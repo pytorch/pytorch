@@ -577,8 +577,8 @@ TEST(LoopNest, ExprSplitWithTailNone) {
 TEST(LoopNest, ExprSplitWithMask01) {
   const int M = 26;
   const int N = 5;
-  Placeholder a_buf("a", kFloat, {M, N});
-  Placeholder b_buf("b", kFloat, {M, N});
+  BufHandle a_buf("a", {M, N}, kFloat);
+  BufHandle b_buf("b", {M, N}, kFloat);
   Tensor tensor = Compute(
       "f", {{M, "m"}, {N, "n"}}, [&](const ExprHandle& m, const ExprHandle& n) {
         return a_buf.load(m, n) + b_buf.load(m, n) + 1.0f;
@@ -611,8 +611,8 @@ TEST(LoopNest, ExprSplitWithMask01) {
 // insert any masks.
 TEST(LoopNest, ExprSplitWithMaskRepeatedNoMask) {
   const int M = 64;
-  Placeholder a_buf("a", kFloat, {M});
-  Placeholder b_buf("b", kFloat, {M});
+  BufHandle a_buf("a", {M}, kFloat);
+  BufHandle b_buf("b", {M}, kFloat);
   Tensor tensor = Compute("f", {{M, "m"}}, [&](const ExprHandle& m) {
     return a_buf.load(m) + b_buf.load(m) + 1.0f;
   });
@@ -695,8 +695,8 @@ TEST(LoopNest, getLoopAt) {
 TEST(LoopNest, TileSimple) {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   const int M = 64, N = 64;
-  Placeholder a_buf("a", kFloat, {M, N});
-  Placeholder b_buf("b", kFloat, {M, N});
+  BufHandle a_buf("a", {M, N}, kFloat);
+  BufHandle b_buf("b", {M, N}, kFloat);
   Tensor tensor = Compute(
       "f", {{M, "m"}, {N, "n"}}, [&](const ExprHandle& m, const ExprHandle& n) {
         return a_buf.load({m, n}) + b_buf.load({m, n}) + 1.0f;
@@ -740,8 +740,8 @@ TEST(LoopNest, TileSimple) {
 TEST(LoopNest, TileWithTails) {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   const int M = 64, N = 64;
-  Placeholder a_buf("a", kFloat, {M, N});
-  Placeholder b_buf("b", kFloat, {M, N});
+  BufHandle a_buf("a", {M, N}, kFloat);
+  BufHandle b_buf("b", {M, N}, kFloat);
   Tensor tensor = Compute(
       "f", {{M, "m"}, {N, "n"}}, [&](const ExprHandle& m, const ExprHandle& n) {
         return a_buf.load({m, n}) + b_buf.load({m, n}) + 1.0f;
@@ -786,8 +786,8 @@ TEST(LoopNest, TileWithTails) {
 TEST(LoopNest, TileInMiddle) {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   const int M = 8, N = 8, L = 8, K = 8;
-  Placeholder a_buf("a", kFloat, {M, N, L, K});
-  Placeholder b_buf("b", kFloat, {M, N, L, K});
+  BufHandle a_buf("a", {M, N, L, K}, kFloat);
+  BufHandle b_buf("b", {M, N, L, K}, kFloat);
   Tensor tensor = Compute(
       "f",
       {{M, "m"}, {N, "n"}, {L, "l"}, {K, "k"}},
@@ -845,8 +845,8 @@ TEST(LoopNest, TileInMiddle) {
 
 TEST(LoopNest, SplitWithTailWithLoopOptions) {
   const int M = 21;
-  Placeholder a_buf("a", kFloat, {M});
-  Placeholder b_buf("b", kFloat, {M});
+  BufHandle a_buf("a", {M}, kFloat);
+  BufHandle b_buf("b", {M}, kFloat);
   Tensor tensor = Compute("f", {{M, "m"}}, [&](const ExprHandle& m) {
     return a_buf.load(m) + b_buf.load(m) + 1.0f;
   });
@@ -875,8 +875,8 @@ TEST(LoopNest, SplitWithTailWithLoopOptions) {
 
 TEST(LoopNest, SplitWithMaskWithLoopOptions) {
   const int M = 21;
-  Placeholder a_buf("a", kFloat, {M});
-  Placeholder b_buf("b", kFloat, {M});
+  BufHandle a_buf("a", {M}, kFloat);
+  BufHandle b_buf("b", {M}, kFloat);
   Tensor tensor = Compute("f", {{M, "m"}}, [&](const ExprHandle& m) {
     return a_buf.load(m) + b_buf.load(m) + 1.0f;
   });
@@ -901,8 +901,8 @@ TEST(LoopNest, ScheduleBroadcastAddBuffer) {
   const int M = 4;
   const int N = 5;
   const int K = 6;
-  Placeholder a_buf("a", kFloat, {M, N});
-  Placeholder b_buf("b", kFloat, {N, K});
+  BufHandle a_buf("a", {M, N}, kFloat);
+  BufHandle b_buf("b", {N, K}, kFloat);
   Tensor c = Compute(
       "broadcast_add",
       {{M, "m"}, {N, "n"}, {K, "k"}},
@@ -949,8 +949,8 @@ TEST(LoopNest, ScheduleFunctionCall01) {
   const int M = 4;
   const int N = 5;
   const int K = 6;
-  Placeholder a_buf("a", kFloat, {M, N});
-  Placeholder b_buf("b", kFloat, {N, K});
+  BufHandle a_buf("a", {M, N}, kFloat);
+  BufHandle b_buf("b", {N, K}, kFloat);
   Tensor c = Compute(
       "broadcast_add",
       {{M, "m"}, {N, "n"}, {K, "k"}},
@@ -1005,10 +1005,10 @@ TEST(LoopNest, ScheduleInlineSimple) {
   const int M = 4;
   const int N = 5;
   const int K = 6;
-  Placeholder a_buf("a", kFloat, {M, N});
-  Placeholder b_buf("b", kFloat, {N, K});
-  Placeholder c_buf("c", kFloat, {M, N});
-  Placeholder d_buf("d", kFloat, {M, K});
+  BufHandle a_buf("a", {M, N}, kFloat);
+  BufHandle b_buf("b", {N, K}, kFloat);
+  BufHandle c_buf("c", {M, N}, kFloat);
+  BufHandle d_buf("d", {M, K}, kFloat);
 
   Tensor x = Compute(
       "x",
@@ -1085,10 +1085,10 @@ void InlineFunc01Helper(const std::vector<std::string>& inline_order) {
   const int M = 4;
   const int N = 5;
   const int K = 6;
-  Placeholder a_buf("a", kFloat, {M, N});
-  Placeholder b_buf("b", kFloat, {N, K});
-  Placeholder c_buf("c", kFloat, {M, N});
-  Placeholder d_buf("d", kFloat, {M, K});
+  BufHandle a_buf("a", {M, N}, kFloat);
+  BufHandle b_buf("b", {N, K}, kFloat);
+  BufHandle c_buf("c", {M, N}, kFloat);
+  BufHandle d_buf("d", {M, K}, kFloat);
 
   Tensor x = Compute(
       "x",
@@ -1306,8 +1306,8 @@ TEST(LoopNest, ScheduleInlineIntrinsics) {
   const int M = 4;
   const int N = 5;
   const int K = 6;
-  Placeholder a_buf("a", kFloat, {M, N});
-  Placeholder b_buf("b", kFloat, {N, K});
+  BufHandle a_buf("a", {M, N}, kFloat);
+  BufHandle b_buf("b", {N, K}, kFloat);
 
   Tensor x = Compute(
       "x",
@@ -1405,7 +1405,7 @@ TEST(LoopNest, ScheduleSplitAThenInline) {
   LoopNest l({b}, {a, b});
   std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(a.buf()).at(0);
   LoopNest::splitWithMask(loops[0], 4);
-  ASSERT_THROWS_WITH(l.computeInline(a.buf()), "compound indices");
+  ASSERT_FALSE(l.computeInline(a.buf()));
 }
 
 // Split a Compute then inline another Compute into it.
@@ -1446,7 +1446,7 @@ TEST(LoopNest, ScheduleSplitTwiceThenInline) {
   std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(a.buf()).at(0);
   LoopNest::splitWithMask(loops[0], 4, &i_inner);
   LoopNest::splitWithMask(i_inner, 2);
-  ASSERT_THROWS_WITH(l.computeInline(a.buf()), "compound indices");
+  ASSERT_FALSE(l.computeInline(a.buf()));
 }
 
 // Inline a Compute, then split.
@@ -1511,7 +1511,7 @@ TEST(LoopNest, ScheduleSplitInlineSimplify) {
   LoopNest l({b}, {a, b});
   std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(a.buf()).at(0);
   LoopNest::splitWithMask(loops[0], 4);
-  ASSERT_THROWS_WITH(l.computeInline(a.buf()), "compound indices");
+  ASSERT_FALSE(l.computeInline(a.buf()));
 }
 
 // Inline a Compute with two consumers.
@@ -1622,7 +1622,7 @@ TEST(LoopNest, ScheduleInlineThreeMixedSplit) {
   loops = l.getAllLoopNestsWritingToBuf(c.buf()).at(0);
   LoopNest::splitWithMask(loops[0], 2);
 
-  ASSERT_THROWS_WITH(l.computeInline(a.buf()), "compound indices");
+  ASSERT_FALSE(l.computeInline(a.buf()));
 }
 
 // Check that inlining works for output tensors too
@@ -1663,12 +1663,132 @@ TEST(LoopNest, ScheduleInlineOutputTensors) {
 # CHECK:       y[m2, n2, k2] = (k2 * m2) * n2 + m2;)IR");
 }
 
+TEST(LoopNest, ScheduleInlineWithCompoundIndices) {
+  // Input IR:
+  //     for (int64_t i = 0; i < 100; i++) {
+  //       A[i*2,i] = i * 500ll;
+  //     }
+  //     for (int64_t j = 0; j < 100; j++) {
+  //       B[0ll,j] = A[0, j] + j * 100ll;
+  //     }
+  BufHandle a_buf("A", {20, 100}, kLong);
+  BufHandle b_buf("B", {20, 100}, kLong);
+  VarHandle i("i", kLong);
+  VarHandle j("j", kLong);
+  auto forI = For::make(
+      i,
+      0,
+      100,
+      Store::make(a_buf, {i * 2, i}, Mul::make(i, static_cast<int64_t>(500))));
+  auto forJ = For::make(
+      j,
+      0,
+      100,
+      Store::make(
+          b_buf,
+          {static_cast<int64_t>(0), j},
+          Add::make(
+              Load::make(a_buf, {static_cast<int64_t>(0), j}),
+              Mul::make(j, static_cast<int64_t>(100)))));
+  auto par = Block::make({forI, forJ});
+
+  LoopNest l(par, {b_buf.node()});
+  // Inlining should fail since the producer has compound expr as index.
+  ASSERT_FALSE(l.computeInline(a_buf.node()));
+
+  // The input statement must remain as is.
+  checkIR(l.root_stmt(), R"IR(
+    # CHECK: for (int64_t i = 0;
+    # CHECK-NEXT:   A[
+    # CHECK: for (int64_t j = 0;
+    # CHECK-NEXT:   B[)IR");
+}
+
+TEST(LoopNest, ScheduleInlineConsumerIndicesWithCast) {
+  // Input IR:
+  //     for (int64_t i = 0; i < 100; i++) {
+  //       A[0ll,i] = i * 500ll;
+  //     }
+  //     for (int64_t j = 0; j < 100; j++) {
+  //       B[0ll,j] = A[(int64_t)0, j] + j * 100ll;
+  //     }
+  BufHandle a_buf("A", {20, 100}, kLong);
+  BufHandle b_buf("B", {20, 100}, kLong);
+  VarHandle i("i", kLong);
+  VarHandle j("j", kLong);
+  auto forI = For::make(
+      i,
+      0,
+      100,
+      Store::make(
+          a_buf,
+          {static_cast<int64_t>(0), i},
+          Mul::make(i, static_cast<int64_t>(500))));
+  auto forJ = For::make(
+      j,
+      0,
+      100,
+      Store::make(
+          b_buf,
+          {static_cast<int64_t>(0), j},
+          Add::make(
+              Load::make(a_buf, {0, j}),
+              Mul::make(j, static_cast<int64_t>(100)))));
+  auto par = Block::make({forI, forJ});
+
+  LoopNest l(par, {b_buf.node()});
+  ASSERT_TRUE(l.computeInline(a_buf.node()));
+
+  checkIR(l.root_stmt(), R"IR(
+    # CHECK: for (int64_t j = 0; j < 100; j++) {
+    # CHECK:   B[0ll, j] = j * 500ll + j * 100ll;
+    # CHECK: })IR");
+}
+
+TEST(LoopNest, ScheduleInlineProducerIndicesWithCast) {
+  // Input IR:
+  //     for (int64_t i = 0; i < 100; i++) {
+  //       A[(int64_t)0,i] = i * 500ll;
+  //     }
+  //     for (int64_t j = 0; j < 100; j++) {
+  //       B[0ll,j] = A[0ll, j] + j * 100ll;
+  //     }
+  BufHandle a_buf("A", {20, 100}, kLong);
+  BufHandle b_buf("B", {20, 100}, kLong);
+  VarHandle i("i", kLong);
+  VarHandle j("j", kLong);
+  auto forI = For::make(
+      i,
+      0,
+      100,
+      Store::make(a_buf, {0, i}, Mul::make(i, static_cast<int64_t>(500))));
+  auto forJ = For::make(
+      j,
+      0,
+      100,
+      Store::make(
+          b_buf,
+          {static_cast<int64_t>(0), j},
+          Add::make(
+              Load::make(a_buf, {static_cast<int64_t>(0), j}),
+              Mul::make(j, static_cast<int64_t>(100)))));
+  auto par = Block::make({forI, forJ});
+
+  LoopNest l(par, {b_buf.node()});
+  ASSERT_TRUE(l.computeInline(a_buf.node()));
+
+  checkIR(l.root_stmt(), R"IR(
+    # CHECK: for (int64_t j = 0; j < 100; j++) {
+    # CHECK:   B[0ll, j] = j * 500ll + j * 100ll;
+    # CHECK: })IR");
+}
+
 TEST(LoopNest, ScheduleFuserStyle) {
   const int kVectorSize = 8;
   const int kVectorCount = 128;
   const int kTotalSize = kVectorSize * kVectorCount;
 
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
 
   Tensor b = Compute(
       "f", {{kTotalSize, "i"}}, [&](const std::vector<VarHandle>& axes) {
@@ -1700,10 +1820,10 @@ TEST(LoopNest, ScheduleFuserThreeArg) {
   const int kVectorCount = 128;
   const int kTotalSize = kVectorSize * kVectorCount;
 
-  Placeholder a(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder c(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder d(BufHandle("D", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b("B", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle c("C", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle d("D", {ExprHandle(kTotalSize)}, kFloat);
 
   Tensor e = Compute("e", {{kTotalSize, "i"}}, [&](const VarHandle& i) {
     return a.load(i) + b.load(i);
@@ -1737,8 +1857,8 @@ TEST(LoopNest, ScheduleDynamicShape2D) {
   auto testWithSize = [](int32_t M, int32_t N) {
     VarHandle m("m", kInt);
     VarHandle n("n", kInt);
-    Placeholder a(BufHandle("a", {m, n}, kFloat));
-    Placeholder b(BufHandle("b", {m, n}, kFloat));
+    BufHandle a("a", {m, n}, kFloat);
+    BufHandle b("b", {m, n}, kFloat);
     Tensor c = Compute(
         "c", {{m, "m"}, {n, "n"}}, [&](const VarHandle& i, const VarHandle& j) {
           return a.load(i, j) + b.load(i, j);
@@ -2127,7 +2247,7 @@ TEST(LoopNest, DISABLED_Conv1d_NH) {
   int H = 256;
   int R = 3;
   int Pad = 1;
-  Placeholder IP("input", kFloat, {H});
+  BufHandle IP("input", {H}, kFloat);
 
   Tensor A =
       Compute("A", {{N, "np"}, {H + 2 * Pad, "hp"}}, [&](Axis n, Axis h) {
@@ -2418,19 +2538,16 @@ TEST(LoopNest, LoopNestReorderExtraStatements) {
       });
   LoopNest l({tensor});
 
-  Placeholder extra(BufHandle("res", {6, 3}, kFloat));
+  BufHandle extra("res", {6, 3}, kFloat);
 
   auto loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
 
   VarHandle i = VarHandle(loops[0]->var());
 
-  StmtPtr store_1 =
-      Store::make(BufHandle(extra.data()), {i, 0}, ExprHandle(1.f));
-  StmtPtr store_2 =
-      Store::make(BufHandle(extra.data()), {i, 1}, ExprHandle(2.f));
+  StmtPtr store_1 = Store::make(extra, {i, 0}, ExprHandle(1.f));
+  StmtPtr store_2 = Store::make(extra, {i, 1}, ExprHandle(2.f));
   // stmt 3 is the Function body.
-  StmtPtr store_3 =
-      Store::make(BufHandle(extra.data()), {i, 2}, ExprHandle(4.f));
+  StmtPtr store_3 = Store::make(extra, {i, 2}, ExprHandle(4.f));
 
   loops[0]->body()->prepend_stmt(store_1);
   loops[1]->body()->prepend_stmt(store_2);
@@ -2549,7 +2666,7 @@ void LoopNestReorderTestHelper(
       [](const std::vector<VarHandle>&) { return -1; });
   LoopNest l({c});
 
-  Placeholder extra(BufHandle("extra", {5}, kInt));
+  BufHandle extra("extra", {5}, kInt);
 
   auto loops = l.getAllLoopNestsWritingToBuf(c.buf()).at(0);
   int j = 0;
@@ -2557,10 +2674,10 @@ void LoopNestReorderTestHelper(
     // Add an increment at each layer of the loop which counts the number of
     // times the loop executes.
     LoadPtr load =
-        alloc<Load>(extra.data(), std::vector<ExprPtr>({alloc<IntImm>(j)}));
+        alloc<Load>(extra.node(), std::vector<ExprPtr>({alloc<IntImm>(j)}));
     AddPtr add = alloc<Add>(load, alloc<IntImm>(1));
     StmtPtr store = alloc<Store>(
-        extra.data(), std::vector<ExprPtr>({alloc<IntImm>(j)}), add);
+        extra.node(), std::vector<ExprPtr>({alloc<IntImm>(j)}), add);
     if (prepend) {
       l->body()->prepend_stmt(store);
     }
@@ -2661,10 +2778,10 @@ TEST(LoopNest, LoopNestReorderInternalLoopNest) {
   const int M = 4;
   const int N = 5;
   const int K = 6;
-  Placeholder a_buf("a", kFloat, {M, N});
-  Placeholder b_buf("b", kFloat, {N, K});
-  Placeholder c_buf("c", kFloat, {M, N});
-  Placeholder d_buf("d", kFloat, {M, K});
+  BufHandle a_buf("a", {M, N}, kFloat);
+  BufHandle b_buf("b", {N, K}, kFloat);
+  BufHandle c_buf("c", {M, N}, kFloat);
+  BufHandle d_buf("d", {M, K}, kFloat);
 
   Tensor x = Compute(
       "x",
@@ -3212,7 +3329,7 @@ TEST(LoopNest, NormalizeOnNestedInnerLoop) {
 TEST(LoopNest, NormalizeAndSplitWithTail) {
   // Create a dummy tensor to construct LoopNest.
   ExprHandle n(100);
-  Placeholder a(BufHandle("a", {n}, kFloat));
+  BufHandle a("a", {n}, kFloat);
   Tensor b =
       Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a.load(i); });
   LoopNest l({b});
@@ -3488,7 +3605,7 @@ TEST(LoopNest, FlattenReductionLoopNestFromTensor) {
   const int N = 7;
   VarHandle m("m", kInt);
   VarHandle n("n", kInt);
-  Placeholder b(BufHandle("b", {m, n}, kFloat));
+  BufHandle b("b", {m, n}, kFloat);
   Tensor c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}});
   LoopNest loop({c});
   HashProvider hasher;
@@ -3543,7 +3660,7 @@ TEST(LoopNest, FlattenIncorrectLoopsAsInput) {
 TEST(LoopNest, DetectInlineRankMismatch) {
   const int kTotalSize = 8;
 
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
   Tensor a = Compute("a", {{kTotalSize, "i"}}, [&](const VarHandle& i) {
     return a_buf.load(i);
   });
@@ -3552,9 +3669,7 @@ TEST(LoopNest, DetectInlineRankMismatch) {
       {{kTotalSize / 2, "i"}, {2, "j"}},
       [&](const VarHandle& i, const VarHandle& j) { return a.load(i, j); });
   LoopNest l({reshape}, {a, reshape});
-  ASSERT_THROWS_WITH(
-      l.computeInline(l.getLoopBodyFor(a)),
-      "Placeholder indexed access is inconsistent with its rank");
+  ASSERT_FALSE(l.computeInline(l.getLoopBodyFor(a)));
 }
 
 TEST(LoopNest, CacheReadsSimple) {
@@ -3935,7 +4050,7 @@ TEST(LoopNest, CompoundTensorSimple) {
 
 TEST(LoopNest, InlineConstantIndex) {
   const int N = 10;
-  Placeholder x_buf("a", kFloat, {1, N, 1});
+  BufHandle x_buf("a", {1, N, 1}, kFloat);
   Tensor y = Compute(
       "f",
       {{1, "m"}, {N, "n"}, {1, "o"}},
@@ -4535,16 +4650,15 @@ TEST(LoopNest, OptimizeConditionalsNotNormalized) {
   ASSERT_EQ(hash_before, hash_after);
 }
 
-static std::pair<std::unique_ptr<Placeholder>, Tensor> colReduce(int M, int N) {
-  auto a =
-      std::make_unique<Placeholder>("a", kFloat, std::vector<ExprHandle>{M, N});
+static std::pair<BufHandle, Tensor> colReduce(int M, int N) {
+  BufHandle a("a", {M, N}, kFloat);
   Tensor t = Reduce(
       "b",
       {{N, "n"}},
       Sum(),
-      [&](const VarHandle& n, const VarHandle& m) { return a->load(m, n); },
+      [&](const VarHandle& n, const VarHandle& m) { return a.load(m, n); },
       {{M, "m"}});
-  return {std::move(a), t};
+  return {a, t};
 }
 
 static StmtPtr splitTailReorder(Tensor b) {
@@ -4588,7 +4702,7 @@ static StmtPtr splitMaskReorder(Tensor b) {
   return nest.root_stmt();
 }
 
-static void checkColReduce(StmtPtr s, Placeholder& p, Tensor t) {
+static void checkColReduce(StmtPtr s, BufHandle p, Tensor t) {
   int M = immediateAs<int>(p.dim(0));
   int N = immediateAs<int>(p.dim(1));
   PaddedBuffer<float> a(M, N);
@@ -4628,7 +4742,7 @@ TEST(LoopNest, ColReduceSplitTailEvenReorder) {
       )IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
-  checkColReduce(s, *p.first, p.second);
+  checkColReduce(s, p.first, p.second);
 }
 
 TEST(LoopNest, ColReduceSplitTailUnevenReorder) {
@@ -4653,21 +4767,21 @@ TEST(LoopNest, ColReduceSplitTailUnevenReorder) {
       )IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
-  checkColReduce(s, *p.first, p.second);
+  checkColReduce(s, p.first, p.second);
 }
 
 TEST(LoopNest, ColReduceSplitMaskEvenReorder) {
   constexpr int M = 76, N = 128;
   auto p = colReduce(M, N);
   StmtPtr s = splitMaskReorder(p.second);
-  checkColReduce(s, *p.first, p.second);
+  checkColReduce(s, p.first, p.second);
 }
 
 TEST(LoopNest, ColReduceSplitMaskUnevenReorder) {
   constexpr int M = 76, N = 100;
   auto p = colReduce(M, N);
   StmtPtr s = splitMaskReorder(p.second);
-  checkColReduce(s, *p.first, p.second);
+  checkColReduce(s, p.first, p.second);
 }
 
 TEST(LoopNest, ReorderAxisWithMultipleConds) {
@@ -4711,7 +4825,7 @@ TEST(LoopNest, ReorderAxisWithMultipleConds) {
 
 TEST(LoopNest, VectorizeUse) {
   constexpr int N = 8;
-  Placeholder a("a", kFloat, {N});
+  BufHandle a("a", {N}, kFloat);
   Tensor b = Compute(
       "b", {{N, "n"}}, [&](const VarHandle& n) { return a.load(n) + 1.0f; });
   Tensor c = Compute(
@@ -4741,8 +4855,8 @@ const char* int64Loop = R"IR(
 
 TEST(LoopNest, Int64Direct) {
   constexpr int64_t N = 12;
-  Placeholder a("a", kLong, {N});
-  Placeholder b("b", kLong, {N});
+  BufHandle a("a", {N}, kLong);
+  BufHandle b("b", {N}, kLong);
   VarHandle n("n", kLong);
   StmtPtr s = For::make(
       n, LongImm::make(0l), N, b.store({n}, a.load({n}) + LongImm::make(1l)));
@@ -4754,7 +4868,7 @@ TEST(LoopNest, Int64Direct) {
 
 TEST(LoopNest, Int64Compute) {
   constexpr int64_t N = 12;
-  Placeholder a("a", kLong, {N});
+  BufHandle a("a", {N}, kLong);
   Tensor b = Compute("b", {{N, "n"}}, [&](const VarHandle& n) {
     return a.load(n) + LongImm::make(1l);
   });
@@ -6659,6 +6773,69 @@ TEST(LoopNest, compressMultipleBuffers) {
   ASSERT_EQ(cBuf.node()->ndim(), 2);
   IS_IMM_WITH_VAL(Int, cBuf.node()->dim(0), 1);
   IS_IMM_WITH_VAL(Int, cBuf.node()->dim(1), 1);
+}
+
+TEST(LoopNest, sanitizeNames) {
+  std::vector<DimArg> dim_args;
+  // Let's pick names that would overlap with default index names if not
+  // sanitized properly:
+  dim_args.emplace_back(ExprHandle(alloc<Var>("i", kInt)), "");
+  dim_args.emplace_back(ExprHandle(alloc<Var>("N:2", kInt)), "");
+  // Now let's create a many dimensions so that we had to use the same letter
+  // for different loops
+  for (int i = 0; i < 10; i++) {
+    dim_args.emplace_back(ExprHandle(alloc<Var>("N", kInt)), "");
+  }
+
+  // Now create two Computes with conflicting after sanitization names:
+  Tensor X = Compute("$X:!", dim_args, [&](const std::vector<VarHandle>& v) {
+    return v[0] + v[1] + v[9] + 1;
+  });
+  Tensor Y = Reduce(
+      "%X\"+",
+      {},
+      Sum(),
+      [&](const std::vector<VarHandle>& v) { return X.load(v); },
+      dim_args);
+
+  // Finally, let's verify what we got after sanitization:
+  LoopNest l({X, Y});
+  StmtPtr s = l.root_stmt();
+  LoopNest::sanitizeNames(s);
+
+  std::ostringstream oss;
+  oss << *s;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK:  for (int i = 0; i < i_1; i++) {
+# CHECK-NEXT:    for (int j = 0; j < N_2_1; j++) {
+# CHECK-NEXT:      for (int k = 0; k < N_9; k++) {
+# CHECK-NEXT:        for (int l = 0; l < N_8; l++) {
+# CHECK-NEXT:          for (int m = 0; m < N_7; m++) {
+# CHECK-NEXT:            for (int n = 0; n < N_6; n++) {
+# CHECK-NEXT:              for (int o = 0; o < N_5; o++) {
+# CHECK-NEXT:                for (int p = 0; p < N_4; p++) {
+# CHECK-NEXT:                  for (int i1 = 0; i1 < N_3; i1++) {
+# CHECK-NEXT:                    for (int j1 = 0; j1 < N_2; j1++) {
+# CHECK-NEXT:                      for (int k1 = 0; k1 < N_1; k1++) {
+# CHECK-NEXT:                        for (int l1 = 0; l1 < N; l1++) {
+# CHECK-NEXT:                          v_X__[i, j, k, l, m, n, o, p, i1, j1, k1, l1] = ((i + j) + j1) + 1;
+# CHECK:  v_X___1 = int(0);
+# CHECK-NEXT:  for (int i_2 = 0; i_2 < i_1; i_2++) {
+# CHECK-NEXT:    for (int j_1 = 0; j_1 < N_2_1; j_1++) {
+# CHECK-NEXT:      for (int k_1 = 0; k_1 < N_9; k_1++) {
+# CHECK-NEXT:        for (int l_1 = 0; l_1 < N_8; l_1++) {
+# CHECK-NEXT:          for (int m_1 = 0; m_1 < N_7; m_1++) {
+# CHECK-NEXT:            for (int n_1 = 0; n_1 < N_6; n_1++) {
+# CHECK-NEXT:              for (int o_1 = 0; o_1 < N_5; o_1++) {
+# CHECK-NEXT:                for (int p_1 = 0; p_1 < N_4; p_1++) {
+# CHECK-NEXT:                  for (int i1_1 = 0; i1_1 < N_3; i1_1++) {
+# CHECK-NEXT:                    for (int j1_1 = 0; j1_1 < N_2; j1_1++) {
+# CHECK-NEXT:                      for (int k1_1 = 0; k1_1 < N_1; k1_1++) {
+# CHECK-NEXT:                        for (int l1_1 = 0; l1_1 < N; l1_1++) {
+# CHECK-NEXT:                          v_X___1 = ReduceOp((v_X___1) + (v_X__[i_2, j_1, k_1, l_1, m_1, n_1, o_1, p_1, i1_1, j1_1, k1_1, l1_1]), reduce_args={i_2, j_1, k_1, l_1, m_1, n_1, o_1, p_1, i1_1, j1_1, k1_1, l1_1});
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
 } // namespace jit
