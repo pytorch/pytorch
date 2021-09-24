@@ -523,11 +523,14 @@ class TestOperators(TestCase):
         xfail('block_diag'),
         xfail('nn.functional.max_pool2d'),
         xfail('nn.functional.batch_norm'),
-        skip('nn.functional.dropout'),  # Nondeterministic
     }))
     def test_vjpvmap(self, device, dtype, op):
         # NB: there is no vjpvmap_has_batch_rule test because that is almost
         # certainly redundant with the vmap_has_batch_rule test in test_vmap.py
+
+        # one-off skip
+        if op.name == 'nn.functional.dropout':
+            self.skipTest("Skipped!")
 
         if not op.supports_autograd:
             # If the op doesn't support autograd, vmap(op) won't either
