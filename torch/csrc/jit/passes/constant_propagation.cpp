@@ -59,7 +59,10 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
           n->inputs().size());
     } break;
     case prim::CreateObject: {
-      createObject(stack, n->output()->type()->expect<ClassType>(), /*use_weak_ref*/true);
+      createObject(
+          stack,
+          n->output()->type()->expect<ClassType>(),
+          /*use_weak_ref*/ true);
     } break;
     case prim::GetAttr: {
       auto attr = pop(stack).toObject()->getAttr(n->s(attr::name));
