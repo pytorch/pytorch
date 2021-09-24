@@ -9,61 +9,7 @@ CONFIG_TREE_DATA = [
                     ("important", [X(True)]),
                 ]),
             ]),
-            # TODO: bring back libtorch test
-            ("7", [X("3.6")]),
         ]),
-        ("clang", [
-            ("7", [
-                ("3.6", [
-                    ("asan", [
-                        (True, [
-                            ("shard_test", [XImportant(True)]),
-                        ]),
-                    ]),
-                    ("onnx", [XImportant(True)]),
-                ]),
-            ]),
-        ]),
-        ("cuda", [
-            ("10.2", [
-                ("3.6", [
-                    # Build are needed for slow_gradcheck
-                    ('build_only', [X(True)]),
-                    ("slow_gradcheck", [
-                        # If you update this slow gradcheck, you should
-                        # also update docker_definitions.py to make sure
-                        # the docker image match the config used here
-                        (True, [
-                            ('shard_test', [XImportant(True)]),
-                        ]),
-                    ]),
-                    # UNCOMMENT THE BELOW TO REENABLE LIBTORCH
-                    # ("libtorch", [
-                    #     (True, [
-                    #         ('build_only', [X(True)]),
-                    #     ]),
-                    # ]),
-                ]),
-            ]),
-        ]),
-    ]),
-    ("bionic", [
-        ("clang", [
-            ("9", [
-                ("3.6", [
-                    ("xla", [XImportant(True)]),
-                    ("vulkan", [XImportant(True)]),
-                ]),
-            ]),
-        ]),
-        # @jithunnair-amd believes Jenkins builds are sufficient
-        # ("rocm", [
-        #     ("3.9", [
-        #         ("3.6", [
-        #             ('build_only', [XImportant(True)]),
-        #         ]),
-        #     ]),
-        # ]),
     ]),
 ]
 
