@@ -125,21 +125,23 @@ Tensor& addmm_out_sparse_csr_dense_cuda(
     return result;
   }
 
-  if (mat1._nnz() == 0) {
-    // By definition, when beta==0, values in self should be ignored. nans and infs
-    // should not propagate
+  if (mat1._nnz() == 0 && mat2.layout() == kStrided) {
+    // According to documetnation, when beta==0 values in self should be ignored. nans and infs should not propagate
     if (beta.toComplexDouble() == 0.) {
-      return result.zero_();
+      result.zero_();
+    } else {
+      result.mul_(beta);
     }
-    return at::mul_out(
-        result,
-        self,
-        at::native::scalar_tensor(
-            beta,
-            self.scalar_type(),
-            c10::nullopt /* layout */,
-            at::kCPU,
-            c10::nullopt /* pin_memory */));
+    return result;
+  }
+
+  if (mat2.is_sparse_csr() && (mat1._nnz() == 0 || mat2._nnz() == 0)) {
+    if (beta.toComplexDouble() == 0.) {
+      result.values().zero_();
+    } else {
+      result.values().mul_(beta);
+    }
+    return result;
   }
 
   sparse::impl::cuda::addmm_out_sparse_csr(mat1, mat2, beta, alpha, result);
