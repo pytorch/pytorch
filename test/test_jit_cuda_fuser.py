@@ -767,43 +767,37 @@ class TestCudaFuser(JitTestCase):
         self._run_helper(add_jit, add, x, y, 2.0)
 
         def clamp0(x: torch.Tensor, f: float):
-            o = torch.rand_like(x)
-            o = o * torch.clamp(x, min=f)
+            o = 1. * torch.clamp(x, min=f)
             return o
         clamp0_jit = torch.jit.script(clamp0)
         self._run_helper(clamp0_jit, clamp0, x, 0.5)
 
         def clamp1(x: torch.Tensor, f: float, ff: float):
-            o = torch.rand_like(x)
-            o = o * torch.clamp(x, min=f, max=ff)
+            o = 1. * torch.clamp(x, min=f, max=ff)
             return o
         clamp1_jit = torch.jit.script(clamp1)
         self._run_helper(clamp1_jit, clamp1, x, -0.2, 0.7)
 
         def threshold(x: torch.Tensor, th: float, val: float):
-            o = torch.rand_like(x)
-            o = x * torch.threshold(o, th, val)
+            o = 1. * torch.threshold(x, th, val)
             return o
         threshold_jit = torch.jit.script(threshold)
         self._run_helper(threshold_jit, threshold, x, 0.2, 0.9)
 
         def where(x: torch.Tensor, y: torch.Tensor, cond: torch.Tensor):
-            o = torch.rand_like(x)
-            o = o * torch.where(cond, x, y)
+            o = 1. * torch.where(cond, x, y)
             return o
         where_jit = torch.jit.script(where)
         self._run_helper(where_jit, where, x, y, cond)
 
         def lerp(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
-            o = torch.rand_like(x)
-            o = o * torch.lerp(x, y, z)
+            o = 1. * torch.lerp(x, y, z)
             return o
         lerp_jit = torch.jit.script(lerp)
         self._run_helper(lerp_jit, lerp, x, y, z)
 
         def lerp_scale(x: torch.Tensor, y: torch.Tensor, z: float):
-            o = torch.rand_like(x)
-            o = o * torch.lerp(x, y, z)
+            o = 1. * torch.lerp(x, y, z)
             return o
         lerp_scale_jit = torch.jit.script(lerp_scale)
         self._run_helper(lerp_scale_jit, lerp_scale, x, y, 0.5)
