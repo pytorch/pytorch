@@ -379,6 +379,16 @@ kernelPointwiseApply2(detail::TensorInfo<scalar1, IndexType> a,
 
 } // namespace
 
+/**
+   Computes ceil(a / b)
+*/
+template <typename T>
+C10_DEPRECATED_MESSAGE("at::cuda::ATenCeilDiv is deprecated. Instead use at::ceil_Div in <ATen/ceil_div.h>.")
+__host__ __device__ __forceinline__ T ATenCeilDiv(T a, T b) {
+  // TODO: Delete when torchvision stops using this function
+  return at::ceil_div(a, b);
+}
+
 template <int step = 1>
 inline bool getApplyGrid(uint64_t totalElements, dim3& grid, int64_t curDevice, int max_threads_per_block=AT_APPLY_THREADS_PER_BLOCK) {
   if (curDevice == -1) return false;
