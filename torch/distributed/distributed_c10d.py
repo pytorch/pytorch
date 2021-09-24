@@ -2131,7 +2131,7 @@ def all_gather_coalesced(
         raise RuntimeError("requires non-empty input tensor list")
 
     if len(output_tensor_lists) == 0:
-        raise RuntimeError("output lists should be equal to world size")
+        raise RuntimeError("output lists should not be empty")
 
     for output_tensor_list in output_tensor_lists:
         _check_tensor_list(output_tensor_list, "output_tensor_lists")
@@ -2144,20 +2144,16 @@ def all_gather_coalesced(
                 f"invalid output size: (expected length {len(input_tensor_list)}" +
                 f", got {len(output_list)}"
             )
-        for idx, tensor in enumerate(output_list):
-            expected_s = input_tensor_list[idx].shape
-            actual_s = tensor.shape
-            if expected_s != actual_s:
+        for idx, (out_t, in_t) in enumerate(zip(output_list, input_tensor_list)):
+            if out_t.shape != in_t.shape:
                 raise RuntimeError(
                     f"invalid size of output tensor at index {idx} (expected length " +
-                    f"{expected_s}, got {actual_s} )"
+                    f"{in_t.shape}, got {out_t.shape} )"
                 )
-            expected_t = input_tensor_list[idx].dtype
-            actual_t = tensor.dtype
-            if expected_t != actual_t:
+            if out_t.dtype != in_t.dtype:
                 raise RuntimeError(
-                    f"invalid tensor type at index {idx} expected {expected_t}, got" +
-                    f" {actual_t} )"
+                    f"invalid tensor type at index {idx} expected {in_t.dtype}, got" +
+                    f" {out_t.dtype} )"
                 )
 
     output_tensor_lists = [
@@ -2173,7 +2169,7 @@ def all_gather_coalesced(
 
     flatten_tensors = [x.flatten() for x in input_tensor_list]
     coalesced_input = torch.cat(flatten_tensors)
-    coalesced_output = [torch.zeros(coalesced_input.shape) for _ in range(len(output_tensor_lists))]
+    coalesced_output = [torch.empty_like(coalesced_input) for _ in range(len(output_tensor_lists))]
 
     def copy_values_to_output_tensor_lists(fut_param):
         vals = fut_param.wait()
@@ -2189,6 +2185,7 @@ def all_gather_coalesced(
         return fut
     else:
         work.wait()
+
 
 def _validate_output_list_for_rank(my_rank, dst, gather_list):
     if dst == my_rank:
