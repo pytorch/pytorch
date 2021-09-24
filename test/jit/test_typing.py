@@ -92,10 +92,9 @@ class TestTyping(JitTestCase):
 
         graph = torch.jit.script(fn).graph
 
-        print(graph)
-
         # Check that we're making a `List[Tuple[str, Any]]`
-        FileCheck().check(r"(str, Any)[] = prim::ListConstruct").run(graph)
+        FileCheck().check("(str, Union[Tensor, Dict(str, Tensor)])"
+                          "[] = prim::ListConstruct()").run(graph)
 
     def test_list_type_refinement_defaults_to_Any_list_comprehension(self):
         def fn(x):
@@ -116,10 +115,9 @@ class TestTyping(JitTestCase):
 
         graph = torch.jit.script(fn).graph
 
-        print(graph)
-
         # Check that we're making a `List[Tuple[str, Any]]`
-        FileCheck().check(r"(str, Any)[] = prim::ListConstruct").run(graph)
+        FileCheck().check("(str, Union[Tensor, Dict(str, Tensor)])"
+                          "[] = prim::ListConstruct()").run(graph)
 
     def test_list_type_refinement_annotation_element_mismatch(self):
         def fn():
@@ -145,7 +143,8 @@ class TestTyping(JitTestCase):
 
         graph = torch.jit.script(fn).graph
 
-        FileCheck().check(r"Dict(str, Any) = prim::DictConstruct").run(graph)
+        FileCheck().check("Dict(str, Union[Tensor, Dict(str, Tensor)])"
+                          " = prim::DictConstruct").run(graph)
 
     def test_dict_type_refinement_defaults_to_Any_dict_comprehension(self):
         def fn(x):
@@ -161,18 +160,20 @@ class TestTyping(JitTestCase):
 
         graph = torch.jit.script(fn).graph
 
-        FileCheck().check("Dict(str, Any) = prim::DictConstruct").run(graph)
+        FileCheck().check("Dict(str, Union[Tensor, Dict(str, Tensor)])"
+                          " = prim::DictConstruct").run(graph)
 
     def test_dict_type_refinement_annotation_key_mismatch(self):
         def fn():
             l1 = [1, 2, "foo", 3]
             l2 = ["foo", "bar", "baz", "qux"]
             d: Dict[int, str] = {k : v for k, v in zip(l1, l2)}
-            return l
+            return d
 
-        with self.assertRaisesRegex(RuntimeError, "Dict type annotation"
-                                    r" `Dict\[int, str\]` did not match"
-                                    " the type of an actual key type"):
+        with self.assertRaisesRegex(RuntimeError, "Dicts may only "
+                                    "contain homogeneous keys, but the "
+                                    "type of the first generated key "
+                                    r"was Union\[int, str\]"):
             torch.jit.script(fn)
 
     def test_dict_type_refinement_annotation_value_mismatch(self):
@@ -180,12 +181,12 @@ class TestTyping(JitTestCase):
             l1 = ["foo", "bar", "baz", "qux"]
             l2 = [1, 2, "foo", 3]
             d: Dict[str, int] = {k : v for k, v in zip(l1, l2)}
-            return l
+            return d
 
-        with self.assertRaisesRegex(RuntimeError, "Dict type annotation"
-                                    r" `Dict\[str, int\]` did not match"
-                                    " the type of an actual value "
-                                    "type"):
+        with self.assertRaisesRegex(RuntimeError, "annotated with type "
+                                    r"Dict\[str, int\] but is being "
+                                    "assigned to a value of type "
+                                    r"Dict\[str, Union\[int, str\]\]"):
             torch.jit.script(fn)
 
     def test_dict_invalid_annotations(self):

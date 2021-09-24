@@ -89,6 +89,19 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
           ? c10::ivalue::Tuple::createNamed(std::move(values), tuple_type)
           : c10::ivalue::Tuple::create(std::move(values));
     }
+    case TypeKind::UnionType: {
+      auto actual_type = toTypeInferredIValue(obj);
+      auto actual_type_ptr = actual_type.type();
+      auto union_type = type->expect<UnionType>();
+      if (!actual_type_ptr->isSubtypeOf(union_type)) {
+        throw py::cast_error(c10::str(
+            "Expected a member of ",
+            union_type->annotation_str(),
+            " but instead found type ",
+            actual_type.type()->annotation_str()));
+      }
+      return actual_type;
+    }
     case TypeKind::StringType:
       return ConstantString::create(py::cast<std::string>(obj));
     case TypeKind::DeviceObjType: {
