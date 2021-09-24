@@ -1242,6 +1242,7 @@
   dispatch:
     MkldnnCPU: copy_mkldnn_
     CompositeExplicitAutograd: copy_
+    SparseCsrCPU, SparseCsrCUDA: copy_sparse_csr_
 
 - func: _copy_from(Tensor self, Tensor dst, bool non_blocking=False) -> Tensor
   dispatch: {}
@@ -1783,6 +1784,7 @@
     Meta: empty_meta
     MkldnnCPU: empty_mkldnn
     SparseCPU, SparseCUDA: empty_sparse
+    SparseCsrCPU, SparseCsrCUDA: empty_sparse_csr
 
 - func: new_empty(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
@@ -1824,6 +1826,7 @@
     CPU, Meta: resize_
     CUDA: resize_cuda_
     QuantizedCPU: quantized_resize_cpu_
+    SparseCsrCPU, SparseCsrCUDA: resize_sparse_csr_
 
 - func: empty_quantized(int[] size, Tensor qtensor, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   category_override: factory
@@ -4900,8 +4903,8 @@
     CUDA: addmm_out_cuda
     SparseCPU: addmm_out_sparse_dense_cpu
     SparseCUDA: addmm_out_sparse_dense_cuda
-    SparseCsrCPU: addmm_out_sparse_csr_dense_cpu
-    SparseCsrCUDA: addmm_out_sparse_csr_dense_cuda
+    SparseCsrCPU: addmm_out_sparse_csr_cpu
+    SparseCsrCUDA: addmm_out_sparse_csr_cuda
 
 - func: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   structured_delegate: addmm.out

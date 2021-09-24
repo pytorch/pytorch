@@ -9,31 +9,6 @@ namespace at {
 namespace mkl {
 namespace sparse {
 
-const char* _mklGetErrorString(sparse_status_t error) {
-  if (error == SPARSE_STATUS_SUCCESS) {
-    return "SPARSE_STATUS_SUCCESS";
-  }
-  if (error == SPARSE_STATUS_NOT_INITIALIZED) {
-    return "SPARSE_STATUS_NOT_INITIALIZED";
-  }
-  if (error == SPARSE_STATUS_ALLOC_FAILED) {
-    return "SPARSE_STATUS_ALLOC_FAILED";
-  }
-  if (error == SPARSE_STATUS_INVALID_VALUE) {
-    return "SPARSE_STATUS_INVALID_VALUE";
-  }
-  if (error == SPARSE_STATUS_EXECUTION_FAILED) {
-    return "SPARSE_STATUS_EXECUTION_FAILED";
-  }
-  if (error == SPARSE_STATUS_INTERNAL_ERROR) {
-    return "SPARSE_STATUS_INTERNAL_ERROR";
-  }
-  if (error == SPARSE_STATUS_NOT_SUPPORTED) {
-    return "SPARSE_STATUS_NOT_SUPPORTED";
-  }
-  return "<unknown>";
-}
-
 template <>
 void create_csr<float>(MKL_SPARSE_CREATE_CSR_ARGTYPES(float)) {
   TORCH_MKLSPARSE_CHECK(mkl_sparse_s_create_csr(
@@ -102,6 +77,103 @@ void mv<c10::complex<double>>(MKL_SPARSE_MV_ARGTYPES(c10::complex<double>)) {
       reinterpret_cast<const MKL_Complex16*>(x),
       reinterpret_cast<const MKL_Complex16&>(beta),
       reinterpret_cast<MKL_Complex16*>(y)));
+}
+
+template <>
+void add<float>(MKL_SPARSE_ADD_ARGTYPES(float)) {
+  TORCH_MKLSPARSE_CHECK(mkl_sparse_s_add(operation, A, alpha, B, C));
+}
+template <>
+void add<double>(MKL_SPARSE_ADD_ARGTYPES(double)) {
+  TORCH_MKLSPARSE_CHECK(mkl_sparse_d_add(operation, A, alpha, B, C));
+}
+template <>
+void add<c10::complex<float>>(MKL_SPARSE_ADD_ARGTYPES(c10::complex<float>)) {
+  TORCH_MKLSPARSE_CHECK(mkl_sparse_c_add(
+      operation, A, reinterpret_cast<const MKL_Complex8&>(alpha), B, C));
+}
+template <>
+void add<c10::complex<double>>(MKL_SPARSE_ADD_ARGTYPES(c10::complex<double>)) {
+  TORCH_MKLSPARSE_CHECK(mkl_sparse_z_add(
+      operation, A, reinterpret_cast<const MKL_Complex16&>(alpha), B, C));
+}
+
+template <>
+void export_csr<float>(MKL_SPARSE_EXPORT_CSR_ARGTYPES(float)) {
+  TORCH_MKLSPARSE_CHECK(mkl_sparse_s_export_csr(
+      source, indexing, rows, cols, rows_start, rows_end, col_indx, values));
+}
+template <>
+void export_csr<double>(MKL_SPARSE_EXPORT_CSR_ARGTYPES(double)) {
+  TORCH_MKLSPARSE_CHECK(mkl_sparse_d_export_csr(
+      source, indexing, rows, cols, rows_start, rows_end, col_indx, values));
+}
+template <>
+void export_csr<c10::complex<float>>(
+    MKL_SPARSE_EXPORT_CSR_ARGTYPES(c10::complex<float>)) {
+  TORCH_MKLSPARSE_CHECK(mkl_sparse_c_export_csr(
+      source,
+      indexing,
+      rows,
+      cols,
+      rows_start,
+      rows_end,
+      col_indx,
+      reinterpret_cast<MKL_Complex8**>(values)));
+}
+template <>
+void export_csr<c10::complex<double>>(
+    MKL_SPARSE_EXPORT_CSR_ARGTYPES(c10::complex<double>)) {
+  TORCH_MKLSPARSE_CHECK(mkl_sparse_z_export_csr(
+      source,
+      indexing,
+      rows,
+      cols,
+      rows_start,
+      rows_end,
+      col_indx,
+      reinterpret_cast<MKL_Complex16**>(values)));
+}
+
+template <>
+void mm<float>(MKL_SPARSE_MM_ARGTYPES(float)) {
+  TORCH_MKLSPARSE_CHECK(mkl_sparse_s_mm(
+      operation, alpha, A, descr, layout, B, columns, ldb, beta, C, ldc));
+}
+template <>
+void mm<double>(MKL_SPARSE_MM_ARGTYPES(double)) {
+  TORCH_MKLSPARSE_CHECK(mkl_sparse_d_mm(
+      operation, alpha, A, descr, layout, B, columns, ldb, beta, C, ldc));
+}
+template <>
+void mm<c10::complex<float>>(MKL_SPARSE_MM_ARGTYPES(c10::complex<float>)) {
+  TORCH_MKLSPARSE_CHECK(mkl_sparse_c_mm(
+      operation,
+      reinterpret_cast<const MKL_Complex8&>(alpha),
+      A,
+      descr,
+      layout,
+      reinterpret_cast<const MKL_Complex8*>(B),
+      columns,
+      ldb,
+      reinterpret_cast<const MKL_Complex8&>(beta),
+      reinterpret_cast<MKL_Complex8*>(C),
+      ldc));
+}
+template <>
+void mm<c10::complex<double>>(MKL_SPARSE_MM_ARGTYPES(c10::complex<double>)) {
+  TORCH_MKLSPARSE_CHECK(mkl_sparse_z_mm(
+      operation,
+      reinterpret_cast<const MKL_Complex16&>(alpha),
+      A,
+      descr,
+      layout,
+      reinterpret_cast<const MKL_Complex16*>(B),
+      columns,
+      ldb,
+      reinterpret_cast<const MKL_Complex16&>(beta),
+      reinterpret_cast<MKL_Complex16*>(C),
+      ldc));
 }
 
 template <>
