@@ -37,6 +37,51 @@ assert torch.get_default_dtype() is torch.float32
 if TEST_SCIPY:
     import scipy
 
+def _test_addmm_addmv(test_case, f, t, m, v, *, alpha=None, beta=None, transpose_out=False, layout=torch.strided, all_sparse=False):
+    """
+    Unified test for checking `f(t, m, v, alpha=alpha, beta=beta)` computation,
+    where f is `torch.addmv` or `torch.addmm`.
+    `transpose_out` controls whether the out argument is in column-major order.
+    `layout` controls whether `m` is converted to specified layout or not.
+    Custom behaviour is implemented only for torch.sparse_csr layout.
+    """
+    dtype = t.dtype
+    numpy_dtype = dtype
+    if dtype in {torch.bfloat16}:
+        numpy_dtype = torch.float
+    if dtype.is_complex:
+        alpha = 0.9 + 0.3j if alpha is None else alpha
+        beta = 0.5 + 0.6j if beta is None else beta
+    else:
+        alpha = 1.2 if alpha is None else alpha
+        beta = 0.8 if beta is None else beta
+
+    # float16 inputs with cusparse backend require larger tolerance than with cublas
+    if layout == torch.sparse_csr and m.dtype == torch.float16:
+        test_case.precision = 1e-1
+
+    def convert_layout(mat):
+        if layout == torch.sparse_csr:
+            return mat.to_sparse_csr()
+        else:
+            return mat
+
+    if all_sparse:
+        res1 = f(*map(convert_layout, (t, m, v)), alpha=alpha, beta=beta)
+        res1 = res1.to_dense()
+    else:
+        res1 = f(t, convert_layout(m), v, alpha=alpha, beta=beta)
+    res2 = torch.full_like(res1, math.nan)
+    if transpose_out:
+        res2 = res2.t().clone(memory_format=torch.contiguous_format).t()
+    f(t, convert_layout(m), v, alpha=alpha, beta=beta, out=res2)
+    res3 = alpha * (m.to(numpy_dtype).cpu().numpy() @ v.to(numpy_dtype).cpu().numpy())
+    if beta != 0:
+        res3 += (beta * t).to(numpy_dtype).cpu().numpy()
+    res3 = torch.from_numpy(res3).to(dtype)
+    test_case.assertEqual(res1, res2)
+    test_case.assertEqual(res1, res3)
+
 class TestLinalg(TestCase):
     def setUp(self):
         super(self.__class__, self).setUp()
@@ -5925,47 +5970,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 ---(input size: {:4}, eigenpairs:{:2}, units: relative error, maxiter={:4})---
 '''.format(tol, eq_err, eq_err_general, iters1, eq_err_scipy, eq_err_general_scipy, iters2, m, k, niter))
 
-    def _test_addmm_addmv(self, f, t, m, v, *, alpha=None, beta=None, transpose_out=False, layout=torch.strided):
-        """
-        Unified test for checking `f(t, m, v, alpha=alpha, beta=beta)` computation,
-        where f is `torch.addmv` or `torch.addmm`.
-        `transpose_out` controls whether the out argument is in column-major order.
-        `layout` controls whether `m` is converted to specified layout or not.
-        Custom behaviour is implemented only for torch.sparse_csr layout.
-        """
-        dtype = t.dtype
-        numpy_dtype = dtype
-        if dtype in {torch.bfloat16}:
-            numpy_dtype = torch.float
-        if dtype.is_complex:
-            alpha = 0.9 + 0.3j if alpha is None else alpha
-            beta = 0.5 + 0.6j if beta is None else beta
-        else:
-            alpha = 1.2 if alpha is None else alpha
-            beta = 0.8 if beta is None else beta
-
-        # float16 inputs with cusparse backend require larger tolerance than with cublas
-        if layout == torch.sparse_csr and m.dtype == torch.float16:
-            self.precision = 1e-1
-
-        def convert_layout(mat):
-            if layout == torch.sparse_csr:
-                return mat.to_sparse_csr()
-            else:
-                return mat
-
-        res1 = f(t, convert_layout(m), v, alpha=alpha, beta=beta)
-        res2 = torch.full_like(res1, math.nan)
-        if transpose_out:
-            res2 = res2.t().clone(memory_format=torch.contiguous_format).t()
-        f(t, convert_layout(m), v, alpha=alpha, beta=beta, out=res2)
-        res3 = alpha * (m.to(numpy_dtype).cpu().numpy() @ v.to(numpy_dtype).cpu().numpy())
-        if beta != 0:
-            res3 += (beta * t).to(numpy_dtype).cpu().numpy()
-        res3 = torch.from_numpy(res3).to(dtype)
-        self.assertEqual(res1, res2)
-        self.assertEqual(res1, res3)
-
     @precisionOverride({torch.bfloat16: 1e-0, torch.half: 5e-4, torch.float: 1e-4, torch.double: 1e-8,
                         torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     @dtypesIfCUDA(*get_all_complex_dtypes(),
@@ -6003,11 +6007,11 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             0.2 * torch.randn((100, 50), device=device).to(dtype).t(),
         ]
         for m, v, t in itertools.product(ms, vs, ts):
-            self._test_addmm_addmv(torch.addmv, t, m, v, layout=layout)
+            _test_addmm_addmv(self, torch.addmv, t, m, v, layout=layout)
         # Test beta=0, t=nan
         t = torch.full((50,), math.nan, device=device).to(dtype)
         for m, v in itertools.product(ms, vs):
-            self._test_addmm_addmv(torch.addmv, t, m, v, beta=0, layout=layout)
+            _test_addmm_addmv(self, torch.addmv, t, m, v, beta=0, layout=layout)
 
     @dtypesIfCUDA(*get_all_fp_dtypes(include_bfloat16=(TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater))))
     @dtypes(torch.float, torch.double)
@@ -6035,7 +6039,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             y_storage = torch.full((o, incy), float('nan'), device=device, dtype=dtype)
             y = y_storage[:, 0].copy_(y_data)
 
-            self._test_addmm_addmv(torch.addmv, y, a, x, layout=layout)
+            _test_addmm_addmv(self, torch.addmv, y, a, x, layout=layout)
 
         for row_major, incx, incy, lda_tail in itertools.product((False, True), (1, 2), (1, 2), (0, 1)):
             _test(row_major, incx, incy, lda_tail)
@@ -6054,19 +6058,19 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         M = torch.randn(10, 25, device=device).to(dtype)
         m1 = torch.randn(10, 50, device=device).to(dtype)
         m2 = torch.randn(50, 25, device=device).to(dtype)
-        self._test_addmm_addmv(torch.addmm, M, m1, m2, layout=layout)
+        _test_addmm_addmv(self, torch.addmm, M, m1, m2, layout=layout)
 
         # Test 0-strided
         M = torch.randn(10, 1, device=device).to(dtype).expand(10, 25)
         m1 = torch.randn(10, 1, device=device).to(dtype).expand(10, 50)
         m2 = torch.randn(50, 25, device=device).to(dtype)
-        self._test_addmm_addmv(torch.addmm, M, m1, m2, layout=layout)
+        _test_addmm_addmv(self, torch.addmm, M, m1, m2, layout=layout)
 
         # Test beta=0, M=nan
         M = torch.full((10, 25), math.nan, device=device).to(dtype)
         m1 = torch.randn(10, 50, device=device).to(dtype)
         m2 = torch.randn(50, 25, device=device).to(dtype)
-        self._test_addmm_addmv(torch.addmm, M, m1, m2, beta=0, layout=layout)
+        _test_addmm_addmv(self, torch.addmm, M, m1, m2, beta=0, layout=layout)
 
         # Test transpose
         for t1, t2, t3, t4 in itertools.product([True, False], repeat=4):
@@ -6078,7 +6082,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             M = maybe_transpose(t1, torch.randn(10, 25, device=device).to(dtype))
             m1 = maybe_transpose(t2, torch.randn(10, 50, device=device).to(dtype))
             m2 = maybe_transpose(t3, torch.randn(50, 25, device=device).to(dtype))
-            self._test_addmm_addmv(torch.addmm, M, m1, m2, transpose_out=t4, layout=layout)
+            _test_addmm_addmv(self, torch.addmm, M, m1, m2, transpose_out=t4, layout=layout)
 
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(*([torch.float, torch.double] + get_all_complex_dtypes()))
@@ -6094,7 +6098,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                     M = torch.randn(n, m, device=device).to(dtype)
                     m1 = torch.randn(n, k, device=device).to(dtype)
                     m2 = torch.randn(k, m, device=device).to(dtype)
-                    self._test_addmm_addmv(torch.addmm, M, m1, m2, layout=layout)
+                    _test_addmm_addmv(self, torch.addmm, M, m1, m2, layout=layout)
 
                     m1 = torch.randn(n, k + 1, device=device).to(dtype)
                     m2 = torch.randn(k, m, device=device).to(dtype)
