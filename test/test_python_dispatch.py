@@ -490,7 +490,7 @@ $6 = torch._ops.aten.add_($1, $5)''')
                 return rs
 
         x = NonWrapperSublass(torch.tensor([3.0, 4.0], requires_grad=True))
-        y = torch.randn(2)
+        y = torch.randn(2, requires_grad=True)
         z = x * y
         self.assertIsInstance(z, NonWrapperSublass)
         z.sum().backward(torch.tensor(1))
