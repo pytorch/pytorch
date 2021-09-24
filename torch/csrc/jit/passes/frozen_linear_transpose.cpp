@@ -12,9 +12,7 @@ namespace {
 
 using Tensor = at::Tensor;
 
-class ConcatLinearLayers {
-  std::shared_ptr<Graph> graph_;
-  bool graph_modified = false;
+class TransposeFrozenLinear {
 
   bool is_constant_linear_op(Node* node) {
     if (node->kind() != aten::linear) {
@@ -42,8 +40,6 @@ class ConcatLinearLayers {
     {
       WithInsertPoint insert_guard(node);
       auto weight = node->namedInput("weight");
-      // Tensor weight_t_tensor = at::transpose(weight_tensor, 1,
-      // 0).clone(at::MemoryFormat::Contiguous);
 
       Tensor weight_tensor = constant_as<Tensor>(weight).value();
       Tensor weight_t_tensor = at::transpose(weight_tensor, 1, 0)
@@ -87,9 +83,13 @@ class ConcatLinearLayers {
     return;
   }
 
+  std::shared_ptr<Graph> graph_;
+  bool graph_modified = false;
  public:
-  bool run(std::shared_ptr<Graph> graph) {
-    graph_ = graph;
+  TransposeFrozenLinear(std::shared_ptr<Graph> graph)
+      : graph_(std::move(graph)) {}  
+
+  bool run() {
     handleBlockAndSubblocks(graph_->block());
     return graph_modified;
   }
@@ -97,9 +97,9 @@ class ConcatLinearLayers {
 } // namespace
 
 TORCH_API bool FrozenLinearTranspose(std::shared_ptr<Graph>& graph) {
-  ConcatLinearLayers concatLayers;
+  TransposeFrozenLinear transposeWeight(graph);
   GRAPH_DUMP("Before FrozenLinearTranspose", graph);
-  bool changed = concatLayers.run(graph);
+  bool changed = transposeWeight.run();
   if (changed) {
     GRAPH_DUMP("After FrozenLinearTranspose", graph);
   }
