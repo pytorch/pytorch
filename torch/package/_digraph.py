@@ -87,7 +87,7 @@ class DiGraph:
         except TypeError:
             return False
 
-    def forward_transitive_closures(self, src: str) -> Set[str]:
+    def forward_transitive_closure(self, src: str) -> Set[str]:
         """Returns a set of nodes that are reachable from src"""
 
         result = set(src)
@@ -100,7 +100,7 @@ class DiGraph:
                     working_set.append(n)
         return result
 
-    def backward_transitive_closures(self, src: str) -> Set[str]:
+    def backward_transitive_closure(self, src: str) -> Set[str]:
         """Returns a set of nodes that are reachable from src in reverse direction"""
 
         result = set(src)
@@ -118,7 +118,7 @@ class DiGraph:
 
         result_graph = DiGraph()
         # First compute forward transitive closure of src (all things reachable from src).
-        forward_reachable_from_src = self.forward_transitive_closures(src)
+        forward_reachable_from_src = self.forward_transitive_closure(src)
 
         if dst not in forward_reachable_from_src:
             return result_graph
@@ -135,4 +135,19 @@ class DiGraph:
                     # only explore further if its reachable from src
                     working_set.append(n)
 
-        return result_graph
+        return result_graph.to_dot()
+
+    def to_dot(self) -> str:
+        """Returns the dot representation of the graph.
+
+        Returns:
+            A dot representation of the graph.
+        """
+        edges = "\n".join(f'"{f}" -> "{t}";' for f, t in self.edges)
+        return f"""\
+digraph G {{
+rankdir = LR;
+node [shape=box];
+{edges}
+}}
+"""

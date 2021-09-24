@@ -965,14 +965,7 @@ class PackageExporter:
         Returns:
             A string representation of dependencies in package.
         """
-        edges = "\n".join(f'"{f}" -> "{t}";' for f, t in self.dependency_graph.edges)
-        return f"""\
-digraph G {{
-rankdir = LR;
-node [shape=box];
-{edges}
-}}
-"""
+        return self.dependency_graph.to_dot()
 
     def _nodes_with_action_type(
         self, action: Optional[_ModuleProviderAction]
@@ -1032,11 +1025,13 @@ node [shape=box];
         else:
             return []
 
-    def all_paths(self, src: str, dst: str) -> DiGraph:
-        """Return a subgraph that has all paths from src to dst.
+    def all_paths(self, src: str, dst: str) -> str:
+        """Return a dot representation of the subgraph
+           that has all paths from src to dst.
 
         Returns:
-            A DiGraph containing all paths from src to dst.
+            A dot representation containing all paths from src to dst.
+            (https://graphviz.org/doc/info/lang.html)
         """
         return self.dependency_graph.all_paths(src, dst)
 
