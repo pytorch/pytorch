@@ -1,6 +1,5 @@
 import torch
 from typing import Tuple, List
-from torch._vmap_internals import _vmap
 
 # Utility functions
 
