@@ -31,7 +31,7 @@ std::string diffs(const at::Tensor& a, const at::Tensor& b) {
 
 TEST(Approx, log_vml) {
   te::VarHandle N("N", te::kInt);
-  te::Placeholder A("A", te::kFloat, {N});
+  te::BufHandle A("A", {N}, te::kFloat);
   te::Tensor B = te::Compute(
       "B", {N}, [&](const te::VarHandle& i) { return log_vml(A.load(i)); });
 
