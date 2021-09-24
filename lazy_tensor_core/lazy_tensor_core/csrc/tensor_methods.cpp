@@ -1776,19 +1776,6 @@ LazyTensor LazyTensor::mul(const LazyTensor& input, const at::Scalar& other,
   return input.CreateFrom(input.GetIrValue() * constant, logical_element_type);
 }
 
-LazyTensor LazyTensor::mv(const LazyTensor& input, const LazyTensor& vec) {
-  // TODO(kreeger): Drop |ir::ops::Dot()| once |mv| and |mv_out| have been
-  //                auto-gen'd.
-  return input.CreateFrom(ir::ops::Dot(input.GetIrValue(), vec.GetIrValue()));
-}
-
-void LazyTensor::mv_out(LazyTensor& out, const LazyTensor& input,
-                        const LazyTensor& vec) {
-  // TODO(kreeger): Drop |ir::ops::Dot()| once |mv| and |mv_out| have been
-  //                auto-gen'd.
-  out.SetIrValue(ir::ops::Dot(input.GetIrValue(), vec.GetIrValue()));
-}
-
 LazyTensor LazyTensor::narrow(const LazyTensor& input, lazy_tensors::int64 dim,
                               lazy_tensors::int64 start,
                               lazy_tensors::int64 length) {

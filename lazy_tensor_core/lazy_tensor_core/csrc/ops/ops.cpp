@@ -185,13 +185,6 @@ NodePtr AddMatMulOp(const Value& input, const Value& weight,
   return node;
 }
 
-NodePtr Dot(const Value& input, const Value& weight) {
-  NodePtr node = GenericOp(OpKind(at::aten::mm), {input, weight});
-  node->SetShapeDeferred(
-      [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
-  return node;
-}
-
 NodePtr MatMul(const Value& lhs, const Value& rhs) {
   NodePtr node = GenericOp(OpKind(at::aten::matmul), {lhs, rhs});
   node->SetShapeDeferred(

@@ -800,9 +800,9 @@ class LazyTensor {
       const LazyTensor& input, const at::Scalar& other,
       c10::optional<at::ScalarType> logical_element_type = c10::nullopt);
 
-  static LazyTensor mv(const LazyTensor& input, const LazyTensor& vec);
-  static void mv_out(LazyTensor& out, const LazyTensor& input,
-                     const LazyTensor& vec);
+//   static LazyTensor mv(const LazyTensor& input, const LazyTensor& vec);
+//   static void mv_out(LazyTensor& out, const LazyTensor& input,
+//                      const LazyTensor& vec);
 
   // Returns a new tensor that is a narrowed view of the input in the given
   // dimension.

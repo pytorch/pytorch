@@ -6,6 +6,7 @@ full_codegen:
   - addcmul
   - cos
   - mm
+  - mv
 supported:
   - _log_softmax
   - _log_softmax_backward_data
