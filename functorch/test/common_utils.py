@@ -109,6 +109,7 @@ def opinfo_in_dict(opinfo, d):
 def xfail(op_name, variant_name=None, *, device_type=None, dtypes=None):
     return (op_name, variant_name, device_type, dtypes, True)
 
+# TODO: this doesn't work in python < 3.8
 def skip(op_name, variant_name=None, *, device_type=None, dtypes=None):
     return (op_name, variant_name, device_type, dtypes, False)
 
