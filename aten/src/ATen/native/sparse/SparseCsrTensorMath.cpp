@@ -361,8 +361,14 @@ Tensor& add_out_sparse_csr_cpu(
   if (self.layout() == kStrided) {
     add_out_dense_sparse_csr_cpu(out, self, other, alpha);
   } else {
-      at::native::resize_as_sparse_csr_(out, self);
-      sparse::impl::cpu::add_out_sparse_csr(self, other, alpha, out);
+    TORCH_CHECK(
+        self.sizes().equals(other.sizes()),
+        "torch.add: Expected input tensors to have the same shape, but got tensor `self` with shape ",
+        self.sizes(),
+        " and tensor `other` with shape ",
+        other.sizes());
+    at::native::resize_as_sparse_csr_(out, self);
+    sparse::impl::cpu::add_out_sparse_csr(self, other, alpha, out);
   }
   return out;
 }
