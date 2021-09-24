@@ -38,14 +38,6 @@ popd
 
 :: The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
 pip install "ninja==1.10.0.post1" future "hypothesis==4.53.2" "expecttest==0.1.3" "librosa>=0.6.2" psutil pillow unittest-xml-reporting pytest
-
-:: Only the CPU tests run coverage, which I know is not super clear: https://github.com/pytorch/pytorch/issues/56264
-if "%BUILD_ENVIRONMENT%" == "win-vs2019-cpu-py3" (
-    :: coverage config file needed for plug-ins and settings to work
-    set PYTORCH_COLLECT_COVERAGE=1
-    python -mpip install coverage==5.5
-    python -mpip install -e tools/coverage_plugins_package
-)
 if %errorlevel% neq 0 ( exit /b %errorlevel% )
 
 set DISTUTILS_USE_SDK=1
@@ -62,7 +54,7 @@ set CUDNN_LIB_DIR=%CUDA_PATH%\lib\x64
 set CUDA_TOOLKIT_ROOT_DIR=%CUDA_PATH%
 set CUDNN_ROOT_DIR=%CUDA_PATH%
 set NVTOOLSEXT_PATH=C:\Program Files\NVIDIA Corporation\NvToolsExt
-set PATH=%CUDA_PATH%\bin;%CUDA_PATH%\libnvvp;%PATH%
+set PATH=%CUDA_PATH%\bin;%CUDA_PATH%\libnvvp;%CUDA_PATH%\extras\CUPTI\lib64;%PATH%
 set NUMBAPRO_CUDALIB=%CUDA_PATH%\bin
 set NUMBAPRO_LIBDEVICE=%CUDA_PATH%\nvvm\libdevice
 set NUMBAPRO_NVVM=%CUDA_PATH%\nvvm\bin\nvvm64_32_0.dll

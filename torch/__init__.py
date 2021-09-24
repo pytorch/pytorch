@@ -78,11 +78,14 @@ if sys.platform == 'win32':
         cuda_version_1 = cuda_version.replace('.', '_')
         cuda_path_var = 'CUDA_PATH_V' + cuda_version_1
         default_path = os.path.join(pfiles_path, 'NVIDIA GPU Computing Toolkit', 'CUDA', 'v' + cuda_version)
-        cuda_path = os.path.join(os.getenv(cuda_path_var, default_path), 'bin')
+        cuda_base = os.getenv(cuda_path_var, default_path)
+        cuda_path = os.path.join(cuda_base, 'bin')
+        cupti_path = os.path.join(cuda_base, 'extras', 'CUPTI', 'lib64')
     else:
         cuda_path = ''
+        cupti_path = ''
 
-    dll_paths.extend(filter(os.path.exists, [nvtoolsext_dll_path, cuda_path]))
+    dll_paths.extend(filter(os.path.exists, [nvtoolsext_dll_path, cuda_path, cupti_path]))
 
     kernel32 = ctypes.WinDLL('kernel32.dll', use_last_error=True)
     with_load_library_flags = hasattr(kernel32, 'AddDllDirectory')
@@ -717,7 +720,6 @@ import torch.backends.mkl
 import torch.backends.mkldnn
 import torch.backends.openmp
 import torch.backends.quantized
-from torch import quantization as quantization
 import torch.utils.data
 from torch import __config__ as __config__
 from torch import __future__ as __future__
@@ -738,6 +740,10 @@ def compiled_with_cxx11_abi():
 # Import the ops "namespace"
 from torch._ops import ops
 from torch._classes import classes
+
+# quantization depends on torch.fx
+# Import quantization
+from torch import quantization as quantization
 
 # Import the quasi random sampler
 from torch import quasirandom as quasirandom

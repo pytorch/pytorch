@@ -617,6 +617,19 @@ def max_pool1d_with_indices(
         what seen in :class:`~torch.nn.MaxPool1d`, and will change in a future release.
 
     See :class:`~torch.nn.MaxPool1d` for details.
+
+    Args:
+        input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iW)`, minibatch dim optional.
+        kernel_size: the size of the window. Can be a single number or a
+            tuple `(kW,)`
+        stride: the stride of the window. Can be a single number or a tuple
+            `(sW,)`. Default: :attr:`kernel_size`
+        padding: Implicit negative infinity padding to be added on both sides, must be >= 0 and <= kernel_size / 2.
+        dilation: The stride between elements within a sliding window, must be > 0.
+        ceil_mode: If ``True``, will use `ceil` instead of `floor` to compute the output shape. This
+                   ensures that every element in the input tensor is covered by a sliding window.
+        return_indices: If ``True``, will return the argmax along with the max values.
+                        Useful for :class:`torch.nn.functional.max_unpool1d` later
     """
     # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
     # and https://github.com/pytorch/pytorch/issues/62545 for context
@@ -702,6 +715,19 @@ def max_pool2d_with_indices(
         what seen in :class:`~torch.nn.MaxPool2d`, and will change in a future release.
 
     See :class:`~torch.nn.MaxPool2d` for details.
+
+    Args:
+        input: input tensor :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`, minibatch dim optional.
+        kernel_size: size of the pooling region. Can be a single number or a
+            tuple `(kH, kW)`
+        stride: stride of the pooling operation. Can be a single number or a
+            tuple `(sH, sW)`. Default: :attr:`kernel_size`
+        padding: Implicit negative infinity padding to be added on both sides, must be >= 0 and <= kernel_size / 2.
+        dilation: The stride between elements within a sliding window, must be > 0.
+        ceil_mode: If ``True``, will use `ceil` instead of `floor` to compute the output shape. This
+                   ensures that every element in the input tensor is covered by a sliding window.
+        return_indices: If ``True``, will return the argmax along with the max values.
+                        Useful for :class:`torch.nn.functional.max_unpool2d` later
     """
     # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
     # and https://github.com/pytorch/pytorch/issues/62545 for context
@@ -787,6 +813,19 @@ def max_pool3d_with_indices(
         what seen in :class:`~torch.nn.MaxPool3d`, and will change in a future release.
 
     See :class:`~torch.nn.MaxPool3d` for details.
+
+    Args:
+        input: input tensor :math:`(\text{minibatch} , \text{in\_channels} , iD, iH , iW)`, minibatch dim optional.
+        kernel_size: size of the pooling region. Can be a single number or a
+                     tuple `(kT, kH, kW)`
+        stride: stride of the pooling operation. Can be a single number or a
+                tuple `(sT, sH, sW)`. Default: :attr:`kernel_size`
+        padding: Implicit negative infinity padding to be added on both sides, must be >= 0 and <= kernel_size / 2.
+        dilation: The stride between elements within a sliding window, must be > 0.
+        ceil_mode: If ``True``, will use `ceil` instead of `floor` to compute the output shape. This
+                   ensures that every element in the input tensor is covered by a sliding window.
+        return_indices: If ``True``, will return the argmax along with the max values.
+                        Useful for :class:`torch.nn.functional.max_unpool3d` later
     """
     # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
     # and https://github.com/pytorch/pytorch/issues/62545 for context
@@ -4563,8 +4602,7 @@ def fold(
     tensor.
 
     .. warning::
-        Currently, only 3-D output tensors (unfolded batched image-like tensors) are
-        supported.
+        Currently, only unbatched (3D) or batched (4D) image-like output tensors are supported.
 
     See :class:`torch.nn.Fold` for details
     """
@@ -4572,7 +4610,7 @@ def fold(
         return handle_torch_function(
             fold, (input,), input, output_size, kernel_size, dilation=dilation, padding=padding, stride=stride
         )
-    if input.dim() == 3:
+    if input.dim() == 3 or input.dim() == 2:
         msg = "{} must be int or 2-tuple for 3D input"
         assert_int_or_pair(output_size, "output_size", msg)
         assert_int_or_pair(kernel_size, "kernel_size", msg)
@@ -4584,7 +4622,8 @@ def fold(
             input, _pair(output_size), _pair(kernel_size), _pair(dilation), _pair(padding), _pair(stride)
         )
     else:
-        raise NotImplementedError("Input Error: Only 3D input Tensors are supported (got {}D)".format(input.dim()))
+        raise NotImplementedError("Input Error: Only unbatched (2D) or batched (3D) input Tensors"
+                                  f"are supported (got {input.dim()}D)")
 
 
 def _pad_circular(input: Tensor, padding: List[int]) -> Tensor:
