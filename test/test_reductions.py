@@ -2865,8 +2865,6 @@ class TestReductions(TestCase):
     and asserts that their output is equal.
     """
     def _test_histogramdd_numpy(self, t, bins, bin_range, weights, density):
-        print([t, bins, bin_range, weights, density])
-
         def to_np(t):
             if type(t) == list:
                 return list(map(to_np, t))

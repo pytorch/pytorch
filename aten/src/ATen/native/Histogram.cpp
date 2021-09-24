@@ -276,7 +276,6 @@ std::vector<Tensor>& histogramdd_bin_edges_out_cpu(const Tensor& self, IntArrayR
 std::vector<Tensor> histogramdd_bin_edges_cpu(const Tensor& self, IntArrayRef bin_ct,
         c10::optional<c10::ArrayRef<double>> range,
         const c10::optional<Tensor>& weight, bool density) {
-    TORCH_WARN(bin_ct);
     std::vector<Tensor> bin_edges_out = allocate_bin_edges_tensors(self);
     return histogramdd_bin_edges_out_cpu(self, bin_ct, range, weight, density, bin_edges_out);
 }

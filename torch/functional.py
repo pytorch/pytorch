@@ -1,6 +1,7 @@
 from typing import (
     Tuple, Optional, Union, Any, Sequence, TYPE_CHECKING
 )
+from collections import namedtuple
 
 import torch
 import torch.nn.functional as F
@@ -339,7 +340,10 @@ def histogramdd(input: Tensor,
         bin_edges = _VF._histogramdd_bin_edges_tensor(input, bins, weight=weight, density=density)
 
     hist = _VF._histogramdd_tensor(input, bin_edges, weight=weight, density=density)
-    return (hist, bin_edges)
+
+    # TODO: figure out how to return torch.return_types.histogramdd
+    histogramdd_return_type = namedtuple('histogramdd_return_type', 'hist bin_edges')
+    return histogramdd_return_type(hist, bin_edges)
 
 # This wrapper exists to support variadic args.
 if TYPE_CHECKING:
