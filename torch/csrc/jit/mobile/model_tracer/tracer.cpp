@@ -100,15 +100,18 @@ int main(int argc, char* argv[]) {
   torch::jit::mobile::TracerResult tracer_result =
       torch::jit::mobile::trace_run(FLAGS_model_input_path);
 
-  for (auto& it : tracer_result.called_kernel_tags) {
-    std::cout << "kernal tag, key: " << it.first << " value: " << it.second
-              << std::endl;
-  }
-  for (auto& it : tracer_result.traced_operators) {
-    std::cout << "- " << it << std::endl;
-  }
   yaml_out << "include_all_kernel_dtypes: true" << std::endl;
   yaml_out << "operators:" << std::endl;
-  printOpsYAML(yaml_out, tracer_result.root_ops, false, true, false);
-  printOpsYAML(yaml_out, tracer_result.traced_operators, false, false, false);
+  printOpsYAML(
+      yaml_out,
+      root_ops,
+      false /* is_used_for_training */,
+      true /* is_root_operator */,
+      false /* include_all_overloads */);
+  printOpsYAML(
+      yaml_out,
+      traced_operators,
+      false /* is_used_for_training */,
+      false /* is_root_operator */,
+      false /* include_all_overloads */);
 }
