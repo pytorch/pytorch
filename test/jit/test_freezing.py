@@ -1,21 +1,19 @@
+import io
+import unittest
+from itertools import product
+from typing import Any
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import unittest
-from torch.testing._internal.jit_utils import JitTestCase
 from torch._C import parse_ir
-
-from torch.testing import FileCheck
-from torch.testing._internal.common_quantized import override_quantized_engine
-from torch.testing._internal.common_quantization import skipIfNoFBGEMM
-from torch.testing._internal.common_utils import set_default_dtype
-from torch.utils import mkldnn as mkldnn_utils
-
-
 from torch.jit._recursive import wrap_cpp_module
-from typing import Any
-from itertools import product
-import io
+from torch.testing import FileCheck
+from torch.testing._internal.common_quantization import skipIfNoFBGEMM
+from torch.testing._internal.common_quantized import override_quantized_engine
+from torch.testing._internal.common_utils import set_default_dtype
+from torch.testing._internal.jit_utils import JitTestCase
+from torch.utils import mkldnn as mkldnn_utils
 
 try:
     import torchvision
@@ -1706,6 +1704,54 @@ class TestFrozenOptimizations(JitTestCase):
 
                 self.assertEqual(mod(inp), scripted_mod(inp))
                 self.assertEqual(mod(inp), scripted_mod(inp))
+
+    @unittest.skipIf(not torch._C.has_cuda, "Optimization currently only run for GPU")    
+    def test_linear_transpose(self):
+        mod_eager = torch.nn.Linear(20, 30).eval()
+        test_val = torch.rand([50, 20])
+        self.check_linear_optimizations_2(mod_eager, 1, 0, "transpose_frozen_linear", (test_val,))
+
+    @unittest.skipIf(not torch._C.has_cuda, "Optimization currently only run for GPU")
+    def test_linear_non_constant_weight(self):
+        class ModLinear(torch.nn.Module):
+            def __init__(self):
+                super(ModLinear, self).__init__()
+                self.bias = torch.nn.Parameter(torch.rand(30))
+
+            def forward(self, x, weight):
+                return torch._C._nn.linear(x, weight, self.bias)
+                j
+        mod_eager = ModLinear().eval()
+        test_val = torch.rand([50, 20])
+        self.check_linear_optimizations_2(mod_eager, 1, 1, "transpose_frozen_linear", (test_val,))
+
+    def check_linear_optimizations_2(self, eager_mod, orig_linears, new_linears, opt_pass, test_vals):
+        # TODO: merge with check_linear_optimizations once both diffs land
+        for is_cuda in [False, True]:
+            if is_cuda:
+                mod_to_device = eager_mod.cuda()
+                test_vals_to_device = [t.cuda() if isinstance(t, torch.Tensor) else t for t in test_vals]
+            else:
+                mod_to_device = eager_mod 
+                test_vals_to_device = test_vals
+
+            script_mod = torch.jit.script(mod_to_device)
+            op_graph = script_mod.graph
+
+            FileCheck().check_count("aten::linear", orig_linears, exactly=True).run(op_graph)
+            # successively no-ops with non-const inputs
+            self.run_pass(opt_pass, op_graph)
+            FileCheck().check_count("aten::linear", orig_linears, exactly=True).run(op_graph)
+
+            script_mod = torch.jit.freeze(script_mod)
+            op_graph = script_mod.graph
+            self.run_pass(opt_pass, op_graph)
+            if is_cuda:
+                FileCheck().check_count("aten::linear", new_linears, exactly=True).run(op_graph)
+            else:
+                FileCheck().check_count("aten::linear", orig_linears, exactly=True).run(op_graph)
+
+            self.assertEqual(mod_to_device(*test_vals_to_device), script_mod(*test_vals_to_device))
 
     @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     def test_collapse_adjacent_conversions(self):
