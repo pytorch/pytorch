@@ -84,7 +84,7 @@ using namespace ::c10::cuda;
 struct Function;
 struct MatchedSchema;
 
-// Graph represents one "function" of computation.
+// A Graph represents one "function" of computation.
 // It uses a simple ownership model where the graph owns all the nodes inside
 // it. All references inside the graph are raw pointers. Destroying the Graph
 // will invalidate any pointers to nodes in the graph.
@@ -104,9 +104,9 @@ TORCH_API std::ostream& operator<<(std::ostream& out, const Node& n);
 // A list of nodes, with inputs and outputs
 struct Block;
 
-// Each use is represented by this type, see Node::uses()
-// 'user' is the consumer of the value, offset is the index into
-// 'user's input this where the produces will be found.
+// Each use is represented by this type, see 'Node::uses()'
+// 'user' is the consumer of the value, 'offset' is the index into
+// 'user's input this where the producers will be found.
 struct Use {
   Use(Node* user, size_t offset) : user(user), offset(offset) {}
   Node* user;
@@ -338,14 +338,16 @@ struct TORCH_API Node {
  protected:
   Node(Graph* graph_, NodeKind kind_); // defined after graph
  public:
-  // each node but Return/Param
-  // is associated with exactly one place in the node list...
-  // of the graph_
-  // this circular is a doubly-linked list, the Return node is used as the
-  // sentinel for the beginning and end of the list such that the list never has
-  // null pointers next_in_graph[0] is next pointer next_in_graph[1] is prev
-  // pointer using an array to allow the same iterator class for forward and
-  // reverse node lists This list represents a topological sort
+  // Each Node but Return/Param Nodes are associated with exactly one
+  // place in the Node list of the Graph. The Graph itself is a circular
+  // doubly-linked list. The Return Node is used as the sentinel for the
+  // "beginning"/"end" of the list. This means that you can tell when
+  // you've traversed the entire list without means worrying about null
+  // pointers. `next_in_graph[0]` is the pointer to the next Node, while
+  // `next_in_graph[1]` is the pointer to the previous Node. The
+  // linked list is implemented as an array to allow the same iterator
+  // class for forward and reversed Node lists. Taken together, this
+  // list also represents a topological sort of the Nodes in the Graph.
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-non-private-member-variables-in-classes,modernize-avoid-c-arrays)
   Node* next_in_graph[2] = {nullptr, nullptr};
 
@@ -980,7 +982,6 @@ struct TORCH_API Node {
   // subclasses should extend if they have additional information to copy.
   // 'this' will be allocated with s->allocNewInstance(g) so it should have
   // the same concrete type as 's'
-  //
   virtual void cloneFrom(Node* s);
 };
 
@@ -1247,7 +1248,7 @@ struct Graph {
   TORCH_API Node* createEnumName(Value* e);
   TORCH_API Node* createEnumValue(Value* e);
   TORCH_API Node* createList(
-      const TypePtr& elem_type,
+      const TypePtr& contained_type,
       at::ArrayRef<Value*> values);
   TORCH_API Node* createListUnpack(Value* v, size_t size);
   TORCH_API Node* createDict(
