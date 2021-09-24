@@ -58,19 +58,15 @@ class WeightNormSparsifier(BaseSparsifier):
         if zeros_per_block > values_per_block:
             raise ValueError("Number of zeros per block cannot be more than "
                              "the total number of elements in that block.")
-        elif sparsity_level <= 0.0:
-            mask.data = torch.ones_like(mask)
-            return
-        elif sparsity_level >= 1.0 and zeros_per_block == values_per_block:
-            mask.data = torch.zeros_like(mask)
-            return
+        if zeros_per_block < 0:
+            raise ValueError("Number of zeros per block should be positive.")
 
         # TODO: Add support for multiple parametrizations for the same weight
         mask = layer.parametrizations.weight[0].mask
-        if sparsity_level <= 0:
-            mask.data = torch.ones(layer.weight.shape, device=layer.weight.device)
+        if sparsity_level <= 0 or zeros_per_block == 0:
+            mask.data = torch.ones_like(mask)
         elif sparsity_level >= 1.0 and (zeros_per_block == values_per_block):
-            mask.data = torch.zeros(layer.weight.shape, device=layer.weight.device)
+            mask.data = torch.zeros_like(mask)
         else:
             ww = layer.weight * layer.weight
             ww_reshaped = ww.reshape(1, *ww.shape)

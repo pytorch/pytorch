@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 
+import itertools
 import logging
+import re
 
 import torch
 from torch import nn
@@ -18,10 +20,12 @@ class Model(nn.Module):
             nn.Linear(16, 16)
         )
         self.linear = nn.Linear(16, 16)
+        self.head = nn.Linear(16, 4)
 
     def forward(self, x):
         x = self.seq(x)
         x = self.linear(x)
+        x = self.head(x)
         return x
 
 
@@ -43,7 +47,7 @@ class TestBaseSparsifier(TestCase):
         model = Model()
         sparsifier = ImplementedSparsifier(test=3)
         sparsifier.prepare(model, config=None)
-        assert len(sparsifier.module_groups) == 2
+        assert len(sparsifier.module_groups) == 3
         sparsifier.step()
         # Can instantiate the model with configs
         sparsifier = ImplementedSparsifier(test=3)
@@ -52,6 +56,30 @@ class TestBaseSparsifier(TestCase):
         assert sparsifier.module_groups[0]['fqn'] == 'linear'
         assert 'test' in sparsifier.module_groups[0]
         assert sparsifier.module_groups[0]['test'] == 3
+
+    def test_prepare_config(self):
+        model = Model()
+        sparsifier = ImplementedSparsifier(test=3)
+        # Make sure there are no parametrizations before `prepare`
+        assert not hasattr(model.seq[0], 'parametrizations')
+        assert not hasattr(model.linear, 'parametrizations')
+        assert not hasattr(model.head, 'parametrizations')
+        sparsifier.prepare(model, config=[
+            {'fqn': 'seq.0', 'test': 42},
+            # No 'linear' to make sure it will be skipped in the sparsification
+            {'module': model.head, 'fqn': 'head'}
+        ])
+        assert len(sparsifier.module_groups) == 2
+        # Check if default argument is not assigned if explicit
+        assert sparsifier.module_groups[0]['fqn'] == 'seq.0'
+        assert sparsifier.module_groups[0]['test'] == 42
+        # Check if FQN and module are pointing to the same location
+        assert sparsifier.module_groups[1]['fqn'] == 'head'
+        assert sparsifier.module_groups[1]['module'] == model.head
+        # Check if parameterizations are attached
+        assert hasattr(model.seq[0], 'parametrizations')
+        assert not hasattr(model.linear, 'parametrizations')
+        assert hasattr(model.head, 'parametrizations')
 
     def test_step(self):
         model = Model()
@@ -212,3 +240,57 @@ class TestWeightNormSparsifier(TestCase):
             module = g['module']
             assert not is_parametrized(module, 'weight')
             assert not hasattr(module, 'mask')
+
+    def test_sparsity_levels(self):
+        sparsity_levels = [-1.0, 0.0, 0.5, 1.0, 2.0]
+        sparse_block_shapes = [(1, 1), (1, 4), (2, 2), (4, 1)]
+        zeros_per_blocks = [0, 1, 2, 3, 4]
+
+        testcases = itertools.tee(itertools.product(sparsity_levels,
+                                                    sparse_block_shapes,
+                                                    zeros_per_blocks))
+        # Create a config and model with all the testcases
+        model = nn.Sequential()
+        sparsifier = WeightNormSparsifier()
+
+        sparsity_per_layer_config = []
+        p = re.compile(r'[-\.\s]')
+        for sl, sbs, zpb in testcases[0]:
+            # Make sure the number of zeros is not > values in a block
+            if zpb > sbs[0] * sbs[1]:
+                continue
+            layer_name = f'{sl}_{sbs}_{zpb}'
+            layer_name = p.sub('_', layer_name)
+
+            layer = nn.Linear(12, 12, bias=False)
+            layer.weight = nn.Parameter(torch.ones(12, 12))
+            model.add_module(layer_name, layer)
+            config = {
+                'fqn': layer_name,
+                'sparsity_level': sl,
+                'sparse_block_shape': sbs,
+                'zeros_per_block': zpb
+            }
+            sparsity_per_layer_config.append(config)
+
+        sparsifier.prepare(model, sparsity_per_layer_config)
+        sparsifier.step()
+        sparsifier.squash_mask()
+        model.eval()
+
+        for sl, sbs, zpb in testcases[1]:
+            if zpb > sbs[0] * sbs[1]:
+                continue
+            layer_name = f'{sl}_{sbs}_{zpb}'
+            layer_name = p.sub('_', layer_name)
+            layer = getattr(model, layer_name)
+
+            # Level of sparsity is achieved
+            sparse_mask = (layer.weight == 0).float()
+            if zpb == 0:
+                assert sparse_mask.mean() == 0
+            else:
+                # Ratio of individual zeros in the tensor
+                true_sl = min(max(sl, 0.0), 1.0)
+                true_sl = true_sl * zpb / sbs[0] / sbs[1]
+                assert sparse_mask.mean() == true_sl
