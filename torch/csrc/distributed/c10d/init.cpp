@@ -378,6 +378,14 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           },
           py::call_guard<py::gil_scoped_release>())
       .def("get_backward_stats", &::c10d::Reducer::get_backward_stats)
+      .def("_install_post_backward_futures", [](::c10d::Reducer& reducer, const std::vector<std::shared_ptr<jit::PythonFutureWrapper>>& futs) {
+              c10::List<c10::intrusive_ptr<c10::ivalue::Future>> futures(c10::FutureType::create(c10::TensorType::get()));
+              for (const auto & fut : futs) {
+              futures.push_back(fut->fut);
+              }
+              reducer.install_futures(std::move(futures));
+          },
+          py::call_guard<py::gil_scoped_release>())
       .def(
           "_rebuild_buckets",
           &::c10d::Reducer::rebuild_buckets,
