@@ -25,6 +25,7 @@ from common_utils import (
     get_exhaustive_batched_inputs,
     opinfo_in_dict,
     xfail,
+    skip,
     skipOps,
     check_vmap_fallback,
 )
@@ -475,6 +476,7 @@ class TestOperators(TestCase):
         xfail('block_diag'),
         xfail('nn.functional.dropout'),
         xfail('nn.functional.max_pool2d'),
+        xfail('nn.functional.batch_norm'),
     })
     def test_vmapvjp_has_batch_rule(self, device, dtype, op):
         # These are too annoying to put into the list above
@@ -521,8 +523,9 @@ class TestOperators(TestCase):
         xfail('nanmean'),
         xfail('vstack'),
         xfail('block_diag'),
-        xfail('nn.functional.dropout'),
         xfail('nn.functional.max_pool2d'),
+        xfail('nn.functional.batch_norm'),
+        skip('nn.functional.dropout'),  # Nondeterministic
     }))
     def test_vjpvmap(self, device, dtype, op):
         # NB: there is no vjpvmap_has_batch_rule test because that is almost
