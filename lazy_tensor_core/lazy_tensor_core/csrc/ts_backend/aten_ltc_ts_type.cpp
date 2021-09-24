@@ -635,20 +635,6 @@ at::Tensor LazyNativeFunctions::max_pool3d(
       self, kernel_size, stride, padding, dilation, ceil_mode);
 }
 
-at::Tensor LazyNativeFunctions::mm(const at::Tensor& self,
-                                   const at::Tensor& mat2) {
-  LTC_FN_COUNTER("lazy::");
-  // lazy::dot doesn't support integer types.
-  if (!at::native::is_floating_point(self) ||
-      !at::native::is_floating_point(mat2)) {
-    return at::native::call_fallback_fn<&ltc_eager_fallback, ATEN_OP(mm)>::call(
-        self, mat2);
-  }
-  return bridge::AtenFromLtcTensor(
-      LazyTensor::mm(/*input=*/bridge::GetLtcTensor(self),
-                     /*weight=*/bridge::GetLtcTensor(mat2)));
-}
-
 at::Tensor LazyNativeFunctions::mul(const at::Tensor& self,
                                     const at::Tensor& other) {
   LTC_FN_COUNTER("lazy::");

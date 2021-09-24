@@ -1746,10 +1746,6 @@ void LazyTensor::min_out(LazyTensor& min, LazyTensor& min_indices,
   min.SetIrValue(ir::Value(node, 0));
   min_indices.SetIrValue(ir::Value(node, 1));
 }
-LazyTensor LazyTensor::mm(const LazyTensor& input, const LazyTensor& weight) {
-  return input.CreateFrom(
-      ir::ops::Dot(input.GetIrValue(), weight.GetIrValue()));
-}
 
 LazyTensor LazyTensor::mse_loss(const LazyTensor& input,
                                 const LazyTensor& target,
@@ -1781,11 +1777,15 @@ LazyTensor LazyTensor::mul(const LazyTensor& input, const at::Scalar& other,
 }
 
 LazyTensor LazyTensor::mv(const LazyTensor& input, const LazyTensor& vec) {
+  // TODO(kreeger): Drop |ir::ops::Dot()| once |mv| and |mv_out| have been
+  //                auto-gen'd.
   return input.CreateFrom(ir::ops::Dot(input.GetIrValue(), vec.GetIrValue()));
 }
 
 void LazyTensor::mv_out(LazyTensor& out, const LazyTensor& input,
                         const LazyTensor& vec) {
+  // TODO(kreeger): Drop |ir::ops::Dot()| once |mv| and |mv_out| have been
+  //                auto-gen'd.
   out.SetIrValue(ir::ops::Dot(input.GetIrValue(), vec.GetIrValue()));
 }
 
