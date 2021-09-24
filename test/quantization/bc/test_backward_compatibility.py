@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 
-import math
 import sys
 import os
 import unittest
