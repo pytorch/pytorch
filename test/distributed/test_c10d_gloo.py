@@ -1221,6 +1221,17 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                     # one tensor in output tensor list
                     self.assertEqualIgnoreType(y, z)
 
+        # Added to address https://github.com/pytorch/pytorch/issues/65231
+        # In the failed tests, all assertEqualIgnoreType are passed on all
+        # processes. However, one of the process didn't call ProcessGroupGloo
+        # destructor before exiting program. This is not surprising as the only
+        # guarantee that Python makes is that garbage collection MAY happen
+        # before the program exits. If GC didn't happen, the two threads in
+        # ProcessGroup might be destructed before joined.
+        # FIXME: it's still unclear why only this test require explicit
+        # destroy_process_group()
+        c10d.destroy_process_group()
+
     @requires_gloo()
     def test_reduce_checks(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -2091,7 +2102,7 @@ class ReducerTest(TestCase):
         model = ReducerModule()
         parameters = list(model.parameters())
         buckets = [list(range(len(parameters)))]
-        dist.Reducer([parameters], buckets, [dist._DEFAULT_FIRST_BUCKET_BYTES], self.process_group)
+        dist.Reducer(parameters, buckets, [dist._DEFAULT_FIRST_BUCKET_BYTES], self.process_group)
 
     def _create_mixed_precision_model(self):
         model = ReducerModule()
@@ -2106,8 +2117,8 @@ class ReducerTest(TestCase):
         # Raise if there are multiple types per bucket.
         # In this case we create one bucket for all parameters.
         with self.assertRaises(RuntimeError):
-            parameters = [list(model.parameters())]
-            buckets = [list(range(len(parameters[0])))]
+            parameters = list(model.parameters())
+            buckets = [list(range(len(parameters)))]
             dist.Reducer(
                 parameters,
                 buckets,
@@ -2118,9 +2129,9 @@ class ReducerTest(TestCase):
     @requires_gloo()
     def test_multi_dtype_multi_bucket(self):
         model = self._create_mixed_precision_model()
-        parameters = [list(model.parameters())]
+        parameters = list(model.parameters())
         group_by_dtype = groupby(
-            range(len(parameters[0])), key=lambda i: parameters[0][i].dtype
+            range(len(parameters)), key=lambda i: parameters[i].dtype
         )
         buckets = [list(indices) for _, indices in group_by_dtype]
         dist.Reducer(
@@ -2131,9 +2142,10 @@ class ReducerTest(TestCase):
         )
 
     def _create_reducer_for_models(self, models, find_unused_parameters=False):
-        parameters = [list(model.parameters()) for model in models]
+        self.assertEqual(len(models), 1)
+        parameters = list(models[0].parameters())
         group_by_dtype = groupby(
-            range(len(parameters[0])), key=lambda i: parameters[0][i].dtype
+            range(len(parameters)), key=lambda i: parameters[i].dtype
         )
         buckets = [list(indices) for _, indices in group_by_dtype]
         return dist.Reducer(
@@ -2143,16 +2155,6 @@ class ReducerTest(TestCase):
             self.process_group,
             find_unused_parameters=find_unused_parameters,
         )
-
-    @requires_gloo()
-    def test_reducer_no_multi_replicas(self):
-        num_replicas = 2
-        models = [self._create_mixed_precision_model() for _ in range(num_replicas)]
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Expected exactly one model replica.",
-        ):
-            reducer = self._create_reducer_for_models(models)
 
     @requires_gloo()
     def test_forward_backward(self):

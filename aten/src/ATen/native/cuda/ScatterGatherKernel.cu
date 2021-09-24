@@ -10,8 +10,8 @@
 
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
-#include <THC/THCAtomics.cuh>
 
 namespace at { namespace native {
 
