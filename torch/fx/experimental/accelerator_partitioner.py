@@ -2,7 +2,7 @@ import operator
 from typing import Dict, List, Set, NamedTuple, Tuple
 
 import torch
-from torch.fx.experimental.graph_manipulation import get_size_of_all_nodes
+from torch.fx.passes.graph_manipulation import get_size_of_all_nodes
 from torch.fx.experimental.partitioner_utils import (
     Partition,
     Device,
