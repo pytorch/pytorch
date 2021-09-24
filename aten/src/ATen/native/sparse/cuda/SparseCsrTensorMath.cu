@@ -73,9 +73,9 @@ using namespace at::sparse_csr;
 // certain utiliy functions are usable from sparse COO.
 using namespace at::sparse;
 
-Tensor& addmm_out_sparse_csr_dense_cuda(
+Tensor& addmm_out_sparse_csr_cuda(
     const Tensor& self,
-    const SparseCsrTensor& mat1,
+    const Tensor& mat1,
     const Tensor& mat2,
     const Scalar& beta,
     const Scalar& alpha,
@@ -89,6 +89,10 @@ Tensor& addmm_out_sparse_csr_dense_cuda(
   // when using same function for CUDA and SparseCsrCUDA dispatch keys
   TORCH_CHECK(mat1.dim() == 2 && mat2.dim() == 2, "tensors must be 2-D");
 
+  TORCH_CHECK(
+      mat1.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (",
+      mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
+
   TensorArg args[]{{result, "out", 0}, {self, "self", 1}, {mat1, "mat1", 2}, {mat2, "mat2", 3}};
   checkAllSameGPU(__func__, args);
 
@@ -96,7 +100,7 @@ Tensor& addmm_out_sparse_csr_dense_cuda(
   IntArrayRef mat2_sizes = mat2.sizes();
   IntArrayRef self__sizes;
   c10::MaybeOwned<Tensor> self_;
-  if (&result != &self) {
+  if (&result != &self && self.layout() == kStrided) {
     self_ = expand_size(self, {mat1_sizes[0], mat2_sizes[1]}, "addmm");
     self__sizes = self_->sizes();
   } else {
@@ -108,10 +112,12 @@ Tensor& addmm_out_sparse_csr_dense_cuda(
   }
 
   if (&result != &self) {
-    at::native::resize_output(result, self__sizes);
-    if (beta.toComplexDouble() != 0.0) {
-      at::native::copy_(result, *self_);
+    if (result.layout() == kStrided) {
+      at::native::resize_output(result, self__sizes);
+    } else {
+      at::native::resize_as_sparse_csr_(result, *self_);
     }
+    result.copy_(*self_);
   }
 
   IntArrayRef result_sizes = result.sizes();
@@ -119,21 +125,23 @@ Tensor& addmm_out_sparse_csr_dense_cuda(
     return result;
   }
 
-  if (mat1._nnz() == 0) {
-    // By definition, when beta==0, values in self should be ignored. nans and infs
-    // should not propagate
+  if (mat1._nnz() == 0 && mat2.layout() == kStrided) {
+    // According to docs, when beta==0 values in self should be ignored. nans and infs should not propagate
     if (beta.toComplexDouble() == 0.) {
-      return result.zero_();
+      result.zero_();
+    } else {
+      result.mul_(beta);
     }
-    return at::mul_out(
-        result,
-        self,
-        at::native::scalar_tensor(
-            beta,
-            self.scalar_type(),
-            c10::nullopt /* layout */,
-            at::kCPU,
-            c10::nullopt /* pin_memory */));
+    return result;
+  }
+
+  if (mat2.is_sparse_csr() && (mat1._nnz() == 0 || mat2._nnz() == 0)) {
+    if (beta.toComplexDouble() == 0.) {
+      result.values().zero_();
+    } else {
+      result.values().mul_(beta);
+    }
+    return result;
   }
 
   sparse::impl::cuda::addmm_out_sparse_csr(mat1, mat2, beta, alpha, result);
@@ -255,11 +263,16 @@ Tensor& add_out_sparse_csr_cuda(
     const Scalar& alpha,
     SparseCsrTensor& out) {
   if (self.layout() == kStrided) {
-    return add_out_dense_sparse_csr_cuda(out, self, other, alpha);
+    add_out_dense_sparse_csr_cuda(out, self, other, alpha);
   } else {
     TORCH_CHECK(
-        false,
-        "NotImplementedError: Addition of sparse CSR tensors is not yet implemented.")
+        self.sizes().equals(other.sizes()),
+        "torch.add: Expected input tensors to have the same shape, but got tensor `self` with shape ",
+        self.sizes(),
+        " and tensor `other` with shape ",
+        other.sizes());
+    at::native::resize_as_sparse_csr_(out, self);
+    sparse::impl::cuda::add_out_sparse_csr(self, other, Scalar(1), alpha, out);
   }
   return out;
 }
