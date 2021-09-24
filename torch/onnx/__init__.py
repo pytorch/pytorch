@@ -34,7 +34,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
            opset_version=None, _retain_param_name=None, do_constant_folding=True,
            example_outputs=None, strip_doc_string=None, dynamic_axes=None,
            keep_initializers_as_inputs=None, custom_opsets=None, enable_onnx_checker=None,
-           use_external_data_format=False):
+           use_external_data_format=None):
     r"""
     Exports a model into ONNX format. If ``model`` is not a
     :class:`torch.jit.ScriptModule` nor a :class:`torch.jit.ScriptFunction`, this runs
@@ -297,10 +297,11 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
 
         enable_onnx_checker (bool, default True): Deprecated and ignored. Will be removed in next
             Pytorch release.
-        use_external_data_format (bool, default False): If True, then some of the model
-            parameters are stored in external data files and not in the ONNX model file itself.
-            Models larger than 2GB cannot be exported in one file because of size limits imposed
-            by Protocol Buffers.
+        use_external_data_format (bool, default False): [Deprecated and ignored. Will be removed in
+            next Pytorch release.]
+            If True, then some of the model parameters are stored in external data files and not in
+            the ONNX model file itself. Models larger than 2GB cannot be exported in one file because
+            of size limits imposed by Protocol Buffers.
             For details see
             `onnx.proto <https://github.com/onnx/onnx/blob/32c7cb66/onnx/onnx.proto#L562>`_.
             If True,  argument ``f`` must be a string specifying the location of the model.
