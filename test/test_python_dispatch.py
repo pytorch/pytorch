@@ -461,12 +461,41 @@ $6 = torch._ops.aten.add_($1, $5)''')
                     pass
 
     def test_enable_python_mode_subclass_autograd_device_check(self) -> None:
-        x = LoggingTensor(torch.tensor([3.0, 4.0], requires_grad=True))
+        class NonWrapperSublass(torch.Tensor):
+            elem: torch.Tensor
+
+            __slots__ = ['elem']
+
+            @staticmethod
+            def __new__(cls, elem, *args, **kwargs):
+                # Wrong device here!
+                r = torch.Tensor._make_subclass(cls, elem.to("meta"), elem.requires_grad)
+                # ...the real tensor is held as an element on the tensor.
+                r.elem = elem
+                return r
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                def unwrap(e):
+                    return e.elem if isinstance(e, NonWrapperSublass) else e
+
+                def wrap(e):
+                    return NonWrapperSublass(e) if isinstance(e, torch.Tensor) else e
+
+                # no_dispatch is only needed if you use enable_python_mode.
+                # It prevents infinite recursion.
+                with no_dispatch():
+                    rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
+                logging.getLogger("NonWrapperSublass").info(f"{func.__module__}.{func.__name__}", args, kwargs, rs)
+                return rs
+
+        x = NonWrapperSublass(torch.tensor([3.0, 4.0], requires_grad=True))
         y = torch.randn(2)
         z = x * y
-        self.assertIsInstance(z, LoggingTensor)
-        z.sum().backward(torch.tensor(1.))
+        self.assertIsInstance(z, NonWrapperSublass)
+        z.sum().backward(torch.tensor(1))
         self.assertEqual(x.grad, y)
+        self.assertEqual(y.grad, x)
 
 if __name__ == '__main__':
     run_tests()
