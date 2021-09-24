@@ -39,6 +39,7 @@ c10::MaybeOwned<Tensor> inline prepare_dense_matrix_for_cusparse(
 #endif
 }
 
+// This function is used for old CUDA Toolkit versions that doesn't support new cuSPARSE Generic API
 void addmm_out_legacy(
     const at::sparse_csr::SparseCsrTensor& mat1,
     const Tensor& mat2,
@@ -109,6 +110,8 @@ void spmm(
   IntArrayRef mat2_strides = mat2_->strides();
   auto ndim = result_->dim();
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim >= 2);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat1.dim() >= 2);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat2.dim() >= 2);
   bool is_result_row_major = (result_strides[ndim - 1] == 1);
   bool is_mat2_row_major = (mat2_strides[ndim - 1] == 1);
   bool transpose_B = (is_result_row_major ^ is_mat2_row_major);
