@@ -147,6 +147,7 @@ jobs:
           cd .circleci/docker && ./build_docker.sh
 
   build:
+    name: Build ${{ github.workflow }}
     runs-on: linux.2xlarge
     needs: [calculate-docker-image, ciflow_should_run]
     env:
