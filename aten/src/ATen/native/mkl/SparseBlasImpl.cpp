@@ -33,6 +33,28 @@ c10::MaybeOwned<Tensor> inline prepare_dense_matrix_for_mkl(
   }
 }
 
+/*
+  Get row-major or column-major matrix.
+
+  Args:
+  * `tensor` - 2D strided Tensor.
+  * `row_major` - coltrol the memory layout.
+*/
+c10::MaybeOwned<Tensor> inline prepare_dense_matrix_for_mkl(
+    const Tensor& tensor,
+    bool row_major) {
+  if (is_blas_compatible_row_major_order(tensor) && row_major) {
+    return c10::MaybeOwned<Tensor>::borrowed(tensor);
+  } else {
+    if (row_major) {
+      return c10::MaybeOwned<Tensor>::owned(
+          tensor.clone(at::MemoryFormat::Contiguous));
+    } else {
+      return c10::MaybeOwned<Tensor>::owned(cloneBatchedColumnMajor(tensor));
+    }
+  }
+}
+
 c10::MaybeOwned<Tensor> inline prepare_dense_vector_for_mkl(
     const Tensor& tensor) {
   if (tensor.is_non_overlapping_and_dense()) {
@@ -74,7 +96,204 @@ void inline col_indices_and_values_resize_(const Tensor& input, int64_t nnz) {
           input.sizes());
 }
 
+/*
+  Resizes `input` tensor and fills it with the data from MKL.
+*/
+template <typename scalar_t>
+void mkl_result_copy_(const Tensor& input, sparse_matrix_t mkl_desc) {
+  sparse_index_base_t indexing = SPARSE_INDEX_BASE_ZERO;
+  MKL_INT rows, cols;
+  MKL_INT *rows_start = nullptr, *rows_end = nullptr, *columns = nullptr;
+  scalar_t* values = nullptr;
+  at::mkl::sparse::export_csr(
+      mkl_desc,
+      &indexing,
+      &rows,
+      &cols,
+      &rows_start,
+      &rows_end,
+      &columns,
+      &values);
+
+  // Resize input using nnz information from MKL
+  MKL_INT nnz = rows_end[rows - 1];
+  col_indices_and_values_resize_(input, nnz);
+
+  auto crow_indices = input.crow_indices();
+  auto col_indices = input.col_indices();
+  auto input_values = input.values();
+
+  // MKL Sparse Inspector-Executor doesn't have a way to provide external
+  // buffers So we have to copy the memory allocated by MKL
+  std::memcpy(
+      input_values.data_ptr<scalar_t>(), values, nnz * sizeof(scalar_t));
+  std::memcpy(col_indices.data_ptr<MKL_INT>(), columns, nnz * sizeof(MKL_INT));
+  std::memcpy(
+      crow_indices.data_ptr<MKL_INT>(), rows_start, rows * sizeof(MKL_INT));
+  crow_indices.data_ptr<MKL_INT>()[rows] = nnz;
+}
+
+/*
+  Computes a sparse matrix-dense matrix product defined as
+  C <- alpha*(A*B) + beta*C
+
+  Args:
+  * `A` - Sparse Tensor storing m x k matrix.
+  * `B` - Dense Tensor storing k x n matrix.
+  * `C` - [in] Dense Tensor storing matrix of size m x n.
+          [out] result of the operation.
+*/
+void addmm_dense_result(
+    const Tensor& A,
+    const Tensor& B,
+    const Scalar& beta,
+    const Scalar& alpha,
+    const Tensor& C) {
+#if !AT_USE_MKL_SPARSE()
+  TORCH_CHECK(
+      false,
+      "Calling addmm on a sparse CPU tensor requires Linux platform. ",
+      "Please use PyTorch built with MKL on Linux.");
+#else
+  c10::MaybeOwned<Tensor> C_ = prepare_dense_matrix_for_mkl(C);
+  IntArrayRef C_strides = C_->strides();
+  auto ndim = C_->dim();
+  bool is_C_row_major = (C_strides[ndim - 1] == 1);
+
+  // MKL requires same storage layout of matrices
+  c10::MaybeOwned<Tensor> B_ = prepare_dense_matrix_for_mkl(B, is_C_row_major);
+  IntArrayRef B_strides = B_->strides();
+  bool is_B_row_major = (B_strides[ndim - 1] == 1);
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!(is_C_row_major ^ is_B_row_major));
+
+  auto order =
+      is_C_row_major ? SPARSE_LAYOUT_ROW_MAJOR : SPARSE_LAYOUT_COLUMN_MAJOR;
+  auto ldc = is_C_row_major ? C_strides[ndim - 2] : C_strides[ndim - 1];
+  auto ldb = is_B_row_major ? B_strides[ndim - 2] : B_strides[ndim - 1];
+  auto columns_C = mkl_int_cast(C.size(-1), "columns_C");
+
+  matrix_descr descrA;
+  descrA.type = SPARSE_MATRIX_TYPE_GENERAL;
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      C.scalar_type(), "addmm_out_sparse_csr_impl_mkl", [&] {
+        auto beta_ = beta.to<scalar_t>();
+        auto alpha_ = alpha.to<scalar_t>();
+
+        auto mkl_sparse_mat =
+            at::mkl::sparse::MklSparseCsrDescriptor<scalar_t>(A);
+        at::mkl::sparse::mm<scalar_t>(
+            SPARSE_OPERATION_NON_TRANSPOSE,
+            alpha_,
+            mkl_sparse_mat.descriptor(),
+            descrA,
+            order,
+            B_->data_ptr<scalar_t>(),
+            columns_C,
+            ldb,
+            beta_,
+            C_->data_ptr<scalar_t>(),
+            ldc);
+      });
+
+  if (!C.is_same(*C_)) {
+    C.copy_(*C_);
+  }
+#endif
+}
+
+/*
+  Computes a sparse matrix-sparse matrix product defined as
+  C <- alpha*(A*B) + beta*C
+
+  Args:
+  * `mat1` - Sparse CSR Tensor storing m x k matrix A.
+  * `mat2` - Sparse CSR Tensor storing k x n matrix B.
+  * `result` - [in] Sparse CSR Tensor storing matrix C of size m x n.
+               [out] result of the operation.
+*/
+void addmm_sparse_result(
+    const Tensor& mat1,
+    const Tensor& mat2,
+    const Scalar& beta,
+    const Scalar& alpha,
+    const Tensor& result) {
+#if !AT_USE_MKL_SPARSE()
+  TORCH_CHECK(
+      false,
+      "Calling add on a sparse CPU tensor requires Linux platform. ",
+      "Please use PyTorch built with MKL on Linux.");
+#else
+  // Compute beta*result because MKL doesn't do it
+  // If beta is zero NaN and Inf should not be propagated to the result
+  if (beta.toComplexDouble() == 0.) {
+    result.values().zero_();
+  } else {
+    result.values().mul_(beta);
+  }
+
+  // MKL doesn't work with empty matrices
+  if (mat1._nnz() == 0 || mat2._nnz() == 0) {
+    return;
+  }
+
+  // MKL doesn't have an interface to compute alpha*(A*B) + beta*C at once
+  Tensor mat1_mat2 = at::empty(result.sizes(), result.options());
+  indices_to_mkl_compatible_inplace(mat1_mat2);
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      result.scalar_type(), "addmm_out_sparse_csr_impl_mkl_sparse", [&] {
+        auto mkl_sparse_mat1 =
+            at::mkl::sparse::MklSparseCsrDescriptor<scalar_t>(mat1);
+        auto mkl_sparse_mat2 =
+            at::mkl::sparse::MklSparseCsrDescriptor<scalar_t>(mat2);
+        auto mkl_result = at::mkl::sparse::MklSparseCsrDescriptor<scalar_t>();
+        auto result_desc = mkl_result.descriptor();
+
+        TORCH_MKLSPARSE_CHECK(mkl_sparse_spmm(
+            SPARSE_OPERATION_NON_TRANSPOSE,
+            mkl_sparse_mat1.descriptor(),
+            mkl_sparse_mat2.descriptor(),
+            &result_desc));
+
+        // copy the data from MKL, otherwise computed result will be destroyed
+        // together with `mkl_result`
+        mkl_result_copy_<scalar_t>(mat1_mat2, result_desc);
+      });
+
+  result.add_(mat1_mat2, alpha);
+#endif
+}
+
 } // anonymous namespace
+
+/*
+  Computes a matrix-matrix product defined as
+  C <- alpha*(A*B) + beta*C
+
+  Args:
+  * `mat1` - Tensor storing m x k matrix A.
+  * `mat2` - Tensor storing k x n matrix B.
+  * `result` - [in] Tensor storing matrix C of size m x n.
+               [out] result of the operation.
+*/
+void addmm_out_sparse_csr(
+    const Tensor& mat1,
+    const Tensor& mat2,
+    const Scalar& beta,
+    const Scalar& alpha,
+    const Tensor& result) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat1.dim() == 2 && mat2.dim() == 2 && result.dim() == 2);
+  if (mat2.layout() == kStrided && result.layout() == kStrided) {
+    return addmm_dense_result(mat1, mat2, beta, alpha, result);
+  } else if (mat2.is_sparse_csr() && result.is_sparse_csr()) {
+    return addmm_sparse_result(mat1, mat2, beta, alpha, result);
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        false, "addmm: Received unexpected tensor layouts as input.");
+  }
+}
 
 /*
   Computes a sparse matrix-dense vector product defined as
@@ -178,44 +397,7 @@ void add_out_sparse_csr(
             &result_desc);
 
         // now copy data from `result_desc` to `result`
-        sparse_index_base_t indexing = SPARSE_INDEX_BASE_ZERO;
-        MKL_INT rows_C, cols_C;
-        MKL_INT *rows_start_C = nullptr, *rows_end_C = nullptr,
-                *columns_C = nullptr;
-        scalar_t* values_C = nullptr;
-        at::mkl::sparse::export_csr(
-            result_desc,
-            &indexing,
-            &rows_C,
-            &cols_C,
-            &rows_start_C,
-            &rows_end_C,
-            &columns_C,
-            &values_C);
-
-        // Resize result using nnz information from MKL
-        MKL_INT nnz_C = rows_end_C[rows_C - 1];
-        col_indices_and_values_resize_(result, nnz_C);
-
-        auto result_crow_indices = result.crow_indices();
-        auto result_col_indices = result.col_indices();
-        auto result_values = result.values();
-
-        // MKL Sparse Inspector-Executor doesn't have a way to provide external
-        // buffers So we have to copy the memory allocated by MKL
-        std::memcpy(
-            result_values.data_ptr<scalar_t>(),
-            values_C,
-            nnz_C * sizeof(scalar_t));
-        std::memcpy(
-            result_col_indices.data_ptr<MKL_INT>(),
-            columns_C,
-            nnz_C * sizeof(MKL_INT));
-        std::memcpy(
-            result_crow_indices.data_ptr<MKL_INT>(),
-            rows_start_C,
-            rows_C * sizeof(MKL_INT));
-        result_crow_indices.data_ptr<MKL_INT>()[rows_C] = nnz_C;
+        mkl_result_copy_<scalar_t>(result, result_desc);
       });
 #endif
 }

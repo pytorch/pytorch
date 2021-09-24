@@ -10,7 +10,7 @@
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/Resize.h>
-#include <ATen/native/mkl/SparseCsrLinearAlgebra.h>
+#include <ATen/native/mkl/SparseBlasImpl.h>
 #include <ATen/native/sparse/SparseBlasImpl.h>
 
 #include <algorithm>
@@ -86,19 +86,19 @@ bool is_square_or_vec(int64_t dim_i, int64_t dim_j, int64_t dim_k) {
 }
 
 template <typename scalar_t>
-void s_addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, int64_t dim_k, Tensor& r, Scalar beta, const Tensor& t, Scalar alpha, const Tensor& csr, const Tensor& col_indices, const Tensor& values, const Tensor& dense) {
+void addmm_out_sparse_csr_native_cpu(const Tensor& sparse, const Tensor& dense, const Tensor& r, Scalar alpha, Scalar beta) {
+
+  auto dim_i = sparse.size(0);
+  auto dim_j = sparse.size(1);
+  auto dim_k = dense.size(1);
+  auto nnz = sparse._nnz();
+
+  auto csr = sparse.crow_indices();
+  auto col_indices = sparse.col_indices();
+  auto values = sparse.values();
 
   scalar_t cast_alpha = alpha.to<scalar_t>();
   scalar_t cast_beta = beta.to<scalar_t>();
-  if (cast_beta == 0) {
-    r.zero_();
-  } else if (cast_beta == 1) {
-    if (!is_same_tensor(r, t)) {
-      r.copy_(t);
-    }
-  } else {
-    at::mul_out(r, t, scalar_to_tensor(beta));
-  }
   AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "csr_mm_crow_indices", [&]() {
     auto csr_accessor = csr.accessor<index_t, 1>();
     auto col_indices_accessor = col_indices.accessor<index_t, 1>();
@@ -134,87 +134,96 @@ void s_addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, 
 }
 
 // Functions for matrix multiplication.
-Tensor& addmm_out_sparse_csr_dense_cpu(
+Tensor& addmm_out_sparse_csr_cpu(
     const Tensor& self,
-    const SparseCsrTensor& sparse,
-    const Tensor& dense,
+    const Tensor& mat1,
+    const Tensor& mat2,
     const Scalar& beta,
     const Scalar& alpha,
-    Tensor& r) {
-  TORCH_INTERNAL_ASSERT(sparse.is_sparse_csr());
-  Tensor t = *expand_size(self, {sparse.size(0), dense.size(1)}, "addmm_out_sparse_csr");
+    Tensor& result) {
+  TORCH_INTERNAL_ASSERT(mat1.is_sparse_csr());
 
-  TORCH_CHECK(!t.is_cuda(),  "Expected all tensors to be on the same device. addmm expected 't' to be CPU tensor, but got CUDA tensor");
+  // TODO: remove this, there are no codegenerated checks for devices yet
   TORCH_CHECK(
-      !r.is_cuda(),
+    !self.is_cuda(),
+    "Expected all tensors to be on the same device. addmm expected 't' to be CPU tensor, but got CUDA tensor");
+  TORCH_CHECK(
+      !result.is_cuda(),
       "Expected all tensors to be on the same device. addmm: expected 'out' to be CPU tensor, but got CUDA tensor");
   TORCH_CHECK(
-      !sparse.is_cuda(),
+      !mat1.is_cuda(),
       "Expected all tensors to be on the same device. addmm: expected 'mat1' to be a CPU tensor, but got a CUDA tensor");
   TORCH_CHECK(
-      !dense.is_cuda(),
+      !mat2.is_cuda(),
       "Expected all tensors to be on the same device. addmm: expected 'mat2' to be a CPU tensor, but got a CUDA tensor");
 
+  // All the checks are from addmm_out_cuda_impl (ATen/native/cuda/Blas.cpp) and TORCH_META_FUNC(addmm) (ATen/native/LinearAlgebra.cpp)
+  // TODO: remove code duplication and unify code
+  TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor");
+  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor");
   TORCH_CHECK(
-      sparse.dim() == 2,
-      "addmm: 2-D matrices expected, got ",
-      sparse.dim(),
-      "D tensor");
-  TORCH_CHECK(
-      dense.dim() == 2,
-      "addmm: 2-D matrices expected, got ",
-      dense.dim(),
-      "D tensor");
+      mat1.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (",
+      mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
 
-  TORCH_CHECK(
-      r.is_contiguous(),
-      "out argument must be contiguous, but got: ",
-      r.suggest_memory_format());
-
-  // ixj * jxk = ixk
-  int64_t dim_i = sparse.size(0);
-  int64_t dim_j = sparse.size(1);
-  int64_t dim_k = dense.size(1);
-
-  TORCH_CHECK(
-      dense.size(0) == dim_j,
-      "addmm: Expected dense matrix (op2) size(0)=",
-      dim_j,
-      ", got ",
-      dense.size(0));
-
-  resize_output(r, {dim_i, dim_k});
-  auto col_indices = sparse.col_indices();
-  auto crow_indices = sparse.crow_indices();
-  auto values = sparse.values();
-  int64_t nnz        = sparse._nnz();
-  if (nnz == 0) {
-    at::mul_out(r, t, at::scalar_tensor(beta, r.options()));
-    return r;
-  }
-  // Do not use MKL for Windows due to linking issues with sparse MKL routines.
-  if (at::hasMKL() && is_mkl_supported() && is_square_or_vec(dim_i, dim_j, dim_k)) {
-    AT_DISPATCH_FLOATING_TYPES(values.scalar_type(), "addmm_sparse_dense", [&] {
-        scalar_t cast_beta = beta.to<scalar_t>();
-        if (cast_beta == 0) {
-          r.zero_();
-        } else if (cast_beta == 1) {
-          if (!is_same_tensor(r, t)) {
-            r.copy_(t);
-          }
-        } else {
-          at::mul_out(r, t, scalar_to_tensor(beta));
-        }
-        // r = r + alpha * sparse * dense
-        _sparse_mm_mkl_(r, sparse, dense, t, alpha, Scalar(static_cast<scalar_t>(1.0)));
-    });
+  IntArrayRef mat1_sizes = mat1.sizes();
+  IntArrayRef mat2_sizes = mat2.sizes();
+  IntArrayRef self__sizes;
+  c10::MaybeOwned<Tensor> self_;
+  if (&result != &self && self.layout() == kStrided) {
+    self_ = expand_size(self, {mat1_sizes[0], mat2_sizes[1]}, "addmm");
+    self__sizes = self_->sizes();
   } else {
-    // r = beta * t + alpha * sparse * dense
-    AT_DISPATCH_FLOATING_TYPES(values.scalar_type(), "addmm_sparse_dense", [&] {
-        s_addmm_out_sparse_dense_worker<scalar_t>(nnz, dim_i, dim_j, dim_k, r, beta, t, alpha, crow_indices, col_indices, values, dense);
-    });
+    self_ = c10::MaybeOwned<Tensor>::borrowed(self);
+    self__sizes = self_->sizes();
   }
-  return r;
+
+  TORCH_CHECK(((self_->dim() == 2) && (self_->sizes()[0] == mat1.sizes()[0]) && (self_->sizes()[1] == mat2.sizes()[1])),
+  "The input tensor must be a matrix with size ", mat1.sizes()[0], "x", mat2.sizes()[1], ", but got a ", self_->dim(),
+  "-D tensor with size ", self__sizes[0], "x", self__sizes[1]);
+
+  if (&result != &self) {
+    if (result.layout() == kStrided) {
+      at::native::resize_output(result, self__sizes);
+    } else {
+      at::native::resize_as_sparse_csr_(result, *self_);
+    }
+    result.copy_(*self_);
+  }
+
+  IntArrayRef result_sizes = result.sizes();
+  if ((result_sizes[0] == 0) || (result_sizes[1] == 0)) {
+    return result;
+  }
+
+  if (mat1._nnz() == 0) {
+    // By definition, when beta==0, values in self should be ignored. nans and infs
+    // should not propagate
+    if (beta.toComplexDouble() == 0.) {
+      return result.zero_();
+    }
+    return at::mul_out(
+        result,
+        self,
+        at::native::scalar_tensor(
+            beta,
+            self.scalar_type(),
+            c10::nullopt /* layout */,
+            at::kCPU,
+            c10::nullopt /* pin_memory */));
+  }
+
+#if !AT_MKL_ENABLED()
+    if (mat2.is_sparse_csr() && result.is_sparse_csr()) {
+      TORCH_CHECK(false, "Calling addmm on sparse CPU tensors requires compiling PyTorch with MKL. Please use PyTorch built with MKL.");
+    }
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.layout() == kStrided);
+    AT_DISPATCH_FLOATING_TYPES(values.scalar_type(), "addmm_sparse_dense", [&] {
+        addmm_out_sparse_csr_native_cpu<scalar_t>(mat1, mat2, result, self_, alpha, beta);
+    });
+#else
+  sparse::impl::mkl::addmm_out_sparse_csr(mat1, mat2, beta, alpha, result);
+#endif
+  return result;
 }
 
 Tensor addmm_sparse_csr_dense(
@@ -228,12 +237,17 @@ Tensor addmm_sparse_csr_dense(
   return r;
 }
 
-SparseCsrTensor& _sparse_csr_mm_out(
-    const SparseCsrTensor& sparse,
-    const Tensor& dense,
-    SparseCsrTensor& result) {
-  Tensor t = at::zeros({}, dense.options());
-  return at::addmm_out(result, t, sparse, dense, 0.0, 1.0); // redispatch!
+Tensor& _sparse_csr_mm_out(
+    const Tensor& mat1,
+    const Tensor& mat2,
+    Tensor& result) {
+  Tensor zero;
+  if (result.is_sparse_csr()) {
+    zero = at::empty({mat1.size(0), mat2.size(1)}, mat2.options());
+  } else {
+    zero = at::zeros({mat1.size(0), mat2.size(1)}, mat2.options());
+  }
+  return at::addmm_out(result, zero, mat1, mat2, 0.0, 1.0);
 }
 
 Tensor _sparse_csr_addmm(
@@ -361,8 +375,14 @@ Tensor& add_out_sparse_csr_cpu(
   if (self.layout() == kStrided) {
     add_out_dense_sparse_csr_cpu(out, self, other, alpha);
   } else {
-      at::native::resize_as_sparse_csr_(out, self);
-      sparse::impl::cpu::add_out_sparse_csr(self, other, alpha, out);
+    TORCH_CHECK(
+        self.sizes().equals(other.sizes()),
+        "torch.add: Expected input tensors to have the same shape, but got tensor `self` with shape ",
+        self.sizes(),
+        " and tensor `other` with shape ",
+        other.sizes());
+    at::native::resize_as_sparse_csr_(out, self);
+    sparse::impl::cpu::add_out_sparse_csr(self, other, alpha, out);
   }
   return out;
 }
