@@ -37,6 +37,7 @@ from torch.testing._internal.common_utils import (
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
+    expectedFailureMeta,
     instantiate_device_type_tests,
     skipCUDAVersionIn,
     onlyCUDA, onlyCPU,
@@ -4026,6 +4027,7 @@ else:
         test_func(torch.Tensor.scatter_add)
         test_func(torch.scatter_add)
 
+    @expectedFailureMeta  # expected a non-determinitic error, but it was not raised
     @onlyNativeDeviceTypes
     def test_nondeterministic_alert_put(self, device):
         def test_func(op_call):
@@ -6451,6 +6453,7 @@ else:
             self.ternary_check_input_output_mem_overlap(out_op, dev,
                                                         expected_failure=not has_input_output_mem_overlap_check)
 
+    @expectedFailureMeta  # RuntimeError not raised
     @dtypes(torch.double)
     @onlyNativeDeviceTypes
     def test_copy_mem_overlap(self, device, dtype):
@@ -6461,6 +6464,7 @@ else:
         self.unary_check_input_output_mem_overlap(
             doubles, sz, lambda input, out: out.copy_(input))
 
+    @expectedFailureMeta  # RuntimeError not raised
     @onlyNativeDeviceTypes
     def test_index_add_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
@@ -6491,6 +6495,7 @@ else:
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             ind.index_copy_(0, ind.clone(), ind)
 
+    @expectedFailureMeta  # Warning not triggered
     @onlyNativeDeviceTypes
     def test_index_fill_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
@@ -6503,6 +6508,7 @@ else:
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             ind.index_fill_(0, ind, 0)
 
+    @expectedFailureMeta  # RuntimeError not raised
     @onlyNativeDeviceTypes
     def test_shift_mem_overlap(self, device):
         x = torch.rand(3, device=device)
@@ -6511,6 +6517,7 @@ else:
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             x[:-1] >>= x[1:]
 
+    @expectedFailureMeta  # RuntimeError not raised
     @onlyNativeDeviceTypes
     def test_bernoulli_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
@@ -6525,6 +6532,7 @@ else:
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             torch.bernoulli(torch.rand_like(x), out=x)
 
+    @expectedFailureMeta  # RuntimeError not raised
     @onlyNativeDeviceTypes
     def test_put_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
@@ -6544,6 +6552,7 @@ else:
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             ind.put_(ind.clone(), ind)
 
+    @expectedFailureMeta  # UserWarning not triggered
     @onlyNativeDeviceTypes
     def test_index_put_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
@@ -6563,6 +6572,7 @@ else:
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             ind.index_put_((ind.clone(),), ind)
 
+    @expectedFailureMeta  # UserWarning not triggered
     @onlyNativeDeviceTypes
     def test_masked_fill_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
@@ -6589,6 +6599,7 @@ else:
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             torch.masked_select(mask.clone(), mask, out=mask)
 
+    @expectedFailureMeta  # RuntimeError not raised
     @onlyNativeDeviceTypes
     def test_masked_scatter_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
