@@ -467,6 +467,15 @@ class AttributePropagator {
             } else {
               attr = overrideGradient(attr);
             }
+            if (attr.isObject()) {
+              if (object_memo_.count(attr.toObject())) {
+                attr = object_memo_[attr.toObject()];
+              } else {
+                auto weak_class_obj = attr.toObject()->copy_to_weak_compilation_ref();
+                object_memo_[attr.toObject()] = weak_class_obj;
+                attr = weak_class_obj;
+              }
+            }
             if (auto attrVal = tryInsertConstant(*graph, attr)) {
               paramConst = *attrVal;
             } else {
@@ -758,14 +767,13 @@ class AttributePropagator {
 
   // Contains the attributes names (e.g. {"self", "subModule", "a"}
   std::deque<std::string> names_;
-}; // class AttributePropagator
-} // namespace
 
-Module freeze_module(
-    const Module& module,
-    std::vector<std::string> preservedAttrs,
-    bool freezeInterfaces,
-    bool preserveParameters) {
+  // see [Constant Object Weak CompilationUnit Reference]
+  std::unordered_map<c10::intrusive_ptr<at::ivalue::Object>, c10::intrusive_ptr<at::ivalue::Object>> object_memo_;
+
+}; // class AttributePropagator
+
+void checkModuleDoesNotReturnSelf(const Module& module) {
   if (module.find_method("forward")) {
     Method method = module.get_method("forward");
     // Check that module does not return itself.
@@ -775,12 +783,33 @@ Module freeze_module(
           "attempted to freeze a module that return itself");
     }
   }
+}
+} // namespace
+
+Module freeze_module(
+    const Module& module,
+    std::vector<std::string> preservedAttrs,
+    bool freezeInterfaces,
+    bool preserveParameters) {
+  checkModuleDoesNotReturnSelf(module);
 
   auto moduleClone = module.clone(true);
   AttributePropagator attrPropagator(
       moduleClone, preservedAttrs, freezeInterfaces, preserveParameters);
   attrPropagator.run();
   return moduleClone;
+}
+
+void freeze_module(
+    Module* module,
+    std::vector<std::string> preservedAttrs,
+    bool freezeInterfaces,
+    bool preserveParameters) {
+  TORCH_CHECK(module != nullptr, "module cannot be nullptr");
+  checkModuleDoesNotReturnSelf(*module);
+  AttributePropagator attrPropagator(
+      *module, preservedAttrs, freezeInterfaces, preserveParameters);
+  attrPropagator.run();
 }
 
 } // namespace jit
