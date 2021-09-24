@@ -730,20 +730,13 @@ Create a view of an existing `torch.Tensor` :attr:`input` with specified
 :attr:`size`, :attr:`stride` and :attr:`storage_offset`.
 
 .. warning::
-    More than one element of a created tensor may refer to a single memory
-    location. As a result, in-place operations (especially ones that are
-    vectorized) may result in incorrect behavior. If you need to write to
-    the tensors, please clone them first.
-
-    Many PyTorch functions, which return a view of a tensor, are internally
-    implemented with this function. Those functions, like
-    :meth:`torch.Tensor.expand`, are easier to read and are therefore more
-    advisable to use.
-
-.. warning::
-    This function will raise a ``RuntimeError`` if the :attr:`input` storage
-    does not have enough allocated memory for the given combination of
-    parameters.
+    Prefer using other view functions, like :meth:`torch.Tensor.expand`,
+    to setting a view's strides manually with `as_strided`, as this
+    function's behavior depends on the implementation of a tensor's storage.
+    The constructed view of the storage must only refer to elements within
+    the storage or a runtime error will be thrown, and if the view is
+    "overlapped" (with multiple indices referring to the same element in
+    memory) its behavior is undefined.
 
 Args:
     {input}
@@ -10319,22 +10312,11 @@ add_docstr(torch.empty_strided,
            r"""
 empty_strided(size, stride, *, dtype=None, layout=None, device=None, requires_grad=False, pin_memory=False) -> Tensor
 
-Returns a tensor filled with uninitialized data. The shape and strides of the tensor is
-defined by the variable argument :attr:`size` and :attr:`stride` respectively.
-``torch.empty_strided(size, stride)`` will allocate as much memory as necessary in order
-to accomodate the given parameters.
-
-.. note::
-    This function is slightly different from ``torch.empty(size).as_strided(size, stride)``.
-    :func:`torch.as_strided` will raise a ``RuntimeError`` if the given combination of
-    :attr:`size` and :attr:`stride` requires more space than previously allocated
-    (by :func:`torch.empty`).
+Creates a tensor with the specified :attr:`size` and :attr:`stride` and filled with undefined data.
 
 .. warning::
-    More than one element of the created tensor may refer to a single memory
-    location. As a result, in-place operations (especially ones that are
-    vectorized) may result in incorrect behavior. If you need to write to
-    the tensors, please clone them first.
+    If the constructed tensor is "overlapped" (with multiple indices referring to the same element
+    in memory) its behavior is undefined.
 
 Args:
     size (tuple of ints): the shape of the output tensor
