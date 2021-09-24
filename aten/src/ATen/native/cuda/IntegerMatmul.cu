@@ -10,8 +10,9 @@ namespace blas {
 
   template <typename scalar_t, bool transA=false, bool transB=false>
   __global__ void gemm_kernel(int64_t M, int64_t N, int64_t K, scalar_t alpha,
-                                                  const scalar_t* a, int64_t lda, const scalar_t * b, int64_t ldb,
-                                                  scalar_t beta, scalar_t *c, int64_t ldc) {
+                              const scalar_t* __restrict__ a, int64_t lda,
+                              const scalar_t* __restrict__  b, int64_t ldb,
+                              scalar_t beta, scalar_t *c, int64_t ldc) {
     int64_t row = blockIdx.y * blockDim.y + threadIdx.y;
     int64_t col = blockIdx.x * blockDim.x + threadIdx.x;
     scalar_t product = 0;

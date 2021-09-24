@@ -169,6 +169,8 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
             c10::nullopt /* pin_memory */));
   }
 
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!result_->is_conj());
+
   // TODO: is it possible to combine the dispatch code?
   if (scalar_type == ScalarType::Long || scalar_type == ScalarType::Int) {
     AT_DISPATCH_INDEX_TYPES(scalar_type, "addmm_cuda_int", [&] {
@@ -191,8 +193,6 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     });
   }
   else {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!result_->is_conj());
-
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, scalar_type, "addmm_cuda", [&] {
       scalar_t alpha_val = alpha.to<scalar_t>();
       scalar_t beta_val = beta.to<scalar_t>();
@@ -288,6 +288,8 @@ Tensor& baddbmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!result_->is_conj());
 
   if (self.scalar_type() == ScalarType::Long || self.scalar_type() == ScalarType::Int) {
+    TORCH_CHECK(batch1_->is_contiguous(), "Tensor batch1 must be contiguous for integer matmul.");
+    TORCH_CHECK(batch2_->is_contiguous(), "Tensor batch2 must be contiguous for integer matmul.");
     AT_DISPATCH_INDEX_TYPES(self.scalar_type(), "baddmm_cuda_int", [&] {
       using scalar_t = index_t;
 
