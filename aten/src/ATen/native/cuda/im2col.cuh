@@ -2,6 +2,7 @@
 
 #include <THC/THCGeneral.h>
 #include <THC/THCDeviceUtils.cuh>
+#include <THC/THCNumerics.cuh>
 
 #include <ATen/ATen.h>
 #include <ATen/TensorUtils.h>

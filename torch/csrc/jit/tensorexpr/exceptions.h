@@ -84,6 +84,8 @@ class malformed_ir : public std::runtime_error {
             "MALFORMED IR: " + err + " - " + std::to_string(stmt)) {}
 };
 
+TORCH_API std::string buildErrorMessage(const std::string& s = "");
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
