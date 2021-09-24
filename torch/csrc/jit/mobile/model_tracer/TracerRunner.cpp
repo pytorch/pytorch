@@ -202,7 +202,6 @@ TracerResult trace_run(const std::string& input_module_path) {
   std::set<std::string> root_ops, traced_operators, enabled_backends;
   torch::jit::mobile::KernelDTypeTracer::kernel_tags_type called_kernel_tags;
 
-
   using torch::jit::MobileModuleLoadOptions;
 
   // run with QNNPACK
