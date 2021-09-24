@@ -7740,54 +7740,6 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
-          name: smoke_linux_manywheel_3_6m_rocm4_0_1_devtoolset7_nightly
-          build_environment: "manywheel 3.6m rocm4.0.1 devtoolset7"
-          requires:
-            - update_s3_htmls
-          filters:
-            branches:
-              only:
-                - postnightly
-          docker_image: "pytorch/manylinux-rocm:4.0.1"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_manywheel_3_7m_rocm4_0_1_devtoolset7_nightly
-          build_environment: "manywheel 3.7m rocm4.0.1 devtoolset7"
-          requires:
-            - update_s3_htmls
-          filters:
-            branches:
-              only:
-                - postnightly
-          docker_image: "pytorch/manylinux-rocm:4.0.1"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_manywheel_3_8m_rocm4_0_1_devtoolset7_nightly
-          build_environment: "manywheel 3.8m rocm4.0.1 devtoolset7"
-          requires:
-            - update_s3_htmls
-          filters:
-            branches:
-              only:
-                - postnightly
-          docker_image: "pytorch/manylinux-rocm:4.0.1"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_manywheel_3_9m_rocm4_0_1_devtoolset7_nightly
-          build_environment: "manywheel 3.9m rocm4.0.1 devtoolset7"
-          requires:
-            - update_s3_htmls
-          filters:
-            branches:
-              only:
-                - postnightly
-          docker_image: "pytorch/manylinux-rocm:4.0.1"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
           name: smoke_linux_manywheel_3_6m_rocm4_1_devtoolset7_nightly
           build_environment: "manywheel 3.6m rocm4.1 devtoolset7"
           requires:
@@ -7881,6 +7833,54 @@ workflows:
               only:
                 - postnightly
           docker_image: "pytorch/manylinux-rocm:4.2"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_manywheel_3_6m_rocm4_3_1_devtoolset7_nightly
+          build_environment: "manywheel 3.6m rocm4.3.1 devtoolset7"
+          requires:
+            - update_s3_htmls
+          filters:
+            branches:
+              only:
+                - postnightly
+          docker_image: "pytorch/manylinux-rocm:4.3.1"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_manywheel_3_7m_rocm4_3_1_devtoolset7_nightly
+          build_environment: "manywheel 3.7m rocm4.3.1 devtoolset7"
+          requires:
+            - update_s3_htmls
+          filters:
+            branches:
+              only:
+                - postnightly
+          docker_image: "pytorch/manylinux-rocm:4.3.1"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_manywheel_3_8m_rocm4_3_1_devtoolset7_nightly
+          build_environment: "manywheel 3.8m rocm4.3.1 devtoolset7"
+          requires:
+            - update_s3_htmls
+          filters:
+            branches:
+              only:
+                - postnightly
+          docker_image: "pytorch/manylinux-rocm:4.3.1"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_manywheel_3_9m_rocm4_3_1_devtoolset7_nightly
+          build_environment: "manywheel 3.9m rocm4.3.1 devtoolset7"
+          requires:
+            - update_s3_htmls
+          filters:
+            branches:
+              only:
+                - postnightly
+          docker_image: "pytorch/manylinux-rocm:4.3.1"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
