@@ -719,6 +719,30 @@ class TestAutograd(TestCase):
         torch.autograd.backward(x, inputs=(y, ))  # allow_unused is implicitly True!
         self.assertIsNone(y.grad)
 
+    def test_grad_batched_grad(self):
+        x = torch.randn(2, 2, requires_grad=True)
+
+        out = x.clone()  # Size([2, 2])
+        batched_grad = torch.arange(3).expand(2, 2, 3).transpose(0, 2)  # Size([3, 2, 2])
+        grad, = torch.autograd.grad(out, (x,), (batched_grad,), is_grads_batched=True)
+        self.assertEqual(grad, torch.arange(3).expand(2, 2, 3).transpose(0, 2).to(dtype=grad.dtype))
+
+        # Detect shape mismatch and
+        grad_out = torch.ones(2, 2)
+        with self.assertRaisesRegex(RuntimeError, "If `is_grads_batched=True`, we interpret the first"):
+            torch.autograd.grad(outputs=out, grad_outputs=(grad_out,), inputs=(x,), is_grads_batched=True)
+
+        # Scalar outputs
+        out = x.sum()  # Size([])
+        batched_grad = torch.arange(3)  # Size([3])
+        grad, = torch.autograd.grad(out, (x,), (batched_grad,), is_grads_batched=True)
+        self.assertEqual(grad, torch.arange(3).expand(2, 2, 3).transpose(0, 2).to(dtype=grad.dtype))
+
+        # We consider scalar and size-1 tensors to be a mismatch (consistent with current behavior)
+        grad_out = torch.ones(2).unsqueeze(1)
+        with self.assertRaisesRegex(RuntimeError, "If `is_grads_batched=True`, we interpret the first"):
+            torch.autograd.grad(outputs=out, grad_outputs=(grad_out,), inputs=(x,), is_grads_batched=True)
+
     def test_hooks(self):
         x = torch.ones(5, 5, requires_grad=True)
         y = torch.ones(5, 5) * 4
