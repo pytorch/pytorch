@@ -105,7 +105,9 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             In this case, the exported model will first take all of its parameters
             as arguments, with the ordering as specified by ``model.state_dict().values()``
         verbose (bool, default False): if True, prints a description of the
-            model being exported to stdout.
+            model being exported to stdout. In addition, the final ONNX graph will include the
+            field ``doc_string``` from the exported model which mentions the source code locations
+            for ``model``.
         training (enum, default TrainingMode.EVAL):
             * ``TrainingMode.EVAL``: export the model in inference mode.
             * ``TrainingMode.PRESERVE``: export the model in inference mode if model.training is
@@ -190,9 +192,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             Must be provided when exporting a ScriptModule or ScriptFunction, ignored otherwise.
             Used to determine the type and shape of the outputs without tracing the execution of
             the model. A single object is treated as equivalent to a tuple of one element.
-        strip_doc_string (bool, default True): do not include the field
-            ``doc_string``` from the exported model. Otherwise the field will mention the source
-            code locations for ``model``.
+        strip_doc_string (bool, default True): [Deprecated and ignored. Will be removed in next PyTorch release]
         dynamic_axes (dict<string, dict<int, string>> or dict<string, list(int)>, default empty dict):
 
             By default the exported model will have the shapes of all input and output tensors
