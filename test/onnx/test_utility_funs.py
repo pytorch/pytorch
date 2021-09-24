@@ -32,7 +32,6 @@ class TestUtilityFuns(TestCase):
 
     def _model_to_graph(self, model, input,
                         do_constant_folding=True,
-                        example_outputs=None,
                         training=TrainingMode.EVAL,
                         operator_export_type=OperatorExportTypes.ONNX,
                         input_names=None,
@@ -49,7 +48,6 @@ class TestUtilityFuns(TestCase):
                                                               _disable_torch_constant_prop=True,
                                                               operator_export_type=operator_export_type,
                                                               training=training,
-                                                              example_outputs=example_outputs,
                                                               input_names=input_names,
                                                               dynamic_axes=dynamic_axes)
         _set_onnx_shape_inference(True)
@@ -116,11 +114,11 @@ class TestUtilityFuns(TestCase):
         example_output = model(input_t, n)
 
         with self.assertRaises(RuntimeError):
-            torch.onnx.export(model,
-                              (input_t, n),
-                              "test.onnx",
-                              opset_version=self.opset_version,
-                              example_outputs=[example_output])
+            torch.onnx._export(model,
+                               (input_t, n),
+                               "test.onnx",
+                               opset_version=self.opset_version,
+                               example_outputs=[example_output])
 
     def test_constant_fold_transpose(self):
         class TransposeModule(torch.nn.Module):
@@ -758,9 +756,8 @@ class TestUtilityFuns(TestCase):
         q_model = torch.quantization.convert(q_model, inplace=False)
 
         q_model.eval()
-        output = q_model(*pt_inputs)
 
-        graph, _, __ = self._model_to_graph(q_model, pt_inputs, example_outputs=output,
+        graph, _, __ = self._model_to_graph(q_model, pt_inputs,
                                             operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,
                                             input_names=['pt_inputs'],
                                             dynamic_axes={'pt_inputs': [0, 1, 2, 3]})
@@ -787,9 +784,8 @@ class TestUtilityFuns(TestCase):
 
         x = torch.tensor([2])
         model = PrimModule()
-        output = model(x)
         model.eval()
-        graph, _, __ = self._model_to_graph(model, (x,), example_outputs=output,
+        graph, _, __ = self._model_to_graph(model, (x,),
                                             operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,
                                             input_names=['x'], dynamic_axes={'x': [0]})
         iter = graph.nodes()
@@ -852,10 +848,9 @@ class TestUtilityFuns(TestCase):
 
         model = torch.jit.script(MyModule())
         x = torch.randn(10, 3, 128, 128)
-        example_outputs = model(x)
         _set_opset_version(self.opset_version)
         _set_operator_export_type(OperatorExportTypes.ONNX)
-        graph, _, __ = self._model_to_graph(model, (x,), do_constant_folding=True, example_outputs=example_outputs,
+        graph, _, __ = self._model_to_graph(model, (x,), do_constant_folding=True,
                                             operator_export_type=OperatorExportTypes.ONNX,
                                             training=torch.onnx.TrainingMode.TRAINING,
                                             input_names=['x'], dynamic_axes={'x': [0, 1, 2, 3]})
