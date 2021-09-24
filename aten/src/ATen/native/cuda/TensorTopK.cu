@@ -53,7 +53,7 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
   int64_t* indicesSliceStart = &indices.data[indicesSliceStartIndex];
 
   // Find the k-th highest element in our input
-  T topKValue = ScalarConvert<int, T>::to(0);
+  T topKValue = static_cast<T>(0);
   radixSelect<T, typename TopKTypeConfig<T>::RadixType, IndexType, Order>(
     inputSliceStart, outputSliceSize,
     inputSliceSize, inputWithinSliceStride,
@@ -80,7 +80,7 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
   for (IndexType i = threadIdx.x; i < numIterations; i += blockDim.x) {
     bool inRange = (i < inputSliceSize);
     T v =
-      inRange ? doLdg(&inputSliceStart[i * inputWithinSliceStride]) : ScalarConvert<int, T>::to(0);
+      inRange ? doLdg(&inputSliceStart[i * inputWithinSliceStride]) : static_cast<T>(0);
     const auto convertedV = at::native::TopKTypeConfig<T>::convert(v);
     bool hasTopK;
     if (Order) {
@@ -118,7 +118,7 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
   for (IndexType i = threadIdx.x; i < numIterations; i += blockDim.x) {
     bool inRange = (i < inputSliceSize);
     T v =
-      inRange ? doLdg(&inputSliceStart[i * inputWithinSliceStride]) : ScalarConvert<int, T>::to(0);
+      inRange ? doLdg(&inputSliceStart[i * inputWithinSliceStride]) : static_cast<T>(0);
     const auto convertedV = at::native::TopKTypeConfig<T>::convert(v);
     bool hasTopK = inRange && (convertedV == topKConverted);
 
