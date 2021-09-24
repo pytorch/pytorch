@@ -5,6 +5,7 @@
 #include <c10/util/ExclusivelyOwned.h>
 #include <c10/util/MaybeOwned.h>
 #include <atomic>
+#include <memory>
 #include <stdexcept>
 
 namespace pybind11 {
@@ -316,6 +317,9 @@ class intrusive_ptr final {
   // to not increase the refcount
   explicit intrusive_ptr(TTarget* target, raw::DontIncreaseRefcount) noexcept
       : target_(target) {}
+
+  explicit intrusive_ptr(std::unique_ptr<TTarget> rhs) noexcept
+      : intrusive_ptr(rhs.release()) {}
 
   intrusive_ptr(intrusive_ptr&& rhs) noexcept : target_(rhs.target_) {
     rhs.target_ = NullType::singleton();
