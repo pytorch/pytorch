@@ -30,10 +30,10 @@ class GradBucket:
 class Reducer:
     def __init__(
         self,
-        replicas: List[List[Tensor]],
+        params: List[Tensor],
         bucket_indices: List[List[int]],
         process_group: ProcessGroup,
-        expect_sparse_gradients: List[List[bool]],
+        expect_sparse_gradients: List[bool],
         bucket_bytes_cap: int,
         find_unused_parameters: bool,
         gradient_as_bucket_view: bool,
@@ -134,7 +134,8 @@ class TCPStore(Store):
         world_size: int = ...,
         is_master: bool = ...,
         timeout: timedelta = ...,
-        wait_for_workers: bool = ...
+        wait_for_workers: bool = ...,
+        multi_tenant: bool = ...
     ): ...
 
 class PrefixStore(Store):
@@ -388,6 +389,6 @@ def _broadcast_coalesced(
     src: int,
 ): ...
 def _test_python_store(store: Store): ...
-def _verify_model_across_ranks(
-    process_group: ProcessGroup, replicas: List[List[Tensor]]
+def _verify_params_across_processes(
+    process_group: ProcessGroup, params: List[Tensor]
 ): ...

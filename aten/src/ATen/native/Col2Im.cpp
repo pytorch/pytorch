@@ -126,7 +126,7 @@ static void col2im_out_cpu_template(
   if (input.dim() == 2) {
     // Force batch
     batched_input = false;
-    input.resize_({1, input.size(0), input.size(1)});
+    input = input.view({1, input.size(0), input.size(1)});
   }
 
   int64_t batch_size = input.size(0);
@@ -136,7 +136,7 @@ static void col2im_out_cpu_template(
   output.resize_({batch_size, n_output_plane, output_height, output_width});
   output.zero_();
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf,
       input.scalar_type(), "col2im_out_cpu", [&] {
         Tensor input_n = Tensor();
         Tensor output_n = Tensor();

@@ -32,7 +32,9 @@ void listConstruct(
 
 void dictConstruct(Stack& stack, const at::DictType& type, size_t num_inputs);
 
-void createObject(Stack& stack, const at::ClassTypePtr& type);
+// as weak_ref will create a Object with a non-owning CompilationUnit reference,
+// for use as a constant in the Graph to avoid a reference cycle
+void createObject(Stack& stack, const at::ClassTypePtr& type, bool as_weak_ref=false);
 
 void isinstance(Stack& stack, at::ArrayRef<at::TypePtr> types);
 

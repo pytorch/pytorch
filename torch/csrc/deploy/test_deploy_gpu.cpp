@@ -53,3 +53,34 @@ TEST(TorchDeployGPUTest, SimpleModel) {
 
   ASSERT_TRUE(ref_output.allclose(output, 1e-03, 1e-05));
 }
+
+TEST(TorchDeployGPUTest, UsesDistributed) {
+  const auto model_filename = path(
+      "USES_DISTRIBUTED",
+      "torch/csrc/deploy/example/generated/uses_distributed");
+  torch::deploy::InterpreterManager m(1);
+  torch::deploy::Package p = m.load_package(model_filename);
+  {
+    auto I = p.acquire_session();
+    I.self.attr("import_module")({"uses_distributed"});
+  }
+}
+
+TEST(TorchDeployGPUTest, TensorRT) {
+  if (!torch::cuda::is_available()) {
+    GTEST_SKIP();
+  }
+  auto packagePath = path(
+      "MAKE_TRT_MODULE", "torch/csrc/deploy/example/generated/make_trt_module");
+  torch::deploy::InterpreterManager m(1);
+  torch::deploy::Package p = m.load_package(packagePath);
+  auto makeModel = p.load_pickle("make_trt_module", "model.pkl");
+  {
+    auto I = makeModel.acquire_session();
+    auto model = I.self(at::ArrayRef<at::IValue>{});
+    auto input = at::ones({1, 2, 3}).cuda();
+    auto output = input * 2;
+    ASSERT_TRUE(
+        output.allclose(model(at::IValue{input}).toIValue().toTensor()));
+  }
+}

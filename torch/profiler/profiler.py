@@ -114,8 +114,14 @@ class profile(object):
         record_shapes (bool): save information about operator's input shapes.
         profile_memory (bool): track tensor memory allocation/deallocation.
         with_stack (bool): record source information (file and line number) for the ops.
-        with_flops (bool): use formula to estimate the FLOPS of specific operators
+        with_flops (bool): use formula to estimate the FLOPs (floating point operations) of specific operators
             (matrix multiplication and 2D convolution).
+        with_modules (bool): record module hierarchy (including function names)
+            corresponding to the callstack of the op. e.g. If module A's forward call's
+            module B's forward which contains an aten::add op,
+            then aten::add's module hierarchy is A.B
+            Note that this support exist, at the moment, only for TorchScript models
+            and not eager mode models.
         use_cuda (bool):
             .. deprecated:: 1.8.1
                 use ``activities`` instead.
@@ -210,6 +216,7 @@ class profile(object):
             profile_memory: bool = False,
             with_stack: bool = False,
             with_flops: bool = False,
+            with_modules: bool = False,
             # deprecated:
             use_cuda: Optional[bool] = None):
         if activities:
@@ -238,6 +245,7 @@ class profile(object):
         self.with_flops = with_flops
         self.profile_memory = profile_memory
         self.with_stack = with_stack
+        self.with_modules = with_modules
         self.step_num = 0
         self.current_action = self.schedule(self.step_num)
         self.profiler: Optional[prof.profile] = None
@@ -426,6 +434,7 @@ class profile(object):
             with_flops=self.with_flops,
             profile_memory=self.profile_memory,
             with_stack=self.with_stack,
+            with_modules=self.with_modules,
             use_kineto=True,
         )
         self.profiler._prepare_trace()

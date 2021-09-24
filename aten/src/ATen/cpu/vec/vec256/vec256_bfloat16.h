@@ -767,7 +767,7 @@ void load_fp32_from_bf16(const c10::BFloat16 *data, Vectorized<float>& out) {
   out = Vectorized<float>::loadu(values);
 }
 
-void load_fp32_from_bf16(const c10::BFloat16 *data, Vectorized<float>& out1, Vectorized<float>& out2) {
+C10_UNUSED void load_fp32_from_bf16(const c10::BFloat16 *data, Vectorized<float>& out1, Vectorized<float>& out2) {
   load_fp32_from_bf16(data, out1);
   data += Vectorized<float>::size();
   load_fp32_from_bf16(data, out2);

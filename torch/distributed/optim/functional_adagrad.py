@@ -26,6 +26,7 @@ class _FunctionalAdagrad(object):
         warmup_num_iters: float = 0.0,
         eps: float = 1e-10,
         coalesce_grad: bool = True,
+        _allow_empty_param_list: bool = False,
     ):
         self.defaults = {
             "lr": lr,
@@ -39,7 +40,7 @@ class _FunctionalAdagrad(object):
         self.coalesce_grad = coalesce_grad
         self.state = torch.jit.annotate(Dict[torch.Tensor, Dict[str, torch.Tensor]], {})
 
-        if len(params) == 0:
+        if len(params) == 0 and not _allow_empty_param_list:
             raise ValueError("optimizer got an empty parameter list")
 
         # NOTE: we only have one param_group and don't allow user to add additional

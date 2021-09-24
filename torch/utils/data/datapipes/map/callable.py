@@ -26,8 +26,8 @@ def default_fn(data):
 
 
 @functional_datapipe('map')
-class MapMapDataPipe(MapDataPipe[T_co]):
-    r""":class:`MapMapDataPipe`.
+class MapperMapDataPipe(MapDataPipe[T_co]):
+    r""":class:`MapperMapDataPipe`.
 
     Map DataPipe to run a function over each item from the source DataPipe.
     The function can be any regular python function or partial object. Lambda

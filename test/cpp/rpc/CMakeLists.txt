@@ -10,7 +10,6 @@ set(TORCH_RPC_TEST_DEPENDENCY_LIBS
 
 if(USE_GLOO)
   list(APPEND TORCH_RPC_TEST_SOURCES
-    ${TORCH_RPC_TEST_DIR}/test_e2e_process_group.cpp
     ${TORCH_RPC_TEST_DIR}/test_e2e_tensorpipe.cpp
   )
 endif()

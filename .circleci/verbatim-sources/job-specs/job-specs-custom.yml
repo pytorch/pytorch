@@ -126,6 +126,7 @@
             set -e
             export IN_CI=1
             export CROSS_COMPILE_ARM64=1
+            export JOB_BASE_NAME=$CIRCLE_JOB
 
             # Install sccache
             sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
@@ -162,6 +163,7 @@
           command: |
             set -e
             export IN_CI=1
+            export JOB_BASE_NAME=$CIRCLE_JOB
 
             # Install sccache
             sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
@@ -198,6 +200,7 @@
           command: |
             set -e
             export IN_CI=1
+            export JOB_BASE_NAME=$CIRCLE_JOB
 
             chmod a+x .jenkins/pytorch/macos-test.sh
             unbuffer .jenkins/pytorch/macos-test.sh 2>&1 | ts
@@ -208,6 +211,9 @@
             set -ex
             source /Users/distiller/workspace/miniconda3/bin/activate
             pip install boto3
+
+            export IN_CI=1
+            export JOB_BASE_NAME=$CIRCLE_JOB
 
             # Using the same IAM user to write stats to our OSS bucket
             export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4}
@@ -234,6 +240,7 @@
             set -e
             export IN_CI=1
             export BUILD_LITE_INTERPRETER=1
+            export JOB_BASE_NAME=$CIRCLE_JOB
             chmod a+x ${HOME}/project/.jenkins/pytorch/macos-lite-interpreter-build-test.sh
             unbuffer ${HOME}/project/.jenkins/pytorch/macos-lite-interpreter-build-test.sh 2>&1 | ts
       - store_test_results:
@@ -446,7 +453,7 @@
   pytorch_ios_build:
     <<: *pytorch_ios_params
     macos:
-      xcode: "12.0"
+      xcode: "12.5.1"
     steps:
       - checkout
       - run_brew_for_ios_build
@@ -510,6 +517,7 @@
             echo "IOS_PLATFORM: ${IOS_PLATFORM}"
             echo "USE_PYTORCH_METAL": "${USE_METAL}"
             echo "BUILD_LITE_INTERPRETER": "${BUILD_LITE_INTERPRETER}"
+            echo "USE_COREML_DELEGATE": "${USE_COREML_DELEGATE}"
 
             #check the custom build flag
             echo "SELECTED_OP_LIST: ${SELECTED_OP_LIST}"
@@ -518,6 +526,7 @@
             fi
             export IOS_ARCH=${IOS_ARCH}
             export IOS_PLATFORM=${IOS_PLATFORM}
+            export USE_COREML_DELEGATE=${USE_COREML_DELEGATE}
             if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then
               export USE_PYTORCH_METAL=${USE_METAL}
             fi
@@ -527,10 +536,6 @@
           no_output_timeout: "30m"
           command: |
             set -e
-            if [ ${BUILD_LITE_INTERPRETER} == 0 ]; then
-              echo "Run Build Test is not for full jit, skipping."
-              exit 0
-            fi
             PROJ_ROOT=/Users/distiller/project
             PROFILE=PyTorch_CI_2021
             # run the ruby build script
@@ -556,21 +561,40 @@
             if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then
               echo "not SIMULATOR build, skip it."
               exit 0
-            elif [ ${BUILD_LITE_INTERPRETER} == 0 ]; then
-              echo "Run Simulator Tests is not for full jit, skipping."
-              exit 0
             fi
             WORKSPACE=/Users/distiller/workspace
             PROJ_ROOT=/Users/distiller/project
             source ~/anaconda/bin/activate
-            pip install torch torchvision --progress-bar off
-            #run unit test
+            # use the pytorch nightly build to generate models
+            pip3 install --pre torch torchvision torchaudio -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
+            # generate models for differnet backends
             cd ${PROJ_ROOT}/ios/TestApp/benchmark
-            python trace_model.py
-            ruby setup.rb
+            mkdir -p ../models
+            if [ ${USE_COREML_DELEGATE} == 1 ]; then
+              pip install coremltools==5.0b5
+              pip install six
+              python coreml_backend.py
+            else
+              python trace_model.py
+            fi
+            if [ ${BUILD_LITE_INTERPRETER} == 1 ]; then
+              echo "Setting up the TestApp for LiteInterpreter"
+              ruby setup.rb --lite 1
+            else
+              echo "Setting up the TestApp for Full JIT"
+              ruby setup.rb
+            fi
             cd ${PROJ_ROOT}/ios/TestApp
             instruments -s -devices
-            fastlane scan
+            if [ ${BUILD_LITE_INTERPRETER} == 1 ]; then
+              if [ ${USE_COREML_DELEGATE} == 1 ]; then
+                fastlane scan --only_testing TestAppTests/TestAppTests/testCoreML
+              else
+                fastlane scan --only_testing TestAppTests/TestAppTests/testLiteInterpreter
+              fi
+            else
+              fastlane scan --only_testing TestAppTests/TestAppTests/testFullJIT
+            fi
   pytorch_linux_bazel_build:
     <<: *pytorch_params
     machine:

@@ -42,6 +42,7 @@ from torch.testing._internal.common_quantization import (
     EmbeddingBagModule,
     EmbeddingModule,
     EmbeddingWithLinear,
+    LinearReluLinearModel,
 )
 
 # annotated models
@@ -995,6 +996,23 @@ class TestPostTrainingDynamic(QuantizationTestCase):
         model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
         checkQuantized(model)
 
+    def test_linear_relu_fusion(self):
+        dtype = torch.qint8
+        model = LinearReluLinearModel().eval()
+        qconfig = default_dynamic_qconfig
+        qconfig_dict = {'' : qconfig}
+        torch.ao.quantization.fuse_modules(model, [['fc1', 'relu']], inplace=True)
+        prepare_dynamic(model, qconfig_dict)
+        convert_dynamic(model)
+
+        def checkQuantized(model):
+            self.checkDynamicQuantizedLinearRelu(model.fc1, dtype)
+            self.checkDynamicQuantizedLinear(model.fc2, dtype)
+            self.checkScriptable(model, self.calib_data, check_save_load=True)
+            self.checkNoQconfig(model)
+
+        checkQuantized(model)
+
     @given(qconfig=st.sampled_from([per_channel_dynamic_qconfig, default_dynamic_qconfig]),
            dtype=st.sampled_from([torch.qint8, torch.float16]))
     def test_quantized_rnn(self, qconfig, dtype):
@@ -1215,8 +1233,6 @@ class TestQuantizeONNXExport(JitTestCase):
         input_names = ["x"]
 
         def export_to_onnx(model, input, input_names):
-            outputs = model(input)
-
             traced = torch.jit.trace(model, input)
             buf = io.BytesIO()
             torch.jit.save(traced, buf)
@@ -1224,7 +1240,7 @@ class TestQuantizeONNXExport(JitTestCase):
 
             model = torch.jit.load(buf)
             f = io.BytesIO()
-            torch.onnx.export(model, input, f, input_names=input_names, example_outputs=outputs,
+            torch.onnx.export(model, input, f, input_names=input_names,
                               operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
         onnx_model = export_to_onnx(model, data, input_names)
 

@@ -51,17 +51,16 @@ static inline Tensor restride_dim(
   return src.as_strided(replacement_shape, strides);
 }
 
-inline Tensor &_dimreduce_setup(Tensor &result, const Tensor &self,
+inline void _dimreduce_setup(const Tensor &result, const Tensor &self,
                                 int64_t dim) {
   IntArrayRef self_sizes = self.sizes();
   std::vector<int64_t> result_sizes;
   result_sizes.insert(result_sizes.end(), self_sizes.begin(), self_sizes.end());
   result_sizes[dim] = 1;
   result.resize_(result_sizes);
-  return result;
 }
 
-inline bool _dimreduce_return_trivial(Tensor &result, const Tensor &self,
+inline bool _dimreduce_return_trivial(const Tensor &result, const Tensor &self,
                                       const Scalar& ident, int64_t dim, bool keepdim) {
   if (self.numel() == 1 && self.ndimension() == 0) {
     result.resize_({});
@@ -203,7 +202,7 @@ static TensorIterator make_reduction(
   return TensorIterator::reduce_op(viewed_result, self.to(in_dtype));
 }
 
-static TensorIterator make_reduction(
+static C10_UNUSED TensorIterator make_reduction(
     const char* name, Tensor& result, const Tensor& self,
     c10::optional<IntArrayRef> dim, bool keepdim, ScalarType out_dtype) {
   // special case for type promotion in mixed precision, improves computational
@@ -253,7 +252,7 @@ static TensorIterator make_reduction(
   return TensorIterator::reduce_op(viewed_result1, viewed_result2, self.to(dtype1));
 }
 
-static TensorIterator make_reduction(
+static C10_UNUSED TensorIterator make_reduction(
     const char* name, Tensor& result1, Tensor& result2, const Tensor& self,
     c10::optional<IntArrayRef> dim, bool keepdim, ScalarType dtype) {
   return make_reduction(name, result1, result2, self, dim, keepdim, dtype, dtype);
@@ -270,7 +269,7 @@ static void zero_numel_check_dims(const Tensor& self, const int64_t dim, const c
   }
 }
 
-static void zero_numel_check_dims(const Tensor& self, const IntArrayRef dim, const char *fn_name) {
+static C10_UNUSED void zero_numel_check_dims(const Tensor& self, const IntArrayRef dim, const char *fn_name) {
   for (const int64_t d : dim) {
     zero_numel_check_dims(self, d, fn_name);
   }
@@ -281,7 +280,7 @@ static void zero_numel_check_dims(const Tensor& self, const IntArrayRef dim, con
 // This function should be called when you are reducing a zero-numel tensor and want to
 // resize the output and return it. This function exists for resizing zero-numel
 // tensors when the size of the reduction dimension is non-zero.
-static void zero_numel_tensor_resize(Tensor& result, Tensor& result_indices,
+static C10_UNUSED void zero_numel_tensor_resize(Tensor& result, Tensor& result_indices,
                                      const Tensor& self, const int64_t dim,
                                      const bool keepdim, const char *fn_name) {
   TORCH_INTERNAL_ASSERT(self.numel() == 0,  fn_name, ": Expected self.numel() != 0.");
@@ -305,7 +304,7 @@ static void zero_numel_tensor_resize(Tensor& result, Tensor& result_indices,
 
 namespace meta {
 
-static DimVector get_reduction_shape(
+static C10_UNUSED DimVector get_reduction_shape(
     const Tensor& self,
     IntArrayRef dims,
     bool keepdim) {
@@ -329,7 +328,7 @@ static TensorIterator make_reduction(
   return TensorIterator::reduce_op(viewed_result, self.to(in_dtype));
 }
 
-static TensorIterator make_reduction_from_out_ty(
+static C10_UNUSED TensorIterator make_reduction_from_out_ty(
     const Tensor& self,
     const Tensor& result,
     IntArrayRef dims,

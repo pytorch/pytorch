@@ -1513,9 +1513,9 @@ See :func:`torch.frexp`
 
 add_docstr_all('flatten',
                r"""
-flatten(input, start_dim=0, end_dim=-1) -> Tensor
+flatten(start_dim=0, end_dim=-1) -> Tensor
 
-see :func:`torch.flatten`
+See :func:`torch.flatten`
 """)
 
 add_docstr_all('gather',
@@ -2421,11 +2421,16 @@ argmax(dim=None, keepdim=False) -> LongTensor
 See :func:`torch.argmax`
 """)
 
-add_docstr_all('mean',
-               r"""
-mean(dim=None, keepdim=False) -> Tensor or (Tensor, Tensor)
+add_docstr_all('mean', r"""
+mean(dim=None, keepdim=False, *, dtype=None) -> Tensor
 
 See :func:`torch.mean`
+""")
+
+add_docstr_all('nanmean', r"""
+nanmean(dim=None, keepdim=False, *, dtype=None) -> Tensor
+
+See :func:`torch.nanmean`
 """)
 
 add_docstr_all('median',

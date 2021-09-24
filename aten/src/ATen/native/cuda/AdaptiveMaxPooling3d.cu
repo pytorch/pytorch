@@ -1,11 +1,11 @@
 #include <ATen/ATen.h>
+#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <c10/util/Exception.h>
-#include <THC/THCAtomics.cuh>
 #include <THC/THCGeneral.h>
 #include <THC/THCNumerics.cuh>
 
@@ -305,6 +305,9 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_out_cuda)
 
   checkAllSameGPU(
       __func__, {output_arg, indices_arg, input_arg});
+  if (input.numel() == 0) {
+    return;
+  }
 
   int64_t osizeT = output_size[0];
   int64_t osizeH = output_size[1];
@@ -380,6 +383,9 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_backward_out_cuda)
   checkAllSameGPU(
       __func__,
       {grad_input_arg, grad_output_arg, input_arg, indices_arg});
+  if (gradOutput.numel() == 0) {
+    return;
+  }
 
   const Tensor gradOutput_ = gradOutput.contiguous();
 

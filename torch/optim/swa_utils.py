@@ -182,7 +182,7 @@ class SWALR(_LRScheduler):
         annealing_strategy (str): "cos" or "linear"; specifies the annealing
             strategy: "cos" for cosine annealing, "linear" for linear annealing
             (default: "cos")
-        last_epoch (int): the index of the last epoch (default: 'cos')
+        last_epoch (int): the index of the last epoch (default: -1)
 
     The :class:`SWALR` scheduler is can be used together with other
     schedulers to switch to a constant learning rate late in the training

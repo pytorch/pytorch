@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <type_traits>
 #include <iterator>
+#include <limits>
 
 // include cub in a safe manner, see:
 // https://github.com/pytorch/pytorch/pull/55292
@@ -54,7 +55,11 @@ struct cuda_type<c10::Half> {
   using type = __half;
 };
 
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 99999
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11050
+// cub sort support for __nv_bfloat16 is added to cub 1.13 in
+// https://github.com/NVIDIA/cub/pull/306 and according to
+// https://github.com/NVIDIA/cub#releases, 1.13 is included in
+// CUDA Toolkit 11.5
 
 // waiting for https://github.com/NVIDIA/cub/pull/306 to land on CUDA
 template<>
@@ -102,6 +107,8 @@ static inline void sort_keys(
     const key_t *keys_in, key_t *keys_out,
     int64_t n, bool descending=false, int64_t begin_bit=0, int64_t end_bit=sizeof(key_t)*8
 ) {
+  TORCH_CHECK(n <= std::numeric_limits<int>::max(),
+    "cub sort does not support sorting more than INT_MAX elements");
   using key_t_ = typename detail::cuda_type<key_t>::type;
 
   const key_t_ *keys_in_ = reinterpret_cast<const key_t_*>(keys_in);
@@ -124,6 +131,8 @@ static inline void sort_pairs(
     const value_t *values_in, value_t *values_out,
     int64_t n, bool descending=false, int64_t begin_bit=0, int64_t end_bit=sizeof(key_t)*8
 ) {
+  TORCH_CHECK(n <= std::numeric_limits<int>::max(),
+    "cub sort does not support sorting more than INT_MAX elements");
   using key_t_ = typename detail::cuda_type<key_t>::type;
 
   auto allocator = c10::cuda::CUDACachingAllocator::get();
@@ -156,6 +165,10 @@ static inline void segmented_sort_pairs(
     OffsetIteratorT begin_offsets, OffsetIteratorT end_offsets,
     bool descending=false, int64_t begin_bit=0, int64_t end_bit=sizeof(key_t)*8
 ) {
+  TORCH_CHECK(num_elements <= std::numeric_limits<int>::max(),
+    "cub sort does not support sorting more than INT_MAX elements");
+  TORCH_CHECK(num_segments <= std::numeric_limits<int>::max(),
+    "cub sort does not support sorting more than INT_MAX elements");
   using key_t_ = typename detail::cuda_type<key_t>::type;
 
   auto allocator = c10::cuda::CUDACachingAllocator::get();
@@ -305,4 +318,12 @@ inline void exclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
   }
 }
 
-}}}
+template<typename InputIteratorT , typename OutputIteratorT , typename NumSelectedIteratorT >
+inline void unique(InputIteratorT input, OutputIteratorT output, NumSelectedIteratorT num_selected_out, int64_t num_items) {
+  TORCH_CHECK(num_items <= std::numeric_limits<int>::max(),
+    "cub unique does not support more than INT_MAX elements");
+  CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceSelect::Unique,
+    input, output, num_selected_out, num_items, at::cuda::getCurrentCUDAStream());
+}
+
+}}}  // namespace at::cuda::cub

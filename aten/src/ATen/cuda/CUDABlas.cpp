@@ -64,8 +64,8 @@ static void _cublasAdjustLdLevel3(
     int64_t* lda,
     int64_t* ldb,
     int64_t* ldc) {
-  bool transa_ = ((transa == 't') || (transa == 'T'));
-  bool transb_ = ((transb == 't') || (transb == 'T'));
+  bool transa_ = ((transa != 'n') && (transa != 'N'));
+  bool transb_ = ((transb != 'n') && (transb != 'N'));
 
   // Note: leading dimensions generally are checked that they are > 0
   // and at least as big the result requires (even if the value won't
@@ -372,7 +372,7 @@ void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
       handle, opa, opb, m, n, k, &alpha, a, lda, b, ldb, &beta, c, ldc));
 }
 
-#if !defined(__HIP_PLATFORM_HCC__) || (defined(__HIP_PLATFORM_HCC__) && HIP_VERSION >= 210)
+#if !defined(__HIP_PLATFORM_HCC__) || (defined(__HIP_PLATFORM_HCC__) && TORCH_HIP_VERSION >= 210)
   template <>
   void gemm<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>)) {
     // See Note [Writing Nondeterministic Operations]
@@ -389,7 +389,7 @@ void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
   }
 #endif
 
-#if !defined(__HIP_PLATFORM_HCC__) || (defined(__HIP_PLATFORM_HCC__) && HIP_VERSION >= 210)
+#if !defined(__HIP_PLATFORM_HCC__) || (defined(__HIP_PLATFORM_HCC__) && TORCH_HIP_VERSION >= 210)
   template <>
   void gemm<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>)) {
     // See Note [Writing Nondeterministic Operations]
@@ -702,7 +702,7 @@ void trsmBatched<c10::complex<double>>(
     CUDABLAS_POSINT_CHECK(gemv<Dtype>, incy); \
   } while (0)
 
-#if !defined(__HIP_PLATFORM_HCC__) || (defined(__HIP_PLATFORM_HCC__) && HIP_VERSION >= 210)
+#if !defined(__HIP_PLATFORM_HCC__) || (defined(__HIP_PLATFORM_HCC__) && TORCH_HIP_VERSION >= 210)
   template <>
   void gemv<c10::complex<double>>(CUDABLAS_GEMV_ARGTYPES(c10::complex<double>)) {
     // See Note [Writing Nondeterministic Operations]
@@ -718,7 +718,7 @@ void trsmBatched<c10::complex<double>>(
   }
 #endif
 
-#if !defined(__HIP_PLATFORM_HCC__) || (defined(__HIP_PLATFORM_HCC__) && HIP_VERSION >= 210)
+#if !defined(__HIP_PLATFORM_HCC__) || (defined(__HIP_PLATFORM_HCC__) && TORCH_HIP_VERSION >= 210)
 template <>
 void gemv<c10::complex<float>>(CUDABLAS_GEMV_ARGTYPES(c10::complex<float>)) {
   // gemv is bw bound, and does not benefit from TF32. But the precision
@@ -851,7 +851,7 @@ void dot<at::Half>(CUDABLAS_DOT_ARGTYPES(at::Half)) {
       result,
       CUDA_R_16F,
       CUDA_R_32F));
-#elif HIP_VERSION >= 210
+#elif TORCH_HIP_VERSION >= 210
   TORCH_CUDABLAS_CHECK(rocblas_hdot(
       handle,
       n,
@@ -880,7 +880,7 @@ void dot<at::BFloat16>(CUDABLAS_DOT_ARGTYPES(at::BFloat16)) {
       result,
       CUDA_R_16BF,
       CUDA_R_32F));
-#elif HIP_VERSION >= 210
+#elif TORCH_HIP_VERSION >= 210
   TORCH_CUDABLAS_CHECK(rocblas_bfdot(
       handle,
       n,
