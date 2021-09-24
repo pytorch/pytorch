@@ -24,6 +24,13 @@ void addmv_out_sparse_csr(
     const Scalar& alpha,
     const Tensor& result);
 
+void add_out_sparse_csr(
+    const at::sparse_csr::SparseCsrTensor& mat1,
+    const at::sparse_csr::SparseCsrTensor& mat2,
+    const Scalar& alpha,
+    const Scalar& beta,
+    const at::sparse_csr::SparseCsrTensor& result);
+
 } // namespace cuda
 } // namespace impl
 } // namespace sparse
