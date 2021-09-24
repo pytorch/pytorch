@@ -172,25 +172,6 @@ class TestWeightNormSparsifier(TestCase):
             module = g['module']
             assert (1.0 - module.parametrizations['weight'][0].mask.mean()) > 0  # checking sparsity level did not collapse
 
-    def test_step_2_of_4(self):
-        model = Model()
-        sparsifier = WeightNormSparsifier(sparsity_level=1.0,
-                                          sparse_block_shape=(1, 4),
-                                          zeros_per_block=2)
-        sparsifier.prepare(model, config=[model.linear])
-        sparsifier.step()
-        # make sure the sparsity level is approximately 50%
-        self.assertAlmostEqual(model.linear.parametrizations['weight'][0].mask.mean().item(), 0.5, places=2)
-        # Make sure each block has exactly 50% zeros
-        module = sparsifier.module_groups[0]['module']
-        mask = module.parametrizations['weight'][0].mask
-        for row in mask:
-            for idx in range(0, len(row), 4):
-                block = row[idx:idx + 4]
-                block, _ = block.sort()
-                assert (block[:2] == 0).all()
-                assert (block[2:] != 0).all()
-
     def test_prepare(self):
         model = Model()
         sparsifier = WeightNormSparsifier()

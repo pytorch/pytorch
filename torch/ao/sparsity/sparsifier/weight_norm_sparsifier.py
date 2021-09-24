@@ -54,22 +54,13 @@ class WeightNormSparsifier(BaseSparsifier):
 
     def update_mask(self, layer, sparsity_level, sparse_block_shape,
                     zeros_per_block, **kwargs):
-        values_per_block = reduce((lambda x, y: x * y), sparse_block_shape)
-        if zeros_per_block > values_per_block:
-            raise ValueError("Number of zeros per block cannot be more than "
-                             "the total number of elements in that block.")
-        elif sparsity_level <= 0.0:
-            mask.data = torch.ones_like(mask)
-            return
-        elif sparsity_level >= 1.0 and zeros_per_block == values_per_block:
-            mask.data = torch.zeros_like(mask)
-            return
-
+        if zeros_per_block != reduce((lambda x, y: x * y), sparse_block_shape):
+            raise NotImplementedError('Partial block sparsity is not yet there')
         # TODO: Add support for multiple parametrizations for the same weight
         mask = layer.parametrizations.weight[0].mask
         if sparsity_level <= 0:
             mask.data = torch.ones(layer.weight.shape, device=layer.weight.device)
-        elif sparsity_level >= 1.0 and (zeros_per_block == values_per_block):
+        elif sparsity_level >= 1.0:
             mask.data = torch.zeros(layer.weight.shape, device=layer.weight.device)
         else:
             ww = layer.weight * layer.weight
@@ -86,26 +77,6 @@ class WeightNormSparsifier(BaseSparsifier):
 
             new_mask = torch.ones(ww.shape, device=layer.weight.device)
             for row, col in zip(rows, cols):
-                submask = new_mask[row:row + sparse_block_shape[0],
-                                   col:col + sparse_block_shape[1]]
-                subweight = layer.weight[row:row + sparse_block_shape[0],
-                                         col:col + sparse_block_shape[1]]
-                self._update_block(submask, subweight,
-                                   zeros_per_block, values_per_block)
+                new_mask[row:row + sparse_block_shape[0],
+                         col:col + sparse_block_shape[1]] = 0
             mask.data = new_mask
-
-    def _update_block(self,
-                      submask: torch.Tensor,
-                      subweight: torch.Tensor,
-                      zeros_per_block: int,
-                      values_per_block: int):
-        r"""Updates a single sparse block"""
-        if zeros_per_block == values_per_block:
-            submask[:] = 0
-        else:
-            w = torch.abs(subweight)
-            w_flat = w.flatten()
-            _, sorted_idx = torch.sort(w_flat)
-            sorted_idx = sorted_idx[:zeros_per_block]
-            rows, cols = _flat_idx_to_2d(sorted_idx, submask.shape)
-            submask[rows, cols] = 0
