@@ -38,7 +38,8 @@ C10_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
 
 namespace at {
 class Tensor;
-}
+class TensorBase;
+} // namespace at
 
 namespace c10 {
 class Scalar;
@@ -151,15 +152,18 @@ struct C10_API AutogradMetaInterface {
   virtual bool requires_grad() const = 0;
   virtual at::Tensor& mutable_grad() = 0;
   virtual const at::Tensor& grad() const = 0;
-  virtual const at::Tensor& fw_grad(uint64_t level, const at::Tensor& self)
+  virtual const at::Tensor& fw_grad(uint64_t level, const at::TensorBase& self)
       const = 0;
   virtual void set_fw_grad(
-      const at::Tensor& new_grad,
-      const at::Tensor& self,
+      const at::TensorBase& new_grad,
+      const at::TensorBase& self,
       uint64_t level,
       bool is_inplace_op) = 0;
   virtual ~AutogradMetaInterface();
 };
+
+// forward declared
+struct TorchDispatchTypeObject;
 
 namespace impl {
 
@@ -249,13 +253,14 @@ struct C10_API AutogradMetaFactoryRegisterer {
 struct PyInterpreter;
 struct C10_API PyInterpreter {
   using name_sig = std::string(const PyInterpreter*);
-  using decref_sig = void(const PyInterpreter*, PyObject*);
+  using decref_sig = void(const PyInterpreter*, PyObject*, bool);
   using detach_sig =
       c10::intrusive_ptr<TensorImpl>(const PyInterpreter*, const TensorImpl*);
   using dispatch_sig = void(
       const PyInterpreter*,
       const c10::OperatorHandle&,
-      torch::jit::Stack* stack);
+      torch::jit::Stack* stack,
+      const std::shared_ptr<TorchDispatchTypeObject>& type);
 
   PyInterpreter(
       name_sig* name_fn,
@@ -284,8 +289,9 @@ struct C10_API PyInterpreter {
   }
 
   // Run Py_DECREF on a PyObject.  We DO NOT assume the GIL is held on call
-  __ubsan_ignore_function__ void decref(PyObject* pyobj) const {
-    return (*decref_fn_)(this, pyobj);
+  // See NOTE [PyInterpreter::decref takes an `is_tensor` arg]
+  __ubsan_ignore_function__ void decref(PyObject* pyobj, bool is_tensor) const {
+    return (*decref_fn_)(this, pyobj, is_tensor);
   }
 
   // Perform a detach by deferring to the __torch_dispatch__ implementation of
@@ -299,8 +305,9 @@ struct C10_API PyInterpreter {
   // Invoke the Python boxed fallback dispatch to go back into Python
   __ubsan_ignore_function__ void dispatch(
       const c10::OperatorHandle& op,
-      torch::jit::Stack* stack) const {
-    return (*dispatch_fn_)(this, op, stack);
+      torch::jit::Stack* stack,
+      const std::shared_ptr<TorchDispatchTypeObject>& type) const {
+    return (*dispatch_fn_)(this, op, stack, type);
   }
 
   // Disarm this PyInterpreter, making all of its methods noops.
@@ -346,6 +353,30 @@ struct C10_API NamedTensorMetaInterface {
     TORCH_INTERNAL_ASSERT(
         false, "Not implemented: NamedTensorMetaInterface::slow_dim");
   };
+};
+
+// NOTE [What is TorchDispatchTypeObject?]
+// A TorchDispatchTypeObject represents the type of a Tensor subclass that has
+// a __torch_dispatch__ classmethod. Concretely, it holds the class as a
+// PyObject* and a PyInterpreter* that says which python interpreter the class
+// came from.
+//
+// See NOTE [dispatch_fn's type argument] for more details
+struct C10_API TorchDispatchTypeObject {
+  // Steals a reference to type_object
+  TorchDispatchTypeObject(
+      PyObject* type_object,
+      c10::impl::PyInterpreter* pyinterpreter);
+
+  // Releases the stolen reference to type_object
+  ~TorchDispatchTypeObject();
+
+  c10::impl::PyInterpreter* pyinterpreter() const;
+  PyObject* ptr() const;
+
+ private:
+  PyObject* data_;
+  c10::impl::PyInterpreter* pyinterpreter_;
 };
 
 // NOTE [ Version Counter Sharing ]
@@ -840,6 +871,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return key_set_.has(DispatchKey::XLA);
   }
 
+  bool is_hpu() const {
+    return key_set_.has(DispatchKey::HPU);
+  }
+
   bool is_lazy() const {
     return key_set_.has(DispatchKey::Lazy);
   }
@@ -1055,7 +1090,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    *   - "self" should represent the Tensor whose forward grad is accessed. It
    * is required when dealing with view.
    */
-  const at::Tensor& _fw_grad(uint64_t level, const at::Tensor& self) const;
+  const at::Tensor& _fw_grad(uint64_t level, const at::TensorBase& self) const;
 
   /**
    * Sets the forward gradient for this Tensor.
@@ -1078,8 +1113,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * better error checking.
    */
   void _set_fw_grad(
-      const at::Tensor& new_grad,
-      const at::Tensor& self,
+      const at::TensorBase& new_grad,
+      const at::TensorBase& self,
       uint64_t level,
       bool is_inplace_op);
 

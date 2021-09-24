@@ -1,12 +1,12 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/native/Pool.h>
+#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/cuda/KernelUtils.cuh>
-#include <THC/THCAtomics.cuh>
 #include <THC/THCNumerics.cuh>
 #include <c10/macros/Macros.h>
 

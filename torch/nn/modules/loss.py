@@ -1236,9 +1236,9 @@ class CosineEmbeddingLoss(_Loss):
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
     Shape:
-        - Input1: :math:`(N, D)`, where `N` is the batch size and `D` is the embedding dimension.
-        - Input2: :math:`(N, D)`, same shape as Input1.
-        - Target: :math:`(N)`.
+        - Input1: :math:`(N, D)` or :math:`(D)`, where `N` is the batch size and `D` is the embedding dimension.
+        - Input2: :math:`(N, D)` or :math:`(D)`, same shape as Input1.
+        - Target: :math:`(N)` or :math:`()`.
         - Output: If :attr:`reduction` is ``'none'``, then :math:`(N)`, otherwise scalar.
     """
     __constants__ = ['margin', 'reduction']
@@ -1436,9 +1436,9 @@ class TripletMarginLoss(_Loss):
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
     Shape:
-        - Input: :math:`(N, D)` where :math:`D` is the vector dimension.
-        - Output: A Tensor of shape :math:`(N)` if :attr:`reduction` is ``'none'``, or a scalar
-          otherwise.
+        - Input: :math:`(N, D)` or :math`(D)` where :math:`D` is the vector dimension.
+        - Output: A Tensor of shape :math:`(N)` if :attr:`reduction` is ``'none'`` and
+                  input shape is :math`(N, D)`; a scalar otherwise.
 
     Examples::
 
