@@ -28,6 +28,12 @@ class ShardingFilterIterDataPipe(IterDataPipe):
             if i % self.num_of_instances == self.instance_id:
                 yield item
 
+    def __len__(self):
+        if isinstance(self.source_datapipe, Sized):
+            return len(self.source_datapipe) // self.num_of_instances +\
+                (1 if (self.instance_id < len(self.source_datapipe) % self.num_of_instances) else 0)
+        raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
+
 
 @functional_datapipe('batch')
 class BatcherIterDataPipe(IterDataPipe[DataChunk]):
@@ -54,6 +60,7 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk]):
                  batch_size: int,
                  drop_last: bool = False,
                  unbatch_level: int = 0,
+                 wrapper_class=DataChunk,
                  ) -> None:
         assert batch_size > 0, "Batch size is required to be larger than 0!"
         super().__init__()
@@ -65,7 +72,7 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk]):
         self.batch_size = batch_size
         self.drop_last = drop_last
         self.length = None
-        self.wrapper_class = DataChunk
+        self.wrapper_class = wrapper_class
 
     def __iter__(self) -> Iterator[DataChunk]:
         batch: List = []

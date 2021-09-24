@@ -51,6 +51,14 @@ namespace jit {
 //
 // This is only applied to lists that are not modified.
 //
+// 5. Slice
+// Given a function like this:
+//     def foo():
+//         return [1, 2, 3, 4, 5][0:2]
+// This pass produces (after deadcode elimination):
+//     def foo():
+//         return [1, 2]
+//
 // Currently this is invoked as part of PeepholeOptimize
 // return true if graph is modified.
 // If `refine_list_len` is true will attempt to refine the len of lists through
