@@ -553,6 +553,18 @@ class TestSparseCSR(TestCase):
             for m, n in itertools.product([3, 5], [3, 5]):
                 run_test(m, n, index_dtype)
 
+    @onlyCUDA
+    @dtypes(*floating_and_complex_types())
+    def test_sparse_add_errors(self, device, dtype):
+        def run_test(index_type):
+            a = self.genSparseCSRTensor((2, 2), 3, dtype=dtype, device=device, index_dtype=index_dtype)
+            b = self.genSparseCSRTensor((2, 1), 2, dtype=dtype, device=device, index_dtype=index_dtype)
+            with self.assertRaisesRegex(RuntimeError, "Expected input tensors to have the same shape"):
+                torch.add(a, b)
+
+        for index_dtype in [torch.int32, torch.int64]:
+            run_test(index_dtype)
+
     @dtypes(*get_all_dtypes())
     def test_coo_csr_conversion(self, device, dtype):
         for m, n in itertools.product([5, 2, 0], [5, 2, 0]):
