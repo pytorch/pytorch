@@ -42,12 +42,6 @@ if [[ "$BUILD_ENVIRONMENT" == *old-gradcheck* ]]; then
   export PYTORCH_TEST_WITH_SLOW_GRADCHECK=ON
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
-  export PYTORCH_COLLECT_COVERAGE=1
-  export COVERAGE_RCFILE="$PWD/.coveragerc" # coverage config file needed for plug-ins and settings to work
-  pip install -e tools/coverage_plugins_package # allows coverage to run with JitPlugin for JIT coverage
-fi
-
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   # Used so that only cuda specific versions of tests are generated
   # mainly used so that we're not spending extra cycles testing cpu
@@ -147,14 +141,12 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX512-* || $TEST_CONFIG == 'nogpu_NO_AVX
   export ATEN_CPU_CAPABILITY=avx2
 fi
 
-if [[ "$BUILD_ENVIRONMENT" != *coverage* ]]; then
-  # if PR_NUMBER exist, use it to grab PR contents.
-  DETERMINE_FROM=$(mktemp)
-  if [ -n "$PR_NUMBER" ]; then
-    get_pr_change_files "$PR_NUMBER" "$DETERMINE_FROM"
-  else
-    file_diff_from_base "$DETERMINE_FROM"
-  fi
+# if PR_NUMBER exist, use it to grab PR contents.
+DETERMINE_FROM=$(mktemp)
+if [ -n "$PR_NUMBER" ]; then
+  get_pr_change_files "$PR_NUMBER" "$DETERMINE_FROM"
+else
+  file_diff_from_base "$DETERMINE_FROM"
 fi
 
 test_python_legacy_jit() {
@@ -213,6 +205,7 @@ test_aten() {
     ${SUDO} ln -sf "$TORCH_LIB_DIR"/libmkldnn* "$TEST_BASE_DIR"
     ${SUDO} ln -sf "$TORCH_LIB_DIR"/libnccl* "$TEST_BASE_DIR"
     ${SUDO} ln -sf "$TORCH_LIB_DIR"/libtorch* "$TEST_BASE_DIR"
+    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libtbb* "$TEST_BASE_DIR"
 
     ls "$TEST_BASE_DIR"
     aten/tools/run_tests.sh "$TEST_BASE_DIR"
@@ -552,15 +545,4 @@ else
   if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc7-test* || "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc5.4-test* ]]; then
     test_python_gloo_with_tls
   fi
-fi
-
-if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
-  pushd test
-  echo "Generating XML coverage report"
-  time python -mcoverage xml
-  popd
-  pushd build
-  echo "Generating lcov coverage report for C++ sources"
-  time lcov --capture --directory . --output-file coverage.info
-  popd
 fi
