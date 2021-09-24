@@ -3289,6 +3289,26 @@ bool LoopNest::rfactor(
   return true;
 }
 
+std::vector<std::vector<ForPtr>> GetAllPerfectlyNestedLoopNests(
+    std::vector<ForPtr> loops) {
+  // Find the first set of loops that can be reordered
+  std::vector<std::vector<ForPtr>> all_nested_loops;
+  std::vector<ForPtr> nested_loops;
+  nested_loops.push_back(loops[0]);
+  for (int i = 1; i < loops.size(); i++) {
+    if (nested_loops.back()->body()->front() == loops[i]) {
+      nested_loops.push_back(loops[i]);
+    } else {
+      if (nested_loops.size() > 1) {
+        all_nested_loops.push_back(nested_loops);
+      }
+      nested_loops.clear();
+      nested_loops.push_back(loops[i]);
+    }
+  }
+  return all_nested_loops;
+}
+
 void LoopNest::randomTransform(int64_t seed) {
   std::srand(seed);
   int n_transforms = std::rand() % 30;
@@ -3340,12 +3360,18 @@ void LoopNest::randomTransform(int64_t seed) {
     DIST3,
     DIST4,
     DIST5,
+    FUSE_LOOPS,
+    REORDER_AXIS,
+    REORDER,
+    TILE,
     MAX_TRANSFORM
   };
   bool no_more_inlining = false;
+  n_transforms = 1;
   try {
     for (int i = 0; i < n_transforms; i++) {
       int transform = std::rand() % MAX_TRANSFORM;
+      transform = TILE;
       switch (transform) {
         case SIMPLIFY: {
           simplify();
@@ -3484,6 +3510,137 @@ void LoopNest::randomTransform(int64_t seed) {
               std::to_string(loop_n) + "])\n";
           break;
         }
+        case FUSE_LOOPS: {
+          auto loops = NodeFinder<For>::find(root_stmt_);
+          if (loops.size() <= 1) {
+            break;
+          }
+          int num_loops_to_fuse =
+              std::max(2, (int)(std::rand() % loops.size()));
+
+          // Choose a random set of loops
+          std::vector<int> loop_numbers(loops.size());
+          std::iota(loop_numbers.begin(), loop_numbers.end(), 0);
+          std::random_shuffle(loop_numbers.begin(), loop_numbers.end());
+
+          std::vector<ForPtr> loops_to_fuse;
+          std::string debug_str;
+          for (int i = 0; i < num_loops_to_fuse; i++) {
+            int loop_number = loop_numbers[i];
+            debug_str += std::to_string(loop_number) + ", ";
+            loops_to_fuse.push_back(loops[loop_number]);
+          }
+
+          // Fuse the loops
+          ForPtr fused_loop;
+          if (fuseLoops(loops_to_fuse, &fused_loop)) {
+            history += "fuseLoops[" + debug_str + "])\n";
+          }
+          break;
+        }
+
+        case REORDER_AXIS: {
+          auto loops = NodeFinder<For>::find(root_stmt_);
+          if (loops.size() <= 1) {
+            break;
+          }
+
+          // Find pairs of axes that can be reordered
+          std::vector<std::pair<ForPtr, ForPtr>> valid_pairs;
+          for (int i = 0; i < loops.size(); i++) {
+            for (int j = i + 1; j < loops.size(); j++) {
+              if (findOuterFor(loops[i], loops[j])) {
+                valid_pairs.push_back(std::make_pair(loops[i], loops[j]));
+              }
+            }
+          }
+
+          // Choose a pair randomly
+          if (valid_pairs.size() == 0) {
+            break;
+          }
+          int valid_pair_n = rand() % valid_pairs.size();
+          auto loop_pair = valid_pairs.at(valid_pair_n);
+          auto first_loop = std::get<0>(loop_pair);
+          auto second_loop = std::get<1>(loop_pair);
+
+          // reorder the axis
+          reorderAxis(first_loop, second_loop);
+
+          history += "reorderAxis for " + std::to_string(first_loop) + " and " +
+              std::to_string(second_loop) + "\n";
+          break;
+        }
+
+        case REORDER: {
+          auto loops = NodeFinder<For>::find(root_stmt_);
+          if (loops.size() <= 1) {
+            break;
+          }
+          auto all_nested_loops = GetAllPerfectlyNestedLoopNests(loops);
+          if (all_nested_loops.size() == 0) {
+            break;
+          }
+          // Randomly pick a set of consecutive loops to reorder
+          int index = rand() % all_nested_loops.size();
+          auto nested_loops = all_nested_loops.at(index);
+
+          // Randomly create a permutation for reordering
+          std::vector<size_t> permutation(nested_loops.size());
+          std::iota(permutation.begin(), permutation.end(), 0);
+          std::random_shuffle(permutation.begin(), permutation.end());
+
+          // reorder
+          reorder(nested_loops, permutation);
+          history += "reorder\n";
+          break;
+        }
+
+        case TILE: {
+          auto loops = NodeFinder<For>::find(root_stmt_);
+          if (loops.size() <= 1) {
+            break;
+          }
+
+          // Find all perfectly nested loop nests
+          auto all_nested_loops = GetAllPerfectlyNestedLoopNests(loops);
+          if (all_nested_loops.size() == 0) {
+            break;
+          }
+
+          // Choose a set of perfectly nested loop nest and then choose a pair
+          // of loops from it
+          int index = rand() % all_nested_loops.size();
+          auto nested_loops = all_nested_loops.at(index);
+          if (nested_loops.size() < 2) {
+            break;
+          }
+          int loop_number = rand() % (nested_loops.size() - 1);
+          auto x_loop = nested_loops.at(loop_number);
+          auto y_loop = nested_loops.at(loop_number + 1);
+
+          auto find_factor = [](ForPtr loop) {
+            ExprPtr loop_stop = loop->stop();
+            auto loop_imm = intValue(loop_stop);
+            if (loop_imm) {
+              int loop_bound = *loop_imm;
+              int factor = rand() % (loop_bound - 1) + 1;
+              return factor;
+            }
+            return -1;
+          };
+
+          int x_factor = find_factor(x_loop);
+          int y_factor = find_factor(y_loop);
+          if (x_factor == -1 || y_factor == -1) {
+            break;
+          }
+          // tile
+          tile(x_loop, y_loop, x_factor, y_factor);
+          history += "tile\n";
+          break;
+        }
+
           // TODO: Add remaining transforms
         default:
           break;
