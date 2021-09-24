@@ -35,7 +35,7 @@ void addmv_out_sparse_csr(
 }
 
 /*
-  Computes a sparse matrix-dense vector product defined as
+  Computes a sum of two sparse matrices defined as
   result <- mat1 + alpha*mat2
 
   Args:
