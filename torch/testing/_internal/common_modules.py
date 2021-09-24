@@ -2,7 +2,8 @@ import torch
 from copy import deepcopy
 from functools import wraps, partial
 from itertools import chain
-from torch.testing import floating_types, make_tensor
+from torch.testing import make_tensor
+from torch.testing._internal.common_dtype import floating_types
 from torch.testing._internal.common_device_type import (
     _TestParametrizer, _dtype_test_suffix, _update_param_kwargs, skipIf)
 from torch.testing._internal.common_nn import nllloss_reference, get_reduction
@@ -48,6 +49,7 @@ class modules(_TestParametrizer):
     """ PROTOTYPE: Decorator for specifying a list of modules over which to run a test. """
 
     def __init__(self, module_info_list):
+        super().__init__(handles_dtypes=True)
         self.module_info_list = module_info_list
 
     def _parametrize_test(self, test, generic_cls, device_cls):
@@ -55,10 +57,9 @@ class modules(_TestParametrizer):
             # TODO: Factor some of this out since it's similar to OpInfo.
             for dtype in floating_types():
                 # Construct the test name.
-                test_name = '{}_{}_{}{}'.format(test.__name__,
-                                                module_info.name.replace('.', '_'),
-                                                device_cls.device_type,
-                                                _dtype_test_suffix(dtype))
+                test_name = '{}_{}{}'.format(module_info.name.replace('.', '_'),
+                                             device_cls.device_type,
+                                             _dtype_test_suffix(dtype))
 
                 # Construct parameter kwargs to pass to the test.
                 param_kwargs = {'module_info': module_info}
@@ -151,6 +152,10 @@ class ModuleInfo(object):
     @property
     def name(self):
         return formatted_module_name(self.module_cls)
+
+    @property
+    def formatted_name(self):
+        return self.name.replace('.', '_')
 
 
 def module_inputs_torch_nn_Linear(module_info, device, dtype, requires_grad, **kwargs):
@@ -273,6 +278,18 @@ def module_inputs_torch_nn_CELU(module_info, device, dtype, requires_grad, **kwa
                     desc='no_batch_dim',
                     reference_fn=no_batch_dim_reference_fn)]
 
+def module_inputs_torch_nn_ReLU(module_info, device, dtype, requires_grad):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    module_inputs = [
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input((2, 3, 4, 5)))),
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input(4)),
+                    desc='no_batch_dim'),
+    ]
+    return module_inputs
+
 
 def module_inputs_torch_nn_L1Loss(module_info, device, dtype, requires_grad, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -300,5 +317,7 @@ module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.Linear,
                module_inputs_func=module_inputs_torch_nn_Linear),
     ModuleInfo(torch.nn.NLLLoss,
-               module_inputs_func=module_inputs_torch_nn_NLLLoss)
+               module_inputs_func=module_inputs_torch_nn_NLLLoss),
+    ModuleInfo(torch.nn.ReLU,
+               module_inputs_func=module_inputs_torch_nn_ReLU),
 ]
