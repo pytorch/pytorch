@@ -1208,13 +1208,12 @@ def skipCUDAIfCudnnVersionLessThan(version=0):
         return wrap_fn
     return dec_fn
 
-
-def skipCUDAIfNoCudnn(fn):
-    return skipCUDAIfCudnnVersionLessThan(0)(fn)
-
 # Skips a test on CUDA if cuSparse generic API is not available
 def skipCUDAIfNoCusparseGeneric(fn):
     return skipCUDAIf(not TEST_CUSPARSE_GENERIC, "cuSparse Generic API not available")(fn)
+
+def skipCUDAIfNoCudnn(fn):
+    return skipCUDAIfCudnnVersionLessThan(0)(fn)
 
 def skipMeta(fn):
     return skipMetaIf(True, "test doesn't work with meta tensors")(fn)
