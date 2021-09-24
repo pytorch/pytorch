@@ -2,12 +2,14 @@
 
 #include <ATen/MemoryOverlap.h>
 #include <ATen/core/interned_strings.h>
+#include <ATen/record_function.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/core/InferenceMode.h>
 #include <c10/util/irange.h>
 #include <caffe2/core/scope_guard.h>
 #include <caffe2/core/timer.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
@@ -63,6 +65,7 @@ namespace {
 void OptimizeGraph(
     std::shared_ptr<torch::jit::Graph>& graph,
     const StaticModuleOptions& opts) {
+  GRAPH_DUMP("Before optimizations: ", graph);
   Inline(*graph);
   ConstantPropagation(graph);
   Canonicalize(graph);
@@ -73,6 +76,9 @@ void OptimizeGraph(
   FuseInferenceOpsForSparseNN(graph);
   UseVariadicCat(graph);
   UseVariadicStack(graph);
+  if (opts.enable_out_variant) {
+    FuseSignLog1P(graph);
+  }
 
   // TODO: we can avoid this guard by moving operations
   // to exposed folders.
@@ -86,6 +92,7 @@ void OptimizeGraph(
   ConstantPropagation(graph);
   RemoveImmutableInputDictLookups(graph);
   UseVariadicTupleUnpack(graph);
+  GRAPH_DUMP("Final graph after optimizations: ", graph);
 }
 
 // remove unused input 0 from graph
@@ -185,7 +192,8 @@ LivenessMap GetLivenessMap(
   FastMap<const Value*, size_t> values_to_idx_in_creation_order;
   for (const auto* node : graph->nodes()) {
     for (const auto* v : node->outputs()) {
-      values_to_idx_in_creation_order[v] = values_in_creation_order.size();
+      values_to_idx_in_creation_order.emplace(
+          v, values_in_creation_order.size());
       values_in_creation_order.emplace_back(v);
     }
   }
@@ -203,10 +211,11 @@ LivenessMap GetLivenessMap(
     if (liveness_map.count(v)) {
       return;
     }
-    liveness_map[v] = {};
+
+    auto& v_live_set = liveness_map[v] = {};
 
     for (const auto& live_v : live_values_use_chain) {
-      liveness_map.at(v).insert(live_v.first);
+      v_live_set.insert(live_v.first);
       liveness_map.at(live_v.first).insert(v);
     }
 
@@ -289,34 +298,43 @@ LivenessMap GetLivenessMap(
     auto outputs = node->outputs();
     for (const auto* input : inputs) {
       for (const auto* output : outputs) {
-        if (liveness_map.count(input) && liveness_map.count(output)) {
-          liveness_map.at(input).insert(output);
-          liveness_map.at(output).insert(input);
+        auto input_it = liveness_map.find(input);
+        if (input_it == liveness_map.end()) {
+          continue;
         }
+        auto output_it = liveness_map.find(output);
+        if (output_it == liveness_map.end()) {
+          continue;
+        }
+        input_it->second.insert(output);
+        output_it->second.insert(input);
       }
     }
+    auto insert_all_pairs_in_liveness_map =
+        [&](at::ArrayRef<const Value*> values) {
+          for (size_t i = 0; !values.empty() && i < values.size() - 1; ++i) {
+            auto value_it = liveness_map.find(values[i]);
+            if (value_it == liveness_map.end()) {
+              continue;
+            }
+            for (size_t j = i + 1; j < values.size(); ++j) {
+              auto value2_it = liveness_map.find(values[j]);
+              if (value2_it != liveness_map.end()) {
+                value_it->second.insert(values[j]);
+                value2_it->second.insert(values[i]);
+              }
+            }
+          }
+        };
     // All inputs should be alive at the same time.
-    for (size_t i = 0; i < inputs.size(); ++i) {
-      for (size_t j = 0; j < inputs.size(); ++j) {
-        if (liveness_map.count(inputs[i]) && liveness_map.count(inputs[j])) {
-          liveness_map.at(inputs[i]).insert(inputs[j]);
-          liveness_map.at(inputs[j]).insert(inputs[i]);
-        }
-      }
-    }
+    insert_all_pairs_in_liveness_map(inputs);
+
     // All outputs should be alive at the same time.
-    for (size_t i = 0; i < outputs.size(); ++i) {
-      for (size_t j = 0; j < outputs.size(); ++j) {
-        if (liveness_map.count(outputs[i]) && liveness_map.count(outputs[j])) {
-          liveness_map.at(outputs[i]).insert(outputs[j]);
-          liveness_map.at(outputs[j]).insert(outputs[i]);
-        }
-      }
-    }
-  }
+    insert_all_pairs_in_liveness_map(outputs);
+  };
 
   return liveness_map;
-}
+};
 
 // Collect the set of Values that are candidates for memory planning:
 //   - Values that are used in in-place operators (i.e., _out variants), and
@@ -1264,7 +1282,9 @@ ProcessedNode::ProcessedNode(
     Node* node,
     std::vector<const IValue*>&& inputs,
     bool enable_out_variant)
-    : node_(node), inputs_(std::move(inputs)) {
+    : node_(node),
+      inputs_(std::move(inputs)),
+      op_name_(node->kind().toQualString()) {
   // TODO leverage type information
   outputs_.resize(node->outputs().size());
 
@@ -1283,7 +1303,18 @@ ProcessedNode::ProcessedNode(
   }
 }
 
-void ProcessedNode::run() {
+std::vector<IValue> ProcessedNode::clone_inputs() const {
+  std::vector<IValue> result;
+  result.reserve(inputs_.size());
+  std::transform(
+      inputs_.begin(),
+      inputs_.end(),
+      std::back_inserter(result),
+      [](const IValue* ival) { return *ival; });
+  return result;
+}
+
+void ProcessedNode::run_impl() {
   DCHECK(verify_no_memory_overlap());
   if (fn_) {
     fn_(this);
@@ -1309,6 +1340,27 @@ void ProcessedNode::run() {
       Output(i) = std::move(stack[i]);
     }
   }
+}
+
+void ProcessedNode::run() {
+#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
+  bool pre_sampled = false;
+  if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
+    at::RecordFunction guard(at::RecordScope::FUNCTION, pre_sampled);
+    if (guard.isActive()) {
+      if (guard.needsInputs()) {
+        guard.before(get_op_name(), clone_inputs());
+      } else {
+        guard.before(get_op_name());
+      }
+    }
+    run_impl();
+  } else {
+    run_impl();
+  }
+#else
+  run_impl();
+#endif
 }
 
 static bool checkNoMemoryOverlap(const at::Tensor& a, const at::Tensor& b) {
