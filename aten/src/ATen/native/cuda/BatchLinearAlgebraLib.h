@@ -7,8 +7,7 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cuda/MiscUtils.h>
 
-#if defined(CUDART_VERSION) && defined(CUSOLVER_VERSION) && CUSOLVER_VERSION >= 10200
-// some cusolver functions don't work well on cuda 9.2 or cuda 10.1.105, cusolver is used on cuda >= 10.1.243
+#if defined(CUDART_VERSION) && defined(CUSOLVER_VERSION)
 #define USE_CUSOLVER
 #endif
 
@@ -36,10 +35,10 @@ namespace at {
 namespace native {
 
 void geqrf_batched_cublas(const Tensor& input, const Tensor& tau);
-void triangular_solve_cublas(const Tensor& A, const Tensor& B, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular);
-void triangular_solve_batched_cublas(const Tensor& A, const Tensor& B, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular);
+void triangular_solve_cublas(const Tensor& A, const Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular);
+void triangular_solve_batched_cublas(const Tensor& A, const Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular);
 void gels_batched_cublas(const Tensor& a, Tensor& b, Tensor& infos);
-void lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots, cublasOperation_t trans);
+void lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType transpose);
 
 #ifdef USE_CUSOLVER
 
@@ -60,7 +59,7 @@ void ormqr_cusolver(const Tensor& input, const Tensor& tau, const Tensor& other,
 Tensor& orgqr_helper_cusolver(Tensor& result, const Tensor& tau);
 
 void linalg_eigh_cusolver(const Tensor& eigenvalues, const Tensor& eigenvectors, const Tensor& infos, bool upper, bool compute_eigenvectors);
-void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& pivots, cublasOperation_t trans);
+void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType transpose);
 
 void lu_looped_cusolver(const Tensor& self, const Tensor& pivots, const Tensor& infos, bool get_pivots);
 
