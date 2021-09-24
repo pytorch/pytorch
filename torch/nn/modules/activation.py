@@ -131,6 +131,8 @@ class RReLU(Module):
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
         - Output: :math:`(*)`, same shape as the input.
 
+    .. image:: ../scripts/activation_images/RReLU.png
+
     Examples::
 
         >>> m = nn.RReLU(0.1, 0.3)
@@ -308,6 +310,8 @@ class Hardsigmoid(Module):
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
         - Output: :math:`(*)`, same shape as the input.
 
+    .. image:: ../scripts/activation_images/Hardsigmoid.png
+
     Examples::
 
         >>> m = nn.Hardsigmoid()
@@ -367,6 +371,8 @@ class SiLU(Module):
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
         - Output: :math:`(*)`, same shape as the input.
 
+    .. image:: ../scripts/activation_images/SiLU.png
+
     Examples::
 
         >>> m = nn.SiLU()
@@ -400,6 +406,8 @@ class Mish(Module):
     Shape:
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
         - Output: :math:`(*)`, same shape as the input.
+
+    .. image:: ../scripts/activation_images/Mish.png
 
     Examples::
 
@@ -439,6 +447,8 @@ class Hardswish(Module):
     Shape:
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
         - Output: :math:`(*)`, same shape as the input.
+
+    .. image:: ../scripts/activation_images/Hardswish.png
 
     Examples::
 
@@ -1236,8 +1246,8 @@ class Softmax2d(Module):
     apply `Softmax` to each location :math:`(Channels, h_i, w_j)`
 
     Shape:
-        - Input: :math:`(N, C, H, W)`
-        - Output: :math:`(N, C, H, W)` (same shape as input)
+        - Input: :math:`(N, C, H, W)` or :math:`(C, H, W)`.
+        - Output: :math:`(N, C, H, W)` or :math:`(C, H, W)` (same shape as input)
 
     Returns:
         a Tensor of the same dimension and shape as the input with
@@ -1252,8 +1262,8 @@ class Softmax2d(Module):
     """
 
     def forward(self, input: Tensor) -> Tensor:
-        assert input.dim() == 4, 'Softmax2d requires a 4D tensor as input'
-        return F.softmax(input, 1, _stacklevel=5)
+        assert input.dim() == 4 or input.dim() == 3, 'Softmax2d requires a 3D or 4D tensor as input'
+        return F.softmax(input, -3, _stacklevel=5)
 
 
 class LogSoftmax(Module):

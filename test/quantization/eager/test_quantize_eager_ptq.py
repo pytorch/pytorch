@@ -1001,7 +1001,7 @@ class TestPostTrainingDynamic(QuantizationTestCase):
         model = LinearReluLinearModel().eval()
         qconfig = default_dynamic_qconfig
         qconfig_dict = {'' : qconfig}
-        torch.quantization.fuse_modules(model, [['fc1', 'relu']], inplace=True)
+        torch.ao.quantization.fuse_modules(model, [['fc1', 'relu']], inplace=True)
         prepare_dynamic(model, qconfig_dict)
         convert_dynamic(model)
 
@@ -1233,8 +1233,6 @@ class TestQuantizeONNXExport(JitTestCase):
         input_names = ["x"]
 
         def export_to_onnx(model, input, input_names):
-            outputs = model(input)
-
             traced = torch.jit.trace(model, input)
             buf = io.BytesIO()
             torch.jit.save(traced, buf)
@@ -1242,7 +1240,7 @@ class TestQuantizeONNXExport(JitTestCase):
 
             model = torch.jit.load(buf)
             f = io.BytesIO()
-            torch.onnx.export(model, input, f, input_names=input_names, example_outputs=outputs,
+            torch.onnx.export(model, input, f, input_names=input_names,
                               operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
         onnx_model = export_to_onnx(model, data, input_names)
 
