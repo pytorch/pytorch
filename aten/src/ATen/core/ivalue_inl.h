@@ -1,6 +1,7 @@
 #pragma once
 
 #include <condition_variable>
+#include <memory>
 #include <type_traits>
 #include <utility>
 
@@ -276,15 +277,9 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
   const std::vector<IValue>& elements() const& {
     return elements_;
   }
-  operator const std::vector<IValue>&() const {
-    return elements();
-  }
 
   std::vector<IValue>& elements() & {
     return elements_;
-  }
-  operator std::vector<IValue>&() {
-    return elements();
   }
 
   std::vector<IValue>&& elements() && {
@@ -874,8 +869,25 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAny(
 // User-defined object.
 struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
  public:
-  Object(StrongTypePtr type, size_t numSlots) : type_(std::move(type)) {
+  // In general, class types hold a shared_ptr to its owning CompilationUnit,
+  // so that its type and methods do not get deallocated while the class exists.
+  // However, the CompilationUnit holds ownership of the type's graphs, so
+  // inserting a constant object into a Graph would create a reference cycle if
+  // that constant object held a shared_ptr to its CU. For these objects we
+  // instatiate them with non-owning references to its CU
+  Object(WeakOrStrongTypePtr type, size_t numSlots) : type_(std::move(type)) {
     slots_.resize(numSlots);
+  }
+
+  Object(StrongTypePtr type, size_t numSlots)
+      : type_(WeakOrStrongTypePtr(std::move(type))) {
+    slots_.resize(numSlots);
+  }
+
+  static c10::intrusive_ptr<Object> create(
+      WeakOrStrongTypePtr type,
+      size_t numSlots) {
+    return c10::make_intrusive<Object>(std::move(type), numSlots);
   }
 
   static c10::intrusive_ptr<Object> create(
@@ -944,7 +956,18 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   std::shared_ptr<ClassType> type() const;
 
   std::shared_ptr<torch::jit::CompilationUnit> compilation_unit() {
-    return type_.cu_;
+    if (type_.holds_strong_ref()) {
+      return type_.cu_.getStrongRefOrThrow();
+    } else {
+      auto weak_ptr = type_.cu_.getWeakRefOrThrow();
+      return std::shared_ptr<torch::jit::CompilationUnit>(weak_ptr);
+    }
+  }
+
+  c10::intrusive_ptr<Object> copy_to_weak_compilation_ref() const;
+
+  void unsafe_make_weak_compilation_ref() {
+    type_ = WeakOrStrongTypePtr(type_.asWeakTypePtr());
   }
 
   c10::intrusive_ptr<Object> copy() const;
@@ -953,9 +976,13 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
 
   c10::intrusive_ptr<Object> deepcopy(IValue::HashAliasedIValueMap& memo) const;
 
+  bool is_weak_compilation_ref() const {
+    return !type_.holds_strong_ref();
+  }
+
  private:
   void resizeObject(size_t slot);
-  StrongTypePtr type_;
+  WeakOrStrongTypePtr type_;
   std::vector<IValue> slots_;
 };
 
@@ -1046,7 +1073,8 @@ inline const ivalue::Object& IValue::toObjectRef() const {
   }                                                        \
   template <>                                              \
   inline c10::detail::ivalue_to_const_ref_overload_return<T>::type IValue::to<T>() const& { \
-    return this->method_name();            \
+    typedef c10::detail::ivalue_to_const_ref_overload_return<T>::type return_type;          \
+    return static_cast<return_type>(this->method_name());                                   \
   }
 
 DEFINE_TO(at::Tensor, toTensor)
