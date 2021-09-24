@@ -15,9 +15,13 @@ def sprint(*args: Any) -> None:
 
 
 def parse_value(value: str) -> Any:
+    # Take the value from a line of `sccache --show-stats` and try to parse
+    # out a value
     try:
         return int(value)
     except ValueError:
+        # sccache reports times as 0.000 s, so detect that here and strip
+        # off the non-numeric parts
         if value.endswith(" s"):
             return float(value[: -len(" s")])
 
@@ -72,10 +76,7 @@ if __name__ == "__main__":
         # we want are hardcoded
         register_rds_schema("sccache_stats", schema_from_sample(data))
 
-        rds_write(
-            "sccache_stats", [data], only_on_master=False
-        )  # TODO: disable this once it's been tested
-        # rds_write("sccache_stats", [data])
+        rds_write("sccache_stats", [data])
         sprint("Wrote sccache stats to DB")
     else:
         sprint("Not in GitHub Actions, skipping")
