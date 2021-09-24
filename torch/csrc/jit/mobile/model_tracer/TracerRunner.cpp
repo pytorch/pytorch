@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/mobile/model_tracer/OperatorCallTracer.h>
 #include <torch/csrc/jit/mobile/model_tracer/TensorUtils.h>
 #include <torch/csrc/jit/mobile/model_tracer/TracerRunner.h>
+#include <torch/csrc/jit/mobile/parse_operators.h>
 #include <torch/script.h>
 
 namespace torch {
@@ -97,22 +98,11 @@ void consume_tensor(at::Tensor& t) {
   c.copy_(t.cpu());
 }
 
-TracerResult trace_run(const std::string& input_module_path) {
-  at::globalContext().setQEngine(at::QEngine::QNNPACK);
-  c10::ObservedOperators::getUnobservedOperatorList().clear();
-
-  torch::jit::mobile::OperatorCallTracer op_tracer;
-  torch::jit::mobile::KernelDTypeTracer kdtype_tracer;
-
-  call_setup_methods();
-
-  std::set<std::string> root_ops, traced_operators;
-  torch::jit::mobile::KernelDTypeTracer::kernel_tags_type called_kernel_tags;
-
-  std::vector<std::string> enabled_backends;
-
-  using torch::jit::MobileModuleLoadOptions;
-
+void run_model(
+    const std::string& input_module_path,
+    std::set<std::string>& root_ops,
+    std::set<std::string>& enabled_backends,
+    KernelDTypeTracer::kernel_tags_type& called_kernel_tags) {
   try {
     // Load the module on CPU with the flag to skip the operator exists check.
     // This is needed so that we can load any TorchBind objects (custom classes)
@@ -128,7 +118,7 @@ TracerResult trace_run(const std::string& input_module_path) {
       std::cout << "Inferred Metal GPU Model." << std::endl;
       root_ops.insert(gpu_metal_operators.begin(), gpu_metal_operators.end());
       called_kernel_tags["__unused__"] = {"Float"};
-      enabled_backends.emplace_back("Metal GPU");
+      enabled_backends.insert("Metal GPU");
 
       // When we encounter a GPU model, we should call .cpu().copy_() on the
       // tensors in the bundled inputs, since this is what will happen when
@@ -137,7 +127,7 @@ TracerResult trace_run(const std::string& input_module_path) {
       module_runner.for_each_tensor_in_bundled_inputs(consume_tensor);
     } else {
       std::cout << "Inferred CPU Model." << std::endl;
-      enabled_backends.emplace_back("CPU");
+      enabled_backends.insert("CPU");
       torch::jit::mobile::MobileModelRunner mobile_module_runner(
           input_module_path);
 
@@ -198,6 +188,26 @@ TracerResult trace_run(const std::string& input_module_path) {
 
     throw ex;
   }
+}
+
+TracerResult trace_run(const std::string& input_module_path) {
+  at::globalContext().setQEngine(at::QEngine::QNNPACK);
+  c10::ObservedOperators::getUnobservedOperatorList().clear();
+
+  torch::jit::mobile::OperatorCallTracer op_tracer;
+  torch::jit::mobile::KernelDTypeTracer kdtype_tracer;
+
+  call_setup_methods();
+
+  std::set<std::string> root_ops, traced_operators, enabled_backends;
+  torch::jit::mobile::KernelDTypeTracer::kernel_tags_type called_kernel_tags;
+
+  using torch::jit::MobileModuleLoadOptions;
+
+  // run with QNNPACK
+  run_model(input_module_path, root_ops, enabled_backends, called_kernel_tags);
+  at::globalContext().setQEngine(at::QEngine::FBGEMM);
+  run_model(input_module_path, root_ops, enabled_backends, called_kernel_tags);
 
   traced_operators = op_tracer.getCalledOperators();
   called_kernel_tags.insert(
