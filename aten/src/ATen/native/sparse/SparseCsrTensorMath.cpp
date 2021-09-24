@@ -196,7 +196,7 @@ Tensor& addmm_out_sparse_csr_cpu(
   }
 
   if (mat1._nnz() == 0 && mat2.layout() == kStrided) {
-    // According to documetnation, when beta==0 values in self should be ignored. nans and infs should not propagate
+    // According to docs, when beta==0 values in self should be ignored. nans and infs should not propagate
     if (beta.toComplexDouble() == 0.) {
       result.zero_();
     } else {
