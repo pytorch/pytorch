@@ -2,6 +2,7 @@ import collections
 import gc
 import io
 import json
+import time
 import os
 import unittest
 
@@ -587,8 +588,16 @@ class TestProfiler(TestCase):
                 assert is_int, "Invalid stacks record"
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
-    @unittest.skipIf(IS_WINDOWS, "Test is flaky on Windows")
     def test_tensorboard_trace_handler(self):
+        def delayed(func, time_to_sleep=0.005):
+            """"The payload in this test might be too small. tensorboard_trace_handler use time.time()
+            to generate a filename. Delaying it to avoid generate the same filename on Windows.
+            """
+            def wrapper(*args, **kwargs):
+                time.sleep(time_to_sleep)
+                func(*args, **kwargs)
+            return wrapper
+
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
         with _profile(use_cuda=use_cuda, use_kineto=True):
             self.payload(use_cuda=use_cuda)
@@ -605,7 +614,7 @@ class TestProfiler(TestCase):
                     warmup=1,
                     active=2,
                     repeat=3),
-                on_trace_ready=torch.profiler.tensorboard_trace_handler(dname)
+                on_trace_ready=delayed(torch.profiler.tensorboard_trace_handler(dname))
             ) as p:
                 for _ in range(18):
                     self.payload(use_cuda=use_cuda)
@@ -634,7 +643,7 @@ class TestProfiler(TestCase):
                     warmup=1,
                     active=2,
                     repeat=3),
-                on_trace_ready=torch.profiler.tensorboard_trace_handler(dname, use_gzip=True)
+                on_trace_ready=delayed(torch.profiler.tensorboard_trace_handler(dname, use_gzip=True))
             )
             p.start()
             for _ in range(18):
