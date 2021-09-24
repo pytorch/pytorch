@@ -1,5 +1,7 @@
 from functorch import make_fx
 import torch
+import torch.nn as nn
+from functorch import make_fx, grad, nnc_jit, nnc_compile, vmap, make_nnc, vjp, make_functional, FunctionalModule
 from torch.fx.node import map_arg
 import torch.fx as fx
 import torch.utils._pytree as pytree
@@ -191,3 +193,18 @@ def tvm_compile(fx_module, example_inputs, name = None):
 
 def tvm_function(fn, name):
     return compiled_function(fn, partial(tvm_compile, name=f'fw_{name}'), partial(tvm_compile, name=f'bw_{name}'))
+
+def compiled_module(mod, fw_compiler, bw_compiler):
+    func_mod, params = make_functional(mod)
+    compiled_f = compiled_function(func_mod, fw_compiler, bw_compiler)
+    #func_mod = func_mod.with_state(params)
+    class CompiledModule(nn.Module):
+        def __init__(self):
+            super(CompiledModule, self).__init__()
+            self.orig_module = mod
+
+        def forward(self, *args, **kwargs):
+            _, p = make_functional(self.orig_module)
+            return compiled_f(p, *args, **kwargs)
+
+    return CompiledModule()
