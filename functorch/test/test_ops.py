@@ -19,8 +19,6 @@ from torch.testing._internal.common_device_type import ops, onlyCPU
 from functorch_lagging_op_db import functorch_lagging_op_db
 from functorch_additional_op_db import additional_op_db
 from common_utils import (
-    parameterized,
-    instantiate_parameterized_methods,
     get_fallback_and_vmap_exhaustive,
     get_exhaustive_batched_inputs,
     opinfo_in_dict,
