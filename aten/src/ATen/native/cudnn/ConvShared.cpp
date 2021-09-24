@@ -227,10 +227,7 @@ Tensor cudnn_convolution_forward(
   checkAllSameType(c, {input, weight});
   checkAllSameGPU(c, {input, weight});
 
-  auto memory_format = at::MemoryFormat::Contiguous;
-  if (cudnn_conv_use_channels_last(*input, *weight)) {
-    memory_format = (weight->ndimension() == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
-  }
+  auto memory_format = cudnn_conv_suggest_memory_format(*input, *weight);
   auto output_t = at::native::empty_cuda(
                     conv_output_size(input->sizes(), weight->sizes(),
                                      padding, stride, dilation),
@@ -248,12 +245,8 @@ Tensor cudnn_convolution_forward(
   TensorArg output{ output_t, "result", 0 };
   convolution_shape_check(c, input, weight, output, padding, stride, dilation, groups);
 
-  // See #4500
   Tensor weight_contig = weight->contiguous(memory_format);
-  // Make sure that NC11 strides follow formula
-  weight_contig.resize_(weight_contig.sizes(), memory_format);
   Tensor input_contig = input->contiguous(memory_format);
-  input_contig.resize_(input_contig.sizes(), memory_format);
 
   raw_cudnn_convolution_forward_out(
       *output, input_contig, weight_contig,
@@ -334,10 +327,7 @@ Tensor cudnn_convolution_backward_input(
   checkAllSameType(c, {grad_output, weight});
   checkAllSameGPU(c, {grad_output, weight});
 
-  auto memory_format = at::MemoryFormat::Contiguous;
-  if (cudnn_conv_use_channels_last(*grad_output, *weight)){
-    memory_format = (weight->ndimension() == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
-  }
+  auto memory_format = cudnn_conv_suggest_memory_format(*grad_output, *weight);
   auto grad_input_t = at::native::empty_cuda(
                     input_size,
                     /*dtype=*/grad_output->scalar_type(),
@@ -350,13 +340,8 @@ Tensor cudnn_convolution_backward_input(
   TensorArg grad_input{ grad_input_t, "result", 0 };
   convolution_shape_check(c, grad_input, weight, grad_output, padding, stride, dilation, groups);
 
-  // See #4500
   Tensor weight_contig = weight->contiguous(memory_format);
-  // Make sure that NC11 strides follow formula
-  weight_contig.resize_(weight_contig.sizes(), memory_format);
-
   Tensor grad_output_contig = grad_output->contiguous(memory_format);
-  grad_output_contig.resize_(grad_output_contig.sizes(), memory_format);
 
   raw_cudnn_convolution_backward_input_out(
       *grad_input, grad_output_contig, weight_contig,
@@ -442,18 +427,12 @@ Tensor cudnn_convolution_backward_weight(
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, bool allow_tf32)
 {
-  auto layout = at::MemoryFormat::Contiguous;
-  if (cudnn_conv_use_channels_last(input_t, grad_output_t)){
-    layout = (input_t.ndimension() == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
-  }
+  auto layout = cudnn_conv_suggest_memory_format(input_t, grad_output_t);
 
   Tensor grad_output_contig_t = grad_output_t.contiguous(layout);
-  // Make sure that NC11 strides follow formula
-  grad_output_contig_t.resize_(grad_output_contig_t.sizes(), layout);
   TensorArg grad_output_contig{ grad_output_contig_t, "grad_output", 1 };
 
   Tensor input_contig_t = input_t.contiguous(layout);
-  input_contig_t.resize_(input_contig_t.sizes(), layout);
   TensorArg input{ input_contig_t, "input", 2};
 
   checkAllSameType(c, {grad_output_contig, input});
@@ -507,23 +486,27 @@ Tensor cudnn_convolution_relu(
     IntArrayRef padding,
     IntArrayRef dilation,
     int64_t groups) {
+  auto memory_format = cudnn_conv_suggest_memory_format(input_t, weight_t);
+  const Tensor input = input_t.contiguous(memory_format);
+  const Tensor weight = weight_t.contiguous(memory_format);
+
   // FuseFrozenConvAddRelu performs some tensor shape checking
   auto output_t = at::native::empty_cuda(
       conv_output_size(
-          input_t.sizes(), weight_t.sizes(), padding, stride, dilation),
-      /*dtype=*/input_t.scalar_type(),
+          input.sizes(), weight.sizes(), padding, stride, dilation),
+      /*dtype=*/input.scalar_type(),
       /*layout=*/c10::nullopt,
       /*device=*/kCUDA,
       /*pin_memory=*/c10::nullopt,
-      /*memory_format=*/input_t.suggest_memory_format());
+      /*memory_format=*/memory_format);
   if (output_t.numel() == 0) {
     return output_t;
   }
 
   raw_cudnn_convolution_add_relu_out(
       output_t,
-      input_t,
-      weight_t,
+      input,
+      weight,
       output_t, // use output_t as z to satisfy CUDNN API
       0, // alpha
       bias_t.has_value()
@@ -540,7 +523,7 @@ Tensor cudnn_convolution_relu(
       groups,
       false, // benchmark
       false, // deterministic
-      input_t.dim() == 4 // enable allow_tf32 for conv2d
+      input.dim() == 4 // enable allow_tf32 for conv2d
   );
 
   return output_t;
@@ -556,23 +539,27 @@ Tensor cudnn_convolution_add_relu(
     IntArrayRef padding,
     IntArrayRef dilation,
     int64_t groups) {
+  auto memory_format = cudnn_conv_suggest_memory_format(input_t, weight_t);
+  const Tensor input = input_t.contiguous(memory_format);
+  const Tensor weight = weight_t.contiguous(memory_format);
+
   // FuseFrozenConvAddRelu performs some tensor shape checking
   auto output_t = at::native::empty_cuda(
       conv_output_size(
-          input_t.sizes(), weight_t.sizes(), padding, stride, dilation),
-      /*dtype=*/input_t.scalar_type(),
+          input.sizes(), weight.sizes(), padding, stride, dilation),
+      /*dtype=*/input.scalar_type(),
       /*layout=*/c10::nullopt,
       /*device=*/kCUDA,
       /*pin_memory=*/c10::nullopt,
-      /*memory_format=*/at::MemoryFormat::Contiguous);
+      /*memory_format=*/memory_format);
   if (output_t.numel() == 0) {
     return output_t;
   }
 
   raw_cudnn_convolution_add_relu_out(
       output_t,
-      input_t,
-      weight_t,
+      input,
+      weight,
       z_t,
       alpha.has_value() ? alpha.value().to<float>() : 1.0,
       bias_t.has_value()
@@ -589,7 +576,7 @@ Tensor cudnn_convolution_add_relu(
       groups,
       false, // benchmark
       false, // deterministic
-      input_t.dim() == 4 // enable allow_tf32 for conv2d
+      input.dim() == 4 // enable allow_tf32 for conv2d
   );
 
   return output_t;
