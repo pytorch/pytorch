@@ -42,5 +42,18 @@ inline void assertNotCapturing(std::string attempt) {
               status);
 }
 
+inline void errorIfCapturingCudnnBenchmark(std::string version_specific) {
+  auto status = currentStreamCaptureStatus();
+  TORCH_CHECK(status == CaptureStatus::None,
+              "Current cudaStreamCaptureStatus: ",
+              status,
+              "\nCapturing ",
+              version_specific,
+              "is prohibited. Possible causes of this error:\n"
+              "1. No warmup iterations occurred before capture.\n"
+              "2. The convolutions you're trying to capture use dynamic shapes, "
+              "in which case capturing them is generally prohibited.");
+}
+
 } // namespace cuda
 } // namespace at

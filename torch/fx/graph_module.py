@@ -96,7 +96,8 @@ def _format_import_block(globals: Dict[str, Any], importer: Importer):
     return '\n'.join(import_strs)
 
 
-def _reduce_graph_module(body: Dict[Any, Any], import_block: str) -> torch.nn.Module:
+@compatibility(is_backward_compatible=True)
+def reduce_graph_module(body: Dict[Any, Any], import_block: str) -> torch.nn.Module:
     # BC: attribute name was changed from `code` to `_code` to facilitate
     # making `code` into a property and adding a docstring to it
     fn_src = body.get('_code') or body['code']
@@ -104,14 +105,15 @@ def _reduce_graph_module(body: Dict[Any, Any], import_block: str) -> torch.nn.Mo
     return _deserialize_graph_module(forward, body)
 
 
-def _reduce_package_graph_module(
+@compatibility(is_backward_compatible=True)
+def reduce_package_graph_module(
     importer: PackageImporter, body: Dict[Any, Any], generated_module_name: str
 ) -> torch.nn.Module:
     forward = importer.import_module(generated_module_name).forward
     return _deserialize_graph_module(forward, body)
 
-
-def _reduce_deploy_graph_module(
+@compatibility(is_backward_compatible=True)
+def reduce_deploy_graph_module(
     importer: PackageImporter, body: Dict[Any, Any], import_block: str
 ) -> torch.nn.Module:
     ns = dict()
@@ -239,6 +241,14 @@ class GraphModule(torch.nn.Module):
         # so create a new singleton class for each instance.
         # it is a subclass of the user-defined class, the only difference
         # is an extra layer to install the forward method
+
+        # address issue described at https://github.com/pytorch/pytorch/issues/63883
+        # in other words, traverse class hierarchy to fix the redundant class definition problem
+        for t in cls.__mro__:
+            c = t.__qualname__.split('.')[-1]
+            if c != 'GraphModuleImpl':
+                cls = t
+                break
 
         class GraphModuleImpl(cls):  # type: ignore[misc, valid-type]
             pass
@@ -618,7 +628,7 @@ class {module_name}(torch.nn.Module):
 
         python_code = self.recompile()
         import_block = _format_import_block(python_code.globals, importer)
-        return (_reduce_deploy_graph_module, (dict_without_graph, import_block))
+        return (reduce_deploy_graph_module, (dict_without_graph, import_block))
 
     def __reduce_package__(self, exporter: PackageExporter):
         dict_without_graph = self.__dict__.copy()
@@ -630,7 +640,7 @@ class {module_name}(torch.nn.Module):
         import_block = _format_import_block(python_code.globals, exporter.importer)
         module_code = import_block + self.code
         exporter.save_source_string(generated_module_name, module_code)
-        return (_reduce_package_graph_module, (dict_without_graph, generated_module_name))
+        return (reduce_package_graph_module, (dict_without_graph, generated_module_name))
 
     def __reduce__(self):
         """
@@ -644,7 +654,7 @@ class {module_name}(torch.nn.Module):
         python_code = self.recompile()
         import_block = _format_import_block(python_code.globals, sys_importer)
         del dict_without_graph['_graph']
-        return (_reduce_graph_module, (dict_without_graph, import_block))
+        return (reduce_graph_module, (dict_without_graph, import_block))
 
     # because __reduce__ is defined for serialization,
     # we need to define deepcopy otherwise it will call __reduce__

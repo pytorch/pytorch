@@ -452,6 +452,7 @@ def get_default_args(fn):
         return {}
 
     signature = inspect.signature(fn)
+
     return {
         k: v.default
         for k, v in signature.parameters.items()
