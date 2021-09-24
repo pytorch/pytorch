@@ -569,7 +569,7 @@ TEST(SchemaParserTest, BeforeAfterSets) {
       " -> (Tensor(b|c)[](a!))");
 
   // The list itself is annotated with `a`
-  const AliasInfo* aliasInfo = *s.arguments().at(0).alias_info();
+  const AliasInfo* aliasInfo = s.arguments().at(0).alias_info();
   ASSERT_NE(aliasInfo, nullptr);
   ASSERT_TRUE(
       aliasInfo->beforeSets() ==
