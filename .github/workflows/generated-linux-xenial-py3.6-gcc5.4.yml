@@ -210,7 +210,6 @@ jobs:
               "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
           }
           retry docker pull "${DOCKER_IMAGE}"
-          docker pull "${DOCKER_IMAGE}"
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py

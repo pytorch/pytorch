@@ -136,7 +136,6 @@ jobs:
       - name: Pull Docker image
         run: |
           !{{ common.pull_docker("${DOCKER_IMAGE}") }}
-          docker pull "${DOCKER_IMAGE}"
       !{{ common.parse_ref() }}
       - name: Build
         env:
