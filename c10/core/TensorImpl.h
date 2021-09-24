@@ -871,6 +871,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return key_set_.has(DispatchKey::XLA);
   }
 
+  bool is_hpu() const {
+    return key_set_.has(DispatchKey::HPU);
+  }
+
   bool is_lazy() const {
     return key_set_.has(DispatchKey::Lazy);
   }

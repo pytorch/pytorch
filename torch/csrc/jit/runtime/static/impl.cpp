@@ -2,6 +2,7 @@
 
 #include <ATen/MemoryOverlap.h>
 #include <ATen/core/interned_strings.h>
+#include <ATen/record_function.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/core/InferenceMode.h>
 #include <c10/util/irange.h>
@@ -1281,7 +1282,9 @@ ProcessedNode::ProcessedNode(
     Node* node,
     std::vector<const IValue*>&& inputs,
     bool enable_out_variant)
-    : node_(node), inputs_(std::move(inputs)) {
+    : node_(node),
+      inputs_(std::move(inputs)),
+      op_name_(node->kind().toQualString()) {
   // TODO leverage type information
   outputs_.resize(node->outputs().size());
 
@@ -1300,7 +1303,18 @@ ProcessedNode::ProcessedNode(
   }
 }
 
-void ProcessedNode::run() {
+std::vector<IValue> ProcessedNode::clone_inputs() const {
+  std::vector<IValue> result;
+  result.reserve(inputs_.size());
+  std::transform(
+      inputs_.begin(),
+      inputs_.end(),
+      std::back_inserter(result),
+      [](const IValue* ival) { return *ival; });
+  return result;
+}
+
+void ProcessedNode::run_impl() {
   DCHECK(verify_no_memory_overlap());
   if (fn_) {
     fn_(this);
@@ -1326,6 +1340,27 @@ void ProcessedNode::run() {
       Output(i) = std::move(stack[i]);
     }
   }
+}
+
+void ProcessedNode::run() {
+#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
+  bool pre_sampled = false;
+  if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
+    at::RecordFunction guard(at::RecordScope::FUNCTION, pre_sampled);
+    if (guard.isActive()) {
+      if (guard.needsInputs()) {
+        guard.before(get_op_name(), clone_inputs());
+      } else {
+        guard.before(get_op_name());
+      }
+    }
+    run_impl();
+  } else {
+    run_impl();
+  }
+#else
+  run_impl();
+#endif
 }
 
 static bool checkNoMemoryOverlap(const at::Tensor& a, const at::Tensor& b) {
