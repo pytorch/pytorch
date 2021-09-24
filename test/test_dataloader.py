@@ -1,6 +1,7 @@
 import math
 import sys
 import errno
+import multiprocessing
 import os
 import ctypes
 import faulthandler
@@ -67,7 +68,11 @@ load_tests = load_tests
 # as well during the execution of this test suite, and it will cause
 # CUDA OOM error on Windows.
 TEST_CUDA = torch.cuda.is_available()
-
+if TEST_CUDA:
+    dev_name = torch.cuda.get_device_name(torch.cuda.current_device()).lower()
+    IS_JETSON = 'xavier' in dev_name or 'nano' in dev_name or 'jetson' in dev_name or 'tegra' in dev_name
+else:
+    IS_JETSON = False
 
 if not NO_MULTIPROCESSING_SPAWN:
     # We want to use `spawn` if able because some of our tests check that the
@@ -1334,8 +1339,8 @@ except RuntimeError as e:
         counting_ds_n = 11
         dl_common_args = dict(num_workers=3, batch_size=3, pin_memory=(not TEST_CUDA))
         for ctx in supported_multiprocessing_contexts:
-            # windows doesn't support sharing cuda tensor; ROCm does not yet fully support IPC
-            if ctx in ['spawn', 'forkserver'] and TEST_CUDA and not IS_WINDOWS:
+            # windows and jetson devices don't support sharing cuda tensor; ROCm does not yet fully support IPC
+            if ctx in ['spawn', 'forkserver'] and TEST_CUDA and not IS_WINDOWS and not IS_JETSON:
                 ds_cls = CUDACountingDataset
             else:
                 ds_cls = CountingDataset
@@ -2320,9 +2325,24 @@ class TestIndividualWorkerQueue(TestCase):
                 current_worker_idx = 0
 
     def test_ind_worker_queue(self):
+        max_num_workers = None
+        if hasattr(os, 'sched_getaffinity'):
+            try:
+                max_num_workers = len(os.sched_getaffinity(0))
+            except Exception:
+                pass
+        if max_num_workers is None:
+            cpu_count = os.cpu_count()
+            if cpu_count is not None:
+                # Use half number of CPUs
+                max_num_workers = cpu_count // 2
+
+        if max_num_workers is None:
+            max_num_workers = 1
+
         for batch_size in (8, 16, 32, 64):
-            for num_workers in range(1, 6):
-                self._run_ind_worker_queue_test(batch_size=batch_size, num_workers=num_workers)
+            for num_workers in range(0, min(6, max_num_workers)):
+                self._run_ind_worker_queue_test(batch_size=batch_size, num_workers=num_workers + 1)
 
 
 class SetAffinityDataset(IterableDataset):
@@ -2334,7 +2354,7 @@ class SetAffinityDataset(IterableDataset):
 
 
 def worker_set_affinity(_):
-    os.sched_setaffinity(0, [2])
+    os.sched_setaffinity(0, [multiprocessing.cpu_count() - 1])
 
 
 @unittest.skipIf(
@@ -2347,7 +2367,7 @@ class TestSetAffinity(TestCase):
         dataloader = torch.utils.data.DataLoader(
             dataset, num_workers=2, worker_init_fn=worker_set_affinity)
         for sample in dataloader:
-            self.assertEqual(sample, [2])
+            self.assertEqual(sample, [multiprocessing.cpu_count() - 1])
 
 class ConvDataset(Dataset):
     def __init__(self):
