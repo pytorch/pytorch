@@ -2123,6 +2123,8 @@ def all_gather_coalesced(
     if _rank_not_in_group(group):
         return
     _check_tensor_list(input_tensor_list, "tensor_list")
+    for output_tensor_list in output_tensor_lists:
+        _check_tensor_list(output_tensor_list, "output_tensor_lists")
     if group is None:
         group = _get_default_group()
 
@@ -2135,9 +2137,6 @@ def all_gather_coalesced(
         )
     if len(input_tensor_list) == 0:
         raise RuntimeError("requires non-empty input tensor list")
-
-    for output_tensor_list in output_tensor_lists:
-        _check_tensor_list(output_tensor_list, "output_tensor_lists")
 
     # Expect i'th tensor of each list from 'output_lists' match i'th tensor
     # from 'input_list' in type and size.
