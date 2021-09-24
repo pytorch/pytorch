@@ -5,6 +5,7 @@ full_codegen:
   - addcdiv
   - addcmul
   - cos
+  - mm
 supported:
   - _log_softmax
   - _log_softmax_backward_data
@@ -31,7 +32,6 @@ supported:
   - fill_.Scalar
   - leaky_relu
   - leaky_relu_backward
-  - mm
   - mul.Tensor
   - mul.Scalar
   - native_batch_norm

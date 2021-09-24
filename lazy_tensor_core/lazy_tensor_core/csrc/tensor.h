@@ -785,8 +785,6 @@ class LazyTensor {
                       const LazyTensor& input, lazy_tensors::int64 dim,
                       bool keepdim);
 
-  static LazyTensor mm(const LazyTensor& input, const LazyTensor& weight);
-
   static LazyTensor mse_loss(const LazyTensor& input, const LazyTensor& target,
                              lazy_tensors::int64 reduction);
 
