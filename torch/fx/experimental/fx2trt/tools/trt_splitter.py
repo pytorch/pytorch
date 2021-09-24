@@ -17,7 +17,19 @@ class TRTOperatorSupport(OperatorSupport):
     def __init__(self):
         self._support_dict = {}
         for k in CONVERTERS.keys():
-            self._support_dict[k] = None
+            name = self.get_op_name(k)
+            self._support_dict[name] = None
+
+    def get_op_name(self, k):
+        if isinstance(k, str):
+            return k
+        elif k.__module__ and "acc_ops" in k.__module__:
+            return f"acc_ops.{k.__name__}"
+        else:
+            module = k.__module__
+            return f"{module if module else ''}.{k.__name__}".replace('_', '')
+
+
 
 
 class TRTSplitter(splitter_base._SplitterBase):
@@ -32,7 +44,6 @@ class TRTSplitter(splitter_base._SplitterBase):
             operator_support = TRTOperatorSupport()
         if not settings:
             settings = splitter_base._SplitterSettingBase()
-
         super().__init__(module, sample_input, operator_support, settings)
 
     def _lower_model_to_backend(

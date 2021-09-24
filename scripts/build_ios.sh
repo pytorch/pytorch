@@ -112,6 +112,11 @@ if [ "${USE_PYTORCH_METAL:-}" == "1" ]; then
   CMAKE_ARGS+=("-DUSE_PYTORCH_METAL=ON")
 fi
 
+# Core ML
+if [ "${USE_COREML_DELEGATE}" == "1" ]; then
+  CMAKE_ARGS+=("-DUSE_COREML_DELEGATE=ON")
+fi
+
 # pthreads
 CMAKE_ARGS+=("-DCMAKE_THREAD_LIBS_INIT=-lpthread")
 CMAKE_ARGS+=("-DCMAKE_HAVE_THREADS_LIBRARY=1")

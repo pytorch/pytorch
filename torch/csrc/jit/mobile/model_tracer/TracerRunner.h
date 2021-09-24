@@ -11,7 +11,7 @@ struct TracerResult {
   std::set<std::string> root_ops;
   std::set<std::string> traced_operators;
   KernelDTypeTracer::kernel_tags_type called_kernel_tags;
-  std::vector<std::string> enabled_backends;
+  std::set<std::string> enabled_backends;
 };
 
 TracerResult trace_run(const std::string& input_module_path);

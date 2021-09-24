@@ -18,6 +18,10 @@
 
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/jit/mobile/model_tracer/TensorUtils.h>
+#include <torch/csrc/jit/mobile/parse_operators.h>
+#include <torch/script.h>
+
+typedef std::map<std::string, std::set<std::string>> kt_type;
 #include <torch/csrc/jit/mobile/model_tracer/TracerRunner.h>
 
 C10_DEFINE_string(
@@ -72,12 +76,6 @@ void printOpsYAML(
   }
 }
 
-const std::vector<std::string> always_included_root_ops = {
-    // The following ops are missing in tracing.
-    "aten::addmm_",
-    "aten::slow_conv_dilated2d",
-};
-
 /**
  * Converts a pytorch model (full/lite) to lite interpreter model for
  * mobile, and additionally writes out a list of root and called
@@ -101,9 +99,6 @@ int main(int argc, char* argv[]) {
 
   torch::jit::mobile::TracerResult tracer_result =
       torch::jit::mobile::trace_run(FLAGS_model_input_path);
-
-  tracer_result.root_ops.insert(
-      always_included_root_ops.begin(), always_included_root_ops.end());
 
   for (auto& it : tracer_result.called_kernel_tags) {
     std::cout << "kernal tag, key: " << it.first << " value: " << it.second
