@@ -18,6 +18,7 @@ from torch.fx import GraphModule
 from torch.testing._internal.common_utils import TestCase, IS_AVX512_VNNI_SUPPORTED
 from torch.testing._internal.common_quantized import override_qengines, qengine_is_fbgemm
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
+from .torch_package_models import LinearReluFunctional
 
 from torch.quantization import MinMaxObserver, PerChannelMinMaxObserver
 import torch.quantization.quantize_fx as quantize_fx
@@ -53,19 +54,6 @@ def get_filenames(self, subname):
 
     return input_file, state_dict_file, scripted_module_file, \
         traced_module_file, expected_file, package_file, get_attr_targets_file
-
-
-class LinearReluFunctional(nn.Module):
-    def __init__(self, N):
-        super().__init__()
-        self.w1 = nn.Parameter(torch.empty(N, N))
-        self.b1 = nn.Parameter(torch.zeros(N))
-        torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
-
-    def forward(self, x):
-        x = torch.nn.functional.linear(x, self.w1, self.b1)
-        x = torch.nn.functional.relu(x)
-        return x
 
 
 class TestSerialization(TestCase):
@@ -172,7 +160,7 @@ class TestSerialization(TestCase):
         Verifies that files created in the past with torch.package
         work on today's FX graph mode quantization transforms.
         """
-        input_file, _state_dict_file, _scripted_module_file, _traced_module_file, \
+        input_file, state_dict_file, _scripted_module_file, _traced_module_file, \
             expected_file, package_file, get_attr_targets_file = \
             get_filenames(self, None)
 
@@ -187,8 +175,9 @@ class TestSerialization(TestCase):
             qconfig = torch.quantization.get_default_qconfig('fbgemm')
             mp = quantize_fx.prepare_fx(m, {'': qconfig})
             mp(input_tensor)
+            mp_state_dict = mp.state_dict()
             mq = quantize_fx.convert_fx(mp)
-            return mq
+            return mq, mp_state_dict
 
         def _get_get_attr_target_strings(m: GraphModule) -> Set[str]:
             results = set()
@@ -203,11 +192,12 @@ class TestSerialization(TestCase):
 
             # save the model with torch.package
             with torch.package.PackageExporter(package_file) as exp:
-                exp.extern('quantization.bc.test_backward_compatibility')
+                exp.intern('quantization.bc.torch_package_models')
                 exp.save_pickle(package_name, resource_name_model, fp32_module)
 
             # do the quantization transforms and save the result
-            mq = _do_quant_transforms(fp32_module, input_tensor)
+            mq, mp_state_dict = _do_quant_transforms(fp32_module, input_tensor)
+            torch.save(mp_state_dict, state_dict_file)
             get_attrs = _get_get_attr_target_strings(mq)
             torch.save(get_attrs, get_attr_targets_file)
             q_result = mq(input_tensor)
@@ -217,11 +207,18 @@ class TestSerialization(TestCase):
         input_tensor = torch.load(input_file)
         expected_output_tensor = torch.load(expected_file)
         expected_get_attrs = torch.load(get_attr_targets_file)
+        expected_mp_state_dict = torch.load(state_dict_file)
 
         # load model from package and verify output and get_attr targets match
         imp = torch.package.PackageImporter(package_file)
         m = imp.load_pickle(package_name, resource_name_model)
-        mq = _do_quant_transforms(m, input_tensor)
+        mq, mp_state_dict = _do_quant_transforms(m, input_tensor)
+
+        for k, v in mp_state_dict.items():
+            self.assertTrue(k in expected_mp_state_dict)
+            expected_v = expected_mp_state_dict[k]
+            self.assertTrue(torch.allclose(v, expected_v))
+
         get_attrs = _get_get_attr_target_strings(mq)
         self.assertTrue(get_attrs == expected_get_attrs)
         output_tensor = mq(input_tensor)
@@ -388,4 +385,3 @@ class TestSerialization(TestCase):
     def test_linear_relu_package_quantization_transforms(self):
         m = LinearReluFunctional(4).eval()
         self._test_package(m, input_size=(1, 1, 4, 4), generate=False)
-
