@@ -2123,15 +2123,18 @@ def all_gather_coalesced(
     if _rank_not_in_group(group):
         return
     _check_tensor_list(input_tensor_list, "tensor_list")
+    if group is None:
+        group = _get_default_group()
+
+    if len(output_tensor_lists) != group.size():
+        raise RuntimeError("output lists should be equal to world size")
+
     if not isinstance(output_tensor_lists, list):
         raise RuntimeError(
             "Invalid function argument: " "output_tensor_lists should be a list"
         )
     if len(input_tensor_list) == 0:
         raise RuntimeError("requires non-empty input tensor list")
-
-    if len(output_tensor_lists) == 0:
-        raise RuntimeError("output lists should not be empty")
 
     for output_tensor_list in output_tensor_lists:
         _check_tensor_list(output_tensor_list, "output_tensor_lists")
@@ -2163,9 +2166,6 @@ def all_gather_coalesced(
     input_tensor_list = [
         t if not t.is_complex() else torch.view_as_real(t) for t in input_tensor_list
     ]
-
-    if group is None:
-        group = _get_default_group()
 
     flatten_tensors = [x.flatten() for x in input_tensor_list]
     coalesced_input = torch.cat(flatten_tensors)
