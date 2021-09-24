@@ -263,7 +263,12 @@ static void nll_loss_out_frame(
                                         scalar_t{0});
 
   if (reduction == Reduction::Mean) {
-    output_val /= total_weight_val;
+    if (total_weight_val != 0) {
+      output_val /= total_weight_val;
+    } else if (input.numel() == 0) {
+      // Mean reduction on empty tensors produces NaN
+      output_val = std::numeric_limits<scalar_t>::quiet_NaN();
+    }
   }
 
   // write result to output tensors
