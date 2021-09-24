@@ -2948,6 +2948,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('linalg.svd', device_type='cuda'),
         xfail('index_put'),
         xfail('nn.functional.max_pool2d'),
+        xfail('nn.functional.batch_norm'),
     })
     def test_vmap_exhaustive(self, device, dtype, op):
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
@@ -3053,6 +3054,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.dropout'),
         xfail('nn.functional.max_pool2d'),
         xfail('nn.functional.conv2d', ''),
+        xfail('nn.functional.batch_norm'),
     })
     def test_op_has_batch_rule(self, device, dtype, op):
         def test():
