@@ -657,7 +657,9 @@ class DistributedDataParallelTest(
         # otherwise process will be taken down and we can't check for errors.
         os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "0"
         os.environ["NCCL_BLOCKING_WAIT"] = "1"
-        timeout = timedelta(seconds=2)
+        # TODO: smaller timeout can fail since PG NCCl does health check in
+        # constructor. Look into reducing this test's runtime.
+        timeout = timedelta(seconds=15)
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size, timeout=timeout)
         pg_gloo = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
@@ -2017,7 +2019,7 @@ class DistributedDataParallelTest(
     # A list of tests for ddp with activation checkpointing
     # when gradient_as_bucket_view=True, False.
     # Most of the tests are referred to
-    # https://github.com/facebookresearch/fairscale/blob/master/tests/nn/pipe/test_checkpoint_ddp.py
+    # https://github.com/facebookresearch/fairscale/blob/main/tests/nn/pipe/test_checkpoint_ddp.py
     class CheckpointOnceModule(nn.Module):
         def __init__(self):
             super().__init__()
