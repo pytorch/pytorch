@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/NativeFunctions.h>
@@ -7,7 +8,6 @@
 
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh>
-#include <THC/THCAtomics.cuh>
 
 #include <ATen/cuda/cub.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>

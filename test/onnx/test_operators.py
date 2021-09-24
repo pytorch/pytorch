@@ -279,12 +279,11 @@ class TestOperators(TestCase):
     def test_conv_variable_length(self):
         x = torch.ones(5, 3, 6, 6, requires_grad=True)
         model = torch.nn.Conv2d(3, 2, 3)
-        y = model(x)
 
         dynamic_axes = {"input_1": [0, 2, 3], "output_1": {0: "output_1_variable_dim_0", 1: "output_1_variable_dim_1"}}
         model_proto_name = "conv2d.onnx"
         torch.onnx.export(model, x, model_proto_name, verbose=True, input_names=["input_1"], output_names=["output_1"],
-                          example_outputs=y, dynamic_axes=dynamic_axes)
+                          dynamic_axes=dynamic_axes)
 
         import onnx
         onnx_model = onnx.load(model_proto_name)
@@ -728,22 +727,6 @@ class TestOperators(TestCase):
     def test_cumsum(self):
         x = torch.randn(2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.cumsum(x, dim=1), x, opset_version=11)
-
-    def test_retain_param_name_disabled(self):
-        class MyModule(Module):
-            def __init__(self):
-                super(MyModule, self).__init__()
-                self.fc1 = nn.Linear(4, 5, bias=False)
-                self.fc1.weight.data.fill_(2.)
-                self.fc2 = nn.Linear(5, 6, bias=False)
-                self.fc2.weight.data.fill_(3.)
-
-            def forward(self, x):
-                return self.fc2(self.fc1(x))
-
-        x = torch.randn(3, 4).float()
-        self.assertONNX(MyModule(), (x,), _retain_param_name=False,
-                        keep_initializers_as_inputs=True)
 
     def test_c2_op(self):
         class MyModel(torch.nn.Module):
