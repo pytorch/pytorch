@@ -1426,18 +1426,31 @@ VaryingShape<Stride> TensorType::computeStrideProps(
   //  Idx:     [1,  3,  2,   0]
   //  sizes:   [1, 16, 10,   8]
   //  Strides: [1,  1, 16, 160]
-
   std::sort(
       stride_indices.begin(),
       stride_indices.end(),
       [&strides, &sizes](const int& a, const int& b) {
         if (strides[a] == strides[b]) {
-          // The index order is ambiguous with 2 dimensions of size 1.
-          // In this case of uncertainty, default to descending index order.
-          if (sizes[a] == sizes[b]) {
-            return a > b;
+          // when strides of two axes are identical:
+          // i. if it's not self-overlapping:
+          //   1. if axis_a is the only size-1 axis, we think axis_a comes
+          //      before axis_b. Since strides[b] == strides[a] * sizes[a];
+          //      Meanwhile, it is not true for axis a;
+          //   2. if axis_b is the only size-1 axis, likewise, we think axis_a
+          //      comes after axis_b;
+          //   3. when both axes are size-1, we just assume canonical memory
+          //      format in PyTorch and takes whichever axis that comes first to
+          //      be the outer dimension;
+          //
+          // ii. when it's self-overlapping, we just default to PyTorch
+          //   canonical memory format and checks for whichever axis that comes
+          //   first;
+          if (sizes[a] == 1 && sizes[b] != 1) {
+            return true;
+          } else if (sizes[a] != 1 && sizes[b] == 1) {
+            return false;
           } else {
-            return sizes[a] == 1;
+            return a > b;
           }
         }
         return strides[a] < strides[b];
