@@ -46,7 +46,8 @@ class ConcatLinearLayers {
       // 0).clone(at::MemoryFormat::Contiguous);
 
       Tensor weight_tensor = constant_as<Tensor>(weight).value();
-      Tensor weight_t_tensor = at::transpose(weight_tensor, 1, 0).clone(at::MemoryFormat::Contiguous);
+      Tensor weight_t_tensor = at::transpose(weight_tensor, 1, 0)
+                                   .clone(at::MemoryFormat::Contiguous);
       Value* weight_t = graph_->insertConstant(weight_t_tensor);
       matmul = graph_->create(aten::matmul, {node->inputs()[0], weight_t});
       matmul->insertAfter(node);
@@ -59,7 +60,8 @@ class ConcatLinearLayers {
       node->replaceAllUsesWith(matmul);
     } else {
       Value* bias_scale = graph_->insertConstant(1);
-      Node* bias_result = graph_->create(aten::add, {matmul->output(), bias, bias_scale});
+      Node* bias_result =
+          graph_->create(aten::add, {matmul->output(), bias, bias_scale});
       bias_result->insertAfter(matmul);
       node->replaceAllUsesWith(bias_result);
     }
@@ -98,7 +100,7 @@ TORCH_API bool FrozenLinearTranspose(std::shared_ptr<Graph>& graph) {
   ConcatLinearLayers concatLayers;
   GRAPH_DUMP("Before FrozenLinearTranspose", graph);
   bool changed = concatLayers.run(graph);
-   if (changed) {
+  if (changed) {
     GRAPH_DUMP("After FrozenLinearTranspose", graph);
   }
   return changed;

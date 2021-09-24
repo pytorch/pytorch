@@ -1705,7 +1705,7 @@ class TestFrozenOptimizations(JitTestCase):
                 self.assertEqual(mod(inp), scripted_mod(inp))
                 self.assertEqual(mod(inp), scripted_mod(inp))
 
-    @unittest.skipIf(not torch._C.has_cuda, "Optimization currently only run for GPU")    
+    @unittest.skipIf(not torch._C.has_cuda, "Optimization currently only run for GPU")
     def test_linear_transpose(self):
         class ModLinear(torch.nn.Module):
             def __init__(self):
@@ -1716,7 +1716,7 @@ class TestFrozenOptimizations(JitTestCase):
             def forward(self, x):
                 return torch._C._nn.linear(x, self.weight, self.bias)
 
-        mod_eager = ModLinear().eval() 
+        mod_eager = ModLinear().eval()
         test_val = torch.rand([50, 20])
         self.check_linear_optimizations_2(mod_eager, 1, 0, "transpose_frozen_linear", (test_val,))
 
@@ -1742,7 +1742,7 @@ class TestFrozenOptimizations(JitTestCase):
                 mod_to_device = eager_mod.cuda()
                 test_vals_to_device = [t.cuda() if isinstance(t, torch.Tensor) else t for t in test_vals]
             else:
-                mod_to_device = eager_mod 
+                mod_to_device = eager_mod
                 test_vals_to_device = test_vals
 
             script_mod = torch.jit.script(mod_to_device)
