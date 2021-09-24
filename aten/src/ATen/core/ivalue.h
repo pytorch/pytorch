@@ -5,7 +5,6 @@
 #include <ATen/core/ivalue_to.h>
 #include <c10/util/C++17.h>
 #include <c10/util/intrusive_ptr.h>
-#include <c10/util/variant.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <typeindex>
 
