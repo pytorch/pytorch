@@ -92,7 +92,7 @@ class TestList(JitTestCase):
             if 1 == 1:
                 x = [1, 2, 3]
             return
-        with self.assertRaisesRegexWithHighlight(RuntimeError, r"previously has type List\[Tensor\]", "x"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, r"previously had type List\[Tensor\]", "x"):
             self.checkScript(reassign_from_empty_literal, (), optimize=False)
 
         def reassign_from_empty_builtin():
@@ -113,7 +113,7 @@ class TestList(JitTestCase):
             if 1 == 1:
                 x = [1.0]
             return
-        with self.assertRaisesRegexWithHighlight(RuntimeError, "previously has type", "x"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "previously had type", "x"):
             self.checkScript(reassign_bad_type, (), optimize=False)
 
         def reassign_nested():
@@ -123,7 +123,7 @@ class TestList(JitTestCase):
                 if 1 == 1:
                     x = [1.0]
             return
-        with self.assertRaisesRegexWithHighlight(RuntimeError, "previously has type", "x"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "previously had type", "x"):
             self.checkScript(reassign_nested, (), optimize=False)
 
     def test_del(self):
@@ -244,12 +244,9 @@ class TestList(JitTestCase):
         self.checkScript(fn, ())
 
     def test_dict_keyword_with_mismatched_annotations(self):
-        err_msg = r"Dict type annotation `Dict\[int, str\]` did not "\
-                  "match the types of the actual dict items"
-        err_msg = r"Dict type annotation `Dict\[int, str\]` did not "\
-                  "match the type of an actual key type `str`"
-        highlight_msg = "dict([(\"foo\", 1), (\"bar\", 2), (\"baz\", 3"
-        with self.assertRaisesRegexWithHighlight(RuntimeError, err_msg, highlight_msg):
+        err_msg = r"is annotated with type Dict\[int, str\] but is " \
+                  r"being assigned to a value of type Dict\[str, int\]"
+        with self.assertRaisesRegex(RuntimeError, err_msg):
             @torch.jit.script
             def fn():
                 x: Dict[int, str] = dict([("foo", 1), ("bar", 2), ("baz", 3)])    # noqa: C406
@@ -1328,7 +1325,7 @@ class TestList(JitTestCase):
             x = torch._C.ListType(None)
 
     def test_list_unification_hint(self):
-        with self.assertRaisesRegex(RuntimeError, "Expected a List type hint"):
+        with self.assertRaisesRegex(RuntimeError, "Expected an annotation of type List"):
             @torch.jit.script
             def x():
                 b : int = [2, 3]

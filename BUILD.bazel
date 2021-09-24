@@ -396,8 +396,6 @@ filegroup(
         "aten/src/THC/THCStorageCopy.cu.cc",
         "aten/src/THC/THCTensor.cu.cc",
         "aten/src/THC/THCTensorCopy.cu.cc",
-        "aten/src/THC/THCTensorMath.cu.cc",
-        "aten/src/THC/THCTensorMathPairwise.cu.cc",
         "aten/src/THC/THCTensorMathScan.cu.cc",
         "aten/src/THC/THCTensorScatterGather.cu.cc",
         "aten/src/THC/THCTensorSort.cu.cc",
