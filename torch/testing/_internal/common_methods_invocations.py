@@ -5746,7 +5746,7 @@ foreach_unary_op_db: List[OpInfo] = [
     ForeachFuncInfo(
         'abs',
         dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
-        dtypesIfCPU=all_types_and_complex_and(torch.bfloat16, torch.half),
+        dtypesIfCPU=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
         dtypesIfCUDA=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
         safe_casts_outputs=False,
         supports_forward_ad=True,
@@ -6044,7 +6044,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('abs',
                    aliases=('absolute', ),
                    ref=np.abs,
-                   dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    skips=(
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
