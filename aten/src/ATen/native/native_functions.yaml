@@ -6703,15 +6703,13 @@
     CUDA: legacy_lstsq_cuda
 
 - func: triangular_solve.X(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False, *, Tensor(a!) X, Tensor(b!) M) -> (Tensor(a!) solution, Tensor(b!) cloned_coefficient)
-  structured: True
   dispatch:
     CPU, CUDA: triangular_solve_out
-    SparseCsrCPU: triangular_solve_out_sparse_csr_cpu
-    SparseCsrCUDA: triangular_solve_out_sparse_csr_cuda
 
 - func: triangular_solve(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False) -> (Tensor solution, Tensor cloned_coefficient)
-  structured_delegate: triangular_solve.X
   variants: method, function
+  dispatch:
+    CPU, CUDA: triangular_solve
 
 - func: symeig.e(Tensor self, bool eigenvectors=False, bool upper=True, *, Tensor(a!) e, Tensor(b!) V) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
   dispatch:

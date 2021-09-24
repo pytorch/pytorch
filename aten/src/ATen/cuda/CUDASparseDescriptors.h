@@ -55,53 +55,7 @@ class TORCH_CUDA_CPP_API CuSparseSpMatCsrDescriptor
     : public CuSparseSpMatDescriptor {
  public:
   CuSparseSpMatCsrDescriptor(const Tensor& input);
-
-#if AT_USE_CUSPARSE_GENERIC_SPSV()
-  void set_mat_fill_mode(bool upper) {
-    cusparseFillMode_t fill_mode =
-        upper ? CUSPARSE_FILL_MODE_UPPER : CUSPARSE_FILL_MODE_LOWER;
-    TORCH_CUDASPARSE_CHECK(cusparseSpMatSetAttribute(
-        this->descriptor(),
-        CUSPARSE_SPMAT_FILL_MODE,
-        &fill_mode,
-        sizeof(fill_mode)));
-  }
-
-  void set_mat_diag_type(bool unit) {
-    cusparseDiagType_t diag_type =
-        unit ? CUSPARSE_DIAG_TYPE_UNIT : CUSPARSE_DIAG_TYPE_NON_UNIT;
-    TORCH_CUDASPARSE_CHECK(cusparseSpMatSetAttribute(
-        this->descriptor(),
-        CUSPARSE_SPMAT_DIAG_TYPE,
-        &diag_type,
-        sizeof(diag_type)));
-  }
-#endif
 };
-
-#if AT_USE_CUSPARSE_GENERIC_SPSV()
-class TORCH_CUDA_CPP_API CuSparseSpSVDescriptor
-    : public CuSparseDescriptor<cusparseSpSVDescr, &cusparseSpSV_destroyDescr> {
- public:
-  CuSparseSpSVDescriptor() {
-    cusparseSpSVDescr_t raw_descriptor;
-    TORCH_CUDASPARSE_CHECK(cusparseSpSV_createDescr(&raw_descriptor));
-    descriptor_.reset(raw_descriptor);
-  }
-};
-#endif
-
-#if AT_USE_CUSPARSE_GENERIC_SPSM()
-class TORCH_CUDA_CPP_API CuSparseSpSMDescriptor
-    : public CuSparseDescriptor<cusparseSpSMDescr, &cusparseSpSM_destroyDescr> {
- public:
-  CuSparseSpSMDescriptor() {
-    cusparseSpSMDescr_t raw_descriptor;
-    TORCH_CUDASPARSE_CHECK(cusparseSpSM_createDescr(&raw_descriptor));
-    descriptor_.reset(raw_descriptor);
-  }
-};
-#endif
 
 } // namespace sparse
 } // namespace cuda
