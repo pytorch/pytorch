@@ -936,8 +936,6 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
 
   if (!can_use_32bit_indexing) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
-      // Dim 0 is always the reduced dimension
-      AT_ASSERT(sub_iter.strides(0)[0] == 0);
       int64_t sub_iter_base_idx = sub_iter.view_offsets()[0];
 
       gpu_reduce_kernel<scalar_t, out_scalar_t, vt0>(sub_iter, ops, ident,
@@ -989,14 +987,14 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
       // Map block.x to the fastest reducing dimension. It implies:
       //   1. block_x_reduce is required.
       //   2. block.y now max out to num_outputs.
-      dim0 = iter.shape()[0];
+      dim0 = inputs_per_output;
       dim1 = num_outputs;
       fastest_moving_stride = iter.strides(/*arg=*/input_index)[0];
     } else {
       // Map block.x to the fastest non reducing dimension. It implies:
       //   1. block_x_reduce is turned off.
       //   2. block.y now max out to inputs_per_output.
-      dim0 = iter.shape()[iter.num_reduce_dims()];
+      dim0 = num_outputs;
       dim1 = inputs_per_output;
       fastest_moving_stride = iter.strides(/*arg=*/input_index)[iter.num_reduce_dims()];
     }

@@ -59,7 +59,7 @@ LoopNest::LoopNest(const std::vector<Tensor>& output_tensors) {
   verify(root_stmt_);
 }
 
-const std::unordered_set<BufPtr> LoopNest::getIntermediateBufs() const {
+std::unordered_set<BufPtr> LoopNest::getIntermediateBufs() const {
   std::unordered_set<BufPtr> result;
   auto input_bufs = getInputBufs();
   auto bufs = NodeFinder<Buf>::find(root_stmt_);
@@ -119,6 +119,112 @@ class IndexFlattener : public IRMutator {
   }
 };
 
+static bool isValidIdentifierChar(char c, size_t pos) {
+  return islower(c) || isupper(c) || c == '_' || (pos > 0 && isdigit(c));
+}
+
+// replaces all invalid characters with underscore
+std::string sanitizeName(const std::string& input_name) {
+  std::stringstream sanitized_name;
+  for (size_t i = 0; i < input_name.size(); ++i) {
+    if (isValidIdentifierChar(input_name[i], i)) {
+      sanitized_name << input_name[i];
+    } else {
+      if (i == 0) {
+        // Don't start names with underscore
+        sanitized_name << "v";
+      }
+      sanitized_name << "_";
+    }
+  }
+  return sanitized_name.str();
+}
+
+class VarNameSanitizer : public IRMutator {
+ public:
+  ExprPtr mutate(BufPtr v) override {
+    if (seen_bufs_.count(v)) {
+      return v;
+    }
+    const std::string& name = v->name_hint();
+    auto new_name = sanitizeName(name);
+    if (taken_names_.count(new_name)) {
+      new_name = getNextAvailableName(new_name);
+    }
+    v->set_name_hint(new_name);
+    taken_names_.insert(new_name);
+    seen_bufs_.insert(v);
+    return v;
+  }
+
+  ExprPtr mutate(VarPtr v) override {
+    if (seen_vars_.count(v)) {
+      return v;
+    }
+    const std::string& name = v->name_hint();
+    auto new_name = sanitizeName(name);
+    if (taken_names_.count(new_name)) {
+      new_name = getNextAvailableName(new_name);
+    }
+    v->set_name_hint(new_name);
+    taken_names_.insert(new_name);
+    seen_vars_.insert(v);
+    return v;
+  }
+
+  StmtPtr mutate(ForPtr v) override {
+    auto new_name = getNextAvailableName(getIndexVarNameAtLevel(level_));
+    if (seen_index_vars_.count(v->var())) {
+      auto new_var = alloc<Var>("", v->var()->dtype());
+      Substitute(v, {{v->var(), new_var}});
+    }
+    v->var()->set_name_hint(new_name);
+    seen_index_vars_.insert(v->var());
+    seen_vars_.insert(v->var());
+    taken_names_.insert(new_name);
+    level_++;
+    v->body()->accept_mutator(this);
+    level_--;
+    v->start()->accept_mutator(this);
+    v->stop()->accept_mutator(this);
+    return v;
+  }
+
+  std::string getIndexVarNameAtLevel(int level_) {
+    int names_num = index_var_names_.size();
+    int counter = level_ / names_num;
+    if (counter == 0) {
+      return index_var_names_[level_ % names_num];
+    } else {
+      return index_var_names_[level_ % names_num] + std::to_string(counter);
+    }
+  }
+  std::string getNextAvailableName(const std::string& base_name) {
+    std::string name = base_name;
+    int counter = 0;
+    while (taken_names_.count(name)) {
+      counter++;
+      name = base_name + "_" + std::to_string(counter);
+    }
+    return name;
+  }
+
+ private:
+  std::vector<std::string> index_var_names_ =
+      {"i", "j", "k", "l", "m", "n", "o", "p"};
+  std::unordered_set<std::string> taken_names_;
+  std::unordered_set<VarPtr> seen_index_vars_;
+  std::unordered_set<VarPtr> seen_vars_;
+  std::unordered_set<BufPtr> seen_bufs_;
+  int level_ = 0;
+};
+
+StmtPtr LoopNest::sanitizeNames(StmtPtr s) {
+  VarNameSanitizer r;
+  s->accept_mutator(&r);
+  return s;
+}
+
 class Vectorizer : public IRMutator {
  public:
   StmtPtr vectorize(ForPtr v) {
@@ -130,13 +236,15 @@ class Vectorizer : public IRMutator {
     auto start_imm = intValue(start);
     auto stop_imm = intValue(stop);
     if (!start_imm) {
-      throw std::runtime_error(
-          "Can't vectorize due to non-constant loop start!");
+      // Can't vectorize due to non-constant loop start!
+      success_ = false;
+      return v;
     }
 
     if (!stop_imm) {
-      throw std::runtime_error(
-          "Can't vectorize due to non-constant loop stop!");
+      // Can't vectorize due to non-constant loop stop!
+      success_ = false;
+      return v;
     }
 
     var_ = var;
@@ -145,10 +253,16 @@ class Vectorizer : public IRMutator {
 
     StmtPtr new_body = body->accept_mutator(this);
     if (new_body == body) {
-      throw std::runtime_error("Vectorization failed!");
+      // Vectorization failed!
+      success_ = false;
+      return v;
     }
 
     return new_body;
+  }
+
+  bool success() const {
+    return success_;
   }
 
   ExprPtr mutate(AddPtr v) override {
@@ -269,7 +383,9 @@ class Vectorizer : public IRMutator {
 
   ExprPtr mutate(VarPtr v) override {
     if (v == var_) {
-      return Ramp::make(ExprHandle(start_), 1, lanes_).node();
+      return Ramp::make(
+                 ExprHandle(start_), ExprHandle(immLike(start_, 1)), lanes_)
+          .node();
     }
 
     return v;
@@ -286,7 +402,9 @@ class Vectorizer : public IRMutator {
       return v;
     }
 
-    throw std::runtime_error("Can't vectorize a Ramp!");
+    // Can't vectorize a Ramp!
+    success_ = false;
+    return v;
   }
 
   ExprPtr mutate(LoadPtr v) override {
@@ -317,14 +435,18 @@ class Vectorizer : public IRMutator {
       return v;
     }
 
-    throw std::runtime_error("Can't vectorize a Broadcast!");
+    // Can't vectorize a Broadcast!
+    success_ = false;
+    return v;
   }
 
   ExprPtr mutate(IfThenElsePtr v) override {
     ExprPtr condition = v->condition();
     ExprPtr new_condition = condition->accept_mutator(this);
     if (new_condition != condition) {
-      throw std::runtime_error("Can't vectorize an IfThenElse condition!");
+      // Can't vectorize an IfThenElse condition!
+      success_ = false;
+      return v;
     }
 
     std::vector<ExprPtr> inputs = {v->true_value(), v->false_value()};
@@ -360,8 +482,9 @@ class Vectorizer : public IRMutator {
     ExprPtr new_stop = stop->accept_mutator(this);
 
     if (new_start != start || new_stop != stop) {
-      throw std::runtime_error(
-          "Can't vectorize nested For with dependent loop bounds!");
+      // Can't vectorize nested For with dependent loop bounds!
+      success_ = false;
+      return v;
     }
 
     StmtPtr body = v->body();
@@ -452,6 +575,7 @@ class Vectorizer : public IRMutator {
   VarPtr var_ = nullptr;
   int lanes_ = 0;
   ExprPtr start_ = nullptr;
+  bool success_ = true;
 };
 
 bool LoopNest::vectorize(ForPtr f) {
@@ -471,12 +595,11 @@ bool LoopNest::vectorize(ForPtr f) {
 
   Vectorizer v;
   StmtPtr new_f = nullptr;
-  try {
-    new_f = Stmt::clone(f);
-    normalize(to<For>(new_f));
-    new_f = FlattenIndexes(new_f);
-    new_f = v.vectorize(to<For>(new_f));
-  } catch (std::runtime_error& e) {
+  new_f = Stmt::clone(f);
+  normalize(to<For>(new_f));
+  new_f = FlattenIndexes(new_f);
+  new_f = v.vectorize(to<For>(new_f));
+  if (!v.success()) {
     // We clone f before vectorizing. So, any partial vectorization will
     // have modified the clone. In case of an exception, we can continue
     // using f.
@@ -527,42 +650,55 @@ class FunctionInliner : public IRMutator {
       : buf_(producer->buf()),
         producer_(producer),
         outputs_(std::move(outputs)) {
+    success_ = true;
     for (auto i : producer->indices()) {
       if (auto index_var = to<Var>(i)) {
         index_vars_.insert(index_var);
         producer_index_vars_.push_back(index_var);
-      } else if (intValue(i)) {
+      } else {
         // If the index can be a constant, then that dimension must have size 1
         // (since we don't support in-place writes). Resolves issue 52581.
-        TORCH_INTERNAL_ASSERT(
-            *intValue(i) == 0,
-            "Constant index impression should always be zero");
+        auto index_val = evalInt(i);
+        if (!index_val || *index_val != 0) {
+          success_ = false;
+          break;
+        }
         producer_index_vars_.push_back(nullptr);
-      } else {
-        throw std::logic_error("cannot inline Buf with compound indices");
       }
     }
+  }
+
+  bool success() const {
+    return success_;
   }
 
  private:
   ExprPtr mutate_loads(BufPtr buf, std::vector<ExprPtr> dims) {
     std::vector<VarPtr> index_vars;
-    TORCH_INTERNAL_ASSERT(buf->ndim() == producer_index_vars_.size());
+    if (buf->ndim() != producer_index_vars_.size()) {
+      // Dimensions of producer and consumer expressions do not match in inliner
+      // in the fuser
+      success_ = false;
+      return nullptr;
+    }
     for (const auto i : c10::irange(buf->ndim())) {
       VarPtr func_callee_arg = producer_index_vars_.at(i);
       ExprPtr func_caller_param = dims.at(i);
       if (func_callee_arg == nullptr) {
-        TORCH_INTERNAL_ASSERT(
-            intValue(func_caller_param) && *intValue(func_caller_param) == 0,
-            "We are implicitly assuming that if you have an index of 0, that must also be inlined into an index of 0");
+        auto param_val = evalInt(func_caller_param);
+        if (!param_val || *param_val != 0) {
+          // We are implicitly assuming that if you have an index of 0, that
+          // must also be inlined into an index of 0.
+          success_ = false;
+          return nullptr;
+        }
         continue;
       }
-      if (func_callee_arg == nullptr)
-        continue;
       auto iter = inline_mapping_.find(func_callee_arg);
       if (iter != inline_mapping_.end()) {
-        throw std::runtime_error(
-            "Duplicated variables: " + func_callee_arg->name_hint());
+        // Duplicated variables
+        success_ = false;
+        return nullptr;
       }
       // Add a mapping for each function parameter to it's source name.
       inline_mapping_[func_callee_arg] = func_caller_param;
@@ -598,20 +734,33 @@ class FunctionInliner : public IRMutator {
   }
 
   ExprPtr mutate(LoadPtr v) override {
+    if (!success()) {
+      return v;
+    }
     BufPtr buf = v->buf();
     if (buf != buf_) {
       return IRMutator::mutate(v);
     }
 
     if (v->indices().size() != buf->ndim()) {
-      throw malformed_input(
-          "Placeholder indexed access is inconsistent with its rank", v);
+      // Number of indices doesn't match buf rank in the fuser
+      success_ = false;
+      return v;
     }
-    return mutate_loads(buf, v->indices());
+    auto result = mutate_loads(buf, v->indices());
+    if (!result) {
+      // If we don't inline successfully return the given load.
+      success_ = false;
+      return v;
+    }
+    return result;
   }
 
   // Replace the target variable with the caller expressions.
   ExprPtr mutate(VarPtr v) override {
+    if (!success()) {
+      return v;
+    }
     auto iter = inline_mapping_.find(v);
     if (iter == inline_mapping_.end()) {
       return v;
@@ -624,6 +773,9 @@ class FunctionInliner : public IRMutator {
 
   // Handle random intrinsics which should be cached.
   ExprPtr mutate(IntrinsicsPtr v) override {
+    if (!success()) {
+      return v;
+    }
     if (!in_producer_ || v->op_type() != kRand) {
       return IRMutator::mutate(v);
     }
@@ -641,12 +793,19 @@ class FunctionInliner : public IRMutator {
 
   // Remove the buffer write from the inlined function.
   StmtPtr mutate(StorePtr v) override {
+    if (!success()) {
+      return v;
+    }
     // If the buf_ is in the outputs set, keep its statement intact. Otherwise,
     // remove it.
     if (v == producer_ && !outputs_.count(buf_)) {
       in_producer_ = true;
       producer_ = to<Store>(IRMutator::mutate(v));
-      TORCH_INTERNAL_ASSERT(producer_ != nullptr);
+      if (!producer_) {
+        // Producer statement for output buf should remain non-null in the fuser
+        success_ = false;
+        return v;
+      }
       in_producer_ = false;
       return nullptr;
     } else {
@@ -656,6 +815,9 @@ class FunctionInliner : public IRMutator {
 
   // Any Random Instrinsics that were turned into vars must be inserted here.
   StmtPtr mutate(BlockPtr v) override {
+    if (!success()) {
+      return v;
+    }
     std::vector<StmtPtr> stmts;
     for (StmtPtr stmt : *v) {
       StmtPtr stmt_new = stmt->accept_mutator(this);
@@ -674,6 +836,9 @@ class FunctionInliner : public IRMutator {
   }
 
   StmtPtr mutate(ForPtr v) override {
+    if (!success()) {
+      return v;
+    }
     ForPtr res = to<For>(IRMutator::mutate(v));
     if (!res) {
       return nullptr;
@@ -710,51 +875,80 @@ class FunctionInliner : public IRMutator {
   bool in_producer_ = false;
   std::unordered_map<LetPtr, std::unordered_set<VarPtr>> random_bindings_;
   std::unordered_set<BufPtr> outputs_;
+  bool success_ = true;
 };
 
-bool LoopNest::computeInline(StmtPtr s) {
-  auto s_store = to<Store>(s);
-  if (s_store == nullptr) {
-    throw std::logic_error("Could not find buffer producer to inline");
-  }
-  return computeInline(s_store->buf());
-}
-
-bool LoopNest::computeInline(BufPtr b) {
+StmtPtr computeInlineImpl(
+    BufPtr b,
+    StmtPtr stmt,
+    const std::unordered_set<BufPtr>& output_bufs) {
   // If buf is used or defined in an ExternalCall, we cannot inline it
-  auto buf_load_store_uses = findLoadOrStoreUses(root_stmt_);
+  auto buf_load_store_uses = findLoadOrStoreUses(stmt);
+  if (!buf_load_store_uses.count(b)) {
+    return nullptr;
+  }
   for (auto& use : buf_load_store_uses.at(b)) {
     StmtPtr s = use.s;
     if (to<ExternalCall>(s)) {
-      return false;
+      return nullptr;
     }
   }
 
   // Find producers.
   StorePtr relevant_store{nullptr};
-  auto stores = NodeFinder<Store>::find(root_stmt_);
+  auto stores = NodeFinder<Store>::find(stmt);
   for (auto s : stores) {
     if (s->buf() == b) {
       auto reductions = NodeFinder<ReduceOp>::find(s);
       if (!reductions.empty()) {
         // Cannot inline a reduction computation
-        return false;
+        return nullptr;
       }
       if (relevant_store != nullptr) {
         // Cannot inline Buf with multiple Tensors
-        return false;
+        return nullptr;
       }
       relevant_store = s;
     }
   }
 
-  TORCH_INTERNAL_ASSERT(relevant_store);
+  if (!relevant_store) {
+    // Cannot find a relevant store to inline a buf in the fuser
+    return nullptr;
+  }
 
   GRAPH_DEBUG("ComputeInline: Def: ", std::to_string(relevant_store));
-  FunctionInliner inliner(relevant_store, output_bufs_);
-  root_stmt_ = root_stmt_->accept_mutator(&inliner);
+  FunctionInliner inliner(relevant_store, output_bufs);
+  auto result = stmt->accept_mutator(&inliner);
+  if (inliner.success()) {
+    return result;
+  }
+  return nullptr;
+}
 
+bool LoopNest::computeInline(BufPtr b) {
+  // Inlining may not always be successful. Since all mutations now happen
+  // in-place, an unsuccessful inlining transformation might leave the IR
+  // in an invalid state. To get around this problem, we clone the root stmt,
+  // try inlining on the clone, and if it succeeds, we proceed to perform
+  // inlining on the actual root stmt. This way the root stmt will always be
+  // in a valid state.
+  auto stmt_copy = Stmt::clone(root_stmt_);
+  auto try_inline = computeInlineImpl(b, stmt_copy, output_bufs_);
+  if (!try_inline) {
+    return false;
+  }
+  root_stmt_ = computeInlineImpl(b, root_stmt_, output_bufs_);
   return true;
+}
+
+bool LoopNest::computeInline(StmtPtr s) {
+  auto s_store = to<Store>(s);
+  if (s_store == nullptr) {
+    // Could not find buffer producer to inline
+    return false;
+  }
+  return computeInline(s_store->buf());
 }
 
 // inlining buffers with multiple uses can create duplicated work, which can
@@ -772,7 +966,11 @@ void LoopNest::inlineIntermediateBufs(bool allow_duplicated_work) {
     auto input_bufs = getInputBufs();
 
     for (auto buf : intermediate_bufs) {
-      TORCH_INTERNAL_ASSERT(buf_load_store_uses.count(buf));
+      TORCH_INTERNAL_ASSERT(
+          buf_load_store_uses.count(buf),
+          buildErrorMessage(
+              "Could not find uses of buf '" + buf->name_hint() +
+              "' in the fuser."));
       std::vector<BufLoadOrStoreUse>& uses = buf_load_store_uses[buf];
       auto stores = c10::filter(
           uses, [](const BufLoadOrStoreUse& use) { return use.isStore; });
@@ -789,7 +987,11 @@ void LoopNest::inlineIntermediateBufs(bool allow_duplicated_work) {
           }
         } else {
           // If S is not a store, it must be an ExternalCall.
-          TORCH_INTERNAL_ASSERT(to<ExternalCall>(stores[0].s));
+          TORCH_INTERNAL_ASSERT(
+              to<ExternalCall>(stores[0].s),
+              buildErrorMessage(
+                  "Expected stmt: " + std::to_string(stores[0].s) +
+                  "\nto be either a Store or an ExternalCall in the fuser."));
         }
       }
 
@@ -927,8 +1129,17 @@ BlockPtr findLowestContainingBlock(const std::vector<BufLoadOrStoreUse>& uses) {
   return b;
 }
 
-StmtPtr LoopNest::insertAllocFree(StmtPtr stmt) {
-  auto intermediate_bufs = getIntermediateBufs();
+StmtPtr LoopNest::insertAllocFree(
+    StmtPtr stmt,
+    const c10::optional<std::unordered_set<BufPtr>>&
+        interm_bufs /* = c10::nullopt*/) {
+  std::unordered_set<BufPtr> intermediate_bufs;
+  if (interm_bufs) {
+    intermediate_bufs = *interm_bufs;
+  } else {
+    intermediate_bufs = getIntermediateBufs();
+  }
+
   if (intermediate_bufs.size() == 0ULL) {
     return stmt;
   }
@@ -1005,7 +1216,9 @@ void LoopNest::eliminateDeadStores() {
   root_stmt_ = root_stmt_->accept_mutator(&deleter);
 }
 
-void LoopNest::prepareForCodegen() {
+void LoopNest::prepareForCodegen(
+    const c10::optional<std::unordered_set<BufPtr>>&
+        interm_bufs /*= c10::nullopt*/) {
   // Expand reduction ops.
   ReductionExpander reduceExpander;
   root_stmt_ = reduceExpander.expand(root_stmt_);
@@ -1013,7 +1226,7 @@ void LoopNest::prepareForCodegen() {
   root_stmt_ = FlattenIndexes(root_stmt_);
 
   // Add allocs and frees for intermediate buffers at the global level.
-  root_stmt_ = insertAllocFree(root_stmt_);
+  root_stmt_ = insertAllocFree(root_stmt_, interm_bufs);
 }
 
 namespace {
@@ -1154,7 +1367,10 @@ bool LoopNest::optimizeConditionals() {
             ifthenelse_exprs.front(), &cond_var, &comp_values, &sub_exprs)) {
       continue;
     }
-    TORCH_INTERNAL_ASSERT(comp_values.size() >= 1);
+    TORCH_INTERNAL_ASSERT(
+        comp_values.size() >= 1,
+        buildErrorMessage(
+            "Expected at least one expression in optimizeConditional in the fuser."));
     comp_values.insert(comp_values.begin(), immLike(comp_values[0], 0));
 
     auto fors = getLoopStmtsFor(store);
@@ -1513,7 +1729,10 @@ void LoopNest::splitWithMask(ForPtr f, int factor, ForPtr* inner) {
 std::vector<ForPtr> LoopNest::distributeLoop(
     ForPtr loop,
     const std::unordered_set<StmtPtr>& pivots) {
-  TORCH_INTERNAL_ASSERT(loop);
+  TORCH_INTERNAL_ASSERT(
+      loop,
+      buildErrorMessage(
+          "Expected non-null loop in distributeLoop in the fuser."));
   auto root = loop->get_parent();
   if (root == nullptr) {
     throw malformed_input("Loop without parent: ", loop);
@@ -1758,7 +1977,10 @@ bool LoopNest::unsafeFuseLoops(
       break;
     }
   }
-  TORCH_INTERNAL_ASSERT(it != root_block->end());
+  TORCH_INTERNAL_ASSERT(
+      it != root_block->end(),
+      buildErrorMessage(
+          "Could not find the given loop in the root stmt in unsafeFuseLoop the fuser."));
   for (auto l : loops) {
     if (*it != l) {
       return false;
@@ -2032,7 +2254,10 @@ std::vector<ForPtr> LoopNest::reorder(
   parent->replace_stmt(loops.front(), empty_block);
   for (size_t i = 1; i < loops.size(); ++i) {
     auto block = to<Block>(loops[i]->get_parent());
-    TORCH_INTERNAL_ASSERT(block);
+    TORCH_INTERNAL_ASSERT(
+        block,
+        buildErrorMessage(
+            "Expected parent stmt to be a non-null Block in reorder transformation the fuser."));
     block->remove_stmt(loops[i]);
   }
 
@@ -2191,9 +2416,13 @@ std::vector<ForPtr> LoopNest::getLoopStmtsInLoopNest(ForPtr f, size_t num) {
   ForPtr curr_for = f;
   loops[0] = curr_for;
   for (size_t i = 1; i < num; ++i) {
-    TORCH_INTERNAL_ASSERT(curr_for->body()->nstmts() == 1);
+    TORCH_INTERNAL_ASSERT(
+        curr_for->body()->nstmts() == 1,
+        buildErrorMessage("Expected a single stmt in the loop body."));
     curr_for = to<For>(curr_for->body()->front());
-    TORCH_INTERNAL_ASSERT(curr_for);
+    TORCH_INTERNAL_ASSERT(
+        curr_for,
+        buildErrorMessage("Expected the only child stmt to be a For loop."));
     loops[i] = curr_for;
   }
   return loops;
@@ -2303,7 +2532,10 @@ void LoopNest::compressBuffer(BufPtr buf, StmtPtr stmt) {
 
   // Find the parent common to all the buffer accesses.
   BlockPtr parent = to<Block>(writes.front()->get_parent());
-  TORCH_INTERNAL_ASSERT(parent);
+  TORCH_INTERNAL_ASSERT(
+      parent,
+      buildErrorMessage(
+          "Expected parent stmt to be a non-null block in compressBuffer in the fuser."));
   for (auto w : writes) {
     parent = Block::getSharedParent(parent, w);
   }
@@ -2325,7 +2557,10 @@ void LoopNest::compressBuffer(BufPtr buf, StmtPtr stmt) {
   // Vector to indicate which dimensions could be compressed away.
   std::vector<bool> dims(buf->dims().size(), true);
   auto check_indices = [&](const std::vector<ExprPtr>& indices) {
-    TORCH_INTERNAL_ASSERT(indices.size() == dims.size());
+    TORCH_INTERNAL_ASSERT(
+        indices.size() == dims.size(),
+        buildErrorMessage(
+            "Expected ranks to match in compressBuffer in the fuser."));
     for (size_t i = 0; i < indices.size(); ++i) {
       auto index_vars = NodeFinder<Var>::find(indices[i]);
       for (auto iv : index_vars) {
@@ -2367,7 +2602,10 @@ void LoopNest::compressBuffer(BufPtr buf, StmtPtr stmt) {
 
   // Modify all access to reflect the removed dims.
   auto get_new_indices = [&](const std::vector<ExprPtr>& indices) {
-    TORCH_INTERNAL_ASSERT(indices.size() == dims.size());
+    TORCH_INTERNAL_ASSERT(
+        indices.size() == dims.size(),
+        buildErrorMessage(
+            "Expected ranks to match in compressBuffer in the fuser."));
     std::vector<ExprPtr> new_indices(indices);
     for (size_t i = 0; i < dims.size(); ++i) {
       if (dims[i]) {
@@ -2573,7 +2811,10 @@ class CacheReplacer : public IRMutator {
 
     // Map indices to call-parameters.
     std::vector<ExprPtr> newIndices;
-    TORCH_INTERNAL_ASSERT(offsets_.size() == v->indices().size());
+    TORCH_INTERNAL_ASSERT(
+        offsets_.size() == v->indices().size(),
+        buildErrorMessage(
+            "Expected ranks to match in CacheReplacer in the fuser."));
     for (size_t i = 0; i < v->indices().size(); ++i) {
       ExprPtr index = v->indices()[i]->accept_mutator(this);
       ExprPtr offset = offsets_[i];
@@ -2595,7 +2836,10 @@ class CacheReplacer : public IRMutator {
 
     // Map indices to call-parameters.
     std::vector<ExprPtr> newIndices;
-    TORCH_INTERNAL_ASSERT(offsets_.size() == v->indices().size());
+    TORCH_INTERNAL_ASSERT(
+        offsets_.size() == v->indices().size(),
+        buildErrorMessage(
+            "Expected ranks to match in CacheReplacer in the fuser."));
     for (size_t i = 0; i < v->indices().size(); ++i) {
       ExprPtr index = v->indices()[i]->accept_mutator(this);
       ExprPtr offset = offsets_[i];
@@ -2643,7 +2887,10 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
     return {nullptr, nullptr};
   }
 
-  TORCH_INTERNAL_ASSERT(bounds_it->second.size() == 1);
+  TORCH_INTERNAL_ASSERT(
+      bounds_it->second.size() == 1,
+      buildErrorMessage(
+          "Unexpected number of bound info entries in cacheAccesses in the fuser."));
   TensorAccessBoundsInfo& info = bounds_it->second[0];
   bool hasReads = info.kind == kLoad || info.kind == kMutate;
   bool hasWrites = info.kind == kStore || info.kind == kMutate;
@@ -2998,7 +3245,10 @@ class RfactorStoreRewriter : public IRMutator {
       return IRMutator::mutate(v);
     }
 
-    TORCH_INTERNAL_ASSERT(old_indices_.size() == v->indices().size());
+    TORCH_INTERNAL_ASSERT(
+        old_indices_.size() == v->indices().size(),
+        buildErrorMessage(
+            "Expected ranks to match in RfactorStoreRewriter in the fuser."));
 
     bool equal_indices = true;
     for (size_t i = 0; i < v->indices().size(); ++i) {
@@ -3032,7 +3282,10 @@ class RfactorStoreRewriter : public IRMutator {
       return IRMutator::mutate(v);
     }
 
-    TORCH_INTERNAL_ASSERT(old_indices_.size() == v->indices().size());
+    TORCH_INTERNAL_ASSERT(
+        old_indices_.size() == v->indices().size(),
+        buildErrorMessage(
+            "Expected ranks to match in RfactorStoreRewriter in the fuser."));
 
     bool equal_indices = true;
     for (size_t i = 0; i < v->indices().size(); ++i) {
@@ -3141,7 +3394,10 @@ bool LoopNest::rfactor(
   //   X[*indexes] = ReduceOp(X[*indexes] + T[*indexes + {reduction_var}],
   //                          reduce_axis={reduction_var})
   BlockPtr b = outer_reduction_for->body();
-  TORCH_INTERNAL_ASSERT(b->nstmts() == 1);
+  TORCH_INTERNAL_ASSERT(
+      b->nstmts() == 1,
+      buildErrorMessage(
+          "Expected to have a single stmt in the block in rfactor transformation in the fuser."));
   StmtPtr first_reduction_loop = b->stmts().front();
   auto rfac_buf_indices = orig_buf_indices;
   rfac_buf_indices.emplace_back(reduction_var);

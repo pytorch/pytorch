@@ -76,12 +76,16 @@ std::vector<ExprPtr> AccessInfo::getIndices() const {
 
 void AccessInfo::addDependency(const std::shared_ptr<AccessInfo>& write) {
   auto res = dependencies_.emplace(write->id(), write);
-  TORCH_INTERNAL_ASSERT(res.second);
+  TORCH_INTERNAL_ASSERT(
+      res.second,
+      buildErrorMessage("Duplicate entry in mem dep checker in the fuser."));
 }
 
 void AccessInfo::addDependent(const std::shared_ptr<AccessInfo>& read) {
   auto res = dependents_.emplace(read->id(), read);
-  TORCH_INTERNAL_ASSERT(res.second);
+  TORCH_INTERNAL_ASSERT(
+      res.second,
+      buildErrorMessage("Duplicate entry in mem dep checker in the fuser."));
 }
 
 bool AccessInfo::hasDependency(const std::shared_ptr<AccessInfo>& info) const {
@@ -107,7 +111,7 @@ DependencySet AccessInfo::getIndirectDependencies() {
 DependencySet AccessInfo::getDirectDependents() {
   DependencySet res;
   for (auto& depPair : dependents_) {
-    res.insert(depPair.second);
+    res.insert(depPair.second.lock());
   }
   return res;
 }
@@ -170,7 +174,7 @@ void AccessInfo::print() const {
   if (!dependents_.empty()) {
     std::cout << " - dependents: ";
     for (auto& pair : dependents_) {
-      std::cout << pair.second->id() << " ";
+      std::cout << pair.second.lock()->id() << " ";
     }
   }
 
@@ -590,7 +594,10 @@ bool executionSafetyCheck(
   if (aStrides.empty() || oStrides.empty()) {
     return false;
   }
-  TORCH_INTERNAL_ASSERT(info->bounds().size() == other->bounds().size());
+  TORCH_INTERNAL_ASSERT(
+      info->bounds().size() == other->bounds().size(),
+      buildErrorMessage(
+          "Dimension mismatch for two accesses in mem dep checker in the fuser."));
   for (size_t b = 0; b < info->bounds().size(); ++b) {
     ExprPtr aIndexStride = aStrides[b];
     ExprPtr oIndexStride = oStrides[b];
@@ -1150,7 +1157,11 @@ void MemDependencyChecker::visit(FreePtr v) {
 
   VarPtr var = v->buffer_var();
   auto it = intermediates_.find(var);
-  TORCH_INTERNAL_ASSERT(it != intermediates_.end());
+  TORCH_INTERNAL_ASSERT(
+      it != intermediates_.end(),
+      buildErrorMessage(
+          "Expected to find '" + var->name_hint() +
+          "' in intermediate vars in mem dep checker in the fuser."));
 
   IndexBounds bounds = it->second->bounds();
   auto info = std::make_shared<AccessInfo>(
