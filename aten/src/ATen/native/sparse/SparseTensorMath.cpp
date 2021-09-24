@@ -1002,11 +1002,11 @@ Tensor _sparse_addmm(
 }
 
 Tensor _sparse_mm(
-  const SparseTensor& sparse,
-  const Tensor& dense
+  const Tensor& mat1,
+  const Tensor& mat2
 ) {
-  Tensor t = at::zeros({}, dense.options());
-  return at::_sparse_addmm(t, sparse, dense, 0, 1);  // redispatch!
+  Tensor result = at::empty({0, 0}, mat2.options());
+  return at::mm_outf(mat1, mat2, result);
 }
 
 // NB: Despite its suggestive name, this actually only exists so that

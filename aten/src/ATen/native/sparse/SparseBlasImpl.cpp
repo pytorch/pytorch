@@ -34,6 +34,31 @@ void addmv_out_sparse_csr(
 #endif
 }
 
+/*
+  Computes a sum of two sparse matrices defined as
+  result <- mat1 + alpha*mat2
+
+  Args:
+  * `mat1` - CSR Tensor storing sparse m x n matrix.
+  * `mat2` - CSR Tensor storing sparse m x n matrix.
+  * `result` - [in] CSR Tensor storing sparse m x n matrix.
+               [out] result of the operation.
+*/
+void add_out_sparse_csr(
+    const Tensor& mat1,
+    const Tensor& mat2,
+    const Scalar& alpha,
+    const Tensor& result) {
+#if !AT_MKL_ENABLED()
+  TORCH_CHECK(
+      false,
+      "Calling add on a sparse CPU tensor requires compiling PyTorch with MKL. ",
+      "Please use PyTorch built MKL support.");
+#else
+  sparse::impl::mkl::add_out_sparse_csr(mat1, mat2, alpha, result);
+#endif
+}
+
 } // namespace cpu
 } // namespace impl
 } // namespace sparse
