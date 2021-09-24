@@ -23,7 +23,7 @@ from functools import partial, wraps
 import functorch
 from functorch import (
     grad, vjp, vmap, jacrev, grad_and_value,
-    make_functional_deprecated_v1, make_functional_with_buffers_deprecated_v1, make_fx, nnc_jit, compiled_function
+    make_functional_deprecated_v1, make_functional_with_buffers_deprecated_v1, make_fx, nnc_jit, compiled_function, compiled_module
 )
 
 from torch.testing._internal.common_device_type import ops, onlyCPU
@@ -258,6 +258,18 @@ class TestEagerFusion(TestCase):
         test_out, test_grad = _outs_and_grads(f, inp)
         self.assertEqual(ref_out, test_out)
         self.assertEqual(ref_grad, test_grad)
+
+    def test_module(self):
+        mod = nn.Sequential(nn.Linear(32, 32), nn.ReLU())
+        compiled_mod = compiled_module(mod, _nop_compile, _nop_compile)
+        inp = torch.randn(32, 32)
+        ref_out = mod(inp)
+        ref_out.sum().backward()
+        ref_grads = [p.grad for p in mod.parameters()]
+        out = compiled_mod(inp)
+        out.sum().backward()
+        grads = [p.grad for p in compiled_mod.parameters()]
+        self.assertEqual((out, grads), (ref_out, ref_grads))
 
 class TestEagerFusionOpInfo(TestCase):
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
