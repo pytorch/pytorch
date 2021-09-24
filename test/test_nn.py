@@ -7073,15 +7073,50 @@ class TestNN(NNTestCase):
             self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
             np.testing.assert_allclose(result, ref_output, atol=1e-5)
 
-    def test_transformerencoderlayer_gelu(self):
-        # this is a deterministic test for TransformerEncoderLayer with gelu activation
+    torch_nn_activations = [
+        'CELU',
+        'ELU',
+        'Hardsigmoid',
+        'Hardswish',
+        'Hardtanh',
+        'LeakyReLU',
+        'ReLU',
+        'ReLU6',
+        'RReLU',
+        'SELU',
+        'Sigmoid',
+        'SiLU',
+    ]
+    torch_nn_functional_activations = [
+        'celu',
+        'elu',
+        'hardsigmoid',
+        'hardswish',
+        'hardtanh',
+        'leaky_relu',
+        'relu',
+        'relu6',
+        'rrelu',
+        'selu',
+        'sigmoid',
+        'silu',
+    ]
+    activations = (
+        *torch_nn_activations,
+        *torch_nn_functional_activations,
+        *(getattr(name, nn)() for name in torch_nn_activations),
+        *(getattr(name, F) for name in torch_nn_functional_activations),
+    )
+
+    def test_transformerencoderlayer_activations(self):
+        # this is a deterministic test for TransformerEncoderLayer with all supported activations with default settings
         d_model = 4
         nhead = 2
         dim_feedforward = 16
         dropout = 0.0
         bsz = 2
 
-        for activation, batch_first in product(('gelu', F.gelu, nn.GELU()), (True, False)):
+        for activation, batch_first in product(self.activations, (True, False)):
             def perm_fn(x):
                 return x.transpose(1, 0) if batch_first else x
 
@@ -7283,8 +7318,8 @@ class TestNN(NNTestCase):
             self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
             np.testing.assert_allclose(result, ref_output, atol=1e-5)
 
-    def test_transformerdecoderlayer_gelu(self):
-        # this is a deterministic test for TransformerDecoderLayer with gelu activation
+    def test_transformerdecoderlayer_activations(self):
+        # this is a deterministic test for TransformerDecoderLayer with all built-in activations with default settings
         d_model = 4
         nhead = 2
         dim_feedforward = 16
@@ -7293,7 +7328,7 @@ class TestNN(NNTestCase):
         seq_length = 5
         tgt_length = 3
 
-        for activation, batch_first in product(('gelu', F.gelu, nn.GELU()), (True, False)):
+        for activation, batch_first in product(self.activations, (True, False)):
             def perm_fn(x):
                 return x.transpose(1, 0) if batch_first else x
 

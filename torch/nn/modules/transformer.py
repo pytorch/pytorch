@@ -483,9 +483,11 @@ def _get_clones(module, N):
 
 
 def _get_activation_fn(activation):
-    if activation == "relu":
-        return F.relu
-    elif activation == "gelu":
-        return F.gelu
-
-    raise RuntimeError("activation should be relu/gelu, not {}".format(activation))
+    try:
+        activation_fn = getattr(torch.nn.functional, activation)
+    except AttributeError:
+        try:
+            activation_fn = getattr(torch.nn, activation)()
+        except AttributeError:
+            raise TypeError(f'Activation function {activation} is not defined in neither `torch.nn` nor `torch.nn.functional`')
+    return activation_fn
