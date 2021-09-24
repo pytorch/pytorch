@@ -610,5 +610,4 @@ Utilities
     get_deterministic_debug_mode
     set_warn_always
     is_warn_always_enabled
-    vmap
     _assert
