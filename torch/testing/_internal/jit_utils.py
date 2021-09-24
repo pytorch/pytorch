@@ -23,9 +23,10 @@ from torch.testing._internal.common_utils import enable_profiling_mode  # noqa: 
 # Standard library
 from contextlib import contextmanager
 from functools import reduce
-from torch._six import StringIO
+from io import StringIO
 from collections import defaultdict
 
+import importlib.util
 import inspect
 import io
 import math
@@ -34,6 +35,7 @@ import pickle
 import sys
 import tempfile
 import textwrap
+from importlib.abc import Loader
 from typing import Any, Dict, List
 
 RUN_CUDA = torch.cuda.is_available()
@@ -56,7 +58,7 @@ def do_input_map(fn, input):
 def clear_class_registry():
     torch._C._jit_clear_class_registry()
     torch.jit._recursive.concrete_type_store = torch.jit._recursive.ConcreteTypeStore()
-    torch.jit._state._script_classes.clear()
+    torch.jit._state._clear_class_state()
 
 def get_execution_plan(graph_executor_state):
     execution_plans = list(graph_executor_state.execution_plans.values())
@@ -112,6 +114,21 @@ class JitTestCase(JitCommonTestCase):
             del self.stringio
             sys.stdout = self.sys_stdout
 
+    class capture_stderr(list):
+        """
+        Replace sys.stderr with a temporary StringIO
+        """
+        def __enter__(self):
+            self.sys_stderr = sys.stderr
+            self.stringio = StringIO()
+            sys.stderr = self.stringio
+            return self
+
+        def __exit__(self, *args):
+            self.append(str(self.stringio.getvalue()))
+            del self.stringio
+            sys.stderr = self.sys_stderr
+
     def setHooks(self):
         torch._C._jit_set_emit_hooks(self.emitModuleHook, self.emitFunctionHook)
 
@@ -146,7 +163,7 @@ class JitTestCase(JitCommonTestCase):
                 elif node.kind() == 'prim::DifferentiableGraph':
                     get_nodes_and_parents_recursively(node.g('Subgraph'), kind, acc)
                 elif node.kind() == 'prim::If' and (node.inputs().__next__().node().kind() == 'aten::all' or
-                                                    node.inputs().__next__().node().kind() == 'prim::TypeCheck' or 
+                                                    node.inputs().__next__().node().kind() == 'prim::TypeCheck' or
                                                     node.inputs().__next__().node().kind() == 'prim::RequiresGradCheck'):
                     get_nodes_and_parents_recursively(node.blocks().__next__(), kind, acc)
                 else:
@@ -272,8 +289,25 @@ class JitTestCase(JitCommonTestCase):
         result.apply(lambda s: s._unpack() if s._c._has_method('_unpack') else None)
         return result
 
-    def assertGraphContains(self, graph, kind):
-        self.assertTrue(any(n.kind() == kind for n in graph.nodes()))
+    def assertGraphContains(self, graph, kind, consider_subgraphs=False):
+
+        if consider_subgraphs:
+            strgraph = str(graph)
+            count = strgraph.count(kind) - strgraph.count('with {}'.format(kind))
+            self.assertTrue(count > 0)
+            return
+
+        def nodes(block):
+            out = []
+            for node in block.nodes():
+                if node.kind() == kind:
+                    out.append(node)
+                for block in node.blocks():
+                    out += nodes(block)
+            return out
+
+        out_nodes = nodes(graph)
+        self.assertTrue(len(out_nodes) > 0)
 
     def assertGraphContainsExactly(self, graph, kind, num_kind_nodes, consider_subgraphs=False):
         def perform_assert(graph, kind, actual, expected, consider_subgraphs):
@@ -331,7 +365,7 @@ class JitTestCase(JitCommonTestCase):
 
         torch._C._jit_pass_lint(graph)
         result = getattr(torch._C, '_jit_pass_' + name)(graph)
-        if result is not None:
+        if result is not None and not isinstance(result, bool):
             graph = result
         torch._C._jit_pass_lint(graph)
 
@@ -358,35 +392,46 @@ class JitTestCase(JitCommonTestCase):
         return _AssertRaisesRegexWithHighlightContext(self, exception, regex, highlight)
 
     def checkScriptRaisesRegex(self, script, inputs, exception, regex,
-                               outputs=None, capture_output=False, profiling=ProfilingMode.PROFILING):
+                               name=None, outputs=None, capture_output=False,
+                               frames_up=1, profiling=ProfilingMode.PROFILING):
         """
         Checks that a given function will throw the correct exception,
-        when executed with normal python, the string frontend, and the AST frontend
+        when executed with normal python, the string frontend, and the
+        AST frontend. Logic taken from `checkScript` (see comments there
+        for details)
         """
-
         with enable_profiling_mode_for_profiling_tests():
-            # normal python
+            # Normal Python
             with self.assertRaisesRegex(exception, regex):
-                script(*inputs)
-            # string frontend
-            with self.assertRaisesRegex(exception, regex):
-                source = textwrap.dedent(inspect.getsource(script))
-                cu = torch.jit.CompilationUnit(source)
-                ge = getattr(cu, script.__name__)
-                # profiling run
-                with self.assertRaisesRegex(exception, regex):
-                    ge(*inputs)
-                # optimized run
-                ge(*inputs)
-            # python AST frontend
-            with self.assertRaisesRegex(exception, regex):
-                ge = torch.jit.script(script)
-                # profiling run
-                with self.assertRaisesRegex(exception, regex):
-                    ge(*inputs)
-                # optimized run
-                ge(*inputs)
+                if isinstance(script, str):
+                    frame = self.get_frame_vars(frames_up)
+                    the_locals: Dict[str, Any] = {}
+                    execWrapper(script, glob=frame, loc=the_locals)
+                    frame.update(the_locals)
 
+                    python_fn = frame[name]
+                else:
+                    python_fn = script
+
+                python_fn(*inputs)
+
+            # String frontend
+            with self.assertRaisesRegex(exception, regex):
+                if isinstance(script, str):
+                    cu = torch.jit.CompilationUnit(script, _frames_up=frames_up)
+                    string_frontend = getattr(cu, name)
+                else:
+                    source = textwrap.dedent(inspect.getsource(script))
+                    cu = torch.jit.CompilationUnit(source, _frames_up=frames_up)
+                    string_frontend = getattr(cu, script.__name__)
+
+                string_frontend(*inputs)
+
+            # Python AST frontend
+            if not isinstance(script, str):
+                with self.assertRaisesRegex(exception, regex):
+                    ge = torch.jit.script(python_fn)
+                    ge(*inputs)
 
     def checkBailouts(self, model, inputs, expected):
         state = model.get_debug_state()
@@ -408,8 +453,13 @@ class JitTestCase(JitCommonTestCase):
                     profiling=ProfilingMode.PROFILING,
                     atol=None,
                     rtol=None):
+        """
+        Checks that a given script generates the same output as the Python
+        version using the given inputs.
+        """
         with torch.jit.optimized_execution(optimize):
             with enable_profiling_mode_for_profiling_tests():
+                extra_profile_runs = any(isinstance(x, torch.Tensor) and x.requires_grad for x in inputs)
                 if isinstance(script, str):
                     # Compile the string to a Script function
                     # with enable_profiling_mode():
@@ -461,6 +511,8 @@ class JitTestCase(JitCommonTestCase):
                 else:
                     # profiling run
                     script_outputs = scripted_fn(*recording_inputs)
+                    if inputs_requires_grad or extra_profile_runs:
+                        opt_script_outputs = scripted_fn(*recording_inputs)
                     # optimized run
                     opt_script_outputs = scripted_fn(*recording_inputs)
                     if TEST_BAILOUTS:
@@ -570,7 +622,7 @@ class JitTestCase(JitCommonTestCase):
             for g2, g2_ge in zip(grads2, grads2_ge):
                 if g2 is None and g2_ge is None:
                     continue
-                self.assertTrue(torch.allclose(g2, g2_ge, atol=8e-4, rtol=8e-4))
+                self.assertEqual(g2, g2_ge, atol=8e-4, rtol=8e-4)
 
         return ge
 
@@ -644,11 +696,15 @@ def _trace(*args, **kwargs):
 
 def enable_cpu_fuser(fn):
     def wrapper(*args, **kwargs):
+        torch._C._jit_override_can_fuse_on_cpu_legacy(True)
         torch._C._jit_override_can_fuse_on_cpu(True)
+        torch._C._jit_set_te_must_use_llvm_cpu(False)
         try:
             fn(*args, **kwargs)
         finally:
+            torch._C._jit_override_can_fuse_on_cpu_legacy(False)
             torch._C._jit_override_can_fuse_on_cpu(False)
+            torch._C._jit_set_te_must_use_llvm_cpu(True)
     return wrapper
 
 
@@ -676,7 +732,7 @@ def attrs_with_prefix(module, prefix):
             if x.startswith(prefix)]
 
 def warmup_backward(f, *args):
-    profiling_count = 2
+    profiling_count = 3
     results = []
     for i in range(profiling_count):
         if len(args) > 0:
@@ -691,3 +747,18 @@ def warmup_backward(f, *args):
 def make_global(*args):
     for arg in args:
         setattr(sys.modules[arg.__module__], arg.__name__, arg)
+
+# Helper function to eval Python3 code without causing a syntax error for
+# this file under py2
+def _get_py3_code(code, fn_name):
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        script_path = os.path.join(tmp_dir, 'script.py')
+        with open(script_path, 'w') as f:
+            f.write(code)
+        spec = importlib.util.spec_from_file_location(fn_name, script_path)
+        module = importlib.util.module_from_spec(spec)
+        loader = spec.loader
+        assert isinstance(loader, Loader)  # Assert type to meet MyPy requriement
+        loader.exec_module(module)
+        fn = getattr(module, fn_name)
+        return fn

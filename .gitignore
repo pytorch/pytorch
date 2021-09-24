@@ -14,6 +14,11 @@ coverage.xml
 .gradle
 .hypothesis
 .mypy_cache
+/.extracted_scripts/
+**/.pytorch_specified_test_cases.csv
+**/.pytorch-disabled-tests.json
+**/.pytorch-slow-tests.json
+**/.pytorch-test-times.json
 */*.pyc
 */*.so*
 */**/__pycache__
@@ -52,6 +57,7 @@ test/generated_type_hints_smoketest.py
 test/htmlcov
 test/cpp_extensions/install/
 third_party/build/
+tools/coverage_plugins_package/pip-wheel-metadata/
 tools/shared/_utils_internal.py
 tools/fast_nvcc/wrap_nvcc.sh
 tools/fast_nvcc/tmp/
@@ -65,7 +71,9 @@ torch/csrc/autograd/generated/*
 # Listed manually because some files in this directory are not generated
 torch/testing/_internal/generated/annotated_fn_args.py
 torch/testing/_internal/data/*.pt
+torch/csrc/api/include/torch/version.h
 torch/csrc/cudnn/cuDNN.cpp
+torch/csrc/deploy/example/generated
 torch/csrc/deploy/interpreter/cpython
 torch/csrc/deploy/interpreter/frozen
 torch/csrc/deploy/interpreter/third_party/typing_extensions.py
@@ -108,6 +116,7 @@ torch/version.py
 # E.g., see .circleci/config.yaml
 env
 .circleci/scripts/COMMIT_MSG
+scripts/release_notes/*.json
 
 # IPython notebook checkpoints
 .ipynb_checkpoints
@@ -169,6 +178,9 @@ docs/source/scripts/activation_images/
 *.swo
 *.swp
 *~
+
+# NFS handle files
+**/.nfs*
 
 # Sublime Text settings
 *.sublime-workspace
@@ -234,6 +246,7 @@ caffe2/version.py
 # setup.py intermediates
 .eggs
 caffe2.egg-info
+MANIFEST
 
 # Atom/Watchman required file
 .watchmanconfig
@@ -246,8 +259,10 @@ cmake-build-debug
 # Below files are not deleted by "setup.py clean".
 
 # Visual Studio Code files
-.vscode
 .vs
+/.vscode/*
+!/.vscode/extensions.json
+!/.vscode/settings_recommended.json
 
 # YouCompleteMe config file
 .ycm_extra_conf.py
@@ -269,8 +284,9 @@ TAGS
 # ccls file
 .ccls-cache/
 
-# clang-format storage location used by apply_clang_format.py
+# clang tooling storage location
 .clang-format-bin
+.clang-tidy-bin
 
 # clangd background index
 .clangd/
@@ -278,3 +294,22 @@ TAGS
 
 # bazel symlinks
 bazel-*
+
+# direnv, posh-direnv
+.envrc
+.psenvrc
+
+# generated shellcheck directories
+.shellcheck_generated*/
+
+# zip archives
+*.zip
+
+# core dump files
+core.*
+
+# Generated if you use the pre-commit script for clang-tidy
+pr.diff
+
+# coverage files
+*/**/.coverage.*

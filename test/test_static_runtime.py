@@ -1,34 +1,38 @@
+import unittest
+from typing import Dict, Optional
+
 import numpy as np
 import torch
 from torch import nn
 from torch.testing._internal.common_utils import TestCase, run_tests
 
-from typing import Dict, Optional
 
-class StaticRuntime:
+class StaticModule:
     def __init__(self, scripted):
         # this is an nn.Module
         if hasattr(scripted, "_c"):
-            self.static_runtime = torch._C._jit_to_static_runtime(scripted._c)
+            self.static_module = torch._C._jit_to_static_module(scripted._c)
         else:
-            self.static_runtime = torch._C._jit_to_static_runtime(scripted.graph)
+            self.static_module = torch._C._jit_to_static_module(scripted.graph)
 
     def __call__(self, *args, **kwargs):
         if not kwargs:
-            return self.static_runtime.run(args)
+            return self.static_module(args)
         else:
-            return self.static_runtime.run(args, kwargs)
+            return self.static_module(args, kwargs)
 
     def benchmark(self, args, kwargs, warmup_runs, main_runs):
-        self.static_runtime.benchmark(args, kwargs, warmup_runs, main_runs)
+        self.static_module.benchmark(args, kwargs, warmup_runs, main_runs)
 
     def benchmark_individual_ops(self, args, kwargs, warmup_runs, main_runs):
-        return self.static_runtime.benchmark_individual_ops(
+        return self.static_module.benchmark_individual_ops(
             args, kwargs, warmup_runs, main_runs
         )
 
 
-def linear_shim(input: torch.Tensor, weight: torch.Tensor, bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+def linear_shim(
+    input: torch.Tensor, weight: torch.Tensor, bias: Optional[torch.Tensor] = None
+) -> torch.Tensor:
     output = input.matmul(weight.t())
     if bias is not None:
         output += bias
@@ -105,7 +109,8 @@ def trivial_graph(a, b, c):
     s = torch.tensor([[3, 3], [3, 3]])
     return a + b * c + s
 
-def loop_graph(a, b, iters : int):
+
+def loop_graph(a, b, iters: int):
     c = a + b * 2
     for i in range(iters):
         c = c + b
@@ -113,15 +118,51 @@ def loop_graph(a, b, iters : int):
         c -= a
     return c
 
-def output_graph(a, b, c, iters : int):
+
+def output_graph(a, b, c, iters: int):
     s = torch.tensor([[3, 3], [3, 3]])
     k = a + b * c + s
-    d : Dict[int, torch.Tensor] = {}
+    d: Dict[int, torch.Tensor] = {}
     for i in range(iters):
         d[i] = k + i
     return d
 
-class TestStaticRuntime(TestCase):
+
+class SubModule(nn.Module):
+    def __init__(self):
+        super(SubModule, self).__init__()
+        self.a = 11
+        self.b = 2
+
+    def forward(self, x):
+        return self.a + self.b + x
+
+
+class SubModule2(nn.Module):
+    def __init__(self):
+        super(SubModule2, self).__init__()
+        self.a = 12
+        self.b = 2
+
+    def forward(self, x):
+        self.b = 30
+        return self.a + self.b + x
+
+
+class TestModule(nn.Module):
+    def __init__(self):
+        super(TestModule, self).__init__()
+        self.sub1 = SubModule()
+        self.sub2 = SubModule2()
+        self.a = 3
+        self.b = 4
+
+    def forward(self, x):
+        self.b = 20
+        return self.sub1(x) + self.a + self.b + self.sub2(x)
+
+
+class TestStaticModule(TestCase):
     def test_multihead_attention_layer(self):
         HID_DIM = 256
         QUERY_LEN = 8
@@ -140,15 +181,15 @@ class TestStaticRuntime(TestCase):
         attention.eval()
         o_ref = attention(src, src, src, src_mask)
 
-        attention_a = StaticRuntime(attention)
+        attention_a = StaticModule(attention)
         o_test = attention_a(src, src, src, src_mask)
         o_test_kw = attention_a(src, src, value=src, mask=src_mask)
 
         for a, b in zip(o_ref, o_test):
-            torch.testing.assert_allclose(a, b)
+            torch.testing.assert_close(a, b)
 
         for a, b in zip(o_ref, o_test_kw):
-            torch.testing.assert_allclose(a, b)
+            torch.testing.assert_close(a, b)
 
     def test_multihead_attention_layer_benchmark(self):
         HID_DIM = 256
@@ -165,7 +206,7 @@ class TestStaticRuntime(TestCase):
 
         attention.eval()
         attention = torch.jit.script(attention)
-        attention_a = StaticRuntime(attention)
+        attention_a = StaticModule(attention)
 
         attention_a.benchmark([src, src, src, src_mask], {}, 2, 2)
         metrics = attention_a.benchmark_individual_ops(
@@ -179,54 +220,96 @@ class TestStaticRuntime(TestCase):
         ln_top = [100, 1024, 1024, 1024, 1]
         sigmoid_top = 3
         bot_l = create_mlp(ln_bot, sigmoid_bot)
-        bot_l_acc = StaticRuntime(bot_l)
+        bot_l_acc = StaticModule(bot_l)
         top_l = create_mlp(ln_top, sigmoid_top)
-        top_l_acc = StaticRuntime(top_l)
+        top_l_acc = StaticModule(top_l)
         with torch.no_grad():
             bot_inp = torch.randn(2048, 512)  # torch.Size([2048, 512])
             top_inp = torch.randn(2048, 100)  # torch.Size([2048, 100])
         ref_bot = bot_l(bot_inp)
         acc_bot = bot_l_acc(bot_inp)[0]
-        torch.testing.assert_allclose(acc_bot, ref_bot)
+        torch.testing.assert_close(acc_bot, ref_bot)
         ref_top = top_l(top_inp)
         acc_top = top_l_acc(top_inp)[0]
-        torch.testing.assert_allclose(acc_top, ref_top)
+        torch.testing.assert_close(acc_top, ref_top)
         for _ in range(5):
             with torch.no_grad():
                 bot_inp = torch.randn(2048, 512)  # torch.Size([2048, 512])
                 top_inp = torch.randn(2048, 100)  # torch.Size([2048, 100])
             ref_bot = bot_l(bot_inp)
             acc_bot = bot_l_acc(bot_inp)[0]
-            torch.testing.assert_allclose(acc_bot, ref_bot)
+            torch.testing.assert_close(acc_bot, ref_bot)
             ref_top = top_l(top_inp)
             acc_top = top_l_acc(top_inp)[0]
-            torch.testing.assert_allclose(acc_top, ref_top)
+            torch.testing.assert_close(acc_top, ref_top)
 
     def test_trivial_graph(self):
         s = torch.full((2, 2), 2)
         tg = torch.jit.script(trivial_graph)
         o_ref = tg(s, s, s)
-        tg_a = StaticRuntime(tg)
+        tg_a = StaticModule(tg)
         o_test = tg_a(s, s, s)[0]
-        torch.testing.assert_allclose(o_ref, o_test)
+        torch.testing.assert_close(o_ref, o_test)
 
     def test_leaky_relu(self):
         s = torch.randn(5, 5)
         tg = torch.jit.script(nn.LeakyReLU(0.1))
         o_ref = tg(s)
-        tg_a = StaticRuntime(tg)
+        tg_a = StaticModule(tg)
         o_test = tg_a(s)[0]
-        torch.testing.assert_allclose(o_ref, o_test)
+        torch.testing.assert_close(o_ref, o_test)
 
+    def test_attr(self):
+        """
+        TorchScript IR of TestModule() after freezing:
+        graph(%self : __torch__.test_static_runtime.___torch_mangle_0.TestModule,
+              %x.1 : Tensor):
+            %18 : int = prim::Constant[value=30]()
+            %30 : int = prim::Constant[value=13]()
+            %3 : int = prim::Constant[value=20]()
+            %2 : int = prim::Constant[value=1]()
+            %self.sub2.a : int = prim::Constant[value=12]()
+            %self.a : int = prim::Constant[value=3]()
+            = prim::SetAttr[name="b"](%self, %3)
+            %17 : Tensor = aten::add(%x.1, %30, %2)
+            %7 : Tensor = aten::add(%17, %self.a, %2)
+            %b.1 : int = prim::GetAttr[name="b"](%self)
+            %9 : Tensor = aten::add(%7, %b.1, %2)
+            %sub2 : __torch__.test_static_runtime.___torch_mangle_2.SubModule2 = prim::GetAttr[name="sub2"](%self)
+            = prim::SetAttr[name="b"](%sub2, %18)
+            %b : int = prim::GetAttr[name="b"](%sub2)
+            %22 : int = aten::add(%self.sub2.a, %b)
+            %23 : Tensor = aten::add(%x.1, %22, %2)
+            %12 : Tensor = aten::add(%9, %23, %2)
+            return (%12)
+        """
+        # test prim::SetAttr and prim::GetAttr impl in Static Runtime
+        m = TestModule()
+
+        m.eval()
+        input = torch.randn(2, 2)
+        output_s = m.forward(input)
+
+        ms = torch.jit.script(m)
+        sm = StaticModule(ms)
+        output_sm = sm(input)[0]
+        torch.testing.assert_close(output_s, output_sm)
+        sm.benchmark([input], {}, 2, 2)
+        sm.benchmark_individual_ops([input], {}, 2, 2)
+        sm.benchmark([], {"x": input}, 2, 2)
+        sm.benchmark_individual_ops([], {"x": input}, 2, 2)
+
+    @unittest.skip("Temporarily disabled")
     def test_fusion_trivial_graph(self):
         s = torch.full((2, 2), 2)
         tg = torch.jit.script(trivial_graph)
         o_ref = tg(s, s, s)
-        torch._C._fuse_to_static_runtime(tg.graph)
+        torch._C._fuse_to_static_module(tg.graph)
         assert "StaticSubgraph" in str(tg.graph)
         o_test = tg(s, s, s)
-        torch.testing.assert_allclose(o_ref, o_test)
+        torch.testing.assert_close(o_ref, o_test)
 
+    @unittest.skip("Temporarily disabled")
     def test_fusion_multihead_attention_layer(self):
         HID_DIM = 256
         QUERY_LEN = 8
@@ -245,35 +328,36 @@ class TestStaticRuntime(TestCase):
         attention.eval()
         o_ref = attention(src, src, src, src_mask)
 
-        torch._C._fuse_to_static_runtime(attention._c)
+        torch._C._fuse_to_static_module(attention._c)
         o_test = attention(src, src, src, src_mask)
 
         for a, b in zip(o_ref, o_test):
-            torch.testing.assert_allclose(a, b)
+            torch.testing.assert_close(a, b)
 
+    @unittest.skip("Temporarily disabled")
     def test_fusion_loop(self):
         a = torch.randn(5, 5)
         b = torch.randn(5, 5)
         c = 4
         lg = torch.jit.script(loop_graph)
         o_ref = lg(a, b, c)
-        torch._C._fuse_to_static_runtime(lg.graph)
+        torch._C._fuse_to_static_module(lg.graph)
         assert "StaticSubgraph" in str(lg.graph)
         o_test = lg(a, b, c)
-        torch.testing.assert_allclose(o_ref, o_test)
+        torch.testing.assert_close(o_ref, o_test)
 
+    @unittest.skip("Temporarily disabled")
     def test_fusion_outputs(self):
         a = torch.randn(2, 2)
         b = torch.randn(2, 2)
         c = 4
         og = torch.jit.script(output_graph)
         o_ref = og(a, b, b, c)
-        torch._C._fuse_to_static_runtime(og.graph)
+        torch._C._fuse_to_static_module(og.graph)
         assert "StaticSubgraph" in str(og.graph)
         o_test = og(a, b, b, c)
         for i in o_ref.keys():
-            torch.testing.assert_allclose(o_ref[i], o_test[i])
-
+            torch.testing.assert_close(o_ref[i], o_test[i])
 
 
 if __name__ == "__main__":

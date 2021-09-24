@@ -2,7 +2,7 @@
 
 #include <ATen/ATen.h>
 
-#include <ostream>
+#include <iostream>
 #include <sstream>
 
 namespace at { namespace native {
@@ -25,11 +25,16 @@ inline cudnnDataType_t getDataType(const at::Tensor& t) {
 
 
 void TensorDescriptor::set(const at::Tensor &t, size_t pad) {
-  set(getDataType(t), t.sizes(), t.strides(), pad, t.suggest_memory_format() == at::MemoryFormat::ChannelsLast);
+  auto memory_format = t.suggest_memory_format();
+  set(getDataType(t), t.sizes(), t.strides(), pad,
+    memory_format == at::MemoryFormat::ChannelsLast ||
+    memory_format == at::MemoryFormat::ChannelsLast3d);
 }
 
 void TensorDescriptor::set(cudnnDataType_t datatype, IntArrayRef t_sizes, IntArrayRef t_strides, size_t pad) {
-  set(datatype, t_sizes, t_strides, pad, is_channels_last_strides_2d(t_sizes, t_strides));
+  set(datatype, t_sizes, t_strides, pad,
+    is_channels_last_strides_2d(t_sizes, t_strides) ||
+    is_channels_last_strides_3d(t_sizes, t_strides));
 }
 
 void TensorDescriptor::set(cudnnDataType_t datatype, IntArrayRef t_sizes, IntArrayRef t_strides, size_t pad, bool nhwc) {
@@ -105,7 +110,7 @@ std::ostream& operator<<(std::ostream & out, const TensorDescriptor& d) {
 
 void TensorDescriptor::print() { std::cout << *this; }
 
-void FilterDescriptor::set(const at::Tensor &t, int64_t pad, bool force_nhwc) {
+void FilterDescriptor::set(const at::Tensor &t, const at::MemoryFormat memory_format, int64_t pad) {
   auto dim = t.ndimension();
   if (dim > CUDNN_DIM_MAX || pad > CUDNN_DIM_MAX)
 #define _STR(X) #X
@@ -113,7 +118,6 @@ void FilterDescriptor::set(const at::Tensor &t, int64_t pad, bool force_nhwc) {
     throw std::runtime_error("cuDNN supports only up to " STR(CUDNN_DIM_MAX) " dimensions");
 #undef _STR
 #undef STR
-  auto memory_format = force_nhwc ? at::MemoryFormat::ChannelsLast : t.suggest_memory_format();
   // NB: It is possible for this test to be insufficient, because the
   // Tensor passed in to set the filter descriptor may not be the actual
   // Tensor whose data pointer is passed to cuDNN.  Nevertheless,
@@ -131,14 +135,15 @@ void FilterDescriptor::set(const at::Tensor &t, int64_t pad, bool force_nhwc) {
   dim = std::max(dim, pad);
   cudnnTensorFormat_t filter_format;
   switch(memory_format) {
-  case at::MemoryFormat::Contiguous:
-    filter_format = CUDNN_TENSOR_NCHW;
-    break;
-  case at::MemoryFormat::ChannelsLast:
-    filter_format = CUDNN_TENSOR_NHWC;
-    break;
-  default:
-    TORCH_INTERNAL_ASSERT(false, "unsurpported memory_format for cuDNN filters");
+    case at::MemoryFormat::Contiguous:
+      filter_format = CUDNN_TENSOR_NCHW;
+      break;
+    case at::MemoryFormat::ChannelsLast:
+    case at::MemoryFormat::ChannelsLast3d:
+      filter_format = CUDNN_TENSOR_NHWC;
+      break;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "unsurpported memory_format for cuDNN filters");
   }
   set(getDataType(t), (int) dim, size, filter_format);
 }

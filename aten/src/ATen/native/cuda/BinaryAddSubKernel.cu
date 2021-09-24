@@ -1,31 +1,32 @@
+#include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/BinaryOps.h>
+#include <c10/cuda/CUDAGuard.h>
 
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
 
 namespace at { namespace native {
 
-template<typename scalar_t>
+template <typename T>
 struct AddFunctor {
-  AddFunctor(scalar_t a): alpha(a) {}
-  __device__ __forceinline__ scalar_t operator() (const scalar_t a, const scalar_t b) const {
-    return a + alpha * b;
+  AddFunctor(T alpha) : alpha_(alpha) {}
+  T alpha_;
+  __device__ __forceinline__ T operator()(T a, T b) const __ubsan_ignore_undefined__ {
+    return a + b * alpha_;
   }
-  private:
-    scalar_t alpha;
 };
 
-void add_kernel_cuda(TensorIteratorBase& iter, Scalar alpha_scalar) {
+void add_kernel_cuda(TensorIteratorBase& iter, const Scalar& alpha_scalar) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBool, kBFloat16, iter.common_dtype(), "add_cuda/sub_cuda", [&]() {
-    AddFunctor<scalar_t> f(alpha_scalar.to<scalar_t>());
-    gpu_kernel_with_scalars(iter, f);
+    using opmath_t = at::opmath_type<scalar_t>;
+    opmath_gpu_kernel_with_scalars<scalar_t>(iter, AddFunctor<opmath_t>(alpha_scalar.to<opmath_t>()));
   });
 }
 
-static void sub_kernel_cuda(TensorIterator& iter, Scalar alpha_scalar) {
+static void sub_kernel_cuda(TensorIteratorBase& iter, const Scalar& alpha_scalar) {
   add_kernel_cuda(iter, -alpha_scalar);
 }
 

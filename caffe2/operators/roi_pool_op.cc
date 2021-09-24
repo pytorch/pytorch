@@ -36,10 +36,15 @@ C10_EXPORT bool RoIPoolOp<float, CPUContext>::RunOnDevice() {
 
   // For each ROI R = [batch_index x1 y1 x2 y2]: max pool over R
   for (int n = 0; n < num_rois; ++n) {
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     int roi_batch_id = rois[0];
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     int roi_start_w = round(rois[1] * spatial_scale_);
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     int roi_start_h = round(rois[2] * spatial_scale_);
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     int roi_end_w = round(rois[3] * spatial_scale_);
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     int roi_end_h = round(rois[4] * spatial_scale_);
     CAFFE_ENFORCE_GE(roi_batch_id, 0);
     CAFFE_ENFORCE_LT(roi_batch_id, batch_size);

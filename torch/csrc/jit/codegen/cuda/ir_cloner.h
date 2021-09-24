@@ -13,11 +13,16 @@ namespace cuda {
 
 class Fusion;
 
-// Clones nodes from an exiting Fusion
+//! Clones nodes from an exiting Fusion
+//!
+//! \warning IrCloner machinery is a specialized helper for implementing
+//!   Fusion copy operations and it's not intended for any other uses
+//!
 class TORCH_CUDA_CU_API IrCloner : private OptInConstDispatch {
   friend class Statement;
 
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit IrCloner(Fusion* new_fusion) : fusion_(new_fusion) {}
 
   Statement* clone(const Statement* statement);
@@ -30,7 +35,9 @@ class TORCH_CUDA_CU_API IrCloner : private OptInConstDispatch {
 
   template <class T>
   std::vector<T*> clone(const std::vector<T*>& container) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<T*> copy;
+    copy.reserve(container.size());
     for (auto p : container) {
       copy.push_back(clone(p));
     }
@@ -53,8 +60,7 @@ class TORCH_CUDA_CU_API IrCloner : private OptInConstDispatch {
   void handle(const IterDomain*) override;
 
   void handle(const Bool*) override;
-  void handle(const Float*) override;
-  void handle(const Half*) override;
+  void handle(const Double*) override;
   void handle(const Int*) override;
   void handle(const NamedScalar*) override;
 
@@ -63,6 +69,10 @@ class TORCH_CUDA_CU_API IrCloner : private OptInConstDispatch {
   void handle(const TernaryOp*) override;
   void handle(const BroadcastOp*) override;
   void handle(const ReductionOp*) override;
+  void handle(const WelfordOp*) override;
+  void handle(const TransposeOp*) override;
+  void handle(const ShiftOp*) override;
+  void handle(const GatherOp*) override;
 
   void handle(const Split*) override;
   void handle(const Merge*) override;

@@ -1,32 +1,20 @@
-set(extra_src)
-
-# IF AVX FOUND
-if(C_AVX_FOUND)
-  list(APPEND extra_src ${CMAKE_CURRENT_SOURCE_DIR}/vector/AVX.cpp)
-endif(C_AVX_FOUND)
+set(Aten_TH_AVX_extra_src)
 
 set(hdr
-  THGeneral.h THHalf.h THAllocator.h THStorage.h THStorageFunctions.h THTensor.h THTensorApply.h THBlas.h
-  THLapack.h THVector.h )
+  THGeneral.h THHalf.h THStorage.h THStorageFunctions.h THTensor.h)
 
 set(ATen_TH_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/THGeneral.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THAllocator.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THStorageFunctions.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensor.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THTensorRandom.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THTensorMath.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THTensorMoreMath.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THTensorEvenMoreMath.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THTensorLapack.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THBlas.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THLapack.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THVector.cpp
-  ${extra_src}
   )
 # Remember that PARENT_SCOPE variables are not in the current scope
 set(ATen_TH_SRCS ${ATen_TH_SRCS} PARENT_SCOPE)
 set(ATen_CPU_SRCS ${ATen_CPU_SRCS} ${ATen_TH_SRCS} PARENT_SCOPE)
+
+# Aten_TH_AVX_extra_src is used in aten/src/ATen/CMakeLists.txt
+# when built with BUILD_LITE_INTERPRETER=1
+set(Aten_TH_AVX_extra_src ${Aten_TH_AVX_extra_src} PARENT_SCOPE)
 ######################################################
 
 
@@ -45,8 +33,6 @@ configure_file(THGeneral.h.in "${CMAKE_CURRENT_BINARY_DIR}/THGeneral.h")
 
 install(FILES
   TH.h
-  THAllocator.h
-  THBlas.h
   ${CMAKE_CURRENT_BINARY_DIR}/THGeneral.h
   THGenerateAllTypes.h
   THGenerateBFloat16Type.h
@@ -69,28 +55,15 @@ install(FILES
   THGenerateQInt8Type.h
   THGenerateQInt32Type.h
   THGenerateQTypes.h
-  THLapack.h
   THStorage.h
   THStorageFunctions.h
   THTensor.h
-  THTensorApply.h
-  THTensorDimApply.h
-  THVector.h
   THHalf.h
   THTensor.hpp
   THStorageFunctions.hpp
   DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/TH")
 
 install(FILES
-  vector/AVX.h
-  ../ATen/native/cpu/avx_mathfun.h
-  DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/TH/vector")
-
-install(FILES
-  generic/THBlas.cpp
-  generic/THBlas.h
-  generic/THLapack.cpp
-  generic/THLapack.h
   generic/THStorage.cpp
   generic/THStorage.h
   generic/THStorageCopy.cpp
@@ -98,14 +71,5 @@ install(FILES
   generic/THTensor.cpp
   generic/THTensor.h
   generic/THTensor.hpp
-  generic/THTensorLapack.cpp
-  generic/THTensorLapack.h
-  generic/THTensorMath.cpp
-  generic/THTensorMath.h
-  generic/THTensorRandom.cpp
-  generic/THTensorRandom.h
-  generic/THVectorDispatch.cpp
-  generic/THVector.h
   # See Note [TH abstraction violation]
-  generic/THTensorFastGetSet.hpp
   DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/TH/generic")

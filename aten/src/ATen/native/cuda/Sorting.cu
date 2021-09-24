@@ -6,6 +6,7 @@
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/SortingRadixSelect.cuh>
+#include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/MemoryOverlap.h>
 #include <THC/THCDeviceUtils.cuh> // only for THCRoundUp?
 #include <THC/THCNumerics.cuh>
@@ -135,7 +136,7 @@ __global__ void gatherMedian(
   }
   __syncthreads();
   if (nan_count > 0) {
-    atomicAdd(&num_nan, nan_count);
+    gpuAtomicAddNoReturn(&num_nan, nan_count);
   }
   __syncthreads();
 
@@ -254,13 +255,8 @@ void kthvalue_cuda_template(
     bool keepdim) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim());
   int64_t slicesize = self.dim() == 0 ? 1 : self.size(dim);
-  // FIXME: This seems bogus, I only do this because it was the old behaviour.
-  //        The reductions are fine, as long as the axis being reduced along
-  //        isn't of 0 elements (and the output has elements).
-  TORCH_CHECK(
-      self.numel() > 0,
-      "cannot perform reduction function kthvalue",
-      " on tensor with no elements because the operation does not have an identity");
+  zero_numel_check_dims(self, dim, "kth_value()");
+
   TORCH_CHECK(k >= 1 && k <= slicesize, "selected number k out of range");
 
   at::assert_no_overlap(self, values);
@@ -281,14 +277,15 @@ void kthvalue_cuda_template(
 
   // Based on required index size, run the algorithm with the
   // appropriate index type
-  if (cuda::detail::canUse32BitIndexMath(self) &&
-      cuda::detail::canUse32BitIndexMath(values) &&
-      cuda::detail::canUse32BitIndexMath(indices)) {
-    run_launcher<scalar_t, uint32_t>(
-        values, indices, self, dim, KthValueLauncher(k));
-  } else {
-    run_launcher<scalar_t, uint64_t>(
-        values, indices, self, dim, KthValueLauncher(k));
+  if (self.numel() != 0) {
+    AT_DISPATCH_INDEX_TYPES(
+        cuda::detail::canUse32BitIndexMath(self) &&
+        cuda::detail::canUse32BitIndexMath(values) &&
+        cuda::detail::canUse32BitIndexMath(indices) ? ScalarType::Int : ScalarType::Long,
+        "kth_value_launcher", [&] {
+          run_launcher<scalar_t, index_t>(
+            values, indices, self, dim, KthValueLauncher(k));
+        });
   }
 
   if (!keepdim) {
@@ -328,12 +325,6 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
   dim = at::maybe_wrap_dim(dim, self.dim());
   Tensor in = self.dim() > 0 ? self.contiguous() : self.unsqueeze(0);
 
-  int64_t size = in.size(dim);
-  TORCH_CHECK(
-      size > 0,
-      "median() cannot compute median for a dimension of size 0 because ",
-      "the operation does not have an identity");
-
   checkDeviceType("median", {values, indices}, self.device().type());
   checkScalarType("median", {indices, "indices", 1}, kLong);
   checkSameType("median", {values, "values", 0}, {self, "self", 2});
@@ -345,6 +336,7 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
       " dimensions");
 
   std::vector<int64_t> out_shape = self.sizes().vec();
+  zero_numel_check_dims(self, dim, "median()");
   if (self.dim() > 0) {
     if (keepdim) {
       out_shape[dim] = 1;
@@ -387,7 +379,10 @@ Tensor median_impl(const Tensor& self, bool ignore_nan) {
   NoNamesGuard guard;
 
   int64_t size = self.numel();
-  TORCH_CHECK(size > 0, "median() input tensor cannot be empty");
+  // Return nan for empty tensors
+  if (size <= 0) {
+    return at::full({}, std::numeric_limits<float>::quiet_NaN()).to(self.options());
+  }
 
   // Sort input tensor to efficiently query for median element
   Tensor sorted = std::get<0>(self.flatten().sort());
@@ -409,12 +404,12 @@ Tensor median_impl(const Tensor& self, bool ignore_nan) {
 // Mark: kthvalue
 
 std::tuple<Tensor&, Tensor&> kthvalue_out_cuda(
-    Tensor& values,
-    Tensor& indices,
     const Tensor& self,
     int64_t k,
     int64_t dim,
-    bool keepdim) {
+    bool keepdim,
+    Tensor& values,
+    Tensor& indices) {
   // See note [Writing Nondeterministic Operations]
   // If there are duplicate elements of the kth value, the procedure for choosing which
   // of the duplicates to use for the indices output is nondeterministic.
@@ -432,11 +427,11 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cuda(
 // Mark: median
 
 std::tuple<Tensor&, Tensor&> median_out_cuda(
-    Tensor& values,
-    Tensor& indices,
     const Tensor& self,
     int64_t dim,
-    bool keepdim) {
+    bool keepdim,
+    Tensor& values,
+    Tensor& indices) {
   return median_with_indices_impl(
       values, indices, self, dim, keepdim, /*ignore_nan=*/false);
 }
@@ -446,11 +441,11 @@ Tensor median_cuda(const Tensor& self) {
 }
 
 std::tuple<Tensor&, Tensor&> nanmedian_out_cuda(
-    Tensor& values,
-    Tensor& indices,
     const Tensor& self,
     int64_t dim,
-    bool keepdim) {
+    bool keepdim,
+    Tensor& values,
+    Tensor& indices) {
   return median_with_indices_impl(
       values, indices, self, dim, keepdim, /*ignore_nan=*/true);
 }

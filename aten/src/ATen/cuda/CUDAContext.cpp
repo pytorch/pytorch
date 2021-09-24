@@ -29,9 +29,9 @@ void initDeviceProperty(DeviceIndex device_index) {
 
 } // anonymous namespace
 
-// We need this function to force the linking against torch_cuda on Windows.
-// If you need to modify this function, please specify a new function and apply the changes
-// according to https://github.com/pytorch/pytorch/pull/34288.
+// We need this function to force the linking against torch_cuda(_cpp) on Windows.
+// If you need to modify this function, please specify a new function and apply
+// the changes according to https://github.com/pytorch/pytorch/pull/34288.
 // Related issue: https://github.com/pytorch/pytorch/issues/31611.
 /* Device info */
 int warp_size() {

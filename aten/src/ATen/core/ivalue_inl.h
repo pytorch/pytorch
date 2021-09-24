@@ -1,7 +1,9 @@
 #pragma once
 
 #include <condition_variable>
+#include <memory>
 #include <type_traits>
+#include <utility>
 
 #include <ATen/core/Dict.h>
 #include <ATen/core/List.h>
@@ -9,8 +11,12 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/qualified_name.h>
 #include <ATen/core/rref_interface.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/core/DeviceGuard.h>
+#include <c10/core/Event.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/Stream.h>
+#include <c10/core/StreamGuard.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/intrusive_ptr.h>
@@ -56,13 +62,12 @@ c10::intrusive_ptr<T, NullType> IValue::moveToIntrusivePtr() {
 }
 template <typename T, class NullType>
 c10::intrusive_ptr<T, NullType> IValue::toIntrusivePtr() const {
-  auto r = c10::intrusive_ptr<T, NullType>::reclaim(
-      payload.u.as_intrusive_ptr == c10::UndefinedTensorImpl::singleton()
-      ? NullType::singleton()
-      : static_cast<T*>(payload.u.as_intrusive_ptr));
-  auto p = r;
-  r.release();
-  return p;
+  if (payload.u.as_intrusive_ptr == c10::UndefinedTensorImpl::singleton()) {
+    return c10::intrusive_ptr<T, NullType>();
+  }
+  c10::raw::intrusive_ptr::incref(payload.u.as_intrusive_ptr);
+  return c10::intrusive_ptr<T, NullType>::reclaim(
+      static_cast<T*>(payload.u.as_intrusive_ptr));
 }
 
 template <class T, class U>
@@ -139,7 +144,9 @@ inline c10::complex<double> IValue::toComplexDouble() const {
   return (*ptr).val;
 }
 inline at::Tensor IValue::toTensor() && {
-  AT_ASSERT(isTensor(), "Expected Tensor but got ", tagKind());
+  if (C10_UNLIKELY(!isTensor())) {
+    reportToTensorTypeError();
+  }
   auto result = std::move(payload.as_tensor);
   // As far as I can tell, omitting the usual explicit destructor call
   // is not UB in and of itself, and it's a slight perf win. The
@@ -154,11 +161,15 @@ inline at::Tensor IValue::toTensor() && {
   return result;
 }
 inline at::Tensor& IValue::toTensor() & {
-  AT_ASSERT(isTensor(), "Expected Tensor but got ", tagKind());
+  if (C10_UNLIKELY(!isTensor())) {
+    reportToTensorTypeError();
+  }
   return payload.as_tensor;
 }
 inline const at::Tensor& IValue::toTensor() const& {
-  AT_ASSERT(isTensor(), "Expected Tensor but got ", tagKind());
+  if (C10_UNLIKELY(!isTensor())) {
+    reportToTensorTypeError();
+  }
   return payload.as_tensor;
 }
 inline c10::Storage IValue::toStorage() && {
@@ -217,10 +228,18 @@ struct TORCH_API ConstantString final : c10::intrusive_ptr_target {
 
  public:
   ConstantString(std::string str) : str_(std::move(str)) {}
+  ConstantString(c10::string_view str) : str_(std::string(str)) {}
   static c10::intrusive_ptr<ConstantString> create(std::string str_);
+  static c10::intrusive_ptr<ConstantString> create(c10::string_view str_);
+  static c10::intrusive_ptr<ConstantString> create(const char* str_);
+
   const std::string& string() const {
     return str_;
   }
+  c10::string_view string_view() const {
+    return str_;
+  }
+
   operator const std::string&() const {
     return string();
   }
@@ -250,23 +269,17 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
   }
 
   template <typename... Args>
-  static c10::intrusive_ptr<Tuple> create(Args... elements_) {
+  static c10::intrusive_ptr<Tuple> create(Args&&... elements_) {
     return c10::make_intrusive<Tuple>(
-        std::vector<IValue>{IValue(elements_)...});
+        std::vector<IValue>{IValue(std::forward<Args>(elements_))...});
   }
 
   const std::vector<IValue>& elements() const& {
     return elements_;
   }
-  operator const std::vector<IValue>&() const {
-    return elements();
-  }
 
   std::vector<IValue>& elements() & {
     return elements_;
-  }
-  operator std::vector<IValue>&() {
-    return elements();
   }
 
   std::vector<IValue>&& elements() && {
@@ -295,18 +308,23 @@ struct EnumHolder;
 } // namespace ivalue
 
 // Future
-struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
+struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
  private:
-  c10::intrusive_ptr<Future> intrusive_from_this() {
-    c10::raw::intrusive_ptr::incref(this); // we are creating a new pointer
-                                           // from a raw `this` pointer
-                                           // so we need to bump the refcount
-                                           // to account for this ownership
-    return c10::intrusive_ptr<Future>::reclaim(this);
-  }
+  // Keep this private in order to force users to go through make_intrusive and
+  // thus prevent creating a Future that's not held by an intrusive_ptr.
+  explicit Future(TypePtr type, std::vector<c10::Device> devices={})
+      : type_(std::move(type)),
+        impl_(getTypeOfDevices(devices)),
+        devices_(sortAndDeduplicateDevices(impl_, std::move(devices))) {}
+
+  friend c10::intrusive_ptr<Future>;
 
  public:
-  explicit Future(TypePtr type) : type_(type) {}
+  Future(const Future&) = delete;
+  Future(Future&&) = delete;
+  Future& operator=(const Future&) = delete;
+  Future& operator=(Future&&) = delete;
+
   struct TORCH_API FutureError final : public std::exception {
     explicit FutureError(std::string&& error_msg_)
         : error_msg(std::move(error_msg_)) {}
@@ -325,13 +343,8 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
    */
   void wait() {
     std::unique_lock<std::mutex> lock(mutex_);
-    while (!completed_) {
-      finished_cv_.wait(lock);
-    }
-
-    if (!eptr_) {
-      postWaitHook(value_);
-    }
+    finished_cv_.wait(lock, [&]() -> bool { return completed_; });
+    synchronizeWithCurrentStreams();
   }
 
   /**
@@ -339,39 +352,76 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
    * exception if an error exists.
    */
   void waitAndThrow() {
-    std::unique_lock<std::mutex> lock(mutex_);
-    while (!completed_) {
-      finished_cv_.wait(lock);
-    }
+    wait();
 
     if (eptr_) {
       std::rethrow_exception(eptr_);
     }
-
-    postWaitHook(value_);
   }
 
   /**
-   * Explicitly mark the future as completed with the output value.
+   * Explicitly mark the future as completed with the output value. Optionally,
+   * the storages for all tensors in IValue can be passed as well. The DataPtrs
+   * of these storages are used to synchronize CUDA streams. If storages isn't
+   * given we will attempt to extract it from the value, if we need to (this
+   * happens if a non-empty set of devices was given to the constructor). Thus
+   * one only needs to provide storages when 1) they cannot be extracted through
+   * IValue::getSubValues() or through pickling in case of Python object; or
+   * when 2) customized storage extraction is more efficient.
    */
-  void markCompleted(IValue value) {
+  using WeakStorage = c10::weak_intrusive_ptr<c10::StorageImpl>;
+  void markCompleted(
+      IValue value,
+      c10::optional<std::vector<WeakStorage>> storages = c10::nullopt) {
+    // Start by performing all steps that can throw, before setting any field.
+    // Do this before even acquiring the mutex, because extractStorages might
+    // acquire the GIL, which could lead to a lock inversion with our mutex.
+    // See https://github.com/pytorch/pytorch/issues/58239.
+    std::vector<WeakStorage> actualStorages;
+    std::vector<c10::Device> usedDevices;
+    try {
+      // FIXME We should always extract DataPtrs, in order to catch the case of
+      // users using CUDA values but forgetting to set devices, which currently
+      // leads to a silent synchronization/correctness issue. However, as this
+      // might worsen perf in CPU-only cases, we should only do so after careful
+      // benchmarks.
+      if (impl_.type() != c10::kCPU) {
+        actualStorages =
+            storages.has_value() ? std::move(*storages) : extractStorages(value);
+        usedDevices = getDevicesOfStorages(impl_, actualStorages);
+        ensureIsSubsetOfDevices(usedDevices, devices_);
+      }
+    } catch (const std::exception&) {
+      setError(std::current_exception());
+      return;
+    }
+
     std::unique_lock<std::mutex> lock(mutex_);
     TORCH_CHECK(
         !completed(),
         "Attempting to mark a completed Future as complete again. Note that "
         "a Future can only be marked completed once.");
-    completed_ = true;
+
+    // Only set value_ and completed_ flag once all checks and preparation steps
+    // have returned successfully to allow for proper error propagation.
     value_ = std::move(value);
+    completed_ = true;
 
-    postMarkCompletedHook(value_);
+    currentDevice_ = impl_.getDevice();
+    storages_ = std::move(actualStorages);
+    for (const c10::Device& device : usedDevices) {
+      c10::Event event(impl_.type());
+      event.record(impl_.getStream(device));
+      events_.push_back(std::move(event));
+    }
 
-    std::vector<std::function<void(void)>> cbs;
+    std::vector<std::function<void(Future&)>> cbs;
     cbs.swap(callbacks_);
     lock.unlock();
 
     finished_cv_.notify_all();
     for (auto& callback : cbs) {
-      callback();
+      invokeCallback(std::move(callback));
     }
   }
 
@@ -389,10 +439,17 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
     if (completed_) {
       // This should be rare and shouldn't cause log spew. Its important to
       // log errors and thats why we have this log here.
-      LOG(INFO)
-          << "Skipping setting following error on the Future since "
-          << "it is already marked completed (this is not neccessarily an error): "
-          << tryRetrieveErrorMessageInternal(eptr);
+      std::string msg = c10::str(
+          "Skipping setting following error on the Future since "
+          "it is already marked completed (this is not necessarily "
+          "an error):\n",
+          tryRetrieveErrorMessageInternal(eptr));
+      if (eptr_) {
+        msg += c10::str(
+            ", \nOriginal exception:\n",
+            tryRetrieveErrorMessageInternal(eptr_));
+      }
+      LOG(INFO) << msg;
       return;
     } else {
       setErrorInternal(std::move(eptr), lock);
@@ -418,18 +475,32 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
     return value_;
   }
 
+  // This accessor should only be used if we know that the future is
+  // completed() with no error.
+  const std::vector<WeakStorage>& storages() const {
+    std::unique_lock<std::mutex> lock(mutex_);
+    AT_ASSERT(completed());
+    AT_ASSERT(!eptr_);
+    return storages_;
+  }
+
   /**
    * Add a callback to the future.
    * The callbacks will be executed once the future completes.
    * If the future has already completed,
    * this function will execute the callback immediately.
    */
-  void addCallback(std::function<void(void)> callback) {
+  template <typename T>
+  void addCallback(T callback) {
+#if __cpp_lib_is_invocable >= 201703
+    static_assert(
+        std::is_invocable_r<void, T, Future&>::value,
+        "The callback must have signature void(Future&)");
+#endif
     std::unique_lock<std::mutex> lock(mutex_);
-    callback = wrapCallback(std::move(callback));
     if (completed()) {
       lock.unlock();
-      callback();
+      invokeCallback(std::move(callback));
       return;
     }
     callbacks_.emplace_back(std::move(callback));
@@ -440,19 +511,68 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
    * value of the callback. This is necessary when the callback provider needs
    * to know for sure when the callback has finished.
    */
-  c10::intrusive_ptr<Future> then(
-      std::function<IValue(void)> callback,
-      TypePtr type) {
-    auto fut = createInstance(std::move(type));
+  template <typename T>
+  c10::intrusive_ptr<Future> then(T callback, TypePtr type) {
+    using IValueWithStorages = std::tuple<IValue, std::vector<WeakStorage>>;
+#if __cpp_lib_is_invocable >= 201703
+    static_assert(
+        guts::disjunction<
+            std::is_invocable_r<IValue, T, Future&>,
+            std::is_invocable_r<IValueWithStorages, T, Future&>>::value,
+        "The callback must have signature IValue(Future&) or "
+        "std::tuple<IValue, std::vector<Storage>>(Future&)");
+#endif
+    auto childFut = createInstance(std::move(type));
+    addCallback([childFut,
+                 cb = std::move(callback)](Future& parentFut) mutable {
+      try {
+        guts::if_constexpr<std::is_convertible<
+            typename std::result_of<T && (Future&)>::type,
+            IValueWithStorages>::value>(
+            [&](auto identity) {
+              IValue value;
+              std::vector<WeakStorage> storages;
+              std::tie(value, storages) = identity(cb)(parentFut);
+              childFut->markCompleted(std::move(value), std::move(storages));
+            },
+            [&](auto identity) {
+              childFut->markCompleted(identity(cb)(parentFut));
+            });
+      } catch (std::exception&) {
+        childFut->setError(std::current_exception());
+      }
+    });
+    return childFut;
+  }
+
+  template <typename T>
+  c10::intrusive_ptr<Future> thenAsync(T callback, TypePtr type) {
+#if __cpp_lib_is_invocable >= 201703
+    static_assert(
+        std::is_invocable_r<c10::intrusive_ptr<Future>, T, Future&>::value,
+        "The callback must have signature c10::intrusive_ptr<Future>(Future&)");
+#endif
+    auto childFut = createInstance(std::move(type));
     addCallback(
-        [fut, cb = std::move(callback)]() {
+        [childFut, cb = std::move(callback)](Future& parentFut) mutable {
+          c10::intrusive_ptr<Future> intermediateFut;
           try {
-            fut->markCompleted(cb());
+            intermediateFut = cb(parentFut);
           } catch (std::exception&) {
-            fut->setError(std::current_exception());
+            childFut->setError(std::current_exception());
+            return;
           }
+          intermediateFut->addCallback(
+              [childFut = std::move(childFut)](Future& intermediateFut) {
+                if (intermediateFut.hasError()) {
+                  childFut->setError(intermediateFut.exception_ptr());
+                } else {
+                  childFut->markCompleted(
+                      intermediateFut.value(), intermediateFut.storages());
+                }
+              });
         });
-    return fut;
+    return childFut;
   }
 
   // Tries to retrieve the error message from std::exception_ptr.
@@ -490,60 +610,82 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
     return type_;
   }
 
- protected:
-  // This hook is called by this class's then() method when it prepares the
-  // instance it returns to the caller. It should be overridden by subclasses so
-  // that they can produce an instace of their own type.
-  virtual c10::intrusive_ptr<Future> createInstance(at::TypePtr type) {
-    return c10::make_intrusive<Future>(type);
+  const std::vector<c10::Device>& devices() const {
+    return devices_;
   }
 
-  // This hook will be called by this class (the superclass) when the future is
-  // marked completed _with a value_ (hence not in case of error). This is done
-  // right away, while the mutex is still held, before any callbacks are run.
-  // It allows subclasses to further update their state if they so need. For
-  // example the CUDAFuture subclass uses it to determine what devices the value
-  // resides on and record an event in those devices' current streams.
-  virtual void postMarkCompletedHook(const at::IValue& value) {}
-
-  // This hook will be called by the addCallback() and the then() methods before
-  // storing the callback for later execution (or before running it inline if
-  // the future is already complete). Note that this method could thus be called
-  // while the future is _not_ yet complete. By default this method does nothing
-  // but subclasses can override this method to add functionality. For example
-  // the CUDAFuture subclass ensures the callback runs with CUDA streams which
-  // are synchronized with the events recorded in the I/O streams.
-  virtual std::function<void(void)> wrapCallback(
-      std::function<void(void)> callback) {
-    return callback;
+  // This method should be used when one intends to manually create a child
+  // future, for example when implementing a customized version of then().
+  c10::intrusive_ptr<Future> createInstance(at::TypePtr type) {
+    return c10::make_intrusive<Future>(std::move(type), devices_);
   }
-
-  // This hook will be called by this class after a user thread has completed
-  // waiting on a successful future. It will thus not be called if the future
-  // completes with an error. It will also not be called if the user accesses
-  // the future's value without synchronization. Subclasses can override this
-  // to add some synchronization to the wait. For example, the CUDAFuture
-  // subclass ensures the user's current CUDA streams synchronize with the I/O
-  // events stored by the future.
-  virtual void postWaitHook(const at::IValue& value) {}
 
  private:
+
+  // This method should always be used when invoking a callback (regardless of
+  // how/when that happens) as it will ensure that the proper "environment" is
+  // set up before running the callback, as in, it will set up the CUDA streams,
+  // synchronize them with the value, and so on (if needed).
+  template<typename T>
+  void invokeCallback(T callback) {
+#if __cpp_lib_is_invocable >= 201703
+    static_assert(
+        std::is_invocable_r<void, T, Future&>::value,
+        "The callback must have signature void(Future&)");
+#endif
+
+    c10::OptionalDeviceGuard deviceGuard(currentDevice_);
+
+    std::vector<c10::Stream> streams;
+    for (const c10::Device& device : devices_) {
+      streams.push_back(impl_.getStreamFromGlobalPool(device));
+    }
+    c10::MultiStreamGuard streamGuard(streams);
+    synchronizeWithCurrentStreams();
+
+    callback(*this);
+  }
+
+  // This method should be called before this future's value is used, as it
+  // ensures that the CUDA streams that are "current" at the callsite properly
+  // synchronize with the value.
+  void synchronizeWithCurrentStreams() {
+    for (c10::Event& event : events_) {
+      event.block(impl_.getStream(event.device()));
+    }
+
+    for (const WeakStorage& weak_storage : storages_) {
+      c10::intrusive_ptr<c10::StorageImpl> storage = weak_storage.lock();
+      if (!storage) {
+        continue;
+      }
+      if (!storage->device().is_cpu()) {
+        impl_.recordDataPtrOnStream(
+            storage->data_ptr(), impl_.getStream(storage->device()));
+      }
+    }
+  }
+
   void setErrorInternal(
       std::exception_ptr eptr,
       std::unique_lock<std::mutex>& lock) {
-    AT_ASSERT(!completed());
+    TORCH_CHECK(
+        !eptr_,
+        "Error already set on this Future: ",
+        tryRetrieveErrorMessageInternal(eptr_),
+        ", trying to set error: ",
+        tryRetrieveErrorMessageInternal(eptr));
+    TORCH_INTERNAL_ASSERT(!completed(), "Future is already marked completed");
     completed_ = true;
     eptr_ = std::move(eptr);
 
-    // Do not call postMarkCompletedHook() here as there isn't any value.
-
-    std::vector<std::function<void(void)>> cbs;
+    std::vector<std::function<void(Future&)>> cbs;
     cbs.swap(callbacks_);
     lock.unlock();
 
     finished_cv_.notify_all();
     for (auto& callback : cbs) {
-      callback();
+      invokeCallback(std::move(callback));
     }
   }
 
@@ -558,14 +700,161 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
     }
   }
 
+  // Defined in ivalue.cpp.
+  static std::vector<WeakStorage> extractStorages(
+      const at::IValue& value);
+
+  static std::vector<c10::Device> getDevicesOfStorages(
+      const c10::impl::VirtualGuardImpl& impl,
+      const std::vector<WeakStorage>& storages) {
+    c10::DeviceIndex deviceCount = impl.deviceCount();
+    std::vector<bool> isDeviceUsed(deviceCount, false);
+    for (const WeakStorage& weak_storage : storages) {
+      c10::intrusive_ptr<c10::StorageImpl> storage = weak_storage.lock();
+      if (!storage) {
+        continue;
+      }
+      c10::Device device = storage->device();
+      if (!device.is_cpu()) {
+        TORCH_CHECK_VALUE(
+            device.type() == impl.type(),
+            "Expected all data ptrs to be on a device of type ",
+            impl.type(),
+            ", got one on device ",
+            device);
+        isDeviceUsed[device.index()] = true;
+      }
+    }
+    std::vector<c10::Device> devices;
+    for (c10::DeviceIndex idx = 0; idx < deviceCount; idx++) {
+      if (isDeviceUsed[idx]) {
+        devices.emplace_back(impl.type(), idx);
+      }
+    }
+    return devices;
+  }
+
+  static std::string formatSetOfDevices(
+      const std::vector<c10::Device>& devices) {
+    if (devices.empty()) {
+      return "(none)";
+    }
+    std::ostringstream oss;
+    oss << devices[0];
+    for (size_t idx = 1; idx < devices.size(); idx++) {
+      if (idx == devices.size() - 1) {
+        oss << " and ";
+      } else {
+        oss << ", ";
+      }
+      oss << devices[idx];
+    }
+    return oss.str();
+  }
+
+  static c10::DeviceType getTypeOfDevices(
+      const std::vector<c10::Device>& devices) {
+    if (devices.empty()) {
+      return c10::kCPU;
+    }
+    c10::DeviceType deviceType = devices[0].type();
+    for (size_t idx = 1; idx < devices.size(); idx++) {
+      TORCH_CHECK_VALUE(
+          devices[idx].type() == deviceType,
+          "Expected all devices to be of the same type, but got a mismatch between ",
+          devices[0],
+          " and ",
+          devices[idx]);
+    }
+    return deviceType;
+  }
+
+  // We need devices to be sorted in order to use ensureIsSubsetOfDevices.
+  static std::vector<c10::Device> sortAndDeduplicateDevices(
+      const c10::impl::VirtualGuardImpl& impl,
+      std::vector<c10::Device> devices) {
+    std::sort(
+      devices.begin(), devices.end(),
+      [](const c10::Device& a, const c10::Device& b) { return a.index() < b.index(); });
+    // Deduplicate by compacting.
+    size_t targetIdx = 0;
+    for (size_t sourceIdx = 0; sourceIdx < devices.size(); sourceIdx++) {
+      TORCH_CHECK_VALUE(
+          devices[sourceIdx].has_index(),
+          "Expected devices to have indices, got ", devices[sourceIdx]);
+      if (targetIdx > 0 && devices[targetIdx - 1].index() == devices[sourceIdx].index()) {
+        // It's a duplicate, skip it.
+        continue;
+      }
+      if (sourceIdx != targetIdx) {
+        devices[targetIdx] = devices[sourceIdx];
+      }
+      targetIdx++;
+    }
+    // If there were duplicates there's now a gap at the end: trim it. Resizing
+    // requires the item type to be default-constructible (which c10::Device is
+    // not) because in principle it could be required to create new items. Since
+    // we know we'll shrink the vector, we provide a custom dummy value instead.
+    devices.resize(targetIdx, c10::Device(c10::kCPU));
+    return devices;
+  }
+
+  static void ensureIsSubsetOfDevices(
+      const std::vector<c10::Device>& subset,
+      const std::vector<c10::Device>& superset) {
+    // We assume the devices in both vectors have the same consistent type, and
+    // their indices are unique and sorted.
+    std::vector<c10::Device> excessDevices;
+    std::set_difference(
+        subset.begin(),
+        subset.end(),
+        superset.begin(),
+        superset.end(),
+        std::back_inserter(excessDevices),
+        [](const c10::Device& a, const c10::Device& b) { return a.index() < b.index(); });
+    TORCH_CHECK_VALUE(
+        excessDevices.empty(),
+        "The result contained tensors residing on device(s) ",
+        formatSetOfDevices(excessDevices),
+        " which are not among the expected device(s) ",
+        formatSetOfDevices(superset));
+  }
+
   mutable std::mutex mutex_;
   std::atomic_bool completed_ = {false}; // is this future complete
   std::condition_variable finished_cv_;
 
   IValue value_; // when finished the value
   TypePtr type_;
-  std::vector<std::function<void(void)>> callbacks_;
+  std::vector<std::function<void(Future&)>> callbacks_;
   std::exception_ptr eptr_;
+
+  // An upcast pointer to a virtual class which allows us to manipulate events,
+  // streams, ... in a generic way, without an explicit dependency on CUDA.
+  const c10::impl::VirtualGuardImpl impl_;
+
+  // The device that was current when markCompleted was called, which we'll
+  // restore when invoking callbacks. It's optional because we'll only store it
+  // if the future completes successfully.
+  optional<c10::Device> currentDevice_;
+
+  // The events that correspond to the completion of the async I/O kernels. They
+  // are recorded on the appropriate streams when the future is marked completed
+  // and can then be queried/waited/blocked on. There is one event for each
+  // distinct device on which the value's tensors reside.
+  std::vector<c10::Event> events_;
+
+  // A cached version of the storages extracted from the value when the future
+  // is first marked completed.
+  std::vector<WeakStorage> storages_;
+
+  // The bounding set of devices that this future, and any of its children, is
+  // allowed to use. This is a superset of the set of devices used by the events
+  // above. We need this to know what streams (for which devices) to set as
+  // current when invoking a callback, thus allowing the callback to use devices
+  // that the parent future didn't use. This field is set to the value provided
+  // in the constructor and will be "inherited" by all child futures.
+  const std::vector<c10::Device> devices_;
 };
 
 // Input is a list of Futures with the same target type.
@@ -580,8 +869,25 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAny(
 // User-defined object.
 struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
  public:
-  Object(StrongTypePtr type, size_t numSlots) : type_(std::move(type)) {
+  // In general, class types hold a shared_ptr to its owning CompilationUnit,
+  // so that its type and methods do not get deallocated while the class exists.
+  // However, the CompilationUnit holds ownership of the type's graphs, so
+  // inserting a constant object into a Graph would create a reference cycle if
+  // that constant object held a shared_ptr to its CU. For these objects we
+  // instatiate them with non-owning references to its CU
+  Object(WeakOrStrongTypePtr type, size_t numSlots) : type_(std::move(type)) {
     slots_.resize(numSlots);
+  }
+
+  Object(StrongTypePtr type, size_t numSlots)
+      : type_(WeakOrStrongTypePtr(std::move(type))) {
+    slots_.resize(numSlots);
+  }
+
+  static c10::intrusive_ptr<Object> create(
+      WeakOrStrongTypePtr type,
+      size_t numSlots) {
+    return c10::make_intrusive<Object>(std::move(type), numSlots);
   }
 
   static c10::intrusive_ptr<Object> create(
@@ -650,7 +956,18 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   std::shared_ptr<ClassType> type() const;
 
   std::shared_ptr<torch::jit::CompilationUnit> compilation_unit() {
-    return type_.cu_;
+    if (type_.holds_strong_ref()) {
+      return type_.cu_.getStrongRefOrThrow();
+    } else {
+      auto weak_ptr = type_.cu_.getWeakRefOrThrow();
+      return std::shared_ptr<torch::jit::CompilationUnit>(weak_ptr);
+    }
+  }
+
+  c10::intrusive_ptr<Object> copy_to_weak_compilation_ref() const;
+
+  void unsafe_make_weak_compilation_ref() {
+    type_ = WeakOrStrongTypePtr(type_.asWeakTypePtr());
   }
 
   c10::intrusive_ptr<Object> copy() const;
@@ -659,9 +976,13 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
 
   c10::intrusive_ptr<Object> deepcopy(IValue::HashAliasedIValueMap& memo) const;
 
+  bool is_weak_compilation_ref() const {
+    return !type_.holds_strong_ref();
+  }
+
  private:
   void resizeObject(size_t slot);
-  StrongTypePtr type_;
+  WeakOrStrongTypePtr type_;
   std::vector<IValue> slots_;
 };
 
@@ -674,6 +995,7 @@ struct ivalue::PyObjectHolder : c10::intrusive_ptr_target {
   virtual c10::InferredType tryToInferType() = 0;
   virtual IValue toIValue(const TypePtr& type, c10::optional<int32_t> N = c10::nullopt) = 0;
   virtual std::string toStr() = 0;
+  virtual std::vector<at::Tensor> extractTensors() = 0;
 
   virtual ~PyObjectHolder(){};
 };
@@ -744,14 +1066,15 @@ inline const ivalue::Object& IValue::toObjectRef() const {
 // toX method to IValue. These named methods are much more discoverable
 // than the to templated function.
 
-#define DEFINE_TO(type, method_name)       \
-  template <>                              \
-  inline type IValue::to<type>()&& {       \
-    return std::move(*this).method_name(); \
-  }                                        \
-  template <>                              \
-  inline type IValue::to<type>() const& {  \
-    return this->method_name();            \
+#define DEFINE_TO(T, method_name)                          \
+  template <>                                              \
+  inline T IValue::to<T>()&& {                             \
+    return static_cast<T>(std::move(*this).method_name()); \
+  }                                                        \
+  template <>                                              \
+  inline c10::detail::ivalue_to_const_ref_overload_return<T>::type IValue::to<T>() const& { \
+    typedef c10::detail::ivalue_to_const_ref_overload_return<T>::type return_type;          \
+    return static_cast<return_type>(this->method_name());                                   \
   }
 
 DEFINE_TO(at::Tensor, toTensor)
@@ -783,6 +1106,7 @@ DEFINE_TO(c10::impl::GenericList, toList)
 DEFINE_TO(c10::impl::GenericDict, toGenericDict)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Tuple>, toTuple)
 DEFINE_TO(std::string, toStringRef)
+DEFINE_TO(c10::string_view, toStringView)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Future>, toFuture)
 DEFINE_TO(c10::intrusive_ptr<c10::RRefInterface>, toRRef)
 DEFINE_TO(c10::intrusive_ptr<at::Quantizer>, toQuantizer)
@@ -887,7 +1211,7 @@ static std::vector<T> createVectorFromList(const c10::detail::ListImpl* impl) {
 }
 
 template <typename T>
-static std::vector<T> createVectorFromList(const c10::List<T>& impl) {
+std::vector<T> createVectorFromList(const c10::List<T>& impl) {
   std::vector<T> result;
   result.reserve(impl.size());
   for (size_t i = 0, N = impl.size(); i < N; ++i) {
@@ -992,8 +1316,16 @@ inline T IValue::to() && {
   return generic_to(std::move(*this), _fake_type<T>{});
 }
 
+template <>
+inline c10::optional<c10::string_view> IValue::to() && {
+  // In the default implementation, the IValue is destroyed with std::move.
+  // But if the unboxed type is optional<string_view> we cannot destroy
+  // the IValue.
+  return generic_to(*this, _fake_type<c10::optional<c10::string_view>>{});
+}
+
 template <typename T>
-inline T IValue::to() const& {
+inline typename c10::detail::ivalue_to_const_ref_overload_return<T>::type IValue::to() const& {
   return generic_to(*this, _fake_type<T>{});
 }
 
@@ -1115,7 +1447,19 @@ template <
         std::nullptr_t>>
 inline IValue::IValue(const std::tuple<Args...>& t)
     : IValue(
-          std::move(c10::guts::apply(c10::ivalue::Tuple::create<Args...>, t))) {
+          std::move(c10::guts::apply(c10::ivalue::Tuple::create<const Args&...>, t))) {
+}
+
+template <
+    typename... Args,
+    std::enable_if_t<
+        !guts::disjunction<
+            std::is_lvalue_reference<Args>...,
+            guts::negation<std::is_constructible<IValue, Args>>...>::value,
+        std::nullptr_t>>
+inline IValue::IValue(std::tuple<Args...>&& t)
+    : IValue(
+          std::move(c10::guts::apply(c10::ivalue::Tuple::create<Args&&...>, std::move(t)))) {
 }
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::ConstantString> v)
@@ -1131,7 +1475,9 @@ inline IValue::IValue(c10::impl::GenericList v)
 }
 
 template <class T, IValue::enable_if_ivalue_constructible<T>>
-inline IValue::IValue(c10::List<T> v) : IValue(impl::toList<T>(std::move(v))) {}
+inline IValue::IValue(c10::List<T>&& v) : IValue(impl::toList<T>(std::move(v))) {}
+template <class T, IValue::enable_if_ivalue_constructible<T>>
+inline IValue::IValue(const c10::List<T>& v) : IValue(impl::toList<T>(v)) {}
 template <class T, IValue::enable_if_ivalue_constructible<T>>
 inline IValue::IValue(at::ArrayRef<T> v) : IValue(c10::List<T>()) {
   auto list = to<c10::List<T>>();
@@ -1275,6 +1621,16 @@ inline c10::optional<std::reference_wrapper<const std::string>> IValue::
           ->string());
 }
 
+inline c10::string_view IValue::toStringView() const {
+  AT_ASSERT(isString(), "Expected String but got ", tagKind());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
+      "called toStringView on null intrusive_ptr IValue");
+  return static_cast<const c10::ivalue::ConstantString*>(
+        payload.u.as_intrusive_ptr)
+    ->string_view();
+}
+
 inline PyObject* IValue::toPyObject() const {
   return toPyObjectHolder()->getPyObject();
 }
@@ -1342,15 +1698,15 @@ namespace ivalue {
 namespace detail {
 
 template <typename T>
-IValue from_(T x, std::true_type) {
-  return IValue(std::move(x));
+IValue from_(T&& x, std::true_type) {
+  return IValue(std::forward<T>(x));
 }
 template <typename T>
 IValue from_(c10::intrusive_ptr<T> x, std::false_type) {
-  return IValue(x);
+  return IValue(std::move(x));
 }
 template <typename T>
-IValue from_(T x, std::false_type) {
+IValue from_(T&& x, std::false_type) {
   static_assert(
       guts::false_t<T>::value,
       "You are calling from with a type that it doesn't support, and isn't a potential custom class (ie: is an intrusive_ptr)");
@@ -1359,9 +1715,9 @@ IValue from_(T x, std::false_type) {
 } // namespace detail
 
 template <typename T>
-IValue from(T x) {
+IValue from(T&& x) {
   return detail::from_(
-      std::move(x), typename std::is_constructible<IValue, T>::type{});
+      std::forward<T>(x), typename std::is_constructible<IValue, T>::type{});
 }
 
 } // namespace ivalue

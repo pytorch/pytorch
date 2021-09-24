@@ -2,6 +2,7 @@
 
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
@@ -59,7 +60,7 @@ bool isDifferentiable(const Node* n) {
 
   if (n->kind() == prim::Constant || n->kind() == prim::AutogradZero ||
       n->kind() == prim::AutogradAdd || n->kind() == prim::ConstantChunk ||
-      n->kind() == prim::profile)
+      n->kind() == prim::profile || n->kind() == prim::profile_ivalue)
     return true;
 
   if (n->isMemberOf(differentiable_ops))
@@ -157,7 +158,7 @@ static c10::optional<std::vector<Value*>> build_script_grad(
     new_outputs = unpackOutputs(new_outputs);
     auto outputs = node->outputs();
     AT_ASSERT(new_outputs.size() == outputs.size() + 1);
-    for (size_t i = 0; i < outputs.size(); ++i) {
+    for (const auto i : c10::irange(outputs.size())) {
       new_outputs.at(i)->setType(outputs[i]->type());
       outputs[i]->replaceAllUsesWith(new_outputs.at(i));
     }
@@ -214,6 +215,7 @@ class GradientHelper {
     } else if (node->kind() == prim::ConstantChunk) {
       auto* g = node->owningGraph();
 
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Value* input_list;
       if (grad_values.size() == 1 &&
           grad_values[0]->type()->isSubtypeOf(ListType::ofTensors())) {
@@ -562,6 +564,7 @@ static void foldSizeIfNotEqual(Node* node) {
     // insert in front of _grad_sum_to_size
     WithInsertPoint guard(node);
     IValue ival{};
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Value* size;
     if (input_size != output_size) {
       size = node->owningGraph()->insertConstant(*input_size);

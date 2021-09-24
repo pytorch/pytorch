@@ -112,3 +112,13 @@ InstanceNorm3d
 ~~~~~~~~~~~~~~~
 .. autoclass:: InstanceNorm3d
     :members:
+
+Embedding
+~~~~~~~~~~~~~~~
+.. autoclass:: Embedding
+    :members:
+
+EmbeddingBag
+~~~~~~~~~~~~~~~
+.. autoclass:: EmbeddingBag
+    :members:

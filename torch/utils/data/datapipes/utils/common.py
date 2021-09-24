@@ -1,7 +1,9 @@
 import os
 import fnmatch
 import warnings
-from typing import List, Union, Iterable
+
+from io import BufferedIOBase
+from typing import Iterable, List, Union
 
 
 def match_masks(name : str, masks : Union[str, List[str]]) -> bool:
@@ -39,15 +41,25 @@ def get_file_pathnames_from_root(
             break
 
 
-def get_file_binaries_from_pathnames(pathnames : Iterable):
-
+def get_file_binaries_from_pathnames(pathnames: Iterable, mode: str):
     if not isinstance(pathnames, Iterable):
-        warnings.warn("get_file_binaries_from_pathnames needs the input be an Iterable")
-        raise TypeError
+        pathnames = [pathnames, ]
+
+    if mode in ('b', 't'):
+        mode = 'r' + mode
 
     for pathname in pathnames:
         if not isinstance(pathname, str):
-            warnings.warn("file pathname must be string type, but got {}".format(type(pathname)))
-            raise TypeError
+            raise TypeError("Expected string type for pathname, but got {}"
+                            .format(type(pathname)))
+        yield (pathname, open(pathname, mode))
 
-        yield (pathname, open(pathname, 'rb'))
+def validate_pathname_binary_tuple(data):
+    if not isinstance(data, tuple):
+        raise TypeError("pathname binary data should be tuple type, but got {}".format(type(data)))
+    if len(data) != 2:
+        raise TypeError("pathname binary tuple length should be 2, but got {}".format(str(len(data))))
+    if not isinstance(data[0], str):
+        raise TypeError("pathname binary tuple should have string type pathname, but got {}".format(type(data[0])))
+    if not isinstance(data[1], BufferedIOBase):
+        raise TypeError("pathname binary tuple should have BufferedIOBase based binary type, but got {}".format(type(data[1])))

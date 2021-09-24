@@ -7,8 +7,8 @@ on:
 
 jobs:
   stale:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: ubuntu-latest
+    if: ${{ github.repository == 'pytorch/pytorch' }}
+    runs-on: ubuntu-18.04
     steps:
       - uses: actions/stale@v3
         with:
@@ -20,8 +20,8 @@ jobs:
           days-before-stale: 60
           days-before-close: 90
   stale-open-source:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: ubuntu-latest
+    if: ${{ github.repository == 'pytorch/pytorch' }}
+    runs-on: ubuntu-18.04
     steps:
       - uses: actions/stale@v3
         with:

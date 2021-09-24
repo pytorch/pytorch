@@ -11,6 +11,7 @@ namespace torch { namespace autograd { namespace python {
 
 struct PythonEngine : public Engine {
   static Engine& get_python_engine();
+  ~PythonEngine() override;
   void thread_init(int device,
       const std::shared_ptr<ReadyQueue>& ready_queue,
       bool should_increment) override;
@@ -26,12 +27,13 @@ struct PythonEngine : public Engine {
       bool accumulate_grad,
       const edge_list& outputs = {}) override;
 
-  std::shared_ptr<at::ivalue::Future> execute_with_graph_task(
+  c10::intrusive_ptr<at::ivalue::Future> execute_with_graph_task(
       const std::shared_ptr<GraphTask>& graph_task,
       std::shared_ptr<Node> graph_root,
       InputBuffer&& input_buffer) override;
 
   std::unique_ptr<AnomalyMetadata> make_anomaly_metadata() override;
+  std::unique_ptr<SavedVariableHooks> get_default_saved_variable_hooks() override;
   private:
     PythonEngine();
 };

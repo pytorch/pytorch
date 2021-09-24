@@ -9,10 +9,10 @@
 
 namespace at { namespace native {
 
-DECLARE_DISPATCH(void(*)(TensorIterator&, Scalar, Scalar, Scalar), arange_stub);
-DECLARE_DISPATCH(void(*)(TensorIterator&, Scalar, Scalar, int64_t), linspace_stub);
+DECLARE_DISPATCH(void(*)(TensorIterator&, const Scalar&, const Scalar&, const Scalar&), arange_stub);
+DECLARE_DISPATCH(void(*)(TensorIterator&, const Scalar&, const Scalar&, int64_t), linspace_stub);
 
-Tensor& linspace_cpu_out(Tensor& result, Scalar start, Scalar end, c10::optional<int64_t> optional_steps) {
+Tensor& linspace_cpu_out(const Scalar& start, const Scalar& end, c10::optional<int64_t> optional_steps, Tensor& result) {
   const auto steps = optional_steps.value_or(100);
   TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
 
@@ -33,7 +33,7 @@ Tensor& linspace_cpu_out(Tensor& result, Scalar start, Scalar end, c10::optional
     result.fill_(start);
   } else {
     Tensor r = result.is_contiguous() ? result : result.contiguous();
-    auto iter = TensorIterator::nullary_op(r);
+    auto iter = TensorIterator::borrowing_nullary_op(r);
     linspace_stub(iter.device_type(), iter, start, end, steps);
     if (!result.is_contiguous()) {
       result.copy_(r);
@@ -43,7 +43,7 @@ Tensor& linspace_cpu_out(Tensor& result, Scalar start, Scalar end, c10::optional
   return result;
 }
 
-Tensor& logspace_cpu_out(Tensor& result, Scalar start, Scalar end, c10::optional<int64_t> optional_steps, double base) {
+Tensor& logspace_cpu_out(const Scalar& start, const Scalar& end, c10::optional<int64_t> optional_steps, double base, Tensor& result) {
   const auto steps = optional_steps.value_or(100);
   TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
 
@@ -62,7 +62,11 @@ Tensor& logspace_cpu_out(Tensor& result, Scalar start, Scalar end, c10::optional
   if (steps == 0) {
     // skip
   } else if (steps == 1) {
-    r.fill_(std::pow(base, start.to<double>()));
+    if (isComplexType(r.scalar_type())){
+      r.fill_(std::pow(base, start.to<c10::complex<double>>()));
+    } else {
+      r.fill_(std::pow(base, start.to<double>()));
+    }
   } else if (isComplexType(r.scalar_type())) {
     AT_DISPATCH_COMPLEX_TYPES(r.scalar_type(), "logspace_cpu", [&]() {
       scalar_t scalar_base = static_cast<scalar_t>(base);
@@ -108,8 +112,8 @@ Tensor& logspace_cpu_out(Tensor& result, Scalar start, Scalar end, c10::optional
   return result;
 }
 
-Tensor& range_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
-  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "range_cpu", [&]() {
+Tensor& range_cpu_out(const Scalar& start, const Scalar& end, const Scalar& step, Tensor& result) {
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, result.scalar_type(), "range_cpu", [&]() {
     using accscalar_t = at::acc_type<scalar_t, false>;
     auto xstart = start.to<accscalar_t>();
     auto xend = end.to<accscalar_t>();
@@ -129,7 +133,7 @@ Tensor& range_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
     scalar_t *data_ptr = r.data_ptr<scalar_t>();
 
     at::parallel_for(0, size, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
-      scalar_t is = p_begin;
+      accscalar_t is = p_begin;
       for (int64_t i = p_begin; i < p_end; ++i, ++is) {
         data_ptr[i] = xstart + is * xstep;
       }
@@ -142,8 +146,8 @@ Tensor& range_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
   return result;
 }
 
-Tensor& arange_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
-  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "arange_cpu", [&]() {
+Tensor& arange_cpu_out(const Scalar& start, const Scalar& end, const Scalar& step, Tensor& result) {
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, result.scalar_type(), "arange_cpu", [&]() {
     using accscalar_t = at::acc_type<scalar_t, false>;
     auto xstart = start.to<accscalar_t>();
     auto xend = end.to<accscalar_t>();
@@ -157,6 +161,7 @@ Tensor& arange_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
     // we dont want.
     // the corner-case we do want to take into account is int64_t, which has higher precision than double
     double size_d;
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (std::is_same<scalar_t, int64_t>::value) {
       size_d = std::ceil(static_cast<double>(end.to<accscalar_t>() - start.to<accscalar_t>())
                          / step.to<accscalar_t>());
@@ -189,7 +194,7 @@ Tensor& arange_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
     }
 
     Tensor r = result.is_contiguous() ? result : result.contiguous();
-    auto iter = TensorIterator::nullary_op(r);
+    auto iter = TensorIterator::borrowing_nullary_op(r);
     arange_stub(iter.device_type(), iter, start, size, step);
     if (!result.is_contiguous()) {
       result.copy_(r);

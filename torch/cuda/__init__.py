@@ -14,14 +14,15 @@ import torch
 import traceback
 import warnings
 import threading
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union, Any
 from ._utils import _get_device_index, _dummy_type
-from .streams import Stream, Event, _Graph
+from .graphs import CUDAGraph, graph_pool_handle, graph, make_graphed_callables
+from .streams import Stream, Event
 from .. import device as _device
 import torch._C
 
 try:
-    from torch._C import _cudart  # type: ignore
+    from torch._C import _cudart  # type: ignore[attr-defined]
 except ImportError:
     _cudart = None
 
@@ -32,11 +33,38 @@ _queued_calls = []  # don't invoke these until initialization occurs
 _is_in_bad_fork = getattr(torch._C, "_cuda_isInBadFork", lambda: False)
 _device_t = Union[_device, str, int, None]
 
+
+class _LazySeedTracker:
+    # Since seeding is memory-less, only track the latest seed.
+    # Note: `manual_seed_all` followed by `manual_seed` overwrites
+    # the seed on current device. We track the order of **latest**
+    # calls between these two API.
+    def __init__(self):
+        self.manual_seed_all_cb = None
+        self.manual_seed_cb = None
+        self.call_order = []
+
+    def queue_seed_all(self, cb, traceback):
+        self.manual_seed_all_cb = (cb, traceback)
+        # update seed_all to be latest
+        self.call_order = [self.manual_seed_cb, self.manual_seed_all_cb]
+
+    def queue_seed(self, cb, traceback):
+        self.manual_seed_cb = (cb, traceback)
+        # update seed to be latest
+        self.call_order = [self.manual_seed_all_cb, self.manual_seed_cb]
+
+    def get_calls(self) -> List:
+        return self.call_order
+
+
+_lazy_seed_tracker = _LazySeedTracker()
+
 # Define dummy _CudaDeviceProperties type if PyTorch was compiled without CUDA
 if hasattr(torch._C, '_CudaDeviceProperties'):
     _CudaDeviceProperties = torch._C._CudaDeviceProperties
 else:
-    _CudaDeviceProperties = _dummy_type('_CudaDeviceProperties')  # type: ignore
+    _CudaDeviceProperties = _dummy_type('_CudaDeviceProperties')  # type: ignore[assignment, misc]
 
 # Global variables dynamically populated by native code
 has_magma: bool = False
@@ -51,6 +79,15 @@ def is_available() -> bool:
     # be initialized
     return torch._C._cuda_getDeviceCount() > 0
 
+def is_bf16_supported():
+    r"""Returns a bool indicating if the current CUDA device supports dtype bfloat16"""
+    cu_vers = torch.version.cuda
+    if cu_vers is not None:
+        cuda_maj_decide = int(cu_vers.split('.')[0]) >= 11
+
+    else:
+        cuda_maj_decide = False
+    return torch.cuda.get_device_properties(torch.cuda.current_device()).major >= 8 and cuda_maj_decide
 
 def _sleep(cycles):
     torch._C._cuda_sleep(cycles)
@@ -67,7 +104,7 @@ def _check_capability():
     old_gpu_warn = """
     Found GPU%d %s which is of cuda capability %d.%d.
     PyTorch no longer supports this GPU because it is too old.
-    The minimum cuda capability that we support is 3.5.
+    The minimum cuda capability supported by this library is %d.%d.
     """
 
     if torch.version.cuda is not None:  # on ROCm we don't want this check
@@ -77,8 +114,10 @@ def _check_capability():
             major = capability[0]
             minor = capability[1]
             name = get_device_name(d)
-            if capability == (3, 0) or major < 3:
-                warnings.warn(old_gpu_warn % (d, name, major, capability[1]))
+            current_arch = major * 10 + minor
+            min_arch = min((int(arch.split("_")[1]) for arch in torch.cuda.get_arch_list()), default=35)
+            if current_arch < min_arch:
+                warnings.warn(old_gpu_warn.format(d, name, major, minor, min_arch // 10, min_arch % 10))
             elif CUDA_VERSION <= 9000 and major >= 7 and minor >= 5:
                 warnings.warn(incorrect_binary_warn % (d, name, 10000, CUDA_VERSION))
 
@@ -109,16 +148,21 @@ def is_initialized():
     return _initialized and not _is_in_bad_fork()
 
 
-def _lazy_call(callable):
+def _lazy_call(callable, **kwargs):
     if is_initialized():
         callable()
     else:
         # TODO(torch_deploy): this accesses linecache, which attempts to read the
         # file system to get traceback info. Patch linecache or do something
         # else here if this ends up being important.
-
-        # Don't store the actual traceback to avoid memory cycle
-        _queued_calls.append((callable, traceback.format_stack()))
+        global _lazy_seed_tracker
+        if kwargs.get("seed_all", False):
+            _lazy_seed_tracker.queue_seed_all(callable, traceback.format_stack())
+        elif kwargs.get("seed", False):
+            _lazy_seed_tracker.queue_seed(callable, traceback.format_stack())
+        else:
+            # Don't store the actual traceback to avoid memory cycle
+            _queued_calls.append((callable, traceback.format_stack()))
 
 _lazy_call(_check_capability)
 _lazy_call(_check_cubins)
@@ -172,6 +216,11 @@ def _lazy_init():
         # we need to just return without initializing in that case.
         # However, we must not let any *other* threads in!
         _tls.is_initializing = True
+
+        for calls in _lazy_seed_tracker.get_calls():
+            if calls:
+                _queued_calls.append(calls)
+
         try:
             for queued_call, orig_traceback in _queued_calls:
                 try:
@@ -213,21 +262,22 @@ class device(object):
             this argument is a negative integer or ``None``.
     """
 
-    def __init__(self, device):
+    def __init__(self, device: Any):
         self.idx = _get_device_index(device, optional=True)
         self.prev_idx = -1
 
     def __enter__(self):
         if self.idx == -1:
             return
-        self.prev_idx = torch._C._cuda_getDevice()
+        self.prev_idx = torch.cuda.current_device()
         if self.prev_idx != self.idx:
-            torch._C._cuda_setDevice(self.idx)
-        _lazy_init()
+            torch.cuda.set_device(self.idx)
+        if not torch.jit.is_scripting():
+            _lazy_init()
 
-    def __exit__(self, *args):
+    def __exit__(self, type: Any, value: Any, traceback: Any):
         if self.prev_idx != self.idx:
-            torch._C._cuda_setDevice(self.prev_idx)
+            torch.cuda.set_device(self.prev_idx)
         return False
 
 
@@ -322,40 +372,81 @@ def can_device_access_peer(device: _device_t, peer_device: _device_t) -> bool:
     return torch._C._cuda_canDeviceAccessPeer(device, peer_device)
 
 
-@contextlib.contextmanager
-def stream(stream):
+class StreamContext(object):
     r"""Context-manager that selects a given stream.
 
     All CUDA kernels queued within its context will be enqueued on a selected
     stream.
 
     Args:
+        Stream (Stream): selected stream. This manager is a no-op if it's
+            ``None``.
+    .. note:: Streams are per-device.
+    """
+    cur_stream : Optional['torch.cuda.Stream']
+
+    def __init__(self, stream: Optional['torch.cuda.Stream']):
+        self.stream = stream
+        self.idx = _get_device_index(None, True)
+        if not torch.jit.is_scripting():
+            if self.idx is None:
+                self.idx = -1
+
+        self.src_prev_stream = None if not torch.jit.is_scripting() else torch.cuda.default_stream(None)
+        self.dst_prev_stream = None if not torch.jit.is_scripting() else torch.cuda.default_stream(None)
+
+    def __enter__(self):
+        # Local cur_stream variable for type refinement
+        cur_stream = self.stream
+        # Return if stream is None or CUDA device not available
+        if cur_stream is None or self.idx == -1:
+            return
+        self.src_prev_stream = torch.cuda.current_stream(None)
+
+        # If the stream is not on the current device, then
+        # set the current stream on the device
+        if self.src_prev_stream.device != cur_stream.device:
+            with device(cur_stream.device):
+                self.dst_prev_stream = torch.cuda.current_stream(cur_stream.device)
+        torch.cuda.set_stream(cur_stream)
+
+    def __exit__(self, type: Any, value: Any, traceback: Any):
+        # Local cur_stream variable for type refinement
+        cur_stream = self.stream
+        # If stream is None or no CUDA device available, return
+        if cur_stream is None or self.idx == -1:
+            return
+
+        # Reset the stream on the original device
+        # and destination device
+        if self.src_prev_stream.device != cur_stream.device:  # type: ignore[union-attr]
+            torch.cuda.set_stream(self.dst_prev_stream)  # type: ignore[arg-type]
+        torch.cuda.set_stream(self.src_prev_stream)  # type: ignore[arg-type]
+
+def stream(stream: Optional['torch.cuda.Stream']) -> StreamContext:
+    r"""Wrapper around the Context-manager StreamContext that
+    selects a given stream.
+
+    Arguments:
         stream (Stream): selected stream. This manager is a no-op if it's
             ``None``.
+    ..Note:: In eager mode stream is of type Stream class while in JIT it is
+    an object of the custom class ``torch.classes.cuda.Stream``.
+    """
+    return StreamContext(stream)
 
-    .. note:: Streams are per-device. If the selected stream is not on the
-        current device, this function will also change the current device to
-        match the stream.
+def set_stream(stream: Stream):
+    r"""Sets the current stream.This is a wrapper API to set the stream.
+        Usage of this function is discouraged in favor of the ``stream``
+        context manager.
+
+    Args:
+        stream (Stream): selected stream. This function is a no-op
+            if this argument is ``None``.
     """
     if stream is None:
-        yield
         return
-    src_prev_stream = current_stream()
-
-    if src_prev_stream.device != stream.device:
-        # The given stream is on a different device; have to restore the
-        # current_stream on that device on exit as well
-        with device(stream.device):
-            dst_prev_stream = current_stream()
-
     torch._C._cuda_setStream(stream._cdata)
-    try:
-        yield
-    finally:
-        if src_prev_stream.device != stream.device:
-            torch._C._cuda_setStream(dst_prev_stream._cdata)
-        torch._C._cuda_setStream(src_prev_stream._cdata)
-
 
 def device_count() -> int:
     r"""Returns the number of GPUs available."""
@@ -374,7 +465,7 @@ def get_arch_list() -> List[str]:
     return arch_flags.split()
 
 def get_gencode_flags() -> str:
-    r"""Returns NVCC gencode flags this library were compiled with."""
+    r"""Returns NVCC gencode flags this library was compiled with."""
     arch_list = get_arch_list()
     if len(arch_list) == 0:
         return ""
@@ -448,11 +539,42 @@ def current_blas_handle():
     _lazy_init()
     return torch._C._cuda_getCurrentBlasHandle()
 
+def set_sync_debug_mode(debug_mode: Union[int, str]) -> None:
+    r"""Sets the debug mode for cuda synchronizing operations.
 
-from .memory import *
+    Args:
+        debug_mode(str or int): if "default" or 0, don't error or warn on synchronizing operations,
+            if "warn" or 1, warn on synchronizing operations, if "error" or 2, error out synchronizing operations.
+
+    Warning:
+        This is an experimental feature, and not all synchronizing operations will trigger warning or error. In
+        particular, operations in torch.distributed and torch.sparse namespaces are not covered yet.
+    """
+
+    _lazy_init()
+    if isinstance(debug_mode, str):
+        if debug_mode == "default":
+            debug_mode = 0
+        elif debug_mode == "warn":
+            debug_mode = 1
+        elif debug_mode == "error":
+            debug_mode = 2
+        else:
+            raise RuntimeError("invalid value of debug_mode, expected one of `default`, `warn`, `error`")
+
+    torch._C._cuda_set_sync_debug_mode(debug_mode)
+
+def get_sync_debug_mode() -> int:
+    r"""Returns current value of debug mode for cuda synchronizing operations."""
+
+    _lazy_init()
+    return torch._C._cuda_get_sync_debug_mode()
 
 
-from .random import *
+from .memory import *  # noqa: F403
+
+
+from .random import *  # noqa: F403
 
 ################################################################################
 # Define Storage and Tensor classes
@@ -492,7 +614,7 @@ class _CudaBase(object):
         # We could use a Protocol here to tell mypy that self has `get_device` method
         # but it is only available in the typing module on Python >= 3.8
         # or on typing_extensions module on Python >= 3.6
-        with device(self.get_device()):  # type: ignore
+        with device(self.get_device()):  # type: ignore[attr-defined]
             return super(_CudaBase, self).type(*args, **kwargs)  # type: ignore[misc]
 
     __new__ = _lazy_new

@@ -35,12 +35,14 @@ TEST_F(ModuleTest, ZeroGrad) {
   auto loss = module(weight).sum();
   loss.backward();
   for (auto& parameter : module->parameters()) {
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto grad = parameter.grad();
     ASSERT_TRUE(grad.defined());
     ASSERT_NE(grad.sum().item<float>(), 0);
   }
   module->zero_grad();
   for (auto& parameter : module->parameters()) {
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto grad = parameter.grad();
     ASSERT_TRUE(grad.defined());
     ASSERT_EQ(grad.sum().item<float>(), 0);
@@ -364,12 +366,15 @@ TEST_F(ModuleTest, CallingCloneOnModuleThatDoesOverrideCloneDoesNotThrow) {
     }
   };
   Cloneable module;
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_NO_THROW({ module.clone(); });
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TestDistinctParametersModule
     : public Cloneable<TestDistinctParametersModule> {
   TestDistinctParametersModule() {
+    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
     reset();
   }
   void reset() override {
@@ -450,8 +455,10 @@ TEST_F(ModuleTest, CloneCreatesDistinctParametersExplicitDevice_MultiCUDA) {
 }
 
 TEST_F(ModuleTest, ClonePreservesExternalReferences) {
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   struct TestModule : public Cloneable<TestModule> {
     TestModule() {
+      // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
       reset();
     }
     void reset() override {
@@ -480,8 +487,10 @@ TEST_F(ModuleTest, ClonePreservesExternalReferences) {
 }
 
 TEST_F(ModuleTest, CloneCopiesTheValuesOfVariablesOfSubmodules) {
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   struct TestModule : public Cloneable<TestModule> {
     TestModule() {
+      // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
       reset();
     }
     void reset() override {
@@ -491,8 +500,10 @@ TEST_F(ModuleTest, CloneCopiesTheValuesOfVariablesOfSubmodules) {
     torch::Tensor weight;
     int value = 0;
   };
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   struct NestedModule : public Cloneable<NestedModule> {
     NestedModule() {
+      // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
       reset();
     }
     void reset() override {
@@ -520,8 +531,10 @@ TEST_F(ModuleTest, CloneCopiesTheValuesOfVariablesOfSubmodules) {
 }
 
 TEST_F(ModuleTest, CloneToDevicePreservesTheDeviceOfParameters_CUDA) {
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   struct TestModule : public Cloneable<TestModule> {
     TestModule() {
+      // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
       reset();
     }
     void reset() override {
@@ -554,8 +567,10 @@ TEST_F(ModuleTest, CloneToDevicePreservesTheDeviceOfParameters_CUDA) {
 TEST_F(
     ModuleTest,
     CloningToAParticularDevicePlacesAllParametersThere_MultiCUDA) {
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   struct TestModule : public Cloneable<TestModule> {
     TestModule() {
+      // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
       reset();
     }
     void reset() override {
@@ -977,10 +992,12 @@ TEST_F(ModuleTest, ThrowsWhenAttemptingtoGetTopLevelModuleAsSharedPtr) {
   }
   {
     TestModule module(1);
+    // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
     ASSERT_NO_THROW(module.modules(/*include_self=*/false));
   }
   {
     auto module = std::make_shared<TestModule>(1);
+    // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
     ASSERT_NO_THROW(module->modules());
   }
 }

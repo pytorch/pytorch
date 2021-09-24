@@ -42,14 +42,14 @@ void multinomial_with_replacement_apply(
   for (int64_t i = 0; i < n_dist; i++) {
     /* Get normalized cumulative distribution from prob distribution */
     scalar_t sum = 0;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     scalar_t val;
-    int n_zeros = 0;
     for (int64_t j = 0; j < n_categories; j++) {
       val = self_ptr[i * self_stride_0 + j * self_stride_1];
       TORCH_CHECK(val >= 0, "invalid multinomial distribution (encountering probability entry < 0)");
-// NB: std::isfinite doesn't bode well with clang for half datatypes,
+// NB: std::isfinite doesn't bode well with libc++ for half datatypes,
 // so we manually cast it to a double and perform the check.
-#if defined(__clang__)
+#if defined(_LIBCPP_VERSION)
       TORCH_CHECK(std::isfinite(static_cast<double>(val)),
                   "invalid multinomial distribution (encountering probability entry = infinity or NaN)");
 #else
@@ -58,9 +58,6 @@ void multinomial_with_replacement_apply(
 #endif
 
       sum += val;
-      if (val == 0) {
-        n_zeros += 1;
-      }
       cum_dist_ptr[j * cum_dist_stride_0] = sum;
     }
 
@@ -82,8 +79,11 @@ void multinomial_with_replacement_apply(
       ie cum_dist[row][slot-1] < uniform_prob < cum_distr[row][slot] */
       int left_pointer = 0;
       int right_pointer = n_categories;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int mid_pointer;
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
       scalar_t cum_prob;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int sample_idx;
       /* Make sure the last cumulative distribution bucket sums to 1 */
       cum_dist_ptr[(n_categories - 1) * cum_dist_stride_0] = 1;

@@ -1,5 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/Exceptions.h>
+#include <ATen/cuda/DeviceUtils.cuh>
+#include <ATen/cuda/CUDAContext.h>
 #include <THC/THCTensorMathReduce.cuh>
 #include <math.h>
 
@@ -132,7 +134,7 @@ __global__ static void pdist_kernel_cuda_impl(scalar_t * result, const scalar_t 
 template <typename scalar_t, typename F>
 __global__ static void cdist_backward_kernel_cuda_impl(scalar_t * buffer, const scalar_t * grad, const scalar_t * x1, const scalar_t * x2, const scalar_t * dist, int64_t gs,
                                                        const scalar_t p, const int64_t r1, const int64_t r2, const int64_t m, const int64_t count, const int64_t r_size, const int64_t l1_size, const int64_t l2_size) {
-  const int y = blockIdx.y * blockDim.y + threadIdx.y;
+  const int y = (blockIdx.y * gridDim.z + blockIdx.z) * blockDim.y + threadIdx.y;
   const int init = blockIdx.x * blockDim.x + threadIdx.x;
   if (y >= count || init >= m) {
     return;
@@ -331,16 +333,21 @@ void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor
   const int64_t r1 = x1.size(-2);
   const int64_t r2 = x2.size(-2);
   const int64_t m = x1.size(-1);
-  int64_t batch = x1.dim() > 2 ? x1.size(0) : 1;
+  // Just like we do in the CPU code, assume that result is always batched
+  int64_t batch = result.size(0);
   const int block_x = 64;
   const int block_y = 16;
   const int grid_x = (m + block_x * 8 - 1) / (block_x * 8);
-  const int grid_y = (dist.numel() + block_y - 1) / block_y;
-
-  const dim3 grid(grid_x, grid_y);
-  const dim3 block(block_x, block_y);
 
   const int64_t count = dist.numel();
+  const int64_t grid_temp = (count + block_y - 1) / block_y;
+
+  const int grid_y = (grid_temp - 1) / 65535 + 1;
+  const int grid_z = (grid_temp - 1) / grid_y + 1;
+
+  const dim3 grid(grid_x, grid_y, grid_z);
+  const dim3 block(block_x, block_y);
+
   const int64_t r_size = r1 * r2;
   const int64_t l1_size = r1 * m;
   const int64_t l2_size = r2 * m;
@@ -348,7 +355,7 @@ void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor
   //we call grad.contiguous() before backward, so stride is guaranteed to be 1
   const int64_t gs = 1;
 
-  Tensor buffer = (x1.dim() > 2) ? at::empty({batch, r2, r1, m}, result.options()) : at::empty({r2, r1, m}, result.options());
+  Tensor buffer = at::empty({batch, r2, r1, m}, result.options());
   AT_DISPATCH_FLOATING_TYPES(result.scalar_type(), "cdist_cuda_backward", [&] {
     if (p == 1.0) {
       cdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::one><<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(buffer.data_ptr<scalar_t>(),
@@ -378,11 +385,7 @@ void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor
     }
   });
 
-  if (x1.dim() > 2) {
-    at::sum_out(result, buffer, 1);
-  } else {
-    at::sum_out(result, buffer, 0);
-  }
+  at::sum_out(result, buffer, 1);
 
 }
 

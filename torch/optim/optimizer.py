@@ -1,5 +1,4 @@
-from collections import defaultdict
-from torch._six import container_abcs
+from collections import defaultdict, abc as container_abcs
 
 import torch
 from copy import deepcopy
@@ -101,7 +100,8 @@ class Optimizer(object):
 
         * state - a dict holding current optimization state. Its content
             differs between optimizer classes.
-        * param_groups - a dict containing all parameter groups
+        * param_groups - a list containing all parameter groups where each
+            parameter group is a dict
         """
         # Save order indices instead of Tensors
         param_mappings = {}
@@ -191,7 +191,7 @@ class Optimizer(object):
 
         Args:
             set_to_none (bool): instead of setting to zero, set the grads to None.
-                This is will in general have lower memory footprint, and can modestly improve performance.
+                This will in general have lower memory footprint, and can modestly improve performance.
                 However, it changes certain behaviors. For example:
                 1. When the user tries to access a gradient and perform manual ops on it,
                 a None attribute or a Tensor full of 0s will behave differently.

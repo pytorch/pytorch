@@ -69,31 +69,31 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   }
 
   # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
-  # DO NOT install cmake here as it would install a version newer than 3.5, but
-  # we want to pin to version 3.5.
-  if [ "$ANACONDA_PYTHON_VERSION" = "3.8" ]; then
+  # DO NOT install cmake here as it would install a version newer than 3.10, but
+  # we want to pin to version 3.10.
+  SCIPY_VERSION=1.1.0
+  if [ "$ANACONDA_PYTHON_VERSION" = "3.9" ]; then
     # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
-    conda_install numpy=1.18.5 pyyaml mkl mkl-include setuptools cffi future six llvmdev=8.0.0
+    conda_install numpy=1.19.2 astunparse pyyaml mkl mkl-include setuptools cffi future six llvmdev=8.0.0 -c conda-forge
+    SCIPY_VERSION=1.6.0
+  elif [ "$ANACONDA_PYTHON_VERSION" = "3.8" ]; then
+    # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
+    conda_install numpy=1.18.5 astunparse pyyaml mkl mkl-include setuptools cffi future six llvmdev=8.0.0
   elif [ "$ANACONDA_PYTHON_VERSION" = "3.7" ]; then
     # DO NOT install dataclasses if installing python-3.7, since its part of python-3.7 core packages
-    conda_install numpy=1.18.5 pyyaml mkl mkl-include setuptools cffi future six
+    conda_install numpy=1.18.5 astunparse pyyaml mkl mkl-include setuptools cffi future six typing_extensions
   else
-    conda_install numpy=1.18.5 pyyaml mkl mkl-include setuptools cffi future six dataclasses
+    conda_install numpy=1.18.5 astunparse pyyaml mkl mkl-include setuptools cffi future six dataclasses typing_extensions
   fi
-  if [[ "$CUDA_VERSION" == 9.2* ]]; then
-    conda_install magma-cuda92 -c pytorch
-  elif [[ "$CUDA_VERSION" == 10.0* ]]; then
-    conda_install magma-cuda100 -c pytorch
-  elif [[ "$CUDA_VERSION" == 10.1* ]]; then
-    conda_install magma-cuda101 -c pytorch
-  elif [[ "$CUDA_VERSION" == 10.2* ]]; then
+
+  if [[ "$CUDA_VERSION" == 10.2* ]]; then
     conda_install magma-cuda102 -c pytorch
   elif [[ "$CUDA_VERSION" == 11.0* ]]; then
     conda_install magma-cuda110 -c pytorch
   elif [[ "$CUDA_VERSION" == 11.1* ]]; then
     conda_install magma-cuda111 -c pytorch
-  elif [[ "$CUDA_VERSION" == 11.2* ]]; then
-    conda_install magma-cuda112 -c pytorch
+  elif [[ "$CUDA_VERSION" == 11.3* ]]; then
+    conda_install magma-cuda113 -c pytorch
   fi
 
   # TODO: This isn't working atm
@@ -104,18 +104,23 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # Pin MyPy version because new errors are likely to appear with each release
   # Pin hypothesis to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
   as_jenkins pip install --progress-bar off pytest \
-    scipy==1.1.0 \
+    scipy==$SCIPY_VERSION \
     scikit-image \
-    librosa>=0.6.2 \
     psutil \
-    numba \
-    llvmlite \
     unittest-xml-reporting \
     boto3==1.16.34 \
-    coverage \
     hypothesis==4.53.2 \
-    mypy==0.770 \
+    expecttest==0.1.3 \
+    mypy==0.812 \
     tb-nightly
+
+  # Install numba only on python-3.8 or below
+  # For numba issue see https://github.com/pytorch/pytorch/issues/51511
+  if [[ $(python -c "import sys; print(int(sys.version_info < (3, 9)))") == "1" ]]; then
+    as_jenkins pip install --progress-bar off numba librosa>=0.6.2
+  else
+    as_jenkins pip install --progress-bar off numba==0.49.0 librosa>=0.6.2
+  fi
 
   # Update scikit-learn to a python-3.8 compatible version
   if [[ $(python -c "import sys; print(int(sys.version_info >= (3, 8)))") == "1" ]]; then

@@ -20,29 +20,67 @@ from sys import maxsize
 # release on 04/24/19
 
 
-@parse_args('v', 'i', 'i', 'none')
+def div(g, self, other, *args):
+    if len(args) == 0:
+        return torch.onnx.symbolic_opset9.true_divide(g, self, other)
+    else:
+        return _div_rounding_mode(g, self, other, *args)
+
+
+@parse_args("v", "v", "s")
+def _div_rounding_mode(g, self, other, rounding_mode):
+    if rounding_mode == "floor":
+        return _floor_divide(g, self, other)
+    else:
+        return torch.onnx.symbolic_opset9._div_rounding_mode(g, self, other, rounding_mode)
+
+
+def _floor_divide(g, self, other):
+    if sym_help._is_fp(self) or sym_help._is_fp(other):
+        out = torch.onnx.symbolic_opset9.true_divide(g, self, other)
+        return g.op("Floor", out)
+    else:
+        # Integer division does trunction rounding
+        div = g.op("Div", self, other)
+        # Division is negative if: self < 0 != other < 0
+        zero = g.op("Constant", value_t=torch.tensor(0, dtype=torch.int64))
+        negative = g.op("Xor",
+                        g.op("Less", self, zero),
+                        g.op("Less", other, zero))
+
+        # For negative numbers with self % other != 0, subtract 1 to round down instead of up
+        mod = g.op("Mod", self, other, fmod_i=0)
+        fixup_mask = g.op("And", negative,
+                          g.op("Not", g.op("Equal", mod, zero)))
+
+        one = g.op("Constant", value_t=torch.tensor(1, dtype=torch.int64))
+        fixup = g.op("Sub", div, one)
+        return g.op("Where", fixup_mask, fixup, div)
+
+
+@parse_args("v", "i", "i", "none")
 def sort(g, self, dim, decending, out=None):
     return sym_help._sort_helper(g, self, dim, decending=decending, out=out)
 
 
-@parse_args('v', 'v', 'i', 'i', 'i', 'none')
+@parse_args("v", "v", "i", "i", "i", "none")
 def topk(g, self, k, dim, largest, sorted, out=None):
     return sym_help._topk_helper(g, self, k, dim, largest=largest, sorted=sorted, out=out)
 
 
 def _max_pool(name, tuple_fn, ndims, return_indices):
-    @parse_args('v', 'is', 'is', 'is', 'is', 'i')
+    @parse_args("v", "is", "is", "is", "is", "i")
     def symbolic_fn(g, input, kernel_size, stride, padding, dilation, ceil_mode):
         if not stride:
             stride = kernel_size
         kwargs = {
-            'kernel_shape_i': tuple_fn(kernel_size),
-            'pads_i': tuple_fn(padding) * 2,
-            'strides_i': tuple_fn(stride),
-            'ceil_mode_i': ceil_mode,
+            "kernel_shape_i": tuple_fn(kernel_size),
+            "pads_i": tuple_fn(padding) * 2,
+            "strides_i": tuple_fn(stride),
+            "ceil_mode_i": ceil_mode,
         }
         if set(tuple_fn(dilation)) != {1}:
-            kwargs['dilations_i'] = tuple_fn(dilation)
+            kwargs["dilations_i"] = tuple_fn(dilation)
         # easy but hacky way to get flattened indices values
         # to be used to convert the indices values to non-flattened.
         # In ONNX the indices are computed as a flatten 1-D tensor,
@@ -83,7 +121,7 @@ max_pool3d_with_indices = _max_pool("max_pool3d_with_indices", _triple, 3, retur
 
 
 def _avg_pool(name, tuple_fn):
-    @parse_args('v', 'is', 'is', 'is', 'i', 'i', 'none')
+    @parse_args("v", "is", "is", "is", "i", "i", "none")
     def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override=None):
         if not stride:
             stride = kernel_size
@@ -91,7 +129,7 @@ def _avg_pool(name, tuple_fn):
         if count_include_pad:
             input = g.op("Pad", input,
                          pads_i=((0,) * 2 + padding) * 2,
-                         mode_s='constant',
+                         mode_s="constant",
                          value_f=0.)
             padding = (0,) * len(padding)
         output = g.op("AveragePool", input,
@@ -103,9 +141,9 @@ def _avg_pool(name, tuple_fn):
     return symbolic_fn
 
 
-avg_pool1d = _avg_pool('avg_pool1d', _single)
-avg_pool2d = _avg_pool('avg_pool2d', _pair)
-avg_pool3d = _avg_pool('avg_pool3d', _triple)
+avg_pool1d = _avg_pool("avg_pool1d", _single)
+avg_pool2d = _avg_pool("avg_pool2d", _pair)
+avg_pool3d = _avg_pool("avg_pool3d", _triple)
 
 
 def _interpolate(name, dim, interpolate_mode):
@@ -121,12 +159,12 @@ def _interpolate(name, dim, interpolate_mode):
     return symbolic_fn
 
 
-upsample_nearest1d = _interpolate('upsample_nearest1d', 3, "nearest")
-upsample_nearest2d = _interpolate('upsample_nearest2d', 4, "nearest")
-upsample_nearest3d = _interpolate('upsample_nearest3d', 5, "nearest")
-upsample_linear1d = _interpolate('upsample_linear1d', 3, "linear")
-upsample_bilinear2d = _interpolate('upsample_bilinear2d', 4, "linear")
-upsample_trilinear3d = _interpolate('upsample_trilinear3d', 5, "linear")
+upsample_nearest1d = _interpolate("upsample_nearest1d", 3, "nearest")
+upsample_nearest2d = _interpolate("upsample_nearest2d", 4, "nearest")
+upsample_nearest3d = _interpolate("upsample_nearest3d", 5, "nearest")
+upsample_linear1d = _interpolate("upsample_linear1d", 3, "linear")
+upsample_bilinear2d = _interpolate("upsample_bilinear2d", 4, "linear")
+upsample_trilinear3d = _interpolate("upsample_trilinear3d", 5, "linear")
 
 def __interpolate(g, input, size, scale_factor, mode , align_corners, recompute_scale_factor):
     scales, mode = sym_help._interpolate_get_scales_and_mode(g, input, size, scale_factor,
@@ -145,7 +183,7 @@ def _slice(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
         assert len(starts) == len(ends)
         assert len(starts) == len(axes)
         assert steps is None or len(starts) == len(steps)
-        if len(starts) == 1 and starts[0] == 0 and ends[0] == 9223372036854775807 \
+        if len(starts) == 1 and starts[0] == 0 and ends[0] == 9223372036854775807\
            and (steps is None or (len(steps) == 1 and steps[0] == 1)):
             return input
         axes = g.op("Constant", value_t=torch.tensor(axes))
@@ -159,29 +197,36 @@ def _slice(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
 
 def slice(g, self, *args):
     if len(args) == 4:
-        # aten::slice(Tensor self, int dim, int start, int end, int step) -> Tensor
+        # aten::slice(Tensor self, int dim, int? start=None, int? end=None, int step=1) -> Tensor
         dim, start, end, step = args
     elif len(args) == 3:
-        # aten::slice(t[] l, int start, int end, int step) -> t[]
+        # aten::slice(t[] l, int? start=None, int? end=None, int step=1) -> t[]
         start, end, step = args
         dim = 0
     else:
         raise NotImplementedError("Unknown aten::slice signature")
-
+    is_start_none = start.node().kind() == "prim::Constant" and start.type().kind() == 'NoneType'
+    is_end_none = end.node().kind() == "prim::Constant" and end.type().kind() == 'NoneType'
+    is_start_onnx_const = start.node().kind() == 'onnx::Constant'
+    is_end_onnx_const = end.node().kind() == 'onnx::Constant'
     step = sym_help._parse_arg(step, 'i')
-    if (start.node().kind() != 'onnx::Constant' or
-       (not isinstance(end, int) and end.node().kind() != 'onnx::Constant') or
-       (not isinstance(dim, int) and dim.node().kind() != 'onnx::Constant')):
+    if (not is_start_none and not is_start_onnx_const) or \
+       (not isinstance(end, int) and not is_end_none and not is_end_onnx_const) or \
+       (not isinstance(dim, int) and dim.node().kind() != 'onnx::Constant'):
         dynamic_slice = True
+        if is_start_none:
+            start = g.op("Constant", value_t=torch.tensor(0))
+        if is_end_none:
+            end = g.op("Constant", value_t=torch.tensor(9223372036854775807))
     else:
-        start = [sym_help._parse_arg(start, 'i')]
-        end = [sym_help._parse_arg(end, 'i')]
+        start = [0 if is_start_none else sym_help._parse_arg(start, 'i')]
+        end = [9223372036854775807 if is_end_none else sym_help._parse_arg(end, 'i')]
         dim = [sym_help._parse_arg(dim, 'i')]
         dynamic_slice = False
     return sym_help._slice_helper(g, self, axes=dim, starts=start, ends=end, steps=[step], dynamic_slice=dynamic_slice)
 
 
-@parse_args('v', 'is')
+@parse_args("v", "is")
 def flip(g, input, dims):
     return sym_help._slice_helper(g, input, axes=dims,
                                   starts=[-1] * len(dims),
@@ -193,7 +238,7 @@ def fmod(g, input, other):
     return g.op("Mod", input, other, fmod_i=1)
 
 
-@parse_args('v', 'v', 'v', 'i', 'i', 'i', 'v', 'i')
+@parse_args("v", "v", "v", "i", "i", "i", "v", "i", "i")
 def embedding_bag(g,
                   embedding_matrix,
                   indices,
@@ -202,9 +247,12 @@ def embedding_bag(g,
                   mode,
                   sparse,
                   per_sample_weights,
-                  include_last_offset):
+                  include_last_offset,
+                  padding_idx):
     if scale_grad_by_freq and sym_help._training_mode:
-        return sym_help._onnx_unsupported('embedding_bag with scale_grad_by_freq for training mode')
+        return sym_help._onnx_unsupported("embedding_bag with scale_grad_by_freq for training mode")
+    if padding_idx is not None and padding_idx >= 0:
+        raise RuntimeError("embedding_bag with padding_idx")
     from torch.onnx.symbolic_opset9 import select
     import warnings
     warnings.warn("Export of embedding_bag with dynamic input/offsets shape is not supported in opset 10. "
@@ -245,11 +293,11 @@ def embedding_bag(g,
         # But the last three outputs are not used in torch.nn.EmbeddingBag or torch.nn.functional.embedding_bag.
         return output, None, None, None
     else:
-        return sym_help._onnx_unsupported('embedding_bag with unknown shape of offsets for opset 10 is not supported. '
-                                          'please use opset 11 or higher.')
+        return sym_help._onnx_unsupported("embedding_bag with unknown shape of offsets for opset 10 is not supported. "
+                                          "please use opset 11 or higher.")
 
 
-@parse_args('v', 't', 'i', 'i', 'i')
+@parse_args("v", "t", "i", "i", "i")
 def fake_quantize_per_tensor_affine(g, inputs, scale, zero_point, quant_min=-128, quant_max=127):
     if quant_min not in [0, -128] or quant_max not in [127, 255]:
         raise RuntimeError(
@@ -258,3 +306,15 @@ def fake_quantize_per_tensor_affine(g, inputs, scale, zero_point, quant_min=-128
     zero_point_dtype = torch.int8 if quant_min == -128 else torch.uint8
     zero_point = torch.tensor(zero_point, dtype=zero_point_dtype)  # ONNX requires zero_point to be tensor
     return g.op("DequantizeLinear", g.op("QuantizeLinear", inputs, scale, zero_point), scale, zero_point)
+
+
+def isinf(g, input):
+    from torch.onnx.symbolic_opset9 import _cast_Double  # type: ignore[attr-defined]
+    return g.op("IsInf", _cast_Double(g, input, False))
+
+
+def isfinite(g, input):
+    from torch.onnx.symbolic_opset9 import isnan, __not_, __or_
+    inf_node = isinf(g, input)
+    nan_node = isnan(g, input)
+    return __not_(g, __or_(g, inf_node, nan_node))

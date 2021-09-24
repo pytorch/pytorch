@@ -1,9 +1,27 @@
+#include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
-
+#include <torch/csrc/jit/python/python_dict.h>
 #include <torch/csrc/jit/python/python_ivalue.h>
+#include <torch/csrc/jit/python/python_list.h>
+
+#include <c10/util/irange.h>
 
 namespace torch {
 namespace jit {
+
+// This is a hack to remove instances deleted in C++ from the PyBind cache
+// C++->Python. We need this because otherwise we may get the old Python object
+// if C++ creates a new object at the memory location of the deleted object.
+void clear_registered_instances(void* ptr) {
+  auto& registered_instances =
+      pybind11::detail::get_internals().registered_instances;
+  auto range = registered_instances.equal_range(ptr);
+  for (auto it = range.first; it != range.second; ++it) {
+    auto vh = it->second->get_value_and_holder();
+    vh.set_instance_registered(false);
+  }
+  registered_instances.erase(ptr);
+}
 
 IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
   switch (type->kind()) {
@@ -21,7 +39,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     }
     case TypeKind::FloatType:
       return py::cast<double>(obj);
-    case TypeKind::ComplexDoubleType: {
+    case TypeKind::ComplexType: {
       auto c_obj = py::cast<std::complex<double>>(obj.ptr());
       return static_cast<c10::complex<double>>(c_obj);
     }
@@ -64,24 +82,50 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       }
       std::vector<IValue> values;
       values.reserve(tuple_size);
-      for (size_t i = 0; i < tuple_size; ++i) {
+      for (const auto i : c10::irange(tuple_size)) {
         values.push_back(toIValue(tuple[i], elem_types[i]));
       }
       return tuple_type->name()
           ? c10::ivalue::Tuple::createNamed(std::move(values), tuple_type)
           : c10::ivalue::Tuple::create(std::move(values));
     }
+    case TypeKind::UnionType: {
+      auto actual_type = toTypeInferredIValue(obj);
+      auto actual_type_ptr = actual_type.type();
+      auto union_type = type->expect<UnionType>();
+      if (!actual_type_ptr->isSubtypeOf(union_type)) {
+        throw py::cast_error(c10::str(
+            "Expected a member of ",
+            union_type->annotation_str(),
+            " but instead found type ",
+            actual_type.type()->annotation_str()));
+      }
+      return actual_type;
+    }
     case TypeKind::StringType:
       return ConstantString::create(py::cast<std::string>(obj));
     case TypeKind::DeviceObjType: {
-      auto device = reinterpret_cast<THPDevice*>(obj.ptr());
-      return device->device;
+      if (THPDevice_Check(obj.ptr())) {
+        auto device = reinterpret_cast<THPDevice*>(obj.ptr());
+        return device->device;
+      }
+      return c10::Device(py::cast<std::string>(obj.ptr()));
     }
     case TypeKind::StreamObjType: {
       auto stream = reinterpret_cast<THPStream*>(obj.ptr());
       return static_cast<int64_t>(stream->cdata);
     }
     case TypeKind::ListType: {
+      // If the object is a ScriptList, retrieve the c10::List
+      // instance inside it.
+      try {
+        auto script_list = py::cast<ScriptList>(obj);
+        return script_list.list_;
+      } catch (...) {
+      }
+
+      // If not (i.e. it is a regular Python list), make a new
+      // c10::List.
       const auto& elem_type = type->expectRef<ListType>().getElementType();
       switch (elem_type->kind()) {
         // allows single int/float to be broadcasted to a fixed size list
@@ -119,6 +163,17 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     }
     case TypeKind::DictType: {
       const auto& dict_type = type->expect<DictType>();
+
+      // If the object is a ScriptDict, retrieve the c10::Dict
+      // instance inside it.
+      try {
+        auto script_dict = py::cast<ScriptDict>(obj);
+        return script_dict.dict_;
+      } catch (py::cast_error& e) {
+      }
+
+      // If not (i.e. it is a regular Python dictionary), make a new
+      // c10::Dict.
       return createGenericDict(
           py::cast<py::dict>(obj),
           dict_type->getKeyType(),
@@ -135,10 +190,17 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     }
     case TypeKind::ClassType: {
       auto classType = type->expect<ClassType>();
-      if (auto mod = as_module(py::cast<py::object>(obj))) {
+      auto object = py::cast<py::object>(obj);
+      if (auto mod = as_module(object)) {
         // if obj is already a ScriptModule, just return its ivalue
         return mod.value()._ivalue();
       }
+
+      // Check if the obj is a ScriptObject.
+      if (auto script_obj = as_object(object)) {
+        return script_obj.value()._ivalue();
+      }
+
       // otherwise is a normal class object, we create a fresh
       // ivalue::Object to use from the py object.
       // 1. create a bare ivalue
@@ -148,7 +210,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
           c10::StrongTypePtr(cu, classType), numAttrs);
 
       // 2. copy all the contained types
-      for (size_t slot = 0; slot < numAttrs; slot++) {
+      for (const auto slot : c10::irange(numAttrs)) {
         const auto& attrType = classType->getAttribute(slot);
         const auto& attrName = classType->getAttributeName(slot);
 
@@ -186,6 +248,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       if (auto mod = as_module(py::cast<py::object>(obj))) {
         classType = mod.value().type();
         res = mod.value()._ivalue();
+      } else if (auto object = as_object(py::cast<py::object>(obj))) {
+        classType = object.value().type();
+        res = object.value()._ivalue();
       } else {
         // We inspect the value to found the compiled TorchScript class
         // and then create a ivalue::Object from that class type.
@@ -207,8 +272,8 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       std::stringstream why_not;
       if (!classType->isSubtypeOfExt(interfaceType, &why_not)) {
         throw py::cast_error(c10::str(
-            "Object ",
-            py::str(obj),
+            "Object of type ",
+            classType->repr_str(),
             " is not compatible with interface ",
             interfaceType->repr_str(),
             "\n",

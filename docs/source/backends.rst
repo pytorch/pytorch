@@ -40,7 +40,7 @@ torch.backends.cuda
     .. method::  clear()
 
         Clears the cuFFT plan cache.
-    
+
 
 torch.backends.cudnn
 ^^^^^^^^^^^^^^^^^^^^

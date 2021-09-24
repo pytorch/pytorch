@@ -63,6 +63,7 @@ struct Index : IndexBase {
       return;
     }
     std::lock_guard<std::mutex> lock(dictMutex_);
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < numKeys; ++i) {
       auto it = dict_.find(keys[i]);
       if (it != dict_.end()) {
@@ -79,6 +80,7 @@ struct Index : IndexBase {
 
   bool Load(const T* keys, size_t numKeys) {
     CAFFE_ENFORCE(
+        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         numKeys <= maxElements_,
         "Cannot load index: Tensor is larger than max_elements.");
     decltype(dict_) dict;

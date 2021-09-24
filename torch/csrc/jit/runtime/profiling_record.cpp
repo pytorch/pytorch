@@ -1,13 +1,18 @@
 #include <torch/csrc/jit/runtime/profiling_record.h>
 
 #include <ATen/core/interned_strings.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/clear_profiling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
+
+#include <torch/csrc/jit/codegen/cuda/interface.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
 namespace jit {
@@ -61,7 +66,7 @@ bool ShapeSymbolTable::bindSymbolicShapes(
   if (*sym_shapes.rank() != new_sizes.size()) {
     return false;
   }
-  for (size_t i = 0; i < new_sizes.size(); i++) {
+  for (const auto i : c10::irange(new_sizes.size())) {
     auto symbol = (*sym_shapes.sizes())[i];
     if (!symbol.is_static()) {
       continue;
@@ -137,7 +142,7 @@ c10::SymbolicShape ProfilingRecord::mergeSymbolicShapes(
       new_sizes.rank().has_value() && sym_shapes.rank().has_value() &&
       *new_sizes.rank() == *sym_shapes.rank());
 
-  for (size_t i = 0; i < *new_sizes.rank(); i++) {
+  for (const auto i : c10::irange(*new_sizes.rank())) {
     if (!(*sym_shapes.sizes())[i].is_static() ||
         !(*new_sizes.sizes())[i].is_static()) {
       new_symbols.emplace_back();
@@ -200,7 +205,13 @@ void ProfilingRecord::insertShapeProfile(Node* n, size_t offset) {
 }
 
 bool needsProfiledInputs(Node* n) {
-  if (tensorexpr::isSupported(n)) {
+  if (tensorexpr::isSupported(n) ||
+#ifndef C10_MOBILE
+      (RegisterCudaFuseGraph::isRegistered() && fuser::cuda::canFuseNode(n))
+#else
+      false
+#endif
+  ) {
     return true;
   }
 
@@ -231,7 +242,13 @@ bool needsProfiledInputs(Node* n) {
 }
 
 bool needsProfiledOutput(Node* n) {
-  if (tensorexpr::isSupported(n)) {
+  if (tensorexpr::isSupported(n) ||
+#ifndef C10_MOBILE
+      (RegisterCudaFuseGraph::isRegistered() && fuser::cuda::canFuseNode(n))
+#else
+      false
+#endif
+  ) {
     return true;
   }
 
@@ -260,7 +277,7 @@ void ProfilingRecord::removeProfileCounter(Block* b) {
 void ProfilingRecord::instrumentBlock(Block* block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
     auto n = *it;
-    for (size_t offset = 0; offset < n->inputs().size(); offset++) {
+    for (const auto offset : c10::irange(n->inputs().size())) {
       auto i = n->input(offset);
       if (i->type()->kind() == c10::TypeKind::TensorType &&
           (needsProfiledInputs(n) || needsProfiledOutput(i->node()))) {
@@ -300,6 +317,11 @@ void ProfilingRecord::removeProfilingNodes(Block* b) {
   }
 }
 
+bool ProfilingRecord::ready() const {
+  std::lock_guard<std::mutex> lock(this->mutex_);
+  return profiling_count_ == 0;
+}
+
 std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
     const std::shared_ptr<Graph>& graph) {
   auto new_g = graph->copy();
@@ -318,6 +340,11 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
 
     if (raw_pr->profiling_count_ > 0) {
       raw_pr->profiling_count_--;
+    } else {
+      // if profiling_count_ is already at 0 ignore incoming profiling data
+      // since we already collected the data for the exact number of runs
+      // required
+      return;
     }
 
     // merge profiling information from all runs

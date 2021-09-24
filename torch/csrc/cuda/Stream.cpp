@@ -16,15 +16,18 @@ static PyObject * THCPStream_pynew(
   PyTypeObject *type, PyObject *args, PyObject *kwargs) {
   HANDLE_TH_ERRORS
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int current_device;
   THCudaCheck(cudaGetDevice(&current_device));
 
   int priority = 0;
   uint64_t cdata = 0;
+  uint64_t stream_ptr = 0;
 
-  static char *kwlist[] = {"priority", "_cdata", nullptr};
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+  static char *kwlist[] = {"priority", "_cdata", "stream_ptr", nullptr};
   if (!PyArg_ParseTupleAndKeywords(
-      args, kwargs, "|iK", kwlist, &priority, &cdata)) {
+      args, kwargs, "|iKK", kwlist, &priority, &cdata, &stream_ptr)) {
     return nullptr;
   }
 
@@ -33,12 +36,19 @@ static PyObject * THCPStream_pynew(
     return nullptr;
   }
 
+  if (stream_ptr) {
+    TORCH_CHECK(priority == 0, "Priority was explicitly set for a external stream")
+  }
+
   at::cuda::CUDAStream stream =
     cdata ?
     at::cuda::CUDAStream::unpack(cdata) :
-    at::cuda::getStreamFromPool(
-      /* isHighPriority */ priority < 0 ? true : false);
+      stream_ptr ?
+      at::cuda::getStreamFromExternal(reinterpret_cast<cudaStream_t>(stream_ptr), current_device) :
+      at::cuda::getStreamFromPool(
+        /* isHighPriority */ priority < 0 ? true : false);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   THCPStream* self = (THCPStream *)ptr.get();
   self->cdata = stream.pack();
   new (&self->cuda_stream) at::cuda::CUDAStream(stream);
@@ -72,6 +82,7 @@ static PyObject * THCPStream_get_priority(THCPStream *self, void *unused) {
 
 static PyObject * THCPStream_priority_range(PyObject *_unused, PyObject* noargs) {
   HANDLE_TH_ERRORS
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int least_priority, greatest_priority;
   std::tie(least_priority, greatest_priority) =
     at::cuda::CUDAStream::priority_range();
@@ -105,10 +116,12 @@ static PyObject * THCPStream_eq(PyObject *_self, PyObject *_other) {
   END_HANDLE_TH_ERRORS
 }
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays, cppcoreguidelines-avoid-non-const-global-variables, cppcoreguidelines-avoid-c-arrays)
 static struct PyMemberDef THCPStream_members[] = {
   {nullptr}
 };
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays, cppcoreguidelines-avoid-non-const-global-variables, cppcoreguidelines-avoid-c-arrays)
 static struct PyGetSetDef THCPStream_properties[] = {
   {"cuda_stream",
     (getter)THCPStream_get_cuda_stream, nullptr, nullptr, nullptr},
@@ -116,6 +129,7 @@ static struct PyGetSetDef THCPStream_properties[] = {
   {nullptr}
 };
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays, cppcoreguidelines-avoid-non-const-global-variables, cppcoreguidelines-avoid-c-arrays)
 static PyMethodDef THCPStream_methods[] = {
   {(char*)"query", THCPStream_query, METH_NOARGS, nullptr},
   {(char*)"synchronize",
@@ -133,37 +147,37 @@ PyTypeObject THCPStreamType = {
   0,                                     /* tp_itemsize */
   (destructor)THCPStream_dealloc,        /* tp_dealloc */
   0,                                     /* tp_vectorcall_offset */
-  0,                                     /* tp_getattr */
-  0,                                     /* tp_setattr */
-  0,                                     /* tp_reserved */
-  0,                                     /* tp_repr */
-  0,                                     /* tp_as_number */
-  0,                                     /* tp_as_sequence */
-  0,                                     /* tp_as_mapping */
-  0,                                     /* tp_hash  */
-  0,                                     /* tp_call */
-  0,                                     /* tp_str */
-  0,                                     /* tp_getattro */
-  0,                                     /* tp_setattro */
-  0,                                     /* tp_as_buffer */
+  nullptr,                               /* tp_getattr */
+  nullptr,                               /* tp_setattr */
+  nullptr,                               /* tp_reserved */
+  nullptr,                               /* tp_repr */
+  nullptr,                               /* tp_as_number */
+  nullptr,                               /* tp_as_sequence */
+  nullptr,                               /* tp_as_mapping */
+  nullptr,                               /* tp_hash  */
+  nullptr,                               /* tp_call */
+  nullptr,                               /* tp_str */
+  nullptr,                               /* tp_getattro */
+  nullptr,                               /* tp_setattro */
+  nullptr,                               /* tp_as_buffer */
   Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
   nullptr,                                  /* tp_doc */
-  0,                                     /* tp_traverse */
-  0,                                     /* tp_clear */
-  0,                                     /* tp_richcompare */
+  nullptr,                               /* tp_traverse */
+  nullptr,                               /* tp_clear */
+  nullptr,                               /* tp_richcompare */
   0,                                     /* tp_weaklistoffset */
-  0,                                     /* tp_iter */
-  0,                                     /* tp_iternext */
+  nullptr,                               /* tp_iter */
+  nullptr,                               /* tp_iternext */
   THCPStream_methods,                    /* tp_methods */
   THCPStream_members,                    /* tp_members */
   THCPStream_properties,                 /* tp_getset */
-  0,                                     /* tp_base */
-  0,                                     /* tp_dict */
-  0,                                     /* tp_descr_get */
-  0,                                     /* tp_descr_set */
+  nullptr,                               /* tp_base */
+  nullptr,                               /* tp_dict */
+  nullptr,                               /* tp_descr_get */
+  nullptr,                               /* tp_descr_set */
   0,                                     /* tp_dictoffset */
-  0,                                     /* tp_init */
-  0,                                     /* tp_alloc */
+  nullptr,                               /* tp_init */
+  nullptr,                               /* tp_alloc */
   THCPStream_pynew,                      /* tp_new */
 };
 

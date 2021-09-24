@@ -1,4 +1,6 @@
 #include <ATen/native/vulkan/api/Context.h>
+#include <ATen/vulkan/Context.h>
+#include <ATen/native/vulkan/ops/Copy.h>
 
 #include <sstream>
 
@@ -7,24 +9,6 @@ namespace native {
 namespace vulkan {
 namespace api {
 namespace {
-
-Context* initialize() {
-  static const std::unique_ptr<Context> context([]() -> Context* {
-    try {
-      const Adapter adapter = runtime()->select([](const Adapter& adapter) {
-        // Select the first adapter.
-        return true;
-      });
-
-      return new Context(adapter);
-    }
-    catch (...) {
-      return nullptr;
-    }
-  }());
-
-  return context.get();
-}
 
 VkDevice create_device(
     const VkPhysicalDevice physical_device,
@@ -94,6 +78,12 @@ VkDevice create_device(
   VK_CHECK(vkCreateDevice(physical_device, &device_create_info, nullptr, &device));
   TORCH_CHECK(device, "Invalid Vulkan device!");
 
+#ifdef USE_VULKAN_WRAPPER
+#ifdef USE_VULKAN_VOLK
+  volkLoadDevice(device);
+#endif
+#endif
+
   return device;
 }
 
@@ -136,12 +126,14 @@ Context::~Context() {
     flush();
   }
   catch (const std::exception& e) {
-    LOG(WARNING)
-        << "Vulkan: Context destructor raised an exception!  Error: "
-        << e.what();
+    TORCH_WARN(
+        "Vulkan: Context destructor raised an exception! Error: ",
+        e.what());
   }
   catch (...) {
-    LOG(WARNING) << "Vulkan: Context destructor raised an unknown exception!";
+    TORCH_WARN(
+        "Vulkan: Context destructor raised an exception! "
+        "Error: Unknown");
   }
 }
 
@@ -158,16 +150,48 @@ bool available() {
 }
 
 Context* context() {
-  Context* const context = initialize();
-  TORCH_CHECK(context, "Vulkan: Backend not available on this platform!");
+  static const std::unique_ptr<Context> context([]() -> Context* {
+    try {
+      const Adapter adapter = runtime()->select([](const Adapter& adapter) {
+        // Select the first adapter.
+        return true;
+      });
 
-  return context;
+      return new Context(adapter);
+    }
+    catch (const std::exception& e) {
+      TORCH_CHECK(false, "Vulkan: Failed to initialize context! Error: ", e.what());
+    }
+    catch (...) {
+      TORCH_CHECK(false, "Vulkan: Failed to initialize context! Error: Unknown");
+    }
+
+    return nullptr;
+  }());
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      context,
+      "Invalid Vulkan context!");
+
+  return context.get();
 }
+
+struct VulkanImpl final : public at::vulkan::VulkanImplInterface {
+  bool is_vulkan_available() const override {
+    return available();
+  }
+
+  Tensor& vulkan_copy_(Tensor& self, const Tensor& src) const override {
+    return vulkan::ops::copy_(self, src);
+  }
+};
+static at::vulkan::VulkanImplRegistrar g_vulkan_impl(new VulkanImpl());
 
 Descriptor::Set dispatch_prologue(
     Command::Buffer& command_buffer,
     const Shader::Layout::Signature& shader_layout_signature,
-    const Shader::Descriptor& shader_descriptor) {
+    const Shader::Descriptor& shader_descriptor,
+    const Shader::WorkGroup& local_work_group_size) {
   Context* const context = api::context();
   const GPU gpu = context->gpu();
   Descriptor& descriptor = context->descriptor();
@@ -185,7 +209,7 @@ Descriptor::Set dispatch_prologue(
           shader_layout.handle,
         }),
         shader.cache.retrieve(shader_descriptor),
-        gpu.adapter->local_work_group_size(),
+        local_work_group_size,
       }));
 
   return descriptor.pool.allocate(shader_layout);

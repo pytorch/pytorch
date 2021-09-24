@@ -33,7 +33,7 @@ void packGradient(const Gradient& gradient, Node* dnode);
 bool needsGradient(const std::shared_ptr<const Graph>& graph);
 void runOptimization(
     std::shared_ptr<Graph>& graph,
-    bool unroll = true,
+    bool unroll_non_constant_loops = true,
     bool const_prop_user_classes = true);
 void runNondiffOptimization(
     std::shared_ptr<Graph>& graph,
@@ -88,16 +88,21 @@ struct GraphExecutorImplBase {
   // The unoptimized starting graph. This field is effectively const, but we
   // can't make it so because Graph::copy() is not const (and making it const is
   // not that easy at this point).
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::shared_ptr<Graph> graph;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::string function_name_;
 
   // If false, we'll run the graph as we get it, without any optimizations.
   // Useful for debugging.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const size_t num_inputs;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const size_t num_outputs;
 
   // GraphExecutors can be accessed from multiple threads, so this thread needs
   // to be held every time we access the fallback or plan_cache.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::mutex compile_mutex;
 };
 

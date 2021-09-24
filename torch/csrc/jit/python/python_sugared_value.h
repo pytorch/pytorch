@@ -25,7 +25,7 @@ inline std::shared_ptr<SugaredValue> toSimple(Value* v) {
 std::shared_ptr<SugaredValue> toSugaredValue(
     py::object obj,
     Function& m,
-    SourceRange loc,
+    const SourceRange& loc,
     bool is_constant = false);
 
 c10::optional<StrongFunctionPtr> as_function(const py::object& obj);
@@ -77,8 +77,11 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
 
   void checkForAddToConstantsError(std::stringstream& ss);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   py::object self;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   c10::optional<py::object> rcb;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Value* moduleSelf_ = nullptr;
 };
 
@@ -217,6 +220,14 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
       TypePtr type_hint) override;
 
  private:
+  // Check that the type of all submodules is a subtype of ty. If the function
+  // returns false, more information about why it returns false (e.g. which
+  // submodule's type is not a subtype of ty) is printed it why_not if it is not
+  // null.
+  bool areAllSubmodulesSubtypeOf(
+      const TypePtr& ty,
+      std::ostream* why_not = nullptr) const;
+
   Value* self_;
   std::shared_ptr<ConcreteModuleType> concreteType_;
 };

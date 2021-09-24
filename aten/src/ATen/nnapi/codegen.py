@@ -98,14 +98,17 @@ def main(argv):
                   CAFFE_ENFORCE(nnapi_.{short_name});
                   int ret = nnapi_.{short_name}({call_args});
                   // TODO: Maybe add better logging here.
-                  CAFFE_ENFORCE(ret == ANEURALNETWORKS_NO_ERROR);
+                  CAFFE_ENFORCE(
+                    ret == ANEURALNETWORKS_NO_ERROR,
+                    "{short_name}", "failed with error ", ret
+                  );
                   return ret;
                 }}"""))
 
     out_dir = pathlib.Path(__file__).parent
 
     (out_dir / "nnapi_wrapper.h").write_text(
-        PREFIX + 
+        PREFIX +
         textwrap.dedent("""\
             #ifndef NNAPI_WRAPPER_H_
             #define NNAPI_WRAPPER_H_
@@ -124,15 +127,18 @@ def main(argv):
     )
 
     (out_dir / "nnapi_wrapper.cpp").write_text(
-        PREFIX + 
+        PREFIX +
         textwrap.dedent("""\
             #ifndef _WIN32
             #include <dlfcn.h>
             #endif
             #include <ATen/nnapi/nnapi_wrapper.h>
             #include <c10/util/Logging.h>
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
             static int loaded = 0;
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
             static struct nnapi_wrapper nnapi_;
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
             static struct nnapi_wrapper check_nnapi_;
             __DEFINE_CHECK_FUNCTIONS__
             void nnapi_wrapper_load(struct nnapi_wrapper** nnapi, struct nnapi_wrapper** check_nnapi) {

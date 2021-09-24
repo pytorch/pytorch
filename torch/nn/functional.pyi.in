@@ -182,6 +182,7 @@ def bilinear(input1: Tensor, input2: Tensor, weight: Tensor, bias: Optional[Tens
 
 def silu(input: Tensor, inplace: bool = False) -> Tensor: ...
 
+def mish(input: Tensor, inplace: bool = False) -> Tensor: ...
 
 def hardswish(input: Tensor, inplace: bool = False) -> Tensor: ...
 
@@ -193,7 +194,7 @@ def embedding(input: Tensor, weight: Tensor, padding_idx: Optional[int] = ..., m
 def embedding_bag(input: Tensor, weight: Tensor, offsets: Optional[Tensor] = ..., max_norm: Optional[float] = ...,
                   norm_type: float = ..., scale_grad_by_freq: bool = ..., mode: str = ...,
                   sparse: bool = ..., per_sample_weights: Optional[Tensor] = ...,
-                  include_last_offset: bool = ...) -> Tensor: ...
+                  include_last_offset: bool = ..., padding_idx: Optional[int] = ...) -> Tensor: ...
 
 def batch_norm(input: Tensor, running_mean: Optional[Tensor], running_var: Optional[Tensor],
                weight: Optional[Tensor] = ..., bias: Optional[Tensor] = ..., training: bool = ...,
@@ -238,7 +239,8 @@ def kl_div(input: Tensor, target: Tensor, size_average: Optional[bool] = ..., re
 
 
 def cross_entropy(input: Tensor, target: Tensor, weight: Optional[Tensor] = ..., size_average: Optional[bool] = ...,
-                  ignore_index: int = ..., reduce: Optional[bool] = ..., reduction: str = ...) -> Tensor: ...
+                  ignore_index: int = ..., reduce: Optional[bool] = ..., reduction: str = ...,
+                  label_smoothing: float = ...) -> Tensor: ...
 
 
 def binary_cross_entropy(input: Tensor, target: Tensor, weight: Optional[Tensor] = ...,
@@ -253,6 +255,9 @@ def binary_cross_entropy_with_logits(input: Tensor, target: Tensor, weight: Opti
 
 def smooth_l1_loss(input: Tensor, target: Tensor, size_average: Optional[bool] = ..., reduce: Optional[bool] = ...,
                    reduction: str = ..., beta: float = ...) -> Tensor: ...
+
+
+def huber_loss(input: Tensor, target: Tensor, reduction: str = ..., delta: float = ...) -> Tensor: ...
 
 
 def l1_loss(input: Tensor, target: Tensor, size_average: Optional[bool] = ..., reduce: Optional[bool] = ...,

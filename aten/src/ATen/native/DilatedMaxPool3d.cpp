@@ -40,6 +40,7 @@ static void max_pool3d_with_indices_single_out_frame(
     for (auto k = start; k < end; k++)
     {
       /* loop over output */
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t i, j, ti;
       scalar_t *ip = input_p + k * itime * iwidth * iheight;
       for (ti = 0; ti < otime; ti++)
@@ -194,7 +195,8 @@ void max_pool3d_with_indices_out_cpu_template(
     pT, pH, pW,
     dilationT, dilationH, dilationW,
     itime, iheight, iwidth,
-    otime, oheight, owidth);
+    otime, oheight, owidth,
+    "max_pool3d_with_indices_out_cpu_template()");
 
   /* get contiguous input */
   Tensor input = input_.contiguous();
@@ -290,6 +292,7 @@ static void max_pool3d_with_indices_backward_single_out_frame(
       int64_t *indz_p_k = indz_p + k * otime * owidth * oheight;
 
       /* calculate max points */
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t ti, i, j;
       for (ti = 0; ti < otime; ti++)
       {
@@ -411,7 +414,8 @@ Tensor& max_pool3d_with_indices_backward_out_cpu_template(
     pT, pH, pW,
     dilationT, dilationH, dilationW,
     itime, iheight, iwidth,
-    otime, oheight, owidth);
+    otime, oheight, owidth,
+    "max_pool3d_with_indices_backward_out_cpu_template()");
 
   /* backprop */
   if (input.ndimension() == 4) /* non-batch mode*/
@@ -470,15 +474,14 @@ Tensor& max_pool3d_with_indices_backward_out_cpu_template(
 
 } // namespace
 
-std::tuple<Tensor&, Tensor&> max_pool3d_with_indices_out_cpu(
-  Tensor& output,
-  Tensor& indices,
-  const Tensor& input,
+std::tuple<Tensor&, Tensor&> max_pool3d_with_indices_out_cpu(const Tensor& input,
   IntArrayRef kernel_size,
   IntArrayRef stride,
   IntArrayRef padding,
   IntArrayRef dilation,
-  bool ceil_mode)
+  bool ceil_mode,
+  Tensor& output,
+  Tensor& indices)
 {
   max_pool3d_with_indices_out_cpu_template(
     output,
@@ -521,16 +524,15 @@ std::tuple<Tensor, Tensor> max_pool3d_with_indices_cpu(
   return std::tuple<Tensor, Tensor>(output, indices);
 }
 
-Tensor& max_pool3d_with_indices_backward_out_cpu(
-  Tensor& gradInput,
-  const Tensor& gradOutput_,
+Tensor& max_pool3d_with_indices_backward_out_cpu(const Tensor& gradOutput_,
   const Tensor& input,
   IntArrayRef kernel_size,
   IntArrayRef stride,
   IntArrayRef padding,
   IntArrayRef dilation,
   bool ceil_mode,
-  const Tensor& indices)
+  const Tensor& indices,
+  Tensor& gradInput)
 {
   max_pool3d_with_indices_backward_out_cpu_template(
     gradInput,

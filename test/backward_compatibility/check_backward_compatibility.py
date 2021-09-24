@@ -25,52 +25,47 @@ from torch._C import parse_schema
 # ]
 #
 # NB: function name DOES NOT include overload name!
-allow_list = [
+ALLOW_LIST = [
     ("c10_experimental", datetime.date(2222, 1, 1)),
     # Internal
     ("static", datetime.date(9999, 1, 1)),
+    ("prim::ModuleDictIndex", datetime.date(9999, 1, 1)),
+    ("prim::MKLDNNRelu6", datetime.date(9999, 1, 1)),
+    ("prim::MKLDNNRelu6_", datetime.date(9999, 1, 1)),
+    ("prim::Concat", datetime.date(9999, 1, 1)),
     # Internal, profiler-specific ops
     ("profiler::_call_end_callbacks_on_jit_fut*", datetime.date(9999, 1, 1)),
     ("profiler::_record_function_enter", datetime.date(9999, 1, 1)),
-    ("aten::_qr_helper", datetime.date(2021, 1, 31)),
-    ("aten::fft", datetime.date(2021, 1, 31)),
-    ("aten::ifft", datetime.date(2021, 1, 31)),
-    ("aten::irfft", datetime.date(2021, 1, 31)),
-    ("aten::rfft", datetime.date(2021, 1, 31)),
-    ("aten::_svd_helper", datetime.date(2021, 1, 31)),
-    ("aten::_cudnn_rnn_flatten_weight", datetime.date(2020, 12, 31)),
-    ("aten::_cudnn_rnn", datetime.date(2020, 12, 31)),
-    ("aten::_cudnn_rnn_backward", datetime.date(2020, 12, 31)),
-    ("aten::quantile", datetime.date(2021, 1, 31)),
-    ("aten::nanquantile", datetime.date(2021, 1, 31)),
-    ("aten::_fft_with_size", datetime.date(2021, 1, 31)),
-    ("aten::thnn_conv_depthwise2d_backward", datetime.date(2021, 1, 31)),
-    ("aten::slow_conv3d_backward", datetime.date(2021, 1, 31)),
-    ("aten::thnn_conv2d_backward", datetime.date(2021, 1, 31)),
-    ("aten::slow_conv_transpose3d_backward", datetime.date(2021, 1, 31)),
-    ("aten::slow_conv_transpose2d_backward", datetime.date(2021, 1, 31)),
-    ("aten::set_", datetime.date(2021, 1, 31)),
-    ("aten::native_layer_norm", datetime.date(2021, 1, 31)),
-    ("aten::native_layer_norm_backward", datetime.date(2021, 1, 31)),
-    ("aten::elu_backward", datetime.date(2021, 1, 31)),
-    ("aten::_multinomial_alias_setup", datetime.date(2021, 1, 31)),
-    ("aten::_multinomial_alias_draw", datetime.date(2021, 1, 31)),
-    ("prim::profile_optional", datetime.date(2021, 1, 31)),
-    ("aten::fake_quantize_per_tensor_affine_backward", datetime.date(2021, 2, 20)),
-    ("aten::fake_quantize_per_channel_affine_backward", datetime.date(2021, 2, 20)),
+    ("aten::_cholesky_helper", datetime.date(9999, 1, 1)),
+    ("aten::_lstsq_helper", datetime.date(9999, 1, 1)),
+    ("aten::_syevd_helper", datetime.date(9999, 1, 1)),
+    ("aten::_lu_solve_helper", datetime.date(9999, 1, 1)),
+    ("aten::_lu_with_info", datetime.date(9999, 1, 1)),
+    ("aten::_linalg_solve_out_helper_", datetime.date(9999, 1, 1)),
+    ("aten::select_backward", datetime.date(9999, 1, 1)),
+    ("aten::slice_backward", datetime.date(9999, 1, 1)),
+    ("aten::diagonal_backward", datetime.date(9999, 1, 1)),
     ("aten::rowwise_prune", datetime.date(9999, 1, 1)),
+    ("aten::_triangular_solve_helper", datetime.date(9999, 1, 1)),
+    ("aten::adaptive_avg_pool3d_backward", datetime.date(9999, 1, 1)),
+    ("aten::_embedding_bag_dense_backward", datetime.date(9999, 1, 1)),
+    ("aten::randperm", datetime.date(9999, 1, 1)),
 ]
 
-def allow_listed(schema, allow_list):
-    for item in allow_list:
-        if item[1] < datetime.date.today():
-            continue
-        regexp = re.compile(item[0])
-        if regexp.search(schema.name):
-            if len(item) > 2:
+ALLOW_LIST_COMPILED = [
+    (
+        re.compile(item[0]),
+        item[1],
+        re.compile(item[2]) if len(item) > 2 else None,
+    ) for item in ALLOW_LIST if item[1] >= datetime.date.today()
+]
+
+def allow_listed(schema):
+    for item in ALLOW_LIST_COMPILED:
+        if item[0].search(str(schema)):
+            if len(item) > 2 and item[2] is not None:
                 # if arguments regex is present, use it
-                regexp_args = re.compile(item[2])
-                return bool(regexp_args.search(str(schema)))
+                return bool(item[2].search(str(schema)))
             return True
     return False
 
@@ -104,7 +99,7 @@ def check_bc(existing_schemas):
     is_bc = True
     broken_ops = []
     for existing_schema in existing_schemas:
-        if allow_listed(existing_schema, allow_list):
+        if allow_listed(existing_schema):
             print("schema: ", str(existing_schema), " found on allowlist, skipping")
             continue
         print("processing existing schema: ", str(existing_schema))

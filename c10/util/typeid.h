@@ -4,7 +4,6 @@
 #include <cassert>
 #include <complex>
 #include <cstdlib>
-#include <iostream>
 #include <memory>
 #include <mutex>
 #include <type_traits>
@@ -23,8 +22,8 @@
 #include <c10/util/Exception.h>
 #include <c10/util/IdWrapper.h>
 #include <c10/util/Type.h>
-#include <c10/util/TypeTraits.h>
 #include <c10/util/TypeIndex.h>
+#include <c10/util/TypeTraits.h>
 #include <c10/util/flat_hash_map.h>
 
 #include <c10/core/ScalarType.h>
@@ -63,7 +62,7 @@ namespace caffe2 {
  */
 class C10_API TypeIdentifier final
     : public at::IdWrapper<TypeIdentifier, c10::util::type_index> {
-public:
+ public:
   friend std::ostream& operator<<(std::ostream& stream, TypeIdentifier typeId);
   friend constexpr bool operator<(TypeIdentifier lhs, TypeIdentifier rhs);
 
@@ -75,7 +74,7 @@ public:
    * is generated during run-time. Do NOT serialize the id for storage.
    */
   template <typename T>
-  static C10_HOST_CONSTEXPR TypeIdentifier Get() noexcept {
+  static C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA TypeIdentifier Get() noexcept {
     return TypeIdentifier(c10::util::get_type_index<T>());
   }
 
@@ -83,7 +82,7 @@ public:
     return TypeIdentifier(c10::util::type_index{0});
   }
 
-private:
+ private:
   constexpr explicit TypeIdentifier(c10::util::type_index id) : IdWrapper(id) {}
 };
 
@@ -122,14 +121,14 @@ struct TypeMetaData final {
   using Delete = void(void*);
 
   constexpr TypeMetaData() noexcept
-  : itemsize_(0),
-    new_(nullptr),
-    placementNew_(nullptr),
-    copy_(nullptr),
-    placementDelete_(nullptr),
-    delete_(nullptr),
-    id_(TypeIdentifier::uninitialized()),
-    name_("nullptr (uninitialized)") {}
+      : itemsize_(0),
+        new_(nullptr),
+        placementNew_(nullptr),
+        copy_(nullptr),
+        placementDelete_(nullptr),
+        delete_(nullptr),
+        id_(TypeIdentifier::uninitialized()),
+        name_("nullptr (uninitialized)") {}
 
   constexpr TypeMetaData(
       size_t itemsize,
@@ -140,14 +139,14 @@ struct TypeMetaData final {
       Delete* deleteFn,
       TypeIdentifier id,
       c10::string_view name) noexcept
-  : itemsize_(itemsize),
-    new_(newFn),
-    placementNew_(placementNew),
-    copy_(copy),
-    placementDelete_(placementDelete),
-    delete_(deleteFn),
-    id_(id),
-    name_(name) {}
+      : itemsize_(itemsize),
+        new_(newFn),
+        placementNew_(placementNew),
+        copy_(copy),
+        placementDelete_(placementDelete),
+        delete_(deleteFn),
+        id_(id),
+        name_(name) {}
 
   size_t itemsize_;
   New* new_;
@@ -311,9 +310,9 @@ class _Uninitialized final {};
 // item sizes for TypeMeta::itemsize() fast path
 static constexpr uint8_t scalarTypeItemSizes[NumScalarTypes] = {
 #define SCALAR_TYPE_SIZE(T, name) sizeof(T),
-  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SCALAR_TYPE_SIZE)
+    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SCALAR_TYPE_SIZE)
 #undef SCALAR_TYPE_SIZE
-    0, // Undefined
+        0, // Undefined
 };
 
 /**
@@ -352,12 +351,10 @@ class C10_API TypeMeta final {
     return *this;
   }
 
-private:
+ private:
   // TypeMeta can only be created by Make, making sure that we do not
   // create incorrectly mixed up TypeMeta objects.
-  explicit TypeMeta(const uint16_t index) noexcept
-  : index_(index) {
-  }
+  explicit TypeMeta(const uint16_t index) noexcept : index_(index) {}
 
  public:
   /**
@@ -421,9 +418,7 @@ private:
     return data().name_;
   }
 
-  friend bool operator==(
-      const TypeMeta lhs,
-      const TypeMeta rhs) noexcept;
+  friend bool operator==(const TypeMeta lhs, const TypeMeta rhs) noexcept;
 
   template <typename T>
   bool Match() const noexcept {
@@ -433,7 +428,7 @@ private:
   // Below are static functions that can be called by passing a specific type.
 
   template <class T>
-  static C10_HOST_CONSTEXPR TypeIdentifier Id() noexcept {
+  static C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA TypeIdentifier Id() noexcept {
     return TypeIdentifier::Get<T>();
   }
 
@@ -470,13 +465,15 @@ private:
   }
 
   /**
-  * convert ScalarType enum values to TypeMeta handles
-  */
+   * convert ScalarType enum values to TypeMeta handles
+   */
   static inline caffe2::TypeMeta fromScalarType(ScalarType scalar_type) {
-    const size_t index = static_cast<uint16_t>(scalar_type);
+    const auto index = static_cast<uint16_t>(scalar_type);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      index < NumScalarTypes,
-      "Unrecognized Scalartype ", scalar_type, " (please report this error)");
+        index < NumScalarTypes,
+        "Unrecognized Scalartype ",
+        scalar_type,
+        " (please report this error)");
     return TypeMeta(index);
   }
 
@@ -490,13 +487,25 @@ private:
     error_unsupported_typemeta(*this);
   }
 
-private:
+ private:
   [[noreturn]] static void error_unsupported_typemeta(caffe2::TypeMeta dtype);
 
   // hard limit number of registered types
-  // note: constexpr provokes Windows compilation error "member may not be initialized"
-  // static constexpr size_t MaxTypeIndex = UINT8_MAX;
-  #define MaxTypeIndex UINT8_MAX
+  // note: constexpr provokes Windows compilation error "member may not be
+  // initialized" static constexpr size_t MaxTypeIndex = 32;
+  //
+#if defined C10_MOBILE
+// The reason for this to be 32 and not UINT8_MAX is that the array
+// initialization takes space which is proportional to the size of the array.
+// The compiler seems to add code (or data padding) to initialize the array with
+// empty elements. In practice, this array doesn't hold more than 18 elements
+// (on mobile), so 32 should be plenty for now. Please see
+// https://github.com/pytorch/pytorch/pull/51881 for details.
+//
+#define MaxTypeIndex 32
+#else
+#define MaxTypeIndex UINT8_MAX
+#endif
 
   static std::atomic<uint16_t> nextTypeIndex;
 
@@ -505,18 +514,19 @@ private:
   template <class T>
   static uint16_t addTypeMetaData() {
     const uint16_t index = nextTypeIndex++;
-    TORCH_CHECK(index <= MaxTypeIndex,
-      "Maximum number of CAFFE_KNOWN_TYPE declarations has been exceeded. ",
-      "Please report this issue.");
+    TORCH_CHECK(
+        index <= MaxTypeIndex,
+        "Maximum number of CAFFE_KNOWN_TYPE declarations has been exceeded. ",
+        "Please report this issue.");
     typeMetaDatas()[index] = detail::TypeMetaData{
-      sizeof(T),
-      detail::_PickNew<T>(),
-      detail::_PickPlacementNew<T>(),
-      detail::_PickCopy<T>(),
-      detail::_PickPlacementDelete<T>(),
-      detail::_PickDelete<T>(),
-      TypeIdentifier::Get<T>(),
-      c10::util::get_fully_qualified_type_name<T>()};
+        sizeof(T),
+        detail::_PickNew<T>(),
+        detail::_PickPlacementNew<T>(),
+        detail::_PickCopy<T>(),
+        detail::_PickPlacementDelete<T>(),
+        detail::_PickDelete<T>(),
+        TypeIdentifier::Get<T>(),
+        c10::util::get_fully_qualified_type_name<T>()};
     return index;
   }
 
@@ -537,31 +547,27 @@ private:
 
 // specializations of TypeMeta::_typeMetaData for ScalarType types
 
-#define DEFINE_SCALAR_METADATA_INSTANCE(T, name)              \
-  template <>                                                 \
-  constexpr uint16_t TypeMeta::_typeMetaData<T>() noexcept {  \
-    return static_cast<uint16_t>(ScalarType::name);           \
+#define DEFINE_SCALAR_METADATA_INSTANCE(T, name)             \
+  template <>                                                \
+  constexpr uint16_t TypeMeta::_typeMetaData<T>() noexcept { \
+    return static_cast<uint16_t>(ScalarType::name);          \
   }
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_SCALAR_METADATA_INSTANCE)
 #undef DEFINE_SCALAR_METADATA_INSTANCE
 
 template <>
-C10_EXPORT constexpr uint16_t TypeMeta::_typeMetaData<detail::_Uninitialized>() noexcept {
+C10_EXPORT constexpr uint16_t TypeMeta::_typeMetaData<
+    detail::_Uninitialized>() noexcept {
   return static_cast<uint16_t>(ScalarType::Undefined);
 }
 
 inline TypeMeta::TypeMeta() noexcept
-  : index_(_typeMetaData<detail::_Uninitialized>()) {
-}
+    : index_(_typeMetaData<detail::_Uninitialized>()) {}
 
-inline bool operator==(
-    const TypeMeta lhs,
-    const TypeMeta rhs) noexcept {
+inline bool operator==(const TypeMeta lhs, const TypeMeta rhs) noexcept {
   return (lhs.index_ == rhs.index_);
 }
-inline bool operator!=(
-    const TypeMeta lhs,
-    const TypeMeta rhs) noexcept {
+inline bool operator!=(const TypeMeta lhs, const TypeMeta rhs) noexcept {
   return !operator==(lhs, rhs);
 }
 
@@ -596,11 +602,18 @@ inline std::ostream& operator<<(
 #define EXPORT_IF_NOT_GCC
 #endif
 
-#define CAFFE_KNOWN_TYPE(T)                                           \
-  template <>                                                         \
-  EXPORT_IF_NOT_GCC uint16_t TypeMeta::_typeMetaData<T>() noexcept {  \
-    static const uint16_t index = addTypeMetaData<T>();               \
-    return index;                                                     \
+#define CAFFE_KNOWN_TYPE(T)                                          \
+  template <>                                                        \
+  EXPORT_IF_NOT_GCC uint16_t TypeMeta::_typeMetaData<T>() noexcept { \
+    static const uint16_t index = addTypeMetaData<T>();              \
+    return index;                                                    \
+  }
+
+#define CAFFE_KNOWN_TYPE_NOEXPORT(T)                    \
+  template <>                                           \
+  uint16_t TypeMeta::_typeMetaData<T>() noexcept {      \
+    static const uint16_t index = addTypeMetaData<T>(); \
+    return index;                                       \
   }
 
 } // namespace caffe2

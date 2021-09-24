@@ -2,9 +2,113 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
+#include <ATen/TensorMeta.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/native/cpu/utils.h>
+#include <c10/util/SmallBuffer.h>
+
+#include <c10/core/TensorOptions.h>
 
 namespace at {
+namespace meta {
+TORCH_META_FUNC(nll_loss_forward)
+(const Tensor& self,
+ const Tensor& target,
+ const OptionalTensorRef weight_opt,
+ int64_t reduction,
+ int64_t ignore_index) {
+  const Tensor& weight = weight_opt.getTensorRef();
+
+  TORCH_CHECK(
+      self.dim() > 0 && self.dim() <= 2, "input tensor should be 1D or 2D");
+  TORCH_CHECK(
+      target.dim() <= 1,
+      "0D or 1D target tensor expected, multi-target not supported");
+
+  auto no_batch_dim = self.dim() == 1  && target.dim() == 0;
+  TORCH_CHECK(
+      no_batch_dim || (self.size(0) == target.size(0)),
+      "size mismatch (got input: ",
+      self.sizes(),
+      ", target: ",
+      target.sizes(),
+      ")")
+
+  const auto n_classes = self.size(-1);
+
+  TORCH_CHECK(
+      !weight.defined() || (weight.dim() == 1 && weight.numel() == n_classes),
+      "weight tensor should be defined either for all ",
+      n_classes,
+      " classes or no classes"
+      " but got weight tensor of shape: ",
+      weight.sizes());
+
+  const auto n_dims = self.dim();
+  const auto batch_size = self.size(0);
+
+  if (reduction == Reduction::None && n_dims == 2) {
+    set_output(0, {batch_size}, self.options());
+  } else {
+    // produce scalar output when reducing or input is 1d
+    set_output(0, {}, self.options());
+  }
+
+  set_output(1, {}, self.options());
+}
+
+TORCH_META_FUNC(nll_loss_backward)
+(const Tensor& grad_output,
+ const Tensor& self,
+ const Tensor& target,
+ OptionalTensorRef weight_opt,
+ int64_t reduction,
+ int64_t ignore_index,
+ const Tensor& total_weight) {
+  TORCH_CHECK(
+      self.dim() > 0 && self.dim() <= 2, "input tensor should be 1D or 2D");
+  TORCH_CHECK(
+      target.dim() <= 1,
+      "0D or 1D target tensor expected, multi-target not supported");
+
+  auto no_batch_dim = self.dim() == 1  && target.dim() == 0;
+  TORCH_CHECK(
+      no_batch_dim || (self.size(0) == target.size(0)),
+      "size mismatch (got input: ",
+      self.sizes(),
+      ", target: ",
+      target.sizes(),
+      ")")
+  TORCH_CHECK(
+      total_weight.numel() == 1,
+      "expected total_weight to be a  single element tensor, got: ",
+      total_weight.sizes(),
+      " (",
+      total_weight.numel(),
+      " elements)");
+
+  const auto& weight = weight_opt.getTensorRef();
+
+  TORCH_CHECK(
+      !weight.defined() || weight.numel() == self.size(-1),
+      "weight tensor should be defined either for all or no classes");
+
+  const auto n_dims = self.dim();
+
+  if (reduction == Reduction::None && n_dims == 2) {
+    const auto batch_size = self.size(0);
+    check_dim_size(grad_output, 1, 0, batch_size);
+  } else {
+    TORCH_CHECK(
+        grad_output.dim() <= 1 && grad_output.numel() == 1,
+        "Expected a single element grad_output tensor, but got: ",
+        grad_output.sizes());
+  }
+
+  set_output(self.sizes(), self.options().memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT));
+}
+} // namespace meta
+
 namespace native {
 
 namespace {
@@ -23,10 +127,10 @@ inline scalar_t* optional_data(const Tensor& source) {
   return source.defined() ? source.data_ptr<scalar_t>() : nullptr;
 }
 
-template <typename scalar_t>
+template <typename scalar_t, typename target_t>
 static void nll_loss_out_frame(
-    Tensor& output,
-    Tensor& total_weight,
+    const Tensor& output,
+    const Tensor& total_weight,
     const Tensor& input,
     const Tensor& target,
     const Tensor& weight,
@@ -43,10 +147,9 @@ static void nll_loss_out_frame(
 
   if (reduction == Reduction::None && n_dims == 2) {
     const auto batch_size = input.size(0);
-    output.resize_({batch_size});
 
     auto input_acc = input.accessor<scalar_t, 2>();
-    auto target_acc = target.accessor<int64_t, 1>();
+    auto target_acc = target.accessor<target_t, 1>();
     auto output_acc = output.accessor<scalar_t, 1>();
 
     at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
@@ -73,51 +176,73 @@ static void nll_loss_out_frame(
     return;
   }
 
-  // produce scalar output when reducing or input is 1d
-  output.resize_({});
-
   auto input_contiguous = input.contiguous();
   auto target_contiguous = target.contiguous();
 
   const scalar_t* input_data = input_contiguous.data_ptr<scalar_t>();
-  const int64_t* target_data = target_contiguous.data_ptr<int64_t>();
+  const target_t* target_data = target_contiguous.data_ptr<target_t>();
 
-  scalar_t output_val = 0;
-  scalar_t total_weight_val = 0;
+  const int64_t ndim = input.dim();
+  TORCH_CHECK(ndim <= 2);
+  const int64_t batch_size = ndim == 1 ? 1 : input.size(0);
 
-  if (input.dim() == 1) {
-    const auto cur_target = target_data[0];
-    if (cur_target != ignore_index) {
-      TORCH_CHECK_INDEX(
-          cur_target >= 0 && cur_target < n_classes,
-          "Target ",
-          cur_target,
-          " is out of bounds.");
-      total_weight_val =
-          weight_data ? weight_data[cur_target] : static_cast<scalar_t>(1);
-      output_val = -input_data[cur_target] * total_weight_val;
+  constexpr int64_t cascade_sum_num_levels = 8;
+  const int64_t level_power =
+      std::max(int64_t(4), utils::CeilLog2(batch_size) / cascade_sum_num_levels);
+  const int64_t level_step = (1 << level_power);
+  const int64_t level_mask = level_step - 1;
+
+  int64_t num_ignored = 0;
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+  scalar_t weight_partial_sums[cascade_sum_num_levels] = {0};
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+  scalar_t loss_partial_sums[cascade_sum_num_levels] = {0};
+  for (int64_t b = 0; b < batch_size; b++) {
+    const int64_t cur_target = target_data[b];
+    if (cur_target == ignore_index) {
+      ++num_ignored;
+      continue;
     }
-  } else if (input.dim() == 2) {
-    const auto batch_size = input.size(0);
-    TORCH_CHECK(target.size(0) == batch_size);
-    const auto n_target = input.size(1);
 
-    for (int64_t i = 0; i < batch_size; i++) {
-      const auto cur_target = target_data[i];
-      if (cur_target != ignore_index) {
-        TORCH_CHECK_INDEX(
-            cur_target >= 0 && cur_target < n_classes,
-            "Target ",
-            cur_target,
-            " is out of bounds.");
+    TORCH_CHECK_INDEX(
+        cur_target >= 0 && cur_target < n_classes,
+        "Target ",
+        cur_target,
+        " is out of bounds.");
 
-        scalar_t cur_weight =
-            weight_data ? weight_data[cur_target] : static_cast<scalar_t>(1);
-        total_weight_val += cur_weight;
-        output_val -= input_data[i * n_target + cur_target] * cur_weight;
+    const auto data = input_data[b * n_classes + cur_target];
+    if (weight_data) {
+      const scalar_t weight_val = weight_data[cur_target];
+      loss_partial_sums[0] -= data * weight_val;
+      weight_partial_sums[0] += weight_val;
+    } else {
+      loss_partial_sums[0] -= data;
+    }
+
+    for (int64_t j = 0; j + 1 < cascade_sum_num_levels; ++j) {
+      const auto mask = (level_mask << (j * level_power));
+      if (C10_LIKELY((b & mask) != 0)) {
+        break;
       }
+
+      weight_partial_sums[j + 1] += weight_partial_sums[j];
+      loss_partial_sums[j + 1] += loss_partial_sums[j];
+
+      weight_partial_sums[j] = 0;
+      loss_partial_sums[j] = 0;
     }
   }
+
+  const scalar_t total_weight_val = !weight_data ?
+    static_cast<scalar_t>(batch_size - num_ignored) :
+    std::accumulate(std::begin(weight_partial_sums),
+                    std::end(weight_partial_sums),
+                    scalar_t{0});
+
+  scalar_t output_val = std::accumulate(std::begin(loss_partial_sums),
+                                        std::end(loss_partial_sums),
+                                        scalar_t{0});
 
   if (reduction == Reduction::Mean &&
       (total_weight_val != 0 || input.numel() == 0)) {
@@ -131,54 +256,41 @@ static void nll_loss_out_frame(
 }
 
 void nll_loss_forward_out_cpu_template(
-    Tensor& output,
-    Tensor& total_weight,
+    const Tensor& output,
+    const Tensor& total_weight,
     const Tensor& input,
     const Tensor& target,
     const Tensor& weight,
     int64_t reduction,
     int64_t ignore_index) {
-  TORCH_CHECK(
-      input.dim() > 0 && input.dim() <= 2, "input tensor should be 1D or 2D");
-  TORCH_CHECK(
-      target.dim() == 1,
-      "1D target tensor expected, multi-target not supported");
-  TORCH_CHECK(
-      input.size(0) == target.size(0),
-      "size mismatch (got input: ",
-      input.sizes(),
-      ", target: ",
-      target.sizes(),
-      ")")
-
-  const auto n_classes = input.size(-1);
-
-  TORCH_CHECK(
-      !weight.defined() || weight.numel() == n_classes,
-      "weight tensor should be defined either for all ",
-      n_classes,
-      " classes or no classes"
-      " but got weight tensor of shape: ",
-      weight.sizes());
-
-  total_weight.resize_({});
-
   AT_DISPATCH_FLOATING_TYPES_AND(
       ScalarType::BFloat16, input.scalar_type(), "nll_loss_out_frame", [&] {
-        nll_loss_out_frame<scalar_t>(
-            output,
-            total_weight,
-            input,
-            target,
-            weight,
-            reduction,
-            ignore_index);
+        if (target.scalar_type() == kByte) {
+          nll_loss_out_frame<scalar_t, uint8_t>(
+              output,
+              total_weight,
+              input,
+              target,
+              weight,
+              reduction,
+              ignore_index);
+        } else {
+          // assumed to be int64
+          nll_loss_out_frame<scalar_t, int64_t>(
+              output,
+              total_weight,
+              input,
+              target,
+              weight,
+              reduction,
+              ignore_index);
+        }
       });
 }
 
-template <typename scalar_t>
+template <typename scalar_t, typename target_t>
 static void nll_loss_backward_out_frame(
-    Tensor& grad_input,
+    const Tensor& grad_input,
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& target,
@@ -189,14 +301,17 @@ static void nll_loss_backward_out_frame(
   const auto n_dims = input.dim();
   const auto n_classes = input.size(-1);
 
-  auto target_acc = target.accessor<int64_t, 1>();
+  auto target_ = target;
+  if (target.dim() == 0) {
+    target_ = target.unsqueeze(0);
+  }
+  auto target_acc = target_.accessor<target_t, 1>();
 
   auto weight_contiguous = optional_contiguous(weight);
   const scalar_t* weight_data = optional_data<scalar_t>(weight_contiguous);
 
   if (reduction == Reduction::None && n_dims == 2) {
     const auto batch_size = input.size(0);
-    check_dim_size(grad_output, 1, 0, batch_size);
     auto grad_input_acc = grad_input.accessor<scalar_t, 2>();
     auto grad_output_acc = grad_output.accessor<scalar_t, 1>();
     at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
@@ -218,10 +333,6 @@ static void nll_loss_backward_out_frame(
     return;
   }
 
-  TORCH_CHECK(
-      grad_output.dim() <= 1 && grad_output.numel() == 1,
-      "Expected a single element grad_output tensor, but got: ",
-      grad_output.sizes());
   const scalar_t grad_output_value = *grad_output.data_ptr<scalar_t>();
 
   if (input.dim() == 1) {
@@ -245,7 +356,6 @@ static void nll_loss_backward_out_frame(
     auto grad_input_acc = grad_input.accessor<scalar_t, 2>();
 
     const auto batch_size = input.size(0);
-    TORCH_CHECK(target.size(0) == batch_size);
 
     for (int64_t i = 0; i < batch_size; i++) {
       const auto cur_target = target_acc[i];
@@ -270,7 +380,7 @@ static void nll_loss_backward_out_frame(
 }
 
 void nll_loss_backward_out_cpu_template(
-    Tensor& grad_input,
+    const Tensor& grad_input,
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& target,
@@ -278,88 +388,64 @@ void nll_loss_backward_out_cpu_template(
     int64_t reduction,
     int64_t ignore_index,
     const Tensor& total_weight) {
-  TORCH_CHECK(
-      input.dim() > 0 && input.dim() <= 2, "input tensor should be 1D or 2D");
-  TORCH_CHECK(
-      target.dim() == 1,
-      "1D target tensor expected, multi-target not supported");
-  TORCH_CHECK(
-      input.size(0) == target.size(0),
-      "size mismatch (got input: ",
-      input.sizes(),
-      ", target: ",
-      target.sizes(),
-      ")")
-  TORCH_CHECK(
-      total_weight.numel() == 1,
-      "expected total_weight to be a  single element tensor, got: ",
-      total_weight.sizes(),
-      " (",
-      total_weight.numel(),
-      " elements)");
-
-  grad_input.resize_as_(input);
   grad_input.zero_();
-
-  TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
-  TORCH_CHECK(
-      !weight.defined() || weight.numel() == input.size(-1),
-      "weight tensor should be defined either for all or no classes");
 
   AT_DISPATCH_FLOATING_TYPES_AND(
       ScalarType::BFloat16,
       input.scalar_type(),
       "nll_loss_backward_out_frame",
       [&] {
-        nll_loss_backward_out_frame<scalar_t>(
-            grad_input,
-            grad_output,
-            input,
-            target,
-            weight,
-            reduction,
-            ignore_index,
-            total_weight);
+        if (target.scalar_type() == kByte) {
+          nll_loss_backward_out_frame<scalar_t, uint8_t>(
+              grad_input,
+              grad_output,
+              input,
+              target,
+              weight,
+              reduction,
+              ignore_index,
+              total_weight);
+        } else {
+          // assumed to be uint64
+          nll_loss_backward_out_frame<scalar_t, int64_t>(
+              grad_input,
+              grad_output,
+              input,
+              target,
+              weight,
+              reduction,
+              ignore_index,
+              total_weight);
+        }
       });
 }
 
 } // namespace
 
-std::tuple<Tensor&, Tensor&> nll_loss_forward_out_cpu(
-    Tensor& output,
-    Tensor& total_weight,
-    const Tensor& self,
-    const Tensor& target,
-    const Tensor& weight,
-    int64_t reduction,
-    int64_t ignore_index) {
+TORCH_IMPL_FUNC(nll_loss_forward_out_cpu)
+(const Tensor& self,
+ const Tensor& target,
+ const OptionalTensorRef weight_opt,
+ int64_t reduction,
+ int64_t ignore_index,
+ const Tensor& output,
+ const Tensor& total_weight) {
+  const Tensor& weight = weight_opt.getTensorRef();
   nll_loss_forward_out_cpu_template(
       output, total_weight, self, target, weight, reduction, ignore_index);
-  return std::tuple<Tensor&, Tensor&>(output, total_weight);
 }
 
-std::tuple<Tensor, Tensor> nll_loss_forward_cpu(
-    const Tensor& self,
-    const Tensor& target,
-    const Tensor& weight,
-    int64_t reduction,
-    int64_t ignore_index) {
-  auto output = at::empty({0}, self.options());
-  auto total_weight = at::empty({0}, self.options());
-  nll_loss_forward_out_cpu(
-      output, total_weight, self, target, weight, reduction, ignore_index);
-  return std::make_tuple(output, total_weight);
-}
-
-Tensor& nll_loss_backward_out_cpu(
-    Tensor& grad_input,
-    const Tensor& grad_output,
-    const Tensor& self,
-    const Tensor& target,
-    const Tensor& weight,
-    int64_t reduction,
-    int64_t ignore_index,
-    const Tensor& total_weight) {
+TORCH_IMPL_FUNC(nll_loss_backward_out_cpu)
+(const Tensor& grad_output,
+ const Tensor& self,
+ const Tensor& target,
+ OptionalTensorRef weight_opt,
+ int64_t reduction,
+ int64_t ignore_index,
+ const Tensor& total_weight,
+ const Tensor& grad_input
+) {
+  const Tensor& weight = weight_opt.getTensorRef();
   nll_loss_backward_out_cpu_template(
       grad_input,
       grad_output,
@@ -369,39 +455,235 @@ Tensor& nll_loss_backward_out_cpu(
       reduction,
       ignore_index,
       total_weight);
-  return grad_input;
 }
 
-Tensor nll_loss_backward_cpu(
-    const Tensor& grad_output,
+Tensor cross_entropy_loss_prob_target(
+    const Tensor& self,
+    const Tensor& target_,
+    const Tensor& weight,
+    int64_t reduction,
+    double label_smoothing) {
+  const auto n_classes = self.size(1);
+  TORCH_CHECK(
+      !weight.defined() || (weight.dim() == 1 && weight.numel() == n_classes),
+      "cross_entropy: weight tensor should be defined either for all ",
+      n_classes,
+      " classes or no classes"
+      " but got weight tensor of shape: ",
+      weight.sizes());
+
+  auto input = at::log_softmax(self, 1, self.scalar_type());
+  Tensor target;
+
+  if (label_smoothing > 0.0) {
+    TORCH_CHECK(label_smoothing <= 1.0, "label_smoothing must be between 0.0 and 1.0. Got: ", label_smoothing);
+    target = target_ * (1 - label_smoothing) + label_smoothing / n_classes;
+  } else {
+    target = target_;
+  }
+
+  if (weight.defined()) {
+    // Expand weight to the correct number of dims for broadcasting with input / target
+    auto weight_broadcast_shape = SmallBuffer<int64_t, 5>(input.dim());
+    std::fill(weight_broadcast_shape.begin(), weight_broadcast_shape.end(), 1);
+    weight_broadcast_shape[1] = weight.size(0);
+    Tensor weight_ = weight.view(weight_broadcast_shape);
+
+    switch (reduction) {
+      case Reduction::Mean:
+        return -(input * target * weight_).sum() / (input.numel() / input.size(1));
+      case Reduction::Sum:
+        return -(input * target * weight_).sum();
+      case Reduction::None:
+        return -(input * target * weight_).sum(1);
+      default:
+        TORCH_CHECK(false, "Invalid reduction type encountered in cross_entropy: ", reduction);
+    }
+  } else {
+    switch (reduction) {
+      case Reduction::Mean:
+        return -(input * target).sum() / (input.numel() / input.size(1));
+      case Reduction::Sum:
+        return -(input * target).sum();
+      case Reduction::None:
+        return -(input * target).sum(1);
+      default:
+        TORCH_CHECK(false, "Invalid reduction type encountered in cross_entropy: ", reduction);
+    }
+  }
+}
+
+Tensor cross_entropy_loss_label_smoothing(
     const Tensor& self,
     const Tensor& target,
     const Tensor& weight,
     int64_t reduction,
     int64_t ignore_index,
-    const Tensor& total_weight) {
-  auto grad_input = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  nll_loss_backward_out_cpu(
-      grad_input,
-      grad_output,
-      self,
-      target,
-      weight,
-      reduction,
-      ignore_index,
-      total_weight);
-  return grad_input;
+    double label_smoothing) {
+
+    auto input = at::log_softmax(self, 1, self.scalar_type());
+    auto nllloss = at::nll_loss_nd(input, target, weight, reduction, ignore_index);
+
+    auto n_classes = input.size(1);
+
+    Tensor smooth_loss;
+    if (weight.defined()) {
+      // Expand weight to the correct number of dims for broadcasting with input / target
+      auto weight_broadcast_shape = SmallBuffer<int64_t, 5>(input.dim());
+      std::fill(weight_broadcast_shape.begin(), weight_broadcast_shape.end(), 1);
+      weight_broadcast_shape[1] = weight.size(0);
+      Tensor weight_ = weight.view(weight_broadcast_shape);
+
+      smooth_loss = -(input * weight_).sum(1);
+    } else {
+      smooth_loss = -input.sum(1);
+    }
+
+    if (ignore_index >= 0) {
+      smooth_loss.index_put_({target == ignore_index}, 0.0);
+    }
+
+    Tensor ret;
+    switch (reduction) {
+      case Reduction::Mean:
+        if (weight.defined()) {
+          // TODO: This code can path can be removed if #61309 is resolved
+          // loss is normalized by the weights to be consistent with nll_loss_nd
+          ret = smooth_loss.sum() / weight.gather(0, target.flatten()).sum();
+        } else {
+          ret = smooth_loss.mean();
+        }
+        break;
+      case Reduction::Sum:
+        ret = smooth_loss.sum();
+        break;
+      case Reduction::None:
+        ret = smooth_loss;
+        break;
+      default:
+        TORCH_CHECK(false, "Invalid reduction type encountered in cross_entropy: ", reduction);
+    }
+    return (1 - label_smoothing) * nllloss + ret * (label_smoothing / n_classes);
 }
 
-Tensor & nll_loss_out(Tensor & output, const Tensor & self, const Tensor & target, const Tensor & weight, int64_t reduction, int64_t ignore_index) {
+Tensor cross_entropy_loss(
+    const Tensor& self,
+    const Tensor& target,
+    const c10::optional<Tensor>& weight,
+    int64_t reduction,
+    int64_t ignore_index,
+    double label_smoothing) {
+  Tensor ret;
+  if (self.sizes() == target.sizes()) {
+    // Assume soft targets when input and target shapes are the same
+    TORCH_CHECK(at::isFloatingType(target.scalar_type()),
+        "Expected floating point type for target with class probabilities, got ", target.scalar_type());
+    TORCH_CHECK(ignore_index < 0, "ignore_index is not supported for floating point target");
+
+    // See [Note: hacky wrapper removal for optional tensor]
+    c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight);
+    const Tensor& weight_ = *weight_maybe_owned;
+    ret = cross_entropy_loss_prob_target(self, target, weight_, reduction, label_smoothing);
+  } else if (label_smoothing > 0.0) {
+    TORCH_CHECK(label_smoothing <= 1.0, "label_smoothing must be between 0.0 and 1.0. Got: ", label_smoothing);
+
+    // See [Note: hacky wrapper removal for optional tensor]
+    c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight);
+    const Tensor& weight_ = *weight_maybe_owned;
+    ret = cross_entropy_loss_label_smoothing(self, target, weight_, reduction, ignore_index, label_smoothing);
+  } else {
+    ret = at::nll_loss_nd(
+        at::log_softmax(self, 1, self.scalar_type()),
+        target,
+        weight,
+        reduction,
+        ignore_index);
+  }
+  return ret;
+}
+
+Tensor & nll_loss_out(const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index, Tensor & output) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+
   Tensor total_weight = at::empty({0}, self.options());
   return std::get<0>(at::nll_loss_forward_out(output, total_weight, self, target, weight, reduction, ignore_index));
 }
 
-Tensor nll_loss(const Tensor & self, const Tensor & target, const Tensor & weight, int64_t reduction, int64_t ignore_index) {
+Tensor nll_loss(const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+
   return std::get<0>(at::nll_loss_forward(self, target, weight, reduction, ignore_index));
 }
 
+Tensor nll_loss_nd(
+    const Tensor& self,
+    const Tensor& target,
+    const c10::optional<Tensor>& weight,
+    int64_t reduction,
+    int64_t ignore_index) {
+  if (self.dim() < 1) {
+    TORCH_CHECK_VALUE(
+        false, "Expected 1 or more dimensions (got ", self.dim(), ")");
+  }
+
+  if (self.dim() != 1 && self.sizes()[0] != target.sizes()[0]) {
+    TORCH_CHECK_VALUE(
+        false,
+        "Expected input batch_size (",
+        self.sizes()[0],
+        ") to match target batch_size (",
+        target.sizes()[0],
+        ").");
+  }
+
+  Tensor ret;
+  Tensor input_ = self;
+  Tensor target_ = target;
+  if (input_.dim() == 1 || input_.dim() == 2) {
+    ret = at::nll_loss(input_, target_, weight, reduction, ignore_index);
+  } else if (input_.dim() == 4) {
+    ret = at::nll_loss2d(input_, target_, weight, reduction, ignore_index);
+  } else {
+    // dim == 3 or dim > 4
+    auto n = input_.sizes()[0];
+    auto c = input_.sizes()[1];
+    auto out_size = input_.sizes().slice(2).vec();
+    out_size.insert(out_size.begin(), n);
+    if (target_.sizes().slice(1) != input_.sizes().slice(2)) {
+      TORCH_CHECK(
+          false,
+          "Expected target size ",
+          IntArrayRef(out_size),
+          ", got ",
+          target_.sizes());
+    }
+    input_ = input_.contiguous();
+    target_ = target_.contiguous();
+    // support empty batches, see #15870
+    if (input_.numel() > 0) {
+      input_ = input_.view({n, c, 1, -1});
+    } else {
+      input_ = input_.view({n, c, 0, 0});
+    }
+    if (target_.numel() > 0) {
+      target_ = target_.view({n, 1, -1});
+    } else {
+      target_ = target_.view({n, 0, 0});
+    }
+    if (!(reduction == Reduction::None)) {
+      ret = at::nll_loss2d(input_, target_, weight, reduction, ignore_index);
+    } else {
+      auto out =
+          at::nll_loss2d(input_, target_, weight, reduction, ignore_index);
+      ret = out.view(out_size);
+    }
+  }
+  return ret;
+}
 
 } // namespace native
 } // namespace at

@@ -1,10 +1,12 @@
 #include <torch/nn/init.h>
 
+#include <torch/linalg.h>
 #include <torch/types.h>
 #include <torch/utils.h>
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <algorithm>
 #include <cmath>
@@ -82,7 +84,7 @@ Tensor dirac_(Tensor tensor) {
   const auto min_dim = std::min(sizes[0], sizes[1]);
 
   tensor.zero_();
-  for (int64_t d = 0; d < min_dim; ++d) {
+  for (const auto d : c10::irange(min_dim)) {
     switch (tensor.ndimension()) {
       case 3: // Temporal convolution
         tensor[d][d][sizes[2] / 2] = 1;
@@ -133,7 +135,7 @@ Tensor orthogonal_(Tensor tensor, double gain) {
 
   // Compute the qr factorization
   Tensor q, r;
-  std::tie(q, r) = torch::qr(flattened);
+  std::tie(q, r) = torch::linalg::qr(flattened);
   // Make Q uniform according to https://arxiv.org/pdf/math-ph/0609050.pdf
   auto d = torch::diag(r, 0);
   auto ph = d.sign();
@@ -159,7 +161,7 @@ Tensor sparse_(Tensor tensor, double sparsity, double std) {
   const auto columns = tensor.size(1);
   const int64_t num_zeros = std::ceil(sparsity * rows);
   tensor.normal_(0, std);
-  for (int64_t column = 0; column < columns; ++column) {
+  for (const auto column : c10::irange(columns)) {
     auto row_indices = torch::randperm(rows, tensor.options().dtype(kLong));
     auto zero_indices =
         row_indices.slice(/*dim=*/0, /*start=*/0, /*end=*/num_zeros);
@@ -203,6 +205,7 @@ Tensor xavier_normal_(Tensor tensor, double gain) {
   NoGradGuard guard;
 
   Fan fan(tensor);
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   const auto std = gain * std::sqrt(2.0 / (fan.in + fan.out));
   return tensor.normal_(0, std);
 }
@@ -210,6 +213,7 @@ Tensor xavier_normal_(Tensor tensor, double gain) {
 Tensor xavier_uniform_(Tensor tensor, double gain) {
   NoGradGuard guard;
   Fan fan(tensor);
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   const auto std = gain * std::sqrt(2.0 / (fan.in + fan.out));
   // Calculate uniform bounds from standard deviation with
   const auto a = std::sqrt(3.0) * std;
@@ -227,6 +231,7 @@ std::tuple<int64_t, int64_t> _calculate_fan_in_and_fan_out(const Tensor& tensor)
     "Fan in and fan out can not be computed "
     "for tensor with fewer than 2 dimensions")
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t fan_in, fan_out;
   if (dimensions == 2) { // Linear
     fan_in = tensor.size(1);

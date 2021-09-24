@@ -108,13 +108,13 @@ std::string used_cpu_capability() {
     case native::CPUCapability::DEFAULT:
       ss << "NO AVX";
       break;
-    case native::CPUCapability::AVX:
-      ss << "AVX";
-      break;
     case native::CPUCapability::AVX2:
       ss << "AVX2";
       break;
-#endif      
+    case native::CPUCapability::AVX512:
+      ss << "AVX512";
+      break;
+#endif
     default:
       break;
   }
@@ -164,7 +164,7 @@ std::string show_config() {
   ss << "  - " << get_openmp_version() << "\n";
 #endif
 
-#ifdef USE_LAPACK
+#if AT_BUILD_WITH_LAPACK()
   // TODO: Actually record which one we actually picked
   ss << "  - LAPACK is enabled (usually provided by MKL)\n";
 #endif
@@ -184,6 +184,10 @@ std::string show_config() {
     ss << detail::getCUDAHooks().showConfig();
   }
 
+  if (hasORT()) {
+    ss << detail::getORTHooks().showConfig();
+  }
+
   ss << "  - Build settings: ";
   for (const auto& pair : caffe2::GetBuildOptions()) {
     if (!pair.second.empty()) {
@@ -194,6 +198,7 @@ std::string show_config() {
 
   // TODO: do HIP
   // TODO: do XLA
+  // TODO: do MLC
 
   return ss.str();
 }

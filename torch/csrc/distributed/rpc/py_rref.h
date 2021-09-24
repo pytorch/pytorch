@@ -53,7 +53,9 @@ class PYBIND11_EXPORT PyRRef {
   // get the type of the data object referenced by this RRef. Timeout argument
   // is only used in the first invocation of this function as an argument to the
   // RPC to the owner node of the RRef.
-  py::object getRRefType(float timeout = rpc::kUnsetRpcTimeout);
+  py::object getRRefType(
+      float timeout = rpc::kUnsetRpcTimeout,
+      bool blocking = true);
 
   // Run the backward pass with the RRef as the root.
   void backward(int64_t autogradContextId, bool retainGraph);
@@ -63,6 +65,12 @@ class PYBIND11_EXPORT PyRRef {
       int64_t autogradContextId,
       bool retainGraph,
       const c10::intrusive_ptr<RRef>& rref);
+
+  // Specialization of backward if the rref is an OwnerRRef.
+  static void backwardOwnerRRef(
+      int64_t autogradContextId,
+      bool retainGraph,
+      IValue value);
 
  private:
   c10::intrusive_ptr<RRef> rref_;

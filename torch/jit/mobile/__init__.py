@@ -51,7 +51,6 @@ def _load_for_lite_interpreter(f, map_location=None):
 
     return LiteScriptModule(cpp_module)
 
-
 class LiteScriptModule(object):
     def __init__(self, cpp_module):
         self._c = cpp_module
@@ -68,3 +67,121 @@ class LiteScriptModule(object):
 
     def run_method(self, method_name, *input):
         return self._c.run_method(method_name, input)
+
+def _export_operator_list(module: LiteScriptModule):
+    r"""
+        return a set of root operator names (with overload name) that are used by any method
+        in this mobile module.
+    """
+    return torch._C._export_operator_list(module._c)
+
+def _get_model_bytecode_version(f_input) -> int:
+    r"""
+    Args:
+        f_input: a file-like object (has to implement read, readline, tell, and seek),
+            or a string containing a file name
+
+    Returns:
+        version: An integer. If the integer is -1, the version is invalid. A warning
+            will show in the log.
+
+    Example:
+
+    .. testcode::
+
+        from torch.jit.mobile import _get_model_bytecode_version
+
+        # Get bytecode version from a saved file path
+        version = _get_model_bytecode_version("path/to/model.ptl")
+
+    """
+    if isinstance(f_input, str):
+        if not os.path.exists(f_input):
+            raise ValueError(f"The provided filename {f_input} does not exist")
+        if os.path.isdir(f_input):
+            raise ValueError(f"The provided filename {f_input} is a directory")
+
+    if (isinstance(f_input, str) or isinstance(f_input, pathlib.Path)):
+        return torch._C._get_model_bytecode_version(str(f_input))
+    else:
+        return torch._C._get_model_bytecode_version_from_buffer(f_input.read())
+
+def _backport_for_mobile(f_input, f_output, to_version):
+    r"""
+    Args:
+        f_input: a file-like object (has to implement read, readline, tell, and seek),
+            or a string containing a file name
+        f_output: path to new model destination
+        to_version: the expected output model bytecode version
+    Returns:
+        success: A boolean. If backport success, return true, otherwise false
+    """
+    if isinstance(f_input, str):
+        if not os.path.exists(f_input):
+            raise ValueError(f"The provided filename {f_input} does not exist")
+        if os.path.isdir(f_input):
+            raise ValueError(f"The provided filename {f_input} is a directory")
+
+    if ((isinstance(f_input, str) or isinstance(f_input, pathlib.Path)) and (
+            isinstance(f_output, str) or isinstance(f_output, pathlib.Path))):
+        return torch._C._backport_for_mobile(str(f_input), str(f_output), to_version)
+    else:
+        return torch._C._backport_for_mobile_from_buffer(f_input.read(), str(f_output), to_version)
+
+def _backport_for_mobile_to_buffer(f_input, to_version):
+    r"""
+    Args:
+        f_input: a file-like object (has to implement read, readline, tell, and seek),
+            or a string containing a file name
+
+    """
+    if isinstance(f_input, str):
+        if not os.path.exists(f_input):
+            raise ValueError(f"The provided filename {f_input} does not exist")
+        if os.path.isdir(f_input):
+            raise ValueError(f"The provided filename {f_input} is a directory")
+
+    if (isinstance(f_input, str) or isinstance(f_input, pathlib.Path)):
+        return torch._C._backport_for_mobile_to_buffer(str(f_input), to_version)
+    else:
+        return torch._C._backport_for_mobile_from_buffer_to_buffer(f_input.read(), to_version)
+
+def _get_model_ops_and_info(f_input):
+    r"""
+    A function to retrieve the root (top level) operators of a model and their corresponding
+    compatibility info. These root operators can call other operators within them (traced ops), and
+    a root op can call many different traced ops depending on internal code paths in the root op.
+    These traced ops are not returned by this function. Those operators are abstracted into the
+    runtime as an implementation detail (and the traced ops themselves can also call other operators)
+    making retrieving them difficult and their value from this api negligible since they will differ
+    between which runtime version the model is run on. Because of this, there is a false positive this
+    api can't prevent in a compatibility usecase. All the root ops of a model are present in a
+    target runtime, but not all the traced ops are which prevents a model from being able to run.
+    Args:
+        f_input: a file-like object (has to implement read, readline, tell, and seek),
+            or a string containing a file name
+
+    Returns:
+        Operators and info: A Dictionary mapping strings (the qualified names of the root operators)
+        of the model to their OperatorInfo structs.
+
+    Example:
+
+    .. testcode::
+
+        from torch.jit.mobile import _get_model_ops_and_info
+
+        # Get bytecode version from a saved file path
+        ops_and_info = _get_model_ops_and_info("path/to/model.ptl")
+
+    """
+    if isinstance(f_input, str):
+        if not os.path.exists(f_input):
+            raise ValueError(f"The provided filename {f_input} does not exist")
+        if os.path.isdir(f_input):
+            raise ValueError(f"The provided filename {f_input} is a directory")
+
+    if (isinstance(f_input, str) or isinstance(f_input, pathlib.Path)):
+        return torch._C._get_model_ops_and_info(str(f_input))
+    else:
+        return torch._C._get_model_ops_and_info(f_input.read())

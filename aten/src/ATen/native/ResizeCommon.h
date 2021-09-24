@@ -20,8 +20,8 @@ inline int64_t storage_size_for(IntArrayRef size, IntArrayRef stride) {
   return storage_size;
 }
 
-inline Tensor& resize_named_tensor_(
-    Tensor& self,
+inline const Tensor& resize_named_tensor_(
+    const Tensor& self,
     IntArrayRef size,
     c10::optional<MemoryFormat> optional_memory_format) {
   TORCH_INTERNAL_ASSERT(self.has_names());

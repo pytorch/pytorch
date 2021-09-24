@@ -1,10 +1,12 @@
+#include <torch/csrc/distributed/rpc/rref_impl.h>
+
 #include <ATen/record_function.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <fmt/format.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/profiler/remote_profiler_manager.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
-#include <torch/csrc/distributed/rpc/rref_impl.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
@@ -14,17 +16,18 @@ namespace {
 std::string getTypeStr(const c10::TypePtr& type) {
   switch (type->kind()) {
     case c10::TypeKind::FunctionType:
-      return type->cast<c10::FunctionType>()->name()->qualifiedName();
+      return type->castRaw<c10::FunctionType>()->name()->qualifiedName();
     case c10::TypeKind::TupleType:
-      return type->cast<c10::TupleType>()->name()->qualifiedName();
+      return type->castRaw<c10::TupleType>()->name()->qualifiedName();
     case c10::TypeKind::ClassType:
-      return type->cast<c10::ClassType>()->name()->qualifiedName();
+      return type->castRaw<c10::ClassType>()->name()->qualifiedName();
     case c10::TypeKind::InterfaceType:
-      return type->cast<c10::InterfaceType>()->name()->qualifiedName();
+      return type->castRaw<c10::InterfaceType>()->name()->qualifiedName();
     default:
       return type->annotation_str();
   }
 }
+
 } // namespace
 
 namespace torch {
@@ -157,7 +160,7 @@ IValue UserRRef::toHere(const float timeoutSeconds) const {
   // ScriptRRefFetchCall message always carries autograd context id even if
   // the message itself does not contain any tensor, because the response would
   // potentially contain tensors.
-  Message msgToSend;
+  c10::intrusive_ptr<Message> msgToSend;
 
   if (isPyObj()) {
     msgToSend = PythonRRefFetchCall(ownerId_, rrefId()).toMessage();
@@ -230,15 +233,33 @@ RRefForkData UserRRef::fork() const {
 
 //////////////////////////  OwnerRRef  /////////////////////////////////////
 
+OwnerRRef::OwnerRRef(
+    worker_id_t ownerId,
+    const RRefId& rrefId,
+    TypePtr type,
+    std::vector<c10::Device> devices)
+    : OwnerRRef(ownerId, rrefId, type, /* value */ {}, std::move(devices)) {}
+
+OwnerRRef::OwnerRRef(
+    worker_id_t ownerId,
+    const RRefId& rrefId,
+    TypePtr type,
+    c10::optional<IValue> value,
+    std::vector<c10::Device> devices)
+    : RRef(ownerId, rrefId, type) {
+  future_ = c10::make_intrusive<JitFuture>(type_, std::move(devices));
+
+  if (value.has_value()) {
+    future_->markCompleted(value.value());
+  }
+}
+
 const IValue& OwnerRRef::getValue() const {
   TORCH_CHECK(
       !getTimedOut(),
       "RRef creation via rpc.remote() timed out, and it "
       "is possible that the RRef on the owner node does not exist.");
-  future_->wait();
-  if (future_->hasError()) {
-    (void)future_->value(); // Throws the error.
-  }
+  future_->waitAndThrow();
   return future_->constValue();
 }
 
@@ -246,7 +267,7 @@ bool OwnerRRef::hasValue() const {
   return future_->completed();
 }
 
-std::shared_ptr<JitFuture> OwnerRRef::getFuture() {
+c10::intrusive_ptr<JitFuture> OwnerRRef::getFuture() {
   return future_;
 }
 

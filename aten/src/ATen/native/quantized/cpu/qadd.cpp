@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 #include <torch/library.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/vec.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/quantized/Quantizer.h>
@@ -47,7 +47,7 @@ Tensor _add_out(Tensor& out, const Tensor& self, const Tensor& other) {
 }
 
 template <bool ReLUFused = false>
-Tensor _add_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
+Tensor _add_scalar_out(Tensor& out, const Tensor& self, const Scalar& other) {
   TORCH_CHECK(
       self.qscheme() == kPerTensorAffine,
       "Only per tensor affine is supported for now!!");
@@ -77,6 +77,7 @@ Tensor _add_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
     double s = self.q_scale();
     int64_t z = self.q_zero_point();
     double c = other.toDouble();
+    // NOLINTNEXTLINE(bugprone-signed-char-misuse)
     int64_t q_min = std::numeric_limits<underlying_t>::min();
     int64_t q_max = std::numeric_limits<underlying_t>::max();
 
@@ -139,10 +140,13 @@ Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
 
   Tensor qy = at::native::empty_affine_quantized(
       qa_contig.sizes(),
-      at::device(kCPU).dtype(kQUInt8).memory_format(qa.suggest_memory_format()),
+      kQUInt8,
+      c10::nullopt /* layout */,
+      kCPU,
+      c10::nullopt /* pin_memory */,
       scale,
       zero_point,
-      c10::nullopt);
+      qa.suggest_memory_format());
 
   if (qa_contig.size(0) == 0) {
     return qy;
@@ -154,10 +158,12 @@ Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
 
   size_t num_elems = qa_contig.numel() / qa_contig.size(0);
   auto output_min = ReLUFused
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       ? activationLimits(scale, zero_point, Activation::RELU)
             .first
       : std::numeric_limits<uint8_t>::min();
   auto output_max = ReLUFused
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       ? activationLimits(scale, zero_point, Activation::RELU)
             .second
       : std::numeric_limits<uint8_t>::max();
@@ -168,6 +174,7 @@ Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
       b_zero_point /* b zero_point */,
       b_scale /* b scale */,
       static_cast<uint8_t>(zero_point) /* sum zero_point */,
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       scale /* sum scale */,
       output_min /* output min */,
       output_max /* output max */,
@@ -235,7 +242,7 @@ Tensor qadd_out(Tensor qa, Tensor qb, Tensor out) {
 
 
 template <bool ReLUFused = false>
-Tensor qadd_scalar(Tensor qa, Scalar b) {
+Tensor qadd_scalar(Tensor qa, const Scalar& b) {
   TORCH_CHECK(qa.qscheme() == kPerTensorAffine ||
               qa.qscheme() == kPerTensorSymmetric,
               "Only per tensor quantization is supported in Add.");
@@ -253,7 +260,7 @@ Tensor qadd_scalar2(Scalar b, Tensor qa) {
 }
 
 template <bool ReLUFused = false>
-Tensor qadd_scalar_out(Tensor qa, Scalar b, Tensor out) {
+Tensor qadd_scalar_out(Tensor qa, const Scalar& b, Tensor out) {
   check_inputs(qa, out);
   return _add_scalar_out<ReLUFused>(out, qa, b);
 }

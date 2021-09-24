@@ -296,6 +296,15 @@ class TestNamedTensor(TestCase):
             check_tuple_return(F.max_pool2d_with_indices, [named_tensor_2d, [2, 2]], named_tensor_2d.names)
             check_tuple_return(F.max_pool3d_with_indices, [named_tensor_3d, [2, 2, 2]], named_tensor_3d.names)
 
+    def test_max_pooling_without_names_does_not_warn(self):
+        for device in torch.testing.get_all_device_types():
+            tensor_2d = torch.zeros(2, 3, 5, 7, device=device, requires_grad=True)
+            with warnings.catch_warnings(record=True) as warns:
+                warnings.simplefilter("always")
+                result = F.max_pool2d(tensor_2d, [2, 2])
+                result.sum().backward()
+                self.assertEqual(len(warns), 0)
+
     def test_no_save_support(self):
         named_tensor = torch.zeros(2, 3, names=('N', 'C'))
         buf = io.BytesIO()
@@ -1063,6 +1072,11 @@ class TestNamedTensor(TestCase):
         with self.assertRaisesRegex(RuntimeError, "must be consecutive in"):
             tensor.flatten(['H', 'D', 'W'], 'features')
 
+    def test_flatten_nodims(self):
+        tensor = torch.empty((2, 3))
+        with self.assertRaisesRegex(RuntimeError, "cannot be empty"):
+            tensor.flatten((), 'abcd')
+
     def test_unflatten(self):
         # test args: tensor, int, namedshape
         self.assertTrue(torch.equal(
@@ -1077,6 +1091,23 @@ class TestNamedTensor(TestCase):
         self.assertTrue(torch.equal(
             torch.ones(4).unflatten(-1, (['A', 2], ['B', 2])),
             torch.ones(2, 2, names=('A', 'B'))))
+        self.assertTrue(torch.equal(
+            torch.ones(4).unflatten(-1, (['A', -1], ['B', 2])),
+            torch.ones(2, 2, names=('A', 'B'))))
+        self.assertTrue(torch.equal(
+            torch.ones(4).unflatten(-1, (['A', 2], ['B', -1])),
+            torch.ones(2, 2, names=('A', 'B'))))
+        self.assertTrue(torch.equal(
+            torch.ones(2, 10, names=('A', 'B')).unflatten('B', (['B1', -1],)),
+            torch.ones(2, 10, names=('A', 'B1'))))
+        self.assertTrue(torch.equal(
+            torch.ones(2, 3 * 4 * 5 * 6, names=('A', 'B'))
+                 .unflatten('B', (['B1', 3], ['B2', 4], ['B3', -1], ['B4', 6])),
+            torch.ones(2, 3, 4, 5, 6, names=('A', 'B1', 'B2', 'B3', 'B4'))))
+        self.assertTrue(torch.equal(
+            torch.ones(2, 0, names=('A', 'B'))
+                 .unflatten('B', (['B1', 3], ['B2', -1], ['B3', 4])),
+            torch.ones(2, 3, 0, 4, names=('A', 'B1', 'B2', 'B3'))))
 
         # test args: namedtensor, int, namedshape
         self.assertTrue(torch.equal(
@@ -1095,6 +1126,15 @@ class TestNamedTensor(TestCase):
         # test invalid args: namedtensor, int, sizes
         with self.assertRaisesRegex(RuntimeError, r"input is a named tensor but no names were given for unflattened sizes"):
             torch.tensor([1], names=("A",)).unflatten(0, (1, 1))
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    r"Provided sizes \[3, -1\] don't multiply up to the "
+                                    r"size of dim 1 \('B': 4\) in Tensor\['A', 'B'\]"):
+            torch.ones(2, 4, names=('A', 'B')).unflatten('B', (('B1', 3), ('B2', -1)))
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    r"the unspecified dimension size -1 can be any value and is ambiguous"):
+            torch.ones(2, 0, names=('A', 'B')).unflatten('B', (('B1', 0), ('B2', -1)))
 
         tensor = torch.randn(7, 2 * 3 * 5, 11, names=('N', 'D', 'K'))
 

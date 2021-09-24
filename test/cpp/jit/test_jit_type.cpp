@@ -8,6 +8,20 @@
 namespace torch {
 namespace jit {
 
+TEST(JitTypeTest, IsComplete) {
+  auto tt = c10::TensorType::create(
+      at::kFloat,
+      at::kCPU,
+      c10::SymbolicShape(std::vector<c10::optional<int64_t>>({1, 49})),
+      std::vector<c10::Stride>(
+          {c10::Stride{2, true, 1},
+           c10::Stride{1, true, 1},
+           c10::Stride{0, true, c10::nullopt}}),
+      false);
+  TORCH_INTERNAL_ASSERT(!tt->isComplete());
+  TORCH_INTERNAL_ASSERT(!tt->strides().isComplete());
+}
+
 TEST(JitTypeTest, UnifyTypes) {
   auto bool_tensor = TensorType::get()->withScalarType(at::kBool);
   auto opt_bool_tensor = OptionalType::create(bool_tensor);

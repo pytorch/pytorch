@@ -2,7 +2,6 @@
 #include <ATen/Config.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/Parallel.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/native/Resize.h>
@@ -20,6 +19,7 @@ using namespace at::sparse;
       https://doi.org/10.1007/BF02070824
 */
 namespace {
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 void csr_to_coo(const int64_t n_row, const int64_t Ap[], int64_t Bi[]) {
   /*
     Expands a compressed row pointer into a row indices array
@@ -40,9 +40,13 @@ void csr_to_coo(const int64_t n_row, const int64_t Ap[], int64_t Bi[]) {
 int64_t _csr_matmult_maxnnz(
     const int64_t n_row,
     const int64_t n_col,
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const int64_t Ap[],
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const int64_t Aj[],
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const int64_t Bp[],
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const int64_t Bj[]) {
   /*
     Compute needed buffer size for matrix `C` in `C = A@B` operation.
@@ -75,14 +79,23 @@ template<class scalar_t>
 void _csr_matmult(
     const int64_t n_row,
     const int64_t n_col,
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const int64_t Ap[],
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const int64_t Aj[],
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const scalar_t Ax[],
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const int64_t Bp[],
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const int64_t Bj[],
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const scalar_t Bx[],
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     int64_t Cp[],
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     int64_t Cj[],
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     scalar_t Cx[]) {
   /*
     Compute CSR entries for matrix C = A@B.
@@ -205,57 +218,6 @@ void sparse_matmul_kernel(
 
 } // end anonymous namespace
 
-Tensor sparse_matrix_mask_helper_cpu(
-  const SparseTensor& t,
-  const Tensor& mask_indices
-) {
-  /*
-    This is a helper function which filter values from `t._values()` using the `mask_indices`.
-    This CPU implementation uses a simple hash_map to filter values by matching the `mask_indices`
-    with the indices at tensor input `t`.
-
-    Inputs:
-      `t`             - tensor input
-      `mask_indices`  - mask indices tensor
-  */
-  int64_t r_nnz = mask_indices.size(1);
-  auto t_v = t._values();
-  Tensor r_values = at::zeros({r_nnz}, t_v.options());
-  auto t_i = t._indices();
-  auto t_nnz = t._nnz();
-
-  std::unordered_map<int64_t, int64_t> t_flatten_indices = std::unordered_map<int64_t, int64_t>{};
-
-  // Step 1: flatten the sparse indices `t._indices()` tensor and then  map this flatten value `index` to the original position `i`
-  auto t_indices_accessor = t_i.accessor<int64_t, 2>();
-  for(int64_t i = 0; i < t_nnz; i++) {
-    int64_t index = t_indices_accessor[0][i] * t.size(1) + t_indices_accessor[1][i];
-    t_flatten_indices[index] = i;
-  }
-
-  // Step 2: Filter `t._values()` values by matching the flatten `mask_indices` with the flatten `t._indices()` using the
-  // hash_map `t_flatten_indices`
-  AT_DISPATCH_FLOATING_TYPES(r_values.scalar_type(), "_sparse_matrix_mask", [&] {
-    auto r_values_accessor = r_values.accessor<scalar_t, 1>();
-    auto t_values = t_v.accessor<scalar_t, 1>();
-    auto mask_indices_accessor = mask_indices.accessor<int64_t, 2>();
-    at::parallel_for(0, r_nnz, 0, [&](int64_t start, int64_t end) {
-      for (auto i = start; i < end; i++) {
-        auto x = mask_indices_accessor[0][i];
-        auto y = mask_indices_accessor[1][i];
-        int64_t index = (x * t.size(1) + y);
-        auto iter = t_flatten_indices.find(index);
-        if (iter != t_flatten_indices.end()) {
-          assert(iter->second < t_nnz);
-          assert(i < r_nnz);
-          r_values_accessor[i] = t_values[ iter->second ];
-        }
-      }
-    });
-  });
-  return r_values;
-}
-
 Tensor sparse_sparse_matmul_cpu(const Tensor& mat1_, const Tensor& mat2_) {
   TORCH_INTERNAL_ASSERT(mat1_.is_sparse());
   TORCH_INTERNAL_ASSERT(mat2_.is_sparse());
@@ -274,7 +236,7 @@ Tensor sparse_sparse_matmul_cpu(const Tensor& mat1_, const Tensor& mat2_) {
   auto output = at::native::empty_like(mat1_);
   output.sparse_resize_and_clear_({mat1_.size(0), mat2_.size(1)}, mat1_.sparse_dim(), 0);
 
-  AT_DISPATCH_FLOATING_TYPES(mat1_.scalar_type(), "sparse_matmul", [&] {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(mat1_.scalar_type(), "sparse_matmul", [&] {
     sparse_matmul_kernel<scalar_t>(output, mat1_.coalesce(), mat2_.coalesce());
   });
   return output;

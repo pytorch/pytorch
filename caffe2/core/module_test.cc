@@ -59,6 +59,7 @@ TEST(ModuleTest, DynamicModule) {
   OperatorDef op_def;
   Workspace ws;
   op_def.set_type("Caffe2ModuleTestDynamicDummy");
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_THROW(
       CreateOperator(op_def, &ws),
       EnforceNotMet);

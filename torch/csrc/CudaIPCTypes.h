@@ -11,7 +11,7 @@
 #include <cstddef>
 namespace torch {
 
-TORCH_CUDA_API bool CudaIPCCollect();
+TORCH_CUDA_CU_API bool CudaIPCCollect();
 
 struct CudaIPCReceivedData final {
   explicit CudaIPCReceivedData(std::shared_ptr<void> shared_ptr)
@@ -47,7 +47,7 @@ struct CudaIPCSentData final {
   }
 };
 
-TORCH_CUDA_API at::DataPtr GetNewRefCountedSentData(void* data, at::Device device);
+TORCH_CUDA_CU_API at::DataPtr GetNewRefCountedSentData(void* data, at::Device device);
 
 namespace {
 
@@ -64,9 +64,7 @@ struct CudaIPCSentDataLimbo final {
   ~CudaIPCSentDataLimbo();
   bool collect();
   void add(std::unique_ptr<CudaIPCSentData> shared_block);
-  uint64_t size() {
-    return shared_blocks_.size();
-  }
+  uint64_t size();
 
  private:
   // TODO: Can be changed to FIFO in order to avoid full traverse on every
@@ -83,7 +81,7 @@ struct CudaIPCRefCountersFile final {
       : next_offset_(0),
         size_(size),
         used_slots_(0),
-        handle_(handle),
+        handle_(std::move(handle)),
         refcounted_shared_mem_(std::move(data_ptr)) {}
 
   int64_t* counter_ptr() {
@@ -134,7 +132,6 @@ namespace c10 {
 namespace {
 class CudaIPCCollectCallback : public FreeMemoryCallback {
  public:
-  ~CudaIPCCollectCallback() {};
   bool Execute() override {
     return torch::CudaIPCCollect();
   }

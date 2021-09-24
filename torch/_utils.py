@@ -1,6 +1,5 @@
 import torch
-import torch._six
-from typing import Optional, List, DefaultDict
+from typing import Optional, List, DefaultDict, Any
 import warnings
 from collections import defaultdict
 import sys
@@ -174,10 +173,19 @@ def _rebuild_sparse_tensor(layout, data):
     raise NotImplementedError("rebuilding sparse tensor for layout %s" % (layout))
 
 
-def _rebuild_xla_tensor(data, dtype, device, requires_grad):
+def _rebuild_device_tensor_from_numpy(data, dtype, device, requires_grad):
     tensor = torch.from_numpy(data).to(dtype=dtype, device=device)
     tensor.requires_grad = requires_grad
     return tensor
+
+
+# Should not be used, only here to be able to load Tensors serialized with older versions of pytorch
+_rebuild_xla_tensor = _rebuild_device_tensor_from_numpy
+_rebuild_mlc_tensor = _rebuild_device_tensor_from_numpy
+
+
+def _rebuild_meta_tensor_no_storage(dtype, size, stride, requires_grad):
+    return torch.empty_strided(size, stride, dtype=dtype, device='meta', requires_grad=requires_grad)
 
 
 def _rebuild_qtensor(storage, storage_offset, size, stride, quantizer_params, requires_grad, backward_hooks):
@@ -254,10 +262,7 @@ def _flatten_dense_tensors(tensors):
     Returns:
         A contiguous 1D buffer containing input tensors.
     """
-    if len(tensors) == 1:
-        return tensors[0].contiguous().view(-1)
-    flat = torch.cat([t.contiguous().view(-1) for t in tensors], dim=0)
-    return flat
+    return torch._C._nn.flatten_dense_tensors(tensors)
 
 
 def _flatten_sparse_tensors(tensors):
@@ -271,8 +276,8 @@ def _flatten_sparse_tensors(tensors):
         A tuple of two contiguous 1D buffers, one containing input tensors'
         indices and the other containing the values.
     """
-    flat_indices = _flatten_dense_tensors([torch.Tensor._indices(t) for t in tensors])
-    flat_values = _flatten_dense_tensors([torch.Tensor._values(t) for t in tensors])
+    flat_indices = torch._C._nn.flatten_dense_tensors([torch.Tensor._indices(t) for t in tensors])
+    flat_values = torch._C._nn.flatten_dense_tensors([torch.Tensor._values(t) for t in tensors])
     return flat_indices, flat_values
 
 
@@ -289,13 +294,7 @@ def _unflatten_dense_tensors(flat, tensors):
         Unflattened dense tensors with sizes same as tensors and values from
         flat.
     """
-    outputs = []
-    offset = 0
-    for tensor in tensors:
-        numel = tensor.numel()
-        outputs.append(flat.narrow(0, offset, numel).view_as(tensor))
-        offset += numel
-    return tuple(outputs)
+    return torch._C._nn.unflatten_dense_tensors(flat, tensors)
 
 
 def _unflatten_sparse_tensors(flat, tensors):
@@ -314,8 +313,8 @@ def _unflatten_sparse_tensors(flat, tensors):
         flat.
     """
     flat_indices, flat_values = flat
-    indices = _unflatten_dense_tensors(flat_indices, [torch.Tensor._indices(t) for t in tensors])
-    values = _unflatten_dense_tensors(flat_values, [torch.Tensor._values(t) for t in tensors])
+    indices = torch._C._nn.unflatten_dense_tensors(flat_indices, [torch.Tensor._indices(t) for t in tensors])
+    values = torch._C._nn.unflatten_dense_tensors(flat_values, [torch.Tensor._values(t) for t in tensors])
     outputs = []
     for t, i, v in zip(tensors, indices, values):
         outputs.append(t.new(i, v, t.size()))
@@ -426,7 +425,13 @@ class ExceptionWrapper(object):
             # Some exceptions have first argument as non-str but explicitly
             # have message field
             raise self.exc_type(message=msg)
-        raise self.exc_type(msg)
+        try:
+            exception = self.exc_type(msg)
+        except TypeError:
+            # If the exception takes multiple arguments, don't try to
+            # instantiate since we don't know how to
+            raise RuntimeError(msg) from None
+        raise exception
 
 
 def _get_available_device_type():
@@ -458,8 +463,17 @@ def _get_devices_properties(device_ids):
     # all device properties
     return [_get_device_attr(lambda m: m.get_device_properties(i)) for i in device_ids]
 
+def get_current_device_index() -> int:
+    r"""Checks if there are CUDA devices available and
+    returns the device index of the current default CUDA device.
+    Returns -1 in case there are no CUDA devices available.
+    Arguments: ``None``
+    """
+    if torch.cuda.device_count() > 0:
+        return torch.cuda.current_device()
+    return -1
 
-def _get_device_index(device, optional=False, allow_cpu=False) -> int:
+def _get_device_index(device: Any, optional: bool = False, allow_cpu: bool = False) -> int:
     r"""Gets the device index from :attr:`device`, which can be a torch.device
     object, a Python integer, or ``None``.
 
@@ -477,8 +491,7 @@ def _get_device_index(device, optional=False, allow_cpu=False) -> int:
     """
     if isinstance(device, str):
         device = torch.device(device)
-    device_idx: Optional[int]
-    device_idx = None
+    device_idx: Optional[int] = None
     if isinstance(device, torch.device):
         if not allow_cpu and device.type == 'cpu':
             raise ValueError('Expected a non cpu device, but got: {}'.format(device))
@@ -487,7 +500,15 @@ def _get_device_index(device, optional=False, allow_cpu=False) -> int:
         device_idx = device
     if device_idx is None:
         if optional:
-            device_idx = _get_current_device_index()
+            # The eager API _get_current_device_index uses `lambda` functions which are
+            # not supported in JIT and hence not scriptable. The JIT equivalent API to get
+            # the current device index is `get_current_device_index()` which can
+            # be scripted. We use is_scripting to check the mode we are in and call the
+            # appropriate API.
+            if torch.jit.is_scripting():
+                device_idx = get_current_device_index()
+            else:
+                device_idx = _get_current_device_index()
         else:
             raise ValueError('Expected a torch.device with a specified index '
                              'or an integer, but got:{}'.format(device))

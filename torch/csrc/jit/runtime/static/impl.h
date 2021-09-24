@@ -6,45 +6,75 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/inliner.h>
+
+#ifdef FBCODE_CAFFE2
+#include <folly/container/F14Map.h>
+#include <folly/container/F14Set.h>
+#endif
 
 namespace torch {
 namespace jit {
 
-struct TORCH_API InferenceModuleOptions {
-  bool optimize_memory{true}; // TODO remove when logic moves to runtime
-};
+#ifdef FBCODE_CAFFE2
+template <typename Key, typename Value>
+using FastMap = folly::F14FastMap<Key, Value>;
+template <typename Key>
+using FastSet = folly::F14FastSet<Key>;
+#else
+template <typename Key, typename Value>
+using FastMap = std::unordered_map<Key, Value>;
+template <typename Key>
+using FastSet = std::unordered_set<Key>;
+#endif
 
-struct TORCH_API StaticRuntimeOptions {
+TORCH_API bool canEnableStaticRuntime(
+    const std::shared_ptr<torch::jit::Graph>& graph);
+
+struct TORCH_API StaticModuleOptions {
+  // to batch allocate (deallocate) tensor storage for all non-escaping
+  // temporary tensors
   bool cleanup_activations{true};
+  // enabling out variant allows Static Runtime to do memory planning
   bool enable_out_variant{true};
+  // to reuse tensor storage for tensors whose live-range do not overlap to
+  // reduce memory footprint (enable_out_variant must be true)
+  bool optimize_memory{true};
+  // to batch allocate tensor storage for output tensors of the
+  // graph, where storage is deallocated outside static runtime
+  // (enable_out_variant must be true)
+  bool optimize_graph_output_memory{false};
 };
 
-/// Static runime supports two execution modes.
+/// The static runime supports two execution modes.
 ///
 /// Mode 1: single-threaded with no parallelism except for intra-op parallelism
 /// For this mode, you can do either:
 /// @code
-///   // m is the TorchScript module
-///   auto runtime = StaticRuntime(m, opts);
-///   auto output = runtime.run(args, kwargs);
+///   // m is a TorchScript module
+///   auto module = StaticModule(m, opts);
+///   auto output = module(args, kwargs);
 /// @endcode
+///
 /// or
+///
 /// @code
-///   auto mod = PrepareForStaticRuntime(m);
-///   auto runtime = StaticRuntime(mod, opts);
-///   auto output = runtime.run(args, kwargs);
+///   // g is the TorchScript graph
+///   auto module = StaticModule(g, opts);
+///   auto output = module(args, kwargs);
 /// @endcode
+///
 /// Mode 2: similar to data parallelism, run the same model for different inputs
-/// on different threads at the same time. In this case, run
-/// PrepareForStaticRuntime to prepare the graph for Static Runtime. You
-/// should have one InferenceModule instance per model, and one Static Runtime
-/// instance per running thread. To avoiding creating StaticRuntime on the fly,
-/// use a synchronized stack (i.e. boost::lockfree::stack) to cache all the
-/// Static Runtime instances in your code.
+/// on different threads at the same time.
+/// You should have one StaticModule per model, and one StaticRuntime instance
+/// per running thread. To avoiding creating StaticRuntimes on the fly, use a
+/// synchronized stack (i.e. boost::lockfree::stack) to cache all the
+/// StaticRuntime instances in your code.
 /// @code
 ///   // initialization
-///   auto mod = PrepareForStaticRuntime(m);
+///   auto module = std::make_shared<StaticModule>(m, opts);
+///
 ///   // 128 is good for most cases. Pick a number that works for you
 ///   boost::lockfree::stack<std::shared_ptr<StaticRuntime>,
 ///     boost::lockfree::fixed_sized<true>> pool(128);
@@ -53,70 +83,154 @@ struct TORCH_API StaticRuntimeOptions {
 ///   std::shared_ptr<StaticRuntime> runtime = nullptr;
 ///   pool.pop(runtime);
 ///   if (!runtime) {
-///     runtime = std::make_shared<StaticRuntime>(mod, opts);
+///     // holds a reference to the underlying module
+///     // but does its own memory management
+///     runtime = std::make_shared<StaticRuntime>(*module);
 ///   }
-///   auto output = runtime->run(args, kwargs);
+///   auto output = runtime(args, kwargs);
 ///   pool.push(runtime);
 /// @endcode
 ///
 
-// Group readonly data structures into InferenceModule
-struct TORCH_API InferenceModule {
- public:
-  explicit InferenceModule(const torch::jit::Module& m, InferenceModuleOptions);
-  explicit InferenceModule(
-      std::shared_ptr<torch::jit::Graph> g,
-      InferenceModuleOptions);
-  torch::jit::Module module;
-  std::shared_ptr<torch::jit::Graph> graph;
-  std::unique_ptr<c10::FunctionSchema> schema;
-
-  std::unordered_map<Value*, size_t> value_to_reg;
-  std::vector<Value*> values; // useful for debugging
-  std::vector<size_t> input_regs; // inputs to the graph
-  std::vector<size_t> output_regs; // outputs of the graph
-  std::vector<size_t> internals;
-  size_t reused_regs = 0;
-  InferenceModuleOptions opts;
-
- private:
-  void init();
-};
-
-TORCH_API void PrepareGraphForStaticRuntime(
-    std::shared_ptr<torch::jit::Graph> g);
-
-inline TORCH_API std::shared_ptr<InferenceModule> PrepareForStaticRuntime(
-    const torch::jit::Module& m,
-    InferenceModuleOptions opts = InferenceModuleOptions()) {
-  return std::make_shared<InferenceModule>(m, opts);
-}
-
-inline TORCH_API std::shared_ptr<InferenceModule> PrepareForStaticRuntime(
-    std::shared_ptr<torch::jit::Graph> g,
-    InferenceModuleOptions opts = InferenceModuleOptions()) {
-  return std::make_shared<InferenceModule>(g, opts);
-}
-
 class MemoryPlanner;
 class ProcessedNode;
+class StaticRuntime;
+class TORCH_API StaticModule {
+ public:
+  explicit StaticModule(
+      std::shared_ptr<torch::jit::Graph> g,
+      const StaticModuleOptions& opts = StaticModuleOptions());
+
+  explicit StaticModule(
+      const torch::jit::Module& m,
+      bool is_frozen = false,
+      const StaticModuleOptions& opts = StaticModuleOptions());
+
+  typedef enum {
+    CONSTANT_VALUE = -2, // VALUE nodes defined by prim::Constant
+    INPUT_VALUE = -1, // VALUE nodes representing graph inputs
+  } VALUE_KIND;
+
+ private:
+  explicit StaticModule(
+      std::pair<std::shared_ptr<torch::jit::Graph>, std::shared_ptr<Module>>
+          graph_and_module,
+      const StaticModuleOptions& opts);
+
+  // for <kind, idx>
+  //   if kind == CONSTANT_VALUE: map to constants_[idx]
+  //   if kind == INPUT_VALUE: map to inputs_[idx]
+  //   otherwise: map to nodes_[kind].outputs()[idx]
+  using DefInfo = std::pair<int, int>;
+
+ public:
+  std::vector<at::Tensor> operator()(const std::vector<at::Tensor>& inps);
+
+  // This interface only works if StaticModule was initialized
+  // with a TorchScript module, otherwise use the above interface
+  c10::IValue operator()(
+      const std::vector<c10::IValue>& args,
+      const std::unordered_map<std::string, c10::IValue>& kwargs);
+
+  const Graph& graph() const {
+    return *graph_;
+  }
+
+  const Module& module() const {
+    return *module_;
+  }
+
+  const StaticModuleOptions& opts() const;
+  size_t num_inputs() const;
+  size_t num_outputs() const;
+
+  const FastMap<int, std::vector<DefInfo>>& index_map() const {
+    return node_inputs_ssa_def_map_;
+  }
+
+  const std::vector<DefInfo>& output_indices() const {
+    return output_ssa_defs_;
+  }
+
+  const std::vector<IValue>& constants() const {
+    return constants_;
+  }
+
+  const std::vector<ProcessedNode>& nodes() const {
+    return nodes_;
+  }
+
+  bool is_optimizable_container_type(Node* n) const {
+    auto it = node_is_optimizable_container_type_.find(n);
+    return it != node_is_optimizable_container_type_.end();
+  }
+
+  const c10::optional<c10::FunctionSchema>& schema() const {
+    return schema_;
+  }
+
+  const FastMap<const Value*, std::vector<const Value*>>&
+  values_share_same_storage() const {
+    return value_to_same_storage_values_;
+  }
+
+  const FastSet<const Value*>& external_values() const {
+    return external_values_;
+  }
+
+  bool first_input_is_self() const {
+    return first_input_is_self_;
+  }
+
+  StaticRuntime& runtime();
+
+ private:
+  StaticModuleOptions opts_;
+  bool first_input_is_self_{false};
+  std::shared_ptr<torch::jit::Graph> graph_;
+  std::shared_ptr<torch::jit::Module> module_;
+  c10::optional<c10::FunctionSchema> schema_;
+  std::unique_ptr<StaticRuntime> cached_runtime_;
+
+  // Bookkeeping for creating new StaticRuntime instances
+  // IValue table (defined by prim::Constant nodes)
+  std::vector<IValue> constants_;
+  // The nodes we need to run
+  std::vector<ProcessedNode> nodes_;
+  // a vector of ssa_defs corresponding to graph->outputs()
+  std::vector<DefInfo> output_ssa_defs_;
+  // map a node idx (in graph order) to a vector of ssa_defs for node inputs
+  FastMap<int, std::vector<DefInfo>> node_inputs_ssa_def_map_;
+
+  // Bookkeeping for MemoryPlanner in StaticRuntime
+  // values whose live-time exceeds that of running one inference (e.g., input,
+  // output, prim::Constants, and their aliases)
+  FastSet<const Value*> external_values_;
+  // map a value to the set of values that may share the same storage with it
+  FastMap<const Value*, std::vector<const Value*>>
+      value_to_same_storage_values_;
+
+  FastSet<Node*> node_is_optimizable_container_type_;
+};
+
 class TORCH_API StaticRuntime {
  public:
-  // InferenceModule m is created by PrepareForStaticRuntime
-  explicit StaticRuntime(
-      std::shared_ptr<InferenceModule> m,
-      const StaticRuntimeOptions& opts = StaticRuntimeOptions());
+  explicit StaticRuntime(const StaticModule& sm);
+  StaticRuntime(StaticRuntime&&) = delete;
+  StaticRuntime& operator=(StaticRuntime&&) = delete;
+  ~StaticRuntime();
 
-  // m is unoptimized
-  explicit StaticRuntime(
-      const torch::jit::Module& m,
-      const StaticRuntimeOptions& opts = StaticRuntimeOptions());
+  C10_DISABLE_COPY_AND_ASSIGN(StaticRuntime);
 
-  std::vector<at::Tensor> run(const std::vector<at::Tensor>& inps);
+  std::vector<at::Tensor> operator()(const std::vector<at::Tensor>& inps);
 
-  // This interface only works module_ that has a non-empty TorchScript module
-  // member; otherwise use the above interface
-  c10::IValue run(
+  // This interface only works if StaticModule was initialized
+  // with a TorchScript module, otherwise use the above interface
+  c10::IValue operator()(
+      const std::vector<c10::IValue>& args,
+      const std::unordered_map<std::string, c10::IValue>& kwargs);
+
+  void display_nodes(
       const std::vector<c10::IValue>& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
@@ -124,7 +238,9 @@ class TORCH_API StaticRuntime {
       const std::vector<c10::IValue>& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs,
       const int warmup_runs,
-      const int main_runs);
+      const int main_runs,
+      bool print_per_node_time = false,
+      bool generate_ai_pep_output = false);
 
   float benchmark_model(
       const std::vector<c10::IValue>& args,
@@ -133,12 +249,20 @@ class TORCH_API StaticRuntime {
       const int main_runs);
 
   struct IndividualMetrics {
-    float setup_time;
-    float total_time;
+    float setup_time{0.0};
+    float memory_alloc_time{0.0};
+    float memory_dealloc_time{0.0};
+    float output_dealloc_time{0.0};
+    float first_iter_time{0.0};
+    float total_time{0.0};
+    size_t out_nodes_count{0};
+    size_t total_nodes_count{0};
     std::vector<float> time_per_node;
     std::unordered_map<std::string, float> time_per_node_type;
     std::unordered_map<std::string, float> percent_per_node_type;
     std::unordered_map<std::string, int> instances_per_node_type;
+    std::unordered_set<std::string> out_nodes;
+    std::unordered_set<std::string> native_nodes;
   };
 
   IndividualMetrics benchmark_individual_ops(
@@ -146,45 +270,6 @@ class TORCH_API StaticRuntime {
       const std::unordered_map<std::string, c10::IValue>& kwargs,
       const int warmup_runs,
       const int main_runs);
-
-  const InferenceModule* get_inference_module() {
-    return module_.get();
-  }
-
-  const std::vector<ProcessedNode>& get_nodes() const {
-    return nodes_;
-  }
-
-  std::vector<ProcessedNode>& get_nodes() {
-    return nodes_;
-  }
-
-  const std::vector<IValue>& get_registers() {
-    return reg_;
-  }
-
-  size_t num_outputs() const;
-
-  inline const std::vector<IValue*>& outputs() const {
-    return outputs_;
-  }
-
- private:
-  // Static runtime states
-  std::shared_ptr<InferenceModule> module_;
-  StaticRuntimeOptions opts_;
-  // IValue table (including inputs, outputs, intermediates, and weights)
-  std::vector<IValue> reg_;
-  std::vector<IValue> constants_;
-  std::vector<IValue> inputs_;
-  std::vector<IValue*> outputs_;
-  // The nodes we need to run
-  std::vector<ProcessedNode> nodes_;
-
-  // Memory planning is only enabled if opts_.cleanup_activations is true.
-  // Otherwise, the memory used by activations is cached inside the static
-  // runtime.
-  std::unique_ptr<MemoryPlanner> planner_;
 
   // Input is readwrite
   IValue& Input(size_t i) {
@@ -197,61 +282,57 @@ class TORCH_API StaticRuntime {
     DCHECK(i < outputs_.size());
     return *outputs_[i];
   }
-};
 
-/// There are three types of ops in a processed graph in Static Runtime:
-///   1. op with _out variant
-///   2. view producing op
-///   3. tensor producing op (could be replaced with type 1 by adding the _out
-///      variant to Static Runtime)
-/// The memory planner only manages tensors that are outputs of type 1 ops,
-/// because type 2 ops don't incur memory allocation and for type 3, the output
-/// tensors are allocated inside the operator and can't be directly managed by
-/// memory planner.
-///
-/// Memory planner tries to minimize the number of memory allocations by
-/// tracking the unique StorageImpls of the output tensors of ops with _out
-/// variants. It tries to do this in several steps:
-///   1. record the max memory usage for each StorageImpl at the end of each
-///      iteration
-///   2. in the next iteration, allocate the buffer for the max total usage and
-///      compute the offset of each allocation with regard to the single memory
-///      buffer, optionally reusing memory.  In the first iteration, we rely on
-///      the default allocator for memory allocation.
-///   3. free the buffer at the end of each iteration
-/// Steps 1 and 3 are handled by `deallocate()`, and step 2 by `allocate()`.
-/// Only models with simple output types are supported, i.e. None, Tensor or
-/// List/Tuple of Tensors. Complex output types such as List of Lists are not
-/// supported.
+  const std::vector<IValue*> outputs() const {
+    return outputs_;
+  }
 
-class MemoryPlanner {
- public:
-  explicit MemoryPlanner(
-      StaticRuntime* runtime,
-      std::unordered_map<Value*, std::vector<Value*>> should_share);
+  const std::vector<ProcessedNode>& nodes() const {
+    return nodes_;
+  }
 
-  void allocate();
-  void deallocate();
-  size_t total_managed() const {
-    return managed_bytes_;
+  std::vector<ProcessedNode>& nodes() {
+    return nodes_;
+  }
+
+  const Graph& graph() const {
+    return static_module_.graph();
+  }
+
+  void check_for_memory_leak(bool output_returned = true);
+
+  bool is_optimizable_container_type(Node* n) const {
+    return static_module_.is_optimizable_container_type(n);
   }
 
  private:
-  std::vector<IValue*> unmanaged_values_;
-  // each pair contains the size (in bytes) of data to be allocated
-  // and a vector of StorageImpl's that should be backed by that same data
-  // Thus, if memonger is disabled, all vectors are of size 1.
-  std::vector<std::pair<size_t, std::vector<c10::StorageImpl*>>>
-      managed_storage_;
-  size_t managed_bytes_{0};
-  at::DataPtr buffer_; // allocated each time we call Run()
+  // helper method for copying input args/kwargs into inputs_
+  void set_inputs(
+      const std::vector<c10::IValue>& args,
+      const std::unordered_map<std::string, c10::IValue>& kwargs);
 
-  static size_t compute_aligned_tensor_size(size_t nbytes);
-  static at::DataPtr allocate_buffer(size_t size);
+  // clean up owning refs of input IValues
+  void clean_up_input_ivalues() {
+    for (IValue& ival : inputs_) {
+      ival = IValue();
+    }
+  }
+
+  // Memory planning is only enabled if sm->opts().cleanup_activations is true.
+  // Otherwise, the memory used by activations is cached inside the static
+  // runtime.
+  const StaticModule& static_module_;
+  std::unique_ptr<MemoryPlanner> planner_;
+  std::vector<IValue> inputs_;
+  std::vector<IValue*> outputs_;
+  std::vector<ProcessedNode> nodes_;
 };
 
-class ProcessedNode {
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+class TORCH_API ProcessedNode {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  ProcessedNode() = default;
   ProcessedNode(
       Node* n,
       std::vector<const IValue*>&& inputs,
@@ -259,7 +340,7 @@ class ProcessedNode {
 
   void run();
 
-  Node* get_node() const {
+  Node* node() const {
     return node_;
   }
 
@@ -275,6 +356,10 @@ class ProcessedNode {
     return outputs_[i];
   }
 
+  void set_input(size_t index, const IValue* ival) {
+    inputs_[index] = ival;
+  }
+
   const std::vector<IValue>& outputs() const {
     return outputs_;
   }
@@ -283,17 +368,32 @@ class ProcessedNode {
     return inputs_;
   }
 
+  std::vector<IValue> clone_inputs() const;
+
   bool has_out_variant() const {
     return static_cast<bool>(fn_);
   }
 
+  bool has_native() const {
+    return static_cast<bool>(native_fn_);
+  }
+
+  bool verify_no_memory_overlap() const;
+
+  const char* get_op_name() const {
+    return op_name_;
+  }
+
  private:
+  void run_impl();
+
   Node* node_;
   c10::optional<Operation> op_;
   std::function<void(ProcessedNode*)> fn_;
   std::function<void(ProcessedNode*)> native_fn_;
   std::vector<const IValue*> inputs_; // unowned
-  std::vector<IValue> outputs_; // TODO make list for safety
+  std::vector<IValue> outputs_;
+  const char* op_name_;
 };
 
 } // namespace jit

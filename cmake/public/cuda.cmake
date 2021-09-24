@@ -38,8 +38,8 @@ endif()
 message(STATUS "Caffe2: CUDA detected: " ${CUDA_VERSION})
 message(STATUS "Caffe2: CUDA nvcc is: " ${CUDA_NVCC_EXECUTABLE})
 message(STATUS "Caffe2: CUDA toolkit directory: " ${CUDA_TOOLKIT_ROOT_DIR})
-if(CUDA_VERSION VERSION_LESS 9.0)
-  message(FATAL_ERROR "PyTorch requires CUDA 9.0 and above.")
+if(CUDA_VERSION VERSION_LESS 10.2)
+  message(FATAL_ERROR "PyTorch requires CUDA 10.2 or above.")
 endif()
 
 if(CUDA_FOUND)
@@ -64,31 +64,33 @@ if(CUDA_FOUND)
     "  return 0;\n"
     "}\n"
     )
-  try_run(run_result compile_result ${PROJECT_RANDOM_BINARY_DIR} ${file}
-    CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${CUDA_INCLUDE_DIRS}"
-    LINK_LIBRARIES ${CUDA_LIBRARIES}
-    RUN_OUTPUT_VARIABLE cuda_version_from_header
-    COMPILE_OUTPUT_VARIABLE output_var
-    )
-  if(NOT compile_result)
-    message(FATAL_ERROR "Caffe2: Couldn't determine version from header: " ${output_var})
-  endif()
-  message(STATUS "Caffe2: Header version is: " ${cuda_version_from_header})
-  if(NOT cuda_version_from_header STREQUAL ${CUDA_VERSION_STRING})
-    # Force CUDA to be processed for again next time
-    # TODO: I'm not sure if this counts as an implementation detail of
-    # FindCUDA
-    set(${cuda_version_from_findcuda} ${CUDA_VERSION_STRING})
-    unset(CUDA_TOOLKIT_ROOT_DIR_INTERNAL CACHE)
-    # Not strictly necessary, but for good luck.
-    unset(CUDA_VERSION CACHE)
-    # Error out
-    message(FATAL_ERROR "FindCUDA says CUDA version is ${cuda_version_from_findcuda} (usually determined by nvcc), "
-      "but the CUDA headers say the version is ${cuda_version_from_header}.  This often occurs "
-      "when you set both CUDA_HOME and CUDA_NVCC_EXECUTABLE to "
-      "non-standard locations, without also setting PATH to point to the correct nvcc.  "
-      "Perhaps, try re-running this command again with PATH=${CUDA_TOOLKIT_ROOT_DIR}/bin:$PATH.  "
-      "See above log messages for more diagnostics, and see https://github.com/pytorch/pytorch/issues/8092 for more details.")
+  if(NOT CMAKE_CROSSCOMPILING)
+    try_run(run_result compile_result ${PROJECT_RANDOM_BINARY_DIR} ${file}
+      CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${CUDA_INCLUDE_DIRS}"
+      LINK_LIBRARIES ${CUDA_LIBRARIES}
+      RUN_OUTPUT_VARIABLE cuda_version_from_header
+      COMPILE_OUTPUT_VARIABLE output_var
+      )
+    if(NOT compile_result)
+      message(FATAL_ERROR "Caffe2: Couldn't determine version from header: " ${output_var})
+    endif()
+    message(STATUS "Caffe2: Header version is: " ${cuda_version_from_header})
+    if(NOT cuda_version_from_header STREQUAL ${CUDA_VERSION_STRING})
+      # Force CUDA to be processed for again next time
+      # TODO: I'm not sure if this counts as an implementation detail of
+      # FindCUDA
+      set(${cuda_version_from_findcuda} ${CUDA_VERSION_STRING})
+      unset(CUDA_TOOLKIT_ROOT_DIR_INTERNAL CACHE)
+      # Not strictly necessary, but for good luck.
+      unset(CUDA_VERSION CACHE)
+      # Error out
+      message(FATAL_ERROR "FindCUDA says CUDA version is ${cuda_version_from_findcuda} (usually determined by nvcc), "
+        "but the CUDA headers say the version is ${cuda_version_from_header}.  This often occurs "
+        "when you set both CUDA_HOME and CUDA_NVCC_EXECUTABLE to "
+        "non-standard locations, without also setting PATH to point to the correct nvcc.  "
+        "Perhaps, try re-running this command again with PATH=${CUDA_TOOLKIT_ROOT_DIR}/bin:$PATH.  "
+        "See above log messages for more diagnostics, and see https://github.com/pytorch/pytorch/issues/8092 for more details.")
+    endif()
   endif()
 endif()
 
@@ -188,6 +190,25 @@ find_library(CUDA_CUDA_LIB cuda
 find_library(CUDA_NVRTC_LIB nvrtc
     PATHS ${CUDA_TOOLKIT_ROOT_DIR}
     PATH_SUFFIXES lib lib64 lib/x64)
+if(CUDA_NVRTC_LIB AND NOT CUDA_NVRTC_SHORTHASH)
+  if("${PYTHON_EXECUTABLE}" STREQUAL "")
+    set(_python_exe "python")
+  else()
+    set(_python_exe "${PYTHON_EXECUTABLE}")
+  endif()
+  execute_process(
+    COMMAND "${_python_exe}" -c
+    "import hashlib;hash=hashlib.sha256();hash.update(open('${CUDA_NVRTC_LIB}','rb').read());print(hash.hexdigest()[:8])"
+    RESULT_VARIABLE _retval
+    OUTPUT_VARIABLE CUDA_NVRTC_SHORTHASH)
+  if(NOT _retval EQUAL 0)
+    message(WARNING "Failed to compute shorthash for libnvrtc.so")
+    set(CUDA_NVRTC_SHORTHASH "XXXXXXXX")
+  else()
+    string(STRIP "${CUDA_NVRTC_SHORTHASH}" CUDA_NVRTC_SHORTHASH)
+    message(STATUS "${CUDA_NVRTC_LIB} shorthash is ${CUDA_NVRTC_SHORTHASH}")
+  endif()
+endif()
 
 # Create new style imported libraries.
 # Several of these libraries have a hardcoded path if CAFFE2_STATIC_LINK_CUDA
@@ -253,20 +274,64 @@ else()
       ${LIBNVTOOLSEXT})
 endif()
 
-# cudnn
-# static linking is handled by USE_STATIC_CUDNN environment variable
-if(CAFFE2_USE_CUDNN)
-  add_library(caffe2::cudnn UNKNOWN IMPORTED)
-  set_property(
-      TARGET caffe2::cudnn PROPERTY IMPORTED_LOCATION
-      ${CUDNN_LIBRARY_PATH})
-  set_property(
-      TARGET caffe2::cudnn PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-      ${CUDNN_INCLUDE_PATH})
-  if(CUDNN_STATIC AND NOT WIN32)
+# cublas. CUDA_CUBLAS_LIBRARIES is actually a list, so we will make an
+# interface library similar to cudart.
+add_library(caffe2::cublas INTERFACE IMPORTED)
+if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
     set_property(
-        TARGET caffe2::cudnn PROPERTY INTERFACE_LINK_LIBRARIES
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
+        TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublas_static.a")
+    set_property(
+      TARGET caffe2::cublas APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+      "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublasLt_static.a")
+    # Add explicit dependency to cudart_static to fix
+    # libcublasLt_static.a.o): undefined reference to symbol 'cudaStreamWaitEvent'
+    # error adding symbols: DSO missing from command line
+    set_property(
+      TARGET caffe2::cublas APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+      "${CUDA_cudart_static_LIBRARY}" rt dl)
+else()
+    set_property(
+        TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
+        ${CUDA_CUBLAS_LIBRARIES})
+endif()
+set_property(
+    TARGET caffe2::cublas PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+    ${CUDA_INCLUDE_DIRS})
+
+# cudnn public and private interfaces
+# static linking is handled by USE_STATIC_CUDNN environment variable
+# If library is linked dynamically, than private interface is no-op
+# If library is linked statically:
+#  - public interface would only reference headers
+#  - private interface will contain the actual link instructions
+if(CAFFE2_USE_CUDNN)
+  add_library(caffe2::cudnn-public INTERFACE IMPORTED)
+  set_property(
+    TARGET caffe2::cudnn-public PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+    ${CUDNN_INCLUDE_PATH})
+  add_library(caffe2::cudnn-private INTERFACE IMPORTED)
+  set_property(
+    TARGET caffe2::cudnn-private PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+    ${CUDNN_INCLUDE_PATH})
+  if(CUDNN_STATIC AND NOT WIN32)
+    if(USE_WHOLE_CUDNN)
+      set_property(
+        TARGET caffe2::cudnn-private PROPERTY INTERFACE_LINK_LIBRARIES
+        "-Wl,--whole-archive,\"${CUDNN_LIBRARY_PATH}\" -Wl,--no-whole-archive")
+    else()
+      set_property(
+        TARGET caffe2::cudnn-private PROPERTY INTERFACE_LINK_LIBRARIES
+        ${CUDNN_LIBRARY_PATH})
+    endif()
+    set_property(
+      TARGET caffe2::cudnn-private APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+      "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
+    # Add explicit dependency on cublas to cudnn
+    get_target_property(__tmp caffe2::cublas INTERFACE_LINK_LIBRARIES)
+    set_property(
+      TARGET caffe2::cudnn-private APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+      "${__tmp}")
     # Lines below use target_link_libraries because we support cmake 3.5+.
     # For cmake 3.13+, target_link_options to set INTERFACE_LINK_OPTIONS would be better.
     # https://cmake.org/cmake/help/v3.5/command/target_link_libraries.html warns
@@ -276,8 +341,12 @@ if(CAFFE2_USE_CUDNN)
     #  link items that will not propagate to dependents."
     # Propagating to a dependent (torch_cuda) is exactly what we want here, so we are
     # flouting the warning, but I can't think of a better (3.5+ compatible) way.
-    target_link_libraries(caffe2::cudnn INTERFACE
+    target_link_libraries(caffe2::cudnn-private INTERFACE
         "-Wl,--exclude-libs,libcudnn_static.a")
+  else()
+  set_property(
+    TARGET caffe2::cudnn-public PROPERTY INTERFACE_LINK_LIBRARIES
+    ${CUDNN_LIBRARY_PATH})
   endif()
 endif()
 
@@ -327,27 +396,6 @@ if(CAFFE2_USE_TENSORRT)
       ${TENSORRT_INCLUDE_DIR})
 endif()
 
-# cublas. CUDA_CUBLAS_LIBRARIES is actually a list, so we will make an
-# interface library similar to cudart.
-add_library(caffe2::cublas INTERFACE IMPORTED)
-if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
-    set_property(
-        TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublas_static.a")
-    if(CUDA_VERSION VERSION_GREATER_EQUAL 10.1)
-      set_property(
-        TARGET caffe2::cublas APPEND PROPERTY INTERFACE_LINK_LIBRARIES
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublasLt_static.a")
-    endif()
-else()
-    set_property(
-        TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
-        ${CUDA_CUBLAS_LIBRARIES})
-endif()
-set_property(
-    TARGET caffe2::cublas PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-    ${CUDA_INCLUDE_DIRS})
-
 # nvrtc
 add_library(caffe2::nvrtc UNKNOWN IMPORTED)
 set_property(
@@ -379,84 +427,10 @@ else()
   list(APPEND CUDA_NVCC_FLAGS "-DONNX_NAMESPACE=onnx_c2")
 endif()
 
-# CUDA 9.0 & 9.1 require GCC version <= 5
-# Although they support GCC 6, but a bug that wasn't fixed until 9.2 prevents
-# them from compiling the std::tuple header of GCC 6.
-# See Sec. 2.2.1 of
-# https://developer.download.nvidia.com/compute/cuda/9.2/Prod/docs/sidebar/CUDA_Toolkit_Release_Notes.pdf
-if((CUDA_VERSION VERSION_EQUAL   9.0) OR
-    (CUDA_VERSION VERSION_GREATER 9.0  AND CUDA_VERSION VERSION_LESS 9.2))
-  if(CMAKE_C_COMPILER_ID STREQUAL "GNU" AND
-      NOT CMAKE_C_COMPILER_VERSION VERSION_LESS 6.0 AND
-      CUDA_HOST_COMPILER STREQUAL CMAKE_C_COMPILER)
-    message(FATAL_ERROR
-      "CUDA ${CUDA_VERSION} is not compatible with std::tuple from GCC version "
-      ">= 6. Please upgrade to CUDA 9.2 or set the following environment "
-      "variable to use another version (for example): \n"
-      "  export CUDAHOSTCXX='/usr/bin/gcc-5'\n")
-  endif()
-endif()
-
-# CUDA 9.0 / 9.1 require MSVC version < 19.12
-# CUDA 9.2 require MSVC version < 19.13
-# CUDA 10.0 require MSVC version < 19.20
-if((CUDA_VERSION VERSION_EQUAL   9.0) OR
-    (CUDA_VERSION VERSION_GREATER 9.0  AND CUDA_VERSION VERSION_LESS 9.2))
-  if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND
-      NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS 19.12 AND
-      NOT DEFINED ENV{CUDAHOSTCXX})
-        message(FATAL_ERROR
-          "CUDA ${CUDA_VERSION} is not compatible with MSVC toolchain version "
-          ">= 19.12. (a.k.a Visual Studio 2017 Update 5, VS 15.5) "
-          "Please upgrade to CUDA >= 9.2 or set the following environment "
-          "variable to use another version (for example): \n"
-          "  set \"CUDAHOSTCXX=C:\\Program Files (x86)\\Microsoft Visual Studio"
-          "\\2017\\Enterprise\\VC\\Tools\\MSVC\\14.11.25503\\bin\\HostX64\\x64\\cl.exe\"\n")
-  endif()
-elseif(CUDA_VERSION VERSION_EQUAL   9.2)
-  if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND
-      NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS 19.14 AND
-      NOT DEFINED ENV{CUDAHOSTCXX})
-    message(FATAL_ERROR
-      "CUDA ${CUDA_VERSION} is not compatible with MSVC toolchain version "
-      ">= 19.14. (a.k.a Visual Studio 2017 Update 7, VS 15.7) "
-      "Please upgrade to CUDA >= 10.0 or set the following environment "
-      "variable to use another version (for example): \n"
-      "  set \"CUDAHOSTCXX=C:\\Program Files (x86)\\Microsoft Visual Studio"
-      "\\2017\\Enterprise\\VC\\Tools\\MSVC\\14.13.26132\\bin\\HostX64\\x64\\cl.exe\"\n")
-  endif()
-elseif(CUDA_VERSION VERSION_EQUAL   10.0)
-  if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND
-      NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS 19.20 AND
-      NOT DEFINED ENV{CUDAHOSTCXX})
-    message(FATAL_ERROR
-      "CUDA ${CUDA_VERSION} is not compatible with MSVC toolchain version "
-      ">= 19.20. (a.k.a Visual Studio 2019, VS 16.0) "
-      "Please upgrade to CUDA >= 10.1 or set the following environment "
-      "variable to use another version (for example): \n"
-      "  set \"CUDAHOSTCXX=C:\\Program Files (x86)\\Microsoft Visual Studio"
-      "\\2017\\Enterprise\\VC\\Tools\\MSVC\\14.16.27023\\bin\\HostX64\\x64\\cl.exe\"\n")
-  endif()
-endif()
-
 # Don't activate VC env again for Ninja generators with MSVC on Windows if CUDAHOSTCXX is not defined
 # by adding --use-local-env.
 if(MSVC AND CMAKE_GENERATOR STREQUAL "Ninja" AND NOT DEFINED ENV{CUDAHOSTCXX})
   list(APPEND CUDA_NVCC_FLAGS "--use-local-env")
-  # For CUDA < 9.2, --cl-version xxx is also required.
-  # We could detect cl version according to the following variable
-  # https://cmake.org/cmake/help/latest/variable/MSVC_TOOLSET_VERSION.html#variable:MSVC_TOOLSET_VERSION.
-  # 140       = VS 2015 (14.0)
-  # 141       = VS 2017 (15.0)
-  if(CUDA_VERSION VERSION_LESS 9.2)
-    if(MSVC_TOOLSET_VERSION EQUAL 140)
-      list(APPEND CUDA_NVCC_FLAGS "--cl-version" "2015")
-    elseif(MSVC_TOOLSET_VERSION EQUAL 141)
-      list(APPEND CUDA_NVCC_FLAGS "--cl-version" "2017")
-    else()
-      message(STATUS "We could not auto-detect the cl-version for MSVC_TOOLSET_VERSION=${MSVC_TOOLSET_VERSION}")
-    endif()
-  endif()
 endif()
 
 # setting nvcc arch flags

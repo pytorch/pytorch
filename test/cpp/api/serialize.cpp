@@ -387,6 +387,7 @@ TEST(SerializeTest, XOR) {
     loss.backward();
     optimizer.step();
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     running_loss = running_loss * 0.99 + loss.sum().item<float>() * 0.01;
     ASSERT_LT(epoch, 3000);
     epoch++;
@@ -811,6 +812,7 @@ TEST(SerializeTest, XOR_CUDA) {
     loss.backward();
     optimizer.step();
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     running_loss = running_loss * 0.99 + loss.sum().item<float>() * 0.01;
     ASSERT_LT(epoch, 3000);
     epoch++;

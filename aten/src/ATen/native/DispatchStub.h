@@ -9,8 +9,8 @@
 
 // Implements instruction set specific function dispatch.
 //
-// Kernels that may make use of specialized instruction sets (e.g. AVX) are
-// compiled multiple times with different compiler flags (e.g. -mavx). A
+// Kernels that may make use of specialized instruction sets (e.g. AVX2) are
+// compiled multiple times with different compiler flags (e.g. -mavx2). A
 // DispatchStub contains a table of function pointers for a kernel. At runtime,
 // the fastest available kernel is chosen based on the features reported by
 // cpuinfo.
@@ -50,8 +50,8 @@ enum class CPUCapability {
 #ifdef HAVE_VSX_CPU_DEFINITION
   VSX = 1,
 #else
-  AVX = 1,
-  AVX2 = 2,
+  AVX2 = 1,
+  AVX512 = 2,
 #endif
   NUM_OPTIONS
 };
@@ -59,77 +59,104 @@ enum class CPUCapability {
 CPUCapability get_cpu_capability();
 
 template <typename FnPtr, typename T>
-struct TORCH_API DispatchStub;
+struct DispatchStub;
+
+/**
+ * The sole purpose of this class is to outline methods that don't need to be
+ * specialized or otherwise inlined and duplicated (by the compiler due to
+ * template expansion), since it causes size bloat if there are a significant
+ * number of specialization of the DispatchStub<> class.
+ */
+struct TORCH_API DispatchStubImpl {
+  void* get_call_ptr(
+    DeviceType device_type
+    , void *DEFAULT
+#ifdef HAVE_AVX512_CPU_DEFINITION
+      , void *AVX512
+#endif
+#ifdef HAVE_AVX2_CPU_DEFINITION
+      , void *AVX2
+#endif
+#ifdef HAVE_VSX_CPU_DEFINITION
+      , void *VSX
+#endif
+  );
+
+  /**
+   * The CPU Dispatch actual method is chosen in decreasing order of preference by
+   * DispatchStubImpl::choose_cpu_impl() in case none is found by
+   * DispatchStubImpl::get_call_ptr() in cpu_dispatch_ptr.
+   */
+  void* choose_cpu_impl(
+    void *DEFAULT
+#ifdef HAVE_AVX512_CPU_DEFINITION
+    , void *AVX512
+#endif
+#ifdef HAVE_AVX2_CPU_DEFINITION
+    , void *AVX2
+#endif
+#ifdef HAVE_VSX_CPU_DEFINITION
+    , void *VSX
+#endif
+  );
+
+  // Fixing dispatch error in Windows debug builds.
+  // See https://github.com/pytorch/pytorch/issues/22681 for more details.
+  #if defined(_MSC_VER) && defined(_DEBUG)
+    std::atomic<void*> cpu_dispatch_ptr;
+    void* cuda_dispatch_ptr;
+    void* hip_dispatch_ptr;
+  #else
+    std::atomic<void*> cpu_dispatch_ptr{nullptr};
+    void* cuda_dispatch_ptr = nullptr;
+    void* hip_dispatch_ptr = nullptr;
+  #endif
+};
 
 template <typename rT, typename T, typename... Args>
-struct TORCH_API DispatchStub<rT (*)(Args...), T> {
+struct DispatchStub<rT (*)(Args...), T> {
   using FnPtr = rT (*) (Args...);
 
   DispatchStub() = default;
   DispatchStub(const DispatchStub&) = delete;
   DispatchStub& operator=(const DispatchStub&) = delete;
 
-  template <typename... ArgTypes>
-  rT operator()(DeviceType device_type, ArgTypes&&... args) {
-    if (device_type == DeviceType::CPU) {
-      // Use memory_order_relaxed here since even if two threads race,
-      // they will still compute the same value for cpu_dispatch_ptr.
-      auto fptr = cpu_dispatch_ptr.load(std::memory_order_relaxed);
-      if (!fptr) {
-        fptr = choose_cpu_impl();
-        cpu_dispatch_ptr.store(fptr, std::memory_order_relaxed);
-      }
-      return (*fptr)(std::forward<ArgTypes>(args)...);
-    } else if (device_type == DeviceType::CUDA) {
-      AT_ASSERTM(cuda_dispatch_ptr, "DispatchStub: missing CUDA kernel");
-      return (*cuda_dispatch_ptr)(std::forward<ArgTypes>(args)...);
-    } else if (device_type == DeviceType::HIP) {
-      AT_ASSERTM(hip_dispatch_ptr, "DispatchStub: missing HIP kernel");
-      return (*hip_dispatch_ptr)(std::forward<ArgTypes>(args)...);
-    } else {
-      AT_ERROR("DispatchStub: unsupported device type", device_type);
-    }
-  }
-
-  FnPtr choose_cpu_impl() {
-    auto capability = static_cast<int>(get_cpu_capability());
-    (void)capability;
-#ifdef HAVE_AVX2_CPU_DEFINITION
-    if (capability >= static_cast<int>(CPUCapability::AVX2)) {
-      AT_ASSERTM(AVX2, "DispatchStub: missing AVX2 kernel");
-      return AVX2;
-    }
+private:
+  FnPtr get_call_ptr(DeviceType device_type) {
+    return reinterpret_cast<FnPtr>(
+      impl.get_call_ptr(device_type
+      , reinterpret_cast<void*>(DEFAULT)
+#ifdef HAVE_AVX512_CPU_DEFINITION
+      , reinterpret_cast<void*>(AVX512)
 #endif
-#ifdef HAVE_AVX_CPU_DEFINITION
-    if (capability >= static_cast<int>(CPUCapability::AVX)) {
-      AT_ASSERTM(AVX, "DispatchStub: missing AVX kernel");
-      return AVX;
-    }
+#ifdef HAVE_AVX2_CPU_DEFINITION
+      , reinterpret_cast<void*>(AVX2)
 #endif
 #ifdef HAVE_VSX_CPU_DEFINITION
-    if (capability >= static_cast<int>(CPUCapability::VSX)) {
-      AT_ASSERTM(VSX, "DispatchStub: missing VSX kernel");
-      return VSX;
-    }
+      , reinterpret_cast<void*>(VSX)
 #endif
-    AT_ASSERTM(DEFAULT, "DispatchStub: missing default kernel");
-    return DEFAULT;
+      )
+    );
   }
 
-// Fixing dispatch error in Windows debug builds.
-// See https://github.com/pytorch/pytorch/issues/22681 for more details.
-#if defined(_MSC_VER) && defined(_DEBUG)
-  std::atomic<FnPtr> cpu_dispatch_ptr;
-  FnPtr cuda_dispatch_ptr;
-  FnPtr hip_dispatch_ptr;
-#else
-  std::atomic<FnPtr> cpu_dispatch_ptr{nullptr};
-  FnPtr cuda_dispatch_ptr = nullptr;
-  FnPtr hip_dispatch_ptr = nullptr;
-#endif
+public:
+  template <typename... ArgTypes>
+  rT operator()(DeviceType device_type, ArgTypes&&... args) {
+    FnPtr call_ptr = get_call_ptr(device_type);
+    return (*call_ptr)(std::forward<ArgTypes>(args)...);
+  }
+
+  void set_cuda_dispatch_ptr(FnPtr fn_ptr) {
+    impl.cuda_dispatch_ptr = reinterpret_cast<void*>(fn_ptr);
+  }
+
+  void set_hip_dispatch_ptr(FnPtr fn_ptr) {
+    impl.hip_dispatch_ptr = reinterpret_cast<void*>(fn_ptr);
+  }
+
   static FnPtr DEFAULT;
-#ifdef HAVE_AVX_CPU_DEFINITION
-  static FnPtr AVX;
+#ifdef HAVE_AVX512_CPU_DEFINITION
+  static FnPtr AVX512;
 #endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
   static FnPtr AVX2;
@@ -137,13 +164,15 @@ struct TORCH_API DispatchStub<rT (*)(Args...), T> {
 #ifdef HAVE_VSX_CPU_DEFINITION
   static FnPtr VSX;
 #endif
+private:
+  DispatchStubImpl impl;
 };
 
 namespace {
 template <typename FnPtr, typename T>
 struct RegisterCUDADispatch {
   RegisterCUDADispatch(DispatchStub<FnPtr, T>& stub, FnPtr value) {
-    stub.cuda_dispatch_ptr = value;
+    stub.set_cuda_dispatch_ptr(value);
   }
 };
 
@@ -151,7 +180,7 @@ template <typename FnPtr, typename T>
 struct RegisterHIPDispatch {
   RegisterHIPDispatch(DispatchStub<FnPtr, T>& stub, FnPtr value) {
     // TODO: make this point at hip_dispatch_ptr
-    stub.cuda_dispatch_ptr = value;
+    stub.set_cuda_dispatch_ptr(value);
   }
 };
 } // anonymous namespace
@@ -174,10 +203,10 @@ struct RegisterHIPDispatch {
 #define REGISTER_ARCH_DISPATCH(name, arch, fn) \
   template <> decltype(fn) DispatchStub<decltype(fn), struct name>::arch = fn;
 
-#ifdef HAVE_AVX_CPU_DEFINITION
-#define REGISTER_AVX_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, AVX, fn)
+#ifdef HAVE_AVX512_CPU_DEFINITION
+#define REGISTER_AVX512_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, AVX512, fn)
 #else
-#define REGISTER_AVX_DISPATCH(name, fn)
+#define REGISTER_AVX512_DISPATCH(name, fn)
 #endif
 
 #ifdef HAVE_AVX2_CPU_DEFINITION
@@ -194,8 +223,8 @@ struct RegisterHIPDispatch {
 
 #define REGISTER_NO_CPU_DISPATCH(name, fn_type)                                \
   REGISTER_ARCH_DISPATCH(name, DEFAULT, static_cast<fn_type>(nullptr))         \
-  REGISTER_AVX_DISPATCH(name, static_cast<fn_type>(nullptr))                   \
-  REGISTER_AVX2_DISPATCH(name, static_cast<fn_type>(nullptr))          \
+  REGISTER_AVX512_DISPATCH(name, static_cast<fn_type>(nullptr))                \
+  REGISTER_AVX2_DISPATCH(name, static_cast<fn_type>(nullptr))                  \
   REGISTER_VSX_DISPATCH(name, static_cast<fn_type>(nullptr))
 
 #define REGISTER_CUDA_DISPATCH(name, fn) \
@@ -215,6 +244,8 @@ struct RegisterHIPDispatch {
 // #define REGISTER_DISPATCH(name, fn) REGISTER_HIP_DISPATCH(name, fn)
 #elif defined(CPU_CAPABILITY)
 #define REGISTER_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn)
+#define REGISTER_NO_AVX512_DISPATCH(name, fn_type)                             \
+  REGISTER_AVX512_DISPATCH(name, static_cast<fn_type>(nullptr))
 #endif
 
 

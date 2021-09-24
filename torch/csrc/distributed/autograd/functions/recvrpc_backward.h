@@ -23,7 +23,7 @@ class TORCH_API RecvRpcBackward : public torch::autograd::Node {
       const AutogradMetadata& autogradMetadata,
       std::shared_ptr<DistAutogradContext> autogradContext,
       rpc::worker_id_t fromWorkerId,
-      std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> deviceMap);
+      rpc::DeviceMap deviceMap);
 
   torch::autograd::variable_list apply(
       torch::autograd::variable_list&& grads) override;
@@ -41,7 +41,7 @@ class TORCH_API RecvRpcBackward : public torch::autograd::Node {
   rpc::worker_id_t fromWorkerId_;
 
   // Device mapping for tensors sent over RPC.
-  const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> deviceMap_;
+  const rpc::DeviceMap deviceMap_;
 };
 
 } // namespace autograd

@@ -22,7 +22,7 @@ __all__ = ['set_sharing_strategy', 'get_sharing_strategy',
            'get_all_sharing_strategies']
 
 
-from multiprocessing import *
+from multiprocessing import *  # noqa: F403
 
 
 __all__ += multiprocessing.__all__  # type: ignore[attr-defined]

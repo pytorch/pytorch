@@ -18,12 +18,14 @@ DLDataType getDLDataType(const Tensor& t) {
     case ScalarType::Char:
       dtype.code = DLDataTypeCode::kDLInt;
       break;
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     case ScalarType::Double:
       dtype.code = DLDataTypeCode::kDLFloat;
       break;
     case ScalarType::Float:
       dtype.code = DLDataTypeCode::kDLFloat;
       break;
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     case ScalarType::Int:
       dtype.code = DLDataTypeCode::kDLInt;
       break;
@@ -37,36 +39,36 @@ DLDataType getDLDataType(const Tensor& t) {
       dtype.code = DLDataTypeCode::kDLFloat;
       break;
     case ScalarType::Bool:
-      dtype.code = DLDataTypeCode::kDLUInt;
+      TORCH_CHECK(false, "Bool type is not supported by dlpack");
+      break;
+    case ScalarType::ComplexHalf:
+      dtype.code = DLDataTypeCode::kDLComplex;
+      break;
+    case ScalarType::ComplexFloat:
+      dtype.code = DLDataTypeCode::kDLComplex;
+      break;
+    case ScalarType::ComplexDouble:
+      dtype.code = DLDataTypeCode::kDLComplex;
       break;
     case ScalarType::BFloat16:
-      throw std::logic_error("BFloat16 is not supported by dlpack");
+      dtype.code = DLDataTypeCode::kDLBfloat;
       break;
     case ScalarType::QInt8:
     case ScalarType::QUInt8:
     case ScalarType::QInt32:
     case ScalarType::QUInt4x2:
-      throw std::logic_error("QUInt/QInt types are not supported by dlpack");
-      break;
-    case ScalarType::ComplexHalf:
-      throw std::logic_error("ComplexHalf is not supported by dlpack");
-      break;
-    case ScalarType::ComplexFloat:
-      throw std::logic_error("ComplexFloat is not supported by dlpack");
-      break;
-    case ScalarType::ComplexDouble:
-      throw std::logic_error("ComplexDouble is not supported by dlpack");
+      TORCH_CHECK(false, "QUInt/QInt types are not supported by dlpack");
       break;
     case ScalarType::Undefined:
-      throw std::logic_error("Undefined is not a valid ScalarType");
+      TORCH_CHECK(false, "Undefined is not a valid ScalarType");
     case ScalarType::NumOptions:
-      throw std::logic_error("NumOptions is not a valid ScalarType");
+      TORCH_CHECK(false, "NumOptions is not a valid ScalarType");
   }
   return dtype;
 }
 
-DLContext getDLContext(const Tensor& tensor, const int64_t& device_id) {
-  DLContext ctx;
+DLDevice getDLDevice(const Tensor& tensor, const int64_t& device_id) {
+  DLDevice ctx;
   ctx.device_id = device_id;
   switch (tensor.device().type()) {
     case DeviceType::CPU:
@@ -88,12 +90,12 @@ DLContext getDLContext(const Tensor& tensor, const int64_t& device_id) {
       ctx.device_type = DLDeviceType::kDLROCM;
       break;
     default:
-      throw std::logic_error("Cannot pack tensors on " + tensor.device().str());
+      TORCH_CHECK(false, "Cannot pack tensors on " + tensor.device().str());
   }
   return ctx;
 }
 
-static Device getATenDevice(const DLContext& ctx) {
+static Device getATenDevice(const DLDevice& ctx) {
   switch (ctx.device_type) {
     case DLDeviceType::kDLCPU:
       return at::Device(DeviceType::CPU);
@@ -112,15 +114,14 @@ static Device getATenDevice(const DLContext& ctx) {
       return at::Device(DeviceType::HIP, ctx.device_id);
 #endif
     default:
-      throw std::logic_error(
-          "Unsupported device_type: " + c10::to_string(ctx.device_type));
+      TORCH_CHECK(
+          false, "Unsupported device_type: " + c10::to_string(ctx.device_type));
   }
 }
 
 ScalarType toScalarType(const DLDataType& dtype) {
   ScalarType stype;
-  if (dtype.lanes != 1)
-    throw std::logic_error("ATen does not support lanes != 1");
+  TORCH_CHECK(dtype.lanes == 1, "ATen does not support lanes != 1");
   switch (dtype.code) {
     case DLDataTypeCode::kDLUInt:
       switch (dtype.bits) {
@@ -128,8 +129,8 @@ ScalarType toScalarType(const DLDataType& dtype) {
           stype = ScalarType::Byte;
           break;
         default:
-          throw std::logic_error(
-              "Unsupported kUInt bits " + c10::to_string(dtype.bits));
+          TORCH_CHECK(
+              false, "Unsupported kUInt bits " + c10::to_string(dtype.bits));
       }
       break;
     case DLDataTypeCode::kDLInt:
@@ -147,8 +148,8 @@ ScalarType toScalarType(const DLDataType& dtype) {
           stype = ScalarType::Long;
           break;
         default:
-          throw std::logic_error(
-              "Unsupported kInt bits " + c10::to_string(dtype.bits));
+          TORCH_CHECK(
+              false, "Unsupported kInt bits " + c10::to_string(dtype.bits));
       }
       break;
     case DLDataTypeCode::kDLFloat:
@@ -163,16 +164,44 @@ ScalarType toScalarType(const DLDataType& dtype) {
           stype = ScalarType::Double;
           break;
         default:
-          throw std::logic_error(
-              "Unsupported kFloat bits " + c10::to_string(dtype.bits));
+          TORCH_CHECK(
+              false, "Unsupported kFloat bits " + c10::to_string(dtype.bits));
+      }
+      break;
+    case DLDataTypeCode::kDLBfloat:
+      switch (dtype.bits) {
+        case 16:
+          stype = ScalarType::BFloat16;
+          break;
+        default:
+          TORCH_CHECK(
+              false, "Unsupported kFloat bits " + c10::to_string(dtype.bits));
+      }
+      break;
+    case DLDataTypeCode::kDLComplex:
+      switch (dtype.bits) {
+        case 32:
+          stype = ScalarType::ComplexHalf;
+          break;
+        case 64:
+          stype = ScalarType::ComplexFloat;
+          break;
+        case 128:
+          stype = ScalarType::ComplexDouble;
+          break;
+        default:
+          TORCH_CHECK(
+              false, "Unsupported kFloat bits " + c10::to_string(dtype.bits));
       }
       break;
     default:
-      throw std::logic_error("Unsupported code " + c10::to_string(dtype.code));
+      TORCH_CHECK(
+          false, "Unsupported code " + c10::to_string(dtype.code));
   }
   return stype;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct ATenDLMTensor {
   Tensor handle;
   DLManagedTensor tensor;
@@ -194,21 +223,24 @@ DLManagedTensor* toDLPack(const Tensor& src) {
   if (src.is_cuda()) {
     device_id = src.get_device();
   }
-  atDLMTensor->tensor.dl_tensor.ctx = getDLContext(src, device_id);
+  atDLMTensor->tensor.dl_tensor.device = getDLDevice(src, device_id);
   atDLMTensor->tensor.dl_tensor.ndim = src.dim();
   atDLMTensor->tensor.dl_tensor.dtype = getDLDataType(src);
   atDLMTensor->tensor.dl_tensor.shape =
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       const_cast<int64_t*>(src.sizes().data());
   atDLMTensor->tensor.dl_tensor.strides =
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       const_cast<int64_t*>(src.strides().data());
   atDLMTensor->tensor.dl_tensor.byte_offset = 0;
   return &(atDLMTensor->tensor);
 }
 
 Tensor fromDLPack(const DLManagedTensor* src) {
-  Device device = getATenDevice(src->dl_tensor.ctx);
+  Device device = getATenDevice(src->dl_tensor.device);
   ScalarType stype = toScalarType(src->dl_tensor.dtype);
   auto deleter = [src](void* self) {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
     src->deleter(const_cast<DLManagedTensor*>(src));
   };
   if (!src->dl_tensor.strides) {

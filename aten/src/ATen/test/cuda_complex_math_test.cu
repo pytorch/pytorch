@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <c10/cuda/CUDAException.h>
 
 int safeDeviceCount() {
   int count;
@@ -23,6 +24,7 @@ TEST(a##Device, b) {                                \
   SKIP_IF_NO_GPU();                                 \
   cudaDeviceSynchronize();                          \
   CUDA##a##b<<<1, 1>>>();                           \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();                   \
   cudaDeviceSynchronize();                          \
   ASSERT_EQ(cudaGetLastError(), cudaSuccess);       \
 }                                                   \
@@ -35,4 +37,3 @@ __global__ void CUDA##a##b()
 #define C10_DEFINE_TEST(a, b) TEST(a##Host, b)
 #define C10_ASSERT_NEAR(a, b, tol) ASSERT_NEAR(a, b, tol)
 #include <c10/test/util/complex_math_test_common.h>
-

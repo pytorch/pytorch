@@ -24,7 +24,6 @@ struct MAGMAQueue {
 
   // Constructor
   explicit MAGMAQueue(int64_t device_id) {
-    auto& context = at::globalContext();
     cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
 #if CUDA_VERSION >= 11000
     // Magma operations is numerically sensitive, so TF32 should be off
@@ -76,14 +75,14 @@ struct MagmaStreamSyncGuard {
   MagmaStreamSyncGuard() {
     auto stream = at::cuda::getCurrentCUDAStream();
     if (stream != at::cuda::getDefaultCUDAStream()) {
-      AT_CUDA_CHECK(cudaStreamSynchronize(stream));
+      at::cuda::stream_synchronize(stream);
     }
   }
 
   ~MagmaStreamSyncGuard() noexcept(false) {
     auto default_stream = at::cuda::getDefaultCUDAStream();
     if (at::cuda::getCurrentCUDAStream() != default_stream) {
-      AT_CUDA_CHECK(cudaStreamSynchronize(default_stream));
+      at::cuda::stream_synchronize(default_stream);
     }
   }
 };
@@ -91,7 +90,7 @@ struct MagmaStreamSyncGuard {
 
 static inline int cuda_int_cast(int64_t value, const char* varname) {
   auto result = static_cast<int>(value);
-  TORCH_CHECK(static_cast<int64_t>(result) == value, 
+  TORCH_CHECK(static_cast<int64_t>(result) == value,
               "cuda_int_cast: The value of ", varname, "(", (long long)value,
               ") is too large to fit into a int (", sizeof(int), " bytes)");
   return result;

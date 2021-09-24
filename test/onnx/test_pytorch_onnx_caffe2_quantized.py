@@ -14,7 +14,7 @@ class TestQuantizedOps(unittest.TestCase):
     def generic_test(self, model, sample_inputs, input_names=None, decimal=3, relaxed_check=False):
         torch.backends.quantized.engine = "qnnpack"
         pt_inputs = tuple(torch.from_numpy(x) for x in sample_inputs)
-        model.qconfig = torch.quantization.get_default_qconfig('qnnpack')
+        model.qconfig = torch.quantization.get_default_qconfig("qnnpack")
         q_model = torch.quantization.prepare(model, inplace=False)
         q_model = torch.quantization.convert(q_model, inplace=False)
 
@@ -28,7 +28,7 @@ class TestQuantizedOps(unittest.TestCase):
         output = q_model(*pt_inputs)
 
         f = io.BytesIO()
-        torch.onnx.export(q_model, pt_inputs, f, input_names=input_names, example_outputs=output,
+        torch.onnx.export(q_model, pt_inputs, f, input_names=input_names,
                           operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
         f.seek(0)
         onnx_model = onnx.load(f)
@@ -84,8 +84,6 @@ class TestQuantizedOps(unittest.TestCase):
         self.generic_unary_test(torch.nn.ReLU())
 
     def export_to_onnx(self, model, input, input_names):
-        outputs = model(input)
-
         traced = torch.jit.trace(model, input)
         buf = io.BytesIO()
         torch.jit.save(traced, buf)
@@ -93,7 +91,7 @@ class TestQuantizedOps(unittest.TestCase):
 
         model = torch.jit.load(buf)
         f = io.BytesIO()
-        torch.onnx.export(model, input, f, input_names=input_names, example_outputs=outputs,
+        torch.onnx.export(model, input, f, input_names=input_names,
                           operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
         f.seek(0)
 
@@ -174,7 +172,7 @@ class TestQuantizedOps(unittest.TestCase):
                 self.dequant = torch.quantization.DeQuantStub()
 
             def forward(self, x):
-                res = torch.nn.quantized.functional.interpolate(self.quant1(x), size=[6, 8], mode='nearest')
+                res = torch.nn.quantized.functional.interpolate(self.quant1(x), size=[6, 8], mode="nearest")
                 return self.dequant(res)
 
         x = np.random.rand(1, 2, 3, 4).astype("float32")
@@ -318,14 +316,14 @@ class TestQuantizedOps(unittest.TestCase):
                 return x
 
         model = ModelWithClassifierHead().eval()
-        torch.quantization.fuse_modules(model, [['conv1', 'relu1'] ,
-                                                ['features.0.0', 'features.0.1', 'features.0.2'],
-                                                ['features.1.0', 'features.1.1', 'features.1.2'],
-                                                ['features.2.0', 'features.2.1', 'features.2.2']], inplace=True)
+        torch.quantization.fuse_modules(model, [["conv1", "relu1"] ,
+                                                ["features.0.0", "features.0.1", "features.0.2"],
+                                                ["features.1.0", "features.1.1", "features.1.2"],
+                                                ["features.2.0", "features.2.1", "features.2.2"]], inplace=True)
 
 
         x = np.random.rand(1, 3, 10, 10).astype("float32")
         self.generic_test(model, (x,), input_names=["x"], relaxed_check=True)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()
