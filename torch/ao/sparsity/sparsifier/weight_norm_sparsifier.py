@@ -41,7 +41,7 @@ class WeightNormSparsifier(BaseSparsifier):
     """
     def __init__(self,
                  sparsity_level: float = 0.5,
-                 sparse_block_shape: Tuple[int] = (1, 4),
+                 sparse_block_shape: Tuple[int, int] = (1, 4),
                  zeros_per_block: int = None):
         if zeros_per_block is None:
             zeros_per_block = reduce((lambda x, y: x * y), sparse_block_shape)
