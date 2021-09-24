@@ -20,8 +20,7 @@ namespace jit {
 
 c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
     const Node* n,
-    bool ignore_custom_classes,
-    AliasDb* db) {
+    bool ignore_custom_classes) {
   Stack stack;
   for (auto input : n->inputs()) {
     if (auto ival = toIValue(input)) {
@@ -59,7 +58,7 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
           n->inputs().size());
     } break;
     case prim::CreateObject: {
-      createObject(stack, n->output()->type()->expect<ClassType>(), /*use_weak_ref*/true);
+      createObject(stack, n->output()->type()->expect<ClassType>());
     } break;
     case prim::GetAttr: {
       auto attr = pop(stack).toObject()->getAttr(n->s(attr::name));
@@ -86,7 +85,7 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
     } break;
   }
 
-  for (IValue& v : stack) {
+  for (const IValue& v : stack) {
     if (v.isTensor()) {
       const at::Tensor& t = v.toTensor();
       if (t.defined() && t.requires_grad()) {
@@ -97,28 +96,6 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
     // Weak form of const propagation
     if (ignore_custom_classes) {
       if (v.isCustomClass()) {
-        return c10::nullopt;
-      }
-    }
-    // see [Constant Object Weak CompilationUnit Reference]
-    if (v.isCustomClass()) {
-      if (v.toObject()->is_weak_compilation_ref()) {
-        continue;
-      }
-      if (!db) {
-        continue;
-      }
-      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-      Node* n_non_const = const_cast<Node*>(n);
-      if (db->mayContainAlias(
-              n_non_const->inputs(), {n_non_const->outputs()})) {
-        continue;
-      }
-      auto obj = v.toObject();
-      obj->unsafe_make_weak_compilation_ref();
-    }
-    if (v.isObject()) {
-      if (!v.toObject()->is_weak_compilation_ref()) {
         return c10::nullopt;
       }
     }
