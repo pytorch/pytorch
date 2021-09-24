@@ -727,7 +727,7 @@ class TestAutograd(TestCase):
         grad, = torch.autograd.grad(out, (x,), (batched_grad,), is_grads_batched=True)
         self.assertEqual(grad, torch.arange(3).expand(2, 2, 3).transpose(0, 2).to(dtype=grad.dtype))
 
-        # Detect shape mismatch and
+        # Detect shape mismatch
         grad_out = torch.ones(2, 2)
         with self.assertRaisesRegex(RuntimeError, "If `is_grads_batched=True`, we interpret the first"):
             torch.autograd.grad(outputs=out, grad_outputs=(grad_out,), inputs=(x,), is_grads_batched=True)
@@ -738,7 +738,7 @@ class TestAutograd(TestCase):
         grad, = torch.autograd.grad(out, (x,), (batched_grad,), is_grads_batched=True)
         self.assertEqual(grad, torch.arange(3).expand(2, 2, 3).transpose(0, 2).to(dtype=grad.dtype))
 
-        # We consider scalar and size-1 tensors to be a mismatch (consistent with current behavior)
+        # We consider scalar and sized-1 to be a mismatch. This is consistent with current non-batched behavior.
         grad_out = torch.ones(2).unsqueeze(1)
         with self.assertRaisesRegex(RuntimeError, "If `is_grads_batched=True`, we interpret the first"):
             torch.autograd.grad(outputs=out, grad_outputs=(grad_out,), inputs=(x,), is_grads_batched=True)
