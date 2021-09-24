@@ -471,8 +471,7 @@ class AttributePropagator {
               if (object_memo_.count(attr.toObject())) {
                 attr = object_memo_[attr.toObject()];
               } else {
-                auto weak_class_obj =
-                    attr.toObject()->copy_to_weak_compilation_ref();
+                auto weak_class_obj = attr.toObject()->copy_to_weak_compilation_ref();
                 object_memo_[attr.toObject()] = weak_class_obj;
                 attr = weak_class_obj;
               }
@@ -770,10 +769,7 @@ class AttributePropagator {
   std::deque<std::string> names_;
 
   // see [Constant Object Weak CompilationUnit Reference]
-  std::unordered_map<
-      c10::intrusive_ptr<at::ivalue::Object>,
-      c10::intrusive_ptr<at::ivalue::Object>>
-      object_memo_;
+  std::unordered_map<c10::intrusive_ptr<at::ivalue::Object>, c10::intrusive_ptr<at::ivalue::Object>> object_memo_;
 
 }; // class AttributePropagator
 
