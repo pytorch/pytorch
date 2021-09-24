@@ -136,37 +136,43 @@ std::vector<int> normalizeOld2New(
 Expr* replaceValInExpr(Expr* expr, Val* reference, Val* substitute);
 
 // Makes rfactor generic with reduction ops and Welford
-TensorView* rfactorHelper(TensorView* red_tv, const std::vector<int>& axes);
+TORCH_CUDA_CU_API TensorView* rfactorHelper(
+    TensorView* red_tv,
+    const std::vector<int>& axes);
 
 // Return immediate producers of tv
-std::vector<TensorView*> producerTvsOf(TensorView* tv);
+TORCH_CUDA_CU_API std::vector<TensorView*> producerTvsOf(TensorView* tv);
 
 // Return immediate consumers of tv
-std::vector<TensorView*> consumerTvsOf(TensorView* tv);
+TORCH_CUDA_CU_API std::vector<TensorView*> consumerTvsOf(TensorView* tv);
 
 // Return immediate producers of tvs (can return tvs input)
-std::vector<TensorView*> producerTvsOf(const std::vector<TensorView*>& tvs);
+TORCH_CUDA_CU_API std::vector<TensorView*> producerTvsOf(
+    const std::vector<TensorView*>& tvs);
 
 // Return immediate consumers of tvs (can return tvs input)
-std::vector<TensorView*> consumerTvsOf(const std::vector<TensorView*>& tvs);
+TORCH_CUDA_CU_API std::vector<TensorView*> consumerTvsOf(
+    const std::vector<TensorView*>& tvs);
 
 // Returns producers of tv that are inputs of fusion
-std::vector<TensorView*> inputTvsOf(TensorView* tv);
+TORCH_CUDA_CU_API std::vector<TensorView*> inputTvsOf(TensorView* tv);
 
 // Returns consumers of tv that are outputs of fusion
-std::vector<TensorView*> outputTvsOf(TensorView* tv);
+TORCH_CUDA_CU_API std::vector<TensorView*> outputTvsOf(TensorView* tv);
 
 // Returns producers of tvs that are inputs of fusion
-std::vector<TensorView*> inputTvsOf(std::vector<TensorView*> tvs);
+TORCH_CUDA_CU_API std::vector<TensorView*> inputTvsOf(
+    std::vector<TensorView*> tvs);
 
 // Returns consumers of tvs that are outputs of fusion
-std::vector<TensorView*> outputTvsOf(std::vector<TensorView*> tvs);
+TORCH_CUDA_CU_API std::vector<TensorView*> outputTvsOf(
+    std::vector<TensorView*> tvs);
 
 // returns all tensor views in fusion that are used between outputs and inputs.
 TORCH_CUDA_CU_API std::vector<TensorView*> allTvs(Fusion* fusion);
 
 // Returns the history of expressions applied to the domains of tv
-std::vector<Expr*> historyOf(TensorView* tv);
+TORCH_CUDA_CU_API std::vector<Expr*> historyOf(TensorView* tv);
 
 } // namespace ir_utils
 } // namespace cuda
