@@ -45,9 +45,9 @@ def to_numpy(tensor):
     else:
         return tensor.cpu().numpy()
 
-def convert_to_onnx(model, input=None, opset_version=9, example_outputs=None,
-                    do_constant_folding=True, keep_initializers_as_inputs=True,
-                    dynamic_axes=None, input_names=None, output_names=None,
+def convert_to_onnx(model, input=None, opset_version=9, do_constant_folding=True,
+                    keep_initializers_as_inputs=True, dynamic_axes=None,
+                    input_names=None, output_names=None,
                     fixed_batch_size=False, training=None,
                     onnx_shape_inference=True):
     # export the model to ONNX
@@ -55,7 +55,6 @@ def convert_to_onnx(model, input=None, opset_version=9, example_outputs=None,
     input_copy = copy.deepcopy(input)
     torch.onnx._export(model, input_copy, f,
                        opset_version=opset_version,
-                       example_outputs=example_outputs,
                        do_constant_folding=do_constant_folding,
                        keep_initializers_as_inputs=keep_initializers_as_inputs,
                        dynamic_axes=dynamic_axes,
@@ -132,7 +131,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
             input = input + ({},)
 
         ort_sess = convert_to_onnx(model, input=input, opset_version=self.opset_version,
-                                   example_outputs=output, do_constant_folding=do_constant_folding,
+                                   do_constant_folding=do_constant_folding,
                                    keep_initializers_as_inputs=self.keep_initializers_as_inputs,
                                    dynamic_axes=dynamic_axes, input_names=input_names,
                                    output_names=output_names, fixed_batch_size=fixed_batch_size, training=training,
@@ -284,8 +283,8 @@ class TestONNXRuntime(unittest.TestCase):
         _run_test(model, tracing_remained_onnx_input_idx)
 
     def run_model_test_with_external_data(self, model, input, rtol=0.001, atol=1e-7,
-                                          example_outputs=None, do_constant_folding=True,
-                                          dynamic_axes=None, input_names=None, output_names=None,
+                                          do_constant_folding=True, dynamic_axes=None,
+                                          input_names=None, output_names=None,
                                           ort_optim_on=True, training=None):
         import os
         import tempfile
@@ -310,7 +309,6 @@ class TestONNXRuntime(unittest.TestCase):
                 input_copy = copy.deepcopy(input)
                 torch.onnx.export(model, input_copy, model_file_name,
                                   opset_version=self.opset_version,
-                                  example_outputs=output,
                                   verbose=False,
                                   do_constant_folding=do_constant_folding,
                                   keep_initializers_as_inputs=self.keep_initializers_as_inputs,
@@ -7801,7 +7799,6 @@ class TestONNXRuntime(unittest.TestCase):
         script_model = torch.jit.script(model)
         output = model(x)
         ort_sess = convert_to_onnx(script_model, input=(x,), opset_version=self.opset_version,
-                                   example_outputs=output,
                                    training=torch.onnx.TrainingMode.TRAINING)
         ort_outs = run_ort(ort_sess, input=(x,))
         assert not torch.all(torch.eq(x, torch.from_numpy(ort_outs[0])))
@@ -7845,7 +7842,6 @@ class TestONNXRuntime(unittest.TestCase):
         y = model(input)
         output = y.cpu().numpy()
         ort_sess = convert_to_onnx(script_model, input=(x,), opset_version=self.opset_version,
-                                   example_outputs=y,
                                    training=torch.onnx.TrainingMode.TRAINING)
         ort_outs = run_ort(ort_sess, input=(x,))
         ort_mask = np.where(ort_outs[0] != 0, 1, 0)
@@ -7930,11 +7926,9 @@ class TestONNXRuntime(unittest.TestCase):
         model = torch.jit.script(MyModule())
         box_regression = torch.randn([4, 4])
         proposal = [torch.randn(2, 4), torch.randn(2, 4)]
-        outputs = model(box_regression, proposal)
 
         with self.assertRaises(RuntimeError) as cm:
-            convert_to_onnx(model, input=(box_regression, proposal),
-                            example_outputs=outputs)
+            convert_to_onnx(model, input=(box_regression, proposal))
 
     def test_initializer_sequence(self):
         class MyModule(torch.nn.Module):
@@ -8003,10 +7997,9 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.ones(2, 3, dtype=torch.float)
         y = torch.tensor(5, dtype=torch.long)
-        example_output = (test_model(x, y),)
         f = io.BytesIO()
 
-        torch.onnx.export(test_model, (x, y), f, example_outputs=example_output, do_constant_folding=False)
+        torch.onnx.export(test_model, (x, y), f, do_constant_folding=False)
         loaded_model = onnx.load_from_string(f.getvalue())
 
         actual_list = [p.name for p in loaded_model.graph.initializer]
