@@ -1,9 +1,10 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/frozen_linear_transpose.h>
 #include <torch/csrc/jit/passes/utils/optimization_utils.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
-#include <torch/csrc/jit/passes/frozen_linear_transpose.h>
+#include <iostream>
 
 namespace torch {
 namespace jit {
@@ -23,13 +24,14 @@ class ConcatLinearLayers {
     if (weight->type() == NoneType::get()) {
       return false;
     }
-    
-    // This should also filter out out-variants of the linear op.
+
+    // This also filters out out-variants of the linear op.
     if (nonConstantParameters(node)) {
       return false;
     }
-    auto weight_tensor = constant_as<Tensor>(weight).value();
+
     // Op is only profitable on CUDA
+    auto weight_tensor = constant_as<Tensor>(weight).value();
     return weight_tensor.device().is_cuda();
   }
 
@@ -40,48 +42,63 @@ class ConcatLinearLayers {
     {
       WithInsertPoint insert_guard(node);
       auto weight = node->namedInput("weight");
-      Tensor weight_tensor = constant_as<Tensor>(weight).value();
-      Tensor weight_t_tensor = weight_tensor.transpose(0, 1);
+      // Tensor weight_t_tensor = at::transpose(weight_tensor, 1,
+      // 0).clone(at::MemoryFormat::Contiguous);
 
+      Tensor weight_tensor = constant_as<Tensor>(weight).value();
+      Tensor weight_t_tensor = at::transpose(weight_tensor, 1, 0).clone(at::MemoryFormat::Contiguous);
       Value* weight_t = graph_->insertConstant(weight_t_tensor);
       matmul = graph_->create(aten::matmul, {node->inputs()[0], weight_t});
       matmul->insertAfter(node);
     }
 
     // Handle a bias if there is any
+    WithInsertPoint insert_guard(matmul);
     auto bias = node->namedInput("bias");
     if (bias->type() == NoneType::get()) {
       node->replaceAllUsesWith(matmul);
     } else {
-      Node* bias_result = graph_->create(aten::add, {matmul->output(), bias});
+      Value* bias_scale = graph_->insertConstant(1);
+      Node* bias_result = graph_->create(aten::add, {matmul->output(), bias, bias_scale});
       bias_result->insertAfter(matmul);
       node->replaceAllUsesWith(bias_result);
     }
     node->destroy();
   };
 
-public:
-  bool handleBlockAndSubblocks(Block* block) {
+  void handleBlockAndSubblocks(Block* block) {
+    // Can't delete nodes while also iterating over it
+    std::vector<Node*> constant_linear_nodes;
+
     for (auto node : block->nodes()) {
       for (Block* block : node->blocks()) {
         handleBlockAndSubblocks(block);
       }
 
       if (is_constant_linear_op(node)) {
-        replace_linear_with_matmul(node);
+        constant_linear_nodes.push_back(node);
       }
     }
-    return graph_modified;
+    for (auto node : constant_linear_nodes) {
+      replace_linear_with_matmul(node);
+    }
+    return;
   }
 
+ public:
+  bool run(std::shared_ptr<Graph> graph) {
+    graph_ = graph;
+    handleBlockAndSubblocks(graph_->block());
+    return graph_modified;
+  }
 };
 } // namespace
 
 TORCH_API bool FrozenLinearTranspose(std::shared_ptr<Graph>& graph) {
   ConcatLinearLayers concatLayers;
   GRAPH_DUMP("Before FrozenLinearTranspose", graph);
-  bool changed = concatLayers.handleBlockAndSubblocks(graph->block());
-  if (changed) {
+  bool changed = concatLayers.run(graph);
+   if (changed) {
     GRAPH_DUMP("After FrozenLinearTranspose", graph);
   }
   return changed;

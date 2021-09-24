@@ -1707,7 +1707,16 @@ class TestFrozenOptimizations(JitTestCase):
 
     @unittest.skipIf(not torch._C.has_cuda, "Optimization currently only run for GPU")    
     def test_linear_transpose(self):
-        mod_eager = torch.nn.Linear(20, 30).eval()
+        class ModLinear(torch.nn.Module):
+            def __init__(self):
+                super(ModLinear, self).__init__()
+                self.bias = torch.nn.Parameter(torch.rand(30))
+                self.weight = torch.nn.Parameter(torch.rand([30, 20]))
+
+            def forward(self, x):
+                return torch._C._nn.linear(x, self.weight, self.bias)
+
+        mod_eager = ModLinear().eval() 
         test_val = torch.rand([50, 20])
         self.check_linear_optimizations_2(mod_eager, 1, 0, "transpose_frozen_linear", (test_val,))
 
@@ -1720,10 +1729,11 @@ class TestFrozenOptimizations(JitTestCase):
 
             def forward(self, x, weight):
                 return torch._C._nn.linear(x, weight, self.bias)
-                j
+
         mod_eager = ModLinear().eval()
         test_val = torch.rand([50, 20])
-        self.check_linear_optimizations_2(mod_eager, 1, 1, "transpose_frozen_linear", (test_val,))
+        test_weight = torch.rand([30, 20])
+        self.check_linear_optimizations_2(mod_eager, 1, 1, "transpose_frozen_linear", (test_val, test_weight))
 
     def check_linear_optimizations_2(self, eager_mod, orig_linears, new_linears, opt_pass, test_vals):
         # TODO: merge with check_linear_optimizations once both diffs land
