@@ -908,9 +908,11 @@ class deviceCountAtLeast(object):
 
 # Only runs the test on the native device type (currently CPU, CUDA, Meta)
 def onlyNativeDeviceTypes(fn):
+    NATIVE_DEVICES = ('cpu', 'cuda', 'meta')
+
     @wraps(fn)
     def only_fn(self, *args, **kwargs):
-        if self.device_type not in ['cpu', 'cuda', 'meta']:
+        if self.device_type not in NATIVE_DEVICES:
             reason = "onlyNativeDeviceTypes: doesn't run on {0}".format(self.device_type)
             raise unittest.SkipTest(reason)
 
