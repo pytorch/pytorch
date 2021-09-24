@@ -27,12 +27,10 @@ c10::ScalarType compute_dtype_mean(const at::Tensor& self, c10::optional<at::Sca
 }
 
 std::vector<int64_t> compute_shape_mv(const at::Tensor & self, const at::Tensor & vec) {
-  // TODO(kreeger): write me!
-  return std::vector<int64_t>({1});
+  return std::vector<int64_t>({self.size(0)});
 }
 
 c10::ScalarType compute_dtype_mv(const at::Tensor & self, const at::Tensor & vec) {
-  // TODO(kreeger): write me!
   return self.scalar_type();
 }
 
