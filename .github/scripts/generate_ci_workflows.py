@@ -51,6 +51,7 @@ LABEL_CIFLOW_SLOW = "ciflow/slow"
 LABEL_CIFLOW_WIN = "ciflow/win"
 LABEL_CIFLOW_XLA = "ciflow/xla"
 LABEL_CIFLOW_NOARCH = "ciflow/noarch"
+LABEL_CIFLOW_PREFIX = "ciflow/"
 
 
 @dataclass
@@ -94,6 +95,7 @@ class CIFlowConfig:
             self.reset_root_job()
             return
         self.labels.add(LABEL_CIFLOW_ALL)
+        assert all(label.startswith(LABEL_CIFLOW_PREFIX) for label in self.labels)
         self.gen_root_job_condition()
 
 
