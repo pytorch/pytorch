@@ -221,7 +221,6 @@ def compiled_module(mod, fw_compiler, bw_compiler):
             self.orig_module = mod
 
         def forward(self, *args, **kwargs):
-            _, p = make_functional(self.orig_module)
-            return compiled_f(p, *args, **kwargs)
+            return compiled_f(tuple(self.orig_module.parameters()), *args, **kwargs)
 
     return CompiledModule()
