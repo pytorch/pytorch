@@ -1036,7 +1036,6 @@ class PackageExporter:
         return self.dependency_graph.all_paths(src, dst)
 
 
-
 # even though these are in the standard library, we do not allow them to be
 # automatically externed since they offer a lot of system level access
 _DISALLOWED_MODULES = ["sys", "io"]
