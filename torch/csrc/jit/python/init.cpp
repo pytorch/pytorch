@@ -668,6 +668,21 @@ void initJITBindings(PyObject* module) {
             ::torch::jit::set_jit_logging_levels(loggingOption);
           })
       .def(
+          "_jit_set_logging_stream",
+          [](std::string stream_name) -> void {
+            if(stream_name == "stdout") {
+              ::torch::jit::set_jit_logging_output_stream(std::cout);
+            }
+            else if(stream_name == "stderr")  {
+              ::torch::jit::set_jit_logging_output_stream(std::cerr);
+            }
+            else {
+              std::cerr << "ERROR: only `stdout` and `stderr`"
+                        << "are supported as output options"
+                        << std::endl;
+            }
+          })
+      .def(
           "_jit_try_infer_type",
           [](py::object obj) -> InferredType {
             return tryToInferType(std::move(obj));
