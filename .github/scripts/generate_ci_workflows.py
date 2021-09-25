@@ -538,7 +538,8 @@ BAZEL_WORKFLOWS = [
     ),
 ]
 
-if __name__ == "__main__":
+
+def main():
     jinja_env = jinja2.Environment(
         variable_start_string="!{{",
         loader=jinja2.FileSystemLoader(str(GITHUB_DIR.joinpath("templates"))),
@@ -571,3 +572,7 @@ if __name__ == "__main__":
                 # During the rollout phase, it has the same effect as LABEL_CIFLOW_DEFAULT
                 ciflow_ruleset.add_label_rule({LABEL_CIFLOW_DEFAULT}, workflow.build_environment)
     ciflow_ruleset.generate_json()
+
+
+if __name__ == "__main__":
+    main()
