@@ -330,10 +330,10 @@ def einsum(*args):
 
 # Wrapper around _histogramdd and _histogramdd_bin_edges needed due to (Tensor, Tensor[]) return type.
 def histogramdd(input: Tensor,
-        bins: Union[List[Tensor], List[int]],
-        range: Optional[List[float]] = None,
-        weight: Optional[Tensor] = None,
-        density: Optional[bool] = False):
+                bins: Union[List[Tensor], List[int]],
+                range: Optional[List[float]] = None,
+                weight: Optional[Tensor] = None,
+                density: bool = False):
     r"""
     histogramdd(input, bins, *, range=None, weight=None, density=False, out=None) -> (Tensor, Tensor[])
 
