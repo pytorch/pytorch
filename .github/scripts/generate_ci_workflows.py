@@ -541,7 +541,7 @@ BAZEL_WORKFLOWS = [
 ]
 
 
-def main():
+def main() -> None:
     jinja_env = jinja2.Environment(
         variable_start_string="!{{",
         loader=jinja2.FileSystemLoader(str(GITHUB_DIR.joinpath("templates"))),
