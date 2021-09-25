@@ -130,9 +130,11 @@ void spmm(
       mat1.layout(),
       mat1.device());
   auto descA = at::cuda::sparse::CuSparseSpMatCsrDescriptor(mat1_32);
+  auto algorithm = CUSPARSE_MM_ALG_DEFAULT;
 #else
   // TODO: update this to support COO sparse layout
   auto descA = at::cuda::sparse::CuSparseSpMatCsrDescriptor(mat1);
+  auto algorithm = CUSPARSE_SPMM_CSR_ALG2;
 #endif
 
   auto descB = at::cuda::sparse::CuSparseDnMatDescriptor(
@@ -149,13 +151,6 @@ void spmm(
         auto alpha_ = alpha.to<scalar_t>();
         cudaDataType compute_type = at::cuda::getCudaDataType<scalar_t>();
         auto handle = at::cuda::getCurrentCUDASparseHandle();
-
-#if defined(CUDA_VERSION) && CUDA_VERSION < 11000
-        auto algorithm = CUSPARSE_MM_ALG_DEFAULT;
-#else
-        // TODO: update this to support COO sparse layout
-        auto algorithm = CUSPARSE_SPMM_CSR_ALG2;
-#endif
 
         size_t buffer_size;
         TORCH_CUDASPARSE_CHECK(cusparseSpMM_bufferSize(
@@ -391,6 +386,13 @@ void addmv_out_sparse_csr(
   auto descX = at::cuda::sparse::CuSparseDnVecDescriptor(*vec_);
   auto descY = at::cuda::sparse::CuSparseDnVecDescriptor(*result_);
 
+  // cusparseSpMVAlg_t was updated in cuda 11.2.1 (cusparse 11.4.0)
+#if CUSPARSE_VERSION >= 11400
+  cusparseSpMVAlg_t alg = CUSPARSE_SPMV_ALG_DEFAULT;
+#else
+  cusparseSpMVAlg_t alg = CUSPARSE_MV_ALG_DEFAULT;
+#endif
+
   // There is no dispatch for kHalf and kBFloat16 types because cusparse
   // computes garbage in this case, latest checked version of cuda is 11.3
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
@@ -401,13 +403,6 @@ void addmv_out_sparse_csr(
         auto alpha_ = alpha.to<scalar_t>();
         cudaDataType compute_type = at::cuda::getCudaDataType<scalar_t>();
         auto handle = at::cuda::getCurrentCUDASparseHandle();
-
-        // cusparseSpMVAlg_t was updated in cuda 11.2.1
-        #if CUSPARSE_VERSION >= 11400
-        cusparseSpMVAlg_t alg = CUSPARSE_SPMV_ALG_DEFAULT;
-        #else
-        cusparseSpMVAlg_t alg = CUSPARSE_MV_ALG_DEFAULT;
-        #endif
 
         size_t buffer_size;
         TORCH_CUDASPARSE_CHECK(cusparseSpMV_bufferSize(
