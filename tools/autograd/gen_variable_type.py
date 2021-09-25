@@ -240,7 +240,7 @@ DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
 
 DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
     # These non-view functions return tensors with storage use_count != 1
-    'thnn_conv2d_forward', 'slow_conv3d_forward', 'channel_shuffle',
+    '_slow_conv2d_forward', 'slow_conv3d_forward', 'channel_shuffle',
 
     # If an input is returned as-is in output, we cannot guarantee its storage_impl
     # use count to be 1 either.
