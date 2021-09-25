@@ -200,6 +200,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/passes/clear_profiling.cpp",
     "torch/csrc/jit/passes/clear_undefinedness.cpp",
     "torch/csrc/jit/passes/common_subexpression_elimination.cpp",
+    "torch/csrc/jit/passes/common_expression_hoisting.cpp",
     "torch/csrc/jit/passes/concat_opt.cpp",
     "torch/csrc/jit/passes/constant_pooling.cpp",
     "torch/csrc/jit/passes/constant_propagation.cpp",
