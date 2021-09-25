@@ -334,43 +334,50 @@ def histogramdd(input: Tensor,
         range: Optional[List[float]] = None,
         weight: Optional[Tensor] = None,
         density: Optional[bool] = False):
-    r"""histogramdd(input, bins, *, range=None, weight=None, density=False, out=None) -> (Tensor, Tensor[])
+    r"""
+    histogramdd(input, bins, *, range=None, weight=None, density=False, out=None) -> (Tensor, Tensor[])
 
     Computes a histogram of the values in a tensor. Interprets the elements of an
     input tensor with innermost dimension D as D-dimensional coordinates.
+
     :attr:`bins` can be a sequence of D ints or a sequence of D 1D tensors.
+
     If :attr:`bins` is a sequence of ints, it specifies the number of equal-width
     bins in each dimension. By default, the lower and upper range of the bins is
     determined by the minimum and maximum elements of the input tensor in the
     corresponding dimension. The :attr:`range` argument can be provided to specify
     ranges for the bins in each dimension.
+
     If :attr:`bins` is a sequence of 1D tensors, it specifies the sequences of bin
     edges, each including their rightmost edge. Each bin sequence should contain
     an increasing sequence of at least 2 elements.
+
     Args:
-	{input}
-	bins: int[] or Tensor[]. If int[], defines the number of equal-width bins
-	      in each dimension. If Tensor[], defines the sequences of bin edges,
-	      each including their rightmost edge.
+        {input}
+        bins: int[] or Tensor[]. If int[], defines the number of equal-width bins
+              in each dimension. If Tensor[], defines the sequences of bin edges,
+              each including their rightmost edge.
     Keyword args:
-	range (tuple of float): Defines the ranges of the bins in each dimension.
-	weight (Tensor): If provided, weight should have the same shape as input
-			 excluding its innermost dimension. Each D-dimensional
-			 coordinate in input contributes its associated weight
-			 towards its bin's result.
-	density (bool): If False, the result will contain the count (or total weight) in each bin.
-			If True, the result is the value of the probability density function over the bins,
-			normalized such that the integral over the range of the bins is 1.
+        range (tuple of float): Defines the ranges of the bins in each dimension.
+        weight (Tensor): If provided, weight should have the same shape as input
+                         excluding its innermost dimension. Each D-dimensional
+                         coordinate in input contributes its associated weight
+                         towards its bin's result.
+        density (bool): If False, the result will contain the count (or total weight)
+                        in each bin. If True, the result is the value of the probability
+                        density function over the bins, normalized such that the integral
+                        over the range of the bins is 1.
     Returns:
-	hist (Tensor): D-dimensional Tensor containing the values of the histogram.
-	bin_edges(Tensor[]): sequence of D 1D Tensors containing the edges of the histogram bins.
+        hist (Tensor): D-dimensional Tensor containing the values of the histogram.
+        bin_edges(Tensor[]): sequence of D 1D Tensors containing the edges of the histogram bins.
+
     Example::
-	>>> torch.histogramdd(torch.tensor([[0., 0.], [1., 1.], [2., 2.]]), bins=(3, 3))
-	histogramdd_return_type(hist=tensor([[1., 0., 0.],
-					    [0., 1., 0.],
-					    [0., 0., 1.]]),
-				bin_edges=(tensor([0.0000, 0.6667, 1.3333, 2.0000]),
-					   tensor([0.0000, 0.6667, 1.3333, 2.0000])))
+        >>> torch.histogramdd(torch.tensor([[0., 0.], [1., 1.], [2., 2.]]), bins=(3, 3))
+        histogramdd_return_type(hist=tensor([[1., 0., 0.],
+                                            [0., 1., 0.],
+                                            [0., 0., 1.]]),
+                                bin_edges=(tensor([0.0000, 0.6667, 1.3333, 2.0000]),
+                                           tensor([0.0000, 0.6667, 1.3333, 2.0000])))
     """
     if isinstance(bins[0], int):
         bin_edges = _VF._histogramdd_bin_edges_cts(input, bins, range=range, weight=weight, density=density)

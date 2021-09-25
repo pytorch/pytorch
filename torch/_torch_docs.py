@@ -4322,32 +4322,6 @@ Example::
 
 """.format(**common_args))
 
-add_docstr(torch.hypot,
-           r"""
-hypot(input, other, *, out=None) -> Tensor
-
-Given the legs of a right triangle, return its hypotenuse.
-
-.. math::
-    \text{out}_{i} = \sqrt{\text{input}_{i}^{2} + \text{other}_{i}^{2}}
-
-The shapes of ``input`` and ``other`` must be
-:ref:`broadcastable <broadcasting-semantics>`.
-""" + r"""
-Args:
-    input (Tensor): the first input tensor
-    other (Tensor): the second input tensor
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> a = torch.hypot(torch.tensor([4.0]), torch.tensor([3.0, 4.0, 5.0]))
-    tensor([5.0000, 5.6569, 6.4031])
-
-""".format(**common_args))
-
 add_docstr(torch.i0,
            r"""
 i0(input, *, out=None) -> Tensor
