@@ -1766,13 +1766,6 @@ histogram(input, bins, *, range=None, weight=None, density=False) -> (Tensor, Te
 See :func:`torch.histogram`
 """)
 
-add_docstr_all('histogramdd',
-               r"""
-histogramdd(input, bins, *, range=None, weight=None, density=False) -> (Tensor, Tensor[])
-
-See :func:`torch.histogramdd`
-""")
-
 add_docstr_all('index_add_',
                r"""
 index_add_(dim, index, tensor, *, alpha=1) -> Tensor
