@@ -125,7 +125,6 @@ void infer_bin_edges_from_input(const Tensor& input, const int64_t D,
 
     TORCH_INTERNAL_ASSERT(min.is_contiguous() && max.is_contiguous());
 
-
     TensorAccessor<scalar_t, 1> min_accessor = min.accessor<scalar_t, 1>();
     TensorAccessor<scalar_t, 1> max_accessor = max.accessor<scalar_t, 1>();
 
