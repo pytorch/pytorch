@@ -15,6 +15,8 @@ import numpy as np
 import torch
 import torch.distributed as dist
 
+import unittest
+
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
@@ -32,7 +34,6 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import SGD
 from torch.testing._internal import common_distributed, common_utils
 from torch.testing._internal.common_utils import (
-    sandcastle_skip_if,
     TEST_WITH_ASAN,
     TEST_WITH_DEV_DBG_ASAN,
 )
@@ -59,7 +60,6 @@ BACKEND = _get_backend_for_tests()
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
-
 def check_same_model_params(model_a: torch.nn.Module, model_b: torch.nn.Module, message: str = "") -> None:
     for p_a, p_b in zip(model_a.parameters(), model_b.parameters()):
         assert torch.allclose(p_a, p_b, atol=1e-3), f"Model parameters differ\n{p_a} {p_b}\n" + message
@@ -68,7 +68,7 @@ def check_same_model_params(model_a: torch.nn.Module, model_b: torch.nn.Module, 
         assert torch.allclose(b_a, b_b), f"Model buffers differ {b_a} - {b_b}\n" + message
 
 
-@sandcastle_skip_if(
+@unittest.skipIf(
     TEST_WITH_ASAN or TEST_WITH_DEV_DBG_ASAN, "CUDA + ASAN doesnt work."
 )
 class TestZeroRedundancyOptimizer(common_distributed.MultiProcessTestCase):
@@ -104,6 +104,10 @@ class TestZeroRedundancyOptimizer(common_distributed.MultiProcessTestCase):
         return dist.init_process_group(backend=backend, store=store, rank=rank, world_size=world_size)
 
 
+# TODO: sandcastle_skip_if does not work here.
+@unittest.skipIf(
+    TEST_WITH_ASAN or TEST_WITH_DEV_DBG_ASAN, "CUDA + ASAN doesnt work."
+)
 class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
     def test_state_dict(self):
         """Check that the ZeroRedundancyOptimizer exposes the expected state dict interface,
