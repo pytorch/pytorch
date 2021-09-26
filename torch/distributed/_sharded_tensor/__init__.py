@@ -10,7 +10,7 @@ from torch.distributed._sharding_spec._internals import (
     get_chunked_dim_size,
     get_split_size,
 )
-from typing import List
+from typing import List, Optional
 
 from .api import (
     CreateOp,
@@ -497,7 +497,7 @@ def shard_parameter(
     setattr(module, param_name, st)
 
 def gather(
-    sharded_tensor: Shardedtensor,
+    sharded_tensor: ShardedTensor,
     dst_rank: int = 0,
     dst_tensor: Optional[torch.Tensor] = None,
 ):
@@ -514,4 +514,4 @@ def gather(
     Returns:
         None
     """
-    return Shardedtensor._gather(sharded_tensor, dst_rank, dst_tensor)
+    return ShardedTensor._gather(sharded_tensor, dst_rank, dst_tensor)

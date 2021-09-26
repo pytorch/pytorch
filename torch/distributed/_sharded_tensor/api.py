@@ -4,7 +4,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import (
     Dict,
-    List
+    List,
+    Optional,
 )
 
 import threading
@@ -177,7 +178,7 @@ class TensorInitParams(object):
                                  pin_memory=False))
 
 def _validate_output_tensor_for_rank(my_rank: int, dst_rank: int, dst_tensor: Optional[torch.Tensor]):
-    if dst == my_rank:
+    if dst_rank == my_rank:
         if not dst_tensor:
             raise ValueError(
                 "Argument ``dst_tensor`` must be specified on destination rank."
@@ -354,7 +355,7 @@ class ShardedTensor(object):
     @classmethod
     def _gather(
         cls,
-        sharded_tensor: Shardedtensor,
+        sharded_tensor: "ShardedTensor",
         dst_rank: int = 0,
         dst_tensor: Optional[torch.Tensor] = None,
     ):
@@ -375,6 +376,7 @@ class ShardedTensor(object):
         if my_rank == dst_rank:
             for sharded_tensor in gathered_shards:
                 sizes = sharded_tensor.metadata().size
+                assert torch.is_tensor(dst_tensor)
                 if torch.eq(sizes, dst_tensor.size()):
                     raise ValueError(
                         f"dst_tensor need to have the same size as metadata.size {sizes}"
@@ -385,7 +387,10 @@ class ShardedTensor(object):
                     # pad starts from last dim https://fburl.com/xgqsds7y
                     idx = 2 * (dims - dim - 1)
                     pad[idx] = sharded_tensor.metadata.shard_offsets[dim]
-                    pad[idx + 1] = sizes[dim] - (sharded_tensor.metadata.shard_offsets[dim] + sharded_tensor.metadata.shard_lengths[dim])
+                    pad[idx + 1] = sizes[dim] - (
+                        sharded_tensor.metadata.shard_offsets[dim] 
+                        + sharded_tensor.metadata.shard_lengths[dim]
+                    )
 
                 padded_tensor = torch.nn.functional.pad(
                     input=sharded_tensor.tensor,
