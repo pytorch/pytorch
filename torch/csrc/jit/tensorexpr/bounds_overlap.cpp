@@ -194,7 +194,7 @@ std::vector<IndexBounds> subtractIndicesBounds(
     return {};
   }
   // All accesses to a buf must have the same dimensionality.
-  TORCH_INTERNAL_ASSERT(A.size() == B.size());
+  TORCH_INTERNAL_ASSERT(A.size() == B.size(), buildErrorMessage());
 
   // Each dimension can be sliced into multiple bound segments.
   std::vector<IndexBounds> boundSlices;
@@ -208,7 +208,8 @@ std::vector<IndexBounds> subtractIndicesBounds(
     for (auto slice : slices) {
       IndexBounds newRegion;
       newRegion.reserve(A.size());
-      TORCH_INTERNAL_ASSERT(remainingOuterBounds.size() == i);
+      TORCH_INTERNAL_ASSERT(
+          remainingOuterBounds.size() == i, buildErrorMessage());
 
       for (size_t j = 0; j < i; ++j) {
         newRegion.push_back(remainingOuterBounds[j]);
@@ -224,7 +225,7 @@ std::vector<IndexBounds> subtractIndicesBounds(
         remaining = A[i];
       } else {
         auto remainingSlices = subtractBound(remaining, slice);
-        TORCH_INTERNAL_ASSERT(remainingSlices.size() == 1);
+        TORCH_INTERNAL_ASSERT(remainingSlices.size() == 1, buildErrorMessage());
         remaining = remainingSlices[0];
       }
     }
