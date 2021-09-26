@@ -172,7 +172,7 @@ class TestWeightNormSparsifier(TestCase):
         for g in sparsifier.module_groups:
             assert isinstance(g['module'], nn.Linear)
             # The module_groups are unordered
-            assert g['fqn'] in ('seq.0', 'linear')
+            assert g['fqn'] in ('seq.0', 'linear', 'head')
 
     def test_step(self):
         model = Model()
