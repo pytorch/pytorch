@@ -24,7 +24,7 @@ env:
   VS_VERSION: "16.8.6"
   VC_YEAR: "2019"
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
-  no_proxy: localhost,127.0.0.1,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock
+  no_proxy: localhost,127.0.0.1,github.com,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock
   TORCH_CUDA_ARCH_LIST: "7.0"
   USE_CUDA: 1
 
@@ -35,12 +35,11 @@ concurrency:
 jobs:
   ciflow_should_run:
     runs-on: ubuntu-18.04
-    if: ${{ (github.event_name != 'pull_request') || (github.event.action !='unassigned') || (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cuda') || contains(github.event.pull_request.labels.*.name, 'ciflow/scheduled') || contains(github.event.pull_request.labels.*.name, 'ciflow/win')) }}
+    if: ${{ (github.repository == 'pytorch/pytorch') && ((github.event_name != 'pull_request') || (github.event.assignee.login != 'pytorchbot' ) || (github.event.action !='unassigned') || (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cuda') || contains(github.event.pull_request.labels.*.name, 'ciflow/scheduled') || contains(github.event.pull_request.labels.*.name, 'ciflow/win'))) }}
     steps:
       - name: noop
         run: echo running ciflow_should_run
   build:
-    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: "windows.4xlarge"
     defaults:
       run:
@@ -94,18 +93,7 @@ jobs:
         run: |
           .jenkins/pytorch/win-build.sh
       # Upload to github so that people can click and download artifacts
-      - name: Upload artifacts to Github
-        if: always()
-        uses: actions/upload-artifact@v2
-        # Don't fail on upload to GH since it's only for user convenience
-        continue-on-error: true
-        with:
-          retention-days: 14
-          if-no-files-found: error
-          name: ${{ env.BUILD_ENVIRONMENT }}
-          path: C:\${{ github.run_id }}\build-results
       - name: Upload artifacts to s3
-        if: always()
         uses: seemethere/upload-artifact-s3@v3
         with:
           retention-days: 14
@@ -134,7 +122,6 @@ jobs:
           rm -rf ./*
 
   generate-test-matrix:
-    if: ${{ github.repository_owner == 'pytorch' }}
     needs: [ciflow_should_run]
     runs-on: ubuntu-18.04
     env:
@@ -142,6 +129,8 @@ jobs:
       NUM_TEST_SHARDS: 2
       NUM_TEST_SHARDS_ON_PULL_REQUEST: 2
       PR_BODY: ${{ github.event.pull_request.body }}
+      NOGPU_RUNNER_TYPE: windows.4xlarge
+      ENABLE_FORCE_ON_CPU_TEST: ''
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
@@ -167,7 +156,6 @@ jobs:
       https_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
       RUN_SMOKE_TESTS_ONLY_ON_PR: False
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
-      CONTINUE_THROUGH_ERROR: ${{ github.repository_owner == 'pytorch' && (github.event_name == 'push' || github.event_name == 'schedule') }}
     needs: [build, generate-test-matrix, ciflow_should_run]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
@@ -206,10 +194,12 @@ jobs:
         run: |
           .\.circleci\scripts\vs_install.ps1
       - name: Install Cuda
+        if: ${{ matrix.config != 'force_on_cpu' }}
         shell: bash
         run: |
           .circleci/scripts/windows_cuda_install.sh
       - name: Install Cudnn
+        if: ${{ matrix.config != 'force_on_cpu' }}
         shell: bash
         run: |
           .circleci/scripts/windows_cudnn_install.sh
@@ -227,29 +217,27 @@ jobs:
         name: Setup Python3
         with:
           python-version: '3.x'
-      - name: Run test scripts
+      - name: Test
         shell: bash
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
+        # Time out the test phase after 3.5 hours
+        timeout-minutes: 210
         run: |
             if [[ $NUM_TEST_SHARDS -ne 2 ]]; then
               export SHARD_NUMBER=0
-            fi
-            if [[ -n $GITHUB_HEAD_REF && "$RUN_SMOKE_TESTS_ONLY_ON_PR" == "true" ]]; then
-              export RUN_SMOKE_TESTS_ONLY=1
             fi
             .jenkins/pytorch/win-test.sh
       - name: Zip test reports for upload
         if: always()
         env:
-          COMMIT_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
+          FILE_SUFFIX: '${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}'
         shell: powershell
         run: |
           # -ir => recursive include all files in pattern
-          7z a "test-reports-$Env:COMMIT_SHA1-$Env:WORKFLOW_ID.zip" -ir'!test\*.xml'
+          7z a "test-reports-$Env:FILE_SUFFIX.zip" -ir'!test\*.xml'
       - uses: actions/upload-artifact@v2
-        name: Store PyTorch Test Reports
+        name: Store Test Reports
         if: always()
         with:
           name: test-reports-${{ matrix.config }}
@@ -257,6 +245,27 @@ jobs:
           if-no-files-found: error
           path:
             pytorch-${{ github.run_id }}/test-reports-*.zip
+      - uses: seemethere/upload-artifact-s3@v3
+        name: Store Test Reports on S3
+        if: always()
+        with:
+          retention-days: 14
+          if-no-files-found: error
+          path:
+            pytorch-${{ github.run_id }}/test-reports-*.zip
+      - name: Install render_test_results dependencies
+        if: always()
+        shell: bash
+        run: |
+          python3 -m pip install junitparser==2.1.1 rich==10.9.0
+      - name: "[[ Click me for rendered test results (useful for finding failing tests) ]]"
+        if: always()
+        shell: bash
+        # Encoding is weird on windows, just try to default to utf-8 if possible
+        env:
+          PYTHONIOENCODING: "utf-8"
+        run: |
+          python3 tools/render_junit.py test/
       - name: Wait until all sessions have drained
         shell: powershell
         if: always()
