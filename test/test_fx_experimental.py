@@ -1468,6 +1468,7 @@ class TestNormalizeOperators(JitTestCase):
             "expand_as",
             "fill_",
             "gradient",
+            "histogramdd",
             "igamma",
             "igammac",
             "index_put",
