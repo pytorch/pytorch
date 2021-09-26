@@ -56,7 +56,7 @@ void TORCH_API set_jit_logging_levels(std::string level);
 
 void TORCH_API set_jit_logging_output_stream(std::ostream& out_stream);
 
-std::ostream& TORCH_API get_jit_logging_output_stream();
+TORCH_API std::ostream& get_jit_logging_output_stream();
 
 std::string TORCH_API getHeader(const Node* node);
 
