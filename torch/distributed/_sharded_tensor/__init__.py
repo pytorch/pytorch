@@ -495,3 +495,23 @@ def shard_parameter(
 
     # Now we can set the attribute appropriately.
     setattr(module, param_name, st)
+
+def gather(
+    sharded_tensor: Shardedtensor,
+    dst_rank: int = 0,
+    dst_tensor: Optional[torch.Tensor] = None,
+):
+    """
+    Creates an full :class:`Tensor` from sharded tensors by gather all shards.
+
+    Args:
+        sharded_tensor (:class `torch.distributed._sharded_tensor.ShardedTensor`): The sharded
+        tensor to gather.
+        dst_rank (int): The rank where full tensor is constructed
+        dst_tensor (:class `torch.Tensor` optional): The output full tensor. Need to and only
+        need to be provided on dst_rank
+
+    Returns:
+        None
+    """
+    return Shardedtensor._gather(sharded_tensor, dst_rank, dst_tensor)

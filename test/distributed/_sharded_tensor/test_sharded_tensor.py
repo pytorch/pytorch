@@ -456,6 +456,35 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         self.assertEqual((expected_h, w), local_shard.size())
         self.assertEqual(local_shard, torch.ones(expected_h, w))
 
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_gather_sharded_ones(self):
+        """ Test _sharded_tensor.ones(...) """
+
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+        h, w = 10, 20
+        sharded_tensor = _sharded_tensor.ones(spec, h, w)
+
+        full_tensor = None
+        if self.rank == 0:
+            full_tensor = torch.zeros(h, w)
+        _sharded_tensor.gather(sharded_tensor, 0, full_tensor)
+
+        if self.rank == 0:
+            self.assertEqual(full_tensor, torch.ones(h, 2))
+        else:
+            assert full_tensor is None
+
     @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()

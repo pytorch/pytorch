@@ -176,6 +176,22 @@ class TensorInitParams(object):
                                  memory_format=torch.contiguous_format,
                                  pin_memory=False))
 
+def _validate_output_tensor_for_rank(my_rank: int, dst_rank: int, dst_tensor: Optional[torch.Tensor]):
+    if dst == my_rank:
+        if not dst_tensor:
+            raise ValueError(
+                "Argument ``dst_tensor`` must be specified on destination rank."
+            )
+        if torch.count_nonzero(dst_tensor)
+            raise ValueError(
+                "Argument ``dst_tensor`` should be a zero tensor."
+            )
+    elif dst_tensor:
+        raise ValueError(
+            "Argument ``dst_tensor`` must NOT be specified "
+            "on non-destination ranks."
+        )
+
 
 class ShardedTensor(object):
     """
@@ -334,6 +350,47 @@ class ShardedTensor(object):
 
         # Barrier for all RPCs to finish on all ranks.
         rpc.api._all_gather(None)
+
+	@classmethod
+    def _gather(
+        cls,
+        sharded_tensor: Shardedtensor,
+        dst_rank: int = 0,
+        dst_tensor: Optional[torch.Tensor] = None,
+    ):
+        my_rank = dist.get_rank(sharded_tensor._process_group)
+        _validate_output_tensor_for_rank(my_rank, dst_rank, dst_tensor)
+
+        shard_tensors = sharded_tensor.local_shards
+
+        gathered_shards = [None for _ in sharded_tensor._process_group.world_size]
+
+        dist.gather_object(
+            obj=shard_tensors,
+            object_gather_list=gathered_shards,
+            dst=dst_rank,
+            group=sharded_tensor._process_group,
+        )
+
+        if my_rank == dst_rank:
+            for sharded_tensor in gathered_shards:
+                sizes = sharded_tensor.metadata().size
+                dims = len(sizes)
+                pad = [0] * 2 * dims
+                for dim in range(dims):
+                    # pad starts from last dim https://fburl.com/xgqsds7y
+                    idx = 2 * (dims - dim - 1)
+                    pad[idx] = sharded_tensor.metadata.shard_offsets[dim]
+                    pad[idx + 1] = sizes[dim] - (sharded_tensor.metadata.shard_offsets[dim] + sharded_tensor.metadata.shard_lengths[dim])
+
+                padded_tensor = torch.nn.functional.pad(
+                    input=sharded_tensor.tensor,
+                    pad=pad,
+                    mode="constant",
+                    value=0,
+                )
+
+                dst_tensor.add_(padded_tensor)
 
     @classmethod
     def _init_from_local_shards(
