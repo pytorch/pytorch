@@ -28,7 +28,7 @@ class TestQuantizedOps(unittest.TestCase):
         output = q_model(*pt_inputs)
 
         f = io.BytesIO()
-        torch.onnx.export(q_model, pt_inputs, f, input_names=input_names, example_outputs=output,
+        torch.onnx.export(q_model, pt_inputs, f, input_names=input_names,
                           operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
         f.seek(0)
         onnx_model = onnx.load(f)
@@ -84,8 +84,6 @@ class TestQuantizedOps(unittest.TestCase):
         self.generic_unary_test(torch.nn.ReLU())
 
     def export_to_onnx(self, model, input, input_names):
-        outputs = model(input)
-
         traced = torch.jit.trace(model, input)
         buf = io.BytesIO()
         torch.jit.save(traced, buf)
@@ -93,7 +91,7 @@ class TestQuantizedOps(unittest.TestCase):
 
         model = torch.jit.load(buf)
         f = io.BytesIO()
-        torch.onnx.export(model, input, f, input_names=input_names, example_outputs=outputs,
+        torch.onnx.export(model, input, f, input_names=input_names,
                           operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
         f.seek(0)
 
