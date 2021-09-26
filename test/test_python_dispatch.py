@@ -1,6 +1,7 @@
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.utils._pytree import tree_map
+from torch.utils._python_dispatch import enable_python_mode
 
 from typing import Iterator, List
 import logging
@@ -23,7 +24,6 @@ def no_dispatch() -> Iterator[None]:
 # 3. Enter dispatcher, wind your way through Autograd
 # 4. Hit Python dispatch key, call __torch_dispatch__
 
-WRAPPER_DEVICE = "meta"
 # TODO: TensorBase should work
 class LoggingTensor(torch.Tensor):
     elem: torch.Tensor
@@ -32,10 +32,15 @@ class LoggingTensor(torch.Tensor):
 
     @staticmethod
     def __new__(cls, elem, *args, **kwargs):
-        # The wrapping tensor (LoggingTensor) is just a meta tensor, so it
-        # doesn't hold any memory (meta tensor is generally the preferred type
-        # of tensor you want to make a subclass from)...
-        r = torch.Tensor._make_subclass(cls, elem.to(WRAPPER_DEVICE), elem.requires_grad)
+        # The wrapping tensor (LoggingTensor) shouldn't hold any
+        # memory for the class in question, but it should still
+        # advertise the same device as before
+        r = torch.Tensor._make_wrapper_subclass(
+            cls, elem.size(),
+            # TODO: clone strides and storage aliasing
+            dtype=elem.dtype, layout=elem.layout,
+            device=elem.device, requires_grad=elem.requires_grad
+        )
         # ...the real tensor is held as an element on the tensor.
         r.elem = elem
         return r
@@ -51,7 +56,10 @@ class LoggingTensor(torch.Tensor):
         def wrap(e):
             return LoggingTensor(e) if isinstance(e, torch.Tensor) else e
 
-        rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
+        # no_dispatch is only needed if you use enable_python_mode.
+        # It prevents infinite recursion.
+        with no_dispatch():
+            rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
         logging.getLogger("LoggingTensor").info(f"{func.__module__}.{func.__name__}", args, kwargs, rs)
         return rs
 
@@ -239,6 +247,17 @@ $5 = torch._ops.aten.kl_div($0, $1, 2, log_target=True)''')
         self.assertIsInstance(y, LoggingTensor)
         self.assertRaises(RuntimeError, lambda: y.resize_(4))
 
+    def test_storage(self) -> None:
+        # For now, just make sure it doesn't crash.  Ideally, we should
+        # return some virtual storage that is safe to work with
+        x = LoggingTensor(torch.ones(1))
+        self.assertRaises(RuntimeError, lambda: x.storage())
+
+    def test_make_wrapper_subclass_noalloc(self) -> None:
+        # This is ludicrously big (8TB) and this should pass because wrapper
+        # subclasses don't allocate
+        torch.Tensor._make_wrapper_subclass(LoggingTensor, (1000000000000,))
+
     def test_version(self) -> None:
         x = LoggingTensor(torch.ones(1))
         prev_vc = x._version
@@ -349,26 +368,134 @@ $6 = torch._ops.aten.add_($1, $5)''')
             a = torch.Tensor._make_subclass(Foo, LoggingTensor(torch.rand(2)))
         with self.assertRaisesRegex(RuntimeError, err_msg):
             b = LoggingTensor(torch.rand(2)).as_subclass(Foo)
-
-        # And in case where we don't know if the user wants this subclass
-        # overwritten, raise a nice error.
-        # The standard LoggingTensor will fail because it is not on the right device
-        with self.assertRaisesRegex(TypeError, "expected.*device=cpu.*device=meta"):
+        with self.assertRaisesRegex(RuntimeError, err_msg):
             Foo(LoggingTensor(torch.rand(2)))
 
-        # And if we put it on the right device, we still get a nice error
-        try:
-            global WRAPPER_DEVICE
-            prev_device = WRAPPER_DEVICE
-            WRAPPER_DEVICE = "cpu"
+        with self.assertRaisesRegex(TypeError, "Foo must define __torch_dispatch__"):
+            torch.Tensor._make_wrapper_subclass(Foo, (2, 2))
 
-            err_msg = "Creating a new Tensor subclass Foo.*python object of type LoggingTensor"
-            with self.assertRaisesRegex(RuntimeError, err_msg):
-                Foo(LoggingTensor(torch.rand(2)))
+    def test_new_ones(self) -> None:
+        class MyTensor(torch.Tensor):
+            __torch_function__ = torch._C._disabled_torch_function_impl
 
-        finally:
-            WRAPPER_DEVICE = prev_device
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                return MyTensor(3)
 
+        self.assertEqual(type(MyTensor(2).new_ones(3)), MyTensor)
+
+    def test_enable_python_mode_error(self) -> None:
+        with self.assertRaisesRegex(ValueError, "__torch_dispatch__"):
+            with enable_python_mode(torch.Tensor):
+                pass
+        z = LoggingTensor(torch.empty([]))
+        with self.assertRaisesRegex(ValueError, "must be the type"):
+            with enable_python_mode(z):
+                pass
+
+    def test_enable_python_mode_basic(self) -> None:
+        with enable_python_mode(LoggingTensor):
+            z = torch.empty([])
+            self.assertTrue(isinstance(z, LoggingTensor))
+
+    def test_enable_python_mode_unrelated_tensors(self) -> None:
+        x = torch.randn([])
+        y = torch.randn([])
+        with enable_python_mode(LoggingTensor):
+            z = x + y
+            self.assertTrue(isinstance(z, LoggingTensor))
+
+    def test_enable_python_mode_subclass_priority(self) -> None:
+        class ErrorA(RuntimeError):
+            pass
+
+        class ErrorB(RuntimeError):
+            pass
+
+        class A(torch.Tensor):
+            @staticmethod
+            def __new__(cls, elem):
+                return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                raise ErrorA
+
+        class B(A):
+            @staticmethod
+            def __new__(cls, elem):
+                return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                raise ErrorB
+
+        a = A(torch.empty(1))
+        b = B(torch.empty(1))
+        with self.assertRaises(ErrorA):
+            a + a
+
+        # B has precedence over A due to the subclass relationship
+        with self.assertRaises(ErrorB):
+            with enable_python_mode(A):
+                b + b
+        with self.assertRaises(ErrorB):
+            with enable_python_mode(B):
+                a + a
+        with self.assertRaises(ErrorB):
+            with enable_python_mode(B):
+                a + b
+
+    def test_enable_python_mode_respects_no_dispatch(self) -> None:
+        with enable_python_mode(LoggingTensor):
+            z = torch.ones([2, 3])
+            self.assertTrue(isinstance(z, LoggingTensor))
+            with no_dispatch():
+                expected = torch.ones([2, 3])
+                self.assertEqual(z.elem, expected)
+
+    def test_nested_enable_python_mode(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "has already been set"):
+            with enable_python_mode(LoggingTensor):
+                with enable_python_mode(LoggingTensor):
+                    pass
+
+    def test_enable_python_mode_subclass_autograd_device_check(self) -> None:
+        class NonWrapperSublass(torch.Tensor):
+            elem: torch.Tensor
+
+            __slots__ = ['elem']
+
+            @staticmethod
+            def __new__(cls, elem, *args, **kwargs):
+                # Wrong device here!
+                r = torch.Tensor._make_subclass(cls, elem.to("meta"), elem.requires_grad)
+                # ...the real tensor is held as an element on the tensor.
+                r.elem = elem
+                return r
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                def unwrap(e):
+                    return e.elem if isinstance(e, NonWrapperSublass) else e
+
+                def wrap(e):
+                    return NonWrapperSublass(e) if isinstance(e, torch.Tensor) else e
+
+                # no_dispatch is only needed if you use enable_python_mode.
+                # It prevents infinite recursion.
+                with no_dispatch():
+                    rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
+                logging.getLogger("NonWrapperSublass").info(f"{func.__module__}.{func.__name__}", args, kwargs, rs)
+                return rs
+
+        x = NonWrapperSublass(torch.tensor([3.0, 4.0], requires_grad=True))
+        y = torch.randn(2, requires_grad=True)
+        z = x * y
+        self.assertIsInstance(z, NonWrapperSublass)
+        z.sum().backward(torch.tensor(1))
+        self.assertEqual(x.grad, y)
+        self.assertEqual(y.grad, x)
 
 if __name__ == '__main__':
     run_tests()

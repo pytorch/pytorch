@@ -1890,16 +1890,60 @@ REGISTER_OPERATOR_FUNCTOR(
         LogAndDumpSchema(n);
         return nullptr;
       }
-      return [](ProcessedNode* p_node) {
+      auto te = createSignedLog1p();
+      return [te](ProcessedNode* p_node) {
         const auto& input = p_node->Input(0).toTensor();
         if (p_node->Output(0).isNone()) {
-          p_node->Output(0) = signed_log1p(input);
-        } else {
-          auto& out = p_node->Output(0).toTensor();
+          p_node->Output(0) = create_empty_from(input);
+        }
+        auto& out = p_node->Output(0).toTensor();
+        if (!te || !te->supports(input)) {
           fastResizeToZero(out);
           signed_log1p_out(out, input);
+          return;
         }
+        at::native::resize_(out, input.sizes(), c10::nullopt);
+        int64_t nn = input.numel();
+        te->call({out.data_ptr(), input.data_ptr(), &nn});
       };
+    });
+
+REGISTER_OPERATOR_FUNCTOR(
+    aten::remainder,
+    aten_remainder,
+    [](Node* n) -> SROperator {
+      if (n->matches(torch::schema(
+              "aten::remainder.Tensor(Tensor self, Tensor other) -> Tensor"))) {
+        return [](ProcessedNode* p_node) {
+          const auto& self = p_node->Input(0).toTensor();
+          if (p_node->Output(0).isNone()) {
+            p_node->Output(0) =
+                at::cpu::remainder(self, p_node->Input(1).toTensor());
+          } else {
+            auto& out = p_node->Output(0).toTensor();
+            fastResizeToZero(out);
+            at::cpu::remainder_out(out, self, p_node->Input(1).toTensor());
+          }
+        };
+      }
+      if (n->matches(torch::schema(
+              "aten::remainder.Scalar(Tensor self, Scalar other) -> Tensor"))) {
+        return [](ProcessedNode* p_node) {
+          const auto& self = p_node->Input(0).toTensor();
+          if (p_node->Output(0).isNone()) {
+            p_node->Output(0) =
+                at::native::remainder(self, p_node->Input(1).toScalar());
+          } else {
+            auto& out = p_node->Output(0).toTensor();
+            fastResizeToZero(out);
+            at::native::remainder_out(self, p_node->Input(1).toScalar(), out);
+          }
+        };
+      }
+
+      // Unrecognized overload
+      LogAndDumpSchema(n);
+      return nullptr;
     });
 } // namespace jit
 } // namespace torch
