@@ -376,8 +376,7 @@ class ShardedTensor(object):
         if my_rank == dst_rank:
             for sharded_tensor in gathered_shards:
                 sizes = sharded_tensor.metadata().size
-                assert torch.is_tensor(dst_tensor)
-                if torch.eq(sizes, dst_tensor.size()):
+                if sizes != dst_tensor.size():
                     raise ValueError(
                         f"dst_tensor need to have the same size as metadata.size {sizes}"
                     )
