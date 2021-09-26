@@ -2884,7 +2884,7 @@ class TestReductions(TestCase):
             # numpy.histogramdd expects range to be specified as a sequence of D (lower, upper) tuples
             reshaped_range = None if not bin_range else [(bin_range[2 * i], bin_range[2 * i + 1]) for i in range(D)]
 
-            (np_hist, np_bin_edges) = np.histogramdd(reshaped_t, np_bins,\
+            (np_hist, np_bin_edges) = np.histogramdd(reshaped_t, np_bins,
                                                      range=reshaped_range, weights=reshaped_wt, density=density)
 
             return (torch.from_numpy(np_hist).to(dtype), [torch.from_numpy(t).to(dtype) for t in np_bin_edges])
