@@ -510,7 +510,6 @@ Other Operations
     gcd
     histc
     histogram
-    histogramdd
     meshgrid
     lcm
     logcumsumexp
