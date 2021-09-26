@@ -12,8 +12,8 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
 
 Features described in this documentation are classified by release status:
 
-  *Stable:*  These features will be maintained long-term and there should generally
-  be no major performance limitations or gaps in documentation.
+  *Stable:*  These features will be maintained for a long-term and there should generally
+  be no major performance limitations or gaps in the documentation.
   We also expect to maintain backwards compatibility (although
   breaking changes can happen and notice will be given one release ahead
   of time).
