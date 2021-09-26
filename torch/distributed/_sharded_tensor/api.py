@@ -182,7 +182,7 @@ def _validate_output_tensor_for_rank(my_rank: int, dst_rank: int, dst_tensor: Op
             raise ValueError(
                 "Argument ``dst_tensor`` must be specified on destination rank."
             )
-        if torch.count_nonzero(dst_tensor)
+        if torch.count_nonzero(dst_tensor):
             raise ValueError(
                 "Argument ``dst_tensor`` should be a zero tensor."
             )
@@ -210,7 +210,7 @@ class ShardedTensor(object):
     create_op specified by tensor_init_params.create_op, e.g., torch.ones, or
     torch.empty
 
-    Args:
+    Arg(:
         sharding_spec (:class:`torch.distributed._sharding_spec.ShardingSpec`): The specification
             describing how to shard the Tensor.
         size (int...): a sequence of integers defining the shape of the output
@@ -351,7 +351,7 @@ class ShardedTensor(object):
         # Barrier for all RPCs to finish on all ranks.
         rpc.api._all_gather(None)
 
-	@classmethod
+    @classmethod
     def _gather(
         cls,
         sharded_tensor: Shardedtensor,
@@ -375,6 +375,10 @@ class ShardedTensor(object):
         if my_rank == dst_rank:
             for sharded_tensor in gathered_shards:
                 sizes = sharded_tensor.metadata().size
+                if torch.eq(sizes, dst_tensor.size()):
+                    raise ValueError(
+                        f"dst_tensor need to have the same size as metadata.size {sizes}"
+                    )
                 dims = len(sizes)
                 pad = [0] * 2 * dims
                 for dim in range(dims):
