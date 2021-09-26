@@ -659,11 +659,11 @@ class DistributedDataParallelTest(
         os.environ["NCCL_BLOCKING_WAIT"] = "1"
         # TODO: smaller timeout can fail since PG NCCl does health check in
         # constructor. Look into reducing this test's runtime.
-        timeout = timedelta(seconds=15)
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size, timeout=timeout)
+        # provide sufficient timeout to initialize NCCL comm.
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size, timeout=timedelta(seconds=15))
         pg_gloo = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
-        pg.barrier().wait()
+        pg.barrier().wait(timedelta(seconds=5))
         # Simulate stuckness in rank 0.
         if self.rank == 0:
             pg_gloo.barrier().wait()
@@ -672,7 +672,7 @@ class DistributedDataParallelTest(
         if self.rank != 0:
             # Time out due to rank 0 not calling into allreduce.
             with self.assertRaises(RuntimeError):
-                pg.allreduce([inp]).wait()
+                pg.allreduce([inp]).wait(timedelta(seconds=5))
 
             # Now when nonzero rank attempts to use communicator, original failure reason should be logged.j
             try:

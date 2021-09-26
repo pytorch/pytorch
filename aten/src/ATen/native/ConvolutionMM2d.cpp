@@ -210,7 +210,7 @@ void slow_conv2d_backward_update_grad_input_frame(
     int64_t pad_width) {
   auto grad_output_2d = grad_output.reshape(
       {grad_output.size(0), grad_output.size(1) * grad_output.size(2)});
-  fgrad_input.addmm_(weight, grad_output_2d, 0, 1);
+  at::mm_out(fgrad_input, weight, grad_output_2d);
 
   grad_input.zero_();
   unfolded2d_acc_stub(
@@ -236,7 +236,6 @@ void slow_conv2d_backward_out_cpu_template(
     const Tensor& input_,
     const Tensor& weight_,
     const Tensor& finput,
-    Tensor& fgrad_input,
     IntArrayRef kernel_size,
     IntArrayRef stride,
     IntArrayRef padding) {
@@ -264,22 +263,20 @@ void slow_conv2d_backward_out_cpu_template(
   const Tensor input = input_.contiguous();
   const Tensor grad_output = grad_output_.contiguous();
   grad_input.resize_as_(input);
-  fgrad_input.resize_as_(finput);
-  fgrad_input.zero_();
   const Tensor tweight = weight.transpose(0, 1);
   const int64_t batch_size = input.size(0);
   at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
     NoGradGuard no_grad;
     AutoDispatchBelowADInplaceOrView non_variable_type_mode;
+    auto fgrad_input = at::empty(finput.sizes().slice(1), finput.options());
     for (int64_t t = start; t < end; t++) {
       Tensor grad_input_t = grad_input[t];
       Tensor grad_output_t = grad_output[t];
-      Tensor fgrad_input_t = fgrad_input[t];
       slow_conv2d_backward_update_grad_input_frame(
           grad_input_t,
           grad_output_t,
           tweight,
-          fgrad_input_t,
+          fgrad_input,
           kernel_height,
           kernel_width,
           stride_height,
@@ -290,51 +287,26 @@ void slow_conv2d_backward_out_cpu_template(
   });
 }
 
-void slow_conv2d_backward_parameters_frame(
+void slow_conv2d_backward_weight_frame(
     Tensor& grad_weight,
-    Tensor& grad_bias,
     Tensor& grad_output,
     const Tensor& finput) {
   auto grad_output_2d = grad_output.view(
       {grad_output.size(0), grad_output.size(1) * grad_output.size(2)});
-  if (grad_weight.defined()) {
-    const Tensor tfinput = finput.transpose(0, 1);
-    grad_weight.addmm_(grad_output_2d, tfinput);
-  }
-
-  if (grad_bias.defined()) {
-    AT_DISPATCH_FLOATING_TYPES_AND(
-        at::ScalarType::BFloat16,
-        grad_output.scalar_type(),
-        "slow_conv2d_backward_parameters",
-        [&] {
-          auto grad_output_2d_acc = grad_output_2d.accessor<scalar_t, 2>();
-          auto grad_bias_acc = grad_bias.accessor<scalar_t, 1>();
-          const auto sz = grad_output_2d.size(1);
-          for (int64_t i = 0; i < grad_bias.size(0); i++) {
-            scalar_t sum = 0;
-            for (int64_t k = 0; k < sz; k++) {
-              sum += grad_output_2d_acc[i][k];
-            }
-            grad_bias_acc[i] += sum;
-          }
-        });
-  }
+  const Tensor tfinput = finput.transpose(0, 1);
+  grad_weight.addmm_(grad_output_2d, tfinput);
 }
 
-static void slow_conv2d_backward_parameters_out_cpu_template(
+static void slow_conv2d_backward_weight_out_cpu_template(
     Tensor& grad_weight,
-    Tensor& grad_bias,
     const Tensor& input_,
     const Tensor& grad_output_,
     const Tensor& finput,
-    Tensor fgrad_input,
     IntArrayRef kernel_size,
     IntArrayRef stride,
     IntArrayRef padding) {
   CheckedFrom c = "slow_conv2d_backward_parameters_cpu";
   auto grad_weight_arg = TensorArg(grad_weight, "grad_weight_arg", 0);
-  auto grad_bias_arg = TensorArg(grad_bias, "grad_bias_arg", 0);
 
   const int64_t kernel_height = kernel_size[0];
   const int64_t kernel_width = kernel_size[1];
@@ -344,20 +316,14 @@ static void slow_conv2d_backward_parameters_out_cpu_template(
   const int64_t stride_width = stride[1];
 
   Tensor grad_weight_2d;
-  if (grad_weight.defined()) {
-    checkContiguous(c, grad_weight_arg);
-    grad_weight_2d = view_weight_2d(grad_weight);
-  }
-
-  if (grad_bias.defined()) {
-    checkContiguous(c, grad_bias_arg);
-  }
+  checkContiguous(c, grad_weight_arg);
+  grad_weight_2d = view_weight_2d(grad_weight);
 
   slow_conv2d_shape_check(
       input_,
       grad_output_,
       grad_weight_2d,
-      grad_bias,
+      {},
       kernel_height,
       kernel_width,
       stride_height,
@@ -377,21 +343,21 @@ static void slow_conv2d_backward_parameters_out_cpu_template(
       finput_t = finput[t];
     }
 
-    slow_conv2d_backward_parameters_frame(
-        grad_weight_2d, grad_bias, grad_output_t, finput_t);
+    slow_conv2d_backward_weight_frame(
+        grad_weight_2d, grad_output_t, finput_t);
   }
 }
 
 } // namespace
 
-std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_forward_out_cpu(const Tensor& self,
+std::tuple<Tensor&, Tensor&> slow_conv2d_forward_out_cpu(
+    const Tensor& self,
     const Tensor& weight_,
     IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding,
     Tensor& output,
-    Tensor& finput,
-    Tensor& fgrad_input) {
+    Tensor& finput) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
@@ -474,10 +440,10 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_forward_out_cpu(const Tensor& 
     }
   });
 
-  return std::tuple<Tensor&, Tensor&, Tensor&>(output, finput, fgrad_input);
+  return std::tuple<Tensor&, Tensor&>(output, finput);
 }
 
-std::tuple<Tensor, Tensor, Tensor> slow_conv2d_forward_cpu(
+std::tuple<Tensor, Tensor> slow_conv2d_forward_cpu(
     const Tensor& self,
     const Tensor& weight,
     IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
@@ -489,7 +455,6 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv2d_forward_cpu(
 
   auto output = at::empty({0}, self.options());
   auto finput = at::empty({0}, self.options());
-  auto fgrad_input = at::empty({0}, self.options());
   at::native::slow_conv2d_forward_out_cpu(
       self,
       weight,
@@ -498,19 +463,18 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv2d_forward_cpu(
       stride,
       padding,
       output,
-      finput,
-      fgrad_input);
-  return std::make_tuple(output, finput, fgrad_input);
+      finput);
+  return std::make_tuple(output, finput);
 }
 
-std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_backward_out_cpu(const Tensor& grad_output,
+std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_backward_out_cpu(
+    const Tensor& grad_output,
     const Tensor& self,
     const Tensor& weight,
     IntArrayRef kernel_size,
     IntArrayRef stride,
     IntArrayRef padding,
     const Tensor& finput,
-    const Tensor& fgrad_input,
     Tensor& grad_input,
     Tensor& grad_weight,
     Tensor& grad_bias) {
@@ -521,31 +485,23 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_backward_out_cpu(const Tensor&
         self,
         weight,
         finput,
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-        const_cast<Tensor&>(fgrad_input),   // cast away auto-generated const of buffer
         kernel_size,
         stride,
         padding);
   }
 
+  if (grad_bias.defined()) {
+    at::sum_out(grad_bias, grad_output, IntArrayRef{0, 2, 3});
+  }
+
   if (grad_weight.defined()) {
     grad_weight.resize_(weight.sizes());
     grad_weight.zero_();
-  }
-
-  if (grad_bias.defined()) {
-    grad_bias.resize_({grad_output.size(1)});
-    grad_bias.zero_();
-  }
-
-  if (grad_weight.defined() || grad_bias.defined()) {
-    slow_conv2d_backward_parameters_out_cpu_template(
+    slow_conv2d_backward_weight_out_cpu_template(
         grad_weight,
-        grad_bias,
         self,
         grad_output,
         finput,
-        fgrad_input,
         kernel_size,
         stride,
         padding);
@@ -563,7 +519,6 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv2d_backward_cpu(
     IntArrayRef stride,
     IntArrayRef padding,
     const Tensor& finput,
-    const Tensor& fgrad_input,
     std::array<bool, 3> output_mask) {
   Tensor grad_input;
   Tensor grad_weight;
@@ -589,7 +544,6 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv2d_backward_cpu(
       stride,
       padding,
       finput,
-      fgrad_input,
       grad_input,
       grad_weight,
       grad_bias);
@@ -603,8 +557,7 @@ Tensor & thnn_conv2d_out(const Tensor & self, const Tensor & weight, IntArrayRef
   const Tensor& bias = *bias_maybe_owned;
 
   Tensor finput = at::empty({0}, self.options());
-  Tensor fgrad_input = at::empty({0}, self.options());
-  return std::get<0>(at::thnn_conv2d_forward_out(output, finput, fgrad_input, self, weight, kernel_size, bias, stride, padding));
+  return std::get<0>(at::_slow_conv2d_forward_out(output, finput, self, weight, kernel_size, bias, stride, padding));
 }
 
 Tensor thnn_conv2d(const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt, IntArrayRef stride, IntArrayRef padding) {
@@ -612,7 +565,7 @@ Tensor thnn_conv2d(const Tensor & self, const Tensor & weight, IntArrayRef kerne
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  return std::get<0>(at::thnn_conv2d_forward(self, weight, kernel_size, bias, stride, padding));
+  return std::get<0>(at::_slow_conv2d_forward(self, weight, kernel_size, bias, stride, padding));
 }
 
 } // namespace native
