@@ -75,7 +75,7 @@ void TORCH_API set_jit_logging_output_stream(std::ostream& stream) {
   JitLoggingConfig::getInstance().setOutputStream(stream);
 }
 
-std::ostream& TORCH_API get_jit_logging_output_stream()  {
+TORCH_API std::ostream& get_jit_logging_output_stream()  {
   return JitLoggingConfig::getInstance().getOutputStream();
 }
 
