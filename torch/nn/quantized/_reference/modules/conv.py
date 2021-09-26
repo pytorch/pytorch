@@ -67,7 +67,6 @@ class _ConvNd(torch.nn.modules.conv._ConvNd):
         model
         """
         # supress mypy warning
-        assert isinstance(self.weight, torch.Tensor)
         assert isinstance(self.weight_scale, torch.Tensor)
         assert isinstance(self.weight_zero_point, torch.Tensor)
         assert isinstance(self.weight_axis, torch.Tensor)
