@@ -78,7 +78,9 @@ inline bool Argument::isBackwardCompatibleWith(
     const Argument* rhs = &old;
     if (!(lhs->name() == rhs->name()
         && lhs->N() == rhs->N()
-        && lhs->alias_info() == rhs->alias_info())) {
+          && (lhs->alias_info() == rhs->alias_info()
+              || (lhs->alias_info() != nullptr && rhs->alias_info() != nullptr
+                  && *lhs->alias_info() == *rhs->alias_info())))) {
       return false;
     }
     if (lhs->kwarg_only() && !rhs->kwarg_only()) {

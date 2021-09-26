@@ -1,9 +1,12 @@
 import torch
-from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.jit_utils import JitTestCase, execWrapper
 import operator
 
-from torch.testing import FileCheck
 
+from torch.testing import FileCheck
+from torch.testing._internal.common_utils import make_tensor
+
+from textwrap import dedent
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -94,7 +97,7 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         @torch.jit.script
         def foo(i: int, z):
             x = torch.ones([2, 3, 4, 5])
-            y = z.view([i, 3, 2, i])
+            y = z.view([z.size(i), 3, 2, z.size(i)])
             if i == 4:
                 return x
             else:
@@ -177,3 +180,78 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             torch._C._jit_pass_peephole(fn.graph)
             torch._C._jit_pass_constant_propagation(fn.graph)
             self.checkShapeAnalysis(out_size, fn.graph, assert_propagation=True)
+
+    def test_arange_shape(self):
+        # no opinfo for tensor constructors
+        inps = [
+            (10,),
+            (10, 10),
+            (0, 10),
+            (0, 1000),
+            (1, -1, -1),
+            (1, 0, -1),
+            (1, 2, 1),
+            (0.6, 0.89, 0.1),
+            (1, 10, 0.3),
+            (1, 10, 4),
+            (0.6, 0.7, 0.8),
+            (1, 10, 0.3),
+            # (True,),  TODO: https://github.com/pytorch/pytorch/issues/63405
+            # (False,), TODO: https://github.com/pytorch/pytorch/issues/63405
+            (0, 5),
+            (0, 5, 2),
+            (0, 5 + 1e-6),
+            (0, 5 - 1e-6),
+            (10, -1 + 1e-6, -1),
+            (10, -1, -1),
+            (10, -1 - 1e-6, -1),
+        ]
+
+        for inp in inps:
+            funcs_template = dedent('''
+            def func():
+                return torch.arange({args})
+            ''')
+
+            inp_s = str(inp)[1:-1]  # remove tuple parens
+            funcs_str = funcs_template.format(args=inp_s)
+            scope = {}
+            execWrapper(funcs_str, globals(), scope)
+            cu = torch.jit.CompilationUnit(funcs_str)
+            self.checkShapeAnalysis(list(cu.func().size()), cu.func.graph, assert_propagation=True, constant_prop=False)
+
+    def test_shape_embedding_bag(self):
+        # TODO: merge into opinfos, having difficulties there
+        with torch.no_grad():
+            def make_arg(shape, low=None, high=None):
+                return make_tensor(shape, device='cpu', dtype=torch.int64,
+                                   low=low, high=high, requires_grad=False)
+
+            nn_inps = (
+                (make_arg((40,), 0, 9), torch.nn.Embedding(20, embedding_dim=64, max_norm=1.0)),
+                (make_arg((2, 4), 0, 9), torch.nn.Embedding(10, 20, sparse=True)),
+                (make_arg(()), torch.nn.Embedding(0, 0, sparse=True)),
+                (make_arg((2, 4), 0, 9), torch.nn.Embedding(10, 0, sparse=True)),
+                (make_arg((4,), 0, 21), torch.nn.Embedding(22, 5, max_norm=1.0)),
+                (make_arg((2,), 0, 1), torch.nn.Embedding.from_pretrained(torch.arange(6.).view(2, 3), max_norm=2.,
+                                                                          norm_type=.5, scale_grad_by_freq=False, sparse=True)),
+            )
+
+            for inp, module in nn_inps:
+                kwargs = {
+                    "weight": module.weight.detach(),
+                    "padding_idx": module.padding_idx,
+                    "max_norm": module.max_norm,
+                    "norm_type": module.norm_type,
+                    "scale_grad_by_freq": module.scale_grad_by_freq,
+                    "sparse": module.sparse,
+                }
+
+                out_size = torch.nn.functional.embedding(inp, **kwargs).size()
+
+                def foo(x):
+                    return torch.nn.functional.embedding(inp, **kwargs)
+
+                fn = torch.jit.trace(foo, (inp.detach(),), check_trace=False)
+
+                self.checkShapeAnalysis(out_size, fn.graph, assert_propagation=True, constant_prop=False)
