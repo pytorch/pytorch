@@ -243,7 +243,8 @@ LazyNativeFunctions::convolution_backward_overrideable(
     int64_t groups, std::array<bool, 3> output_mask) {
   // Lower to cudnn_convolution_backward when possbile
   if (at::globalContext().userEnabledCuDNN() &&
-      lazy_tensors::sys_util::GetEnvBool("LTC_TS_CUDA", true)) {
+      lazy_tensors::compiler::TSComputationClient::HardwareDeviceType() ==
+          at::kCUDA) {
     LTC_FN_COUNTER("lazy::");
     auto result = LazyTensor::convolution_backward_overrideable(
         bridge::GetLtcTensor(grad_output), bridge::GetLtcTensor(input),
