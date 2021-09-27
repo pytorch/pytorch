@@ -450,7 +450,7 @@ void IRPrinter::visit(FreePtr v) {
 }
 
 void IRPrinter::visit(LetPtr v) {
-  os() << dtypeToCppString(v->dtype()) << " " << *v->var();
+  os() << dtypeToCppString(v->var()->dtype()) << " " << *v->var();
   os() << " = " << *v->value();
   os() << ";" << std::endl;
 }
