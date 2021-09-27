@@ -12,11 +12,12 @@ if "%BUILD_ENVIRONMENT%"=="" (
     set CONDA_PARENT_DIR=C:\Jenkins
 )
 if NOT "%BUILD_ENVIRONMENT%"=="" (
-    IF EXIST %CONDA_PARENT_DIR%\Miniconda3 ( rd /s /q %CONDA_PARENT_DIR%\Miniconda3 )
-    curl --retry 3 https://repo.anaconda.com/miniconda/Miniconda3-latest-Windows-x86_64.exe --output %TMP_DIR_WIN%\Miniconda3-latest-Windows-x86_64.exe
-    if %errorlevel% neq 0 ( exit /b %errorlevel% )
-    %TMP_DIR_WIN%\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=%CONDA_PARENT_DIR%\Miniconda3
-    if %errorlevel% neq 0 ( exit /b %errorlevel% )
+    IF NOT EXIST %CONDA_PARENT_DIR%\Miniconda3 (
+      curl --retry 3 https://repo.anaconda.com/miniconda/Miniconda3-latest-Windows-x86_64.exe --output %TMP_DIR_WIN%\Miniconda3-latest-Windows-x86_64.exe
+      if %errorlevel% neq 0 ( exit /b %errorlevel% )
+      %TMP_DIR_WIN%\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=%CONDA_PARENT_DIR%\Miniconda3
+      if %errorlevel% neq 0 ( exit /b %errorlevel% )
+    )
 )
 call %CONDA_PARENT_DIR%\Miniconda3\Scripts\activate.bat %CONDA_PARENT_DIR%\Miniconda3
 if NOT "%BUILD_ENVIRONMENT%"=="" (
@@ -63,26 +64,23 @@ set NUMBAPRO_NVVM=%CUDA_PATH%\nvvm\bin\nvvm64_32_0.dll
 
 set PYTHONPATH=%TMP_DIR_WIN%\build;%PYTHONPATH%
 
-if NOT "%BUILD_ENVIRONMENT%"=="" (
-    pushd %TMP_DIR_WIN%\build
-    copy /Y %PYTORCH_FINAL_PACKAGE_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z %TMP_DIR_WIN%\
-    :: 7z: -aos skips if exists because this .bat can be called multiple times
-    7z x %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z -aos
-    popd
-) else (
-    xcopy /s %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torch %TMP_DIR_WIN%\build\torch\
+:: Install pre-built bdist_wheel
+FOR %%A IN (%PYTORCH_FINAL_PACKAGE_DIR%\*.whl) DO (
+    call python -m pip install %%A
+    if %errorlevel% neq 0 ( exit /b %errorlevel% )
 )
+@echo off
+for /f %%W in ('python -c "from distutils.sysconfig import get_python_lib; print(get_python_lib())"') DO set site_packages=%%W
+set TORCH_CMAKE_PREFIX=%site_packages%\torch
 
 @echo off
 echo @echo off >> %TMP_DIR_WIN%/ci_scripts/pytorch_env_restore.bat
 for /f "usebackq tokens=*" %%i in (`set`) do echo set "%%i" >> %TMP_DIR_WIN%/ci_scripts/pytorch_env_restore.bat
 @echo on
 
-if NOT "%BUILD_ENVIRONMENT%" == "" (
-  :: Create a shortcut to restore pytorch environment
-  echo @echo off >> %TMP_DIR_WIN%/ci_scripts/pytorch_env_restore_helper.bat
-  echo call "%TMP_DIR_WIN%/ci_scripts/pytorch_env_restore.bat" >> %TMP_DIR_WIN%/ci_scripts/pytorch_env_restore_helper.bat
-  echo cd /D "%CD%" >> %TMP_DIR_WIN%/ci_scripts/pytorch_env_restore_helper.bat
+:: Create a shortcut to restore pytorch environment
+echo @echo off >> %TMP_DIR_WIN%/ci_scripts/pytorch_env_restore_helper.bat
+echo call "%TMP_DIR_WIN%/ci_scripts/pytorch_env_restore.bat" >> %TMP_DIR_WIN%/ci_scripts/pytorch_env_restore_helper.bat
+echo cd /D "%CD%" >> %TMP_DIR_WIN%/ci_scripts/pytorch_env_restore_helper.bat
 
-  aws s3 cp "s3://ossci-windows/Restore PyTorch Environment.lnk" "C:\Users\circleci\Desktop\Restore PyTorch Environment.lnk"
-)
+aws s3 cp "s3://ossci-windows/Restore PyTorch Environment.lnk" "C:\Users\circleci\Desktop\Restore PyTorch Environment.lnk"
