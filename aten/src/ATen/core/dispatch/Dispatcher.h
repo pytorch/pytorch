@@ -252,6 +252,13 @@ public:
    */
   std::vector<OperatorHandle> findDanglingImpls() const;
 
+  /**
+   * Useful for inspecting global Dispatcher registration state.
+   * Returns the names of all operators with a kernel registered for the specified DispatchKey.
+   * If no DispatchKey is specified, it returns all registered operators.
+   */
+  std::vector<OperatorName> getRegistrationsForDispatchKey(c10::optional<DispatchKey> k) const;
+
 private:
   Dispatcher();
 
@@ -317,6 +324,11 @@ public:
   std::string dumpState() const {
     return operatorDef_->op.dumpState();
   }
+
+  bool hasKernelForDispatchKey(DispatchKey k) const {
+    return operatorDef_->op.hasKernelForDispatchKey(k);
+  }
+
 
   std::string dumpComputedTable() const {
     return operatorDef_->op.dumpComputedTable();
