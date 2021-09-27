@@ -106,8 +106,7 @@ if sys.platform == 'win32':
     try:
         ctypes.CDLL('vcruntime140.dll')
         ctypes.CDLL('msvcp140.dll')
-        if cuda_version not in ('9.2', '10.0'):
-            ctypes.CDLL('vcruntime140_1.dll')
+        ctypes.CDLL('vcruntime140_1.dll')
     except OSError:
         print('''Microsoft Visual C++ Redistributable is not installed, this may lead to the DLL load failure.
                  It can be downloaded at https://aka.ms/vs/16/release/vc_redist.x64.exe''')
@@ -718,7 +717,6 @@ import torch.backends.mkl
 import torch.backends.mkldnn
 import torch.backends.openmp
 import torch.backends.quantized
-from torch import quantization as quantization
 import torch.utils.data
 from torch import __config__ as __config__
 from torch import __future__ as __future__
@@ -739,6 +737,10 @@ def compiled_with_cxx11_abi():
 # Import the ops "namespace"
 from torch._ops import ops
 from torch._classes import classes
+
+# quantization depends on torch.fx
+# Import quantization
+from torch import quantization as quantization
 
 # Import the quasi random sampler
 from torch import quasirandom as quasirandom

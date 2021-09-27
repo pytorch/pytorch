@@ -326,24 +326,4 @@ struct THCNumerics<double> {
   static inline __host__ __device__  bool isinf(double a) { return ::isinf(a); }
 };
 
-// WARNING: The following note is deprecated
-///       `half` has some type conversion issues associated with it, since it
-///        is a struct without a constructor/implicit conversion constructor.
-///        We use this to convert scalar values to the given type that the
-///        tensor expects.
-///
-/// at::Half has implicit conversions for float and __half types. Moreover
-/// it has constructors for __half and float types.
-
-template <typename In, typename Out>
-struct ScalarConvert {
-  static __host__ __device__ Out to(const In v) { return (Out) v; }
-};
-
-// DEPRECATED: use static_cast in kernels instead of scalar_cast
-template <typename T, typename U>
-__host__ __device__ T scalar_cast(U u) {
-  return ScalarConvert<U, T>::to(u);
-}
-
 #endif // THC_NUMERICS_INC
