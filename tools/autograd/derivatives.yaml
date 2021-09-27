@@ -1597,9 +1597,6 @@
   self: kl_div_backward(grad, self, target, reduction, log_target)
   target: kl_div_target_backward(grad, self, target, reduction, log_target)
 
-- name: l1_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
-  self, target: l1_loss_backward(grad, self, target, reduction)
-
 - name: mse_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   self: mse_loss_backward(grad, self, target, reduction)
   target: mse_loss_backward(grad, target, self, reduction)

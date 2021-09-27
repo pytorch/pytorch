@@ -455,10 +455,7 @@ Tensor& mse_loss_backward_out(const Tensor& grad_output,
 }
 
 Tensor l1_loss(const Tensor& input, const Tensor& target, int64_t reduction) {
-  auto diff = input - target;
-  auto output = diff.is_complex() ? at::real(diff).abs() + at::imag(diff).abs()
-                                  : diff.abs();
-  return apply_loss_reduction(output, reduction);
+  return apply_loss_reduction(input.sub(target).abs(), reduction);
 }
 
 }}  // namespace at::native
