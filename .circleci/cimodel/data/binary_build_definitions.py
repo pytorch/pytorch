@@ -124,9 +124,9 @@ class Conf(object):
         Output looks similar to:
 
       - binary_upload:
-          name: binary_linux_manywheel_3_7m_cu92_devtoolset7_nightly_upload
+          name: binary_linux_manywheel_3_7m_cu113_devtoolset7_nightly_upload
           context: org-member
-          requires: binary_linux_manywheel_3_7m_cu92_devtoolset7_nightly_test
+          requires: binary_linux_manywheel_3_7m_cu113_devtoolset7_nightly_test
           filters:
             branches:
               only:
@@ -134,7 +134,7 @@ class Conf(object):
             tags:
               only: /v[0-9]+(\\.[0-9]+)*-rc[0-9]+/
           package_type: manywheel
-          upload_subfolder: cu92
+          upload_subfolder: cu113
         """
         return {
             "binary_upload": OrderedDict({
