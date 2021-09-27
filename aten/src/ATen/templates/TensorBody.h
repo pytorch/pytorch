@@ -167,11 +167,8 @@ class TORCH_API Tensor: public TensorBase {
   // Also MSVC will wrongly issue the following warning with the aforementioned fix
   //    warning C4522: 'at::Tensor': multiple assignment operators specified
   // Let's just skip the warning.
-
-  #ifdef _MSC_VER
-  #pragma warning( push )
-  #pragma warning( disable : 4522 )
-  #endif
+  //
+  // TODO: temporarily disabled
 
   Tensor& operator=(const TensorBase& x) & {
     impl_ = x.getIntrusivePtr();
@@ -559,12 +556,6 @@ class TORCH_API Tensor: public TensorBase {
     return *this;
   }
 };
-
-// For "multiple ... operators specified" warnings, closing brace of class
-// declaration must be included between pragma push & pop
-#ifdef _MSC_VER
-#pragma warning( pop )
-#endif
 
 namespace detail {
 // Helper creator for Tensor class which doesn't requires the users to pass

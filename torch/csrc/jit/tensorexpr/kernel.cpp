@@ -41,25 +41,6 @@ static bool checkTypes(const ScalarType highType, const int typeConstraints) {
   return false;
 }
 
-static ExprHandle promoteToDtype(ExprHandle e, ScalarType dt) {
-  if (e.dtype().scalar_type() == dt) {
-    return e;
-  }
-
-  switch (dt) {
-// NOLINTNEXTLINE
-#define TYPE_CASE(Type, Name) \
-  case ScalarType::Name:      \
-    e = cast<Type>(e);        \
-    break;
-    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
-#undef TYPE_CASE
-    default:
-      throw unsupported_dtype();
-  }
-  return e;
-}
-
 } // namespace
 
 namespace torch {
@@ -95,6 +76,25 @@ std::string buildErrorMessage(const std::string& s) {
     return s + " " + generic_error_message;
   }
   return s + ". " + generic_error_message;
+}
+
+ExprHandle promoteToDtype(ExprHandle e, ScalarType dt) {
+  if (e.dtype().scalar_type() == dt) {
+    return e;
+  }
+
+  switch (dt) {
+// NOLINTNEXTLINE
+#define TYPE_CASE(Type, Name) \
+  case ScalarType::Name:      \
+    e = cast<Type>(e);        \
+    break;
+    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
+#undef TYPE_CASE
+    default:
+      throw unsupported_dtype();
+  }
+  return e;
 }
 
 static int te_cuda_pointwise_loop_levels = -1;
@@ -392,35 +392,6 @@ bool matmulIsSupported(const torch::jit::Node* node) {
   return true;
 }
 
-void annotateInputShapes(
-    const std::shared_ptr<Graph>& graph,
-    const std::vector<c10::optional<at::Tensor>>& example_inputs) {
-  TORCH_INTERNAL_ASSERT(
-      graph->inputs().size() == example_inputs.size(),
-      buildErrorMessage("Given inputs do not match the fuser graph inputs."));
-  for (size_t idx = 0; idx < example_inputs.size(); idx++) {
-    if (auto t = example_inputs[idx]) {
-      auto concrete_tensor_type = tensorTypeInCurrentExecutionContext(*t);
-      graph->inputs().at(idx)->setType(concrete_tensor_type);
-    }
-  }
-}
-
-std::shared_ptr<Graph> removeUnusedSelfArgument(
-    const std::shared_ptr<Graph>& graph) {
-  if (graph->inputs().size() == 0) {
-    return graph;
-  }
-  jit::Value* self_argument = graph->inputs().at(0);
-  if (self_argument->uses().size() != 0 ||
-      !self_argument->type()->is_module()) {
-    return graph;
-  }
-  std::shared_ptr<Graph> res = graph->copy();
-  res->eraseInput(0);
-  return res;
-}
-
 std::vector<ExprHandle> valueShape(const ArgValue& v) {
   if (auto b = c10::get_if<tensorexpr::BufHandle>(&v)) {
     return b->dims();
@@ -484,7 +455,7 @@ std::vector<ExprHandle> computeIndicesToBroadcast(
   while (sizeIt != inputSizes.rend()) {
     auto const& size = intValue(*sizeIt);
     if (size && *size == 1) {
-      bcast.emplace_back(0);
+      bcast.emplace_back(LongImm::make(0));
     } else {
       bcast.emplace_back(*axisIt);
     }
@@ -527,6 +498,24 @@ void promoteInputs(std::vector<ExprHandle>& inputs, const int typeConstraints) {
   for (ExprHandle& e : inputs) {
     e = promoteToDtype(e, highType);
   }
+}
+
+ExprHandle promoteIntegerToDefaultType(const ExprHandle& e) {
+  auto scalarType = static_cast<c10::ScalarType>(e.dtype().scalar_type());
+  if (!c10::isIntegralType(scalarType, /*includeBool*/ true)) {
+    return e;
+  }
+
+  auto defaultType = c10::typeMetaToScalarType(c10::get_default_dtype());
+
+  // We intend to promote Integers to floating-point types
+  TORCH_INTERNAL_ASSERT(
+      !c10::isIntegralType(defaultType, /*includeBool*/ true));
+
+  return Cast::make(
+      Dtype(
+          static_cast<tensorexpr::ScalarType>(defaultType), e.dtype().lanes()),
+      e);
 }
 
 ExprHandle demoteOutput(
@@ -764,6 +753,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::lgamma:
     case aten::type_as:
     case aten::masked_fill:
+    case aten::sign:
       return sizesForValue(v->node()->input(0));
 
     case aten::sub:
@@ -896,25 +886,6 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
       throw malformed_input(msg);
     }
   }
-}
-
-ExprHandle promoteIntegerToDefaultType(const ExprHandle& e) {
-  auto scalarType = static_cast<c10::ScalarType>(e.dtype().scalar_type());
-  if (!c10::isIntegralType(scalarType, /*includeBool*/ true)) {
-    return e;
-  }
-
-  auto defaultType = c10::typeMetaToScalarType(c10::get_default_dtype());
-
-  // We intend to promote Integers to floating-point types
-  TORCH_INTERNAL_ASSERT(
-      !c10::isIntegralType(defaultType, /*includeBool*/ true),
-      buildErrorMessage("Non-integer type"));
-
-  return Cast::make(
-      Dtype(
-          static_cast<tensorexpr::ScalarType>(defaultType), e.dtype().lanes()),
-      e);
 }
 
 ExprHandle promoteHalfToFloat(const ExprHandle& e) {
@@ -2201,6 +2172,10 @@ Tensor tensorexpr::computeOperandValue(
           kIntegralTypes | kFloatingPointTypes | kBoolType);
     } break;
 
+    case aten::sign: {
+      return computeSign(inputs, outputShape);
+    } break;
+
     case aten::ceil: {
       return computeOneOperand(
           "aten_ceil",
@@ -2533,8 +2508,8 @@ Tensor tensorexpr::computeOperandValue(
       addmmInputs.push_back(inputs[0]);
       addmmInputs.push_back(inputs[1]);
       // Using int64_t as computeAddMM supports only int64_t scalars now
-      addmmInputs.push_back(1l); // beta
-      addmmInputs.push_back(1l); // alpha
+      addmmInputs.push_back(1ll); // beta
+      addmmInputs.push_back(1ll); // alpha
       return computeAddMM(addmmInputs, outputShape, outputType);
     } break;
     case aten::addmm: {
@@ -2668,6 +2643,9 @@ void fuseAllLoops(StmtPtr st) {
       }
       loopsToFuse.push_back(loop);
     }
+    if (loopsToFuse.empty()) {
+      return;
+    }
     if (!loopBoundsAllEqual(loopsToFuse)) {
       return;
     }
@@ -2762,6 +2740,7 @@ static void parallelizeOuterLoops(LoopNest& l, Bufs&& bufs) {
 
 StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
   torch::jit::tensorexpr::LoopNest l(st, bufOutputs_);
+  LoopNest::sanitizeNames(l.root_stmt());
   GRAPH_DEBUG("Original Stmt:\n", std::to_string(l.root_stmt()), "\n");
 
   bool hasReduction = NodeFinder<ReduceOp>::find(l.root_stmt()).size() != 0;
@@ -2775,6 +2754,8 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
     auto root_stmt = l.root_stmt();
     root_stmt->accept(block_analysis.get());
   }
+  l.simplify();
+  GRAPH_DEBUG("after simplify", *l.root_stmt());
 
   // Inlining output & intermediate buffers can duplicate computation.
   // Duplicating work can slow down the program if it's not ameliorated in some
@@ -2988,18 +2969,18 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
         throw malformed_input(msg);
       }
       if (isContiguous(input)) {
-        Placeholder inBuffer(
+        BufHandle inBuffer(
             "t" + input_name_map_[input],
-            ToDtype(static_cast<ScalarType>(*tt->scalarType())),
-            toExprHandles(*tt->sizes().concrete_sizes()));
-        bufs_.emplace(input, inBuffer.data());
+            toExprHandles(*tt->sizes().concrete_sizes()),
+            ToDtype(static_cast<ScalarType>(*tt->scalarType())));
+        bufs_.emplace(input, inBuffer.node());
         bufferArgs_.emplace_back(inBuffer);
         break;
       }
-      Placeholder inBuffer(
+      BufHandle inBuffer(
           "t" + input_name_map_[input],
-          ToDtype(static_cast<ScalarType>(*tt->scalarType())),
-          {0});
+          {0},
+          ToDtype(static_cast<ScalarType>(*tt->scalarType())));
       std::vector<DimArg> inputTensorDims;
       for (size_t i = 0; i < *tt->sizes().size(); i++) {
         auto const size = *tt->sizes()[i];
@@ -3130,6 +3111,7 @@ Tensor TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
   //     cur_idx = absolute // stride
   //     absolute = absolute % stride
 
+  auto zero = LongImm::make(0);
   return Compute(
       "output_1", dims, [&](const std::vector<VarHandle>& axes_input) {
         std::vector<ExprHandle> axes(axes_input.begin(), axes_input.end());
@@ -3142,17 +3124,17 @@ Tensor TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
             reverse_sort_indices(strides);
         std::vector<ExprHandle> new_axes(sorted_stride_indices.size());
         for (size_t stride_index : sorted_stride_indices) {
-          auto stride = strides[stride_index];
           auto size = sizes[stride_index];
-          auto index = absolute_position /
-              ExprHandle(immLike(absolute_position, stride));
+          auto index = zero;
           if (size != 1) {
+            auto stride = strides[stride_index];
+            index = absolute_position /
+                ExprHandle(immLike(absolute_position, stride));
             absolute_position = absolute_position %
                 ExprHandle(immLike(absolute_position, stride));
           }
           new_axes[stride_index] = index;
         }
-        // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
         return BufHandle(buf).load(new_axes);
       });
 }
