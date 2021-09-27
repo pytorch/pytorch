@@ -151,7 +151,6 @@ class TORCH_CUDA_CPP_API CuSparseMatDescriptor
     descriptor_.reset(raw_descriptor);
   }
 };
-#endif
 
 } // namespace sparse
 } // namespace cuda
