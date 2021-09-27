@@ -20,6 +20,9 @@ Error::Error(std::string msg, std::string backtrace, const void* caller)
   // the message before it is actually thrown.
   if (IsDebuggerPresent()) {
     std::cerr << what_ << std::endl;
+    // In debug builds, calling `abort` leads to a message box being shown and
+    // this way we can have the console shown as the top window.
+    abort();
   }
 #endif
 }
