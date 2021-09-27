@@ -9,6 +9,18 @@ namespace at {
 namespace mkl {
 namespace sparse {
 
+namespace {
+
+  template <typename scalar_t, typename MKL_Complex>
+  MKL_Complex to_mkl_complex(c10::complex<scalar_t> scalar) {
+    MKL_Complex mkl_scalar;
+    mkl_scalar.real = scalar.real();
+    mkl_scalar.imag = scalar.imag();
+    return mkl_scalar;
+  }
+
+}
+
 const char* _mklGetErrorString(sparse_status_t error) {
   if (error == SPARSE_STATUS_SUCCESS) {
     return "SPARSE_STATUS_SUCCESS";
@@ -85,22 +97,22 @@ template <>
 void mv<c10::complex<float>>(MKL_SPARSE_MV_ARGTYPES(c10::complex<float>)) {
   TORCH_MKLSPARSE_CHECK(mkl_sparse_c_mv(
       operation,
-      reinterpret_cast<const MKL_Complex8&>(alpha),
+      to_mkl_complex<float, MKL_Complex8>(alpha),
       A,
       descr,
       reinterpret_cast<const MKL_Complex8*>(x),
-      reinterpret_cast<const MKL_Complex8&>(beta),
+      to_mkl_complex<float, MKL_Complex8>(beta),
       reinterpret_cast<MKL_Complex8*>(y)));
 }
 template <>
 void mv<c10::complex<double>>(MKL_SPARSE_MV_ARGTYPES(c10::complex<double>)) {
   TORCH_MKLSPARSE_CHECK(mkl_sparse_z_mv(
       operation,
-      reinterpret_cast<const MKL_Complex16&>(alpha),
+      to_mkl_complex<double, MKL_Complex16>(alpha),
       A,
       descr,
       reinterpret_cast<const MKL_Complex16*>(x),
-      reinterpret_cast<const MKL_Complex16&>(beta),
+      to_mkl_complex<double, MKL_Complex16>(beta),
       reinterpret_cast<MKL_Complex16*>(y)));
 }
 
