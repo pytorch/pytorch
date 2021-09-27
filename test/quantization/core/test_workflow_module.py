@@ -396,7 +396,6 @@ class TestObserver(QuantizationTestCase):
         self._test_memoryless(MovingAveragePerChannelMinMaxObserver)
 
 
-
 # HistogramObserver that works like it does on master
 class _ReferenceHistogramObserver(HistogramObserver):
     def __init__(self, *args, **kwargs):
