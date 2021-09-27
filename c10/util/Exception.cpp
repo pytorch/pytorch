@@ -20,6 +20,13 @@ Error::Error(std::string msg, std::string backtrace, const void* caller)
   // the message before it is actually thrown.
   if (IsDebuggerPresent()) {
     std::cerr << what_ << std::endl;
+
+    // Tries to bring up the console if it is minimized
+    HWND cw_hwnd = GetConsoleWindow();
+    if (cw_hwnd) {
+      ShowWindow(cw_hwnd, SW_NORMAL);
+    }
+      
     // In debug builds, calling `abort` leads to a message box being shown and
     // this way we can have the console shown as the top window.
     abort();
