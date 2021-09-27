@@ -198,11 +198,11 @@ The following environment variables are made available to you in your script:
 
 9. ``MASTER_PORT`` - The port on the ``MASTER_ADDR`` that can be used to host the C10d TCP store.
 
-10. ``TORCHELASTIC_RESTART_COUNT`` - The number of worker group restarts so far.
+10. ``PET_RESTART_COUNT`` - The number of worker group restarts so far.
 
-11. ``TORCHELASTIC_MAX_RESTARTS`` - The configured maximum number of restarts.
+11. ``PET_MAX_RESTARTS`` - The configured maximum number of restarts.
 
-12. ``TORCHELASTIC_RUN_ID`` - Equal to the rendezvous ``run_id`` (e.g. unique job id).
+12. ``PET_RUN_ID`` - Equal to the rendezvous ``run_id`` (e.g. unique job id).
 
 **Deployment:**
 
