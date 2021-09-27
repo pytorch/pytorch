@@ -233,9 +233,6 @@ jobs:
         # Time out the test phase after 3.5 hours
         timeout-minutes: 210
         run: |
-            if [[ $NUM_TEST_SHARDS -ne 2 ]]; then
-              export SHARD_NUMBER=0
-            fi
             .jenkins/pytorch/win-test.sh
       !{{ common.upload_test_reports(name='windows') }}
       !{{ common.render_test_results() }}
