@@ -77,8 +77,8 @@ jobs:
           retry () {
               "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
           }
-          # Ensure the working directory gets chowned back to the current user
           retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Clean workspace
         run: |
@@ -179,8 +179,8 @@ jobs:
           retry () {
               "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
           }
-          # Ensure the working directory gets chowned back to the current user
           retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Clean workspace
         run: |
@@ -199,9 +199,12 @@ jobs:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
           submodules: recursive
-      - name: Pull docker image
+      - name: Pull Docker image
         run: |
-          docker pull "${DOCKER_IMAGE}"
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
       - name: Build
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
@@ -338,7 +341,6 @@ jobs:
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
-      CONTINUE_THROUGH_ERROR: ${{ github.repository == 'pytorch/pytorch' && (github.event_name == 'push' || github.event_name == 'schedule') }}
     steps:
       - name: Display EC2 information
         shell: bash
@@ -368,8 +370,8 @@ jobs:
           retry () {
               "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
           }
-          # Ensure the working directory gets chowned back to the current user
           retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Clean workspace
         run: |
@@ -388,9 +390,12 @@ jobs:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
           submodules: recursive
-      - name: Pull docker image
+      - name: Pull Docker image
         run: |
-          docker pull "${DOCKER_IMAGE}"
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         if: ${{ contains(env.BUILD_ENVIRONMENT, 'cuda') && !contains(matrix.config, 'nogpu') }}
         run: |
@@ -463,7 +468,6 @@ jobs:
             -e NUM_TEST_SHARDS \
             -e PYTORCH_IGNORE_DISABLED_ISSUES \
             -e PR_LABELS \
-            -e CONTINUE_THROUGH_ERROR \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
             -e http_proxy="http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -e https_proxy="http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -e no_proxy="localhost,127.0.0.1,github.com,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock" \

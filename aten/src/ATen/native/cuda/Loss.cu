@@ -276,11 +276,14 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
 void nll_loss_forward_out_cuda_template(
     const Tensor& output,
     const Tensor& total_weight,
-    const Tensor& input,
-    const Tensor& target,
+    const Tensor& input_,
+    const Tensor& target_,
     const Tensor& weight,
     int64_t reduction,
     int64_t ignore_index) {
+  auto input = *input_.expect_contiguous();
+  auto target = *target_.expect_contiguous();
+
   int64_t n_classes = input.size(-1);
   int64_t n_dims = input.dim();
   int64_t batch_size = n_dims == 1 ? 1 : input.size(0);
@@ -327,9 +330,6 @@ void nll_loss_forward_out_cuda_template(
   output.resize_({});
   total_weight.resize_({});
 
-  auto input_ = input.contiguous();
-  auto target_ = target.contiguous();
-
   if (n_dims == 1) {
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
@@ -345,8 +345,8 @@ void nll_loss_forward_out_cuda_template(
                     <<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
                         output.data_ptr<scalar_t>(),
                         total_weight.data_ptr<scalar_t>(),
-                        input_.data_ptr<scalar_t>(),
-                        target_.data_ptr<index_t>(),
+                        input.data_ptr<scalar_t>(),
+                        target.data_ptr<index_t>(),
                         weight_.defined() ? weight_.data_ptr<scalar_t>()
                                           : nullptr,
                         reduction == at::Reduction::Mean,
@@ -374,8 +374,8 @@ void nll_loss_forward_out_cuda_template(
                        at::cuda::getCurrentCUDAStream()>>>(
                         output.data_ptr<scalar_t>(),
                         total_weight.data_ptr<scalar_t>(),
-                        input_.data_ptr<scalar_t>(),
-                        target_.data_ptr<index_t>(),
+                        input.data_ptr<scalar_t>(),
+                        target.data_ptr<index_t>(),
                         weight_.defined() ? weight_.data_ptr<scalar_t>()
                                           : nullptr,
                         reduction == at::Reduction::Mean,
@@ -459,14 +459,19 @@ __global__ void nll_loss_backward_reduce_cuda_kernel_2d(
 };
 
 void nll_loss_backward_out_cuda_template(
-    const Tensor& grad_input,
-    const Tensor& grad_output,
-    const Tensor& input,
-    const Tensor& target,
+    const Tensor& grad_input_,
+    const Tensor& grad_output_,
+    const Tensor& input_,
+    const Tensor& target_,
     const Tensor& total_weight,
     const Tensor& weight,
     int64_t reduction,
     int64_t ignore_index) {
+  auto target = *target_.expect_contiguous();
+  auto input = *input_.expect_contiguous();
+  auto grad_input = *grad_input_.expect_contiguous();
+  auto grad_output = *grad_output_.expect_contiguous();
+
   int64_t n_dims = input.dim();
   int64_t n_classes = input.size(-1);
   int64_t batch_size = n_dims == 1 ? 1 : input.size(0);
@@ -508,7 +513,6 @@ void nll_loss_backward_out_cuda_template(
     return;
   }
 
-  auto target_ = target.contiguous();
   TORCH_CHECK(grad_output.numel() == 1);
 
   if (n_dims == 1) {
