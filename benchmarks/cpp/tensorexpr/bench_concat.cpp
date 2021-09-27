@@ -51,12 +51,12 @@ class ConcatBench : public benchmark::Fixture {
     size_t num_inputs = inputs_.size();
     size_t num_dims = 2;
 
-    std::vector<Placeholder> inputs;
+    std::vector<BufHandle> inputs;
     for (size_t i = 0; i < num_inputs; ++i) {
-      inputs.emplace_back(Placeholder(
+      inputs.emplace_back(BufHandle(
           "input" + std::to_string(i),
-          kFloat,
-          {input_sizes_[i][0], input_sizes_[i][1]}));
+          {input_sizes_[i][0], input_sizes_[i][1]},
+          kFloat));
     }
 
     Tensor output = Compute(
@@ -112,14 +112,14 @@ class ConcatBench : public benchmark::Fixture {
             {alloc<IntImm>(output_size_[0]), alloc<IntImm>(output_size_[1])}),
         kFloat);
 
-    std::vector<Placeholder> inputs;
+    std::vector<BufHandle> inputs;
     std::vector<StmtPtr> for_stmts(num_inputs);
     int cumulative_input_sizes = 0;
     for (size_t i = 0; i < num_inputs; ++i) {
-      inputs.emplace_back(Placeholder(
+      inputs.emplace_back(BufHandle(
           "input" + std::to_string(i),
-          kFloat,
-          {input_sizes_[i][0], input_sizes_[i][1]}));
+          {input_sizes_[i][0], input_sizes_[i][1]},
+          kFloat));
       std::vector<VarPtr> for_vars(num_inputs);
       for (size_t d = 0; d < num_dims; ++d) {
         for_vars[d] =
@@ -131,7 +131,7 @@ class ConcatBench : public benchmark::Fixture {
               {for_vars[0],
                alloc<Add>(for_vars[1], alloc<IntImm>(cumulative_input_sizes))}),
           alloc<Load>(
-              inputs[i].data(),
+              inputs[i].node(),
               std::vector<ExprPtr>({for_vars[0], for_vars[1]})));
       auto for_st = alloc<For>(
           for_vars[0],

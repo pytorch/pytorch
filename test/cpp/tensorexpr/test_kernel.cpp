@@ -248,7 +248,11 @@ TEST_F(Kernel, Huge) {
   TensorExprKernel k(graph);
   std::ostringstream oss;
   oss << *k.getCodeGenStmt();
-  const std::string& verification_pattern = "# CHECK: 4000000000";
+  // The 4000000000 iterations loop will be split into 500000000 x 8 and the
+  // outer loop will be parallel. If LLVM is not present, it will not be split,
+  // and to cover both of these cases we're looking for 00000000ll; in the
+  // output.
+  const std::string& verification_pattern = R"IR(# CHECK: 00000000ll;)IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
@@ -577,6 +581,36 @@ TEST_F(Kernel, CatInputTypesPromotion) {
   }
 }
 
+TEST_F(Kernel, CatAndInlineWithAConstantDim) {
+  const auto graph_string = R"IR(
+      graph(%0 : Float(1, 512, strides=[1024, 1], requires_grad=0, device=cpu),
+            %1 : Float(1, 512, strides=[1024, 1], requires_grad=0, device=cpu)):
+        %2 : bool = prim::Constant[value=0]()
+        %3 : int = prim::Constant[value=1]()
+        %4 : Tensor[] = prim::ListConstruct(%0, %1)
+        %5 : Float(1, 1024, strides=[1024, 1], requires_grad=0, device=cpu) = aten::cat(%4, %3)
+        %6 : Tensor[] = prim::ListConstruct(%5)
+        %7 : Float(1, 1024, strides=[1024, 1], requires_grad=0, device=cpu) = aten::cat(%6, %3)
+        %8 : Float(1, 1024, strides=[1024, 1], requires_grad=0, device=cpu) = aten::_cast_Float(%7, %2)
+        return (%8, %7))IR";
+
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+  TensorExprKernel k(graph);
+
+  auto a = at::rand({1, 512}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto b = at::rand({1, 512}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto ref = at::_cast_Float(at::cat({a, b}, 1), 0);
+
+  std::vector<at::Tensor> inputs = {a, b};
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  auto o = stack[0].toTensor();
+  ASSERT_EQ(o.sizes(), ref.sizes());
+  ASSERT_EQ(o.dtype(), ref.dtype());
+  ASSERT_TRUE(at::allclose(o, ref));
+}
+
 TEST_F(Kernel, CatWoConditionals) {
   getCatWoConditionals() = true;
   const auto graph_string = R"IR(
@@ -599,17 +633,15 @@ TEST_F(Kernel, CatWoConditionals) {
   const std::string& verification_pattern =
       R"IR(
 # CHECK: for
-# CHECK-NEXT: for
-# CHECK-NEXT: for
-# CHECK-NEXT: aten_cat
 # CHECK: for
-# CHECK-NEXT: for
-# CHECK-NEXT: for
-# CHECK-NEXT: aten_cat
 # CHECK: for
-# CHECK-NEXT: for
-# CHECK-NEXT: for
-# CHECK-NEXT: aten_cat)IR";
+# CHECK: aten_cat
+# CHECK: for
+# CHECK: for
+# CHECK: aten_cat
+# CHECK: for
+# CHECK: for
+# CHECK: aten_cat)IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
   auto a = at::rand({5, 3, 2}, TensorOptions(kCPU).dtype(at::kFloat));
@@ -840,9 +872,9 @@ TEST_F(Kernel, SumOneAxis) {
         // Check the IR we produced
         const std::string& verification_pattern =
             R"IR(
-# CHECK: for (int64_t v = 0ll; v <
+# CHECK: for (int64_t
 # CHECK-NEXT: sum
-# CHECK-NEXT: for (int64_t v_1 = 0ll; v_1 <
+# CHECK-NEXT: for (int64_t
 # CHECK-NEXT:   sum)IR";
         torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
@@ -901,10 +933,10 @@ TEST_F(Kernel, SumMultipleAxes) {
         // Check the IR we produced
         const std::string& verification_pattern =
             R"IR(
-# CHECK: int64_t v = 0
-# CHECK: int64_t v_1 = 0
-# CHECK: int64_t v_2 = 0
-# CHECK: int64_t v_3 = 0
+# CHECK: for (int64_t
+# CHECK: for (int64_t
+# CHECK: for (int64_t
+# CHECK: for (int64_t
 # CHECK: sum)IR";
         torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
@@ -1148,6 +1180,84 @@ TEST_F(Kernel, Softmax4D) {
   }
 }
 
+TEST_F(Kernel, SignTest) {
+  const auto graph_template = R"IR(
+      graph(%0 : ${dtype}(${size}, strides=[1], device=cpu)):
+        %2 : ${dtype}(${size}, strides=[1]) = aten::sign(%0)
+        return (%2))IR";
+
+  auto run_test = [](const std::string& graph_string, const at::Tensor& input) {
+    auto graph = std::make_shared<Graph>();
+    parseIR(graph_string, &*graph);
+
+    TensorExprKernel k(graph);
+    StmtPtr s = k.getCodeGenStmt();
+
+    std::vector<at::Tensor> inputs = {input};
+    std::vector<IValue> stack = fmap<IValue>(inputs);
+    k.run(stack);
+    auto o = stack[0].toTensor();
+    auto ref = at::sign(input);
+    ASSERT_TRUE(at::allclose(o, ref));
+  };
+  auto common_options = at::TensorOptions()
+                            .layout(at::kStrided)
+                            .device(at::kCPU)
+                            .requires_grad(false);
+  int default_input_size = 100;
+  for (auto scalar_type : {ScalarType::Float, ScalarType::Double}) {
+    at::Tensor corner_case_inputs;
+    TemplateEnv env;
+    auto options = common_options;
+    switch (scalar_type) {
+      case ScalarType::Float: {
+        env.s("dtype", "Float");
+        options = options.dtype(at::kFloat);
+        std::vector<float> input_float = {
+            0.0f,
+            -0.0f,
+            std::numeric_limits<float>::infinity(),
+            -std::numeric_limits<float>::infinity(),
+            std::nanf("1"),
+            -std::nanf("1")};
+        corner_case_inputs = at::from_blob(
+            input_float.data(),
+            {static_cast<long>(input_float.size())},
+            options);
+        auto rand_input = at::rand({default_input_size}, options);
+        auto input = at::cat({rand_input, corner_case_inputs});
+        env.d("size", at::numel(input));
+        const auto graph_string = format(graph_template, env);
+        run_test(graph_string, input);
+        break;
+      }
+      case ScalarType::Double: {
+        env.s("dtype", "Double");
+        options = options.dtype(at::kDouble);
+        std::vector<double> input_double = {
+            0.0,
+            -0.0,
+            std::numeric_limits<double>::infinity(),
+            -std::numeric_limits<double>::infinity(),
+            std::nan("1"),
+            -std::nan("1")};
+        corner_case_inputs = at::from_blob(
+            input_double.data(),
+            {static_cast<long>(input_double.size())},
+            options);
+        auto rand_input = at::rand({default_input_size}, options);
+        auto input = at::cat({rand_input, corner_case_inputs});
+        env.d("size", at::numel(input));
+        const auto graph_string = format(graph_template, env);
+        run_test(graph_string, input);
+        break;
+      }
+      default:
+        throw unsupported_dtype();
+    }
+  }
+}
+
 TEST_F(Kernel, InlineProducerIntoReduction) {
   // Inline producer (mul) into reduction (sum).
   const auto graph_string = R"IR(
@@ -1169,8 +1279,8 @@ TEST_F(Kernel, InlineProducerIntoReduction) {
   // We should have only one loop in the end.
   const std::string& verification_pattern =
       R"IR(
-        # CHECK: for (int64_t v = 0ll; v < 5
-        # CHECK-NEXT: for (int64_t v_1 = 0ll; v_1 < 3
+        # CHECK: for (int64_t i_1 = 0ll; i_1 < 5
+        # CHECK-NEXT: for (int64_t j_1 = 0ll; j_1 < 3
         # CHECK-NEXT:   sum
         # CHECK-NOT: for)IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
@@ -1208,11 +1318,11 @@ TEST_F(Kernel, InlineReductionIntoConsumer) {
   // We should have two loops in the end.
   const std::string& verification_pattern =
       R"IR(
-        # CHECK: for (int64_t v = 0ll; v < 5
-        # CHECK-NEXT: for (int64_t v_1 = 0ll; v_1 < 3
+        # CHECK: for (int64_t i_1 = 0ll; i_1 < 5
+        # CHECK-NEXT: for (int64_t j_1 = 0ll; j_1 < 3
         # CHECK-NEXT:   sum
-        # CHECK: for (int64_t v_2 = 0ll; v_2 < 5
-        # CHECK-NEXT: for (int64_t v_3 = 0ll; v_3 < 3
+        # CHECK: for (int64_t i_2 = 0ll; i_2 < 5
+        # CHECK-NEXT: for (int64_t j_2 = 0ll; j_2 < 3
         # CHECK-NEXT:   aten_mul
         # CHECK-NOT: for)IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
