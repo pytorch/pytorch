@@ -61,8 +61,7 @@ git --no-pager log --max-count 1
 popd
 
 # Clone the Builder master repo
-# retry git clone -q https://github.com/pytorch/builder.git "$BUILDER_ROOT"
-retry git clone -q https://github.com/mszhanyi/builder.git -b zhanyi/cu11.1.1 "$BUILDER_ROOT"
+retry git clone -q https://github.com/pytorch/builder.git "$BUILDER_ROOT"
 pushd "$BUILDER_ROOT"
 echo "Using builder from "
 git --no-pager log --max-count 1
