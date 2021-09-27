@@ -5,11 +5,28 @@
 #include <ATen/native/Pool.h>
 #include <ATen/native/cpu/utils.h>
 
-#include <c10/util/Optional.h>
-
 namespace at { namespace native {
 
 namespace {
+
+template<typename T>
+class atomic_optional {
+public:
+  atomic_optional() = default;
+  operator bool() const {
+    return valid_.load();
+  }
+  T value() const {
+    return val_.load();
+  }
+  void operator=(const T& val) {
+    valid_ = true;
+    val_ = val;
+  }
+private:
+  std::atomic<T> val_{};
+  std::atomic<T> valid_{false};
+};
 
 template <typename scalar_t, bool is_3d = false>
 void cpu_max_unpool(
@@ -52,7 +69,7 @@ void cpu_max_unpool(
   int64_t input_image_size = numel / channels;
   int64_t output_image_size = output.numel() / channels;
 
-  std::atomic<c10::optional<int64_t>> optional_error_index;
+  atomic_optional<int64_t> optional_error_index;
 
   // parallel on dim N, C, D, H, W: [channels, input_image_size]
   at::parallel_for(0, numel, 0, [&](int64_t begin, int64_t end) {
@@ -75,17 +92,15 @@ void cpu_max_unpool(
     }
   });
 
-  if (auto error_index = optional_error_index.load()) {
+  if (optional_error_index) {
     if (is_3d) {
-      AT_ERROR("Found an invalid max index: ", error_index.value(),
+      AT_ERROR("Found an invalid max index: ", optional_error_index.value(),
           " (output volumes are of size ", output_depth,
           "x", output_height, "x", output_width);
-      (void)error_index;
     } else {
-      AT_ERROR("Found an invalid max index: ", error_index.value(),
+      AT_ERROR("Found an invalid max index: ", optional_error_index.value(),
           " (output volumes are of size ", output_height,
           "x", output_width);
-      (void)error_index;
     }
   }
 
@@ -117,7 +132,7 @@ void cpu_max_unpool_channels_last(
   int64_t input_image_size = input_height * input_width;
   int64_t output_image_size = output_height * output_width;
 
-  std::atomic<c10::optional<int64_t>> optional_error_index;
+  atomic_optional<int64_t> optional_error_index;
 
   // parallel on dim N, H, W
   at::parallel_for(0, nbatch * input_image_size, 0, [&](int64_t begin, int64_t end) {
@@ -145,11 +160,10 @@ void cpu_max_unpool_channels_last(
     }
   });
 
-  if (auto error_index = optional_error_index.load()) {
-    AT_ERROR("Found an invalid max index: ", error_index.value(),
+  if (optional_error_index) {
+    AT_ERROR("Found an invalid max index: ", optional_error_index.value(),
         " (output volumes are of size ", output_height,
         "x", output_width);
-    (void)error_index;
   }
 
   if (!output_.is_contiguous(memory_format)) {
@@ -190,7 +204,7 @@ void cpu_max_unpool_backward(
   int64_t input_image_size = numel / channels;
   int64_t output_image_size = grad_output.numel() / channels;
 
-  std::atomic<c10::optional<int64_t>> optional_error_index;
+  atomic_optional<int64_t> optional_error_index;
 
   // parallel on dim N, C, D, H, W
   at::parallel_for(0, numel, 0, [&](int64_t begin, int64_t end) {
@@ -213,18 +227,16 @@ void cpu_max_unpool_backward(
     }
   });
 
-  if (auto error_index = optional_error_index.load()) {
+  if (optional_error_index) {
     if (is_3d) {
-      AT_ERROR("invalid max index ", error_index.value(),
+      AT_ERROR("invalid max index ", optional_error_index.value(),
           ", odepth= ", output_depth,
           ", owidth= ", output_width,
           ", oheight= ", output_height);
-      (void)error_index;
     } else {
-      AT_ERROR("invalid max index ", error_index.value(),
+      AT_ERROR("invalid max index ", optional_error_index.value(),
           ", owidth= ", output_width,
           ", oheight= ", output_height);
-      (void)error_index;
     }
   }
 
@@ -256,7 +268,7 @@ void cpu_max_unpool_backward_channels_last(
   int64_t input_image_size = input_height * input_width;
   int64_t output_image_size = output_height * output_width;
 
-  std::atomic<c10::optional<int64_t>> optional_error_index;
+  atomic_optional<int64_t> optional_error_index;
 
   // parallel on dim N, H, W
   at::parallel_for(0, nbatch * input_image_size, 0, [&](int64_t begin, int64_t end) {
@@ -283,11 +295,10 @@ void cpu_max_unpool_backward_channels_last(
     }
   });
 
-  if (auto error_index = optional_error_index.load()) {
-    AT_ERROR("invalid max index ", error_index.value(),
+  if (optional_error_index) {
+    AT_ERROR("invalid max index ", optional_error_index.value(),
         ", owidth= ", output_width,
         ", oheight= ", output_height);
-    (void)error_index;
   }
 
   if (!grad_input_.is_contiguous(memory_format)) {
