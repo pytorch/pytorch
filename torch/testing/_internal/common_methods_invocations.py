@@ -5675,24 +5675,25 @@ def sample_inputs_pixel_unshuffle(op_info, device, dtype, requires_grad, **kwarg
 def sample_inputs_kl_div(op_info, device, dtype, requires_grad, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    shapes_and_kwargs: List[Tuple[Tuple[int, ...], Dict[str, Any]]] = [
-        ((2,), dict()),
-        ((2, 3), dict()),
-        ((2, 3, 4), dict()),
-        ((2,), dict(log_target=True)),
-        ((2,), dict(reduction="none")),
-        ((2,), dict(reduction="batchmean")),
-        ((2,), dict(reduction="sum")),
+    shapes_and_reduction = [
+        ((2,), "mean"),
+        ((2, 3), "mean"),
+        ((2, 3, 4), "mean"),
+        ((2,), "none"),
+        ((2,), "batchmean"),
+        ((2,), "sum"),
     ]
 
     sample_inputs = []
-    for shape, kwargs in shapes_and_kwargs:
+    for (shape, reduction), log_target in itertools.product(shapes_and_reduction, (True, False)):
         input = make(shape, low=None, high=0)
-        if kwargs.get("log_target", False):
-            target = make(shape, low=-inf, high=0)
+        if log_target:
+            target = make(shape, high=0)
         else:
             target = make(shape, low=0, high=1)
-        sample_inputs.append(SampleInput(input, args=(target,), kwargs=kwargs))
+        sample_inputs.append(
+            SampleInput(input, args=(target,), kwargs=dict(reduction=reduction, log_target=log_target))
+        )
     return sample_inputs
 
 def sample_inputs_diagflat(op_info, device, dtype, requires_grad, **kwargs):
@@ -10172,7 +10173,7 @@ op_db: List[OpInfo] = [
             torch.float16, torch.bfloat16, torch.int8, torch.int16, torch.int32, torch.int64
         ),
         supports_out=False,
-        gradcheck_fast_mode=False,
+        check_batched_grad=False,
         skips=(
             DecorateInfo(
                 unittest.skip("Skipped!"),

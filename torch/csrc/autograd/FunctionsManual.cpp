@@ -1163,32 +1163,25 @@ Tensor infinitely_differentiable_logit_backward(
   }
 }
 
-Tensor kl_div_backward(const Tensor& grad, const Tensor& input, const Tensor& target, int64_t reduction, bool log_target) {
-  auto grad_expand = grad.expand_as(input);
-
-  auto grad_input = (log_target ? -at::exp(target) : -target) * grad_expand;
-
+Tensor kl_div_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction, bool log_target) {
+  auto grad_input = (
+    log_target ? -at::exp(target)
+               : -target
+  ) * grad_output;
   if (reduction == at::Reduction::Mean) {
     grad_input /= input.numel();
-  }
-  else if (reduction == at::Reduction::BatchMean) {
-    grad_input /= input.size(0);
   }
   return grad_input;
 }
 
-Tensor kl_div_target_backward(const Tensor& grad, const Tensor& input, const Tensor& target, int64_t reduction, bool log_target) {
-  auto grad_expand = grad.expand_as(input);
-
-  auto grad_target = (log_target ? at::exp(target) * (1 + target - input) : (1 + at::log(target) - input)) * grad_expand;
-
+Tensor kl_div_target_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction, bool log_target) {
+  auto grad_target = (
+    log_target ? at::exp(target) * (1 + target - input)
+               : (1 + at::log(target) - input)
+  ) * grad_output;
   if (reduction == at::Reduction::Mean) {
     grad_target /= input.numel();
   }
-  else if (reduction == at::Reduction::BatchMean) {
-    grad_target /= input.size(0);
-  }
-
   return grad_target;
 }
 
