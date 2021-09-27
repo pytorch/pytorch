@@ -421,8 +421,6 @@ _(aten, kaiser_window) \
 _(aten, kl_div) \
 _(aten, kthvalue) \
 _(aten, l1_loss) \
-_(aten, l1_loss_backward) \
-_(aten, l1_loss_forward) \
 _(aten, layer_norm) \
 _(aten, lcm) \
 _(aten, leaky_relu) \

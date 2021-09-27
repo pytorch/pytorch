@@ -295,7 +295,7 @@ Tensor sgn_backward(Tensor result, Tensor grad, Tensor self) {
   if (self.is_complex()) {
     auto abs = at::abs(self);
     // C -> C
-    // https://arxiv.org/pdf/1701.00392.pdf Section 4.20
+    // https://arxiv.org/pdf/1701.00392.pdf Section 4.8 Equation 4.20
     return at::where(abs == 0.0, at::zeros({}, grad.options()), (grad/abs - (at::real(grad/self) * result)));
   } else {
     return at::zeros_like(self, at::MemoryFormat::Preserve);
@@ -1330,27 +1330,34 @@ Tensor binary_cross_entropy_double_backward_grad_output(const Tensor & grad, con
   return ggO;
 }
 
-Tensor l1_loss_double_backward(const Tensor & grad, const Tensor & grad_output, const Tensor & self, const Tensor & other, int64_t reduction) {
-  if (!self.is_complex()) {
-    return at::zeros_like(grad);
-  } else {
-    auto diff = self - other;
-    auto output = grad_output * sgn_backward(diff.sgn(), grad, diff);
-    if (reduction == at::Reduction::Mean) {
-      output /= self.numel();
-    }
-    return output;
+std::tuple<Tensor, Tensor> l1_loss_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction) {
+  if (!grad_output.defined() || (!input.requires_grad() && !target.requires_grad())) {
+     return std::make_tuple(Tensor{}, Tensor{});
   }
-}
 
-Tensor l1_loss_double_backward_grad_output(const Tensor & grad, const Tensor & grad_output, const Tensor & input, const Tensor & target, int64_t reduction) {
-  auto output = at::l1_loss_backward(grad.conj(), input, target, at::Reduction::None);
+  auto diff = input - target;
+  auto grad_input =  (
+    diff.is_complex() ? at::complex(at::real(diff).sign(), at::imag(diff).sign())
+                      : diff.sign()
+  ) * grad_output;
   if (reduction == at::Reduction::Mean) {
-    return output.mean();
-  } else if (reduction == at::Reduction::Sum) {
-    return output.sum();
+      grad_input /= input.numel();
   }
-  return handle_r_to_c(grad_output, output);
+  auto grad_target = -grad_input;
+
+  if (grad_input.is_complex()) {
+    if (!input.is_complex()) {
+      grad_input = at::real(grad_input);
+    }
+    if (!target.is_complex()) {
+      grad_target = at::real(grad_target);
+    }
+  }
+
+  return std::make_tuple(
+    input.requires_grad() ? grad_input : Tensor{},
+    target.requires_grad() ? grad_target : Tensor{}
+  );
 }
 
 Tensor smooth_l1_loss_double_backward(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction, double beta) {
