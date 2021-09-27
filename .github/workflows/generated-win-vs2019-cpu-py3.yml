@@ -37,12 +37,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+
   ciflow_should_run:
     runs-on: ubuntu-18.04
     if: ${{ (github.repository_owner == 'pytorch') && ((github.event_name != 'pull_request') || (github.event.assignee.login != 'pytorchbot' ) || (github.event.action !='unassigned') || (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/win'))) }}
+    env:
+      LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
     steps:
       - name: noop
         run: echo running ciflow_should_run
+      - name: print labels
+        run: echo "${LABELS}"
   build:
     runs-on: "windows.4xlarge"
     defaults:

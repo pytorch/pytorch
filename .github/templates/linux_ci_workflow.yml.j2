@@ -52,18 +52,7 @@ env:
 !{{ common.concurrency(build_environment) }}
 
 jobs:
-{%- if ciflow_config.enabled %}
-  !{{ ciflow_config.root_job_name }}:
-    runs-on: ubuntu-18.04
-    if: ${{ !{{ ciflow_config.root_job_condition }} }}
-    env:
-      LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
-    steps:
-      - name: noop
-        run: echo running !{{ ciflow_config.root_job_name }}
-      - name: print labels
-        run: echo "${LABELS}"
-{%- endif %}
+!{{ common.ciflow_should_run_job(ciflow_config) }}
   calculate-docker-image:
     runs-on: linux.2xlarge
     {%- if ciflow_config.enabled %}
