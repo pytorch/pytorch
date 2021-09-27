@@ -14,6 +14,7 @@
 #include "lazy_tensor_core/csrc/ops/cat.h"
 #include "lazy_tensor_core/csrc/ops/constant.h"
 #include "lazy_tensor_core/csrc/ops/constant_pad_nd.h"
+#include "lazy_tensor_core/csrc/ops/convolution_overrideable.h"
 #include "lazy_tensor_core/csrc/ops/device_data.h"
 #include "lazy_tensor_core/csrc/ops/expand.h"
 #include "lazy_tensor_core/csrc/ops/generic_slice.h"
@@ -106,6 +107,11 @@ class TSNodeLowering : public NodeLowering {
       case at::aten::cat: {
         return InferCat(
             ir::NodeCast<ir::ops::Cat>(node, ir::OpKind(at::aten::cat)));
+      }
+      case at::aten::convolution_overrideable: {
+        return InferConvolutionOverrideable(
+            ir::NodeCast<ir::ops::ConvolutionOverrideable>(
+                node, ir::OpKind(at::aten::convolution_overrideable)));
       }
       case at::aten::addmm:
       case at::aten::mm: {
@@ -241,6 +247,11 @@ class TSNodeLowering : public NodeLowering {
     if (node->op().op == at::aten::cat) {
       return LowerCat(
           ir::NodeCast<ir::ops::Cat>(node, ir::OpKind(at::aten::cat)));
+    }
+    if (node->op().op == at::aten::convolution_overrideable) {
+      return LowerConvolutionOverrideable(
+          ir::NodeCast<ir::ops::ConvolutionOverrideable>(
+              node, ir::OpKind(at::aten::convolution_overrideable)));
     }
     if (node->op().op == at::aten::native_batch_norm) {
       return LowerBatchNorm(ir::NodeCast<ir::ops::TSNativeBatchNormForward>(
@@ -414,6 +425,34 @@ class TSNodeLowering : public NodeLowering {
     }
     output_shape.set_dimensions(node->dim(), cat_dimension_size);
     return output_shape;
+  }
+
+  static lazy_tensors::Shape InferConvolutionOverrideable(
+      const ir::ops::ConvolutionOverrideable* conv) {
+    const auto& operands = conv->operands();
+    LTC_CHECK(!operands.empty());
+    const auto& input_size = operands[0].shape().dimensions();
+    const auto& weight_size = operands[1].shape().dimensions();
+    const auto& dilation = conv->dilation();
+    const auto& padding = conv->padding();
+    const auto& stride = conv->stride();
+
+    // Shape computation logic copied from conv_output_size
+    constexpr int input_batch_size_dim = 0;
+    constexpr int weight_output_channels_dim = 0;
+    bool has_dilation = dilation.size() > 0;
+    auto dim = input_size.size();
+    std::vector<int64_t> output_size(dim);
+    output_size[0] = input_size[input_batch_size_dim];
+    output_size[1] = weight_size[weight_output_channels_dim];
+    for (size_t d = 2; d < dim; ++d) {
+      auto dilation_ = has_dilation ? dilation[d - 2] : 1;
+      auto kernel = dilation_ * (weight_size[d] - 1) + 1;
+      output_size[d] =
+          (input_size[d] + (2 * padding[d - 2]) - kernel) / stride[d - 2] + 1;
+    }
+
+    return lazy_tensors::Shape(operands[0].shape().element_type(), output_size);
   }
 
   static lazy_tensors::Shape InferEmbeddingDenseBackward(
@@ -634,6 +673,41 @@ class TSNodeLowering : public NodeLowering {
             ->output());
     arguments.emplace_back(cat->dim());
     return LowerBuiltin(cat, arguments);
+  }
+
+  TSOpVector LowerConvolutionOverrideable(
+      const ir::ops::ConvolutionOverrideable* conv) {
+    constexpr size_t kBiasOperandsOffset = 2;
+    const auto& operands = conv->operands();
+    LTC_CHECK(!operands.empty());
+
+    std::vector<torch::jit::NamedValue> arguments;
+    arguments.emplace_back(loctx()->GetOutputOp(operands[0]));
+    arguments.emplace_back(loctx()->GetOutputOp(operands[1]));
+    // bias is optional
+    c10::optional<at::Tensor> nullArg;
+    if (operands.size() <= kBiasOperandsOffset) {
+      arguments.emplace_back(nullArg);
+    } else {
+      arguments.emplace_back(
+          loctx()->GetOutputOp(operands[kBiasOperandsOffset]));
+    }
+    arguments.emplace_back(conv->stride());
+    arguments.emplace_back(conv->padding());
+    arguments.emplace_back(conv->dilation());
+    arguments.emplace_back(conv->transposed());
+    arguments.emplace_back(conv->output_padding());
+    arguments.emplace_back(conv->groups());
+    // TODO: backend information is exposed too early here.
+    // Clean up after convolution unification is done.
+    auto& ctx = at::globalContext();
+    arguments.emplace_back(ctx.benchmarkCuDNN());  // benchmark
+    arguments.emplace_back(ctx.deterministicCuDNN() || ctx.deterministicAlgorithms());  // deterministic
+    arguments.emplace_back(ctx.userEnabledCuDNN());   // cudnn_enabled
+    arguments.emplace_back(ctx.allowTF32CuDNN());   // allow_tf32
+
+    // Invoke aten::_convolution instead of aten::convolution_overrideable
+    return LowerBuiltin(at::aten::_convolution, arguments);
   }
 
   TSOpVector LowerConstant(const ir::ops::Constant* node) {

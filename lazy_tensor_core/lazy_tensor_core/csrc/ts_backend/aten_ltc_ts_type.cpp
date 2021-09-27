@@ -351,56 +351,18 @@ at::Tensor LazyNativeFunctions::convolution_overrideable(
     const c10::optional<at::Tensor>& bias, at::IntArrayRef stride,
     at::IntArrayRef padding, at::IntArrayRef dilation, bool transposed,
     at::IntArrayRef output_padding, int64_t groups) {
-  if (groups != 1) {
-    std::vector<at::Tensor> outputs(groups);
-    for (int g = 0; g < groups; ++g) {
-      auto input_g = subtensor(input, 1, groups, g);
-      auto weight_g = subtensor(weight, 0, groups, g);
-      auto bias_g = bias ? subtensor(*bias, 0, groups, g) : bias;
-      outputs[g] =
-          torch_lazy_tensors::LazyNativeFunctions::convolution_overrideable(
-              input_g, weight_g, bias_g, stride, padding, dilation, transposed,
-              output_padding, 1);
-    }
-    return at::cat(outputs, 1);
-  }
-  LTC_FN_TRACK(3);
-  LTC_COUNTER("aten::convolution_overrideable", 1);
-  LTC_VLOG(3) << "LTC-TS convolution_overrideable :"
-              << " input=" << input.toString()
-              << " weight=" << weight.toString();
-  std::vector<at::Tensor> xlatens_tensors = {input, weight};
-  auto xlatens = bridge::LtcCreateTensorList(xlatens_tensors);
-  std::vector<c10::optional<at::Tensor>> xlatens_opt_tensors = {bias};
-  auto xlatens_opt = bridge::LtcCreateOptTensorList(xlatens_opt_tensors);
-  const auto kernel_size = weight.sizes().slice(2);
-  LTC_CHECK(kernel_size.size() == 2 || kernel_size.size() == 3);
-  const at::DeviceType device_type =
-      lazy_tensors::compiler::TSComputationClient::HardwareDeviceType();
-  if (transposed) {
-    auto&& x_result =
-        kernel_size.size() == 2
-            ? at::slow_conv_transpose2d(
-                  input.to(device_type), weight.to(device_type), kernel_size,
-                  (bias && bias->defined()) ? bias->to(device_type) : bias,
-                  stride, padding, output_padding, dilation)
-            : at::slow_conv_transpose3d(
-                  input.to(device_type), weight.to(device_type), kernel_size,
-                  (bias && bias->defined()) ? bias->to(device_type) : bias,
-                  stride, padding, output_padding, dilation);
-    return bridge::CreateLtcTensor(x_result, bridge::GetLtcDevice(input));
-  }
-  auto&& x_result =
-      kernel_size.size() == 2
-          ? at::slow_conv_dilated2d(
-                input.to(device_type), weight.to(device_type), kernel_size,
-                (bias && bias->defined()) ? bias->to(device_type) : bias,
-                stride, padding, dilation)
-          : at::slow_conv_dilated3d(
-                input.to(device_type), weight.to(device_type), kernel_size,
-                (bias && bias->defined()) ? bias->to(device_type) : bias,
-                stride, padding, dilation);
-  return bridge::CreateLtcTensor(x_result, bridge::GetLtcDevice(input));
+  LTC_FN_COUNTER("lazy::");
+  return (bias && bias->defined())
+             ? bridge::AtenFromLtcTensor(LazyTensor::convolution_overrideable(
+                   bridge::GetLtcTensor(input), bridge::GetLtcTensor(weight),
+                   bridge::GetLtcTensor(*bias), Helpers::I64List(stride),
+                   Helpers::I64List(padding), Helpers::I64List(dilation),
+                   transposed, Helpers::I64List(output_padding), groups))
+             : bridge::AtenFromLtcTensor(LazyTensor::convolution_overrideable(
+                   bridge::GetLtcTensor(input), bridge::GetLtcTensor(weight),
+                   Helpers::I64List(stride), Helpers::I64List(padding),
+                   Helpers::I64List(dilation), transposed,
+                   Helpers::I64List(output_padding), groups));
 }
 
 at::Tensor LazyNativeFunctions::_copy_from(const at::Tensor& self,
