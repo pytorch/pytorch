@@ -980,12 +980,12 @@ LazyTensor::convolution_backward_overrideable(
     const LazyTensor& weight, std::vector<lazy_tensors::int64> stride,
     std::vector<lazy_tensors::int64> padding,
     std::vector<lazy_tensors::int64> dilation, bool transposed,
-    std::vector<lazy_tensors::int64> output_padding,
-    lazy_tensors::int64 groups) {
+    std::vector<lazy_tensors::int64> output_padding, lazy_tensors::int64 groups,
+    std::array<bool, 3> output_mask) {
   ir::NodePtr node = ir::MakeNode<ir::ops::ConvolutionBackwardOverrideable>(
       out_backprop.GetIrValue(), input.GetIrValue(), weight.GetIrValue(),
       std::move(stride), std::move(padding), std::move(dilation), transposed,
-      std::move(output_padding), groups);
+      std::move(output_padding), groups, std::move(output_mask));
   LazyTensor grad_input = out_backprop.CreateFrom(ir::Value(node, 0));
   LazyTensor grad_weight = out_backprop.CreateFrom(ir::Value(node, 1));
   LazyTensor grad_bias = out_backprop.CreateFrom(ir::Value(node, 2));

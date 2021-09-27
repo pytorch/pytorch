@@ -268,6 +268,20 @@ LazyNativeFunctions::convolution_backward_overrideable(
     const at::Tensor& weight, at::IntArrayRef stride, at::IntArrayRef padding,
     at::IntArrayRef dilation, bool transposed, at::IntArrayRef output_padding,
     int64_t groups, std::array<bool, 3> output_mask) {
+  // Lower to cudnn_convolution_backward when possbile
+  if (at::globalContext().userEnabledCuDNN() &&
+      lazy_tensors::sys_util::GetEnvBool("LTC_TS_CUDA", true)) {
+    LTC_FN_COUNTER("lazy::");
+    auto result = LazyTensor::convolution_backward_overrideable(
+        bridge::GetLtcTensor(grad_output), bridge::GetLtcTensor(input),
+        bridge::GetLtcTensor(weight), Helpers::I64List(stride),
+        Helpers::I64List(padding), Helpers::I64List(dilation), transposed,
+        Helpers::I64List(output_padding), groups, std::move(output_mask));
+    return std::make_tuple(bridge::AtenFromLtcTensor(std::get<0>(result)),
+                           bridge::AtenFromLtcTensor(std::get<1>(result)),
+                           bridge::AtenFromLtcTensor(std::get<2>(result)));
+  }
+  // Fallback otherwise
   if (groups > 1) {
     std::vector<at::Tensor> grad_input(groups);
     std::vector<at::Tensor> grad_weight(groups);

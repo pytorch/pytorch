@@ -442,7 +442,7 @@ class LazyTensor {
       std::vector<lazy_tensors::int64> padding,
       std::vector<lazy_tensors::int64> dilation, bool transposed,
       std::vector<lazy_tensors::int64> output_padding,
-      lazy_tensors::int64 groups);
+      lazy_tensors::int64 groups, std::array<bool, 3> output_mask);
 
   static LazyTensor convolution_overrideable(
       const LazyTensor& input, const LazyTensor& weight,

@@ -18,6 +18,14 @@ class ConvolutionBackwardOverrideable : public Node {
       std::vector<lazy_tensors::int64> output_padding,
       lazy_tensors::int64 groups);
 
+  ConvolutionBackwardOverrideable(
+      const Value& grad_output, const Value& input, const Value& weight,
+      std::vector<lazy_tensors::int64> stride,
+      std::vector<lazy_tensors::int64> padding,
+      std::vector<lazy_tensors::int64> dilation, bool transposed,
+      std::vector<lazy_tensors::int64> output_padding,
+      lazy_tensors::int64 groups, std::array<bool, 3> output_mask);
+
   NodePtr Clone(OpList operands) const override;
 
   std::string ToString() const override;
@@ -36,6 +44,8 @@ class ConvolutionBackwardOverrideable : public Node {
 
   lazy_tensors::int64 groups() const { return groups_; }
 
+  std::array<bool, 3> output_mask() const { return output_mask_; }
+
  private:
   std::vector<lazy_tensors::int64> stride_;
   std::vector<lazy_tensors::int64> padding_;
@@ -43,6 +53,7 @@ class ConvolutionBackwardOverrideable : public Node {
   std::vector<lazy_tensors::int64> output_padding_;
   bool transposed_;
   lazy_tensors::int64 groups_;
+  std::array<bool, 3> output_mask_;
 };
 
 }  // namespace ops

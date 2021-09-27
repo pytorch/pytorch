@@ -30,6 +30,19 @@ ConvolutionBackwardOverrideable::ConvolutionBackwardOverrideable(
       [&]() { return compiler::NodeLowering::Get()->Infer(this); });
 }
 
+ConvolutionBackwardOverrideable::ConvolutionBackwardOverrideable(
+    const Value& grad_output, const Value& input, const Value& weight,
+    std::vector<lazy_tensors::int64> stride,
+    std::vector<lazy_tensors::int64> padding,
+    std::vector<lazy_tensors::int64> dilation, bool transposed,
+    std::vector<lazy_tensors::int64> output_padding, lazy_tensors::int64 groups,
+    std::array<bool, 3> output_mask)
+    : ConvolutionBackwardOverrideable(grad_output, input, weight, stride,
+                                      padding, dilation, transposed,
+                                      output_padding, groups) {
+  output_mask_ = std::move(output_mask);
+}
+
 NodePtr ConvolutionBackwardOverrideable::Clone(OpList operands) const {
   return MakeNode<ConvolutionBackwardOverrideable>(
       operands.at(0), operands.at(1), operands.at(2), stride_, padding_,

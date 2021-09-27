@@ -14,6 +14,7 @@
 #include "lazy_tensor_core/csrc/ops/cat.h"
 #include "lazy_tensor_core/csrc/ops/constant.h"
 #include "lazy_tensor_core/csrc/ops/constant_pad_nd.h"
+#include "lazy_tensor_core/csrc/ops/convolution_backward_overrideable.h"
 #include "lazy_tensor_core/csrc/ops/convolution_overrideable.h"
 #include "lazy_tensor_core/csrc/ops/device_data.h"
 #include "lazy_tensor_core/csrc/ops/expand.h"
@@ -107,6 +108,11 @@ class TSNodeLowering : public NodeLowering {
       case at::aten::cat: {
         return InferCat(
             ir::NodeCast<ir::ops::Cat>(node, ir::OpKind(at::aten::cat)));
+      }
+      case at::aten::convolution_backward_overrideable: {
+        return InferConvolutionBackwardOverrideable(
+            ir::NodeCast<ir::ops::ConvolutionBackwardOverrideable>(
+                node, ir::OpKind(at::aten::convolution_backward_overrideable)));
       }
       case at::aten::convolution_overrideable: {
         return InferConvolutionOverrideable(
@@ -247,6 +253,11 @@ class TSNodeLowering : public NodeLowering {
     if (node->op().op == at::aten::cat) {
       return LowerCat(
           ir::NodeCast<ir::ops::Cat>(node, ir::OpKind(at::aten::cat)));
+    }
+    if (node->op().op == at::aten::convolution_backward_overrideable) {
+      return LowerConvolutionBackwardOverrideable(
+          ir::NodeCast<ir::ops::ConvolutionBackwardOverrideable>(
+              node, ir::OpKind(at::aten::convolution_backward_overrideable)));
     }
     if (node->op().op == at::aten::convolution_overrideable) {
       return LowerConvolutionOverrideable(
@@ -425,6 +436,15 @@ class TSNodeLowering : public NodeLowering {
     }
     output_shape.set_dimensions(node->dim(), cat_dimension_size);
     return output_shape;
+  }
+
+  static lazy_tensors::Shape InferConvolutionBackwardOverrideable(
+      const ir::ops::ConvolutionBackwardOverrideable* conv_backward) {
+    const ir::Output& self = conv_backward->operand(0);
+    const ir::Output& input = conv_backward->operand(1);
+    const ir::Output& weight = conv_backward->operand(2);
+    return lazy_tensors::ShapeUtil::MakeTupleShape(
+        {input.shape(), weight.shape(), self.shape()});
   }
 
   static lazy_tensors::Shape InferConvolutionOverrideable(
@@ -675,6 +695,50 @@ class TSNodeLowering : public NodeLowering {
     return LowerBuiltin(cat, arguments);
   }
 
+  TSOpVector LowerConvolutionBackwardOverrideable(
+      const ir::ops::ConvolutionBackwardOverrideable* conv) {
+    const auto& operands = conv->operands();
+    LTC_CHECK(!operands.empty());
+
+    std::vector<torch::jit::NamedValue> arguments;
+
+    // TODO: Clean up after convolution unification is done.
+    auto& ctx = at::globalContext();
+    LTC_CHECK(ctx.userEnabledCuDNN() &&
+              lazy_tensors::sys_util::GetEnvBool("LTC_TS_CUDA", true));
+
+    // See cudnn_convolution_backward/cudnn_convolution_transpose_backward in
+    // native_functions.yaml
+    arguments.emplace_back(loctx()->GetOutputOp(operands[1]));
+    arguments.emplace_back(loctx()->GetOutputOp(operands[0]));
+    arguments.emplace_back(loctx()->GetOutputOp(operands[2]));
+
+    arguments.emplace_back(conv->padding());
+    if (conv->transposed()) {
+      arguments.emplace_back(conv->output_padding());
+    }
+    arguments.emplace_back(conv->stride());
+    arguments.emplace_back(conv->dilation());
+    arguments.emplace_back(conv->groups());
+    arguments.emplace_back(ctx.benchmarkCuDNN());  // benchmark
+    arguments.emplace_back(ctx.deterministicCuDNN() ||
+                           ctx.deterministicAlgorithms());  // deterministic
+    arguments.emplace_back(ctx.allowTF32CuDNN());           // allow_tf3
+    std::array<bool, 2> output_mask = {conv->output_mask()[0],
+                                       conv->output_mask()[1]};
+    arguments.emplace_back(output_mask);
+
+    auto result =
+        conv->transposed()
+            ? LowerBuiltin(at::aten::cudnn_convolution_transpose_backward,
+                           arguments)
+            : LowerBuiltin(at::aten::cudnn_convolution_backward, arguments);
+    // cudnn_convolution_backward/cudnn_convolution_transpose_backward only
+    // returns 2 tensors
+    result.push_back(nullptr);
+    return result;
+  }
+
   TSOpVector LowerConvolutionOverrideable(
       const ir::ops::ConvolutionOverrideable* conv) {
     constexpr size_t kBiasOperandsOffset = 2;
@@ -702,9 +766,10 @@ class TSNodeLowering : public NodeLowering {
     // Clean up after convolution unification is done.
     auto& ctx = at::globalContext();
     arguments.emplace_back(ctx.benchmarkCuDNN());  // benchmark
-    arguments.emplace_back(ctx.deterministicCuDNN() || ctx.deterministicAlgorithms());  // deterministic
-    arguments.emplace_back(ctx.userEnabledCuDNN());   // cudnn_enabled
-    arguments.emplace_back(ctx.allowTF32CuDNN());   // allow_tf32
+    arguments.emplace_back(ctx.deterministicCuDNN() ||
+                           ctx.deterministicAlgorithms());  // deterministic
+    arguments.emplace_back(ctx.userEnabledCuDNN());         // cudnn_enabled
+    arguments.emplace_back(ctx.allowTF32CuDNN());           // allow_tf32
 
     // Invoke aten::_convolution instead of aten::convolution_overrideable
     return LowerBuiltin(at::aten::_convolution, arguments);
