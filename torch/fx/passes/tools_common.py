@@ -1,4 +1,4 @@
-from typing import List, Tuple, Union, Dict, Any, Set
+from typing import List, Tuple, Union, Dict, Any, Set, Mapping
 from dataclasses import dataclass
 
 import torch
@@ -15,7 +15,7 @@ Names = List[str]
 CALLABLE_NODE_OPS = {"call_module", "call_function", "call_method"}
 
 @compatibility(is_backward_compatible=False)
-def get_node_target(submodules: Dict[str, torch.nn.Module], node: torch.fx.Node) -> str:
+def get_node_target(submodules: Mapping[str, torch.nn.Module], node: torch.fx.Node) -> str:
     """
     Given a `node` returns its target typename.
 
