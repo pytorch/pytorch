@@ -122,6 +122,35 @@ index_select_add(const Tensor &select_indices,
   }
 }
 
+namespace {
+template <typename index_t>
+void fbgemm_spmdm_report_error_(
+    int64_t output_size,
+    int index_size,
+    int64_t N,
+    const index_t* offsets,
+    const index_t* indices) {
+  for (int m = 0; m < output_size; ++m) {
+    for (index_t i = offsets[m]; i < offsets[m + 1]; ++i) {
+      TORCH_CHECK(i < index_size);
+      index_t idx = indices[i];
+      TORCH_CHECK(
+          0 <= idx && idx < N,
+          "Index ",
+          i,
+          " is out of bounds: ",
+          idx,
+          ", range 0 to ",
+          N);
+    }
+  }
+  TORCH_CHECK(
+      offsets[output_size] == index_size,
+      "Yout input seems to be incorrect: the last offset value should be "
+      "the size of the indices tensor, but it appears not.");
+}
+} // namespace
+
 template<typename data_t, typename index_t>
 typename std::enable_if<std::is_same<data_t, float>::value, void>::type
 index_select_add(const Tensor &select_indices,
@@ -172,7 +201,7 @@ index_select_add(const Tensor &select_indices,
     at::parallel_for(
         0, output_size, 1, [&](index_t start_idx, index_t end_idx) {
 #ifdef USE_FBGEMM
-          kernel_fp32_index_t(
+          bool success = kernel_fp32_index_t(
             /* output_size */end_idx - start_idx,
             /* index_size */offsets_data[end_idx] - offsets_data[start_idx],
             /* data_size */src.sizes()[0],
@@ -181,6 +210,14 @@ index_select_add(const Tensor &select_indices,
             /* offsets_or_lengths */offsets_data + start_idx,
             /* weights */nullptr,
             /* output */output_data + start_idx * ddim);
+          if (!success) {
+            fbgemm_spmdm_report_error_(
+                end_idx - start_idx,
+                offsets_data[end_idx] - offsets_data[start_idx],
+                src.sizes()[0],
+                offsets_data + start_idx,
+                select_indices_data + offsets_data[start_idx]);
+          }
 #else
           caffe2::EmbeddingLookupIdx(
               /*block_size=*/ddim,
@@ -333,7 +370,7 @@ index_select_scale_add(const Tensor &select_indices,
     at::parallel_for(
         0, output_size, 1, [&](index_t start_idx, index_t end_idx) {
 #ifdef USE_FBGEMM
-          kernel_fp32_index_t(
+          bool success = kernel_fp32_index_t(
             /* output_size */end_idx - start_idx,
             /* index_size */offsets_data[end_idx] - offsets_data[start_idx],
             /* data_size */src.sizes()[0],
@@ -342,6 +379,14 @@ index_select_scale_add(const Tensor &select_indices,
             /* offsets_or_lengths */offsets_data + start_idx,
             /* weights */scale_data + offsets_data[start_idx],
             /* output */output_data + start_idx * ddim);
+          if (!success) {
+            fbgemm_spmdm_report_error_(
+                end_idx - start_idx,
+                offsets_data[end_idx] - offsets_data[start_idx],
+                src.sizes()[0],
+                offsets_data + start_idx,
+                select_indices_data + offsets_data[start_idx]);
+          }
 #else
           caffe2::EmbeddingLookupIdx(
               /*block_size=*/ddim,
