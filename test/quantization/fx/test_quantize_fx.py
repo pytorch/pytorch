@@ -2879,7 +2879,7 @@ class TestQuantizeFx(QuantizationTestCase):
             if n.target == "lstm":
                 self.assertEqual(type(n.args[1]), tuple)
 
-    def test_lowering(self):
+    def test_relu_lowering(self):
         class M(torch.nn.Module):
             def forward(self, x):
                 return torch.nn.functional.relu(x)
@@ -3098,6 +3098,74 @@ class TestQuantizeFx(QuantizationTestCase):
                               'mods2_output_activation_post_process_0',
                               'mods3_output_activation_post_process_0']
         assert name_list == expected_name_list
+
+    def test_linear_lowering(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        m = M().eval()
+        m = prepare_fx(m, {"": default_qconfig})
+        m = convert_fx(m, is_reference=True)
+
+        from torch.ao.quantization.fx.match_utils import is_match
+        from torch.ao.quantization.fx.match_utils import MatchAllNode
+        from torch.ao.quantization.fx.utils import _parent_name
+
+        # traverse the graph and find dequantize - ref quantized linear - quantize patterns and
+        # and replace it with quantized linear modules
+        pattern = (torch.quantize_per_tensor, (torch.nn.quantized._reference.Linear, "dequantize"), MatchAllNode, MatchAllNode, MatchAllNode)
+        modules = dict(m.named_modules())
+        nodes = list(m.graph.nodes)
+        to_erase = []
+        for n in m.graph.nodes:
+            if is_match(modules, n, pattern):
+                q_node = n
+                linear_node = q_node.args[0]
+                dq_node = linear_node.args[0]
+                if not len(dq_node.users) == 1:
+                    continue
+                if not len(linear_node.users) == 1:
+                    continue
+                # change this pattern to use torch.nn.quantized.Linear
+                ref_qlinear = modules[linear_node.target]
+                # initialize qlinear with ref_qlinear (https://github.com/pytorch/pytorch/blob/master/torch/nn/quantized/_reference/modules/linear.py)
+                qlinear = torch.nn.quantized.Linear(ref_qlinear.in_features, ref_qlinear.out_features)
+                qweight = ref_qlinear.get_quantized_weight()
+                qlinear.set_weight_bias(qweight, ref_qlinear.bias)
+
+                # get output scale/zero_point from the quantize node
+                scale_node = q_node.args[1]
+                zero_point_node = q_node.args[2]
+                dtype = q_node.args[3]
+                assert isinstance(dtype, torch.dtype) and dtype == torch.quint8, f"Only qint8 output for quantized linear is supported, got: {dtype}"
+                act_scale = getattr(m, scale_node.target)
+                act_zero_point = getattr(m, zero_point_node.target)
+                qlinear.scale = float(act_scale)
+                qlinear.zero_point = int(act_zero_point)
+
+                # replace ref_linear with linear
+                parent_name, module_name = _parent_name(linear_node.target)
+                setattr(modules[parent_name], module_name, qlinear)
+                # remvoe dq node:
+                dq_node_input = dq_node.args[0]
+
+                dq_node.replace_all_uses_with(dq_node_input)
+                m.graph.erase_node(dq_node)
+
+                # remove q node and args:
+                q_node.replace_all_uses_with(linear_node)
+                m.graph.erase_node(q_node)
+                m.graph.erase_node(scale_node)
+                m.graph.erase_node(zero_point_node)
+
+        m.recompile()
+        print("after:", m)
+
 
 
 @skipIfNoFBGEMM

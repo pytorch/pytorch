@@ -71,6 +71,12 @@ class Linear(nn.Linear):
             self.weight, self.weight_qscheme, self.weight_dtype, self.weight_scale,
             self.weight_zero_point, self.weight_axis)
 
+    def get_quantized_weight(self):
+        # TODO: refactor https://github.com/pytorch/pytorch/blob/master/torch/nn/quantized/_reference/modules/utils.py#L4
+        # and extract the get_quantized_weight part
+        print("getting quantized weight")
+        return torch._empty_affine_quantized(torch.Size(self.weight.shape), dtype=torch.qint8)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         we have:
