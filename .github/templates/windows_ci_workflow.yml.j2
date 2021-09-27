@@ -67,14 +67,7 @@ env:
 !{{ common.concurrency(build_environment) }}
 
 jobs:
-{%- if ciflow_config.enabled %}
-  !{{ ciflow_config.root_job_name }}:
-    runs-on: ubuntu-18.04
-    if: ${{ !{{ ciflow_config.root_job_condition }} }}
-    steps:
-      - name: noop
-        run: echo running !{{ ciflow_config.root_job_name }}
-{%- endif %}
+!{{ common.ciflow_should_run_job(ciflow_config) }}
   build:
     runs-on: "windows.4xlarge"
     defaults:
