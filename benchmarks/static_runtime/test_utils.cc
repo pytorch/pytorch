@@ -56,10 +56,7 @@ class ModuleStaticRuntimeTestContext : public StaticRuntimeTestContext {
 class GraphStaticRuntimeContext : public StaticRuntimeTestContext {
  public:
   explicit GraphStaticRuntimeContext(const std::string& source_ir) {
-    graph_ = std::make_shared<Graph>();
-    std::unordered_map<std::string, Value*> vmap;
-    parseIR(source_ir, graph_.get(), vmap);
-
+    graph_ = getGraphFromIR(source_ir);
     graph_exec_ = GraphExecutor(graph_, "");
   }
 
@@ -173,6 +170,13 @@ void compareResults(
 }
 
 } // namespace
+
+std::shared_ptr<Graph> getGraphFromIR(const std::string& ir) {
+    auto graph = std::make_shared<Graph>();
+    std::unordered_map<std::string, Value*> vmap;
+    parseIR(ir, graph.get(), vmap);
+    return graph;
+}
 
 void testStaticRuntime(
     const std::string& source,

@@ -4,6 +4,7 @@
 
 #include <string>
 #include <vector>
+#include <torch/csrc/jit/ir/ir.h>
 
 namespace c10 {
 struct IValue;
@@ -25,6 +26,8 @@ void testStaticRuntime(
     const std::vector<c10::IValue>& args2 = {},
     const bool use_allclose = false,
     const bool use_equalnan = false);
+
+std::shared_ptr<Graph> getGraphFromIR(const std::string& ir);
 
 } // namespace test
 } // namespace jit

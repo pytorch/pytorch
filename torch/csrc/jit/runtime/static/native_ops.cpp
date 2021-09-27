@@ -471,5 +471,41 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         }
       };
     });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    static_runtime::JumpIf,
+    static_runtime_JumpIf,
+    [](Node*) -> SROperator {
+      return [](ProcessedNode* pnode) {
+        if (pnode->Input(0).toBool()) {
+          pnode->set_jump_target(pnode->Input(1).toInt());
+        } else {
+          pnode->set_jump_target(ProcessedNode::NO_JUMP_TARGET);
+        }
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    static_runtime::JumpIfNot,
+    static_runtime_JumpIfNot,
+    [](Node*) -> SROperator {
+      return [](ProcessedNode* pnode) {
+        if (!pnode->Input(0).toBool()) {
+          pnode->set_jump_target(pnode->Input(1).toInt());
+        } else {
+          pnode->set_jump_target(ProcessedNode::NO_JUMP_TARGET);
+        }
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    static_runtime::Jump,
+    static_runtime_Jump,
+    [](Node*) -> SROperator {
+      return [](ProcessedNode* pnode) {
+        pnode->set_jump_target(pnode->Input(0).toInt());
+      };
+    });
+
 } // namespace jit
 } // namespace torch

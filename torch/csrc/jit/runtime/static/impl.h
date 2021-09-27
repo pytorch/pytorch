@@ -331,6 +331,8 @@ class TORCH_API StaticRuntime {
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_API ProcessedNode {
  public:
+  static constexpr size_t NO_JUMP_TARGET = std::numeric_limits<size_t>::max();
+
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ProcessedNode() = default;
   ProcessedNode(
@@ -384,6 +386,14 @@ class TORCH_API ProcessedNode {
     return op_name_;
   }
 
+  void set_jump_target(size_t loc) {
+    jump_target_ = loc;
+  }
+
+  size_t get_jump_target() const {
+    return jump_target_;
+  }
+
  private:
   void run_impl();
 
@@ -394,6 +404,7 @@ class TORCH_API ProcessedNode {
   std::vector<const IValue*> inputs_; // unowned
   std::vector<IValue> outputs_;
   const char* op_name_;
+  size_t jump_target_ = NO_JUMP_TARGET;
 };
 
 } // namespace jit

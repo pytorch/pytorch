@@ -28,16 +28,22 @@ bool HasInplaceOp(Block* block, const AliasDb& alias_db) {
   return false;
 }
 
-bool graphHasOp(std::shared_ptr<Graph>& graph, const char* op_name) {
+bool graphHasAnyOf(
+    std::shared_ptr<Graph>& graph,
+    const FastSet<NodeKind>& ops) {
   DepthFirstGraphNodeIterator graph_it(graph);
   for (auto node = graph_it.next(); node != nullptr; node = graph_it.next()) {
-    const char* node_qual_string = node->kind().toQualString();
-    if (strcmp(node_qual_string, op_name) == 0) {
+    if (ops.find(node->kind()) != ops.end()) {
       return true;
     }
   }
   return false;
 }
+
+bool graphHasOp(std::shared_ptr<Graph>& graph, const char* op_name) {
+  return graphHasAnyOf(graph, {c10::Symbol::fromQualString(op_name)});
+}
+
 } // namespace
 
 bool HasInplaceOp(std::shared_ptr<Graph>& graph, const AliasDb& alias_db) {
@@ -51,6 +57,14 @@ bool forwardHasOp(
   Method method = module.get_method("forward");
   auto graph = method.graph();
   return graphHasOp(graph, op_name);
+}
+
+bool hasJumpOps(std::shared_ptr<torch::jit::Graph>& graph) {
+  return graphHasAnyOf(
+      graph,
+      {c10::Symbol::fromQualString("static_runtime::Jump"),
+       c10::Symbol::fromQualString("static_runtime::JumpIf"),
+       c10::Symbol::fromQualString("static_runtime::JumpIfNot")});
 }
 
 namespace {
@@ -340,6 +354,15 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
   m.def(torch::schema(
       "static_runtime::VarTupleUnpack(...) -> ...",
       c10::AliasAnalysisKind::CONSERVATIVE));
+  m.def(torch::schema(
+      "static_runtime::Jump(int target) -> ()",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def(torch::schema(
+      "static_runtime::JumpIf(bool cond, int target) -> ()",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def(torch::schema(
+      "static_runtime::JumpIfNot(bool cond, int target) -> ()",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
 }
 
 void FuseSignLog1P(std::shared_ptr<torch::jit::Graph>& graph) {

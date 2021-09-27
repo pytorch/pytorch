@@ -531,8 +531,13 @@ FastMap<const Value*, std::vector<const Value*>> GenerateSameStorageValues(
 void PrepareGraphForStaticModule(
     std::shared_ptr<torch::jit::Graph> graph,
     const StaticModuleOptions& opts) {
+  // Assume graph has been optimized already if we have control flow.
+  // Once jump instructions are introduced, we can't modify the graph
+  // anymore, since adding/removing nodes may invalidate jump targets.
+  if (!hasJumpOps(graph)) {
+    OptimizeGraph(graph, opts);
+  }
   TORCH_CHECK(canEnableStaticRuntime(graph));
-  OptimizeGraph(graph, opts);
 }
 
 std::pair<std::shared_ptr<Graph>, std::shared_ptr<Module>>
@@ -860,9 +865,11 @@ c10::IValue StaticRuntime::operator()(
   // NB: before optimizing the order of execution, ensure that the
   // memory optimization pass (LivenessMap) is
   // aware of the new order!
-  for (auto& n : nodes_) {
-    // LOG(INFO) << "Running node: " << PrintNode(n.node());
-    n.run();
+  for (size_t ip = 0; ip < nodes_.size();) {
+    auto& node = nodes_[ip];
+    node.run();
+    auto jump_target = node.get_jump_target();
+    ip = jump_target != ProcessedNode::NO_JUMP_TARGET ? jump_target : ip + 1;
   }
 
   if (static_module_.opts().cleanup_activations) {
@@ -1089,8 +1096,11 @@ void StaticRuntime::display_nodes(
   }
   set_inputs(args, kwargs);
 
-  for (auto& node : nodes_) {
+  for (size_t ip = 0; ip < nodes_.size();) {
+    auto& node = nodes_[ip];
     node.run();
+    auto jump_target = node.get_jump_target();
+    ip = jump_target != ProcessedNode::NO_JUMP_TARGET ? jump_target : ip + 1;
     display_pnode_info(node);
   }
 
@@ -1159,11 +1169,14 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
     float millis = timer.MilliSeconds();
     results.memory_alloc_time += millis;
 
-    for (const auto i : c10::irange(nodes_.size())) {
+    for (size_t ip = 0; ip < nodes_.size();) {
       timer.Start();
-      nodes_[i].run();
+      auto& node = nodes_[ip];
+      node.run();
       millis = timer.MilliSeconds();
-      results.time_per_node[i] += millis;
+      results.time_per_node[ip] += millis;
+      auto jump_target = node.get_jump_target();
+      ip = jump_target != ProcessedNode::NO_JUMP_TARGET ? jump_target : ip + 1;
     }
     timer.Start();
     if (static_module_.opts().cleanup_activations) {

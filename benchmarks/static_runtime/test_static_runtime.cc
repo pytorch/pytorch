@@ -1520,3 +1520,86 @@ TEST(StaticRuntime, IndividualOps_RemainderScalar) {
       /*use_allclose*/ true,
       /*use_equalnan*/ true);
 }
+
+TEST(StaticRuntime, ControlFlow_JumpIf) {
+  auto test_jump = [](const std::string& ir, bool jump_arg) {
+    auto graph = getGraphFromIR(ir);
+    StaticModuleOptions opt = {
+      .cleanup_activations = true,
+      .enable_out_variant = true,
+      .optimize_memory = true
+    };
+    torch::jit::StaticModule smodule(graph, opt);
+
+    // Both adds are executed
+    auto result_no_jmp = smodule({!jump_arg}, {});
+    ASSERT_TRUE(result_no_jmp.isTuple());
+    const auto& elems_no_jmp = result_no_jmp.toTuple()->elements();
+    ASSERT_EQ(elems_no_jmp.size(), 2);
+    for (const auto& e : elems_no_jmp) {
+      ASSERT_TRUE(e.isInt());
+      ASSERT_EQ(e.toInt(), 2);
+    }
+
+    // One add is skipped
+    auto results_jmp = smodule({jump_arg}, {});
+    ASSERT_TRUE(results_jmp.isTuple());
+    const auto& elems_jmp = results_jmp.toTuple()->elements();
+    ASSERT_EQ(elems_jmp.size(), 2);
+    ASSERT_TRUE(elems_jmp[0].isNone());
+    ASSERT_TRUE(elems_jmp[1].isInt());
+    ASSERT_EQ(elems_jmp[1].toInt(), 2);
+  };
+
+  const std::string jump_if = R"IR(
+    graph(%0: bool):
+        %target : int = prim::Constant[value=2]()
+        %a : int = prim::Constant[value=1]()
+        static_runtime::JumpIf(%0, %target)
+        %2 : int = aten::add(%a, %a)
+        %3 : int = aten::add(%a, %a)
+        return (%2, %3)
+  )IR";
+
+  const std::string jump_if_not = R"IR(
+    graph(%0: bool):
+        %target : int = prim::Constant[value=2]()
+        %a : int = prim::Constant[value=1]()
+        static_runtime::JumpIfNot(%0, %target)
+        %2 : int = aten::add(%a, %a)
+        %3 : int = aten::add(%a, %a)
+        return (%2, %3)
+  )IR";
+
+  test_jump(jump_if, true);
+  test_jump(jump_if_not, false);
+}
+
+TEST(StaticRuntime, ControlFlow_Jump) {
+  const std::string ir = R"IR(
+    graph():
+        %target : int = prim::Constant[value=2]()
+        %a : int = prim::Constant[value=1]()
+        static_runtime::Jump(%target)
+        %2 : int = aten::add(%a, %a)
+        %3 : int = aten::add(%a, %a)
+        return (%2, %3)
+  )IR";
+
+  auto graph = getGraphFromIR(ir);
+  StaticModuleOptions opt = {
+    .cleanup_activations = true,
+    .enable_out_variant = true,
+    .optimize_memory = true
+  };
+  torch::jit::StaticModule smodule(graph, opt);
+
+  // One add is skipped
+  auto results_jmp = smodule({}, {});
+  ASSERT_TRUE(results_jmp.isTuple());
+  const auto& elems_jmp = results_jmp.toTuple()->elements();
+  ASSERT_EQ(elems_jmp.size(), 2);
+  ASSERT_TRUE(elems_jmp[0].isNone());
+  ASSERT_TRUE(elems_jmp[1].isInt());
+  ASSERT_EQ(elems_jmp[1].toInt(), 2);
+}
