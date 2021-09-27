@@ -272,15 +272,33 @@ std::tuple<Tensor, optional<int64_t>> select_batching_rule(const Tensor& self, o
   return std::make_tuple(result, 0);
 }
 
+VmapDimVector getPhysicalShape(const Tensor& self, int64_t & bdim, const IntArrayRef logical_shape) {
+  VmapDimVector new_shape = { logical_shape.begin(), logical_shape.end() };
+  if (bdim >= new_shape.size()) {
+    bdim = new_shape.size();
+  }
+  new_shape.insert(new_shape.begin() + bdim, self.size(bdim));
+  return new_shape;
+}
+
 std::tuple<Tensor, optional<int64_t>> _reshape_alias_batch_rule(const Tensor& self, optional<int64_t> bdim, const IntArrayRef shape, const IntArrayRef strides) {
   (void) strides;
   TORCH_INTERNAL_ASSERT(bdim.has_value());
+  // bdim_ can be updated by getPhysicalShape
+  int64_t bdim_ = *bdim;
+  auto new_shape = getPhysicalShape(self, bdim_, shape);
+  return std::make_tuple(at::reshape(self, new_shape), bdim_);
+}
 
-  c10::SmallBuffer<int64_t, 5> new_shape(shape.size() + 1);
-  new_shape[*bdim] = self.size(*bdim);
-  std::copy(shape.begin(), shape.begin() + *bdim, new_shape.begin());
-  std::copy(shape.begin() + *bdim, shape.end(), new_shape.begin() + *bdim + 1);
-  return std::make_tuple(at::reshape(self, new_shape), bdim);
+std::tuple<Tensor, optional<int64_t>> view_batch_rule(const Tensor& self, optional<int64_t> bdim, const IntArrayRef size) {
+  if (!bdim.has_value()) {
+    // expand_as can route to this batching rule with unbatched tensor
+    return std::make_tuple(self.view(size), bdim);
+  }
+  // bdim_ can be updated by getPhysicalShape
+  int64_t bdim_ = *bdim;
+  auto new_size = getPhysicalShape(self, bdim_, size);
+  return std::make_tuple(self.view(new_size), bdim_);
 }
 
 std::tuple<Tensor,optional<int64_t>> diagonal_backward_batch_rule(
@@ -339,6 +357,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("squeeze", squeeze_batch_rule);
   VMAP_SUPPORT("squeeze.dim", squeeze_dim_batch_rule);
   VMAP_SUPPORT("_reshape_alias", _reshape_alias_batch_rule);
+  VMAP_SUPPORT("view", view_batch_rule);
   VMAP_SUPPORT("diagonal_backward", diagonal_backward_batch_rule);
   VMAP_SUPPORT("select_backward", select_backward_batch_rule);
   VMAP_SUPPORT("slice_backward", slice_backward_batch_rule);
