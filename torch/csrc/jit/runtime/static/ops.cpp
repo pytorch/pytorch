@@ -1907,5 +1907,43 @@ REGISTER_OPERATOR_FUNCTOR(
         te->call({out.data_ptr(), input.data_ptr(), &nn});
       };
     });
+
+REGISTER_OPERATOR_FUNCTOR(
+    aten::remainder,
+    aten_remainder,
+    [](Node* n) -> SROperator {
+      if (n->matches(torch::schema(
+              "aten::remainder.Tensor(Tensor self, Tensor other) -> Tensor"))) {
+        return [](ProcessedNode* p_node) {
+          const auto& self = p_node->Input(0).toTensor();
+          if (p_node->Output(0).isNone()) {
+            p_node->Output(0) =
+                at::cpu::remainder(self, p_node->Input(1).toTensor());
+          } else {
+            auto& out = p_node->Output(0).toTensor();
+            fastResizeToZero(out);
+            at::cpu::remainder_out(out, self, p_node->Input(1).toTensor());
+          }
+        };
+      }
+      if (n->matches(torch::schema(
+              "aten::remainder.Scalar(Tensor self, Scalar other) -> Tensor"))) {
+        return [](ProcessedNode* p_node) {
+          const auto& self = p_node->Input(0).toTensor();
+          if (p_node->Output(0).isNone()) {
+            p_node->Output(0) =
+                at::native::remainder(self, p_node->Input(1).toScalar());
+          } else {
+            auto& out = p_node->Output(0).toTensor();
+            fastResizeToZero(out);
+            at::native::remainder_out(self, p_node->Input(1).toScalar(), out);
+          }
+        };
+      }
+
+      // Unrecognized overload
+      LogAndDumpSchema(n);
+      return nullptr;
+    });
 } // namespace jit
 } // namespace torch

@@ -1,9 +1,5 @@
 #pragma once
 
-#include <THC/THCGeneral.h>
-#include <THC/THCDeviceUtils.cuh>
-#include <THC/THCNumerics.cuh>
-
 #include <ATen/ATen.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
@@ -64,7 +60,7 @@ __global__ void im2col_kernel(
         int64_t w = w_in + j * dilation_width;
         *col = (h >= 0 && w >= 0 && h < height && w < width)
             ? im[i * dilation_height * width + j * dilation_width]
-            : ScalarConvert<int, dt>::to(0);
+            : static_cast<dt>(0);
         col += height_col * width_col;
       }
     }
