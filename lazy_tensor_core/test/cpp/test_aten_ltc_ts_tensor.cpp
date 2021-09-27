@@ -8704,6 +8704,52 @@ TEST_F(AtenLtcTsTensorTest, TestAdaptiveAvgPool2DNoBatchBackward) {
   }
 }
 
+TEST_F(AtenLtcTsTensorTest, TestConv2D) {
+  int in_channels = 4;
+  int out_channels = 4;
+  int kernel_size = 3;
+  for (int stride = 1; stride <= 3; ++stride) {
+    for (int padding = 0; padding <= 2; ++padding) {
+      for (bool with_bias : {true, false}) {
+        for (int dilation = 1; dilation <= 3; ++dilation) {
+          for (int groups :
+               {1, 2, 4}) {  // covers normal, grouped, depthwise conv.
+            ForEachDevice([&](const torch::Device& device) {
+              torch::Tensor input = torch::rand(
+                  {1, in_channels, 7, 7}, torch::TensorOptions(torch::kDouble));
+              torch::Tensor weight =
+                  torch::rand({out_channels, in_channels / groups, kernel_size,
+                               kernel_size},
+                              torch::TensorOptions(torch::kDouble));
+              torch::Tensor bias =
+                  with_bias ? torch::rand({out_channels},
+                                          torch::TensorOptions(torch::kDouble))
+                            : torch::Tensor();
+
+              torch::Tensor xla_input = CopyToDevice(input, device);
+              torch::Tensor xla_weight = CopyToDevice(weight, device);
+              torch::Tensor xla_bias =
+                  with_bias ? CopyToDevice(bias, device) : torch::Tensor();
+
+              torch::Tensor output =
+                  torch::conv2d(input, weight, bias,
+                                /*stride=*/{stride, stride},
+                                /*padding=*/{padding, padding},
+                                /*dilation=*/{dilation, dilation}, groups);
+              torch::Tensor xla_output =
+                  torch::conv2d(xla_input, xla_weight, xla_bias,
+                                /*stride=*/{stride, stride},
+                                /*padding=*/{padding, padding},
+                                /*dilation=*/{dilation, dilation}, groups);
+              AllClose(output, xla_output);
+            });
+          }
+        }
+      }
+    }
+  }
+}
+
 TEST_F(AtenLtcTsTensorTest, TestConv2DBackward) {
   int in_channels = 4;
   int out_channels = 4;
