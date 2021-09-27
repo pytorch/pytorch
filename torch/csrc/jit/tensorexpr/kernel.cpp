@@ -64,7 +64,6 @@ std::string sanitizeName(const std::string& input_name) {
   return sanitized_name.str();
 }
 
-
 std::string buildErrorMessage(const std::string& s) {
   static const std::string generic_error_message =
       "This error occured in the fuser. You can turn off the fuser with "
@@ -2572,6 +2571,7 @@ Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
   auto outputType = findDtypeForValue(v->node()->output());
   std::vector<ExprHandle> outputShape = sizesForValue(v);
   // handle ops optional arguments
+  // TODO: Avoid materializing optional tensors
   switch (op) {
     case aten::conv2d: {
       // handle optional bias
