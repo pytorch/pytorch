@@ -170,10 +170,6 @@ def assert_valid_qconfig(qconfig: Optional[Union[QConfig, QConfigDynamic]],
         isinstance(mod, torch.nn.ConvTranspose1d) or
         isinstance(mod, torch.nn.ConvTranspose2d) or
         isinstance(mod, torch.nn.ConvTranspose3d))
-    is_embedding_mod = (
-        isinstance(mod, torch.nn.Embedding) or
-        isinstance(mod, torch.nn.EmbeddingBag)
-    )
     if is_conv_transpose_mod:
         example_observer = qconfig.weight()
         is_per_channel = (
