@@ -60,13 +60,13 @@ __global__ void max_pool_forward_nchw(const int nthreads, const scalar_t* bottom
     for (int h = hstart; h < hend; h += dilation_h) {
       for (int w = wstart; w < wend; w += dilation_w) {
         scalar_t val = btm_data[h * width + w];
-        if ((ScalarConvert<scalar_t, accscalar_t>::to(val) > maxval) || THCNumerics<scalar_t>::isnan(val)) {
+        if ((static_cast<accscalar_t>(val) > maxval) || THCNumerics<scalar_t>::isnan(val)) {
           maxidx = h * width + w;
-          maxval = ScalarConvert<scalar_t, accscalar_t>::to(val);
+          maxval = static_cast<accscalar_t>(val);
         }
       }
     }
-    top_data[index] = ScalarConvert<scalar_t, accscalar_t>::to(maxval);
+    top_data[index] = static_cast<accscalar_t>(maxval);
     top_mask[index] = maxidx;
   }
 }
@@ -134,8 +134,8 @@ __global__ void max_pool_forward_nhwc(const scalar_t* bottom_data, const int nba
           const scalar_t *ptr_input = bottom_data + ih * in_stride_h + iw * in_stride_w;
           for(int c = channel_offset; c < channels; c+= blockDim.x*kernel_stride_C) {
             scalar_t val = ptr_input[c*in_stride_c];
-            if ((scalar_cast<accscalar_t>(val) > out_cached[cached_index]) || THCNumerics<scalar_t>::isnan(val)) {
-              out_cached[cached_index] = scalar_cast<accscalar_t>(val);
+            if ((static_cast<accscalar_t>(val) > out_cached[cached_index]) || THCNumerics<scalar_t>::isnan(val)) {
+              out_cached[cached_index] = static_cast<accscalar_t>(val);
               out_mask_cached[cached_index] = ih * width + iw;
             }
             cached_index += blockDim.x;
@@ -187,11 +187,11 @@ __global__ void max_pool_backward_nchw(const int nthreads, const scalar_t* top_d
         for (int ph = phstart; ph < phend; ++ph) {
           for (int pw = pwstart; pw < pwend; ++pw) {
             if (top_mask[ph * pooled_width + pw + offset] == h * width + w) {
-              gradient += ScalarConvert<scalar_t, accscalar_t>::to(top_diff[ph * pooled_width + pw + offset]);
+              gradient += static_cast<accscalar_t>(top_diff[ph * pooled_width + pw + offset]);
             }
           }
         }
-        bottom_diff[(n*channels+c)*height*width+index] = ScalarConvert<accscalar_t, scalar_t>::to(gradient);
+        bottom_diff[(n*channels+c)*height*width+index] = static_cast<scalar_t>(gradient);
       }
     }
   }
@@ -254,7 +254,7 @@ __global__ void max_pool_backward_nhwc(const int nthreads, const scalar_t* top_d
             for (int c = channel_offset; c < channels; c += blockDim.x*kernel_stride_C) {
               if (ptr_top_mask[c*out_stride_c] == index_shift) {
                 out_cached[cached_index] +=
-                  scalar_cast<accscalar_t>(top_diff[oh * out_stride_h + ow * out_stride_w + c*out_stride_c]);
+                  static_cast<accscalar_t>(top_diff[oh * out_stride_h + ow * out_stride_w + c*out_stride_c]);
               }
               cached_index += blockDim.x;
             }
@@ -263,7 +263,7 @@ __global__ void max_pool_backward_nhwc(const int nthreads, const scalar_t* top_d
         scalar_t *ptr_bottom_diff = bottom_diff + index_shift * channels;
         int cached_index = threadIdx.x;
         for (int c = channel_offset; c < channels; c += blockDim.x*kernel_stride_C) {
-          ptr_bottom_diff[c] = scalar_cast<scalar_t>(out_cached[cached_index]);
+          ptr_bottom_diff[c] = static_cast<scalar_t>(out_cached[cached_index]);
           out_cached[cached_index] = accscalar_t(0.0);
           cached_index += blockDim.x;
         }
@@ -274,7 +274,7 @@ __global__ void max_pool_backward_nhwc(const int nthreads, const scalar_t* top_d
         for (int c = channel_offset; c < channels; c += blockDim.x*kernel_stride_C) {
           if (ptr_top_mask[c*out_stride_c] == index_shift) {
             ptr_bottom_diff[c] =
-              scalar_cast<scalar_t>(top_diff[phstart * out_stride_h + pwstart * out_stride_w + c*out_stride_c]);
+              static_cast<scalar_t>(top_diff[phstart * out_stride_h + pwstart * out_stride_w + c*out_stride_c]);
           }
           cached_index += blockDim.x;
         }
