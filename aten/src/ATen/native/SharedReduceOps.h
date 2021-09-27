@@ -21,9 +21,32 @@
 #define device_sqrt std::sqrt
 #endif
 #if defined(__CUDACC__) || defined(__HIPCC__)
-#define MAX(X, Y) ::max(X,Y)
-#define MIN(X, Y) ::min(X,Y)
+template <typename scalar_t>
+inline C10_DEVICE scalar_t max_propagate_nan(scalar_t a, scalar_t b) {
+#if defined(__HIPCC__)
+  // TODO: remove this special case for HIP when issue is fixed:
+  //       https://github.com/ROCm-Developer-Tools/HIP/issues/2209
+  scalar_t max = at::_isnan(a) ? a : (at::_isnan(b) ? b : std::max(a, b));
 #else
+  scalar_t max = at::_isnan(b) ? b : std::max(a, b);
+#endif
+  return max;
+}
+template <typename scalar_t>
+inline C10_DEVICE scalar_t min_propagate_nan(scalar_t a, scalar_t b) {
+#if defined(__HIPCC__)
+  // TODO: remove this special case for HIP when issue is fixed:
+  //       https://github.com/ROCm-Developer-Tools/HIP/issues/2209
+  scalar_t min = at::_isnan(a) ? a : (at::_isnan(b) ? b : std::min(a, b));
+#else
+  scalar_t min = at::_isnan(b) ? b : std::min(a, b);
+#endif
+  return min;
+}
+#define MAX(X, Y) max_propagate_nan(X,Y)
+#define MIN(X, Y) min_propagate_nan(X,Y)
+#else
+#include <ATen/native/cpu/zmath.h>
 #define MAX(X, Y) max_impl(X,Y)
 #define MIN(X, Y) min_impl(X,Y)
 #endif
@@ -57,14 +80,21 @@ struct WelfordData {
   scalar_t m2;
   index_t n;
   combine_t nf;
-  C10_HOST_DEVICE WelfordData() : mean(0), m2(0), n(0), nf(0)  {}
-  C10_DEVICE WelfordData(scalar_t mean, scalar_t m2, index_t n, combine_t nf) : mean(mean), m2(m2), n(n), nf(nf) {}
+
+  C10_HOST_DEVICE WelfordData() : mean(0), m2(0), n(0), nf(0) {}
+
+  C10_HOST_DEVICE WelfordData(
+      scalar_t mean,
+      scalar_t m2,
+      index_t n,
+      combine_t nf)
+      : mean(mean), m2(m2), n(n), nf(nf) {}
 };
 
 
 template <typename scalar_t, typename acc_scalar_t, typename index_t, typename combine_t, typename res_t>
 struct WelfordOps {
-  bool unbiased;
+  index_t correction;
   bool take_sqrt;
  public:
   using acc_t = WelfordData<acc_scalar_t, index_t, combine_t>;
@@ -100,13 +130,11 @@ struct WelfordOps {
       new_count
     };
   }
-  inline C10_DEVICE res_t project(acc_t acc) const {
-    auto mean = acc.mean;
-    combine_t divisor = unbiased ? (acc.nf - 1) : acc.nf;
-    auto ret = (divisor > 0) ?
-      (take_sqrt ? device_sqrt(acc.m2 / divisor) : (acc.m2 / divisor))
-      : NAN;
-    detail::pair<scalar_t, scalar_t> results{(scalar_t) ret, (scalar_t) mean};
+  inline C10_DEVICE res_t project(acc_t acc) const __ubsan_ignore_float_divide_by_zero__ {
+    const auto mean = static_cast<scalar_t>(acc.mean);
+    const combine_t divisor = acc.nf > correction ? acc.nf - correction : 0;
+    const auto var = acc.m2 / divisor;
+    res_t results(take_sqrt ? device_sqrt(var) : var, mean);
     return results;
   }
 
@@ -124,9 +152,8 @@ struct WelfordOps {
     };
   }
 #endif
-  WelfordOps(bool unbiased, bool take_sqrt)
-    : unbiased(unbiased), take_sqrt(take_sqrt) {
-  }
+  C10_HOST_DEVICE WelfordOps(index_t correction, bool take_sqrt)
+      : correction(correction), take_sqrt(take_sqrt) {}
 };
 
 template <typename acc_t, typename factor_t>
@@ -373,56 +400,6 @@ struct NanSumOps {
 
   inline C10_DEVICE data_t project(acc_t a) const {
     return data_t{a};
-  }
-
-  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
-    return acc;
-  }
-
-#if defined(__CUDACC__) || defined(__HIPCC__)
-  inline C10_DEVICE acc_t warp_shfl_down(acc_t data, int offset) const {
-    return WARP_SHFL_DOWN(data, offset);
-  }
-#endif
-};
-
-template <typename acc_t>
-struct AndOps {
-  inline C10_DEVICE acc_t reduce(acc_t a, acc_t b, int64_t /*idx*/) const {
-    return static_cast<bool>(a) && static_cast<bool>(b);
-  }
-
-  inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
-    return static_cast<bool>(a) && static_cast<bool>(b);
-  }
-
-  inline C10_DEVICE acc_t project(acc_t a) const {
-    return a;
-  }
-
-  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
-    return acc;
-  }
-
-#if defined(__CUDACC__) || defined(__HIPCC__)
-  inline C10_DEVICE acc_t warp_shfl_down(acc_t data, int offset) const {
-    return WARP_SHFL_DOWN(data, offset);
-  }
-#endif
-};
-
-template <typename acc_t>
-struct OrOps {
-  inline C10_DEVICE acc_t reduce(acc_t a, acc_t b, int64_t /*idx*/) const {
-    return static_cast<bool>(a) || static_cast<bool>(b);
-  }
-
-  inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
-    return static_cast<bool>(a) || static_cast<bool>(b);
-  }
-
-  inline C10_DEVICE acc_t project(acc_t a) const {
-    return a;
   }
 
   static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {

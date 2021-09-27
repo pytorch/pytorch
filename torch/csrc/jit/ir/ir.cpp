@@ -4,6 +4,7 @@
 #include <ATen/core/function.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
@@ -23,22 +24,60 @@
 namespace torch {
 namespace jit {
 
+namespace utils {
+std::string getNodesModuleHierarchy(const Node& n) {
+  if (!n.callstack().has_value()) {
+    return std::string();
+  }
+  InlinedCallStackPtr callstack_ptr = n.callstack().value();
+  std::string module_hierarchy;
+  for (auto& entry : callstack_ptr->vec()) {
+    const auto& opt_module_info = std::get<kModuleInstanceInfo>(entry);
+    if (opt_module_info.has_value()) {
+      const auto& module_instance_info = opt_module_info.value();
+      if (!module_hierarchy.empty()) {
+        module_hierarchy.append(".");
+      }
+      module_hierarchy.append(utils::get_module_info(module_instance_info));
+    } else {
+      module_hierarchy += ".UNKNOWN_INSTANCE(UNKNOWN_TYPE)";
+    }
+  }
+  return module_hierarchy;
+}
+} // namespace utils
+
+namespace {
+
 // Constants relating to maintaining the topological index of nodes.
 //
 // Lower and upper bounds of the index. Inclusive range.
-static constexpr topo_position_t kLowerBound = INT64_MIN;
-static constexpr topo_position_t kUpperBound = INT64_MAX;
-static constexpr topo_position_t kMidPoint = 0;
+constexpr topo_position_t kLowerBound = INT64_MIN;
+constexpr topo_position_t kUpperBound = INT64_MAX;
+constexpr topo_position_t kMidPoint = 0;
 
 // How far away to space nodes that are appended to the graph.
 // should be 2^n, where:
 //   - n is the maximum number of repeated insertions without a re-index
 //   - 2^(64-n) is the maximum number of appends to the end without reindex
-static constexpr topo_position_t kAppendInterval = 1099511627776ULL /* 2^40 */;
+constexpr topo_position_t kAppendInterval = 1099511627776ULL /* 2^40 */;
 
-static void printValueRef(std::ostream& out, const Value* n) {
+void printValueRef(std::ostream& out, const Value* n) {
   out << "%" << n->debugName();
 }
+
+bool isNumber(c10::string_view str) {
+  return str.find_first_not_of("0123456789") == std::string::npos;
+}
+
+std::string normalizeAttrName(c10::string_view field) {
+  if (isNumber(field)) {
+    return "_" + std::string{field};
+  }
+  return std::string{field};
+}
+
+} // namespace
 
 // NB: This overload will become ambiguous with the one Caffe2 provides in its
 // logging, if they ever intersect.
@@ -104,10 +143,12 @@ std::ostream& operator<<(
 static void printAttribute(std::ostream& out, const at::Tensor& tensor) {
   // 1-elem tensors are usually boxed scalars, so print them like it
   if (tensor.numel() == 1) {
-    auto scalar_tensor = tensor.view({}).item();
+    auto scalar_tensor = tensor.view(std::vector<int64_t>{}).item();
     out << "{";
     if (scalar_tensor.isFloatingPoint()) {
       out << scalar_tensor.toDouble();
+    } else if (scalar_tensor.isComplex()) {
+      out << scalar_tensor.toComplexDouble();
     } else {
       out << scalar_tensor.toLong();
     }
@@ -157,6 +198,13 @@ static void printTypeList(
 
 void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
   switch (kindOf(name)) {
+    case AttributeKind::c:
+      printAttribute(out, c(name));
+      break;
+    case AttributeKind::cs:
+      // TODO(@anjali411): fix this
+      AT_ASSERT(false);
+      break;
     case AttributeKind::f:
       printAttribute(out, f(name));
       break;
@@ -230,7 +278,8 @@ SourceRange Node::sourceRange() const {
 }
 
 static std::ostream& indent(std::ostream& out, size_t level) {
-  for (size_t i = 0; i < level; ++i) {
+  for (const auto i : c10::irange(level)) {
+    (void)i; // Suppress unused variable warning
     out << "  ";
   }
   return out;
@@ -285,6 +334,7 @@ std::ostream& Node::print(
     }
     if (auto file_line_col = r.file_line_col()) {
       std::string filename;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       size_t line, col;
       std::tie(filename, line, col) = *file_line_col;
       out << " # " << filename << ":" << line << ":" << col;
@@ -297,7 +347,7 @@ std::ostream& Node::print(
 
   out << "\n";
 
-  for (size_t i = 0; i < blocks().size(); ++i) {
+  for (const auto i : c10::irange(blocks().size())) {
     auto b = blocks()[i];
     indent(out, level + 1) << "block" << i << "("
                            << const_value_list_with_types(b->inputs())
@@ -461,7 +511,7 @@ void Graph::lint() const {
   // - Params and return do NOT occur in nodes
   // - next_unique_ is greater than all uniques in graph
   // - uniques in all_nodes are unique
-  // - every use will occur later in the topsort
+  // - every use will occur later in the toposort
 
   struct LintScope {
     LintScope() = default;
@@ -480,6 +530,7 @@ void Graph::lint() const {
       AT_ASSERT(!contains(n));
       nodes.insert(n);
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
     std::unique_ptr<LintScope> parent;
 
    private:
@@ -736,7 +787,9 @@ bool Value::mustBeNone() const {
 }
 bool Value::mustNotBeNone() const {
   return node_->kind() != prim::AutogradAdd && type() != NoneType::get() &&
-      !type()->cast<OptionalType>();
+      !type()->cast<OptionalType>() &&
+      !(type()->cast<UnionType>() &&
+        type()->expect<UnionType>()->canHoldType(NoneType::get()));
 }
 
 std::string Value::debugNameBase() const {
@@ -759,7 +812,7 @@ bool Value::isValidName(const std::string& name) {
   }
 
   // Numbers are not legal
-  if (name.find_first_not_of("0123456789") == std::string::npos) {
+  if (isNumber(name)) {
     return false;
   }
 
@@ -797,12 +850,24 @@ Value* Value::setDebugName(const std::string& name) {
         name_base = name.substr(0, last_dot_pos);
       }
     }
+
+    auto& names_suffixes = node()->owningGraph()->name_base_suffix_;
+    auto it = names_suffixes.find(name_base);
+    if (it != names_suffixes.end()) {
+      suffix = std::max(suffix, it->second + 1);
+    }
+
+    // Verify that new name is not used and find next usable name in case
+    // suffix is used.
     std::string replacement_name;
     do {
       std::stringstream ss;
       ss << name_base << "." << suffix++;
       replacement_name = ss.str();
     } while (names.count(replacement_name) > 0);
+
+    names_suffixes[name_base] = suffix;
+
     old_owner_of_name->second->setDebugName(replacement_name);
   }
 
@@ -849,10 +914,28 @@ void Value::replaceAllUsesAfterNodeWith(const Node* node, Value* newValue) {
       uses_.end());
 }
 
+void Value::replaceAllUsesDominatedByNodeWith(
+    const Node* node,
+    Value* newValue) {
+  std::for_each(uses_.begin(), uses_.end(), [&node, newValue](Use& u) {
+    if (u.user->isDominatedBy(node)) {
+      u.user->inputs_[u.offset] = newValue;
+      newValue->uses_.push_back(u);
+    }
+  });
+
+  uses_.erase(
+      std::remove_if(
+          uses_.begin(),
+          uses_.end(),
+          [&node](const Use& u) { return u.user->isDominatedBy(node); }),
+      uses_.end());
+}
+
 size_t findArgument(
     const FunctionSchema& the_schema,
     const std::string& unqualName) {
-  for (size_t i = 0; i < the_schema.arguments().size(); ++i) {
+  for (const auto i : c10::irange(the_schema.arguments().size())) {
     const Argument* arg = &the_schema.arguments()[i];
     if (arg->name() == unqualName) {
       return i;
@@ -901,7 +984,7 @@ bool Node::matches(const FunctionSchema& schema) const {
   }
 
   TypeEnv type_env;
-  for (size_t i = 0; i < formals.size(); ++i) {
+  for (const auto i : c10::irange(formals.size())) {
     auto formal = formals[i].type();
     const MatchTypeReturn matched_type =
         matchTypeVariables(formal, actuals[i]->type(), type_env);
@@ -997,7 +1080,7 @@ const Operator& Node::getOperator() const {
   er << "Schema not found for node. File a bug report.\n";
   er << "Node: " << *this << "\n";
   er << "Input types:";
-  for (size_t i = 0; i < inputs().size(); ++i) {
+  for (const auto i : c10::irange(inputs().size())) {
     if (i > 0)
       er << ", ";
     er << *inputs()[i]->type();
@@ -1083,6 +1166,7 @@ bool Node::hasSideEffects() const {
     case cuda::set_stream:
     case cuda::_set_device:
     case cuda::_current_device:
+    case cuda::synchronize:
 #endif
     case prim::Enter:
     case prim::Exit:
@@ -1204,7 +1288,7 @@ void Node::eraseOutput(size_t i) {
   Value* n = outputs_[i];
   outputs_.erase(outputs_.begin() + i);
   owningGraph()->freeValue(n);
-  for (size_t j = i; j < outputs_.size(); j++) {
+  for (const auto j : c10::irange(i, outputs_.size())) {
     outputs_[j]->offset_--;
   }
 }
@@ -1249,9 +1333,42 @@ void Node::cloneFrom(Node* s) {
 void Node::replaceAllUsesWith(Node* n) {
   AT_ASSERT(outputs().size() == n->outputs().size());
   size_t nOutputs = outputs().size();
-  for (size_t i = 0; i < nOutputs; i++) {
+  for (const auto i : c10::irange(nOutputs)) {
     outputs()[i]->replaceAllUsesWith(n->outputs()[i]);
   }
+}
+
+Node* Node::replaceWithNewSymbol(Symbol new_symbol) {
+  WithInsertPoint insert_guard{this};
+  bool had_operator = maybeOperator() != nullptr;
+  auto graph = owningGraph();
+  auto replace_node = graph->insertNode(graph->create(new_symbol, 0));
+  for (Value* v : inputs()) {
+    replace_node->addInput(v);
+  }
+  for (Value* v : outputs()) {
+    auto new_out = replace_node->addOutput()->copyMetadata(v);
+    v->replaceAllUsesWith(new_out);
+  }
+  replace_node->copyMetadata(this);
+  replace_node->copyAttributes(*this);
+  TORCH_INTERNAL_ASSERT(
+      (replace_node->maybeOperator() != nullptr) == had_operator,
+      "invalid symbol replacement:",
+      new_symbol,
+      kind());
+  return replace_node;
+}
+
+bool Node::isDominatedBy(const Node* dominator) const {
+  const Node* node = this;
+  while (node) {
+    if (node->owningBlock() == dominator->owningBlock()) {
+      return dominator->isBefore(node);
+    }
+    node = node->owningBlock()->owningNode();
+  }
+  return false;
 }
 
 Value* Node::insertInput(size_t i, Value* value) {
@@ -1261,7 +1378,7 @@ Value* Node::insertInput(size_t i, Value* value) {
   // after the one we're inserting. Concretely, these are the inputs at
   // indices [i, # input). Since we're inserting one input before all of
   // these inputs, increment their use offsets for this value by 1
-  for (size_t use_itr = i; use_itr < inputs_.size(); ++use_itr) {
+  for (const auto use_itr : c10::irange(i, inputs_.size())) {
     // See Note [User node does not uniquely identify use]
     auto use = findUseForInput(use_itr);
     use->offset += 1;
@@ -1414,7 +1531,7 @@ void Node::removeInput(size_t i) {
 
 void Node::removeAllInputs() {
   op_ = nullptr;
-  for (size_t i = 0; i < inputs().size(); ++i) {
+  for (const auto i : c10::irange(inputs().size())) {
     dropInput(i);
   }
   inputs_.clear();
@@ -1425,7 +1542,7 @@ void Node::permuteInputs(const std::vector<size_t>& new_order) {
   AT_ASSERT(new_order.size() == inputs_.size());
   std::vector<Value*> new_inputs;
   new_inputs.reserve(new_order.size());
-  for (size_t i = 0; i < new_order.size(); ++i) {
+  for (const auto i : c10::irange(new_order.size())) {
     AT_ASSERTM(inputs_.at(new_order[i]) != nullptr, "Repeated index");
     new_inputs.push_back(inputs_.at(new_order[i]));
     auto it = findUseForInput(new_order[i]);
@@ -1440,7 +1557,7 @@ void Node::permuteOutputs(const std::vector<size_t>& new_order) {
   AT_ASSERT(new_order.size() == outputs_.size());
   std::vector<Value*> new_outputs;
   new_outputs.reserve(new_order.size());
-  for (size_t i = 0; i < new_order.size(); ++i) {
+  for (const auto i : c10::irange(new_order.size())) {
     AT_ASSERTM(outputs_.at(new_order[i]) != nullptr, "Repeated index");
     new_outputs.push_back(outputs_.at(new_order[i]));
     outputs_.at(new_order[i])->setOffset(i);
@@ -1540,7 +1657,8 @@ Value* Graph::insert(
 Node* Graph::create(NodeKind kind, size_t num_outputs) {
   // NB: Node constructor adds node to all_nodes
   auto n = new Node(this, kind);
-  for (size_t i = 0; i < num_outputs; i++) {
+  for (const auto i : c10::irange(num_outputs)) {
+    (void)i;
     n->addOutput();
   }
   return n;
@@ -1621,7 +1739,8 @@ Node* Graph::createTupleSlice(
   new_vals.reserve(num_values);
 
   int64_t i = beg;
-  for (int64_t j = 0; j < num_values; ++j) {
+  for (const auto j : c10::irange(num_values)) {
+    (void)j; // Suppress unused variable warning
     auto idx = insertConstant(IValue(static_cast<int64_t>(i)));
     auto tupleIndex = insertNode(createTupleIndex(tup, idx, tt->elements()[i]));
 
@@ -1648,25 +1767,29 @@ Node* Graph::createEnumValue(Value* e) {
   return n;
 }
 
-Node* Graph::createList(const TypePtr& elem_type, at::ArrayRef<Value*> values) {
+Node* Graph::createList(
+    const TypePtr& contained_type,
+    at::ArrayRef<Value*> values) {
   auto n = create(prim::ListConstruct, values);
   for (const auto& v : values) {
     TORCH_CHECK(
-        v->type()->isSubtypeOf(elem_type),
+        v->type()->isSubtypeOf(contained_type),
         "Expected a list element that subtypes '",
-        elem_type->repr_str(),
+        contained_type->repr_str(),
         "' but got an element of type '",
         v->type()->repr_str(),
         "'");
   }
-  n->output()->setType(ListType::create(elem_type));
+  n->output()->setType(ListType::create(contained_type));
   return n;
 }
+
 Node* Graph::createListUnpack(Value* v, size_t size) {
   ListTypePtr list_type = v->type()->expect<ListType>();
   TypePtr elem_type = list_type->getElementType();
   auto n = create(prim::ListUnpack, {v}, 0);
-  for (size_t i = 0; i < size; ++i) {
+  for (const auto i : c10::irange(size)) {
+    (void)i; // Suppress unused variable warning
     n->addOutput()->setType(elem_type);
   }
   return n;
@@ -1679,7 +1802,7 @@ Node* Graph::createDict(
     at::ArrayRef<Value*> values) {
   AT_ASSERT(keys.size() == values.size());
   auto n = create(prim::DictConstruct, 1);
-  for (size_t i = 0; i < keys.size(); ++i) {
+  for (const auto i : c10::irange(keys.size())) {
     AT_ASSERT(keys[i]->type()->isSubtypeOf(key_type));
     AT_ASSERT(values[i]->type()->isSubtypeOf(value_type));
 
@@ -1720,6 +1843,7 @@ Node* Graph::createGetAttr(Value* obj, const std::string& field) {
 
   const auto outputType = classType->getAttribute(field);
   n->output()->setType(outputType);
+  n->output()->setDebugName(normalizeAttrName(field));
   return n;
 }
 
@@ -1766,11 +1890,13 @@ Value* Graph::insertToList(Value* v, TypePtr type) {
     elem_ty = 1;
   } else if (ptr == BoolType::get()) {
     elem_ty = 2;
+  } else if (ptr == ComplexType::get()) {
+    elem_ty = 3;
   } else {
     TORCH_CHECK(
         false,
         ptr->repr_str(),
-        " is not one of the supported element types for tolist: int, float, bool");
+        " is not one of the supported element types for tolist: int, float, complex, bool");
   }
 
   // Pass in the number of dimensions and base element type as arguments
@@ -1884,6 +2010,53 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
   return g.insertNode(g.createTupleUnpack(v))->outputs();
 }
 
+void inlineCallStackOfNode(
+    Node* n,
+    std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
+    Function* callee,
+    Node* to_replace,
+    c10::optional<ModuleInstanceInfo> m_info);
+
+void inlineCallStackOfBlock(
+    Block* b,
+    std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
+    Function* callee,
+    Node* to_replace,
+    c10::optional<ModuleInstanceInfo> m_info) {
+  for (auto n : b->nodes()) {
+    inlineCallStackOfNode(n, new_cs_entries, callee, to_replace, m_info);
+  }
+}
+
+void inlineCallStackOfNode(
+    Node* new_node,
+    std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
+    Function* callee,
+    Node* to_replace,
+    c10::optional<ModuleInstanceInfo> m_info) {
+  auto new_node_cs = new_node->callstack();
+
+  InlinedCallStack* raw_callstack_ptr =
+      new_node_cs ? new_node_cs->get() : nullptr;
+
+  if (!new_cs_entries.count(raw_callstack_ptr)) {
+    if (new_node_cs) {
+      new_cs_entries[raw_callstack_ptr] = c10::make_intrusive<InlinedCallStack>(
+          *new_node_cs, callee, to_replace->sourceRange(), m_info);
+    } else {
+      new_cs_entries[raw_callstack_ptr] = c10::make_intrusive<InlinedCallStack>(
+          callee, to_replace->sourceRange(), m_info);
+    }
+  }
+  new_node->setCallStack(new_cs_entries.at(raw_callstack_ptr));
+  // We updated the inlined callstack of new_node.
+  // Same must be done for the nodes of the blocks of new_node.
+  // For example If node's block otherwise is not annotated appropriately.
+  for (auto block : new_node->blocks()) {
+    inlineCallStackOfBlock(block, new_cs_entries, callee, to_replace, m_info);
+  }
+}
+
 // inline_optimized_graph argument is used in substitute function call for
 // ONNX conversion
 std::vector<Value*> inlineCallTo(
@@ -1917,10 +2090,18 @@ std::vector<Value*> inlineCallTo(
     if (to_replace->input(0)->node()->kind() == prim::GetAttr) {
       module_instance_info = c10::make_optional(ModuleInstanceInfo(
           class_type_ptr, to_replace->input(0)->node()->s(attr::name)));
+    } else if (
+        to_replace->owningGraph()->inputs().size() > 0 &&
+        to_replace->input(0) == to_replace->owningGraph()->inputs()[0]) {
+      // This CallMethod must correspond to method of the same object
+      // to which this graph belongs.
+      module_instance_info =
+          c10::make_optional(ModuleInstanceInfo(class_type_ptr, "SELF"));
     } else {
-      std::string instance_name_unknown("INSTANCE_NAME_UNKNOWN");
+      // Not sure if it is possible to come here ever.
+      // TODO: Remove this else. Or add assert
       module_instance_info = c10::make_optional(
-          ModuleInstanceInfo(class_type_ptr, instance_name_unknown));
+          ModuleInstanceInfo(class_type_ptr, "INSTANCE_NAME_UNKNOWN"));
     }
   }
 
@@ -1960,31 +2141,17 @@ std::vector<Value*> inlineCallTo(
       continue;
     }
 
-    auto new_node_cs = new_node->callstack();
-
-    InlinedCallStack* raw_callstack_ptr =
-        new_node_cs ? new_node_cs->get() : nullptr;
-
-    if (!new_callstack_entries.count(raw_callstack_ptr)) {
-      if (new_node_cs) {
-        new_callstack_entries[raw_callstack_ptr] =
-            c10::make_intrusive<InlinedCallStack>(
-                *new_node_cs,
-                callee,
-                to_replace->sourceRange(),
-                module_instance_info);
-      } else {
-        new_callstack_entries[raw_callstack_ptr] =
-            c10::make_intrusive<InlinedCallStack>(
-                callee, to_replace->sourceRange(), module_instance_info);
-      }
-    }
-    new_node->setCallStack(new_callstack_entries.at(raw_callstack_ptr));
+    inlineCallStackOfNode(
+        new_node,
+        new_callstack_entries,
+        callee,
+        to_replace,
+        module_instance_info);
   }
   const auto& old_outputs = to_replace->outputs();
 
   AT_ASSERT(new_outputs.size() == old_outputs.size());
-  for (size_t i = 0; i < old_outputs.size(); ++i) {
+  for (const auto i : c10::irange(old_outputs.size())) {
     if (old_outputs[i]->hasDebugName()) {
       new_outputs[i]->setDebugName(old_outputs[i]->debugName());
     }
@@ -2020,7 +2187,7 @@ std::vector<Value*> insertGraph(
     std::unordered_map<Value*, Value*>& value_map) {
   auto value_map_func = [&](Value* v) { return value_map.at(v); };
   AT_ASSERT(callee.inputs().size() == inputs.size());
-  for (size_t i = 0; i < inputs.size(); ++i) {
+  for (const auto i : c10::irange(inputs.size())) {
     value_map[callee.inputs()[i]] = inputs[i];
   }
   for (auto* node : callee.nodes()) {
@@ -2056,16 +2223,6 @@ Node* ProfileOp::allocNewInstance(Graph* g) {
   return new ProfileOp(g, {nullptr});
 }
 
-void ProfileOptionalOp::cloneFrom(Node* other_) {
-  Node::cloneFrom(other_);
-  auto other = other_->cast<ProfileOptionalOp>();
-  this->callback_ = other->getCallback();
-}
-
-Node* ProfileOptionalOp::allocNewInstance(Graph* g) {
-  return new ProfileOptionalOp(g, {nullptr});
-}
-
 void ProfileIValueOp::cloneFrom(Node* other_) {
   Node::cloneFrom(other_);
   auto other = other_->cast<ProfileIValueOp>();
@@ -2085,7 +2242,6 @@ TypePtr NamedValue::type() const {
 }
 
 const Symbol ProfileOp::Kind = ::c10::prim::profile;
-const Symbol ProfileOptionalOp::Kind = ::c10::prim::profile_optional;
 const Symbol ProfileIValueOp::Kind = ::c10::prim::profile_ivalue;
 
 OperatorSet::OperatorSet(std::initializer_list<const char*> sig_literals) {

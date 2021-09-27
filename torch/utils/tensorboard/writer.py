@@ -312,7 +312,15 @@ class SummaryWriter(object):
             for k, v in metric_dict.items():
                 w_hp.add_scalar(k, v)
 
-    def add_scalar(self, tag, scalar_value, global_step=None, walltime=None):
+    def add_scalar(
+        self,
+        tag,
+        scalar_value,
+        global_step=None,
+        walltime=None,
+        new_style=False,
+        double_precision=False,
+    ):
         """Add scalar data to summary.
 
         Args:
@@ -321,7 +329,8 @@ class SummaryWriter(object):
             global_step (int): Global step value to record
             walltime (float): Optional override default walltime (time.time())
               with seconds after epoch of event
-
+            new_style (boolean): Whether to use new style (tensor field) or old
+              style (simple_value field). New style could lead to faster data loading.
         Examples::
 
             from torch.utils.tensorboard import SummaryWriter
@@ -341,8 +350,11 @@ class SummaryWriter(object):
         if self._check_caffe2_blob(scalar_value):
             from caffe2.python import workspace
             scalar_value = workspace.FetchBlob(scalar_value)
-        self._get_file_writer().add_summary(
-            scalar(tag, scalar_value), global_step, walltime)
+
+        summary = scalar(
+            tag, scalar_value, new_style=new_style, double_precision=double_precision
+        )
+        self._get_file_writer().add_summary(summary, global_step, walltime)
 
     def add_scalars(self, main_tag, tag_scalar_dict, global_step=None, walltime=None):
         """Adds many scalar data to summary.
@@ -706,9 +718,7 @@ class SummaryWriter(object):
         torch._C._log_api_usage_once("tensorboard.logging.add_onnx_graph")
         self._get_file_writer().add_onnx_graph(load_onnx_graph(prototxt))
 
-    def add_graph(self, model, input_to_model=None, verbose=False):
-        # prohibit second call?
-        # no, let tensorboard handle it and show its warning message.
+    def add_graph(self, model, input_to_model=None, verbose=False, use_strict_trace=True):
         """Add graph data to summary.
 
         Args:
@@ -716,11 +726,14 @@ class SummaryWriter(object):
             input_to_model (torch.Tensor or list of torch.Tensor): A variable or a tuple of
                 variables to be fed.
             verbose (bool): Whether to print graph structure in console.
+            use_strict_trace (bool): Whether to pass keyword argument `strict` to
+                `torch.jit.trace`. Pass False when you want the tracer to
+                record your mutable container types (list, dict)
         """
         torch._C._log_api_usage_once("tensorboard.logging.add_graph")
         if hasattr(model, 'forward'):
             # A valid PyTorch model should have a 'forward' method
-            self._get_file_writer().add_graph(graph(model, input_to_model, verbose))
+            self._get_file_writer().add_graph(graph(model, input_to_model, verbose, use_strict_trace))
         else:
             # Caffe2 models do not have the 'forward' method
             from caffe2.proto import caffe2_pb2
@@ -825,7 +838,7 @@ class SummaryWriter(object):
             metadata, label_img, fs, subdir, global_step, tag)
         self._projector_config.embeddings.extend([embedding_info])
 
-        from google.protobuf import text_format  # type: ignore
+        from google.protobuf import text_format
         config_pbtxt = text_format.MessageToString(self._projector_config)
         write_pbtxt(self._get_file_writer().get_logdir(), config_pbtxt)
 

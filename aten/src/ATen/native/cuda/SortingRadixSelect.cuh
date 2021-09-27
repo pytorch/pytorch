@@ -1,4 +1,4 @@
-#include <THC/THCAtomics.cuh>
+#include <ATen/cuda/Atomic.cuh>
 
 namespace at {
 namespace native {
@@ -219,7 +219,7 @@ __device__ void countRadixUsingMask(
   if (getLaneId() == 0) {
 #pragma unroll
     for (uint32_t i = 0; i < RadixSize; ++i) {
-      gpuAtomicAdd(&smem[i], counts[i]);
+      gpuAtomicAddNoReturn(&smem[i], counts[i]);
     }
   }
 

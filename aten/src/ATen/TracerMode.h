@@ -8,12 +8,12 @@
 //
 // Historically, tracing function was controlled by two switches:
 //
-// - `AutoNonVariableTypeMode` guard
+// - `AutoDispatchBelowADInplaceOrView` guard
 //
 //    Tracing function used to be script-generated inside `VariableType_*.cpp`
 //    kernels, sharing the same `Autograd` dispatch key with autograd function.
 //    Therefore, before tracing function was moved out of VariableType,
-//    `AutoNonVariableTypeMode` guard can also disable tracing as a side effect
+//    `AutoDispatchBelowADInplaceOrView` guard can also disable tracing as a side effect
 //    of disabling `Autograd` dispatching.
 //
 // - `setTracingState()` API in `torch/csrc/jit/frontend/tracer.h`
@@ -42,7 +42,7 @@
 //
 // - `tracer::impl::NoTracerDispatchMode` guard
 //
-//    It's used to cover the old semantics of `AutoNonVariableTypeMode` after
+//    It's used to cover the old semantics of `AutoDispatchBelowADInplaceOrView` after
 //    tracing was moved out of VariableType.
 //
 // Before tracing function was moved out of VariableType, tracing was enabled
@@ -51,7 +51,7 @@
 //    1) `TracingState` object in TLS != null;
 //       - Either inside the execution scope of `tracer::trace()`, or
 //       - Eagerly called `setTracingState()` with non-null object.
-//    2) Not inside `AutoNonVariableTypeMode` scope;
+//    2) Not inside `AutoDispatchBelowADInplaceOrView` scope;
 //
 // After:
 //
@@ -69,10 +69,10 @@
 //   `setTracingState()` Python/C++ APIs (and other APIs calling it) so that
 //   these two can be unified.
 //
-// - `AutoNonVariableTypeMode` v.s. `tracer::impl::NoTracerDispatchMode`
+// - `AutoDispatchBelowADInplaceOrView` v.s. `tracer::impl::NoTracerDispatchMode`
 //
 //   We don't need to always set both guards together to keep semantics
-//   unchanged. For the follow use cases of `AutoNonVariableTypeMode` we don't
+//   unchanged. For the follow use cases of `AutoDispatchBelowADInplaceOrView` we don't
 //   need set the new tracer guard:
 //
 //   * Script-generated VariableType kernels. The guard is not necessary as
@@ -99,7 +99,7 @@
 //   * Some manually maintained functions, e.g.:
 //     `torch/csrc/autograd/VariableTypeManual.cpp`.
 //     Set the new guard if it's not obvious whether `setTracingState(null)`
-//     has been called before it reaches the `AutoNonVariableTypeMode` guard.
+//     has been called before it reaches the `AutoDispatchBelowADInplaceOrView` guard.
 //
 //   We might need tweak the usage of the new guard to optimize/fix things.
 //   It should only affect the correctness of tracing function, because the

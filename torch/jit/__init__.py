@@ -1,11 +1,15 @@
 import torch._C
 
+from contextlib import contextmanager
+from typing import Iterator
+
 from torch.utils import set_module
 
 # These are imported so users can access them from the `torch.jit` module
 from torch._jit_internal import (
     Final,
     Future,
+    _IgnoreContextManager,
     _overload,
     _overload_method,
     ignore,
@@ -19,11 +23,13 @@ from torch.jit._script import (
     Attribute,
     ScriptModule,
     script_method,
+    RecursiveScriptClass,
     RecursiveScriptModule,
     ScriptWarning,
     interface,
     CompilationUnit,
     ScriptFunction,
+    _ScriptProfile,
     _unwrap_optional,
 )
 from torch.jit._trace import (
@@ -43,9 +49,7 @@ from torch.jit._trace import (
 from torch.jit._async import fork, wait
 from torch.jit._serialization import save, load
 from torch.jit._fuser import optimized_execution, fuser, last_executed_optimized_graph
-
-from torch.jit.cuda import stream
-from torch.jit._freeze import freeze
+from torch.jit._freeze import freeze, optimize_for_inference, run_frozen_optimizations
 
 # For backwards compatibility
 _fork = fork
@@ -54,7 +58,10 @@ _wait = wait
 
 def export_opnames(m):
     r"""
-        Returns a list of operator names of a script module and its submodules
+        Generates new bytecode for a Script module and returns what the op list
+        would be for a Script Module based off the current code base. If you
+        have a LiteScriptModule and want to get the currently present
+        list of ops call _export_operator_list instead.
     """
     return torch._C._export_opnames(m._c)
 
@@ -68,7 +75,49 @@ Error.__qualname__ = "Error"
 
 # for use in python if using annotate
 def annotate(the_type, the_value):
-    # noop in python
+    """
+    This method is a pass-through function that returns `the_value`, used to hint TorchScript
+    compiler the type of `the_value`. It is a no-op when running outside of TorchScript.
+
+    Though TorchScript can infer correct type for most Python expressions, there are some cases where
+    type inference can be wrong, including:
+
+    - Empty containers like `[]` and `{}`, which TorchScript assumes to be container of `Tensor`
+    - Optional types like `Optional[T]` but assigned a valid value of type `T`, TorchScript would assume
+      it is type `T` rather than `Optional[T]`
+
+    Note that `annotate()` does not help in `__init__` method of `torch.nn.Module` subclasses because it
+    is executed in eager mode. To annotate types of `torch.nn.Module` attributes,
+    use :meth:`~torch.jit.Annotate` instead.
+
+    Example:
+
+    .. testcode::
+
+        import torch
+        from typing import Dict
+
+        @torch.jit.script
+        def fn():
+            # Telling TorchScript that this empty dictionary is a (str -> int) dictionary
+            # instead of default dictionary type of (str -> Tensor).
+            d = torch.jit.annotate(Dict[str, int], {})
+
+            # Without `torch.jit.annotate` above, following statement would fail because of
+            # type mismatch.
+            d["name"] = 20
+
+    .. testcleanup::
+
+        del fn
+
+    Args:
+        the_type: Python type that should be passed to TorchScript compiler as type hint for `the_value`
+        the_value: Value or expression to hint type for.
+
+    Returns:
+        `the_value` is passed back as return value.
+    """
     return the_value
 
 
@@ -93,20 +142,20 @@ def script_if_tracing(fn):
     return _script_if_tracing(fn)
 
 
-# for torch.jit.isinstance 
+# for torch.jit.isinstance
 def isinstance(obj, target_type):
     """
-    This function provides for conatiner type refinement in TorchScript. It can refine 
+    This function provides for conatiner type refinement in TorchScript. It can refine
     parameterized containers of the List, Dict, Tuple, and Optional types. E.g. ``List[str]``,
-    ``Dict[str, List[torch.Tensor]]``, ``Optional[Tuple[int,str,int]]``. It can also 
+    ``Dict[str, List[torch.Tensor]]``, ``Optional[Tuple[int,str,int]]``. It can also
     refine basic types such as bools and ints that are available in TorchScript.
 
     Args:
         obj: object to refine the type of
-        target_type: type to try to refine obj to 
+        target_type: type to try to refine obj to
     Returns:
-        ``bool``: True if obj was successfully refined to the type of target_type, 
-            False otherwise with no new type refinement     
+        ``bool``: True if obj was successfully refined to the type of target_type,
+            False otherwise with no new type refinement
 
 
     Example (using ``torch.jit.isinstance`` for type refinement):
@@ -134,6 +183,19 @@ def isinstance(obj, target_type):
         m(y)
     """
     return _isinstance(obj, target_type)
+
+
+# Context manager for globally hiding source ranges when printing graphs.
+# Note that these functions are exposed to Python as static members of the
+# Graph class, so mypy checks need to be skipped.
+@contextmanager
+def _hide_source_ranges() -> Iterator[None]:
+    old_enable_source_ranges = torch._C.Graph.global_print_source_ranges  # type: ignore[attr-defined]
+    try:
+        torch._C.Graph.set_global_print_source_ranges(False)  # type: ignore[attr-defined]
+        yield
+    finally:
+        torch._C.Graph.set_global_print_source_ranges(old_enable_source_ranges)  # type: ignore[attr-defined]
 
 
 if not torch._C._jit_init():

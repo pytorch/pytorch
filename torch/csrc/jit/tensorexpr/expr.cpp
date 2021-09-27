@@ -50,6 +50,22 @@ ExprHandle ExprHandle::operator<=(const ExprHandle& other) const {
   return CompareSelect::make(*this, other, CompareSelectOperation::kLE);
 }
 
+ExprHandle ExprHandle::operator&&(const ExprHandle& other) const {
+  if (!this->node()->dtype().is_integral()) {
+    throw unsupported_dtype();
+  }
+  return IfThenElse::make(
+      *this, other, ExprHandle(getImmediateByType(other.dtype(), 0)));
+}
+
+ExprHandle ExprHandle::operator||(const ExprHandle& other) const {
+  if (!this->node()->dtype().is_integral()) {
+    throw unsupported_dtype();
+  }
+  return IfThenElse::make(
+      *this, ExprHandle(getImmediateByType(other.dtype(), 1)), other);
+}
+
 ExprHandle ExprHandle::operator&(const ExprHandle& other) const {
   return And::make(*this, other);
 }
@@ -73,7 +89,7 @@ ExprHandle ExprHandle::operator>>(const ExprHandle& other) const {
 // NOLINTNEXTLINE
 #define IMM_EXPR_DECLARE(Type, Name) \
   ExprHandle::ExprHandle(Type v) : ExprHandle(Name##Imm::make(v)) {}
-AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_EXPR_DECLARE);
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_EXPR_DECLARE);
 #undef IMM_EXPR_DECLARE
 
 ExprHandle sin(const ExprHandle& v) {
@@ -128,6 +144,60 @@ ExprHandle abs(const ExprHandle& v) {
   return Intrinsics::make(kAbs, v);
 }
 
+// The default tanh is quite slow, use the Eigen version from here:
+// https://bitbucket.org/eigen/eigen/src/94875feeeeb9abe5509b314197da1991ba2070f5/Eigen/src/Core/MathFunctionsImpl.h#lines-26
+ExprHandle fast_tanh(const ExprHandle& v) {
+  // TODO: use a dedicated bind-var to make sure v is not evalualted multiple
+  // times. Clamp the input expression to [-9, 9]
+  ExprHandle plus_9 = FloatImm::make(9.0f);
+  ExprHandle minus_9 = FloatImm::make(-9.0f);
+  ExprHandle v1 = Min::make(v, plus_9, false);
+  v1 = Max::make(v1, minus_9, false);
+
+  // The coefficients for the numerator
+  ExprHandle alpha_1 = FloatImm::make(4.89352455891786e-03f);
+  ExprHandle alpha_3 = FloatImm::make(6.37261928875436e-04f);
+  ExprHandle alpha_5 = FloatImm::make(1.48572235717979e-05f);
+  ExprHandle alpha_7 = FloatImm::make(5.12229709037114e-08f);
+  ExprHandle alpha_9 = FloatImm::make(-8.60467152213735e-11f);
+  ExprHandle alpha_11 = FloatImm::make(2.00018790482477e-13f);
+  ExprHandle alpha_13 = FloatImm::make(-2.76076847742355e-16f);
+
+  // The coeffecients for the denominator
+  ExprHandle beta_0 = FloatImm::make(4.89352518554385e-03f);
+  ExprHandle beta_2 = FloatImm::make(2.26843463243900e-03f);
+  ExprHandle beta_4 = FloatImm::make(1.18534705686654e-04f);
+  ExprHandle beta_6 = FloatImm::make(1.19825839466702e-06f);
+
+  // numerator
+  ExprHandle v2 = v1 * v1;
+  ExprHandle p = v2 * alpha_13 + alpha_11;
+  p = v2 * p + alpha_9;
+  p = v2 * p + alpha_7;
+  p = v2 * p + alpha_5;
+  p = v2 * p + alpha_3;
+  p = v2 * p + alpha_1;
+  p = v1 * p;
+
+  // denominator
+  ExprHandle q = v2 * beta_6 + beta_4;
+  q = v2 * q + beta_2;
+  q = v2 * q + beta_0;
+
+  ExprHandle result = p / q;
+  return result;
+}
+
+ExprHandle fast_sigmoid(const ExprHandle& x) {
+  // sigmoid(x) = (tanh(x / 2) + 1) / 2
+  ExprHandle one_v = FloatImm::make(1.f);
+  ExprHandle half_v = FloatImm::make(0.5f);
+  ExprHandle x2 = x * half_v;
+  ExprHandle y{fast_tanh(x2)};
+  ExprHandle z = (y + one_v) * half_v;
+  return z;
+}
+
 ExprHandle fast_log(const ExprHandle& v) {
   // this implementation is taken from sleef:
   // https://github.com/shibatch/sleef/blob/master/src/libm/sleefsp.c#L1131
@@ -157,15 +227,49 @@ ExprHandle fast_log(const ExprHandle& v) {
   t = mlaf(t, x2, 0.666666686534881591796875);
   t = mlaf(t, x2, 2.0);
   x = x * t + FloatImm::make(0.693147180559945286226764) * e;
-  x = IfThenElse::make(
-      v < FloatImm::make(0),
-      FloatImm::make(std::numeric_limits<float>::quiet_NaN()),
-      x);
-  x = IfThenElse::make(
-      v == FloatImm::make(0),
-      FloatImm::make(-std::numeric_limits<float>::infinity()),
-      x);
+
+  auto zero = FloatImm::make(0);
+  auto nan = FloatImm::make(std::numeric_limits<float>::quiet_NaN());
+  auto neg_inf = FloatImm::make(-std::numeric_limits<float>::infinity());
+  x = CompareSelect::make(v, zero, nan, x, kLT);
+  x = CompareSelect::make(v, zero, neg_inf, x, kEQ);
   return x;
+}
+
+ExprHandle log_vml(const ExprHandle& v) {
+  auto mlaf = [](ExprHandle x, ExprHandle y, float z) {
+    return x * y + FloatImm::make(z);
+  };
+
+  auto in = bitcast<int32_t>(v);
+  auto a = in - IntImm::make(0x3f2aaaab);
+  auto e = cast<float>(a >> IntImm::make(23));
+
+  auto x = (a & IntImm::make(0x7fffff)) + IntImm::make(0x3f2aaaab);
+  x = bitcast<float>(x) - 1.0f;
+
+  auto t = FloatImm::make(-0.12891686f);
+  t = mlaf(x, t, 0.139844373f);
+  t = mlaf(x, t, -0.121842608f);
+  t = mlaf(x, t, 0.140058696f);
+  t = mlaf(x, t, -0.16680488f);
+  t = mlaf(x, t, 0.200104058f);
+  t = mlaf(x, t, -0.249997973f);
+  t = mlaf(x, t, 0.333332151f);
+  t = mlaf(x, t, -0.5f);
+  t = x * t;
+  t = x * t + x;
+
+  auto z = e * FloatImm::make(1.42860677e-06f) + t;
+  z = e * FloatImm::make(0.693145752f) + z;
+
+  return CompareSelect::make(
+      IntImm::make(0x1000000),
+      in + IntImm::make(0x800000),
+      log(v),
+      z,
+      kGT,
+      kUnlikely);
 }
 
 ExprHandle log(const ExprHandle& v) {
@@ -256,11 +360,15 @@ ExprHandle Buf::make(
     const std::vector<ExprHandle>& dims,
     Dtype dtype) {
   return ExprHandle(
-      new Buf(name_hint, ExprHandleVectorToExprVector(dims), dtype));
+      alloc<Buf>(name_hint, ExprHandleVectorToExprVector(dims), dtype));
 }
 
 ExprHandle Buf::make(const std::vector<ExprHandle>& dims, Dtype dtype) {
   return Buf::make("", dims, dtype);
+}
+
+std::vector<ExprHandle> BufHandle::dims() const {
+  return ExprVectorToExprHandleVector(node()->dims());
 }
 
 ExprHandle expr_to_vec(ExprHandle v, int lanes) {

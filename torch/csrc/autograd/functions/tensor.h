@@ -17,7 +17,6 @@ struct TORCH_API CopyBackwards : public Node {
   variable_list apply(variable_list&& grads) override;
 
   at::TensorOptions src_options;
-  at::Device src_device = at::kCPU;
 };
 
 // Note [View + Inplace update for base tensor]
@@ -86,7 +85,7 @@ struct TORCH_API CopySlices : public Node {
   CopySlices(
       const Variable& base_var,
       at::TensorGeometry view_,
-      c10::optional<std::function<at::Tensor(const at::Tensor&)>> view_fn_,
+      std::function<at::Tensor(const at::Tensor&)> view_fn_,
       std::shared_ptr<Node> fn_);
 
   variable_list apply(variable_list&& inputs) override;
@@ -96,7 +95,7 @@ struct TORCH_API CopySlices : public Node {
   // view and view_fn are redundant and view_fn will be used if available.
   // See Note [View + Inplace update for base tensor] for details.
   at::TensorGeometry view;
-  c10::optional<std::function<at::Tensor(const at::Tensor&)>> view_fn;
+  std::function<at::Tensor(const at::Tensor&)> view_fn;
   std::shared_ptr<Node> fn;
 };
 

@@ -1,5 +1,3 @@
-import unittest
-
 import sys
 import torch
 import torch.cuda.nccl as nccl
@@ -7,7 +5,8 @@ import torch.cuda
 
 from torch.testing._internal.common_utils import (TestCase, run_tests,
                                                   IS_WINDOWS, load_tests,
-                                                  TEST_WITH_ROCM)
+                                                  TEST_WITH_ROCM,
+                                                  sandcastle_skip_if)
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes
 import re
@@ -27,15 +26,15 @@ datatypes = [torch.float, torch.bfloat16] if TEST_WITH_ROCM else [torch.float]
 
 class TestNCCL(TestCase):
 
-    @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
+    @sandcastle_skip_if(IS_WINDOWS, "NCCL doesn't support Windows")
     def test_unique_id(self, device):
         uid = nccl.unique_id()
         self.assertIsInstance(uid, bytes)
         self.assertGreater(len(uid), 1)
 
-    @unittest.skipIf(TEST_WITH_ROCM and HIP_VERSION < 3.5, 'Skip NCCL tests for ROCm')
-    @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @sandcastle_skip_if(TEST_WITH_ROCM and HIP_VERSION < 3.5, 'Skip NCCL tests for ROCm')
+    @sandcastle_skip_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @sandcastle_skip_if(not TEST_MULTIGPU, "only one GPU detected")
     @dtypes(*datatypes)
     def test_broadcast(self, device, dtype):
         expected = torch.zeros(128).uniform_().to(dtype=dtype)
@@ -56,9 +55,9 @@ class TestNCCL(TestCase):
         for i in range(torch.cuda.device_count()):
             self.assertEqual(tensors[i], expected)
 
-    @unittest.skipIf(TEST_WITH_ROCM and HIP_VERSION < 3.5, 'Skip NCCL tests for ROCm')
-    @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @sandcastle_skip_if(TEST_WITH_ROCM and HIP_VERSION < 3.5, 'Skip NCCL tests for ROCm')
+    @sandcastle_skip_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @sandcastle_skip_if(not TEST_MULTIGPU, "only one GPU detected")
     @dtypes(*datatypes)
     def test_reduce(self, device, dtype):
         cpu_tensors = [torch.zeros(128).uniform_().to(dtype=dtype) for i in range(nGPUs)]
@@ -77,13 +76,11 @@ class TestNCCL(TestCase):
 
         self.assertEqual(tensors[0], expected)
 
-    @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @sandcastle_skip_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @sandcastle_skip_if(not TEST_MULTIGPU, "only one GPU detected")
+    @sandcastle_skip_if(TEST_WITH_ROCM and HIP_VERSION < 3.5 and dtype == torch.bfloat16, "Skip bfloat16 test for ROCm < 3.5")
     @dtypes(*datatypes)
     def test_all_reduce(self, device, dtype):
-        if TEST_WITH_ROCM and HIP_VERSION < 3.5 and dtype == torch.bfloat16:
-            raise unittest.SkipTest("Skip bfloat16 test for ROCm < 3.5")
-
         cpu_tensors = [torch.zeros(128).uniform_().to(dtype=dtype) for i in range(nGPUs)]
         expected = torch.zeros(128, dtype=dtype)
         for t in cpu_tensors:
@@ -109,8 +106,8 @@ class TestNCCL(TestCase):
         for tensor in tensors:
             self.assertEqual(tensor, expected)
 
-    @unittest.skipIf(TEST_WITH_ROCM and HIP_VERSION < 3.5, 'Skip NCCL tests for ROCm')
-    @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
+    @sandcastle_skip_if(TEST_WITH_ROCM and HIP_VERSION < 3.5, 'Skip NCCL tests for ROCm')
+    @sandcastle_skip_if(IS_WINDOWS, "NCCL doesn't support Windows")
     def test_collective_errors(self, device):
         t = torch.rand(10).cuda(0)
         with self.assertRaisesRegex(TypeError, "Inputs should be a collection of tensors"):
@@ -128,9 +125,9 @@ class TestNCCL(TestCase):
         with self.assertRaisesRegex(TypeError, "Inputs should be a collection of tensors"):
             nccl.reduce_scatter(t, t)
 
-    @unittest.skipIf(TEST_WITH_ROCM and HIP_VERSION < 3.5, 'Skip NCCL tests for ROCm')
-    @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @sandcastle_skip_if(TEST_WITH_ROCM and HIP_VERSION < 3.5, 'Skip NCCL tests for ROCm')
+    @sandcastle_skip_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @sandcastle_skip_if(not TEST_MULTIGPU, "only one GPU detected")
     @dtypes(*datatypes)
     def test_all_gather(self, device, dtype):
         cpu_inputs = [torch.zeros(128).uniform_().to(dtype=dtype) for i in range(nGPUs)]
@@ -153,9 +150,9 @@ class TestNCCL(TestCase):
         for tensor in outputs:
             self.assertEqual(tensor, expected)
 
-    @unittest.skipIf(TEST_WITH_ROCM and HIP_VERSION < 3.5, 'Skip NCCL tests for ROCm')
-    @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @sandcastle_skip_if(TEST_WITH_ROCM and HIP_VERSION < 3.5, 'Skip NCCL tests for ROCm')
+    @sandcastle_skip_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @sandcastle_skip_if(not TEST_MULTIGPU, "only one GPU detected")
     @dtypes(*datatypes)
     def test_reduce_scatter(self, device, dtype):
         in_size = 32 * nGPUs

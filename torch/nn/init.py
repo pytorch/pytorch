@@ -1,8 +1,8 @@
 import math
 import warnings
 
-import torch
 from torch import Tensor
+import torch
 
 
 # These no_grad_* functions are necessary as wrappers around the parts of these
@@ -77,7 +77,16 @@ def calculate_gain(nonlinearity, param=None):
     Tanh              :math:`\frac{5}{3}`
     ReLU              :math:`\sqrt{2}`
     Leaky Relu        :math:`\sqrt{\frac{2}{1 + \text{negative\_slope}^2}}`
+    SELU              :math:`\frac{3}{4}`
     ================= ====================================================
+
+    .. warning::
+        In order to implement `Self-Normalizing Neural Networks`_ ,
+        you should use ``nonlinearity='linear'`` instead of ``nonlinearity='selu'``.
+        This gives the initial weights a variance of ``1 / N``,
+        which is necessary to induce a stable fixed point in the forward pass.
+        In contrast, the default gain for ``SELU`` sacrifices the normalisation
+        effect for more stable gradient flow in rectangular layers.
 
     Args:
         nonlinearity: the non-linear function (`nn.functional` name)
@@ -85,6 +94,8 @@ def calculate_gain(nonlinearity, param=None):
 
     Examples:
         >>> gain = nn.init.calculate_gain('leaky_relu', 0.2)  # leaky_relu with negative_slope=0.2
+
+    .. _Self-Normalizing Neural Networks: https://papers.nips.cc/paper/2017/hash/5d44ee6f2c3f71b73125876103c8f6c4-Abstract.html
     """
     linear_fns = ['linear', 'conv1d', 'conv2d', 'conv3d', 'conv_transpose1d', 'conv_transpose2d', 'conv_transpose3d']
     if nonlinearity in linear_fns or nonlinearity == 'sigmoid':
@@ -102,6 +113,8 @@ def calculate_gain(nonlinearity, param=None):
         else:
             raise ValueError("negative_slope {} not a valid number".format(param))
         return math.sqrt(2.0 / (1 + negative_slope ** 2))
+    elif nonlinearity == 'selu':
+        return 3.0 / 4  # Value found empirically (https://github.com/pytorch/pytorch/pull/50664)
     else:
         raise ValueError("Unsupported nonlinearity {}".format(nonlinearity))
 
@@ -271,7 +284,10 @@ def _calculate_fan_in_and_fan_out(tensor):
     num_output_fmaps = tensor.size(0)
     receptive_field_size = 1
     if tensor.dim() > 2:
-        receptive_field_size = tensor[0][0].numel()
+        # math.prod is not always available, accumulate the product manually
+        # we could use functools.reduce but that is not supported by TorchScript
+        for s in tensor.shape[2:]:
+            receptive_field_size *= s
     fan_in = num_input_fmaps * receptive_field_size
     fan_out = num_output_fmaps * receptive_field_size
 
@@ -368,6 +384,9 @@ def kaiming_uniform_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
         >>> w = torch.empty(3, 5)
         >>> nn.init.kaiming_uniform_(w, mode='fan_in', nonlinearity='relu')
     """
+    if 0 in tensor.shape:
+        warnings.warn("Initializing zero-element tensors is a no-op")
+        return tensor
     fan = _calculate_correct_fan(tensor, mode)
     gain = calculate_gain(nonlinearity, a)
     std = gain / math.sqrt(fan)
@@ -403,6 +422,9 @@ def kaiming_normal_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
         >>> w = torch.empty(3, 5)
         >>> nn.init.kaiming_normal_(w, mode='fan_out', nonlinearity='relu')
     """
+    if 0 in tensor.shape:
+        warnings.warn("Initializing zero-element tensors is a no-op")
+        return tensor
     fan = _calculate_correct_fan(tensor, mode)
     gain = calculate_gain(nonlinearity, a)
     std = gain / math.sqrt(fan)
@@ -436,7 +458,7 @@ def orthogonal_(tensor, gain=1):
         flattened.t_()
 
     # Compute the qr factorization
-    q, r = torch.qr(flattened)
+    q, r = torch.linalg.qr(flattened)
     # Make Q uniform according to https://arxiv.org/pdf/math-ph/0609050.pdf
     d = torch.diag(r, 0)
     ph = d.sign()

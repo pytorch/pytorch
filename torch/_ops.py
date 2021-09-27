@@ -2,7 +2,6 @@ import torch._C
 
 import contextlib
 import ctypes
-import os
 import sys
 import types
 
@@ -55,6 +54,9 @@ class _OpNamespace(types.ModuleType):
         self.name = name
 
     def __getattr__(self, op_name):
+        # It is not a valid op_name when __file__ is passed in
+        if op_name == '__file__':
+            return 'torch.ops'
         # Get the op `my_namespace::my_op` if available. This will also check
         # for overloads and raise an exception if there are more than one.
         qualified_op_name = '{}::{}'.format(self.name, op_name)
@@ -67,7 +69,7 @@ class _OpNamespace(types.ModuleType):
         return op
 
 class _Ops(types.ModuleType):
-    __file__ = os.path.join(os.path.dirname(__file__), '_ops.py')
+    __file__ = '_ops.py'
 
     def __init__(self):
         super(_Ops, self).__init__('torch.ops')
@@ -97,6 +99,9 @@ class _Ops(types.ModuleType):
         Args:
             path (str): A path to a shared library to load.
         """
+        if sys.executable == "torch_deploy":
+            return
+
         path = torch._utils_internal.resolve_library_path(path)
         with dl_open_guard():
             # Import the shared library into the process, thus running its

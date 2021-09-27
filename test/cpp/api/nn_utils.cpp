@@ -6,6 +6,8 @@
 
 #include <algorithm>
 #include <random>
+#include <string>
+#include <sstream>
 
 using namespace torch::nn;
 
@@ -104,6 +106,176 @@ TEST_F(NNUtilsTest, ClipGradNorm) {
   }
 }
 
+// Check that clip_grad_norm_ raises an error if the norm of a gradient
+// is non-finite
+TEST_F(NNUtilsTest, ClipGradNormErrorIfNonfinite) {
+  double inf = std::numeric_limits<double>::infinity();
+  double nan = std::numeric_limits<double>::quiet_NaN();
+
+  using Vector = std::vector<double>;
+
+  Vector norms_pos = {0.1, 1, 2, 3.5, inf};
+  Vector norms_neg = {-0.1, -1, -2, -3.5};
+  Vector norms_neg_plus_0 = {0, -0.1, -1, -2, -3.5};
+  Vector norms_except_0 = {0.1, 1, 2, 3.5, inf, -0.1, -1, -2, -3.5};
+  Vector norms_all = {0, 0.1, 1, 2, 3.5, inf, -0.1, -1, -2, -3.5};
+
+  // Each entry in test_cases has the following values, in this order:
+  //
+  // grad_only_one_elem    If True, only one element of the parameter's
+  //                       gradient is set to the scalar grad, and the
+  //                       rest of the elements are 0. If False, all grad
+  //                       elements are equal to the scalar.
+  //
+  // prefix_finite_grad_param  If True, prefix a parameter that has a grad
+  //                           of 1.
+  //
+  // scalars           Scalars to use as the parameter's grad, through
+  //                   multiplication
+  //
+  // norms_nonfinite   Norm types that should produce nonfinite total norm
+  //
+  // norms_finite      Norm types that should produce finite total norm
+  std::vector<std::tuple<bool, bool, Vector, Vector, Vector>> test_cases({
+    // Test errors from an infinite grad
+    std::make_tuple(false, false, Vector({inf, -inf}), norms_except_0, Vector({0})),
+    std::make_tuple(false, true, Vector({inf, -inf}), norms_pos, norms_neg_plus_0),
+    std::make_tuple(true, false, Vector({inf, -inf}), norms_pos, norms_neg_plus_0),
+    std::make_tuple(false, true, Vector({inf, -inf}), norms_pos, norms_neg_plus_0),
+
+    // Test errors from a NaN grad
+    std::make_tuple(false, false, Vector({nan}), norms_except_0, Vector({0})),
+    std::make_tuple(false, true, Vector({nan}), norms_except_0, Vector({0})),
+    std::make_tuple(true, false, Vector({nan}), norms_except_0, Vector({0})),
+    std::make_tuple(true, true, Vector({nan}), norms_except_0, Vector({0})),
+
+    // Test a grad that should never error
+    std::make_tuple(false, false, Vector({2e22, -2e22}), Vector(), norms_all),
+    std::make_tuple(false, true, Vector({2e22, -2e22}), Vector(), norms_all),
+    std::make_tuple(true, false, Vector({2e22, -2e22}), Vector(), norms_all),
+    std::make_tuple(true, true, Vector({2e22, -2e22}), Vector(), norms_all),
+
+    // Test a grad that will overflow to inf for only some norm orders
+    std::make_tuple(
+      false, false, Vector({2e200, -2e200}), Vector({3.5, 2, -2, -3.5}),
+      Vector({inf, 1, 0.1, 0, -1, -0.1})),
+    std::make_tuple(
+      false, true, Vector({2e200, -2e200}), Vector({3.5, 2}),
+      Vector({inf, 1, 0.1, 0, -1, -0.1, -2, -3.5})),
+    std::make_tuple(
+      true, false, Vector({2e200, -2e200}), Vector({3.5, 2}),
+      Vector({inf, 1, 0.1, 0, -1, -0.1, -2, -3.5})),
+    std::make_tuple(
+      false, true, Vector({2e200, -2e200}), Vector({3.5, 2}),
+      Vector({inf, 1, 0.1, 0, -1, -0.1, -2, -3.5})),
+  });
+
+  auto gen_parameters = [](
+      double scalar,
+      bool grad_only_one_elem,
+      bool prefix_finite_grad_param,
+      torch::DeviceType device_type) {
+    auto param = torch::ones(10, torch::TensorOptions().dtype(torch::kDouble).device(device_type).requires_grad(true));
+    if (grad_only_one_elem) {
+      param[1].mul(scalar).sum().backward();
+    } else {
+      param.mul(scalar).sum().backward();
+    }
+
+    std::vector<torch::Tensor> parameters;
+    if (prefix_finite_grad_param) {
+      auto prefix_param = torch::ones(1, torch::TensorOptions().dtype(torch::kDouble).device(device_type).requires_grad(true));
+      prefix_param.mul(1).sum().backward();
+      parameters.push_back(prefix_param);
+    }
+    parameters.push_back(param);
+
+    return parameters;
+  };
+
+  auto run_test_case = [&gen_parameters](
+      double norm_type,
+      bool error_if_nonfinite,
+      double scalar,
+      bool grad_only_one_elem,
+      bool prefix_finite_grad_param,
+      bool is_norm_nonfinite,
+      torch::DeviceType device_type) {
+    std::stringstream ss;
+    ss << "device: " << device_type
+       << ", norm_type: " << norm_type
+       << ", error_if_nonfinite: " << error_if_nonfinite
+       << ", scalar: " << scalar
+       << ", grad_only_one_elem: " << grad_only_one_elem
+       << ", prefix_finite_grad_param: " << prefix_finite_grad_param
+       << ", is_norm_nonfinite: " << is_norm_nonfinite;
+    std::string msg = ss.str();
+
+    auto parameters = gen_parameters(
+      scalar,
+      grad_only_one_elem,
+      prefix_finite_grad_param,
+      device_type);
+
+    if (is_norm_nonfinite && error_if_nonfinite) {
+      std::vector<torch::Tensor> grads_before;
+      // NOLINTNEXTLINE(performance-for-range-copy)
+      for (auto p : parameters) {
+        // NOLINTNEXTLINE(performance-inefficient-vector-operation)
+        grads_before.push_back(p.grad().clone());
+      }
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
+      EXPECT_THROW(utils::clip_grad_norm_(parameters, 1., norm_type, true), std::exception) << msg;
+      // Grads should not change if error is thrown
+      for (int64_t p_idx = 0; p_idx < parameters.size(); p_idx++) {
+        ASSERT_TRUE(torch::allclose(parameters[p_idx].grad(), grads_before[p_idx], 1.0, 0.0, /*equal_nan*/ true)) << msg;
+      }
+    } else {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
+      EXPECT_NO_THROW(utils::clip_grad_norm_(parameters, 1., norm_type, error_if_nonfinite)) << msg;
+    }
+  };
+
+  for (auto device_type : {torch::kCPU, torch::kCUDA}) {
+    if (device_type == torch::kCUDA && !torch::cuda::is_available()) {
+      continue;
+    }
+    for (auto test_case : test_cases) {
+      auto grad_only_one_elem = std::get<0>(test_case);
+      auto prefix_finite_grad_param = std::get<1>(test_case);
+      auto scalars = std::get<2>(test_case);
+      auto norms_nonfinite = std::get<3>(test_case);
+      auto norms_finite = std::get<4>(test_case);
+
+      for (auto error_if_nonfinite : {false, true}) {
+        for (auto scalar : scalars) {
+          for (auto norm_type : norms_nonfinite) {
+            run_test_case(
+              norm_type,
+              error_if_nonfinite,
+              scalar,
+              grad_only_one_elem,
+              prefix_finite_grad_param,
+              true,
+              device_type);
+          }
+
+          for (auto norm_type : norms_finite) {
+            run_test_case(
+              norm_type,
+              error_if_nonfinite,
+              scalar,
+              grad_only_one_elem,
+              prefix_finite_grad_param,
+              false,
+              device_type);
+          }
+        }
+      }
+    }
+  }
+}
+
 TEST_F(NNUtilsTest, ClipGradValue) {
   auto l = Linear(10, 10);
   float clip_value = 2.5;
@@ -188,7 +360,9 @@ TEST_F(NNUtilsTest, ConvertParameters) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-non-const-global-variables)
 int64_t PackedSequenceTest_batch_size = 5;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-non-const-global-variables)
 int64_t PackedSequenceTest_max_length = 6;
 
 std::vector<torch::Tensor> PackedSequenceTest_ordered_sequence(torch::ScalarType tensor_type) {
@@ -245,6 +419,7 @@ TEST_F(PackedSequenceTest, WrongOrder) {
   auto a = torch::ones({25, 300});
   auto b = torch::ones({22, 300});
   auto b_a = rnn_utils::pad_sequence({b, a});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(
     rnn_utils::pack_padded_sequence(
       b_a, torch::tensor({22, 25}), /*batch_first=*/false, /*enforce_sorted=*/true),
@@ -268,7 +443,7 @@ TEST_F(PackedSequenceTest, TotalLength) {
           /*total_length=*/total_length);
       };
       ASSERT_THROWS_WITH(err_fn(),
-        "Expected total_length to be at least the length of the longest sequence in input");     
+        "Expected total_length to be at least the length of the longest sequence in input");
     }
   }
 
@@ -387,6 +562,7 @@ TEST_F(NNUtilsTest, PackSequence) {
     }
     std::vector<torch::Tensor> unsorted_sequences;
     for (const auto& s : sequences) {
+      // NOLINTNEXTLINE(performance-inefficient-vector-operation)
       unsorted_sequences.emplace_back(s.clone());
     }
     std::shuffle(
@@ -396,6 +572,7 @@ TEST_F(NNUtilsTest, PackSequence) {
 
     std::vector<int64_t> unsorted_sequences_lengths_vec;
     for (const auto& t : unsorted_sequences) {
+      // NOLINTNEXTLINE(performance-inefficient-vector-operation)
       unsorted_sequences_lengths_vec.emplace_back(t.size(0));
     }
 
@@ -483,6 +660,7 @@ TEST_F(NNUtilsTest, PackPaddedSequence) {
 
   for (const auto& test_case : test_cases) {
     for (bool batch_first : std::vector<bool>{true, false}) {
+      // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
       std::vector<int64_t> sorted_lengths = std::get<0>(test_case);
       bool should_shuffle = std::get<1>(test_case);
 
@@ -493,7 +671,7 @@ TEST_F(NNUtilsTest, PackPaddedSequence) {
       auto src = padded;
       if (batch_first) {
         src = src.transpose(0, 1);
-      }  
+      }
 
       // check output
       rnn_utils::PackedSequence packed = rnn_utils::pack_padded_sequence(
@@ -602,6 +780,7 @@ TEST_F(NNUtilsTest, PadSequence) {
       std::default_random_engine{});
     std::vector<torch::Tensor> expected_tensors;
     for (const torch::Tensor& seq : sequences) {
+      // NOLINTNEXTLINE(performance-inefficient-vector-operation)
       expected_tensors.emplace_back(pad(seq, maxlen * maxlen));
     }
 

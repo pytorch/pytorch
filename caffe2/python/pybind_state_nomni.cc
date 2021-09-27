@@ -205,14 +205,14 @@ void addNomnigraphMethods(pybind11::module& m) {
           "createNode",
           [](NNGraph* g, GenericOperator& op) {
             return g->createNode(
-                nom::util::make_unique<GenericOperator>(op.getName()));
+                std::make_unique<GenericOperator>(op.getName()));
           },
           py::return_value_policy::reference_internal)
       .def(
           "createNode",
           [](NNGraph* g, nom::repr::Tensor& tensor) {
             return g->createNode(
-                nom::util::make_unique<nom::repr::Tensor>(tensor.getName()));
+                std::make_unique<nom::repr::Tensor>(tensor.getName()));
           },
           py::return_value_policy::reference_internal)
       .def(
@@ -300,7 +300,7 @@ void addNomnigraphMethods(pybind11::module& m) {
   };
   auto setAnnotation = [](NNGraph::NodeRef n, Caffe2Annotation& annot) {
     auto* nnOp = nn::get<NeuralNetOperator>(n);
-    nnOp->setAnnotation(nom::util::make_unique<Caffe2Annotation>(annot));
+    nnOp->setAnnotation(std::make_unique<Caffe2Annotation>(annot));
   };
   auto getAnnotation = [](NNGraph::NodeRef n) {
     return getOrAddCaffe2Annotation(n);
@@ -504,6 +504,7 @@ void addNomnigraphMethods(pybind11::module& m) {
           [](Caffe2Annotation& annot) {
             auto DeviceOption = py::module::import("caffe2.proto.caffe2_pb2")
                                     .attr("DeviceOption");
+            // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
             auto proto = annot.getDeviceOption();
             std::string serialized_proto;
             proto.SerializeToString(&serialized_proto);
@@ -526,6 +527,7 @@ void addNomnigraphMethods(pybind11::module& m) {
           [](Caffe2Annotation& annot) {
             auto opDef = py::module::import("caffe2.proto.caffe2_pb2")
                                     .attr("OperatorDef");
+            // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
             auto proto = annot.getOperatorDef();
             std::string serialized_proto;
             proto.SerializeToString(&serialized_proto);

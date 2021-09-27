@@ -36,7 +36,24 @@ inline TORCH_API void lazy_init_num_threads() {
   }
 }
 
-}
+TORCH_API void set_thread_num(int);
+
+class TORCH_API ThreadIdGuard {
+public:
+  ThreadIdGuard(int new_id):
+    old_id_(at::get_thread_num()) {
+    set_thread_num(new_id);
+  }
+
+  ~ThreadIdGuard() {
+    set_thread_num(old_id_);
+  }
+
+private:
+  int old_id_;
+};
+
+}  // namespace internal
 
 /*
 parallel_for
@@ -128,7 +145,7 @@ void launch_no_thread_state(std::function<void()> fn);
 TORCH_API void intraop_launch(std::function<void()> func);
 
 // Launches intra-op parallel task, returns a future
-TORCH_API std::shared_ptr<c10::ivalue::Future> intraop_launch_future(
+TORCH_API c10::intrusive_ptr<c10::ivalue::Future> intraop_launch_future(
     std::function<void()> func);
 
 // Returns number of intra-op threads used by default

@@ -1,12 +1,10 @@
 import warnings
-from typing import Tuple, Optional
+from typing import Optional, Tuple
 
 import torch
 from torch import Tensor
-from .linear import _LinearWithBias
-from torch.nn.init import xavier_uniform_
-from torch.nn.init import constant_
-from torch.nn.init import xavier_normal_
+from .linear import NonDynamicallyQuantizableLinear
+from torch.nn.init import constant_, xavier_normal_, xavier_uniform_
 from torch.nn.parameter import Parameter
 from .module import Module
 from .. import functional as F
@@ -30,9 +28,8 @@ class Threshold(Module):
         inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     Examples::
 
@@ -72,9 +69,8 @@ class ReLU(Module):
         inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     .. image:: ../scripts/activation_images/ReLU.png
 
@@ -132,9 +128,10 @@ class RReLU(Module):
         inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Output: :math:`(*)`, same shape as the input.
+
+    .. image:: ../scripts/activation_images/RReLU.png
 
     Examples::
 
@@ -194,9 +191,8 @@ class Hardtanh(Module):
     have been deprecated in favor of :attr:`min_val` and :attr:`max_val`.
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     .. image:: ../scripts/activation_images/Hardtanh.png
 
@@ -253,9 +249,8 @@ class ReLU6(Hardtanh):
         inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     .. image:: ../scripts/activation_images/ReLU6.png
 
@@ -282,9 +277,8 @@ class Sigmoid(Module):
 
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     .. image:: ../scripts/activation_images/Sigmoid.png
 
@@ -313,9 +307,10 @@ class Hardsigmoid(Module):
         inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Output: :math:`(*)`, same shape as the input.
+
+    .. image:: ../scripts/activation_images/Hardsigmoid.png
 
     Examples::
 
@@ -342,9 +337,8 @@ class Tanh(Module):
         \text{Tanh}(x) = \tanh(x) = \frac{\exp(x) - \exp(-x)} {\exp(x) + \exp(-x)}
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     .. image:: ../scripts/activation_images/Tanh.png
 
@@ -359,7 +353,8 @@ class Tanh(Module):
         return torch.tanh(input)
 
 class SiLU(Module):
-    r"""Applies the silu function, element-wise.
+    r"""Applies the Sigmoid Linear Unit (SiLU) function, element-wise.
+    The SiLU function is also known as the swish function.
 
     .. math::
         \text{silu}(x) = x * \sigma(x), \text{where } \sigma(x) \text{ is the logistic sigmoid.}
@@ -373,9 +368,10 @@ class SiLU(Module):
         where the SiLU was experimented with later.
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Output: :math:`(*)`, same shape as the input.
+
+    .. image:: ../scripts/activation_images/SiLU.png
 
     Examples::
 
@@ -397,6 +393,42 @@ class SiLU(Module):
         inplace_str = 'inplace=True' if self.inplace else ''
         return inplace_str
 
+class Mish(Module):
+    r"""Applies the Mish function, element-wise.
+    Mish: A Self Regularized Non-Monotonic Neural Activation Function.
+
+    .. math::
+        \text{Mish}(x) = x * \text{Tanh}(\text{Softplus}(x))
+
+    .. note::
+        See `Mish: A Self Regularized Non-Monotonic Neural Activation Function <https://arxiv.org/abs/1908.08681>`_
+
+    Shape:
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Output: :math:`(*)`, same shape as the input.
+
+    .. image:: ../scripts/activation_images/Mish.png
+
+    Examples::
+
+        >>> m = nn.Mish()
+        >>> input = torch.randn(2)
+        >>> output = m(input)
+    """
+    __constants__ = ['inplace']
+    inplace: bool
+
+    def __init__(self, inplace: bool = False):
+        super(Mish, self).__init__()
+        self.inplace = inplace
+
+    def forward(self, input: Tensor) -> Tensor:
+        return F.mish(input, inplace=self.inplace)
+
+    def extra_repr(self) -> str:
+        inplace_str = 'inplace=True' if self.inplace else ''
+        return inplace_str
+
 class Hardswish(Module):
     r"""Applies the hardswish function, element-wise, as described in the paper:
 
@@ -413,9 +445,10 @@ class Hardswish(Module):
         inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Output: :math:`(*)`, same shape as the input.
+
+    .. image:: ../scripts/activation_images/Hardswish.png
 
     Examples::
 
@@ -452,9 +485,8 @@ class ELU(Module):
         inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     .. image:: ../scripts/activation_images/ELU.png
 
@@ -494,9 +526,8 @@ class CELU(Module):
         inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     .. image:: ../scripts/activation_images/CELU.png
 
@@ -535,15 +566,20 @@ class SELU(Module):
     with :math:`\alpha = 1.6732632423543772848170429916717` and
     :math:`\text{scale} = 1.0507009873554804934193349852946`.
 
+    .. warning::
+        When using ``kaiming_normal`` or ``kaiming_normal_`` for initialisation,
+        ``nonlinearity='linear'`` should be used instead of ``nonlinearity='selu'``
+        in order to get `Self-Normalizing Neural Networks`_.
+        See :func:`torch.nn.init.calculate_gain` for more information.
+
     More details can be found in the paper `Self-Normalizing Neural Networks`_ .
 
     Args:
         inplace (bool, optional): can optionally do the operation in-place. Default: ``False``
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     .. image:: ../scripts/activation_images/SELU.png
 
@@ -611,9 +647,8 @@ class GELU(Module):
     where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     .. image:: ../scripts/activation_images/GELU.png
 
@@ -642,9 +677,8 @@ class Hardshrink(Module):
         lambd: the :math:`\lambda` value for the Hardshrink formulation. Default: 0.5
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     .. image:: ../scripts/activation_images/Hardshrink.png
 
@@ -689,9 +723,9 @@ class LeakyReLU(Module):
         inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
+        - Input: :math:`(*)` where `*` means, any number of additional
           dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Output: :math:`(*)`, same shape as the input
 
     .. image:: ../scripts/activation_images/LeakyReLU.png
 
@@ -725,9 +759,8 @@ class LogSigmoid(Module):
         \text{LogSigmoid}(x) = \log\left(\frac{ 1 }{ 1 + \exp(-x)}\right)
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     .. image:: ../scripts/activation_images/LogSigmoid.png
 
@@ -759,9 +792,8 @@ class Softplus(Module):
         threshold: values above this revert to a linear function. Default: 20
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     .. image:: ../scripts/activation_images/Softplus.png
 
@@ -802,9 +834,8 @@ class Softshrink(Module):
         lambd: the :math:`\lambda` (must be no less than zero) value for the Softshrink formulation. Default: 0.5
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     .. image:: ../scripts/activation_images/Softshrink.png
 
@@ -831,36 +862,39 @@ class Softshrink(Module):
 class MultiheadAttention(Module):
     r"""Allows the model to jointly attend to information
     from different representation subspaces.
-    See `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_
+    See `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_.
 
     .. math::
         \text{MultiHead}(Q, K, V) = \text{Concat}(head_1,\dots,head_h)W^O
-        \text{where} head_i = \text{Attention}(QW_i^Q, KW_i^K, VW_i^V)
+
+    where :math:`head_i = \text{Attention}(QW_i^Q, KW_i^K, VW_i^V)`.
 
     Args:
-        embed_dim: total dimension of the model.
-        num_heads: parallel attention heads.
-        dropout: a Dropout layer on attn_output_weights. Default: 0.0.
-        bias: add bias as module parameter. Default: True.
-        add_bias_kv: add bias to the key and value sequences at dim=0.
-        add_zero_attn: add a new batch of zeros to the key and
-                       value sequences at dim=1.
-        kdim: total number of features in key. Default: None.
-        vdim: total number of features in value. Default: None.
-
-    Note that if :attr:`kdim` and :attr:`vdim` are None, they will be set
-    to :attr:`embed_dim` such that query, key, and value have the same
-    number of features.
+        embed_dim: Total dimension of the model.
+        num_heads: Number of parallel attention heads. Note that ``embed_dim`` will be split
+            across ``num_heads`` (i.e. each head will have dimension ``embed_dim // num_heads``).
+        dropout: Dropout probability on ``attn_output_weights``. Default: ``0.0`` (no dropout).
+        bias: If specified, adds bias to input / output projection layers. Default: ``True``.
+        add_bias_kv: If specified, adds bias to the key and value sequences at dim=0. Default: ``False``.
+        add_zero_attn: If specified, adds a new batch of zeros to the key and value sequences at dim=1.
+            Default: ``False``.
+        kdim: Total number of features for keys. Default: ``None`` (uses ``kdim=embed_dim``).
+        vdim: Total number of features for values. Default: ``None`` (uses ``vdim=embed_dim``).
+        batch_first: If ``True``, then the input and output tensors are provided
+            as (batch, seq, feature). Default: ``False`` (seq, batch, feature).
 
     Examples::
 
         >>> multihead_attn = nn.MultiheadAttention(embed_dim, num_heads)
         >>> attn_output, attn_output_weights = multihead_attn(query, key, value)
     """
+    __constants__ = ['batch_first']
     bias_k: Optional[torch.Tensor]
     bias_v: Optional[torch.Tensor]
 
-    def __init__(self, embed_dim, num_heads, dropout=0., bias=True, add_bias_kv=False, add_zero_attn=False, kdim=None, vdim=None):
+    def __init__(self, embed_dim, num_heads, dropout=0., bias=True, add_bias_kv=False, add_zero_attn=False,
+                 kdim=None, vdim=None, batch_first=False, device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
         super(MultiheadAttention, self).__init__()
         self.embed_dim = embed_dim
         self.kdim = kdim if kdim is not None else embed_dim
@@ -869,29 +903,30 @@ class MultiheadAttention(Module):
 
         self.num_heads = num_heads
         self.dropout = dropout
+        self.batch_first = batch_first
         self.head_dim = embed_dim // num_heads
         assert self.head_dim * num_heads == self.embed_dim, "embed_dim must be divisible by num_heads"
 
         if self._qkv_same_embed_dim is False:
-            self.q_proj_weight = Parameter(torch.Tensor(embed_dim, embed_dim))
-            self.k_proj_weight = Parameter(torch.Tensor(embed_dim, self.kdim))
-            self.v_proj_weight = Parameter(torch.Tensor(embed_dim, self.vdim))
+            self.q_proj_weight = Parameter(torch.empty((embed_dim, embed_dim), **factory_kwargs))
+            self.k_proj_weight = Parameter(torch.empty((embed_dim, self.kdim), **factory_kwargs))
+            self.v_proj_weight = Parameter(torch.empty((embed_dim, self.vdim), **factory_kwargs))
             self.register_parameter('in_proj_weight', None)
         else:
-            self.in_proj_weight = Parameter(torch.empty(3 * embed_dim, embed_dim))
+            self.in_proj_weight = Parameter(torch.empty((3 * embed_dim, embed_dim), **factory_kwargs))
             self.register_parameter('q_proj_weight', None)
             self.register_parameter('k_proj_weight', None)
             self.register_parameter('v_proj_weight', None)
 
         if bias:
-            self.in_proj_bias = Parameter(torch.empty(3 * embed_dim))
+            self.in_proj_bias = Parameter(torch.empty(3 * embed_dim, **factory_kwargs))
         else:
             self.register_parameter('in_proj_bias', None)
-        self.out_proj = _LinearWithBias(embed_dim, embed_dim)
+        self.out_proj = NonDynamicallyQuantizableLinear(embed_dim, embed_dim, bias=bias, **factory_kwargs)
 
         if add_bias_kv:
-            self.bias_k = Parameter(torch.empty(1, 1, embed_dim))
-            self.bias_v = Parameter(torch.empty(1, 1, embed_dim))
+            self.bias_k = Parameter(torch.empty((1, 1, embed_dim), **factory_kwargs))
+            self.bias_v = Parameter(torch.empty((1, 1, embed_dim), **factory_kwargs))
         else:
             self.bias_k = self.bias_v = None
 
@@ -926,46 +961,45 @@ class MultiheadAttention(Module):
                 need_weights: bool = True, attn_mask: Optional[Tensor] = None) -> Tuple[Tensor, Optional[Tensor]]:
         r"""
     Args:
-        query, key, value: map a query and a set of key-value pairs to an output.
-            See "Attention Is All You Need" for more details.
-        key_padding_mask: if provided, specified padding elements in the key will
-            be ignored by the attention. When given a binary mask and a value is True,
-            the corresponding value on the attention layer will be ignored. When given
-            a byte mask and a value is non-zero, the corresponding value on the attention
-            layer will be ignored
-        need_weights: output attn_output_weights.
-        attn_mask: 2D or 3D mask that prevents attention to certain positions. A 2D mask will be broadcasted for all
-            the batches while a 3D mask allows to specify a different mask for the entries of each batch.
+        query: Query embeddings of shape :math:`(L, N, E_q)` when ``batch_first=False`` or :math:`(N, L, E_q)`
+            when ``batch_first=True``, where :math:`L` is the target sequence length, :math:`N` is the batch size,
+            and :math:`E_q` is the query embedding dimension ``embed_dim``. Queries are compared against
+            key-value pairs to produce the output. See "Attention Is All You Need" for more details.
+        key: Key embeddings of shape :math:`(S, N, E_k)` when ``batch_first=False`` or :math:`(N, S, E_k)` when
+            ``batch_first=True``, where :math:`S` is the source sequence length, :math:`N` is the batch size, and
+            :math:`E_k` is the key embedding dimension ``kdim``. See "Attention Is All You Need" for more details.
+        value: Value embeddings of shape :math:`(S, N, E_v)` when ``batch_first=False`` or :math:`(N, S, E_v)` when
+            ``batch_first=True``, where :math:`S` is the source sequence length, :math:`N` is the batch size, and
+            :math:`E_v` is the value embedding dimension ``vdim``. See "Attention Is All You Need" for more details.
+        key_padding_mask: If specified, a mask of shape :math:`(N, S)` indicating which elements within ``key``
+            to ignore for the purpose of attention (i.e. treat as "padding"). Binary and byte masks are supported.
+            For a binary mask, a ``True`` value indicates that the corresponding ``key`` value will be ignored for
+            the purpose of attention. For a byte mask, a non-zero value indicates that the corresponding ``key``
+            value will be ignored.
+        need_weights: If specified, returns ``attn_output_weights`` in addition to ``attn_outputs``.
+            Default: ``True``.
+        attn_mask: If specified, a 2D or 3D mask preventing attention to certain positions. Must be of shape
+            :math:`(L, S)` or :math:`(N\cdot\text{num\_heads}, L, S)`, where :math:`N` is the batch size,
+            :math:`L` is the target sequence length, and :math:`S` is the source sequence length. A 2D mask will be
+            broadcasted across the batch while a 3D mask allows for a different mask for each entry in the batch.
+            Binary, byte, and float masks are supported. For a binary mask, a ``True`` value indicates that the
+            corresponding position is not allowed to attend. For a byte mask, a non-zero value indicates that the
+            corresponding position is not allowed to attend. For a float mask, the mask values will be added to
+            the attention weight.
 
-    Shapes for inputs:
-        - query: :math:`(L, N, E)` where L is the target sequence length, N is the batch size, E is
-          the embedding dimension.
-        - key: :math:`(S, N, E)`, where S is the source sequence length, N is the batch size, E is
-          the embedding dimension.
-        - value: :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is
-          the embedding dimension.
-        - key_padding_mask: :math:`(N, S)` where N is the batch size, S is the source sequence length.
-          If a ByteTensor is provided, the non-zero positions will be ignored while the position
-          with the zero positions will be unchanged. If a BoolTensor is provided, the positions with the
-          value of ``True`` will be ignored while the position with the value of ``False`` will be unchanged.
-        - attn_mask: if a 2D mask: :math:`(L, S)` where L is the target sequence length, S is the
-          source sequence length.
-
-          If a 3D mask: :math:`(N\cdot\text{num\_heads}, L, S)` where N is the batch size, L is the target sequence
-          length, S is the source sequence length. ``attn_mask`` ensure that position i is allowed to attend
-          the unmasked positions. If a ByteTensor is provided, the non-zero positions are not allowed to attend
-          while the zero positions will be unchanged. If a BoolTensor is provided, positions with ``True``
-          is not allowed to attend while ``False`` values will be unchanged. If a FloatTensor
-          is provided, it will be added to the attention weight.
-
-    Shapes for outputs:
-        - attn_output: :math:`(L, N, E)` where L is the target sequence length, N is the batch size,
-          E is the embedding dimension.
-        - attn_output_weights: :math:`(N, L, S)` where N is the batch size,
-          L is the target sequence length, S is the source sequence length.
+    Outputs:
+        - **attn_output** - Attention outputs of shape :math:`(L, N, E)` when ``batch_first=False`` or
+          :math:`(N, L, E)` when ``batch_first=True``, where :math:`L` is the target sequence length, :math:`N` is
+          the batch size, and :math:`E` is the embedding dimension ``embed_dim``.
+        - **attn_output_weights** - Attention output weights of shape :math:`(N, L, S)`, where :math:`N` is the batch
+          size, :math:`L` is the target sequence length, and :math:`S` is the source sequence length. Only returned
+          when ``need_weights=True``.
         """
+        if self.batch_first:
+            query, key, value = [x.transpose(1, 0) for x in (query, key, value)]
+
         if not self._qkv_same_embed_dim:
-            return F.multi_head_attention_forward(
+            attn_output, attn_output_weights = F.multi_head_attention_forward(
                 query, key, value, self.embed_dim, self.num_heads,
                 self.in_proj_weight, self.in_proj_bias,
                 self.bias_k, self.bias_v, self.add_zero_attn,
@@ -976,7 +1010,7 @@ class MultiheadAttention(Module):
                 q_proj_weight=self.q_proj_weight, k_proj_weight=self.k_proj_weight,
                 v_proj_weight=self.v_proj_weight)
         else:
-            return F.multi_head_attention_forward(
+            attn_output, attn_output_weights = F.multi_head_attention_forward(
                 query, key, value, self.embed_dim, self.num_heads,
                 self.in_proj_weight, self.in_proj_bias,
                 self.bias_k, self.bias_v, self.add_zero_attn,
@@ -984,7 +1018,10 @@ class MultiheadAttention(Module):
                 training=self.training,
                 key_padding_mask=key_padding_mask, need_weights=need_weights,
                 attn_mask=attn_mask)
-
+        if self.batch_first:
+            return attn_output.transpose(1, 0), attn_output_weights
+        else:
+            return attn_output, attn_output_weights
 
 class PReLU(Module):
     r"""Applies the element-wise function:
@@ -1020,9 +1057,9 @@ class PReLU(Module):
         init (float): the initial value of :math:`a`. Default: 0.25
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`( *)` where `*` means, any number of additional
+          dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     Attributes:
         weight (Tensor): the learnable weights of shape (:attr:`num_parameters`).
@@ -1038,10 +1075,12 @@ class PReLU(Module):
     __constants__ = ['num_parameters']
     num_parameters: int
 
-    def __init__(self, num_parameters: int = 1, init: float = 0.25) -> None:
+    def __init__(self, num_parameters: int = 1, init: float = 0.25,
+                 device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
         self.num_parameters = num_parameters
         super(PReLU, self).__init__()
-        self.weight = Parameter(torch.Tensor(num_parameters).fill_(init))
+        self.weight = Parameter(torch.empty(num_parameters, **factory_kwargs).fill_(init))
 
     def forward(self, input: Tensor) -> Tensor:
         return F.prelu(input, self.weight)
@@ -1057,9 +1096,8 @@ class Softsign(Module):
         \text{SoftSign}(x) = \frac{x}{ 1 + |x|}
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     .. image:: ../scripts/activation_images/Softsign.png
 
@@ -1081,9 +1119,8 @@ class Tanhshrink(Module):
         \text{Tanhshrink}(x) = x - \tanh(x)
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     .. image:: ../scripts/activation_images/Tanhshrink.png
 
@@ -1209,8 +1246,8 @@ class Softmax2d(Module):
     apply `Softmax` to each location :math:`(Channels, h_i, w_j)`
 
     Shape:
-        - Input: :math:`(N, C, H, W)`
-        - Output: :math:`(N, C, H, W)` (same shape as input)
+        - Input: :math:`(N, C, H, W)` or :math:`(C, H, W)`.
+        - Output: :math:`(N, C, H, W)` or :math:`(C, H, W)` (same shape as input)
 
     Returns:
         a Tensor of the same dimension and shape as the input with
@@ -1225,8 +1262,8 @@ class Softmax2d(Module):
     """
 
     def forward(self, input: Tensor) -> Tensor:
-        assert input.dim() == 4, 'Softmax2d requires a 4D tensor as input'
-        return F.softmax(input, 1, _stacklevel=5)
+        assert input.dim() == 4 or input.dim() == 3, 'Softmax2d requires a 3D or 4D tensor as input'
+        return F.softmax(input, -3, _stacklevel=5)
 
 
 class LogSoftmax(Module):

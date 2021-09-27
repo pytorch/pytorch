@@ -13,67 +13,7 @@ namespace jit {
 using namespace torch::jit::tensorexpr;
 using SimpleIRExprEval = ExprEval<SimpleIREvaluator>;
 
-#define IS_NODE(T, node)                        \
-  {                                             \
-    auto* node_ = dynamic_cast<const T*>(node); \
-    ASSERT_NE(nullptr, node_);                  \
-  }
-
-#define IS_NODE_WITH_NAME(T, node, name)     \
-  auto* name = dynamic_cast<const T*>(node); \
-  ASSERT_NE(nullptr, name);
-
-#define IS_NODE_WITH_NAME_AND_CAST(T, node, name, Type)        \
-  const T* name = nullptr;                                     \
-  {                                                            \
-    auto* node_ = dynamic_cast<const Cast*>(node);             \
-    ASSERT_NE(nullptr, node_);                                 \
-    ASSERT_EQ(node_->dtype().scalar_type(), ScalarType::Type); \
-    name = dynamic_cast<const T*>(node_->src_value());         \
-  }                                                            \
-  ASSERT_NE(nullptr, name);
-
-#define IS_IMM_WITH_VAL(T, node, val)                \
-  {                                                  \
-    auto* node_ = dynamic_cast<const T##Imm*>(node); \
-    ASSERT_NE(nullptr, node_);                       \
-    ASSERT_EQ(node_->value(), val);                  \
-  }
-
-#define IS_VAR_WITH_NAME(node, name)              \
-  {                                               \
-    auto* node_ = dynamic_cast<const Var*>(node); \
-    ASSERT_NE(nullptr, node_);                    \
-    ASSERT_EQ(node_->name_hint(), name);          \
-  }
-
-#define IS_BINOP_W_VARS(T, node, name, v1, v2) \
-  const T* name = nullptr;                     \
-  {                                            \
-    name = dynamic_cast<const T*>(node);       \
-    ASSERT_NE(nullptr, name);                  \
-    IS_VAR_WITH_NAME(name->lhs(), v1);         \
-    IS_VAR_WITH_NAME(name->rhs(), v2);         \
-  }
-
-#define IS_BINOP_W_CONST(T, node, name, v, c) \
-  const T* name = nullptr;                    \
-  {                                           \
-    name = dynamic_cast<const T*>(node);      \
-    ASSERT_NE(nullptr, name);                 \
-    IS_VAR_WITH_NAME(name->lhs(), v);         \
-    IS_IMM_WITH_VAL(Int, name->rhs(), c);     \
-  }
-
-#define IS_RAND(node)                                    \
-  {                                                      \
-    auto* node_ = dynamic_cast<const Intrinsics*>(node); \
-    ASSERT_NE(nullptr, node_);                           \
-    ASSERT_EQ(node_->op_type(), kRand);                  \
-  }
-
 TEST(Simplify, ConstantFoldSimple) {
-  KernelScope kernel_scope;
   ExprHandle a(2.0f);
   ExprHandle b(3.0f);
   ExprHandle f = (a + b);
@@ -87,7 +27,6 @@ TEST(Simplify, ConstantFoldSimple) {
 }
 
 TEST(Simplify, ConstantFoldTwoLayer) {
-  KernelScope kernel_scope;
   ExprHandle a(2.0f);
   ExprHandle b(3.0f);
   ExprHandle c(4.0f);
@@ -103,7 +42,6 @@ TEST(Simplify, ConstantFoldTwoLayer) {
 }
 
 TEST(Simplify, ConstantFoldShifts) {
-  KernelScope kernel_scope;
   ExprHandle a(7);
   ExprHandle b(2);
   ExprHandle c(3);
@@ -118,7 +56,6 @@ TEST(Simplify, ConstantFoldShifts) {
 }
 
 TEST(Simplify, ConstantFoldBitwise) {
-  KernelScope kernel_scope;
   ExprHandle a(59);
   ExprHandle b(22);
   ExprHandle c(101);
@@ -133,7 +70,6 @@ TEST(Simplify, ConstantFoldBitwise) {
 }
 
 TEST(Simplify, ConstantFoldMultiOp) {
-  KernelScope kernel_scope;
   ExprHandle a(2.0f);
   ExprHandle b(3.0f);
   ExprHandle c(4.0f);
@@ -152,7 +88,6 @@ TEST(Simplify, ConstantFoldMultiOp) {
 }
 
 TEST(Simplify, ConstantFoldMinMax) {
-  KernelScope kernel_scope;
   ExprHandle a(12.0f);
   ExprHandle b(15.0f);
   ExprHandle c(17.0f);
@@ -161,6 +96,7 @@ TEST(Simplify, ConstantFoldMinMax) {
   ExprHandle minHandle = Min::make(b, c, true);
   ExprHandle fn = Max::make(a, minHandle, false);
 
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   ASSERT_EQ(fn.dtype().scalar_type(), ScalarType::Float);
 
   ExprHandle newF = IRSimplifier::simplify(fn);
@@ -171,7 +107,6 @@ TEST(Simplify, ConstantFoldMinMax) {
 }
 
 TEST(Simplify, ConstantFoldIntrinsics) {
-  KernelScope kernel_scope;
   ExprHandle a(2.0f);
   ExprHandle b(3.0f);
   ExprHandle c(4.0f);
@@ -193,7 +128,6 @@ TEST(Simplify, ConstantFoldIntrinsics) {
 }
 
 TEST(Simplify, ConstantFoldCastToBool) {
-  KernelScope kernel_scope;
   ExprHandle f = Cast::make(kBool, IntImm::make(0));
   ExprHandle newF = IRSimplifier::simplify(f);
   SimpleIRExprEval eval(newF);
@@ -201,15 +135,14 @@ TEST(Simplify, ConstantFoldCastToBool) {
 }
 
 TEST(Simplify, ConstantFoldWithVar) {
-  KernelScope kernel_scope;
   {
     VarHandle x("x", kInt);
     ExprHandle body = x * (ExprHandle(2) + ExprHandle(4));
 
     ExprHandle newF = IRSimplifier::simplify(body);
-    const Mul* root = newF.AsNode<Mul>();
+    MulPtr root = newF.AsNode<Mul>();
     ASSERT_NE(root, nullptr);
-    ASSERT_NE(dynamic_cast<const IntImm*>(root->lhs()), nullptr);
+    ASSERT_NE(to<IntImm>(root->lhs()), nullptr);
 
     SimpleIRExprEval eval(newF);
     eval.bindVar(x, ExprHandle(3));
@@ -221,9 +154,9 @@ TEST(Simplify, ConstantFoldWithVar) {
     ExprHandle body = x * (ExprHandle(2.f) + ExprHandle(4.f));
 
     ExprHandle newF = IRSimplifier::simplify(body);
-    const Mul* root = newF.AsNode<Mul>();
+    MulPtr root = newF.AsNode<Mul>();
     ASSERT_NE(root, nullptr);
-    ASSERT_NE(dynamic_cast<const FloatImm*>(root->rhs()), nullptr);
+    ASSERT_NE(to<FloatImm>(root->rhs()), nullptr);
 
     SimpleIRExprEval eval(newF);
     eval.bindVar(x, ExprHandle(3.f));
@@ -232,7 +165,6 @@ TEST(Simplify, ConstantFoldWithVar) {
 }
 
 TEST(Simplify, ConditionalSelectFoldSimple) {
-  KernelScope kernel_scope;
   ExprHandle a(3.0f);
   ExprHandle b(4.0f);
   ExprHandle c(3.0f);
@@ -279,7 +211,6 @@ TEST(Simplify, ConditionalSelectFoldSimple) {
 }
 
 TEST(Simplify, ConditionalSelectFoldTwoLayer) {
-  KernelScope kernel_scope;
   ExprHandle a(3.0f);
   ExprHandle b(2.0f);
   ExprHandle c(2.0f);
@@ -327,12 +258,11 @@ TEST(Simplify, ConditionalSelectFoldTwoLayer) {
 }
 
 TEST(Simplify, ConditionalSelectFoldWithVar) {
-  KernelScope kernel_scope;
   VarHandle x("x", kFloat);
   ExprHandle f = x < 4.f;
 
   ExprHandle newF = IRSimplifier::simplify(f);
-  const IntImm* folded = newF.AsNode<IntImm>();
+  IntImmPtr folded = newF.AsNode<IntImm>();
   ASSERT_EQ(folded, nullptr);
 
   {
@@ -348,16 +278,15 @@ TEST(Simplify, ConditionalSelectFoldWithVar) {
 }
 
 TEST(Simplify, UnFoldableExpr) {
-  KernelScope kernel_scope;
   VarHandle x("x", kFloat);
   VarHandle y("y", kFloat);
   ExprHandle body = (ExprHandle(3) * x) + (ExprHandle(5) * y);
 
   ExprHandle newF = IRSimplifier::simplify(body);
-  const Add* root = newF.AsNode<Add>();
+  AddPtr root = newF.AsNode<Add>();
   ASSERT_NE(root, nullptr);
-  ASSERT_EQ(dynamic_cast<const FloatImm*>(root->lhs()), nullptr);
-  ASSERT_EQ(dynamic_cast<const FloatImm*>(root->rhs()), nullptr);
+  ASSERT_EQ(to<FloatImm>(root->lhs()), nullptr);
+  ASSERT_EQ(to<FloatImm>(root->rhs()), nullptr);
 
   SimpleIRExprEval eval(newF);
   eval.bindVar(x, ExprHandle(3.f));
@@ -366,7 +295,6 @@ TEST(Simplify, UnFoldableExpr) {
 }
 
 TEST(Simplify, HashSimple) {
-  KernelScope kernel_scope;
   VarHandle x("x", kFloat);
   ExprHandle a(2.0f);
   ExprHandle b(3.0f);
@@ -387,12 +315,11 @@ TEST(Simplify, HashSimple) {
 }
 
 TEST(Simplify, HashEquivalence) {
-  KernelScope kernel_scope;
   VarHandle x("x", kFloat);
   VarHandle y("y", kFloat);
   ExprHandle f = (x * y) + (x * y);
 
-  const Add* root = f.AsNode<Add>();
+  AddPtr root = f.AsNode<Add>();
   ASSERT_NE(root, nullptr);
 
   HashProvider hasher;
@@ -424,11 +351,10 @@ TEST(Simplify, HashEquivalence) {
 }
 
 TEST(Simplify, HashEquivalenceRand) {
-  KernelScope kernel_scope;
   ExprHandle f =
       Intrinsics::make(kRand, kFloat) + Intrinsics::make(kRand, kInt);
 
-  const Add* root = f.AsNode<Add>();
+  AddPtr root = f.AsNode<Add>();
   ASSERT_NE(root, nullptr);
 
   HashProvider hasher;
@@ -444,7 +370,6 @@ TEST(Simplify, HashEquivalenceRand) {
 }
 
 TEST(Simplify, HashEquivalenceAfterFolding) {
-  KernelScope kernel_scope;
   VarHandle x("x", kFloat);
   ExprHandle a(2.0f);
   ExprHandle b(3.0f);
@@ -470,20 +395,19 @@ TEST(Simplify, HashEquivalenceAfterFolding) {
 }
 
 TEST(Simplify, HashDifferenceTypes) {
-  KernelScope kernel_scope;
-
   HashProvider hasher;
-  std::vector<const Expr*> immediates;
+  std::vector<ExprPtr> immediates;
 
-  immediates.push_back(new DoubleImm(1));
-  immediates.push_back(new FloatImm(1));
-  immediates.push_back(new HalfImm(1));
-  immediates.push_back(new BoolImm(1));
-  immediates.push_back(new CharImm(1));
-  immediates.push_back(new ByteImm(1));
-  immediates.push_back(new ShortImm(1));
-  immediates.push_back(new IntImm(1));
-  immediates.push_back(new LongImm(1));
+  immediates.push_back(alloc<DoubleImm>(1));
+  immediates.push_back(alloc<FloatImm>(1));
+  immediates.push_back(alloc<HalfImm>(1));
+  // NOLINTNEXTLINE(modernize-use-bool-literals)
+  immediates.push_back(alloc<BoolImm>(1));
+  immediates.push_back(alloc<CharImm>(1));
+  immediates.push_back(alloc<ByteImm>(1));
+  immediates.push_back(alloc<ShortImm>(1));
+  immediates.push_back(alloc<IntImm>(1));
+  immediates.push_back(alloc<LongImm>(1));
 
   // Immediates of different types are not equal.
   for (unsigned int i = 0; i < immediates.size(); ++i) {
@@ -503,12 +427,10 @@ TEST(Simplify, HashDifferenceTypes) {
 }
 
 TEST(Simplify, HashLargeExpression) {
-  KernelScope kernel_scope;
   constexpr int N = 1024;
   BufHandle a("A", {N}, kInt);
   BufHandle b("B", {N}, kInt);
   BufHandle c("C", {N}, kInt);
-  auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
   auto memcpy_stmt = For::make(
       i,
@@ -518,24 +440,18 @@ TEST(Simplify, HashLargeExpression) {
           c,
           {i},
           CompareSelect::make(
-              Load::make(a, {i}, mask),
-              Load::make(b, {i}, mask),
-              CompareSelectOperation::kEQ),
-          mask));
+              Load::make(a, {i}),
+              Load::make(b, {i}),
+              CompareSelectOperation::kEQ)));
 
   BufHandle d("D", {1}, kInt);
   BufHandle e("E", {1}, kInt);
   auto store_ramp_stmt = Store::make(
-      e,
-      {Ramp::make(0, 1, 4)},
-      Load::make(d, {Ramp::make(0, 1, 4)}, Broadcast::make(IntImm::make(1), 4)),
-      Broadcast::make(Cast::make(kInt, DoubleImm::make(1)), 4));
+      e, {Ramp::make(0, 1, 4)}, Load::make(d, {Ramp::make(0, 1, 4)}));
 
   auto if_stmt = Cond::make(
       CompareSelect::make(
-          Load::make(a, {i}, mask),
-          Load::make(b, {i}, mask),
-          CompareSelectOperation::kGE),
+          Load::make(a, {i}), Load::make(b, {i}), CompareSelectOperation::kGE),
       memcpy_stmt,
       store_ramp_stmt);
 
@@ -554,12 +470,10 @@ TEST(Simplify, HashLargeExpression) {
 }
 
 TEST(Simplify, HashForLoopOptions) {
-  KernelScope kernel_scope;
   constexpr int N = 1024;
   BufHandle a("A", {N}, kInt);
   BufHandle b("B", {N}, kInt);
   BufHandle c("C", {N}, kInt);
-  auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
   auto for_stmt = For::make(
       i,
@@ -569,10 +483,9 @@ TEST(Simplify, HashForLoopOptions) {
           c,
           {i},
           CompareSelect::make(
-              Load::make(a, {i}, mask),
-              Load::make(b, {i}, mask),
-              CompareSelectOperation::kEQ),
-          mask));
+              Load::make(a, {i}),
+              Load::make(b, {i}),
+              CompareSelectOperation::kEQ)));
 
   HashProvider hasher;
   auto hash_before = hasher.hash(for_stmt);
@@ -598,46 +511,47 @@ TEST(Simplify, HashForLoopOptions) {
 
 /// (2 + x) + 4 => x + 6
 TEST(Simplify, SimplifyAdd) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
 
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   VarHandle m("m", kInt);
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   VarHandle n("n", kInt);
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   VarHandle n_1("n_1", kInt);
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   ExprHandle body = (ExprHandle(2) + x) + ExprHandle(4);
 
   ExprHandle simplified = IRSimplifier::simplify(body);
-  const Add* root = simplified.AsNode<Add>();
+  AddPtr root = simplified.AsNode<Add>();
   ASSERT_NE(root, nullptr);
-  const Var* lhs = dynamic_cast<const Var*>(root->lhs());
+  VarPtr lhs = to<Var>(root->lhs());
   ASSERT_NE(lhs, nullptr);
   ASSERT_EQ(lhs->name_hint(), "x");
-  const IntImm* rhs = dynamic_cast<const IntImm*>(root->rhs());
+  IntImmPtr rhs = to<IntImm>(root->rhs());
   ASSERT_NE(rhs, nullptr);
   ASSERT_EQ(rhs->value(), 6.f);
 }
 
 /// (2 - x) - 4 => -2 - x
 TEST(Simplify, SimplifySub) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   ExprHandle body = (ExprHandle(2) - x) - ExprHandle(4);
 
   ExprHandle simplified = IRSimplifier::simplify(body);
-  const Sub* root = simplified.AsNode<Sub>();
+  SubPtr root = simplified.AsNode<Sub>();
   ASSERT_NE(root, nullptr);
-  const IntImm* lhs = dynamic_cast<const IntImm*>(root->lhs());
+  IntImmPtr lhs = to<IntImm>(root->lhs());
   ASSERT_NE(lhs, nullptr);
   ASSERT_EQ(lhs->value(), -2.f);
-  const Var* rhs = dynamic_cast<const Var*>(root->rhs());
+  VarPtr rhs = to<Var>(root->rhs());
   ASSERT_NE(rhs, nullptr);
   ASSERT_EQ(rhs->name_hint(), "x");
 }
 
 /// 2 * (1 - x) - 4 => 2 * (-3 - x)
 TEST(Simplify, SimplifyMultiLayer) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   ExprHandle body = ExprHandle(2) * ((ExprHandle(1) - x) - ExprHandle(4));
   ExprHandle simplified = IRSimplifier::simplify(body);
@@ -650,84 +564,79 @@ TEST(Simplify, SimplifyMultiLayer) {
 
 /// 2 * (3 * x) - (x * 4) => 2 * x
 TEST(Simplify, SimplifyMultiTerm) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   ExprHandle body =
       (ExprHandle(2) * ((ExprHandle(3) * x)) - (x * ExprHandle(4)));
 
   ExprHandle simplified = IRSimplifier::simplify(body);
-  const Mul* root = simplified.AsNode<Mul>();
+  MulPtr root = simplified.AsNode<Mul>();
   ASSERT_NE(root, nullptr);
-  const IntImm* lhs = dynamic_cast<const IntImm*>(root->lhs());
+  IntImmPtr lhs = to<IntImm>(root->lhs());
   ASSERT_NE(lhs, nullptr);
   ASSERT_EQ(lhs->value(), 2);
-  const Var* rhs = dynamic_cast<const Var*>(root->rhs());
+  VarPtr rhs = to<Var>(root->rhs());
   ASSERT_NE(rhs, nullptr);
   ASSERT_EQ(rhs->name_hint(), "x");
 }
 
 /// 2 * (3 * (long)x) - (x * 4) => 2 * x
 TEST(Simplify, SimplifyCasts) {
-  KernelScope kernel_scope;
   VarHandle x("x", kLong);
   ExprHandle body =
       (ExprHandle(2) * ((ExprHandle(3) * x)) - (x * ExprHandle(4)));
 
   ExprHandle simplified = IRSimplifier::simplify(body);
-  const Mul* root = simplified.AsNode<Mul>();
+  MulPtr root = simplified.AsNode<Mul>();
   ASSERT_NE(root, nullptr);
-  const LongImm* lhs = dynamic_cast<const LongImm*>(root->lhs());
+  LongImmPtr lhs = to<LongImm>(root->lhs());
   ASSERT_NE(lhs, nullptr);
   ASSERT_EQ(lhs->value(), 2);
-  const Var* rhs = dynamic_cast<const Var*>(root->rhs());
+  VarPtr rhs = to<Var>(root->rhs());
   ASSERT_NE(rhs, nullptr);
   ASSERT_EQ(rhs->name_hint(), "x");
 }
 
 /// (x + 0) * 1 => x
 TEST(Simplify, SimplifyEliminatesNoOps) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   ExprHandle body = (x + ExprHandle(0)) * 1;
 
   ExprHandle simplified = IRSimplifier::simplify(body);
-  const Var* root = simplified.AsNode<Var>();
+  VarPtr root = simplified.AsNode<Var>();
   ASSERT_NE(root, nullptr);
   ASSERT_EQ(root->name_hint(), "x");
 }
 
 /// Cannot simplify this.
 TEST(Simplify, SimplifyMultiVar) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   ExprHandle body = x * 24 + y * 34;
 
   ExprHandle simplified = IRSimplifier::simplify(body);
 
-  const Add* root = simplified.AsNode<Add>();
+  AddPtr root = simplified.AsNode<Add>();
   ASSERT_NE(root, nullptr);
-  const Mul* lhs = dynamic_cast<const Mul*>(root->lhs());
+  MulPtr lhs = to<Mul>(root->lhs());
   ASSERT_NE(lhs, nullptr);
-  const Var* varX = dynamic_cast<const Var*>(lhs->rhs());
+  VarPtr varX = to<Var>(lhs->rhs());
   ASSERT_NE(varX, nullptr);
-  ASSERT_EQ(varX->name_hint(), "y");
-  const Mul* rhs = dynamic_cast<const Mul*>(root->rhs());
+  ASSERT_EQ(varX->name_hint(), "x");
+  MulPtr rhs = to<Mul>(root->rhs());
   ASSERT_NE(rhs, nullptr);
-  const Var* varY = dynamic_cast<const Var*>(rhs->rhs());
+  VarPtr varY = to<Var>(rhs->rhs());
   ASSERT_NE(varY, nullptr);
-  ASSERT_EQ(varY->name_hint(), "x");
+  ASSERT_EQ(varY->name_hint(), "y");
 }
 
 // x + 2 + y => x + y + 2
 TEST(Simplify, DISABLED_SimplifyReorderings) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   ExprHandle body = x + 2 + y;
   ExprHandle simplified = IRSimplifier::simplify(body);
 
-  const Add* root = simplified.AsNode<Add>();
+  AddPtr root = simplified.AsNode<Add>();
   ASSERT_NE(root, nullptr);
 
   IS_NODE_WITH_NAME(Add, root->lhs(), rhs);
@@ -738,7 +647,6 @@ TEST(Simplify, DISABLED_SimplifyReorderings) {
 
 /// y + x * 0 => y
 TEST(Simplify, SimplifyEliminatesVar) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   ExprHandle body = y + x * ExprHandle(0);
@@ -748,7 +656,6 @@ TEST(Simplify, SimplifyEliminatesVar) {
 }
 
 TEST(Simplify, SimplifyAdds) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
 
@@ -760,8 +667,8 @@ TEST(Simplify, SimplifyAdds) {
     IS_NODE_WITH_NAME(Mul, simplified.node(), root);
     IS_IMM_WITH_VAL(Int, root->lhs(), 2);
     IS_NODE_WITH_NAME(Add, root->rhs(), add);
-    IS_VAR_WITH_NAME(add->lhs(), "y");
-    IS_VAR_WITH_NAME(add->rhs(), "x");
+    IS_VAR_WITH_NAME(add->lhs(), "x");
+    IS_VAR_WITH_NAME(add->rhs(), "y");
   }
 
   {
@@ -819,7 +726,6 @@ TEST(Simplify, SimplifyAdds) {
 }
 
 TEST(Simplify, SimplifyMuls) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
 
@@ -832,11 +738,11 @@ TEST(Simplify, SimplifyMuls) {
 
     IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
     IS_NODE_WITH_NAME(Add, mul->lhs(), lhs);
-    IS_VAR_WITH_NAME(lhs->lhs(), "y");
-    IS_VAR_WITH_NAME(lhs->rhs(), "x");
+    IS_VAR_WITH_NAME(lhs->lhs(), "x");
+    IS_VAR_WITH_NAME(lhs->rhs(), "y");
     IS_NODE_WITH_NAME(Add, mul->rhs(), rhs);
-    IS_VAR_WITH_NAME(rhs->lhs(), "y");
-    IS_VAR_WITH_NAME(rhs->rhs(), "x");
+    IS_VAR_WITH_NAME(rhs->lhs(), "x");
+    IS_VAR_WITH_NAME(rhs->rhs(), "y");
   }
 
   {
@@ -923,23 +829,104 @@ TEST(Simplify, SimplifyMuls) {
   }
 
   {
-    // (x + y) * (x - y) => (x - y) * (x - y)
+    // (x + y) * (x - y) => (x + y) * (x - y)
     // Don't simplify with different ops on each side.
     ExprHandle body = (x + y) * (x - y);
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
     IS_NODE_WITH_NAME(Add, mul->lhs(), lhs);
-    IS_VAR_WITH_NAME(lhs->lhs(), "y");
-    IS_VAR_WITH_NAME(lhs->rhs(), "x");
+    IS_VAR_WITH_NAME(lhs->lhs(), "x");
+    IS_VAR_WITH_NAME(lhs->rhs(), "y");
     IS_NODE_WITH_NAME(Sub, mul->rhs(), rhs);
     IS_VAR_WITH_NAME(rhs->lhs(), "x");
     IS_VAR_WITH_NAME(rhs->rhs(), "y");
+  }
+
+  {
+    // Multiply a polynomial by a term.
+    //   - term with no scalar, poly with non-identity scalar.
+    // x * (y + 1) => x + x * y
+    ExprHandle body = x * (y + ExprHandle(1));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Add, simplified.node(), add);
+    IS_VAR_WITH_NAME(add->lhs(), "x");
+    IS_NODE_WITH_NAME(Mul, add->rhs(), mul);
+    IS_VAR_WITH_NAME(mul->lhs(), "x");
+    IS_VAR_WITH_NAME(mul->rhs(), "y");
+  }
+
+  {
+    // Multiply a polynomial by a term.
+    //   - term with identity scalar, poly with non-identity scalar.
+    // (x * 1) * (y + 1) => x + x * y
+    ExprHandle body = (x * ExprHandle(1)) * (y + ExprHandle(1));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Add, simplified.node(), add);
+    IS_VAR_WITH_NAME(add->lhs(), "x");
+    IS_NODE_WITH_NAME(Mul, add->rhs(), mul);
+    IS_VAR_WITH_NAME(mul->lhs(), "x");
+    IS_VAR_WITH_NAME(mul->rhs(), "y");
+  }
+
+  {
+    // Multiply a polynomial by a term.
+    //   - term with non-identity scalar, poly with non-identity scalar.
+    // (x * 2) * (y + 1) => 2 * (x + x * y)
+    ExprHandle body = (x * ExprHandle(2)) * (y + ExprHandle(1));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
+    IS_IMM_WITH_VAL(Int, mul->lhs(), 2);
+    IS_NODE_WITH_NAME(Add, mul->rhs(), add);
+    IS_VAR_WITH_NAME(add->lhs(), "x");
+    IS_NODE_WITH_NAME(Mul, add->rhs(), mul2);
+    IS_VAR_WITH_NAME(mul2->lhs(), "x");
+    IS_VAR_WITH_NAME(mul2->rhs(), "y");
+  }
+
+  {
+    // Multiply a polynomial by a term.
+    //   - term with non-identity scalar, poly with identity scalar.
+    // (x * 2) * (y + 0) => 2 * (x * y)
+    ExprHandle body = (x * ExprHandle(2)) * (y + ExprHandle(0));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
+    IS_IMM_WITH_VAL(Int, mul->lhs(), 2);
+    IS_NODE_WITH_NAME(Mul, mul->rhs(), mul2);
+    IS_VAR_WITH_NAME(mul2->lhs(), "x");
+    IS_VAR_WITH_NAME(mul2->rhs(), "y");
+  }
+
+  {
+    // Multiply a polynomial by a term.
+    //   - term with identity scalar, poly with identity scalar.
+    // (x * 1) * (y + 0) => x * y
+    ExprHandle body = (x * ExprHandle(1)) * (y + ExprHandle(0));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
+    IS_VAR_WITH_NAME(mul->lhs(), "x");
+    IS_VAR_WITH_NAME(mul->rhs(), "y");
+  }
+
+  {
+    // Multiply a polynomial by a term.
+    //   - term with no scalar, poly with identity scalar.
+    // x * (y + 0) => x * y
+    ExprHandle body = x * (y + ExprHandle(0));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
+    IS_VAR_WITH_NAME(mul->lhs(), "x");
+    IS_VAR_WITH_NAME(mul->rhs(), "y");
   }
 }
 
 // Sub an expr from itself will result in zero.
 TEST(Simplify, SimplifySubs) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
 
@@ -1105,7 +1092,6 @@ TEST(Simplify, SimplifySubs) {
 }
 
 TEST(Simplify, SimplifyDiv) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
 
   {
@@ -1123,8 +1109,377 @@ TEST(Simplify, SimplifyDiv) {
   }
 }
 
+TEST(Simplify, SimplifyDivWithLoopContext0) {
+  // Stmt to simplify:
+  // for (int i = 0; i < 100; i++) {
+  //  A[i] = i / 100;
+  //}
+  VarHandle i("i", kInt);
+  BufHandle a_buf("A", {100}, kInt);
+  auto for_stmt = For::make(i, 0, 100, Store::make(a_buf, {i}, (i / 100)));
+
+  const StmtPtr simplified = IRSimplifier::simplify(for_stmt);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT:   A[i] = 0;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyDivWithLoopContext1) {
+  // Stmt to simplify:
+  // for (int i = 0; i < 6; i++) {
+  //  A[i] = (i + 24) / 6;
+  //}
+  VarHandle i("i", kInt);
+  BufHandle a_buf("A", {6}, kInt);
+  auto for_stmt = For::make(i, 0, 6, Store::make(a_buf, {i}, (i + 24) / 6));
+
+  const StmtPtr simplified = IRSimplifier::simplify(for_stmt);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT:   A[i] = 4;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyDivWithLoopContext2) {
+  // Stmt to simplify:
+  // for (int i = 0; i < 5; i++) {
+  //  A[i] = (i + 25) / 6;
+  //}
+  VarHandle i("i", kInt);
+  BufHandle a_buf("A", {5}, kInt);
+  auto for_stmt = For::make(i, 0, 5, Store::make(a_buf, {i}, (i + 25) / 6));
+
+  const StmtPtr simplified = IRSimplifier::simplify(for_stmt);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT:   A[i] = 4;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyDivWithLoopContext3) {
+  // Stmt to simplify:
+  // for (int i = 0; i < 6; i++) {
+  //  A[i] = (i + 24) / (-6);
+  //}
+  VarHandle i("i", kInt);
+  BufHandle a_buf("A", {6}, kInt);
+  auto for_stmt = For::make(i, 0, 6, Store::make(a_buf, {i}, (i + 24) / (-6)));
+
+  const StmtPtr simplified = IRSimplifier::simplify(for_stmt);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NOT:   A[i] = -4;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyDivWithLoopContext4) {
+  // Stmt to simplify:
+  // for (int i = 0; i < 5; i++) {
+  //  A[i] = (i - 5) / 6;
+  //}
+  VarHandle i("i", kInt);
+  BufHandle a_buf("A", {5}, kInt);
+  auto for_stmt = For::make(i, 0, 5, Store::make(a_buf, {i}, (i + (-5)) / 6));
+
+  const StmtPtr simplified = IRSimplifier::simplify(for_stmt);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NOT:   A[i] = 0;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyDivWithLoopContext5) {
+  // Stmt to simplify:
+  // for (int i = 0; i < 6; i++) {
+  //  for (int j = 0; j < 10; j++) {
+  //    A[i, j] = (i + 6*j) / 6;
+  //  }
+  //}
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  BufHandle a_buf("A", {6, 10}, kInt);
+  auto for_j = For::make(j, 0, 10, Store::make(a_buf, {i, j}, (i + j * 6) / 6));
+  auto for_i = For::make(i, 0, 6, for_j);
+
+  const StmtPtr simplified = IRSimplifier::simplify(for_i);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK:   for (int j
+# CHECK-NEXT:   A[i, j] = j;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyDivWithLoopContext6) {
+  // Stmt to simplify:
+  // for (int i = 0; i < 6; i++) {
+  //  for (int j = -1; j < 9; j++) {
+  //    A[i, j+1] = (i + 6*j) / 6;
+  //  }
+  //}
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  BufHandle a_buf("A", {6, 10}, kInt);
+  auto for_j =
+      For::make(j, -1, 9, Store::make(a_buf, {i, j + 1}, (i + j * 6) / 6));
+  auto for_i = For::make(i, 0, 6, for_j);
+
+  const StmtPtr simplified = IRSimplifier::simplify(for_i);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK:   for (int j
+# CHECK-NOT:   A[i, j] = j;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyDivWithLoopContext7) {
+  // Stmt to simplify:
+  // for (int i = 0; i < 6; i++) {
+  //  for (int j = 0; j < 10; j++) {
+  //    A[i, j] = (i + 6*j) / (-6);
+  //  }
+  //}
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  BufHandle a_buf("A", {6, 10}, kInt);
+  auto for_j =
+      For::make(j, 0, 10, Store::make(a_buf, {i, j}, (i + j * 6) / (-6)));
+  auto for_i = For::make(i, 0, 6, for_j);
+
+  const StmtPtr simplified = IRSimplifier::simplify(for_i);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK:   for (int j
+# CHECK-NOT:   A[i, j] = -j;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyModWithLoopContext0) {
+  // Stmt to simplify:
+  // for (int i = 0; i < 100; i++) {
+  //  A[i] = i % 100;
+  //}
+  VarHandle i("i", kInt);
+  BufHandle a_buf("A", {100}, kInt);
+  auto for_stmt = For::make(i, 0, 100, Store::make(a_buf, {i}, (i % 100)));
+
+  const StmtPtr simplified = IRSimplifier::simplify(for_stmt);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT:   A[i] = i;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyModWithLoopContext1) {
+  // Stmt to simplify:
+  // for (int i = 0; i < 6; i++) {
+  //  A[i] = (i + 24) % 6;
+  //}
+  VarHandle i("i", kInt);
+  BufHandle a_buf("A", {6}, kInt);
+  auto for_stmt = For::make(i, 0, 6, Store::make(a_buf, {i}, (i + 24) % 6));
+
+  const StmtPtr simplified = IRSimplifier::simplify(for_stmt);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT:   A[i] = i;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyModWithLoopContext2) {
+  // Stmt to simplify:
+  // for (int i = 0; i < 5; i++) {
+  //  A[i] = (i + 25) % 6;
+  //}
+  VarHandle i("i", kInt);
+  BufHandle a_buf("A", {5}, kInt);
+  auto for_stmt = For::make(i, 0, 5, Store::make(a_buf, {i}, (i + 25) % 6));
+
+  const StmtPtr simplified = IRSimplifier::simplify(for_stmt);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT:   A[i] = i + 1;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyModWithLoopContext3) {
+  // Stmt to simplify:
+  // for (int i = 0; i < 6; i++) {
+  //  A[i] = (i + 24) % (-6);
+  //}
+  VarHandle i("i", kInt);
+  BufHandle a_buf("A", {6}, kInt);
+  auto for_stmt = For::make(i, 0, 6, Store::make(a_buf, {i}, (i + 24) % (-6)));
+
+  const StmtPtr simplified = IRSimplifier::simplify(for_stmt);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NOT:   A[i] = i;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyModWithLoopContext4) {
+  // Stmt to simplify:
+  // for (int i = 0; i < 5; i++) {
+  //  A[i] = (i - 5) % 6;
+  //}
+  VarHandle i("i", kInt);
+  BufHandle a_buf("A", {5}, kInt);
+  auto for_stmt = For::make(i, 0, 5, Store::make(a_buf, {i}, (i + (-5)) % 6));
+
+  const StmtPtr simplified = IRSimplifier::simplify(for_stmt);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NOT:   A[i] = i - 5;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyModWithLoopContext5) {
+  // Stmt to simplify:
+  // for (int i = 0; i < 6; i++) {
+  //  for (int j = 0; j < 10; j++) {
+  //    A[i, j] = (i + 6*j) % 6;
+  //  }
+  //}
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  BufHandle a_buf("A", {6, 10}, kInt);
+  auto for_j = For::make(j, 0, 10, Store::make(a_buf, {i, j}, (i + j * 6) % 6));
+  auto for_i = For::make(i, 0, 6, for_j);
+
+  const StmtPtr simplified = IRSimplifier::simplify(for_i);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK:   for (int j
+# CHECK-NEXT:   A[i, j] = i;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyModWithLoopContext6) {
+  // Stmt to simplify:
+  // for (int i = 0; i < 6; i++) {
+  //  for (int j = -1; j < 9; j++) {
+  //    A[i, j+1] = (i + 6*j) % 6;
+  //  }
+  //}
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  BufHandle a_buf("A", {6, 10}, kInt);
+  auto for_j =
+      For::make(j, -1, 9, Store::make(a_buf, {i, j + 1}, (i + j * 6) % 6));
+  auto for_i = For::make(i, 0, 6, for_j);
+
+  const StmtPtr simplified = IRSimplifier::simplify(for_i);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK:   for (int j
+# CHECK-NOT:   A[i, j] = i;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyModWithLoopContext7) {
+  // Stmt to simplify:
+  // for (int i = 0; i < 6; i++) {
+  //  for (int j = 0; j < 10; j++) {
+  //    A[i, j] = (i + 6*j) % (-6);
+  //  }
+  //}
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  BufHandle a_buf("A", {6, 10}, kInt);
+  auto for_j =
+      For::make(j, 0, 10, Store::make(a_buf, {i, j}, (i + j * 6) % (-6)));
+  auto for_i = For::make(i, 0, 6, for_j);
+
+  const StmtPtr simplified = IRSimplifier::simplify(for_i);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK:   for (int j
+# CHECK-NOT:   A[i, j] = i;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
 TEST(Simplify, SimplifyMod) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   VarHandle z("z", kInt);
@@ -1133,6 +1488,7 @@ TEST(Simplify, SimplifyMod) {
     // Constant folding works.
     ExprHandle body = ExprHandle(10) % 8;
     ExprHandle simplified = IRSimplifier::simplify(body);
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     IS_IMM_WITH_VAL(Int, simplified.node(), 2);
   }
 
@@ -1250,7 +1606,6 @@ TEST(Simplify, SimplifyMod) {
 
 // Test that mixing ops together simplifies as expected.
 TEST(Simplify, SimplifyMultiOp) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
 
@@ -1269,14 +1624,14 @@ TEST(Simplify, SimplifyMultiOp) {
   }
 
   {
-    // (x + y) - (x * y) => x + y - (x * y)
-    ExprHandle body = (x + y) - (x * y);
+    // (x + y) - x * y => (x + y) - x * y
+    ExprHandle body = (x + y) - x * y;
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Sub, simplified.node(), sub);
     IS_NODE_WITH_NAME(Add, sub->lhs(), add);
     IS_NODE_WITH_NAME(Mul, sub->rhs(), mul);
-    IS_VAR_WITH_NAME(add->lhs(), "y");
-    IS_VAR_WITH_NAME(add->rhs(), "x");
+    IS_VAR_WITH_NAME(add->lhs(), "x");
+    IS_VAR_WITH_NAME(add->rhs(), "y");
     IS_VAR_WITH_NAME(mul->lhs(), "x");
     IS_VAR_WITH_NAME(mul->rhs(), "y");
   }
@@ -1319,24 +1674,23 @@ TEST(Simplify, SimplifyMultiOp) {
 
 // Test that chaining many ops together works as expected.
 TEST(Simplify, SimplifyManyOps) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
 
   {
-    // x + y + x + x + y + y + x + y + x = 5 * x + 4 * y
+    // x + y + x + x + y + y + x + y + x = 4 * y + 5 * x
     ExprHandle body = x + y + x + x + y + y + x + y + x;
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Add, simplified.node(), add);
 
     IS_NODE_WITH_NAME(Mul, add->lhs(), lhs);
-    IS_IMM_WITH_VAL(Int, lhs->lhs(), 5);
-    IS_VAR_WITH_NAME(lhs->rhs(), "x");
+    IS_IMM_WITH_VAL(Int, lhs->lhs(), 4);
+    IS_VAR_WITH_NAME(lhs->rhs(), "y");
 
     IS_NODE_WITH_NAME(Mul, add->rhs(), rhs);
-    IS_IMM_WITH_VAL(Int, rhs->lhs(), 4);
-    IS_VAR_WITH_NAME(rhs->rhs(), "y");
+    IS_IMM_WITH_VAL(Int, rhs->lhs(), 5);
+    IS_VAR_WITH_NAME(rhs->rhs(), "x");
   }
 
   {
@@ -1367,7 +1721,6 @@ TEST(Simplify, SimplifyManyOps) {
 }
 
 TEST(Simplify, SimplifyFactorization) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
 
@@ -1380,8 +1733,8 @@ TEST(Simplify, SimplifyFactorization) {
     IS_IMM_WITH_VAL(Int, mul->lhs(), 2);
 
     IS_NODE_WITH_NAME(Add, mul->rhs(), add);
-    IS_VAR_WITH_NAME(add->lhs(), "y");
-    IS_VAR_WITH_NAME(add->rhs(), "x");
+    IS_VAR_WITH_NAME(add->lhs(), "x");
+    IS_VAR_WITH_NAME(add->rhs(), "y");
   }
 
   {
@@ -1409,12 +1762,12 @@ TEST(Simplify, SimplifyFactorization) {
     IS_NODE_WITH_NAME(Add, simplified.node(), add);
 
     IS_NODE_WITH_NAME(Mul, add->lhs(), lhs);
-    IS_IMM_WITH_VAL(Int, lhs->lhs(), 5);
-    IS_VAR_WITH_NAME(lhs->rhs(), "y");
+    IS_IMM_WITH_VAL(Int, lhs->lhs(), 2);
+    IS_VAR_WITH_NAME(lhs->rhs(), "x");
 
     IS_NODE_WITH_NAME(Mul, add->rhs(), rhs);
-    IS_IMM_WITH_VAL(Int, rhs->lhs(), 2);
-    IS_VAR_WITH_NAME(rhs->rhs(), "x");
+    IS_IMM_WITH_VAL(Int, rhs->lhs(), 5);
+    IS_VAR_WITH_NAME(rhs->rhs(), "y");
   }
 
   {
@@ -1428,8 +1781,8 @@ TEST(Simplify, SimplifyFactorization) {
     IS_IMM_WITH_VAL(Int, mul->lhs(), 10);
 
     IS_NODE_WITH_NAME(Add, mul->rhs(), add);
-    IS_VAR_WITH_NAME(add->lhs(), "y");
-    IS_VAR_WITH_NAME(add->rhs(), "x");
+    IS_VAR_WITH_NAME(add->lhs(), "x");
+    IS_VAR_WITH_NAME(add->rhs(), "y");
   }
 
   {
@@ -1478,24 +1831,17 @@ TEST(Simplify, SimplifyFactorization) {
     VarHandle g("g", kInt);
     VarHandle h("h", kInt);
 
-    ExprHandle body = ExprHandle(0) + (ExprHandle(1024) * a) +
-        (ExprHandle(-1) * b) + (ExprHandle(-1) * c) + (ExprHandle(1) * d) +
-        (ExprHandle(1) * e) + (ExprHandle(32) * f) + (ExprHandle(-1024) * g) +
-        (ExprHandle(-32) * h);
+    ExprHandle body = a * 1024 + 0 + b * (-1) + c * (-1) + d * 1 + e * 1 +
+        f * 32 + g * (-1024) + h * (-32);
     ExprHandle simplified = IRSimplifier::simplify(body);
-
-    // We only check for the top level nodes here, since the main purpose
-    // here is ensure that this simplification completes.
-    IS_NODE_WITH_NAME(Sub, simplified.node(), sub);
-    IS_NODE_WITH_NAME(Mul, sub->rhs(), mul);
-    IS_IMM_WITH_VAL(Int, mul->lhs(), 1024);
-    IS_VAR_WITH_NAME(mul->rhs(), "g");
+    checkExprIR(
+        simplified,
+        "((((((d + e) + 1024 * a) + 32 * f) - b) - c) - 1024 * g) - 32 * h");
   }
 }
 
 // (4 * x + y + z * 2) + (4 * x + y + z * 4) => 2 * (y + 3 * z + 4 * x)
 TEST(Simplify, SimplifyFactorizeUneven) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   VarHandle z("z", kInt);
@@ -1519,10 +1865,9 @@ TEST(Simplify, SimplifyFactorizeUneven) {
   IS_VAR_WITH_NAME(zmul->rhs(), "z");
 }
 
-// (x * y) + (2 * x) * (x + y) => 3 * (x * y) + 2 * (x * x)
+// (x * y) + (2 * x) * (x + y) => 2 * (x * x) + 3 * (x * y)
 // This is kind of a placeholder test for variable factorization.
 TEST(Simplify, SimplifyDeeperTerms) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   ExprHandle body = (x * y) + (ExprHandle(2) * x) * (x + y);
@@ -1531,22 +1876,21 @@ TEST(Simplify, SimplifyDeeperTerms) {
   IS_NODE_WITH_NAME(Add, simplified.node(), add);
 
   IS_NODE_WITH_NAME(Mul, add->lhs(), lhs);
-  IS_IMM_WITH_VAL(Int, lhs->lhs(), 3);
-  IS_NODE_WITH_NAME(Mul, lhs->rhs(), xyTerm);
-  IS_VAR_WITH_NAME(xyTerm->lhs(), "x");
-  IS_VAR_WITH_NAME(xyTerm->rhs(), "y");
+  IS_IMM_WITH_VAL(Int, lhs->lhs(), 2);
+  IS_NODE_WITH_NAME(Mul, lhs->rhs(), xxTerm);
+  IS_VAR_WITH_NAME(xxTerm->lhs(), "x");
+  IS_VAR_WITH_NAME(xxTerm->rhs(), "x");
 
   IS_NODE_WITH_NAME(Mul, add->rhs(), rhs);
-  IS_IMM_WITH_VAL(Int, rhs->lhs(), 2);
-  IS_NODE_WITH_NAME(Mul, rhs->rhs(), xxTerm);
-  IS_VAR_WITH_NAME(xxTerm->rhs(), "x");
-  IS_VAR_WITH_NAME(xxTerm->rhs(), "x");
+  IS_IMM_WITH_VAL(Int, rhs->lhs(), 3);
+  IS_NODE_WITH_NAME(Mul, rhs->rhs(), xyTerm);
+  IS_VAR_WITH_NAME(xyTerm->lhs(), "x");
+  IS_VAR_WITH_NAME(xyTerm->rhs(), "y");
 }
 
 // Tests the difference between two less trivial expressions.
 // (m * (1 * n_1) + (n  + 1)) - (m *  (1 * n_1) + n) => 1
 TEST(Simplify, SimplifyDeeperDifference) {
-  KernelScope kernel_scope;
   VarHandle n("n", kInt);
   VarHandle n_1("n_1", kInt);
   VarHandle m("m", kInt);
@@ -1560,7 +1904,6 @@ TEST(Simplify, SimplifyDeeperDifference) {
 // Test constant folding into the difference between expressions.
 // 2 + char((m * (1 * n_1) + (n  + 1)) - (m *  (1 * n_1) + n)) => 3
 TEST(Simplify, SimplifyFoldComplexDifference) {
-  KernelScope kernel_scope;
   VarHandle n("n", kInt);
   VarHandle n_1("n_1", kInt);
   VarHandle m("m", kInt);
@@ -1575,7 +1918,6 @@ TEST(Simplify, SimplifyFoldComplexDifference) {
 }
 
 TEST(Simplify, SimplifyIfComponents) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   ExprHandle body = IfThenElse::make(
@@ -1597,20 +1939,19 @@ TEST(Simplify, SimplifyIfComponents) {
 }
 
 TEST(Simplify, SimplifyOpaqueTerms) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
 
   {
-    // 2 * x/y * x - x/y * y => y * x/y
+    // 2 * x/y * y - x/y * y => x/y * y
     ExprHandle body = ((ExprHandle(2)) * (x / y) * y) - ((x / y) * y);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
-    IS_VAR_WITH_NAME(mul->lhs(), "y");
-    IS_NODE_WITH_NAME(Div, mul->rhs(), div);
+    IS_NODE_WITH_NAME(Div, mul->lhs(), div);
     IS_VAR_WITH_NAME(div->lhs(), "x");
     IS_VAR_WITH_NAME(div->rhs(), "y");
+    IS_VAR_WITH_NAME(mul->rhs(), "y");
   }
 
   {
@@ -1623,8 +1964,6 @@ TEST(Simplify, SimplifyOpaqueTerms) {
 }
 
 TEST(Simplify, SimplifySymbolicMinMax) {
-  KernelScope kernel_scope;
-
   {
     // Minimum with constant difference between terms.
     VarHandle x("x", kInt);
@@ -1659,7 +1998,6 @@ TEST(Simplify, SimplifySymbolicMinMax) {
 }
 
 TEST(Simplify, SimplifyNestedMax) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   VarHandle z("z", kInt);
@@ -1669,46 +2007,47 @@ TEST(Simplify, SimplifyNestedMax) {
     ExprHandle body = Max::make(x + y, x + y, true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
-    IS_BINOP_W_VARS(Add, simplified.node(), add, "y", "x");
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
+    IS_BINOP_W_VARS(Add, simplified.node(), add, "x", "y");
   }
 
   {
-    // Max(x + y, Max(x + y, z)) => Max(y + x, z)
+    // Max(x + y, Max(x + y, z)) => Max(x + y, z)
     ExprHandle body = Max::make(x + y, Max::make(x + y, z, true), true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Max, simplified.node(), max);
-    IS_BINOP_W_VARS(Add, max->lhs(), add, "y", "x");
+    IS_BINOP_W_VARS(Add, max->lhs(), add, "x", "y");
     IS_VAR_WITH_NAME(max->rhs(), "z");
   }
 
   {
-    // Max(x + y, Max(z, x + y)) => Max(y + x, z)
+    // Max(x + y, Max(z, x + y)) => Max(x + y, z)
     ExprHandle body = Max::make(x + y, Max::make(z, x + y, true), true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Max, simplified.node(), max);
-    IS_BINOP_W_VARS(Add, max->lhs(), add, "y", "x");
+    IS_BINOP_W_VARS(Add, max->lhs(), add, "x", "y");
     IS_VAR_WITH_NAME(max->rhs(), "z");
   }
 
   {
-    // Max(Max(x + y, z), x + y) => Max(y + x, z)
+    // Max(Max(x + y, z), x + y) => Max(x + y, z)
     ExprHandle body = Max::make(Max::make(x + y, z, true), x + y, true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Max, simplified.node(), max);
-    IS_BINOP_W_VARS(Add, max->lhs(), add, "y", "x");
+    IS_BINOP_W_VARS(Add, max->lhs(), add, "x", "y");
     IS_VAR_WITH_NAME(max->rhs(), "z");
   }
 
   {
-    // Max(Max(z, x + y), x + y) => Max(y + x, z)
+    // Max(Max(z, x + y), x + y) => Max(x + y, z)
     ExprHandle body = Max::make(Max::make(z, x + y, true), x + y, true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Max, simplified.node(), max);
-    IS_BINOP_W_VARS(Add, max->lhs(), add, "y", "x");
+    IS_BINOP_W_VARS(Add, max->lhs(), add, "x", "y");
     IS_VAR_WITH_NAME(max->rhs(), "z");
   }
 
@@ -1726,55 +2065,39 @@ TEST(Simplify, SimplifyNestedMax) {
   }
 
   {
-    // Max(Min(x, y), Min(x, z)) => Min(x, Max(y, z))
+    // Max(Min(x, y), Min(x, z)) => Min(Max(y, z), x)
     ExprHandle body =
         Max::make(Min::make(x, y, true), Min::make(x, z, true), true);
     ExprHandle simplified = IRSimplifier::simplify(body);
-
-    IS_NODE_WITH_NAME(Min, simplified.node(), min);
-    IS_VAR_WITH_NAME(min->lhs(), "x");
-    IS_BINOP_W_VARS(Max, min->rhs(), max, "y", "z");
-    ASSERT_TRUE(max->propagate_nans());
+    checkExprIR(simplified, "Min(Max(y, z, 1), x, 1)");
   }
 
   {
-    // Max(Min(x, y), Min(z, x)) => Min(x, Max(y, z))
+    // Max(Min(x, y), Min(z, x)) => Min(Max(y, z), x)
     ExprHandle body =
         Max::make(Min::make(x, y, true), Min::make(z, x, true), true);
     ExprHandle simplified = IRSimplifier::simplify(body);
-
-    IS_NODE_WITH_NAME(Min, simplified.node(), min);
-    IS_VAR_WITH_NAME(min->lhs(), "x");
-    IS_BINOP_W_VARS(Max, min->rhs(), max, "y", "z");
-    ASSERT_TRUE(max->propagate_nans());
+    checkExprIR(simplified, "Min(Max(y, z, 1), x, 1)");
   }
 
   {
-    // Max(Min(y, x), Min(x, z)) => Min(x, Max(y, z))
+    // Max(Min(y, x), Min(x, z)) => Min(Max(y, z), x)
     ExprHandle body =
         Max::make(Min::make(y, x, true), Min::make(x, z, true), true);
     ExprHandle simplified = IRSimplifier::simplify(body);
-
-    IS_NODE_WITH_NAME(Min, simplified.node(), min);
-    IS_VAR_WITH_NAME(min->lhs(), "x");
-    IS_BINOP_W_VARS(Max, min->rhs(), max, "y", "z");
-    ASSERT_TRUE(max->propagate_nans());
+    checkExprIR(simplified, "Min(Max(y, z, 1), x, 1)");
   }
 
   {
-    // Max(Min(y, x), Min(z, x)) => Min(x, Max(y, z))
+    // Max(Min(y, x), Min(z, x)) => Min(Max(y, z), x)
     ExprHandle body =
         Max::make(Min::make(y, x, true), Min::make(z, x, true), true);
     ExprHandle simplified = IRSimplifier::simplify(body);
-
-    IS_NODE_WITH_NAME(Min, simplified.node(), min);
-    IS_VAR_WITH_NAME(min->lhs(), "x");
-    IS_BINOP_W_VARS(Max, min->rhs(), max, "y", "z");
-    ASSERT_TRUE(max->propagate_nans());
+    checkExprIR(simplified, "Min(Max(y, z, 1), x, 1)");
   }
 
   {
-    // Max(Min(y, x), Min(z, x)) => Max(Min(x, z), Min(x, y))
+    // Max(Min(y, x), Min(z, x)) => Max(Min(x, y), Min(x, z))
     // When all the ops in the pattern do not have the same propagate_nans,
     // it should not be simplified.
     ExprHandle body =
@@ -1782,10 +2105,10 @@ TEST(Simplify, SimplifyNestedMax) {
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Max, simplified.node(), max);
-    IS_BINOP_W_VARS(Min, max->lhs(), min1, "x", "z");
-    ASSERT_FALSE(min1->propagate_nans());
-    IS_BINOP_W_VARS(Min, max->rhs(), min2, "x", "y");
-    ASSERT_TRUE(min2->propagate_nans());
+    IS_BINOP_W_VARS(Min, max->lhs(), min1, "x", "y");
+    ASSERT_TRUE(min1->propagate_nans());
+    IS_BINOP_W_VARS(Min, max->rhs(), min2, "x", "z");
+    ASSERT_FALSE(min2->propagate_nans());
     ASSERT_TRUE(max->propagate_nans());
   }
 
@@ -1918,18 +2241,7 @@ TEST(Simplify, SimplifyNestedMax) {
         8,
         false);
     ExprHandle simplified = IRSimplifier::simplify(body);
-
-    IS_NODE_WITH_NAME(Max, simplified.node(), max1);
-    IS_NODE_WITH_NAME(Max, max1->lhs(), max2);
-    IS_VAR_WITH_NAME(max2->lhs(), "x");
-    IS_NODE_WITH_NAME(Max, max2->rhs(), max3);
-    IS_BINOP_W_CONST(Max, max3->lhs(), max4, "z", 5);
-    ASSERT_TRUE(max4->propagate_nans());
-    IS_VAR_WITH_NAME(max3->rhs(), "y");
-    ASSERT_FALSE(max3->propagate_nans());
-    ASSERT_TRUE(max2->propagate_nans());
-    IS_IMM_WITH_VAL(Int, max1->rhs(), 8);
-    ASSERT_FALSE(max1->propagate_nans());
+    checkExprIR(simplified, "Max(Max(Max(Max(z, 5, 1), y, 0), x, 1), 8, 0)");
   }
 
   {
@@ -1962,7 +2274,6 @@ TEST(Simplify, SimplifyNestedMax) {
 }
 
 TEST(Simplify, SimplifyNestedMin) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   VarHandle z("z", kInt);
@@ -1972,46 +2283,47 @@ TEST(Simplify, SimplifyNestedMin) {
     ExprHandle body = Min::make(x + y, x + y, true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
-    IS_BINOP_W_VARS(Add, simplified.node(), add, "y", "x");
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
+    IS_BINOP_W_VARS(Add, simplified.node(), add, "x", "y");
   }
 
   {
-    // Min(x + y, Min(x + y, z)) => Min(y + x, z)
+    // Min(x + y, Min(x + y, z)) => Min(x + y, z)
     ExprHandle body = Min::make(x + y, Min::make(x + y, z, true), true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Min, simplified.node(), min);
-    IS_BINOP_W_VARS(Add, min->lhs(), add, "y", "x");
+    IS_BINOP_W_VARS(Add, min->lhs(), add, "x", "y");
     IS_VAR_WITH_NAME(min->rhs(), "z");
   }
 
   {
-    // Min(x + y, Min(z, x + y)) => Min(y + x, z)
+    // Min(x + y, Min(z, x + y)) => Min(x + y, z)
     ExprHandle body = Min::make(x + y, Min::make(z, x + y, true), true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Min, simplified.node(), min);
-    IS_BINOP_W_VARS(Add, min->lhs(), add, "y", "x");
+    IS_BINOP_W_VARS(Add, min->lhs(), add, "x", "y");
     IS_VAR_WITH_NAME(min->rhs(), "z");
   }
 
   {
-    // Min(Min(x + y, z), x + y) => Min(y + x, z)
+    // Min(Min(x + y, z), x + y) => Min(x + y, z)
     ExprHandle body = Min::make(Min::make(x + y, z, true), x + y, true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Min, simplified.node(), min);
-    IS_BINOP_W_VARS(Add, min->lhs(), add, "y", "x");
+    IS_BINOP_W_VARS(Add, min->lhs(), add, "x", "y");
     IS_VAR_WITH_NAME(min->rhs(), "z");
   }
 
   {
-    // Min(Min(z, x + y), x + y) => Min(y + x, z)
+    // Min(Min(z, x + y), x + y) => Min(x + y, z)
     ExprHandle body = Min::make(Min::make(z, x + y, true), x + y, true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Min, simplified.node(), min);
-    IS_BINOP_W_VARS(Add, min->lhs(), add, "y", "x");
+    IS_BINOP_W_VARS(Add, min->lhs(), add, "x", "y");
     IS_VAR_WITH_NAME(min->rhs(), "z");
   }
 
@@ -2029,55 +2341,39 @@ TEST(Simplify, SimplifyNestedMin) {
   }
 
   {
-    // Min(Max(x, y), Max(x, z)) => Max(x, Min(y, z))
+    // Min(Max(x, y), Max(x, z)) => Max(Min(y, z), x)
     ExprHandle body =
         Min::make(Max::make(x, y, true), Max::make(x, z, true), true);
     ExprHandle simplified = IRSimplifier::simplify(body);
-
-    IS_NODE_WITH_NAME(Max, simplified.node(), max);
-    IS_VAR_WITH_NAME(max->lhs(), "x");
-    IS_BINOP_W_VARS(Min, max->rhs(), min, "y", "z");
-    ASSERT_TRUE(min->propagate_nans());
+    checkExprIR(simplified, "Max(Min(y, z, 1), x, 1)");
   }
 
   {
-    // Min(Max(x, y), Max(z, x)) => Max(x, Min(y, z))
+    // Min(Max(x, y), Max(z, x)) => Max(Min(y, z), x)
     ExprHandle body =
         Min::make(Max::make(x, y, true), Max::make(z, x, true), true);
     ExprHandle simplified = IRSimplifier::simplify(body);
-
-    IS_NODE_WITH_NAME(Max, simplified.node(), max);
-    IS_VAR_WITH_NAME(max->lhs(), "x");
-    IS_BINOP_W_VARS(Min, max->rhs(), min, "y", "z");
-    ASSERT_TRUE(min->propagate_nans());
+    checkExprIR(simplified, "Max(Min(y, z, 1), x, 1)");
   }
 
   {
-    // Min(Max(y, x), Max(x, z)) => Max(x, Min(y, z))
+    // Min(Max(y, x), Max(x, z)) => Max(Min(y, z), x)
     ExprHandle body =
         Min::make(Max::make(y, x, true), Max::make(x, z, true), true);
     ExprHandle simplified = IRSimplifier::simplify(body);
-
-    IS_NODE_WITH_NAME(Max, simplified.node(), max);
-    IS_VAR_WITH_NAME(max->lhs(), "x");
-    IS_BINOP_W_VARS(Min, max->rhs(), min, "y", "z");
-    ASSERT_TRUE(min->propagate_nans());
+    checkExprIR(simplified, "Max(Min(y, z, 1), x, 1)");
   }
 
   {
-    // Min(Max(y, x), Max(z, x)) => Max(x, Min(y, z))
+    // Min(Max(y, x), Max(z, x)) => Max(Min(y, z), x)
     ExprHandle body =
         Min::make(Max::make(y, x, true), Max::make(z, x, true), true);
     ExprHandle simplified = IRSimplifier::simplify(body);
-
-    IS_NODE_WITH_NAME(Max, simplified.node(), max);
-    IS_VAR_WITH_NAME(max->lhs(), "x");
-    IS_BINOP_W_VARS(Min, max->rhs(), min, "y", "z");
-    ASSERT_TRUE(min->propagate_nans());
+    checkExprIR(simplified, "Max(Min(y, z, 1), x, 1)");
   }
 
   {
-    // Min(Max(y, x), Max(z, x)) => Min(Max(x, z), Max(x, y))
+    // Min(Max(y, x), Max(z, x)) => Min(Max(x, y), Max(x, z))
     // When all the ops in the pattern do not have the same propagate_nans,
     // it should not be simplified.
     ExprHandle body =
@@ -2085,10 +2381,10 @@ TEST(Simplify, SimplifyNestedMin) {
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Min, simplified.node(), min);
-    IS_BINOP_W_VARS(Max, min->lhs(), max1, "x", "z");
-    ASSERT_FALSE(max1->propagate_nans());
-    IS_BINOP_W_VARS(Max, min->rhs(), max2, "x", "y");
-    ASSERT_TRUE(max2->propagate_nans());
+    IS_BINOP_W_VARS(Max, min->lhs(), max1, "x", "y");
+    ASSERT_TRUE(max1->propagate_nans());
+    IS_BINOP_W_VARS(Max, min->rhs(), max2, "x", "z");
+    ASSERT_FALSE(max2->propagate_nans());
     ASSERT_TRUE(min->propagate_nans());
   }
 
@@ -2213,7 +2509,7 @@ TEST(Simplify, SimplifyNestedMin) {
   }
 
   {
-    // Min(Min(Min(Min(z, 5), y), x), 8) => Min(Min(x, Min(Min(z, 5), y)), 8)
+    // Min(Min(Min(Min(z, 5), y), x), 8) => Min(Min(Min(Min(z, 5), y), x), 8)
     // Do not simplify when all the Min ops do not have the same
     // propagate_nans.
     ExprHandle body = Min::make(
@@ -2221,18 +2517,7 @@ TEST(Simplify, SimplifyNestedMin) {
         8,
         false);
     ExprHandle simplified = IRSimplifier::simplify(body);
-
-    IS_NODE_WITH_NAME(Min, simplified.node(), min1);
-    IS_NODE_WITH_NAME(Min, min1->lhs(), min2);
-    IS_VAR_WITH_NAME(min2->lhs(), "x");
-    IS_NODE_WITH_NAME(Min, min2->rhs(), min3);
-    IS_BINOP_W_CONST(Min, min3->lhs(), min4, "z", 5);
-    ASSERT_TRUE(min4->propagate_nans());
-    IS_VAR_WITH_NAME(min3->rhs(), "y");
-    ASSERT_FALSE(min3->propagate_nans());
-    ASSERT_TRUE(min2->propagate_nans());
-    IS_IMM_WITH_VAL(Int, min1->rhs(), 8);
-    ASSERT_FALSE(min1->propagate_nans());
+    checkExprIR(simplified, "Min(Min(Min(Min(z, 5, 1), y, 0), x, 1), 8, 0)");
   }
 
   {
@@ -2265,8 +2550,6 @@ TEST(Simplify, SimplifyNestedMin) {
 }
 
 TEST(Simplify, SimplifyWontReorderFloat) {
-  KernelScope kernel_scope;
-
   {
     // 3 * (3 * x) - 3 * (3 * y) => 9 * (x - y)
     // This is an expression we can simplify.
@@ -2377,8 +2660,6 @@ TEST(Simplify, SimplifyWontReorderFloat) {
 }
 
 TEST(Simplify, SimplifyRoundModPattern) {
-  KernelScope kernel_scope;
-
   {
     // (x/y)*y + x%y => x.
     VarHandle x("x", kInt);
@@ -2535,16 +2816,7 @@ TEST(Simplify, SimplifyRoundModPattern) {
     VarHandle z("z", kInt);
     ExprHandle body = ((x / y) * y) + (x % z);
     ExprHandle simplified = IRSimplifier::simplify(body);
-
-    IS_NODE_WITH_NAME(Add, simplified.node(), add);
-    IS_NODE_WITH_NAME(Mul, add->lhs(), roundMul);
-    IS_VAR_WITH_NAME(roundMul->lhs(), "y");
-    IS_NODE_WITH_NAME(Div, roundMul->rhs(), roundDiv);
-    IS_VAR_WITH_NAME(roundDiv->lhs(), "x");
-    IS_VAR_WITH_NAME(roundDiv->rhs(), "y");
-    IS_NODE_WITH_NAME(Mod, add->rhs(), mod);
-    IS_VAR_WITH_NAME(mod->lhs(), "x");
-    IS_VAR_WITH_NAME(mod->rhs(), "z");
+    checkExprIR(simplified, "(x / y) * y + x % z");
   }
 
   {
@@ -2554,15 +2826,7 @@ TEST(Simplify, SimplifyRoundModPattern) {
     VarHandle z("z", kInt);
     ExprHandle body = (y * (x / z)) + (x % y);
     ExprHandle simplified = IRSimplifier::simplify(body);
-    IS_NODE_WITH_NAME(Add, simplified.node(), add);
-    IS_NODE_WITH_NAME(Mul, add->lhs(), roundMul);
-    IS_VAR_WITH_NAME(roundMul->lhs(), "y");
-    IS_NODE_WITH_NAME(Div, roundMul->rhs(), roundDiv);
-    IS_VAR_WITH_NAME(roundDiv->lhs(), "x");
-    IS_VAR_WITH_NAME(roundDiv->rhs(), "z");
-    IS_NODE_WITH_NAME(Mod, add->rhs(), mod);
-    IS_VAR_WITH_NAME(mod->lhs(), "x");
-    IS_VAR_WITH_NAME(mod->rhs(), "y");
+    checkExprIR(simplified, "x % y + (x / z) * y");
   }
 
   {
@@ -2572,21 +2836,11 @@ TEST(Simplify, SimplifyRoundModPattern) {
     VarHandle z("z", kInt);
     ExprHandle body = ((x / y) * z) + (x % y);
     ExprHandle simplified = IRSimplifier::simplify(body);
-    IS_NODE_WITH_NAME(Add, simplified.node(), add);
-    IS_NODE_WITH_NAME(Mul, add->lhs(), roundMul);
-    IS_VAR_WITH_NAME(roundMul->lhs(), "z");
-    IS_NODE_WITH_NAME(Div, roundMul->rhs(), roundDiv);
-    IS_VAR_WITH_NAME(roundDiv->lhs(), "x");
-    IS_VAR_WITH_NAME(roundDiv->rhs(), "y");
-    IS_NODE_WITH_NAME(Mod, add->rhs(), mod);
-    IS_VAR_WITH_NAME(mod->lhs(), "x");
-    IS_VAR_WITH_NAME(mod->rhs(), "y");
+    checkExprIR(simplified, "x % y + (x / y) * z");
   }
 }
 
 TEST(Simplify, SimplifyRoundModPatternFactorization) {
-  KernelScope kernel_scope;
-
   {
     // Full factorization.
     // 2 * (x/y * y) + 2 * (x%y) => 2 * x.
@@ -2601,9 +2855,10 @@ TEST(Simplify, SimplifyRoundModPatternFactorization) {
 
   {
     // Partial Factorization.
-    // 32 * (x/y) + 4 * (x % y) => 4 * x.
+    // 32 * (x/8) + 4 * (x % 8) => 4 * x.
     VarHandle x("x", kInt);
     VarHandle y("y", kInt);
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks,cppcoreguidelines-avoid-magic-numbers)
     ExprHandle body = ExprHandle(32) * (x / 8) + ExprHandle(4) * (x % 8);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
@@ -2644,24 +2899,22 @@ TEST(Simplify, SimplifyRoundModPatternFactorization) {
 }
 
 TEST(Simplify, SimplifyRoundModPatternMultivar) {
-  KernelScope kernel_scope;
-
   {
     // Multivar.
-    // (x/8) * 8 + (y/5)*5 + x%8 + y%5 => y + x.
+    // (x/8) * 8 + (y/5)*5 + x%8 + y%5 => x + y.
     VarHandle x("x", kInt);
     VarHandle y("y", kInt);
     ExprHandle body = (x / ExprHandle(8) * ExprHandle(8)) +
         (y / ExprHandle(5) * ExprHandle(5)) + (x % 8) + (y % 5);
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Add, simplified.node(), add);
-    IS_VAR_WITH_NAME(add->lhs(), "y");
-    IS_VAR_WITH_NAME(add->rhs(), "x");
+    IS_VAR_WITH_NAME(add->lhs(), "x");
+    IS_VAR_WITH_NAME(add->rhs(), "y");
   }
 
   {
     // Find the right var.
-    // (y/8) * 8  x%8 + y%8 + z%8 => z%8 + x%8 + y
+    // (y/8) * 8  x%8 + y%8 + z%8 => x%8 + y + z%8
     VarHandle x("x", kInt);
     VarHandle y("y", kInt);
     VarHandle z("z", kInt);
@@ -2681,28 +2934,276 @@ TEST(Simplify, SimplifyRoundModPatternMultivar) {
 
   {
     // Compound.
-    // (x + (z + 512 * y) % 16) + 16 * ((z + 512 * y) / 16)  => x + (z + 512 *
-    // y).
+    // (x + (z + 512 * y) % 16) + 16 * ((z + 512 * y) / 16)
+    // => (z + 512 * y) + x
     VarHandle x("x", kInt);
     VarHandle y("y", kInt);
     VarHandle z("z", kInt);
 
-    ExprHandle body = x + (z + ExprHandle(512) * y) % ExprHandle(16) +
-        ExprHandle(16) * ((z + ExprHandle(512) * y) / ExprHandle(16));
+    ExprHandle body = x + (z + y * 512) % 16 + ((z + y * 512) / 16 * 16);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    checkExprIR(simplified, "x + (z + 512 * y)");
+  }
+}
+
+TEST(Simplify, SimplifyModRoundModPattern) {
+  {
+    // t/7 % 9 * 7 + t % 7 => t%63
+    VarHandle t("t", kInt);
+    ExprHandle body = (t / 7 % 9) * 7 + t % 7;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
+    IS_VAR_WITH_NAME(mod->lhs(), "t");
+    IS_IMM_WITH_VAL(Int, mod->rhs(), 63);
+  }
+
+  {
+    // 2*t/7 % 9 * 7 + 2*t % 7 => 2*t % 63
+    VarHandle t("t", kInt);
+    ExprHandle body = (ExprHandle(2) * t / 7 % 9) * 7 + ExprHandle(2) * t % 7;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
+    IS_NODE_WITH_NAME(Mul, mod->lhs(), mul);
+    IS_IMM_WITH_VAL(Int, mul->lhs(), 2);
+    IS_VAR_WITH_NAME(mul->rhs(), "t");
+    IS_IMM_WITH_VAL(Int, mod->rhs(), 63);
+  }
+
+  {
+    // t/x % y * x + t % x => t%(x*y)
+    VarHandle t("t", kInt);
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle body = (t / x % y) * x + t % x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
+    IS_VAR_WITH_NAME(mod->lhs(), "t");
+    IS_NODE_WITH_NAME(Mul, mod->rhs(), mul);
+    IS_VAR_WITH_NAME(mul->lhs(), "x");
+    IS_VAR_WITH_NAME(mul->rhs(), "y");
+  }
+
+  {
+    // k*t/x % y * x + k*t % x => k*t%(x*y)
+    VarHandle t("t", kInt);
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    VarHandle k("k", kInt);
+    ExprHandle body = (k * t / x % y) * x + k * t % x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    checkExprIR(simplified, "(k * t) % (x * y)");
+  }
+
+  {
+    // t/k/x % y * x + t/k % x => t/k%(x*y)
+    VarHandle t("t", kInt);
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    VarHandle k("k", kInt);
+    ExprHandle body = (t / k / x % y) * x + t / k % x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
+    IS_NODE_WITH_NAME(Div, mod->lhs(), div);
+    IS_VAR_WITH_NAME(div->lhs(), "t");
+    IS_VAR_WITH_NAME(div->rhs(), "k");
+    IS_NODE_WITH_NAME(Mul, mod->rhs(), mul);
+    IS_VAR_WITH_NAME(mul->lhs(), "x");
+    IS_VAR_WITH_NAME(mul->rhs(), "y");
+  }
+
+  {
+    // Sanity checking we wont do the optimization on floats.
+    VarHandle x("x", kFloat);
+    VarHandle y("y", kFloat);
+    VarHandle z("z", kFloat);
+    ExprHandle body = ((x / y % z) * y) + (x % y);
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Add, simplified.node(), add);
-    IS_VAR_WITH_NAME(add->lhs(), "x");
-    IS_NODE_WITH_NAME(Add, add->rhs(), add2);
-    IS_VAR_WITH_NAME(add2->lhs(), "z");
-    IS_NODE_WITH_NAME(Mul, add2->rhs(), mul);
-    IS_IMM_WITH_VAL(Int, mul->lhs(), 512);
+    IS_NODE_WITH_NAME(Mul, add->lhs(), mul);
+    IS_NODE_WITH_NAME(Mod, mul->lhs(), mod);
+    IS_NODE_WITH_NAME(Div, mod->lhs(), div);
+    IS_VAR_WITH_NAME(div->lhs(), "x");
+    IS_VAR_WITH_NAME(div->rhs(), "y");
+    IS_VAR_WITH_NAME(mod->rhs(), "z");
     IS_VAR_WITH_NAME(mul->rhs(), "y");
+    IS_NODE_WITH_NAME(Mod, add->rhs(), mod2);
+    IS_VAR_WITH_NAME(mod2->lhs(), "x");
+    IS_VAR_WITH_NAME(mod2->rhs(), "y");
+  }
+}
+
+TEST(Simplify, SimplifyModRoundModPatternFactorization) {
+  {
+    // 2 * (t /7 % 9 * 7) + 2 * (t % 7) => 2 * (t % 63)
+    VarHandle t("t", kInt);
+    ExprHandle body =
+        ExprHandle(2) * ((t / 7 % 9) * 7) + ExprHandle(2) * (t % 7);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
+    IS_IMM_WITH_VAL(Int, mul->lhs(), 2);
+    IS_NODE_WITH_NAME(Mod, mul->rhs(), mod);
+    IS_VAR_WITH_NAME(mod->lhs(), "t");
+    IS_IMM_WITH_VAL(Int, mod->rhs(), 63);
+  }
+
+  {
+    // t /7 % 9 * 14 + 2* (t % 7) => 2* (t % 63)
+    VarHandle t("t", kInt);
+    ExprHandle body = (t / 7 % 9) * 14 + ExprHandle(2) * (t % 7);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
+    IS_IMM_WITH_VAL(Int, mul->lhs(), 2);
+    IS_NODE_WITH_NAME(Mod, mul->rhs(), mod);
+    IS_VAR_WITH_NAME(mod->lhs(), "t");
+    IS_IMM_WITH_VAL(Int, mod->rhs(), 63);
+  }
+
+  {
+    // t/14 % 9 * 7 + t/2 % 7 => t/2 % 63
+    VarHandle t("t", kInt);
+    ExprHandle body = (t / 14 % 9) * 7 + t / 2 % 7;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
+    IS_NODE_WITH_NAME(Div, mod->lhs(), div);
+    IS_VAR_WITH_NAME(div->lhs(), "t");
+    IS_IMM_WITH_VAL(Int, div->rhs(), 2);
+    IS_IMM_WITH_VAL(Int, mod->rhs(), 63);
+  }
+
+  {
+    // t/(7*3) % 9 * 7*3 + t % (7*3) => t % 189
+    VarHandle t("t", kInt);
+    ExprHandle body = (t / (ExprHandle(7) * ExprHandle(3)) % 9) * 7 * 3 +
+        t % (ExprHandle(7) * ExprHandle(3));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
+    IS_VAR_WITH_NAME(mod->lhs(), "t");
+    IS_IMM_WITH_VAL(Int, mod->rhs(), 189);
+  }
+
+  {
+    // 2*(t/x % y * x) + 2*(t % x) => 2*(t%(x*y))
+    VarHandle t("t", kInt);
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle body =
+        ExprHandle(2) * ((t / x % y) * x) + ExprHandle(2) * (t % x);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
+    IS_IMM_WITH_VAL(Int, mul->lhs(), 2);
+    IS_NODE_WITH_NAME(Mod, mul->rhs(), mod);
+    IS_VAR_WITH_NAME(mod->lhs(), "t");
+    IS_NODE_WITH_NAME(Mul, mod->rhs(), mul2);
+    IS_VAR_WITH_NAME(mul2->lhs(), "x");
+    IS_VAR_WITH_NAME(mul2->rhs(), "y");
+  }
+}
+
+TEST(Simplify, SimplifyModRoundModPatternMultivar) {
+  {
+    // t/7 % 9 * 7 + t % 7 + t => t % 63 + t
+    VarHandle t("t", kInt);
+    ExprHandle body = (t / 7 % 9) * 7 + t % 7 + t;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    checkExprIR(simplified, "t % 63 + t");
+  }
+
+  {
+    // t/7 % 9 * 7 + t/8 % 9 * 8 + t % 7 + t % 8  => t % 63 + t % 72
+    VarHandle t("t", kInt);
+    ExprHandle body = (t / 7 % 9) * 7 + (t / 8 % 9) * 8 + t % 7 + t % 8;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Add, simplified.node(), add);
+    IS_NODE_WITH_NAME(Mod, add->lhs(), mod1);
+    IS_VAR_WITH_NAME(mod1->lhs(), "t");
+    IS_IMM_WITH_VAL(Int, mod1->rhs(), 63);
+    IS_NODE_WITH_NAME(Mod, add->rhs(), mod2);
+    IS_VAR_WITH_NAME(mod2->lhs(), "t");
+    IS_IMM_WITH_VAL(Int, mod2->rhs(), 72);
+  }
+
+  {
+    // k + t/x % y * x + t % x => k + t%(x*y)
+    VarHandle t("t", kInt);
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    VarHandle k("k", kInt);
+    ExprHandle body = k + (t / x % y) * x + t % x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Add, simplified.node(), add);
+    IS_VAR_WITH_NAME(add->lhs(), "k");
+    IS_NODE_WITH_NAME(Mod, add->rhs(), mod);
+    IS_VAR_WITH_NAME(mod->lhs(), "t");
+    IS_NODE_WITH_NAME(Mul, mod->rhs(), mul);
+    IS_VAR_WITH_NAME(mul->lhs(), "x");
+    IS_VAR_WITH_NAME(mul->rhs(), "y");
+  }
+
+  {
+    // t/x % y * x + t % x + (t/k / x % y) * x + t/k % x
+    // => t%(x*y) + t/k % (x*y)
+    VarHandle t("t", kInt);
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    VarHandle k("k", kInt);
+    ExprHandle body = (t / x % y) * x + t % x + (t / k / x % y) * x + t / k % x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    checkExprIR(simplified, "(t / k) % (x * y) + t % (x * y)");
+  }
+
+  {
+    // 3D: (7 * ((i0_flat / 7) % 9) + i0_flat % 7) + 63 * (i0_flat / 63)
+    // => io_flat
+    VarHandle t("io_flat", kInt);
+    ExprHandle body =
+        ExprHandle(7) * (t / 7 % 9) + t % 7 + ExprHandle(63) * (t / 63);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_VAR_WITH_NAME(simplified.node(), "io_flat");
+  }
+
+  { // 5D: i0_flat / (11 * 10 * 9 * 7)  * (7 * 9 * 10 * 11) +
+    // (i0_flat / (10 * 9 * 7) % 11)  * 7 * 9 * 10 +
+    // (i0_flat / (9 * 7) % 10) * 7 * 9 +
+    // (i0_flat / 7 % 9)  * 7 +
+    // i0_flat % 7 => io_flat
+    VarHandle t("io_flat", kInt);
+    ExprHandle body = (t / (ExprHandle(11) * 10 * 9 * 7)) * (7 * 9 * 10 * 11) +
+        (t / (ExprHandle(10) * 9 * 7) % 11) * 7 * 9 * 10 +
+        (t / (ExprHandle(9) * 7) % 10) * 7 * 9 + (t / 7 % 9) * 7 + t % 7;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_VAR_WITH_NAME(simplified.node(), "io_flat");
+  }
+
+  {
+    // 3D: (m * ((i0_flat / m) % n) + i0_flat % m) + (m * n) *
+    // (i0_flat / (m * n)) => io_flat
+    VarHandle t("io_flat", kInt);
+    VarHandle m("m", kInt);
+    VarHandle n("n", kInt);
+    ExprHandle body = m * (t / m % n) + t % m + (m * n) * (t / (m * n));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_VAR_WITH_NAME(simplified.node(), "io_flat");
+  }
+
+  { // 5D: i0_flat / (k * l * n * m)  * (m * n * l * k) +
+    // (i0_flat / (l * n * m) % k)  * m * n * l +
+    // (i0_flat / (n * m) % l) * m * n +
+    // (i0_flat / m % n)  * m +
+    // i0_flat % m => io_flat
+    VarHandle t("io_flat", kInt);
+    VarHandle m("m", kInt);
+    VarHandle n("n", kInt);
+    VarHandle l("l", kInt);
+    VarHandle k("k", kInt);
+    ExprHandle body = (t / (k * l * n * m)) * (m * n * l * k) +
+        (t / (l * n * m) % k) * m * n * l + (t / (n * m) % l) * m * n +
+        (t / m % n) * m + t % m;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_VAR_WITH_NAME(simplified.node(), "io_flat");
   }
 }
 
 TEST(Simplify, SimplifyDivisionScalarFactorization) {
-  KernelScope kernel_scope;
-
   {
     // Simple factorization of numerator and denominator.
     // 8x / 4y => 2x / y.
@@ -2773,8 +3274,6 @@ TEST(Simplify, SimplifyDivisionScalarFactorization) {
 }
 
 TEST(Simplify, SimplifyConstantBranches) {
-  KernelScope kernel_scope;
-
   {
     // If the condition is constant true then take the true_value.
     // 1 ? x : y => x
@@ -2831,20 +3330,18 @@ TEST(Simplify, SimplifyConstantBranches) {
 }
 
 TEST(Simplify, SimplifyConstantCond) {
-  KernelScope kernel_scope;
-
   {
     // If the condition is constant true then take the true_value.
     // 1 ? A[0] = 1 : B[0] = 1 => A[0] = 1
     BufHandle a("A", {1}, kInt);
     BufHandle b("B", {1}, kInt);
     ExprHandle condition(1);
-    Stmt* true_val = Store::make(a, {0}, 1, 1);
-    Stmt* false_val = Store::make(b, {0}, 1, 1);
+    StmtPtr true_val = Store::make(a, {0}, 1);
+    StmtPtr false_val = Store::make(b, {0}, 1);
 
-    Cond* body = new Cond(condition.node(), true_val, false_val);
-    Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = dynamic_cast<Block*>(simplified);
+    CondPtr body = alloc<Cond>(condition.node(), true_val, false_val);
+    StmtPtr simplified = IRSimplifier::simplify(body);
+    BlockPtr block = to<Block>(simplified);
     IS_NODE_WITH_NAME(Store, block->front(), store);
     IS_VAR_WITH_NAME(store->base_handle(), "A");
   }
@@ -2855,12 +3352,12 @@ TEST(Simplify, SimplifyConstantCond) {
     BufHandle a("A", {1}, kInt);
     BufHandle b("B", {1}, kInt);
     ExprHandle condition(0);
-    Stmt* true_val = Store::make(a, {0}, 1, 1);
-    Stmt* false_val = Store::make(b, {0}, 1, 1);
+    StmtPtr true_val = Store::make(a, {0}, 1);
+    StmtPtr false_val = Store::make(b, {0}, 1);
 
-    Stmt* body = new Cond(condition.node(), true_val, false_val);
-    Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = dynamic_cast<Block*>(simplified);
+    StmtPtr body = alloc<Cond>(condition.node(), true_val, false_val);
+    StmtPtr simplified = IRSimplifier::simplify(body);
+    BlockPtr block = to<Block>(simplified);
     IS_NODE_WITH_NAME(Store, block->front(), store);
     IS_VAR_WITH_NAME(store->base_handle(), "B");
   }
@@ -2872,12 +3369,12 @@ TEST(Simplify, SimplifyConstantCond) {
     BufHandle a("A", {1}, kInt);
     BufHandle b("B", {1}, kInt);
     ExprHandle condition(x - x);
-    Stmt* true_val = Store::make(a, {0}, 1, 1);
-    Stmt* false_val = Store::make(b, {0}, 1, 1);
+    StmtPtr true_val = Store::make(a, {0}, 1);
+    StmtPtr false_val = Store::make(b, {0}, 1);
 
-    Stmt* body = new Cond(condition.node(), true_val, false_val);
-    Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = dynamic_cast<Block*>(simplified);
+    StmtPtr body = alloc<Cond>(condition.node(), true_val, false_val);
+    StmtPtr simplified = IRSimplifier::simplify(body);
+    BlockPtr block = to<Block>(simplified);
     IS_NODE_WITH_NAME(Store, block->front(), store);
     IS_VAR_WITH_NAME(store->base_handle(), "B");
   }
@@ -2888,12 +3385,12 @@ TEST(Simplify, SimplifyConstantCond) {
     VarHandle x("x", kInt);
     BufHandle a("A", {1}, kInt);
     ExprHandle condition(x - x);
-    Stmt* true_val = Store::make(a, {0}, x, 1);
-    Stmt* false_val = Store::make(a, {0}, x, 1);
+    StmtPtr true_val = Store::make(a, {0}, x);
+    StmtPtr false_val = Store::make(a, {0}, x);
 
-    Stmt* body = new Cond(condition.node(), true_val, false_val);
-    Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = dynamic_cast<Block*>(simplified);
+    StmtPtr body = alloc<Cond>(condition.node(), true_val, false_val);
+    StmtPtr simplified = IRSimplifier::simplify(body);
+    BlockPtr block = to<Block>(simplified);
     IS_NODE_WITH_NAME(Store, block->front(), store);
     IS_VAR_WITH_NAME(store->base_handle(), "A");
   }
@@ -2904,12 +3401,12 @@ TEST(Simplify, SimplifyConstantCond) {
     VarHandle x("x", kInt);
     BufHandle a("A", {1}, kInt);
     ExprHandle condition(x - x);
-    Stmt* true_val = Store::make(a, {0}, ExprHandle(2) * x, 1);
-    Stmt* false_val = Store::make(a, {0}, x + x, 1);
+    StmtPtr true_val = Store::make(a, {0}, ExprHandle(2) * x);
+    StmtPtr false_val = Store::make(a, {0}, x + x);
 
-    Stmt* body = new Cond(condition.node(), true_val, false_val);
-    Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = dynamic_cast<Block*>(simplified);
+    StmtPtr body = alloc<Cond>(condition.node(), true_val, false_val);
+    StmtPtr simplified = IRSimplifier::simplify(body);
+    BlockPtr block = to<Block>(simplified);
     IS_NODE_WITH_NAME(Store, block->front(), store);
     IS_VAR_WITH_NAME(store->base_handle(), "A");
   }
@@ -2920,39 +3417,44 @@ TEST(Simplify, SimplifyConstantCond) {
     VarHandle x("x", kInt);
     BufHandle a("A", {1}, kInt);
     ExprHandle condition(x);
-    Stmt* true_val = Store::make(a, {0}, x, 1);
-    Stmt* false_val = Store::make(a, {0}, ExprHandle(2) * x, 1);
+    StmtPtr true_val = Store::make(a, {0}, x);
+    StmtPtr false_val = Store::make(a, {0}, ExprHandle(2) * x);
 
-    Stmt* body = new Cond(condition.node(), true_val, false_val);
-    Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = dynamic_cast<Block*>(simplified);
+    StmtPtr body = alloc<Cond>(condition.node(), true_val, false_val);
+    StmtPtr simplified = IRSimplifier::simplify(body);
+    BlockPtr block = to<Block>(simplified);
     ASSERT_EQ(block, nullptr);
   }
 
   {
-    Stmt* cond = new Cond(ExprHandle(false).node(), new Block({}), nullptr);
-    Stmt* simplified = IRSimplifier::simplify(cond);
+    StmtPtr cond = alloc<Cond>(
+        ExprHandle(false).node(),
+        alloc<Block>(std::vector<StmtPtr>({})),
+        nullptr);
+    StmtPtr simplified = IRSimplifier::simplify(cond);
     ASSERT_EQ(simplified, nullptr);
   }
 
   {
-    Stmt* cond = new Cond(ExprHandle(true).node(), nullptr, new Block({}));
-    Stmt* simplified = IRSimplifier::simplify(cond);
+    StmtPtr cond = alloc<Cond>(
+        ExprHandle(true).node(),
+        nullptr,
+        alloc<Block>(std::vector<StmtPtr>({})));
+    StmtPtr simplified = IRSimplifier::simplify(cond);
     ASSERT_EQ(simplified, nullptr);
   }
 }
 
 TEST(Simplify, SimplifyEliminateEmptyCond) {
-  KernelScope kernel_scope;
   // If the branches are empty in different ways, eliminate.
   {
     VarHandle x("x", kInt);
     ExprHandle condition(x);
-    Stmt* true_val = new Block({});
+    StmtPtr true_val = alloc<Block>(std::vector<StmtPtr>({}));
 
-    Stmt* body = new Cond(condition.node(), true_val, nullptr);
-    Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = dynamic_cast<Block*>(simplified);
+    StmtPtr body = alloc<Cond>(condition.node(), true_val, nullptr);
+    StmtPtr simplified = IRSimplifier::simplify(body);
+    BlockPtr block = to<Block>(simplified);
     ASSERT_NE(block, nullptr);
     ASSERT_EQ(block->nstmts(), 0);
   }
@@ -2960,19 +3462,17 @@ TEST(Simplify, SimplifyEliminateEmptyCond) {
   {
     VarHandle x("x", kInt);
     ExprHandle condition(x);
-    Stmt* false_val = new Block({});
+    StmtPtr false_val = alloc<Block>(std::vector<StmtPtr>({}));
 
-    Stmt* body = new Cond(condition.node(), nullptr, false_val);
-    Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = dynamic_cast<Block*>(simplified);
+    StmtPtr body = alloc<Cond>(condition.node(), nullptr, false_val);
+    StmtPtr simplified = IRSimplifier::simplify(body);
+    BlockPtr block = to<Block>(simplified);
     ASSERT_NE(block, nullptr);
     ASSERT_EQ(block->nstmts(), 0);
   }
 }
 
 TEST(Simplify, SimplifyConstantComparisons) {
-  KernelScope kernel_scope;
-
   auto ComparisonTest =
       [](ExprHandle a, ExprHandle b, CompareSelectOperation op, int result) {
         ExprHandle body = CompareSelect::make(a, b, op);
@@ -3017,7 +3517,6 @@ TEST(Simplify, SimplifyConstantComparisons) {
 }
 
 TEST(Simplify, SimplifySymbolicComparisons) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
 
@@ -3038,6 +3537,7 @@ TEST(Simplify, SimplifySymbolicComparisons) {
 
   // x == x * 2 cannot simplify since we don't know x is nonzero.
   body = CompareSelect::make(x, x * 2, kEQ);
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   IS_NODE(CompareSelect, IRSimplifier::simplify(body).node());
 
   // x == x * 1 => 1
@@ -3154,18 +3654,14 @@ TEST(Simplify, SimplifySymbolicComparisons) {
 }
 
 TEST(Simplify, SimplifyEliminateZeroLengthFor) {
-  KernelScope kernel_scope;
-
   {
     // Will eliminate zero loop For.
     BufHandle a("A", {4}, kInt);
     BufHandle c("C", {4}, kInt);
-    auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
-    auto body =
-        For::make(i, 0, 0, Store::make(c, {i}, Load::make(a, {i}, mask), mask));
-    Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = dynamic_cast<Block*>(simplified);
+    auto body = For::make(i, 0, 0, Store::make(c, {i}, Load::make(a, {i})));
+    StmtPtr simplified = IRSimplifier::simplify(body);
+    BlockPtr block = to<Block>(simplified);
     ASSERT_EQ(block->nstmts(), 0);
   }
 
@@ -3173,12 +3669,10 @@ TEST(Simplify, SimplifyEliminateZeroLengthFor) {
     // still works if start is not zero.
     BufHandle a("A", {4}, kInt);
     BufHandle c("C", {4}, kInt);
-    auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
-    auto body =
-        For::make(i, 2, 2, Store::make(c, {i}, Load::make(a, {i}, mask), mask));
-    Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = dynamic_cast<Block*>(simplified);
+    auto body = For::make(i, 2, 2, Store::make(c, {i}, Load::make(a, {i})));
+    StmtPtr simplified = IRSimplifier::simplify(body);
+    BlockPtr block = to<Block>(simplified);
     ASSERT_EQ(block->nstmts(), 0);
   }
 
@@ -3187,12 +3681,10 @@ TEST(Simplify, SimplifyEliminateZeroLengthFor) {
     VarHandle x("x", kInt);
     BufHandle a("A", {4}, kInt);
     BufHandle c("C", {4}, kInt);
-    auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
-    auto body =
-        For::make(i, x, x, Store::make(c, {i}, Load::make(a, {i}, mask), mask));
-    Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = dynamic_cast<Block*>(simplified);
+    auto body = For::make(i, x, x, Store::make(c, {i}, Load::make(a, {i})));
+    StmtPtr simplified = IRSimplifier::simplify(body);
+    BlockPtr block = to<Block>(simplified);
     ASSERT_EQ(block->nstmts(), 0);
   }
 
@@ -3201,12 +3693,10 @@ TEST(Simplify, SimplifyEliminateZeroLengthFor) {
     VarHandle x("x", kInt);
     BufHandle a("A", {4}, kInt);
     BufHandle c("C", {4}, kInt);
-    auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
-    auto body = For::make(
-        i, 0, x - x, Store::make(c, {i}, Load::make(a, {i}, mask), mask));
-    Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = dynamic_cast<Block*>(simplified);
+    auto body = For::make(i, 0, x - x, Store::make(c, {i}, Load::make(a, {i})));
+    StmtPtr simplified = IRSimplifier::simplify(body);
+    BlockPtr block = to<Block>(simplified);
     ASSERT_EQ(block->nstmts(), 0);
   }
 
@@ -3214,28 +3704,22 @@ TEST(Simplify, SimplifyEliminateZeroLengthFor) {
     // Sanity check does nothing if the condition is not met.
     BufHandle a("A", {4}, kInt);
     BufHandle c("C", {4}, kInt);
-    auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
-    auto body =
-        For::make(i, 0, 3, Store::make(c, {i}, Load::make(a, {i}, mask), mask));
-    Stmt* simplified = IRSimplifier::simplify(body);
+    auto body = For::make(i, 0, 3, Store::make(c, {i}, Load::make(a, {i})));
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE(For, simplified);
   }
 }
 
 TEST(Simplify, SimplifyOneLoopFor) {
-  KernelScope kernel_scope;
-
   {
     // Will remove the loop if the body is run once.
     BufHandle a("A", {4}, kInt);
     BufHandle c("C", {4}, kInt);
-    auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
-    auto body =
-        For::make(i, 0, 1, Store::make(c, {i}, Load::make(a, {i}, mask), mask));
-    Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = dynamic_cast<Block*>(simplified);
+    auto body = For::make(i, 0, 1, Store::make(c, {i}, Load::make(a, {i})));
+    StmtPtr simplified = IRSimplifier::simplify(body);
+    BlockPtr block = to<Block>(simplified);
     IS_NODE_WITH_NAME(Store, block->front(), store);
     IS_VAR_WITH_NAME(store->base_handle(), "C");
     IS_IMM_WITH_VAL(Int, store->flat_index(), 0);
@@ -3245,12 +3729,10 @@ TEST(Simplify, SimplifyOneLoopFor) {
     // still works if start is not zero.
     BufHandle a("A", {4}, kInt);
     BufHandle c("C", {4}, kInt);
-    auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
-    auto body =
-        For::make(i, 2, 3, Store::make(c, {i}, Load::make(a, {i}, mask), mask));
-    Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = dynamic_cast<Block*>(simplified);
+    auto body = For::make(i, 2, 3, Store::make(c, {i}, Load::make(a, {i})));
+    StmtPtr simplified = IRSimplifier::simplify(body);
+    BlockPtr block = to<Block>(simplified);
     IS_NODE_WITH_NAME(Store, block->front(), store);
     IS_VAR_WITH_NAME(store->base_handle(), "C");
     IS_IMM_WITH_VAL(Int, store->flat_index(), 2);
@@ -3261,12 +3743,10 @@ TEST(Simplify, SimplifyOneLoopFor) {
     VarHandle x("x", kInt);
     BufHandle a("A", {4}, kInt);
     BufHandle c("C", {4}, kInt);
-    auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
-    auto body = For::make(
-        i, x, x + 1, Store::make(c, {i}, Load::make(a, {i}, mask), mask));
-    Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = dynamic_cast<Block*>(simplified);
+    auto body = For::make(i, x, x + 1, Store::make(c, {i}, Load::make(a, {i})));
+    StmtPtr simplified = IRSimplifier::simplify(body);
+    BlockPtr block = to<Block>(simplified);
     IS_NODE_WITH_NAME(Store, block->front(), store);
     IS_VAR_WITH_NAME(store->base_handle(), "C");
     IS_VAR_WITH_NAME(store->flat_index(), "x");
@@ -3277,12 +3757,11 @@ TEST(Simplify, SimplifyOneLoopFor) {
     VarHandle x("x", kInt);
     BufHandle a("A", {4}, kInt);
     BufHandle c("C", {4}, kInt);
-    auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
-    auto body = For::make(
-        i, 0, x - x + 1, Store::make(c, {i}, Load::make(a, {i}, mask), mask));
-    Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = dynamic_cast<Block*>(simplified);
+    auto body =
+        For::make(i, 0, x - x + 1, Store::make(c, {i}, Load::make(a, {i})));
+    StmtPtr simplified = IRSimplifier::simplify(body);
+    BlockPtr block = to<Block>(simplified);
     IS_NODE_WITH_NAME(Store, block->front(), store);
     IS_VAR_WITH_NAME(store->base_handle(), "C");
     IS_IMM_WITH_VAL(Int, store->flat_index(), 0);
@@ -3292,29 +3771,24 @@ TEST(Simplify, SimplifyOneLoopFor) {
     // Sanity check does nothing if the condition is not met.
     BufHandle a("A", {4}, kInt);
     BufHandle c("C", {4}, kInt);
-    auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
-    auto body =
-        For::make(i, 0, 3, Store::make(c, {i}, Load::make(a, {i}, mask), mask));
-    Stmt* simplified = IRSimplifier::simplify(body);
+    auto body = For::make(i, 0, 3, Store::make(c, {i}, Load::make(a, {i})));
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE(For, simplified);
   }
 }
 
 TEST(Simplify, SimplifyForWontLoseLoopOptions) {
-  KernelScope kernel_scope;
-
   {
     // Sanity check does nothing if the condition is not met.
     BufHandle a("A", {4}, kInt);
     BufHandle c("C", {4}, kInt);
-    auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     LoopOptions options;
-    options.set_gpu_block_index(12);
-    auto body = For::make(
-        i, 0, 1, Store::make(c, {i}, Load::make(a, {i}, mask), mask), options);
-    Stmt* simplified = IRSimplifier::simplify(body);
+    options.set_gpu_block_index(LoopOptions::IDX_W);
+    auto body =
+        For::make(i, 0, 1, Store::make(c, {i}, Load::make(a, {i})), options);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(For, simplified, for_);
     LoopOptions options2 = for_->loop_options();
     ASSERT_EQ(options.gpu_block_index(), options2.gpu_block_index());
@@ -3322,20 +3796,16 @@ TEST(Simplify, SimplifyForWontLoseLoopOptions) {
 }
 
 TEST(Simplify, SimplifyMultilevelFor) {
-  KernelScope kernel_scope;
-
   {
     // Multiple layers of For will be simplified out.
     BufHandle a("A", {4}, kInt);
     BufHandle c("C", {4}, kInt);
-    auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     VarHandle j("j", kInt);
-    auto* body =
-        For::make(i, 0, 1, Store::make(c, {i}, Load::make(a, {i}, mask), mask));
+    auto body = For::make(i, 0, 1, Store::make(c, {i}, Load::make(a, {i})));
     auto outer = For::make(j, 0, 1, body);
-    Stmt* simplified = IRSimplifier::simplify(outer);
-    Block* block = dynamic_cast<Block*>(simplified);
+    StmtPtr simplified = IRSimplifier::simplify(outer);
+    BlockPtr block = to<Block>(simplified);
     IS_NODE_WITH_NAME(Store, block->front(), store);
     IS_VAR_WITH_NAME(store->base_handle(), "C");
     IS_IMM_WITH_VAL(Int, store->flat_index(), 0);
@@ -3345,19 +3815,17 @@ TEST(Simplify, SimplifyMultilevelFor) {
     // Will maintain an outer loop if the inner loop is eliminated.
     BufHandle a("A", {4}, kInt);
     BufHandle c("C", {4}, kInt);
-    auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     VarHandle j("j", kInt);
-    auto* body =
-        For::make(i, 0, 1, Store::make(c, {i}, Load::make(a, {i}, mask), mask));
+    auto body = For::make(i, 0, 1, Store::make(c, {i}, Load::make(a, {i})));
     auto outer = For::make(j, 0, 2, body);
-    Stmt* simplified = IRSimplifier::simplify(outer);
-    For* for__ = static_cast<For*>(simplified);
+    StmtPtr simplified = IRSimplifier::simplify(outer);
+    ForPtr for__ = static_to<For>(simplified);
     IS_NODE_WITH_NAME(For, for__, for_);
     IS_VAR_WITH_NAME(for_->var(), "j");
     IS_IMM_WITH_VAL(Int, for_->start(), 0);
     IS_IMM_WITH_VAL(Int, for_->stop(), 2);
-    Block* block = dynamic_cast<Block*>(for_->body());
+    BlockPtr block = to<Block>(for_->body());
     ASSERT_NE(block, nullptr);
     IS_NODE_WITH_NAME(Store, block->front(), store);
     IS_VAR_WITH_NAME(store->base_handle(), "C");
@@ -3368,14 +3836,12 @@ TEST(Simplify, SimplifyMultilevelFor) {
     // Will maintain inner loop if outer loops is eliminated.
     BufHandle a("A", {4}, kInt);
     BufHandle c("C", {4}, kInt);
-    auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     VarHandle j("j", kInt);
-    auto* body =
-        For::make(i, 0, 2, Store::make(c, {i}, Load::make(a, {i}, mask), mask));
+    auto body = For::make(i, 0, 2, Store::make(c, {i}, Load::make(a, {i})));
     auto outer = For::make(j, 0, 1, body);
-    Stmt* simplified = IRSimplifier::simplify(outer);
-    Block* block = dynamic_cast<Block*>(simplified);
+    StmtPtr simplified = IRSimplifier::simplify(outer);
+    BlockPtr block = to<Block>(simplified);
     IS_NODE_WITH_NAME(For, block->front(), for_);
     IS_VAR_WITH_NAME(for_->var(), "i");
     IS_IMM_WITH_VAL(Int, for_->start(), 0);
@@ -3387,12 +3853,11 @@ TEST(Simplify, SimplifyMultilevelFor) {
 }
 
 TEST(Simplify, SimplifyForCleansUp) {
-  KernelScope kernel_scope;
-
   {
-    Placeholder a("a", kFloat, {1, 12, 1});
+    BufHandle a("a", {1, 12, 1}, kFloat);
     VarHandle x("x", kInt);
-    Tensor* b = Compute(
+    Tensor b = Compute(
+        // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
         "x",
         {{1, "i"}, {12, "m"}, {1, "n"}},
         [](const VarHandle& i, const VarHandle& m, const VarHandle& n) {
@@ -3401,10 +3866,10 @@ TEST(Simplify, SimplifyForCleansUp) {
     LoopNest l({b});
     l.prepareForCodegen();
 
-    Stmt* body = l.root_stmt();
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr body = l.root_stmt();
+    StmtPtr simplified = IRSimplifier::simplify(body);
 
-    Block* block = dynamic_cast<Block*>(simplified);
+    BlockPtr block = to<Block>(simplified);
     IS_NODE_WITH_NAME(For, block->front(), for_);
     // for is over "m".
     IS_VAR_WITH_NAME(for_->var(), "m");
@@ -3416,37 +3881,33 @@ TEST(Simplify, SimplifyForCleansUp) {
 }
 
 TEST(Simplify, SimplifyEliminateEmptyFor) {
-  KernelScope kernel_scope;
-
   {
     // Flatten many layers around an empty block to an empty block.
-    Stmt* last = new Block({});
+    StmtPtr last = alloc<Block>(std::vector<StmtPtr>({}));
     for (int i = 0; i < 11; ++i) {
       VarHandle loopVar("loopVar", kInt);
       last = For::make(loopVar, 0, 10, last);
     }
 
-    Stmt* simplified = IRSimplifier::simplify(last);
+    StmtPtr simplified = IRSimplifier::simplify(last);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 0);
   }
 }
 
 TEST(Simplify, SimplifyFlattenBlock) {
-  KernelScope kernel_scope;
-
   {
     // Flatten multiple blocks down to one.
     // { { { stmt1, stmt2 } } } =>  { stmt1, stmt2 }
     BufHandle a("A", {1}, kInt);
-    Store* store1 = Store::make(a, {0}, 1, 1);
-    Store* store2 = Store::make(a, {0}, 0, 1);
+    StorePtr store1 = Store::make(a, {0}, 1);
+    StorePtr store2 = Store::make(a, {0}, 0);
 
-    Block* block1 = new Block({store1, store2});
-    Block* block2 = new Block({block1});
+    BlockPtr block1 = alloc<Block>(std::vector<StmtPtr>({store1, store2}));
+    BlockPtr block2 = alloc<Block>(std::vector<StmtPtr>({block1}));
 
-    Block* enclosing = new Block({block2});
-    Stmt* simplified = IRSimplifier::simplify(enclosing);
+    BlockPtr enclosing = alloc<Block>(std::vector<StmtPtr>({block2}));
+    StmtPtr simplified = IRSimplifier::simplify(enclosing);
 
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 2);
@@ -3462,14 +3923,14 @@ TEST(Simplify, SimplifyFlattenBlock) {
     // Flatten multiple sub blocks containing statements.
     // { { stmt1 }, { stmt2 } } =>  { stmt1, stmt2 }
     BufHandle a("A", {1}, kInt);
-    Store* store1 = Store::make(a, {0}, 1, 1);
-    Store* store2 = Store::make(a, {0}, 0, 1);
+    StorePtr store1 = Store::make(a, {0}, 1);
+    StorePtr store2 = Store::make(a, {0}, 0);
 
-    Block* block1 = new Block({store1});
-    Block* block2 = new Block({store2});
+    BlockPtr block1 = alloc<Block>(std::vector<StmtPtr>({store1}));
+    BlockPtr block2 = alloc<Block>(std::vector<StmtPtr>({store2}));
 
-    Block* enclosing = new Block({block1, block2});
-    Stmt* simplified = IRSimplifier::simplify(enclosing);
+    BlockPtr enclosing = alloc<Block>(std::vector<StmtPtr>({block1, block2}));
+    StmtPtr simplified = IRSimplifier::simplify(enclosing);
 
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 2);
@@ -3485,14 +3946,14 @@ TEST(Simplify, SimplifyFlattenBlock) {
     // Flatten sub blocks with different depths.
     // { stmt1 , { { stmt2 } } } =>  { stmt1, stmt2 }
     BufHandle a("A", {1}, kInt);
-    Store* store1 = Store::make(a, {0}, 1, 1);
-    Store* store2 = Store::make(a, {0}, 0, 1);
+    StorePtr store1 = Store::make(a, {0}, 1);
+    StorePtr store2 = Store::make(a, {0}, 0);
 
-    Block* block1 = new Block({store2});
-    Block* block2 = new Block({block1});
+    BlockPtr block1 = alloc<Block>(std::vector<StmtPtr>({store2}));
+    BlockPtr block2 = alloc<Block>(std::vector<StmtPtr>({block1}));
 
-    Block* enclosing = new Block({store1, block2});
-    Stmt* simplified = IRSimplifier::simplify(enclosing);
+    BlockPtr enclosing = alloc<Block>(std::vector<StmtPtr>({store1, block2}));
+    StmtPtr simplified = IRSimplifier::simplify(enclosing);
 
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 2);
@@ -3506,64 +3967,63 @@ TEST(Simplify, SimplifyFlattenBlock) {
 
   {
     // Flatten many layers around an empty block to an empty block.
-    Stmt* last = new Block({});
+    StmtPtr last = alloc<Block>(std::vector<StmtPtr>({}));
     for (int i = 0; i < 11; ++i) {
-      last = new Block({last});
+      last = alloc<Block>(std::vector<StmtPtr>({last}));
     }
 
-    Stmt* simplified = IRSimplifier::simplify(last);
+    StmtPtr simplified = IRSimplifier::simplify(last);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 0);
   }
 }
 
 TEST(Simplify, SimplifyEliminateZeroLengthAlloc) {
-  KernelScope kernel_scope;
-
   {
     // Simple positive case.
-    VarHandle x("x", kInt);
+    BufHandle b("x", {0}, kInt);
 
-    Allocate* alloc = Allocate::make(x, kInt, {0});
-    Free* free_ = Free::make(x);
+    AllocatePtr alloc_ = Allocate::make(b);
+    FreePtr free_ = Free::make(b);
 
-    Block* block1 = new Block({alloc, free_});
+    BlockPtr block1 = alloc<Block>(std::vector<StmtPtr>({alloc_, free_}));
     ASSERT_EQ(block1->nstmts(), 2);
 
-    Stmt* simplified = IRSimplifier::simplify(block1);
+    StmtPtr simplified = IRSimplifier::simplify(block1);
     IS_NODE_WITH_NAME(Block, simplified, block2);
     ASSERT_EQ(block2->nstmts(), 0);
   }
 
   {
     // Simple negative case.
-    VarHandle x("x", kInt);
+    BufHandle b("x", {2}, kInt);
 
-    Allocate* alloc = Allocate::make(x, kInt, {2});
-    Free* free_ = Free::make(x);
+    AllocatePtr alloc_ = Allocate::make(b);
+    FreePtr free_ = Free::make(b);
 
-    Block* block1 = new Block({alloc, free_});
+    BlockPtr block1 = alloc<Block>(std::vector<StmtPtr>({alloc_, free_}));
     ASSERT_EQ(block1->nstmts(), 2);
 
-    Stmt* simplified = IRSimplifier::simplify(block1);
+    StmtPtr simplified = IRSimplifier::simplify(block1);
     IS_NODE_WITH_NAME(Block, simplified, block2);
     ASSERT_EQ(block2->nstmts(), 2);
   }
 
   {
     // Finds right Alloc/Free.
-    VarHandle x("x", kInt);
-    VarHandle y("y", kInt);
+    BufHandle b1("x", {0}, kInt);
+    BufHandle b2("y", {2}, kInt);
 
-    Allocate* alloc1 = Allocate::make(x, kInt, {0});
-    Allocate* alloc2 = Allocate::make(y, kInt, {2});
-    Free* free2_ = Free::make(y);
-    Free* free1_ = Free::make(x);
+    AllocatePtr alloc1 = Allocate::make(b1);
+    AllocatePtr alloc2 = Allocate::make(b2);
+    FreePtr free2_ = Free::make(b2);
+    FreePtr free1_ = Free::make(b1);
 
-    Block* block1 = new Block({alloc1, alloc2, free2_, free1_});
+    BlockPtr block1 =
+        alloc<Block>(std::vector<StmtPtr>({alloc1, alloc2, free2_, free1_}));
     ASSERT_EQ(block1->nstmts(), 4);
 
-    Stmt* simplified = IRSimplifier::simplify(block1);
+    StmtPtr simplified = IRSimplifier::simplify(block1);
     IS_NODE_WITH_NAME(Block, simplified, block2);
     ASSERT_EQ(block2->nstmts(), 2);
     IS_NODE_WITH_NAME(Allocate, block2->stmts().front(), simplified_alloc);
@@ -3574,26 +4034,25 @@ TEST(Simplify, SimplifyEliminateZeroLengthAlloc) {
 
   {
     // Dynamic shape.
-    VarHandle x("x", kInt);
-    VarHandle y("y", kInt);
     VarHandle z("z", kInt);
+    BufHandle b1("x", {0}, kInt);
+    BufHandle b2("y", {z}, kInt);
 
-    Allocate* alloc1 = Allocate::make(x, kInt, {0});
-    Allocate* alloc2 = Allocate::make(y, kInt, {z});
-    Free* free2_ = Free::make(y);
-    Free* free1_ = Free::make(x);
+    AllocatePtr alloc1 = Allocate::make(b1);
+    AllocatePtr alloc2 = Allocate::make(b2);
+    FreePtr free2_ = Free::make(b2);
+    FreePtr free1_ = Free::make(b1);
 
-    Block* block1 = new Block({alloc1, alloc2, free2_, free1_});
+    BlockPtr block1 =
+        alloc<Block>(std::vector<StmtPtr>({alloc1, alloc2, free2_, free1_}));
     ASSERT_EQ(block1->nstmts(), 4);
-    Stmt* simplified = IRSimplifier::simplify(block1);
+    StmtPtr simplified = IRSimplifier::simplify(block1);
     IS_NODE_WITH_NAME(Block, simplified, block2);
     ASSERT_EQ(block2->nstmts(), 2);
   }
 }
 
 TEST(Simplify, DontSimplifyRand) {
-  KernelScope kernel_scope;
-
   {
     // rand() + rand() = rand() + rand() NOT 2 * rand().
     ExprHandle body =
@@ -3626,11 +4085,9 @@ TEST(Simplify, DontSimplifyRand) {
 }
 
 TEST(Simplify, SimplifyReorderForCond) {
-  KernelScope kernel_scope;
   BufHandle a("A", {4}, kInt);
   BufHandle b("B", {1}, kInt);
   BufHandle c("C", {4}, kInt);
-  auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
 
@@ -3642,10 +4099,10 @@ TEST(Simplify, SimplifyReorderForCond) {
         4,
         Cond::make(
             CompareSelect::make(j, 10, CompareSelectOperation::kLT),
-            Store::make(c, {i}, Load::make(a, {i}, mask), mask),
+            Store::make(c, {i}, Load::make(a, {i})),
             nullptr));
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Cond, simplified, cond);
     IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_block);
     IS_NODE_WITH_NAME(For, true_block->front(), loop);
@@ -3659,10 +4116,10 @@ TEST(Simplify, SimplifyReorderForCond) {
         4,
         Cond::make(
             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
-            Store::make(c, {i}, Load::make(a, {i}, mask), mask),
+            Store::make(c, {i}, Load::make(a, {i})),
             nullptr));
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(For, simplified, loop);
     IS_NODE_WITH_NAME(Cond, loop->body()->front(), cond);
   }
@@ -3676,11 +4133,11 @@ TEST(Simplify, SimplifyReorderForCond) {
         4,
         Cond::make(
             CompareSelect::make(
-                Load::make(c, {0}, mask), 10, CompareSelectOperation::kLT),
-            Store::make(c, {0}, Load::make(a, {i}, mask), mask),
+                Load::make(c, {0}), 10, CompareSelectOperation::kLT),
+            Store::make(c, {0}, Load::make(a, {i})),
             nullptr));
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(For, simplified, loop);
     IS_NODE_WITH_NAME(Cond, loop->body()->front(), cond);
   }
@@ -3693,11 +4150,11 @@ TEST(Simplify, SimplifyReorderForCond) {
         4,
         Cond::make(
             CompareSelect::make(
-                Load::make(b, {0}, mask), 10, CompareSelectOperation::kLT),
-            Store::make(c, {0}, Load::make(a, {i}, mask), mask),
+                Load::make(b, {0}), 10, CompareSelectOperation::kLT),
+            Store::make(c, {0}, Load::make(a, {i})),
             nullptr));
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Cond, simplified, cond);
     IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_block);
     IS_NODE_WITH_NAME(For, true_block->front(), loop);
@@ -3711,11 +4168,11 @@ TEST(Simplify, SimplifyReorderForCond) {
         4,
         Cond::make(
             CompareSelect::make(
-                Load::make(a, {0}, mask), 10, CompareSelectOperation::kLT),
-            Store::make(c, {0}, Load::make(a, {i}, mask), mask),
+                Load::make(a, {0}), 10, CompareSelectOperation::kLT),
+            Store::make(c, {0}, Load::make(a, {i})),
             nullptr));
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Cond, simplified, cond);
     IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_block);
     IS_NODE_WITH_NAME(For, true_block->front(), loop);
@@ -3731,10 +4188,10 @@ TEST(Simplify, SimplifyReorderForCond) {
             {Let::make(j, 3),
              Cond::make(
                  CompareSelect::make(j, 10, CompareSelectOperation::kLT),
-                 Store::make(c, {0}, Load::make(a, {i}, mask), mask),
+                 Store::make(c, {0}, Load::make(a, {i})),
                  nullptr)}));
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(For, simplified, loop);
     IS_NODE_WITH_NAME(Let, loop->body()->front(), let);
     IS_NODE_WITH_NAME(Cond, loop->body()->back(), cond);
@@ -3749,14 +4206,14 @@ TEST(Simplify, SimplifyReorderForCond) {
         4,
         Cond::make(
             CompareSelect::make(
-                Load::make(a, {0}, mask), 10, CompareSelectOperation::kLT),
+                Load::make(a, {0}), 10, CompareSelectOperation::kLT),
             Cond::make(
                 CompareSelect::make(j, 10, CompareSelectOperation::kEQ),
-                Store::make(c, {0}, Load::make(a, {i}, mask), mask),
+                Store::make(c, {0}, Load::make(a, {i})),
                 nullptr),
             nullptr));
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Cond, simplified, cond);
     IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_block);
     IS_NODE_WITH_NAME(Cond, true_block->front(), cond2);
@@ -3773,14 +4230,14 @@ TEST(Simplify, SimplifyReorderForCond) {
         4,
         Cond::make(
             CompareSelect::make(
-                Load::make(a, {0}, mask), 10, CompareSelectOperation::kLT),
+                Load::make(a, {0}), 10, CompareSelectOperation::kLT),
             Cond::make(
                 CompareSelect::make(i, 10, CompareSelectOperation::kEQ),
-                Store::make(c, {0}, Load::make(a, {i}, mask), mask),
+                Store::make(c, {0}, Load::make(a, {i})),
                 nullptr),
             nullptr));
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Cond, simplified, cond);
     IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_block);
     IS_NODE_WITH_NAME(For, true_block->front(), loop);
@@ -3797,10 +4254,10 @@ TEST(Simplify, SimplifyReorderForCond) {
         4,
         Cond::make(
             CompareSelect::make(j, 10, CompareSelectOperation::kLT),
-            Store::make(c, {0}, Load::make(a, {i}, mask), mask),
-            Store::make(c, {0}, 0, mask)));
+            Store::make(c, {0}, Load::make(a, {i})),
+            Store::make(c, {0}, 0)));
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(For, simplified, loop);
     IS_NODE_WITH_NAME(Cond, loop->body()->front(), cond);
   }
@@ -3815,21 +4272,19 @@ TEST(Simplify, SimplifyReorderForCond) {
         4,
         Cond::make(
             CompareSelect::make(
-                Load::make(c, {0}, mask), 10, CompareSelectOperation::kLT),
-            Store::make(c, {1}, Load::make(a, {i}, mask), mask),
+                Load::make(c, {0}), 10, CompareSelectOperation::kLT),
+            Store::make(c, {1}, Load::make(a, {i})),
             nullptr));
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(For, simplified, loop);
     IS_NODE_WITH_NAME(Cond, loop->body()->front(), cond);
   }
 }
 
 TEST(Simplify, SimplifyFuseConditions) {
-  KernelScope kernel_scope;
   BufHandle a("A", {2}, kInt);
   BufHandle b("B", {2}, kInt);
-  auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
 
@@ -3839,14 +4294,15 @@ TEST(Simplify, SimplifyFuseConditions) {
     auto body = Block::make(
         {Cond::make(
              CompareSelect::make(i, 10, CompareSelectOperation::kLT),
-             Store::make(a, {0}, i, mask),
+             Store::make(a, {0}, i),
              nullptr),
          Cond::make(
              CompareSelect::make(i, 10, CompareSelectOperation::kLT),
-             Store::make(a, {1}, i, mask),
+             Store::make(a, {1}, i),
              nullptr)});
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 1);
     IS_NODE_WITH_NAME(Cond, block->front(), cond);
@@ -3860,14 +4316,14 @@ TEST(Simplify, SimplifyFuseConditions) {
     auto body = Block::make(
         {Cond::make(
              CompareSelect::make(i, 10, CompareSelectOperation::kLT),
-             Store::make(a, {0}, i, mask),
+             Store::make(a, {0}, i),
              nullptr),
          Cond::make(
              CompareSelect::make(j, 10, CompareSelectOperation::kLT),
-             Store::make(a, {1}, i, mask),
+             Store::make(a, {1}, i),
              nullptr)});
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 2);
     IS_NODE_WITH_NAME(Cond, block->front(), cond1);
@@ -3886,14 +4342,14 @@ TEST(Simplify, SimplifyFuseConditions) {
     auto body = Block::make(
         {Cond::make(
              CompareSelect::make(i, 10, CompareSelectOperation::kLT),
-             Store::make(a, {0}, i, mask),
+             Store::make(a, {0}, i),
              nullptr),
          Cond::make(
              CompareSelect::make(i, 11, CompareSelectOperation::kLT),
-             Store::make(a, {1}, i, mask),
+             Store::make(a, {1}, i),
              nullptr)});
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 2);
     IS_NODE_WITH_NAME(Cond, block->front(), cond1);
@@ -3913,14 +4369,14 @@ TEST(Simplify, SimplifyFuseConditions) {
     auto body = Block::make(
         {Cond::make(
              CompareSelect::make(i, 10, CompareSelectOperation::kLT),
-             Store::make(a, {0}, i, mask),
+             Store::make(a, {0}, i),
              nullptr),
          Cond::make(
              CompareSelect::make(i, 10, CompareSelectOperation::kGT),
-             Store::make(a, {1}, i, mask),
+             Store::make(a, {1}, i),
              nullptr)});
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 2);
     IS_NODE_WITH_NAME(Cond, block->front(), cond1);
@@ -3939,26 +4395,17 @@ TEST(Simplify, SimplifyFuseConditions) {
     // Can't fuse, CompareSelect results are different.
     // Actually we totally could if we normalized CompareSelect results, but
     // TODO for later.
-    auto body = Block::make({Cond::make(
-                                 CompareSelect::make(
-                                     i,
-                                     10,
-                                     new IntImm(1),
-                                     new IntImm(0),
-                                     CompareSelectOperation::kLT),
-                                 Store::make(a, {0}, i, mask),
-                                 nullptr),
-                             Cond::make(
-                                 CompareSelect::make(
-                                     j,
-                                     10,
-                                     new IntImm(2),
-                                     new IntImm(0),
-                                     CompareSelectOperation::kLT),
-                                 Store::make(a, {1}, i, mask),
-                                 nullptr)});
+    auto body = Block::make(
+        {Cond::make(
+             CompareSelect::make(i, 10, 1, 0, CompareSelectOperation::kLT),
+             Store::make(a, {0}, i),
+             nullptr),
+         Cond::make(
+             CompareSelect::make(j, 10, 2, 0, CompareSelectOperation::kLT),
+             Store::make(a, {1}, i),
+             nullptr)});
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 2);
     IS_NODE_WITH_NAME(Cond, block->front(), cond1);
@@ -3979,13 +4426,13 @@ TEST(Simplify, SimplifyFuseConditions) {
         {Cond::make(
              CompareSelect::make(i, 10, CompareSelectOperation::kLT),
              nullptr,
-             Store::make(a, {0}, i, mask)),
+             Store::make(a, {0}, i)),
          Cond::make(
              CompareSelect::make(i, 10, CompareSelectOperation::kLT),
              nullptr,
-             Store::make(a, {1}, i, mask))});
+             Store::make(a, {1}, i))});
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 1);
     IS_NODE_WITH_NAME(Cond, block->front(), cond);
@@ -3999,14 +4446,14 @@ TEST(Simplify, SimplifyFuseConditions) {
     auto body = Block::make(
         {Cond::make(
              CompareSelect::make(i, 10, CompareSelectOperation::kLT),
-             Store::make(a, {0}, i, mask),
-             Store::make(b, {0}, i, mask)),
+             Store::make(a, {0}, i),
+             Store::make(b, {0}, i)),
          Cond::make(
              CompareSelect::make(i, 10, CompareSelectOperation::kLT),
-             Store::make(a, {1}, i, mask),
-             Store::make(b, {1}, i, mask))});
+             Store::make(a, {1}, i),
+             Store::make(b, {1}, i))});
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 1);
     IS_NODE_WITH_NAME(Cond, block->front(), cond);
@@ -4021,14 +4468,14 @@ TEST(Simplify, SimplifyFuseConditions) {
     auto body = Block::make(
         {Cond::make(
              CompareSelect::make(i, 10, CompareSelectOperation::kLT),
-             Store::make(a, {0}, i, mask),
+             Store::make(a, {0}, i),
              nullptr),
          Cond::make(
              CompareSelect::make(i, 10, CompareSelectOperation::kLT),
              nullptr,
-             Store::make(b, {1}, i, mask))});
+             Store::make(b, {1}, i))});
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 1);
     IS_NODE_WITH_NAME(Cond, block->front(), cond);
@@ -4059,22 +4506,22 @@ TEST(Simplify, SimplifyFuseConditions) {
     auto body = Block::make({
         Cond::make(
             CompareSelect::make(j, 10, CompareSelectOperation::kLT),
-            Store::make(a, {0}, j, mask),
+            Store::make(a, {0}, j),
             nullptr),
         Cond::make(
             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
-            Store::make(a, {0}, i, mask),
+            Store::make(a, {0}, i),
             nullptr),
         Cond::make(
             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
-            Store::make(a, {1}, i, mask),
+            Store::make(a, {1}, i),
             nullptr),
         Cond::make(
             CompareSelect::make(i, 11, CompareSelectOperation::kLT),
-            Store::make(a, {1}, j, mask),
+            Store::make(a, {1}, j),
             nullptr),
     });
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 3);
     auto it = block->begin();
@@ -4090,22 +4537,22 @@ TEST(Simplify, SimplifyFuseConditions) {
     auto body = Block::make({
         Cond::make(
             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
-            Store::make(a, {0}, j, mask),
+            Store::make(a, {0}, j),
             nullptr),
         Cond::make(
             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
-            Store::make(a, {0}, i, mask),
+            Store::make(a, {0}, i),
             nullptr),
         Cond::make(
             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
-            Store::make(a, {1}, i, mask),
+            Store::make(a, {1}, i),
             nullptr),
         Cond::make(
             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
-            Store::make(a, {1}, j, mask),
+            Store::make(a, {1}, j),
             nullptr),
     });
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 1);
     IS_NODE_WITH_NAME(Cond, block->front(), cond);
@@ -4119,23 +4566,23 @@ TEST(Simplify, SimplifyFuseConditions) {
     auto body = Block::make({
         Cond::make(
             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
-            Store::make(a, {0}, j, mask),
+            Store::make(a, {0}, j),
             nullptr),
         Cond::make(
             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
-            Store::make(a, {0}, i, mask),
+            Store::make(a, {0}, i),
             nullptr),
-        Store::make(b, {1}, i + j, mask),
+        Store::make(b, {1}, i + j),
         Cond::make(
             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
-            Store::make(a, {1}, i, mask),
+            Store::make(a, {1}, i),
             nullptr),
         Cond::make(
             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
-            Store::make(a, {1}, j, mask),
+            Store::make(a, {1}, j),
             nullptr),
     });
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 3);
     IS_NODE_WITH_NAME(Cond, block->front(), cond);
@@ -4155,21 +4602,22 @@ TEST(Simplify, SimplifyFuseConditions) {
 
   {
     // Can fuse if the conditions simplify to the same thing.
-    auto body = Block::make({Cond::make(
-                                 CompareSelect::make(
-                                     i * 2,
-                                     ExprHandle(87) % ExprHandle(11),
-                                     CompareSelectOperation::kLT),
-                                 Store::make(a, {0}, i, mask),
-                                 nullptr),
-                             Cond::make(
-                                 CompareSelect::make(
-                                     i * 2,
-                                     ExprHandle(300) / ExprHandle(30),
-                                     CompareSelectOperation::kLT),
-                                 Store::make(a, {1}, i, mask),
-                                 nullptr)});
-    Stmt* simplified = IRSimplifier::simplify(body);
+    auto body = Block::make(
+        {Cond::make(
+             CompareSelect::make(
+                 i * 2,
+                 ExprHandle(87) % ExprHandle(11),
+                 CompareSelectOperation::kLT),
+             Store::make(a, {0}, i),
+             nullptr),
+         Cond::make(
+             CompareSelect::make(
+                 i * 2,
+                 ExprHandle(300) / ExprHandle(30),
+                 CompareSelectOperation::kLT),
+             Store::make(a, {1}, i),
+             nullptr)});
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 1);
     IS_NODE_WITH_NAME(Cond, block->front(), cond);
@@ -4181,11 +4629,11 @@ TEST(Simplify, SimplifyFuseConditions) {
   {
     // Can fuse non-CompareSelects.
     // if (i) { X } if (i) { Y } => if (i) { X; Y }
-    auto body =
-        Block::make({Cond::make(i, Store::make(a, {0}, i, mask), nullptr),
-                     Cond::make(i, Store::make(a, {1}, i, mask), nullptr)});
+    auto body = Block::make(
+        {Cond::make(i, Store::make(a, {0}, i), nullptr),
+         Cond::make(i, Store::make(a, {1}, i), nullptr)});
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 1);
     IS_NODE_WITH_NAME(Cond, block->front(), cond);
@@ -4196,11 +4644,11 @@ TEST(Simplify, SimplifyFuseConditions) {
 
   {
     // Sanity check wont fuse different non-CompareSelects.
-    auto body =
-        Block::make({Cond::make(i, Store::make(a, {0}, i, mask), nullptr),
-                     Cond::make(j, Store::make(a, {1}, i, mask), nullptr)});
+    auto body = Block::make(
+        {Cond::make(i, Store::make(a, {0}, i), nullptr),
+         Cond::make(j, Store::make(a, {1}, i), nullptr)});
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 2);
     IS_NODE_WITH_NAME(Cond, block->front(), cond1);
@@ -4210,10 +4658,10 @@ TEST(Simplify, SimplifyFuseConditions) {
   {
     // Sanity check constant condition elimination still occurs when merging is
     // possible.
-    auto body =
-        Block::make({Cond::make(1, Store::make(a, {0}, i, mask), nullptr),
-                     Cond::make(1, Store::make(a, {1}, i, mask), nullptr)});
-    Stmt* simplified = IRSimplifier::simplify(body);
+    auto body = Block::make(
+        {Cond::make(1, Store::make(a, {0}, i), nullptr),
+         Cond::make(1, Store::make(a, {1}, i), nullptr)});
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 2);
     IS_NODE_WITH_NAME(Store, block->front(), store1);
@@ -4229,14 +4677,14 @@ TEST(Simplify, SimplifyFuseConditions) {
         Block::make(
             {Cond::make(
                  CompareSelect::make(j, 10, CompareSelectOperation::kLT),
-                 Store::make(a, {1}, Load::make(b, {0}, mask), mask),
+                 Store::make(a, {1}, Load::make(b, {0})),
                  nullptr),
              Cond::make(
                  CompareSelect::make(j, 10, CompareSelectOperation::kLT),
-                 Store::make(a, {2}, Load::make(b, {0}, mask), mask),
+                 Store::make(a, {2}, Load::make(b, {0})),
                  nullptr)}));
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Cond, simplified, cond);
     IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_block);
     IS_NODE_WITH_NAME(For, true_block->front(), loop);
@@ -4244,18 +4692,18 @@ TEST(Simplify, SimplifyFuseConditions) {
 }
 
 TEST(Simplify, SimplifySyncThreads) {
-  KernelScope kernel_scope;
   BufHandle a("A", {4}, kInt);
-  auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
 
   {
     // Merge two inner SyncThreads.
-    auto body = Block::make({Store::make(a, {0}, 1, 1),
-                             new SyncThreads(),
-                             new SyncThreads(),
-                             Store::make(a, {1}, 0, 1)});
-    Stmt* simplified = IRSimplifier::simplify(body);
+    auto body = Block::make(
+        // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
+        {Store::make(a, {0}, 1),
+         alloc<SyncThreads>(),
+         alloc<SyncThreads>(),
+         Store::make(a, {1}, 0)});
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 3);
     auto it = block->begin();
@@ -4267,9 +4715,9 @@ TEST(Simplify, SimplifySyncThreads) {
   {
     // Eliminate outer SyncThreads.
     auto body = Block::make(
-        {new SyncThreads(), Store::make(a, {1}, 0, 1), new SyncThreads()});
+        {alloc<SyncThreads>(), Store::make(a, {1}, 0), alloc<SyncThreads>()});
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 1);
     auto it = block->begin();
@@ -4278,15 +4726,16 @@ TEST(Simplify, SimplifySyncThreads) {
 
   {
     // Merge many inner SyncThreads.
-    auto body = Block::make({Store::make(a, {0}, 1, 1),
-                             new SyncThreads(),
-                             new SyncThreads(),
-                             new SyncThreads(),
-                             new SyncThreads(),
-                             new SyncThreads(),
-                             Store::make(a, {1}, 0, 1)});
+    auto body = Block::make(
+        {Store::make(a, {0}, 1),
+         alloc<SyncThreads>(),
+         alloc<SyncThreads>(),
+         alloc<SyncThreads>(),
+         alloc<SyncThreads>(),
+         alloc<SyncThreads>(),
+         Store::make(a, {1}, 0)});
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 3);
     auto it = block->begin();
@@ -4297,15 +4746,16 @@ TEST(Simplify, SimplifySyncThreads) {
 
   {
     // Merge multiple outer SyncThreads.
-    auto body = Block::make({new SyncThreads(),
-                             new SyncThreads(),
-                             Store::make(a, {1}, 0, 1),
-                             new SyncThreads(),
-                             new SyncThreads(),
-                             new SyncThreads(),
-                             new SyncThreads()});
+    auto body = Block::make(
+        {alloc<SyncThreads>(),
+         alloc<SyncThreads>(),
+         Store::make(a, {1}, 0),
+         alloc<SyncThreads>(),
+         alloc<SyncThreads>(),
+         alloc<SyncThreads>(),
+         alloc<SyncThreads>()});
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 1);
     auto it = block->begin();
@@ -4314,17 +4764,18 @@ TEST(Simplify, SimplifySyncThreads) {
 
   {
     // Merge multiple sections;
-    auto body = Block::make({Store::make(a, {0}, 1, 1),
-                             new SyncThreads(),
-                             new SyncThreads(),
-                             Store::make(a, {1}, 0, 1),
-                             Store::make(a, {2}, 0, 1),
-                             new SyncThreads(),
-                             new SyncThreads(),
-                             new SyncThreads(),
-                             Store::make(a, {3}, 0, 1)});
+    auto body = Block::make(
+        {Store::make(a, {0}, 1),
+         alloc<SyncThreads>(),
+         alloc<SyncThreads>(),
+         Store::make(a, {1}, 0),
+         Store::make(a, {2}, 0),
+         alloc<SyncThreads>(),
+         alloc<SyncThreads>(),
+         alloc<SyncThreads>(),
+         Store::make(a, {3}, 0)});
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 6);
     auto it = block->begin();
@@ -4338,12 +4789,11 @@ TEST(Simplify, SimplifySyncThreads) {
 }
 
 TEST(Simplify, SimplifyRampSubBroadcast) {
-  KernelScope kernel_scope;
   int num_lanes = 4;
   ExprHandle ramp = Ramp::make(ExprHandle(0), ExprHandle(6), num_lanes);
   ExprHandle broadcast = Broadcast::make(ExprHandle(-5), num_lanes);
   ExprHandle simplified = IRSimplifier::simplify(ramp - broadcast);
-  Ramp* newRamp = simplified.AsNode<Ramp>();
+  RampPtr newRamp = simplified.AsNode<Ramp>();
   IS_NODE_WITH_NAME(IntImm, newRamp->base(), base);
   ASSERT_EQ(base->value(), 5);
   IS_NODE_WITH_NAME(IntImm, newRamp->stride(), stride);
@@ -4352,7 +4802,6 @@ TEST(Simplify, SimplifyRampSubBroadcast) {
 }
 
 TEST(Simplify, SimplifyBroadcastTermExpander) {
-  KernelScope kernel_scope;
   int num_lanes = 8;
   ExprHandle bc0 = Broadcast::make(ExprHandle(0), num_lanes);
   ExprHandle bc1 = Broadcast::make(ExprHandle(1), num_lanes);
@@ -4364,17 +4813,135 @@ TEST(Simplify, SimplifyBroadcastTermExpander) {
   BufHandle buf("buf", {num_lanes}, kInt);
   // The result isn't fully simplified currently and thus would be brittle to
   // match. Observe its value instead.
-  auto store = Store::make(
-      buf,
-      {Ramp::make(0, 1, num_lanes)},
-      simplified,
-      Broadcast::make(ExprHandle(1), num_lanes));
+  auto store = Store::make(buf, {Ramp::make(0, 1, num_lanes)}, simplified);
   SimpleIREvaluator eval(store, {buf});
   std::vector<int> output(num_lanes);
   eval(output);
   for (int i = 0; i < num_lanes; ++i) {
     ASSERT_EQ(output[i], 2);
   }
+}
+
+TEST(Simplify, DISABLED_CompareSelectCondAlwaysInLoopBounds) {
+  // Before:
+  //   for (int n = 1; n < N; n++) {
+  //     b[n] = n < 1 ? 0.f : 1.f;
+  //   }
+  // After:
+  //   for (int n = 1; n < N; n++) {
+  //     b[n] = 1.f;
+  //   }
+  constexpr int N = 8;
+  BufHandle b("b", {N}, kFloat);
+  VarHandle n("n", kInt);
+  StmtPtr s = For::make(
+      n, 1, N, b.store({n}, CompareSelect::make(n, 1, 0.f, 1.0f, kLT)));
+  s = IRSimplifier::simplify(s);
+  std::ostringstream oss;
+  oss << *s;
+  torch::jit::testing::FileCheck().run(
+      R"IR(
+# CHECK: b[n] = 1.f;
+)IR",
+      oss.str());
+}
+
+TEST(Simplify, DISABLED_IfThenCondAlwaysInLoopBounds) {
+  // Before:
+  //   for (int n = 1; n < N; n++) {
+  //     b[n] = IfThenElse(n < 1 ? 1 : 0, 0.f, 1.f);
+  //   }
+  // After:
+  //   for (int n = 1; n < N; n++) {
+  //     b[n] = 1.f;
+  //   }
+  constexpr int N = 8;
+  BufHandle b("b", {N}, kFloat);
+  VarHandle n("n", kInt);
+  StmtPtr s =
+      For::make(n, 1, N, b.store({n}, IfThenElse::make(n < 1, 0.f, 1.0f)));
+  s = IRSimplifier::simplify(s);
+  std::ostringstream oss;
+  oss << *s;
+  torch::jit::testing::FileCheck().run(
+      R"IR(
+# CHECK: b[n] = 1.f;
+)IR",
+      oss.str());
+}
+
+TEST(Simplify, DISABLED_MultiClauseCondAlwaysInLoopBounds) {
+  // This test mimics the unpadded region of a conv2d.  We want to remove any
+  // conditional that is provably satisfied (or unsatisfied) by the entire loop
+  // range.
+  // Before:
+  //   for (int i = 1; i < 7; i++) {
+  //     for (int j = 1; j < 7; j++) {
+  //       b[i, j] = IfThenElse(
+  //         j>=7 ? 1 : (i>=7 ? 1 : (j<1 ? 1 : (i<1 ? 1 : 0))), 0.f, 1.f);
+  // After:
+  //   for (int i = 1; i < 7; i++) {
+  //     for (int j = 1; j < 7; j++) {
+  //       b[i, j] = 1.f;
+  constexpr int N = 8;
+  BufHandle b("b", {N, N}, kFloat);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  auto csel = CompareSelect::make(i, 1, kLT);
+  csel = CompareSelect::make(j, 1, 1, csel, kLT);
+  csel = CompareSelect::make(i, N - 1, 1, csel, kGE);
+  csel = CompareSelect::make(j, N - 1, 1, csel, kGE);
+  StmtPtr s = b.store({i, j}, IfThenElse::make(csel, 0.f, 1.0f));
+  s = For::make(j, 1, N - 1, s);
+  s = For::make(i, 1, N - 1, s);
+  s = IRSimplifier::simplify(s);
+  std::ostringstream oss;
+  oss << *s;
+  torch::jit::testing::FileCheck().run(
+      R"IR(
+# CHECK: b[n] = 1.f;
+)IR",
+      oss.str());
+}
+
+TEST(Simplify, DISABLED_SimplifyLoopBounds) {
+  // This test mimics the padded region of a conv2d.  We want to adjust the
+  // loop bounds such that the condition will be always met.  Note that this
+  // could be solved by peeling, and applying the range-based conditional
+  // simplification in the previous tests.
+  // Before:
+  //   for (int i = 0; i < 3; i++) {
+  //     for (int j = 0; j < 3; j++) {
+  //       b[i, j] = (b[i, j]) + (IfThenElse(
+  //         j>=7 ? 1 : (i>=7 ? 1 : (j<1 ? 1 : (i<1 ? 1 : 0))), 0.f, a[i, j]));
+  // After:
+  //   for (int i = 1; i < 3; i++) {
+  //     for (int j = 1; j < 3; j++) {
+  //       b[i, j] = (b[i, j]) + 1.f;
+  constexpr int N = 8;
+  constexpr int K = 3;
+  BufHandle a("a", {N, N}, kFloat);
+  BufHandle b("b", {N, N}, kFloat);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  auto csel = CompareSelect::make(i, 1, kLT);
+  csel = CompareSelect::make(j, 1, 1, csel, kLT);
+  csel = CompareSelect::make(i, N - 1, 1, csel, kGE);
+  csel = CompareSelect::make(j, N - 1, 1, csel, kGE);
+  StmtPtr s = b.store(
+      {i, j}, b.load({i, j}) + IfThenElse::make(csel, 0.f, a.load({i, j})));
+  s = For::make(j, 0, K, s);
+  s = For::make(i, 0, K, s);
+  s = IRSimplifier::simplify(s);
+  std::ostringstream oss;
+  oss << *s;
+  torch::jit::testing::FileCheck().run(
+      R"IR(
+# CHECK: for (int i = 1; i < 3; i++) {
+# CHECK: for (int j = 1; j < 3; j++) {
+# CHECK-NOT: IfThenElse
+)IR",
+      oss.str());
 }
 
 } // namespace jit

@@ -60,7 +60,7 @@ JITTimePoint timePoint() {
   return JITTimePoint{std::chrono::high_resolution_clock::now()};
 }
 
-void recordDurationSince(const std::string& name, JITTimePoint tp) {
+void recordDurationSince(const std::string& name, const JITTimePoint& tp) {
   auto end = std::chrono::high_resolution_clock::now();
   // Measurement in microseconds.
   auto seconds = std::chrono::duration<double>(end - tp.point).count() * 1e9;

@@ -402,7 +402,7 @@ TEST(SubgraphMatcherTest, MatchesAttributes) {
       R"IR(
 graph(%0):
   %a = a::a[isattr=[1,2]](%0)
-  %b = a::b[intattr=10, floatattr=3.14](%0)
+  %b = a::b[intattr=10, floatattr=3.14, complexattr=-3.14j](%0)
   %c = a::c[myattr="qqq"](%a, %b)
   return (%c))IR",
       &graph);
@@ -442,7 +442,7 @@ graph(%0):
     parseIR(
         R"IR(
 graph(%0):
-  %b = a::b[intattr=10, floatattr=3.14](%0)
+  %b = a::b[intattr=10, floatattr=3.14, complexattr=-3.14j](%0)
   return (%b))IR",
         &pattern);
     AT_ASSERT(!findPatternMatches(pattern, graph).empty());
@@ -452,7 +452,7 @@ graph(%0):
     parseIR(
         R"IR(
 graph(%0):
-  %b = a::b[intattr=10, floatattr=3.14, strattr="rrr"](%0)
+  %b = a::b[intattr=10, floatattr=3.14, complexattr=-3.14j, strattr="rrr"](%0)
   return (%b))IR",
         &pattern);
     AT_ASSERT(findPatternMatches(pattern, graph).empty());
@@ -500,6 +500,7 @@ graph(%x):
   return (%y))IR",
       &pattern1);
   // No support for patterns with subblocks
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(findPatternMatches(pattern1, graph));
 
   parseIR(
@@ -512,6 +513,7 @@ graph(%x):
   // Not supported multi-output pattern, because not the whole pattern is
   // covered by a traversal up from the first output (`%z = ...` is not
   // visited). See the note "Multi-output Patterns" in subgraph_matcher.h.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(findPatternMatches(pattern2, graph));
 }
 

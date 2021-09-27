@@ -2,6 +2,33 @@
 
 set -ex
 
+install_magma() {
+    # "install" hipMAGMA into /opt/rocm/magma by copying after build
+    git clone https://bitbucket.org/icl/magma.git -b magma_ctrl_launch_bounds
+    pushd magma
+    # The branch "magma_ctrl_launch_bounds" is having a fix over the below commit, so keeping the below comment for reference.
+    #git checkout 878b1ce02e9cfe4a829be22c8f911e9c0b6bd88f
+    # Work around non-asii characters in certain magma sources; remove this after upstream magma fixes this.
+    perl -i.bak -pe 's/[^[:ascii:]]//g' sparse/control/magma_zfree.cpp
+    perl -i.bak -pe 's/[^[:ascii:]]//g' sparse/control/magma_zsolverinfo.cpp
+    cp make.inc-examples/make.inc.hip-gcc-mkl make.inc
+    echo 'LIBDIR += -L$(MKLROOT)/lib' >> make.inc
+    echo 'LIB += -Wl,--enable-new-dtags -Wl,--rpath,/opt/rocm/lib -Wl,--rpath,$(MKLROOT)/lib -Wl,--rpath,/opt/rocm/magma/lib' >> make.inc
+    echo 'DEVCCFLAGS += --amdgpu-target=gfx803 --amdgpu-target=gfx900 --amdgpu-target=gfx906 --amdgpu-target=gfx908 --gpu-max-threads-per-block=256' >> make.inc
+    # hipcc with openmp flag may cause isnan() on __device__ not to be found; depending on context, compiler may attempt to match with host definition
+    sed -i 's/^FOPENMP/#FOPENMP/g' make.inc
+    export PATH="${PATH}:/opt/rocm/bin"
+    make -f make.gen.hipMAGMA -j $(nproc)
+    make lib/libmagma.so -j $(nproc) MKLROOT=/opt/conda
+    make testing/testing_dgemm -j $(nproc) MKLROOT=/opt/conda
+    popd
+    mv magma /opt/rocm
+}
+
+ver() {
+    printf "%3d%03d%03d%03d" $(echo "$1" | tr '.' ' ');
+}
+
 install_ubuntu() {
     apt-get update
     if [[ $UBUNTU_VERSION == 18.04 ]]; then
@@ -10,27 +37,25 @@ install_ubuntu() {
     fi
     apt-get install -y kmod
     apt-get install -y wget
-    apt-get install -y libopenblas-dev
 
     # Need the libc++1 and libc++abi1 libraries to allow torch._C to load at runtime
     apt-get install -y libc++1
     apt-get install -y libc++abi1
 
+    ROCM_REPO="ubuntu"
+    if [[ $(ver $ROCM_VERSION) -lt $(ver 4.2) ]]; then
+        ROCM_REPO="xenial"
+    fi
+
     # Add rocm repository
     wget -qO - http://repo.radeon.com/rocm/rocm.gpg.key | apt-key add -
-    echo "deb [arch=amd64] http://repo.radeon.com/rocm/apt/${ROCM_VERSION} xenial main" > /etc/apt/sources.list.d/rocm.list
+    echo "deb [arch=amd64] http://repo.radeon.com/rocm/apt/${ROCM_VERSION} ${ROCM_REPO} main" > /etc/apt/sources.list.d/rocm.list
     apt-get update --allow-insecure-repositories
 
     DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated \
                    rocm-dev \
                    rocm-utils \
-                   rocfft \
-                   miopen-hip \
-                   rocblas \
-                   hipsparse \
-                   rocrand \
-                   hipcub \
-                   rocthrust \
+                   rocm-libs \
                    rccl \
                    rocprofiler-dev \
                    roctracer-dev
@@ -44,9 +69,11 @@ install_ubuntu() {
       DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated ${MIOPENKERNELS}
     fi
 
-  # Cleanup
-  apt-get autoclean && apt-get clean
-  rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+    install_magma
+
+    # Cleanup
+    apt-get autoclean && apt-get clean
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 }
 
 install_centos() {
@@ -70,16 +97,12 @@ install_centos() {
   yum install -y \
                    rocm-dev \
                    rocm-utils \
-                   rocfft \
-                   miopen-hip \
-                   rocblas \
-                   hipsparse \
-                   rocrand \
+                   rocm-libs \
                    rccl \
-                   hipcub \
-                   rocthrust \
                    rocprofiler-dev \
                    roctracer-dev
+
+  install_magma
 
   # Cleanup
   yum clean all

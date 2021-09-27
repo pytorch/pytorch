@@ -6,14 +6,25 @@
 
 #ifdef USE_VULKAN_SHADERC_RUNTIME
 #include <ATen/native/vulkan/glsl.h>
-#define VK_KERNEL(name) { name##_glsl, }
+#define VK_KERNEL(name)                          \
+  ::at::native::vulkan::api::Shader::Descriptor{ \
+    name##_glsl,                                 \
+  }
 #else
 #include <ATen/native/vulkan/spv.h>
-#define VK_KERNEL(name) { name##_spv, name##_spv_len, }
+#define VK_KERNEL(name)                          \
+  ::at::native::vulkan::api::Shader::Descriptor{ \
+    name##_spv,                                  \
+    name##_spv_len,                              \
+  }
 #endif /* USE_VULKAN_SHADERC_RUNTIME */
 
 #ifdef USE_VULKAN_WRAPPER
+#ifdef USE_VULKAN_VOLK
+#include <volk.h>
+#else
 #include <vulkan_wrapper.h>
+#endif /* USE_VULKAN_VOLK */
 #else
 #include <vulkan/vulkan.h>
 #endif /* USE_VULKAN_WRAPPER */
@@ -124,6 +135,9 @@ class Handle final {
 //
 // Impl
 //
+
+template<typename Type, typename Deleter>
+constexpr Type Handle<Type, Deleter>::kNull;
 
 template<typename Type, typename Deleter>
 inline Handle<Type, Deleter>::Handle(const Type payload, Deleter deleter)

@@ -37,11 +37,28 @@ class Distribution(object):
         if validate_args is not None:
             self._validate_args = validate_args
         if self._validate_args:
-            for param, constraint in self.arg_constraints.items():
+            try:
+                arg_constraints = self.arg_constraints
+            except NotImplementedError:
+                arg_constraints = {}
+                warnings.warn(f'{self.__class__} does not define `arg_constraints`. ' +
+                              'Please set `arg_constraints = {}` or initialize the distribution ' +
+                              'with `validate_args=False` to turn off validation.')
+            for param, constraint in arg_constraints.items():
                 if constraints.is_dependent(constraint):
                     continue  # skip constraints that cannot be checked
                 if param not in self.__dict__ and isinstance(getattr(type(self), param), lazy_property):
                     continue  # skip checking lazily-constructed args
+                value = getattr(self, param)
+                valid = constraint.check(value)
+                if not valid.all():
+                    raise ValueError(
+                        f"Expected parameter {param} "
+                        f"({type(value).__name__} of shape {tuple(value.shape)}) "
+                        f"of distribution {repr(self)} "
+                        f"to satisfy the constraint {repr(constraint)}, "
+                        f"but found invalid values:\n{value}"
+                    )
                 if not constraint.check(getattr(self, param)).all():
                     raise ValueError("The parameter {} has invalid values".format(param))
         super(Distribution, self).__init__()
@@ -258,9 +275,23 @@ class Distribution(object):
             if i != 1 and j != 1 and i != j:
                 raise ValueError('Value is not broadcastable with batch_shape+event_shape: {} vs {}.'.
                                  format(actual_shape, expected_shape))
-        assert self.support is not None
-        if not self.support.check(value).all():
-            raise ValueError('The value argument must be within the support')
+        try:
+            support = self.support
+        except NotImplementedError:
+            warnings.warn(f'{self.__class__} does not define `support` to enable ' +
+                          'sample validation. Please initialize the distribution with ' +
+                          '`validate_args=False` to turn off validation.')
+            return
+        assert support is not None
+        valid = support.check(value)
+        if not valid.all():
+            raise ValueError(
+                "Expected value argument "
+                f"({type(value).__name__} of shape {tuple(value.shape)}) "
+                f"to be within the support ({repr(support)}) "
+                f"of the distribution {repr(self)}, "
+                f"but found invalid values:\n{value}"
+            )
 
     def _get_checked_instance(self, cls, _instance=None):
         if _instance is None and type(self).__init__ != cls.__init__:

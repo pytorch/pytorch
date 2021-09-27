@@ -67,7 +67,7 @@ class Binomial(Distribution):
     def _new(self, *args, **kwargs):
         return self._param.new(*args, **kwargs)
 
-    @constraints.dependent_property
+    @constraints.dependent_property(is_discrete=True, event_dim=0)
     def support(self):
         return constraints.integer_interval(0, self.total_count)
 

@@ -14,125 +14,104 @@ namespace rpc {
 // RequestCallback implementation with no Python dependencies.
 class TORCH_API RequestCallbackNoPython : public RequestCallback {
  public:
-  std::shared_ptr<JitFuture> processMessage(
-      Message& request) const override;
+  c10::intrusive_ptr<JitFuture> processMessage(
+      Message& request,
+      std::vector<c10::Stream> streams) const override;
 
  protected:
   virtual std::unique_ptr<RpcCommandBase> deserializePythonRpcCommand(
       std::unique_ptr<RpcCommandBase> rpc,
       const MessageType& messageType) const;
 
-  virtual void processScriptCall(
+  virtual c10::intrusive_ptr<JitFuture> processScriptCall(
       RpcCommandBase& rpc,
-      const std::function<void(Message)>& markComplete,
-      const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture) const;
+      std::vector<c10::Stream> streams) const;
 
-  bool processScriptCallOp(
-      ScriptCall& scriptCall,
-      const std::function<void(Message)>& markComplete,
-      std::vector<at::IValue>& stack) const;
-
-  virtual void processPythonCall(
+  virtual c10::intrusive_ptr<JitFuture> processPythonCall(
       RpcCommandBase& rpc,
-      const std::function<void(Message)>& markComplete,
-      const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture) const;
+      std::vector<c10::Stream> streams) const;
 
-  virtual TypePtr getScriptRemoteCallType(
-      ScriptRemoteCall& scriptRemoteCall) const;
+  c10::intrusive_ptr<JitFuture> assignOwnerRRef(
+      const RRefId& rrefId,
+      const RRefId& forkId,
+      c10::intrusive_ptr<JitFuture> valueFuture) const;
 
-  virtual void processScriptRemoteCall(
-      ScriptRemoteCall& scriptRemoteCall,
-      const std::function<void(void)>& postProcessing,
-      std::vector<at::IValue>& stack,
-      const c10::intrusive_ptr<OwnerRRef>& ownerRRef) const;
-
-  void processBaseScriptRemoteCall(
+  virtual c10::intrusive_ptr<JitFuture> processScriptRemoteCall(
       RpcCommandBase& rpc,
-      const std::function<void(Message)>& markComplete,
-      const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture) const;
+      std::vector<c10::Stream> streams) const;
 
-  bool processScriptRemoteCallOp(
-      ScriptRemoteCall& scriptRemoteCall,
-      const std::function<void(void)>& postProcessing,
-      std::vector<at::IValue>& stack,
-      const c10::intrusive_ptr<OwnerRRef>& ownerRRef) const;
-
-  virtual void processPythonRemoteCall(
+  virtual c10::intrusive_ptr<JitFuture> processPythonRemoteCall(
       RpcCommandBase& rpc,
-      const std::function<void(Message)>& markComplete,
-      const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture) const;
+      std::vector<c10::Stream> streams) const;
 
-  void processScriptRRefFetchCall(
-      RpcCommandBase& rpc,
-      const std::function<void(Message)>& markComplete,
-      const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture) const;
+  c10::intrusive_ptr<JitFuture> retrieveOwnerRRef(const RRefId& rrefId) const;
 
-  virtual void processPythonRRefFetchCall(
-      RpcCommandBase& rpc,
-      const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture) const;
+  c10::intrusive_ptr<JitFuture> processScriptRRefFetchCall(
+      RpcCommandBase& rpc) const;
 
-  void processRRefUserDelete(
-      RpcCommandBase& rpc,
-      const std::function<void(Message)>& markComplete) const;
+  virtual c10::intrusive_ptr<JitFuture> processPythonRRefFetchCall(
+      RpcCommandBase& rpc) const;
 
-  void processRRefChildAccept(
-      RpcCommandBase& rpc,
-      const std::function<void(Message)>& markComplete) const;
+  c10::intrusive_ptr<JitFuture> processRRefUserDelete(
+      RpcCommandBase& rpc) const;
 
-  void processRRefForkRequest(
-      RpcCommandBase& rpc,
-      const std::function<void(Message)>& markComplete) const;
+  c10::intrusive_ptr<JitFuture> processRRefChildAccept(
+      RpcCommandBase& rpc) const;
 
-  void processForwardAutogradReq(
-      RpcCommandBase& rpc,
-      const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture) const;
+  c10::intrusive_ptr<JitFuture> processRRefForkRequest(
+      RpcCommandBase& rpc) const;
 
-  void processBackwardAutogradReq(
+  c10::intrusive_ptr<JitFuture> processForwardAutogradReq(
       RpcCommandBase& rpc,
-      const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture) const;
+      std::vector<c10::Stream> streams) const;
 
-  void processCleanupAutogradContextReq(
+  c10::intrusive_ptr<JitFuture> processBackwardAutogradReq(
       RpcCommandBase& rpc,
-      const std::function<void(Message)>& markComplete) const;
+      std::vector<c10::Stream> streams) const;
 
-  void processRunWithProfilingReq(
-      RpcCommandBase& rpc,
-      const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture) const;
+  c10::intrusive_ptr<JitFuture> processCleanupAutogradContextReq(
+      RpcCommandBase& rpc) const;
+
+  c10::intrusive_ptr<JitFuture> processRunWithProfilingReq(
+      RpcCommandBase& rpc) const;
 
   virtual void handleRRefDelete(c10::intrusive_ptr<RRef>& rref) const;
 
-  void processRpc(
+  c10::intrusive_ptr<JitFuture> processRpc(
       RpcCommandBase& rpc,
       const MessageType& messageType,
-      const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture) const;
+      std::vector<c10::Stream> streams) const;
 
-  virtual void processRpcWithErrors(
+  virtual c10::intrusive_ptr<JitFuture> processRpcWithErrors(
       RpcCommandBase& rpc,
       const MessageType& messageType,
-      const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture) const;
+      std::vector<c10::Stream> streams) const;
 
-  IValue handleError(
+  c10::intrusive_ptr<Message> handleError(
       const std::exception& e,
       const MessageType messageType,
       int64_t messageId) const;
 
   virtual bool cudaAvailable() const;
 
-  virtual void processRRefBackward(
-      RpcCommandBase& rpc,
-      const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture) const;
+  virtual c10::intrusive_ptr<JitFuture> processRRefBackward(
+      RpcCommandBase& rpc) const;
+
+  // Helpers to run user-defined functions, operators and other computations.
+
+  c10::intrusive_ptr<JitFuture> runJitOperator(
+      const jit::Operator& op,
+      std::vector<at::IValue>& stack,
+      std::vector<c10::Stream> streams) const;
+
+  // Helpers to convert various kinds of objects into already-completed futures.
+
+  c10::intrusive_ptr<JitFuture> asFuture(IValue value, TypePtr type) const;
+
+  c10::intrusive_ptr<JitFuture> asFuture(
+      c10::intrusive_ptr<Message> message) const;
+
+  c10::intrusive_ptr<JitFuture> asFuture(std::exception_ptr err) const;
 };
 
 } // namespace rpc

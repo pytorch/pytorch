@@ -25,9 +25,9 @@ MPI supports CUDA only if the implementation used to build PyTorch supports it.
 +----------------+-----+-----+-----+-----+-----+-----+
 | Device         | CPU | GPU | CPU | GPU | CPU | GPU |
 +================+=====+=====+=====+=====+=====+=====+
-| send           | ✓   | ✘   | ✓   | ?   | ✘   | ✘   |
+| send           | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
-| recv           | ✓   | ✘   | ✓   | ?   | ✘   | ✘   |
+| recv           | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
 | broadcast      | ✓   | ✓   | ✓   | ?   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
@@ -43,7 +43,7 @@ MPI supports CUDA only if the implementation used to build PyTorch supports it.
 +----------------+-----+-----+-----+-----+-----+-----+
 | reduce_scatter | ✘   | ✘   | ✘   | ✘   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
-| all_to_all     | ✘   | ✘   | ✓   | ?   | ✘   | ✘   |
+| all_to_all     | ✘   | ✘   | ✓   | ?   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
 | barrier        | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
@@ -55,19 +55,19 @@ Backends that come with PyTorch
 PyTorch distributed package supports Linux (stable), MacOS (stable), and Windows (prototype).
 By default for Linux, the Gloo and NCCL backends are built and included in PyTorch
 distributed (NCCL only when building with CUDA). MPI is an optional backend that can only be
-included if you build PyTorch from source. (e.g.building PyTorch on a host that has MPI
+included if you build PyTorch from source. (e.g. building PyTorch on a host that has MPI
 installed.)
 
-.. warning ::
-    As of PyTorch v1.7, Windows support for the distributed package only covers collective
-    communications with Gloo backend, `FileStore`, and `DistributedDataParallel`. Therefore,
-    the `init_method` argument in :func:`init_process_group` must point to a file. This works
-    for both local and shared file systems:
+.. note ::
+    As of PyTorch v1.8, Windows supports all collective communications backend but NCCL,
+    If  the `init_method` argument of :func:`init_process_group` points to a file it must adhere
+    to the following schema:
 
     - Local file system, ``init_method="file:///d:/tmp/some_file"``
     - Shared file system, ``init_method="file://////{machine_name}/{share_folder_name}/some_file"``
 
-    Similarly, if you directly pass in a `store` argument, it must be a ``FileStore`` instance.
+    Same as on Linux platform, you can enable TcpStore by setting environment variables,
+    MASTER_ADDR and MASTER_PORT.
 
 Which backend to use?
 ^^^^^^^^^^^^^^^^^^^^^
@@ -174,19 +174,13 @@ joined.
 
 .. autofunction:: init_process_group
 
-.. autoclass:: Backend
-
-.. autofunction:: get_backend
-
-.. autofunction:: get_rank
-
-.. autofunction:: get_world_size
-
 .. autofunction:: is_initialized
 
 .. autofunction:: is_mpi_available
 
 .. autofunction:: is_nccl_available
+
+.. autofunction:: is_torchelastic_launched
 
 --------------------------------------------------------------------------------
 
@@ -270,12 +264,28 @@ The machine with rank 0 will be used to set up all connections.
 This is the default method, meaning that ``init_method`` does not have to be specified (or
 can be ``env://``).
 
+Post-Initialization
+-------------------
+
+Once :func:`torch.distributed.init_process_group` was run, the following functions can be used. To
+check whether the process group has already been initialized use :func:`torch.distributed.is_initialized`.
+
+.. autoclass:: Backend
+
+.. autofunction:: get_backend
+
+.. autofunction:: get_rank
+
+.. autofunction:: get_world_size
+
+--------------------------------------------------------------------------------
+
 Distributed Key-Value Store
 ---------------------------
 
 The distributed package comes with a distributed key-value store, which can be
 used to share information between processes in the group as well as to
-initialize the distributed pacakge in
+initialize the distributed package in
 :func:`torch.distributed.init_process_group` (by explicitly creating the store
 as an alternative to specifying ``init_method``.) There are 3 choices for
 Key-Value Stores: :class:`~torch.distributed.TCPStore`,
@@ -290,6 +300,7 @@ Key-Value Stores: :class:`~torch.distributed.TCPStore`,
 .. autofunction:: torch.distributed.Store.set
 .. autofunction:: torch.distributed.Store.get
 .. autofunction:: torch.distributed.Store.add
+.. autofunction:: torch.distributed.Store.compare_set
 .. autofunction:: torch.distributed.Store.wait
 .. autofunction:: torch.distributed.Store.num_keys
 .. autofunction:: torch.distributed.Store.delete_key
@@ -330,13 +341,13 @@ as they should never be created manually, but they are guaranteed to support two
 
 Synchronous and asynchronous collective operations
 --------------------------------------------------
-Every collective operation function supports the following two kinds of operations, 
+Every collective operation function supports the following two kinds of operations,
 depending on the setting of the ``async_op`` flag passed into the collective:
 
 **Synchronous operation** - the default mode, when ``async_op`` is set to ``False``.
 When the function returns, it is guaranteed that
 the collective operation is performed. In the case of CUDA operations, it is not guaranteed
-that the CUDA operation is completed, since CUDA operations are asynchronous. For CPU collectives, any 
+that the CUDA operation is completed, since CUDA operations are asynchronous. For CPU collectives, any
 further function calls utilizing the output of the collective call will behave as expected. For CUDA collectives,
 function calls utilizing the output on the same CUDA stream will behave as expected. Users must take care of
 synchronization under the scenario of running under different streams. For details on CUDA semantics such as stream
@@ -347,12 +358,15 @@ See the below script to see examples of differences in these semantics for CPU a
 returns a distributed request object. In general, you don't need to create it manually and it
 is guaranteed to support two methods:
 
-* ``is_completed()`` - in the case of CPU collectives, returns ``True`` if completed. In the case of CUDA operations, 
-  returns ``True`` if the operation has been successfully enqueued onto a CUDA stream and the output can be utilized on the 
-  default stream without further synchronization. 
+* ``is_completed()`` - in the case of CPU collectives, returns ``True`` if completed. In the case of CUDA operations,
+  returns ``True`` if the operation has been successfully enqueued onto a CUDA stream and the output can be utilized on the
+  default stream without further synchronization.
 * ``wait()`` - in the case of CPU collectives, will block the process until the operation is completed. In the case
-  of CUDA collectives, will block until the operation has been successfully enqueued onto a CUDA stream and the 
-  output can be utilized on the default stream without further synchronization. 
+  of CUDA collectives, will block until the operation has been successfully enqueued onto a CUDA stream and the
+  output can be utilized on the default stream without further synchronization.
+* ``get_future()`` - returns ``torch._C.Future`` object. Supported for NCCL, also supported for most operations on GLOO
+  and MPI, except for peer to peer operations.
+  Note: as we continue adopting Futures and merging APIs, ``get_future()`` call might become redundant.
 
 **Example**
 
@@ -368,7 +382,7 @@ It shows the explicit need to synchronize when using collective outputs on diffe
     handle = dist.all_reduce(output, async_op=True)
     # Wait ensures the operation is enqueued, but not necessarily complete.
     handle.wait()
-    # Using result on non-default stream.    
+    # Using result on non-default stream.
     with torch.cuda.stream(s):
         s.wait_stream(torch.cuda.default_stream())
         output.add_(100)
@@ -382,7 +396,7 @@ It shows the explicit need to synchronize when using collective outputs on diffe
 Collective functions
 --------------------
 
-.. autofunction:: broadcast 
+.. autofunction:: broadcast
 
 .. autofunction:: broadcast_object_list
 
@@ -408,6 +422,8 @@ Collective functions
 
 .. autofunction:: barrier
 
+.. autofunction:: monitored_barrier
+
 .. autoclass:: ReduceOp
 
 .. class:: reduce_op
@@ -417,6 +433,41 @@ Collective functions
 
     :class:`~torch.distributed.ReduceOp` is recommended to use instead.
 
+Profiling Collective Communication
+-----------------------------------------
+
+Note that you can use ``torch.profiler`` (recommended, only available after 1.8.1)  or ``torch.autograd.profiler`` to profile collective communication and point-to-point communication APIs mentioned here. All out-of-the-box backends (``gloo``,
+``nccl``, ``mpi``) are supported and collective communication usage will be rendered as expected in profiling output/traces. Profiling your code is the same as any regular torch operator:
+
+::
+
+    import torch
+    import torch.distributed as dist
+    with torch.profiler():
+        tensor = torch.randn(20, 10)
+        dist.all_reduce(tensor)
+
+Please refer to the `profiler documentation <https://pytorch.org/docs/master/profiler.html>`__ for a full overview of profiler features.
+
+Autograd-enabled communication primitives
+-----------------------------------------
+
+If you want to use collective communication functions supporting autograd
+you can find an implementation of those in the `torch.distributed.nn.*` module.
+
+Functions here are synchronous and will be inserted in the autograd graph, so
+you need to ensure that all the processes that participated in the collective operation
+will do the backward pass for the backward communication to effectively happen and
+don't cause a deadlock.
+
+Please notice that currently the only backend where all the functions are guaranteed to work is ``gloo``.
+.. autofunction:: torch.distributed.nn.broadcast
+.. autofunction:: torch.distributed.nn.gather
+.. autofunction:: torch.distributed.nn.scatter
+.. autofunction:: torch.distributed.nn.reduce
+.. autofunction:: torch.distributed.nn.all_gather
+.. autofunction:: torch.distributed.nn.all_to_all
+.. autofunction:: torch.distributed.nn.all_reduce
 
 Multi-GPU collective functions
 ------------------------------
@@ -533,3 +584,212 @@ For references on how to use it, please refer to `PyTorch example - ImageNet
 implementation <https://github.com/pytorch/examples/tree/master/imagenet>`_
 
 Note that this function requires Python 3.4 or higher.
+
+Debugging ``torch.distributed`` applications
+------------------------------------------------------
+
+Debugging distributed applications can be challenging due to hard to understand hangs, crashes, or inconsistent behavior across ranks. ``torch.distributed`` provides
+a suite of tools to help debug training applications in a self-serve fashion:
+
+As of v1.10, :func:`torch.distributed.monitored_barrier` exists as an alternative to :func:`torch.distributed.barrier` which fails with helpful information about which rank may be faulty
+when crashing, i.e. not all ranks calling into :func:`torch.distributed.monitored_barrier` within the provided timeout. :func:`torch.distributed.monitored_barrier` implements a host-side
+barrier using ``send``/``recv`` communication primitives in a process similar to acknowledgements, allowing rank 0 to report which rank(s) failed to acknowledge
+the barrier in time. As an example, consider the following function where rank 1 fails to call into :func:`torch.distributed.monitored_barrier` (in practice this could be due
+to an application bug or hang in a previous collective):
+
+::
+
+    import os
+    from datetime import timedelta
+
+    import torch
+    import torch.distributed as dist
+    import torch.multiprocessing as mp
+
+
+    def worker(rank):
+        dist.init_process_group("nccl", rank=rank, world_size=2)
+        # monitored barrier requires gloo process group to perform host-side sync.
+        group_gloo = dist.new_group(backend="gloo")
+        if rank not in [1]:
+            dist.monitored_barrier(group=group_gloo, timeout=timedelta(seconds=2))
+
+
+    if __name__ == "__main__":
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "29501"
+        mp.spawn(worker, nprocs=2, args=())
+
+The following error message is produced on rank 0, allowing the user to determine which rank(s) may be faulty and investigate further:
+
+::
+
+  RuntimeError: Rank 1 failed to pass monitoredBarrier in 2000 ms
+   Original exception:
+  [gloo/transport/tcp/pair.cc:598] Connection closed by peer [2401:db00:eef0:1100:3560:0:1c05:25d]:8594
+
+
+Next, the environment variable ``TORCH_DISTRIBUTED_DEBUG``  can be used to trigger additional useful logging and collective synchronization checks to ensure all ranks
+are synchronized appropriately. ``TORCH_DISTRIBUTED_DEBUG`` can be set to either ``OFF`` (default), ``INFO``, or ``DETAIL`` depending on the debugging level
+required. Please note that the most verbose option, ``DETAIL`` may impact the application performance and thus should only be used when debugging issues.
+
+Setting ``TORCH_DISTRIBUTED_DEBUG=INFO`` will result in additional debug logging when models trained with :func:`torch.nn.parallel.DistributedDataParallel` are initialized, and
+``TORCH_DISTRIBUTED_DEBUG=DETAIL`` will additionally log runtime performance statistics a select number of iterations. These runtime statistics
+include data such as forward time, backward time, gradient communication time, etc. As an example, given the following application:
+
+::
+
+    import os
+
+    import torch
+    import torch.distributed as dist
+    import torch.multiprocessing as mp
+
+
+    class TwoLinLayerNet(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.a = torch.nn.Linear(10, 10, bias=False)
+            self.b = torch.nn.Linear(10, 1, bias=False)
+
+        def forward(self, x):
+            a = self.a(x)
+            b = self.b(x)
+            return (a, b)
+
+
+    def worker(rank):
+        dist.init_process_group("nccl", rank=rank, world_size=2)
+        torch.cuda.set_device(rank)
+        print("init model")
+        model = TwoLinLayerNet().cuda()
+        print("init ddp")
+        ddp_model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank])
+
+        inp = torch.randn(10, 10).cuda()
+        print("train")
+
+        for _ in range(20):
+            output = ddp_model(inp)
+            loss = output[0] + output[1]
+            loss.sum().backward()
+
+
+    if __name__ == "__main__":
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "29501"
+        os.environ[
+            "TORCH_DISTRIBUTED_DEBUG"
+        ] = "DETAIL"  # set to DETAIL for runtime logging.
+        mp.spawn(worker, nprocs=2, args=())
+
+The following logs are rendered at initialization time:
+
+::
+
+  I0607 16:10:35.739390 515217 logger.cpp:173] [Rank 0]: DDP Initialized with:
+  broadcast_buffers: 1
+  bucket_cap_bytes: 26214400
+  find_unused_parameters: 0
+  gradient_as_bucket_view: 0
+  is_multi_device_module: 0
+  iteration: 0
+  num_parameter_tensors: 2
+  output_device: 0
+  rank: 0
+  total_parameter_size_bytes: 440
+  world_size: 2
+  backend_name: nccl
+  bucket_sizes: 440
+  cuda_visible_devices: N/A
+  device_ids: 0
+  dtypes: float
+  master_addr: localhost
+  master_port: 29501
+  module_name: TwoLinLayerNet
+  nccl_async_error_handling: N/A
+  nccl_blocking_wait: N/A
+  nccl_debug: WARN
+  nccl_ib_timeout: N/A
+  nccl_nthreads: N/A
+  nccl_socket_ifname: N/A
+  torch_distributed_debug: INFO
+
+
+The following logs are rendered during runtime (when ``TORCH_DISTRIBUTED_DEBUG=DETAIL`` is set):
+
+::
+
+  I0607 16:18:58.085681 544067 logger.cpp:344] [Rank 1 / 2] Training TwoLinLayerNet unused_parameter_size=0
+   Avg forward compute time: 40838608
+   Avg backward compute time: 5983335
+  Avg backward comm. time: 4326421
+   Avg backward comm/comp overlap time: 4207652
+  I0607 16:18:58.085693 544066 logger.cpp:344] [Rank 0 / 2] Training TwoLinLayerNet unused_parameter_size=0
+   Avg forward compute time: 42850427
+   Avg backward compute time: 3885553
+  Avg backward comm. time: 2357981
+   Avg backward comm/comp overlap time: 2234674
+
+
+In addition, ``TORCH_DISTRIBUTED_DEBUG=INFO`` enhances crash logging in :func:`torch.nn.parallel.DistributedDataParallel` due to unused parameters in the model. Currently, ``find_unused_parameters=True``
+must be passed into :func:`torch.nn.parallel.DistributedDataParallel` initialization if there are parameters that may be unused in the forward pass, and as of v1.10, all model outputs are required
+to be used in loss computation as :func:`torch.nn.parallel.DistributedDataParallel` does not support unused parameters in the backwards pass. These constraints are challenging especially for larger
+models, thus when crashing with an error, :func:`torch.nn.parallel.DistributedDataParallel` will log the fully qualified name of all parameters that went unused. For example, in the above application,
+if we modify ``loss`` to be instead computed as ``loss = output[1]``, then ``TwoLinLayerNet.a`` does not receive a gradient in the backwards pass, and
+thus results in ``DDP`` failing. On a crash, the user is passed information about parameters which went unused, which may be challenging to manually find for large models:
+
+
+::
+
+  RuntimeError: Expected to have finished reduction in the prior iteration before starting a new one. This error indicates that your module has parameters that were not used in producing loss. You can enable unused parameter detection by passing
+   the keyword argument `find_unused_parameters=True` to `torch.nn.parallel.DistributedDataParallel`, and by
+  making sure all `forward` function outputs participate in calculating loss.
+  If you already have done the above, then the distributed data parallel module wasn't able to locate the output tensors in the return value of your module's `forward` function. Please include the loss function and the structure of the return va
+  lue of `forward` of your module when reporting this issue (e.g. list, dict, iterable).
+  Parameters which did not receive grad for rank 0: a.weight
+  Parameter indices which did not receive grad for rank 0: 0
+
+
+Setting ``TORCH_DISTRIBUTED_DEBUG=DETAIL`` will trigger additional consistency and synchronization checks on every collective call issued by the user
+either directly or indirectly (such as DDP ``allreduce``). This is done by creating a wrapper process group that wraps all process groups returned by
+:func:`torch.distributed.init_process_group` and :func:`torch.distributed.new_group` APIs. As a result, these APIs will return a wrapper process group that can be used exactly like a regular process
+group, but performs consistency checks before dispatching the collective to an underlying process group. Currently, these checks include a :func:`torch.distributed.monitored_barrier`,
+which ensures all ranks complete their outstanding collective calls and reports ranks which are stuck. Next, the collective itself is checked for consistency by
+ensuring all collective functions match and are called with consistent tensor shapes. If this is not the case, a detailed error report is included when the
+application crashes, rather than a hang or uninformative error message. As an example, consider the following function which has mismatched input shapes into
+:func:`torch.distributed.all_reduce`:
+
+::
+
+    import torch
+    import torch.distributed as dist
+    import torch.multiprocessing as mp
+
+
+    def worker(rank):
+        dist.init_process_group("nccl", rank=rank, world_size=2)
+        torch.cuda.set_device(rank)
+        tensor = torch.randn(10 if rank == 0 else 20).cuda()
+        dist.all_reduce(tensor)
+        torch.cuda.synchronize(device=rank)
+
+
+    if __name__ == "__main__":
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "29501"
+        os.environ["TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"
+        mp.spawn(worker, nprocs=2, args=())
+
+With the ``NCCL`` backend, such an application would likely result in a hang which can be challenging to root-cause in nontrivial scenarios. If the user enables
+``TORCH_DISTRIBUTED_DEBUG=DETAIL`` and reruns the application, the following error message reveals the root cause:
+
+::
+
+    work = default_pg.allreduce([tensor], opts)
+    RuntimeError: Error when verifying shape tensors for collective ALLREDUCE on rank 0. This likely indicates that input shapes into the collective are mismatched across ranks. Got shapes:  10
+    [ torch.LongTensor{1} ]
+
+In addition, `TORCH_DISTRIBUTED_DEBUG=DETAIL` can be used in conjunction with `TORCH_SHOW_CPP_STACKTRACES=1` to log the entire callstack when a collective desynchronization is detected. These
+collective desynchronization checks will work for all applications that use ``c10d`` collective calls backed by process groups created with the
+:func:`torch.distributed.init_process_group` and :func:`torch.distributed.new_group` APIs.

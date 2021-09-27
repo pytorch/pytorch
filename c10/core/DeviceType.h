@@ -7,8 +7,8 @@
 
 #include <c10/macros/Macros.h>
 
-#include <ostream>
 #include <functional>
+#include <ostream>
 
 namespace c10 {
 
@@ -21,43 +21,54 @@ enum class DeviceType : int8_t {
   IDEEP = 5, // IDEEP.
   HIP = 6, // AMD HIP
   FPGA = 7, // FPGA
-  MSNPU = 8, // MSNPU
+  ORT = 8, // ONNX Runtime / Microsoft
   XLA = 9, // XLA / TPU
   Vulkan = 10, // Vulkan
-  Metal = 11, //Metal
+  Metal = 11, // Metal
+  XPU = 12, // XPU
+  MLC = 13, // ML Compute / Apple
+  Meta = 14, // Meta (tensors with no data)
+  HPU = 15, // HPU / HABANA
+  VE = 16, // SX-Aurora / NEC
+  Lazy = 17, // Lazy Tensors
   // NB: If you add more devices:
   //  - Change the implementations of DeviceTypeName and isValidDeviceType
   //    in DeviceType.cpp
   //  - Change the number below
-  COMPILE_TIME_MAX_DEVICE_TYPES = 12,
+  COMPILE_TIME_MAX_DEVICE_TYPES = 18,
 };
 
 constexpr DeviceType kCPU = DeviceType::CPU;
 constexpr DeviceType kCUDA = DeviceType::CUDA;
 constexpr DeviceType kHIP = DeviceType::HIP;
 constexpr DeviceType kFPGA = DeviceType::FPGA;
-constexpr DeviceType kMSNPU = DeviceType::MSNPU;
+constexpr DeviceType kORT = DeviceType::ORT;
 constexpr DeviceType kXLA = DeviceType::XLA;
+constexpr DeviceType kMLC = DeviceType::MLC;
+constexpr DeviceType kMeta = DeviceType::Meta;
 constexpr DeviceType kVulkan = DeviceType::Vulkan;
 constexpr DeviceType kMetal = DeviceType::Metal;
+constexpr DeviceType kXPU = DeviceType::XPU;
+constexpr DeviceType kHPU = DeviceType::HPU;
+constexpr DeviceType kVE = DeviceType::VE;
+constexpr DeviceType kLazy = DeviceType::Lazy;
 
 // define explicit int constant
 constexpr int COMPILE_TIME_MAX_DEVICE_TYPES =
     static_cast<int>(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES);
 
-static_assert(COMPILE_TIME_MAX_DEVICE_TYPES <= 16,
+static_assert(
+    COMPILE_TIME_MAX_DEVICE_TYPES <= 18,
     "Hey!  You seem to be adding a lot of new DeviceTypes.  The intent was "
     "for this constant to reflect the actual number of DeviceTypes we support "
     "in PyTorch; it's important that this number is not too large as we "
     "use this to allocate stack arrays in some places in our code.  If you "
-    "are indeed just adding the 17th device type, feel free to change "
+    "are indeed just adding the 18th device type, feel free to change "
     "the check to 32; but if you are adding some sort of extensible device "
     "types registration, please be aware that you are affecting code that "
     "this number is small.  Try auditing uses of this constant.");
 
-C10_API std::string DeviceTypeName(
-    DeviceType d,
-    bool lower_case = false);
+C10_API std::string DeviceTypeName(DeviceType d, bool lower_case = false);
 
 C10_API bool isValidDeviceType(DeviceType d);
 
@@ -66,7 +77,8 @@ C10_API std::ostream& operator<<(std::ostream& stream, DeviceType type);
 } // namespace c10
 
 namespace std {
-template <> struct hash<c10::DeviceType> {
+template <>
+struct hash<c10::DeviceType> {
   std::size_t operator()(c10::DeviceType k) const {
     return std::hash<int>()(static_cast<int>(k));
   }
@@ -74,5 +86,5 @@ template <> struct hash<c10::DeviceType> {
 } // namespace std
 
 namespace torch {
-  using c10::DeviceType;
+using c10::DeviceType;
 }

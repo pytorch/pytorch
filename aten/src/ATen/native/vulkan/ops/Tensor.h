@@ -2,8 +2,10 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/native/vulkan/ops/Common.h>
+#include <ATen/ATen.h>
+#include <ATen/native/vulkan/api/api.h>
 #include <ATen/native/vulkan/VulkanOpaqueTensorImpl.h>
+#include <c10/util/accumulate.h>
 
 namespace at {
 namespace native {
@@ -157,10 +159,10 @@ class vTensor final {
   */
 
   template<typename Type>
-  Future<Type, Access::Read> host() const &;
+  Future<Type, Access::Read> host(api::Command::Buffer&) const &;
 
   template<typename Type, Access::Flags kAccess>
-  Future<Type, kAccess> host() &;
+  Future<Type, kAccess> host(api::Command::Buffer&) &;
 
   /*
     Device access - these functions will be expensive if they trigger a buffer
@@ -178,14 +180,10 @@ class vTensor final {
     predictability of usage and efficiency.
   */
 
-  Buffer::Object buffer(Stage::Flags) const &;
-  Buffer::Object buffer(Stage::Flags, Access::Flags) &;
   Buffer::Object buffer(api::Command::Buffer&, Stage::Flags) const &;
   Buffer::Object buffer(api::Command::Buffer&, Stage::Flags, Access::Flags) &;
 
   bool has_image() const;
-  Image::Object image(Stage::Flags) const &;
-  Image::Object image(Stage::Flags, Access::Flags) &;
   Image::Object image(api::Command::Buffer&, Stage::Flags) const &;
   Image::Object image(api::Command::Buffer&, Stage::Flags, Access::Flags) &;
 
@@ -210,26 +208,22 @@ class vTensor final {
     Host
   */
 
-  const vTensor* host() const;
-  vTensor* host(Access::Flags access);
+  const vTensor* host(api::Command::Buffer&) const;
+  vTensor* host(api::Command::Buffer&, Access::Flags);
 
   template<typename Type>
-  Future<Type, Access::Read> host() const && = delete;
+  Future<Type, Access::Read> host(api::Command::Buffer&) const && = delete;
 
   template<typename Type, Access::Flags kAccess>
-  Future<Type, kAccess> host() && = delete;
+  Future<Type, kAccess> host(api::Command::Buffer&) && = delete;
 
   /*
     Device
   */
 
-  Buffer::Object buffer(Stage::Flags) const && = delete;
-  Buffer::Object buffer(Stage::Flags, Access::Flags) && = delete;
   Buffer::Object buffer(api::Command::Buffer&, Stage::Flags) const && = delete;
   Buffer::Object buffer(api::Command::Buffer&, Stage::Flags, Access::Flags) && = delete;
 
-  Image::Object image(Stage::Flags) const && = delete;
-  Image::Object image(Stage::Flags, Access::Flags) && = delete;
   Image::Object image(api::Command::Buffer&, Stage::Flags) const && = delete;
   Image::Object image(api::Command::Buffer&, Stage::Flags, Access::Flags) && = delete;
 
@@ -249,21 +243,22 @@ class vTensor final {
     ~View() = default;
 
     /*
-      Device
+      Buffer
     */
 
-    Buffer& buffer(Stage::Flags, Access::Flags) const;
     Buffer& buffer(api::Command::Buffer&, Stage::Flags, Access::Flags) const;
 
+    /*
+      Image
+    */
+
     bool has_image() const;
-    Image& image(Stage::Flags, Access::Flags) const;
     Image& image(api::Command::Buffer&, Stage::Flags, Access::Flags) const;
 
     /*
       Host
     */
 
-    Buffer& staging(Stage::Flags, Access::Flags) const;
     Buffer& staging(api::Command::Buffer&, Stage::Flags, Access::Flags) const;
     vTensor::Memory& wait() const;
 
@@ -331,6 +326,11 @@ class vTensor final {
       Component::Flags available_;
       Component::Flags dirty_;
       Bundle bundle_;
+
+     private:
+     #ifdef VULKAN_TENSOR_DEBUG
+      friend class View;
+     #endif /* VULKAN_TENSOR_DEBUG */
     };
 
     typedef State::Component Component;
@@ -343,7 +343,7 @@ class vTensor final {
     Image& image(CMD&, Stage::Flags, Access::Flags) const;
     Buffer& staging() const;
     Buffer& staging(CMD&, Stage::Flags, Access::Flags) const;
-    Fence& fence() const;
+    Fence& fence(Access::Flags) const;
 
     // Validation
     void verify() const;
@@ -369,10 +369,12 @@ class vTensor final {
     c10::SmallVector<int64_t, 6u> strides_;
 
    private:
-    // Debug
+   #ifdef VULKAN_TENSOR_DEBUG
+    friend class vTensor;
     friend std::ostream& operator<<(
       std::ostream&,
       const View::State::Bundle&);
+   #endif /* VULKAN_TENSOR_DEBUG */
   };
 
   // Even at the cost of a heap allocation plus the resulting negative impact
@@ -396,14 +398,14 @@ class vTensor final {
   std::shared_ptr<View> view_;
 
  private:
-  // Debug
+ #ifdef VULKAN_TENSOR_DEBUG
   friend std::ostream& operator<<(
       std::ostream&,
       const View::State::Bundle&);
+ #endif /* VULKAN_TENSOR_DEBUG */
 };
 
-const vTensor& convert(const Tensor& tensor);
-vTensor& convert(Tensor& tensor);
+vTensor& convert(const Tensor& tensor);
 Tensor convert(const vTensor& tensor);
 
 using vTensorImpl = VulkanOpaqueTensorImpl<vTensor>;
@@ -485,13 +487,15 @@ vTensor::Future<Type, kAccess>::wait() const & {
 }
 
 template<typename Type>
-inline vTensor::Future<Type, vTensor::Access::Read> vTensor::host() const & {
-  return Future<Type, vTensor::Access::Read>(host());
+inline vTensor::Future<Type, vTensor::Access::Read>
+vTensor::host(api::Command::Buffer& command_buffer) const & {
+  return Future<Type, vTensor::Access::Read>(host(command_buffer));
 }
 
 template<typename Type, vTensor::Access::Flags kAccess>
-inline vTensor::Future<Type, kAccess> vTensor::host() & {
-  return Future<Type, kAccess>(host(kAccess));
+inline vTensor::Future<Type, kAccess>
+vTensor::host(api::Command::Buffer& command_buffer) & {
+  return Future<Type, kAccess>(host(command_buffer, kAccess));
 }
 
 inline bool vTensor::has_image() const {
@@ -512,7 +516,7 @@ inline IntArrayRef vTensor::sizes() const {
 
 inline size_t vTensor::nbytes() const {
   return c10::elementSize(c10::typeMetaToScalarType(options().dtype())) *
-         prod_intlist(sizes());
+         c10::multiply_integers(sizes());
 }
 
 inline IntArrayRef vTensor::strides() const {
@@ -583,18 +587,7 @@ inline void vTensor::View::State::set_dirty(
   dirty_ |= components;
 }
 
-inline const vTensor& convert(const Tensor& tensor) {
-  TORCH_INTERNAL_ASSERT(
-      tensor.is_vulkan(),
-      "Vulkan tensor expected!");
-
-  const vTensorImpl* const impl =
-      static_cast<const vTensorImpl*>(tensor.unsafeGetTensorImpl());
-
-  return impl->opaque_handle();
-}
-
-inline vTensor& convert(Tensor& tensor) {
+inline vTensor& convert(const Tensor& tensor) {
   TORCH_INTERNAL_ASSERT(
       tensor.is_vulkan(),
       "Vulkan tensor expected!");

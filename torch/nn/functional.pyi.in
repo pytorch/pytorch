@@ -1,7 +1,7 @@
 from torch import Tensor
 from torch.types import _size
 from typing import Any, Optional, Tuple, Dict, List, Callable, Sequence, Union
-from .common_types import _ratio_any_t, _size_1_t, _size_2_t, _size_3_t, _size_2_opt_t, _size_3_opt_t
+from .common_types import _ratio_any_t, _size_any_t, _size_1_t, _size_2_t, _size_3_t, _size_2_opt_t, _size_3_opt_t
 
 # 'TypedDict' is a new accepted type that represents a dictionary with a fixed set of allowed keys.
 # It is standards-track but not in `typing` yet. We leave this hear to be uncommented once the feature
@@ -182,6 +182,7 @@ def bilinear(input1: Tensor, input2: Tensor, weight: Tensor, bias: Optional[Tens
 
 def silu(input: Tensor, inplace: bool = False) -> Tensor: ...
 
+def mish(input: Tensor, inplace: bool = False) -> Tensor: ...
 
 def hardswish(input: Tensor, inplace: bool = False) -> Tensor: ...
 
@@ -193,7 +194,7 @@ def embedding(input: Tensor, weight: Tensor, padding_idx: Optional[int] = ..., m
 def embedding_bag(input: Tensor, weight: Tensor, offsets: Optional[Tensor] = ..., max_norm: Optional[float] = ...,
                   norm_type: float = ..., scale_grad_by_freq: bool = ..., mode: str = ...,
                   sparse: bool = ..., per_sample_weights: Optional[Tensor] = ...,
-                  include_last_offset: bool = ...) -> Tensor: ...
+                  include_last_offset: bool = ..., padding_idx: Optional[int] = ...) -> Tensor: ...
 
 def batch_norm(input: Tensor, running_mean: Optional[Tensor], running_var: Optional[Tensor],
                weight: Optional[Tensor] = ..., bias: Optional[Tensor] = ..., training: bool = ...,
@@ -205,7 +206,7 @@ def instance_norm(input: Tensor, running_mean: Optional[Tensor] = ..., running_v
                   momentum: float = ..., eps: float = ...) -> Tensor: ...
 
 
-def layer_norm(input: Tensor, normalized_shape: List[int], weight: Optional[Tensor] = ..., bias: Optional[Tensor] = ...,
+def layer_norm(input: Tensor, normalized_shape: Sequence[int], weight: Optional[Tensor] = ..., bias: Optional[Tensor] = ...,
                eps: float = ...) -> Tensor: ...
 
 
@@ -229,12 +230,17 @@ def poisson_nll_loss(input: Tensor, target: Tensor, log_input: bool = ..., full:
                      reduction: str = ...) -> Tensor: ...
 
 
+def gaussian_nll_loss(input: Tensor, target: Tensor, var: Tensor, full: Optional[bool] = ...,
+                      eps: Optional[float] = ..., reduction: Optional[str] = ...) -> Tensor: ...
+
+
 def kl_div(input: Tensor, target: Tensor, size_average: Optional[bool] = ..., reduce: Optional[bool] = ...,
            reduction: str = ..., log_target: bool = ...) -> Tensor: ...
 
 
 def cross_entropy(input: Tensor, target: Tensor, weight: Optional[Tensor] = ..., size_average: Optional[bool] = ...,
-                  ignore_index: int = ..., reduce: Optional[bool] = ..., reduction: str = ...) -> Tensor: ...
+                  ignore_index: int = ..., reduce: Optional[bool] = ..., reduction: str = ...,
+                  label_smoothing: float = ...) -> Tensor: ...
 
 
 def binary_cross_entropy(input: Tensor, target: Tensor, weight: Optional[Tensor] = ...,
@@ -249,6 +255,9 @@ def binary_cross_entropy_with_logits(input: Tensor, target: Tensor, weight: Opti
 
 def smooth_l1_loss(input: Tensor, target: Tensor, size_average: Optional[bool] = ..., reduce: Optional[bool] = ...,
                    reduction: str = ..., beta: float = ...) -> Tensor: ...
+
+
+def huber_loss(input: Tensor, target: Tensor, reduction: str = ..., delta: float = ...) -> Tensor: ...
 
 
 def l1_loss(input: Tensor, target: Tensor, size_average: Optional[bool] = ..., reduce: Optional[bool] = ...,
@@ -335,12 +344,12 @@ def normalize(input: Tensor, p: float = ..., dim: int = ..., eps: float = ...,
 def assert_int_or_pair(arg: Any, arg_name: Any, message: Any) -> None: ...
 
 
-def unfold(input: Tensor, kernel_size: _size, dilation: _size = ..., padding: _size = ...,
-           stride: _size = ...) -> Tensor: ...
+def unfold(input: Tensor, kernel_size: _size_any_t, dilation: _size_any_t = ..., padding: _size_any_t = ...,
+           stride: _size_any_t = ...) -> Tensor: ...
 
 
-def fold(input: Tensor, output_size: _size, kernel_size: _size, dilation: _size = ..., padding: _size = ...,
-         stride: _size = ...) -> Tensor: ...
+def fold(input: Tensor, output_size: _size_any_t, kernel_size: _size_any_t, dilation: _size_any_t = ..., padding: _size_any_t = ...,
+         stride: _size_any_t = ...) -> Tensor: ...
 
 
 def multi_head_attention_forward(query: Tensor,

@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/frontend/parser.h>
+
 #include <c10/util/Optional.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
@@ -114,7 +115,8 @@ struct ParserImpl {
       } break;
       case TK_TRUE:
       case TK_FALSE:
-      case TK_NONE: {
+      case TK_NONE:
+      case TK_NONE_TYPE: {
         auto k = L.cur().kind;
         auto r = L.cur().range;
         prefix = create_compound(k, r, {});
@@ -262,13 +264,15 @@ struct ParserImpl {
   }
   Expr parseExp(int precedence) {
     TreeRef prefix;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int unary_prec;
     if (shared.isUnary(L.cur().kind, &unary_prec)) {
       auto kind = L.cur().kind;
       auto pos = L.cur().range;
       L.next();
-      auto unary_kind =
-          kind == '*' ? TK_STARRED : kind == '-' ? TK_UNARY_MINUS : kind;
+      auto unary_kind = kind == '*' ? TK_STARRED
+          : kind == '-'             ? TK_UNARY_MINUS
+                                    : kind;
       auto subexp = parseExp(unary_prec);
       // fold '-' into constant numbers, so that attributes can accept
       // things like -1
@@ -280,6 +284,7 @@ struct ParserImpl {
     } else {
       prefix = parseBaseExp();
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int binary_prec;
     while (shared.isBinary(L.cur().kind, &binary_prec)) {
       if (binary_prec <= precedence) // not allowed to parse something which is

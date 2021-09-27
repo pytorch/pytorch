@@ -11,6 +11,7 @@ namespace caffe2 {
   };                                                                   \
   REGISTER_CPU_OPERATOR(OP_NAME, TemplatePutOp<STAT_NAME>);
 
+// NOLINTNEXTLINE(modernize-pass-by-value,cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_TEMPLATED_STAT_PUT_OP(
     AveragePut,
     AveragePutStat,
@@ -43,6 +44,7 @@ OPERATOR_SCHEMA(AveragePut)
         "value",
         "(*Tensor`<number>`*): A scalar tensor, representing any numeric value");
 
+// NOLINTNEXTLINE(modernize-pass-by-value,cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_TEMPLATED_STAT_PUT_OP(
     IncrementPut,
     IncrementPutStat,
@@ -75,6 +77,7 @@ OPERATOR_SCHEMA(IncrementPut)
         "value",
         "(*Tensor`<number>`*): A scalar tensor, representing any numeric value");
 
+// NOLINTNEXTLINE(modernize-pass-by-value,cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_TEMPLATED_STAT_PUT_OP(
     StdDevPut,
     StdDevPutStat,

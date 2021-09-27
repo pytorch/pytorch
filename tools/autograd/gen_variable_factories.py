@@ -5,11 +5,13 @@
 import re
 from typing import Optional, List
 
-from tools.codegen.api.types import *
-import tools.codegen.api.cpp as cpp
+from tools.codegen.api.types import CppSignatureGroup
+from tools.codegen.api import cpp
 import tools.codegen.api.python as python
-from tools.codegen.gen import with_native_function, parse_native_yaml, FileManager, mapMaybe
-from tools.codegen.model import *
+from tools.codegen.gen import parse_native_yaml, FileManager
+from tools.codegen.context import with_native_function
+from tools.codegen.utils import mapMaybe
+from tools.codegen.model import NativeFunction, TensorOptionsArguments, Variant
 
 OPTIONAL_TYPE_PATTERN = re.compile(r"c10::optional<(.+)>")
 TYPE_PATTERN = re.compile(r"(?:const\s+)?([A-Z]\w+)")
@@ -32,7 +34,7 @@ def fully_qualified_type(argument_type: str) -> str:
     return maybe_optional_type(qualified_type, is_opt)
 
 def gen_variable_factories(out: str, native_yaml_path: str, template_path: str) -> None:
-    native_functions = parse_native_yaml(native_yaml_path)
+    native_functions = parse_native_yaml(native_yaml_path).native_functions
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
     fm.write_with_template('variable_factories.h', 'variable_factories.h', lambda: {
         'generated_comment': '@' + f'generated from {fm.template_dir}/variable_factories.h',
@@ -72,12 +74,7 @@ def process_function(f: NativeFunction) -> Optional[str]:
 
     return f"""\
 inline at::Tensor {name}({', '.join(formals)}) {{
-  at::Tensor tensor = ([&]() {{
-    at::AutoNonVariableTypeMode non_var_type_mode(true);
-    return at::{name}({', '.join(exprs)});
-  }})();
-  at::Tensor result =
-    autograd::make_variable(std::move(tensor), /*requires_grad=*/{requires_grad});
-  return result;
+  at::AutoDispatchBelowADInplaceOrView guard;
+  return autograd::make_variable(at::{name}({', '.join(exprs)}), /*requires_grad=*/{requires_grad});
 }}
 """

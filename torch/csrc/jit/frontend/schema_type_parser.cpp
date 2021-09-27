@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/frontend/schema_type_parser.h>
+
 #include <ATen/core/alias_info.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/jit_type.h>
@@ -11,6 +12,7 @@
 using c10::AliasInfo;
 using c10::BoolType;
 using c10::CapsuleType;
+using c10::ComplexType;
 using c10::DeviceObjType;
 using c10::DictType;
 using c10::FloatType;
@@ -30,6 +32,7 @@ using c10::StringType;
 using c10::Symbol;
 using c10::TensorType;
 using c10::TupleType;
+using c10::UnionType;
 using c10::VarType;
 
 namespace torch {
@@ -54,16 +57,18 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"Scalar", NumberType::get()},
       {"str", StringType::get()},
       {"float", FloatType::get()},
+      {"complex", ComplexType::get()},
       {"int", IntType::get()},
       {"bool", BoolType::get()},
       {"None", NoneType::get()},
+      {"NoneType", NoneType::get()},
       {"Capsule", CapsuleType::get()},
       {"Any", at::AnyType::get()},
       {"AnyClassType", at::AnyClassType::get()},
       {"AnyEnumType", at::AnyEnumType::get()},
   };
   auto tok = L.cur();
-  if (!L.nextIf(TK_NONE)) {
+  if (!L.nextIf(TK_NONE) && !L.nextIf(TK_NONE_TYPE)) {
     L.expect(TK_IDENT);
   }
   std::string text = tok.text();
@@ -163,6 +168,7 @@ c10::optional<c10::Device> SchemaTypeParser::tryToParseDeviceType() {
     if (L.cur().kind == ':') {
       L.expect(':');
       const std::string& num = L.expect(TK_NUMBER).text();
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       std::string::size_type num_len;
       device_idx = c10::stoi(num, &num_len);
     }
@@ -175,6 +181,7 @@ c10::optional<c10::Device> SchemaTypeParser::tryToParseDeviceType() {
 c10::optional<bool> SchemaTypeParser::tryToParseRequiresGrad() {
   L.expect('=');
   const std::string& num = L.expect(TK_NUMBER).text();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::string::size_type num_len;
   return (bool)c10::stoi(num, &num_len);
 }
@@ -227,8 +234,9 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
         L.expect('=');
         parseList('[', ',', ']', [&] {
           const std::string& num = L.expect(TK_NUMBER).text();
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           std::string::size_type num_len;
-          size_t stride = c10::stoi(num, &num_len);
+          auto stride = c10::stoll(num, &num_len);
           strides.push_back(stride);
         });
         return;
@@ -251,8 +259,9 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
       return;
     }
     const std::string& num = L.expect(TK_NUMBER).text();
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::string::size_type num_len;
-    size_t dim = c10::stoi(num, &num_len);
+    auto dim = c10::stoll(num, &num_len);
     dims.emplace_back(dim);
   });
   if (seen_strides) {
@@ -323,6 +332,18 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
     L.expect(')');
     alias_info = parseAliasAnnotation();
     value = DictType::create(key_type, value_type);
+  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Union") {
+    L.next();
+    L.expect('(');
+    std::vector<TypePtr> types;
+    types.emplace_back(parseType().first);
+    while (L.cur().kind != ')') {
+      L.expect(',');
+      types.emplace_back(parseType().first);
+    }
+    L.expect(')');
+    alias_info = parseAliasAnnotation();
+    value = UnionType::create(types);
   } else if (
       complete_tensor_types && L.cur().kind == TK_IDENT &&
       parseTensorDType(L.cur().text())) {

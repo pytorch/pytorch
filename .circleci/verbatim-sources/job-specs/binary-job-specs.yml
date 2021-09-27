@@ -22,14 +22,14 @@
         command: |
             ls -lah /final_pkgs
     - run:
-        name: save binary size
+        name: upload build & binary data
         no_output_timeout: "5m"
         command: |
             source /env
             cd /pytorch && export COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
             python3 -mpip install requests && \
             SCRIBE_GRAPHQL_ACCESS_TOKEN=${SCRIBE_GRAPHQL_ACCESS_TOKEN} \
-            python3 /pytorch/.circleci/scripts/upload_binary_size_to_scuba.py || exit 0
+            python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
     - persist_to_workspace:
         root: /
         paths: final_pkgs
@@ -45,7 +45,7 @@
   binary_linux_test:
     <<: *binary_linux_test_upload_params
     machine:
-        image: ubuntu-1604:202007-01
+        image: ubuntu-2004:202104-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
@@ -108,7 +108,7 @@
   smoke_linux_test:
     <<: *binary_linux_test_upload_params
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -198,10 +198,48 @@
         root: /Users/distiller/project
         paths: final_pkgs
 
+    - store_artifacts:
+        path: /Users/distiller/project/final_pkgs
+
+  binary_macos_arm64_build:
+    <<: *binary_mac_params
+    macos:
+      xcode: "12.3.0"
+    steps:
+    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
+    - checkout
+    - run:
+        <<: *binary_checkout
+    - run:
+        <<: *binary_populate_env
+    - brew_update
+    - run:
+        <<: *binary_install_miniconda
+
+    - run:
+        name: Build
+        no_output_timeout: "90m"
+        command: |
+          # Do not set -u here; there is some problem with CircleCI
+          # variable expansion with PROMPT_COMMAND
+          set -ex -o pipefail
+          export CROSS_COMPILE_ARM64=1
+          script="/Users/distiller/project/pytorch/.circleci/scripts/binary_macos_build.sh"
+          cat "$script"
+          source "$script"
+
+    - persist_to_workspace:
+        root: /Users/distiller/project
+        paths: final_pkgs
+
+    - store_artifacts:
+        path: /Users/distiller/project/final_pkgs
+
+
   binary_ios_build:
     <<: *pytorch_ios_params
     macos:
-      xcode: "12.0"
+      xcode: "12.5.1"
     steps:
     - attach_workspace:
         at: ~/workspace
@@ -228,7 +266,7 @@
   binary_ios_upload:
     <<: *pytorch_ios_params
     macos:
-      xcode: "12.0"
+      xcode: "12.5.1"
     steps:
     - attach_workspace:
         at: ~/workspace
@@ -270,6 +308,8 @@
     - persist_to_workspace:
         root: "C:/w"
         paths: final_pkgs
+    - store_artifacts:
+        path: C:/w/final_pkgs
 
   binary_windows_test:
     <<: *binary_windows_params
@@ -352,4 +392,3 @@
           command: |
               ANACONDA_API_TOKEN="${CONDA_PYTORCHBOT_TOKEN}" \
               scripts/release/anaconda-prune/run.sh
-

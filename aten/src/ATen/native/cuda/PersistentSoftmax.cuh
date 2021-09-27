@@ -1,12 +1,13 @@
 #pragma once
 
 #include <assert.h>
-#include <cuda_fp16.h>
 #include <cfloat>
 #include <limits>
 #include <stdint.h>
 #include <cuda_fp16.h>
 #include <c10/macros/Macros.h>
+
+#include <ATen/cuda/DeviceUtils.cuh>
 
 namespace {
 

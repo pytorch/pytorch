@@ -28,19 +28,26 @@ bool copy_transpose_valid(const Tensor& self, const Tensor& src) {
   return self.is_contiguous() && src.numel() != 0 && src.dim() == 2 &&
       src.stride(0) == 1 && src.stride(1) == src.size(0) &&
       self.scalar_type() == src.scalar_type() &&
+      self.sizes().equals(src.sizes()) &&
       self.numel() >= MIN_SZ;
 }
 
 // special case copy where tensor is contiguous and src is a transposed matrix
 // This can be generalized to most copies, but it's trickier
 void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t BLOCK_SZ;
   if (self.scalar_type() == kByte) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     BLOCK_SZ = 120;
   } else {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     BLOCK_SZ = 60;
   }
   Tensor buf = empty({BLOCK_SZ, BLOCK_SZ}, self.options());
+
+  // The code below is implemented with the assumption that sizes are equal
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(self.sizes().equals(src.sizes()));
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBool, kBFloat16, self.scalar_type(), "copy_", [&] {
     scalar_t* sp = src.data_ptr<scalar_t>();
@@ -114,28 +121,36 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
       if (src.dtype() == at::kFloat && self.dtype() == at::kHalf) {
         auto* output_ptr =
             reinterpret_cast<fbgemm::float16*>(self.data_ptr<at::Half>());
-        at::parallel_for(
-            0,
-            self.numel(),
-            at::internal::GRAIN_SIZE,
-            [&](int64_t begin, int64_t end) {
-              fbgemm::FloatToFloat16_simd(
-                  src.data_ptr<float>() + begin,
-                  output_ptr + begin,
+        if (self.numel() < at::internal::GRAIN_SIZE) {
+          fbgemm::FloatToFloat16_simd(src.data_ptr<float>(), output_ptr, self.numel());
+        } else {
+          at::parallel_for(
+              0,
+              self.numel(),
+              at::internal::GRAIN_SIZE,
+              [&](int64_t begin, int64_t end) {
+                fbgemm::FloatToFloat16_simd(
+                    src.data_ptr<float>() + begin,
+                    output_ptr + begin,
                   end - begin);
-            });
+              });
+        }
       } else {
         auto in_data = reinterpret_cast<fbgemm::float16*>(
             src.data_ptr<at::Half>());
         auto* output_ptr = self.data_ptr<float>();
-        at::parallel_for(
-            0,
-            self.numel(),
-            at::internal::GRAIN_SIZE,
-            [&](int64_t begin, int64_t end) {
-              fbgemm::Float16ToFloat_simd(
-                  in_data + begin, output_ptr + begin, end - begin);
-            });
+        if (self.numel() < at::internal::GRAIN_SIZE) {
+          fbgemm::Float16ToFloat_simd(in_data, output_ptr, self.numel());
+        } else {
+          at::parallel_for(
+              0,
+              self.numel(),
+              at::internal::GRAIN_SIZE,
+              [&](int64_t begin, int64_t end) {
+                fbgemm::Float16ToFloat_simd(
+                    in_data + begin, output_ptr + begin, end - begin);
+              });
+        }
       }
       return self;
     }
@@ -150,6 +165,16 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
 
   if (self.is_same(src)) {
     return self;
+  }
+
+  // Copies into meta self are OK and just ignored (similar to inplace)
+  if (self.is_meta()) {
+    // TODO: need to see if there is extra error checking needed
+    return self;
+  }
+
+  if (src.is_meta()) {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Cannot copy out of meta tensor; no data!")
   }
 
   // Re-dispatch copies when either src or self device not implemented here (e.g. XLA).
@@ -218,7 +243,6 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   if(!self.is_complex() && src.is_complex()) {
     TORCH_WARN_ONCE("Casting complex values to real discards the imaginary part");
   }
-
   copy_stub(device_type, iter, non_blocking);
   return self;
 }
@@ -231,6 +255,22 @@ Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
   }
   namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;
+}
+
+void copy_ignoring_overlaps(const Tensor &dst, const Tensor &src) {
+  // Called when we are copying into an overlapping index `dst`, but we don't
+  // care which writer wins. Hacky but it works. This is only used by
+  // CUDA_tensor_apply2 in case that there are write overlaps.
+  // FIXME: really, overlapping writes should be illegal/an error in Torch
+  auto iter = TensorIteratorConfig()
+      .add_output(dst)
+      .add_input(src)
+      .resize_outputs(false)
+      .set_check_mem_overlap(false)
+      .check_all_same_dtype(true)
+      .check_all_same_device(true)
+      .build();
+  copy_stub(iter.device_type(), iter, /*non_blocking=*/false);
 }
 
 DEFINE_DISPATCH(copy_stub);

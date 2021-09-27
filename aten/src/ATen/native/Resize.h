@@ -2,41 +2,60 @@
 
 #include <ATen/ATen.h>
 #include <ATen/native/ResizeCommon.h>
-#include <TH/THTensor.hpp>
+#include <ATen/TensorUtils.h>
+
+#include <c10/core/CPUAllocator.h>
+
 
 namespace at { namespace native {
 
 // TODO: make all operations that resize given outputs use this function
-//   for consistency and maintainability
+//   for consistency and maintainability.
+//   Some operations like `cat` might not be able to make the use of
+//   resize_output directly. For more details to understand how it works in `cat`,
+//   see https://github.com/pytorch/pytorch/pull/62560#discussion_r687363362
 // Resizes outputs
 // Functions accepting output tensors, like with the "out" kwarg, should
 //   call this function to handle resizing their output tensor.
 // Issues a warning if the output tensor has one or more elements and
 //   needs resizing
 // NOTE: In the future the warning will become an error
-TORCH_API void resize_output(Tensor& output, IntArrayRef shape);
+// Returns a bool saying whether or not the resize actually happened or not
+TORCH_API bool resize_output(const Tensor& output, IntArrayRef shape);
 
-// These functions are called by native::resize_ as well as (legacy) TH resize.
-// They are not in TH/THTensor.cpp because the at namespace is easier
-// to benchmark than TH; I can't get gbenchmark to call fns from THTensor.cpp
+// Utility for resize_output
+//  Returns a bool saying resize should happen or not and
+//  raises a warning if resizing for one or more elements
+TORCH_API bool resize_output_check(const Tensor& output, IntArrayRef shape);
 
-static inline void maybe_resize_storage_cpu(TensorImpl* self, int64_t new_size) {
+TORCH_API void resize_bytes_cpu(StorageImpl* storage, size_t size_bytes);
+
+static inline void maybe_resize_storage_cpu(TensorImpl* self, uint64_t new_size) {
   // It does not make sense to try to resize a storage
   // to hold 0 elements, and this can break
   // if storage_offset is positive but
   // new_size is 0, so just bail in that case
   // (same comment is in Resize.cuh)
-  if (new_size > 0) {
-    if (!THTensor_getStoragePtr(self)) {
-      caffe2::TypeMeta dtype = self->dtype();
-      THTensor_stealAndSetStoragePtr(self, THStorage_new());
-      TORCH_INTERNAL_ASSERT(dtype == self->dtype());
-    }
-    int64_t new_size_bytes =
-        (new_size + self->storage_offset()) * self->dtype().itemsize();
-    if (new_size_bytes > self->storage().nbytes()) {
-      THStorage_resizeBytes(THTensor_getStoragePtr(self), new_size_bytes);
-    }
+  if (new_size == 0) {
+    return;
+  }
+
+  const auto new_size_bytes_i =
+      (new_size + self->storage_offset()) * self->dtype().itemsize();
+  TORCH_CHECK(!overflows<size_t>(new_size_bytes_i), "Requested storage size (",
+              new_size_bytes_i, ") cannot be represented as a size_t");
+  const auto new_size_bytes = static_cast<size_t>(new_size_bytes_i);
+
+  const Storage& storage = self->unsafe_storage();
+  if (!storage) {
+    auto new_storage = c10::make_intrusive<StorageImpl>(
+        StorageImpl::use_byte_size_t(),
+        new_size_bytes,
+        c10::GetCPUAllocator(),
+        true);
+    self->set_storage_keep_dtype(std::move(new_storage));
+  } else if (new_size_bytes > storage.nbytes()) {
+    resize_bytes_cpu(storage.unsafeGetStorageImpl(), new_size_bytes);
   }
 }
 
@@ -72,7 +91,7 @@ static inline void checkInBoundsForStorage(
     const caffe2::TypeMeta data_type,
     const Storage& new_storage) {
   int64_t storage_size_bytes =
-      detail::computeStorageNbytes(size, stride, data_type.itemsize());
+      at::detail::computeStorageNbytes(size, stride, data_type.itemsize());
   int64_t storage_offset_bytes = storage_offset * data_type.itemsize();
   if (storage_size_bytes == 0) {
     // NB: (a tensor with arbitrary 0 dims)'s storage can have any numel.
@@ -91,7 +110,7 @@ static inline void checkInBoundsForStorage(
       ", and itemsize ",
       data_type.itemsize(),
       " requiring a storage size of ",
-      storage_size_bytes,
+      storage_size_bytes + storage_offset_bytes,
       " are out of bounds for storage of size ",
       new_storage_size_bytes);
 }
@@ -126,9 +145,7 @@ static inline void checkSetStorage(Tensor& result, Storage storage, int64_t stor
   }
 
   // storageOffset
-  if (storage_offset < 0) {
-    TORCH_CHECK("Tensor: invalid storage offset ", storage_offset);
-  }
+  TORCH_CHECK(storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);
 }
 
 /**

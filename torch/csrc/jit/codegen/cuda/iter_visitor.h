@@ -3,10 +3,6 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
-
-#include <torch/csrc/jit/codegen/cuda/fusion.h>
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
 
 #include <deque>
@@ -17,6 +13,11 @@ namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
+
+class Fusion;
+class Statement;
+class Expr;
+class Val;
 
 /*
  * IterVisitor starts from leaf nodes, fusion outputs, or the provided values.
@@ -30,9 +31,10 @@ namespace cuda {
  * TODO: We may want to have ordering of outputs to inputs. I'm not sure why we
  * would want this, but seems like it would be a reasonable request.
  */
-class TORCH_CUDA_API IterVisitor : public OptOutDispatch {
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+class TORCH_CUDA_CU_API IterVisitor : public OptOutDispatch {
  public:
-  virtual ~IterVisitor() = default;
+  ~IterVisitor() override = default;
 
   IterVisitor() = default;
 
@@ -47,63 +49,38 @@ class TORCH_CUDA_API IterVisitor : public OptOutDispatch {
   // These functions will start at outputs and propagate up through the DAG
   // to inputs based on depth first traversal. Next could be called on a node
   // multiple times.
-  virtual std::vector<Statement*> next(Statement* stmt) {
-    if (stmt->isVal()) {
-      return next(stmt->as<Val>());
-    } else if (stmt->isExpr()) {
-      return next(stmt->as<Expr>());
-    } else {
-      TORCH_INTERNAL_ASSERT(
-          false, "IterVisitor could not detect type in next_dispatch.");
-    }
-  }
+  virtual std::vector<Statement*> next(Statement* stmt);
 
-  virtual std::vector<Statement*> next(Val* v) {
-    FusionGuard::getCurFusion()->assertInFusion(v, "Cannot traverse val, ");
-    if (FusionGuard::getCurFusion()->origin(v) != nullptr) {
-      return {FusionGuard::getCurFusion()->origin(v)};
-    }
-    return {};
-  }
+  virtual std::vector<Statement*> next(Val* v);
 
-  virtual std::vector<Statement*> next(Expr* expr) {
-    FusionGuard::getCurFusion()->assertInFusion(expr, "Cannot traverse expr, ");
-    std::vector<Statement*> next_stmts{expr->inputs().begin(),
-                                       expr->inputs().end()};
-    return next_stmts;
-  }
+  virtual std::vector<Statement*> next(Expr* expr);
 
   // This handle functions is called on every Statement* in topological order,
   // starting from outputs to inputs.
-  void handle(Statement* s) override {
-    OptOutDispatch::handle(s);
-  }
+  void handle(Statement* s) override;
+
   // This handle functions is called on every Expr* in topological order,
   // starting from outputs to inputs.
-  void handle(Expr* e) override {
-    OptOutDispatch::handle(e);
-  }
+  void handle(Expr* e) override;
+
   // This handle functions is called on every Val* in topological order,
   // starting from outputs to inputs.
-  void handle(Val* v) override {
-    OptOutDispatch::handle(v);
-  }
+  void handle(Val* v) override;
 
   // The entire stack during traversal. stmt_stack.back().back() is the node
   // that is being called in handle(). stmt_stack.back() contains siblings (not
   // guarenteed to be all siblings throughout traversal). stmt_stack.front()
   // contains the outputs we started with (not guarenteed to be all outputs
   // throughout traversal).
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::vector<Statement*>> stmt_stack;
 
   // Statements to stop traversal on if they're hit (pretends they're leaf
   // nodes in next)
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unordered_set<Statement*> termination_stmts;
 
-  void traverse_(
-      Fusion* fusion,
-      bool from_outputs_only = false,
-      bool traverse_all_paths = false);
+  void traverseHelper(Fusion* fusion, bool traverse_all_paths = false);
 
  public:
   // Starts at nodes provided in from, traverses from these nodes to inputs.
@@ -119,17 +96,16 @@ class TORCH_CUDA_API IterVisitor : public OptOutDispatch {
       const std::vector<Val*>& from,
       bool traverseAllPaths = false);
 
-  // from_outputs_only = true start from outputs registered with fusion,
-  // from_outputs_only = false start from all leaf nodes. Calls into
-  // traverseFrom.
-  void traverse(Fusion* fusion, bool from_outputs_only = false);
+  // Iterates from terminating outputs registered with the fusion. Terminating
+  // means value is not used to generate any other value used in producing
+  // registered outputs.
+  void traverse(Fusion* fusion);
 
-  // from_outputs_only = true start from outputs registered with fusion,
-  // from_outputs_only = false start from all leaf nodes. Calls into
-  // traverseFrom.
-  void traverseAllPaths(Fusion* fusion, bool from_outputs_only = false);
+  // Same as traverse put it traverses every edge, meaning it will traverse
+  // values more than once.
+  void traverseAllPaths(Fusion* fusion);
 
-  static std::unordered_set<Val*> getInputsTo(const std::vector<Val*>& vals);
+  static std::vector<Val*> getInputsTo(const std::vector<Val*>& vals);
 };
 
 /*
@@ -145,13 +121,27 @@ class TORCH_CUDA_API IterVisitor : public OptOutDispatch {
  *
  * The first step of BackwardVisitor is to make sure we've specified enough
  * outputs to guarentee that we will traverse all outputs of all exprs during
- * the backward traversal.
+ * the backward traversal. In the case where we don't require visiting all
+ * outputs of some exprs, example being the `N` output of welford ops.
+ * `must_cover_all_expr_outputs` is added to disable the check, and in
+ * this case the visitor pass need be aware
+ *  1. Exprs with any output that has a use chain that ends with a final
+ * consumer in the `from` list `will be` visited.
+ *  2. Vals that doesn't have a use chain that ends with a final
+ * consumer in the `from` list `will not be` visited, even though its
+ * definition expr might be visited. An example is if the `N` output
+ * of an welford op is unused, but other outputs are, the welford op
+ * will be visited but the `N` output will not.
+ *
  */
-class TORCH_CUDA_API BackwardVisitor : public OptOutDispatch {
- public:
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+class TORCH_CUDA_CU_API BackwardVisitor : public OptOutDispatch {
+ protected:
+  // NOLINTNEXTLINE(modernize-use-override)
   virtual ~BackwardVisitor() = default;
 
-  BackwardVisitor() = default;
+  BackwardVisitor(bool must_cover_all_expr_outputs = true)
+      : must_cover_all_expr_outputs_(must_cover_all_expr_outputs) {}
 
   BackwardVisitor(const BackwardVisitor& other) = default;
   BackwardVisitor& operator=(const BackwardVisitor& other) = default;
@@ -171,19 +161,18 @@ class TORCH_CUDA_API BackwardVisitor : public OptOutDispatch {
 
   // This handle functions is called on every Statement* in topological order,
   // starting from outputs to inputs.
-  virtual void handle(Statement* stmt) override {
-    OptOutDispatch::handle(stmt);
-  }
+  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
+  virtual void handle(Statement* stmt) override;
+
   // This handle functions is called on every Expr* in topological order,
   // starting from outputs to inputs.
-  virtual void handle(Expr* expr) override {
-    OptOutDispatch::handle(expr);
-  }
+  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
+  virtual void handle(Expr* expr) override;
+
   // This handle functions is called on every Val* in topological order,
   // starting from outputs to inputs.
-  virtual void handle(Val* val) override {
-    OptOutDispatch::handle(val);
-  }
+  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
+  virtual void handle(Val* val) override;
 
   // All exprs that need to be visited in this traversal. Labeled in topological
   // order (size_t).
@@ -205,9 +194,11 @@ class TORCH_CUDA_API BackwardVisitor : public OptOutDispatch {
       Fusion* fusion,
       const std::vector<Val*>& from,
       bool traverseAllPaths = false);
+
+  bool must_cover_all_expr_outputs_ = true;
 };
 
-class TORCH_CUDA_API DependencyCheck {
+class TORCH_CUDA_CU_API DependencyCheck {
  public:
   // Returns if "dependency" is a dependency of "of".
   static bool isDependencyOf(Val* dependency, Val* of);
@@ -228,26 +219,37 @@ class TORCH_CUDA_API DependencyCheck {
   // Returns an empty deque if there are no uses of dependency found.
   static std::deque<std::deque<Val*>> getAllUseChains(Val* dependency);
 
-  // Grab all values that exist between and including provided vals
-  static std::unordered_set<Val*> getAllValsBetween(
+  // Grab all values that exist between and including provided
+  // vals. Returned values are topologicaly ordered.
+  static std::vector<Val*> getAllValsBetween(
+      const std::unordered_set<Val*>& dependencies,
+      const std::vector<Val*>& of);
+
+  // Returns all dependent exprs that exist between
+  //  the provided vals
+  static std::vector<Expr*> getAllExprsBetween(
       const std::unordered_set<Val*>& dependencies,
       const std::vector<Val*>& of);
 
   // Return registered outputs of the fusion that are a dependency of any val of
   static std::unordered_set<Val*> getAllOutputsOf(
       const std::unordered_set<Val*>& of);
+
+  // Return all Vals that depend on the given Vals
+  static std::unordered_set<Val*> getAllDependentVals(
+      const std::unordered_set<Val*>& of);
 };
 
 // Expr sort will take a fusion and return a topologically sorted list of
 // expressions.
 class ExprSort : public IterVisitor {
- private:
+ protected:
   std::vector<Expr*> exprs;
 
   void handle(Expr* expr) override;
 
  public:
-  static std::vector<Expr*> getExprs(Fusion* fusion, bool from_outputs_only);
+  static std::vector<Expr*> getExprs(Fusion* fusion);
 
   static std::vector<Expr*> getExprs(
       Fusion* fusion,
@@ -256,12 +258,16 @@ class ExprSort : public IterVisitor {
 
 class InputsOf : public IterVisitor {
  private:
-  std::unordered_set<Val*> inputs;
+  std::unordered_set<Val*> grabbed_inputs;
+  std::vector<Val*> ordered_inputs;
 
   void handle(Val* v) final;
 
  public:
-  static std::unordered_set<Val*> output(Fusion* fusion, Val* output_);
+  static std::vector<Val*> output(Fusion* fusion, Val* output_);
+  static std::vector<Val*> outputs(
+      Fusion* fusion,
+      const std::vector<Val*>& outputs_);
 };
 
 } // namespace cuda

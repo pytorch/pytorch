@@ -4,11 +4,13 @@
 #include <stdint.h>
 #include <stdexcept>
 #include <string>
-#include <utility>
 #include <type_traits>
+#include <utility>
 
+#include <c10/core/OptionalRef.h>
 #include <c10/core/ScalarType.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/Exception.h>
 #include <c10/util/Half.h>
 #include <c10/util/TypeCast.h>
 
@@ -26,8 +28,8 @@ class C10_API Scalar {
  public:
   Scalar() : Scalar(int64_t(0)) {}
 
-#define DEFINE_IMPLICIT_CTOR(type, name)      \
-  Scalar(type vv) : Scalar(vv, true) { }
+#define DEFINE_IMPLICIT_CTOR(type, name) \
+  Scalar(type vv) : Scalar(vv, true) {}
 
   AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, DEFINE_IMPLICIT_CTOR)
   AT_FORALL_COMPLEX_TYPES(DEFINE_IMPLICIT_CTOR)
@@ -45,33 +47,35 @@ class C10_API Scalar {
     v.i = convert<int64_t, bool>(vv);
   }
 
-#define DEFINE_ACCESSOR(type, name)                       \
-  type to##name() const {                                 \
-    if (Tag::HAS_d == tag) {                              \
-      return checked_convert<type, double>(v.d, #type);   \
-    } else if (Tag::HAS_z == tag) {                       \
-      return checked_convert<type, c10::complex<double>>( \
-          v.z, #type);                                    \
-    } if (Tag::HAS_b == tag) {                            \
-      return checked_convert<type, bool>(v.i, #type);     \
-    } else {                                              \
-      return checked_convert<type, int64_t>(v.i, #type);  \
-    }                                                     \
+#define DEFINE_ACCESSOR(type, name)                                   \
+  type to##name() const {                                             \
+    if (Tag::HAS_d == tag) {                                          \
+      return checked_convert<type, double>(v.d, #type);               \
+    } else if (Tag::HAS_z == tag) {                                   \
+      return checked_convert<type, c10::complex<double>>(v.z, #type); \
+    }                                                                 \
+    if (Tag::HAS_b == tag) {                                          \
+      return checked_convert<type, bool>(v.i, #type);                 \
+    } else {                                                          \
+      return checked_convert<type, int64_t>(v.i, #type);              \
+    }                                                                 \
   }
 
   // TODO: Support ComplexHalf accessor
   AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_ACCESSOR)
 
   // also support scalar.to<int64_t>();
+  // Deleted for unsupported types, but specialized below for supported types
   template <typename T>
-  T to() const;
+  T to() const = delete;
 
 #undef DEFINE_ACCESSOR
   bool isFloatingPoint() const {
     return Tag::HAS_d == tag;
   }
 
-  C10_DEPRECATED_MESSAGE("isIntegral is deprecated. Please use the overload with 'includeBool' parameter instead.")
+  C10_DEPRECATED_MESSAGE(
+      "isIntegral is deprecated. Please use the overload with 'includeBool' parameter instead.")
   bool isIntegral() const {
     return Tag::HAS_i == tag;
   }
@@ -90,7 +94,9 @@ class C10_API Scalar {
   Scalar conj() const;
   Scalar log() const;
 
-  template<typename T, typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
+  template <
+      typename T,
+      typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
   bool equal(T num) const {
     if (isComplex()) {
       auto val = v.z;
@@ -105,7 +111,9 @@ class C10_API Scalar {
     }
   }
 
-  template<typename T, typename std::enable_if<c10::is_complex<T>::value, int>::type = 0>
+  template <
+      typename T,
+      typename std::enable_if<c10::is_complex<T>::value, int>::type = 0>
   bool equal(T num) const {
     if (isComplex()) {
       return v.z == num;
@@ -142,26 +150,30 @@ class C10_API Scalar {
   }
 
  private:
-    template<typename T,
-             typename std::enable_if<std::is_integral<T>::value && ! std::is_same<T, bool>::value, bool>::type* =
-                 nullptr>
-    Scalar(T vv, bool) : tag(Tag::HAS_i) {
-      v.i = convert<decltype(v.i), T>(vv);
-    }
+  template <
+      typename T,
+      typename std::enable_if<
+          std::is_integral<T>::value && !std::is_same<T, bool>::value,
+          bool>::type* = nullptr>
+  Scalar(T vv, bool) : tag(Tag::HAS_i) {
+    v.i = convert<decltype(v.i), T>(vv);
+  }
 
-    template<typename T,
-             typename std::enable_if<!std::is_integral<T>::value && !c10::is_complex<T>::value, bool>::type* =
-                 nullptr>
-    Scalar(T vv, bool) : tag(Tag::HAS_d) {
-      v.d = convert<decltype(v.d), T>(vv);
-    }
+  template <
+      typename T,
+      typename std::enable_if<
+          !std::is_integral<T>::value && !c10::is_complex<T>::value,
+          bool>::type* = nullptr>
+  Scalar(T vv, bool) : tag(Tag::HAS_d) {
+    v.d = convert<decltype(v.d), T>(vv);
+  }
 
-    template<typename T,
-             typename std::enable_if<c10::is_complex<T>::value, bool>::type* =
-                 nullptr>
-    Scalar(T vv, bool) : tag(Tag::HAS_z) {
-      v.z = convert<decltype(v.z), T>(vv);
-    }
+  template <
+      typename T,
+      typename std::enable_if<c10::is_complex<T>::value, bool>::type* = nullptr>
+  Scalar(T vv, bool) : tag(Tag::HAS_z) {
+    v.z = convert<decltype(v.z), T>(vv);
+  }
 
   // We can't set v in the initializer list using the
   // syntax v{ .member = ... } because it doesn't work on MSVC
@@ -172,20 +184,17 @@ class C10_API Scalar {
     double d;
     int64_t i;
     c10::complex<double> z;
-    v_t(){}  // default constructor
+    v_t() {} // default constructor
   } v;
 };
 
-// define the scalar.to<int64_t>() specializations
-template <typename T>
-inline T Scalar::to() const {
-  throw std::runtime_error("to() cast to unexpected type.");
-}
+using OptionalScalarRef = c10::OptionalRef<Scalar>;
 
-#define DEFINE_TO(T, name)    \
-  template <>                 \
-  inline T Scalar::to<T>() const {  \
-    return to##name();        \
+// define the scalar.to<int64_t>() specializations
+#define DEFINE_TO(T, name)         \
+  template <>                      \
+  inline T Scalar::to<T>() const { \
+    return to##name();             \
   }
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_TO)
 #undef DEFINE_TO

@@ -1,8 +1,5 @@
 #pragma once
 
-#include <THC/THCGeneral.h>
-#include <THC/THCDeviceUtils.cuh>
-
 #include <ATen/ATen.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
@@ -63,7 +60,7 @@ __global__ void im2col_kernel(
         int64_t w = w_in + j * dilation_width;
         *col = (h >= 0 && w >= 0 && h < height && w < width)
             ? im[i * dilation_height * width + j * dilation_width]
-            : ScalarConvert<int, dt>::to(0);
+            : static_cast<dt>(0);
         col += height_col * width_col;
       }
     }
@@ -112,7 +109,7 @@ void im2col(
 }
 
 template <typename dt, typename accT>
-C10_LAUNCH_BOUNDS_1(1024)
+C10_LAUNCH_BOUNDS_1(512)
 __global__ void col2im_kernel(
     const int64_t n,
     const dt* data_col,
@@ -191,7 +188,7 @@ void col2im(
   // bottom dimension, and then in the kernel add up the top dimensions.
   // CUDA_NUM_THREADS = 1024
   col2im_kernel<dt, accT>
-      <<<GET_BLOCKS(num_kernels), CUDA_NUM_THREADS, 0, stream>>>(
+      <<<GET_BLOCKS(num_kernels, 512), 512, 0, stream>>>(
           num_kernels,
           data_col,
           height,

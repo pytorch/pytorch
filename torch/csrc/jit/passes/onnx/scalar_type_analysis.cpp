@@ -1,5 +1,7 @@
-#include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
+#include <c10/util/irange.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
 
 namespace torch {
 namespace jit {
@@ -15,6 +17,8 @@ class ScalarTypeHashFunction {
     return static_cast<size_t>(type);
   }
 };
+
+const int ONNX_OPSET_14 = 14;
 
 static const std::unordered_map<c10::ScalarType, int, ScalarTypeHashFunction>
     scalarTypeToONNXTypeMap = {
@@ -50,10 +54,6 @@ static const std::unordered_set<NodeKind> standardOps = {
     onnx::Mod,
 };
 
-static bool IsStandardOp(const NodeKind& nkind) {
-  return standardOps.find(nkind) != standardOps.end();
-}
-
 // For these operators, all inputs share the same scalar type.
 // The output scalar type is always Bool.
 static const std::unordered_set<NodeKind> comparisonOps = {
@@ -64,6 +64,10 @@ static const std::unordered_set<NodeKind> comparisonOps = {
     onnx::LessOrEqual,
 };
 
+static bool IsStandardOp(const NodeKind& nkind) {
+  return standardOps.find(nkind) != standardOps.end();
+}
+
 static bool IsComparisonOp(const NodeKind& nkind) {
   return comparisonOps.find(nkind) != comparisonOps.end();
 }
@@ -71,13 +75,12 @@ static bool IsComparisonOp(const NodeKind& nkind) {
 static TensorTypePtr CreateProfiledTensorTypeWithScalarType(
     const TensorTypePtr& typePtr,
     const c10::ScalarType& scalar_type) {
+  AT_ASSERT(typePtr != nullptr);
   return typePtr->withScalarType({scalar_type});
 }
 
 static bool IsImplicitCastSupported(const NodeKind& nodeKind) {
-  return (
-      standardOps.find(nodeKind) != standardOps.end() ||
-      comparisonOps.find(nodeKind) != comparisonOps.end());
+  return IsStandardOp(nodeKind) || IsComparisonOp(nodeKind);
 }
 
 static c10::optional<c10::ScalarType> PromoteScalarTypes(
@@ -86,7 +89,7 @@ static c10::optional<c10::ScalarType> PromoteScalarTypes(
     return c10::nullopt;
   }
   auto st = types[0];
-  for (size_t i = 1; i < types.size(); ++i) {
+  for (const auto i : c10::irange(1, types.size())) {
     st = c10::promoteTypes(st, types[i]);
   }
   return st;
@@ -132,6 +135,15 @@ static c10::optional<c10::ScalarType> PromoteScalarTypesWithCategory(
 static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
   std::vector<c10::ScalarType> typesFromTensors;
   std::vector<c10::ScalarType> typesFromScalars;
+
+  auto get_scalar_type =
+      [](const Value* input) -> c10::optional<at::ScalarType> {
+    if (auto* tensor_type = input->type()->castRaw<TensorType>()) {
+      return tensor_type->scalarType();
+    }
+    return c10::nullopt;
+  };
+
   std::for_each(
       n->inputs().begin(), n->inputs().end(), [&](const Value* input) {
         auto nkind = input->node()->kind();
@@ -180,16 +192,13 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
           } else {
             typesFromTensors.emplace_back(scalar_type);
           }
-        } else if (
-            auto scalar_type =
-                input->type()->cast<TensorType>()->scalarType()) {
+        } else if (auto scalar_type = get_scalar_type(input)) {
           typesFromTensors.emplace_back(*scalar_type);
         }
       });
 
   c10::optional<c10::ScalarType> st = c10::nullopt;
-  const c10::optional<c10::ScalarType> output_st =
-      n->output()->type()->cast<TensorType>()->scalarType();
+  const auto output_st = get_scalar_type(n->output());
 
   if (IsComparisonOp(n->kind())) {
     // For comparison ops, always promote scalar type to highest among inputs,
@@ -203,12 +212,6 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
     if (output_st) {
       // If output scalar type is available, use that.
       st = output_st;
-    } else if (n->kind() == onnx::Mod && !typesFromTensors.empty()) {
-      // Most of the operators like Mul are switched to allow implicit type
-      // promotion. But fmod and remainder still only support implicit casting
-      // between scalars. i.e. for torch.remainder(a, b), if a is LongTensor and
-      // b is float, b will be cast to Long.
-      st = PromoteScalarTypes(typesFromTensors);
     } else {
       // PyTorch now does implicit type promotion regardless whether the inputs
       // are tensors or scalars. (Previously only scalars support implicit
@@ -220,6 +223,21 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
   }
 
   return st;
+}
+
+static c10::optional<c10::ScalarType> LowPrecisionCastForStandardOps(
+    const Node* n,
+    const c10::ScalarType& scalar_type) {
+  // Some of standardOps do not support uint8\int8\int16 type for ONNX
+  // opset version < 14.
+  // Fix in this ONNX PR:
+  // https://github.com/onnx/onnx/pull/3334
+  if (n->kind() != onnx::Gemm && IsStandardOp(n->kind()) &&
+      (scalar_type == c10::kByte || scalar_type == c10::kChar ||
+       scalar_type == c10::kShort)) {
+    return c10::kLong;
+  }
+  return scalar_type;
 }
 
 static void UpdateScalarTypeForInputs(
@@ -236,13 +254,14 @@ static void UpdateScalarTypeForInputs(
 
   for (auto input : n->inputs()) {
     auto input_tensor_type = input->type()->cast<TensorType>();
-    auto input_scalar_type = input_tensor_type->scalarType();
+    auto input_scalar_type =
+        input_tensor_type ? input_tensor_type->scalarType() : c10::nullopt;
 
     if ((input->node()->kind() == onnx::Constant) ||
         (input_scalar_type && (*input_scalar_type != scalar_type))) {
       if (input->node()->kind() == onnx::Constant) {
         // Fix up the scalar directly instead of inserting a cast operator.
-        // NOTE: Keep only the else branch once constant_folding is enabled by
+        // TODO: Keep only the else branch once constant_folding is enabled by
         // default.
         at::Tensor val = input->node()->t(attr::value);
         at::Tensor new_val = val.to(scalar_type);
@@ -272,41 +291,120 @@ static void UpdateScalarTypeForOutput(
       CreateProfiledTensorTypeWithScalarType(output_tensor_type, scalar_type));
 }
 
+static void RecoverScalarTypeForOutput(
+    Value* out,
+    const c10::ScalarType& scalar_type) {
+  Node* n = out->node();
+  TORCH_INTERNAL_ASSERT(nullptr != n);
+  const int64_t onnx_type = ScalarTypeToONNXType(scalar_type);
+  Node* cast_node = n->owningGraph()->create(onnx::Cast, 1);
+  cast_node->addInput(out);
+  cast_node->i_(attr::to, onnx_type);
+  cast_node->insertAfter(n);
+  out->replaceAllUsesAfterNodeWith(cast_node, cast_node->output());
+}
+
+// This example error found when exports transfo_xl model using add op in uint8
+// type, as below:
+// if self.same_length:
+//     all_ones = word_emb.new_ones((qlen, klen), dtype=torch.uint8)
+//     mask_len = klen - self.mem_len
+//     if mask_len > 0:
+//         mask_shift_len = qlen - mask_len
+//     else:
+//         mask_shift_len = qlen
+//     dec_attn_mask = (torch.triu(all_ones, 1 + mlen) + torch.tril(all_ones,
+//     -mask_shift_len))[:, :, None]  # -1
+//
+// `all_ones is` an uint8 tensor, But the calculation of `dec_attn_mask` using
+// add(+) op to get the uint8 result. Reference Link:
+// https://github.com/huggingface/transformers/blob/b020a736c374460af1b34267283f957988350630/src/transformers/models/transfo_xl/modeling_transfo_xl.py#L936
+static void LowPrecisionCastNodeForStandardOps(Node* n, int opset_version) {
+  TORCH_INTERNAL_ASSERT(n->outputs().size() == 1);
+  if (n->output()->type()->cast<TensorType>() == nullptr ||
+      n->output()->type()->cast<TensorType>()->scalarType() == c10::nullopt) {
+    // skip LowPrecisionCast if op output type is null.
+    return;
+  }
+  auto output_scalar_type =
+      n->output()->type()->cast<TensorType>()->scalarType().value();
+  for (size_t i = 0; i < n->inputs().size(); ++i) {
+    if (n->input(i)->type()->cast<TensorType>() == nullptr ||
+        n->input(i)->type()->cast<TensorType>()->scalarType() == c10::nullopt) {
+      // skip LowPrecisionCast if any op input type node is null.
+      return;
+    }
+    auto input_tensor_type =
+        n->input(i)->type()->cast<TensorType>()->scalarType().value();
+    TORCH_INTERNAL_ASSERT(output_scalar_type == input_tensor_type);
+  }
+
+  // The LowPrecision problem will be fixed in ONNX opset 14.
+  if (opset_version < ONNX_OPSET_14) {
+    auto expected_scalar_type_cast =
+        LowPrecisionCastForStandardOps(n, output_scalar_type);
+    UpdateScalarTypeForInputs(n, *expected_scalar_type_cast);
+    if (output_scalar_type != *expected_scalar_type_cast) {
+      // If input type is changed, convert it to the original type.
+      RecoverScalarTypeForOutput(n->output(), output_scalar_type);
+    }
+  }
+}
+
+static void ImplicitCastNodeForONNX(Node* n) {
+  if (IsImplicitCastSupported(n->kind())) {
+    auto expected_scalar_type = InferExpectedScalarType(n);
+    if (expected_scalar_type) {
+      UpdateScalarTypeForInputs(n, *expected_scalar_type);
+      if (!IsComparisonOp(n->kind())) {
+        UpdateScalarTypeForOutput(n, *expected_scalar_type);
+      }
+    }
+  }
+}
+
 static void ImplicitCastForONNX(Block* block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
     for (auto sub : it->blocks()) {
       ImplicitCastForONNX(sub);
     }
-    auto* subgraph = it->owningGraph();
 
-    if (IsImplicitCastSupported(it->kind())) {
-      auto expected_scalar_type = InferExpectedScalarType(*it);
-      if (expected_scalar_type) {
-        UpdateScalarTypeForInputs(*it, *expected_scalar_type);
-        if (!IsComparisonOp(it->kind())) {
-          UpdateScalarTypeForOutput(*it, *expected_scalar_type);
-        }
-      }
-    }
+    ImplicitCastNodeForONNX(*it);
   }
   EliminateDeadCode(
       block, true, DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
 }
 
-// This pass tries to resolve scalar type mismatch issues between input tensors
-// introduced by the implicit type conversions on scalars.
-// TODO: Note that currently this pass handles traced graph only.
-// More specifically, graphs that have scalar type information recorded.
-// For scripted graphs we need something like scalar type propagation,
-// otherwise we do not have enough information to perform the check, let alone
-// fixes.
-void ImplicitCastForONNX(const std::shared_ptr<Graph>& graph) {
-  ImplicitCastForONNX(graph->block());
+static void LowPrecisionCastForStandardOpsONNX(
+    Block* block,
+    int opset_version) {
+  for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
+    for (auto sub : it->blocks()) {
+      LowPrecisionCastForStandardOpsONNX(sub, opset_version);
+    }
+
+    if (IsStandardOp(it->kind())) {
+      LowPrecisionCastNodeForStandardOps(*it, opset_version);
+    }
+  }
+  EliminateDeadCode(
+      block, true, DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
 }
 } // anonymous namespace
 
-void ScalarTypeAnalysisForONNX(const std::shared_ptr<Graph>& graph) {
+void ScalarTypeAnalysisForONNX(
+    const std::shared_ptr<Graph>& graph,
+    bool lowprecision_cast,
+    int opset_version) {
   ImplicitCastForONNX(graph->block());
+  if (lowprecision_cast) {
+    LowPrecisionCastForStandardOpsONNX(graph->block(), opset_version);
+  }
+  GRAPH_DUMP("After ScalarTypeAnalysisForONNX: ", graph);
+}
+
+void ScalarTypeAnalysisNodeForONNX(Node* n) {
+  ImplicitCastNodeForONNX(n);
 }
 
 } // namespace jit

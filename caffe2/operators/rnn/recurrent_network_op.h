@@ -102,6 +102,7 @@ void repeatCopy(
     const T* src,
     T* dst,
     Context* context) {
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (int i = 0; i < repeat_n; ++i) {
     context->template CopySameDevice<T>(n, src, dst + i * n);
   }
@@ -226,6 +227,7 @@ class RecurrentNetworkOp final : public Operator<Context> {
         this->template GetRepeatedArgument<int>("initial_recurrent_state_ids");
     CAFFE_ENFORCE_EQ(states.size(), inputs.size(), "states/inputs mismatch");
     std::vector<detail::RecurrentInput> ris;
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (auto i = 0; i < states.size(); ++i) {
       // States need to be "global" (since they are shared between
       // forward and backward).
@@ -251,6 +253,7 @@ class RecurrentNetworkOp final : public Operator<Context> {
     CAFFE_ENFORCE(
         dst.size() == offset.size(), "alias_dst/alias_offset mismatch");
     std::vector<detail::OffsetAlias> aliases;
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (auto i = 0; i < src.size(); ++i) {
       detail::OffsetAlias oc;
       oc.src = src[i];
@@ -321,6 +324,7 @@ class RecurrentNetworkOp final : public Operator<Context> {
     // have to be stored in step workspaces but can be shared.
     initializeBlobsToRecomputeOnBackward(sharedBlobsWs.get());
 
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (has_backward_pass && seqLen > stepWorkspaces.size()) {
       stepWorkspaces.resize(seqLen);
     }
@@ -493,6 +497,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
         param.size(),
         " != ",
         param_grads.size());
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < param.size(); ++i) {
       detail::Param p;
       // Forward inputs come after [outputs_with_grads] gradient inputs
@@ -520,6 +525,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
     const auto& offset =
         this->template GetRepeatedArgument<int32_t>("alias_offset");
 
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (auto i = 0; i < recurrent.size(); ++i) {
       detail::RecurrentGradient rg;
       rg.param = recurrent[i];
@@ -568,6 +574,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
         "backward_link_offset",
         "",
         &links);
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < links.size(); i++) {
       links[i] = remappedLink(links[i]);
     }
@@ -782,6 +789,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
     }
 
     CAFFE_ENFORCE_EQ(recurrentInputIds_.size(), recurrentGradients_.size());
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < recurrentInputIds_.size(); ++i) {
       // See GetRecurrentNetworkGradient to understand offseting here
       // Outputs of the gradient are inputs of the forward pass.

@@ -1,16 +1,51 @@
 import bisect
-import random
+import functools
 import warnings
+from typing import (
+    Callable,
+    Dict,
+    Generic,
+    Iterable,
+    Iterator,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    TypeVar,
+)
 
-from torch._utils import _accumulate
-from torch import randperm
 # No 'default_generator' in torch/__init__.pyi
-from torch import default_generator  # type: ignore
-from typing import TypeVar, Generic, Iterable, Iterator, Sequence, List, Optional, Tuple
-from ... import Tensor, Generator
+from torch import default_generator, randperm
+from torch._utils import _accumulate
+from torch.utils.data._typing import _DataPipeMeta
+
+from ... import Generator, Tensor
 
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
+
+UNTRACABLE_DATAFRAME_PIPES = ['batch',  # As it returns DataChunks
+                              'groupby',   # As it returns DataChunks
+                              '_dataframes_as_tuples',  # As it unpacks DF
+                              'trace_as_dataframe',  # As it used to mark DF for tracing
+                              ]
+
+class DataChunk(list, Generic[T]):
+    def __init__(self, items):
+        super().__init__(items)
+        self.items = items
+
+    def as_str(self, indent=''):
+        res = indent + "[" + ", ".join(str(i) for i in iter(self)) + "]"
+        return res
+
+    def __iter__(self) -> Iterator[T]:
+        for i in super().__iter__():
+            yield i
+
+    def raw_iterator(self):
+        for i in self.items:
+            yield i
 
 
 class Dataset(Generic[T_co]):
@@ -28,6 +63,7 @@ class Dataset(Generic[T_co]):
       sampler that yields integral indices.  To make it work with a map-style
       dataset with non-integral indices/keys, a custom sampler must be provided.
     """
+    functions: Dict[str, Callable] = {}
 
     def __getitem__(self, index) -> T_co:
         raise NotImplementedError
@@ -39,8 +75,36 @@ class Dataset(Generic[T_co]):
     # See NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
     # in pytorch/torch/utils/data/sampler.py
 
+    def __getattr__(self, attribute_name):
+        if attribute_name in Dataset.functions:
+            function = functools.partial(Dataset.functions[attribute_name], self)
+            return function
+        else:
+            raise AttributeError
 
-class IterableDataset(Dataset[T_co]):
+    @classmethod
+    def register_function(cls, function_name, function):
+        cls.functions[function_name] = function
+
+    @classmethod
+    def register_datapipe_as_function(cls, function_name, cls_to_register, enable_df_api_tracing=False):
+        if function_name in cls.functions:
+            raise Exception("Unable to add DataPipe function name {} as it is already taken".format(function_name))
+
+        def class_function(cls, enable_df_api_tracing, source_dp, *args, **kwargs):
+            result_pipe = cls(source_dp, *args, **kwargs)
+            if isinstance(result_pipe, Dataset):
+                if enable_df_api_tracing or isinstance(source_dp, DFIterDataPipe):
+                    if function_name not in UNTRACABLE_DATAFRAME_PIPES:
+                        result_pipe = result_pipe.trace_as_dataframe()
+
+            return result_pipe
+
+        function = functools.partial(class_function, cls_to_register, enable_df_api_tracing)
+        cls.functions[function_name] = function
+
+
+class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
     r"""An iterable Dataset.
 
     All datasets that represent an iterable of data samples should subclass it.
@@ -142,6 +206,8 @@ class IterableDataset(Dataset[T_co]):
         >>> print(list(torch.utils.data.DataLoader(ds, num_workers=20, worker_init_fn=worker_init_fn)))
         [3, 4, 5, 6]
     """
+    functions: Dict[str, Callable] = {}
+    reduce_ex_hook : Optional[Callable] = None
 
     def __iter__(self) -> Iterator[T_co]:
         raise NotImplementedError
@@ -149,9 +215,33 @@ class IterableDataset(Dataset[T_co]):
     def __add__(self, other: Dataset[T_co]):
         return ChainDataset([self, other])
 
-    # No `def __len__(self)` default?
+    # No `def __len__(self)` default? Subclasses raise `TypeError` when needed.
     # See NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
 
+    def __getattr__(self, attribute_name):
+        if attribute_name in IterableDataset.functions:
+            function = functools.partial(IterableDataset.functions[attribute_name], self)
+            return function
+        else:
+            raise AttributeError
+
+    def __reduce_ex__(self, *args, **kwargs):
+        if IterableDataset.reduce_ex_hook is not None:
+            try:
+                return IterableDataset.reduce_ex_hook(self)
+            except NotImplementedError:
+                pass
+        return super().__reduce_ex__(*args, **kwargs)
+
+    @classmethod
+    def set_reduce_ex_hook(cls, hook_fn):
+        if IterableDataset.reduce_ex_hook is not None and hook_fn is not None:
+            raise Exception("Attempt to override existing reduce_ex_hook")
+        IterableDataset.reduce_ex_hook = hook_fn
+
+class DFIterDataPipe(IterableDataset):
+    def _is_dfpipe(self):
+        return True
 
 class TensorDataset(Dataset[Tuple[Tensor, ...]]):
     r"""Dataset wrapping tensors.
@@ -196,9 +286,8 @@ class ConcatDataset(Dataset[T_co]):
 
     def __init__(self, datasets: Iterable[Dataset]) -> None:
         super(ConcatDataset, self).__init__()
-        # Cannot verify that datasets is Sized
-        assert len(datasets) > 0, 'datasets should not be an empty iterable'  # type: ignore
         self.datasets = list(datasets)
+        assert len(self.datasets) > 0, 'datasets should not be an empty iterable'  # type: ignore[arg-type]
         for d in self.datasets:
             assert not isinstance(d, IterableDataset), "ConcatDataset does not support IterableDataset"
         self.cumulative_sizes = self.cumsum(self.datasets)
@@ -226,10 +315,10 @@ class ConcatDataset(Dataset[T_co]):
 
 
 class ChainDataset(IterableDataset):
-    r"""Dataset for chainning multiple :class:`IterableDataset` s.
+    r"""Dataset for chaining multiple :class:`IterableDataset` s.
 
     This class is useful to assemble different existing dataset streams. The
-    chainning operation is done on-the-fly, so concatenating large-scale
+    chaining operation is done on-the-fly, so concatenating large-scale
     datasets with this class will be efficient.
 
     Args:
@@ -249,66 +338,8 @@ class ChainDataset(IterableDataset):
         total = 0
         for d in self.datasets:
             assert isinstance(d, IterableDataset), "ChainDataset only supports IterableDataset"
-            # Cannot verify that all self.datasets are Sized
-            total += len(d)  # type: ignore
+            total += len(d)
         return total
-
-
-class BufferedShuffleDataset(IterableDataset[T_co]):
-    r"""Dataset shuffled from the original dataset.
-
-    This class is useful to shuffle an existing instance of an IterableDataset.
-    The buffer with `buffer_size` is filled with the items from the dataset first. Then,
-    each item will be yielded from the buffer by reservoir sampling via iterator.
-
-    `buffer_size` is required to be larger than 0. For `buffer_size == 1`, the
-    dataset is not shuffled. In order to fully shuffle the whole dataset, `buffer_size`
-    is required to be greater than or equal to the size of dataset.
-
-    When it is used with :class:`~torch.utils.data.DataLoader`, each item in the
-    dataset will be yielded from the :class:`~torch.utils.data.DataLoader` iterator.
-    And, the method to set up a random seed is different based on :attr:`num_workers`.
-
-    For single-process mode (:attr:`num_workers == 0`), the random seed is required to
-    be set before the :class:`~torch.utils.data.DataLoader` in the main process.
-
-        >>> ds = BufferedShuffleDataset(dataset)
-        >>> random.seed(...)
-        >>> print(list(torch.utils.data.DataLoader(ds, num_workers=0)))
-
-    For multi-process mode (:attr:`num_workers > 0`), the random seed is set by a callable
-    function in each worker.
-
-        >>> ds = BufferedShuffleDataset(dataset)
-        >>> def init_fn(worker_id):
-        ...     random.seed(...)
-        >>> print(list(torch.utils.data.DataLoader(ds, ..., num_workers=n, worker_init_fn=init_fn)))
-
-    Args:
-        dataset (IterableDataset): The original IterableDataset.
-        buffer_size (int): The buffer size for shuffling.
-    """
-    dataset: IterableDataset[T_co]
-    buffer_size: int
-
-    def __init__(self, dataset: IterableDataset[T_co], buffer_size: int) -> None:
-        super(BufferedShuffleDataset, self).__init__()
-        assert buffer_size > 0, "buffer_size should be larger than 0"
-        self.dataset = dataset
-        self.buffer_size = buffer_size
-
-    def __iter__(self) -> Iterator[T_co]:
-        buf: List[T_co] = []
-        for x in self.dataset:
-            if len(buf) == self.buffer_size:
-                idx = random.randint(0, self.buffer_size - 1)
-                yield buf[idx]
-                buf[idx] = x
-            else:
-                buf.append(x)
-        random.shuffle(buf)
-        while buf:
-            yield buf.pop()
 
 
 class Subset(Dataset[T_co]):
@@ -327,6 +358,8 @@ class Subset(Dataset[T_co]):
         self.indices = indices
 
     def __getitem__(self, idx):
+        if isinstance(idx, list):
+            return self.dataset[[self.indices[i] for i in idx]]
         return self.dataset[self.indices[idx]]
 
     def __len__(self):
@@ -347,7 +380,7 @@ def random_split(dataset: Dataset[T], lengths: Sequence[int],
         generator (Generator): Generator used for the random permutation.
     """
     # Cannot verify that dataset is Sized
-    if sum(lengths) != len(dataset):  # type: ignore
+    if sum(lengths) != len(dataset):
         raise ValueError("Sum of input lengths does not equal the length of the input dataset!")
 
     indices = randperm(sum(lengths), generator=generator).tolist()

@@ -54,7 +54,7 @@ namespace at { namespace native {
 
 // ---------------------------------------------------------------------
 //
-// ConvolutionParams and ConvolutionArgs
+// ConvolutionParams
 //
 // ---------------------------------------------------------------------
 
@@ -84,12 +84,14 @@ void setConvolutionParams(
 
   cudnnDataType_t dataType = getCudnnDataType(input);
   memset(params, 0, sizeof(ConvolutionParams));
+  params->device_id = at::cuda::current_device();
   params->dataType = dataType;
   // ASSERT(weight.dim() == input.dim())
-  for (int i = 0; i != input.dim(); ++i) {
-    params->input_size[i] = (int) input.size(i);
-    params->input_stride[i] = (int) input.stride(i);
-    params->weight_size[i] = (int) weight.size(i);
+  params->input_dim = input.dim();
+  params->memory_format = input.suggest_memory_format();
+  for (int i = 0; i != params->input_dim; ++i) {
+    params->input_size[i] = (int) input.sizes()[i];
+    params->weight_size[i] = (int) weight.sizes()[i];
   }
   // ASSERT(padding.size() == stride.size())
   // ASSERT(padding.size() == dilation.size())
@@ -105,21 +107,22 @@ void setConvolutionParams(
   params->allow_tf32 = allow_tf32;
 }
 
-std::string repro_from_args(const ConvolutionArgs& args) {
+std::string repro_from_args(const ConvolutionParams& params) {
   auto pybool = [](bool b) -> const char* { return b ? "True" : "False"; };
   std::string partial_dtype;
-  switch (args.params.dataType) {
+  switch (params.dataType) {
     case CUDNN_DATA_FLOAT: partial_dtype = "float"; break;
     case CUDNN_DATA_DOUBLE: partial_dtype = "double"; break;
     case CUDNN_DATA_HALF: partial_dtype = "half"; break;
     default: partial_dtype = "unsupported";
   }
   const std::string full_dtype = "torch." + partial_dtype;
-  const int out_channels = args.weight.sizes()[0];
-  const int in_channels = args.weight.sizes()[1] * args.params.groups;
-  const size_t dim = args.input.sizes().size();
+  const int out_channels = params.weight_size[0];
+  const int in_channels = params.weight_size[1] * params.groups;
+  const size_t dim = params.input_dim;
   const std::string channels_last_xd = dim == 4 ? "channels_last" : "channels_last_3d";
-  const std::string to_channels_last = args.input.suggest_memory_format() == at::MemoryFormat::ChannelsLast \
+  const std::string to_channels_last =
+    ((params.memory_format == at::MemoryFormat::ChannelsLast) || (params.memory_format == at::MemoryFormat::ChannelsLast3d)) \
     ? ".to(memory_format=torch." + channels_last_xd + ")" : "";
 
   std::ostringstream ss;
@@ -128,36 +131,22 @@ std::string repro_from_args(const ConvolutionArgs& args) {
   ss << "import torch\n";
   ss << "torch.backends.cuda.matmul.allow_tf32 = " << pybool(at::globalContext().allowTF32CuBLAS()) << "\n";
   ss << "torch.backends.cudnn.benchmark = " << pybool(at::globalContext().benchmarkCuDNN()) << "\n";
-  ss << "torch.backends.cudnn.deterministic = " << pybool(args.params.deterministic) << "\n";
-  ss << "torch.backends.cudnn.allow_tf32 = " << pybool(args.params.allow_tf32) << "\n";
-  ss << "data = torch.randn(" << args.input.sizes() << ", dtype=" << full_dtype << ", ";
+  ss << "torch.backends.cudnn.deterministic = " << pybool(params.deterministic) << "\n";
+  ss << "torch.backends.cudnn.allow_tf32 = " << pybool(params.allow_tf32) << "\n";
+  ss << "data = torch.randn(" << ArrayRef<int>(params.input_size, dim) << ", dtype=" << full_dtype << ", ";
   ss <<   "device='cuda', requires_grad=True)" << to_channels_last << "\n";
   ss << "net = torch.nn.Conv" << dim-2 << "d(" << in_channels << ", " << out_channels << ", ";
-  ss <<   "kernel_size=" << args.weight.sizes().slice(2) << ", ";
-  ss <<   "padding=" << ArrayRef<int>(args.params.padding, dim-2) << ", ";
-  ss <<   "stride=" << ArrayRef<int>(args.params.stride, dim-2) << ", ";
-  ss <<   "dilation=" << ArrayRef<int>(args.params.dilation, dim-2) << ", ";
-  ss <<   "groups=" << args.params.groups << ")\n";
+  ss <<   "kernel_size=" << ArrayRef<int>(&params.weight_size[2], dim - 2) << ", ";
+  ss <<   "padding=" << ArrayRef<int>(params.padding, dim-2) << ", ";
+  ss <<   "stride=" << ArrayRef<int>(params.stride, dim-2) << ", ";
+  ss <<   "dilation=" << ArrayRef<int>(params.dilation, dim-2) << ", ";
+  ss <<   "groups=" << params.groups << ")\n";
   ss << "net = net.cuda()." << partial_dtype << "()" << to_channels_last << "\n";
   ss << "out = net(data)\n";
   ss << "out.backward(torch.randn_like(out))\n";
   ss << "torch.cuda.synchronize()\n\n";
-  
+
   return ss.str();
-}
-
-std::ostream& operator<<(std::ostream & out, const ConvolutionArgs& args) {
-  out << repro_from_args(args)         // already has a trailing newline
-    << args.params                     // already has a trailing newline
-    << "input: " << args.idesc         // already has a trailing newline
-    << "output: " << args.odesc        // already has a trailing newline
-    << "weight: " << args.wdesc        // already has a trailing newline
-    << "Pointer addresses: " << "\n"
-    << "    input: " << args.input.data_ptr() << "\n"
-    << "    output: " << args.output.data_ptr() << "\n"
-    << "    weight: " << args.weight.data_ptr() << "\n";
-
-  return out;
 }
 
 // ---------------------------------------------------------------------
@@ -238,13 +227,18 @@ Tensor cudnn_convolution_forward(
   checkAllSameType(c, {input, weight});
   checkAllSameGPU(c, {input, weight});
 
-  auto layout = cudnn_conv_use_channels_last(*input, *weight) ?
-      at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
-  auto output_t = at::empty(
+  auto memory_format = at::MemoryFormat::Contiguous;
+  if (cudnn_conv_use_channels_last(*input, *weight)) {
+    memory_format = (weight->ndimension() == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
+  }
+  auto output_t = at::native::empty_cuda(
                     conv_output_size(input->sizes(), weight->sizes(),
                                      padding, stride, dilation),
-                    input->options(),
-                    layout);
+                    /*dtype=*/input->scalar_type(),
+                    /*layout=*/c10::nullopt,
+                    /*device=*/kCUDA,
+                    /*pin_memory=*/c10::nullopt,
+                    /*memory_format=*/memory_format);
 
   if (output_t.numel() == 0) {
     return output_t;
@@ -255,11 +249,11 @@ Tensor cudnn_convolution_forward(
   convolution_shape_check(c, input, weight, output, padding, stride, dilation, groups);
 
   // See #4500
-  Tensor weight_contig = weight->contiguous(layout);
+  Tensor weight_contig = weight->contiguous(memory_format);
   // Make sure that NC11 strides follow formula
-  weight_contig.resize_(weight_contig.sizes(), layout);
-  Tensor input_contig = input->contiguous(layout);
-  input_contig.resize_(input_contig.sizes(), layout);
+  weight_contig.resize_(weight_contig.sizes(), memory_format);
+  Tensor input_contig = input->contiguous(memory_format);
+  input_contig.resize_(input_contig.sizes(), memory_format);
 
   raw_cudnn_convolution_forward_out(
       *output, input_contig, weight_contig,
@@ -340,21 +334,29 @@ Tensor cudnn_convolution_backward_input(
   checkAllSameType(c, {grad_output, weight});
   checkAllSameGPU(c, {grad_output, weight});
 
-  auto layout = cudnn_conv_use_channels_last(*grad_output, *weight) ?
-      at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
-  auto grad_input_t = at::empty(input_size, grad_output->options(), layout);
+  auto memory_format = at::MemoryFormat::Contiguous;
+  if (cudnn_conv_use_channels_last(*grad_output, *weight)){
+    memory_format = (weight->ndimension() == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
+  }
+  auto grad_input_t = at::native::empty_cuda(
+                    input_size,
+                    /*dtype=*/grad_output->scalar_type(),
+                    /*layout=*/c10::nullopt,
+                    /*device=*/kCUDA,
+                    /*pin_memory=*/c10::nullopt,
+                    /*memory_format=*/memory_format);
 
   // Avoid "grad_input" when this is being used as transposed convolution
   TensorArg grad_input{ grad_input_t, "result", 0 };
   convolution_shape_check(c, grad_input, weight, grad_output, padding, stride, dilation, groups);
 
   // See #4500
-  Tensor weight_contig = weight->contiguous(layout);
+  Tensor weight_contig = weight->contiguous(memory_format);
   // Make sure that NC11 strides follow formula
-  weight_contig.resize_(weight_contig.sizes(), layout);
+  weight_contig.resize_(weight_contig.sizes(), memory_format);
 
-  Tensor grad_output_contig = grad_output->contiguous(layout);
-  grad_output_contig.resize_(grad_output_contig.sizes(), layout);
+  Tensor grad_output_contig = grad_output->contiguous(memory_format);
+  grad_output_contig.resize_(grad_output_contig.sizes(), memory_format);
 
   raw_cudnn_convolution_backward_input_out(
       *grad_input, grad_output_contig, weight_contig,
@@ -440,8 +442,10 @@ Tensor cudnn_convolution_backward_weight(
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, bool allow_tf32)
 {
-  auto layout = cudnn_conv_use_channels_last(input_t, grad_output_t) ?
-      at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
+  auto layout = at::MemoryFormat::Contiguous;
+  if (cudnn_conv_use_channels_last(input_t, grad_output_t)){
+    layout = (input_t.ndimension() == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
+  }
 
   Tensor grad_output_contig_t = grad_output_t.contiguous(layout);
   // Make sure that NC11 strides follow formula
@@ -495,6 +499,101 @@ Tensor cudnn_convolution_transpose_backward_weight(
       padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
 }
 
+Tensor cudnn_convolution_relu(
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    const c10::optional<Tensor>& bias_t,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    int64_t groups) {
+  // FuseFrozenConvAddRelu performs some tensor shape checking
+  auto output_t = at::native::empty_cuda(
+      conv_output_size(
+          input_t.sizes(), weight_t.sizes(), padding, stride, dilation),
+      /*dtype=*/input_t.scalar_type(),
+      /*layout=*/c10::nullopt,
+      /*device=*/kCUDA,
+      /*pin_memory=*/c10::nullopt,
+      /*memory_format=*/input_t.suggest_memory_format());
+  if (output_t.numel() == 0) {
+    return output_t;
+  }
+
+  raw_cudnn_convolution_add_relu_out(
+      output_t,
+      input_t,
+      weight_t,
+      output_t, // use output_t as z to satisfy CUDNN API
+      0, // alpha
+      bias_t.has_value()
+          ? bias_t.value()
+          : at::native::zeros(
+                {output_t.size(1)},
+                optTypeMetaToScalarType(output_t.options().dtype_opt()),
+                output_t.options().layout_opt(),
+                output_t.options().device_opt(),
+                output_t.options().pinned_memory_opt()),
+      stride,
+      padding,
+      dilation,
+      groups,
+      false, // benchmark
+      false, // deterministic
+      input_t.dim() == 4 // enable allow_tf32 for conv2d
+  );
+
+  return output_t;
+}
+
+Tensor cudnn_convolution_add_relu(
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    const Tensor& z_t,
+    const c10::optional<Scalar>& alpha,
+    const c10::optional<Tensor>& bias_t,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    int64_t groups) {
+  // FuseFrozenConvAddRelu performs some tensor shape checking
+  auto output_t = at::native::empty_cuda(
+      conv_output_size(
+          input_t.sizes(), weight_t.sizes(), padding, stride, dilation),
+      /*dtype=*/input_t.scalar_type(),
+      /*layout=*/c10::nullopt,
+      /*device=*/kCUDA,
+      /*pin_memory=*/c10::nullopt,
+      /*memory_format=*/at::MemoryFormat::Contiguous);
+  if (output_t.numel() == 0) {
+    return output_t;
+  }
+
+  raw_cudnn_convolution_add_relu_out(
+      output_t,
+      input_t,
+      weight_t,
+      z_t,
+      alpha.has_value() ? alpha.value().to<float>() : 1.0,
+      bias_t.has_value()
+          ? bias_t.value()
+          : at::native::zeros(
+                {output_t.size(1)},
+                optTypeMetaToScalarType(output_t.options().dtype_opt()),
+                output_t.options().layout_opt(),
+                output_t.options().device_opt(),
+                output_t.options().pinned_memory_opt()),
+      stride,
+      padding,
+      dilation,
+      groups,
+      false, // benchmark
+      false, // deterministic
+      input_t.dim() == 4 // enable allow_tf32 for conv2d
+  );
+
+  return output_t;
+}
 }}
 
 #endif  // AT_CUDNN_ENABLED

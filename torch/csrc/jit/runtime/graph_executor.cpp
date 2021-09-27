@@ -2,6 +2,7 @@
 
 #include <ATen/core/ivalue.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -157,7 +158,8 @@ struct CaptureList {
         case CAPTURE_LIST: {
           c10::List<at::Tensor> lst;
           auto size = *size_it++;
-          for (size_t i = 0; i < size; i++) {
+          // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
+          for (const auto i : c10::irange(size)) {
             lst.emplace_back(var_capture_it->unpack(saved_for));
             var_capture_it++;
           }
@@ -275,6 +277,8 @@ struct DifferentiableGraphBackward : public autograd::Node {
       } else if (v.isTensor()) {
         produceOutput(output_index++, std::move(v).toTensor(), outputs);
       } else {
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(v.isNone());
+        output_index++;
         // Input grad can also be None even if it requires grad
         // Example: `other` in expand_as(self, other)
         outputs.emplace_back();
@@ -298,8 +302,11 @@ struct DifferentiableGraphBackward : public autograd::Node {
       for (const at::Tensor tensor : value.toTensorList()) {
         addOutputForTensor(tensor);
       }
-    } else {
+    } else if (value.isTensor()) {
       addOutputForTensor(value.toTensor());
+    } else {
+      // We could have None passed here via `Optional[Tensor]`
+      add_next_edge(autograd::Edge{});
     }
   }
 
@@ -362,14 +369,15 @@ struct DifferentiableGraphBackward : public autograd::Node {
 // to the output Variables if present.
 struct DifferentiableGraphOp {
   DifferentiableGraphOp(Gradient grad)
-      : f(grad.f, "<foward op>"),
+      : f_ptr(std::make_shared<GraphExecutor>(grad.f, "<forward op>")),
+        legacy_f(grad.f, "<forward op>"),
         grad(std::move(grad)),
         grad_executor(this->grad.df, "<backward op>"),
         num_inputs(this->grad.f->inputs().size()),
         num_outputs(this->grad.f->outputs().size()) {}
 
   // XXX: keep in mind that stack can be larger than the inputs we need!
-  void operator()(Stack* stack) const {
+  void operator()(Stack& stack) const {
     auto grad_fn = std::make_shared<DifferentiableGraphBackward>(
         grad_executor,
         grad.df_input_vjps.size(),
@@ -386,8 +394,14 @@ struct DifferentiableGraphOp {
       captureInputs(*grad_fn, inputs);
     }
 
-    detachVariables(*stack);
-    InterpreterState(f).run(*stack);
+    detachVariables(stack);
+    if (IsNewExecutorEnabled()) {
+      ExecutionPlan plan =
+          f_ptr->getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts());
+      InterpreterState(plan.code).run(stack);
+    } else {
+      InterpreterState(legacy_f).run(stack);
+    }
 
     {
       auto outputs = last(stack, num_outputs);
@@ -405,12 +419,13 @@ struct DifferentiableGraphOp {
       // drop the temporary outputs so that we return the same number of
       // outputs as if we were not also calculating gradient
       const size_t num_temporary_outputs = num_outputs - grad.f_real_outputs;
-      stack->erase(stack->end() - num_temporary_outputs, stack->end());
+      stack.erase(stack.end() - num_temporary_outputs, stack.end());
     }
   }
 
  private:
   friend GraphExecutor* detail::getGradExecutor(Operation& op);
+  friend GraphExecutor* detail::getDifferentiableGraphOpExecutor(Operation& op);
 
   at::Tensor detach(at::Tensor t) const {
     if (!t.defined()) {
@@ -423,10 +438,11 @@ struct DifferentiableGraphOp {
     if (v.isTensor()) {
       v = IValue(detach(std::move(v).toTensor()));
     } else if (v.isTensorList()) {
-      c10::List<at::Tensor> lst = std::move(v).toTensorList();
-      for (size_t i = 0; i < lst.size(); ++i) {
-        lst.set(i, detach(lst.extract(i)));
+      std::vector<at::Tensor> lst = v.toTensorVector();
+      for (auto& tensor : lst) {
+        tensor = detach(tensor);
       }
+      // NOLINTNEXTLINE(performance-move-const-arg)
       v = std::move(lst);
     }
   }
@@ -437,7 +453,7 @@ struct DifferentiableGraphOp {
     // ourselves.
     const int64_t stack_size = stack.size();
     const int64_t stack_offset = stack_size - num_inputs;
-    for (int64_t i = stack_offset; i < stack_size; ++i) {
+    for (const auto i : c10::irange(stack_offset, stack_size)) {
       detach(stack[i]);
     }
   }
@@ -457,7 +473,8 @@ struct DifferentiableGraphOp {
     }
   }
 
-  Code f;
+  std::shared_ptr<GraphExecutor> f_ptr;
+  Code legacy_f;
   Gradient grad;
   GraphExecutor grad_executor;
 
@@ -493,6 +510,17 @@ namespace detail {
 GraphExecutor* getGradExecutor(Operation& op) {
   if (auto diff_op = op.target<DifferentiableGraphOp>()) {
     return &diff_op->grad_executor;
+  }
+  return nullptr;
+}
+
+GraphExecutor* getDifferentiableGraphOpExecutor(Operation& op) {
+  TORCH_INTERNAL_ASSERT(
+      IsNewExecutorEnabled(),
+      __FUNCTION__,
+      " is only accessible under profiling executor\n");
+  if (auto diff_op = op.target<DifferentiableGraphOp>()) {
+    return diff_op->f_ptr.get();
   }
   return nullptr;
 }
@@ -543,7 +571,7 @@ c10::intrusive_ptr<Future> GraphExecutorImplBase::runAsync(
   last_executed_optimized_graph = frame->plan.graph;
   if (!res->completed()) {
     // If not completed, persist the Frame until complete.
-    res->addCallback([frame] {});
+    res->addCallback([frame](Future& /* unused */) {});
   }
   return res;
 }
@@ -708,13 +736,16 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
 
   ~GraphExecutorImpl() override = default;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   ArgumentSpecCreator arg_spec_creator_;
   // Populated only when optimize is false (and in that case plan_cache will be
   // unused). The compiled version of graph.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   ExecutionPlan fallback;
 
   // Mapping from argument configurations to optimized versions of the graph
   // that are specialized to the spec.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unordered_map<ArgumentSpec, ExecutionPlan> plan_cache;
 };
 
@@ -756,6 +787,16 @@ std::shared_ptr<Graph> GraphExecutor::graph() const {
 
 GraphExecutorState GraphExecutor::getDebugState() {
   return pImpl->getDebugState();
+}
+
+void GraphExecutor::debugFlushCompilationCache() {
+  if (auto ppImpl =
+          std::dynamic_pointer_cast<ProfilingGraphExecutorImpl>(pImpl)) {
+    ppImpl->debugFlushCompilationCache();
+  } else {
+    // we are deprecating legacy executor
+    TORCH_INTERNAL_ASSERT("Not Implemented for Legacy Executor");
+  }
 }
 
 TORCH_API bool IsNewExecutorEnabled() {
@@ -867,7 +908,7 @@ void runNondiffOptimization(
 
 void runOptimization(
     std::shared_ptr<Graph>& graph,
-    bool unroll,
+    bool unroll_non_constant_loops,
     bool const_prop_user_classes) {
   // Basic graph preprocessing to eliminate noise.
   GRAPH_DEBUG(
@@ -894,9 +935,17 @@ void runOptimization(
 
   // Unroll small loops, and eliminate expressions that are the same at every
   // iteration.
-  if (unroll) {
-    UnrollLoops(graph);
+  bool unroll_success = false;
+  if (unroll_non_constant_loops) {
+    unroll_success = UnrollLoops(graph);
     GRAPH_DEBUG("After UnrollLoops, before RemoveListMutation\n", *graph);
+  } else {
+    unroll_success = UnrollConstantLoops(graph);
+    GRAPH_DEBUG(
+        "After UnrollConstantLoops, before RemoveListMutation\n", *graph);
+  }
+
+  if (unroll_success) {
     // run again with unrolled loops
     RemoveListMutation(graph);
     GRAPH_DEBUG("After RemoveListMutation, before PeepholeOptimize\n", *graph);
@@ -938,12 +987,12 @@ Node* replaceBlockWithFallbackGraph(Block* b, ArrayRef<Value*> inputs) {
   fallback->g_(attr::Subgraph, graph);
   b->prependNode(fallback);
 
-  for (size_t i = 0; i < inputs.size(); i++) {
+  for (const auto i : c10::irange(inputs.size())) {
     graph->inputs()[i]->setType(inputs[i]->type());
     graph->inputs()[i]->copyMetadata(inputs[i]);
   }
 
-  for (size_t i = 0; i < b->outputs().size(); i++) {
+  for (const auto i : c10::irange(b->outputs().size())) {
     fallback->output(i)->setType(b->outputs()[i]->type());
     fallback->output(i)->copyMetadata(b->outputs()[i]);
     b->replaceOutput(i, fallback->output(i));

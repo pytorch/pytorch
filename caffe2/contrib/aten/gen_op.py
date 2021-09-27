@@ -1,4 +1,4 @@
-#!/bin/env python
+#!/bin/env python3
 
 # Copyright (c) 2016-present, Facebook, Inc.
 #
@@ -36,10 +36,10 @@ if args.aten_root:
     if not os.path.exists(args.aten_root):
         raise ValueError('aten_root ({}) does not exist'.format(
             args.aten_root))
-    sys.path.append(os.path.join(args.aten_root, '..'))  # TODO: fix this
+    sys.path.insert(0, os.path.join(args.aten_root, '..'))
     from tools.codegen.code_template import CodeTemplate as CT
 else:
-    from tools.codegen.code_template import CodeTemplate as CT  # type: ignore[import,no-redef]
+    from tools.codegen.code_template import CodeTemplate as CT
 
 OP_TEMPLATE = CT.from_file(
     os.path.join(args.template_dir, 'aten_op_template.h'))
@@ -47,9 +47,9 @@ OP_TEMPLATE = CT.from_file(
 
 try:
     # use faster C loader if available
-    from yaml import CLoader as Loader
+    from yaml import CSafeLoader as Loader
 except ImportError:
-    from yaml import Loader  # type: ignore[misc]
+    from yaml import SafeLoader as Loader  # type: ignore[misc]
 
 
 def write(filename, s):
@@ -68,30 +68,30 @@ def value_has_tensors(v):
 
 
 def value_is_tensor_type(v):
-    return value_has_tensors(v) and v['dynamic_type'] not in ['TensorList', 'const c10::List<c10::optional<Tensor>> &']
+    return value_has_tensors(v) and v['dynamic_type'] not in ['at::TensorList', 'const c10::List<c10::optional<at::Tensor>> &']
 
 
 # for each aten type, how do we handle a return value of that type?
 RETURN_MAP = {
-    'Tensor': 'assignTo(Output(${offset}),${output});',
-    'Scalar': 'assignTo(Output(${offset}),${output}.type(), ${output});',
+    'at::Tensor': 'assignTo(Output(${offset}),${output});',
+    'at::Scalar': 'assignTo(Output(${offset}),${output}.type(), ${output});',
     'bool': 'assignToValue<int64_t>(Output(${offset}),${output});',
     'int64_t': 'assignToValue<int64_t>(Output(${offset}),${output});',
-    'std::vector<Tensor>': 'assignListStartingAt(${offset}, ${output});',
+    '::std::vector<at::Tensor>': 'assignListStartingAt(${offset}, ${output});',
 }
 
 # for each non-Tensor aten argument, how to we read it from caffe2's
 # attribute list. Most of these call runtime functions defined in the
 # template class.
 ARGUMENT_MAP = {
-    'Scalar': 'at::Scalar ${arg} = readScalarAttribute("${arg}");',
+    'const at::Scalar &': 'at::Scalar ${arg} = readScalarAttribute("${arg}");',
     'bool': 'bool ${arg} = readAttribute<int64_t>("${arg}");',
     'int': 'int ${arg} = readAttribute<int64_t>("${arg}");',
     'double': 'double ${arg} = readAttribute<float>("${arg}");',
     'int64_t': 'int64_t ${arg} = readAttribute<int64_t>("${arg}");',
-    'IntArrayRef': 'auto ${arg} = readIntArrayRef("${arg}");',
-    'std::array<bool,2>': 'auto ${arg} = readBoolMask<2>("${arg}");',
-    'std::array<bool,3>': 'auto ${arg} = readBoolMask<3>("${arg}");',
+    'at::IntArrayRef': 'auto ${arg} = readIntArrayRef("${arg}");',
+    '::std::array<bool,2>': 'auto ${arg} = readBoolMask<2>("${arg}");',
+    '::std::array<bool,3>': 'auto ${arg} = readBoolMask<3>("${arg}");',
 }
 
 # for BC reasons we want to route some of the functions to different
@@ -165,7 +165,7 @@ IMPLEMENTATION_TEMPLATE = CT("""\
 C10_NOINLINE void implementation_${key}() { // ${name}
     ${initialization}
     run_op = [=] {
-        at::AutoNonVariableTypeMode guard;
+        at::AutoDispatchBelowAutograd guard;
         ${statements}
         auto the_result = ${invocation};
         ${assignments}
@@ -189,7 +189,7 @@ def get_output(o, i):
     if len(o['returns']) == 1:
         return 'the_result'
     else:
-        return 'std::get<{}>(the_result)'.format(i)
+        return '::std::get<{}>(the_result)'.format(i)
 
 
 def attribute_names(o):
@@ -208,7 +208,7 @@ def self_as_first_argument(arguments):
 def get_num_inputs(o):
     args = 0
     for a in o['arguments']:
-        if a['type'] in ['TensorList', 'const c10::List<c10::optional<Tensor>> &']:
+        if a['type'] in ['at::TensorList', 'const c10::List<c10::optional<at::Tensor>> &']:
             return '*'
         elif value_has_tensors(a):
             args += 1
@@ -218,14 +218,14 @@ def get_num_inputs(o):
 def find_factory_methods(decls):
     factory_methods = {}
     for o in decls:
-        if any(arg['dynamic_type'] == 'TensorOptions' for arg in o['arguments']):
+        if any(arg['dynamic_type'] == 'at::TensorOptions' for arg in o['arguments']):
             factory_methods[o['name']] = 0
     return factory_methods
 
 
 def emit_assignments(o, env):
     for i, r in enumerate(o['returns']):
-        t = RETURN_MAP[r['type'] if not value_is_tensor_type(r) else 'Tensor']
+        t = RETURN_MAP[r['type'] if not value_is_tensor_type(r) else 'at::Tensor']
         assignment = CT(t).substitute(env, offset=i, output=get_output(o, i))
         check_size_assignment = ASSIGN_CHECK_SIZE_TEMPLATE.substitute(env, offset=i, assignment=assignment)
 
@@ -277,23 +277,23 @@ if __name__ == '__main__':
             # e.g. "Float" is at::kFloat
             assert('Type' in o['method_of'])
 
-        static_tensor_inputs = sum(arg['type'] not in ['TensorList', 'const c10::List<c10::optional<Tensor>> &'] and value_is_tensor_type(arg) for arg in o['arguments'])
-        has_tensorlist = any(arg['type'] in ['TensorList', 'const c10::List<c10::optional<Tensor>> &'] for arg in o['arguments'])
+        static_tensor_inputs = sum(arg['type'] not in ['at::TensorList', 'const c10::List<c10::optional<at::Tensor>> &'] and value_is_tensor_type(arg) for arg in o['arguments'])
+        has_tensorlist = any(arg['type'] in ['at::TensorList', 'const c10::List<c10::optional<at::Tensor>> &'] for arg in o['arguments'])
         if has_tensorlist:
-            tensorlist_idx = [i for i, arg in enumerate(o['arguments']) if arg['type'] in ['TensorList', 'const c10::List<c10::optional<Tensor>> &']][0]
+            tensorlist_idx = [i for i, arg in enumerate(o['arguments']) if arg['type'] in ['at::TensorList', 'const c10::List<c10::optional<at::Tensor>> &']][0]
 
         real_inputs = 0
         for i, arg in enumerate(o['arguments']):
             env['arguments'].append(arg['name'])
             # Pretend the flat argument list is a stack where the end is the top.
             view_length = 'InputSize()' if has_tensorlist and i < tensorlist_idx else static_tensor_inputs
-            if arg['type'] == 'TensorList':
+            if arg['type'] == 'at::TensorList':
                 # NOTE: do not advance real_inputs here. After this we will
                 # switch to indexing the "stack" from the end
                 env['statements'].append(
                     'auto {} = peekSlice({}, InputSize() - {}, InputSize());'
                     .format(arg['name'], real_inputs, static_tensor_inputs))
-            elif arg['type'] == 'const c10::List<c10::optional<Tensor>> &':
+            elif arg['type'] == 'const c10::List<c10::optional<at::Tensor>> &':
                 # NOTE: do not advance real_inputs here. After this we will
                 # switch to indexing the "stack" from the end
                 env['statements'].append(

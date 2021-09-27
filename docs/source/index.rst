@@ -18,7 +18,7 @@ Features described in this documentation are classified by release status:
   breaking changes can happen and notice will be given one release ahead
   of time).
 
-  *Beta:*  Features are tagged as Beta because the API may change based on
+  *Beta:*  These features are tagged as Beta because the API may change based on
   user feedback, because the performance needs to improve, or because
   coverage across operators is not yet complete. For Beta features, we are
   committing to seeing the feature through to the Stable classification.
@@ -58,6 +58,9 @@ Features described in this documentation are classified by release status:
    torch.cuda.amp <amp>
    torch.backends <backends>
    torch.distributed <distributed>
+   torch.distributed.algorithms.join <distributed.algorithms.join>
+   torch.distributed.elastic <distributed.elastic>
+   torch.distributed.optim <distributed.optim>
    torch.distributions <distributions>
    torch.fft <fft>
    futures
@@ -65,17 +68,22 @@ Features described in this documentation are classified by release status:
    torch.hub <hub>
    torch.jit <jit>
    torch.linalg <linalg>
+   torch.special <special>
    torch.overrides
+   torch.package <package>
    profiler
    nn.init
    onnx
    optim
    complex_numbers
+   ddp_comm_hooks
+   pipeline
    quantization
    rpc
    torch.random <random>
    sparse
    storage
+   torch.testing <testing>
    torch.utils.benchmark <benchmark_utils>
    torch.utils.bottleneck <bottleneck>
    torch.utils.checkpoint <checkpoint>
@@ -95,9 +103,8 @@ Features described in this documentation are classified by release status:
    :caption: Libraries
 
    torchaudio <https://pytorch.org/audio/stable>
-   torchtext <https://pytorch.org/text>
-   torchvision <https://pytorch.org/vision>
-   TorchElastic <https://pytorch.org/elastic/>
+   torchtext <https://pytorch.org/text/stable>
+   torchvision <https://pytorch.org/vision/stable>
    TorchServe <https://pytorch.org/serve>
    PyTorch on XLA Devices <http://pytorch.org/xla/>
 

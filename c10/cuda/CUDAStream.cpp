@@ -1,7 +1,8 @@
-#include <c10/cuda/CUDAStream.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAStream.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <array>
 #include <atomic>
@@ -10,7 +11,6 @@
 #include <vector>
 
 #include <iostream>
-
 namespace c10 {
 namespace cuda {
 
@@ -42,6 +42,7 @@ static DeviceIndex num_gpus = -1;
 static constexpr int kStreamsPerPoolBits = 5;
 static constexpr int kStreamsPerPool = 1 << kStreamsPerPoolBits;
 static constexpr unsigned int kDefaultFlags = cudaStreamNonBlocking;
+static constexpr int kStreamTypeBits = 3;
 
 // Note: lower numbers are higher priorities, zero is default priority
 static int kHighPriority = -1;
@@ -74,13 +75,13 @@ static std::array<LeakyStreamInternals, kStreamsPerPool>
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~
 // How do we assign stream IDs?
 //
-// -- 25 bits -- -- 2 bits --  -- 5 bits -----
-// zeros         StreamIdType  stream id index
+// -- 57 bits --  -- 5 bits -----  -- 3 bits --
+// zeros          stream id index  StreamIdType
 //
 // Where StreamIdType:
-//  00 = default stream
-//  01 = low priority stream
-//  10 = high priority stream
+//  000 = default stream or externally allocated if id[63:3] != 0
+//  001 = low priority stream
+//  010 = high priority stream
 //
 // This is not really for efficiency; it's just easier to write the code
 // to extract the index if we do this with bitmasks :)
@@ -96,11 +97,16 @@ static std::array<LeakyStreamInternals, kStreamsPerPool>
 // could work around this with something like
 // https://stackoverflow.com/questions/13150449/efficient-unsigned-to-signed-cast-avoiding-implementation-defined-behavior
 // but it seems a bit overkill for this.
-
+//
+// Also, external managed stream pointers (cudaStream_t) can be directly stored
+// in the Id field so in this case, we need to check the stream alignment.
+// The IdType uses an additional bit to match with the 64-bit address alignment
+// making easy to identify an external stream when its value (X & 7) > 0
 enum class StreamIdType : uint8_t {
   DEFAULT = 0x0,
   LOW = 0x1,
   HIGH = 0x2,
+  EXT = 0x3,
 };
 
 std::ostream& operator<<(std::ostream& stream, StreamIdType s) {
@@ -114,6 +120,9 @@ std::ostream& operator<<(std::ostream& stream, StreamIdType s) {
     case StreamIdType::HIGH:
       stream << "HIGH";
       break;
+    case StreamIdType::EXT:
+      stream << "EXT";
+      break;
     default:
       stream << static_cast<uint8_t>(s);
       break;
@@ -121,21 +130,29 @@ std::ostream& operator<<(std::ostream& stream, StreamIdType s) {
   return stream;
 }
 
-// StreamId is 32-bit, so we can just rely on regular promotion rules.
+// StreamId is 64-bit, so we can just rely on regular promotion rules.
 // We rely on streamIdIndex and streamIdType being non-negative;
 // see Note [Hazard when concatenating signed integers]
 
 static inline StreamIdType streamIdType(StreamId s) {
-  return static_cast<StreamIdType>(s >> kStreamsPerPoolBits);
+  int mask_for_type = (1 << kStreamTypeBits) - 1;
+  if (s && ((s & mask_for_type) == 0)) {
+    // Externally allocated streams have their id being the cudaStream_ptr
+    // so the bits corresponding to the type will be 0 and will collide with
+    // the default stream.
+    return StreamIdType::EXT;
+  }
+  return static_cast<StreamIdType>(s & mask_for_type);
 }
 
 static inline size_t streamIdIndex(StreamId s) {
-  return static_cast<size_t>(s & ((1 << kStreamsPerPoolBits) - 1));
+  return static_cast<size_t>(
+      (s >> kStreamTypeBits) & ((1 << kStreamsPerPoolBits) - 1));
 }
 
 StreamId makeStreamId(StreamIdType st, size_t si) {
-  return (static_cast<StreamId>(st) << kStreamsPerPoolBits) |
-      static_cast<StreamId>(si);
+  return (static_cast<StreamId>(si) << kStreamTypeBits) |
+      static_cast<StreamId>(st);
 }
 
 template <typename T, typename A>
@@ -175,7 +192,7 @@ static StreamId CUDAStream_getStreamId(const LeakyStreamInternals* ptr) {
         StreamIdType::HIGH, ptr - high_priority_streams[device_index].data());
   }
 
-  AT_ASSERTM(
+  TORCH_INTERNAL_ASSERT(
       0,
       "Could not compute stream ID for ",
       ptr,
@@ -197,7 +214,7 @@ static void initGlobalStreamState() {
   num_gpus = device_count();
   // Check if the number of GPUs matches the expected compile-time max number
   // of GPUs.
-  AT_ASSERTM(
+  TORCH_CHECK(
       num_gpus <= C10_COMPILE_TIME_MAX_GPUS,
       "Number of CUDA devices on the machine is larger than the compiled "
       "max number of gpus expected (",
@@ -205,7 +222,7 @@ static void initGlobalStreamState() {
       "). Increase that and recompile.");
 
   // Initializes default streams
-  for (auto i = decltype(num_gpus){0}; i < num_gpus; ++i) {
+  for (const auto i : c10::irange(num_gpus)) {
     default_streams[i].device_index = i;
     low_priority_counters[i] = 0;
     high_priority_counters[i] = 0;
@@ -219,7 +236,7 @@ static void initDeviceStreamState(DeviceIndex device_index) {
   // with it.
   CUDAGuard device_guard{device_index};
 
-  for (auto i = decltype(kStreamsPerPool){0}; i < kStreamsPerPool; ++i) {
+  for (const auto i : c10::irange(kStreamsPerPool)) {
     auto& lowpri_stream = low_priority_streams[device_index][i];
     auto& hipri_stream = high_priority_streams[device_index][i];
 
@@ -245,14 +262,14 @@ static void initCUDAStreamsOnce() {
   // Inits current streams (thread local) to default streams
   current_streams =
       (LeakyStreamInternals**)malloc(num_gpus * sizeof(LeakyStreamInternals*));
-  for (auto i = decltype(num_gpus){0}; i < num_gpus; ++i) {
+  for (const auto i : c10::irange(num_gpus)) {
     current_streams[i] = &default_streams[i];
   }
 }
 
 // Helper to verify the GPU index is valid
 static inline void check_gpu(DeviceIndex device_index) {
-  AT_ASSERT(device_index >= 0 && device_index < num_gpus);
+  TORCH_INTERNAL_ASSERT(device_index >= 0 && device_index < num_gpus);
 }
 
 // Helper to determine the index of the stream to return
@@ -269,7 +286,7 @@ LeakyStreamInternals* CUDAStream_internals(CUDAStream s) {
   size_t si = streamIdIndex(s.unwrap().id());
   switch (st) {
     case StreamIdType::DEFAULT:
-      AT_ASSERTM(
+      TORCH_INTERNAL_ASSERT(
           si == 0,
           "Unrecognized stream ",
           s.unwrap(),
@@ -284,7 +301,7 @@ LeakyStreamInternals* CUDAStream_internals(CUDAStream s) {
     case StreamIdType::HIGH:
       return &high_priority_streams[device_index][si];
     default:
-      AT_ASSERTM(
+      TORCH_INTERNAL_ASSERT(
           0,
           "Unrecognized stream ",
           s.unwrap(),
@@ -306,9 +323,16 @@ CUDAStream CUDAStream_fromInternals(const LeakyStreamInternals* ptr) {
 } // anonymous namespace
 
 cudaStream_t CUDAStream::stream() const {
-  auto ptr = CUDAStream_internals(*this);
-  AT_ASSERT(ptr);
-  return ptr->stream;
+  int64_t stream_id = unwrap().id();
+  if (streamIdType(stream_id) == StreamIdType::EXT) {
+    // In this case this is a externally allocated stream
+    // we don't need to manage its life cycle
+    return reinterpret_cast<cudaStream_t>(stream_id);
+  } else {
+    auto ptr = CUDAStream_internals(*this);
+    TORCH_INTERNAL_ASSERT(ptr);
+    return ptr->stream;
+  }
 }
 
 // Returns a stream from the requested pool
@@ -335,6 +359,18 @@ CUDAStream getStreamFromPool(
   return CUDAStream_fromInternals(&low_priority_streams[device_index][idx]);
 }
 
+CUDAStream getStreamFromExternal(
+    cudaStream_t ext_stream,
+    DeviceIndex device_index) {
+  return CUDAStream(
+      CUDAStream::UNCHECKED,
+      // The stream pointer will be the actual id
+      Stream(
+          Stream::UNSAFE,
+          c10::Device(DeviceType::CUDA, device_index),
+          reinterpret_cast<int64_t>(ext_stream)));
+}
+
 CUDAStream getDefaultCUDAStream(DeviceIndex device_index) {
   initCUDAStreamsOnce();
   if (device_index == -1) {
@@ -355,7 +391,7 @@ CUDAStream getCurrentCUDAStream(DeviceIndex device_index) {
 void setCurrentCUDAStream(CUDAStream stream) {
   initCUDAStreamsOnce();
   auto ptr = CUDAStream_internals(stream);
-  AT_ASSERT(ptr);
+  TORCH_INTERNAL_ASSERT(ptr);
   current_streams[ptr->device_index] = ptr;
 }
 

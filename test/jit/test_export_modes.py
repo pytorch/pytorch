@@ -64,21 +64,20 @@ class TestExportModes(JitTestCase):
             return (a, a)
         f = io.BytesIO()
         x = torch.ones(3)
-        torch.onnx._export(foo, (x,), f, example_outputs=(x, x))
+        torch.onnx._export(foo, (x,), f)
 
     @skipIfNoLapack
     def test_aten_fallback(self):
         class ModelWithAtenNotONNXOp(nn.Module):
             def forward(self, x, y):
                 abcd = x + y
-                defg = torch.qr(abcd)
+                defg = torch.linalg.qr(abcd)
                 return defg
 
         x = torch.rand(3, 4)
         y = torch.rand(3, 4)
-        f = io.BytesIO()
         torch.onnx.export_to_pretty_string(
-            ModelWithAtenNotONNXOp(), (x, y), f,
+            ModelWithAtenNotONNXOp(), (x, y), None,
             add_node_names=False,
             do_constant_folding=False,
             operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK)
@@ -91,11 +90,10 @@ class TestExportModes(JitTestCase):
             def forward(self, x, y):
                 return torch.fmod(x, y)
 
-        f = io.BytesIO()
         x = torch.randn(3, 4, dtype=torch.float32)
         y = torch.randn(3, 4, dtype=torch.float32)
         torch.onnx.export_to_pretty_string(
-            ModelWithAtenFmod(), (x, y), f,
+            ModelWithAtenFmod(), (x, y), None,
             add_node_names=False,
             do_constant_folding=False,
             operator_export_type=OperatorExportTypes.ONNX_ATEN)

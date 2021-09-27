@@ -1,11 +1,15 @@
 import os
 import sys
 import inspect
-from typing import Dict, List, Any
+import unittest
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 from textwrap import dedent
 from collections import OrderedDict
 
+from torch import Tensor
 import torch
+import torch.nn as nn
+import types
 from torch.testing import FileCheck
 
 # Make the helper files in test/ importable
@@ -19,23 +23,49 @@ if __name__ == '__main__':
                        "instead.")
 
 class TestList(JitTestCase):
+    def test_list_bool_conversion(self):
+        def if_predicate(l: List[int]):
+            if l:
+                s = 0
+                for n in l:
+                    s += n
+
+                return s
+            else:
+                return -1
+
+        self.checkScript(if_predicate, ([1, 2, 3],))
+        self.checkScript(if_predicate, ([],))
+
+        def while_predicate(l: List[int]):
+            s = 0
+
+            while l:
+                s += l.pop()
+
+        self.checkScript(while_predicate, ([1, 2, 3],))
+        self.checkScript(while_predicate, ([],))
+
+        def ternary_predicate(l: List[int]):
+            return "non-empty" if l else "empty"
+
+        self.checkScript(ternary_predicate, ([1, 2, 3],))
+        self.checkScript(ternary_predicate, ([],))
+
     def test_in_check(self):
-        def int_in(x):
-            # type: (List[int]) -> bool
+        def int_in(x: List[int]) -> bool:
             return 2 in x
 
         self.checkScript(int_in, ([1, 2, 3],))
         self.checkScript(int_in, ([1, 3, 3],))
 
-        def float_in(x):
-            # type: (List[float]) -> bool
+        def float_in(x: List[float]) -> bool:
             return 2. in x
 
         self.checkScript(float_in, ([1., 2., 3.],))
         self.checkScript(float_in, ([1., 3., 3.],))
 
-        def str_in(x):
-            # type: (List[str]) -> bool
+        def str_in(x: List[str]) -> bool:
             return 'hi' in x
 
         self.checkScript(str_in, (['not', 'here'],))
@@ -62,7 +92,7 @@ class TestList(JitTestCase):
             if 1 == 1:
                 x = [1, 2, 3]
             return
-        with self.assertRaisesRegex(RuntimeError, r"previously has type List\[Tensor\]"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, r"previously had type List\[Tensor\]", "x"):
             self.checkScript(reassign_from_empty_literal, (), optimize=False)
 
         def reassign_from_empty_builtin():
@@ -83,7 +113,7 @@ class TestList(JitTestCase):
             if 1 == 1:
                 x = [1.0]
             return
-        with self.assertRaisesRegex(RuntimeError, "previously has type"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "previously had type", "x"):
             self.checkScript(reassign_bad_type, (), optimize=False)
 
         def reassign_nested():
@@ -93,15 +123,14 @@ class TestList(JitTestCase):
                 if 1 == 1:
                     x = [1.0]
             return
-        with self.assertRaisesRegex(RuntimeError, "previously has type"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "previously had type", "x"):
             self.checkScript(reassign_nested, (), optimize=False)
 
     def test_del(self):
         def inputs():
             return [1, 2, 3, 4]
 
-        def fn(x):
-            # type: (List[int]) -> List[int]
+        def fn(x: List[int]) -> List[int]:
             del x[1]
             return x
 
@@ -114,18 +143,16 @@ class TestList(JitTestCase):
         self.assertEqual(torch.jit.script(fn)(inputs()), python_out)
 
         @torch.jit.script
-        def fn2(x):
-            # type: (List[int]) -> List[int]
+        def fn2(x: List[int]) -> List[int]:
             del x[100]
             return x
 
-        with self.assertRaisesRegex(RuntimeError, "out of range"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "out of range", "x[100]"):
             fn2([])
 
-        with self.assertRaisesRegex(RuntimeError, "deletion at a single index"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "deletion at a single index", "x[1:3]"):
             @torch.jit.script
-            def fn(x):
-                # type: (List[int]) -> List[int]
+            def fn(x: List[int]) -> List[int]:
                 del x[1:3]
                 return x
 
@@ -148,24 +175,117 @@ class TestList(JitTestCase):
         self.checkScript(foo3, ())
         FileCheck().check_count("aten::list", 2, exactly=True).run(torch.jit.script(foo3).graph)
 
+    def test_dict_keyword_with_kwargs(self):
+        def fn():
+            return dict(foo=1, bar=2, baz=3)
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_with_kwargs_using_container_values(self):
+        def fn():
+            return dict(foo=[1, 2, 3], bar=[4, 5, 6], baz=[7, 8, 9])
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_with_iterable(self):
+        def fn():
+            return dict([("foo", 1), ("bar", 2), ("baz", 3)])    # noqa: C406
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_with_empty_iterable(self):
+        def fn():
+            return dict([])    # noqa: C406
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_with_internal_aggregate_function(self):
+        def fn():
+            return dict(zip(["foo", "baz", "bar"], [1, 2, 3]))
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_with_mapping(self):
+        def fn():
+            return dict({"foo" : 1, "bar" : 2, "baz" : 3})
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_with_mapping_and_kwargs(self):
+        def fn():
+            return dict({"foo" : 1, "bar" : 2}, baz=3)
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_with_dict_comprehension(self):
+        def fn():
+            return dict({i: chr(i + 65) for i in range(4)})
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_with_dict_comprehension_and_kwargs(self):
+        def fn():
+            return dict({chr(65 + i) : i for i in range(4)}, foo=2)
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_with_empty_dict_comprehension(self):
+        def fn():
+            return dict({})
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_is_correctly_typed(self):
+        def fn():
+            x: Dict[str, int] = dict()
+            x["foo"] = 1
+            return x
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_with_mismatched_annotations(self):
+        err_msg = r"is annotated with type Dict\[int, str\] but is " \
+                  r"being assigned to a value of type Dict\[str, int\]"
+        with self.assertRaisesRegex(RuntimeError, err_msg):
+            @torch.jit.script
+            def fn():
+                x: Dict[int, str] = dict([("foo", 1), ("bar", 2), ("baz", 3)])    # noqa: C406
+                return x
+
+    def test_dict_keyword_with_nested_call(self):
+        def fn():
+            return dict(dict(foo=1, bar=2, baz=3))
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_with_previously_declared_variable(self):
+        def fn():
+            d = {"foo" : 1, "bar" : 2}
+            return dict(d)
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_with_previously_declared_variable_and_kwargs(self):
+        def fn():
+            d = {"foo" : 1, "bar" : 2}
+            return dict(d, baz=3)
+
+        self.checkScript(fn, ())
+
     def test_min_bool_list(self):
-        def jit_min_list(a, b):
-            # type: (List[bool], List[bool]) -> List[bool]
+        def jit_min_list(a: List[bool], b: List[bool]) -> List[bool]:
             return min(a, b)
 
         self.checkScript(jit_min_list, ([True, False], [False, True]))
 
     def test_min_max_list(self):
-        def jit_min_list(a, b):
-            # type: (List[int], List[int]) -> List[int]
+        def jit_min_list(a: List[int], b: List[int]) -> List[int]:
             return min(a, b)
 
-        def jit_min_list_float(a, b):
-            # type: (List[float], List[float]) -> List[float]
+        def jit_min_list_float(a: List[float], b: List[float]) -> List[float]:
             return min(a, b)
 
-        def jit_min_list_bool(a, b):
-            # type: (List[bool], List[bool]) -> List[bool]
+        def jit_min_list_bool(a: List[bool], b: List[bool]) -> List[bool]:
             return min(a, b)
 
         def run_tests(func, a, b):
@@ -186,16 +306,13 @@ class TestList(JitTestCase):
                            [False, True], [False, False, True], [False, False, False]]
         run_tests(jit_min_list_bool, args_left_bool, args_right_bool)
 
-        def jit_max_list(a, b):
-            # type: (List[int], List[int]) -> List[int]
+        def jit_max_list(a: List[int], b: List[int]) -> List[int]:
             return max(a, b)
 
-        def jit_max_list_float(a, b):
-            # type: (List[float], List[float]) -> List[float]
+        def jit_max_list_float(a: List[float], b: List[float]) -> List[float]:
             return max(a, b)
 
-        def jit_max_list_bool(a, b):
-            # type: (List[bool], List[bool]) -> List[bool]
+        def jit_max_list_bool(a: List[bool], b: List[bool]) -> List[bool]:
             return max(a, b)
 
         args_left_int = [[1, 8, 8], [8, 1, 1], [], [1], [], [1, 2]]
@@ -365,8 +482,7 @@ class TestList(JitTestCase):
             t2 = scope['func']()
             self.assertEqual(t1, t2)
 
-        def test_fail(x):
-            # type: (List[Tensor]) -> List[Tensor]
+        def test_fail(x: List[Tensor]) -> List[Tensor]:
             x.sort()
             return x
 
@@ -459,9 +575,9 @@ class TestList(JitTestCase):
         def test_index_slice_out_of_bounds_index(x):
             x = x[[4], :, :]
             return x
-        with self.assertRaisesRegex(RuntimeError, "index 4 is out of bounds for dimension 0 with size 3"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "index 4 is out of bounds for dimension 0 with size 3",
+                                                               "x[[4], :, :]"):
             self.checkScript(test_index_slice_out_of_bounds_index, (a,))
-
 
     def test_mutable_list_append(self):
         def test_append():
@@ -472,8 +588,7 @@ class TestList(JitTestCase):
         self.checkScript(test_append, ())
 
     def test_comprehensions_basic(self):
-        def comp(l):
-            # type: (List[int]) -> List[int]
+        def comp(l: List[int]) -> List[int]:
 
             n = [x * 3 for x in l]
             return n
@@ -482,8 +597,7 @@ class TestList(JitTestCase):
         self.checkScript(comp, ([1, 2, 3],))
 
     def test_comprehensions_basic_float(self):
-        def comp(l):
-            # type: (List[float]) -> List[float]
+        def comp(l: List[float]) -> List[float]:
 
             n = [x * 3 for x in l]
             return n
@@ -492,8 +606,7 @@ class TestList(JitTestCase):
 
     def test_comprehensions_two_comps(self):
         @torch.jit.script
-        def comp(l1, l2):
-            # type: (List[int], List[int]) -> List[int]
+        def comp(l1: List[int], l2: List[int]) -> List[int]:
 
             n = [x * 3 for x in l1]
             n2 = [x + 2 for x in l2]
@@ -502,8 +615,7 @@ class TestList(JitTestCase):
         self.assertEqual(comp([1, 2, 3], [4, 5]), [3, 6, 9, 6, 7])
 
     def test_comprehension_out_type_not_in_type(self):
-        def list_cast():
-            # type: () -> int
+        def list_cast() -> int:
             li = [int(i) for i in [torch.tensor(0), torch.tensor(1), torch.tensor(2)]]
             return li[0] + li[1] + li[2]
 
@@ -513,15 +625,13 @@ class TestList(JitTestCase):
         def test_func(fn, inputs):
             self.assertEqual(fn(*inputs), torch.jit.script(fn)(*inputs))
 
-        def foo(names, results):
-            # type: (List[int], List[int]) -> List[Tuple[int, int]]
+        def foo(names: List[int], results: List[int]) -> List[Tuple[int, int]]:
             return [(k + 5, v - 2) for k, v in zip(names, results)]
 
         test_func(foo, ([1, 2, 4], [4, 7, 9]))
         test_func(foo, ([5], [4, 7, 9]))
 
-        def fn(x):
-            # type: (int) -> List[int]
+        def fn(x: int) -> List[int]:
             return [i for i in range(x)]  # noqa: C416
 
         test_func(fn, (9,))
@@ -601,8 +711,7 @@ class TestList(JitTestCase):
 
     def test_mutable_list_function_inline(self):
         @torch.jit.script
-        def bar(y):
-            # type: (List[int]) -> None
+        def bar(y: List[int]) -> None:
             y.append(4)
 
         @torch.jit.script
@@ -643,7 +752,7 @@ class TestList(JitTestCase):
             a = torch.jit.annotate(List[int], [])
             return a.pop()
 
-        with self.assertRaisesRegex(RuntimeError, "pop from empty list"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "pop from empty list", "a.pop"):
             test_pop_empty()
 
     def test_mutable_list_pop(self):
@@ -768,7 +877,7 @@ class TestList(JitTestCase):
 
             return a
 
-        with self.assertRaisesRegex(RuntimeError, "x not in list"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "x not in list", "a.remove"):
             test_list_remove_not_existing()
 
     def test_mutable_list_remove(self):
@@ -794,7 +903,7 @@ class TestList(JitTestCase):
 
             return i
 
-        with self.assertRaisesRegex(RuntimeError, "'5' is not in list"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "'5' is not in list", "a.index"):
             list_index_not_existing()
 
     def test_list_index(self):
@@ -828,7 +937,7 @@ class TestList(JitTestCase):
 
             return i
 
-        with self.assertRaisesRegex(RuntimeError, "is not in list"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "is not in list", "a.index"):
             tensor_list_index_not_existing()
 
     def test_list_count(self):
@@ -888,8 +997,7 @@ class TestList(JitTestCase):
 
     def test_extend_list_mutable(self):
         @torch.jit.script
-        def extend_list(a, b):
-            # type: (List[Tensor], List[Tensor]) -> List[Tensor]
+        def extend_list(a: List[Tensor], b: List[Tensor]) -> List[Tensor]:
 
             a.extend(b)
             return a
@@ -900,8 +1008,7 @@ class TestList(JitTestCase):
 
     def test_extend_list_immutable(self):
         @torch.jit.script
-        def extend_list(a, b):
-            # type: (List[int], List[int]) -> List[int]
+        def extend_list(a: List[int], b: List[int]) -> List[int]:
 
             a.extend(b)
             return a
@@ -912,8 +1019,7 @@ class TestList(JitTestCase):
 
     def test_copy_list_mutable(self):
         @torch.jit.script
-        def copy_list(a):
-            # type: (List[Tensor]) -> List[Tensor]
+        def copy_list(a: List[Tensor]) -> List[Tensor]:
             return a.copy()
 
         for l in [[], [torch.rand(2)], [torch.rand(2), torch.rand(2), torch.rand(2)]]:
@@ -921,36 +1027,29 @@ class TestList(JitTestCase):
 
     def test_copy_list_immutable(self):
         @torch.jit.script
-        def copy_list(a):
-            # type: (List[int]) -> List[int]
+        def copy_list(a: List[int]) -> List[int]:
             return a.copy()
 
         for l in [[], [1], [1, 2, 3]]:
             self.assertEqual(copy_list(l), l)
 
     def test_min_max_single_list(self):
-        def min_intlist(li):
-            # type: (List[int]) -> int
+        def min_intlist(li: List[int]) -> int:
             return min(li)
 
-        def max_intlist(li):
-            # type: (List[int]) -> int
+        def max_intlist(li: List[int]) -> int:
             return max(li)
 
-        def min_boollist(li):
-            # type: (List[bool]) -> bool
+        def min_boollist(li: List[bool]) -> bool:
             return min(li)
 
-        def max_boollist(li):
-            # type: (List[bool]) -> bool
+        def max_boollist(li: List[bool]) -> bool:
             return max(li)
 
-        def min_floatlist(li):
-            # type: (List[float]) -> float
+        def min_floatlist(li: List[float]) -> float:
             return min(li)
 
-        def max_floatlist(li):
-            # type: (List[float]) -> float
+        def max_floatlist(li: List[float]) -> float:
             return max(li)
 
 
@@ -980,23 +1079,19 @@ class TestList(JitTestCase):
         """
         Boolean dtype unit tests.
         """
-        def to_list_bool_0D(x):
-            # type: (torch.Tensor) -> bool
+        def to_list_bool_0D(x: torch.Tensor) -> bool:
             li = torch.jit.annotate(bool, x.tolist())
             return li
 
-        def to_list_bool_1D(x):
-            # type: (torch.Tensor) -> List[bool]
+        def to_list_bool_1D(x: torch.Tensor) -> List[bool]:
             li = torch.jit.annotate(List[bool], x.tolist())
             return li
 
-        def to_list_bool_2D(x):
-            # type: (torch.Tensor) -> List[List[bool]]
+        def to_list_bool_2D(x: torch.Tensor) -> List[List[bool]]:
             li = torch.jit.annotate(List[List[bool]], x.tolist())
             return li
 
-        def to_list_bool_3D(x):
-            # type: (torch.Tensor) -> List[List[List[bool]]]
+        def to_list_bool_3D(x: torch.Tensor) -> List[List[List[bool]]]:
             li = torch.jit.annotate(List[List[List[bool]]], x.tolist())
             return li
 
@@ -1021,23 +1116,19 @@ class TestList(JitTestCase):
         """
         Int dtype unit tests.
         """
-        def to_list_int_0D(x):
-            # type: (torch.Tensor) -> int
+        def to_list_int_0D(x: torch.Tensor) -> int:
             li = torch.jit.annotate(int, x.tolist())
             return li
 
-        def to_list_int_1D(x):
-            # type: (torch.Tensor) -> List[int]
+        def to_list_int_1D(x: torch.Tensor) -> List[int]:
             li = torch.jit.annotate(List[int], x.tolist())
             return li
 
-        def to_list_int_2D(x):
-            # type: (torch.Tensor) -> List[List[int]]
+        def to_list_int_2D(x: torch.Tensor) -> List[List[int]]:
             li = torch.jit.annotate(List[List[int]], x.tolist())
             return li
 
-        def to_list_int_3D(x):
-            # type: (torch.Tensor) -> List[List[List[int]]]
+        def to_list_int_3D(x: torch.Tensor) -> List[List[List[int]]]:
             li = torch.jit.annotate(List[List[List[int]]], x.tolist())
             return li
 
@@ -1058,23 +1149,19 @@ class TestList(JitTestCase):
         """
         Float dtype unit tests.
         """
-        def to_list_float_0D(x):
-            # type: (torch.Tensor) -> float
+        def to_list_float_0D(x: torch.Tensor) -> float:
             li = torch.jit.annotate(float, x.tolist())
             return li
 
-        def to_list_float_1D(x):
-            # type: (torch.Tensor) -> List[float]
+        def to_list_float_1D(x: torch.Tensor) -> List[float]:
             li = torch.jit.annotate(List[float], x.tolist())
             return li
 
-        def to_list_float_2D(x):
-            # type: (torch.Tensor) -> List[List[float]]
+        def to_list_float_2D(x: torch.Tensor) -> List[List[float]]:
             li = torch.jit.annotate(List[List[float]], x.tolist())
             return li
 
-        def to_list_float_3D(x):
-            # type: (torch.Tensor) -> List[List[List[float]]]
+        def to_list_float_3D(x: torch.Tensor) -> List[List[List[float]]]:
             li = torch.jit.annotate(List[List[List[float]]], x.tolist())
             return li
 
@@ -1092,6 +1179,38 @@ class TestList(JitTestCase):
         self.checkScript(to_list_float_3D, (torch.randn(5, 6, 7, dtype=torch.double).transpose(0, 1),))
 
         """
+        Complex dtype unit tests.
+        """
+        def to_list_complex_0D(x: torch.Tensor) -> complex:
+            li = torch.jit.annotate(complex, x.tolist())
+            return li
+
+        def to_list_complex_1D(x: torch.Tensor) -> List[complex]:
+            li = torch.jit.annotate(List[complex], x.tolist())
+            return li
+
+        def to_list_complex_2D(x: torch.Tensor) -> List[List[complex]]:
+            li = torch.jit.annotate(List[List[complex]], x.tolist())
+            return li
+
+        def to_list_complex_3D(x: torch.Tensor) -> List[List[List[complex]]]:
+            li = torch.jit.annotate(List[List[List[complex]]], x.tolist())
+            return li
+
+        # Test with torch.complex dtype Tensors to check that they are converted to double automatically.
+        self.checkScript(to_list_complex_0D, (torch.randn(5, dtype=torch.cfloat)[0],))
+        self.checkScript(to_list_complex_1D, (torch.randn(5, dtype=torch.cfloat),))
+        self.checkScript(to_list_complex_2D, (torch.randn(5, 6, dtype=torch.cfloat),))
+        self.checkScript(to_list_complex_3D, (torch.randn(5, 6, 7, dtype=torch.cfloat),))
+        self.checkScript(to_list_complex_3D, (torch.randn(5, 6, 7, dtype=torch.cfloat).transpose(0, 1),))
+
+        self.checkScript(to_list_complex_0D, (torch.randn(5, dtype=torch.cdouble)[0],))
+        self.checkScript(to_list_complex_1D, (torch.randn(5, dtype=torch.cdouble),))
+        self.checkScript(to_list_complex_2D, (torch.randn(5, 6, dtype=torch.cdouble),))
+        self.checkScript(to_list_complex_3D, (torch.randn(5, 6, 7, dtype=torch.cdouble),))
+        self.checkScript(to_list_complex_3D, (torch.randn(5, 6, 7, dtype=torch.cdouble).transpose(0, 1),))
+
+        """
         Non-happy path tests:
             - missing type annotation
             - mismatch between type annotation and input
@@ -1099,28 +1218,23 @@ class TestList(JitTestCase):
             - type annotation with the wrong dimension
             - type annotation with scalar type that doesn't match the input scalar type
         """
-        def to_list_missing_type_annotation(x):
-            # type: (torch.Tensor) -> List[float]
+        def to_list_missing_type_annotation(x: torch.Tensor) -> List[float]:
             li = x.tolist()
             return li
 
-        def to_list_incorrect_type_annotation(x):
-            # type: (torch.Tensor) -> List[float]
+        def to_list_incorrect_type_annotation(x: torch.Tensor) -> List[float]:
             li = torch.jit.annotate(float, x.tolist())
             return li
 
-        def to_list_unsupported_type_annotation(x):
-            # type: (torch.Tensor) -> List[float]
+        def to_list_unsupported_type_annotation(x: torch.Tensor) -> List[float]:
             li = torch.jit.annotate(List[str], x.tolist())
             return li
 
-        def to_list_type_annotation_wrong_dim(x):
-            # type: (torch.Tensor) -> List[List[float]]
+        def to_list_type_annotation_wrong_dim(x: torch.Tensor) -> List[List[float]]:
             li = torch.jit.annotate(List[List[float]], x.tolist())
             return li
 
-        def to_list_type_annotation_incorrect_scalar_type(x):
-            # type: (torch.Tensor) -> List[float]
+        def to_list_type_annotation_incorrect_scalar_type(x: torch.Tensor) -> List[float]:
             li = torch.jit.annotate(List[float], x.tolist())
             return li
 
@@ -1164,18 +1278,15 @@ class TestList(JitTestCase):
         if not torch.cuda.is_available() or torch.cuda.device_count() == 0:
             self.skipTest("CUDA is not available")
 
-        def to_list_bool_1D(x):
-            # type: (torch.Tensor) -> List[bool]
+        def to_list_bool_1D(x: torch.Tensor) -> List[bool]:
             li = torch.jit.annotate(List[bool], x.tolist())
             return li
 
-        def to_list_int_1D(x):
-            # type: (torch.Tensor) -> List[int]
+        def to_list_int_1D(x: torch.Tensor) -> List[int]:
             li = torch.jit.annotate(List[int], x.tolist())
             return li
 
-        def to_list_float_1D(x):
-            # type: (torch.Tensor) -> List[float]
+        def to_list_float_1D(x: torch.Tensor) -> List[float]:
             li = torch.jit.annotate(List[float], x.tolist())
             return li
 
@@ -1187,8 +1298,7 @@ class TestList(JitTestCase):
             5, dtype=torch.double).cuda(),))
 
     def test_no_element_type_annotation(self):
-        def fn_with_comment(x):
-            # type: (torch.Tensor) -> List
+        def fn_with_comment(x: torch.Tensor) -> List:
             a: List = x.tolist()
             return a
 
@@ -1214,6 +1324,12 @@ class TestList(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "Can not create ListType with None type"):
             x = torch._C.ListType(None)
 
+    def test_list_unification_hint(self):
+        with self.assertRaisesRegex(RuntimeError, "Expected an annotation of type List"):
+            @torch.jit.script
+            def x():
+                b : int = [2, 3]
+                return b
 
 
 class TestDict(JitTestCase):
@@ -1226,12 +1342,39 @@ class TestDict(JitTestCase):
     def dict_bool(self):
         return {True: 1}
 
+    def test_dict_bool_conversion(self):
+        def if_predicate(d: Dict[int, int]):
+            if d:
+                s, t = 0, 0
+                for k, v in d.items():
+                    s += k
+                    t += v
+
+                return s, t
+            else:
+                return -1, -1
+
+        self.checkScript(if_predicate, ({1: 2, 3: 5},))
+        self.checkScript(if_predicate, ({},))
+
+        def while_predicate(d: Dict[int, int]):
+            while d:
+                d.clear()
+
+        self.checkScript(while_predicate, ({1: 2, 3: 5},))
+        self.checkScript(while_predicate, ({},))
+
+        def ternary_predicate(d: Dict[int, int]):
+            return "non-empty" if d else "empty"
+
+        self.checkScript(ternary_predicate, ({1: 2, 3: 5},))
+        self.checkScript(ternary_predicate, ({},))
+
     def test_del(self):
         def inputs():
             return {'hi': 2, 'bye': 3}
 
-        def fn(x):
-            # type: (Dict[str, int]) -> Dict[str, int]
+        def fn(x: Dict[str, int]) -> Dict[str, int]:
             del x['hi']
             return x
 
@@ -1242,13 +1385,12 @@ class TestDict(JitTestCase):
         cu.define(dedent(inspect.getsource(fn)))
         self.assertEqual(cu.fn(inputs()), python_out)
         self.assertEqual(torch.jit.script(fn)(inputs()), python_out)
-        with self.assertRaisesRegex(RuntimeError, "KeyError"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "KeyError", "x['hi']"):
             self.checkScript(fn, [{}])
 
     def test_keys(self):
         @torch.jit.script
-        def keys(x):
-            # type: (Dict[str, Tensor]) -> List[str]
+        def keys(x: Dict[str, Tensor]) -> List[str]:
             return list(x.keys())
 
         self.assertEqual(set(keys(self.dict())), set(self.dict().keys()))
@@ -1263,30 +1405,26 @@ class TestDict(JitTestCase):
 
     def test_values(self):
         @torch.jit.script
-        def values(x):
-            # type: (Dict[str, Tensor]) -> List[Tensor]
+        def values(x: Dict[str, Tensor]) -> List[Tensor]:
             return list(x.values())
 
         the_dict = self.dict()
         self.assertEqual(set(values(the_dict)), set(the_dict.values()))
 
     def test_len(self):
-        def length(x):
-            # type: (Dict[str, Tensor]) -> int
+        def length(x: Dict[str, Tensor]) -> int:
             return len(x)
 
         self.checkScript(length, (self.dict(),))
 
     def test_copy(self):
-        def func(x):
-            # type: (Dict[str, Tensor]) -> Dict[str, Tensor]
+        def func(x: Dict[str, Tensor]) -> Dict[str, Tensor]:
             return x.copy()
 
         self.checkScript(func, (self.dict(),))
 
     def test_items(self):
-        def func(x):
-            # type: (Dict[str, Tensor]) -> List[Tuple[str, Tensor]]
+        def func(x: Dict[str, Tensor]) -> List[Tuple[str, Tensor]]:
             return x.items()
 
         # The value returned by Python is in arbitrary order, so we can't use
@@ -1301,8 +1439,7 @@ class TestDict(JitTestCase):
             self.assertTrue(item in script_out)
 
     def test_pop(self):
-        def pop(x, key):
-            # type: (Dict[str, Tensor], str) -> Tuple[Tensor, Dict[str, Tensor]]
+        def pop(x: Dict[str, Tensor], key: str) -> Tuple[Tensor, Dict[str, Tensor]]:
             return x.pop(key), x
 
         # checkScript doesn't copy the inputs, so we can't use it since this mutates
@@ -1314,20 +1451,18 @@ class TestDict(JitTestCase):
 
         tester(pop, 'a')
 
-        with self.assertRaisesRegex(RuntimeError, "KeyError"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "KeyError", "x.pop"):
             torch.jit.script(pop)(self.dict(), 'x')
 
 
-        def default_pop(x, key, default):
-            # type: (Dict[str, Tensor], str, Tensor) -> Tuple[Tensor, Dict[str, Tensor]]
+        def default_pop(x: Dict[str, Tensor], key: str, default: Tensor) -> Tuple[Tensor, Dict[str, Tensor]]:
             return x.pop(key, default), x
 
         tester(default_pop, 'a', torch.randn(2, 2))
         tester(default_pop, 'x', torch.randn(2, 2))
 
     def test_setdefault(self):
-        def setdefault(x, key, default):
-            # type: (Dict[str, Tensor], str, Tensor) -> Dict[str, Tensor]
+        def setdefault(x: Dict[str, Tensor], key: str, default: Tensor) -> Dict[str, Tensor]:
             x.setdefault(key, default)
             return x
 
@@ -1335,8 +1470,7 @@ class TestDict(JitTestCase):
         self.checkScript(setdefault, (self.dict(), 'nonexistant', torch.randn(2, 2)))
 
     def test_update(self):
-        def update(a, b):
-            # type: (Dict[str, Tensor], Dict[str, Tensor]) -> Tuple[Dict[str, Tensor], Dict[str, Tensor]]
+        def update(a: Dict[str, Tensor], b: Dict[str, Tensor]) -> Tuple[Dict[str, Tensor], Dict[str, Tensor]]:
             a.update(b)
             return a, b
 
@@ -1353,8 +1487,7 @@ class TestDict(JitTestCase):
         self.checkScript(foo, ())
 
     def test_aug_assign(self):
-        def aug_assign_dict_tensor(a):
-            # type: (Dict[str, Tensor]) -> Dict[str, Tensor]
+        def aug_assign_dict_tensor(a: Dict[str, Tensor]) -> Dict[str, Tensor]:
             a['a'] += 1
             a['b'] -= 12
             a['c'] *= 122
@@ -1362,8 +1495,7 @@ class TestDict(JitTestCase):
             a['c'] %= 2
             return a
 
-        def aug_assign_dict_prim(a):
-            # type: (Dict[str, float]) -> Dict[str, float]
+        def aug_assign_dict_prim(a: Dict[str, float]) -> Dict[str, float]:
             a['a'] += 3.4
             a['b'] -= 2.4
             a['c'] *= 3.0
@@ -1376,8 +1508,7 @@ class TestDict(JitTestCase):
 
     def test_popitem(self):
         @torch.jit.script
-        def popitem(x):
-            # type: (Dict[str, Tensor]) -> Tuple[Tuple[str, Tensor], Dict[str, Tensor]]
+        def popitem(x: Dict[str, Tensor]) -> Tuple[Tuple[str, Tensor], Dict[str, Tensor]]:
             item = x.popitem()
             return item, x
 
@@ -1395,68 +1526,59 @@ class TestDict(JitTestCase):
         self.assertTrue(isinstance(script_out[0][1], torch.Tensor))
 
     def test_clear(self):
-        def clear(x):
-            # type: (Dict[str, Tensor]) -> Dict[str, Tensor]
+        def clear(x: Dict[str, Tensor]) -> Dict[str, Tensor]:
             x.clear()
             return x
 
         self.checkScript(clear, (self.dict(),))
 
     def test_get(self):
-        def get(x, key):
-            # type: (Dict[str, Tensor], str) -> Optional[Tensor]
+        def get(x: Dict[str, Tensor], key: str) -> Optional[Tensor]:
             return x.get(key)
 
         self.checkScript(get, (self.dict(), 'a'))
         self.checkScript(get, (self.dict(), "doesn't exist"))
 
-        def get_default(x, key):
-            # type: (Dict[str, Tensor], str) -> Optional[Tensor]
+        def get_default(x: Dict[str, Tensor], key: str) -> Optional[Tensor]:
             return x.get(key, torch.randn(2, 2))
 
         self.checkScript(get, (self.dict(), 'a'))
         self.checkScript(get, (self.dict(), "doesn't exist"))
 
     def test_get_boolkey(self):
-        def get(x, key):
-            # type: (Dict[bool, int], bool) -> Optional[int]
+        def get(x: Dict[bool, int], key: bool) -> Optional[int]:
             return x.get(key)
 
         self.checkScript(get, (self.dict_bool(), True))
         self.checkScript(get, (self.dict_bool(), False))
 
-        def get_default(x, key):
-            # type: (Dict[bool, int], bool) -> int
+        def get_default(x: Dict[bool, int], key: bool) -> int:
             return x.get(key, 42)
 
         self.checkScript(get_default, (self.dict_bool(), True))
         self.checkScript(get_default, (self.dict_bool(), False))
 
     def test_basic(self):
-        def simple(x):
-            # type: (Dict[str, int]) -> Dict[str, int]
+        def simple(x: Dict[str, int]) -> Dict[str, int]:
             return x
 
         self.checkScript(simple, ({'item': 20, 'other_item': 120},))
 
-        def index(x):
-            # type: (Dict[str, int]) -> int
+        def index(x: Dict[str, int]) -> int:
             return x['item']
 
         self.checkScript(index, ({'item': 20, 'other_item': 120},))
 
-        def type_default():
-            # type: () -> Dict[str, Tensor]
+        def type_default() -> Dict[str, Tensor]:
             return {}
 
         self.checkScript(type_default, ())
 
         @torch.jit.script
-        def missing_index(x):
-            # type: (Dict[str, int]) -> int
+        def missing_index(x: Dict[str, int]) -> int:
             return x['dne']
 
-        with self.assertRaisesRegex(RuntimeError, "KeyError"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "KeyError", "x['d"):
             missing_index({'item': 20, 'other_item': 120})
 
         code = dedent('''
@@ -1475,16 +1597,14 @@ class TestDict(JitTestCase):
         '''))
         self.assertEqual({10: 1.2, 11: 1.3}, cu.literal3())
 
-        def list_of_dicts():
-            # type: () -> List[Dict[str, Tensor]]
+        def list_of_dicts() -> List[Dict[str, Tensor]]:
             return [{'word': torch.ones(2) + 3}, {'other word': torch.ones(1) + 2}]
 
         self.checkScript(list_of_dicts, ())
 
     def test_mutability(self):
         @torch.jit.script
-        def fn():
-            # type: () -> Dict[str, int]
+        def fn() -> Dict[str, int]:
             a = torch.jit.annotate(Dict[str, int], {})
             a['ok'] = 10
             return a
@@ -1492,16 +1612,14 @@ class TestDict(JitTestCase):
         self.assertEqual(fn(), {'ok': 10})
 
     def test_key_type(self):
-        with self.assertRaisesRegex(RuntimeError, "but instead found type"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "but instead found type", "a[None]"):
             @torch.jit.script
-            def fn(a):
-                # type: (Dict[str, int]) -> int
+            def fn(a: Dict[str, int]) -> int:
                 return a[None]
 
     def test_loop(self):
         @torch.jit.script
-        def fn(x):
-            # type: (int) -> Dict[str, int]
+        def fn(x: int) -> Dict[str, int]:
             a = torch.jit.annotate(Dict[str, int], {})
             for i in range(x):
                 a['ok'] = i
@@ -1520,36 +1638,31 @@ class TestDict(JitTestCase):
         self.checkScript(fn, (torch.rand(2, 3), torch.rand(2, 3)))
 
     def test_membership(self):
-        def fn(x, y):
-            # type: (Dict[int, int], int) -> int
+        def fn(x: Dict[int, int], y: int) -> int:
             return x.get(y, 3)
 
         d = {1: 2, 3: 4}
         self.checkScript(fn, (d, 3))
         self.checkScript(fn, (d, 2))
 
-        def optional(x, y):
-            # type: (Dict[int, int], int) -> bool
+        def optional(x: Dict[int, int], y: int) -> bool:
             res = x.get(y)
             return res is None
 
         self.checkScript(fn, (d, 3))
         self.checkScript(fn, (d, 2))
 
-        with self.assertRaisesRegex(RuntimeError, "is actually of type Optional"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "is actually of type Optional", "return x.get(y"):
             @torch.jit.script
-            def bad_types(x, y):
-                # type: (Dict[int, int], int) -> int
+            def bad_types(x: Dict[int, int], y: int) -> int:
                 return x.get(y)  # noqa: T484
 
     def test_dict_to_python(self):
         @torch.jit.ignore
-        def python_lookup(my_dict, keys):
-            # type: (Dict[str, int], List[str]) -> List[int]
+        def python_lookup(my_dict: Dict[str, int], keys: List[str]) -> List[int]:
             return [my_dict[k] for k in keys]
 
-        def fn(my_dict, keys):
-            # type: (Dict[str, int], List[str]) -> List[int]
+        def fn(my_dict: Dict[str, int], keys: List[str]) -> List[int]:
             return python_lookup(my_dict, keys)
 
         a_dict = {'a': torch.ones(1), 'b': torch.ones(1) + 1, 'c': torch.ones(1) + 2}
@@ -1592,7 +1705,7 @@ class TestDict(JitTestCase):
             a[1] = 2
             return a
 
-        with self.assertRaisesRegex(Exception, "Arguments for call are not"):
+        with self.assertRaisesRegexWithHighlight(Exception, "Arguments for call are not", "a[1] = 2"):
             torch.jit.script(test_dict_error)
 
     def test_type_annotation_missing_contained_type(self):
@@ -1601,8 +1714,7 @@ class TestDict(JitTestCase):
         key and value types produces an error.
         """
         # This function uses a type comment.
-        def fn_with_comment(input):
-            # type: (Dict) -> Any
+        def fn_with_comment(input: Dict) -> Any:
             return input
 
         # This function uses Python3 style type annotations.
@@ -1622,3 +1734,796 @@ class TestDict(JitTestCase):
 
         with self.assertRaisesRegex(RuntimeError, r"Attempted to use Dict without contained types"):
             m = torch.jit.script(annotated_fn)
+
+    def test_dict_preserves_order(self):
+        def dict_ordering():
+            a : Dict[int, int] = {}
+            for i in range(1000):
+                a[i] = i + 1
+            return a
+
+        self.checkScript(dict_ordering, ())
+        di = torch.jit.script(dict_ordering)()
+        res = list(di.items())
+        for i in range(1000):
+            key, value = res[i]
+            self.assertTrue(key == i and value == i + 1)
+
+    def test_optional_dict_construct(self):
+        class M(torch.nn.Module):
+            def use(self, buffer: Dict[str, Optional[torch.Tensor]]):
+                return buffer["prev_key"]
+
+            def forward(self, x):
+                prev_key = torch.rand(2, 3)
+                next_key = torch.rand(2, 3)
+                saved_state: Dict[str, Optional[torch.Tensor]] = {
+                    "prev_key": prev_key,
+                    "next_key": next_key,
+                }
+
+                return self.use(saved_state)
+
+        self.checkModule(M(), (torch.rand(2, 2),))
+
+
+class TestNamedTuple(JitTestCase):
+    def test_namedtuple(self):
+        class FeatureVector(NamedTuple):
+            float_features: float
+            sequence_features: List[float]
+            time_since_first: float
+
+        @torch.jit.script
+        def foo(x) -> float:
+            fv = FeatureVector(3.0, [3.0], 3.0)
+            rv = fv.float_features
+            for val in fv.sequence_features:
+                rv += val
+            rv *= fv.time_since_first
+            return rv
+
+        self.assertEqual(foo(torch.rand(3, 4)), 18.0)
+
+    def test_namedtuple_constant(self):
+        class Tup(NamedTuple):
+            a: int
+            b: int
+
+        @torch.jit.script
+        def foo():
+            return Tup(1, 2)
+
+        self.assertEqual(foo(), Tup(1, 2))
+
+    def test_return_named_tuple(self):
+        class FeatureVector(NamedTuple):
+            float_features: float
+            sequence_features: List[float]
+            time_since_first: float
+
+        @torch.jit.script
+        def foo(x):
+            fv = FeatureVector(3.0, [3.0], 3.0)
+            return fv
+
+        out = foo(torch.rand(3, 4))
+        out = foo(torch.rand(3, 4))
+        self.assertEqual(out.float_features, 3.0)
+        self.assertEqual(out.sequence_features, [3.0])
+        self.assertEqual(out.time_since_first, 3.0)
+
+    def test_namedtuple_as_attr(self):
+        class Config(NamedTuple):
+            size: int
+
+        class MyMod(nn.Module):
+            configs: Dict[int, Config]
+
+            def __init__(self, configs):
+                super().__init__()
+                self.configs = configs
+
+            def forward(self, x):
+                for _id, config in self.configs.items():
+                    x += config.size
+                return x
+
+        s = torch.jit.script(MyMod({0: Config(size=16)}))
+
+    def test_namedtuple_resolution(self):
+        class TheType(NamedTuple):
+            t: int
+
+        class MyModule(types.ModuleType):
+            def __init__(self):
+                super(MyModule, self).__init__('MyModule')
+
+            def __getattr__(self, attr):
+                return TheType
+
+        some_module = MyModule()
+
+        def fn() -> some_module.Type:
+            return some_module.Type(1)
+
+        self.checkScript(fn, [])
+
+    def test_namedtuple_slice_unpack(self):
+        class MyCoolNamedTuple(NamedTuple):
+            a : int
+            b : float
+            c : List[int]
+
+        @torch.jit.script
+        def foo(a : int, b : float, c : List[int]):
+            tup = MyCoolNamedTuple(a, b, c)
+            my_a, my_b, my_c = tup
+            return tup[:1], my_a, my_c
+
+        self.assertEqual(foo(3, 3.5, [6]), ((3,), 3, [6]))
+
+    def test_namedtuple_lower(self):
+        class MyCoolNamedTuple(NamedTuple):
+            a : int
+            b : float
+            c : List[int]
+
+        @torch.jit.script
+        def foo(a : int):
+            tup = MyCoolNamedTuple(a, 3.14, [9])
+            return tup
+
+        FileCheck().check('TupleConstruct').run(foo.graph)
+        torch._C._jit_pass_lower_all_tuples(foo.graph)
+        FileCheck().check_not('TupleConstruct').run(foo.graph)
+
+    def test_namedtuple_type_annotation(self):
+        global MyCoolNamedTuple  # see [local resolution in python]
+
+        class MyCoolNamedTuple(NamedTuple):
+            a : int
+            b : float
+            c : List[int]
+
+        @torch.jit.script
+        def foo(x : MyCoolNamedTuple) -> MyCoolNamedTuple:
+            return x
+
+        mnt = MyCoolNamedTuple(42, 420.0, [666])
+        self.assertEqual(foo(mnt), mnt)
+
+    def test_namedtuple_wrong_types(self):
+        class MyCoolNamedTuple(NamedTuple):
+            a : int
+            b : float
+            c : List[int]
+
+        with self.assertRaisesRegex(RuntimeError, "Expected a value of type 'int' for argument 'a'"
+                                                  " but instead found type 'str'"):
+            @torch.jit.script
+            def foo():
+                tup = MyCoolNamedTuple('foo', 'bar', 'baz')
+                return tup
+
+    def test_namedtuple_kwarg_construct(self):
+        class MyCoolNamedTuple(NamedTuple):
+            a : int
+            b : float
+            c : List[int]
+
+        @torch.jit.script
+        def foo():
+            tup = MyCoolNamedTuple(c=[1, 2, 3], b=3.5, a=9)
+            return tup
+
+        tup = foo()
+        self.assertEqual(tup.a, 9)
+        self.assertEqual(tup.b, 3.5)
+        self.assertEqual(tup.c, [1, 2, 3])
+
+    @unittest.skipIf(True, "broken while these tests were not in CI")
+    def test_namedtuple_serialization(self):
+        class MyCoolNamedTuple(NamedTuple):
+            a : int
+            b : float
+            c : List[int]
+
+        class MyMod(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self):
+                return MyCoolNamedTuple(3, 3.5, [3, 4, 5])
+
+        mm = MyMod()
+        mm.save('foo.zip')
+        torch.testing._internal.jit_utils.clear_class_registry()
+        loaded = torch.jit.load('foo.zip')
+
+        out = mm()
+        out_loaded = loaded()
+
+        for name in ['a', 'b', 'c']:
+            self.assertEqual(getattr(out_loaded, name), getattr(out, name))
+
+class TestScriptDict(JitTestCase):
+    """
+    This class contains a suite of tests for torch.jit.script, a
+    function that returns a dictionary-like object that has reference
+    semantics across the Python/TorchScript boundary. That is,
+    it can be passed to a TorchScript function that mutates it
+    and those modifications are visible in the scope of the Python
+    caller of said TorchScript function.
+
+    The vast majority of tests are for making sure that objects returned
+    by torch.jit.script behave like dictionaries do so that they are fungible
+    in almost all cirumstances with regular dictionaries.
+    """
+    def _script_dict_add(self, d: torch._C.ScriptDict, k: int, v: int):
+        """
+        This is a helper function that inserts the pair (k, v) into the
+        dictionary d in TorchScript. It is used for testing reference
+        semantics.
+        """
+        @torch.jit.script
+        def dict_add(d: Dict[int, int], k: int, v: int):
+            d[k] = v
+
+        dict_add(d, k, v)
+
+    def _compare_eager_and_script(self, fn, input_dict, script_input_dict=None):
+        """
+        This is a helper function that facilitates comparing behaviour between
+        Python dictionaries and "scripted" dictionaries.
+
+        Args:
+            fn: The function to test and compare the behaviour of.
+            input_dict: The input dictionary to use for the test (passed to fn).
+            script_input_dict: The scripted input dictionary to use for the tests.
+                                If None, input_dict is scripted with torch.jit.script
+                                and used instead.
+        """
+        # Create ScriptDict version of input_dict if needed.
+        script_input_dict = script_input_dict or torch.jit.script(input_dict)
+
+        # Run fn with both input_dict and scripted_dict.
+        eager_raised, script_raised = False, False
+
+        try:
+            eager_out = fn(input_dict)
+        except Exception as e:
+            eager_exception = e
+            eager_raised = True
+
+        try:
+            script_out = fn(script_input_dict)
+        except Exception as e:
+            script_exception = e
+            script_raised = True
+
+        # Check that both calls raised or none of them raised.
+        self.assertEqual(eager_raised, script_raised)
+
+        if eager_raised:
+            # If fn raised an exception, it should be the same between
+            # regular and scripted dictionaries.
+            self.assertEqual(type(eager_exception), type(script_exception))
+        else:
+            # Otherwise, make sure the outputs match and the dictionaries
+            # match (the latter may not be the same as the output).
+            self.assertEqual(eager_out, script_out)
+            self.assertEqual(input_dict, script_input_dict)
+
+    def test_repr(self):
+        """
+        Test the __repr__ method.
+        """
+        self._compare_eager_and_script(lambda d: repr(d), {1: 2})
+
+    def test_bool(self):
+        """
+        Test the __bool__ method. This should return True
+        if the dictionary is non-empty and False otherwise.
+        """
+        self._compare_eager_and_script(lambda d: bool(d), {1: 2})
+        self._compare_eager_and_script(lambda d: bool(d), {})
+
+    def test_iter(self):
+        """
+        Test iteration over a dictionary's keys.
+        """
+        def sum_keys(input_dict):
+            s = 0
+            for k in input_dict:
+                s += k
+
+            return s
+
+        self._compare_eager_and_script(sum_keys, {1: 2, 3: 4})
+
+    def test_items(self):
+        """
+        Test .items().
+        """
+        def sum_pair_product(input_dict):
+            s = 0
+            for k, v in input_dict.items():
+                s += k * v
+
+            return s
+
+        self._compare_eager_and_script(sum_pair_product, {1: 2, 3: 4})
+
+    def test_getitem(self):
+        """
+        Test accessing dictionary values using the [] operator.
+        """
+        data = {1: 2, 3: 4}
+        self._compare_eager_and_script(lambda d: d[1], data)
+        self._compare_eager_and_script(lambda d: d[4], data)
+        self._compare_eager_and_script(lambda d: d[2], data)
+        self._compare_eager_and_script(lambda d: d["key"], data)
+
+    def test_setitem(self):
+        """
+        Test setting dictionary values using the [] operator.
+        """
+        data = {1: 2, 3: 4}
+
+        def fn(input_dict):
+            input_dict[1] = 10
+            input_dict[3] = 11
+
+        self._compare_eager_and_script(fn, data)
+
+        # Check that using improperly typed keys and values
+        # throws TypeError.
+        # _compare_eager_and_script cannot be used here since
+        # the following uses of __setitem__ are valid in
+        # Python.
+        script_data = torch.jit.script(data)
+
+        with self.assertRaises(TypeError):
+            script_data["str"] = 3
+
+        with self.assertRaises(TypeError):
+            script_data[3] = "str"
+
+    def test_contains(self):
+        """
+        Test membership checks (x in y, x not in y).
+        """
+        data = {1: 2, 3: 4}
+
+        def fn(input_dict):
+            return 1 in input_dict, 2 not in input_dict, 3 in input_dict, 4 not in input_dict
+
+        self._compare_eager_and_script(fn, data)
+
+        # Check that using an improperly typed key
+        # throws KeyError.
+        script_data = torch.jit.script(data)
+
+        with self.assertRaises(KeyError):
+            a = "str" in script_data
+
+    def test_delitem(self):
+        """
+        Test deletion.
+        """
+        data = {1: 2, 3: 4}
+
+        def del_fn(input_dict):
+            del input_dict[1]
+
+        def del_fn_raises(input_dict):
+            del input_dict[10]
+
+        self._compare_eager_and_script(del_fn, data)
+        self._compare_eager_and_script(del_fn_raises, data)
+
+        # Check that using an improperly typed key
+        # throws TypeError.
+        script_data = torch.jit.script(data)
+
+        with self.assertRaises(TypeError):
+            del script_data["str"]
+
+    def test_len(self):
+        """
+        Test len() builtin function.
+        """
+        self._compare_eager_and_script(lambda d: len(d), {1: 2})
+        self._compare_eager_and_script(lambda d: len(d), {})
+
+    @unittest.skip("Cannot pass until all dicts returned from TorchScript are ScriptDicts")
+    def test_nested(self):
+        """
+        Test that reference semantics are honoured when the ScriptDict that is
+        mutated using TorchScript is inside another.
+        """
+        nested = torch.jit.script({1: {1: 2}, 2: {3: 4}}, type_hint=Dict[int, Dict[int, int]])
+
+        one = nested[1]
+        two = nested[2]
+
+        self._script_dict_add(one, 9, 10)
+        self._script_dict_add(two, 11, 12)
+
+        # The mutation should be visible in the original dictionary, nested.
+        self.assertEqual(len(one), 2)
+        self.assertEqual(len(two), 2)
+        self.assertEqual(len(nested[1]), 2)
+        self.assertEqual(len(nested[2]), 2)
+
+    def test_reference_semantics(self):
+        """
+        Test that reference semantics are honoured; that modifications made
+        to a ScriptDict in TorchScript are visible in Python.
+        """
+        data = torch.jit.script({1: 2})
+        self._script_dict_add(data, 3, 4)
+
+        # The mutation should be visible in the original dictionary.
+        self.assertEqual(len(data), 2)
+        self.assertTrue(3 in data)
+        self.assertEqual(data[3], 4)
+
+
+class TestScriptList(JitTestCase):
+    """
+    This class contains a suite of tests for torch._C.ScriptList, a
+    function that returns a list-like object that has reference
+    semantics across the Python/TorchScript boundary. That is,
+    it can be passed to a TorchScript function that mutates it
+    and those modifications are visible in the scope of the Python
+    caller of said TorchScript function.
+
+    The vast majority of tests are for making sure that instances of
+    torch._C.ScriptList behave like lists do so that they are fungible
+    in almost all cirumstances with regular list.
+    """
+    def _script_list_add(self, l: torch._C.ScriptList, e: int):
+        """
+        This is a helper function that inserts the element e into the
+        list l in TorchScript. It is used for testing reference
+        semantics.
+        """
+        @torch.jit.script
+        def list_add(l: List[int], e: int):
+            l.append(e)
+
+        list_add(l, e)
+
+    def _compare_eager_and_script(self, fn, input_list, script_input_list=None):
+        """
+        This is a helper function that facilitates comparing behaviour between
+        Python lists and "scripted" lists.
+        Args:
+            fn: The function to test and compare the behaviour of.
+            input_list: The input list to use for the test (passed to fn).
+            script_input_list: The scripted input list to use for the tests.
+                                If None, input_list is scripted with torch.jit.script
+                                and used instead.
+        """
+        # Create ScriptDict version of input_list if needed.
+        script_input_list = script_input_list or torch.jit.script(input_list)
+
+        # Run fn with both input_list and scripted_dict.
+        eager_raised, script_raised = False, False
+
+        try:
+            eager_out = fn(input_list)
+        except Exception as e:
+            eager_exception = e
+            eager_raised = True
+
+        try:
+            script_out = fn(script_input_list)
+        except Exception as e:
+            script_exception = e
+            script_raised = True
+
+        # Check that both calls raised or none of them raised.
+        self.assertEqual(eager_raised, script_raised)
+
+        if eager_raised:
+            # If fn raised an exception, it should be the same between
+            # regular and scripted lists.
+            self.assertEqual(type(eager_exception), type(script_exception))
+        else:
+            # Otherwise, make sure the outputs match and the lists
+            # match (the latter may not be the same as the output).
+            self.assertEqual(eager_out, script_out)
+            self.assertEqual(input_list, script_input_list)
+
+    def test_repr(self):
+        """
+        Test the __repr__ method.
+        """
+        self._compare_eager_and_script(lambda l: repr(l), [1])
+
+    def test_bool(self):
+        """
+        Test the __bool__ method. This should return True
+        if the list is non-empty and False otherwise.
+        """
+        self._compare_eager_and_script(lambda l: bool(l), [1])
+        self._compare_eager_and_script(lambda l: bool(l), [])
+
+    def test_iter(self):
+        """
+        Test iteration over a list's elements.
+        """
+        def sum_elements(input_list):
+            s = 0
+            for k in input_list:
+                s += k
+
+            return s
+
+        self._compare_eager_and_script(sum_elements, [1, 2, 3, 4])
+
+    def test_getitem(self):
+        """
+        Test accessing list elements using the [] operator.
+        """
+        data = [1, 2, 3, 4]
+
+        # Test regular indexing.
+        self._compare_eager_and_script(lambda l: l[1], data)
+        self._compare_eager_and_script(lambda l: l[3], data)
+        self._compare_eager_and_script(lambda l: l[-1], data)
+
+        # Test slicing.
+        self._compare_eager_and_script(lambda l: l[1:3], data)
+        self._compare_eager_and_script(lambda l: l[:], data)
+        self._compare_eager_and_script(lambda l: l[1:], data)
+        self._compare_eager_and_script(lambda l: l[:2], data)
+        self._compare_eager_and_script(lambda l: l[-1], data)
+        self._compare_eager_and_script(lambda l: l[-1::-1], data)
+
+        # Test errors.
+        self._compare_eager_and_script(lambda l: l[5], data)
+        self._compare_eager_and_script(lambda l: l[-7], data)
+        self._compare_eager_and_script(lambda l: l["key"], data)
+
+    def test_setitem(self):
+        """
+        Test setting list elements using the [] operator.
+        """
+        data = [1, 2, 3, 4]
+
+        # Test regular assignment.
+        def setitem(input_list):
+            input_list[1] = 10
+            input_list[3] = 11
+            input_list[-1] = 12
+
+        self._compare_eager_and_script(setitem, data.copy())
+
+        # Test slice assignment.
+        # TODO: Something like input_list[:1] = [1, 2, 3, 4, 5]
+        # is allowed in Python, but pybind11/stl_bind.h does not
+        # allow it. Should we?
+        def setitem_slice(input_list):
+            input_list[:4:2] = [10, 11]
+            input_list[-2:] = [15, 16]
+
+        self._compare_eager_and_script(setitem_slice, data)
+
+        # Test errors.
+        def out_of_range(input_list):
+            input_list[11] = 3
+
+        def out_of_range_negative(input_list):
+            input_list[-11] = 3
+
+        def wrong_index_type(input_list):
+            input_list["str"] = 3
+
+        self._compare_eager_and_script(out_of_range, data)
+        self._compare_eager_and_script(out_of_range_negative, data)
+        self._compare_eager_and_script(wrong_index_type, data)
+
+        # Check that using value of an incorrect type throws TypeError.
+        # _compare_eager_and_script cannot be used here since
+        # the following use of __setitem__ is valid in
+        # Python.
+        script_data = torch.jit.script(data)
+
+        with self.assertRaises(TypeError):
+            script_data[0] = "str"
+
+    def test_contains(self):
+        """
+        Test membership checks (x in y, x not in y).
+        """
+        data = [1, 2, 3, 4]
+
+        def fn(input_list):
+            return 1 in input_list, 2 not in input_list, 3 in input_list, 4 not in input_list
+
+        self._compare_eager_and_script(fn, data)
+
+        # Check that using a value of an incorrect type throws a TypeError.
+        script_data = torch.jit.script(data)
+
+        with self.assertRaises(TypeError):
+            a = "str" in script_data
+
+    def test_delitem(self):
+        """
+        Test deletion.
+        """
+        data = [1, 2, 3, 4]
+
+        def del_fn(input_list):
+            del input_list[1]
+
+        def del_fn_out_of_range(input_list):
+            del input_list[10]
+
+        def del_fn_wrong_type(input_list):
+            del input_list["str"]
+
+        self._compare_eager_and_script(del_fn, data.copy())
+        self._compare_eager_and_script(del_fn_out_of_range, data)
+        self._compare_eager_and_script(del_fn_wrong_type, data)
+
+    def test_len(self):
+        """
+        Test len() builtin function.
+        """
+        self._compare_eager_and_script(lambda l: len(l), [1, 2, 3, 4])
+        self._compare_eager_and_script(lambda l: len(l), [])
+
+    def test_count(self):
+        """
+        Test count method.
+        """
+        self._compare_eager_and_script(lambda l: l.count(3), [1, 2, 3, 3])
+
+        # Check that using a value of an incorrect type throws TypeError.
+        script_data = torch.jit.script([1])
+
+        with self.assertRaises(TypeError):
+            script_data.count("str")
+
+    def test_remove(self):
+        """
+        Test remove method.
+        """
+        self._compare_eager_and_script(lambda l: l.remove(1), [1, 2, 3])
+        self._compare_eager_and_script(lambda l: l.remove(10), [1, 2, 3])
+
+        # Check that using a value of an incorrect type throws TypeError.
+        script_data = torch.jit.script([1])
+
+        with self.assertRaises(TypeError):
+            script_data.remove("str")
+
+    def test_append(self):
+        """
+        Test append method.
+        """
+        self._compare_eager_and_script(lambda l: l.append(1), [4, 3, 2])
+
+        # Check that using a value of an incorrect type throws TypeError.
+        script_data = torch.jit.script([1])
+
+        with self.assertRaises(TypeError):
+            script_data.append("str")
+
+    def test_clear(self):
+        """
+        Test clear.
+        """
+        self._compare_eager_and_script(lambda l: l.clear(), [4, 3, 2])
+
+    def test_extend(self):
+        """
+        Test extend.
+        """
+        class Iterable(object):
+            def __init__(self, limit: int):
+                self.limit = limit
+                self.value = 0
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                if self.value == limit:
+                    raise StopIteration()
+
+                ret = self.value
+                self.value += 1
+                return ret
+
+        data = [1, 2, 3]
+
+        def extend_list(input_list):
+            input_list.extend([4, 5, 6])
+
+        def extend_dict(input_list):
+            input_list.extend({4: 10, 5: 11, 6: 12})
+
+        def extend_iterable(input_list):
+            input_list.extend(Iterable(3))
+
+        self._compare_eager_and_script(extend_list, data.copy())
+        self._compare_eager_and_script(extend_dict, data.copy())
+        self._compare_eager_and_script(extend_iterable, data)
+
+        # Check that using a value of an incorrect type throws TypeError.
+        script_data = torch.jit.script([1])
+
+        with self.assertRaises(TypeError):
+            script_data.extend(["a"])
+
+        with self.assertRaises(TypeError):
+            script_data.extend({"a": 1})
+
+    def test_insert(self):
+        """
+        Test insert.
+        """
+        data = [1, 2, 4]
+
+        self._compare_eager_and_script(lambda l: l.insert(3, 3), data.copy())
+        self._compare_eager_and_script(lambda l: l.insert(0, 3), data.copy())
+        self._compare_eager_and_script(lambda l: l.insert(-2, 3), data)
+
+        # Check that using a value of an incorrect type throws TypeError.
+        script_data = torch.jit.script([1])
+
+        with self.assertRaises(TypeError):
+            script_data.insert((0, "str"))
+
+    def test_pop(self):
+        """
+        Test pop.
+        """
+        data = [1, 2, 3, 4, 5]
+
+        # Test normal cases.
+        self._compare_eager_and_script(lambda l: l.pop(), data.copy())
+        self._compare_eager_and_script(lambda l: l.pop(2), data.copy())
+        self._compare_eager_and_script(lambda l: l.pop(-3), data.copy())
+
+        # Test error cases.
+        self._compare_eager_and_script(lambda l: l.pop(10), data)
+
+    @unittest.skip("Cannot pass until all list returned from TorchScript are ScriptLists")
+    def test_nested(self):
+        """
+        Test that reference semantics are honoured when the ScriptList that is
+        mutated using TorchScript is inside another.
+        """
+        nested = torch.jit.script([[1], [2]], List[List[int]])
+
+        one = nested[0]
+        two = nested[1]
+
+        self._script_list_add(one, 3)
+        self._script_list_add(two, 4)
+
+        # The mutation should be visible in the original list, nested.
+        self.assertEqual(len(one), 2)
+        self.assertEqual(len(two), 2)
+        self.assertEqual(one[len(one) - 1], 3)
+        self.assertEqual(two[len(one) - 1], 4)
+        self.assertEqual(len(nested[0]), 2)
+        self.assertEqual(len(nested[1]), 2)
+
+    def test_reference_semantics(self):
+        """
+        Test that reference semantics are honoured; that modifications made
+        to a ScriptList in TorchScript are visible in Python.
+        """
+        l = torch.jit.script([1, 2])
+        self._script_list_add(l, 3)
+
+        self.assertEqual(len(l), 3)
+        self.assertTrue(3 in l)
+        self.assertEqual(l[2], 3)

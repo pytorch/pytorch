@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
+
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 
@@ -66,12 +67,8 @@ void IrCloner::handle(const Bool* b) {
   clone_ = new Bool(b, this);
 }
 
-void IrCloner::handle(const Float* f) {
-  clone_ = new Float(f, this);
-}
-
-void IrCloner::handle(const Half* h) {
-  clone_ = new Half(h, this);
+void IrCloner::handle(const Double* d) {
+  clone_ = new Double(d, this);
 }
 
 void IrCloner::handle(const Int* i) {
@@ -104,6 +101,22 @@ void IrCloner::handle(const BroadcastOp* op) {
 
 void IrCloner::handle(const ReductionOp* op) {
   clone_ = new ReductionOp(op, this);
+}
+
+void IrCloner::handle(const WelfordOp* op) {
+  clone_ = new WelfordOp(op, this);
+}
+
+void IrCloner::handle(const TransposeOp* op) {
+  clone_ = new TransposeOp(op, this);
+}
+
+void IrCloner::handle(const ShiftOp* op) {
+  clone_ = new ShiftOp(op, this);
+}
+
+void IrCloner::handle(const GatherOp* op) {
+  clone_ = new GatherOp(op, this);
 }
 
 void IrCloner::handle(const Split* split) {

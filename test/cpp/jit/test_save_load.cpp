@@ -112,6 +112,7 @@ TEST(SerializationTest, TypeTags) {
        ListType::create(
            DictType::create(StringType::get(), TensorType::get()))},
       {tuple, TupleType::create({IntType::get(), StringType::get()})}};
+  // NOLINTNEXTLINE(performance-for-range-copy)
   for (auto item : items) {
     auto bytes = torch::pickle_save(item.value);
     auto loaded = torch::pickle_load(bytes);

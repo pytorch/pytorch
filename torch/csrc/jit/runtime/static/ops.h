@@ -1,61 +1,160 @@
 #pragma once
 
+#include <ATen/Utils.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
+
+namespace at {
+namespace native {
+at::Tensor& reshape_copy_out(
+    at::Tensor& out,
+    const at::Tensor& self,
+    const std::vector<int64_t>& proposed_shape,
+    bool infer_size = true);
+} // namespace native
+} // namespace at
 
 namespace torch {
 namespace jit {
 
 using SROperator = std::function<void(ProcessedNode*)>;
-using SROpFunctor = std::function<SROperator(Node* n)>;
+using SROpFunctor = SROperator (*)(Node* n);
 struct SROperatorFunctor {
   virtual SROperator Generate(Node*) {
     std::function<void(ProcessedNode*)> out;
     return out;
-  }
-  virtual bool CanReuseInput() {
-    return false;
-  }
-  virtual bool CanReuseOutput() {
-    return false;
   }
   virtual ~SROperatorFunctor() = default;
 };
 
 C10_DECLARE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
 
-// TODO: reuse_inp reuse_out can be deprecated with further analysis
-// try to avoid this API.
-#define REGISTER_OPERATOR_FUNCTOR_OPT(name, id, reuse_inp, reuse_out, ...) \
-  struct SROperatorFunctor_##id : public SROperatorFunctor {               \
-    const SROpFunctor fn = __VA_ARGS__;                                    \
-    bool CanReuseInput() override {                                        \
-      return reuse_inp;                                                    \
-    }                                                                      \
-    bool CanReuseOutput() override {                                       \
-      return reuse_out;                                                    \
-    }                                                                      \
-    SROperator Generate(Node* n) override {                                \
-      return fn(n);                                                        \
-    }                                                                      \
-  };                                                                       \
+#define REGISTER_OPERATOR_FUNCTOR(name, id, ...)             \
+  struct SROperatorFunctor_##id : public SROperatorFunctor { \
+    const SROpFunctor fn = __VA_ARGS__;                      \
+    SROperator Generate(Node* n) override {                  \
+      return fn(n);                                          \
+    }                                                        \
+  };                                                         \
   C10_REGISTER_CLASS(SROperatorRegistry, name, SROperatorFunctor_##id);
 
-#define REGISTER_OPERATOR_FUNCTOR(name, id, ...) \
-  REGISTER_OPERATOR_FUNCTOR_OPT(name, id, true, true, __VA_ARGS__)
+C10_DECLARE_REGISTRY(SRNativeOperatorRegistry, SROperatorFunctor);
+#define REGISTER_NATIVE_OPERATOR_FUNCTOR(name, id, ...)            \
+  struct SRNativeOperatorFunctor_##id : public SROperatorFunctor { \
+    const SROpFunctor fn = __VA_ARGS__;                            \
+    SROperator Generate(Node* n) override {                        \
+      return fn(n);                                                \
+    }                                                              \
+  };                                                               \
+  C10_REGISTER_CLASS(                                              \
+      SRNativeOperatorRegistry, name, SRNativeOperatorFunctor_##id);
 
 inline at::Tensor create_empty_from(const at::Tensor& t) {
-  return at::empty({0}, t.options());
+  return at::detail::empty_cpu(
+      {0},
+      c10::typeMetaToScalarType(t.dtype()),
+      t.layout(),
+      t.device(),
+      c10::nullopt,
+      c10::nullopt);
 }
 
-bool canRunOutOfPlace(Node* n);
-bool canReuseInputs(Node* n);
-bool canReuseOutputs(Node* n);
+inline at::Tensor create_empty_from(
+    at::IntArrayRef sizes,
+    const at::Tensor& t) {
+  return at::detail::empty_cpu(
+      sizes,
+      c10::typeMetaToScalarType(t.dtype()),
+      t.layout(),
+      t.device(),
+      c10::nullopt,
+      c10::nullopt);
+}
+
+inline at::Tensor create_empty(c10::ScalarType dtype) {
+  return at::detail::empty_cpu(
+      {0}, dtype, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt);
+}
+
+inline at::Tensor create_empty_from(
+    const at::Tensor& t,
+    c10::ScalarType dtype) {
+  return at::detail::empty_cpu(
+      {0}, dtype, t.layout(), t.device(), c10::nullopt, c10::nullopt);
+}
+
+inline at::Tensor create_empty_from(const at::Tensor& t, c10::Layout layout) {
+  return at::detail::empty_cpu(
+      {0},
+      c10::typeMetaToScalarType(t.dtype()),
+      layout,
+      t.device(),
+      c10::nullopt,
+      c10::nullopt);
+}
+
+inline at::Tensor create_empty_from(const at::Tensor& t, c10::Device device) {
+  return at::detail::empty_cpu(
+      {0},
+      c10::typeMetaToScalarType(t.dtype()),
+      t.layout(),
+      device,
+      c10::nullopt,
+      c10::nullopt);
+}
+
+inline at::Tensor create_empty_from(
+    const at::Tensor& t,
+    c10::MemoryFormat memory_format) {
+  return at::detail::empty_cpu(
+      {0},
+      c10::typeMetaToScalarType(t.dtype()),
+      t.layout(),
+      t.device(),
+      c10::nullopt,
+      memory_format);
+}
+
+inline bool checkResizedDataPtr(at::Tensor& t) {
+  auto const prev_data_ptr = t.data_ptr();
+  t.resize_({0});
+  return prev_data_ptr == t.data_ptr();
+}
+
+inline void fastResizeToZero(at::Tensor& t) {
+  t.unsafeGetTensorImpl()->set_sizes_contiguous({0});
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(checkResizedDataPtr(t));
+}
+
+// check if an op has an out variant registered in Static Runtime
+bool opIsRegistered(const c10::Symbol& op_name);
+// check if Static Runtime can run an op natively.
+// prim ops that are implemented directly in the jit interpreter are implemented
+// as native ops in Static Runtime
+bool nativeOpIsRegistered(const c10::Symbol& op_name);
+
+bool canReuseInputsOutputs(
+    Node* n,
+    const FastMap<Node*, bool>& node_has_out_variant);
+bool isOptimizableContainerType(
+    Node* n,
+    const FastMap<Node*, bool>& node_has_out_variant);
 
 std::function<void(ProcessedNode*)> getOutOfPlaceOperation(Node* n);
-
-bool canRunNatively(Node* n);
 std::function<void(ProcessedNode*)> getNativeOperation(Node* n);
+
+bool hasVarArgs(Node* n);
+
+inline std::string PrintNode(const Node* node) {
+  std::ostringstream ss;
+  node->print(ss, 0, nullptr, false);
+  return ss.str();
+}
+
+inline void LogAndDumpSchema(const Node* node) {
+  VLOG(1) << "Found schema mismatch";
+  node->schema().dump();
+}
 
 } // namespace jit
 } // namespace torch

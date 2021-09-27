@@ -1,8 +1,11 @@
 #include <ATen/ATen.h>
+#include <ATen/native/Resize.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/xnnpack/Engine.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/irange.h>
+#include <c10/util/MaybeOwned.h>
 
 #include <array>
 #include <cctype>
@@ -13,22 +16,45 @@
 
 namespace at { namespace native {
 
-Tensor linear(const Tensor& input, const Tensor& weight, const Tensor& bias) {
+Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  auto bias = bias_opt.has_value()
+    ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
+    : c10::MaybeOwned<Tensor>::owned(c10::in_place);
+
   if (input.is_mkldnn()) {
-    return at::mkldnn_linear(input, weight, bias);
+    return at::mkldnn_linear(input, weight, *bias);
   }
 #if defined(C10_MOBILE)
-  if (xnnpack::use_linear(input, weight, bias)) {
-    return xnnpack::linear(input, weight, bias);
+  if (xnnpack::use_linear(input, weight, *bias)) {
+    return xnnpack::linear(input, weight, *bias);
   }
 #endif
-  if (input.dim() == 2 && bias.defined()) {
+  if (input.dim() == 2 && bias->defined()) {
     // Fused op is marginally faster.
-    return at::addmm(bias, input, weight.t());
+    return at::addmm(*bias, input, weight.t());
   }
   auto output = at::matmul(input, weight.t());
-  if (bias.defined()) {
-    output.add_(bias);
+  if (bias->defined()) {
+    output.add_(*bias);
+  }
+  return output;
+}
+
+Tensor& linear_out(const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt, Tensor& output) {
+  TORCH_CHECK(!input.is_mkldnn(), "linear doesn't support out for MKLDNN tensors");
+  // See [Note: hacky wrapper removal for optional tensor]
+  auto bias = bias_opt.has_value()
+              ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
+              : c10::MaybeOwned<Tensor>::owned(c10::in_place);
+
+  if (input.dim() == 2 && bias->defined()) {
+    // Fused op is marginally faster.
+    return at::addmm_out(output, *bias, input, weight.t());
+  }
+  output = at::matmul_out(output, input, weight.t());
+  if (bias->defined()) {
+    output.add_(*bias);
   }
   return output;
 }
@@ -51,7 +77,7 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   int64_t lro_size = 1, lo_size = 1, ro_size = 1, sum_size = 1;
   Tensor left = left_;
   Tensor right = right_;
-  for (int64_t i = 0; i < dim; i++) {
+  for (const auto i : c10::irange(dim)) {
     auto sl = left.size(i)>1;
     auto sr = right.size(i)>1;
     if (sum_dims[i]) { // first dimensions that will be summed over after multiplication
@@ -84,6 +110,7 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   // then the permuted output is a view of bmm(left, right)
   // finally, opermutation reverts the permutation to the original order of dimensions
   std::vector<int64_t> out_size;
+  // NOLINTNEXTLINE(performance-inefficient-vector-operation)
   for (auto& d : lro) out_size.push_back(left.size(d));
   for (auto& d : lo) out_size.push_back(left.size(d));
   for (auto& d : sum_dims_) { out_size.push_back(1); (void)(d); }; // avoid warining about not using d
@@ -101,20 +128,20 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
 
   std::vector<int64_t> opermutation(lro.size()+lo.size()+sum_dims_.size()+ro.size(), -1);
   {
-  int64_t i = 0;
+    int64_t i = 0;
 
-  for (auto it = lro.begin(); it != lro.end(); i++, it++) {
-    opermutation[*it] = i;
-  }
-  for (auto it = lo.begin(); it != lo.end(); i++, it++) {
-    opermutation[*it] = i;
-  }
-  for (auto it = sum_dims_.begin(); it != sum_dims_.end(); i++, it++) {
-    opermutation[*it] = i;
-  }
-  for (auto it = ro.begin(); it != ro.end(); i++, it++) {
-    opermutation[*it] = i;
-  }
+    for (auto it = lro.cbegin(); it != lro.cend(); i++, it++) {
+      opermutation[*it] = i;
+    }
+    for (auto it = lo.cbegin(); it != lo.cend(); i++, it++) {
+      opermutation[*it] = i;
+    }
+    for (auto it = sum_dims_.cbegin(); it != sum_dims_.cend(); i++, it++) {
+      opermutation[*it] = i;
+    }
+    for (auto it = ro.cbegin(); it != ro.cend(); i++, it++) {
+      opermutation[*it] = i;
+    }
   }
 
   // now we can execute the operations above
@@ -126,6 +153,7 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   // finally squeeze summed dimensions if desired
   if (! keepdim) {
     auto sizes = result.sizes().vec();
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     for (int i = dim-1; i>=0; i--) {
       if (sum_dims[i]) {
         sizes.erase(sizes.begin() + i);
@@ -136,17 +164,34 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   return result;
 }
 
+namespace {
+
+bool einsum_check_label(unsigned char label) {
+  return std::isalpha(label);
+}
+
+uint8_t einsum_label_to_index(unsigned char label) {
+  constexpr uint8_t NUM_OF_LETTERS = 'z' - 'a' + 1;
+  return std::isupper(label) ? label - 'A' : NUM_OF_LETTERS + (label - 'a');
+}
+
+unsigned char einsum_index_to_label(uint8_t index) {
+  constexpr uint8_t NUM_OF_LETTERS = 'z' - 'a' + 1;
+  return index < NUM_OF_LETTERS ? index + 'A' : index - NUM_OF_LETTERS + 'a';
+}
+
+} // namespace
+
 // There are roughly three parts to compute einsum:
 // 1. Parse equation to extract the labels for each input operand and output
 // 2. Unsqueeze missing dimensions from input operands and permute to align them
 // 3. Compute result by multiplying input operands and summing contraction
 //    dimensions We do the last part by reducing to bmm.
-Tensor einsum(std::string equation, TensorList operands) {
-  TORCH_CHECK(!operands.empty(), "einsum() must provide at least one operand");
-  checkDeviceType("einsum()", operands, operands[0].device().type());
+Tensor einsum(c10::string_view equation, TensorList operands) {
+  TORCH_CHECK(!operands.empty(), "einsum(): must provide at least one operand");
 
   // Code used to identify ELLIPSIS ("...")
-  constexpr int ELLIPSIS = '.';
+  constexpr uint8_t ELLIPSIS = 52;
 
   // Find arrow (->) to split equation into lhs and rhs
   const auto arrow_pos = equation.find("->");
@@ -154,13 +199,14 @@ Tensor einsum(std::string equation, TensorList operands) {
 
   const auto num_ops = operands.size();
 
-  // Convert labels for input operands into an index in [0, 25] and store
+  // Convert labels for input operands into an index in [0, 52) and store
   // them in op_labels for each operand along with ELLIPSIS if present.
-  std::vector<std::vector<int>> op_labels(num_ops);
+  std::vector<std::vector<uint8_t>> op_labels(num_ops);
   bool found_ell = false;
   std::size_t curr_op = 0;
   for (auto i = decltype(lhs.length()){0}; i < lhs.length(); ++i) {
-    switch (lhs[i]) {
+    const unsigned char label = lhs[i];
+    switch (label) {
       case ' ':
         // Ignore spaces
         break;
@@ -169,13 +215,13 @@ Tensor einsum(std::string equation, TensorList operands) {
         TORCH_CHECK(
             // Only one ellipsis per operand can be given
             !found_ell,
-            "einsum() found \'.\' for operand ",
+            "einsum(): found \'.\' for operand ",
             curr_op,
             " for which an ellipsis was already found");
         TORCH_CHECK(
             // Ensure it's a valid ellipsis
             i + 2 < lhs.length() && lhs[++i] == '.' && lhs[++i] == '.',
-            "einsum() found \'.\' for operand ",
+            "einsum(): found \'.\' for operand ",
             curr_op,
             " that is not part of any ellipsis");
         op_labels[curr_op].push_back(ELLIPSIS);
@@ -187,30 +233,28 @@ Tensor einsum(std::string equation, TensorList operands) {
         ++curr_op;
         TORCH_CHECK(
             curr_op < num_ops,
-            "einsum() fewer operands were provided than specified in the equation");
+            "einsum(): fewer operands were provided than specified in the equation");
         found_ell = false;
         break;
 
       default:
         // Parse label
         TORCH_CHECK(
-            lhs[i] >= 'a' && lhs[i] <= 'z',
-            "einsum() operand subscript must be in range [a, z] but found ",
-            lhs[i],
-            " for operand ",
-            curr_op);
-        // Convert label to index in [0, 25] and store
-        op_labels[curr_op].push_back(lhs[i] - 'a');
+            einsum_check_label(label),
+            "einsum(): invalid subscript given at index ",
+            i,
+            " in the equation string, subscripts must be in [a-zA-Z]");
+        op_labels[curr_op].push_back(einsum_label_to_index(label));
     }
   }
 
   TORCH_CHECK(
       curr_op == num_ops - 1,
-      "einsum() more operands were provided than specified in the equation");
+      "einsum(): more operands were provided than specified in the equation");
 
-  // Labels must be within [a, z].
-  constexpr int TOTAL_LABELS = 'z' - 'a' + 1;
-  std::vector<int> label_count(TOTAL_LABELS, 0);
+  // Labels must be within [a-zA-Z].
+  constexpr uint8_t TOTAL_LABELS = 52;
+  std::vector<int64_t> label_count(TOTAL_LABELS, 0);
 
   // The maximum number of dimensions covered by any ellipsis, needed when
   // unsqueezing missing dimensions from operands to permute and broadcast
@@ -219,11 +263,11 @@ Tensor einsum(std::string equation, TensorList operands) {
   // Compute label frequency and number of dimensions covered by ellipsis
   // We do this after parsing labels to make it more readable and simpler
   // to compute the number of dimensions covered by ellipsis.
-  for (auto i = decltype(num_ops){0}; i < num_ops; ++i) {
+  for(const auto i : c10::irange(num_ops)) {
     const auto operand = operands[i];
     const auto labels = op_labels[i];
-    const int64_t ndims = operand.dim();
-    int64_t nlabels = labels.size();
+    const auto ndims = operand.dim();
+    int64_t nlabels = static_cast<int64_t>(labels.size());
     bool has_ellipsis = false;
 
     for (const auto& label : labels) {
@@ -238,7 +282,7 @@ Tensor einsum(std::string equation, TensorList operands) {
 
     TORCH_CHECK(
         has_ellipsis ? nlabels <= ndims : nlabels == ndims,
-        "einsum() the number of subscripts in the equation (",
+        "einsum(): the number of subscripts in the equation (",
         nlabels,
         has_ellipsis ? ") is more than the number of dimensions ("
                      : ") does not match the number of dimensions (",
@@ -252,7 +296,7 @@ Tensor einsum(std::string equation, TensorList operands) {
   // shape out_dims + sum_dims. For this, we create a mapping of label
   // to index into the permuted shape.
   std::vector<int64_t> label_perm_index(TOTAL_LABELS, -1);
-  
+
   // Current index in the permuted shape
   int64_t perm_index = 0;
 
@@ -264,7 +308,7 @@ Tensor einsum(std::string equation, TensorList operands) {
     // Implicit output is ellipsis (...) + labels seen only once
     perm_index = ell_num_dim;
     found_ell = true;
-    for (int label = 0; label < TOTAL_LABELS; ++label) {
+    for (const auto label : c10::irange(TOTAL_LABELS)) {
       if (label_count[label] == 1) {
         label_perm_index[label] = perm_index++;
       }
@@ -273,7 +317,8 @@ Tensor einsum(std::string equation, TensorList operands) {
     // Parse explicit output
     const auto rhs = equation.substr(arrow_pos + 2);
     for (auto i = decltype(rhs.length()){0}; i < rhs.length(); ++i) {
-      switch (rhs[i]) {
+      const unsigned char label = rhs[i];
+      switch (label) {
         case ' ':
           // Ignore spaces
           break;
@@ -282,11 +327,11 @@ Tensor einsum(std::string equation, TensorList operands) {
           TORCH_CHECK(
               // There can only be one ellipsis in the output
               !found_ell,
-              "einsum() found \'.\' for output but an ellipsis (...) was already found");
+              "einsum(): found \'.\' for output but an ellipsis (...) was already found");
           TORCH_CHECK(
               // Ensure ellipsis is correct
               i + 2 < rhs.length() && rhs[++i] == '.' && rhs[++i] == '.',
-              "einsum() found \'.\' for output that is not part of any ellipsis (...)");
+              "einsum(): found \'.\' for output that is not part of any ellipsis (...)");
           ell_index = perm_index;
           perm_index += ell_num_dim;
           found_ell = true;
@@ -294,22 +339,21 @@ Tensor einsum(std::string equation, TensorList operands) {
 
         default:
           TORCH_CHECK(
-              // Labels must be in [a, z]
-              rhs[i] >= 'a' && rhs[i] <= 'z',
-              "einsum() subscripts must be in range [a, z] but found ",
-              rhs[i],
-              " for the output");
-          const auto label = rhs[i] - 'a';
+              einsum_check_label(label),
+              "einsum(): invalid subscript given at index ",
+            lhs.size() + 2 + i,
+              " in the equation string, subscripts must be in [a-zA-Z]");
+          const auto index = einsum_label_to_index(label);
           TORCH_CHECK(
               // Ensure label appeared at least once for some input operand and at
               // most once for the output
-              label_count[label] > 0 && label_perm_index[label] == -1,
-              "einsum() output subscript ",
-              rhs[i],
-              label_perm_index[label] > -1
+              label_count[index] > 0 && label_perm_index[index] == -1,
+              "einsum(): output subscript ",
+              label,
+              label_perm_index[index] > -1
                   ? " appears more than once in the output"
                   : " does not appear in the equation for any input operand");
-          label_perm_index[label] = perm_index++;
+          label_perm_index[index] = perm_index++;
       }
     }
   }
@@ -324,7 +368,7 @@ Tensor einsum(std::string equation, TensorList operands) {
   }
 
   // Add contraction labels (labels not present in output)
-  for (int label = 0; label < TOTAL_LABELS; ++label) {
+  for (const auto label : c10::irange(TOTAL_LABELS)) {
     if (label_count[label] > 0 && label_perm_index[label] == -1) {
       label_perm_index[label] = perm_index++;
     }
@@ -332,26 +376,27 @@ Tensor einsum(std::string equation, TensorList operands) {
 
   // Here we unsqueeze missing dimensions to make all operands have the same
   // number of dimensions. We take diagonals for repeated labels within the
-  // same operand. Finally we permute the operands to align dimensions as 
+  // same operand. Finally we permute the operands to align dimensions as
   // per the perm_out_index we computed above.
   std::vector<Tensor> permuted_operands;
-  for (auto i = decltype(num_ops){0}; i < num_ops; ++i) {
+  for (const auto i: c10::irange(num_ops)) {
     std::vector<int64_t> perm_shape(perm_index, -1);
     std::vector<int64_t> label_dim(TOTAL_LABELS, -1);
     Tensor operand = operands[i];
     const auto labels = op_labels[i];
     const auto original_sizes = operand.sizes();
 
-    std::size_t j = 0;
+    int64_t j = 0;
     for (const auto& label : labels) {
       if (label == ELLIPSIS) {
         // Add missing dimensions covered by the ellipsis
-        const int64_t num_missing_dim =
+        const auto num_missing_dim =
             ell_num_dim - (original_sizes.size() - labels.size() + 1);
-        for (int64_t k = 0; k < num_missing_dim; ++k) {
+        for (const auto k : c10::irange(num_missing_dim)) {
+          (void)k; //Suppress unused warning
           operand = operand.unsqueeze(j);
         }
-        for (int64_t k = 0; k < ell_num_dim; ++k) {
+        for (const auto k : c10::irange(ell_num_dim)) {
           perm_shape[ell_index + k] = j++;
         }
       } else if (label_dim[label] != -1) {
@@ -359,8 +404,8 @@ Tensor einsum(std::string equation, TensorList operands) {
         const auto dim = label_dim[label];
         TORCH_CHECK(
             operand.size(j) == operand.size(dim),
-            "einsum() subscript ",
-            char(label + 'a'),
+            "einsum(): subscript ",
+            einsum_index_to_label(label),
             " is repeated for operand ",
             i,
             " but the sizes don't match, ",
@@ -390,14 +435,14 @@ Tensor einsum(std::string equation, TensorList operands) {
   // dimension size != 1 for optimizing reductions
   std::vector<std::size_t> dim_last_op(perm_index, 0);
   bool has_zero_size_dim = false;
-  for (int64_t dim = 0; dim < perm_index; ++dim) {
+  for (const auto dim : c10::irange(perm_index)) {
     auto broadcast_size = permuted_operands[0].size(dim);
-    for (auto i = decltype(num_ops){1}; i < num_ops; ++i) {
+    for (const auto i: c10::irange(1, num_ops)) {
       const auto dim_size = permuted_operands[i].size(dim);
       if (broadcast_size != dim_size && broadcast_size != 1 && dim_size != 1) {
         std::ostringstream msg;
-        msg << "einsum() operands do not broadcast with remapped shapes [original->remapped]:";
-        for (auto j = decltype(num_ops){0}; j < num_ops; ++j) {
+        msg << "einsum(): operands do not broadcast with remapped shapes [original->remapped]:";
+        for (const auto j: c10::irange(num_ops)) {
           msg << " " << operands[j].sizes() << "->"
               << permuted_operands[j].sizes();
         }
@@ -417,7 +462,7 @@ Tensor einsum(std::string equation, TensorList operands) {
   // Fast path for when an operand has zero sized dim
   if (has_zero_size_dim) {
     std::vector<int64_t> out_shape(out_size);
-    for (int64_t i = 0; i < out_size; ++i) {
+    for (const auto i : c10::irange(out_size)) {
       out_shape[i] = permuted_operands[dim_last_op[i]].size(i);
     }
     return at::zeros(out_shape, result.options());
@@ -435,7 +480,7 @@ Tensor einsum(std::string equation, TensorList operands) {
     }
   }
 
-  for (auto i = decltype(num_ops){1}; i < num_ops; ++i) {
+  for (const auto i: c10::irange(1, num_ops)) {
     Tensor operand = permuted_operands[i];
     std::vector<int64_t> sum_dims;
 
@@ -489,7 +534,7 @@ Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
   std::vector<int64_t> sum_dims_12, sum_dims_23;
   int64_t unroll_size = -1;
   // asserts...
-  for (int64_t i = 0; i < total_dim; i++) {
+  for (const auto i : c10::irange(total_dim)) {
     int64_t s = 0;
     if (expand1[i]) {
       i1 = i1.unsqueeze(i);
@@ -519,21 +564,27 @@ Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
   int64_t slicemul3 = (expand3[unroll_dim] ? 0 : 1);
 
   auto output = at::zeros(output_size, i1.options());
-  if (! sumdim[unroll_dim]) {
-    for (int64_t k = 0; k < unroll_size; k++) {
-      Tensor buf = at::native::sumproduct_pair(i1.narrow(unroll_dim, k * slicemul1, 1),
-                                               i2.narrow(unroll_dim, k * slicemul2, 1),
-                                               sum_dims_12, true);
-      buf = at::native::sumproduct_pair(buf, i3.narrow(unroll_dim, k * slicemul3, 1), sum_dims_23, true);
-      output.narrow(unroll_dim, k, 1).add_(buf);
+
+  // Three conditionals are necessary since this function is meant to work for both
+  // forward and backward, which changes the dimensions of the inputs.
+  // Note that if output has zero elems is because (at least) one of i1, i2, i3 has zero elems.
+  if (i1.numel() != 0 && i2.numel() != 0 && i3.numel() != 0) {
+    if (! sumdim[unroll_dim]) {
+      for (const auto k : c10::irange(unroll_size)) {
+        Tensor buf = at::native::sumproduct_pair(i1.narrow(unroll_dim, k * slicemul1, 1),
+                                                 i2.narrow(unroll_dim, k * slicemul2, 1),
+                                                 sum_dims_12, true);
+        buf = at::native::sumproduct_pair(buf, i3.narrow(unroll_dim, k * slicemul3, 1), sum_dims_23, true);
+        output.narrow(unroll_dim, k, 1).add_(buf);
+      }
     }
-  }
-  else {
-    for (int64_t k = 0; k < unroll_size; k++) {
-      Tensor buf = at::native::sumproduct_pair(i1.narrow(unroll_dim, k*slicemul1, 1),
-                                               i2.narrow(unroll_dim, k*slicemul2, 1), sum_dims_12, true);
-      buf = at::native::sumproduct_pair(buf, i3.narrow(unroll_dim, k*slicemul3, 1), sum_dims_23, true);
-      output.add_(buf);
+    else {
+      for (const auto k : c10::irange(unroll_size)) {
+        Tensor buf = at::native::sumproduct_pair(i1.narrow(unroll_dim, k*slicemul1, 1),
+                                                 i2.narrow(unroll_dim, k*slicemul2, 1), sum_dims_12, true);
+        buf = at::native::sumproduct_pair(buf, i3.narrow(unroll_dim, k*slicemul3, 1), sum_dims_23, true);
+        output.add_(buf);
+      }
     }
   }
   for (int64_t i = output.dim()-1; i >= 0; i--)
@@ -542,9 +593,13 @@ Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
   return output;
 }
 
-Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight, const Tensor& bias) {
+Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight, const c10::optional<Tensor>& bias_opt) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+
   TORCH_CHECK(input1.dim() == input2.dim(), "bilinear(): input dimensions do not match: got ", input1.dim(), " and ", input2.dim());
-  for (int64_t i = 0; i < input1.dim() - 1; i++) {
+  for (const auto i : c10::irange(input1.dim() - 1)) {
     TORCH_CHECK(input1.size(i) == input2.size(i),
               "bilinear(): input batch dimensions do not match at dim ", i, ": got ", input1.size(i), " and ", input2.size(i));
   }
@@ -562,8 +617,8 @@ Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight
   auto size1 = input1.sizes();
   output_size.insert(output_size.end(), size1.begin(), size1.end() - 1);
   output_size.push_back(weight.size(0));
-  auto input1_flattened = input1.view({-1, input1.size(-1)});
-  auto input2_flattened = input2.view({-1, input2.size(-1)});
+  auto input1_flattened = input1.reshape({-1, input1.size(-1)});
+  auto input2_flattened = input2.reshape({-1, input2.size(-1)});
   Tensor output = at::_trilinear(input1_flattened, weight, input2_flattened, {1,3}, {0}, {1,2}, {2,3}).reshape(output_size);
   if (bias.defined()) {
     output = output + bias;
@@ -578,7 +633,7 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
   int64_t csize = 1;  // total size of the contracted dimensions
   Tensor t1 = input1;
   Tensor t2 = input2;
-  for (size_t i = 0; i < dims1.size(); i++) {
+  for (const auto i : c10::irange(dims1.size())) {
     int s1 = input1.size(dims1[i]);
     int s2 = input2.size(dims2[i]);
     if (s2 == 1) { // broadcasted dimensions can be summed right away
@@ -602,20 +657,20 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
   int64_t size2 = 1; // number of non-contracted elements in input2
 
   // fill the permutations and compute sizes
-  for (int64_t i = 0; i < input1.dim(); i++) {
+  for (const auto i : c10::irange(input1.dim())) {
     if (! cdims1[i]) {
       p1.emplace_back(i);
       size1 *= t1.size(i);
       rsizes.emplace_back(t1.size(i));
     }
   }
-  for (size_t i = 0; i < dims1.size(); i++) {
-    p1.emplace_back(dims1[i]);
+  for (const auto x : dims1) {
+    p1.emplace_back(x);
   }
-  for (size_t i = 0; i < dims2.size(); i++) {
-    p2.emplace_back(dims2[i]);
+  for (const auto x : dims2) {
+    p2.emplace_back(x);
   }
-  for (int64_t i = 0; i < input2.dim(); i++) {
+  for (const auto i : c10::irange(input2.dim())) {
     if (! cdims2[i]) {
       p2.emplace_back(i);
       size2 *= t2.size(i);
@@ -629,10 +684,28 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
   return at::mm(t1, t2).reshape(rsizes);
 }
 
-Tensor &tensordot_out(Tensor& result, const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2) {
-  result.copy_(at::native::tensordot(input1, input2, dims1, dims2));
+Tensor &tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2, Tensor& result) {
+  Tensor result_tmp = at::native::tensordot(input1, input2, dims1, dims2);
+  auto result_dtype = result_tmp.scalar_type();
+  auto output_tensor_dtype = result.scalar_type();
+  auto output_device = result.device();
+  auto input1_device = input1.device();
+  auto input2_device = input2.device();
+  // check if the input & output tensors are on the same device.
+  TORCH_CHECK(
+    (output_device == input1_device) && (input1_device == input2_device),
+    "tensordot: Expected the output and input tensors to be on the "
+    "same device, but got the output tensor on ", output_device,
+    ", input tensor a on ", input1_device, ", and input tensor b on ", input2_device);
+  // check if the computed result has the same dtype as the out tensor
+  // (because tensordot does not support type promotion)
+  TORCH_CHECK(
+    result_dtype == output_tensor_dtype, "tensordot",
+    ": Expected the output tensor to have dtype ", result_dtype,
+    ", but got an output tensor with dtype ", output_tensor_dtype);
+  at::native::resize_output(result, result_tmp.sizes());
+  result.copy_(result_tmp);
   return result;
 }
-
 
 }}  // namespace at::native

@@ -1,11 +1,18 @@
 #include <torch/csrc/jit/runtime/profiling_record.h>
+
 #include <ATen/core/interned_strings.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/clear_profiling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
+#include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
+
+#include <torch/csrc/jit/codegen/cuda/interface.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
 namespace jit {
@@ -26,6 +33,11 @@ class ProfileRegistry {
 
   bool shouldProfileNode(const Node* node) {
     std::lock_guard<std::mutex> guard(mutex_);
+    // to guard differentiable graphs, we want profiling information
+    // (in particular requires_grad) for nodes handled by autodiff
+    if (isDifferentiable(node)) {
+      return true;
+    }
     for (const auto& func : registry_funcs_) {
       if (func(node)) {
         return true;
@@ -54,7 +66,7 @@ bool ShapeSymbolTable::bindSymbolicShapes(
   if (*sym_shapes.rank() != new_sizes.size()) {
     return false;
   }
-  for (size_t i = 0; i < new_sizes.size(); i++) {
+  for (const auto i : c10::irange(new_sizes.size())) {
     auto symbol = (*sym_shapes.sizes())[i];
     if (!symbol.is_static()) {
       continue;
@@ -86,16 +98,11 @@ ProfileOp* ProfilingRecord::createProfileNode(
   return pn;
 }
 
-ProfileOptionalOp* ProfilingRecord::createProfileOptionalNode(
-    const std::function<void(Stack&)>& fp,
-    at::ArrayRef<Value*> inputs) {
-  auto pn = new ProfileOptionalOp(profiled_graph_.get(), fp);
-  pn->i_(attr::num_present, 0);
-  pn->i_(attr::num_none, 0);
-
-  for (auto in : inputs) {
-    pn->addInput(in);
-  }
+ProfileIValueOp* ProfilingRecord::createProfileIValueNode(Value* in_val) {
+  auto pn = new ProfileIValueOp(this->profiled_graph_.get(), nullptr);
+  pn->addInput(in_val);
+  auto pno = pn->addOutput();
+  pno->setType(in_val->type());
   return pn;
 }
 
@@ -135,7 +142,7 @@ c10::SymbolicShape ProfilingRecord::mergeSymbolicShapes(
       new_sizes.rank().has_value() && sym_shapes.rank().has_value() &&
       *new_sizes.rank() == *sym_shapes.rank());
 
-  for (size_t i = 0; i < *new_sizes.rank(); i++) {
+  for (const auto i : c10::irange(*new_sizes.rank())) {
     if (!(*sym_shapes.sizes())[i].is_static() ||
         !(*new_sizes.sizes())[i].is_static()) {
       new_symbols.emplace_back();
@@ -198,7 +205,13 @@ void ProfilingRecord::insertShapeProfile(Node* n, size_t offset) {
 }
 
 bool needsProfiledInputs(Node* n) {
-  if (tensorexpr::isSupported(n)) {
+  if (tensorexpr::isSupported(n) ||
+#ifndef C10_MOBILE
+      (RegisterCudaFuseGraph::isRegistered() && fuser::cuda::canFuseNode(n))
+#else
+      false
+#endif
+  ) {
     return true;
   }
 
@@ -229,7 +242,13 @@ bool needsProfiledInputs(Node* n) {
 }
 
 bool needsProfiledOutput(Node* n) {
-  if (tensorexpr::isSupported(n)) {
+  if (tensorexpr::isSupported(n) ||
+#ifndef C10_MOBILE
+      (RegisterCudaFuseGraph::isRegistered() && fuser::cuda::canFuseNode(n))
+#else
+      false
+#endif
+  ) {
     return true;
   }
 
@@ -255,47 +274,14 @@ void ProfilingRecord::removeProfileCounter(Block* b) {
   }
 }
 
-bool hasGradSumToSizeUses(Value* v) {
-  return std::any_of(v->uses().begin(), v->uses().end(), [](const Use& use) {
-    return use.user->kind() == aten::_grad_sum_to_size;
-  });
-}
-
 void ProfilingRecord::instrumentBlock(Block* block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
     auto n = *it;
-    for (size_t offset = 0; offset < n->inputs().size(); offset++) {
+    for (const auto offset : c10::irange(n->inputs().size())) {
       auto i = n->input(offset);
       if (i->type()->kind() == c10::TypeKind::TensorType &&
           (needsProfiledInputs(n) || needsProfiledOutput(i->node()))) {
         insertShapeProfile(n, offset);
-      }
-
-      if (i->type()->cast<OptionalType>() && hasGradSumToSizeUses(i)) {
-        // here we are profile the definition instead of the use,
-        // because we are only optimizing in the case of a None value which is
-        // immutable
-        auto opt_pn = createProfileOptionalNode(nullptr, {i});
-        std::function<void(Stack&)> optional_profiler = [this,
-                                                         opt_pn](Stack& stack) {
-          std::lock_guard<std::mutex> lock(this->mutex_);
-          // frame_id is unused
-          int64_t frame_id = 0;
-          pop(stack, frame_id);
-          IValue value;
-          pop(stack, value);
-          if (value.isNone()) {
-            opt_pn->i_(attr::num_none, opt_pn->i(attr::num_none) + 1);
-          } else {
-            opt_pn->i_(attr::num_present, opt_pn->i(attr::num_present) + 1);
-          }
-          push(stack, value);
-        };
-        opt_pn->setCallback(optional_profiler);
-        auto pno = opt_pn->addOutput();
-        pno->setType(i->type());
-        opt_pn->insertAfter(i->node());
-        i->replaceAllUsesAfterNodeWith(opt_pn, pno);
       }
     }
 
@@ -320,7 +306,7 @@ void ProfilingRecord::instrumentBlock(Block* block) {
 
 void ProfilingRecord::removeProfilingNodes(Block* b) {
   for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
-    if (it->kind() == prim::profile || it->kind() == prim::profile_optional) {
+    if (it->kind() == prim::profile || it->kind() == prim::profile_ivalue) {
       it->output()->replaceAllUsesWith(it->input());
       it.destroyCurrent();
     } else {
@@ -329,6 +315,11 @@ void ProfilingRecord::removeProfilingNodes(Block* b) {
       }
     }
   }
+}
+
+bool ProfilingRecord::ready() const {
+  std::lock_guard<std::mutex> lock(this->mutex_);
+  return profiling_count_ == 0;
 }
 
 std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
@@ -349,6 +340,11 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
 
     if (raw_pr->profiling_count_ > 0) {
       raw_pr->profiling_count_--;
+    } else {
+      // if profiling_count_ is already at 0 ignore incoming profiling data
+      // since we already collected the data for the exact number of runs
+      // required
+      return;
     }
 
     // merge profiling information from all runs

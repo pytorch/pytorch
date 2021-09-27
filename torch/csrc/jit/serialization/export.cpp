@@ -1,24 +1,26 @@
 #include <torch/csrc/jit/serialization/export.h>
+
+#include <ATen/ATen.h>
+#include <ATen/Utils.h>
+#include <ATen/core/functional.h>
+#include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
+#include <c10/util/accumulate.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/symbolic.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
 #include <torch/csrc/jit/serialization/onnx.h>
 #include <torch/csrc/onnx/onnx.h>
 
-#include <ATen/core/functional.h>
-#include <c10/util/Exception.h>
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/inliner.h>
-#include <torch/csrc/jit/runtime/instruction.h>
-
 #include <onnx/checker.h>
 #include <onnx/onnx_pb.h>
 #include <onnx/proto_utils.h>
-
-#include <ATen/ATen.h>
-#include <c10/util/Optional.h>
 
 #include <fstream>
 #include <memory>
@@ -26,6 +28,7 @@
 #include <set>
 #include <string>
 #include <vector>
+
 namespace torch {
 namespace jit {
 
@@ -220,6 +223,20 @@ class EncoderBase {
       bool use_external_data_format = false,
       const std::string& onnx_file_path = std::string());
 
+  void AddInitializersIntoGraphProto(
+      onnx::GraphProto* graph_proto,
+      const Block* block,
+      const std::map<std::string, at::Tensor>& initializers =
+          std::map<std::string, at::Tensor>(),
+      bool use_external_data_format = false,
+      const std::string& onnx_file_path = std::string());
+
+  unsigned long long int GetGraphProtoSize(
+      onnx::GraphProto* graph_proto,
+      const std::shared_ptr<Graph>& graph,
+      const std::map<std::string, at::Tensor>& initializers =
+          std::map<std::string, at::Tensor>());
+
   virtual void EncodeTensor(
       onnx::TensorProto* tensor_proto,
       const at::Tensor& tensor,
@@ -248,13 +265,21 @@ class EncoderBase {
       const bool use_external_data_format = false,
       const std::string& onnx_file_path = std::string());
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   SymbolDimMap symbol_dim_map_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   onnx::ModelProto model_proto_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   size_t num_blocks_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   size_t num_op_nodes_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   size_t num_external_data_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   onnx_torch::OperatorExportTypes operator_export_type_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool strip_doc_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::set<std::string> domains_;
 
   // For large models, the parameters can be stored in separate binary files.
@@ -262,6 +287,7 @@ class EncoderBase {
   // tensor, beyond which the parameter is stored in a separate file (if API
   // argument use_external_data_format is set to True). This threshold is in
   // place so as not to create too many external files.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const size_t ParamSizeThresholdForExternalStorage = 1024;
 };
 
@@ -322,13 +348,14 @@ void EncoderBase::EncodeValueInfo(
         std::unordered_map<int64_t, std::string>>& dynamic_axes) {
   std::string name = n->debugName();
   v->set_name(name);
-  auto tensorTypeToONNXType = [&dynamic_axes, &name, this](
+
+  auto tensorTypeToONNXType = [&dynamic_axes, &name, n, this](
                                   const TensorTypePtr& t,
                                   onnx::TypeProto_Tensor* tensor_type) {
     if (t->dim()) {
       onnx::TensorShapeProto* shape = tensor_type->mutable_shape();
       auto sizes = t->symbolic_sizes().sizes().value();
-      for (size_t i = 0; i < sizes.size(); i++) {
+      for (const auto i : c10::irange(sizes.size())) {
         shape->add_dim();
         if ((dynamic_axes.find(name) != dynamic_axes.end()) &&
             (dynamic_axes.at(name).find(i) != dynamic_axes.at(name).end())) {
@@ -340,7 +367,13 @@ void EncoderBase::EncodeValueInfo(
           shape->mutable_dim(i)->set_dim_value(sizes[i].static_size());
         } else {
           if (symbol_dim_map_.find(sizes[i]) == symbol_dim_map_.end()) {
-            symbol_dim_map_[sizes[i]] = name + "_" + std::to_string(i);
+            if (n->node()->kind() == prim::Param) {
+              symbol_dim_map_[sizes[i]] = name + "_dim_" + std::to_string(i);
+            } else {
+              std::string op_type = n->node()->kind().toUnqualString();
+              symbol_dim_map_[sizes[i]] =
+                  op_type + name + "_dim_" + std::to_string(i);
+            }
           }
           shape->mutable_dim(i)->set_dim_param(symbol_dim_map_[sizes[i]]);
         }
@@ -420,7 +453,7 @@ void EncoderBase::EncodeBlock(
   // be a subset of graph inputs. We use keep_initializers_as_inputs
   // argument to determine whether to add initializers
   // as inputs or not. If keep_initializers_as_inputs=false,
-  // we only add non-parameter inputs as inputs to ONNX graph, and.
+  // we only add non-parameter inputs as inputs to ONNX graph, and
   // not the initializers (parameters). If keep_initializers_as_inputs
   // =true, we add initializers as inputs too. Setting
   // keep_initializers_as_inputs=false allows better
@@ -445,9 +478,7 @@ void EncoderBase::EncodeBlock(
     EncodeValueInfo(graph_proto, v, output, dynamic_axes);
   }
   for (auto node : block->nodes()) {
-    bool is_raw_export =
-        operator_export_type_ == onnx_torch::OperatorExportTypes::RAW;
-    if (node->mustBeNone() && !is_raw_export) {
+    if (node->mustBeNone()) {
       // None nodes are used to implement optional inputs. One
       // way to "not provide" an optional input is to create an
       // Undefined node, and pass its output as that input.
@@ -458,7 +489,7 @@ void EncoderBase::EncodeBlock(
       p_n->set_doc_string(node->sourceRange().str());
     }
     for (auto input : node->inputs()) {
-      if (input->node()->mustBeNone() && !is_raw_export) {
+      if (input->node()->mustBeNone()) {
         p_n->add_input("");
       } else {
         p_n->add_input(input->debugName());
@@ -478,9 +509,7 @@ void EncoderBase::EncodeBlock(
       domains_.insert(domain);
       p_n->set_domain(domain);
     }
-    if (is_raw_export) {
-      AT_ASSERT(!node->kind().is_onnx());
-    } else if (operator_export_type_ == onnx_torch::OperatorExportTypes::ONNX) {
+    if (operator_export_type_ == onnx_torch::OperatorExportTypes::ONNX) {
       AT_ASSERT(
           !node->kind().is_aten() && !node->kind().is_prim() &&
           !node->kind().is_attr());
@@ -493,15 +522,6 @@ void EncoderBase::EncodeBlock(
     for (auto attr_name : node->attributeNames()) {
       AddAttribute(
           p_n, node, attr_name, use_external_data_format, onnx_file_path);
-    }
-    if (is_raw_export && node->blocks().size() > 0) {
-      auto blocks = p_n->add_attribute();
-      blocks->set_name("_blocks");
-      blocks->set_type(onnx::AttributeProto_AttributeType_GRAPHS);
-      for (auto block : node->blocks()) {
-        auto graph = blocks->add_graphs();
-        EncodeBlock(graph, block, initializers);
-      }
     }
     if (node->kind() == ::c10::onnx::Loop) {
       AT_ASSERT(node->blocks().size() == 1);
@@ -523,10 +543,10 @@ void EncoderBase::EncodeBlock(
     if (node->kind() == ::c10::onnx::If) {
       AT_ASSERT(node->blocks().size() == 2);
 
-      auto true_branch = p_n->add_attribute();
-      true_branch->set_name("then_branch");
-      true_branch->set_type(onnx::AttributeProto_AttributeType_GRAPH);
-      auto true_g = true_branch->mutable_g();
+      auto then_branch = p_n->add_attribute();
+      then_branch->set_name("then_branch");
+      then_branch->set_type(onnx::AttributeProto_AttributeType_GRAPH);
+      auto true_g = then_branch->mutable_g();
       EncodeBlock(
           true_g,
           node->blocks()[0],
@@ -537,10 +557,10 @@ void EncoderBase::EncodeBlock(
           use_external_data_format,
           onnx_file_path);
 
-      auto false_branch = p_n->add_attribute();
-      false_branch->set_name("else_branch");
-      false_branch->set_type(onnx::AttributeProto_AttributeType_GRAPH);
-      auto false_g = false_branch->mutable_g();
+      auto else_branch = p_n->add_attribute();
+      else_branch->set_name("else_branch");
+      else_branch->set_type(onnx::AttributeProto_AttributeType_GRAPH);
+      auto false_g = else_branch->mutable_g();
       EncodeBlock(
           false_g,
           node->blocks()[1],
@@ -552,17 +572,67 @@ void EncoderBase::EncodeBlock(
           onnx_file_path);
     }
   }
+  AddInitializersIntoGraphProto(
+      graph_proto,
+      block,
+      initializers,
+      use_external_data_format,
+      onnx_file_path);
+}
+
+void EncoderBase::AddInitializersIntoGraphProto(
+    onnx::GraphProto* graph_proto,
+    const Block* block,
+    const std::map<std::string, at::Tensor>& initializers,
+    bool use_external_data_format,
+    const std::string& onnx_file_path) {
   AT_ASSERT(block->inputs().size() >= initializers.size());
-  for (auto& name_tensor_pair : initializers) {
+  for (auto input : block->inputs()) {
+    auto name_tensor_pair = initializers.find(input->debugName());
+    if (name_tensor_pair == initializers.end()) {
+      continue;
+    }
     auto p = graph_proto->add_initializer();
-    p->set_name(name_tensor_pair.first);
+    p->set_name(name_tensor_pair->first);
     EncodeTensor(
         p,
-        name_tensor_pair.second,
-        name_tensor_pair.first,
+        name_tensor_pair->second,
+        name_tensor_pair->first,
         use_external_data_format,
         onnx_file_path);
   }
+}
+
+unsigned long long int EncoderBase::GetGraphProtoSize(
+    onnx::GraphProto* graph_proto,
+    const std::shared_ptr<Graph>& graph,
+    const std::map<std::string, at::Tensor>& initializers) {
+  unsigned long long int sizes = 0;
+  for (auto input : graph->inputs()) {
+    auto name_tensor_pair = initializers.find(input->debugName());
+    if (name_tensor_pair == initializers.end()) {
+      continue;
+    }
+    onnx::GraphProto* graph_proto_copy = new onnx::GraphProto(*graph_proto);
+    auto tensor_proto = graph_proto_copy->add_initializer();
+    const at::Tensor tensor = name_tensor_pair->second;
+    for (auto d : tensor.sizes()) {
+      tensor_proto->add_dims(d);
+    }
+    tensor_proto->set_data_type(ATenTypeToOnnxType(tensor.scalar_type()));
+    at::Tensor t;
+    if (tensor.is_quantized()) {
+      t = tensor.contiguous();
+    } else {
+      t = tensor.contiguous().cpu();
+    }
+    tensor_proto->set_raw_data(std::string(
+        static_cast<char*>(t.data_ptr()), t.element_size() * t.numel()));
+    sizes += tensor_proto->ByteSizeLong();
+    delete graph_proto_copy;
+    graph_proto_copy = nullptr;
+  }
+  return sizes;
 }
 
 void EncoderBase::AddAttribute(
@@ -600,6 +670,7 @@ void EncoderBase::AddAttribute(
     case AttributeKind::fs:
       attr->set_type(onnx::AttributeProto_AttributeType_FLOATS);
       for (auto& v : node->fs(name))
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         attr->add_floats(v);
       break;
     case AttributeKind::i:
@@ -663,7 +734,10 @@ void EncoderBase::AddAttribute(
       }
       break;
     default:
-      throw std::runtime_error("unexpected attribute kind");
+      std::ostringstream err_msg;
+      err_msg << "attribute \"" << name.toDisplayString()
+              << "\" has unexpected kind: " << toString(node->kindOf(name));
+      throw std::runtime_error(err_msg.str());
   }
 }
 
@@ -689,6 +763,10 @@ class GraphEncoder : public EncoderBase {
     return raw_data_export_map_;
   }
 
+  bool get_use_external_data_format() {
+    return use_external_data_format_;
+  }
+
  private:
   void EncodeTensor(
       onnx::TensorProto* tensor_proto,
@@ -699,6 +777,7 @@ class GraphEncoder : public EncoderBase {
 
   RawDataExportMap raw_data_export_map_;
   bool defer_weight_export_;
+  bool use_external_data_format_;
 };
 
 GraphEncoder::GraphEncoder(
@@ -717,9 +796,20 @@ GraphEncoder::GraphEncoder(
     bool use_external_data_format,
     const std::string& onnx_file_path)
     : EncoderBase(operator_export_type, strip_doc),
-      defer_weight_export_(defer_weight_export) {
-  if (operator_export_type != onnx_torch::OperatorExportTypes::RAW) {
-    validateGraph(graph, operator_export_type);
+      defer_weight_export_(defer_weight_export),
+      use_external_data_format_(use_external_data_format) {
+  validateGraph(graph, operator_export_type);
+  // If graph proto size exceed maximum protobuf size of 2GB, set
+  // use_external_data_format to true.
+  if (!use_external_data_format && !onnx_file_path.empty() &&
+      GetGraphProtoSize(model_proto_.mutable_graph(), graph, initializers) >
+          INT_MAX) {
+    GRAPH_DEBUG(
+        "Exporting model exceed maximum protobuf size of 2GB. Storing model parameters in external data files");
+    use_external_data_format = true;
+    // use_external_data_format_ is one of graph_encoder private variable set
+    // for return `use_external_data_format` value.
+    use_external_data_format_ = use_external_data_format;
   }
 
   if (use_external_data_format) {
@@ -804,11 +894,8 @@ void GraphEncoder::EncodeTensor(
     tensor_proto->set_raw_data("__EXTERNAL");
   } else {
     AT_ASSERT(t.is_contiguous());
-    size_t tensorSize = static_cast<size_t>(std::accumulate(
-        std::begin(tensor.sizes()),
-        std::end(tensor.sizes()),
-        static_cast<int64_t>(1),
-        std::multiplies<int64_t>()));
+    size_t tensorSize = static_cast<size_t>(c10::multiply_integers(
+        std::begin(tensor.sizes()), std::end(tensor.sizes())));
     if (use_external_data_format &&
         tensorSize > ParamSizeThresholdForExternalStorage) {
       AT_ASSERT(!onnx_file_path.empty());
@@ -860,15 +947,11 @@ std::string pretty_print_onnx(
   return prettyPrint(graph_encoder.get_model_proto());
 }
 
-// export_raw_ir will export IR ops without turning them into ONNX ops.
-// The output will use the ONNX protobuf format, but the ops will not
-// conform to the ONNX op specification. Thus, the output will not
-// be interpretable by a ONNX-compatible framework. However, PyTorch or
-// libtorch will be able to import the IR and play it back.
 std::tuple<
     std::shared_ptr<::ONNX_NAMESPACE::ModelProto>,
     RawDataExportMap,
-    SymbolDimMap>
+    SymbolDimMap,
+    bool>
 export_onnx(
     const std::shared_ptr<Graph>& graph,
     const std::map<std::string, at::Tensor>& initializers,
@@ -897,21 +980,22 @@ export_onnx(
       add_node_names,
       use_external_data_format,
       onnx_file_path);
-  const size_t proto_size = graph_encoder.get_model_proto().ByteSizeLong();
-  TORCH_CHECK(
-      proto_size <= INT_MAX,
-      "Exporting model exceed maximum protobuf size of 2GB. "
-      "Please call torch.onnx.export with use_external_data_format=True.");
   GRAPH_DEBUG("onnx proto:", prettyPrint(graph_encoder.get_model_proto()));
   return std::make_tuple(
       std::make_shared<::ONNX_NAMESPACE::ModelProto>(
           graph_encoder.get_model_proto()),
       graph_encoder.get_raw_data_export_map(),
-      graph_encoder.get_symbol_dim_param_map());
+      graph_encoder.get_symbol_dim_param_map(),
+      graph_encoder.get_use_external_data_format());
 }
 
 std::string serialize_model_proto_to_string(
     const std::shared_ptr<::ONNX_NAMESPACE::ModelProto>& model_proto) {
+  const size_t proto_size = model_proto->ByteSizeLong();
+  TORCH_CHECK(
+      proto_size <= INT_MAX,
+      "Exporting model exceed maximum protobuf size of 2GB. "
+      "Please call torch.onnx.export without setting use_external_data_format parameter.");
   return model_proto->SerializeAsString();
 }
 

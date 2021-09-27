@@ -56,19 +56,28 @@ C10_HOST_DEVICE static void reduce_fraction(size_t &numerator, size_t &denominat
   denominator /= a;
 }
 
+//template for changing MAX_NUM_THREADS based on op dtype
+template <typename T>
+struct mnt_wrapper {
+  static constexpr int MAX_NUM_THREADS = 512;
+};
+
+template <>
+struct mnt_wrapper <c10::complex<double>>{
+  static constexpr int MAX_NUM_THREADS = 256;
+};
+
 struct ReduceConfig {
   static constexpr int BLOCK_X = 0;
   static constexpr int BLOCK_Y = 1;
   static constexpr int CTA = 2;
 
-  static constexpr int MAX_NUM_THREADS = 512;
   static constexpr int input_vec_size = 4;
 
   ReduceConfig(int element_size_bytes, int num_outputs, int num_inputs)
     : element_size_bytes(element_size_bytes)
     , num_inputs(num_inputs)
     , num_outputs(num_outputs) {}
-
   int element_size_bytes;
   int num_inputs;
   int num_outputs;
@@ -85,8 +94,9 @@ struct ReduceConfig {
   bool vectorize_input = false;
   int output_vec_size = 1;
 
+  template <typename T>
   void set_block_dimension(int64_t dim0, int64_t dim1) {
-    const int max_num_threads = MAX_NUM_THREADS / output_vec_size;
+    const int max_num_threads = mnt_wrapper<T>::MAX_NUM_THREADS / output_vec_size;
     int dim0_pow2 = dim0 < max_num_threads ? static_cast<int>(last_pow2(dim0)) : max_num_threads;
     int dim1_pow2 = dim1 < max_num_threads ? static_cast<int>(last_pow2(dim1)) : max_num_threads;
     block_width = std::min(dim0_pow2, int(at::cuda::warp_size()));
@@ -909,10 +919,11 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
     // acc_buf_ptr holds buffer used for accumulation among multiple sub_iter
     // when accumulation in output is not possible.
     if (!can_accumulate_in_output && !can_use_32bit_indexing) {
-      int64_t output_memory_size = 1;
+      int64_t output_memory_size = iter.element_size(0);
       for (int dim = 0; dim < iter.ndim(); dim++) {
         output_memory_size = std::max(output_memory_size, iter.shape()[dim] * iter.strides(0)[dim]);
       }
+      output_memory_size /= iter.element_size(0); //iter.strides is in bytes
       owned_buf_ptr.reset(new AccumulationBuffer(sizeof(arg_t),
                                                  sizeof(out_scalar_t),
                                                  (char*) iter.data_ptr(0),
@@ -925,8 +936,6 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
 
   if (!can_use_32bit_indexing) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
-      // Dim 0 is always the reduced dimension
-      AT_ASSERT(sub_iter.strides(0)[0] == 0);
       int64_t sub_iter_base_idx = sub_iter.view_offsets()[0];
 
       gpu_reduce_kernel<scalar_t, out_scalar_t, vt0>(sub_iter, ops, ident,
@@ -978,14 +987,14 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
       // Map block.x to the fastest reducing dimension. It implies:
       //   1. block_x_reduce is required.
       //   2. block.y now max out to num_outputs.
-      dim0 = iter.shape()[0];
+      dim0 = inputs_per_output;
       dim1 = num_outputs;
       fastest_moving_stride = iter.strides(/*arg=*/input_index)[0];
     } else {
       // Map block.x to the fastest non reducing dimension. It implies:
       //   1. block_x_reduce is turned off.
       //   2. block.y now max out to inputs_per_output.
-      dim0 = iter.shape()[iter.num_reduce_dims()];
+      dim0 = num_outputs;
       dim1 = inputs_per_output;
       fastest_moving_stride = iter.strides(/*arg=*/input_index)[iter.num_reduce_dims()];
     }
@@ -1024,7 +1033,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   }
 
   // Adjust block_width and block_height
-  config.set_block_dimension(dim0, dim1);
+  config.set_block_dimension<scalar_t>(dim0, dim1);
 
   int block_width = config.block_width;
   int block_height = config.block_height;
@@ -1105,7 +1114,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   reduce.accumulate = iter.should_accumulate();
   reduce.final_output = iter.is_final_output();
 
-  launch_reduce_kernel<ReduceConfig::MAX_NUM_THREADS>(config, reduce);
+  launch_reduce_kernel<mnt_wrapper<scalar_t>::MAX_NUM_THREADS>(config, reduce);
 }
 
 }} // namespace at::native

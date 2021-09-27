@@ -22,7 +22,7 @@ GRUCell
 ~~~~~~~~~~~~~~~
 .. autoclass:: GRUCell
     :members:
-    
+
 RNNCell
 ~~~~~~~~~~~~~~~
 .. autoclass:: RNNCell

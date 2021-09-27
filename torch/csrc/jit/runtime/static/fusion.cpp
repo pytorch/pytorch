@@ -1,41 +1,57 @@
 #include <torch/csrc/jit/runtime/static/fusion.h>
+
 #include <ATen/core/interned_strings.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/canonicalize.h>
+#include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/freeze_module.h>
+#include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
+#include <torch/csrc/jit/runtime/static/passes.h>
 
 namespace torch {
 namespace jit {
 
-void createFusionGroups(Block* block, AliasDb* aliasDb);
+void createFusionGroups(Block* block, AliasDb* aliasDb, size_t min_size);
 
-void fuseStaticSubgraphs(std::shared_ptr<Graph> graph) {
-  PrepareGraphForStaticRuntime(graph);
+void fuseStaticSubgraphs(std::shared_ptr<Graph> graph, size_t min_size) {
+  Inline(*graph);
+  ReplaceWithCopy(graph);
+  ConstantPropagation(graph);
+  Canonicalize(graph);
+  ConstantPropagation(graph);
+  RemoveTensorMutation(graph);
+  ConstantPropagation(graph);
+  EliminateDeadCode(graph);
   auto aliasDb = torch::make_unique<AliasDb>(graph);
-  createFusionGroups(graph->block(), aliasDb.get());
+  createFusionGroups(graph->block(), aliasDb.get(), min_size);
+  ConstantPooling(graph);
+  ConstantPropagation(graph);
   torch::jit::EliminateDeadCode(graph);
 }
 
 Operation createStaticSubgraphRuntime(const Node* node) {
-  auto g = torch::jit::PrepareForStaticRuntime(node->g(attr::Subgraph));
-  auto runtime = std::make_shared<torch::jit::StaticRuntime>(g);
-  auto num_inputs = runtime->get_inference_module()->input_regs.size();
-  return [runtime, num_inputs](Stack* stack) {
+  auto g = node->g(attr::Subgraph);
+  auto module = std::make_shared<torch::jit::StaticModule>(g);
+  auto num_inputs = module->num_inputs();
+  return [module, num_inputs](Stack& stack) {
     RECORD_FUNCTION("Static Runtime", std::vector<c10::IValue>());
     auto inps = torch::jit::last(stack, num_inputs);
     // TODO maybe avoid call to vec
-    auto outputs = runtime->run(inps.vec(), {});
+    auto outputs = (*module)(inps.vec(), {});
     torch::jit::drop(stack, num_inputs);
 
-    if (runtime->num_outputs() > 1) {
+    if (module->num_outputs() > 1) {
       for (auto& o : outputs.toTuple()->elements()) {
-        push_one(*stack, std::move(o));
+        push_one(stack, std::move(o));
       }
     } else {
-      push_one(*stack, std::move(outputs));
+      push_one(stack, std::move(outputs));
     }
     return 0;
   };
@@ -91,7 +107,7 @@ bool canHandle(Node* node) {
   }
 
   // TODO add "canRunNatively" once memory management is audited
-  return canRunOutOfPlace(node);
+  return getOutOfPlaceOperation(node) != nullptr;
 }
 
 bool canMerge(Node* consumer, Node* producer, AliasDb* aliasDb) {
@@ -141,7 +157,9 @@ value_list sortReverseTopological(ArrayRef<Value*> inputs, Block* b) {
 }
 
 static void debugDumpFusionGroup(const std::string& msg, Node* n) {
+  // NOLINTNEXTLINE(clang-analyzer-core.NonNullParamChecker)
   GRAPH_DEBUG(msg, *n);
+  // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
   if (n->kind() == prim::StaticSubgraph) {
     GRAPH_DEBUG(*n->g(attr::Subgraph));
   }
@@ -219,11 +237,38 @@ std::pair<graph_node_list::iterator, bool> scanNode(Node* n, AliasDb* aliasDb) {
   return createFusionGroup(n, aliasDb);
 }
 
-void createFusionGroups(Block* block, AliasDb* aliasDb) {
+bool inlineIfTooSmall(Node* n, size_t min_size) {
+  if (n->kind() != prim::StaticSubgraph) {
+    return false;
+  }
+  auto subgraph = SubgraphUtils::getSubgraph(n);
+  size_t num_nodes = std::distance(
+      subgraph->block()->nodes().begin(), subgraph->block()->nodes().end());
+  if (num_nodes < min_size) {
+    GRAPH_UPDATE("Fusion group is too small, unmerging: ", *n);
+    SubgraphUtils::unmergeSubgraph(n);
+    return true;
+  }
+  ConstantPooling(subgraph);
+  ConstantPropagation(subgraph);
+  return false;
+}
+
+void inlineSmallFusionGroups(Block* block, size_t min_size) {
+  for (Node* n : block->nodes()) {
+    for (Block* b : n->blocks()) {
+      inlineSmallFusionGroups(b, min_size);
+    }
+    inlineIfTooSmall(n, min_size);
+  }
+}
+
+void createFusionGroups(Block* block, AliasDb* aliasDb, size_t min_size) {
   bool any_changed = true;
   while (any_changed) {
     any_changed = false;
     for (auto it = block->nodes().rbegin(); it != block->nodes().rend();) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       bool changed;
       std::tie(it, changed) = scanNode(*it, aliasDb);
       any_changed |= changed;
@@ -232,7 +277,7 @@ void createFusionGroups(Block* block, AliasDb* aliasDb) {
 
   for (Node* n : block->nodes()) {
     for (Block* b : n->blocks()) {
-      createFusionGroups(b, aliasDb);
+      createFusionGroups(b, aliasDb, min_size);
     }
   }
 
@@ -250,7 +295,7 @@ void createFusionGroups(Block* block, AliasDb* aliasDb) {
   Node* prev_fusion_group =
       initial_fusion_groups.size() ? initial_fusion_groups[0] : nullptr;
 
-  for (size_t i = 1; i < initial_fusion_groups.size(); ++i) {
+  for (const auto i : c10::irange(1, initial_fusion_groups.size())) {
     // Try merging the just created fusion group into the previous one.
     // If it did not work, then put the previous fusion group into
     // fusion_groups vector - we will not touch it anymore in this loop.
@@ -271,6 +316,7 @@ void createFusionGroups(Block* block, AliasDb* aliasDb) {
       prev_fusion_group = fusion_group;
     }
   }
+  inlineSmallFusionGroups(block, min_size);
 }
 
 } // namespace jit

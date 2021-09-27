@@ -10,6 +10,7 @@ struct THFloatTensor;
 
 #include <iostream>
 #include <chrono>
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <string.h>
 #include <sstream>
 
@@ -255,13 +256,16 @@ void TestIndexingByScalar() {
   for (int i = 0; i < tensor.numel(); ++i) {
     ASSERT_TRUE(tensor[i].equal(one * i));
   }
+  // NOLINTNEXTLINE(bugprone-too-small-loop-variable)
   for (int16_t i = 0; i < tensor.numel(); ++i) {
     ASSERT_TRUE(tensor[i].equal(one * i));
   }
+  // NOLINTNEXTLINE(bugprone-too-small-loop-variable)
   for (int8_t i = 0; i < tensor.numel(); ++i) {
     ASSERT_TRUE(tensor[i].equal(one * i));
   }
   // Throw StartsWith("Can only index tensors with integral scalars")
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(tensor[Scalar(3.14)].equal(one));
 }
 
@@ -273,10 +277,13 @@ void TestIndexingByZerodimTensor() {
   }
   // Throw StartsWith(
   //            "Can only index tensors with integral scalars")
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(tensor[ones({}) * 3.14].equal(one));
   // Throw StartsWith("Can only index with tensors that are defined")
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(tensor[Tensor()].equal(one));
   // Throw StartsWith("Can only index with tensors that are scalars (zero-dim)")
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(tensor[ones({2, 3, 4}, kInt)].equal(one));
 }
 void TestIndexingMixedDevice(DeprecatedTypeProperties& type) {
@@ -293,9 +300,12 @@ void TestDispatch() {
 }
 
 void TestNegativeDim(DeprecatedTypeProperties& type) {
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(empty({5, -5, 5}, type.options()));
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(empty({5, -5, -5}, type.options()));
   Tensor tensor = empty({5, 5}, type.options());
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(tensor.reshape({-5, -5}));
 }
 
@@ -389,6 +399,7 @@ TEST(BasicTest, FactoryMethodsTest) {
 
   // Test setting requires_grad to true.
   // This is a bug. Requires_grad was set to TRUE but this is not implemented.
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   EXPECT_ANY_THROW(at::empty({4}, at::TensorOptions().requires_grad(true)));
 
   // Test setting dtype
@@ -398,6 +409,18 @@ TEST(BasicTest, FactoryMethodsTest) {
   ASSERT_EQ(tensor1.device(), at::kCPU);
   ASSERT_FALSE(tensor1.requires_grad());
   ASSERT_FALSE(tensor1.is_pinned());
+
+  // Sparse tensor CPU test to avoid requiring CUDA to catch simple bugs.
+  // Sparse tensors do not work with static CPU dispatch.
+#ifndef ATEN_CPU_STATIC_DISPATCH
+  tensor1 = at::empty({4}, at::TensorOptions().dtype(at::kHalf).layout(at::kSparse));
+  ASSERT_EQ(tensor1.dtype(), at::kHalf);
+  ASSERT_EQ(tensor1.layout(), at::kSparse);
+  ASSERT_EQ(tensor1.device(), at::kCPU);
+  ASSERT_FALSE(tensor1.requires_grad());
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  ASSERT_FALSE(tensor1.is_pinned());
+#endif // ATEN_CPU_STATIC_DISPATCH
 
   if (torch::cuda::is_available()) {
     // Test setting pin memory
@@ -427,10 +450,7 @@ TEST(BasicTest, FactoryMethodsTest) {
     // This is a bug
     // Issue https://github.com/pytorch/pytorch/issues/30405
     ASSERT_FALSE(tensor1.requires_grad());
-
-    // This will cause an exception
-    // Issue https://github.com/pytorch/pytorch/issues/30405
-    ASSERT_ANY_THROW(tensor1.is_pinned());
+    ASSERT_FALSE(tensor1.is_pinned());
   }
 
   // Test _like variants

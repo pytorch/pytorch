@@ -100,22 +100,9 @@ struct _cpu_scatter_gather_dim_loop {
 template <bool is_scatter_like = true>
 struct cpu_scatter_gather_base_kernel {
   template <typename func_t>
-  void operator()(Tensor& self, int64_t dim,
-    const Tensor& index, Scalar& value,
+  void operator()(const Tensor& self, int64_t dim,
+    const Tensor& index, const Scalar& value,
     const std::string& method_name, func_t& kernel_func) {
-    // no-op if index is empty
-    if (index.numel() == 0) {
-      return;
-    }
-
-    dim = maybe_wrap_dim(dim, self.dim());
-
-    if (is_scatter_like) {
-      scatter_shape_check(self, dim, index, self);
-    }
-    else {
-      gather_shape_check(self, dim, index, self);
-    }
 
     auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
     auto index_strides = ensure_nonempty_vec(index.strides().vec());
@@ -130,6 +117,7 @@ struct cpu_scatter_gather_base_kernel {
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
       .resize_outputs(false)
+      // NOLINTNEXTLINE(bugprone-argument-comment)
       .declare_static_shape(index.sizes(), /*squash_dim=*/dim)
       .add_output(self)
       .add_input(index)
@@ -143,9 +131,9 @@ struct cpu_scatter_gather_base_kernel {
 
     auto index_upper_bound = self_dim_size;
 
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
-      ScalarType::Bool, ScalarType::Half, iter.dtype(),
-      "method_name", [&] {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+      ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, iter.dtype(),
+      "scatter_gather_scalar_cpu", [&] {
         constexpr auto SELF_ITER_STRIDE_IDX = 0;
         constexpr auto INDEX_ITER_STRIDE_IDX = 1;
 
@@ -199,28 +187,14 @@ struct cpu_scatter_gather_base_kernel {
   }
 
   template <typename func_t>
-  void operator()(Tensor& self, int64_t dim,
+  void operator()(const Tensor& self, int64_t dim,
     const Tensor& index, const Tensor& src,
     const std::string& method_name, func_t& kernel_func) {
-
-    // no-op if index is empty
-    if (index.numel() == 0) {
-      return;
-    }
-
-    dim = maybe_wrap_dim(dim, self.dim());
-
-    scatter_gather_dtype_check(method_name, self, index, src);
-    if (is_scatter_like) {
-      scatter_shape_check(self, dim, index, src);
-    }
-    else {
-      gather_shape_check(self, dim, index, src);
-    }
 
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
       .resize_outputs(false)
+      // NOLINTNEXTLINE(bugprone-argument-comment)
       .declare_static_shape(index.sizes(), /*squash_dim=*/dim)
       .add_output(self)
       .add_input(src)
@@ -238,9 +212,9 @@ struct cpu_scatter_gather_base_kernel {
 
     auto index_upper_bound = is_scatter_like ? self_dim_size : src_dim_size;
 
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
-      ScalarType::Bool, ScalarType::Half, iter.dtype(),
-      "method_name", [&] {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+      ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, iter.dtype(),
+      "scatter_gather_tensor_cpu", [&] {
         constexpr auto SELF_ITER_STRIDE_IDX = 0;
         constexpr auto INDEX_ITER_STRIDE_IDX = 2;
         constexpr auto SRC_ITER_STRIDE_IDX = 1;
@@ -300,30 +274,30 @@ struct cpu_scatter_gather_base_kernel {
   }
 };
 
-void gather_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim, const Tensor& index) {
+void gather_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim, const Tensor& index) {
   cpu_scatter_gather_base_kernel</*is_scatter_like=*/false>()(
     result, dim, index, self,
     "gather_out_cpu", tensor_assign);
 }
 
-void scatter_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
+void scatter_cpu_kernel(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
   cpu_scatter_gather_base_kernel<>()(
     self, dim, index, src, "scatter_cpu_", tensor_assign);
 }
 
-void scatter_fill_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, Scalar value) {
+void scatter_fill_cpu_kernel(const Tensor& self, int64_t dim, const Tensor& index, const Scalar& value) {
   cpu_scatter_gather_base_kernel<>()(
     self, dim, index, value, "scatter_fill_cpu_", tensor_assign);
 }
 
-void scatter_add_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
+void scatter_add_cpu_kernel(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
   cpu_scatter_gather_base_kernel<>()(
     self, dim, index, src,
     "scatter_add_", reduce_add);
 
 }
 
-void scatter_reduce_cpu_kernel(Tensor& self, const int64_t dim, const Tensor& index,
+void scatter_reduce_cpu_kernel(const Tensor& self, const int64_t dim, const Tensor& index,
                                const Tensor& src, const SCATTER_GATHER_OP& reduce) {
   switch (reduce) {
   case SCATTER_GATHER_OP::REDUCE_ADD :
@@ -337,8 +311,8 @@ void scatter_reduce_cpu_kernel(Tensor& self, const int64_t dim, const Tensor& in
   }
 }
 
-void scatter_scalar_reduce_cpu_kernel(Tensor& self, const int64_t dim, const Tensor& index,
-                                      Scalar& value, const SCATTER_GATHER_OP& reduce) {
+void scatter_scalar_reduce_cpu_kernel(const Tensor& self, const int64_t dim, const Tensor& index,
+                                      const Scalar& value, const SCATTER_GATHER_OP& reduce) {
   switch (reduce) {
   case SCATTER_GATHER_OP::REDUCE_ADD :
     cpu_scatter_gather_base_kernel<>()(self, dim, index, value,
