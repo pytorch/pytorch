@@ -1522,6 +1522,18 @@ class TestOldViewOps(TestCase):
         self.assertRaisesRegex(RuntimeError, "not supported for tensors with negative bit set",
                                lambda: torch.tensor([1 + 2j]).conj().imag.view(torch.int32))
 
+    @onlyCPU
+    def test_crow_col_indices(self, device):
+        crow_indices = (0, 1, 2)
+        col_indices = (1, 0)
+        values = (1, 2)
+        t = torch.sparse_csr_tensor(crow_indices, col_indices, values, size=(2, 2))
+        # This is the test. If crow_indices is not a view op it'll
+        # trigger an internal assert due to use count greater than 1
+        # in debug build.
+        t.crow_indices()
+        t.col_indices()
+
 instantiate_device_type_tests(TestViewOps, globals())
 instantiate_device_type_tests(TestOldViewOps, globals())
 
