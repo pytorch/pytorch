@@ -397,10 +397,10 @@ class MinMaxObserver(_ObserverBase):
         dtype=torch.quint8,
         qscheme=torch.per_tensor_affine,
         reduce_range=False,
-        memoryless=False,
         quant_min=None,
         quant_max=None,
         factory_kwargs=None,
+        memoryless=False,
     ) -> None:
 
         # For x86 quantized kernels, we need to ensure that the vpmaddubsw
@@ -511,9 +511,9 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
         dtype=torch.quint8,
         qscheme=torch.per_tensor_affine,
         reduce_range=False,
-        memoryless=False,
         quant_min=None,
         quant_max=None,
+        memoryless=False,
         **kwargs
     ) -> None:
         self.averaging_constant = averaging_constant
@@ -521,9 +521,9 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
             dtype=dtype,
             qscheme=qscheme,
             reduce_range=reduce_range,
-            memoryless=memoryless,
             quant_min=quant_min,
             quant_max=quant_max,
+            memoryless=memoryless,
             **kwargs
         )
 
@@ -579,10 +579,10 @@ class PerChannelMinMaxObserver(_ObserverBase):
         dtype=torch.quint8,
         qscheme=torch.per_channel_affine,
         reduce_range=False,
-        memoryless=False,
         quant_min=None,
         quant_max=None,
         factory_kwargs=None,
+        memoryless=False,
     ) -> None:
         super(PerChannelMinMaxObserver, self).__init__(
             dtype=dtype,
@@ -762,9 +762,9 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         dtype=torch.quint8,
         qscheme=torch.per_channel_affine,
         reduce_range=False,
-        memoryless=False,
         quant_min=None,
         quant_max=None,
+        memoryless=False,
         **kwargs
     ) -> None:
         super(MovingAveragePerChannelMinMaxObserver, self).__init__(
@@ -772,9 +772,9 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
             dtype=dtype,
             qscheme=qscheme,
             reduce_range=reduce_range,
-            memoryless=memoryless,
             quant_min=quant_min,
             quant_max=quant_max,
+            memoryless=memoryless,
             **kwargs
         )
         self.averaging_constant = averaging_constant
@@ -841,8 +841,8 @@ class HistogramObserver(_ObserverBase):
         dtype: torch.dtype = torch.quint8,
         qscheme=torch.per_tensor_affine,
         reduce_range=False,
-        memoryless=False,
         factory_kwargs=None,
+        memoryless=False,
     ) -> None:
         # bins: The number of bins used for histogram calculation.
         super(HistogramObserver, self).__init__(
