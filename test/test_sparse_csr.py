@@ -9,7 +9,7 @@ from torch.testing._internal.common_utils import \
     (IS_MACOS, IS_WINDOWS, TestCase, run_tests, load_tests, coalescedonoff)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoCusparseGeneric,
-     precisionOverride)
+     precisionOverride, skipMeta)
 from torch.testing._internal.common_dtype import floating_types, get_all_dtypes
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
@@ -103,6 +103,36 @@ class TestSparseCSR(TestCase):
             self.assertEqual(torch.tensor([0, 2, 4], dtype=torch.int64, device=device), sparse.crow_indices())
             self.assertEqual(torch.tensor([0, 1, 0, 1], dtype=torch.int64, device=device), sparse.col_indices())
             self.assertEqual(torch.tensor([1, 2, 3, 4], dtype=dtype, device=device), sparse.values())
+
+    @skipMeta
+    @dtypes(*get_all_dtypes())
+    def test_empty(self, device, dtype):
+        ns = [5, 2, 0]
+        for shape in itertools.product(ns, ns):
+            result = torch.empty(shape, dtype=dtype, device=device, layout=torch.sparse_csr)
+            self.assertEqual(result.shape, shape)
+            self.assertEqual(result.dtype, dtype)
+            self.assertEqual(result.device, torch.device(device))
+            self.assertEqual(result.layout, torch.sparse_csr)
+            self.assertEqual(result.crow_indices().shape, (shape[0] + 1,))
+            self.assertEqual(result.col_indices().shape, (0,))
+            self.assertEqual(result.values().shape, (0,))
+            self.assertEqual(result._nnz(), 0)
+            self.assertEqual(result.crow_indices().device, torch.device(device))
+            self.assertEqual(result.col_indices().device, torch.device(device))
+            self.assertEqual(result.values().device, torch.device(device))
+            self.assertEqual(result.crow_indices().dtype, torch.int64)
+            self.assertEqual(result.col_indices().dtype, torch.int64)
+            self.assertEqual(result.values().dtype, dtype)
+
+    @skipMeta
+    @dtypes(*get_all_dtypes())
+    def test_empty_errors(self, device, dtype):
+        with self.assertRaisesRegex(RuntimeError, "torch.empty: Only 2D sparse CSR tensors are supported."):
+            torch.empty((5,), dtype=dtype, device=device, layout=torch.sparse_csr)
+
+        with self.assertRaisesRegex(RuntimeError, "torch.empty: Only 2D sparse CSR tensors are supported."):
+            torch.empty((2, 3, 4), dtype=dtype, device=device, layout=torch.sparse_csr)
 
     def test_factory_type_invariants_check(self, device):
         with self.assertRaisesRegex(RuntimeError, "both crow_indices and col_indices should have the same type."):
