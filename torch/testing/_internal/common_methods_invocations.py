@@ -2567,6 +2567,9 @@ def sample_inputs_sort(op_info, device, dtype, requires_grad, **kwargs):
     samples.append(SampleInput(scalar, kwargs=dict(dim=0, descending=True, stable=True)))
     return samples
 
+def sample_inputs_argsort(*args, **kwargs):
+    return [sample_input for sample_input in sample_inputs_sort(*args, **kwargs) if "stable" not in sample_input.kwargs]
+
 def sample_inputs_index_fill(op_info, device, dtype, requires_grad, **kwargs):
     samples = []
     t = make_tensor((S, S, S), device, dtype,
@@ -3501,6 +3504,16 @@ def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwarg
             *(SampleInput(nd_tensor, kwargs=dict(dim=dim))
                 for dim in [-1, -2, -3]),
         ]
+
+def sample_inputs_repeat_interleave(op_info, device, dtype, requires_grad, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        SampleInput(make_input(()), kwargs=dict(repeats=2)),
+        SampleInput(make_input((2, 3, 4)), kwargs=dict(repeats=2)),
+        SampleInput(make_input((2, 3, 4)), kwargs=dict(repeats=2, dim=1)),
+        SampleInput(make_input((2, 3, 4)), kwargs=dict(repeats=torch.arange(3, device=device), dim=1))
+    ]
 
 # Metadata class for Fast Fourier Transforms in torch.fft.
 class SpectralFuncInfo(OpInfo):
@@ -10000,6 +10013,37 @@ op_db: List[OpInfo] = [
                          "TestJit",
                          "test_variant_consistency_jit",
                          dtypes=(torch.float32,),),
+        ),
+    ),
+    OpInfo(
+        "argsort",
+        dtypesIfCPU=all_types_and(torch.bool, torch.float16, torch.bfloat16),
+        dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+        sample_inputs_func=sample_inputs_argsort,
+        supports_out=False,
+        supports_autograd=False,
+        skips=(
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestJit",
+                "test_variant_consistency_jit",
+                dtypes=(torch.float32,),
+            ),
+        ),
+    ),
+    OpInfo(
+        "repeat_interleave",
+        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+        sample_inputs_func=sample_inputs_repeat_interleave,
+        supports_out=False,
+        supports_forward_ad=True,
+        skips=(
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestJit",
+                "test_variant_consistency_jit",
+                dtypes=(torch.float32, torch.complex64),
+            ),
         ),
     ),
 ]

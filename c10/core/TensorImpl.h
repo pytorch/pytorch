@@ -1180,9 +1180,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         dtype_initialized(),
         "Cannot access data pointer of Tensor that doesn't have initialized dtype "
         "(e.g., caffe2::Tensor x(CPU), prior to calling mutable_data<T>() on x)");
-    return static_cast<void*>(
-        static_cast<char*>(storage_.data()) +
-        data_type_.itemsize() * storage_offset_);
+    if (storage_offset_) {
+      return static_cast<void*>(
+          static_cast<char*>(storage_.data()) +
+          data_type_.itemsize() * storage_offset_);
+    } else {
+      return storage_.data();
+    }
   }
 
   /**
