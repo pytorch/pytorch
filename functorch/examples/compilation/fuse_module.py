@@ -20,7 +20,6 @@ def run(mod, input):
 class Foo(nn.Module):
     def __init__(self):
         super(Foo, self).__init__()
-        #self.param = nn.Parameter(torch.randn(2000, 1, 4))
         self.param = nn.Parameter(torch.randn(1))
 
     def forward(self, x):
@@ -39,7 +38,6 @@ for a, b in zip(run(mod, input), run(compiled_mod, input)):
 out = mod(input)
 out.sum().backward()
 mod.param.data -= mod.param.grad
-#mod.param.grad = None
 compiled_mod.orig_module.param.data -= compiled_mod.orig_module.param.grad
 compiled_mod.orig_module.param.grad = None
 

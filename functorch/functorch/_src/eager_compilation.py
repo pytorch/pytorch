@@ -214,7 +214,6 @@ def tvm_function(fn, name):
 def compiled_module(mod, fw_compiler, bw_compiler):
     func_mod, params = make_functional(mod)
     compiled_f = compiled_function(func_mod, fw_compiler, bw_compiler)
-    #func_mod = func_mod.with_state(params)
     class CompiledModule(nn.Module):
         def __init__(self):
             super(CompiledModule, self).__init__()
