@@ -109,6 +109,16 @@ class TRTModule(torch.nn.Module):
         self.output_names = state_dict[prefix + "output_names"]
         self._initialize()
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop('context', None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        if self.engine:
+            self.context = self.engine.create_execution_context()
+
     def forward(self, *inputs):
         with torch.autograd.profiler.record_function("TRTModule:Forward"):
             self._check_initialized()
