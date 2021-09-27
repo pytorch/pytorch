@@ -832,12 +832,13 @@ struct TORCH_API DictType : public Type {
       case TypeKind::ComplexType:
       case TypeKind::StringType:
       case TypeKind::TensorType:
+      case TypeKind::DeviceObjType:
         return DictTypePtr(new DictType(key, value));
       default:
         AT_ERROR(
             "Cannot create dict for key type '",
             key->str(),
-            "', only int, float, complex, Tensor and string keys are supported");
+            "', only int, float, complex, Tensor, device and string keys are supported");
     }
   }
 
