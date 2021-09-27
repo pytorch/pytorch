@@ -233,6 +233,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor.to_sparse_csr,
         Tensor._reduce_ex_internal,
         Tensor._fix_weakref,
+        Tensor._make_wrapper_subclass,
         Tensor._python_dispatch.__get__,
         Tensor._conj,
         Tensor._conj_physical,
