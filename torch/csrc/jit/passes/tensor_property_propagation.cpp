@@ -110,7 +110,6 @@ void RegisterArgumentCreatorFor(const char* schema, ArgumentCreator creator) {
   }
 }
 
-
 static bool canBeInferredWithMetaTensor(Node* n) {
   auto opt_op = n->maybeOperator();
   GRAPH_DEBUG("Checking ", getHeader(n));
@@ -147,6 +146,97 @@ c10::optional<c10::ScalarType> inferWithMetaTensor(Node* n) {
     return c10::nullopt;
 }
 
+
+class TensorPropertyInferrer {
+  public:
+  
+  TensorPropertyInferrer(OperatorMap<ArgumentCreator> om): ops_to_args_(om) {}
+  bool virtual hasProperty(Value* v) = 0;
+  void virtual setType(Value* v, const IValue& ival) { throw std::runtime_error("setType(Value*, IValue&) not yet implemented "); }
+  void virtual setType(Value* dst, const Value* src) { throw std::runtime_error("setType(Value*, Value*) not yet implemented "); }
+  bool supportsNodeWithMeta(Node* n) {
+    auto opt_op = n->maybeOperator();
+    GRAPH_DEBUG("Checking ", getHeader(n));
+    if (!opt_op) {
+      GRAPH_DEBUG("not registered with Meta");
+      return false;
+    }
+    GRAPH_DEBUG("not registered with Meta");
+    return ops_to_args_.contains(*opt_op);
+  }
+
+  bool virtual processNodeWithOther(Node*) {return false; };
+  bool virtual processValueWithCopy(Value* src, Value* dst) {
+    if (!hasProperty(src)) {
+      return false;
+    }
+
+    setType(dst, src);
+    return true;
+  }
+
+  bool virtual processNodeWithMeta(Node* n) {
+    
+    auto argument_creator = *ops_to_args_.find(n->getOperator());
+    bool args_have_dtypes = std::all_of(n->inputs().begin(), n->inputs().end(), [this](Value* v) { return this->hasProperty(v); });
+    if (!args_have_dtypes) {
+      return false;
+    }
+
+    Stack stack = *argument_creator(n);
+    auto op = n->getOperation();
+    try {
+      op(&stack);
+      const auto num_inputs = n->outputs().size();
+      for (auto i: c10::irange(num_inputs)) {
+        setType(n->output(i), peek(stack, i, num_inputs));
+      }
+      return true;
+    }
+    catch(...) {
+      GRAPH_DEBUG("caught exception!");
+      return false;
+    };
+
+  }
+  OperatorMap<ArgumentCreator> ops_to_args_;
+};
+
+class ScalarTypeInferrer: public TensorPropertyInferrer  {
+
+public:
+
+  using TensorPropertyInferrer::TensorPropertyInferrer;
+
+  bool hasProperty(Value* v) override {
+    return !v->type()->cast<TensorType>() || v->type()->expect<TensorType>()->scalarType().has_value();
+  }
+
+  void setType(Value* value, const IValue& ival) override {
+    auto scalarType = ival.toTensor().scalar_type();
+    _setType(value, scalarType);
+  }
+
+  void setType(Value* dst, const Value* src) override {
+    auto scalarType = *src->type()->expect<TensorType>()->scalarType();
+    _setType(dst, scalarType);
+  }
+
+private:
+
+  void _setType(Value* value, ScalarType scalarType) {
+    auto tensor_type = value->type()->cast<TensorType>();
+    TORCH_INTERNAL_ASSERT(tensor_type, "Expecting a tensor type");
+    if (!tensor_type->scalarType().has_value()) {
+      value->setType(tensor_type->withScalarType(scalarType));
+    } else if (tensor_type->scalarType().value() != scalarType) {
+      tensor_type->withScalarType({});
+    }
+  }
+
+
+};
+
 using dtype_func_t = std::function<c10::optional<ScalarType>(Node*)>;
 static std::vector<std::pair<OperatorSet, dtype_func_t>>
     dtype_transfer_functions;
@@ -161,8 +251,9 @@ static std::vector<std::pair<OperatorSet, dtype_func_t>>
 //  - otherwise if the inferred property is more precise, original property of
 //  the output tensor will be updated
 struct TensorPropertyPropagationPass {
-  TensorPropertyPropagationPass(std::shared_ptr<Graph> graph)
-      : graph_(std::move(graph)) {
+  TensorPropertyPropagationPass(std::shared_ptr<Graph> graph, TensorPropertyInferrer* tpi)
+      : graph_(std::move(graph)),
+      node_type_inferrer_(tpi) {
   }
 
   // returns true if at least one node has its scalar type set on a tensor node
@@ -183,27 +274,6 @@ struct TensorPropertyPropagationPass {
       GRAPH_DEBUG("getScalarType = ", stype.value());
     }
     return stype;
-  }
-
-  // Set scalar type for value (of Tensor type) if its scalar type
-  // is not yet specified; otherwise report error if scalarType
-  // differs from value's scalar type
-  bool setTensorScalarType(Value* value, ScalarType scalarType) {
-    bool changed = false;
-    auto tensor_type = value->type()->cast<TensorType>();
-    TORCH_INTERNAL_ASSERT(tensor_type, "Expecting a tensor type");
-    if (!tensor_type->scalarType().has_value()) {
-      value->setType(tensor_type->withScalarType(scalarType));
-      changed = true;
-    } else if (tensor_type->scalarType().value() != scalarType) {
-      TORCH_INTERNAL_ASSERT(
-          false,
-          "scalar type mismatch: t1 = ",
-          scalarType,
-          " t2=",
-          tensor_type->scalarType().value());
-    }
-    return changed;
   }
 
   bool processBlocks(at::ArrayRef<Block*> blocks) {
@@ -287,7 +357,12 @@ struct TensorPropertyPropagationPass {
   bool mergeTensorProperties(
       const at::ArrayRef<Value*>& oneList,
       const at::ArrayRef<Value*>& anotherList) {
-    TORCH_INTERNAL_ASSERT(false, "Not implemented yet");
+    TORCH_INTERNAL_ASSERT(oneList.size() == anotherList.size());
+    for (auto i: c10::irange(oneList.size())) {
+      
+    }
+
+    return false;
   }
 
   bool processIf(Node* node) {
@@ -321,30 +396,6 @@ struct TensorPropertyPropagationPass {
     return false;
   }
 
-    static c10::optional<ScalarType> promoteWithMeta(Node* n) {
-    GRAPH_DEBUG("In promoteWithMeta");
-
-    std::vector<IValue> stack;
-    for (auto inp : n->inputs()) {
-      auto st = getScalarType(inp);
-      if (!st.has_value()) {
-        return c10::nullopt;
-      }
-
-      stack.push_back(at::empty({1}, at::TensorOptions(at::kMeta).dtype(*st)));
-    }
-
-    auto op = n->getOperation();
-    op(&stack);
-
-    GRAPH_DEBUG(
-        "Node output[0]",
-        getHeader(n),
-        " gets type ",
-        c10::toString(stack.back().toTensor().scalar_type()));
-    return {stack.back().toTensor().scalar_type()};
-  }
-
   bool checkSchemaReturnsTensors(const c10::FunctionSchema* schema) {
     const std::vector<Argument>& return_args = schema->returns();
     bool has_tensor_output = false;
@@ -370,36 +421,27 @@ struct TensorPropertyPropagationPass {
     }
 
     GRAPH_DEBUG("case = ", n->kind(), " ", *n);
-    c10::optional<ScalarType> scalarType;
     bool changed = false;
     bool found = false;
-    if (canBeInferredWithMetaTensor(n)) {
-      scalarType = inferWithMetaTensor(n);
+    if (node_type_inferrer_->supportsNodeWithMeta(n)) {
+      changed = node_type_inferrer_->processNodeWithMeta(n);
+      TORCH_INTERNAL_ASSERT(changed);
       found = true;
     } else {
       switch (n->kind()) {
         case aten::append:
-          // TODO: add
+          // auto elementType = n->input()->type()->expect<ListType>()->containedTypes()[0];
+          // if (auto itp  = elementType->cast<TensorType>()) {
+          //   //itp->
+          //   auto otp = elementType->cast<TensorType>()->containedTypes()[0];
+          //   ListType::create(otp->withScalarType(i))
+          // }
           break;
         default:
-          for (auto& entry : dtype_transfer_functions) {
-            if (n->isMemberOf(entry.first)) {
-              scalarType = entry.second(n);
-              found = true;
-              break;
-            }
+            TORCH_INTERNAL_ASSERT(false);
           }
       }
-    }
-    if (!found) {
-      TORCH_INTERNAL_ASSERT(false, "schema not supported yet: ", schema_opt);
-    } else {
-      if (scalarType.has_value()) {
-        TORCH_INTERNAL_ASSERT(
-            n->outputs().size() == 1, "Only handle a single output");
-        changed = setTensorScalarType(n->output(0), scalarType.value());
-      }
-    }
+
     return changed;
   }
 
@@ -409,64 +451,6 @@ struct TensorPropertyPropagationPass {
     }
     return aliasDb_.get();
   }
-
-  // simpleTypeTransferFunction returns the type that is common among all input
-  // scalar type if promoteToCommonType is true, will promote differing types to
-  // a common type and return
-  //
-  // Examples:
-  //    input types = (float, int, int)
-  //    when promoteToCommonType == true: output type = float
-  //    when promoteToCommonType == false: output type = nullopt
-  static c10::optional<ScalarType> simpleTypeTransferFunction(
-      Node* n,
-      bool promoteType = false) {
-    auto scalarType = getScalarType(n->inputs().at(0));
-    if (!scalarType.has_value()) {
-      return nullopt;
-    }
-
-    auto stype = scalarType.value();
-    for (size_t i = 1; i < n->inputs().size(); i++) {
-      auto input = n->inputs().at(i);
-      auto t = getScalarType(input);
-      if (!t.has_value()) {
-        return nullopt;
-      }
-      auto ttype = t.value();
-      if (ttype != stype) {
-        if (promoteType) {
-          stype = c10::promoteTypes(stype, ttype);
-          if (stype == ScalarType::Undefined) {
-            return nullopt;
-          }
-        } else {
-          return nullopt;
-        }
-      }
-    }
-    GRAPH_DEBUG("SimpleTypeTransferFunction: result = ", stype);
-    return stype;
-  }
-
-  // This transfer function returns the dtype of the <idx>th operand
-  static c10::optional<ScalarType> typeOfNthOperand(Node* n, int idx) {
-    auto stype = getScalarType(n->inputs().at(idx));
-    if (stype.has_value()) {
-      GRAPH_DEBUG("typeOfNthOperand: result = ", stype.value());
-    }
-    return stype;
-  }
-
-  // This transfer function uses the scalar type of one input as that of the
-  // output slected_input: the index of the input Value* whose scalar type will
-  // be used for the output
-  c10::optional<ScalarType> useInputScalarTypeTransferFunction(
-      Node* n,
-      int selected_input) {
-    TORCH_INTERNAL_ASSERT(false, "not implemented");
-  }
-
 
   /*
   // This one is a special rule -- mean take the ScalarType if specified,
@@ -479,6 +463,7 @@ struct TensorPropertyPropagationPass {
   std::shared_ptr<Graph> graph_;
   // lazily initialized if using aliasing_types, otherwise not initialized
   std::unique_ptr<AliasDb> aliasDb_ = nullptr;
+  std::shared_ptr<TensorPropertyInferrer> node_type_inferrer_ = nullptr;
 };
 
 } // anonymous namespace
@@ -486,7 +471,8 @@ struct TensorPropertyPropagationPass {
 // This analysis propagates input tensor properties (if any) throughout the
 // graph. Currently only support dtype propagation.
 void TensorPropertyPropagation(std::shared_ptr<Graph>& graph) {
-  TensorPropertyPropagationPass tp = TensorPropertyPropagationPass(graph);
+  ScalarTypeInferrer* mtp = new ScalarTypeInferrer(getArgumentCreatorMap());
+  TensorPropertyPropagationPass tp = TensorPropertyPropagationPass(graph, mtp);
   bool changed = tp.run();
   if (changed) {
     GRAPH_DUMP("After TensorPropertyPropagation pass:", graph);
