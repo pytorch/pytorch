@@ -401,11 +401,40 @@ def matmul(*, input, other):
 @register_custom_acc_mapper_fn(
     op_and_target=("call_function", nn.functional.dropout),
     arg_replacement_tuples=[("input", "input")])
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_method", "detach"),
+    arg_replacement_tuples=[("input", "input")])
 def dropout_mapper(node: torch.fx.Node, mod: nn.Module):
     """
     Remove dropout node and directly map its input to output.
     """
     return node.kwargs["input"]
+
+@register_acc_op_mapping(
+    op_and_target=("call_function", nn.functional.hardsigmoid))
+@register_acc_op
+def hardsigmoid(*, input):
+    return nn.functional.hardsigmoid(input)
+
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_function", nn.functional.hardswish),
+    arg_replacement_tuples=[
+        ("input", "input"),
+    ],
+)
+def hardswish_mapper(node: torch.fx.Node, _: nn.Module) -> torch.fx.Node:
+    input_node = node.kwargs["input"]
+    with node.graph.inserting_before(node):
+        new_sigmoid_node = node.graph.call_function(
+            hardsigmoid, kwargs={"input": input_node}
+        )
+        new_sigmoid_node.meta = node.meta.copy()
+        new_node = node.graph.call_function(
+            mul, kwargs={"input": new_sigmoid_node, "other": input_node}
+        )
+        new_node.meta = node.meta.copy()
+        return new_node
+
 
 @register_acc_op_mapping(
     op_and_target=("call_function", torch.ops.quantized.add),
@@ -480,12 +509,10 @@ def quantize_per_tensor(*, input, acc_out_ty=None):
     )
 
 
+@register_acc_op_mapping(op_and_target=("call_method", "dequantize"))
+@register_acc_op_mapping(op_and_target=("call_function", torch.dequantize))
 @register_acc_op
-def dequantize(*, input, input_tensor_meta):
-    """`input_tensor_meta` contains extra argument of quantization
-    parameters, e.g. scale/zero_point and will be using for
-    lowring dequantize op to TensorRT
-    """
+def dequantize(*, input):
     return torch.dequantize(input)
 
 
@@ -497,6 +524,7 @@ def sub(*, input, other):
 
 @register_acc_op_mapping(op_and_target=("call_function", torch.mul))
 @register_acc_op_mapping(op_and_target=("call_function", operator.mul))
+@register_acc_op_mapping(op_and_target=("call_method", "mul"))
 @register_acc_op
 def mul(*, input, other):
     return input * other
@@ -716,6 +744,7 @@ def cosh(*, input):
 
 
 @register_acc_op_mapping(op_and_target=("call_function", torch.tanh))
+@register_acc_op_mapping(op_and_target=("call_method", "tanh"))
 @register_acc_op
 def tanh(*, input):
     return torch.tanh(**locals())
@@ -1448,29 +1477,3 @@ def packed_quantized_convrelu2d_mapper(
         )
         relu_node.meta = node.meta
         return relu_node
-
-
-@register_custom_acc_mapper_fn(
-    op_and_target=("call_function", torch.dequantize),
-    arg_replacement_tuples=[("input", "input")],
-)
-@register_custom_acc_mapper_fn(
-    op_and_target=("call_method", "dequantize"),
-    arg_replacement_tuples=[("input", "input")],
-)
-def custom_dequantize_mapper(node: torch.fx.Node, mod: nn.Module) -> torch.fx.Node:
-    assert isinstance(node.kwargs["input"], torch.fx.Node)
-    assert "tensor_meta" in node.kwargs["input"].meta
-    new_kwargs = {
-        "input": node.kwargs["input"],
-        "input_tensor_meta": node.kwargs["input"].meta["tensor_meta"],
-    }
-    # `input_tensor_meta` contains quantization parameters that can be used to lower
-    # acc_ops.dequantize to TensorRT ops
-    with node.graph.inserting_before(node):
-        new_node = node.graph.create_node(
-            "call_function", dequantize, kwargs=new_kwargs, name=node.name
-        )
-        assert isinstance(node, torch.fx.Node)
-        new_node.meta = node.meta
-        return new_node
