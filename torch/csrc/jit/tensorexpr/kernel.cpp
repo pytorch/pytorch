@@ -18,8 +18,6 @@
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
 
-namespace {
-
 static bool checkTypes(const ScalarType highType, const int typeConstraints) {
   if (typeConstraints == kAllTypes) {
     return true;
@@ -41,27 +39,12 @@ static bool checkTypes(const ScalarType highType, const int typeConstraints) {
   return false;
 }
 
-} // namespace
-
 namespace torch {
 namespace jit {
 namespace tensorexpr {
 
 static bool isValidIdentifierChar(char c, size_t pos) {
   return islower(c) || isupper(c) || c == '_' || (pos > 0 && isdigit(c));
-}
-
-// replaces all invalid characters with underscore
-std::string sanitizeName(const std::string& input_name) {
-  std::stringstream sanitized_name;
-  for (size_t i = 0; i < input_name.size(); ++i) {
-    if (isValidIdentifierChar(input_name[i], i)) {
-      sanitized_name << input_name[i];
-    } else {
-      sanitized_name << "_";
-    }
-  }
-  return sanitized_name.str();
 }
 
 std::string buildErrorMessage(const std::string& s) {
@@ -2507,8 +2490,8 @@ Tensor tensorexpr::computeOperandValue(
       addmmInputs.push_back(inputs[0]);
       addmmInputs.push_back(inputs[1]);
       // Using int64_t as computeAddMM supports only int64_t scalars now
-      addmmInputs.push_back(1ll); // beta
-      addmmInputs.push_back(1ll); // alpha
+      addmmInputs.push_back(1l); // beta
+      addmmInputs.push_back(1l); // alpha
       return computeAddMM(addmmInputs, outputShape, outputType);
     } break;
     case aten::addmm: {
