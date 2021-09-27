@@ -84,7 +84,25 @@ void resize_out(const Tensor &out, IntArrayRef sizes, IntArrayRef strides, const
     } else if (options.memory_format_opt().has_value()) {
       out.unsafeGetTensorImpl()->empty_tensor_restride(*options.memory_format_opt());
     }
+  } else {
+    at::assert_no_internal_overlap(out);
   }
+}
+"""]
+
+def gen_check_inplace_helper(backend_index: BackendIndex) -> List[str]:
+    return ["""
+void check_inplace(const Tensor &self, IntArrayRef sizes, const TensorOptions &options) {
+  TORCH_CHECK(options.dtype() == self.dtype(),
+      "Bad in-place call: ",
+      "input tensor dtype ", self.dtype(), " and output tensor dtype ", options.dtype(), " should match");
+  TORCH_CHECK(options.device() == self.device(),
+      "Bad in-place call: ",
+      "input tensor device ", self.device(), " and output tensor device ", options.device(), " should match");
+  TORCH_CHECK(sizes == self.sizes(),
+      "Bad in-place call: ",
+      "input tensor size ", self.sizes(), " and output tensor size ", sizes, " should match");
+  at::assert_no_internal_overlap(self);
 }
 """]
 
@@ -92,7 +110,8 @@ void resize_out(const Tensor &out, IntArrayRef sizes, IntArrayRef strides, const
 def gen_registration_helpers(backend_index: BackendIndex) -> List[str]:
     return [
         *gen_create_out_helper(backend_index),
-        *gen_resize_out_helper(backend_index)
+        *gen_resize_out_helper(backend_index),
+        *gen_check_inplace_helper(backend_index)
     ]
 
 
@@ -423,7 +442,9 @@ if (C10_UNLIKELY(current_device.has_value())) {
             return f"""{maybe_set_guard_line}
 outputs_[output_idx] = create_out(sizes, strides, options);"""
         elif k is SchemaKind.inplace:
-            return maybe_set_guard
+            return f"""{maybe_set_guard_line}
+const auto& out = outputs_[output_idx].get();
+check_inplace(out, sizes, options);"""
         elif k is SchemaKind.out:
             return f"""{maybe_set_guard_line}
 const auto& out = outputs_[output_idx].get();
