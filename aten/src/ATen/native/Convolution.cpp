@@ -189,7 +189,7 @@ auto ConvParams::use_cudnn(const at::Tensor& input, const at::Tensor& weight) co
   }
   if (!input.is_cuda() || !cudnn_enabled) {
     return false;
-  }
+  } 
   if (input.scalar_type() == at::kBFloat16 || weight.scalar_type() == at::kBFloat16) {
     return false;
   }
