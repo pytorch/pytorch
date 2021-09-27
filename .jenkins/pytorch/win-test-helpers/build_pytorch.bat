@@ -121,9 +121,9 @@ if not x%BUILD_ENVIRONMENT:cuda11=%==x%BUILD_ENVIRONMENT% (
 )
 
 python setup.py bdist_wheel && sccache --show-stats && (
-  :: Some funky for loops here since batch doesn't support globs
-  FOR %%pkg IN (dist\*.whl) DO python -m pip install %%pkg
   copy /Y dist\*.whl "%PYTORCH_FINAL_PACKAGE_DIR%\"
+  :: Some funky for loops here since batch doesn't support globs
+  FOR %%A IN (dist\*.whl) DO call python -m pip install %%A
   :: export test times so that potential sharded tests that'll branch off this build will use consistent data
   python test/run_test.py --export-past-test-times %PYTORCH_FINAL_PACKAGE_DIR%/.pytorch-test-times.json
 
