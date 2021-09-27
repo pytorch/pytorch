@@ -9,7 +9,7 @@ from torch.testing._internal.common_utils import \
     (IS_MACOS, IS_WINDOWS, TestCase, run_tests, load_tests, coalescedonoff)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoCusparseGeneric,
-     precisionOverride)
+     precisionOverride, skipMeta)
 from torch.testing._internal.common_dtype import floating_types, get_all_dtypes
 from test_linalg import _test_addmm_addmv
 
@@ -104,6 +104,113 @@ class TestSparseCSR(TestCase):
             self.assertEqual(torch.tensor([0, 2, 4], dtype=torch.int64, device=device), sparse.crow_indices())
             self.assertEqual(torch.tensor([0, 1, 0, 1], dtype=torch.int64, device=device), sparse.col_indices())
             self.assertEqual(torch.tensor([1, 2, 3, 4], dtype=dtype, device=device), sparse.values())
+
+    @skipMeta
+    @dtypes(*get_all_dtypes())
+    def test_empty(self, device, dtype):
+        ns = [5, 2, 0]
+        for shape in itertools.product(ns, ns):
+            result = torch.empty(shape, dtype=dtype, device=device, layout=torch.sparse_csr)
+            self.assertEqual(result.shape, shape)
+            self.assertEqual(result.dtype, dtype)
+            self.assertEqual(result.device, torch.device(device))
+            self.assertEqual(result.layout, torch.sparse_csr)
+            self.assertEqual(result.crow_indices().shape, (shape[0] + 1,))
+            self.assertEqual(result.col_indices().shape, (0,))
+            self.assertEqual(result.values().shape, (0,))
+            self.assertEqual(result._nnz(), 0)
+            self.assertEqual(result.crow_indices().device, torch.device(device))
+            self.assertEqual(result.col_indices().device, torch.device(device))
+            self.assertEqual(result.values().device, torch.device(device))
+            self.assertEqual(result.crow_indices().dtype, torch.int64)
+            self.assertEqual(result.col_indices().dtype, torch.int64)
+            self.assertEqual(result.values().dtype, dtype)
+
+    @skipMeta
+    @dtypes(*get_all_dtypes())
+    def test_empty_errors(self, device, dtype):
+        with self.assertRaisesRegex(RuntimeError, "torch.empty: Only 2D sparse CSR tensors are supported."):
+            torch.empty((5,), dtype=dtype, device=device, layout=torch.sparse_csr)
+
+        with self.assertRaisesRegex(RuntimeError, "torch.empty: Only 2D sparse CSR tensors are supported."):
+            torch.empty((2, 3, 4), dtype=dtype, device=device, layout=torch.sparse_csr)
+
+    @skipMeta
+    @dtypes(*get_all_dtypes())
+    def test_copy(self, device, dtype):
+
+        def run_test(shape, nnz, index_type):
+            a = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+            b = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+
+            a.copy_(b)
+
+            self.assertEqual(a.crow_indices(), b.crow_indices())
+            self.assertEqual(a.col_indices(), b.col_indices())
+            self.assertEqual(a.values(), b.values())
+
+        ns = [5, 2, 0]
+        for shape, index_dtype in zip(itertools.product(ns, ns), [torch.int32, torch.int64]):
+            run_test(shape, 0, index_dtype)
+            run_test(shape, shape[0]*shape[1], index_dtype)
+
+    @skipMeta
+    @dtypes(*get_all_dtypes())
+    def test_copy_errors(self, device, dtype):
+        for index_dtype in [torch.int32, torch.int64]:
+            shape1 = (2, 3)
+            shape2 = (3, 2)
+            a = self.genSparseCSRTensor(shape1, 0, dtype=dtype, device=device, index_dtype=index_dtype)
+            b = self.genSparseCSRTensor(shape2, 0, dtype=dtype, device=device, index_dtype=index_dtype)
+
+            with self.assertRaisesRegex(RuntimeError, "only same size tensors are supported."):
+                a.copy_(b)
+
+            with self.assertRaisesRegex(RuntimeError, "copy between different layouts is not supported."):
+                a.copy_(torch.empty(a.shape, dtype=dtype, device=device))
+
+            b = self.genSparseCSRTensor(shape1, 1, dtype=dtype, device=device, index_dtype=index_dtype)
+            with self.assertRaisesRegex(RuntimeError, "only tensors with the same number of specified elements are supported."):
+                a.copy_(b)
+
+    @skipMeta
+    @dtypes(*get_all_dtypes())
+    def test_resize(self, device, dtype):
+        for index_dtype in [torch.int32, torch.int64]:
+            shape = (2, 3)
+            nnz = 6
+            a = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+
+            new_shape = (4, 5)
+            a.resize_(new_shape)
+
+            self.assertEqual(a.shape, new_shape)
+            # resize to larger shape doesn't add specified elements
+            self.assertEqual(a._nnz(), nnz)
+
+            new_shape = (1, 5)
+            a.resize_(new_shape)
+
+            self.assertEqual(a.shape, new_shape)
+            # resize to smaller shape trims specified elements
+            self.assertEqual(a._nnz(), 5)
+
+    @skipMeta
+    @dtypes(*get_all_dtypes())
+    def test_resize_errors(self, device, dtype):
+        for index_dtype in [torch.int32, torch.int64]:
+            shape = (2, 3)
+            nnz = 6
+            a = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+
+            with self.assertRaisesRegex(RuntimeError, "torch.resize_: Only 2D sparse CSR tensors are supported."):
+                new_shape = (4,)
+                a.resize_(new_shape)
+
+            # resizing of columns to smaller size is not implemented
+            with self.assertRaisesRegex(RuntimeError, "torch.resize_: Resizing columns of sparse CSR tensors to a smaller value is not supported."):
+                new_shape = (2, 2)
+                a.resize_(new_shape)
 
     def test_factory_type_invariants_check(self, device):
         with self.assertRaisesRegex(RuntimeError, "both crow_indices and col_indices should have the same type."):
