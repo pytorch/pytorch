@@ -2294,7 +2294,7 @@ class TestSWAUtils(TestCase):
         # Test AveragedModel with EMA as avg_fn and use_state_dict as True.
         dnn = torch.nn.Sequential(
             torch.nn.Conv2d(1, 5, kernel_size=3),
-            torch.nn.BatchNorm2d(5, momentum=0.3, track_running_stats=False),
+            torch.nn.BatchNorm2d(5, momentum=0.3),
             torch.nn.Linear(5, 10)
         )
         alpha = 0.9
@@ -2302,11 +2302,14 @@ class TestSWAUtils(TestCase):
         def avg_fn(p_avg, p, n_avg):
             return alpha * p_avg + (1 - alpha) * p
         averaged_dnn = AveragedModel(dnn, avg_fn=avg_fn, mode='state_dict')
-        averaged_params = [torch.zeros_like(param) for param in dnn.state_dict().values()]
+        averaged_params = [torch.zeros_like(param)
+            for param in dnn.state_dict().values() if param.size() != torch.Size([])]
         n_updates = 10
         for i in range(n_updates):
             updated_averaged_params = []
             for p, p_avg in zip(dnn.state_dict().values(), averaged_params):
+                if p.size() == torch.Size([]):
+                    continue
                 p.detach().add_(torch.randn_like(p))
                 if i == 0:
                     updated_averaged_params.append(p.clone())
