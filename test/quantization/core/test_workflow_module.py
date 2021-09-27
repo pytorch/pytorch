@@ -370,12 +370,12 @@ class TestObserver(QuantizationTestCase):
             x = obs(x)
 
     def _test_memoryless(self, obs_class):
-        obs=obs_class(memoryless = True)
-        x = torch.randn((3,3))
+        obs = obs_class(memoryless=True)
+        x = torch.randn((3, 3))
         obs(x)
         params = obs.calculate_qparams()
         for _ in range(20):
-            obs(torch.randn((3,3)))
+            obs(torch.randn((3, 3)))
             self.assertNotEqual(params, obs.calculate_qparams())
             obs(x)
             self.assertEqual(params, obs.calculate_qparams())
@@ -383,11 +383,17 @@ class TestObserver(QuantizationTestCase):
     def test_memoryless_minmaxobserver(self):
         self._test_memoryless(MinMaxObserver)
 
-    def test_memoryless_per_channel_minmaxobserver(self):
+    def test_memoryless_perchannelminmaxobserver(self):
         self._test_memoryless(PerChannelMinMaxObserver)
 
-    def test_memoryless_per_channel_histogramobserver(self):
+    def test_memoryless_histogramobserver(self):
         self._test_memoryless(HistogramObserver)
+
+    def test_memoryless_movingaverageminmaxobserver(self):
+        self._test_memoryless(MovingAverageMinMaxObserver)
+
+    def test_memoryless_movingaverageperchannelminmaxobserver(self):
+        self._test_memoryless(MovingAveragePerChannelMinMaxObserver)
 
 
 

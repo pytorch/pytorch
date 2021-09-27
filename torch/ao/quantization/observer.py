@@ -521,7 +521,7 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
             dtype=dtype,
             qscheme=qscheme,
             reduce_range=reduce_range,
-            memoryless = memoryless,
+            memoryless=memoryless,
             quant_min=quant_min,
             quant_max=quant_max,
             **kwargs
@@ -851,6 +851,7 @@ class HistogramObserver(_ObserverBase):
             reduce_range=reduce_range,
             factory_kwargs=factory_kwargs,
         )
+        self.memoryless = memoryless
         factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
         self.bins = bins
         self.register_buffer("histogram", torch.zeros(self.bins, **factory_kwargs))
