@@ -32,9 +32,9 @@ on:
     steps:
       !{{ common.setup_ec2_linux() }}
       !{{ common.checkout_pytorch("recursive") }}
-      - name: Pull docker image
+      - name: Pull Docker image
         run: |
-          docker pull "${DOCKER_IMAGE}"
+          !{{ common.pull_docker("${DOCKER_IMAGE}") }}
       - name: Determine shm-size
         run: |
           shm_size="1g"
