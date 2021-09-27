@@ -129,7 +129,7 @@ c10::StrongTypePtr typeResolverMobile(
 }
 
 c10::intrusive_ptr<c10::ivalue::Object> objLoaderMobile(
-    at::StrongTypePtr type,
+    const at::StrongTypePtr& type,
     IValue input,
     std::shared_ptr<mobile::CompilationUnit> mobile_compilation_unit) {
   auto cls = type.type_->expect<at::ClassType>();
@@ -160,9 +160,7 @@ c10::intrusive_ptr<c10::ivalue::Object> objLoaderMobile(
     auto obj = c10::ivalue::Object::create(type, ndict);
     auto it = dict.begin();
     for (const auto i : c10::irange(ndict)) {
-      std::stringstream name;
-      name << it->key();
-      cls->addOrCheckAttribute(name.str(), it->key().type());
+      cls->addOrCheckAttribute(it->key().toStringRef(), it->key().type());
       obj->setSlot(i, it->value());
       ++it;
     }
