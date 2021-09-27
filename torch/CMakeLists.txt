@@ -335,6 +335,13 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/utils/throughput_benchmark.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
 endif()
 
+# coreml
+if(USE_COREML_DELEGATE)
+  list(APPEND TORCH_PYTHON_SRCS ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/cpp/backend.cpp)
+  list(APPEND TORCH_PYTHON_SRCS ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/cpp/preprocess.cpp)
+endif()
+
+
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
 if(HAVE_SOVERSION)
   set_target_properties(torch_python PROPERTIES
@@ -422,4 +429,10 @@ if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
           )
   # Pybind11 requires explicit linking of the torch_python library
   target_link_libraries(nnapi_backend torch torch_python)
+endif()
+
+if(BUILD_BINARY)
+  add_library(aot_compiler SHARED
+          ${TORCH_SRC_DIR}/csrc/jit/mobile/nnc/aot_compiler.cpp
+          )
 endif()
