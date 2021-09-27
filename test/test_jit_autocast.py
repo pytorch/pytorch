@@ -1,5 +1,6 @@
 import torch
-from torch.cuda.amp import autocast
+#from torch.cuda.amp import autocast
+from torch import autocast
 from typing import Optional
 
 import unittest
