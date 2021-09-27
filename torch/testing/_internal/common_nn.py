@@ -513,7 +513,7 @@ def kldivloss_with_target_no_reduce_test():
 
 
 def kldivloss_no_reduce_test():
-    t = torch.randn(10, 10)
+    t = torch.rand(10, 10)
     return dict(
         fullname='KLDivLoss_no_reduce',
         constructor=wrap_functional(
@@ -528,7 +528,7 @@ def kldivloss_no_reduce_test():
 
 
 def kldivloss_no_reduce_scalar_test():
-    t = torch.randn(())
+    t = torch.rand(())
     return dict(
         fullname='KLDivLoss_no_reduce_scalar',
         constructor=wrap_functional(
@@ -556,7 +556,7 @@ def kldivloss_with_log_target_no_reduce_test():
 
 
 def kldivloss_no_reduce_log_target_test():
-    t = torch.randn(10, 10)
+    t = torch.rand(10, 10)
     return dict(
         fullname='KLDivLoss_no_reduce_log_target',
         constructor=wrap_functional(
@@ -571,7 +571,7 @@ def kldivloss_no_reduce_log_target_test():
 
 
 def kldivloss_no_reduce_scalar_log_target_test():
-    t = torch.randn(())
+    t = torch.rand(()).log()
     return dict(
         fullname='KLDivLoss_no_reduce_scalar_log_target',
         constructor=wrap_functional(
@@ -6157,7 +6157,11 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
             def apply_fn(input1, input2, target, *params):  # type: ignore[misc]
                 return module(input1, input2, target)
 
-        gradcheck(apply_fn, inputs, check_batched_grad=self.check_batched_grad)
+        try:
+            gradcheck(apply_fn, inputs, check_batched_grad=self.check_batched_grad)
+        except Exception:
+            input = self._get_input()
+            raise
 
         if self.check_gradgrad:
             gradgradcheck(apply_fn, inputs, check_batched_grad=self.check_batched_grad)
