@@ -5888,6 +5888,9 @@ non-zero elements in the :attr:`input` tensor.
 .. note::
     This function is similar to NumPy's `argwhere`.
 
+    When :attr:`input` is on CUDA, :func:`torch.nonzero() <torch.nonzero>` causes
+    host-device synchronization.
+
 Args:
     {input}
 

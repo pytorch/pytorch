@@ -5627,10 +5627,19 @@ def sample_inputs_argwhere(op_info, device, dtype, requires_grad, **kwargs):
     def generator():
         yield SampleInput(torch.tensor([1, 0, 2, 0], dtype=dtype, device=device, requires_grad=requires_grad))
 
+        mask = torch.tensor([[0, 1, 0, 1, 0],
+                             [1, 1, 1, 1, 0],
+                             [0, 0, 0, 1, 0],
+                             [1, 0, 1, 1, 0],
+                             [1, 0, 0, 1, 0]], dtype=torch.bool, device=device)
         t = make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad)
         with torch.no_grad():
-            m = mask_not_all_zeros(t.shape)
-            t[m] = 0
+            t[mask] = 0
+        yield SampleInput(t)
+        
+        t = make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad, noncontiguous=True)
+        with torch.no_grad():
+            t[mask] = 0
         yield SampleInput(t)
 
         t = make_tensor((S, 0), dtype=dtype, device=device, requires_grad=requires_grad)
