@@ -1,6 +1,6 @@
 #pragma once
 #include <ATen/ATen.h>
-#include <THC/THCAtomics.cuh>
+#include <ATen/cuda/Atomic.cuh>
 
 namespace at {
 namespace native {

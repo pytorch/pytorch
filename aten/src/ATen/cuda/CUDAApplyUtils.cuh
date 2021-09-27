@@ -2,7 +2,7 @@
 
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/TensorUtils.h>
-#include <THC/THCAtomics.cuh>
+#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/macros/Macros.h>
 #include <ATen/native/Copy.h>

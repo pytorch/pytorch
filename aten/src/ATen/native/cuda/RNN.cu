@@ -6,6 +6,8 @@
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <c10/macros/Macros.h>
 
+#include <THC/THCNumerics.cuh>
+
 namespace at { namespace native {
 
 namespace {
