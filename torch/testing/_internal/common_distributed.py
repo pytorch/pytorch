@@ -23,6 +23,7 @@ import torch.distributed as c10d
 from torch.testing._internal.common_utils import (
     TestCase,
     TEST_WITH_ROCM,
+    TEST_WITH_TSAN,
     FILE_SCHEMA,
     find_free_port,
     retry_on_connect_failures,
@@ -289,7 +290,11 @@ def create_tcp_store(
         )
 
 
-TIMEOUT_DEFAULT = 100
+if TEST_WITH_TSAN:
+    # TSAN runs much slower.
+    TIMEOUT_DEFAULT = 500
+else:
+    TIMEOUT_DEFAULT = 100
 TIMEOUT_OVERRIDE = {"test_ddp_uneven_inputs": 400}
 
 

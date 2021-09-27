@@ -69,21 +69,21 @@ std::pair<IValue, IValue> getFunctionTuple(
 
   std::shared_ptr<MobileCode> code;
   code = std::make_shared<MobileCode>(
-      graph,
-      func.name(),
-      BytecodeEmitDefaultValueForUnspecifiedArgMode::
-          is_enabled() /* emit_default_input_instructions */);
+      graph, func.name(), BytecodeEmitMode::is_default_value_for_unspecified_arg_enabled() /* emit_default_input_instructions */, BytecodeEmitMode::is_default_args_before_out_args_enabled() /* enable_defaults_args_with_out_args */);
   auto instructions_copy = code->instructions();
 
   // operator names
   std::vector<c10::OperatorName> opnames;
   std::vector<std::string> method_names;
   std::vector<int64_t> op_debug_handles;
+  int next_new_op_index = 0;
   for (size_t i = 0; i < instructions_copy.size(); ++i) {
     Instruction ins = instructions_copy[i];
-    if (ins.op == OP || ins.op == OPN) {
+    if ((ins.op == OP || ins.op == OPN) && ins.X == next_new_op_index) {
+      // Found a new op (assumes new operators ordered by ascending ins.X)
       auto node = code->instructions_source()[i];
       opnames.emplace_back(node->schema().operator_name());
+      next_new_op_index++;
     }
     // CALL nodes at this point represent built-in (i.e. non-Graph)
     // functions that were not inlined. Here we convert the CALL
@@ -168,7 +168,7 @@ std::pair<IValue, IValue> getFunctionTuple(
     if (it != op_to_specified_args.end()) {
       num_args = it->second;
     }
-    if (BytecodeEmitDefaultValueForUnspecifiedArgMode::is_enabled()) {
+    if (BytecodeEmitMode::is_default_value_for_unspecified_arg_enabled()) {
       operators.emplace_back(to_tuple({opname.name, opname.overload_name}));
     } else {
       operators.emplace_back(
@@ -869,11 +869,21 @@ std::vector<std::string> export_opnames(const script::Module& m) {
 // or not. It's the major difference between bytecode v5 and v6.
 thread_local bool emitBytecodeDefaultInputs =
     caffe2::serialize::kProducedBytecodeVersion <= 5 ? true : false;
-bool BytecodeEmitDefaultValueForUnspecifiedArgMode::is_enabled() {
+bool BytecodeEmitMode::is_default_value_for_unspecified_arg_enabled() {
   return emitBytecodeDefaultInputs;
 }
-void BytecodeEmitDefaultValueForUnspecifiedArgMode::set_enabled(bool enabled) {
+void BytecodeEmitMode::set_default_value_for_unspecified_arg_enabled(
+    bool enabled) {
   emitBytecodeDefaultInputs = enabled;
+}
+
+thread_local bool emitDefautlArgsWithOutArgs =
+    caffe2::serialize::kProducedBytecodeVersion <= 6 ? false : true;
+bool BytecodeEmitMode::is_default_args_before_out_args_enabled() {
+  return emitDefautlArgsWithOutArgs;
+}
+void BytecodeEmitMode::set_default_args_before_out_args_enabled(bool enabled) {
+  emitDefautlArgsWithOutArgs = enabled;
 }
 
 } // namespace jit
