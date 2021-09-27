@@ -704,8 +704,10 @@ class TSNodeLowering : public NodeLowering {
 
     // TODO: Clean up after convolution unification is done.
     auto& ctx = at::globalContext();
-    LTC_CHECK(ctx.userEnabledCuDNN() &&
-              lazy_tensors::sys_util::GetEnvBool("LTC_TS_CUDA", true));
+    LTC_CHECK(
+        ctx.userEnabledCuDNN() &&
+        lazy_tensors::compiler::TSComputationClient::HardwareDeviceType() ==
+            at::kCUDA);
 
     // See cudnn_convolution_backward/cudnn_convolution_transpose_backward in
     // native_functions.yaml
