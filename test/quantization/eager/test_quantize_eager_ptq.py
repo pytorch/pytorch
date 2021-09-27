@@ -523,7 +523,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
         self.assertTrue('QuantizedEmbedding' in str(model))
         self.assertTrue('QuantizedLinear' in str(model))
         self.checkQuantizedLinear(model.fc)
-        model(indices, offsets, x)
+        model(idx, offsets, x)
 
     @skipIfNoFBGEMM
     def test_dequant_stub(self):

@@ -1941,7 +1941,7 @@ class EmbeddingModule(torch.nn.Module):
 class EmbeddingWithStaticLinear(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.emb = torch.nn.EmbeddingBag(num_embeddings=10, embedding_dim=5)
+        self.emb = torch.nn.EmbeddingBag(num_embeddings=10, embedding_dim=12)
         self.fc = torch.nn.Linear(4, 2)
         self.emb.qconfig = float_qparams_weight_only_qconfig
         self.qconfig = default_qconfig
