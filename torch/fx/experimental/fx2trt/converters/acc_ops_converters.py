@@ -1510,3 +1510,9 @@ def acc_ops_dequantize(network, target, args, kwargs, name):
     layer.name = input_val.name + ".dequant"
     layer.axis = 0
     return layer.get_output(0)
+
+@tensorrt_converter(acc_ops.eq)
+def acc_ops_eq(network, target, args, kwargs, name):
+    return add_binary_elementwise_layer(
+        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.EQUAL, name
+    )

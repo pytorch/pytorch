@@ -1477,3 +1477,8 @@ def packed_quantized_convrelu2d_mapper(
         )
         relu_node.meta = node.meta
         return relu_node
+@register_acc_op_mapping(op_and_target=("call_function", torch.eq))
+@register_acc_op_mapping(op_and_target=("call_method", "eq"))
+@register_acc_op
+def eq(*, input, other):
+    return torch.eq(input, other)
