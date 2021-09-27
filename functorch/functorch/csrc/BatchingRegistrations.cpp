@@ -497,6 +497,17 @@ Tensor contiguous_batching_rule(const Tensor& self, MemoryFormat memory_format) 
   return physical_view.getPhysicalToLogicalMap().apply(result);
 }
 
+Tensor view_batching_rule(const Tensor& self, IntArrayRef size) {
+  if (!participatesInCurrentLevel(self)) {
+    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    return self.view(size);
+  }
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto size_physical = self_physical.getPhysicalShape(size);
+  auto result = self_physical.tensor().view(size_physical);
+  return self_physical.getPhysicalToLogicalMap().apply(result);
+}
+
 Tensor view_as_complex_batching_rule(const Tensor& self) {
   if (!participatesInCurrentLevel(self)) {
     c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1023,6 +1034,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   // want to support the other variant yet bc it isn't documented...
   m.impl("numpy_T", native::numpy_T); // composite wrt autograd
   m.impl("permute", permute_batching_rule);
+  m.impl("reshape_as", native::reshape_as); // composite wrt autograd
   m.impl("slice.Tensor", slice_batching_rule);
   m.impl("split.Tensor", split_batching_rule);
   m.impl("split_with_sizes", split_with_sizes_batching_rule);
@@ -1033,6 +1045,8 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("unbind.int", unbind_batching_rule);
   m.impl("unfold", unfold_batching_rule);
   m.impl("unsqueeze_", unsqueeze__batching_rule);
+  m.impl("view", view_batching_rule);
+  m.impl("view_as", native::view_as); // composite wrt autograd
 
   m.impl("addmm", addmm_batching_rule);
   // clamp operations
