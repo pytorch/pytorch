@@ -5,7 +5,6 @@
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
 #include <torch/csrc/jit/passes/onnx/constant_map.h>
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_controlflow.h>
-#include <torch/csrc/jit/passes/onnx/fold_if_node.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
 #include <torch/csrc/jit/python/python_arg_flatten.h>
@@ -421,11 +420,6 @@ c10::optional<at::Tensor> ComputeConstantFolding(Node* n, int opset_version) {
   if (inputTensorValues.size() < n->inputs().size()) {
     return c10::nullopt;
   }
-  // The _jit_pass_onnx_fold_if pass is processed after onnx pass,
-  // therefore the onnx graph here may contain the if blocks that is never
-  // traced. Constant folding on those if blocks may rely on the input shape
-  // which does not meet the criteria, so it may get errors. A possible solution
-  // is to put _jit_pass_onnx_fold_if pass in an earlier stage.
   try {
     return onnx_constant_fold::runTorchBackendForOnnx(
         n, inputTensorValues, opset_version);

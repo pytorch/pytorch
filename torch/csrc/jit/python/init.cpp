@@ -44,7 +44,6 @@
 #include <torch/csrc/jit/passes/onnx/eliminate_unused_items.h>
 #include <torch/csrc/jit/passes/onnx/eval_peephole.h>
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_controlflow.h>
-#include <torch/csrc/jit/passes/onnx/fold_if_node.h>
 #include <torch/csrc/jit/passes/onnx/function_extraction.h>
 #include <torch/csrc/jit/passes/onnx/function_substitution.h>
 #include <torch/csrc/jit/passes/onnx/list_model_parameters.h>
@@ -188,11 +187,6 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_symbolic_shapes_test_mode_enabled",
           &symbolicShapeAnalysisTestModeEnabled)
-      .def(
-          "_jit_pass_onnx_fold_if",
-          [](std::shared_ptr<Graph>& graph) {
-            return FoldIfNodeONNX(graph->block());
-          })
       .def(
           "_jit_pass_onnx_peephole",
           [](std::shared_ptr<Graph>& graph,
