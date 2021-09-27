@@ -112,8 +112,8 @@ at::Tensor glu_double_backward_grad_output(const at::Tensor & grad, const at::Te
 at::Tensor infinitely_differentiable_silu_backward(const at::Tensor& grad_output, const at::Tensor& input);
 at::Tensor infinitely_differentiable_mish_backward(const at::Tensor& grad_output, const at::Tensor& input);
 Tensor infinitely_differentiable_logit_backward(const Tensor& grad, const Tensor& self, c10::optional<double> eps);
-Tensor kl_div_backward(const Tensor& grad, const Tensor& input, const Tensor& target, int64_t reduction, bool log_target);
-Tensor kl_div_target_backward(const Tensor& grad, const Tensor& input, const Tensor& target, int64_t reduction, bool log_target);
+Tensor kl_div_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction, bool log_target);
+Tensor kl_div_target_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction, bool log_target);
 Tensor binary_cross_entropy_target_backward(
   const Tensor& grad,
   const Tensor& self,
