@@ -1305,9 +1305,15 @@ def single_batch_reference_fn(input, parameters, module):
     The module is passed the input and target in batched form with a single item.
     The output is squeezed to compare with the no-batch input.
     """
-    single_batch_input = input.unsqueeze(0)
+    def unsqueeze_inp(inp):
+        if isinstance(inp, (list, tuple)):
+            return [t.unsqueeze(0) for t in inp]
+        return inp.unsqueeze(0)
+
+    single_batch_input = unsqueeze_inp(input)
+    single_batch_input = [single_batch_input] if isinstance(single_batch_input, torch.Tensor) else single_batch_input
     with freeze_rng_state():
-        return module(single_batch_input).squeeze(0)
+        return module(*single_batch_input).squeeze(0)
 
 
 new_module_tests = [
@@ -2792,6 +2798,14 @@ new_module_tests = [
     ),
     dict(
         module_name='EmbeddingBag',
+        constructor_args=(4, 3),
+        cpp_constructor_args='torch::nn::EmbeddingBagOptions(4, 3)',
+        input_fn=lambda: torch.empty(1, 512, dtype=torch.long).random_(4).expand(7, 512),
+        check_gradgrad=False,
+        desc='discontiguous',
+    ),
+    dict(
+        module_name='EmbeddingBag',
         constructor_args=(4, 3, None, 2., False, 'sum'),
         cpp_constructor_args='''torch::nn::EmbeddingBagOptions(4, 3)
                                 .max_norm(c10::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kSum)''',
@@ -3700,6 +3714,15 @@ new_module_tests = [
         test_cuda=True,
     ),
     dict(
+        fullname='Fold_no_batch_dim_input',
+        constructor=lambda: nn.Fold((3, 3), (2, 2), (1, 1), (0, 0), (1, 1)),
+        cpp_constructor_args='torch::nn::FoldOptions({3, 3}, {2, 2}).dilation({1, 1}).padding({0, 0}).stride({1, 1})',
+        input_size=(16, 4),
+        check_gradgrad=False,
+        ref=single_batch_reference_fn,
+        test_cuda=True,
+    ),
+    dict(
         fullname='Unfold_int_input',
         constructor=lambda: nn.Unfold(2, 1, 0, 1),
         cpp_constructor_args='torch::nn::UnfoldOptions(2).dilation(1).padding(0).stride(1)',
@@ -3712,6 +3735,15 @@ new_module_tests = [
         constructor=lambda: nn.Fold(3, 2, 1, 0, 1),
         cpp_constructor_args='torch::nn::FoldOptions(3, 2).dilation(1).padding(0).stride(1)',
         input_size=(2, 16, 4),
+        check_gradgrad=False,
+        test_cuda=True,
+    ),
+    dict(
+        fullname='Fold_no_batch_dim_int_input',
+        constructor=lambda: nn.Fold(3, 2, 1, 0, 1),
+        cpp_constructor_args='torch::nn::FoldOptions(3, 2).dilation(1).padding(0).stride(1)',
+        input_size=(16, 4),
+        ref=single_batch_reference_fn,
         check_gradgrad=False,
         test_cuda=True,
     ),
@@ -3934,6 +3966,33 @@ new_module_tests = [
         reference_fn=lambda i, *_: padding3d_circular(i, (3, 3, 2, 1, 2, 2)),
         skip_double=TEST_WITH_ROCM,
         pickle=False,
+    ),
+    dict(
+        module_name='PairwiseDistance',
+        input_fn=lambda: (torch.randn(10, 8), torch.randn(10, 8)),
+    ),
+    dict(
+        module_name='PairwiseDistance',
+        input_fn=lambda: (torch.randn(10, 1), torch.randn(10, 8)),
+        desc='broadcast_lhs'
+    ),
+    dict(
+        module_name='PairwiseDistance',
+        input_fn=lambda: (torch.randn(10, 8), torch.randn(1, 8)),
+        desc='broadcast_rhs'
+    ),
+    dict(
+        module_name='PairwiseDistance',
+        constructor_args=(1.5, 1e-05, True),
+        cpp_constructor_args='torch::nn::PairwiseDistanceOptions().p(1.5).eps(1e-05).keepdim(true)',
+        input_fn=lambda: (torch.randn(10, 8), torch.randn(10, 8)),
+        desc='with_non_default_args',
+    ),
+    dict(
+        module_name='PairwiseDistance',
+        input_fn=lambda: (torch.randn(8), torch.randn(8)),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
     ),
     dict(
         module_name='TransformerEncoderLayer',
@@ -5437,6 +5496,8 @@ classification_criterion_no_batch = [
     ('SoftMarginLoss', lambda: torch.randn(9), lambda: torch.tensor([-1, 1, 1] * 3)),
     ('NLLLoss', lambda: F.log_softmax(torch.randn(3), dim=0), lambda: torch.tensor(1)),
     ('CosineEmbeddingLoss', lambda: (torch.randn(9), torch.randn(9)), lambda: torch.tensor(1)),
+    # For TripletMarginLoss, input_fn : (anchor, positive) and target_fn : negative
+    ('TripletMarginLoss', lambda: (torch.randn(9), torch.randn(9)), lambda: torch.randn(9)),
 ]
 classification_criterion_no_batch_extra_info: Dict[str, dict] = {
     'MultiLabelMarginLoss': {'check_gradgrad': False},
