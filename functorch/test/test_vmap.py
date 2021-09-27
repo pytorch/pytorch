@@ -2432,6 +2432,10 @@ class TestVmapOperators(Namespace.TestVmapBase):
         B0, B1, B2 = 7, 11, 13
         op = torch.Tensor.view
 
+        # We should error out if the view would produce an incorrect result
+        with self.assertRaises(RuntimeError):
+            vmap(op, in_dims=(1, None))(torch.rand(2, B0, 5), [10])
+
         test(op, (torch.rand(B0, 2 * 5), [2, 5]), in_dims=(0, None))
         test(op, (torch.rand(B0, 4, 5), [1, 2, 1, 10]), in_dims=(0, None))
         test(vmap(lambda t: t.view([-1])), (torch.rand(B0, B1, 2, 5, 3),))
@@ -2442,6 +2446,10 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test = self._vmap_view_test
         B0, B1, B2 = 7, 11, 13
         op = torch.Tensor.view_as
+
+        # We should error out if the view would produce an incorrect result
+        with self.assertRaises(RuntimeError):
+            vmap(op, in_dims=(1, 0))(torch.rand(2, B0, 5), torch.rand(B0, 10))
 
         test(op, (torch.rand(B0, 2 * 5), torch.rand(B0, 2, 5)))
         test(op, (torch.rand(2 * 5), torch.rand(B0, 2, 5)), in_dims=(None, 0))
