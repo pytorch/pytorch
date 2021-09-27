@@ -1663,12 +1663,15 @@ TEST_F(Kernel, Linear) {
   auto x0 = at::rand({2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
   auto x1 = at::rand({2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
   auto xb = at::rand({2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+  std::cout << "XXX x0:\n" << x0 << std::endl;
+  std::cout << "XXX x1:\n" << x1 << std::endl;
+  std::cout << "XXX xb:\n" << xb << std::endl;
   auto y_expected = at::linear(x0, x1, xb);
   std::cout << "XXX y_expected:\n" << y_expected << std::endl;
   TensorExprKernel k(graph);
   std::vector<at::Tensor> inputs = {x0, x1, xb};
   StmtPtr s = k.getCodeGenStmt();
-
+/*
   std::ostringstream oss;
   oss << *s;
 
@@ -1679,7 +1682,7 @@ TEST_F(Kernel, Linear) {
 # CHECK-NEXT: for
 # CHECK-NOT: for)IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
-
+*/
   std::vector<IValue> stack = fmap<IValue>(inputs);
   k.run(stack);
   auto y = stack[0].toTensor();
