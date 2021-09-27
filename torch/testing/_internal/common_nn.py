@@ -5498,9 +5498,18 @@ classification_criterion_no_batch = [
     ('CosineEmbeddingLoss', lambda: (torch.randn(9), torch.randn(9)), lambda: torch.tensor(1)),
     # For TripletMarginLoss, input_fn : (anchor, positive) and target_fn : negative
     ('TripletMarginLoss', lambda: (torch.randn(9), torch.randn(9)), lambda: torch.randn(9)),
+    ('MultiLabelSoftMarginLoss', lambda: torch.randn(9), lambda: torch.randn(9)),
 ]
 classification_criterion_no_batch_extra_info: Dict[str, dict] = {
     'MultiLabelMarginLoss': {'check_gradgrad': False},
+}
+# TODO : Fix these discrepancies
+classification_cpp_parity = {
+    'BCELoss': False,
+    'BCEWithLogitsLoss': False,
+    'HingeEmbeddingLoss': False,
+    'NLLLoss': False,
+    'SoftMarginLoss': False,
 }
 reductions = ['none', 'mean', 'sum']
 for (name, input_fn, target_fn), reduction in product(classification_criterion_no_batch,
@@ -5511,7 +5520,8 @@ for (name, input_fn, target_fn), reduction in product(classification_criterion_n
         input_fn=lambda f=input_fn: f(),
         target_fn=lambda f=target_fn: f(),
         reference_fn=single_batch_reference_criterion_fn,
-        test_cpp_api_parity=False,
+        test_cpp_api_parity=True,
+        has_parity=classification_cpp_parity.get(name, True)
     )
     extra_info = classification_criterion_no_batch_extra_info.get(name, {})
     classification_test_info.update(extra_info)

@@ -3310,7 +3310,9 @@ def multilabel_soft_margin_loss(
     if weight is not None:
         loss = loss * weight
 
-    loss = loss.sum(dim=1) / input.size(1)  # only return N loss values
+    reduction_dim = input.dim() - 1
+    C = input.size(1) if input.dim() == 2 else input.size(0)
+    loss = loss.sum(dim=reduction_dim) / C  # only return N loss values
 
     if reduction == "none":
         ret = loss
