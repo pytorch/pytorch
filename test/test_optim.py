@@ -2302,8 +2302,8 @@ class TestSWAUtils(TestCase):
         def avg_fn(p_avg, p, n_avg):
             return alpha * p_avg + (1 - alpha) * p
         averaged_dnn = AveragedModel(dnn, avg_fn=avg_fn, mode='state_dict')
-        averaged_params = [torch.zeros_like(param)
-            for param in dnn.state_dict().values() if param.size() != torch.Size([])]
+        averaged_params = [torch.zeros_like(param) for param in dnn.state_dict().values()
+                           if param.size() != torch.Size([])]
         n_updates = 10
         for i in range(n_updates):
             updated_averaged_params = []
