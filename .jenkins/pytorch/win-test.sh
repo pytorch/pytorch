@@ -7,13 +7,6 @@ SCRIPT_PARENT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 # shellcheck source=./common.sh
 source "$SCRIPT_PARENT_DIR/common.sh"
 
-IMAGE_COMMIT_ID=$(git rev-parse HEAD)
-export IMAGE_COMMIT_ID
-export IMAGE_COMMIT_TAG=${BUILD_ENVIRONMENT}-${IMAGE_COMMIT_ID}
-if [[ ${JOB_NAME} == *"develop"* ]]; then
-  export IMAGE_COMMIT_TAG=develop-${IMAGE_COMMIT_TAG}
-fi
-
 export TMP_DIR="${PWD}/build/win_tmp"
 TMP_DIR_WIN=$(cygpath -w "${TMP_DIR}")
 export TMP_DIR_WIN

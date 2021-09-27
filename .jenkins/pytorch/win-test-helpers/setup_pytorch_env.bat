@@ -65,8 +65,10 @@ set NUMBAPRO_NVVM=%CUDA_PATH%\nvvm\bin\nvvm64_32_0.dll
 set PYTHONPATH=%TMP_DIR_WIN%\build;%PYTHONPATH%
 
 :: Install pre-built bdist_wheel
-call pip install %PYTORCH_FINAL_PACKAGE_DIR%\*.whl
-if %errorlevel% neq 0 ( exit /b %errorlevel% )
+FOR %%A IN (%PYTORCH_FINAL_PACKAGE_DIR%\*.whl) DO (
+    call python -m pip install %%A
+    if %errorlevel% neq 0 ( exit /b %errorlevel% )
+)
 
 @echo off
 echo @echo off >> %TMP_DIR_WIN%/ci_scripts/pytorch_env_restore.bat
