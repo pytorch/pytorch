@@ -18,6 +18,11 @@ try:
 except ImportError:
     from fx.examples import SimpleWithLeaf
 
+try:
+    from .tensorrt_example import make_trt_module
+except ImportError:
+    from tensorrt_example import make_trt_module
+
 def generate_fx_example():
     name = 'simple_leaf'
     model = SimpleWithLeaf(5, 10)
@@ -82,3 +87,10 @@ if __name__ == "__main__":
 
     with PackageExporter(p / "uses_distributed") as e:
         e.save_source_string("uses_distributed", "import torch.distributed; assert torch.distributed.is_available()")
+
+    with PackageExporter(str(p / "make_trt_module")) as e:
+        e.extern("tensorrt")
+        e.add_dependency("tensorrt")
+        e.mock("iopath.**")
+        e.intern("**")
+        e.save_pickle("make_trt_module", "model.pkl", make_trt_module)
