@@ -375,7 +375,7 @@ class TestObserver(QuantizationTestCase):
         obs(x)
         params = obs.calculate_qparams()
         for _ in range(20):
-            obs(torch.randn((3, 3)))
+            obs(10*torch.randn((3, 3)))
             self.assertNotEqual(params, obs.calculate_qparams())
             obs(x)
             self.assertEqual(params, obs.calculate_qparams())
