@@ -5,28 +5,11 @@
 #include <ATen/native/Pool.h>
 #include <ATen/native/cpu/utils.h>
 
+#include <c10/util/Optional.h>
+
 namespace at { namespace native {
 
 namespace {
-
-template<typename T>
-class atomic_optional {
-public:
-  atomic_optional() = default;
-  operator bool() const {
-    return valid_.load();
-  }
-  T value() const {
-    return val_.load();
-  }
-  void operator=(const T& val) {
-    valid_ = true;
-    val_ = val;
-  }
-private:
-  std::atomic<T> val_{};
-  std::atomic<T> valid_{false};
-};
 
 template <typename scalar_t, bool is_3d = false>
 void cpu_max_unpool(
@@ -69,7 +52,7 @@ void cpu_max_unpool(
   int64_t input_image_size = numel / channels;
   int64_t output_image_size = output.numel() / channels;
 
-  atomic_optional<int64_t> optional_error_index;
+  c10::optional<int64_t> optional_error_index;
 
   // parallel on dim N, C, D, H, W: [channels, input_image_size]
   at::parallel_for(0, numel, 0, [&](int64_t begin, int64_t end) {
@@ -83,6 +66,7 @@ void cpu_max_unpool(
       int64_t maxp = indices_data[i];
       if (maxp < 0 || maxp >= output_image_size) {
         optional_error_index = maxp;
+        std::atomic_thread_fence(std::memory_order_release);
       } else {
         output_ptr[maxp] = input_data[i];
       }
@@ -132,7 +116,7 @@ void cpu_max_unpool_channels_last(
   int64_t input_image_size = input_height * input_width;
   int64_t output_image_size = output_height * output_width;
 
-  atomic_optional<int64_t> optional_error_index;
+  c10::optional<int64_t> optional_error_index;
 
   // parallel on dim N, H, W
   at::parallel_for(0, nbatch * input_image_size, 0, [&](int64_t begin, int64_t end) {
@@ -150,6 +134,7 @@ void cpu_max_unpool_channels_last(
         int64_t maxp = indices_ptr[c];
         if (maxp < 0 || maxp >= output_image_size) {
           optional_error_index = maxp;
+          std::atomic_thread_fence(std::memory_order_release);
         } else {
           output_ptr[maxp * channels + c] = input_ptr[c];
         }
@@ -204,7 +189,7 @@ void cpu_max_unpool_backward(
   int64_t input_image_size = numel / channels;
   int64_t output_image_size = grad_output.numel() / channels;
 
-  atomic_optional<int64_t> optional_error_index;
+  c10::optional<int64_t> optional_error_index;
 
   // parallel on dim N, C, D, H, W
   at::parallel_for(0, numel, 0, [&](int64_t begin, int64_t end) {
@@ -218,6 +203,7 @@ void cpu_max_unpool_backward(
       int64_t maxp = indices_data[i];
       if (maxp < 0 || maxp >= output_image_size) {
           optional_error_index = maxp;
+          std::atomic_thread_fence(std::memory_order_release);
       } else {
         grad_input_data[i] = grad_output_ptr[maxp];
       }
@@ -268,7 +254,7 @@ void cpu_max_unpool_backward_channels_last(
   int64_t input_image_size = input_height * input_width;
   int64_t output_image_size = output_height * output_width;
 
-  atomic_optional<int64_t> optional_error_index;
+  c10::optional<int64_t> optional_error_index;
 
   // parallel on dim N, H, W
   at::parallel_for(0, nbatch * input_image_size, 0, [&](int64_t begin, int64_t end) {
@@ -285,6 +271,7 @@ void cpu_max_unpool_backward_channels_last(
         int64_t maxp = indices_ptr[c];
         if (maxp < 0 || maxp >= output_image_size) {
           optional_error_index = maxp;
+          std::atomic_thread_fence(std::memory_order_release);
         } else {
           grad_input_ptr[c] = grad_output_ptr[maxp * channels + c];
         }
