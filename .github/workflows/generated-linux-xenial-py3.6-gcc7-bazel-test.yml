@@ -19,6 +19,7 @@ env:
   XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
   TORCH_CUDA_ARCH_LIST: 5.2
   IN_CI: 1
+  IS_GHA: 1
   # This is used for the phase of adding wheel tests only, will be removed once completed
   IN_WHEEL_TEST: 1
   # Used for custom_opertor, jit_hooks, custom_backend, see .jenkins/pytorch/build.sh
@@ -26,7 +27,9 @@ env:
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
   PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
+  AWS_DEFAULT_REGION: us-east-1
+  CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
+  CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
 concurrency:
   group: linux-xenial-py3.6-gcc7-bazel-test-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
