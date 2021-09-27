@@ -100,6 +100,13 @@ int main(int argc, char* argv[]) {
   torch::jit::mobile::TracerResult tracer_result =
       torch::jit::mobile::trace_run(FLAGS_model_input_path);
 
+  // If the op exist in both traced_ops and root_ops, leave it in root_ops only
+  for(const auto& root_op: root_ops) {
+    if (traced_operators.find(root_op) != traced_operators.end()) {
+      traced_operators.erase(root_op);
+    }
+  }
+
   yaml_out << "include_all_kernel_dtypes: true" << std::endl;
   yaml_out << "operators:" << std::endl;
   printOpsYAML(
