@@ -1362,8 +1362,8 @@ Tensor computePrepackedConv2dClampRun(
   }
 
   BufHandle ResultBuf("prepacked_conv2d_clamp_run", outputShape, dtype);
-  BufHandle inp = c10::get<BufHandle>(inputs[0]);
-  BufHandle prepacked = c10::get<BufHandle>(inputs[1]);
+  const BufHandle& inp = c10::get<BufHandle>(inputs[0]);
+  const BufHandle& prepacked = c10::get<BufHandle>(inputs[1]);
   StmtPtr s = ExternalCall::make(
       ResultBuf, "nnc_prepacked_conv2d_clamp_run", {inp, prepacked}, {});
   return Tensor(ResultBuf.node(), s);
@@ -1379,8 +1379,8 @@ Tensor computePrepackedLinearClampRun(
   }
 
   BufHandle ResultBuf("prepacked_linear_clamp_run", outputShape, dtype);
-  BufHandle inp = c10::get<BufHandle>(inputs[0]);
-  BufHandle prepacked = c10::get<BufHandle>(inputs[1]);
+  const BufHandle& inp = c10::get<BufHandle>(inputs[0]);
+  const BufHandle& prepacked = c10::get<BufHandle>(inputs[1]);
   StmtPtr s = ExternalCall::make(
       ResultBuf, "nnc_prepacked_linear_clamp_run", {inp, prepacked}, {});
   return Tensor(ResultBuf.node(), s);
