@@ -24,7 +24,7 @@ class autocast(torch.autocast_mode.autocast):
     ``torch.cuda.amp.autocast(args...)`` is equivalent to ``torch.autocast("cuda", args...)``
     """
 
-    def __init__(self, enabled : bool = True, dtype : int = 0, cache_enabled : bool = True):
+    def __init__(self, enabled : bool = True, dtype : torch.dtype = torch.float16, cache_enabled : bool = True):
         if torch._jit_internal.is_scripting():
             self._enabled = enabled
             return
@@ -33,26 +33,18 @@ class autocast(torch.autocast_mode.autocast):
     def __enter__(self):
         if torch._jit_internal.is_scripting():
             return self
-        self.prev = torch.is_autocast_enabled()
-        torch.set_autocast_enabled(self._enabled)
-        torch.autocast_increment_nesting()
-        return self
+        return super().__enter__()
 
     # TODO: discuss a unified TorchScript-friendly API for autocast
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any):  # type: ignore[override]
         if torch._jit_internal.is_scripting():
             return
-        # Drop the cache when we exit to a nesting level that's outside any instance of autocast.
-        if torch.autocast_decrement_nesting() == 0:
-            torch.clear_autocast_cache()
-        torch.set_autocast_enabled(self.prev)
-        return False
+        return super().__exit__()
 
     def __call__(self, func):
         if torch._jit_internal.is_scripting():
             return func
-        else:
-            return autocast_decorator(self, func)
+        return autocast_decorator(self, func)
 
 
 # Casts Tensors and containers of Tensors.  Special-cases passthroughs for strings and np.ndarrays, which
