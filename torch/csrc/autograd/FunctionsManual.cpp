@@ -464,21 +464,17 @@ Tensor prod_backward(Tensor grad, const Tensor& input, Tensor result, int64_t di
   }
 }
 
-// std::function is used to be able to pass lambdas that capture
-using solve_f = std::function<Tensor(const Tensor&, const Tensor&)>;
+template <typename solve_f>
 static Tensor generic_solve_jvp(
   solve_f solve,
   const Tensor& X, const Tensor& A,
-  const Tensor& dA, const Tensor& dB,
-  // we need to compute A^{-1} dA. Sometimes this product could exhibit
-  // a structure that could be exploited. See, for example, lu_solve_jvp.
-  c10::optional<solve_f> solve_with_structure = c10::nullopt) {
+  const Tensor& dA, const Tensor& dB) {
   auto is_vector_case = at::native::linalg_solve_is_vector_rhs(dA, dB);
   auto dA_contrib = is_vector_case ? dA.matmul(X.unsqueeze(-1)).squeeze(-1) : dA.matmul(X);
-  if (solve_with_structure.has_value()) {
-    return solve(A, dB) - solve_with_structure.value()(A, dA_contrib);
-  }
-  return solve(A, dB - dA_contrib);
+  // In general,
+  // dX = solve(A, dB - dA_contrib), but this behavior is different for lu_solve.
+  // For refer to lu_solve_jvp for more details on this.
+  return solve(A, dB, dA_contrib);
 }
 
 Tensor solve_jvp(
@@ -488,7 +484,9 @@ Tensor solve_jvp(
   const Tensor& dB
 ) {
   return generic_solve_jvp(
-    at::linalg_solve,
+    [](const Tensor& A, const Tensor& dB, const Tensor& dA_contrib) {
+      return at::linalg_solve(A, dB - dA_contrib);
+    },
     X, A, dA, dB
   );
 }
@@ -2964,8 +2962,8 @@ Tensor triangular_solve_jvp(
   const bool unitriangular
 ) {
   return generic_solve_jvp(
-    [=](const Tensor& A, const Tensor& B) {
-      return std::get<0>(at::triangular_solve(B, A, upper, transpose, unitriangular));
+    [&](const Tensor& A, const Tensor& dB, const Tensor& dA_contrib) {
+      return std::get<0>(at::triangular_solve(dB - dA_contrib, A, upper, transpose, unitriangular));
     },
     X, A, dA, dB
   );
@@ -3001,8 +2999,8 @@ Tensor cholesky_solve_jvp(
                   : dU.matmul(U.transpose(-1, -2).conj());
   auto dA = dK + dK.transpose(-1, -2).conj();
   return generic_solve_jvp(
-    [=](const Tensor& A, const Tensor& B) {
-      return at::cholesky_solve(B, A, upper);
+    [&](const Tensor& A, const Tensor& dB, const Tensor& dA_contrib) {
+      return at::cholesky_solve(dB - dA_contrib, A, upper);
     },
     X, /*A=*/U, dA, dB
   );
@@ -3856,23 +3854,22 @@ Tensor lu_solve_jvp(
   dL = dLU_data.tril(-1);
   dU = dLU_data.triu();
   auto dA = dL.matmul(U) + L.matmul(dU);
-  // We exploit the structure in the computation of A^{-1} dA, where the permutation matrix P such that A = P L U
-  // cancels itself. Because of that we use lu_solve with the identity permutation input.
-  // The identity permutation pivots are 1-based because of the Fortran-like LAPACK interfaces.
-  auto identity_pivots = at::arange(1, LU_data.size(-1) + 1, LU_pivots.options()).expand(LU_pivots.sizes());
   return generic_solve_jvp(
-    [&LU_pivots](const Tensor& A, const Tensor& B) {
-      return at::lu_solve(B, A, LU_pivots);
+    [&](const Tensor& A, const Tensor& dB, const Tensor& dA_contrib) {
+      // We exploit the structure in the computation of A^{-1} dA, where the permutation matrix P such that A = P L U
+      // cancels itself. Because of that we use lu_solve with the identity permutation input.
+      // The identity permutation pivots are 1-based because of the Fortran-like LAPACK interfaces.
+      // More details on the permutation matrix canceling note:
+      // as part of forward AD we need to compute A^{-1} dA.
+      // Since A = P L U and P is not differentiable, we get
+      // dA = P d(L U), A^{-1} = (L U)^{-1} P^T, so
+      // A^{-1} dA = (L U)^{-1} d(L U), which is lu_solve with
+      // the pivots set to the identity permutation
+      auto identity_pivots = at::arange(1, LU_data.size(-1) + 1, LU_pivots.options()).expand(LU_pivots.sizes());
+      return at::lu_solve(dB, A, LU_pivots) - at::lu_solve(dA_contrib, A, identity_pivots);
     },
-    X, /*A=*/LU_data, dA, dB,
-    // as part of forward AD we need to compute A^{-1} dA.
-    // Since A = P L U and P is not differentiable, we get
-    // dA = P d(L U), A^{-1} = (L U)^{-1} P^T, so
-    // A^{-1} dA = (L U)^{-1} d(L U), which is lu_solve with
-    // the pivots set to the identity permutation
-    [&identity_pivots](const Tensor& A, const Tensor& B) {
-      return at::lu_solve(B, A, identity_pivots);
-    });
+    X, /*A=*/LU_data, dA, dB
+  );
 }
 
 Tensor lu_unpack_backward(
