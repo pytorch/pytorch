@@ -419,11 +419,7 @@ class TORCH_API Let : public StmtNode<Let> {
     return alloc<Let>(var.node(), val.node());
   }
 
-  Let(VarPtr var, ExprPtr val) : dtype_(var->dtype()), var_(var), val_(val) {}
-
-  Dtype dtype() const {
-    return dtype_;
-  }
+  Let(VarPtr var, ExprPtr val) : var_(var), val_(val) {}
 
   VarPtr var() const {
     return var_;
@@ -442,7 +438,6 @@ class TORCH_API Let : public StmtNode<Let> {
   }
 
  private:
-  Dtype dtype_;
   VarPtr var_;
   ExprPtr val_;
 };
