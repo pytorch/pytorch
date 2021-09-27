@@ -10,6 +10,7 @@ enum Reduction {
   None,             // Do not reduce
   Mean,             // (Possibly weighted) mean of losses
   Sum,              // Sum losses
+  BatchMean,        // Average only over batch dimension
   END
 };
 } // namespace Reduction

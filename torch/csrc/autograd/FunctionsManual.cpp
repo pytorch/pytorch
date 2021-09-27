@@ -1163,28 +1163,30 @@ Tensor infinitely_differentiable_logit_backward(
   }
 }
 
-Tensor kl_div_double_backward_grad_output(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction, bool log_target) {
-  auto result = kl_div_backward(grad, input, target, at::Reduction::None, log_target);
+Tensor kl_div_backward(const Tensor& grad, const Tensor& input, const Tensor& target, int64_t reduction, bool log_target) {
+  auto grad_expand = grad.expand_as(input);
+
+  auto grad_input = (log_target ? -at::exp(target) : -target) * grad_expand;
+
   if (reduction == at::Reduction::Mean) {
-    return result.mean();
-  } else if (reduction == at::Reduction::Sum) {
-    return result.sum();
+    grad_input /= input.numel();
   }
-  return result;
+  else if (reduction == at::Reduction::BatchMean) {
+    grad_input /= input.size(0);
+  }
+  return grad_input;
 }
 
-// Compute derivatives for targets.
-Tensor kl_div_target_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction, bool log_target) {
-  Tensor grad_target;
-  if (!log_target) {
-    grad_target = grad_output.mul(target.log().add_(1).sub_(self)).masked_fill_(target == 0, 0.);
-  }
-  else {
-    grad_target = grad_output.mul(target.add(1).sub_(self).mul_(target.exp()));
-  }
+Tensor kl_div_target_backward(const Tensor& grad, const Tensor& input, const Tensor& target, int64_t reduction, bool log_target) {
+  auto grad_expand = grad.expand_as(input);
+
+  auto grad_target = (log_target ? at::exp(target) * (1 + target - input) : (1 + at::log(target) - input)) * grad_expand;
 
   if (reduction == at::Reduction::Mean) {
-    grad_target.div_(target.numel());
+    grad_target /= input.numel();
+  }
+  else if (reduction == at::Reduction::BatchMean) {
+    grad_target /= input.size(0);
   }
 
   return grad_target;
