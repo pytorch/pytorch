@@ -28,6 +28,7 @@ std::shared_ptr<TEWrapper> createLogit();
 std::shared_ptr<TEWrapper> createRelu();
 std::shared_ptr<TEWrapper> createTanh();
 std::shared_ptr<TEWrapper> createSigmoid();
+std::shared_ptr<TEWrapper> createSignedLog1p();
 
 } // namespace jit
 } // namespace torch

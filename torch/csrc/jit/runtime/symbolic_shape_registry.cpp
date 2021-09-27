@@ -55,24 +55,6 @@ const std::string shape_compute_functions =
             out.append(elem)
           return out
 
-        def unary_one_unused_input(self: List[int], inp0: Any):
-          return _copy(self)
-
-        def unary_two_unused_inputs(self: List[int], inp0: Any, inp1: Any):
-          return _copy(self)
-
-        def unary_three_unused_inputs(self: List[int], inp0: Any, inp1: Any, inp2: Any):
-          out: List[int] = []
-          for elem in self:
-            out.append(elem)
-          return out
-
-        def unary_four_unused_inputs(self: List[int], inp0: Any, inp1: Any, inp2: Any, inp3: Any):
-          return _copy(self)
-
-        def unary_five_unused_inputs(self: List[int], inp0: Any, inp1: Any, inp2: Any, inp3: Any, inp4: Any):
-          return _copy(self)
-
         def unary(self: List[int]):
           return _copy(self)
 
@@ -142,8 +124,77 @@ const std::string shape_compute_functions =
               out.append(self[idx])
           return out
 
-        def broadcast_one_unused_input(self: List[int], other: List[int], unused: Any):
-          return broadcast(self, other)
+        # note: python already rounds down towards negative infinity on integer division, special arithmetic not needed
+        def div_rtn(x: int, y: int):
+          return x // y
+
+        def pooling_output_shape_pad_lr(inputSize: int, kernelSize: int, pad_l: int, pad_r: int, stride: int, dilation: int, ceil_mode: bool):
+          outputSize = div_rtn(inputSize + pad_l + pad_r - dilation * (kernelSize - 1) - 1 + (stride - 1 if ceil_mode else 0), stride) + 1
+          if ceil_mode:
+            if (outputSize - 1) * stride >= inputSize + pad_l:
+              outputSize = outputSize - 1
+          return outputSize
+
+        def pooling_output_shape(inputSize: int, kernelSize: int, pad_l: int, stride: int, dilation: int, ceil_mode: bool):
+          assert stride != 0, "stride should not be zeero"
+          return pooling_output_shape_pad_lr(inputSize, kernelSize, pad_l, pad_l, stride, dilation, ceil_mode)
+
+        def pool2d_shape_check(input: List[int], kH: int, kW: int, dH: int, dW: int, padH: int, padW: int,
+                               dilationH: int, dilationW: int, nInputPlane: int, inputHeight: int, inputWidth: int, outputHeight: int, outputWidth: int):
+
+          ndim = len(input)
+          nOutputPlane = nInputPlane
+
+          assert kW > 0 and kH > 0
+          assert dW > 0 and dH > 0
+          assert dilationH > 0 and dilationW > 0
+
+          valid_dims = input[1] != 0 and input[2] != 0
+          assert ndim == 3 and input[0] != 0 and valid_dims or (ndim == 4 and valid_dims and input[3] != 0)
+
+          assert kW // 2 >= padW and kH // 2 >= padH
+          assert outputWidth >= 1 and outputHeight >= 1
+
+        def max_pool2d(input: List[int], kernel_size: List[int], stride: List[int], padding: List[int], dilation: List[int], ceil_mode: bool):
+          assert len(kernel_size) == 1 or len(kernel_size) == 2, "max_pool2d: kernel_size must either be a single int, or a tuple of two ints"
+          kH = kernel_size[0]
+          kW = kH if len(kernel_size) == 1 else kernel_size[1]
+
+          assert len(stride) == 0 or len(stride) == 1 or len(stride) == 2, "max_pool2d: stride must either be omitted, a single int, or a tuple of two ints"
+          dH = kH if len(stride) == 0 else stride[0]
+          dW = kW if len(stride) == 0 else dH if len(stride) == 1 else stride[1]
+
+          assert len(padding) == 1 or len(padding) == 2, "max_pool2d: padding must be either be a single int, or a tuple of two ints"
+          padH = padding[0]
+          padW = padH if len(padding) == 1 else padding[1]
+
+          assert len(dilation) == 1 or len(dilation) == 2, "max_pool2d: dilation must be either a single int, or a tuple of two ints"
+          dilationH = dilation[0]
+          dilationW = dilationH if len(dilation) == 1 else dilation[1]
+
+          assert len(input) == 3 or len(input) == 4
+
+          nbatch = input[-4] if len(input) == 4 else 1
+          nInputPlane = input[-3]
+          inputHeight = input[-2]
+          inputWidth = input[-1]
+
+          outputHeight = pooling_output_shape(inputHeight, kH, padH, dH, dilationH, ceil_mode)
+          outputWidth = pooling_output_shape(inputWidth, kW, padW, dW, dilationW, ceil_mode)
+
+          pool2d_shape_check(input, kH, kW, dH, dW, padH, padW, dilationH, dilationW, nInputPlane,
+                             inputHeight, inputWidth, outputHeight, outputWidth)
+
+          if len(input) == 3:
+            return [nInputPlane, outputHeight, outputWidth]
+          else:
+            return [nbatch, nInputPlane, outputHeight, outputWidth]
+
+        def max_pool2d_with_indices(input: List[int], kernel_size: List[int], stride: List[int], padding: List[int], dilation: List[int], ceil_mode: bool):
+          out = max_pool2d(input, kernel_size, stride, padding, dilation, ceil_mode)
+          return (out, out)
+    )"
+    R"(
 
         def mm(self: List[int] , mat2: List[int]):
           assert len(self) == 2, "self must be a matrix"
@@ -200,6 +251,14 @@ const std::string shape_compute_functions =
             else:
               result_size.append(self[i])
           return result_size
+
+        def embedding(weight: List[int], indices: List[int], padding_idx:int = -1, scale_grad_by_freq:bool=False, sparse: bool=False):
+          assert len(weight) == 2
+          if len(indices) == 1:
+            return index_select(weight, 0, indices)
+          size = _copy(indices)
+          size.append(weight[1])
+          return size
 
         def max_int():
           return 9223372036854775807
@@ -312,7 +371,8 @@ const std::string shape_compute_functions =
             else:
               out.append(self[i])
           return out
-
+    )"
+    R"(
         def linear(input: List[int], weight: List[int], bias: Optional[List[int]]):
           out = matmul(input, t(weight))
           if bias is not None:
@@ -493,29 +553,29 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
   // clang-format off
   static const OperatorMap<std::string> schema_to_function_graph{
       {"aten::mul.Tensor(Tensor self, Tensor other) -> Tensor", "broadcast"},
-      {"aten::mul.Scalar(Tensor self, Scalar other) -> Tensor", "unary_one_unused_input"},
+      {"aten::mul.Scalar(Tensor self, Scalar other) -> Tensor", "unary"},
       {"aten::div.Tensor(Tensor self, Tensor other) -> Tensor", "broadcast"},
-      {"aten::div.Scalar(Tensor self, Scalar other) -> Tensor", "unary_one_unused_input"},
-      {"aten::contiguous(Tensor(a) self, *, MemoryFormat memory_format=contiguous_format) -> Tensor(a)", "unary_one_unused_input"},
+      {"aten::div.Scalar(Tensor self, Scalar other) -> Tensor", "unary"},
+      {"aten::contiguous(Tensor(a) self, *, MemoryFormat memory_format=contiguous_format) -> Tensor(a)", "unary"},
       {"aten::gt.Tensor(Tensor self, Tensor other) -> Tensor", "broadcast"},
-      {"aten::rsub.Tensor(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", "unary_two_unused_inputs"},
-      {"aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor", "broadcast_one_unused_input"},
-      {"aten::add_.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor", "broadcast_one_unused_input"},
-      {"aten::add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", "unary_two_unused_inputs"},
-      {"aten::hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> Tensor", "unary_two_unused_inputs"},
+      {"aten::rsub.Tensor(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", "unary"},
+      {"aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor", "broadcast"},
+      {"aten::add_.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor", "broadcast"},
+      {"aten::add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", "unary"},
+      {"aten::hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> Tensor", "unary"},
       {"aten::hardswish(Tensor self) -> Tensor", "unary"},
       {"aten::hardswish_(Tensor self) -> Tensor", "unary"},
       {"aten::hardsigmoid(Tensor self) -> Tensor", "unary"},
       {"aten::hardsigmoid_(Tensor self) -> Tensor", "unary"},
-      {"aten::dropout(Tensor input, float p, bool train) -> Tensor", "unary_two_unused_inputs"},
+      {"aten::dropout(Tensor input, float p, bool train) -> Tensor", "unary"},
       {"aten::adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor", "adaptive_avg_pool2d"},
       {"aten::gelu(Tensor self) -> Tensor", "unary"},
       {"aten::tanh(Tensor self) -> Tensor", "unary"},
       {"aten::erf(Tensor self) -> (Tensor)", "unary"},
       {"prim::NumToTensor.Scalar(Scalar a) -> Tensor", "zero_dim_tensor"},
       {"prim::NumToTensor.bool(bool a) -> Tensor", "zero_dim_tensor"},
-      {"aten::zeros(int[] size, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None) -> (Tensor)", "unary_four_unused_inputs"},
-      {"aten::to.dtype(Tensor(a) self, int dtype, bool non_blocking=False, bool copy=False, int? memory_format=None) -> (Tensor(a))", "unary_four_unused_inputs"},
+      {"aten::zeros(int[] size, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None) -> (Tensor)", "unary"},
+      {"aten::to.dtype(Tensor(a) self, int dtype, bool non_blocking=False, bool copy=False, int? memory_format=None) -> (Tensor(a))", "unary"},
       {"aten::arange(Scalar end, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None) -> (Tensor)", "arange_end"},
       {"aten::arange.start(Scalar start, Scalar end, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor", "arange_start"},
       {"aten::arange.start_step(Scalar start, Scalar end, Scalar step, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor", "arange_start_step"},
@@ -526,13 +586,18 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::select.int(Tensor(a) self, int dim, int index) -> Tensor(a)", "select"},
       {"aten::index_select(Tensor self, int dim, Tensor index) -> Tensor", "index_select"},
       {"aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, "
-       "float eps=1e-05, bool cudnn_enable=True) -> Tensor", "unary_five_unused_inputs"},
-      {"aten::softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor", "unary_two_unused_inputs"},
+       "float eps=1e-05, bool cudnn_enable=True) -> Tensor", "unary"},
+      {"aten::softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor", "unary"},
+      {"aten::_no_grad_embedding_renorm_(Tensor weight, Tensor input, float max_norm, float norm_type) -> Tensor", "unary"},
+      {"aten::embedding_renorm_(Tensor(a!) self, Tensor indices, float max_norm, float norm_type) -> Tensor(a!)", "unary"},
+      {"aten::embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor", "embedding"},
       {"aten::mm(Tensor self, Tensor mat2) -> Tensor", "mm"},
       {"aten::dot(Tensor self, Tensor tensor) -> Tensor", "dot"},
       {"aten::mv(Tensor self, Tensor vec) -> Tensor", "mv"},
       {"aten::matmul(Tensor self, Tensor other) -> Tensor", "matmul"},
       {"aten::linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor", "linear"},
+      {"aten::max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor", "max_pool2d"},
+      {"aten::max_pool2d_with_indices(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> (Tensor, Tensor)", "max_pool2d_with_indices"},
       {"aten::t(Tensor(a) self) -> Tensor(a)", "t"},
       {"aten::transpose.int(Tensor(a) self, int dim0, int dim1) -> Tensor(a)", "transpose"},
       {"aten::conv1d(Tensor input, Tensor weight, Tensor? bias=None, int[1] stride=1, int[1] padding=0, int[1] dilation=1, int groups=1) -> Tensor", "conv1d"},
@@ -547,7 +612,7 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)", "expand_one_unused"},
       {"aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "mean_dim"},
       {"aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor", "addmm"},
-      {"aten::quantize_per_tensor(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor", "unary_three_unused_inputs"},
+      {"aten::quantize_per_tensor(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor", "unary"},
       {"aten::dequantize(Tensor self) -> Tensor", "unary"},
 #ifdef USE_XNNPACK
       {"prepacked::conv2d_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.Conv2dOpContext W_prepack) -> Tensor Y", "prepacked_conv2d_clamp_run"},
@@ -583,6 +648,26 @@ void loadModule(const CompilationUnit& module) {
     std::shared_ptr<Graph> graph = shape_compute_function.graph();
     Inline(*graph);
 
+    // ATEN operators can return multiple unboxed values, this in contrast to
+    // functions defined in TorchScript or User-Registered Operators
+    // Which must use a Tuple
+    // Here, modify the shape graph of aten operators with multiple outputs
+    // so that they correspond to each other
+    if (pair.first->schema().returns().size() > 1) {
+      TORCH_INTERNAL_ASSERT(
+          graph->outputs().size() == 1 &&
+          graph->outputs().at(0)->node()->kind() == prim::TupleConstruct);
+      auto tuple_node = graph->outputs().at(0)->node();
+      graph->eraseOutput(0);
+      for (Value* v : tuple_node->inputs()) {
+        graph->registerOutput(v);
+      }
+    }
+
+    // allow extra unused arguments to map multiple functions to e.g. unary
+    TORCH_INTERNAL_ASSERT(
+        graph->inputs().size() <= pair.first->schema().arguments().size());
+
     cached_schema_to_graph[schema_string] = graph;
     reused_functions[shape_compute_function_name] = graph;
   }
@@ -590,6 +675,7 @@ void loadModule(const CompilationUnit& module) {
 
 void loadFunctions() {
   auto src = std::make_shared<Source>(shape_compute_functions);
+  std::stringstream ss;
   std::vector<at::IValue> constantTable;
   auto resolver = std::make_shared<SourceImporterImpl>(
       compilation_unit,

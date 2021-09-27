@@ -119,6 +119,112 @@ class IndexFlattener : public IRMutator {
   }
 };
 
+static bool isValidIdentifierChar(char c, size_t pos) {
+  return islower(c) || isupper(c) || c == '_' || (pos > 0 && isdigit(c));
+}
+
+// replaces all invalid characters with underscore
+std::string sanitizeName(const std::string& input_name) {
+  std::stringstream sanitized_name;
+  for (size_t i = 0; i < input_name.size(); ++i) {
+    if (isValidIdentifierChar(input_name[i], i)) {
+      sanitized_name << input_name[i];
+    } else {
+      if (i == 0) {
+        // Don't start names with underscore
+        sanitized_name << "v";
+      }
+      sanitized_name << "_";
+    }
+  }
+  return sanitized_name.str();
+}
+
+class VarNameSanitizer : public IRMutator {
+ public:
+  ExprPtr mutate(BufPtr v) override {
+    if (seen_bufs_.count(v)) {
+      return v;
+    }
+    const std::string& name = v->name_hint();
+    auto new_name = sanitizeName(name);
+    if (taken_names_.count(new_name)) {
+      new_name = getNextAvailableName(new_name);
+    }
+    v->set_name_hint(new_name);
+    taken_names_.insert(new_name);
+    seen_bufs_.insert(v);
+    return v;
+  }
+
+  ExprPtr mutate(VarPtr v) override {
+    if (seen_vars_.count(v)) {
+      return v;
+    }
+    const std::string& name = v->name_hint();
+    auto new_name = sanitizeName(name);
+    if (taken_names_.count(new_name)) {
+      new_name = getNextAvailableName(new_name);
+    }
+    v->set_name_hint(new_name);
+    taken_names_.insert(new_name);
+    seen_vars_.insert(v);
+    return v;
+  }
+
+  StmtPtr mutate(ForPtr v) override {
+    auto new_name = getNextAvailableName(getIndexVarNameAtLevel(level_));
+    if (seen_index_vars_.count(v->var())) {
+      auto new_var = alloc<Var>("", v->var()->dtype());
+      Substitute(v, {{v->var(), new_var}});
+    }
+    v->var()->set_name_hint(new_name);
+    seen_index_vars_.insert(v->var());
+    seen_vars_.insert(v->var());
+    taken_names_.insert(new_name);
+    level_++;
+    v->body()->accept_mutator(this);
+    level_--;
+    v->start()->accept_mutator(this);
+    v->stop()->accept_mutator(this);
+    return v;
+  }
+
+  std::string getIndexVarNameAtLevel(int level_) {
+    int names_num = index_var_names_.size();
+    int counter = level_ / names_num;
+    if (counter == 0) {
+      return index_var_names_[level_ % names_num];
+    } else {
+      return index_var_names_[level_ % names_num] + std::to_string(counter);
+    }
+  }
+  std::string getNextAvailableName(const std::string& base_name) {
+    std::string name = base_name;
+    int counter = 0;
+    while (taken_names_.count(name)) {
+      counter++;
+      name = base_name + "_" + std::to_string(counter);
+    }
+    return name;
+  }
+
+ private:
+  std::vector<std::string> index_var_names_ =
+      {"i", "j", "k", "l", "m", "n", "o", "p"};
+  std::unordered_set<std::string> taken_names_;
+  std::unordered_set<VarPtr> seen_index_vars_;
+  std::unordered_set<VarPtr> seen_vars_;
+  std::unordered_set<BufPtr> seen_bufs_;
+  int level_ = 0;
+};
+
+StmtPtr LoopNest::sanitizeNames(StmtPtr s) {
+  VarNameSanitizer r;
+  s->accept_mutator(&r);
+  return s;
+}
+
 class Vectorizer : public IRMutator {
  public:
   StmtPtr vectorize(ForPtr v) {
@@ -544,47 +650,55 @@ class FunctionInliner : public IRMutator {
       : buf_(producer->buf()),
         producer_(producer),
         outputs_(std::move(outputs)) {
+    success_ = true;
     for (auto i : producer->indices()) {
       if (auto index_var = to<Var>(i)) {
         index_vars_.insert(index_var);
         producer_index_vars_.push_back(index_var);
-      } else if (intValue(i)) {
+      } else {
         // If the index can be a constant, then that dimension must have size 1
         // (since we don't support in-place writes). Resolves issue 52581.
-        TORCH_INTERNAL_ASSERT(
-            *intValue(i) == 0,
-            buildErrorMessage(
-                "Unexpected non-zero constant index in inlined buffer in the fuser."));
+        auto index_val = evalInt(i);
+        if (!index_val || *index_val != 0) {
+          success_ = false;
+          break;
+        }
         producer_index_vars_.push_back(nullptr);
-      } else {
-        throw std::logic_error("cannot inline Buf with compound indices");
       }
     }
+  }
+
+  bool success() const {
+    return success_;
   }
 
  private:
   ExprPtr mutate_loads(BufPtr buf, std::vector<ExprPtr> dims) {
     std::vector<VarPtr> index_vars;
-    TORCH_INTERNAL_ASSERT(
-        buf->ndim() == producer_index_vars_.size(),
-        buildErrorMessage(
-            "Dimensions of producer and consumer expressions do not match in inliner in the fuser."));
+    if (buf->ndim() != producer_index_vars_.size()) {
+      // Dimensions of producer and consumer expressions do not match in inliner
+      // in the fuser
+      success_ = false;
+      return nullptr;
+    }
     for (const auto i : c10::irange(buf->ndim())) {
       VarPtr func_callee_arg = producer_index_vars_.at(i);
       ExprPtr func_caller_param = dims.at(i);
       if (func_callee_arg == nullptr) {
-        TORCH_INTERNAL_ASSERT(
-            intValue(func_caller_param) && *intValue(func_caller_param) == 0,
-            buildErrorMessage(
-                "We are implicitly assuming that if you have an index of 0, that must also be inlined into an index of 0"));
+        auto param_val = evalInt(func_caller_param);
+        if (!param_val || *param_val != 0) {
+          // We are implicitly assuming that if you have an index of 0, that
+          // must also be inlined into an index of 0.
+          success_ = false;
+          return nullptr;
+        }
         continue;
       }
-      if (func_callee_arg == nullptr)
-        continue;
       auto iter = inline_mapping_.find(func_callee_arg);
       if (iter != inline_mapping_.end()) {
-        throw std::logic_error(
-            "Duplicated variables: " + func_callee_arg->name_hint());
+        // Duplicated variables
+        success_ = false;
+        return nullptr;
       }
       // Add a mapping for each function parameter to it's source name.
       inline_mapping_[func_callee_arg] = func_caller_param;
@@ -620,20 +734,33 @@ class FunctionInliner : public IRMutator {
   }
 
   ExprPtr mutate(LoadPtr v) override {
+    if (!success()) {
+      return v;
+    }
     BufPtr buf = v->buf();
     if (buf != buf_) {
       return IRMutator::mutate(v);
     }
 
-    TORCH_INTERNAL_ASSERT(
-        v->indices().size() == buf->ndim(),
-        buildErrorMessage(
-            "Number of indices doesn't match buf rank in the fuser."));
-    return mutate_loads(buf, v->indices());
+    if (v->indices().size() != buf->ndim()) {
+      // Number of indices doesn't match buf rank in the fuser
+      success_ = false;
+      return v;
+    }
+    auto result = mutate_loads(buf, v->indices());
+    if (!result) {
+      // If we don't inline successfully return the given load.
+      success_ = false;
+      return v;
+    }
+    return result;
   }
 
   // Replace the target variable with the caller expressions.
   ExprPtr mutate(VarPtr v) override {
+    if (!success()) {
+      return v;
+    }
     auto iter = inline_mapping_.find(v);
     if (iter == inline_mapping_.end()) {
       return v;
@@ -646,6 +773,9 @@ class FunctionInliner : public IRMutator {
 
   // Handle random intrinsics which should be cached.
   ExprPtr mutate(IntrinsicsPtr v) override {
+    if (!success()) {
+      return v;
+    }
     if (!in_producer_ || v->op_type() != kRand) {
       return IRMutator::mutate(v);
     }
@@ -663,15 +793,19 @@ class FunctionInliner : public IRMutator {
 
   // Remove the buffer write from the inlined function.
   StmtPtr mutate(StorePtr v) override {
+    if (!success()) {
+      return v;
+    }
     // If the buf_ is in the outputs set, keep its statement intact. Otherwise,
     // remove it.
     if (v == producer_ && !outputs_.count(buf_)) {
       in_producer_ = true;
       producer_ = to<Store>(IRMutator::mutate(v));
-      TORCH_INTERNAL_ASSERT(
-          producer_,
-          buildErrorMessage(
-              "Producer statement for output buf should remain non-null in the fuser"));
+      if (!producer_) {
+        // Producer statement for output buf should remain non-null in the fuser
+        success_ = false;
+        return v;
+      }
       in_producer_ = false;
       return nullptr;
     } else {
@@ -681,6 +815,9 @@ class FunctionInliner : public IRMutator {
 
   // Any Random Instrinsics that were turned into vars must be inserted here.
   StmtPtr mutate(BlockPtr v) override {
+    if (!success()) {
+      return v;
+    }
     std::vector<StmtPtr> stmts;
     for (StmtPtr stmt : *v) {
       StmtPtr stmt_new = stmt->accept_mutator(this);
@@ -699,6 +836,9 @@ class FunctionInliner : public IRMutator {
   }
 
   StmtPtr mutate(ForPtr v) override {
+    if (!success()) {
+      return v;
+    }
     ForPtr res = to<For>(IRMutator::mutate(v));
     if (!res) {
       return nullptr;
@@ -735,54 +875,80 @@ class FunctionInliner : public IRMutator {
   bool in_producer_ = false;
   std::unordered_map<LetPtr, std::unordered_set<VarPtr>> random_bindings_;
   std::unordered_set<BufPtr> outputs_;
+  bool success_ = true;
 };
 
-bool LoopNest::computeInline(StmtPtr s) {
-  auto s_store = to<Store>(s);
-  if (s_store == nullptr) {
-    throw std::logic_error("Could not find buffer producer to inline");
-  }
-  return computeInline(s_store->buf());
-}
-
-bool LoopNest::computeInline(BufPtr b) {
+StmtPtr computeInlineImpl(
+    BufPtr b,
+    StmtPtr stmt,
+    const std::unordered_set<BufPtr>& output_bufs) {
   // If buf is used or defined in an ExternalCall, we cannot inline it
-  auto buf_load_store_uses = findLoadOrStoreUses(root_stmt_);
+  auto buf_load_store_uses = findLoadOrStoreUses(stmt);
+  if (!buf_load_store_uses.count(b)) {
+    return nullptr;
+  }
   for (auto& use : buf_load_store_uses.at(b)) {
     StmtPtr s = use.s;
     if (to<ExternalCall>(s)) {
-      return false;
+      return nullptr;
     }
   }
 
   // Find producers.
   StorePtr relevant_store{nullptr};
-  auto stores = NodeFinder<Store>::find(root_stmt_);
+  auto stores = NodeFinder<Store>::find(stmt);
   for (auto s : stores) {
     if (s->buf() == b) {
       auto reductions = NodeFinder<ReduceOp>::find(s);
       if (!reductions.empty()) {
         // Cannot inline a reduction computation
-        return false;
+        return nullptr;
       }
       if (relevant_store != nullptr) {
         // Cannot inline Buf with multiple Tensors
-        return false;
+        return nullptr;
       }
       relevant_store = s;
     }
   }
 
-  TORCH_INTERNAL_ASSERT(
-      relevant_store,
-      buildErrorMessage(
-          "Cannot find a relevant store to inline a buf in the fuser."));
+  if (!relevant_store) {
+    // Cannot find a relevant store to inline a buf in the fuser
+    return nullptr;
+  }
 
   GRAPH_DEBUG("ComputeInline: Def: ", std::to_string(relevant_store));
-  FunctionInliner inliner(relevant_store, output_bufs_);
-  root_stmt_ = root_stmt_->accept_mutator(&inliner);
+  FunctionInliner inliner(relevant_store, output_bufs);
+  auto result = stmt->accept_mutator(&inliner);
+  if (inliner.success()) {
+    return result;
+  }
+  return nullptr;
+}
 
+bool LoopNest::computeInline(BufPtr b) {
+  // Inlining may not always be successful. Since all mutations now happen
+  // in-place, an unsuccessful inlining transformation might leave the IR
+  // in an invalid state. To get around this problem, we clone the root stmt,
+  // try inlining on the clone, and if it succeeds, we proceed to perform
+  // inlining on the actual root stmt. This way the root stmt will always be
+  // in a valid state.
+  auto stmt_copy = Stmt::clone(root_stmt_);
+  auto try_inline = computeInlineImpl(b, stmt_copy, output_bufs_);
+  if (!try_inline) {
+    return false;
+  }
+  root_stmt_ = computeInlineImpl(b, root_stmt_, output_bufs_);
   return true;
+}
+
+bool LoopNest::computeInline(StmtPtr s) {
+  auto s_store = to<Store>(s);
+  if (s_store == nullptr) {
+    // Could not find buffer producer to inline
+    return false;
+  }
+  return computeInline(s_store->buf());
 }
 
 // inlining buffers with multiple uses can create duplicated work, which can
