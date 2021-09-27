@@ -10,7 +10,7 @@ pushd build
 echo "Executing CMake for custom_operator test..."
 
 :: Note: Caffe2 does not support MSVC + CUDA + Debug mode (has to be Release mode)
-cmake -DCMAKE_PREFIX_PATH=%TMP_DIR_WIN%\build\torch -DCMAKE_BUILD_TYPE=Release -GNinja ..
+cmake -DCMAKE_PREFIX_PATH=%TORCH_CMAKE_PREFIX% -DCMAKE_BUILD_TYPE=Release -GNinja ..
 if ERRORLEVEL 1 exit /b 1
 
 echo "Executing Ninja for custom_operator test..."

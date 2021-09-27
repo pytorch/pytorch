@@ -69,6 +69,9 @@ FOR %%A IN (%PYTORCH_FINAL_PACKAGE_DIR%\*.whl) DO (
     call python -m pip install %%A
     if %errorlevel% neq 0 ( exit /b %errorlevel% )
 )
+@echo off
+for /f %%W in ('python -c "from distutils.sysconfig import get_python_lib; print(get_python_lib())"') DO set site_packages=%%w
+set TORCH_CMAKE_PREFIX=%site_packages%\torch
 
 @echo off
 echo @echo off >> %TMP_DIR_WIN%/ci_scripts/pytorch_env_restore.bat
