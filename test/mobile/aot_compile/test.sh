@@ -9,6 +9,8 @@ COMPILED_MODEL=aot_test_model.compiled.pt
 COMPILED_CODE=aot_test_model.compiled.ll
 
 test_aot_model_compiler() {
+  ls "$BUILD_BIN_DIR" | grep aot
+
   python "$CURRENT_DIR"/aot_test_model.py
   "$BUILD_BIN_DIR"/aot_model_compiler --model aot_test_model.pt --model_name=aot_test_model --model_version=v1 --input_dims="2,2,2"
 

@@ -294,6 +294,8 @@ test_libtorch() {
 
 test_aot_model_compiler() {
   # Test Ahead of Time model compilation
+  echo "Testing AOT Model compiler.."
+  ls "$BUILD_BIN_DIR" | grep aot
   source test/mobile/aot_compile/test.sh
 }
 
