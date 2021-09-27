@@ -6157,11 +6157,7 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
             def apply_fn(input1, input2, target, *params):  # type: ignore[misc]
                 return module(input1, input2, target)
 
-        try:
-            gradcheck(apply_fn, inputs, check_batched_grad=self.check_batched_grad)
-        except Exception:
-            input = self._get_input()
-            raise
+        gradcheck(apply_fn, inputs, check_batched_grad=self.check_batched_grad)
 
         if self.check_gradgrad:
             gradgradcheck(apply_fn, inputs, check_batched_grad=self.check_batched_grad)
