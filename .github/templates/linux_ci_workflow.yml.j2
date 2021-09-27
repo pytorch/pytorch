@@ -44,6 +44,7 @@ env:
   CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
   PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 !{{ common.concurrency(build_environment) }}
 
@@ -61,7 +62,6 @@ jobs:
         run: echo "${LABELS}"
 {%- endif %}
   calculate-docker-image:
-    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     {%- if ciflow_config.enabled %}
     needs: [!{{ ciflow_config.root_job_name }}]
@@ -130,10 +130,10 @@ jobs:
     steps:
       !{{ common.setup_ec2_linux() }}
       !{{ common.checkout_pytorch("recursive") }}
-      - name: Pull docker image
+      - name: Pull Docker image
         run: |
-          docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch
+          !{{ common.pull_docker("${DOCKER_IMAGE}") }}
+      - name: Build
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
@@ -207,7 +207,6 @@ jobs:
 {%- if not exclude_test %}
 {% block test +%}
   generate-test-matrix:
-    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-18.04
     {%- if ciflow_config.enabled %}
     needs: [!{{ ciflow_config.root_job_name }}]
@@ -256,13 +255,12 @@ jobs:
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
-      CONTINUE_THROUGH_ERROR: ${{ github.repository_owner == 'pytorch' && (github.event_name == 'push' || github.event_name == 'schedule') }}
     steps:
       !{{ common.setup_ec2_linux() }}
       !{{ common.checkout_pytorch("recursive") }}
-      - name: Pull docker image
+      - name: Pull Docker image
         run: |
-          docker pull "${DOCKER_IMAGE}"
+          !{{ common.pull_docker("${DOCKER_IMAGE}") }}
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         if: ${{ contains(env.BUILD_ENVIRONMENT, 'cuda') && !contains(matrix.config, 'nogpu') }}
         run: |
@@ -290,9 +288,17 @@ jobs:
       - name: Output disk space left
         run: |
           sudo df -H
-      - name: Test PyTorch
+      !{{ common.parse_ref() }}
+      - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          IS_GHA: 1
+          CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
+          CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          AWS_DEFAULT_REGION: us-east-1
+        # Time out the test phase after 3.5 hours
+        timeout-minutes: 210
         run: |
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
@@ -313,6 +319,11 @@ jobs:
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e GITHUB_ACTIONS \
             -e IN_CI \
+            -e IS_GHA \
+            -e CIRCLE_BRANCH \
+            -e CIRCLE_SHA1 \
+            -e CIRCLE_PR_NUMBER \
+            -e AWS_DEFAULT_REGION \
             -e IN_WHEEL_TEST \
             -e SHARD_NUMBER \
             -e JOB_BASE_NAME \
@@ -320,7 +331,6 @@ jobs:
             -e NUM_TEST_SHARDS \
             -e PYTORCH_IGNORE_DISABLED_ISSUES \
             -e PR_LABELS \
-            -e CONTINUE_THROUGH_ERROR \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
             -e http_proxy="!{{ common.squid_proxy }}" -e https_proxy="!{{ common.squid_proxy }}" -e no_proxy="!{{ common.squid_no_proxy }}" \
@@ -343,14 +353,8 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      {%- if is_coverage %}
-      - name: Report coverage
-        run: |
-          python3 -mpip install codecov==2.1.12
-          python3 -mcodecov
-      {%- endif %}
+      !{{ common.render_test_results() }}
       !{{ common.upload_test_reports(name='linux') }}
-      !{{ common.parse_ref() }}
       !{{ common.upload_test_statistics(build_environment) }}
       !{{ common.teardown_ec2_linux() }}
 {% endblock %}
@@ -368,9 +372,9 @@ jobs:
     steps:
       !{{ common.setup_ec2_linux() }}
       !{{ common.checkout_pytorch("recursive") }}
-      - name: Pull docker image
+      - name: Pull Docker image
         run: |
-          docker pull "${DOCKER_IMAGE}"
+          !{{ common.pull_docker("${DOCKER_IMAGE}") }}
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download PyTorch Build Artifacts
         with:

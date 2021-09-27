@@ -29,11 +29,7 @@ def get_size(file_dir: str) -> int:
 
 
 def base_data() -> Dict[str, Any]:
-    build_env_split = os.environ.get("BUILD_ENVIRONMENT", "").split()
-    build_environment = build_env_split[0]
-
     return {
-        "build_environment": build_environment,
         "run_duration_seconds": int(
             time.time() - os.path.getmtime(os.path.realpath(__file__))
         ),
@@ -147,15 +143,16 @@ if __name__ == "__main__":
     if len(sys.argv) == 2:
         file_dir = sys.argv[1]
 
-    sample_lib = {
-        "library": "abcd",
-        "size": 1234,
-    }
-    sample_data = {
-        **base_data(),
-        **sample_lib,
-    }
-    register_rds_schema("binary_size", schema_from_sample(sample_data))
+    if os.getenv("IS_GHA", "0") == "1":
+        sample_lib = {
+            "library": "abcd",
+            "size": 1234,
+        }
+        sample_data = {
+            **base_data(),
+            **sample_lib,
+        }
+        register_rds_schema("binary_size", schema_from_sample(sample_data))
 
     if "-android" in os.environ.get("BUILD_ENVIRONMENT", ""):
         report_android_sizes(file_dir)
@@ -175,6 +172,7 @@ if __name__ == "__main__":
                 }
                 data.append({**base_data(), **library_data})
             rds_write("binary_size", data)
+            print(json.dumps(data, indent=2))
         else:
             print("checking dir: " + file_dir)
             size = get_size(file_dir)
