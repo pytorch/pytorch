@@ -13,6 +13,15 @@ namespace c10 {
 Error::Error(std::string msg, std::string backtrace, const void* caller)
     : msg_(std::move(msg)), backtrace_(std::move(backtrace)), caller_(caller) {
   refresh_what();
+
+#if defined(_MSC_VER) && defined(_DEBUG)
+  // When debugging with Visual Studio on Windows, it eats the message when an
+  // exception is thrown without an outer try-catch block. So let's just print
+  // the message before it is actually thrown.
+  if (IsDebuggerPresent()) {
+    std::cerr << what_ << std::endl;
+  }
+#endif
 }
 
 // PyTorch-style error message
