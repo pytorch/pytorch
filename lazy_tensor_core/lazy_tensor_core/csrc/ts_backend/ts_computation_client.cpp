@@ -2,7 +2,6 @@
 
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_lowering_context.h"
-#include "torch/csrc/jit/runtime/graph_executor.h"
 
 namespace lazy_tensors {
 namespace {
@@ -42,12 +41,11 @@ std::vector<ComputationClient::ComputationPtr> TSComputationClient::Compile(
 std::vector<ComputationClient::DataPtr> TSComputationClient::ExecuteComputation(
     const Computation& computation, lazy_tensors::Span<const DataPtr> arguments,
     const std::string& device, const ExecuteComputationOptions& options) {
-  auto graph =
+  torch::jit::GraphExecutor& graph_executor =
       static_cast<
           torch_lazy_tensors::compiler::ts_backend::GenericComputationTS*>(
           computation.computation())
-          ->graph();
-  torch::jit::GraphExecutor interp(graph, "");
+          ->graph_executor();
   std::vector<torch::jit::IValue> stack;
   for (auto argument : arguments) {
     const auto ts_data =
@@ -58,7 +56,7 @@ std::vector<ComputationClient::DataPtr> TSComputationClient::ExecuteComputation(
         ts_data->data().device().type() == at::kCUDA);
     stack.emplace_back(ts_data->data());
   }
-  interp.run(stack);
+  graph_executor.run(stack);
   std::vector<ComputationClient::DataPtr> results;
   for (torch::jit::IValue component : stack) {
     at::Tensor result = component.toTensor();
