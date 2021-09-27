@@ -47,7 +47,6 @@ def _extract_tensor_metadata(result : torch.Tensor) -> TensorMetadata:
     if is_quantized:
         qscheme = result.qscheme()
         qparams["qscheme"] = qscheme
-        qparams["dtype"] = result.dtype
         if qscheme in {torch.per_tensor_affine, torch.per_tensor_symmetric}:
             qparams["scale"] = result.q_scale()  # type: ignore[assignment]
             qparams["zero_point"] = result.q_zero_point()  # type: ignore[assignment]
