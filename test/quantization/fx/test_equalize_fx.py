@@ -523,7 +523,7 @@ class TestEqualizeFx(QuantizationTestCase):
             inp_counter = 0
             weight_counter = 0
             for node in convert_ref.graph.nodes:
-                if "weight" not in node.name and node.op == 'call_module' and \
+                if "w_activation_post" not in node.name and node.op == 'call_module' and \
                    isinstance(modules[str(node.target)], MinMaxObserver):
                     # Check min/max values of input activation layers
                     exp_min_val, exp_max_val = exp_inp_act_vals[inp_counter]
@@ -533,7 +533,7 @@ class TestEqualizeFx(QuantizationTestCase):
 
                 elif node.op == 'call_module' and isinstance(modules[str(node.target)], MinMaxObserver):
                     # Check min/max values of weight activation layers
-                    assert("weight" in node.name)
+                    assert("w_activation_post" in node.name)
                     exp_min_val, exp_max_val = exp_weight_act_vals[weight_counter]
                     self.assertEqual(modules[str(node.target)].min_val, exp_min_val)
                     self.assertEqual(modules[str(node.target)].max_val, exp_max_val)
