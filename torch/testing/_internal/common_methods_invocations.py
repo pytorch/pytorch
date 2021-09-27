@@ -5649,7 +5649,7 @@ def sample_inputs_argwhere(op_info, device, dtype, requires_grad, **kwargs):
         with torch.no_grad():
             t[mask] = 0
         yield SampleInput(t)
-        
+
         t = make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad, noncontiguous=True)
         with torch.no_grad():
             t[mask] = 0
