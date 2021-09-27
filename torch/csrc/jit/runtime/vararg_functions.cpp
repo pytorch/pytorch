@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
-#include <ATen/ATen.h>
+#include <ATen/Functions.h>
+#include <ATen/Tensor.h>
 #include <c10/util/irange.h>
 
 namespace torch {
