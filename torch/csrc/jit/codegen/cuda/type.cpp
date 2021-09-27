@@ -15,6 +15,7 @@ bool isFloatingPointType(DataType dtype) {
     case DataType::Double:
     case DataType::Float:
     case DataType::Half:
+    case DataType::BFloat16:
       return true;
     case DataType::Int:
     case DataType::Int32:
@@ -33,6 +34,7 @@ bool isIntegralType(DataType dtype) {
     case DataType::Double:
     case DataType::Float:
     case DataType::Half:
+    case DataType::BFloat16:
       return false;
     case DataType::Int:
     case DataType::Int32:
@@ -103,6 +105,8 @@ static const char* data_type2string(DataType t) {
       return "float";
     case DataType::Half:
       return "__half";
+    case DataType::BFloat16:
+      return "__bfloat";
     case DataType::Int:
       return "int64_t";
     case DataType::Int32:
@@ -526,6 +530,10 @@ static const char* supported_casts2string(
       return "__float2half";
     case supported_switch_pair(DataType::Half, DataType::Float):
       return "__half2float";
+    case supported_switch_pair(DataType::Float, DataType::BFloat16):
+      return "__float2bfloat";
+    case supported_switch_pair(DataType::BFloat16, DataType::Float):
+      return "__bfloat2float";
     case supported_switch_pair(DataType::Bool, DataType::Float):
       return "float";
     case supported_switch_pair(DataType::Bool, DataType::Int):
@@ -547,6 +555,8 @@ DataType aten_to_data_type(const at::ScalarType& scalar_type) {
       return DataType::Float;
     case at::ScalarType::Half:
       return DataType::Half;
+    case at::ScalarType::BFloat16:
+      return DataType::BFloat16;
     case at::ScalarType::Long:
       return DataType::Int;
     case at::ScalarType::Int:
@@ -566,6 +576,8 @@ at::ScalarType data_type_to_aten(const DataType& data_type) {
       return at::ScalarType::Float;
     case DataType::Half:
       return at::ScalarType::Half;
+    case DataType::BFloat16:
+      return at::ScalarType::BFloat16;
     case DataType::Int:
       return at::ScalarType::Long;
     case DataType::Int32:
@@ -648,6 +660,7 @@ std::string typePrefix(const DataType data_type) {
       return "d";
     case DataType::Float:
     case DataType::Half:
+    case DataType::BFloat16:
       return "f";
     case DataType::Int:
     case DataType::Int32:
@@ -693,6 +706,8 @@ size_t dataTypeSize(DataType type) {
       return sizeof(float);
     case DataType::Half:
       return sizeof(at::Half);
+    case DataType::BFloat16:
+      return sizeof(at::BFloat16);
     case DataType::Int:
       return sizeof(uint64_t);
     case DataType::Int32:

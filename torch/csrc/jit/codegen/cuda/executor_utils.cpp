@@ -14,6 +14,7 @@
 #include <torch/csrc/jit/resource_guard.h>
 
 #include <nvfuser_resources/PhiloxCudaStateRaw.h>
+#include <nvfuser_resources/bf16_support.h>
 #include <nvfuser_resources/block_reduction.h>
 #include <nvfuser_resources/block_sync_atomic.h>
 #include <nvfuser_resources/block_sync_default.h>
@@ -41,6 +42,9 @@ std::string kernelPreamble() {
 
 #ifndef __HIP_PLATFORM_HCC__
   ss << nvfuser_resources::fp16_support_cu;
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+  ss << nvfuser_resources::bf16_support_cu;
+#endif
 #else
   ss << R"(
 #ifndef __noinline__
@@ -123,6 +127,9 @@ bool validateKernelArgTensor(
     case at::ScalarType::Half:
       match = param_data_type == DataType::Half;
       break;
+    case at::ScalarType::BFloat16:
+      match = param_data_type == DataType::BFloat16;
+      break;
     case at::ScalarType::Float:
       match = param_data_type == DataType::Float;
       break;
@@ -164,7 +171,7 @@ bool validateKernelArgScalar(
       break;
     case c10::ScalarType::Double:
       match = param_type == DataType::Double || param_type == DataType::Float ||
-          param_type == DataType::Half;
+          param_type == DataType::Half || param_type == DataType::BFloat16;
       break;
     case c10::ScalarType::Bool:
       match = param_type == DataType::Bool;

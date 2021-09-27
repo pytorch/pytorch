@@ -1021,6 +1021,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.grad_fn.__get__: lambda self: -1,
         Tensor._version.__get__: lambda self: -1,
         Tensor.autocast_to_fp16: lambda self: -1,
+        Tensor.autocast_to_bf16: lambda self: -1,
         Tensor.autocast_to_fp32: lambda self: -1,
         Tensor.data.__get__: lambda self: -1,
         Tensor.device.__get__: lambda self: -1,

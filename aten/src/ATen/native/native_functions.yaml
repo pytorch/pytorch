@@ -5331,6 +5331,10 @@
   variants: method
   device_guard: False
 
+- func: autocast_to_bf16(Tensor(a) self) -> Tensor(a)
+  variants: method
+  device_guard: False
+
 - func: autocast_to_fp32(Tensor(a) self) -> Tensor(a)
   variants: method
   device_guard: False

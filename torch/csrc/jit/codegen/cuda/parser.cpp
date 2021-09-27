@@ -29,7 +29,7 @@ constexpr auto kNumLayernormFwd = 2;
 constexpr auto kNumBatchnormFwd = 3;
 constexpr auto kNumInstancenormFwd = 1;
 constexpr auto kNumSumToSize = 2;
-// constexpr auto kNumAutocastOps = 2;
+constexpr auto kNumAutocastOps = 3;
 
 namespace {
 
@@ -117,9 +117,11 @@ class IrParser {
       fusion->addInput(value_map_[val->unique()]);
 
       auto opt_dtype = value_map_[val->unique()]->getDataType();
-      // computation promotion, we cast fp16 inputs to fp32 and use promoted
-      // type in the computation.
-      if (opt_dtype.has_value() && opt_dtype.value() == DataType::Half) {
+      // computation promotion, we cast fp16 or bf16 inputs to fp32 and use
+      // promoted type in the computation.
+      if (opt_dtype.has_value() &&
+          (opt_dtype.value() == DataType::Half ||
+           opt_dtype.value() == DataType::BFloat16)) {
         Val* promoted_val = castOp(DataType::Float, value_map_[val->unique()]);
         value_map_[val->unique()] = promoted_val;
       }
@@ -141,6 +143,10 @@ class IrParser {
       if (tensor_type->scalarType() == at::ScalarType::Half) {
         // No need to update value_map_ after this point.
         out = castOp(DataType::Half, out)->as<TensorView>();
+      }
+      if (tensor_type->scalarType() == at::ScalarType::BFloat16) {
+        // No need to update value_map_ after this point.
+        out = castOp(DataType::BFloat16, out)->as<TensorView>();
       }
       fusion->addOutput(out);
     }
@@ -1211,6 +1217,7 @@ class IrParser {
                 const auto scalar_type = opt_ivalue->toScalarType();
                 if (scalar_type == at::ScalarType::Double ||
                     scalar_type == at::ScalarType::Float ||
+                    scalar_type == at::ScalarType::BFloat16 ||
                     scalar_type == at::ScalarType::Half) {
                   return true;
                 }
@@ -1272,6 +1279,7 @@ class IrParser {
                 const auto scalar_type = opt_ivalue->toScalarType();
                 if (scalar_type == at::ScalarType::Double ||
                     scalar_type == at::ScalarType::Float ||
+                    scalar_type == at::ScalarType::BFloat16 ||
                     scalar_type == at::ScalarType::Half) {
                   return true;
                 }
@@ -1337,31 +1345,22 @@ class IrParser {
     }
 
     {
-      auto ptr_op = getOperatorForLiteral(
-          "aten::autocast_to_fp16(Tensor(a) self) -> Tensor(a)");
-      REGISTER_PARSE_RULE(
-          ptr_op,
-          {
-            auto self = value_map[node->input()->unique()];
-            auto out = unaryOp(UnaryOpType::Set, self);
-            value_map.emplace(node->output()->unique(), out);
-          },
-          nullptr,
-          nullptr);
-    }
-
-    {
-      auto ptr_op = getOperatorForLiteral(
-          "aten::autocast_to_fp32(Tensor(a) self) -> Tensor(a)");
-      REGISTER_PARSE_RULE(
-          ptr_op,
-          {
-            auto self = value_map[node->input()->unique()];
-            auto out = unaryOp(UnaryOpType::Set, self);
-            value_map.emplace(node->output()->unique(), out);
-          },
-          nullptr,
-          nullptr);
+      std::array<const char*, kNumAutocastOps> AutocastOps = {
+          "aten::autocast_to_fp16(Tensor(a) self) -> Tensor(a)",
+          "aten::autocast_to_bf16(Tensor(a) self) -> Tensor(a)",
+          "aten::autocast_to_fp32(Tensor(a) self) -> Tensor(a)"};
+      for (auto signature : AutocastOps) {
+        auto ptr_op = getOperatorForLiteral(signature);
+        REGISTER_PARSE_RULE(
+            ptr_op,
+            {
+              auto self = value_map[node->input()->unique()];
+              auto out = unaryOp(UnaryOpType::Set, self);
+              value_map.emplace(node->output()->unique(), out);
+            },
+            nullptr,
+            nullptr);
+      }
     }
 
     // Limiting aten::to implementation to only change the dtype of a tensor
@@ -1382,6 +1381,9 @@ class IrParser {
             // Shape Inference will continue to propagate the right
             // type to outputs unchanged.
             if (dtype == at::ScalarType::Half) {
+              dtype = at::ScalarType::Float;
+            }
+            if (dtype == at::ScalarType::BFloat16) {
               dtype = at::ScalarType::Float;
             }
 

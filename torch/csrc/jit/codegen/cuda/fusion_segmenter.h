@@ -347,6 +347,8 @@ class TORCH_CUDA_CU_API SegmentedFusion {
   //! A set of intermediate tensors that need to be cast to fp16
   std::unordered_set<TensorView*> force_fp16_tv_set_;
 
+  DataType force_half_precision_type_;
+
   //! Static traversal information to be used for fast heuristics lookup
   std::unordered_map<SegmentedGroup*, std::unique_ptr<HeuristicSummary>>
       heuristic_summary_cache_;

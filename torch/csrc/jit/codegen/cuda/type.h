@@ -52,7 +52,7 @@ enum class PredicateType {
   ReductionWrite
 };
 
-enum class DataType { Double, Float, Half, Int, Int32, Bool, Null };
+enum class DataType { Double, Float, Half, Int, Int32, Bool, BFloat16, Null };
 
 // Returns if the datatype is a floating point type
 bool isFloatingPointType(DataType dtype);

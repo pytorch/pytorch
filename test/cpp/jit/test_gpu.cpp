@@ -34,6 +34,7 @@
 
 #include "test_gpu_validator.h"
 
+#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/Exceptions.h>
 #include <c10/cuda/CUDAStream.h>
 
@@ -3655,7 +3656,7 @@ IValue gen_aten_operand(
     bool rand) {
   if (desc.first == ValType::TensorView) {
     if (desc.second == DataType::Double || desc.second == DataType::Float ||
-        desc.second == DataType::Half) {
+        desc.second == DataType::Half || desc.second == DataType::BFloat16) {
       auto options = at::TensorOptions()
                          .dtype(data_type_to_aten(desc.second))
                          .device(at::kCUDA, 0);
@@ -3691,7 +3692,7 @@ IValue gen_aten_operand(
   } else if (desc.first == ValType::Scalar) {
     // IValue scalars can only be double int64 or bool
     if (desc.second == DataType::Double || desc.second == DataType::Float ||
-        desc.second == DataType::Half) {
+        desc.second == DataType::Half || desc.second == DataType::BFloat16) {
       return IValue(at::Scalar(1.f));
     } else if (desc.second == DataType::Int) {
       return IValue(at::Scalar(1));
@@ -7431,6 +7432,12 @@ TEST(NVFuserTest, FusionReductionSchedulerMultiDimFastest_CUDA) {
 TEST(NVFuserTest, FusionReductionSchedulerNoODimShmoo_CUDA) {
   std::vector<DataType> dtypes = {
       DataType::Double, DataType::Float, DataType::Half};
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+  if (at::cuda::getDeviceProperties(0)->major >= 8) {
+    dtypes.insert(dtypes.end(), DataType::BFloat16);
+  }
+#endif
+
   std::vector<int> red_dims;
 
   // Tried to cut down the number iterations with just
@@ -7446,12 +7453,13 @@ TEST(NVFuserTest, FusionReductionSchedulerNoODimShmoo_CUDA) {
       FusionGuard fg(&fusion);
 
       bool is_fp16 = dtype == DataType::Half;
+      bool is_bf16 = dtype == DataType::BFloat16;
 
       TensorView* tv0 = makeSymbolicTensor(1, dtype);
       fusion.addInput(tv0);
 
       TensorView* tv0_cast = tv0;
-      if (is_fp16) {
+      if (is_fp16 || is_bf16) {
         tv0_cast = castOp(DataType::Float, tv0);
       }
 
@@ -7460,6 +7468,9 @@ TEST(NVFuserTest, FusionReductionSchedulerNoODimShmoo_CUDA) {
       TensorView* tv1_cast = tv1;
       if (is_fp16) {
         tv1_cast = castOp(DataType::Half, tv1);
+      }
+      if (is_bf16) {
+        tv1_cast = castOp(DataType::BFloat16, tv1);
       }
 
       fusion.addOutput(tv1_cast);
@@ -7495,6 +7506,12 @@ TEST(NVFuserTest, FusionReductionSchedulerNoODimShmoo_CUDA) {
 TEST(NVFuserTest, FusionReductionSchedulerDimShmoo_CUDA) {
   std::vector<DataType> dtypes = {
       DataType::Double, DataType::Float, DataType::Half};
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+  if (at::cuda::getDeviceProperties(0)->major >= 8) {
+    dtypes.insert(dtypes.end(), DataType::BFloat16);
+  }
+#endif
+
   std::vector<int> red_axis = {1, 0};
   std::vector<int> output_dims = {160, 320};
   std::vector<int> red_dims;
@@ -7514,12 +7531,13 @@ TEST(NVFuserTest, FusionReductionSchedulerDimShmoo_CUDA) {
           FusionGuard fg(&fusion);
 
           bool is_fp16 = dtype == DataType::Half;
+          bool is_bf16 = dtype == DataType::BFloat16;
 
           TensorView* tv0 = makeSymbolicTensor(2, dtype);
           fusion.addInput(tv0);
 
           TensorView* tv0_cast = tv0;
-          if (is_fp16) {
+          if (is_fp16 || is_bf16) {
             tv0_cast = castOp(DataType::Float, tv0);
           }
 
@@ -7529,7 +7547,9 @@ TEST(NVFuserTest, FusionReductionSchedulerDimShmoo_CUDA) {
           if (is_fp16) {
             tv1_cast = castOp(DataType::Half, tv1);
           }
-
+          if (is_bf16) {
+            tv1_cast = castOp(DataType::BFloat16, tv1);
+          }
           fusion.addOutput(tv1_cast);
 
           auto options =
@@ -12092,8 +12112,9 @@ void testWelford(DataType dtype, int red_axis, int odim, int rdim) {
   FusionGuard fg(&fusion);
   TensorView* tv0 = makeSymbolicTensor(2, dtype);
   bool is_fp16 = dtype == DataType::Half;
+  bool is_bf16 = dtype == DataType::BFloat16;
   TensorView* tv0_cast = tv0;
-  if (is_fp16) {
+  if (is_fp16 || is_bf16) {
     tv0_cast = castOp(DataType::Float, tv0);
   }
   fusion.addInput(tv0);
@@ -12110,6 +12131,10 @@ void testWelford(DataType dtype, int red_axis, int odim, int rdim) {
     avg_cast = castOp(DataType::Half, tv_avg);
     M2_cast = castOp(DataType::Half, tv_M2);
   }
+  if (is_bf16) {
+    avg_cast = castOp(DataType::BFloat16, tv_avg);
+    M2_cast = castOp(DataType::BFloat16, tv_M2);
+  }
 
   fusion.addOutput(avg_cast);
   fusion.addOutput(M2_cast);
@@ -12123,7 +12148,7 @@ void testWelford(DataType dtype, int red_axis, int odim, int rdim) {
       (axis ? at::randn({odim, rdim}, options)
             : at::randn({rdim, odim}, options));
 
-  if (is_fp16) {
+  if (is_fp16 || is_bf16) {
     outputs_of_red.push_back(avg_cast);
     outputs_of_red.push_back(M2_cast);
   }
@@ -12164,6 +12189,12 @@ void testWelford(DataType dtype, int red_axis, int odim, int rdim) {
 TEST(NVFuserTest, FusionWelfordShmoo_CUDA) {
   std::vector<DataType> dtypes = {
       DataType::Double, DataType::Float, DataType::Half};
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+  if (at::cuda::getDeviceProperties(0)->major >= 8) {
+    dtypes.insert(dtypes.end(), DataType::BFloat16);
+  }
+#endif
+
   std::vector<int> red_axis = {1, 0};
   std::vector<int> output_dims = {160, 320};
   std::vector<int> red_dims;
@@ -12186,7 +12217,8 @@ TEST(NVFuserTest, FusionWelfordShmoo_CUDA) {
           //       with half precision. skipping too large volumes for half for
           //       nwo might need further numerical experiments to re-design
           //       this.
-          if (rdim > 32768 && dtype == DataType::Half) {
+          if (rdim > 32768 &&
+              (dtype == DataType::Half || dtype == DataType::BFloat16)) {
             continue;
           }
           testWelford(dtype, axis, odim, rdim);
@@ -16043,6 +16075,52 @@ TEST(NVFuserTest, FusionForceFp16Simple_CUDA) {
   }
 }
 
+TEST(NVFuserTest, FusionForceBf16Simple_CUDA) {
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+  if (at::cuda::getDeviceProperties(0)->major >= 8) {
+    std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+    auto fusion = fusion_ptr.get();
+    FusionGuard fg(fusion);
+
+    auto tv0 = makeSymbolicTensor(2);
+    auto tv1 = makeSymbolicTensor(2);
+
+    fusion->addInput(tv0);
+    fusion->addInput(tv1);
+
+    // Group 1
+    auto tv2 = sum(tv0, {1});
+    auto tv3 = broadcast(tv2, {false, true});
+
+    // Group 2
+    auto tv4 = add(tv3, tv1); // Edge: tv3: expect cast
+    auto tv5 = castOp(DataType::BFloat16, tv4);
+
+    fusion->addOutput(tv5);
+
+    FusionExecutorCache fec(std::move(fusion_ptr));
+
+    std::vector<int64_t> shape{15, 16};
+
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+    auto in0 = at::randn(shape, options);
+    auto in1 = at::randn(shape, options);
+    fec.runFusionWithInputs({in0, in1});
+
+    // Check the segmented edge is bf16
+    auto segmented_fusion = fec.getMostRecentKernelRuntime()->fusionSegments();
+    for (auto edge : segmented_fusion->edges()) {
+      auto edge_tv = edge->val->as<TensorView>();
+      TORCH_CHECK(edge_tv->getDataType() == DataType::BFloat16);
+    }
+  } else {
+    GTEST_SKIP();
+  }
+#else
+  GTEST_SKIP();
+#endif
+}
+
 TEST(NVFuserTest, FusionForceFp16NotAllCast_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   auto fusion = fusion_ptr.get();
@@ -16090,6 +16168,63 @@ TEST(NVFuserTest, FusionForceFp16NotAllCast_CUDA) {
       TORCH_CHECK(consumer->isA<ReductionOp>());
     }
   }
+}
+
+TEST(NVFuserTest, FusionForceBf16NotAllCast_CUDA) {
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+  if (at::cuda::getDeviceProperties(0)->major >= 8) {
+    std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+    auto fusion = fusion_ptr.get();
+    FusionGuard fg(fusion);
+
+    auto tv0 = makeSymbolicTensor(3);
+    auto tv1 = makeSymbolicTensor(3);
+
+    fusion->addInput(tv0);
+    fusion->addInput(tv1);
+
+    // Group 1
+    auto tv3 = sum(tv0, {1});
+    auto tv4 = broadcast(tv3, {false, true, false});
+    auto tv5 = sum(tv0, {1});
+
+    // Group 2
+    auto tv6 = add(tv4, tv1); // edge tv4, expect cast
+    auto tv7 = castOp(DataType::BFloat16, tv6);
+
+    // Group 3
+    auto tv8 = sum(tv5, {1}); // edge tv5, don't expect cast
+
+    fusion->addOutput(tv7);
+    fusion->addOutput(tv8);
+
+    FusionExecutorCache fec(std::move(fusion_ptr));
+
+    std::vector<int64_t> shape{16, 16, 16};
+
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+    auto in0 = at::randn(shape, options);
+    auto in1 = at::randn(shape, options);
+    fec.runFusionWithInputs({in0, in1});
+
+    auto segmented_fusion = fec.getMostRecentKernelRuntime()->fusionSegments();
+    auto complete_fusion = segmented_fusion->completeFusion();
+
+    // Check that the edge that wasn't fp16 is the producer of the
+    //  reduction op, i.e. tv8 = sum(tv5,{1});.
+    for (auto edge : segmented_fusion->edges()) {
+      auto edge_tv = edge->val->as<TensorView>();
+      if (edge_tv->getDataType() == DataType::Float) {
+        auto consumer = *(complete_fusion->unordered_uses(edge_tv).begin());
+        TORCH_CHECK(consumer->isA<ReductionOp>());
+      }
+    }
+  } else {
+    GTEST_SKIP();
+  }
+#else
+  GTEST_SKIP();
+#endif
 }
 
 TEST(NVFuserTest, FusionBufferReuseBroadCastMultiVisit_CUDA) {

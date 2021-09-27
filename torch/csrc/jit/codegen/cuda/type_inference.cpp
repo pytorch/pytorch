@@ -419,9 +419,28 @@ class NaiveTypePropagator {
         }
         break;
       }
+      case aten::autocast_to_bf16: {
+        const auto in_type = node->input(0)->type()->cast<TensorType>();
+        const auto in_scalar_type = in_type->scalarType();
+        TORCH_CHECK(
+            hasTypeAndDevice(in_type),
+            "Type and device propagation has failed, or was not provided enough information.");
+        if (in_scalar_type == at::ScalarType::Float) {
+          node->output()->setType(
+              in_type->withScalarType(at::ScalarType::BFloat16));
+        } else {
+          node->output()->setType(in_type);
+        }
+        break;
+      }
       case aten::autocast_to_fp32: {
-        const auto in_type = getInputTensorType(node, 0);
-        if (in_type->scalarType() == at::ScalarType::Half) {
+        const auto in_type = node->input(0)->type()->cast<TensorType>();
+        const auto in_scalar_type = in_type->scalarType();
+        TORCH_CHECK(
+            hasTypeAndDevice(in_type),
+            "Type and device propagation has failed, or was not provided enough information.");
+        if (in_scalar_type == at::ScalarType::Half ||
+            in_scalar_type == at::ScalarType::BFloat16) {
           node->output()->setType(
               in_type->withScalarType(at::ScalarType::Float));
         } else {

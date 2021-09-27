@@ -202,6 +202,7 @@ _(aten, atleast_1d) \
 _(aten, atleast_2d) \
 _(aten, atleast_3d) \
 _(aten, autocast_to_fp16) \
+_(aten, autocast_to_bf16) \
 _(aten, autocast_to_fp32) \
 _(aten, avg_pool1d) \
 _(aten, avg_pool2d) \

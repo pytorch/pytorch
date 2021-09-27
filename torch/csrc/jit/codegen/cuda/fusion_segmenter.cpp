@@ -636,12 +636,13 @@ void detailGroupPrint(std::ostream& os, const SegmentedGroup* group) {
 //!       fp32_tv = cast(fp16_tv)
 //!
 //!  All segmented groups that take TV0 as input will then
-//!   take fp16_tv instead and the cast to fp32 will be
+//!   take fp16_tv or bf16_tv instead and the cast to fp32 will be
 //!   automatically included in each of the groups.
 TensorView* castIntermediateValueInCompleteFusion(
     Fusion* fusion,
     TensorView* original_tv,
-    std::unordered_set<Expr*> edge_from_group_uses) {
+    std::unordered_set<Expr*> edge_from_group_uses,
+    DataType dtype) {
   FusionGuard fg(fusion);
 
   // A utility lambda that creates consumer tensordomain of
@@ -665,7 +666,8 @@ TensorView* castIntermediateValueInCompleteFusion(
   };
 
   // create the tv's to cast
-  auto fp16_tv = make_consumer_tv(original_tv, DataType::Half);
+  auto half_precision_tv = make_consumer_tv(original_tv, dtype);
+
   auto fp32_tv = make_consumer_tv(original_tv, DataType::Float);
 
   // replace uses of original tv with fp32_tv in the complete
@@ -678,14 +680,13 @@ TensorView* castIntermediateValueInCompleteFusion(
   }
 
   // Insert the cast ops.
-  new UnaryOp(UnaryOpType::Cast, fp16_tv, original_tv);
-  new UnaryOp(UnaryOpType::Cast, fp32_tv, fp16_tv);
+  new UnaryOp(UnaryOpType::Cast, half_precision_tv, original_tv);
+  new UnaryOp(UnaryOpType::Cast, fp32_tv, half_precision_tv);
 
   // Return the new tv to replace original tv with
   //  on the segmented edges.
-  return fp16_tv;
+  return half_precision_tv;
 }
-
 } // namespace
 
 void SegmentedFusion::finalize() {
@@ -705,10 +706,9 @@ void SegmentedFusion::finalize() {
   //  including both the producer and consumer of the selected tv's that
   //  we cast to fp16.
   std::unordered_set<SegmentedGroup*> affected_group_set;
-
   // A map to keep track of the tv's that have been inserted cast
   //  and its fp16 version.
-  std::unordered_map<TensorView*, TensorView*> fp32_to_fp16_cast_map;
+  std::unordered_map<TensorView*, TensorView*> fp32_to_half_cast_map;
 
   // Go through all edges of the segmented fusion.
   for (auto edge : edges()) {
@@ -736,15 +736,18 @@ void SegmentedFusion::finalize() {
       }
     }
 
-    // Only look at ones that need to cast to fp16
-    if (force_fp16_tv_set_.count(edge_tv)) {
-      auto cast_tv_it = fp32_to_fp16_cast_map.find(edge->val->as<TensorView>());
+    // Only look at ones that need to cast to fp16 or bf16
+    if ((force_fp16_tv_set_.count(edge_tv) > 0)) {
+      auto cast_tv_it = fp32_to_half_cast_map.find(edge->val->as<TensorView>());
       TensorView* cast_tv = nullptr;
       // Insert cast ops for this tv if we haven't done so.
-      if (cast_tv_it == fp32_to_fp16_cast_map.end()) {
+      if (cast_tv_it == fp32_to_half_cast_map.end()) {
         cast_tv = castIntermediateValueInCompleteFusion(
-            complete_fusion_.get(), edge_tv, uses_in_from_group);
-        fp32_to_fp16_cast_map[edge->val->as<TensorView>()] = cast_tv;
+            complete_fusion_.get(),
+            edge_tv,
+            uses_in_from_group,
+            force_half_precision_type_);
+        fp32_to_half_cast_map[edge->val->as<TensorView>()] = cast_tv;
       } else {
         cast_tv = cast_tv_it->second;
       }
@@ -3051,27 +3054,36 @@ void SegmentedFusion::setCachedHeuristicDataFor(
 namespace {
 
 //! A thin traversal class that collects all the tensorviews
-//!  that could cast to fp16 if they were segmented edges.
+//!  that could cast to fp16 or bf16 if they were segmented edges.
 //!  The selected values are currently defined as all the
 //!  tensorviews that
 //!     1. are not complete fusion input/output,
 //!     2. have a use chain that ends with a fp16
 //!         complete fusion output
 //!     3. are fp32 datatype
-class ForceFP16Annotation : public IterVisitor {
+class ForceHalfAnnotation : public IterVisitor {
  public:
-  static std::unordered_set<TensorView*> getAnnotatedSet(Fusion* fusion) {
-    ForceFP16Annotation annotation;
+  static std::unordered_set<TensorView*> getFP16AnnotatedSet(Fusion* fusion) {
+    ForceHalfAnnotation annotation;
     std::vector<Val*> fp16_outputs;
-
+    auto& cast_to_type = annotation.cast_to_type_;
     std::copy_if(
         fusion->outputs().begin(),
         fusion->outputs().end(),
         std::back_inserter(fp16_outputs),
-        [](auto* val) {
+        [&cast_to_type](auto* val) {
+          auto dtype = val->getDataType().value();
+          if (cast_to_type && dtype != DataType::Float) {
+            TORCH_INTERNAL_ASSERT(
+                cast_to_type == dtype,
+                "We do not want a mix of BFloat16 and Float16 in the same graph");
+          } else if (dtype != DataType::Float) {
+            cast_to_type = dtype;
+          }
           return val->template isA<TensorView>() &&
               val->getDataType().has_value() &&
-              val->getDataType().value() == DataType::Half;
+              (val->getDataType().value() == DataType::Half ||
+               val->getDataType().value() == DataType::BFloat16);
         });
 
     annotation.traverseFrom(fusion, fp16_outputs);
@@ -3090,13 +3102,23 @@ class ForceFP16Annotation : public IterVisitor {
   }
 
   std::unordered_set<TensorView*> force_fp16_tv_set_;
+  c10::optional<DataType> cast_to_type_ = c10::nullopt;
 };
 
 } // namespace
 
 void SegmentedFusion::annotateFP16IntermediateTensors() {
   force_fp16_tv_set_ =
-      ForceFP16Annotation::getAnnotatedSet(complete_fusion_.get());
+      ForceHalfAnnotation::getFP16AnnotatedSet(complete_fusion_.get());
+  for (auto o : complete_fusion_->outputs()) {
+    auto o_tv = dynamic_cast<TensorView*>(o);
+    if (o_tv) {
+      auto dtype = o_tv->getDataType().value();
+      if (dtype == DataType::Half || dtype == DataType::BFloat16) {
+        force_half_precision_type_ = dtype;
+      }
+    }
+  }
 }
 
 TORCH_CUDA_CU_API std::string toString(
