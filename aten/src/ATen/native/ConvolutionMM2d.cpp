@@ -287,6 +287,7 @@ void slow_conv2d_backward_out_cpu_template(
   const Tensor grad_output = grad_output_.contiguous();
   grad_input.resize_as_(input);
   grad_input.zero_();
+  TORCH_CHECK(grad_input.is_contiguous(), "slow_conv2d: grad_input must be contiguous");
   const int64_t batch_size = input.size(0);
 
   AT_DISPATCH_ALL_TYPES_AND(kBFloat16, input.scalar_type(), "slow_conv2d_backward", [&] {
@@ -382,6 +383,7 @@ static void slow_conv2d_backward_weight_out_cpu_template(
 
   auto input = input_.contiguous();
   auto grad_output = grad_output_.contiguous();
+  TORCH_CHECK(grad_input.is_contiguous(), "slow_conv2d: grad_weight must be contiguous");
 
   const int64_t batch_size = input.size(0);
 
@@ -467,7 +469,8 @@ std::tuple<Tensor&, Tensor&> slow_conv2d_forward_out_cpu(
   if (bias.defined()) {
     output.copy_(bias.reshape({-1, 1, 1}));
   }
-  TORCH_CHECK(output.is_contiguous());
+  TORCH_CHECK(output.is_contiguous() && finput.is_contiguous(),
+              "slow_conv2d output tensors must be contiguous");
 
   AT_DISPATCH_ALL_TYPES_AND(kBFloat16, input.scalar_type(), "slow_conv2d_cpu", [&]{
     auto input_a = input.accessor<scalar_t, 4>();
