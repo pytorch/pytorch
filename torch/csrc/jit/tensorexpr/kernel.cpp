@@ -998,6 +998,17 @@ Tensor computeOneOperand(
       });
 }
 
+Tensor computeNoop(
+    const std::string& name,
+    const std::vector<ArgValue>& inputValues,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType) {
+  return computeOneOperand(
+      name, inputValues, outputShape, outputType, [](const ExprHandle& a) {
+        return a;
+      });
+}
+
 Tensor computeTwoOperand(
     const std::string& name,
     const std::vector<ArgValue>& inputValues,
@@ -1341,12 +1352,52 @@ Tensor computeConv2d(
   return Tensor(ResultBuf.node(), s);
 }
 
+Tensor computePrepackedConv2dClampRun(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType) {
+  Dtype dtype = kFloat;
+  if (outputType) {
+    dtype = Dtype(*outputType);
+  }
+
+  BufHandle ResultBuf("prepacked_conv2d_clamp_run", outputShape, dtype);
+  const BufHandle& inp = c10::get<BufHandle>(inputs[0]);
+  const BufHandle& prepacked = c10::get<BufHandle>(inputs[1]);
+  StmtPtr s = ExternalCall::make(
+      ResultBuf, "nnc_prepacked_conv2d_clamp_run", {inp, prepacked}, {});
+  return Tensor(ResultBuf.node(), s);
+}
+
+Tensor computePrepackedLinearClampRun(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType) {
+  Dtype dtype = kFloat;
+  if (outputType) {
+    dtype = Dtype(*outputType);
+  }
+
+  BufHandle ResultBuf("prepacked_linear_clamp_run", outputShape, dtype);
+  const BufHandle& inp = c10::get<BufHandle>(inputs[0]);
+  const BufHandle& prepacked = c10::get<BufHandle>(inputs[1]);
+  StmtPtr s = ExternalCall::make(
+      ResultBuf, "nnc_prepacked_linear_clamp_run", {inp, prepacked}, {});
+  return Tensor(ResultBuf.node(), s);
+}
+
 Tensor tensorexpr::computeOperandValue(
     c10::Symbol op,
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType,
     at::Device device) {
+  const std::string opStr = op.toQualString();
+  if (opStr == "prepacked::conv2d_clamp_run") {
+    return computePrepackedConv2dClampRun(inputs, outputShape, outputType);
+  } else if (opStr == "prepacked::linear_clamp_run") {
+    return computePrepackedLinearClampRun(inputs, outputShape, outputType);
+  }
   switch (op) {
     case aten::add: {
       auto add_lambda = [](const ExprHandle& lhs, const ExprHandle& rhs) {
@@ -1628,6 +1679,10 @@ Tensor tensorexpr::computeOperandValue(
           "aten_neg", inputs, outputShape, outputType, [](const ExprHandle& a) {
             return ExprHandle(-0) - a;
           });
+    } break;
+
+    case aten::dropout: {
+      return computeNoop("aten_dropout", inputs, outputShape, outputType);
     } break;
 
     case aten::isnan: {
@@ -2279,7 +2334,8 @@ Tensor tensorexpr::computeOperandValue(
           aten::transpose,
           {inputs[0], (int64_t)1, (int64_t)0},
           outputShape,
-          outputType);
+          outputType,
+          device);
     }
     case aten::transpose: {
       auto A = c10::get<BufHandle>(inputs[0]);
@@ -2345,6 +2401,7 @@ Tensor tensorexpr::computeOperandValue(
             return broadcast(A, indices);
           });
     }
+    case aten::flatten:
     case aten::reshape:
     case aten::view: {
       auto A = c10::get<BufHandle>(inputs[0]);
@@ -2357,7 +2414,16 @@ Tensor tensorexpr::computeOperandValue(
               return A.load(empty_indices);
             });
       }
-      auto view_dims = c10::get<IntList>(inputs[1]);
+      auto view_dims = [&]() {
+        if (op == aten::flatten) {
+          std::vector<int64_t> ret;
+          for (const auto dim : c10::irange(outputShape.size())) {
+            ret.push_back(outputShape[dim].AsNode<LongImm>()->value());
+          }
+          return ret;
+        }
+        return c10::get<IntList>(inputs[1]);
+      }();
       return Compute(
           "aten_reshape",
           c10::fmap<DimArg>(outputShape),
@@ -2436,13 +2502,11 @@ Tensor tensorexpr::computeOperandValue(
     case aten::adaptive_avg_pool2d: {
       return computeAdaptiveAvgPool2d(inputs, outputShape, outputType);
     } break;
-    default: {
-      std::string msg =
-          std::string("Unhandled node kind (in computeOperandValue): ") +
-          op.toQualString();
-      throw malformed_input(msg);
-    }
   }
+  std::string msg =
+      std::string("Unhandled node kind (in computeOperandValue): ") +
+      op.toQualString();
+  throw malformed_input(msg);
 }
 
 c10::optional<ScalarType> findDtypeForValue(const torch::jit::Value* v) {
@@ -2463,22 +2527,41 @@ Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
     hasRandom_ = true;
   }
 
+  auto outputType = findDtypeForValue(v);
+  std::vector<ExprHandle> outputShape = sizesForValue(v);
+
   std::vector<ArgValue> argInputs;
   if (op == prim::ConstantChunk) {
     auto const& n = v->node();
     argInputs.push_back(toArg(inputs[0]));
-    argInputs.push_back((int64_t)v->offset());
+    argInputs.push_back(static_cast<int64_t>(v->offset()));
     argInputs.push_back(n->i(attr::dim));
     argInputs.push_back(n->i(attr::chunks));
   } else if (op == aten::to) {
     argInputs.push_back(toArg(inputs[0]));
+  } else if (op == aten::conv2d) {
+    for (auto inp : inputs) {
+      argInputs.push_back(toArg(inp));
+    }
+    // handle optional bias
+    if (c10::get_if<ArgNone>(&argInputs[2])) {
+      Dtype dtype = outputType ? Dtype(*outputType) : kFloat;
+      std::vector<ExprHandle> biasShape;
+      biasShape.push_back(outputShape[1]);
+      auto bias_tensor = at::zeros({outputShape[1].AsNode<LongImm>()->value()});
+      unpacked_constant_tensors_.push_back(bias_tensor);
+      BufPtr buf = alloc<Buf>(
+          "conv2d_bias_opt_" + sanitizeName(v->debugName()),
+          ExprHandleVectorToExprVector(biasShape),
+          dtype);
+      constants_.push_back({buf, bias_tensor.data_ptr()});
+      argInputs[2] = BufHandle(buf);
+    }
   } else {
     for (auto inp : inputs) {
       argInputs.push_back(toArg(inp));
     }
   }
-  auto outputType = findDtypeForValue(v);
-  std::vector<ExprHandle> outputShape = sizesForValue(v);
 
   if (NNCLoweringFunction custom_lowering = getCustomLoweringFor(op)) {
     return custom_lowering(argInputs, outputShape, outputType, device_);
@@ -3028,6 +3111,17 @@ Tensor TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
 }
 
 void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
+  auto val = toIValue(v).value();
+  if (torch::isCustomClass(val)) {
+    auto name_hint = "const_" + sanitizeName(v->debugName());
+    auto dtype = Dtype(ScalarType::Float);
+    std::vector<ExprPtr> dims;
+    BufPtr buf = alloc<Buf>(name_hint, dims, dtype);
+    auto dataPtr = val.toObjectRef().getSlot(0).toCapsule().get();
+    constants_.push_back({buf, dataPtr});
+    bufs_[v] = buf;
+    return;
+  }
   if (!v->type()->cast<TensorType>()) {
     // Only Tensor constants need to be bound, scalar constants will be turned
     // into immediates in TE IR
