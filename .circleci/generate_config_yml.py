@@ -77,15 +77,15 @@ class Header(object):
         for line in filter(None, lines):
             output_filehandle.write(line + "\n")
 
-def filter_master_only_jobs(items):
-    def _for_all_items(items, functor) -> None:
-        if isinstance(items, list):
-            for item in items:
-                _for_all_items(item, functor)
-        if isinstance(items, dict) and len(items) == 1:
-            item_type, item = next(iter(items.items()))
-            functor(item_type, item)
+def _for_all_items(items, functor) -> None:
+    if isinstance(items, list):
+        for item in items:
+            _for_all_items(item, functor)
+    if isinstance(items, dict) and len(items) == 1:
+        item_type, item = next(iter(items.items()))
+        functor(item_type, item)
 
+def filter_master_only_jobs(items):
     def _is_master_item(item):
         filters = item.get('filters', None)
         branches = filters.get('branches', None) if filters is not None else None
@@ -123,9 +123,22 @@ def filter_master_only_jobs(items):
     _for_all_items(items, _save_requires_if_master)
     return _do_filtering(items)
 
+def generate_required_docker_images(items):
+    required_docker_images = set()
+
+    def _requires_docker_image(item_type, item):
+        requires = item.get('requires', None)
+        if not isinstance(requires, list):
+            return
+        for requirement in requires:
+            if requirement.startswith('docker'):
+                required_docker_images.add(requirement)
+    _for_all_items(items, _requires_docker_image)
+    return required_docker_images
 
 def gen_build_workflows_tree():
     build_workflows_functions = [
+        # For rocm images, which don't have a circleci job equivalent
         cimodel.data.simple.docker_definitions.get_workflow_jobs,
         pytorch_build_definitions.get_workflow_jobs,
         cimodel.data.simple.macos_definitions.get_workflow_jobs,
@@ -140,6 +153,11 @@ def gen_build_workflows_tree():
         binary_build_definitions.get_binary_smoke_test_jobs,
     ]
     build_jobs = [f() for f in build_workflows_functions]
+    build_jobs.extend(
+        cimodel.data.simple.docker_definitions.get_workflow_jobs(
+            generate_required_docker_images(build_jobs)
+        )
+    )
     master_build_jobs = filter_master_only_jobs(build_jobs)
 
     binary_build_functions = [
@@ -148,10 +166,15 @@ def gen_build_workflows_tree():
         binary_build_definitions.get_nightly_uploads,
     ]
 
-    slow_gradcheck_jobs = [
-        pytorch_build_definitions.get_workflow_jobs,
-        cimodel.data.simple.docker_definitions.get_workflow_jobs,
+    slow_gradcheck_functions = [
+        pytorch_build_definitions.get_workflow_jobs
     ]
+    slow_gradcheck_jobs = [f(only_slow_gradcheck=True) for f in slow_gradcheck_functions]
+    slow_gradcheck_jobs.extend(
+        cimodel.data.simple.docker_definitions.get_workflow_jobs(
+            generate_required_docker_images(slow_gradcheck_jobs)
+        )
+    )
 
     return {
         "workflows": {
@@ -169,7 +192,7 @@ def gen_build_workflows_tree():
             },
             "slow_gradcheck_build": {
                 "when": r"<< pipeline.parameters.run_slow_gradcheck_build >>",
-                "jobs": [f(only_slow_gradcheck=True) for f in slow_gradcheck_jobs],
+                "jobs": slow_gradcheck_jobs,
             },
         }
     }
