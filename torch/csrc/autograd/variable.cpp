@@ -587,7 +587,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const at::T
         fn->add_input_metadata(
           view_info.base_.options(),
           self.sizes(), // Note: sizes(), not base_.sizes(), is intentional
-          view_info.base_.device());
+          self.unsafeGetTensorImpl()->is_python_dispatch());
         diff_view_meta->grad_fn_ = std::move(fn);
       }
       diff_view_meta->set_attr_version(current_version);
