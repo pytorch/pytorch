@@ -18,7 +18,7 @@ class TestModule(TestCase):
     precision = 1e-5
     rel_tol = 1e-5
 
-    def _assert_module_parameters_and_buffer_are(self, module, device, dtype, device_id=None):
+    def _assert_module_parameters_and_buffer_are(self, module, device, dtype):
         # Check device placement and dtype for created parameters and buffers.
         # Only verify floating point dtypes since that's what the kwarg or methods
         # such as `float()` applies to.
@@ -26,11 +26,7 @@ class TestModule(TestCase):
             for item_name, item in items:
                 self.assertEqual(
                     str(item.device), device,
-                    f'{name} {item_name} is on {item.device.type} instead of the expected device {device}')
-                if device_id:
-                    self.assertEqual(
-                        item.get_device(), device_id,
-                        f'{name} {item_name} is on device_id: {item.get_device()} instead of {device_id}')
+                    f'{name} {item_name} is on {item.device} instead of the expected device {device}')
                 if item.dtype.is_floating_point:
                     self.assertEqual(
                         item.dtype, dtype,
@@ -151,7 +147,7 @@ class TestModule(TestCase):
                 input_device_args = module_input_device.forward_input.args
                 input_device_kwargs = module_input_device.forward_input.kwargs
                 m(*input_device_args, **input_device_kwargs)
-                self._assert_module_parameters_and_buffer_are(m, device, dtype, 0)
+                self._assert_module_parameters_and_buffer_are(m, device, dtype)
 
                 # === Move to CPU ===
                 input_cpu_args = module_input_cpu.forward_input.args
@@ -163,26 +159,26 @@ class TestModule(TestCase):
                 # === Move back to GPU and forward pass ===
                 m.cuda()
                 m(*input_device_args, **input_device_kwargs)
-                self._assert_module_parameters_and_buffer_are(m, device, dtype, 0)
+                self._assert_module_parameters_and_buffer_are(m, device, dtype)
 
                 if torch.cuda.device_count() >= 2:
                     # === test cross-GPU transfer works
-                    def _to_device(objs):
+                    def _to_device1(objs):
                         if isinstance(objs, (tuple, list)):
-                            return type(objs)(_to_device(item) for item in objs)
+                            return type(objs)(_to_device1(item) for item in objs)
                         elif isinstance(objs, dict):
-                            return {name: _to_device(item) for name, item in objs.items()}
+                            return {name: _to_device1(item) for name, item in objs.items()}
                         elif isinstance(objs, torch.Tensor):
                             return objs.cuda(1)
                         else:
                             return objs
-                    input_device_1_args = _to_device(input_device_args)
-                    input_device_1_kwargs = _to_device(input_device_kwargs)
+                    input_device_1_args = _to_device1(input_device_args)
+                    input_device_1_kwargs = _to_device1(input_device_kwargs)
 
                     m.cuda(1)
                     with torch.cuda.device(1):
                         m(*input_device_1_args, **input_device_1_kwargs)
-                    self._assert_module_parameters_and_buffer_are(m, device, dtype, 1)
+                    self._assert_module_parameters_and_buffer_are(m, device, dtype)
 
 
     @modules(module_db)
