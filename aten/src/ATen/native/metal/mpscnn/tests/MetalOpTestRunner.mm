@@ -68,8 +68,8 @@
   REG_TEST("test_softmax", test_softmax);
   REG_TEST("test_sigmoid", test_sigmoid);
   REG_TEST("test_hardsigmoid", test_hardsigmoid);
+  REG_TEST("test_hardswish_", test_hardswish_);
   REG_TEST("test_hardswish", test_hardswish);
-  REG_TEST("test_hardswish2", test_hardswish2);
   REG_TEST("test_upsampling_nearest2d_vec", test_upsampling_nearest2d_vec);
   REG_TEST("test_upsampling_nearest2d_vec2", test_upsampling_nearest2d_vec2);
   REG_TEST("test_adaptive_avg_pool2d", test_adaptive_avg_pool2d);
