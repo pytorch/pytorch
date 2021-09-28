@@ -575,6 +575,24 @@ c10::optional<::c10::SymbolicShape> ComputeShapeFromTile(
   return shape;
 }
 
+c10::optional<::c10::SymbolicShape> ComputeShapeFromSqueeze(
+    const std::vector<::c10::ShapeSymbol>& input_shape) {
+  std::vector<::c10::ShapeSymbol> final_shape;
+  final_shape.reserve(input_shape.size());
+  for (const auto i : c10::irange(input_shape.size())) {
+    if (input_shape[i].is_static()) {
+      if (input_shape[i].static_size() != 1) {
+        final_shape.emplace_back(::c10::ShapeSymbol::fromStaticSize(
+            input_shape[i].static_size()));
+      }
+    } else {
+      final_shape.emplace_back(::c10::ShapeSymbol::newSymbol());
+    }
+  }
+  ::c10::SymbolicShape shape(final_shape);
+  return shape;
+}
+
 void UpdateRank(Value* value, size_t rank) {
   ConstantValueMap::SetRank(value->debugName(), rank);
   if (TensorTypePtr value_type = value->type()->cast<TensorType>()) {
@@ -1328,6 +1346,25 @@ void ComputeConstant(Node* n, int opset_version) {
     case ::c10::onnx::Relu:
     case ::c10::onnx::Softmax: {
       ProcessUnchangeNode(n);
+      break;
+    }
+    case ::c10::onnx::Squeeze: {
+      if (ConstantValueMap::HasShape(n->input(0)->debugName())) {
+        auto input0_shape_size =
+            ConstantValueMap::GetShape(n->input(0)->debugName())
+                .value()
+                .sizes();
+        if (input0_shape_size.has_value()) {
+          auto input0_shape_value = input0_shape_size.value();
+          if (n->inputs().size() == 1) {
+            auto final_shape =
+                ComputeShapeFromSqueeze(input0_shape_value);
+            if (final_shape.has_value()) {
+              UpdateShape(n->output(), final_shape.value());
+            }
+          }
+        }
+      }
       break;
     }
     case ::c10::onnx::Tile: {

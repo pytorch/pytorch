@@ -1387,6 +1387,19 @@ class TestONNXRuntime(unittest.TestCase):
         x_noop = torch.randn(2, 2, 3)
         self.squeeze_model_tests(1, x_squeeze, x_noop)
 
+    def test_squeeze_dynamic_without_dim(self):
+        class Squeeze(torch.nn.Module):
+            def forward(self, input):
+                output = input.view(-1)
+                return output.squeeze()
+
+        inputs = torch.rand(2, 3)
+        another_inputs = torch.rand(4, 5)
+        self.run_test(Squeeze(), (inputs, ),
+                      input_names=["x"],
+                      dynamic_axes={"x" : {0: "0", 1: "1"}},
+                      test_with_inputs=[another_inputs])
+
     def test_squeeze_neg_without_no_op(self):
         x = torch.randn(2, 1, 4)
         self.squeeze_model_tests(-2, x, None)
