@@ -14,6 +14,7 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/callstack_debug_info_serialization.h>
+#include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
@@ -36,21 +37,6 @@
 namespace torch {
 namespace jit {
 
-char const* toString(OpCode op);
-
-IValue to_tuple(std::vector<IValue> ivalues) {
-  return c10::ivalue::Tuple::create(std::move(ivalues));
-}
-
-IValue Table(const std::vector<std::pair<std::string, IValue>>& entries) {
-  std::vector<IValue> ivalue_entries;
-  ivalue_entries.reserve(entries.size());
-  for (const auto& e : entries) {
-    ivalue_entries.push_back(to_tuple({e.first, e.second}));
-  }
-  return to_tuple(std::move(ivalue_entries));
-}
-
 namespace {
 
 ExportModuleExtraFilesHook& GetExtraFilesHook() {
@@ -58,273 +44,102 @@ ExportModuleExtraFilesHook& GetExtraFilesHook() {
   return func;
 }
 
-std::pair<IValue, IValue> getFunctionTuple(
+std::unordered_set<const FunctionSchema*> getInterfaceCalls(Graph& graph) {
+  std::unordered_set<const FunctionSchema*> ret;
+  auto nodes = findAllNodes(graph, c10::prim::CallMethod, true);
+  for (Node* node : nodes) {
+    if (auto iface = node->input(0)->type()->castRaw<InterfaceType>()) {
+      ret.insert(iface->getMethod(node->s(attr::name)));
+    }
+  }
+  return ret;
+}
+
+struct ModuleMethod {
+  ModuleMethod(const Module& m, const Function& f, c10::QualifiedName n)
+      : module(m), function(f), exportName(std::move(n)) {}
+  const Module& module;
+  const Function& function;
+  c10::QualifiedName exportName;
+};
+
+std::vector<ModuleMethod> getModuleInterfaceExports(
     const Module& module,
-    const Function& func,
-    BackendDebugInfoRecorder& debug_info_recorder,
-    const std::basic_string<char>& qn,
-    TypeNameUniquer& type_name_uniquer_,
-    bool isInterface = false) {
+    const std::unordered_set<const FunctionSchema*>& schemas) {
+  if (schemas.size() == 0) {
+    return {};
+  }
+  std::unordered_set<std::string> names;
+  for (auto schema : schemas) {
+    names.insert(schema->name());
+  }
+  std::vector<ModuleMethod> ret;
+  for (const auto& submodule : module.modules()) {
+    for (const auto& method : submodule.get_methods()) {
+      if (names.find(method.function().qualname().name()) != names.end()) {
+        ret.emplace_back(
+            submodule, method.function(), method.function().qualname());
+      }
+    }
+  }
+  return ret;
+}
+
+void exportFunction(
+    BytecodeExportSet& exportSet,
+    const ModuleMethod& method,
+    bool toplevel = false) {
+  const auto& func = method.function;
+  const auto& qn = method.exportName;
+  if (exportSet.contains(qn)) {
+    if (toplevel) {
+      exportSet.update(qn, toplevel);
+    }
+    return;
+  }
   auto graph = func.graph()->copy();
 
   Inline(*graph);
 
   std::shared_ptr<MobileCode> code;
   code = std::make_shared<MobileCode>(
-      graph,
-      func.name(),
-      BytecodeEmitDefaultValueForUnspecifiedArgMode::
-          is_enabled() /* emit_default_input_instructions */);
+      graph, func.name(), BytecodeEmitMode::is_default_value_for_unspecified_arg_enabled() /* emit_default_input_instructions */, BytecodeEmitMode::is_default_args_before_out_args_enabled() /* enable_defaults_args_with_out_args */);
   auto instructions_copy = code->instructions();
 
-  // operator names
-  std::vector<c10::OperatorName> opnames;
-  std::vector<std::string> method_names;
-  std::vector<int64_t> op_debug_handles;
-  int next_new_op_index = 0;
-  for (size_t i = 0; i < instructions_copy.size(); ++i) {
-    Instruction ins = instructions_copy[i];
-    if ((ins.op == OP || ins.op == OPN) && ins.X == next_new_op_index) {
-      // Found a new op (assumes new operators ordered by ascending ins.X)
-      auto node = code->instructions_source()[i];
-      opnames.emplace_back(node->schema().operator_name());
-      next_new_op_index++;
-    }
-    // CALL nodes at this point represent built-in (i.e. non-Graph)
-    // functions that were not inlined. Here we convert the CALL
-    // instructions for these functions into INTERFACE_CALL instructions
-    // s.t. at runtime, we will look up the Function* on the Type of the
-    // 0th argument in the stack and call that directly.
-    if (ins.op == CALL) {
-      auto node = code->instructions_source()[i];
-      if (node->kind() == prim::CallMethod) {
-        // NB: replacing instruction
-        auto method_name_idx =
-            code->constant_table().size() + method_names.size();
-        method_names.emplace_back(node->s(attr::name));
-        Instruction new_instr{
-            INTERFACE_CALL,
-            static_cast<int32_t>(method_name_idx),
-            static_cast<uint16_t>(node->inputs().size())};
-        instructions_copy[i] = new_instr;
-      } else {
-        TORCH_INTERNAL_ASSERT(
-            false, "Unsupported node kind on CALL opcode for mobile");
-      }
-    } else if (ins.op == RET) {
-      auto node = code->instructions_source()[i];
-      for (const auto& input : node->inputs()) {
-        const auto& input_type = input->type();
-        if (input_type->kind() == TypeKind::TupleType) {
-          if (const auto& name_typed_input =
-                  input_type->cast<at::NamedType>()) {
-            TORCH_CHECK(
-                !name_typed_input->name(),
-                "A named tuple type is not supported in mobile module. ",
-                "Workaround: instead of using a named tuple type's fields, ",
-                "use a dictionary type's key-value pair itmes or ",
-                "a pytorch class (class Foo(torch.nn.Module))'s attributes.'");
-          }
-        } else if (
-            input_type->kind() == TypeKind::ListType ||
-            input_type->kind() == TypeKind::DictType) {
-          for (const TypePtr& element_type : input_type->containedTypes()) {
-            TORCH_CHECK(
-                element_type->kind() != TypeKind::ClassType,
-                "Returining a list or dictionary with pytorch class type ",
-                "is not supported in mobile module "
-                "(List[Foo] or Dict[int, Foo] for class Foo(torch.nn.Module)). "
-                "Workaround: instead of using pytorch class as their element type, ",
-                "use a combination of list, dictionary, and single types.");
-          }
-        }
-      }
-    } else {
-      TORCH_CHECK(
-          isOpSupportedInMobile(ins.op),
-          toString(ins.op),
-          " is not supported in mobile module.");
-    }
-    auto node = code->instructions_source()[i];
-    int64_t debug_handle = debug_info_recorder.getNextDebugHandle(node);
-    // Note 1-to-1 correspondence between instructions and debug handles
-    op_debug_handles.emplace_back(debug_handle);
+  exportSet.add(
+      qn, ExportedBytecode{std::move(code), func.getSchema(), toplevel});
+
+  auto exports =
+      getModuleInterfaceExports(method.module, getInterfaceCalls(*graph));
+  for (const auto& method : exports) {
+    exportFunction(exportSet, method);
   }
-
-  // instructions
-  std::vector<IValue> instructions;
-  instructions.reserve(instructions_copy.size());
-  for (Instruction ins : instructions_copy) {
-    instructions.emplace_back(to_tuple({toString(ins.op), ins.X, ins.N}));
-  }
-
-  // operators
-  std::vector<IValue> operators;
-  auto op_to_specified_args = code->op_to_num_specified_args();
-  operators.reserve(opnames.size());
-  for (const auto& opname : opnames) {
-    auto unique_name = c10::toString(opname);
-    // For operator with vararg, adding default arguments would be confusing and
-    // is not allowed. For an operator with num_args = -1, it means the number
-    // of arguments is not available for this operator, we don't do any backward
-    // compatibility adaptation at runtime.
-    int num_args = -1;
-    auto it = op_to_specified_args.find(unique_name);
-    if (it != op_to_specified_args.end()) {
-      num_args = it->second;
-    }
-    if (BytecodeEmitDefaultValueForUnspecifiedArgMode::is_enabled()) {
-      operators.emplace_back(to_tuple({opname.name, opname.overload_name}));
-    } else {
-      operators.emplace_back(
-          to_tuple({opname.name, opname.overload_name, num_args}));
-    }
-  }
-
-  // constants
-  //
-  // Make a copy of the constants and append the method names
-  // that we emitted for the converted INTERFACE_CALL nodes above.
-  auto constants = code->constant_table();
-  for (auto& method_name : method_names) {
-    constants.emplace_back(std::move(method_name));
-  }
-
-  // types
-  std::vector<IValue> types;
-  types.reserve(code->type_table().size());
-  static const std::string torch_prefix("__torch__");
-  static const std::string class_prefix("__torch__.torch.classes");
-  for (const TypePtr& t : code->type_table()) {
-    auto type_str = t->annotation_str();
-    if (type_str.find(torch_prefix) == 0) {
-      TORCH_CHECK(
-          type_str.find(class_prefix) == 0,
-          "__torch__ types other than torchbind (__torch__.torch.classes)"
-          "are not supported in lite interpreter. ",
-          "Workaround: instead of using arbitrary class type (class Foo()), ",
-          "define a pytorch class (class Foo(torch.nn.Module)).");
-    }
-    types.emplace_back(type_str);
-  }
-
-  // since the register location is embedded into the bytecode, pass the
-  // register size
-  auto register_size = static_cast<int>(code->register_size());
-
-  auto codeTable = Table(
-      {{"instructions", to_tuple(instructions)},
-       {"operators", to_tuple(operators)},
-       {"constants", to_tuple(constants)},
-       {"types", to_tuple(types)},
-       {"register_size", register_size}});
-
-  // schema
-  const auto& schema = func.getSchema();
-  auto type_printer =
-      [&](const c10::ConstTypePtr& t) -> c10::optional<std::string> {
-    auto namedType = t->cast<c10::NamedType>();
-    if (namedType && namedType->name()) {
-      return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
-    }
-    return c10::nullopt;
-  };
-  TORCH_CHECK(
-      schema.overload_name().empty(), // @TODO: is this check correct?
-      "Overloads are not supported in mobile modules.");
-  TORCH_CHECK(
-      !schema.is_vararg(), "Python *args are not supported in mobile modules.");
-  TORCH_CHECK(
-      !schema.is_varret(),
-      "A variable number of return values is not supported in mobile modules.");
-  auto makeArgTuple = [&](const std::vector<Argument>& args) {
-    std::vector<IValue> argTables;
-    for (auto&& arg : args) {
-      TORCH_CHECK(
-          !arg.N(),
-          "Arguments with known list lengths are not supported in mobile modules.");
-      TORCH_CHECK(
-          !arg.kwarg_only(),
-          "Keyword-only arguments are not supported in mobile modules.");
-      /*
-        This part adds the argument's name, type and default_value in
-        `bytecode.pkl` This has to be consistent with the `code/` directory
-        which has annotated py code of the entire module. `type_printer` uses
-        `TypeNameUniquer` to get the managled name of the argument. This helps
-        in having the right object reference when a class method is called using
-        the `self` argument.
-
-        arg.type()->annotation_str(type_printer) => mangled unique name of the
-        module/submodule
-      */
-      argTables.emplace_back(Table({
-          {"name", arg.name()},
-          {"type", arg.type()->annotation_str(type_printer)},
-          {"default_value", arg.default_value()},
-      }));
-    }
-    return to_tuple(argTables);
-  };
-  auto schemaTable = Table({
-      {"arguments", makeArgTuple(schema.arguments())},
-      {"returns", makeArgTuple(schema.returns())},
-      {"is_interface", isInterface},
-  });
-
-  // function tuple
-  auto bytecode_vals = to_tuple({qn, codeTable, schemaTable});
-
-  c10::optional<IValue> debug_info_vals;
-  // module debug info
-  // This is just a set of debug handles.
-  // We always save debug handles.
-  // debug handles generated by debug_handle_manager
-  // will correspond to {source_range, inlinedCallStackPtr} which we will
-  // serialize separately.
-  IValue module_debug_tuple = c10::ivalue::Tuple::create(op_debug_handles);
-  auto function_debug_info =
-      Table({{"function_debug_handles", module_debug_tuple}});
-  debug_info_vals = to_tuple({qn, function_debug_info});
-  return std::make_pair(bytecode_vals, debug_info_vals);
 }
 
 void setstateTuple(
+    BytecodeExportSet& exportSet,
     const Module& module,
     const IValue& ivalue,
-    std::vector<c10::IValue>& elements,
-    std::unordered_set<std::string>& qn_cache,
-    std::vector<c10::IValue>& debug_info_elements,
-    BackendDebugInfoRecorder& debug_info_recorder,
-    TypeNameUniquer& type_name_uniquer_) {
+    TypeNameUniquer& type_name_uniquer_,
+    bool toplevel = false) {
   if (!ivalue.isObject())
     return;
   auto obj = ivalue.toObject();
   auto type = obj->type();
   if (checkHasValidSetGetState(type)) {
     Function& setstate = type->getMethod("__setstate__");
-    const auto qn =
-        type_name_uniquer_.getUniqueName(obj->type()).qualifiedName() + "." +
-        setstate.name();
-    if (qn_cache.find(qn) != qn_cache.end()) {
+    auto qn = type_name_uniquer_.getUniqueName(obj->type()).qualifiedName() +
+        "." + setstate.name();
+    if (exportSet.contains(qn)) {
       return;
     }
     if (setstate.isGraphFunction()) {
-      auto func_tuple = getFunctionTuple(
-          module, setstate, debug_info_recorder, qn, type_name_uniquer_);
-      elements.push_back(func_tuple.first);
-      qn_cache.emplace(qn);
-      debug_info_elements.push_back(func_tuple.second);
+      exportFunction(
+          exportSet, ModuleMethod{module, setstate, std::move(qn)}, toplevel);
     }
   } else {
     for (size_t i = 0, n = type->numAttributes(); i < n; ++i) {
-      setstateTuple(
-          module,
-          obj->getSlot(i),
-          elements,
-          qn_cache,
-          debug_info_elements,
-          debug_info_recorder,
-          type_name_uniquer_);
+      setstateTuple(exportSet, module, obj->getSlot(i), type_name_uniquer_);
     }
   }
 }
@@ -402,94 +217,25 @@ SourceRangeRecords getBackendSourceRanges(const Module& m) {
   return sr_records;
 }
 
-std::unordered_set<InterfaceType*> getModuleInterfaces(const Module& module) {
-  std::unordered_set<InterfaceType*> ret;
-  for (const auto& m : module.get_methods()) {
-    auto nodes = findAllNodes(*m.graph(), c10::prim::CallMethod, true);
-    for (Node* node : nodes) {
-      if (auto iface = node->input(0)->type()->castRaw<InterfaceType>()) {
-        ret.insert(iface);
-      }
-    }
-  }
-  for (const auto& c : module.children()) {
-    auto types = getModuleInterfaces(c);
-    ret.insert(types.begin(), types.end());
-  }
-  return ret;
-}
-
-void getModuleInterfaceDefs(
-    const Module& module,
-    const std::unordered_set<InterfaceType*>& interfaces,
-    BackendDebugInfoRecorder& recorder,
-    TypeNameUniquer& uniquer,
-    std::unordered_map<std::string, Function*>& ret) {
-  for (const auto& m : module.get_methods()) {
-    for (auto interface : interfaces) {
-      if (interface->getMethod(m.name())) {
-        auto qn = m.function().qualname().qualifiedName();
-        ret.emplace(qn, &m.function());
-      }
-    }
-  }
-  for (const auto& c : module.children()) {
-    getModuleInterfaceDefs(c, interfaces, recorder, uniquer, ret);
-  }
-}
-
-std::unordered_map<std::string, Function*> getModuleInterfaceDefs(
-    const Module& module,
-    BackendDebugInfoRecorder& recorder,
-    TypeNameUniquer& uniquer) {
-  std::unordered_map<std::string, Function*> ret;
-  getModuleInterfaceDefs(
-      module, getModuleInterfaces(module), recorder, uniquer, ret);
-  return ret;
-}
 } // namespace
 
-void moduleMethodsTuple(
+BytecodeExportSet moduleMethodsTuple(
     const Module& module,
-    std::vector<c10::IValue>& elements, // note: appended to in-place
-    std::vector<c10::IValue>& debug_info_elements,
-    BackendDebugInfoRecorder& debug_info_recorder,
-    TypeNameUniquer& type_name_uniquer_,
-    std::unordered_map<std::string, Function*>& interface_defs) {
+    TypeNameUniquer& type_name_uniquer_) {
+  BytecodeExportSet exportSet;
   auto methods = module.get_methods();
-  std::unordered_set<std::string> qn_cache;
   // top level methods
   for (const auto& method : methods) {
-    const auto qn = method.function().qualname().qualifiedName();
-    if (qn_cache.find(qn) != qn_cache.end()) {
-      continue;
-    }
-    auto it = interface_defs.find(qn);
-    bool isInterface = it != interface_defs.end();
-    if (isInterface) {
-      interface_defs.erase(it);
-    }
-    auto func_tuple = getFunctionTuple(
-        module,
-        method.function(),
-        debug_info_recorder,
-        qn,
-        type_name_uniquer_,
-        isInterface);
-    elements.push_back(func_tuple.first);
-    qn_cache.emplace(qn);
-    debug_info_elements.push_back(func_tuple.second);
+    exportFunction(
+        exportSet,
+        ModuleMethod{module, method.function(), method.function().qualname()},
+        /* toplevel */ true);
   }
 
   // __setstate__ of all components
-  setstateTuple(
-      module,
-      module._ivalue(),
-      elements,
-      qn_cache,
-      debug_info_elements,
-      debug_info_recorder,
-      type_name_uniquer_);
+  setstateTuple(exportSet, module, module._ivalue(), type_name_uniquer_, true);
+
+  return exportSet;
 }
 
 void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook) {
@@ -704,28 +450,10 @@ void ScriptModuleSerializer::writeByteCode(
   // Always save debug handles
   debug_info_elements.emplace_back(static_cast<int64_t>(version_to_write));
 
-  auto interface_defs =
-      getModuleInterfaceDefs(module, debug_info_recorder, type_name_uniquer_);
+  BytecodeExportSet exportSet = moduleMethodsTuple(module, type_name_uniquer_);
+  exportSet.exportIValues(
+      elements, debug_info_elements, debug_info_recorder, type_name_uniquer_);
 
-  moduleMethodsTuple(
-      module,
-      elements,
-      debug_info_elements,
-      debug_info_recorder,
-      type_name_uniquer_,
-      interface_defs);
-
-  for (const auto& p : interface_defs) {
-    auto t = getFunctionTuple(
-        module,
-        *p.second,
-        debug_info_recorder,
-        p.first,
-        type_name_uniquer_,
-        true);
-    elements.push_back(std::move(t.first));
-    debug_info_elements.push_back(std::move(t.second));
-  }
   auto telements = to_tuple(std::move(elements));
   writeArchive(
       telements,
@@ -907,12 +635,10 @@ void ExportModule(
 namespace {
 void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
   std::vector<c10::IValue> elements;
-  std::vector<c10::IValue> debug_info_elements;
   BackendDebugInfoRecorder dummy;
   TypeNameUniquer dummy_uniquer = TypeNameUniquer();
-  std::unordered_map<std::string, Function*> dummy_i;
-  moduleMethodsTuple(
-      m, elements, debug_info_elements, dummy, dummy_uniquer, dummy_i);
+  BytecodeExportSet exportSet = moduleMethodsTuple(m, dummy_uniquer);
+  exportSet.exportIValues(elements, dummy, dummy_uniquer);
   for (const auto& element : elements) {
     auto table = element.toTuple()->elements()[1];
     auto row =
@@ -949,11 +675,21 @@ std::vector<std::string> export_opnames(const script::Module& m) {
 // or not. It's the major difference between bytecode v5 and v6.
 thread_local bool emitBytecodeDefaultInputs =
     caffe2::serialize::kProducedBytecodeVersion <= 5 ? true : false;
-bool BytecodeEmitDefaultValueForUnspecifiedArgMode::is_enabled() {
+bool BytecodeEmitMode::is_default_value_for_unspecified_arg_enabled() {
   return emitBytecodeDefaultInputs;
 }
-void BytecodeEmitDefaultValueForUnspecifiedArgMode::set_enabled(bool enabled) {
+void BytecodeEmitMode::set_default_value_for_unspecified_arg_enabled(
+    bool enabled) {
   emitBytecodeDefaultInputs = enabled;
+}
+
+thread_local bool emitDefautlArgsWithOutArgs =
+    caffe2::serialize::kProducedBytecodeVersion <= 6 ? false : true;
+bool BytecodeEmitMode::is_default_args_before_out_args_enabled() {
+  return emitDefautlArgsWithOutArgs;
+}
+void BytecodeEmitMode::set_default_args_before_out_args_enabled(bool enabled) {
+  emitDefautlArgsWithOutArgs = enabled;
 }
 
 } // namespace jit
