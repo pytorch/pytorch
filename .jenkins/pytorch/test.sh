@@ -289,7 +289,7 @@ test_aot_model_compiler() {
   echo "Testing AOT Model compiler.."
   ls "$TORCH_BIN_DIR"/test_aot_model_compiler
   # ls "$BUILD_BIN_DIR"/aot_model_compiler
-  source test/mobile/aot_compile/test.sh
+  source test/mobile/nnc/test_aot_compile.sh
 }
 
 test_vulkan() {
