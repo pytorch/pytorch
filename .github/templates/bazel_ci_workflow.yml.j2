@@ -32,9 +32,9 @@ on:
     steps:
       !{{ common.setup_ec2_linux() }}
       !{{ common.checkout_pytorch("recursive") }}
-      - name: Pull docker image
+      - name: Pull Docker image
         run: |
-          docker pull "${DOCKER_IMAGE}"
+          !{{ common.pull_docker("${DOCKER_IMAGE}") }}
       - name: Determine shm-size
         run: |
           shm_size="1g"
@@ -109,6 +109,7 @@ on:
             -e GITHUB_ACTIONS \
             -e IN_CI \
             -e SHARD_NUMBER \
+            -e NUM_TEST_SHARDS \
             -e JOB_BASE_NAME \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \

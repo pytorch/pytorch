@@ -1,10 +1,10 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/ceil_div.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/UpSample.cuh>
 
 namespace at {
@@ -104,7 +104,7 @@ static void upsample_nearest1d_out_cuda_template(
   unsigned int n = output.numel() / nbatch;
   dim3 bdim{std::min<unsigned int>(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
-  dim3 gdim{cuda::ATenCeilDiv(n, bdim.x)};
+  dim3 gdim{ceil_div(n, bdim.x)};
   // safe check for int32 indexing; implicitly restrict launch config for kernel
   TORCH_CHECK(output.numel() <= std::numeric_limits<int32_t>::max());
 
@@ -151,7 +151,7 @@ static void upsample_nearest1d_backward_out_cuda_template(
   unsigned int n = grad_input.numel() / nbatch;
   dim3 bdim{std::min<unsigned int>(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
-  dim3 gdim{cuda::ATenCeilDiv(n, bdim.x)};
+  dim3 gdim{ceil_div(n, bdim.x)};
   // safe check for int32 indexing; implicitly restrict launch config for kernel
   TORCH_CHECK(grad_input.numel() <= std::numeric_limits<int32_t>::max());
 
