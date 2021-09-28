@@ -1,10 +1,14 @@
 import warnings
-from typing import List, NamedTuple, Iterable, Any, Optional, Tuple, Sequence
+from typing import List, NamedTuple, Iterable, Any, Optional, Tuple, Sequence, Dict
 
 import tensorrt as trt
 import torch
 import torch.fx
 from torch.fx.node import _get_qualified_name
+from torch.fx.passes.shape_prop import TensorMetadata
+
+
+TRTInterpreterResult = Tuple[Any, Sequence[str], Sequence[str]]
 
 
 # Borrowed from torch2trt
@@ -39,31 +43,52 @@ def torch_dtype_from_trt(dtype):
 
 
 class TRTModule(torch.nn.Module):
-    def __init__(
-        self, engine=None, input_names=None, output_names=None, fp16_output=False
-    ):
+    def __init__(self, engine=None, input_names=None, output_names=None):
         super(TRTModule, self).__init__()
         self._register_state_dict_hook(TRTModule._on_state_dict)
         self.engine = engine
-        if self.engine is not None:
-            self.context = self.engine.create_execution_context()
         self.input_names = input_names
         self.output_names = output_names
+        self.initialized = False
 
-        # Indicate output is in fp16
-        self.fp16_output = fp16_output
+        if engine:
+            self._initialize()
 
-        # Indices of outputs into the CUDA engine bindings, in the order as they are
-        # in the fx graph's `output` node.
-        self.output_indices_in_order: Sequence[int] = [
+    def _initialize(self):
+        self.initialized = True
+        self.context = self.engine.create_execution_context()
+
+        # Indices of inputs/outputs in the trt engine bindings, in the order
+        # as they are in the original PyTorch model.
+        self.input_binding_indices_in_order: Sequence[int] = [
+            self.engine.get_binding_index(name) for name in self.input_names
+        ]
+        self.output_binding_indices_in_order: Sequence[int] = [
             self.engine.get_binding_index(name) for name in self.output_names
         ]
 
+        self.input_dtypes: Sequence[torch.dtype] = [
+            torch_dtype_from_trt(self.engine.get_binding_dtype(idx))
+            for idx in self.input_binding_indices_in_order
+        ]
+        self.input_shapes: Sequence[Sequence[int]] = [
+            tuple(self.engine.get_binding_shape(idx))
+            for idx in self.input_binding_indices_in_order
+        ]
+        self.output_dtypes: Sequence[torch.dtype] = [
+            torch_dtype_from_trt(self.engine.get_binding_dtype(idx))
+            for idx in self.output_binding_indices_in_order
+        ]
+
+    def _check_initialized(self):
+        if not self.initialized:
+            raise RuntimeError("TRTModule is not initialized.")
+
     def _on_state_dict(self, state_dict, prefix, local_metadata):
+        self._check_initialized()
         state_dict[prefix + "engine"] = bytearray(self.engine.serialize())
         state_dict[prefix + "input_names"] = self.input_names
         state_dict[prefix + "output_names"] = self.output_names
-        state_dict[prefix + "fp16_output"] = self.fp16_output
 
     def _load_from_state_dict(
         self,
@@ -79,60 +104,99 @@ class TRTModule(torch.nn.Module):
 
         with trt.Logger() as logger, trt.Runtime(logger) as runtime:
             self.engine = runtime.deserialize_cuda_engine(engine_bytes)
-            self.context = self.engine.create_execution_context()
 
         self.input_names = state_dict[prefix + "input_names"]
         self.output_names = state_dict[prefix + "output_names"]
+        self._initialize()
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop('context', None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        if self.engine:
+            self.context = self.engine.create_execution_context()
 
     def forward(self, *inputs):
-        assert len(inputs) == len(
-            self.input_names
-        ), f"Wrong number of inputs, expect {len(self.input_names)} get {len(inputs)}."
-        batch_size = inputs[0].shape[0]
-        contiguous_inputs: List[torch.Tensor] = [i.contiguous() for i in inputs]
-        bindings: List[Any] = [None] * (len(self.input_names) + len(self.output_names))
+        with torch.autograd.profiler.record_function("TRTModule:Forward"):
+            self._check_initialized()
 
-        for i, input_name in enumerate(self.input_names):
-            assert inputs[i].is_cuda, f"{i}th input is not on cuda device."
-            idx = self.engine.get_binding_index(input_name)
-            bindings[idx] = contiguous_inputs[i].data_ptr()
+            with torch.autograd.profiler.record_function("TRTModule:ProcessInputs"):
+                assert len(inputs) == len(
+                    self.input_names
+                ), f"Wrong number of inputs, expect {len(self.input_names)} get {len(inputs)}."
 
-            if not self.engine.has_implicit_batch_dimension:
-                self.context.set_binding_shape(idx, tuple(contiguous_inputs[i].shape))
+                # This is only used when the trt engine is using implicit batch dim.
+                batch_size = inputs[0].shape[0]
+                contiguous_inputs: List[torch.Tensor] = [i.contiguous() for i in inputs]
+                bindings: List[Any] = [None] * (
+                    len(self.input_names) + len(self.output_names)
+                )
 
-        # create output tensors
-        outputs: List[torch.Tensor] = []
-        for idx in self.output_indices_in_order:
-            dtype = torch_dtype_from_trt(self.engine.get_binding_dtype(idx))
+                for i, input_name in enumerate(self.input_names):
+                    assert inputs[
+                        i
+                    ].is_cuda, f"{i}th input({input_name}) is not on cuda device."
+                    assert (
+                        inputs[i].dtype == self.input_dtypes[i]
+                    ), f"Dtype mismatch for {i}th input({input_name}). Expect {self.input_dtypes[i]}, got {inputs[i].dtype}."
 
-            if self.engine.has_implicit_batch_dimension:
-                shape = (batch_size,) + tuple(self.engine.get_binding_shape(idx))
-            else:
-                shape = tuple(self.context.get_binding_shape(idx))
+                    idx = self.input_binding_indices_in_order[i]
+                    bindings[idx] = contiguous_inputs[i].data_ptr()
 
-            output = torch.empty(size=shape, dtype=dtype, device="cuda")
-            outputs.append(output)
-            bindings[idx] = output.data_ptr()
+                    if not self.engine.has_implicit_batch_dimension:
+                        self.context.set_binding_shape(
+                            idx, tuple(contiguous_inputs[i].shape)
+                        )
+                    else:
+                        assert (
+                            inputs[i].size()[1:] == self.input_shapes[i]
+                        ), f"Shape mismatch for {i}th input({input_name}). " \
+                           f"Expect {self.input_shapes[i]}, got {inputs[i].size()[1:]}."
 
-        if self.engine.has_implicit_batch_dimension:
-            self.context.execute_async(
-                batch_size, bindings, torch.cuda.current_stream().cuda_stream
-            )
-        else:
-            self.context.execute_async_v2(
-                bindings, torch.cuda.current_stream().cuda_stream
-            )
+            with torch.autograd.profiler.record_function("TRTModule:ProcessOutputs"):
+                # create output tensors
+                outputs: List[torch.Tensor] = []
+                for i, idx in enumerate(self.output_binding_indices_in_order):
+                    if self.engine.has_implicit_batch_dimension:
+                        shape = (batch_size,) + tuple(
+                            self.engine.get_binding_shape(idx)
+                        )
+                    else:
+                        shape = tuple(self.context.get_binding_shape(idx))
 
-        if len(outputs) == 1:
-            return outputs[0]
+                    output = torch.empty(  # type: ignore[call-overload]
+                        size=shape,
+                        dtype=self.output_dtypes[i],
+                        device=torch.cuda.current_device(),
+                    )
+                    outputs.append(output)
+                    bindings[idx] = output.data_ptr()
 
-        return tuple(outputs)
+            with torch.autograd.profiler.record_function("TRTModule:TensorRTRuntime"):
+                if self.engine.has_implicit_batch_dimension:
+                    self.context.execute_async(
+                        batch_size, bindings, torch.cuda.current_stream().cuda_stream
+                    )
+                else:
+                    self.context.execute_async_v2(
+                        bindings, torch.cuda.current_stream().cuda_stream
+                    )
+
+            if len(outputs) == 1:
+                return outputs[0]
+
+            return tuple(outputs)
 
     def enable_profiling(self):
-        raise RuntimeError(
-            "Profiling is not supported right now because it requires calling"
-            " execute() instead of execute_async()."
-        )
+        """
+        Enable TensorRT profiling. After calling this function, TensorRT will report
+        time spent on each layer in stdout for each forward run.
+        """
+        self._check_initialized()
+
         if not self.context.profiler:
             self.context.profiler = trt.Profiler()
 
@@ -205,9 +269,7 @@ def create_inputs_from_specs(input_specs):
         elif not has_batch_dim:
             shape = (1,) + tuple(shape)
 
-        inputs.append(
-            torch.randn(shape).to(dtype=dtype, device=device)
-        )
+        inputs.append(torch.randn(shape).to(dtype=dtype, device=device))
 
     return inputs
 
@@ -218,6 +280,7 @@ class TRTInterpreter(torch.fx.Interpreter):
         module: torch.fx.GraphModule,
         input_specs: List[InputTensorSpec],
         explicit_batch_dimension: bool = False,
+        explicit_precision: bool = False,
         logger_level=trt.Logger.WARNING,
     ):
         super().__init__(module)
@@ -225,18 +288,26 @@ class TRTInterpreter(torch.fx.Interpreter):
         self.logger = trt.Logger(logger_level)
         self.builder = trt.Builder(self.logger)
 
+        flag = 0
         if explicit_batch_dimension:
             EXPLICIT_BATCH = 1 << (int)(
                 trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH
             )
-            self.network = self.builder.create_network(EXPLICIT_BATCH)
-        else:
-            self.network = self.builder.create_network()
+            flag |= EXPLICIT_BATCH
+
+        if explicit_precision:
+            EXPLICIT_PRECISION = 1 << (int)(
+                trt.NetworkDefinitionCreationFlag.EXPLICIT_PRECISION
+            )
+            flag |= EXPLICIT_PRECISION
+        self.network = self.builder.create_network(flag)
 
         missing_ops = self.validate_conversion()
         if missing_ops:
-            warnings.warn("Interpretation will fail due to missing operations \n"
-                          + "\n".join(f"{i}" for i in missing_ops))
+            warnings.warn(
+                "Interpretation will fail due to missing operations \n"
+                + "\n".join(f"{i}" for i in missing_ops)
+            )
 
         self.optimization_profiles: Optional[List] = None
         self.input_specs = input_specs
@@ -245,6 +316,7 @@ class TRTInterpreter(torch.fx.Interpreter):
         self._cur_node_name: Optional[str] = None
         self._input_names: List[str] = []
         self._output_names: List[str] = []
+        self._itensor_to_tensor_meta: Dict[trt.tensorrt.ITensor, TensorMetadata] = dict()
 
     def validate_input_specs(self):
         for shape, dtpe, _, shape_ranges, has_batch_dim in self.input_specs:
@@ -326,7 +398,7 @@ class TRTInterpreter(torch.fx.Interpreter):
         fp16_mode=True,
         int8_mode=False,
         strict_type_constraints=True,
-    ):
+    ) -> TRTInterpreterResult:
         # TODO hack, should check contents of args and remove fp16_mode probably
         self.fp16_mode = fp16_mode
 
@@ -361,7 +433,23 @@ class TRTInterpreter(torch.fx.Interpreter):
 
     def run_node(self, n):
         self._cur_node_name = str(n)
-        return super().run_node(n)
+        # add "_itensor_to_tensor_meta"
+        kwargs = dict(n.kwargs)
+        kwargs["_itensor_to_tensor_meta"] = self._itensor_to_tensor_meta
+        n.kwargs = kwargs
+
+        # run the node
+        trt_node = super().run_node(n)
+
+        # remove "_itensor_to_tensor_meta"
+        kwargs = dict(n.kwargs)
+        del kwargs["_itensor_to_tensor_meta"]
+        n.kwargs = kwargs
+
+        if isinstance(trt_node, trt.tensorrt.ITensor):
+            self._itensor_to_tensor_meta[trt_node] = n.meta.get("tensor_meta")
+
+        return trt_node
 
     def placeholder(self, target, args, kwargs):
         self._input_names.append(target)
@@ -389,7 +477,9 @@ class TRTInterpreter(torch.fx.Interpreter):
         converter = CONVERTERS.get(submod_type)
 
         if not converter:
-            raise RuntimeError(f'Conversion of module of type {submod_type} not currently supported!')
+            raise RuntimeError(
+                f"Conversion of module of type {submod_type} not currently supported!"
+            )
 
         return converter(self.network, submod, args, kwargs, self._cur_node_name)
 
