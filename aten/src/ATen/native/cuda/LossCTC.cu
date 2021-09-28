@@ -15,7 +15,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/Atomic.cuh>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/CUDAContext.h>
 
 #include <type_traits>
 #include <numeric>

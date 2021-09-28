@@ -1,6 +1,6 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
@@ -130,7 +130,7 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
     const int SZ = 4;
     values = values.contiguous();
     int64_t stride = c10::multiply_integers(values.sizes().slice(1));
-    dim3 grid(THCCeilDiv(newNnz, (int64_t) SZ), THCCeilDiv(stride, (int64_t) C10_WARP_SIZE*SZ));
+    dim3 grid(ceil_div(newNnz, (int64_t) SZ), ceil_div(stride, (int64_t) C10_WARP_SIZE*SZ));
     dim3 block(C10_WARP_SIZE, SZ);
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16, values.scalar_type(), "coalesce_sparse_cuda", [&] {
@@ -152,7 +152,7 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
   // to different sizes
   // int64_t blockX = min(stride, (int64_t) 512);
   // dim3 block(blockX, 512 / blockX);
-  // int64_t grid = min((int64_t) 1024, THCCeilDiv((int64_t) newNnz * stride, (int64_t) block.x * block.y));
+  // int64_t grid = min((int64_t) 1024, ceil_div((int64_t) newNnz * stride, (int64_t) block.x * block.y));
   // THCSTensor_coalesceValuesKernel_gridStrided<real, accreal><<<grid, block, 0, stream> >>(
   //   THCIndexTensor_(data)(state, uniqueOffsets),
   //   THCIndexTensor_(data)(state, origIndices),
@@ -259,7 +259,7 @@ Tensor sparse_mask_helper_cuda(
   // Step 4: Copy the Filtered `t._values()` using the matches at `t_indices_pos`
   if (r_nnz > 0 && t_values.numel() > 0) {
     int64_t block_size = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
-    auto grid_size = cuda::ATenCeilDiv(r_nnz, block_size);
+    auto grid_size = ceil_div(r_nnz, block_size);
 
     auto t_indices_ti = getTensorInfo<int64_t, int64_t>(t_flatten_indices);
     auto mask_indices_ti =
