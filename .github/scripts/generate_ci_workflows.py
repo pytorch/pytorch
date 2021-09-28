@@ -52,6 +52,7 @@ LABEL_CIFLOW_WIN = "ciflow/win"
 LABEL_CIFLOW_XLA = "ciflow/xla"
 LABEL_CIFLOW_NOARCH = "ciflow/noarch"
 LABEL_CIFLOW_PREFIX = "ciflow/"
+LABEL_CIFLOW_SLOW_GRADCHECK = "ciflow/slow-gradcheck"
 
 
 @dataclass
@@ -467,6 +468,20 @@ LINUX_WORKFLOWS = [
         ciflow_config=CIFlowConfig(
             enabled=True,
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_XLA, LABEL_CIFLOW_NOARCH},
+        ),
+    ),
+    CIWorkflow(
+        arch="linux",
+        build_environment="pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
+        test_runner_type=LINUX_CUDA_TEST_RUNNER,
+        on_pull_request=True,
+        num_test_shards=2,
+        distributed_test=False,
+        is_scheduled="45 0,4,8,12,16,20 * * *",
+        ciflow_config=CIFlowConfig(
+            enabled=True,
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_SLOW_GRADCHECK},
         ),
     ),
     # CIWorkflow(
