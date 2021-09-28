@@ -79,7 +79,7 @@ def disable_apex_o2_state_dict_hook(model):
     # Exporter cannot identify them as same tensors.
     # Since this hook is only used by optimizer, it is safe to
     # remove this hook while exporting.
-    tmp_map = {}
+    tmp_map = {}  # type: ignore[var-annotated]
     for module in model.modules():
         for k, v in module._state_dict_hooks.items():
             if type(v).__name__ == 'O2StateDictHook':
@@ -99,7 +99,7 @@ def disable_apex_o2_state_dict_hook(model):
 @contextlib.contextmanager
 def exporter_context(model, mode):
     with select_model_mode_for_export(model, mode) as mode_ctx, \
-        disable_apex_o2_state_dict_hook(model) as apex_ctx:
+            disable_apex_o2_state_dict_hook(model) as apex_ctx:
         yield (mode_ctx, apex_ctx)
 
 def export(model, args, f, export_params=True, verbose=False, training=None,
