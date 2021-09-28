@@ -165,9 +165,12 @@ def backward(
     if retain_graph is None:
         retain_graph = create_graph
 
-    # Calls into C++ autograd engine
-    Variable._execution_engine.run_backward(tensors, grad_tensors_, retain_graph, create_graph, inputs, allow_unreachable=True, accumulate_grad=True)  # noqa: B950
-
+    # The reason we repeat same the comment below is that
+    # some Python versions print out the first line of a multi-line function
+    # calls in the traceback and some print out the last line
+    Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+        tensors, grad_tensors_, retain_graph, create_graph, inputs,
+        allow_unreachable=True, accumulate_grad=True)  # Calls into the C++ engine to run the backward pass
 
 def grad(
     outputs: _TensorOrTensors,
@@ -257,14 +260,19 @@ def grad(
     if retain_graph is None:
         retain_graph = create_graph
 
+    # The reason we repeat same the comment several times below is because
+    # some Python versions print out the first line of multi-line function
+    # calls in the traceback and some print out the last line
     if is_grads_batched:
         def vjp(gO):
-            # Call into C++ autograd engine
-            return Variable._execution_engine.run_backward(outputs, gO, retain_graph, create_graph, inputs, allow_unused, accumulate_grad=False)  # noqa: B950
+            return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+                outputs, gO, retain_graph, create_graph, inputs,
+                allow_unused, accumulate_grad=False)  # Calls into the C++ engine to run the backward pass
         return _vmap_internals._vmap(vjp, 0, 0)(grad_outputs)
     else:
-        # Call into C++ autograd engine
-        return Variable._execution_engine.run_backward(outputs, grad_outputs_, retain_graph, create_graph, inputs, allow_unused, accumulate_grad=False)  # noqa: B950
+        return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+            outputs, grad_outputs_, retain_graph, create_graph, inputs,
+            allow_unused, accumulate_grad=False)  # Calls into the C++ engine to run the backward pass
 
 
 # This function applies in case of gradient checkpointing for memory
