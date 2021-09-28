@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
