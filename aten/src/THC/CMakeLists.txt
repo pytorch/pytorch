@@ -29,10 +29,6 @@ install(FILES
           THCAtomics.cuh
           THCAllocator.h
           THCCachingHostAllocator.h
-          THCDeviceTensor.cuh
-          THCDeviceTensor-inl.cuh
-          THCDeviceTensorUtils.cuh
-          THCDeviceTensorUtils-inl.cuh
           THCGenerateAllTypes.h
           THCGenerateBFloat16Type.h
           THCGenerateBoolType.h
