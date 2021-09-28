@@ -746,7 +746,7 @@
 
 - func: bartlett_window.periodic(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
-- func: batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor
+- func: batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor(a!)? running_mean, Tensor(b!)? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor
 
 - func: quantized_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor
   dispatch:
@@ -2259,7 +2259,7 @@
   dispatch:
     CPU, CUDA: _index_put_impl_
 
-- func: instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor
+- func: instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor(a!)? running_mean, Tensor(b!)? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor
   variants: function
 
 - func: inverse(Tensor self) -> Tensor
@@ -3198,7 +3198,7 @@
   dispatch:
     CUDA: batch_norm_backward_elemt_cuda
 
-- func: batch_norm_update_stats(Tensor input, Tensor? running_mean, Tensor? running_var, float momentum) -> (Tensor, Tensor)
+- func: batch_norm_update_stats(Tensor input, Tensor(a!)? running_mean, Tensor(b!)? running_var, float momentum) -> (Tensor, Tensor)
   dispatch:
     CPU: batch_norm_update_stats_cpu
     CUDA: batch_norm_update_stats_cuda

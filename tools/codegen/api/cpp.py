@@ -80,7 +80,7 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
     elif isinstance(t, OptionalType):
         if str(t.elem) == 'Tensor':
             if mutable and not local.use_const_ref_for_mutable_tensors():
-                return NamedCType(binds, MutRefCType(BaseCType(tensorT)))  # TODO: fix this discrepancy
+                return NamedCType(binds, MutRefCType(OptionalCType(BaseCType(tensorT))))
             else:
                 return NamedCType(binds, ConstRefCType(OptionalCType(BaseCType(tensorT))))
         elif str(t.elem) == 'Scalar':

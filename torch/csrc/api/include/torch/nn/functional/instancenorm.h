@@ -8,12 +8,15 @@ namespace functional {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
-inline Tensor instance_norm(const Tensor& input, const Tensor& running_mean,
-    const Tensor& running_var, const Tensor& weight, const Tensor& bias,
+inline Tensor instance_norm(const Tensor& input, Tensor& running_mean,
+    Tensor& running_var, const Tensor& weight, const Tensor& bias,
     bool use_input_stats, double momentum, double eps) {
 
+  auto running_mean_opt = c10::optional<Tensor>(running_mean);
+  auto running_var_opt = c10::optional<Tensor>(running_var);
+
   return torch::instance_norm(
-    input, weight, bias, running_mean, running_var,
+    input, weight, bias, running_mean_opt, running_var_opt,
     use_input_stats, momentum, eps, at::globalContext().userEnabledCuDNN()
   );
 }
@@ -31,7 +34,7 @@ inline Tensor instance_norm(const Tensor& input, const Tensor& running_mean,
 /// namespace F = torch::nn::functional;
 /// F::instance_norm(input, F::InstanceNormFuncOptions().running_mean(mean).running_var(variance).weight(weight).bias(bias).momentum(0.1).eps(1e-5));
 /// ```
-inline Tensor instance_norm(const Tensor& input, const InstanceNormFuncOptions& options = {}) {
+inline Tensor instance_norm(const Tensor& input, InstanceNormFuncOptions& options) {
   return detail::instance_norm(
     input, options.running_mean(),
     options.running_var(), options.weight(), options.bias(),
