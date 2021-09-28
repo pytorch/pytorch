@@ -1,14 +1,12 @@
 #include <ATen/ATen.h>
+#include <ATen/ceil_div.h>
 #include <ATen/cuda/Atomic.cuh>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <c10/util/Exception.h>
-#include <THC/THCGeneral.h>
-#include <THC/THCNumerics.cuh>
-#include <THC/THCDeviceUtils.cuh>
 
 #include <algorithm>
 #include <cfloat>
@@ -267,7 +265,7 @@ void replication_pad2d_backward_out_cuda_template(
           for (int64_t block_z = 0; block_z < size0; block_z += 65535) {
             int64_t block_z_size = std::min(size0 - block_z, static_cast<int64_t>(65535));
 
-            dim3 gridSize(THCCeilDiv(outputPlaneSize, static_cast<int64_t>(256)), block_y_size, block_z_size);
+            dim3 gridSize(ceil_div(outputPlaneSize, static_cast<int64_t>(256)), block_y_size, block_z_size);
             dim3 blockSize(outputPlaneSize > 256 ? 256 : outputPlaneSize);
 
             replication_pad_backward_kernel <<<gridSize, blockSize, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -432,7 +430,7 @@ void replication_pad3d_backward_out_cuda_template(
         for (int64_t block_z = 0; block_z < size0; block_z += 65535) {
           int64_t block_z_size = std::min(size0 - block_z, static_cast<int64_t>(65535));
 
-          dim3 gridSize(THCCeilDiv(outputPlaneSize, static_cast<int64_t>(256)), block_y_size, block_z_size);
+          dim3 gridSize(ceil_div(outputPlaneSize, static_cast<int64_t>(256)), block_y_size, block_z_size);
           dim3 blockSize(outputPlaneSize > 256 ? 256 : outputPlaneSize);
 
           replication_pad_backward_kernel <<<gridSize, blockSize, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -487,7 +485,7 @@ TORCH_IMPL_FUNC(replication_pad1d_out_cuda) (
         for (int64_t block_z = 0; block_z < size0; block_z += 65535) {
           int64_t block_z_size = std::min(size0 - block_z, static_cast<int64_t>(65535));
 
-          dim3 gridSize(THCCeilDiv(outputPlaneSize, static_cast<int64_t>(256)), block_y_size, block_z_size);
+          dim3 gridSize(ceil_div(outputPlaneSize, static_cast<int64_t>(256)), block_y_size, block_z_size);
           dim3 blockSize(outputPlaneSize > 256 ? 256 : outputPlaneSize);
 
           replication_pad_forward_kernel1d <<<gridSize, blockSize, 0,
@@ -553,7 +551,7 @@ TORCH_IMPL_FUNC(replication_pad1d_backward_out_cuda) (
         for (int64_t block_z = 0; block_z < size0; block_z += 65535) {
           int64_t block_z_size = std::min(size0 - block_z, static_cast<int64_t>(65535));
 
-          dim3 gridSize(THCCeilDiv(outputPlaneSize, static_cast<int64_t>(256)), block_y_size, block_z_size);
+          dim3 gridSize(ceil_div(outputPlaneSize, static_cast<int64_t>(256)), block_y_size, block_z_size);
           dim3 blockSize(outputPlaneSize > 256 ? 256 : outputPlaneSize);
 
           replication_pad_backward_kernel <<<gridSize, blockSize, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -593,7 +591,7 @@ TORCH_IMPL_FUNC(replication_pad2d_out_cuda) (
         int64_t block_y_size = std::min(size1 - block_y, static_cast<int64_t>(65535));
         for (int64_t block_z = 0; block_z < size0; block_z += 65535) {
           int64_t block_z_size = std::min(size0 - block_z, static_cast<int64_t>(65535));
-          dim3 gridSize(THCCeilDiv(outputPlaneSize, static_cast<int64_t>(256)), block_y_size, block_z_size);
+          dim3 gridSize(ceil_div(outputPlaneSize, static_cast<int64_t>(256)), block_y_size, block_z_size);
           dim3 blockSize(outputPlaneSize > 256 ? 256 : outputPlaneSize);
           replication_pad_forward_kernel2d <<<gridSize, blockSize, 0, at::cuda::getCurrentCUDAStream()>>>(
               devInput, devOutput, padT, padB, padL, padR, block_y, block_z);
@@ -689,7 +687,7 @@ TORCH_IMPL_FUNC(replication_pad3d_out_cuda) (
         for (int64_t block_z = 0; block_z < size0; block_z += 65535) {
           int64_t block_z_size = std::min(size0 - block_z, static_cast<int64_t>(65535));
 
-          dim3 gridSize(THCCeilDiv(outputPlaneSize, static_cast<int64_t>(256)), block_y_size, block_z_size);
+          dim3 gridSize(ceil_div(outputPlaneSize, static_cast<int64_t>(256)), block_y_size, block_z_size);
           dim3 blockSize(outputPlaneSize > 256 ? 256 : outputPlaneSize);
 
           replication_pad_forward_kernel3d <<<gridSize, blockSize, 0, at::cuda::getCurrentCUDAStream()>>>(

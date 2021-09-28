@@ -130,8 +130,8 @@ c10::StrongTypePtr typeResolverMobile(
 
 c10::intrusive_ptr<c10::ivalue::Object> objLoaderMobile(
     const at::StrongTypePtr& type,
-    IValue input,
-    std::shared_ptr<mobile::CompilationUnit> mobile_compilation_unit) {
+    const IValue& input,
+    const mobile::CompilationUnit& mobile_compilation_unit) {
   auto cls = type.type_->expect<at::ClassType>();
   auto qn = cls->name();
   c10::QualifiedName method_name(qn.value(), "__setstate__");
@@ -448,7 +448,7 @@ c10::IValue BytecodeDeserializer::readArchive(
   };
 
   auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
-    return objLoaderMobile(type, input, mcu);
+    return objLoaderMobile(type, input, *mcu);
   };
 
   bool bytecode_tensor_in_constants_archive =
