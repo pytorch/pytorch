@@ -848,9 +848,8 @@ def sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwar
     inputs: List[SampleInput] = []
     for sample_input in sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
         for mask in _generate_masked_reduction_mask(sample_input.input.shape, device, **kwargs):
-            inputs.append(SampleInput(sample_input.input,
-                                      args=sample_input.args,
-                                      kwargs=dict(mask=mask, **sample_input.kwargs)))
+            args, kwargs = sample_input.args, dict(mask=mask, **sample_input.kwargs)
+            inputs.append(SampleInput(sample_input.input, args=args, kwargs=kwargs))
             if(dtype.is_floating_point and sample_input.input.ndim ==
                2 and mask is not None and mask.shape ==
                sample_input.input.shape):
@@ -858,10 +857,7 @@ def sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwar
                 for v in [torch.inf, -torch.inf, torch.nan]:
                     t = sample_input.input.clone()
                     t.diagonal()[:] = v
-                    inputs.append(SampleInput(t,
-                                              args=sample_input.args,
-                                              kwargs=dict(mask=mask, **sample_input.kwargs)))
-    # TODO: inputs with special values like nan, inf, -inf.
+                    inputs.append(SampleInput(t, args=args, kwargs=kwargs))
     return inputs
 
 
@@ -6026,8 +6022,9 @@ def gradcheck_wrapper_triangular_input(op, input, *args, upper=False, **kwargs):
 def reference_reduction_numpy(f, supports_keepdims=True):
     """Wraps a NumPy reduction operator.
 
-    The wrapper function will forward dim and keepdim kwargs to the wrapped
-    function as the NumPy equivalent axis and keepdims kwargs.
+    The wrapper function will forward dim, keepdim, and mask kwargs to
+    the wrapped function as the NumPy equivalent axis, keepdims, and
+    where kwargs.
 
     Args:
         f: NumPy reduction operator to wrap
@@ -6037,6 +6034,7 @@ def reference_reduction_numpy(f, supports_keepdims=True):
 
     Returns:
         Wrapped function
+
     """
     @wraps(f)
     def wrapper(x: np.ndarray, *args, **kwargs):
@@ -6058,6 +6056,11 @@ def reference_reduction_numpy(f, supports_keepdims=True):
 
         if 'keepdim' in keys and supports_keepdims:
             kwargs['keepdims'] = keepdim
+
+        if 'mask' in keys:
+            mask = kwargs.pop('mask')
+            where = np._NoValue if mask is None else mask.cpu().numpy()
+            kwargs['where'] = where
 
         result = f(x, *args, **kwargs)
 
@@ -10082,7 +10085,7 @@ op_db: List[OpInfo] = [
     ),
     ReductionOpInfo(
         'sparse.masked_sum',
-        ref=np.sum,
+        ref=reference_reduction_numpy(np.sum),
         method_variant=None,
         identity=0,
         nan_policy='propagate',
@@ -10092,13 +10095,13 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         skips=(
             # FIXME: sum does not support passing keepdim without passing dim
-            SkipInfo('TestReductions', 'test_dim_default_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
             # FIXME: sum reduces all dimensions when dim=[]
-            SkipInfo('TestReductions', 'test_dim_empty'),
-            SkipInfo('TestReductions', 'test_dim_empty_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
             # FIXME: sum does not support passing None to dim
-            SkipInfo('TestReductions', 'test_dim_none'),
-            SkipInfo('TestReductions', 'test_dim_none_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
         ),
         supports_sparse=True,
         sample_inputs_func=sample_inputs_masked_reduction

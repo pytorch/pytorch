@@ -3119,40 +3119,30 @@ class TestReductions(TestCase):
         TestSparseMaskedReductions.
         """
 
-        def to_other_inputs(input, *args, **kwargs):
-            assert not args
-            axis = kwargs.get('dim', None)
-            keepdims = kwargs.get('keepdim', np._NoValue)
-
-            mask = kwargs.get('mask')
-            where = np._NoValue if mask is None else mask.cpu().numpy()
-
-            assert_equal_kwargs = dict()
-
+        def to_numpy(input):
             if input.dtype is torch.bfloat16:
-                np_dtype = np.float32
-                a = input.cpu().to(torch.float32).numpy()
+                return input.cpu().to(torch.float32).numpy()
+            else:
+                return input.cpu().numpy()
+
+        def to_assert_equal(input):
+            assert_equal_kwargs = dict(equal_nan=True)
+            if input.dtype is torch.bfloat16:
                 assert_equal_kwargs['exact_dtype'] = False
                 assert_equal_kwargs['rtol'] = 1e-2
                 assert_equal_kwargs['atol'] = 1e-3
-                exact_dtype = False
             else:
-                np_dtype = torch_to_numpy_dtype_dict[dtype]
-                a = input.cpu().numpy()
                 assert_equal_kwargs['exact_dtype'] = True
-                exact_dtype = True
                 if input.dtype is torch.float16:
                     assert_equal_kwargs['rtol'] = 1e-2
                     assert_equal_kwargs['atol'] = 1e-3
-            return (a,), dict(axis=axis, keepdims=keepdims, where=where, dtype=np_dtype), assert_equal_kwargs
+            return assert_equal_kwargs
 
         samples = op.sample_inputs_func(op, device, dtype, requires_grad=False)
         for sample_input in samples:
             t = sample_input.input
-            mask = sample_input.kwargs.get('mask')
             actual = op(t, *sample_input.args, **sample_input.kwargs)
-            numpy_args, numpy_kwargs, assert_equal_kwargs = to_other_inputs(t, *sample_input.args, **sample_input.kwargs)
-            expected = op.ref(*numpy_args, **numpy_kwargs)
+            expected = op.ref(to_numpy(t), *sample_input.args, **sample_input.kwargs)
             msg = ("Failed to produce expected results! Input tensor was"
                    " {0}, torch result is {1}, and reference result is"
                    " {2}.").format(t, actual, expected) if t.numel() < 10 else None
@@ -3163,7 +3153,7 @@ class TestReductions(TestCase):
             outmask = torch.sparse.masked_mask(t, **sample_input.kwargs)
             actual = torch.where(outmask, actual, torch.zeros_like(actual))
             expected = np.where(outmask.cpu().numpy(), expected, np.zeros_like(expected))
-            self.assertEqual(actual, expected, msg, equal_nan=True, **assert_equal_kwargs)
+            self.assertEqual(actual, expected, msg, **to_assert_equal(t))
 
 instantiate_device_type_tests(TestReductions, globals())
 
