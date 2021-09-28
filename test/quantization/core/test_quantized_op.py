@@ -311,8 +311,19 @@ class TestQuantizedOps(TestCase):
                 ],
                 'reference_fn': torch.nn.functional.hardsigmoid,
                 'output_range': (0.0, 1.0),
-                'change_zero_point': True
-            }
+                'change_zero_point': True,
+            },
+            {
+                'quantized_fn': [
+                    torch.nn.quantized.functional.hardsigmoid
+                ],
+                'reference_fn': torch.nn.functional.hardsigmoid,
+                'output_range': (0.0, 1.0),
+                'change_zero_point': True,
+                'extra_kwargs': {
+                    'inplace': True,
+                },
+            },
         ]
         shapes = ((4,), (4, 4), (4, 4, 4), (4, 4, 4, 4))
         dtypes = (torch.quint8, torch.qint8)
