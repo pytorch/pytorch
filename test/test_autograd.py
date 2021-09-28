@@ -4249,25 +4249,25 @@ class TestAutograd(TestCase):
         bwd_fail_err_msg = "FAIL BWD"
 
         class UserFn(Function):
-                @staticmethod
-                def forward(ctx, foo, fwd_bad, bwd_bad):
-                    ctx.fwd_bad = fwd_bad
-                    ctx.bwd_bad = bwd_bad
-                    return foo * 2
+            @staticmethod
+            def forward(ctx, foo, fwd_bad, bwd_bad):
+                ctx.fwd_bad = fwd_bad
+                ctx.bwd_bad = bwd_bad
+                return foo * 2
 
-                @staticmethod
-                def vjp(ctx, gO):
-                    if ctx.bwd_bad:
-                        raise RuntimeError(bwd_fail_err_msg)
-                    else:
-                        return 2 * gO, None, None
+            @staticmethod
+            def vjp(ctx, gO):
+                if ctx.bwd_bad:
+                    raise RuntimeError(bwd_fail_err_msg)
+                else:
+                    return 2 * gO, None, None
 
-                @staticmethod
-                def jvp(ctx, gI, _1, _2):
-                    if ctx.fwd_bad:
-                        raise RuntimeError(fwd_fail_err_msg)
-                    else:
-                        return 2 * gI
+            @staticmethod
+            def jvp(ctx, gI, _1, _2):
+                if ctx.fwd_bad:
+                    raise RuntimeError(fwd_fail_err_msg)
+                else:
+                    return 2 * gI
 
         for fast_mode in (True, False):
             for check_forward_ad in (True, False):
