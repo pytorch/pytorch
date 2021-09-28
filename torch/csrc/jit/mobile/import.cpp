@@ -135,7 +135,7 @@ c10::intrusive_ptr<c10::ivalue::Object> objLoaderMobile(
   auto cls = type.type_->expect<at::ClassType>();
   auto qn = cls->name();
   c10::QualifiedName method_name(qn.value(), "__setstate__");
-  auto setstate = mobile_compilation_unit->find_function(method_name);
+  auto setstate = mobile_compilation_unit.find_function(method_name);
   auto find_custom_class_with_setstate = [&qn]() -> c10::ClassTypePtr {
     auto custom_class_type = torch::jit::getCustomClass(qn->qualifiedName());
     if (custom_class_type && custom_class_type->findMethod("__setstate__")) {
