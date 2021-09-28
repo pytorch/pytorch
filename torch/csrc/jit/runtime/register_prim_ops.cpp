@@ -117,7 +117,7 @@ static const OperatorGeneratorArgs opGenArgs[] = {
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("aten::numpy_T(Tensor(a) self) -> Tensor(a)"),
+        TORCH_SELECTIVE_SCHEMA("aten::numpy_T.a(Tensor(a) self) -> Tensor(a)"),
         [](Stack& stack) {
           at::Tensor a;
           pop(stack, a);
@@ -125,7 +125,7 @@ static const OperatorGeneratorArgs opGenArgs[] = {
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("aten::matrix_H(Tensor(a) self) -> Tensor(a)"),
+        TORCH_SELECTIVE_SCHEMA("aten::matrix_H.a(Tensor(a) self) -> Tensor(a)"),
         [](Stack& stack) {
           at::Tensor a;
           pop(stack, a);
@@ -133,7 +133,7 @@ static const OperatorGeneratorArgs opGenArgs[] = {
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("aten::mT(Tensor(a) self) -> Tensor(a)"),
+        TORCH_SELECTIVE_SCHEMA("aten::mT.a(Tensor(a) self) -> Tensor(a)"),
         [](Stack& stack) {
           at::Tensor a;
           pop(stack, a);
@@ -141,7 +141,7 @@ static const OperatorGeneratorArgs opGenArgs[] = {
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("aten::mH(Tensor(a) self) -> Tensor(a)"),
+        TORCH_SELECTIVE_SCHEMA("aten::mH.a(Tensor(a) self) -> Tensor(a)"),
         [](Stack& stack) {
           at::Tensor a;
           pop(stack, a);
