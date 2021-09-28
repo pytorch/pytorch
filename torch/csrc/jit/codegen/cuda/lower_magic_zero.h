@@ -10,7 +10,7 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-//! Insert magic zero definition at the begining of the kernel. Insert magic
+//! Insert magic zero definition at the beginning of the kernel. Insert magic
 //! zero update after every (outer most) loop nest with a compile time extent.
 //!
 //! This will make sure nvrtc does not aggressively save predicate and indices.
