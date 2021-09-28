@@ -580,7 +580,7 @@ static inline bool is_blas_compatible_column_major_order(const Tensor& input) {
   IntArrayRef input_strides = input.strides();
   IntArrayRef input_sizes = input.sizes();
   auto ndim = input.dim();
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim >= 2);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2);
   auto leading_dimension = input_strides[ndim - 1];
   auto rows = input_sizes[ndim - 2];
   return (input_strides[ndim - 2] == 1) && (leading_dimension >= std::max<int64_t>(1, rows));
@@ -590,7 +590,7 @@ static inline bool is_blas_compatible_row_major_order(const Tensor& input) {
   IntArrayRef input_strides = input.strides();
   IntArrayRef input_sizes = input.sizes();
   auto ndim = input.dim();
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim >= 2);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2);
   auto leading_dimension = input_strides[ndim - 2];
   auto cols = input_sizes[ndim - 1];
   return (input_strides[ndim - 1] == 1) && (leading_dimension >= std::max<int64_t>(1, cols));
