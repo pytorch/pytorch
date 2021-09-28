@@ -460,7 +460,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
-	def test_gather(self):
+    def test_gather(self):
         """ Test _sharded_tensor.gather(...) """
 
         spec = ChunkShardingSpec(
@@ -1215,6 +1215,49 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         self.assertEqual(torch.device(f'cuda:{self.rank}'), local_shard.tensor.device)
         self.assertEqual((5, 5), local_shard.tensor.size())
         self.assertEqual(local_shard.tensor, torch.ones(5, 5))
+
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_gather(self):
+        """ Test _sharded_tensor.gather(...) """
+
+        spec = EnumerableShardingSpec([
+            ShardMetadata(
+                shard_offsets=[0, 0],
+                shard_lengths=[5, 5],
+                placement="rank:0/cuda:0",
+            ),
+            ShardMetadata(
+                shard_offsets=[0, 5],
+                shard_lengths=[5, 5],
+                placement="rank:1/cuda:1",
+            ),
+            ShardMetadata(
+                shard_offsets=[5, 0],
+                shard_lengths=[5, 5],
+                placement="rank:2/cuda:2",
+            ),
+            ShardMetadata(
+                shard_offsets=[5, 5],
+                shard_lengths=[5, 5],
+                placement="rank:3/cuda:3",
+            )
+        ])
+
+        h, w = 10, 10
+        sharded_tensor = _sharded_tensor.ones(spec, h, w, init_rrefs=True)
+
+        full_tensor = None
+        if self.rank == 0:
+            full_tensor = torch.zeros(h, w)
+        _sharded_tensor.gather(0, full_tensor)
+
+        if self.rank == 0:
+            self.assertEqual(full_tensor, torch.ones(h, w))
+        else:
+            self.assertIsNone(full_tensor)
 
     @skip_if_lt_x_gpu(4)
     @requires_nccl()

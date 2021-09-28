@@ -220,7 +220,7 @@ class ShardedTensor(object):
     create_op specified by tensor_init_params.create_op, e.g., torch.ones, or
     torch.empty
 
-    Arg(:
+    Arg:
         sharding_spec (:class:`torch.distributed._sharding_spec.ShardingSpec`): The specification
             describing how to shard the Tensor.
         size (int...): a sequence of integers defining the shape of the output
@@ -361,7 +361,7 @@ class ShardedTensor(object):
         # Barrier for all RPCs to finish on all ranks.
         rpc.api._all_gather(None)
 
-	def gather(
+    def gather(
         self,
         dst: int = 0,
         out: Optional[torch.Tensor] = None,
