@@ -26,9 +26,7 @@ install(FILES
           THCStorageCopy.h
           THCTensor.h
           THCTensorMathReduce.cuh
-          THCAsmUtils.cuh
           THCAtomics.cuh
-          THCScanUtils.cuh
           THCAllocator.h
           THCCachingHostAllocator.h
           THCDeviceTensor.cuh

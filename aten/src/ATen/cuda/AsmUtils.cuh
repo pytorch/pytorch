@@ -1,7 +1,10 @@
-#ifndef THC_ASM_UTILS_INC
-#define THC_ASM_UTILS_INC
+#pragma once
+#include <cstdint>
 
 // Collection of direct PTX functions
+
+namespace at {
+namespace cuda {
 
 template <typename T>
 struct Bitfield {};
@@ -144,4 +147,4 @@ __device__ __forceinline__ unsigned getLaneMaskGe() {
 }
 #endif
 
-#endif // THC_ASM_UTILS_INC
+}} // namespace at::cuda
