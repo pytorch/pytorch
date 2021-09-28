@@ -123,7 +123,7 @@ def _check_requires_grad(inputs, input_type, strict):
                                    " The outputs must be computed in a differentiable manner from the input"
                                    " when running in strict mode.".format(i))
 
-def _autograd_grad(outputs, inputs, grad_outputs=None, create_graph=False, retain_graph=None, batched_grads=False):
+def _autograd_grad(outputs, inputs, grad_outputs=None, create_graph=False, retain_graph=None, is_grads_batched=False):
     # Version of autograd.grad that accepts `None` in outputs and do not compute gradients for them.
     # This has the extra constraint that inputs has to be a tuple
     assert isinstance(outputs, tuple)
@@ -145,7 +145,7 @@ def _autograd_grad(outputs, inputs, grad_outputs=None, create_graph=False, retai
     else:
         return torch.autograd.grad(new_outputs, inputs, new_grad_outputs, allow_unused=True,
                                    create_graph=create_graph, retain_graph=retain_graph,
-                                   batched_grads=batched_grads)
+                                   is_grads_batched=is_grads_batched)
 
 def _fill_in_zeros(grads, refs, strict, create_graph, stage):
     # Used to detect None in the grads and depending on the flags, either replace them
@@ -534,7 +534,7 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False):
 
             # Step 2: Call vmap + autograd.grad
             def vjp(grad_output):
-                vj = list(_autograd_grad(flat_outputs, inputs, grad_output, create_graph=create_graph, batched_grads=True))
+                vj = list(_autograd_grad(flat_outputs, inputs, grad_output, create_graph=create_graph, is_grads_batched=True))
                 for el_idx, vj_el in enumerate(vj):
                     if vj_el is not None:
                         continue
