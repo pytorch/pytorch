@@ -353,34 +353,34 @@ void slow_conv3d_backward_out_cpu_template(
   const int64_t batch_size = input.size(0);
 
 
-  at::parallel_for(0, batch_size, CONV3D_GRAIN_SALT,
-                   [&](int64_t start, int64_t end) {
-    AT_DISPATCH_ALL_TYPES_AND(kBFloat16, input.scalar_type(), "slow_conv3d_cpu_grad_input", [&] {
-      auto grad_input_a = grad_input.accessor<scalar_t, 5>();
-      auto grad_output_a = grad_output_contiguous.accessor<scalar_t, 5>();
-      auto fgrad_input_a = fgrad_input.accessor<scalar_t, 3>();
-      auto weight_2d_a = weight2d.accessor<scalar_t, 2>();
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, input.scalar_type(), "slow_conv3d_cpu_grad_input", [&] {
+    at::parallel_for(0, batch_size, CONV3D_GRAIN_SALT,
+                    [&](int64_t start, int64_t end) {
+        auto grad_input_a = grad_input.accessor<scalar_t, 5>();
+        auto grad_output_a = grad_output_contiguous.accessor<scalar_t, 5>();
+        auto fgrad_input_a = fgrad_input.accessor<scalar_t, 3>();
+        auto weight_2d_a = weight2d.accessor<scalar_t, 2>();
 
-      for (int64_t t = start; t < end; t++) {
-        auto grad_input_t = grad_input_a[t];
-        auto grad_output_t = grad_output_a[t];
-        auto fgrad_input_t = fgrad_input_a[t];
-        slow_conv3d_backward_update_grad_input_frame(
-            grad_input_t,
-            grad_output_t,
-            weight_2d_a,
-            fgrad_input_t,
-            kernel_depth,
-            kernel_height,
-            kernel_width,
-            stride_depth,
-            stride_height,
-            stride_width,
-            pad_depth,
-            pad_height,
-            pad_width,
-            groups);
-      }
+        for (int64_t t = start; t < end; t++) {
+          auto grad_input_t = grad_input_a[t];
+          auto grad_output_t = grad_output_a[t];
+          auto fgrad_input_t = fgrad_input_a[t];
+          slow_conv3d_backward_update_grad_input_frame(
+              grad_input_t,
+              grad_output_t,
+              weight_2d_a,
+              fgrad_input_t,
+              kernel_depth,
+              kernel_height,
+              kernel_width,
+              stride_depth,
+              stride_height,
+              stride_width,
+              pad_depth,
+              pad_height,
+              pad_width,
+              groups);
+        }
     });
   });
 }
