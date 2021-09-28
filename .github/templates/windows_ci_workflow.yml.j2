@@ -45,6 +45,7 @@ env:
   BUILD_WHEEL: 1
   CUDA_VERSION: "!{{ cuda_version }}"
   IN_CI: 1
+  IS_GHA: 1
   INSTALL_WINDOWS_SDK: 1
   PYTHON_VERSION: "3.8"
   PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
@@ -55,6 +56,9 @@ env:
   VC_YEAR: "2019"
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
   no_proxy: !{{ common.squid_no_proxy }}
+  AWS_DEFAULT_REGION: us-east-1
+  CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
+  CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
 {%- if cuda_version != "cpu" %}
   TORCH_CUDA_ARCH_LIST: "7.0"
   USE_CUDA: 1
@@ -63,16 +67,8 @@ env:
 !{{ common.concurrency(build_environment) }}
 
 jobs:
-{%- if ciflow_config.enabled %}
-  !{{ ciflow_config.root_job_name }}:
-    runs-on: ubuntu-18.04
-    if: ${{ !{{ ciflow_config.root_job_condition }} }}
-    steps:
-      - name: noop
-        run: echo running !{{ ciflow_config.root_job_name }}
-{%- endif %}
+!{{ common.ciflow_should_run_job(ciflow_config) }}
   build:
-    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: "windows.4xlarge"
     {%- if ciflow_config.enabled %}
     needs: [!{{ ciflow_config.root_job_name }}]
@@ -102,25 +98,16 @@ jobs:
         run: |
           .circleci/scripts/windows_cudnn_install.sh
 {%- endif %}
+      !{{ common.parse_ref() }}
       - name: Build
         shell: bash
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
+          CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
         run: |
           .jenkins/pytorch/win-build.sh
       # Upload to github so that people can click and download artifacts
-      - name: Upload artifacts to Github
-        if: always()
-        uses: actions/upload-artifact@v2
-        # Don't fail on upload to GH since it's only for user convenience
-        continue-on-error: true
-        with:
-          retention-days: 14
-          if-no-files-found: error
-          name: ${{ env.BUILD_ENVIRONMENT }}
-          path: C:\${{ github.run_id }}\build-results
       - name: Upload artifacts to s3
-        if: always()
         uses: !{{ common.upload_artifact_s3_action }}
         with:
           retention-days: 14
@@ -139,11 +126,6 @@ jobs:
           rm -rf ./*
 
   generate-test-matrix:
-{%- if only_build_on_pull_request %}
-    if: ${{ github.repository_owner == 'pytorch' && github.event_name == 'push' }}
-{%- else %}
-    if: ${{ github.repository_owner == 'pytorch' }}
-{%- endif %}
     {%- if ciflow_config.enabled %}
     needs: [!{{ ciflow_config.root_job_name }}]
     {%- endif %}
@@ -153,6 +135,8 @@ jobs:
       NUM_TEST_SHARDS: !{{ num_test_shards }}
       NUM_TEST_SHARDS_ON_PULL_REQUEST: !{{ num_test_shards_on_pull_request }}
       PR_BODY: ${{ github.event.pull_request.body }}
+      NOGPU_RUNNER_TYPE: windows.4xlarge
+      ENABLE_FORCE_ON_CPU_TEST: !{{ enable_force_on_cpu_test }}
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
@@ -181,7 +165,6 @@ jobs:
       https_proxy: "!{{ common.squid_proxy }}"
       RUN_SMOKE_TESTS_ONLY_ON_PR: !{{ only_run_smoke_tests_on_pull_request }}
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
-      CONTINUE_THROUGH_ERROR: ${{ github.repository_owner == 'pytorch' && (github.event_name == 'push' || github.event_name == 'schedule') }}
     needs: [build, generate-test-matrix, !{{ ciflow_config.root_job_name }}]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
@@ -200,10 +183,12 @@ jobs:
           .\.circleci\scripts\vs_install.ps1
 {%- if cuda_version != "cpu" %}
       - name: Install Cuda
+        if: ${{ matrix.config != 'force_on_cpu' }}
         shell: bash
         run: |
           .circleci/scripts/windows_cuda_install.sh
       - name: Install Cudnn
+        if: ${{ matrix.config != 'force_on_cpu' }}
         shell: bash
         run: |
           .circleci/scripts/windows_cudnn_install.sh
@@ -222,19 +207,16 @@ jobs:
         name: Setup Python3
         with:
           python-version: '3.x'
-      - name: Run test scripts
+      - name: Test
         shell: bash
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
+        # Time out the test phase after 3.5 hours
+        timeout-minutes: 210
         run: |
-            if [[ $NUM_TEST_SHARDS -ne 2 ]]; then
-              export SHARD_NUMBER=0
-            fi
-            if [[ -n $GITHUB_HEAD_REF && "$RUN_SMOKE_TESTS_ONLY_ON_PR" == "true" ]]; then
-              export RUN_SMOKE_TESTS_ONLY=1
-            fi
             .jenkins/pytorch/win-test.sh
       !{{ common.upload_test_reports(name='windows') }}
+      !{{ common.render_test_results() }}
       !{{ wait_and_kill_ssh() }}
       !{{ common.parse_ref() }}
       !{{ common.upload_test_statistics(build_environment) }}
