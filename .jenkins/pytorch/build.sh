@@ -49,11 +49,6 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   nvcc --version
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
-  # enable build option in CMake
-  export USE_CPP_CODE_COVERAGE=ON
-fi
-
 if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   # enable split torch_cuda build option in CMake
   export BUILD_SPLIT_CUDA=ON
@@ -255,6 +250,8 @@ else
     if which sccache > /dev/null; then
       echo 'PyTorch Build Statistics'
       sccache --show-stats
+
+      sccache --show-stats | python -m tools.stats.upload_sccache_stats
     fi
 
     assert_git_not_dirty
