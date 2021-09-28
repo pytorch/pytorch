@@ -186,7 +186,7 @@ torch::CppFunction autogradNotImplementedFallback() {
 }
 
 void autogradNotImplementedInplaceOrViewFallbackImpl(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
-  // Mimics a subset of the logic from ADInplaceOrViewType kernel
+  // Mimics a subset of the logic from ADInplaceOrViewType kernel:
   // - see gen_inplace_or_view_type.py
   // - this should only be used with autogradNotImplementedFallback above
   //
@@ -202,11 +202,10 @@ void autogradNotImplementedInplaceOrViewFallbackImpl(const c10::OperatorHandle& 
   //   and the first output (which may be either Tensor or vec of Tensor)
   //
   // For inplace ops:
-  // - (TODO?) enforce that the same op cannot be both a view and
+  // - (TODO?) enforce that the same op cannot be both a view and inplace
   //   that is not allowed in the gen_inplace_or_view logic
   //
-  // TODO: We could just link to the documentation once we have that
-  // instead of repeating this.
+  // For more information see https://pytorch.org/tutorials/advanced/dispatcher
   const auto& schema = op.schema();
   const auto& op_name = schema.operator_name().name;
   const auto& arguments = schema.arguments();
@@ -246,10 +245,7 @@ void autogradNotImplementedInplaceOrViewFallbackImpl(const c10::OperatorHandle& 
         aliased_input_idx = i;
         const c10::IValue& aliased_input_iv = (*stack)[stack_start + i]; // get a reference to an ivalue on the stack
         TORCH_CHECK(aliased_input_iv.isTensor());
-        // copy assignment (TODO: how to avoid this extra reference count bump??)
-        // It doesn't seem like we can save merely a pointer to Tensor because it would
-        // get dropped from the stack...
-        aliased_input = aliased_input_iv.toTensor();
+        aliased_input = aliased_input_iv.toTensor();  // TODO: Can we avoid saving this tensor and incurring the refcount bump?
       } else {
         any_is_inplace = true;
       }
