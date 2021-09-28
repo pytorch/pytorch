@@ -51,6 +51,7 @@ LABEL_CIFLOW_SLOW = "ciflow/slow"
 LABEL_CIFLOW_WIN = "ciflow/win"
 LABEL_CIFLOW_XLA = "ciflow/xla"
 LABEL_CIFLOW_NOARCH = "ciflow/noarch"
+LABEL_CIFLOW_PREFIX = "ciflow/"
 
 
 @dataclass
@@ -94,6 +95,7 @@ class CIFlowConfig:
             self.reset_root_job()
             return
         self.labels.add(LABEL_CIFLOW_ALL)
+        assert all(label.startswith(LABEL_CIFLOW_PREFIX) for label in self.labels)
         self.gen_root_job_condition()
 
 
@@ -538,7 +540,8 @@ BAZEL_WORKFLOWS = [
     ),
 ]
 
-if __name__ == "__main__":
+
+def main() -> None:
     jinja_env = jinja2.Environment(
         variable_start_string="!{{",
         loader=jinja2.FileSystemLoader(str(GITHUB_DIR.joinpath("templates"))),
@@ -571,3 +574,7 @@ if __name__ == "__main__":
                 # During the rollout phase, it has the same effect as LABEL_CIFLOW_DEFAULT
                 ciflow_ruleset.add_label_rule({LABEL_CIFLOW_DEFAULT}, workflow.build_environment)
     ciflow_ruleset.generate_json()
+
+
+if __name__ == "__main__":
+    main()
