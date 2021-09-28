@@ -171,6 +171,10 @@ inline bool operator==(const Argument& lhs, const Argument& rhs) {
                    && *lhs.alias_info() == *rhs.alias_info()));
 }
 
+inline bool operator!=(const Argument& lhs, const Argument& rhs) {
+  return !(lhs == rhs);
+}
+
 bool operator==(const FunctionSchema& lhs, const FunctionSchema& rhs);
 
 struct FunctionSchema {

@@ -1,12 +1,10 @@
-import torch
-from torch.testing._internal.jit_utils import JitTestCase, execWrapper
 import operator
+from textwrap import dedent
 
-
+import torch
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import make_tensor
-
-from textwrap import dedent
+from torch.testing._internal.jit_utils import JitTestCase, execWrapper
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -108,9 +106,6 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         FileCheck().check("*, 3, 2, *").check("*, 3, *, *) = prim::If").run(foo.graph)
 
     def test_unary_shape_functions(self):
-        def apply(fn):
-            return lambda x: fn(x)
-
         unary_ops = [
             torch.nn.functional.hardtanh,
         ]
@@ -121,10 +116,22 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             torch._C._jit_pass_propagate_shapes_on_graph(t.graph)
             self.assertEqual(next(t.graph.outputs()).type().symbolic_sizes(), [2, 2])
 
-    def test_binary_shape_functions(self):
-        def apply(fn):
-            return lambda x, y: fn(x, y)
+    def test_unary_shape_fns_inplace(self):
+        def div_inplace(x):
+            x.div_(2)
+            return x
 
+        unary_ops = [
+            div_inplace
+        ]
+        for fn in unary_ops:
+            t = torch.jit.trace(fn, (torch.rand([4, 4])))
+            ten_input = next(t.graph.inputs())
+            ten_input.setType(ten_input.type().with_sizes([2, 2]))
+            torch._C._jit_pass_propagate_shapes_on_graph(t.graph)
+            self.assertEqual(next(t.graph.outputs()).type().symbolic_sizes(), [2, 2])
+
+    def test_binary_shape_functions(self):
         binary_ops = [
             operator.__mul__,
             operator.__truediv__,
@@ -134,6 +141,26 @@ class TestSymbolicShapeAnalysis(JitTestCase):
 
         for fn in binary_ops:
             size_1 = [1, 4, 8]
+            size_2 = [4, 1, 8]
+            t = torch.jit.trace(fn, (torch.rand([4]), torch.rand([4])))
+            inputs = list(t.graph.inputs())
+            inputs[0].setType(inputs[0].type().with_sizes(size_1))
+            inputs[1].setType(inputs[1].type().with_sizes(size_2))
+            torch._C._jit_pass_propagate_shapes_on_graph(t.graph)
+            self.assertEqual(next(t.graph.outputs()).type().symbolic_sizes(), [4, 4, 8])
+
+    def test_binary_shape_fns_inplace(self):
+        def div_inplace_tensor(x, y):
+            x.div_(y)
+            z = x
+            return z
+
+        binary_ops = [
+            div_inplace_tensor
+        ]
+
+        for fn in binary_ops:
+            size_1 = [4, 4, 8]  # x (can't broadcast, inplace)
             size_2 = [4, 1, 8]
             t = torch.jit.trace(fn, (torch.rand([4]), torch.rand([4])))
             inputs = list(t.graph.inputs())
