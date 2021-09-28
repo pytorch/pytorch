@@ -192,6 +192,7 @@ void autogradNotImplementedInplaceOrViewFallbackImpl(const c10::OperatorHandle& 
   // Mimics a subset of the logic from ADInplaceOrViewType kernel:
   // - see gen_inplace_or_view_type.py
   // - this should only be used with autogradNotImplementedFallback above
+  // - For more information see https://pytorch.org/tutorials/advanced/dispatcher
   //
   // NOTE [ Limitations of ADInplaceOrView boxed kernel ]
   //
@@ -200,15 +201,11 @@ void autogradNotImplementedInplaceOrViewFallbackImpl(const c10::OperatorHandle& 
   // if we do in-place on view's created in this kernel, the proper "derivative
   // is not implemented" error is still raised.
   //
-  // For views:
-  // - We enforce that the view relationship is between the first input
-  //   and the first output (which may be either Tensor or vec of Tensor)
-  //
-  // For inplace ops:
-  // - (TODO?) enforce that the same op cannot be both a view and inplace
+  // Just like the codegened kernel, we try to enforce some things:
+  // - For views: we enforce that the view relationship is between the first input
+  //   and the first output (which may be either Tensor or vec of Tensors
+  // - For inplace (TODO?): enforce that the same op cannot be both a view and inplace
   //   that is not allowed in the gen_inplace_or_view logic
-  //
-  // For more information see https://pytorch.org/tutorials/advanced/dispatcher
   const auto& schema = op.schema();
   const auto& op_name = schema.operator_name().name;
   const auto& arguments = schema.arguments();
