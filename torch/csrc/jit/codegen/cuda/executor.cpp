@@ -508,7 +508,13 @@ LaunchParams FusionExecutor::computeLaunchParams(
 
   TORCH_INTERNAL_ASSERT(
       (dynamic_smem_size + static_smem_size) < max_device_smem,
-      "The total shared memory allocation is larger than available memory.");
+      "The total shared memory allocation is larger than available memory.",
+      " Dynamic size: ",
+      dynamic_smem_size,
+      ". Static size: ",
+      static_smem_size,
+      ". Available size: ",
+      max_device_smem);
   launch_params.setSmem(dynamic_smem_size);
 
   return launch_params;
