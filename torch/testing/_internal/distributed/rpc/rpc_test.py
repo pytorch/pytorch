@@ -1609,6 +1609,35 @@ class RpcTest(RpcAgentTestFixture):
         dist.barrier()
         rpc.shutdown(graceful=False)
 
+    @dist_init(setup_rpc=False)
+    def test_wait_all_workers_timeout(self):
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=self.rpc_backend_options,
+        )
+
+        og_func = rpc.api._wait_all_workers
+
+        def wait_all_workers_sleep(timeout):
+            try:
+                rpc.api._all_gather(SlowPickleClass(0.5), timeout=timeout)
+            except RuntimeError as ex:
+                raise ex
+
+        rpc.api._wait_all_workers = wait_all_workers_sleep
+
+        try:
+            with self.assertRaisesRegex(RuntimeError, ''):
+                rpc.shutdown(graceful=True, timeout=0.01)
+        finally:
+            rpc.api._wait_all_workers = og_func
+        dist.barrier()
+
     def test_wait_all_workers_dense(self):
         self._wait_all_workers(heavy_rpc, torch.ones(100, 100))
 
