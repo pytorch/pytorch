@@ -3,6 +3,8 @@
 #include <torch/csrc/jit/mobile/parse_operators.h>
 
 #include <ATen/core/ivalue.h>
+#include <ATen/core/qualified_name.h>
+#include <c10/util/Exception.h>
 #include <c10/util/ScopeExit.h>
 #include <c10/util/irange.h>
 #include <caffe2/serialize/inline_container.h>
@@ -183,6 +185,20 @@ bool isTensorInBytecodeArchive(
 
 namespace {
 
+void tryRegisterMethod(const std::vector<c10::Argument>& args, Function& func) {
+  if (args.empty()) {
+    return;
+  }
+
+  if (args[0].name() != "self") {
+    return;
+  }
+
+  if (auto cls = args[0].type()->castRaw<ClassType>()) {
+    cls->addMethod(&func);
+  }
+}
+
 // The deserializer class which loads the bytecode package from bc files.
 class BytecodeDeserializer final {
  public:
@@ -239,7 +255,7 @@ void BytecodeDeserializer::parseFunctionSchema(
     mobile::Function* function) {
   // function schema
   if (schemaTable) { // (schema is optional for back compat)
-    auto parseArgList = [this](std::vector<IValue>&& argTables) {
+    auto parseArgList = [this, function](std::vector<IValue>&& argTables) {
       std::vector<c10::Argument> args;
       for (auto&& argTable : std::move(argTables)) {
         auto argTableElements =
@@ -261,6 +277,7 @@ void BytecodeDeserializer::parseFunctionSchema(
             c10::nullopt /*N*/,
             std::move(default_value));
       }
+      tryRegisterMethod(args, *function);
       return args;
     };
     auto schemaTableElements =
@@ -286,17 +303,6 @@ void BytecodeDeserializer::parseFunctionSchema(
         false /*is_varargs*/,
         false /*is_varret*/);
     function->setSchema(std::move(schema));
-
-    auto isInterface = optional_field(
-                           schemaTableElements,
-                           "is_interface",
-                           BYTECODE_INDEX_SCHEMA_IS_INTERFACE);
-    if (isInterface && isInterface->toBool()) {
-      auto qn = c10::QualifiedName(function_name);
-      if (auto cls = compilation_unit_->get_class(qn.prefix())) {
-        cls->addMethod(&function->getBytecodeFunction());
-      }
-    }
   }
 }
 

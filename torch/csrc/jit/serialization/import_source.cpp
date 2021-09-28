@@ -19,7 +19,7 @@ struct OpsValue : public SugaredValue {
   }
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       const std::string& field) override {
     return std::make_shared<BuiltinModule>(field, version_);
   }
@@ -42,7 +42,7 @@ struct TORCH_API ClassNamespaceValue : public SugaredValue {
 
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       const std::string& name) override;
   std::string kind() const override {
     return "Class Namespace";
@@ -65,7 +65,7 @@ struct ConstantTableValue : public SugaredValue {
   // select an attribute on it, e.g. `this.field`
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       const std::string& field) override {
     const char* field_s = field.c_str();
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -205,7 +205,7 @@ void SourceImporterImpl::LEGACY_import_methods(
 
 std::shared_ptr<SugaredValue> SourceImporterImpl::resolveValue(
     const std::string& name,
-    Function& m,
+    GraphFunction& m,
     const SourceRange& loc) {
   auto it = env_.find(name);
   if (it != env_.end()) {
@@ -703,7 +703,7 @@ void SourceImporterImpl::parseImports(Lexer& L) {
 
 std::shared_ptr<SugaredValue> ClassNamespaceValue::attr(
     const SourceRange& loc,
-    Function& m,
+    GraphFunction& m,
     const std::string& name) {
   auto fullName = c10::QualifiedName(basename_, name);
   // Could be a ClassType or NamedTuple constructor

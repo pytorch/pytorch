@@ -12,22 +12,10 @@ namespace jit {
 char const* toString(OpCode op);
 namespace mobile {
 
-const c10::QualifiedName& BytecodeFunction::qualname() const {
-  return function_.qualname();
-}
-
-const std::string& BytecodeFunction::name() const {
-  return function_.name();
-}
-
-const Code& BytecodeFunction::getCode() const {
-  return *function_.get_code().get();
-}
-
 Function::Function(c10::QualifiedName name)
     : name_(std::move(name)),
       code_(std::make_shared<Code>()),
-      bytecodeFunction_(*this) {}
+      executor_(*code_) {}
 
 const c10::QualifiedName& Function::qualname() const {
   return name_;
@@ -160,27 +148,61 @@ int64_t Function::get_debug_handle(size_t pc) const {
   return code_->instructions_with_handles_[pc].debug_handle;
 }
 
-void Function::setSchema(c10::FunctionSchema schema) {
+torch::jit::Function& Function::setSchema(c10::FunctionSchema schema) {
   schema_ = std::move(schema);
+  return *this;
 }
 
-const at::optional<c10::FunctionSchema>& Function::getSchema() const {
-  return schema_;
+bool Function::hasSchema() const {
+  return schema_.has_value();
 }
 
-bool Function::run(Stack& stack) const {
-  const auto& schema = getSchema();
-  if (schema) { // if we have a schema then resolve optional args if any
-    schema->checkAndNormalizeInputs(
+const c10::FunctionSchema& Function::getSchema() const {
+  return *schema_;
+}
+
+void Function::run(Stack& stack) {
+  if (hasSchema()) { // if we have a schema then resolve optional args if any
+    getSchema().checkAndNormalizeInputs(
         stack, std::unordered_map<std::string, IValue>{} /*kwargs*/);
   }
   InterpreterState interp_state(code_);
-  return interp_state.run(stack);
+  interp_state.run(stack);
 }
 
-c10::IValue Function::operator()(Stack& stack) const {
+void Function::run(Stack&& stack) {
+  run(stack);
+}
+
+c10::intrusive_ptr<c10::ivalue::Future> Function::runAsync(
+    Stack& stack,
+    TaskLauncher taskLauncher) {
+  TORCH_INTERNAL_ASSERT(
+      false, "runAsync() is not supported for torch::jit::mobile::Function.");
+}
+
+at::IValue Function::operator()(Stack stack, const Kwargs& kwargs) {
+  TORCH_INTERNAL_ASSERT(kwargs.empty());
   run(stack);
   return stack.front();
+}
+
+Executor& Function::get_executor() {
+  return executor_;
+}
+
+size_t Function::num_inputs() const {
+  return schema_->arguments().size();
+}
+
+void Function::check_single_output() {
+  TORCH_CHECK(schema_->returns().size() == 1);
+}
+
+std::string Function::pretty_print_schema() const {
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "pretty_print_schema() is not supported for torch::jit::mobile::Function.");
 }
 
 const std::shared_ptr<Code> Function::get_code() const {
