@@ -302,7 +302,7 @@ BenchmarkCache<size_t> bwd_filter_wssizes;
 
 struct Workspace {
   Workspace(size_t size) : size(size), data(NULL) {
-    data = c10::cuda::CUDACachingAllocator::raw_alloc(size);
+    data = c10::hip::HIPCachingAllocator::raw_alloc(size);
   }
   Workspace(const Workspace&) = delete;
   Workspace(Workspace&&) = default;
