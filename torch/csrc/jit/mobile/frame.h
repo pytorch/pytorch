@@ -10,7 +10,7 @@ struct Code;
 
 class Frame {
  public:
-  Frame(const Code& code) : code_(code) {}
+  explicit Frame(const Code& code) : code_(code) {}
   const Code& getCode() const {
     return code_;
   }
