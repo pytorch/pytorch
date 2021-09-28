@@ -4,7 +4,6 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorCompare.h>
 #include <ATen/native/cuda/Loops.cuh>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 
 
 namespace at { namespace native {

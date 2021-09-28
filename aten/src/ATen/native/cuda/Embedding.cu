@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/util/Exception.h>
 #include <c10/macros/Macros.h>
@@ -238,7 +239,7 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
     auto indices_contig = indices.contiguous();
     auto grad_weight = at::zeros({num_weights, grad_.size(-1)}, grad_.options());
     int64_t stride = grad_weight.stride(0);
-    dim3 grid(THCCeilDiv(stride, (int64_t)C10_WARP_SIZE));
+    dim3 grid(ceil_div(stride, (int64_t)C10_WARP_SIZE));
     dim3 block(C10_WARP_SIZE, BLOCKDIMY);
 
     AT_DISPATCH_FLOATING_TYPES_AND2(

@@ -101,3 +101,15 @@ __device__ __forceinline__ c10::complex<T> WARP_SHFL_DOWN(c10::complex<T> value,
         __shfl_down(value.imag_, delta, width));
 #endif
 }
+
+/**
+ * For CC 3.5+, perform a load using __ldg
+ */
+template <typename T>
+__device__ __forceinline__ T doLdg(const T* p) {
+#if __CUDA_ARCH__ >= 350 && !defined(USE_ROCM)
+  return __ldg(p);
+#else
+  return *p;
+#endif
+}
