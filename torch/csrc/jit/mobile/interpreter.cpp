@@ -11,8 +11,8 @@
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/backends/backend_exception.h>
+#include <torch/csrc/jit/mobile/executor.h>
 #include <torch/csrc/jit/mobile/observer.h>
-#include "jit/mobile/executor.h"
 
 namespace torch {
 namespace jit {
