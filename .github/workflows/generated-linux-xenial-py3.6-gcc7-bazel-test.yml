@@ -19,6 +19,7 @@ env:
   XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
   TORCH_CUDA_ARCH_LIST: 5.2
   IN_CI: 1
+  IS_GHA: 1
   # This is used for the phase of adding wheel tests only, will be removed once completed
   IN_WHEEL_TEST: 1
   # Used for custom_opertor, jit_hooks, custom_backend, see .jenkins/pytorch/build.sh
@@ -26,12 +27,15 @@ env:
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
   PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
+  AWS_DEFAULT_REGION: us-east-1
+  CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
+  CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
 concurrency:
   group: linux-xenial-py3.6-gcc7-bazel-test-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
+
   ciflow_should_run:
     runs-on: ubuntu-18.04
     if: ${{ (github.repository == 'pytorch/pytorch') && ((github.event_name != 'pull_request') || (github.event.assignee.login != 'pytorchbot' ) || (github.event.action !='unassigned') || (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/bazel') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux'))) }}
@@ -79,8 +83,8 @@ jobs:
           retry () {
               "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
           }
-          # Ensure the working directory gets chowned back to the current user
           retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Clean workspace
         run: |
@@ -154,7 +158,6 @@ jobs:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
       JOB_BASE_NAME: linux-xenial-py3.6-gcc7-bazel-test-build-and-test
       NUM_TEST_SHARDS: 1
-      CONTINUE_THROUGH_ERROR: ${{ github.repository == 'pytorch/pytorch' && (github.event_name == 'push' || github.event_name == 'schedule') }}
     steps:
       - name: Display EC2 information
         shell: bash
@@ -184,8 +187,8 @@ jobs:
           retry () {
               "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
           }
-          # Ensure the working directory gets chowned back to the current user
           retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Clean workspace
         run: |
@@ -204,9 +207,12 @@ jobs:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
           submodules: recursive
-      - name: Pull docker image
+      - name: Pull Docker image
         run: |
-          docker pull "${DOCKER_IMAGE}"
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
       - name: Determine shm-size
         run: |
           shm_size="1g"
@@ -283,10 +289,10 @@ jobs:
             -e GITHUB_ACTIONS \
             -e IN_CI \
             -e SHARD_NUMBER \
+            -e NUM_TEST_SHARDS \
             -e JOB_BASE_NAME \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
-            -e CONTINUE_THROUGH_ERROR \
             -e PR_LABELS \
             -e http_proxy="http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -e https_proxy="http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -e no_proxy="localhost,127.0.0.1,github.com,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock" \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \

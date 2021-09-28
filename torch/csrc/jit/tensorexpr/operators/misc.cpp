@@ -382,11 +382,12 @@ Tensor computeExpand(
       });
 }
 
-Tensor computeReshape(
+static Tensor computeReshapeHelper(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType,
-    at::Device device) {
+    at::Device device,
+    const IntList& view_dims) {
   auto A = c10::get<BufHandle>(inputs[0]);
   if (A.ndim() == 0) {
     return Compute(
@@ -397,7 +398,6 @@ Tensor computeReshape(
           return A.load(empty_indices);
         });
   }
-  auto view_dims = c10::get<IntList>(inputs[1]);
   return Compute(
       "aten_reshape",
       c10::fmap<DimArg>(outputShape),
@@ -447,6 +447,30 @@ Tensor computeReshape(
         return A.load(orig_buf_indexes);
       });
 }
+
+Tensor computeFlatten(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
+  std::vector<int64_t> view_dims;
+  for (const auto dim : c10::irange(outputShape.size())) {
+    view_dims.push_back(outputShape[dim].AsNode<LongImm>()->value());
+  }
+  return computeReshapeHelper(
+      inputs, outputShape, outputType, device, view_dims);
+}
+
+Tensor computeReshape(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
+  auto view_dims = c10::get<IntList>(inputs[1]);
+  return computeReshapeHelper(
+      inputs, outputShape, outputType, device, view_dims);
+}
+
 
 static std::pair<ScalarType, std::vector<BufHandle>> processCatList(
     const std::vector<BufHandle>& bufList) {

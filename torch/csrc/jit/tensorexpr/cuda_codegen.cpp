@@ -508,7 +508,7 @@ void CudaPrinter::visit(BlockPtr v) {
 
 void CudaPrinter::visit(LetPtr v) {
   emitIndent();
-  os() << dtypeToCppString(v->dtype());
+  os() << dtypeToCppString(v->var()->dtype());
   os() << " " << *v->var() << " = ";
   v->value()->accept(this);
   os() << ";" << std::endl;
