@@ -9,6 +9,7 @@
 /torch/autograd/ @albanD @soulitzer
 /tools/autograd/ @albanD @soulitzer
 /torch/nn/ @albanD @jbschlosser
+/torch/optim/ @albanD
 /test/test_public_bindings.py @albanD
 /aten/src/ATen/native/native_functions.yaml @ezyang
 
