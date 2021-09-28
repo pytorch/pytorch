@@ -68,8 +68,8 @@ void collapseDims(TensorInfo<T, T2>& info, Args&... infos) {
 #define DEVICE_BIAS_GET(D_TENSOR, INDEX)                              \
   D_TENSOR.data[IndexToOffset<scalar_t, index_type, 1>::get(INDEX, D_TENSOR)]
 
-#define H2F(input) ScalarConvert<scalar_t, accscalar_t>::to(input)
-#define F2H(input) ScalarConvert<accscalar_t, scalar_t>::to(input)
+#define H2F(input) static_cast<accscalar_t>(input)
+#define F2H(input) static_cast<scalar_t>(input)
 
 template<typename T>
 __device__ __forceinline__

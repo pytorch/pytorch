@@ -7,9 +7,6 @@ CONFIG_TREE_DATA = [
             ("5.4", [  # All this subtree rebases to master and then build
                 ("3.6", [
                     ("important", [X(True)]),
-                    ("parallel_tbb", [X(True)]),
-                    ("parallel_native", [X(True)]),
-                    ("pure_torch", [X(True)]),
                 ]),
             ]),
             # TODO: bring back libtorch test
@@ -30,7 +27,8 @@ CONFIG_TREE_DATA = [
         ("cuda", [
             ("10.2", [
                 ("3.6", [
-                    ("shard_test", [X(True)]),
+                    # Build are needed for slow_gradcheck
+                    ('build_only', [X(True)]),
                     ("slow_gradcheck", [
                         # If you update this slow gradcheck, you should
                         # also update docker_definitions.py to make sure
@@ -147,7 +145,6 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
             "build_only": BuildOnlyConfigNode,
             "shard_test": ShardTestConfigNode,
             "cuda_gcc_override": CudaGccOverrideConfigNode,
-            "coverage": CoverageConfigNode,
             "pure_torch": PureTorchConfigNode,
             "slow_gradcheck": SlowGradcheckConfigNode,
         }
@@ -289,14 +286,6 @@ class ShardTestConfigNode(TreeConfigNode):
 
     def child_constructor(self):
         return ImportantConfigNode
-
-
-class CoverageConfigNode(TreeConfigNode):
-    def init2(self, node_name):
-        self.props["is_coverage"] = node_name
-
-    def child_constructor(self):
-        return ExperimentalFeatureConfigNode
 
 
 class ImportantConfigNode(TreeConfigNode):
