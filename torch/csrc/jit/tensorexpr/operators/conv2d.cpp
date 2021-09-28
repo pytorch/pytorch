@@ -380,7 +380,6 @@ Tensor computePrepackedLinearClampRun(
   return Tensor(ResultBuf.node(), s);
 }
 
-
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
