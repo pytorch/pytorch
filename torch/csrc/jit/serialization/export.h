@@ -33,7 +33,8 @@ using SymbolDimMap = std::map<c10::ShapeSymbol, std::string>;
 TORCH_API std::tuple<
     std::shared_ptr<::ONNX_NAMESPACE::ModelProto>,
     RawDataExportMap,
-    SymbolDimMap>
+    SymbolDimMap,
+    bool>
 export_onnx(
     const std::shared_ptr<Graph>& graph,
     const std::map<std::string, at::Tensor>& initializers,
@@ -188,25 +189,49 @@ TORCH_API void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook);
  */
 TORCH_API std::vector<std::string> export_opnames(const Module& m);
 
-struct TORCH_API BytecodeEmitDefaultValueForUnspecifiedArgMode {
-  static bool is_enabled();
-  static void set_enabled(bool enabled);
+struct TORCH_API BytecodeEmitMode {
+  static bool is_default_value_for_unspecified_arg_enabled();
+  static void set_default_value_for_unspecified_arg_enabled(bool enabled);
+
+  static bool is_default_args_before_out_args_enabled();
+  static void set_default_args_before_out_args_enabled(bool enabled);
 };
 
 // RAII guard to switch the way JIT emits the bytecode for inputs.
+// default_value_for_unspecified_arg:
 // true: instruction of default argument values (like LOADC) is emitted.
 // false: instruction of default argument values are not emitted. Instead
 // they are fetched from operator schema.
-struct TORCH_API BytecodeEmitDefaultInputsGuard {
-  BytecodeEmitDefaultInputsGuard(bool enable)
-      : prev_mode(BytecodeEmitDefaultValueForUnspecifiedArgMode::is_enabled()) {
-    BytecodeEmitDefaultValueForUnspecifiedArgMode::set_enabled(enable);
+// default_args_before_out_args (to forward compatibile support
+// operators allowing out arguments and default arguments):
+// true: the number of specified arguments will deserialized to (#all_args -
+// #default_args). false: the number of specified arguments will deserialized to
+// (#all_args).
+struct TORCH_API BytecodeEmitModeGuard {
+  BytecodeEmitModeGuard(
+      bool enable_default_value_for_unspecified_arg,
+      bool enable_default_args_before_out_args)
+      : prev_default_value_for_unspecified_arg_mode(
+            BytecodeEmitMode::is_default_value_for_unspecified_arg_enabled()),
+        prev_default_args_before_out_args(
+            BytecodeEmitMode::is_default_args_before_out_args_enabled()) {
+    BytecodeEmitMode::set_default_value_for_unspecified_arg_enabled(
+        enable_default_value_for_unspecified_arg);
+    BytecodeEmitMode::set_default_args_before_out_args_enabled(
+        enable_default_args_before_out_args);
   }
-  ~BytecodeEmitDefaultInputsGuard() {
-    BytecodeEmitDefaultValueForUnspecifiedArgMode::set_enabled(prev_mode);
+  ~BytecodeEmitModeGuard() {
+    BytecodeEmitMode::set_default_value_for_unspecified_arg_enabled(
+        prev_default_value_for_unspecified_arg_mode);
+    BytecodeEmitMode::set_default_args_before_out_args_enabled(
+        prev_default_args_before_out_args);
   }
-  bool prev_mode;
+  bool prev_default_value_for_unspecified_arg_mode;
+  bool prev_default_args_before_out_args;
 };
 
+TORCH_API IValue to_tuple(std::vector<IValue> ivalues);
+TORCH_API IValue
+Table(const std::vector<std::pair<std::string, IValue>>& entries);
 } // namespace jit
 } // namespace torch
