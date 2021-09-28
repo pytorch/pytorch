@@ -35,11 +35,6 @@ TORCH_META_FUNC(addmm)(const Tensor& self, const Tensor& mat1, const Tensor& mat
 
   auto names = at::namedinference::propagate_names_for_addmm(mat1, mat2, self);
   set_output(0, {mat1.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
-  const auto& result = maybe_get_output(0);
-  //this check can fire for inplace op only, for all other versions result is guaranteed to be correct size
-  TORCH_CHECK(((result.dim() == 2) && (result.sizes()[0] == mat1.sizes()[0]) && (result.sizes()[1] == mat2.sizes()[1])),
-  "The input tensor must be a matrix with size ", mat1.sizes()[0], "x", mat2.sizes()[1], ", but got a ", result.dim(),
-  "-D tensor with size ", result.sizes()[0], "x", result.sizes()[1]);
 }
 
 TORCH_META_FUNC(mm)(const Tensor & self, const Tensor & mat2) {
@@ -51,11 +46,6 @@ TORCH_META_FUNC(mm)(const Tensor & self, const Tensor & mat2) {
 
   auto names = at::namedinference::compute_matmul_outnames(self, mat2);
   set_output(0, {self.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
-  const auto& result = maybe_get_output(0);
-  //this check can fire for inplace op only, for all other versions result is guaranteed to be correct size
-  TORCH_CHECK(((result.dim() == 2) && (result.sizes()[0] == self.sizes()[0]) && (result.sizes()[1] == mat2.sizes()[1])),
-  "The input tensor must be a matrix with size ", self.sizes()[0], "x", mat2.sizes()[1], ", but got a ", result.dim(),
-  "-D tensor with size ", result.sizes()[0], "x", result.sizes()[1]);
 }
 
 template <typename Meta>
