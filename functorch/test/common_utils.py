@@ -22,7 +22,6 @@ def loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values):
         idx_kwargs = {}
         flat_args, args_spec = pytree.tree_flatten(batched_args)
         flat_dims, dims_spec = pytree.tree_flatten(in_dims)
-        # print(flat_args)
         assert(args_spec == dims_spec)
         new_args = [a.select(in_dim, idx) if in_dim is not None else a for a, in_dim in zip(flat_args, flat_dims)]
         out = op(*pytree.tree_unflatten(new_args, args_spec), **kwarg_values)
@@ -68,7 +67,7 @@ def get_exhaustive_batched_inputs(arg_values, kwarg_values, batch_size=3):
 
 def get_fallback_and_vmap_exhaustive(op, arg_values, kwarg_values, compute_loop_out=True):
     out_dim = 0
-    batch_size = 3
+    batch_size = 4
     generator = get_exhaustive_batched_inputs(arg_values, kwarg_values, batch_size)
     for batched_args, in_dims, kwarg_values in generator:
         if compute_loop_out:
@@ -94,13 +93,13 @@ def get_fallback_and_vmap_exhaustive(op, arg_values, kwarg_values, compute_loop_
                 out[idx] = out[idx] + x.to(out[idx].device)
             return out
 
-        vmap1_dims = tuple([0] + [None] * len(in_dims))
-        vmap2_dims = tuple([None] + list(in_dims))
+        vmap1_dims = tuple([None] + list(in_dims))
+        vmap2_dims = tuple([0] + [None] * len(in_dims))
         if compute_loop_out:
-            loop_out = pytree.tree_map(lambda v: torch.ones(3, *v.shape, device=v.device) + v, loop_out)
+            loop_out = pytree.tree_map(lambda v: torch.ones(2, *v.shape, device=v.device) + v, loop_out)
         else:
             loop_out = None
-        batched_out = vmap(vmap(f, in_dims=vmap1_dims), in_dims=vmap2_dims)(torch.ones(3), *batched_args, **kwarg_values)
+        batched_out = vmap(vmap(f, in_dims=vmap1_dims), in_dims=vmap2_dims)(torch.ones(2), *batched_args, **kwarg_values)
         yield (loop_out, batched_out)
 
 def opinfo_in_dict(opinfo, d):

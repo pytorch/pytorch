@@ -204,7 +204,7 @@ std::tuple<Tensor,Tensor> cudnn_convolution_backward_plumbing(const Tensor & sel
 /**
  * grid sample batch rule breaks down into 3 cases:
  *   case 1 (input is batched, grid is not):
- *     batch input along first dimension, unpack along first dimension 
+ *     batch input along first dimension, unpack along first dimension
  *     2d:
  *       input: N(BC)H_{in}W_{in}, grid: NH_{out}W_{out}2
  *       output: N(BC)H_{out}W_{out}
@@ -253,6 +253,45 @@ grid_sample_batch_rule(const Tensor& input, optional<int64_t> input_bdim, const 
     result = std::make_tuple(Func(input, grid, std::forward<ExtraArgs>(extra_args)...), nullopt);
   }
   return result;
+}
+
+std::tuple<Tensor, optional<int64_t>> cross_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim,
+    const Tensor& other, optional<int64_t> other_bdim,
+    const optional<int64_t> dim) {
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  auto other_ = moveBatchDimToFront(other, other_bdim);
+
+  if (other_bdim.has_value() && !self_bdim.has_value()) {
+    self_ = self_.expand_as(other_);
+  }
+  if (self_bdim.has_value() && !other_bdim.has_value()) {
+    other_ = other_.expand_as(self_);
+  }
+  auto new_dim = dim;
+  if (dim.has_value()) {
+    auto t = (self_bdim.has_value()) ? self_ : other_;
+    bool flag = (self_bdim.has_value()) ? true : other_bdim.has_value();
+    new_dim = getPhysicalDim(t, flag, *dim);
+  } else {
+    // if batch size is 3 we have to avoid that bdim is used as cross' dim argument
+    // according to cross API:
+    // > If dim is not given, it defaults to the first dimension found with the size 3
+    // we have to skip batch dim and find another dim with size 3
+    auto bs = (self_bdim.has_value()) ? self_.size(0) : (other_bdim.has_value()) ? other_.size(0) : -1;
+    if (bs == 3) {
+      auto t = (self_bdim.has_value()) ? self_ : other_;
+      int64_t idx = 1;
+      for (auto it = t.sizes().begin() + 1; it < t.sizes().end(); ++it, ++idx) {
+        if (*it == 3) {
+          new_dim = idx;
+          break;
+        }
+      }
+    }
+  }
+  optional<int64_t> out_dim = (self_bdim.has_value() || other_bdim.has_value()) ? 0 : (optional<int64_t>) nullopt;
+  return std::make_tuple(at::cross(self_, other_, new_dim), out_dim);
 }
 
 // TODO: replace with targetable functionalization
@@ -360,6 +399,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("grid_sampler_2d", GRID_SAMPLE_BATCH_RULE(grid_sampler));
   VMAP_SUPPORT("grid_sampler_3d", GRID_SAMPLE_BATCH_RULE(grid_sampler));
   VMAP_SUPPORT("cudnn_grid_sampler", GRID_SAMPLE_BATCH_RULE(cudnn_grid_sampler));
+  VMAP_SUPPORT("cross", cross_batch_rule);
 
   UNARY_POINTWISE(constant_pad_nd);
   EXISTING_BDIM(reflection_pad1d);
