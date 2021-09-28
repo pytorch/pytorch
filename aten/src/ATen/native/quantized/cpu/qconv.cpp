@@ -646,7 +646,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
     }
     at::Tensor qbias;
     // Original bias was float, so we requantize it here.
-    if (conv_p.per_channel) {
+    if (convolution_op->per_channel) {
       at::Tensor bias_quant_scales =
           weight_contig.q_per_channel_scales() * act_input_scale;
       at::Tensor bias_zp = at::zeros(bias_quant_scales.sizes(), c10::kInt);
@@ -664,7 +664,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
     input_scale = act_input_scale;
     w.reset();
     w = std::make_unique<qnnpack::PrePackConvWeights>(
-        conv_p,
+        convolution_op.get(),
         w_zero_points.data(),
         reinterpret_cast<uint8_t*>(qnnp_w_data),
         reinterpret_cast<int32_t*>(qbias.template data_ptr<c10::qint32>()));
@@ -718,7 +718,6 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
   pytorch_qnnp_status run_status;
   if (transpose()) {
     run_status = qnnpack::qnnpackDeConv(
-        conv_p,
         convolution_op.get(),
         pack_w->getPackedWeights(),
         N,
@@ -735,7 +734,6 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
         caffe2::pthreadpool_());
   } else {
     run_status = qnnpack::qnnpackConv(
-        conv_p,
         convolution_op.get(),
         pack_w->getPackedWeights(),
         N,

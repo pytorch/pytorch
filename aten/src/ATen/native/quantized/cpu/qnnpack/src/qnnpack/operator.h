@@ -110,6 +110,7 @@ struct pytorch_qnnp_operator {
   enum pytorch_qnnp_format format;
 
   bool per_channel;
+  bool transpose;
 
   // Sparsity support
   sparse_matrix_t sparse_matrix;

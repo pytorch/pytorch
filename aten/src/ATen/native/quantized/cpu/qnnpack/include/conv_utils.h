@@ -239,7 +239,14 @@ struct conv_param_t {
   /**
    * @brief Computes the output dimensions given a 2D input.
    */
-  std::array<size_t, 2> compute_output_dims(std::array<size_t, 2> input_dims) const {
+  static std::array<size_t, 2> compute_output_dims(
+      std::array<size_t, 2> input_dims,
+      std::array<size_t, 4> padding,
+      std::array<size_t, 2> adjustment_dims,
+      std::array<size_t, 2> kernel_dims,
+      std::array<size_t, 2> dilation,
+      std::array<size_t, 2> stride_dims,
+      bool transpose) {
     std::array<size_t, 2> output_dims;
     output_dims[0] = compute_output_dimension(input_dims[0],  // width
                                               padding[1] + padding[3],
