@@ -330,7 +330,6 @@ void slow_conv2d_backward_weight_frame(
   const int64_t n = grad_output.size(0);
   const int64_t k = grad_output.size(1) * grad_output.size(2);
 
-  constexpr int64_t one = 1;
   const int64_t lda = k;
   const int64_t ldb = k;
   const int64_t ldc = m;
