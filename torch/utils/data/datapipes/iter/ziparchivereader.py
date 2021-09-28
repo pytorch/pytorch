@@ -9,14 +9,14 @@ import zipfile
 import warnings
 
 class ZipArchiveReaderIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
-    r""" :class:`ZipArchiveReaderIterDataPipe`.
+    r""":class:`ZipArchiveReaderIterDataPipe`.
 
-    Iterable data pipe to extract zip binary streams from input iterable which contains a tuple of pathname and
-    zip binary stream. This yields a tuple of pathname and extracted binary stream.
+    Iterable DataPipe to extract zip binary streams from input iterable which contains a tuple of path name and
+    zip binary stream. This yields a tuple of path name and extracted binary stream.
 
     Args:
-        datapipe: Iterable datapipe that provides tuples of pathname and zip binary stream
-        length: Nominal length of the datapipe
+        datapipe: Iterable DataPipe that provides tuples of path name and zip binary stream
+        length: Nominal length of the DataPipe
 
     Note:
         The opened file handles will be closed automatically if the default DecoderDataPipe

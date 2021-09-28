@@ -175,9 +175,6 @@ class _StorageBase(object):
     def _untyped(self):
         return self
 
-    @classproperty
-    def dtype(self):
-        return torch.uint8
 
 def _load_from_bytes(b):
     return torch.load(io.BytesIO(b))
@@ -231,9 +228,9 @@ class TypedStorage:
             ' * (int size)\n'
             ' * (Sequence data)\n')
         if type(self) == TypedStorage:
-            arg_error_msg += ' * (wrap_storage=<ByteStorage>, dtype=<torch.dtype>)'
+            arg_error_msg += ' * (wrap_storage=<UntypedStorage>, dtype=<torch.dtype>)'
         else:
-            arg_error_msg += ' * (wrap_storage=<ByteStorage>)'
+            arg_error_msg += ' * (wrap_storage=<UntypedStorage>)'
 
         if 'wrap_storage' in kwargs:
             assert len(args) == 0, (
@@ -258,7 +255,7 @@ class TypedStorage:
 
             storage = kwargs['wrap_storage']
 
-            if not isinstance(storage, (torch.ByteStorage, torch.cuda.ByteStorage)):
+            if not isinstance(storage, (torch.UntypedStorage, torch.cuda.UntypedStorage)):
                 raise TypeError(arg_error_msg)
             if type(self) != TypedStorage and storage.__module__ != self.__module__:
                 raise TypeError((
@@ -283,10 +280,10 @@ class TypedStorage:
                 return True
 
             if len(args) == 0:
-                self._storage = eval(self.__module__).ByteStorage()
+                self._storage = eval(self.__module__).UntypedStorage()
 
             elif len(args) == 1 and isint(args[0]):
-                self._storage = eval(self.__module__).ByteStorage(int(args[0]) * self.element_size())
+                self._storage = eval(self.__module__).UntypedStorage(int(args[0]) * self.element_size())
 
             elif len(args) == 1 and isinstance(args[0], collections.abc.Sequence):
                 if self.dtype in [torch.quint8, torch.quint4x2, torch.qint32, torch.qint8]:
@@ -319,17 +316,17 @@ class TypedStorage:
     def _untyped(self):
         return self._storage
 
-    def _new_wrapped_storage(self, byte_storage):
-        module = eval(byte_storage.__module__)
-        assert type(byte_storage) == module.ByteStorage
+    def _new_wrapped_storage(self, untyped_storage):
+        module = eval(untyped_storage.__module__)
+        assert type(untyped_storage) == module.UntypedStorage
 
         if type(self) == TypedStorage:
-            return TypedStorage(wrap_storage=byte_storage, dtype=self.dtype)
+            return TypedStorage(wrap_storage=untyped_storage, dtype=self.dtype)
         else:
-            # NOTE: We need to use the module of byte_storage in case self's
-            # module is different, e.g. if self is on CPU and byte_storage
+            # NOTE: We need to use the module of untyped_storage in case self's
+            # module is different, e.g. if self is on CPU and untyped_storage
             # is on CUDA, and vice versa
-            return getattr(module, type(self).__name__)(wrap_storage=byte_storage)
+            return getattr(module, type(self).__name__)(wrap_storage=untyped_storage)
 
     def __len__(self):
         return self._storage.nbytes() // self.element_size()
@@ -384,7 +381,7 @@ class TypedStorage:
         # a storage view, which would be a hassle to implement in TypedStorage,
         # so it was disabled
         if isinstance(idx, slice):
-            raise RuntimeError('slices are only supported in ByteStorage.__getitem__')
+            raise RuntimeError('slices are only supported in UntypedStorage.__getitem__')
         elif not isinstance(idx, int):
             raise RuntimeError(f"can't index a {type(self)} with {type(idx)}")
 
@@ -482,8 +479,8 @@ class TypedStorage:
     def _new_shared(cls, size):
         """Creates a new storage in shared memory with the same data type"""
         module = eval(cls.__module__)
-        byte_storage = module.ByteStorage._new_shared(size * cls().element_size())
-        return cls(wrap_storage=byte_storage)
+        untyped_storage = module.UntypedStorage._new_shared(size * cls().element_size())
+        return cls(wrap_storage=untyped_storage)
 
     @property
     def _cdata(self):
@@ -515,7 +512,7 @@ class TypedStorage:
 
     @classmethod
     def _free_weak_ref(cls, *args, **kwargs):
-        return eval(cls.__module__).ByteStorage._free_weak_ref(*args, **kwargs)
+        return eval(cls.__module__).UntypedStorage._free_weak_ref(*args, **kwargs)
 
     def _weak_ref(self, *args, **kwargs):
         return self._storage._weak_ref(*args, **kwargs)
@@ -529,12 +526,12 @@ class TypedStorage:
         if 'dtype' in kwargs or len(args) == 5:
             raise RuntimeError((
                 "from_buffer: 'dtype' can only be specified in "
-                "ByteStorage.from_buffer"))
+                "UntypedStorage.from_buffer"))
 
         kwargs['dtype'] = cls().dtype
 
-        byte_storage = eval(cls.__module__).ByteStorage.from_buffer(*args, **kwargs)
-        return cls(wrap_storage=byte_storage)
+        untyped_storage = eval(cls.__module__).UntypedStorage.from_buffer(*args, **kwargs)
+        return cls(wrap_storage=untyped_storage)
 
     def _to(self, dtype):
         storage = torch.tensor([], dtype=self.dtype, device=self.device).set_(self).to(dtype).storage()
@@ -594,16 +591,16 @@ class TypedStorage:
     def from_file(cls, filename, shared, size):
         if cls == TypedStorage:
             raise RuntimeError('from_file can only be called on derived classes')
-        byte_storage = eval(cls.__module__).ByteStorage.from_file(
+        untyped_storage = eval(cls.__module__).UntypedStorage.from_file(
             filename,
             shared,
             size * torch._utils._element_size(cls.dtype))
-        storage = cls(wrap_storage=byte_storage)
+        storage = cls(wrap_storage=untyped_storage)
         return storage
 
     @classmethod
     def _expired(cls, *args, **kwargs):
-        return eval(cls.__module__).ByteStorage._expired(*args, **kwargs)
+        return eval(cls.__module__).UntypedStorage._expired(*args, **kwargs)
 
     def is_pinned(self):
         return self._storage.is_pinned()
@@ -625,11 +622,11 @@ class TypedStorage:
 
     @classmethod
     def _new_shared_cuda(cls, *args, **kwargs):
-        return eval(cls.__module__).ByteStorage._new_shared_cuda(*args, **kwargs)
+        return eval(cls.__module__).UntypedStorage._new_shared_cuda(*args, **kwargs)
 
     @classmethod
     def _new_with_weak_ptr(cls, *args, **kwargs):
-        return eval(cls.__module__).ByteStorage._new_with_weak_ptr(*args, **kwargs)
+        return eval(cls.__module__).UntypedStorage._new_with_weak_ptr(*args, **kwargs)
 
     def _share_filename_(self, *args, **kwargs):
         manager_handle, storage_handle, size = self._storage._share_filename_(*args, **kwargs)
@@ -637,7 +634,7 @@ class TypedStorage:
 
     @classmethod
     def _release_ipc_counter(cls, *args, **kwargs):
-        return eval(cls.__module__).ByteStorage._release_ipc_counter(*args, **kwargs)
+        return eval(cls.__module__).UntypedStorage._release_ipc_counter(*args, **kwargs)
 
     def _shared_incref(self, *args, **kwargs):
         return self._storage._shared_incref(*args, **kwargs)

@@ -360,7 +360,7 @@ def init_reductions():
     ForkingPickler.register(torch.cuda.Event, reduce_event)
 
     for t in torch._storage_classes:
-        if cast(Storage, t).dtype == torch.uint8:
+        if t.__name__ == 'UntypedStorage':
             ForkingPickler.register(t, reduce_storage)
         else:
             ForkingPickler.register(t, reduce_typed_storage_child)

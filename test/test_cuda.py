@@ -584,7 +584,7 @@ class TestCuda(TestCase):
         self.assertTrue(isinstance(q_copy[1], torch.cuda.IntTensor))
         self.assertTrue(isinstance(q_copy[2], torch.cuda.FloatTensor))
         self.assertTrue(isinstance(q_copy[3], torch.storage.TypedStorage))
-        self.assertTrue(isinstance(q_copy[3]._storage, torch.cuda.ByteStorage))
+        self.assertTrue(isinstance(q_copy[3]._storage, torch.cuda.UntypedStorage))
         q_copy[1].fill_(10)
         self.assertEqual(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
 

@@ -151,9 +151,9 @@ bool isStorage(PyObject* obj)
   return false;
 }
 
-at::Storage createStorageGetType(PyObject* obj, at::ScalarType& scalar_type)
+at::Storage createStorageGetType(PyObject* obj, at::ScalarType& scalar_type, bool& is_typed_storage)
 {
-  bool is_typed_storage = PyObject_TypeCheck(obj, getTypedStorageTypeObject());
+  is_typed_storage = PyObject_TypeCheck(obj, getTypedStorageTypeObject());
   THPObjectPtr maybe_untyped_storage;
   if (is_typed_storage) {
     PyObject* maybe_untyped_storage_obj = PyObject_GetAttrString(obj, "_storage");
@@ -178,6 +178,7 @@ at::Storage createStorageGetType(PyObject* obj, at::ScalarType& scalar_type)
     }
     if (obj_type == storage_type) {
       auto& type = *item.second;
+      // UntypedStorage should always be interpreted with byte dtype
       scalar_type = at::kByte;
       return type.unsafeStorageFromTH(((THPVoidStorage*)obj)->cdata, true);
     }
@@ -187,7 +188,8 @@ at::Storage createStorageGetType(PyObject* obj, at::ScalarType& scalar_type)
 
 at::Storage createStorage(PyObject* obj) {
   at::ScalarType scalar_type;
-  return createStorageGetType(obj, scalar_type);
+  bool is_typed_storage;
+  return createStorageGetType(obj, scalar_type, is_typed_storage);
 }
 
 }  // namespace

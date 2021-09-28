@@ -1760,7 +1760,7 @@ class AbstractTestCases:
 
         def test_from_buffer(self):
             a = bytearray([1, 2, 3, 4])
-            self.assertEqual(torch.ByteStorage.from_buffer(a, dtype=torch.uint8).tolist(), [1, 2, 3, 4])
+            self.assertEqual(torch.ByteStorage.from_buffer(a).tolist(), [1, 2, 3, 4])
             shorts = torch.ShortStorage.from_buffer(a, 'big')
             self.assertEqual(shorts.size(), 2)
             self.assertEqual(shorts.tolist(), [258, 772])
@@ -1786,7 +1786,7 @@ class AbstractTestCases:
             bools = torch.BoolStorage.from_buffer(f, 'big')
             self.assertEqual(bools.size(), 4)
             self.assertEqual(bools.tolist(), [False, True, True, True])
-            bytes = torch.ByteStorage.from_buffer(a, dtype=torch.uint8)
+            bytes = torch.ByteStorage.from_buffer(a)
             self.assertEqual(bytes.nbytes(), 4)
             self.assertEqual(bytes.tolist(), [1, 2, 3, 4])
 
@@ -3098,6 +3098,32 @@ class TestTorchDeviceType(TestCase):
         a_s = a.storage()
         b = torch.tensor(a_s, device=device, dtype=dtype).reshape(a.size())
         self.assertEqual(a, b)
+        c = torch.tensor(a_s._untyped(), device=device, dtype=dtype).reshape(a.size())
+        self.assertEqual(a, c)
+
+        for error_dtype in get_all_dtypes():
+            if error_dtype == dtype:
+                continue
+            with self.assertRaisesRegex(RuntimeError, r'Expected a Storage of type'):
+                error_storage = a.to(error_dtype).storage()
+                torch.tensor(error_storage, device=device, dtype=dtype)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(*get_all_dtypes())
+    def test_set_storage(self, device, dtype):
+        a = make_tensor((4, 5, 3), device, dtype, low=-9, high=9)
+        a_s = a.storage()
+        b = torch.tensor([], device=device, dtype=dtype).set_(a_s).reshape(a.size())
+        self.assertEqual(a, b)
+        c = torch.tensor([], device=device, dtype=dtype).set_(a_s._untyped()).reshape(a.size())
+        self.assertEqual(a, c)
+
+        for error_dtype in get_all_dtypes():
+            if error_dtype == dtype:
+                continue
+            with self.assertRaisesRegex(RuntimeError, r'Expected a Storage of type'):
+                error_storage = a.to(error_dtype).storage()
+                b = torch.tensor([], device=device, dtype=dtype).set_(error_storage)
 
     @dtypes(torch.float32, torch.complex64)
     def test_deepcopy(self, device, dtype):
@@ -3121,6 +3147,10 @@ class TestTorchDeviceType(TestCase):
         w[2].sub_(1)
         for i in range(a.numel()):
             self.assertEqual(w[1][1][i], q[1][1][i] - 1)
+
+        # Check that deepcopy preserves attributes
+        a.foo = 3
+        self.assertEqual(deepcopy(a).foo, 3)
 
     @dtypes(torch.float32, torch.complex64)
     def test_deepcopy_scalar(self, device, dtype):

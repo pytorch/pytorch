@@ -1108,8 +1108,12 @@ static PyObject* THPVariable_set_(
       // aten::set_.source_Storage(Tensor(a!) self, Storage source) ->
       // Tensor(a!)
       at::ScalarType storage_scalar_type;
-      at::Storage storage = _r.storage(0, &storage_scalar_type);
-      TORCH_INTERNAL_ASSERT(storage_scalar_type == self.dtype() || storage_scalar_type == at::kByte);
+      bool is_typed_storage;
+      at::Storage storage = _r.storage(0, storage_scalar_type, is_typed_storage);
+      TORCH_CHECK(storage_scalar_type == self.dtype() || !is_typed_storage,
+        "Expected a Storage of type ", self.dtype(),
+        " or an UntypedStorage, but got type ", storage_scalar_type,
+        " for argument 1 'storage'");
       auto dispatch_set_ = [](const Tensor& self, Storage source) -> Tensor {
         pybind11::gil_scoped_release no_gil;
         return self.set_(source);
@@ -1120,8 +1124,12 @@ static PyObject* THPVariable_set_(
       // aten::set_.source_Storage_storage_offset(Tensor(a!) self, Storage
       // source, int storage_offset, int[] size, int[] stride=[]) -> Tensor(a!)
       at::ScalarType storage_scalar_type;
-      at::Storage storage = _r.storage(0, &storage_scalar_type);
-      TORCH_INTERNAL_ASSERT(storage_scalar_type == self.dtype() || storage_scalar_type == at::kByte);
+      bool is_typed_storage;
+      at::Storage storage = _r.storage(0, storage_scalar_type, is_typed_storage);
+      TORCH_CHECK(storage_scalar_type == self.dtype() || !is_typed_storage,
+        "Expected a Storage of type ", self.dtype(),
+        " or an UntypedStorage, but got type ", storage_scalar_type,
+        " for argument 1 'storage'");
       auto dispatch_set_ = [](const Tensor& self,
                               Storage source,
                               int64_t storage_offset,

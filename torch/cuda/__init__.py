@@ -623,8 +623,13 @@ class _CudaBase(object):
 
 from torch.storage import TypedStorage
 
-class ByteStorage(_CudaBase, torch._C.CudaByteStorageBase, _StorageBase):
+class UntypedStorage(_CudaBase, torch._C.CudaByteStorageBase, _StorageBase):
     pass
+
+class ByteStorage(TypedStorage):
+    @classproperty
+    def dtype(self):
+        return torch.uint8
 
 class DoubleStorage(TypedStorage):
     @classproperty
@@ -681,6 +686,7 @@ class ComplexFloatStorage(TypedStorage):
     def dtype(self):
         return torch.cfloat
 
+torch._storage_classes.add(UntypedStorage)
 torch._storage_classes.add(DoubleStorage)
 torch._storage_classes.add(FloatStorage)
 torch._storage_classes.add(LongStorage)

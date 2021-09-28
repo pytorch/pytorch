@@ -32,7 +32,7 @@ PyObject* createPyObject(
     const at::Storage& storage,
     const caffe2::TypeMeta data_type);
 at::Storage createStorage(PyObject* obj);
-at::Storage createStorageGetType(PyObject* obj, at::ScalarType& scalar_type);
+at::Storage createStorageGetType(PyObject* obj, at::ScalarType& scalar_type, bool& is_typed_storage);
 bool isStorage(PyObject* obj);
 
 THPDtype* getTHPDtype(at::ScalarType scalarType);

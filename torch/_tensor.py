@@ -5,6 +5,7 @@ from numbers import Number
 from typing import Any, Dict, Optional, Tuple, Union
 import warnings
 import copyreg
+from copy import deepcopy
 
 import torch
 import torch._C as _C
@@ -91,7 +92,7 @@ class Tensor(torch._C._TensorBase):
             # does accurate alias tracking; however, the code below
             # doesn't work because of
             # https://github.com/pytorch/pytorch/issues/47442
-            if self.is_sparse or self.device.type in ['xla', 'mlc', 'ort', 'meta']:
+            if self.is_sparse or self.device.type in ['xla', 'mlc', 'ort', 'meta', 'hpu']:
                 new_tensor = self.clone()
             else:
                 new_storage = self.storage().__deepcopy__(memo)
@@ -129,6 +130,18 @@ class Tensor(torch._C._TensorBase):
                     new_tensor.requires_grad = self.requires_grad
             if self.grad is not None:
                 new_tensor.grad = self.grad.__deepcopy__(memo)
+
+            if not type(self) is Tensor:
+                new_tensor = new_tensor.as_subclass(type(self))  # type: ignore[arg-type]
+
+                # Plain Tensors don't have slots
+                slots_to_save = copyreg._slotnames(self.__class__)  # type: ignore[attr-defined]
+                for slot in slots_to_save:
+                    if hasattr(self, slot):
+                        setattr(new_tensor, slot, deepcopy(getattr(self, slot), memo))
+
+            new_tensor.__dict__ = deepcopy(self.__dict__, memo)
+
             memo[id(self)] = new_tensor
             return new_tensor
 
@@ -166,12 +179,9 @@ class Tensor(torch._C._TensorBase):
             raise RuntimeError(f'unsupported Storage type: {self.dtype}')
 
         storage = self._storage()
-
-        if self.dtype != torch.uint8:
-            # If dtype is not byte, need to change it to the proper storage type
-            storage_name = torch.storage._dtype_to_storage_type_map()[self.dtype]
-            storage_class = eval(type(storage).__module__ + '.' + storage_name)
-            storage = storage_class(wrap_storage=storage)
+        storage_name = torch.storage._dtype_to_storage_type_map()[self.dtype]
+        storage_class = eval(type(storage).__module__ + '.' + storage_name)
+        storage = storage_class(wrap_storage=storage)
         return storage
 
     def _reduce_ex_internal(self, proto):

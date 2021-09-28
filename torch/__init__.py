@@ -526,8 +526,13 @@ from .storage import _StorageBase, TypedStorage
 # NOTE: New <type>Storage classes should never be added. When adding a new
 # dtype, use torch.storage.TypedStorage directly.
 
-class ByteStorage(_C.ByteStorageBase, _StorageBase):
+class UntypedStorage(_C.ByteStorageBase, _StorageBase):
     pass
+
+class ByteStorage(TypedStorage):
+    @classproperty
+    def dtype(self):
+        return torch.uint8
 
 class DoubleStorage(TypedStorage):
     @classproperty
@@ -605,9 +610,10 @@ class QUInt4x2Storage(TypedStorage):
         return torch.quint4x2
 
 _storage_classes = {
-    DoubleStorage, FloatStorage, LongStorage, IntStorage, ShortStorage,
-    CharStorage, ByteStorage, HalfStorage, BoolStorage, QUInt8Storage, QInt8Storage,
-    QInt32Storage, BFloat16Storage, ComplexFloatStorage, ComplexDoubleStorage, QUInt4x2Storage
+    UntypedStorage, DoubleStorage, FloatStorage, LongStorage, IntStorage,
+    ShortStorage, CharStorage, ByteStorage, HalfStorage, BoolStorage,
+    QUInt8Storage, QInt8Storage, QInt32Storage, BFloat16Storage,
+    ComplexFloatStorage, ComplexDoubleStorage, QUInt4x2Storage
 }
 
 # The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()

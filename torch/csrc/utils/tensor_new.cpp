@@ -20,6 +20,7 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/TracerMode.h>
 #include <c10/core/Backend.h>
+#include <c10/core/DispatchKeySet.h>
 #include <c10/core/Layout.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
@@ -284,8 +285,12 @@ Tensor internal_new_from_data(
 
     if (isStorage(data)) {
       ScalarType storage_scalar_type;
-      Storage storage = createStorageGetType(data, storage_scalar_type);
-      tensor = at::empty(sizes, at::initialTensorOptions().dtype(storage_scalar_type).pinned_memory(pin_memory).device(storage.device()));
+      bool is_typed_storage;
+      Storage storage = createStorageGetType(data, storage_scalar_type, is_typed_storage);
+      TORCH_CHECK(!is_typed_storage || storage_scalar_type == scalar_type,
+          "Expected a Storage of type ", scalar_type,
+          " or an UntypedStorage, but got ", storage_scalar_type);
+      tensor = at::empty(sizes, at::initialTensorOptions().dtype(is_typed_storage ? storage_scalar_type : inferred_scalar_type).pinned_memory(pin_memory).device(storage.device()));
       tensor.set_(storage);
 
     } else {
@@ -337,42 +342,31 @@ Tensor legacy_new_from_sequence(
 // TODO: Rewrite this using dispatchKeyToTensorOptions
 void check_base_legacy_new(c10::DispatchKey dispatch_key, at::Layout expected_layout) {
   if (expected_layout == c10::kStrided) {
-    TORCH_CHECK(
-        dispatch_key == c10::DispatchKey::CPU ||
-            dispatch_key == c10::DispatchKey::CUDA ||
-            dispatch_key == c10::DispatchKey::HIP ||
-            dispatch_key == c10::DispatchKey::XLA ||
-            dispatch_key == c10::DispatchKey::Lazy ||
-            dispatch_key == c10::DispatchKey::XPU,
-        "new(): expected DispatchKey: ",
+    constexpr c10::DispatchKeySet expected_key_set({
         c10::DispatchKey::CPU,
-        " or ",
         c10::DispatchKey::CUDA,
-        " or ",
         c10::DispatchKey::HIP,
-        " or ",
         c10::DispatchKey::XLA,
-        " or ",
         c10::DispatchKey::Lazy,
-        " or ",
         c10::DispatchKey::XPU,
+        c10::DispatchKey::HPU,
+    });
+    TORCH_CHECK(expected_key_set.has(dispatch_key),
+        "new(): expected key in ",
+        expected_key_set,
         " but got: ",
         dispatch_key);
   } else if(expected_layout == c10::kSparse) {
     // NOTE: no sparse XLA or Lazy
-    TORCH_CHECK(
-        dispatch_key == c10::DispatchKey::SparseCPU ||
-            dispatch_key == c10::DispatchKey::SparseCUDA ||
-            dispatch_key == c10::DispatchKey::SparseHIP ||
-            dispatch_key == c10::DispatchKey::SparseXPU,
-        "new(): expected DispatchKey: ",
+    constexpr c10::DispatchKeySet expected_key_set({
         c10::DispatchKey::SparseCPU,
-        " or ",
         c10::DispatchKey::SparseCUDA,
-        " or ",
         c10::DispatchKey::SparseHIP,
-        " or ",
         c10::DispatchKey::SparseXPU,
+    });
+    TORCH_CHECK(expected_key_set.has(dispatch_key),
+        "new(): expected key in ",
+        expected_key_set,
         " but got: ",
         dispatch_key);
   } else {
@@ -518,14 +512,13 @@ Tensor legacy_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_t
     return at::empty({0}, build_options(options, scalar_type));
   } else if (r.idx == 1) {
     at::ScalarType storage_scalar_type;
-    at::Storage storage = r.storage(0, &storage_scalar_type);
-    if (storage_scalar_type != at::ScalarType::Undefined) {
+    bool is_typed_storage;
+    at::Storage storage = r.storage(0, storage_scalar_type, is_typed_storage);
+    if (storage_scalar_type != at::ScalarType::Undefined && is_typed_storage) {
       TORCH_CHECK(
         storage_scalar_type == scalar_type,
-        "Expected Storage of type ",
-        scalar_type,
-        " but got type ",
-        storage_scalar_type,
+        "Expected a Storage of type ", scalar_type,
+        " or an UntypedStorage, but got type ", storage_scalar_type,
         " for argument 1 'storage'");
     }
     return new_with_storage(options, scalar_type, storage);
@@ -581,14 +574,13 @@ Tensor legacy_tensor_new(c10::DispatchKey dispatch_key, at::ScalarType scalar_ty
     return at::empty({0}, build_options(options, scalar_type));
   } else if (r.idx == 1) {
     at::ScalarType storage_scalar_type;
-    at::Storage storage = r.storage(0, &storage_scalar_type);
-    if (storage_scalar_type != at::ScalarType::Undefined) {
+    bool is_typed_storage;
+    at::Storage storage = r.storage(0, storage_scalar_type, is_typed_storage);
+    if (storage_scalar_type != at::ScalarType::Undefined && is_typed_storage) {
       TORCH_CHECK(
         storage_scalar_type == scalar_type,
-        "Expected Storage of type ",
-        scalar_type,
-        " but got type ",
-        storage_scalar_type,
+        "Expected a Storage of type ", scalar_type,
+        " or an UntypedStorage, but got type ", storage_scalar_type,
         " for argument 1 'storage'");
     }
     return new_with_storage(options, scalar_type, storage);
