@@ -13,9 +13,9 @@
       "parallelnative-linux-xenial-py3.6-gcc5.4",
       "periodic-libtorch-linux-xenial-cuda11.1-py3.6-gcc7",
       "periodic-linux-xenial-cuda11.1-py3.6-gcc7",
+      "periodic-pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck",
       "periodic-win-vs2019-cuda11.1-py3",
       "puretorch-linux-xenial-py3.6-gcc5.4",
-      "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck",
       "win-vs2019-cpu-py3",
       "win-vs2019-cuda10.2-py3",
       "win-vs2019-cuda11.3-py3"
@@ -39,8 +39,8 @@
       "linux-xenial-cuda11.3-py3.6-gcc7",
       "periodic-libtorch-linux-xenial-cuda11.1-py3.6-gcc7",
       "periodic-linux-xenial-cuda11.1-py3.6-gcc7",
+      "periodic-pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck",
       "periodic-win-vs2019-cuda11.1-py3",
-      "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck",
       "win-vs2019-cuda10.2-py3",
       "win-vs2019-cuda11.3-py3"
     ],
@@ -49,7 +49,7 @@
       "linux-xenial-cuda11.3-py3.6-gcc7",
       "linux-xenial-py3.6-gcc5.4",
       "linux-xenial-py3.6-gcc7-bazel-test",
-      "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck",
+      "periodic-pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck",
       "win-vs2019-cpu-py3",
       "win-vs2019-cuda11.3-py3"
     ],
@@ -70,8 +70,8 @@
       "parallelnative-linux-xenial-py3.6-gcc5.4",
       "periodic-libtorch-linux-xenial-cuda11.1-py3.6-gcc7",
       "periodic-linux-xenial-cuda11.1-py3.6-gcc7",
-      "puretorch-linux-xenial-py3.6-gcc5.4",
-      "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck"
+      "periodic-pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck",
+      "puretorch-linux-xenial-py3.6-gcc5.4"
     ],
     "ciflow/noarch": [
       "linux-bionic-py3.6-clang9"
@@ -84,10 +84,10 @@
     "ciflow/slow": [
       "linux-bionic-cuda10.2-py3.9-gcc7",
       "linux-xenial-cuda10.2-py3.6-gcc7",
-      "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck"
+      "periodic-pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck"
     ],
     "ciflow/slow-gradcheck": [
-      "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck"
+      "periodic-pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck"
     ],
     "ciflow/win": [
       "periodic-win-vs2019-cuda11.1-py3",

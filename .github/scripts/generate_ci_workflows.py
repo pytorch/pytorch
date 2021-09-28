@@ -472,7 +472,7 @@ LINUX_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="linux",
-        build_environment="pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck",
+        build_environment="periodic-pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         on_pull_request=True,

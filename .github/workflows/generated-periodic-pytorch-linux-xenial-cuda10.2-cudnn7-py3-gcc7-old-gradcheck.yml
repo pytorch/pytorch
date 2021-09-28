@@ -1,7 +1,7 @@
 # @generated DO NOT EDIT MANUALLY
 # Template is at:    .github/templates/linux_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck
+name: periodic-pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck
 
 on:
   pull_request:
@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 env:
-  BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck
+  BUILD_ENVIRONMENT: periodic-pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck
   DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7
   SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
   XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
@@ -29,7 +29,7 @@ env:
   CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
   CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
 concurrency:
-  group: pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: periodic-pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
@@ -153,7 +153,7 @@ jobs:
     needs: [calculate-docker-image, ciflow_should_run]
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
-      JOB_BASE_NAME: pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck-build
+      JOB_BASE_NAME: periodic-pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck-build
     steps:
       - name: Display EC2 information
         shell: bash
@@ -344,7 +344,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
-      JOB_BASE_NAME: pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck-test
+      JOB_BASE_NAME: periodic-pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck-test
       TEST_CONFIG: ${{ matrix.config }}
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
@@ -536,7 +536,7 @@ jobs:
         env:
           AWS_DEFAULT_REGION: us-east-1
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck-test
+          JOB_BASE_NAME: periodic-pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck-test
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
