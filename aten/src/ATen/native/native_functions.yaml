@@ -8535,6 +8535,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA: hardsigmoid_out
+    QuantizedCPU: hardsigmoid_out_quantized_cpu
 
 - func: hardsigmoid(Tensor self) -> Tensor
   structured_delegate: hardsigmoid.out

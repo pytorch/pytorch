@@ -87,4 +87,10 @@ Tensor hardsigmoid_quantized_cpu(const Tensor& qx) {
   return qy;
 }
 
+Tensor& hardsigmoid_out_quantized_cpu(const Tensor& qx, Tensor& result) {
+  // TODO(future PR): optimize the qnnpack implementation, if needed
+  result = hardsigmoid_quantized_cpu(qx);
+  return result;
+}
+
 }}  // namespace at::native
