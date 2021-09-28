@@ -127,53 +127,55 @@ for op in ops:
 
 def annotate_ops(ops, is_unique):
     categorization = defaultdict(int)
-    for i in ops:
+    for op in ops:
         old_tcnt = sum(categorization.values())
-        if i['name'][-1] == '_':
+        if op['name'][-1] == '_':
             categorization['inplace'] += 1
-            i['meta'] = 'inplace'
+            op['meta'] = 'inplace'
             continue
-        if not is_unique and 'a!' in i['func'].lower():
+        if 'slow_conv3d_backward.grad_input' in op['full_name']:
+            import pdb; pdb.set_trace()
+        if not is_unique and 'a!' in op['func'].lower():
             categorization['out'] += 1
-            i['meta'] = 'out'
+            op['meta'] = 'out'
             continue
-        if 'conv' in i['name']:
+        if 'conv' in op['name']:
             categorization['conv'] += 1
-            i['meta'] = 'conv'
+            op['meta'] = 'conv'
             continue
-        if 'pool' in i['name']:
+        if 'pool' in op['name']:
             categorization['pool'] += 1
-            i['meta'] = 'pool'
+            op['meta'] = 'pool'
             continue
-        if 'backward' in i['name']:
+        if 'backward' in op['name']:
             categorization['backward'] += 1
-            i['meta'] = 'backward'
+            op['meta'] = 'backward'
             continue
-        if i['name'][0] == '_' and i['name'][1] != '_':
+        if op['name'][0] == '_' and op['name'][1] != '_':
             categorization['private'] += 1
-            i['meta'] = 'private'
+            op['meta'] = 'private'
             continue
-        if 'batch_norm' in i['name']:
+        if 'batch_norm' in op['name']:
             categorization['batch_norm'] += 1
-            i['meta'] = 'batch_norm'
+            op['meta'] = 'batch_norm'
             continue
-        if 'Tensor' not in i['func'] or'Tensor' not in i['ret_type']:
+        if 'Tensor' not in op['func'] or'Tensor' not in op['ret_type']:
             categorization['non_tensor'] += 1
-            i['meta'] = 'non_tensor'
+            op['meta'] = 'non_tensor'
             continue
-        if 'cudnn' in i['name'] or 'mkldnn' in i['name'] or 'miopen' in i['name'] or 'native' in i['name'] or 'thnn' in i['name'] or 'slow' in i['name']:
+        if 'cudnn' in op['name'] or 'mkldnn' in op['name'] or 'miopen' in op['name'] or 'native' in op['name'] or 'thnn' in op['name'] or 'slow' in op['name']:
             categorization['backend'] += 1
-            i['meta'] = 'backend'
+            op['meta'] = 'backend'
             continue
-        if i['name'] in annotated_ops:
+        if op['name'] in annotated_ops:
             categorization['core'] += 1
-            i['meta'] = 'core ' + annotated_ops[i['name']]
+            op['meta'] = 'core ' + annotated_ops[op['name']]
         else:
             categorization['core'] += 1
-            i['meta'] = 'core unknown'
+            op['meta'] = 'core unknown'
     return categorization
 
-categorization = annotate_ops(uniq_ops, True)
+# categorization = annotate_ops(uniq_ops, True)
 categorization = annotate_ops(ops, False)
 
 for op in ops:
