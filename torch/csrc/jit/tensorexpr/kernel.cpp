@@ -386,8 +386,7 @@ std::vector<ExprHandle> TensorExprKernel::sizesForValue(
   }
   GRAPH_DEBUG("Unknown sizes for the node: ", *v->node());
   GRAPH_DEBUG("Full fusion group graph:\n", *v->node()->owningGraph());
-  std::string msg =
-      std::string("Unhandled node kind (in inferSizesForValue): ") +
+  std::string msg = std::string("Unhandled node kind (in sizesForValue): ") +
       v->node()->kind().toQualString();
   throw malformed_input(msg);
 }
