@@ -309,7 +309,7 @@ struct Workspace {
   Workspace& operator=(Workspace&&) = default;
   ~Workspace() {
     if (data) {
-      c10::hip::HIPCachingAllocator::raw_delete(size);
+      c10::hip::HIPCachingAllocator::raw_delete(data);
     }
   }
 
