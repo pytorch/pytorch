@@ -20,6 +20,6 @@ enum class TrainingMode {
 // test_operators.py will be more stable. Only bump it when
 // necessary.
 static const size_t IR_VERSION = 7;
-static const char* PRODUCER_VERSION = "1.10";
+static const char* PRODUCER_VERSION = "1.11";
 } // namespace onnx
 } // namespace torch

@@ -959,7 +959,7 @@ inline Stack evilDeprecatedBadCreateStackDoNotUse(
 // Run `callee`, potentially inserting a CallFunction/CallMethod node into the
 // tracing graph.
 inline py::object runAndInsertCall(
-    Function& callee,
+    GraphFunction& callee,
     const tuple_slice& args,
     const py::kwargs& kwargs,
     c10::optional<IValue> self,
@@ -1076,7 +1076,7 @@ inline py::object invokeScriptFunctionFromPython(
   // the implications of doing so
 
   return runAndInsertCall(
-      callee,
+      toGraphFunction(callee),
       args,
       kwargs,
       /*self=*/c10::nullopt,
@@ -1097,7 +1097,7 @@ inline py::object invokeScriptMethodFromPython(
   }
 
   return runAndInsertCall(
-      callee.function(),
+      toGraphFunction(callee.function()),
       args,
       kwargs,
       self,

@@ -781,10 +781,6 @@ const ExecutionPlan& GraphExecutor::getPlanFor(
   return pImpl->getPlanFor(inputs, remaining_bailout_depth);
 }
 
-std::shared_ptr<Graph> GraphExecutor::graph() const {
-  return pImpl->graph;
-}
-
 GraphExecutorState GraphExecutor::getDebugState() {
   return pImpl->getDebugState();
 }

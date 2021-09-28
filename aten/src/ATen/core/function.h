@@ -16,7 +16,7 @@ namespace torch {
 namespace jit {
 
 struct Graph;
-struct GraphExecutor;
+class Executor;
 
 using Stack = std::vector<at::IValue>;
 using Kwargs = std::unordered_map<std::string, at::IValue>;
@@ -35,7 +35,9 @@ struct TORCH_API Function {
     return no_doc_string;
   }
 
-  virtual bool isGraphFunction() const = 0;
+  virtual bool isGraphFunction() const {
+    return false;
+  }
 
   virtual void run(Stack& stack) = 0;
 
@@ -56,13 +58,11 @@ struct TORCH_API Function {
   // if this isn't yet defined, run its method_creator function
   virtual void ensure_defined() = 0;
 
-  virtual std::shared_ptr<Graph> graph() const = 0;
+  virtual bool hasExecutor() const {
+    return true;
+  }
 
-  virtual std::shared_ptr<Graph> optimized_graph() const = 0;
-
-  virtual void clear_execution_info() = 0;
-
-  virtual GraphExecutor& get_executor() = 0;
+  virtual Executor& get_executor() = 0;
 
   virtual const c10::FunctionSchema& getSchema() const = 0;
 

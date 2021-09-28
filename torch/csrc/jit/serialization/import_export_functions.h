@@ -9,10 +9,6 @@ IValue expect_field(
     std::vector<IValue>& elements,
     const std::string& expected_name,
     size_t entry);
-c10::optional<IValue> optional_field(
-    std::vector<IValue>& elements,
-    const std::string& expected_name,
-    size_t entry);
 std::string operator_str(
     const std::string& name,
     const std::string& overloadname);
