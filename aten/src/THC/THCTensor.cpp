@@ -1,6 +1,5 @@
 #include <THC/THCGeneral.h>
 #include <THC/THCTensor.hpp>
-#include <THC/THCTensorCopy.h>
 
 #include <new>
 

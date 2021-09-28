@@ -1,4 +1,5 @@
-from inspect import signature
+from itertools import product
+from inspect import signature, isgenerator
 from copy import deepcopy
 import tempfile
 from operator import methodcaller
@@ -7,7 +8,7 @@ import torch
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCUDA
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from)
+    TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck, gradgradcheck)
 from unittest.mock import patch
 
 
@@ -276,6 +277,167 @@ class TestModule(TestCase):
             output_op.backward(grad)
             output_ip.backward(grad)
             self.assertEqual(input_args[0].grad, input_arg_copy[0].grad)
+
+    def _traverse_obj(self, obj, func):
+        if isinstance(obj, (tuple, list)):
+            return type(obj)(self._traverse_obj(o, func) for o in obj)
+        elif isgenerator(obj):
+            return tuple(self._traverse_obj(o, func) for o in obj)
+        elif isinstance(obj, dict):
+            return {name: self._traverse_obj(o, func) for name, o in obj.items()}
+        elif isinstance(obj, (torch.Tensor, torch.nn.Parameter)):
+            return func(obj)
+
+    def _retain_grad(self, obj):
+        # gradients needs to be retained to check for grad. This is useful when
+        # non-leafs are present in the graph.
+        def inner_retain_grad(obj):
+            if obj.requires_grad:
+                obj.retain_grad()
+        self._traverse_obj(obj, inner_retain_grad)
+
+    def _get_grads(self, obj):
+        def inner_get_grad(obj):
+            if obj.requires_grad:
+                return obj.grad
+        return self._traverse_obj(obj, inner_get_grad)
+
+    def _zero_grad(self, obj):
+        def inner_zero_grad(obj):
+            if obj.grad is not None:
+                obj.grad = None
+        self._traverse_obj(obj, inner_zero_grad)
+
+    @modules(module_db)
+    def test_non_contiguous_tensors(self, device, dtype, module_info):
+        # Check modules work with non-contiguous tensors
+
+        module_cls = module_info.module_cls
+        module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
+                                                       requires_grad=True)
+
+        def _make_non_contiguous(obj):
+            def inner_make_non_contiguous(obj):
+                # Scalar tensors can not be made non-contiguous
+                if not isinstance(obj, torch.Tensor) or obj.dim() == 0:
+                    return obj
+
+                out = torch.repeat_interleave(obj, 2, dim=-1)
+                out = out[..., ::2].detach()
+                out.requires_grad = obj.requires_grad
+                return out
+            return self._traverse_obj(obj, inner_make_non_contiguous)
+
+        def _can_be_noncontiguous(obj):
+            if isinstance(obj, (tuple, list)):
+                return any(_can_be_noncontiguous(o) for o in obj)
+            elif isinstance(obj, dict):
+                return any(_can_be_noncontiguous(o) for o in obj.values())
+            # scalar tensors can not be non-contiguous
+            if not isinstance(obj, torch.Tensor) or obj.dim() == 0:
+                return False
+            return True
+
+
+        for module_input in module_inputs:
+            if module_input.forward_input is None:
+                continue
+
+            input_args, input_kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
+            if not (_can_be_noncontiguous(input_args) or _can_be_noncontiguous(input_kwargs)):
+                continue
+
+            # === Instantiate the module. ===
+            args, kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
+            m = module_cls(*args, **kwargs)
+            m.to(device).to(dtype)
+
+            self._retain_grad((input_args, input_kwargs))
+
+            # === Forward with default input
+            with freeze_rng_state():
+                default_output = m(*input_args, **input_kwargs)
+                grad_output = default_output.clone().detach_().normal_()
+                default_output.backward(grad_output, retain_graph=True)
+
+            default_input_args_grad, default_input_kwargs_grad = deepcopy(self._get_grads((input_args, input_kwargs)))
+            default_param_grad = deepcopy([p.grad for p in m.parameters()])
+
+            # === Construct non-contiguous tensors ===
+            nc_input_args, nc_input_kwargs = _make_non_contiguous((input_args, input_kwargs))
+            nc_grad_output = _make_non_contiguous(grad_output)
+
+            # === Compare results with non-contiguous and contiguous tensors ===
+            inputs = [(input_args, input_kwargs), (nc_input_args, nc_input_kwargs)]
+            grads = [grad_output, nc_grad_output]
+
+            for (in_args, in_kwargs), g_out in product(inputs, grads):
+                g_out_copy = deepcopy(g_out)
+                self._zero_grad((in_args, in_kwargs))
+                self._zero_grad(m.parameters())
+
+                with freeze_rng_state():
+                    out = m(*in_args, **in_kwargs)
+                    out.backward(g_out_copy, retain_graph=True)
+
+                input_args_grad, input_kwargs_grad = self._get_grads((in_args, in_kwargs))
+                self.assertEqual(out, default_output)
+                self.assertEqual(input_args_grad, default_input_args_grad, atol=1e-4, rtol=0)
+                self.assertEqual(input_kwargs_grad, default_input_kwargs_grad, atol=1e-4, rtol=0)
+
+                param_grad = [p.grad for p in m.parameters()]
+                self.assertEqual(param_grad, default_param_grad)
+
+
+    def _test_gradients_helper(self, device, dtype, module_info, check):
+        # Check gradients
+        module_cls = module_info.module_cls
+        module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
+                                                       requires_grad=True)
+
+        for module_input in module_inputs:
+            if module_input.forward_input is None:
+                continue
+
+            # === Instantiate the module. ===
+            args, kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
+            m = module_cls(*args, **kwargs)
+            m.to(device).to(dtype)
+
+            params = tuple(m.parameters())
+
+            # === Perform gradient check on the input_args ===
+            input_args, input_kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
+
+            other_kwargs = {}
+            kwarg_tensors = []
+            for name, obj in input_kwargs.items():
+                if isinstance(obj, torch.Tensor):
+                    kwarg_tensors.append((name, obj))
+                else:
+                    other_kwargs[name] = obj
+
+            grad_input = input_args + params + tuple(obj for (_, obj) in kwarg_tensors)
+
+            def fn_to_gradcheck(*input_and_params):
+                new_input_args = input_and_params[:len(input_args)]
+                kwarg_args = input_and_params[-len(kwarg_tensors):]
+                new_kwargs = {name: obj for (name, _), obj in zip(kwarg_tensors, kwarg_args)}
+
+                with freeze_rng_state():
+                    return m(*new_input_args, **new_kwargs, **other_kwargs)
+
+            self.assertTrue(check(fn_to_gradcheck, grad_input))
+
+
+    @modules(module_db, allowed_dtypes=[torch.double])
+    def test_grad(self, device, dtype, module_info):
+        self._test_gradients_helper(device, dtype, module_info, gradcheck)
+
+    @modules([m for m in module_db if m.supports_gradgrad],
+             allowed_dtypes=[torch.double])
+    def test_gradgrad(self, device, dtype, module_info):
+        self._test_gradients_helper(device, dtype, module_info, gradgradcheck)
 
 
 instantiate_device_type_tests(TestModule, globals())
