@@ -15,8 +15,18 @@ target_link_libraries(test_mobile_nnc PRIVATE torch gtest)
 target_include_directories(test_mobile_nnc PRIVATE ${ATen_CPU_INCLUDE})
 target_compile_definitions(test_mobile_nnc PRIVATE USE_GTEST)
 
+add_executable(test_aot_model_compiler
+  ${TORCH_ROOT}/binaries/aot_model_compiler.cc
+)
+
+target_link_libraries(test_aot_model_compiler PRIVATE torch gtest)
+target_link_libraries(test_aot_model_compiler PRIVATE aot_compiler)
+target_include_directories(test_aot_model_compiler PRIVATE ${ATen_CPU_INCLUDE})
+target_compile_definitions(test_mobile_nnc PRIVATE USE_GTEST)
+
 if(INSTALL_TEST)
   install(TARGETS test_mobile_nnc DESTINATION bin)
+  install(TARGETS test_aot_model_compiler DESTINATION bin)
   # Install PDB files for MSVC builds
   if(MSVC AND BUILD_SHARED_LIBS)
     install(FILES $<TARGET_PDB_FILE:test_mobile_nnc> DESTINATION bin OPTIONAL)
