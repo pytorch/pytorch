@@ -2,6 +2,7 @@
 #include <ATen/native/IndexingUtils.h>
 
 #include <ATen/ATen.h>
+#include <ATen/ceil_div.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/MemoryOverlap.h>
@@ -13,8 +14,6 @@
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAUtils.h>
 
-#include <THC/THCDeviceUtils.cuh>
-#include <THC/THCGeneral.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/cub.cuh>
 #include <c10/util/irange.h>
@@ -250,8 +249,8 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
       TORCH_INTERNAL_ASSERT(linearIndex.numel()*sliceSize*nElemBefore == value.numel(), "number of flattened indices did not match number of elements in the value tensor", linearIndex.numel()*sliceSize*nElemBefore, value.numel());
       const int UNROLL = 4;
       const int indices_per_block = 4;
-      dim3 grid(THCCeilDiv(num_indices, (int64_t) indices_per_block),
-           std::min<int>(at::cuda::getCurrentDeviceProperties()->maxGridSize[1], THCCeilDiv(sliceSize, (int64_t) (C10_WARP_SIZE*UNROLL))),
+      dim3 grid(ceil_div(num_indices, (int64_t) indices_per_block),
+           std::min<int>(at::cuda::getCurrentDeviceProperties()->maxGridSize[1], ceil_div(sliceSize, (int64_t) (C10_WARP_SIZE*UNROLL))),
            std::min(std::max<int>(1,nElemBefore), at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
       dim3 block(C10_WARP_SIZE, indices_per_block);
 
@@ -532,10 +531,10 @@ Tensor& index_add_cuda_(Tensor & self, int64_t dim, const Tensor & index, const 
       selfAddDimSize, alpha_value);                                         \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  dim3 smallIndexGrid(std::min(THCCeilDiv(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
+  dim3 smallIndexGrid(std::min(ceil_div(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
   dim3 smallIndexBlock(std::min(sliceSize, (ptrdiff_t)128));
 
-  dim3 largeIndexGrid(std::min(THCCeilDiv(sourceTotalSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
+  dim3 largeIndexGrid(std::min(ceil_div(sourceTotalSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
   dim3 largeIndexBlock(std::min(sourceTotalSize, (ptrdiff_t)128));
 
   if (cuda::detail::canUse32BitIndexMath(self) &&
@@ -789,10 +788,10 @@ void index_select_out_cuda_impl(
       selfSelectDimSize);                                                      \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  dim3 smallIndexGrid(std::min(THCCeilDiv(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
+  dim3 smallIndexGrid(std::min(ceil_div(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
   dim3 smallIndexBlock(std::min(sliceSize, (ptrdiff_t)128));
 
-  dim3 largeIndexGrid(std::min(THCCeilDiv(outTotalSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
+  dim3 largeIndexGrid(std::min(ceil_div(outTotalSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
   dim3 largeIndexBlock(std::min(outTotalSize, (ptrdiff_t)128));
   if (cuda::detail::canUse32BitIndexMath(out) &&
       cuda::detail::canUse32BitIndexMath(self) &&
