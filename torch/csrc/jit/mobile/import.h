@@ -81,7 +81,7 @@ c10::StrongTypePtr typeResolverMobile(
 c10::intrusive_ptr<c10::ivalue::Object> objLoaderMobile(
     const at::StrongTypePtr& type,
     const at::IValue& input,
-    const mobile::CompilationUnit& mobile_compilation_unit);
+    mobile::CompilationUnit& mobile_compilation_unit);
 
 // Given a reader, which has access to a model file,
 // return true if there exists tensors in `bytecode` archive
