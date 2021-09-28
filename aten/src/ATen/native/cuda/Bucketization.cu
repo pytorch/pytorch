@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
+#include <ATen/ceil_div.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/BucketizationUtils.h>
 #include <THC/THC.h>
 
@@ -81,7 +81,7 @@ void searchsorted_cuda_contiguous(Tensor& result, const Tensor& input, const Ten
   int64_t maxThread = at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   int64_t maxGrid = 1024;
   dim3 block = dim3(std::min(maxThread, numel_in));
-  dim3 grid  = dim3(std::min(maxGrid, cuda::ATenCeilDiv<int64_t>(numel_in, block.x)));
+  dim3 grid  = dim3(std::min(maxGrid, ceil_div<int64_t>(numel_in, block.x)));
   at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
 
   searchsorted_cuda_kernel<<<grid, block, 0, stream>>>(

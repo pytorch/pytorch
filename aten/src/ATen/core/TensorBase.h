@@ -368,6 +368,11 @@ class TORCH_API TensorBase {
     return impl_->is_xla();
   }
 
+  /// Returns if a `Tensor` has HPU backend.
+  bool is_hpu() const {
+    return impl_->is_hpu();
+  }
+
   /// Returns if a `Tensor` has Lazy backend.
   bool is_lazy() const {
     return impl_->is_lazy();

@@ -324,30 +324,22 @@ Tensor LinearOpContext::run(
               1,
             },
             {8, 8, 1},
-            // Write-only access bypasses synchronization but inserts appropriate
-            // barriers if necessary.
+            // Shader parameters
+            block,
+            // Textures
             v_output.image(
                 command_buffer,
                 vTensor::Stage::Compute,
                 vTensor::Access::Write),
-            // Read-only access is implied on const tensors and triggers an async
-            // synchronization if necessary.
             v_input.image(
                 command_buffer,
                 vTensor::Stage::Compute),
-            // Read-only access is implied on const tensors and triggers an async
-            // synchronization if necessary.
             packed_.v_weight.image(
                 command_buffer,
                 vTensor::Stage::Compute),
-            // Read-only access is implied on const tensors and triggers an async
-            // synchronization if necessary.
             packed_.v_bias.image(
                 command_buffer,
-                vTensor::Stage::Compute),
-            // Object lifetime is managed by the resource pool.
-            // It is OK not to keep track of the handle.
-            context->resource().pool.uniform(block).object);
+                vTensor::Stage::Compute));
       }
       else {
         const struct {
@@ -373,25 +365,18 @@ Tensor LinearOpContext::run(
               1,
             },
             {8, 8, 1},
-            // Write-only access bypasses synchronization but inserts appropriate
-            // barriers if necessary.
+            // Shader parameters
+            block_no_bias,
             v_output.image(
                 command_buffer,
                 vTensor::Stage::Compute,
                 vTensor::Access::Write),
-            // Read-only access is implied on const tensors and triggers an async
-            // synchronization if necessary.
             v_input.image(
                 command_buffer,
                 vTensor::Stage::Compute),
-            // Read-only access is implied on const tensors and triggers an async
-            // synchronization if necessary.
             packed_.v_weight.image(
                 command_buffer,
-                vTensor::Stage::Compute),
-            // Object lifetime is managed by the resource pool.
-            // It is OK not to keep track of the handle.
-            context->resource().pool.uniform(block_no_bias).object);
+                vTensor::Stage::Compute));
       }
     }
     else {
