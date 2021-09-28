@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/jit_log.h>
 
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/clear_profiling.h>
 #include <torch/csrc/jit/passes/inliner.h>
@@ -11,7 +12,6 @@
 #include <torch/csrc/jit/runtime/graph_executor_impl.h>
 
 #include <stack>
-#include "jit/api/function_impl.h"
 
 namespace torch {
 namespace jit {
