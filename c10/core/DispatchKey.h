@@ -21,7 +21,6 @@ namespace c10 {
 //
 // NOTE: Keep the list in sync with `DispatchKey` in tools/codegen/model.py
 enum class DispatchKey : uint8_t {
-
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~ UNDEFINED ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // This is not a "real" tensor id, but it exists to give us a "nullopt"
   // element we can return for cases when a DispatchKeySet contains no elements.
@@ -357,6 +356,51 @@ enum class DispatchKey : uint8_t {
 static_assert(
     static_cast<uint8_t>(DispatchKey::NumDispatchKeys) < 64,
     "DispatchKey is used as index into 64-bit bitmask; you must have less than 64 entries");
+
+#if defined(C10_MOBILE_TRIM_DISPATCH_KEYS)
+/**
+ * The method below maps the dispatch key in the enum DispatchKey to an
+ * integer index in the dispatchTable_ array in OperatorEntry. The array
+ * is trimmed for mobile to reduce peak memory usage since it's
+ * unnecessary to reserve additional space for dispatch keys that will
+ * never be used on mobile.
+ */
+C10_API constexpr int getMappedDispatchKey(DispatchKey dk) {
+  switch (dk) {
+    case DispatchKey::Undefined:
+      return 0;
+    case DispatchKey::CPU:
+      return 1;
+    case DispatchKey::Vulkan:
+      return 2;
+    case DispatchKey::Metal:
+      return 3;
+    case DispatchKey::QuantizedCPU:
+      return 4;
+    case DispatchKey::SparseCPU:
+      return 5;
+    case DispatchKey::BackendSelect:
+      return 6;
+    case DispatchKey::ADInplaceOrView:
+      return 7;
+    case DispatchKey::AutogradOther:
+      return 8;
+    case DispatchKey::AutogradCPU:
+      return 9;
+    case DispatchKey::NumDispatchKeys: // Sentinel, end of runtime keys.
+      return 10;
+    default:
+      return -1;
+  }
+}
+#else
+/**
+ * For the server use-case, make this a simple pass-through.
+ */
+C10_API constexpr int getMappedDispatchKey(DispatchKey dk) {
+  return static_cast<int>(dk);
+}
+#endif
 
 C10_API const char* toString(DispatchKey);
 C10_API std::ostream& operator<<(std::ostream&, DispatchKey);

@@ -299,8 +299,11 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
 // or alias keys and their associated keysets).
 // This function should be considered a private helper for updateDispatchTable_()
 void OperatorEntry::updateDispatchTableEntry_(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) {
-  auto dispatch_ix = static_cast<uint8_t>(dispatch_key);
-  dispatchTable_[dispatch_ix] = computeDispatchTableEntry(dispatcher, dispatch_key);
+  auto dispatch_ix = c10::getMappedDispatchKey(dispatch_key);
+  if (dispatch_ix == -1) {
+    return;
+  }
+  dispatchTable_.at(dispatch_ix) = computeDispatchTableEntry(dispatcher, dispatch_key);
   dispatchKeyExtractor_.setOperatorHasFallthroughForKey(dispatch_key, dispatchTable_[dispatch_ix].isFallthrough());
 }
 

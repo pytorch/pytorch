@@ -170,7 +170,11 @@ public:
   [[noreturn]] void reportError(DispatchKey dispatchKey) const;
 
   const KernelFunction& lookup(DispatchKey k) const {
-    const auto& kernel = dispatchTable_[static_cast<uint8_t>(k)];
+    auto idx = getMappedDispatchKey(k);
+    if (idx == -1) {
+      reportError(k);
+    }
+    const auto& kernel = dispatchTable_[idx];
     // A valid kernel *always* has a boxed kernel and *may* have an
     // unboxed kernel. However, we typically do unboxed calls in at::
     // APIs, where the kernel 1) will very likely be valid and 2)
@@ -203,7 +207,7 @@ private:
   OperatorName name_;
   c10::optional<AnnotatedSchema> schema_;
 
-  std::array<KernelFunction, static_cast<uint8_t>(DispatchKey::NumDispatchKeys)> dispatchTable_;
+  std::array<KernelFunction, c10::getMappedDispatchKey(DispatchKey::NumDispatchKeys)> dispatchTable_;
   DispatchKeyExtractor dispatchKeyExtractor_;
 
   // kernels_ stores all registered kernels for the corresponding dispatch key
