@@ -846,6 +846,7 @@ def _generate_masked_reduction_mask(input_shape, device, **kwargs):
 def sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwargs):
     """Sample inputs for masked reduction operators."""
     inputs: List[SampleInput] = []
+    kwargs['supports_multiple_dims'] = op_info.supports_multiple_dims
     for sample_input in sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
         for mask in _generate_masked_reduction_mask(sample_input.input.shape, device, **kwargs):
             args, kwargs = sample_input.args, dict(mask=mask, **sample_input.kwargs)
@@ -10104,6 +10105,36 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
         ),
         supports_sparse=True,
+        sample_inputs_func=sample_inputs_masked_reduction
+    ),
+    ReductionOpInfo(
+        'sparse.masked_prod',
+        ref=reference_reduction_numpy(np.prod),
+        method_variant=None,
+        identity=1,
+        nan_policy='propagate',
+        supports_multiple_dims=False,
+        supports_out=False,
+        supports_forward_ad=True,
+        promotes_int_to_int64=False,
+        dtypes=all_types_and_complex_and(torch.bool),
+        skips=(
+            # FIXME: prod does not support passing keepdim without passing dim
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
+            # FIXME: prod reduces all dimensions when dim=[]
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
+            # FIXME: prod does not support passing None to dim
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
+                         dtypes=[torch.float16, torch.complex64]),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values',
+                         dtypes=[torch.uint8, torch.bfloat16, torch.complex64]),
+            # prod overflows easily when using small types
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', dtypes=[torch.uint8]),
+        ),
+        supports_sparse=False,
         sample_inputs_func=sample_inputs_masked_reduction
     ),
     OpInfo(

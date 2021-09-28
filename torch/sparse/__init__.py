@@ -415,12 +415,12 @@ def masked_prod(input: Tensor,
         dtype = input.dtype
     if input.layout == torch.strided:
         mask_input = input if mask is None else torch.where(mask, input, torch.ones_like(input))
-        if dim is None:
+        if dim is None or dim == ():
             return torch.prod(mask_input, dtype=dtype)
         elif isinstance(dim, int):
             return torch.prod(mask_input, dim, keepdim, dtype=dtype)
         else:
-            raise NotImplementedError(f'masked_prod of {input.layout} tensor for non-integer dim')
+            raise NotImplementedError(f'masked_prod of {input.layout} tensor (shape={input.shape}) for non-integer dim={dim}')
     # TODO: elif input.layout == torch.sparse_coo:
     # TODO: elif input.layout == torch.sparse_csr:
     else:
@@ -443,7 +443,7 @@ def masked_mask(input: Tensor,
             # TODO: implement coo.any(dim=dim, keepdim=keepdim)
             outmask = torch.sparse_coo_tensor(input.indices(),
                                               torch.ones(input.values().shape, dtype=torch.bool, device=input.device)).to_dense()
-        elif input.layout == torch.sparse_csr:  # type: ignore
+        elif input.layout == torch.sparse_csr:
             # TODO: implement csr.any(dim=dim, keepdim=keepdim)
             outmask = torch.sparse_csr_tensor(input.crow_indices(), input.col_indices(),
                                               torch.ones(input.values().shape, dtype=torch.bool, device=input.device)).to_dense()
