@@ -33,7 +33,8 @@ using SymbolDimMap = std::map<c10::ShapeSymbol, std::string>;
 TORCH_API std::tuple<
     std::shared_ptr<::ONNX_NAMESPACE::ModelProto>,
     RawDataExportMap,
-    SymbolDimMap>
+    SymbolDimMap,
+    bool>
 export_onnx(
     const std::shared_ptr<Graph>& graph,
     const std::map<std::string, at::Tensor>& initializers,
