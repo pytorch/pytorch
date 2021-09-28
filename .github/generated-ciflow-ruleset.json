@@ -83,7 +83,8 @@
     ],
     "ciflow/slow": [
       "linux-bionic-cuda10.2-py3.9-gcc7",
-      "linux-xenial-cuda10.2-py3.6-gcc7"
+      "linux-xenial-cuda10.2-py3.6-gcc7",
+      "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck"
     ],
     "ciflow/slow-gradcheck": [
       "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck"

@@ -481,7 +481,7 @@ LINUX_WORKFLOWS = [
         is_scheduled="45 0,4,8,12,16,20 * * *",
         ciflow_config=CIFlowConfig(
             enabled=True,
-            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_SLOW_GRADCHECK},
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_SLOW_GRADCHECK, LABEL_CIFLOW_SLOW},
         ),
     ),
     # CIWorkflow(
