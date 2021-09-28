@@ -65,6 +65,11 @@ ADD ./common/install_openssl.sh install_openssl.sh
 ENV OPENSSL_ROOT_DIR /opt/openssl
 RUN bash ./install_openssl.sh
 
+# (optional) Install TensorRT
+ARG TENSORRT
+ADD ./common/install_tensorrt.sh install_tensorrt.sh
+RUN bash ./install_tensorrt.sh
+
 # (optional) Install non-default CMake version
 ARG CMAKE_VERSION
 ADD ./common/install_cmake.sh install_cmake.sh
