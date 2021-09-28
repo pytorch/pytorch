@@ -135,7 +135,8 @@ void setstateTuple(
       return;
     }
     if (auto f = tryToGraphFunction(setstate)) {
-      exportFunction(exportSet, ModuleMethod{module, *f, std::move(qn)}, toplevel);
+      exportFunction(
+          exportSet, ModuleMethod{module, *f, std::move(qn)}, toplevel);
     }
   } else {
     for (size_t i = 0, n = type->numAttributes(); i < n; ++i) {
