@@ -347,6 +347,21 @@ class TestModule(TestCase):
 
             grad_input = input_args + params + tuple(obj for (_, obj) in kwarg_tensors)
 
+            if all(i.numel() == 0 for i in grad_input):
+                # All the inputs have zero elements, check that the gradients
+                # are the correct shape
+                out = m(*input_args, **input_kwargs)
+                g0 = torch.rand_like(out)
+                num_checks = 2 if check == gradgradcheck else 1
+
+                for _ in range(num_checks):
+                    out.backward(g0, retain_graph=True)
+                    for i in grad_input:
+                        if not i.requires_grad:
+                            continue
+                        self.assertEqual(i.grad, torch.zeros_like(i))
+                return
+
             def fn_to_gradcheck(*input_and_params):
                 new_input_args = input_and_params[:len(input_args)]
                 kwarg_args = input_and_params[-len(kwarg_tensors):]
