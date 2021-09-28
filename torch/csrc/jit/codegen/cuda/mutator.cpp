@@ -10,24 +10,6 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-void OptOutMutator::mutate(Fusion* fusion) {
-  std::vector<Expr*> orig_exprs = fusion->exprs();
-
-  /*
-   * We go through all the exprs, in topologically sorted order. We call mutate
-   * on them which could insert nodes, removes nodes, or both. These operations
-   * modify the dag and the Fusion will keep track of what has/hasn't been
-   * changed by the origin dependency tracking that it does. If an operation is
-   * added, and its output node is a val which previously was the output of
-   * another expresion, that older expresion will be removed as we can only
-   * assign a Val once due to our SSA restriction. Therefore we don't need to
-   * manually track what expressions stayed constant or were changed.
-   */
-
-  for (Statement* stmt : orig_exprs)
-    mutate(stmt);
-}
-
 // MUTATE FUNCTIONS FOR VALS
 
 Statement* OptOutMutator::mutate(IterDomain* id) {
@@ -64,37 +46,20 @@ Statement* OptOutMutator::mutate(TensorDomain* td) {
 Statement* OptOutMutator::mutate(TensorView* tv) {
   TensorDomain* td = mutateAsVal(tv->domain())->as<TensorDomain>();
 
-  TensorView* computeAtView = nullptr;
-  if (tv->hasComputeAt())
-    computeAtView = mutateAsVal(tv->getComputeAtView())->as<TensorView>();
-
-  if (!tv->domain()->sameAs(td) ||
-      (tv->hasComputeAt() && !tv->getComputeAtView()->sameAs(computeAtView))) {
+  if (!tv->domain()->sameAs(td)) {
     TensorView* mutated_tv = new TensorView(td, tv->getDataType().value());
-    if (tv->hasComputeAt()) {
-      mutated_tv->setComputeAt(
-          computeAtView, (int)(tv->getRelativeComputeAtAxis()));
-    }
     registerMutation(tv, mutated_tv);
     return mutated_tv;
   }
   return tv;
 }
 
-Statement* OptOutMutator::mutate(kir::TensorIndex* ti) {
-  return ti;
-}
-
 Statement* OptOutMutator::mutate(Bool* b) {
   return b;
 }
 
-Statement* OptOutMutator::mutate(Float* f) {
-  return f;
-}
-
-Statement* OptOutMutator::mutate(Half* h) {
-  return h;
+Statement* OptOutMutator::mutate(Double* d) {
+  return d;
 }
 
 Statement* OptOutMutator::mutate(Int* i) {
@@ -107,14 +72,6 @@ Statement* OptOutMutator::mutate(NamedScalar* ns) {
 
 // MUTATE FUNCTIONS FOR EXPRESSIONS.
 
-Statement* OptOutMutator::mutate(kir::Allocate* a) {
-  return a;
-}
-
-Statement* OptOutMutator::mutate(kir::Sync* a) {
-  return a;
-}
-
 Statement* OptOutMutator::mutate(Split* s) {
   IterDomain* ot = mutateAsVal(s->outer())->as<IterDomain>();
   IterDomain* inr = mutateAsVal(s->inner())->as<IterDomain>();
@@ -126,7 +83,7 @@ Statement* OptOutMutator::mutate(Split* s) {
     return s;
   }
   FusionGuard::getCurFusion()->removeExpr(s);
-  return new Split(ot, inr, in, fact);
+  return new Split(ot, inr, in, fact, s->innerSplit());
 }
 
 Statement* OptOutMutator::mutate(Merge* m) {
@@ -184,20 +141,83 @@ Statement* OptOutMutator::mutate(ReductionOp* rop) {
   return new ReductionOp(rop->getReductionOpType(), init, out, in);
 }
 
-Statement* OptOutMutator::mutate(kir::GridReduction* gr) {
-  return gr;
+namespace {
+inline bool compareOptional(Val* a, Val* b) {
+  if (!a || !b) {
+    return (!a && !b);
+  }
+  return a->sameAs(b);
+}
+
+} // namespace
+
+Statement* OptOutMutator::mutate(WelfordOp* wop) {
+  Val* out_avg = mutateAsVal(wop->outAvg())->asVal();
+  Val* out_var = mutateAsVal(wop->outVar())->asVal();
+  Val* out_N = mutateAsVal(wop->outN())->asVal();
+
+  Val* in_avg = mutateAsVal(wop->inAvg())->asVal();
+  Val* in_var = wop->inVar() ? mutateAsVal(wop->inVar())->asVal() : nullptr;
+  Val* in_N = mutateAsVal(wop->inN())->asVal();
+
+  Val* init_avg =
+      wop->initAvg() ? mutateAsVal(wop->initAvg())->asVal() : nullptr;
+  Val* init_var =
+      wop->initVar() ? mutateAsVal(wop->initVar())->asVal() : nullptr;
+  Val* init_N = mutateAsVal(wop->initN())->asVal();
+
+  const bool out_compare = out_avg->sameAs(wop->outAvg()) &&
+      out_var->sameAs(wop->outVar()) && out_N->sameAs(wop->outN());
+  const bool in_compare = in_avg->sameAs(wop->inAvg()) &&
+      compareOptional(in_var, wop->inVar()) && in_N->sameAs(wop->inN());
+  const bool init_compare = compareOptional(init_avg, wop->initAvg()) &&
+      compareOptional(init_var, wop->initVar()) && init_N->sameAs(wop->initN());
+
+  if (out_compare && init_compare && in_compare) {
+    return wop;
+  } else {
+    return new WelfordOp(
+        out_avg,
+        out_var,
+        out_N,
+        init_avg,
+        init_var,
+        init_N,
+        in_avg,
+        in_var,
+        in_N);
+  }
 }
 
 Statement* OptOutMutator::mutate(BroadcastOp* bop) {
   return bop;
 }
 
-Statement* OptOutMutator::mutate(kir::ForLoop* fl) {
-  return fl;
+Statement* OptOutMutator::mutate(TransposeOp* top) {
+  return top;
 }
 
-Statement* OptOutMutator::mutate(kir::IfThenElse* ite) {
-  return ite;
+Statement* OptOutMutator::mutate(ShiftOp* sop) {
+  Val* out = mutateAsVal(sop->out())->asVal();
+  Val* in = mutateAsVal(sop->in())->asVal();
+
+  if (out->sameAs(sop->out()) && in->sameAs(sop->in()))
+    return sop;
+  auto offsets = sop->offsets();
+  FusionGuard::getCurFusion()->removeExpr(sop);
+  return new ShiftOp(out, in, offsets);
+}
+
+Statement* OptOutMutator::mutate(GatherOp* op) {
+  Val* out = mutateAsVal(op->out())->asVal();
+  Val* in = mutateAsVal(op->in())->asVal();
+
+  if (out->sameAs(op->out()) && in->sameAs(op->in()))
+    return op;
+  auto window_shape = op->windowShape();
+  auto pad_width = op->padWidth();
+  FusionGuard::getCurFusion()->removeExpr(op);
+  return new GatherOp(out, in, window_shape, pad_width);
 }
 
 } // namespace cuda

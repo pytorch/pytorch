@@ -41,7 +41,6 @@ CPU_RUNNERS = {
 
 LABEL_CIFLOW_ALL = "ciflow/all"
 LABEL_CIFLOW_BAZEL = "ciflow/bazel"
-LABEL_CIFLOW_COVERAGE = "ciflow/coverage"
 LABEL_CIFLOW_CPU = "ciflow/cpu"
 LABEL_CIFLOW_CUDA = "ciflow/cuda"
 LABEL_CIFLOW_DEFAULT = "ciflow/default"
@@ -52,6 +51,7 @@ LABEL_CIFLOW_SLOW = "ciflow/slow"
 LABEL_CIFLOW_WIN = "ciflow/win"
 LABEL_CIFLOW_XLA = "ciflow/xla"
 LABEL_CIFLOW_NOARCH = "ciflow/noarch"
+LABEL_CIFLOW_PREFIX = "ciflow/"
 
 
 @dataclass
@@ -95,6 +95,7 @@ class CIFlowConfig:
             self.reset_root_job()
             return
         self.labels.add(LABEL_CIFLOW_ALL)
+        assert all(label.startswith(LABEL_CIFLOW_PREFIX) for label in self.labels)
         self.gen_root_job_condition()
 
 
@@ -139,7 +140,6 @@ class CIWorkflow:
     docker_image_base: str = ''
     enable_doc_jobs: bool = False
     exclude_test: bool = False
-    is_coverage: bool = False
     is_libtorch: bool = False
     is_scheduled: str = ''
     num_test_shards: int = 1
@@ -457,19 +457,6 @@ LINUX_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="linux",
-        build_environment="linux-bionic-py3.8-gcc9-coverage",
-        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.8-gcc9",
-        test_runner_type=LINUX_CPU_TEST_RUNNER,
-        on_pull_request=True,
-        is_coverage=True,
-        num_test_shards=2,
-        ciflow_config=CIFlowConfig(
-            enabled=True,
-            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_COVERAGE, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU},
-        ),
-    ),
-    CIWorkflow(
-        arch="linux",
         build_environment="linux-bionic-py3.6-clang9",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.6-clang9",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
@@ -553,7 +540,8 @@ BAZEL_WORKFLOWS = [
     ),
 ]
 
-if __name__ == "__main__":
+
+def main() -> None:
     jinja_env = jinja2.Environment(
         variable_start_string="!{{",
         loader=jinja2.FileSystemLoader(str(GITHUB_DIR.joinpath("templates"))),
@@ -586,3 +574,7 @@ if __name__ == "__main__":
                 # During the rollout phase, it has the same effect as LABEL_CIFLOW_DEFAULT
                 ciflow_ruleset.add_label_rule({LABEL_CIFLOW_DEFAULT}, workflow.build_environment)
     ciflow_ruleset.generate_json()
+
+
+if __name__ == "__main__":
+    main()
