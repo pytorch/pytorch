@@ -131,7 +131,7 @@ extern PyObject *THPException_FatalError;
 // Throwing this exception means that the python error flags have been already
 // set and control should be immediately returned to the interpreter.
 struct python_error : public std::exception {
-  python_error();
+  python_error() : type(nullptr), value(nullptr), traceback(nullptr) {}
 
   python_error(const python_error& other)
       : type(other.type),

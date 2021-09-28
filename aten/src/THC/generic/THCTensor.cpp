@@ -5,12 +5,6 @@
 #include <ATen/InferSize.h>
 #include <ATen/NativeFunctions.h>
 
-/**** access methods ****/
-THCStorage *THCTensor_(storage)(THCState *state, const THCTensor *self)
-{
-  return THTensor_getStoragePtr(self);
-}
-
 /**** creation methods ****/
 
 /* Empty init */

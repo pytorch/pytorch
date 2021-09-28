@@ -1,8 +1,9 @@
 #ifndef THC_SCAN_UTILS_INC
 #define THC_SCAN_UTILS_INC
 
+#include <ATen/ceil_div.h>
+#include <ATen/cuda/DeviceUtils.cuh>
 #include <THC/THCAsmUtils.cuh>
-#include <THC/THCDeviceUtils.cuh>
 #include <c10/macros/Macros.h>
 
 // Collection of in-kernel scan / prefix sum utilities
@@ -149,7 +150,7 @@ __device__ void exclusiveBinaryPrefixScan(T* smem, bool in, T* out, T* carry, Bi
   *out -= (T) in;
 
   // The outgoing carry for all threads is the last warp's sum
-  *carry = smem[THCCeilDiv<int>(blockDim.x, C10_WARP_SIZE) - 1];
+  *carry = smem[at::ceil_div<int>(blockDim.x, C10_WARP_SIZE) - 1];
 
   if (KillWARDependency) {
     __syncthreads();
