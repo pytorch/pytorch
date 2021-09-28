@@ -283,7 +283,6 @@ void slow_conv2d_backward_out_cpu_template(
       pad_width,
       false);
 
-
   const Tensor input = input_.contiguous();
   const Tensor grad_output = grad_output_.contiguous();
   grad_input.resize_as_(input);
@@ -297,7 +296,8 @@ void slow_conv2d_backward_out_cpu_template(
     auto weight_a = weight.accessor<scalar_t, 2>();
 
     at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
-      std::vector<scalar_t> fgrad_input(c10::multiply_integers(finput.sizes().slice(1)));
+      auto fgrad_input = std::make_unique<scalar_t[]>(
+          c10::multiply_integers(finput.sizes().slice(1)));
       for (int64_t t = start; t < end; t++) {
         auto grad_input_t = grad_input_a[t];
         auto grad_output_t = grad_output_a[t];
@@ -305,7 +305,7 @@ void slow_conv2d_backward_out_cpu_template(
             grad_input_t,
             grad_output_t,
             weight_a,
-            fgrad_input.data(),
+            fgrad_input.get(),
             kernel_height,
             kernel_width,
             stride_height,
