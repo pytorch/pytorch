@@ -2002,7 +2002,7 @@ def foo(x):
   }
 
   // Check that inlining doesn't corrupt callstack of the callee's nodes.
-  const Function& baz = cu->get_function("baz");
+  const auto& baz = toGraphFunction(cu->get_function("baz"));
   for (Node* n : baz.optimized_graph()->nodes()) {
     if (n->kind() == prim::Constant) {
       if (!n->hasAttribute(attr::value) ||

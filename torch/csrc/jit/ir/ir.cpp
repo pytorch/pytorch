@@ -2081,7 +2081,6 @@ std::vector<Value*> inlineCallTo(
     GraphFunction* callee,
     bool inline_optimized_graph /*=true*/) {
   WithInsertPoint guard(to_replace);
-  TORCH_INTERNAL_ASSERT(callee->isGraphFunction());
   std::unordered_map<Value*, Value*> value_map;
   std::vector<torch::jit::Value*> new_outputs;
 

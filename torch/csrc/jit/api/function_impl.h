@@ -37,7 +37,7 @@ struct TORCH_API GraphFunction : public Function {
     return graph_;
   }
 
-  std::shared_ptr<Graph> optimized_graph() const override {
+  std::shared_ptr<Graph> optimized_graph() const {
     std::lock_guard<std::recursive_mutex> lock(compile_mutex);
     if (optimized_graph_) {
       return *optimized_graph_;
@@ -47,14 +47,6 @@ struct TORCH_API GraphFunction : public Function {
       preoptimizeGraph(*optimized_graph_);
     }
     return *optimized_graph_;
-  }
-
-  void clear_execution_info() override {
-    std::lock_guard<std::recursive_mutex> lock(compile_mutex);
-    if (optimized_graph_) {
-      optimized_graph_.reset();
-    }
-    executor_.reset();
   }
 
   const c10::QualifiedName& qualname() const override {
