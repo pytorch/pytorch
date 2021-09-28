@@ -131,7 +131,7 @@ c10::StrongTypePtr typeResolverMobile(
 c10::intrusive_ptr<c10::ivalue::Object> objLoaderMobile(
     const at::StrongTypePtr& type,
     const IValue& input,
-    const mobile::CompilationUnit& mobile_compilation_unit) {
+    mobile::CompilationUnit& mobile_compilation_unit) {
   auto cls = type.type_->expect<at::ClassType>();
   auto qn = cls->name();
   c10::QualifiedName method_name(qn.value(), "__setstate__");
