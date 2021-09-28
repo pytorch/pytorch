@@ -2017,7 +2017,7 @@ class DistributedDataParallelTest(
     # A list of tests for ddp with activation checkpointing
     # when gradient_as_bucket_view=True, False.
     # Most of the tests are referred to
-    # https://github.com/facebookresearch/fairscale/blob/master/tests/nn/pipe/test_checkpoint_ddp.py
+    # https://github.com/facebookresearch/fairscale/blob/main/tests/nn/pipe/test_checkpoint_ddp.py
     class CheckpointOnceModule(nn.Module):
         def __init__(self):
             super().__init__()
