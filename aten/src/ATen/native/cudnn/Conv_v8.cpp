@@ -300,7 +300,6 @@ const auto get_generator_sources(const cudnnBackendDescriptorType_t& desc, const
     auto fallback = cudnn_frontend::EngineFallbackListBuilder()
                         .setOperationGraph(opGraph)
                         .setOperation(desc)
-                        //.setOperation(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
                         .build();
     auto &fallback_list = fallback.getFallbackList();
     cudnn_frontend::EngineConfigList filtered_configs;
@@ -638,7 +637,6 @@ void raw_cudnn_convolution_add_relu_out(
     bool allow_tf32) {
   if (output.numel() == 0) { return; }
   if (use_v8()) {
-    //auto bias_ = bias.repeat({output.size(0), 1, 1, 1});
     auto bias_ = bias.view({1, bias.numel(), 1, 1});
     run_fused_conv(input, output, weight, z, bias_,
       alpha, stride, padding, dilation,
