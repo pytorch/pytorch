@@ -378,7 +378,6 @@ class TestOperators(TestCase):
         xfail('complex'),
         xfail('copysign'),
         xfail('corrcoef'),
-        xfail('cross'),
         xfail('cummax'),
         xfail('cummin'),
         xfail('cumprod'),
