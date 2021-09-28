@@ -1108,7 +1108,7 @@ static PyObject* THPVariable_set_(
       // aten::set_.source_Storage(Tensor(a!) self, Storage source) ->
       // Tensor(a!)
       at::ScalarType storage_scalar_type;
-      bool is_typed_storage;
+      bool is_typed_storage = true;
       at::Storage storage = _r.storage(0, storage_scalar_type, is_typed_storage);
       TORCH_CHECK(storage_scalar_type == self.dtype() || !is_typed_storage,
         "Expected a Storage of type ", self.dtype(),
@@ -1124,7 +1124,7 @@ static PyObject* THPVariable_set_(
       // aten::set_.source_Storage_storage_offset(Tensor(a!) self, Storage
       // source, int storage_offset, int[] size, int[] stride=[]) -> Tensor(a!)
       at::ScalarType storage_scalar_type;
-      bool is_typed_storage;
+      bool is_typed_storage = true;
       at::Storage storage = _r.storage(0, storage_scalar_type, is_typed_storage);
       TORCH_CHECK(storage_scalar_type == self.dtype() || !is_typed_storage,
         "Expected a Storage of type ", self.dtype(),

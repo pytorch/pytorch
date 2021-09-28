@@ -285,7 +285,7 @@ Tensor internal_new_from_data(
 
     if (isStorage(data)) {
       ScalarType storage_scalar_type;
-      bool is_typed_storage;
+      bool is_typed_storage = false;
       Storage storage = createStorageGetType(data, storage_scalar_type, is_typed_storage);
       TORCH_CHECK(!is_typed_storage || storage_scalar_type == scalar_type,
           "Expected a Storage of type ", scalar_type,
@@ -512,7 +512,7 @@ Tensor legacy_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_t
     return at::empty({0}, build_options(options, scalar_type));
   } else if (r.idx == 1) {
     at::ScalarType storage_scalar_type;
-    bool is_typed_storage;
+    bool is_typed_storage = false;
     at::Storage storage = r.storage(0, storage_scalar_type, is_typed_storage);
     if (storage_scalar_type != at::ScalarType::Undefined && is_typed_storage) {
       TORCH_CHECK(
@@ -574,7 +574,7 @@ Tensor legacy_tensor_new(c10::DispatchKey dispatch_key, at::ScalarType scalar_ty
     return at::empty({0}, build_options(options, scalar_type));
   } else if (r.idx == 1) {
     at::ScalarType storage_scalar_type;
-    bool is_typed_storage;
+    bool is_typed_storage = false;
     at::Storage storage = r.storage(0, storage_scalar_type, is_typed_storage);
     if (storage_scalar_type != at::ScalarType::Undefined && is_typed_storage) {
       TORCH_CHECK(

@@ -1,7 +1,7 @@
 import io
 
 import torch
-from ._utils import _type, _cuda, classproperty
+from ._utils import _type, _cuda
 from torch.types import Storage
 from typing import Any, TypeVar, Type, Union, cast
 import copy
@@ -82,7 +82,7 @@ class _StorageBase(object):
         return _type(self, getattr(torch, self.__class__.__name__))
 
     def _to(self, dtype):
-        storage = torch.tensor([], dtype=self.dtype, device=self.device).set_(cast(Storage, self)).to(dtype).storage()
+        storage = torch.tensor([], dtype=torch.uint8, device=self.device).set_(cast(Storage, self)).to(dtype).storage()
         if storage.data_ptr() == self.data_ptr():
             storage = storage.clone()
         return storage

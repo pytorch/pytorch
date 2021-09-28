@@ -188,7 +188,7 @@ at::Storage createStorageGetType(PyObject* obj, at::ScalarType& scalar_type, boo
 
 at::Storage createStorage(PyObject* obj) {
   at::ScalarType scalar_type;
-  bool is_typed_storage;
+  bool is_typed_storage = false;
   return createStorageGetType(obj, scalar_type, is_typed_storage);
 }
 
