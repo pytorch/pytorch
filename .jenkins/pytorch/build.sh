@@ -49,17 +49,12 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   nvcc --version
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
-  # enable build option in CMake
-  export USE_CPP_CODE_COVERAGE=ON
-fi
-
 if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   # enable split torch_cuda build option in CMake
   export BUILD_SPLIT_CUDA=ON
 fi
 
-if [[ ${BUILD_ENVIRONMENT} == *"pure_torch"* ]]; then
+if [[ ${BUILD_ENVIRONMENT} == *"pure_torch"* || ${BUILD_ENVIRONMENT} == *"puretorch"* ]]; then
   export BUILD_CAFFE2=OFF
 fi
 

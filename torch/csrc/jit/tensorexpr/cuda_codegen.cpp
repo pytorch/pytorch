@@ -508,7 +508,7 @@ void CudaPrinter::visit(BlockPtr v) {
 
 void CudaPrinter::visit(LetPtr v) {
   emitIndent();
-  os() << dtypeToCppString(v->dtype());
+  os() << dtypeToCppString(v->var()->dtype());
   os() << " " << *v->var() << " = ";
   v->value()->accept(this);
   os() << ";" << std::endl;
@@ -821,7 +821,7 @@ StmtPtr GPUMetaVarRewriter::mutate(BlockPtr v) {
     bool need_sync = false;
     // We never mask loops, they'll mask their contents.
     if (!segment.mask()) {
-      TORCH_INTERNAL_ASSERT(segment.stmts().size() == 1);
+      TORCH_INTERNAL_ASSERT(segment.stmts().size() == 1, buildErrorMessage());
       stmts.push_back(segment.stmts()[0]);
       continue;
     }

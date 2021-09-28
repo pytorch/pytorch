@@ -634,12 +634,6 @@ static variable_list call_post_hooks(Node& fn, variable_list outputs, const vari
   return outputs;
 }
 
-static bool is_compatible_type(const at::TensorOptions& expected, const at::TensorOptions& actual) {
-  // Types are compatible if they exactly match or if the gradient is a sparse
-  // version of the expected type.
-  return expected.type_equal(actual) || (actual.is_sparse() && expected.device().type() == actual.device().type());
-}
-
 void set_device(int device) {
   // NB: We MUST NOT construct the guard for device CPU,
   // as in some settings we compile with cuda, but
@@ -701,22 +695,37 @@ void validate_outputs(
     if (c10::typeMetaToScalarType(metadata.options().dtype()) != grad.scalar_type()) {
       grad = grad.to(c10::typeMetaToScalarType(metadata.options().dtype()));
     }
-    if (grad.device() != metadata.device() &&
-        grad.dim() == 0) {
-      grad = grad.to(metadata.device());
-    }
-    if (!is_compatible_type(metadata.options(), grad.options())) {
+    if (grad.dtype() != metadata.dtype()) {
        std::stringstream ss;
-       ss << "invalid gradient at index " << i << " - expected type ";
-       ss << metadata.options() << " but got " << grad.options();
+       ss << "invalid gradient at index " << i << " - expected dtype ";
+       ss << metadata.dtype() << " but got " << grad.dtype();
        AT_ERROR(format_error(ss.str()));
     }
-    auto grad_device = grad.device();
-    if (grad_device != metadata.device()) {
-      std::stringstream ss;
-      ss << "invalid gradient at index " << i << " - expected device ";
-      ss << metadata.device() << " but got " << grad_device;
-      AT_ERROR(format_error(ss.str()));
+    if (grad.layout() != metadata.layout()) {
+       // TODO: Currently we only support (*, Sparse) combination for (tensor.layout(), tensor.grad.layout())
+       // In future, there will be an oppportunity to support more combinations of layouts if they are composable
+       // (example., operations like addition etc., are well defined between tensors of different layouts.),
+       // as well as all parts of autograd like AccumulateGrad correctly handle this.
+       if (!grad.is_sparse()) {
+        std::stringstream ss;
+        ss << "invalid gradient at index " << i << " - expected layout ";
+        ss << metadata.layout() << " but got " << grad.layout();
+        AT_ERROR(format_error(ss.str()));
+       }
+    }
+
+    if (grad.device() != metadata.device()) {
+      // quick hack for: https://github.com/pytorch/pytorch/issues/65016 but should be eventually removed
+      if (!(metadata.is_tensor_subclass() || grad.unsafeGetTensorImpl()->is_python_dispatch())) {
+        if (grad.dim() == 0) {
+          grad = grad.to(metadata.device());
+        } else {
+          std::stringstream ss;
+          ss << "invalid gradient at index " << i << " - expected device ";
+          ss << metadata.device() << " but got " << grad.device();
+          AT_ERROR(format_error(ss.str()));
+        }
+      }
     }
     // We should not build graph for Tensors that are not differentiable
     TORCH_INTERNAL_ASSERT(isDifferentiableType(grad.scalar_type()));
