@@ -189,7 +189,10 @@ class ValidateAllocation : private kir::IrVisitor {
     const auto gpu_lower = GpuLower::current();
     for (const auto& allocations : live_allocations_) {
       for (const auto& allocate : allocations) {
-        const auto tv = allocate->buffer()->as<kir::TensorView>();
+        const auto tv = dynamic_cast<kir::TensorView*>(allocate->buffer());
+        if (tv == nullptr) {
+          continue;
+        }
         for (const auto& axis : tv->domain()->domain()) {
           if (!gpu_lower->caParallelMap().areMapped(loop_id, axis)) {
             continue;
