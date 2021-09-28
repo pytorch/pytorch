@@ -1446,11 +1446,12 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
 
     # some qhandlers override the activations constructor
     def get_activation_ctr(self, qconfig, pattern) -> Optional[Callable]:
-        if activation_dtype(qconfig) == torch.float16:
-            return qconfig.activation
-        else:
+        act_dtype = activation_dtype(qconfig)
+        if act_dtype == torch.quint8:
             return get_default_output_activation_post_process_map().get(
-                pattern, None)
+                pattern, qconfig.activation)
+        else:
+            return qconfig.activation
 
     def convert(self,
                 node: Node,

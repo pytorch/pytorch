@@ -30,8 +30,6 @@ class TRTOperatorSupport(OperatorSupport):
             return f"{module if module else ''}.{k.__name__}".replace('_', '')
 
 
-
-
 class TRTSplitter(splitter_base._SplitterBase):
     def __init__(
         self,

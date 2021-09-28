@@ -58,6 +58,11 @@ Tensor computeFourOperand(
         const ExprHandle&,
         const ExprHandle&,
         const ExprHandle&)>& innerExpr);
+Tensor computeNoop(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device);
 
 } // namespace tensorexpr
 } // namespace jit
