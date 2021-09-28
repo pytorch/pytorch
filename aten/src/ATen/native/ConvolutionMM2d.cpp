@@ -383,7 +383,7 @@ static void slow_conv2d_backward_weight_out_cpu_template(
 
   auto input = input_.contiguous();
   auto grad_output = grad_output_.contiguous();
-  TORCH_CHECK(grad_input.is_contiguous(), "slow_conv2d: grad_weight must be contiguous");
+  TORCH_CHECK(grad_weight.is_contiguous(), "slow_conv2d: grad_weight must be contiguous");
 
   const int64_t batch_size = input.size(0);
 
