@@ -177,22 +177,31 @@ class TensorInitParams(object):
                                  memory_format=torch.contiguous_format,
                                  pin_memory=False))
 
-def _validate_output_tensor_for_rank(my_rank: int, dst_rank: int, dst_tensor: Optional[torch.Tensor]):
+def _validate_output_tensor_for_gather(
+    my_rank: int,
+    dst_rank: int,
+    size: torch.Size,
+    dst_tensor: Optional[torch.Tensor],
+):
     if dst_rank == my_rank:
         if not dst_tensor:
             raise ValueError(
-                "Argument ``dst_tensor`` must be specified on destination rank."
+                f"Argument ``dst_tensor`` must be specified on destination rank {dst_rank}"
             )
         if torch.count_nonzero(dst_tensor):
             raise ValueError(
                 "Argument ``dst_tensor`` should be a zero tensor."
             )
+        if size != dst_tensor.size():
+            raise ValueError(
+                f"Argument ``dst_tensor`` have size {size}"
+            )
+
     elif dst_tensor:
         raise ValueError(
             "Argument ``dst_tensor`` must NOT be specified "
             "on non-destination ranks."
         )
-
 
 class ShardedTensor(object):
     """
@@ -352,53 +361,81 @@ class ShardedTensor(object):
         # Barrier for all RPCs to finish on all ranks.
         rpc.api._all_gather(None)
 
-    @classmethod
-    def _gather(
-        cls,
-        sharded_tensor: "ShardedTensor",
-        dst_rank: int = 0,
-        dst_tensor: Optional[torch.Tensor] = None,
+	def gather(
+        self,
+        dst: int = 0,
+        out: Optional[torch.Tensor] = None,
     ):
-        my_rank = dist.get_rank(sharded_tensor._process_group)
-        _validate_output_tensor_for_rank(my_rank, dst_rank, dst_tensor)
+        """
+        Creates a full :class:`Tensor` on rank `dst` by gathering all sharded tensors.
 
-        shard_tensors = sharded_tensor.local_shards
+        The API needs to be called on all ranks in SPMD fashion. All ranks should have
+        the same `dst`. `out` should be a full size zero tensor on `dst` and
+        None on all other ranks.
 
-        gathered_shards = [None for _ in sharded_tensor._process_group.world_size]
+        Args:
+            dst(int): The rank where full tensor is constructed
+            out (:class `torch.Tensor` optional): The output full tensor. Needs to be provided
+            ONLY on `dst`
+        """
+        my_rank = dist.get_rank(self._process_group)
+        full_size = self.metadata().size
+        _validate_output_tensor_for_gather(my_rank, dst, full_size, out)
 
-        dist.gather_object(
-            obj=shard_tensors,
-            object_gather_list=gathered_shards,
-            dst=dst_rank,
-            group=sharded_tensor._process_group,
+        shard_tensors = self.local_shards()
+        flattened_shard_tensors = torch.stack(
+            [local_shard.tensor for local_shard in shard_tensors],
+        )
+        flattened_local_metadata = torch.stack(
+            [
+                torch.tensor(
+                    [
+                        local_shard.metadata.shard_offsets,
+                        local_shard.metadata.shard_lengths,
+                    ],
+                    dtype=torch.int,
+                ) for local_shard in shard_tensors
+            ],
         )
 
-        if my_rank == dst_rank:
-            for sharded_tensor in gathered_shards:
-                sizes = sharded_tensor.metadata().size
-                if sizes != dst_tensor.size():
-                    raise ValueError(
-                        f"dst_tensor need to have the same size as metadata.size {sizes}"
-                    )
-                dims = len(sizes)
-                pad = [0] * 2 * dims
-                for dim in range(dims):
-                    # pad starts from last dim https://fburl.com/xgqsds7y
-                    idx = 2 * (dims - dim - 1)
-                    pad[idx] = sharded_tensor.metadata.shard_offsets[dim]
-                    pad[idx + 1] = sizes[dim] - (
-                        sharded_tensor.metadata.shard_offsets[dim] 
-                        + sharded_tensor.metadata.shard_lengths[dim]
-                    )
+        gathered_shard_tensors = [None for _ in self._process_group.world_size]
+        gathered_local_metadata = [None for _ in self._process_group.world_size]
 
-                padded_tensor = torch.nn.functional.pad(
-                    input=sharded_tensor.tensor,
-                    pad=pad,
-                    mode="constant",
-                    value=0,
-                )
+        gather_tensor = dist.gather(
+            tensor=flattened_shard_tensors,
+            gather_list=gathered_shard_tensors,
+            dst=dst,
+            group=self._process_group,
+            async_op=True,
+        )
 
-                dst_tensor.add_(padded_tensor)
+        gather_metadata = dist.gather(
+            tensor=flattened_local_metadata,
+            gather_list=gathered_local_metadata,
+            dst=dst,
+            group=self._process_group,
+            async_op=True,
+        )
+
+        gather_tensor.wait()
+        gather_metadata.wait()
+
+        if my_rank == dst:
+            dims = len(full_size)
+            for sharded_tensor, sharded_metadata in zip(
+                gathered_shard_tensors,
+                gathered_local_metadata,
+            ):
+                # the idx-th shard from a rank
+                for idx in range(sharded_metadata.size()[0]):
+                    out_narrow_view = out
+                    for dim in range(dims):
+                        out_narrow_view = out_narrow_view.narrow(
+                            dim,
+                            gathered_local_metadata[idx][0][dim],
+                            gathered_local_metadata[idx][1][dim],
+                        )
+                    out_narrow_view.add_(sharded_tensor[idx])
 
     @classmethod
     def _init_from_local_shards(

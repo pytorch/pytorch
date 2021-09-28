@@ -460,8 +460,8 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
-    def test_gather_sharded_ones(self):
-        """ Test _sharded_tensor.ones(...) """
+	def test_gather(self):
+        """ Test _sharded_tensor.gather(...) """
 
         spec = ChunkShardingSpec(
             dim=0,
@@ -478,12 +478,12 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         full_tensor = None
         if self.rank == 0:
             full_tensor = torch.zeros(h, w)
-        _sharded_tensor.gather(sharded_tensor, 0, full_tensor)
+        _sharded_tensor.gather(0, full_tensor)
 
         if self.rank == 0:
-            self.assertEqual(full_tensor, torch.ones(h, 2))
+            self.assertEqual(full_tensor, torch.ones(h, w))
         else:
-            assert full_tensor is None
+            self.assertIsNone(full_tensor)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
