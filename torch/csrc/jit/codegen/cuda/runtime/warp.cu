@@ -1,6 +1,6 @@
 namespace warp {
 
-const int WARP_SIZE = 32;
+constexpr int WARP_SIZE = 32;
 
 template <
     bool SINGLE_WARP,
@@ -27,18 +27,19 @@ __device__ void warpReduceTIDX(
 
   // Reduce within each warp
   for (int i = 16; i >= 1; i /= 2) {
-    reduction_op(reduce_val, __shfl_xor_sync(0xffffffff, reduce_val, i, 32));
+    reduction_op(
+        reduce_val, __shfl_xor_sync(0xffffffff, reduce_val, i, WARP_SIZE));
   }
 
   // Reduce across warp if needed
   // Load value to shared mem
   if (!SINGLE_WARP) {
-    unsigned int warp_idx = thread_idx.x / 32;
-    unsigned int lane_idx = thread_idx.x % 32;
+    unsigned int warp_idx = thread_idx.x / WARP_SIZE;
+    unsigned int lane_idx = thread_idx.x % WARP_SIZE;
     unsigned int reduce_group_id = thread_idx.z * block_dim.y + thread_idx.y;
     bool is_warp_head = lane_idx == 0;
     unsigned int reduction_size = block_dim.x;
-    unsigned int num_of_warps = reduction_size / 32;
+    unsigned int num_of_warps = reduction_size / WARP_SIZE;
     unsigned int smem_offset = reduce_group_id * num_of_warps;
 
     block_sync::sync();
