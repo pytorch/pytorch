@@ -55,20 +55,16 @@ Tensor clamp(
           VK_KERNEL(clamp),
           v_output.extents(),
           context->gpu().adapter->local_work_group_size(),
-          // Write-only access bypasses synchronization but inserts appropriate
-          // barriers if necessary.
+          // Shader parameters
+          block,
+          // Textures
           v_output.image(
               command_buffer,
               vTensor::Stage::Compute,
               vTensor::Access::Write),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
           v_self.image(
               command_buffer,
-              vTensor::Stage::Compute),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
+              vTensor::Stage::Compute));
     }
     else {
       TORCH_CHECK(false, "Not implemented!");
@@ -121,15 +117,13 @@ Tensor& clamp_(
           VK_KERNEL(clamp_),
           v_self.extents(),
           context->gpu().adapter->local_work_group_size(),
-          // Read-Write access triggers an async synchronization if necessory
-          // and inserts appropriate barriers if hazards are detected.
+          // Shader parameters
+          block,
+          // Textures
           v_self.image(
               command_buffer,
               vTensor::Stage::Compute,
-              vTensor::Access::Read | vTensor::Access::Write),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
+              vTensor::Access::Read | vTensor::Access::Write));
     }
     else {
       TORCH_CHECK(false, "Not implemented!");
@@ -176,20 +170,16 @@ Tensor activation(
           shader_descriptor,
           v_output.extents(),
           context->gpu().adapter->local_work_group_size(),
-          // Write-only access bypasses synchronization but inserts appropriate
-          // barriers if necessary.
+          // Shader parameters
+          block,
+          // Textures
           v_output.image(
               command_buffer,
               vTensor::Stage::Compute,
               vTensor::Access::Write),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
           v_self.image(
               command_buffer,
-              vTensor::Stage::Compute),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
+              vTensor::Stage::Compute));
     }
     else {
       TORCH_CHECK(false, "Not implemented!");
@@ -232,15 +222,13 @@ Tensor& activation_(
           shader_descriptor,
           v_self.extents(),
           context->gpu().adapter->local_work_group_size(),
-          // Read-Write access triggers an async synchronization if necessory
-          // and inserts appropriate barriers if hazards are detected.
+          // Shader parameters
+          block,
+          // Textures
           v_self.image(
               command_buffer,
               vTensor::Stage::Compute,
-              vTensor::Access::Read | vTensor::Access::Write),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
+              vTensor::Access::Read | vTensor::Access::Write));
     }
     else {
       TORCH_CHECK(false, "Not implemented!");
@@ -328,20 +316,16 @@ Tensor activation_scalar(
           shader_descriptor,
           v_output.extents(),
           context->gpu().adapter->local_work_group_size(),
-          // Write-only access bypasses synchronization but inserts appropriate
-          // barriers if necessary.
+          // Shader parameters
+          block,
+          // Textures,
           v_output.image(
               command_buffer,
               vTensor::Stage::Compute,
               vTensor::Access::Write),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
           v_self.image(
               command_buffer,
-              vTensor::Stage::Compute),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
+              vTensor::Stage::Compute));
     }
     else {
       TORCH_CHECK(false, "Not implemented!");
@@ -387,15 +371,13 @@ Tensor& activation_scalar_(
           shader_descriptor,
           v_self.extents(),
           context->gpu().adapter->local_work_group_size(),
-          // Read-Write access triggers an async synchronization if necessory
-          // and inserts appropriate barriers if hazards are detected.
+          // Shader parameters
+          block,
+          // Textures
           v_self.image(
               command_buffer,
               vTensor::Stage::Compute,
-              vTensor::Access::Read | vTensor::Access::Write),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
+              vTensor::Access::Read | vTensor::Access::Write));
     }
     else {
       TORCH_CHECK(false, "Not implemented!");
