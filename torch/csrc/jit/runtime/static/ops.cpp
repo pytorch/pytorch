@@ -146,6 +146,25 @@ at::Tensor& flatten_copy_out(
   return reshape_copy_out(out, self, shape, false);
 }
 
+namespace {
+template <typename scalar_t>
+void to_copy_out_fast_path(Tensor& out, const Tensor& self) {
+  using self_t = scalar_t;
+  const auto N = self.numel();
+  const auto self_data = self.data_ptr<self_t>();
+  AT_DISPATCH_ALL_TYPES_AND2(
+      kHalf,
+      kBFloat16,
+      out.scalar_type(),
+      "to_copy_out_inner_loop",
+      [&]() {
+        const auto out_data = out.data_ptr<scalar_t>();
+        for (const auto idx : c10::irange(N)) {
+          out_data[idx] = static_cast<scalar_t>(self_data[idx]);
+        }
+      });
+}
+
 at::Tensor& to_copy_out(
     Tensor& out,
     const Tensor& self,
@@ -176,20 +195,7 @@ at::Tensor& to_copy_out(
           (self.dtype() == kHalf && out.dtype() == kFloat))) {
     AT_DISPATCH_ALL_TYPES_AND2(
         kHalf, kBFloat16, self.scalar_type(), "to_copy_out", [&]() {
-          using self_t = scalar_t;
-          const auto N = self.numel();
-          const auto self_data = self.data_ptr<self_t>();
-          AT_DISPATCH_ALL_TYPES_AND2(
-              kHalf,
-              kBFloat16,
-              out.scalar_type(),
-              "to_copy_out_inner_loop",
-              [&]() {
-                const auto out_data = out.data_ptr<scalar_t>();
-                for (const auto idx : c10::irange(N)) {
-                  out_data[idx] = static_cast<scalar_t>(self_data[idx]);
-                }
-              });
+          to_copy_out_fast_path<scalar_t>(out, self);
         });
     return out;
   }
