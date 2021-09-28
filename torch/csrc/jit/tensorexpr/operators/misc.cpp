@@ -471,7 +471,6 @@ Tensor computeReshape(
       inputs, outputShape, outputType, device, view_dims);
 }
 
-
 static std::pair<ScalarType, std::vector<BufHandle>> processCatList(
     const std::vector<BufHandle>& bufList) {
   if (bufList.size() == 0) {
