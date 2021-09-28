@@ -1,6 +1,8 @@
 # Generates ADInplaceOrViewType.h/cpp
-# **If any changes are being made to the ADInplaceOrView codegen please also check
+#
+# NOTE: If any changes are being made to the ADInplaceOrView codegen please also check
 # if updates are needed in torch/csrc/autograd/autograd_not_implemented_fallback.cpp
+# The fallback is expected to mimick this codegen, so we should keep the two in sync.
 
 from tools.codegen.api import cpp
 from tools.codegen.api.autograd import (
