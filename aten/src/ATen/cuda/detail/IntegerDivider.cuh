@@ -1,10 +1,13 @@
-#ifndef THC_INTEGER_DIVIDER_INC
-#define THC_INTEGER_DIVIDER_INC
+#pragma once
 
 #include <assert.h>
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 #include <cuda_runtime.h>
 #endif
+
+namespace at {
+namespace cuda {
+namespace detail {
 
 // A utility class to implement integer division by multiplication, given a fixed
 // divisor.
@@ -120,4 +123,4 @@ struct IntDivider<unsigned int> {
   unsigned int shift;  // Shift amounts.
 };
 
-#endif // THC_INTEGER_DIVIDER_INC
+}}}  // namespace at::cuda::detail
