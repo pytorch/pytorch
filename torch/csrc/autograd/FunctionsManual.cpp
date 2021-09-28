@@ -464,16 +464,31 @@ Tensor prod_backward(Tensor grad, const Tensor& input, Tensor result, int64_t di
   }
 }
 
+template <typename solve_f>
+static Tensor generic_solve_jvp(
+  solve_f solve,
+  const Tensor& X, const Tensor& A,
+  const Tensor& dA, const Tensor& dB) {
+  auto is_vector_case = at::native::linalg_solve_is_vector_rhs(dA, dB);
+  auto dA_contrib = is_vector_case ? dA.matmul(X.unsqueeze(-1)).squeeze(-1) : dA.matmul(X);
+  // In general,
+  // dX = solve(A, dB - dA_contrib), but this behavior is different for lu_solve.
+  // For refer to lu_solve_jvp for more details on this.
+  return solve(A, dB, dA_contrib);
+}
+
 Tensor solve_jvp(
-    const Tensor& input_primal,
-    const Tensor& input_tangent,
-    const Tensor& other_tangent,
-    const Tensor& result) {
-  bool vector_case = at::native::linalg_solve_is_vector_rhs(input_tangent, other_tangent);
-  if (vector_case) {
-    return at::linalg_solve(input_primal, other_tangent - at::matmul(input_tangent, result.unsqueeze(-1)).squeeze(-1));
-  }
-  return at::linalg_solve(input_primal, other_tangent - at::matmul(input_tangent, result));
+  const Tensor& X,
+  const Tensor& A,
+  const Tensor& dA,
+  const Tensor& dB
+) {
+  return generic_solve_jvp(
+    [](const Tensor& A, const Tensor& dB, const Tensor& dA_contrib) {
+      return at::linalg_solve(A, dB - dA_contrib);
+    },
+    X, A, dA, dB
+  );
 }
 
 Tensor solve_backward_self(const Tensor & grad, const Tensor & self, const Tensor & A) {
@@ -2934,6 +2949,21 @@ std::tuple<Tensor, Tensor> triangular_solve_backward(
   return std::tuple<Tensor, Tensor>{grad_b, grad_a};
 }
 
+Tensor triangular_solve_jvp(
+  const Tensor& X, const Tensor& A,
+  const Tensor& dA, const Tensor& dB,
+  const bool upper,
+  const bool transpose,
+  const bool unitriangular
+) {
+  return generic_solve_jvp(
+    [&](const Tensor& A, const Tensor& dB, const Tensor& dA_contrib) {
+      return std::get<0>(at::triangular_solve(dB - dA_contrib, A, upper, transpose, unitriangular));
+    },
+    X, A, dA, dB
+  );
+}
+
 std::tuple<Tensor, Tensor> cholesky_solve_backward(
     const Tensor& grad_x, const Tensor& self,
     const Tensor& input2, const Tensor& result, const bool upper) {
@@ -2951,6 +2981,24 @@ std::tuple<Tensor, Tensor> cholesky_solve_backward(
     }
   }
   return std::tuple<Tensor, Tensor>{grad_self, grad_input2};
+}
+
+Tensor cholesky_solve_jvp(
+  const Tensor& X,
+  const Tensor& U,
+  const Tensor& dU,
+  const Tensor& dB,
+  const bool upper
+) {
+  auto dK = upper ? dU.transpose(-1, -2).conj().matmul(U)
+                  : dU.matmul(U.transpose(-1, -2).conj());
+  auto dA = dK + dK.transpose(-1, -2).conj();
+  return generic_solve_jvp(
+    [&](const Tensor& A, const Tensor& dB, const Tensor& dA_contrib) {
+      return at::cholesky_solve(dB - dA_contrib, A, upper);
+    },
+    X, /*A=*/U, dA, dB
+  );
 }
 
 Tensor fft_c2r_backward(const Tensor& grad, IntArrayRef dim, int64_t normalization) {
@@ -3789,40 +3837,34 @@ std::tuple<Tensor, Tensor> lu_solve_backward(
   return std::make_tuple(self_grad, LU_data_grad);
 }
 
-Tensor lu_solve_forward_AD(
-  const Tensor& dB,
-  const Tensor& dLU_data,
+Tensor lu_solve_jvp(
+  const Tensor& X,
   const Tensor& LU_data,
-  const Tensor& LU_pivots,
-  const Tensor& X
+  const Tensor& dLU_data,
+  const Tensor& dB,
+  const Tensor& LU_pivots
 ) {
-  auto dL = dLU_data.tril(-1);
-  auto dU = dLU_data.triu();
-
-  // From the derivations from above we have that:
-  // dX = -U^{-1} dU U^{-1} L^{-1} P^T B - U^{-1} L^{-1} dL L^{-1} P^T B + U^{-1} L^{-1} P^T dB,
-  // or, using that X = (LU)^{-1} P^T B,
-  // dX = -U^{-1} dU X - (LU)^{-1} dL U X + (LU)^{-1} P^T dB
-
-  // -U^{-1} dU X
-  auto U = LU_data.triu();
-  auto dU_part = -std::get<0>(at::triangular_solve(
-    dU.matmul(X),
-    U,
-    /*upper=*/true
-  ));
-
-  // (LU)^{-1} dL U X,
-  // we use lu_solve to solve this system which requires pivots which are returned by the lu routine.
-  // Since no pivoting is required for the system, we create a tensor of identity permutations
-  // which are 1-based because of the Fortran-like LAPACK interfaces.
-  auto identity_pivots = at::arange(1, LU_data.size(-1) + 1, LU_pivots.options()).expand(LU_pivots.sizes());
-  auto dL_part = at::lu_solve(dL.matmul(U).matmul(X), LU_data, identity_pivots);
-
-  // (LU)^{-1} P^T dB
-  auto dB_part = at::lu_solve(dB, LU_data, LU_pivots);
-
-  return dU_part - dL_part + dB_part;
+  Tensor L, U, dL, dU;
+  std::tie(std::ignore, L, U) = at::lu_unpack(LU_data, LU_pivots, /*unpack_data=*/true, /*unpack_pivots=*/false);
+  dL = dLU_data.tril(-1);
+  dU = dLU_data.triu();
+  auto dA = dL.matmul(U) + L.matmul(dU);
+  return generic_solve_jvp(
+    [&](const Tensor& A, const Tensor& dB, const Tensor& dA_contrib) {
+      // We exploit the structure in the computation of A^{-1} dA, where the permutation matrix P such that A = P L U
+      // cancels itself. Because of that we use lu_solve with the identity permutation input.
+      // The identity permutation pivots are 1-based because of the Fortran-like LAPACK interfaces.
+      // More details on the permutation matrix canceling note:
+      // as part of forward AD we need to compute A^{-1} dA.
+      // Since A = P L U and P is not differentiable, we get
+      // dA = P d(L U), A^{-1} = (L U)^{-1} P^T, so
+      // A^{-1} dA = (L U)^{-1} d(L U), which is lu_solve with
+      // the pivots set to the identity permutation
+      auto identity_pivots = at::arange(1, LU_data.size(-1) + 1, LU_pivots.options()).expand(LU_pivots.sizes());
+      return at::lu_solve(dB, A, LU_pivots) - at::lu_solve(dA_contrib, A, identity_pivots);
+    },
+    X, /*A=*/LU_data, dA, dB
+  );
 }
 
 Tensor lu_unpack_backward(

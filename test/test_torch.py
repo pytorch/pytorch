@@ -3037,6 +3037,10 @@ class TestTorchDeviceType(TestCase):
         for i in range(a.numel()):
             self.assertEqual(w[1][1][i], q[1][1][i] - 1)
 
+        # Check that deepcopy preserves attributes
+        a.foo = 3
+        self.assertEqual(deepcopy(a).foo, 3)
+
     @dtypes(torch.float32, torch.complex64)
     def test_deepcopy_scalar(self, device, dtype):
         from copy import deepcopy
