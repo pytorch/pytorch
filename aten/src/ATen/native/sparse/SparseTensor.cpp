@@ -512,19 +512,14 @@ SparseTensor& copy_sparse_wrapper_(
     bool non_blocking) {
   // TODO: Once copy_ is fully migrated to use dispatcher, handle named
   // inference using dispatcher instead of doing it everywhere
-  auto maybe_outnames = namedinference::compute_broadcast_outnames(self, src);
-  {
-    NoNamesGuard guard;
-    if (!self.is_sparse() || !src.is_sparse()) {
-      AT_ERROR(
-          "copy_() between dense and sparse Tensors is not implemented! Found self type = ",
-          self.toString(),
-          " and src type = ",
-          src.toString());
-    }
-    at::copy_sparse_to_sparse_(self, src, non_blocking);
+  if (!self.is_sparse() || !src.is_sparse()) {
+    AT_ERROR(
+        "copy_() between dense and sparse Tensors is not implemented! Found self type = ",
+        self.toString(),
+        " and src type = ",
+        src.toString());
   }
-  namedinference::propagate_names_if_nonempty(self, maybe_outnames);
+  at::copy_sparse_to_sparse_(self, src, non_blocking);
   return self;
 }
 

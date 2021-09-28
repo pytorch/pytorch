@@ -102,7 +102,7 @@ bool is_supported_device(Device device) {
 namespace at {
 namespace native {
 
-static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) {
+Tensor& copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   // TODO: this should be handled during dispatch, but that's missing...
   TORCH_CHECK(self.defined(), "self is undefined");
   TORCH_CHECK(src.defined(), "src is undefined");
@@ -239,11 +239,12 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   return self;
 }
 
-Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
+Tensor& named_copy_(Tensor& self, const Tensor& src, bool non_blocking) {
   auto maybe_outnames = namedinference::compute_broadcast_outnames(self, src);
   {
     NoNamesGuard guard;
-    copy_impl(self, src, non_blocking);
+    c10::impl::ExcludeDispatchKeyGuard guard_(DispatchKey::Named);
+    self.copy_(src, non_blocking); // redispatch!
   }
   namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;
