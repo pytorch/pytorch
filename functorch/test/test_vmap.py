@@ -1634,6 +1634,17 @@ class TestVmapOperators(Namespace.TestVmapBase):
             number = getter([]).item()
             self._test_unary(lambda t: op(t, number), getter, 'cpu', check_propagates_grad=False)
 
+    def test_cross_batch_size_three(self):
+        # Let's test corner case when batch_size is 3 and cross' dim argument is not specified
+        # According to the cross API, dim will be assigned to the first dim with value 3
+        # In this test we ensure that found dim is not batch dim.
+        op = torch.cross
+        test = self._vmap_test
+        B0 = B1 = 3
+        test(op, (torch.rand(B0, 2, 3), torch.rand(B0, 2, 3)))
+        test(vmap(op, in_dims=(0, None)), (torch.rand(B0, B1, 2, 3), torch.rand(B0, B1, 2, 3)),
+             in_dims=(None, 1))
+
     def test_diagonal(self):
         tensor = torch.randn(3, 5, 7, 11, 13)
         test = self._vmap_view_test
@@ -2974,7 +2985,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('cdist'),
         xfail('complex'),
         xfail('copysign'),
-        xfail('cross'),
         xfail('diag_embed'),
         xfail('dsplit'),
         xfail('eig'),
