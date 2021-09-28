@@ -1,4 +1,5 @@
-// This file defines classes for registering standard lowerings from JIT to TE IR.
+// This file defines classes for registering standard lowerings from JIT to TE
+// IR.
 #pragma once
 
 #include <c10/util/variant.h>
