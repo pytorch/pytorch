@@ -6,9 +6,10 @@ from typing import Any, List
 
 import torch.utils.data.backward_compatibility
 
-import torch.utils.data.sharding
+import torch.utils.data.graph_settings
 from torch.utils.data import DataLoader, IterDataPipe, communication
 from torch.utils.data.datapipes.iter import IterableWrapper
+
 
 class _ThreadingDataLoader2:
 
@@ -18,7 +19,7 @@ class _ThreadingDataLoader2:
         self.collate_fn = collate_fn
         for worker_id in range(num_workers):
             (thread, req_queue, res_queue, thread_localdatapipe) = communication.eventloop.SpawnThreadForDataPipeline(datapipe)
-            torch.utils.data.sharding.apply_sharding(thread_localdatapipe, num_workers, worker_id)
+            torch.utils.data.graph_settings.apply_sharding(thread_localdatapipe, num_workers, worker_id)
             thread.start()
             self.threads.append((thread, req_queue, res_queue))  # These queues are independent
             local_datapipe = communication.iter.QueueWrapper(
@@ -99,14 +100,17 @@ class DataLoader2:
                     datapipe = datapipe.batch(batch_size, drop_last=drop_last)
                     if collate_fn is None:
                         collate_fn = torch.utils.data._utils.collate.default_collate
+            torch.utils.data.graph_settings.apply_shuffle_settings(datapipe, shuffle=shuffle)
             if parallelism_mode == 'mp' or num_workers == 0:
 
                 my_worker_init_fn = functools.partial(
                     sharding_worker_init_fn, worker_init_fn)
 
+                # Note: It is safe to pass shuffle=True to the old DataLoader, as shuffle does nothing
+                # for Iterable, but required to set Pipes correctly.
                 data_loader = DataLoader(datapipe,
                                          batch_size=None,  # Replaced by .batch DataPipe
-                                         shuffle=False,  # Replaced by .shuffle DataPipe
+                                         shuffle=shuffle,
                                          sampler=None,
                                          batch_sampler=None,
                                          num_workers=num_workers,

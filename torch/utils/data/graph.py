@@ -44,7 +44,10 @@ def list_connected_datapipes(scan_obj, exclude_primitive):
     IterableDataset.set_reduce_ex_hook(reduce_hook)
     if exclude_primitive:
         IterableDataset.set_getstate_hook(getstate_hook)
-    p.dump(scan_obj)
+    try:
+        p.dump(scan_obj)
+    except AttributeError:  # unpickable DataPipesGraph
+        pass  # TODO(VitalyFedyunin): We need to tight this requirement after migrating from old DataLoader
     IterableDataset.set_reduce_ex_hook(None)
     if exclude_primitive:
         IterableDataset.set_getstate_hook(None)

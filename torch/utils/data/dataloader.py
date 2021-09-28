@@ -18,8 +18,10 @@ import torch.multiprocessing as multiprocessing
 from torch._utils import ExceptionWrapper
 from torch._six import string_classes
 
-from . import IterableDataset, Sampler, SequentialSampler, RandomSampler, BatchSampler, Dataset
+from . import IterDataPipe, IterableDataset, Sampler, SequentialSampler, RandomSampler, BatchSampler, Dataset
 from . import _utils
+
+import torch.utils.data.graph_settings
 
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
@@ -224,11 +226,14 @@ class DataLoader(Generic[T_co]):
             # option. If this turns out to be useful in future, we can re-enable
             # this, and support custom samplers that specify the assignments to
             # specific workers.
-            if shuffle is not False:
+            if isinstance(dataset, IterDataPipe):
+                torch.utils.data.graph_settings.apply_shuffle_settings(dataset, shuffle=shuffle)
+            elif shuffle is not False:
                 raise ValueError(
                     "DataLoader with IterableDataset: expected unspecified "
                     "shuffle option, but got shuffle={}".format(shuffle))
-            elif sampler is not None:
+
+            if sampler is not None:
                 # See NOTE [ Custom Samplers and IterableDataset ]
                 raise ValueError(
                     "DataLoader with IterableDataset: expected unspecified "
@@ -240,6 +245,8 @@ class DataLoader(Generic[T_co]):
                     "batch_sampler option, but got batch_sampler={}".format(batch_sampler))
         else:
             self._dataset_kind = _DatasetKind.Map
+
+
 
         if sampler is not None and shuffle:
             raise ValueError('sampler option is mutually exclusive with '
