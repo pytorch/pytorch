@@ -2521,8 +2521,9 @@ c10::optional<ScalarType> findDtypeForValue(const torch::jit::Value* v) {
 
 NNCLoweringFunction getStandardLoweringFor(const std::string& op) {
   const auto& lowerings = getNNCLoweringRegistry();
-  if (lowerings.count(op))
+  if (lowerings.count(op)) {
     return lowerings.at(op);
+  }
   return nullptr;
 }
 
