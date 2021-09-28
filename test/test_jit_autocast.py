@@ -356,7 +356,7 @@ class TestAutocast(JitTestCase):
             self.assertEqual(result.dtype, expected_dtype)
 
     # traced inside scripting
-    @unittest.skipIf(True, "broken")
+    #@unittest.skipIf(True, "broken")
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     def test_script_and_tracing(self):
         def helper(a, b):
@@ -368,6 +368,7 @@ class TestAutocast(JitTestCase):
         def fn(a, b):
             with autocast(enabled=True):
                 return traced(a, b)
+        print(fn.graph)
 
         result = fn(self.a_fp32, self.b_fp32)
         self.assertEqual(result.dtype, torch.float16)

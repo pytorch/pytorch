@@ -2,7 +2,7 @@ import torch
 import functools
 import warnings
 
-from typing import Any
+from typing import Any, Optional
 
 def autocast_decorator(autocast_instance, func):
     @functools.wraps(func)
@@ -138,7 +138,7 @@ class autocast(object):
         dtype(torch_dtype, optional):  Whether to use torch.float16 or torch.bfloat16.
         cache_enabled(bool, optional, default=True):  Whether the weight cache inside autocast should be enabled.
     """
-    def __init__(self, device_type : str, dtype : torch.dtype, enabled : bool = True, cache_enabled : bool = True):
+    def __init__(self, device_type : str, dtype : Optional[torch.dtype] = None, enabled : bool = True, cache_enabled : Optional[bool] = None):
         if torch._jit_internal.is_scripting():
             self._enabled = enabled
             return
@@ -154,9 +154,9 @@ class autocast(object):
         if torch.cuda.amp.common.amp_definitely_not_available() and self.device == 'cuda':
             warnings.warn('User provided device_type of \'cuda\', but CUDA is not available. Disabling')
             enabled = False
-        if dtype != None:
+        if dtype is not None:
             self.fast_dtype = dtype
-        if cache_enabled != None:
+        if cache_enabled is not None:
             self._cache_enabled = cache_enabled
 
         if self.device == 'cpu':

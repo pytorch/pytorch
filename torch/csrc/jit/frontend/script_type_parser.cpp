@@ -230,6 +230,7 @@ TypePtr ScriptTypeParser::parseTypeFromExpr(const Expr& expr) const {
 }
 
 TypePtr ScriptTypeParser::parseTypeFromExprImpl(const Expr& expr) const {
+  std::cout << "parsing type from expr impl: " << kindToString(expr.kind()) << std::endl;
   if (expr.kind() == TK_SUBSCRIPT) {
     auto subscript = Subscript(expr);
     auto value_name = parseBaseTypeName(subscript.value());
@@ -237,11 +238,13 @@ TypePtr ScriptTypeParser::parseTypeFromExprImpl(const Expr& expr) const {
       throw ErrorReport(subscript.value().range())
           << "Subscripted type must be a type identifier";
     }
+    std::cout << "  type name: " << *value_name << std::endl;
     return subscriptToType(*value_name, subscript);
 
   } else if (expr.kind() == TK_STRINGLITERAL) {
     const auto& type_name = StringLiteral(expr).text();
 
+    std::cout << "type name : " << type_name << std::endl;
     // Check if the type is a custom class. This is done by checking
     // if type_name starts with "torch.classes."
     if (type_name.find("torch.classes.") == 0) {
@@ -265,6 +268,12 @@ TypePtr ScriptTypeParser::parseTypeFromExprImpl(const Expr& expr) const {
       return custom_class_type;
     }
 
+    // if (type_name.find("torch.autocast") == 0) {
+    //   auto custom_class_type =
+    //       getCustomClass("__torch__.torch.autocast");
+    //   return custom_class_type;
+    // }
+
     if (resolver_) {
       if (auto typePtr = resolver_->resolveType(type_name, expr.range())) {
         return typePtr;
@@ -273,6 +282,8 @@ TypePtr ScriptTypeParser::parseTypeFromExprImpl(const Expr& expr) const {
 
     throw ErrorReport(expr) << "Unknown type name '" << type_name << "'";
   } else if (auto name = parseBaseTypeName(expr)) {
+    std::cout << "parsed base type name: " << *name << "\n";
+    
     auto itr = string_to_type_lut().find(*name);
     if (itr != string_to_type_lut().end()) {
       return itr->second;

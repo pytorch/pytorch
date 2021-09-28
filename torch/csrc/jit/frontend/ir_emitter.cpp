@@ -443,7 +443,13 @@ struct Environment {
       const std::string& ident,
       const SourceRange& range,
       bool required = true) {
+    std::cout << " --- getting sugard value: " << ident << " required? " << required << std::endl;
     auto retval = findInAnyFrame(ident);
+    if (retval) {
+      std::cout << "  found in frame\n";
+    } else {
+      std::cout << "  not found in frame\n";
+    }
 
     if (!retval) {
       static std::unordered_map<std::string, SugaredValuePtr> globals = {
@@ -522,7 +528,11 @@ struct Environment {
       };
       auto it = globals.find(ident);
       if (it != globals.end()) {
+        std::cout << "  setting global" << std::endl;
         retval = it->second;
+      }
+      if (retval) {
+        std::cout << "  found global" << std::endl;
       }
     }
 
@@ -532,10 +542,16 @@ struct Environment {
           retval = std::make_shared<NamedTupleConstructor>(tuple_type);
         }
       }
+      if (retval) {
+        std::cout << "  return a named tuple" << std::endl;
+      }
     }
 
     if (!retval) {
       retval = resolver->resolveValue(ident, method, range);
+      if (retval) {
+        std::cout << "  return an aten buildin" << std::endl;
+      }
     }
 
     if (!retval) {
@@ -544,10 +560,20 @@ struct Environment {
           retval = std::make_shared<ClassValue>(class_type);
         }
       }
+      if (retval) {
+        std::cout << "  return an class value" << std::endl;
+      }
     }
 
     if (!retval && required) {
+      std::cout << " throwing error\n" << std::endl;
       throwVarNotFoundError(ident, range);
+    }
+
+    if (retval) {
+      std::cout << " !found\n" << std::endl;
+    } else {
+      std::cout << " !not found\n" << std::endl;
     }
 
     return retval;
@@ -1077,6 +1103,9 @@ struct to_ir {
       List<Stmt>::const_iterator end) {
     for (; begin != end; ++begin) {
       auto stmt = *begin;
+      printf("parsing: ");
+      stmt.dump();
+      printf("\n");
       ErrorReport::CallStack::update_pending_range(stmt.range());
       switch (stmt.kind()) {
         case TK_IF:
@@ -1117,18 +1146,22 @@ struct to_ir {
           // Emit nothing for pass
           break;
         case TK_DEF:
+          printf(" xxxoooxxx emit closure\n");
           emitClosure(Def(stmt));
           break;
         case TK_DELETE:
           emitDelete(Delete(stmt));
           break;
         case TK_WITH:
+          printf("emit TK_WITH\n");
           emitWith(With(stmt));
+          printf("done emit TK_WITH\n");
           break;
         default:
           throw ErrorReport(stmt)
               << "Unrecognized statement kind " << kindToString(stmt.kind());
       }
+      printf("finished parsing\n");
       // Found an exit statement in this block. The remaining statements aren't
       // reachable so we don't emit them.
       if (exit_blocks.count(environment_stack->block()))
@@ -2320,17 +2353,24 @@ struct to_ir {
   }
 
   void emitWith(const With& stmt) {
+    printf(" emitting With \n");
     auto targets = stmt.targets();
     // Keep a stack of entered objects so they can be exited
     // in the right order.
     std::stack<Value*> entered;
 
+    printf(" emitting targets \n");
     for (const auto& target : targets) {
+      printf(" emitting target: - \n");
       Expr e = target.target();
 
+      printf(" emitting expression: - \n");
+      e.dump();
       auto* rhs = emitExpr(e);
+      printf(" done emitting expression: - \n");
       auto* n = graph->insertNode(graph->create(prim::Enter, {rhs}));
       entered.push(rhs);
+      printf(" 1: - \n");
 
       if (rhs->type()->kind() != TypeKind::ClassType) {
         throw ErrorReport(e.range())
@@ -2345,6 +2385,7 @@ struct to_ir {
         throw ErrorReport(e.range())
             << "Object returned by with item expression does not define __enter__ and __exit__ methods";
       }
+      printf(" 2: - \n");
 
       // Check the schema of __enter__.
       auto& enterSchema = enterMethod->getSchema();
@@ -2352,6 +2393,7 @@ struct to_ir {
         throw ErrorReport(e.range())
             << "__enter__ must have only one argument and one return value";
       }
+      printf(" 3: - \n");
 
       // Check the schema of __exit__.
       auto& exitSchema = exitMethod->getSchema();
@@ -2366,6 +2408,7 @@ struct to_ir {
           }
         }
       }
+      printf(" 4: - \n");
 
       // Set the output of the enter node to be the return type of __enter__.
       n->output(0)->setType(enterSchema.returns().at(0).type());
@@ -2376,9 +2419,12 @@ struct to_ir {
         Var i = target.var().get();
         environment_stack->setVar(i.range(), i.name().name(), n->output(0));
       }
+      printf(" 5: - \n");
     }
 
+    printf("emitting with statment body\n");
     emitStatements(stmt.body());
+    printf("finished \n");
 
     // Insert all the corresponding prim::Exit nodes.
     while (!entered.empty()) {
@@ -3227,14 +3273,28 @@ struct to_ir {
       Apply& apply,
       size_t n_binders,
       const TypePtr& type_hint = nullptr) {
+    std::cout << "emit apply expr: " << std::endl;
     auto sv = emitSugaredExpr(apply.callee(), 1);
+    std::cout << "callee: kind: " << sv->kind() << std::endl;
     auto loc = apply.callee().range();
     if (auto special_form = dynamic_cast<SpecialFormValue*>(sv.get())) {
       return emitApplySpecialForm(special_form->form(), apply, type_hint);
     }
     auto args = getNamedValues(apply.inputs(), true);
     auto kwargs = emitAttributes(apply.attributes());
-    return sv->call(loc, method, args, kwargs, n_binders);
+
+    if (auto builtin = dynamic_cast<BuiltinFunction*>(sv.get())) {
+      std::cout << "builtin type " <<  builtin->symbol.toQualString() << std::endl;
+      // TODO: add aten::autocast into interned string
+      if (false && builtin->symbol == Symbol::fromQualString("aten::autocast")) {
+        return std::make_shared<BuiltinFunction>(Symbol::fromQualString("torch::autocast"), at::nullopt)
+            ->call(loc, method, args, kwargs, n_binders);
+      }
+    }
+    std::cout << "prior to call" << std::endl;
+    auto ret = sv->call(loc, method, args, kwargs, n_binders);
+    std::cout << "after to call" << std::endl;
+    return ret;
   }
 
   // this function handles expressions that look like apply statements
@@ -3745,7 +3805,12 @@ struct to_ir {
       case '.': {
         auto select = Select(tree);
         auto sv = emitSugaredExpr(select.value(), 1);
-        return sv->attr(select.range(), method, select.selector().name());
+        //return sv->attr(select.range(), method, select.selector().name());
+        auto ret = sv->attr(select.range(), method, select.selector().name());
+        std::cout << " method: " << method.name() << " and qual name: " << method.qualname().name() << std::endl;
+        std::cout << " >>> accesssor . kind: " << sv->kind();
+        std::cout << " >>> output kind: " << ret->kind() << std::endl;
+        return ret;
       }
       case TK_APPLY: {
         auto apply = Apply(tree);
@@ -5050,6 +5115,7 @@ struct FunctionResolver : public Resolver {
       const std::string& name,
       Function& m,
       const SourceRange& loc) override {
+    std::cout << "      ====== check function name: " << m.qualname().name() << std::endl;
     auto it = functionTable_.find(name);
     if (it != functionTable_.end()) {
       return std::make_shared<FunctionValue>(it->second);
