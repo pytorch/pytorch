@@ -18,5 +18,4 @@ test_aot_model_compiler() {
   fi
 }
 
-echo "Running AOT compiler test.."
 test_aot_model_compiler
