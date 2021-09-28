@@ -174,6 +174,17 @@ Tensor computeFourOperand(
       });
 }
 
+Tensor computeNoop(
+    const std::vector<ArgValue>& inputValues,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
+  return computeOneOperand(
+      "copy", inputValues, outputShape, outputType, [](const ExprHandle& a) {
+        return a;
+      });
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

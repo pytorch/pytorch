@@ -2,7 +2,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 
-#include <THC/THCAtomics.cuh>
+#include <ATen/cuda/Atomic.cuh>
 #include <THC/THCNumerics.cuh>
 
 namespace at {
