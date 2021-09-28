@@ -430,7 +430,8 @@ void Unfold3dAccKernelImpl(
 } // namespace
 
 void Unfold3dCopyCPU(
-    const Tensor& src,
+    ScalarType dtype,
+    const void *src,
     int64_t C,
     int64_t X_D,
     int64_t X_H,
@@ -447,10 +448,10 @@ void Unfold3dCopyCPU(
     int64_t pad_d,
     int64_t pad_h,
     int64_t pad_w,
-    Tensor* dst) {
+    void* dst) {
   AT_DISPATCH_ALL_TYPES_AND(
       at::ScalarType::BFloat16,
-      src.scalar_type(),
+      dtype,
       "Unfold3dCopyCPU",
       [=, &src]() {
         Unfold3dCopyKernelImpl<scalar_t>(
@@ -470,13 +471,14 @@ void Unfold3dCopyCPU(
             pad_d,
             pad_h,
             pad_w,
-            src.data_ptr<scalar_t>(),
-            dst->data_ptr<scalar_t>());
+            static_cast<const scalar_t*>(src),
+            static_cast<scalar_t*>(dst));
       });
 }
 
 void Unfold3dAccCPU(
-    const Tensor& src,
+    ScalarType dtype,
+    const void *src,
     int64_t C,
     int64_t X_D,
     int64_t X_H,
@@ -493,10 +495,10 @@ void Unfold3dAccCPU(
     int64_t pad_d,
     int64_t pad_h,
     int64_t pad_w,
-    Tensor* dst) {
+    void* dst) {
   AT_DISPATCH_ALL_TYPES_AND(
       at::ScalarType::BFloat16,
-      src.scalar_type(),
+      dtype,
       "Unfold3dAccCPU",
       [=, &src]() {
         Unfold3dAccKernelImpl<scalar_t>(
@@ -516,8 +518,8 @@ void Unfold3dAccCPU(
             pad_d,
             pad_h,
             pad_w,
-            src.data_ptr<scalar_t>(),
-            dst->data_ptr<scalar_t>());
+            static_cast<const scalar_t*>(src),
+            static_cast<scalar_t*>(dst));
       });
 }
 
