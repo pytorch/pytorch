@@ -789,7 +789,7 @@ WelfordResult Welford(
 
     TORCH_CHECK(
         axis >= 0 && (unsigned int)axis < tv->nDims(),
-        "Reduction on invalid axis, recieved: ",
+        "Reduction on invalid axis, received: ",
         axis,
         " however tensor view only has ",
         tv->nDims(),

@@ -188,3 +188,18 @@ concurrency:
         run: |
           python3 tools/render_junit.py test/
 {%- endmacro -%}
+
+{%- macro ciflow_should_run_job(ciflow_config) -%}
+{%- if ciflow_config.enabled %}
+  !{{ ciflow_config.root_job_name }}:
+    runs-on: ubuntu-18.04
+    if: ${{ !{{ ciflow_config.root_job_condition }} }}
+    env:
+      LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+    steps:
+      - name: noop
+        run: echo running !{{ ciflow_config.root_job_name }}
+      - name: print labels
+        run: echo "${LABELS}"
+{%- endif %}
+{%- endmacro -%}
