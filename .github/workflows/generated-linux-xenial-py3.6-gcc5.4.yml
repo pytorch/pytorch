@@ -19,6 +19,7 @@ env:
   XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
   TORCH_CUDA_ARCH_LIST: 5.2
   IN_CI: 1
+  IS_GHA: 1
   # This is used for the phase of adding wheel tests only, will be removed once completed
   IN_WHEEL_TEST: 1
   # Used for custom_opertor, jit_hooks, custom_backend, see .jenkins/pytorch/build.sh
@@ -26,12 +27,15 @@ env:
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
   PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
+  AWS_DEFAULT_REGION: us-east-1
+  CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
+  CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
 concurrency:
   group: linux-xenial-py3.6-gcc5.4-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
+
   ciflow_should_run:
     runs-on: ubuntu-18.04
     if: ${{ (github.repository_owner == 'pytorch') && ((github.event_name != 'pull_request') || (github.event.assignee.login != 'pytorchbot' ) || (github.event.action !='unassigned') || (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux'))) }}
@@ -79,8 +83,8 @@ jobs:
           retry () {
               "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
           }
-          # Ensure the working directory gets chowned back to the current user
           retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Clean workspace
         run: |
@@ -181,8 +185,8 @@ jobs:
           retry () {
               "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
           }
-          # Ensure the working directory gets chowned back to the current user
           retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Clean workspace
         run: |
@@ -201,16 +205,30 @@ jobs:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
           submodules: recursive
-      - name: Pull docker image
+      - name: Pull Docker image
         run: |
-          docker pull "${DOCKER_IMAGE}"
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Parse ref
+        id: parse-ref
+        run: .github/scripts/parse_ref.py
       - name: Build
+        env:
+          CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
             -e JOB_BASE_NAME \
             -e MAX_JOBS="$(nproc --ignore=2)" \
+            -e AWS_DEFAULT_REGION \
+            -e IS_GHA \
+            -e CIRCLE_PR_NUMBER \
+            -e CIRCLE_SHA1 \
+            -e CIRCLE_BRANCH \
+            -e GITHUB_RUN_ID \
             -e SCCACHE_BUCKET \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
@@ -229,19 +247,12 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t "${container_name}" sh -c 'sudo chown -R jenkins . && .jenkins/pytorch/build.sh'
-      - name: Parse ref
-        id: parse-ref
-        run: .github/scripts/parse_ref.py
       - name: Display and upload binary build size statistics (Click Me)
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
-          AWS_DEFAULT_REGION: us-east-1
-          IS_GHA: 1
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
-          CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
           CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         run: |
@@ -340,7 +351,6 @@ jobs:
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
-      CONTINUE_THROUGH_ERROR: ${{ github.repository == 'pytorch/pytorch' && (github.event_name == 'push' || github.event_name == 'schedule') }}
     steps:
       - name: Display EC2 information
         shell: bash
@@ -370,8 +380,8 @@ jobs:
           retry () {
               "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
           }
-          # Ensure the working directory gets chowned back to the current user
           retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Clean workspace
         run: |
@@ -390,9 +400,12 @@ jobs:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
           submodules: recursive
-      - name: Pull docker image
+      - name: Pull Docker image
         run: |
-          docker pull "${DOCKER_IMAGE}"
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         if: ${{ contains(env.BUILD_ENVIRONMENT, 'cuda') && !contains(matrix.config, 'nogpu') }}
         run: |
@@ -426,11 +439,7 @@ jobs:
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          IS_GHA: 1
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
-          CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          AWS_DEFAULT_REGION: us-east-1
         # Time out the test phase after 3.5 hours
         timeout-minutes: 210
         run: |
@@ -438,9 +447,6 @@ jobs:
             TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
           else
             TEST_COMMAND=.jenkins/pytorch/test.sh
-          fi
-          if [[ $NUM_TEST_SHARDS -ne 2 ]]; then
-            export SHARD_NUMBER=0
           fi
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
@@ -465,7 +471,6 @@ jobs:
             -e NUM_TEST_SHARDS \
             -e PYTORCH_IGNORE_DISABLED_ISSUES \
             -e PR_LABELS \
-            -e CONTINUE_THROUGH_ERROR \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
             -e http_proxy="http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -e https_proxy="http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -e no_proxy="localhost,127.0.0.1,github.com,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock" \
@@ -601,8 +606,8 @@ jobs:
           retry () {
               "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
           }
-          # Ensure the working directory gets chowned back to the current user
           retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Clean workspace
         run: |
@@ -621,9 +626,12 @@ jobs:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
           submodules: recursive
-      - name: Pull docker image
+      - name: Pull Docker image
         run: |
-          docker pull "${DOCKER_IMAGE}"
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download PyTorch Build Artifacts
         with:
