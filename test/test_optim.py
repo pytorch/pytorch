@@ -11,7 +11,7 @@ import torch.nn.functional as F
 from torch.optim import SGD
 from torch.autograd import Variable
 from torch import sparse
-from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, StepLR, \
+from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, SequentialLR, StepLR, \
     MultiStepLR, ConstantLR, LinearLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, \
     _LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR, ChainedScheduler
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
@@ -1255,6 +1255,41 @@ class TestLRScheduler(TestCase):
                                       threshold=0.1, patience=5, cooldown=5)
         self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
 
+    def test_sequentiallr1(self):
+        epochs = 19
+        schedulers = [None] * 2
+        targets = [[0.05, 0.04, 0.032] + [0.05 for x in range(4)]
+                                       + [0.05 * 0.1 for x in range(4)]
+                                       + [0.05 * 0.01 for x in range(4)]
+                                       + [0.05 * 0.001 for x in range(4)]]
+        milestones = [3]
+        schedulers[0] = ExponentialLR(self.opt, gamma=0.8)
+        schedulers[1] = StepLR(self.opt, gamma=0.1, step_size=4)
+        scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=milestones)
+        self._test(scheduler, targets, epochs)
+
+    def test_sequentiallr2(self):
+        epochs = 13
+        schedulers = [None] * 2
+        targets = [[0.005, 0.005, 0.005] + [0.05 * 0.9 ** x for x in range(10)]]
+        milestones = [3]
+        schedulers[0] = ConstantLR(self.opt, factor=0.1, total_iters=3)
+        schedulers[1] = ExponentialLR(self.opt, gamma=0.9)
+        scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=milestones)
+        self._test(scheduler, targets, epochs)
+
+    def test_sequentiallr3(self):
+        epochs = 12
+        schedulers = [None] * 3
+        targets = [[0.005, 0.005, 0.005] + [0.05, 0.04, 0.032]
+                                         + [0.05, 0.05, 0.005, 0.005, 0.0005, 0.0005]]
+        milestones = [3, 6]
+        schedulers[0] = ConstantLR(self.opt, factor=0.1, total_iters=3)
+        schedulers[1] = ExponentialLR(self.opt, gamma=0.8)
+        schedulers[2] = StepLR(self.opt, gamma=0.1, step_size=2)
+        scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=milestones)
+        self._test(scheduler, targets, epochs)
+
     def test_chained_lr1(self):
         epochs = 10
         schedulers = [None] * 1
@@ -2253,6 +2288,38 @@ class TestSWAUtils(TestCase):
             averaged_params = updated_averaged_params
 
         for p_avg, p_swa in zip(averaged_params, averaged_dnn.parameters()):
+            self.assertEqual(p_avg, p_swa)
+
+    def test_averaged_model_exponential_use_state_dict(self):
+        # Test AveragedModel with EMA as avg_fn and use_state_dict as True.
+        dnn = torch.nn.Sequential(
+            torch.nn.Conv2d(1, 5, kernel_size=3),
+            torch.nn.BatchNorm2d(5, momentum=0.3),
+            torch.nn.Linear(5, 10)
+        )
+        alpha = 0.9
+
+        def avg_fn(p_avg, p, n_avg):
+            return alpha * p_avg + (1 - alpha) * p
+        averaged_dnn = AveragedModel(dnn, avg_fn=avg_fn, mode='state_dict')
+        averaged_params = [torch.zeros_like(param) for param in dnn.state_dict().values()
+                           if param.size() != torch.Size([])]
+        n_updates = 10
+        for i in range(n_updates):
+            updated_averaged_params = []
+            for p, p_avg in zip(dnn.state_dict().values(), averaged_params):
+                if p.size() == torch.Size([]):
+                    continue
+                p.detach().add_(torch.randn_like(p))
+                if i == 0:
+                    updated_averaged_params.append(p.clone())
+                else:
+                    updated_averaged_params.append((p_avg * alpha +
+                                                   p * (1 - alpha)).clone())
+            averaged_dnn.update_parameters(dnn)
+            averaged_params = updated_averaged_params
+
+        for p_avg, p_swa in zip(averaged_params, averaged_dnn.module.state_dict().values()):
             self.assertEqual(p_avg, p_swa)
 
     def _test_update_bn(self, dnn, dl_x, dl_xy, cuda):
