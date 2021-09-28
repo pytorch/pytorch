@@ -1317,7 +1317,7 @@ struct to_ir {
   }
 
   template <class F1, class F2, class F3>
-  void refineAndSetTypeHintOrPopulateCandidatesVector(
+  void refineAndSetUnionTypeHintOrPopulateCandidatesVector(
       const TypePtr& type_hint,
       TypePtr* refined_type_hint_ptr,
       std::vector<TypePtr>* all_candidates,
@@ -1496,7 +1496,7 @@ struct to_ir {
         return t->isSubtypeOf(AnyListType::get());
       };
 
-      refineAndSetTypeHintOrPopulateCandidatesVector(
+      refineAndSetUnionTypeHintOrPopulateCandidatesVector(
           type_hint,
           &refined_type_hint,
           &all_candidates,
@@ -1624,7 +1624,7 @@ struct to_ir {
 
       auto do_if_match = [&]() { dict_value->setType(refined_type_hint); };
 
-      refineAndSetTypeHintOrPopulateCandidatesVector(
+      refineAndSetUnionTypeHintOrPopulateCandidatesVector(
           type_hint,
           &refined_type_hint,
           &all_candidates,
@@ -3603,14 +3603,14 @@ struct to_ir {
       auto annotated_v_type =
           annotated_dict_type->expect<DictType>()->getValueType();
 
-      const auto is_key_subtype = key_type != annotated_k_type;
+      const auto is_key_subtype = key_type == annotated_k_type;
       const auto is_value_subtype =
-          !value_type->isSubtypeOfExt(annotated_v_type, &ss);
+          value_type->isSubtypeOfExt(annotated_v_type, &ss);
 
       if (!is_key_subtype) {
         err << "Generated key type " << key_type->repr_str()
             << " did not match the annotated key type, which was "
-            << annotated_k_type->repr_str();
+            << annotated_k_type->repr_str() << "\n";
       }
 
       if (!is_value_subtype) {
@@ -3683,16 +3683,18 @@ struct to_ir {
       return t->kind() == DictType::Kind;
     };
 
-    refineAndSetTypeHintOrPopulateCandidatesVector(
-        type_hint,
-        &refined_type_hint,
-        &all_candidates,
-        "Dict",
-        apply,
-        type_match,
-        [] {},
-        [] {},
-        /*is_dict_constructor=*/true);
+    if (type_hint && type_hint->kind() != DictType::Kind) {
+      refineAndSetUnionTypeHintOrPopulateCandidatesVector(
+          type_hint,
+          &refined_type_hint,
+          &all_candidates,
+          "Dict",
+          apply,
+          type_match,
+          [] {},
+          [] {},
+          /*is_dict_constructor=*/true);
+    }
 
     if (!all_candidates.empty()) {
       throw ErrorReport(apply)
@@ -4197,7 +4199,7 @@ struct to_ir {
         return t->isSubtypeOf(AnyListType::get());
       };
 
-      refineAndSetTypeHintOrPopulateCandidatesVector(
+      refineAndSetUnionTypeHintOrPopulateCandidatesVector(
           type_hint,
           &refined_type_hint,
           &all_candidates,
@@ -4344,7 +4346,7 @@ struct to_ir {
         return t->kind() == DictType::Kind;
       };
 
-      refineAndSetTypeHintOrPopulateCandidatesVector(
+      refineAndSetUnionTypeHintOrPopulateCandidatesVector(
           type_hint,
           &refined_type_hint,
           &all_candidates,
