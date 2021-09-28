@@ -562,7 +562,7 @@ void ProcessGroupNCCL::runHealthCheck() {
       const auto key = getKeyFromDevices(rankDevice);
       // OpType does not matter, only need to set to not go through send/recv
       // path.
-      auto& ncclComms = getNCCLComm(key, rankDevice, OpType::ALLREDUCE);
+      auto& ncclComms = getNCCLComm(key, rankDevice, OpType::ALLREDUCE); // NOLINT
       // Now destroy the communicators and remove them from cache so we don't
       // use destroyed communicators.
       destroyNCCLComms(key);
@@ -581,7 +581,7 @@ void ProcessGroupNCCL::runHealthCheck() {
   });
   // We don't need to join the thread, just need to verify health check via the
   // CV. Hence we detach the thread here.
-  t.detach();
+  t.detach(); // NOLINT
   LOG(INFO) << "[Rank " << rank_ << "]"
             << " will wait up to " << options_->timeout.count()
             << " msec for NCCL health check to complete.";

@@ -1,3 +1,4 @@
+#include <ATen/ceil_div.h>
 #include <ATen/Context.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/Dispatch.h>
@@ -6,7 +7,6 @@
 #include <ATen/native/Resize.h>
 
 #include <ATen/cuda/CUDAApplyUtils.cuh>
-#include <ATen/cuda/detail/IndexUtils.cuh>
 
 namespace at {
 namespace native {
@@ -169,7 +169,7 @@ Tensor& apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
           int(sz),
           int(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock)));
       const dim3 grid(
-          std::min(int(1024), cuda::ATenCeilDiv(int(sz), int(threads.x))));
+          std::min(int(1024), ceil_div(int(sz), int(threads.x))));
       auto start =
           (dimension >= 0 ? dimension * self_stride_1
                           : -dimension * self_stride_0);
@@ -198,7 +198,7 @@ Tensor& apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
       const dim3 threads(std::min(
           int(sz), at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock));
       const dim3 grid(
-          std::min(int(1024), cuda::ATenCeilDiv(int(sz), int(threads.x))));
+          std::min(int(1024), ceil_div(int(sz), int(threads.x))));
       auto start =
           (dimension >= 0 ? dimension * result_stride_1
                           : -dimension * result_stride_0);
