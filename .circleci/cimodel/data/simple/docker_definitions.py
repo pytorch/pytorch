@@ -20,6 +20,8 @@ def get_workflow_jobs(images=IMAGE_NAMES, only_slow_gradcheck=False):
     """Generates a list of docker image build definitions"""
     ret = []
     for image_name in images:
+        if image_name.startswith('docker-'):
+            image_name = image_name.lstrip('docker-')
         if only_slow_gradcheck and image_name is not SLOW_GRADCHECK_IMAGE_NAME:
             continue
 

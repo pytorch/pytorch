@@ -131,8 +131,10 @@ def generate_required_docker_images(items):
         if not isinstance(requires, list):
             return
         for requirement in requires:
-            if requirement.startswith('docker'):
+            requirement = requirement.replace('"', '')
+            if requirement.startswith('docker-'):
                 required_docker_images.add(requirement)
+
     _for_all_items(items, _requires_docker_image)
     return required_docker_images
 
