@@ -54,11 +54,11 @@ cusparseIndexType_t getCuSparseIndexType(const c10::ScalarType& scalar_type) {
 }
 
 CuSparseDnMatDescriptor::CuSparseDnMatDescriptor(const Tensor& input) {
-  TORCH_INTERNAL_ASSERT(input.layout() == kStrided);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.layout() == kStrided);
   IntArrayRef input_strides = input.strides();
   IntArrayRef input_sizes = input.sizes();
   auto ndim = input.dim();
-  TORCH_INTERNAL_ASSERT(ndim >= 2);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2);
   auto rows = input_sizes[ndim - 2];
   auto cols = input_sizes[ndim - 1];
 
@@ -88,14 +88,6 @@ CuSparseDnMatDescriptor::CuSparseDnMatDescriptor(const Tensor& input) {
       value_type,
       order));
 
-  if (ndim > 2) {
-    auto batch_count =
-        at::native::cuda_int_cast(at::native::batchCount(input), "batch_count");
-    auto batch_stride = input_strides[ndim - 3];
-    TORCH_CUDASPARSE_CHECK(cusparseDnMatSetStridedBatch(
-        raw_descriptor, batch_count, batch_stride));
-  }
-
   descriptor_.reset(raw_descriptor);
 }
 
@@ -119,7 +111,7 @@ CuSparseDnVecDescriptor::CuSparseDnVecDescriptor(const Tensor& input) {
 
 CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.is_sparse_csr());
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.dim() >= 2);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.dim() == 2);
 
   IntArrayRef input_sizes = input.sizes();
   auto ndim = input.dim();
@@ -155,26 +147,6 @@ CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input) {
       CUSPARSE_INDEX_BASE_ZERO, // base index of row offset and col indes
       value_type // data type of values
       ));
-
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
-  if (ndim > 2) {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        at::native::batchCount(input) == at::native::batchCount(values));
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        at::native::batchCount(input) == at::native::batchCount(crow_indices));
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        at::native::batchCount(input) == at::native::batchCount(col_indices));
-    auto batch_count =
-        at::native::cuda_int_cast(at::native::batchCount(input), "batch_count");
-    auto crow_indices_batch_stride = crow_indices.stride(-2);
-    auto columns_values_batch_stride = values.stride(-2);
-    TORCH_CUDASPARSE_CHECK(cusparseCsrSetStridedBatch(
-        raw_descriptor,
-        batch_count,
-        crow_indices_batch_stride,
-        columns_values_batch_stride));
-  }
-#endif
 
   descriptor_.reset(raw_descriptor);
 }
