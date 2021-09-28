@@ -49,7 +49,6 @@ struct NativeResolver : public Resolver {
       const std::string& name,
       Function& m,
       const SourceRange& loc) override {
-    std::cout << "name: " << name << "      ====== check function: " << m.name() << std::endl;
     if (name == "torch") {
       return std::make_shared<BuiltinModule>("aten");
     }

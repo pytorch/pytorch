@@ -626,7 +626,6 @@ Value* emitBuiltinCall(
     method->ensure_defined();
     schemas.push_back(&method->getSchema());
   }
-  std::cout << "emit builtin call: " << name.toQualString() << std::endl;
 
   // no operators found with the same name, print out similarly named operators
   if (schemas.size() == 0) {
