@@ -849,7 +849,20 @@ def sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwar
     kwargs['supports_multiple_dims'] = op_info.supports_multiple_dims
     for sample_input in sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
         for mask in _generate_masked_reduction_mask(sample_input.input.shape, device, **kwargs):
+            identity = op_info.identity
+            initial: Optional[torch.Tensor] = None
+            if isinstance(identity, str) and mask is not None:
+                if dtype.is_floating_point:
+                    initial = torch.tensor(getattr(torch.finfo(dtype), op_info.identity), dtype=dtype)
+                elif dtype.is_signed:
+                    initial = torch.tensor(getattr(torch.iinfo(dtype), op_info.identity), dtype=dtype)
+                elif dtype is torch.uint8:
+                    initial = torch.tensor(dict(min=0, max=255)[op_info.identity], dtype=dtype)
+                else:
+                    raise NotImplementedError(f'evaluate initial={op_info.identity} for {dtype}')
             args, kwargs = sample_input.args, dict(mask=mask, **sample_input.kwargs)
+            if initial is not None:
+                kwargs['initial'] = initial
             inputs.append(SampleInput(sample_input.input, args=args, kwargs=kwargs))
             if(dtype.is_floating_point and sample_input.input.ndim ==
                2 and mask is not None and mask.shape ==
@@ -6063,6 +6076,11 @@ def reference_reduction_numpy(f, supports_keepdims=True):
             if mask is not None:
                 kwargs['where'] = mask.cpu().numpy()
 
+        if 'initial' in keys:
+            initial = kwargs.pop('initial')
+            if initial is not None:
+                kwargs['initial'] = initial.cpu().numpy()
+
         result = f(x, *args, **kwargs)
 
         # Unsqueeze reduced dimensions if NumPy does not support keepdims
@@ -10113,7 +10131,7 @@ op_db: List[OpInfo] = [
         method_variant=None,
         identity=1,
         nan_policy='propagate',
-        supports_multiple_dims=False,
+        supports_multiple_dims=True,
         supports_out=False,
         supports_forward_ad=True,
         promotes_int_to_int64=False,
@@ -10133,6 +10151,44 @@ op_db: List[OpInfo] = [
                          dtypes=[torch.uint8, torch.bfloat16, torch.complex64]),
             # prod overflows easily when using small types
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', dtypes=[torch.uint8]),
+        ),
+        supports_sparse=False,
+        sample_inputs_func=sample_inputs_masked_reduction
+    ),
+    ReductionOpInfo(
+        'sparse.masked_amax',
+        nan_policy='propagate',
+        dtypes=all_types_and(torch.float16, torch.bool),
+        ref=reference_reduction_numpy(np.amax),
+        identity='min',
+        supports_multiple_dims=True,
+        skips=(
+            # FIXME: amax reduces all dimensions when dim=[]
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
+            # FIXME: amax expects non-zero dimensions
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_empty_tensor_empty_slice'),
+            # FIXME: identity (read: initial) value of amax depends on input dtype
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_identity'),
+        ),
+        supports_sparse=False,
+        sample_inputs_func=sample_inputs_masked_reduction
+    ),
+    ReductionOpInfo(
+        'sparse.masked_amin',
+        nan_policy='propagate',
+        dtypes=all_types_and(torch.float16, torch.bool),
+        ref=reference_reduction_numpy(np.amin),
+        identity='max',
+        supports_multiple_dims=True,
+        skips=(
+            # FIXME: amin reduces all dimensions when dim=[]
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
+            # FIXME: amin expects non-zero dimensions
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_empty_tensor_empty_slice'),
+            # FIXME: identity (read: initial) value of amin depends on input dtype
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_identity'),
         ),
         supports_sparse=False,
         sample_inputs_func=sample_inputs_masked_reduction

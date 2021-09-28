@@ -3475,7 +3475,7 @@ class TestSparseMaskedReductions(TestCase):
             msg = ("Failed to produce expected results! Input tensor was"
                    " {0}, torch result is {1}, and reference result is"
                    " {2}.").format(t, actual, expected) if t.numel() < 10 else None
-            outmask = torch.sparse.masked_mask(t, **sample_input.kwargs)
+            outmask = torch.sparse._masked_mask(t, **sample_input.kwargs)
             expected = torch.where(outmask, expected, torch.zeros_like(expected))
             actual = actual.to_dense()
             actual = torch.where(outmask, actual, torch.zeros_like(actual))

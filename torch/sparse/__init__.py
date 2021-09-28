@@ -297,14 +297,17 @@ def _canonical_dim(dim, ndim):
     if dim is None:
         return tuple(range(ndim))
     dim = (dim,) if isinstance(dim, int) else dim
-    return tuple(d % (ndim or 1) for d in dim)
+    dim = tuple(d % (ndim or 1) for d in dim)
+    if len(dim) != len(set(dim)):
+        raise RuntimeError('some dim appears multiple times in the list of dims')
+    return tuple(sorted(dim))
 
 
 @_apply_docstring_templates
 def masked_sum(input: Tensor,
                dim: DimOrDims = None,
                *,
-               keepdim: bool = False,
+               keepdim: Optional[bool] = False,
                dtype: Optional[DType] = None,
                mask: Optional[Tensor] = None) -> Tensor:
     """
@@ -327,7 +330,7 @@ def masked_sum(input: Tensor,
         if dim is None:
             return torch.sum(mask_input, dtype=dtype)
         else:
-            return torch.sum(mask_input, dim, keepdim, dtype=dtype)
+            return torch.sum(mask_input, dim, bool(keepdim), dtype=dtype)
     elif input.layout == torch.sparse_coo:
         if mask is None or mask is input:
             # mask is defined by input
@@ -397,7 +400,7 @@ def masked_sum(input: Tensor,
 def masked_prod(input: Tensor,
                 dim: DimOrDims = None,
                 *,
-                keepdim: bool = False,
+                keepdim: Optional[bool] = False,
                 dtype: Optional[DType] = None,
                 mask: Optional[Tensor] = None) -> Tensor:
     """
@@ -418,7 +421,13 @@ def masked_prod(input: Tensor,
         if dim is None or dim == ():
             return torch.prod(mask_input, dtype=dtype)
         elif isinstance(dim, int):
-            return torch.prod(mask_input, dim, keepdim, dtype=dtype)
+            return torch.prod(mask_input, dim, bool(keepdim), dtype=dtype)
+        elif isinstance(dim, (tuple, list)):
+            # Workaround https://github.com/pytorch/pytorch/issues/56586
+            result = mask_input
+            for d in reversed(_canonical_dim(dim, mask_input.ndim)):
+                result = result.prod(dim=d, keepdim=bool(keepdim))
+            return result
         else:
             raise NotImplementedError(f'masked_prod of {input.layout} tensor (shape={input.shape}) for non-integer dim={dim}')
     # TODO: elif input.layout == torch.sparse_coo:
@@ -427,12 +436,89 @@ def masked_prod(input: Tensor,
         raise NotImplementedError(f'masked_prod of {input.layout} tensor')
 
 
-def masked_mask(input: Tensor,
+def _initial_like(input, initial):
+    dtype = input.dtype
+    if isinstance(initial, str):
+        if dtype.is_floating_point:
+            initial = torch.tensor(getattr(torch.finfo(dtype), initial), dtype=dtype)
+        elif dtype.is_signed:
+            initial = torch.tensor(getattr(torch.iinfo(dtype), initial), dtype=dtype)
+        elif dtype is torch.uint8:
+            initial = torch.tensor(dict(min=0, max=255)[initial], dtype=dtype)
+        else:
+            raise NotImplementedError(f'{initial} for {dtype}')
+    initial_like = torch.empty_like(input)
+    initial_like.fill_(initial)
+    return initial_like
+
+
+@_apply_docstring_templates
+def masked_amax(input: Tensor,
                 dim: DimOrDims = None,
                 *,
-                keepdim: bool = False,
-                dtype: Optional[DType] = None,  # unused
+                keepdim: Optional[bool] = False,
+                dtype: Optional[DType] = None,
                 mask: Optional[Tensor] = None) -> Tensor:
+    """
+{masked_reduction_signature}
+
+{masked_reduction_descr}
+
+{masked_reduction_args}
+
+{masked_reduction_example}
+    >>> torch.sparse.masked_amax(input, 1, mask=mask)
+    tensor([                  -1, -9223372036854775808])
+    """
+    if dtype is None:
+        dtype = input.dtype
+    if input.layout == torch.strided:
+        mask_input = input if mask is None else torch.where(mask, input, _initial_like(input, 'min'))
+        dim_ = _canonical_dim(dim, mask_input.ndim)
+        return torch.amax(mask_input, dim_, bool(keepdim)).to(dtype=dtype)
+    # TODO: elif input.layout == torch.sparse_coo:
+    # TODO: elif input.layout == torch.sparse_csr:
+    else:
+        raise NotImplementedError(f'masked_amax of {input.layout} tensor')
+
+
+@_apply_docstring_templates
+def masked_amin(input: Tensor,
+                dim: DimOrDims = None,
+                *,
+                keepdim: Optional[bool] = False,
+                dtype: Optional[DType] = None,
+                mask: Optional[Tensor] = None) -> Tensor:
+    """
+{masked_reduction_signature}
+
+{masked_reduction_descr}
+
+{masked_reduction_args}
+
+{masked_reduction_example}
+    >>> torch.sparse.masked_amin(input, 1, mask=mask)
+    tensor([                 -3, 9223372036854775807])
+    """
+    if dtype is None:
+        dtype = input.dtype
+
+    if input.layout == torch.strided:
+        mask_input = input if mask is None else torch.where(mask, input, _initial_like(input, 'max'))
+        dim_ = _canonical_dim(dim, mask_input.ndim)
+        return torch.amin(mask_input, dim_, bool(keepdim)).to(dtype=dtype)
+    # TODO: elif input.layout == torch.sparse_coo:
+    # TODO: elif input.layout == torch.sparse_csr:
+    else:
+        raise NotImplementedError(f'masked_amin of {input.layout} tensor')
+
+
+def _masked_mask(input: Tensor,
+                 dim: DimOrDims = None,
+                 *,
+                 keepdim: Optional[bool] = False,
+                 dtype: Optional[DType] = None,  # unused
+                 mask: Optional[Tensor] = None) -> Tensor:
     """
     Return the output mask of an masked reduction operation.
     """
@@ -458,12 +544,10 @@ def masked_mask(input: Tensor,
     if isinstance(dim, tuple):
         # Workaround https://github.com/pytorch/pytorch/issues/56586
         for d in reversed(dim):
-            outmask = outmask.any(dim=d, keepdim=keepdim)
+            outmask = outmask.any(dim=d, keepdim=bool(keepdim))
     elif isinstance(dim, int):
-        outmask = outmask.any(dim=dim, keepdim=keepdim)
+        outmask = outmask.any(dim=dim, keepdim=bool(keepdim))
     else:
         assert dim is None
         outmask = outmask.any()
     return outmask
-
-# TODO: masked_mean, masked_amin, masked_amax

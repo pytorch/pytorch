@@ -3141,7 +3141,9 @@ class TestReductions(TestCase):
         samples = op.sample_inputs_func(op, device, dtype, requires_grad=False)
         for sample_input in samples:
             t = sample_input.input
-            actual = op(t, *sample_input.args, **sample_input.kwargs)
+            sample_input_kwargs = sample_input.kwargs.copy()
+            sample_input_kwargs.pop('initial', None)
+            actual = op(t, *sample_input.args, **sample_input_kwargs)
             expected = op.ref(to_numpy(t), *sample_input.args, **sample_input.kwargs)
             msg = ("Failed to produce expected results! Input tensor was"
                    " {0}, torch result is {1}, and reference result is"
@@ -3150,7 +3152,9 @@ class TestReductions(TestCase):
             # The elements of output tensors from masked reductions
             # are well-defined when the associated output masks are
             # True. So, here we implement masked equality test:
-            outmask = torch.sparse.masked_mask(t, **sample_input.kwargs)
+            masked_mask_kwargs = sample_input.kwargs.copy()
+            masked_mask_kwargs.pop('initial', None)
+            outmask = torch.sparse._masked_mask(t, **masked_mask_kwargs)
             actual = torch.where(outmask, actual, torch.zeros_like(actual))
             expected = np.where(outmask.cpu().numpy(), expected, np.zeros_like(expected))
             self.assertEqual(actual, expected, msg, **to_assert_equal(t))
