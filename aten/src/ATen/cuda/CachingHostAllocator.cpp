@@ -1,4 +1,4 @@
-#include <THC/THCCachingHostAllocator.h>
+#include <ATen/cuda/CachingHostAllocator.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/cuda/detail/CUDAHooks.h>
@@ -14,6 +14,8 @@
 #include <set>
 #include <utility>
 
+namespace at {
+namespace cuda {
 namespace {
 
 struct BlockSize
@@ -60,6 +62,9 @@ struct HostAllocator
   std::deque<std::pair<cudaEvent_t, void*>> cuda_events;
 
   HostAllocator() : available(BlockComparator) {}
+  ~HostAllocator() {
+    emptyCache();
+  }
 
   cudaError_t malloc(void** ptr, size_t size)
   {
@@ -76,7 +81,7 @@ struct HostAllocator
     auto it = available.lower_bound(search_key);
     if (it != available.end()) {
       Block& block = blocks.at(it->ptr);
-      THAssert(!block.allocated && block.event_count == 0);
+      TORCH_INTERNAL_ASSERT(!block.allocated && block.event_count == 0);
       block.allocated = true;
       *ptr = block.ptr;
       available.erase(it);
@@ -122,10 +127,10 @@ struct HostAllocator
     }
 
     auto it = blocks.find(ptr);
-    THAssert(it != blocks.end());
+    TORCH_INTERNAL_ASSERT(it != blocks.end());
 
     Block& block = it->second;
-    THAssert(block.allocated);
+    TORCH_INTERNAL_ASSERT(block.allocated);
 
     // free (on valid memory) shouldn't fail, so mark unallocated before
     // we process the streams.
@@ -155,7 +160,7 @@ struct HostAllocator
     }
 
     Block& block = it->second;
-    THAssert(block.allocated);
+    TORCH_INTERNAL_ASSERT(block.allocated);
 
     block.streams.insert(stream);
     return cudaSuccess;
@@ -204,7 +209,7 @@ struct HostAllocator
       const cudaEvent_t event = cuda_event.first;
       Block& block = blocks.at(cuda_event.second);
       if (!block.allocated) {
-        THCudaCheckWarn(cudaEventDestroy(event));
+        C10_CUDA_CHECK_WARN(cudaEventDestroy(event));
         block.event_count--;
       }
     }
@@ -219,7 +224,7 @@ struct HostAllocator
     for (auto it = blocks.begin(); it != blocks.end();) {
       Block& block = it->second;
       if (!block.allocated) {
-        THCudaCheckWarn(cudaFreeHost(block.ptr));
+        C10_CUDA_CHECK_WARN(cudaFreeHost(block.ptr));
         it = blocks.erase(it);
       } else {
         ++it;
@@ -260,32 +265,34 @@ struct HostAllocator
 
 static HostAllocator allocator;
 
-cudaError_t THCCachingHostAllocator_recordEvent(void *ptr, at::cuda::CUDAStream stream)
+cudaError_t CachingHostAllocator_recordEvent(void *ptr, at::cuda::CUDAStream stream)
 {
   return allocator.recordEvent(ptr, stream);
 }
 
-void THCCachingHostAllocator_emptyCache()
+void CachingHostAllocator_emptyCache()
 {
   allocator.emptyCache();
 }
 
-static void THCCachingHostDeleter(void* ptr) {
+static void CachingHostDeleter(void* ptr) {
   allocator.free(ptr);
 }
 
-struct THCCachingHostAllocator final : public at::Allocator {
+struct CachingHostAllocator final : public at::Allocator {
   at::DataPtr allocate(size_t size) const override {
     void *ptr;
-    THCudaCheck(allocator.malloc(&ptr, size));
-    return {ptr, ptr, &THCCachingHostDeleter, at::DeviceType::CPU};
+    C10_CUDA_CHECK(allocator.malloc(&ptr, size));
+    return {ptr, ptr, &CachingHostDeleter, at::DeviceType::CPU};
   }
   at::DeleterFnPtr raw_deleter() const override {
-    return &THCCachingHostDeleter;
+    return &CachingHostDeleter;
   }
 };
 
-static THCCachingHostAllocator thc_caching_host_allocator;
+static CachingHostAllocator caching_host_allocator;
 at::Allocator* getTHCCachingHostAllocator() {
-  return &thc_caching_host_allocator;
+  return &caching_host_allocator;
 }
+
+}}  // namespace at::cuda

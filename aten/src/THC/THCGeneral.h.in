@@ -45,8 +45,6 @@ TORCH_CUDA_CPP_API void THCudaShutdown(THCState* state);
 /* 1; otherwise, 0. */
 TORCH_CUDA_CPP_API int THCState_getPeerToPeerAccess(THCState* state, int dev, int devToAccess);
 
-TORCH_CUDA_CPP_API c10::Allocator* THCState_getCudaHostAllocator(THCState* state);
-
 /* For the current device and stream, returns the allocated scratch space */
 TORCH_CUDA_CPP_API size_t THCState_getCurrentDeviceScratchSpaceSize(THCState* state);
 
@@ -60,9 +58,5 @@ TORCH_CUDA_CPP_API void __THCudaCheck(cudaError_t err, const char *file, const i
 TORCH_CUDA_CPP_API void __THCudaCheckWarn(cudaError_t err, const char *file, const int line);
 TORCH_CUDA_CPP_API void __THCublasCheck(cublasStatus_t status, const char *file, const int line);
 TORCH_CUDA_CPP_API void __THCusparseCheck(cusparseStatus_t status, const char *file, const int line);
-
-at::DataPtr THCudaHostAlloc(THCState *state, size_t size);
-
-TORCH_CUDA_CPP_API void THCudaHostRecord(THCState *state, void *ptr);
 
 #endif
