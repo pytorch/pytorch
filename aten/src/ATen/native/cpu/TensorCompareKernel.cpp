@@ -20,8 +20,8 @@ namespace at { namespace native { namespace {
 
 template <typename scalar_t, typename scalar_t_2 = int64_t, typename loop1d_t>
 static inline void compare_base_kernel_core(
-    Tensor& result1,
-    Tensor& result2,
+    const Tensor& result1,
+    const Tensor& result2,
     const Tensor& self,
     int64_t dim,
     bool keepdim,
@@ -61,7 +61,7 @@ static inline void compare_base_kernel_core(
 }
 
 template <typename scalar_t, typename scalar_t_2=int64_t, typename func_t>
-static inline void compare_base_kernel(Tensor& result1, Tensor& result2,
+static inline void compare_base_kernel(const Tensor& result1, const Tensor& result2,
     const Tensor& self,
     int64_t dim,
     bool keepdim,
@@ -126,16 +126,13 @@ static void min_kernel_impl(
 }
 
 static void max_kernel_impl(
-    Tensor& result,
-    Tensor& indice,
+    const Tensor& result,
+    const Tensor& indice,
     const Tensor& self,
     int64_t dim,
     bool keepdim) {
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
-
-  TORCH_CHECK(result.scalar_type() == self.scalar_type() && indice.scalar_type() == kLong,
-    "Expect dtype ", self.scalar_type(), "and torch.long, but got ", result.scalar_type(), "and", indice.scalar_type());
 
   AT_DISPATCH_ALL_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Bool, self.scalar_type(), "max_cpu", [&] {
     compare_base_kernel<scalar_t>(result, indice, self, wrap_dim, keepdim, [&] (

@@ -275,15 +275,12 @@ static C10_UNUSED void zero_numel_check_dims(const Tensor& self, const IntArrayR
   }
 }
 
-// Resize the result tensor and indices when result.numel() == 0 depending on values of
-// dim and keepdim for returning tensors containing reduction results.
-// This function should be called when you are reducing a zero-numel tensor and want to
-// resize the output and return it. This function exists for resizing zero-numel
-// tensors when the size of the reduction dimension is non-zero.
-static C10_UNUSED void zero_numel_tensor_resize(Tensor& result, Tensor& result_indices,
-                                     const Tensor& self, const int64_t dim,
-                                     const bool keepdim, const char *fn_name) {
-  TORCH_INTERNAL_ASSERT(self.numel() == 0,  fn_name, ": Expected self.numel() != 0.");
+static std::vector<int64_t> get_zero_numel_tensor_size(
+    const Tensor& self,
+    const int64_t dim,
+    const bool keepdim,
+    const char* fn_name) {
+  TORCH_INTERNAL_ASSERT(self.numel() == 0,  fn_name, ": Expected self.numel() == 0.");
   zero_numel_check_dims(self, dim, fn_name);
   std::vector<int64_t> sizes;
   if (keepdim) {
@@ -297,9 +294,22 @@ static C10_UNUSED void zero_numel_tensor_resize(Tensor& result, Tensor& result_i
       }
     }
   }
+  return sizes;
+}
+
+// Resize the result tensor and indices when result.numel() == 0 depending on values of
+// dim and keepdim for returning tensors containing reduction results.
+// This function should be called when you are reducing a zero-numel tensor and want to
+// resize the output and return it. This function exists for resizing zero-numel
+// tensors when the size of the reduction dimension is non-zero.
+static C10_UNUSED void zero_numel_tensor_resize(Tensor& result, Tensor& result_indices,
+                                     const Tensor& self, const int64_t dim,
+                                     const bool keepdim, const char *fn_name) {
+  auto sizes = get_zero_numel_tensor_size(self, dim, keepdim, fn_name);
   at::native::resize_output(result, sizes);
   at::native::resize_output(result_indices, sizes);
 }
+
 } // native
 
 namespace meta {
@@ -326,6 +336,28 @@ static TensorIterator make_reduction(
     return TensorIterator::reduce_op(viewed_result, self);
   }
   return TensorIterator::reduce_op(viewed_result, self.to(in_dtype));
+}
+
+static TensorIterator make_reduction(
+    const Tensor& self,
+    const Tensor& result1,
+    const Tensor& result2,
+    IntArrayRef dims,
+    bool keepdim,
+    ScalarType dtype1,
+    ScalarType dtype2) {
+  int64_t ndim = self.dim();
+  auto mask = at::native::make_dim_mask(dims, ndim);
+  auto viewed_result1 = at::native::review_reduce_result(result1, ndim, mask, keepdim);
+  auto viewed_result2 = at::native::review_reduce_result(result2, ndim, mask, keepdim);
+  // special case for type promotion in mixed precision, improves computational efficiency.
+  // We don't generalize this to common mismatched input/output types to avoid cross product
+  // of templated kernel launches.
+  if (self.scalar_type() == dtype1 ||
+      (self.is_cuda() && self.scalar_type() == kHalf && dtype1 == kFloat)) {
+    return TensorIterator::reduce_op(viewed_result1, viewed_result2, self);
+  }
+  return TensorIterator::reduce_op(viewed_result1, viewed_result2, self.to(dtype1));
 }
 
 static C10_UNUSED TensorIterator make_reduction_from_out_ty(
