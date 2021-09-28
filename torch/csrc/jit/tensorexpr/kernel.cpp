@@ -2477,18 +2477,7 @@ Tensor tensorexpr::computeOperandValue(
       return computeConv2d(inputs, outputShape, outputType);
     } break;
     case aten::linear: {
-      // linear = inputs[0] @ inputs[1] + inputs[2]
-      // addmm = beta(inputs[3]) * inputs[0] + alpha(inputs[4]) * inputs[1] @
-      // inputs[2]
-      std::vector<ArgValue> addmmInputs;
-      addmmInputs.reserve(5);
-      addmmInputs.push_back(inputs[2]);
-      addmmInputs.push_back(inputs[0]);
-      addmmInputs.push_back(inputs[1]);
-      // Using int64_t as computeAddMM supports only int64_t scalars now
-      addmmInputs.push_back(1l); // beta
-      addmmInputs.push_back(1l); // alpha
-      return computeAddMM(addmmInputs, outputShape, outputType);
+      return computeLinear(inputs, outputShape, outputType);
     } break;
     case aten::addmm: {
       return computeAddMM(inputs, outputShape, outputType);

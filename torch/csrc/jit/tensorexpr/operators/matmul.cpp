@@ -72,6 +72,26 @@ Tensor computeAddMM(
                inputs[4])})); // TODO: handle other dtypes of alpha and beta
 }
 
+Tensor computeLinear(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType) {
+  Dtype dtype = kFloat;
+  if (outputType) {
+    dtype = Dtype(*outputType);
+  }
+  BufHandle ResultBuf("linear", outputShape, dtype);
+  return Tensor(
+      ResultBuf.node(),
+      ExternalCall::make(
+          ResultBuf,
+          "nnc_aten_linear",
+          {c10::get<BufHandle>(inputs[0]),
+           c10::get<BufHandle>(inputs[1]),
+           c10::get<BufHandle>(inputs[2])},
+          {}));
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

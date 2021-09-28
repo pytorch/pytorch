@@ -170,6 +170,28 @@ void nnc_aten_addmm(
   }
 }
 
+void nnc_aten_linear(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int8_t* buf_dtypes,
+    int64_t args_num,
+    int64_t* extra_args) {
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+
+  at::Tensor& r = tensors[0];
+  const at::Tensor& x = tensors[1];
+  const at::Tensor& w = tensors[2];
+  const at::Tensor& b = tensors[3];
+
+  try {
+    at::linear_out(r, x, w, b);
+  } catch (...) {
+  }
+}
+
 // Only provides first output, the second output is just a copy of one of the
 // inputs
 void nnc_aten_triangular_solve(
@@ -251,6 +273,9 @@ const static RegisterNNCExternalFunction nnc_mean(
 const static RegisterNNCExternalFunction nnc_addmm(
     "nnc_aten_addmm",
     nnc_aten_addmm);
+const static RegisterNNCExternalFunction nnc_linear(
+    "nnc_aten_linear",
+    nnc_aten_linear);
 
 const static RegisterNNCExternalFunction nnc_triangular_solve(
     "nnc_aten_triangular_solve",
