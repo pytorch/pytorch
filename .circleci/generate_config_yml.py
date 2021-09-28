@@ -157,7 +157,8 @@ def gen_build_workflows_tree():
     build_jobs = [f() for f in build_workflows_functions]
     build_jobs.extend(
         cimodel.data.simple.docker_definitions.get_workflow_jobs(
-            generate_required_docker_images(build_jobs)
+            # sort for consistency
+            sorted(generate_required_docker_images(build_jobs))
         )
     )
     master_build_jobs = filter_master_only_jobs(build_jobs)
@@ -174,7 +175,8 @@ def gen_build_workflows_tree():
     slow_gradcheck_jobs = [f(only_slow_gradcheck=True) for f in slow_gradcheck_functions]
     slow_gradcheck_jobs.extend(
         cimodel.data.simple.docker_definitions.get_workflow_jobs(
-            generate_required_docker_images(slow_gradcheck_jobs)
+            # sort for consistency
+            sorted(generate_required_docker_images(slow_gradcheck_jobs))
         )
     )
 
