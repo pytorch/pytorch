@@ -3,12 +3,19 @@
 {# squid_proxy is an private ELB that only available for GHA custom runners #}
 {%- set squid_proxy    = "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -%}
 {# squid_no_proxy is a list of common set of fixed domains or IPs that we don't need to proxy. See https://docs.aws.amazon.com/AmazonECS/latest/developerguide/http_proxy_config.html#windows-proxy #}
-{%- set squid_no_proxy = "localhost,127.0.0.1,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock" -%}
+{%- set squid_no_proxy = "localhost,127.0.0.1,github.com,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock" -%}
 
 {%- macro concurrency(build_environment) -%}
 concurrency:
   group: !{{ build_environment }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
+{%- endmacro -%}
+
+{%- macro pull_docker(image) -%}
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "!{{ image }}"
 {%- endmacro -%}
 
 {%- macro display_ec2_information() -%}
@@ -35,6 +42,7 @@ concurrency:
 
 {%- macro upload_test_statistics(build_environment) -%}
       - name: Display and upload test statistics (Click Me)
+        if: always()
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
@@ -55,6 +63,9 @@ concurrency:
 {%- macro setup_ec2_linux() -%}
       !{{ display_ec2_information() }}
       - name: Log in to ECR
+        env:
+          AWS_RETRY_MODE: standard
+          AWS_MAX_ATTEMPTS: 5
         run: |
           aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
           bash /tmp/ecr-login.sh
@@ -63,8 +74,9 @@ concurrency:
         env:
           ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
         run: |
+          !{{ pull_docker("${ALPINE_IMAGE}") }}
           # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Clean workspace
         run: |
           rm -rf "${GITHUB_WORKSPACE:?}/*"
@@ -83,6 +95,13 @@ concurrency:
         # Always hold for active ssh sessions
         if: always()
         run: .github/scripts/wait_for_ssh_to_drain.sh
+      - name: Chown workspace
+        if: always()
+        env:
+          ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Kill containers, clean up images
         if: always()
         run: |
@@ -91,12 +110,6 @@ concurrency:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-      - name: Chown workspace
-        env:
-          ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
 {%- endmacro -%}
 
 {%- macro checkout_pytorch(submodules) -%}
@@ -106,4 +119,87 @@ concurrency:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
           submodules: !{{ submodules }}
+{%- endmacro -%}
+
+
+{%- macro upload_test_reports(name) -%}
+      - name: Zip test reports for upload
+        if: always()
+        env:
+{%- if name == 'linux' or name == 'windows' %}
+          FILE_SUFFIX: '${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}'
+{%- else %}
+          FILE_SUFFIX: '!{{ name }}-${{ github.job }}'
+{%- endif %}
+{%- if name == 'windows' %}
+        shell: powershell
+        run: |
+          # -ir => recursive include all files in pattern
+          7z a "test-reports-$Env:FILE_SUFFIX.zip" -ir'!test\*.xml'
+{%- else %}
+        run: |
+          # Remove any previous test reports if they exist
+          rm -f test-reports-*.zip
+          zip -r "test-reports-${FILE_SUFFIX}.zip" test -i '*.xml'
+{%- endif %}
+      - uses: actions/upload-artifact@v2
+        name: Store Test Reports
+        if: always()
+        with:
+{%- if name == 'linux' or name == 'windows' %}
+          name: test-reports-${{ matrix.config }}
+{%- else %}
+          name: test-reports-!{{ name }}
+{%- endif %}
+          retention-days: 14
+          if-no-files-found: error
+          path:
+{%- if name == 'windows' %}
+            pytorch-${{ github.run_id }}/test-reports-*.zip
+{%- else %}
+            test-reports-*.zip
+{%- endif %}
+      - uses: !{{ upload_artifact_s3_action }}
+        name: Store Test Reports on S3
+        if: always()
+        with:
+          retention-days: 14
+          if-no-files-found: error
+          path:
+{%- if name == 'windows' %}
+            pytorch-${{ github.run_id }}/test-reports-*.zip
+{%- else %}
+            test-reports-*.zip
+{%- endif %}
+{%- endmacro -%}
+
+{%- macro render_test_results() -%}
+      - name: Install render_test_results dependencies
+        if: always()
+        shell: bash
+        run: |
+          python3 -m pip install junitparser==2.1.1 rich==10.9.0
+      - name: "[[ Click me for rendered test results (useful for finding failing tests) ]]"
+        if: always()
+        shell: bash
+        # Encoding is weird on windows, just try to default to utf-8 if possible
+        env:
+          PYTHONIOENCODING: "utf-8"
+        run: |
+          python3 tools/render_junit.py test/
+{%- endmacro -%}
+
+{%- macro ciflow_should_run_job(ciflow_config) -%}
+{%- if ciflow_config.enabled %}
+  !{{ ciflow_config.root_job_name }}:
+    runs-on: ubuntu-18.04
+    if: ${{ !{{ ciflow_config.root_job_condition }} }}
+    env:
+      LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+    steps:
+      - name: noop
+        run: echo running !{{ ciflow_config.root_job_name }}
+      - name: print labels
+        run: echo "${LABELS}"
+{%- endif %}
 {%- endmacro -%}

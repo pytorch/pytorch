@@ -3991,8 +3991,14 @@ class TestLinalg(TestCase):
         def check(x, y):
             # Compare with numpy
             res = torch_fn(x, y)
-            ref = torch.from_numpy(np.array(np_fn(x.cpu().numpy(), y.cpu().numpy())))
-            self.assertEqual(res.cpu(), ref)
+            if x.dtype == torch.bfloat16:
+                ref = torch.from_numpy(np.array(np_fn(x.cpu().float().numpy(), y.cpu().float().numpy())))
+            else:
+                ref = torch.from_numpy(np.array(np_fn(x.cpu().numpy(), y.cpu().numpy())))
+            if res.dtype == torch.bfloat16:
+                self.assertEqual(res.cpu(), ref.bfloat16())
+            else:
+                self.assertEqual(res.cpu(), ref)
 
             # Test out variant
             out = torch.empty_like(res)
@@ -4005,19 +4011,20 @@ class TestLinalg(TestCase):
         check(x, y)
 
         # Contiguous
-        x = torch.randn(10, dtype=dtype, device=device)
-        y = torch.randn(10, dtype=dtype, device=device)
+        x = 0.1 * torch.randn(5000, dtype=dtype, device=device)
+        y = 0.1 * torch.randn(5000, dtype=dtype, device=device)
         check(x, y)
 
         # 0 strided
-        y = torch.randn(1, dtype=dtype, device=device).expand(10)
+        y = 0.1 * torch.randn(1, dtype=dtype, device=device).expand(5000)
         check(x, y)
 
         # 2 strided
         check(x[::2], y[::2])
 
-    @dtypes(torch.float, torch.cfloat)
-    @precisionOverride({torch.cfloat: 1e-4, torch.float32: 5e-5})
+    @dtypes(torch.float, torch.cfloat, torch.bfloat16)
+    @dtypesIfCUDA(torch.float, torch.cfloat)
+    @precisionOverride({torch.cfloat: 1e-4, torch.float32: 5e-5, torch.bfloat16: 1e-0})
     def test_dot_vs_numpy(self, device, dtype):
         self._test_dot_vdot_vs_numpy(device, dtype, torch.dot, np.dot)
 
@@ -4969,13 +4976,14 @@ class TestLinalg(TestCase):
                 self.assertEqual(answer, expected)
 
         # test x @ y
+        print(x.shape, y.shape)
         expected = np.matmul(x.cpu(), y.cpu())
         ans = torch.matmul(x, y)
         self.assertTrue(ans.is_contiguous())
         assertEqual(ans, expected)
 
         # We do not do any broadcasting on y, so this is fine
-        out = torch.empty(ans.shape, dtype=x.dtype, device=x.device)
+        out = torch.empty_like(ans)
         ans = torch.matmul(x, y, out=out)
         self.assertIs(ans, out)
         self.assertTrue(ans.is_contiguous())
@@ -4990,7 +4998,7 @@ class TestLinalg(TestCase):
         self.assertTrue(ans.is_contiguous())
         assertEqual(ans, expected)
 
-        out = torch.empty(ans.shape, dtype=x.dtype, device=x.device)
+        out = torch.empty_like(ans)
         ans = torch.matmul(yt, xt, out=out)
         self.assertIs(ans, out)
         self.assertTrue(ans.is_contiguous())
@@ -5003,18 +5011,21 @@ class TestLinalg(TestCase):
         """
         assert x_dim >= 1
         assert y_dim >= 2
-        for by, mn in product(product(range(batch_size), repeat=y_dim - 2),
-                              product(range(matrix_size), repeat=2)):
-            if x_dim == 1:
-                size_x = mn[:1]
-                size_y = by + mn
-                yield size_x, size_y
-            else:
-                for bx, k in product(product(range(batch_size), repeat=x_dim - 2),
-                                     range(matrix_size)):
-                    size_x = bx + (k,) + mn[:1]
+        for y in range(1, y_dim + 1):
+            for by, mn in product(product(range(batch_size), repeat=max(y - 2, 0)),
+                                  product(range(matrix_size), repeat=min(y, 2))):
+                if x_dim == 1:
+                    size_x = mn[:1]
                     size_y = by + mn
                     yield size_x, size_y
+                else:
+                    for k in range(matrix_size):
+                        if x_dim == 2:
+                            size_x = (k,) + mn[:1]
+                        else:
+                            size_x = by[-(x_dim - 2):] + (k,) + mn[:1]
+                        size_y = by + mn
+                        yield size_x, size_y
 
     @dtypesIfCUDA(torch.float, torch.complex64)  # Integer matmul just supported on CPU
     @dtypes(torch.int64, torch.float, torch.complex64)
@@ -5022,8 +5033,9 @@ class TestLinalg(TestCase):
         make_arg = partial(make_tensor, device=device, dtype=dtype)
 
         for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(1), (True, False), (True, False)):
-            self.check_single_matmul(make_arg(size_x, noncontiguous=nctg_x),
-                                     make_arg(size_y, noncontiguous=nctg_y))
+            x = make_arg(size_x, noncontiguous=nctg_x)
+            y = make_arg(size_y, noncontiguous=nctg_y)
+            self.check_single_matmul(x, y)
 
     @dtypesIfCUDA(torch.float, torch.complex64)  # Integer matmul just supported on CPU
     @dtypes(torch.int64, torch.float, torch.complex64)
@@ -5031,8 +5043,19 @@ class TestLinalg(TestCase):
         make_arg = partial(make_tensor, device=device, dtype=dtype)
 
         for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(2), (True, False), (True, False)):
-            self.check_single_matmul(make_arg(size_x, noncontiguous=nctg_x),
-                                     make_arg(size_y, noncontiguous=nctg_y))
+            x = make_arg(size_x, noncontiguous=nctg_x)
+            y = make_arg(size_y, noncontiguous=nctg_y)
+            self.check_single_matmul(x, y)
+
+    @dtypesIfCUDA(torch.float, torch.complex64)  # Integer matmul just supported on CPU
+    @dtypes(torch.int64, torch.float, torch.complex64)
+    def test_matmul_small_brute_force_3d_Nd(self, device, dtype):
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
+
+        for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(3), (True, False), (True, False)):
+            x = make_arg(size_x, noncontiguous=nctg_x)
+            y = make_arg(size_y, noncontiguous=nctg_y)
+            self.check_single_matmul(x, y)
 
     def test_linear_algebra_scalar_raises(self, device) -> None:
         m = torch.randn(5, 5, device=device)
@@ -5933,31 +5956,32 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         # have to use torch.randn(...).to(bfloat16) instead of
         # torch.randn(..., dtype=bfloat16). randn does not support
         # bfloat16 yet.
+        # "*0.2" to reduce errors for low precision
         ts = [
-            torch.randn(10, device=device).to(dtype),
-            torch.randn(1, device=device).to(dtype).expand(10),
+            0.2 * torch.randn(50, device=device).to(dtype),
+            0.2 * torch.randn(1, device=device).to(dtype).expand(50),
         ]
         vs = [
-            torch.randn(100, device=device).to(dtype),
-            torch.ones(1, device=device).to(dtype).expand(100),  # to reduce errors for low precision
+            0.2 * torch.randn(100, device=device).to(dtype),
+            0.2 * torch.ones(1, device=device).to(dtype).expand(100),  # to reduce errors for low precision
         ]
         ms = [
             # 0d
-            torch.ones((), device=device).to(dtype).expand(10, 100),  # to reduce errors for low precision
+            0.2 * torch.ones((), device=device).to(dtype).expand(50, 100),  # to reduce errors for low precision
             # 1d
-            torch.randn((1, 100), device=device).to(dtype).expand(10, 100),
+            0.2 * torch.randn((1, 100), device=device).to(dtype).expand(50, 100),
             # this initialization reduces errors for low precision for broadcasted matrices
             # by making sure that intermediate and result values are exactly representable
             # in low precision type
-            torch.randint(3, (10, 1), dtype=torch.float, device=device).to(dtype).expand(10, 100),
+            0.2 * torch.randint(3, (50, 1), dtype=torch.float, device=device).to(dtype).expand(50, 100),
             # 2d
-            torch.randn((10, 100), device=device).to(dtype),
-            torch.randn((100, 10), device=device).to(dtype).t(),
+            0.2 * torch.randn((50, 100), device=device).to(dtype),
+            0.2 * torch.randn((100, 50), device=device).to(dtype).t(),
         ]
         for m, v, t in itertools.product(ms, vs, ts):
             self._test_addmm_addmv(torch.addmv, t, m, v)
         # Test beta=0, t=nan
-        t = torch.full((10,), math.nan, device=device).to(dtype)
+        t = torch.full((50,), math.nan, device=device).to(dtype)
         for m, v in itertools.product(ms, vs):
             self._test_addmm_addmv(torch.addmv, t, m, v, beta=0)
 
@@ -6135,12 +6159,12 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             return torch.randint(0, 100, (x, y), dtype=dtype, device=device)
 
         def genf_bfloat(x, y):
-            return torch.randn(x, y, dtype=torch.float32, device=device).to(dtype)
+            return torch.randn(x, y, dtype=torch.float32, device=device).to(dtype) * 0.1
 
         def genf_float(x, y):
             return torch.randn(x, y, dtype=dtype, device=device)
 
-        for (n, m, p) in [(20, 10, 5), (15, 5, 10), (5, 18, 10)]:
+        for (n, m, p) in [(20, 10, 15), (15, 20, 10), (25, 18, 10)]:
             if (dtype == torch.int32) or (dtype == torch.int64):
                 genf = genf_int
             elif (dtype == torch.bfloat16):
@@ -6211,7 +6235,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             return
 
         batch_sizes = [1, 10]
-        M, N, O = 23, 8, 12
+        M, N, O = 23, 15, 12
         numpy_dtype = dtype if dtype != torch.bfloat16 else torch.float32
 
         is_supported = True
@@ -6233,8 +6257,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         def generate_inputs(num_batches):
             # transposed tensors
             for perm1, perm2 in itertools.product(itertools.permutations((0, 1, 2)), repeat=2):
-                b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1)
-                b2 = make_tensor((num_batches, N, O), device, dtype, low=-1, high=1)
+                b1 = make_tensor((num_batches, M, N), device, dtype, low=-0.1, high=0.1)
+                b2 = make_tensor((num_batches, N, O), device, dtype, low=-0.1, high=0.1)
                 b1 = b1.permute(perm1).contiguous().permute(invert_perm(perm1))
                 b2 = b2.permute(perm2).contiguous().permute(invert_perm(perm2))
                 yield b1, b2
@@ -6242,8 +6266,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             for b1, b2, b3, b4, b5, b6 in itertools.product((True, False), repeat=6):
                 shape1 = (num_batches if b1 else 1, M if b2 else 1, N if b3 else 1)
                 shape2 = (num_batches if b4 else 1, N if b5 else 1, O if b6 else 1)
-                b1 = make_tensor(shape1, device, dtype, low=-1, high=1).expand(num_batches, M, N)
-                b2 = make_tensor(shape2, device, dtype, low=-1, high=1).expand(num_batches, N, O)
+                b1 = make_tensor(shape1, device, dtype, low=-0.1, high=0.1).expand(num_batches, M, N)
+                b2 = make_tensor(shape2, device, dtype, low=-0.1, high=0.1).expand(num_batches, N, O)
                 yield b1, b2
             # zero-sized tensors
             for z1, z2, z3, z4 in itertools.product((True, False), repeat=4):
@@ -6323,7 +6347,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             return
 
         num_batches = 2
-        M, N, O = 2, 3, 4
+        M, N, O = 16, 17, 18
 
         is_supported = True
         if dtype == torch.bfloat16:
@@ -6349,8 +6373,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             # transposed tensors
             for perm1, perm2 in itertools.product(itertools.permutations((0, 1, 2)), repeat=2):
                 for perm3 in itertools.permutations((0, 1)):
-                    b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1)
-                    b2 = make_tensor((num_batches, N, O), device, dtype, low=-1, high=1)
+                    b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1) * 0.1
+                    b2 = make_tensor((num_batches, N, O), device, dtype, low=-1, high=1) * 0.1
                     b1 = b1.permute(perm1).contiguous().permute(invert_perm(perm1))
                     b2 = b2.permute(perm2).contiguous().permute(invert_perm(perm2))
                     ref = torch.from_numpy(
@@ -6362,8 +6386,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             for s1, s2, s3, s4, s5, s6 in itertools.product((True, False), repeat=6):
                 shape1 = (num_batches if s1 else 1, M if s2 else 1, N if s3 else 1)
                 shape2 = (num_batches if s4 else 1, N if s5 else 1, O if s6 else 1)
-                b1 = make_tensor(shape1, device, dtype, low=-1, high=1).expand(num_batches, M, N)
-                b2 = make_tensor(shape2, device, dtype, low=-1, high=1).expand(num_batches, N, O)
+                b1 = make_tensor(shape1, device, dtype, low=-1, high=1).expand(num_batches, M, N) * 0.1
+                b2 = make_tensor(shape2, device, dtype, low=-1, high=1).expand(num_batches, N, O) * 0.1
                 ref = torch.from_numpy(
                     b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()
                 ).to(device=device, dtype=dtype).sum(0)
@@ -6373,8 +6397,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             for z1, z2, z3, z4 in itertools.product((True, False), repeat=4):
                 shape1 = (num_batches if z1 else 0, M if z2 else 0, N if z3 else 0)
                 shape2 = (num_batches if z1 else 0, N if z3 else 0, O if z4 else 0)
-                b1 = make_tensor(shape1, device, dtype, low=-1, high=1)
-                b2 = make_tensor(shape2, device, dtype, low=-1, high=1)
+                b1 = make_tensor(shape1, device, dtype, low=-1, high=1) * 0.1
+                b2 = make_tensor(shape2, device, dtype, low=-1, high=1) * 0.1
                 ref = torch.from_numpy(
                     b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()
                 ).to(device=device, dtype=dtype).sum(0)
@@ -6396,7 +6420,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             return
 
         num_batches = 10
-        M, N, O = 12, 8, 5
+        M, N, O = 12, 8, 50
 
         is_supported = True
         if dtype == torch.bfloat16 and self.device_type == 'cuda':
