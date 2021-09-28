@@ -10,14 +10,6 @@ from torch._six import string_classes
 from typing import Any
 
 
-def autocast_decorator(autocast_instance, func):
-    @functools.wraps(func)
-    def decorate_autocast(*args, **kwargs):
-        with autocast_instance:
-            return func(*args, **kwargs)
-    decorate_autocast.__script_unsupported = '@autocast() decorator is not supported in script mode'  # type: ignore[attr-defined]
-    return decorate_autocast
-
 class autocast(torch.autocast_mode.autocast):
     r"""
     See :class:`torch.autocast`.
@@ -39,12 +31,12 @@ class autocast(torch.autocast_mode.autocast):
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any):  # type: ignore[override]
         if torch._jit_internal.is_scripting():
             return
-        return super().__exit__()
+        return super().__exit__(exc_type, exc_val, exc_tb)
 
     def __call__(self, func):
         if torch._jit_internal.is_scripting():
             return func
-        return autocast_decorator(self, func)
+        return super().__call__(func)
 
 
 # Casts Tensors and containers of Tensors.  Special-cases passthroughs for strings and np.ndarrays, which
