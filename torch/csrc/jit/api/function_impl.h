@@ -33,7 +33,7 @@ struct TORCH_API GraphFunction : public Function {
   IValue operator()(std::vector<IValue> stack, const Kwargs& kwargs = Kwargs())
       override;
 
-  std::shared_ptr<Graph> graph() const override {
+  std::shared_ptr<Graph> graph() const {
     return graph_;
   }
 
@@ -143,5 +143,11 @@ struct TORCH_API GraphFunction : public Function {
   // before a call to setSchema
   mutable std::unique_ptr<FunctionSchema> schema_;
 };
+
+// Short hands for dynamic_cast<GraphFunction*>.
+TORCH_API GraphFunction* tryToGraphFunction(Function&) noexcept;
+TORCH_API GraphFunction& toGraphFunction(Function&);
+TORCH_API const GraphFunction& toGraphFunction(const Function&);
+
 } // namespace jit
 } // namespace torch

@@ -1537,7 +1537,7 @@ void loadModule(const CompilationUnit& module) {
       continue;
 
     GradientPair pair;
-    pair.forward = method->graph();
+    pair.forward = toGraphFunction(*method).graph();
 
     // lookup the backward function
     Node* forward_tuple = pair.forward->outputs().at(0)->node();

@@ -11,6 +11,7 @@
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/frontend/code_template.h>
@@ -469,7 +470,7 @@ TEST(ControlFlowTest, Basic) {
   auto cu = compile(cf_examples);
 
   auto run = [&](const std::string& name, std::vector<IValue> stack) {
-    auto graph = cu->get_function(name).graph();
+    auto graph = toGraphFunction(cu->get_function(name)).graph();
     Code code(graph, "");
     InterpreterState interp(code);
     interp.run(stack);
@@ -1605,7 +1606,7 @@ TEST(LoopPeelerTest, NoInductionVariableUse) {
     )JIT";
 
   auto cu = compile(str_func_def);
-  auto& f = cu->get_function("test_peel_n_times");
+  auto& f = toGraphFunction(cu->get_function("test_peel_n_times"));
   auto stack = createStack({});
   // peeling loop once
   {
@@ -1647,7 +1648,7 @@ TEST(LoopPeelerTest, YesInductionVariableUse) {
     )JIT";
 
   auto cu = compile(str_func_def);
-  auto& f = cu->get_function("test_peel_n_times");
+  auto& f = toGraphFunction(cu->get_function("test_peel_n_times"));
   auto stack = createStack({});
   // peeling loop once
   {
@@ -1693,7 +1694,7 @@ TEST(LoopPeelerTest, LoopWithTerminationCondition) {
   // the peel changes the termination condition to false
   // so the original loop doesn't run
   auto cu = compile(str_func_def);
-  auto& f = cu->get_function("test_with_cond_times");
+  auto& f = toGraphFunction(cu->get_function("test_with_cond_times"));
   auto stack = createStack({});
   // peeling 5 iterations should update the termination
   // condition to false
@@ -1738,7 +1739,7 @@ TEST(LoopPeelerTest, SimpleNestedLoops) {
     )JIT";
 
   auto cu = compile(str_func_def);
-  auto& f = cu->get_function("test_nested_loops");
+  auto& f = toGraphFunction(cu->get_function("test_nested_loops"));
   auto stack = createStack({});
 
   {
@@ -1778,7 +1779,7 @@ TEST(LoopPeelerTest, SimpleNestedLoops2) {
     )JIT";
 
   auto cu = compile(str_func_def);
-  auto& f = cu->get_function("test_nested_loops");
+  auto& f = toGraphFunction(cu->get_function("test_nested_loops"));
   auto stack = createStack({});
   {
     LoopsPeeler peeler(true_pred, 1);
@@ -1815,7 +1816,7 @@ TEST(InsertAndEliminateRedundantGuardsTest, Basic) {
   )JIT";
 
   auto cu = compile(basic_example);
-  auto& fun = cu->get_function("basic");
+  auto& fun = toGraphFunction(cu->get_function("basic"));
   auto pr = ProfilingRecord::instrumentGraph(fun.graph());
   auto x = at::randn({2, 3}, at::kCPU);
   auto y = at::randn({2, 3}, at::kCPU);
@@ -1866,7 +1867,7 @@ TEST(InsertBailOutsTest, Basic) {
   )JIT";
 
   auto cu = compile(basic_example);
-  auto& fun = cu->get_function("basic_loop");
+  auto& fun = toGraphFunction(cu->get_function("basic_loop"));
   auto pr = ProfilingRecord::instrumentGraph(fun.graph());
   auto x = at::randn({2, 3}, at::kCPU);
   auto y = at::randn({2, 3}, at::kCPU);
@@ -1960,7 +1961,7 @@ def foo(x):
     return bar(x)*baz(x)*11
   )";
   auto cu = compile(text);
-  const Function& foo = cu->get_function("foo");
+  const auto& foo = toGraphFunction(cu->get_function("foo"));
   for (Node* n : foo.optimized_graph()->nodes()) {
     if (n->kind() == prim::Constant) {
       if (!n->hasAttribute(attr::value) ||
@@ -2042,7 +2043,7 @@ def c(x):
     return x
   )";
   auto cu = compile(text);
-  const Function& baz = cu->get_function("c");
+  const auto& baz = toGraphFunction(cu->get_function("c"));
   std::unordered_map<std::string, InlinedCallStack*> callstack_objects;
   for (Node* n : baz.optimized_graph()->nodes()) {
     if (n->kind() == prim::Constant) {
@@ -2087,7 +2088,8 @@ TEST(InlinedCallStackTest, BlockAnnotation) {
       return self.A0.forward(x, y, z) + self.B0.forward(x)
   )");
 
-  auto graph = c.get_method("forward").function().optimized_graph();
+  auto graph =
+      toGraphFunction(c.get_method("forward").function()).optimized_graph();
   std::stringstream add_ss, mul_ss;
   for (Node* n : graph->nodes()) {
     if (n->kind() == prim::If) {
@@ -2148,7 +2150,8 @@ TEST(InlinedCallStackTest, SelfCallMethods) {
       return self.A0.forward(x, y) + self.call_b(x)
   )");
 
-  auto graph = c.get_method("forward").function().optimized_graph();
+  auto graph =
+      toGraphFunction(c.get_method("forward").function()).optimized_graph();
   std::unordered_map<std::string, size_t> module_hierarchies;
   for (Node* n : graph->nodes()) {
     auto hierarchy = torch::jit::utils::getNodesModuleHierarchy(*n);

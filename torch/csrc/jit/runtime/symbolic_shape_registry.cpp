@@ -645,7 +645,8 @@ void loadModule(const CompilationUnit& module) {
 
     Function& shape_compute_function =
         module.get_function(shape_compute_function_name);
-    std::shared_ptr<Graph> graph = shape_compute_function.graph();
+    std::shared_ptr<Graph> graph =
+        toGraphFunction(shape_compute_function).graph();
     Inline(*graph);
 
     // ATEN operators can return multiple unboxed values, this in contrast to

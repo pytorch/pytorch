@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/serialization/export.h>
 
 #include <c10/util/Exception.h>
+#include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/backends/backend_debug_handler.h>
 #include <torch/csrc/jit/backends/backend_debug_info.h>
 #include <torch/csrc/jit/frontend/source_range.h>
@@ -56,10 +57,10 @@ std::unordered_set<const FunctionSchema*> getInterfaceCalls(Graph& graph) {
 }
 
 struct ModuleMethod {
-  ModuleMethod(const Module& m, const Function& f, c10::QualifiedName n)
+  ModuleMethod(const Module& m, const GraphFunction& f, c10::QualifiedName n)
       : module(m), function(f), exportName(std::move(n)) {}
   const Module& module;
-  const Function& function;
+  const GraphFunction& function;
   c10::QualifiedName exportName;
 };
 
@@ -76,9 +77,9 @@ std::vector<ModuleMethod> getModuleInterfaceExports(
   std::vector<ModuleMethod> ret;
   for (const auto& submodule : module.modules()) {
     for (const auto& method : submodule.get_methods()) {
-      if (names.find(method.function().qualname().name()) != names.end()) {
-        ret.emplace_back(
-            submodule, method.function(), method.function().qualname());
+      const auto& f = toGraphFunction(method.function());
+      if (names.find(f.qualname().name()) != names.end()) {
+        ret.emplace_back(submodule, f, f.qualname());
       }
     }
   }
@@ -133,9 +134,8 @@ void setstateTuple(
     if (exportSet.contains(qn)) {
       return;
     }
-    if (setstate.isGraphFunction()) {
-      exportFunction(
-          exportSet, ModuleMethod{module, setstate, std::move(qn)}, toplevel);
+    if (auto f = tryToGraphFunction(setstate)) {
+      exportFunction(exportSet, ModuleMethod{module, *f, std::move(qn)}, toplevel);
     }
   } else {
     for (size_t i = 0, n = type->numAttributes(); i < n; ++i) {
@@ -226,10 +226,9 @@ BytecodeExportSet moduleMethodsTuple(
   auto methods = module.get_methods();
   // top level methods
   for (const auto& method : methods) {
+    const auto& f = toGraphFunction(method.function());
     exportFunction(
-        exportSet,
-        ModuleMethod{module, method.function(), method.function().qualname()},
-        /* toplevel */ true);
+        exportSet, ModuleMethod{module, f, f.qualname()}, /* toplevel */ true);
   }
 
   // __setstate__ of all components
