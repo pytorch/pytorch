@@ -41,13 +41,14 @@ class Context final {
   Resource& resource();
 
   // GPU RPC
-  template<typename... Arguments>
+  template<typename Struct, typename... Arguments>
   void dispatch(
       Command::Buffer& command_buffer,
       const Shader::Layout::Signature& shader_layout_signature,
       const Shader::Descriptor& shader_descriptor,
       const Shader::WorkGroup& global_work_group,
       const Shader::WorkGroup& local_work_group_size,
+      const Struct& params,
       Arguments&&... arguments);
 
   // This function is expensive and its use consequential for performance. Only
@@ -135,44 +136,59 @@ inline void bind(
 
 } // namespace detail
 
-template<typename... Arguments>
-inline void Context::dispatch(
+template<typename Struct, typename... Arguments>
+void Context::dispatch(
     Command::Buffer& command_buffer,
     const Shader::Layout::Signature& shader_layout_signature,
     const Shader::Descriptor& shader_descriptor,
     const Shader::WorkGroup& global_work_group,
     const Shader::WorkGroup& local_work_group_size,
+    const Struct& params,
     Arguments&&... arguments) {
-  // Forward declaration
-  Descriptor::Set dispatch_prologue(
-      Command::Buffer&,
-      const Shader::Layout::Signature&,
-      const Shader::Descriptor&,
-      const Shader::WorkGroup&);
+  // Create/retrieve descriptor set layout
+  Context* const context = api::context();
+  const GPU gpu = context->gpu();
+  Descriptor& descriptor = context->descriptor();
+  Pipeline& pipeline = context->pipeline();
+  Shader& shader = context->shader();
 
-  // Factor out template parameter independent code to minimize code bloat.
-  Descriptor::Set descriptor_set = dispatch_prologue(
-      command_buffer,
-      shader_layout_signature,
-      shader_descriptor,
-      local_work_group_size);
+  const Shader::Layout::Object shader_layout =
+      shader.layout.cache.retrieve({
+        shader_layout_signature,
+      });
 
+  const VkPipelineLayout pipe_layout =
+      pipeline.layout.cache.retrieve({
+        shader_layout.handle,
+        sizeof(params)
+      });
+
+  vkCmdPushConstants(
+      command_buffer.handle(),
+      pipe_layout,
+      VK_SHADER_STAGE_COMPUTE_BIT,
+      0,
+      sizeof(params),
+      &params);
+
+  command_buffer.bind(
+      pipeline.cache.retrieve({
+        pipe_layout,
+        shader.cache.retrieve(shader_descriptor),
+        local_work_group_size,
+      }));
+
+  Descriptor::Set descriptor_set = descriptor.pool.allocate(shader_layout);
+
+  // Bind textures
   detail::bind(
       descriptor_set,
       std::index_sequence_for<Arguments...>{},
       std::forward<Arguments>(arguments)...);
 
-  // Forward declaration
-  void dispatch_epilogue(
-      Command::Buffer&,
-      const Descriptor::Set&,
-      const Shader::WorkGroup&);
-
-  // Factor out template parameter independent code to minimize code bloat.
-  dispatch_epilogue(
-      command_buffer,
-      descriptor_set,
-      global_work_group);
+  // Bind to command buffer
+  command_buffer.bind(descriptor_set);
+  command_buffer.dispatch(global_work_group);
 }
 
 } // namespace api

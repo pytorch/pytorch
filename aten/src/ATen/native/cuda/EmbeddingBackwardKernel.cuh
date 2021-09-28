@@ -4,12 +4,6 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/NativeFunctions.h>
 
-#include <ATen/AccumulateType.h>
-
-#include <THC/THCDeviceUtils.cuh>
-#include <THC/THCTensorMathReduce.cuh>
-#include <THC/THCThrustAllocator.cuh>
-
 #pragma once
 
 namespace at {
