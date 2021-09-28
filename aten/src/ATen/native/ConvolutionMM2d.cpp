@@ -422,7 +422,8 @@ std::tuple<Tensor&, Tensor&> slow_conv2d_forward_out_cpu(
   if (bias.defined()) {
     output.copy_(bias.reshape({-1, 1, 1}));
   }
-  TORCH_CHECK(output.is_contiguous());
+  TORCH_CHECK(output.is_contiguous() && finput.is_contiguous(),
+              "slow_conv2d output tensors must be contiguous");
 
   AT_DISPATCH_ALL_TYPES_AND(kBFloat16, input.scalar_type(), "slow_conv2d_cpu", [&]{
     auto input_a = input.accessor<scalar_t, 4>();
