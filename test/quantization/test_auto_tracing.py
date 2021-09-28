@@ -1,5 +1,7 @@
 import collections
 import copy
+import math
+from typing import List
 import unittest
 
 import torch
@@ -65,7 +67,7 @@ class AutoTracingTestCase(QuantizationTestCase):
             out_m_copy_p = m_copy_p(*example_args)
             # print(m_copy_p)
             m_copy_q = convert_fx(m_copy_p)
-            print(m_copy_q)
+            # print(m_copy_q)
             # print(m_copy_q.graph)
             out_q_fx = m_copy_q(*example_args)
             # print(out_q)
@@ -123,6 +125,7 @@ class TestAutoTracing(AutoTracingTestCase):
         m = M().eval()
         m.qconfig = torch.quantization.default_qconfig
         mp = _quantize_dynamic_tracing.prepare(m, (torch.randn(1, 1, 1, 1),))
+        print(mp)
         self.assertTrue(isinstance(mp.conv, nni.ConvReLU2d))
         self.assertTrue(isinstance(mp.child[0], nni.ConvReLU2d))
 
@@ -200,6 +203,40 @@ class TestAutoTracing(AutoTracingTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
 
+    @unittest.skip('this depends on unsupported syntax detection, currently disabled')
+    @skipIfNoFBGEMM
+    def test_iterating_over_items(self):
+        class M1(torch.nn.ModuleDict):
+            def __init__(self):
+                super().__init__()
+                self.update({
+                    '1': torch.nn.Conv2d(1, 1, 1),
+                })
+
+            def forward(self, x):
+                for name, module in self.items():
+                    x = module(x)
+                return x
+
+        class M2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(1, 1, 1)
+                self.m1 = M1()
+                self.conv2 = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.m1(x)
+                x = self.conv2(x)
+                return x
+
+        m = M2().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),),
+            do_fx_comparison=False, do_torchscript_checks=False)
+
+
     @skipIfNoFBGEMM
     def test_conv(self):
         class M(torch.nn.Module):
@@ -274,7 +311,6 @@ class TestAutoTracing(AutoTracingTestCase):
         output = mp(inputs)
         labels = torch.randn(1, 1, 1, 1)
         loss = (output - labels).sum()
-        print('LOSSS\n\n\n', loss, type(loss), output, labels)
         loss.backward()
         optim = torch.optim.SGD(mp.parameters(), lr=0.01)
         optim.step()
@@ -333,7 +369,7 @@ class TestAutoTracing(AutoTracingTestCase):
                 # FX graph mode quant does not support this yet
                 do_fx_comparison=False)
 
-    @unittest.skip('TODO handle fp32 inplace and fix this test')
+    @unittest.skip('FX graph mode is using fake_quantize with PTQ, TODO verify')
     @skipIfNoFBGEMM
     def test_conv_unsupported_inplace_conv(self):
         """
@@ -479,6 +515,52 @@ class TestAutoTracing(AutoTracingTestCase):
         model_fp32 = M(torch.randn(1, 1, 1, 1), torch.randn(1)).eval()
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
+
+    @skipIfNoFBGEMM
+    def test_conv_functional_dynamic_weights(self):
+        class M(torch.nn.Module):
+            def __init__(self, weight2d, bias2d):
+                super().__init__()
+                self.weight2d = torch.nn.Parameter(weight2d)
+                self.bias2d = torch.nn.Parameter(bias2d)
+                self.stride2d = (1, 1)
+                self.padding2d = (0, 0)
+                self.dilation2d = (1, 1)
+                self.groups = 1
+
+            def forward(self, x):
+                updated_weight = self.weight2d * x
+                x = F.conv2d(
+                    x, updated_weight, self.bias2d, self.stride2d, self.padding2d,
+                    self.dilation2d, self.groups)
+                return x
+
+        model_fp32 = M(torch.randn(1, 1, 1, 1), torch.randn(1)).eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(
+            model_fp32, qconfig, (torch.randn(1, 1, 2, 2),),
+            # FX implements this functionality instead of skipping it
+            do_fx_comparison=False,
+            # TODO enable scripting support for this
+            do_torchscript_checks=False)
+
+    @skipIfNoFBGEMM
+    def test_linear_functional(self):
+        class LinearFunctional(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w1 = nn.Parameter(torch.empty(4, 4))
+                self.b1 = nn.Parameter(torch.ones(4))
+                torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
+
+            def forward(self, x):
+                x = F.linear(x, self.w1, self.b1)
+                return x
+
+        model_fp32 = LinearFunctional().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(
+            model_fp32, qconfig, (torch.randn(1, 1, 4, 4),))
 
     @skipIfNoFBGEMM
     def test_gelu_linear(self):
@@ -714,6 +796,49 @@ class TestAutoTracing(AutoTracingTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
 
+    @skipIfNoFBGEMM
+    def test_inplace_unquantizeable_op(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = nn.Conv2d(1, 1, 1)
+                self.silu = nn.SiLU(inplace=True)
+                # self.silu = nn.SiLU()
+                self.conv2 = nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.silu(x)
+                x = self.conv2(x)
+                return x
+
+        model_fp32 = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
+
+    @unittest.skip('this depends on unsupported syntax detection, currently disabled')
+    @skipIfNoFBGEMM
+    def test_vovnet_sequential(self):
+
+        class SequentialAppendList(nn.Sequential):
+            def __init__(self, *args):
+                super(SequentialAppendList, self).__init__(*args)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                concat_list = []
+                for i, module in enumerate(self):
+                    if i == 0:
+                        concat_list.append(module(x))
+                    else:
+                        concat_list.append(module(concat_list[-1]))
+                x = torch.cat(concat_list, dim=1)
+                return x
+
+        m = SequentialAppendList(torch.nn.Conv2d(1, 1, 1)).eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 1, 1),))
+        print(m)
+
     # TODO fix this test
     @unittest.skip('foo')
     @skipIfNoFBGEMM
@@ -853,6 +978,29 @@ class TestAutoTracing(AutoTracingTestCase):
             # the module is not symbolically traceable
             do_fx_comparison=False)
 
+    @skipIfNoFBGEMM
+    def test_lstm(self):
+        # building block of torchbenchmark/tts_angular
+        class LSTMWithProjection(nn.Module):
+            def __init__(self, input_size, hidden_size, proj_size):
+                super().__init__()
+                self.input_size = input_size
+                self.hidden_size = hidden_size
+                self.proj_size = proj_size
+                self.lstm = nn.LSTM(input_size, hidden_size, batch_first=True)
+                self.linear = nn.Linear(hidden_size, proj_size, bias=False)
+
+            def forward(self, x):
+                self.lstm.flatten_parameters()
+                o, (_, _) = self.lstm(x)
+                return self.linear(o)
+
+        m = LSTMWithProjection(1, 1, 1).eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(
+            m, qconfig, (torch.randn(1, 1, 1),),
+            # the module is not symbolically traceable
+            do_fx_comparison=False)
 
     # TODO(future PR): enable this test
     @unittest.skip("this is currently broken")

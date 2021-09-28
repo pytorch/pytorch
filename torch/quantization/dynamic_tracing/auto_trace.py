@@ -66,12 +66,13 @@ def add_auto_observation(
         Otherwise, calls the original function.
         """
 
-        def __torch_function__(self, func, types, args=(), kwargs=None):
+        @classmethod
+        def __torch_function__(cls, func, types, args=(), kwargs=None):
             # to prevent printing things from going into an infinite loop
             if func == torch.Tensor.__repr__:
                 return super().__torch_function__(func, types, args, kwargs)
             if enable_logging:
-                logger.debug(f'__torch_function__ {str(func)}')
+                logger.debug(f'__torch_function__ {str(func)} len_args {len(args)}')
 
             nonlocal qtensor_id
             kwargs = kwargs if kwargs else {}
@@ -149,15 +150,9 @@ def add_auto_observation(
             new_args = map_aggregate(args, convert_to_interception_proxy)
             new_kwargs = map_aggregate(kwargs, convert_to_interception_proxy)
             orig_module_call = torch.nn.Module.__call__
+            orig_nn_sequential_forward = torch.nn.Sequential.forward
 
             def record_module(self, *args, **kwargs):
-
-                # `torch.nn.Sequential` runs forward on all module children
-                # of `self`. This is a hacky workaround to terminate early in
-                # that case.
-                # TODO(future PR): fix it without hacks
-                if isinstance(self, AutoQuantizationState):
-                    return args[0]
 
                 if enable_logging:
                     logger.debug(f"record_module: {type(self)}")
@@ -186,6 +181,7 @@ def add_auto_observation(
                         hasattr(cur_module, '_auto_quant_state') and
                         (not needs_op_hooks)
                     )
+                    needs_arg_dequants = can_have_op_hooks and not needs_op_hooks
 
                     if needs_op_hooks:
                         assert parent_module is not None
@@ -211,15 +207,24 @@ def add_auto_observation(
                     elif needs_io_hooks:
                         # TODO(future PR): add inputs io hook
 
+                        cur_qstate = cur_module._auto_quant_state
+                        cur_qstate.validate_is_at_first_idx()
+
                         # original forward
                         output = orig_module_call(self, *args, **kwargs)
 
                         # after hooks
-                        cur_qstate = cur_module._auto_quant_state
                         assert isinstance(cur_qstate, AutoQuantizationState)
                         output = cur_qstate.outputs_prepare_hook(
                             output, first_call, qtensor_id)
                         cur_qstate.validate_is_at_last_seen_idx()
+
+                    elif needs_arg_dequants:
+                        output = orig_module_call(self, *args, **kwargs)
+                        # if this fp32 was inplace, make sure to set the output dtype
+                        # back to torch.float
+                        if hasattr(output, '_qtensor_info'):
+                            del output._qtensor_info
 
                     else:
                         output = orig_module_call(self, *args, **kwargs)
@@ -234,6 +239,7 @@ def add_auto_observation(
                     cur_module = old_module
 
             torch.nn.Module.__call__ = record_module
+            torch.nn.Sequential.forward = _nn_sequential_patched_forward
             nonlocal first_call
             try:
                 # Create a list before iterating because we are adding new
@@ -249,7 +255,15 @@ def add_auto_observation(
                     # for functions, this is the parent module FQN
                     module_id_to_fqn[id(v)] = k
 
-                    if hasattr(v, 'qconfig') and not is_leaf(v):
+                    # If the module has a `_calls_forward_on_each_child_module`
+                    # flag, skip it for now
+                    manual_skip = hasattr(v, '_calls_forward_on_each_child_module') \
+                        and v._calls_forward_on_each_child_module is True
+                    has_qconfig = hasattr(v, 'qconfig') and v.qconfig is not None
+                    if manual_skip:
+                        assert not has_qconfig
+
+                    if has_qconfig and not is_leaf(v) and not manual_skip:
                         if first_call:
                             if v is self:
                                 # for the top level module only, specify input
@@ -270,6 +284,7 @@ def add_auto_observation(
                 return output
             finally:
                 torch.nn.Module.__call__ = orig_module_call
+                torch.nn.Sequential.forward = orig_nn_sequential_forward
                 first_call = False
 
 
@@ -309,7 +324,8 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
         Otherwise, calls the original function.
         """
 
-        def __torch_function__(self, func, types, args=(), kwargs=None):
+        @classmethod
+        def __torch_function__(cls, func, types, args=(), kwargs=None):
             # to prevent printing things from going into an infinite loop
             if func == torch.Tensor.__repr__:
                 return super().__torch_function__(func, types, args, kwargs)
@@ -337,23 +353,6 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                 qstate.validate_cur_op(func)
                 func, args, kwargs = qstate.op_convert_before_hook(
                     func, args, kwargs, cur_module)
-
-                if False:
-                    # TODO(future PR): remove this after https://github.com/pytorch/pytorch/issues/64660 is fixed
-                    if (
-                        func == torch.ops.quantized.add and
-                        isinstance(args[1], torch.Tensor) and
-                        args[0].shape != args[1].shape
-                    ):
-                        new_args = [*args]
-                        new_shape1 = list(args[1].shape)
-                        for idx in range(len(new_shape1)):
-                            if idx == 0:
-                                new_shape1[idx] = args[0].shape[idx]
-                            else:
-                                new_shape1[idx] = 1
-                        new_args[1] = new_args[1].repeat(*new_shape1)
-                        args = tuple(new_args)
 
                 # forward
                 output = super().__torch_function__(func, types, args, kwargs)
@@ -437,15 +436,9 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
             new_args = map_aggregate(args, convert_to_dispatch_proxy)
             new_kwargs = map_aggregate(kwargs, convert_to_dispatch_proxy)
             orig_module_call = torch.nn.Module.__call__
+            orig_nn_sequential_forward = torch.nn.Sequential.forward
 
             def record_module(self, *args, **kwargs):
-                # `torch.nn.Sequential` runs forward on all module children
-                # of `self`. This is a hacky workaround to terminate early in
-                # that case.
-                # TODO(future PR): fix it without hacks
-                if isinstance(self, AutoQuantizationState):
-                    return args[0]
-
                 if enable_logging:
                     fqn = module_id_to_fqn.get(id(self), None)
                     logger.debug(f"\nstarting fqn {fqn}")
@@ -471,13 +464,16 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                         logger.debug(f"record_module {type(self)} " +
                           # f"arg_types {[type(arg) for arg in args]} " +
                           f"arg_dtypes {[arg.dtype if isinstance(arg, torch.Tensor) else None for arg in args]} " +
-                          f"op_hooks {needs_op_hooks} io_hooks {needs_io_hooks}")
+                          f"op_hooks {needs_op_hooks} io_hooks {needs_io_hooks} " +
+                          f"arg_dequants {needs_arg_dequants}")
 
                     if needs_op_hooks:
                         # before hooks
                         assert parent_module is not None
                         assert isinstance(parent_module._auto_quant_state, AutoQuantizationState)
                         qstate = parent_module._auto_quant_state
+                        if enable_logging:
+                            logger.debug(qstate)
                         qstate.validate_cur_op(cur_module)
                         _, args, kwargs = qstate.op_convert_before_hook(
                             cur_module, args, kwargs, cur_module)
@@ -491,6 +487,8 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                         cur_qstate = cur_module._auto_quant_state
                         if enable_logging:
                             logger.debug(cur_qstate)
+
+                        cur_qstate.validate_is_at_first_idx()
 
                         # before hooks (TODO)
                         # forward
@@ -531,6 +529,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                     cur_module = old_module
 
             torch.nn.Module.__call__ = record_module
+            torch.nn.Sequential.forward = _nn_sequential_patched_forward
 
             try:
                 for k, v in self.named_modules():
@@ -559,6 +558,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                 return output
             finally:
                 torch.nn.Module.__call__ = orig_module_call
+                torch.nn.Sequential.forward = orig_nn_sequential_forward
 
         def rewrite_for_scripting(self):
             return auto_trace_rewrite.rewrite_for_scripting(self)
@@ -567,3 +567,16 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
     module.__class__ = QuantizationDispatchModule
 
     return module
+
+
+# AutoQuantizationState lives in parent module's _modules.
+# Currently, `torch.nn.Sequential`'s forward iterates over all
+# items in _modules. To avoid changing the meaning of the program, for
+# now we patch the forward to ignore our quantization state.
+# Note: this is a hackedy hack, before launching we should consider
+# checking the fix into `torch.nn.Sequential` to avoid the patch.
+def _nn_sequential_patched_forward(cls, input):
+    for module in cls:
+        if not isinstance(module, AutoQuantizationState):
+            input = module(input)
+    return input

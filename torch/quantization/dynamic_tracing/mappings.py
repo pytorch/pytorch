@@ -24,6 +24,7 @@ fp32_to_int8_fun_mapping = {
     operator.mul: torch.ops.quantized.mul,
     torch.cat: torch.ops.quantized.cat,
     F.conv2d: torch.ops.quantized.conv2d,
+    F.linear: toq.linear,
 }
 
 # TODO: enforce that functions in fp32_to_int8_fun_mapping must both be
@@ -37,7 +38,7 @@ functions_supported_by_quantization = set([
     torch.cat,
     # adding for MobileNetV2, will need a better place for these
     torch.nn.functional.adaptive_avg_pool2d,
-    # F.hardsigmoid,
+    F.hardsigmoid,
     torch.flatten,
     toq.add,
     toq.mul,
@@ -46,6 +47,9 @@ functions_supported_by_quantization = set([
     toq.conv2d,
     F.dropout,
     torch.relu,
+    F.relu,
+    F.linear,
+    toq.linear,
 ])
 
 module_types_supported_by_quantization = set([

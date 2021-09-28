@@ -2,6 +2,7 @@ import torch
 
 from .dynamic_tracing.auto_trace import add_auto_observation, add_auto_convert
 from .dynamic_tracing.fusion import get_module_fusion_fqns
+from .dynamic_tracing.unsupported_syntax_detection import mark_unsupported_syntax
 
 
 def prepare(model, example_inputs, inplace=False, allow_list=None,
@@ -16,6 +17,23 @@ def prepare(model, example_inputs, inplace=False, allow_list=None,
     """
     assert example_inputs is not None, 'example_inputs must be specified'
 
+    # Detect unsupported syntax, such as calling forward of each element
+    # of `torch.nn.Module._modules`.
+    # For now this is disabled as it doesn't work on things like BERT,
+    # potentially due to weight sharing.
+    # TODO: either enable it or delete it from the codebase
+    if False:
+        mark_unsupported_syntax(model, example_inputs)
+
+    def _disable_quant_for_unsupported(m):
+        if hasattr(m, '_calls_forward_on_each_child_module') and \
+                m._calls_forward_on_each_child_module is True:
+            m.qconfig = None
+        for name, child in m.named_children():
+            _disable_quant_for_unsupported(child)
+
+    _disable_quant_for_unsupported(model)
+
     if fuse_modules:
         # automatically fuse modules
         old_class = model.__class__
@@ -26,7 +44,9 @@ def prepare(model, example_inputs, inplace=False, allow_list=None,
         module_fusion_fqns = get_module_fusion_fqns(model)
         if len(module_fusion_fqns):
             model = torch.quantization.fuse_modules(model, module_fusion_fqns)
-        del model._auto_quant_state
+        # TODO: also delete _auto_quant_staate of all children
+        if hasattr(model, '_auto_quant_state'):
+            del model._auto_quant_state
         model.__class__ = old_class
 
     # Automatically assign qconfigs for modules where the defaults do not
@@ -38,6 +58,9 @@ def prepare(model, example_inputs, inplace=False, allow_list=None,
             child.qconfig = torch.quantization.float_qparams_weight_only_qconfig
             # uncomment below to unbreak attention_is_all_you_need
             # TODO write up issue, maybe fix
+            child.qconfig = None
+        elif isinstance(child, torch.nn.LSTM):
+            # TODO: fix LSTM handling in eager mode static quant and remove this
             child.qconfig = None
 
     model = torch.quantization.prepare(

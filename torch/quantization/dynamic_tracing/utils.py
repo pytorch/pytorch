@@ -56,10 +56,24 @@ SeenOp = collections.namedtuple(
         'output_tensor_infos',
         # Information about tensors which will need to be packed,
         # Dict[int, str]
+        # idx is the argument index in args
+        # name is the name of this parameter in the parent module
         'packable_tensor_idx_to_name',
         # Information about non-tensors which will need to be packed,
         # Dict[int, Any]
+        # idx is the argument index in args
+        # arg is the argument value
         'packable_nontensor_idx_to_arg',
+        # Information about tensors which will need to be packed from kwargs.
+        # Dict[str, str]
+        # kwarg_name is the kwarg name
+        # name is the name of this parameter in the parent module
+        'packable_tensor_kwarg_name_to_name',
+        # This is True if all packable args are simple attributes, or there
+        # are no packable args.
+        # This is False if some packable args are results of other functions.
+        # bool
+        'op_packing_only_uses_module_attributes',
     ],
 )
 def seen_op_repr(self) -> str:
@@ -71,6 +85,8 @@ def seen_op_repr(self) -> str:
         s += f"\n     (packable_tensor_idx_to_name): {self.packable_tensor_idx_to_name}"
     if len(self.packable_nontensor_idx_to_arg):
         s += f"\n     (packable_nontensor_idx_to_arg): {self.packable_nontensor_idx_to_arg}"
+    if len(self.packable_tensor_kwarg_name_to_name):
+        s += f"\n     (packable_tensor_kwarg_name_to_name): {self.packable_tensor_kwarg_name_to_name}"
     return s
 
 SeenOp.__repr__ = seen_op_repr  # type: ignore[assignment]
@@ -155,37 +171,65 @@ def pack_weights_for_functionals(
         for idx, seen_op in qstate.idx_to_seen_ops.items():
             packable_args_len = len(seen_op.packable_tensor_idx_to_name) + \
                 len(seen_op.packable_nontensor_idx_to_arg)
-            if packable_args_len > 0:
-                if seen_op.type == F.conv2d:
-                    # fetch all the info needed for packed params
-                    weight = getattr(module, seen_op.packable_tensor_idx_to_name[1])
-                    bias = getattr(module, seen_op.packable_tensor_idx_to_name[2])
-                    stride = seen_op.packable_nontensor_idx_to_arg[3]
-                    padding = seen_op.packable_nontensor_idx_to_arg[4]
-                    dilation = seen_op.packable_nontensor_idx_to_arg[5]
-                    groups = seen_op.packable_nontensor_idx_to_arg[6]
+            if packable_args_len == 0:
+                continue
 
-                    # quantize the weight
-                    # TODO: create weight observers from qconfig.weight
-                    weight_tensor_id = seen_op.input_tensor_infos[1].id
-                    weight_obs = qstate.tensor_id_to_observer[str(weight_tensor_id)]
-                    scale, zp = weight_obs.calculate_qparams()
-                    qweight = torch.quantize_per_tensor(weight, scale, zp, torch.qint8)
+            if seen_op.type == F.conv2d:
+                # fetch all the info needed for packed params
+                weight = getattr(module, seen_op.packable_tensor_idx_to_name[1])
+                bias = getattr(module, seen_op.packable_tensor_idx_to_name[2])
+                stride = seen_op.packable_nontensor_idx_to_arg[3]
+                padding = seen_op.packable_nontensor_idx_to_arg[4]
+                dilation = seen_op.packable_nontensor_idx_to_arg[5]
+                groups = seen_op.packable_nontensor_idx_to_arg[6]
 
-                    # create the packed params
-                    packed_params = toq.conv2d_prepack(
-                        qweight, bias, stride, padding, dilation, groups)
+                # quantize the weight
+                # TODO: create weight observers from qconfig.weight
+                weight_tensor_id = seen_op.input_tensor_infos[1].id
+                weight_obs = qstate.tensor_id_to_observer[str(weight_tensor_id)]
+                scale, zp = weight_obs.calculate_qparams()
+                qweight = torch.quantize_per_tensor(weight, scale, zp, torch.qint8)
 
-                    # attach to module
-                    name_idx = 0
-                    prefix = "_packed_params_"
+                # create the packed params
+                packed_params = toq.conv2d_prepack(
+                    qweight, bias, stride, padding, dilation, groups)
+
+                # attach to module
+                name_idx = 0
+                prefix = "_packed_params_"
+                name_candidate = f"{prefix}{name_idx}"
+                while hasattr(module, name_candidate):
+                    name_idx += 1
                     name_candidate = f"{prefix}{name_idx}"
-                    while hasattr(module, name_candidate):
-                        name_idx += 1
-                        name_candidate = f"{prefix}{name_idx}"
-                    setattr(module, name_candidate, packed_params)
-                    qstate.idx_to_packed_weight_name[str(idx)] = name_candidate
-                    # TODO: delete the original weights
+                setattr(module, name_candidate, packed_params)
+                qstate.idx_to_packed_weight_name[str(idx)] = name_candidate
+                # TODO: delete the original weights
+
+            elif seen_op.type == F.linear:
+                # fetch all the info needed for packed params
+                weight = getattr(module, seen_op.packable_tensor_idx_to_name[1])
+                bias = getattr(module, seen_op.packable_tensor_kwarg_name_to_name['bias'])
+
+                # quantize the weight
+                # TODO: create weight observers from qconfig.weight
+                weight_tensor_id = seen_op.input_tensor_infos[1].id
+                weight_obs = qstate.tensor_id_to_observer[str(weight_tensor_id)]
+                scale, zp = weight_obs.calculate_qparams()
+                qweight = torch.quantize_per_tensor(weight, scale, zp, torch.qint8)
+
+                # create the packed params
+                packed_params = toq.linear_prepack(qweight, bias)
+
+                # attach to module
+                name_idx = 0
+                prefix = "_packed_params_"
+                name_candidate = f"{prefix}{name_idx}"
+                while hasattr(module, name_candidate):
+                    name_idx += 1
+                    name_candidate = f"{prefix}{name_idx}"
+                setattr(module, name_candidate, packed_params)
+                qstate.idx_to_packed_weight_name[str(idx)] = name_candidate
+                # TODO: delete the original weights
 
     for _, child in module.named_children():
         pack_weights_for_functionals(child)
@@ -210,9 +254,16 @@ class FuncOutputObsType(enum.Enum):
 def get_func_output_obs_type(
     op: Callable,
     args: Tuple[Any, ...],
+    op_packing_only_uses_module_attributes: bool,
 ) -> FuncOutputObsType:
     if isinstance(op, torch.nn.Module):
         return FuncOutputObsType.NONE
+
+    # check for ops which need packed weights but the weights are
+    # coming from another function
+    if not op_packing_only_uses_module_attributes:
+        return FuncOutputObsType.NONE
+
     if op in add_and_mul_ops:
         if len(args) > 0 and args[0].dtype in (torch.int32, torch.int64):
             # this is handling ops on dtypes such as torch.int
@@ -246,8 +297,10 @@ def converted_func_needs_scale_zp(op: Callable, seen_op: SeenOp) -> bool:
         first_dtype_is_not_int = len(inputs) > 0 and \
             inputs[0].inf_dtype not in (torch.int32, torch.int64)
         return first_dtype_is_not_int
-    elif op == F.conv2d:
-        return True
+    elif op in (F.conv2d, F.linear):
+        outputs = seen_op.output_tensor_infos
+        is_int8 = outputs[0].inf_dtype == torch.quint8
+        return is_int8
     # TODO: add more ops
     # print('op', op)
     return False
@@ -259,15 +312,26 @@ class FuncOutputDTypeType(enum.Enum):
     # for ops which are quantizeable and take the dtype of the previous
     # op, for example nn.Dropout
     DTYPE_EQUALS_INPUT_DTYPE = 1
+    # for ops which may be quantizeable in some cases but are not
+    # quantizeable due to observed syntax (for example, F.conv2d with
+    # weights coming from another function).
+    DTYPE_DEFAULT_BC_UNSUPPORTED_SYNTAX = 2
 
 def get_func_output_dtype_type(
     op: Callable,
     args: Tuple[Any, ...],
+    op_packing_only_uses_module_attributes: bool,
 ) -> FuncOutputDTypeType:
     if isinstance(op, torch.nn.Module):
         if type(op) in module_types_supported_by_quantization_preserves_dtype:
             return FuncOutputDTypeType.DTYPE_EQUALS_INPUT_DTYPE
-    elif op in functions_supported_by_quantization_preserves_dtype:
+
+    # check for ops which need packed weights but the weights are
+    # coming from another function
+    if not op_packing_only_uses_module_attributes:
+        return FuncOutputDTypeType.DTYPE_DEFAULT_BC_UNSUPPORTED_SYNTAX
+
+    if op in functions_supported_by_quantization_preserves_dtype:
         return FuncOutputDTypeType.DTYPE_EQUALS_INPUT_DTYPE
     elif op in add_and_mul_ops and len(args) > 0 and \
             args[0].dtype in (torch.int32, torch.int64):
@@ -279,10 +343,28 @@ def get_func_output_dtype_type(
 
     return FuncOutputDTypeType.DTYPE_DEPENDS_ON_QCONFIG
 
+def get_op_packing_only_uses_module_attributes(
+    op: Callable,
+    args: Tuple[Any, ...],
+    module: torch.nn.Module,
+) -> bool:
+    # check for ops which need packed weights but the weights are
+    # coming from another function
+    packable_tensor_arg_idxs = get_packable_tensor_arg_idxs(op)
+    if packable_tensor_arg_idxs is not None:
+        for arg_idx in packable_tensor_arg_idxs:
+            arg_name_in_root = get_param_name(module, args[arg_idx])
+            if arg_name_in_root is None:
+                return False
+    return True
+
 def get_quantized_op(
     op: Callable,
     seen_op: SeenOp,
 ) -> Callable:
+    if seen_op.output_tensor_infos[0].inf_dtype != torch.quint8:
+        return op
+
     new_op = op
     if not isinstance(op, torch.nn.Module):
         if (
@@ -304,6 +386,8 @@ def get_input_observed_arg_idxs(
         return [0]
     if op == F.conv2d:
         return [0, 1]
+    elif op == F.linear:
+        return [0, 1]
     # None means "observe all Tensor args"
     return None
 
@@ -314,6 +398,17 @@ def get_packable_tensor_arg_idxs(op: Callable) -> Optional[List[int]]:
     """
     if op == F.conv2d:
         return [1, 2]
+    elif op == F.linear:
+        return [1]
+    return None
+
+def get_packable_tensor_kwarg_names(op: Callable) -> Optional[List[str]]:
+    """
+    Returns tensor kwarg names which correspond to parameters which will
+    need to be packed.
+    """
+    if op == F.linear:
+        return ['bias']
     return None
 
 def get_param_name(module: torch.nn.Module, arg: Any) -> Optional[str]:
@@ -323,7 +418,8 @@ def get_param_name(module: torch.nn.Module, arg: Any) -> Optional[str]:
     for name, param in module.named_parameters():
         if arg is param:
             return name
-    raise AssertionError(f"arg {arg} not found in module {module}")
+    return None
+    # raise AssertionError(f"arg {arg} not found in module {module}")
 
 def get_packable_nontensor_arg_idxs(op: Callable) -> Optional[List[int]]:
     """
@@ -339,10 +435,15 @@ def get_packable_arg_idxs(op: Callable) -> Optional[List[int]]:
     if op == F.conv2d:
         # weight, bias, stride, padding, dilation, groups
         return [1, 2, 3, 4, 5, 6]
+    elif op == F.linear:
+        # weight
+        return [1]
     return None
 
 def get_weight_arg_idx(op: Callable) -> Optional[int]:
     if op == F.conv2d:
+        return 1
+    elif op == F.linear:
         return 1
     return None
 

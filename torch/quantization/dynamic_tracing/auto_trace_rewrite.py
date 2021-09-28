@@ -112,7 +112,8 @@ class AllModuleTracer(torch.fx.Tracer):
                 qstate.validate_cur_op(target)
 
                 old_target = target
-                target, arg_quant_infos, packed_param_name, additional_kwargs = \
+                # TODO use arg_dequant_infos
+                target, arg_quant_infos, arg_dequant_infos, packed_param_name, additional_kwargs = \
                     qstate.get_op_convert_info(target, unwrap_scale_zp=True)
 
                 args = self._maybe_update_args_with_quants(args, arg_quant_infos, target)
@@ -134,7 +135,13 @@ class AllModuleTracer(torch.fx.Tracer):
                     args = tuple(new_args_with_packed)
 
                 # TODO move op-specific logic out of here
-                if old_target != F.conv2d:
+                if target is torch.ops.quantized.linear:
+                    new_args = [*args]
+                    new_args.append(additional_kwargs['scale'])
+                    new_args.append(additional_kwargs['zero_point'])
+                    args = tuple(new_args)
+                    del kwargs['bias']
+                elif old_target != F.conv2d or target is F.conv2d:
                     kwargs.update(**additional_kwargs)
                 else:
                     new_args = [*args]
@@ -142,8 +149,8 @@ class AllModuleTracer(torch.fx.Tracer):
                     new_args.append(additional_kwargs['zero_point'])
                     args = tuple(new_args)
 
+                dtype_to_use = qstate.get_cur_output_inf_dtype()
                 qstate.mark_cur_op_complete(old_target)
-                dtype_to_use = torch.quint8
 
             else:
                 args = self._maybe_update_args_with_dequants(args)
@@ -156,15 +163,16 @@ class AllModuleTracer(torch.fx.Tracer):
             if qstate.cur_op_needs_hooks(module_instance):
                 qstate.validate_cur_op(module_instance)
 
-                _, arg_quant_infos, _packed_param_name, additional_kwargs = \
+                # TODO use arg_dequant_infos
+                _, arg_quant_infos, arg_dequant_infos, _packed_param_name, additional_kwargs = \
                     qstate.get_op_convert_info(
                         module_instance, unwrap_scale_zp=True)
 
                 args = self._maybe_update_args_with_quants(args, arg_quant_infos, target)
                 kwargs.update(**additional_kwargs)
 
+                dtype_to_use = qstate.get_cur_output_inf_dtype()
                 qstate.mark_cur_op_complete(module_instance)
-                dtype_to_use = torch.quint8
 
             else:
                 args = self._maybe_update_args_with_dequants(args)

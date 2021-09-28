@@ -101,8 +101,11 @@ from quantization.jit.test_fusion_passes import TestFusionPasses  # noqa: F401
 from quantization.jit.test_deprecated_jit_quant import TestDeprecatedJitQuantized  # noqa: F401
 
 # AO Migration tests
-from quantization.ao_migration.test_quantize import TestAOMigrationQuantizePy  # noqa: F401
-
+from quantization.ao_migration.test_quantization import TestAOMigrationQuantization  # noqa: F401
+try:
+    from quantization.ao_migration.test_quantization_fx import TestAOMigrationQuantizationFx  # noqa: F401
+except ImportError:
+    pass
 
 from quantization.test_auto_tracing import TestAutoTracing  # noqa: F401
 from quantization.test_auto_tracing import TestAutoTracingModels  # noqa: F401
