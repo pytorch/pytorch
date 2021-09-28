@@ -162,6 +162,15 @@ class TestWeightNormSparsifier(TestCase):
             # After step
             module = g['module']
             assert (1.0 - module.parametrizations['weight'][0].mask.mean()) > 0  # checking sparsity level has increased
+        # Test if the mask collapses to all zeros if the weights are randomized
+        iters_before_collapse = 1000
+        for _ in range(iters_before_collapse):
+            model.linear.weight.data = torch.randn(model.linear.weight.shape)
+            sparsifier.step()
+        for g in sparsifier.module_groups:
+            # After step
+            module = g['module']
+            assert (1.0 - module.parametrizations['weight'][0].mask.mean()) > 0  # checking sparsity level did not collapse
 
     def test_prepare(self):
         model = Model()
