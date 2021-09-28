@@ -607,22 +607,41 @@ Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
     hasRandom_ = true;
   }
 
+  auto outputType = findDtypeForValue(v);
+  std::vector<ExprHandle> outputShape = sizesForValue(v);
+
   std::vector<ArgValue> argInputs;
   if (op == prim::ConstantChunk) {
     auto const& n = v->node();
     argInputs.push_back(toArg(inputs[0]));
-    argInputs.push_back((int64_t)v->offset());
+    argInputs.push_back(static_cast<int64_t>(v->offset()));
     argInputs.push_back(n->i(attr::dim));
     argInputs.push_back(n->i(attr::chunks));
   } else if (op == aten::to) {
     argInputs.push_back(toArg(inputs[0]));
+  } else if (op == aten::conv2d) {
+    for (auto inp : inputs) {
+      argInputs.push_back(toArg(inp));
+    }
+    // handle optional bias
+    if (c10::get_if<ArgNone>(&argInputs[2])) {
+      Dtype dtype = outputType ? Dtype(*outputType) : kFloat;
+      std::vector<ExprHandle> biasShape;
+      biasShape.push_back(outputShape[1]);
+      auto bias_tensor = at::zeros({outputShape[1].AsNode<LongImm>()->value()});
+      unpacked_constant_tensors_.push_back(bias_tensor);
+      BufPtr buf = alloc<Buf>(
+          "conv2d_bias_opt_" + sanitizeName(v->debugName()),
+          ExprHandleVectorToExprVector(biasShape),
+          dtype);
+      constants_.push_back({buf, bias_tensor.data_ptr()});
+      argInputs[2] = BufHandle(buf);
+    }
   } else {
     for (auto inp : inputs) {
       argInputs.push_back(toArg(inp));
     }
   }
-  auto outputType = findDtypeForValue(v);
-  std::vector<ExprHandle> outputShape = sizesForValue(v);
 
   if (NNCLoweringFunction custom_lowering = getCustomLoweringFor(op)) {
     return custom_lowering(argInputs, outputShape, outputType, device_);
@@ -1178,6 +1197,17 @@ Tensor TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
 }
 
 void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
+  auto val = toIValue(v).value();
+  if (torch::isCustomClass(val)) {
+    auto name_hint = "const_" + sanitizeName(v->debugName());
+    auto dtype = Dtype(ScalarType::Float);
+    std::vector<ExprPtr> dims;
+    BufPtr buf = alloc<Buf>(name_hint, dims, dtype);
+    auto dataPtr = val.toObjectRef().getSlot(0).toCapsule().get();
+    constants_.push_back({buf, dataPtr});
+    bufs_[v] = buf;
+    return;
+  }
   if (!v->type()->cast<TensorType>()) {
     // Only Tensor constants need to be bound, scalar constants will be turned
     // into immediates in TE IR

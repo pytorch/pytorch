@@ -20,6 +20,16 @@ NNCLoweringFunction getStandardLoweringFor(const std::string& op) {
 }
 
 namespace {
+RegisterNNCLoweringFunction aten_dropout("aten::dropout", computeNoop);
+
+RegisterNNCLoweringFunction prepacked_conv2d_clamp_run(
+    "prepacked::conv2d_clamp_run",
+    computePrepackedConv2dClampRun);
+
+RegisterNNCLoweringFunction prepacked_linear_clamp_run(
+    "prepacked::linear_clamp_run",
+    computePrepackedLinearClampRun);
+
 RegisterNNCLoweringFunction aten_sub(
     "aten::sub",
     [](const std::vector<ArgValue>& inputs,
@@ -1342,6 +1352,7 @@ RegisterNNCLoweringFunction aten_permute(
 RegisterNNCLoweringFunction aten_expand("aten::expand", computeExpand);
 RegisterNNCLoweringFunction aten_expand_as("aten::expand_as", computeExpand);
 
+RegisterNNCLoweringFunction aten_flatten("aten::flatten", computeFlatten);
 RegisterNNCLoweringFunction aten_view("aten::view", computeReshape);
 RegisterNNCLoweringFunction aten_reshape("aten::reshape", computeReshape);
 
