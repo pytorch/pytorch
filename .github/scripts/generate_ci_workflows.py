@@ -143,8 +143,6 @@ class CIWorkflow:
     is_libtorch: bool = False
     is_scheduled: str = ''
     num_test_shards: int = 1
-    on_pull_request: bool = False
-    only_build_on_pull_request: bool = False
     only_run_smoke_tests_on_pull_request: bool = False
     num_test_shards_on_pull_request: int = -1
     distributed_test: bool = True
@@ -166,9 +164,6 @@ class CIWorkflow:
     def __post_init__(self) -> None:
         if self.is_libtorch:
             self.exclude_test = True
-
-        if not self.on_pull_request:
-            self.only_build_on_pull_request = False
 
         if self.distributed_test:
             self.enable_distributed_test = 1
@@ -193,7 +188,6 @@ class CIWorkflow:
         if self.ciflow_config.enabled:
             # make sure if LABEL_CIFLOW_DEFAULT is set, we then need to set trigger_action_only to False
             assert self.ciflow_config.trigger_action_only != (LABEL_CIFLOW_DEFAULT in self.ciflow_config.labels)
-            assert self.on_pull_request
             assert LABEL_CIFLOW_ALL in self.ciflow_config.labels
             assert LABEL_CIFLOW_ALL in self.ciflow_config.root_job_condition
             if self.arch == 'linux':
@@ -227,7 +221,6 @@ WINDOWS_WORKFLOWS = [
         build_environment="win-vs2019-cpu-py3",
         cuda_version="cpu",
         test_runner_type=WINDOWS_CPU_TEST_RUNNER,
-        on_pull_request=True,
         num_test_shards=2,
         ciflow_config=CIFlowConfig(
             enabled=True,
@@ -240,7 +233,6 @@ WINDOWS_WORKFLOWS = [
         build_environment="win-vs2019-cuda10.2-py3",
         cuda_version="10.2",
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
-        on_pull_request=True,
         num_test_shards=2,
         enable_force_on_cpu_test=1,
         ciflow_config=CIFlowConfig(
@@ -255,7 +247,6 @@ WINDOWS_WORKFLOWS = [
         cuda_version="11.3",
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
         num_test_shards=2,
-        on_pull_request=True,
         only_run_smoke_tests_on_pull_request=True,
         ciflow_config=CIFlowConfig(
             enabled=True,
@@ -270,7 +261,6 @@ WINDOWS_WORKFLOWS = [
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
         num_test_shards=2,
         is_scheduled="45 0,4,8,12,16,20 * * *",
-        on_pull_request=True,
         ciflow_config=CIFlowConfig(
             enabled=True,
             trigger_action_only=True,
@@ -285,7 +275,6 @@ LINUX_WORKFLOWS = [
         build_environment="linux-xenial-py3.6-gcc5.4",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
-        on_pull_request=True,
         enable_jit_legacy_test=1,
         enable_doc_jobs=True,
         enable_docs_test=1,
@@ -303,8 +292,6 @@ LINUX_WORKFLOWS = [
     #    build_environment="paralleltbb-linux-xenial-py3.6-gcc5.4",
     #    docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
     #    test_runner_type=LINUX_CPU_TEST_RUNNER,
-    #    # This is a master only job despite on_pull_request is set to True
-    #    on_pull_request=True,
     #    ciflow_config=CIFlowConfig(
     #        enabled=True,
     #        trigger_action_only=True,
@@ -316,8 +303,6 @@ LINUX_WORKFLOWS = [
         build_environment="parallelnative-linux-xenial-py3.6-gcc5.4",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
-        # This is a master only job despite on_pull_request is set to True
-        on_pull_request=True,
         ciflow_config=CIFlowConfig(
             enabled=True,
             trigger_action_only=True,
@@ -331,8 +316,6 @@ LINUX_WORKFLOWS = [
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         exclude_test=True,
-        # This is a master only job despite on_pull_request is set to True
-        on_pull_request=True,
         ciflow_config=CIFlowConfig(
             enabled=True,
             trigger_action_only=True,
@@ -363,7 +346,6 @@ LINUX_WORKFLOWS = [
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         num_test_shards=2,
-        on_pull_request=True,
         ciflow_config=CIFlowConfig(
             enabled=True,
             run_on_canary=True,
@@ -382,7 +364,6 @@ LINUX_WORKFLOWS = [
         enable_nogpu_no_avx2_test=1,
         enable_slow_test=1,
         num_test_shards=2,
-        on_pull_request=True,
         ciflow_config=CIFlowConfig(
             enabled=True,
             trigger_action_only=True,
@@ -395,7 +376,6 @@ LINUX_WORKFLOWS = [
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         is_libtorch=True,
-        on_pull_request=True,
         ciflow_config=CIFlowConfig(
             enabled=True,
             trigger_action_only=True,
@@ -408,7 +388,6 @@ LINUX_WORKFLOWS = [
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         num_test_shards=2,
-        on_pull_request=True,
         ciflow_config=CIFlowConfig(
             enabled=True,
             labels=set([LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA]),
@@ -420,7 +399,6 @@ LINUX_WORKFLOWS = [
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         is_libtorch=True,
-        on_pull_request=True,
         ciflow_config=CIFlowConfig(
             enabled=True,
             trigger_action_only=True,
@@ -434,7 +412,6 @@ LINUX_WORKFLOWS = [
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         num_test_shards=2,
         is_scheduled="45 0,4,8,12,16,20 * * *",
-        on_pull_request=True,
         ciflow_config=CIFlowConfig(
             enabled=True,
             trigger_action_only=True,
@@ -448,7 +425,6 @@ LINUX_WORKFLOWS = [
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         is_libtorch=True,
         is_scheduled="45 0,4,8,12,16,20 * * *",
-        on_pull_request=True,
         ciflow_config=CIFlowConfig(
             enabled=True,
             trigger_action_only=True,
@@ -460,7 +436,6 @@ LINUX_WORKFLOWS = [
         build_environment="linux-bionic-py3.6-clang9",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.6-clang9",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
-        on_pull_request=True,
         num_test_shards=2,
         distributed_test=False,
         enable_noarch_test=1,
@@ -532,7 +507,6 @@ BAZEL_WORKFLOWS = [
         build_environment="linux-xenial-py3.6-gcc7-bazel-test",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
-        on_pull_request=True,
         ciflow_config=CIFlowConfig(
             enabled=True,
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_BAZEL, LABEL_CIFLOW_CPU, LABEL_CIFLOW_LINUX},
@@ -567,8 +541,8 @@ def main() -> None:
 
             if workflow.ciflow_config.enabled:
                 ciflow_ruleset.add_label_rule(workflow.ciflow_config.labels, workflow.build_environment)
-            elif workflow.on_pull_request:
-                # If ciflow is disabled but still on_pull_request, we can denote
+            else:
+                # If ciflow is disabled we can denote
                 # it as a special label LABEL_CIFLOW_DEFAULT in the ruleset, which will be later
                 # turned into an actual LABEL_CIFLOW_DEFAULT label in the workflow.
                 # During the rollout phase, it has the same effect as LABEL_CIFLOW_DEFAULT

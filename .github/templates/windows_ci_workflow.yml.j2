@@ -19,7 +19,6 @@
 name: !{{ build_environment }}
 
 on:
-{%- if on_pull_request %}
   pull_request:
   {%- if ciflow_config.enabled %}
     {%- if ciflow_config.trigger_action_only %}
@@ -28,7 +27,6 @@ on:
     types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
     {%- endif %}
   {%- endif %}
-{%- endif %}
 {%- if is_scheduled %}
   schedule:
     - cron: !{{ is_scheduled }}
@@ -162,9 +160,6 @@ jobs:
         run: .github/scripts/generate_pytorch_test_matrix.py
 
   test:
-{%- if only_build_on_pull_request %}
-    if: ${{ github.event_name == 'push' }}
-{%- endif %}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-test
       SHARD_NUMBER: ${{ matrix.shard }}
