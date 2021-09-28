@@ -71,6 +71,29 @@ TORCH_META_FUNC(isneginf) (const Tensor& self) {
   build_unary_force_boolean_op(maybe_get_output(), self);
 }
 
+TORCH_META_FUNC2(max, dim)(const Tensor& self, int64_t dim, bool keepdim) {
+  TORCH_CHECK(
+      self.layout() == Layout::Strided,
+      "max(): only supports strided layout, got: ", self.layout());
+  TORCH_CHECK(
+      !self.is_complex(),
+      "max(): does not support complex input");
+
+  dim = maybe_wrap_dim(dim, self.dim());
+
+  DimVector sizes(self.sizes());
+  if (self.numel() == 0) {
+    sizes = at::native::get_zero_numel_tensor_size(self, dim, keepdim, "max()");
+  } else {
+    sizes = get_reduction_shape(self, dim, keepdim);
+  }
+
+  set_output(0, sizes, self.options());
+  set_output(1, sizes, self.options().dtype(kLong));
+  namedinference::propagate_names_for_reduction(maybe_get_output(0), self, dim, keepdim);
+  namedinference::propagate_names_for_reduction(maybe_get_output(1), self, dim, keepdim);
+}
+
 } // namespace meta
 
 namespace native {
@@ -394,7 +417,9 @@ std::tuple<Tensor &,Tensor &> mode_out(const Tensor& self, int64_t dim, bool kee
               indices.scalar_type(), "' for indices output");
   dim = maybe_wrap_dim(dim, self.dim());
   if (self.numel() == 0) {
-    zero_numel_tensor_resize(values, indices, self, dim, keepdim, "mode()");
+    auto sizes = get_zero_numel_tensor_size(self, dim, keepdim, "mode()");
+    resize_output(values, sizes);
+    resize_output(indices, sizes);
     return std::tie(values, indices);
   }
   else if (_dimreduce_return_trivial_no_ident(values, self, dim, keepdim, "mode")) {
@@ -413,58 +438,30 @@ std::tuple<Tensor &,Tensor &> mode_out(const Tensor& self, int64_t dim, bool kee
   }
 }
 
-std::tuple<Tensor, Tensor> max(const Tensor& self, int64_t dim, bool keepdim) {
-    Tensor max_indices = at::empty({0}, self.options().dtype(kLong));
-    if (self.is_quantized()) {
-      Tensor max = at::empty({0}, self.options().dtype(toUnderlying(self.scalar_type())));
-      at::native::max_out(self.int_repr(), dim, keepdim, max, max_indices);
-      // TODO: qscheme
-      return std::tuple<Tensor, Tensor>(at::_make_per_tensor_quantized_tensor(max,
-        self.q_scale(), self.q_zero_point()), max_indices);
+TORCH_IMPL_FUNC(max_out)
+(const Tensor& self,
+ int64_t dim,
+ bool keepdim,
+ const Tensor& values,
+ const Tensor& indices) {
+  NoNamesGuard guard;
+  if (self.numel() > 0) {
+    if (self.numel() == 1 && self.dim() == 0) {
+      values.fill_(self);
+      indices.fill_(0);
     } else {
-      Tensor max = at::empty({0}, self.options());
-      return at::native::max_out(self, dim, keepdim, max, max_indices);
+      max_stub(self.device().type(), values, indices, self, dim, keepdim);
     }
-}
-
-static std::tuple<Tensor &,Tensor &> max_out_impl(Tensor& max, Tensor& max_indices,
-                                                  const Tensor& self, int64_t dim, bool keepdim) {
-  TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
-              "max only supports CPU AND CUDA device type, got: ", self.device().type());
-  TORCH_CHECK(self.layout() == Layout::Strided,
-              "max only supports strided layout, got: ", self.layout());
-  TORCH_CHECK(self.device() == max.device(),
-              "expected device ", self.device(), " but got ",
-              max.device(), " for max values output");
-  TORCH_CHECK(self.device() == max_indices.device(),
-              "expected device ", self.device(), " but got ",
-              max_indices.device(), " for indices output");
-  dim = maybe_wrap_dim(dim, self.dim());
-  if (self.numel() == 0) {
-    zero_numel_tensor_resize(max, max_indices, self, dim, keepdim, "max()");
-    return std::tie(max, max_indices);
-  }
-  else if (_dimreduce_return_trivial_no_ident(max, self, dim, keepdim, "max")) {
-    // case where self.numel() == 1. The result does not need to be reshaped
-    // as a case of reduction in this case.
-    TORCH_CHECK(!self.is_complex(), "max does not support complex inputs.");
-    AT_ASSERT(max.dim() == 0);
-    max_indices.resize_({}).fill_(0);
-    return std::forward_as_tuple(max, max_indices);
-  } else {
-    max_stub(self.device().type(), max, max_indices, self, dim, keepdim);
-    return std::tuple<Tensor &,Tensor &>{max, max_indices};
   }
 }
 
-std::tuple<Tensor&,Tensor&> max_out(const Tensor& self, int64_t dim, bool keepdim, Tensor& max, Tensor& max_indices) {
-  auto result = [&]() {
-    NoNamesGuard guard;
-    return max_out_impl(max, max_indices, self, dim, keepdim);
-  }();
-  namedinference::propagate_names_for_reduction(max, self, dim, keepdim);
-  namedinference::propagate_names_for_reduction(max_indices, self, dim, keepdim);
-  return result;
+std::tuple<Tensor, Tensor> qmax(const Tensor& self, int64_t dim, bool keepdim) {
+  Tensor max_indices = at::empty({0}, self.options().dtype(kLong));
+  Tensor max = at::empty({0}, self.options().dtype(toUnderlying(self.scalar_type())));
+  at::max_outf(self.int_repr(), dim, keepdim, max, max_indices);
+  // TODO: qscheme
+  return std::tuple<Tensor, Tensor>(
+      at::_make_per_tensor_quantized_tensor(max, self.q_scale(), self.q_zero_point()), max_indices);
 }
 
 std::tuple<Tensor, Tensor> min(const Tensor& self, int64_t dim, bool keepdim) {
@@ -498,7 +495,9 @@ static std::tuple<Tensor &,Tensor &> min_out_impl(Tensor& min, Tensor& min_indic
               min_indices.device(), " for indices output");
   dim = maybe_wrap_dim(dim, self.dim());
   if (self.numel() == 0) {
-    zero_numel_tensor_resize(min, min_indices, self, dim, keepdim, "min()");
+    auto sizes = get_zero_numel_tensor_size(self, dim, keepdim, "min()");
+    resize_output(min, sizes);
+    resize_output(min_indices, sizes);
     return std::tie(min, min_indices);
   }
   else if (_dimreduce_return_trivial_no_ident(min, self, dim, keepdim, "min")) {

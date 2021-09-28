@@ -2759,12 +2759,14 @@
     CPU, CUDA: _compute_linear_combination_out
 
 - func: max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
+  structured_delegate: max.dim_max
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
-    CPU, CUDA, QuantizedCPU, QuantizedCUDA: max
+    QuantizedCPU, QuantizedCUDA: qmax
 
 - func: max.dim_max(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_values) -> (Tensor(a!) values, Tensor(b!) indices)
+  structured: True
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: max_out
