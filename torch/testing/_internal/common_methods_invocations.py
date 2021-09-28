@@ -6059,8 +6059,8 @@ def reference_reduction_numpy(f, supports_keepdims=True):
 
         if 'mask' in keys:
             mask = kwargs.pop('mask')
-            where = np._NoValue if mask is None else mask.cpu().numpy()
-            kwargs['where'] = where
+            if mask is not None:
+                kwargs['where'] = mask.cpu().numpy()
 
         result = f(x, *args, **kwargs)
 
