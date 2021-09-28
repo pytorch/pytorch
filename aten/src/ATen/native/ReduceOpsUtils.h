@@ -322,6 +322,37 @@ static C10_UNUSED DimVector get_reduction_shape(
   return native::shape_from_dim_mask(self, mask, keepdim);
 }
 
+static void resize_reduction(
+    impl::MetaBase& meta,
+    const Tensor& self,
+    IntArrayRef dims,
+    bool keepdim,
+    ScalarType out_dtype) {
+  DimVector dims_(dims);
+  maybe_wrap_dims(dims_, self.dim());
+  auto shape = get_reduction_shape(self, dims_, keepdim);
+  meta.set_output(shape, self.options().dtype(out_dtype));
+  namedinference::propagate_names_for_reduction(
+      meta.maybe_get_output(), self, dims_, keepdim);
+}
+
+static void resize_reduction_with_indices(
+    impl::MetaBase& meta,
+    const Tensor& self,
+    IntArrayRef dims,
+    bool keepdim,
+    ScalarType out_dtype) {
+  DimVector dims_(dims);
+  maybe_wrap_dims(dims_, self.dim());
+  auto shape = get_reduction_shape(self, dims_, keepdim);
+  meta.set_output(0, shape, self.options().dtype(out_dtype));
+  meta.set_output(1, shape, self.options().dtype(kLong));
+  namedinference::propagate_names_for_reduction(
+      meta.maybe_get_output(0), self, dims_, keepdim);
+  namedinference::propagate_names_for_reduction(
+      meta.maybe_get_output(1), self, dims_, keepdim);
+}
+
 static TensorIterator make_reduction(
     const Tensor& self,
     const Tensor& result,

@@ -71,27 +71,27 @@ TORCH_META_FUNC(isneginf) (const Tensor& self) {
   build_unary_force_boolean_op(maybe_get_output(), self);
 }
 
-TORCH_META_FUNC2(max, dim)(const Tensor& self, int64_t dim, bool keepdim) {
-  TORCH_CHECK(
-      self.layout() == Layout::Strided,
-      "max(): only supports strided layout, got: ", self.layout());
-  TORCH_CHECK(
-      !self.is_complex(),
-      "max(): does not support complex input");
+static void check_unsupported_complex(const char* name, const Tensor& self) {
+  TORCH_CHECK(!self.is_complex(), name, ": does not support complex input");
+}
 
+TORCH_PRECOMPUTE_META_FUNC2(max, dim)
+(const Tensor& self, int64_t dim, bool keepdim) {
   dim = maybe_wrap_dim(dim, self.dim());
+  at::native::zero_numel_check_dims(self, dim, "max()");
+  check_unsupported_complex("max()", self);
+  resize_reduction_with_indices(*this, self, dim, keepdim, self.scalar_type());
+  return TORCH_PRECOMPUTE_STRUCT2(max, dim)()
+      .set_dim(maybe_wrap_dim(dim, self.dim()));
+}
 
-  DimVector sizes(self.sizes());
-  if (self.numel() == 0) {
-    sizes = at::native::get_zero_numel_tensor_size(self, dim, keepdim, "max()");
-  } else {
-    sizes = get_reduction_shape(self, dim, keepdim);
-  }
-
-  set_output(0, sizes, self.options());
-  set_output(1, sizes, self.options().dtype(kLong));
-  namedinference::propagate_names_for_reduction(maybe_get_output(0), self, dim, keepdim);
-  namedinference::propagate_names_for_reduction(maybe_get_output(1), self, dim, keepdim);
+TORCH_PRECOMPUTE_META_FUNC2(min, dim)(const Tensor& self, int64_t dim, bool keepdim) {
+  dim = maybe_wrap_dim(dim, self.dim());
+  at::native::zero_numel_check_dims(self, dim, "min()");
+  check_unsupported_complex("min()", self);
+  resize_reduction_with_indices(*this, self, dim, keepdim, self.scalar_type());
+  return TORCH_PRECOMPUTE_STRUCT2(min, dim)()
+      .set_dim(maybe_wrap_dim(dim, self.dim()));
 }
 
 } // namespace meta
@@ -438,21 +438,41 @@ std::tuple<Tensor &,Tensor &> mode_out(const Tensor& self, int64_t dim, bool kee
   }
 }
 
-TORCH_IMPL_FUNC(max_out)
-(const Tensor& self,
- int64_t dim,
- bool keepdim,
- const Tensor& values,
- const Tensor& indices) {
+template <class Stub>
+void minmax_out_impl(
+    const Tensor& self,
+    int64_t dim,
+    bool keepdim,
+    const Tensor& values,
+    const Tensor& indices,
+    Stub& stub) {
   NoNamesGuard guard;
   if (self.numel() > 0) {
     if (self.numel() == 1 && self.dim() == 0) {
       values.fill_(self);
       indices.fill_(0);
     } else {
-      max_stub(self.device().type(), values, indices, self, dim, keepdim);
+      stub(self.device().type(), values, indices, self, dim, keepdim);
     }
   }
+}
+
+TORCH_IMPL_FUNC(max_out)
+(const Tensor& self,
+ int64_t dim,
+ bool keepdim,
+ const Tensor& values,
+ const Tensor& indices) {
+  minmax_out_impl(self, dim, keepdim, values, indices, max_stub);
+}
+
+TORCH_IMPL_FUNC(min_out)
+(const Tensor& self,
+ int64_t dim,
+ bool keepdim,
+ const Tensor& values,
+ const Tensor& indices) {
+  minmax_out_impl(self, dim, keepdim, values, indices, min_stub);
 }
 
 std::tuple<Tensor, Tensor> qmax(const Tensor& self, int64_t dim, bool keepdim) {
@@ -464,66 +484,17 @@ std::tuple<Tensor, Tensor> qmax(const Tensor& self, int64_t dim, bool keepdim) {
       at::_make_per_tensor_quantized_tensor(max, self.q_scale(), self.q_zero_point()), max_indices);
 }
 
-std::tuple<Tensor, Tensor> min(const Tensor& self, int64_t dim, bool keepdim) {
+std::tuple<Tensor, Tensor> qmin(const Tensor& self, int64_t dim, bool keepdim) {
   Tensor min_indices = at::empty({0}, self.options().dtype(kLong));
-  if (self.is_quantized()) {
-    Tensor min = at::empty({0}, self.options().dtype(toUnderlying(self.scalar_type())));
-    at::native::min_out(self.int_repr(), dim, keepdim, min, min_indices);
-    return std::tuple<Tensor, Tensor>(at::_make_per_tensor_quantized_tensor(min, self.q_scale(), self.q_zero_point()), min_indices);
-  } else {
-    Tensor min = at::empty({0}, self.options());
-    return at::native::min_out(self, dim, keepdim, min, min_indices);
-  }
+  Tensor min = at::empty({0}, self.options().dtype(toUnderlying(self.scalar_type())));
+  at::min_outf(self.int_repr(), dim, keepdim, min, min_indices);
+  return std::tuple<Tensor, Tensor>(
+      at::_make_per_tensor_quantized_tensor(min, self.q_scale(), self.q_zero_point()), min_indices);
 }
 
 // DEPRECATED: Use at::aminmax instead
 std::tuple<Tensor, Tensor> _aminmax(const Tensor& self, int64_t dim, bool keepdim) {
   return at::aminmax(self, dim, keepdim);
-}
-
-static std::tuple<Tensor &,Tensor &> min_out_impl(Tensor& min, Tensor& min_indices,
-                                                  const Tensor& self, int64_t dim, bool keepdim) {
-  TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
-              "min only supports CPU AND CUDA device type, got: ", self.device().type());
-  TORCH_CHECK(self.layout() == Layout::Strided,
-              "min only supports strided layout, got: ", self.layout());
-  TORCH_CHECK(self.device() == min.device(),
-              "expected device ", self.device(), " but got ",
-              min.device(), " for min values output");
-  TORCH_CHECK(self.device() == min_indices.device(),
-              "expected device ", self.device(), " but got ",
-              min_indices.device(), " for indices output");
-  dim = maybe_wrap_dim(dim, self.dim());
-  if (self.numel() == 0) {
-    auto sizes = get_zero_numel_tensor_size(self, dim, keepdim, "min()");
-    resize_output(min, sizes);
-    resize_output(min_indices, sizes);
-    return std::tie(min, min_indices);
-  }
-  else if (_dimreduce_return_trivial_no_ident(min, self, dim, keepdim, "min")) {
-    TORCH_CHECK(!self.is_complex(), "min does not support complex inputs.");
-    AT_ASSERT(min.dim() == 0);
-    min_indices.resize_({}).fill_(0);
-    return std::forward_as_tuple(min, min_indices);
-  } else {
-    min_stub(self.device().type(), min, min_indices, self, dim, keepdim);
-    return std::tuple<Tensor &,Tensor &>{min, min_indices};
-  }
-}
-
-std::tuple<Tensor&, Tensor&> min_out(
-    const Tensor& self,
-    int64_t dim,
-    bool keepdim,
-    Tensor& min,
-    Tensor& min_indices) {
-  auto result = [&]() {
-    NoNamesGuard guard;
-    return min_out_impl(min, min_indices, self, dim, keepdim);
-  }();
-  namedinference::propagate_names_for_reduction(min, self, dim, keepdim);
-  namedinference::propagate_names_for_reduction(min_indices, self, dim, keepdim);
-  return result;
 }
 
 TORCH_IMPL_FUNC(clamp_out)
