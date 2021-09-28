@@ -185,6 +185,11 @@ class TORCH_API Reducer {
   // rebuilt.
   bool rebuild_buckets();
 
+  // Install futures that should be awaited at end of backwards. Currently these
+  // are only used by user-defined custom buffer reduction hooks, but can be generalized
+  // to any user-originating futures that need to be awaited.
+  void install_futures(c10::List<c10::intrusive_ptr<c10::ivalue::Future>> futs);
+
   // Returns true if we should rebuild buckets, else false. We only rebuild
   // buckets once after the first iteration and never rebuild them if
   // find_unused_parameters_.
@@ -201,10 +206,9 @@ class TORCH_API Reducer {
       c10::intrusive_ptr<c10d::ProcessGroup::Work> forwardPassWorkHandle,
       bool useStaticWorldSize);
 
-  // Retrieve on-device tensors used to track locally unused parameters. For
-  // each replica, it is a tensor where index i = 1 if the Variable with that
-  // index has been used.
-  std::vector<at::Tensor> get_local_used_maps_on_device() const;
+  // Retrieve on-device tensors used to track locally unused parameters. It is
+  // a tensor where index i = 1 if the Variable with that index has been used.
+  at::Tensor get_local_used_map_on_device() const;
 
   // An function for users to set sample_rate of collecting
   // runtime stats. The time stats will be recorded for the
@@ -274,24 +278,26 @@ class TORCH_API Reducer {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool ddp_graph_static_{true};
   // Locally used parameter maps indicating if parameters are used locally
-  // during the current iteration or no_sync session if no_sync is on. One
-  // tensor for each model replica and each tensor is one-dim int32 tensor of
-  // number of parameters. These tensors are marked in autograd_hook to indicate
-  // the corresponding param has been used, and get allreduced in the end of
-  // backward of current iteration or no_sync session for figuring out the
-  // globally unused parameters.
+  // during the current iteration or no_sync session if no_sync is on.
+  // Each map is a one-dim int32 tensor of number of parameters. These tensors
+  // are marked in autograd_hook to indicate the corresponding param has been
+  // used, and get allreduced in the end of backward step of current iteration
+  // or no_sync session for figuring out the globally unused parameters.
   //
-  // local_used_maps_:     CPU tensors for bookkeeping locally used params
-  // local_used_maps_dev_: dev tensors for reducing globally unused params
-  std::vector<at::Tensor> local_used_maps_;
-  std::vector<at::Tensor> local_used_maps_dev_;
+  // local_used_map_:     CPU tensor for bookkeeping locally used params
+  // local_used_map_dev_: dev tensor for reducing globally unused params
+  at::Tensor local_used_map_;
+  at::Tensor local_used_map_dev_;
   // Indicate that reduction is done and D2H copy is done as well.
-  bool local_used_maps_reduced_;
+  bool local_used_map_reduced_;
 
   // Weak pointer to associated DDP logger.
   std::weak_ptr<c10d::Logger> logger_;
+  // List of futures installed by Reducer::install_futures that should be awaited
+  // at the end of backwards pass.
+  c10::optional<c10::List<c10::intrusive_ptr<c10::ivalue::Future>>> installed_futures_{c10::nullopt};
 
-  // Work handle for allreduce on local_used_maps_
+  // Work handle for allreduce on local_used_map_
   c10::intrusive_ptr<c10d::ProcessGroup::Work> local_used_work_;
 
   void mark_variable_ready_dense(size_t variable_index);

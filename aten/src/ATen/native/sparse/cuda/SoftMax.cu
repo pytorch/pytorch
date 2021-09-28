@@ -390,8 +390,6 @@ void cuda_sparse_coo_softmax(
   }
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
-  auto policy = thrust::cuda::par(allocator).on(stream);
 
   auto nnz = values.size(0);
   auto sizes = input.sizes();
