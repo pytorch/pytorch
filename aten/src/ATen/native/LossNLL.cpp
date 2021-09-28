@@ -5,8 +5,8 @@
 #include <ATen/TensorMeta.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/cpu/utils.h>
+#include <ATen/native/Resize.h>
 #include <c10/util/SmallBuffer.h>
-#include <c10/macros/Macros.h>
 
 #include <c10/core/TensorOptions.h>
 
@@ -136,7 +136,7 @@ static void nll_loss_out_frame(
     const Tensor& target,
     const Tensor& weight,
     int64_t reduction,
-    int64_t ignore_index) __ubsan_ignore_float_divide_by_zero__ {
+    int64_t ignore_index) {
   const auto n_dims = input.dim();
   const auto n_classes = input.size(-1);
 
@@ -148,6 +148,7 @@ static void nll_loss_out_frame(
 
   if (reduction == Reduction::None && n_dims == 2) {
     const auto batch_size = input.size(0);
+    at::native::resize_output(output, {batch_size});
 
     auto input_acc = input.accessor<scalar_t, 2>();
     auto target_acc = target.accessor<target_t, 1>();
@@ -174,6 +175,22 @@ static void nll_loss_out_frame(
       }
     });
 
+    return;
+  }
+
+  // produce scalar outputs for the reduction case
+  at::native::resize_output(output, {});
+
+  if (target.numel() == 0) {
+    // Here target (and input) have zero elements
+    // Mean reduction on empty tensors produces NaN. See the discussion in
+    // https://github.com/pytorch/pytorch/pull/64572#issuecomment-926504162
+    if (reduction == Reduction::Mean) {
+      output.fill_(std::numeric_limits<double>::quiet_NaN());
+    } else {
+      output.zero_();
+    }
+    total_weight.zero_();
     return;
   }
 
@@ -244,8 +261,9 @@ static void nll_loss_out_frame(
                                         std::end(loss_partial_sums),
                                         scalar_t{0});
 
-  if (reduction == Reduction::Mean) {
-    // allow NaN result for total_weight_val == 0 case, see #15870
+  // Mean reduction with all ignored. See the discussion in
+  // https://github.com/pytorch/pytorch/pull/64572#issuecomment-926504162
+  if (reduction == Reduction::Mean && num_ignored != batch_size) {
     output_val /= total_weight_val;
   }
 
@@ -296,7 +314,7 @@ static void nll_loss_backward_out_frame(
     const Tensor& weight,
     int64_t reduction,
     int64_t ignore_index,
-    const Tensor& total_weight) __ubsan_ignore_float_divide_by_zero__ {
+    const Tensor& total_weight) {
   const auto n_dims = input.dim();
   const auto n_classes = input.size(-1);
 
@@ -670,7 +688,7 @@ Tensor nll_loss_nd(
     } else {
       target_ = target_.view({n, 0, 0});
     }
-    if (!(reduction == Reduction::None)) {
+    if (reduction != Reduction::None) {
       ret = at::nll_loss2d(input_, target_, weight, reduction, ignore_index);
     } else {
       auto out =

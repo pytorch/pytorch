@@ -4,7 +4,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/cpu/utils.h>
-#include <c10/macros/Macros.h>
+#include <ATen/native/Resize.h>
 
 namespace at {
 namespace native {
@@ -89,7 +89,7 @@ static void nll_loss2d_forward_out_frame(
     const Tensor& target,
     const Tensor& weight,
     int64_t reduction,
-    int64_t ignore_index) __ubsan_ignore_float_divide_by_zero__ {
+    int64_t ignore_index) {
   const int64_t n_classes = input.size(1);
 
   scalar_t* total_weight_data = total_weight.data_ptr<scalar_t>();
@@ -103,7 +103,7 @@ static void nll_loss2d_forward_out_frame(
     const int64_t H = input.size(2);
     const int64_t W = input.size(3);
 
-    output.resize_({batch_size, H, W});
+    at::native::resize_output(output, {batch_size, H, W});
     auto input_acc = input.accessor<scalar_t, 4>();
     auto output_acc = output.accessor<scalar_t, 3>();
     auto target_acc = target.accessor<int64_t, 3>();
@@ -139,7 +139,20 @@ static void nll_loss2d_forward_out_frame(
   }
 
   // produce scalar outputs for the reduction case
-  output.resize_({});
+  resize_output(output, {});
+
+  if (target.numel() == 0) {
+    // Here target (and input) have zero elements
+    // Mean reduction on empty tensors produces NaN. See the discussion in
+    // https://github.com/pytorch/pytorch/pull/64572#issuecomment-926504162
+    if (reduction == Reduction::Mean) {
+      output.fill_(std::numeric_limits<double>::quiet_NaN());
+    } else {
+      output.zero_();
+    }
+    total_weight.zero_();
+    return;
+  }
 
   auto input_contiguous = input.contiguous();
   auto target_contiguous = target.contiguous();
@@ -213,7 +226,9 @@ static void nll_loss2d_forward_out_frame(
                                         std::end(loss_partial_sums),
                                         scalar_t{0});
 
-  if (reduction == Reduction::Mean) {
+  // Mean reduction on empty tensors produces 0. See the discussion in
+  // https://github.com/pytorch/pytorch/pull/64572#issuecomment-926504162
+  if (reduction == Reduction::Mean && num_ignored != numiter) {
     // allow NaN result for total_weight_val == 0 case, see #15870
     output_val /= total_weight_val;
   }
@@ -258,7 +273,7 @@ static void nll_loss2d_backward_out_frame(
     const Tensor& weight,
     int64_t reduction,
     int64_t ignore_index,
-    const Tensor& total_weight) __ubsan_ignore_float_divide_by_zero__ {
+    const Tensor& total_weight) {
   auto weight_contiguous = optional_contiguous(weight);
   const scalar_t* weight_data = optional_data<scalar_t>(weight_contiguous);
 

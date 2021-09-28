@@ -2,13 +2,12 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Dispatch.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <aten/src/ATen/TensorUtils.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/cuda/Loops.cuh>
-#include <c10/macros/Macros.h>
+#include <ATen/native/Resize.h>
 
 constexpr float EPSILON = 1e-12;
 
@@ -208,26 +207,29 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_1d(
     scalar_t* weights,
     bool size_average,
     int n_classes,
-    int64_t ignore_index) __ubsan_ignore_float_divide_by_zero__ {
+    int64_t ignore_index) {
   CUDA_KERNEL_ASSERT(threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0);
 
   int t = static_cast<int>(*target);
   if (t != static_cast<int>(ignore_index)) {
     CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
-    scalar_t cur_weight =
-        weights != nullptr ? weights[t] : static_cast<scalar_t>(1);
-    *output = -cur_weight * input[t];
+    const auto cur_weight = weights != nullptr ? weights[t] : scalar_t{1};
     *total_weight = cur_weight;
+
     if (size_average) {
-      *output /= *total_weight;
+      // If we try to normalize a zero then we return a NaN
+      if (cur_weight == 0) {
+        *output = std::numeric_limits<scalar_t>::quiet_NaN();
+      } else {
+        *output = -input[t];
+      }
+    } else {
+      *output = -cur_weight * input[t];
     }
   } else {
-    if (size_average) {
-      // Mean reduction on empty tensors produces NaN
-      *output = std::numeric_limits<scalar_t>::quiet_NaN();
-    } else{
-      *output = scalar_t{0};
-    }
+    // If the only element was omited, we get 0. See the discussion in
+    // https://github.com/pytorch/pytorch/pull/64572#issuecomment-926504162
+    *output = scalar_t{0};
   }
 }
 
@@ -242,16 +244,19 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
     int nframe,
     int ndim,
     int n_classes,
-    int64_t ignore_index) __ubsan_ignore_float_divide_by_zero__ {
+    int64_t ignore_index) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   __shared__ accscalar_t sh_inputs[NLL_LOSS_THREADS],
       acc_weight[NLL_LOSS_THREADS];
+  __shared__ bool any_used[NLL_LOSS_THREADS];
 
   sh_inputs[threadIdx.x] = static_cast<accscalar_t>(0);
   acc_weight[threadIdx.x] = static_cast<accscalar_t>(0);
+  any_used[threadIdx.x] = false;
   for (int i = threadIdx.x; i < nframe; i += NLL_LOSS_THREADS) {
     int t = target[i];
     if (t != static_cast<int>(ignore_index)) {
+      any_used[threadIdx.x] = true;
       CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
       scalar_t cur_weight =
           weights != nullptr ? weights[t] : static_cast<scalar_t>(1);
@@ -265,16 +270,19 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
   if (threadIdx.x == 0) {
     accscalar_t output_acc = 0;
     accscalar_t total_weight_acc = 0;
+    bool any_used_acc = false;
     for (int i = 0; i < NLL_LOSS_THREADS; ++i) {
       output_acc += sh_inputs[i];
       total_weight_acc += acc_weight[i];
+      any_used_acc |= any_used[i];
     }
     *total_weight = static_cast<scalar_t>(total_weight_acc);
-    // allow NaN result for total_weight_val == 0 case as the normalisation of an empty
-    // vector is NaN (it has no identity element), see #15870
-    if (size_average) {
+    if (size_average && any_used_acc) {
       *output = static_cast<scalar_t>(output_acc / total_weight_acc);
     } else {
+      // if !any_used_acc, this is equivalent to *output = 0
+      // Mean reduction on tensors with all entries omited. See the discussion in
+      // https://github.com/pytorch/pytorch/pull/64572#issuecomment-926504162
       *output = static_cast<scalar_t>(output_acc);
     }
   }
@@ -283,11 +291,14 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
 void nll_loss_forward_out_cuda_template(
     const Tensor& output,
     const Tensor& total_weight,
-    const Tensor& input,
-    const Tensor& target,
+    const Tensor& input_,
+    const Tensor& target_,
     const Tensor& weight,
     int64_t reduction,
     int64_t ignore_index) {
+  auto input = *input_.expect_contiguous();
+  auto target = *target_.expect_contiguous();
+
   int64_t n_classes = input.size(-1);
   int64_t n_dims = input.dim();
   int64_t batch_size = n_dims == 1 ? 1 : input.size(0);
@@ -295,7 +306,7 @@ void nll_loss_forward_out_cuda_template(
   auto weight_ = weight.defined() ? weight.contiguous() : weight;
 
   if (reduction == Reduction::None && n_dims == 2) {
-    output.resize_({batch_size});
+    at::native::resize_output(output, {batch_size});
     if (batch_size == 0) {
       // This guards from unnecessary operations and launching CUDA kernel with
       // 0 blocks.
@@ -331,11 +342,22 @@ void nll_loss_forward_out_cuda_template(
     return;
   }
 
-  output.resize_({});
+  // produce scalar outputs for the reduction case
+  at::native::resize_output(output, {});
   total_weight.resize_({});
 
-  auto input_ = input.contiguous();
-  auto target_ = target.contiguous();
+  if (target.numel() == 0) {
+    // Here target (and input) have zero elements
+    // Mean reduction on empty tensors produces NaN. See the discussion in
+    // https://github.com/pytorch/pytorch/pull/64572#issuecomment-926504162
+    if (reduction == Reduction::Mean) {
+      output.fill_(std::numeric_limits<double>::quiet_NaN());
+    } else {
+      output.zero_();
+    }
+    total_weight.zero_();
+    return;
+  }
 
   if (n_dims == 1) {
     AT_DISPATCH_FLOATING_TYPES_AND2(
@@ -352,8 +374,8 @@ void nll_loss_forward_out_cuda_template(
                     <<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
                         output.data_ptr<scalar_t>(),
                         total_weight.data_ptr<scalar_t>(),
-                        input_.data_ptr<scalar_t>(),
-                        target_.data_ptr<index_t>(),
+                        input.data_ptr<scalar_t>(),
+                        target.data_ptr<index_t>(),
                         weight_.defined() ? weight_.data_ptr<scalar_t>()
                                           : nullptr,
                         reduction == at::Reduction::Mean,
@@ -381,8 +403,8 @@ void nll_loss_forward_out_cuda_template(
                        at::cuda::getCurrentCUDAStream()>>>(
                         output.data_ptr<scalar_t>(),
                         total_weight.data_ptr<scalar_t>(),
-                        input_.data_ptr<scalar_t>(),
-                        target_.data_ptr<index_t>(),
+                        input.data_ptr<scalar_t>(),
+                        target.data_ptr<index_t>(),
                         weight_.defined() ? weight_.data_ptr<scalar_t>()
                                           : nullptr,
                         reduction == at::Reduction::Mean,
@@ -427,12 +449,18 @@ __global__ void nll_loss_backward_reduce_cuda_kernel_1d(
   bool size_average,
   int n_classes,
   int64_t ignore_index
-) __ubsan_ignore_float_divide_by_zero__ {
+) {
   int t = static_cast<int>(*target);
   if (t != static_cast<int>(ignore_index)) {
     CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
-    scalar_t norm = size_average ? (static_cast<scalar_t>(1) / *total_weight) : static_cast<scalar_t>(1);
-    grad_input[t] = -(weights != nullptr ? weights[t] : static_cast<scalar_t>(1)) * norm * grad_output[0];
+    auto grad = -grad_output[0];
+    if (weights != nullptr) {
+      grad *= weights[t];
+    }
+    if (size_average) {
+      grad /= *total_weight;
+    }
+    grad_input[t] = grad;
   }
 };
 
@@ -447,7 +475,7 @@ __global__ void nll_loss_backward_reduce_cuda_kernel_2d(
     int nframe,
     int ndim,
     int n_classes,
-    int64_t ignore_index) __ubsan_ignore_float_divide_by_zero__ {
+    int64_t ignore_index) {
   scalar_t norm = size_average ? (static_cast<scalar_t>(1) / *total_weight) : static_cast<scalar_t>(1);
 
   for (int i = threadIdx.x; i < nframe; i += NLL_LOSS_THREADS) {
@@ -460,14 +488,19 @@ __global__ void nll_loss_backward_reduce_cuda_kernel_2d(
 };
 
 void nll_loss_backward_out_cuda_template(
-    const Tensor& grad_input,
-    const Tensor& grad_output,
-    const Tensor& input,
-    const Tensor& target,
+    const Tensor& grad_input_,
+    const Tensor& grad_output_,
+    const Tensor& input_,
+    const Tensor& target_,
     const Tensor& total_weight,
     const Tensor& weight,
     int64_t reduction,
     int64_t ignore_index) {
+  auto target = *target_.expect_contiguous();
+  auto input = *input_.expect_contiguous();
+  auto grad_input = *grad_input_.expect_contiguous();
+  auto grad_output = *grad_output_.expect_contiguous();
+
   int64_t n_dims = input.dim();
   int64_t n_classes = input.size(-1);
   int64_t batch_size = n_dims == 1 ? 1 : input.size(0);
@@ -507,8 +540,6 @@ void nll_loss_backward_out_cuda_template(
         });
     return;
   }
-
-  auto target_ = target.contiguous();
 
   if (n_dims == 1) {
     AT_DISPATCH_FLOATING_TYPES_AND2(
