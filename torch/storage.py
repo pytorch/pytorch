@@ -633,6 +633,15 @@ class TypedStorage:
         return manager_handle, storage_handle, size // self.element_size()
 
     @classmethod
+    def _new_shared_filename(cls, manager, obj, size):
+        bytes_size = size * torch._utils._element_size(cls.dtype)
+        return cls(wrap_storage=eval(cls.__module__).UntypedStorage._new_shared_filename(manager, obj, bytes_size))
+
+    def _shared_decref(self):
+        self._storage._shared_decref()
+        return self
+
+    @classmethod
     def _release_ipc_counter(cls, *args, **kwargs):
         return eval(cls.__module__).UntypedStorage._release_ipc_counter(*args, **kwargs)
 
