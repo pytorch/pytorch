@@ -26,7 +26,7 @@ class TestModule(TestCase):
             for item_name, item in items:
                 self.assertEqual(
                     str(item.device), device,
-                    f'{name} {item_name} is on {item.device} instead of the expected device {device}')
+                    f'{name} {item_name} is on device {item.device} instead of the expected device {device}')
                 if item.dtype.is_floating_point:
                     self.assertEqual(
                         item.dtype, dtype,
