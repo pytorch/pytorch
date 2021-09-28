@@ -121,6 +121,9 @@ class AbstractTestCases:
         def test_dir(self):
             dir(torch)
 
+        def test_wildcard_import(self):
+            exec('from torch import *')
+
         @wrapDeterministicFlagAPITest
         def test_deterministic_flag(self):
             for deterministic in [True, False]:
@@ -3030,6 +3033,10 @@ class TestTorchDeviceType(TestCase):
         w[2].sub_(1)
         for i in range(a.numel()):
             self.assertEqual(w[1][1][i], q[1][1][i] - 1)
+
+        # Check that deepcopy preserves attributes
+        a.foo = 3
+        self.assertEqual(deepcopy(a).foo, 3)
 
     @dtypes(torch.float32, torch.complex64)
     def test_deepcopy_scalar(self, device, dtype):
