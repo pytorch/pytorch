@@ -291,7 +291,7 @@ struct CachingHostAllocator final : public at::Allocator {
 };
 
 static CachingHostAllocator caching_host_allocator;
-at::Allocator* getTHCCachingHostAllocator() {
+at::Allocator* getCachingHostAllocator() {
   return &caching_host_allocator;
 }
 
