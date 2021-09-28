@@ -1,8 +1,11 @@
 #pragma once
 
+#include <vector>
+
+#include <ATen/core/function.h>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
-#include <vector>
+#include <torch/csrc/jit/mobile/executor.h>
 
 namespace torch {
 namespace jit {
@@ -12,13 +15,22 @@ enum OpCode : uint8_t;
 namespace mobile {
 struct Code;
 
-class Function {
+class TORCH_API Function : public torch::jit::Function {
  public:
-  TORCH_API Function(c10::QualifiedName name);
-  TORCH_API bool run(Stack& stack) const;
-  c10::IValue operator()(Stack& stack) const;
-  const std::string& name() const;
-  TORCH_API const c10::QualifiedName& qualname() const;
+  Function(c10::QualifiedName name);
+  void run(Stack& stack) override;
+  void run(Stack&& stack) override;
+  c10::intrusive_ptr<c10::ivalue::Future> runAsync(
+      Stack& stack,
+      TaskLauncher taskLauncher = at::launch) override;
+  at::IValue operator()(Stack stack, const Kwargs& = {}) override;
+  void ensure_defined() override {}
+  Executor& get_executor() override;
+  size_t num_inputs() const override;
+  void check_single_output() override;
+  std::string pretty_print_schema() const override;
+  const std::string& name() const override;
+  const c10::QualifiedName& qualname() const override;
   void append_instruction(OpCode op, int X, int N, int64_t dbg_handle = -1);
   bool append_operator(
       const std::string& name,
@@ -34,8 +46,9 @@ class Function {
   int64_t get_debug_handle(size_t pc) const;
   const std::shared_ptr<Code> get_code() const;
 
-  void setSchema(c10::FunctionSchema schema);
-  const at::optional<c10::FunctionSchema>& getSchema() const;
+  torch::jit::Function& setSchema(c10::FunctionSchema schema) override;
+  bool hasSchema() const;
+  const c10::FunctionSchema& getSchema() const override;
 
   // Returns the debug handle corresponding to where the execution
   // is halted due to exception.
@@ -46,6 +59,7 @@ class Function {
   c10::QualifiedName name_;
   std::shared_ptr<Code> code_;
   at::optional<c10::FunctionSchema> schema_; // (byte-code version 4+)
+  EdgeExecutor executor_;
 };
 
 } // namespace mobile

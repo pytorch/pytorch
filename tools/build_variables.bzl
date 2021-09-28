@@ -436,6 +436,7 @@ torch_mobile_core = [
     # This should not be needed eventually.
     # TODO: Remove this dependency
     "torch/csrc/jit/backends/backend_debug_info.cpp",
+    "torch/csrc/jit/mobile/executor.cpp",
     "torch/csrc/jit/mobile/function.cpp",
     "torch/csrc/jit/mobile/import.cpp",
     "torch/csrc/jit/mobile/interpreter.cpp",
@@ -477,6 +478,7 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
     # To be included for eager symbolication in lite interpreter
     # when it is built in libtorch
     "torch/csrc/jit/mobile/debug_info.cpp",
+    "torch/csrc/jit/mobile/executor.cpp",
     "torch/csrc/jit/mobile/function.cpp",
     "torch/csrc/jit/mobile/import.cpp",
     "torch/csrc/jit/mobile/import_data.cpp",
