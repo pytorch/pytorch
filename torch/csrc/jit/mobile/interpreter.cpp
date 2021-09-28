@@ -12,6 +12,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/backends/backend_exception.h>
 #include <torch/csrc/jit/mobile/observer.h>
+#include "jit/mobile/executor.h"
 
 namespace torch {
 namespace jit {
@@ -129,9 +130,11 @@ bool InterpreterState::run(Stack& stack) {
                   ->getMethod(code.constants_[inst.X].toStringRef());
           RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS(
               method.name(), debug_handle, stack);
-          if (auto f = dynamic_cast<BytecodeFunction*>(&method)) {
+
+          if (method.hasExecutor()) {
+            auto& plan = method.get_executor().getPlanFor(stack, 0);
             frame.step();
-            enterFrame(f->getCode());
+            enterFrame(toEdgeExecutionPlan(plan).getCode());
             continue;
           }
 

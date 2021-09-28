@@ -2078,10 +2078,9 @@ void inlineCallStackOfNode(
 // ONNX conversion
 std::vector<Value*> inlineCallTo(
     Node* to_replace,
-    Function* callee,
+    GraphFunction* callee,
     bool inline_optimized_graph /*=true*/) {
   WithInsertPoint guard(to_replace);
-  TORCH_INTERNAL_ASSERT(callee->isGraphFunction());
   std::unordered_map<Value*, Value*> value_map;
   std::vector<torch::jit::Value*> new_outputs;
 

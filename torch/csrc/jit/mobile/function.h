@@ -8,6 +8,7 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/operator_name.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/jit/mobile/executor.h>
 
 namespace torch {
 namespace jit {
@@ -17,94 +18,22 @@ enum OpCode : uint8_t;
 namespace mobile {
 struct Code;
 
-class Function;
-// FIXME This is more like a hack, don't land or check in it.
-class BytecodeFunction : public torch::jit::Function {
+class TORCH_API Function : public torch::jit::Function {
  public:
-  BytecodeFunction(mobile::Function& function) : function_(function) {}
-
-  bool isGraphFunction() const override {
-    return false;
-  }
-
-  void run(Stack& stack) override {
-    throw c10::NotImplementedError("", "");
-  }
-
-  void run(Stack&& stack) override {
-    throw c10::NotImplementedError("", "");
-  }
-
+  Function(c10::QualifiedName name);
+  void run(Stack& stack) override;
+  void run(Stack&& stack) override;
   c10::intrusive_ptr<c10::ivalue::Future> runAsync(
       Stack& stack,
-      TaskLauncher taskLauncher = at::launch) override {
-    throw c10::NotImplementedError("", "");
-  }
-
-  at::IValue operator()(
-      std::vector<at::IValue> stack,
-      const Kwargs& kwargs = Kwargs()) override {
-    throw c10::NotImplementedError("", "");
-  }
-
-  const c10::QualifiedName& qualname() const override;
-
+      TaskLauncher taskLauncher = at::launch) override;
+  at::IValue operator()(Stack stack, const Kwargs& = {}) override;
+  void ensure_defined() override {}
+  Executor& get_executor() override;
+  size_t num_inputs() const override;
+  void check_single_output() override;
+  std::string pretty_print_schema() const override;
   const std::string& name() const override;
-
-  // if this isn't yet defined, run its method_creator function
-  void ensure_defined() override {
-    throw c10::NotImplementedError("", "");
-  }
-
-  std::shared_ptr<Graph> graph() const override {
-    throw c10::NotImplementedError("", "");
-  }
-
-  std::shared_ptr<Graph> optimized_graph() const override {
-    throw c10::NotImplementedError("", "");
-  }
-
-  void clear_execution_info() override {
-    throw c10::NotImplementedError("", "");
-  }
-
-  GraphExecutor& get_executor() override {
-    throw c10::NotImplementedError("", "");
-  }
-
-  const c10::FunctionSchema& getSchema() const override {
-    throw c10::NotImplementedError("", "");
-  }
-
-  size_t num_inputs() const override {
-    throw c10::NotImplementedError("", "");
-  }
-
-  void check_single_output() override {
-    throw c10::NotImplementedError("", "");
-  }
-
-  std::string pretty_print_schema() const override {
-    throw c10::NotImplementedError("", "");
-  }
-
-  Function& setSchema(c10::FunctionSchema schema) override {
-    throw c10::NotImplementedError("", "");
-  }
-
-  const Code& getCode() const;
-
- private:
-  mobile::Function& function_;
-};
-
-class Function {
- public:
-  TORCH_API Function(c10::QualifiedName name);
-  TORCH_API bool run(Stack& stack) const;
-  c10::IValue operator()(Stack& stack) const;
-  const std::string& name() const;
-  TORCH_API const c10::QualifiedName& qualname() const;
+  const c10::QualifiedName& qualname() const override;
   void append_instruction(OpCode op, int X, int N, int64_t dbg_handle = -1);
   bool append_operator(
       const std::string& name,
@@ -120,23 +49,20 @@ class Function {
   int64_t get_debug_handle(size_t pc) const;
   const std::shared_ptr<Code> get_code() const;
 
-  void setSchema(c10::FunctionSchema schema);
-  const at::optional<c10::FunctionSchema>& getSchema() const;
+  torch::jit::Function& setSchema(c10::FunctionSchema schema) override;
+  bool hasSchema() const;
+  const c10::FunctionSchema& getSchema() const override;
 
   // Returns the debug handle corresponding to where the execution
   // is halted due to exception.
   // If no corresponding debug handle is found then -1 is returned.
   int64_t getExceptionDebugHandle() const;
 
-  BytecodeFunction& getBytecodeFunction() {
-    return bytecodeFunction_;
-  }
-
  private:
   c10::QualifiedName name_;
   std::shared_ptr<Code> code_;
   at::optional<c10::FunctionSchema> schema_; // (byte-code version 4+)
-  BytecodeFunction bytecodeFunction_;
+  EdgeExecutor executor_;
 };
 
 } // namespace mobile

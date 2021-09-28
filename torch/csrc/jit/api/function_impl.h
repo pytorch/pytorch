@@ -33,11 +33,11 @@ struct TORCH_API GraphFunction : public Function {
   IValue operator()(std::vector<IValue> stack, const Kwargs& kwargs = Kwargs())
       override;
 
-  std::shared_ptr<Graph> graph() const override {
+  std::shared_ptr<Graph> graph() const {
     return graph_;
   }
 
-  std::shared_ptr<Graph> optimized_graph() const override {
+  std::shared_ptr<Graph> optimized_graph() const {
     std::lock_guard<std::recursive_mutex> lock(compile_mutex);
     if (optimized_graph_) {
       return *optimized_graph_;
@@ -47,14 +47,6 @@ struct TORCH_API GraphFunction : public Function {
       preoptimizeGraph(*optimized_graph_);
     }
     return *optimized_graph_;
-  }
-
-  void clear_execution_info() override {
-    std::lock_guard<std::recursive_mutex> lock(compile_mutex);
-    if (optimized_graph_) {
-      optimized_graph_.reset();
-    }
-    executor_.reset();
   }
 
   const c10::QualifiedName& qualname() const override {
@@ -87,7 +79,7 @@ struct TORCH_API GraphFunction : public Function {
   }
 
   GraphExecutorState getDebugState() {
-    return get_executor().getDebugState();
+    return get_graph_executor().getDebugState();
   }
 
   bool is_optimized() const {
@@ -103,18 +95,22 @@ struct TORCH_API GraphFunction : public Function {
         "Method (but not graphs in general) require a single output. Use None/Tuple for 0 or 2+ outputs");
   }
 
-  GraphExecutor& get_executor() override {
-    ensure_defined();
-    std::lock_guard<std::recursive_mutex> lock(compile_mutex);
-    if (executor_) {
-      return executor_;
-    }
-    check_single_output();
-    executor_ = GraphExecutor(optimized_graph(), name_.name());
-    return executor_;
+  Executor& get_executor() override {
+    return get_graph_executor();
   }
 
  private:
+  GraphExecutor& get_graph_executor() {
+    ensure_defined();
+    std::lock_guard<std::recursive_mutex> lock(compile_mutex);
+    if (executor_) {
+      return *executor_;
+    }
+    check_single_output();
+    executor_ = GraphExecutor(optimized_graph(), name_.name());
+    return *executor_;
+  }
+
   c10::QualifiedName name_;
   // The original, non-optimized graph
   std::shared_ptr<Graph> graph_; // for debugging and for inlining
@@ -131,7 +127,7 @@ struct TORCH_API GraphFunction : public Function {
   // (e.g. optimized_graph() from get_executor()).
   mutable std::recursive_mutex compile_mutex;
 
-  GraphExecutor executor_; // for execution
+  c10::optional<GraphExecutor> executor_; // for execution
 
   // an optional function that actually creates the method when
   // ensure_defined() is called. This is used by the compiler so
@@ -143,5 +139,11 @@ struct TORCH_API GraphFunction : public Function {
   // before a call to setSchema
   mutable std::unique_ptr<FunctionSchema> schema_;
 };
+
+// Short hands for dynamic_cast<GraphFunction*>.
+TORCH_API GraphFunction* tryToGraphFunction(Function&) noexcept;
+TORCH_API GraphFunction& toGraphFunction(Function&);
+TORCH_API const GraphFunction& toGraphFunction(const Function&);
+
 } // namespace jit
 } // namespace torch

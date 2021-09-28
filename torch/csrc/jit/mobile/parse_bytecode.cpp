@@ -25,17 +25,6 @@ IValue expect_field(
   return std::move(row->elements().at(1));
 }
 
-c10::optional<IValue> optional_field(
-    std::vector<IValue>& elements,
-    const std::string& expected_name,
-    size_t entry) {
-  if (entry >= elements.size()) {
-    return {};
-  }
-
-  return expect_field(elements, expected_name, entry);
-}
-
 namespace mobile {
 
 namespace {

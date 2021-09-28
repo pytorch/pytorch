@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/runtime/graph_executor_impl.h>
 
 #include <stack>
+#include "jit/api/function_impl.h"
 
 namespace torch {
 namespace jit {
@@ -98,7 +99,7 @@ class AttributePropagator {
 
     for (auto function : preservedMethods_) {
       GRAPH_DEBUG("Analyzing function: " + function->name());
-      auto graph = function->graph();
+      auto graph = toGraphFunction(*function).graph();
       optimizeSubGraphs(graph, applyInline);
       if (freezeInterfaces_) {
         inlineInterfaceCalls(graph);
@@ -110,7 +111,7 @@ class AttributePropagator {
 
     for (auto function : preservedMethods_) {
       GRAPH_DEBUG("Propagating function: " + function->name());
-      auto graph = function->graph();
+      auto graph = toGraphFunction(*function).graph();
       propagateAttributes(graph);
       optimizeSubGraphs(graph, applyOptimizations);
     }
@@ -352,18 +353,17 @@ class AttributePropagator {
       if (user_node->kind() == prim::CallMethod) {
         const std::string& methodName = user_node->s(attr::name);
         Function& function = class_type->getMethod(methodName);
-        if (!function.isGraphFunction()) {
-          continue;
-        }
-        GRAPH_UPDATE(
-            "Inlining interface method '",
-            function.name(),
-            "' to ",
-            *user_node);
+        if (auto graphFunction = tryToGraphFunction(function)) {
+          GRAPH_UPDATE(
+              "Inlining interface method '",
+              function.name(),
+              "' to ",
+              *user_node);
 
-        GRAPH_UPDATE("Function body: ", *function.optimized_graph());
-        inlineCallTo(user_node, &function);
-        inlined = true;
+          GRAPH_UPDATE("Function body: ", graphFunction->optimized_graph());
+          inlineCallTo(user_node, graphFunction);
+          inlined = true;
+        }
       }
     }
     return inlined;
@@ -466,6 +466,16 @@ class AttributePropagator {
               }
             } else {
               attr = overrideGradient(attr);
+            }
+            if (attr.isObject()) {
+              if (object_memo_.count(attr.toObject())) {
+                attr = object_memo_[attr.toObject()];
+              } else {
+                auto weak_class_obj =
+                    attr.toObject()->copy_to_weak_compilation_ref();
+                object_memo_[attr.toObject()] = weak_class_obj;
+                attr = weak_class_obj;
+              }
             }
             if (auto attrVal = tryInsertConstant(*graph, attr)) {
               paramConst = *attrVal;
@@ -573,7 +583,7 @@ class AttributePropagator {
   // 3) Remove non public unreferenced methods.
   void cleanupFrozenModule() {
     for (auto function : preservedMethods_) {
-      auto graph = function->graph();
+      auto graph = toGraphFunction(*function).graph();
       recordReferencedAttrs(graph);
       handleSharedClassType(module_, graph);
       removeExtraWaitCalls(graph->block());
@@ -758,6 +768,13 @@ class AttributePropagator {
 
   // Contains the attributes names (e.g. {"self", "subModule", "a"}
   std::deque<std::string> names_;
+
+  // see [Constant Object Weak CompilationUnit Reference]
+  std::unordered_map<
+      c10::intrusive_ptr<at::ivalue::Object>,
+      c10::intrusive_ptr<at::ivalue::Object>>
+      object_memo_;
+
 }; // class AttributePropagator
 
 void checkModuleDoesNotReturnSelf(const Module& module) {
