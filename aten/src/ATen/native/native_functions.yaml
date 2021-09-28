@@ -723,20 +723,17 @@
 
 - func: baddbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function, method
-  dispatch:
-    CPU: baddbmm_cpu
-    CUDA: baddbmm_cuda
+  structured_delegate: baddbmm.out
 
 - func: baddbmm_(Tensor(a!) self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   variants: method
-  dispatch:
-    CPU: baddbmm__cpu
-    CUDA: baddbmm__cuda
+  structured_delegate: baddbmm.out
 
 - func: _baddbmm_mkl_(Tensor(a!) self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   variants: function
 
 - func: baddbmm.out(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   variants: function
   dispatch:
     CPU: baddbmm_out_cpu
@@ -940,14 +937,14 @@
 - func: blackman_window.periodic(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: bmm(Tensor self, Tensor mat2) -> Tensor
+  structured_delegate: bmm.out
   variants: function, method
   dispatch:
-    CPU: bmm_cpu
-    CUDA: bmm_cuda
     SparseCPU: bmm_sparse_cpu
     SparseCUDA: bmm_sparse_cuda
 
 - func: bmm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   variants: function
   dispatch:
     CPU: bmm_out_cpu
