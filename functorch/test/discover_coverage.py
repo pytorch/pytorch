@@ -39,6 +39,55 @@ def get_public_overridable_apis(pytorch_root='/raid/rzou/pt/whiteboard'):
                 results[f'{module_name}.{line}'] = api
     return results
 
+denylist = {
+    'torch.Tensor.data_ptr',
+    'torch.Tensor.dim',
+    'torch.Tensor.element_size',
+    'torch.Tensor.backward',
+    'torch.Tensor.as_strided',
+    'torch.Tensor.register_hook',
+    'torch.Tensor.record_stream',
+    'torch.Tensor.qscheme',
+    'torch.Tensor.ndimension',
+    'torch.Tensor.smm',
+    'torch.Tensor.sspaddmm',
+    'torch.Tensor.retain_grad',
+    'torch.Tensor.sparse_mask',
+    'torch.Tensor.sparse_dim',
+    'torch.Tensor.dense_dim',
+    'torch.Tensor.values',
+    'torch.Tensor.indices',
+    'torch.Tensor.numel',
+    'torch.Tensor.size',
+    'torch.Tensor.nelement',
+    'torch.Tensor.q_scale',
+    'torch.Tensor.q_zero_point',
+    'torch.Tensor.q_per_channel_scales',
+    'torch.Tensor.q_per_channel_zero_points',
+    'torch.Tensor.q_per_channel_axis',
+    'torch.Tensor.int_repr',
+    'torch.Tensor.to_sparse',
+    'torch.Tensor.is_inference',
+    'torch.Tensor.storage',
+    'torch.Tensor.storage_type',
+}
+
+def get_method_only_ops_we_care_about():
+    apis = get_public_overridable_apis()
+    result = []
+    for key, _ in apis.items():
+        if not key.startswith('torch.Tensor'):
+            continue
+        if key in denylist:
+            continue
+        api = key.split('.')[2]
+        # filter out in-place
+        if api.endswith('_'):
+            continue
+        if f'torch.{api}' not in apis.keys():
+            result.append(api)
+    return result
+
 # Deduplicates torch.abs and Tensor.abs
 def get_public_overridable_ops():
     results = get_public_overridable_apis()
@@ -61,28 +110,6 @@ def get_public_overridable_outplace_ops():
     return results
 
 def get_public_overridable_outplace_we_care_about():
-    denylist = {
-        'torch.Tensor.data_ptr',
-        'torch.Tensor.dim',
-        'torch.Tensor.element_size',
-        'torch.Tensor.backward',
-        'torch.Tensor.as_strided',
-        'torch.Tensor.register_hook',
-        'torch.Tensor.record_stream',
-        'torch.Tensor.qscheme',
-        'torch.Tensor.ndimension',
-        'torch.Tensor.smm',
-        'torch.Tensor.sspaddmm',
-        'torch.Tensor.retain_grad',
-        'torch.Tensor.sparse_mask',
-        'torch.Tensor.sparse_dim',
-        'torch.Tensor.dense_dim',
-        'torch.Tensor.values'
-        'torch.Tensor.indices',
-        'torch.Tensor.numel',
-        'torch.Tensor.size',
-        'torch.Tensor.nelement',
-    }
     results = get_public_overridable_outplace_ops()
     cpy = copy.deepcopy(results)
     for key, _ in cpy.items():
@@ -94,7 +121,7 @@ def get_public_overridable_outplace_we_care_about():
         if '.is_' in key:
             del results[key]
 
-        if key in denylist:
+        if key in denylist and key in results:
             del results[key]
     return results
 
@@ -205,3 +232,7 @@ print(f'OpInfo-tested overridable public outplace ops: {len(tested_overridable_o
 statuses = transpose_statuses()
 for test in tests:
     print(f'{test} coverage {len(statuses[test])}')
+
+method_only_ops = get_method_only_ops_we_care_about()
+# for op in method_only_ops:
+#     print(f'    {op},')
