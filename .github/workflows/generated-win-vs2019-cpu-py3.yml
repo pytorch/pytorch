@@ -228,7 +228,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            pytorch-${{ github.run_id }}/test-reports-*.zip
+            test-reports-*.zip
       - uses: seemethere/upload-artifact-s3@v3
         name: Store Test Reports on S3
         if: always()
@@ -236,7 +236,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            pytorch-${{ github.run_id }}/test-reports-*.zip
+            test-reports-*.zip
       - name: Install render_test_results dependencies
         if: always()
         shell: bash
