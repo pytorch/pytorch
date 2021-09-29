@@ -193,9 +193,11 @@ concurrency:
 {%- if ciflow_config.enabled %}
   !{{ ciflow_config.root_job_name }}:
     runs-on: ubuntu-18.04
-    if: ${{ !{{ ciflow_config.root_job_condition }} }}
     env:
+      IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == '!{{ ciflow_config.trigger_action }}') && (github.event.assigneed.login == '!{{ ciflow_config.trigger_actor }}') }}
+      LABEL_CONDITIONS: ${{ !{{ ciflow_config.label_conditions }} }}
       LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+    if: !{{ ciflow_config.root_job_condition }}
     steps:
       - name: noop
         run: echo running !{{ ciflow_config.root_job_name }}
