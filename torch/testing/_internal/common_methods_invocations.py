@@ -9088,7 +9088,7 @@ op_db: List[OpInfo] = [
                # error, or similar, if a pad specifier arg is a non-tensor:
                #    Expected a value of type 'Tensor' for argument 'pad_width'
                #    but instead found type 'int'.
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            )),
     OpInfo('sort',
            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
