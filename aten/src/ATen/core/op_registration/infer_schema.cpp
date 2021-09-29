@@ -1,5 +1,4 @@
 #include <ATen/core/op_registration/infer_schema.h>
-#include <iostream>
 #include <sstream>
 
 namespace c10 {
