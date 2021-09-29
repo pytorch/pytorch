@@ -165,7 +165,7 @@ enum class DispatchKey : uint8_t {
   // This is implemented at a dispatch level right before any backends run
   Negative,
 
-  ZeroTensor,
+  ZeroTensor, // registered at build/aten/src/ATen/RegisterZeroTensor.cpp
 
   // See Note [Out-of-tree vmap+grad prototype]. The purpose of this key
   // is to insert code after the "autograd subsystem" runs, so this key should

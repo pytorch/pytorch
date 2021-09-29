@@ -88,6 +88,8 @@ namespace at {
     m.impl("empty_like", torch::CppFunction::makeFallthrough());
     m.impl("empty_strided", torch::CppFunction::makeFallthrough());
     m.impl("mul.Scalar", torch::CppFunction::makeFallthrough());
+    // m.impl("mul.Tensor", torch::CppFunction::makeFallthrough());
+    // m.impl("add.Tensor", torch::CppFunction::makeFallthrough());
     // m.impl("set_.source_Storage_storage_offset", torch::CppFunction::makeFallthrough());
     // m.impl("set_.source_Tensor", torch::CppFunction::makeFallthrough());
     // m.impl("set_", torch::CppFunction::makeFallthrough());

@@ -1163,6 +1163,7 @@ def main() -> None:
         # Meta is a magic key: it is automatically generated for structured
         # kernels
         DispatchKey.Meta,
+        DispatchKey.ZeroTensor,
     ]
     # Only a limited set of dispatch keys get CPUFunctions.h headers generated
     # for them; this is the set

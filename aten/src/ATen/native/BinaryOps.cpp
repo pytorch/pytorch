@@ -624,6 +624,26 @@ Tensor& mul_(Tensor& self, const Scalar& other) {
   return at::mul_out(self, wrapped_scalar_tensor(other), self); // redispatch!
 }
 
+Tensor mul_zerotensor(const Tensor& self, const Tensor& other) {
+  std::cout<<"Entering mul_zerotensor\n";
+  TORCH_CHECK(self.sizes() == other.sizes());
+  TORCH_CHECK(self.device() == other.device());
+  auto commonDtype = at::result_type(self, other);
+  auto result_options = self.options().dtype(commonDtype);
+  return at::efficientzerotensor(self.sizes(), result_options);
+}
+
+Tensor add_zerotensor(const Tensor& self, const Tensor& other, const Scalar& alpha) {
+  TORCH_CHECK(self.sizes() == other.sizes());
+  TORCH_CHECK(self.device() == other.device());
+  auto commonDtype = at::result_type(self, other);
+  if (self.is_zerotensor()) {
+    return (commonDtype == other.scalar_type()) ? other.mul(alpha) : other.to(commonDtype).mul(alpha);
+  } else {
+    return (commonDtype == self.scalar_type()) ? self.clone() : self.to(commonDtype);
+  }
+}
+
 // multiply, alias for mul
 Tensor& multiply_out(const Tensor& self, const Tensor& other, Tensor& result) {
   return at::mul_out(result, self, other);
