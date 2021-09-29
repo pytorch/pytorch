@@ -25,7 +25,7 @@
 #include <magma_v2.h>
 #endif
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 #include <miopen/version.h>
 #endif
 
@@ -93,7 +93,7 @@ bool CUDAHooks::isPinnedPtr(void* data) const {
   }
   cudaPointerAttributes attr;
   cudaError_t err = cudaPointerGetAttributes(&attr, data);
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
   if (err == cudaErrorInvalidValue) {
     cudaGetLastError();
     return false;
@@ -106,7 +106,7 @@ bool CUDAHooks::isPinnedPtr(void* data) const {
     return false;
   }
 #endif
-#if CUDA_VERSION >= 10000
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 10000
   return attr.type == cudaMemoryTypeHost;
 #else
   return attr.memoryType == cudaMemoryTypeHost;
@@ -287,7 +287,7 @@ std::string CUDAHooks::showConfig() const {
     }
   };
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
   oss << "  - CUDA Runtime ";
 #else
   oss << "  - HIP Runtime ";
@@ -296,7 +296,7 @@ std::string CUDAHooks::showConfig() const {
   oss << "\n";
 
   // TODO: Make HIPIFY understand CUDART_VERSION macro
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
   if (runtimeVersion != CUDART_VERSION) {
     oss << "  - Built with CUDA Runtime ";
     printCudaStyleVersion(CUDART_VERSION);
@@ -305,7 +305,7 @@ std::string CUDAHooks::showConfig() const {
   oss << "  - NVCC architecture flags: " << NVCC_FLAGS_EXTRA << "\n";
 #endif
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 #if AT_CUDNN_ENABLED()
 
 
