@@ -139,7 +139,7 @@ static void nll_loss2d_forward_out_frame(
   }
 
   // produce scalar outputs for the reduction case
-  resize_output(output, {});
+  at::native::resize_output(output, {});
 
   if (target.numel() == 0) {
     // Here target (and input) have zero elements
@@ -226,10 +226,7 @@ static void nll_loss2d_forward_out_frame(
                                         std::end(loss_partial_sums),
                                         scalar_t{0});
 
-  // Mean reduction on empty tensors produces 0. See the discussion in
-  // https://github.com/pytorch/pytorch/pull/64572#issuecomment-926504162
-  if (reduction == Reduction::Mean && num_ignored != numiter) {
-    // allow NaN result for total_weight_val == 0 case, see #15870
+  if (reduction == Reduction::Mean) {
     output_val /= total_weight_val;
   }
 

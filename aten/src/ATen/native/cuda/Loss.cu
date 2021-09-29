@@ -248,15 +248,12 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   __shared__ accscalar_t sh_inputs[NLL_LOSS_THREADS],
       acc_weight[NLL_LOSS_THREADS];
-  __shared__ bool any_used[NLL_LOSS_THREADS];
 
   sh_inputs[threadIdx.x] = static_cast<accscalar_t>(0);
   acc_weight[threadIdx.x] = static_cast<accscalar_t>(0);
-  any_used[threadIdx.x] = false;
   for (int i = threadIdx.x; i < nframe; i += NLL_LOSS_THREADS) {
     int t = target[i];
     if (t != static_cast<int>(ignore_index)) {
-      any_used[threadIdx.x] = true;
       CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
       scalar_t cur_weight =
           weights != nullptr ? weights[t] : static_cast<scalar_t>(1);
@@ -270,19 +267,14 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
   if (threadIdx.x == 0) {
     accscalar_t output_acc = 0;
     accscalar_t total_weight_acc = 0;
-    bool any_used_acc = false;
     for (int i = 0; i < NLL_LOSS_THREADS; ++i) {
       output_acc += sh_inputs[i];
       total_weight_acc += acc_weight[i];
-      any_used_acc |= any_used[i];
     }
     *total_weight = static_cast<scalar_t>(total_weight_acc);
-    if (size_average && any_used_acc) {
+    if (size_average) {
       *output = static_cast<scalar_t>(output_acc / total_weight_acc);
     } else {
-      // if !any_used_acc, this is equivalent to *output = 0
-      // Mean reduction on tensors with all entries omited. See the discussion in
-      // https://github.com/pytorch/pytorch/pull/64572#issuecomment-926504162
       *output = static_cast<scalar_t>(output_acc);
     }
   }

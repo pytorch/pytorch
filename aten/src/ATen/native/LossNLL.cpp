@@ -261,9 +261,7 @@ static void nll_loss_out_frame(
                                         std::end(loss_partial_sums),
                                         scalar_t{0});
 
-  // Mean reduction with all ignored. See the discussion in
-  // https://github.com/pytorch/pytorch/pull/64572#issuecomment-926504162
-  if (reduction == Reduction::Mean && num_ignored != batch_size) {
+  if (reduction == Reduction::Mean) {
     output_val /= total_weight_val;
   }
 
