@@ -5,7 +5,6 @@
 #include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <unordered_map>
-#include "jit/frontend/function_schema_parser.h"
 
 namespace torch {
 namespace jit {
@@ -63,10 +62,10 @@ const std::string shape_compute_functions =
           dimsA = len(a)
           dimsB = len(b)
           if dimsB > dimsA:
-            raise AssertionError("The dims of tensor b ({}) must be less than or equal to" 
+            raise AssertionError("The dims of tensor b ({}) must be less than or equal to"
                                  "the dims of tensor a ({}) ".format(dimsB, dimsA))
           for dimA in range(dimsA):
-            dimB = dimsB - dimsA + dimA 
+            dimB = dimsB - dimsA + dimA
             sizeA = a[dimA]
             sizeB = b[dimB] if (dimB >= 0) else 1
             if sizeA != sizeB and sizeB != 1:
