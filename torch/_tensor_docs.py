@@ -1784,7 +1784,7 @@ Note:
 
 Args:
     dim (int): dimension along which to index
-    index (IntTensor or LongTensor): indices of :attr:`tensor` to select from
+    index (IntTensor or LongTensor): indices of :attr:`input` to select from
     input (Tensor): the tensor containing values to add
 
 Keyword args:
