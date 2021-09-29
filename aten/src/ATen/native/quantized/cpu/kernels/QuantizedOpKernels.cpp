@@ -2696,12 +2696,13 @@ template <typename T>
 void quantize_tensor_arm(
     const float* in,
     Tensor& qtensor,
+    const int64_t start_offset,
     const int64_t N,
     const float scale,
     const int32_t zero_point) {
-  auto out = qtensor.data_ptr<T>();
+  auto out = qtensor.data_ptr<T>() + start_offset;
   for (int i = 0; i < N; ++i) {
-    out[i] = at::native::quantize_val<T>(scale, zero_point, in[i]);
+    out[i] = at::native::quantize_val<T>(scale, zero_point, in[i + start_offset]);
   }
 }
 
@@ -2715,12 +2716,14 @@ template <>
 void quantize_tensor_arm<c10::quint8>(
     const float* in,
     Tensor& qtensor,
+    const int64_t start_offset,
     const int64_t N,
     const float scale,
     const int32_t zero_point) {
   const float inv_scale = 1.0f / scale;
   uint32_t i = 0;
-  auto out = (uint8_t*)qtensor.data_ptr<c10::quint8>();
+  in += start_offset;
+  auto out = (uint8_t*)qtensor.data_ptr<c10::quint8>() + start_offset;
   const float32x4_t vinv_scale = vdupq_n_f32(inv_scale);
 #if defined(__ARM_NEON__)
   // magic float and magic int to take care of rounding
@@ -2796,12 +2799,13 @@ template <typename T>
 void dequantize_tensor_arm(
     const T* in,
     Tensor& rtensor,
+    const int64_t start_offset,
     const int64_t N,
     const float scale,
     const int32_t zero_point) {
-  float* out = rtensor.data_ptr<float>();
+  float* out = rtensor.data_ptr<float>() + start_offset;
   for (int i = 0; i < N; ++i) {
-    out[i] = dequantize_val<T>(scale, zero_point, in[i]);
+    out[i] = dequantize_val<T>(scale, zero_point, in[i + start_offset]);
   }
 }
 
@@ -2809,11 +2813,13 @@ template <>
 void dequantize_tensor_arm<c10::qint8>(
     const c10::qint8* in,
     Tensor& rtensor,
+    const int64_t start_offset,
     const int64_t N,
     const float scale,
     const int32_t zero_point) {
+  in += start_offset;
   const int8_t* in_underlying = reinterpret_cast<const int8_t*>(in);
-  float* out = rtensor.data_ptr<float>();
+  float* out = rtensor.data_ptr<float>() + start_offset;
 
   const int32x4_t zero_point_s32x4 = vdupq_n_s32(zero_point);
   const float32x4_t scale_fp32x4 = vdupq_n_f32(scale);
@@ -2853,11 +2859,13 @@ template <>
 void dequantize_tensor_arm<c10::quint8>(
     const c10::quint8* in,
     Tensor& rtensor,
+    const int64_t start_offset,
     const int64_t N,
     const float scale,
     const int32_t zero_point) {
+  in += start_offset;
   const uint8_t* in_underlying = reinterpret_cast<const uint8_t*>(in);
-  float* out = rtensor.data_ptr<float>();
+  float* out = rtensor.data_ptr<float>() + start_offset;
 
   const float32x4_t scale_fp32x4 = vdupq_n_f32(scale);
   const float32x4_t scale_times_zero_point_fp32x4 =
@@ -2906,8 +2914,14 @@ void quantize_tensor_per_tensor_affine_cpu(
       qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_cpu", [&]() {
         check_tensor_memory_format(rtensor, qtensor);
         const float* const rdata = rtensor.data_ptr<float>();
-        quantize_tensor_arm<scalar_t>(
-            rdata, qtensor, rtensor.numel(), scale, zero_point);
+        at::parallel_for(
+          0,
+          rtensor.numel(),
+          1,
+          [&rdata, &qtensor, &scale, &zero_point](int64_t begin, int64_t end) {
+            quantize_tensor_arm<scalar_t>(
+              rdata, qtensor, begin, end - begin, scale, zero_point);
+          });
       });
 #else
   // Fallback path
@@ -2934,8 +2948,14 @@ void dequantize_tensor_per_tensor_affine_cpu(
       qtensor.scalar_type(), "dequantize_tensor_per_tensor_affine_cpu", [&]() {
         check_tensor_memory_format(qtensor, rtensor);
         const scalar_t* qdata = qtensor.data_ptr<scalar_t>();
-        dequantize_tensor_arm<scalar_t>(
-            qdata, rtensor, qtensor.numel(), scale, zero_point);
+        at::parallel_for(
+          0,
+          qtensor.numel(),
+          1,
+          [&qdata, &rtensor, &scale, &zero_point](int64_t begin, int64_t end) {
+            dequantize_tensor_arm<scalar_t>(
+              qdata, rtensor, begin, end - begin, scale, zero_point);
+          });
       });
 #else
   AT_DISPATCH_QINT_TYPES(
