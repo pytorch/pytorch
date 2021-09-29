@@ -255,8 +255,8 @@ void slow_conv_transposed2d_channels_last(
     int64_t n = batch_size * input_height * input_width;
 
     cpublas::gemm(
-        cpublas::NoTranspose,
-        cpublas::NoTranspose,
+        TransposeType::NoTranspose,
+        TransposeType::NoTranspose,
         m,
         n,
         k,
@@ -388,8 +388,8 @@ void slow_conv_transpose2d_out_cpu_template(
         int64_t k = n_input_plane;
 
         cpublas::gemm(
-            cpublas::NoTranspose,
-            cpublas::Transpose,
+            TransposeType::NoTranspose,
+            TransposeType::Transpose,
             n,
             m,
             k,
@@ -482,8 +482,8 @@ void slow_conv_transposed2d_backward_channels_last(
     int64_t n = batch_size * input_height * input_width;
 
     cpublas::gemm(
-        cpublas::Transpose,
-        cpublas::NoTranspose,
+        TransposeType::Transpose,
+        TransposeType::NoTranspose,
         m,
         n,
         k,
@@ -622,8 +622,8 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
         int64_t k = n_output_plane * kernel_height * kernel_width;
 
         cpublas::gemm(
-            cpublas::NoTranspose,
-            cpublas::NoTranspose,
+            TransposeType::NoTranspose,
+            TransposeType::NoTranspose,
             n,
             m,
             k,
@@ -690,8 +690,8 @@ void slow_conv_transposed_acc_grad_channels_last(
       int64_t n = n_input_plane;
 
       cpublas::gemm(
-          cpublas::NoTranspose,
-          cpublas::Transpose,
+          TransposeType::NoTranspose,
+          TransposeType::Transpose,
           m,
           n,
           k,
@@ -841,8 +841,8 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
         int64_t k = input_height * input_width;
 
         cpublas::gemm(
-            cpublas::Transpose,
-            cpublas::NoTranspose,
+            TransposeType::Transpose,
+            TransposeType::NoTranspose,
             n,
             m,
             k,
