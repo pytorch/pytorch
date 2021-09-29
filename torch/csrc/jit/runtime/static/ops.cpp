@@ -500,12 +500,12 @@ REGISTER_OPERATOR_FUNCTOR(aten::bmm, aten_bmm, [](Node* n) -> SROperator {
     const auto& in0_t = p_node->Input(0).toTensor();
     const auto& in1_t = p_node->Input(1).toTensor();
     if (p_node->Output(0).isNone()) {
-      p_node->Output(0) = at::native::bmm_cpu(in0_t, in1_t);
-    } else {
-      auto& out_t = p_node->Output(0).toTensor();
-      fastResizeToZero(out_t);
-      at::native::bmm_out_cpu(in0_t, in1_t, out_t);
+      p_node->Output(0) = create_empty_from(in0_t);
     }
+    auto& out_t = p_node->Output(0).toTensor();
+
+    fastResizeToZero(out_t);
+    at::cpu::bmm_out(out_t, in0_t, in1_t);
   };
 });
 
@@ -1906,6 +1906,44 @@ REGISTER_OPERATOR_FUNCTOR(
         int64_t nn = input.numel();
         te->call({out.data_ptr(), input.data_ptr(), &nn});
       };
+    });
+
+REGISTER_OPERATOR_FUNCTOR(
+    aten::remainder,
+    aten_remainder,
+    [](Node* n) -> SROperator {
+      if (n->matches(torch::schema(
+              "aten::remainder.Tensor(Tensor self, Tensor other) -> Tensor"))) {
+        return [](ProcessedNode* p_node) {
+          const auto& self = p_node->Input(0).toTensor();
+          if (p_node->Output(0).isNone()) {
+            p_node->Output(0) =
+                at::cpu::remainder(self, p_node->Input(1).toTensor());
+          } else {
+            auto& out = p_node->Output(0).toTensor();
+            fastResizeToZero(out);
+            at::cpu::remainder_out(out, self, p_node->Input(1).toTensor());
+          }
+        };
+      }
+      if (n->matches(torch::schema(
+              "aten::remainder.Scalar(Tensor self, Scalar other) -> Tensor"))) {
+        return [](ProcessedNode* p_node) {
+          const auto& self = p_node->Input(0).toTensor();
+          if (p_node->Output(0).isNone()) {
+            p_node->Output(0) =
+                at::native::remainder(self, p_node->Input(1).toScalar());
+          } else {
+            auto& out = p_node->Output(0).toTensor();
+            fastResizeToZero(out);
+            at::native::remainder_out(self, p_node->Input(1).toScalar(), out);
+          }
+        };
+      }
+
+      // Unrecognized overload
+      LogAndDumpSchema(n);
+      return nullptr;
     });
 } // namespace jit
 } // namespace torch

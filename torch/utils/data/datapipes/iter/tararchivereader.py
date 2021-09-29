@@ -8,16 +8,16 @@ import tarfile
 import warnings
 
 class TarArchiveReaderIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
-    r""" :class:`TarArchiveReaderIterDataPipe`.
+    r""":class:`TarArchiveReaderIterDataPipe`.
 
-    Iterable datapipe to extract tar binary streams from input iterable which contains tuples of pathnames and
-    tar binary stream. This yields a tuple of pathname and extracted binary stream.
+    Iterable DataPipe to extract tar binary streams from input iterable which contains tuples of path name and
+    tar binary stream. This yields a tuple of path name and extracted binary stream.
 
     Args:
-        datapipe: Iterable datapipe that provides tuples of pathname and tar binary stream
+        datapipe: Iterable DataPipe that provides tuples of path name and tar binary stream
         mode: File mode used by `tarfile.open` to read file object.
             Mode has to be a string of the form 'filemode[:compression]'
-        length: a nominal length of the datapipe
+        length: a nominal length of the DataPipe
 
     Note:
         The opened file handles will be closed automatically if the default DecoderDataPipe
