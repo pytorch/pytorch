@@ -1,10 +1,13 @@
 #pragma once
 
+#include <unordered_map>
 #include <vector>
 
 #include <ATen/core/function.h>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/core/operator_name.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/mobile/executor.h>
 
 namespace torch {
