@@ -1,7 +1,5 @@
 namespace warp {
 
-constexpr int WARP_SIZE = 32;
-
 template <
     bool SINGLE_WARP,
     typename T,
@@ -17,6 +15,8 @@ __device__ void warpReduceTIDX(
     T* shared_mem,
     bool read_write_pred,
     T init_val) {
+  constexpr int WARP_SIZE = 32;
+
   // Assume input padded to multiples of a warp
   T reduce_val = init_val;
 
