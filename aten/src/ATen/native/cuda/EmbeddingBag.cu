@@ -1,6 +1,8 @@
 #include <ATen/ATen.h>
+#include <ATen/ceil_div.h>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/TensorUtils.h>
 #include <ATen/NativeFunctions.h>
 
@@ -49,7 +51,7 @@ __global__ void EmbeddingBag_updateOutputKernel_max(
 
   // the strategy here is that each bag x feature is handled by a single thread
 
-  int64_t chunksPerBag = THCCeilDiv(featureSize, (int64_t)blockDim.x);
+  int64_t chunksPerBag = ceil_div(featureSize, (int64_t)blockDim.x);
   int64_t numChunks = numBags * chunksPerBag;
   int64_t chunkOffset = blockIdx.x * blockDim.y + threadIdx.y;
   int64_t chunkStride = gridDim.x * blockDim.y;
@@ -100,7 +102,7 @@ __global__ void EmbeddingBag_updateOutputKernel_sum_mean(
   // the strategy here is that each bag x feature is handled by a single thread
 
   using accscalar_t = acc_type<scalar_t, true>;
-  int64_t chunksPerBag = THCCeilDiv(featureSize, (int64_t)blockDim.x);
+  int64_t chunksPerBag = ceil_div(featureSize, (int64_t)blockDim.x);
   int64_t numChunks = numBags * chunksPerBag;
   int64_t chunkOffset = blockIdx.x * blockDim.y + threadIdx.y;
   int64_t chunkStride = gridDim.x * blockDim.y;
@@ -198,7 +200,7 @@ __global__ void EmbeddingBag_accGradParametersKernel_max(
 
   using accscalar_t = acc_type<scalar_t, true>;
 
-  int64_t chunksPerBag = THCCeilDiv(stride, (int64_t)blockDim.x);
+  int64_t chunksPerBag = ceil_div(stride, (int64_t)blockDim.x);
   int64_t numChunks = numBags * chunksPerBag;
   int64_t chunkOffset = blockIdx.x * blockDim.y + threadIdx.y;
   int64_t chunkStride = gridDim.x * blockDim.y;
