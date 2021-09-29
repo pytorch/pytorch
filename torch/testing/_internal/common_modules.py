@@ -1,3 +1,4 @@
+import unittest
 import torch
 from copy import deepcopy
 from collections import namedtuple
@@ -8,6 +9,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import floating_types
 from torch.testing._internal.common_device_type import (
     _TestParametrizer, _dtype_test_suffix, _update_param_kwargs, skipIf)
+from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_nn import nllloss_reference, get_reduction
 from torch.testing._internal.common_utils import (
     freeze_rng_state, set_single_threaded_if_parallel_tbb)
@@ -83,12 +85,13 @@ class modules(_TestParametrizer):
                         if module_info.should_skip(generic_cls.__name__, test.__name__, device_cls.device_type, dtype):
                             active_decorators.append(skipIf(True, "Skipped!"))
 
-                        if module_info.decorators is not None:
-                            for decorator in module_info.decorators:
+                        all_decorators = (*module_input.decorators, *module_info.decorators)
+                        if all_decorators:
+                            for decorator in all_decorators:
                                 # Can't use isinstance as it would cause a circular import
                                 if decorator.__class__.__name__ == 'DecorateInfo':
                                     if decorator.is_active(generic_cls.__name__, test.__name__,
-                                                        device_cls.device_type, dtype):
+                                                           device_cls.device_type, dtype):
                                         active_decorators += decorator.decorators
                                 else:
                                     active_decorators.append(decorator)
@@ -145,13 +148,14 @@ class FunctionInput(object):
 
 class ModuleInput(object):
     """ Contains args / kwargs for module instantiation + forward pass. """
-    __slots__ = ['constructor_input', 'forward_input', 'desc', 'reference_fn']
+    __slots__ = ['constructor_input', 'forward_input', 'desc', 'reference_fn', 'decorators']
 
-    def __init__(self, constructor_input, forward_input=None, desc='', reference_fn=None):
+    def __init__(self, constructor_input, forward_input=None, desc='', reference_fn=None, decorators=tuple()):
         self.constructor_input = constructor_input  # Inputs to pass during construction
         self.forward_input = forward_input  # Inputs to pass to forward()
         self.desc = desc  # Description for this set of inputs
         self.reference_fn = reference_fn  # Reference with signature: reference_fn(module, parameters, *args, **kwargs)
+        self.decorators = decorators  # decorators to apply to generated specific input
 
         if reference_fn is not None:
 
@@ -174,7 +178,7 @@ class ModuleInfo(object):
                  *,
                  module_inputs_func,  # Function to generate module inputs
                  skips=(),  # Indicates which tests to skip
-                 decorators=None,  # Additional decorators to apply to generated tests
+                 decorators=tuple(),  # Additional decorators to apply to generated tests
                  dtypes=floating_types(),  # dtypes this function is expected to work with
                  supports_gradgrad=True,  # whether the op supports second order gradients
                  ):
@@ -225,25 +229,15 @@ def module_inputs_torch_nn_NLLLoss(module_info, device, dtype, requires_grad, **
     make_input = delayed(partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad))
 
     @delayed
-    def make_pos_weight(size):
-        return partial(make_tensor, device=device, dtype=dtype, requires_grad=False)(size).abs()
+    def make_weight(size, neg=False):
+        weight = make_tensor(size, device=device, dtype=dtype, requires_grad=False)
+        if neg:
+            weight[0] = -1
+            return weight
 
-    cases: List[Tuple[str, dict]] = [
-        ('', {}),
-        ('reduction_sum', {'reduction': 'sum'}),
-        ('reduction_none', {'reduction': 'none'}),
-        ('ignore_index', {'ignore_index': 2}),
-        ('weights', {'weight': make_pos_weight(10)}),
-        ('weights_ignore_index', {'weight': make_pos_weight(10), 'ignore_index': 2}),
-        ('weights_ignore_index_neg', {'weight': make_pos_weight(10), 'ignore_index': -1})
-    ]
+        return weight.abs()
 
-    # TODO: Uncomment when negative weights is supported.
-    # negative_weight = make_weight(10)
-    # negative_weight[0] = -1
-    # cases.append(('weights_negative', {'weight': negative_weight}))
-    module_inputs = []
-    for desc, constructor_kwargs in cases:
+    def construct_module_input(desc, constructor_kwargs, **module_input_kwargs):
         def reference_fn(m, p, i, t, **construct_kwargs):
             return nllloss_reference(i, t, **construct_kwargs)
 
@@ -256,14 +250,30 @@ def module_inputs_torch_nn_NLLLoss(module_info, device, dtype, requires_grad, **
         def construct_target():
             return torch.empty(15, device=device).uniform_().mul(10).floor().long()
 
-        module_inputs.append(
-            ModuleInput(
-                constructor_input=FunctionInput(**constructor_kwargs),
-                forward_input=FunctionInput(construct_input(), construct_target()),
-                reference_fn=reference_fn,
-                desc=desc)
-        )
+        return ModuleInput(
+            constructor_input=FunctionInput(**constructor_kwargs),
+            forward_input=FunctionInput(construct_input(), construct_target()),
+            reference_fn=reference_fn,
+            desc=desc, **module_input_kwargs)
 
+
+    cases: List[Tuple[str, dict]] = [
+        ('default', {}),
+        ('reduction_sum', {'reduction': 'sum'}),
+        ('reduction_none', {'reduction': 'none'}),
+        ('ignore_index', {'ignore_index': 2}),
+        ('weights', {'weight': make_weight(10)}),
+        ('weights_ignore_index', {'weight': make_weight(10), 'ignore_index': 2}),
+        ('weights_ignore_index_neg', {'weight': make_weight(10), 'ignore_index': -1})
+    ]
+
+    module_inputs = [construct_module_input(desc, constructor_kwargs)
+                     for desc, constructor_kwargs in cases]
+
+    module_inputs.append(construct_module_input(
+        'weights_negative', {'weight': make_weight(10, neg=True)},
+        decorators=(DecorateInfo(unittest.expectedFailure, "TestModule", "test_grad", device_type='cpu'),
+                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_gradgrad", device_type='cpu'),)))
     return module_inputs
 
 
@@ -369,7 +379,7 @@ def module_inputs_torch_nn_L1Loss(module_info, device, dtype, requires_grad, **k
 
 
 def module_inputs_torch_nn_Hardswish(module_info, device, dtype, requires_grad, **kwargs):
-    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_input = delayed(partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad))
 
     return [
         ModuleInput(
@@ -382,7 +392,7 @@ def module_inputs_torch_nn_Hardswish(module_info, device, dtype, requires_grad, 
 
 
 def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, requires_grad, **kwargs):
-    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_input = delayed(partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad))
 
     return [
         ModuleInput(
