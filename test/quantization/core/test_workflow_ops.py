@@ -693,10 +693,8 @@ class TestFakeQuantizeOps(TestCase):
     def _test_forward_per_channel_cachemask_impl(self, device):
         torch_types = (torch.qint8, torch.quint8)
         float_types = (torch.float32, torch.float16, torch.float64)
-        if device == 'cpu':
-            zero_point_types = (torch.int, torch.float32, torch.float16)
-        else:
-            zero_point_types = (torch.int,)
+        zero_point_types = (torch.int, torch.float32, torch.float16)
+
         for torch_type, float_type, zero_point_type in itertools.product(torch_types, float_types, zero_point_types):
             X = torch.randn(1, 2, 4, 4, dtype=float_type).to(device)
             # pick the scale + zp so that some values get clipped
@@ -808,10 +806,7 @@ class TestFakeQuantizeOps(TestCase):
         X, (scale, zero_point, axis, torch_type) = X
         quant_min = torch.iinfo(torch_type).min
         quant_max = torch.iinfo(torch_type).max
-        if device == 'cpu':
-            zero_point_types = (torch.int, torch.float, torch.float16)
-        else:
-            zero_point_types = (torch.int,)
+        zero_point_types = (torch.int, torch.float, torch.float16)
 
         for zero_point_type in zero_point_types:
             X = to_tensor(X, device)
@@ -829,11 +824,7 @@ class TestFakeQuantizeOps(TestCase):
     def _test_backward_per_channel_cachemask_impl(self, device):
         torch_types = (torch.qint8, torch.quint8)
         float_types = (torch.float32, torch.float16, torch.float64)
-        # TODO Support float zero_points for CUDA.
-        if device == 'cpu':
-            zero_point_types = (torch.int, torch.float32, torch.float16)
-        else:
-            zero_point_types = (torch.int,)
+        zero_point_types = (torch.int, torch.float32, torch.float16)
 
         for torch_type, float_type, zero_point_type in itertools.product(torch_types, float_types, zero_point_types):
             X = torch.randn(1, 2, 4, 4, dtype=float_type).to(device)
@@ -959,10 +950,6 @@ class TestFakeQuantizeOps(TestCase):
         axis = 1
         for i in range(20):
             for torch_type, float_type, device, zero_type in itertools.product(torch_types, float_types, devices, zero_types):
-                # TODO(future PR): Support float zero_points for CUDA.
-                if device.type == 'cuda' and zero_type != torch.int32:
-                    continue
-
                 X = torch.randn(3, 3, device=device).to(float_type)
                 scales = (10 * torch.randn(3, device=device)).abs()
                 scale = scales.mean().to(float).item()
