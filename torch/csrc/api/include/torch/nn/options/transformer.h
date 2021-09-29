@@ -6,6 +6,7 @@
 #include <torch/enum.h>
 
 #include <torch/nn/modules/container/any.h>
+#include <torch/nn/options/transformerlayer.h>
 
 namespace torch {
 namespace nn {
@@ -20,8 +21,6 @@ namespace nn {
 /// ```
 struct TORCH_API TransformerOptions {
 
-  using activation_t = c10::variant<enumtype::kReLU, enumtype::kGELU>;
-
   // The following constructors are commonly used
   // Please don't add more unless it is proved as a common usage
   TransformerOptions() = default;
@@ -29,27 +28,21 @@ struct TORCH_API TransformerOptions {
   TransformerOptions(int64_t d_model, int64_t nhead, int64_t num_encoder_layers, int64_t num_decoder_layers);
 
   /// the number of expected features in the encoder/decoder inputs (default=512)
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(int64_t, d_model) = 512;
 
   /// the number of heads in the multiheadattention models (default=8)
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(int64_t, nhead) = 8;
 
   /// the number of sub-encoder-layers in the encoder (default=6)
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(int64_t, num_encoder_layers) = 6;
 
   /// the number of sub-decoder-layers in the decoder (default=6)
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(int64_t, num_decoder_layers) = 6;
 
   /// the dimension of the feedforward network model (default=2048)
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(int64_t, dim_feedforward) = 2048;
 
   /// the dropout value (default=0.1)
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, dropout) = 0.1;
 
   /// the activation function of encoder/decoder intermediate layer (default=``torch::kReLU``)

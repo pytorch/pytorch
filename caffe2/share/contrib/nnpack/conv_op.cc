@@ -13,7 +13,6 @@
 #include "caffe2/utils/math.h"
 #include "nnpack.h"
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(caffe2_profile_nnpack, false, "");
 namespace caffe2 {
 
@@ -421,15 +420,10 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
               size_t(output_subsample.width),
               size_t(padding.top),
               gmacs,
-              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               profile.total * 1E3,
-              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               profile.input_transform * 1E3,
-              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               profile.kernel_transform * 1E3,
-              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               profile.block_multiplication * 1E3,
-              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               profile.output_transform * 1E3,
               gflops);
           CAFFE_ENFORCE(ret > 0);
@@ -441,7 +435,6 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(Conv, NNPACK, NNPACKConvOp);
 
 } // namespace caffe2

@@ -25,7 +25,6 @@ class Int8TensorCPUSerializer : public BlobSerializerBase {
     for (int i = 0; i < tensor.t.dim(); ++i) {
       proto.add_dims(tensor.t.dim32(i));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     proto.set_precision(8);
     proto.set_scale(tensor.scale);
     proto.set_bias(tensor.zero_point);
@@ -101,11 +100,9 @@ class Int8TensorCPUDeserializer : public TensorDeserializer {
 } // namespace int8
 
 namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_SERIALIZER(
     (TypeMeta::Id<int8::Int8TensorCPU>()),
     int8::Int8TensorCPUSerializer);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_DESERIALIZER(Int8TensorCPU, int8::Int8TensorCPUDeserializer);
 } // namespace
 

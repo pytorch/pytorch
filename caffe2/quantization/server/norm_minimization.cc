@@ -87,7 +87,6 @@ TensorQuantizationParams NormMinimization::NonlinearQuantizationParamsSearch(
     CDF.push_back(sum);
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   double stepsize = 0.00001; // experiment on the granularity
   double alpha = 0.0f, beta = 1.0f; // lowerbound and upperbound
   int start_bin = 0;
@@ -185,7 +184,6 @@ TensorQuantizationParams NormMinimization::NonlinearQuantizationParamsSearch(
     selected_sum += bins_f[i];
   }
   VLOG(2) << "best quantization range covers "
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           << (double)selected_sum / total * 100 << " %%";
 
   // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
@@ -341,7 +339,6 @@ TensorQuantizationParams NormMinimization::ChooseQuantizationParams(
   for (int i = i_begin; i < i_end; ++i) {
     selected_sum += bins_f[i];
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   VLOG(2) << "best quantization range covers " << selected_sum / total_sum * 100
           << " %%";
 

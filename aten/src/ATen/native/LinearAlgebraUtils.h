@@ -12,6 +12,23 @@
 
 namespace at { namespace native {
 
+// Used as an interface between the different BLAS-like libraries
+enum class TransposeType {
+  NoTranspose,
+  Transpose,
+  ConjTranspose,
+};
+
+// Transforms TransposeType into the BLAS / LAPACK format
+static char to_blas(TransposeType trans) {
+  switch (trans) {
+    case TransposeType::Transpose: return 'T';
+    case TransposeType::NoTranspose: return 'N';
+    case TransposeType::ConjTranspose: return 'C';
+  }
+  TORCH_INTERNAL_ASSERT(false, "Invalid transpose type");
+}
+
 /*
  * Clones a Tensor so that the following conditions hold:
  * If we think of a Tensor of having size (B, M, N), where B is any number
@@ -19,8 +36,8 @@ namespace at { namespace native {
  * - Each (M, N) matrix is in column major form
  * - Let Tensor P have size (B, M, N) and Q have size (B, M', N').
  *   Then when laid out in memory, the M by N matrix starting at
- *   P.data_ptr()[b * M * N] is of the same corresponding batch as the M' by N'
- *   matrix starting at Q.data_ptr()[b * M' * N'].
+ *   P.data_ptr()[B * M * N] is of the same corresponding batch as the M' by N'
+ *   matrix starting at Q.data_ptr()[B * M' * N'].
  */
 static inline Tensor cloneBatchedColumnMajor(const Tensor& src) {
   // If src is already in batched column major format, then
@@ -214,61 +231,65 @@ static inline void squareCheckInputs(const Tensor& self) {
 }
 
 /*
+ * Given a info int, obtained after a single operation, this function check if the computation
+ * has been successful (info = 0) or not, and report in case of the latter.
+ */
+static inline void singleCheckErrors(int64_t info, const char* name, int64_t batch_id=-1) {
+  std::string batch_string{""};
+  if (batch_id >= 0) {
+    batch_string = ": (Batch element " + std::to_string(batch_id) + ")";
+  }
+  if (info < 0) {
+    TORCH_INTERNAL_ASSERT(false, name, batch_string,
+        ": Argument ", -info, " has illegal value. Most certainly there is a bug in the implementation calling the backend library.");
+  } else if (info > 0) {
+    if (strstr(name, "inv")) {
+      // inv, inverse, cholesky_inverse, etc.
+      TORCH_CHECK(false, name, batch_string,
+          ": The diagonal element ", info, " is zero, the inversion could not be completed because the input matrix is singular.");
+    } else if (strstr(name, "solve")) {
+      // solve, linalg_solve, cholesky_solve, etc.
+      TORCH_CHECK(false, name, batch_string,
+          ": The diagonal element ", info, " is zero, the solve could not be completed because the input matrix is singular.");
+    } else if (strstr(name, "cholesky")) {
+      TORCH_CHECK(false, name, batch_string,
+          ": The factorization could not be completed because the input is not positive-definite (the leading minor of order ", info, " is not positive-definite).");
+    } else if (strstr(name, "svd")) {
+      TORCH_CHECK(false, name, batch_string,
+          ": The algorithm failed to converge because the input matrix is ill-conditioned or has too many repeated singular values (error code: ", info, ").");
+    } else if (strstr(name, "eig") || strstr(name, "syevd")) {
+      TORCH_CHECK(false, name, batch_string,
+          ": The algorithm failed to converge because the input matrix is ill-conditioned or has too many repeated eigenvalues (error code: ", info, ").");
+    } else if (strstr(name, "lstsq")) {
+      TORCH_CHECK(false, name, batch_string,
+          ": The least squares solution could not be computed because the input matrix does not have full rank (error code: ", info, ").");
+    } else {
+      TORCH_INTERNAL_ASSERT(false, name, ": Unknown error code: ", info, ".");
+    }
+  }
+}
+
+/*
  * Given a vector of int64_t infos, obtained after a batch operations,
  * this function checks if the computation over all these batches has been
  * successful (info = 0) or not, and report in case of the latter.
  */
-static inline void batchCheckErrors(std::vector<int64_t>& infos, const char* name, bool allow_singular=false) {
+static inline void batchCheckErrors(const std::vector<int64_t>& infos, const char* name) {
   for (size_t i = 0; i < infos.size(); i++) {
     auto info = infos[i];
-    if (info < 0) {
-      AT_ERROR(name, ": For batch ", i, ": Argument ", -info, " has illegal value");
-    } else if (info > 0) {
-      if (strstr(name, "svd")) {
-        AT_ERROR(name, ": the updating process of SBDSDC did not converge (error: ", info, ")");
-      } else if (strstr(name, "symeig") || strstr(name, "syevd")) {
-        AT_ERROR(name, ": For batch ", i, ": the algorithm failed to converge; ", info,
-                 " off-diagonal elements of an intermediate tridiagonal form did not converge to zero.");
-      } else if (!allow_singular) {
-        AT_ERROR(name, ": For batch ", i, ": U(", info, ",", info, ") is zero, singular U.");
-      }
-    }
+    singleCheckErrors(info, name, i);
   }
 }
 
 /*
  * This is an overloaded case of the previous function for a tensor of infos.
  */
-static inline void batchCheckErrors(const Tensor& infos, const char* name, bool allow_singular=false, int info_per_batch=1) {
-  auto batch_size = infos.numel();
+static inline void batchCheckErrors(const Tensor& infos, const char* name) {
   auto infos_cpu = infos.to(at::kCPU);
   auto infos_data = infos_cpu.data_ptr<int>();
-  for (int64_t i = 0; i < batch_size; i++) {
+  for (int64_t i = 0; i < infos.numel(); i++) {
     auto info = infos_data[i];
-    if (info < 0) {
-      AT_ERROR(name, ": For batch ", i/info_per_batch, ": Argument ", -info, " has illegal value");
-    } else if (!allow_singular && info > 0) {
-      AT_ERROR(name, ": For batch ", i/info_per_batch, ": U(", info, ",", info, ") is zero, singular U.");
-    }
-  }
-}
-
-/*
- * Given a info int, obtained after a single operation, this function check if the computation
- * has been successful (info = 0) or not, and report in case of the latter.
- */
-static inline void singleCheckErrors(int64_t info, const char* name, bool allow_singular=false) {
-  if (info < 0) {
-    AT_ERROR(name, ": Argument ", -info, " has illegal value");
-  } else if (info > 0) {
-    if (strstr(name, "svd")) {
-      AT_ERROR(name, ": the updating process of SBDSDC did not converge (error: ", info, ")");
-    } else if (strstr(name, "eig")) { // this catches both "eig" and "symeig"
-      AT_ERROR(name, ": the algorithm failed to converge; ", info,
-               " off-diagonal elements of an intermediate tridiagonal form did not converge to zero.");
-    } else if (!allow_singular) {
-      AT_ERROR(name, ": U(", info, ",", info, ") is zero, singular U.");
-    }
+    singleCheckErrors(info, name, i);
   }
 }
 
@@ -328,7 +349,7 @@ static inline Tensor _move_to_end(const Tensor& self, IntArrayRef axes) {
 }
 
 // parse the "mode" param in linalg_qr: return a tuple of bools (compute_q, reduced)
-static inline std::tuple<bool, bool> _parse_qr_mode(std::string mode) {
+static inline std::tuple<bool, bool> _parse_qr_mode(c10::string_view mode) {
   bool compute_q;
   bool reduced;
   if (mode == "reduced") {
@@ -385,27 +406,47 @@ static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& in
   auto sizes = input.sizes().vec();
   int64_t m = input.size(-2), n = input.size(-1);
 
-  sizes[input.dim() - 1] = (compute_uv && some) ? std::min(m, n) : m;
-  auto strides = at::detail::defaultStrides(sizes);
+  sizes[input.dim() - 1] = some ? std::min(m, n) : m;
+  auto u_strides = at::detail::defaultStrides(sizes);
   // U should be a column-major or a batch of column-major matrices
   // ... x m x ucol will have strides: ...., ucol, 1
   // We require: ...., 1, m
-  strides[input.dim() - 1] = m;
-  strides[input.dim() - 2] = 1;
+  u_strides[input.dim() - 1] = m;
+  u_strides[input.dim() - 2] = 1;
 
-  Tensor U_empty = at::empty_strided(sizes, strides, input.options().device(usvt_device));
-  U_empty.zero_();
+  // cuSOLVER's gesvdjBatched fails with illegal memory access and
+  // cuSOLVER's gesvdj fails with CUSOLVER_STATUS_EXECUTION_FAILED
+  // if matrices for U and VT are not allocated
+  // even though the result of computation is not used we need to allocate this memory
+
+  Tensor U_empty = (compute_uv || svd_use_cusolver)
+      ? at::empty_strided(sizes, u_strides, input.options().device(usvt_device))
+      : at::empty({0}, input.options().device(usvt_device));
 
   // VT should be a column-major or a batch of column-major matrices
-  sizes[input.dim() - 2] = n;
+  sizes[input.dim() - 2] = some ? std::min(m, n) : n;
   sizes[input.dim() - 1] = n;
-  // VT should be a column-major or a batch of column-major matrices
-  Tensor VT_empty = at::zeros(sizes, input.options().device(usvt_device));
-  VT_empty.transpose_(-2, -1);
+  auto vt_strides = at::detail::defaultStrides(sizes);
+  if (!svd_use_cusolver) {
+    vt_strides[input.dim() - 1] = sizes[input.dim() - 2];
+    vt_strides[input.dim() - 2] = 1;
+  }
+  Tensor VT_empty = (compute_uv || svd_use_cusolver)
+      ? at::empty_strided(sizes, vt_strides, input.options().device(usvt_device))
+      : at::empty({0}, input.options().device(usvt_device));
+
+  // U and VT might not get filled in this case
+  if (!some && compute_uv && input.numel() == 0) {
+    U_empty.zero_();
+    VT_empty.zero_();
+    // make U and VT an identity matrix, because they should be orthogonal
+    U_empty.diagonal(0, -2, -1).fill_(1);
+    VT_empty.diagonal(0, -2, -1).fill_(1);
+  }
 
   sizes.pop_back();
   sizes[input.dim() - 2] = std::min(m, n);
-  ScalarType dtype = toValueType(typeMetaToScalarType(input.dtype()));
+  ScalarType dtype = toValueType(input.scalar_type());
   Tensor S_empty = at::empty(sizes, input.options().dtype(dtype).device(usvt_device));
 
   return std::tuple<Tensor, Tensor, Tensor>(U_empty, S_empty, VT_empty);
@@ -480,7 +521,7 @@ static inline int64_t computeLRWorkDim(const char jobz, int64_t m, int64_t n) {
 
 // This function checks whether the uplo argument input is valid
 // Allowed strings are "u", "U", "l", "L"
-static inline void checkUplo(const std::string& uplo) {
+static inline void checkUplo(const c10::string_view uplo) {
   // To use std::toupper safely with plain chars (or signed chars), the argument should first be converted to unsigned char
   char uplo_uppercase = static_cast<char>(std::toupper(static_cast<unsigned char>(uplo[0])));
   TORCH_CHECK(uplo.size() == 1 && (uplo_uppercase == 'U' || uplo_uppercase == 'L'),

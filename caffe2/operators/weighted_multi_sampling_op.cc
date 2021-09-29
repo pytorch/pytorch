@@ -45,12 +45,10 @@ bool WeightedMultiSamplingOp<Context>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     WeightedMultiSampling,
     WeightedMultiSamplingOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(WeightedMultiSampling)
     .NumInputs(1, 2)
     .NumOutputs(1)
@@ -113,6 +111,5 @@ argument `num_samples` to determine the number of samples to generate.
         "`num_samples` or the second input tensor.")
     .Arg("num_samples", "number of samples to sample from the input data");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(WeightedMultiSample);
 } // namespace caffe2

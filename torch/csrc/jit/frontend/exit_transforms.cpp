@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/frontend/exit_transforms.h>
 
 #include <ATen/core/jit_type.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/ir_views.h>
@@ -148,9 +149,11 @@ struct ExitTransformer {
     IfView if_view(n);
     registerBlockOutputs(if_view.thenBlock(), true_outs);
     registerBlockOutputs(if_view.elseBlock(), false_outs);
-    for (size_t i = 0; i < true_outs.size(); ++i) {
-      auto out_type =
-          unifyTypes(true_outs.at(i)->type(), false_outs.at(i)->type());
+    for (const auto i : c10::irange(true_outs.size())) {
+      auto out_type = unifyTypes(
+          true_outs.at(i)->type(),
+          false_outs.at(i)->type(),
+          /*default_to_union=*/true);
       n->addOutput()->setType(*out_type);
     }
   }
@@ -550,7 +553,7 @@ bool inlineConsecutiveIfs(Node* node) {
   bool then_value = maybe_then_value->toBool();
   bool else_value = maybe_else_value->toBool();
 
-  for (auto i = 0; i < 2; ++i) {
+  for (const auto i : c10::irange(2)) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Block* first_if_block;
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -666,8 +669,7 @@ static void convertEnterExitNodesToWithBlocks(std::shared_ptr<Graph>& graph) {
     node = it.next();
   }
 
-  // The stack should not be empty; an Exit should have been found for every
-  // Enter.
+  // The stack should be empty; an Exit should have been found for every Enter.
   TORCH_INTERNAL_ASSERT(enter_node_stack.empty());
 
   // Now, add a With block for each Enter-Exit pair. The innermost pairs were

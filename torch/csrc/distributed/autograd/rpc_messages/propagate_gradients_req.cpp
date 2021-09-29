@@ -2,6 +2,8 @@
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 
+#include <c10/util/irange.h>
+
 namespace torch {
 namespace distributed {
 namespace autograd {
@@ -18,7 +20,7 @@ PropagateGradientsReq::PropagateGradientsReq(
       grads_(std::move(grads)),
       retainGraph_(retainGraph) {}
 
-Message PropagateGradientsReq::toMessageImpl() && {
+c10::intrusive_ptr<Message> PropagateGradientsReq::toMessageImpl() && {
   std::vector<at::IValue> ivalues;
   // Add all the grad tensors.
   for (const auto& grad : grads_) {
@@ -37,7 +39,7 @@ Message PropagateGradientsReq::toMessageImpl() && {
   std::vector<char> payload =
       jit::pickle(c10::ivalue::Tuple::create(std::move(ivalues)), &tensorTable);
 
-  return Message(
+  return c10::make_intrusive<Message>(
       std::move(payload),
       std::move(tensorTable),
       MessageType::BACKWARD_AUTOGRAD_REQ);
@@ -74,13 +76,12 @@ std::unique_ptr<PropagateGradientsReq> PropagateGradientsReq::fromMessage(
 
   // Retrieve the gradient tensors.
   std::vector<Variable> grads(tupleElements.size());
-  for (size_t i = 0; i < tupleElements.size(); i++) {
+  for(const auto i : c10::irange(tupleElements.size())) {
     grads[i] = tupleElements[i].toTensor();
   }
 
-  // NOLINTNEXTLINE(modernize-make-unique)
-  return std::unique_ptr<PropagateGradientsReq>(
-      new PropagateGradientsReq(autogradMetadata, grads, retainGraph));
+  return std::make_unique<PropagateGradientsReq>(
+    autogradMetadata, grads, retainGraph);
 }
 
 const AutogradMetadata& PropagateGradientsReq::getAutogradMetadata() {

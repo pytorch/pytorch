@@ -5,11 +5,76 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/Resize.h>
-#include <THC/THCNumerics.cuh> // for ScalarConvert
-#include <THC/THCSortUtils.cuh>
 
 namespace at { namespace native {
+
+template <typename T>
+__device__ inline void swapVars(T& t1, T& t2) {
+  T tmp = t1;
+  t1 = t2;
+  t2 = tmp;
+}
+
+template <typename Comparator, typename K, typename V>
+__device__ inline void bitonicSwap(K& kA, V& vA, bool& validA,
+                                   K& kB, V& vB, bool& validB,
+                                   bool dir,
+                                   const Comparator& comp) {
+  // Invalid entries always sort to the end
+  bool swap = (comp(kA, kB) && validA) || !validB;
+  if (swap == dir) {
+    swapVars(kA, kB);
+    swapVars(vA, vB);
+    swapVars(validA, validB);
+  }
+};
+
+template <typename Comparator, typename K, typename V,
+          typename IndexType, int Power2SortSize>
+__device__ inline void bitonicSort(K keys[Power2SortSize],
+                                   V values[Power2SortSize],
+                                   bool valid[Power2SortSize],
+                                   const Comparator& comp) {
+#ifndef __HIP_PLATFORM_HCC__
+#pragma unroll
+#endif
+  for (unsigned int size = 2; size < Power2SortSize; size *= 2) {
+    bool flag = ((threadIdx.x & (size / 2)) != 0);
+
+#ifndef __HIP_PLATFORM_HCC__
+#pragma unroll
+#endif
+    for (unsigned int stride = size / 2; stride > 0; stride /= 2) {
+
+      __syncthreads();
+
+      unsigned int pos = 2 * threadIdx.x - (threadIdx.x & (stride - 1));
+      bitonicSwap<Comparator, K, V>(
+        keys[pos], values[pos], valid[pos],
+        keys[pos + stride], values[pos + stride], valid[pos + stride],
+        flag, comp);
+    }
+  }
+
+#ifndef __HIP_PLATFORM_HCC__
+#pragma unroll
+#endif
+  for (unsigned int stride = Power2SortSize / 2; stride > 0; stride /= 2) {
+
+    __syncthreads();
+
+    unsigned int pos = 2 * threadIdx.x - (threadIdx.x & (stride - 1));
+    bitonicSwap<Comparator, K, V>(
+      keys[pos], values[pos], valid[pos],
+      keys[pos + stride], values[pos + stride], valid[pos + stride],
+      false, comp);
+  }
+
+  __syncthreads();
+
+}
 
 // at::cuda::detail::TensorInfo version
 // Sorts (key, value) pairs (in different tensors) in-place; i.e.,
@@ -54,9 +119,9 @@ bitonicSortKVInPlace(at::cuda::detail::TensorInfo<K, IndexType> keys,
 
     bool valid1 = (elem1 < keySliceSize);
     K k1 = valid1 ?
-      keys.data[keyStartOffset + elem1 * keySliceStride] : ScalarConvert<int, K>::to(0);
+      keys.data[keyStartOffset + elem1 * keySliceStride] : static_cast<K>(0);
     V v1 = valid1 ?
-      values.data[valueStartOffset + elem1 * valueSliceStride] : ScalarConvert<int, V>::to(0);
+      values.data[valueStartOffset + elem1 * valueSliceStride] : static_cast<V>(0);
 
     sharedKeys[elem1] = k1;
     sharedValues[elem1] = v1;
@@ -64,9 +129,9 @@ bitonicSortKVInPlace(at::cuda::detail::TensorInfo<K, IndexType> keys,
 
     bool valid2 = (elem2 < keySliceSize);
     K k2 = valid2 ?
-      keys.data[keyStartOffset + elem2 * keySliceStride] : ScalarConvert<int, K>::to(0);
+      keys.data[keyStartOffset + elem2 * keySliceStride] : static_cast<K>(0);
     V v2 = valid2 ?
-      values.data[valueStartOffset + elem2 * valueSliceStride] : ScalarConvert<int, V>::to(0);
+      values.data[valueStartOffset + elem2 * valueSliceStride] : static_cast<V>(0);
 
     sharedKeys[elem2] = k2;
     sharedValues[elem2] = v2;
@@ -95,7 +160,7 @@ bitonicSortKVInPlace(at::cuda::detail::TensorInfo<K, IndexType> keys,
 }
 
 bool should_use_small_sort(const Tensor &self, int64_t dim);
-void sortKeyValueInplace(Tensor& key,
-                         Tensor& value,
+void sortKeyValueInplace(const Tensor& key,
+                         const Tensor& value,
                          int dim, bool dir);
 }} // at::native

@@ -6,9 +6,7 @@
 
 using namespace at;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestUndefined, UndefinedTest) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   manual_seed(123);
 
   // mainly test ops on undefined tensors don't segfault and give a reasonable errror message.

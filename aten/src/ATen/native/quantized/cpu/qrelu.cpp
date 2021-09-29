@@ -14,11 +14,8 @@
 namespace at {
 namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qrelu_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qrelu6_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qrelu_leaky_stub);
 
 #ifdef USE_PYTORCH_QNNPACK
@@ -97,7 +94,7 @@ Tensor relu_quantized_cpu(const Tensor& qx) {
 Tensor& relu_quantized_cpu_(Tensor& qx) {
   const auto zero_point = qx.q_zero_point();
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qrelu", [&]() {
-    using Vec = Vec256<scalar_t>;
+    using Vec = Vectorized<scalar_t>;
     auto iter = TensorIterator::unary_op(qx, qx);
     auto zero_point_vec = Vec(scalar_t(zero_point));
     cpu_kernel_vec(
@@ -142,13 +139,12 @@ Tensor quantized_relu6(const Tensor& qx) {
 Tensor quantized_relu6_(Tensor& qx) {
   const auto zero_point = qx.q_zero_point();
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qrelu6_", [&]() {
-    using Vec = Vec256<scalar_t>;
+    using Vec = Vectorized<scalar_t>;
     auto iter = TensorIterator::unary_op(qx, qx);
     auto zero_point_vec = Vec(scalar_t(zero_point));
     scalar_t six = at::native::quantize_val<scalar_t>(
         qx.q_scale(),
         qx.q_zero_point(),
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         /*value=*/6.0);
     auto six_vec = Vec(six);
     cpu_kernel_vec(

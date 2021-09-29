@@ -35,13 +35,25 @@ that perform all or part of the computation in lower precision. Higher-level
 APIs are provided that incorporate typical workflows of converting FP32 model
 to lower precision with minimal accuracy loss.
 
+Quantization requires users to be aware of three concepts:
+
+#. Quantization Config (Qconfig): Specifies how weights and activations are to be quantized. Qconfig is needed to create a quantized model.
+#. Backend: Refers to kernels that support quantization, usually with different numerics.
+#. Quantization engine (torch.backends.quantization.engine): When a quantized model is executed, the qengine specifies which backend is to be used for execution. It is important to ensure that the qengine is consistent with the Qconfig.
+
+
+Natively supported backends
+---------------------------
+
 Today, PyTorch supports the following backends for running quantized operators efficiently:
 
 * x86 CPUs with AVX2 support or higher (without AVX2 some operations have
-  inefficient implementations)
-* ARM CPUs (typically found in mobile/embedded devices)
+  inefficient implementations), via `fbgemm` (`<https://github.com/pytorch/FBGEMM>`_).
+* ARM CPUs (typically found in mobile/embedded devices), via
+  `qnnpack` (`<https://github.com/pytorch/QNNPACK>`_).
 
-The corresponding implementation is chosen automatically based on the PyTorch build mode.
+The corresponding implementation is chosen automatically based on the PyTorch build mode, though users
+have the option to override this by setting `torch.backends.quantization.engine` to `fbgemm` or `qnnpack`.
 
 .. note::
 
@@ -49,33 +61,35 @@ The corresponding implementation is chosen automatically based on the PyTorch bu
   this is the direction for future work. Move the model to CPU in order to test the
   quantized functionality.
 
-  Quantization-aware training (through :class:`~torch.quantization.FakeQuantize`)
-  supports both CPU and CUDA.
+  Quantization-aware training (through :class:`~torch.quantization.FakeQuantize`,
+  which emulates quantized numerics in fp32) supports both CPU and CUDA.
 
 
-.. note::
+When preparing a quantized model, it is necessary to ensure that qconfig
+and the engine used for quantized computations match the backend on which
+the model will be executed. The qconfig controls the type of observers used
+during the quantization passes. The qengine controls whether `fbgemm` or
+`qnnpack` specific packing function is used when packing weights for linear
+and convolution functions and modules. For example:
 
-    When preparing a quantized model, it is necessary to ensure that qconfig
-    and the engine used for quantized computations match the backend on which
-    the model will be executed. Quantization currently supports two backends:
-    fbgemm (for use on x86, `<https://github.com/pytorch/FBGEMM>`_) and qnnpack
-    (for use on the ARM QNNPACK library `<https://github.com/pytorch/QNNPACK>`_).
-    For example, if you are interested in quantizing a model to run on ARM, it
-    is recommended to set the qconfig by calling:
+Default settings for fbgemm::
 
-    ``qconfig = torch.quantization.get_default_qconfig('qnnpack')``
+    # set the qconfig for PTQ
+    qconfig = torch.quantization.get_default_qconfig('fbgemm')
+    # or, set the qconfig for QAT
+    qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
+    # set the qengine to control weight packing
+    torch.backends.quantized.engine = 'fbgemm'
 
-    for post training quantization and
+Default settings for qnnpack::
 
-    ``qconfig = torch.quantization.get_default_qat_qconfig('qnnpack')``
+    # set the qconfig for PTQ
+    qconfig = torch.quantization.get_default_qconfig('qnnpack')
+    # or, set the qconfig for QAT
+    qconfig = torch.quantization.get_default_qat_qconfig('qnnpack')
+    # set the qengine to control weight packing
+    torch.backends.quantized.engine = 'qnnpack'
 
-    for quantization aware training.
-
-    In addition, the torch.backends.quantized.engine parameter should be set to
-    match the backend. For using qnnpack for inference, the backend is set to
-    qnnpack as follows
-
-    ``torch.backends.quantized.engine = 'qnnpack'``
 
 Quantization API Summary
 ---------------------------------------
@@ -133,22 +147,53 @@ The following table compares the differences between Eager Mode Quantization and
 +-----------------+-------------------+-------------------+
 
 
-Eager Mode Quantization
-^^^^^^^^^^^^^^^^^^^^^^^
-
-There are three types of quantization supported in Eager Mode Quantization:
+There are three types of quantization supported:
 
 1. dynamic quantization (weights quantized with activations read/stored in
    floating point and quantized for compute.)
 2. static quantization (weights quantized, activations quantized, calibration
    required post training)
-3. quantization aware training (weights quantized, activations quantized,
+3. static quantization aware training (weights quantized, activations quantized,
    quantization numerics modeled during training)
 
 Please see our `Introduction to Quantization on Pytorch
 <https://pytorch.org/blog/introduction-to-quantization-on-pytorch/>`_ blog post
 for a more comprehensive overview of the tradeoffs between these quantization
 types.
+
+Operator coverage varies between dynamic and static quantization and is captured in the table below.
+Note that for FX quantization, the corresponding functionals are also supported.
+
++---------------------------+-------------------+--------------------+
+|                           |Static             | Dynamic            |
+|                           |Quantization       | Quantization       |
++---------------------------+-------------------+--------------------+
+| | nn.Linear               | | Y               | | Y                |
+| | nn.Conv1d/2d/3d         | | Y               | | N                |
++---------------------------+-------------------+--------------------+
+| | nn.LSTM                 | | N               | | Y                |
+| | nn.GRU                  | | N               | | Y                |
++---------------------------+-------------------+--------------------+
+| | nn.RNNCell              | | N               | | Y                |
+| | nn.GRUCell              | | N               | | Y                |
+| | nn.LSTMCell             | | N               | | Y                |
++---------------------------+-------------------+--------------------+
+|nn.EmbeddingBag            | Y (activations    |                    |
+|                           | are in fp32)      | Y                  |
++---------------------------+-------------------+--------------------+
+|nn.Embedding               | Y                 | N                  |
++---------------------------+-------------------+--------------------+
+|nn.MultiheadAttention      |Not Supported      | Not supported      |
++---------------------------+-------------------+--------------------+
+|Activations                |Broadly supported  | Un-changed,        |
+|                           |                   | computations       |
+|                           |                   | stay in fp32       |
++---------------------------+-------------------+--------------------+
+
+
+Eager Mode Quantization
+^^^^^^^^^^^^^^^^^^^^^^^
+
 
 Dynamic Quantization
 ~~~~~~~~~~~~~~~~~~~~
@@ -460,7 +505,7 @@ API Example::
   qconfig_dict = {"": torch.quantization.get_default_qat_qconfig('qnnpack')}
   model_to_quantize.train()
   # prepare
-  model_prepared = quantize_fx.prepare_qat_fx(model_to_qunatize, qconfig_dict)
+  model_prepared = quantize_fx.prepare_qat_fx(model_to_quantize, qconfig_dict)
   # training loop (not shown)
   # quantize
   model_quantized = quantize_fx.convert_fx(model_prepared)

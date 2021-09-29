@@ -2,16 +2,11 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(YellowFin, YellowFinOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(YellowFin)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(10)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumOutputs(8)
     .AllowInplace(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         {{0, 0}, {1, 1}, {2, 2}, {3, 3}, {4, 4}, {5, 5}, {6, 6}, {7, 7}})
     .SetDoc(R"DOC(
 
@@ -30,26 +25,18 @@ nesterov and zero_debias for debias of moving average.
     .Input(2, "lr", "Learning rate")
     .Input(3, "mu", "Momentum coefficient")
     .Input(4, "curv_win", "Memory for latest curvature ranges")
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .Input(5, "g_avg", "Moving average of gradient")
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .Input(6, "g2_avg", "Moving average of squared gradient")
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .Input(7, "scalars_memory", "Memory for stateful scalars")
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .Input(8, "grad", "Gradient computed")
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .Input(9, "iter", "Iteration number")
     .Output(0, "output_param", "Parameters to be updated")
     .Output(1, "output_moment", "Momentum")
     .Output(2, "output_lr", "Output learning rate")
     .Output(3, "output_mu", "Output momentum coefficient")
     .Output(4, "output_curv_win", "Output memory for latest curvature ranges")
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .Output(5, "output_g_avg", "Output moving average of gradient")
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .Output(6, "output_g2_avg", "Output moving average of squared gradient")
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .Output(7, "output_scalars_memory", "Output memory for stateful scalars")
     .Arg("beta", "Default 0.999")
     .Arg("curv_win_width", "Default 20")
@@ -57,7 +44,6 @@ nesterov and zero_debias for debias of moving average.
     .Arg("nesterov", "Default false")
     .Arg("zero_debias", "Default true");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(YellowFin);
 
 #define CAFFE2_YELLOWFIN_GETLRMU(T)                                         \

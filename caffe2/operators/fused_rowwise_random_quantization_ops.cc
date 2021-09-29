@@ -34,7 +34,6 @@ bool FloatToFusedRandRowwiseQuantizedOp<Context>::RunOnDevice() {
   // |    1B    |  1B  |  4B |  4B | ...output_data....|
   // In output_data: the b-th bucket of the i-th byte stores
   // the i-th data of the b-th segment of input row
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   size_t data_per_byte = 8 / bitwidth_;
   // How many bytes in the output
   size_t segment_size = (input_columns + data_per_byte - 1) / data_per_byte;
@@ -123,24 +122,19 @@ bool FusedRandRowwiseQuantizedToFloatOp<Context>::RunOnDevice() {
 
 #undef IS_LITTLE_ENDIAN
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     FloatToFusedRandRowwiseQuantized,
     FloatToFusedRandRowwiseQuantizedOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(FloatToFusedRandRowwiseQuantized)
     .NumInputs(1)
     .NumOutputs(1)
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
       ArgumentHelper helper(def);
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       auto bitwidth = helper.GetSingleArgument<int32_t>("bitwidth", 8);
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       size_t data_per_byte = 8 / bitwidth;
       vector<TensorShape> out;
       TensorShape X = in[0];
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       X.set_dims(1, 10 + (X.dims(1) + data_per_byte - 1) / data_per_byte);
       out.push_back(std::move(X));
       out[0].set_data_type(TensorProto_DataType_UINT8);
@@ -180,14 +174,11 @@ In Advances in Neural Information Processing Systems, pp. 1508-1518. 2017.
     .Output(0, "output", "Fused bitwidth, tail, min, max and quantized data")
     .Arg("bitwidth", "How many bits to quantize per data (defaults to 8).")
     .Arg("random", "random or not (True). False is set up for unittest.");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(FloatToFusedRandRowwiseQuantized);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     FusedRandRowwiseQuantizedToFloat,
     FusedRandRowwiseQuantizedToFloatOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(FusedRandRowwiseQuantizedToFloat)
     .NumInputs(1)
     .NumOutputs(1)
@@ -211,6 +202,5 @@ Refer FloatToFusedRandRowwiseQuantized operator for details.
         "quantized_input",
         "Fused bitwidth, tail, min, max and quantized data")
     .Output(0, "float_input", "Float32 data");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(FusedRandRowwiseQuantizedToFloat);
 } // namespace caffe2

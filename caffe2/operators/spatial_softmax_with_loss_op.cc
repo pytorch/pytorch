@@ -2,17 +2,14 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SpatialSoftmaxWithLoss,
     SpatialSoftmaxWithLossOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SpatialSoftmaxWithLossGradient,
     SpatialSoftmaxWithLossGradientOp<float, CPUContext>);
 
 // Input: X (logits), T (labels); Output: P (probs), Y
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SpatialSoftmaxWithLoss)
     .NumInputs(2, 3)
     .NumOutputs(2)
@@ -59,7 +56,6 @@ For spatial softmax, weighting is by x,y position of the input.
     .Output(1, "loss", "Average loss");
 
 // Input: X, T, P, dY; Output: dX
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SpatialSoftmaxWithLossGradient).NumOutputs(1);
 
 #define DONT_CARE (-1)
@@ -101,7 +97,6 @@ bool SpatialSoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
     for (int y = 0; y < H; ++y) {
       for (int x = 0; x < W; ++x) {
         // Subtract max on each cell for numerical reasons
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         float max_val = (-1e20f);
         for (int c = 0; c < D; ++c) {
           // TODO optimize
@@ -152,7 +147,6 @@ bool SpatialSoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
           // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
           float w = weights ? weights[label_idx] : 1.0;
           total_weight += w;
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           sum_label_xent += -log(std::max(Pdata[idx], 1e-20f)) * w;
         }
       }
@@ -267,7 +261,6 @@ class GetSoftmaxWithLossGradient : public GradientMakerBase {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(SpatialSoftmaxWithLoss, GetSoftmaxWithLossGradient);
 }
 } // namespace caffe2

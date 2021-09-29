@@ -90,17 +90,13 @@ Tensor arithmetic_scalar(
           },
           shader_descriptor,
           v_output.extents(),
-          context->gpu().adapter->local_work_group_size(),
-          // Write-only access bypasses synchronization but inserts appropriate
-          // barriers if necessary.
+          adaptive_work_group_size(v_output.extents()),
+          // Shader parameters
+          block,
+          // Textures
           v_output.image(
               command_buffer, vTensor::Stage::Compute, vTensor::Access::Write),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          v_self.image(command_buffer, vTensor::Stage::Compute),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
+          v_self.image(command_buffer, vTensor::Stage::Compute));
     } else {
       TORCH_CHECK(false, "Not implemented!");
     }
@@ -146,16 +142,14 @@ Tensor& arithmetic_scalar_(
           },
           shader_descriptor,
           v_self.extents(),
-          context->gpu().adapter->local_work_group_size(),
-          // Read-Write access triggers an async synchronization if necessory
-          // and inserts appropriate barriers if hazards are detected.
+          adaptive_work_group_size(v_self.extents()),
+          // Shader parameters
+          block,
+          // Textures
           v_self.image(
               command_buffer,
               vTensor::Stage::Compute,
-              vTensor::Access::Read | vTensor::Access::Write),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
+              vTensor::Access::Read | vTensor::Access::Write));
     } else {
       TORCH_CHECK(false, "Not implemented!");
     }
@@ -216,20 +210,14 @@ Tensor arithmetic_tensor(
           },
           shader_descriptor,
           v_output.extents(),
-          context->gpu().adapter->local_work_group_size(),
-          // Write-only access bypasses synchronization but inserts appropriate
-          // barriers if necessary.
+          adaptive_work_group_size(v_output.extents()),
+          // Shader parameters
+          block,
+          // Textures
           v_output.image(
               command_buffer, vTensor::Stage::Compute, vTensor::Access::Write),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
           v_self.image(command_buffer, vTensor::Stage::Compute),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          v_other.image(command_buffer, vTensor::Stage::Compute),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
+          v_other.image(command_buffer, vTensor::Stage::Compute));
     } else {
       TORCH_CHECK(false, "Not implemented!");
     }
@@ -283,19 +271,17 @@ Tensor& arithmetic_tensor_(
           },
           shader_descriptor,
           v_self.extents(),
-          context->gpu().adapter->local_work_group_size(),
-          // Read-Write access triggers an async synchronization if necessory
-          // and inserts appropriate barriers if hazards are detected.
+          adaptive_work_group_size(v_self.extents()),
+          // Shader parameters
+          block,
+          // Textures
           v_self.image(
               command_buffer,
               vTensor::Stage::Compute,
               vTensor::Access::Read | vTensor::Access::Write),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
-          v_other.image(command_buffer, vTensor::Stage::Compute),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
+          v_other.image(command_buffer, vTensor::Stage::Compute));
     } else {
       TORCH_CHECK(false, "Not implemented!");
     }
@@ -412,22 +398,22 @@ Tensor& div_tensor_(Tensor& self, const Tensor& other_arg) {
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl("add.Scalar", TORCH_FN(add_scalar));
-  m.impl("add_.Scalar", TORCH_FN(add_scalar_));
-  m.impl("add.Tensor", TORCH_FN(add_tensor));
-  m.impl("add_.Tensor", TORCH_FN(add_tensor_));
-  m.impl("sub.Scalar", TORCH_FN(sub_scalar));
-  m.impl("sub_.Scalar", TORCH_FN(sub_scalar_));
-  m.impl("sub.Tensor", TORCH_FN(sub_tensor));
-  m.impl("sub_.Tensor", TORCH_FN(sub_tensor_));
-  m.impl("mul.Scalar", TORCH_FN(mul_scalar));
-  m.impl("mul_.Scalar", TORCH_FN(mul_scalar_));
-  m.impl("mul.Tensor", TORCH_FN(mul_tensor));
-  m.impl("mul_.Tensor", TORCH_FN(mul_tensor_));
-  m.impl("div.Scalar", TORCH_FN(div_scalar));
-  m.impl("div_.Scalar", TORCH_FN(div_scalar_));
-  m.impl("div.Tensor", TORCH_FN(div_tensor));
-  m.impl("div_.Tensor", TORCH_FN(div_tensor_));
+  m.impl(TORCH_SELECTIVE_NAME("aten::add.Scalar"), TORCH_FN(add_scalar));
+  m.impl(TORCH_SELECTIVE_NAME("aten::add_.Scalar"), TORCH_FN(add_scalar_));
+  m.impl(TORCH_SELECTIVE_NAME("aten::add.Tensor"), TORCH_FN(add_tensor));
+  m.impl(TORCH_SELECTIVE_NAME("aten::add_.Tensor"), TORCH_FN(add_tensor_));
+  m.impl(TORCH_SELECTIVE_NAME("aten::sub.Scalar"), TORCH_FN(sub_scalar));
+  m.impl(TORCH_SELECTIVE_NAME("aten::sub_.Scalar"), TORCH_FN(sub_scalar_));
+  m.impl(TORCH_SELECTIVE_NAME("aten::sub.Tensor"), TORCH_FN(sub_tensor));
+  m.impl(TORCH_SELECTIVE_NAME("aten::sub_.Tensor"), TORCH_FN(sub_tensor_));
+  m.impl(TORCH_SELECTIVE_NAME("aten::mul.Scalar"), TORCH_FN(mul_scalar));
+  m.impl(TORCH_SELECTIVE_NAME("aten::mul_.Scalar"), TORCH_FN(mul_scalar_));
+  m.impl(TORCH_SELECTIVE_NAME("aten::mul.Tensor"), TORCH_FN(mul_tensor));
+  m.impl(TORCH_SELECTIVE_NAME("aten::mul_.Tensor"), TORCH_FN(mul_tensor_));
+  m.impl(TORCH_SELECTIVE_NAME("aten::div.Scalar"), TORCH_FN(div_scalar));
+  m.impl(TORCH_SELECTIVE_NAME("aten::div_.Scalar"), TORCH_FN(div_scalar_));
+  m.impl(TORCH_SELECTIVE_NAME("aten::div.Tensor"), TORCH_FN(div_tensor));
+  m.impl(TORCH_SELECTIVE_NAME("aten::div_.Tensor"), TORCH_FN(div_tensor_));
 }
 
 #endif /* USE_VULKAN_API */

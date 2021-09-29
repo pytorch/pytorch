@@ -17,7 +17,6 @@ struct TORCH_API CosineSimilarityOptions {
   /// Dimension where cosine similarity is computed. Default: 1
   TORCH_ARG(int64_t, dim) = 1;
   /// Small value to avoid division by zero. Default: 1e-8
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, eps) = 1e-8;
 };
 
@@ -45,10 +44,8 @@ using CosineSimilarityFuncOptions = CosineSimilarityOptions;
 /// ```
 struct TORCH_API PairwiseDistanceOptions {
   /// The norm degree. Default: 2
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, p) = 2.0;
   /// Small value to avoid division by zero. Default: 1e-6
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, eps) = 1e-6;
   /// Determines whether or not to keep the vector dimension. Default: false
   TORCH_ARG(bool, keepdim) = false;

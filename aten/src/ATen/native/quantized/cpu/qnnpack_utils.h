@@ -2,6 +2,7 @@
 
 #ifdef USE_PYTORCH_QNNPACK
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 #include <pytorch_qnnpack.h>
 #include <qnnpack_func.h>
 
@@ -74,6 +75,7 @@ struct PackedLinearWeightsQnnp : public LinearPackedParamsBase {
       c10::optional<at::Tensor> bias);
 
  private:
+  std::mutex qnnp_mutex_;
   template <bool ReluFused>
   at::Tensor apply_impl(
       at::Tensor input,
@@ -291,6 +293,7 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
   }
 
  private:
+  std::mutex qnnp_mutex_;
   template <bool ReluFused>
   at::Tensor apply_impl(
       const at::Tensor& input,
@@ -360,20 +363,20 @@ Tensor qnnpack_avg_pool2d(
 } // namespace at
 
 namespace {
-std::vector<float> generate_requantization_scales(
+C10_UNUSED std::vector<float> generate_requantization_scales(
     const at::Tensor& weight_scales,
     const float input_scale,
     const float output_scale,
     std::vector<float>& requant_scales) {
   // Since weight scale is allocated with padding
   // weight_scales.numel() gives us padded num elements.
-  auto num_output_channels_padded = weight_scales.numel();
-  float* weight_scales_data = weight_scales.data_ptr<float>();
-  if (requant_scales.size() < num_output_channels_padded) {
+  const auto num_output_channels_padded = weight_scales.numel();
+  float *const weight_scales_data = weight_scales.data_ptr<float>();
+  if (static_cast<int64_t>(requant_scales.size()) < num_output_channels_padded) {
     requant_scales.resize(num_output_channels_padded);
   }
-  for (int i = 0; i < num_output_channels_padded; ++i) {
-    auto inverse_output_scale = 1.f /output_scale;
+  for (const auto i : c10::irange(num_output_channels_padded)) {
+    const auto inverse_output_scale = 1.f /output_scale;
     requant_scales[i] = (weight_scales_data[i] * input_scale) * inverse_output_scale;
     TORCH_CHECK(
         (requant_scales[i] > 0.0f && std::isnormal(requant_scales[i])),
@@ -384,20 +387,20 @@ std::vector<float> generate_requantization_scales(
   return requant_scales;
 }
 
-std::pair<std::vector<uint8_t>, at::Tensor> make_zero_points_and_scales_tensor(
+C10_UNUSED std::pair<std::vector<uint8_t>, at::Tensor> make_zero_points_and_scales_tensor(
     const at::Tensor& weight_contig,
     bool transpose = false,
     uint32_t groups = 1
   ) {
   const int out_ch_idx = transpose ? 1 : 0;
-  auto num_output_channels = weight_contig.size(out_ch_idx) * (transpose ? groups : 1);
+  const auto num_output_channels = weight_contig.size(out_ch_idx) * (transpose ? groups : 1);
   // Add 8 to account for bufferring needed by QNNPACK.
-  auto num_output_channels_padded = num_output_channels + 8;
+  const auto num_output_channels_padded = num_output_channels + 8;
   const auto qtype = weight_contig.qscheme();
   std::vector<uint8_t> weight_zp(num_output_channels_padded, 0);
   // Adjust weight zero point, similar to weight data.
   if (qtype == at::kPerTensorAffine) {
-    for (int i = 0; i < num_output_channels; ++i) {
+    for (const auto i : c10::irange(num_output_channels)) {
       weight_zp[i] = (uint8_t)(weight_contig.q_zero_point() + 128);
     }
   } else if (qtype == at::kPerChannelAffine) {
@@ -406,7 +409,7 @@ std::pair<std::vector<uint8_t>, at::Tensor> make_zero_points_and_scales_tensor(
         "Per channel zero points dtype must be long int.");
     const int64_t* per_channel_zero_points =
       weight_contig.q_per_channel_zero_points().data_ptr<int64_t>();
-    for (int i = 0; i < num_output_channels; ++i) {
+    for (const auto i : c10::irange(num_output_channels)) {
       weight_zp[i] = (uint8_t)(per_channel_zero_points[i] + 128);
     }
   } else {
@@ -416,24 +419,24 @@ std::pair<std::vector<uint8_t>, at::Tensor> make_zero_points_and_scales_tensor(
     at::empty(
         {num_output_channels_padded},
         at::device(at::kCPU).dtype(at::kFloat));
-  float* weight_scales_data = weight_scales.data_ptr<float>();
+  float *const weight_scales_data = weight_scales.data_ptr<float>();
   if (qtype == at::kPerTensorAffine) {
-    for (int i = 0; i < num_output_channels; ++i) {
+    for (const auto i : c10::irange(num_output_channels)) {
       weight_scales_data[i] = weight_contig.q_scale();
     }
   } else if (qtype == at::kPerChannelAffine) {
     TORCH_CHECK(
         weight_contig.q_per_channel_scales().scalar_type() == at::kDouble,
         "Per channel scales dtype must be double.");
-    const double* per_channel_scales =
+    const double *const per_channel_scales =
       weight_contig.q_per_channel_scales().data_ptr<double>();
-    for (int i = 0; i < num_output_channels; ++i) {
+    for (const auto i : c10::irange(num_output_channels)) {
       weight_scales_data[i] = static_cast<float>(per_channel_scales[i]);
     }
   } else {
     TORCH_INTERNAL_ASSERT("Unsupported quantization scheme.");
   }
-  for (int i = num_output_channels; i <  num_output_channels_padded; ++i) {
+  for (const auto i : c10::irange(num_output_channels, num_output_channels_padded)) {
     weight_scales_data[i] = 1.f;
   }
   return {weight_zp, weight_scales};

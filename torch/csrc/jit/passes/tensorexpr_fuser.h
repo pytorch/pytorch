@@ -24,8 +24,6 @@ TORCH_API void setTensorExprFuserEnabled(bool val);
 TORCH_API bool tensorExprFuserEnabled();
 TORCH_API bool setTexprReductionsEnabled(bool value);
 TORCH_API bool texprReductionsEnabled();
-TORCH_API bool texprParallelCPUEnabled();
-TORCH_API void setTexprParallelCPUEnabled(bool val);
 
 TORCH_API void RemoveProfileNodesAndSpecializeTypes(
     std::shared_ptr<Graph>& graph);
@@ -60,7 +58,8 @@ TORCH_API bool usedOnlyInSize(Value* v);
 TORCH_API Value* broadcastSizes(at::ArrayRef<Value*> sizes, AliasDb* db);
 
 namespace tensorexpr {
+TORCH_API const OperatorSet& supported_eltwise_set();
 TORCH_API bool isSupported(Node* node);
-}
+} // namespace tensorexpr
 } // namespace jit
 } // namespace torch

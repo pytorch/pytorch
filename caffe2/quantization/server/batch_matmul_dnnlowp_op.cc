@@ -743,18 +743,15 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     BatchMatMul,
     DNNLOWP,
     BatchMatMulDNNLowPOp<uint8_t>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     BatchMatMul,
     DNNLOWP_16,
     BatchMatMulDNNLowPOp<uint16_t>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8BatchMatMul,
     DNNLOWP,

@@ -18,8 +18,8 @@ class TORCH_API RpcWithAutograd final : public rpc::RpcCommandBase {
       rpc::worker_id_t fromWorkerId,
       rpc::MessageType messageType,
       const AutogradMetadata& autogradMetadata,
-      rpc::Message&& wrappedMessage,
-      std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> deviceMap = {});
+      c10::intrusive_ptr<rpc::Message> wrappedMessage,
+      rpc::DeviceMap deviceMap = {});
 
   // Used when receiving an RPC over the wire.
   RpcWithAutograd(
@@ -29,9 +29,9 @@ class TORCH_API RpcWithAutograd final : public rpc::RpcCommandBase {
       std::unique_ptr<rpc::RpcCommandBase> wrappedRpc,
       rpc::MessageType wrappedMessageType,
       std::vector<torch::Tensor> tensors,
-      std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> deviceMap = {});
+      rpc::DeviceMap deviceMap = {});
 
-  rpc::Message toMessageImpl() && override;
+  c10::intrusive_ptr<rpc::Message> toMessageImpl() && override;
 
   static std::unique_ptr<RpcWithAutograd> fromMessage(
       const rpc::Message& message);
@@ -55,7 +55,7 @@ class TORCH_API RpcWithAutograd final : public rpc::RpcCommandBase {
   rpc::worker_id_t fromWorkerId() const;
 
   // Retrieve the device map.
-  const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap();
+  const rpc::DeviceMap& deviceMap();
 
  private:
   // WorkerId from which this RPC originated. This is necessary for knowing
@@ -80,7 +80,7 @@ class TORCH_API RpcWithAutograd final : public rpc::RpcCommandBase {
   // avoid serializing the request twice.
   // When receive rpcWithAutograd is constructed fromMessage, it is nullptr;
   // When send rpcWithAutograd is constructed before toMessage, it is valid;
-  rpc::Message wrappedMessage_;
+  c10::intrusive_ptr<rpc::Message> wrappedMessage_;
 
   // message type of the wrappedMessage, this is stored separately since
   // wrappedMessage_ is not always guaranteed to be populated.
@@ -90,7 +90,7 @@ class TORCH_API RpcWithAutograd final : public rpc::RpcCommandBase {
   std::vector<torch::Tensor> tensors_;
 
   // Device mapping for tensors that are sent across an RPC to another node.
-  std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> deviceMap_;
+  rpc::DeviceMap deviceMap_;
 };
 
 } // namespace autograd

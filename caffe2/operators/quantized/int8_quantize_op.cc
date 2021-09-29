@@ -2,10 +2,8 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Int8Quantize, int8::Int8QuantizeOp);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Int8Quantize)
     .Arg("Y_scale", "Output tensor quantization scale")
     .Arg("Y_zero_point", "Output tensor quantization offset")

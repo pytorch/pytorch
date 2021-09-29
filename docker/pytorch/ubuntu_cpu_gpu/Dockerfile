@@ -5,20 +5,17 @@
 #   nvidia/cuda:11.2.1-cudnn8-devel-ubuntu18.04
 #   nvidia/cuda:10.2-cudnn8-devel-ubuntu18.04
 #   nvidia/cuda:10.1-cudnn7-devel-ubuntu18.04
-#   nvidia/cuda:9.2-cudnn7-devel-ubuntu18.04
 #
 # Available MAGMA_CUDA_VERSION options (for GPU/CUDA builds):
 #   magma-cuda112
 #   magma-cuda111
 #   magma-cuda102
 #   magma-cuda101
-#   magma-cuda92
 #
 # Available TORCH_CUDA_ARCH_LIST_VAR options (for GPU/CUDA builds):
 #   "3.7+PTX;5.0;6.0;6.1;7.0;7.5;8.0;8.6" for CUDA 11.2/11.1
 #   "3.7+PTX;5.0;6.0;6.1;7.0;7.5;8.0" for CUDA 11.0
 #   "3.7+PTX;5.0;6.0;6.1;7.0;7.5" for CUDA 10.2/10.1
-#   "3.7+PTX;5.0;6.0;6.1;7.0" for CUDA 9.2
 #
 # Build image with CPU or GPU support with the following command:
 #   nvidia-docker build -t ${CONTAINER_TAG}
@@ -49,8 +46,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         cmake \
         curl \
         git \
+        git-lfs \
         libjpeg-dev \
         libpng-dev \
+        openmpi-bin \
         wget && \
     rm -rf /var/lib/apt/lists/*
 RUN /usr/sbin/update-ccache-symlinks
@@ -86,7 +85,10 @@ ARG TORCH_CUDA_ARCH_LIST_VAR
 RUN if [ -z "$TORCH_CUDA_ARCH_LIST_VAR" ] ; then \
     echo "Continuing CPU build ..."; \
   else \
-    echo "Setting CUDA env vars ..."; \
+    echo "Setting CUDA env vars and installing openmpi ..."; \
+    # Set MPI links to avoid libmpi_cxx.so.1 not found error
+    ln -s /usr/lib/x86_64-linux-gnu/libmpi_cxx.so.20 /usr/lib/x86_64-linux-gnu/libmpi_cxx.so.1; \
+    ln -s /usr/lib/x86_64-linux-gnu/libmpi.so.20.10.1 /usr/lib/x86_64-linux-gnu/libmpi.so.12; \
   fi
 # If the build argument TORCH_CUDA_ARCH_LIST_VAR is given, container will be
 # set for GPU/CUDA build, else for CPU build.

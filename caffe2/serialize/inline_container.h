@@ -7,6 +7,7 @@
 #include <istream>
 #include <mutex>
 #include <ostream>
+#include <unordered_set>
 
 #include <c10/core/Allocator.h>
 #include <c10/core/Backend.h>
@@ -140,7 +141,7 @@ class TORCH_API PyTorchStreamWriter final {
       bool compress = false);
   void writeEndOfFile();
 
-  const std::vector<std::string>& getAllWrittenRecords();
+  const std::unordered_set<std::string>& getAllWrittenRecords();
 
   bool finalized() const {
     return finalized_;
@@ -156,7 +157,7 @@ class TORCH_API PyTorchStreamWriter final {
   void setup(const std::string& file_name);
   void valid(const char* what, const char* info = "");
   size_t current_pos_ = 0;
-  std::vector<std::string> files_written;
+  std::unordered_set<std::string> files_written_;
   std::unique_ptr<mz_zip_archive> ar_;
   std::string archive_name_;
   std::string archive_name_plus_slash_;
@@ -184,7 +185,7 @@ size_t getPadding(
     size_t filename_size,
     size_t size,
     std::string& padding_buf);
-}
+} // namespace detail
 
 } // namespace serialize
 } // namespace caffe2

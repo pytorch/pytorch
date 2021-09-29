@@ -40,8 +40,8 @@ c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut(
     const c10::intrusive_ptr<c10::ivalue::Future>& fut) {
   // Profiling callback that ends the associated record_function
   // and returns the value of the passed in future.
-  std::function<c10::IValue(void)> futureProfilingFunc =
-      [fut, handle]() {
+  std::function<c10::IValue(c10::ivalue::Future&)> futureProfilingFunc =
+      [handle](c10::ivalue::Future& fut) {
         TORCH_INTERNAL_ASSERT(
             handle.defined(),
             "Undefined RecordFunction handle. This can happen if the handle is "
@@ -55,10 +55,10 @@ c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut(
         // transparent, we must make this future propagate the value of the RPC
         // future.
         // Use value() here instead of constValue() to ensure we propagate errors.
-        return fut->value();
+        return fut.value();
       };
   // Define a future that completes after the profiling callbacks are run.
-  auto profiledFut = fut->then(at::wrapPropagateTLSState<c10::IValue>(
+  auto profiledFut = fut->then(at::wrapPropagateTLSState(
       futureProfilingFunc),
       fut->elementType()
       );
@@ -76,11 +76,10 @@ c10::AliasAnalysisKind aliasAnalysisFromSchema() {
   return c10::AliasAnalysisKind::FROM_SCHEMA;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 jit::RegisterOperators reg_fut_ops({
     jit::Operator(
         "profiler::_call_end_callbacks_on_jit_fut(Tensor x, Future(t) y) -> Future(t)",
-        [](jit::Stack* stack) {
+        [](jit::Stack& stack) {
           // Pop inputs, which should be a future and a tensor
           auto fut = jit::pop(stack).toFuture();
           auto tensor = jit::pop(stack).toTensor();

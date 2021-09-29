@@ -1,6 +1,4 @@
-from io import BytesIO, StringIO
-from pathlib import Path
-from tempfile import TemporaryDirectory
+from io import BytesIO
 from textwrap import dedent
 from unittest import skipIf
 
@@ -27,23 +25,22 @@ except ImportError:
 class ModelTest(PackageTestCase):
     """End-to-end tests packaging an entire model."""
 
-    @skipIf(IS_FBCODE or IS_SANDCASTLE, "Tests that use temporary files are disabled in fbcode")
+    @skipIf(
+        IS_FBCODE or IS_SANDCASTLE,
+        "Tests that use temporary files are disabled in fbcode",
+    )
     def test_resnet(self):
         resnet = resnet18()
 
         f1 = self.temp()
 
         # create a package that will save it along with its code
-        with PackageExporter(f1, verbose=False) as e:
+        with PackageExporter(f1) as e:
             # put the pickled resnet in the package, by default
             # this will also save all the code files references by
             # the objects in the pickle
+            e.intern("**")
             e.save_pickle("model", "model.pkl", resnet)
-
-            # check th debug graph has something reasonable:
-            buf = StringIO()
-            debug_graph = e._write_dep_graph(failing_module="torch")
-            self.assertIn("torchvision.models.resnet", debug_graph)
 
         # we can now load the saved model
         i = PackageImporter(f1)
@@ -52,7 +49,7 @@ class ModelTest(PackageTestCase):
         # test that it works
         input = torch.rand(1, 3, 224, 224)
         ref = resnet(input)
-        self.assertTrue(torch.allclose(r2(input), ref))
+        self.assertEqual(r2(input), ref)
 
         # functions exist also to get at the private modules in each package
         torchvision = i.import_module("torchvision")
@@ -64,7 +61,7 @@ class ModelTest(PackageTestCase):
         # came from imported packages so that it can resolve
         # class names like torchvision.models.resnet.ResNet
         # to their source code.
-        with PackageExporter(f2, verbose=False, importer=(i, sys_importer)) as e:
+        with PackageExporter(f2, importer=(i, sys_importer)) as e:
             # e.importers is a list of module importing functions
             # that by default contains importlib.import_module.
             # it is searched in order until the first success and
@@ -77,24 +74,14 @@ class ModelTest(PackageTestCase):
             # we suggest reconstructing the model objects using code from a single package
             # using functions like save_state_dict and load_state_dict to transfer state
             # to the correct code objects.
+            e.intern("**")
             e.save_pickle("model", "model.pkl", r2)
 
         f2.seek(0)
 
         i2 = PackageImporter(f2)
         r3 = i2.load_pickle("model", "model.pkl")
-        self.assertTrue(torch.allclose(r3(input), ref))
-
-        # test we can load from a directory
-        import zipfile
-
-        zf = zipfile.ZipFile(f1, "r")
-
-        with TemporaryDirectory() as td:
-            zf.extractall(path=td)
-            iz = PackageImporter(str(Path(td) / Path(f1).name))
-            r4 = iz.load_pickle("model", "model.pkl")
-            self.assertTrue(torch.allclose(r4(input), ref))
+        self.assertEqual(r3(input), ref)
 
     @skipIfNoTorchVision
     def test_model_save(self):
@@ -118,7 +105,8 @@ class ModelTest(PackageTestCase):
         # Option 1: save by pickling the whole model
         # + single-line, similar to torch.jit.save
         # - more difficult to edit the code after the model is created
-        with PackageExporter(f1, verbose=False) as e:
+        with PackageExporter(f1) as e:
+            e.intern("**")
             e.save_pickle("model", "pickled", resnet)
             # note that this source is the same for all models in this approach
             # so it can be made part of an API that just takes the model and
@@ -140,7 +128,8 @@ class ModelTest(PackageTestCase):
         # Option 2: save with state dict
         # - more code to write to save/load the model
         # + but this code can be edited later to adjust adapt the model later
-        with PackageExporter(f2, verbose=False) as e:
+        with PackageExporter(f2) as e:
+            e.intern("**")
             e.save_pickle("model", "state_dict", resnet.state_dict())
             src = dedent(
                 """\
@@ -170,7 +159,7 @@ class ModelTest(PackageTestCase):
             r = the_model(input)
             results.append(r)
 
-        self.assertTrue(torch.allclose(*results))
+        self.assertEqual(*results)
 
     @skipIfNoTorchVision
     def test_script_resnet(self):
@@ -180,7 +169,8 @@ class ModelTest(PackageTestCase):
         # Option 1: save by pickling the whole model
         # + single-line, similar to torch.jit.save
         # - more difficult to edit the code after the model is created
-        with PackageExporter(f1, verbose=False) as e:
+        with PackageExporter(f1) as e:
+            e.intern("**")
             e.save_pickle("model", "pickled", resnet)
 
         f1.seek(0)
@@ -198,7 +188,7 @@ class ModelTest(PackageTestCase):
         loaded = torch.jit.load(f2)
 
         input = torch.rand(1, 3, 224, 224)
-        self.assertTrue(torch.allclose((loaded(input)), resnet(input)))
+        self.assertEqual(loaded(input), resnet(input))
 
 
 if __name__ == "__main__":

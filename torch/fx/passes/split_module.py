@@ -1,7 +1,9 @@
 import torch
 from torch.fx.graph_module import GraphModule
 from typing import Callable, List, Dict, Any, Optional
+from torch.fx._compatibility import compatibility
 
+@compatibility(is_backward_compatible=True)
 class Partition:
     def __init__(self, name: str):
         self.name: str = name
@@ -10,8 +12,8 @@ class Partition:
         self.outputs: Dict[str, None] = {}
         self.partitions_dependent_on: Dict[str, None] = {}
         self.partition_dependents: Dict[str, None] = {}
-        self.graph : torch.fx.graph.Graph = torch.fx.graph.Graph()  # type: ignore[attr-defined, name-defined]
-        self.environment : Dict[torch.fx.node.Node, torch.fx.node.Node] = {}  # type: ignore[name-defined]
+        self.graph : torch.fx.graph.Graph = torch.fx.graph.Graph()
+        self.environment : Dict[torch.fx.node.Node, torch.fx.node.Node] = {}
         self.targets : Dict[str, Any] = {}
 
     def __repr__(self) -> str:
@@ -23,15 +25,16 @@ class Partition:
             f" parition dependents: {self.partition_dependents}"
 
 # Creates subgraphs out of main graph
+@compatibility(is_backward_compatible=True)
 def split_module(
     m: GraphModule,
     root_m: torch.nn.Module,
-    split_callback: Callable[[torch.fx.node.Node], int],  # type: ignore[name-defined]
+    split_callback: Callable[[torch.fx.node.Node], int],
 ):
     partitions: Dict[str, Partition] = {}
-    orig_nodes: Dict[str, torch.fx.node.Node] = {}  # type: ignore[name-defined]
+    orig_nodes: Dict[str, torch.fx.node.Node] = {}
 
-    def record_cross_partition_use(def_node : torch.fx.node.Node, use_node : Optional[torch.fx.node.Node]):  # type: ignore[name-defined] # noqa: B950
+    def record_cross_partition_use(def_node : torch.fx.node.Node, use_node : Optional[torch.fx.node.Node]):  # noqa: B950
         def_partition_name = getattr(def_node, '_fx_partition', None)
         use_partition_name = getattr(use_node, '_fx_partition', None)
         if def_partition_name != use_partition_name:
@@ -56,7 +59,7 @@ def split_module(
         if node.op in ["placeholder", "get_attr"]:
             continue
         if node.op == 'output':
-            torch.fx.graph.map_arg(node.args[0], lambda n: record_cross_partition_use(n, None))  # type: ignore[attr-defined]
+            torch.fx.graph.map_arg(node.args[0], lambda n: record_cross_partition_use(n, None))
             continue
         partition_name = str(split_callback(node))
 
@@ -68,8 +71,8 @@ def split_module(
         partition.node_names.append(node.name)
         node._fx_partition = partition_name
 
-        torch.fx.graph.map_arg(node.args, lambda def_node: record_cross_partition_use(def_node, node))  # type: ignore[attr-defined]
-        torch.fx.graph.map_arg(node.kwargs, lambda def_node: record_cross_partition_use(def_node, node))  # type: ignore[attr-defined] # noqa: B950
+        torch.fx.graph.map_arg(node.args, lambda def_node: record_cross_partition_use(def_node, node))
+        torch.fx.graph.map_arg(node.kwargs, lambda def_node: record_cross_partition_use(def_node, node))  # noqa: B950
 
     # find partitions with no dependencies
     root_partitions : List[str] = []
@@ -104,8 +107,8 @@ def split_module(
 
             # swap out old graph nodes in kw/args with references to new nodes in this submodule
             environment = partition.environment
-            gathered_args = torch.fx.graph.map_arg(node.args, lambda n : environment[n])  # type: ignore[attr-defined]
-            gathered_kwargs = torch.fx.graph.map_arg(node.kwargs, lambda n : environment[n])  # type: ignore[attr-defined]
+            gathered_args = torch.fx.graph.map_arg(node.args, lambda n : environment[n])
+            gathered_kwargs = torch.fx.graph.map_arg(node.kwargs, lambda n : environment[n])
 
             if node.op not in ['call_module', 'get_attr']:
                 target = node.target
@@ -128,9 +131,9 @@ def split_module(
             partition.environment[node] = new_node
 
     # Set up values to construct base module
-    base_mod_env : Dict[str, torch.fx.node.Node] = {}  # type: ignore[name-defined]
-    base_mod_graph : torch.fx.graph.Graph = torch.fx.graph.Graph()  # type: ignore[attr-defined, name-defined]
-    base_mod_attrs : Dict[str, torch.fx.graph_module.GraphModule] = {}  # type: ignore[name-defined]
+    base_mod_env : Dict[str, torch.fx.node.Node] = {}
+    base_mod_graph : torch.fx.graph.Graph = torch.fx.graph.Graph()
+    base_mod_attrs : Dict[str, torch.fx.graph_module.GraphModule] = {}
     for node in m.graph.nodes:
         if node.op == 'placeholder':
             base_mod_env[node.name] = base_mod_graph.placeholder(node.name)
@@ -159,14 +162,14 @@ def split_module(
 
         # Construct GraphModule for this partition
         submod_name = f'submod_{partition_name}'
-        base_mod_attrs[submod_name] = torch.fx.graph_module.GraphModule(partition.targets, partition.graph)  # type: ignore[attr-defined] # noqa: B950
+        base_mod_attrs[submod_name] = torch.fx.graph_module.GraphModule(partition.targets, partition.graph)  # noqa: B950
 
         # Emit call in base graph to this submodule
 
         output_val = base_mod_graph.call_module(submod_name, tuple(base_mod_env[name] for name in partition.inputs))
         if len(partition.outputs) > 1:
             # Unpack multiple return values from submodule
-            output_val_proxy = torch.fx.proxy.Proxy(output_val)  # type: ignore[attr-defined]
+            output_val_proxy = torch.fx.proxy.Proxy(output_val)
             for i, output_name in enumerate(partition.outputs):
                 base_mod_env[output_name] = output_val_proxy[i].node  # type: ignore[index]
         else:
@@ -174,6 +177,6 @@ def split_module(
 
     for node in m.graph.nodes:
         if node.op == 'output':
-            base_mod_graph.output(torch.fx.graph.map_arg(node.args[0], lambda n : base_mod_env[n.name]))  # type: ignore[attr-defined] # noqa: B950
+            base_mod_graph.output(torch.fx.graph.map_arg(node.args[0], lambda n : base_mod_env[n.name]))  # noqa: B950
 
-    return torch.fx.graph_module.GraphModule(base_mod_attrs, base_mod_graph)  # type: ignore[attr-defined]
+    return torch.fx.graph_module.GraphModule(base_mod_attrs, base_mod_graph)

@@ -23,11 +23,9 @@ if NOT "%BUILD_ENVIRONMENT%"=="" (
 
 call %CONDA_PARENT_DIR%\Miniconda3\Scripts\activate.bat %CONDA_PARENT_DIR%\Miniconda3
 if NOT "%BUILD_ENVIRONMENT%"=="" (
-    :: We have to pin Python version to 3.6.7, until mkl supports Python 3.7
-    :: Numba is pinned to 0.44.0 to avoid https://github.com/numba/numba/issues/4352
-    call conda install -y -q python=3.6.7 numpy mkl cffi pyyaml boto3 protobuf numba==0.44.0 scipy==1.5.0 typing_extensions dataclasses
+    call conda install -y -q python=3.8 numpy mkl cffi pyyaml boto3 protobuf numba scipy=1.6.2 typing_extensions dataclasses libuv
     if errorlevel 1 exit /b
-    if not errorlevel 0 exit /b
+    if not errorlevel 0 exit /b    
     call conda install -y -q -c conda-forge cmake
     if errorlevel 1 exit /b
     if not errorlevel 0 exit /b
@@ -45,13 +43,8 @@ if not errorlevel 0 exit /b
 popd
 
 :: The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
-pip install "ninja==1.10.0.post1" future "hypothesis==4.53.2" "librosa>=0.6.2" psutil pillow unittest-xml-reporting pytest
-
-:: TODO: All sharded configs run coverage. We should change that to be only one config, but right now we will just
-:: install coverage everywhere. Tracked: https://github.com/pytorch/pytorch/issues/56264
-python -mpip install coverage==5.5
-python -mpip install -e tools/coverage_plugins_package
-
+=======
+pip install "ninja==1.10.0.post1" future "hypothesis==4.53.2" "expecttest==0.1.3" "librosa>=0.6.2" psutil pillow unittest-xml-reporting pytest
 if errorlevel 1 exit /b
 if not errorlevel 0 exit /b
 

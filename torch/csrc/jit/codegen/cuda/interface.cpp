@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/interface.h>
 
 #include <ATen/core/dispatch/OperatorOptions.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 
@@ -9,7 +10,6 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<bool> cuda_fusion_guard_mode{true};
 
 std::atomic<bool>& getCudaFusionGuardMode() {
@@ -23,28 +23,34 @@ CudaFuserInterface* getFuserInterface() {
 
 void compileFusionGroup(Node* fusion_node) {
   TORCH_CHECK(
-      getFuserInterface()->fn_compile_n_ != nullptr,
+      getFuserInterface()->fn_compile_n != nullptr,
       "Running the CUDA fuser requires a CUDA build.");
-  getFuserInterface()->fn_compile_n_(fusion_node);
+  getFuserInterface()->fn_compile_n(fusion_node);
 }
 
 void runFusionGroup(const Node* fusion_node, Stack& stack) {
   TORCH_CHECK(
-      getFuserInterface()->fn_run_n_s_ != nullptr,
+      getFuserInterface()->fn_run_n_s != nullptr,
       "Running the CUDA fuser requires a CUDA build.");
-  getFuserInterface()->fn_run_n_s_(fusion_node, stack);
+  getFuserInterface()->fn_run_n_s(fusion_node, stack);
 }
 
 void fuseGraph(std::shared_ptr<Graph>& graph) {
   TORCH_CHECK(
-      getFuserInterface()->fn_fuse_graph_ != nullptr,
+      getFuserInterface()->fn_fuse_graph != nullptr,
       "Running the CUDA fuser requires a CUDA build.");
-  getFuserInterface()->fn_fuse_graph_(graph);
+  getFuserInterface()->fn_fuse_graph(graph);
 }
 
 bool canFuseNode(const Node* node) {
-  return getFuserInterface()->fn_can_fuse_n_ != nullptr &&
-      getFuserInterface()->fn_can_fuse_n_(node);
+  return getFuserInterface()->fn_can_fuse_n != nullptr &&
+      getFuserInterface()->fn_can_fuse_n(node);
+}
+
+void InsertProfileNodesForCUDAFuser(ProfilingRecord* pr) {
+  if (getFuserInterface()->fn_insert_profile_inodes) {
+    getFuserInterface()->fn_insert_profile_inodes(pr);
+  }
 }
 
 //! [ Note -- type guard logic in CudaFusionGuard ]
@@ -90,8 +96,7 @@ bool complyWith(
   // check a. if num_dimension check fails or scalar type check fails
   if (*guard_tensor_type->dim() != static_cast<size_t>(tensor.ndimension()) ||
       (guard_tensor_type->scalarType().has_value() &&
-       (guard_tensor_type->scalarType().value() != tensor.scalar_type())) ||
-      tensor.requires_grad()) {
+       (guard_tensor_type->scalarType().value() != tensor.scalar_type()))) {
     return false;
   }
 
@@ -103,7 +108,7 @@ bool complyWith(
   const auto& t_sizes = tensor.sizes();
   const auto& t_strides = tensor.strides();
   int inner_dim = -1;
-  for (size_t j = 0; j < *guard_tensor_type->dim(); j++) {
+  for (const auto j : c10::irange(*guard_tensor_type->dim())) {
     // check b. for stride check, we go along dimensions from fastest stride to
     // slowest stride
     int sorted_index = stride_properties[j]->stride_index_
@@ -132,7 +137,8 @@ bool complyWith(
         if (j != 0) {
           // we use contiguity to collapse dimension, if size == 1, it is
           // always collapsible
-          if (t_sizes[sorted_index] != 1) {
+          // computeStrideProps also default to contiguous when stride == 1
+          if (t_sizes[sorted_index] != 1 && t_strides[sorted_index] != 1) {
             TORCH_INTERNAL_ASSERT(
                 stride_properties[j - 1]->stride_index_.has_value(),
                 "Counknown index is meaningless");
@@ -179,18 +185,69 @@ bool complyWith(
 namespace {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+RegisterOperators size_eq_guard({
+    Operator(
+        //"prim::CudaFusionSizeEq(int[] size, int[] ref) -> bool",
+        "prim::CudaFusionSizeEq(...) -> bool",
+        // prim::CudaFusionGuard returns a fresh Boolean type without aliasing.
+        // if we would ever return refined tensor, which would change aliasing
+        // analysis, we should update aliasdb pass.
+        [](const Node* node) -> Operation {
+          return [](Stack* stack) {
+            at::ArrayRef<IValue> inputs = last(stack, 2);
+            drop(stack, 2);
+
+            if (!fuser::cuda::getCudaFusionGuardMode()) {
+              push(stack, IValue(true));
+              return;
+            }
+
+            // auto inp = inputs[0].toIntList();
+            TORCH_INTERNAL_ASSERT(
+                inputs[1].isIntList(), "reference needs to be of int list");
+            auto ref = inputs[1].toIntList();
+
+            auto ret = true;
+            if (ref.empty()) {
+              ret = inputs[0].isNone();
+            } else {
+              if (inputs[0].isIntList()) {
+                auto inp = inputs[0].toIntList();
+                if (inp.size() != ref.size()) {
+                  push(stack, IValue(false));
+                  return;
+                }
+
+                for (size_t i = 0; i < inp.size(); i++) {
+                  if (((inp[i] == 1) != (ref[i] == 1))) {
+                    ret = false;
+                    break;
+                  }
+                }
+              } else {
+                ret = false;
+              }
+            }
+
+            push(stack, IValue(ret));
+            return;
+          };
+        },
+        aliasAnalysisFromSchema()),
+});
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg_fusion({
     Operator(
         prim::CudaFusionGroup,
         [](const Node* node) -> Operation {
-          return [node](Stack* stack) {
-            fuser::cuda::runFusionGroup(node, *stack);
+          return [node](Stack& stack) {
+            fuser::cuda::runFusionGroup(node, stack);
           };
         },
         aliasAnalysisSpecialCase()),
 });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg_guard({
     Operator(
         "prim::CudaFusionGuard(...) -> bool",
@@ -198,7 +255,7 @@ RegisterOperators reg_guard({
         // if we would ever return refined tensor, which would change aliasing
         // analysis, we should update aliasdb pass.
         [](const Node* node) -> Operation {
-          return [node](Stack* stack) {
+          return [node](Stack& stack) {
             // TODO: check latency here!!!!
             std::vector<TypePtr> types = node->tys(attr::types);
             const auto num_inputs = types.size();
@@ -210,7 +267,7 @@ RegisterOperators reg_guard({
               return;
             }
 
-            for (size_t i = 0; i < num_inputs; i++) {
+            for (const auto i : c10::irange(num_inputs)) {
               const c10::TensorTypePtr& guard_tensor_type =
                   types[i]->cast<TensorType>();
 
@@ -228,6 +285,24 @@ RegisterOperators reg_guard({
             // naively return true;
             push(stack, IValue(true));
             return;
+          };
+        },
+        aliasAnalysisFromSchema()),
+});
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+RegisterOperators reg_add_optional({
+    Operator(
+        "prim::add_optional(Tensor(a) input, Tensor? bias) -> Tensor(a)",
+        [](const Node* node) -> Operation {
+          return [](Stack* stack) {
+            IValue input, bias;
+            pop(stack, input, bias);
+            if (bias.isNone()) {
+              push(stack, std::move(input));
+            } else {
+              push(stack, at::add(input.toTensor(), bias.toTensor(), 1.0));
+            }
           };
         },
         aliasAnalysisFromSchema()),

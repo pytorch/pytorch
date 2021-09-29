@@ -10,10 +10,12 @@
 #include <cub/block/block_reduce.cuh>
 #include <cub/cub.cuh>
 
+#include <thrust/host_vector.h>
 #include <thrust/device_vector.h>
 #include <thrust/functional.h>
 
 #include "caffe2/core/context_gpu.h"
+#include "caffe2/utils/GpuAtomics.cuh"
 #include "caffe2/utils/conversions.h"
 
 #include "caffe2/utils/fixed_divisor.h"
@@ -36,7 +38,6 @@
 #endif // __HIP_PLATFORM_HCC__
 
 #ifdef __HIP_PLATFORM_HCC__
-#include <hip/hip_version.h>
 using CUBLAS_HALF_TYPE = rocblas_half;
 #else // __HIP_PLATFORM_HCC
 using CUBLAS_HALF_TYPE = __half;
@@ -1674,9 +1675,9 @@ CAFFE2_CUDA_EXPORT void Dot<at::Half, CUDAContext>(
     const at::Half* b,
     at::Half* y,
     CUDAContext* context) {
-#if defined __HIP_PLATFORM_HCC__ && HIP_VERSION < 210
+#if defined __HIP_PLATFORM_HCC__ && TORCH_HIP_VERSION < 210
   CAFFE_THROW("HIP currently does not support FP16 completely yet.");
-#elif defined __HIP_PLATFORM_HCC__ && HIP_VERSION >= 210
+#elif defined __HIP_PLATFORM_HCC__ && TORCH_HIP_VERSION >= 210
   CUBLAS_ENFORCE(cublasSetPointerMode(
       context->cublas_handle(), CUBLAS_POINTER_MODE_DEVICE));
   CUBLAS_ENFORCE(rocblas_hdot(
@@ -2217,13 +2218,13 @@ __global__ void Im2ColNdNCHWCUDAKernel(
       if (!kCol2Im) {
         Y_data[col_index] = is_padding ? 0 : __ldg(X_data + img_index);
       } else if (!is_padding) {
-        atomicAdd(Y_data + img_index, __ldg(X_data + col_index));
+        gpu_atomic_add(Y_data + img_index, __ldg(X_data + col_index));
       }
 #else
       if (!kCol2Im) {
         Y_data[col_index] = is_padding ? 0 : X_data[img_index];
       } else if (!is_padding) {
-        atomicAdd(Y_data + img_index, X_data[col_index]);
+        gpu_atomic_add(Y_data + img_index, X_data[col_index]);
       }
 #endif
     }
@@ -2890,7 +2891,8 @@ CAFFE2_CUDA_EXPORT void BroadcastCUDAImpl(
       const T alpha,                                 \
       const T* X,                                    \
       T* Y,                                          \
-      CUDAContext* context) {                        \
+      CUDAContext* context,                          \
+      bool) {                                        \
     CAFFE_ENFORCE_LE(X_ndim, Y_ndim);                \
     DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_1(          \
         Y_ndim,                                      \

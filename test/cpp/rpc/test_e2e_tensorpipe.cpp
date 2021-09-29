@@ -39,6 +39,8 @@ class TestE2ETensorPipe : public TestE2EBase {
         numWorkers,
         pg,
         opts,
+        std::unordered_map<std::string, DeviceMap>{},
+        std::vector<c10::Device>{},
         std::make_unique<RequestCallbackNoPython>());
   }
 };

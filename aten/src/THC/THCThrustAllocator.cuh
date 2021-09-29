@@ -2,6 +2,7 @@
 #define THC_THRUST_ALLOCATOR_INC
 
 #include <cstddef>
+#include <THC/THCGeneral.h>
 
 /// Allocator for Thrust to re-route its internal device allocations
 /// to the THC allocator

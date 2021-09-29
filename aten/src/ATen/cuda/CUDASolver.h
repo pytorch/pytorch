@@ -31,7 +31,7 @@ void getrf<c10::complex<float>>(CUDASOLVER_GETRF_ARGTYPES(c10::complex<float>));
 
 
 #define CUDASOLVER_GETRS_ARGTYPES(Dtype)  \
-    cusolverDnHandle_t handle, int n, int nrhs, Dtype* dA, int lda, int* ipiv, Dtype* ret, int ldb, int* info
+    cusolverDnHandle_t handle, int n, int nrhs, Dtype* dA, int lda, int* ipiv, Dtype* ret, int ldb, int* info, cublasOperation_t trans
 
 template<class Dtype>
 void getrs(CUDASOLVER_GETRS_ARGTYPES(Dtype)) {
@@ -249,6 +249,51 @@ template <>
 void orgqr<c10::complex<float>>(CUDASOLVER_ORGQR_ARGTYPES(c10::complex<float>));
 template <>
 void orgqr<c10::complex<double>>(CUDASOLVER_ORGQR_ARGTYPES(c10::complex<double>));
+
+#define CUDASOLVER_ORMQR_BUFFERSIZE_ARGTYPES(Dtype)                          \
+  cusolverDnHandle_t handle, cublasSideMode_t side, cublasOperation_t trans, \
+      int m, int n, int k, const Dtype *A, int lda, const Dtype *tau,        \
+      const Dtype *C, int ldc, int *lwork
+
+template <class Dtype>
+void ormqr_bufferSize(CUDASOLVER_ORMQR_BUFFERSIZE_ARGTYPES(Dtype)) {
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "at::cuda::solver::ormqr_bufferSize: not implemented for ",
+      typeid(Dtype).name());
+}
+template <>
+void ormqr_bufferSize<float>(CUDASOLVER_ORMQR_BUFFERSIZE_ARGTYPES(float));
+template <>
+void ormqr_bufferSize<double>(CUDASOLVER_ORMQR_BUFFERSIZE_ARGTYPES(double));
+template <>
+void ormqr_bufferSize<c10::complex<float>>(
+    CUDASOLVER_ORMQR_BUFFERSIZE_ARGTYPES(c10::complex<float>));
+template <>
+void ormqr_bufferSize<c10::complex<double>>(
+    CUDASOLVER_ORMQR_BUFFERSIZE_ARGTYPES(c10::complex<double>));
+
+#define CUDASOLVER_ORMQR_ARGTYPES(Dtype)                                     \
+  cusolverDnHandle_t handle, cublasSideMode_t side, cublasOperation_t trans, \
+      int m, int n, int k, const Dtype *A, int lda, const Dtype *tau, Dtype *C,    \
+      int ldc, Dtype *work, int lwork, int *devInfo
+
+template <class Dtype>
+void ormqr(CUDASOLVER_ORMQR_ARGTYPES(Dtype)) {
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "at::cuda::solver::ormqr: not implemented for ",
+      typeid(Dtype).name());
+}
+template <>
+void ormqr<float>(CUDASOLVER_ORMQR_ARGTYPES(float));
+template <>
+void ormqr<double>(CUDASOLVER_ORMQR_ARGTYPES(double));
+template <>
+void ormqr<c10::complex<float>>(CUDASOLVER_ORMQR_ARGTYPES(c10::complex<float>));
+template <>
+void ormqr<c10::complex<double>>(
+    CUDASOLVER_ORMQR_ARGTYPES(c10::complex<double>));
 
 #ifdef USE_CUSOLVER_64_BIT
 

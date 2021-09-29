@@ -78,11 +78,12 @@ if [ -n "${IOS_ARCH:-}" ]; then
   CMAKE_ARGS+=("-DIOS_ARCH=${IOS_ARCH}")
 fi
 
-if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
-  CMAKE_ARGS+=("-DBUILD_LITE_INTERPRETER=ON")
-else
+if [ "${BUILD_LITE_INTERPRETER}" == 0 ]; then
   CMAKE_ARGS+=("-DBUILD_LITE_INTERPRETER=OFF")
+else
+  CMAKE_ARGS+=("-DBUILD_LITE_INTERPRETER=ON")
 fi
+CMAKE_ARGS+=("-DUSE_LITE_INTERPRETER_PROFILER=OFF")
 
 # Don't build binaries or tests (only the library)
 CMAKE_ARGS+=("-DBUILD_TEST=OFF")
@@ -103,6 +104,11 @@ CMAKE_ARGS+=("-DUSE_MKLDNN=OFF")
 # Metal
 if [ "${USE_PYTORCH_METAL:-}" == "1" ]; then
   CMAKE_ARGS+=("-DUSE_PYTORCH_METAL=ON")
+fi
+
+# Core ML
+if [ "${USE_COREML_DELEGATE}" == "1" ]; then
+  CMAKE_ARGS+=("-DUSE_COREML_DELEGATE=ON")
 fi
 
 # pthreads

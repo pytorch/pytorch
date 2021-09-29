@@ -18,7 +18,7 @@ void backward(
     DistEngine::getInstance().execute(context_id, roots, retain_graph);
   } catch (std::exception& e) {
     // FIXME: crashes if exception type is not RuntimeError
-    throw std::runtime_error(e.what());
+    TORCH_CHECK(false, e.what());
   }
 }
 

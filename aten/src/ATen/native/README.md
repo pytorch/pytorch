@@ -7,8 +7,8 @@ Like all ATen methods/functions, native functions are made available
 from both ATen's C++ and Python APIs.  In C++, they are made available
 either as methods on `Tensor` (`t.mymeth()`) and functions in the ATen
 namespace (`at::myfunc()`).  In PyTorch, they are made available as
-methods on `Variable` or as functions on `torch._C._FunctionBase`
-(it is the user's responsibility to re-exporting these functions in
+methods on `Variable` or as functions on `torch._C._FunctionBase`.
+(It is the user's responsibility to re-export these functions in
 a more user-facing module.)
 
 The rest of this document describes how to implement an ATen function.
@@ -364,6 +364,21 @@ e.g., you call a function already manages device guard setting, or
 you're a function that simply does not interact with any devices. In
 that case, code generation of the device guard can be disabled by adding
 `device_guard: False` to your function definition.
+
+### `device_check`
+
+```
+device_check: NoCheck
+```
+
+By default, ATen code generation will generate device check,
+which will ensure all the tensor parameters passed to kernel are
+on the same device.
+
+However, in some cases, checking the device is unncessary, becuase,
+e.g., you call a function allows to work on multiple devices.
+In that case, code generation of the device check can e disabled by adding
+`device_check: NoCheck` to your function definition.
 
 ### `manual_kernel_registration`
 

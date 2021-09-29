@@ -24,7 +24,7 @@ namespace templates {
 //
 // If random's uint64_t arithmetics produces 65503 as a random value after casting to torch::half it becomes 65504
 // and violates the requirement that random value must be less than `to`. To resolve this issue `update_from` and `update_to`
-// moves `from` to the left and `to` to the right to the next closest value that won't go outside [from, to) after casting to
+// moves `from` to the right and `to` to the left to the next closest value that won't go outside [from, to) after casting to
 // the target dtype. For `to` = 65504 it moves left for (1 << (log2(to) - 11 + 1)) = 32 and becomes 65472, which is previous
 // available number for torch::half dtype.
 template<typename scalar_t>
@@ -63,7 +63,7 @@ int64_t update_to(int64_t to) {
 
 template<template<typename> class random_kernel, typename RNG>
 at::Tensor& random_impl(at::Tensor& self, c10::optional<Generator> generator) {
-  auto iter = at::TensorIterator::nullary_op(self);
+  auto iter = at::TensorIterator::borrowing_nullary_op(self);
   random_kernel<RNG>()(iter, generator);
   return self;
 }
@@ -106,7 +106,7 @@ static void check_from_to_in_range(int64_t from, int64_t to_inc, caffe2::TypeMet
 template<template<typename> class random_from_to_kernel, typename RNG>
 at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<int64_t> to_opt, c10::optional<Generator> generator) {
   uint64_t range = 0;
-  auto iter = at::TensorIterator::nullary_op(self);
+  auto iter = at::TensorIterator::borrowing_nullary_op(self);
   if (to_opt.has_value()) {
     // [from, to)
     int64_t to = *to_opt;
@@ -299,7 +299,7 @@ at::Tensor& uniform_impl_(at::Tensor& self, double from, double to, c10::optiona
       from = std::min(std::max(from, min), max);
       to = std::max(std::min(to, max), min);
     });
-    auto iter = at::TensorIterator::nullary_op(self);
+    auto iter = at::TensorIterator::borrowing_nullary_op(self);
     uniform_kernel<RNG>()(iter, from, to, generator);
   }
   return self;
@@ -310,7 +310,7 @@ at::Tensor& uniform_impl_(at::Tensor& self, double from, double to, c10::optiona
 template<template<typename> class log_normal_kernel, typename RNG>
 at::Tensor& log_normal_impl_(at::Tensor& self, double mean, double std, c10::optional<Generator> gen) {
   TORCH_CHECK(std > 0.0, "log_normal_ expects std > 0.0, but found std=", std);
-  auto iter = TensorIterator::nullary_op(self);
+  auto iter = TensorIterator::borrowing_nullary_op(self);
   log_normal_kernel<RNG>()(iter, mean, std, gen);
   return self;
 }
@@ -320,7 +320,7 @@ at::Tensor& log_normal_impl_(at::Tensor& self, double mean, double std, c10::opt
 template<template<typename> class geometric_kernel, typename RNG>
 Tensor& geometric_impl_(Tensor& self, double p, c10::optional<Generator> gen) {
   TORCH_CHECK(0 < p && p < 1, "geometric_ expects p to be in (0, 1), but got p=", p);
-  auto iter = TensorIterator::nullary_op(self);
+  auto iter = TensorIterator::borrowing_nullary_op(self);
   geometric_kernel<RNG>()(iter, p, gen);
   return self;
 }
@@ -330,7 +330,7 @@ Tensor& geometric_impl_(Tensor& self, double p, c10::optional<Generator> gen) {
 template<template<typename> class exponential_kernel, typename RNG>
 Tensor& exponential_impl_(Tensor& self, double lambda, c10::optional<Generator> gen) {
   TORCH_CHECK(lambda >= 0.0, "exponential_ expects lambda >= 0.0, but found lambda=", lambda);
-  auto iter = TensorIterator::nullary_op(self);
+  auto iter = TensorIterator::borrowing_nullary_op(self);
   exponential_kernel<RNG>()(iter, lambda, gen);
   return self;
 }
@@ -339,7 +339,7 @@ Tensor& exponential_impl_(Tensor& self, double lambda, c10::optional<Generator> 
 
 template<template<typename> class cauchy_kernel, typename RNG>
 Tensor& cauchy_impl_(Tensor& self, double median, double sigma, c10::optional<Generator> gen) {
-  auto iter = TensorIterator::nullary_op(self);
+  auto iter = TensorIterator::borrowing_nullary_op(self);
   cauchy_kernel<RNG>()(iter, median, sigma, gen);
   return self;
 }

@@ -16,11 +16,6 @@
 #include <ATen/native/Distributions.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/LegacyTHFunctionsCUDA.h>
-
-#include <THC/THCGeneral.h>
-#include <THC/THCApply.cuh>
-#include <THC/THCDeviceUtils.cuh>
 
 #include <cstdint>
 #include <limits>
@@ -133,7 +128,7 @@ void gamma_cuda_kernel(
         ret_val = (min_value > sample) ? min_value : sample;
       };
   at::cuda::CUDA_tensor_apply2<scalar_t, scalar_t, decltype(functor),
-                               /*max_threads_per_block=*/512,
+                               /*max_threads_per_block=*/256,
                                /*min_blocks_per_sm==*/2>(ret, alpha, functor);
 }
 

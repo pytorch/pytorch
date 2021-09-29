@@ -114,7 +114,7 @@ TORCH_API std::vector<Dimname> compute_matmul_outnames(const Tensor& self, const
 TORCH_API std::vector<Dimname> compute_cdist_outnames(const Tensor& self, const Tensor& other);
 
 TORCH_API std::vector<Dimname> compute_bmm_outnames(
-    Tensor& result,
+    const Tensor& result,
     const Tensor& self,
     const Tensor& other);
 
@@ -140,8 +140,7 @@ TORCH_API TensorImpl* propagate_names(
 TORCH_API void propagate_names(TensorImpl* result, /*const */TensorImpl* src);
 
 // result = m1 @ m2 + bias
-TORCH_API void propagate_names_for_addmm(
-    Tensor& result,
+TORCH_API std::vector<Dimname> propagate_names_for_addmm(
     const Tensor& m1,
     const Tensor& m2,
     const Tensor& bias);
@@ -154,7 +153,7 @@ TORCH_API std::vector<Dimname> propagate_names_for_addmv(
 TORCH_API void check_names_for_dot(TensorImpl* vec1, TensorImpl* vec2);
 
 TORCH_API std::vector<Dimname> compute_baddbmm_outnames(
-    Tensor& result,
+    const Tensor& result,
     const Tensor& self,
     const Tensor& other,
     const Tensor& bias);

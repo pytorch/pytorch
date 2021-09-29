@@ -56,7 +56,6 @@ class IDEEPInt8QuantizeOp final : public IDEEPOperator {
   OUTPUT_TAGS(OUTPUT);
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR_WITH_ENGINE(Int8Quantize, DNNLOWP, IDEEPInt8QuantizeOp);
 
 } // namespace

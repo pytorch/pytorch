@@ -4,8 +4,8 @@
 
 #include "onnx/onnx_pb.h"
 
-#include "c10/util/Exception.h"
-#include "c10/util/SmallVector.h"
+#include <c10/util/Exception.h>
+#include <c10/util/SmallVector.h>
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
@@ -58,7 +58,10 @@ class OnnxifiOp final : public Operator<Context> {
         use_passed_output_shapes_(this->template GetSingleArgument<int>("use_passed_output_shapes", 0)),
         adjust_quantized_offset_(this->template GetSingleArgument<int>(
             "adjust_quantized_offset",
-            128)) {
+            128)),
+        use_onnxifi_batch_size_(this->template GetSingleArgument<int>(
+            "use_onnxifi_batch_size",
+            0)) {
     lib_ = onnx::initOnnxifiLibrary();
     backend_graph_map_ptr_ = onnx::getOnnxBackendGraphMap();
     CAFFE_ENFORCE(lib_, "Cannot initialize ONNXIFI library");
@@ -130,7 +133,8 @@ class OnnxifiOp final : public Operator<Context> {
 
     LOG(INFO) << "use_onnx_=" << use_onnx_
         << ", use_glow_aot_=" << use_glow_aot_
-        << ", use_passed_output_shapes_=" << use_passed_output_shapes_;
+        << ", use_passed_output_shapes_=" << use_passed_output_shapes_
+        << ", use_onnxifi_batch_size_=" << use_onnxifi_batch_size_;
 
     if (use_passed_output_shapes_) {
       // Populate output_shapes_per_bs_
@@ -147,9 +151,8 @@ class OnnxifiOp final : public Operator<Context> {
           name_to_shape.emplace(output_qshape_tp.name(), details::TensorInfo{output_qshape_tp});
         }
 
-        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-        for (output_idx = 0; output_idx < output_names_.size(); ++output_idx) {
-          auto it = name_to_shape.find(output_names_[output_idx]);
+        for (const auto& output : output_names_) {
+          auto it = name_to_shape.find(output);
           CAFFE_ENFORCE(it != name_to_shape.end());
           output_shapes_per_bs_[bs].push_back({});
           auto &output_shapes = output_shapes_per_bs_[bs].back();
@@ -265,8 +268,7 @@ class OnnxifiOp final : public Operator<Context> {
 
       // Release unused backend ids.
       for (size_t i = 0; i < num_backends; ++i) {
-        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-        if (i == backend_index) {
+        if (i == static_cast<size_t>(backend_index)) {
           continue;
         }
         lib_->onnxReleaseBackendID(backend_ids[i]);
@@ -346,6 +348,7 @@ class OnnxifiOp final : public Operator<Context> {
       decltype(onnxSetIOAndRunGraphPointer_) set;
       decltype(onnxReleaseTraceEventsPointer_) release;
       decltype(onnxWaitEventForPointer_) waitfor;
+      decltype(onnxGetCurrentBatchSizePointer_) currentbatchsize;
     } u;
     if (lib_->onnxGetExtensionFunctionAddress(
             backend_id_, "onnxSetIOAndRunGraphFunction", &u.p) !=
@@ -368,6 +371,13 @@ class OnnxifiOp final : public Operator<Context> {
     } else {
       onnxWaitEventForPointer_ = u.waitfor;
     }
+    if (lib_->onnxGetExtensionFunctionAddress(
+            backend_id_, "onnxGetCurrentBatchSizeFunction", &u.p) !=
+        ONNXIFI_STATUS_SUCCESS) {
+      onnxWaitEventForPointer_ = nullptr;
+    } else {
+      onnxGetCurrentBatchSizePointer_ = u.currentbatchsize;
+    }
 #endif
   }
 
@@ -378,6 +388,9 @@ class OnnxifiOp final : public Operator<Context> {
       c10::ArrayRef<uint64_t> max_shape,
       details::OutputReshapeInfo &output_reshape_info,
       int index);
+
+  /// Helper method for updating output reshape info using provided output shape hints.
+  void extractOutputBatchSizes(int current_batch_size);
 
   /// Extract output batch size. If the output batch size is going to be at
   /// max_batch_size_, return true indicating that no output shape adjustment is
@@ -442,6 +455,8 @@ class OnnxifiOp final : public Operator<Context> {
       char* message,
       size_t* messageLength);
 
+  onnxStatus (*onnxGetCurrentBatchSizePointer_)(int64_t*);
+
   std::shared_ptr<onnxTraceEventList> traces_{nullptr};
 #endif
 
@@ -504,6 +519,9 @@ class OnnxifiOp final : public Operator<Context> {
 
   // Adjust the quantized offset to compensate mismatch of certain backend
   uint8_t adjust_quantized_offset_{0};
+
+  // Whether we should read batch size value from Onnxifi request data
+  const bool use_onnxifi_batch_size_{false};
 };
 
 } // namespace caffe2

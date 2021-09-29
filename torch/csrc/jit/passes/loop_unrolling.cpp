@@ -2,6 +2,7 @@
 
 #include <ATen/core/interned_strings.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir_views.h>
@@ -128,7 +129,8 @@ void repeatBody(Block* body, size_t times, Block* dest) {
   std::vector<Value*> io = dest->inputs().vec();
   TORCH_INTERNAL_ASSERT(
       !body->inputs().at(0)->hasUses(), "loop counter should be unused");
-  for (size_t i = 0; i < times; ++i) {
+  for (const auto i : c10::irange(times)) {
+    (void)i; // Suppress unused variable warning
     io[0] = body->inputs().at(0);
     io = insertBlockCopy(*graph, body, io);
   }
@@ -162,11 +164,9 @@ void replaceLoopCounter(Node* loop) {
   body->insertOutput(1, result);
 }
 
-bool unroll(Node* loop) {
+void unroll(Node* loop) {
   Graph* graph = loop->owningGraph();
   Block* body = loop->blocks().at(0);
-  if (!isSmallBlock(body))
-    return false;
 
   // We will be using a "mutable" counter outside of the loop instead of the
   // default one, because this will allow us to share it between the unrolled
@@ -184,7 +184,7 @@ bool unroll(Node* loop) {
     repeatBody(body, *const_len, dest);
     loop->eraseBlock(0);
     inlineBody(loop);
-    return true;
+    return;
   }
 
   WithInsertPoint insert_point_guard{loop};
@@ -212,11 +212,9 @@ bool unroll(Node* loop) {
           aten::sub,
           {iter_count,
            graph->insert(aten::mul, {unrolled_iter_count, kUnrollFactor})}));
-
-  return true;
 }
 
-bool UnrollLoops(Block* block) {
+bool UnrollLoops(Block* block, bool constant_only) {
   bool changed = false;
   for (auto it = block->nodes().begin(); it != block->nodes().end();) {
     // XXX: unroll might destroy the current node, so we need to pre-increment
@@ -224,11 +222,21 @@ bool UnrollLoops(Block* block) {
     Node* node = *it;
     ++it;
     for (Block* subblock : node->blocks()) {
-      changed |= UnrollLoops(subblock);
+      changed |= UnrollLoops(subblock, constant_only);
     }
-    if (isForLoop(node)) {
-      changed |= unroll(node);
+    if (!isForLoop(node)) {
+      continue;
     }
+    if (constant_only) {
+      if (node->inputs().at(0)->node()->kind() != prim::Constant) {
+        continue;
+      }
+    } else if (!isSmallBlock(node->blocks().at(0))) {
+      continue;
+    }
+
+    unroll(node);
+    changed = true;
   }
   return changed;
 }
@@ -366,7 +374,15 @@ Node* PeelLoop(Node* n, size_t times) {
 }
 
 bool UnrollLoops(std::shared_ptr<Graph>& graph) {
-  bool changed = UnrollLoops(graph->block());
+  bool changed = UnrollLoops(graph->block(), false);
+  if (changed) {
+    EliminateDeadCode(graph);
+  }
+  return changed;
+}
+
+bool UnrollConstantLoops(std::shared_ptr<Graph>& graph) {
+  bool changed = UnrollLoops(graph->block(), true);
   if (changed) {
     EliminateDeadCode(graph);
   }

@@ -117,16 +117,6 @@ struct GuardElimination {
     }
   }
 
-  bool isDominatedBy(Node* node, Node* dominator) {
-    while (node) {
-      if (node->owningBlock() == dominator->owningBlock()) {
-        return dominator->isBefore(node);
-      }
-      node = node->owningBlock()->owningNode();
-    }
-    return false;
-  }
-
   void removeDominatedGuards(Block* b) {
     // If a Node guards a value which isn't mutated, then that node
     // can replace all other guards of the value which it dominates
@@ -150,7 +140,7 @@ struct GuardElimination {
             continue;
           }
 
-          if (!isDominatedBy(use.user, n)) {
+          if (!use.user->isDominatedBy(n)) {
             continue;
           }
 
@@ -375,7 +365,6 @@ struct GuardElimination {
       case aten::conv1d:
       case aten::conv2d:
       case aten::conv3d:
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         return checkInputs(n, std::unordered_set<size_t>{2, 6}, false);
       case aten::slice:
         return !n->input(0)->type()->expectRef<TensorType>().isSummarized() &&
@@ -400,7 +389,6 @@ struct GuardElimination {
             // check that the dilation is constant
             n->input(4)->node()->kind() == prim::Constant &&
             // check that the ceil_mode is constant
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             n->input(5)->node()->kind() == prim::Constant;
       case aten::unsqueeze:
         // check that the dimension argument is constant
@@ -467,7 +455,6 @@ struct GuardElimination {
 
   std::shared_ptr<Graph> graph_;
   std::unique_ptr<AliasDb> aliasDb_;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static std::unordered_set<Symbol> simple_ops_;
 };
 

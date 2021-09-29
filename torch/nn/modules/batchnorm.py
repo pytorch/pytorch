@@ -50,9 +50,12 @@ class _NormBase(Module):
         if self.track_running_stats:
             self.register_buffer('running_mean', torch.zeros(num_features, **factory_kwargs))
             self.register_buffer('running_var', torch.ones(num_features, **factory_kwargs))
+            self.running_mean: Optional[Tensor]
+            self.running_var: Optional[Tensor]
             self.register_buffer('num_batches_tracked',
                                  torch.tensor(0, dtype=torch.long,
                                               **{k: v for k, v in factory_kwargs.items() if k != 'dtype'}))
+            self.num_batches_tracked: Optional[Tensor]
         else:
             self.register_buffer("running_mean", None)
             self.register_buffer("running_var", None)
@@ -63,9 +66,9 @@ class _NormBase(Module):
         if self.track_running_stats:
             # running_mean/running_var/num_batches... are registered at runtime depending
             # if self.track_running_stats is on
-            self.running_mean.zero_()  # type: ignore[operator]
-            self.running_var.fill_(1)  # type: ignore[operator]
-            self.num_batches_tracked.zero_()  # type: ignore[operator]
+            self.running_mean.zero_()  # type: ignore[union-attr]
+            self.running_var.fill_(1)  # type: ignore[union-attr]
+            self.num_batches_tracked.zero_()  # type: ignore[union-attr,operator]
 
     def reset_parameters(self) -> None:
         self.reset_running_stats()
@@ -162,8 +165,6 @@ class _BatchNorm(_NormBase):
         passed when the update should occur (i.e. in training mode when they are tracked), or when buffer stats are
         used for normalization (i.e. in eval mode when buffers are not None).
         """
-        assert self.running_mean is None or isinstance(self.running_mean, torch.Tensor)
-        assert self.running_var is None or isinstance(self.running_var, torch.Tensor)
         return F.batch_norm(
             input,
             # If buffers are not to be tracked, ensure that they won't be updated
@@ -179,7 +180,7 @@ class _BatchNorm(_NormBase):
         )
 
 
-class _LazyBatchNorm(LazyModuleMixin, _BatchNorm):
+class _LazyNormBase(LazyModuleMixin, _NormBase):
 
     weight: UninitializedParameter  # type: ignore[assignment]
     bias: UninitializedParameter  # type: ignore[assignment]
@@ -187,7 +188,7 @@ class _LazyBatchNorm(LazyModuleMixin, _BatchNorm):
     def __init__(self, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(_LazyBatchNorm, self).__init__(
+        super(_LazyNormBase, self).__init__(
             # affine and track_running_stats are hardcoded to False to
             # avoid creating tensors that will soon be overwritten.
             0,
@@ -221,8 +222,8 @@ class _LazyBatchNorm(LazyModuleMixin, _BatchNorm):
                 self.weight.materialize((self.num_features,))
                 self.bias.materialize((self.num_features,))
             if self.track_running_stats:
-                self.running_mean.materialize((self.num_features,))
-                self.running_var.materialize((self.num_features,))
+                self.running_mean.materialize((self.num_features,))  # type:ignore[union-attr]
+                self.running_var.materialize((self.num_features,))  # type:ignore[union-attr]
             self.reset_parameters()
 
 
@@ -300,7 +301,7 @@ class BatchNorm1d(_BatchNorm):
             )
 
 
-class LazyBatchNorm1d(_LazyBatchNorm):
+class LazyBatchNorm1d(_LazyNormBase, _BatchNorm):
     r"""A :class:`torch.nn.BatchNorm1d` module with lazy initialization of
     the ``num_features`` argument of the :class:`BatchNorm1d` that is inferred
     from the ``input.size(1)``.
@@ -407,7 +408,7 @@ class BatchNorm2d(_BatchNorm):
             raise ValueError("expected 4D input (got {}D input)".format(input.dim()))
 
 
-class LazyBatchNorm2d(_LazyBatchNorm):
+class LazyBatchNorm2d(_LazyNormBase, _BatchNorm):
     r"""A :class:`torch.nn.BatchNorm2d` module with lazy initialization of
     the ``num_features`` argument of the :class:`BatchNorm2d` that is inferred
     from the ``input.size(1)``.
@@ -513,7 +514,7 @@ class BatchNorm3d(_BatchNorm):
             raise ValueError("expected 5D input (got {}D input)".format(input.dim()))
 
 
-class LazyBatchNorm3d(_LazyBatchNorm):
+class LazyBatchNorm3d(_LazyNormBase, _BatchNorm):
     r"""A :class:`torch.nn.BatchNorm3d` module with lazy initialization of
     the ``num_features`` argument of the :class:`BatchNorm3d` that is inferred
     from the ``input.size(1)``.
@@ -715,8 +716,6 @@ class SyncBatchNorm(_BatchNorm):
         used for normalization (i.e. in eval mode when buffers are not None).
         """
         # If buffers are not to be tracked, ensure that they won't be updated
-        assert self.running_mean is None or isinstance(self.running_mean, torch.Tensor)
-        assert self.running_var is None or isinstance(self.running_var, torch.Tensor)
         running_mean = (
             self.running_mean if not self.training or self.track_running_stats else None
         )
@@ -765,7 +764,7 @@ class SyncBatchNorm(_BatchNorm):
         :class:`torch.nn.SyncBatchNorm` layers.
 
         Args:
-            module (nn.Module): module containing one or more attr:`BatchNorm*D` layers
+            module (nn.Module): module containing one or more :attr:`BatchNorm*D` layers
             process_group (optional): process group to scope synchronization,
                 default is the whole world
 

@@ -1,4 +1,7 @@
 #pragma once
+
+#include <c10/util/irange.h>
+
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -15,7 +18,9 @@ namespace jit {
 // in the top level environment, and then recurses into a parent
 // environment if the key is not found.)
 struct TemplateEnv {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   TemplateEnv() : parent(nullptr) {}
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   TemplateEnv(TemplateEnv& parent) : parent(&parent) {}
 
   using string_list = std::vector<std::string>;
@@ -190,7 +195,7 @@ struct CodeTemplate {
       bool comma_after) const {
     if (comma_before && strings.size() > 0)
       out << ", ";
-    for (size_t i = 0; i < strings.size(); ++i) {
+    for (const auto i : c10::irange(strings.size())) {
       if (i > 0)
         out << ", ";
       out << strings[i];
@@ -203,7 +208,8 @@ struct CodeTemplate {
   // or trailing newlines. It's the responsibility of the calling function
   // to indent correctly in the context.
   void emitIndent(std::ostream& out, size_t indent) const {
-    for (size_t i = 0; i < indent; ++i) {
+    for (const auto i : c10::irange(indent)) {
+      (void)i; // Suppress unused variable warning
       out << " ";
     }
   }
@@ -222,7 +228,7 @@ struct CodeTemplate {
       std::stringstream& out,
       size_t indent,
       const string_list& strings) const {
-    for (size_t i = 0; i < strings.size(); ++i) {
+    for (const auto i : c10::irange(strings.size())) {
       if (i > 0)
         emitIndent(out, indent);
       emitStringWithIndents(out, indent, strings[i]);

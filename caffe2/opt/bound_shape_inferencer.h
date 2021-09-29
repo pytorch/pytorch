@@ -91,7 +91,7 @@ class TORCH_API BoundShapeInferencer : public BoundShapeInferencerBase {
   explicit BoundShapeInferencer(const BoundShapeSpec& spec)
       : BoundShapeInferencerBase(spec) {}
 
-  virtual ~BoundShapeInferencer() override {}
+   ~BoundShapeInferencer() override {}
   void InferBoundShapeAndType(
       const NetDef& net,
       const ShapeInfoMap& info,

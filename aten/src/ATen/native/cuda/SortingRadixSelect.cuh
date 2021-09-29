@@ -1,4 +1,8 @@
-#include <THC/THCAtomics.cuh>
+#include <ATen/ceil_div.h>
+#include <ATen/cuda/Atomic.cuh>
+#include <ATen/cuda/DeviceUtils.cuh>
+
+#include <THC/THCAsmUtils.cuh>
 
 namespace at {
 namespace native {
@@ -219,7 +223,7 @@ __device__ void countRadixUsingMask(
   if (getLaneId() == 0) {
 #pragma unroll
     for (uint32_t i = 0; i < RadixSize; ++i) {
-      gpuAtomicAdd(&smem[i], counts[i]);
+      gpuAtomicAddNoReturn(&smem[i], counts[i]);
     }
   }
 
@@ -256,7 +260,7 @@ __device__ scalar_t findPattern(
 
   // All threads participate in the loop, in order to sync on the flag
   index_t numIterations =
-      THCRoundUp(sliceSize, static_cast<index_t>(blockDim.x));
+      round_up(sliceSize, static_cast<index_t>(blockDim.x));
   for (index_t i = threadIdx.x; i < numIterations; i += blockDim.x) {
     bool inRange = (i < sliceSize);
     scalar_t v = inRange ? doLdg(&data[i * withinSliceStride])

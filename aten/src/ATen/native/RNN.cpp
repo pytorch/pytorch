@@ -238,7 +238,6 @@ struct QuantizedCellParams : public CellParamsBase {
     at::Tensor qw_ih = std::move(tensors[0]), qw_hh = std::move(tensors[1]),
                b_ih = std::move(tensors[2]), b_hh = std::move(tensors[3]),
                col_offsets_ih = std::move(tensors[4]),
-               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                col_offsets_hh = std::move(tensors[5]);
     double scale_ih = doubles[0], scale_hh = doubles[1];
     int64_t zero_point_ih = longs[0], zero_point_hh = longs[1];
@@ -488,7 +487,6 @@ c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params_fp16(
 static std::unordered_map<
     std::string,
     c10::intrusive_ptr<CellParamsBase> (*)(CellParamsSerializationType)>
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     cell_params_deserializers = {
         {"quantized", &QuantizedCellParams::__setstate__},
         {"quantized_dynamic", &QuantizedCellParamsDynamic::__setstate__},
@@ -555,7 +553,6 @@ static std::vector<CellParams> gather_params(TensorList params, bool has_biases,
   if (has_biases) {
     if (has_projections) {
       TORCH_CHECK(params.size() % 5 == 0, "got an incorrect number of RNN parameters");
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       for (size_t i = 0; i < params.size(); i += 5) {
         result.emplace_back(params[i], params[i + 1], params[i + 2], params[i + 3], params[i + 4]);
       }
@@ -589,7 +586,6 @@ static c10::List<c10::intrusive_ptr<CellParamsBase>> gather_quantized_params(
   static at::Tensor undefined;
   std::vector<c10::intrusive_ptr<CellParamsBase>> result;
   TORCH_CHECK(params.size() % 12 == 0, "got an incorrect number of quantized RNN parameters");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (size_t i = 0; i < params.size(); i += 12) {
     result.emplace_back(c10::make_intrusive<QuantizedCellParams>(
         static_cast<at::Tensor>(params[i]),
@@ -597,19 +593,12 @@ static c10::List<c10::intrusive_ptr<CellParamsBase>> gather_quantized_params(
         static_cast<at::Tensor>(params[i + 2]),
         static_cast<at::Tensor>(params[i + 3]),
         static_cast<at::Tensor>(params[i + 4]),
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         static_cast<at::Tensor>(params[i + 5]),
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         static_cast<at::Tensor>(params[i + 6]),
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         static_cast<at::Tensor>(params[i + 7]),
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         static_cast<at::Tensor>(params[i + 8]).item(),
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         static_cast<at::Tensor>(params[i + 9]).item(),
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         static_cast<at::Tensor>(params[i + 10]).item(),
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         static_cast<at::Tensor>(params[i + 11]).item()));
   }
   return c10::List<c10::intrusive_ptr<CellParamsBase>>(result);
@@ -739,9 +728,8 @@ struct Cell {
   using hidden_type = hidden_type_tmpl;
   using cell_params = cell_params_tmpl;
 
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  virtual ~Cell() {} // This is really dumb, but enables projects with
-                     // -Wnon-virtual-dtor to compile...
+  virtual ~Cell() = default; // This is really dumb, but enables projects with
+                             // -Wnon-virtual-dtor to compile...
 
   virtual hidden_type operator()(
       const Tensor& input,
@@ -856,9 +844,8 @@ template<typename io_type, typename hidden_type, typename param_type>
 struct Layer {
   using output_type = LayerOutput<io_type, hidden_type>;
 
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  virtual ~Layer() {} // This is really dumb, but enables projects with
-                      // -Wnon-virtual-dtor to compile...
+  virtual ~Layer() = default; // This is really dumb, but enables projects with
+                              // -Wnon-virtual-dtor to compile...
   virtual output_type operator()(
       const io_type& input,
       const hidden_type& input_hidden,
@@ -896,10 +883,12 @@ struct FullLayer : Layer<Tensor, hidden_type, cell_params> {
       const auto inputs_w = params.linear_ih(inputs);
       auto unstacked_output =
           (*this)(inputs_w.unbind(0), input_hidden, params, true);
+      TORCH_CHECK(unstacked_output.outputs.size()>0, "Expected sequence length to be larger than 0 in RNN");
       return {at::stack(unstacked_output.outputs, 0),
               unstacked_output.final_hidden};
     }
     auto unstacked_output = (*this)(inputs.unbind(0), input_hidden, params);
+    TORCH_CHECK(unstacked_output.outputs.size()>0, "Expected sequence length to be larger than 0 in RNN");
     return {at::stack(unstacked_output.outputs, 0),
             unstacked_output.final_hidden};
   }
@@ -927,6 +916,7 @@ struct FullBidirectionalLayer
       step_inputs = input_w.unbind(0);
       auto fw_result = layer_(
           step_inputs, input_hidden.first, params.first, true);
+      TORCH_CHECK(fw_result.outputs.size() > 0, "Expected sequence length to be larger than 0 in RNN");
       auto fw_output = at::stack(fw_result.outputs, 0);
       input_w = params.second.linear_ih(input);
       step_inputs = input_w.unbind(0);
@@ -941,6 +931,7 @@ struct FullBidirectionalLayer
 
     step_inputs = input.unbind(0);
     auto fw_result = layer_(step_inputs, input_hidden.first, params.first);
+    TORCH_CHECK(fw_result.outputs.size() > 0, "Expected sequence length to be larger than 0 in RNN");
     auto fw_output = at::stack(fw_result.outputs, 0);
     auto rev_step_inputs = reverse(std::move(step_inputs));
     auto rev_result =
@@ -1404,7 +1395,6 @@ bool _use_cudnn_rnn_flatten_weight() {
         std::move(packed_output.data), std::move(std::get<1>(result)));     \
   }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 ONE_HIDDEN_RNN(gru, GRUCell<CellParams>)
 ONE_HIDDEN_QRNN(quantized_gru, GRUCell<QRNNCellParamsWrapper>)
 
@@ -1465,27 +1455,17 @@ std::tuple<Tensor, Tensor> quantized_gru_data_legacy(
 }
 
 using tanf_cell_type = SimpleCell<tanh_f, CellParams>;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 ONE_HIDDEN_RNN(rnn_tanh, tanf_cell_type)
 using relu_cell_type = SimpleCell<relu_f, CellParams>;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 ONE_HIDDEN_RNN(rnn_relu, relu_cell_type);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(lstm_cudnn_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(lstm_packed_cudnn_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(lstm_miopen_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(lstm_packed_miopen_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_NO_CPU_DISPATCH(lstm_cudnn_stub, lstm_fn);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_NO_CPU_DISPATCH(lstm_packed_cudnn_stub, lstm_packed_fn);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_NO_CPU_DISPATCH(lstm_miopen_stub, lstm_fn);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_NO_CPU_DISPATCH(lstm_packed_miopen_stub, lstm_packed_fn);
 
 std::tuple<Tensor, Tensor, Tensor> lstm(
@@ -2001,10 +1981,8 @@ DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(quantized_rnn_tanh_cell_dynamic, simple_hx_typ
 
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto ensure_linear_params_registered = register_linear_params();
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto cell_params_base_registry =
     torch::class_<CellParamsBase>("rnn", "CellParamsBase")
         .def_pickle(

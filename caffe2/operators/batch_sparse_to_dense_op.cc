@@ -3,16 +3,17 @@
 namespace caffe2 {
 
 template <>
+template <typename TLen, typename TInd>
 void BatchSparseToDenseOp<float, CPUContext>::FillInDenseValues(
     const int64_t batch_size,
     const int64_t indice_lengths,
-    const int64_t* lengths_data,
-    const int64_t* indices_data,
+    const TLen* lengths_data,
+    const TInd* indices_data,
     const float* values_data,
     float* output_data,
     CPUContext* /*context*/) {
-  int64_t lengths_sum = 0;
-  math::Sum<int64_t, CPUContext>(
+  TLen lengths_sum = 0;
+  math::Sum<TLen, CPUContext>(
       batch_size, lengths_data, &lengths_sum, &context_);
   CAFFE_ENFORCE_EQ(lengths_sum, indice_lengths);
 
@@ -33,16 +34,17 @@ void BatchSparseToDenseOp<float, CPUContext>::FillInDenseValues(
 }
 
 template <>
+template <typename TLen, typename TInd>
 void BatchDenseToSparseOp<float, CPUContext>::FillInSparseValues(
     const int64_t batch_size,
     const int64_t indice_lengths,
-    const int64_t* lengths_data,
-    const int64_t* indices_data,
+    const TLen* lengths_data,
+    const TInd* indices_data,
     const float* dense_data,
     float* output_data,
     CPUContext* /*context*/) {
-  int64_t lengths_sum = 0;
-  math::Sum<int64_t, CPUContext>(
+  TLen lengths_sum = 0;
+  math::Sum<TLen, CPUContext>(
       batch_size, lengths_data, &lengths_sum, &context_);
   CAFFE_ENFORCE_EQ(lengths_sum, indice_lengths);
 
@@ -62,12 +64,10 @@ void BatchDenseToSparseOp<float, CPUContext>::FillInSparseValues(
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     BatchSparseToDense,
     BatchSparseToDenseOp<float, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BatchSparseToDense)
     .NumInputs(3, 4)
     .NumOutputs(1)
@@ -151,12 +151,10 @@ after running this operator.
         "Optional, missing values are filled with this value."
         "default_value = 0 when not set");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     BatchDenseToSparse,
     BatchDenseToSparseOp<float, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BatchDenseToSparse)
     .NumInputs(3)
     .NumOutputs(1)
@@ -227,9 +225,7 @@ class GetBatchDenseToSparseGradient : public GradientMakerBase {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(BatchSparseToDense, GetBatchSparseToDenseGradient);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(BatchDenseToSparse, GetBatchDenseToSparseGradient);
 
 } // namespace

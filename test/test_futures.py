@@ -30,7 +30,7 @@ class TestFuture(TestCase):
         f = Future()
         f.set_exception(value_error)
         with self.assertRaisesRegex(ValueError, "Intentional"):
-            f.value()  # type: ignore[attr-defined]
+            f.value()
 
         def cb(fut):
             fut.value()

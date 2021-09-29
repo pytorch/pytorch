@@ -153,11 +153,12 @@ class _Formatter(object):
 def _scalar_str(self, formatter1, formatter2=None):
     if formatter2 is not None:
         real_str = _scalar_str(self.real, formatter1)
-        imag_str = _scalar_str(self.imag, formatter2) + "j"
-        if self.imag < 0:
-            return real_str + imag_str.lstrip()
+        imag_str = (_scalar_str(self.imag, formatter2) + "j").lstrip()
+        # handles negative numbers, +0.0, -0.0
+        if imag_str[0] == '+' or imag_str[0] == '-':
+            return real_str + imag_str
         else:
-            return real_str + "+" + imag_str.lstrip()
+            return real_str + "+" + imag_str
     else:
         return formatter1.format(self.item())
 
@@ -174,11 +175,12 @@ def _vector_str(self, indent, summarize, formatter1, formatter2=None):
     def _val_formatter(val, formatter1=formatter1, formatter2=formatter2):
         if formatter2 is not None:
             real_str = formatter1.format(val.real)
-            imag_str = formatter2.format(val.imag) + "j"
-            if val.imag < 0:
-                return real_str + imag_str.lstrip()
+            imag_str = (formatter2.format(val.imag) + "j").lstrip()
+            # handles negative numbers, +0.0, -0.0
+            if imag_str[0] == '+' or imag_str[0] == '-':
+                return real_str + imag_str
             else:
-                return real_str + "+" + imag_str.lstrip()
+                return real_str + "+" + imag_str
         else:
             return formatter1.format(val)
 
@@ -231,10 +233,17 @@ def _tensor_str(self, indent):
         self = self.rename(None)
 
     summarize = self.numel() > PRINT_OPTS.threshold
+
+    # handle the negative bit
+    if self.is_neg():
+        self = self.resolve_neg()
+
     if self.dtype is torch.float16 or self.dtype is torch.bfloat16:
         self = self.float()
 
     if self.dtype.is_complex:
+        # handle the conjugate bit
+        self = self.resolve_conj()
         real_formatter = _Formatter(get_summarized_data(self.real) if summarize else self.real)
         imag_formatter = _Formatter(get_summarized_data(self.imag) if summarize else self.imag)
         return _tensor_str_with_formatter(self, indent, summarize, real_formatter, imag_formatter)

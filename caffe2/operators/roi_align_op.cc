@@ -102,7 +102,6 @@ C10_EXPORT bool RoIAlignOp<float, CPUContext>::RunOnDeviceWithOrderNCHW(
   for (int64_t n = 0; n < N; ++n) {
     const int64_t roi_batch_idx = roi_cols == 4 ? 0 : R[n * roi_cols];
     const float* X_ptr = X + roi_batch_idx * C * H * W;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     const float* R_ptr = R + n * roi_cols + (roi_cols == 5);
     float* Y_ptr = Y + n * C * pooled_h_ * pooled_w_;
 
@@ -189,7 +188,6 @@ C10_EXPORT bool RoIAlignOp<float, CPUContext>::RunOnDeviceWithOrderNHWC(
   for (int64_t n = 0; n < N; ++n) {
     const int64_t roi_batch_idx = roi_cols == 4 ? 0 : R[n * roi_cols];
     const float* X_ptr = X + roi_batch_idx * C * H * W;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     const float* R_ptr = R + n * roi_cols + (roi_cols == 5);
     float* Y_ptr = Y + n * C * pooled_h_ * pooled_w_;
 
@@ -258,11 +256,9 @@ C10_EXPORT bool RoIAlignOp<float, CPUContext>::RunOnDeviceWithOrderNHWC(
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(RoIAlign, RoIAlignOp<float, CPUContext>);
 
 // Input: X, rois; Output: Y
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RoIAlign)
     .NumInputs(2)
     .NumOutputs(1)

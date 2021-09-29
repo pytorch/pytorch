@@ -1,20 +1,22 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <ATen/Config.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cpu/zmath.h>
-
-#include <TH/TH.h> // for USE_LAPACK
 
 
 namespace at { namespace native {
 
 enum class LapackLstsqDriverType : int64_t { Gels, Gelsd, Gelsy, Gelss};
 
-#ifdef USE_LAPACK
+#if AT_BUILD_WITH_LAPACK()
 // Define per-batch functions to be used in the implementation of batched
 // linear algebra operations
+
+template <class scalar_t>
+void lapackCholesky(char uplo, int n, scalar_t *a, int lda, int *info);
 
 template <class scalar_t>
 void lapackCholeskyInverse(char uplo, int n, scalar_t *a, int lda, int *info);
@@ -28,11 +30,11 @@ void lapackGeqrf(int m, int n, scalar_t *a, int lda, scalar_t *tau, scalar_t *wo
 template <class scalar_t>
 void lapackOrgqr(int m, int n, int k, scalar_t *a, int lda, scalar_t *tau, scalar_t *work, int lwork, int *info);
 
+template <class scalar_t>
+void lapackOrmqr(char side, char trans, int m, int n, int k, scalar_t *a, int lda, scalar_t *tau, scalar_t *c, int ldc, scalar_t *work, int lwork, int *info);
+
 template <class scalar_t, class value_t = scalar_t>
 void lapackSyevd(char jobz, char uplo, int n, scalar_t* a, int lda, value_t* w, scalar_t* work, int lwork, value_t* rwork, int lrwork, int* iwork, int liwork, int* info);
-
-template <class scalar_t>
-void lapackTriangularSolve(char uplo, char trans, char diag, int n, int nrhs, scalar_t* a, int lda, scalar_t* b, int ldb, int* info);
 
 template <class scalar_t>
 void lapackGels(char trans, int m, int n, int nrhs,
@@ -153,7 +155,21 @@ void lapackLstsq(
       iwork);
 }
 
+template <class scalar_t>
+void lapackLuSolve(char trans, int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, int ldb, int *info);
+
+template <class scalar_t>
+void lapackLu(int m, int n, scalar_t *a, int lda, int *ipiv, int *info);
+
 #endif
+
+#if AT_BUILD_WITH_BLAS()
+template <class scalar_t>
+void blasTriangularSolve(char side, char uplo, char trans, char diag, int n, int nrhs, scalar_t* a, int lda, scalar_t* b, int ldb);
+#endif
+
+using cholesky_fn = void (*)(const Tensor& /*input*/, const Tensor& /*info*/, bool /*upper*/);
+DECLARE_DISPATCH(cholesky_fn, cholesky_stub);
 
 using cholesky_inverse_fn = Tensor& (*)(Tensor& /*result*/, Tensor& /*infos*/, bool /*upper*/);
 
@@ -167,16 +183,19 @@ using linalg_eig_fn = void (*)(Tensor& /*eigenvalues*/, Tensor& /*eigenvectors*/
 
 DECLARE_DISPATCH(linalg_eig_fn, linalg_eig_stub);
 
-using geqrf_fn = void (*)(const Tensor& /*input*/, const Tensor& /*tau*/, int64_t /*m*/, int64_t /*n*/);
+using geqrf_fn = void (*)(const Tensor& /*input*/, const Tensor& /*tau*/);
 DECLARE_DISPATCH(geqrf_fn, geqrf_stub);
 
-using orgqr_fn = Tensor& (*)(Tensor& /*result*/, const Tensor& /*tau*/, int64_t /*n_columns*/);
+using orgqr_fn = Tensor& (*)(Tensor& /*result*/, const Tensor& /*tau*/);
 DECLARE_DISPATCH(orgqr_fn, orgqr_stub);
 
+using ormqr_fn = void (*)(const Tensor& /*input*/, const Tensor& /*tau*/, const Tensor& /*other*/, bool /*left*/, bool /*transpose*/);
+DECLARE_DISPATCH(ormqr_fn, ormqr_stub);
+
 using linalg_eigh_fn = void (*)(
-    Tensor& /*eigenvalues*/,
-    Tensor& /*eigenvectors*/,
-    Tensor& /*infos*/,
+    const Tensor& /*eigenvalues*/,
+    const Tensor& /*eigenvectors*/,
+    const Tensor& /*infos*/,
     bool /*upper*/,
     bool /*compute_eigenvectors*/);
 DECLARE_DISPATCH(linalg_eigh_fn, linalg_eigh_stub);
@@ -193,12 +212,32 @@ DECLARE_DISPATCH(lstsq_fn, lstsq_stub);
 
 using triangular_solve_fn = void (*)(
     Tensor& /*A*/,
-    Tensor& /*b*/,
-    Tensor& /*infos*/,
+    Tensor& /*B*/,
+    bool /*left*/,
     bool /*upper*/,
-    bool /*transpose*/,
-    bool /*conjugate_transpose*/,
+    TransposeType /*transpose*/,
     bool /*unitriangular*/);
 DECLARE_DISPATCH(triangular_solve_fn, triangular_solve_stub);
+
+using lu_fn = void (*)(
+    const Tensor& /*input*/,
+    const Tensor& /*pivots*/,
+    const Tensor& /*infos*/,
+    bool /*compute_pivots*/);
+DECLARE_DISPATCH(lu_fn, lu_stub);
+
+using lu_solve_fn = void (*)(
+    const Tensor& /*b*/,
+    const Tensor& /*lu*/,
+    const Tensor& /*pivots*/);
+DECLARE_DISPATCH(lu_solve_fn, lu_solve_stub);
+
+using lu_solve_trans_fn = void (*)(
+    const Tensor& /*b*/,
+    const Tensor& /*lu*/,
+    const Tensor& /*pivots*/,
+    TransposeType /*trans*/);
+DECLARE_DISPATCH(lu_solve_trans_fn, lu_solve_trans_stub);
+
 
 }} // namespace at::native

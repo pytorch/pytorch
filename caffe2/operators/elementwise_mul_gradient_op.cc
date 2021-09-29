@@ -1,6 +1,7 @@
 #include <c10/util/accumulate.h>
 
 #include "caffe2/operators/elementwise_mul_op.h"
+#include "caffe2/utils/math/broadcast.h"
 
 #include <algorithm>
 #include <functional>
@@ -10,6 +11,33 @@
 namespace caffe2 {
 
 namespace {
+
+template <typename TGrad, typename TIn>
+void ComputeMulGradientFastpath(
+    const int A_size,
+    const int B_size,
+    const int C_size,
+    const TGrad* dC,
+    const TIn* A,
+    const TIn* B,
+    TGrad* dA,
+    TGrad* dB) {
+  int A_index = 0;
+  int B_index = 0;
+  for (int C_index = 0; C_index < C_size; ++C_index) {
+    dA[A_index] += dC[C_index] * B[B_index];
+    dB[B_index] += dC[C_index] * A[A_index];
+    A_index++;
+    B_index++;
+    if (A_index >= A_size) {
+      A_index = 0;
+    }
+    if (B_index >= B_size) {
+      B_index = 0;
+    }
+  }
+
+}
 
 template <typename TGrad, typename TIn>
 void ComputeMulGradient(
@@ -22,12 +50,20 @@ void ComputeMulGradient(
     const TIn* B,
     TGrad* dA,
     TGrad* dB,
-    CPUContext* context) {
+    CPUContext* context,
+    bool allow_broadcast_fastpath) {
   const auto A_size = c10::multiply_integers(A_dims, A_dims + ndim);
   const auto B_size = c10::multiply_integers(B_dims, B_dims + ndim);
   const auto C_size = c10::multiply_integers(C_dims, C_dims + ndim);
   math::Set<TGrad, CPUContext>(A_size, TGrad(0), dA, context);
   math::Set<TGrad, CPUContext>(B_size, TGrad(0), dB, context);
+  if (
+      allow_broadcast_fastpath
+      && math::can_use_broadcast_fastpath(ndim, A_dims)
+      && math::can_use_broadcast_fastpath(ndim, B_dims)) {
+    ComputeMulGradientFastpath(A_size, B_size, C_size, dC, A, B, dA, dB);
+    return;
+  }
   std::vector<int> index(ndim, 0);
   for (int C_index = 0; C_index < C_size; ++C_index) {
     const int A_index =
@@ -74,6 +110,15 @@ void ComputeMulGradient(
     const float* B,
     float* dA,
     float* dB) {
+  if (dA != nullptr) {
+    CAFFE_ENFORCE_NE(dA, dB, "Outputs dA and dB should point to distinct blobs");
+  }
+  if (dC == dA) {
+    // Ensure operation can be performed in-place.
+    // See below comment in `MulFunctor::Backward`.
+    std::swap(A, B);
+    std::swap(dA, dB);
+  }
   for (int i = 0; i < size; ++i) {
     dA[i] = dC[i] * B[i];
     dB[i] = dC[i] * A[i];
@@ -94,8 +139,22 @@ bool MulFunctor<CPUContext>::Backward(
     TGrad* dA,
     TGrad* dB,
     CPUContext* context) const {
+  if (dA != nullptr) {
+    CAFFE_ENFORCE_NE(dA, dB, "Outputs dA and dB should point to distinct blobs");
+  }
   if (A_dims == B_dims) {
     const auto size = c10::multiply_integers(A_dims);
+    if (dC == dA) {
+      // A, B, and dC are inputs (dC is the output of the previous gradient op
+      // in the dag), and dA and dB are outputs. If the op is performed
+      // in-place, either dA or dB could alias dC. In the dC == dA case, we need
+      // to make sure we don't overwrite dC when we write to dA, so swap the
+      // inputs to avoid clobbering dC. Semantically this is equivalent with
+      // writing to dB first. The other case (dC == dB) is already safe because
+      // we are writing to dA first.
+      std::swap(A, B);
+      std::swap(dA, dB);
+    }
     math::Mul(size, dC, B, dA, context);
     math::Mul(size, dC, A, dB, context);
     return true;
@@ -211,7 +270,8 @@ bool MulFunctor<CPUContext>::Backward(
         B,
         dA,
         dB,
-        context);
+        context,
+        allow_broadcast_fastpath_);
   }
 
   return true;
@@ -262,10 +322,9 @@ template bool MulFunctor<CPUContext>::Backward<int64_t, int64_t, int64_t>(
     int64_t* dB,
     CPUContext* context) const;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     MulGradient,
-    BinaryElementwiseGradientOp<
+    BinaryElementwiseGradientBroadcastOp<
         NumericTypes,
         CPUContext,
         MulFunctor<CPUContext>>);
@@ -286,7 +345,6 @@ class GetMulGradient final : public GradientMakerBase {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Mul, GetMulGradient);
 
 } // namespace caffe2

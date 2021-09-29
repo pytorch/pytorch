@@ -1,5 +1,7 @@
 #include <torch/csrc/utils/byte_order.h>
 #include <c10/util/BFloat16.h>
+#include <c10/util/irange.h>
+
 #include <cstring>
 #include <vector>
 
@@ -121,7 +123,7 @@ THPByteOrder THP_nativeByteOrder()
 
 void THP_decodeInt16Buffer(int16_t* dst, const uint8_t* src, THPByteOrder order, size_t len)
 {
-  for (size_t i = 0; i < len; i++) {
+  for(const auto i : c10::irange(len)) {
     dst[i] = (int16_t)(
         order == THP_BIG_ENDIAN ? decodeUInt16BE(src) : decodeUInt16LE(src));
     src += sizeof(int16_t);
@@ -130,7 +132,7 @@ void THP_decodeInt16Buffer(int16_t* dst, const uint8_t* src, THPByteOrder order,
 
 void THP_decodeInt32Buffer(int32_t* dst, const uint8_t* src, THPByteOrder order, size_t len)
 {
-  for (size_t i = 0; i < len; i++) {
+  for(const auto i : c10::irange(len)) {
     dst[i] = (int32_t)(
         order == THP_BIG_ENDIAN ? decodeUInt32BE(src) : decodeUInt32LE(src));
     src += sizeof(int32_t);
@@ -139,7 +141,7 @@ void THP_decodeInt32Buffer(int32_t* dst, const uint8_t* src, THPByteOrder order,
 
 void THP_decodeInt64Buffer(int64_t* dst, const uint8_t* src, THPByteOrder order, size_t len)
 {
-  for (size_t i = 0; i < len; i++) {
+  for(const auto i : c10::irange(len)) {
     dst[i] = (int64_t)(
         order == THP_BIG_ENDIAN ? decodeUInt64BE(src) : decodeUInt64LE(src));
     src += sizeof(int64_t);
@@ -148,7 +150,7 @@ void THP_decodeInt64Buffer(int64_t* dst, const uint8_t* src, THPByteOrder order,
 
 void THP_decodeHalfBuffer(THHalf* dst, const uint8_t* src, THPByteOrder order, size_t len)
 {
-  for (size_t i = 0; i < len; i++) {
+  for(const auto i : c10::irange(len)) {
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union { uint16_t x; THHalf f; };
     x = (order == THP_BIG_ENDIAN ? decodeUInt16BE(src) : decodeUInt16LE(src));
@@ -159,7 +161,7 @@ void THP_decodeHalfBuffer(THHalf* dst, const uint8_t* src, THPByteOrder order, s
 
 void THP_decodeBFloat16Buffer(at::BFloat16* dst, const uint8_t* src, THPByteOrder order, size_t len)
 {
-  for (size_t i = 0; i < len; i++) {
+  for(const auto i : c10::irange(len)) {
     uint16_t x =
         (order == THP_BIG_ENDIAN ? decodeUInt16BE(src) : decodeUInt16LE(src));
     std::memcpy(&dst[i], &x, sizeof(dst[i]));
@@ -169,14 +171,14 @@ void THP_decodeBFloat16Buffer(at::BFloat16* dst, const uint8_t* src, THPByteOrde
 
 void THP_decodeBoolBuffer(bool* dst, const uint8_t* src, THPByteOrder order, size_t len)
 {
-  for (size_t i = 0; i < len; i++) {
+  for(const auto i : c10::irange(len)) {
     dst[i] = (int)src[i] != 0 ? true : false;
   }
 }
 
 void THP_decodeFloatBuffer(float* dst, const uint8_t* src, THPByteOrder order, size_t len)
 {
-  for (size_t i = 0; i < len; i++) {
+  for(const auto i : c10::irange(len)) {
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union { uint32_t x; float f; };
     x = (order == THP_BIG_ENDIAN ? decodeUInt32BE(src) : decodeUInt32LE(src));
@@ -187,7 +189,7 @@ void THP_decodeFloatBuffer(float* dst, const uint8_t* src, THPByteOrder order, s
 
 void THP_decodeDoubleBuffer(double* dst, const uint8_t* src, THPByteOrder order, size_t len)
 {
-  for (size_t i = 0; i < len; i++) {
+  for(const auto i : c10::irange(len)) {
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union { uint64_t x; double d; };
     x = (order == THP_BIG_ENDIAN ? decodeUInt64BE(src) : decodeUInt64LE(src));
@@ -198,7 +200,7 @@ void THP_decodeDoubleBuffer(double* dst, const uint8_t* src, THPByteOrder order,
 
 void THP_decodeComplexFloatBuffer(c10::complex<float>* dst, const uint8_t* src, THPByteOrder order, size_t len)
 {
-  for (size_t i = 0; i < len; i++) {
+  for(const auto i : c10::irange(len)) {
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union { uint32_t x; float re; };
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -215,7 +217,7 @@ void THP_decodeComplexFloatBuffer(c10::complex<float>* dst, const uint8_t* src, 
 
 void THP_decodeComplexDoubleBuffer(c10::complex<double>* dst, const uint8_t* src, THPByteOrder order, size_t len)
 {
-  for (size_t i = 0; i < len; i++) {
+  for(const auto i : c10::irange(len)) {
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union { uint32_t x; double re; };
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -234,7 +236,8 @@ void THP_encodeInt16Buffer(uint8_t* dst, const int16_t* src, THPByteOrder order,
 {
   memcpy(dst, src, sizeof(int16_t) * len);
   if (order != THP_nativeByteOrder()) {
-    for (size_t i = 0; i < len; i++) {
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
+    for(const auto i : c10::irange(len)) {
       swapBytes16(dst);
       dst += sizeof(int16_t);
     }
@@ -245,7 +248,8 @@ void THP_encodeInt32Buffer(uint8_t* dst, const int32_t* src, THPByteOrder order,
 {
   memcpy(dst, src, sizeof(int32_t) * len);
   if (order != THP_nativeByteOrder()) {
-    for (size_t i = 0; i < len; i++) {
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
+    for(const auto i : c10::irange(len)) {
       swapBytes32(dst);
       dst += sizeof(int32_t);
     }
@@ -256,7 +260,8 @@ void THP_encodeInt64Buffer(uint8_t* dst, const int64_t* src, THPByteOrder order,
 {
   memcpy(dst, src, sizeof(int64_t) * len);
   if (order != THP_nativeByteOrder()) {
-    for (size_t i = 0; i < len; i++) {
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
+    for(const auto i : c10::irange(len)) {
       swapBytes64(dst);
       dst += sizeof(int64_t);
     }
@@ -267,7 +272,8 @@ void THP_encodeFloatBuffer(uint8_t* dst, const float* src, THPByteOrder order, s
 {
   memcpy(dst, src, sizeof(float) * len);
   if (order != THP_nativeByteOrder()) {
-    for (size_t i = 0; i < len; i++) {
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
+    for(const auto i : c10::irange(len)) {
       swapBytes32(dst);
       dst += sizeof(float);
     }
@@ -278,7 +284,8 @@ void THP_encodeDoubleBuffer(uint8_t* dst, const double* src, THPByteOrder order,
 {
   memcpy(dst, src, sizeof(double) * len);
   if (order != THP_nativeByteOrder()) {
-    for (size_t i = 0; i < len; i++) {
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
+    for(const auto i : c10::irange(len)) {
       swapBytes64(dst);
       dst += sizeof(double);
     }
@@ -289,7 +296,7 @@ template <typename T>
 std::vector<T> complex_to_float(const c10::complex<T>* src, size_t len) {
   std::vector<T> new_src;
   new_src.reserve(2 * len);
-  for (size_t i = 0; i < len; i++) {
+  for(const auto i : c10::irange(len)) {
     auto elem = src[i];
     new_src.emplace_back(elem.real());
     new_src.emplace_back(elem.imag());

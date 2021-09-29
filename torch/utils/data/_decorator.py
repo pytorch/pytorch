@@ -1,7 +1,7 @@
 import inspect
 from functools import wraps
 from typing import Any, Callable, Optional, Type, Union, get_type_hints
-from torch.utils.data import IterDataPipe
+from torch.utils.data import IterDataPipe, MapDataPipe
 from torch.utils.data._typing import _DataPipeMeta
 
 
@@ -11,20 +11,30 @@ from torch.utils.data._typing import _DataPipeMeta
 class functional_datapipe(object):
     name: str
 
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, enable_df_api_tracing=False) -> None:
+        """
+            Args:
+                enable_df_api_tracing - if set, any returned DataPipe would accept
+                DataFrames API in tracing mode.
+        """
         self.name = name
+        self.enable_df_api_tracing = enable_df_api_tracing
 
     def __call__(self, cls):
-        if isinstance(cls, Type):  # type: ignore[arg-type]
-            if not isinstance(cls, _DataPipeMeta):
-                raise TypeError('`functional_datapipe` can only decorate IterDataPipe')
-        # with non_deterministic decorator
-        else:
-            if not isinstance(cls, non_deterministic) and \
-                not (hasattr(cls, '__self__') and
-                     isinstance(cls.__self__, non_deterministic)):
-                raise TypeError('`functional_datapipe` can only decorate IterDataPipe')
-        IterDataPipe.register_datapipe_as_function(self.name, cls)
+        if issubclass(cls, IterDataPipe):
+            if isinstance(cls, Type):  # type: ignore[arg-type]
+                if not isinstance(cls, _DataPipeMeta):
+                    raise TypeError('`functional_datapipe` can only decorate IterDataPipe')
+            # with non_deterministic decorator
+            else:
+                if not isinstance(cls, non_deterministic) and \
+                    not (hasattr(cls, '__self__') and
+                         isinstance(cls.__self__, non_deterministic)):
+                    raise TypeError('`functional_datapipe` can only decorate IterDataPipe')
+            IterDataPipe.register_datapipe_as_function(self.name, cls, enable_df_api_tracing=self.enable_df_api_tracing)
+        elif issubclass(cls, MapDataPipe):
+            MapDataPipe.register_datapipe_as_function(self.name, cls, enable_df_api_tracing=self.enable_df_api_tracing)
+
         return cls
 
 
@@ -105,14 +115,10 @@ class non_deterministic(object):
 
 
 ######################################################
-# typing
+# Type validation
 ######################################################
-# Construct-time checking
-# Validate each DataPipe with hint as a subtype of the hint.
-def construct_time_validation(f):
-    if f.__name__ not in ('__init__', '__new__'):
-        raise TypeError("Can not decorate function {} with 'construct_time_validation'"
-                        .format(f.__name__))
+# Validate each argument of DataPipe with hint as a subtype of the hint.
+def argument_validation(f):
     signature = inspect.signature(f)
     hints = get_type_hints(f)
 
@@ -135,6 +141,26 @@ def construct_time_validation(f):
     return wrapper
 
 
+# Default value is True
+_runtime_validation_enabled: bool = True
+
+
+class runtime_validation_disabled(object):
+    prev: bool
+
+    def __init__(self) -> None:
+        global _runtime_validation_enabled
+        self.prev = _runtime_validation_enabled
+        _runtime_validation_enabled = False
+
+    def __enter__(self) -> None:
+        pass
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        global _runtime_validation_enabled
+        _runtime_validation_enabled = self.prev
+
+
 # Runtime checking
 # Validate output data is subtype of return hint
 def runtime_validation(f):
@@ -146,11 +172,15 @@ def runtime_validation(f):
 
     @wraps(f)
     def wrapper(self):
-        it = f(self)
-        for d in it:
-            if not self.type.issubtype_of_instance(d):
-                raise RuntimeError("Expected an instance of subtype {}, but found {}"
-                                   .format(self.type, d))
-            yield d
+        global _runtime_validation_enabled
+        if not _runtime_validation_enabled:
+            yield from f(self)
+        else:
+            it = f(self)
+            for d in it:
+                if not self.type.issubtype_of_instance(d):
+                    raise RuntimeError("Expected an instance as subtype of {}, but found {}({})"
+                                       .format(self.type, d, type(d)))
+                yield d
 
     return wrapper

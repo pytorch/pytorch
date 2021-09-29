@@ -54,7 +54,6 @@ void verifyShapeInfo(
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, SparseLengthsSum) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -65,9 +64,7 @@ TEST(BoundShapeInference, SparseLengthsSum) {
       makeTensorInfo(
           {TensorBoundShape_DimType_CONSTANT,
            TensorBoundShape_DimType_CONSTANT},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {1000, 16}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BoundShapeSpec spec(20, 1000);
   BoundShapeInferencer eng(spec);
   eng.InferBoundShapeAndType(net, shape_map, nullptr);
@@ -76,7 +73,6 @@ TEST(BoundShapeInference, SparseLengthsSum) {
       out_shape,
       "Weights",
       {TensorBoundShape_DimType_CONSTANT, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {1000, 16});
   verifyShapeInfo(
       out_shape,
@@ -94,11 +90,9 @@ TEST(BoundShapeInference, SparseLengthsSum) {
       out_shape,
       "Out",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 16});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, SparseLengthsSumSparseLookup) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -112,10 +106,8 @@ TEST(BoundShapeInference, SparseLengthsSumSparseLookup) {
       "Remapping",
       makeTensorInfo(
           {TensorBoundShape_DimType_CONSTANT},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {1000},
           TensorProto_DataType_INT32));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BoundShapeSpec spec(20, 1000);
   shape_map.emplace(
       "Indices",
@@ -158,7 +150,6 @@ TEST(BoundShapeInference, SparseLengthsSumSparseLookup) {
       TensorProto_DataType_INT32);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, SparseLengthsSumFused8BitRowwise) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -173,10 +164,8 @@ TEST(BoundShapeInference, SparseLengthsSumFused8BitRowwise) {
       makeTensorInfo(
           {TensorBoundShape_DimType_CONSTANT,
            TensorBoundShape_DimType_CONSTANT},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {1000, 58},
           TensorProto_DataType_INT8));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BoundShapeSpec spec(20, 1000);
   BoundShapeInferencer eng(spec);
   eng.InferBoundShapeAndType(net, shape_map, nullptr);
@@ -185,7 +174,6 @@ TEST(BoundShapeInference, SparseLengthsSumFused8BitRowwise) {
       out_shape,
       "Weights",
       {TensorBoundShape_DimType_CONSTANT, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {1000, 58},
       TensorProto_DataType_INT8);
   verifyShapeInfo(
@@ -204,11 +192,9 @@ TEST(BoundShapeInference, SparseLengthsSumFused8BitRowwise) {
       out_shape,
       "Out",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 50});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, SparseLengthsSum8BitRowwiseSparse) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -223,17 +209,14 @@ TEST(BoundShapeInference, SparseLengthsSum8BitRowwiseSparse) {
       makeTensorInfo(
           {TensorBoundShape_DimType_CONSTANT,
            TensorBoundShape_DimType_CONSTANT},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {1000, 58},
           TensorProto_DataType_INT8));
   shape_map.emplace(
       "Mapping",
       makeTensorInfo(
           {TensorBoundShape_DimType_CONSTANT},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {2000},
           TensorProto_DataType_INT32));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BoundShapeSpec spec(20, 1000);
   BoundShapeInferencer eng(spec);
   eng.InferBoundShapeAndType(net, shape_map, nullptr);
@@ -242,14 +225,12 @@ TEST(BoundShapeInference, SparseLengthsSum8BitRowwiseSparse) {
       out_shape,
       "Weights",
       {TensorBoundShape_DimType_CONSTANT, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {1000, 58},
       TensorProto_DataType_INT8);
   verifyShapeInfo(
       out_shape,
       "Mapping",
       {TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {2000},
       TensorProto_DataType_INT32);
   verifyShapeInfo(
@@ -268,11 +249,9 @@ TEST(BoundShapeInference, SparseLengthsSum8BitRowwiseSparse) {
       out_shape,
       "Out",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 50});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, SparseLengthsSumFused4BitRowwise) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -287,10 +266,8 @@ TEST(BoundShapeInference, SparseLengthsSumFused4BitRowwise) {
       makeTensorInfo(
           {TensorBoundShape_DimType_CONSTANT,
            TensorBoundShape_DimType_CONSTANT},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {1000, 54},
           TensorProto_DataType_INT8));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BoundShapeSpec spec(20, 1000);
   BoundShapeInferencer eng(spec);
   eng.InferBoundShapeAndType(net, shape_map, nullptr);
@@ -299,7 +276,6 @@ TEST(BoundShapeInference, SparseLengthsSumFused4BitRowwise) {
       out_shape,
       "Weights",
       {TensorBoundShape_DimType_CONSTANT, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {1000, 54},
       TensorProto_DataType_INT8);
   verifyShapeInfo(
@@ -318,18 +294,15 @@ TEST(BoundShapeInference, SparseLengthsSumFused4BitRowwise) {
       out_shape,
       "Out",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 100});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, LengthsRangeFill) {
   NetDef net;
   net.add_op()->CopyFrom(
       CreateOperatorDef("LengthsRangeFill", "", {"X"}, {"Y"}, {}));
   net.add_op()->CopyFrom(CreateOperatorDef("Copy", "", {"Y"}, {"Z"}, {}));
   ShapeInfoMap shape_map;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BoundShapeSpec spec(20, 1000);
   BoundShapeInferencer eng(spec);
   eng.InferBoundShapeAndType(net, shape_map, nullptr);
@@ -355,13 +328,11 @@ TEST(BoundShapeInference, LengthsRangeFill) {
 }
 
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, ConstantFill) {
   NetDef net;
   net.add_op()->CopyFrom(
       CreateOperatorDef("ConstantFill", "", {"X"}, {"Y"}, {}));
   ShapeInfoMap shape_map;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BoundShapeSpec spec(20, 1000);
   BoundShapeInferencer eng(spec);
   shape_map.emplace(
@@ -369,7 +340,6 @@ TEST(BoundShapeInference, ConstantFill) {
       makeTensorInfo(
           {TensorBoundShape_DimType_BATCH,
            TensorBoundShape_DimType_CONSTANT},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {20, 1024}));
   eng.InferBoundShapeAndType(net, shape_map, nullptr);
   const auto& out_shape = eng.shape_info();
@@ -377,18 +347,14 @@ TEST(BoundShapeInference, ConstantFill) {
       out_shape,
       "Y",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {20, 1024},
       TensorProto_DataType_FLOAT);
 }
 
 // https://github.com/pytorch/pytorch/issues/40861
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, DISABLED_ON_WINDOWS(Reshape)) {
   NetDef net;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> new_shape{-1, 8};
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> new_shape2{2, 8};
   net.add_op()->CopyFrom(
       CreateOperatorDef("FC", "", {"X0", "W0", "B0"}, {"X1"}, {}));
@@ -412,12 +378,9 @@ TEST(BoundShapeInference, DISABLED_ON_WINDOWS(Reshape)) {
       makeTensorInfo(
           {TensorBoundShape_DimType_CONSTANT,
            TensorBoundShape_DimType_CONSTANT},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {16, 1024}));
   shape_map.emplace(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       "B0", makeTensorInfo({TensorBoundShape_DimType_CONSTANT}, {16}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BoundShapeSpec spec(20, 1000);
   BoundShapeInferencer eng(spec);
   eng.InferBoundShapeAndType(net, shape_map, nullptr);
@@ -426,25 +389,21 @@ TEST(BoundShapeInference, DISABLED_ON_WINDOWS(Reshape)) {
       out_shape,
       "X0",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 1024});
   verifyShapeInfo(
       out_shape,
       "X1",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 16});
   verifyShapeInfo(
       out_shape,
       "Y1",
       {TensorBoundShape_DimType_BATCH,
        TensorBoundShape_DimType_CONSTANT}, // TODO
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size * 16 / 8, 8});
   EXPECT_TRUE(out_shape.find("Y2") == out_shape.end());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, ConcatMissingInput) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -453,14 +412,12 @@ TEST(BoundShapeInference, ConcatMissingInput) {
       {"I0", "I1"},
       {"Cout", "split_info"},
       {MakeArgument<int>("axis", 1), MakeArgument<int>("add_axis", 1)}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BoundShapeSpec spec(20, 1000);
   ShapeInfoMap shape_map;
   shape_map.emplace(
       "I0",
       makeTensorInfo(
           {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {spec.max_batch_size, 60}));
   BoundShapeInferencer eng(spec);
   eng.InferBoundShapeAndType(net, shape_map, nullptr);
@@ -469,7 +426,6 @@ TEST(BoundShapeInference, ConcatMissingInput) {
       out_shape,
       "I0",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 60});
   verifyShapeInfo(
       out_shape,
@@ -477,12 +433,10 @@ TEST(BoundShapeInference, ConcatMissingInput) {
       {TensorBoundShape_DimType_BATCH,
        TensorBoundShape_DimType_CONSTANT,
        TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 2, 60});
 }
 
 // See https://github.com/pytorch/pytorch/issues/35544
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     BoundShapeInference,
     DISABLED_ON_WINDOWS(Int8QuantizeInferInputBackwards)) {
@@ -493,7 +447,6 @@ TEST(
       {"I0"},
       {"Cout", "split_info"},
       {MakeArgument<int>("Y_zero_point", 0),
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        MakeArgument<float>("Y_scale", 0.05)}));
   net.add_op()->CopyFrom(CreateOperatorDef(
       "Int8FC",
@@ -501,9 +454,7 @@ TEST(
       {"Cout", "W0", "B0"},
       {"Y"},
       {MakeArgument<int>("Y_zero_point", 0),
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        MakeArgument<float>("Y_scale", 0.05)}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BoundShapeSpec spec(20, 1000);
   ShapeInfoMap shape_map;
   shape_map.emplace(
@@ -511,7 +462,6 @@ TEST(
       makeTensorInfo(
           {TensorBoundShape_DimType_CONSTANT,
            TensorBoundShape_DimType_CONSTANT},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {16, 101},
           TensorProto_DataType_INT8,
           true));
@@ -519,7 +469,6 @@ TEST(
       "B0",
       makeTensorInfo(
           {TensorBoundShape_DimType_CONSTANT},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {16},
           TensorProto_DataType_INT32,
           true));
@@ -530,13 +479,11 @@ TEST(
       out_shape,
       "I0",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 101});
   verifyShapeInfo(
       out_shape,
       "Cout",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 101},
       TensorProto_DataType_UINT8,
       true);
@@ -544,13 +491,11 @@ TEST(
       out_shape,
       "Y",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 16},
       TensorProto_DataType_UINT8,
       true);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, ConcatInferInputBackwards) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -561,24 +506,20 @@ TEST(BoundShapeInference, ConcatInferInputBackwards) {
       {MakeArgument<int>("axis", 1)}));
   net.add_op()->CopyFrom(
       CreateOperatorDef("FCTransposed", "", {"Cout", "W0", "B0"}, {"Y"}, {}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BoundShapeSpec spec(20, 1000);
   ShapeInfoMap shape_map;
   shape_map.emplace(
       "I0",
       makeTensorInfo(
           {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {spec.max_batch_size, 60}));
   shape_map.emplace(
       "W0",
       makeTensorInfo(
           {TensorBoundShape_DimType_CONSTANT,
            TensorBoundShape_DimType_CONSTANT},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {101, 16}));
   shape_map.emplace(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       "B0", makeTensorInfo({TensorBoundShape_DimType_CONSTANT}, {16}));
   BoundShapeInferencer eng(spec);
   eng.InferBoundShapeAndType(net, shape_map, nullptr);
@@ -587,29 +528,24 @@ TEST(BoundShapeInference, ConcatInferInputBackwards) {
       out_shape,
       "I0",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 60});
   verifyShapeInfo(
       out_shape,
       "Cout",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 101});
   verifyShapeInfo(
       out_shape,
       "Y",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 16});
   verifyShapeInfo(
       out_shape,
       "I1",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 101 - 60});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, ElementwiseInferInputBackwards) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -620,20 +556,17 @@ TEST(BoundShapeInference, ElementwiseInferInputBackwards) {
       {"I00", "I11"},
       {"Outt"},
       {MakeArgument<int>("broadcast", 1)}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BoundShapeSpec spec(20, 1000);
   ShapeInfoMap shape_map;
   shape_map.emplace(
       "Out",
       makeTensorInfo(
           {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {spec.max_batch_size, 60}));
   shape_map.emplace(
       "Outt",
       makeTensorInfo(
           {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {spec.max_batch_size, 50}));
   BoundShapeInferencer eng(spec);
   eng.InferBoundShapeAndType(net, shape_map, nullptr);
@@ -642,29 +575,24 @@ TEST(BoundShapeInference, ElementwiseInferInputBackwards) {
       out_shape,
       "I0",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 60});
   verifyShapeInfo(
       out_shape,
       "I1",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 60});
   verifyShapeInfo(
       out_shape,
       "I00",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 50});
   verifyShapeInfo(
       out_shape,
       "I11",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 50});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, ElementwiseOp) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -676,32 +604,27 @@ TEST(BoundShapeInference, ElementwiseOp) {
       {"I00", "I11"},
       {"Outt"},
       {MakeArgument<int>("broadcast", 1)}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BoundShapeSpec spec(20, 1000);
   ShapeInfoMap shape_map;
   shape_map.emplace(
       "I0",
       makeTensorInfo(
           {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {spec.max_batch_size, 60}));
   shape_map.emplace(
       "I00",
       makeTensorInfo(
           {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {spec.max_batch_size, 50}));
   shape_map.emplace(
       "I3",
       makeTensorInfo(
           {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {spec.max_batch_size, 40}));
   shape_map.emplace(
       "I4",
       makeTensorInfo(
           {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {spec.max_batch_size, 40}));
   BoundShapeInferencer eng(spec);
   eng.InferBoundShapeAndType(net, shape_map, nullptr);
@@ -710,35 +633,29 @@ TEST(BoundShapeInference, ElementwiseOp) {
       out_shape,
       "I1",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 60});
   verifyShapeInfo(
       out_shape,
       "Out",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 60});
   verifyShapeInfo(
       out_shape,
       "I11",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 50});
   verifyShapeInfo(
       out_shape,
       "Outt",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 50});
   verifyShapeInfo(
       out_shape,
       "Out3",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 40});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, Bucketize) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -746,16 +663,13 @@ TEST(BoundShapeInference, Bucketize) {
       "",
       {"In"},
       {"Out"},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {MakeArgument<std::vector<float>>("boundaries", {1.0, 2.0})}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BoundShapeSpec spec(20, 1000);
   ShapeInfoMap shape_map;
   shape_map.emplace(
       "In",
       makeTensorInfo(
           {TensorBoundShape_DimType_BATCH_OF_FEATURE_MAX, TensorBoundShape_DimType_CONSTANT},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {spec.max_batch_size, 60}));
   BoundShapeInferencer eng(spec);
   eng.InferBoundShapeAndType(net, shape_map, nullptr);
@@ -764,12 +678,10 @@ TEST(BoundShapeInference, Bucketize) {
       out_shape,
       "Out",
       {TensorBoundShape_DimType_BATCH_OF_FEATURE_MAX, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 60},
       TensorProto_DataType_INT32);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, Split) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -780,7 +692,6 @@ TEST(BoundShapeInference, Split) {
       {"X"},
       {"Y2", "Y3", "Y4"},
       {MakeArgument<int>("axis", 1),
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        MakeArgument<std::vector<int>>("split", {4, 30, 14})}));
   net.add_op()->CopyFrom(CreateOperatorDef(
       "Split",
@@ -788,14 +699,12 @@ TEST(BoundShapeInference, Split) {
       {"X1"},
       {"Y5", "Y6"},
       {MakeArgument<int>("axis", 1), MakeArgument<int>("add_axis", 1)}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BoundShapeSpec spec(20, 1000);
   ShapeInfoMap shape_map;
   shape_map.emplace(
       "X",
       makeTensorInfo(
           {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {spec.max_batch_size, 48}));
   shape_map.emplace(
       "X1",
@@ -803,7 +712,6 @@ TEST(BoundShapeInference, Split) {
           {TensorBoundShape_DimType_BATCH,
            TensorBoundShape_DimType_CONSTANT,
            TensorBoundShape_DimType_CONSTANT},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {spec.max_batch_size, 2, 48}));
   BoundShapeInferencer eng(spec);
   eng.InferBoundShapeAndType(net, shape_map, nullptr);
@@ -812,7 +720,6 @@ TEST(BoundShapeInference, Split) {
       out_shape,
       "X",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 48});
   verifyShapeInfo(
       out_shape,
@@ -820,19 +727,16 @@ TEST(BoundShapeInference, Split) {
       {TensorBoundShape_DimType_BATCH,
        TensorBoundShape_DimType_CONSTANT,
        TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 2, 48});
   verifyShapeInfo(
       out_shape,
       "Y0",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 48 / 2});
   verifyShapeInfo(
       out_shape,
       "Y1",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 48 / 2});
   verifyShapeInfo(
       out_shape,
@@ -843,30 +747,25 @@ TEST(BoundShapeInference, Split) {
       out_shape,
       "Y3",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 30});
   verifyShapeInfo(
       out_shape,
       "Y4",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 14});
   verifyShapeInfo(
       out_shape,
       "Y5",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 48});
   verifyShapeInfo(
       out_shape,
       "Y6",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 48});
 }
 
 // https://github.com/pytorch/pytorch/issues/41471
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, DISABLED_ON_WINDOWS(FC)) {
   NetDef net;
   net.add_op()->CopyFrom(
@@ -881,20 +780,16 @@ TEST(BoundShapeInference, DISABLED_ON_WINDOWS(FC)) {
       makeTensorInfo(
           {TensorBoundShape_DimType_CONSTANT,
            TensorBoundShape_DimType_CONSTANT},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {16, 1024}));
   shape_map.emplace(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       "B0", makeTensorInfo({TensorBoundShape_DimType_CONSTANT}, {16}));
   shape_map.emplace(
       "W1",
       makeTensorInfo(
           {TensorBoundShape_DimType_CONSTANT,
            TensorBoundShape_DimType_CONSTANT},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {16, 1024}));
   shape_map.emplace(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       "B1", makeTensorInfo({TensorBoundShape_DimType_CONSTANT}, {1024}));
 
   shape_map.emplace(
@@ -902,15 +797,12 @@ TEST(BoundShapeInference, DISABLED_ON_WINDOWS(FC)) {
       makeTensorInfo(
           {TensorBoundShape_DimType_CONSTANT,
            TensorBoundShape_DimType_CONSTANT},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {16, 1024}));
   shape_map.emplace(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       "B2", makeTensorInfo({TensorBoundShape_DimType_CONSTANT}, {16}));
   shape_map.emplace(
       "quant_param", makeTensorInfo({TensorBoundShape_DimType_CONSTANT}, {1}));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BoundShapeSpec spec(20, 1000);
   BoundShapeInferencer eng(spec);
   eng.InferBoundShapeAndType(net, shape_map, nullptr);
@@ -919,31 +811,26 @@ TEST(BoundShapeInference, DISABLED_ON_WINDOWS(FC)) {
       out_shape,
       "X0",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 1024});
   verifyShapeInfo(
       out_shape,
       "Out0",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 16});
   verifyShapeInfo(
       out_shape,
       "X1",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 16});
   verifyShapeInfo(
       out_shape,
       "Out1",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 1024});
   verifyShapeInfo(
       out_shape,
       "X2",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 1024},
       TensorProto_DataType_UINT8,
       true);
@@ -951,13 +838,11 @@ TEST(BoundShapeInference, DISABLED_ON_WINDOWS(FC)) {
       out_shape,
       "Out2",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 16},
       TensorProto_DataType_UINT8,
       true);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, FC3D) {
   NetDef net;
   net.add_op()->CopyFrom(
@@ -969,12 +854,9 @@ TEST(BoundShapeInference, FC3D) {
           {TensorBoundShape_DimType_CONSTANT,
            TensorBoundShape_DimType_CONSTANT,
            TensorBoundShape_DimType_CONSTANT},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {16, 1, 1024}));
   shape_map.emplace(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       "B0", makeTensorInfo({TensorBoundShape_DimType_CONSTANT}, {16}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BoundShapeSpec spec(20, 1000);
   BoundShapeInferencer eng(spec);
   eng.InferBoundShapeAndType(net, shape_map, nullptr);
@@ -983,17 +865,14 @@ TEST(BoundShapeInference, FC3D) {
       out_shape,
       "X0",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 1024});
   verifyShapeInfo(
       out_shape,
       "Out0",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {spec.max_batch_size, 16});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, Quantization) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -1004,9 +883,7 @@ TEST(BoundShapeInference, Quantization) {
       makeTensorInfo(
           {TensorBoundShape_DimType_CONSTANT,
            TensorBoundShape_DimType_CONSTANT},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {16, 64}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BoundShapeSpec spec(20, 1000);
   BoundShapeInferencer eng(spec);
   eng.InferBoundShapeAndType(net, shape_map, nullptr);
@@ -1015,12 +892,10 @@ TEST(BoundShapeInference, Quantization) {
       out_shape,
       "Out_w",
       {TensorBoundShape_DimType_CONSTANT, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {16, 72},
       TensorProto_DataType_UINT8);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, Tile) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -1028,7 +903,6 @@ TEST(BoundShapeInference, Tile) {
       "",
       {"blob"},
       {"blob_tile"},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {MakeArgument<int>("tiles", 32),
        MakeArgument<int>("axis", 0),
        MakeArgument<int>("dynamic", 1)}));
@@ -1038,9 +912,7 @@ TEST(BoundShapeInference, Tile) {
       makeTensorInfo(
           {TensorBoundShape_DimType_CONSTANT,
            TensorBoundShape_DimType_CONSTANT},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {1, 16}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BoundShapeSpec spec(32, 1000);
   BoundShapeInferencer eng(spec);
   eng.InferBoundShapeAndType(net, shape_map, nullptr);
@@ -1049,10 +921,8 @@ TEST(BoundShapeInference, Tile) {
       out_shape,
       "blob_tile",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {32, 16});
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BoundShapeSpec spec2(8, 1000);
   BoundShapeInferencer eng2(spec2);
   eng2.InferBoundShapeAndType(net, shape_map, nullptr);
@@ -1061,11 +931,9 @@ TEST(BoundShapeInference, Tile) {
       out_shape2,
       "blob_tile",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {8, 16});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, Combo0) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -1094,18 +962,15 @@ TEST(BoundShapeInference, Combo0) {
       makeTensorInfo(
           {TensorBoundShape_DimType_CONSTANT,
            TensorBoundShape_DimType_CONSTANT},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {1000, 16}));
   shape_map.emplace(
       "Weights1",
       makeTensorInfo(
           {TensorBoundShape_DimType_CONSTANT,
            TensorBoundShape_DimType_CONSTANT},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {20000, 16}));
   shape_map.emplace(
       "Indices", makeTensorInfo({TensorBoundShape_DimType_CONSTANT}, {2}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BoundShapeSpec spec(20, 1000);
   BoundShapeInferencer eng(spec);
   eng.InferBoundShapeAndType(net, shape_map, nullptr);
@@ -1118,7 +983,6 @@ TEST(BoundShapeInference, Combo0) {
       {spec.max_batch_size, 2});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, Softmax) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -1133,9 +997,7 @@ TEST(BoundShapeInference, Softmax) {
       makeTensorInfo(
           {TensorBoundShape_DimType_CONSTANT,
            TensorBoundShape_DimType_CONSTANT},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {1, 16}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BoundShapeSpec spec(32, 1000);
   BoundShapeInferencer eng(spec);
   eng.InferBoundShapeAndType(net, shape_map, nullptr);
@@ -1144,11 +1006,9 @@ TEST(BoundShapeInference, Softmax) {
       out_shape,
       "output",
       {TensorBoundShape_DimType_CONSTANT, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {1, 16});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, LpNorm) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -1163,9 +1023,7 @@ TEST(BoundShapeInference, LpNorm) {
       makeTensorInfo(
           {TensorBoundShape_DimType_CONSTANT,
            TensorBoundShape_DimType_CONSTANT},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {1, 16}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BoundShapeSpec spec(32, 1000);
   BoundShapeInferencer eng(spec);
   eng.InferBoundShapeAndType(net, shape_map, nullptr);
@@ -1177,7 +1035,6 @@ TEST(BoundShapeInference, LpNorm) {
       {1});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, Transpose) {
   NetDef net;
   std::vector<int> axes{1, 0};
@@ -1193,9 +1050,7 @@ TEST(BoundShapeInference, Transpose) {
       makeTensorInfo(
           {TensorBoundShape_DimType_CONSTANT,
            TensorBoundShape_DimType_CONSTANT},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {1, 16}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BoundShapeSpec spec(32, 1000);
   BoundShapeInferencer eng(spec);
   eng.InferBoundShapeAndType(net, shape_map, nullptr);
@@ -1204,6 +1059,5 @@ TEST(BoundShapeInference, Transpose) {
       out_shape,
       "output",
       {TensorBoundShape_DimType_CONSTANT, TensorBoundShape_DimType_CONSTANT},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {16, 1});
 }
