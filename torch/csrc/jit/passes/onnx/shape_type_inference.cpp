@@ -942,6 +942,8 @@ c10::SymbolicShape ComputeShapeForSlice(
 
 void ProcessSliceNode(Node* n, int opset_version) {
   auto valid = true;
+  // For opset version <= 9, starts, ends, axes, steps are attributes,
+  // so their values are always valid.
   if (opset_version >= 10) {
     valid = ConstantValueMap::HasValue(n->input(1)->debugName()) &&
         ConstantValueMap::HasValue(n->input(2)->debugName());
@@ -954,8 +956,7 @@ void ProcessSliceNode(Node* n, int opset_version) {
   }
   if (!ConstantValueMap::HasShape(n->input(0)->debugName()) || !valid) {
     if (ConstantValueMap::HasRank(n->input(0)->debugName())) {
-      auto rank =
-          ConstantValueMap::GetRank(n->input(0)->debugName()).value();
+      auto rank = ConstantValueMap::GetRank(n->input(0)->debugName()).value();
       UpdateRank(n->output(), rank);
     }
     return;
