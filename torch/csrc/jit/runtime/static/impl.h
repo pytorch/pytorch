@@ -369,6 +369,8 @@ class TORCH_API ProcessedNode {
     return inputs_;
   }
 
+  std::vector<IValue> clone_inputs() const;
+
   bool has_out_variant() const {
     return fn_.index() == 0;
   }
@@ -379,18 +381,21 @@ class TORCH_API ProcessedNode {
 
   bool verify_no_memory_overlap() const;
 
+  const char* get_op_name() const {
+    return op_name_;
+  }
+
  private:
+  void run_impl();
+
   Node* node_;
   using OutVariant = std::function<void(ProcessedNode*)>;
   using NativeFunction = std::function<void(ProcessedNode*)>;
   c10::variant<OutVariant, NativeFunction, Operation> fn_;
   std::vector<const IValue*> inputs_; // unowned
   std::vector<IValue> outputs_;
+  const char* op_name_;
 };
-
-static_assert(
-    sizeof(void*) != 8 || sizeof(ProcessedNode) == 12 * sizeof(void*),
-    "ProcessedNode size changed");
 
 } // namespace jit
 } // namespace torch
