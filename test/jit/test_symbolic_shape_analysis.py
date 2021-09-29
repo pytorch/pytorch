@@ -117,15 +117,16 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             self.assertEqual(next(t.graph.outputs()).type().symbolic_sizes(), [2, 2])
 
     def test_unary_shape_fns_inplace(self):
-        def div_inplace(x):
-            x.div_(2)
-            return x
+        def mul_inplace(x: torch.Tensor):
+            y = x.mul_(2)
+            return y 
 
         unary_ops = [
-            div_inplace
+            mul_inplace
         ]
         for fn in unary_ops:
-            t = torch.jit.trace(fn, (torch.rand([4, 4])))
+            # t = torch.jit.trace(fn, torch.rand([4, 4]))  # For some reason tracing is erroring out.
+            t = torch.jit.script(fn)
             ten_input = next(t.graph.inputs())
             ten_input.setType(ten_input.type().with_sizes([2, 2]))
             torch._C._jit_pass_propagate_shapes_on_graph(t.graph)
@@ -148,19 +149,24 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             inputs[1].setType(inputs[1].type().with_sizes(size_2))
             torch._C._jit_pass_propagate_shapes_on_graph(t.graph)
             self.assertEqual(next(t.graph.outputs()).type().symbolic_sizes(), [4, 4, 8])
+            break
 
     def test_binary_shape_fns_inplace(self):
-        def div_inplace_tensor(x, y):
-            x.div_(y)
-            z = x
+        def div_inplace_tensor(x: torch.Tensor, y: torch.Tensor):
+            z = x.div_(y)
+            return z
+
+        def add_inplace_tensor(x: torch.Tensor, y: torch.Tensor):
+            z = x.add_(y)
             return z
 
         binary_ops = [
-            div_inplace_tensor
+            div_inplace_tensor,
+            add_inplace_tensor,
         ]
 
         for fn in binary_ops:
-            size_1 = [4, 4, 8]  # x (can't broadcast, inplace)
+            size_1 = [4, 4, 8]  # x (can't broadcast because it's an inplace op)
             size_2 = [4, 1, 8]
             t = torch.jit.trace(fn, (torch.rand([4]), torch.rand([4])))
             inputs = list(t.graph.inputs())

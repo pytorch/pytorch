@@ -411,6 +411,18 @@ def dropout_mapper(node: torch.fx.Node, mod: nn.Module):
     return node.kwargs["input"]
 
 @register_acc_op_mapping(
+    op_and_target=("call_function", nn.functional.hardtanh),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        ("min_val", "left"),
+        ("max_val", "right"),
+    ],
+)
+@register_acc_op
+def hardtanh(*, input, left, right):
+    return nn.functional.hardtanh(input, min_val=left, max_val=right)
+
+@register_acc_op_mapping(
     op_and_target=("call_function", nn.functional.hardsigmoid))
 @register_acc_op
 def hardsigmoid(*, input):

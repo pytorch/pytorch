@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <unordered_map>
+#include "jit/frontend/function_schema_parser.h"
 
 namespace torch {
 namespace jit {
@@ -36,22 +37,6 @@ const std::string shape_compute_functions =
 
           return expandedSizes
 
-        def broadcast_inplace(a: List[int], b: List[int]):
-          dimsA = len(a)
-          dimsB = len(b)
-          if dimsB > dimsA:
-            raise AssertionError("The dims of tensor b ({}) must be less than or equal to" 
-                                 "the dims of tensor a ({}) ".format(dimsB, dimsA))
-          for dimA in range(dimsA):
-            dimB = dimsB - dimsA + dimA 
-            sizeA = a[dimA]
-            sizeB = b[dimB] if (dimB >= 0) else 1
-            if sizeA != sizeB and sizeB != 1:
-                # TODO: only assertion error is bound in C++ compilation right now
-                raise AssertionError("The size of tensor a {} must match the size of tensor b ("
-                                "{}) at non-singleton dimension {}".format(sizeA, sizeB, dimA))
-          return a
-
         def adaptive_avg_pool2d(self: List[int], out: List[int]):
           assert len(out) == 2
           assert len(self) == 3 or len(self) == 4
@@ -73,6 +58,22 @@ const std::string shape_compute_functions =
 
         def unary(self: List[int]):
           return _copy(self)
+
+        def broadcast_inplace(a: List[int], b: List[int]):
+          dimsA = len(a)
+          dimsB = len(b)
+          if dimsB > dimsA:
+            raise AssertionError("The dims of tensor b ({}) must be less than or equal to" 
+                                 "the dims of tensor a ({}) ".format(dimsB, dimsA))
+          for dimA in range(dimsA):
+            dimB = dimsB - dimsA + dimA 
+            sizeA = a[dimA]
+            sizeB = b[dimB] if (dimB >= 0) else 1
+            if sizeA != sizeB and sizeB != 1:
+                # TODO: only assertion error is bound in C++ compilation right now
+                raise AssertionError("The size of tensor a {} must match the size of tensor b ("
+                                "{}) at non-singleton dimension {}".format(sizeA, sizeB, dimA))
+          return _copy(a)
 
         def expand(self: List[int], sizes: List[int]):
           assert len(sizes) >= len(self)
@@ -452,6 +453,12 @@ const std::string shape_compute_functions =
           assert len(input) == 4
           return conv_output_size(input, weight, bias, stride, padding, dilation, groups)
 
+        def batch_norm(input: List[int], weight: List[int], bias: Optional[List[int]], running_mean: Optional[List[int]], running_var: Optional[List[int]], training: bool, momentum: float, eps: float, cudnn_enabled: bool):
+          out: List[int] = []
+          for elem in input:
+            out.append(elem)
+          return out
+
         def conv3d(input: List[int], weight: List[int], bias: Optional[List[int]], stride: List[int], padding: List[int], dilation: List[int], groups: int):
           assert len(weight) == 5
           assert len(input) == 5
@@ -572,8 +579,11 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor", "broadcast"},
       {"aten::add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", "unary"},
       {"aten::hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> Tensor", "unary"},
+      {"aten::hardswish(Tensor self) -> Tensor", "unary"},
       {"aten::hardswish_(Tensor self) -> Tensor", "unary"},
+      {"aten::hardsigmoid(Tensor self) -> Tensor", "unary"},
       {"aten::hardsigmoid_(Tensor self) -> Tensor", "unary"},
+      {"aten::dropout(Tensor input, float p, bool train) -> Tensor", "unary"},
       {"aten::adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor", "adaptive_avg_pool2d"},
       {"aten::gelu(Tensor self) -> Tensor", "unary"},
       {"aten::tanh(Tensor self) -> Tensor", "unary"},
@@ -608,6 +618,7 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::transpose.int(Tensor(a) self, int dim0, int dim1) -> Tensor(a)", "transpose"},
       {"aten::conv1d(Tensor input, Tensor weight, Tensor? bias=None, int[1] stride=1, int[1] padding=0, int[1] dilation=1, int groups=1) -> Tensor", "conv1d"},
       {"aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor", "conv2d"},
+      {"aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor", "batch_norm"},
       {"aten::conv3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1, int groups=1) -> Tensor", "conv3d"},
       {"aten::flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)", "flatten"},
       {"aten::relu(Tensor self) -> Tensor", "unary"},
@@ -617,6 +628,8 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)", "expand_one_unused"},
       {"aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "mean_dim"},
       {"aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor", "addmm"},
+      {"aten::quantize_per_tensor(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor", "unary"},
+      {"aten::dequantize(Tensor self) -> Tensor", "unary"},
 #ifdef USE_XNNPACK
       {"prepacked::conv2d_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.Conv2dOpContext W_prepack) -> Tensor Y", "prepacked_conv2d_clamp_run"},
       {"prepacked::linear_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.LinearOpContext W_prepack) -> Tensor Y", "prepacked_linear_clamp_run"},
@@ -632,20 +645,19 @@ std::unordered_map<const FunctionSchema*, std::shared_ptr<Graph>>
 // CompilationUnit that holds all these Functions and keeps them alive.
 auto compilation_unit = std::make_shared<CompilationUnit>();
 
-const at::optional<FunctionSchema> getInplaceVariant(
+const at::optional<const FunctionSchema*> getInplaceVariant(
     const FunctionSchema& base_schema) {
   auto& inplace_variants =
       getAllOperatorsFor(c10::Symbol::fromQualString(base_schema.name() + "_"));
+
   for (const auto& variant : inplace_variants) {
-    // m.def("div.Tensor(Tensor self, Tensor other) -> Tensor");
-    // m.def("div_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)");
     // Need to check that all args are the same except for the first, which
     // is almost the same except for the Alias info
-    const FunctionSchema& schema = variant->schema();
-    if (schema.arguments().size() != base_schema.arguments().size()) {
+    const FunctionSchema* schema = &variant->schema();
+    if (schema->arguments().size() != base_schema.arguments().size()) {
       continue;
     }
-    Argument self_arg = schema.arguments()[0];
+    Argument self_arg = schema->arguments()[0];
     if (*self_arg.type() != *base_schema.arguments()[0].type()) {
       continue;
     }
@@ -653,8 +665,8 @@ const at::optional<FunctionSchema> getInplaceVariant(
       continue;
     }
     bool rest_of_args_match = true;
-    for (size_t i = 1; i < schema.arguments().size(); i++) {
-      if (schema.arguments()[i] != base_schema.arguments()[i]) {
+    for (size_t i = 1; i < schema->arguments().size(); i++) {
+      if (schema->arguments()[i] != base_schema.arguments()[i]) {
         rest_of_args_match = false;
         break;
       }
@@ -663,10 +675,10 @@ const at::optional<FunctionSchema> getInplaceVariant(
       continue;
     }
     // Lastly check the return types are the same
-    if (schema.returns().size() != 1) {
+    if (schema->returns().size() != 1) {
       continue;
     }
-    Argument ret_arg = schema.returns()[0];
+    Argument ret_arg = schema->returns()[0];
     if (*ret_arg.type() != *base_schema.returns()[0].type()) {
       continue;
     }
@@ -734,14 +746,14 @@ void loadModule(const CompilationUnit& module) {
       auto inplace_schema = getInplaceVariant(*schema_string);
       if (inplace_schema.has_value()) {
         registerSchema(
-            &inplace_schema.value(), "unary", reused_functions, module);
+            inplace_schema.value(), "unary", reused_functions, module);
       }
     }
     if (shape_compute_function_name == "broadcast") {
       auto inplace_schema = getInplaceVariant(*schema_string);
       if (inplace_schema.has_value()) {
         registerSchema(
-            &inplace_schema.value(),
+            inplace_schema.value(),
             "broadcast_inplace",
             reused_functions,
             module);
