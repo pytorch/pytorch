@@ -266,6 +266,9 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(at::Tensor input) {
       /*qmin=*/0,
       /*qmax=*/255);
   float* weight_scales_data = w_scales.data_ptr<float>();
+
+  // QNNPack is not thread safe
+  std::lock_guard<std::mutex> lock(qnnp_mutex_);
   if (!input_scale.has_value() || input_scale.value() != q_params.scale) {
     generate_requantization_scales(
         // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
