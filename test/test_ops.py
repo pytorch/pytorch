@@ -515,7 +515,7 @@ class TestGradients(TestCase):
         return _fn
 
     def _check_helper(self, device, dtype, op, variant, check, *, check_forward_ad=False, check_backward_ad=True,
-                      check_undefined_grad=True):
+                      check_undefined_grad=True, check_batched_grad=None):
         # NB: check_backward_ad does not affect gradgradcheck (always True)
         if variant is None:
             self.skipTest("Skipped! Variant not implemented.")
@@ -554,8 +554,10 @@ class TestGradients(TestCase):
             gradcheck_args += sample.args
 
             if check == 'gradcheck':
+                if check_batched_grad is None:
+                    check_batched_grad = op.check_batched_grad
                 self.assertTrue(gradcheck(fn, gradcheck_args,
-                                          check_batched_grad=op.check_batched_grad,
+                                          check_batched_grad=check_batched_grad,
                                           check_grad_dtypes=True,
                                           nondet_tol=op.gradcheck_nondet_tol,
                                           fast_mode=op.gradcheck_fast_mode,
@@ -580,15 +582,16 @@ class TestGradients(TestCase):
                 self.assertTrue(False, msg="Unknown check requested!")
 
     def _grad_test_helper(self, device, dtype, op, variant, *, check_forward_ad=False, check_backward_ad=True,
-                          check_undefined_grad=True):
+                          check_undefined_grad=True, check_batched_grad=None):
         return self._check_helper(device, dtype, op, variant, 'gradcheck', check_forward_ad=check_forward_ad,
-                                  check_backward_ad=check_backward_ad, check_undefined_grad=check_undefined_grad)
+                                  check_backward_ad=check_backward_ad, check_undefined_grad=check_undefined_grad,
+                                  check_batched_grad=check_batched_grad)
 
     def _gradgrad_test_helper(self, device, dtype, op, variant):
         return self._check_helper(device, dtype, op, variant, 'gradgradcheck')
 
     def _skip_helper(self, op, device, dtype):
-        if not op.supports_autograd:
+        if not op.supports_autograd and not op.supports_forward_ad:
             self.skipTest("Skipped! autograd not supported.")
         if not op.supports_complex_autograd(torch.device(device).type) and dtype.is_complex:
             self.skipTest("Skipped! Complex autograd not supported.")
@@ -649,26 +652,24 @@ class TestGradients(TestCase):
     def _forward_grad_helper(self, device, dtype, op, variant):
         if op.supports_forward_ad:
             self._grad_test_helper(device, dtype, op, variant, check_forward_ad=True, check_backward_ad=False,
-                                   check_undefined_grad=False)
+                                   check_undefined_grad=False, check_batched_grad=False)
         else:
             err_msg = r"Trying to use forward AD with .* that does not support it\."
             hint_msg = ("Running forward AD for an OP that has does not support it did not "
                         "raise any error. If your op supports forward AD, you should set supports_forward_ad=True")
             with self.assertRaisesRegex(NotImplementedError, err_msg, msg=hint_msg):
                 self._grad_test_helper(device, dtype, op, variant, check_forward_ad=True, check_backward_ad=False,
-                                       check_undefined_grad=False)
+                                       check_undefined_grad=False, check_batched_grad=False)
 
     @_gradcheck_ops(op_db)
     def test_forward_mode_AD(self, device, dtype, op):
-        if not op.supports_complex_autograd(torch.device(device).type) and dtype.is_complex:
-            self.skipTest("Skipped! Complex autograd not supported.")
+        self._skip_helper(op, device, dtype)
 
         self._forward_grad_helper(device, dtype, op, op.get_op())
 
     @_gradcheck_ops(op_db)
     def test_inplace_forward_mode_AD(self, device, dtype, op):
-        if not op.supports_complex_autograd(torch.device(device).type) and dtype.is_complex:
-            self.skipTest("Skipped! Complex autograd not supported.")
+        self._skip_helper(op, device, dtype)
 
         if not op.inplace_variant or not op.supports_inplace_autograd:
             self.skipTest("Skipped! Operation does not support inplace autograd.")
