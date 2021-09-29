@@ -53,6 +53,10 @@ class PythonTensor(torch.Tensor):
         real_out = func(*pytree.tree_map(unwrap_tensor, args), **pytree.tree_map(unwrap_tensor, kwargs))
 
         def wrap_with_proxy(e, idx):
+            # Some ops (like native_batch_norm_backward) return undefined tensors that get converted into None in python.
+            # As the function signature expects tensors, if we directly return these None tensors back to C++, we'll error.
+            if e is None:
+                return PythonTensor(torch.empty(()), proxy_out[idx])
             return PythonTensor(e, proxy_out[idx]) if type(e) == torch.Tensor else e
         if isinstance(real_out, tuple):
             return tuple([wrap_with_proxy(e, idx) for idx, e in enumerate(real_out)])
