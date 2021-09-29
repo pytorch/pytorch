@@ -22,10 +22,28 @@ namespace {
 // as we prototype the support
 bool autocast_enabled = false;
 
+struct AutocastContext {
+  bool enabled = false;
+  bool cpu_enabled = false;
+  operator bool() const {
+    return enabled || cpu_enabled;
+  }
+};
+
 struct AutocastScope {
   Value* instance = nullptr;
-  bool enabled = false;
+  AutocastContext context;
+  void stack(const AutocastContext& parent_context) {
+  }
 };
+
+bool isAutocastNode(Value* value) {
+  const auto class_name = getModuleName(value);
+  return class_name.has_value() && 
+      (*class_name == "__torch__.torch.cuda.amp.autocast_mode.autocast" ||
+      *class_name == "__torch__.torch.cpu.amp.autocast_mode.autocast" ||
+      *class_name == "__torch__.torch.autocast_mode.autocast");
+}
 
 // If we have an autocast instance, return it
 //
@@ -42,28 +60,40 @@ struct AutocastScope {
 //  2. `prim::SetAttr` must follow `prim::CreateObject()` in the same block,
 //    but there might be other nodes in between
 //
-c10::optional<AutocastScope> parseAutocast(Value* value) {
-  const auto class_name = getModuleName(value);
-  if (class_name &&
-      *class_name == "__torch__.torch.cuda.amp.autocast_mode.autocast") {
+c10::optional<AutocastScope> parseAutocast(Value* value, const AutocastContext& context) {
+  if (isAutocastNode(value)) {
     if (value->node()->kind() == prim::CreateObject) {
-      // Search for `prim::SetAttr[name="_enabled"]`
+      AutocastScope scope;
+      scope.instance = value;
+      scope.context = context;
+      bool enabled;
+      std::string device;
       for (Use use : value->uses()) {
+        // TODO: support runtime flag
         if (use.user->kind() == prim::SetAttr &&
             use.user->s(attr::name) == "_enabled") {
-          const auto enabled = constant_as<bool>(use.user->input(1));
-          if (enabled.has_value()) {
-            // We have an autocast instance
-            AutocastScope scope;
-            scope.instance = value;
-            scope.enabled = *enabled;
-            return scope;
-          } else {
-            // TODO: better error message
-            AT_ERROR("Autocast argument must be a constant");
-          }
+          // Search for `prim::SetAttr[name="_enabled"]`
+          auto ret = constant_as<bool>(use.user->input(1));
+          TORCH_CHECK(ret.has_value(),
+            "Autocast _enabled argument must be a constant");
+          enabled = ret.value();
+        } else if (use.user->kind() == prim::SetAttr &&
+            use.user->s(attr::name) == "device") {
+          // Search for `prim::SetAttr[name="device"]`
+          auto ret = constant_as<std::string>(use.user->input(1));
+          TORCH_CHECK(ret.has_value(),
+            "Autocast device argument must be a constant");
+          device = ret.value();
         }
       }
+      if (device == "cuda") {
+        scope.context.enabled = enabled;
+      } else if (device == "cpu") {
+        scope.context.cpu_enabled = enabled;
+      } else {
+        TORCH_INTERNAL_ASSERT(false, "unrecognized device for autocast pass");
+      }
+      return scope;
     } else {
       // We only support simple and static autocast expressions. For example,
       // the following should report an error (since the autocast would not
@@ -84,13 +114,23 @@ c10::optional<AutocastScope> parseAutocast(Value* value) {
   return c10::nullopt;
 }
 
-void castTensorInputs(Node* node, Symbol cast_op) {
+void castTensorInputs(Node* node, Symbol cast_op, const AutocastContext& context) {
+  if (!context) {
+    return;
+  }
+
   const auto graph = node->owningGraph();
 
   std::unordered_set<Value*> casted_inputs;
   for (auto input : node->inputs()) {
-    if (input->type()->kind() == TensorType::Kind &&
-        input->node()->kind() != cast_op) {
+    // TODO: update cast_op signature to take dynamic context flags
+    auto input_tensor_type = input->type()->cast<TensorType>();
+    if (input_tensor_type &&
+        input->node()->kind() != cast_op &&
+        input_tensor_type->device().has_value() &&
+        ((input_tensor_type->device()->is_cuda() && context.enabled) ||
+        (input_tensor_type->device()->is_cpu() && context.cpu_enabled))
+        ) {
       casted_inputs.insert(input);
     }
   }
@@ -125,7 +165,10 @@ bool hasExplicitDtypeArgument(Node* node) {
   return dtype_arg && dtype_arg->type()->kind() != TypeKind::NoneType;
 }
 
-void castInputsToWidestType(Node* node) {
+void castInputsToWidestType(Node* node, const AutocastContext& context) {
+  if (!context) {
+    return;
+  }
   // Figure out the widest type
   // (really, just looking for any float32 inputs)
   //
@@ -135,14 +178,14 @@ void castInputsToWidestType(Node* node) {
     if (auto tensor_type = input->type()->cast<TensorType>()) {
       const auto dtype = tensor_type->scalarType();
       if (!dtype.has_value() || *dtype == at::ScalarType::Float) {
-        castTensorInputs(node, aten::autocast_to_fp32);
+        castTensorInputs(node, aten::autocast_to_fp32, context);
         return;
       }
     }
   }
 }
 
-void handleBlock(Block* block, bool initial_state) {
+void handleBlock(Block* block, AutocastContext initial_state) {
   std::stack<AutocastScope> autocast_stack;
 
   c10::optional<bool> incompatible_amp = c10::nullopt;
@@ -150,12 +193,13 @@ void handleBlock(Block* block, bool initial_state) {
   // The current autocast enabled/disabled state
   auto current_state = [&] {
     return autocast_stack.empty() ? initial_state
-                                  : autocast_stack.top().enabled;
+                                  : autocast_stack.top().context;
   };
 
   for (Node* node : block->nodes()) {
     switch (node->kind()) {
       case prim::CallFunction:
+        // TODO: limit it only to amp related node;
         TORCH_INTERNAL_ASSERT(
             !incompatible_amp.has_value() || incompatible_amp.value(),
             "Calls are not expected with AMP & JIT");
@@ -163,6 +207,7 @@ void handleBlock(Block* block, bool initial_state) {
         break;
 
       case prim::CallMethod:
+        // TODO: limit it only to amp related node;
         if (auto class_type = node->input(0)->type()->cast<ClassType>()) {
           const auto& name = node->s(attr::name);
           const auto& function = class_type->getMethod(name);
@@ -181,7 +226,7 @@ void handleBlock(Block* block, bool initial_state) {
         break;
 
       case prim::Enter:
-        if (auto autocast_scope = parseAutocast(node->input())) {
+        if (auto autocast_scope = parseAutocast(node->input(), current_state())) {
           if (node->hasUses()) {
             // TODO: better error message
             AT_ERROR("`with autocast() as ...` is not supported");
@@ -195,11 +240,10 @@ void handleBlock(Block* block, bool initial_state) {
         break;
 
       case prim::Exit:
-        // TODO: technically we can avoid parseAutocast() here
-        if (auto autocast_scope = parseAutocast(node->input())) {
+        if (isAutocastNode(node->input(0))) {
           TORCH_INTERNAL_ASSERT(!autocast_stack.empty());
           TORCH_INTERNAL_ASSERT(
-              autocast_stack.top().instance == autocast_scope->instance);
+              autocast_stack.top().instance == node->input());
           TORCH_INTERNAL_ASSERT(
               !incompatible_amp.has_value() || !incompatible_amp.value(),
               "Unsupported case by AMP & JIT");
@@ -237,8 +281,8 @@ void handleBlock(Block* block, bool initial_state) {
       case aten::gru_cell:
       case aten::rnn_tanh_cell:
       case aten::rnn_relu_cell:
-        if (current_state() && !node->schema().is_mutable()) {
-          castTensorInputs(node, aten::autocast_to_fp16);
+        if (!node->schema().is_mutable()) {
+          castTensorInputs(node, aten::autocast_to_fp16, current_state());
         }
         break;
 
@@ -284,8 +328,8 @@ void handleBlock(Block* block, bool initial_state) {
       case aten::pdist:
       case aten::cdist:
       case aten::renorm:
-        if (current_state() && !node->schema().is_mutable()) {
-          castTensorInputs(node, aten::autocast_to_fp32);
+        if (!node->schema().is_mutable()) {
+          castTensorInputs(node, aten::autocast_to_fp32, current_state());
         }
         break;
 
@@ -296,10 +340,8 @@ void handleBlock(Block* block, bool initial_state) {
       case aten::cumprod:
       case aten::cumsum:
       case aten::sum:
-        if (current_state() && !node->schema().is_mutable()) {
-          if (!hasExplicitDtypeArgument(node)) {
-            castTensorInputs(node, aten::autocast_to_fp32);
-          }
+        if (!node->schema().is_mutable() && !hasExplicitDtypeArgument(node)) {
+          castTensorInputs(node, aten::autocast_to_fp32, current_state());
         }
         break;
 
@@ -323,8 +365,8 @@ void handleBlock(Block* block, bool initial_state) {
       case aten::sub:
       case aten::mul:
       case aten::div:
-        if (current_state() && !node->schema().is_mutable()) {
-          castInputsToWidestType(node);
+        if (!node->schema().is_mutable()) {
+          castInputsToWidestType(node, current_state());
         }
         break;
 
@@ -358,7 +400,8 @@ bool autocastEnabled() {
 void Autocast(const std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("\nBefore Autocast: ", graph);
   if (autocastEnabled()) {
-    handleBlock(graph->block(), at::autocast::is_enabled());
+    AutocastContext init = {at::autocast::is_enabled(), at::autocast::is_cpu_enabled()};
+    handleBlock(graph->block(), init);
   }
   GRAPH_DUMP("\nAfter Autocast: ", graph);
 }
