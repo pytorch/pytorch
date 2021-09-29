@@ -30,6 +30,13 @@ class ShardedTensorTestBase(MultiProcessTestCase):
                 rank=self.rank,
                 init_method=f"file://{self.file_name}",
             )
+        elif backend == "mpi":
+            dist.init_process_group(
+                backend="mpi",
+                world_size=self.world_size,
+                rank=self.rank,
+                init_method=f"file://{self.file_name}",
+            )
         else:
             raise RuntimeError(f"Backend {backend} not supported!")
 
