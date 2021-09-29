@@ -21,11 +21,28 @@ class TsNode : public Node {
   TsNode(OpKind op, OpList operands, size_t num_outputs = 1,
          torch::lazy::hash_t hash_seed = 0x5a2d296e9);
 
+  void SetShapeDeferred(const std::function<lazy_tensors::Shape()>& shape_fn);
+
   // Contructor used to create leaf nodes.
   TsNode(OpKind op, lazy_tensors::Shape shape, size_t num_outputs,
          torch::lazy::hash_t hash_seed);
 
   virtual ~TsNode() {}
+
+  // TODO(whc) rename this back to GetOpShape after deleting it from Node base
+  lazy_tensors::Shape TsGetOpShape(
+      const std::function<lazy_tensors::Shape()>& shape_fn) const;
+
+  // Retrieves the full shape of the IR Node. Note that if this is a
+  // multi-output node, the returned shape will be a tuple.
+  virtual const lazy_tensors::Shape& shape() const override;
+
+  // Retrieves the shape of the output at a given index. If the node is not a
+  // multi-output node, output_index must be zero.
+  virtual const lazy_tensors::Shape& shape(size_t output_index) const override;
+
+ private:
+  lazy_tensors::Shape shape_;
 };
 
 }  // namespace ir

@@ -139,7 +139,6 @@ Node::Node(OpKind op, OpList operands, lazy_tensors::Shape shape,
            size_t num_outputs, torch::lazy::hash_t hash_seed)
     : op_(std::move(op)),
       num_outputs_(num_outputs),
-      shape_(std::move(shape)),
       node_hash_(torch::lazy::HashCombine(op_.hash(), hash_seed)),
       hash_(node_hash_) {
   metadata_.scope = GetCurrentScope();
@@ -169,28 +168,18 @@ Node::Node(OpKind op, OpList operands,
            const std::function<lazy_tensors::Shape()>& shape_fn,
            size_t num_outputs, torch::lazy::hash_t hash_seed)
     : Node(std::move(op), operands, lazy_tensors::Shape(), num_outputs,
-           hash_seed) {
-  // Forward the constructor to the one above (with empty shape), so we have the
-  // full hash information, then fetch/compute the real shape.
-  shape_ = GetOpShape(shape_fn);
-}
+           hash_seed) {}
 
 Node::Node(OpKind op, OpList operands, size_t num_outputs,
            torch::lazy::hash_t hash_seed)
     : Node(std::move(op), operands, lazy_tensors::Shape(), num_outputs,
            hash_seed) {}
 
-void Node::SetShapeDeferred(
-    const std::function<lazy_tensors::Shape()>& shape_fn) {
-  shape_ = GetOpShape(shape_fn);
-}
-
 Node::Node(OpKind op, lazy_tensors::Shape shape, size_t num_outputs,
            torch::lazy::hash_t hash_seed)
     : op_(std::move(op)),
       num_outputs_(num_outputs),
-      shape_(std::move(shape)),
-      node_hash_(GetOpHash(op_, shape_, hash_seed)),
+      node_hash_(GetOpHash(op_, shape, hash_seed)),
       hash_(node_hash_) {
   metadata_.scope = GetCurrentScope();
   metadata_.frame_info = GetFrameInfo();
@@ -200,14 +189,6 @@ Node::~Node() {
   for (size_t i = 0; i < operands_as_outputs_.size(); ++i) {
     operands_[i]->RemoveUse(Use(this, i, operands_as_outputs_[i].index));
   }
-}
-
-const lazy_tensors::Shape& Node::shape(size_t output_index) const {
-  if (shape_.IsTuple()) {
-    return shape_.tuple_shapes(output_index);
-  }
-  LTC_CHECK_EQ(output_index, 0);
-  return shape_;
 }
 
 void Node::AddOperand(NodePtr node, size_t index) {
