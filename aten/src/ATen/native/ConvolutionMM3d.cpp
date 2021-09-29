@@ -353,7 +353,8 @@ void slow_conv3d_backward_out_cpu_template(
   const int64_t batch_size = input.size(0);
 
 
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, input.scalar_type(), "slow_conv3d_cpu_grad_input", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      kBFloat16, input.scalar_type(), "slow_conv3d_cpu_grad_input", [&] {
     at::parallel_for(0, batch_size, CONV3D_GRAIN_SALT,
                     [&](int64_t start, int64_t end) {
         auto grad_input_a = grad_input.accessor<scalar_t, 5>();
