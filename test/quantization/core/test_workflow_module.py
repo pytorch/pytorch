@@ -794,7 +794,7 @@ class TestDistributed(QuantizationTestCase):
                 torch.quantization.DeQuantStub(),
             )
 
-            torch.quantization.fuse_modules(model, [['1', '2', '3'], ['4', '5']], inplace=True)
+            torch.ao.quantization.fuse_modules(model, [['1', '2', '3'], ['4', '5']], inplace=True)
 
             model.qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
             torch.quantization.prepare_qat(model, inplace=True)
@@ -835,7 +835,7 @@ class TestDistributed(QuantizationTestCase):
 
             model = Model()
             # fuse it
-            fused_model = torch.quantization.fuse_modules(
+            fused_model = torch.ao.quantization.fuse_modules(
                 model,
                 [['conv', 'bn']],
             )
