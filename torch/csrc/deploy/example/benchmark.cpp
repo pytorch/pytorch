@@ -55,12 +55,12 @@ const int min_items_to_complete = 1;
 struct RunPython {
   static torch::deploy::ReplicatedObj load_and_wrap(
       torch::deploy::Package& package) {
-    auto I = package.acquire_session();
+    auto I = package.acquireSession();
     auto obj = I.self.attr("load_pickle")({"model", "model.pkl"});
     if (cuda) {
       obj = I.global("gpu_wrapper", "GPUWrapper")({obj});
     }
-    return I.create_movable(obj);
+    return I.createMovable(obj);
   }
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   RunPython(
@@ -69,7 +69,7 @@ struct RunPython {
       const torch::deploy::Interpreter* interps)
       : obj_(load_and_wrap(package)), eg_(std::move(eg)), interps_(interps) {}
   void operator()(int i) {
-    auto I = obj_.acquire_session();
+    auto I = obj_.acquireSession();
     if (cuda) {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       std::vector<at::IValue> eg2 = {i};
@@ -189,12 +189,12 @@ struct Benchmark {
     pthread_barrier_init(&first_run_, nullptr, n_threads_ + 1);
 
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    torch::deploy::Package package = manager_.load_package(file_to_run_);
+    torch::deploy::Package package = manager_.loadPackage(file_to_run_);
 
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<at::IValue> eg;
     {
-      auto I = package.acquire_session();
+      auto I = package.acquireSession();
 
       eg = I.global("builtins", "tuple")(
                 I.self.attr("load_pickle")({"model", "example.pkl"}))
@@ -306,7 +306,7 @@ int main(int argc, char* argv[]) {
 
   // make sure gpu_wrapper.py is in the import path
   for (auto& interp : manager.all_instances()) {
-    auto I = interp.acquire_session();
+    auto I = interp.acquireSession();
     I.global("sys", "path").attr("append")({"torch/csrc/deploy/example"});
   }
 
