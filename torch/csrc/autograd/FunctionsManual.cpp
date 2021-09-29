@@ -4185,10 +4185,18 @@ Tensor _lu_with_info_jvp(
 }
 
 Tensor linalg_trace_backward(const Tensor & grad, IntArrayRef input_sizes, int64_t offset) {
-  auto grad_input = at::zeros(input_sizes, grad.options());
-  auto diag = grad_input.diagonal(offset, -2, -1);
-  diag.copy_(grad.unsqueeze(-1));
-  return grad_input;
+  auto m = input_sizes[input_sizes.size() - 2];
+  auto n = input_sizes[input_sizes.size() - 1];
+  // TODO: replace with `at::eye(m, n, offset)` after `offset` option is supported in `at::eye`.
+  if (offset <= -m || n <= offset) {
+    return at::zeros(input_sizes, grad.options());
+  }
+  auto diag = m >= n ?
+    at::matmul(at::diag(at::ones({m - std::abs(offset)}, grad.options()), offset),
+               at::eye(m, n, grad.options())) :
+    at::matmul(at::eye(m, n, grad.options()),
+               at::diag(at::ones({n - std::abs(offset)}, grad.options()), offset));
+  return grad.unsqueeze(-1).unsqueeze(-1) * diag;
 }
 
 

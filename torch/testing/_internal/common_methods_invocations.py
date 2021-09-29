@@ -2014,6 +2014,10 @@ def sample_inputs_linalg_trace(self, device, dtype, requires_grad, **kwargs):
         ((S, S), -2),
         ((S, L, M), 1),
         ((S, L, M), -1),
+        ((S, L, M), 100),
+        ((S, L, M), -100),
+        ((S, M, L), 1),
+        ((S, M, L), -1),
     )
     samples = []
 
@@ -7332,6 +7336,8 @@ op_db: List[OpInfo] = [
            supports_out=False,
            op=torch.linalg.trace,
            dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
+           backward_dtypesIfCPU=floating_types(),
+           backward_dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
            sample_inputs_func=sample_inputs_linalg_trace),
     OpInfo('linalg.vector_norm',
            op=torch.linalg.vector_norm,
