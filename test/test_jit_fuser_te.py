@@ -2039,6 +2039,7 @@ works_list = [
     'sqrt',
     'sub',
     'sum',
+    't',
     'tan',
     'tanh',
     'transpose',
@@ -2058,9 +2059,6 @@ known_failures = [
 
 # If your OpInfo test causes this test to fail, add it here
 skip_ops = [
-    # Causing SIGSEGV
-    # Reference: https://github.com/pytorch/pytorch/pull/59442/checks?check_run_id=2746156896
-    't',
     'conj'
 ]
 
