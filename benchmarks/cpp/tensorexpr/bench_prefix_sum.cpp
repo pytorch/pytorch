@@ -144,16 +144,16 @@ class PrefixSumBench : public benchmark::Fixture {
   _mm512_alignr_epi32(x, _mm512_setzero_si512(), 16 - k)
 
   __m512i PrefixSum(__m512i x) {
-    x = _mm512_add_epi32(x, _mm512_slli_si512(x, 1));
-    x = _mm512_add_epi32(x, _mm512_slli_si512(x, 2));
-    x = _mm512_add_epi32(x, _mm512_slli_si512(x, 4));
-    x = _mm512_add_epi32(x, _mm512_slli_si512(x, 8));
+    x = _mm512_add_ps(x, _mm512_slli_si512(x, 1));
+    x = _mm512_add_ps(x, _mm512_slli_si512(x, 2));
+    x = _mm512_add_ps(x, _mm512_slli_si512(x, 4));
+    x = _mm512_add_ps(x, _mm512_slli_si512(x, 8));
     return x; // local prefix sums
   }
 
   template <int index>
-  int _mm512_extract_epi32(__m512i target) {
-    return _mm512_cvtsi512_si32(_mm512_alignr_epi32(target, target, index));
+  float _mm512_extract_f32(__m512i target) {
+    return _mm512_cvtss_f32(_mm512_alignr_epi32(target, target, index));
   }
 
   void runLocalAVX512(benchmark::State& state) {
@@ -163,12 +163,12 @@ class PrefixSumBench : public benchmark::Fixture {
       auto output_data = output_.data_ptr<float>();
 
       __m512i acc = _mm512_setzero_si512();
-      int32_t carry = 0;
+      float carry = 0.0f;
       for (int i = 0; i < input_size_ / 16; i++) {
         __m512i x = reinterpret_cast<__m512i*>(input_data)[i];
         x = PrefixSum(x);
-        x += _mm512_set1_epi32(carry);
-        carry = _mm512_extract_epi32<15>(x);
+        x = _mm512_add_ps(x, _mm512_set1_ps(carry));
+        carry = _mm512_extract_f32<15>(x);
         reinterpret_cast<__m512i*>(output_data)[i] = x;
       }
     }
