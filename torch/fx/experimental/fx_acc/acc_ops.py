@@ -28,12 +28,13 @@ def linear(*, input, weight, bias):
 @register_acc_op
 def quantized_linear(*, input, weight, bias, acc_out_ty=None):
     assert acc_out_ty is not None
+    qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams"),
     return nn.quantized.functional.linear(
         input,
         weight,
         bias,
-        acc_utils.get_field_from_acc_out_ty(acc_out_ty, "q_scale"),
-        acc_utils.get_field_from_acc_out_ty(acc_out_ty, "q_zero_point"),
+        qparams["scale"],
+        qparams["zero_point"],
     )
 
 
@@ -412,6 +413,18 @@ def dropout_mapper(node: torch.fx.Node, mod: nn.Module):
     Remove dropout node and directly map its input to output.
     """
     return node.kwargs["input"]
+
+@register_acc_op_mapping(
+    op_and_target=("call_function", nn.functional.hardtanh),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        ("min_val", "left"),
+        ("max_val", "right"),
+    ],
+)
+@register_acc_op
+def hardtanh(*, input, left, right):
+    return nn.functional.hardtanh(input, min_val=left, max_val=right)
 
 @register_acc_op_mapping(
     op_and_target=("call_function", nn.functional.hardsigmoid))
@@ -841,6 +854,7 @@ def quantized_conv2d(
     acc_out_ty=None,
 ):
     assert acc_out_ty is not None
+    qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
     return torch.nn.quantized.functional.conv2d(
         input,
         weight,
@@ -850,8 +864,8 @@ def quantized_conv2d(
         dilation,
         groups,
         padding_mode,
-        acc_utils.get_field_from_acc_out_ty(acc_out_ty, "q_scale"),
-        acc_utils.get_field_from_acc_out_ty(acc_out_ty, "q_zero_point"),
+        qparams["scale"],
+        qparams["zero_point"],
     )
 
 

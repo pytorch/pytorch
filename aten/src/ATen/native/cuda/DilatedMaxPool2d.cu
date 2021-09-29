@@ -1,16 +1,15 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/ceil_div.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/Pool.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <THC/THCNumerics.cuh>
 #include <c10/macros/Macros.h>
 #include <ATen/native/cuda/LaunchUtils.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 
 namespace at {
 namespace native {
@@ -361,18 +360,18 @@ const Tensor& indices) {
               maxThreadsDim[0], std::min<int>(lastPow2(nInputPlane), max_threads / block_y / block_z));
           const dim3 block(block_x, block_y, block_z);
 
-          int kernel_stride_C = cuda::ATenCeilDiv(
+          int kernel_stride_C = ceil_div(
               safe_downcast<int, int64_t>(nInputPlane), block_x * 4);
-          int kernel_size_C = cuda::ATenCeilDiv(
+          int kernel_size_C = ceil_div(
               safe_downcast<int, int64_t>(nInputPlane), block_x * kernel_stride_C);
 
           int grid_x = nbatch*kernel_stride_C;
           int grid_y = std::min<int>(
               at::cuda::getCurrentDeviceProperties()->maxGridSize[1],
-              cuda::ATenCeilDiv(safe_downcast<int, int64_t>(outputWidth), block_y*BLOCK_STRIDE));
+              ceil_div(safe_downcast<int, int64_t>(outputWidth), block_y*BLOCK_STRIDE));
           int grid_z = std::min<int>(
               at::cuda::getCurrentDeviceProperties()->maxGridSize[2],
-              cuda::ATenCeilDiv(safe_downcast<int, int64_t>(outputHeight), block_z*BLOCK_STRIDE));
+              ceil_div(safe_downcast<int, int64_t>(outputHeight), block_z*BLOCK_STRIDE));
           const dim3 grid(grid_x, grid_y, grid_z);
 
           size_t shmem_size = (kernel_size_C * block_x*block_y*block_z) * (sizeof(int) + sizeof(scalar_t));
@@ -394,7 +393,7 @@ const Tensor& indices) {
           const int num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock,
                                             BLOCK_THREADS);
           max_pool_forward_nchw<scalar_t, scalar_t>
-              <<<cuda::ATenCeilDiv(count, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+              <<<ceil_div(count, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
               count, input_data,
                   nbatch, nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
                   kH, kW, dH, dW, padH, padW, dilationH, dilationW,
@@ -494,18 +493,18 @@ const Tensor& gradInput) {
               maxThreadsDim[0], std::min<int>(lastPow2(nInputPlane), max_threads / block_y / block_z));
           const dim3 block(block_x, block_y, block_z);
 
-          int kernel_stride_C = cuda::ATenCeilDiv(
+          int kernel_stride_C = ceil_div(
               safe_downcast<int, int64_t>(nInputPlane), block_x * 4);
-          int kernel_size_C = cuda::ATenCeilDiv(
+          int kernel_size_C = ceil_div(
               safe_downcast<int, int64_t>(nInputPlane), block_x * kernel_stride_C);
 
           int grid_x = nbatch*kernel_stride_C;
           int grid_y = std::min<int>(
               at::cuda::getCurrentDeviceProperties()->maxGridSize[1],
-              cuda::ATenCeilDiv(safe_downcast<int, int64_t>(inputWidth), block_y*BLOCK_STRIDE));
+              ceil_div(safe_downcast<int, int64_t>(inputWidth), block_y*BLOCK_STRIDE));
           int grid_z = std::min<int>(
               at::cuda::getCurrentDeviceProperties()->maxGridSize[2],
-              cuda::ATenCeilDiv(safe_downcast<int, int64_t>(inputHeight), block_z*BLOCK_STRIDE));
+              ceil_div(safe_downcast<int, int64_t>(inputHeight), block_z*BLOCK_STRIDE));
           const dim3 grid(grid_x, grid_y, grid_z);
 
           size_t shmem_size = (kernel_size_C * block_x*block_y*block_z) * sizeof(accscalar_t);
