@@ -211,9 +211,9 @@ def tvm_compile(fx_module, example_inputs, name = None):
 def tvm_function(fn, name):
     return compiled_function(fn, partial(tvm_compile, name=f'fw_{name}'), partial(tvm_compile, name=f'bw_{name}'))
 
-def compiled_module(mod, fw_compiler, bw_compiler):
+def compiled_module(mod, fw_compiler, bw_compiler, partition_fn=default_partition):
     func_mod, params = make_functional(mod)
-    compiled_f = compiled_function(func_mod, fw_compiler, bw_compiler)
+    compiled_f = compiled_function(func_mod, fw_compiler, bw_compiler, partition_fn)
     class CompiledModule(nn.Module):
         def __init__(self):
             super(CompiledModule, self).__init__()
