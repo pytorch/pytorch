@@ -142,6 +142,7 @@ class autocast(object):
     def __init__(self, device_type : str, dtype : Optional[_dtype] = None, enabled : bool = True, cache_enabled : Optional[bool] = None):
         if torch._jit_internal.is_scripting():
             self._enabled = enabled
+            self.device = device_type
             return
 
         self.device = device_type

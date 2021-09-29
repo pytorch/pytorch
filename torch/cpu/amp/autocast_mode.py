@@ -9,6 +9,7 @@ class autocast(torch.autocast_mode.autocast):
     def __init__(self, enabled : bool = True, dtype : torch.dtype = torch.bfloat16, cache_enabled : bool = True):
         if torch._jit_internal.is_scripting():
             self._enabled = enabled
+            self.device = "cpu"
             return
         super().__init__("cpu", enabled=enabled, dtype=dtype, cache_enabled=cache_enabled)
 
