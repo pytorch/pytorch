@@ -41,7 +41,6 @@ CPU_RUNNERS = {
 
 LABEL_CIFLOW_ALL = "ciflow/all"
 LABEL_CIFLOW_BAZEL = "ciflow/bazel"
-LABEL_CIFLOW_COVERAGE = "ciflow/coverage"
 LABEL_CIFLOW_CPU = "ciflow/cpu"
 LABEL_CIFLOW_CUDA = "ciflow/cuda"
 LABEL_CIFLOW_DEFAULT = "ciflow/default"
@@ -52,6 +51,7 @@ LABEL_CIFLOW_SLOW = "ciflow/slow"
 LABEL_CIFLOW_WIN = "ciflow/win"
 LABEL_CIFLOW_XLA = "ciflow/xla"
 LABEL_CIFLOW_NOARCH = "ciflow/noarch"
+LABEL_CIFLOW_PREFIX = "ciflow/"
 
 
 @dataclass
@@ -64,6 +64,7 @@ class CIFlowConfig:
     trigger_actor: str = 'pytorchbot'
     root_job_name: str = 'ciflow_should_run'
     root_job_condition: str = ''
+    label_conditions: str = ''
 
     # trigger_action_only controls if we listen only on the trigger_action of a pull_request.
     # If it's False, we listen on all default pull_request actions, this is useful when
@@ -71,20 +72,25 @@ class CIFlowConfig:
     trigger_action_only: bool = False
 
     def gen_root_job_condition(self) -> None:
-        # TODO: Make conditions strict
-        # At the beginning of the rollout of ciflow, we keep everything the same as what we have
-        # Once fully rollout, we can have strict constraints
-        # e.g. ADD      env.GITHUB_ACTOR == '{self.trigger_actor}
-        #      REMOVE   github.event.action !='{self.trigger_action}'
-        label_conditions = [
-            f"contains(github.event.pull_request.labels.*.name, '{label}')" for label in sorted(self.labels)]
-        if self.run_on_canary:
-            self.root_job_condition = "(github.repository_owner == 'pytorch') && "
+        # CIFlow conditions:
+        #  - Workflow should always run on push
+        #  - CIFLOW_DEFAULT workflows should run on PRs even if no `ciflow/` labels on PR
+        #  - Otherwise workflow should be scheduled on all qualifying events
+        label_conditions = [f"contains(github.event.pull_request.labels.*.name, '{label}')" for label in sorted(self.labels)]
+        self.label_conditions = ' || '.join(label_conditions)
+        repo_condition = "github.repository_owner == 'pytorch'" if self.run_on_canary else "github.repository == 'pytorch/pytorch'"
+        push_event = "github.event_name == 'push'"
+        pr_updated_event = f"github.event_name == 'pull_request' && github.event.action != '{self.trigger_action}'"
+        if LABEL_CIFLOW_DEFAULT in self.labels:
+            run_with_no_labels = f"({pr_updated_event}) && " \
+                                 f"!contains(join(github.event.pull_request.labels.*.name), '{LABEL_CIFLOW_PREFIX}')"
         else:
-            self.root_job_condition = "(github.repository == 'pytorch/pytorch') && "
-        self.root_job_condition += f"((github.event_name != 'pull_request') || " \
-            f"(github.event.action !='{self.trigger_action}') || " \
-            f"({' || '.join(label_conditions)}))"
+            run_with_no_labels = "false"
+        self.root_job_condition = f"${{{{ ({repo_condition}) && (\n" \
+                                  f"            ({push_event}) ||\n" \
+                                  f"            ({self.label_conditions}) ||\n" \
+                                  f"            ({run_with_no_labels}))\n"\
+                                  f"         }}}}"
 
     def reset_root_job(self) -> None:
         self.root_job_name = ''
@@ -95,6 +101,7 @@ class CIFlowConfig:
             self.reset_root_job()
             return
         self.labels.add(LABEL_CIFLOW_ALL)
+        assert all(label.startswith(LABEL_CIFLOW_PREFIX) for label in self.labels)
         self.gen_root_job_condition()
 
 
@@ -139,7 +146,6 @@ class CIWorkflow:
     docker_image_base: str = ''
     enable_doc_jobs: bool = False
     exclude_test: bool = False
-    is_coverage: bool = False
     is_libtorch: bool = False
     is_scheduled: str = ''
     num_test_shards: int = 1
@@ -161,6 +167,7 @@ class CIWorkflow:
     enable_backwards_compat_test: YamlShellBool = "''"
     enable_xla_test: YamlShellBool = "''"
     enable_noarch_test: YamlShellBool = "''"
+    enable_force_on_cpu_test: YamlShellBool = "''"
 
     def __post_init__(self) -> None:
         if self.is_libtorch:
@@ -194,7 +201,7 @@ class CIWorkflow:
             assert self.ciflow_config.trigger_action_only != (LABEL_CIFLOW_DEFAULT in self.ciflow_config.labels)
             assert self.on_pull_request
             assert LABEL_CIFLOW_ALL in self.ciflow_config.labels
-            assert LABEL_CIFLOW_ALL in self.ciflow_config.root_job_condition
+            assert LABEL_CIFLOW_ALL in self.ciflow_config.label_conditions
             if self.arch == 'linux':
                 assert LABEL_CIFLOW_LINUX in self.ciflow_config.labels
             if self.arch == 'windows':
@@ -241,6 +248,7 @@ WINDOWS_WORKFLOWS = [
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
         on_pull_request=True,
         num_test_shards=2,
+        enable_force_on_cpu_test=1,
         ciflow_config=CIFlowConfig(
             enabled=True,
             trigger_action_only=True,
@@ -455,19 +463,6 @@ LINUX_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="linux",
-        build_environment="linux-bionic-py3.8-gcc9-coverage",
-        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.8-gcc9",
-        test_runner_type=LINUX_CPU_TEST_RUNNER,
-        on_pull_request=True,
-        is_coverage=True,
-        num_test_shards=2,
-        ciflow_config=CIFlowConfig(
-            enabled=True,
-            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_COVERAGE, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU},
-        ),
-    ),
-    CIWorkflow(
-        arch="linux",
         build_environment="linux-bionic-py3.6-clang9",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.6-clang9",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
@@ -551,7 +546,8 @@ BAZEL_WORKFLOWS = [
     ),
 ]
 
-if __name__ == "__main__":
+
+def main() -> None:
     jinja_env = jinja2.Environment(
         variable_start_string="!{{",
         loader=jinja2.FileSystemLoader(str(GITHUB_DIR.joinpath("templates"))),
@@ -584,3 +580,7 @@ if __name__ == "__main__":
                 # During the rollout phase, it has the same effect as LABEL_CIFLOW_DEFAULT
                 ciflow_ruleset.add_label_rule({LABEL_CIFLOW_DEFAULT}, workflow.build_environment)
     ciflow_ruleset.generate_json()
+
+
+if __name__ == "__main__":
+    main()

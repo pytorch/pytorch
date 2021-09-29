@@ -6,7 +6,6 @@
       "libtorch-linux-xenial-cuda11.3-py3.6-gcc7",
       "linux-bionic-cuda10.2-py3.9-gcc7",
       "linux-bionic-py3.6-clang9",
-      "linux-bionic-py3.8-gcc9-coverage",
       "linux-xenial-cuda10.2-py3.6-gcc7",
       "linux-xenial-cuda11.3-py3.6-gcc7",
       "linux-xenial-py3.6-gcc5.4",
@@ -23,12 +22,8 @@
     "ciflow/bazel": [
       "linux-xenial-py3.6-gcc7-bazel-test"
     ],
-    "ciflow/coverage": [
-      "linux-bionic-py3.8-gcc9-coverage"
-    ],
     "ciflow/cpu": [
       "linux-bionic-py3.6-clang9",
-      "linux-bionic-py3.8-gcc9-coverage",
       "linux-xenial-py3.6-gcc5.4",
       "linux-xenial-py3.6-gcc7-bazel-test",
       "parallelnative-linux-xenial-py3.6-gcc5.4",
@@ -49,7 +44,6 @@
     ],
     "ciflow/default": [
       "linux-bionic-py3.6-clang9",
-      "linux-bionic-py3.8-gcc9-coverage",
       "linux-xenial-cuda11.3-py3.6-gcc7",
       "linux-xenial-py3.6-gcc5.4",
       "linux-xenial-py3.6-gcc7-bazel-test",
@@ -66,7 +60,6 @@
       "libtorch-linux-xenial-cuda11.3-py3.6-gcc7",
       "linux-bionic-cuda10.2-py3.9-gcc7",
       "linux-bionic-py3.6-clang9",
-      "linux-bionic-py3.8-gcc9-coverage",
       "linux-xenial-cuda10.2-py3.6-gcc7",
       "linux-xenial-cuda11.3-py3.6-gcc7",
       "linux-xenial-py3.6-gcc5.4",

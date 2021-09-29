@@ -387,6 +387,10 @@ class Module:
             raise KeyError("module name can't be empty string \"\"")
         self._modules[name] = module
 
+    def register_module(self, name: str, module: Optional['Module']) -> None:
+        r"""Alias for :func:`add_module`."""
+        self.add_module(name, module)
+
     def get_submodule(self, target: str) -> "Module":
         """
         Returns the submodule given by ``target`` if it exists,
