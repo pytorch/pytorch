@@ -12,7 +12,7 @@ namespace ops {
 Unselect::Unselect(const Value& target, const Value& source,
                    lazy_tensors::int64 dim, lazy_tensors::int64 start,
                    lazy_tensors::int64 end, lazy_tensors::int64 stride)
-    : TsNode(ltc_unselect, {target, source}, target.shape(),
+    : TsNode(ltc_unselect, {target, source}, GetShapeFromTsValue(target),
            /*num_outputs=*/1,
            torch::lazy::MHash(dim, start, end, stride)),
       dim_(dim),

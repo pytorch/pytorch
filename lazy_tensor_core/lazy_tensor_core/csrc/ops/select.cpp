@@ -12,7 +12,7 @@ Select::Select(const Value& input, lazy_tensors::int64 dim,
                lazy_tensors::int64 stride)
     : TsNode(ltc_select, {input},
            [&]() {
-             return MakeSelectShape(input.shape(), dim, start, end, stride);
+             return MakeSelectShape(GetShapeFromTsValue(input), dim, start, end, stride);
            },
            /*num_outputs=*/1,
            torch::lazy::MHash(dim, start, end, stride)),

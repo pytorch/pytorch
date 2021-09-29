@@ -9,7 +9,7 @@ namespace ops {
 
 MaskedFill::MaskedFill(const Value& input, const Value& mask,
                        const at::Scalar& value)
-    : TsNode(OpKind(at::aten::masked_fill), {input, mask}, input.shape(),
+    : TsNode(OpKind(at::aten::masked_fill), {input, mask}, GetShapeFromTsValue(input),
            /*num_outputs=*/1, ScalarHash(value)),
       value_(std::move(value)) {}
 

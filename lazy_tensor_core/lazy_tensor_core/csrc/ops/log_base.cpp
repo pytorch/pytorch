@@ -6,7 +6,7 @@ namespace ir {
 namespace ops {
 
 LogBase::LogBase(const Value& input, ir::OpKind kind, double base)
-    : TsNode(kind, {input}, input.shape(),
+    : TsNode(kind, {input}, GetShapeFromTsValue(input),
            /*num_outputs=*/1, torch::lazy::MHash(base)),
       base_(base) {}
 

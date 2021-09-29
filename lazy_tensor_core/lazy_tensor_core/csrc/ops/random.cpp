@@ -11,7 +11,7 @@ namespace ops {
 // be "aten::random_" here.
 Random::Random(const Value& input)
     : TsNode(ir::OpKind(c10::Symbol::fromQualString("aten::random_")),
-        {input}, input.shape()) {}
+        {input}, GetShapeFromTsValue(input)) {}
 
 NodePtr Random::Clone(OpList operands) const {
   return MakeNode<Random>(operands.at(0));

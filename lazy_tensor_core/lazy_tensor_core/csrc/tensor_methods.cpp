@@ -144,7 +144,7 @@ struct MinMaxValues {
 
 ir::Value MaybeExpand(const ir::Value& input,
                       const lazy_tensors::Shape& target_shape) {
-  if (input.shape().dimensions() == target_shape.dimensions()) {
+  if (GetShapeFromTsValue(input).dimensions() == target_shape.dimensions()) {
     return input;
   }
   return ir::MakeNode<ir::ops::Expand>(
@@ -266,7 +266,7 @@ ir::Value GetFloatingIrValue(const LazyTensor& input,
                              at::ScalarType float_type) {
   ir::Value input_value = input.GetIrValue();
   if (!lazy_tensors::primitive_util::IsFloatingPointType(
-          input_value.shape().element_type())) {
+          GetShapeFromTsValue(input_value).element_type())) {
     input_value = ir::MakeNode<ir::ops::Cast>(input_value, float_type);
   }
   return input_value;
@@ -1004,7 +1004,7 @@ LazyTensor LazyTensor::div(const LazyTensor& input, const LazyTensor& other,
     if (logical_element_type.has_value()) {
       lazy_tensors::PrimitiveType res_intended_type =
           MakeLtcPrimitiveType(*logical_element_type, &input.GetDevice());
-      if (res.shape().element_type() != res_intended_type) {
+      if (GetShapeFromTsValue(res).element_type() != res_intended_type) {
         res = ir::MakeNode<ir::ops::Cast>(res, res_intended_type);
       }
     }
@@ -1021,7 +1021,7 @@ LazyTensor LazyTensor::div(const LazyTensor& input, const at::Scalar& other) {
       at::typeMetaToScalarType(c10::get_default_dtype());
   ir::Value input_value = GetFloatingIrValue(input, scalar_type);
   ir::Value other_value = GetIrValueForScalar(
-      other, input_value.shape().element_type(), input.GetDevice());
+      other, GetShapeFromTsValue(input_value).element_type(), input.GetDevice());
   return input.CreateFrom(input_value / other_value, scalar_type);
 }
 

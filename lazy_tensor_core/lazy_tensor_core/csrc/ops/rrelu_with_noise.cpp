@@ -13,7 +13,7 @@ RreluWithNoise::RreluWithNoise(const Value& input, const Value& seed,
                                bool training)
     : TsNode(ir::OpKind(at::aten::rrelu_with_noise), {input, seed},
            lazy_tensors::ShapeUtil::MakeTupleShape(
-               {input.shape(), input.shape()}),
+               {GetShapeFromTsValue(input), GetShapeFromTsValue(input)}),
            /*num_outputs=*/2,
            torch::lazy::MHash(ScalarHash(lower), ScalarHash(upper),
                                      training)),

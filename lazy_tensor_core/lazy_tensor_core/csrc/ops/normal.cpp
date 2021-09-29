@@ -6,7 +6,7 @@ namespace ir {
 namespace ops {
 
 Normal::Normal(const Value& mean, const Value& std, const Value& seed)
-    : TsNode(ir::OpKind(at::aten::normal), {mean, std, seed}, mean.shape()) {}
+    : TsNode(ir::OpKind(at::aten::normal), {mean, std, seed}, GetShapeFromTsValue(mean)) {}
 
 NodePtr Normal::Clone(OpList operands) const {
   return MakeNode<Normal>(operands.at(0), operands.at(1), operands.at(2));

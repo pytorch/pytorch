@@ -522,7 +522,8 @@ lazy_tensors::util::MaybeRef<lazy_tensors::Shape> LazyTensor::shape() const {
     return lazy_tensors::Shape(data()->handle->shape());
   }
   if (data()->ir_value) {
-    return data()->ir_value.shape();
+    // TODO(whc) remove shape from LazyTensor API too!
+    return GetShapeFromTsValue(data()->ir_value);
   }
   LTC_CHECK(data()->tensor_data);
   const Device& device = GetDevice();
@@ -637,7 +638,7 @@ void LazyTensor::SetIrValue(ir::Value ir_value) {
 
 void LazyTensor::SetInPlaceIrValue(ir::Value ir_value) {
   auto tensor_shape = shape();
-  if (tensor_shape.get().element_type() != ir_value.shape().element_type()) {
+  if (tensor_shape.get().element_type() != GetShapeFromTsValue(ir_value).element_type()) {
     ir_value = ir::MakeNode<ir::ops::Cast>(ir_value,
                                            tensor_shape.get().element_type());
   }
@@ -790,13 +791,13 @@ View::IrNode LazyTensor::GetViewUpdate(
 
 std::shared_ptr<View> LazyTensor::UpdateView(std::shared_ptr<View> view,
                                              ir::Value ir_value) const {
-  if (ir_value.shape().dimensions() != view->shape().dimensions()) {
+  if (GetShapeFromTsValue(ir_value).dimensions() != view->shape().dimensions()) {
     LTC_CHECK_EQ(lazy_tensors::util::Multiply<lazy_tensors::int64>(
-                     ir_value.shape().dimensions()),
+                     GetShapeFromTsValue(ir_value).dimensions()),
                  lazy_tensors::util::Multiply<lazy_tensors::int64>(
                      view->shape().dimensions()));
 
-    ViewInfo view_info(ViewInfo::Type::kReshape, ir_value.shape(),
+    ViewInfo view_info(ViewInfo::Type::kReshape, GetShapeFromTsValue(ir_value),
                        view->shape());
     view = view->CreateSubView(view_info.shape, view_info);
   }
@@ -819,7 +820,7 @@ void LazyTensor::ModifyCurrentView(ViewInfo view_info) const {
   ir::Value ir_value = GetIrValue();
   std::shared_ptr<Alias> alias = std::make_shared<Alias>(ir_value);
   data()->view =
-      std::make_shared<View>(ir_value.shape(), alias, std::move(view_info));
+      std::make_shared<View>(GetShapeFromTsValue(ir_value), alias, std::move(view_info));
   AssignIrValue(ir::Value());
 }
 
@@ -832,9 +833,9 @@ std::shared_ptr<View> LazyTensor::CreateView(ViewInfo view_info) const {
   // Node, and using the same alias for the created IR Node.
   ir::Value ir_value = GetIrValue();
   std::shared_ptr<Alias> alias = std::make_shared<Alias>(ir_value);
-  ViewInfo this_view_info(ViewInfo::Type::kNoOp, ir_value.shape(),
-                          ir_value.shape());
-  data()->view = std::make_shared<View>(ir_value.shape(), alias,
+  ViewInfo this_view_info(ViewInfo::Type::kNoOp, GetShapeFromTsValue(ir_value),
+                          GetShapeFromTsValue(ir_value));
+  data()->view = std::make_shared<View>(GetShapeFromTsValue(ir_value), alias,
                                         std::move(this_view_info));
   AssignIrValue(ir::Value());
   return std::make_shared<View>(view_info.shape, alias, view_info);

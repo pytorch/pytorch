@@ -7,7 +7,7 @@ namespace ir {
 namespace ops {
 
 Hardshrink::Hardshrink(const Value& input, const at::Scalar& lambda)
-    : TsNode(OpKind(at::aten::hardshrink), {input}, input.shape(),
+    : TsNode(OpKind(at::aten::hardshrink), {input}, GetShapeFromTsValue(input),
            /*num_outputs=*/1, ScalarHash(lambda)),
       lambda_(std::move(lambda)) {}
 

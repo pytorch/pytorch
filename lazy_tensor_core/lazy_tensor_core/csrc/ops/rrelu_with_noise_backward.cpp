@@ -11,7 +11,7 @@ RreluWithNoiseBackward::RreluWithNoiseBackward(
     const Value& grad_output, const Value& input, const Value& noise,
     const at::Scalar& lower, const at::Scalar& upper, bool training)
     : TsNode(ir::OpKind(at::aten::rrelu_with_noise_backward),
-           {grad_output, input, noise}, input.shape(),
+           {grad_output, input, noise}, GetShapeFromTsValue(input),
            /*num_outputs=*/1,
            torch::lazy::MHash(ScalarHash(lower), ScalarHash(upper),
                                      training)),

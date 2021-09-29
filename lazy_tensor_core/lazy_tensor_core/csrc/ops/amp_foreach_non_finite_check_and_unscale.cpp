@@ -16,10 +16,10 @@ lazy_tensors::Shape NodeOutputShape(const OpList& inputs,
   std::vector<lazy_tensors::Shape> output_shapes;
   output_shapes.reserve(inputs.size() + 1);
   for (size_t i = 0; i < inputs.size(); ++i) {
-    const lazy_tensors::Shape& input_shape = inputs[i].shape();
+    const lazy_tensors::Shape& input_shape = GetShapeFromTsValue(inputs[i]);
     output_shapes.push_back(input_shape);
   }
-  output_shapes.push_back(found_inf.shape());
+  output_shapes.push_back(GetShapeFromTsValue(found_inf));
   return lazy_tensors::ShapeUtil::MakeTupleShape(output_shapes);
 }
 

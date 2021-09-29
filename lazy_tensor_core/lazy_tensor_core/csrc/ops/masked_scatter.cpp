@@ -8,7 +8,7 @@ namespace ops {
 MaskedScatter::MaskedScatter(const Value& input, const Value& mask,
                              const Value& source)
     : TsNode(ir::OpKind(at::aten::masked_scatter), {input, mask, source},
-           input.shape(),
+           GetShapeFromTsValue(input),
            /*num_outputs=*/1) {}
 
 NodePtr MaskedScatter::Clone(OpList operands) const {

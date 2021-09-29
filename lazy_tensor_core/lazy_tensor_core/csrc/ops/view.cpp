@@ -13,7 +13,7 @@ namespace {
 lazy_tensors::Shape NodeOutputShape(
     const Value& input,
     lazy_tensors::Span<const lazy_tensors::int64> output_sizes) {
-  const lazy_tensors::Shape& input_shape = input.shape();
+  const lazy_tensors::Shape& input_shape = GetShapeFromTsValue(input);
   auto info = Helpers::GetDynamicReshapeInfo(input_shape, output_sizes);
   if (info) {
     return std::move(info->output_shape);

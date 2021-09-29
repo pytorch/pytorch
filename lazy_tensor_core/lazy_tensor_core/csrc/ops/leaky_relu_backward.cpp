@@ -9,7 +9,7 @@ LeakyReluBackward::LeakyReluBackward(const Value& grad_output,
                                      const Value& input, double negative_slope,
                                      bool self_is_result)
     : TsNode(ir::OpKind(at::aten::leaky_relu_backward), {grad_output, input},
-           input.shape(),
+           GetShapeFromTsValue(input),
            /*num_outputs=*/1, torch::lazy::MHash(negative_slope)),
       negative_slope_(negative_slope),
       self_is_result_(self_is_result) {}

@@ -14,7 +14,7 @@ Diagonal::Diagonal(const Value& input, lazy_tensors::int64 offset,
                    lazy_tensors::int64 dim1, lazy_tensors::int64 dim2)
     : TsNode(ir::OpKind(at::aten::diagonal), {input},
            [&]() {
-             return MakeDiagonalShape(input.shape(), offset, dim1, dim2);
+             return MakeDiagonalShape(GetShapeFromTsValue(input), offset, dim1, dim2);
            },
            /*num_outputs=*/1, torch::lazy::MHash(offset, dim1, dim2)),
       offset_(offset),

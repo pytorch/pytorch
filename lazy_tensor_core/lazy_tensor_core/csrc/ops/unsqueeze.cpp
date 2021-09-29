@@ -10,7 +10,7 @@ namespace ops {
 namespace {
 
 lazy_tensors::Shape NodeOutputShape(const Value& input, int dim) {
-  const lazy_tensors::Shape& shape = input.shape();
+  const lazy_tensors::Shape& shape = GetShapeFromTsValue(input);
   auto dimensions = BuildUnsqueezeDimensions(shape.dimensions(), dim);
   return lazy_tensors::ShapeUtil::MakeShape(shape.element_type(), dimensions);
 }

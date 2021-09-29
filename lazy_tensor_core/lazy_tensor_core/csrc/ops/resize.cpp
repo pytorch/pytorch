@@ -11,7 +11,7 @@ namespace {
 
 lazy_tensors::Shape NodeOutputShape(
     const Value& input, lazy_tensors::Span<const lazy_tensors::int64> size) {
-  return lazy_tensors::ShapeUtil::MakeShape(input.shape().element_type(), size);
+  return lazy_tensors::ShapeUtil::MakeShape(GetShapeFromTsValue(input).element_type(), size);
 }
 
 }  // namespace

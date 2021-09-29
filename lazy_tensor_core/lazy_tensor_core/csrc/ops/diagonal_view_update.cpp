@@ -11,7 +11,7 @@ DiagonalViewUpdate::DiagonalViewUpdate(const Value& target, const Value& input,
                                        lazy_tensors::int64 offset,
                                        lazy_tensors::int64 dim1,
                                        lazy_tensors::int64 dim2)
-    : TsNode(ltc_diagonal_view_update, {target, input}, target.shape(),
+    : TsNode(ltc_diagonal_view_update, {target, input}, GetShapeFromTsValue(target),
            /*num_outputs=*/1, torch::lazy::MHash(offset, dim1, dim2)),
       offset_(offset),
       dim1_(dim1),

@@ -12,7 +12,7 @@ namespace {
 lazy_tensors::Shape NodeOutputShape(const Value& growth_tracker,
                                     const Value& current_scale) {
   return lazy_tensors::ShapeUtil::MakeTupleShape(
-      {growth_tracker.shape(), current_scale.shape()});
+      {GetShapeFromTsValue(growth_tracker), GetShapeFromTsValue(current_scale)});
 }
 
 }  // namespace

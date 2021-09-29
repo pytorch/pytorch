@@ -13,7 +13,7 @@ namespace {
 
 lazy_tensors::Shape NodeOutputShape(const Value& input,
                                     lazy_tensors::PrimitiveType type) {
-  lazy_tensors::Shape shape = input.shape();
+  lazy_tensors::Shape shape = GetShapeFromTsValue(input);
   shape.set_element_type(type);
   return shape;
 }

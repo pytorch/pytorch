@@ -9,7 +9,7 @@ namespace ops {
 
 LinearInterpolation::LinearInterpolation(const Value& value,
                                          const Value& new_value, double alpha)
-    : TsNode(ltc_moving_average, {value, new_value}, value.shape(),
+    : TsNode(ltc_moving_average, {value, new_value}, GetShapeFromTsValue(value),
            /*num_outputs=*/1, torch::lazy::MHash(alpha)),
       alpha_(alpha) {}
 

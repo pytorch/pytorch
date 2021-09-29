@@ -7,7 +7,7 @@ namespace ops {
 
 Scatter::Scatter(const Value& input, const Value& index, const Value& src,
                  lazy_tensors::int64 dim)
-    : TsNode(ir::OpKind(at::aten::scatter), {input, index, src}, input.shape(),
+    : TsNode(ir::OpKind(at::aten::scatter), {input, index, src}, GetShapeFromTsValue(input),
            /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim) {}
 
