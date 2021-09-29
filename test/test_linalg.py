@@ -4971,8 +4971,10 @@ class TestLinalg(TestCase):
         def assertEqual(answer, expected):
             if x.dtype.is_floating_point or x.dtype.is_complex:
                 k = max(x.shape[-1], 1)  # Scale the atol with the size of the matrix
-                self.assertEqual(answer, expected, msg=f"{x.shape} x {y.shape} = {answer.shape}",
-                                                   atol=k * 5e-5, rtol=1e-4)
+                self.assertEqual(answer, expected,
+                                 msg=f"{x.shape} x {y.shape} = {answer.shape}",
+                                 atol=k * 5e-5,
+                                 rtol=1e-4)
             else:
                 self.assertEqual(answer, expected, msg=f"{x.shape} x {y.shape} = {answer.shape}")
 
@@ -5011,20 +5013,22 @@ class TestLinalg(TestCase):
         """
         assert x_dim >= 1
         assert y_dim >= 2
+        x = x_dim
         for y in range(1, y_dim + 1):
-            for by, mn in product(product(range(batch_size), repeat=max(y - 2, 0)),
-                                  product(range(matrix_size), repeat=min(y, 2))):
-                if x_dim == 1:
+            for batch, mn in product(product(range(batch_size), repeat=max(x - 2, y - 2, 0)),
+                                     product(range(matrix_size), repeat=min(y, 2))):
+                if x == 1:
                     size_x = mn[:1]
-                    size_y = by + mn
+                    size_y = batch + mn
                     yield size_x, size_y
                 else:
                     for k in range(matrix_size):
-                        if x_dim == 2:
-                            size_x = (k,) + mn[:1]
-                        else:
-                            size_x = by[-(x_dim - 2):] + (k,) + mn[:1]
-                        size_y = by + mn
+                        size_x = (k,) + mn[:1]
+                        if x > 2:
+                            size_x = batch[-(x - 2):] + size_x
+                        size_y = mn
+                        if y > 2:
+                            size_y = batch[-(y - 2):] + size_y
                         yield size_x, size_y
 
     @dtypesIfCUDA(torch.float, torch.complex64)  # Integer matmul just supported on CPU

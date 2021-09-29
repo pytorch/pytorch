@@ -1012,6 +1012,7 @@
 - name: mv(Tensor self, Tensor vec) -> Tensor
   self: grad.ger(vec.conj())
   vec: self.conj().t().mv(grad)
+  result: self_t.mv(vec_p) + self_p.mv(vec_t)
 
 - name: mvlgamma(Tensor self, int p) -> Tensor
   self: mvlgamma_backward(grad, self, p)
