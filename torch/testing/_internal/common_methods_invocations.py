@@ -5973,16 +5973,13 @@ def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):
     return op(input + input.conj().transpose(-2, -1), *args, **kwargs)
 
 
-def gradcheck_wrapper_triangular_input(op, *args, upper=False, idx=0, **kwargs):
+def gradcheck_wrapper_triangular_input(op, input, *args, upper=False, **kwargs):
     """Gradcheck wrpper for functions that take lower or upper triangular matrices as input.
 
     They require a modified function because the finite-difference algorithm
     for calculating derivatives does not preserve the triangular property of the input.
-    `idx` is used to specific which `args[idx]` is to be triangularized.
     """
-    triangular_arg = args[idx].triu() if upper else args[idx].tril()
-    modified_args = args[:idx] + (triangular_arg,) + args[idx + 1:]
-    return op(*modified_args, upper)
+    return op(input.triu() if upper else input.tril(), upper)
 
 
 def reference_reduction_numpy(f, supports_keepdims=True):
@@ -6260,8 +6257,6 @@ op_db: List[OpInfo] = [
                # FIXME: bfloat16 backward support likely depends on CUDA11+
                #   and SM53+
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', active_if=IS_WINDOWS),
-               # baddbmm does not correctly warn when resizing out= inputs
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
            ),
            sample_inputs_func=sample_inputs_baddbmm),
     OpInfo('dot',
@@ -6287,8 +6282,6 @@ op_db: List[OpInfo] = [
                # FIXME: bfloat16 backward support likely depends on CUDA11+
                #   and SM53+
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', active_if=IS_WINDOWS),
-               # bmm does not correctly warn when resizing out= inputs
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
            ),
            sample_inputs_func=sample_inputs_bmm),
     OpInfo('mv',
@@ -6528,14 +6521,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
                # cholesky_inverse does not correctly warn when resizing out= inputs
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),)),
-    OpInfo('cholesky_solve',
-           op=torch.cholesky_solve,
-           dtypes=floating_and_complex_types(),
-           sample_inputs_func=sample_inputs_legacy_solve,
-           check_batched_gradgrad=False,
-           supports_forward_ad=True,
-           gradcheck_wrapper=lambda *args, **kwargs: gradcheck_wrapper_triangular_input(*args, idx=1, **kwargs),
-           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
     OpInfo('chunk',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            sample_inputs_func=sample_inputs_chunk,
@@ -8584,8 +8569,6 @@ op_db: List[OpInfo] = [
            supports_out=False,
            sample_inputs_func=sample_inputs_legacy_solve,
            check_batched_gradgrad=False,
-           supports_forward_ad=True,
-           gradcheck_wrapper=lambda *args, **kwargs: gradcheck_wrapper_triangular_input(*args, idx=1, **kwargs),
            decorators=[skipCUDAIfNoMagma]),
     UnaryUfuncInfo('trunc',
                    aliases=('fix', ),
