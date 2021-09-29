@@ -6,6 +6,7 @@
 #include <fstream>
 #include <istream>
 #include <mutex>
+#include <optional>
 #include <ostream>
 #include <unordered_set>
 
@@ -151,6 +152,8 @@ class TORCH_API PyTorchStreamWriter final {
     return archive_name_;
   }
 
+  void skipWriteVersion();
+
   ~PyTorchStreamWriter();
 
  private:
@@ -164,7 +167,7 @@ class TORCH_API PyTorchStreamWriter final {
   std::string padding_;
   std::ofstream file_stream_;
   std::function<size_t(const void*, size_t)> writer_func_;
-  uint64_t version_ = kProducedFileFormatVersion;
+  std::optional<uint64_t> version_ = kProducedFileFormatVersion;
   bool finalized_ = false;
   bool err_seen_ = false;
   friend size_t ostream_write_func(
