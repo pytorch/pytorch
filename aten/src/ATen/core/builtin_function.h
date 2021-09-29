@@ -68,12 +68,6 @@ struct BuiltinOpFunction : public Function {
     // nop
   }
 
-  std::shared_ptr<Graph> graph() const override {
-    TORCH_INTERNAL_ASSERT(false , "BuiltinFunction had a graph requested "
-      "from it. This probably indicates that the JIT calling context needs a "
-      "special case on Function::isGraphFunction()");
-  }
-
   std::shared_ptr<Graph> optimized_graph() const override {
     TORCH_INTERNAL_ASSERT(false , "BuiltinFunction had a graph requested "
       "from it. This probably indicates that the JIT calling context needs a "

@@ -4,6 +4,7 @@
 #include <c10/util/StringUtil.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
+#include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
@@ -27,14 +28,14 @@ std::string getInputDebugName(const Node& n, const int idx) {
 }
 
 void assert_ignored_methods_not_called(
-    torch::jit::Function* fn,
+    torch::jit::Function& fn,
     const std::unordered_set<std::string>& ignored_methods) {
   if (ignored_methods.empty()) {
     return;
   }
   const bool recurse = true;
-  std::vector<Node*> all_nodes =
-      findAllNodes(*fn->graph().get(), c10::prim::CallMethod, recurse);
+  std::vector<Node*> all_nodes = findAllNodes(
+      *toGraphFunction(fn).graph(), c10::prim::CallMethod, recurse);
 
   // Extract method names from these nodes.
   std::unordered_set<std::string> encountered_ignored_methods;
@@ -56,14 +57,14 @@ void assert_ignored_methods_not_called(
   TORCH_CHECK(
       false,
       "Preserved method '",
-      fn->name(),
+      fn.name(),
       "' references ignored method(s) '",
       encountered_ignored_methods_str,
       "'. This is not permitted.");
 }
 
 void assert_ignored_attributes_not_referenced(
-    torch::jit::Function* fn,
+    torch::jit::Function& fn,
     const std::unordered_set<std::string>& ignored_attributes) {
   if (ignored_attributes.empty()) {
     return;
@@ -71,7 +72,7 @@ void assert_ignored_attributes_not_referenced(
 
   const bool recurse = true;
   std::vector<Node*> all_nodes =
-      findAllNodes(*fn->graph().get(), c10::prim::GetAttr, recurse);
+      findAllNodes(*toGraphFunction(fn).graph(), c10::prim::GetAttr, recurse);
 
   // Extract attribute names from these nodes.
   std::unordered_set<std::string> encountered_ignored_attributes;
@@ -93,7 +94,7 @@ void assert_ignored_attributes_not_referenced(
   TORCH_CHECK(
       false,
       "Preserved method '",
-      fn->name(),
+      fn.name(),
       "' references ignored attribute(s) '",
       encountered_ignored_attributes_str,
       "'. This is not permitted.");
@@ -282,7 +283,7 @@ void Module::clone_method(
       return in;
     return it->second;
   };
-  auto graph = method.graph()->copy();
+  auto graph = toGraphFunction(method).graph()->copy();
   graph->remapTypes(type_remap_fn);
   auto schema = method.getSchema().cloneWithRemappedTypes(type_remap_fn);
   const auto this_method_name = getNameForMethod(method.name());
@@ -411,8 +412,8 @@ Module Module::clone_impl(
     for (auto& fn : type()->methods()) {
       // If this method is not in the list of ignored methods, clone it.
       if (ignored_methods.count(fn->name()) == 0) {
-        assert_ignored_methods_not_called(fn, ignored_methods);
-        assert_ignored_attributes_not_referenced(fn, ignored_attributes);
+        assert_ignored_methods_not_called(*fn, ignored_methods);
+        assert_ignored_attributes_not_referenced(*fn, ignored_attributes);
         r.clone_method(*this, *fn, type_remap);
       }
     }

@@ -82,6 +82,7 @@ using namespace ::c10::cuda;
 } // namespace cuda
 
 struct Function;
+struct GraphFunction;
 struct MatchedSchema;
 
 // A Graph represents one "function" of computation.
@@ -1539,7 +1540,7 @@ TORCH_API std::vector<Value*> insertGraph(
  */
 TORCH_API std::vector<Value*> inlineCallTo(
     Node* to_replace,
-    Function* callee,
+    GraphFunction* callee,
     bool use_graph = true);
 
 /** If there is only one value in \p OUTPUTS and its kind is Tuple, insert a
