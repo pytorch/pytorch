@@ -5,8 +5,9 @@ from typing import List, Dict, Optional, Tuple
 import logging
 
 import torch
-from torch.fx.experimental.graph_manipulation import get_size_of_node
+from torch.fx.passes.graph_manipulation import get_size_of_node
 from torch.fx.node import map_arg
+from torch.fx._compatibility import compatibility
 
 from .operator_support import (
     get_node_target,
@@ -63,6 +64,7 @@ class _SplitterSettingBase:
 
 
 # TODO: this can probably be optimized
+@compatibility(is_backward_compatible=False)
 class FxNetAccNodesFinder:
     """
     Finds a set of nodes that can be supported on ACC, excluding nodes that have non-tensor
@@ -163,11 +165,11 @@ class FxNetAccNodesFinder:
 
         return self.acc_nodes
 
-
+@compatibility(is_backward_compatible=False)
 class FxNetSplitterInternalError(Exception):
     pass
 
-
+@compatibility(is_backward_compatible=False)
 @dataclass
 class Subgraph:
     is_acc: bool

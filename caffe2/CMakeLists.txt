@@ -47,6 +47,7 @@ elseif("${ATEN_THREADING}" STREQUAL "TBB")
   if(NOT USE_TBB)
     message(FATAL_ERROR "Using TBB backend but USE_TBB is off")
   endif()
+  message(WARNING "ATEN TBB Threading is deprectated.")
   set(AT_PARALLEL_NATIVE_TBB 1)
 else()
   message(FATAL_ERROR "Unknown ATen parallel backend: ${ATEN_THREADING}")
@@ -518,6 +519,22 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     endforeach()
   endif()
 
+  # Mobile backend delegate srcs
+  if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
+    set(DELEGATE_SRCS
+      ${TORCH_SRC_DIR}/csrc/jit/backends/backend_debug_info.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/backends/backend_interface.cpp
+    )
+    list(APPEND TORCH_SRCS ${DELEGATE_SRCS})
+    if(IOS AND USE_COREML_DELEGATE)
+      set(COREML_DELEGATE_SRCS
+        ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/objc/PTMCoreMLBackend.mm
+        ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/objc/PTMCoreMLExecutor.mm
+      )
+      list(APPEND TORCH_SRCS ${COREML_DELEGATE_SRCS})
+    endif()
+  endif()
+
   # Required workaround for LLVM 9 includes.
   if(NOT MSVC)
     set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp PROPERTIES COMPILE_FLAGS -Wno-noexcept-type)
@@ -541,6 +558,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
        ${TORCH_SRC_DIR}/csrc/jit/mobile/module.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/observer.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/parse_bytecode.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/parse_operators.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/train/export_data.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/train/optim/sgd.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/train/random.cpp
@@ -936,12 +954,15 @@ if(USE_CUDA OR USE_ROCM)
   # The list of NVFUSER runtime files
   list(APPEND NVFUSER_RUNTIME_FILES
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/block_reduction.cu
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/block_sync_atomic.cu
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/block_sync_default.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/broadcast.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/fp16_support.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/grid_reduction.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/helpers.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/random_numbers.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/tensor.cu
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/welford.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/detail/PhiloxCudaStateRaw.cuh
     ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/detail/UnpackRaw.cuh
   )
@@ -1664,6 +1685,10 @@ if(BUILD_TENSOREXPR_BENCHMARK)
   add_subdirectory(${TORCH_ROOT}/benchmarks/cpp/tensorexpr ${CMAKE_BINARY_DIR}/tensorexpr_bench)
 endif()
 
+if(BUILD_NVFUSER_BENCHMARK)
+  add_subdirectory(${TORCH_ROOT}/benchmarks/cpp/nvfuser ${CMAKE_BINARY_DIR}/nvfuser_bench)
+endif()
+
 if(BUILD_CPP_BENCHMARKS)
   add_subdirectory(${TORCH_ROOT}/benchmarks/cpp ${PROJECT_BINARY_DIR}/bin)
 endif()
@@ -1891,6 +1916,7 @@ if(BUILD_PYTHON)
   add_library(caffe2_pybind11_state MODULE ${Caffe2_CPU_PYTHON_SRCS})
   if(USE_NUMPY)
     target_compile_options(caffe2_pybind11_state PRIVATE "-DUSE_NUMPY")
+    target_link_libraries(caffe2_pybind11_state  PRIVATE numpy::numpy)
   endif()
   if(NOT MSVC)
     set_target_properties(caffe2_pybind11_state PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
@@ -1902,11 +1928,10 @@ if(BUILD_PYTHON)
   target_include_directories(caffe2_pybind11_state PRIVATE $<INSTALL_INTERFACE:include>)
   target_include_directories(caffe2_pybind11_state PRIVATE ${Caffe2_CPU_INCLUDE})
 
-  target_link_libraries(
-      caffe2_pybind11_state torch_library)
+  target_link_libraries(caffe2_pybind11_state PRIVATE
+      torch_library python::python pybind::pybind11)
   if(WIN32)
-    target_link_libraries(caffe2_pybind11_state ${PYTHON_LIBRARIES})
-    target_link_libraries(caffe2_pybind11_state onnx_proto)
+    target_link_libraries(caffe2_pybind11_state PRIVATE onnx_proto)
   endif(WIN32)
 
   # Install caffe2_pybind11_state(_gpu|hip) in site-packages/caffe2/python,
@@ -1924,6 +1949,7 @@ if(BUILD_PYTHON)
     add_library(caffe2_pybind11_state_gpu MODULE ${Caffe2_GPU_PYTHON_SRCS})
     if(USE_NUMPY)
       target_compile_options(caffe2_pybind11_state_gpu PRIVATE "-DUSE_NUMPY")
+      target_link_libraries(caffe2_pybind11_state_gpu PRIVATE numpy::numpy)
     endif()
     if(NOT MSVC)
       set_target_properties(caffe2_pybind11_state_gpu PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
@@ -1934,10 +1960,10 @@ if(BUILD_PYTHON)
     set_target_properties(caffe2_pybind11_state_gpu PROPERTIES LINK_FLAGS "${_caffe2_pybind11_state_linker_flags}")
     target_include_directories(caffe2_pybind11_state_gpu PRIVATE $<INSTALL_INTERFACE:include>)
     target_include_directories(caffe2_pybind11_state_gpu PRIVATE ${Caffe2_CPU_INCLUDE})
-    target_link_libraries(caffe2_pybind11_state_gpu torch_library)
+    target_link_libraries(caffe2_pybind11_state_gpu PRIVATE
+        torch_library python::python pybind::pybind11)
     if(WIN32)
-      target_link_libraries(caffe2_pybind11_state_gpu ${PYTHON_LIBRARIES})
-      target_link_libraries(caffe2_pybind11_state_gpu onnx_proto)
+      target_link_libraries(caffe2_pybind11_state_gpu PRIVATE onnx_proto)
     endif(WIN32)
 
     # Install with same rpath as non-gpu caffe2_pybind11_state
@@ -1955,6 +1981,7 @@ if(BUILD_PYTHON)
     add_library(caffe2_pybind11_state_hip MODULE ${Caffe2_HIP_PYTHON_SRCS})
     if(USE_NUMPY)
       target_compile_options(caffe2_pybind11_state_hip PRIVATE "-DUSE_NUMPY")
+      target_link_libraries(caffe2_pybind11_state_hip PRIVATE numpy::numpy)
     endif()
     if(NOT MSVC)
       target_compile_options(caffe2_pybind11_state_hip PRIVATE ${HIP_CXX_FLAGS} -fvisibility=hidden)
@@ -1965,10 +1992,8 @@ if(BUILD_PYTHON)
     set_target_properties(caffe2_pybind11_state_hip PROPERTIES LINK_FLAGS "${_caffe2_pybind11_state_linker_flags}")
     target_include_directories(caffe2_pybind11_state_hip PRIVATE $<INSTALL_INTERFACE:include>)
     target_include_directories(caffe2_pybind11_state_hip PRIVATE ${Caffe2_CPU_INCLUDE} ${Caffe2_HIP_INCLUDE})
-    target_link_libraries(caffe2_pybind11_state_hip torch_library)
-    if(WIN32)
-      target_link_libraries(caffe2_pybind11_state_hip ${PYTHON_LIBRARIES})
-    endif(WIN32)
+    target_link_libraries(caffe2_pybind11_state_hip PRIVATE
+        torch_library python::python pybind::pybind11)
 
     # Install with same rpath as non-hip caffe2_pybind11_state
     set_target_properties(
