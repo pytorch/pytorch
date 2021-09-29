@@ -20,6 +20,12 @@ struct ExecutionPlan {
     return static_cast<bool>(graph);
   }
 
+  virtual bool isEdgeExecutionPlan() const {
+    return false;
+  }
+
+  virtual ~ExecutionPlan() = default;
+
   Code code;
   std::shared_ptr<Graph> graph;
 };
