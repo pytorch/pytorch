@@ -2125,15 +2125,6 @@ def sample_inputs_pad(op_info, device, dtype, requires_grad, **kwargs):
         ),
         kwargs=dict(mode='constant')))
 
-    inputs.append(SampleInput(
-        make_input_tensor((S, S, S, S)),
-        args=(
-            ((1, 2), (3, 4), (5, 6), (7, 0)),
-        ),
-        kwargs=dict(
-            mode='constant',
-            constant_values=((-3, -2), (-1, 0), (1, 2), (3, 4)))))
-
     return inputs
 
 # Missing to test the nondeterminism of the operation

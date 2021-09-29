@@ -5392,23 +5392,23 @@ else:
             ((10, 10), 'constant', ((2, 2), (2, 2)), {}),
             ((10, 10), 'constant', ((2, 2), (2, 2)), {'constant_values': 10}),
             ((5, 2, 4, 1, 7), 'constant', ((1, 2), (6, 4), (10, 7), (3, 3), (0, 0)), {'constant_values': 89}),
-            ((15,), 'constant', ((100, 100),), {'constant_values': 1234}),
+            ((15,), 'constant', ((100, 100),), {'constant_values': 123}),
 
             # pad_width containing zeros, and degenerate inputs
-            ((15,), 'constant', ((0, 1000),), {'constant_values': 1234}),
-            ((15,), 'constant', ((100, 0),), {'constant_values': 1234}),
-            ((0,), 'constant', ((100, 0),), {'constant_values': 1234}),
-            ((0,), 'constant', ((0, 100),), {'constant_values': 1234}),
-            ((0,), 'constant', ((0, 0),), {'constant_values': 1234}),
-            ((0, 0), 'constant', ((100, 0), (100, 100)), {'constant_values': 1234}),
-            ((0, 0), 'constant', ((1, 0), (1, 0)), {'constant_values': 1234}),
-            ((0, 0), 'constant', ((0, 100), (1, 0)), {'constant_values': 1234}),
-            ((0, 0), 'constant', ((1, 1), (1, 1)), {'constant_values': 1234}),
-            ((0, 0), 'constant', ((0, 0), (0, 0)), {'constant_values': 1234}),
+            ((15,), 'constant', ((0, 1000),), {'constant_values': 123}),
+            ((15,), 'constant', ((100, 0),), {'constant_values': 123}),
+            ((0,), 'constant', ((100, 0),), {'constant_values': 123}),
+            ((0,), 'constant', ((0, 100),), {'constant_values': 123}),
+            ((0,), 'constant', ((0, 0),), {'constant_values': 123}),
+            ((0, 0), 'constant', ((100, 0), (100, 100)), {'constant_values': 123}),
+            ((0, 0), 'constant', ((1, 0), (1, 0)), {'constant_values': 123}),
+            ((0, 0), 'constant', ((0, 100), (1, 0)), {'constant_values': 123}),
+            ((0, 0), 'constant', ((1, 1), (1, 1)), {'constant_values': 123}),
+            ((0, 0), 'constant', ((0, 0), (0, 0)), {'constant_values': 123}),
         ]
 
         # 'constant' mode with each combination of the different formats for
-        # pad_width and constant_values
+        # pad_width
         pad_width_list = [
             5,
             (7,),
@@ -5418,15 +5418,7 @@ else:
             ((4, 2),),
             ((3, 2), (8, 10), (1, 0), (5, 6)),
         ]
-        constant_values_list = [
-            2,
-            (4,),
-            ((8,),),
-            ((1,), (3,), (5,), (0,)),
-            (5, 2),
-            ((9, 3),),
-            ((1, 2), (3, 4), (4, 5), (6, 7)),
-        ]
+        constant_values_list = [2, 10]
         for pad_width, constant_values in product(pad_width_list, constant_values_list):
             test_cases.append(
                 ((4, 13, 2, 5), 'constant', pad_width, {'constant_values': constant_values}))
@@ -5436,16 +5428,12 @@ else:
         if dtype.is_floating_point or dtype.is_complex:
             test_cases += [
                 ((4, 13, 2, 5), 'constant', ((3, 2), (8, 10), (1, 0), (5, 6)),
-                    {'constant_values': ((3.3, 1.3), (4.4, 5), (10, 1), (4, 8))}),
-                ((4, 13, 2, 5), 'constant', ((3, 2), (8, 10), (1, 0), (5, 6)),
                     {'constant_values': 5.4}),
             ]
 
         # 'constant' mode with complex constant_values
         if dtype.is_complex:
             test_cases += [
-                ((4, 13, 2, 5), 'constant', ((3, 2), (8, 10), (1, 0), (5, 6)),
-                    {'constant_values': ((3. + 1j, 1.3j), (4.4, 5), (10, 1), (4j, 8))}),
                 ((4, 13, 2, 5), 'constant', ((3, 2), (8, 10), (1, 0), (5, 6)),
                     {'constant_values': 1.2j}),
             ]
@@ -5497,39 +5485,23 @@ else:
 
         # constant_values primitives must be integers if dtype is an integer
         if not dtype.is_floating_point and not dtype.is_complex:
-            for constant_values in [0., (1.,), ((0, 2.),), inf, nan, 1j, (5j,), ((1, 2j),)]:
-                with self.assertRaisesRegex(RuntimeError, r"torch.pad: Expected 'constant_values' to be of integer type"):
+            for constant_values in [0., inf, nan, 1j]:
+                with self.assertRaisesRegex(
+                        RuntimeError,
+                        r"torch.pad: Expected 'constant_values' to be of integer type"):
                     torch.pad(input, 1, constant_values=constant_values)
 
         # constant_values primitives cannot be complex if input isn't complex
         if dtype.is_floating_point:
-            for constant_values in [1j, (5j,), ((1, 2j),)]:
-                with self.assertRaisesRegex(
-                        RuntimeError,
-                        r"torch.pad: Expected 'constant_values' to be of floating point or integer type"):
-                    torch.pad(input, 1, constant_values=constant_values)
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"torch.pad: Expected 'constant_values' to be of floating point or integer type"):
+                torch.pad(input, 1, constant_values=1j)
 
         # pad_width negative value error
         for pad_width in [-2, (-5,), ((0, 0), (0, 0), (-10, 0)), torch.tensor(-1)]:
             with self.assertRaisesRegex(RuntimeError, r"torch.pad: Expected 'pad_width' to be non-negative"):
                 torch.pad(input, pad_width)
-
-    # This test ensures that torch.pad throws an error if input and
-    # tensor constant_values arg have different dtypes.
-    @onlyOnCPUAndCUDA
-    @dtypes(*torch.testing.get_all_dtypes())
-    def test_pad_errors_constant_values_dtypes(self, device, dtype):
-        input = make_tensor((3, 3, 3), device, dtype, low=-9, high=9)
-        dtypes = torch.testing.get_all_dtypes()
-        sizes = [(), (1,), (2,), (1, 1), (1, 2), (input.dim(), 1), (input.dim(), 2)]
-        pad_widths = ((3, 4), (5, 6), (7, 8))
-
-        for constant_values_dtype, constant_values_size in product(dtypes, sizes):
-            constant_values = torch.zeros(constant_values_size, device=device, dtype=constant_values_dtype)
-            if constant_values_dtype != dtype:
-                error_msg = r'torch.pad: Expected constant_values.dtype to match input.dtype'
-                with self.assertRaisesRegex(RuntimeError, error_msg):
-                    torch.pad(input, pad_widths, constant_values=constant_values)
 
     # Ensure proper device checking for tensor inputs to torch.pad
     @onlyOnCPUAndCUDA

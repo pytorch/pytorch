@@ -410,27 +410,17 @@ def pad(input, pad_width, mode='constant', *, constant_values=None, out=None):
                 * 'empty': Pads with undefined values from uninitialized memory.
 
     Keyword args:
-        constant_values (Tensor, sequence, array_like, or scalar): Used in
-            ``mode='constant'`` to specify the padding values for each dimension.
-            The following formats can be used. Default: 0
-
-                * Scalar, (all,), or ((all,)) yields equal before and after pad
-                  values for all dimensions.
-                * ((both_1), ..., (both_N)) yields unique padding for each
-                  dimension, but before and after pad values within each
-                  dimension are equal.
-                * ((before, after),) or (before, after) yields unique before
-                  and after pad values, but same for all dimensions.
-                * ((before_1, after_1), ..., (before_N, after_N)) yields unique
-                  before and after pad values for each dimension.
+        constant_values (scalar): Used in
+            ``mode='constant'`` to specify the value to pad the input with.
+            Default: 0
 
         out (Tensor, optional): Output tensor. Default: None
 
     """
-    if has_torch_function_variadic(input, pad_width, constant_values):
+    if has_torch_function_variadic(input, pad_width):
         return handle_torch_function(
             pad,
-            (input, pad_width, constant_values),
+            (input, pad_width),
             input, pad_width, mode,
             constant_values=constant_values,
             out=out)
@@ -441,16 +431,11 @@ def pad(input, pad_width, mode='constant', *, constant_values=None, out=None):
         # NOTE: Even if the input is CUDA, putting pad_width on the CPU is more
         # efficient since we need to use its data to calculate the result size
         'cpu')
-    constant_values_ = _maybe_convert_pad_specifier(
-        constant_values,
-        'constant_values',
-        input.dtype,
-        input.device)
     return _VF.pad(
         input,
         pad_width_,
         mode,
-        constant_values=constant_values_,
+        constant_values=constant_values,
         out=out)
 
 

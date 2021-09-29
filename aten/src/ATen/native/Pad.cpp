@@ -80,94 +80,11 @@ PadMode get_pad_mode_from_str(c10::string_view mode_str) {
   TORCH_CHECK(false, "torch.pad: Unrecognized mode: ", mode_str);
 }
 
-// Fill the pad result with data from the input tensor
-// NOTE: pad_width must be processed with expand_pad_specifier before
-// calling this function
-void fill_input(Tensor& result, const Tensor& self, const Tensor& pad_width) {
-  std::vector<at::indexing::TensorIndex> slices = pad_width_to_inner_slices(pad_width, self);
-  result.index_put_(slices, self);
-}
-
-// Fill each section of padding for each dimension with the
-// corresponding constant value
-//
-// NOTE: pad_width and constant_values must be processed with
-// expand_pad_specifier before calling this function
-void fill_constant_pad(Tensor& result, const Tensor& self, const Tensor& pad_width, const Tensor& constant_values) {
-  for (int64_t pad_dim_idx = 0; pad_dim_idx < self.dim(); pad_dim_idx++) {
-    auto width_before = pad_width[pad_dim_idx][0].item<int64_t>();
-    auto width_after = pad_width[pad_dim_idx][1].item<int64_t>();
-
-    // Fill before-padding for this dimension
-    if (width_before > 0) {
-      std::vector<at::indexing::TensorIndex> slices;
-      for (int64_t slice_dim_idx = 0; slice_dim_idx < self.dim(); slice_dim_idx++) {
-        if (slice_dim_idx == pad_dim_idx) {
-          slices.push_back(at::indexing::TensorIndex(at::indexing::Slice(
-              0,
-              width_before,
-              at::indexing::None)));
-        } else if (slice_dim_idx < pad_dim_idx) {
-          slices.push_back(at::indexing::TensorIndex(at::indexing::Slice(
-              0,
-              result.size(slice_dim_idx),
-              at::indexing::None)));
-        } else {
-          auto other_width_before = pad_width[slice_dim_idx][0].item<int64_t>();
-          slices.push_back(at::indexing::TensorIndex(at::indexing::Slice(
-              other_width_before,
-              other_width_before + self.size(slice_dim_idx),
-              at::indexing::None)));
-        }
-      }
-      result.index_put_(slices, constant_values[pad_dim_idx][0]);
-    }
-
-    // Fill after-padding for this dimension
-    if (width_after > 0) {
-      std::vector<at::indexing::TensorIndex> slices;
-      for (int64_t slice_dim_idx = 0; slice_dim_idx < self.dim(); slice_dim_idx++) {
-        if (slice_dim_idx == pad_dim_idx) {
-          slices.push_back(at::indexing::TensorIndex(at::indexing::Slice(
-              width_before + self.size(slice_dim_idx),
-              result.size(slice_dim_idx),
-              at::indexing::None)));
-        } else if (slice_dim_idx < pad_dim_idx) {
-          slices.push_back(at::indexing::TensorIndex(at::indexing::Slice(
-              0,
-              result.size(slice_dim_idx),
-              at::indexing::None)));
-        } else {
-          auto other_width_before = pad_width[slice_dim_idx][0].item<int64_t>();
-          slices.push_back(at::indexing::TensorIndex(at::indexing::Slice(
-              other_width_before,
-              other_width_before + self.size(slice_dim_idx),
-              at::indexing::None)));
-        }
-      }
-      result.index_put_(slices, constant_values[pad_dim_idx][1]);
-    }
-  }
-}
-
-void check_pad_specifier_is_none(const c10::optional<Tensor>& arg, const char* arg_name, c10::string_view mode_str) {
+template<typename T>
+void check_arg_is_none(const c10::optional<T>& arg, const char* arg_name, c10::string_view mode_str) {
   TORCH_CHECK(!arg.has_value(),
     "torch.pad: Unsupported keyword argument for '", std::string(mode_str),
     "' mode: ", arg_name);
-}
-
-// Calculate the size of the padded tensor
-//
-// NOTE: pad_width must be processed with expand_pad_specifier before
-// calling this function
-Tensor get_result_size(const Tensor& self, const Tensor& pad_width) {
-  auto result_size_tensor = at::tensor(
-    self.sizes(),
-    TensorOptions().dtype(at::kLong).device(at::kCPU).memory_format(c10::MemoryFormat::Contiguous));
-
-  result_size_tensor += pad_width.sum(1).cpu();
-
-  return result_size_tensor;
 }
 
 // Create an IntArrayRef from a tensor
@@ -176,7 +93,7 @@ IntArrayRef tensor_to_arrayref(const Tensor& size_tensor) {
 }
 
 // Check that a tensor is on the expected device
-void check_device(const Tensor& arg, const char* arg_name, at::Device self_device) {
+void check_device(const at::Tensor& arg, const char* arg_name, at::Device self_device) {
   TORCH_CHECK(arg.device() == self_device,
     "torch.pad: Expected '", arg_name, "' to be on the same device as ",
     "'input' (", self_device, ") but got ", arg.device());
@@ -186,7 +103,7 @@ Tensor& pad_out_impl(
   const Tensor& self,
   const Tensor& pad_width,
   c10::string_view mode_str,
-  const c10::optional<Tensor>& constant_values_opt,
+  const c10::optional<Scalar>& constant_values_opt,
   Tensor& result
 ) {
   // pad_width must be Long, on CPU, and non-negative
@@ -202,12 +119,7 @@ Tensor& pad_out_impl(
 
   if (mode != PadMode::Constant) {
     // constant_values should be none if not using constant mode
-    check_pad_specifier_is_none(constant_values_opt, "constant_values", mode_str);
-  } else {
-    // If using constant_values is given, it should be on same device as self
-    if (constant_values_opt.has_value()) {
-      check_device(constant_values_opt.value(), "constant_values", self.device());
-    }
+    check_arg_is_none(constant_values_opt, "constant_values", mode_str);
   }
 
   // If `out` is given, it must match `self`'s dtype and device
@@ -220,31 +132,34 @@ Tensor& pad_out_impl(
 
   Tensor pad_width_ = at::native::expand_pad_specifier(pad_width, "pad_width", self.dim());
 
-  auto result_size_tensor = get_result_size(self, pad_width_);
-  auto result_size = tensor_to_arrayref(result_size_tensor);
-  if (result.defined()) {
-    at::native::resize_output(result, result_size);
-  } else {
-    // TODO: In constant mode, if constant_values is a single scalar, we could
-    // use at::full here for better performance than fill_constant_pad
-    result = at::empty(result_size, self.options());
-  }
-
   if (mode == PadMode::Constant) {
-    fill_input(result, self, pad_width_);
+    Scalar constant_values = constant_values_opt.value_or(
+      c10::Scalar(0));
 
-    Tensor constant_values = at::native::expand_pad_specifier(
-      constant_values_opt.value_or(
-        at::zeros({1}, self.options().device(at::kCPU))),
-      "constant_values",
-      self.dim());
+    c10::ScalarType scalar_type = self.scalar_type();
 
-    TORCH_CHECK(
-      constant_values.scalar_type() == self.dtype(),
-      "torch.pad: Expected constant_values.dtype to match input.dtype (",
-      self.dtype(), ") but got ", constant_values.dtype());
+    if (c10::isIntegralType(scalar_type, true)) {
+      TORCH_CHECK(constant_values.isIntegral(true),
+        "torch.pad: Expected 'constant_values' to be of integer type");
+    } else if (c10::isFloatingType(scalar_type)) {
+      TORCH_CHECK(!constant_values.isComplex(),
+        "torch.pad: Expected 'constant_values' to be of floating point",
+        " or integer type");
+    }
 
-    fill_constant_pad(result, self, pad_width_, constant_values);
+    Tensor pad_width_flipped = at::flip(pad_width_, {0});
+    Tensor result_ = at::constant_pad_nd(
+      self,
+      tensor_to_arrayref(pad_width_flipped),
+      constant_values);
+
+    if (result.defined()) {
+      at::native::resize_output(result, result_.sizes());
+      result.copy_(result_);
+
+    } else {
+      result = result_;
+    }
   }
   return result;
 }
@@ -253,7 +168,7 @@ Tensor& pad_out(
   const Tensor& self,
   const Tensor& pad_width,
   c10::string_view mode_str,
-  const c10::optional<Tensor>& constant_values_opt,
+  const c10::optional<Scalar>& constant_values_opt,
   Tensor& result
 ) {
   return pad_out_impl(self, pad_width, mode_str, constant_values_opt, result);
@@ -263,7 +178,7 @@ Tensor pad(
   const Tensor& self,
   const Tensor& pad_width,
   c10::string_view mode_str,
-  const c10::optional<Tensor>& constant_values_opt
+  const c10::optional<Scalar>& constant_values_opt
 ) {
   Tensor result;
   return pad_out_impl(self, pad_width, mode_str, constant_values_opt, result);
