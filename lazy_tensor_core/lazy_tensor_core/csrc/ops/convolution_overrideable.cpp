@@ -14,7 +14,7 @@ ConvolutionOverrideable::ConvolutionOverrideable(
     std::vector<lazy_tensors::int64> padding,
     std::vector<lazy_tensors::int64> dilation, bool transposed,
     std::vector<lazy_tensors::int64> output_padding, lazy_tensors::int64 groups)
-    : Node(ir::OpKind(at::aten::convolution_overrideable),
+    : TsNode(ir::OpKind(at::aten::convolution_overrideable),
            {input, weight, bias},
            /*num_outputs=*/1,
            torch::lazy::MHash(stride, padding, dilation, transposed,
@@ -35,7 +35,7 @@ ConvolutionOverrideable::ConvolutionOverrideable(
     std::vector<lazy_tensors::int64> padding,
     std::vector<lazy_tensors::int64> dilation, bool transposed,
     std::vector<lazy_tensors::int64> output_padding, lazy_tensors::int64 groups)
-    : Node(ir::OpKind(at::aten::convolution_overrideable), {input, weight},
+    : TsNode(ir::OpKind(at::aten::convolution_overrideable), {input, weight},
            /*num_outputs=*/1,
            torch::lazy::MHash(stride, padding, dilation, transposed,
                                      output_padding, groups)),

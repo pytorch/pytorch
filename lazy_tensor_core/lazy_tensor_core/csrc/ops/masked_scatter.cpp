@@ -7,7 +7,7 @@ namespace ops {
 
 MaskedScatter::MaskedScatter(const Value& input, const Value& mask,
                              const Value& source)
-    : Node(ir::OpKind(at::aten::masked_scatter), {input, mask, source},
+    : TsNode(ir::OpKind(at::aten::masked_scatter), {input, mask, source},
            input.shape(),
            /*num_outputs=*/1) {}
 

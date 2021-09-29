@@ -2,14 +2,14 @@
 
 #include <c10/core/Scalar.h>
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 #include "lazy_tensors/types.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class RreluWithNoise : public Node {
+class RreluWithNoise : public TsNode {
  public:
   RreluWithNoise(const Value& input, const Value& seed, const at::Scalar& lower,
                  const at::Scalar& upper, bool training);

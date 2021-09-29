@@ -8,7 +8,7 @@ namespace ir {
 namespace ops {
 
 Repeat::Repeat(const Value& input, std::vector<lazy_tensors::int64> repeats)
-    : Node(ir::OpKind(at::aten::repeat), {input},
+    : TsNode(ir::OpKind(at::aten::repeat), {input},
            /*num_outputs=*/1, torch::lazy::MHash(repeats)),
       repeats_(std::move(repeats)) {
   SetShapeDeferred(

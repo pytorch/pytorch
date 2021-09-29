@@ -13,7 +13,7 @@ namespace ops {
 Logsumexp::Logsumexp(const Value& input,
                      std::vector<lazy_tensors::int64> dimensions,
                      bool keep_reduced_dimensions)
-    : Node(ir::OpKind(at::aten::logsumexp), {input},
+    : TsNode(ir::OpKind(at::aten::logsumexp), {input},
            /*num_outputs=*/1,
            torch::lazy::MHash(dimensions, keep_reduced_dimensions)),
       dimensions_(std::move(dimensions)),

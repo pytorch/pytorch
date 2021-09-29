@@ -11,7 +11,7 @@ namespace ops {
 ReplicationPadBackward::ReplicationPadBackward(
     const Value& grad_output, const Value& input,
     std::vector<lazy_tensors::int64> padding)
-    : Node(ltc_replication_pad_backward, {grad_output, input},
+    : TsNode(ltc_replication_pad_backward, {grad_output, input},
            /*num_outputs=*/1, torch::lazy::MHash(padding)),
       padding_(std::move(padding)) {
   SetShapeDeferred(

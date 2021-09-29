@@ -11,7 +11,7 @@ namespace ops {
 NllLoss2d::NllLoss2d(const Value& logits, const Value& labels,
                      const c10::optional<Value>& weight,
                      ReductionMode reduction, int ignore_index)
-    : Node(ir::OpKind(at::aten::nll_loss2d),
+    : TsNode(ir::OpKind(at::aten::nll_loss2d),
            lazy_tensors::util::GetValuesVector<Value>({logits, labels},
                                                       {&weight}),
            /*num_outputs=*/1,

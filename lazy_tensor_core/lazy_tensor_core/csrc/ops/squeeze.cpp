@@ -8,7 +8,7 @@ namespace ir {
 namespace ops {
 
 Squeeze::Squeeze(const Value& input, int dim)
-    : Node(ir::OpKind(at::aten::squeeze), {input},
+    : TsNode(ir::OpKind(at::aten::squeeze), {input},
            /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim) {
   SetShapeDeferred(

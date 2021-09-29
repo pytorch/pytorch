@@ -25,7 +25,7 @@ lazy_tensors::Shape NodeOutputShape(const Value& input) {
 }  // namespace
 
 MaskedSelect::MaskedSelect(const Value& input, const Value& mask)
-    : Node(ir::OpKind(at::aten::masked_select), {input, mask},
+    : TsNode(ir::OpKind(at::aten::masked_select), {input, mask},
            NodeOutputShape(input),
            /*num_outputs=*/2) {}
 

@@ -1,12 +1,12 @@
 #pragma once
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class TSNativeBatchNormForward : public Node {
+class TSNativeBatchNormForward : public TsNode {
  public:
   TSNativeBatchNormForward(const Value& input, const Value& weight,
                            const Value& bias, const Value& running_mean,

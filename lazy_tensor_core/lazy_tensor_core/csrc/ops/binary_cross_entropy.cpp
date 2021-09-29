@@ -11,7 +11,7 @@ namespace ops {
 BinaryCrossEntropy::BinaryCrossEntropy(const Value& logits, const Value& labels,
                                        const c10::optional<Value>& weight,
                                        ReductionMode reduction)
-    : Node(ir::OpKind(at::aten::binary_cross_entropy),
+    : TsNode(ir::OpKind(at::aten::binary_cross_entropy),
            lazy_tensors::util::GetValuesVector<Value>({logits, labels},
                                                       {&weight}),
            /*num_outputs=*/1,

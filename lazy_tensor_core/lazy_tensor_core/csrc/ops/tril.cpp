@@ -6,7 +6,7 @@ namespace ir {
 namespace ops {
 
 Tril::Tril(const Value& input, lazy_tensors::int64 diagonal)
-    : Node(ir::OpKind(at::aten::tril), {input}, input.shape(),
+    : TsNode(ir::OpKind(at::aten::tril), {input}, input.shape(),
            /*num_outputs=*/1, torch::lazy::MHash(diagonal)),
       diagonal_(diagonal) {}
 

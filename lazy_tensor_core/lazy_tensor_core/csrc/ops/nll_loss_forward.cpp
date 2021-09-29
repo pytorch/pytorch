@@ -11,7 +11,7 @@ namespace ops {
 NllLossForward::NllLossForward(const Value& logits, const Value& labels,
                  const c10::optional<Value>& weight, ReductionMode reduction,
                  int ignore_index)
-    : Node(ir::OpKind(at::aten::nll_loss_forward),
+    : TsNode(ir::OpKind(at::aten::nll_loss_forward),
            lazy_tensors::util::GetValuesVector<Value>({logits, labels},
                                                       {&weight}),
            /*num_outputs=*/2,

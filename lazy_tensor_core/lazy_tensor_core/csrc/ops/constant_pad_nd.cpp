@@ -13,7 +13,7 @@ namespace ops {
 ConstantPadNd::ConstantPadNd(const Value& input,
                              std::vector<lazy_tensors::int64> pad,
                              const at::Scalar& value)
-    : Node(ir::OpKind(at::aten::constant_pad_nd), {input},
+    : TsNode(ir::OpKind(at::aten::constant_pad_nd), {input},
            /*num_outputs=*/1,
            torch::lazy::MHash(pad, ScalarHash(value))),
       pad_(std::move(pad)),

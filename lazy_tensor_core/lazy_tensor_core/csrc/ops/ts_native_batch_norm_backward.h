@@ -2,14 +2,14 @@
 
 #include <array>
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
 // Node for the backward batch norm operator.
-class TSNativeBatchNormBackward : public Node {
+class TSNativeBatchNormBackward : public TsNode {
  public:
   TSNativeBatchNormBackward(const Value& grad_out, const Value& input,
                             const Value& weight, const Value& running_mean,

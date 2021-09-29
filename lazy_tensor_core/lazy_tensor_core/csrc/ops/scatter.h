@@ -1,12 +1,12 @@
 #pragma once
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class Scatter : public Node {
+class Scatter : public TsNode {
  public:
   Scatter(const Value& input, const Value& index, const Value& src,
           lazy_tensors::int64 dim);

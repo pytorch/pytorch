@@ -1,6 +1,6 @@
 #pragma once
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 #include "lazy_tensors/primitive_types.h"
 #include "lazy_tensors/span.h"
 
@@ -9,7 +9,7 @@ namespace ir {
 namespace ops {
 
 // IR node for 2D & 3D convolutions with or without bias.
-class ConvolutionOverrideable : public Node {
+class ConvolutionOverrideable : public TsNode {
  public:
   ConvolutionOverrideable(const Value& input, const Value& weight,
                           const Value& bias,

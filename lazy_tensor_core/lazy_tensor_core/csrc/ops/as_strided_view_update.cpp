@@ -14,7 +14,7 @@ AsStridedViewUpdate::AsStridedViewUpdate(
     const Value& target, const Value& input,
     std::vector<lazy_tensors::int64> size,
     std::vector<lazy_tensors::int64> stride, lazy_tensors::int64 storage_offset)
-    : Node(ltc_as_strided_view_update, {target, input},
+    : TsNode(ltc_as_strided_view_update, {target, input},
            [&]() {
              return lazy_tensors::ShapeUtil::MakeShape(
                  target.shape().element_type(), size);

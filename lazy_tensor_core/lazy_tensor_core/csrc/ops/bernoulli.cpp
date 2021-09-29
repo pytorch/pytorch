@@ -7,7 +7,7 @@ namespace ops {
 
 Bernoulli::Bernoulli(const Value& probability, const Value& seed,
                      lazy_tensors::Shape shape)
-    : Node(ir::OpKind(at::aten::bernoulli), {probability, seed},
+    : TsNode(ir::OpKind(at::aten::bernoulli), {probability, seed},
            std::move(shape)) {}
 
 NodePtr Bernoulli::Clone(OpList operands) const {

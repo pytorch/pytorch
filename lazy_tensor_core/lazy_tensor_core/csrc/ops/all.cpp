@@ -12,7 +12,7 @@ namespace ops {
 
 All::All(const Value& input, std::vector<lazy_tensors::int64> dimensions,
          bool keep_reduced_dimensions)
-    : Node(ir::OpKind(at::aten::all), {input},
+    : TsNode(ir::OpKind(at::aten::all), {input},
            /*num_outputs=*/1,
            torch::lazy::MHash(dimensions, keep_reduced_dimensions)),
       dimensions_(std::move(dimensions)),

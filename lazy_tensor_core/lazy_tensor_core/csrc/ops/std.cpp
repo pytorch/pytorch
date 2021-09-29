@@ -10,7 +10,7 @@ namespace ops {
 
 Std::Std(const Value& input, std::vector<lazy_tensors::int64> dimensions,
          bool keep_reduced_dimensions, lazy_tensors::int64 correction)
-    : Node(ir::OpKind(at::aten::std), {input},
+    : TsNode(ir::OpKind(at::aten::std), {input},
            /*num_outputs=*/1,
            torch::lazy::MHash(dimensions, keep_reduced_dimensions,
                                      correction)),

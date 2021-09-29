@@ -12,7 +12,7 @@ namespace ops {
 UpsampleBilinear::UpsampleBilinear(const Value& input,
                                    std::vector<lazy_tensors::int64> output_size,
                                    bool align_corners)
-    : Node(ir::OpKind(at::aten::upsample_bilinear2d), {input},
+    : TsNode(ir::OpKind(at::aten::upsample_bilinear2d), {input},
            /*num_outputs=*/1,
            torch::lazy::MHash(output_size, align_corners)),
       output_size_(std::move(output_size)),

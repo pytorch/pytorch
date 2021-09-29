@@ -1,11 +1,11 @@
 #pragma once
 
-// This header can depend on ops/ and ir.h, as well as system/c++,
+// This header can depend on ops/ and ts_backend/TsNode.h, as well as system/c++,
 // PT,... but not on other lazy tensor core headers.
 
 #include <memory>
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 #include "lazy_tensor_core/csrc/ops/constant.h"
 #include "lazy_tensor_core/csrc/ops/generic.h"
 #include "lazy_tensor_core/csrc/ops/scalar.h"

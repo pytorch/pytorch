@@ -24,7 +24,7 @@ AllReduce::AllReduce(AllReduceType reduce_type,
                      lazy_tensors::Span<const Value> operands,
                      const Value& token, double scale,
                      std::vector<std::vector<lazy_tensors::int64>> groups)
-    : Node(ltc_cross_replica_sum, GetOperandList(operands, token),
+    : TsNode(ltc_cross_replica_sum, GetOperandList(operands, token),
            /*num_outputs=*/operands.size() + 1,
            torch::lazy::MHash(
                lazy_tensors::util::GetEnumValue(reduce_type), scale, groups)),

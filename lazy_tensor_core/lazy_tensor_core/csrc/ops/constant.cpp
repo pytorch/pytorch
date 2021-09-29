@@ -8,7 +8,7 @@ namespace ir {
 namespace ops {
 
 Constant::Constant(lazy_tensors::Literal value)
-    : Node(OpKind(at::prim::Constant), value.shape(), /*num_outputs=*/1,
+    : TsNode(OpKind(at::prim::Constant), value.shape(), /*num_outputs=*/1,
            value.Hash()),
       value_(std::move(value)) {}
 

@@ -11,12 +11,12 @@ namespace ir {
 namespace ops {
 
 Scalar::Scalar(const at::Scalar& value, lazy_tensors::Shape shape)
-    : Node(OpKind(at::prim::Constant), std::move(shape), /*num_outputs=*/1,
+    : TsNode(OpKind(at::prim::Constant), std::move(shape), /*num_outputs=*/1,
            ScalarHash(value)),
       value_(std::move(value)) {}
 
 Scalar::Scalar(const at::Scalar& value, lazy_tensors::PrimitiveType type)
-    : Node(OpKind(at::prim::Constant),
+    : TsNode(OpKind(at::prim::Constant),
            lazy_tensors::ShapeUtil::MakeShape(type, {}),
            /*num_outputs=*/1, ScalarHash(value)),
       value_(std::move(value)) {}

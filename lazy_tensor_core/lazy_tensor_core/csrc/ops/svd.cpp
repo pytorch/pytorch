@@ -8,7 +8,7 @@ namespace ir {
 namespace ops {
 
 SVD::SVD(const Value& input, bool some, bool compute_uv)
-    : Node(ir::OpKind(at::aten::svd), {input},
+    : TsNode(ir::OpKind(at::aten::svd), {input},
            /*num_outputs=*/3, torch::lazy::MHash(some, compute_uv)),
       some_(some),
       compute_uv_(compute_uv) {

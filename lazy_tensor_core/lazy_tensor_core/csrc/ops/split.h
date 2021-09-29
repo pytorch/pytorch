@@ -2,14 +2,14 @@
 
 #include <vector>
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
 // Split the tensor into chunks along a given dimension.
-class Split : public Node {
+class Split : public TsNode {
  public:
   Split(const Value& input, std::vector<lazy_tensors::int64> split_sizes,
         lazy_tensors::int64 dim);

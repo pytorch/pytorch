@@ -10,7 +10,7 @@ namespace ops {
 Select::Select(const Value& input, lazy_tensors::int64 dim,
                lazy_tensors::int64 start, lazy_tensors::int64 end,
                lazy_tensors::int64 stride)
-    : Node(ltc_select, {input},
+    : TsNode(ltc_select, {input},
            [&]() {
              return MakeSelectShape(input.shape(), dim, start, end, stride);
            },

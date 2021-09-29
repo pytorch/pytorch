@@ -12,7 +12,7 @@ TSNativeBatchNormBackward::TSNativeBatchNormBackward(
     const Value& running_mean, const Value& running_var, const Value& save_mean,
     const Value& save_invstd, bool training, double eps,
     std::array<bool, 3> output_mask)
-    : Node(ir::OpKind(at::aten::native_batch_norm_backward),
+    : TsNode(ir::OpKind(at::aten::native_batch_norm_backward),
            {grad_out, input, weight, running_mean, running_var, save_mean,
             save_invstd},
            /*num_outputs=*/3,
@@ -29,7 +29,7 @@ TSNativeBatchNormBackward::TSNativeBatchNormBackward(
     const Value& grad_out, const Value& input, const Value& weight,
     const Value& save_mean, const Value& save_invstd, bool training, double eps,
     std::array<bool, 3> output_mask)
-    : Node(ir::OpKind(at::aten::native_batch_norm_backward),
+    : TsNode(ir::OpKind(at::aten::native_batch_norm_backward),
            {grad_out, input, weight, save_mean, save_invstd},
            /*num_outputs=*/3,
            torch::lazy::MHash(training, eps, output_mask[0],

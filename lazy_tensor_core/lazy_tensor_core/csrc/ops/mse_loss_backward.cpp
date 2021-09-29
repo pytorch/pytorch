@@ -11,7 +11,7 @@ namespace ops {
 
 MseLossBackward::MseLossBackward(const Value& grad_output, const Value& input,
                                  const Value& target, ReductionMode reduction)
-    : Node(ir::OpKind(at::aten::mse_loss_backward),
+    : TsNode(ir::OpKind(at::aten::mse_loss_backward),
            {grad_output, input, target},
            /*num_outputs=*/1,
            torch::lazy::MHash(

@@ -18,7 +18,7 @@ lazy_tensors::Shape NodeOutputShape(const Value& input, int dim) {
 }  // namespace
 
 Unsqueeze::Unsqueeze(const Value& input, int dim)
-    : Node(ir::OpKind(at::aten::unsqueeze), {input},
+    : TsNode(ir::OpKind(at::aten::unsqueeze), {input},
            [&]() { return NodeOutputShape(input, dim); },
            /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim) {}

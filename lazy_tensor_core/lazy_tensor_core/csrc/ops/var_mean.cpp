@@ -10,7 +10,7 @@ namespace ops {
 VarMean::VarMean(const Value& input,
                  std::vector<lazy_tensors::int64> dimensions,
                  lazy_tensors::int64 correction, bool keep_reduced_dimensions)
-    : Node(ir::OpKind(at::aten::var_mean), {input},
+    : TsNode(ir::OpKind(at::aten::var_mean), {input},
            /*num_outputs=*/2,
            torch::lazy::MHash(dimensions, correction,
                                      keep_reduced_dimensions)),

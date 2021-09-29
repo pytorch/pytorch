@@ -9,7 +9,7 @@ namespace ops {
 
 TopK::TopK(const Value& input, lazy_tensors::int64 k, lazy_tensors::int64 dim,
            bool largest, bool sorted)
-    : Node(ir::OpKind(at::aten::topk), {input},
+    : TsNode(ir::OpKind(at::aten::topk), {input},
            /*num_outputs=*/2,
            torch::lazy::MHash(k, dim, largest, sorted)),
       k_(k),

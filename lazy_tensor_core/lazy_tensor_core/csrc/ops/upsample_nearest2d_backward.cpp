@@ -11,7 +11,7 @@ namespace ops {
 UpsampleNearestBackward::UpsampleNearestBackward(
     const Value& input, std::vector<lazy_tensors::int64> output_size,
     std::vector<lazy_tensors::int64> input_size)
-    : Node(ir::OpKind(at::aten::upsample_nearest2d_backward), {input},
+    : TsNode(ir::OpKind(at::aten::upsample_nearest2d_backward), {input},
            /*num_outputs=*/1,
            torch::lazy::MHash(output_size, input_size)),
       output_size_(std::move(output_size)),

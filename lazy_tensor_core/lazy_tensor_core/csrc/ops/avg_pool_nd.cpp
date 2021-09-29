@@ -30,7 +30,7 @@ AvgPoolNd::AvgPoolNd(const Value& input, lazy_tensors::int64 spatial_dim_count,
                      std::vector<lazy_tensors::int64> stride,
                      std::vector<lazy_tensors::int64> padding, bool ceil_mode,
                      bool count_include_pad)
-    : Node(ir::OpKind(AvgPoolNdSymbol(spatial_dim_count)), {input},
+    : TsNode(ir::OpKind(AvgPoolNdSymbol(spatial_dim_count)), {input},
            /*num_outputs=*/1,
            torch::lazy::MHash(spatial_dim_count, kernel_size, stride,
                                      padding, ceil_mode, count_include_pad)),

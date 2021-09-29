@@ -12,7 +12,7 @@ namespace ops {
 
 Prod::Prod(const Value& input, std::vector<lazy_tensors::int64> dimensions,
            bool keep_reduced_dimensions, c10::optional<at::ScalarType> dtype)
-    : Node(ir::OpKind(at::aten::prod), {input},
+    : TsNode(ir::OpKind(at::aten::prod), {input},
            /*num_outputs=*/1,
            torch::lazy::MHash(dimensions, keep_reduced_dimensions,
                                      OptionalOr<int>(dtype, -1))),

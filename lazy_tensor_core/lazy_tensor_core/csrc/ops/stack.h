@@ -1,13 +1,13 @@
 #pragma once
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 #include "lazy_tensors/span.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class Stack : public Node {
+class Stack : public TsNode {
  public:
   Stack(lazy_tensors::Span<const ir::Value> values, lazy_tensors::int64 dim);
 

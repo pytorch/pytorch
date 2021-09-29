@@ -1,12 +1,12 @@
 #pragma once
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class Unsqueeze : public Node {
+class Unsqueeze : public TsNode {
  public:
   // Insert a dimension of size one at the specified position.
   Unsqueeze(const Value& input, int dim);

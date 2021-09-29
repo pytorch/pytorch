@@ -6,7 +6,7 @@ namespace ir {
 namespace ops {
 
 Cholesky::Cholesky(const Value& input, bool lower)
-    : Node(ir::OpKind(at::aten::cholesky), {input}, input.shape(),
+    : TsNode(ir::OpKind(at::aten::cholesky), {input}, input.shape(),
            /*num_outputs=*/1, torch::lazy::MHash(lower)),
       lower_(lower) {}
 

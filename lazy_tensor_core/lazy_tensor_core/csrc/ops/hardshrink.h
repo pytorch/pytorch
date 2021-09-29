@@ -2,13 +2,13 @@
 
 #include <c10/core/Scalar.h>
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class Hardshrink : public Node {
+class Hardshrink : public TsNode {
  public:
   Hardshrink(const Value& input, const at::Scalar& lambda);
 

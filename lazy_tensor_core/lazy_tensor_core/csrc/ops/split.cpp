@@ -12,7 +12,7 @@ namespace ops {
 
 Split::Split(const Value& input, std::vector<lazy_tensors::int64> split_sizes,
              lazy_tensors::int64 dim)
-    : Node(ir::OpKind(at::aten::split), {input},
+    : TsNode(ir::OpKind(at::aten::split), {input},
            ComputeSplitCount(input.shape().dimensions(dim), split_sizes),
            torch::lazy::MHash(split_sizes, dim)),
       split_sizes_(std::move(split_sizes)),

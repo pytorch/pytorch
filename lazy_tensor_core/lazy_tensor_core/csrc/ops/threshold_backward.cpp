@@ -7,7 +7,7 @@ namespace ops {
 
 ThresholdBackward::ThresholdBackward(const Value& grad_output,
                                      const Value& input, float threshold)
-    : Node(ir::OpKind(at::aten::threshold_backward), {grad_output, input},
+    : TsNode(ir::OpKind(at::aten::threshold_backward), {grad_output, input},
            input.shape(), /*num_outputs=*/1,
            torch::lazy::MHash(threshold)),
       threshold_(threshold) {}

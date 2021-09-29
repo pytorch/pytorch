@@ -11,7 +11,7 @@ namespace ops {
 RreluWithNoise::RreluWithNoise(const Value& input, const Value& seed,
                                const at::Scalar& lower, const at::Scalar& upper,
                                bool training)
-    : Node(ir::OpKind(at::aten::rrelu_with_noise), {input, seed},
+    : TsNode(ir::OpKind(at::aten::rrelu_with_noise), {input, seed},
            lazy_tensors::ShapeUtil::MakeTupleShape(
                {input.shape(), input.shape()}),
            /*num_outputs=*/2,

@@ -1,13 +1,13 @@
 #pragma once
 
 #include "lazy_tensor_core/csrc/cross_replica_reduces.h"
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class AllReduce : public Node {
+class AllReduce : public TsNode {
  public:
   AllReduce(AllReduceType reduce_type, lazy_tensors::Span<const Value> operands,
             const Value& token, double scale,

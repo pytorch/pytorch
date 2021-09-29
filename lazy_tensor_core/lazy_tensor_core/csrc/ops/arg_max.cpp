@@ -8,7 +8,7 @@ namespace ir {
 namespace ops {
 
 ArgMax::ArgMax(const Value& input, lazy_tensors::int64 dim, bool keepdim)
-    : Node(ir::OpKind(at::aten::argmax), {input},
+    : TsNode(ir::OpKind(at::aten::argmax), {input},
            /*num_outputs=*/1, torch::lazy::MHash(dim, keepdim)),
       dim_(dim),
       keepdim_(keepdim) {

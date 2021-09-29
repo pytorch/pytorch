@@ -10,7 +10,7 @@ namespace ops {
 // since random only has in-place versions. Therefore we force the symbol to
 // be "aten::random_" here.
 Random::Random(const Value& input)
-    : Node(ir::OpKind(c10::Symbol::fromQualString("aten::random_")),
+    : TsNode(ir::OpKind(c10::Symbol::fromQualString("aten::random_")),
         {input}, input.shape()) {}
 
 NodePtr Random::Clone(OpList operands) const {

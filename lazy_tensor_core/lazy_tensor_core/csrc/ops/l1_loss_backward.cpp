@@ -9,7 +9,7 @@ namespace ops {
 
 L1LossBackward::L1LossBackward(const Value& grad_output, const Value& input,
                                const Value& target, ReductionMode reduction)
-    : Node(ir::OpKind(at::aten::l1_loss_backward), {grad_output, input, target},
+    : TsNode(ir::OpKind(at::aten::l1_loss_backward), {grad_output, input, target},
            /*num_outputs=*/1,
            torch::lazy::MHash(
                lazy_tensors::util::GetEnumValue(reduction))),

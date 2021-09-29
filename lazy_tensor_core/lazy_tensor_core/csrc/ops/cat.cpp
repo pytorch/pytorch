@@ -8,7 +8,7 @@ namespace ir {
 namespace ops {
 
 Cat::Cat(lazy_tensors::Span<const ir::Value> values, lazy_tensors::int64 dim)
-    : Node(ir::OpKind(at::aten::cat), values,
+    : TsNode(ir::OpKind(at::aten::cat), values,
            /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim) {
   SetShapeDeferred(

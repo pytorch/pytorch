@@ -8,7 +8,7 @@ namespace ir {
 namespace ops {
 
 MinInDim::MinInDim(const Value& input, lazy_tensors::int64 dim, bool keepdim)
-    : Node(ir::OpKind(at::aten::min), {input},
+    : TsNode(ir::OpKind(at::aten::min), {input},
            /*num_outputs=*/2, torch::lazy::MHash(dim, keepdim)),
       dim_(dim),
       keepdim_(keepdim) {

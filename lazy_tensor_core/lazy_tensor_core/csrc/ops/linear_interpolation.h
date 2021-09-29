@@ -1,12 +1,12 @@
 #pragma once
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class LinearInterpolation : public Node {
+class LinearInterpolation : public TsNode {
  public:
   LinearInterpolation(const Value& value, const Value& new_value, double alpha);
 

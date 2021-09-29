@@ -10,7 +10,7 @@ namespace ir {
 namespace ops {
 
 Permute::Permute(const Value& input, std::vector<lazy_tensors::int64> dims)
-    : Node(ir::OpKind(at::aten::permute), {input},
+    : TsNode(ir::OpKind(at::aten::permute), {input},
            /*num_outputs=*/1, torch::lazy::MHash(dims)),
       dims_(std::move(dims)) {
   SetShapeDeferred(

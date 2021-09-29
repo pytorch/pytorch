@@ -10,7 +10,7 @@ namespace ops {
 
 Expand::Expand(const Value& input, std::vector<lazy_tensors::int64> size,
                bool is_scalar_expand)
-    : Node(ir::OpKind(at::aten::expand), {input},
+    : TsNode(ir::OpKind(at::aten::expand), {input},
            /*num_outputs=*/1,
            torch::lazy::MHash(size, is_scalar_expand)),
       size_(std::move(size)),

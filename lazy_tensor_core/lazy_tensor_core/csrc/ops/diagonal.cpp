@@ -12,7 +12,7 @@ namespace ops {
 
 Diagonal::Diagonal(const Value& input, lazy_tensors::int64 offset,
                    lazy_tensors::int64 dim1, lazy_tensors::int64 dim2)
-    : Node(ir::OpKind(at::aten::diagonal), {input},
+    : TsNode(ir::OpKind(at::aten::diagonal), {input},
            [&]() {
              return MakeDiagonalShape(input.shape(), offset, dim1, dim2);
            },

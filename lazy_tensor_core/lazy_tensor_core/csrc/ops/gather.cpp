@@ -8,7 +8,7 @@ namespace ir {
 namespace ops {
 
 Gather::Gather(const Value& input, lazy_tensors::int64 dim, const Value& index)
-    : Node(ir::OpKind(at::aten::gather), {input, index},
+    : TsNode(ir::OpKind(at::aten::gather), {input, index},
            /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim) {
   SetShapeDeferred(

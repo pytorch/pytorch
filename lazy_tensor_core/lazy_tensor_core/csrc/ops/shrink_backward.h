@@ -2,13 +2,13 @@
 
 #include <c10/core/Scalar.h>
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class ShrinkBackward : public Node {
+class ShrinkBackward : public TsNode {
  public:
   ShrinkBackward(OpKind kind, const Value& grad_output, const Value& input,
                  const at::Scalar& lambda);

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 #include "lazy_tensor_core/csrc/reduction.h"
 #include "lazy_tensors/types.h"
 
@@ -8,7 +8,7 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class L1LossBackward : public Node {
+class L1LossBackward : public TsNode {
  public:
   L1LossBackward(const Value& grad_output, const Value& input,
                  const Value& target, ReductionMode reduction);

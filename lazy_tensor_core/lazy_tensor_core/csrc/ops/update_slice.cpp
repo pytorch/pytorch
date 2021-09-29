@@ -11,7 +11,7 @@ namespace ops {
 UpdateSlice::UpdateSlice(
     const Value& input, const Value& source,
     lazy_tensors::Span<const lazy_tensors::int64> base_indices)
-    : Node(ltc_update_slice, {input, source},
+    : TsNode(ltc_update_slice, {input, source},
            /*num_outputs=*/1, torch::lazy::MHash(base_indices)),
       base_indices_(base_indices.begin(), base_indices.end()) {
   SetShapeDeferred(

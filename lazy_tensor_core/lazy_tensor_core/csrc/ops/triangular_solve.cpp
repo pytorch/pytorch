@@ -10,7 +10,7 @@ namespace ops {
 TriangularSolve::TriangularSolve(const Value& rhs, const Value& lhs,
                                  bool left_side, bool lower, bool transpose,
                                  bool unit_diagonal)
-    : Node(ir::OpKind(at::aten::triangular_solve), {rhs, lhs},
+    : TsNode(ir::OpKind(at::aten::triangular_solve), {rhs, lhs},
            /*num_outputs=*/2,
            torch::lazy::MHash(left_side, lower, transpose,
                                      unit_diagonal)),

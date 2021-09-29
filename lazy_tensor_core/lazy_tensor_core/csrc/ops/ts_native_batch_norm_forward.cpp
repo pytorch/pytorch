@@ -11,7 +11,7 @@ TSNativeBatchNormForward::TSNativeBatchNormForward(
     const Value& input, const Value& weight, const Value& bias,
     const Value& running_mean, const Value& running_var, bool training,
     double momentum, double eps)
-    : Node(ir::OpKind(at::aten::native_batch_norm),
+    : TsNode(ir::OpKind(at::aten::native_batch_norm),
            {input, weight, bias, running_mean, running_var},
            /*num_outputs=*/3,
            torch::lazy::MHash(training, momentum, eps)),

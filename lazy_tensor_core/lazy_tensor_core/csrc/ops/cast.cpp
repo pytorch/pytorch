@@ -21,14 +21,14 @@ lazy_tensors::Shape NodeOutputShape(const Value& input,
 }  // namespace
 
 Cast::Cast(const Value& input, lazy_tensors::PrimitiveType type)
-    : Node(ltc_cast, {input}, NodeOutputShape(input, type),
+    : TsNode(ltc_cast, {input}, NodeOutputShape(input, type),
            /*num_outputs=*/1,
            torch::lazy::MHash(static_cast<int>(type))),
       type_(type) {}
 
 Cast::Cast(const Value& input, at::ScalarType dtype,
            c10::optional<at::ScalarType> stype)
-    : Node(ltc_cast, {input},
+    : TsNode(ltc_cast, {input},
            NodeOutputShape(input,
                            MakeLtcPrimitiveType(dtype, /*device=*/nullptr)),
            /*num_outputs=*/1,

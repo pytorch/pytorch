@@ -2,14 +2,14 @@
 
 #include <c10/util/Optional.h>
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 #include "lazy_tensor_core/csrc/reduction.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class NllLossBackward : public Node {
+class NllLossBackward : public TsNode {
  public:
   NllLossBackward(const Value& grad_output, const Value& logits,
                   const Value& labels, const c10::optional<Value>& weight,

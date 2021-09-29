@@ -2,13 +2,13 @@
 
 #include <c10/core/Scalar.h>
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class LeakyReluBackward : public Node {
+class LeakyReluBackward : public TsNode {
  public:
   LeakyReluBackward(const Value& grad_output, const Value& input,
                     double negative_slope, bool self_is_result = false);

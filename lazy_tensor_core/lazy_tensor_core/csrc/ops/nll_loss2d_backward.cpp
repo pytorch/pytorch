@@ -13,7 +13,7 @@ NllLoss2dBackward::NllLoss2dBackward(const Value& grad_output,
                                      const c10::optional<Value>& weight,
                                      const c10::optional<Value>& total_weight,
                                      ReductionMode reduction, int ignore_index)
-    : Node(ir::OpKind(at::aten::nll_loss2d_backward),
+    : TsNode(ir::OpKind(at::aten::nll_loss2d_backward),
            lazy_tensors::util::GetValuesVector<Value>(
                {grad_output, logits, labels}, {&weight, &total_weight}),
            /*num_outputs=*/1,
