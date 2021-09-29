@@ -612,7 +612,7 @@ const std::vector<std::string> functions = {
             size = len(tensors)
             split_sizes = [0] * size
             for i in range(size):
-                if tensors[i].numel() > 0:
+                if tensors[i].size() != [0]:
                     split_sizes[i] = tensors[i].size()[dim]
 
             def backward(grad_output):
