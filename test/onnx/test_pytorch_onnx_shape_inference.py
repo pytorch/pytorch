@@ -13,10 +13,12 @@ def expect_tensor(scalar_type, shape=None):
     return verify
 
 class TestONNXShapeInference(unittest.TestCase):
-    from torch.onnx.symbolic_helper import _onnx_main_opset, _set_opset_version
-    opset_version = _onnx_main_opset
-    _set_onnx_shape_inference(True)
-    _set_opset_version(opset_version)
+    def __init__(self, *args, **kwargs):
+        unittest.TestCase.__init__(self, *args, **kwargs)
+        from torch.onnx.symbolic_helper import _onnx_main_opset, _set_opset_version
+        self.opset_version = _onnx_main_opset
+        _set_onnx_shape_inference(True)
+        _set_opset_version(self.opset_version)
 
     def run_test(self, g, n, type_assertion_funcs):
         if not isinstance(type_assertion_funcs, list):
