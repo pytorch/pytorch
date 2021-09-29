@@ -213,10 +213,15 @@ class TestSerialization(TestCase):
         m = imp.load_pickle(package_name, resource_name_model)
         mq, mp_state_dict = _do_quant_transforms(m, input_tensor)
 
+        self.assertTrue(
+            set(expected_mp_state_dict.keys()) == set(mp_state_dict.keys()),
+            f"State dict keys mismatch, expected {expected_mp_state_dict.keys()}, actual {mp_state_dict.keys()}.")
+
         for k, v in mp_state_dict.items():
-            self.assertTrue(k in expected_mp_state_dict)
             expected_v = expected_mp_state_dict[k]
-            self.assertTrue(torch.allclose(v, expected_v))
+            self.assertTrue(
+                torch.allclose(v, expected_v),
+                f"Tensors for {k} mismatch, expected {expected_v}, actual {v}.")
 
         get_attrs = _get_get_attr_target_strings(mq)
         self.assertTrue(get_attrs == expected_get_attrs)
