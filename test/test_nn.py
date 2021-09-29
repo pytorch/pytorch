@@ -45,7 +45,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, skipCUDAIfRocmVersionLessThan, skipCUDAIfNotMiopenSuggestNHWC, \
-    onlyOnCPUAndCUDA, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, skipMeta
+    onlyOnCPUAndCUDA, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, skipMeta, get_all_device_types
 from torch.nn import MultiheadAttention
 
 from hypothesis import given
@@ -8690,7 +8690,7 @@ class TestNN(NNTestCase):
         # checking error message when RNN has seq_len = 0
         for module in (nn.RNN, nn.LSTM, nn.GRU):
             for bidirectional in [True, False]:
-                for device in torch.testing.get_all_device_types():
+                for device in get_all_device_types():
                     input = torch.ones(0, 10, 5)
                     rnn = module(5, 6, bidirectional=bidirectional)
                     if device == 'cuda':

@@ -45,7 +45,7 @@ __device__ __forceinline__ void reduce_block_into_lanes
     __syncthreads();
   }
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
   #pragma unroll
 #endif
   for(int i = (blockSize >> 1); i >= 64; i >>= 1)
@@ -64,7 +64,7 @@ __device__ __forceinline__ void reduce_block_into_lanes
       final = val;
     // __SYNCWARP();
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
     #pragma unroll
 #endif
     for(int i = 16; i >= lanes; i >>= 1)
