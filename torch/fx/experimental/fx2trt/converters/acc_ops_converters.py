@@ -1434,7 +1434,8 @@ def acc_ops_sigmoid(network, target, args, kwargs, name):
 @tensorrt_converter(acc_ops.permute)
 def acc_ops_permute(network, target, args, kwargs, name):
     input_val = kwargs["input"]
-    permutation = kwargs["permutation"]
+    ranks = len(input_val.shape) + (1 if network.has_implicit_batch_dimension else 0)
+    permutation = [i % ranks for i in kwargs["permutation"]]
 
     if not isinstance(input_val, trt.tensorrt.ITensor):
         raise RuntimeError(
@@ -1483,14 +1484,15 @@ def acc_ops_quantize_per_tensor(network, target, args, kwargs, name):
 @tensorrt_converter(acc_ops.dequantize)
 def acc_ops_dequantize(network, target, args, kwargs, name):
     input_val = kwargs["input"]
+    input_val_tensor_meta = kwargs["_itensor_to_tensor_meta"][input_val]
 
     if not isinstance(input_val, trt.tensorrt.ITensor):
         raise RuntimeError(f"{name} received input {input_val} that is not part "
                            "of the TensorRT region!")
 
-    q_scale = acc_utils.get_field_from_acc_out_ty(kwargs["input_tensor_meta"], "q_scale")
-    q_zero_point = acc_utils.get_field_from_acc_out_ty(kwargs["input_tensor_meta"], "q_zero_point")
-    dtype = acc_utils.get_field_from_acc_out_ty(kwargs["input_tensor_meta"], "dtype")
+    q_scale = acc_utils.get_field_from_acc_out_ty(input_val_tensor_meta, "q_scale")
+    q_zero_point = acc_utils.get_field_from_acc_out_ty(input_val_tensor_meta, "q_zero_point")
+    dtype = acc_utils.get_field_from_acc_out_ty(input_val_tensor_meta, "dtype")
 
     if dtype not in (torch.quint8, torch.qint8, torch.qint32):
         raise RuntimeError("Only support (torch.quint8, torch.qint8, torch.qint32) "

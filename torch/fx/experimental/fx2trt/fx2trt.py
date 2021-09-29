@@ -1,10 +1,11 @@
 import warnings
-from typing import List, NamedTuple, Iterable, Any, Optional, Tuple, Sequence
+from typing import List, NamedTuple, Iterable, Any, Optional, Tuple, Sequence, Dict
 
 import tensorrt as trt
 import torch
 import torch.fx
 from torch.fx.node import _get_qualified_name
+from torch.fx.passes.shape_prop import TensorMetadata
 
 
 TRTInterpreterResult = Tuple[Any, Sequence[str], Sequence[str]]
@@ -107,6 +108,16 @@ class TRTModule(torch.nn.Module):
         self.input_names = state_dict[prefix + "input_names"]
         self.output_names = state_dict[prefix + "output_names"]
         self._initialize()
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop('context', None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        if self.engine:
+            self.context = self.engine.create_execution_context()
 
     def forward(self, *inputs):
         with torch.autograd.profiler.record_function("TRTModule:Forward"):
@@ -305,6 +316,7 @@ class TRTInterpreter(torch.fx.Interpreter):
         self._cur_node_name: Optional[str] = None
         self._input_names: List[str] = []
         self._output_names: List[str] = []
+        self._itensor_to_tensor_meta: Dict[trt.tensorrt.ITensor, TensorMetadata] = dict()
 
     def validate_input_specs(self):
         for shape, dtpe, _, shape_ranges, has_batch_dim in self.input_specs:
@@ -421,7 +433,23 @@ class TRTInterpreter(torch.fx.Interpreter):
 
     def run_node(self, n):
         self._cur_node_name = str(n)
-        return super().run_node(n)
+        # add "_itensor_to_tensor_meta"
+        kwargs = dict(n.kwargs)
+        kwargs["_itensor_to_tensor_meta"] = self._itensor_to_tensor_meta
+        n.kwargs = kwargs
+
+        # run the node
+        trt_node = super().run_node(n)
+
+        # remove "_itensor_to_tensor_meta"
+        kwargs = dict(n.kwargs)
+        del kwargs["_itensor_to_tensor_meta"]
+        n.kwargs = kwargs
+
+        if isinstance(trt_node, trt.tensorrt.ITensor):
+            self._itensor_to_tensor_meta[trt_node] = n.meta.get("tensor_meta")
+
+        return trt_node
 
     def placeholder(self, target, args, kwargs):
         self._input_names.append(target)
