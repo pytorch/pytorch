@@ -174,7 +174,6 @@ if HAS_PYDOT:
             result += "|" + "requires_grad" + "=" + str(tm.requires_grad) + r"\l"
             result += "|" + "stride" + "=" + str(tm.stride) + r"\l"
             if tm.is_quantized:
-                assert tm.qparams is not None
                 assert "qscheme" in tm.qparams
                 qscheme = tm.qparams["qscheme"]
                 if qscheme in {

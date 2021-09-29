@@ -254,7 +254,6 @@ def move_kwargs_to_acc_out_ty(
             assert len(kwarg_replacement_tuple) == 3
             orig_kwarg_name, tmd_field_name, move_to_qparams = kwarg_replacement_tuple  # type: ignore[misc]
         if move_to_qparams:
-            # when the arg is constant, the fields will be constant value and tmd_field_name
             qparams[tmd_field_name] = new_kwargs[orig_kwarg_name]
         else:
             tmd_dict[tmd_field_name] = new_kwargs[orig_kwarg_name]
