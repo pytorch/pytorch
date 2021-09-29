@@ -993,7 +993,7 @@ def main():
         )
         # downloading test cases configuration to local environment
         get_test_case_configs(dirpath=test_directory)
-        
+
         if os.getenv("IS_GHA", "0") == "1":
             print("DETERMINATING")
             diff_path = REPO_ROOT / "pr.diff"
