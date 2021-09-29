@@ -170,7 +170,7 @@ public:
   [[noreturn]] void reportError(DispatchKey dispatchKey) const;
 
   const KernelFunction& lookup(DispatchKey k) const {
-    auto idx = getMappedDispatchKey(k);
+    const auto idx = getDispatchTableIndexForDispatchKey(k);
     if (idx == -1) {
       reportError(k);
     }
@@ -207,7 +207,7 @@ private:
   OperatorName name_;
   c10::optional<AnnotatedSchema> schema_;
 
-  std::array<KernelFunction, c10::getMappedDispatchKey(DispatchKey::NumDispatchKeys)> dispatchTable_;
+  std::array<KernelFunction, c10::getDispatchTableIndexForDispatchKey(DispatchKey::NumDispatchKeys)> dispatchTable_;
   DispatchKeyExtractor dispatchKeyExtractor_;
 
   // kernels_ stores all registered kernels for the corresponding dispatch key

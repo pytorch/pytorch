@@ -365,7 +365,7 @@ static_assert(
  * unnecessary to reserve additional space for dispatch keys that will
  * never be used on mobile.
  */
-C10_API constexpr int getMappedDispatchKey(DispatchKey dk) {
+C10_API constexpr int getDispatchTableIndexForDispatchKey(DispatchKey dk) {
   switch (dk) {
     case DispatchKey::Undefined:
       return 0;
@@ -397,7 +397,7 @@ C10_API constexpr int getMappedDispatchKey(DispatchKey dk) {
 /**
  * For the server use-case, make this a simple pass-through.
  */
-C10_API constexpr int getMappedDispatchKey(DispatchKey dk) {
+C10_API constexpr int getDispatchTableIndexForDispatchKey(DispatchKey dk) {
   return static_cast<int>(dk);
 }
 #endif
