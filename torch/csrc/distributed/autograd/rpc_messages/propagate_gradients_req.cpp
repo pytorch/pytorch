@@ -55,7 +55,7 @@ std::unique_ptr<PropagateGradientsReq> PropagateGradientsReq::fromMessage(
       payload_size,
       *rpc::RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
       message.tensors());
-  auto tupleElements = std::move(*std::move(tuple).toTuple()).elements();
+  const auto& tupleElements = tuple.toTuple()->elements();
 
   // Build PropagateGradientsReq.
   TORCH_INTERNAL_ASSERT(tupleElements.size() >= 3);
@@ -66,8 +66,8 @@ std::unique_ptr<PropagateGradientsReq> PropagateGradientsReq::fromMessage(
   // Build AutogradMetadata.
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t autogradContextId, autogradMessageId;
-  autogradMessageId = tupleElements.back().toInt();
-  autogradContextId = tupleElements.back().toInt();
+  autogradMessageId = tupleElements[tupleElements.size() - 2].toInt();
+  autogradContextId = tupleElements[tupleElements.size() - 3].toInt();
 
   AutogradMetadata autogradMetadata(autogradContextId, autogradMessageId);
 

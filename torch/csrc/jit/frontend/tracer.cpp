@@ -352,7 +352,8 @@ static IValue addInput(
     AT_ASSERT(
         elem_values.size() == num_elems && elem_types.size() == num_elems);
     for (const auto i : c10::irange(num_elems)) {
-      tuple->unsafeSetElement(i, addInput(state, elems.at(i), elem_types[i], elem_values[i]));
+      tuple->unsafeSetElement(
+          i, addInput(state, elems.at(i), elem_types[i], elem_values[i]));
     }
     return tuple;
   } else if (auto dict_type = type->cast<DictType>()) {
