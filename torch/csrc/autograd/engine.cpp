@@ -716,7 +716,7 @@ void validate_outputs(
 
     if (grad.device() != metadata.device()) {
       // quick hack for: https://github.com/pytorch/pytorch/issues/65016 but should be eventually removed
-      if (!metadata.is_tensor_subclass()) {
+      if (!(metadata.is_tensor_subclass() || grad.unsafeGetTensorImpl()->is_python_dispatch())) {
         if (grad.dim() == 0) {
           grad = grad.to(metadata.device());
         } else {
@@ -1261,7 +1261,7 @@ void GraphTask::stash_current_streams() {
   caller_current_streams_.resize(num_gpus);
   if (num_gpus > 0) {
     for (c10::DeviceIndex idx = 0; idx < num_gpus;  idx++) {
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
       // If the build targets ROCM, stash streams for all visible devices unconditionally, to work around
       // https://github.com/pytorch/pytorch/issues/59750.
       // TODO: Remove ROCM-specific behavior when https://github.com/pytorch/pytorch/issues/59750 is fixed.
