@@ -81,7 +81,7 @@ void quantize_tensor_per_channel_affine_cuda(
     const Tensor& scales,
     const Tensor& zero_points,
     int64_t axis) {
-  static const std::string fn_name = "quantize_tensor_per_channel_affine_cuda";
+  static constexpr auto fn_name = "quantize_tensor_per_channel_affine_cuda";
   std::vector<int64_t> expected_shape(rtensor.dim(), 1);
   expected_shape[axis] = rtensor.size(axis);
 
@@ -124,7 +124,7 @@ void dequantize_tensor_per_channel_affine_cuda(
     const Tensor& scales,
     const Tensor& zero_points,
     int64_t axis) {
-  static const std::string fn_name = "dequantize_tensor_per_channel_affine_cuda";
+  static constexpr auto fn_name = "dequantize_tensor_per_channel_affine_cuda";
   std::vector<int64_t> expected_shape(rtensor.dim(), 1);
   expected_shape[axis] = rtensor.size(axis);
 
@@ -160,7 +160,7 @@ void quantize_tensor_per_channel_float_qparams_cuda(
     const Tensor& scales,
     const Tensor& zero_points,
     int64_t axis) {
-  static const std::string fn_name = "quantize_tensor_per_channel_float_qparams_cuda";
+  static constexpr auto fn_name = "quantize_tensor_per_channel_float_qparams_cuda";
   std::vector<int64_t> expected_shape(rtensor.dim(), 1);
   expected_shape[axis] = rtensor.size(axis);
 
@@ -208,7 +208,7 @@ void dequantize_tensor_per_channel_float_qparams_cuda(
     const Tensor& scales,
     const Tensor& zero_points,
     int64_t axis) {
-  static const std::string fn_name = "dequantize_tensor_per_channel_float_qparams_cuda";
+  static constexpr auto fn_name = "dequantize_tensor_per_channel_float_qparams_cuda";
   std::vector<int64_t> expected_shape(rtensor.dim(), 1);
   expected_shape[axis] = rtensor.size(axis);
 
