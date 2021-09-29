@@ -2432,6 +2432,20 @@ def sample_inputs_histogram(op_info, device, dtype, requires_grad):
 
     return sample_inputs
 
+def sample_inputs_bincount(op_info, device, dtype, requires_grad):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    sample_inputs = []
+
+    for max_val, weighted, minlength in product(range(1, S + 1), [False, True], range(0, 2 * S)):
+        input_tensor = torch.randint(0, max_val + 1, (S,), dtype=dtype)
+        weight_tensor = make_arg((S,)) if weighted else None
+
+        sample_inputs.append(SampleInput(input_tensor,
+                                         kwargs=dict(weights=weight_tensor, minlength=minlength)))
+
+    return sample_inputs
+
 def sample_inputs_gradient(op_info, device, dtype, requires_grad):
     sample_inputs = []
     test_cases_float = (
@@ -9146,6 +9160,15 @@ op_db: List[OpInfo] = [
            dtypes=_dispatch_dtypes(),  # histogram is only implemented on CPU
            dtypesIfCPU=floating_types(),
            sample_inputs_func=sample_inputs_histogram,
+           supports_autograd=False,
+           skips=(
+               # JIT tests don't work with Tensor keyword arguments
+               # https://github.com/pytorch/pytorch/issues/58507
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),),),
+    OpInfo('bincount',
+           dtypes=integral_types_and(),
+           sample_inputs_func=sample_inputs_bincount,
+           supports_out=False,
            supports_autograd=False,
            skips=(
                # JIT tests don't work with Tensor keyword arguments
