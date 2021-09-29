@@ -202,8 +202,8 @@ CanonicalIndexInfo GetCanonicalIndexInfo(
 }
 
 ir::Value EnsureRank1(const ir::Value& index) {
-  LTC_CHECK_LE(index->shape().rank(), 1);
-  return index->shape().rank() == 0
+  LTC_CHECK_LE(GetShapeFromTsValue(index).rank(), 1);
+  return GetShapeFromTsValue(index).rank() == 0
              ? ir::MakeNode<ir::ops::Expand>(
                    index, std::vector<lazy_tensors::int64>{1},
                    /*is_scalar_expand=*/false)

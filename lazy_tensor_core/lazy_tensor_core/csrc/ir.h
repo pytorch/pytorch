@@ -146,6 +146,9 @@ inline std::ostream& operator<<(std::ostream& stream, const OpKind& op) {
 
 using OpList = lazy_tensors::Span<const Value>;
 
+void EmitShortFrameInfo(std::ostream& stream,
+                        const std::vector<SourceLocation>& frames);
+
 // A node in the graph. Nodes for operations which requires extra data to be
 // stored for lowering, should inherit from this class and add operation
 // specific member there. For example, a constant might create a new
@@ -182,14 +185,6 @@ class Node {
   const OpKind& op() const { return op_; }
 
   size_t num_outputs() const { return num_outputs_; }
-
-  // Retrieves the full shape of the IR Node. Note that if this is a
-  // multi-output node, the returned shape will be a tuple.
-  virtual const lazy_tensors::Shape& shape() const = 0;
-
-  // Retrieves the shape of the output at a given index. If the node is not a
-  // multi-output node, output_index must be zero.
-  virtual const lazy_tensors::Shape& shape(size_t output_index) const = 0;
 
   const std::vector<Output>& operands() const { return operands_as_outputs_; }
 

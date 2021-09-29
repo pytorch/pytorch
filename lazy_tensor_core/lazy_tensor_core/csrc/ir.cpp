@@ -66,6 +66,8 @@ ShapeCache* GetShapeCache() {
   return cache;
 }
 
+}  // namespace
+
 void EmitShortFrameInfo(std::ostream& stream,
                         const std::vector<SourceLocation>& frames) {
   if (!frames.empty()) {
@@ -80,8 +82,6 @@ void EmitShortFrameInfo(std::ostream& stream,
            << ":" << frame.line;
   }
 }
-
-}  // namespace
 
 bool Use::operator<(const Use& rhs) const {
   if (node->op() != rhs.node->op()) {
@@ -210,14 +210,16 @@ void Node::ReplaceAllUsesWith(NodePtr node, size_t index) {
 
 std::string Node::ToString() const {
   std::stringstream ss;
-  ss << shape() << " " << op();
-  if (num_outputs() > 1) {
-    ss << ", num_outputs=" << num_outputs();
-  }
-  if (!metadata_.scope.empty()) {
-    ss << ", scope=" << metadata_.scope;
-  }
-  EmitShortFrameInfo(ss, metadata_.frame_info);
+  ss << "TODO reimplement Node::ToString with aten shape in base class, for "
+        "now it's solely implemented in TsNode";
+  // ss << shape() << " " << op();
+  // if (num_outputs() > 1) {
+  //   ss << ", num_outputs=" << num_outputs();
+  // }
+  // if (!metadata_.scope.empty()) {
+  //   ss << ", scope=" << metadata_.scope;
+  // }
+  // EmitShortFrameInfo(ss, metadata_.frame_info);
   return ss.str();
 }
 

@@ -10,6 +10,7 @@ namespace ir {
 // from an ir::Output that holds a Node* that points to a TsNode 
 lazy_tensors::Shape GetShapeFromTsOutput(const ir::Output& output);
 lazy_tensors::Shape GetShapeFromTsValue(const ir::Value& value);
+lazy_tensors::Shape GetShapeFromTsNode(const ir::Node& value);
 
 class TsNode : public Node {
  public:
@@ -40,11 +41,13 @@ class TsNode : public Node {
 
   // Retrieves the full shape of the IR Node. Note that if this is a
   // multi-output node, the returned shape will be a tuple.
-  virtual const lazy_tensors::Shape& shape() const override;
+  const lazy_tensors::Shape& shape() const;
 
   // Retrieves the shape of the output at a given index. If the node is not a
   // multi-output node, output_index must be zero.
-  virtual const lazy_tensors::Shape& shape(size_t output_index) const override;
+  const lazy_tensors::Shape& shape(size_t output_index) const;
+
+  virtual std::string ToString() const;
 
  private:
   lazy_tensors::Shape shape_;
