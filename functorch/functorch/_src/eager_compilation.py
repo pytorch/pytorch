@@ -18,7 +18,7 @@ def draw_graph(traced: torch.fx.GraphModule, fname: str, figname: str = "fx_grap
     getattr(x, "write_" + ext.lstrip("."))(fname)
 
 # todo(chilli): clean this up/make it more understandable
-def partition_backwards(fx_module: fx.GraphModule, _joint_inputs):
+def default_partition(fx_module: fx.GraphModule, _joint_inputs):
     bw_nodes = set()
     saved_nodes = set()
     output_node = None
@@ -90,7 +90,7 @@ def create_joint_forward_backward(fn):
 
 def draw_joint_graph(graph, joint_inputs, file_name="full_graph.png"):
     draw_graph(graph, file_name)
-    return partition_backwards(graph, joint_inputs)
+    return default_partition(graph, joint_inputs)
 
 def create_compiled_function(flat_fn, fw_compiler, bw_compiler, partition_fn):
     joint_forward_backward = create_joint_forward_backward(flat_fn)
@@ -144,7 +144,7 @@ def create_compiled_function(flat_fn, fw_compiler, bw_compiler, partition_fn):
     return CompiledFunction
 
 
-def compiled_function(fn, fw_compiler, bw_compiler, partition_fn=partition_backwards):
+def compiled_function(fn, fw_compiler, bw_compiler, partition_fn=default_partition):
     saved_fn = None
 
     def returned_function(*args, **kwargs):
