@@ -4971,9 +4971,10 @@ class TestLinalg(TestCase):
         def assertEqual(answer, expected):
             if x.dtype.is_floating_point or x.dtype.is_complex:
                 k = max(x.shape[-1], 1)  # Scale the atol with the size of the matrix
-                self.assertEqual(answer, expected, msg=f"x.shape x y.shape = answer.shape", atol=k * 5e-5, rtol=1e-4)
+                self.assertEqual(answer, expected, msg=f"{x.shape} x {y.shape} = {answer.shape}",
+                                                   atol=k * 5e-5, rtol=1e-4)
             else:
-                self.assertEqual(answer, expected, msg=f"x.shape x y.shape = answer.shape")
+                self.assertEqual(answer, expected, msg=f"{x.shape} x {y.shape} = {answer.shape}")
 
         # test x @ y
         expected = np.matmul(x.cpu(), y.cpu())
