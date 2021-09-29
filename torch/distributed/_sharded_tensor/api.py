@@ -184,19 +184,25 @@ def _validate_output_tensor_for_gather(
     dst_tensor: Optional[torch.Tensor],
 ):
     if dst_rank == my_rank:
-        if not dst_tensor:
+        if dst_tensor is None:
             raise ValueError(
                 f"Argument ``dst_tensor`` must be specified on destination rank {dst_rank}"
+            )
+        curr_device = torch.device(f"cuda:{my_rank}")
+        if tuple(size) != (dst_tensor.size()):
+            raise ValueError(
+                f"Argument ``dst_tensor`` have size {tuple(dst_tensor.size())},"
+                f"but should be {tuple(size)}"
+            )
+        if dst_tensor.device != curr_device:
+            raise ValueError(
+                f"Argument ``dst_tensor`` should be created on device {curr_device},"
+                f"but found on {dst_tensor.device}"
             )
         if torch.count_nonzero(dst_tensor):
             raise ValueError(
                 "Argument ``dst_tensor`` should be a zero tensor."
             )
-        if size != dst_tensor.size():
-            raise ValueError(
-                f"Argument ``dst_tensor`` have size {size}"
-            )
-
     elif dst_tensor:
         raise ValueError(
             "Argument ``dst_tensor`` must NOT be specified "
@@ -381,61 +387,37 @@ class ShardedTensor(object):
         my_rank = dist.get_rank(self._process_group)
         full_size = self.metadata().size
         _validate_output_tensor_for_gather(my_rank, dst, full_size, out)
+        curr_device = torch.device(f"cuda:{my_rank}")
 
         shard_tensors = self.local_shards()
-        flattened_shard_tensors = torch.stack(
-            [local_shard.tensor for local_shard in shard_tensors],
-        )
-        flattened_local_metadata = torch.stack(
-            [
-                torch.tensor(
-                    [
-                        local_shard.metadata.shard_offsets,
-                        local_shard.metadata.shard_lengths,
-                    ],
-                    dtype=torch.int,
-                ) for local_shard in shard_tensors
-            ],
-        )
+        world_size = dist.get_world_size(self._process_group)
 
-        gathered_shard_tensors = [None for _ in self._process_group.world_size]
-        gathered_local_metadata = [None for _ in self._process_group.world_size]
-
-        gather_tensor = dist.gather(
-            tensor=flattened_shard_tensors,
-            gather_list=gathered_shard_tensors,
-            dst=dst,
-            group=self._process_group,
-            async_op=True,
-        )
-
-        gather_metadata = dist.gather(
-            tensor=flattened_local_metadata,
-            gather_list=gathered_local_metadata,
-            dst=dst,
-            group=self._process_group,
-            async_op=True,
-        )
-
-        gather_tensor.wait()
-        gather_metadata.wait()
+        gathered_shards = [None] * world_size
+        # all_gather_object is not efficient. will revise this part once
+        # NCCL support for dist.gather() is ready
+        with torch.cuda.device(curr_device):
+            dist.all_gather_object(
+                obj=shard_tensors,
+                object_list=gathered_shards,
+                group=self._process_group,
+            )
 
         if my_rank == dst:
             dims = len(full_size)
-            for sharded_tensor, sharded_metadata in zip(
-                gathered_shard_tensors,
-                gathered_local_metadata,
-            ):
-                # the idx-th shard from a rank
-                for idx in range(sharded_metadata.size()[0]):
+            for shards in gathered_shards:
+                for shard in shards:
+                    metadata = shard.metadata
+                    tensor = shard.tensor.to(curr_device)
+
                     out_narrow_view = out
                     for dim in range(dims):
                         out_narrow_view = out_narrow_view.narrow(
                             dim,
-                            gathered_local_metadata[idx][0][dim],
-                            gathered_local_metadata[idx][1][dim],
-                        )
-                    out_narrow_view.add_(sharded_tensor[idx])
+                            metadata.shard_offsets[dim],
+                            metadata.shard_lengths[dim],
+                        ).contiguous()
+
+                    out_narrow_view.add_(tensor)
 
     @classmethod
     def _init_from_local_shards(

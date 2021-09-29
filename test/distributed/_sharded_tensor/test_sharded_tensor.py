@@ -456,7 +456,6 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         self.assertEqual((expected_h, w), local_shard.size())
         self.assertEqual(local_shard, torch.ones(expected_h, w))
 
-
     @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
@@ -476,11 +475,16 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         sharded_tensor = _sharded_tensor.ones(spec, h, w)
 
         full_tensor = None
-        if self.rank == 0:
-            full_tensor = torch.zeros(h, w)
-        _sharded_tensor.gather(0, full_tensor)
+        dst = 1
+        if self.rank == dst:
+            full_tensor = torch.zeros(
+                h, 
+                w,
+                device=torch.device(f"cuda:{dst}"),
+            )
+        sharded_tensor.gather(dst, full_tensor)
 
-        if self.rank == 0:
+        if self.rank == dst:
             self.assertEqual(full_tensor, torch.ones(h, w))
         else:
             self.assertIsNone(full_tensor)
@@ -1216,7 +1220,6 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         self.assertEqual((5, 5), local_shard.tensor.size())
         self.assertEqual(local_shard.tensor, torch.ones(5, 5))
 
-
     @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
@@ -1250,11 +1253,16 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         sharded_tensor = _sharded_tensor.ones(spec, h, w, init_rrefs=True)
 
         full_tensor = None
-        if self.rank == 0:
-            full_tensor = torch.zeros(h, w)
-        _sharded_tensor.gather(0, full_tensor)
+        dst = 0
+        if self.rank == dst:
+            full_tensor = torch.zeros(
+                h, 
+                w,
+                device=torch.device(f"cuda:{dst}")
+            )
+        sharded_tensor.gather(dst, full_tensor)
 
-        if self.rank == 0:
+        if self.rank == dst:
             self.assertEqual(full_tensor, torch.ones(h, w))
         else:
             self.assertIsNone(full_tensor)
