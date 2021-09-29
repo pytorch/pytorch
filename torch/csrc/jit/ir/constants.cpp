@@ -123,11 +123,13 @@ c10::optional<Value*> tryInsertConstant(
       n->destroy();
       return c10::nullopt;
     };
-    // TODO: bail on inserting object with owning compilation unit reference
     // see: [Constant Object Weak CompilationUnit Reference]
   } else if (
-      (val.isGenericDict() && insertableIValue(val)) || (val.isEnum()) ||
-      (val.isObject() && !val.toObjectRef().type()->is_module())) {
+      (val.isObject() && !val.toObjectRef().type()->is_module()) &&
+      val.toObject()->is_weak_compilation_ref()) {
+    n->ival_(attr::value, val);
+    n->output()->setType(val.type());
+  } else if ((val.isGenericDict() && insertableIValue(val)) || (val.isEnum())) {
     n->ival_(attr::value, val);
     n->output()->setType(val.type());
   } else {
