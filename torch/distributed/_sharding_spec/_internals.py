@@ -40,8 +40,8 @@ class ShardMetadata(object):
         for i in range(len(self.shard_offsets)):
             if self.shard_offsets[i] < 0:
                 raise ValueError('shard_offsets should be >=0')
-            if self.shard_lengths[i] <= 0:
-                raise ValueError('shard_lengths should be > 0')
+            if self.shard_lengths[i] < 0:
+                raise ValueError('shard_lengths should be >= 0')
 
 
 
@@ -122,3 +122,31 @@ def check_tensor(shards_metadata, tensor_dims) -> None:
             f'Total volume of shards: {total_shard_volume} '
             f'does not match tensor volume: {tensor_volume}, in other words '
             f'all the individual shards do not cover the entire tensor')
+
+def get_split_size(dim_size, chunks):
+    """
+    Computes the split size inline with ``torch.chunk``
+
+    Args:
+        dim_size(int): Size of the dimension being chunked.
+        chunks(int): Number of chunks to create for ``dim_size``.
+
+    Returns:
+        An int indicating the split size to use.
+    """
+    return (dim_size + chunks - 1) // chunks
+
+def get_chunked_dim_size(dim_size, split_size, idx):
+    """
+    Computes the dim size of the chunk for provided ``idx`` given ``dim_size``
+    and ``split_size``.
+
+    Args:
+        dim_size(int): Size of the dimension being chunked.
+        split_size(int): The chunk size for each chunk of ``dim_size``.
+        idx(int): The index of chunk whose dim size is being requested.
+
+    Returns:
+        An int indicating the dim size of the chunk.
+    """
+    return min(dim_size, split_size * (idx + 1)) - split_size * idx

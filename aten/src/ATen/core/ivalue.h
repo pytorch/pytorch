@@ -872,17 +872,14 @@ struct TORCH_API IValue final {
   struct HashAliasedIValue {
     size_t operator()(const IValue& val) const {
       if (val.isTensor()) {
-        auto& tensor = val.toTensor();
-        if (tensor.is_mkldnn() || tensor.is_sparse()) {
+        if (val.toTensor().is_mkldnn()) {
           // MKLDNN tensors dont have storage and dont create views
           // or aliasing so we can just use Tensor pointer, TODO: find way
           // to use mkldnn storage
-          // Sparse tensors don't have storage use unsafeGetTensorImpl
-          // instead of using the storage of indices or values.
-          return reinterpret_cast<size_t>(tensor.unsafeGetTensorImpl());
+          return reinterpret_cast<size_t>(val.toTensor().unsafeGetTensorImpl());
         } else {
           return reinterpret_cast<size_t>(
-              tensor.storage().unsafeGetStorageImpl());
+              val.toTensor().storage().unsafeGetStorageImpl());
         }
       }
       // If it is not a Tensor, then two mutable IValues alias each other only
@@ -1149,6 +1146,77 @@ struct TORCH_API StrongTypePtr {
   std::shared_ptr<torch::jit::CompilationUnit> cu_;
   std::shared_ptr<Type> type_;
 };
+
+// [Constant Object Weak CompilationUnit Reference]
+// A non owning pointer to a type. When a class get inserted as a constant
+// into a graph, if we used a strong pointer we would have a circular reference
+// from Object -> CompilationUnit and CompilationUnit -> Graph (which owns the
+// Constant Object)
+struct TORCH_API WeakTypePtr {
+  WeakTypePtr(
+      std::weak_ptr<torch::jit::CompilationUnit> cu,
+      std::shared_ptr<Type> type);
+
+  std::weak_ptr<torch::jit::CompilationUnit> cu_;
+  std::shared_ptr<Type> type_;
+};
+
+// internal build errors with std::variant :/
+struct WeakOrStrongCompilationUnit {
+  explicit WeakOrStrongCompilationUnit(
+      std::shared_ptr<torch::jit::CompilationUnit> shared_cu) {
+    strong_ptr_ = shared_cu;
+    weak_ptr_ = c10::nullopt;
+  }
+
+  explicit WeakOrStrongCompilationUnit(
+      std::weak_ptr<torch::jit::CompilationUnit> weak_cu) {
+    strong_ptr_ = c10::nullopt;
+    weak_ptr_ = weak_cu;
+  }
+
+  std::shared_ptr<torch::jit::CompilationUnit> getStrongRefOrThrow() const {
+    TORCH_INTERNAL_ASSERT(strong_ptr_ != c10::nullopt);
+    return *strong_ptr_;
+  }
+
+  std::weak_ptr<torch::jit::CompilationUnit> getWeakRefOrThrow() const {
+    TORCH_INTERNAL_ASSERT(weak_ptr_ != c10::nullopt);
+    return *weak_ptr_;
+  }
+
+  bool holdingStrongRef() const {
+    return strong_ptr_ != c10::nullopt;
+  }
+
+  c10::optional<std::shared_ptr<torch::jit::CompilationUnit>> strong_ptr_;
+  c10::optional<std::weak_ptr<torch::jit::CompilationUnit>> weak_ptr_;
+};
+
+// An Object will hold a non-owning Compilation Unit reference if it is a
+// Constant in the graph and a Owning reference otherwise
+struct TORCH_API WeakOrStrongTypePtr {
+  explicit WeakOrStrongTypePtr(WeakTypePtr weak)
+      : cu_(WeakOrStrongCompilationUnit(weak.cu_)) {
+    type_ = weak.type_;
+  }
+  explicit WeakOrStrongTypePtr(StrongTypePtr strong)
+      : cu_(WeakOrStrongCompilationUnit(strong.cu_)) {
+    type_ = strong.type_;
+  }
+  explicit WeakOrStrongTypePtr(WeakOrStrongCompilationUnit cu, TypePtr type)
+      : cu_(cu) {
+    type_ = type;
+  }
+  WeakTypePtr asWeakTypePtr() const;
+
+  WeakOrStrongCompilationUnit cu_;
+  TypePtr type_;
+  bool holds_strong_ref() const {
+    return cu_.holdingStrongRef();
+  }
+};
+
 
 TORCH_API ska::flat_hash_map<std::type_index, c10::ClassTypePtr>&
 getCustomClassTypeMap();
