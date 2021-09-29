@@ -44,12 +44,12 @@ jobs:
         run: echo running ciflow_should_run
       - name: print labels
         run: echo "${LABELS}"
-  calculate-docker-image:
+
+  build:
     runs-on: linux.2xlarge
     needs: [ciflow_should_run]
     env:
-      DOCKER_BUILDKIT: 1
-    timeout-minutes: 90
+      JOB_BASE_NAME: periodic-linux-xenial-cuda11.1-py3.6-gcc7-build
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
     steps:
@@ -100,17 +100,18 @@ jobs:
         with:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
-          submodules: false
+          submodules: recursive
       - name: Calculate docker image tag
         id: calculate-tag
         run: |
           DOCKER_TAG=$(git rev-parse HEAD:.circleci/docker)
+          echo "DOCKER_TAG=${DOCKER_TAG}" >> "${GITHUB_ENV}"
+          echo "DOCKER_IMAGE=${DOCKER_IMAGE_BASE}:${DOCKER_TAG}" >> "${GITHUB_ENV}"
           echo "::set-output name=docker_tag::${DOCKER_TAG}"
           echo "::set-output name=docker_image::${DOCKER_IMAGE_BASE}:${DOCKER_TAG}"
       - name: Check if image should be built
         id: check
         env:
-          DOCKER_TAG: ${{ steps.calculate-tag.outputs.docker_tag }}
           BASE_REVISION: ${{ github.event.pull_request.base.sha || github.sha }}
         run: |
           set -x
@@ -142,67 +143,11 @@ jobs:
       - name: Build and push docker image
         if: ${{ steps.check.outputs.rebuild }}
         env:
-          DOCKER_TAG: ${{ steps.calculate-tag.outputs.docker_tag }}
           DOCKER_SKIP_S3_UPLOAD: 1
+        working-directory: .circleci/docker
         run: |
           export IMAGE_NAME=${DOCKER_IMAGE_BASE#308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/}
-          cd .circleci/docker && ./build_docker.sh
-
-  build:
-    runs-on: linux.2xlarge
-    needs: [calculate-docker-image, ciflow_should_run]
-    env:
-      DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
-      JOB_BASE_NAME: periodic-linux-xenial-cuda11.1-py3.6-gcc7-build
-    steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
-          bash /tmp/ecr-login.sh
-          rm /tmp/ecr-login.sh
-      - name: Chown workspace
-        env:
-          ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE:?}/*"
-          rm -f ~/.ssh/authorized_keys
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          # deep clone, to allow use of git merge-base
-          fetch-depth: 0
-          submodules: recursive
+          ./build_docker.sh
       - name: Pull Docker image
         run: |
           retry () {
@@ -337,13 +282,13 @@ jobs:
         run: .github/scripts/generate_pytorch_test_matrix.py
 
   test:
-    needs: [calculate-docker-image, build, generate-test-matrix, ciflow_should_run]
+    needs: [build, generate-test-matrix, ciflow_should_run]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     env:
-      DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
+      DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: periodic-linux-xenial-cuda11.1-py3.6-gcc7-test
       TEST_CONFIG: ${{ matrix.config }}
       SHARD_NUMBER: ${{ matrix.shard }}
