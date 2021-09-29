@@ -155,10 +155,10 @@ static bool check_has_torch_dispatch(PyObject *obj) {
 }
 
 static PyObject* getXLATensorClass() {
-  // TODO: What should we do if XLATensor doesn't exist? Return THPVariableClass?
-  // TODO: is THPObjectPtr the right pointer container?
-  static THPObjectPtr xla_tensor_ptr(py::globals()["XLATensor"].ptr());
-  return xla_tensor_ptr.get();
+  static const char* python_xla_tensor_name = "XLATensor";
+  static PyObject* xla_tensor_class = py::globals().contains(python_xla_tensor_name) ? 
+    py::globals()[python_xla_tensor_name].ptr() : nullptr;
+  return xla_tensor_class;
 };
 
 // TODO: Make this take Variable by const reference
@@ -207,8 +207,7 @@ PyObject * THPVariable_Wrap(at::TensorBase var)
     }
   }
 
-  // TODO: is there a better check?
-  if (var.device().type() == c10::kXLA) {
+  if (var.is_xla() && getXLATensorClass()) {
       return THPVariable_NewWithVar(
         (PyTypeObject*)getXLATensorClass(), std::move(var), status);
   }
