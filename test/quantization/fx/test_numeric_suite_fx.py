@@ -31,7 +31,7 @@ from torch.quantization.quantization_mappings import (
     get_default_dynamic_quant_module_mappings,
     get_default_float_to_quantized_operator_mappings,
 )
-from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_quantization import NodeSpec as ns
 from torch.quantization.fx.pattern_utils import get_default_quant_patterns
 import torch.quantization.fx.quantization_patterns as qp
@@ -1855,7 +1855,6 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         ref_shadow = mc_shadows_mp(datum)
         self.assertEqual(ref_fp32, ref_shadow)
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_extract_weights_cuda(self):
         # Note: this is not using quantization because quantized kernels do not
@@ -1867,7 +1866,6 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             results, 'a', 'b', compute_sqnr, 'sqnr')
         self.assert_ns_compare_dict_valid(results)
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_add_loggers_cuda(self):
         # Note: this is not using quantization because quantized kernels do not
@@ -1885,7 +1883,6 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         extend_logger_results_with_comparison(
             act_compare_dict, 'a', 'b', compute_sqnr, 'sqnr')
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_add_shadow_loggers_cuda(self):
         # Note: this is not using quantization because quantized kernels do not
