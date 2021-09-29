@@ -1072,6 +1072,11 @@ class TestNamedTensor(TestCase):
         with self.assertRaisesRegex(RuntimeError, "must be consecutive in"):
             tensor.flatten(['H', 'D', 'W'], 'features')
 
+    def test_flatten_nodims(self):
+        tensor = torch.empty((2, 3))
+        with self.assertRaisesRegex(RuntimeError, "cannot be empty"):
+            tensor.flatten((), 'abcd')
+
     def test_unflatten(self):
         # test args: tensor, int, namedshape
         self.assertTrue(torch.equal(

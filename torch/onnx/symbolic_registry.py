@@ -93,6 +93,15 @@ def is_registered_op(opname, domain, version):
     global _registry
     return (domain, version) in _registry and opname in _registry[(domain, version)]
 
+def unregister_op(opname, domain, version):
+    global _registry
+    if is_registered_op(opname, domain, version):
+        del _registry[(domain, version)][opname]
+        if not _registry[(domain, version)]:
+            del _registry[(domain, version)]
+    else:
+        warnings.warn("The opname " + opname + " is not registered.")
+
 def get_op_supported_version(opname, domain, version):
     iter_version = version
     while iter_version <= _onnx_main_opset:

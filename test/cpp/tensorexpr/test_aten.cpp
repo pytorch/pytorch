@@ -15,10 +15,9 @@ namespace jit {
 using namespace torch::jit::tensorexpr;
 
 TEST(ATen, _cast_Float) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
@@ -43,10 +42,9 @@ TEST(ATen, _cast_Float) {
 }
 
 TEST(ATen, negInt) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kInt));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
@@ -71,10 +69,9 @@ TEST(ATen, negInt) {
 }
 
 TEST(ATen, negFloat) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
@@ -99,12 +96,11 @@ TEST(ATen, negFloat) {
 }
 
 TEST(ATen, addInt) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder d_buf(BufHandle("D", {ExprHandle(kTotalSize)}, kInt));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle c_buf("C", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle d_buf("D", {ExprHandle(kTotalSize)}, kInt);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
@@ -136,12 +132,11 @@ TEST(ATen, addInt) {
 }
 
 TEST(ATen, addFloat) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder d_buf(BufHandle("D", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle c_buf("C", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle d_buf("D", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
@@ -173,12 +168,11 @@ TEST(ATen, addFloat) {
 }
 
 TEST(ATen, subInt) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder d_buf(BufHandle("D", {ExprHandle(kTotalSize)}, kInt));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle c_buf("C", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle d_buf("D", {ExprHandle(kTotalSize)}, kInt);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
@@ -210,12 +204,11 @@ TEST(ATen, subInt) {
 }
 
 TEST(ATen, subFloat) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder d_buf(BufHandle("D", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle c_buf("C", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle d_buf("D", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
@@ -247,12 +240,11 @@ TEST(ATen, subFloat) {
 }
 
 TEST(ATen, lerp) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder d_buf(BufHandle("D", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle c_buf("C", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle d_buf("D", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
@@ -284,13 +276,12 @@ TEST(ATen, lerp) {
 }
 
 TEST(ATen, addcmulInt) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder d_buf(BufHandle("D", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder e_buf(BufHandle("E", {ExprHandle(kTotalSize)}, kInt));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle c_buf("C", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle d_buf("D", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle e_buf("E", {ExprHandle(kTotalSize)}, kInt);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
@@ -326,13 +317,12 @@ TEST(ATen, addcmulInt) {
 }
 
 TEST(ATen, addcmulFloat) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder d_buf(BufHandle("D", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder e_buf(BufHandle("E", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle c_buf("C", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle d_buf("D", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle e_buf("E", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
@@ -368,11 +358,10 @@ TEST(ATen, addcmulFloat) {
 }
 
 TEST(ATen, mulInt) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kInt));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle c_buf("C", {ExprHandle(kTotalSize)}, kInt);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
@@ -400,11 +389,10 @@ TEST(ATen, mulInt) {
 }
 
 TEST(ATen, mulFloat) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle c_buf("C", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
@@ -432,11 +420,10 @@ TEST(ATen, mulFloat) {
 }
 
 TEST(ATen, divInt) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kInt));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle c_buf("C", {ExprHandle(kTotalSize)}, kInt);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
@@ -464,11 +451,10 @@ TEST(ATen, divInt) {
 }
 
 TEST(ATen, divFloat) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle c_buf("C", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
@@ -496,11 +482,10 @@ TEST(ATen, divFloat) {
 }
 
 TEST(ATen, maxInt) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kInt));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle c_buf("C", {ExprHandle(kTotalSize)}, kInt);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
@@ -528,11 +513,10 @@ TEST(ATen, maxInt) {
 }
 
 TEST(ATen, maxFloat) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle c_buf("C", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
@@ -560,11 +544,10 @@ TEST(ATen, maxFloat) {
 }
 
 TEST(ATen, minInt) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kInt));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle c_buf("C", {ExprHandle(kTotalSize)}, kInt);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
@@ -592,11 +575,10 @@ TEST(ATen, minInt) {
 }
 
 TEST(ATen, minFloat) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle c_buf("C", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
@@ -624,10 +606,9 @@ TEST(ATen, minFloat) {
 }
 
 void __ubsan_ignore_float_divide_by_zero__ testATenreciprocal() {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
@@ -651,10 +632,9 @@ void __ubsan_ignore_float_divide_by_zero__ testATenreciprocal() {
 }
 
 TEST(ATen, reluInt) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kInt));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
@@ -678,10 +658,9 @@ TEST(ATen, reluInt) {
 }
 
 TEST(ATen, reluFloat) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
@@ -707,10 +686,9 @@ TEST(ATen, reluFloat) {
 }
 
 TEST(ATen, logFloat) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
@@ -734,10 +712,9 @@ TEST(ATen, logFloat) {
 }
 
 TEST(ATen, fastLogFloat) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
@@ -766,10 +743,9 @@ TEST(ATen, fastLogFloat) {
 }
 
 TEST(ATen, fastTanhFloat) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
@@ -798,10 +774,9 @@ TEST(ATen, fastTanhFloat) {
 }
 
 TEST(ATen, fastSigmoidFloat) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
@@ -831,10 +806,9 @@ TEST(ATen, fastSigmoidFloat) {
 }
 
 TEST(ATen, log10Float) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
@@ -858,10 +832,9 @@ TEST(ATen, log10Float) {
 }
 
 TEST(ATen, log2Float) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
@@ -885,10 +858,9 @@ TEST(ATen, log2Float) {
 }
 
 TEST(ATen, expFloat) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
@@ -913,10 +885,9 @@ TEST(ATen, expFloat) {
 }
 
 TEST(ATen, erfFloat) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
@@ -941,10 +912,9 @@ TEST(ATen, erfFloat) {
 }
 
 TEST(ATen, cosFloat) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
@@ -969,11 +939,10 @@ TEST(ATen, cosFloat) {
 }
 
 TEST(ATen, eqInt) {
-  KernelScope kernel_scope;
   constexpr int N = 128;
-  Placeholder a(BufHandle("A", {N}, kInt));
-  Placeholder b(BufHandle("B", {N}, kInt));
-  Placeholder c(BufHandle("C", {N}, kInt));
+  BufHandle a("A", {N}, kInt);
+  BufHandle b("B", {N}, kInt);
+  BufHandle c("C", {N}, kInt);
   std::vector<int> a_buffer(N, 1);
   std::vector<int> b_buffer(N, 1);
   std::vector<int> c_buffer(N, 0);
@@ -995,11 +964,10 @@ TEST(ATen, eqInt) {
 }
 
 TEST(ATen, geInt) {
-  KernelScope kernel_scope;
   constexpr int N = 128;
-  Placeholder a(BufHandle("A", {N}, kInt));
-  Placeholder b(BufHandle("B", {N}, kInt));
-  Placeholder c(BufHandle("C", {N}, kInt));
+  BufHandle a("A", {N}, kInt);
+  BufHandle b("B", {N}, kInt);
+  BufHandle c("C", {N}, kInt);
   std::vector<int> a_buffer(N, 5);
   std::vector<int> b_buffer(N, 5);
   std::vector<int> c_buffer(N, 0);
@@ -1021,11 +989,10 @@ TEST(ATen, geInt) {
 }
 
 TEST(ATen, gtInt) {
-  KernelScope kernel_scope;
   constexpr int N = 128;
-  Placeholder a(BufHandle("A", {N}, kInt));
-  Placeholder b(BufHandle("B", {N}, kInt));
-  Placeholder c(BufHandle("C", {N}, kInt));
+  BufHandle a("A", {N}, kInt);
+  BufHandle b("B", {N}, kInt);
+  BufHandle c("C", {N}, kInt);
   std::vector<int> a_buffer(N, 6);
   std::vector<int> b_buffer(N, 3);
   std::vector<int> c_buffer(N, 0);
@@ -1047,11 +1014,10 @@ TEST(ATen, gtInt) {
 }
 
 TEST(ATen, leInt) {
-  KernelScope kernel_scope;
   constexpr int N = 128;
-  Placeholder a(BufHandle("A", {N}, kInt));
-  Placeholder b(BufHandle("B", {N}, kInt));
-  Placeholder c(BufHandle("C", {N}, kInt));
+  BufHandle a("A", {N}, kInt);
+  BufHandle b("B", {N}, kInt);
+  BufHandle c("C", {N}, kInt);
   std::vector<int> a_buffer(N, 5);
   std::vector<int> b_buffer(N, 5);
   std::vector<int> c_buffer(N, 0);
@@ -1073,11 +1039,10 @@ TEST(ATen, leInt) {
 }
 
 TEST(ATen, ltInt) {
-  KernelScope kernel_scope;
   constexpr int N = 128;
-  Placeholder a(BufHandle("A", {N}, kInt));
-  Placeholder b(BufHandle("B", {N}, kInt));
-  Placeholder c(BufHandle("C", {N}, kInt));
+  BufHandle a("A", {N}, kInt);
+  BufHandle b("B", {N}, kInt);
+  BufHandle c("C", {N}, kInt);
   std::vector<int> a_buffer(N, 5);
   std::vector<int> b_buffer(N, 5);
   std::vector<int> c_buffer(N, 1);

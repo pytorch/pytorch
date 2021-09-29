@@ -78,6 +78,12 @@ VkDevice create_device(
   VK_CHECK(vkCreateDevice(physical_device, &device_create_info, nullptr, &device));
   TORCH_CHECK(device, "Invalid Vulkan device!");
 
+#ifdef USE_VULKAN_WRAPPER
+#ifdef USE_VULKAN_VOLK
+  volkLoadDevice(device);
+#endif
+#endif
+
   return device;
 }
 
@@ -180,42 +186,6 @@ struct VulkanImpl final : public at::vulkan::VulkanImplInterface {
   }
 };
 static at::vulkan::VulkanImplRegistrar g_vulkan_impl(new VulkanImpl());
-
-Descriptor::Set dispatch_prologue(
-    Command::Buffer& command_buffer,
-    const Shader::Layout::Signature& shader_layout_signature,
-    const Shader::Descriptor& shader_descriptor,
-    const Shader::WorkGroup& local_work_group_size) {
-  Context* const context = api::context();
-  const GPU gpu = context->gpu();
-  Descriptor& descriptor = context->descriptor();
-  Pipeline& pipeline = context->pipeline();
-  Shader& shader = context->shader();
-
-  const Shader::Layout::Object shader_layout =
-      shader.layout.cache.retrieve({
-        shader_layout_signature,
-      });
-
-  command_buffer.bind(
-      pipeline.cache.retrieve({
-        pipeline.layout.cache.retrieve({
-          shader_layout.handle,
-        }),
-        shader.cache.retrieve(shader_descriptor),
-        local_work_group_size,
-      }));
-
-  return descriptor.pool.allocate(shader_layout);
-}
-
-void dispatch_epilogue(
-    Command::Buffer& command_buffer,
-    const Descriptor::Set& descriptor_set,
-    const Shader::WorkGroup& global_work_group) {
-  command_buffer.bind(descriptor_set);
-  command_buffer.dispatch(global_work_group);
-}
 
 } // namespace api
 } // namespace vulkan

@@ -16,7 +16,7 @@ void assert_dims_constant(const BufHandle& buf) {
 
 using InitFunc = std::function<ExprHandle(const std::vector<VarHandle>&)>;
 
-Tensor* conv2d_depthwise_static(
+Tensor conv2d_depthwise_static(
     BufHandle input,
     BufHandle weight,
     const InitFunc& init_func,
@@ -45,7 +45,7 @@ Tensor* conv2d_depthwise_static(
   auto OH = (H - R + 2 * pad) / stride + 1;
   auto OW = (W - S + 2 * pad) / stride + 1;
 
-  Tensor* conv = Reduce(
+  Tensor conv = Reduce(
       "conv2d_depthwise",
       {{N, "n"}, {K, "k"}, {OH, "oh"}, {OW, "ow"}},
       Sum(),
@@ -83,7 +83,7 @@ Tensor* conv2d_depthwise_static(
   } else if (R == 3 && stride == 1 && pad == 1) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     ForPtr main, peeled;
-    auto loops = nest.getAllLoopNestsWritingToBuf(conv->buf());
+    auto loops = nest.getAllLoopNestsWritingToBuf(conv.buf());
     main = loops[1][kLoopW];
     nest.sliceHead(main, 1, &peeled, &main);
     nest.sliceTail(main, 1, &main, &peeled);
@@ -92,10 +92,10 @@ Tensor* conv2d_depthwise_static(
     nest.sliceTail(main, 1, &main, &peeled);
   }
 
-  return new Tensor(conv->buf(), nest.root_stmt());
+  return Tensor(conv.buf(), nest.root_stmt());
 }
 
-Tensor* conv2d_depthwise_dynamic(
+Tensor conv2d_depthwise_dynamic(
     BufHandle input,
     BufHandle weight,
     const InitFunc& init_func,
@@ -144,7 +144,7 @@ Tensor* conv2d_depthwise_dynamic(
 
 } // namespace
 
-Tensor* conv2d_depthwise(
+Tensor conv2d_depthwise(
     BufHandle input,
     BufHandle weight,
     BufHandle bias,
@@ -158,7 +158,7 @@ Tensor* conv2d_depthwise(
   return conv2d_depthwise_static(input, weight, init_func, stride, pad, groups);
 }
 
-Tensor* conv2d_depthwise(
+Tensor conv2d_depthwise(
     BufHandle input,
     BufHandle weight,
     int stride,
@@ -170,7 +170,7 @@ Tensor* conv2d_depthwise(
   return conv2d_depthwise_static(input, weight, init_func, stride, pad, groups);
 }
 
-Tensor* conv2d_depthwise(
+Tensor conv2d_depthwise(
     BufHandle input,
     BufHandle weight,
     BufHandle bias,
@@ -206,7 +206,7 @@ Tensor* conv2d_depthwise(
       groups);
 }
 
-Tensor* conv2d_depthwise(
+Tensor conv2d_depthwise(
     BufHandle input,
     BufHandle weight,
     ExprHandle N,

@@ -64,8 +64,8 @@ static void _cublasAdjustLdLevel3(
     int64_t* lda,
     int64_t* ldb,
     int64_t* ldc) {
-  bool transa_ = ((transa == 't') || (transa == 'T'));
-  bool transb_ = ((transb == 't') || (transb == 'T'));
+  bool transa_ = ((transa != 'n') && (transa != 'N'));
+  bool transb_ = ((transb != 'n') && (transb != 'N'));
 
   // Note: leading dimensions generally are checked that they are > 0
   // and at least as big the result requires (even if the value won't
