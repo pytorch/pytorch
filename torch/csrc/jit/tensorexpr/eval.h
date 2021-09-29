@@ -29,19 +29,31 @@ class Value {
     Intvalues.push_back(0);
   }
 
+  template <typename T>
+  Value(Dtype dtype, T v) : dtype_(dtype) {
+#define TYPE_CASE(Type, Name)  \
+  if (dtype == k##Name) {      \
+    Name##values.push_back(v); \
+    return;                    \
+  }
+    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
+#undef TYPE_CASE
+    throw unsupported_dtype();
+  }
+
 #define VALUE_CTOR(Type, Name)      \
   Value(Type v) : dtype_(k##Name) { \
     Name##values.push_back(v);      \
   }
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_CTOR);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_CTOR);
 #undef VALUE_CTOR
 
 #define VALUE_VEC_CTOR(Type, Name)  \
   Value(const std::vector<Type>& v) \
       : dtype_(Dtype(k##Name, v.size())), Name##values(v) {}
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_VEC_CTOR);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_VEC_CTOR);
 #undef VALUE_VEC_CTOR
 
   template <typename T>
@@ -49,6 +61,8 @@ class Value {
 
   template <typename T>
   const std::vector<T>& as_vec() const;
+
+  int64_t intValue() const;
 
   Dtype dtype() const {
     return dtype_;
@@ -58,7 +72,7 @@ class Value {
   Dtype dtype_;
 
 #define VALUE_STORAGE(Type, Name) std::vector<Type> Name##values;
-  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_STORAGE);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_STORAGE);
 #undef VALUE_STORAGE
   void* ptr;
 };
@@ -71,7 +85,7 @@ class Value {
     }                                   \
     return Name##values[0];             \
   }
-AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_AS_DISPATCH);
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_AS_DISPATCH);
 #undef VALUE_AS_DISPATCH
 
 #define VALUE_AS_VEC_DISPATCH(Type, Name)                       \
@@ -82,7 +96,7 @@ AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_AS_DISPATCH);
     }                                                           \
     return Name##values;                                        \
   }
-AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_AS_VEC_DISPATCH);
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_AS_VEC_DISPATCH);
 #undef VALUE_AS_VEC_DISPATCH
 
 template <typename To, typename From>
@@ -143,17 +157,14 @@ class ExprEval {
       : dtype_(expr.dtype()) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<BufferArg> buffer_args_extended = buffer_args;
-    Placeholder ret_buf("ret_val", dtype_, {1});
+    BufHandle ret_buf("ret_val", {1}, dtype_);
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    std::vector<ExprPtr> indices;
-    ExprPtr zero = alloc<IntImm>(0);
-    for (size_t i = 0; i < ret_buf.data()->ndim(); i++) {
+    std::vector<ExprHandle> indices;
+    ExprHandle zero = IntImm::make(0);
+    for (size_t i = 0; i < ret_buf.ndim(); i++) {
       indices.push_back(zero);
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    StmtPtr store_stmt =
-        // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
-        alloc<Store>(ret_buf.data(), indices, expr.node());
+    StmtPtr store_stmt = Store::make(ret_buf, indices, expr);
     buffer_args_extended.emplace_back(ret_buf);
     codegen_.reset(new CodeGenType(store_stmt, buffer_args_extended));
   }
@@ -192,7 +203,7 @@ class ExprEval {
     ret_value_ = Value(ret_val_arg[0]);                 \
   } break;
       // NOLINTNEXTLINE(modernize-use-emplace)
-      AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+      AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
       case ScalarType::Bool: {
         // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -217,7 +228,7 @@ class ExprEval {
     codegen_->call_raw(args_extended);           \
     ret_value_ = Value(ret_val_arg[0]);          \
   } break;
-      AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+      AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
       case ScalarType::Bool: {
         // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -252,6 +263,10 @@ class ExprEval {
   std::unique_ptr<CodeGenType> codegen_;
   Value ret_value_;
 };
+
+// Evaluates the given expression and returns an int64_t value if the result of
+// the given expression is int64_t.
+c10::optional<int64_t> evalInt(ExprPtr e);
 
 // Substitutes the given vars with their corresponding expressions in the input
 // expression.

@@ -13,7 +13,6 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/core/Array.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
@@ -28,7 +27,7 @@ namespace native {
 // -----------------------------------
 // glu forward
 // -----------------------------------
-void glu_kernel(TensorIterator& iter) {
+void glu_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "glu_cuda", [&]() {
     using acc_t = at::acc_type<scalar_t, true>;
     gpu_kernel(iter, [] GPU_LAMBDA (scalar_t a_, scalar_t b_) -> scalar_t {

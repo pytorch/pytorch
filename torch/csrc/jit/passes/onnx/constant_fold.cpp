@@ -489,6 +489,12 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
   } else if (node->kind() == onnx::Equal) {
     updated_val = at::eq(inputTensorValues[0], inputTensorValues[1]);
     return c10::optional<at::Tensor>(updated_val);
+  } else if (node->kind() == onnx::Greater) {
+    updated_val = at::greater(inputTensorValues[0], inputTensorValues[1]);
+    return c10::optional<at::Tensor>(updated_val);
+  } else if (node->kind() == onnx::Less) {
+    updated_val = at::less(inputTensorValues[0], inputTensorValues[1]);
+    return c10::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Neg) {
     updated_val = at::neg(inputTensorValues[0]);
     return c10::optional<at::Tensor>(updated_val);

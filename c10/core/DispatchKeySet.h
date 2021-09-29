@@ -248,7 +248,7 @@ constexpr DispatchKeySet autogradother_backends = DispatchKeySet(
     {DispatchKey::HIP,
      DispatchKey::VE,
      DispatchKey::FPGA,
-     DispatchKey::MSNPU,
+     DispatchKey::ORT,
      DispatchKey::Vulkan,
      DispatchKey::Metal,
      DispatchKey::QuantizedCPU,
