@@ -77,33 +77,6 @@ std::ostream& printPyObject(std::ostream& out, const THPObjectPtr& obj) {
   }
 }
 
-std::vector<Node*> findAllNodes(
-    c10::ArrayRef<torch::jit::Block*> blocks,
-    Symbol kind,
-    bool recurse = true) {
-  std::vector<Node*> ret;
-  for (Block* block : blocks) {
-    for (Node* n : block->nodes()) {
-      if (n->kind() == kind) {
-        ret.push_back(n);
-      }
-      if (recurse) {
-        auto nodes = findAllNodes(n->blocks(), kind, recurse);
-        ret.insert(ret.end(), nodes.begin(), nodes.end());
-      }
-    }
-  }
-  return ret;
-}
-
-std::vector<Node*> findAllNodes(
-    Block* block,
-    Symbol kind,
-    bool recurse = true) {
-  std::vector<Block*> blocks = {block};
-  return findAllNodes(blocks, kind, recurse);
-}
-
 Node* findNode(
     c10::ArrayRef<torch::jit::Block*> blocks,
     Symbol kind,
@@ -373,8 +346,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "findAllNodes",
           [](Graph& g, const std::string& kind, bool recurse) {
-            return findAllNodes(
-                g.block(), Symbol::fromQualString(kind), recurse);
+            return findAllNodes(g, Symbol::fromQualString(kind), recurse);
           },
           "Find all nodes",
           py::arg("kind"),
@@ -492,7 +464,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "findAllNodes",
           [](Block& b, const std::string& kind, bool recurse) {
-            return findAllNodes(&b, Symbol::fromQualString(kind), recurse);
+            return findAllNodes(b, Symbol::fromQualString(kind), recurse);
           },
           "Find all nodes",
           py::arg("kind"),

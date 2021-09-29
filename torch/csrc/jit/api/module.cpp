@@ -26,25 +26,6 @@ std::string getInputDebugName(const Node& n, const int idx) {
   return n.inputs().at(idx)->debugName();
 }
 
-std::vector<Node*> findAllNodes(
-    c10::ArrayRef<torch::jit::Block*> blocks,
-    Symbol kind,
-    bool recurse) {
-  std::vector<Node*> ret;
-  for (Block* block : blocks) {
-    for (Node* n : block->nodes()) {
-      if (n->kind() == kind) {
-        ret.push_back(n);
-      }
-      if (recurse) {
-        auto nodes = findAllNodes(n->blocks(), kind, recurse);
-        ret.insert(ret.end(), nodes.begin(), nodes.end());
-      }
-    }
-  }
-  return ret;
-}
-
 void assert_ignored_methods_not_called(
     torch::jit::Function* fn,
     const std::unordered_set<std::string>& ignored_methods) {
@@ -53,7 +34,7 @@ void assert_ignored_methods_not_called(
   }
   const bool recurse = true;
   std::vector<Node*> all_nodes =
-      findAllNodes({fn->graph()->block()}, c10::prim::CallMethod, recurse);
+      findAllNodes(*fn->graph().get(), c10::prim::CallMethod, recurse);
 
   // Extract method names from these nodes.
   std::unordered_set<std::string> encountered_ignored_methods;
@@ -90,7 +71,7 @@ void assert_ignored_attributes_not_referenced(
 
   const bool recurse = true;
   std::vector<Node*> all_nodes =
-      findAllNodes({fn->graph()->block()}, c10::prim::GetAttr, recurse);
+      findAllNodes(*fn->graph().get(), c10::prim::GetAttr, recurse);
 
   // Extract attribute names from these nodes.
   std::unordered_set<std::string> encountered_ignored_attributes;
