@@ -190,6 +190,10 @@ ReduceFunc toFunction(const ReduceOp& r) {
       TORCH_CHECK(false,
           "Cannot use ReduceOp.BXOR with non-integral dtype");
       break;
+    case ReduceOp::AVG:
+      TORCH_CHECK(false,
+          "Cannot use ReduceOp.AVG with Gloo");
+      break;
     case ReduceOp::UNUSED:
       break;
   }
@@ -255,6 +259,10 @@ ReduceFunc toFunction(const ReduceOp& r) {
       return ReduceFunc(&bor<T>);
     case ReduceOp::BXOR:
       return ReduceFunc(&bxor<T>);
+    case ReduceOp::AVG:
+      TORCH_CHECK(false,
+          "Cannot use ReduceOp.AVG with Gloo");
+      break;
     case ReduceOp::UNUSED:
       break;
   }
@@ -923,7 +931,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
     std::vector<at::Tensor>& inputs,
     const BroadcastOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
-    throw std::invalid_argument("ProcessGroupGloo::broadcast: " + msg);
+    TORCH_CHECK(false, "ProcessGroupGloo::broadcast: " + msg);
   };
 
   assertRootRank(invalidArgument, opts.rootRank, size_);
@@ -1414,7 +1422,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
     std::vector<at::Tensor>& inputs,
     const AllreduceOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
-    throw std::invalid_argument("ProcessGroupGloo::allreduce: " + msg);
+    TORCH_CHECK(false, "ProcessGroupGloo::allreduce: " + msg);
   };
 
   assertNonEmpty(invalidArgument, inputs);
@@ -1475,7 +1483,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce_coalesced(
     std::vector<at::Tensor>& tensors,
     const AllreduceCoalescedOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
-    throw std::invalid_argument(
+    TORCH_CHECK(false,
         "ProcessGroupGloo::allreduce_coalesced: " + msg);
   };
   assertNonEmpty(invalidArgument, tensors);
@@ -1644,7 +1652,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce(
     std::vector<at::Tensor>& inputs,
     const ReduceOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
-    throw std::invalid_argument("ProcessGroupGloo::reduce: " + msg);
+    TORCH_CHECK(false, "ProcessGroupGloo::reduce: " + msg);
   };
 
   assertRootRank(invalidArgument, opts.rootRank, size_);
@@ -1821,7 +1829,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
     std::vector<at::Tensor>& inputs,
     const AllgatherOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
-    throw std::invalid_argument("ProcessGroupGloo::allgather: " + msg);
+    TORCH_CHECK(false, "ProcessGroupGloo::allgather: " + msg);
   };
 
   if (inputs.size() == 0) {
@@ -1955,7 +1963,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather_coalesced(
     std::vector<at::Tensor>& input_list,
     const AllgatherOptions& /* unused */) {
   static auto invalidArgument = [](const std::string& msg) {
-    throw std::invalid_argument(
+    TORCH_CHECK(false,
         "ProcessGroupGloo::allgather_coalesced: " + msg);
   };
 
@@ -2152,7 +2160,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::gather(
     std::vector<at::Tensor>& inputs,
     const GatherOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
-    throw std::invalid_argument("ProcessGroupGloo::gather: " + msg);
+    TORCH_CHECK(false, "ProcessGroupGloo::gather: " + msg);
   };
 
   assertRootRank(invalidArgument, opts.rootRank, size_);
@@ -2336,7 +2344,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
     std::vector<std::vector<at::Tensor>>& inputs,
     const ScatterOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
-    throw std::invalid_argument("ProcessGroupGloo::scatter: " + msg);
+    TORCH_CHECK(false, "ProcessGroupGloo::scatter: " + msg);
   };
 
   assertRootRank(invalidArgument, opts.rootRank, size_);
@@ -2530,7 +2538,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::alltoall_base(
     std::vector<int64_t>& inputCounts,
     const AllToAllOptions& /* unused */) {
   static auto invalidArgument = [](const std::string& msg) {
-    throw std::invalid_argument("ProcessGroupGloo::alltoall_base: " + msg);
+    TORCH_CHECK(false, "ProcessGroupGloo::alltoall_base: " + msg);
   };
 
   TORCH_CHECK(

@@ -16,7 +16,6 @@ from torch.onnx.symbolic_helper import parse_args, _parse_arg, _unimplemented
 from typing import Optional
 from sys import maxsize as maxsize
 
-import numpy
 import math
 import warnings
 
@@ -877,7 +876,7 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
         padding = tuple(tuple_fn(padding))
         if ceil_mode:
             padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
-            padding = padding + tuple(numpy.add(padding_ceil, padding))
+            padding = padding + tuple(a + b for (a, b) in zip(padding_ceil, padding))
         else:
             padding = padding * 2
         kwargs = {
@@ -938,7 +937,7 @@ def _avg_pool(name, tuple_fn):
                          value_f=0.)
             padding = (0,) * len(padding)
         if ceil_mode:
-            padding = padding + tuple(numpy.add(padding_ceil, padding))
+            padding = padding + tuple(a + b for (a, b) in zip(padding_ceil, padding))
         else:
             padding = padding * 2
         output = g.op("AveragePool", input,
@@ -1539,6 +1538,11 @@ def log1p(g, self):
     return log(g, add(g, sym_help._if_scalar_type_as(g, torch.ones(1), self), self))
 
 
+def log10(g, self):
+    _ln10 = 2.30258509299404568401
+    return g.op("Div", log(g, self), g.op("Constant", value_t=torch.tensor([_ln10])))
+
+
 def pow(g, self, exponent):
     f_dtype = self_dtype = self.type().scalarType()
     if not sym_help._is_fp(self):
@@ -2058,7 +2062,7 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
         if not sym_help._is_tensor(repeats):
             repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
         if input_sizes[dim] == 0:
-            return sym_help._onnx_opset_unsupported_detailed("repeat_interleave", 9, 11,
+            return sym_help._onnx_opset_unsupported_detailed("repeat_interleave", 9, 13,
                                                              "Unsupported along dimension with unknown input size")
         else:
             reps = input_sizes[dim]
@@ -2067,8 +2071,11 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     # Cases where repeats is a 1 dim Tensor
     elif repeats_dim == 1:
         if input_sizes[dim] == 0:
-            return sym_help._onnx_opset_unsupported_detailed("repeat_interleave", 9, 11,
+            return sym_help._onnx_opset_unsupported_detailed("repeat_interleave", 9, 13,
                                                              "Unsupported along dimension with unknown input size")
+        if repeats_sizes[0] is None:
+            return sym_help._onnx_opset_unsupported_detailed("repeat_interleave", 9, 13,
+                                                             "Unsupported for cases with dynamic repeats")
         assert repeats_sizes[0] == input_sizes[dim], "repeats must have the same size as input along dim"
         reps = repeats_sizes[0]
     else:
@@ -2894,7 +2901,14 @@ def baddbmm(g, self, batch1, batch2, beta, alpha):
     return add(g, mul_a, mul_b)
 
 
-def meshgrid(g, tensor_list):
+@parse_args('v', 's')
+def meshgrid(g, tensor_list, indexing: Optional[str] = None):
+    if indexing is None:
+        indexing = 'ij'
+    elif indexing not in {'ij', 'xy'}:
+        raise ValueError(f'Unsupported indexing: {indexing}')
+    if indexing == 'xy':
+        tensor_list[0], tensor_list[1] = tensor_list[1], tensor_list[0]
     tensors = [sym_help._reshape_helper(g, t, g.op("Constant", value_t=torch.LongTensor([-1])))
                for t in sym_help._unpack_list(tensor_list)]
     tensors_shape = [g.op("Shape", t) for t in tensors]
@@ -2905,6 +2919,8 @@ def meshgrid(g, tensor_list):
         shape_i[i] = tensors_shape[i]
         t_reshaped = _reshape_from_tensor(g, t, g.op("Concat", *shape_i, axis_i=0))
         out.append(g.op("Expand", t_reshaped, out_shape))
+    if indexing == 'xy':
+        out[0], out[1] = out[1], out[0]
     return g.op("prim::ListConstruct", *out)
 
 
@@ -3133,6 +3149,10 @@ def hann_window(g, window_length, periodic=True, dtype=None, layout=None, device
 
 def mv(g, self, vec):
     return matmul(g, self, vec)
+
+
+def dot(g, self, other):
+    return matmul(g, self, other)
 
 
 @parse_args('v', 'v')

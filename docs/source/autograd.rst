@@ -252,6 +252,7 @@ You can define how these saved tensors should be packed / unpacked using hooks.
 A common application is to trade compute for memory by saving those intermediary results
 to disk or to CPU instead of leaving them on the GPU. This is especially useful if you
 notice your model fits on GPU during evaluation, but not training.
+Also see :ref:`saved-tensors-hooks-doc`.
 
 .. autoclass:: torch.autograd.graph.saved_tensors_hooks
 

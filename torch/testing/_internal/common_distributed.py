@@ -23,6 +23,7 @@ import torch.distributed as c10d
 from torch.testing._internal.common_utils import (
     TestCase,
     TEST_WITH_ROCM,
+    TEST_WITH_TSAN,
     FILE_SCHEMA,
     find_free_port,
     retry_on_connect_failures,
@@ -289,7 +290,11 @@ def create_tcp_store(
         )
 
 
-TIMEOUT_DEFAULT = 100
+if TEST_WITH_TSAN:
+    # TSAN runs much slower.
+    TIMEOUT_DEFAULT = 500
+else:
+    TIMEOUT_DEFAULT = 100
 TIMEOUT_OVERRIDE = {"test_ddp_uneven_inputs": 400}
 
 
@@ -466,10 +471,6 @@ class MultiProcessTestCase(TestCase):
             logger.info(f"Started process {rank} with pid {process.pid}")
             self.pid_to_pipe[process.pid] = parent_conn
             self.processes.append(process)
-
-    def _fork_processes(self) -> None:
-        proc = torch.multiprocessing.get_context("fork").Process
-        self._start_processes(proc)
 
     def _spawn_processes(self) -> None:
         proc = torch.multiprocessing.get_context("spawn").Process
