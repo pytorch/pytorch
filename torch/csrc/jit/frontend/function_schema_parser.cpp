@@ -122,6 +122,13 @@ struct SchemaParser {
     return results;
   }
 
+  either<OperatorName, FunctionSchema> parseExactlyOneDeclaration() {
+    auto result = parseDeclaration();
+    L.nextIf(TK_NEWLINE);
+    L.expect(TK_EOF);
+    return result;
+  }
+
   Argument parseArgument(size_t idx, bool is_return, bool kwarg_only) {
     auto p = type_parser.parseType();
     auto type = std::move(p.first);
@@ -132,7 +139,7 @@ struct SchemaParser {
     std::string name;
     if (L.nextIf('[')) {
       // note: an array with a size hint can only occur at the Argument level
-      type = ListType::create(type);
+      type = ListType::create(std::move(type));
       N = c10::stoll(L.expect(TK_NUMBER).text());
       L.expect(']');
       auto container = type_parser.parseAliasAnnotation();
@@ -141,7 +148,7 @@ struct SchemaParser {
       }
       alias_info = std::move(container);
       if (L.nextIf('?')) {
-        type = OptionalType::create(type);
+        type = OptionalType::create(std::move(type));
       }
     }
     if (is_return) {
@@ -319,7 +326,7 @@ struct SchemaParser {
 
 C10_EXPORT either<OperatorName, FunctionSchema> parseSchemaOrName(
     const std::string& schemaOrName) {
-  return SchemaParser(schemaOrName).parseDeclarations().at(0);
+  return SchemaParser(schemaOrName).parseExactlyOneDeclaration();
 }
 
 C10_EXPORT FunctionSchema parseSchema(const std::string& schema) {
