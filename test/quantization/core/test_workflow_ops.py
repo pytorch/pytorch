@@ -693,7 +693,11 @@ class TestFakeQuantizeOps(TestCase):
     def _test_forward_per_channel_cachemask_impl(self, device):
         torch_types = (torch.qint8, torch.quint8)
         float_types = (torch.float32, torch.float16, torch.float64)
-        for torch_type, float_type in itertools.product(torch_types, float_types):
+        if device == 'cpu':
+            zero_point_types = (torch.int, torch.float32, torch.float16)
+        else:
+            zero_point_types = (torch.int,)
+        for torch_type, float_type, zero_point_type in itertools.product(torch_types, float_types, zero_point_types):
             X = torch.randn(1, 2, 4, 4, dtype=float_type).to(device)
             # pick the scale + zp so that some values get clipped
             axis = 1
@@ -701,7 +705,7 @@ class TestFakeQuantizeOps(TestCase):
             obs(X * 0.75)
             scale, zero_point = obs.calculate_qparams()
             # TODO(future PR): fix the wrong dtype in obs.calculate_qparams and remove the cast
-            zero_point = zero_point.to(torch.int32)
+            zero_point = zero_point.to(zero_point_type)
             quant_min, quant_max = obs.quant_min, obs.quant_max
 
             Y = _fake_quantize_per_channel_affine_reference(
@@ -804,23 +808,34 @@ class TestFakeQuantizeOps(TestCase):
         X, (scale, zero_point, axis, torch_type) = X
         quant_min = torch.iinfo(torch_type).min
         quant_max = torch.iinfo(torch_type).max
+        if device == 'cpu':
+            zero_point_types = (torch.int, torch.float, torch.float16)
+        else:
+            zero_point_types = (torch.int,)
 
-        X = to_tensor(X, device)
-        scale = to_tensor(scale, device)
-        zero_point = torch.tensor(zero_point).to(dtype=torch.int32, device=device)
-        X.requires_grad_()
-        Y_prime = torch.fake_quantize_per_channel_affine(
-            X, scale, zero_point, axis, quant_min, quant_max)
-        dout = torch.rand_like(X, dtype=torch.float).to(device)
-        dX = _fake_quantize_per_channel_affine_grad_reference(
-            dout, X, scale, zero_point, axis, quant_min, quant_max)
-        Y_prime.backward(dout)
-        np.testing.assert_allclose(dX.cpu().detach().numpy(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
+        for zero_point_type in zero_point_types:
+            X = to_tensor(X, device)
+            scale = to_tensor(scale, device)
+            zero_point = torch.tensor(zero_point).to(dtype=zero_point_type, device=device)
+            X.requires_grad_()
+            Y_prime = torch.fake_quantize_per_channel_affine(
+                X, scale, zero_point, axis, quant_min, quant_max)
+            dout = torch.rand_like(X, dtype=torch.float).to(device)
+            dX = _fake_quantize_per_channel_affine_grad_reference(
+                dout, X, scale, zero_point, axis, quant_min, quant_max)
+            Y_prime.backward(dout)
+            np.testing.assert_allclose(dX.cpu().detach().numpy(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
     def _test_backward_per_channel_cachemask_impl(self, device):
         torch_types = (torch.qint8, torch.quint8)
         float_types = (torch.float32, torch.float16, torch.float64)
-        for torch_type, float_type in itertools.product(torch_types, float_types):
+        # TODO Support float zero_points for CUDA.
+        if device == 'cpu':
+            zero_point_types = (torch.int, torch.float32, torch.float16)
+        else:
+            zero_point_types = (torch.int,)
+
+        for torch_type, float_type, zero_point_type in itertools.product(torch_types, float_types, zero_point_types):
             X = torch.randn(1, 2, 4, 4, dtype=float_type).to(device)
             # pick the scale + zp so that some values get clipped
             axis = 1
@@ -828,7 +843,7 @@ class TestFakeQuantizeOps(TestCase):
             obs(X * 0.75)
             scale, zero_point = obs.calculate_qparams()
             # TODO(future PR): fix the wrong dtype in obs.calculate_qparams and remove the cast
-            zero_point = zero_point.to(torch.int32)
+            zero_point = zero_point.to(zero_point_type)
             quant_min, quant_max = obs.quant_min, obs.quant_max
             X.requires_grad_()
             Y_prime = torch.fake_quantize_per_channel_affine(
@@ -936,11 +951,18 @@ class TestFakeQuantizeOps(TestCase):
         torch.random.manual_seed(NP_RANDOM_SEED)
         torch_types = [torch.qint8, torch.quint8]
         float_types = [torch.float, torch.float16, torch.float64]
-        zero_types = [torch.int]
+        if test_type == "per_channel":
+            zero_types = [torch.int, torch.float, torch.float16]
+        else:
+            zero_types = [torch.int]
         devices = [torch.device('cpu'), torch.device('cuda')] if torch.cuda.is_available() else [torch.device('cpu')]
         axis = 1
         for i in range(20):
             for torch_type, float_type, device, zero_type in itertools.product(torch_types, float_types, devices, zero_types):
+                # TODO(future PR): Support float zero_points for CUDA.
+                if device.type == 'cuda' and zero_type != torch.int32:
+                    continue
+
                 X = torch.randn(3, 3, device=device).to(float_type)
                 scales = (10 * torch.randn(3, device=device)).abs()
                 scale = scales.mean().to(float).item()

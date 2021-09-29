@@ -9,14 +9,14 @@ import zipfile
 import warnings
 
 class ZipArchiveReaderIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
-    r""" :class:`ZipArchiveReaderIterDataPipe`.
+    r""":class:`ZipArchiveReaderIterDataPipe`.
 
-    Iterable data pipe to extract zip binary streams from input iterable which contains a tuple of pathname and
-    zip binary stream. This yields a tuple of pathname and extracted binary stream.
+    Iterable DataPipe to extract zip binary streams from input iterable which contains a tuple of path name and
+    zip binary stream. This yields a tuple of path name and extracted binary stream.
 
     Args:
-        datapipe: Iterable datapipe that provides tuples of pathname and zip binary stream
-        length: Nominal length of the datapipe
+        datapipe: Iterable DataPipe that provides tuples of path name and zip binary stream
+        length: Nominal length of the DataPipe
 
     Note:
         The opened file handles will be closed automatically if the default DecoderDataPipe
@@ -36,6 +36,7 @@ class ZipArchiveReaderIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
         for data in self.datapipe:
             validate_pathname_binary_tuple(data)
             pathname, data_stream = data
+            folder_name = os.path.dirname(pathname)
             try:
                 # typing.cast is used here to silence mypy's type checker
                 zips = zipfile.ZipFile(cast(IO[bytes], data_stream))
@@ -47,7 +48,7 @@ class ZipArchiveReaderIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
                     elif zipinfo.filename.endswith('/'):
                         continue
                     extracted_fobj = zips.open(zipinfo)
-                    inner_pathname = os.path.normpath(os.path.join(pathname, zipinfo.filename))
+                    inner_pathname = os.path.normpath(os.path.join(folder_name, zipinfo.filename))
                     yield (inner_pathname, extracted_fobj)  # type: ignore[misc]
             except Exception as e:
                 warnings.warn(

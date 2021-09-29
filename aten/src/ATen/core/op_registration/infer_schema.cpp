@@ -6,12 +6,23 @@ namespace c10 {
 namespace detail {
 namespace infer_schema {
 namespace {
+
+std::string fastToString(size_t x) {
+  if (C10_LIKELY(x < 10)) {
+    std::string result;
+    result.push_back('_');
+    result.push_back('0' + x);
+    return result;
+  }
+  return "_" + c10::guts::to_string(x);
+}
+
 std::vector<Argument> createArgumentVector(c10::ArrayRef<ArgumentDef> args) {
   std::vector<Argument> result;
   result.reserve(args.size());
   for (size_t i = 0; i < args.size(); ++i) {
     // Arguments are named "_<index>"
-    result.emplace_back("_" + c10::guts::to_string(i), (*args[i].getTypeFn)());
+    result.emplace_back(fastToString(i), (*args[i].getTypeFn)());
   }
   return result;
 }
