@@ -5422,8 +5422,8 @@ else:
     def test_pad(self, device, dtype):
         test_cases = [
             # Input size, pad mode, pad width, kwargs
-
             #################################################
+
             # 'constant' mode
             ((10, 10, 10), 'constant', ((0, 0), (0, 0), (0, 0)), {}),
             ((4, 13, 2, 5), 'constant', ((3, 2), (8, 10), (1, 0), (5, 6)), {}),
@@ -5460,7 +5460,6 @@ else:
         for pad_width, constant_values in product(pad_width_list, constant_values_list):
             test_cases.append(
                 ((4, 13, 2, 5), 'constant', pad_width, {'constant_values': constant_values}))
-
 
         # 'constant' mode with floating point constant_values
         if dtype.is_floating_point or dtype.is_complex:
@@ -5540,6 +5539,11 @@ else:
         for pad_width in [-2, (-5,), ((0, 0), (0, 0), (-10, 0)), torch.tensor(-1)]:
             with self.assertRaisesRegex(RuntimeError, r"torch.pad: Expected 'pad_width' to be non-negative"):
                 torch.pad(input, pad_width)
+
+        # constant_values sequence types are not supported yet
+        for constant_values in [(1, 2), torch.tensor([2, 4], device=device)]:
+            with self.assertRaisesRegex(RuntimeError, r"torch.pad: constant_values must be a scalar"):
+                torch.pad(input, 1, constant_values=constant_values)
 
     # Ensure proper device checking for tensor inputs to torch.pad
     @onlyOnCPUAndCUDA

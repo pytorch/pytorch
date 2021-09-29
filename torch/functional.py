@@ -1,6 +1,7 @@
 from typing import (
     Tuple, Optional, Union, Any, Sequence, TYPE_CHECKING
 )
+from numbers import Number
 
 import torch
 import torch.nn.functional as F
@@ -343,7 +344,7 @@ def _maybe_convert_pad_specifier(pad_spec, arg_name, dtype, device):
         return pad_spec
 
     # A valid pad specifier argument is either a single number, a sequence,
-    # of a homogeneous sequence of sequences. All of these can be represented
+    # or a homogeneous sequence of sequences. All of these can be represented
     # as a tensor.
     pad_spec_tensor = torch.tensor(pad_spec, device=device)
 
@@ -424,6 +425,16 @@ def pad(input, pad_width, mode='constant', *, constant_values=None, out=None):
             input, pad_width, mode,
             constant_values=constant_values,
             out=out)
+    if constant_values is not None:
+        if not isinstance(constant_values, Number):
+            raise RuntimeError((
+                "torch.pad: constant_values must be a scalar, but got type "
+                f"{type(constant_values)}. If you are trying to provide a "
+                "sequence type to specify different constant values for "
+                "before- and after-padding or for each dimension, as numpy.pad "
+                "supports, please open an issue to request this feature: "
+                "https://github.com/issues"))
+
     pad_width_ = _maybe_convert_pad_specifier(
         pad_width,
         'pad_width',
