@@ -1374,7 +1374,6 @@ def packed_quantized_linear_mapper(
             )
 
         qparams = {
-            "qscheme": torch.per_tensor_affine,
             "scale": linear_module.scale,
             "zero_point": linear_module.zero_point
         }
@@ -1428,7 +1427,6 @@ def packed_quantized_conv2d_mapper(
             get_bias.meta["tensor_meta"] = _extract_tensor_metadata(conv_module.bias())
 
         qparams = {
-            "qscheme": torch.per_tensor_affine,
             "scale": conv_module.scale,
             "zero_point": conv_module.zero_point
         }
@@ -1467,7 +1465,6 @@ def add_relu_unfuse_mapper(
 ) -> torch.fx.Node:
     with node.graph.inserting_before(node):
         qparams = {
-            "qscheme": torch.per_tensor_affine,
             "scale": node.kwargs["scale"],
             "zero_point": node.kwargs["zero_point"]
         }
