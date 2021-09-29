@@ -379,7 +379,7 @@ class TestAutograd(TestCase):
     def test_not_implemented_fwad(self):
         x = torch.randn(3)
         v = torch.rand(3)
-        mat = torch.randn(2, 3)
+        y = torch.randn(3)
 
         with fwAD.dual_level():
             dual_x = fwAD.make_dual(x, v)
@@ -388,8 +388,8 @@ class TestAutograd(TestCase):
             hint_msg = "Running forward AD for an OP that does not implement it should raise a NotImplementedError"
 
             with self.assertRaisesRegex(NotImplementedError, err_msg, msg=hint_msg):
-                # if forward AD ends up being implemented for torch.mv, choose a different op
-                res = torch.mv(mat, dual_x)
+                # if forward AD ends up being implemented for torch.dist, choose a different op
+                res = torch.dist(y, dual_x)
 
     def test_accumulate_grad(self):
         grad_output = torch.ones(5, 5)
