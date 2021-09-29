@@ -2779,6 +2779,121 @@ void quantize_tensor_arm<c10::quint8>(
 #endif
 }
 
+#if defined(__aarch64__)
+#define VMOVL_HIGH_U8(x) vmovl_high_u8(x)
+#define VMOVL_HIGH_S8(x) vmovl_high_s8(x)
+#define VMOVL_HIGH_U16(x) vmovl_high_u16(x)
+#define VMOVL_HIGH_S16(x) vmovl_high_s16(x)
+#else // vmovl_high intrinsic not supported
+#define VMOVL_HIGH_U8(x) vmovl_u8(vget_high_u8(x))
+#define VMOVL_HIGH_S8(x) vmovl_s8(vget_high_s8(x))
+#define VMOVL_HIGH_U16(x) vmovl_u16(vget_high_u16(x))
+#define VMOVL_HIGH_S16(x) vmovl_s16(vget_high_s16(x))
+#endif
+
+// Generic template defaults to naive dequantize implementation
+template <typename T>
+void dequantize_tensor_arm(
+    const T* in,
+    Tensor& rtensor,
+    const int64_t N,
+    const float scale,
+    const int32_t zero_point) {
+  float* out = rtensor.data_ptr<float>();
+  for (int i = 0; i < N; ++i) {
+    out[i] = dequantize_val<T>(scale, zero_point, in[i]);
+  }
+}
+
+template <>
+void dequantize_tensor_arm<c10::qint8>(
+    const c10::qint8* in,
+    Tensor& rtensor,
+    const int64_t N,
+    const float scale,
+    const int32_t zero_point) {
+  const int8_t* in_underlying = reinterpret_cast<const int8_t*>(in);
+  float* out = rtensor.data_ptr<float>();
+
+  const int32x4_t zero_point_s32x4 = vdupq_n_s32(zero_point);
+  const float32x4_t scale_fp32x4 = vdupq_n_f32(scale);
+
+  int i;
+  for (i = 0; i + 16 < N; i += 16) {
+    const int8x16_t vin_s8 = vld1q_s8(in_underlying);
+
+    const int16x8_t vin_low_s16 = vmovl_s8(vget_low_s8(vin_s8)); // 0 ... 7
+    const int16x8_t vin_high_s16 = VMOVL_HIGH_S8(vin_s8); // 8 ... 15
+
+    const int32x4_t vin_s32_low_low = vmovl_s16(vget_low_s16(vin_low_s16)); // 0 ... 3
+    const int32x4_t vin_s32_low_high = VMOVL_HIGH_S16(vin_low_s16); // 4 ... 7
+    const int32x4_t vin_s32_high_low = vmovl_s16(vget_low_s16(vin_high_s16)); // 8 ... 11
+    const int32x4_t vin_s32_high_high = VMOVL_HIGH_S16(vin_high_s16); // 12 ... 15
+
+    // Store       Multiply  int32->fp32   Subtract
+    vst1q_f32(out, vmulq_f32(vcvtq_f32_s32(vsubq_s32(vin_s32_low_low, zero_point_s32x4)), scale_fp32x4));
+    out += 4;
+    vst1q_f32(out, vmulq_f32(vcvtq_f32_s32(vsubq_s32(vin_s32_low_high, zero_point_s32x4)), scale_fp32x4));
+    out += 4;
+    vst1q_f32(out, vmulq_f32(vcvtq_f32_s32(vsubq_s32(vin_s32_high_low, zero_point_s32x4)), scale_fp32x4));
+    out += 4;
+    vst1q_f32(out, vmulq_f32(vcvtq_f32_s32(vsubq_s32(vin_s32_high_high, zero_point_s32x4)), scale_fp32x4));
+    out += 4;
+
+    in += 16;
+    in_underlying += 16;
+  }
+
+  for (; i < N; ++i) { // use default dequantize for remaining vals
+    (*out++) = dequantize_val<c10::qint8>(scale, zero_point, (*in++));
+  }
+}
+
+template <>
+void dequantize_tensor_arm<c10::quint8>(
+    const c10::quint8* in,
+    Tensor& rtensor,
+    const int64_t N,
+    const float scale,
+    const int32_t zero_point) {
+  const uint8_t* in_underlying = reinterpret_cast<const uint8_t*>(in);
+  float* out = rtensor.data_ptr<float>();
+
+  const float32x4_t scale_fp32x4 = vdupq_n_f32(scale);
+  const float32x4_t scale_times_zero_point_fp32x4 =
+      vmulq_f32(scale_fp32x4, vdupq_n_f32(zero_point));
+
+  int i;
+  for (i = 0; i + 16 < N; i += 16) {
+    const uint8x16_t vin_u8 = vld1q_u8(in_underlying);
+
+    const uint16x8_t vin_low_u16 = vmovl_u8(vget_low_u8(vin_u8)); // 0 ... 7
+    const uint16x8_t vin_high_u16 = VMOVL_HIGH_U8(vin_u8); // 8 ... 15
+
+    const uint32x4_t vin_u32_low_low = vmovl_u16(vget_low_u16(vin_low_u16)); // 0 ... 3
+    const uint32x4_t vin_u32_low_high = VMOVL_HIGH_U16(vin_low_u16); // 4 ... 7
+    const uint32x4_t vin_u32_high_low = vmovl_u16(vget_low_u16(vin_high_u16)); // 8 ... 11
+    const uint32x4_t vin_u32_high_high = VMOVL_HIGH_U16(vin_high_u16); // 12 ... 15
+
+    // Store       Subtract  Multiply  uint32->fp32
+    vst1q_f32(out, vsubq_f32(vmulq_f32(vcvtq_f32_u32(vin_u32_low_low), scale_fp32x4), scale_times_zero_point_fp32x4));
+    out += 4;
+    vst1q_f32(out, vsubq_f32(vmulq_f32(vcvtq_f32_u32(vin_u32_low_high), scale_fp32x4), scale_times_zero_point_fp32x4));
+    out += 4;
+    vst1q_f32(out, vsubq_f32(vmulq_f32(vcvtq_f32_u32(vin_u32_high_low), scale_fp32x4), scale_times_zero_point_fp32x4));
+    out += 4;
+    vst1q_f32(out, vsubq_f32(vmulq_f32(vcvtq_f32_u32(vin_u32_high_high), scale_fp32x4), scale_times_zero_point_fp32x4));
+    out += 4;
+
+    in += 16;
+    in_underlying += 16;
+  }
+
+  for (; i < N; ++i) { // use default dequantize for remaining vals
+    (*out++) = dequantize_val<c10::quint8>(scale, zero_point, (*in++));
+  }
+}
+
 #endif // defined(__ARM_NEON__) || defined(__aarch64__)
 
 void quantize_tensor_per_tensor_affine_cpu(
@@ -2814,6 +2929,15 @@ void dequantize_tensor_per_tensor_affine_cpu(
     Tensor& rtensor,
     double scale,
     int64_t zero_point) {
+#if defined(__ARM_NEON__) || defined(__aarch64__)
+  AT_DISPATCH_QINT_TYPES(
+      qtensor.scalar_type(), "dequantize_tensor_per_tensor_affine_cpu", [&]() {
+        check_tensor_memory_format(qtensor, rtensor);
+        const scalar_t* qdata = qtensor.data_ptr<scalar_t>();
+        dequantize_tensor_arm<scalar_t>(
+            qdata, rtensor, qtensor.numel(), scale, zero_point);
+      });
+#else
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "dequantize_tensor_per_tensor_affine_cpu", [&]() {
       check_tensor_memory_format(qtensor, rtensor);
@@ -2824,6 +2948,7 @@ void dequantize_tensor_per_tensor_affine_cpu(
           rd[i] = dequantize_val<scalar_t>(scale, zero_point, qd[i]);
         }
       });
+#endif // defined(__ARM_NEON__) || defined(__aarch64__)
 }
 #endif // USE_FBGEMM
 

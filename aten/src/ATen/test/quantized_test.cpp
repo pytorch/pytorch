@@ -280,4 +280,58 @@ TEST(TestQTensor, FromBlobQuantizedPerChannel) {
   }
   TORCH_CHECK(customDataDeleted);
 }
+
+#if defined(__ARM_NEON__) || defined(__aarch64__)
+TEST(TestQTensor, TestArmVectorizedAndParallelQuantizeDequantize) {
+  float scale = 7;
+  int zero_point = 10;
+  int numel = 132; // Each thread has 2 vectorized dequantize + 1 non-vectorized
+
+  std::vector<float> x_values;
+  for (int i = 0; i < numel; i++) {
+    x_values.push_back(9 * i);
+  }
+
+  Tensor x = from_blob(x_values.data(), x_values.size());
+
+  auto test_for_datatype = [&](
+      const ScalarType scalar_type,
+      const auto get_data_ptr,
+      const auto quantize_val_with_datatype) {
+    Tensor q = at::quantize_per_tensor(x, scale, zero_point, scalar_type);
+    auto* q_data = get_data_ptr(q);
+    for (int i = 0; i < numel; i++) {
+      ASSERT_EQ(
+        q_data[i].val_,
+        quantize_val_with_datatype(scale, zero_point, x_values[i]).val_);
+    }
+    Tensor r = q.dequantize();
+    float* r_data = r.data_ptr<float>();
+    for (int i = 0; i < numel; i++) {
+      ASSERT_EQ(
+        r_data[i],
+        native::dequantize_val(scale, zero_point, q_data[i]));
+    }
+  };
+
+  // Unsigned Int 8
+  test_for_datatype(
+    kQUInt8,
+    [](Tensor q) { return q.data_ptr<quint8>(); },
+    native::quantize_val<quint8>);
+
+  // Signed Int 8
+  test_for_datatype(
+    kQInt8,
+    [](Tensor q) { return q.data_ptr<qint8>(); },
+    native::quantize_val<qint8>);
+
+  // Signed Int 32 (not optimized with vectorization)
+  test_for_datatype(
+    kQInt32,
+    [](Tensor q) { return q.data_ptr<qint32>(); },
+    native::quantize_val<qint32>);
+}
+#endif // (__ARM_NEON__) || defined(__aarch64__)
+
 #endif // ATEN_CPU_STATIC_DISPATCH
