@@ -1,3 +1,4 @@
 from .register_dispatch_key import RegisterDispatchKey as RegisterDispatchKey
 from .register_dispatch_key import gen_registration_helpers as gen_registration_helpers
 from .native_functions import compute_native_function_declaration as compute_native_function_declaration
+from .ufunc import compute_ufunc_cuda as compute_ufunc_cuda, compute_ufunc_cpu as compute_ufunc_cpu, compute_ufunc_cpu_kernel as compute_ufunc_cpu_kernel

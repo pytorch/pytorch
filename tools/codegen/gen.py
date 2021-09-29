@@ -9,6 +9,7 @@ import functools
 import json
 from dataclasses import dataclass
 import hashlib
+import subprocess
 
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.model import (Argument, DispatchKey, FunctionSchema,
@@ -17,8 +18,8 @@ from tools.codegen.model import (Argument, DispatchKey, FunctionSchema,
                                  BackendIndex, BackendMetadata,
                                  OptionalType, SchemaKind, SelfArgument,
                                  TensorOptionsArguments, Type, Variant,
-                                 assert_never, is_cuda_dispatch_key,
-                                 is_generic_dispatch_key)
+                                 assert_never, is_cuda_dispatch_key, is_ufunc_dispatch_key,
+                                 is_generic_dispatch_key, ScalarType)
 from tools.codegen.api.types import (Binding, CppSignature, CppSignatureGroup,
                                      DispatcherSignature, NativeSignature)
 from tools.codegen.api import cpp
@@ -902,14 +903,19 @@ class FileManager:
     template_dir: str
     dry_run: bool
     filenames: Set[str]
+    clang_format: bool
 
-    def __init__(self, install_dir: str, template_dir: str, dry_run: bool) -> None:
+    def __init__(self, install_dir: str, template_dir: str, dry_run: bool, clang_format: bool=False) -> None:
         self.install_dir = install_dir
         self.template_dir = template_dir
         self.filenames = set()
         self.dry_run = dry_run
+        self.clang_format = clang_format
 
     def _write_if_changed(self, filename: str, contents: str) -> None:
+        if self.clang_format and (filename.endswith('.h') or filename.endswith('.cpp') or filename.endswith('.cu')):
+            proc = subprocess.run(['clang-format'], input=contents, capture_output=True, check=True, universal_newlines=True)  # type: ignore
+            contents = proc.stdout
         old_contents: Optional[str]
         try:
             with open(filename, 'r') as f:
@@ -1072,6 +1078,10 @@ def main() -> None:
         '--rocm',
         action='store_true',
         help='reinterpret CUDA as ROCm/HIP and adjust filepaths accordingly')
+    parser.add_argument(
+        '--clang-format',
+        action='store_true',
+        help='run clang-format on generated sources')
     # TODO: --op_registration_whitelist will be removed when all call-sites
     # for gen.py are moved over to using the operator YAML file for mobile
     # custom build.
@@ -1130,10 +1140,16 @@ def main() -> None:
     pathlib.Path(core_install_dir).mkdir(parents=True, exist_ok=True)
 
     def make_file_manager(install_dir: str) -> FileManager:
-        return FileManager(install_dir=install_dir, template_dir=template_dir, dry_run=options.output_dependencies)
+        return FileManager(
+            install_dir=install_dir,
+            template_dir=template_dir,
+            dry_run=options.output_dependencies,
+            clang_format=options.clang_format
+        )
 
     core_fm = make_file_manager(core_install_dir)
     cpu_fm = make_file_manager(options.install_dir)
+    cpu_vec_fm = make_file_manager(options.install_dir)
     cuda_fm = make_file_manager(options.install_dir)
 
     extra_cuda_headers = '''\
@@ -1247,6 +1263,36 @@ def main() -> None:
                 )),
             })
 
+        for g in structured_native_functions:
+            if not g.out.ufunc_inner_loop or not is_ufunc_dispatch_key(dispatch_key):
+                continue
+            name = g.functional.func.name.name
+            if dispatch_key is DispatchKey.CPU:
+                assert fm is cpu_fm
+                fm.write_with_template(f'UfuncCPU_{name}.cpp', 'UfuncCPU.cpp', lambda: {
+                    'meta_declaration': compute_meta_function_declaration(g),
+                    'native_declaration':
+                        dest.compute_native_function_declaration(g, backend_indices[dispatch_key]),
+                    'native_definitions': dest.compute_ufunc_cpu(g),
+                })
+                cpu_vec_fm.write_with_template(f'UfuncCPUKernel_{name}.cpp', 'UfuncCPUKernel.cpp', lambda: {
+                    'name': name,
+                    'native_definitions': dest.compute_ufunc_cpu_kernel(g),
+                })
+            elif dispatch_key is DispatchKey.CUDA:
+                fm.write_with_template(f'UfuncCUDA_{name}.cu', 'UfuncCUDA.cu', lambda: {
+                    'name': name,
+                    #'meta_declaration': compute_meta_function_declaration(g),
+                    #'native_declaration':
+                    #    dest.compute_native_function_declaration(g, backend_indices[dispatch_key]),
+                    # TODO: fix so that NativeFunctions.h isn't indirectly
+                    # included
+                    'meta_declaration': '',
+                    'native_definitions': dest.compute_ufunc_cuda(g),
+                })
+            else:
+                raise AssertionError(f'unrecognized {dispatch_key} for ufunc')
+
         del fm
 
     # BackendSelect is generated specially
@@ -1322,13 +1368,14 @@ def main() -> None:
             grouped_native_functions)),
     })
 
-    cpu_fm.write('Declarations.yaml', lambda: format_yaml([compute_declaration_yaml(f) for f in native_functions]))
+    # cpu_fm.write('Declarations.yaml', lambda: format_yaml([compute_declaration_yaml(f) for f in native_functions]))
     cpu_fm.write('RegistrationDeclarations.h', lambda: {
         'registration_declarations': [compute_registration_declarations(f, backend_indices) for f in native_functions],
     })
 
     if options.output_dependencies:
         cpu_fm.write_outputs(options.output_dependencies)
+        cpu_vec_fm.write_outputs(f"{options.output_dependencies}-cpu-vec")
         core_fm.write_outputs(f"{options.output_dependencies}-core")
         cuda_fm.write_outputs(f"{options.output_dependencies}-cuda")
 

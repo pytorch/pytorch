@@ -67,7 +67,108 @@ if(INTERN_BUILD_ATEN_OPS)
     set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/MapAllocator.cpp PROPERTIES COMPILE_FLAGS "-fno-openmp")
   endif()
 
+  file(GLOB_RECURSE all_python "${CMAKE_CURRENT_LIST_DIR}/../tools/codegen/*.py")
+
+  set(GEN_ROCM_FLAG)
+  if(USE_ROCM)
+    set(GEN_ROCM_FLAG --rocm)
+  endif()
+
+  set(CUSTOM_BUILD_FLAGS)
+  if(INTERN_BUILD_MOBILE)
+    if(USE_VULKAN)
+      list(APPEND CUSTOM_BUILD_FLAGS --backend_whitelist CPU QuantizedCPU Vulkan)
+    else()
+      list(APPEND CUSTOM_BUILD_FLAGS --backend_whitelist CPU QuantizedCPU)
+    endif()
+  endif()
+
+  if(SELECTED_OP_LIST)
+    # With static dispatch we can omit the OP_DEPENDENCY flag. It will not calculate the transitive closure
+    # of used ops. It only needs to register used root ops.
+    if(NOT STATIC_DISPATCH_BACKEND AND NOT OP_DEPENDENCY)
+      message(WARNING
+        "For custom build with dynamic dispatch you have to provide the dependency graph of PyTorch operators.\n"
+        "Switching to STATIC_DISPATCH_BACKEND=CPU. If you run into problems with static dispatch and still want"
+        " to use selective build with dynamic dispatch, please try:\n"
+        "1. Run the static analysis tool to generate the dependency graph, e.g.:\n"
+        "   LLVM_DIR=/usr ANALYZE_TORCH=1 tools/code_analyzer/build.sh\n"
+        "2. Run the custom build with the OP_DEPENDENCY option pointing to the generated dependency graph, e.g.:\n"
+        "   scripts/build_android.sh -DSELECTED_OP_LIST=<op_list.yaml> -DOP_DEPENDENCY=<dependency_graph.yaml>\n"
+      )
+      set(STATIC_DISPATCH_BACKEND CPU)
+    else()
+      execute_process(
+        COMMAND
+        "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_LIST_DIR}/../tools/code_analyzer/gen_op_registration_allowlist.py
+        --op-dependency "${OP_DEPENDENCY}"
+        --root-ops "${SELECTED_OP_LIST}"
+        OUTPUT_VARIABLE OP_REGISTRATION_WHITELIST
+      )
+      separate_arguments(OP_REGISTRATION_WHITELIST)
+      message(STATUS "Custom build with op registration whitelist: ${OP_REGISTRATION_WHITELIST}")
+      list(APPEND CUSTOM_BUILD_FLAGS
+        --force_schema_registration
+        --op_registration_whitelist ${OP_REGISTRATION_WHITELIST})
+    endif()
+  endif()
+
+  if(STATIC_DISPATCH_BACKEND)
+    message(STATUS "Custom build with static dispatch backend: ${STATIC_DISPATCH_BACKEND}")
+    list(APPEND CUSTOM_BUILD_FLAGS
+      --static_dispatch_backend ${STATIC_DISPATCH_BACKEND})
+  endif()
+
+  set(GEN_COMMAND
+      "${PYTHON_EXECUTABLE}" -m tools.codegen.gen
+      --source-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen
+      --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
+      ${GEN_ROCM_FLAG}
+      ${CUSTOM_BUILD_FLAGS}
+      ${GEN_VULKAN_FLAGS}
+  )
+
+  execute_process(
+      COMMAND ${GEN_COMMAND}
+        --output-dependencies ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_cpp.txt
+      RESULT_VARIABLE RETURN_VALUE
+      WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
+  )
+  if(NOT RETURN_VALUE EQUAL 0)
+      message(STATUS ${generated_cpp})
+      message(FATAL_ERROR "Failed to get generated_cpp list")
+  endif()
+  # FIXME: the file/variable name lists cpp, but these list both cpp and .h files
+  file(READ ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_cpp.txt generated_cpp)
+  file(READ ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_cpp.txt-cpu-vec cpu_vec_generated_cpp)
+  file(READ ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_cpp.txt-cuda cuda_generated_cpp)
+  file(READ ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_cpp.txt-core core_generated_cpp)
+
+  file(GLOB_RECURSE all_templates "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/templates/*")
+
+  file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/aten/src/ATen)
+  file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/aten/src/ATen/core)
+
+  add_custom_command(OUTPUT ${generated_cpp} ${cuda_generated_cpp} ${core_generated_cpp} ${cpu_vec_generated_cpp}
+    COMMAND ${GEN_COMMAND}
+    DEPENDS ${all_python} ${all_templates}
+      ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
+    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
+    )
+
+  # Generated headers used from a CUDA (.cu) file are
+  # not tracked correctly in CMake. We make the libATen.so depend explicitly
+  # on building the generated ATen files to workaround.
+  add_custom_target(ATEN_CPU_FILES_GEN_TARGET DEPENDS ${generated_cpp} ${core_generated_cpp} ${cpu_vec_generated_cpp})
+  add_custom_target(ATEN_CUDA_FILES_GEN_TARGET DEPENDS ${cuda_generated_cpp})
+  add_library(ATEN_CPU_FILES_GEN_LIB INTERFACE)
+  add_library(ATEN_CUDA_FILES_GEN_LIB INTERFACE)
+  add_dependencies(ATEN_CPU_FILES_GEN_LIB ATEN_CPU_FILES_GEN_TARGET)
+  add_dependencies(ATEN_CUDA_FILES_GEN_LIB ATEN_CUDA_FILES_GEN_TARGET)
+
+
   file(GLOB cpu_kernel_cpp_in "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cpu/*.cpp" "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/quantized/cpu/kernels/*.cpp")
+  list(APPEND cpu_kernel_cpp_in "${cpu_vec_generated_cpp}")
 
   list(APPEND CPU_CAPABILITY_NAMES "DEFAULT")
   list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}")
@@ -155,104 +256,6 @@ if(INTERN_BUILD_ATEN_OPS)
     endforeach()
   endforeach()
   list(APPEND ATen_CPU_SRCS ${cpu_kernel_cpp})
-
-  file(GLOB_RECURSE all_python "${CMAKE_CURRENT_LIST_DIR}/../tools/codegen/*.py")
-
-  set(GEN_ROCM_FLAG)
-  if(USE_ROCM)
-    set(GEN_ROCM_FLAG --rocm)
-  endif()
-
-  set(CUSTOM_BUILD_FLAGS)
-  if(INTERN_BUILD_MOBILE)
-    if(USE_VULKAN)
-      list(APPEND CUSTOM_BUILD_FLAGS --backend_whitelist CPU QuantizedCPU Vulkan)
-    else()
-      list(APPEND CUSTOM_BUILD_FLAGS --backend_whitelist CPU QuantizedCPU)
-    endif()
-  endif()
-
-  if(SELECTED_OP_LIST)
-    # With static dispatch we can omit the OP_DEPENDENCY flag. It will not calculate the transitive closure
-    # of used ops. It only needs to register used root ops.
-    if(NOT STATIC_DISPATCH_BACKEND AND NOT OP_DEPENDENCY)
-      message(WARNING
-        "For custom build with dynamic dispatch you have to provide the dependency graph of PyTorch operators.\n"
-        "Switching to STATIC_DISPATCH_BACKEND=CPU. If you run into problems with static dispatch and still want"
-        " to use selective build with dynamic dispatch, please try:\n"
-        "1. Run the static analysis tool to generate the dependency graph, e.g.:\n"
-        "   LLVM_DIR=/usr ANALYZE_TORCH=1 tools/code_analyzer/build.sh\n"
-        "2. Run the custom build with the OP_DEPENDENCY option pointing to the generated dependency graph, e.g.:\n"
-        "   scripts/build_android.sh -DSELECTED_OP_LIST=<op_list.yaml> -DOP_DEPENDENCY=<dependency_graph.yaml>\n"
-      )
-      set(STATIC_DISPATCH_BACKEND CPU)
-    else()
-      execute_process(
-        COMMAND
-        "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_LIST_DIR}/../tools/code_analyzer/gen_op_registration_allowlist.py
-        --op-dependency "${OP_DEPENDENCY}"
-        --root-ops "${SELECTED_OP_LIST}"
-        OUTPUT_VARIABLE OP_REGISTRATION_WHITELIST
-      )
-      separate_arguments(OP_REGISTRATION_WHITELIST)
-      message(STATUS "Custom build with op registration whitelist: ${OP_REGISTRATION_WHITELIST}")
-      list(APPEND CUSTOM_BUILD_FLAGS
-        --force_schema_registration
-        --op_registration_whitelist ${OP_REGISTRATION_WHITELIST})
-    endif()
-  endif()
-
-  if(STATIC_DISPATCH_BACKEND)
-    message(STATUS "Custom build with static dispatch backend: ${STATIC_DISPATCH_BACKEND}")
-    list(APPEND CUSTOM_BUILD_FLAGS
-      --static_dispatch_backend ${STATIC_DISPATCH_BACKEND})
-  endif()
-
-  set(GEN_COMMAND
-      "${PYTHON_EXECUTABLE}" -m tools.codegen.gen
-      --source-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen
-      --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
-      ${GEN_ROCM_FLAG}
-      ${CUSTOM_BUILD_FLAGS}
-      ${GEN_VULKAN_FLAGS}
-  )
-
-  execute_process(
-      COMMAND ${GEN_COMMAND}
-        --output-dependencies ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_cpp.txt
-      RESULT_VARIABLE RETURN_VALUE
-      WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
-  )
-  if(NOT RETURN_VALUE EQUAL 0)
-      message(STATUS ${generated_cpp})
-      message(FATAL_ERROR "Failed to get generated_cpp list")
-  endif()
-  # FIXME: the file/variable name lists cpp, but these list both cpp and .h files
-  file(READ ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_cpp.txt generated_cpp)
-  file(READ ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_cpp.txt-cuda cuda_generated_cpp)
-  file(READ ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_cpp.txt-core core_generated_cpp)
-
-  file(GLOB_RECURSE all_templates "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/templates/*")
-
-  file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/aten/src/ATen)
-  file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/aten/src/ATen/core)
-
-  add_custom_command(OUTPUT ${generated_cpp} ${cuda_generated_cpp} ${core_generated_cpp}
-    COMMAND ${GEN_COMMAND}
-    DEPENDS ${all_python} ${all_templates}
-      ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
-    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
-    )
-
-  # Generated headers used from a CUDA (.cu) file are
-  # not tracked correctly in CMake. We make the libATen.so depend explicitly
-  # on building the generated ATen files to workaround.
-  add_custom_target(ATEN_CPU_FILES_GEN_TARGET DEPENDS ${generated_cpp} ${core_generated_cpp})
-  add_custom_target(ATEN_CUDA_FILES_GEN_TARGET DEPENDS ${cuda_generated_cpp})
-  add_library(ATEN_CPU_FILES_GEN_LIB INTERFACE)
-  add_library(ATEN_CUDA_FILES_GEN_LIB INTERFACE)
-  add_dependencies(ATEN_CPU_FILES_GEN_LIB ATEN_CPU_FILES_GEN_TARGET)
-  add_dependencies(ATEN_CUDA_FILES_GEN_LIB ATEN_CUDA_FILES_GEN_TARGET)
 endif()
 
 function(append_filelist name outputvar)

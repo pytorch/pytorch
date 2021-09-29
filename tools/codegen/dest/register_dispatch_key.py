@@ -11,7 +11,8 @@ from tools.codegen.model import (DispatchKey, NativeFunction,
                                  TensorOptionsArguments,
                                  DeviceCheckType, Argument, assert_never,
                                  is_cuda_dispatch_key, BackendIndex,
-                                 gets_generated_out_inplace_wrapper)
+                                 gets_generated_out_inplace_wrapper,
+                                 BackendMetadata, is_ufunc_dispatch_key)
 from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType,
                                      CppSignature, CppSignatureGroup,
                                      Expr, MutRefCType, kernel_signature,
@@ -20,6 +21,7 @@ from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType,
 import tools.codegen.api.meta as meta
 import tools.codegen.api.cpp as cpp
 import tools.codegen.api.structured as structured
+import tools.codegen.api.ufunc as ufunc
 from tools.codegen.api.translate import translate
 from tools.codegen.selective_build.selector import SelectiveBuilder
 
@@ -331,6 +333,8 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 metadata = self.backend_index.get_kernel(f)
                 if metadata is None:
                     return None
+                # NB: This is checked on entry to unstructured
+                assert isinstance(metadata, BackendMetadata)
                 if self.class_method_name is None:
                     impl_name = f"{self.cpp_namespace}::{metadata.kernel}"
                 else:
