@@ -290,7 +290,8 @@ void slow_conv2d_backward_out_cpu_template(
   TORCH_CHECK(grad_input.is_contiguous(), "slow_conv2d: grad_input must be contiguous");
   const int64_t batch_size = input.size(0);
 
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, input.scalar_type(), "slow_conv2d_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      kBFloat16, input.scalar_type(), "slow_conv2d_cpu_grad_input", [&] {
     auto input_a = input.accessor<scalar_t, 4>();
     auto grad_output_a = grad_output.accessor<scalar_t, 4>();
     auto grad_input_a = grad_input.accessor<scalar_t, 4>();
@@ -386,7 +387,8 @@ static void slow_conv2d_backward_weight_out_cpu_template(
 
   const int64_t batch_size = input.size(0);
 
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, input.scalar_type(), "slow_conv2d_weight_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      kBFloat16, input.scalar_type(), "slow_conv2d_cpu_grad_weight", [&] {
     auto grad_output_a = grad_output.accessor<scalar_t, 4>();
     auto grad_weight_2d_a = grad_weight_2d.accessor<scalar_t, 2>();
     auto finput_a = finput.accessor<scalar_t, 3>();
