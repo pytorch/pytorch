@@ -12,12 +12,13 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_methods_invocations import \
     (op_db, _NOTHING, UnaryUfuncInfo, ReductionOpInfo, SpectralFuncInfo)
 from torch.testing._internal.common_device_type import \
-    (deviceCountAtLeast, instantiate_device_type_tests, ops, onlyCUDA, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
+    (deviceCountAtLeast, instantiate_device_type_tests, ops, onlyCPU, onlyCUDA, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, create_traced_fn, \
     check_alias_annotation
 from torch.testing._internal.jit_utils import disable_autodiff_subgraph_inlining
 import torch.testing._internal.opinfo_helper as opinfo_helper
+from torch.testing._internal.composite_compliance import _check_composite_compliance
 
 # variant testing is only done with torch.float and torch.cfloat to avoid
 #   excessive test times and maximize signal to noise ratio
@@ -495,6 +496,23 @@ class TestCommon(TestCase):
         if len(inplace_ops) > 0:
             inplace_samples = list(filter(lambda sample: not sample.broadcasts_input, samples))
             _test_inplace_preserve_storage(inplace_samples, inplace_variants)
+
+    # Checks if the operator (if it is composite) is written to support most
+    # backends and Tensor subclasses. See "CompositeImplicitAutograd Compliance"
+    # in aten/src/ATen/native/README.md for more details
+    #
+    # NB: onlyCPU because CompositeImplicitAutograd ops go through the same
+    # codepath on all devices. Ideally we'd use a meta device here but coverage
+    # for that is not good yet.
+    @onlyCPU
+    @ops(op_db, allowed_dtypes=(torch.float,))
+    def test_composite_compliance(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype, requires_grad=False)
+
+        for sample in samples:
+            args = [sample.input] + list(sample.args)
+            kwargs = sample.kwargs
+            _check_composite_compliance(op, args, kwargs)
 
 
 # gradcheck requires double precision

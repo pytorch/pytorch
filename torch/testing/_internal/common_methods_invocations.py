@@ -7169,6 +7169,8 @@ op_db: List[OpInfo] = [
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
+               # Pre-existing condition; Needs to be fixed
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
                # Gradcheck for complex generates invalid inputs for this function
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD', dtypes=complex_types()),),
            ),
@@ -7205,7 +7207,11 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            check_batched_gradgrad=False,
            sample_inputs_func=sample_inputs_linalg_invertible,
-           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
+           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
+           skips=(
+               # Pre-existing condition; Needs to be fixed
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
+           )),
     OpInfo('linalg.eigh',
            aten_name='linalg_eigh',
            dtypes=floating_and_complex_types(),
@@ -7226,6 +7232,8 @@ op_db: List[OpInfo] = [
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
+               # Pre-existing condition; Needs to be fixed
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
                # Gradcheck hangs for this function
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),),
            ),
@@ -7258,7 +7266,12 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, skipCUDAIfRocm],
            sample_inputs_func=sample_inputs_linalg_matrix_power,
-           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           skips=(
+               # Pre-existing condition; Needs to be fixed
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
+           ),
+           ),
     OpInfo('linalg.multi_dot',
            # Need this lambda because gradcheck does not work with TensorList inputs
            aten_name='linalg_multi_dot',
@@ -7280,6 +7293,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_linalg_norm,
            aten_name='linalg_norm',
            skips=(
+               # Pre-existing condition; Needs to be fixed
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
                # linalg.norm does not correctly warn when resizing out= inputs
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
            )),
@@ -7289,6 +7304,8 @@ op_db: List[OpInfo] = [
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            sample_inputs_func=sample_inputs_linalg_matrix_norm,
            skips=(
+               # Pre-existing condition; Needs to be fixed
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
                # linalg.matrix_norm does not correctly warn when resizing out= inputs
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
            )),
@@ -7394,6 +7411,8 @@ op_db: List[OpInfo] = [
                    safe_casts_outputs=True,
                    supports_autograd=False,
                    skips=(
+                       # Pre-existing condition; Needs to be fixed
+                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
                        # The function variant always returns BoolTensor
                        # while the inplace variant preserves the input dtype.
                        # >>> t = torch.randn(3)
@@ -7603,10 +7622,20 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_max_min_reduction_no_dim,),
     OpInfo('quantile',
            dtypes=floating_types(),
-           sample_inputs_func=sample_inputs_reduction_quantile),
+           sample_inputs_func=sample_inputs_reduction_quantile,
+           skips=(
+               # Pre-existing condition; Needs to be fixed
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
+           ),
+           ),
     OpInfo('nanquantile',
            dtypes=floating_types(),
-           sample_inputs_func=sample_inputs_reduction_quantile),
+           sample_inputs_func=sample_inputs_reduction_quantile,
+           skips=(
+               # Pre-existing condition; Needs to be fixed
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
+           ),
+           ),
     BinaryUfuncInfo(
         'max',
         aliases=('maximum',),
@@ -8547,6 +8576,10 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
            supports_forward_ad=True,
+           skips=(
+               # Pre-existing condition; Needs to be fixed
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
+           ),
            sample_inputs_func=sample_inputs_tensor_split,),
     OpInfo('hsplit',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
@@ -8700,6 +8733,10 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
+           skips=(
+               # Pre-existing condition; Needs to be fixed
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
+           ),
            ),
     OpInfo('linalg.inv_ex',
            aten_name='linalg_inv_ex',
@@ -8732,14 +8769,24 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            supports_autograd=False,
            sample_inputs_func=sample_inputs_linalg_invertible,
-           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
+           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
+           skips=(
+               # Pre-existing condition; Needs to be fixed
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
+           ),
+           ),
     OpInfo('linalg.matrix_rank',
            aten_name='linalg_matrix_rank',
            variant_test_name='hermitian',
            dtypes=floating_and_complex_types(),
            supports_autograd=False,
            sample_inputs_func=sample_inputs_linalg_pinv_hermitian,
-           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
+           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
+           skips=(
+               # Pre-existing condition; Needs to be fixed
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
+           ),
+           ),
     OpInfo('linalg.pinv',
            aten_name='linalg_pinv',
            op=torch.linalg.pinv,
@@ -9224,6 +9271,9 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_autograd=False,
+           skips=(
+               DecorateInfo(unittest.skip("Allowed exception"), 'TestCommon', 'test_composite_compliance'),
+           ),
            sample_inputs_func=sample_inputs_resize_ops),
     OpInfo('resize_as_',
            op=lambda x, other: torch.resize_as_(x.clone(), other),
@@ -9583,6 +9633,8 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            dtypesIfCUDA=floating_and_complex_types(),
            skips=(
+               # Pre-existing condition; Needs to be fixed
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
                # RuntimeError not raised :
                # Expected RuntimeError when calling with input.device=cpu and out.device=cuda
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
@@ -9601,6 +9653,8 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            skips=(
+               # Pre-existing condition; Needs to be fixed
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
                # RuntimeError not raised :
                # Expected RuntimeError when calling with input.device=cpu and out.device=cuda
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
