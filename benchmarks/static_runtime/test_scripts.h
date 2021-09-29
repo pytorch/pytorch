@@ -838,3 +838,37 @@ const std::string signed_log1p_script = R"IR(
       %res : Tensor = aten::clone(%3, %none)
       return (%res)
 )IR";
+
+const auto getitem_immutable_input_dict_script = R"JIT(
+  def forward(self, input: Dict[int, Tensor]):
+      a = input[0]
+      b = input[1]
+      c = a + b
+      return c.clone()
+)JIT";
+
+const auto getitem_mutable_input_dict_script = R"JIT(
+  def forward(self, input: Dict[int, Tensor]):
+      a = input[0]
+      input[1] = a
+      b = input[1]
+      c = a + b
+      return c.clone()
+)JIT";
+
+const auto var_tuple_unpack_script = R"JIT(
+  def forward(self, input_0: Tuple[Tensor, Tensor], input_1: Tuple[int, int]):
+      a, b = input_0
+      c, d = input_1
+      res = a * c + b * d
+      return res.clone()
+)JIT";
+
+const auto var_tuple_unpack_not_applied_script = R"JIT(
+  def forward(self, input_0: Tuple[Tensor, Tensor], input_1: Tuple[int, int]):
+      a, b = input_0
+      x = a + b
+      c, d = input_1
+      res = a * c + b * d + x
+      return res.clone()
+)JIT";

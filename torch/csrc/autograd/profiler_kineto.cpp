@@ -47,6 +47,11 @@ std::string stacksToStr(const std::vector<std::string>& stacks, const char* deli
 std::string dtypesToStr(const std::vector<std::string>& types);
 std::vector<std::string> inputTypes(const at::RecordFunction& fn);
 
+// Assumption: Total threads number will not exceed 2^16-1, and total ops will not exceed 2^48 -1.
+static inline uint64_t getForwardThreadKey(uint64_t tid, uint64_t seqNr) {
+  return (((tid) << 48) | ((seqNr) & (((uint64_t)1 << 48) - 1)));
+}
+
 struct KinetoThreadLocalState : public ProfilerThreadLocalState {
   explicit KinetoThreadLocalState(const ProfilerConfig& config)
     : ProfilerThreadLocalState(config) {
@@ -154,10 +159,10 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
             "Addr", std::to_string(reinterpret_cast<intptr_t>(ptr)));
         act.addMetadata("Bytes", std::to_string(alloc_size));
         if (total_allocated >= 0) {
-          act.addMetadata("Allocated Bytes", std::to_string(total_allocated));
+          act.addMetadata("Total Allocated", std::to_string(total_allocated));
         }
         if (total_reserved >= 0) {
-          act.addMetadata("Reserved Bytes", std::to_string(total_reserved));
+          act.addMetadata("Total Reserved", std::to_string(total_reserved));
         }
 #endif // USE_KINETO
 
@@ -232,6 +237,11 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
 
   void finalizeCPUTrace() {
     TORCH_INTERNAL_ASSERT(cpu_trace->activities.size() == kineto_events_.size());
+    // startThreadId_seqNum to pointer of activity.
+    // Low-16bits of startThreadId and low-48bits seqNum are concatenated into one uint64_t variable as key.
+    std::unordered_map<uint64_t, libkineto::GenericTraceActivity*> tidSeq2activity;
+    uint64_t fwd_bwd_link_id = 1;
+
     for (size_t idx = 0; idx < cpu_trace->activities.size(); ++idx) {
       auto& kineto_event = kineto_events_[idx];
       auto& activity = cpu_trace->activities[idx];
@@ -258,6 +268,43 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
         activity.addMetadata(
             "Sequence number",
             std::to_string(kineto_event.sequenceNr()));
+        generateForwardBackwardLink(kineto_event, fwd_bwd_link_id, activity, tidSeq2activity);
+      }
+    }
+  }
+
+  void generateForwardBackwardLink(const KinetoEvent &kineto_event,
+    uint64_t &fwd_bwd_link_id,
+    libkineto::GenericTraceActivity &activity,
+    std::unordered_map<uint64_t, libkineto::GenericTraceActivity*> &tidSeq2activity) {
+    if (kineto_event.fwdThreadId() > 0) {
+      // act is backward op.
+      uint64_t key = getForwardThreadKey(kineto_event.fwdThreadId(), kineto_event.sequenceNr());
+      auto iter = tidSeq2activity.find(key);
+      if (iter != tidSeq2activity.end()) {
+        libkineto::GenericTraceActivity* fwd = iter->second;
+        activity.flow.linkedActivity = fwd; // Only destination side set this, to distinguish with start side.
+        activity.flow.id = fwd->flow.id = fwd_bwd_link_id;
+        activity.flow.type = fwd->flow.type = libkineto::kLinkFwdBwd;
+        ++fwd_bwd_link_id;
+      }
+    }
+    else if (kineto_event.startThreadId() != 0) {
+      // act is forward op.
+      uint64_t key = getForwardThreadKey(kineto_event.startThreadId(), kineto_event.sequenceNr());
+      // Assumption: Among all ops with same sequence number,
+      // the one with biggest start time is most likely launching backward op.
+      auto iter = tidSeq2activity.find(key);
+      if (iter == tidSeq2activity.end()) {
+        tidSeq2activity[key] = &activity;
+      }
+      else {
+        // Now the sequence number is only incremented on creating a "Node" object for backward pass,
+        // by calling "at::sequence_number::get_and_increment()".
+        // Among all ops with same sequence number, the one with biggest startTime is the one launching backward op.
+        if (activity.startTime >= iter->second->startTime) {
+          tidSeq2activity[key] = &activity;
+        }
       }
     }
   }

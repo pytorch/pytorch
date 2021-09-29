@@ -14,8 +14,24 @@
 #include <sstream>
 #include <stdexcept>
 
+#include <ATen/native/quantized/cpu/conv_packed_params.h>
+
 namespace torch {
 namespace jit {
+
+namespace {
+bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor> inputs) {
+  double maxValue = 0.0;
+  for (auto& tensor : inputs) {
+    maxValue = fmax(tensor.abs().max().item<float>(), maxValue);
+  }
+  return diff.abs().max().item<float>() < 2e-6 * maxValue;
+}
+
+bool almostEqual(const at::Tensor& a, const at::Tensor& b) {
+  return checkRtol(a - b, {a, b});
+}
+} // namespace
 
 using namespace torch::indexing;
 using namespace torch::jit::tensorexpr;
@@ -83,6 +99,44 @@ TEST_F(Kernel, InliningIntermediates) {
       torch::jit::testing::FileCheck().check_not("aten_sub")->run(oss.str());
     }
   }
+}
+
+TEST_F(Kernel, PreAllocIntermediateBufs) {
+  const auto graph_string = R"IR(
+graph(%a.1 : Float(8, 8, strides=[8, 1], requires_grad=0, device=cpu),
+      %b.1 : Float(8, 8, strides=[8, 1], requires_grad=0, device=cpu)):
+  %2 : int = prim::Constant[value=1]()
+  %c.2 : Float(8, 8, strides=[8, 1], requires_grad=0, device=cpu) = aten::matmul(%a.1, %b.1) # test_matmul.py:12:12
+  %3 : Float(8, 8, strides=[8, 1], requires_grad=0, device=cpu) = aten::add(%a.1, %c.2, %2) # test_matmul.py:13:15
+  return (%3))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  auto a = at::rand({8, 8}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto b = at::rand({8, 8}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto o = at::zeros({8, 8}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto ref = at::matmul(a, b) + a;
+  TensorExprKernel k(graph, {}, true);
+
+  std::vector<at::Tensor> inputs = {a, b};
+  auto stmt = k.getCodeGenStmt();
+
+  std::ostringstream oss;
+  oss << *stmt;
+
+  // Check whether the intermediate buffer has been added to constants
+  auto constants = k.getConstantDescriptors();
+  ASSERT_EQ(constants.size(), 1);
+
+  // Check the IR we produced
+  torch::jit::testing::FileCheck().check_not("Alloc")->run(oss.str());
+  torch::jit::testing::FileCheck().check_not("Free")->run(oss.str());
+
+  // Check correctness
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  o = stack[0].toTensor();
+  ASSERT_TRUE(at::allclose(o, ref));
 }
 
 TEST_F(Kernel, _1) {
@@ -210,7 +264,11 @@ TEST_F(Kernel, Huge) {
   TensorExprKernel k(graph);
   std::ostringstream oss;
   oss << *k.getCodeGenStmt();
-  const std::string& verification_pattern = "# CHECK: 4000000000";
+  // The 4000000000 iterations loop will be split into 500000000 x 8 and the
+  // outer loop will be parallel. If LLVM is not present, it will not be split,
+  // and to cover both of these cases we're looking for 00000000ll; in the
+  // output.
+  const std::string& verification_pattern = R"IR(# CHECK: 00000000ll;)IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
@@ -539,6 +597,36 @@ TEST_F(Kernel, CatInputTypesPromotion) {
   }
 }
 
+TEST_F(Kernel, CatAndInlineWithAConstantDim) {
+  const auto graph_string = R"IR(
+      graph(%0 : Float(1, 512, strides=[1024, 1], requires_grad=0, device=cpu),
+            %1 : Float(1, 512, strides=[1024, 1], requires_grad=0, device=cpu)):
+        %2 : bool = prim::Constant[value=0]()
+        %3 : int = prim::Constant[value=1]()
+        %4 : Tensor[] = prim::ListConstruct(%0, %1)
+        %5 : Float(1, 1024, strides=[1024, 1], requires_grad=0, device=cpu) = aten::cat(%4, %3)
+        %6 : Tensor[] = prim::ListConstruct(%5)
+        %7 : Float(1, 1024, strides=[1024, 1], requires_grad=0, device=cpu) = aten::cat(%6, %3)
+        %8 : Float(1, 1024, strides=[1024, 1], requires_grad=0, device=cpu) = aten::_cast_Float(%7, %2)
+        return (%8, %7))IR";
+
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+  TensorExprKernel k(graph);
+
+  auto a = at::rand({1, 512}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto b = at::rand({1, 512}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto ref = at::_cast_Float(at::cat({a, b}, 1), 0);
+
+  std::vector<at::Tensor> inputs = {a, b};
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  auto o = stack[0].toTensor();
+  ASSERT_EQ(o.sizes(), ref.sizes());
+  ASSERT_EQ(o.dtype(), ref.dtype());
+  ASSERT_TRUE(at::allclose(o, ref));
+}
+
 TEST_F(Kernel, CatWoConditionals) {
   getCatWoConditionals() = true;
   const auto graph_string = R"IR(
@@ -561,17 +649,15 @@ TEST_F(Kernel, CatWoConditionals) {
   const std::string& verification_pattern =
       R"IR(
 # CHECK: for
-# CHECK-NEXT: for
-# CHECK-NEXT: for
-# CHECK-NEXT: aten_cat
 # CHECK: for
-# CHECK-NEXT: for
-# CHECK-NEXT: for
-# CHECK-NEXT: aten_cat
 # CHECK: for
-# CHECK-NEXT: for
-# CHECK-NEXT: for
-# CHECK-NEXT: aten_cat)IR";
+# CHECK: aten_cat
+# CHECK: for
+# CHECK: for
+# CHECK: aten_cat
+# CHECK: for
+# CHECK: for
+# CHECK: aten_cat)IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
   auto a = at::rand({5, 3, 2}, TensorOptions(kCPU).dtype(at::kFloat));
@@ -802,9 +888,9 @@ TEST_F(Kernel, SumOneAxis) {
         // Check the IR we produced
         const std::string& verification_pattern =
             R"IR(
-# CHECK: for (int64_t v = 0ll; v <
+# CHECK: for (int64_t
 # CHECK-NEXT: sum
-# CHECK-NEXT: for (int64_t v_1 = 0ll; v_1 <
+# CHECK-NEXT: for (int64_t
 # CHECK-NEXT:   sum)IR";
         torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
@@ -863,10 +949,10 @@ TEST_F(Kernel, SumMultipleAxes) {
         // Check the IR we produced
         const std::string& verification_pattern =
             R"IR(
-# CHECK: int64_t v = 0
-# CHECK: int64_t v_1 = 0
-# CHECK: int64_t v_2 = 0
-# CHECK: int64_t v_3 = 0
+# CHECK: for (int64_t
+# CHECK: for (int64_t
+# CHECK: for (int64_t
+# CHECK: for (int64_t
 # CHECK: sum)IR";
         torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
@@ -1110,6 +1196,84 @@ TEST_F(Kernel, Softmax4D) {
   }
 }
 
+TEST_F(Kernel, SignTest) {
+  const auto graph_template = R"IR(
+      graph(%0 : ${dtype}(${size}, strides=[1], device=cpu)):
+        %2 : ${dtype}(${size}, strides=[1]) = aten::sign(%0)
+        return (%2))IR";
+
+  auto run_test = [](const std::string& graph_string, const at::Tensor& input) {
+    auto graph = std::make_shared<Graph>();
+    parseIR(graph_string, &*graph);
+
+    TensorExprKernel k(graph);
+    StmtPtr s = k.getCodeGenStmt();
+
+    std::vector<at::Tensor> inputs = {input};
+    std::vector<IValue> stack = fmap<IValue>(inputs);
+    k.run(stack);
+    auto o = stack[0].toTensor();
+    auto ref = at::sign(input);
+    ASSERT_TRUE(at::allclose(o, ref));
+  };
+  auto common_options = at::TensorOptions()
+                            .layout(at::kStrided)
+                            .device(at::kCPU)
+                            .requires_grad(false);
+  int default_input_size = 100;
+  for (auto scalar_type : {ScalarType::Float, ScalarType::Double}) {
+    at::Tensor corner_case_inputs;
+    TemplateEnv env;
+    auto options = common_options;
+    switch (scalar_type) {
+      case ScalarType::Float: {
+        env.s("dtype", "Float");
+        options = options.dtype(at::kFloat);
+        std::vector<float> input_float = {
+            0.0f,
+            -0.0f,
+            std::numeric_limits<float>::infinity(),
+            -std::numeric_limits<float>::infinity(),
+            std::nanf("1"),
+            -std::nanf("1")};
+        corner_case_inputs = at::from_blob(
+            input_float.data(),
+            {static_cast<long>(input_float.size())},
+            options);
+        auto rand_input = at::rand({default_input_size}, options);
+        auto input = at::cat({rand_input, corner_case_inputs});
+        env.d("size", at::numel(input));
+        const auto graph_string = format(graph_template, env);
+        run_test(graph_string, input);
+        break;
+      }
+      case ScalarType::Double: {
+        env.s("dtype", "Double");
+        options = options.dtype(at::kDouble);
+        std::vector<double> input_double = {
+            0.0,
+            -0.0,
+            std::numeric_limits<double>::infinity(),
+            -std::numeric_limits<double>::infinity(),
+            std::nan("1"),
+            -std::nan("1")};
+        corner_case_inputs = at::from_blob(
+            input_double.data(),
+            {static_cast<long>(input_double.size())},
+            options);
+        auto rand_input = at::rand({default_input_size}, options);
+        auto input = at::cat({rand_input, corner_case_inputs});
+        env.d("size", at::numel(input));
+        const auto graph_string = format(graph_template, env);
+        run_test(graph_string, input);
+        break;
+      }
+      default:
+        throw unsupported_dtype();
+    }
+  }
+}
+
 TEST_F(Kernel, InlineProducerIntoReduction) {
   // Inline producer (mul) into reduction (sum).
   const auto graph_string = R"IR(
@@ -1131,8 +1295,8 @@ TEST_F(Kernel, InlineProducerIntoReduction) {
   // We should have only one loop in the end.
   const std::string& verification_pattern =
       R"IR(
-        # CHECK: for (int64_t v = 0ll; v < 5
-        # CHECK-NEXT: for (int64_t v_1 = 0ll; v_1 < 3
+        # CHECK: for (int64_t i_1 = 0ll; i_1 < 5
+        # CHECK-NEXT: for (int64_t j_1 = 0ll; j_1 < 3
         # CHECK-NEXT:   sum
         # CHECK-NOT: for)IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
@@ -1170,11 +1334,11 @@ TEST_F(Kernel, InlineReductionIntoConsumer) {
   // We should have two loops in the end.
   const std::string& verification_pattern =
       R"IR(
-        # CHECK: for (int64_t v = 0ll; v < 5
-        # CHECK-NEXT: for (int64_t v_1 = 0ll; v_1 < 3
+        # CHECK: for (int64_t i_1 = 0ll; i_1 < 5
+        # CHECK-NEXT: for (int64_t j_1 = 0ll; j_1 < 3
         # CHECK-NEXT:   sum
-        # CHECK: for (int64_t v_2 = 0ll; v_2 < 5
-        # CHECK-NEXT: for (int64_t v_3 = 0ll; v_3 < 3
+        # CHECK: for (int64_t i_2 = 0ll; i_2 < 5
+        # CHECK-NEXT: for (int64_t j_2 = 0ll; j_2 < 3
         # CHECK-NEXT:   aten_mul
         # CHECK-NOT: for)IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
@@ -1418,7 +1582,78 @@ TEST_F(Kernel, CustomLowering) {
   torch::jit::testing::FileCheck().check("isnan")->run(oss.str());
 }
 
-//TODO: Why Tensor(2, 2) does not work? Need dtype propagation? 
+TEST_F(Kernel, Vectorize) {
+#ifdef TORCH_ENABLE_LLVM
+  const auto graph_string = R"IR(
+      graph(%0 : Float(100, 16, strides=[16, 1], device=cpu),
+            %1 : Float(100, 16, strides=[16, 1], device=cpu)):
+        %2 : Float(100, 16, strides=[16, 1]) = aten::mul(%0, %1)
+        %3 : Float(100, 16, strides=[16, 1]) = aten::mul(%0, %2)
+        return (%3))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  auto a = at::rand({100, 16}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto b = at::rand({100, 16}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto o = at::zeros({100, 16}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto ref = a * (a * b);
+  TensorExprKernel k(graph);
+  std::vector<at::Tensor> inputs = {a, b};
+  StmtPtr s = k.getCodeGenStmt();
+
+  std::ostringstream oss;
+  oss << *s;
+
+  // Check the IR we produced
+  const std::string& verification_pattern = R"IR(# CHECK: Ramp)IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  o = stack[0].toTensor();
+  for (size_t i = 0; i < 100 * 16; i++) {
+    CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
+  }
+#endif
+}
+
+// TODO: To vectorize loopnest for 100x3 case, we need to flatten loops first.
+TEST_F(Kernel, DISABLED_FlattenVectorize) {
+#ifdef TORCH_ENABLE_LLVM
+  const auto graph_string = R"IR(
+      graph(%0 : Float(100, 3, strides=[3, 1], device=cpu),
+            %1 : Float(100, 3, strides=[3, 1], device=cpu)):
+        %2 : Float(100, 3, strides=[3, 1]) = aten::mul(%0, %1)
+        %3 : Float(100, 3, strides=[3, 1]) = aten::mul(%0, %2)
+        return (%3))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  auto a = at::rand({100, 3}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto b = at::rand({100, 3}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto o = at::zeros({100, 3}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto ref = a * (a * b);
+  TensorExprKernel k(graph);
+  std::vector<at::Tensor> inputs = {a, b};
+  StmtPtr s = k.getCodeGenStmt();
+
+  std::ostringstream oss;
+  oss << *s;
+
+  // Check the IR we produced
+  const std::string& verification_pattern = R"IR(# CHECK: Ramp)IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  o = stack[0].toTensor();
+  for (size_t i = 0; i < 100 * 3; i++) {
+    CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
+  }
+#endif
+}
+
+// TODO: Why Tensor(2, 2) does not work? Need dtype propagation?
 //%q.1 : Tensor(2, 2) = aten::quantize_per_tensor(%x.1, %4, %3, %2)
 TEST_F(Kernel, QuantDequant) {
 #ifdef TORCH_ENABLE_LLVM
@@ -1434,19 +1669,11 @@ TEST_F(Kernel, QuantDequant) {
   parseIR(graph_string, &*graph);
 
   auto x = at::rand({2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
-  std::cout << "XXX x:\n" << x << std::endl;
   auto q = at::quantize_per_tensor(x, 0.1f, 130, at::kQUInt8);
-  c10::quint8* p = q.data_ptr<c10::quint8>();
-  for (int i = 0; i < 4; ++i) {
-    std::cout << i << " -> " << p[i].val_ << std::endl;
-  }
-  std::cout << "XXX q:\n" << q << std::endl;
-  auto dq = at::dequantize(q);
-  std::cout << "XXX dq:\n" << dq << std::endl;
+  auto y_expected = at::dequantize(q);
   TensorExprKernel k(graph);
   std::vector<at::Tensor> inputs = {x};
   StmtPtr s = k.getCodeGenStmt();
-  std::cout << "XXX stmt:" << *s << std::endl;
 
   std::ostringstream oss;
   oss << *s;
@@ -1461,18 +1688,216 @@ TEST_F(Kernel, QuantDequant) {
 
   std::vector<IValue> stack = fmap<IValue>(inputs);
   k.run(stack);
-  auto aot_o = stack[0].toTensor();
-  std::cout << "XXX aot_o:\n" << aot_o << std::endl;
-  for (size_t i = 0; i < 2 * 2; i++) {
-    auto of = ((float*)aot_o.data_ptr())[i];
-    auto dqf = ((float*)dq.data_ptr())[i];
-    std::cout << "XXX dq:" << dq << std::endl;
-    std::cout << "XXX of:" << of << std::endl;
-    CHECK_EQ(of, dqf);
-  }
+  auto y = stack[0].toTensor();
+  CHECK_EQ(almostEqual(y_expected, y), 1);
 #endif
 }
 
+at::Tensor quantized_add(
+    at::Tensor x1,
+    at::Tensor x2,
+    double scale,
+    int64_t zero) {
+  const auto qadd_op =
+      c10::Dispatcher::singleton()
+          .findSchemaOrThrow("quantized::add", "")
+          .typed<at::Tensor(at::Tensor, at::Tensor, double, int64_t)>();
+  return qadd_op.call(x1, x2, scale, zero);
+}
+
+c10::intrusive_ptr<ConvPackedParamsBase<2>> quantized_conv2d_prepack(
+    at::Tensor weight,
+    c10::optional<at::Tensor> bias,
+    std::vector<int64_t> stride,
+    std::vector<int64_t> padding,
+    std::vector<int64_t> dilation,
+    int64_t groups) {
+  auto qconv2d_prepack_op =
+      c10::Dispatcher::singleton()
+          .findSchemaOrThrow("quantized::conv2d_prepack", "")
+          .typed<c10::intrusive_ptr<ConvPackedParamsBase<2>>(
+              at::Tensor,
+              c10::optional<at::Tensor>,
+              std::vector<int64_t>,
+              std::vector<int64_t>,
+              std::vector<int64_t>,
+              int64_t)>();
+  return qconv2d_prepack_op.call(
+      weight, bias, stride, padding, dilation, groups);
+}
+
+at::Tensor quantized_conv2d(
+    at::Tensor qx,
+    c10::intrusive_ptr<ConvPackedParamsBase<2>> packed_weight,
+    double scale,
+    int64_t zero) {
+  auto qconv2d_op = c10::Dispatcher::singleton()
+                        .findSchemaOrThrow("quantized::conv2d", "")
+                        .typed<at::Tensor(
+                            at::Tensor,
+                            c10::intrusive_ptr<ConvPackedParamsBase<2>>,
+                            double,
+                            int64_t)>();
+  return qconv2d_op.call(qx, packed_weight, scale, zero);
+}
+
+at::Tensor quantized_conv2d_relu(
+    at::Tensor qx,
+    c10::intrusive_ptr<ConvPackedParamsBase<2>> packed_weight,
+    double scale,
+    int64_t zero) {
+  auto qconv2d_op = c10::Dispatcher::singleton()
+                        .findSchemaOrThrow("quantized::conv2d_relu", "")
+                        .typed<at::Tensor(
+                            at::Tensor,
+                            c10::intrusive_ptr<ConvPackedParamsBase<2>>,
+                            double,
+                            int64_t)>();
+  return qconv2d_op.call(qx, packed_weight, scale, zero);
+}
+
+TEST_F(Kernel, QuantConv2dReluDequant) {
+#ifdef TORCH_ENABLE_LLVM
+  const auto graph_string = R"IR(
+      graph(%x.1 : Float(1, 3, 2, 2, strides=[12, 4, 2, 1], device=cpu), %w : Float(2, 3, 2, 2, strides=[12, 4, 2, 1], device=cpu), %b : Float(2, strides=[1], device=cpu)):
+        %2 : int = prim::Constant[value=13]()
+        %qs.1 : int = prim::Constant[value=130]()
+        %qz.1 : float = prim::Constant[value=0.1]()
+        %qs.2 : int = prim::Constant[value=140]()
+        %qz.2 : float = prim::Constant[value=0.2]()
+        %s : int[] = prim::Constant[value=[1, 1]]()
+        %p : int[] = prim::Constant[value=[0, 0]]()
+        %d : int[] = prim::Constant[value=[1, 1]]()
+        %g : int = prim::Constant[value=1]()
+        %qcp : __torch__.torch.classes.quantized.Conv2dPackedParamsBase = torch.ops.quantized.conv2d_prepack(%w, %b, %s, %p, %d, %g)
+        %q.1 : Float(2, 2) = aten::quantize_per_tensor(%x.1, %qz.1, %qs.1, %2)
+        %qc : Float(2, 2) = quantized::conv2d_relu(%q.1, %qcp, %qz.2, %qs.1)
+        %6 : Float(2, 2) = aten::dequantize(%qc)
+        return (%6))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  auto x = at::rand({1, 3, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto w = at::rand({2, 3, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto b = at::rand({2}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto q = at::quantize_per_tensor(x, 0.1f, 130, at::kQUInt8);
+  auto qcp = quantized_conv2d_prepack(w, b, {1, 1}, {0, 0}, {1, 1}, 1);
+  auto qc = quantized_conv2d_relu(q, qcp, 0.2f, 140);
+  auto y_expected = at::dequantize(q);
+
+  TensorExprKernel k(graph);
+  StmtPtr s = k.getCodeGenStmt();
+
+  std::ostringstream oss;
+  oss << *s;
+
+  // Check the IR we produced
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for
+# CHECK-NEXT: for
+# CHECK-NOT: for)IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  std::vector<IValue> stack = {IValue(x), IValue(w), IValue(b)};
+  k.run(stack);
+  auto y = stack[0].toTensor();
+  CHECK_EQ(almostEqual(y_expected, y), 1);
+#endif
+}
+
+TEST_F(Kernel, QuantConv2dDequant) {
+#ifdef TORCH_ENABLE_LLVM
+  const auto graph_string = R"IR(
+      graph(%x.1 : Float(2, 2, strides=[2, 1], device=cpu), %qcp : __torch__.torch.classes.quantized.Conv2dPackedParamsBase):
+        %2 : int = prim::Constant[value=13]()
+        %qs.1 : int = prim::Constant[value=130]()
+        %qz.1 : float = prim::Constant[value=0.1]()
+        %qs.2 : int = prim::Constant[value=140]()
+        %qz.2 : float = prim::Constant[value=0.2]()
+        %q.1 : Float(2, 2) = aten::quantize_per_tensor(%x.1, %qz.1, %qs.1, %2)
+        %qc : Float(2, 2) = quantized::conv2d(%q.1, %qcp, %qz.2, %qs.1)
+        %6 : Float(2, 2) = aten::dequantize(%qc)
+        return (%6))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  auto x = at::rand({1, 3, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto w = at::rand({2, 3, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto b = at::rand({2}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto q = at::quantize_per_tensor(x, 0.1f, 130, at::kQUInt8);
+  auto qcp = quantized_conv2d_prepack(w, b, {1, 1}, {0, 0}, {1, 1}, 1);
+  auto qc = quantized_conv2d(q, qcp, 0.2f, 140);
+  auto y_expected = at::dequantize(q);
+
+  TensorExprKernel k(graph);
+  StmtPtr s = k.getCodeGenStmt();
+
+  std::ostringstream oss;
+  oss << *s;
+
+  // Check the IR we produced
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for
+# CHECK-NEXT: for
+# CHECK-NOT: for)IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  std::vector<IValue> stack = {IValue(x), IValue(qcp)};
+  k.run(stack);
+  auto y = stack[0].toTensor();
+  CHECK_EQ(almostEqual(y_expected, y), 1);
+#endif
+}
+
+TEST_F(Kernel, QuantAddDequant) {
+#ifdef TORCH_ENABLE_LLVM
+  const auto graph_string = R"IR(
+      graph(%x.1 : Float(2, 2, strides=[2, 1], device=cpu), %x.2 : Float(2, 2, strides=[2, 1], device=cpu)):
+        %2 : int = prim::Constant[value=13]()
+        %qz.1 : int = prim::Constant[value=130]()
+        %qs.1 : float = prim::Constant[value=0.1]()
+        %qz.2 : int = prim::Constant[value=140]()
+        %qs.2 : float = prim::Constant[value=0.2]()
+        %qz.a : int = prim::Constant[value=145]()
+        %qs.a : float = prim::Constant[value=0.3]()
+        %q.1 : Float(2, 2) = aten::quantize_per_tensor(%x.1, %qz.1, %qs.1, %2)
+        %q.2 : Float(2, 2) = aten::quantize_per_tensor(%x.2, %qz.2, %qs.2, %2)
+        %qa : Float(2, 2) = quantized::add(%q.1, %q.2, %qs.a, %qz.a)
+        %6 : Float(2, 2) = aten::dequantize(%qa)
+        return (%6))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  auto x1 = at::rand({2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto x2 = at::rand({2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto q1 = at::quantize_per_tensor(x1, 0.1f, 130, at::kQUInt8);
+  auto q2 = at::quantize_per_tensor(x2, 0.2f, 140, at::kQUInt8);
+  auto qa = quantized_add(q1, q2, 0.3f, 145);
+  auto y_expected = at::dequantize(qa);
+  TensorExprKernel k(graph);
+  std::vector<at::Tensor> inputs = {x1, x2};
+  StmtPtr s = k.getCodeGenStmt();
+
+  std::ostringstream oss;
+  oss << *s;
+
+  // Check the IR we produced
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for
+# CHECK-NEXT: for
+# CHECK-NOT: for)IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  auto y = stack[0].toTensor();
+  CHECK_EQ(almostEqual(y_expected, y), 1);
+#endif
+}
+/*
 TEST_F(Kernel, Quant) {
 #ifdef TORCH_ENABLE_LLVM
   const auto graph_string = R"IR(
@@ -1486,13 +1911,7 @@ TEST_F(Kernel, Quant) {
   parseIR(graph_string, &*graph);
 
   auto x = at::rand({2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
-  std::cout << "XXX x:\n" << x << std::endl;
-  auto q = at::quantize_per_tensor(x, 0.1f, 130, at::kQUInt8);
-  c10::quint8* p = q.data_ptr<c10::quint8>();
-  for (int i = 0; i < 4; ++i) {
-    std::cout << i << " -> " << p[i].val_ << std::endl;
-  }
-  std::cout << "XXX q:\n" << q << std::endl;
+  auto y_expected = at::quantize_per_tensor(x, 0.1f, 130, at::kQUInt8);
   TensorExprKernel k(graph);
   std::vector<at::Tensor> inputs = {x};
   StmtPtr s = k.getCodeGenStmt();
@@ -1510,11 +1929,11 @@ TEST_F(Kernel, Quant) {
 
   std::vector<IValue> stack = fmap<IValue>(inputs);
   k.run(stack);
-  auto aot_q = stack[0].toTensor();
-  std::cout << "XXX aot_q:\n" << aot_q << std::endl;
+  auto y = stack[0].toTensor();
+  CHECK_EQ(almostEqual(y_expected, y), 1);
 #endif
 }
-
+*/
 
 } // namespace jit
 } // namespace torch

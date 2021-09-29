@@ -81,7 +81,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   }
   void bindVar(VarPtr var, const Value& val) {
     eval_context_[var] = val;
-    GRAPH_DEBUG("Binding value ", val.intValue(), " with var ", var->name_hint());
+    GRAPH_DEBUG(
+        "Binding value ", val.intValue(), " with var ", var->name_hint());
   }
 
   Value evaluateExpr(ExprPtr e) {
@@ -677,7 +678,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
           ", val=",                                  \
           (int)val[i]);                              \
     }                                                \
-    value_ = Value(val);                               \
+    value_ = Value(val);                             \
   } break;
       AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
@@ -1083,6 +1084,16 @@ void SimpleIREvaluator::bindVar(VarPtr v, ExprPtr e) {
 Value SimpleIREvaluator::value() const {
   return impl_->value();
 }
+
+c10::optional<int64_t> evalInt(ExprPtr e) {
+  try {
+    return ExprEval<SimpleIREvaluator>(cast<int64_t>(ExprHandle(e)))
+        .value<int64_t>();
+  } catch (std::runtime_error& err) {
+    return c10::nullopt;
+  }
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

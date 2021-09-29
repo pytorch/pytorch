@@ -64,6 +64,18 @@ jobs:
         run: |
           # shellcheck disable=SC2016
           (! git --no-pager grep -InP '# type:\s*ignore(?!\[)' -- '**.py' '**.pyi' ':(exclude)test/test_jit.py' || (echo 'The above lines have unqualified `type: ignore`; please convert them to `type: ignore[xxxx]`'; false))
+      - name: Ensure GitHub PyPi dependencies are pinned
+        if: always()
+        run: |
+          (! git --no-pager grep --color=always -InP \
+                '(pip|pip3|python -m pip|python3 -m pip|python3 -mpip|python -mpip) install ([a-z][\.a-z-0-9]*+(?!(=|.*\.whl))([[:blank:]]|))+' \
+                -- .github \
+                ':(exclude)**.rst' \
+                ':(exclude)**.py' \
+                ':(exclude)**.md' \
+                ':(exclude)**.diff' \
+                ':(exclude)third_party' ||
+            (echo "The above lines have unpinned PyPi installs; please pin them to a specific version: e.g. 'thepackage==1.2'"; false))
       # note that this next step depends on a clean checkout;
       # if you run it locally then it will likely to complain
       # about all the generated files in torch/test
@@ -287,7 +299,7 @@ jobs:
       - name: Install dependencies
         run: |
           set -eux
-          pip3 install typing-extensions --user # for tools/linter/translate_annotations.py
+          pip3 install typing-extensions==3.10 --user # for tools/linter/translate_annotations.py
           pip3 install -r requirements-flake8.txt --user
           flake8 --version
       - name: Run flake8
@@ -304,11 +316,6 @@ jobs:
             --regex='^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): (?P<errorCode>\w+\d+) (?P<errorDesc>.*)' \
             --commit="$HEAD_SHA" \
             > flake8-output/annotations.json
-      - name: Upload artifact
-        uses: actions/upload-artifact@v2
-        with:
-          name: flake8-py3
-          path: flake8-output/
       - name: Fail if there were any warnings
         run: |
           set -eu
@@ -318,6 +325,17 @@ jobs:
             echo 'Please fix the above Flake8 warnings.'
             false
           fi
+      - name: Add annotations
+        # Don't run on forked pull requests
+        if: ${{ failure() && github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: pytorch/add-annotations-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          check_name: 'flake8-py3'
+          linter_output_path: flake8-output/annotations.json
+          commit_sha: ${{ github.event.pull_request.head.sha }}
+          mode: json
 
   clang-tidy:
     runs-on: linux.2xlarge
@@ -388,11 +406,6 @@ jobs:
             --regex='^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): (?P<errorDesc>.*?) \[(?P<errorCode>.*)\]' \
             --commit="$HEAD_SHA" \
             > clang-tidy-output/annotations.json
-      - name: Upload artifact
-        uses: actions/upload-artifact@v2
-        with:
-          name: clang-tidy
-          path: clang-tidy-output/
       - name: Check for warnings
         run: |
           cd "${GITHUB_WORKSPACE}"
@@ -402,6 +415,17 @@ jobs:
             echo 'Please fix the above clang-tidy warnings.'
             false
           fi
+      - name: Add annotations
+        # Don't run on forked pull requests
+        if: ${{ failure() && github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: pytorch/add-annotations-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          check_name: 'clang-tidy'
+          linter_output_path: clang-tidy/annotations.json
+          commit_sha: ${{ github.event.pull_request.head.sha }}
+          mode: json
 
   cmakelint:
     runs-on: ubuntu-18.04
@@ -416,7 +440,7 @@ jobs:
       - name: Install dependencies
         run: |
           set -eux
-          pip3 install cmakelint --user
+          pip3 install cmakelint==1.4.1 --user
           cmakelint --version
       - name: Run cmakelint
         run: |
@@ -442,7 +466,7 @@ jobs:
           pip3 install numpy==1.20 --user # https://github.com/pytorch/pytorch/pull/60472
           pip3 install expecttest==0.1.3 mypy==0.812 --user
           # Needed to check tools/render_junit.py
-          pip3 install junitparser rich --user
+          pip3 install junitparser==2.1.1 rich==10.9.0 --user
       - name: Run autogen
         run: |
           set -eux
@@ -467,5 +491,5 @@ jobs:
           fi
 
 concurrency:
-  group: lint-${{ github.event.pull_request.number || github.sha }}
+  group: lint-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
