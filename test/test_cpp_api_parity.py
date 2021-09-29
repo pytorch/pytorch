@@ -6,9 +6,10 @@ import os
 
 import torch.testing._internal.common_utils as common
 import torch.testing._internal.common_nn as common_nn
+import torch.testing._internal.common_modules as common_modules
 from cpp_api_parity.parity_table_parser import parse_parity_tracker_table
 from cpp_api_parity.utils import is_torch_nn_functional_test
-from cpp_api_parity import module_impl_check, functional_impl_check, sample_module, sample_functional
+from cpp_api_parity import module_impl_check, functional_impl_check, sample_module, sample_functional, module_info_impl_check
 
 # NOTE: turn this on if you want to print source code of all C++ tests (e.g. for debugging purpose)
 PRINT_CPP_SOURCE = False
@@ -22,6 +23,7 @@ parity_table = parse_parity_tracker_table(PARITY_TABLE_PATH)
 class TestCppApiParity(common.TestCase):
     module_test_params_map = {}
     functional_test_params_map = {}
+    module_info_test_params_map = {}
 
 expected_test_params_dicts = []
 
@@ -54,6 +56,12 @@ assert len([name for name in TestCppApiParity.__dict__ if 'sample_functional' in
 
 module_impl_check.build_cpp_tests(TestCppApiParity, print_cpp_source=PRINT_CPP_SOURCE)
 functional_impl_check.build_cpp_tests(TestCppApiParity, print_cpp_source=PRINT_CPP_SOURCE)
+
+for module_info in common_modules.module_db:
+    module_info_impl_check.write_test_to_test_class(
+        TestCppApiParity, module_info, devices)
+
+module_info_impl_check.build_cpp_tests(TestCppApiParity, print_cpp_source=PRINT_CPP_SOURCE)
 
 if __name__ == "__main__":
     common.run_tests()

@@ -117,13 +117,15 @@ class FunctionInput(object):
 
 class ModuleInput(object):
     """ Contains args / kwargs for module instantiation + forward pass. """
-    __slots__ = ['constructor_input', 'forward_input', 'desc', 'reference_fn']
+    __slots__ = ['constructor_input', 'forward_input', 'desc', 'reference_fn', 'test_cpp_parity', 'cpp_constructor_args']
 
-    def __init__(self, constructor_input, forward_input=None, desc='', reference_fn=None):
+    def __init__(self, constructor_input, forward_input=None, desc='', reference_fn=None, test_cpp_parity=False, cpp_constructor_args=''):
         self.constructor_input = constructor_input  # Inputs to pass during construction
         self.forward_input = forward_input  # Inputs to pass to forward()
         self.desc = desc  # Description for this set of inputs
         self.reference_fn = reference_fn  # Reference with signature: reference_fn(module, parameters, *args, **kwargs)
+        self.test_cpp_parity = test_cpp_parity
+        self.cpp_constructor_args = cpp_constructor_args
 
         if reference_fn is not None:
 
@@ -302,9 +304,12 @@ def module_inputs_torch_nn_ReLU(module_info, device, dtype, requires_grad):
 
     module_inputs = [
         ModuleInput(constructor_input=FunctionInput(),
-                    forward_input=FunctionInput(make_input((2, 3, 4, 5)))),
+                    forward_input=FunctionInput(make_input((2, 3, 4, 5))),
+                    test_cpp_parity=True,
+                    ),
         ModuleInput(constructor_input=FunctionInput(),
                     forward_input=FunctionInput(make_input(4)),
+                    test_cpp_parity=True,
                     desc='no_batch_dim'),
     ]
     return module_inputs
@@ -317,10 +322,12 @@ def module_inputs_torch_nn_L1Loss(module_info, device, dtype, requires_grad, **k
         ModuleInput(constructor_input=FunctionInput(),
                     forward_input=FunctionInput(make_input(shape=(2, 3, 4)),
                                                 make_input(shape=(2, 3, 4))),
+                    test_cpp_parity=True,
                     reference_fn=lambda m, p, i, t: 1. / i.numel() * sum((a - b).abs().sum()
                                                                          for a, b in zip(i, t))),
         ModuleInput(constructor_input=FunctionInput(),
                     forward_input=FunctionInput(make_input(shape=()), make_input(shape=())),
+                    test_cpp_parity=True,
                     reference_fn=lambda m, p, i, t: 1. / i.numel() * (i - t).abs().sum(),
                     desc='scalar')] + generate_regression_criterion_inputs(make_input)
 
@@ -344,10 +351,12 @@ def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, r
     return [
         ModuleInput(
             constructor_input=FunctionInput(4, 2, 16, 0.0),
+            cpp_constructor_args='torch::nn::TransformerEncoderLayerOptions(4, 2).dim_feedforward(16).dropout(0.0)',
             forward_input=FunctionInput(
                 make_input(shape=(2, 3, 4))
             ),
-            desc='relu_activation'
+            desc='relu_activation',
+            test_cpp_parity=True
         ),
         ModuleInput(
             constructor_input=FunctionInput(4, 2, 8, 0.0, F.gelu),
