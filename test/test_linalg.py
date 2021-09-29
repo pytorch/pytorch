@@ -8014,16 +8014,12 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             size = np.prod(shape)
             x = torch.arange(size, device=device).reshape(*shape)
             y = torch.linalg.trace(x)
-            xn = np.array(x.cpu().numpy()).reshape(shape)
-            yn = np.trace(xn, axis1=-2, axis2=-1)
-            yn = torch.from_numpy(np.asarray(yn))
+            yn = np.trace(x.cpu(), axis1=-2, axis2=-1)
             self.assertEqual(y, yn)
 
             for offset in offsets:
                 y = torch.linalg.trace(x, offset)
-                xn = x.cpu().numpy()
-                yn = np.trace(xn, offset, axis1=-2, axis2=-1)
-                yn = torch.from_numpy(np.asarray(yn))
+                yn = np.trace(x.cpu(), offset, axis1=-2, axis2=-1)
                 self.assertEqual(y, yn)
 
 
