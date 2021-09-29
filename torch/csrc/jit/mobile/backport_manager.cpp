@@ -82,7 +82,7 @@ void get_model_stream(PyTorchStreamReader& reader, std::stringstream& out) {
     return !out ? 0 : nbytes;
   };
   PyTorchStreamWriter writer(writer_func);
-  writer.skipWriteVersion();
+
   selective_copy(
       reader,
       writer,
@@ -208,7 +208,6 @@ std::stringstream update_bytecode_version(
   };
 
   PyTorchStreamWriter writer_bytecode(writer_func);
-  writer_bytecode.skipWriteVersion();
 
   selective_copy(
       reader_bytecode, writer_bytecode, excluded_files, excluded_dirs);
@@ -328,7 +327,6 @@ std::stringstream backport_v5_to_v4(std::stringstream& input_model_stream) {
   };
 
   PyTorchStreamWriter writer(writer_func);
-  writer.skipWriteVersion();
 
   selective_copy(reader, writer, excluded_files, excluded_dirs);
 

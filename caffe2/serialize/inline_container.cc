@@ -348,15 +348,8 @@ void PyTorchStreamWriter::setup(const string& file_name) {
 }
 
 void PyTorchStreamWriter::setMinVersion(const uint64_t version) {
-  version_ = std::max(version, version_.has_value() ? version_.value() : kProducedFileFormatVersion);
+  version_ = std::max(version, version_);
 }
-
-// This function needs be used carefully and usually needs to be used with
-// writeRecord to write version manually. If a model is generated without
-// version, it will no longer be readable by PyTorchStreamReader.
- void PyTorchStreamWriter::skipWriteVersion(){
-    version_.reset();
-  }
 
 void PyTorchStreamWriter::writeRecord(
     const std::string& name,
@@ -391,9 +384,10 @@ void PyTorchStreamWriter::writeRecord(
 }
 
 void PyTorchStreamWriter::writeEndOfFile() {
-  if(version_.has_value()) {
-    // Rewrites version info
-    std::string version = c10::to_string(version_.value());
+  auto allRecords = getAllWrittenRecords();
+  // If no ".data/version" or "version" record in the output model, rewrites version info
+  if(allRecords.find(".data/version") == allRecords.end() && allRecords.find("version") == allRecords.end()) {
+    std::string version = c10::to_string(version_);
     version.push_back('\n');
     if (version_ >= 0x6L) {
       writeRecord(".data/version", version.c_str(), version.size());

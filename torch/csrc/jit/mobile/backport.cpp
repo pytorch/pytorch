@@ -35,8 +35,6 @@ bool _backport_for_mobile(
     return !out ? 0 : nbytes;
   };
   PyTorchStreamWriter writer(writer_func);
-  writer.skipWriteVersion();
-
   return _backport_for_mobile_impl(std::move(rai), writer, to_version);
 }
 
@@ -47,8 +45,6 @@ bool _backport_for_mobile(
   std::unique_ptr<IStreamAdapter> istream_adapter =
       std::make_unique<IStreamAdapter>(&in);
   PyTorchStreamWriter writer(output_filename);
-  writer.skipWriteVersion();
-
   return _backport_for_mobile_impl(
       std::move(istream_adapter), writer, to_version);
 }
@@ -70,8 +66,6 @@ bool _backport_for_mobile(
     return !out ? 0 : nbytes;
   };
   PyTorchStreamWriter writer(writer_func);
-  writer.skipWriteVersion();
-
   return _backport_for_mobile_impl(
       std::move(istream_adapter), writer, to_version);
 }
@@ -89,8 +83,6 @@ bool _backport_for_mobile(
   istream_adapter = std::make_unique<IStreamAdapter>(&file_stream);
 
   PyTorchStreamWriter writer(output_filename);
-  writer.skipWriteVersion();
-
   return _backport_for_mobile_impl(
       std::move(istream_adapter), writer, to_version);
 }
