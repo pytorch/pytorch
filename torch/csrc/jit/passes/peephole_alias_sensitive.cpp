@@ -109,7 +109,7 @@ struct PeepholeOptimizeAliasSensitiveImpl {
   }
 
   bool tryToReplaceOutputWithInput(Value* input, Value* output) {
-    if (!aliasDb_->safeToChangeAliasingRelationship(output, input)) {
+    if (!aliasDb_->safeToChangeAliasingRelationship(input, output)) {
       return false;
     }
     // however we make an replace an output with an input, all of the aliasing
