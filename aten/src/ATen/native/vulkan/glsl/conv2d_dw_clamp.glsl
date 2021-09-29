@@ -8,7 +8,8 @@ layout(set = 0, binding = 3) readonly buffer bias {
   vec4 data[];
 }
 uBias;
-layout(set = 0, binding = 4) uniform constBlock {
+
+layout(push_constant) uniform constBlock {
   ivec2 padding;
   ivec2 kernelSize;
   ivec2 stride;
