@@ -153,16 +153,17 @@ namespace {
 // non-_MSC_VER version is a syntax error according to MSVC. Use the
 // appropriate version depending on if we're MSVC or not.
 
-#define TO_COPY_OUT_FAST_PATH_LOGIC(out, self, self_t) do {   \
-    const auto N = self.numel();                                        \
-    const auto self_data = self.data_ptr<self_t>();                     \
-    AT_DISPATCH_ALL_TYPES_AND2(                                         \
+#define TO_COPY_OUT_FAST_PATH_LOGIC(out, self, self_t)                         \
+  do {                                                                         \
+    const auto N = self.numel();                                               \
+    const auto self_data = self.data_ptr<self_t>();                            \
+    AT_DISPATCH_ALL_TYPES_AND2(                                                \
         kHalf, kBFloat16, out.scalar_type(), "to_copy_out_inner_loop", [&]() { \
-          const auto out_data = out.data_ptr<scalar_t>();               \
-          for (const auto idx : c10::irange(N)) {                       \
-            out_data[idx] = static_cast<scalar_t>(self_data[idx]);      \
-          }                                                             \
-        });                                                             \
+          const auto out_data = out.data_ptr<scalar_t>();                      \
+          for (const auto idx : c10::irange(N)) {                              \
+            out_data[idx] = static_cast<scalar_t>(self_data[idx]);             \
+          }                                                                    \
+        });                                                                    \
   } while (0)
 
 #ifdef _MSC_VER
@@ -171,10 +172,11 @@ void to_copy_out_fast_path(Tensor& out, const Tensor& self) {
   TO_COPY_OUT_FAST_PATH_LOGIC(out, self, T);
 }
 
-#define TO_COPY_OUT_FAST_PATH_BODY(out, self) to_copy_out_fast_path<scalar_t>(out, self)
+#define TO_COPY_OUT_FAST_PATH_BODY(out, self) \
+  to_copy_out_fast_path<scalar_t>(out, self)
 #else
 #define TO_COPY_OUT_FAST_PATH_BODY(out, self) \
-  using self_t = scalar_t; \
+  using self_t = scalar_t;                    \
   TO_COPY_OUT_FAST_PATH_LOGIC(out, self, self_t)
 #endif
 } // namespace
