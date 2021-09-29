@@ -119,7 +119,8 @@ class ModuleInput(object):
     """ Contains args / kwargs for module instantiation + forward pass. """
     __slots__ = ['constructor_input', 'forward_input', 'desc', 'reference_fn', 'test_cpp_parity', 'cpp_constructor_args']
 
-    def __init__(self, constructor_input, forward_input=None, desc='', reference_fn=None, test_cpp_parity=False, cpp_constructor_args=''):
+    def __init__(self, constructor_input, forward_input=None, desc='', reference_fn=None,
+                 test_cpp_parity=False, cpp_constructor_args=''):
         self.constructor_input = constructor_input  # Inputs to pass during construction
         self.forward_input = forward_input  # Inputs to pass to forward()
         self.desc = desc  # Description for this set of inputs
@@ -176,8 +177,10 @@ def module_inputs_torch_nn_Linear(module_info, device, dtype, requires_grad, **k
 
     module_inputs = [
         ModuleInput(constructor_input=FunctionInput(10, 8),
-                    forward_input=FunctionInput(input=make_input((4, 10))),
-                    reference_fn=lambda m, p, input: torch.mm(input, p[0].t()) + p[1].view(1, -1).expand(4, 8)),
+                    forward_input=FunctionInput(make_input((4, 10))),
+                    reference_fn=lambda m, p, input: torch.mm(input, p[0].t()) + p[1].view(1, -1).expand(4, 8),
+                    test_cpp_parity=True,
+                    cpp_constructor_args='torch::nn::LinearOptions(10, 8)'),
         ModuleInput(constructor_input=FunctionInput(10, 8, bias=False),
                     forward_input=FunctionInput(make_input((4, 10))),
                     desc='no_bias',

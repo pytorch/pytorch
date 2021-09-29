@@ -37,7 +37,10 @@ def process_test_params_for_module(module_info, sample, device):
             for i, arg in enumerate(args):
                 arg_dict[arg_type].append(CppArg(name=arg_type_prefix + str(i), value=arg))
 
-        inputs = convert_to_list(sample.forward_input.args) + convert_to_list(sample.forward_input.kwargs)
+        err_msg = ("Sample's forward input can't have kwarg if cpp_parity is True"
+                   " as C++ does not have kwarg")
+        assert len(sample.forward_input.kwargs) == 0, err_msg
+        inputs = convert_to_list(sample.forward_input.args)
         put_args_into_arg_dict('input', 'i', inputs)
         return arg_dict
 
