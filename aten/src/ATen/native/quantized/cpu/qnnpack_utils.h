@@ -1,5 +1,6 @@
 #pragma once
 
+#include "c10/util/Exception.h"
 #ifdef USE_PYTORCH_QNNPACK
 #include <ATen/ATen.h>
 #include <c10/util/irange.h>
@@ -116,19 +117,6 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
         kernel_(std::move(kernel)),
         w_scales(w_scale),
         w_zero_points(std::move(w_zps)) {
-    TORCH_CHECK(
-        groups != 0,
-        "quantized::PackedConvWeightsQnnp: groups must be nonzero");
-    TORCH_CHECK(
-        kernel_[0] != 0 && kernel_[1] != 0,
-        "quantized::PackedConvWeightsQnnp: kernel size must be nonzero");
-    TORCH_CHECK(
-        dilation_[0] != 0 && dilation_[1] != 0,
-        "quantized::PackedConvWeightsQnnp: dilation must be nonzero");
-    TORCH_CHECK(
-        stride_[0] != 0 && stride_[1] != 0,
-        "quantized::PackedConvWeightsQnnp: stride must be nonzero");
-
     const bool any_padding = std::any_of(
         padding_.begin(), padding_.end(), [](const auto& e) { return e != 0; });
     const size_t kernel_size = kernel_[0] * kernel_[1];
