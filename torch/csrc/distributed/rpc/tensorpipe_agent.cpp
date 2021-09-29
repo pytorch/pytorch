@@ -48,7 +48,7 @@ std::vector<c10::Device> getDevicesForTensors(
       "Request device mapping is not available for destination ",
       remoteName);
   std::vector<c10::Device> devices;
-  devices.reserve(2 * tensors.size());
+  devices.reserve(tensors.size());
   bool hasMappedDevice = false;
   for (const auto& t : tensors) {
     if (t.device().is_cpu()) {
@@ -67,12 +67,7 @@ std::vector<c10::Device> getDevicesForTensors(
           " for device ",
           t.device(),
           " but received a tensor on that device.");
-      if (t.is_sparse()) {
-        devices.push_back(deviceIter->second);
-        devices.push_back(deviceIter->second);
-      } else {
-        devices.push_back(deviceIter->second);
-      }
+      devices.push_back(deviceIter->second);
       hasMappedDevice = true;
     }
   }

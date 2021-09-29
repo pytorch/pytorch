@@ -106,10 +106,12 @@ inline scalar_t parallel_reduce(
   }
 
   c10::SmallVector<scalar_t, 64> results(at::get_num_threads(), ident);
-  internal::invoke_parallel(begin, end, grain_size, [&](int64_t begin, int64_t end) {
-    auto tid = at::get_thread_num();
-    results[tid] = f(begin, end, ident);
-  });
+  internal::invoke_parallel(begin, end, grain_size,
+    [&](const int64_t my_begin, const int64_t my_end) {
+      const auto tid = at::get_thread_num();
+      results[tid] = f(my_begin, my_end, ident);
+    }
+  );
 
   scalar_t result = ident;
   for (auto partial_result : results) {

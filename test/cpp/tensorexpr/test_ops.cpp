@@ -25,8 +25,8 @@ TEST(Ops, Sum) {
     constexpr int M = 8;
     constexpr int N = 16;
 
-    Placeholder a("a", kFloat, {M, N});
-    Tensor b = computeSum({a.handle(), dims, false}, c10::kFloat);
+    BufHandle a("a", {M, N}, kFloat);
+    Tensor b = computeSum({a, dims, false}, c10::kFloat);
     auto cg = compile({a}, {b});
 
     auto at = at::arange(M * N, at::kFloat).view({M, N});
