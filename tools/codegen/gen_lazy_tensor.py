@@ -55,12 +55,18 @@ def main() -> None:
         '--impl_path', type=str, default=None, help='path to the source C++ file containing kernel definitions')
     parser.add_argument(
         '--gen_ts_lowerings', action="store_true", help='Generate TorchScript lowerings in addition to Lazy IR and NativeFunctions')
+    parser.add_argument(
+        '--node_base', type=str, default="Node", help='Name of backend specific custom Lazy IR Node base class')
+    parser.add_argument(
+        '--node_base_hdr', type=str, default=None, help='Path to header file defining custom Lazy IR Node base class')
     options = parser.parse_args()
 
-    run(options.source_yaml, options.output_dir, options.dry_run, options.impl_path, options.gen_ts_lowerings)
+    run(options.source_yaml, options.output_dir, options.dry_run, options.impl_path,
+        options.gen_ts_lowerings, options.node_base, options.node_base_hdr)
 
 
-def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[str], gen_ts_lowerings: bool) -> None:
+def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[str],
+        gen_ts_lowerings: bool, node_base: str, node_base_hdr: Optional[str]) -> None:
 
     # Assumes that this file lives at PYTORCH_ROOT/tools/codegen/gen_backend_stubs.py
     pytorch_root = pathlib.Path(__file__).parent.parent.parent.absolute()
@@ -132,7 +138,8 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                 lambda f: dest.gen_lazy_nativefunc_definition(
                     f,
                     backend_indices[backend_dispatch_key],
-                    class_method_name=f'{backend_dispatch_key}NativeFunctions'),
+                    class_method_name=f'{backend_dispatch_key}NativeFunctions',
+                    node_base=node_base),
                 grouped_native_functions
             )),
         })
@@ -169,13 +176,14 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                 "lazy_tensors/types.h",
                 "lazy_tensor_core/csrc/compiler/node_lowering.h",
                 "torch/csrc/lazy/core/hash.h",
-            ]],
+                node_base_hdr if node_base_hdr is not None else None
+            ] if path is not None],
             'external_backend_headers': f'#include "{output_dir}/{backend_key}NativeFunctions.h"',
             'namespaced_headers': '',
             'DispatchKey': backend_dispatch_key,
             'dispatch_namespace': backend_dispatch_key.lower(),
             'ir_declarations': list(concat_map_codegen(
-                dest.LazyIR(backend_indices[backend_dispatch_key]),
+                dest.LazyIR(backend_indices[backend_dispatch_key], node_base),
                 grouped_native_functions
             )),
         })

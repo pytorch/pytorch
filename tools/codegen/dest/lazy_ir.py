@@ -38,6 +38,7 @@ def node_ctor_inputs(func: LazyIrSchema) -> str:
 @dataclass(frozen=True)
 class LazyIR:
     backend_index: BackendIndex
+    node_base: str
 
     @method_with_native_function
     def __call__(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
@@ -89,11 +90,11 @@ class LazyIR:
 
         return [f"""\
 // TODO(alanwaketan): Public members don't need to have _ suffix.
-class {schema.node_name} : public Node {{
+class {schema.node_name} : public {self.node_base} {{
  public:
   {schema.node_name}({node_ctor_args}, const std::vector<at::ScalarType>& out_dtypes,
       const std::vector<std::vector<int64_t>>& out_shapes)
-      : Node(ir::OpKind(at::aten::{func.name.name}),
+      : {self.node_base}(ir::OpKind(at::aten::{func.name.name}),
               {{{base_ctor_value_args}}},
               convertShape(out_dtypes, out_shapes),
               /*num_outputs=*/{len(func.returns)},
@@ -141,7 +142,7 @@ def lazy_tensor_decls(value_types: List[NamedCType]) -> str:
 
 
 def gen_lazy_nativefunc_definition(func: NativeFunction, backend_index: BackendIndex,
-                                   class_method_name: str) -> List[str]:
+                                   class_method_name: str, node_base: str) -> List[str]:
     sig = kernel_signature(func, backend_index)
 
     # Lazy IR stuff

@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "c10/core/ScalarType.h"
 #include "lazy_tensor_core/csrc/python_util.h"
 #include "lazy_tensors/computation_client/types.h"
 #include "lazy_tensors/shape.h"
