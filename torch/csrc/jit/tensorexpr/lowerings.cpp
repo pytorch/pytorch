@@ -1386,10 +1386,12 @@ RegisterNNCLoweringsFunction aten_expand(
     computeExpand);
 
 // TODO: convert to schema, add a test
-RegisterNNCLoweringsFunction aten_flatten({"aten::flatten"}, computeFlatten);
-// TODO: convert to schema, add a test
+RegisterNNCLoweringsFunction aten_flatten({"aten::flatten"}, computeReshape);
 RegisterNNCLoweringsFunction aten_view(
-    {"aten::view", "aten::reshape"},
+    {"aten::reshape(Tensor(a) self, int[] shape) -> (Tensor(a))",
+     "aten::reshape_as(Tensor(a) self, Tensor other) -> (Tensor(a))",
+     "aten::view(Tensor(a) self, int[] size) -> (Tensor(a))",
+     "aten::view_as(Tensor(a) self, Tensor other) -> (Tensor(a))"},
     computeReshape);
 
 // aten::mm is a subset of aten::matmul where both inputs are rank 2
