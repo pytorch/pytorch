@@ -88,7 +88,7 @@ void promoteInputs(std::vector<ExprHandle>& inputs, const int typeConstraints) {
 
   // Find the highest type among the inputs.
   ScalarType highType = inputs[0].dtype().scalar_type();
-  for (auto input : inputs) {
+  for (const auto& input : inputs) {
     auto inputType = input.dtype().scalar_type();
     if (isScalar(input)) {
       if (isIntegralType(highType, false) && isFloatingType(inputType)) {
@@ -313,7 +313,7 @@ Tensor computeChunk(
       "prim_constantchunk",
       c10::fmap<DimArg>(outputShape),
       [inputs](const std::vector<VarHandle>& axes) {
-        auto b = c10::get<BufHandle>(inputs[0]);
+        const auto& b = c10::get<BufHandle>(inputs[0]);
         int64_t chunkIdx = c10::get<int64_t>(inputs[1]);
         int64_t dim = c10::get<int64_t>(inputs[2]);
         int64_t chunks = c10::get<int64_t>(inputs[3]);
@@ -324,7 +324,7 @@ Tensor computeChunk(
         size_t step = buf_info->dims[norm_dim] / chunks;
 
         std::vector<ExprHandle> new_indices;
-        for (size_t i = 0; i < indices.size(); ++i) {
+        for (int64_t i = 0; i < indices.size(); ++i) {
           if (i == norm_dim) {
             new_indices.push_back(
                 indices[i] + ExprHandle(immLike(indices[i], chunkIdx * step)));
@@ -466,7 +466,7 @@ Tensor computeReshape(
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType,
     at::Device device) {
-  auto view_dims = c10::get<IntList>(inputs[1]);
+  const auto& view_dims = c10::get<IntList>(inputs[1]);
   return computeReshapeHelper(
       inputs, outputShape, outputType, device, view_dims);
 }
@@ -489,7 +489,7 @@ static std::pair<ScalarType, std::vector<BufHandle>> processCatList(
     nonEmptyInputs.push_back(buf);
   }
   ScalarType highType = bufInputs[0].dtype().scalar_type();
-  for (auto input : bufInputs) {
+  for (const auto& input : bufInputs) {
     auto maybe_dtype = input.dtype().scalar_type();
     highType = promoteTypes(highType, maybe_dtype);
   }
@@ -539,7 +539,7 @@ Tensor computeCatWoConditionals(
     std::vector<VarPtr> for_vars(dims.size());
     std::vector<ExprPtr> load_indices(dims.size());
     std::vector<ExprPtr> store_indices(dims.size());
-    for (size_t i = 0; i < dims.size(); ++i) {
+    for (int64_t i = 0; i < dims.size(); ++i) {
       for_vars[i] = alloc<Var>(
           "i" + c10::to_string(inp_pos) + "_" + c10::to_string(i),
           dims[i].dtype());
