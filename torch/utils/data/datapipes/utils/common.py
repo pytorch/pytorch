@@ -66,5 +66,5 @@ def validate_pathname_binary_tuple(data):
 
 # Warns user that the DataPipe has been moved to TorchData and will be removed from `torch`
 def deprecation_warning_torchdata(name):
-    warnings.warn(f"""{name} is deprecated and will be removed from the package `torch`. Please import it 
-                      from the new package TorchData: https://github.com/pytorch/data""", DeprecationWarning)
+    warnings.warn(f"""{name} is deprecated and will be removed from the package `torch`. Please import it """
+                   """from the new package TorchData: https://github.com/pytorch/data""", DeprecationWarning)
