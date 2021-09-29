@@ -6,6 +6,7 @@
 #include <ATen/native/PointwiseOps.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
+#include <ATen/native/Resize.h>
 
 constexpr float EPSILON = 1e-12;
 
@@ -106,21 +107,18 @@ Tensor margin_ranking_loss(const Tensor& input1, const Tensor& input2, const Ten
   return apply_loss_reduction(output, reduction);
 }
 
-Tensor _kl_div_log_target(const Tensor& input, const Tensor& target, int64_t reduction) {
-  auto output = at::exp(target) * (target - input);
-  return apply_loss_reduction(output, reduction);
-}
-
-Tensor _kl_div_non_log_target(const Tensor& input, const Tensor& target, int64_t reduction) {
-  auto output_pos = target * (at::log(target) - input);
-  auto zeros = at::zeros_like(output_pos, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto output = at::where(target > 0, output_pos, zeros);
-  return apply_loss_reduction(output, reduction);
-}
-
 Tensor kl_div(const Tensor& input, const Tensor& target, int64_t reduction, bool log_target) {
-  return log_target ? _kl_div_log_target(input, target, reduction)
-                    : _kl_div_non_log_target(input, target, reduction);
+  Tensor output;
+  if (log_target) {
+    output = at::exp(target) * (target - input);
+  }
+  else {
+    // continuous extension 0 * log(0) := 0
+    auto output_not_extended = target * (at::log(target) - input);
+    auto zeros = at::zeros_like(output_not_extended);
+    output = at::where(target == 0, zeros, output_not_extended);
+  }
+  return apply_loss_reduction(output, reduction);
 }
 
 Tensor binary_cross_entropy_cpu(const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, int64_t reduction) {
@@ -454,8 +452,17 @@ Tensor& mse_loss_backward_out(const Tensor& grad_output,
   return grad_input;
 }
 
+Tensor& l1_loss_out(const Tensor& input, const Tensor& target, int64_t reduction, Tensor& out) {
+  auto loss = apply_loss_reduction(input.sub(target).abs(), reduction);
+  resize_output(out, loss.sizes());
+  out.copy_(loss);
+  return out;
+}
+
 Tensor l1_loss(const Tensor& input, const Tensor& target, int64_t reduction) {
-  return apply_loss_reduction(input.sub(target).abs(), reduction);
+  const auto float_type = c10::toValueType(input.scalar_type());
+  Tensor output = at::empty({0}, input.options().dtype(float_type));
+  return l1_loss_out(input, target, reduction, output);
 }
 
 }}  // namespace at::native

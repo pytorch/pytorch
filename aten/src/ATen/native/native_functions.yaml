@@ -8269,6 +8269,11 @@
   dispatch:
     CPU, CUDA: mse_loss_backward
 
+- func: l1_loss.out(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: nn
+  dispatch:
+    CompositeExplicitAutograd: l1_loss_out
+
 - func: l1_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   python_module: nn
 

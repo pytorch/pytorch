@@ -3104,6 +3104,8 @@ def l1_loss(
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
+    # *,
+    # out: Optional[torch.Tensor] = None
 ) -> Tensor:
     r"""l1_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
 
@@ -3113,7 +3115,14 @@ def l1_loss(
     """
     if has_torch_function_variadic(input, target):
         return handle_torch_function(
-            l1_loss, (input, target), input, target, size_average=size_average, reduce=reduce, reduction=reduction
+            l1_loss,
+            (input, target),
+            input,
+            target,
+            size_average=size_average,
+            reduce=reduce,
+            reduction=reduction,
+            # out=out,
         )
     if not (target.size() == input.size()):
         warnings.warn(
@@ -3126,7 +3135,7 @@ def l1_loss(
         reduction = _Reduction.legacy_get_string(size_average, reduce)
 
     expanded_input, expanded_target = torch.broadcast_tensors(input, target)
-    return torch._C._nn.l1_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction))
+    return torch._C._nn.l1_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction))  #, out)
 
 
 def mse_loss(

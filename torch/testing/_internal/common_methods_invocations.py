@@ -5679,21 +5679,33 @@ def sample_inputs_pairwise_distance(op_info, device, dtype, requires_grad, **kwa
     ]
 
 def sample_inputs_pixel_shuffle(op_info, device, dtype, requires_grad, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    shapes_and_upscale_factors = [
+        ((1, 9, 2, 2), 1),
+        ((1, 9, 2, 2), 3),
+        ((9, 2, 2), 1),
+        ((2, 3, 9, 2, 2), 1),
+    ]
+
     return [
-        SampleInput(
-            make_tensor((1, 9, 2, 2), device=device, dtype=dtype, requires_grad=requires_grad),
-            kwargs=dict(upscale_factor=upscale_factor),
-        )
-        for upscale_factor in (1, 3)
+        SampleInput(make_input(shape), kwargs=dict(upscale_factor=upscale_factor))
+        for shape, upscale_factor in shapes_and_upscale_factors
     ]
 
 def sample_inputs_pixel_unshuffle(op_info, device, dtype, requires_grad, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    shapes_and_downscale_factors = [
+        ((1, 1, 6, 6), 1),
+        ((1, 1, 6, 6), 3),
+        ((1, 6, 6), 1),
+        ((2, 3, 1, 6, 6), 1),
+    ]
+
     return [
-        SampleInput(
-            make_tensor((1, 1, 6, 6), device=device, dtype=dtype, requires_grad=requires_grad),
-            kwargs=dict(downscale_factor=downscale_factor),
-        )
-        for downscale_factor in (1, 3)
+        SampleInput(make_input(shape), kwargs=dict(downscale_factor=downscale_factor))
+        for shape, downscale_factor in shapes_and_downscale_factors
     ]
 
 def sample_inputs_kl_div(op_info, device, dtype, requires_grad, **kwargs):
@@ -10245,8 +10257,8 @@ op_db: List[OpInfo] = [
         ref=loss_reference_reduction_wrapper(lambda input, target: np.abs(input - target)),
         sample_inputs_func=sample_inputs_loss,
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-        supports_out=False,
         supports_forward_ad=True,
+        supports_out=False,
         skips=(
             DecorateInfo(
                 unittest.skip("Skipped!"),
