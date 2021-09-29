@@ -2438,7 +2438,7 @@ def sample_inputs_bincount(op_info, device, dtype, requires_grad):
     sample_inputs = []
 
     for max_val, weighted, minlength in product(range(1, S + 1), [False, True], range(0, 2 * S)):
-        input_tensor = torch.randint(0, max_val + 1, (S,), dtype=dtype)
+        input_tensor = torch.randint(0, max_val + 1, (S,), dtype=dtype, device=device)
         weight_tensor = make_arg((S,)) if weighted else None
 
         sample_inputs.append(SampleInput(input_tensor,
