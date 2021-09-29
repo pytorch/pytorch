@@ -478,7 +478,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         dst = 1
         if self.rank == dst:
             full_tensor = torch.zeros(
-                h, 
+                h,
                 w,
                 device=torch.device(f"cuda:{dst}"),
             )
@@ -1256,7 +1256,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         dst = 0
         if self.rank == dst:
             full_tensor = torch.zeros(
-                h, 
+                h,
                 w,
                 device=torch.device(f"cuda:{dst}")
             )
