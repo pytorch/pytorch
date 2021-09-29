@@ -91,7 +91,7 @@ void ConcatAddMulReplaceNaNClip(std::shared_ptr<torch::jit::Graph>& graph) {
         return (%res))IR";
   std::string fused_pattern = R"IR(
     graph(%a, %b, %c, %d, %e, %f, %g, %h, %i, %j):
-        %res = fb::concat_add_mul_replacenan_clip(%c, %e, %a, %i, %j)
+        %res = fb::concat_add_mul_replacenan_clip(%c, %e, %a, %i, %j, %b)
         return (%res))IR";
 
   SubgraphRewriter fuse;

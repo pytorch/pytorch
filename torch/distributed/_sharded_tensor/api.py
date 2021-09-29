@@ -4,6 +4,7 @@ from enum import Enum
 from typing import (
     Dict,
     List,
+    Optional,
 )
 
 import threading
@@ -342,6 +343,7 @@ class ShardedTensor(object):
         world_size = dist.get_world_size(sharded_tensor._process_group)
 
         local_shard_metadatas: List[ShardMetadata] = []
+        local_sharded_tensor_metadata: Optional[ShardedTensorMetadata] = None
         global_size = torch.Size(check_tensor_size_and_flatten(overall_size))
 
         if len(local_shards) > 0:
@@ -350,7 +352,7 @@ class ShardedTensor(object):
             local_shards_requires_grad = local_shards[0].tensor.requires_grad
             local_shards_is_pinned = local_shards[0].tensor.is_pinned()
             # pick a device from any local shards and use it for collective later
-            local_shards_device = torch.device("cpu")
+            local_shards_device = "cpu"
 
             # 1. Validate local tensors and associated metadatas
             for local_shard in local_shards:
@@ -427,7 +429,6 @@ class ShardedTensor(object):
         else:
             # if there's no local_shards, we don't need to verify anything, and this rank will only
             # hold a handle of the global sharded tensor
-            local_sharded_tensor_metadata = None
             local_shards_device = ""
 
         gathered_metadatas = [None for _ in range(world_size)]
@@ -478,15 +479,16 @@ class ShardedTensor(object):
                     rank_metadata.tensor_properties.requires_grad:
                 raise ValueError(
                     f'ShardedTensor requires_grad property does not match from different ranks! '
-                    f'Found requires_grad={global_sharded_tensor_metadata.tensor_properties.requires_grad} on rank {global_metadata_rank}, '
-                    f'and requires_grad={rank_metadata.tensor_properties.requires_grad} on rank {rank}'
+                    f'Found requires_grad={global_sharded_tensor_metadata.tensor_properties.requires_grad} on '
+                    f'rank {global_metadata_rank} and requires_grad={rank_metadata.tensor_properties.requires_grad} '
+                    f'on rank {rank}'
                 )
             elif global_sharded_tensor_metadata.tensor_properties.pin_memory != \
                     rank_metadata.tensor_properties.pin_memory:
                 raise ValueError(
                     f'ShardedTensor pin_memory property does not match from different ranks! '
-                    f'Found is_pinned(): {global_sharded_tensor_metadata.tensor_properties.pin_memory} on rank {global_metadata_rank}, '
-                    f'and is_pinned(): {rank_metadata.tensor_properties.pin_memory} on rank {rank}'
+                    f'Found is_pinned(): {global_sharded_tensor_metadata.tensor_properties.pin_memory} on '
+                    f'rank {global_metadata_rank} and is_pinned(): {rank_metadata.tensor_properties.pin_memory} on rank {rank}'
                 )
             else:
                 # pass all validations, extend shards metadata

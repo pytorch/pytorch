@@ -1677,7 +1677,10 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
 
         tensor_requires_grad = True if self.rank == 0 else False
         wrong_requires_grad_shards = [
-            _sharded_tensor.Shard(torch.randn(5, 5, device=f"cuda:{self.rank}", requires_grad=tensor_requires_grad), local_shard_metadata)
+            _sharded_tensor.Shard(
+                torch.randn(5, 5, device=f"cuda:{self.rank}", requires_grad=tensor_requires_grad),
+                local_shard_metadata
+            )
         ]
         with self.assertRaisesRegex(ValueError, 'ShardedTensor requires_grad property does not match from different ranks!'):
             sharded_tensor = _sharded_tensor.init_from_local_shards(
