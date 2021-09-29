@@ -29,9 +29,6 @@ def check_metadata_consistency(wrapper_tensor):
             "dtype of the tensor was modified directly without "
             "going through the PyTorch dispatcher.")
 
-# This is a bit fragile because this needs to be updated whenever a new view op
-# is added. We probably want some sort of introspection to tell that if a
-# torch.* op is a view or not.
 def is_view_fn(func):
     return func.__name__ in {
         'as_strided',
@@ -67,6 +64,7 @@ def is_view_fn(func):
         '_reshape_alias',
         '_unsafe_view',
         '_conj',
+        'alias',
     }
 
 def is_inplace_view_fn(func):
@@ -120,14 +118,14 @@ class CompositeCompliantTensor(torch.Tensor):
         if is_view_fn(func):
             # Autograd asserts that for B = A.view_fn(...), B and A's storages
             # are the same. Here we try to make B alias A to avoid those asserts.
-            aliased_tensor = args[0]
             with no_dispatch():
-                x = torch.empty(aliased_tensor.shape, dtype=aliased_tensor.dtype,
-                                device=aliased_tensor.device)
-                x.set_(aliased_tensor)
-                args_with_x = list(args)
-                args_with_x[0] = x
-                result = func(*args_with_x, **kwargs)
+                # Idea: this is a weird way of getting a storage that aliases the input.
+                # 1. under no_dispatch, all of the wrapper tensors look like meta tensors
+                # 2. we run func, which ends up running the meta tensor version of the view op
+                # 3. the result is one or more meta tensor that aliases the input.
+                # 4. we set the storage of the wrapper tensor results to be
+                #    the meta tensor(s) that aliases the input
+                result = func(*args, **kwargs)
                 if isinstance(result, tuple) or isinstance(result, list):
                     for a, b in zip(rs, result):
                         a.set_(b)
@@ -139,7 +137,7 @@ class CompositeCompliantTensor(torch.Tensor):
         # run into these, we manually modify the metadata of the input.
         with no_dispatch():
             if is_inplace_view_fn(func):
-                func(args[0])
+                func(*args, **kwargs)
 
         # For each CompositeCompliantTensor t, we check that t and t.elem
         # have consistent metadata. If they don't have consistent metadata,

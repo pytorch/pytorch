@@ -359,7 +359,7 @@ CompositeImplicitAutograd or hide parts of the operator in a new operator
 that is not CompositeImplicitAutograd.
 
 CompositeImplicitAutograd operators must not:
-- call `set_` or `resize_` or moral equivalents. These are tricky to handle for
+- call `resize_` or moral equivalents. These are tricky to handle for
 many backends, like vmap and meta.
 - call `out=` operations. These are impossible to handle for vmap and can cause
 dispatch-to-python objects to lose their subclassing.
