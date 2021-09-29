@@ -1031,11 +1031,6 @@ static void addmm_impl_cpu_(
     result.copy_(self);
   }
 
-  if (use_mkldnn_bf16_matmul(m1, m2, result)){
-    mkldnn_matmul(m1, m2, result, beta.to<float>(), alpha.to<float>());
-    return;
-  }
-
   bool transpose_c = false;
   Tensor c;
 

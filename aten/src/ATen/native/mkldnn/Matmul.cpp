@@ -23,6 +23,17 @@ bool use_mkldnn_bf16_matmul(
   return false;
 }
 
+bool mkldnn_bf16_gemm(
+    TransposeType transa, TransposeType transb,
+    int64_t m, int64_t n, int64_t k,
+    float alpha,
+    const c10::BFloat16 *a, int64_t lda,
+    const c10::BFloat16 *b, int64_t ldb,
+    float beta,
+    c10::BFloat16 *c, int64_t ldc) {
+  return false;
+}
+
 } // namespace native
 } // namespace at
 
@@ -33,6 +44,62 @@ bool use_mkldnn_bf16_matmul(
 
 namespace at {
 namespace native {
+
+static bool use_mkldnn_bf16_matmul() {
+  return (
+      at::globalContext().userEnabledMkldnn() &&
+      mkldnn_bf16_device_check());
+}
+
+bool mkldnn_bf16_gemm(
+    TransposeType transa, TransposeType transb,
+    int64_t m, int64_t n, int64_t k,
+    float alpha,
+    const c10::BFloat16 *a_data, int64_t lda,
+    const c10::BFloat16 *b_data, int64_t ldb,
+    float beta,
+    c10::BFloat16 *c_data, int64_t ldc) {
+
+  if (!use_mkldnn_bf16_matmul() ||
+      (m * n * k <= 16 * 16 * 16)) {
+    return false;
+  }
+
+  ideep::attr_t op_attr;
+  // mkldnn matmul primitive only supports 1-D bias tensors, so use
+  // mkldnn post ops to perform the add.
+  if (beta != 0.0f) op_attr = ideep::attr_t::fuse_sum();
+
+  ideep::tensor::dims a_strides{{1, lda}}, b_strides{{1, ldb}}, c_strides{{1, ldc}};
+  if (transa != TransposeType::NoTranspose) {
+    std::swap(a_strides[0], a_strides[1]);
+  }
+  if (transb != TransposeType::NoTranspose) {
+    std::swap(b_strides[0], b_strides[1]);
+  }
+
+  ideep::tensor a({
+      /*sizes=*/{m, k},
+      ideep::tensor::data_type::bf16,
+      /*strides=*/a_strides},
+    const_cast<c10::BFloat16*>(a_data));
+  ideep::tensor b({
+      /*sizes=*/{k, n},
+      ideep::tensor::data_type::bf16,
+      /*strides=*/b_strides},
+    const_cast<c10::BFloat16*>(b_data));
+  ideep::tensor c({
+      /*sizes=*/{m, n},
+      ideep::tensor::data_type::bf16,
+      /*strides=*/c_strides},
+    c_data);
+
+  ideep::matmul_forward::compute(
+      a, b, c, alpha, beta,
+      ideep::scale_t(), ideep::scale_t(), ideep::scale_t(), op_attr);
+
+  return true;
+}
 
 void mkldnn_matmul(
     const Tensor &mat1,
@@ -130,14 +197,13 @@ bool use_mkldnn_bf16_matmul(
   c10::MaybeOwned<Tensor> result_maybe_owned = at::borrow_from_optional_tensor(result_opt);
   const Tensor& result = *result_maybe_owned;
   return (
-    at::globalContext().userEnabledMkldnn() &&
-    mat1.scalar_type() == kBFloat16 &&
-    mat2.scalar_type() == kBFloat16 &&
-    (!result.defined() || result.scalar_type() == kBFloat16) &&
-    mat1.numel() != 0 &&
-    mat2.numel() != 0 &&
-    mkldnn_bf16_device_check() &&
-    checksize(mat1, mat2));
+      use_mkldnn_bf16_matmul() &&
+      mat1.scalar_type() == kBFloat16 &&
+      mat2.scalar_type() == kBFloat16 &&
+      (!result.defined() || result.scalar_type() == kBFloat16) &&
+      mat1.numel() != 0 &&
+      mat2.numel() != 0 &&
+      checksize(mat1, mat2));
 }
 
 } // namespace native

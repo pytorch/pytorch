@@ -1,4 +1,5 @@
 #include <ATen/native/CPUBlas.h>
+#include <ATen/native/mkldnn/Matmul.h>
 #include <ATen/Config.h>
 
 #include <climits>
@@ -248,6 +249,25 @@ void gemm(
 
   gemm_stub(
       kCPU, kLong,
+      transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+}
+
+void gemm(
+    TransposeType transa, TransposeType transb,
+    int64_t m, int64_t n, int64_t k,
+    float alpha,
+    const c10::BFloat16 *a, int64_t lda,
+    const c10::BFloat16 *b, int64_t ldb,
+    float beta,
+    c10::BFloat16 *c, int64_t ldc) {
+  internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
+#if AT_MKLDNN_ENABLED()
+  if (mkldnn_bf16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+    return;
+  }
+#endif
+  gemm_stub(
+      kCPU, kBFloat16,
       transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
