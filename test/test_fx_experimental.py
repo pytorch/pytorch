@@ -8,11 +8,11 @@ from typing import Callable, Dict, Union, List, Optional
 import torch
 import torch.fx.experimental.optimization as optimization
 from torch.fx._symbolic_trace import symbolic_trace
-from torch.fx.experimental import graph_manipulation
 from torch.fx.experimental import merge_matmul
 from torch.fx.experimental.accelerator_partitioner import Partitioner
 from torch.fx.experimental.normalize import NormalizeOperators, NormalizeArgs
-from torch.fx.experimental.param_fetch import lift_lowering_attrs_to_nodes
+from torch.fx.passes import graph_manipulation
+from torch.fx.passes.param_fetch import lift_lowering_attrs_to_nodes
 from torch.fx.experimental.partitioner_utils import (
     NodeLatency,
     get_partition_to_latency_mapping,
@@ -1459,13 +1459,20 @@ class TestNormalizeOperators(JitTestCase):
     def test_normalize_operator_exhaustive(self, device, dtype, op):
         # Sorted and one entry on each line to minimize merge conflicts.
         op_skip = {
+            # See: https://github.com/pytorch/pytorch/issues/64997
+            "block_diag",
+            "broadcast_tensors",
             "contiguous",
             "einsum",
             "expand",
             "expand_as",
             "fill_",
             "gradient",
+            "igamma",
+            "igammac",
             "index_put",
+            "nn.functional.conv2d",
+            "nn.functional.dropout",
             "polygamma",
             "special.polygamma",
             "repeat",
@@ -1497,7 +1504,7 @@ class TestNormalizeOperators(JitTestCase):
             return
 
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
-        fx_fail = {"stack", "hstack", "vstack", "dstack", "linalg.multi_dot"}
+        fx_fail = {"cat", "stack", "hstack", "vstack", "dstack", "linalg.multi_dot"}
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
         for sample_input in sample_inputs_itr:
             unsupported_arg_type = False

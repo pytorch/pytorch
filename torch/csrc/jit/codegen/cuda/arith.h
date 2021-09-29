@@ -49,7 +49,34 @@ TORCH_CUDA_CU_API TensorView* reductionOp(
     BinaryOpType reduction_op_type,
     const std::vector<int>& axes,
     Val* init,
-    TensorView* v1);
+    TensorView* v1,
+    bool keep_dim = false);
+
+//! Auxiliary Struct holding result of
+//! a single welford op in ternsorview
+class TORCH_CUDA_CU_API WelfordResult {
+ public:
+  TensorView* avg;
+  TensorView* var_sum;
+  TensorView* n;
+
+  explicit WelfordResult(
+      TensorView* in_avg,
+      TensorView* in_var_sum,
+      TensorView* in_n);
+
+  WelfordResult rFactor(const std::vector<int>& axes);
+};
+
+//! Welford operator on specified axes. This is currently the only scan op with
+//! multiple outputs that is supported. May consider generalization if more scan
+//! ops are added.
+TORCH_CUDA_CU_API WelfordResult Welford(
+    TensorView* tv,
+    const std::vector<int>& axes,
+    TensorView* init_avg = nullptr,
+    TensorView* init_var = nullptr,
+    Int* init_N = new Int(0));
 
 // UNARY OPERATIONS
 TORCH_CUDA_CU_API Val* neg(Val* v);
@@ -62,6 +89,18 @@ TORCH_CUDA_CU_API TensorView* neg(TensorView* v);
 TORCH_CUDA_CU_API TensorView* broadcast(
     TensorView* inp,
     const std::vector<bool>& is_broadcast_dim);
+
+//! Transpose a tensor as specified by axis mappings.
+//!
+//! The transposition mapping is specified with a list of pairs from
+//! old to new positions. Positions are relative to the noReduction
+//! domain.
+//!
+//! \param inp Tensor to transpose
+//! \param old2new Pairs of mapping from old to new positions.
+TORCH_CUDA_CU_API TensorView* transpose(
+    TensorView* inp,
+    const std::unordered_map<int, int>& old2new);
 
 // BINARY OPERATIONS
 // add
@@ -94,6 +133,11 @@ TORCH_CUDA_CU_API Val* lt(Val* v1, Val* v2);
 TORCH_CUDA_CU_API TensorView* lt(TensorView* v1, Val* v2);
 TORCH_CUDA_CU_API TensorView* lt(Val* v1, TensorView* v2);
 TORCH_CUDA_CU_API TensorView* lt(TensorView* v1, TensorView* v2);
+// gt
+TORCH_CUDA_CU_API Val* gt(Val* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* gt(TensorView* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* gt(Val* v1, TensorView* v2);
+TORCH_CUDA_CU_API TensorView* gt(TensorView* v1, TensorView* v2);
 // eq
 TORCH_CUDA_CU_API Val* eq(Val* v1, Val* v2);
 TORCH_CUDA_CU_API TensorView* eq(TensorView* v1, Val* v2);
@@ -113,7 +157,18 @@ TORCH_CUDA_CU_API TensorView* andOp(TensorView* v1, TensorView* v2);
 // REDUCTION OPERATIONS
 TORCH_CUDA_CU_API TensorView* sum(
     TensorView* v1,
-    const std::vector<int>& reduction_axes);
+    const std::vector<int>& reduction_axes,
+    bool keep_dim = false);
+
+TORCH_CUDA_CU_API TensorView* max(
+    TensorView* v1,
+    const std::vector<int>& reduction_axes,
+    bool keep_dim = false);
+
+TORCH_CUDA_CU_API TensorView* min(
+    TensorView* v1,
+    const std::vector<int>& reduction_axes,
+    bool keep_dim = false);
 
 // COMPOUND OPERATIONS
 // add_alpha
@@ -195,6 +250,67 @@ TORCH_CUDA_CU_API TensorView* threshold(
 // clamp
 TORCH_CUDA_CU_API Val* clamp(Val* in, Val* min_val, Val* max_val);
 TORCH_CUDA_CU_API TensorView* clamp(TensorView* in, Val* min_val, Val* max_val);
+
+//! Internal operator for supporting backward graphs
+//!
+//! example:
+//!   v1 = T1 [I0(10),I1(20),I2(30),I3(40)]
+//!   v2 = sum_to(v1,{30,1}) ------> v2 = T2[I2,R3 (keep_dim)]
+//!
+//!  This operator will return v1* directly if sizes of v1 root domain
+//!  is already the same as shape.
+//!
+//!  Name of sum_to is different from NV fuser naming,
+//!  this is to align with the operator name of at::sum_to.
+
+TORCH_CUDA_CU_API TensorView* sum_to(
+    TensorView* v1,
+    const std::vector<Int*>& sum_to_size);
+
+TORCH_CUDA_CU_API TensorView* sum_to(
+    TensorView* v1,
+    const std::vector<int64_t>& sum_to_size);
+
+//! Shift a tensor to a direction specified by offsets.
+//!
+//! Example:
+//!   t0: 2D tensor of size N by M
+//!   t1 = shift(t0, {1, -1});
+//!
+//!   then:
+//!     t1[i, j] = t0[i-1, j+1] for 1 <= i < N and 0 <= j < M-1.
+//!     t1[i, j] = 0, otherwise
+TORCH_CUDA_CU_API TensorView* shift(
+    TensorView* inp,
+    const std::vector<int>& offsets);
+
+//! Gather a window of nearby elements for each element.
+//!
+//! Each window of size window_shape is stored as a additional
+//! innermost domain, meaning that the number of dimensions of the
+//! output tensor doubles. The pad_width parameter specifies the
+//! padding width of each side of each axis.
+//!
+//! Example:
+//!   t0: 2D tensor of [N, M]
+//!   t1 = gather(t0, {1, 3}, {{0, 0}, {1, 1}});
+//!
+//!   then:
+//!     t1: [N, M, 1, 3]
+//!     t1[i, j, k, l] = The value at the window position of [k, l]
+//!                      for t0[i, j]
+TORCH_CUDA_CU_API TensorView* gather(
+    TensorView* inp,
+    const std::vector<int>& window_shape,
+    const std::vector<std::vector<int>>& pad_width);
+
+//! Gather a window of nearby elements for each element.
+//!
+//! Same as the another gather interface but with Int* parameters.
+TORCH_CUDA_CU_API TensorView* gather(
+    TensorView* inp,
+    const std::vector<Int*>& window_shape,
+    const std::vector<std::vector<Int*>>& pad_width);
 
 } // namespace cuda
 } // namespace fuser

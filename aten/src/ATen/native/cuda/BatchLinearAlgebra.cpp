@@ -97,7 +97,7 @@ void magmaCholeskyBatched(
 
 template<class scalar_t>
 void magmaTriangularSolveBatched(
-    magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
+    magma_side_t side, magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
     scalar_t** dA_array, magma_int_t ldda, scalar_t** dB_array, magma_int_t lddb, magma_int_t batchsize,
     const MAGMAQueue& magma_queue);
 
@@ -667,29 +667,29 @@ void magmaCholeskyBatched<c10::complex<float>>(
 
 template<>
 void magmaTriangularSolveBatched<double>(
-    magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
+    magma_side_t side, magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
     double** dA_array, magma_int_t ldda, double** dB_array, magma_int_t lddb, magma_int_t batchsize,
     const MAGMAQueue& magma_queue) {
-  magmablas_dtrsm_batched(MagmaLeft, uplo, trans, diag, m, n, 1, dA_array, ldda, dB_array, lddb, batchsize, magma_queue.get_queue());
+  magmablas_dtrsm_batched(side, uplo, trans, diag, m, n, 1, dA_array, ldda, dB_array, lddb, batchsize, magma_queue.get_queue());
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
 void magmaTriangularSolveBatched<float>(
-    magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
+    magma_side_t side, magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
     float** dA_array, magma_int_t ldda, float** dB_array, magma_int_t lddb, magma_int_t batchsize,
     const MAGMAQueue& magma_queue) {
-  magmablas_strsm_batched(MagmaLeft, uplo, trans, diag, m, n, 1, dA_array, ldda, dB_array, lddb, batchsize, magma_queue.get_queue());
+  magmablas_strsm_batched(side, uplo, trans, diag, m, n, 1, dA_array, ldda, dB_array, lddb, batchsize, magma_queue.get_queue());
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
 void magmaTriangularSolveBatched<c10::complex<double>>(
-    magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
+    magma_side_t side, magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
     c10::complex<double>** dA_array, magma_int_t ldda, c10::complex<double>** dB_array, magma_int_t lddb, magma_int_t batchsize,
     const MAGMAQueue& magma_queue) {
   magmaDoubleComplex alpha({1, 0});
-  magmablas_ztrsm_batched(MagmaLeft, uplo, trans, diag, m, n, alpha,
+  magmablas_ztrsm_batched(side, uplo, trans, diag, m, n, alpha,
     reinterpret_cast<magmaDoubleComplex**>(dA_array), ldda,
     reinterpret_cast<magmaDoubleComplex**>(dB_array), lddb, batchsize, magma_queue.get_queue());
   AT_CUDA_CHECK(cudaGetLastError());
@@ -697,11 +697,11 @@ void magmaTriangularSolveBatched<c10::complex<double>>(
 
 template<>
 void magmaTriangularSolveBatched<c10::complex<float>>(
-    magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
+    magma_side_t side, magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
     c10::complex<float>** dA_array, magma_int_t ldda, c10::complex<float>** dB_array, magma_int_t lddb, magma_int_t batchsize,
     const MAGMAQueue& magma_queue) {
   magmaFloatComplex alpha({1, 0});
-  magmablas_ctrsm_batched(MagmaLeft, uplo, trans, diag, m, n, alpha,
+  magmablas_ctrsm_batched(side, uplo, trans, diag, m, n, alpha,
     reinterpret_cast<magmaFloatComplex**>(dA_array), ldda,
     reinterpret_cast<magmaFloatComplex**>(dB_array), lddb, batchsize, magma_queue.get_queue());
   AT_CUDA_CHECK(cudaGetLastError());
@@ -1224,8 +1224,15 @@ void checkMagmaInternalError(magma_int_t info, const std::string& magma_function
       ", when calling ", magma_function_name);
 }
 
+magma_trans_t to_magma(TransposeType trans) {
+  switch (trans) {
+    case TransposeType::NoTranspose: return MagmaNoTrans;
+    case TransposeType::Transpose: return MagmaTrans;
+    case TransposeType::ConjTranspose: return MagmaConjTrans;
+  }
+  TORCH_INTERNAL_ASSERT(false, "Invalid transpose type");
+}
 } // anonymous namespace
-
 #endif // USE_MAGMA
 
 #define ALLOCATE_ARRAY(name, type, size) \
@@ -1950,27 +1957,28 @@ REGISTER_CUDA_DISPATCH(lu_stub, &apply_lu);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangular_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
-static void apply_triangular_solve_batched(Tensor& A, Tensor& b, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
+static void apply_triangular_solve_batched_magma(Tensor& A, Tensor& b, bool left, bool upper, TransposeType transpose, bool unitriangular) {
 #ifndef USE_MAGMA
 AT_ERROR("triangular_solve: MAGMA library not found in "
          "compilation. Please rebuild with MAGMA.");
 #else
   magma_uplo_t uplo = upper ? MagmaUpper : MagmaLower;
-  magma_trans_t trans = transpose ? MagmaTrans : MagmaNoTrans;
-  trans = conjugate_transpose ? MagmaConjTrans : trans;
+  magma_trans_t trans = to_magma(transpose);
   magma_diag_t diag = unitriangular ? MagmaUnit : MagmaNonUnit;
+  magma_side_t side = left ? MagmaLeft : MagmaRight;
 
   auto A_data = A.data_ptr<scalar_t>();
   auto b_data = b.data_ptr<scalar_t>();
-  magma_int_t m = magma_int_cast(A.size(-2), "A.size(-2)");
-  magma_int_t n = magma_int_cast(A.size(-1), "A.size(-1)");
-  magma_int_t nrhs = magma_int_cast(b.size(-1), "b.size(-1)");
+  // This allows to pass rectangular A and b when left = True
+  magma_int_t m = magma_int_cast(left ? A.size(-1) : b.size(-2), "m");
+  magma_int_t n = magma_int_cast(b.size(-1), "n");
   // magma returns early if m <= 0 || n <= 0 for magmaTriangularSolveBatched
   // magmaTriangularSolve is calling cuBLAS and it prints
   // ** On entry to DTRSM  parameter number 9 had an illegal value
   // so let's use proper lda parameter here
-  magma_int_t lda = std::max<magma_int_t>(1, m);
-  magma_int_t batch_size = magma_int_cast(batchCount(A), "batchCount");
+  magma_int_t lda = std::max<magma_int_t>(1, A.size(-2));
+  magma_int_t ldb = std::max<magma_int_t>(1, b.size(-2));
+  magma_int_t batch_size = magma_int_cast(batchCount(A), "batch_size");
 
   auto A_mat_stride = matrixStride(A);
   auto b_mat_stride = matrixStride(b);
@@ -1990,7 +1998,7 @@ AT_ERROR("triangular_solve: MAGMA library not found in "
   MAGMAQueue magma_queue(b.get_device());
 
   constexpr int64_t batch_limit = 65535;
-  // Compute as many batches of 65535 possible
+  // Compute as many batches of 65535 as possible
   // The number of "mini"-batches are floor(batch_size / batch_limit)
   // and these cover floor(batch_size / batch_limit) * batch_limit matrix solves
   int64_t mini_batches = batch_size / batch_limit;
@@ -2000,40 +2008,39 @@ AT_ERROR("triangular_solve: MAGMA library not found in "
     scalar_t** b_array_cur = &b_array[mini_idx];
 
     magmaTriangularSolveBatched<scalar_t>(
-        uplo, trans, diag, n, nrhs, A_array_cur,
-        lda, b_array_cur, lda, batch_limit, magma_queue);
+        side, uplo, trans, diag, m, n, A_array_cur,
+        lda, b_array_cur, ldb, batch_limit, magma_queue);
   }
 
   // Compute whatever is left = batch_size - floor(batch_size / batch_limit) * batch_limit
   // which concisely is equal to batch_size % batch_limit
   if (batch_size % batch_limit != 0) {
     magmaTriangularSolveBatched<scalar_t>(
-        uplo, trans, diag, n, nrhs, &A_array[mini_idx],
-        lda, &b_array[mini_idx], lda, batch_size % batch_limit, magma_queue);
+        side, uplo, trans, diag, m, n, &A_array[mini_idx],
+        lda, &b_array[mini_idx], ldb, batch_size % batch_limit, magma_queue);
   }
 #endif
 }
 
-void triangular_solve_batched_magma(Tensor& A, Tensor& B, Tensor& infos, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
-  (void)infos; // unused
+void triangular_solve_batched_magma(Tensor& A, Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "triangular_solve_cuda", [&]{
-    apply_triangular_solve_batched<scalar_t>(A, B, upper, transpose, conjugate_transpose, unitriangular);
+    apply_triangular_solve_batched_magma<scalar_t>(A, B, left, upper, transpose, unitriangular);
   });
 }
 
-void triangular_solve_kernel(Tensor& A, Tensor& B, Tensor& infos, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
+void triangular_solve_kernel(Tensor& A, Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular) {
   // For batches smaller than 8 and matrix sizes larger than 64x64 cuBLAS forloop is faster than batched version
   if (batchCount(A) <= 8 && A.size(-1) >= 64) {
-    triangular_solve_cublas(A, B, infos, upper, transpose, conjugate_transpose, unitriangular);
+    triangular_solve_cublas(A, B, left, upper, transpose, unitriangular);
   } else {
 #ifndef USE_MAGMA
-    triangular_solve_batched_cublas(A, B, infos, upper, transpose, conjugate_transpose, unitriangular);
+    triangular_solve_batched_cublas(A, B, left, upper, transpose, unitriangular);
 #else
     // cuBLAS batched is faster than MAGMA batched up until 512x512, after that MAGMA is faster
     if (A.size(-1) <= 512) {
-      triangular_solve_batched_cublas(A, B, infos, upper, transpose, conjugate_transpose, unitriangular);
+      triangular_solve_batched_cublas(A, B, left, upper, transpose, unitriangular);
     } else {
-      triangular_solve_batched_magma(A, B, infos, upper, transpose, conjugate_transpose, unitriangular);
+      triangular_solve_batched_magma(A, B, left, upper, transpose, unitriangular);
     }
 #endif // USE_MAGMA
   }
@@ -2724,21 +2731,6 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda(const Tensor& self, bool som
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#ifdef USE_MAGMA
-magma_trans_t _get_magma_trans(char trans) {
-  switch (trans) {
-    case 'N':
-      return MagmaNoTrans;
-    case 'T':
-      return MagmaTrans;
-    case 'C':
-      return MagmaConjTrans;
-    default:
-      return MagmaNoTrans;
-  }
-}
-#endif
-
 /*
   Solves the matrix equation A X = B
   X and B are n-by-nrhs matrices, A is represented using the LU factorization.
@@ -2754,14 +2746,14 @@ magma_trans_t _get_magma_trans(char trans) {
   For further details, please see the MAGMA documentation for magma_dgetrs_gpu.
 */
 template <typename scalar_t>
-static void apply_lu_solve_looped_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots, char lapack_trans) {
+static void apply_lu_solve_looped_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType transpose) {
 #ifndef USE_MAGMA
   TORCH_CHECK(
       false,
       "Calling torch.lu_solve on a CUDA tensor requires compiling ",
       "PyTorch with MAGMA. lease rebuild with MAGMA.");
 #else
-  auto trans = _get_magma_trans(lapack_trans);
+  auto trans = to_magma(transpose);
   auto b_data = b.data_ptr<scalar_t>();
   auto lu_data = lu.data_ptr<scalar_t>();
 
@@ -2808,14 +2800,14 @@ static void apply_lu_solve_looped_magma(const Tensor& b, const Tensor& lu, const
   For further details, please see the MAGMA documentation for magma_dgetrs_batched.
 */
 template <typename scalar_t>
-static void apply_lu_solve_batched_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots, char lapack_trans) {
+static void apply_lu_solve_batched_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType transpose) {
 #ifndef USE_MAGMA
   TORCH_CHECK(
       false,
       "Calling torch.lu_solve on a CUDA tensor requires compiling ",
       "PyTorch with MAGMA. lease rebuild with MAGMA.");
 #else
-  auto trans = _get_magma_trans(lapack_trans);
+  auto trans = to_magma(transpose);
   auto b_data = b.data_ptr<scalar_t>();
   auto lu_data = lu.data_ptr<scalar_t>();
 
@@ -2869,34 +2861,20 @@ static void apply_lu_solve_batched_magma(const Tensor& b, const Tensor& lu, cons
 #endif
 }
 
-static void lu_solve_batched_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots, char lapack_trans) {
+static void lu_solve_batched_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType trans) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(b.scalar_type(), "lu_solve_batched_magma", [&]{
-    apply_lu_solve_batched_magma<scalar_t>(b, lu, pivots, lapack_trans);
+    apply_lu_solve_batched_magma<scalar_t>(b, lu, pivots, trans);
   });
 }
 
-static void lu_solve_looped_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots, char lapack_trans) {
+static void lu_solve_looped_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType trans) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(b.scalar_type(), "lu_solve_looped_magma", [&]{
-    apply_lu_solve_looped_magma<scalar_t>(b, lu, pivots, lapack_trans);
+    apply_lu_solve_looped_magma<scalar_t>(b, lu, pivots, trans);
   });
 }
 
-#if defined(USE_CUSOLVER) || defined(CUDART_VERSION)
-cublasOperation_t _get_cublas_trans(char trans) {
-  switch (trans) {
-    case 'N':
-      return CUBLAS_OP_N;
-    case 'T':
-      return CUBLAS_OP_T;
-    case 'C':
-      return CUBLAS_OP_C;
-    default:
-      return CUBLAS_OP_N;
-  }
-}
-#endif
 
-static void lu_solve_trans_dispatch(const Tensor& b, const Tensor& lu, const Tensor& pivots, char trans) {
+static void lu_solve_trans_dispatch(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType trans) {
   auto batch_size = batchCount(lu);
   auto m = lu.size(-2);
   auto b2 = b.size(-1);
@@ -2904,7 +2882,7 @@ static void lu_solve_trans_dispatch(const Tensor& b, const Tensor& lu, const Ten
   // heuristics determined from tests dicussed in https://github.com/pytorch/pytorch/pull/59148
 #ifdef USE_CUSOLVER
   if ((batch_size == 1 && m > 512) || (batch_size <= 8 && over_magma_dim_limit)) {
-    lu_solve_looped_cusolver(b, lu, pivots, _get_cublas_trans(trans));
+    lu_solve_looped_cusolver(b, lu, pivots, trans);
   }
 #else
   if (batch_size == 1) {
@@ -2913,7 +2891,7 @@ static void lu_solve_trans_dispatch(const Tensor& b, const Tensor& lu, const Ten
 #endif // ifdef USE_CUSOLVER
 #ifdef CUDART_VERSION
   else if ((batch_size > 2 && m <= 128) || (batch_size > 8 && over_magma_dim_limit)) {
-    lu_solve_batched_cublas(b, lu, pivots, _get_cublas_trans(trans));
+    lu_solve_batched_cublas(b, lu, pivots, trans);
   }
 #endif // ifdef CUDART_VERSION
   else {
@@ -2924,7 +2902,7 @@ static void lu_solve_trans_dispatch(const Tensor& b, const Tensor& lu, const Ten
 REGISTER_CUDA_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_dispatch);
 
 static void lu_solve_dispatch(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
-  lu_solve_trans_dispatch(b, lu, pivots, 'N');
+  lu_solve_trans_dispatch(b, lu, pivots, TransposeType::NoTranspose);
 }
 
 REGISTER_CUDA_DISPATCH(lu_solve_stub, &lu_solve_dispatch);
@@ -2975,7 +2953,7 @@ void gels_magma(const Tensor& a, Tensor& b, Tensor& infos) {
   });
 }
 
-void linalg_lstsq_gels(const Tensor& A, const Tensor& B, const Tensor& infos) {
+void linalg_lstsq_gels(const Tensor& A, const Tensor& B, const Tensor& /*infos*/) {
   // The steps for using the QR decomposition for solving least squares problems
   // are outlined here https://en.wikipedia.org/wiki/QR_decomposition#Using_for_solution_to_linear_inverse_problems
   auto m = A.size(-2);
@@ -3012,15 +2990,13 @@ void linalg_lstsq_gels(const Tensor& A, const Tensor& B, const Tensor& infos) {
     ormqr_kernel(A_broadcasted, tau_broadcasted, B, /*left=*/true, /*transpose=*/true);
 
     // Step 3: solve R X = B
-    bool upper = true;
-    bool transpose = false;
-    bool conjugate_transpose = false;
-    bool unitriangular = false;
     triangular_solve_kernel(
         const_cast<Tensor&>(A_broadcasted),
         const_cast<Tensor&>(B),
-        const_cast<Tensor&>(infos),
-        upper, transpose, conjugate_transpose, unitriangular);
+        /*left=*/true,
+        /*upper=*/true,
+        /*transpose=*/TransposeType::NoTranspose,
+        /*unitriangular=*/false);
   } else { // underdetermined case
     Tensor Ah = cloneBatchedColumnMajor(A.conj().transpose(-2, -1));
 
@@ -3036,15 +3012,15 @@ void linalg_lstsq_gels(const Tensor& A, const Tensor& B, const Tensor& infos) {
     Tensor Ah_broadcasted = is_fortran_contiguous ? Ah_expanded : cloneBatchedColumnMajor(Ah_expanded);
 
     // Step 2: R^H Z = B
-    bool upper = true;
-    bool transpose = true;
-    bool conjugate_transpose = true;
-    bool unitriangular = false;
+    const auto trans = Ah_broadcasted.is_complex() ? TransposeType::ConjTranspose
+                                                   : TransposeType::Transpose;
     triangular_solve_kernel(
         const_cast<Tensor&>(Ah_broadcasted),
         const_cast<Tensor&>(B),
-        const_cast<Tensor&>(infos),
-        upper, transpose, conjugate_transpose, unitriangular);
+        /*left=*/true,
+        /*upper=*/true,
+        /*transpose=*/trans,
+        /*unitriangular=*/false);
 
     // B matrix has the size max(m, n) x nrhs
     // triangular_solve_kernel writes its output into the first m rows of B leaving the rest untouched
