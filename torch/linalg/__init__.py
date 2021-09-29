@@ -2046,7 +2046,13 @@ Examples::
 trace = _add_docstr(_linalg.linalg_trace, r"""
 trace(input, offset=0) -> Tensor
 
-Returns the sum of the elements of the diagonal.
+Returns the sum of the elements of the diagonal. If `offset` is given, the retrun value is the sum
+of `input[i, i + offset]` for all `i`.
+
+Args:
+    input (Tensor): tensor from which the diagonals are taken.
+    offset (int): offset of the diagonal from the main diagonal. A positive value indicates
+                  an upper diagonal, and negative value a lower diagonal. Default: `0`.
 
 Example::
 
