@@ -147,23 +147,19 @@ at::Tensor& flatten_copy_out(
 }
 
 namespace {
-template <typename scalar_t>
+template <typename T>
 void to_copy_out_fast_path(Tensor& out, const Tensor& self) {
-  using self_t = scalar_t;
   const auto N = self.numel();
-  const auto self_data = self.data_ptr<self_t>();
+  const auto self_data = self.data_ptr<T>();
   AT_DISPATCH_ALL_TYPES_AND2(
-      kHalf,
-      kBFloat16,
-      out.scalar_type(),
-      "to_copy_out_inner_loop",
-      [&]() {
+      kHalf, kBFloat16, out.scalar_type(), "to_copy_out_inner_loop", [&]() {
         const auto out_data = out.data_ptr<scalar_t>();
         for (const auto idx : c10::irange(N)) {
           out_data[idx] = static_cast<scalar_t>(self_data[idx]);
         }
       });
 }
+} // namespace
 
 at::Tensor& to_copy_out(
     Tensor& out,
