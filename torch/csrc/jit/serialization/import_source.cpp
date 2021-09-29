@@ -79,6 +79,7 @@ struct ConstantTableValue : public SugaredValue {
                              << constants_->size() << " entries)";
     }
     auto ivalue = constants_->at(offset);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Value* value;
 
     // see [Constant Object Weak CompilationUnit Reference]
