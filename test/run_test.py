@@ -993,22 +993,23 @@ def main():
         )
         # downloading test cases configuration to local environment
         get_test_case_configs(dirpath=test_directory)
-
-    print("DETERMINATING")
-    diff_path = REPO_ROOT / "pr.diff"
-    print(diff_path.exists())
-    determined_tests = manual_determinator.determinate(
-        diff_path,
-        REPO_ROOT / "test" / "manual_determinations.yml",
-        selected_tests,
-        CORE_TEST_LIST,
-    )
-    print(
-        f"Target determinator filtered from:\n{manual_determinator.indent_list(selected_tests)}\n"
-        f"to:\n{manual_determinator.indent_list(determined_tests)}"
-    )
-    print("DONE")
-    selected_tests = determined_tests
+        
+        if os.getenv("IS_GHA", "0") == "1":
+            print("DETERMINATING")
+            diff_path = REPO_ROOT / "pr.diff"
+            print(diff_path.exists())
+            determined_tests = manual_determinator.determinate(
+                diff_path,
+                REPO_ROOT / "test" / "manual_determinations.yml",
+                selected_tests,
+                CORE_TEST_LIST,
+            )
+            print(
+                f"Target determinator filtered from:\n{manual_determinator.indent_list(selected_tests)}\n"
+                f"to:\n{manual_determinator.indent_list(determined_tests)}"
+            )
+            print("DONE")
+            selected_tests = determined_tests
     exit(0)
     # exit(0)
 
