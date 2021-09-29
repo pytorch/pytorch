@@ -16,6 +16,7 @@
 #include <THC/THCThrustAllocator.cuh>
 
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDADataType.h>
 #include <ATen/cuda/CUDAUtils.h>
 #include <cusparse.h>
 #include <ATen/native/sparse/cuda/SparseCUDABlas.h>
@@ -118,14 +119,7 @@ struct csrMatrixRef {
         nnz_{nnz},
         size_{size} {
     #if IS_CUSPARSE11_AVAILABLE()
-      cudaDataType cuda_data_type;
-      if ( std::is_same<float, scalar_t>::value ) {
-        cuda_data_type = CUDA_R_32F;
-      } else if ( std::is_same<double, scalar_t>::value) {
-        cuda_data_type = CUDA_R_64F;
-      } else {
-        TORCH_CHECK(false, "Tensor types must be either float32 or float64");
-      }
+      cudaDataType cuda_data_type = at::cuda::getCudaDataType<scalar_t>();
       TORCH_CUDASPARSE_CHECK(cusparseCreateCsr(
         &description_,
         this->size(0),
@@ -192,8 +186,14 @@ struct CusparseMatrixMultiplyOp {
   cusparseSpGEMMDescr_t spgemmDesc;
 
   CusparseMatrixMultiplyOp() {
-    static_assert(std::is_same<float, scalar_t>::value || std::is_same<double, scalar_t>::value,
-      "cusparse csr sparse-sparse MM only supports data type of float and double.");
+    static_assert(
+      std::is_same<c10::Half, scalar_t>::value ||
+          std::is_same<c10::BFloat16, scalar_t>::value ||
+          std::is_same<float, scalar_t>::value ||
+          std::is_same<double, scalar_t>::value ||
+          std::is_same<c10::complex<float>, scalar_t>::value ||
+          std::is_same<c10::complex<double>, scalar_t>::value,
+      "cusparseSpGEMM only supports data type of half, bfloat16, float, double and complex float, double.");
     // SpGEMM Computation
     TORCH_CUDASPARSE_CHECK(cusparseSpGEMM_createDescr(&spgemmDesc));
   }
@@ -212,14 +212,6 @@ struct CusparseMatrixMultiplyOp {
 
     const int B_num_cols = B.size(1);
 
-    cudaDataType computeType;
-    if ( std::is_same<float, scalar_t>::value ) {
-      computeType = CUDA_R_32F;
-    } else if ( std::is_same<double, scalar_t>::value) {
-      computeType = CUDA_R_64F;
-    } else {
-      TORCH_CHECK(false, "Tensor types must be either float32 or float64");
-    }
     csrOutput out({A.size(0), B.size(1)});
 
     out.csr_pointers_ = at::empty({out.size(0) + 1}, output_indices.options().dtype(kInt));
@@ -251,6 +243,16 @@ struct CusparseMatrixMultiplyOp {
     cusparseSpMatDescr_t matB = B.description_;
     cusparseSpMatDescr_t matC = C.description_;
     //--------------------------------------------------------------------------
+
+    cudaDataType computeType = at::cuda::getCudaDataType<scalar_t>();
+
+    // If a specific GPU model does not provide native support for a given data type,
+    // the routine returns CUSPARSE_STATUS_ARCH_MISMATCH error
+    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+    TORCH_CHECK(prop->major >= 5 && !((10*prop->major + prop->minor) < 53 && computeType == CUDA_R_16F),
+        "sparse_mm: CUDA Float16 requires compute capability >= 53 (current: ", prop->major, prop->minor, ")");
+    TORCH_CHECK(!(prop->major < 8 && computeType == CUDA_R_16BF),
+        "sparse_mm: CUDA BFloat16 requires compute capability >= 80 (current: ", prop->major, prop->minor, ")");
 
     // ask bufferSize1 bytes for external memory
     TORCH_CUDASPARSE_CHECK(cusparseSpGEMM_workEstimation(
@@ -646,8 +648,21 @@ void sparse_sparse_matmul_cuda_kernel(
     const Tensor& mat1,
     const Tensor& mat2) {
 
-  static_assert(std::is_same<float, scalar_t>::value || std::is_same<double, scalar_t>::value,
-    "sparse_sparse_matmul_cuda_kernel only supports float and double value types");
+  static_assert(
+    std::is_same<c10::Half, scalar_t>::value ||
+        std::is_same<c10::BFloat16, scalar_t>::value ||
+        std::is_same<float, scalar_t>::value ||
+        std::is_same<double, scalar_t>::value ||
+        std::is_same<c10::complex<float>, scalar_t>::value ||
+        std::is_same<c10::complex<double>, scalar_t>::value,
+    "sparse_sparse_matmul_cuda_kernel only supports data type of half, bfloat16, float, double and complex float, double.");
+
+  // older versions of cusparse on Windows segfault for complex128 dtype
+#if defined(_WIN32) && defined(CUSPARSE_VERSION) && CUSPARSE_VERSION < 11400
+  TORCH_CHECK(
+      !(mat1.scalar_type() == ScalarType::ComplexDouble),
+      "Sparse multiplication with complex128 dtype inputs is not supported with current CUDA version. Please upgrade to CUDA Toolkit 11.2.1+");
+#endif
 
   Tensor mat1_indices_ = mat1._indices().contiguous();
   Tensor mat1_values = mat1._values().contiguous();
@@ -775,9 +790,15 @@ Tensor sparse_sparse_matmul_cuda(const Tensor& mat1_, const Tensor& mat2_) {
   auto output = at::native::empty_like(mat1_);
   output.sparse_resize_and_clear_({mat1_.size(0), mat2_.size(1)}, mat1_.sparse_dim(), 0);
 
+#if IS_CUSPARSE11_AVAILABLE()
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, mat1_.scalar_type(), "sparse_matmul", [&] {
+    sparse_sparse_matmul_cuda_kernel<scalar_t>(output, mat1_.coalesce(), mat2_.coalesce());
+  });
+#else
   AT_DISPATCH_FLOATING_TYPES(mat1_.scalar_type(), "sparse_matmul", [&] {
     sparse_sparse_matmul_cuda_kernel<scalar_t>(output, mat1_.coalesce(), mat2_.coalesce());
   });
+#endif
   return output;
 }
 

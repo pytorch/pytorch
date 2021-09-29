@@ -6,7 +6,6 @@
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
-#include <THC/THCNumerics.cuh>
 #include <c10/macros/Macros.h>
 
 namespace at {
@@ -66,7 +65,7 @@ __global__ void avg_pool2d_out_cuda_frame(const int nthreads,
         divide_factor = (hend - hstart) * (wend - wstart);
       }
     }
-    top_data[index] = ScalarConvert<accscalar_t, scalar_t>::to(aveval / divide_factor);
+    top_data[index] = static_cast<scalar_t>(aveval / divide_factor);
   }
 }
 
@@ -115,7 +114,7 @@ __global__ void avg_pool2d_out_cuda_frame_nhwc(const int nthreads,
         divide_factor = (hend - hstart) * (wend - wstart);
       }
     }
-    top_data[index] = ScalarConvert<accscalar_t, scalar_t>::to(aveval / divide_factor);
+    top_data[index] = static_cast<scalar_t>(aveval / divide_factor);
   }
 }
 
@@ -171,7 +170,7 @@ __global__ void avg_pool2d_backward_out_cuda_frame(const int nthreads, const sca
         gradient += top_diff_slice[ph * pooled_width + pw] / divide_factor;
       }
     }
-    bottom_diff[index] = ScalarConvert<accscalar_t, scalar_t>::to(gradient);
+    bottom_diff[index] = static_cast<scalar_t>(gradient);
   }
 }
 
@@ -226,7 +225,7 @@ __global__ void avg_pool2d_backward_out_cuda_frame_nhwc(const int nthreads,
         gradient += top_diff_slice[(ph * pooled_width + pw) * channels] / divide_factor;
       }
     }
-    bottom_diff[index] = ScalarConvert<accscalar_t, scalar_t>::to(gradient);
+    bottom_diff[index] = static_cast<scalar_t>(gradient);
   }
 }
 

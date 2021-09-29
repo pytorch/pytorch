@@ -18,7 +18,6 @@
 #include <ATen/native/TensorIterator.h>
 
 #include <THC/THCGeneral.h>
-#include <THC/THCApply.cuh>
 #include <THC/THCDeviceUtils.cuh>
 
 #include <cstdint>

@@ -1,13 +1,11 @@
 #include <ATen/ATen.h>
+#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <c10/util/Exception.h>
-#include <THC/THCAtomics.cuh>
-#include <THC/THCGeneral.h>
-#include <THC/THCNumerics.cuh>
 #include <ATen/native/cuda/LaunchUtils.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 
@@ -79,7 +77,7 @@ namespace {
         // Compute the average pooling over corresponding input pixels
         T *ptr_input = input + istartH*istrideH + istartW*istrideW;
         T *ptr_output = output + oh*osizeW + ow;
-        T sum = ScalarConvert<int, T>::to(0);
+        T sum = static_cast<T>(0);
         int ih, iw;
         for(ih = 0; ih < kH; ++ih) {
           for(iw = 0; iw < kW; ++iw) {
