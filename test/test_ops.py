@@ -665,15 +665,12 @@ class TestGradients(TestCase):
 
         self._forward_grad_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
 
-    # Tests that functions that do not support autograd do not fail unexpectedly
-    @_gradcheck_ops(op_db)
+    # Functions that do not support autograd should not fail in forward mode
+    # Inplace functions (such as "resize_") are expected to fail in forward mode and should be skipped
+    # Test only when supports_autograd=False and for double dtype
+    @ops(filter(lambda op: not op.supports_autograd, op_db), dtypes=OpDTypes.supported, allowed_dtypes=(torch.double,))
     def test_nondifferentiable(self, device, dtype, op):
-        # Test only when supports_autograd=True and dtype is float64
-        if op.supports_autograd or dtype.is_complex:
-            self.skipTest("Skipped! Autograd is supported or complex dtype.")
-        if "resize" in op.name:
-            self.skipTest("Skipped! Cannot resize variables that require grad.")
-
+        # Expecting no errors
         samples = op.sample_inputs(device, dtype, requires_grad=True)
         sample = samples[0]
         result = op(sample.input, *sample.args, **sample.kwargs)
