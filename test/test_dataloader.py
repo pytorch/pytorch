@@ -1547,6 +1547,26 @@ except RuntimeError as e:
                     ls[i].append(next(its[i]))
             self.assertEqual(ls[0], ls[1])
 
+    def test_serialize_sampler(self):
+        from torch.utils.data import RandomSampler
+        sampler = RandomSampler(self.dataset, num_samples=5, replacement=True)
+        it1 = iter(sampler)
+        torch.manual_seed(0)
+        _ = next(it1)
+
+        torch.manual_seed(0)
+        seed = torch.empty((), dtype=torch.int64).random_()
+        self.assertEqual(list(sampler._iterators.values())[0].initial_seed(), seed)
+
+        it2 = iter(sampler)
+        torch.manual_seed(1)
+        _ = next(it2)
+
+        torch.manual_seed(1)
+        seed = torch.empty((), dtype=torch.int64).random_()
+        _ = list(it1)
+        self.assertEqual(list(sampler._iterators.values())[0].initial_seed(), seed)
+
     def _test_sampler(self, **kwargs):
         indices = range(2, 12)  # using a regular iterable
         dl = self._get_data_loader(self.dataset, sampler=indices, batch_size=2, **kwargs)
