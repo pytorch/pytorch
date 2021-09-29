@@ -6,7 +6,6 @@ from sys import maxsize
 import torch
 import torch.onnx.symbolic_helper as sym_help
 import warnings
-import numpy
 
 from torch.onnx.symbolic_helper import parse_args, _unimplemented, _is_tensor_list
 from torch.onnx.symbolic_opset9 import expand, unused, mul
@@ -432,18 +431,23 @@ def unbind(g, self, dim=0, _outputs=None):
 
 # Generate paddings in ONNX order based on pad in pytorch.
 # Args:
-#     dim: the dimension of the tensor.
+#     input: the input tensor.
 #     pad: the paddings in pytorch.
 #          The order is dim_n_begin, dim_n_end, dim_n-1_begin, dim_n-1_end, ..., dim_m_begin, dim_m_end,
 #          where m is in range [0, n].
-def _prepare_onnx_paddings(g, dim, pad):
+def _prepare_onnx_paddings(g, input, pad):
     # The desired order of paddings is
     # dim_0_begin, dim_1_begin, ... , dim_0_end, ..., dim_n_end.
     # n is the dimension of input.
     # Assume zero-dimensions in the beginning, pad the "pad" sequence with zeros in the beginning
     pad_len = torch.onnx.symbolic_opset9.size(g, pad, g.op("Constant", value_t=torch.tensor([0])))
     # Set extension = [0] * (dim * 2 - len(pad))
-    extension = g.op("Sub", g.op("Mul", g.op("Constant", value_t=torch.tensor(dim, dtype=torch.int64)),
+    rank = sym_help._get_tensor_rank(input)
+    if rank is None:
+        rank = g.op("Size", g.op("Shape", input))
+    else:
+        rank = g.op("Constant", value_t=torch.tensor(rank, dtype=torch.int64))
+    extension = g.op("Sub", g.op("Mul", rank,
                      g.op("Constant", value_t=torch.tensor(2, dtype=torch.int64))), pad_len)
     # Concat pad with extension: paddings = [dim_n_begin, dim_n_end, dim_n-1_begin, dim_n-1_end, 0, 0, ... ]
     # Currently ONNX only supports int64 type for Pad
@@ -464,19 +468,19 @@ def constant_pad_nd(g, input, padding, value=None):
     mode = "constant"
     value = sym_help._maybe_get_scalar(value)
     value = sym_help._if_scalar_type_as(g, value, input)
-    pad = _prepare_onnx_paddings(g, sym_help._get_tensor_rank(input), padding)
+    pad = _prepare_onnx_paddings(g, input, padding)
     return g.op("Pad", input, pad, value, mode_s=mode)
 
 
 def reflection_pad(g, input, padding):
     mode = "reflect"
-    paddings = _prepare_onnx_paddings(g, sym_help._get_tensor_rank(input), padding)
+    paddings = _prepare_onnx_paddings(g, input, padding)
     return g.op("Pad", input, paddings, mode_s=mode)
 
 
 def replication_pad(g, input, padding):
     mode = "edge"
-    paddings = _prepare_onnx_paddings(g, sym_help._get_tensor_rank(input), padding)
+    paddings = _prepare_onnx_paddings(g, input, padding)
     return g.op("Pad", input, paddings, mode_s=mode)
 
 
@@ -689,8 +693,8 @@ def _get_im2col_indices_along_dim(g, input_d, kernel_size_d, dilation_d, padding
                             blocks_d, g.op("Constant", value_t=torch.tensor(stride_d)))
 
     # Apply dilation on kernel and find its indices along dim d
-    kernel_grid = numpy.arange(0, kernel_size_d * dilation_d, dilation_d)
-    kernel_grid = g.op("Constant", value_t=torch.tensor([kernel_grid]))
+    kernel_grid = torch.arange(0, kernel_size_d * dilation_d, dilation_d)
+    kernel_grid = g.op("Constant", value_t=kernel_grid.unsqueeze(0))
 
     # Broadcast and add kernel staring positions (indices) with
     # kernel_grid along dim d, to get block indices along dim d

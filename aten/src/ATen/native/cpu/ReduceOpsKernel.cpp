@@ -163,24 +163,29 @@ static void std_var_kernel_impl(TensorIterator& iter, int64_t correction, bool t
 }
 
 static void prod_kernel_impl(TensorIterator& iter) {
-  // Workaround for the error: '*' in boolean context, suggest '&&' instead [-Werror=int-in-bool-context]
+  // Workaround for the error: '*' in boolean context, suggest '&&' instead
+  // [-Werror=int-in-bool-context]
   if (iter.dtype() == ScalarType::Bool) {
     using scalar_t = bool;
     binary_kernel_reduce_vec(
-      iter,
-      [=](scalar_t a, scalar_t b) -> scalar_t { return a && b; },
-      [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) { return a && b; },
-      // NOLINTNEXTLINE(bugprone-argument-comment)
-      /*identity=*/1);
+        iter,
+        [=](scalar_t a, scalar_t b)
+            __ubsan_ignore_undefined__ -> scalar_t { return a && b; },
+        [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b)
+            __ubsan_ignore_undefined__ { return a && b; },
+        // NOLINTNEXTLINE(bugprone-argument-comment)
+        /*identity=*/1);
   } else {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "prod_cpu", [&] {
       binary_kernel_reduce_vec(
-        iter,
-        [=](scalar_t a, scalar_t b) -> scalar_t { return a * b; },
-        [=](Vectorized <scalar_t> a, Vectorized <scalar_t> b) { return a * b; },
-        // NOLINTNEXTLINE(bugprone-argument-comment)
-        /*identity=*/1);
-      });
+          iter,
+          [=](scalar_t a, scalar_t b)
+              __ubsan_ignore_undefined__ -> scalar_t { return a * b; },
+          [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b)
+              __ubsan_ignore_undefined__ { return a * b; },
+          // NOLINTNEXTLINE(bugprone-argument-comment)
+          /*identity=*/1);
+    });
   }
 }
 
