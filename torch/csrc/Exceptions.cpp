@@ -243,6 +243,4 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
   }
 }
 
-
-
 } // namespace torch
