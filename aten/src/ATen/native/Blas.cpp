@@ -17,10 +17,6 @@ TORCH_META_FUNC(addmv)(const Tensor &self, const Tensor &mat, const Tensor &vec,
      "size mismatch, got ", self.size(0), ", ", mat.size(0), "x", mat.size(1), ",", vec.size(0));
   auto names = at::namedinference::propagate_names_for_addmv(mat, vec, self);
   set_output(0, IntArrayRef(mat.sizes().data(), 1), {}, mat.options(), names);
-  auto result = maybe_get_output(0);
-  //this check can fire for inplace op only, for all other versions result is guaranteed to be correct size
-  TORCH_CHECK(result.dim() == 1 && result.sizes()[0] == mat.sizes()[0], "output of addmv operation should be 1D with ",
-  "size equal to mat.size(0), yet got output size ", result.sizes(), " and mat.size(0) ", mat.size(0));
 }
 }
 
