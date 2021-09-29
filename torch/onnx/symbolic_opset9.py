@@ -828,10 +828,10 @@ def softmax(g, input, dim, dtype=None):
         softmax = g.op("Cast", softmax, to_i=sym_help.scalar_type_to_onnx[parsed_dtype])
     return softmax
 
-@parse_args("v", "t", "v")
 def softplus(g, self, beta, threshold):
-    if beta != 1:
-        return _unimplemented("beta", "has to be 1")
+    beta_const = sym_help._maybe_get_const(beta, "f")
+    if beta_const != 1:
+        return g.op("Div", g.op("Softplus", g.op("Mul", self, beta)), beta)
     return g.op("Softplus", self)
 
 
