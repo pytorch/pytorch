@@ -39,7 +39,7 @@ class ProcessGroupNCCLJitTest(JitTestCase):
 
     def _create_nccl_pg(self, name_prefix):
         tcp_store = create_tcp_store(jit_class=True)
-        opts = torch.classes.dist_c10d.ProcessGroupNCCLOptions(0, True)
+        opts = torch.classes.dist_c10d.ProcessGroupNCCLOptions(10000, True)
 
         name = unique_process_group_name(name_prefix)
 
