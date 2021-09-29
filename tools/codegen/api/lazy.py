@@ -5,7 +5,7 @@ from tools.codegen.model import (Type, BaseTy, BaseType, OptionalType,
 from tools.codegen.api.types import (BaseCppType, BaseCType, OptionalCType,
                                      ConstRefCType, NamedCType,
                                      MutRefCType,
-                                     VectorCType, intT, ListCType,
+                                     VectorCType, boolT, intT, ListCType,
                                      scalarT, scalarTypeT, ArrayRefCType, ArrayCType, TupleCType)
 
 valueT = BaseCppType('ir', 'Value')
@@ -34,6 +34,10 @@ def process_ir_type(typ: Type) -> Union[BaseCType, VectorCType, OptionalCType, L
             return BaseCType(valueT)
         elif typ.name == BaseTy.Scalar:
             return BaseCType(scalarT)
+        elif typ.name == BaseTy.int:
+            return BaseCType(intT)
+        elif typ.name == BaseTy.bool:
+            return BaseCType(boolT)
         else:
             raise AssertionError(f"TODO add support for type {repr(typ)}")
     elif isinstance(typ, OptionalType):
@@ -118,7 +122,8 @@ class LazyIrSchema:
 
     @property
     def node_name(self) -> str:
-        return str(self.name).lower().capitalize()
+        op_name = str(self.name).lower()
+        return ''.join(word.capitalize() or '' for word in op_name.split('_'))
 
     @property
     def aten_name(self) -> str:

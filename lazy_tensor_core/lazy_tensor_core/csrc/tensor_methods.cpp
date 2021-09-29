@@ -57,7 +57,6 @@
 #include "lazy_tensor_core/csrc/ops/leaky_relu_backward.h"
 #include "lazy_tensor_core/csrc/ops/linear_interpolation.h"
 #include "lazy_tensor_core/csrc/ops/log_base.h"
-#include "lazy_tensor_core/csrc/ops/log_softmax.h"
 #include "lazy_tensor_core/csrc/ops/logsumexp.h"
 #include "lazy_tensor_core/csrc/ops/masked_fill.h"
 #include "lazy_tensor_core/csrc/ops/masked_scatter.h"
@@ -1545,20 +1544,6 @@ LazyTensor LazyTensor::log_sigmoid_backward(const LazyTensor& grad_output,
                                             const LazyTensor& buffer) {
   return grad_output.CreateFrom(ir::ops::LogSigmoidBackward(
       grad_output.GetIrValue(), input.GetIrValue(), buffer.GetIrValue()));
-}
-
-LazyTensor LazyTensor::log_softmax(const LazyTensor& input,
-                                   lazy_tensors::int64 dim,
-                                   c10::optional<at::ScalarType> dtype) {
-  if (!dtype) {
-    dtype = input.dtype_optional();
-  }
-  return input.CreateFrom(
-      ir::MakeNode<ir::ops::LogSoftmax>(
-          input.GetIrValue(),
-          Helpers::GetCanonicalDimensionIndex(dim, input.shape().get().rank()),
-          dtype),
-      dtype);
 }
 
 LazyTensor LazyTensor::log_softmax_backward(const LazyTensor& grad_output,
