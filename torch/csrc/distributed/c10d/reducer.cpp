@@ -933,6 +933,16 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
   }
 }
 
+void Reducer::install_futures(c10::List<c10::intrusive_ptr<c10::ivalue::Future>> futs) {
+  // Append instead of overwrite so that this method can be called multiple
+  // times in one iteration.
+  if (!installed_futures_) {
+    installed_futures_ = std::move(futs);
+  } else {
+    installed_futures_->append(futs);
+  }
+}
+
 void Reducer::initialize_buckets(
     std::vector<std::vector<size_t>> bucket_indices,
     std::vector<size_t> per_bucket_sizes) {
@@ -1497,7 +1507,12 @@ void Reducer::finalize_backward() {
     }
   }
 
-  // See Note [Skip allreducing local_used_map_dev]
+  if (installed_futures_ != c10::nullopt) {
+      c10::collectAll(*installed_futures_)->wait();
+      installed_futures_ = c10::nullopt;
+  }
+
+  // See Note [Skip allreducing local_used_maps_dev]
   if (dynamic_graph_find_unused() || static_graph_first_iteration()) {
     // Due to the lazy wait, it is possible that reduction of the current
     // iteration is still going when the one for next iteration gets kicked off.

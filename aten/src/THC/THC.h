@@ -10,6 +10,5 @@
 #include <THC/THCStorageCopy.h>
 
 #include <THC/THCTensor.h>
-#include <THC/THCTensorCopy.h>
 
 #endif
