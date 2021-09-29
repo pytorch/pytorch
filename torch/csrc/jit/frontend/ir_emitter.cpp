@@ -1,5 +1,5 @@
+#include <jit/frontend/tree_views.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
-#include "jit/frontend/tree_views.h"
 
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
@@ -3720,7 +3720,7 @@ struct to_ir {
       // inference now that Union has been introduced.
       std::shared_ptr<SugaredValue> iter_input;
       try {
-        auto iter_input = emitSugaredExpr(apply.inputs()[0], 1, type_hint);
+        iter_input = emitSugaredExpr(apply.inputs()[0], 1, type_hint);
       } catch (const ErrorReport&) {
         iter_input = emitSugaredExpr(apply.inputs()[0], 1);
       }

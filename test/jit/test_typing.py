@@ -103,10 +103,10 @@ class TestTyping(JitTestCase):
             d: Dict[str, int] = {k : v for k, v in zip(l1, l2)}
             return d
 
-        with self.assertRaisesRegex(RuntimeError, "annotated with type "
-                                    r"Dict\[str, int\] but is being "
-                                    "assigned to a value of type "
-                                    r"Dict\[str, Union\[int, str\]\]"):
+        with self.assertRaisesRegex(RuntimeError, "Dict type annotation"
+                                    r" `Dict\[str, int\]` did not match"
+                                    " the type of an actual value type"
+                                    r" `Union\[int, str\]`"):
             torch.jit.script(fn)
 
     def test_dict_invalid_annotations(self):
