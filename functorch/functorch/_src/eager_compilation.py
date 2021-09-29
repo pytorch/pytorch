@@ -110,7 +110,7 @@ def create_compiled_function(flat_fn, fw_compiler, bw_compiler, partition_fn):
                 else:
                     num_outs = 1
 
-                joint_inputs = (flat_args, (out,))
+                joint_inputs = (flat_args, out)
                 with torch.enable_grad():
                     fx_g = make_fx(joint_forward_backward)(*joint_inputs)
                 fw_module, bw_module = partition_fn(fx_g, joint_inputs)
