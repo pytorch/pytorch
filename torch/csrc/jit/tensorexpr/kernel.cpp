@@ -1474,7 +1474,7 @@ Tensor computeReshape(
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType,
     at::Device device) {
-  auto view_dims = c10::get<IntList>(inputs[1]);
+  const auto& view_dims = c10::get<IntList>(inputs[1]);
   return computeReshapeHelper(
       inputs, outputShape, outputType, device, view_dims);
 }
@@ -2954,15 +2954,15 @@ Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
   std::vector<ArgValue> argInputs;
   if (op == prim::ConstantChunk) {
     auto const& n = v->node();
-    argInputs.push_back(toArg(inputs[0]));
-    argInputs.push_back(static_cast<int64_t>(v->offset()));
-    argInputs.push_back(n->i(attr::dim));
-    argInputs.push_back(n->i(attr::chunks));
+    argInputs.emplace_back(toArg(inputs[0]));
+    argInputs.emplace_back(static_cast<int64_t>(v->offset()));
+    argInputs.emplace_back(n->i(attr::dim));
+    argInputs.emplace_back(n->i(attr::chunks));
   } else if (op == aten::to) {
-    argInputs.push_back(toArg(inputs[0]));
+    argInputs.emplace_back(toArg(inputs[0]));
   } else if (op == aten::conv2d) {
     for (auto inp : inputs) {
-      argInputs.push_back(toArg(inp));
+      argInputs.emplace_back(toArg(inp));
     }
     // handle optional bias
     if (c10::get_if<ArgNone>(&argInputs[2])) {
@@ -2980,7 +2980,7 @@ Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
     }
   } else {
     for (auto inp : inputs) {
-      argInputs.push_back(toArg(inp));
+      argInputs.emplace_back(toArg(inp));
     }
   }
 
