@@ -29,6 +29,8 @@ functions = [
     'ELU',
     'Hardshrink',
     'Hardtanh',
+    'Hardsigmoid',
+    'Hardswish',
     'LeakyReLU',  # Perhaps we should add text explaining slight slope?
     'LogSigmoid',
     'PReLU',
@@ -46,7 +48,6 @@ functions = [
     'Softsign',
     'Tanh',
     'Tanhshrink'
-    # 'Threshold'  Omit, pending cleanup. See PR5457
 ]
 
 
