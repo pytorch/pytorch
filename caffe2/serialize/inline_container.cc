@@ -348,7 +348,7 @@ void PyTorchStreamWriter::setup(const string& file_name) {
 }
 
 void PyTorchStreamWriter::setMinVersion(const uint64_t version) {
-  version_ = std::max(version, version_.value());
+  version_ = std::max(version, version_.has_value() ? version_.value() : kProducedFileFormatVersion);
 }
 
 // This function needs be used carefully and usually needs to be used with
