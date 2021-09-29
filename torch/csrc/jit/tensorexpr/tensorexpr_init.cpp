@@ -187,6 +187,16 @@ void initTensorExprBindings(PyObject* module) {
       .def(py::init<const std::vector<ExprHandle>&, Dtype>())
       .def(py::init<Dtype>())
       .def(
+          "__hash__",
+          [](const BufHandle& self) {
+            return std::hash<BufPtr>()(self.node());
+          })
+      .def(
+          "__eq__",
+          [](const BufHandle& self, const BufHandle& other) {
+            return self.node() == other.node();
+          })
+      .def(
           "load",
           [](BufHandle& self, const std::vector<ExprHandle>& v) {
             return Load::make(self, v);
@@ -610,6 +620,7 @@ void initTensorExprBindings(PyObject* module) {
           &LoopNest::reorderAxis,
           py::return_value_policy::reference)
       .def("simplify", &LoopNest::simplify, py::return_value_policy::reference)
+      .def_static("sanitize_names", &LoopNest::sanitizeNames)
       .def(
           "inline_intermediate_bufs",
           [](LoopNest& self, bool allow_duplicated_work) {

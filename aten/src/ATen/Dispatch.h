@@ -1,8 +1,6 @@
 #pragma once
 
 #include <ATen/core/DeprecatedTypeProperties.h>
-#include <ATen/core/Tensor.h>
-#include <ATen/record_function.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Half.h>
@@ -36,11 +34,15 @@ inline constexpr bool should_include_kernel_dtype(
  * binary.
  */
 #if defined ENABLE_RECORD_KERNEL_FUNCTION_DTYPE
-#define RECORD_KERNEL_FUNCTION_DTYPE(NAME, enum_type)                      \
-  {RECORD_FUNCTION_WITH_SCOPE(                                             \
-    at::RecordScope::KERNEL_FUNCTION_DTYPE,                                \
-    std::string(NAME) + "$" + toString(enum_type),                         \
-    {});}
+namespace at {
+namespace detail {
+TORCH_API void record_kernel_function_dtype(std::string name);
+}
+}
+
+#define RECORD_KERNEL_FUNCTION_DTYPE(NAME, enum_type)                   \
+  at::detail::record_kernel_function_dtype(                             \
+    std::string(NAME) + "$" + toString(enum_type));
 #else
 #define RECORD_KERNEL_FUNCTION_DTYPE(NAME, enum_type)
 #endif
@@ -74,11 +76,11 @@ inline constexpr bool should_include_kernel_dtype(
 // Workaround for C10_UNUSED because CUDA 10.1 and below fails to handle unused
 // attribute in the type aliasing context. Keep name long and verbose to avoid
 // macro collisions.
-#if defined(__CUDACC__) && CUDA_VERSION <= 10100
+#if defined(__CUDACC__) && defined(CUDA_VERSION) && CUDA_VERSION <= 10100
 #define C10_UNUSED_DISPATCH_CUDA_WORKAROUND
 #else
 #define C10_UNUSED_DISPATCH_CUDA_WORKAROUND C10_UNUSED
-#endif // defined(__CUDACC__) && CUDA_VERSION <= 10100
+#endif // defined(__CUDACC__) && defined(CUDA_VERSION) && CUDA_VERSION <= 10100
 
 #if defined __cpp_if_constexpr
 #define AT_QINT_PRIVATE_CASE_TYPE(                                           \
