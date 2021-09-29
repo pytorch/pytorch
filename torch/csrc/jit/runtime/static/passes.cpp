@@ -517,6 +517,9 @@ void ReplaceWithCopy(
 // NB: The alias type of the fused op needs to be changed to
 // c10::AliasAnalysisKind::PURE_FUNCTION to make alias analysis work.
 void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
+  AliasDb alias_db(graph);
+  const std::vector<Value*> graph_outputs(
+      graph->outputs().begin(), graph->outputs().end());
   auto nodes = graph->nodes();
   std::vector<Node*> equally_splits_to_remove;
   for (auto it = nodes.begin(); it != nodes.end(); ++it) {
@@ -540,6 +543,17 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
         continue;
       }
 
+      if (strcmp(node_qual_string, "fb::equally_split") != 0) {
+        // If any output of the ListUnpack node is unmanaged, disable fusion
+        // since the fused op assumes all outputs are either managed or not.
+        // "fb::equally_split" is excluded here since it does doublecheck
+        // individual outputs without having this assumption.
+        const std::vector<Value*> list_unpack_outputs_vec(
+            list_unpack_outputs.begin(), list_unpack_outputs.end());
+        if (alias_db.mayContainAlias(list_unpack_outputs_vec, graph_outputs)) {
+          continue;
+        }
+      }
       // handle outputs
       for (Value* out : list_unpack_outputs) {
         Value* new_out = node->addOutput();
