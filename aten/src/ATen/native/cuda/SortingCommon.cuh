@@ -1,15 +1,13 @@
 #pragma once
 #include <ATen/ATen.h>
+#include <ATen/ceil_div.h>
 #include <ATen/native/SortingUtils.h>
 #include <assert.h>
 #include <c10/macros/Macros.h>
 #include <stdlib.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
-#include <THC/THCDeviceUtils.cuh> // only for THCRoundUp?
 #include <THC/THCNumerics.cuh>
-#include <THC/THCScanUtils.cuh>
-#include <THC/THCTensorMathReduce.cuh> // AddOp
 
 namespace at {
 namespace native {
@@ -35,11 +33,11 @@ static bool getGridFromTiles(int64_t gridTiles, dim3& grid) {
   int64_t gridZ = 1;
 
   if (gridTiles > MAX_GRID_SIZE) {
-    gridTiles = cuda::ATenCeilDiv(gridTiles, MAX_GRID_SIZE);
+    gridTiles = ceil_div(gridTiles, MAX_GRID_SIZE);
     gridY = gridTiles > MAX_GRID_SIZE ? MAX_GRID_SIZE : gridTiles;
 
     if (gridTiles > MAX_GRID_SIZE) {
-      gridTiles = cuda::ATenCeilDiv(gridTiles, MAX_GRID_SIZE);
+      gridTiles = ceil_div(gridTiles, MAX_GRID_SIZE);
       gridZ = gridTiles > MAX_GRID_SIZE ? MAX_GRID_SIZE : gridTiles;
     }
   }
