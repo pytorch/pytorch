@@ -23,6 +23,24 @@
 namespace torch {
 namespace jit {
 
+bool mergeTypes(
+    ArrayRef<Value*> lhs,
+    ArrayRef<Value*> rhs,
+    ArrayRef<Value*> outputs) {
+  AT_ASSERT(lhs.size() == rhs.size() && rhs.size() == outputs.size());
+  bool changed = false;
+  for (const auto i : c10::irange(lhs.size())) {
+    auto old_output_type = outputs[i]->type();
+    auto new_type =
+        unifyTypes(lhs[i]->type(), rhs[i]->type(), /*default_to_any=*/true);
+    AT_ASSERT(new_type);
+    outputs[i]->setType(*new_type);
+    if (*old_output_type != *outputs[i]->type())
+      changed = true;
+  }
+  return changed;
+}
+
 namespace prim {
 using namespace ::c10::prim;
 }
@@ -276,10 +294,10 @@ class ShapePropagator {
       ArrayRef<Value*> outputs) {
     AT_ASSERT(lhs.size() == rhs.size() && rhs.size() == outputs.size());
     bool changed = false;
-    for (const auto i : c10::irange(lhs.size())) {
+    for (size_t i = 0; i < lhs.size(); ++i) {
       auto old_output_type = outputs[i]->type();
       auto new_type =
-          unifyTypes(lhs[i]->type(), rhs[i]->type(), /*default_to_any=*/true);
+          unifyTypes(lhs[i]->type(), rhs[i]->type(), /*default_to_union=*/true);
       AT_ASSERT(new_type);
       outputs[i]->setType(*new_type);
       if (*old_output_type != *outputs[i]->type())
@@ -410,7 +428,7 @@ class ShapePropagator {
     // is to uncover any mistakes we could make when editing this code,
     // and eventually it shouldn't matter, because this phase should be
     // preceded by schema checking.
-    op(&stack);
+    op(stack);
 
     AT_ASSERT(stack.size() == node->outputs().size());
     for (const auto i : c10::irange(stack.size())) {

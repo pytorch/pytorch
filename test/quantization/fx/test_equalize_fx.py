@@ -217,10 +217,10 @@ class TestEqualizeFx(QuantizationTestCase):
             ref_zero_points = -128 if weight_qdtype is torch.qint8 else 0
             ref_zero_points = ref_zero_points - np.round(ref_min_weights_scaled / ref_scales)
 
-        self.assertTrue(torch.allclose(weight_qparams[0], torch.tensor(
-            ref_scales, dtype=weight_qparams[0].dtype), atol=0.0001))
-        self.assertTrue(torch.allclose(weight_qparams[1], torch.tensor(
-            ref_zero_points, dtype=weight_qparams[1].dtype), atol=1))
+        self.assertEqual(weight_qparams[0], torch.tensor(
+            ref_scales, dtype=weight_qparams[0].dtype), rtol=1e-5, atol=0.0001)
+        self.assertEqual(weight_qparams[1], torch.tensor(
+            ref_zero_points, dtype=weight_qparams[1].dtype), rtol=1e-5, atol=1)
 
     def test_input_weight_equalization_prepare(self):
         """ Tests that graphs created after prepare_fx is as expected
@@ -523,7 +523,7 @@ class TestEqualizeFx(QuantizationTestCase):
             inp_counter = 0
             weight_counter = 0
             for node in convert_ref.graph.nodes:
-                if "weight" not in node.name and node.op == 'call_module' and \
+                if "w_activation_post" not in node.name and node.op == 'call_module' and \
                    isinstance(modules[str(node.target)], MinMaxObserver):
                     # Check min/max values of input activation layers
                     exp_min_val, exp_max_val = exp_inp_act_vals[inp_counter]
@@ -533,7 +533,7 @@ class TestEqualizeFx(QuantizationTestCase):
 
                 elif node.op == 'call_module' and isinstance(modules[str(node.target)], MinMaxObserver):
                     # Check min/max values of weight activation layers
-                    assert("weight" in node.name)
+                    assert("w_activation_post" in node.name)
                     exp_min_val, exp_max_val = exp_weight_act_vals[weight_counter]
                     self.assertEqual(modules[str(node.target)].min_val, exp_min_val)
                     self.assertEqual(modules[str(node.target)].max_val, exp_max_val)
@@ -783,7 +783,7 @@ class TestEqualizeFx(QuantizationTestCase):
             prepared(x)
             equalized_and_quantized = convert_fx(prepared)  # Check if compile
             equalized_and_quantized_output = equalized_and_quantized(x)
-            self.assertTrue(torch.allclose(quantized_output, equalized_and_quantized_output, atol=0.1))
+            self.assertEqual(quantized_output, equalized_and_quantized_output, rtol=1e-5, atol=0.1)
 
     @skipIfNoFBGEMM
     def test_selective_equalization(self):

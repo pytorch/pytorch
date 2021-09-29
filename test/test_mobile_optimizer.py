@@ -119,7 +119,7 @@ class TestOptimizer(TestCase):
                    .check_not("aten::relu(") \
                    .check_count("aten::_add_relu(", 1, exactly=True) \
                    .run(optimized_scripted_model.graph)
-        torch.testing.assert_allclose(initial_result, optimized_result, rtol=1e-2, atol=1e-3)
+        torch.testing.assert_close(initial_result, optimized_result, rtol=1e-2, atol=1e-3)
 
         FileCheck().check_not("Tensor = aten::conv2d") \
                    .check_not("Tensor = prim::CallFunction") \
@@ -131,7 +131,7 @@ class TestOptimizer(TestCase):
                    .check_not("aten::relu(") \
                    .check_count("aten::_add_relu(", 1, exactly=True) \
                    .run(optimized_scripted_model.foo.graph)
-        torch.testing.assert_allclose(initial_foo_result, optimized_foo_result, rtol=1e-2, atol=1e-3)
+        torch.testing.assert_close(initial_foo_result, optimized_foo_result, rtol=1e-2, atol=1e-3)
 
 
         optimization_blocklist_no_prepack = {MobileOptimizerType.INSERT_FOLD_PREPACK_OPS}
@@ -142,7 +142,7 @@ class TestOptimizer(TestCase):
                    .check_not("prepacked::linear_clamp_run") \
                    .check_not("prepacked::conv2d_clamp_run") \
                    .run(optimized_scripted_model_no_prepack.graph)
-        torch.testing.assert_allclose(initial_result, optimized_result_no_prepack, rtol=1e-2, atol=1e-3)
+        torch.testing.assert_close(initial_result, optimized_result_no_prepack, rtol=1e-2, atol=1e-3)
 
 
         bn_test_module = BNTestModule()
@@ -157,14 +157,14 @@ class TestOptimizer(TestCase):
         bn_fold_scripted_module = optimize_for_mobile(bn_scripted_module, optimization_blocklist_no_prepack)
         self.assertEqual(len(torch.jit.export_opnames(bn_fold_scripted_module)), 1)
         bn_input = torch.rand(1, 1, 6, 6)
-        torch.testing.assert_allclose(bn_scripted_module(bn_input), bn_fold_scripted_module(bn_input), rtol=1e-2, atol=1e-3)
+        torch.testing.assert_close(bn_scripted_module(bn_input), bn_fold_scripted_module(bn_input), rtol=1e-2, atol=1e-3)
 
         optimization_blocklist_no_fold_bn = {MobileOptimizerType.CONV_BN_FUSION}
         no_bn_fold_scripted_module = optimize_for_mobile(bn_scripted_module, optimization_blocklist_no_fold_bn)
         FileCheck().check_count("aten::batch_norm", 1, exactly=True) \
                    .run(str(get_forward_graph(no_bn_fold_scripted_module._c)))
         bn_input = torch.rand(1, 1, 6, 6)
-        torch.testing.assert_allclose(bn_scripted_module(bn_input), no_bn_fold_scripted_module(bn_input), rtol=1e-2, atol=1e-3)
+        torch.testing.assert_close(bn_scripted_module(bn_input), no_bn_fold_scripted_module(bn_input), rtol=1e-2, atol=1e-3)
 
         class MyMobileOptimizedTagTest(torch.nn.Module):
             def __init__(self):
@@ -231,7 +231,7 @@ class TestOptimizer(TestCase):
         FileCheck().check_not("dropout.__") \
             .check_count("aten::_add_relu(", 1, exactly=True) \
             .run(optimized_scripted_model.foo.graph)
-        torch.testing.assert_allclose(initial_result, optimized_result, rtol=1e-2, atol=1e-3)
+        torch.testing.assert_close(initial_result, optimized_result, rtol=1e-2, atol=1e-3)
 
         class BNTestNoForwardModule(torch.nn.Module):
             def __init__(self):
@@ -257,7 +257,7 @@ class TestOptimizer(TestCase):
         bn_fold_no_forward_scripted_module = optimize_for_mobile(bn_no_forward_scripted_module, preserved_methods=['foo'])
         self.assertEqual(len(torch.jit.export_opnames(bn_fold_no_forward_scripted_module)), 1)
         bn_input = torch.rand(1, 1, 6, 6)
-        torch.testing.assert_allclose(
+        torch.testing.assert_close(
             bn_no_forward_scripted_module.foo(bn_input),
             bn_fold_no_forward_scripted_module.foo(bn_input),
             rtol=1e-2,
@@ -493,7 +493,7 @@ class TestOptimizer(TestCase):
             data = torch.randn(4, 1, 4, 4)
             m_res = m(data)
             m_optim_res = m_optim(data)
-            torch.testing.assert_allclose(m_res, m_optim_res, rtol=1e-2, atol=1e-3)
+            torch.testing.assert_close(m_res, m_optim_res, rtol=1e-2, atol=1e-3)
 
             # generic case
 
@@ -507,7 +507,7 @@ class TestOptimizer(TestCase):
             data = torch.randn(4, 1, 4, 4)
             m_res = m(data)
             m_optim_res = m_optim(data)
-            torch.testing.assert_allclose(m_res, m_optim_res, rtol=1e-2, atol=1e-3)
+            torch.testing.assert_close(m_res, m_optim_res, rtol=1e-2, atol=1e-3)
 
     @unittest.skipUnless(HAS_TORCHVISION, "Needs torchvision")
     def test_mobilenet_optimize_for_mobile(self):

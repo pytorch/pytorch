@@ -2,7 +2,7 @@ import torch
 from torch.testing._internal.jit_utils import JitTestCase, RUN_CUDA, _inline_everything
 from torch import nn
 from torch.testing import FileCheck
-from typing import List
+from typing import Callable, List
 
 import unittest
 
@@ -218,6 +218,19 @@ class TestPeephole(JitTestCase):
             self.run_pass("inline", conv_dim.graph)
             self.run_pass("peephole", conv_dim.graph)
             FileCheck().check("conv").check("dim").run(conv_dim.graph)
+
+    def test_normalized_rsub(self):
+        a = torch.tensor([1, 2, 3])
+        b = torch.tensor([4, 5, 6])
+
+        def convertible_rsub(x, y):
+            return (x - y), torch.rsub(y, x)
+
+        self.checkScript(convertible_rsub, (a, b))
+        op_graph = torch.jit.script(convertible_rsub).graph
+        FileCheck().check_count("aten::sub", 2, exactly=True).run(op_graph)
+        FileCheck().check_count("aten::rsub", 0, exactly=True).run(op_graph)
+
 
     def test_normalized_is_op(self):
         def convertible_is_op(x: bool, y: bool):
@@ -506,13 +519,17 @@ class TestPeephole(JitTestCase):
         FileCheck().check("aten::add").run(foo.graph)
 
     def test_optimize_out_comparison_same_value(self):
-        @torch.jit.script
         def foo(x: int):
             return x == x, x != x
 
-        self.run_pass("peephole", foo.graph)
-        FileCheck().check_not("aten::eq").check_not("aten::neq").run(foo.graph)
-        self.assertEqual(foo(1), (True, False))
+        def foo2(x: List[int]):
+            return x == x, x != x
+
+        for func, inp in zip([foo, foo2], [1, [2, 3]]):
+            func_s = torch.jit.script(func)
+            self.run_pass("peephole", func_s.graph)
+            FileCheck().check_not("aten::eq").check_not("aten::neq").run(func_s.graph)
+            self.assertEqual(func(inp), func_s(inp))
 
     def test_refine_integer_values(self):
         @torch.jit.script
@@ -555,6 +572,17 @@ class TestPeephole(JitTestCase):
         FileCheck().check("aten::len").run(foo.graph)
         self.assertEqual(3, foo(torch.rand([3, 1])))
 
+    def test_peephole_int(self):
+        @torch.jit.script
+        def foo(x):
+            # type: (number)
+            return int(x)
+
+        FileCheck().check("aten::Int").run(foo.graph)
+        next(foo.graph.inputs()).setType(torch._C.IntType.get())
+        self.run_pass("peephole", foo.graph)
+        FileCheck().check_not("aten::Int").run(foo.graph)
+
     def test_peephole_arith(self):
         @torch.jit.script
         def foo(input0: int, input1: int, input2: int, input3: int):
@@ -568,7 +596,7 @@ class TestPeephole(JitTestCase):
                    .check("aten::mul").check("aten::floordiv") \
                    .check("aten::div").run(foo.graph)
         self.run_pass("peephole", foo.graph)
-        FileCheck().check("graph").check("):").check_next("aten::Int") \
+        FileCheck().check("graph").check("):") \
                    .check_next("ListConstruct").check_next("return").run(foo.graph)
         self.assertEqual(foo(0, 1, 2, 3), [1, 3])
 
@@ -706,3 +734,75 @@ class TestPeephole(JitTestCase):
         self.run_pass("peephole", foo.graph)
         FileCheck().check("DictConstruct").check("len").run(foo.graph)
         self.assertEqual(foo(), 1)
+
+    def test_peephole_slice_all_three_args(self):
+        def foo(x: int):
+            return [1, 2, x, 4, 5, 6, 7][-5:6:2]
+
+        graph = torch.jit.script(foo).graph
+        self.run_pass("peephole", graph)
+        FileCheck().check_not("aten::slice").run(graph)
+        self.checkScript(foo, (3, ))
+
+    def test_peephole_slice_one_empty_arg(self):
+        def check_helper(fn: Callable[[int], None]) -> None:
+            graph = torch.jit.script(fn).graph
+            self.run_pass("peephole", graph)
+            FileCheck().check_not("aten::slice").run(graph)
+            self.checkScript(fn, (3, ))
+
+        def foo(x: int):
+            return [1, 2, x, 4, 5, 6, 7][1::2]
+
+        check_helper(foo)
+
+        def foo(x: int):
+            return [1, 2, x, 4, 5, 6, 7][:5:3]
+
+        check_helper(foo)
+
+        def foo(x: int):
+            return [1, 2, x, 4, 5, 6, 7][0:4]
+
+        check_helper(foo)
+
+    def test_peephole_slice_two_empty_args(self):
+        def check_helper(fn: Callable[[int], None]) -> None:
+            graph = torch.jit.script(fn).graph
+            self.run_pass("peephole", graph)
+            FileCheck().check_not("aten::slice").run(graph)
+            self.checkScript(fn, (3, ))
+
+        def foo(x: int):
+            return [1, 2, x, 4, 5, 6, 7][::2]
+
+        check_helper(foo)
+
+        def foo(x: int):
+            return [1, 2, x, 4, 5, 6, 7][:5]
+
+        check_helper(foo)
+
+        def foo(x: int):
+            return [1, 2, x, 4, 5, 6, 7][1:]
+
+        check_helper(foo)
+
+    def test_peephole_slice_optimization_not_applied_list_modified(self):
+        @torch.jit.script
+        def foo():
+            li = [1, 2, 3, 4, 5, 6, 7]
+            li[0] = 0
+            return li[2:5]
+
+        self.run_pass("peephole", foo.graph)
+        FileCheck().check("aten::slice").run(foo.graph)
+
+    def test_peephole_slice_optimization_not_applied_non_const_args(self):
+        @torch.jit.script
+        def foo(x: int, y: int):
+            li = [1, 2, 3, 4, 5, 6, 7]
+            return li[x:y]
+
+        self.run_pass("peephole", foo.graph)
+        FileCheck().check("aten::slice").run(foo.graph)

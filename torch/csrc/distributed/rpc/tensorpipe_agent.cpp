@@ -16,12 +16,6 @@
 #include <c10/core/StreamGuard.h>
 #include <c10/util/irange.h>
 
-#if TENSORPIPE_HAS_SHM_TRANSPORT
-// Needed for ::getpid(), which is used to create a unique address.
-#include <sys/types.h>
-#include <unistd.h>
-#endif
-
 namespace torch {
 namespace distributed {
 namespace rpc {
@@ -209,22 +203,10 @@ C10_REGISTER_CREATOR(TensorPipeTransportRegistry, uv, makeUvTransport);
 
 #if TENSORPIPE_HAS_SHM_TRANSPORT
 
-std::string createUniqueShmAddr() {
-  thread_local uint32_t threadLocalId = 0;
-  return c10::str(
-      "shm://tensorpipe_rpc_agent_",
-      std::this_thread::get_id(),
-      "_",
-      ::getpid(),
-      "_",
-      threadLocalId++);
-}
-
 std::unique_ptr<TransportRegistration> makeShmTransport() {
   auto context = tensorpipe::transport::shm::create();
-  std::string address = createUniqueShmAddr();
-  return std::make_unique<TransportRegistration>(TransportRegistration{
-      std::move(context), kShmTransportPriority, std::move(address)});
+  return std::make_unique<TransportRegistration>(
+      TransportRegistration{std::move(context), kShmTransportPriority, ""});
 }
 
 // The SHM implements connections using ringbuffers residing in anonymous shared
