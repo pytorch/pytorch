@@ -219,6 +219,14 @@ std::unordered_map<Value*, Value*> BlockToONNX(
   return {};
 }
 
+bool ConstantFoldCondition(torch::jit::Value* output) {
+  auto fold_condition = output->node()->kind() != c10::onnx::Constant &&
+      ConstantValueMap::HasValue(output->debugName());
+  auto reliable_value =
+      ConstantValueMap::GetTypeReliable(output->debugName()).value_or(false);
+  return fold_condition && reliable_value;
+}
+
 void NodeToONNX(
     Node* old_node,
     Block* new_block,
@@ -267,8 +275,7 @@ void NodeToONNX(
         //
         // If onnx shape inference is turned on, the new outputs will have
         // types inferred, and they will be merged with the old types.
-        if (outputs[i]->node()->kind() != c10::onnx::Constant &&
-            ConstantValueMap::HasValue(outputs[i]->debugName())) {
+        if (ConstantFoldCondition(outputs[i])) {
           // Create a const node if the node output value is in
           // ConstantValueMap.
           auto value =
@@ -286,8 +293,10 @@ void NodeToONNX(
           ONNXShapeTypeInference(const_node, empty_params_dict, opset_version);
           env[old] = const_node->output();
         } else {
-          outputs[i]->setType(
-              MergeInferredType(old->type(), outputs[i]->type()));
+          // ConstantValueMap has been set in shape inference,
+          // set_constant_value_map = false here to avoid redundancy.
+          MergeInferredTypeAndSetMap(
+              outputs[i], old->type(), outputs[i]->type(), false);
 
           // Copy over source location and scope information to all nodes
           // created by the symbolic

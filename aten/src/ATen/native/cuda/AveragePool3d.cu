@@ -1,13 +1,12 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/native/Pool.h>
+#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/cuda/KernelUtils.cuh>
-#include <THC/THCAtomics.cuh>
-#include <THC/THCNumerics.cuh>
 #include <c10/macros/Macros.h>
 
 
@@ -85,7 +84,7 @@ __global__ void avg_pool3d_cuda_update_output(
       }
     }
 
-    output[slice][oFrame][oRow][oCol] = ScalarConvert<accscalar_t, scalar_t>::to(sum / divide_factor);
+    output[slice][oFrame][oRow][oCol] = static_cast<scalar_t>(sum / divide_factor);
   }
 }
 
@@ -154,7 +153,7 @@ __global__ void avg_pool3d_cuda_update_output(
       }
     }
 
-    output[slice][oFrame][oRow][oCol] = ScalarConvert<accscalar_t, scalar_t>::to(sum / divide_factor);
+    output[slice][oFrame][oRow][oCol] = static_cast<scalar_t>(sum / divide_factor);
   }
 }
 
@@ -199,7 +198,7 @@ __global__ void avg_pool3d_single_backward_out_frame_stride1(
       }
       frameOffset += gradOutput.size(2) * gradOutput.size(3);
     }
-    gradInput[slice][iFrame][iRow][iCol] = ScalarConvert<accscalar_t, scalar_t>::to(sum * normFactor);
+    gradInput[slice][iFrame][iRow][iCol] = static_cast<scalar_t>(sum * normFactor);
   }
 }
 
@@ -246,8 +245,8 @@ __global__ void avg_pool3d_cuda_update_grad_input_atomic(
       }
     }
 
-    scalar_t val = ScalarConvert<accscalar_t, scalar_t>::to(
-      ScalarConvert<scalar_t, accscalar_t>::to(gradOutput[slice][oFrame][oRow][oCol]) / divide_factor);
+    scalar_t val = static_cast<scalar_t>(
+      static_cast<accscalar_t>(gradOutput[slice][oFrame][oRow][oCol]) / divide_factor);
     for (int iFrame = tstart; iFrame < tend; ++iFrame)
     {
       for (int iRow = hstart; iRow < hend; ++iRow)
@@ -304,8 +303,8 @@ __global__ void avg_pool3d_cuda_update_grad_input(
       }
     }
 
-    scalar_t val = ScalarConvert<accscalar_t, scalar_t>::to(
-      ScalarConvert<scalar_t, accscalar_t>::to(gradOutput[slice][oFrame][oRow][oCol]) / divide_factor);
+    scalar_t val = static_cast<scalar_t>(
+      static_cast<accscalar_t>(gradOutput[slice][oFrame][oRow][oCol]) / divide_factor);
     for (int iFrame = tstart; iFrame < tend; ++iFrame)
     {
       for (int iRow = hstart; iRow < hend; ++iRow)
