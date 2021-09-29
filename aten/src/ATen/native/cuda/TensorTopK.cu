@@ -2,11 +2,11 @@
 #include <ATen/ceil_div.h>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/cuda/ScanUtils.cuh>
 #include <ATen/native/Resize.h>
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/SortingRadixSelect.cuh>
 #include <ATen/native/cuda/SortUtils.cuh>
-#include <THC/THCScanUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh>  // for AddOp
 
 #include <c10/macros/Macros.h>
@@ -94,7 +94,8 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
 
     int index;
     int carry;
-    exclusiveBinaryPrefixScan<int, true>(smem, hasTopK, &index, &carry, AddOp<int>());
+    at::cuda::exclusiveBinaryPrefixScan<int, true>(
+        smem, hasTopK, &index, &carry, AddOp<int>());
 
     if (hasTopK) {
       int writeIndex = writeIndexStart + index;
@@ -127,7 +128,8 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
 
     int index;
     int carry;
-    exclusiveBinaryPrefixScan<int, true>(smem, hasTopK, &index, &carry, AddOp<int>());
+    at::cuda::exclusiveBinaryPrefixScan<int, true>(
+        smem, hasTopK, &index, &carry, AddOp<int>());
 
     if (hasTopK && index < topKRemaining) {
       int writeIndex = writeIndexStart + index;

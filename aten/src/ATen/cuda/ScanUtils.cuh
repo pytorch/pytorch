@@ -1,13 +1,14 @@
-#ifndef THC_SCAN_UTILS_INC
-#define THC_SCAN_UTILS_INC
+#pragma once
 
 #include <ATen/ceil_div.h>
 #include <ATen/cuda/DeviceUtils.cuh>
-#include <THC/THCAsmUtils.cuh>
+#include <ATen/cuda/AsmUtils.cuh>
 #include <c10/macros/Macros.h>
 
 // Collection of in-kernel scan / prefix sum utilities
 
+namespace at {
+namespace cuda {
 
 // Extends the above Inclusive Scan to support segments. It has the same properties
 // but also takes a flag array that indicates the starts of "segments", i.e. individual
@@ -157,4 +158,4 @@ __device__ void exclusiveBinaryPrefixScan(T* smem, bool in, T* out, T* carry, Bi
   }
 }
 
-#endif // THC_SCAN_UTILS_INC
+}}  // namespace at::cuda
