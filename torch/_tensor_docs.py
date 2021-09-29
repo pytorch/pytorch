@@ -4657,7 +4657,7 @@ See :func:`torch.pinverse`
 
 add_docstr_all('index_add',
                r"""
-index_add(dim, index, tensor2) -> Tensor
+index_add(dim, index, input) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.index_add_`.
 """)
