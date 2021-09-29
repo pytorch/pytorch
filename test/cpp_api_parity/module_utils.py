@@ -8,7 +8,7 @@ from cpp_api_parity.utils import TorchNNModuleInfoTestParams, TorchNNModuleTestP
     set_python_tensors_requires_grad, move_python_tensors_to_device, \
     serialize_arg_dict_as_script_module, \
     compute_temp_file_path, generate_error_msg, \
-    try_remove_folder
+    try_remove_folder, compute_cpp_args_construction_stmts_and_forward_arg_symbols
 
 # Expected substitutions:
 #
@@ -177,3 +177,24 @@ def test_forward_backward(unit_test_class, test_params, cpp_module):
 
     # Remove temporary folder that stores C++ outputs
     try_remove_folder(cpp_tmp_folder)
+
+
+def generate_test_cpp_sources(test_params, template):
+    device = test_params.device
+
+    cpp_constructor_args = test_params.cpp_constructor_args
+    if cpp_constructor_args != '':
+        cpp_constructor_args = '({})'.format(cpp_constructor_args)
+
+    cpp_args_construction_stmts, cpp_forward_args_symbols = \
+        compute_cpp_args_construction_stmts_and_forward_arg_symbols(test_params)
+
+    test_cpp_sources = template.substitute(
+        module_variant_name=test_params.module_variant_name,
+        module_qualified_name='torch::nn::{}'.format(test_params.module_name),
+        cpp_args_construction_stmts=";\n  ".join(cpp_args_construction_stmts),
+        cpp_constructor_args=cpp_constructor_args,
+        cpp_forward_args_symbols=", ".join(cpp_forward_args_symbols),
+        device=device,
+    )
+    return test_cpp_sources

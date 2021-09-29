@@ -19,10 +19,11 @@ import pprint
 
 import torch
 from cpp_api_parity.utils import TorchNNModuleTestParams, TORCH_NN_COMMON_TEST_HARNESS, \
-    compile_cpp_code_inline, add_test, compute_cpp_args_construction_stmts_and_forward_arg_symbols, \
+    compile_cpp_code_inline, add_test, \
     compute_arg_dict, decorate_test_fn, is_torch_nn_functional_test, try_remove_folder
 from cpp_api_parity.sample_module import SAMPLE_MODULE_CPP_SOURCE
-from cpp_api_parity.module_utils import test_forward_backward, TORCH_NN_MODULE_TEST_FORWARD_BACKWARD
+from cpp_api_parity.module_utils import test_forward_backward, TORCH_NN_MODULE_TEST_FORWARD_BACKWARD, \
+    generate_test_cpp_sources
 
 def compute_module_name(test_params_dict):
     fullname = test_params_dict.get('fullname', None)
@@ -102,32 +103,12 @@ def write_test_to_test_class(
 
         add_test(unit_test_class, unit_test_name, test_fn)
 
-def generate_test_cpp_sources(test_params, template):
-    device = test_params.device
-
-    cpp_constructor_args = test_params.cpp_constructor_args
-    if cpp_constructor_args != '':
-        cpp_constructor_args = '({})'.format(cpp_constructor_args)
-
-    cpp_args_construction_stmts, cpp_forward_args_symbols = \
-        compute_cpp_args_construction_stmts_and_forward_arg_symbols(test_params)
-
-    test_cpp_sources = template.substitute(
-        module_variant_name=test_params.module_variant_name,
-        module_qualified_name='torch::nn::{}'.format(test_params.module_name),
-        cpp_args_construction_stmts=";\n  ".join(cpp_args_construction_stmts),
-        cpp_constructor_args=cpp_constructor_args,
-        cpp_forward_args_symbols=", ".join(cpp_forward_args_symbols),
-        device=device,
-    )
-    return test_cpp_sources
-
 # Build all C++ tests together, instead of once per test.
 def build_cpp_tests(unit_test_class, print_cpp_source=False):
     assert len(unit_test_class.module_test_params_map) > 0
     cpp_sources = TORCH_NN_COMMON_TEST_HARNESS + SAMPLE_MODULE_CPP_SOURCE
     functions = []
-    for test_name, test_params in unit_test_class.module_test_params_map.items():
+    for _, test_params in unit_test_class.module_test_params_map.items():
         cpp_sources += generate_test_cpp_sources(
             test_params=test_params, template=TORCH_NN_MODULE_TEST_FORWARD_BACKWARD)
         functions.append('{}_test_forward_backward'.format(test_params.module_variant_name))
