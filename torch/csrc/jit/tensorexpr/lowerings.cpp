@@ -672,7 +672,7 @@ RegisterNNCLoweringFunction aten_type_as(
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
        at::Device device) {
-      const BufHandle rhs = c10::get<BufHandle>(inputs[1]);
+      const BufHandle& rhs = c10::get<BufHandle>(inputs[1]);
       auto dtype = rhs.dtype();
       return computeOneOperand(
           "aten_type_as",
@@ -1299,7 +1299,7 @@ RegisterNNCLoweringFunction aten_unsqueeze(
             //                 0 1 2 3
             std::vector<ExprHandle> indices;
             int64_t i = 0;
-            for (auto a : axes) {
+            for (const auto& a : axes) {
               if (i++ != dim) {
                 indices.emplace_back(ExprHandle(a.node()));
               }
