@@ -7,7 +7,14 @@ namespace ir {
 
 lazy_tensors::Shape GetShapeFromTsOutput(const ir::Output& output) {
   if (auto tsnode = dynamic_cast<const TsNode *>(output.node)) {
-    return tsnode->shape();
+    return tsnode->shape(output.index);
+  }
+  throw std::runtime_error("Expected TsNode but could not dynamic cast");
+}
+
+lazy_tensors::Shape GetShapeFromTsValue(const ir::Value& value) {
+  if (auto tsnode = dynamic_cast<const TsNode *>(value.node.get())) {
+    return tsnode->shape(value.index);
   }
   throw std::runtime_error("Expected TsNode but could not dynamic cast");
 }

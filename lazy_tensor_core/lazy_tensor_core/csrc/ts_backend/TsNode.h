@@ -9,6 +9,7 @@ namespace ir {
 // Helper that makes it easy to access the TsNode::shape() method
 // from an ir::Output that holds a Node* that points to a TsNode 
 lazy_tensors::Shape GetShapeFromTsOutput(const ir::Output& output);
+lazy_tensors::Shape GetShapeFromTsValue(const ir::Value& value);
 
 class TsNode : public Node {
  public:
