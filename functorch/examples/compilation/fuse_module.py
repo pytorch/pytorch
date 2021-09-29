@@ -15,7 +15,7 @@ def run(mod, input):
     out = mod(input)
     out.sum().backward()
     grads = [p.grad for p in mod.parameters()]
-    return out, *grads
+    return (out, *grads)
 
 class Foo(nn.Module):
     def __init__(self):
