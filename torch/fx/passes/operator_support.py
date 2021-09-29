@@ -2,10 +2,11 @@ from typing import Dict
 
 import torch
 import torch.fx
+from torch.fx._compatibility import compatibility
 
 from .tools_common import get_node_target, CALLABLE_NODE_OPS
 
-
+@compatibility(is_backward_compatible=False)
 class OperatorSupport:
     """
     `_support_dict` maps node.target to supported inputs dtypes.
