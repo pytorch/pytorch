@@ -171,7 +171,7 @@ public:
 
   const KernelFunction& lookup(DispatchKey k) const {
     const auto idx = getDispatchTableIndexForDispatchKey(k);
-    if (idx == -1) {
+    if (C10_UNLIKELY(idx == -1)) {
       reportError(k);
     }
     const auto& kernel = dispatchTable_[idx];

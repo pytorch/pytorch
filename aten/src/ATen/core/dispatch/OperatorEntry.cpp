@@ -300,7 +300,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
 // This function should be considered a private helper for updateDispatchTable_()
 void OperatorEntry::updateDispatchTableEntry_(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) {
   const auto dispatch_ix = c10::getDispatchTableIndexForDispatchKey(dispatch_key);
-  if (dispatch_ix == -1) {
+  if (C10_UNLIKELY(dispatch_ix == -1)) {
     return;
   }
   dispatchTable_[dispatch_ix] = computeDispatchTableEntry(dispatcher, dispatch_key);
