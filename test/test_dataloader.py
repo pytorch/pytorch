@@ -32,7 +32,7 @@ from torch.utils.data.datapipes.iter import IterableWrapper
 from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS,
                                                   IS_IN_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
-                                                  load_tests, TEST_WITH_TSAN, IS_SANDCASTLE)
+                                                  load_tests, TEST_WITH_ASAN, TEST_WITH_TSAN, IS_SANDCASTLE)
 
 
 try:
@@ -2306,6 +2306,9 @@ class TestWorkerQueueDataset(Dataset):
     TEST_WITH_TSAN,
     "Fails with TSAN with the following error: starting new threads after multi-threaded "
     "fork is not supported. Dying (set die_after_fork=0 to override)")
+@unittest.skipIf(
+    TEST_WITH_ASAN,
+    "Flaky with ASAN, see https://github.com/pytorch/pytorch/issues/65727")
 class TestIndividualWorkerQueue(TestCase):
     def setUp(self):
         super(TestIndividualWorkerQueue, self).setUp()

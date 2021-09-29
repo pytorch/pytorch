@@ -308,9 +308,9 @@ Tensor computeConv2d(
   }
 
   BufHandle ResultBuf("conv", outputShape, dtype);
-  BufHandle inp = c10::get<BufHandle>(inputs[0]);
-  BufHandle w = c10::get<BufHandle>(inputs[1]);
-  BufHandle b = c10::get<BufHandle>(inputs[2]);
+  const BufHandle& inp = c10::get<BufHandle>(inputs[0]);
+  const BufHandle& w = c10::get<BufHandle>(inputs[1]);
+  const BufHandle& b = c10::get<BufHandle>(inputs[2]);
 
   auto strides = _pair_int(inputs[3]);
   auto padding = _pair_int(inputs[4]);
