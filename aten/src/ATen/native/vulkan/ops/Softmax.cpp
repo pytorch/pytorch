@@ -10,10 +10,11 @@ namespace {
 
 using namespace api::utils;
 
-Tensor softmax(
+Tensor softmax_internal(
     const at::Tensor& input_arg,
     const int64_t dim,
-    const bool half_to_float) {
+    const bool half_to_float,
+    const api::Shader::Descriptor& shader_descriptor) {
   TORCH_CHECK(
       input_arg.dim() == 4,
       "Vulkan softmax expects 4-dimensional input!");
@@ -73,23 +74,19 @@ Tensor softmax(
             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
-          VK_KERNEL(softmax),
+          shader_descriptor,
           global_work_group_size,
           local_work_group_size,
-          // Write-only access bypasses synchronization but inserts appropriate
-          // barriers if necessary.
+          // Shader parameters
+          block,
+          // Textures
           v_output.image(
               command_buffer,
               vTensor::Stage::Compute,
               vTensor::Access::Write),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
           v_input.image(
               command_buffer,
-              vTensor::Stage::Compute),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
+              vTensor::Stage::Compute));
     }
     else {
       TORCH_CHECK(false, "Not implemented!");
@@ -100,10 +97,25 @@ Tensor softmax(
   return convert(v_output);
 }
 
+Tensor softmax(
+    const at::Tensor& input_arg,
+    const int64_t dim,
+    const bool half_to_float) {
+  return softmax_internal(input_arg, dim, half_to_float, VK_KERNEL(softmax));
+}
+
+Tensor log_softmax(
+    const at::Tensor& input_arg,
+    const int64_t dim,
+    const bool half_to_float) {
+  return softmax_internal(input_arg, dim, half_to_float, VK_KERNEL(log_softmax));
+}
+
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl("_softmax", TORCH_FN(softmax));
+  m.impl("_log_softmax", TORCH_FN(log_softmax));
 }
 
 #endif /* USE_VULKAN_API */

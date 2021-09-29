@@ -12,7 +12,7 @@ namespace jit {
 namespace {
 
 Operator createOperatorFromC10(const c10::OperatorHandle& op) {
-  return Operator(op, [op](Stack* stack) { op.callBoxed(stack); });
+  return Operator(op, [op](Stack& stack) { op.callBoxed(stack); });
 }
 
 class RegistrationListener final : public c10::OpRegistrationListener {

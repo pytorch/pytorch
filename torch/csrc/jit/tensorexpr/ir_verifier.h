@@ -2,6 +2,7 @@
 
 #include <iostream>
 
+#include <torch/csrc/jit/tensorexpr/fwd_decls.h>
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 
 namespace torch {
@@ -32,26 +33,26 @@ class TORCH_API IRVerifier : public IRVisitor {
  public:
   IRVerifier() = default;
 
-  void visit(Mod* v) override;
-  void visit(And* v) override;
-  void visit(Or* v) override;
-  void visit(Xor* v) override;
-  void visit(Lshift* v) override;
-  void visit(Rshift* v) override;
-  void visit(CompareSelect* v) override;
-  void visit(Ramp* v) override;
-  void visit(Load* v) override;
-  void visit(IfThenElse* v) override;
-  void visit(Intrinsics* v) override;
+  void visit(ModPtr v) override;
+  void visit(AndPtr v) override;
+  void visit(OrPtr v) override;
+  void visit(XorPtr v) override;
+  void visit(LshiftPtr v) override;
+  void visit(RshiftPtr v) override;
+  void visit(CompareSelectPtr v) override;
+  void visit(RampPtr v) override;
+  void visit(LoadPtr v) override;
+  void visit(IfThenElsePtr v) override;
+  void visit(IntrinsicsPtr v) override;
 
-  void visit(ExternalCall* v) override;
-  void visit(Store* v) override;
-  void visit(For* v) override;
-  void visit(Block* v) override;
+  void visit(ExternalCallPtr v) override;
+  void visit(StorePtr v) override;
+  void visit(ForPtr v) override;
+  void visit(BlockPtr v) override;
 };
 
-TORCH_API void verify(Stmt*);
-TORCH_API void verify(Expr*);
+TORCH_API void verify(StmtPtr);
+TORCH_API void verify(ExprPtr);
 TORCH_API void verify(ExprHandle);
 
 } // namespace tensorexpr

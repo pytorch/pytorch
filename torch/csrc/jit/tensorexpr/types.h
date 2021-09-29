@@ -75,7 +75,7 @@ extern TORCH_API Dtype kHandle;
 
 #define NNC_DTYPE_DECLARATION(ctype, name) extern TORCH_API Dtype k##name;
 
-AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, NNC_DTYPE_DECLARATION)
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, NNC_DTYPE_DECLARATION)
 #undef NNC_DTYPE_DECLARATION
 
 template <typename T>
@@ -86,7 +86,7 @@ TORCH_API Dtype ToDtype();
   inline Dtype ToDtype<ctype>() {            \
     return k##name;                          \
   }
-AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, NNC_TODTYPE_DECLARATION)
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, NNC_TODTYPE_DECLARATION)
 #undef NNC_TODTYPE_DECLARATION
 
 TORCH_API Dtype ToDtype(ScalarType type);

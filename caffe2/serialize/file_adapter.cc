@@ -1,7 +1,8 @@
 #include "caffe2/serialize/file_adapter.h"
 #include <c10/util/Exception.h>
+#include <cerrno>
 #include <cstdio>
-
+#include <string>
 #include "caffe2/core/common.h"
 
 namespace caffe2 {
@@ -10,7 +11,20 @@ namespace serialize {
 FileAdapter::RAIIFile::RAIIFile(const std::string& file_name) {
   fp_ = fopen(file_name.c_str(), "rb");
   if (fp_ == nullptr) {
-    AT_ERROR("open file failed, file path: ", file_name);
+    char buf[1024];
+    buf[0] = '\0';
+#if defined(_WIN32) && (defined(__MINGW32__) || defined(_MSC_VER))
+  strerror_s(buf, sizeof(buf), errno);
+#else
+  strerror_r(errno, buf, sizeof(buf));
+#endif
+    AT_ERROR(
+        "open file failed because of errno ",
+        errno,
+        " on fopen: ",
+        buf,
+        ", file path: ",
+        file_name);
   }
 }
 
