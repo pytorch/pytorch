@@ -80,11 +80,7 @@ run_tests() {
           "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
         fi
     else
-        if [[ "${BUILD_ENVIRONMENT}" == *win-vs2019-cpu-py3* ]]; then
-          export PYTORCH_COLLECT_COVERAGE=1
-          export COVERAGE_RCFILE=$PWD/.coveragerc # coverage config file needed for plug-ins and settings to work
-        fi
-        if [[ "${JOB_BASE_NAME}" == *-test1 || "${SHARD_NUMBER}" == 1 ]]; then
+        if [[ "${JOB_BASE_NAME}" == *-test1 || ("${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1) ]]; then
             "$SCRIPT_HELPERS_DIR"/test_python_first_shard.bat "$DETERMINE_FROM"
 
             if [[ -z ${RUN_SMOKE_TESTS_ONLY} ]]; then
@@ -94,7 +90,7 @@ run_tests() {
               fi
             fi
 
-        elif [[ "${JOB_BASE_NAME}" == *-test2 || "${SHARD_NUMBER}" == 2 ]]; then
+        elif [[ "${JOB_BASE_NAME}" == *-test2 || ("${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1) ]]; then
             "$SCRIPT_HELPERS_DIR"/test_python_second_shard.bat "$DETERMINE_FROM"
 
             if [[ -z ${RUN_SMOKE_TESTS_ONLY} ]]; then
@@ -108,17 +104,3 @@ run_tests() {
 run_tests
 assert_git_not_dirty
 echo "TEST PASSED"
-
-if [[ "${BUILD_ENVIRONMENT}" == *win-vs2019-cpu-py3* ]]; then
-  pushd "$TEST_DIR"
-  python -mpip install coverage==5.5
-  python -mpip install -e "$PROJECT_DIR/tools/coverage_plugins_package"
-  echo "Generating XML coverage report"
-  time python -mcoverage xml
-  popd
-
-  pushd "$PROJECT_DIR"
-  python -mpip install codecov
-  python -mcodecov
-  popd
-fi
