@@ -56,9 +56,9 @@ std::unordered_set<const FunctionSchema*> getInterfaceCalls(Graph& graph) {
 }
 
 struct ModuleMethod {
-  ModuleMethod(const Module& m, const Function& f, c10::QualifiedName n)
-      : module(m), function(f), exportName(std::move(n)) {}
-  const Module& module;
+  ModuleMethod(Module m, const Function& f, c10::QualifiedName n)
+      : module(std::move(m)), function(f), exportName(std::move(n)) {}
+  Module module;
   const Function& function;
   c10::QualifiedName exportName;
 };
@@ -74,7 +74,7 @@ std::vector<ModuleMethod> getModuleInterfaceExports(
     names.insert(schema->name());
   }
   std::vector<ModuleMethod> ret;
-  for (const auto& submodule : module.modules()) {
+  for (auto submodule : module.modules()) {
     for (const auto& method : submodule.get_methods()) {
       if (names.find(method.function().qualname().name()) != names.end()) {
         ret.emplace_back(
