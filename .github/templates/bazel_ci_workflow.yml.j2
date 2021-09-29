@@ -109,6 +109,7 @@ on:
             -e GITHUB_ACTIONS \
             -e IN_CI \
             -e SHARD_NUMBER \
+            -e NUM_TEST_SHARDS \
             -e JOB_BASE_NAME \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
