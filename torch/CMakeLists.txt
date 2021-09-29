@@ -70,7 +70,6 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
 
     ${TORCH_ROOT}/third_party/gloo
     ${TORCH_ROOT}/third_party/onnx
-    ${pybind11_INCLUDE_DIRS}
 
     ${TORCH_SRC_DIR}/csrc
     ${TORCH_SRC_DIR}/csrc/api/include
@@ -80,6 +79,8 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
 list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${LIBSHM_SRCDIR})
 
 set(TORCH_PYTHON_LINK_LIBRARIES
+    python::python
+    pybind::pybind11
     shm
     fmt::fmt-header-only)
 
@@ -324,12 +325,6 @@ if(USE_DEPLOY)
 
 endif()
 
-
-# Avoid numpy for the DEPLOY build
-if(USE_NUMPY)
-    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NUMPY)
-endif()
-
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/utils/throughput_benchmark.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
@@ -343,6 +338,12 @@ endif()
 
 
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
+# Avoid numpy for the DEPLOY build
+if(USE_NUMPY)
+  target_link_libraries(torch_python PRIVATE numpy::numpy)
+  target_compile_definitions(torch_python PRIVATE USE_NUMPY)
+endif()
+
 if(HAVE_SOVERSION)
   set_target_properties(torch_python PROPERTIES
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
@@ -377,7 +378,7 @@ endif()
 
 target_compile_definitions(torch_python PRIVATE "-DTHP_BUILD_MAIN_LIB")
 
-target_link_libraries(torch_python torch_library ${TORCH_PYTHON_LINK_LIBRARIES})
+target_link_libraries(torch_python PRIVATE torch_library ${TORCH_PYTHON_LINK_LIBRARIES})
 
 target_compile_definitions(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_DEFINITIONS})
 
@@ -428,7 +429,7 @@ if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
           ${TORCH_SRC_DIR}/csrc/jit/backends/nnapi/nnapi_backend_preprocess.cpp
           )
   # Pybind11 requires explicit linking of the torch_python library
-  target_link_libraries(nnapi_backend torch torch_python)
+  target_link_libraries(nnapi_backend PRIVATE torch torch_python pybind::pybind11)
 endif()
 
 if(BUILD_BINARY)
