@@ -6238,8 +6238,6 @@
 - func: linalg_trace(Tensor self, int offset=0) -> Tensor
   python_module: linalg
   variants: method, function
-  dispatch:
-    CompositeExplicitAutograd: linalg_trace
 
 - func: ne.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
