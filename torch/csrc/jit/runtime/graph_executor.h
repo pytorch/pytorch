@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/python/update_graph_executor_opt.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
+#include <torch/csrc/jit/runtime/executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/variable_tensor_list.h>
 
@@ -15,34 +16,6 @@ namespace torch {
 namespace jit {
 struct GraphExecutorState;
 struct Code;
-
-struct ExecutionPlan {
-  ExecutionPlan() = default;
-  ExecutionPlan(
-      std::shared_ptr<Graph> graph,
-      std::string function_name,
-      size_t remaining_bailout_depth = 0)
-      : code(graph, std::move(function_name), remaining_bailout_depth),
-        graph(std::move(graph)) {}
-
-  operator bool() const {
-    return static_cast<bool>(graph);
-  }
-
-  Code code;
-  std::shared_ptr<Graph> graph;
-};
-
-// Notice that those structs don't manage lifetime of their members.
-// They is only valid only right after you call getDebugState() and should never
-// be used again once another GraphExecutor function is called.
-
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-struct GraphExecutorState {
-  const Graph* graph = nullptr;
-  ExecutionPlan fallback; // XXX: members of this field are optional
-  std::unordered_map<ArgumentSpec, ExecutionPlan> execution_plans;
-};
 
 struct TORCH_API EnableProfilingGuard {
   EnableProfilingGuard();
@@ -54,7 +27,8 @@ struct TORCH_API EnableProfilingGuard {
 };
 
 struct GraphExecutorImplBase;
-struct TORCH_API GraphExecutor {
+
+struct TORCH_API GraphExecutor : public Executor {
   GraphExecutor() = default;
   GraphExecutor(const std::shared_ptr<Graph>& graph, std::string function_name);
 
@@ -72,21 +46,13 @@ struct TORCH_API GraphExecutor {
   // profiled information whenever a bailout check is failed/triggered, a new
   // `GraphExecutor` will be created. This new `GraphExecutor`'s
   // remaining_bailout_depth will be reduced by 1.
-  const ExecutionPlan& getPlanFor(
-      Stack& inputs,
-      size_t remaining_bailout_depth);
-  explicit operator bool() const {
-    return pImpl != nullptr;
-  }
-  void reset() {
-    pImpl.reset();
-  }
-  std::shared_ptr<Graph> graph() const;
-  GraphExecutorState getDebugState();
+  const ExecutionPlan& getPlanFor(Stack& inputs, size_t remaining_bailout_depth)
+      override;
+  GraphExecutorState getDebugState() override;
 
   static size_t getDefaultNumBailOuts();
 
-  void debugFlushCompilationCache();
+  void debugFlushCompilationCache() override;
 
  private:
   std::shared_ptr<GraphExecutorImplBase> pImpl;
