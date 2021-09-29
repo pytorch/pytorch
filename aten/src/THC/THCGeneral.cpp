@@ -219,7 +219,7 @@ void __THCublasCheck(cublasStatus_t status, const char *file, const int line)
         errmsg = "an absent device architectural feature is required";
         break;
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
       case CUBLAS_STATUS_MAPPING_ERROR:
         errmsg = "an access to GPU memory space failed";
         break;
@@ -289,15 +289,6 @@ void __THCusparseCheck(cusparseStatus_t status, const char *file, const int line
 
     _THError(file, line, "cusparse runtime error : %s", errmsg);
   }
-}
-
-void* THCudaMalloc(THCState *state, size_t size)
-{
-  return c10::cuda::CUDACachingAllocator::raw_alloc(size);
-}
-
-void THCudaFree(THCState *state, void* ptr) {
-  c10::cuda::CUDACachingAllocator::raw_delete(ptr);
 }
 
 at::DataPtr THCudaHostAlloc(THCState *state, size_t size)
