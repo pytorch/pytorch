@@ -1273,9 +1273,15 @@ void initJITBindings(PyObject* module) {
           // ArgumentVector (c10::SmallVector<Argument, ...>) to
           // Python directly is not a huge problem because PyBind
           // itself copies exposed containers anyway.
-          "arguments", [](FunctionSchema& self) { return c10::ArrayRef<Argument>(self.arguments()).vec(); })
+          "arguments",
+          [](FunctionSchema& self) {
+            return c10::ArrayRef<Argument>(self.arguments()).vec();
+          })
       .def_property_readonly(
-          "returns", [](FunctionSchema& self) { return c10::ArrayRef<Argument>(self.returns()).vec(); })
+          "returns",
+          [](FunctionSchema& self) {
+            return c10::ArrayRef<Argument>(self.returns()).vec();
+          })
       .def(
           "is_backward_compatible_with",
           [](const FunctionSchema& self, const FunctionSchema& old_schema) {
