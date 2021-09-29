@@ -51,7 +51,7 @@ struct TORCH_API Code {
       const std::shared_ptr<Graph>& graph,
       std::string function_name,
       size_t remaining_bailout_depth = 0);
-  ~Code();
+  ~Code() = default;
 
   const std::vector<GraphExecutor*>& grad_executors();
   const std::vector<GraphExecutor*>& diff_graph_op_executors();
