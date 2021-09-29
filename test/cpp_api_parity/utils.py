@@ -58,6 +58,53 @@ TorchNNModuleTestParams = namedtuple(
     ]
 )
 
+TorchNNModuleInfoTestParams = namedtuple(
+    'TorchNNModuleInfoTestParams',
+    [
+        # NN module name (e.g. "BCELoss")
+        'module_name',
+
+        # Unique identifier for this module config (e.g. "BCELoss_weights_cuda")
+        'module_variant_name',
+
+        # An instance of an NN test class (e.g. `CriterionTest`) which stores
+        # necessary information (e.g. input / target / extra_args) for running the Python test
+        'module_info',
+        'sample',
+
+        # Constructor arguments passed to the C++ module constructor, which must be
+        # strictly equivalent to the Python module constructor arguments
+        # (e.g. `torch::nn::BCELossOptions().weight(torch::rand(10))`,
+        # which is strictly equivalent to passing `torch.rand(10)` to `torch.nn.BCELoss`
+        # constructor in Python)
+        'cpp_constructor_args',
+
+        # All arguments used in NN module's forward pass.
+        # Please see `compute_arg_dict` function for details on how we construct this dict.
+        # (e.g.
+        # ```
+        # arg_dict = {
+        #     'input': [python_input_tensor],
+        #     'target': [python_target_tensor],
+        #     'extra_args': [],
+        #     'other': [],
+        # }
+        # ```
+        # )
+        'arg_dict',
+
+        # Whether we expect this NN module test to pass the Python/C++ parity test
+        # (e.g. `True`)
+        'has_parity',
+
+        # Device (e.g. "cuda")
+        'device',
+
+        # Temporary folder to store C++ outputs (to be compared with Python outputs later)
+        'cpp_tmp_folder',
+    ]
+)
+
 # Note that this namedtuple is for C++ parity test mechanism's internal use.
 # For guidance on how to add a new C++ parity test, please see
 # NOTE [How to check NN module / functional API parity between Python and C++ frontends]
