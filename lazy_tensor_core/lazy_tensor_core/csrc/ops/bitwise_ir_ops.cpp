@@ -3,6 +3,7 @@
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ops/ops.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -10,7 +11,7 @@ namespace ops {
 
 Value BitwiseOp(const OpKind& kind, const Value& node1, const Value& node2) {
   NodePtr node = GenericOp(kind, {node1, node2});
-  node->SetShapeDeferred(
+  std::dynamic_pointer_cast<TsNode>(node)->SetShapeDeferred(
       [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
   return node;
 }

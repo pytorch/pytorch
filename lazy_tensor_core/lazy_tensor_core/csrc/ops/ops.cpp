@@ -27,7 +27,7 @@ namespace ops {
 #define PTLTC_BINARY_OP(name, sym)                                           \
   NodePtr name(const Value& input0, const Value& input1) {                   \
     NodePtr node = GenericOp(OpKind(sym), {input0, input1});                 \
-    node->SetShapeDeferred(                                                  \
+    std::dynamic_pointer_cast<TsNode>(node)->SetShapeDeferred(                                                  \
         [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); }); \
     return node;                                                             \
   }
@@ -84,7 +84,7 @@ NodePtr Abs(const Value& input) {
 
 NodePtr ReluOp(const Value& input) {
   NodePtr node = GenericOp(OpKind(at::aten::relu), {input});
-  node->SetShapeDeferred(
+  std::dynamic_pointer_cast<TsNode>(node)->SetShapeDeferred(
       [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
   return node;
 }
@@ -138,7 +138,7 @@ NodePtr Clamp(const Value& input, const Value& min, const Value& max) {
 
 NodePtr Ger(const Value& input, const Value& other) {
   NodePtr node = GenericOp(OpKind(at::aten::ger), {input, other});
-  node->SetShapeDeferred(
+  std::dynamic_pointer_cast<TsNode>(node)->SetShapeDeferred(
       [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
   return node;
 }
@@ -146,14 +146,14 @@ NodePtr Ger(const Value& input, const Value& other) {
 NodePtr AddMatMulOp(const Value& input, const Value& weight,
                     const Value& bias) {
   NodePtr node = GenericOp(OpKind(at::aten::addmm), {input, weight, bias});
-  node->SetShapeDeferred(
+  std::dynamic_pointer_cast<TsNode>(node)->SetShapeDeferred(
       [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
   return node;
 }
 
 NodePtr MatMul(const Value& lhs, const Value& rhs) {
   NodePtr node = GenericOp(OpKind(at::aten::matmul), {lhs, rhs});
-  node->SetShapeDeferred(
+  std::dynamic_pointer_cast<TsNode>(node)->SetShapeDeferred(
       [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
   return node;
 }
@@ -162,7 +162,7 @@ NodePtr AdaptiveAvgPool3dBackward(const Value& grad_output,
                                   const Value& input) {
   NodePtr node = GenericOp(OpKind(at::aten::adaptive_avg_pool3d_backward),
                            {grad_output, input});
-  node->SetShapeDeferred(
+  std::dynamic_pointer_cast<TsNode>(node)->SetShapeDeferred(
       [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
   return node;
 }
@@ -171,14 +171,14 @@ NodePtr AdaptiveAvgPool2dBackward(const Value& grad_output,
                                   const Value& input) {
   NodePtr node = GenericOp(OpKind(at::aten::adaptive_avg_pool2d_backward),
                            {grad_output, input});
-  node->SetShapeDeferred(
+  std::dynamic_pointer_cast<TsNode>(node)->SetShapeDeferred(
       [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
   return node;
 }
 
 NodePtr ComparisonOp(c10::Symbol kind, const Value& input, const Value& other) {
   NodePtr node = GenericOp(OpKind(kind), {input, other});
-  node->SetShapeDeferred(
+  std::dynamic_pointer_cast<TsNode>(node)->SetShapeDeferred(
       [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
   return node;
 }
@@ -260,7 +260,7 @@ NodePtr ARange(const at::Scalar& start, const at::Scalar& end,
 NodePtr BroadcastTensors(lazy_tensors::Span<const Value> tensors) {
   NodePtr node = GenericOp(OpKind(at::aten::broadcast_tensors), tensors,
                            /*num_outputs=*/tensors.size());
-  node->SetShapeDeferred(
+  std::dynamic_pointer_cast<TsNode>(node)->SetShapeDeferred(
       [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
   return node;
 }
@@ -405,7 +405,7 @@ NodePtr BaddBmm(const Value& lhs, const Value& rhs, const Value& bias,
   NodePtr node =
       GenericOp(OpKind(at::aten::baddbmm),
                 {lhs, rhs, bias, product_multiplier, bias_multiplier});
-  node->SetShapeDeferred(
+  std::dynamic_pointer_cast<TsNode>(node)->SetShapeDeferred(
       [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
   return node;
 }
@@ -417,7 +417,7 @@ NodePtr Lerp(const Value& start, const Value& end, const Value& weight) {
 
 NodePtr LogicalAnd(const Value& input, const Value& other) {
   NodePtr node = GenericOp(OpKind(at::aten::logical_and), {input, other});
-  node->SetShapeDeferred(
+  std::dynamic_pointer_cast<TsNode>(node)->SetShapeDeferred(
       [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
   return node;
 }
