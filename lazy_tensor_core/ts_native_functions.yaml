@@ -7,7 +7,6 @@ full_codegen:
   - cos
   - mm
   - mv
-  - mv_out
 supported:
   - _log_softmax
   - _log_softmax_backward_data
