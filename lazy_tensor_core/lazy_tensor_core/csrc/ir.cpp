@@ -105,10 +105,6 @@ size_t Output::Hasher::operator()(const Output& output) const {
       reinterpret_cast<std::ptrdiff_t>(output.node), output.index);
 }
 
-const lazy_tensors::Shape& Output::shape() const { return node->shape(index); }
-
-const lazy_tensors::Shape& Output::node_shape() const { return node->shape(); }
-
 torch::lazy::hash_t Output::hash() const {
   return torch::lazy::HashCombine(node->hash(), index);
 }

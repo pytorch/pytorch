@@ -74,13 +74,6 @@ struct Output {
   explicit Output(const Node* node, size_t index = 0)
       : node(node), index(index) {}
 
-  // Retrieves the shape of this output. If the IR Node generating the value is
-  // a multi-output node, the shape returned by this API will not be the full
-  // tuple shape, but only the shape at index referred by this value.
-  // To retrieve the full tuple shape in that case, use the node_shape() API.
-  const lazy_tensors::Shape& shape() const;
-  const lazy_tensors::Shape& node_shape() const;
-
   torch::lazy::hash_t hash() const;
 
   bool operator==(const Output& rhs) const {

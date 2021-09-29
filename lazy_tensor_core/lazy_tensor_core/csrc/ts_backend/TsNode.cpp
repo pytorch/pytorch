@@ -5,6 +5,13 @@
 namespace torch_lazy_tensors {
 namespace ir {
 
+lazy_tensors::Shape GetShapeFromTsOutput(const ir::Output& output) {
+  if (auto tsnode = dynamic_cast<const TsNode *>(output.node)) {
+    return tsnode->shape();
+  }
+  throw std::runtime_error("Expected TsNode but could not dynamic cast");
+}
+
 TsNode::TsNode(OpKind op, OpList operands, lazy_tensors::Shape shape,
                size_t num_outputs, torch::lazy::hash_t hash_seed)
     : Node(op, operands, shape, num_outputs, hash_seed), shape_(shape) {}

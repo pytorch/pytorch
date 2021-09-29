@@ -6,6 +6,10 @@
 namespace torch_lazy_tensors {
 namespace ir {
 
+// Helper that makes it easy to access the TsNode::shape() method
+// from an ir::Output that holds a Node* that points to a TsNode 
+lazy_tensors::Shape GetShapeFromTsOutput(const ir::Output& output);
+
 class TsNode : public Node {
  public:
   TsNode(OpKind op, OpList operands, lazy_tensors::Shape shape,
