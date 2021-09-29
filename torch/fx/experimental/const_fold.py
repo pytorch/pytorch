@@ -1,9 +1,9 @@
 import operator
-from typing import Dict, Set, List, Optional
+from typing import Dict, Set, List, Optional, Union
 
 import torch.fx
+import torch.fx.experimental.fx_acc.acc_utils as acc_utils
 from torch.fx.passes.split_module import split_module
-import re
 
 
 def _make_tuple(x):
@@ -67,7 +67,7 @@ class FoldedGraphModule(torch.fx.GraphModule):
 
 
 def split_const_subgraphs(
-    module: torch.nn.Module,
+    module: Union[torch.nn.Module, torch.fx.GraphModule]
 ) -> FoldedGraphModule:
     """
     Looks through `module` for any nodes that have all constant attribute inputs
@@ -76,7 +76,10 @@ def split_const_subgraphs(
     attributes on the module prior to running the non-constant portion of the
     graph.
     """
-    mod_traced = torch.fx.symbolic_trace(module)
+    if not isinstance(module, torch.fx.GraphModule):
+        mod_traced = torch.fx.symbolic_trace(module)
+    else:
+        mod_traced = module
 
     # Build up a list of const_nodes, defined as nodes that are themselves
     # get_attrs, or have all get_attr or other constant node inputs.
@@ -106,6 +109,21 @@ def split_const_subgraphs(
 
     split = split_module(mod_traced, module, mod_partition)
 
+    # Later we are creating get_attr nodes from main module get_attr nodes and we use the
+    # same node.target. If there's a get_attr that refers to an attributes in a module and
+    # this module is not included in submod_1 then we would have a trouble when creating
+    # get_attr ndoes because it will try to find the module that owns the attribute first.
+    # Setting owning_module here makes the owning_module of submod_1.graph to None then
+    # the check when creating get_attr nodes will get skipped.
+    split.submod_1.graph.owning_module = mod_traced
+
+    # The module that a call_module node refers to gets copied to submodules during split.
+    # The path to the module also gets inlined, i.e. mod.a.b -> mod_a_b. Here we need to
+    # attach inlined modules to `mod_traced` as it's the owning module now.
+    for node in split.submod_1.graph.nodes:
+        if node.op == "call_module":
+            setattr(mod_traced, node.target, getattr(split.submod_1, node.target))
+
     # Gather all names that are output from the const folding subgraph, which we
     # will need to set dummy params on the module.
     const_output_names: List[str] = []
@@ -120,18 +138,8 @@ def split_const_subgraphs(
     for i in range(len(const_output_names)):
         # Add a suffix to make it easier to tell these were the result of const folding.
         name = const_output_names[i] + "__CF"
-        # Delete all characters that are illegal in a Python identifier.
-        name = re.sub("[^0-9a-zA-Z_]+", "_", name)
-        if name[0].isdigit():
-            name = f"_{name}"
-        # Now make sure it is in fact unique to the module by incrementing suffix value.
-        while hasattr(mod_traced, name):
-            match = re.match(r"(.*)_(\d+)$", name)
-            if match is None:
-                name = name + "_1"
-            else:
-                base, num = match.group(1, 2)
-                name = f"{base}_{int(num) + 1}"
+        # Get an unique name for the attr.
+        name = acc_utils.get_unique_attr_name_in_module(mod_traced, name)
         const_output_names[i] = name
 
     # Now track the const_output_names to what name is used in the parent graph
@@ -191,11 +199,12 @@ def split_const_subgraphs(
     # Now we have a mapping from const output names to the index they are passed
     # into submod_1, so swap in getattrs for placeholders.
     ph_idx = 0
+
     for node in split.submod_1.graph.nodes:
         if node.op != "placeholder":
             continue
-        is_folded_attr = ph_idx in submod_1_input_idx_to_folded_attr_name.keys()
-        is_unfolded_attr = ph_idx in submod_1_input_idx_to_unfolded_attr_name.keys()
+        is_folded_attr = ph_idx in submod_1_input_idx_to_folded_attr_name
+        is_unfolded_attr = ph_idx in submod_1_input_idx_to_unfolded_attr_name
         if not is_folded_attr and not is_unfolded_attr:
             ph_idx += 1
             continue
@@ -205,6 +214,7 @@ def split_const_subgraphs(
             if is_folded_attr
             else submod_1_input_idx_to_unfolded_attr_name[ph_idx]
         )
+
         if is_folded_attr:
             assert not hasattr(mod_traced, const_output_name)
             # Use a dummy param, which will be overwritten when we run const folding.
@@ -213,8 +223,11 @@ def split_const_subgraphs(
                 const_output_name,
                 torch.nn.Parameter(torch.randn(1)),
             )
+
         with split.submod_1.graph.inserting_before(node):
-            node.replace_all_uses_with(split.submod_1.graph.get_attr(const_output_name))
+            new_node = split.submod_1.graph.get_attr(const_output_name)
+            new_node.meta = node.meta.copy()
+            node.replace_all_uses_with(new_node)
         split.submod_1.graph.erase_node(node)
         ph_idx += 1
 
@@ -244,10 +257,24 @@ def split_const_subgraphs(
             ):
                 break
             later_node = later_node.next
-        assert later_node.op != "root"
-        node.prepend(later_node)
+
+        # The placeholder is in split.graph but not in split.submod_1.graph.
+        # In this case we add the placeholder to submod_1.graph.
+        if later_node.op == "root":
+            with split.submod_1.graph.inserting_before(node):
+                split.submod_1.graph.placeholder(curr_orig_ph_target)
+        else:
+            node.prepend(later_node)
+
         # Note we do not increment node here, as it still may be in the wrong
         # place (we just prepended the ph that should have come before it).
+
+    # There might be more placeholders left in orig_ph_targets.
+    last_placeholder = next(n for n in split.submod_1.graph.nodes if n.target == orig_ph_targets[ph_idx - 1])
+    while ph_idx < len(orig_ph_targets):
+        with split.submod_1.graph.inserting_after(last_placeholder):
+            split.submod_1.graph.placeholder(orig_ph_targets[ph_idx])
+        ph_idx += 1
 
     # split_module currently does not use get_attrs for attrs. Instead it passes
     # them in as args from the parent module, which used get_attrs. Here we set
@@ -255,15 +282,19 @@ def split_const_subgraphs(
     # somehow a priori knowing the attrs that should be passed as args. We can
     # unconditionally do this for all placeholders because we know all
     # placeholders to submod_0 must be constants accessible via get_attr.
-    for node in split.submod_0.graph.nodes:
+    # Note that here we set the split.submod_0.graph into a new root_submod_0 with split
+    # as the root module, because we are fetching attributes directly from the root
+    # module, instead of fetching them from split.submod_0.
+    root_submod_0 = torch.fx.GraphModule(split, split.submod_0.graph)
+    for node in root_submod_0.graph.nodes:
         if node.op != "placeholder":
             continue
         in_node = next(n for n in call_submod_0_args if n.name == node.target)
         assert in_node.op == "get_attr"
-        with split.submod_0.graph.inserting_before(node):
-            node.replace_all_uses_with(split.submod_0.graph.get_attr(in_node.target))
-        split.submod_0.graph.erase_node(node)
+        with root_submod_0.graph.inserting_before(node):
+            node.replace_all_uses_with(root_submod_0.graph.get_attr(in_node.target))
+        root_submod_0.graph.erase_node(node)
 
     return FoldedGraphModule(
-        mod_traced, split.submod_1.graph, split.submod_0.graph, const_output_names
+        mod_traced, split.submod_1.graph, root_submod_0.graph, const_output_names
     )

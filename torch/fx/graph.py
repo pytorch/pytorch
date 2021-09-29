@@ -561,9 +561,10 @@ class Graph:
         def _get_attr_reference_exists(mod: torch.nn.Module, qualified_name: str) -> bool:
             module_path, _, name = qualified_name.rpartition(".")
 
-            submod: Optional[torch.nn.Module] = mod.get_submodule(module_path)
-
-            if not submod:
+            try:
+                submod: torch.nn.Module = mod.get_submodule(module_path)
+            except AttributeError:
+                warnings.warn(f"Failed to fetch module {module_path}!")
                 return False
 
             if not hasattr(submod, name):
@@ -1184,10 +1185,11 @@ reflectable_magic_methods = {
     'pow': '{} ** {}',
     'lshift': '{} << {}',
     'rshift': '{} >> {}',
-    'and': '{} & {}',
-    'or': '{} | {}',
+    'and_': '{} & {}',
+    'or_': '{} | {}',
     'xor': '{} ^ {}',
-    'getitem': '{}[{}]'
+    'getitem': '{}[{}]',
+    'matmul': '{} @ {}',
 }
 
 magic_methods = dict({
