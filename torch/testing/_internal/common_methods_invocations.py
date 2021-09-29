@@ -9152,7 +9152,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.bfloat16),
            sample_inputs_func=sample_inputs_bucketize,
            supports_autograd=False,
-          ),
+           ),
     OpInfo('cat',
            ref=lambda input_seq, dim=0, **kwargs: np.concatenate(input_seq, axis=dim, **kwargs),
            aliases=('concat',),
