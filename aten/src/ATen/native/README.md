@@ -363,9 +363,9 @@ CompositeImplicitAutograd operators must not:
 many backends, like vmap and meta.
 - call `out=` operations. These are impossible to handle for vmap and can cause
 dispatch-to-python objects to lose their subclassing.
-- call operations that do not dispatch. Examples of these operations are
-directly accessing the TensorImpl API to modify the sizes/strides/metadata of a
-Tensor.
+- Change the metadata of a Tensor without performing dispatches. Examples of these
+operations are directly accessing the TensorImpl API to modify the
+sizes/strides/metadata of a Tensor.
 - In the same vein as the last point, `data_ptr` access or `item` access are not
 allowed. These operations do not go through the dispatcher.
 - `copy_` is a marginal case. If you're able to rewrite your operation without

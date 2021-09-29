@@ -8,7 +8,7 @@ from torch.utils._python_dispatch import enable_python_mode
 # TODO: move this into library proper
 @contextlib.contextmanager
 def no_dispatch() -> Iterator[None]:
-    guard = torch._C._DisableTorchDispatch()
+    guard = torch._C._DisableTorchDispatch()  # type: ignore
     try:
         yield
     finally:
@@ -88,7 +88,7 @@ class CompositeCompliantTensor(torch.Tensor):
         # by a CompositeImplicitAutograd operation; if the CompositeImplicitAutograd
         # operator attempts to read from the storage without dispatching then it'll
         # raise a RuntimeError due to it being a meta storage.
-        r = torch.Tensor._make_wrapper_subclass(
+        r = torch.Tensor._make_wrapper_subclass(  # type: ignore
             cls, elem.size(),
             dtype=elem.dtype, layout=elem.layout,
             device=elem.device, requires_grad=elem.requires_grad)
