@@ -1,10 +1,19 @@
+<<<<<<< HEAD
+#include <torch/csrc/jit/mobile/nnc/aot_compiler.h>
+=======
 // (c) Facebook, Inc. and its affiliates. Confidential and proprietary.
 
 #include <aot_compiler.h>
+>>>>>>> 19fdba7164 ([aot_compiler] Add passes, fix long dim)
 
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #include <torch/csrc/jit/ir/ir.h>
+<<<<<<< HEAD
+#include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+=======
 #include <torch/csrc/jit/jit_opt_limit.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
@@ -14,10 +23,17 @@
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 
+>>>>>>> 19fdba7164 ([aot_compiler] Add passes, fix long dim)
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
+<<<<<<< HEAD
+#include <torch/csrc/jit/tensorexpr/graph_opt.h>
+#include <torch/csrc/jit/tensorexpr/ir.h>
+#include <torch/csrc/jit/tensorexpr/kernel.h>
+=======
+>>>>>>> 19fdba7164 ([aot_compiler] Add passes, fix long dim)
 
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
@@ -29,7 +45,11 @@ namespace nnc {
 
 std::vector<int64_t> getConstSizes(const BufPtr b) {
   std::vector<int64_t> r;
+<<<<<<< HEAD
+  for (const auto& dim : b->dims()) {
+=======
   for (auto dim : b->dims()) {
+>>>>>>> 19fdba7164 ([aot_compiler] Add passes, fix long dim)
     LongImmPtr imm_dim = to<LongImm>(dim);
     // TODO: assert it's actually immediate
     int64_t s = imm_dim->value();
@@ -38,13 +58,21 @@ std::vector<int64_t> getConstSizes(const BufPtr b) {
   return r;
 }
 
+<<<<<<< HEAD
+void compileFunction(
+=======
 void get_compiled_function(
+>>>>>>> 19fdba7164 ([aot_compiler] Add passes, fix long dim)
     std::shared_ptr<tensorexpr::TensorExprKernel> kernel,
     Function* func) {
   std::vector<at::Tensor> parameters;
 
   auto const_descriptors = kernel->getConstantDescriptors();
+<<<<<<< HEAD
+  for (const auto& cd : const_descriptors) {
+=======
   for (auto cd : const_descriptors) {
+>>>>>>> 19fdba7164 ([aot_compiler] Add passes, fix long dim)
     auto sizes = getConstSizes(cd.buf);
     at::Tensor const_tensor = at::from_blob(cd.ptr, sizes).clone();
     parameters.push_back(const_tensor);
@@ -71,34 +99,30 @@ void get_compiled_function(
   func->set_output_specs(out_spec);
 }
 
-std::unique_ptr<Function> aot_compile(
+std::pair<std::unique_ptr<Function>, const std::string> aotCompile(
     const std::string& method_name,
     std::shared_ptr<Graph>& g,
-    const std::vector<int64_t>& sizes,
-    std::string* compiled_assembly) {
+    const std::vector<int64_t>& sizes) {
   auto g2 = g->copy();
-  std::cerr << "Input sizes: ";
-  for (auto s : sizes) {
-    std::cerr << s << ", ";
-  }
-  std::cerr << "\n";
+  GRAPH_DEBUG("Input sizes ", sizes);
 
   RemoveTensorMutation(g);
   EliminateDeadCode(g->block());
   g = tensorexpr::removeUnusedSelfArgument(g);
+  GRAPH_DUMP("graph before shape propagation ", g);
 
   std::vector<c10::optional<at::Tensor>> example_inputs = {at::rand(sizes)};
-  g->dump();
   tensorexpr::annotateInputShapes(g, example_inputs);
 
   PropagateShapesOnGraph(g);
   PeepholeOptimize(g, false);
   ConstantPropagation(g);
   PropagateShapesOnGraph(g);
-  g->dump();
+  GRAPH_DUMP("graph after shape propagation ", g);
+
   std::shared_ptr<tensorexpr::TensorExprKernel> kernel =
       std::make_shared<tensorexpr::TensorExprKernel>(g);
-  *compiled_assembly = kernel->getCodeText();
+  const std::string compiled_assembly = kernel->getCodeText();
 
   g = g2;
 
@@ -110,8 +134,8 @@ std::unique_ptr<Function> aot_compile(
   input.dtype_ = c10::ScalarType::Float;
   func->set_input_specs({input});
 
-  get_compiled_function(kernel, func.get());
-  return func;
+  compileFunction(kernel, func.get());
+  return std::make_pair(std::move(func), compiled_assembly);
 }
 
 } // namespace nnc

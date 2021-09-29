@@ -23,6 +23,8 @@ Functions
 .. autofunction:: expm1
 .. autofunction:: exp2
 .. autofunction:: gammaln
+.. autofunction:: gammainc
+.. autofunction:: gammaincc
 .. autofunction:: polygamma
 .. autofunction:: digamma
 .. autofunction:: psi
