@@ -5,8 +5,8 @@
 namespace torch {
 namespace jit {
 
-// Concats multiple linear ops with the same Tensor input
-// into a single linear op.
+// Transposes the weight matrix for frozen linear modules.
+// and converts it into a matmul
 TORCH_API bool FrozenLinearTranspose(std::shared_ptr<Graph>& graph);
 
 } // namespace jit

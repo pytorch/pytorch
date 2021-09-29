@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/passes/frozen_linear_transpose.h>
 #include <torch/csrc/jit/passes/utils/optimization_utils.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <iostream>
 
 namespace torch {
@@ -18,31 +19,31 @@ class TransposeFrozenLinear {
       : graph_(std::move(graph)) {}
 
   bool run() {
-    handleBlockAndSubblocks(graph_->block());
-    return graph_modified;
+    // Can't delete nodes while also iterating over it
+    DepthFirstGraphNodeIterator graph_it(graph_);
+
+    for (auto next_node = graph_it.next(); next_node != nullptr;) {
+      Node* node = next_node;
+      next_node = graph_it.next();
+
+      if (is_constant_linear_op(node)) {
+        replace_linear_with_matmul(node);
+      }
+    }
+    return graph_modified_;
   }
 
   bool is_constant_linear_op(Node* node) {
     if (node->kind() != aten::linear) {
       return false;
     }
-    auto weight = node->namedInput("weight");
-    if (weight->type() == NoneType::get()) {
-      return false;
-    }
 
     // This also filters out out-variants of the linear op.
-    if (nonConstantParameters(node)) {
-      return false;
-    }
-
-    // Op is only profitable on CUDA
-    auto weight_tensor = constant_as<Tensor>(weight).value();
-    return weight_tensor.device().is_cuda();
+    return !nonConstantParameters(node);
   }
 
   void replace_linear_with_matmul(Node* node) {
-    graph_modified = true;
+    graph_modified_ = true;
     Node* matmul = nullptr;
 
     {
@@ -72,28 +73,11 @@ class TransposeFrozenLinear {
     node->destroy();
   };
 
-  void handleBlockAndSubblocks(Block* block) {
-    // Can't delete nodes while also iterating over it
-    std::vector<Node*> constant_linear_nodes;
-
-    for (auto node : block->nodes()) {
-      for (Block* block : node->blocks()) {
-        handleBlockAndSubblocks(block);
-      }
-
-      if (is_constant_linear_op(node)) {
-        constant_linear_nodes.push_back(node);
-      }
-    }
-    for (auto node : constant_linear_nodes) {
-      replace_linear_with_matmul(node);
-    }
-    return;
-  }
+  void handleBlockAndSubblocks(Block* block) {}
 
  private:
   std::shared_ptr<Graph> graph_;
-  bool graph_modified = false;
+  bool graph_modified_ = false;
 };
 } // namespace
 

@@ -1705,7 +1705,6 @@ class TestFrozenOptimizations(JitTestCase):
                 self.assertEqual(mod(inp), scripted_mod(inp))
                 self.assertEqual(mod(inp), scripted_mod(inp))
 
-    @unittest.skipIf(not torch._C.has_cuda, "Optimization currently only run for GPU")
     def test_linear_transpose(self):
         class ModLinear(torch.nn.Module):
             def __init__(self):
@@ -1720,7 +1719,6 @@ class TestFrozenOptimizations(JitTestCase):
         test_val = torch.rand([50, 20])
         self.check_linear_optimizations_2(mod_eager, 1, 0, "transpose_frozen_linear", (test_val,))
 
-    @unittest.skipIf(not torch._C.has_cuda, "Optimization currently only run for GPU")
     def test_linear_non_constant_weight(self):
         class ModLinear(torch.nn.Module):
             def __init__(self):
@@ -1737,31 +1735,23 @@ class TestFrozenOptimizations(JitTestCase):
 
     def check_linear_optimizations_2(self, eager_mod, orig_linears, new_linears, opt_pass, test_vals):
         # TODO: merge with check_linear_optimizations once both diffs land
-        for is_cuda in [False, True]:
-            if is_cuda:
-                mod_to_device = eager_mod.cuda()
-                test_vals_to_device = [t.cuda() if isinstance(t, torch.Tensor) else t for t in test_vals]
-            else:
-                mod_to_device = eager_mod
-                test_vals_to_device = test_vals
+        mod_to_device = eager_mod
+        test_vals_to_device = test_vals
 
-            script_mod = torch.jit.script(mod_to_device)
-            op_graph = script_mod.graph
+        script_mod = torch.jit.script(mod_to_device)
+        op_graph = script_mod.graph
 
-            FileCheck().check_count("aten::linear", orig_linears, exactly=True).run(op_graph)
-            # successively no-ops with non-const inputs
-            self.run_pass(opt_pass, op_graph)
-            FileCheck().check_count("aten::linear", orig_linears, exactly=True).run(op_graph)
+        FileCheck().check_count("aten::linear", orig_linears, exactly=True).run(op_graph)
+        # successively no-ops with non-const inputs
+        self.run_pass(opt_pass, op_graph)
+        FileCheck().check_count("aten::linear", orig_linears, exactly=True).run(op_graph)
 
-            script_mod = torch.jit.freeze(script_mod)
-            op_graph = script_mod.graph
-            self.run_pass(opt_pass, op_graph)
-            if is_cuda:
-                FileCheck().check_count("aten::linear", new_linears, exactly=True).run(op_graph)
-            else:
-                FileCheck().check_count("aten::linear", orig_linears, exactly=True).run(op_graph)
+        script_mod = torch.jit.freeze(script_mod)
+        op_graph = script_mod.graph
+        self.run_pass(opt_pass, op_graph)
+        FileCheck().check_count("aten::linear", new_linears, exactly=True).run(op_graph)
 
-            self.assertEqual(mod_to_device(*test_vals_to_device), script_mod(*test_vals_to_device))
+        self.assertEqual(mod_to_device(*test_vals_to_device), script_mod(*test_vals_to_device))
 
     @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     def test_collapse_adjacent_conversions(self):
