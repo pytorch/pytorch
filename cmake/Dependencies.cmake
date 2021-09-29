@@ -1024,11 +1024,18 @@ if(BUILD_PYTHON)
   endif()
 
   if(PYTHONINTERP_FOUND AND PYTHONLIBS_FOUND)
-    include_directories(SYSTEM ${PYTHON_INCLUDE_DIR})
+    add_library(python::python INTERFACE IMPORTED)
+    set_property(TARGET python::python PROPERTY
+        INTERFACE_INCLUDE_DIRECTORIES ${PYTHON_INCLUDE_DIRS})
+    set_property(TARGET python::python PROPERTY
+        INTERFACE_LINK_LIBRARIES ${PYTHON_LIBRARIES})
+
     caffe2_update_option(USE_NUMPY OFF)
     if(NUMPY_FOUND)
       caffe2_update_option(USE_NUMPY ON)
-      include_directories(SYSTEM ${NUMPY_INCLUDE_DIR})
+      add_library(numpy::numpy INTERFACE IMPORTED)
+      set_property(TARGET numpy::numpy PROPERTY
+          INTERFACE_INCLUDE_DIRECTORIES ${NUMPY_INCLUDE_DIR})
     endif()
     # Observers are required in the python build
     caffe2_update_option(USE_OBSERVERS ON)
@@ -1055,7 +1062,11 @@ else()
             FILES_MATCHING PATTERN "*.h")
 endif()
 message(STATUS "pybind11 include dirs: " "${pybind11_INCLUDE_DIRS}")
-include_directories(SYSTEM ${pybind11_INCLUDE_DIRS})
+add_library(pybind::pybind11 INTERFACE IMPORTED)
+set_property(TARGET pybind::pybind11 PROPERTY
+    INTERFACE_INCLUDE_DIRECTORIES ${pybind11_INCLUDE_DIRS})
+set_property(TARGET pybind::pybind11 PROPERTY
+    INTERFACE_LINK_LIBRARIES python::python)
 
 # ---[ MPI
 if(USE_MPI)

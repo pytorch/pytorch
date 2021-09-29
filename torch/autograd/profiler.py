@@ -654,8 +654,8 @@ def parse_nvprof_trace(path):
     unique = EnforceUnique()
     for row in conn.execute(kernel_query):
         unique.see(row['marker_id'], row['runtime_id'])
-        # 211 is cudaKernelLaunch for cuda >= 9.2; 13 is for older cuda versions
-        assert (row['cbid'] == 211) or (row['cbid'] == 13)
+        # 211 is cudaKernelLaunch for cuda >= 9.2
+        assert (row['cbid'] == 211)
         evt = functions_map[row['marker_id']]
         evt.append_kernel(row['kernel_name'],
                           0,

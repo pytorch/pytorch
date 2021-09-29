@@ -20,9 +20,12 @@ from torch.distributed._sharding_spec import (
 )
 from torch.distributed._sharding_spec._internals import (
     check_tensor,
-    validate_non_overlapping_shards_metadata
+    validate_non_overlapping_shards_metadata,
+    get_split_size,
+    get_chunked_dim_size,
 )
 from torch.types import Number
+from .ops import sharded_linear
 
 # Tracking for sharded tensor objects.
 _sharded_tensor_lock = threading.Lock()
@@ -461,14 +464,14 @@ class ShardedTensor(object):
         remote_devices = self._sharding_spec.placements  # type: ignore[attr-defined]
         chunks = len(remote_devices)
         # split_size computed similar to 'torch.chunk'
-        split_size = (dim_size + chunks - 1) // chunks
+        split_size = get_split_size(dim_size, chunks)
 
         shards_metadata = []
         for idx, remote_device in enumerate(remote_devices):
             rank, local_device = self._parse_and_validate_remote_device(remote_device)
 
             # Adjust the sharding dim for this rank.
-            sharded_dim_size = min(dim_size, split_size * (idx + 1)) - split_size * idx
+            sharded_dim_size = get_chunked_dim_size(dim_size, split_size, idx)
 
             if sharded_dim_size > 0:
                 # Build sharding_metadata.
@@ -547,7 +550,12 @@ class ShardedTensor(object):
         return self._sharding_spec
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
-        raise RuntimeError(f"torch function '{func.__name__}' not supported for ShardedTensor!")
+        if func == torch.nn.functional.linear:
+            return sharded_linear(types, args, kwargs, self._process_group)
+
+        raise RuntimeError(
+            f"torch function '{func.__name__}', with args: {args} and "
+            f"kwargs: {kwargs} not supported for ShardedTensor!")
 
     def metadata(self) -> ShardedTensorMetadata:
         """
@@ -617,7 +625,7 @@ class ShardedTensor(object):
         return self._remote_shards
 
     def __repr__(self):
-        return str(self._metadata)
+        return f'ShardedTensor({self._metadata})'
 
     @dataclass
     class ProcessGroupState:

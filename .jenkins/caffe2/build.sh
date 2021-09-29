@@ -84,20 +84,6 @@ build_args+=("BUILD_TEST=ON")
 build_args+=("INSTALL_TEST=ON")
 build_args+=("USE_ZSTD=ON")
 
-if [[ $BUILD_ENVIRONMENT == *py2-cuda9.0-cudnn7-ubuntu16.04* ]]; then
-  # removing http:// duplicate in favor of nvidia-ml.list
-  # which is https:// version of the same repo
-  sudo rm -f /etc/apt/sources.list.d/nvidia-machine-learning.list
-  curl --retry 3 -o ./nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb https://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu1604/x86_64/nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
-  sudo dpkg -i ./nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
-  sudo apt-key add /var/nvinfer-runtime-trt-repo-5.0.2-ga-cuda9.0/7fa2af80.pub
-  sudo apt-get -qq update
-  sudo apt-get install -y --no-install-recommends libnvinfer5=5.0.2-1+cuda9.0 libnvinfer-dev=5.0.2-1+cuda9.0
-  rm ./nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
-
-  build_args+=("USE_TENSORRT=ON")
-fi
-
 if [[ $BUILD_ENVIRONMENT == *cuda* ]]; then
   build_args+=("USE_CUDA=ON")
   build_args+=("USE_NNPACK=OFF")
