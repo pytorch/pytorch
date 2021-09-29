@@ -182,7 +182,7 @@ def _validate_output_tensor_for_gather(
     dst_rank: int,
     size: torch.Size,
     dst_tensor: Optional[torch.Tensor],
-):
+) -> None:
     if dst_rank == my_rank:
         if dst_tensor is None:
             raise ValueError(
@@ -371,7 +371,7 @@ class ShardedTensor(object):
         self,
         dst: int = 0,
         out: Optional[torch.Tensor] = None,
-    ):
+    ) -> None:
         """
         Creates a full :class:`Tensor` on rank `dst` by gathering all sharded tensors.
 
@@ -405,6 +405,7 @@ class ShardedTensor(object):
         if my_rank == dst:
             dims = len(full_size)
             for shards in gathered_shards:
+                assert shards is not None, f"gathered shards cannot be None on {dst}"
                 for shard in shards:
                     metadata = shard.metadata
                     tensor = shard.tensor.to(curr_device)

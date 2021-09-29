@@ -459,7 +459,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
-    def test_gather(self):
+    def test_gather(self) -> None:
         """ Test _sharded_tensor.gather(...) """
 
         spec = ChunkShardingSpec(
@@ -1223,7 +1223,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
-    def test_gather(self):
+    def test_gather(self) -> None:
         """ Test _sharded_tensor.gather(...) """
 
         spec = EnumerableShardingSpec([
