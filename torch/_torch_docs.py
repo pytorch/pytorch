@@ -644,9 +644,6 @@ add_docstr(torch.any,
            r"""
 any(input) -> Tensor
 
-Args:
-    {input}
-
 Tests if any element in :attr:`input` evaluates to `True`.
 
 .. note:: This function matches the behaviour of NumPy in returning

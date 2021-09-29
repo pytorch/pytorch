@@ -330,10 +330,11 @@ def einsum(*args):
 # This wrapper exists to support variadic args.
 if TYPE_CHECKING:
     # The JIT doesn't understand Union, so only add type annotation for mypy
-    def meshgrid(*tensors: Union[Tensor, List[Tensor]]) -> Tuple[Tensor, ...]:
-        return _meshgrid(*tensors)
+    def meshgrid(*tensors: Union[Tensor, List[Tensor]],
+                 indexing: Optional[str] = None) -> Tuple[Tensor, ...]:
+        return _meshgrid(*tensors, indexing=indexing)
 else:
-    def meshgrid(*tensors):
+    def meshgrid(*tensors, indexing: Optional[str] = None) -> Tuple[Tensor, ...]:
         r"""Creates grids of coordinates specified by the 1D inputs in `attr`:tensors.
 
         This is helpful when you want to visualize data over some
@@ -351,10 +352,11 @@ else:
             single element.
 
         .. warning::
-            `torch.meshgrid` has the same behavior as calling
-            `numpy.meshgrid(..., indexing='ij')`, and in the future
-            `torch.meshgrid` will also support the `indexing`
-            argument.
+            `torch.meshgrid(*tensors)` currently has the same behavior
+            as calling `numpy.meshgrid(*arrays, indexing='ij')`.
+
+            In the future `torch.meshgrid` will transition to
+            `indexing='xy'` as the default.
 
             https://github.com/pytorch/pytorch/issues/50276 tracks
             this issue with the goal of migrating to NumPy's behavior.
@@ -367,6 +369,17 @@ else:
         Args:
             tensors (list of Tensor): list of scalars or 1 dimensional tensors. Scalars will be
                 treated as tensors of size :math:`(1,)` automatically
+
+            indexing: (str, optional): the indexing mode, either "xy"
+                or "ij", defaults to "ij". See warning for future changes.
+
+                If "xy" is selected, the first dimension corresponds
+                to the cardinality of the second input and the second
+                dimension corresponds to the cardinality of the first
+                input.
+
+                If "ij" is selected, the dimensions are in the same
+                order as the cardinality of the inputs.
 
         Returns:
             seq (sequence of Tensors): If the input has :math:`N`
@@ -382,7 +395,7 @@ else:
             Observe the element-wise pairings across the grid, (1, 4),
             (1, 5), ..., (3, 6). This is the same thing as the
             cartesian product.
-            >>> grid_x, grid_y = torch.meshgrid(x, y)
+            >>> grid_x, grid_y = torch.meshgrid(x, y, indexing='ij')
             >>> grid_x
             tensor([[1, 1, 1],
                     [2, 2, 2],
@@ -403,7 +416,7 @@ else:
             >>> import matplotlib.pyplot as plt
             >>> xs = torch.linspace(-5, 5, steps=100)
             >>> ys = torch.linspace(-5, 5, steps=100)
-            >>> x, y = torch.meshgrid(xs, ys)
+            >>> x, y = torch.meshgrid(xs, ys, indexing='xy')
             >>> z = torch.sin(torch.sqrt(x * x + y * y))
             >>> ax = plt.axes(projection='3d')
             >>> ax.plot_surface(x.numpy(), y.numpy(), z.numpy())
@@ -414,16 +427,22 @@ else:
             :width: 512
 
         """
-        return _meshgrid(*tensors)
+        return _meshgrid(*tensors, indexing=indexing)
 
 
-def _meshgrid(*tensors):
+def _meshgrid(*tensors, indexing: Optional[str]):
     if has_torch_function(tensors):
-        return handle_torch_function(meshgrid, tensors, *tensors)
+        return handle_torch_function(meshgrid, tensors, *tensors, indexing=indexing)
     if len(tensors) == 1 and isinstance(tensors[0], (list, tuple)):
         # the old interface of passing the operands as one list argument
         tensors = tensors[0]  # type: ignore[assignment]
-    return _VF.meshgrid(tensors)  # type: ignore[attr-defined]
+
+    # Continue allowing call of old method that takes no indexing
+    # kwarg for forward compatibility reasons.
+    #
+    # Remove this two weeks after landing.
+    kwargs = {} if indexing is None else {'indexing': indexing}
+    return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
 
 
 def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
@@ -627,9 +646,6 @@ def istft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
 
     return _VF.istft(input, n_fft, hop_length, win_length, window, center,  # type: ignore[attr-defined]
                      normalized, onesided, length, return_complex)
-
-
-del torch.unique_dim
 
 
 if TYPE_CHECKING:

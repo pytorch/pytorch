@@ -1,23 +1,20 @@
-from .fake_quantize import (
-    # FakeQuantize (for qat)
-    default_fake_quant,
-    default_weight_fake_quant,
-    default_symmetric_fixed_qparams_fake_quant,
-    default_affine_fixed_qparams_fake_quant,
-    default_per_channel_weight_fake_quant,
-    default_histogram_fake_quant,
-)
-from .quantize import (
-    add_observer_,
-    add_quant_dequant,
-    convert,
-    get_observer_dict,
-    prepare,
-    prepare_qat,
-    propagate_qconfig_,
-    quantize,
-    quantize_dynamic,
-    quantize_qat,
-    register_activation_post_process_hook,
-    swap_module,
-)  # noqa: F401
+# flake8: noqa: F403
+
+from .fake_quantize import *  # noqa: F403
+from .fuse_modules import fuse_modules  # noqa: F403
+from .fuser_method_mappings import *  # noqa: F403
+from .observer import *  # noqa: F403
+from .qconfig import *  # noqa: F403
+from .quant_type import *  # noqa: F403
+from .quantization_mappings import *  # noqa: F403
+from .quantize import *  # noqa: F403
+from .quantize_jit import *  # noqa: F403
+from .stubs import *  # noqa: F403
+
+def default_eval_fn(model, calib_data):
+    r"""
+    Default evaluation function takes a torch.utils.data.Dataset or a list of
+    input Tensors and run the model on the dataset
+    """
+    for data, target in calib_data:
+        model(data)

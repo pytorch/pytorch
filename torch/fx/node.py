@@ -24,7 +24,9 @@ Argument = Optional[Union[
     BaseArgumentTypes
 ]]
 
-_side_effectful_functions: Set[Callable] = {torch._assert}
+_side_effectful_functions: Set[Callable] = {
+    torch._assert, torch.ops.profiler._record_function_enter,
+    torch.ops.profiler._record_function_exit}
 
 # this is fixed on master, WAR for 1.5
 def _find_module_of_method(orig_method: Callable[..., Any]) -> str:

@@ -1,8 +1,9 @@
 #ifndef THC_SCAN_UTILS_INC
 #define THC_SCAN_UTILS_INC
 
+#include <ATen/ceil_div.h>
+#include <ATen/cuda/DeviceUtils.cuh>
 #include <THC/THCAsmUtils.cuh>
-#include <THC/THCDeviceUtils.cuh>
 #include <c10/macros/Macros.h>
 
 // Collection of in-kernel scan / prefix sum utilities
@@ -95,7 +96,7 @@ __device__ void exclusivePrefixScan(T* smem, T in, T* out, T* carry, BinaryFunct
 template <typename T, bool KillWARDependency, class BinaryFunction>
 __device__ void inclusiveBinaryPrefixScan(T* smem, bool in, T* out, BinaryFunction binop) {
   // Within-warp, we use warp voting.
-#if defined (__HIP_PLATFORM_HCC__)
+#if defined (USE_ROCM)
   unsigned long long int vote = WARP_BALLOT(in);
   T index = __popcll(getLaneMaskLe() & vote);
   T carry = __popcll(vote);
@@ -149,7 +150,7 @@ __device__ void exclusiveBinaryPrefixScan(T* smem, bool in, T* out, T* carry, Bi
   *out -= (T) in;
 
   // The outgoing carry for all threads is the last warp's sum
-  *carry = smem[THCCeilDiv<int>(blockDim.x, C10_WARP_SIZE) - 1];
+  *carry = smem[at::ceil_div<int>(blockDim.x, C10_WARP_SIZE) - 1];
 
   if (KillWARDependency) {
     __syncthreads();
