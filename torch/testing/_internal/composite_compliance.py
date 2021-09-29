@@ -77,13 +77,6 @@ def is_inplace_view_fn(func):
         't_',
     }
 
-def get_magic_value(elem):
-    if torch.is_floating_point(elem) or torch.is_complex(elem):
-        return 901234567890
-    if elem.dtype == torch.bool:
-        return True
-    return torch.iinfo(elem.dtype).max
-
 class CompositeCompliantTensor(torch.Tensor):
     elem: torch.Tensor
 
