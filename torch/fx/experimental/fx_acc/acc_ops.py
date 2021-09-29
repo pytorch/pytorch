@@ -28,7 +28,7 @@ def linear(*, input, weight, bias):
 @register_acc_op
 def quantized_linear(*, input, weight, bias, acc_out_ty=None):
     assert acc_out_ty is not None
-    qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams"),
+    qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
     return nn.quantized.functional.linear(
         input,
         weight,
