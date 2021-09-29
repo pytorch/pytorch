@@ -235,7 +235,7 @@ class TestEagerFusion(TestCase):
         compiled_f = compiled_function(f, _nop_compile, _nop_compile)
         inp = [torch.randn(3, 3, requires_grad=True), torch.randn(3, 3)]
         ref_out, ref_grad = _outs_and_grads(f, inp)
-        test_out, test_grad = _outs_and_grads(f, inp)
+        test_out, test_grad = _outs_and_grads(compiled_f, inp)
         self.assertEqual(ref_out, test_out)
         self.assertEqual(ref_grad, test_grad)
 
@@ -245,7 +245,7 @@ class TestEagerFusion(TestCase):
         compiled_f = compiled_function(f, _nop_compile, _nop_compile)
         inp = [torch.randn(3, 3, requires_grad=True), torch.randn(3, 3)]
         ref_out, ref_grad = _outs_and_grads(f, inp)
-        test_out, test_grad = _outs_and_grads(f, inp)
+        test_out, test_grad = _outs_and_grads(compiled_f, inp)
         self.assertEqual(ref_out, test_out)
         self.assertEqual(ref_grad, test_grad)
 
@@ -255,7 +255,7 @@ class TestEagerFusion(TestCase):
         compiled_f = compiled_function(f, _nop_compile, _nop_compile)
         inp = [torch.randn(3, 3, requires_grad=True), torch.randn(3, 3)]
         ref_out, ref_grad = _outs_and_grads(f, inp)
-        test_out, test_grad = _outs_and_grads(f, inp)
+        test_out, test_grad = _outs_and_grads(compiled_f, inp)
         self.assertEqual(ref_out, test_out)
         self.assertEqual(ref_grad, test_grad)
 
