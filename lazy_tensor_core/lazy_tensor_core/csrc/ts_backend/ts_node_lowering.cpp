@@ -80,19 +80,19 @@ class TSNodeLowering : public NodeLowering {
       auto generic_slice = ir::NodeCast<ir::ops::GenericSlice>(
           node, *ir::ops::ltc_generic_slice);
       const ir::Output& argument = node->operand(0);
-      return lazy_tensors::Shape(argument.shape().element_type(),
+      return lazy_tensors::Shape(GetShapeFromTsOutput(argument).element_type(),
                                  generic_slice->sizes());
     }
     if (node->op() == *ir::ops::ltc_update_slice) {
       const ir::Output& argument = node->operand(0);
-      return argument.shape();
+      return GetShapeFromTsOutput(argument);
     }
     switch (node->op().op) {
       case at::aten::expand: {
         auto expand =
             ir::NodeCast<ir::ops::Expand>(node, ir::OpKind(at::aten::expand));
         const ir::Output& argument = node->operand(0);
-        return lazy_tensors::Shape(argument.shape().element_type(),
+        return lazy_tensors::Shape(GetShapeFromTsOutput(argument).element_type(),
                                    expand->size());
       }
       case at::aten::embedding_dense_backward: {
@@ -129,7 +129,7 @@ class TSNodeLowering : public NodeLowering {
       case at::aten::leaky_relu_backward:
       case at::aten::nll_loss_backward: {
         const ir::Output& input = node->operand(1);
-        return input.shape();
+        return GetShapeFromTsOutput(input);
       }
       case at::aten::native_batch_norm: {
         return InferBatchNorm(node);
@@ -145,7 +145,7 @@ class TSNodeLowering : public NodeLowering {
         auto permute =
             ir::NodeCast<ir::ops::Permute>(node, ir::OpKind(at::aten::permute));
         const ir::Output& argument = node->operand(0);
-        return ir::ops::Permute::MakePermuteShape(argument.shape(),
+        return ir::ops::Permute::MakePermuteShape(GetShapeFromTsOutput(argument),
                                                   permute->dims());
       }
       // activation and unary op do not change shape
@@ -155,7 +155,7 @@ class TSNodeLowering : public NodeLowering {
       case at::aten::relu_:
       case at::aten::sqrt: {
         const ir::Output& argument = node->operand(0);
-        return argument.shape();
+        return GetShapeFromTsOutput(argument);
       }
       case at::aten::repeat: {
         return InferRepeat(
@@ -177,7 +177,7 @@ class TSNodeLowering : public NodeLowering {
         auto constant_pad_nd = ir::NodeCast<ir::ops::ConstantPadNd>(
             node, ir::OpKind(at::aten::constant_pad_nd));
         const ir::Output& argument = node->operand(0);
-        const lazy_tensors::Shape& argument_shape = argument.shape();
+        const lazy_tensors::Shape& argument_shape = GetShapeFromTsOutput(argument);
         const auto argument_dimensions = argument_shape.dimensions();
         const auto& pad = constant_pad_nd->pad();
         LTC_CHECK_EQ(argument_dimensions.size() * 2, pad.size());
@@ -202,7 +202,7 @@ class TSNodeLowering : public NodeLowering {
         auto mean = ir::NodeCast<ir::ops::Mean>(
             node, ir::OpKind(at::aten::mean));
         const ir::Output& argument = node->operand(0);
-        const lazy_tensors::Shape& argument_shape = argument.shape();
+        const lazy_tensors::Shape& argument_shape = GetShapeFromTsOutput(argument);
         lazy_tensors::PrimitiveType element_type =
         mean->dtype_ ? torch_lazy_tensors::TensorTypeToLtcType(*mean->dtype_)
                      : argument_shape.element_type();
@@ -382,8 +382,8 @@ class TSNodeLowering : public NodeLowering {
     const ir::Output& rhs = node->operand(1);
     return lazy_tensors::Shape(
         lazy_tensors::PrimitiveType::PRED,
-        Helpers::GetPromotedShape(lhs.shape().dimensions(),
-                                  rhs.shape().dimensions()));
+        Helpers::GetPromotedShape(GetShapeFromTsOutput(lhs).dimensions(),
+                                  GetShapeFromTsOutput(rhs).dimensions()));
   }
 
   static lazy_tensors::Shape InferBatchNorm(const ir::Node* node) {
@@ -391,21 +391,21 @@ class TSNodeLowering : public NodeLowering {
     const ir::Output& running_mean = node->operand(3);
     const ir::Output& running_var = node->operand(4);
     return lazy_tensors::ShapeUtil::MakeTupleShape(
-        {input.shape(), running_mean.shape(), running_var.shape()});
+        {GetShapeFromTsOutput(input), GetShapeFromTsOutput(running_mean), GetShapeFromTsOutput(running_var)});
   }
 
   static lazy_tensors::Shape InferBatchNormBackward(const ir::Node* node) {
     const ir::Output& input = node->operand(1);
     const ir::Output& weight = node->operand(2);
     return lazy_tensors::ShapeUtil::MakeTupleShape(
-        {input.shape(), weight.shape(), weight.shape()});
+        {GetShapeFromTsOutput(input), GetShapeFromTsOutput(weight), GetShapeFromTsOutput(weight)});
   }
 
   static lazy_tensors::Shape InferNllLossForward(
       const ir::ops::NllLossForward* node) {
     static constexpr size_t kDimension2D = 2;
 
-    auto& inputShape = node->operand(0).shape();
+    auto inputShape = GetShapeFromTsOutput(node->operand(0));
     auto scalarShape = lazy_tensors::Shape(inputShape.element_type(), {});
     if (node->reduction() == ReductionMode::kNone &&
         inputShape.dimensions_size() == kDimension2D) {
@@ -422,8 +422,8 @@ class TSNodeLowering : public NodeLowering {
   static lazy_tensors::Shape InferBmm(const ir::Node* node) {
     const ir::Output& tensor1 = node->operand(0);
     const ir::Output& tensor2 = node->operand(1);
-    const lazy_tensors::Shape& tensor1_shape = tensor1.shape();
-    const lazy_tensors::Shape& tensor2_shape = tensor2.shape();
+    const lazy_tensors::Shape& tensor1_shape = GetShapeFromTsOutput(tensor1);
+    const lazy_tensors::Shape& tensor2_shape = GetShapeFromTsOutput(tensor2);
     LTC_CHECK_EQ(tensor1_shape.rank(), 3);
     LTC_CHECK_EQ(tensor2_shape.rank(), 3);
     lazy_tensors::int64 b = tensor1_shape.dimensions(0);
@@ -438,10 +438,10 @@ class TSNodeLowering : public NodeLowering {
   static lazy_tensors::Shape InferCat(const ir::ops::Cat* node) {
     const auto& operands = node->operands();
     LTC_CHECK(!operands.empty());
-    lazy_tensors::Shape output_shape = operands[0].shape();
+    lazy_tensors::Shape output_shape = GetShapeFromTsOutput(operands[0]);
     size_t cat_dimension_size = 0;
     for (const ir::Output& operand : operands) {
-      cat_dimension_size += operand.shape().dimensions(node->dim());
+      cat_dimension_size += GetShapeFromTsOutput(operand).dimensions(node->dim());
     }
     output_shape.set_dimensions(node->dim(), cat_dimension_size);
     return output_shape;
@@ -492,7 +492,7 @@ class TSNodeLowering : public NodeLowering {
   static lazy_tensors::Shape InferEmbeddingDenseBackward(
       const ir::ops::TSEmbeddingDenseBackward* node) {
     const ir::Output& grad_output = node->operand(0);
-    const lazy_tensors::Shape& grad_output_shape = grad_output.shape();
+    const lazy_tensors::Shape& grad_output_shape = GetShapeFromTsOutput(grad_output);
     return lazy_tensors::Shape(
         grad_output_shape.element_type(),
         {node->num_weights(),
@@ -503,9 +503,9 @@ class TSNodeLowering : public NodeLowering {
       const ir::ops::IndexSelect* node) {
     const ir::Output& input = node->operand(0);
     const ir::Output& index = node->operand(1);
-    const lazy_tensors::Shape& index_shape = index.shape();
+    const lazy_tensors::Shape& index_shape = GetShapeFromTsOutput(index);
     LTC_CHECK_EQ(index_shape.rank(), 1);
-    const lazy_tensors::Shape& input_shape = input.shape();
+    const lazy_tensors::Shape& input_shape = GetShapeFromTsOutput(input);
     const auto input_dimensions = input_shape.dimensions();
     std::vector<lazy_tensors::int64> output_dimensions(input_dimensions.begin(),
                                                        input_dimensions.end());
@@ -518,8 +518,8 @@ class TSNodeLowering : public NodeLowering {
   static lazy_tensors::Shape InferMm(const ir::Node* node) {
     const ir::Output& tensor1 = node->operand(0);
     const ir::Output& tensor2 = node->operand(1);
-    const lazy_tensors::Shape& tensor1_shape = tensor1.shape();
-    const lazy_tensors::Shape& tensor2_shape = tensor2.shape();
+    const lazy_tensors::Shape& tensor1_shape = GetShapeFromTsOutput(tensor1);
+    const lazy_tensors::Shape& tensor2_shape = GetShapeFromTsOutput(tensor2);
     LTC_CHECK_EQ(tensor1_shape.rank(), 2);
     LTC_CHECK_EQ(tensor2_shape.rank(), 2);
     lazy_tensors::int64 n = tensor1_shape.dimensions(0);
@@ -531,7 +531,7 @@ class TSNodeLowering : public NodeLowering {
 
   static lazy_tensors::Shape InferRepeat(const ir::ops::Repeat* repeat) {
     const ir::Output& input = repeat->operand(0);
-    const lazy_tensors::Shape& input_shape = input.shape();
+    const lazy_tensors::Shape& input_shape = GetShapeFromTsOutput(input);
     const auto& repeats = repeat->repeats();
     LTC_CHECK_GE(repeats.size(), input_shape.rank());
 
@@ -549,7 +549,7 @@ class TSNodeLowering : public NodeLowering {
 
   static lazy_tensors::Shape InferSqueeze(const ir::ops::Squeeze* squeeze) {
     const ir::Output& argument = squeeze->operand(0);
-    const lazy_tensors::Shape& argument_shape = argument.shape();
+    const lazy_tensors::Shape& argument_shape = GetShapeFromTsOutput(argument);
     const auto output_sizes =
         BuildSqueezedDimensions(argument_shape.dimensions(), squeeze->dim());
     return lazy_tensors::Shape(argument_shape.element_type(), output_sizes);
@@ -558,9 +558,9 @@ class TSNodeLowering : public NodeLowering {
   static lazy_tensors::Shape InferStack(const ir::ops::Stack* stack) {
     const auto& inputs = stack->operands();
     LTC_CHECK(!inputs.empty());
-    const lazy_tensors::Shape& input_shape = inputs[0].shape();
+    const lazy_tensors::Shape& input_shape = GetShapeFromTsOutput(inputs[0]);
     for (const ir::Output& input : inputs) {
-      LTC_CHECK_EQ(input.shape(), input_shape);
+      LTC_CHECK_EQ(GetShapeFromTsOutput(input), input_shape);
     }
     const auto input_dimensions = input_shape.dimensions();
     std::vector<lazy_tensors::int64> output_dimensions(input_dimensions.begin(),
@@ -574,7 +574,7 @@ class TSNodeLowering : public NodeLowering {
 
   static lazy_tensors::Shape InferSum(const ir::ops::Sum* sum) {
     const ir::Output& argument = sum->operand(0);
-    const lazy_tensors::Shape& argument_shape = argument.shape();
+    const lazy_tensors::Shape& argument_shape = GetShapeFromTsOutput(argument);
     const auto argument_dimensions = argument_shape.dimensions();
     std::vector<lazy_tensors::int64> output_dimensions;
     const auto& sum_dimensions = sum->dimensions();
@@ -637,7 +637,7 @@ class TSNodeLowering : public NodeLowering {
     torch::jit::Value* destination =
         GenerateClone(loctx()->GetOutputOp(node->operand(0)));
     const ir::Output& input_op = node->operand(1);
-    const lazy_tensors::Shape& input_shape = input_op.shape();
+    const lazy_tensors::Shape& input_shape = GetShapeFromTsOutput(input_op);
     const auto input_dimensions = input_shape.dimensions();
     std::vector<torch::jit::NamedValue> dest_arguments;
     dest_arguments.emplace_back(destination);
@@ -840,7 +840,7 @@ class TSNodeLowering : public NodeLowering {
     torch::jit::Value* base = loctx()->GetOutputOp(input);
     const auto& base_indices = node->base_indices();
     const auto& sizes = node->sizes();
-    const lazy_tensors::Shape& input_shape = input.shape();
+    const lazy_tensors::Shape& input_shape = GetShapeFromTsOutput(input);
     LTC_CHECK_EQ(sizes.size(), base_indices.size());
     LTC_CHECK_EQ(input_shape.rank(), base_indices.size());
     for (size_t dim = 0; dim < base_indices.size(); ++dim) {
@@ -1045,7 +1045,7 @@ class TSNodeLowering : public NodeLowering {
         GenerateClone(loctx()->GetOutputOp(node->operand(0)));
     const auto& base_indices = node->base_indices();
     const ir::Output& source_argument = node->operand(1);
-    const lazy_tensors::Shape& source_shape = source_argument.shape();
+    const lazy_tensors::Shape& source_shape = GetShapeFromTsOutput(source_argument);
     LTC_CHECK_EQ(source_shape.rank(), base_indices.size());
     torch::jit::Value* base = dest;
     for (size_t dim = 0; dim < base_indices.size(); ++dim) {
