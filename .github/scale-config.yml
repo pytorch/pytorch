@@ -25,7 +25,7 @@ runner_types:
   linux.8xlarge.nvidia.gpu:
     instance_type: g3.8xlarge
     os: linux
-    max_available: 50
+    max_available: 100
     disk_size: 150
   linux.16xlarge.nvidia.gpu:
     instance_type: g3.16xlarge
