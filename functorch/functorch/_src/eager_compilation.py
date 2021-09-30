@@ -1,10 +1,12 @@
 from functorch import make_fx
+import time
 import torch
 import torch.nn as nn
-from functorch import make_fx, grad, nnc_jit, nnc_compile, vmap, make_nnc, vjp, make_functional, FunctionalModule
+from functorch import make_functional_with_buffers, make_fx
 from torch.fx.node import map_arg
 import torch.fx as fx
 import torch.utils._pytree as pytree
+import torch.utils.dlpack
 from torch.fx.passes import graph_drawer
 import os
 
@@ -82,9 +84,11 @@ def default_partition(fx_module: fx.GraphModule, _joint_inputs):
 
 def create_joint_forward_backward(fn):
     def joint_forward_backward(primals, tangents):
-        primals = pytree.tree_map(lambda x: x.requires_grad_(), primals)
         out = fn(*primals)
-        backward_out = torch.autograd.grad(out, primals, grad_outputs=tangents, create_graph=True, allow_unused=True)
+        primals = [p for p in pytree.tree_flatten(primals)[0] if p.requires_grad]
+        backward_out = []
+        if primals:
+            backward_out = torch.autograd.grad(out, primals, grad_outputs=tangents, create_graph=True, allow_unused=True)
         return out, backward_out
     return joint_forward_backward
 
@@ -140,7 +144,10 @@ def create_compiled_function(flat_fn, fw_compiler, bw_compiler, partition_fn):
             out = compiled_bw(*ctx.activations, *contiguous_args)
             if not isinstance(out, list):
                 out = [out]
-            return tuple(out)
+            out_iter = iter(out)
+            grad_out = [next(out_iter) if p else None for p in ctx.needs_input_grad]
+            return tuple(grad_out)
+        
     return CompiledFunction
 
 
@@ -212,14 +219,20 @@ def tvm_function(fn, name):
     return compiled_function(fn, partial(tvm_compile, name=f'fw_{name}'), partial(tvm_compile, name=f'bw_{name}'))
 
 def compiled_module(mod, fw_compiler, bw_compiler, partition_fn=default_partition):
-    func_mod, params = make_functional(mod)
+    func_mod, params, buffers = make_functional_with_buffers(mod)
     compiled_f = compiled_function(func_mod, fw_compiler, bw_compiler, partition_fn)
+
     class CompiledModule(nn.Module):
         def __init__(self):
             super(CompiledModule, self).__init__()
             self.orig_module = mod
 
         def forward(self, *args, **kwargs):
-            return compiled_f(tuple(self.orig_module.parameters()), *args, **kwargs)
+            return compiled_f(
+                tuple(self.orig_module.parameters()),
+                tuple(self.orig_module.buffers()),
+                *args,
+                **kwargs
+            )
 
     return CompiledModule()
