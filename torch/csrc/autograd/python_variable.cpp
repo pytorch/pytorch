@@ -154,12 +154,19 @@ static bool check_has_torch_dispatch(PyObject *obj) {
   );
 }
 
-static PyObject* getXLATensorClass() {
-  static const char* python_xla_tensor_name = "XLATensor";
-  static PyObject* xla_tensor_class = py::globals().contains(python_xla_tensor_name) ? 
-    py::globals()[python_xla_tensor_name].ptr() : nullptr;
-  return xla_tensor_class;
-};
+static std::unordered_map<c10::Device, PyObject*> device_to_py_ten_class_;
+
+void RegisterPythonTensorClass(std::string device, PyObject* python_tensor_class) {
+  // TODO: needs to be threadsafe
+  c10::Device dev(device);
+  dev.set_index(0);
+  device_to_py_ten_class_[device] = python_tensor_class;
+}
+
+static PyObject* getPythonTensorClass(c10::Device d) {
+  d.set_index(0);
+  return device_to_py_ten_class_[d];
+}
 
 // TODO: Make this take Variable by const reference
 PyObject * THPVariable_Wrap(at::TensorBase var)
@@ -207,9 +214,9 @@ PyObject * THPVariable_Wrap(at::TensorBase var)
     }
   }
 
-  if (var.is_xla() && getXLATensorClass()) {
+  if (auto clazz = getPythonTensorClass(var.device())) {
       return THPVariable_NewWithVar(
-        (PyTypeObject*)getXLATensorClass(), std::move(var), status);
+        (PyTypeObject*)clazz, std::move(var), status);
   }
 
   return THPVariable_NewWithVar(
