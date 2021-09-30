@@ -101,12 +101,11 @@ c10::optional<AutocastScope> parseAutocast(
           dtype = ret.value();
         }
       }
+      TORCH_CHECK(enabled.has_value(), "Autocast missing _enabled attribute");
       TORCH_CHECK(
-          enabled.has_value(), "Autocast missing _enabled attribute");
-      TORCH_CHECK(
-          dtype != c10::ScalarType::Undefined, "Autocast missing fast_dtype attribute");
-      TORCH_CHECK(
-          !device.empty(), "Autocast missing device attribute");
+          dtype != c10::ScalarType::Undefined,
+          "Autocast missing fast_dtype attribute");
+      TORCH_CHECK(!device.empty(), "Autocast missing device attribute");
       if (device == "cuda") {
         scope.context.enabled = enabled.value();
         scope.context.scalar_type = dtype;
@@ -114,7 +113,8 @@ c10::optional<AutocastScope> parseAutocast(
         scope.context.cpu_enabled = enabled.value();
         scope.context.cpu_scalar_type = dtype;
       } else {
-        TORCH_INTERNAL_ASSERT(false, "unrecognized device for autocast pass: ", device);
+        TORCH_INTERNAL_ASSERT(
+            false, "unrecognized device for autocast pass: ", device);
       }
       return scope;
     } else {
