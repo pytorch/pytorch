@@ -1470,12 +1470,12 @@ Tensor matmul(
   const auto has_out = out_opt.has_value();
 
   if (dim_tensor1 == 1 && dim_tensor2 == 1) {
-    return has_out ? at::dot_out(tensor1, tensor2, *out_opt) : tensor1.dot(tensor2);
+    return has_out ? at::dot_out(*out_opt, tensor1, tensor2) : tensor1.dot(tensor2);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 1) {
-    return has_out ? at::mv_out(tensor1, tensor2, *out_opt) : tensor1.mv(tensor2);
+    return has_out ? at::mv_out(*out_opt, tensor1, tensor2) : tensor1.mv(tensor2);
   } else if (dim_tensor1 == 1 && dim_tensor2 == 2) {
     // optimization: use mv instead of mm by calling mv with swapped (and transposed) args
-    return has_out ? at::mv_out(tensor2.t(), tensor1, *out_opt) : tensor2.t().mv(tensor1);
+    return has_out ? at::mv_out(*out_opt, tensor2.t(), tensor1) : tensor2.t().mv(tensor1);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 2) {
     return has_out ? at::mm_out(*out_opt, tensor1, tensor2) : tensor1.mm(tensor2);
   } else if (dim_tensor1 >= 3 && (dim_tensor2 == 1 || dim_tensor2 == 2)) {
@@ -1497,7 +1497,7 @@ Tensor matmul(
     if (has_out) {
       const auto output = is_tensor2_matrix
                             ? at::_unsafe_view(at::mm_out(*out_opt, t1, tensor2), output_size)
-                            : at::_unsafe_view(at::native::mv_out(t1, tensor2, *out_opt), output_size);
+                            : at::_unsafe_view(at::mv_out(*out_opt, t1, tensor2), output_size);
       return out_opt->set_(output);
     } else {
       if (is_tensor2_matrix) {
@@ -1577,7 +1577,7 @@ Tensor matmul(
 
 Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
   auto maybe_outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
-  auto result = at::native::matmul(c10::nullopt, tensor1, tensor2);
+  auto result = at::matmul(c10::nullopt, tensor1, tensor2);
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
 }
@@ -1591,7 +1591,7 @@ Tensor& matmul_out(const Tensor & tensor1, const Tensor & tensor2, Tensor &resul
 
 // torch.linalg.matmul, alias for torch.matmul
 Tensor linalg_matmul(const Tensor & tensor1, const Tensor & tensor2) {
-  return at::native::matmul(tensor1, tensor2);
+  return at::matmul(tensor1, tensor2);
 }
 
 Tensor& linalg_matmul_out(const Tensor & tensor1, const Tensor & tensor2, Tensor &result) {

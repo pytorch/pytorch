@@ -1073,9 +1073,7 @@ def sample_inputs_linalg_det_singular(op_info, device, dtype, requires_grad):
             lu, pivs = x.lu()
             p, l, u = torch.lu_unpack(lu, pivs)
             u_diag_abs = u.diagonal(0, -2, -1).abs()
-            u_diag_abs_largest = u_diag_abs.max(dim=-1, keepdim=True).values
             u_diag_abs_smallest_idxs = torch.topk(u_diag_abs, k=(n - rank), largest=False).indices
-            u.diagonal(0, -2, -1).div_(u_diag_abs_largest)
             u.diagonal(0, -2, -1)[..., u_diag_abs_smallest_idxs] = torch.finfo(dtype).eps
 
             matrix = p @ l @ u
@@ -8417,7 +8415,8 @@ op_db: List[OpInfo] = [
     OpInfo('__rmatmul__',
            op=torch.Tensor.__rmatmul__,
            dtypes=floating_types(),
-           dtypesIfCPU=all_types_and_complex_and(torch.bfloat16),
+           dtypesIfCPU=all_types_and_complex_and(torch.bfloat16, torch.float16),
+           supports_forward_ad=True,
            dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else [],
                                            torch.complex64, torch.complex128),
            backward_dtypesIfCUDA=floating_types_and(torch.float16,
