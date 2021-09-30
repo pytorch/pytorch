@@ -673,30 +673,22 @@ void Conv2dOpContext::conv2d_sliding_window(
         shader,
         global_size,
         adaptive_work_group_size(global_size),
-        // Write-only access bypasses synchronization but inserts appropriate
-        // barriers if necessary.
+        // Shader parameters
+        block,
+        // Textures
         v_output.image(
             command_buffer,
             vTensor::Stage::Compute,
             vTensor::Access::Write),
-        // Read-only access is implied on const tensors and triggers an async
-        // synchronization if necessary.
         v_input.image(
             command_buffer,
             vTensor::Stage::Compute),
-        // Read-only access is implied on const tensors and triggers an async
-        // synchronization if necessary.
         packed_.v_weight.image(
             command_buffer,
             vTensor::Stage::Compute),
-        // Read-only access is implied on const tensors and triggers an async
-        // synchronization if necessary.
         packed_.v_bias.image(
             command_buffer,
-            vTensor::Stage::Compute),
-        // Object lifetime is managed by the resource pool.
-        // It is OK not to keep track of the handle.
-        context->resource().pool.uniform(block).object);
+            vTensor::Stage::Compute));
   }
   command_pool.submit(context->gpu().queue, command_buffer);
 }
@@ -755,14 +747,16 @@ void Conv2dOpContext::conv2d_winograd_2_3(
         VK_KERNEL(transform_winograd_2_3_sh),
         v_input_winograd.extents(),
         adaptive_work_group_size(v_input_winograd.extents()),
+        // Shader parameters
+        transform_block,
+        // Textures
         v_input_winograd.image(
             command_buffer,
             vTensor::Stage::Compute,
             vTensor::Access::Write),
         v_input.image(
             command_buffer,
-            vTensor::Stage::Compute),
-        context->resource().pool.uniform(transform_block).object);
+            vTensor::Stage::Compute));
 
   }
   {
@@ -797,6 +791,9 @@ void Conv2dOpContext::conv2d_winograd_2_3(
         VK_KERNEL(conv2d_winograd_2_3),
         global_size,
         adaptive_work_group_size(global_size),
+        // Shader parameters
+        block,
+        // Textures
         v_output.image(
             command_buffer,
             vTensor::Stage::Compute,
