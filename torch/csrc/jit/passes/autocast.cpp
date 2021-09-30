@@ -70,9 +70,9 @@ c10::optional<AutocastScope> parseAutocast(
       AutocastScope scope;
       scope.instance = value;
       scope.context = context;
-      bool enabled;
+      c10::optional<bool> enabled;
       std::string device;
-      c10::ScalarType dtype;
+      c10::ScalarType dtype = c10::ScalarType::Undefined;
       for (Use use : value->uses()) {
         // TODO: support runtime flag
         if (use.user->kind() == prim::SetAttr &&
@@ -101,14 +101,20 @@ c10::optional<AutocastScope> parseAutocast(
           dtype = ret.value();
         }
       }
+      TORCH_CHECK(
+          enabled.has_value(), "Autocast missing _enabled attribute");
+      TORCH_CHECK(
+          dtype != c10::ScalarType::Undefined, "Autocast missing fast_dtype attribute");
+      TORCH_CHECK(
+          !device.empty(), "Autocast missing device attribute");
       if (device == "cuda") {
-        scope.context.enabled = enabled;
+        scope.context.enabled = enabled.value();
         scope.context.scalar_type = dtype;
       } else if (device == "cpu") {
-        scope.context.cpu_enabled = enabled;
+        scope.context.cpu_enabled = enabled.value();
         scope.context.cpu_scalar_type = dtype;
       } else {
-        TORCH_INTERNAL_ASSERT(false, "unrecognized device for autocast pass");
+        TORCH_INTERNAL_ASSERT(false, "unrecognized device for autocast pass: ", device);
       }
       return scope;
     } else {

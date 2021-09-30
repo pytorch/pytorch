@@ -187,12 +187,12 @@ class autocast(object):
             self.prev = torch.is_autocast_cpu_enabled()
             self.prev_fastdtype = torch.get_autocast_cpu_dtype()
             torch.set_autocast_cpu_enabled(self._enabled)
-            torch.set_autocast_cpu_dtype(self.fast_dtype)
+            torch.set_autocast_cpu_dtype(self.fast_dtype)  # type: ignore[arg-type]
             torch.autocast_increment_nesting()
         else:
             self.prev = torch.is_autocast_enabled()
             self.prev_fastdtype = torch.get_autocast_gpu_dtype()
-            torch.set_autocast_gpu_dtype(self.fast_dtype)
+            torch.set_autocast_gpu_dtype(self.fast_dtype)  # type: ignore[arg-type]
             torch.set_autocast_enabled(self._enabled)
             torch.autocast_increment_nesting()
         torch.set_autocast_cache_enabled(self._cache_enabled)
