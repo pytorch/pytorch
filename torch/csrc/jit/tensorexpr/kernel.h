@@ -76,6 +76,10 @@ void promoteInputs(
     std::vector<ExprHandle>& inputs,
     const int typeConstraints = kAllTypes);
 
+ExprHandle promoteToDtype(ExprHandle e, ScalarType dt);
+
+ExprHandle promoteIntegerToDefaultType(const ExprHandle& e);
+
 ExprHandle demoteOutput(
     const ExprHandle& e,
     const c10::optional<ScalarType> type);
@@ -301,12 +305,6 @@ TORCH_API bool& getOptConditionals();
 
 TORCH_API c10::optional<at::Device> pickDeviceType(
     const at::ArrayRef<torch::jit::Value*>& inputs);
-
-TORCH_API void annotateInputShapes(
-    const std::shared_ptr<Graph>& graph,
-    const std::vector<c10::optional<at::Tensor>>& example_inputs);
-TORCH_API std::shared_ptr<Graph> removeUnusedSelfArgument(
-    const std::shared_ptr<Graph>& graph);
 
 } // namespace tensorexpr
 } // namespace jit

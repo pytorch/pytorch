@@ -18,7 +18,7 @@ namespace at {
     c10::optional<bool> is_write;
     for (const auto i : c10::irange(num_arguments)) {
       const auto& alias_info = arguments[i].alias_info();
-      if (alias_info.has_value()) {
+      if (alias_info != nullptr) {
         if (is_write.has_value()) {
           TORCH_CHECK(*is_write == alias_info->isWrite(),
             "Unsupported operator for ", "ZeroTensorFallback: ", op.schema().name(),
