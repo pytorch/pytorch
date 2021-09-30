@@ -112,15 +112,18 @@ class RandomSampler(Sampler[int]):
     def __iter__(self) -> Iterator[int]:
         n = len(self.data_source)
         if self.generator is None:
-            self.generator = torch.Generator()
-            self.generator.manual_seed(int(torch.empty((), dtype=torch.int64).random_().item()))
+            seed = int(torch.empty((), dtype=torch.int64).random_().item())
+            generator = torch.Generator()
+            generator.manual_seed(seed)
+        else:
+            generator = self.generator
 
         if self.replacement:
             for _ in range(self.num_samples // 32):
-                yield from torch.randint(high=n, size=(32,), dtype=torch.int64, generator=self.generator).tolist()
-            yield from torch.randint(high=n, size=(self.num_samples % 32,), dtype=torch.int64, generator=self.generator).tolist()
+                yield from torch.randint(high=n, size=(32,), dtype=torch.int64, generator=generator).tolist()
+            yield from torch.randint(high=n, size=(self.num_samples % 32,), dtype=torch.int64, generator=generator).tolist()
         else:
-            yield from torch.randperm(n, generator=self.generator).tolist()
+            yield from torch.randperm(n, generator=generator).tolist()
 
     def __len__(self) -> int:
         return self.num_samples
@@ -140,7 +143,8 @@ class SubsetRandomSampler(Sampler[int]):
         self.generator = generator
 
     def __iter__(self) -> Iterator[int]:
-        return (self.indices[i] for i in torch.randperm(len(self.indices), generator=self.generator))
+        for i in torch.randperm(len(self.indices), generator=self.generator):
+            yield self.indices[i]
 
     def __len__(self) -> int:
         return len(self.indices)
@@ -183,7 +187,7 @@ class WeightedRandomSampler(Sampler[int]):
 
     def __iter__(self) -> Iterator[int]:
         rand_tensor = torch.multinomial(self.weights, self.num_samples, self.replacement, generator=self.generator)
-        return iter(rand_tensor.tolist())
+        yield from iter(rand_tensor.tolist())
 
     def __len__(self) -> int:
         return self.num_samples
