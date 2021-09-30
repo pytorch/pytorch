@@ -630,9 +630,10 @@ jobs:
             fi
             return 1
           }
+          DISABLE_PEER_VERIFY_NODESOURCE='-o -o \'Acquire::https::deb.nodesource.com::Verify-Peer "false";\''
 
           if is_vanilla_build; then
-            echo "apt-get update && apt-get install -y qemu-user gdb" | docker exec -u root -i "$id" bash
+            echo "apt-get ${DISABLE_PEER_VERIFY_NODESOURCE} update && apt-get ${DISABLE_PEER_VERIFY_NODESOURCE} install -y qemu-user gdb" | docker exec -u root -i "$id" bash
             echo "cd workspace/build; qemu-x86_64 -g 2345 -cpu Broadwell -E ATEN_CPU_CAPABILITY=default ./bin/basic --gtest_filter=BasicTest.BasicTestCPU & gdb ./bin/basic -ex 'set pagination off' -ex 'target remote :2345' -ex 'continue' -ex 'bt' -ex='set confirm off' -ex 'quit \$_isvoid(\$_exitcode)'" | docker exec -u jenkins -i "$id" bash
           else
             echo "Skipping for ${BUILD_ENVIRONMENT}"
