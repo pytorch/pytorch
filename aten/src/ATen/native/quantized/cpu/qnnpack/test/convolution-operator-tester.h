@@ -573,21 +573,23 @@ class ConvolutionOperatorTester {
                   kernelZeroPoints.data(),
                   kernel.data(),
                   bias.data()));
-          const pytorch_qnnp_status runStatus = qnnpack::qnnpackConv(
-              convolution,
-              packW->getPackedWeights(),
-              batchSize(),
-              inputHeight(),
-              inputWidth(),
-              inputZeroPoint,
-              inputPtr,
-              kernelZeroPoints.data(),
-              requantization_scales.data(),
-              outputZeroPoint,
-              qmin(),
-              qmax(),
-              output.data(),
-              nullptr);
+          ASSERT_EQ(
+              pytorch_qnnp_status_success,
+              qnnpack::qnnpackConv(
+                  convolution,
+                  packW->getPackedWeights(),
+                  batchSize(),
+                  inputHeight(),
+                  inputWidth(),
+                  inputZeroPoint,
+                  inputPtr,
+                  kernelZeroPoints.data(),
+                  requantization_scales.data(),
+                  outputZeroPoint,
+                  qmin(),
+                  qmax(),
+                  output.data(),
+                  nullptr));
           ASSERT_EQ(
               pytorch_qnnp_status_success,
               pytorch_qnnp_delete_operator(convolution));
