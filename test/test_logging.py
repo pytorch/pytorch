@@ -15,6 +15,9 @@ class LoggingTest(TestCase):
         s = TestCase.runWithPytorchAPIUsageStderr("from ctypes import CDLL; CDLL('{}')".format(torch._C.__file__))
         self.assertNotRegexpMatches(s, "PYTORCH_API_USAGE")
 
+    def test_bad(self):
+        raise RuntimeError
+
 
 if __name__ == '__main__':
     run_tests()
