@@ -74,28 +74,6 @@ class BaseSparsifier(abc.ABC):
         format_string += ')'
         return format_string
 
-    def _pack_state(self):
-        state: Dict[str, Dict] = defaultdict(dict)
-        for g in self.module_groups:
-            parametrization = g['module'].parametrizations['weight']
-            # original_weight = parametrization.original
-            key = g['fqn']
-            mask = None
-            # Find the mask in the FakeSparsity.
-            found = False
-            for p in parametrization:
-                if isinstance(p, FakeSparsity):
-                    parametrization = p
-                    found = True
-                    break
-            if found:
-                mask = parametrization.mask
-            state[key]['mask'] = mask
-            # Get all the tensors inside the module_group
-            state[key].update(
-                {key: value for key, value in self.state[key].items()})
-        return state
-
     def state_dict(self):
         r"""Returns the state of the optimizer as a :class:`dict`.
 
@@ -103,6 +81,8 @@ class BaseSparsifier(abc.ABC):
         * state - current state of the sparsification.
         * module_groups - a list containing all sparsity configuration groups
             with the key 'fqn' specifying the layer path within a model
+
+        TODO: Need a clean way of loading the state of the "preapred" module
         """
         module_groups = [
             dict(filter(lambda key_value: key_value[0] != 'module', mg.items()))
@@ -110,7 +90,7 @@ class BaseSparsifier(abc.ABC):
         ]
 
         return {
-            'state': self._pack_state(),
+            'state': self.state,
             'module_groups': module_groups,
         }
 
@@ -183,6 +163,7 @@ class BaseSparsifier(abc.ABC):
             module = config['module']
             param = config.get('parametrization', FakeSparsity)
             mask = config.get('mask', torch.ones(module.weight.shape))
+            self.state[config['fqn']]['mask'] = mask
             parametrize.register_parametrization(module, 'weight', param(mask))
 
     def squash_mask(self, *args, **kwargs):

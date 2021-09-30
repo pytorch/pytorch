@@ -482,12 +482,12 @@ class OpInfo(object):
                  safe_casts_outputs=False,  # whether op allows safe casting when writing to out arguments
 
                  # the following metadata relates to autograd support
-                 supports_autograd=True,  # whether the operation supports gradient computations
+                 supports_autograd=True,  # whether the operation supports backward mode AD
                                           # if true, gradient correctness is tested in test_ops.py
                                           # using the op's sample inputs
-                 supports_gradgrad=True,  # whether the op supports second order gradients
+                 supports_gradgrad=None,  # whether the op supports second order gradients
                                           # if true, gradgrad correctness is tested in test_ops.py
-                                          # (this value is ignored if supports_autograd=False)
+                                          # defaults to support_autograd's value
                  supports_inplace_autograd=None,  # whether the operation supports inplace autograd
                                                   # if true, tested in test_ops.py
                                                   # defaults to supports_autograd's value
@@ -495,8 +495,10 @@ class OpInfo(object):
                                              # If the value is True, we check that the gradients are correct
                                              # If the value is False, we test that forward grad is not implemented
                  gradcheck_wrapper=lambda op, *args, **kwargs: op(*args, **kwargs),  # wrapper function for gradcheck
-                 check_batched_grad=True,  # whether to check batched grad when doing gradcheck
-                 check_batched_gradgrad=True,  # whether to check batched grad grad when doing gradgradcheck
+                 check_batched_grad=None,  # whether to check batched grad when doing gradcheck
+                                           # defaults to support_autograd's value
+                 check_batched_gradgrad=None,  # whether to check batched grad grad when doing gradgradcheck
+                                               # default's to support_gradgrad's value
                  gradcheck_nondet_tol=0.0,  # tolerance for nondeterminism while performing gradcheck
                  gradcheck_fast_mode=None,  # Whether to use the fast implmentation for gradcheck/gradgradcheck.
                                             # When set to None, defers to the default value provided by the wrapper
@@ -596,19 +598,49 @@ class OpInfo(object):
         else:
             self.autodiff_nonfusible_nodes = autodiff_nonfusible_nodes
 
-        # autograd support
-        self.supports_autograd = supports_autograd
-        self.supports_inplace_autograd = supports_inplace_autograd
-        if self.supports_inplace_autograd is None:
-            self.supports_inplace_autograd = supports_autograd
+        # Autograd support
 
-        self.gradcheck_wrapper = gradcheck_wrapper
-        self.supports_gradgrad = supports_gradgrad
+        # Autograd flags that don't depend on backward AD
+        self.supports_autograd = supports_autograd
         self.supports_forward_ad = supports_forward_ad
+        self.gradcheck_fast_mode = gradcheck_fast_mode
+        self.gradcheck_wrapper = gradcheck_wrapper
+        self.gradcheck_nondet_tol = gradcheck_nondet_tol
+
+        # Autograd flags that depend on backward AD only
+        # - If setting has been explicitly set, raise error if inconsistent
+        if supports_gradgrad is None:
+            supports_gradgrad = supports_autograd
+        else:
+            assert not (supports_gradgrad and not supports_autograd), (
+                "supports_gradgrad refines the part of autograd is supported, so it should "
+                "not be set if supports_autograd is False")
+        if check_batched_grad is None:
+            check_batched_grad = supports_autograd
+        else:
+            assert not (check_batched_grad and not supports_autograd), (
+                "check_batched_grad refines the part of autograd that will be checked (by gradcheck), so "
+                "it should not be set if supports_autograd is False")
+        if check_batched_gradgrad is None:
+            check_batched_gradgrad = supports_gradgrad
+        else:
+            assert not (check_batched_gradgrad and not supports_gradgrad), (
+                "check_batched_gradgrad refines the part of autograd that will be checked (by "
+                "gradgradcheck), so it should not be set if either supports_gradgrad or supports_autograd "
+                "is False.")
+
+        self.supports_gradgrad = supports_gradgrad
         self.check_batched_grad = check_batched_grad
         self.check_batched_gradgrad = check_batched_gradgrad
-        self.gradcheck_nondet_tol = gradcheck_nondet_tol
-        self.gradcheck_fast_mode = gradcheck_fast_mode
+
+        # Autograd flags that depend on both forward AD and backward AD
+        if supports_inplace_autograd is None:
+            supports_inplace_autograd = supports_autograd or supports_forward_ad
+        else:
+            assert not (supports_inplace_autograd and not supports_autograd and not supports_forward_ad), (
+                "supports_inplace_autograd refines the part of autograd that is supported, so "
+                "it should not be set if both supports_autograd and supports_forward_ad are False")
+        self.supports_inplace_autograd = supports_inplace_autograd
 
         self.supports_sparse = supports_sparse
 
@@ -4032,35 +4064,35 @@ def _sample_inputs_svd(op_info, device, dtype, requires_grad=False, is_linalg_sv
         # loss functions for complex-valued svd have to be "gauge invariant",
         # i.e. loss functions shouldn't change when sigh of the singular vectors change.
         # the simplest choice to satisfy this requirement is to apply 'abs'.
-        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device),
+        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype, device=device),
             lambda usv: usv[1]),  # 'check_grad_s'
-        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device),
+        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype, device=device),
             lambda usv: abs(usv[0])),  # 'check_grad_u'
-        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device),
+        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype, device=device),
             lambda usv: abs(usv[2])),  # 'check_grad_v'
         # this test is important as it checks the additional term that is non-zero only for complex-valued inputs
         # and when the loss function depends both on 'u' and 'v'
-        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device),
+        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype, device=device),
             uv_loss),  # 'check_grad_uv'
-        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device)[:(S - 2)],
+        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype, device=device)[:(S - 2)],
             lambda usv: (abs(usv[0]), usv[1], abs(usv[2][..., :, :(S - 2)]))),  # 'wide'
-        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device)[:, :(S - 2)],
+        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype, device=device)[:, :(S - 2)],
             lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))),  # 'tall'
-        (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype).to(device),
+        (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype, device=device),
             lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))),  # 'batched'
-        (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype).to(device)[..., :(S - 2), :],
+        (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype, device=device)[..., :(S - 2), :],
             lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))),  # 'wide_batched'
-        (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype).to(device)[..., :, :(S - 2)],
+        (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype, device=device)[..., :, :(S - 2)],
             lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))),  # 'tall_batched'
     )
     test_cases2 = (  # some=False
-        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device)[:(S - 2)],
+        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype, device=device)[:(S - 2)],
             lambda usv: (abs(usv[0]), usv[1], abs(slice_V(usv[2])))),  # 'wide_all'
-        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device)[:, :(S - 2)],
+        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype, device=device)[:, :(S - 2)],
             lambda usv: (abs(usv[0][:, :(S - 2)]), usv[1], abs(usv[2]))),  # 'tall_all'
-        (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype).to(device)[..., :(S - 2), :],
+        (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype, device=device)[..., :(S - 2), :],
             lambda usv: (abs(usv[0]), usv[1], abs(slice_V(usv[2])))),  # 'wide_all_batched'
-        (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype).to(device)[..., :, :(S - 2)],
+        (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype, device=device)[..., :, :(S - 2)],
             lambda usv: (abs(usv[0][..., :, :(S - 2)]), usv[1], abs(usv[2]))),  # 'tall_all_batched'
     )
 
@@ -6257,8 +6289,6 @@ op_db: List[OpInfo] = [
                # FIXME: bfloat16 backward support likely depends on CUDA11+
                #   and SM53+
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', active_if=IS_WINDOWS),
-               # baddbmm does not correctly warn when resizing out= inputs
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
            ),
            sample_inputs_func=sample_inputs_baddbmm),
     OpInfo('dot',
@@ -6284,8 +6314,6 @@ op_db: List[OpInfo] = [
                # FIXME: bfloat16 backward support likely depends on CUDA11+
                #   and SM53+
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', active_if=IS_WINDOWS),
-               # bmm does not correctly warn when resizing out= inputs
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
            ),
            sample_inputs_func=sample_inputs_bmm),
     OpInfo('mv',
@@ -7428,7 +7456,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_out=False,
            sample_inputs_func=sample_inputs_lu,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
                # we skip jit tests because `lu` is a torch function
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
@@ -7439,7 +7467,7 @@ op_db: List[OpInfo] = [
            check_batched_gradgrad=False,
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_lu_solve,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack]),
+           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
     OpInfo('lu_unpack',
            op=torch.lu_unpack,
            dtypes=floating_and_complex_types(),
@@ -8573,7 +8601,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            sample_inputs_func=sample_inputs_legacy_solve,
            check_batched_gradgrad=False,
-           decorators=[skipCUDAIfNoMagma]),
+           decorators=[skipCPUIfNoLapack, skipCUDAIfNoMagmaAndNoCusolver]),
     UnaryUfuncInfo('trunc',
                    aliases=('fix', ),
                    ref=np.trunc,
@@ -9702,6 +9730,7 @@ op_db: List[OpInfo] = [
         ),
         sample_inputs_func=sample_inputs_tensorinv,
         supports_forward_ad=True,
+        decorators=[skipCPUIfNoLapack, skipCUDAIfNoMagmaAndNoCusolver],
     ),
     OpInfo(
         "nn.functional.mse_loss",
