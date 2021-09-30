@@ -295,13 +295,13 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #define C10_DEVICE
 #endif
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 #define C10_HIP_HOST_DEVICE __host__ __device__
 #else
 #define C10_HIP_HOST_DEVICE
 #endif
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 #define C10_WARP_SIZE warpSize // = 64 or 32 (Defined in hip_runtime.h)
 #else
 #define C10_WARP_SIZE 32
@@ -315,7 +315,7 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 // even when NDEBUG is defined. This is useful for important assertions in CUDA
 // code that would otherwise be suppressed when building Release.
 #if defined(__ANDROID__) || defined(__APPLE__) || \
-    (defined(__HIP_PLATFORM_HCC__) && ROCM_VERSION < 40100)
+    (defined(USE_ROCM) && ROCM_VERSION < 40100)
 // Those platforms do not support assert()
 #define CUDA_KERNEL_ASSERT(cond)
 #elif defined(_MSC_VER)
@@ -392,34 +392,6 @@ __host__ __device__
 #define C10_IS_TRIVIALLY_COPYABLE(T) __has_trivial_copy(T)
 #else
 #define C10_IS_TRIVIALLY_COPYABLE(T) std::is_trivially_copyable<T>::value
-#endif
-
-// We need --expt-relaxed-constexpr in CUDA because of Eigen. This flag allows
-// device code in CUDA to call host constexpr functions. Unfortunately,
-// the CUDA compiler (at least for CUDA 9.0, 9.1 and 9.2) isn't compatible
-// with many of the constexpr things we'd like to do and the device code
-// compiler crashes when it sees one of these host-only functions.
-// It works when nvcc builds host code, but not when it builds device code
-// and notices it can call these constexpr functions from device code.
-// As a workaround, we use C10_HOST_CONSTEXPR instead of constexpr for these
-// functions. This enables constexpr when compiled on the host and applies
-// __host__ when it is compiled on the device in an attempt to stop it from
-// being called from device functions. Not sure if the latter works, but
-// even if not, it not being constexpr anymore should be enough to stop
-// it from being called from device code.
-// TODO This occurred in CUDA 9 (9.0 to 9.2). Test if this is fixed in CUDA 10.
-#if defined(__CUDA_ARCH__)
-#define C10_HOST_CONSTEXPR __host__
-#define C10_HOST_CONSTEXPR_VAR
-#else
-#define C10_HOST_CONSTEXPR constexpr
-#define C10_HOST_CONSTEXPR_VAR constexpr
-#endif
-
-#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ <= 9200)
-#define C10_HOST_CONSTEXPR_EXCEPT_CUDA92
-#else
-#define C10_HOST_CONSTEXPR_EXCEPT_CUDA92 constexpr
 #endif
 
 #if !defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && \

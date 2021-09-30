@@ -2,7 +2,9 @@
 
 #include <ATen/CPUFunctions.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
+#include <torch/csrc/jit/tensorexpr/operators/operators.h>
 
 namespace torch {
 namespace jit {
@@ -53,6 +55,15 @@ std::shared_ptr<TEWrapper> wrapTECompute(
   return wrap;
 }
 
+std::shared_ptr<TEWrapper> wrapTECompute(
+    std::shared_ptr<TEWrapper> wrap,
+    LoopNest* ln,
+    std::vector<CodeGen::BufferArg> args) {
+  auto cg = std::make_unique<LLVMCodeGen>(ln->root_stmt(), args);
+  wrap->update(std::move(cg));
+  return wrap;
+}
+
 #else
 
 void TEWrapper::call(const std::vector<void*>& args) {
@@ -68,6 +79,13 @@ std::shared_ptr<TEWrapper> wrapTECompute(
     Tensor out,
     std::vector<CodeGen::BufferArg> args,
     int width = kVectorWidth) {
+  return wrap;
+}
+
+std::shared_ptr<TEWrapper> wrapTECompute(
+    std::shared_ptr<TEWrapper> wrap,
+    LoopNest* ln,
+    std::vector<CodeGen::BufferArg> args) {
   return wrap;
 }
 
@@ -176,6 +194,39 @@ std::shared_ptr<TEWrapper> createSigmoid() {
   constexpr int kSleefWidth = 8;
   wrap = wrapTECompute(wrap, B, {A, N}, kSleefWidth);
   updateNNCCache(aten::sigmoid, wrap);
+  return wrap;
+}
+
+std::shared_ptr<TEWrapper> createSignedLog1p() {
+  static auto signed_log1p_symbol =
+      c10::Symbol::fromQualString("static_runtime::signed_log1p");
+  auto wrap = lookupNNCCache(signed_log1p_symbol);
+  if (wrap) {
+    return wrap;
+  }
+  wrap = std::make_shared<TEWrapper>();
+  auto N = VarHandle("N", kInt);
+  BufHandle A("A", {N}, kFloat);
+  Tensor abs_result = Compute("aten_abs", {N}, [&](const VarHandle& i) {
+    return tensorexpr::abs(A.load(i));
+  });
+  Tensor log1p_result = Compute("aten_log1p", {N}, [&](const VarHandle& i) {
+    return log1p(abs_result.load(i));
+  });
+  Tensor sign = computeSign({A}, {N});
+  Tensor output = Compute("aten_mul", {N}, [&](const VarHandle& i) {
+    return sign.load(i) * log1p_result.load(i);
+  });
+  LoopNest ln({output}, {abs_result, log1p_result, sign, output});
+  GRAPH_DEBUG("Original stmt: ", *ln.root_stmt());
+  ln.inlineIntermediateBufs(true);
+  ln.prepareForCodegen();
+  ln.simplify();
+  ln.vectorizeInnerLoops();
+  ln.simplify();
+  GRAPH_DEBUG("Final stmt: ", *ln.root_stmt());
+  wrap = wrapTECompute(wrap, &ln, {output, A, N});
+  updateNNCCache(signed_log1p_symbol, wrap);
   return wrap;
 }
 
