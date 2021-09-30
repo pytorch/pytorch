@@ -10,6 +10,7 @@
 #include <ATen/native/Resize.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAUtils.h>
 
 #include <THC/THCDeviceUtils.cuh>
@@ -18,7 +19,6 @@
 #include <ATen/cuda/cub.cuh>
 #include <c10/util/irange.h>
 #include <c10/core/QScheme.h>
-#include <THC/THCAtomics.cuh>
 
 #include <limits>
 
