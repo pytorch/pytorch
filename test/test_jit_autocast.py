@@ -6,6 +6,7 @@ import unittest
 from test_jit import JitTestCase
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import run_tests
+from torch.testing import FileCheck
 
 
 class TestAutocast(JitTestCase):
@@ -476,6 +477,38 @@ class TestAutocast(JitTestCase):
         self.assertEqual(y.dtype, torch.float32)
         self.assertEqual(z.dtype, torch.float32)
 
+    @unittest.skipIf(not TEST_CUDA, "No cuda")
+    def test_autocast_api(self):
+
+        def t_autocast_cpu(x, y):
+            with torch.autocast("cpu"):
+                return torch.mm(x, y)
+
+        def t_autocast_cuda(x, y):
+            with torch.autocast("cuda"):
+                return torch.mm(x, y)
+
+        def t_cuda_amp_autocast(x, y):
+            with torch.cuda.amp.autocast():
+                return torch.mm(x, y)
+
+        def t_cpu_amp_autocast(x, y):
+            with torch.cpu.amp.autocast():
+                return torch.mm(x, y)
+
+        def test(func, device):
+            jit_func = torch.jit.script(func)
+            x = torch.randn(5, 5, device=device, dtype=torch.float32)
+            y = torch.randn(5, 5, device=device, dtype=torch.float32)
+            o = func(x, y)
+            jit_o = jit_func(x, y)
+            FileCheck().check('aten::autocast_to_fp16').run(jit_func.graph_for(x, y))
+            self.assertEqual(o.dtype, jit_o.dtype)
+
+        test(t_autocast_cpu, "cuda")
+        test(t_autocast_cuda, "cuda")
+        test(t_cuda_amp_autocast, "cuda")
+        test(t_cpu_amp_autocast, "cuda")
 
 if __name__ == '__main__':
     run_tests()

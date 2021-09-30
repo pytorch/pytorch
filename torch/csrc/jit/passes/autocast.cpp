@@ -126,11 +126,7 @@ void castTensorInputs(Node* node, Symbol cast_op, const AutocastContext& context
     // TODO: update cast_op signature to take dynamic context flags
     auto input_tensor_type = input->type()->cast<TensorType>();
     if (input_tensor_type &&
-        input->node()->kind() != cast_op &&
-        input_tensor_type->device().has_value() &&
-        ((input_tensor_type->device()->is_cuda() && context.enabled) ||
-        (input_tensor_type->device()->is_cpu() && context.cpu_enabled))
-        ) {
+        input->node()->kind() != cast_op) {
       casted_inputs.insert(input);
     }
   }
@@ -138,7 +134,9 @@ void castTensorInputs(Node* node, Symbol cast_op, const AutocastContext& context
   WithInsertPoint insert_point(node);
 
   for (auto input : casted_inputs) {
-    const auto new_input = graph->insert(cast_op, {input});
+    const auto new_input = graph->insert(cast_op, {input,
+    graph->insertConstant(IValue(context.enabled)),
+    graph->insertConstant(IValue(context.cpu_enabled))});
     node->replaceInputWith(input, new_input);
   }
 }
