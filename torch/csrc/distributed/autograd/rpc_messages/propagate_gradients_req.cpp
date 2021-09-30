@@ -74,7 +74,7 @@ std::unique_ptr<PropagateGradientsReq> PropagateGradientsReq::fromMessage(
   // Retrieve the gradient tensors.
   std::vector<Variable> grads(tupleElements.size() - 3);
   for(const auto i : c10::irange(tupleElements.size() - 3)) {
-    grads[i] = std::move(tupleElements[i]).toTensor();
+    grads[i] = tupleElements[i].toTensor();
   }
 
   return std::make_unique<PropagateGradientsReq>(
