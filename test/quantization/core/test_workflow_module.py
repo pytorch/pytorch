@@ -369,6 +369,22 @@ class TestObserver(QuantizationTestCase):
             # verify no crash
             x = obs(x)
 
+    def _test_memoryless(self, obs_class):
+        obs = obs_class(memoryless=True)
+        x = torch.randn((3, 3))
+        obs(x)
+        params = obs.calculate_qparams()
+        for _ in range(20):
+            obs(10 * torch.randn((3, 3)))
+            self.assertNotEqual(params, obs.calculate_qparams())
+            obs(x)
+            self.assertEqual(params, obs.calculate_qparams())
+
+    def test_memoryless_minmaxobserver(self):
+        self._test_memoryless(MinMaxObserver)
+
+    def test_memoryless_perchannelminmaxobserver(self):
+        self._test_memoryless(PerChannelMinMaxObserver)
 
 # HistogramObserver that works like it does on master
 class _ReferenceHistogramObserver(HistogramObserver):
@@ -794,7 +810,7 @@ class TestDistributed(QuantizationTestCase):
                 torch.quantization.DeQuantStub(),
             )
 
-            torch.quantization.fuse_modules(model, [['1', '2', '3'], ['4', '5']], inplace=True)
+            torch.ao.quantization.fuse_modules(model, [['1', '2', '3'], ['4', '5']], inplace=True)
 
             model.qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
             torch.quantization.prepare_qat(model, inplace=True)
@@ -835,7 +851,7 @@ class TestDistributed(QuantizationTestCase):
 
             model = Model()
             # fuse it
-            fused_model = torch.quantization.fuse_modules(
+            fused_model = torch.ao.quantization.fuse_modules(
                 model,
                 [['conv', 'bn']],
             )
