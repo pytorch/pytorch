@@ -517,8 +517,7 @@ std::vector<at::IValue> readWrappedPayload(
       additionalPayloadSize,
       *rpc::RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
       tensorTable);
-  std::vector<at::IValue> tupleElements =
-    tuple.toTuple()->elements();
+  std::vector<at::IValue> tupleElements = tuple.toTuple()->elements();
   payload.resize(payload.size() - additionalPayloadSize);
   return tupleElements;
 }
