@@ -1184,7 +1184,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // tensor's storage will be nullptr, and adding a nonzero offset to nullptr
     // is UB.  So we skip the offset computation in this case.
     if (is_empty()) {
-      return storage_.data();
+      return nullptr;
     }
     return static_cast<void*>(
         static_cast<char*>(storage_.data()) +
