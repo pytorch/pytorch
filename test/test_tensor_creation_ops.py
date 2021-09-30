@@ -16,7 +16,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, deviceCountAtLeast, onlyOnCPUAndCUDA,
     onlyCPU, largeTensorTest, precisionOverride, dtypes,
-    onlyCUDA, skipCPUIf, dtypesIfCUDA, dtypesIfCPU, skipMeta)
+    onlyCUDA, skipCPUIf, dtypesIfCUDA, dtypesIfCPU, skipMeta, get_all_device_types)
 from torch.testing._internal.common_dtype import (
     get_all_dtypes, get_all_math_dtypes, get_all_int_dtypes, get_all_fp_dtypes, get_all_complex_dtypes
 )
@@ -2531,7 +2531,7 @@ class TestTensorCreation(TestCase):
         self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(0, float('inf')))
         self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(float('inf')))
 
-        for device in torch.testing.get_all_device_types():
+        for device in get_all_device_types():
             self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(-5, float('nan'), device=device))
             # check with step size
             self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(0, float('-inf'), -1, device=device))
