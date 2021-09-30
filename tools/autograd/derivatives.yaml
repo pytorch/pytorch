@@ -1683,7 +1683,7 @@
   self: log_sigmoid_backward(grad, self, buffer)
 
 - name: _log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
-  self: _log_softmax_backward_data(grad, result, dim, self.scalar_type())
+  self: _log_softmax_backward_data(grad, result, dim, self)
 
 - name: _sparse_log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   self: _sparse_log_softmax_backward_data(grad, result, dim, self)
@@ -1701,7 +1701,7 @@
   self: rrelu_with_noise_backward(grad, result, noise, lower, upper, training, true)
 
 - name: _softmax(Tensor self, int dim, bool half_to_float) -> Tensor
-  self: _softmax_backward_data(grad, result, dim, self.scalar_type())
+  self: _softmax_backward_data(grad, result, dim, self)
 
 - name: _sparse_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   self: _sparse_softmax_backward_data(grad, result, dim, self)
@@ -1948,9 +1948,9 @@
   grad_output: log_sigmoid_backward(grad, self, buffer)
   self: log_sigmoid_double_backward(grad * grad_output, self)
 
-- name: _log_softmax_backward_data(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype) -> Tensor
+- name: _log_softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
   grad_output: grad.to(output.dtype()) - (grad.to(output.dtype()) * output.exp()).sum(dim, true)
-  output: (-grad_output.sum(dim, true) * output.exp() * grad.to(output.dtype())).to(output.dtype())
+  self: log_softmax_double_backward(grad.to(output.dtype()), grad_output, dim, output).to(self.dtype())
 
 - name: leaky_relu_backward(Tensor grad_output, Tensor self, Scalar negative_slope, bool self_is_result) -> Tensor
   # self_is_result is always false here since double backward call is an out-of-place call, self is input itself
@@ -2030,9 +2030,9 @@
   grad_output: softplus_backward(grad, self, beta, threshold, output)
   self: softplus_double_backward(grad * grad_output, self, beta, threshold)
 
-- name: _softmax_backward_data(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype) -> Tensor
-  grad_output: _softmax_backward_data(grad.to(output.dtype()), output, dim, input_dtype)
-  output: softmax_double_backward(grad.to(output.dtype()), grad_output, dim, output).to(output.dtype())
+- name: _softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
+  grad_output: _softmax_backward_data(grad.to(output.dtype()), output, dim, self)
+  self: softmax_double_backward(grad.to(output.dtype()), grad_output, dim, output).to(self.dtype())
 
 - name: soft_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
   grad_output: soft_margin_loss_double_backward_grad_output(grad, grad_output, self, target, reduction)
