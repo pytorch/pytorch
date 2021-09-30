@@ -26,8 +26,8 @@ class AveragedModel(Module):
             :class:`AveragedModel` parameter, the current value of :attr:`model`
             parameter and the number of models already averaged; if None,
             equally weighted average is used (default: None)
-        mode (str, optional): whether to use parameters or state_dict for update
-            (default: parameters)
+        mode (str, optional): whether to use "parameters" or "state_dict" for update
+            (default: "parameters")
 
     Example:
         >>> loader, optimizer, model, loss_fn = ...
@@ -98,7 +98,14 @@ class AveragedModel(Module):
                 return averaged_model_parameter + \
                     (model_parameter - averaged_model_parameter) / (num_averaged + 1)
         self.avg_fn = avg_fn
-        self.use_state_dict = mode == 'state_dict'
+        modes = {
+            'parameters': False,
+            'state_dict': True,
+        }
+        try:
+            self.use_state_dict = modes[mode]
+        except KeyError:
+            raise ValueError(f'Invalid mode passed, valid values are {", ".join(modes.keys())}.')
 
     def forward(self, *args, **kwargs):
         return self.module(*args, **kwargs)
