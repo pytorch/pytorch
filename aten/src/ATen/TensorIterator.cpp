@@ -1358,11 +1358,7 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
 
   for (auto& op : operands_) {
     TORCH_INTERNAL_ASSERT(op.tensor->defined());
-    // Don't access the data_ptr if the tensor is size-0; if there's an offset
-    // into storage that will trigger UB.
-    if (op.tensor->numel() != 0) {
-      op.data = op.tensor->data_ptr();
-    }
+    op.data = op.tensor->data_ptr();
   }
 
   // zero out offsets
