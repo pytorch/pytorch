@@ -331,7 +331,11 @@ Tensor _s_where_dispatch(
   return at::_s_where(*b_condition, *b_self, *b_other);
 }
 
-Tensor get_promoted_tensor(const Tensor& t, ScalarType common_dtype) {
+Tensor get_promoted_where_tensor(const Tensor& t, ScalarType common_dtype) {
+  // [NOTE] `where`: dynamic casting and type promotion
+  // Since CPU doesn't support dynamic casting in kernels, if `t`'s type is not the same
+  // as `common_dtype`, we create a temporary by casting `t` to `common_dtype`.
+  // However this is not required for CUDA as it supports dynamic casting in kernels.
   return (t.device().is_cpu()) && !(t.scalar_type() == common_dtype)
       ? t.to(common_dtype)
       : t;
@@ -345,20 +349,40 @@ Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
 }
 
 Tensor where(const Tensor& condition, const Scalar& self, const Tensor& other) {
+  // [NOTE] `where` type promotion
+  // `where` operator supports type promotion by considering `self` and `other`,
+  // to compute the common_dtype and the output dtype. Since TensorIterator
+  // doesn't have a mechanism to specify inputs which should participate in type-promotion,
+  // we do it manually using `at::result_type`.
+  // Note: type promotion is currently implemented only for
+  //       1. scalar x tensor
+  //       2. tensor x scalar
+  //       3. scalar x scalar
   auto common_dtype = at::result_type(self, other);
+
+  // [NOTE] where : `scalar_tensor` over `wrapped_scalar_tensor`
+  // Here, we use `scalar_tensor` instead of `wrapped_scalar_tensor`,
+  // as we have handled the type-promotion above and don't need to worry about setting
+  // wrapped_number on the tensor.
   const Tensor& self_t = at::scalar_tensor(self, other.options().dtype(common_dtype));
-  return _s_where_dispatch(condition, self_t, get_promoted_tensor(other, common_dtype));
+  return _s_where_dispatch(condition, self_t, get_promoted_where_tensor(other, common_dtype));
 }
 
 Tensor where(const Tensor& condition, const Tensor& self, const Scalar& other) {
+  // Refer: [NOTE] `where` type promotion
   auto common_dtype = at::result_type(self, other);
+
+  // Refer: [NOTE] where : `scalar_tensor` over `wrapped_scalar_tensor`
   const Tensor& other_t = at::scalar_tensor(other, self.options().dtype(common_dtype));
-  return _s_where_dispatch(condition, get_promoted_tensor(self, common_dtype), other_t);
+  return _s_where_dispatch(condition, get_promoted_where_tensor(self, common_dtype), other_t);
 }
 
 Tensor where(const Tensor& condition, const Scalar& self, const Scalar& other) {
   const auto device = condition.device();
+  // Refer: [NOTE] `where` type promotion
   auto common_dtype = at::result_type(self, other);
+
+  // Refer: [NOTE] where : `scalar_tensor` over `wrapped_scalar_tensor`
   auto other_t = at::scalar_tensor(other, condition.options().dtype(common_dtype));
   auto self_t = at::scalar_tensor(self, condition.options().dtype(common_dtype));
   return at::where(condition, self_t, other_t);
@@ -369,9 +393,17 @@ std::vector<Tensor> where(const Tensor& condition) {
 }
 
 Tensor _s_where(const Tensor& condition, const Tensor& self, const Tensor& other) {
-  auto result_type = self.device().is_cpu()
-      ? self.scalar_type()
-      : at::promote_types(self.scalar_type(), other.scalar_type());
+  // Since we dont cast the input tensors when they reside on CUDA to common_dtype
+  // we have to recompute the output type.
+  // For more context, refer [NOTE] `where`: dynamic casting and type promotion
+  ScalarType result_type;
+  if (self.scalar_type() != other.scalar_type()) {
+    // This should never happen on CPU
+    TORCH_INTERNAL_ASSERT(!self.device().is_cpu())
+    result_type = at::promote_types(self.scalar_type(), other.scalar_type());
+  } else {
+    result_type = self.scalar_type();
+  }
   Tensor ret = at::empty(self.sizes(), self.options().dtype(result_type));
 
   auto iter = at::TensorIteratorConfig()
