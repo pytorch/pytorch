@@ -874,6 +874,7 @@ if _enabled:
         "forward",
         "register_buffer",
         "register_parameter",
+        "register_module",
         "add_module",
         "_apply",
         "apply",
