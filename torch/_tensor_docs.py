@@ -1789,7 +1789,7 @@ Args:
     source (Tensor): the tensor containing values to add
 
 Keyword args:
-    alpha (Number): the scalar multiplier for ``source``.
+    alpha (Number): the scalar multiplier for ``source``
 
 Example::
 
