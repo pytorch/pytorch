@@ -573,6 +573,7 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
     return _VF.stft(input, n_fft, hop_length, win_length, window,  # type: ignore[attr-defined]
                     normalized, onesided, return_complex)
 
+
 istft = _add_docstr(
     torch.istft,
     "istft(input, n_fft, hop_length=None, win_length=None, window=None, center=True, "
