@@ -1643,11 +1643,11 @@ Tensor lowerToNextLayer<batch_rule_75_t,Tensor,const Tensor &, Dimname, c10::opt
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
-typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_76_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, const Tensor &, c10::optional<int64_t>);
+typedef std::tuple<Tensor,c10::optional<int64_t>> (*batch_rule_76_t)(const Tensor &, c10::optional<int64_t>, const Tensor &, c10::optional<int64_t>, int64_t, ScalarType);
 template <>
-Tensor lowerToNextLayer<batch_rule_76_t,Tensor,const Tensor &, const Tensor &, int64_t, const Tensor &>(
+Tensor lowerToNextLayer<batch_rule_76_t,Tensor,const Tensor &, const Tensor &, int64_t, ScalarType>(
   batch_rule_76_t batch_rule,
-  const Tensor & grad_output, const Tensor & output, int64_t dim, const Tensor & self
+  const Tensor & grad_output, const Tensor & output, int64_t dim, ScalarType input_dtype
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -1659,10 +1659,7 @@ Tensor lowerToNextLayer<batch_rule_76_t,Tensor,const Tensor &, const Tensor &, i
   Tensor output_value;
   optional<int64_t> output_bdim;
   std::tie(output_value, output_bdim) = unwrapTensorAtLevel(output, cur_level);
-  Tensor self_value;
-  optional<int64_t> self_bdim;
-  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
-  auto results = batch_rule(grad_output_value, grad_output_bdim, output_value, output_bdim, dim, self_value, self_bdim);
+  auto results = batch_rule(grad_output_value, grad_output_bdim, output_value, output_bdim, dim, input_dtype);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
