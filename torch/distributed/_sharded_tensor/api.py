@@ -112,7 +112,7 @@ class ShardedTensorMetadata(object):
         else:
             raise RuntimeError(f'Invalid torch.memory_format: {memory_format}')
 
-        # Keep old seriazation to ensure backward compatibility
+        # Keep old serialization to ensure backward compatibility
         return (
             self.shards_metadata,
             self.size,
@@ -416,7 +416,7 @@ class ShardedTensor(object):
                             dim,
                             metadata.shard_offsets[dim],
                             metadata.shard_lengths[dim],
-                        ).contiguous()
+                        )
 
                     out_narrow_view.add_(tensor)
 
