@@ -1048,15 +1048,16 @@ Tensor zeros(IntArrayRef size,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
+    c10::optional<bool> pin_memory,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
-  auto result = at::empty(size, options);
+  auto result = at::empty(size, options, optional_memory_format);
   return result.zero_();
 }
 
-Tensor& zeros_out(IntArrayRef size, Tensor& result) {
+Tensor& zeros_out(IntArrayRef size, c10::optional<c10::MemoryFormat> optional_memory_format, Tensor& result) {
   if (result.is_sparse()) {
     result.sparse_resize_and_clear_(size, size.size(), 0.);
     return result;
@@ -1467,7 +1468,8 @@ Tensor zeros(
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
+    c10::optional<bool> pin_memory,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
   return native::full(size, /*fill_value=*/0., names, dtype, layout, device, pin_memory);
 }
 
