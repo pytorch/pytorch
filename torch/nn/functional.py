@@ -3113,13 +3113,7 @@ def l1_loss(
     """
     if has_torch_function_variadic(input, target):
         return handle_torch_function(
-            l1_loss,
-            (input, target),
-            input,
-            target,
-            size_average=size_average,
-            reduce=reduce,
-            reduction=reduction,
+            l1_loss, (input, target), input, target, size_average=size_average, reduce=reduce, reduction=reduction,
         )
     if not (target.size() == input.size()):
         warnings.warn(

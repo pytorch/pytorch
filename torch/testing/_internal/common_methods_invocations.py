@@ -5569,19 +5569,26 @@ def sample_inputs_loss(op_info, device, dtype, requires_grad, **kwargs):
         ((S, S, S), None),
     ]
 
-    sample_inputs = [
+    return [
         SampleInput(_make_tensor(shape), args=(_make_tensor(shape),), kwargs=kwargs)
         for shape, kwargs in shapes_and_kwargs
     ]
 
-    if dtype == torch.complex128 and torch.complex128 in op_info.supported_dtypes(device):
-        shape = ()
-        sample_inputs.extend(
-            [
-                SampleInput(_make_tensor(shape, dtype=torch.float64), args=(_make_tensor(shape),)),
-                SampleInput(_make_tensor(shape), args=(_make_tensor(shape, dtype=torch.float64),)),
-            ]
-        )
+def sample_inputs_l1_loss(op_info, device, dtype, requires_grad, **kwargs):
+    sample_inputs = sample_inputs_loss(op_info, device, dtype, requires_grad, **kwargs)
+
+    if not dtype.is_complex:
+        return sample_inputs
+
+    make = partial(make_tensor, (), device=device, requires_grad=requires_grad)
+    float_dtype = torch.float64
+
+    sample_inputs.extend(
+        [
+            SampleInput(make(dtype=dtype), args=(make(dtype=float_dtype),)),
+            SampleInput(make(dtype=float_dtype), args=(make(dtype=dtype),)),
+        ]
+    )
 
     return sample_inputs
 
@@ -6030,11 +6037,6 @@ def loss_reference_reduction_wrapper(fn):
             return output
 
     return wrapper
-
-
-@loss_reference_reduction_wrapper
-def reference_l1_loss(input, target):
-    return np.abs(input.real - target.real) + np.abs(input.imag - target.imag)
 
 
 @loss_reference_reduction_wrapper
@@ -10255,7 +10257,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "nn.functional.l1_loss",
         ref=loss_reference_reduction_wrapper(lambda input, target: np.abs(input - target)),
-        sample_inputs_func=sample_inputs_loss,
+        sample_inputs_func=sample_inputs_l1_loss,
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         supports_forward_ad=True,
         supports_out=False,
