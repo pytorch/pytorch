@@ -24,7 +24,7 @@ namespace {
     return std::string();
 #else
     if (debug.empty()) {
-      return debugString(nullptr, file, line);
+      return debugString(static_cast<const char*>(nullptr), file, line);
     } else {
       return debug;
     }
