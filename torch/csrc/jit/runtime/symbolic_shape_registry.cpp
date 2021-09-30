@@ -579,9 +579,7 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", "unary"},
       {"aten::hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> Tensor", "unary"},
       {"aten::hardswish(Tensor self) -> Tensor", "unary"},
-      {"aten::hardswish_(Tensor self) -> Tensor", "unary"},
       {"aten::hardsigmoid(Tensor self) -> Tensor", "unary"},
-      {"aten::hardsigmoid_(Tensor self) -> Tensor", "unary"},
       {"aten::dropout(Tensor input, float p, bool train) -> Tensor", "unary"},
       {"aten::adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor", "adaptive_avg_pool2d"},
       {"aten::gelu(Tensor self) -> Tensor", "unary"},
@@ -653,9 +651,11 @@ const at::optional<const FunctionSchema*> getInplaceVariant(
     // Need to check that all args are the same except for the first, which
     // is almost the same except for the Alias info
     const FunctionSchema* schema = &variant->schema();
-    if (schema->arguments().size() != base_schema.arguments().size()) {
+    // TODO: try this out. If the tests fail, then we know something is wrong
+    if (!schema->isSubtypeOf(base_schema, true)) {
       continue;
     }
+
     Argument self_arg = schema->arguments()[0];
     if (*self_arg.type() != *base_schema.arguments()[0].type()) {
       continue;
@@ -663,24 +663,11 @@ const at::optional<const FunctionSchema*> getInplaceVariant(
     if (!self_arg.alias_info()->isWrite()) {
       continue;
     }
-    bool rest_of_args_match = true;
-    for (size_t i = 1; i < schema->arguments().size(); i++) {
-      if (schema->arguments()[i] != base_schema.arguments()[i]) {
-        rest_of_args_match = false;
-        break;
-      }
-    }
-    if (!rest_of_args_match) {
-      continue;
-    }
     // Lastly check the return types are the same
     if (schema->returns().size() != 1) {
       continue;
     }
     Argument ret_arg = schema->returns()[0];
-    if (*ret_arg.type() != *base_schema.returns()[0].type()) {
-      continue;
-    }
     if (!ret_arg.alias_info()->isWrite()) {
       continue;
     }
@@ -696,8 +683,13 @@ void registerSchema(
     std::unordered_map<std::string, std::shared_ptr<Graph>>& reused_functions,
     const CompilationUnit& module) {
   if (reused_functions.count(shape_compute_function_name)) {
-    cached_schema_to_graph[schema_string] =
-        reused_functions[shape_compute_function_name];
+    auto graph = reused_functions[shape_compute_function_name];
+
+    // allow extra unused arguments to map multiple functions to e.g. unary
+    TORCH_INTERNAL_ASSERT(
+        graph->inputs().size() <= schema_string->arguments().size());
+
+    cached_schema_to_graph[schema_string] = graph;
     return;
   }
 

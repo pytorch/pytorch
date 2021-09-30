@@ -167,11 +167,10 @@ class TestSymbolicShapeAnalysis(JitTestCase):
 
         for fn in binary_ops:
             size_1 = [4, 4, 8]  # x (can't broadcast because it's an inplace op)
-            size_2 = [4, 1, 8]
-            t = torch.jit.trace(fn, (torch.rand([4]), torch.rand([4])))
+            t = torch.jit.script(fn)
             inputs = list(t.graph.inputs())
             inputs[0].setType(inputs[0].type().with_sizes(size_1))
-            inputs[1].setType(inputs[1].type().with_sizes(size_2))
+            # Intentionally not populate the type of inputs[1]
             torch._C._jit_pass_propagate_shapes_on_graph(t.graph)
             self.assertEqual(next(t.graph.outputs()).type().symbolic_sizes(), [4, 4, 8])
 
