@@ -1,6 +1,8 @@
 import operator_benchmark as op_bench
 import torch
 
+from torch.testing._internal.common_device_type import get_all_device_types
+
 """Microbenchmark for Fill_ operator."""
 
 fill_short_configs = op_bench.config_list(
@@ -19,7 +21,7 @@ fill_short_configs = op_bench.config_list(
 
 fill_long_configs = op_bench.cross_product_configs(
     N=[10, 1000],
-    device=torch.testing.get_all_device_types(),
+    device=get_all_device_types(),
     dtype=[torch.bool, torch.int8, torch.uint8, torch.int16, torch.int32,
            torch.int64, torch.half, torch.float, torch.double],
     tags=["long"]
