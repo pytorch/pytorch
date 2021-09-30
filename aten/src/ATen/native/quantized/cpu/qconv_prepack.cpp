@@ -25,6 +25,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
         torch::List<int64_t> dilation,
         int64_t groups,
         bool transpose) {
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " USE_FBGEMM " << __FUNCTION__<< std::endl;
   TORCH_CHECK(
       weight.ndimension() == kSpatialDim + 2,
       "Weights are expected to have ",
@@ -193,6 +194,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
         torch::List<int64_t> dilation,
         int64_t groups,
         bool transpose) {
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " USE_PYTORCH_QNNPACK " << __FUNCTION__<< std::endl;
   TORCH_CHECK(
       kSpatialDim == 2 || kSpatialDim == 3,  // 1D is packed as 2d, hence we don't need other checks
       "QNNPACK packing only supports 2D / 3D convolution.");
@@ -358,6 +360,7 @@ class QConvPackWeightInt8 final {
     auto& ctx = at::globalContext();
 #ifdef USE_FBGEMM
     if (ctx.qEngine() == at::QEngine::FBGEMM) {
+      std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " USE_FBGEMM " << __FUNCTION__<< std::endl;
       return PackedConvWeight<kSpatialDim>::prepack(
           weight, bias, stride, padding, output_padding, dilation, groups,
           transpose);
@@ -366,6 +369,7 @@ class QConvPackWeightInt8 final {
 
 #ifdef USE_PYTORCH_QNNPACK
     if (ctx.qEngine() == at::QEngine::QNNPACK) {
+      std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " USE_PYTORCH_QNNPACK " << __FUNCTION__<< std::endl;
       TORCH_CHECK(
           kSpatialDim == 2,
           "quantized::conv_prepack (qnnpack): QNNPACK only supports Conv1d "

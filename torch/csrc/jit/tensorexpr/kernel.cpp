@@ -664,6 +664,11 @@ std::vector<ExprHandle> TensorExprKernel::sizesFromVaryingShape(
 
 std::vector<ExprHandle> TensorExprKernel::sizesForValue(
     const torch::jit::Value* v) {
+  auto kind = v->type()->kind();
+  std::cout << "XXX " << __FUNCTION__ << " v:" << v->debugName()
+    << " type:" << v->type()->str() 
+    << " type kind:" << typeKindToString(kind)
+    << std::endl;
   if (known_sizes_.count(v)) {
     return known_sizes_.at(v);
   }
@@ -682,6 +687,9 @@ std::vector<ExprHandle> TensorExprKernel::sizesForValue(
     return {int64_t{1}};
   }
   if (v->type()->isSubtypeOf(NoneType::get())) {
+    return {};
+  }
+  if (v->type()->kind() == TypeKind::ClassType) {
     return {};
   }
 
@@ -1386,6 +1394,50 @@ Tensor computePrepackedLinearClampRun(
   return Tensor(ResultBuf.node(), s);
 }
 
+Tensor computeQuantizedConv2dPrepack(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType) {
+  Dtype dtype = kFloat;
+  if (outputType) {
+    dtype = Dtype(*outputType);
+  }
+
+  BufHandle ResultBuf("quantized_conv2d_prepack", outputShape, dtype);
+  const BufHandle& w = c10::get<BufHandle>(inputs[0]);
+  const BufHandle& b = c10::get<BufHandle>(inputs[1]);
+  auto strides = _pair_int(inputs[2]);
+  auto padding = _pair_int(inputs[3]);
+  auto dilation = _pair_int(inputs[4]);
+  int groups = c10::get<int64_t>(inputs[5]);
+
+  StmtPtr s = ExternalCall::make(
+      ResultBuf,
+      "nnc_quantized_conv2d_prepack",
+      {w, b},
+      {strides[0], strides[1], padding[0], padding[1], dilation[0], dilation[1], groups});
+  return Tensor(ResultBuf.node(), s);
+}
+
+Tensor computeQuantizedConv2d(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType) {
+  Dtype dtype = kFloat;
+  if (outputType) {
+    dtype = Dtype(*outputType);
+  }
+
+  BufHandle ResultBuf("quantized_conv2d", outputShape, dtype);
+  const BufHandle& inp = c10::get<BufHandle>(inputs[0]);
+  const BufHandle& prepacked = c10::get<BufHandle>(inputs[1]);
+  const double qscale = c10::get<double>(inputs[2]);
+  const int64_t qzero = c10::get<int64_t>(inputs[3]);
+  StmtPtr s = ExternalCall::make(
+      ResultBuf, "nnc_quantized_conv2d", {inp, prepacked}, {qscale, qzero});
+  return Tensor(ResultBuf.node(), s);
+}
+
 Tensor computeQuantizePerTensor(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
@@ -1398,15 +1450,27 @@ Tensor computeQuantizePerTensor(
         "",
         os.node()->dtype().scalar_type() == ScalarType::Long ? kLong : kInt));
   }
+  std::cout << "XXX " << __FUNCTION__ << std::endl;
+  for (const auto& arg : inputs) {
+    std::cout << "XXX " << getArgValueName(arg) << std::endl;
+  }
   std::cout << "XXX " << __FUNCTION__ <<  " outputType:" << *outputType << std::endl;
   auto axes = VarVectorToVarHandleVector(vars);
   std::vector<ExprHandle> indices(axes.begin(), axes.end());
 
   auto qscale = constant(inputs[1]);
   auto qzero = constant(inputs[2]);
-  // TODO: handle inputs[3] argument as dtype, asserts qint8, quint8
-  // TODO: optimize casts
-  auto dtype = Dtype(ScalarType::Byte);
+  const int64_t qdtype = c10::get<int64_t>(inputs[3]);
+  std::cout << "XXX " << __FUNCTION__<< " qdtype:" << qdtype << std::endl;
+  const auto dtype = [qdtype]() {
+    // TODO: replace 12 and 13 with literals
+    if (13l == qdtype) {
+      return Dtype(ScalarType::Byte);
+    } else if (12l == qdtype) {
+      return Dtype(ScalarType::Char);
+    }
+    throw malformed_input("Unsupported quantized dtype");
+  }();
   // Q(x, scale, zero) = round(x / scale + zero)
   const BufHandle& inp = c10::get<BufHandle>(inputs[0]);
 
@@ -1476,10 +1540,14 @@ Tensor tensorexpr::computeOperandValue(
     const c10::optional<ScalarType>& outputType,
     at::Device device) {
   const std::string opStr = op.toQualString();
-  if (opStr == "prepacked::conv2d_clamp_run") {
+  if ("prepacked::conv2d_clamp_run" == opStr) {
     return computePrepackedConv2dClampRun(inputs, outputShape, outputType);
-  } else if (opStr == "prepacked::linear_clamp_run") {
+  } else if ("prepacked::linear_clamp_run" == opStr) {
     return computePrepackedLinearClampRun(inputs, outputShape, outputType);
+  } else if ("quantized::conv2d_prepack" == opStr) {
+    return computeQuantizedConv2dPrepack(inputs, outputShape, outputType);
+  } else if ("quantized::conv2d" == opStr) {
+    return computeQuantizedConv2d(inputs, outputShape, outputType);
   }
   switch (op) {
     case aten::add: {

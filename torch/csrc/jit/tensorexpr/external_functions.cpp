@@ -4,6 +4,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/native/xnnpack/OpContext.h>
+#include <ATen/native/quantized/cpu/conv_packed_params.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
@@ -96,6 +97,116 @@ void nnc_aten_conv2d(
   }
 
   // TODO: can i haz an out version of the conv2d?
+  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+}
+
+c10::intrusive_ptr<ConvPackedParamsBase<2>> quantized_conv2d_prepack(
+    at::Tensor qweight,
+    c10::optional<at::Tensor> bias,
+    c10::List<int64_t> stride,
+    c10::List<int64_t> padding,
+    c10::List<int64_t> dilation,
+    int64_t groups) {
+  auto qconv2d_prepack_op =
+      c10::Dispatcher::singleton()
+          .findSchemaOrThrow("quantized::conv2d_prepack", "")
+          .typed<c10::intrusive_ptr<ConvPackedParamsBase<2>>(
+              at::Tensor,
+              c10::optional<at::Tensor>,
+              c10::List<int64_t>,
+              c10::List<int64_t>,
+              c10::List<int64_t>,
+              int64_t)>();
+  return qconv2d_prepack_op.call(
+      qweight, bias, stride, padding, dilation, groups);
+}
+
+void nnc_aten_quantized_conv2d_prepack(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int8_t* buf_dtypes,
+    int64_t args_num,
+    int64_t* extra_args) {
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+
+  at::Tensor& r = tensors[0];
+  const at::Tensor& w = tensors[1];
+	//TODO: handle optional bias
+  const at::Tensor& b = tensors[2];
+	TORCH_INTERNAL_ASSERT(args_num == 7 && bufs_num == 3);
+
+	int64_t strideH = extra_args[0];
+	int64_t strideW = extra_args[1];
+	int64_t paddingH = extra_args[2];
+	int64_t paddingW = extra_args[3];
+	int64_t dilationH = extra_args[4];
+	int64_t dilationW = extra_args[5];
+	int64_t groups = extra_args[6];
+
+	try {
+		c10::intrusive_ptr<ConvPackedParamsBase<2>> prepacked = quantized_conv2d_prepack(
+				w,
+				b,
+				{strideH, strideW},
+				{paddingH, paddingW},
+				{dilationH, dilationW},
+				groups);
+	} catch (...) {
+	}
+
+	//TODO: prepacked object put in output buffer
+	// XXX-CustomClass-to blob
+  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+}
+
+at::Tensor quantized_conv2d(
+    at::Tensor qx,
+    c10::intrusive_ptr<ConvPackedParamsBase<2>> packed_weight,
+    double scale,
+    int64_t zero) {
+  auto qconv2d_op = c10::Dispatcher::singleton()
+                        .findSchemaOrThrow("_quantized::conv2d", "")
+                        .typed<at::Tensor(
+                            at::Tensor,
+                            const c10::intrusive_ptr<ConvPackedParamsBase<2>>&,
+                            double,
+                            int64_t)>();
+  return qconv2d_op.call(qx, packed_weight, scale, zero);
+}
+
+void nnc_aten_quantized_conv2d(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int8_t* buf_dtypes,
+    int64_t args_num,
+    int64_t* extra_args) {
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+
+  at::Tensor& r = tensors[0];
+  const at::Tensor& x = tensors[1];
+  auto convPackedParams = reinterpret_cast<ConvPackedParamsBase<2>*>(buf_data[2]);
+	double qscale = extra_args[0];
+	int64_t qzero = extra_args[1];
+
+	try {
+		r = quantized_conv2d(
+				x,
+				c10::intrusive_ptr<ConvPackedParamsBase<2>>::unsafe_steal_from_new(convPackedParams),
+				qscale,
+				qzero);
+	} catch (...) {
+	}
+	double out_scale = at::q_scale(r);
+	int64_t out_zero = at::q_zero_point(r);
+	// TODO: how to return result scale/zero from external call?
+	// introduce extra out args?
+
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
@@ -242,6 +353,12 @@ void nnc_prepacked_conv2d_clamp_run(
 const static RegisterNNCExternalFunction nnc_conv2d(
     "nnc_aten_conv2d",
     nnc_aten_conv2d);
+const static RegisterNNCExternalFunction nnc_quantized_conv2d_prepack(
+    "nnc_quantized_conv2d_prepack",
+    nnc_aten_quantized_conv2d_prepack);
+const static RegisterNNCExternalFunction nnc_quantized_conv2d(
+    "nnc_quantized_conv2d",
+    nnc_aten_quantized_conv2d);
 const static RegisterNNCExternalFunction nnc_adaptive_avg_pool2d(
     "nnc_aten_adaptive_avg_pool2d",
     nnc_aten_adaptive_avg_pool2d);
