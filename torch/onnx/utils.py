@@ -518,11 +518,6 @@ def _model_to_graph(model, args, verbose=False,
         # make sure that the param dict and the graph match each other
         assert len(params) + len(flatten_args) == sum(1 for _ in graph.inputs())
 
-    else:
-        flatten_args, _ = torch._C._jit_flatten(args)
-        # make sure that the param dict and the graph match each other
-        assert len(params) + len(flatten_args) == sum(1 for _ in graph.inputs())
-
     # NB: ONNX requires complete information about output types, which might be
     # erased by some optimizations, so we need to set it explicitly again.
     if torch_out is not None:
