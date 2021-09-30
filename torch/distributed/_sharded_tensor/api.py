@@ -572,10 +572,13 @@ class ShardedTensor(object):
         """
         return self._local_shards
 
-    def size(self) -> torch.Size:
+    def size(self, int dim=None) -> Union[torch.Size(), int]:
         """
-        Returns the size of the tensor. The returned value is a subclass of tuple.
+        Returns the size of the tensor. The returned value is a subclass of tuple,
+        when dim not specified. If dim is given, we will return
         """
+        if dim:
+            return self._metadata.size(dim)
         return self._metadata.size
 
     def is_pinned(self) -> bool:
