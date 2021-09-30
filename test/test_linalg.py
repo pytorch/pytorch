@@ -1050,7 +1050,7 @@ class TestLinalg(TestCase):
         from torch.testing._internal.common_utils import random_hermitian_matrix
 
         def run_test(dims, uplo):
-            x = random_hermitian_matrix(dims[-1], *dims[:-2]).requires_grad_()
+            x = random_hermitian_matrix(dims[-1], *dims[:-2], device=device, dtype=dtype).requires_grad_()
             w, v = torch.linalg.eigh(x)
             (w.sum() + abs(v).sum()).backward()
             self.assertEqual(x.grad, x.grad.conj().transpose(-1, -2))  # Check the gradient is Hermitian
@@ -1335,6 +1335,9 @@ class TestLinalg(TestCase):
         for keepdim in [True, False]:
             for input_size, ord_settings in test_cases:
                 for ord in ord_settings:
+                    if self.device_type == 'cpu' and not torch._C.has_lapack and ord in [2, -2, 'nuc']:
+                        continue
+
                     dtypes = [torch.float, torch.double, torch.cfloat, torch.cdouble]
                     for from_dtype, to_dtype in itertools.product(dtypes, dtypes):
                         if from_dtype.is_complex and not to_dtype.is_complex:
@@ -1569,6 +1572,8 @@ class TestLinalg(TestCase):
             for input_size, ord_settings, dim in test_cases:
                 input = torch.randn(*input_size, dtype=dtype, device=device)
                 for ord in ord_settings:
+                    if self.device_type == 'cpu' and not torch._C.has_lapack and ord in [2, -2, 'nuc']:
+                        continue
                     run_test_case(input, ord, dim, keepdim)
 
 
@@ -2573,6 +2578,7 @@ class TestLinalg(TestCase):
                     self.assertEqual(a_norm_fro, a_norm_2)
 
     @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
     def test_nuclear_norm_axes_small_brute_force_old(self, device):
         def check_single_nuclear_norm(x, axes):
             if self.device_type != 'cpu' and randrange(100) < 95:
@@ -2734,6 +2740,7 @@ class TestLinalg(TestCase):
             self.assertEqual(s_expect, s_actual, msg="Singular values don't match")
 
     @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_svd_lowrank(self, device, dtype):
@@ -2817,6 +2824,10 @@ class TestLinalg(TestCase):
         self.assertEqual(t, t2)
 
     def _test_svd_helper(self, shape, some, col_maj, device, dtype):
+        # test implementation below uses cpu unconditionally
+        if not torch._C.has_lapack:
+            reason = "PyTorch compiled without Lapack"
+            raise unittest.SkipTest(reason)
         # To have accurate tests and less false positives on different CPUs and GPUs,
         # we use double or complex double accuracy for CPU reference.
         cpu_dtype = torch.complex128 if dtype.is_complex else torch.float64
@@ -3220,7 +3231,7 @@ class TestLinalg(TestCase):
                 [[], [0], [2], [2, 1]],
                 [0, 5]
             ):
-                matrices = random_fullrank_matrix_distinct_singular_value(n, *batches, dtype=dtype).to(device)
+                matrices = random_fullrank_matrix_distinct_singular_value(n, *batches, dtype=dtype, device=device)
                 run_test(torch_inverse, matrices, batches, n)
 
                 # test non-contiguous input
@@ -3228,7 +3239,7 @@ class TestLinalg(TestCase):
                 if n > 0:
                     run_test(
                         torch_inverse,
-                        random_fullrank_matrix_distinct_singular_value(n * 2, *batches, dtype=dtype).to(device)
+                        random_fullrank_matrix_distinct_singular_value(n * 2, *batches, dtype=dtype, device=device)
                         .view(-1, n * 2, n * 2)[:, ::2, ::2].view(*batches, n, n),
                         batches, n
                     )
@@ -3278,7 +3289,7 @@ class TestLinalg(TestCase):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
         def test_inverse_many_batches_helper(torch_inverse, b, n):
-            matrices = random_fullrank_matrix_distinct_singular_value(b, n, n, dtype=dtype).to(device)
+            matrices = random_fullrank_matrix_distinct_singular_value(b, n, n, dtype=dtype, device=device)
             matrices_inverse = torch_inverse(matrices)
 
             # Compare against NumPy output
@@ -3488,7 +3499,7 @@ class TestLinalg(TestCase):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
         b = torch.randn(*b_dims, dtype=dtype, device=device)
-        A = random_fullrank_matrix_distinct_singular_value(*A_dims, dtype=dtype).to(device)
+        A = random_fullrank_matrix_distinct_singular_value(*A_dims, dtype=dtype, device=device)
         return b, A
 
     @skipCUDAIfNoMagma
@@ -3544,7 +3555,7 @@ class TestLinalg(TestCase):
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3})
     def test_solve_batched_non_contiguous(self, device, dtype):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
-        A = random_fullrank_matrix_distinct_singular_value(2, 2, dtype=dtype).to(device).permute(1, 0, 2)
+        A = random_fullrank_matrix_distinct_singular_value(2, 2, dtype=dtype, device=device).permute(1, 0, 2)
         b = torch.randn(2, 2, 2, dtype=dtype, device=device).permute(2, 1, 0)
         self.assertFalse(A.is_contiguous())
         self.assertFalse(b.is_contiguous())
@@ -3651,7 +3662,7 @@ class TestLinalg(TestCase):
     def test_old_solve_batched_non_contiguous(self, device, dtype):
         from numpy.linalg import solve
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
-        A = random_fullrank_matrix_distinct_singular_value(2, 2, dtype=dtype).to(device).permute(1, 0, 2)
+        A = random_fullrank_matrix_distinct_singular_value(2, 2, dtype=dtype, device=device).permute(1, 0, 2)
         b = torch.randn(2, 2, 2, dtype=dtype, device=device).permute(2, 1, 0)
         x, _ = torch.solve(b, A)
         x_exp = solve(A.cpu().numpy(), b.cpu().numpy())
@@ -3991,8 +4002,14 @@ class TestLinalg(TestCase):
         def check(x, y):
             # Compare with numpy
             res = torch_fn(x, y)
-            ref = torch.from_numpy(np.array(np_fn(x.cpu().numpy(), y.cpu().numpy())))
-            self.assertEqual(res.cpu(), ref)
+            if x.dtype == torch.bfloat16:
+                ref = torch.from_numpy(np.array(np_fn(x.cpu().float().numpy(), y.cpu().float().numpy())))
+            else:
+                ref = torch.from_numpy(np.array(np_fn(x.cpu().numpy(), y.cpu().numpy())))
+            if res.dtype == torch.bfloat16:
+                self.assertEqual(res.cpu(), ref.bfloat16())
+            else:
+                self.assertEqual(res.cpu(), ref)
 
             # Test out variant
             out = torch.empty_like(res)
@@ -4005,19 +4022,20 @@ class TestLinalg(TestCase):
         check(x, y)
 
         # Contiguous
-        x = torch.randn(10, dtype=dtype, device=device)
-        y = torch.randn(10, dtype=dtype, device=device)
+        x = 0.1 * torch.randn(5000, dtype=dtype, device=device)
+        y = 0.1 * torch.randn(5000, dtype=dtype, device=device)
         check(x, y)
 
         # 0 strided
-        y = torch.randn(1, dtype=dtype, device=device).expand(10)
+        y = 0.1 * torch.randn(1, dtype=dtype, device=device).expand(5000)
         check(x, y)
 
         # 2 strided
         check(x[::2], y[::2])
 
-    @dtypes(torch.float, torch.cfloat)
-    @precisionOverride({torch.cfloat: 1e-4, torch.float32: 5e-5})
+    @dtypes(torch.float, torch.cfloat, torch.bfloat16)
+    @dtypesIfCUDA(torch.float, torch.cfloat)
+    @precisionOverride({torch.cfloat: 1e-4, torch.float32: 5e-5, torch.bfloat16: 1e-0})
     def test_dot_vs_numpy(self, device, dtype):
         self._test_dot_vdot_vs_numpy(device, dtype, torch.dot, np.dot)
 
@@ -5488,7 +5506,7 @@ class TestLinalg(TestCase):
                 else:
                     rows, columns = matrix_size
                 if a is None:
-                    a = random_matrix(rows, columns, *batches, **dict(singular=singular, dtype=dtype)).to(device)
+                    a = random_matrix(rows, columns, *batches, **dict(singular=singular, dtype=dtype, device=device))
                 a_LU_info, pivots_info, info_ = a.lu(pivot=pivot, get_infos=True)
                 self.assertEqual(a_LU_info.size(), torch.Size(batches + (rows, columns)))
                 self.assertEqual(pivots_info.size(), torch.Size(batches + (min(rows, columns),)))
@@ -5951,31 +5969,32 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         # have to use torch.randn(...).to(bfloat16) instead of
         # torch.randn(..., dtype=bfloat16). randn does not support
         # bfloat16 yet.
+        # "*0.2" to reduce errors for low precision
         ts = [
-            torch.randn(10, device=device).to(dtype),
-            torch.randn(1, device=device).to(dtype).expand(10),
+            0.2 * torch.randn(50, device=device).to(dtype),
+            0.2 * torch.randn(1, device=device).to(dtype).expand(50),
         ]
         vs = [
-            torch.randn(100, device=device).to(dtype),
-            torch.ones(1, device=device).to(dtype).expand(100),  # to reduce errors for low precision
+            0.2 * torch.randn(100, device=device).to(dtype),
+            0.2 * torch.ones(1, device=device).to(dtype).expand(100),  # to reduce errors for low precision
         ]
         ms = [
             # 0d
-            torch.ones((), device=device).to(dtype).expand(10, 100),  # to reduce errors for low precision
+            0.2 * torch.ones((), device=device).to(dtype).expand(50, 100),  # to reduce errors for low precision
             # 1d
-            torch.randn((1, 100), device=device).to(dtype).expand(10, 100),
+            0.2 * torch.randn((1, 100), device=device).to(dtype).expand(50, 100),
             # this initialization reduces errors for low precision for broadcasted matrices
             # by making sure that intermediate and result values are exactly representable
             # in low precision type
-            torch.randint(3, (10, 1), dtype=torch.float, device=device).to(dtype).expand(10, 100),
+            0.2 * torch.randint(3, (50, 1), dtype=torch.float, device=device).to(dtype).expand(50, 100),
             # 2d
-            torch.randn((10, 100), device=device).to(dtype),
-            torch.randn((100, 10), device=device).to(dtype).t(),
+            0.2 * torch.randn((50, 100), device=device).to(dtype),
+            0.2 * torch.randn((100, 50), device=device).to(dtype).t(),
         ]
         for m, v, t in itertools.product(ms, vs, ts):
             self._test_addmm_addmv(torch.addmv, t, m, v)
         # Test beta=0, t=nan
-        t = torch.full((10,), math.nan, device=device).to(dtype)
+        t = torch.full((50,), math.nan, device=device).to(dtype)
         for m, v in itertools.product(ms, vs):
             self._test_addmm_addmv(torch.addmv, t, m, v, beta=0)
 
@@ -6153,12 +6172,12 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             return torch.randint(0, 100, (x, y), dtype=dtype, device=device)
 
         def genf_bfloat(x, y):
-            return torch.randn(x, y, dtype=torch.float32, device=device).to(dtype)
+            return torch.randn(x, y, dtype=torch.float32, device=device).to(dtype) * 0.1
 
         def genf_float(x, y):
             return torch.randn(x, y, dtype=dtype, device=device)
 
-        for (n, m, p) in [(20, 10, 5), (15, 5, 10), (5, 18, 10)]:
+        for (n, m, p) in [(20, 10, 15), (15, 20, 10), (25, 18, 10)]:
             if (dtype == torch.int32) or (dtype == torch.int64):
                 genf = genf_int
             elif (dtype == torch.bfloat16):
@@ -6229,7 +6248,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             return
 
         batch_sizes = [1, 10]
-        M, N, O = 23, 8, 12
+        M, N, O = 23, 15, 12
         numpy_dtype = dtype if dtype != torch.bfloat16 else torch.float32
 
         is_supported = True
@@ -6251,8 +6270,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         def generate_inputs(num_batches):
             # transposed tensors
             for perm1, perm2 in itertools.product(itertools.permutations((0, 1, 2)), repeat=2):
-                b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1)
-                b2 = make_tensor((num_batches, N, O), device, dtype, low=-1, high=1)
+                b1 = make_tensor((num_batches, M, N), device, dtype, low=-0.1, high=0.1)
+                b2 = make_tensor((num_batches, N, O), device, dtype, low=-0.1, high=0.1)
                 b1 = b1.permute(perm1).contiguous().permute(invert_perm(perm1))
                 b2 = b2.permute(perm2).contiguous().permute(invert_perm(perm2))
                 yield b1, b2
@@ -6260,8 +6279,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             for b1, b2, b3, b4, b5, b6 in itertools.product((True, False), repeat=6):
                 shape1 = (num_batches if b1 else 1, M if b2 else 1, N if b3 else 1)
                 shape2 = (num_batches if b4 else 1, N if b5 else 1, O if b6 else 1)
-                b1 = make_tensor(shape1, device, dtype, low=-1, high=1).expand(num_batches, M, N)
-                b2 = make_tensor(shape2, device, dtype, low=-1, high=1).expand(num_batches, N, O)
+                b1 = make_tensor(shape1, device, dtype, low=-0.1, high=0.1).expand(num_batches, M, N)
+                b2 = make_tensor(shape2, device, dtype, low=-0.1, high=0.1).expand(num_batches, N, O)
                 yield b1, b2
             # zero-sized tensors
             for z1, z2, z3, z4 in itertools.product((True, False), repeat=4):
@@ -6341,7 +6360,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             return
 
         num_batches = 2
-        M, N, O = 2, 3, 4
+        M, N, O = 16, 17, 18
 
         is_supported = True
         if dtype == torch.bfloat16:
@@ -6367,8 +6386,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             # transposed tensors
             for perm1, perm2 in itertools.product(itertools.permutations((0, 1, 2)), repeat=2):
                 for perm3 in itertools.permutations((0, 1)):
-                    b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1)
-                    b2 = make_tensor((num_batches, N, O), device, dtype, low=-1, high=1)
+                    b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1) * 0.1
+                    b2 = make_tensor((num_batches, N, O), device, dtype, low=-1, high=1) * 0.1
                     b1 = b1.permute(perm1).contiguous().permute(invert_perm(perm1))
                     b2 = b2.permute(perm2).contiguous().permute(invert_perm(perm2))
                     ref = torch.from_numpy(
@@ -6380,8 +6399,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             for s1, s2, s3, s4, s5, s6 in itertools.product((True, False), repeat=6):
                 shape1 = (num_batches if s1 else 1, M if s2 else 1, N if s3 else 1)
                 shape2 = (num_batches if s4 else 1, N if s5 else 1, O if s6 else 1)
-                b1 = make_tensor(shape1, device, dtype, low=-1, high=1).expand(num_batches, M, N)
-                b2 = make_tensor(shape2, device, dtype, low=-1, high=1).expand(num_batches, N, O)
+                b1 = make_tensor(shape1, device, dtype, low=-1, high=1).expand(num_batches, M, N) * 0.1
+                b2 = make_tensor(shape2, device, dtype, low=-1, high=1).expand(num_batches, N, O) * 0.1
                 ref = torch.from_numpy(
                     b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()
                 ).to(device=device, dtype=dtype).sum(0)
@@ -6391,8 +6410,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             for z1, z2, z3, z4 in itertools.product((True, False), repeat=4):
                 shape1 = (num_batches if z1 else 0, M if z2 else 0, N if z3 else 0)
                 shape2 = (num_batches if z1 else 0, N if z3 else 0, O if z4 else 0)
-                b1 = make_tensor(shape1, device, dtype, low=-1, high=1)
-                b2 = make_tensor(shape2, device, dtype, low=-1, high=1)
+                b1 = make_tensor(shape1, device, dtype, low=-1, high=1) * 0.1
+                b2 = make_tensor(shape2, device, dtype, low=-1, high=1) * 0.1
                 ref = torch.from_numpy(
                     b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()
                 ).to(device=device, dtype=dtype).sum(0)
@@ -6414,7 +6433,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             return
 
         num_batches = 10
-        M, N, O = 12, 8, 5
+        M, N, O = 12, 8, 50
 
         is_supported = True
         if dtype == torch.bfloat16 and self.device_type == 'cuda':
@@ -7435,14 +7454,13 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_lu_solve_batched_non_contiguous(self, device, dtype):
-        from numpy.linalg import solve
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
-        A = random_fullrank_matrix_distinct_singular_value(2, 2, dtype=dtype, device='cpu')
-        b = torch.randn(2, 2, 2, dtype=dtype, device='cpu')
-        x_exp = torch.as_tensor(solve(A.permute(0, 2, 1).numpy(), b.permute(2, 1, 0).numpy())).to(device)
-        A = A.to(device).permute(0, 2, 1)
-        b = b.to(device).permute(2, 1, 0)
+        A = random_fullrank_matrix_distinct_singular_value(2, 2, dtype=dtype, device=device)
+        b = torch.randn(2, 2, 2, dtype=dtype, device=device)
+        x_exp = np.linalg.solve(A.cpu().permute(0, 2, 1).numpy(), b.cpu().permute(2, 1, 0).numpy())
+        A = A.permute(0, 2, 1)
+        b = b.permute(2, 1, 0)
         assert not A.is_contiguous() and not b.is_contiguous(), "contiguous inputs"
         LU_data, LU_pivots = torch.lu(A)
         x = torch.lu_solve(b, LU_data, LU_pivots)
@@ -7452,7 +7470,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
         b = torch.randn(*b_dims, dtype=dtype, device=device)
-        A = random_fullrank_matrix_distinct_singular_value(*A_dims, dtype=dtype).to(device)
+        A = random_fullrank_matrix_distinct_singular_value(*A_dims, dtype=dtype, device=device)
         LU_data, LU_pivots, info = torch.lu(A, get_infos=True, pivot=pivot)
         self.assertEqual(info, torch.zeros_like(info))
         return b, A, LU_data, LU_pivots
@@ -7522,16 +7540,14 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_lu_solve_batched_broadcasting(self, device, dtype):
-        from numpy.linalg import solve
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
         def run_test(A_dims, b_dims, pivot=True):
             A_matrix_size = A_dims[-1]
             A_batch_dims = A_dims[:-2]
-            A = random_fullrank_matrix_distinct_singular_value(A_matrix_size, *A_batch_dims, dtype=dtype)
-            b = torch.randn(*b_dims, dtype=dtype)
-            x_exp = torch.as_tensor(solve(A.numpy(), b.numpy())).to(dtype=dtype, device=device)
-            A, b = A.to(device), b.to(device)
+            A = random_fullrank_matrix_distinct_singular_value(A_matrix_size, *A_batch_dims, dtype=dtype, device=device)
+            b = make_tensor(b_dims, dtype=dtype, device=device)
+            x_exp = np.linalg.solve(A.cpu(), b.cpu())
             LU_data, LU_pivots = torch.lu(A, pivot=pivot)
             x = torch.lu_solve(b, LU_data, LU_pivots)
             self.assertEqual(x, x_exp)
