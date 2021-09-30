@@ -1343,7 +1343,7 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
         work = group.allreduce_coalesced(tensors, opts)
 
     if async_op:
-        return work
+        return work.get_future()
     else:
         work.wait()
 
@@ -1519,8 +1519,11 @@ def _object_to_tensor(obj):
     f = io.BytesIO()
     _pickler(f).dump(obj)
     byte_storage = torch.ByteStorage.from_buffer(f.getvalue())  # type: ignore[attr-defined]
-    byte_tensor = torch.tensor(byte_storage, dtype=torch.uint8)
-    local_size = torch.tensor([byte_tensor.numel()], dtype=torch.long)
+    # Do not replace `torch.ByteTensor` or `torch.LongTensor` with torch.tensor and specifying dtype.
+    # Otherwise, it will casue 100X slowdown.
+    # See: https://github.com/pytorch/pytorch/issues/65696
+    byte_tensor = torch.ByteTensor(byte_storage)
+    local_size = torch.LongTensor([byte_tensor.numel()])
     return byte_tensor, local_size
 
 
@@ -2145,7 +2148,7 @@ def all_gather_coalesced(
         work = group.allgather_coalesced(output_tensor_lists, input_tensor_list)
 
     if async_op:
-        return work
+        return work.get_future()
     else:
         work.wait()
 

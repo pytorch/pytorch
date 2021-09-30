@@ -47,7 +47,7 @@ TEST(BoundsInference, _1) {
   // For this loop bounds inference should yield the following:
   // {{b, kStore, 0, 99}, {a, kLoad, 0, 99}}
   ExprHandle n(100);
-  Placeholder a(BufHandle("a", {n}, kFloat));
+  BufHandle a("a", {n}, kFloat);
   Tensor b =
       Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a.load(i); });
   LoopNest l({b});
@@ -55,9 +55,9 @@ TEST(BoundsInference, _1) {
 
   // We should have two entries: one for 'b' and one for 'a'.
   ASSERT_EQ(bounds_info.size(), 2);
-  ASSERT_EQ(bounds_info.at(a.data()).size(), 1);
-  ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
-  verifyConstBounds(bounds_info.at(a.data())[0], {{0, 99}});
+  ASSERT_EQ(bounds_info.at(a.node()).size(), 1);
+  ASSERT_EQ(bounds_info.at(a.node())[0].kind, kLoad);
+  verifyConstBounds(bounds_info.at(a.node())[0], {{0, 99}});
 
   ASSERT_EQ(bounds_info.at(b.buf()).size(), 1);
   ASSERT_EQ(bounds_info.at(b.buf())[0].kind, kStore);
@@ -71,7 +71,7 @@ TEST(BoundsInference, _2) {
   // For this loop bounds inference should yield the following:
   // {{b, kStore, 0, n-1}, {a, kLoad, 0, n-1}}
   VarHandle n("n", kInt);
-  Placeholder a(BufHandle("a", {n}, kFloat));
+  BufHandle a("a", {n}, kFloat);
   Tensor b =
       Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a.load(i); });
   LoopNest l({b});
@@ -79,9 +79,9 @@ TEST(BoundsInference, _2) {
 
   // We should have two entries: one for 'b' and one for 'a'.
   ASSERT_EQ(bounds_info.size(), 2);
-  ASSERT_EQ(bounds_info.at(a.data()).size(), 1);
-  ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
-  verifyConstBounds(bounds_info.at(a.data())[0], {{0, -1}});
+  ASSERT_EQ(bounds_info.at(a.node()).size(), 1);
+  ASSERT_EQ(bounds_info.at(a.node())[0].kind, kLoad);
+  verifyConstBounds(bounds_info.at(a.node())[0], {{0, -1}});
 
   ASSERT_EQ(bounds_info.at(b.buf()).size(), 1);
   ASSERT_EQ(bounds_info.at(b.buf())[0].kind, kStore);
@@ -95,7 +95,7 @@ TEST(BoundsInference, _3) {
   // For this loop bounds inference should yield the following:
   // {{b, kStore, 0, 99}, {a, kLoad, 0, 109}}
   ExprHandle n(100);
-  Placeholder a(BufHandle("a", {n + 10}, kFloat));
+  BufHandle a("a", {n + 10}, kFloat);
   Tensor b = Compute("b", {{n, "i"}}, [&](const VarHandle& i) {
     return a.load(i) * a.load(i + 10);
   });
@@ -104,9 +104,9 @@ TEST(BoundsInference, _3) {
 
   // We should have two entries: one for 'b' and one for 'a'.
   ASSERT_EQ(bounds_info.size(), 2);
-  ASSERT_EQ(bounds_info.at(a.data()).size(), 1);
-  ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
-  verifyConstBounds(bounds_info.at(a.data())[0], {{0, 109}});
+  ASSERT_EQ(bounds_info.at(a.node()).size(), 1);
+  ASSERT_EQ(bounds_info.at(a.node())[0].kind, kLoad);
+  verifyConstBounds(bounds_info.at(a.node())[0], {{0, 109}});
 
   ASSERT_EQ(bounds_info.at(b.buf()).size(), 1);
   ASSERT_EQ(bounds_info.at(b.buf())[0].kind, kStore);
@@ -124,7 +124,7 @@ TEST(BoundsInference, _4) {
   //     c[y,x] = a[y,x] * b[y,x]
   ExprHandle W(320);
   ExprHandle H(200);
-  Placeholder a(BufHandle("a", {H, W}, kFloat));
+  BufHandle a("a", {H, W}, kFloat);
   Tensor b = Compute(
       "b", {{H, "y"}, {W, "x"}}, [&](const VarHandle& y, const VarHandle& x) {
         return x * y;
@@ -141,9 +141,9 @@ TEST(BoundsInference, _4) {
     auto bounds_info = inferBounds(loops[0]);
     ASSERT_EQ(bounds_info.size(), 3);
 
-    ASSERT_EQ(bounds_info.at(a.data()).size(), 1);
-    ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
-    verifyConstBounds(bounds_info.at(a.data())[0], {{0, 199}, {0, 319}});
+    ASSERT_EQ(bounds_info.at(a.node()).size(), 1);
+    ASSERT_EQ(bounds_info.at(a.node())[0].kind, kLoad);
+    verifyConstBounds(bounds_info.at(a.node())[0], {{0, 199}, {0, 319}});
 
     ASSERT_EQ(bounds_info.at(b.buf()).size(), 1);
     ASSERT_EQ(bounds_info.at(b.buf())[0].kind, kLoad);
@@ -158,9 +158,9 @@ TEST(BoundsInference, _4) {
     auto bounds_info = inferBounds(loops[1]);
     ASSERT_EQ(bounds_info.size(), 3);
 
-    ASSERT_EQ(bounds_info.at(a.data()).size(), 1);
-    ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
-    verifyConstBounds(bounds_info.at(a.data())[0], {{-1, -1}, {0, 319}});
+    ASSERT_EQ(bounds_info.at(a.node()).size(), 1);
+    ASSERT_EQ(bounds_info.at(a.node())[0].kind, kLoad);
+    verifyConstBounds(bounds_info.at(a.node())[0], {{-1, -1}, {0, 319}});
 
     ASSERT_EQ(bounds_info.at(b.buf()).size(), 1);
     ASSERT_EQ(bounds_info.at(b.buf())[0].kind, kLoad);
@@ -175,9 +175,9 @@ TEST(BoundsInference, _4) {
     auto bounds_info = inferBounds(body);
     ASSERT_EQ(bounds_info.size(), 3);
 
-    ASSERT_EQ(bounds_info.at(a.data()).size(), 1);
-    ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
-    verifyConstBounds(bounds_info.at(a.data())[0], {{-1, -1}, {-1, -1}});
+    ASSERT_EQ(bounds_info.at(a.node()).size(), 1);
+    ASSERT_EQ(bounds_info.at(a.node())[0].kind, kLoad);
+    verifyConstBounds(bounds_info.at(a.node())[0], {{-1, -1}, {-1, -1}});
 
     ASSERT_EQ(bounds_info.at(b.buf()).size(), 1);
     ASSERT_EQ(bounds_info.at(b.buf())[0].kind, kLoad);
@@ -202,7 +202,7 @@ TEST(BoundsInference, _5) {
   // for i_tail in 0..100%16:
   //   b[i_tail + (100/16)*16] = a[i_tail + (100/16)*16];
   ExprHandle n(100);
-  Placeholder a(BufHandle("a", {n}, kFloat));
+  BufHandle a("a", {n}, kFloat);
   Tensor b =
       Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a.load(i); });
   LoopNest l({b});
@@ -220,9 +220,9 @@ TEST(BoundsInference, _5) {
     auto bounds_info = inferBounds(outer);
     ASSERT_EQ(bounds_info.size(), 2);
 
-    ASSERT_EQ(bounds_info.at(a.data()).size(), 1);
-    ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
-    verifyConstBounds(bounds_info.at(a.data())[0], {{0, 95}});
+    ASSERT_EQ(bounds_info.at(a.node()).size(), 1);
+    ASSERT_EQ(bounds_info.at(a.node())[0].kind, kLoad);
+    verifyConstBounds(bounds_info.at(a.node())[0], {{0, 95}});
 
     ASSERT_EQ(bounds_info.at(b.buf()).size(), 1);
     ASSERT_EQ(bounds_info.at(b.buf())[0].kind, kStore);
@@ -233,9 +233,9 @@ TEST(BoundsInference, _5) {
     auto bounds_info = inferBounds(tail);
     ASSERT_EQ(bounds_info.size(), 2);
 
-    ASSERT_EQ(bounds_info.at(a.data()).size(), 1);
-    ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
-    verifyConstBounds(bounds_info.at(a.data())[0], {{96, 99}});
+    ASSERT_EQ(bounds_info.at(a.node()).size(), 1);
+    ASSERT_EQ(bounds_info.at(a.node())[0].kind, kLoad);
+    verifyConstBounds(bounds_info.at(a.node())[0], {{96, 99}});
 
     ASSERT_EQ(bounds_info.at(b.buf()).size(), 1);
     ASSERT_EQ(bounds_info.at(b.buf())[0].kind, kStore);
@@ -256,7 +256,7 @@ TEST(BoundsInference, _6) {
   ExprHandle H(200);
   ExprHandle CW(32);
   ExprHandle CH(20);
-  Placeholder a(BufHandle("a", {H, W}, kFloat));
+  BufHandle a("a", {H, W}, kFloat);
   Tensor b = Compute(
       "b", {{H, "y"}, {W, "x"}}, [&](const VarHandle& y, const VarHandle& x) {
         return x * y;
@@ -273,9 +273,9 @@ TEST(BoundsInference, _6) {
     auto bounds_info = inferBounds(loops[0]);
     ASSERT_EQ(bounds_info.size(), 3);
 
-    ASSERT_EQ(bounds_info.at(a.data()).size(), 1);
-    ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
-    verifyConstBounds(bounds_info.at(a.data())[0], {{100, 119}, {100, 131}});
+    ASSERT_EQ(bounds_info.at(a.node()).size(), 1);
+    ASSERT_EQ(bounds_info.at(a.node())[0].kind, kLoad);
+    verifyConstBounds(bounds_info.at(a.node())[0], {{100, 119}, {100, 131}});
 
     ASSERT_EQ(bounds_info.at(b.buf()).size(), 1);
     ASSERT_EQ(bounds_info.at(b.buf())[0].kind, kLoad);
@@ -290,9 +290,9 @@ TEST(BoundsInference, _6) {
     auto bounds_info = inferBounds(loops[1]);
     ASSERT_EQ(bounds_info.size(), 3);
 
-    ASSERT_EQ(bounds_info.at(a.data()).size(), 1);
-    ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
-    verifyConstBounds(bounds_info.at(a.data())[0], {{-1, -1}, {100, 131}});
+    ASSERT_EQ(bounds_info.at(a.node()).size(), 1);
+    ASSERT_EQ(bounds_info.at(a.node())[0].kind, kLoad);
+    verifyConstBounds(bounds_info.at(a.node())[0], {{-1, -1}, {100, 131}});
 
     ASSERT_EQ(bounds_info.at(b.buf()).size(), 1);
     ASSERT_EQ(bounds_info.at(b.buf())[0].kind, kLoad);
@@ -307,9 +307,9 @@ TEST(BoundsInference, _6) {
     auto bounds_info = inferBounds(body);
     ASSERT_EQ(bounds_info.size(), 3);
 
-    ASSERT_EQ(bounds_info.at(a.data()).size(), 1);
-    ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
-    verifyConstBounds(bounds_info.at(a.data())[0], {{-1, -1}, {-1, -1}});
+    ASSERT_EQ(bounds_info.at(a.node()).size(), 1);
+    ASSERT_EQ(bounds_info.at(a.node())[0].kind, kLoad);
+    verifyConstBounds(bounds_info.at(a.node())[0], {{-1, -1}, {-1, -1}});
 
     ASSERT_EQ(bounds_info.at(b.buf()).size(), 1);
     ASSERT_EQ(bounds_info.at(b.buf())[0].kind, kLoad);
@@ -323,7 +323,7 @@ TEST(BoundsInference, _6) {
 
 TEST(BoundsInference, Adjacent) {
   ExprHandle H(6);
-  Placeholder a(BufHandle("a", {20}, kFloat));
+  BufHandle a("a", {20}, kFloat);
   Tensor b =
       Compute("b", {{H, "x"}}, [&](const VarHandle& x) { return a.load(x); });
   Tensor c = Compute(
@@ -337,9 +337,9 @@ TEST(BoundsInference, Adjacent) {
     ASSERT_EQ(bounds_info.size(), 2);
 
     // reads from a[0:5], writes to b[0:5]
-    ASSERT_EQ(bounds_info.at(a.data()).size(), 1);
-    ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
-    verifyConstBounds(bounds_info.at(a.data())[0], {{0, 5}});
+    ASSERT_EQ(bounds_info.at(a.node()).size(), 1);
+    ASSERT_EQ(bounds_info.at(a.node())[0].kind, kLoad);
+    verifyConstBounds(bounds_info.at(a.node())[0], {{0, 5}});
 
     ASSERT_EQ(bounds_info.at(b.buf()).size(), 1);
     ASSERT_EQ(bounds_info.at(b.buf())[0].kind, kStore);
@@ -351,9 +351,9 @@ TEST(BoundsInference, Adjacent) {
     ASSERT_EQ(bounds_info.size(), 2);
 
     // reads from a[0+6:5+6], writes to c[0:5]
-    ASSERT_EQ(bounds_info.at(a.data()).size(), 1);
-    ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
-    verifyConstBounds(bounds_info.at(a.data())[0], {{6, 11}});
+    ASSERT_EQ(bounds_info.at(a.node()).size(), 1);
+    ASSERT_EQ(bounds_info.at(a.node())[0].kind, kLoad);
+    verifyConstBounds(bounds_info.at(a.node())[0], {{6, 11}});
 
     ASSERT_EQ(bounds_info.at(c.buf()).size(), 1);
     ASSERT_EQ(bounds_info.at(c.buf())[0].kind, kStore);
@@ -366,9 +366,9 @@ TEST(BoundsInference, Adjacent) {
 
     // Should be union of above 2 bounds, but this time the bounds of A can be
     // merged.
-    ASSERT_EQ(bounds_info.at(a.data()).size(), 1);
-    ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
-    verifyConstBounds(bounds_info.at(a.data())[0], {{0, 11}});
+    ASSERT_EQ(bounds_info.at(a.node()).size(), 1);
+    ASSERT_EQ(bounds_info.at(a.node())[0].kind, kLoad);
+    verifyConstBounds(bounds_info.at(a.node())[0], {{0, 11}});
 
     ASSERT_EQ(bounds_info.at(b.buf()).size(), 1);
     ASSERT_EQ(bounds_info.at(b.buf())[0].kind, kStore);
@@ -381,7 +381,7 @@ TEST(BoundsInference, Adjacent) {
 }
 
 TEST(BoundsInference, MultipleTopLoopLoad) {
-  Placeholder a(BufHandle("a", {100}, kFloat));
+  BufHandle a("a", {100}, kFloat);
   Tensor b =
       Compute("b", {{64, "x"}}, [&](const VarHandle& x) { return a.load(x); });
   Tensor c = Compute(
@@ -396,7 +396,7 @@ TEST(BoundsInference, MultipleTopLoopLoad) {
 
   // a only read.
   {
-    auto bounds = bounds_info[a.data()];
+    auto bounds = bounds_info[a.node()];
     ASSERT_EQ(bounds.size(), 1);
     // One dimension.
     auto bound = bounds[0];
