@@ -152,7 +152,7 @@ __global__ void nll_loss2d_backward_kernel(
   scalar_t* grad_input,
   scalar_t* grad_output,
   int64_t* target,
-  scalar_t* weight,
+  scalar_t* weights,
   scalar_t* total_weight,
   bool size_average,
   int batch_size,
@@ -161,19 +161,26 @@ __global__ void nll_loss2d_backward_kernel(
   int blocks_per_sample,
   int64_t ignore_index
 ) {
-  scalar_t norm = size_average ? (static_cast<scalar_t>(1) / *total_weight) : static_cast<scalar_t>(1);
+  const auto grad = -(size_average ? *grad_output / *total_weight
+                                   : *grad_output);
 
-  int sample = blockIdx.x / blocks_per_sample;
-  int step = blockDim.x * blocks_per_sample;
-  int toffset = sample * map_nelem;
-  int ioffset = sample * map_nelem * n_classes;
+  const int sample = blockIdx.x / blocks_per_sample;
+  const int step = blockDim.x * blocks_per_sample;
+
+  const int toffset = sample * map_nelem;
+  const auto* const target_thread = target + toffset;
+
+  const int ioffset = sample * map_nelem * n_classes;
+  auto* const grad_input_thread = grad_input + ioffset;
+
   for (int i = (blockIdx.x % blocks_per_sample) * blockDim.x + threadIdx.x;
        i < map_nelem;
        i += step) {
-    int t = (int)target[toffset + i];
+    int t = (int)target_thread[i];
     if (t != ignore_index) {
       CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
-      grad_input[ioffset + i + map_nelem * t] = -(weight != nullptr ? weight[t] : static_cast<scalar_t>(1)) * norm * grad_output[0];
+      grad_input_thread[i + map_nelem * t] = weights != nullptr ? weights[t] * grad
+                                                                : grad;
     }
   }
 }

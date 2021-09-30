@@ -445,16 +445,12 @@ __global__ void nll_loss_backward_reduce_cuda_kernel_1d(
   int t = static_cast<int>(*target);
   if (t != static_cast<int>(ignore_index)) {
     CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
-    auto grad = -grad_output[0];
-    if (weights != nullptr) {
-      grad *= weights[t];
-    }
-    if (size_average) {
-      grad /= *total_weight;
-    }
-    grad_input[t] = grad;
+    const auto grad = -(size_average ? *grad_output / *total_weight
+                                     : *grad_output);
+    grad_input[t] = weights != nullptr ? weights[t] * grad
+                                       : grad;
   }
-};
+}
 
 template <typename scalar_t, typename index_t>
 __global__ void nll_loss_backward_reduce_cuda_kernel_2d(
@@ -468,16 +464,18 @@ __global__ void nll_loss_backward_reduce_cuda_kernel_2d(
     int ndim,
     int n_classes,
     int64_t ignore_index) {
-  scalar_t norm = size_average ? (static_cast<scalar_t>(1) / *total_weight) : static_cast<scalar_t>(1);
+  const auto grad = -(size_average ? *grad_output / *total_weight
+                                   : *grad_output);
 
   for (int i = threadIdx.x; i < nframe; i += NLL_LOSS_THREADS) {
     int t = target[i];
     if (t != static_cast<int>(ignore_index)) {
       CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
-      grad_input[i * ndim + t] = -(weights != nullptr ? weights[t] : static_cast<scalar_t>(1)) * norm * grad_output[0];
+      grad_input[i * ndim + t] = weights != nullptr ? weights[t] * grad
+                                                    : grad;
     }
   }
-};
+}
 
 void nll_loss_backward_out_cuda_template(
     const Tensor& grad_input_,

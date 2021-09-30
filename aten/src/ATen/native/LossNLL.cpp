@@ -350,44 +350,31 @@ static void nll_loss_backward_out_frame(
   if (input.dim() == 1) {
     auto grad_input_acc = grad_input.accessor<scalar_t, 1>();
 
-    const auto cur_target = target_acc[0];
-    if (cur_target != ignore_index) {
-      TORCH_CHECK_INDEX(
-          cur_target >= 0 && cur_target < n_classes,
-          "Target ",
-          cur_target,
-          " is out of bounds.");
-
-      grad_input_acc[cur_target] =
-          (reduction != Reduction::Mean && weight_data != nullptr)
-          ? -weight_data[cur_target]
-          : static_cast<scalar_t>(-1);
-      grad_input_acc[cur_target] *= grad_output_value;
+    const auto t = target_acc[0];
+    if (t != ignore_index) {
+      TORCH_CHECK_INDEX(t >= 0 && t < n_classes, "Target ", t, " is out of bounds.");
+      const auto grad = -(reduction == Reduction::Mean ? grad_output_value / total_weight_value
+                                                       : grad_output_value);
+      grad_input_acc[t] = weight_data != nullptr ? weight_data[t] * grad
+                                                 : grad;
     }
   } else if (input.dim() == 2) {
     auto grad_input_acc = grad_input.accessor<scalar_t, 2>();
+    const auto grad = -(reduction == Reduction::Mean ? grad_output_value / total_weight_value
+                                                     : grad_output_value);
 
     const auto batch_size = input.size(0);
 
-    for (int64_t i = 0; i < batch_size; i++) {
-      const auto cur_target = target_acc[i];
-
-      if (cur_target != ignore_index) {
-        TORCH_CHECK_INDEX(
-            cur_target >= 0 && cur_target < n_classes,
-            "Target ",
-            cur_target,
-            " is out of bounds.");
-
-        const scalar_t w = weight_data != nullptr ? weight_data[cur_target]
-                                                  : static_cast<scalar_t>(1);
-        grad_input_acc[i][cur_target] = -w * grad_output_value;
-
-        if (reduction == Reduction::Mean) {
-          grad_input_acc[i][cur_target] /= total_weight_value;
+    at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
+      for (const auto i : c10::irange(start, end)) {
+        const auto t = target_acc[i];
+        if (t != ignore_index) {
+          TORCH_CHECK_INDEX(t >= 0 && t < n_classes, "Target ", t, " is out of bounds.");
+          grad_input_acc[i][t] = weight_data != nullptr ? weight_data[t] * grad
+                                                        : grad;
         }
       }
-    }
+    });
   }
 }
 

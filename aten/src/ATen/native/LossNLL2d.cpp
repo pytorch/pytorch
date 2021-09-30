@@ -325,29 +325,21 @@ static void nll_loss2d_backward_out_frame(
   const int64_t map_size = input.size(2) * input.size(3);
   const int64_t sample_size = map_size * n_classes;
 
-  scalar_t normalize = (reduction == at::Reduction::Mean)
-      ? total_weight_value
-      : static_cast<scalar_t>(1);
+  const auto grad = -(reduction == Reduction::Mean ? grad_output_value / total_weight_value
+                                                   : grad_output_value);
 
   at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
     for (int64_t b = start; b < end; b++) {
       for (int64_t elem = 0; elem < map_size; elem++) {
-        const int64_t cur_target = target_data[b * map_size + elem];
+        const int64_t t = target_data[b * map_size + elem];
 
-        if (cur_target == ignore_index) {
-          continue;
+        if (t != ignore_index) {
+          TORCH_CHECK_INDEX(t >= 0 && t < n_classes, "Target ", t, " is out of bounds.");
+
+          const int64_t index = b * sample_size + t * map_size + elem;
+          grad_input_data[index] = weight_data != nullptr ? weight_data[t] * grad
+                                                          : grad;
         }
-
-        TORCH_CHECK_INDEX(
-            cur_target >= 0 && cur_target < n_classes,
-            "Target ",
-            cur_target,
-            " is out of bounds.");
-
-        const int64_t index = b * sample_size + cur_target * map_size + elem;
-        const scalar_t w = weight_data != nullptr ? weight_data[cur_target]
-                                                  : static_cast<scalar_t>(1);
-        grad_input_data[index] = -w / normalize * grad_output_value;
       }
     }
   });
