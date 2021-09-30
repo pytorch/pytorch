@@ -7,7 +7,6 @@ name: !{{ build_environment }}
 {%- endblock %}
 
 on:
-{%- if on_pull_request %}
   pull_request:
   {%- if ciflow_config.enabled %}
     {%- if ciflow_config.trigger_action_only %}
@@ -16,22 +15,19 @@ on:
     types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
     {%- endif %}
   {%- endif %}
-{%- else %}
-  # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
-{%- endif %}
 
 {% block build +%}
   # building and testing in a single job since bazel runs only small subset of tests
   build-and-test:
     runs-on: !{{ test_runner_type }}
-    needs: [calculate-docker-image, !{{ ciflow_config.root_job_name }}]
+    needs: [!{{ ciflow_config.root_job_name }}]
     env:
-      DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
       JOB_BASE_NAME: !{{ build_environment }}-build-and-test
       NUM_TEST_SHARDS: !{{ num_test_shards }}
     steps:
       !{{ common.setup_ec2_linux() }}
       !{{ common.checkout_pytorch("recursive") }}
+      !{{ common.calculate_docker_image() }}
       - name: Pull Docker image
         run: |
           !{{ common.pull_docker("${DOCKER_IMAGE}") }}

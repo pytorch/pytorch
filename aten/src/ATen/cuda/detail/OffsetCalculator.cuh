@@ -13,7 +13,7 @@
 // Operands that share the same shape, but may have different strides.
 // OffsetCalculator iterates the tensor in a column-major order
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 constexpr int MAX_DIMS = 16;
 #else
 constexpr int MAX_DIMS = 25;
