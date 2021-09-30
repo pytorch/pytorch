@@ -48,12 +48,14 @@ from torch.quantization import (
     convert,
     quantize_dynamic,
     default_placeholder_observer,
+    default_weight_observer,
     PerChannelMinMaxObserver,
     QConfigDynamic,
     FixedQParamsFakeQuantize,
     FusedMovingAvgObsFakeQuantize,
     FakeQuantize,
     MovingAverageMinMaxObserver,
+    HistogramObserver,
     QConfig,
 )
 
@@ -3044,6 +3046,60 @@ class TestQuantizeFx(QuantizationTestCase):
         }
         self.checkGraphModuleNodes(m, expected_node_occurrence=occurrence)
 
+    def test_observer_fqn(self):
+        """
+        Test to make sure the observer FQN is based on the quantizable op/module that it is observing
+        and uses the modules FQN to determine the observer name.
+        """
+        class Linear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.ones(5, 5)
+                self.b = torch.zeros(5)
+
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.w, self.b)
+
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mods1 = torch.nn.Sequential(
+                    Linear(),
+                    Linear()
+                )
+                self.mods2 = Linear()
+                self.mods3 = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                x = self.mods1(x)
+                x = torch.add(x, 4)
+                x = self.mods2(x)
+                y = torch.add(x, 2)
+                z = torch.mul(x, 5)
+                a = self.mods3(y)
+                return a, z
+
+        model = M().eval()
+
+        prepared = prepare_fx(model, {"": default_qconfig})
+        name_list = []
+        for name, mod in prepared.named_modules():
+            if isinstance(mod, torch.ao.quantization.observer.MinMaxObserver):
+                assert "mods" in name
+                name_list.append(name)
+        expected_name_list = ['mods1_0_input_activation_post_process_0',
+                              'mods1_0_w_activation_post_process_0',
+                              'mods1_0_output_activation_post_process_0',
+                              'mods1_1_w_activation_post_process_0',
+                              'mods1_1_output_activation_post_process_0',
+                              'mods2_w_activation_post_process_0',
+                              'mods2_output_activation_post_process_0',
+                              'mods3_output_activation_post_process_0']
+        assert name_list == expected_name_list
+
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops
@@ -4261,6 +4317,35 @@ class TestQuantizeFxOps(QuantizationTestCase):
             M(), data, quant_type, custom_qconfig_dict=qconfig_dict,
             expected_node_occurrence=node_occurrence)
 
+    def test_fixed_qparams_ops_qint8(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sigmoid = torch.nn.Sigmoid()
+                self.tanh = torch.nn.Tanh()
+
+            def forward(self, x):
+                x = self.sigmoid(x)
+                x = torch.sigmoid(x)
+                x = x.sigmoid()
+                x = self.tanh(x)
+                x = torch.tanh(x)
+                x = x.tanh()
+                return x
+
+        data = (torch.randn((2, 2, 2, 2), dtype=torch.float),)
+        quant_type = QuantType.STATIC
+        qconfig = torch.quantization.QConfig(
+            activation=HistogramObserver.with_args(qscheme=torch.per_tensor_symmetric, dtype=torch.qint8),
+            weight=default_weight_observer)
+        qconfig_dict = {"": qconfig}
+        node_occurrence = {
+            ns.call_function(torch.quantize_per_tensor): 7,
+            ns.call_method("dequantize"): 7
+        }
+        self.checkGraphModeFxOp(
+            M(), data, quant_type, custom_qconfig_dict=qconfig_dict,
+            expected_node_occurrence=node_occurrence, is_reference=True)
 
     @skipIfNoFBGEMM
     def test_general_shape_ops(self):
@@ -5422,6 +5507,80 @@ class TestQuantizeFxModels(QuantizationTestCase):
             out_ref = converted(inp)
 
             torch.testing.assert_allclose(out, out_ref)
+
+    def test_disable_output_fake_quant(self):
+
+        class Linear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.ones(5, 5)
+                self.b = torch.zeros(5)
+
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.w, self.b)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mods1 = torch.nn.Sequential(
+                    Linear(),
+                    Linear()
+                )
+                self.mods2 = Linear()
+                self.mods3 = Linear()
+
+            def forward(self, x):
+                x = self.mods1(x)
+                x = torch.add(x, 4)
+                x = self.mods2(x)
+                y = torch.add(x, 2)
+                z = torch.mul(x, 5)
+                a = self.mods3(y)
+                return a, z
+        devices = ["cpu", "cuda"] if torch.cuda.is_available() else ["cpu"]
+
+        for device in devices:
+            model = M().train()
+            qconfig = torch.quantization.get_default_qat_qconfig("fbgemm")
+            qconfig_dict = {
+                "": None,
+                "object_type": [
+                    (torch.nn.functional.linear, qconfig),
+                    (torch.nn.functional.relu, qconfig),
+                ],
+            }
+            prepared = torch.quantization.quantize_fx.prepare_qat_fx(model, qconfig_dict)
+            prepared.to(device)
+            modules = dict(prepared.named_modules())
+
+            def check_all_users_not_linear(node):
+                for user, _ in node.users.items():
+                    if user.op == 'call_function' and user.target == torch.nn.functional.linear:
+                        return False
+                return True
+
+
+            for node in prepared.graph.nodes:
+                if node.op == 'call_module' and torch.ao.quantization.is_activation_post_process(modules[str(node.target)]):
+                    # get the users
+                    if check_all_users_not_linear(node):
+                        mod = modules[str(node.target)]
+                        mod.output_fake_quant = False
+            for i in range(10):
+                prepared(torch.rand(5, 5, device=device))
+
+            disabled_output_fake_quants = ["mods3_output_activation_post_process_0",
+                                           "mods2_output_activation_post_process_0",
+                                           "mods1_1_output_activation_post_process_0"]
+
+            for name, mod in prepared.named_modules():
+                if isinstance(mod, FusedMovingAvgObsFakeQuantize):
+                    if name in disabled_output_fake_quants:
+                        self.assertEqual(mod.output_fake_quant, False)
+                    else:
+                        self.assertEqual(mod.output_fake_quant, True)
+
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
                        "\tpython test/test_quantization.py TESTNAME\n\n"
