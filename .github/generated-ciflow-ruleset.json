@@ -16,7 +16,6 @@
       "periodic-win-vs2019-cuda11.1-py3",
       "puretorch-linux-xenial-py3.6-gcc5.4",
       "win-vs2019-cpu-py3",
-      "win-vs2019-cuda10.2-py3",
       "win-vs2019-cuda11.3-py3"
     ],
     "ciflow/bazel": [
@@ -39,7 +38,6 @@
       "periodic-libtorch-linux-xenial-cuda11.1-py3.6-gcc7",
       "periodic-linux-xenial-cuda11.1-py3.6-gcc7",
       "periodic-win-vs2019-cuda11.1-py3",
-      "win-vs2019-cuda10.2-py3",
       "win-vs2019-cuda11.3-py3"
     ],
     "ciflow/default": [
@@ -84,7 +82,6 @@
     "ciflow/win": [
       "periodic-win-vs2019-cuda11.1-py3",
       "win-vs2019-cpu-py3",
-      "win-vs2019-cuda10.2-py3",
       "win-vs2019-cuda11.3-py3"
     ],
     "ciflow/xla": [
