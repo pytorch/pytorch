@@ -25,6 +25,7 @@ from torch.quantization import (
 
 from torch.quantization.quantization_mappings import (
     get_default_qat_module_mappings,
+    get_default_static_quant_module_mappings,
 )
 
 import torch.nn as nn
@@ -375,6 +376,22 @@ class TestObserver(QuantizationTestCase):
             # verify no crash
             x = obs(x)
 
+    def _test_memoryless(self, obs_class):
+        obs = obs_class(memoryless=True)
+        x = torch.randn((3, 3))
+        obs(x)
+        params = obs.calculate_qparams()
+        for _ in range(20):
+            obs(10 * torch.randn((3, 3)))
+            self.assertNotEqual(params, obs.calculate_qparams())
+            obs(x)
+            self.assertEqual(params, obs.calculate_qparams())
+
+    def test_memoryless_minmaxobserver(self):
+        self._test_memoryless(MinMaxObserver)
+
+    def test_memoryless_perchannelminmaxobserver(self):
+        self._test_memoryless(PerChannelMinMaxObserver)
 
 # HistogramObserver that works like it does on master
 class _ReferenceHistogramObserver(HistogramObserver):
@@ -1123,31 +1140,37 @@ class TestFusedObsFakeQuantModule(TestCase):
         model = Model()
         indices = torch.randint(0, 10, (5, 12))
         qat_mappings = get_default_qat_module_mappings()
-        qat_mappings[nn.EmbeddingBag] = torch.nn.qat.EmbeddingBag
-
-        float_qparams_observer = PerChannelMinMaxObserver.with_args(dtype=torch.quint8,
-                                                                    qscheme=torch.per_channel_affine_float_qparams,
-                                                                    ch_axis=0)
-        float_qparams_qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
-                                               weight=float_qparams_observer)
+        float_qparams_fakequant = FakeQuantize.with_args(observer=torch.quantization.PerChannelMinMaxObserver,
+                                                        qscheme=torch.per_channel_affine_float_qparams,
+                                                        ch_axis=0,
+                                                        memoryless=True)
+        float_qparams_qconfig = QConfig(activation=NoopObserver,
+                                        weight=float_qparams_fakequant)
         model.qconfig = float_qparams_qconfig
 
-
         quant_model = torch.quantization.QuantWrapper(model)
-        quant_model = torch.quantization.prepare_qat(quant_model, qat_mappings)
-        quant_model(indices)
+        quant_model = torch.quantization.prepare_qat(quant_model, mapping=qat_mappings)
 
         count_fake_quant = 0
         for name, mod in quant_model.named_modules():
             if name.endswith('weight_fake_quant'):
                 count_fake_quant += 1
-                self.assertEqual(type(mod), PerChannelMinMaxObserver)
+                self.assertEqual(type(mod), FakeQuantize)
 
         self.assertEqual(count_fake_quant, 2)
 
-        # Model activation observer should be Placeholder, due to it being dynamic quantization.
-        self.assertEqual(type(quant_model.quant.activation_post_process),
-                         PlaceholderObserver)
+        quant_model(indices)
+
+        convert_mappings = get_default_static_quant_module_mappings()
+        # For EmbeddingBags, input should not be quantized.
+        convert_mappings[torch.ao.quantization.stubs.QuantStub] = torch.nn.quantizable.Identity
+
+        inference_gm = torch.quantization.convert(quant_model.eval().cpu(), convert_mappings)
+
+        # Ensure that EmbeddingBags are now quantized
+        self.assertEqual(type(inference_gm.module.emb1), torch.nn.quantized.EmbeddingBag)
+        self.assertEqual(type(inference_gm.module.emb2), torch.nn.quantized.EmbeddingBag)
+
 
     def test_default_fused_qat_config(self):
         class Model(nn.Module):

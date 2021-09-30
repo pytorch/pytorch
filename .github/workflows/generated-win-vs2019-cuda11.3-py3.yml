@@ -95,18 +95,7 @@ jobs:
         run: |
           .jenkins/pytorch/win-build.sh
       # Upload to github so that people can click and download artifacts
-      - name: Upload artifacts to Github
-        if: always()
-        uses: actions/upload-artifact@v2
-        # Don't fail on upload to GH since it's only for user convenience
-        continue-on-error: true
-        with:
-          retention-days: 14
-          if-no-files-found: error
-          name: ${{ env.BUILD_ENVIRONMENT }}
-          path: C:\${{ github.run_id }}\build-results
       - name: Upload artifacts to s3
-        if: always()
         uses: seemethere/upload-artifact-s3@v3
         with:
           retention-days: 14
@@ -169,7 +158,6 @@ jobs:
       https_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
       RUN_SMOKE_TESTS_ONLY_ON_PR: True
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
-      CONTINUE_THROUGH_ERROR: ${{ github.repository == 'pytorch/pytorch' && (github.event_name == 'push' || github.event_name == 'schedule') }}
     needs: [build, generate-test-matrix, ciflow_should_run]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
@@ -235,6 +223,8 @@ jobs:
         shell: bash
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
+        # Time out the test phase after 3.5 hours
+        timeout-minutes: 210
         run: |
             if [[ $NUM_TEST_SHARDS -ne 2 ]]; then
               export SHARD_NUMBER=0

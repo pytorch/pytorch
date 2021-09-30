@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Tuple
 
 def _is_per_channel(qscheme: 'torch.qscheme') -> bool:
-    return qscheme in [torch.per_channel_symmetric, torch.per_channel_affine]
+    return qscheme in [torch.per_channel_symmetric, torch.per_channel_affine, torch.per_channel_affine_float_qparams]
 
 def _is_per_tensor(qscheme: 'torch.qscheme') -> bool:
     return qscheme in [torch.per_tensor_symmetric, torch.per_tensor_affine]
