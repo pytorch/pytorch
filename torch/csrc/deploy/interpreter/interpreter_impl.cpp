@@ -191,69 +191,43 @@ warnings.simplefilter("ignore")
 static const size_t NUM_FROZEN_PY_BUILTIN_MODULES = 6;
 static const size_t NUM_FROZEN_PY_STDLIB_MODULES = 680;
 
-// We need to preserve the existing FrozenModules list, since it includes
-// important importlib machinery. This code is adapted from the similar
-// `PyImport_ExtendInittab`.
-int extendFrozenModules(
-    struct _frozen* frozenpython,
-    struct _frozen* frozentorch,
-    struct _frozen* frozentensorrt) {
-  struct _frozen* p = nullptr;
-  size_t a = 0, b = 0, c = 0, d = 0;
-  int res = 0;
+#include <torch/csrc/deploy/builtin_registry.h>
+using torch::deploy::builtin_registry;
+REGISTER_TORCH_DEPLOY_BUILTIN(cpython_internal, PyImport_FrozenModules);
+REGISTER_TORCH_DEPLOY_BUILTIN(frozenpython, _PyImport_FrozenModules);
+REGISTER_TORCH_DEPLOY_BUILTIN(frozentorch, _PyImport_FrozenModules_torch);
+// TODO(shunting) move this to the tensorrt code
+REGISTER_TORCH_DEPLOY_BUILTIN(tensorrt, _PyImport_FrozenModules_tensorrt);
 
-  /* Count the number of entries in both tables */
-  for (a = 0; frozenpython[a].name != nullptr; a++) {
-    // std::cout << "frozenpython[" << a << "]: " << frozenpython[a].name <<
-    // std::endl;
-  }
-  for (b = 0; frozentorch[b].name != nullptr; b++) {
-    // std::cout << "frozentorch[" << b << "]: " << frozentorch[b].name <<
-    // std::endl;
-  }
-  for (c = 0; PyImport_FrozenModules[c].name != nullptr; c++) {
-    // std::cout << "oldfrozen[" << c << "]: " << PyImport_FrozenModules[c].name
-    // << std::endl;
-  }
-  if (frozentensorrt) {
-    for (d = 0; frozentensorrt[d].name != nullptr; d++) {
-      // std::cout << "oldfrozen[" << d << "]: " <<
-      // PyImport_FrozenModules[d].name
-      // << std::endl;
-    }
-  }
-
+int extendFrozenModules() {
+  auto* cpython_internal_frozens =
+      builtin_registry::get_item("cpython_internal");
   // Num frozen builtins shouldn't change (unless modifying the underlying
   // cpython version)
   TORCH_INTERNAL_ASSERT(
-      c == NUM_FROZEN_PY_BUILTIN_MODULES,
+      cpython_internal_frozens != nullptr &&
+          cpython_internal_frozens->num_modules ==
+              NUM_FROZEN_PY_BUILTIN_MODULES,
       "Missing python builtin frozen modules");
-  // Check a+b together since in OSS a is empty and b contains stdlib+torch,
-  // while in fbcode they are separated due to thirdparty2 frozenpython. No
-  // fixed number of torch modules to check for, but there should be at least
-  // one.
+
+  auto* frozenpython = builtin_registry::get_item("frozenpython");
+  auto* frozentorch = builtin_registry::get_item("frozentorch");
+  // Check frozenpython+frozentorch together since in OSS frozenpython is empty
+  // and frozentorch contains stdlib+torch, while in fbcode they are separated
+  // due to thirdparty2 frozenpython. No fixed number of torch modules to check
+  // for, but there should be at least one.
   TORCH_INTERNAL_ASSERT(
-      a + b > NUM_FROZEN_PY_STDLIB_MODULES + 1,
+      frozenpython != nullptr && frozentorch != nullptr &&
+          frozenpython->num_modules + frozentorch->num_modules >
+              NUM_FROZEN_PY_STDLIB_MODULES + 1,
       "Missing frozen python stdlib or torch modules");
 
-  /* Allocate new memory for the combined table */
-  if (a + b + c + d <= SIZE_MAX / sizeof(struct _frozen) - 1) {
-    size_t size = sizeof(struct _frozen) * (a + b + c + d + 1);
-    p = (_frozen*)PyMem_Realloc(p, size);
-  }
+  struct _frozen* p = builtin_registry::get_all_frozen_modules();
   if (p == nullptr) {
     return -1;
   }
-
-  /* Copy the tables into the new memory */
-  memcpy(p, PyImport_FrozenModules, (c + 1) * sizeof(struct _frozen));
-  memcpy(p + c, frozenpython, (a + 1) * sizeof(struct _frozen));
-  memcpy(p + a + c, frozentorch, (b + 1) * sizeof(struct _frozen));
-  if (frozentensorrt) {
-    memcpy(p + a + c + b, frozentensorrt, (d + 1) * sizeof(struct _frozen));
-  }
   PyImport_FrozenModules = p;
-  return res;
+  return 0;
 }
 
 static py::object global_impl(const char* module, const char* name) {
@@ -312,10 +286,7 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterImpl
       PyImport_AppendInittab("tensorrt.tensorrt", PyInit_tensorrt);
     }
 
-    int ret = extendFrozenModules(
-        _PyImport_FrozenModules,
-        _PyImport_FrozenModules_torch,
-        _PyImport_FrozenModules_tensorrt);
+    int ret = extendFrozenModules();
     TORCH_INTERNAL_ASSERT(ret == 0);
 
     PyPreConfig preconfig;
