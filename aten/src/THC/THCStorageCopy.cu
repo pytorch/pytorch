@@ -2,7 +2,6 @@
 #include <THC/THCGeneral.h>
 
 #include <TH/THHalf.h>
-#include <THC/THCTensorCopy.h>
 #include <THC/THCTensor.hpp>
 #include <THC/THCStorage.hpp>
 
