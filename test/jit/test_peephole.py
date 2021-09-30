@@ -219,6 +219,19 @@ class TestPeephole(JitTestCase):
             self.run_pass("peephole", conv_dim.graph)
             FileCheck().check("conv").check("dim").run(conv_dim.graph)
 
+    def test_normalized_rsub(self):
+        a = torch.tensor([1, 2, 3])
+        b = torch.tensor([4, 5, 6])
+
+        def convertible_rsub(x, y):
+            return (x - y), torch.rsub(y, x)
+
+        self.checkScript(convertible_rsub, (a, b))
+        op_graph = torch.jit.script(convertible_rsub).graph
+        FileCheck().check_count("aten::sub", 2, exactly=True).run(op_graph)
+        FileCheck().check_count("aten::rsub", 0, exactly=True).run(op_graph)
+
+
     def test_normalized_is_op(self):
         def convertible_is_op(x: bool, y: bool):
             return x is True, False is x, x is y
