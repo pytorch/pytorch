@@ -66,7 +66,7 @@ void nnc_aten_conv2d(
   if (args_num > 0) {
     // Check that if the extra arguments are provided, then the bias tensor is
     // also present
-    TORCH_INTERNAL_ASSERT(args_num == 7 && bufs_num == 4, buildErrorMessage());
+    TORCH_INTERNAL_ASSERT(args_num == 7 && bufs_num == 4);
     const at::Tensor& b = tensors[3];
 
     int64_t strideH = extra_args[0];

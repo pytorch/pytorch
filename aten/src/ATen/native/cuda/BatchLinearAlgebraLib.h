@@ -7,8 +7,7 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cuda/MiscUtils.h>
 
-#if defined(CUDART_VERSION) && defined(CUSOLVER_VERSION) && CUSOLVER_VERSION >= 10200
-// some cusolver functions don't work well on cuda 9.2 or cuda 10.1.105, cusolver is used on cuda >= 10.1.243
+#if defined(CUDART_VERSION) && defined(CUSOLVER_VERSION)
 #define USE_CUSOLVER
 #endif
 

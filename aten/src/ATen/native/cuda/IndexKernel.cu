@@ -6,7 +6,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/core/Array.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
@@ -16,7 +15,6 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/KernelUtils.cuh>
 #include <c10/util/MaybeOwned.h>
-#include <THC/THCTensorInfo.cuh>
 
 namespace at { namespace native {
 
