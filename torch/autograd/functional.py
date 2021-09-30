@@ -429,7 +429,9 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False):
             ``autograd.grad`` once per row of the jacobian. If this flag is
             ``True``, we perform only a single ``autograd.grad`` call with
             ``batched_grad=True`` which uses the vmap prototype feature.
-            See :func:`torch.autograd.grad`'s ``batched_grad`` parameter for
+            Though this should lead to performance improvements in many cases,
+            because this feature is still experimental, there may be performance
+            cliffs. See :func:`torch.autograd.grad`'s ``batched_grad`` parameter for
             more information.
 
     Returns:
