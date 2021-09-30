@@ -234,6 +234,7 @@ class AliasDb {
   c10::optional<AliasTypeSet> mapTypeToAliasTypeSetPtr(
       const TypePtr& type) const;
   bool functionalNonEscapingListUse(const Use& use) const;
+  bool functionalNonEscapingTupleUse(const Use& use) const;
 
   std::shared_ptr<Graph> graph_;
 
