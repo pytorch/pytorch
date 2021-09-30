@@ -108,11 +108,11 @@ struct TORCH_API LoadBalancer {
 };
 
 struct TORCH_API InterpreterManager {
-  explicit InterpreterManager(size_t n_interp = 2);
+  explicit InterpreterManager(size_t nInterp = 2);
 
-  // get a free model, guarenteed that no other user of acquire_one has the same
+  // get a free model, guarenteed that no other user of acquireOne has the same
   // model. It _is_ possible that other users will be using the interpreter.
-  InterpreterSession acquire_one() {
+  InterpreterSession acquireOne() {
     TORCH_DEPLOY_TRY
     int where = resources_.acquire();
     InterpreterSession I = instances_[where].acquireSession();
@@ -123,7 +123,7 @@ struct TORCH_API InterpreterManager {
 
   // use to make sure something gets run on all interpreters, such as loading or
   // unloading a model eagerly
-  at::ArrayRef<Interpreter> all_instances() {
+  at::ArrayRef<Interpreter> allInstances() {
     TORCH_DEPLOY_TRY
     return instances_;
     TORCH_DEPLOY_SAFE_CATCH_RETHROW
@@ -255,7 +255,7 @@ class PythonMethodWrapper : public torch::IMethod {
 
 struct TORCH_API Package {
   // shorthand for getting the object as a pickle resource in the package
-  ReplicatedObj load_pickle(
+  ReplicatedObj loadPickle(
       const std::string& module,
       const std::string& file) {
     TORCH_DEPLOY_TRY
@@ -267,7 +267,7 @@ struct TORCH_API Package {
 
   InterpreterSession acquireSession() {
     TORCH_DEPLOY_TRY
-    auto I = manager_->acquire_one();
+    auto I = manager_->acquireOne();
     I.self = I.impl_->createOrGetPackageImporterFromContainerFile(
         containerFile_);
     return I;

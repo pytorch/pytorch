@@ -35,31 +35,31 @@ const std::initializer_list<InterpreterSymbol> kInterpreterSearchPath = {
 
 static bool writeDeployInterpreter(FILE* dst) {
   TORCH_INTERNAL_ASSERT(dst);
-  const char* lib_start = nullptr;
-  const char* lib_end = nullptr;
+  const char* libStart = nullptr;
+  const char* libEnd = nullptr;
   bool customLoader = false;
   for (const auto& s : kInterpreterSearchPath) {
-    lib_start = (const char*)dlsym(nullptr, s.startSym);
-    if (lib_start) {
-      lib_end = (const char*)dlsym(nullptr, s.endSym);
+    libStart = (const char*)dlsym(nullptr, s.startSym);
+    if (libStart) {
+      libEnd = (const char*)dlsym(nullptr, s.endSym);
       customLoader = s.customLoader;
       break;
     }
   }
   TORCH_CHECK(
-      lib_start != nullptr && lib_end != nullptr,
+      libStart != nullptr && libEnd != nullptr,
       "torch::deploy requires a build-time dependency on embedded_interpreter or embedded_interpreter_cuda, neither of which were found.  torch::cuda::is_available()=",
       torch::cuda::is_available());
 
-  size_t size = lib_end - lib_start;
-  size_t written = fwrite(lib_start, 1, size, dst);
+  size_t size = libEnd - libStart;
+  size_t written = fwrite(libStart, 1, size, dst);
   TORCH_INTERNAL_ASSERT(size == written, "expected written == size");
   return customLoader;
 }
 
-InterpreterManager::InterpreterManager(size_t n_interp) : resources_(n_interp) {
+InterpreterManager::InterpreterManager(size_t nInterp) : resources_(nInterp) {
   TORCH_DEPLOY_TRY
-  for (const auto i : c10::irange(n_interp)) {
+  for (const auto i : c10::irange(nInterp)) {
     instances_.emplace_back(this);
     auto I = instances_.back().acquireSession();
     // make torch.version.interp be the interpreter id
@@ -117,7 +117,7 @@ InterpreterSession ReplicatedObj::acquireSession(
   TORCH_DEPLOY_TRY
   InterpreterSession I = onThisInterpreter
       ? onThisInterpreter->acquireSession()
-      : pImpl_->manager_->acquire_one();
+      : pImpl_->manager_->acquireOne();
   I.self = I.fromMovable(*this);
   return I;
   TORCH_DEPLOY_SAFE_CATCH_RETHROW
@@ -134,7 +134,7 @@ void ReplicatedObjImpl::unload(const Interpreter* onThisInterpreter) {
   TORCH_DEPLOY_TRY
   if (!onThisInterpreter) {
     // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
-    for (auto& interp : manager_->all_instances()) {
+    for (auto& interp : manager_->allInstances()) {
       unload(&interp);
     }
     return;

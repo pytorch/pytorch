@@ -31,7 +31,7 @@ TEST(TorchDeployGPUTest, SimpleModel) {
   // Test
   torch::deploy::InterpreterManager m(1);
   torch::deploy::Package p = m.loadPackage(model_filename);
-  auto model = p.load_pickle("model", "model.pkl");
+  auto model = p.loadPickle("model", "model.pkl");
   {
     auto M = model.acquireSession();
     M.self.attr("to")({"cuda"});
@@ -74,7 +74,7 @@ TEST(TorchDeployGPUTest, TensorRT) {
       "MAKE_TRT_MODULE", "torch/csrc/deploy/example/generated/make_trt_module");
   torch::deploy::InterpreterManager m(1);
   torch::deploy::Package p = m.loadPackage(packagePath);
-  auto makeModel = p.load_pickle("make_trt_module", "model.pkl");
+  auto makeModel = p.loadPickle("make_trt_module", "model.pkl");
   {
     auto I = makeModel.acquireSession();
     auto model = I.self(at::ArrayRef<at::IValue>{});

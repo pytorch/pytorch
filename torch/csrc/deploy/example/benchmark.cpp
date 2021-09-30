@@ -208,7 +208,7 @@ struct Benchmark {
       run_one_work_item = RunJIT(file_to_run_, std::move(eg));
     } else {
       run_one_work_item =
-          RunPython(package, std::move(eg), manager_.all_instances().data());
+          RunPython(package, std::move(eg), manager_.allInstances().data());
     }
 
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -305,7 +305,7 @@ int main(int argc, char* argv[]) {
   torch::deploy::InterpreterManager manager(max_thread);
 
   // make sure gpu_wrapper.py is in the import path
-  for (auto& interp : manager.all_instances()) {
+  for (auto& interp : manager.allInstances()) {
     auto I = interp.acquireSession();
     I.global("sys", "path").attr("append")({"torch/csrc/deploy/example"});
   }

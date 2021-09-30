@@ -22,7 +22,7 @@ void compare_torchpy_jit(const char* model_filename, const char* jit_filename) {
   // Test
   torch::deploy::InterpreterManager m(1);
   torch::deploy::Package p = m.loadPackage(model_filename);
-  auto model = p.load_pickle("model", "model.pkl");
+  auto model = p.loadPickle("model", "model.pkl");
   at::IValue eg;
   {
     auto I = p.acquireSession();
@@ -51,7 +51,7 @@ TEST(TorchpyTest, LoadLibrary) {
   torch::deploy::InterpreterManager m(1);
   torch::deploy::Package p = m.loadPackage(
       path("LOAD_LIBRARY", "torch/csrc/deploy/example/generated/load_library"));
-  auto model = p.load_pickle("fn", "fn.pkl");
+  auto model = p.loadPickle("fn", "fn.pkl");
   model({});
 }
 
@@ -65,11 +65,11 @@ TEST(TorchpyTest, DifferentInterps) {
   m.reigsterModuleSource("check_none", "check = id(None)\n");
   int64_t id0 = 0, id1 = 0;
   {
-    auto I = m.all_instances()[0].acquireSession();
+    auto I = m.allInstances()[0].acquireSession();
     id0 = I.global("check_none", "check").toIValue().toInt();
   }
   {
-    auto I = m.all_instances()[1].acquireSession();
+    auto I = m.allInstances()[1].acquireSession();
     id1 = I.global("check_none", "check").toIValue().toInt();
   }
   ASSERT_NE(id0, id1);
@@ -89,7 +89,7 @@ TEST(TorchpyTest, Movable) {
   torch::deploy::InterpreterManager m(1);
   torch::deploy::ReplicatedObj obj;
   {
-    auto I = m.acquire_one();
+    auto I = m.acquireOne();
     auto model =
         I.global("torch.nn", "Module")(std::vector<torch::deploy::Obj>());
     obj = I.createMovable(model);
@@ -100,7 +100,7 @@ TEST(TorchpyTest, Movable) {
 TEST(TorchpyTest, MultiSerialSimpleModel) {
   torch::deploy::InterpreterManager manager(3);
   torch::deploy::Package p = manager.loadPackage(path("SIMPLE", simple));
-  auto model = p.load_pickle("model", "model.pkl");
+  auto model = p.loadPickle("model", "model.pkl");
   auto ref_model = torch::jit::load(path("SIMPLE_JIT", simple_jit));
 
   auto input = torch::ones({10, 20});
@@ -143,7 +143,7 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
   torch::deploy::InterpreterManager manager(nthreads);
 
   torch::deploy::Package p = manager.loadPackage(path("SIMPLE", simple));
-  auto model = p.load_pickle("model", "model.pkl");
+  auto model = p.loadPickle("model", "model.pkl");
   auto ref_model = torch::jit::load(path("SIMPLE_JIT", simple_jit));
 
   auto input = torch::ones({10, 20});
@@ -183,9 +183,9 @@ TEST(TorchpyTest, ThrowsSafely) {
 
   torch::deploy::Package p = manager.loadPackage(path("SIMPLE", simple));
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-  EXPECT_THROW(p.load_pickle("some other", "garbage path"), c10::Error);
+  EXPECT_THROW(p.loadPickle("some other", "garbage path"), c10::Error);
 
-  auto model = p.load_pickle("model", "model.pkl");
+  auto model = p.loadPickle("model", "model.pkl");
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   EXPECT_THROW(model(at::IValue("unexpected input")), c10::Error);
 }
@@ -214,8 +214,8 @@ TEST(TorchpyTest, TensorSharingNotAllowed) {
   size_t nthreads = 2;
   torch::deploy::InterpreterManager m(nthreads);
   // generate a tensor from one interpreter
-  auto I0 = m.all_instances()[0].acquireSession();
-  auto I1 = m.all_instances()[1].acquireSession();
+  auto I0 = m.allInstances()[0].acquireSession();
+  auto I1 = m.allInstances()[1].acquireSession();
   auto obj = I0.global("torch", "empty")({I0.fromIValue(2)});
   auto t = obj.toIValue().toTensor();
   // try to feed it to the other interpreter, should error
@@ -237,7 +237,7 @@ TEST(TorchpyTest, TaggingRace) {
     std::atomic<int64_t> failed(0);
     at::parallel_for(0, nthreads, 1, [&](int64_t begin, int64_t end) {
       for (const auto i : c10::irange(begin, end)) {
-        auto I = m.all_instances()[i].acquireSession();
+        auto I = m.allInstances()[i].acquireSession();
         try {
           I.fromIValue(t);
           success++;
@@ -255,11 +255,11 @@ TEST(TorchpyTest, DisarmHook) {
   at::Tensor t = torch::empty(2);
   {
     torch::deploy::InterpreterManager m(1);
-    auto I = m.acquire_one();
+    auto I = m.acquireOne();
     I.fromIValue(t);
   } // unload the old interpreter
   torch::deploy::InterpreterManager m(1);
-  auto I = m.acquire_one();
+  auto I = m.acquireOne();
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_THROW(I.fromIValue(t), c10::Error); // NOT a segfault
 }
@@ -267,7 +267,7 @@ TEST(TorchpyTest, DisarmHook) {
 TEST(TorchpyTest, RegisterModule) {
   torch::deploy::InterpreterManager m(2);
   m.reigsterModuleSource("foomodule", "def add1(x): return x + 1\n");
-  for (const auto& interp : m.all_instances()) {
+  for (const auto& interp : m.allInstances()) {
     auto I = interp.acquireSession();
     AT_ASSERT(3 == I.global("foomodule", "add1")({2}).toIValue().toInt());
   }
@@ -278,7 +278,7 @@ TEST(TorchpyTest, FxModule) {
   torch::deploy::InterpreterManager manager(nthreads);
   torch::deploy::Package p = manager.loadPackage(path(
       "SIMPLE_LEAF_FX", "torch/csrc/deploy/example/generated/simple_leaf_fx"));
-  auto model = p.load_pickle("model", "model.pkl");
+  auto model = p.loadPickle("model", "model.pkl");
 
   std::vector<at::Tensor> outputs;
   auto input = torch::ones({5, 10});
@@ -304,7 +304,7 @@ thread_local int in_another_module = 5;
 TEST(TorchpyTest, SharedLibraryLoad) {
   torch::deploy::InterpreterManager manager(2);
   auto no_args = at::ArrayRef<torch::deploy::Obj>();
-  for (auto& interp : manager.all_instances()) {
+  for (auto& interp : manager.allInstances()) {
     auto I = interp.acquireSession();
 
     const char* test_lib_path = getenv("LIBTEST_DEPLOY_LIB");
@@ -329,7 +329,7 @@ TEST(TorchpyTest, SharedLibraryLoad) {
     // I.global("numpy", "array"); // force numpy to load here so it is loaded
     //                             // twice before we run the tests
   }
-  for (auto& interp : manager.all_instances()) {
+  for (auto& interp : manager.allInstances()) {
     auto I = interp.acquireSession();
     // auto i =
     //     I.global("test_deploy_python", "numpy_test")({1}).toIValue().toInt();
@@ -396,11 +396,11 @@ result = torch.Tensor([1,2,3])
 )PYTHON");
   at::Tensor w_grad0, w_grad1;
   {
-    auto I = m.all_instances()[0].acquireSession();
+    auto I = m.allInstances()[0].acquireSession();
     w_grad0 = I.global("autograd_test", "result").toIValue().toTensor();
   }
   {
-    auto I = m.all_instances()[1].acquireSession();
+    auto I = m.allInstances()[1].acquireSession();
     w_grad1 = I.global("autograd_test", "result").toIValue().toTensor();
   }
   EXPECT_TRUE(w_grad0.equal(w_grad1));
