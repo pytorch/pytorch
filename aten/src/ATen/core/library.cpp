@@ -7,15 +7,11 @@ namespace torch {
 namespace {
   // TODO: Consider representing debug info as a struct instead so you
   // don't have to allocate strings all the time
-  std::string debugString(const char* debug, const char* file, uint32_t line) {
+  std::string debugString(const char* file, uint32_t line) {
 #ifdef STRIP_ERROR_MESSAGES
     return std::string();
 #else
-    if (debug == nullptr || debug[0] == '\0') {
-      return c10::str("registered at ", file, ":", line);
-    } else {
-      return std::string(debug);
-    }
+    return c10::str("registered at ", file, ":", line);
 #endif
   }
 
@@ -24,7 +20,7 @@ namespace {
     return std::string();
 #else
     if (debug.empty()) {
-      return debugString(static_cast<const char*>(nullptr), file, line);
+      return debugString(file, line);
     } else {
       return debug;
     }
@@ -67,7 +63,7 @@ Library::Library(Kind kind, std::string ns, c10::optional<c10::DispatchKey> k, c
         // don't register a library
         registrars_.emplace_back(
           c10::Dispatcher::singleton().registerLibrary(
-            *ns_, debugString("", file_, line_)
+            *ns_, debugString(file_, line_)
           )
         );
         // fallthrough
@@ -130,7 +126,7 @@ Library& Library::_def(c10::FunctionSchema&& schema, c10::OperatorName* out_name
   registrars_.emplace_back(
     c10::Dispatcher::singleton().registerDef(
       std::move(schema),
-      debugString("", file_, line_)
+      debugString(file_, line_)
     )
   );
   return *this;
