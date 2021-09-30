@@ -76,11 +76,11 @@ class MultiheadAttention(nn.MultiheadAttention):
         self.q_scaling_product = nnq.FloatFunctional()
 
         # Quant/Dequant
-        self.quant_attn_output = torch.quantization.QuantStub()
-        self.quant_attn_output_weights = torch.quantization.QuantStub()
-        self.dequant_q = torch.quantization.DeQuantStub()
-        self.dequant_k = torch.quantization.DeQuantStub()
-        self.dequant_v = torch.quantization.DeQuantStub()
+        self.quant_attn_output = torch.ao.quantization.QuantStub()
+        self.quant_attn_output_weights = torch.ao.quantization.QuantStub()
+        self.dequant_q = torch.ao.quantization.DeQuantStub()
+        self.dequant_k = torch.ao.quantization.DeQuantStub()
+        self.dequant_v = torch.ao.quantization.DeQuantStub()
 
     def _get_name(self):
         return 'QuantizableMultiheadAttention'
@@ -146,7 +146,7 @@ class MultiheadAttention(nn.MultiheadAttention):
                 observed.linear_V.bias = nn.Parameter(other.in_proj_bias[(other.embed_dim * 2):])
         observed.eval()
         # Explicit prepare
-        observed = torch.quantization.prepare(observed, inplace=True)
+        observed = torch.ao.quantization.prepare(observed, inplace=True)
         return observed
 
     @torch.jit.unused
@@ -221,7 +221,7 @@ class MultiheadAttention(nn.MultiheadAttention):
 
     @classmethod
     def from_observed(cls, other):
-        converted = torch.quantization.convert(other, mapping=None,
+        converted = torch.ao.quantization.convert(other, mapping=None,
                                                inplace=False,
                                                remove_qconfig=True,
                                                convert_custom_config_dict=None)
