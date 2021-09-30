@@ -15,6 +15,7 @@
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/callstack_debug_info_serialization.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
+#include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/csrc/jit/serialization/python_print.h>
@@ -36,25 +37,24 @@ namespace jit {
 
 char const* toString(OpCode op);
 
+IValue to_tuple(std::vector<IValue> ivalues) {
+  return c10::ivalue::Tuple::create(std::move(ivalues));
+}
+
+IValue Table(const std::vector<std::pair<std::string, IValue>>& entries) {
+  std::vector<IValue> ivalue_entries;
+  ivalue_entries.reserve(entries.size());
+  for (const auto& e : entries) {
+    ivalue_entries.push_back(to_tuple({e.first, e.second}));
+  }
+  return to_tuple(std::move(ivalue_entries));
+}
+
 namespace {
 
 ExportModuleExtraFilesHook& GetExtraFilesHook() {
   static ExportModuleExtraFilesHook func = nullptr;
   return func;
-}
-
-static IValue Tup(std::vector<IValue> ivalues) {
-  return c10::ivalue::Tuple::create(std::move(ivalues));
-}
-
-static IValue Table(
-    const std::vector<std::pair<std::string, IValue>>& entries) {
-  std::vector<IValue> ivalue_entries;
-  ivalue_entries.reserve(entries.size());
-  for (const auto& e : entries) {
-    ivalue_entries.push_back(Tup({e.first, e.second}));
-  }
-  return Tup(std::move(ivalue_entries));
 }
 
 std::pair<IValue, IValue> getFunctionTuple(
@@ -69,21 +69,21 @@ std::pair<IValue, IValue> getFunctionTuple(
 
   std::shared_ptr<MobileCode> code;
   code = std::make_shared<MobileCode>(
-      graph,
-      func.name(),
-      BytecodeEmitDefaultValueForUnspecifiedArgMode::
-          is_enabled() /* emit_default_input_instructions */);
+      graph, func.name(), BytecodeEmitMode::is_default_value_for_unspecified_arg_enabled() /* emit_default_input_instructions */, BytecodeEmitMode::is_default_args_before_out_args_enabled() /* enable_defaults_args_with_out_args */);
   auto instructions_copy = code->instructions();
 
   // operator names
   std::vector<c10::OperatorName> opnames;
   std::vector<std::string> method_names;
   std::vector<int64_t> op_debug_handles;
+  int next_new_op_index = 0;
   for (size_t i = 0; i < instructions_copy.size(); ++i) {
     Instruction ins = instructions_copy[i];
-    if (ins.op == OP || ins.op == OPN) {
+    if ((ins.op == OP || ins.op == OPN) && ins.X == next_new_op_index) {
+      // Found a new op (assumes new operators ordered by ascending ins.X)
       auto node = code->instructions_source()[i];
       opnames.emplace_back(node->schema().operator_name());
+      next_new_op_index++;
     }
     // CALL nodes at this point represent built-in (i.e. non-Graph)
     // functions that were not inlined. Here we convert the CALL
@@ -150,7 +150,7 @@ std::pair<IValue, IValue> getFunctionTuple(
   std::vector<IValue> instructions;
   instructions.reserve(instructions_copy.size());
   for (Instruction ins : instructions_copy) {
-    instructions.emplace_back(Tup({toString(ins.op), ins.X, ins.N}));
+    instructions.emplace_back(to_tuple({toString(ins.op), ins.X, ins.N}));
   }
 
   // operators
@@ -168,11 +168,11 @@ std::pair<IValue, IValue> getFunctionTuple(
     if (it != op_to_specified_args.end()) {
       num_args = it->second;
     }
-    if (BytecodeEmitDefaultValueForUnspecifiedArgMode::is_enabled()) {
-      operators.emplace_back(Tup({opname.name, opname.overload_name}));
+    if (BytecodeEmitMode::is_default_value_for_unspecified_arg_enabled()) {
+      operators.emplace_back(to_tuple({opname.name, opname.overload_name}));
     } else {
       operators.emplace_back(
-          Tup({opname.name, opname.overload_name, num_args}));
+          to_tuple({opname.name, opname.overload_name, num_args}));
     }
   }
 
@@ -208,10 +208,10 @@ std::pair<IValue, IValue> getFunctionTuple(
   auto register_size = static_cast<int>(code->register_size());
 
   auto codeTable = Table(
-      {{"instructions", Tup(instructions)},
-       {"operators", Tup(operators)},
-       {"constants", Tup(constants)},
-       {"types", Tup(types)},
+      {{"instructions", to_tuple(instructions)},
+       {"operators", to_tuple(operators)},
+       {"constants", to_tuple(constants)},
+       {"types", to_tuple(types)},
        {"register_size", register_size}});
 
   // schema
@@ -258,7 +258,7 @@ std::pair<IValue, IValue> getFunctionTuple(
           {"default_value", arg.default_value()},
       }));
     }
-    return Tup(argTables);
+    return to_tuple(argTables);
   };
   auto schemaTable = Table({
       {"arguments", makeArgTuple(schema.arguments())},
@@ -266,7 +266,7 @@ std::pair<IValue, IValue> getFunctionTuple(
   });
 
   // function tuple
-  auto bytecode_vals = Tup({qn, codeTable, schemaTable});
+  auto bytecode_vals = to_tuple({qn, codeTable, schemaTable});
 
   c10::optional<IValue> debug_info_vals;
   // module debug info
@@ -278,7 +278,7 @@ std::pair<IValue, IValue> getFunctionTuple(
   IValue module_debug_tuple = c10::ivalue::Tuple::create(op_debug_handles);
   auto function_debug_info =
       Table({{"function_debug_handles", module_debug_tuple}});
-  debug_info_vals = Tup({qn, function_debug_info});
+  debug_info_vals = to_tuple({qn, function_debug_info});
   return std::make_pair(bytecode_vals, debug_info_vals);
 }
 
@@ -648,7 +648,7 @@ void ScriptModuleSerializer::writeByteCode(
       debug_info_elements,
       debug_info_recorder,
       type_name_uniquer_);
-  auto telements = Tup(std::move(elements));
+  auto telements = to_tuple(std::move(elements));
   writeArchive(
       telements,
       /*archive_name=*/"bytecode",
@@ -656,7 +656,7 @@ void ScriptModuleSerializer::writeByteCode(
       /*tensor_dir=*/"constants/",
       /*use_storage_context=*/true);
 
-  auto debug_info_telements = Tup(std::move(debug_info_elements));
+  auto debug_info_telements = to_tuple(std::move(debug_info_elements));
 
   // At the moment keeping this feature experimental
   // since we have not evaluated how this affect model size
@@ -869,11 +869,21 @@ std::vector<std::string> export_opnames(const script::Module& m) {
 // or not. It's the major difference between bytecode v5 and v6.
 thread_local bool emitBytecodeDefaultInputs =
     caffe2::serialize::kProducedBytecodeVersion <= 5 ? true : false;
-bool BytecodeEmitDefaultValueForUnspecifiedArgMode::is_enabled() {
+bool BytecodeEmitMode::is_default_value_for_unspecified_arg_enabled() {
   return emitBytecodeDefaultInputs;
 }
-void BytecodeEmitDefaultValueForUnspecifiedArgMode::set_enabled(bool enabled) {
+void BytecodeEmitMode::set_default_value_for_unspecified_arg_enabled(
+    bool enabled) {
   emitBytecodeDefaultInputs = enabled;
+}
+
+thread_local bool emitDefautlArgsWithOutArgs =
+    caffe2::serialize::kProducedBytecodeVersion <= 6 ? false : true;
+bool BytecodeEmitMode::is_default_args_before_out_args_enabled() {
+  return emitDefautlArgsWithOutArgs;
+}
+void BytecodeEmitMode::set_default_args_before_out_args_enabled(bool enabled) {
+  emitDefautlArgsWithOutArgs = enabled;
 }
 
 } // namespace jit
