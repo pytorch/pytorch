@@ -2102,6 +2102,15 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(lambda t: op(t, 1, 1)), (torch.rand(B1, 2, B0, 5),), in_dims=2)
         test(vmap(vmap(lambda t: op(t, 1, 1), in_dims=1)), (torch.rand(B1, 2, B0, B2, 5),), in_dims=2)
 
+    def test_roll_no_dims(self):
+        op = torch.roll
+        test = self._vmap_test
+        B0, B1, B2 = 7, 11, 13
+        test(op, (torch.rand(B0, 2, 5), 2), in_dims=(0, None))
+        test(op, (torch.rand(2, B0, 5), 3), in_dims=(1, None))
+        test(vmap(lambda t: op(t, 3)), (torch.rand(B1, 2, B0, 5),), in_dims=2)
+        test(vmap(vmap(lambda t: op(t, 3), in_dims=1)), (torch.rand(B1, 2, B0, B2, 5),), in_dims=2)
+
     def test_stack(self):
         test = self._vmap_test
         B0, B1 = 5, 7
@@ -3039,7 +3048,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('resize_as_'),
         xfail('resolve_conj'),
         xfail('resolve_neg'),
-        xfail('roll'),
         xfail('scatter'),
         xfail('scatter_add'),
         xfail('take'),
