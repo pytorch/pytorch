@@ -3,10 +3,10 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/core/TensorAccessor.h>
 #include <ATen/cuda/detail/KernelUtils.h>
-#include <THC/THCAtomics.cuh>
 #include <c10/cuda/CUDAException.h>
 #include <c10/macros/Macros.h>
 #include <ATen/native/Resize.h>
