@@ -582,8 +582,8 @@ c10::optional<::c10::SymbolicShape> ComputeShapeFromSqueeze(
   for (const auto i : c10::irange(input_shape.size())) {
     if (input_shape[i].is_static()) {
       if (input_shape[i].static_size() != 1) {
-        final_shape.emplace_back(::c10::ShapeSymbol::fromStaticSize(
-            input_shape[i].static_size()));
+        final_shape.emplace_back(
+            ::c10::ShapeSymbol::fromStaticSize(input_shape[i].static_size()));
       }
     } else {
       final_shape.emplace_back(::c10::ShapeSymbol::newSymbol());
@@ -1356,9 +1356,14 @@ void ComputeConstant(Node* n, int opset_version) {
                 .sizes();
         if (input0_shape_size.has_value()) {
           auto input0_shape_value = input0_shape_size.value();
-          if (n->inputs().size() == 1) {
-            auto final_shape =
-                ComputeShapeFromSqueeze(input0_shape_value);
+          // For opset_versions > 13, for n->inputs().size() > 1,
+          // the shape inference is handled via onnx shape inference
+          // For opset_versions < 13, we ensure the attribute axes is not
+          // present as in cases with axes attr present, the shape inference is
+          // handled via onnx shape inference
+          if ((opset_version >= 13 && n->inputs().size() == 1) ||
+              (opset_version < 13 && !n->hasAttributeS("axes"))) {
+            auto final_shape = ComputeShapeFromSqueeze(input0_shape_value);
             if (final_shape.has_value()) {
               UpdateShape(n->output(), final_shape.value());
             }
