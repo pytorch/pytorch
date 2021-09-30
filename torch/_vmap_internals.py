@@ -101,7 +101,7 @@ def _unwrap_batched(
     if isinstance(batched_outputs, Tensor):
         out_dim = out_dims_as_tuple[0]
         return torch._remove_batch_dim(batched_outputs, vmap_level, batch_size, out_dim)  # type: ignore[return-value]
-    return tuple(torch._remove_batch_dim(out, vmap_level, batch_size, out_dim)
+    return tuple((torch._remove_batch_dim(out, vmap_level, batch_size, out_dim) if out is not None else None)
                  for out, out_dim in zip(batched_outputs, out_dims_as_tuple))
 
 # Checks that `fn` returned one or more Tensors and nothing else.
@@ -109,13 +109,13 @@ def _unwrap_batched(
 # so we are effectively checking that `outputs` is a single Tensor or a tuple of
 # Tensors.
 def _validate_outputs(outputs: Any, func: Callable) -> None:
-    if isinstance(outputs, Tensor):
+    if isinstance(outputs, Tensor) or outputs is None:
         return
     if not isinstance(outputs, tuple):
         raise ValueError(f'vmap({_get_name(func)}, ...): `{_get_name(func)}` must only return '
                          f'Tensors, got type {type(outputs)} as the return.')
     for idx, output in enumerate(outputs):
-        if isinstance(output, Tensor):
+        if isinstance(output, Tensor) or output is None:
             continue
         raise ValueError(f'vmap({_get_name(func)}, ...): `{_get_name(func)}` must only return '
                          f'Tensors, got type {type(output)} for return {idx}.')
@@ -262,6 +262,24 @@ def _vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> C
             batched_inputs, batch_size = _create_batched_inputs(in_dims, args, vmap_level, func)
             batched_outputs = func(*batched_inputs)
             _validate_outputs(batched_outputs, func)
+            return _unwrap_batched(batched_outputs, out_dims, vmap_level, batch_size, func)
+        finally:
+            torch._C._vmapmode_decrement_nesting()
+    return wrapped
+
+# Warning: Do NOT use, this is a temporary workaround and may be removed.
+# This is a version of vmap that does not validate type of the outputs. This is used to enable
+# us to wrap the call to the autograd engine, which may return None when any of the inputs are
+# unsed. See the issue tracking this https://github.com/facebookresearch/functorch/issues/159.
+def _unsafe_vmap_for_autograd(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Callable:
+    @functools.wraps(func)
+    def wrapped(*args):
+        _check_out_dims_is_int_or_int_tuple(out_dims, func)
+        vmap_level = torch._C._vmapmode_increment_nesting()
+        try:
+            batched_inputs, batch_size = _create_batched_inputs(in_dims, args, vmap_level, func)
+            batched_outputs = func(*batched_inputs)
+            # Don't validate the outputs
             return _unwrap_batched(batched_outputs, out_dims, vmap_level, batch_size, func)
         finally:
             torch._C._vmapmode_decrement_nesting()
