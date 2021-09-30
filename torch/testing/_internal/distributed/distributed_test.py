@@ -7339,7 +7339,9 @@ class DistributedTest:
             # tests expected behavior when nonzero rank hangs.
             nccl_pg = dist.new_group(
                 ranks=list(i for i in range(int(self.world_size))),
-                timeout=timedelta(seconds=2),
+                # provide sufficient timeout so communicators
+                # can be initialized in ctor.
+                timeout=timedelta(seconds=15),
                 backend=dist.Backend.NCCL,
             )
             gloo_pg = dist.new_group(
@@ -7350,7 +7352,7 @@ class DistributedTest:
             # Let all ranks call allreduce first to set up communicators etc.
             # Directly simulating error here will run into store issue described
             # in https://github.com/pytorch/pytorch/issues/54524.
-            nccl_pg.allreduce(tensors).wait()
+            nccl_pg.allreduce(tensors).wait(timedelta(seconds=5))
             # All ranks besides 0 call into allreduce. This is to simulate a
             # desync across the world, where some ranks call into
             # monitored_barrier() and others are stuck in collective comm. In
@@ -7383,6 +7385,8 @@ class DistributedTest:
                     gloo_pg.monitored_barrier(
                         monitored_barrier_timeout_seconds, wait_all_ranks=wait_all_ranks
                     )
+
+            self._barrier(timeout=30)
 
         @with_nccl_blocking_wait
         @require_backend({"gloo", "nccl"})
@@ -8088,12 +8092,7 @@ class DistributedTest:
             return self._test_ddp_new_tensor_in_fwd(static_graph=True)
 
 
-        @skip_if_lt_x_gpu(2)
-        @sandcastle_skip_if(
-            BACKEND != "nccl" and BACKEND != "gloo",
-            "Only Nccl & Gloo backend support DistributedDataParallel",
-        )
-        def test_ddp_buffer_hook_allreduce(self):
+        def _test_ddp_buffer_hook_allreduce(self, return_futures):
             rank = self.rank
             torch.cuda.set_device(rank)
             torch.manual_seed(rank)
@@ -8107,19 +8106,22 @@ class DistributedTest:
                     dist.all_reduce(buffer, group=ddp.process_group, async_op=True).get_future()
                     for buffer in buffers
                 ]
-                torch.futures.collect_all(futs).wait()
+                if return_futures:
+                    return futs
+                else:
+                    torch.futures.collect_all(futs).wait()
 
-            model = NetWithBuffers().cuda(rank)
-            model_ddp = torch.nn.parallel.DistributedDataParallel(
-                model,
-                device_ids=[self.rank],
-            )
             hook_pre_fwd = torch.nn.parallel.distributed._BufferCommHookLocation.PRE_FORWARD
             hook_post_fwd = torch.nn.parallel.distributed._BufferCommHookLocation.POST_FORWARD
             for hook_run_location in [
                 hook_pre_fwd,
                 hook_post_fwd,
             ]:
+                model = NetWithBuffers().cuda(rank)
+                model_ddp = torch.nn.parallel.DistributedDataParallel(
+                    model,
+                    device_ids=[self.rank],
+                )
                 model_ddp._register_buffer_comm_hook(
                     model_ddp,
                     buffer_comm_hook,
@@ -8140,16 +8142,50 @@ class DistributedTest:
                         model_no_hook_buffers = list(model_ddp_no_hook.module.buffers())
                         for tensor in model_no_hook_buffers:
                             dist.all_reduce(tensor)
+
                     loss_no_hook = model_ddp_no_hook(inp).sum()
                     if hook_run_location == hook_post_fwd:
                         model_no_hook_buffers = list(model_ddp_no_hook.module.buffers())
                         for tensor in model_no_hook_buffers:
                             dist.all_reduce(tensor)
+                    torch.cuda.synchronize()
 
-                    self._verify_buffers_equal(model_ddp, model_ddp_no_hook)
+                    # if return_futures, they are only awaited on by DDP
+                    # at the end of the backwards pass for maximum overlap.
+                    if not return_futures:
+                        self._verify_buffers_equal(model_ddp, model_ddp_no_hook)
                     loss_hook.backward()
                     loss_no_hook.backward()
+                    # Note that when custom hooks return futures, this
+                    # comparison is not expected to work when hook run location
+                    # is pre-forward pass. This is because the hook does async
+                    # communication and forward pass modifies the buffer without
+                    # appropriate synchronization. Therefore, if returning
+                    # futures from custom buffer hooks, it is advised to set
+                    # hook run location to post forward.
+                    if return_futures and hook_run_location == hook_post_fwd:
+                        self._verify_buffers_equal(model_ddp, model_ddp_no_hook)
+                dist.barrier()
 
+        @skip_if_lt_x_gpu(2)
+        @sandcastle_skip_if(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        def test_ddp_buffer_hook_allreduce_return_future(self):
+            self._test_ddp_buffer_hook_allreduce(
+                return_futures=True
+            )
+
+        @skip_if_lt_x_gpu(2)
+        @sandcastle_skip_if(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        def test_ddp_buffer_hook_allreduce(self):
+            self._test_ddp_buffer_hook_allreduce(
+                return_futures=False
+            )
 
         @skip_if_lt_x_gpu(2)
         @sandcastle_skip_if(
