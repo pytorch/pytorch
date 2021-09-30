@@ -43,7 +43,9 @@ def _make_grads(outputs: Sequence[torch.Tensor], grads: Sequence[_OptionalTensor
                                        + str(grads.index(grad)) + "] has a shape of "
                                        + str(grad.shape) + " and output["
                                        + str(outputs.index(out)) + "] has a shape of "
-                                       + str(out.shape) + ".")
+                                       + str(out.shape) + ". "
+                                       "If you only want some tensors in `grad_output` to be considered "
+                                       "batched, consider using vmap.")
                 else:
                     raise RuntimeError("Mismatch in shape: grad_output["
                                        + str(grads.index(grad)) + "] has a shape of "
@@ -229,7 +231,7 @@ def grad(
             single call. This should lead to performance improvements when compared
             to manually looping and performing backward multiple times. Note that
             due to this feature being experimental, there may be performance
-            cliffs. Please use `torch._C._debug_only_display_vmap_fallback_warnings(True)`
+            cliffs. Please use ``torch._C._debug_only_display_vmap_fallback_warnings(True)``
             to show any performance warnings and file an issue on github if warnings exist
             for your use case. Defaults to ``False``.
     """
@@ -268,7 +270,7 @@ def grad(
             return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
                 outputs, gO, retain_graph, create_graph, inputs,
                 allow_unused, accumulate_grad=False)  # Calls into the C++ engine to run the backward pass
-        return _vmap_internals._vmap(vjp, 0, 0)(grad_outputs)
+        return _vmap_internals._unsafe_vmap_for_autograd(vjp, 0, 0)(grad_outputs)
     else:
         return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
             outputs, grad_outputs_, retain_graph, create_graph, inputs,
