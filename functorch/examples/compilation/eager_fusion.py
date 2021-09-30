@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch
 from functools import partial
 import time
+import torch.utils
 
 a = torch.randn(2000, 1, 4, requires_grad=True)
 b = torch.randn(1, 2000, 4)

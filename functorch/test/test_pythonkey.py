@@ -271,15 +271,17 @@ class TestEagerFusion(TestCase):
         grads = [p.grad for p in compiled_mod.parameters()]
         self.assertEqual((out, grads), (ref_out, ref_grads))
 
+    def test_batchnorm(self):
+        mod = compiled_module(nn.BatchNorm2d(4), _nop_compile, _nop_compile)
+        x = torch.ones(1, 4, 2, 2)
+        mod(x).sum().backward()
+
 class TestEagerFusionOpInfo(TestCase):
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     # entries in here need don't work and need to be fixed.
     # Each one of these is a bug (or needs to be investigated)
     @skipOps('TestEagerFusionOpInfo', 'test_eager_compilation_exhaustive', {
         xfail('__rmatmul__'),
-        xfail('expand_as'),
-        xfail('fmod', ''),
-        xfail('remainder', ''),
         xfail('linalg.cholesky'),
         xfail('linalg.det'),
         xfail('linalg.inv'),
@@ -287,10 +289,8 @@ class TestEagerFusionOpInfo(TestCase):
         xfail('nn.functional.gelu'),
         xfail('nn.functional.linear'),
         xfail('polar'),
-        xfail('reshape_as'),
         xfail('special.zeta', 'grad'),
         xfail('to_sparse'),
-        xfail('view_as'),
         xfail('addcdiv'),
         xfail('atanh'),
         xfail('addcdiv'),
@@ -303,8 +303,6 @@ class TestEagerFusionOpInfo(TestCase):
         xfail('matrix_exp'),
         xfail('trapezoid'),
         xfail('trapz'),
-        xfail('igamma', 'grad_other'),
-        xfail('igammac', 'grad_other'),
         xfail('block_diag'),
     })
     def test_eager_compilation_exhaustive(self, device, dtype, op):
@@ -347,9 +345,10 @@ class TestEagerFusionOpInfo(TestCase):
             orig_grad = get_grads(args)
             self.assertEqual(orig_grad, compiled_grad)
 
-            args = pytree.tree_map(lambda x: x.detach().uniform_(0, 1), args)
-            for arg in args:
-                arg.requires_grad = True
+            def create_new_arg(x):
+                return x.detach().uniform_(0, 1).requires_grad_(x.requires_grad)
+
+            args = pytree.tree_map(create_new_arg, args)
 
             reset_grads()
             compiled_f(args, kwargs).sum().backward()
