@@ -477,15 +477,23 @@ class TestAutocast(JitTestCase):
         self.assertEqual(y.dtype, torch.float32)
         self.assertEqual(z.dtype, torch.float32)
 
+    def _test_autocast(self, func, cast_op, *args):
+        jit_func = torch.jit.script(func)
+        o = func(*args)
+        jit_o = jit_func(*args)
+        FileCheck().check(cast_op).run(jit_func.graph_for(*args))
+        for o0, o1 in zip(o, jit_o):
+            self.assertEqual(o0.dtype, o1.dtype)
+
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     def test_autocast_api(self):
 
         def t_autocast_cpu(x, y):
-            with torch.autocast("cpu"):
+            with torch.autocast("cpu", dtype=torch.bfloat16):
                 return torch.mm(x, y)
 
         def t_autocast_cuda(x, y):
-            with torch.autocast("cuda"):
+            with torch.autocast("cuda", dtype=torch.half):
                 return torch.mm(x, y)
 
         def t_cuda_amp_autocast(x, y):
@@ -496,19 +504,31 @@ class TestAutocast(JitTestCase):
             with torch.cpu.amp.autocast():
                 return torch.mm(x, y)
 
-        def test(func, device):
-            jit_func = torch.jit.script(func)
-            x = torch.randn(5, 5, device=device, dtype=torch.float32)
-            y = torch.randn(5, 5, device=device, dtype=torch.float32)
-            o = func(x, y)
-            jit_o = jit_func(x, y)
-            FileCheck().check('aten::autocast_to_fp16').run(jit_func.graph_for(x, y))
-            self.assertEqual(o.dtype, jit_o.dtype)
+        x = torch.randn(5, 5, device="cuda", dtype=torch.float32)
+        y = torch.randn(5, 5, device= "cuda", dtype=torch.float32)
+        self._test_autocast(t_autocast_cpu, "aten::autocast_to_reduced_precision", x, y)
+        self._test_autocast(t_autocast_cuda, "aten::autocast_to_reduced_precision", x, y)
+        self._test_autocast(t_cuda_amp_autocast, "aten::autocast_to_reduced_precision", x, y)
+        self._test_autocast(t_cpu_amp_autocast, "aten::autocast_to_reduced_precision", x, y)
 
-        test(t_autocast_cpu, "cuda")
-        test(t_autocast_cuda, "cuda")
-        test(t_cuda_amp_autocast, "cuda")
-        test(t_cpu_amp_autocast, "cuda")
+    @unittest.skipIf(True, "we need to provide dtype argument at this moment")
+    @unittest.skipIf(not TEST_CUDA, "No cuda")
+    def test_autocast_api_not_supported(self):
+
+        def t_autocast_cpu(x, y):
+            # no dtype provided is not currently supported
+            with torch.autocast("cpu"):
+                return torch.mm(x, y)
+
+        def t_autocast_cuda(x, y):
+            # no dtype provided is not currently supported
+            with torch.autocast("cuda"):
+                return torch.mm(x, y)
+
+        x = torch.randn(5, 5, device="cuda", dtype=torch.float32)
+        y = torch.randn(5, 5, device="cuda", dtype=torch.float32)
+        self._test_autocast(t_autocast_cpu, "aten::autocast_to_reduced_precision", x, y)
+        self._test_autocast(t_autocast_cuda, "aten::autocast_to_reduced_precision", x, y)
 
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     def test_autocast_mixed_dtypes(self):
@@ -524,11 +544,7 @@ class TestAutocast(JitTestCase):
         cpu1 = torch.randn(5, 5, device="cpu", dtype=torch.float32)
         cuda0 = torch.randn(5, 5, device="cuda", dtype=torch.float32)
         cuda1 = torch.randn(5, 5, device="cuda", dtype=torch.float32)
-        o0, o1 = t(cpu0, cpu1, cuda0, cuda1)
-        jit_o0, jit_o1 = jit_t(cpu0, cpu1, cuda0, cuda1)
-        FileCheck().check('aten::autocast_to_fp16').run(jit_t.graph_for(cpu0, cpu1, cuda0, cuda1))
-        self.assertEqual(o0.dtype, jit_o0.dtype)
-        self.assertEqual(o1.dtype, jit_o1.dtype)
+        self._test_autocast(t, "aten::autocast_to_reduced_precision", cpu0, cpu1, cuda0, cuda1)
 
 if __name__ == '__main__':
     run_tests()

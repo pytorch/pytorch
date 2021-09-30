@@ -20,7 +20,7 @@ class autocast(torch.autocast_mode.autocast):
         if torch._jit_internal.is_scripting():
             self._enabled = enabled
             self.device = "cuda"
-            self.dtype = dtype
+            self.fast_dtype = dtype
             return
         super().__init__("cuda", enabled=enabled, dtype=dtype, cache_enabled=cache_enabled)
 

@@ -1,8 +1,9 @@
 import torch
+import sys
 import functools
 import warnings
 
-from typing import Any, Optional
+from typing import Any, Optional, Final
 from .types import _dtype
 
 def autocast_decorator(autocast_instance, func):
@@ -143,9 +144,10 @@ class autocast(object):
         if torch._jit_internal.is_scripting():
             self._enabled = enabled
             self.device = device_type
-            self.dtype = dtype
+            self.fast_dtype = dtype
+            # TODO: support get_autocast_gpu/cpu_dtype
+            assert dtype is not None
             return
-
         self.device = device_type
         if self.device == 'cuda':
             self.fast_dtype = torch.get_autocast_gpu_dtype()

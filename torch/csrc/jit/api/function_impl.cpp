@@ -75,8 +75,16 @@ const c10::FunctionSchema& GraphFunction::getSchema() const {
 }
 
 GraphFunction::SpecializationKey GraphFunction::currentSpecialization() const {
-  return at::autocast::is_enabled() ? SpecializationKey::AutocastOn
-                                    : SpecializationKey::AutocastOff;
+  bool cpu_enabled = at::autocast::is_cpu_enabled();
+  bool gpu_enabled = at::autocast::is_enabled();
+  if (cpu_enabled && gpu_enabled) {
+    return SpecializationKey::CpuGpuAutocastOn;
+  } else if (!cpu_enabled && !gpu_enabled) {
+    return SpecializationKey::AutocastOff;
+  } else {
+    return gpu_enabled ? SpecializationKey::GpuAutocastOn
+                       : SpecializationKey::CpuAutocastOn;
+  }
 }
 
 void preoptimizeGraph(std::shared_ptr<Graph>& graph) {

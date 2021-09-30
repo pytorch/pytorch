@@ -89,9 +89,11 @@ c10::optional<AutocastScope> parseAutocast(Value* value, const AutocastContext& 
             "Autocast device argument must be a constant");
           device = ret.value();
         } else if (use.user->kind() == prim::SetAttr &&
-            use.user->s(attr::name) == "dtype") {
-          // Search for `prim::SetAttr[name="dtype"]`
+            use.user->s(attr::name) == "fast_dtype") {
+          // Search for `prim::SetAttr[name="fast_dtype"]`
+          printf("try to cast as int\n");
           auto ret = constant_as<c10::ScalarType>(use.user->input(1));
+          printf("finished cast as int\n");
           TORCH_CHECK(ret.has_value(),
             "Autocast dtype argument must be a constant");
           dtype = ret.value();

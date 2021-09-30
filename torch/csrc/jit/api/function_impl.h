@@ -121,7 +121,9 @@ struct TORCH_API GraphFunction : public Function {
  private:
   enum SpecializationKey {
     AutocastOff,
-    AutocastOn,
+    CpuAutocastOn,
+    GpuAutocastOn,
+    CpuGpuAutocastOn,
 
     // This provides the number of specializations
     // (Must be last entry)
