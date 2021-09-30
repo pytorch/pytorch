@@ -166,31 +166,6 @@ class TestSaveLoad(PackageTestCase):
         IS_FBCODE or IS_SANDCASTLE,
         "Tests that use temporary files are disabled in fbcode",
     )
-    def test_save_imported_module_fails(self):
-        """
-        Directly saving/requiring an PackageImported module should raise a specific error message.
-        """
-        import package_a.subpackage
-
-        obj = package_a.subpackage.PackageASubpackageObject()
-        obj2 = package_a.PackageAObject(obj)
-        f1 = self.temp()
-        with PackageExporter(f1) as pe:
-            pe.intern("**")
-            pe.save_pickle("obj", "obj.pkl", obj)
-
-        importer1 = PackageImporter(f1)
-        loaded1 = importer1.load_pickle("obj", "obj.pkl")
-
-        f2 = self.temp()
-        pe = PackageExporter(f2, importer=(importer1, sys_importer))
-        with self.assertRaisesRegex(ModuleNotFoundError, "torch.package"):
-            pe.save_module(loaded1.__module__)
-
-    @skipIf(
-        IS_FBCODE or IS_SANDCASTLE,
-        "Tests that use temporary files are disabled in fbcode",
-    )
     def test_exporting_mismatched_code(self):
         """
         If an object with the same qualified name is loaded from different
@@ -234,6 +209,49 @@ class TestSaveLoad(PackageTestCase):
         # 'importer1' is a match for the one used by loaded1.
         pe = make_exporter()
         pe.save_pickle("obj", "obj.pkl", loaded1)
+
+    def test_save_imported_module(self):
+        """Saving a module that came from another PackageImporter should work."""
+        import package_a.subpackage
+
+        obj = package_a.subpackage.PackageASubpackageObject()
+        obj2 = package_a.PackageAObject(obj)
+
+        buffer = BytesIO()
+        with PackageExporter(buffer) as exporter:
+            exporter.intern("**")
+            exporter.save_pickle("model", "model.pkl", obj2)
+
+        buffer.seek(0)
+
+        importer = PackageImporter(buffer)
+        imported_obj2 = importer.load_pickle("model", "model.pkl")
+        imported_obj2_module = imported_obj2.__class__.__module__
+
+        # Should export without error.
+        buffer2 = BytesIO()
+        with PackageExporter(buffer2, importer=(importer, sys_importer)) as exporter:
+            exporter.intern("**")
+            exporter.save_module(imported_obj2_module)
+
+    def test_save_imported_module_using_package_importer(self):
+        """Exercise a corner case: re-packaging a module that uses `torch_package_importer`"""
+        import package_a.use_torch_package_importer  # noqa: F401
+
+        buffer = BytesIO()
+        with PackageExporter(buffer) as exporter:
+            exporter.intern("**")
+            exporter.save_module("package_a.use_torch_package_importer")
+
+        buffer.seek(0)
+
+        importer = PackageImporter(buffer)
+
+        # Should export without error.
+        buffer2 = BytesIO()
+        with PackageExporter(buffer2, importer=(importer, sys_importer)) as exporter:
+            exporter.intern("**")
+            exporter.save_module("package_a.use_torch_package_importer")
 
 
 if __name__ == "__main__":

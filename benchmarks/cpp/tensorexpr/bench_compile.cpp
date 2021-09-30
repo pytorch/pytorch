@@ -11,7 +11,7 @@ static void BM_CompileSwish(benchmark::State& state) {
   for (auto _ : state) {
     constexpr int N = 512;
     te::VarHandle n("n", te::kInt);
-    te::Placeholder A(te::BufHandle("A", {N}, te::kFloat));
+    te::BufHandle A("A", {N}, te::kFloat);
     te::Tensor relu = te::Compute("relu", {{n, "n"}}, [&](const te::VarHandle& i) {
       return te::Max::make(A.load(i), 0.f, false);
     });
@@ -40,7 +40,7 @@ static void BM_CompileSwish(benchmark::State& state) {
 static void BM_CompileSwishLLVMOnly(benchmark::State& state) {
   constexpr int N = 512;
   te::VarHandle n("n", te::kInt);
-  te::Placeholder A(te::BufHandle("A", {N}, te::kFloat));
+  te::BufHandle A("A", {N}, te::kFloat);
   te::Tensor relu = te::Compute("relu", {{n, "n"}}, [&](const te::VarHandle& i) {
     return te::Max::make(A.load(i), 0.f, false);
   });

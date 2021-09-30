@@ -1,13 +1,14 @@
 #include <torch/csrc/jit/codegen/cuda/predicate_compute.h>
 
 #include <torch/csrc/jit/codegen/cuda/arith.h>
+#include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/index_compute.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
-#include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 
 #include <c10/util/irange.h>
@@ -17,278 +18,255 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-std::vector<kir::Bool*> PredicateCompute::computePredicates(
-    const TensorView* tv,
-    const std::vector<Val*>& indices,
-    bool use_rfactor) {
-  FUSER_PERF_SCOPE("computePredicates");
+namespace {
 
-  const std::vector<IterDomain*>& root =
-      use_rfactor ? tv->getMaybeRFactorDomain() : tv->getRootDomain();
-
-  TORCH_INTERNAL_ASSERT(root.size() == indices.size());
-
-  bool no_pred_needed = true;
-  for (auto id : tv->domain()->domain()) {
-    if (id->getOrigin() != nullptr) {
-      no_pred_needed = false;
+// find the first (and only) TensorView output
+//
+// TODO(kir): same question as ir_utils::getTvOutput():
+//    why do we assume a single TV output?
+//
+kir::TensorView* firstTensorViewOutput(const kir::Expr* expr) {
+  TORCH_INTERNAL_ASSERT(expr != nullptr);
+  for (auto out : expr->outputs()) {
+    if (out->isA<kir::TensorView>()) {
+      return out->as<kir::TensorView>();
+    } else if (out->isA<kir::TensorIndex>()) {
+      return out->as<kir::TensorIndex>()->view();
     }
   }
-
-  if (no_pred_needed) {
-    return {};
-  }
-
-  kir::IrBuilder ir_builder(GpuLower::current()->kernel());
-
-  auto true_bool = ir_builder.create<kir::Bool>(true);
-  std::vector<kir::Bool*> preds(root.size(), true_bool);
-  Val* extent = nullptr;
-
-  for (const auto i : c10::irange(indices.size())) {
-    const bool zero_ind = indices[i]->isZeroInt();
-    const bool simple_ind = indices[i]->getOrigin() == nullptr;
-
-    if (root[i]->isBroadcast()) {
-      continue;
-    } else if (simple_ind && !zero_ind) {
-      extent = nullptr;
-      continue;
-    } else if (zero_ind) {
-      if (root[i]->extent()->isOneInt()) {
-        continue;
-      }
-      const auto lowered_extent = GpuLower::lowerValue(root[i]->extent());
-      if (extent == nullptr) {
-        extent = lowered_extent;
-      } else {
-        extent = ir_builder.mulExpr(extent, lowered_extent);
-      }
-    } else {
-      auto local_extent = GpuLower::lowerValue(root[i]->extent());
-      if (extent != nullptr) {
-        local_extent = ir_builder.mulExpr(extent, local_extent);
-      }
-      auto pred = ir_builder.ltExpr(indices[i], local_extent);
-      extent = nullptr;
-      TORCH_INTERNAL_ASSERT(
-          pred->getValType().value() == ValType::KirScalar &&
-          pred->getDataType().value() == DataType::Bool);
-      preds[i] = pred->as<kir::Bool>();
-    }
-  }
-  return preds;
+  TORCH_INTERNAL_ASSERT(false, "Missing kir::TensorView output");
 }
 
+bool isTensorIndexOp(kir::Expr* expr) {
+  const auto& outputs = expr->outputs();
+  return outputs.size() >= 1 && outputs[0]->isA<kir::TensorIndex>();
+}
+
+bool isOutputLocal(const kir::Expr* expr) {
+  return std::all_of(
+      expr->outputs().begin(),
+      expr->outputs().end(),
+      [](const kir::Val* output) {
+        return !output->isA<kir::TensorView>() ||
+            output->as<kir::TensorView>()->memoryType() == MemoryType::Local;
+      });
+}
+
+} // namespace
+
 kir::Bool* PredicateCompute::getInlinePredicate(
-    Expr* expr,
+    const kir::Expr* expr,
     const std::vector<kir::ForLoop*>& loops,
     kir::Bool* thread_pred,
-    bool ignore_block_grid_reductions) {
-  FUSER_PERF_SCOPE("getInlinePredicate");
+    PredicateType pred_type) {
+  FUSER_PERF_SCOPE("GpuLower::Lower::getInlinePredicate");
 
-  kir::IrBuilder ir_builder(GpuLower::current()->kernel());
+  const auto gpu_lower = GpuLower::current();
+  kir::IrBuilder ir_builder(gpu_lower->kernel());
+
+  // If outputs are registers, no need to predicate for threads
+  if (isOutputLocal(expr)) {
+    thread_pred = ir_builder.trueVal();
+  }
 
   if (loops.empty()) {
-    return ir_builder.create<kir::Bool>(true);
+    TORCH_INTERNAL_ASSERT(thread_pred != nullptr);
+    return thread_pred;
   }
 
-  // Handle these elsewhere
-  if (ignore_block_grid_reductions &&
-      expr->getExprType() == ExprType::ReductionOp &&
-      (expr->as<ReductionOp>()->out()->as<TensorView>()->hasBlockReduction() ||
-       expr->as<ReductionOp>()->out()->as<TensorView>()->hasGridReduction())) {
-    return ir_builder.create<kir::Bool>(true);
+  auto out_tv = firstTensorViewOutput(expr);
+
+  if (gpu_lower->predicateElimination().canOmitPredicate(expr)) {
+    return thread_pred;
   }
 
-  TORCH_INTERNAL_ASSERT(
-      ir_utils::isTVOp(expr),
-      "Cannot generate predicate based on operation without a TensorView.");
-
-  auto out_tv = ir_utils::getTVOutput(expr);
-
-  auto pred_contiguity = out_tv->domain()->contiguity();
-
-  for (auto inp : expr->inputs()) {
-    if (!ir_utils::isTV(inp)) {
-      continue;
-    }
-    auto inp_tv = inp->as<TensorView>();
-    // NOLINTNEXTLINE(bugprone-branch-clone)
-    if (inp_tv->domain()->hasRFactor()) {
-      continue;
-    } else if (
-        inp_tv->getMemoryType() == MemoryType::Shared ||
-        inp_tv->getMemoryType() == MemoryType::Local) {
-      continue;
-    } else {
-      pred_contiguity = IndexCompute::contiguityAnd(
-          pred_contiguity,
-          IndexCompute::contiguityPasC(inp_tv->domain(), out_tv->domain()));
-    }
-  }
-
-  auto pred_inds =
-      Index::getConsumerRootPredIndices(out_tv, loops, pred_contiguity);
-  auto root_indices = pred_inds.first;
-  bool use_maybe_rfactor = pred_inds.second;
-
-  if (out_tv->getMemoryType() == MemoryType::Local && out_tv->hasReduction() &&
-      !use_maybe_rfactor) {
-    auto tv_filter_inp_view =
-        ir_utils::filterByType<TensorView>(expr->inputs());
-    auto has_tv_inputs = tv_filter_inp_view.begin() != tv_filter_inp_view.end();
-    // If predicates doesn't need maybe_rfactor, but it has reduction axes, and
-    // expr has no inputs, we're pretty confident we're intializing a reduction
-    // buffer. If we're initing a reduction buffer don't generate an inline
-    // predicate.
-    if (!has_tv_inputs) {
-      return ir_builder.create<kir::Bool>(true);
-    }
-  }
-
-  auto all_preds = PredicateCompute::computePredicates(
-      out_tv, root_indices, use_maybe_rfactor);
-
-  // If we have thread predicates, add those
-  if (thread_pred != nullptr) {
-    all_preds.push_back(thread_pred);
-  }
+  auto all_preds = Index::getReferenceRootPredicates(out_tv, loops);
 
   std::vector<kir::Bool*> preds;
 
-  for (auto pred : all_preds)
-    if (!(pred->isConst()) || !(pred->isConst() && pred->value().value()))
+  auto is_true = [](const kir::Bool* p) {
+    return p->isConst() && p->value().value();
+  };
+
+  // When pred_type is ReductionWrite, filter out predicates for
+  // reduction axes. For blockReduce, this is necessary when reduction
+  // axes start at non-zero offsets and parallelized with TID since
+  // blockReduce returns a valid output only at offset-zero
+  // threads. Similarly, for gridReduce, the last block to store the
+  // output may be predicated out with the read predicate, so the
+  // write predicate needs to ignore the reduction axes.
+  bool non_zero_start_found = false;
+  for (size_t i = 0; i < all_preds.first.size(); ++i) {
+    auto pred = all_preds.first[i];
+    if (pred_type == PredicateType::ReductionWrite) {
+      const auto& concrete_root_ids = all_preds.second[i];
+      bool pred_for_reduction_axis = false;
+      for (auto pred_root_id : concrete_root_ids) {
+        auto kir_pred_root_id =
+            gpu_lower->lowerValue(pred_root_id)->as<kir::IterDomain>();
+        auto it = std::find_if(
+            out_tv->domain()->rootDomain().begin(),
+            out_tv->domain()->rootDomain().end(),
+            [&](const auto& out_root_id) {
+              return gpu_lower->caIndexMap().areMapped(
+                  kir_pred_root_id, out_root_id);
+            });
+        TORCH_INTERNAL_ASSERT(
+            it != out_tv->domain()->rootDomain().end(),
+            "No corresponding root ID found for ",
+            pred_root_id);
+        auto out_root_id = *it;
+        if (out_root_id->isReduction()) {
+          if (!out_root_id->start()->isZeroInt()) {
+            non_zero_start_found = true;
+          }
+          pred_for_reduction_axis = true;
+          break;
+        }
+      }
+      // Don't add the predicate if it corresponds to a reduction axis
+      if (pred_for_reduction_axis) {
+        continue;
+      }
+    }
+    if (!is_true(pred)) {
       preds.push_back(pred);
+    }
+  }
+
+  // When generating a predicate for blockReduce writes and not for
+  // gridReduce, if all reduction axes start with zero, we can just
+  // use the same predicate for reads. nullptr is returned then.
+  if (pred_type == PredicateType::ReductionWrite && !non_zero_start_found &&
+      !out_tv->fuserTv()->domain()->hasGridReduction()) {
+    return nullptr;
+  }
+
+  if (thread_pred != nullptr && !is_true(thread_pred)) {
+    preds.push_back(thread_pred);
+  }
 
   if (preds.empty()) {
-    return ir_builder.create<kir::Bool>(true);
+    return ir_builder.trueVal();
   }
 
-  Val* cond = preds[0];
-
-  for (decltype(preds.size()) i{1}; i < preds.size(); i++) {
+  kir::Val* cond = preds[0];
+  for (size_t i = 1; i < preds.size(); i++) {
     cond = ir_builder.andExpr(cond, preds[i]);
   }
-
-  TORCH_INTERNAL_ASSERT(
-      cond->getValType().value() == ValType::KirScalar &&
-          cond->getDataType().value() == DataType::Bool,
-      "Error computing predicate, should be returning a Bool, but returning ",
-      cond->getDataType().value());
 
   return cond->as<kir::Bool>();
 }
 
-kir::Bool* UnrollPredicate::get(
+kir::Bool* UnswitchPredicate::get(
     const std::vector<kir::ForLoop*>& outer_loops,
-    kir::ForLoop* unrolled_loop,
-    const std::unordered_map<IterDomain*, IterDomain*>& p2c_root_map) {
-  FUSER_PERF_SCOPE("UnrollPredicate::get");
+    kir::ForLoop* unrolled_loop) {
+  FUSER_PERF_SCOPE("GpuLower::Lower::UnswitchPredicate::get");
 
   kir::IrBuilder ir_builder(GpuLower::current()->kernel());
 
-  UnrollPredicate up(outer_loops, unrolled_loop, p2c_root_map);
+  UnswitchPredicate up(outer_loops, unrolled_loop);
 
-  std::unordered_set<kir::Bool*> pred_set;
-  for (auto entry : up.predicates_) {
-    pred_set.emplace(entry.second);
-  }
-
-  if (up.predicates_.empty()) {
-    return ir_builder.create<kir::Bool>(true);
-  }
-
-  Val* unroll_pred = nullptr;
-  for (auto pred : pred_set) {
-    if (unroll_pred == nullptr) {
+  kir::Val* unroll_pred = nullptr;
+  for (auto pred : up.predicates_) {
+    if (pred->isConst() && pred->value().value()) {
+      continue;
+    } else if (unroll_pred == nullptr) {
       unroll_pred = pred;
     } else {
       unroll_pred = ir_builder.andExpr(unroll_pred, pred);
     }
   }
-  TORCH_INTERNAL_ASSERT(
-      // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
-      unroll_pred->getValType().value() == ValType::KirScalar &&
-      unroll_pred->getDataType().value() == DataType::Bool);
-  return unroll_pred->as<kir::Bool>();
+
+  return unroll_pred == nullptr ? ir_builder.trueVal()
+                                : unroll_pred->as<kir::Bool>();
 }
 
-void UnrollPredicate::predicateOn(Expr* tv_expr) {
-  FUSER_PERF_SCOPE("UnrollPredicate::predicateOn");
+void UnswitchPredicate::predicateOn(kir::Expr* tv_expr) {
+  FUSER_PERF_SCOPE("GpuLower::Lower::UnswitchPredicate::predicateOn");
 
   if (for_loops_.empty()) {
     return;
   }
 
-  auto out_tv = ir_utils::getTVOutput(tv_expr);
+  const auto gpu_lower = GpuLower::current();
 
-  auto pred_contiguity = out_tv->domain()->contiguity();
-
-  for (auto inp : tv_expr->inputs()) {
-    if (!ir_utils::isTV(inp)) {
-      continue;
-    }
-    auto inp_tv = inp->as<TensorView>();
-    // NOLINTNEXTLINE(bugprone-branch-clone)
-    if (inp_tv->domain()->hasRFactor()) {
-      continue;
-    } else if (
-        inp_tv->getMemoryType() == MemoryType::Shared ||
-        inp_tv->getMemoryType() == MemoryType::Local) {
-      continue;
-    } else {
-      pred_contiguity = IndexCompute::contiguityAnd(
-          pred_contiguity,
-          IndexCompute::contiguityPasC(inp_tv->domain(), out_tv->domain()));
-    }
+  if (gpu_lower->predicateElimination().canOmitPredicate(tv_expr)) {
+    return;
   }
 
-  auto pred_inds = Index::getConsumerRootPredIndices(
-      out_tv, for_loops_, pred_contiguity, true);
-  auto root_indices = pred_inds.first;
-  auto use_rfactor = pred_inds.second;
+  auto out_tv = firstTensorViewOutput(tv_expr);
 
-  auto all_preds =
-      PredicateCompute::computePredicates(out_tv, root_indices, use_rfactor);
+  auto pred_info = Index::getReferenceRootPredicates(out_tv, for_loops_, true);
 
-  auto root_dom =
-      use_rfactor ? out_tv->getMaybeRFactorDomain() : out_tv->getRootDomain();
-
-  TORCH_INTERNAL_ASSERT(
-      all_preds.size() == root_dom.size(),
-      "Predicates should be produced for every dimension, even if it's simply set as true.");
-
-  for (const auto i : c10::irange(all_preds.size())) {
-    if (all_preds[i]->isConst() && all_preds[i]->value().value()) {
+  for (auto i : c10::irange(pred_info.first.size())) {
+    auto pred = pred_info.first[i];
+    if (pred->isConst() && pred->value()) {
       continue;
     }
-    auto term_id = loop_utils::getTermIDInMap(root_dom[i], p2c_root_map_);
-    predicates_[term_id] = all_preds[i];
+
+    const auto& root_ids = pred_info.second[i];
+
+    bool add_pred = false;
+
+    for (auto root_id : root_ids) {
+      auto kir_root_id = gpu_lower->lowerValue(root_id)->as<kir::IterDomain>();
+
+      if (kir_root_id->isBroadcast()) {
+        continue;
+      }
+
+      if (std::find(
+              predicated_iter_dom_.begin(),
+              predicated_iter_dom_.end(),
+              kir_root_id) == predicated_iter_dom_.end()) {
+        add_pred = true;
+        predicated_iter_dom_.push_back(kir_root_id);
+      }
+    }
+    if (add_pred) {
+      predicates_.push_back(pred);
+    }
   }
 }
 
-void UnrollPredicate::openLoop(kir::ForLoop* fl) {
-  FUSER_PERF_SCOPE("UnrollPredicate::openLoop");
+void UnswitchPredicate::openLoop(kir::ForLoop* fl) {
+  FUSER_PERF_SCOPE("GpuLower::Lower::UnswitchPredicate::openLoop");
 
   for_loops_.push_back(fl);
 
   for (auto expr : fl->body().exprs()) {
-    if (ir_utils::isTVOp(expr)) {
+    if (ir_utils::isTVOp(expr) || isTensorIndexOp(expr)) {
       predicateOn(expr);
-    } else if (expr->getExprType().value() == ExprType::ForLoop) {
-      openLoop(expr->as<kir::ForLoop>());
+    } else if (auto ite = dynamic_cast<kir::IfThenElse*>(expr)) {
+      openIte(ite);
+    } else if (auto for_loop = dynamic_cast<kir::ForLoop*>(expr)) {
+      openLoop(for_loop);
     }
   }
 
   for_loops_.pop_back();
 }
 
-UnrollPredicate::UnrollPredicate(
+void UnswitchPredicate::openIte(kir::IfThenElse* ite) {
+  FUSER_PERF_SCOPE("GpuLower::Lower::UnswitchPredicate::openIte");
+
+  // only expand the ite thenBody
+  for (auto expr : ite->thenBody().exprs()) {
+    if (ir_utils::isTVOp(expr) || isTensorIndexOp(expr)) {
+      predicateOn(expr);
+    } else if (auto ite = dynamic_cast<kir::IfThenElse*>(expr)) {
+      openIte(ite);
+    } else if (auto for_loop = dynamic_cast<kir::ForLoop*>(expr)) {
+      openLoop(for_loop);
+    }
+  }
+}
+
+UnswitchPredicate::UnswitchPredicate(
     std::vector<kir::ForLoop*> outer_loops,
-    kir::ForLoop* unrolled_loop,
-    const std::unordered_map<IterDomain*, IterDomain*>& _p2c_root_map)
-    : for_loops_(std::move(outer_loops)), p2c_root_map_(_p2c_root_map) {
+    kir::ForLoop* unrolled_loop)
+    : for_loops_(std::move(outer_loops)) {
   openLoop(unrolled_loop);
 }
 
