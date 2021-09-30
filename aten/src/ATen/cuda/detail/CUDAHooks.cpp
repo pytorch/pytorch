@@ -8,6 +8,7 @@
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/CUDADevice.h>
 #include <ATen/cuda/Exceptions.h>
+#include <ATen/cuda/PeerToPeerAccess.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <ATen/detail/CUDAHooksInterface.h>
@@ -47,26 +48,28 @@ namespace detail {
 const at::cuda::NVRTC& nvrtc();
 int64_t current_device();
 
-std::function<void(void)> THCMagma_init;
-
 // NB: deleter is dynamic, because we need it to live in a separate
 // compilation unit (alt is to have another method in hooks, but
 // let's not if we don't need to!)
 std::unique_ptr<THCState, void (*)(THCState*)> CUDAHooks::initCUDA() const {
   C10_LOG_API_USAGE_ONCE("aten.init.cuda");
-  THCState* thc_state = THCState_alloc();
+  THCState* thc_state = new THCState();
 
   // Force the update to enable unit testing. This code get executed before unit tests
   // have a chance to enable vitals.
   at::vitals::VitalsAPI.setVital("CUDA", "used", "true", /* force = */ true);
 
-  THCudaInit(thc_state);
-  if (THCMagma_init)
-    THCMagma_init();
+  const auto num_devices = c10::cuda::device_count_ensure_non_zero();
+  c10::cuda::CUDACachingAllocator::init(num_devices);
+  at::cuda::detail::init_p2p_access_cache(num_devices);
+
+#ifdef USE_MAGMA
+  magma_init();
+#endif
+
   return std::unique_ptr<THCState, void (*)(THCState*)>(
       thc_state, [](THCState* p) {
-        if (p)
-          THCState_free(p);
+        delete p;
       });
 }
 
