@@ -3,7 +3,6 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/Functions.h>
 
-#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 #include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensor_core/csrc/helpers.h"
@@ -15,6 +14,7 @@
 #include "lazy_tensor_core/csrc/ops/ops.h"
 #include "lazy_tensor_core/csrc/ops/permute.h"
 #include "lazy_tensor_core/csrc/ops/scalar.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/permutation_util.h"
@@ -154,8 +154,8 @@ ir::NodePtr IndexFillOp(const ir::Value& buffer, lazy_tensors::int64 dim,
   ir::Value index_rank1 = EnsureRank1(index);
   ir::NodePtr node = ir::MakeNode<ir::ops::IndexAlongDim>(
       ir::OpKind(at::aten::index_fill), buffer, index_rank1, value, dim);
-  std::dynamic_pointer_cast<ir::TsNode>(node)->SetShapeDeferred(
-      [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
+  TsNodeSetShapeDeferred(
+      node, [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
   return node;
 }
 
@@ -164,8 +164,8 @@ ir::NodePtr IndexAddOp(const ir::Value& buffer, lazy_tensors::int64 dim,
   ir::Value index_rank1 = EnsureRank1(index);
   ir::NodePtr node = ir::MakeNode<ir::ops::IndexAlongDim>(
       ir::OpKind(at::aten::index_add), buffer, index_rank1, source, dim);
-  std::dynamic_pointer_cast<ir::TsNode>(node)->SetShapeDeferred(
-      [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
+  TsNodeSetShapeDeferred(
+      node, [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
   return node;
 }
 
@@ -174,8 +174,8 @@ ir::NodePtr IndexCopyOp(const ir::Value& buffer, lazy_tensors::int64 dim,
   ir::Value index_rank1 = EnsureRank1(index);
   ir::NodePtr node = ir::MakeNode<ir::ops::IndexAlongDim>(
       ir::OpKind(at::aten::index_copy), buffer, index_rank1, source, dim);
-  std::dynamic_pointer_cast<ir::TsNode>(node)->SetShapeDeferred(
-      [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
+  TsNodeSetShapeDeferred(
+      node, [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
   return node;
 }
 

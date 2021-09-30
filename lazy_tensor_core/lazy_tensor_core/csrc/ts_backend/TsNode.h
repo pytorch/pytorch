@@ -7,10 +7,12 @@ namespace torch_lazy_tensors {
 namespace ir {
 
 // Helper that makes it easy to access the TsNode::shape() method
-// from an ir::Output that holds a Node* that points to a TsNode 
+// from an ir::Output that holds a Node* that points to a TsNode
 lazy_tensors::Shape GetShapeFromTsOutput(const ir::Output& output);
 lazy_tensors::Shape GetShapeFromTsValue(const ir::Value& value);
 lazy_tensors::Shape GetShapeFromTsNode(const ir::Node& value);
+void TsNodeSetShapeDeferred(
+    NodePtr node, const std::function<lazy_tensors::Shape()>& shape_fn);
 
 class TsNode : public Node {
  public:

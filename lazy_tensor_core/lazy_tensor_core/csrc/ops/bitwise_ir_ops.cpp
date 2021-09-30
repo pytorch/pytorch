@@ -11,8 +11,8 @@ namespace ops {
 
 Value BitwiseOp(const OpKind& kind, const Value& node1, const Value& node2) {
   NodePtr node = GenericOp(kind, {node1, node2});
-  std::dynamic_pointer_cast<TsNode>(node)->SetShapeDeferred(
-      [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
+  TsNodeSetShapeDeferred(
+      node, [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
   return node;
 }
 

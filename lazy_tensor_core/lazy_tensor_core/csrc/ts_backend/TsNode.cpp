@@ -26,6 +26,15 @@ lazy_tensors::Shape GetShapeFromTsNode(const ir::Node& node) {
   throw std::runtime_error("Expected TsNode but could not dynamic cast");
 }
 
+void TsNodeSetShapeDeferred(
+    NodePtr node, const std::function<lazy_tensors::Shape()>& shape_fn) {
+  if (auto tsnode = std::dynamic_pointer_cast<TsNode>(node)) {
+    tsnode->SetShapeDeferred(shape_fn);
+  } else {
+    throw std::runtime_error("Expected TsNode but could not dynamic cast");
+  }
+}
+
 TsNode::TsNode(OpKind op, OpList operands, lazy_tensors::Shape shape,
                size_t num_outputs, torch::lazy::hash_t hash_seed)
     : Node(op, operands, shape, num_outputs, hash_seed), shape_(shape) {}
