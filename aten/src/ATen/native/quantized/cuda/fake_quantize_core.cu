@@ -182,8 +182,6 @@ void _fake_quant_per_channel_cachemask_cuda_helper(
 
 void fake_quant_per_channel_cachemask_cuda(
     TensorIterator &iter, TensorIterator &iter_mask, int64_t quant_min, int64_t quant_max) {
-  // TODO(future, optional): read once, write twice.  Not done at the moment
-  //   for simplicity, as we do not expect this to be a bottleneck.
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "fake_quantize_channel_cachemask_cpu_type_handling", [&] {
     _fake_quant_per_channel_cachemask_cuda_helper<scalar_t>(iter, iter_mask, quant_min, quant_max);
   });
