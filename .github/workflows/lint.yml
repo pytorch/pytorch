@@ -316,11 +316,6 @@ jobs:
             --regex='^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): (?P<errorCode>\w+\d+) (?P<errorDesc>.*)' \
             --commit="$HEAD_SHA" \
             > flake8-output/annotations.json
-      - name: Upload artifact
-        uses: actions/upload-artifact@v2
-        with:
-          name: flake8-py3
-          path: flake8-output/
       - name: Fail if there were any warnings
         run: |
           set -eu
@@ -330,6 +325,17 @@ jobs:
             echo 'Please fix the above Flake8 warnings.'
             false
           fi
+      - name: Add annotations
+        # Don't run on forked pull requests
+        if: ${{ failure() && github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: pytorch/add-annotations-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          check_name: 'flake8-py3'
+          linter_output_path: flake8-output/annotations.json
+          commit_sha: ${{ github.event.pull_request.head.sha }}
+          mode: json
 
   clang-tidy:
     runs-on: linux.2xlarge
@@ -400,11 +406,6 @@ jobs:
             --regex='^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): (?P<errorDesc>.*?) \[(?P<errorCode>.*)\]' \
             --commit="$HEAD_SHA" \
             > clang-tidy-output/annotations.json
-      - name: Upload artifact
-        uses: actions/upload-artifact@v2
-        with:
-          name: clang-tidy
-          path: clang-tidy-output/
       - name: Check for warnings
         run: |
           cd "${GITHUB_WORKSPACE}"
@@ -414,6 +415,17 @@ jobs:
             echo 'Please fix the above clang-tidy warnings.'
             false
           fi
+      - name: Add annotations
+        # Don't run on forked pull requests
+        if: ${{ failure() && github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: pytorch/add-annotations-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          check_name: 'clang-tidy'
+          linter_output_path: clang-tidy/annotations.json
+          commit_sha: ${{ github.event.pull_request.head.sha }}
+          mode: json
 
   cmakelint:
     runs-on: ubuntu-18.04

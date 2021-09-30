@@ -6,34 +6,27 @@
       "libtorch-linux-xenial-cuda11.3-py3.6-gcc7",
       "linux-bionic-cuda10.2-py3.9-gcc7",
       "linux-bionic-py3.6-clang9",
-      "linux-bionic-py3.8-gcc9-coverage",
       "linux-xenial-cuda10.2-py3.6-gcc7",
       "linux-xenial-cuda11.3-py3.6-gcc7",
       "linux-xenial-py3.6-gcc5.4",
       "linux-xenial-py3.6-gcc7-bazel-test",
       "parallelnative-linux-xenial-py3.6-gcc5.4",
-      "paralleltbb-linux-xenial-py3.6-gcc5.4",
       "periodic-libtorch-linux-xenial-cuda11.1-py3.6-gcc7",
       "periodic-linux-xenial-cuda11.1-py3.6-gcc7",
       "periodic-win-vs2019-cuda11.1-py3",
       "puretorch-linux-xenial-py3.6-gcc5.4",
       "win-vs2019-cpu-py3",
-      "win-vs2019-cuda10.1-py3",
+      "win-vs2019-cuda10.2-py3",
       "win-vs2019-cuda11.3-py3"
     ],
     "ciflow/bazel": [
       "linux-xenial-py3.6-gcc7-bazel-test"
     ],
-    "ciflow/coverage": [
-      "linux-bionic-py3.8-gcc9-coverage"
-    ],
     "ciflow/cpu": [
       "linux-bionic-py3.6-clang9",
-      "linux-bionic-py3.8-gcc9-coverage",
       "linux-xenial-py3.6-gcc5.4",
       "linux-xenial-py3.6-gcc7-bazel-test",
       "parallelnative-linux-xenial-py3.6-gcc5.4",
-      "paralleltbb-linux-xenial-py3.6-gcc5.4",
       "puretorch-linux-xenial-py3.6-gcc5.4",
       "win-vs2019-cpu-py3"
     ],
@@ -46,17 +39,16 @@
       "periodic-libtorch-linux-xenial-cuda11.1-py3.6-gcc7",
       "periodic-linux-xenial-cuda11.1-py3.6-gcc7",
       "periodic-win-vs2019-cuda11.1-py3",
-      "win-vs2019-cuda10.1-py3",
+      "win-vs2019-cuda10.2-py3",
       "win-vs2019-cuda11.3-py3"
     ],
     "ciflow/default": [
       "linux-bionic-py3.6-clang9",
-      "linux-bionic-py3.8-gcc9-coverage",
       "linux-xenial-cuda11.3-py3.6-gcc7",
       "linux-xenial-py3.6-gcc5.4",
       "linux-xenial-py3.6-gcc7-bazel-test",
       "win-vs2019-cpu-py3",
-      "win-vs2019-cuda10.1-py3"
+      "win-vs2019-cuda11.3-py3"
     ],
     "ciflow/libtorch": [
       "libtorch-linux-xenial-cuda10.2-py3.6-gcc7",
@@ -68,13 +60,11 @@
       "libtorch-linux-xenial-cuda11.3-py3.6-gcc7",
       "linux-bionic-cuda10.2-py3.9-gcc7",
       "linux-bionic-py3.6-clang9",
-      "linux-bionic-py3.8-gcc9-coverage",
       "linux-xenial-cuda10.2-py3.6-gcc7",
       "linux-xenial-cuda11.3-py3.6-gcc7",
       "linux-xenial-py3.6-gcc5.4",
       "linux-xenial-py3.6-gcc7-bazel-test",
       "parallelnative-linux-xenial-py3.6-gcc5.4",
-      "paralleltbb-linux-xenial-py3.6-gcc5.4",
       "periodic-libtorch-linux-xenial-cuda11.1-py3.6-gcc7",
       "periodic-linux-xenial-cuda11.1-py3.6-gcc7",
       "puretorch-linux-xenial-py3.6-gcc5.4"
@@ -94,7 +84,7 @@
     "ciflow/win": [
       "periodic-win-vs2019-cuda11.1-py3",
       "win-vs2019-cpu-py3",
-      "win-vs2019-cuda10.1-py3",
+      "win-vs2019-cuda10.2-py3",
       "win-vs2019-cuda11.3-py3"
     ],
     "ciflow/xla": [

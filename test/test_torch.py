@@ -43,7 +43,7 @@ from torch.testing._internal.common_device_type import (
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     skipMeta,
     PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyOnCPUAndCUDA,
-    expectedAlertNondeterministic)
+    expectedAlertNondeterministic, get_all_device_types)
 from typing import Dict, List, Tuple
 import torch.backends.quantized
 import torch.testing._internal.data
@@ -120,6 +120,9 @@ class AbstractTestCases:
 
         def test_dir(self):
             dir(torch)
+
+        def test_wildcard_import(self):
+            exec('from torch import *')
 
         @wrapDeterministicFlagAPITest
         def test_deterministic_flag(self):
@@ -249,7 +252,7 @@ class AbstractTestCases:
                         torch.where(condition, x, y)
 
         def test_where_bool_tensor(self):
-            for d in torch.testing.get_all_device_types():
+            for d in get_all_device_types():
                 a = torch.tensor([True, False], device=d)
                 res = torch.where(a > 0)
                 self.assertEqual(1, len(res))
@@ -276,7 +279,7 @@ class AbstractTestCases:
 
             height = 5
             width = 5
-            for device in torch.testing.get_all_device_types():
+            for device in get_all_device_types():
                 for dt1 in get_all_dtypes():
                     for dt2 in get_all_dtypes():
                         for contiguous in [True, False]:
@@ -518,6 +521,15 @@ class AbstractTestCases:
             # Make sure autograd was propagated to the original tensor
             # declared with requires_grad.
             self.assertTrue(t.grad is not None)
+
+            # Make sure invalid subclasses raise nice errors
+            class BadSubTensor():
+                member_var = object()
+
+            err_msg = "Creating a Tensor subclass from a class that does not inherit from Tensor"
+            with self.assertRaisesRegex(RuntimeError, err_msg):
+                s0 = t0.as_subclass(BadSubTensor)
+
 
         def test_type(self):
             x = torch.randn(3, 3).double()
@@ -930,7 +942,7 @@ class AbstractTestCases:
                 reference[0.0, :, 0.0] = 1
 
         def test_index_add(self):
-            for device in torch.testing.get_all_device_types():
+            for device in get_all_device_types():
                 for dest_contig, src_contig, index_contig in product([True, False], repeat=3):
                     for other_sizes in ((), (4, 5)):
                         for dtype in [torch.int, torch.long]:
@@ -961,7 +973,7 @@ class AbstractTestCases:
         # specific dtypes on cuda:
         # https://github.com/pytorch/pytorch/issues/29153
         def test_index_add_all_dtypes(self):
-            for device in torch.testing.get_all_device_types():
+            for device in get_all_device_types():
                 for dtype in get_all_math_dtypes(device):
                     for idx_dtype in [torch.int, torch.long]:
                         size = [5, 5]
@@ -2681,7 +2693,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         def test_normal_shape(self):
             warned = False
-            for device in torch.testing.get_all_device_types():
+            for device in get_all_device_types():
                 tensor1 = torch.rand(1, device=device)
                 tensor4 = torch.rand(4, device=device)
                 tensor120 = torch.rand(120, device=device)
@@ -3021,6 +3033,10 @@ class TestTorchDeviceType(TestCase):
         w[2].sub_(1)
         for i in range(a.numel()):
             self.assertEqual(w[1][1][i], q[1][1][i] - 1)
+
+        # Check that deepcopy preserves attributes
+        a.foo = 3
+        self.assertEqual(deepcopy(a).foo, 3)
 
     @dtypes(torch.float32, torch.complex64)
     def test_deepcopy_scalar(self, device, dtype):
@@ -7095,15 +7111,102 @@ else:
                 _test_helper(x, op, unary=True)
 
     @skipMeta
-    @dtypes(*get_all_dtypes())
-    def test_dlpack_conversion(self, device, dtype):
-        # DLpack does not explicitly support bool
-        # It does it through uint8 type
-        if dtype is torch.bool:
-            return
-        x = make_tensor((5,), device, dtype, low=-9, high=9)
+    @onlyOnCPUAndCUDA
+    @dtypes(*get_all_dtypes(include_bool=False))
+    def test_dlpack_capsule_conversion(self, device, dtype):
+        # DLpack does not explicitly support bool (xref dmlc/dlpack#75)
+        x = make_tensor((5,), device, dtype)
         z = from_dlpack(to_dlpack(x))
         self.assertEqual(z, x)
+
+    @skipMeta
+    @onlyOnCPUAndCUDA
+    @dtypes(*get_all_dtypes(include_bool=False))
+    def test_dlpack_protocol_conversion(self, device, dtype):
+        x = make_tensor((5,), device, dtype)
+        z = from_dlpack(x)
+        self.assertEqual(z, x)
+
+    @skipMeta
+    @onlyOnCPUAndCUDA
+    def test_dlpack_shared_storage(self, device):
+        x = make_tensor((5,), device, torch.float64)
+        z = from_dlpack(to_dlpack(x))
+        z[0] = z[0] + 20.0
+        self.assertEqual(z, x)
+
+    @skipMeta
+    @onlyCUDA
+    @dtypes(*get_all_dtypes(include_bool=False))
+    def test_dlpack_conversion_with_streams(self, device, dtype):
+        # Create a stream where the tensor will reside
+        stream = torch.cuda.Stream()
+        with torch.cuda.stream(stream):
+            # Do an operation in the actual stream
+            x = make_tensor((5,), device, dtype) + 1
+        # DLPack protocol helps establish a correct stream order
+        # (hence data dependency) at the exchange boundary.
+        # DLPack manages this synchronization for us, so we don't need to
+        # explicitly wait until x is populated
+        stream = torch.cuda.Stream()
+        with torch.cuda.stream(stream):
+            z = from_dlpack(x)
+        stream.synchronize()
+        self.assertEqual(z, x)
+
+    @skipMeta
+    @onlyCUDA
+    @dtypes(*get_all_dtypes(include_bool=False))
+    def test_dlpack_conversion_with_diff_streams(self, device, dtype):
+        from torch._C import _from_dlpack
+        stream_a = torch.cuda.Stream()
+        stream_b = torch.cuda.Stream()
+        # DLPack protocol helps establish a correct stream order
+        # (hence data dependency) at the exchange boundary.
+        # the `tensor.__dlpack__` method will insert a synchronization event
+        # in the current stream to make sure that it was correctly populated.
+        with torch.cuda.stream(stream_a):
+            x = make_tensor((5,), device, dtype) + 1
+            z = _from_dlpack(x.__dlpack__(stream_b.cuda_stream))
+            stream_a.synchronize()
+        stream_b.synchronize()
+        self.assertEqual(z, x)
+
+    @skipMeta
+    @onlyOnCPUAndCUDA
+    @dtypes(*get_all_dtypes(include_bool=False))
+    def test_dlpack_tensor_invalid_stream(self, device, dtype):
+        with self.assertRaises(TypeError):
+            x = make_tensor((5,), device, dtype)
+            x.__dlpack__(stream=object())
+
+    @skipMeta
+    def test_dlpack_error_on_bool_tensor(self):
+        x = torch.tensor([True], dtype=torch.bool)
+        with self.assertRaises(RuntimeError):
+            to_dlpack(x)
+
+    # TODO: increase tests once NumPy supports the `__dlpack__` protocol
+
+    @skipMeta
+    def test_dlpack_export_requires_grad(self):
+        x = torch.zeros(10, dtype=torch.float32, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, r"require gradient"):
+            x.__dlpack__()
+
+    @skipMeta
+    def test_dlpack_export_is_conj(self):
+        x = torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j])
+        y = torch.conj(x)
+        with self.assertRaisesRegex(RuntimeError, r"conjugate bit"):
+            y.__dlpack__()
+
+    @skipMeta
+    def test_dlpack_export_non_strided(self):
+        x = torch.sparse_coo_tensor([[0]], [1], size=(1,))
+        y = torch.conj(x)
+        with self.assertRaisesRegex(RuntimeError, r"strided"):
+            y.__dlpack__()
 
     @onlyCUDA
     @unittest.skipIf(PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property")
@@ -8053,7 +8156,7 @@ class TestTorch(AbstractTestCases._TestTorchMixin):
         self.assertEqual(y.grad.foo, 2)
 
     def test_subclass_preserved(self):
-        class MyTensor(torch._C._TensorBase):
+        class MyTensor(torch.Tensor):
             pass
 
         x = MyTensor(torch.empty(2))
