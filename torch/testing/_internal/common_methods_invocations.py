@@ -6198,7 +6198,7 @@ op_db: List[OpInfo] = [
                     dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
                     assert_autodiffed=True,
                     supports_forward_ad=True,
-                    sample_inputs_func=sample_inputs_binary_pwise),
+                    sample_inputs_func=partial(sample_inputs_binary_pwise, python_scalars=True)),
     BinaryUfuncInfo('sub',
                     # NumPy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
                     ref=lambda input, other, *, alpha=1: np.subtract(input, np.multiply(alpha, other)),
@@ -6206,7 +6206,7 @@ op_db: List[OpInfo] = [
                     dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
                     assert_autodiffed=True,
                     supports_forward_ad=True,
-                    sample_inputs_func=partial(sample_inputs_add_sub, alpha=2),
+                    sample_inputs_func=partial(sample_inputs_add_sub, alpha=2, python_scalars=True),
                     supports_inplace_autograd=False),
     OpInfo('addmm',
            # This addmm OpInfo is for when alpha and beta are not both equal to 1.
@@ -6774,7 +6774,7 @@ op_db: List[OpInfo] = [
                     aliases=('divide',),
                     variant_test_name='no_rounding_mode',
                     dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                    sample_inputs_func=sample_inputs_binary_pwise,
+                    sample_inputs_func=partial(sample_inputs_binary_pwise, python_scalars=True),
                     supports_forward_ad=True,
                     assert_autodiffed=True,
                     rhs_make_tensor_kwargs=dict(exclude_zero=True)),
@@ -6782,7 +6782,7 @@ op_db: List[OpInfo] = [
                     aliases=('divide',),
                     variant_test_name='trunc_rounding',
                     dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                    sample_inputs_func=partial(sample_inputs_binary_pwise, rounding_mode="trunc"),
+                    sample_inputs_func=partial(sample_inputs_binary_pwise, rounding_mode="trunc", python_scalars=True),
                     supports_forward_ad=True,
                     skips=(
                         # Reference: https://github.com/pytorch/pytorch/issues/59174
@@ -6794,7 +6794,7 @@ op_db: List[OpInfo] = [
                     aliases=('divide',),
                     variant_test_name='floor_rounding',
                     dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                    sample_inputs_func=partial(sample_inputs_binary_pwise, rounding_mode="floor"),
+                    sample_inputs_func=partial(sample_inputs_binary_pwise, rounding_mode="floor", python_scalars=True),
                     supports_forward_ad=True,
                     skips=(
                         # Reference: https://github.com/pytorch/pytorch/issues/59174
