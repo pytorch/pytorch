@@ -320,7 +320,10 @@ void dictConstruct(Stack& stack, const at::DictType& type, size_t num_inputs) {
   push(stack, std::move(vals));
 }
 
-void createObject(Stack& stack, const at::ClassTypePtr& type, bool as_weak_ref) {
+void createObject(
+    Stack& stack,
+    const at::ClassTypePtr& type,
+    bool as_weak_ref) {
   if (as_weak_ref) {
     c10::WeakTypePtr weak(type->compilation_unit(), type);
     auto userObj = c10::ivalue::Object::create(
