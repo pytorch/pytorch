@@ -233,7 +233,7 @@ if(INTERN_BUILD_ATEN_OPS)
       string(REPLACE "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/" "" NAME ${IMPL})
       list(GET CPU_CAPABILITY_NAMES ${i} CPU_CAPABILITY)
       set(NEW_IMPL ${CMAKE_BINARY_DIR}/aten/src/ATen/${NAME}.${CPU_CAPABILITY}.cpp)
-      configure_file(${IMPL} ${NEW_IMPL} COPYONLY)
+      add_custom_command(OUTPUT ${NEW_IMPL} COMMAND cp ${IMPL} ${NEW_IMPL} DEPENDS ${IMPL})
       set(cpu_kernel_cpp ${NEW_IMPL} ${cpu_kernel_cpp}) # Create list of copies
       list(GET CPU_CAPABILITY_FLAGS ${i} FLAGS)
       if(MSVC)
