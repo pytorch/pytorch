@@ -3668,13 +3668,6 @@ Example::
 
 """)
 
-add_docstr_all('storage_type',
-               r"""
-storage_type() -> type
-
-Returns the type of the underlying storage.
-""")
-
 add_docstr_all('stride',
                r"""
 stride(dim) -> tuple or int

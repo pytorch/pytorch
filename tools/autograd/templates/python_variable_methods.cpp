@@ -924,20 +924,6 @@ static PyObject * THPVariable_storage(PyObject* self, PyObject* arg)
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_storage_type(PyObject* self, PyObject* arg)
-{
-  HANDLE_TH_ERRORS
-  if (check_has_torch_function(self)) {
-    return handle_torch_function(self, "storage_type");
-  }
-  auto& self_ = THPVariable_Unpack(self);
-  auto storage = THPObjectPtr(createPyObject(self_.storage(), self_.dtype()));
-  auto storage_type = (PyObject*)Py_TYPE(storage);
-  Py_INCREF(storage_type);
-  return storage_type;
-  END_HANDLE_TH_ERRORS
-}
-
 static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
@@ -1233,7 +1219,6 @@ PyMethodDef variable_methods[] = {
   {"size", castPyCFunctionWithKeywords(THPVariable_size), METH_VARARGS | METH_KEYWORDS, NULL},
   {"_storage", THPVariable_storage, METH_NOARGS, NULL},
   {"storage_offset", THPVariable_storage_offset, METH_NOARGS, NULL},
-  {"storage_type", THPVariable_storage_type, METH_NOARGS, NULL},
   {"stride", castPyCFunctionWithKeywords(THPVariable_stride), METH_VARARGS | METH_KEYWORDS, NULL},
   {"to", castPyCFunctionWithKeywords(THPVariable_to), METH_VARARGS | METH_KEYWORDS, NULL},
   {"tolist", THPVariable_tolist, METH_NOARGS, NULL},

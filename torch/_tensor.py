@@ -815,6 +815,17 @@ class Tensor(torch._C._TensorBase):
 
         return dict(typestr=typestr, shape=shape, strides=strides, data=data, version=2)
 
+    def storage_type(self):
+        r"""storage_type() -> type
+
+        Returns the type of the underlying storage.
+
+        """
+        # NB: this returns old fashioned TypedStorage, e.g., FloatStorage, as it
+        # would be pretty pointless otherwise (it would always return
+        # UntypedStorage)
+        return type(self.storage())
+
     def refine_names(self, *names):
         r"""Refines the dimension names of :attr:`self` according to :attr:`names`.
 
