@@ -169,6 +169,7 @@ class TORCH_API StaticModule {
     return schema_;
   }
 
+  // cleared after MemoryPlanner creation to save memory
   const FastMap<const Value*, std::vector<const Value*>>&
   values_share_same_storage() const {
     return value_to_same_storage_values_;
@@ -180,6 +181,11 @@ class TORCH_API StaticModule {
 
   bool first_input_is_self() const {
     return first_input_is_self_;
+  }
+
+  // Release unused state after MemoryPlanner creation to save memory
+  void release_state() const {
+    value_to_same_storage_values_.clear();
   }
 
   StaticRuntime& runtime();
@@ -206,8 +212,9 @@ class TORCH_API StaticModule {
   // values whose live-time exceeds that of running one inference (e.g., input,
   // output, prim::Constants, and their aliases)
   FastSet<const Value*> external_values_;
-  // map a value to the set of values that may share the same storage with it
-  FastMap<const Value*, std::vector<const Value*>>
+  // map a value to the set of values that may share the same storage with it.
+  // Cleared after MemoryPlanner creation to save memory
+  mutable FastMap<const Value*, std::vector<const Value*>>
       value_to_same_storage_values_;
 
   FastSet<Node*> node_is_optimizable_container_type_;
@@ -317,6 +324,8 @@ class TORCH_API StaticRuntime {
       ival = IValue();
     }
   }
+
+  void cleanup_activations();
 
   // Memory planning is only enabled if sm->opts().cleanup_activations is true.
   // Otherwise, the memory used by activations is cached inside the static

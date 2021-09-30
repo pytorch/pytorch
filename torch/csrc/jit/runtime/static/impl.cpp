@@ -842,6 +842,26 @@ void StaticRuntime::set_inputs(
   }
 }
 
+void StaticRuntime::cleanup_activations() {
+  if (static_module_.opts().cleanup_activations) {
+    // MemoryPlanner is created after the first invocation of `run()`. This is
+    // done intentionally because MemoryPlanner uses `Tensor` sizes of the
+    // previous `run()` for memory planning of subsequent runs
+    if (!planner_) {
+      planner_ = std::make_unique<MemoryPlanner>(
+          this,
+          static_module_.values_share_same_storage(),
+          static_module_.external_values(),
+          static_module_.opts().enable_out_variant,
+          static_module_.opts().optimize_graph_output_memory);
+      static_module_.release_state();
+    }
+    planner_->deallocate();
+    // clean up owning refs of input tensors
+    clean_up_input_ivalues();
+  }
+}
+
 c10::IValue StaticRuntime::operator()(
     const std::vector<c10::IValue>& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
@@ -865,22 +885,7 @@ c10::IValue StaticRuntime::operator()(
     n.run();
   }
 
-  if (static_module_.opts().cleanup_activations) {
-    // MemoryPlanner is created after the first invocation of `run()`. This is
-    // done intentionally because MemoryPlanner uses `Tensor` sizes of the
-    // previous `run()` for memory planning of subsequent runs
-    if (!planner_) {
-      planner_ = std::make_unique<MemoryPlanner>(
-          this,
-          static_module_.values_share_same_storage(),
-          static_module_.external_values(),
-          static_module_.opts().enable_out_variant,
-          static_module_.opts().optimize_graph_output_memory);
-    }
-    planner_->deallocate();
-    // clean up owning refs of input tensors
-    clean_up_input_ivalues();
-  }
+  cleanup_activations();
 
   // no need to keep references of outputs in static runtime anymore
   if (static_module_.num_outputs() > 1) {
@@ -1095,18 +1100,9 @@ void StaticRuntime::display_nodes(
   }
 
   if (static_module_.opts().cleanup_activations) {
-    // MemoryPlanner is created after the first invocation of `run()`. This is
-    // done intentionally because MemoryPlanner uses `Tensor` sizes of the
-    // previous `run()` for memory planning of subsequent runs
-    if (!planner_) {
-      planner_ = std::make_unique<MemoryPlanner>(
-          this,
-          static_module_.values_share_same_storage(),
-          static_module_.external_values(),
-          static_module_.opts().enable_out_variant,
-          static_module_.opts().optimize_graph_output_memory);
+    if (planner_) {
+      planner_->deallocate();
     }
-    planner_->deallocate();
     // clean up owning refs of input tensors
     clean_up_input_ivalues();
   }
@@ -1166,19 +1162,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
       results.time_per_node[i] += millis;
     }
     timer.Start();
-    if (static_module_.opts().cleanup_activations) {
-      if (!planner_) {
-        planner_ = std::make_unique<MemoryPlanner>(
-            this,
-            static_module_.values_share_same_storage(),
-            static_module_.external_values(),
-            static_module_.opts().enable_out_variant,
-            static_module_.opts().optimize_graph_output_memory);
-      }
-      planner_->deallocate();
-      // clean up owning refs of input tensors
-      clean_up_input_ivalues();
-    }
+    cleanup_activations();
     millis = timer.MilliSeconds();
     results.memory_dealloc_time += millis;
 
