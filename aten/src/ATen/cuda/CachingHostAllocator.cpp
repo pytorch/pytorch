@@ -62,9 +62,6 @@ struct HostAllocator
   std::deque<std::pair<cudaEvent_t, void*>> cuda_events;
 
   HostAllocator() : available(BlockComparator) {}
-  ~HostAllocator() {
-    emptyCache();
-  }
 
   cudaError_t malloc(void** ptr, size_t size)
   {
