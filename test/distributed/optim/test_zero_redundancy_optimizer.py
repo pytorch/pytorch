@@ -15,6 +15,8 @@ import numpy as np
 import torch
 import torch.distributed as dist
 
+import unittest
+
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
@@ -31,11 +33,12 @@ from torch.distributed.optim.zero_redundancy_optimizer import _broadcast_object
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import SGD
 from torch.testing._internal import common_distributed, common_utils
-from torch.testing._internal.common_utils import IS_WINDOWS
+from torch.testing._internal.common_utils import (
+    TEST_WITH_ASAN,
+    TEST_WITH_DEV_DBG_ASAN,
+)
 
-if IS_WINDOWS:
-    print("Test fails on windows, see https://github.com/pytorch/pytorch/issues/63086")
-    sys.exit(0)
+from torch.testing._internal.common_utils import IS_WINDOWS
 
 try:
     import torchvision
@@ -44,10 +47,16 @@ except ImportError:
     HAS_TORCHVISION = False
 
 # Use GLOO on GPU when running CUDA + Windows
-BACKEND = (
-    dist.Backend.NCCL if not IS_WINDOWS and torch.cuda.is_available()
-    else dist.Backend.GLOO
-)
+def _get_backend_for_tests():
+    return (
+        dist.Backend.NCCL if not IS_WINDOWS and torch.cuda.is_available()
+        # Windows only has GLOO, but GLOO GPU works. And use GLOO CPU when
+        # no GPUs are available.
+        else dist.Backend.GLOO
+    )
+
+BACKEND = _get_backend_for_tests()
+
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
@@ -59,6 +68,9 @@ def check_same_model_params(model_a: torch.nn.Module, model_b: torch.nn.Module, 
         assert torch.allclose(b_a, b_b), f"Model buffers differ {b_a} - {b_b}\n" + message
 
 
+@unittest.skipIf(
+    TEST_WITH_ASAN or TEST_WITH_DEV_DBG_ASAN, "CUDA + ASAN doesnt work."
+)
 class TestZeroRedundancyOptimizer(common_distributed.MultiProcessTestCase):
     def setUp(self):
         super(TestZeroRedundancyOptimizer, self).setUp()
@@ -68,7 +80,7 @@ class TestZeroRedundancyOptimizer(common_distributed.MultiProcessTestCase):
 
     @property
     def device(self):
-        return torch.device(self.rank) if BACKEND == dist.Backend.NCCL else torch.device("cpu")
+        return torch.device(self.rank) if torch.cuda.is_available() else torch.device("cpu")
 
     @property
     def world_size(self):
@@ -92,6 +104,10 @@ class TestZeroRedundancyOptimizer(common_distributed.MultiProcessTestCase):
         return dist.init_process_group(backend=backend, store=store, rank=rank, world_size=world_size)
 
 
+# TODO: sandcastle_skip_if does not work here.
+@unittest.skipIf(
+    TEST_WITH_ASAN or TEST_WITH_DEV_DBG_ASAN, "CUDA + ASAN doesnt work."
+)
 class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
     def test_state_dict(self):
         """Check that the ZeroRedundancyOptimizer exposes the expected state dict interface,
@@ -281,7 +297,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
     def test_step(self):
         """ Check that the ZeroRedundancyOptimizer wrapper properly exposes the `.step()` interface"""
 
-        if self.rank >= self.world_size or (BACKEND == dist.Backend.NCCL and torch.cuda.device_count() < 2):
+        if self.rank >= self.world_size or (torch.cuda.is_available() and torch.cuda.device_count() < 2):
             return
 
         self.dist_init(self.rank, world_size=self.world_size)
@@ -322,7 +338,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
     def test_step_with_closure(self):
         """ Check that the ZeroRedundancyOptimizer wrapper properly exposes the `.step(closure)` interface"""
 
-        if self.rank >= self.world_size or (BACKEND == dist.Backend.NCCL and torch.cuda.device_count() < 2):
+        if self.rank >= self.world_size or (torch.cuda.is_available() and torch.cuda.device_count() < 2):
             return
 
         self.dist_init(self.rank, world_size=self.world_size)
@@ -680,9 +696,9 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         rank = self.rank
         world_size = self.world_size
         is_gpu = device.type == "cuda"
-        backend = dist.Backend.NCCL if is_gpu else dist.Backend.GLOO
+        backend = _get_backend_for_tests() if is_gpu else dist.Backend.GLOO
         self.dist_init(rank, world_size, backend)
-        if BACKEND == dist.Backend.NCCL and is_gpu:
+        if is_gpu:
             torch.cuda.set_device(self.device)
 
         model = torch.nn.Sequential(
@@ -928,7 +944,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
 
         rank = self.rank
         is_gpu = device.type == "cuda"
-        if BACKEND == dist.Backend.NCCL and is_gpu:
+        if is_gpu:
             torch.cuda.set_device(device)
         models_to_test = [
             (
