@@ -4675,6 +4675,7 @@ criterion_tests = [
     dict(
         module_name='KLDivLoss',
         constructor=wraps(nn.KLDivLoss)(partial(nn.KLDivLoss, log_target=True)),
+        cpp_constructor_args='torch::nn::KLDivLossOptions().log_target(true)',
         input_fn=lambda: torch.rand(10, 10),
         target_fn=lambda: torch.rand(10, 10).log(),
         reference_fn=lambda i, t, m:
@@ -5273,6 +5274,7 @@ criterion_tests = [
     dict(
         module_name='KLDivLoss',
         constructor=wraps(nn.KLDivLoss)(partial(nn.KLDivLoss, log_target=True)),
+        cpp_constructor_args='torch::nn::KLDivLossOptions().log_target(true)',
         input_fn=lambda: torch.rand(()),
         target_fn=lambda: torch.rand(()).log(),
         reference_fn=lambda i, t, m:
