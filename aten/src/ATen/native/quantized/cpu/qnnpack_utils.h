@@ -1,6 +1,5 @@
 #pragma once
 
-#include "c10/util/Exception.h"
 #ifdef USE_PYTORCH_QNNPACK
 #include <ATen/ATen.h>
 #include <c10/util/irange.h>
