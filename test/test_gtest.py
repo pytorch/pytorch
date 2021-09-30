@@ -1,16 +1,23 @@
 import subprocess
 import time
 import os
+import sys
 from pathlib import Path
-from typing import Optional, Dict
+from typing import List, Any, Optional, Dict
 from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
     TEST_SAVE_XML,
+    IS_WINDOWS,
+    IS_MACOS,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TEST_BINARY_DIR = REPO_ROOT / "build" / "bin"
+if IS_WINDOWS:
+    TEST_BINARY_DIR = REPO_ROOT / "build" / "torch" / "bin"
+elif IS_MACOS:
+    TEST_BINARY_DIR = REPO_ROOT.parent / "cpp-build" / "bin"
 BUILD_ENVIRONMENT = os.getenv("BUILD_ENVIRONMENT", "")
 
 # This is a temporary list of tests that use this framework rather than get run
@@ -23,6 +30,14 @@ ALLOWLISTED_TEST = {
     "test_tensorexpr",
     "test_mobile_nnc",
 }
+
+
+def run_cmd(cmd: List[str], env: Optional[Dict[str, str]] = None) -> Any:
+    print(f"[gtest runner] {' '.join(cmd)}")
+    proc = subprocess.run(cmd, env=env)
+    if proc.returncode != 0:
+        raise RuntimeError(f"Command '{cmd}' failed")
+    return proc
 
 
 def run_binary(
@@ -45,10 +60,7 @@ def run_binary(
     if filter is not None:
         cmd += [f"--gtest_filter={filter}"]
 
-    print(f"[gtest runner] {' '.join(cmd)}")
-    proc = subprocess.run(cmd, env=env)
-    if proc.returncode != 0:
-        raise RuntimeError(f"C++ test '{binary.name}' failed ({binary})")
+    run_cmd(cmd, env=env)
 
 
 class GTest(TestCase):
@@ -65,10 +77,14 @@ class GTest(TestCase):
     """
 
     def test_jit(self, binary: Path, test_name: str):
+        setup_path = REPO_ROOT / "test" / "cpp" / "jit" / "tests_setup.py"
+
+        run_cmd([sys.executable, str(setup_path), "setup"])
         if "cuda" in BUILD_ENVIRONMENT:
             run_binary(binary, test_name)
         else:
             run_binary(binary, test_name, filter="-*CUDA")
+        run_cmd([sys.executable, str(setup_path), "shutdown"])
 
     def test_api(self, binary: Path, test_name: str):
         env = os.environ.copy()
