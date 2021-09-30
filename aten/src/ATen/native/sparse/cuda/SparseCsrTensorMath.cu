@@ -13,10 +13,10 @@
 #include <cuda_runtime.h>
 #include <type_traits>
 
-#include <THC/THCThrustAllocator.cuh>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAUtils.h>
+#include <ATen/cuda/ThrustAllocator.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 
 #include <ATen/native/sparse/cuda/SparseBlasLegacy.h>
@@ -216,7 +216,7 @@ Tensor& add_out_dense_sparse_csr_cuda(
                 int64_t out_strides1 = out_strides[1];
 
                 cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-                auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+                at::cuda::ThrustAllocator allocator;
                 auto policy = thrust::cuda::par(allocator).on(stream);
 
                // Note that this could be wildly imbalanced if the sparsity pattern varies a lot between rows.
