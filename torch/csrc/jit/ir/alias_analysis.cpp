@@ -743,7 +743,7 @@ void AliasDb::analyzeImpl(Node* node) {
   // schema arguments represent
   std::unordered_map<Symbol, Value*> formalToActual;
   for (const auto i : c10::irange(schema.arguments().size())) {
-    const auto& formal = schema.arguments()[i].alias_info();
+    const at::AliasInfo* formal = schema.arguments()[i].alias_info();
     const auto& actualValue = node->inputs().at(i);
     // Skip if there's no alias annotation
     if (!formal) {
@@ -795,7 +795,7 @@ void AliasDb::analyzeImpl(Node* node) {
   // Use the formal-actual mapping to give aliases to the outputs
   for (const auto i : c10::irange(schema.returns().size())) {
     const auto actual = node->outputs().at(i);
-    const auto& formal = schema.returns()[i].alias_info();
+    const at::AliasInfo* formal = schema.returns()[i].alias_info();
     if (!formal) {
       // This is a fresh tensor
       giveFreshAlias(actual);
@@ -1129,16 +1129,6 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
   // immutable. `Any` is mutable but can point to an immutable type
   // through refinement
   if (isMutableTypeInternal(from) != isMutableTypeInternal(to)) {
-    bool expected_kind = false;
-    for (auto kind : {from->type()->kind(), to->type()->kind()}) {
-      expected_kind = expected_kind ||
-          (kind == TypeKind::OptionalType || kind == TypeKind::FutureType ||
-           kind == TypeKind::TupleType ||
-           kind == TypeKind::UnionType) // immutable type containers
-          || kind == TypeKind::AnyType;
-    }
-    TORCH_INTERNAL_ASSERT(
-        expected_kind, from->type()->str(), to->type()->str());
     return;
   }
   // both immutable

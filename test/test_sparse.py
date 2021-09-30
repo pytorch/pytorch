@@ -3,25 +3,26 @@ import itertools
 import functools
 import operator
 import random
-from collections import defaultdict
 import unittest
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
-    do_test_empty_full, load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, \
+    do_test_empty_full, load_tests, TEST_NUMPY, IS_WINDOWS, gradcheck, coalescedonoff, \
     DeterministicGuard
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from numbers import Number
 from typing import Dict, Any
+from distutils.version import LooseVersion
+from torch.testing import get_all_complex_dtypes, get_all_fp_dtypes
+from torch.testing._internal.common_cuda import \
+    (SM53OrLater, SM80OrLater, CUDA11OrLater)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, dtypes, dtypesIfCPU, onlyCPU, onlyCUDA, deviceCountAtLeast)
+    (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, precisionOverride,
+     deviceCountAtLeast)
 from torch.testing._internal.common_methods_invocations import \
     (sparse_unary_ufuncs)
 from torch.testing._internal.common_dtype import (
     floating_and_complex_types, floating_and_complex_types_and, get_all_dtypes, get_all_int_dtypes,
 )
-
-if TEST_SCIPY:
-    import scipy.sparse
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -29,6 +30,10 @@ load_tests = load_tests
 
 # batched grad doesn't support sparse
 gradcheck = functools.partial(gradcheck, check_batched_grad=False)
+
+CUSPARSE_SPMM_COMPLEX128_SUPPORTED = (
+    IS_WINDOWS and torch.version.cuda and LooseVersion(torch.version.cuda) > "11.2"
+) or (not IS_WINDOWS and CUDA11OrLater)
 
 class TestSparse(TestCase):
 
@@ -3220,75 +3225,21 @@ class TestSparse(TestCase):
     # TODO: Check after why ROCm's cusparseXcsrgemm2Nnz function doesn't return the same nnz value as CUDA
     @skipIfRocm
     @coalescedonoff
-    @dtypes(torch.double)
-    @dtypesIfCPU(torch.double, torch.cdouble)
+    @dtypes(*get_all_complex_dtypes(),
+            *get_all_fp_dtypes(include_half=False, include_bfloat16=False))
+    @dtypesIfCUDA(*((torch.complex64,) if CUDA11OrLater else ()),
+                  *((torch.complex128,) if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else ()),
+                  *get_all_fp_dtypes(
+                      include_half=(CUDA11OrLater and SM53OrLater),
+                      include_bfloat16=(CUDA11OrLater and SM80OrLater)))
+    @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2, torch.complex64: 1e-2, torch.float32: 1e-2})
     def test_sparse_matmul(self, device, dtype, coalesced):
         """
         This function test `torch.sparse.mm` when both the mat1 and mat2 are sparse tensors.
         """
 
-        def _indices2csr(indices, dim):
-            nnz = len(indices)
-            r = [0] * (dim + 1)
-            last_i = 0
-            for i in indices:
-                if i != last_i:
-                    for _i in range(last_i, i + 1):
-                        r[_i + 1] = r[last_i + 1]
-                    last_i = i
-                r[last_i + 1] += 1
-            for _i in range(last_i, dim):
-                r[_i + 1] = r[last_i + 1]
-            assert r[-1] == nnz
-            return r
-
-        def sparse_mm(a, b, method='scipy'):
-            a = a.to('cpu')
-            b = b.to('cpu')
-            if method == 'scipy':
-                indices_1 = a._indices().numpy()
-                values_1 = a._values().numpy()
-                indices_2 = b._indices().numpy()
-                values_2 = b._values().numpy()
-
-                mat1 = scipy.sparse.coo_matrix((values_1, (indices_1[0], indices_1[1])), shape=a.shape)
-                mat2 = scipy.sparse.coo_matrix((values_2, (indices_2[0], indices_2[1])), shape=b.shape)
-                result = mat1.dot(mat2).tocoo()
-                return torch.sparse_coo_tensor([result.row, result.col], result.data, result.shape,
-                                               dtype=dtype, device=device)
-            else:
-                assert a.shape[1] == b.shape[0]
-                n, p = a.shape
-                p, m = b.shape
-                indices_a = a._indices()
-                values_a = a._values()
-                indices_b = b._indices()
-                values_b = b._values()
-                nnz1 = len(indices_a[0])
-                nnz2 = len(indices_b[0])
-
-                if a.is_coalesced() and b.is_coalesced():
-                    r2 = _indices2csr(indices_b[0], b.shape[0])
-                    d = defaultdict(values_b.numpy().dtype.type)
-                    for n1 in range(nnz1):
-                        for n2 in range(r2[indices_a[1][n1]], r2[indices_a[1][n1] + 1]):
-                            d[indices_a[0][n1].item(), indices_b[1][n2].item()] += values_a[n1] * values_b[n2]
-
-                else:
-                    d = defaultdict(values_b.numpy().dtype.type)
-                    for n1 in range(nnz1):
-                        for n2 in range(nnz2):
-                            if indices_b[0][n2] == indices_a[1][n1]:
-                                d[indices_a[0][n1].item(), indices_b[1][n2].item()] += values_a[n1] * values_b[n2]
-                i3 = []
-                j3 = []
-                values = []
-                for i, j in sorted(d):
-                    i3.append(i)
-                    j3.append(j)
-                    values.append(d[i, j])
-                return torch.sparse_coo_tensor(torch.tensor([i3, j3]), torch.tensor(values), (n, m),
-                                               dtype=dtype, device=device)
+        def ref_sparse_mm(a, b):
+            return a.to_dense() @ b.to_dense()
 
         def grad_with_custom_sparsity_pattern_test_helper(sparse_dims, nnz, shape_a, shape_b):
             def test_grad_dense(a_s, b_s, g_s):
@@ -3322,31 +3273,30 @@ class TestSparse(TestCase):
             a, i_a, v_a = self._gen_sparse(sparse_dims, nnz, shape_a, dtype, device, coalesced)
             b, i_b, v_b = self._gen_sparse(sparse_dims, nnz, shape_b, dtype, device, coalesced)
 
-            # python implementation
-            r1 = sparse_mm(a, b, 'scipy' if TEST_SCIPY else 'direct')
-
-            self.assertEqual(r1.to_dense(), torch.mm(a.to_dense(), b.to_dense()))
+            # dense implementation
+            r1 = ref_sparse_mm(a, b)
 
             # cpp implementation
             r2 = torch.sparse.mm(a, b)
-            self.assertEqual(r1, r2)
+            self.assertEqual(r1, r2.to_dense())
 
-            a.requires_grad_(True)
-            b.requires_grad_(True)
+            if dtype in [torch.double, torch.cdouble]:
+                a.requires_grad_(True)
+                b.requires_grad_(True)
 
-            # check autograd support on sparse matmul
-            def fn(D1, D2):
-                return torch.sparse.mm(D1, D2).to_dense()
+                # check autograd support on sparse matmul
+                def fn(D1, D2):
+                    return torch.sparse.mm(D1, D2).to_dense()
 
-            if a.is_cuda:
-                # For cuda, `nondet_tol` is set with `1e-5`
-                # This is because cuSparse sometimes returns approximate zero values like `~e-323`
-                # TODO: Check this cuSparse issue.
-                # This happens when you do chain multiplication `torch.sparse.mm` operations
-                gradcheck(fn, (a, b), check_sparse_nnz=True, nondet_tol=1e-5)
-            else:
-                gradcheck(fn, (a, b), check_sparse_nnz=True)
-            grad_with_custom_sparsity_pattern_test_helper(sparse_dims, nnz, shape_a, shape_b)
+                if a.is_cuda:
+                    # For cuda, `nondet_tol` is set with `1e-5`
+                    # This is because cuSparse sometimes returns approximate zero values like `~e-323`
+                    # TODO: Check this cuSparse issue.
+                    # This happens when you do chain multiplication `torch.sparse.mm` operations
+                    gradcheck(fn, (a, b), check_sparse_nnz=True, nondet_tol=1e-5)
+                else:
+                    gradcheck(fn, (a, b), check_sparse_nnz=True)
+                grad_with_custom_sparsity_pattern_test_helper(sparse_dims, nnz, shape_a, shape_b)
 
         def test_error_cases():
             def fn(sparse_dims, nnz, shape_a, shape_b):
