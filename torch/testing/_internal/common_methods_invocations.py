@@ -9252,7 +9252,7 @@ op_db: List[OpInfo] = [
     OpInfo('resize_',
            op=lambda x, shape: x.clone().resize_(shape),
            method_variant=None,
-           inplace_variant=torch.Tensor.resize_,
+           inplace_variant=None,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_autograd=False,
