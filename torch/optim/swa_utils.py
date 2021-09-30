@@ -27,7 +27,7 @@ class AveragedModel(Module):
             parameter and the number of models already averaged; if None,
             equally weighted average is used (default: None)
         mode (str, optional): whether to use ``'parameters'`` or ``'state_dict'`` for update
-            (default: "parameters")
+            (default: ``'parameters'``)
 
     Example:
         >>> loader, optimizer, model, loss_fn = ...
