@@ -1057,12 +1057,12 @@ def sample_inputs_linalg_det(op_info, device, dtype, requires_grad):
         t.requires_grad = requires_grad
     return [SampleInput(t) for t in inputs]
 
-def sample_inputs_linalg_det_singular(op_info, device, dtype, requires_grad):
+def sample_inputs_linalg_det_singular(op_info, device, dtype, requires_grad, *args, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     def make_singular_matrix_batch_base(size, rank):
         assert size[-1] == size[-2]
-        assert rank > 0 and rank <= size[-1]
+        assert rank > 0 and rank < size[-1]
 
         with torch.no_grad():
             n = size[-1]
@@ -1078,7 +1078,8 @@ def sample_inputs_linalg_det_singular(op_info, device, dtype, requires_grad):
 
             matrix = p @ l @ u
 
-        assert (matrix.det().abs() < torch.finfo(dtype).eps * torch.linalg.matrix_norm(matrix)).all().item()
+        print(size, rank)
+        assert (matrix.det().abs() < rank * torch.finfo(dtype).eps * torch.linalg.matrix_norm(matrix) * (size[-1] - rank)).all().item()
 
         matrix.requires_grad_(requires_grad)
         return matrix
@@ -6205,7 +6206,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=partial(sample_inputs_addmm, alpha=1, beta=1)),
     OpInfo('addmv',
            dtypes=floating_types(),
-           dtypesIfCPU=all_types_and_complex_and(torch.bfloat16),
+           dtypesIfCPU=all_types_and_complex_and(torch.bfloat16, torch.float16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128,
                                            *[torch.bfloat16] if CUDA11OrLater else []),
            dtypesIfROCM=floating_types_and(torch.half),
@@ -6290,7 +6291,7 @@ op_db: List[OpInfo] = [
            ),
            sample_inputs_func=sample_inputs_bmm),
     OpInfo('mv',
-           dtypes=all_types_and_complex_and(torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            skips=(
                # bmm does not correctly warn when resizing out= inputs
@@ -6300,7 +6301,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_mv),
     OpInfo('addr',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
-           backward_dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
+           backward_dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            backward_dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            # Reference: https://github.com/pytorch/pytorch/issues/50747
            supports_inplace_autograd=False,
@@ -7489,7 +7490,7 @@ op_db: List[OpInfo] = [
            aliases=('linalg.matmul',),
            dtypes=floating_types(),
            supports_forward_ad=True,
-           dtypesIfCPU=all_types_and_complex_and(torch.bfloat16),
+           dtypesIfCPU=all_types_and_complex_and(torch.bfloat16, torch.float16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            dtypesIfROCM=floating_types_and(torch.half, torch.bfloat16),
            backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
