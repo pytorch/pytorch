@@ -4,7 +4,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import (
     Dict,
-    List
+    List,
+    Union
 )
 
 import threading
@@ -572,11 +573,15 @@ class ShardedTensor(object):
         """
         return self._local_shards
 
-    def size(self) -> torch.Size:
+    def size(self, dim: int = None) -> Union[torch.Size, int]:
         """
-        Returns the size of the tensor. The returned value is a subclass of tuple.
+        Returns the size of the tensor. When dim not specified, the returned
+        value is a subclass of tuple. If dim is given, we return int.
         """
-        return self._metadata.size
+        size = self._metadata.size
+        if dim is not None:
+            return size[dim]
+        return size
 
     def is_pinned(self) -> bool:
         """
