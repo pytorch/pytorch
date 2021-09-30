@@ -129,13 +129,13 @@ c10::StrongTypePtr typeResolverMobile(
 }
 
 c10::intrusive_ptr<c10::ivalue::Object> objLoaderMobile(
-    at::StrongTypePtr type,
-    IValue input,
-    std::shared_ptr<mobile::CompilationUnit> mobile_compilation_unit) {
+    const at::StrongTypePtr& type,
+    const IValue& input,
+    mobile::CompilationUnit& mobile_compilation_unit) {
   auto cls = type.type_->expect<at::ClassType>();
   auto qn = cls->name();
   c10::QualifiedName method_name(qn.value(), "__setstate__");
-  auto setstate = mobile_compilation_unit->find_function(method_name);
+  auto setstate = mobile_compilation_unit.find_function(method_name);
   auto find_custom_class_with_setstate = [&qn]() -> c10::ClassTypePtr {
     auto custom_class_type = torch::jit::getCustomClass(qn->qualifiedName());
     if (custom_class_type && custom_class_type->findMethod("__setstate__")) {
@@ -160,9 +160,7 @@ c10::intrusive_ptr<c10::ivalue::Object> objLoaderMobile(
     auto obj = c10::ivalue::Object::create(type, ndict);
     auto it = dict.begin();
     for (const auto i : c10::irange(ndict)) {
-      std::stringstream name;
-      name << it->key();
-      cls->addOrCheckAttribute(name.str(), it->key().type());
+      cls->addOrCheckAttribute(it->key().toStringRef(), it->key().type());
       obj->setSlot(i, it->value());
       ++it;
     }
@@ -450,7 +448,7 @@ c10::IValue BytecodeDeserializer::readArchive(
   };
 
   auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
-    return objLoaderMobile(type, input, mcu);
+    return objLoaderMobile(type, input, *mcu);
   };
 
   bool bytecode_tensor_in_constants_archive =
