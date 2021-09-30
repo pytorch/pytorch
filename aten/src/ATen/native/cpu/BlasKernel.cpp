@@ -74,8 +74,9 @@ void gemm_transa_(
     for (int64_t j = 0; j < n; j++)
     {
       opmath_t sum = 0;
-      for(int64_t l = 0; l < k; l++)
-        sum += a_[l]*b_[l];
+      for(int64_t l = 0; l < k; l++) {
+        sum += static_cast<opmath_t>(a_[l]) * static_cast<opmath_t>(b_[l]);
+      }
       b_ += ldb;
       if (beta == scalar_t(0))
         c[j*ldc+i] = alpha*sum;
@@ -132,17 +133,17 @@ void gemm_transab_(
       int64_t l_k = k / 4;
       for (int64_t l_l = 0; l_l < l_k; l_l++) {
         c[j * ldc + i] += a[i * lda + l_l * 4 + 0] //
-          * b[(l_l * 4 + 0) * ldb + j] * alpha;
+            * (b[(l_l * 4 + 0) * ldb + j] * alpha);
         c[j * ldc + i] += a[i * lda + l_l * 4 + 1] //
-          * b[(l_l * 4 + 1) * ldb + j] * alpha;
+            * (b[(l_l * 4 + 1) * ldb + j] * alpha);
         c[j * ldc + i] += a[i * lda + l_l * 4 + 2] //
-          * b[(l_l * 4 + 2) * ldb + j] * alpha;
+            * (b[(l_l * 4 + 2) * ldb + j] * alpha);
         c[j * ldc + i] += a[i * lda + l_l * 4 + 3] //
-          * b[(l_l * 4 + 3) * ldb + j] * alpha;
+            * (b[(l_l * 4 + 3) * ldb + j] * alpha);
       }
       int64_t l = l_k * 4;
       for (; l < k; l++)
-        c[j * ldc + i] += a[i * lda + l] * b[l * ldb + j] * alpha;
+        c[j * ldc + i] += a[i * lda + l] * (b[l * ldb + j] * alpha);
     }
   }
 }
