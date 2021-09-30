@@ -1059,6 +1059,59 @@ Tensor cholesky_inverse_backward(Tensor grad, Tensor L, bool upper, Tensor inver
   return grad_L;
 }
 
+// The formula for forward AD is adapted from
+//
+// Golub, Gene H., and Victor Pereyra. "The Differentiation of Pseudo-Inverses and Nonlinear
+// Least Squares Problems Whose Variables Separate."
+// SIAM Journal on Numerical Analysis 10(2). (1973). 413-432. doi: 10.1137/0710036
+Tensor pinv_jvp(
+  const Tensor& A,
+  const Tensor& pinvA,
+  const Tensor& dA
+) {
+  auto m = A.size(-2);
+  auto n = A.size(-1);
+  auto dAh = dA.transpose(-1, -2).conj();
+  auto pinvAh = pinvA.transpose(-1, -2).conj();
+  // optimization to produce matrices of the smallest dimension
+  if (m <= n) {
+    auto K = pinvAh.matmul(dAh);
+    return pinvA.matmul(K - K.transpose(-1, -2).conj() - K.matmul(A.matmul(pinvA)))
+         + (dAh - pinvA.matmul(A.matmul(dAh))).matmul(pinvAh.matmul(pinvA));
+  }
+  else {
+    auto K = dAh.matmul(pinvAh);
+    return (K - K.transpose(-1, -2).conj() - pinvA.matmul(A).matmul(K)).matmul(pinvA)
+         + (pinvA.matmul(pinvAh)).matmul(dAh - (dAh.matmul(A)).matmul(pinvA));
+  }
+}
+
+Tensor pinv_backward(
+  const Tensor& grad,
+  const Tensor& pinvA,
+  const Tensor& A
+) {
+  auto m = A.size(-2);
+  auto n = A.size(-1);
+  auto pinvAh = pinvA.transpose(-1, -2).conj();
+  auto gradh = grad.transpose(-1, -2).conj();
+  // optimization to produce matrices of the smallest dimension
+  if (m <= n) {
+    auto K = gradh.matmul(pinvA);
+    auto KpinvAh = K.matmul(pinvAh);
+    return - (pinvA.matmul(K)).transpose(-1, -2).conj()
+           + KpinvAh - (A.matmul(pinvA)).matmul(KpinvAh)
+           + (pinvAh.matmul(pinvA)).matmul(gradh - K.matmul(A));
+  }
+  else {
+    auto K = pinvA.matmul(gradh);
+    auto pinvAhK = pinvAh.matmul(K);
+    return - (K.matmul(pinvA)).transpose(-1, -2).conj()
+           + (gradh - A.matmul(K)).matmul(pinvA).matmul(pinvAh)
+           + pinvAhK - pinvAhK.matmul(pinvA).matmul(A);
+  }
+}
+
 Tensor split_with_sizes_backward(const std::vector<torch::autograd::Variable> &grads,
                                  IntArrayRef split_sizes, int64_t dim, IntArrayRef sizes, const at::TensorOptions &options) {
   dim = at::maybe_wrap_dim(dim, sizes.size());
