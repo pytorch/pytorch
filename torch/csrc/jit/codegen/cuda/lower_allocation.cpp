@@ -488,7 +488,7 @@ class AllocationInserter : public kir::MutableIrVisitor {
         "this pass should be run before any conditionals are placed in code.");
   }
 
-  AllocationInserter(std::vector<kir::Expr*> _loop_nests)
+  explicit AllocationInserter(std::vector<kir::Expr*> _loop_nests)
       : loop_nests_(std::move(_loop_nests)),
         gpu_lower(GpuLower::current()),
         ir_builder(gpu_lower->kernel()) {
@@ -506,8 +506,8 @@ class AllocationInserter : public kir::MutableIrVisitor {
       if (alloc.alloc_expr == nullptr) {
         continue;
       }
-      // Dynamic smem exprs need to be at the begining of the kernel outside for
-      // loops
+      // Dynamic smem exprs need to be at the beginning of the kernel outside
+      // for loops
       if (alloc.buffer->memoryType() == MemoryType::Shared &&
           !kir::ExpressionEvaluator::isConst(alloc.alloc_expr->size())) {
         loop_nests_.insert(loop_nests_.begin(), alloc.alloc_expr);

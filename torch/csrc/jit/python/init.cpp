@@ -140,7 +140,7 @@ bool loadPythonClasses() {
 }
 } // anonymous namespace
 
-#if !defined(__HIP_PLATFORM_HCC__)
+#if !defined(USE_ROCM)
 TORCH_API void runJITCPPTests();
 #endif
 
@@ -550,7 +550,7 @@ void initJITBindings(PyObject* module) {
           [](const std::shared_ptr<Graph>& graph) {
             CreateAutodiffSubgraphs(graph);
           })
-#if defined(BUILDING_TESTS) && !defined(__HIP_PLATFORM_HCC__)
+#if defined(BUILDING_TESTS) && !defined(USE_ROCM)
       .def(
           "_jit_run_cpp_tests",
           []() {
