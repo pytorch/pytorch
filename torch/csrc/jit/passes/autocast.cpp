@@ -25,6 +25,9 @@ bool autocast_enabled = false;
 struct AutocastContext {
   bool enabled = false;
   bool cpu_enabled = false;
+  c10::ScalarType scalar_type = c10::ScalarType::Undefined;
+  c10::ScalarType cpu_scalar_type = c10::ScalarType::Undefined;
+
   operator bool() const {
     return enabled || cpu_enabled;
   }
@@ -68,6 +71,7 @@ c10::optional<AutocastScope> parseAutocast(Value* value, const AutocastContext& 
       scope.context = context;
       bool enabled;
       std::string device;
+      c10::ScalarType dtype;
       for (Use use : value->uses()) {
         // TODO: support runtime flag
         if (use.user->kind() == prim::SetAttr &&
@@ -84,12 +88,39 @@ c10::optional<AutocastScope> parseAutocast(Value* value, const AutocastContext& 
           TORCH_CHECK(ret.has_value(),
             "Autocast device argument must be a constant");
           device = ret.value();
+        } else if (use.user->kind() == prim::SetAttr &&
+            use.user->s(attr::name) == "dtype") {
+          // Search for `prim::SetAttr[name="dtype"]`
+          auto ret = constant_as<c10::ScalarType>(use.user->input(1));
+          TORCH_CHECK(ret.has_value(),
+            "Autocast dtype argument must be a constant");
+          dtype = ret.value();
+          std::cout << "found scalar_type" << dtype << std::endl;
+          switch(dtype) {
+            case c10::ScalarType::BFloat16:
+              printf("bfloat16\n");
+              break;
+            case c10::ScalarType::Half:
+              printf("float16\n");
+              break;
+            case c10::ScalarType::Float:
+              printf("float32\n");
+              break;
+            case c10::ScalarType::Undefined:
+              printf("Undefined\n");
+              break;
+            default:
+              printf("default\n");
+              break;
+          }
         }
       }
       if (device == "cuda") {
         scope.context.enabled = enabled;
+        scope.context.scalar_type = dtype;
       } else if (device == "cpu") {
         scope.context.cpu_enabled = enabled;
+        scope.context.cpu_scalar_type = dtype;
       } else {
         TORCH_INTERNAL_ASSERT(false, "unrecognized device for autocast pass");
       }
@@ -134,10 +165,23 @@ void castTensorInputs(Node* node, Symbol cast_op, const AutocastContext& context
   WithInsertPoint insert_point(node);
 
   for (auto input : casted_inputs) {
-    const auto new_input = graph->insert(cast_op, {input,
-    graph->insertConstant(IValue(context.enabled)),
-    graph->insertConstant(IValue(context.cpu_enabled))});
-    node->replaceInputWith(input, new_input);
+    if (cast_op == aten::autocast_to_full_precision) {
+      const auto new_input = graph->insert(cast_op, {input,
+      graph->insertConstant(IValue(context.enabled)),
+      graph->insertConstant(IValue(context.cpu_enabled))});
+      node->replaceInputWith(input, new_input);
+    } else if (cast_op == aten::autocast_to_reduced_precision) {
+      
+
+      const auto new_input = graph->insert(cast_op, {input,
+      graph->insertConstant(IValue(context.enabled)),
+      graph->insertConstant(IValue(context.cpu_enabled)),
+      graph->insertConstant(IValue(context.scalar_type)),
+      graph->insertConstant(IValue(context.cpu_scalar_type))});
+      node->replaceInputWith(input, new_input);
+    } else {
+      TORCH_INTERNAL_ASSERT(false, "unrecognized cast_op symbol: ", cast_op.toQualString());
+    }
   }
 }
 
@@ -176,7 +220,7 @@ void castInputsToWidestType(Node* node, const AutocastContext& context) {
     if (auto tensor_type = input->type()->cast<TensorType>()) {
       const auto dtype = tensor_type->scalarType();
       if (!dtype.has_value() || *dtype == at::ScalarType::Float) {
-        castTensorInputs(node, aten::autocast_to_fp32, context);
+        castTensorInputs(node, aten::autocast_to_full_precision, context);
         return;
       }
     }
@@ -280,7 +324,7 @@ void handleBlock(Block* block, AutocastContext initial_state) {
       case aten::rnn_tanh_cell:
       case aten::rnn_relu_cell:
         if (!node->schema().is_mutable()) {
-          castTensorInputs(node, aten::autocast_to_fp16, current_state());
+          castTensorInputs(node, aten::autocast_to_reduced_precision, current_state());
         }
         break;
 
@@ -327,7 +371,7 @@ void handleBlock(Block* block, AutocastContext initial_state) {
       case aten::cdist:
       case aten::renorm:
         if (!node->schema().is_mutable()) {
-          castTensorInputs(node, aten::autocast_to_fp32, current_state());
+          castTensorInputs(node, aten::autocast_to_full_precision, current_state());
         }
         break;
 
@@ -339,7 +383,7 @@ void handleBlock(Block* block, AutocastContext initial_state) {
       case aten::cumsum:
       case aten::sum:
         if (!node->schema().is_mutable() && !hasExplicitDtypeArgument(node)) {
-          castTensorInputs(node, aten::autocast_to_fp32, current_state());
+          castTensorInputs(node, aten::autocast_to_full_precision, current_state());
         }
         break;
 
@@ -398,7 +442,8 @@ bool autocastEnabled() {
 void Autocast(const std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("\nBefore Autocast: ", graph);
   if (autocastEnabled()) {
-    AutocastContext init = {at::autocast::is_enabled(), at::autocast::is_cpu_enabled()};
+    AutocastContext init = {at::autocast::is_enabled(), at::autocast::is_cpu_enabled(),
+        at::autocast::get_autocast_gpu_dtype(), at::autocast::get_autocast_cpu_dtype()};
     handleBlock(graph->block(), init);
   }
   GRAPH_DUMP("\nAfter Autocast: ", graph);

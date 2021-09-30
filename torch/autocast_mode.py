@@ -143,6 +143,7 @@ class autocast(object):
         if torch._jit_internal.is_scripting():
             self._enabled = enabled
             self.device = device_type
+            self.dtype = dtype
             return
 
         self.device = device_type

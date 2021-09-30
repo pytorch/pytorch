@@ -510,5 +510,25 @@ class TestAutocast(JitTestCase):
         test(t_cuda_amp_autocast, "cuda")
         test(t_cpu_amp_autocast, "cuda")
 
+    @unittest.skipIf(not TEST_CUDA, "No cuda")
+    def test_autocast_mixed_dtypes(self):
+        def t(cpu0, cpu1, cuda0, cuda1):
+            with torch.autocast("cpu", torch.bfloat16):
+                with torch.autocast("cuda", torch.float16):
+                    cpu_o = torch.mm(cpu0, cpu1)
+                    cuda_o = torch.mm(cuda0, cuda1)
+                    return cpu_o, cuda_o
+        
+        jit_t = torch.jit.script(t)
+        cpu0 = torch.randn(5, 5, device="cpu", dtype=torch.float32)
+        cpu1 = torch.randn(5, 5, device="cpu", dtype=torch.float32)
+        cuda0 = torch.randn(5, 5, device="cuda", dtype=torch.float32)
+        cuda1 = torch.randn(5, 5, device="cuda", dtype=torch.float32)
+        o0, o1 = t(cpu0, cpu1, cuda0, cuda1)
+        jit_o0, jit_o1 = jit_t(cpu0, cpu1, cuda0, cuda1)
+        FileCheck().check('aten::autocast_to_fp16').run(jit_t.graph_for(cpu0, cpu1, cuda0, cuda1))
+        self.assertEqual(o0.dtype, jit_o0.dtype)
+        self.assertEqual(o1.dtype, jit_o1.dtype)
+
 if __name__ == '__main__':
     run_tests()
