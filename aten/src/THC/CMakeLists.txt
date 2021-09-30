@@ -26,15 +26,9 @@ install(FILES
           THCStorageCopy.h
           THCTensor.h
           THCTensorMathReduce.cuh
-          THCAsmUtils.cuh
           THCAtomics.cuh
-          THCScanUtils.cuh
           THCAllocator.h
           THCCachingHostAllocator.h
-          THCDeviceTensor.cuh
-          THCDeviceTensor-inl.cuh
-          THCDeviceTensorUtils.cuh
-          THCDeviceTensorUtils-inl.cuh
           THCGenerateAllTypes.h
           THCGenerateBFloat16Type.h
           THCGenerateBoolType.h
@@ -52,7 +46,6 @@ install(FILES
           THCGenerateComplexDoubleType.h
           THCIntegerDivider.cuh
           THCNumerics.cuh
-          THCThrustAllocator.cuh
           # See Note [TH abstraction violation]
           THCTensor.hpp
           THCStorage.hpp
