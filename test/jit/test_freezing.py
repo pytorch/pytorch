@@ -1,20 +1,18 @@
+import io
+import unittest
+from itertools import product
+from typing import Any
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import unittest
-from torch.testing._internal.jit_utils import JitTestCase
-
-from torch.testing import FileCheck
-from torch.testing._internal.common_quantized import override_quantized_engine
-from torch.testing._internal.common_quantization import skipIfNoFBGEMM
-from torch.testing._internal.common_utils import set_default_dtype
-from torch.utils import mkldnn as mkldnn_utils
-
-
 from torch.jit._recursive import wrap_cpp_module
-from typing import Any
-from itertools import product
-import io
+from torch.testing import FileCheck
+from torch.testing._internal.common_quantization import skipIfNoFBGEMM
+from torch.testing._internal.common_quantized import override_quantized_engine
+from torch.testing._internal.common_utils import set_default_dtype
+from torch.testing._internal.jit_utils import JitTestCase
+from torch.utils import mkldnn as mkldnn_utils
 
 try:
     import torchvision
@@ -1584,7 +1582,7 @@ class TestFrozenOptimizations(JitTestCase):
             test_conv_fusion(use_bias, nn.Conv2d, False, pytorch_op, False,
                              add_tensor=torch.rand(1).to(torch.int), expect_success=False)
 
-    @unittest.skipIf(not torch._C.has_cuda, "Optimization currently only run for GPU")
+    @unittest.skipIf(not TEST_CUDA, "Optimization currently only run for GPU")
     def test_linear_concat(self):
         out_dimms = [[5, 10], [1, 5]]
 
@@ -1607,7 +1605,7 @@ class TestFrozenOptimizations(JitTestCase):
             test_val1 = torch.rand([50, 5])
             self.check_linear_optimizations(mod_eager, 2, 1, (test_val1, ))
 
-    @unittest.skipIf(not torch._C.has_cuda, "Optimization currently only run for GPU")
+    @unittest.skipIf(not TEST_CUDA, "Optimization currently only run for GPU")
     def test_linear_concat_complex(self):
         """
             Testing that the interleaving of multiple optimizations does not 
@@ -1634,7 +1632,7 @@ class TestFrozenOptimizations(JitTestCase):
         test_val1 = torch.rand([50, 5])
         self.check_linear_optimizations(mod_eager, 4, 2, (test_val1, ))
 
-    @unittest.skipIf(not torch._C.has_cuda, "Optimization currently only run for GPU")
+    @unittest.skipIf(not TEST_CUDA, "Optimization currently only run for GPU")
     def test_linear_concat_different_input(self):
         """
         There should be no change to the graph due to the optimization pass
@@ -1660,7 +1658,7 @@ class TestFrozenOptimizations(JitTestCase):
         test_val2 = torch.rand([50, 5])
         self.check_linear_optimizations(mod_eager, 2, 2, (test_val1, test_val2))
 
-    @unittest.skipIf(not torch._C.has_cuda, "Optimization currently only run for GPU")
+    @unittest.skipIf(not TEST_CUDA, "Optimization currently only run for GPU")
     def test_linear_multiple_blocks(self):
         class ModMultLinear(nn.Module):
             def __init__(self, w1_dim, w2_dim):
