@@ -141,7 +141,7 @@ static bool maybe_enable_p2p_access(Device dst_device, Device src_device) {
   if (dst_device.is_cpu() || src_device.is_cpu()) {
     return false;
   }
-  return at::cuda::detail::get_p2p_access(src_device.index(), dst_device.index());
+  return at::cuda::get_p2p_access(src_device.index(), dst_device.index());
 }
 
 static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {

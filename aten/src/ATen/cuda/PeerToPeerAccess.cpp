@@ -7,10 +7,11 @@
 
 namespace at {
 namespace cuda {
-namespace detail {
 
-static std::vector<int8_t> p2pAccessEnabled;
-static int64_t num_devices = -1;
+static std::vector<int8_t> p2pAccessEnabled_;
+static int64_t num_devices_ = -1;
+
+namespace detail {
 
 void init_p2p_access_cache(int64_t num_devices) {
   // p2pAccessEnabled records if p2p copies are allowed between pairs of
@@ -18,33 +19,36 @@ void init_p2p_access_cache(int64_t num_devices) {
   // "-1" (unknown).
   // Currently the max number of gpus in P2P group is 8, so if there are more
   // we enable P2P in groups of 8
-  p2pAccessEnabled.clear();
-  p2pAccessEnabled.resize(num_devices * num_devices, -1);
+  p2pAccessEnabled_.clear();
+  p2pAccessEnabled_.resize(num_devices * num_devices, -1);
+  num_devices_ = num_devices;
 
   for (int64_t i = 0; i < num_devices; ++i) {
-    p2pAccessEnabled[i * num_devices + i] = 1;
+    p2pAccessEnabled_[i * num_devices + i] = 1;
   }
 }
 
-bool get_p2p_access(int source_dev, int dest_dev) {
-  TORCH_CHECK(source_dev >= 0 || source_dev < num_devices,
-              source_dev, " is not a device");
-  TORCH_CHECK(dest_dev >= 0 || dest_dev < num_devices,
-              dest_dev, " is not a device");
-  TORCH_INTERNAL_ASSERT(num_devices >= 0, "p2p access cache not initialized");
+}  // namespace detail
 
-  auto &cache = p2pAccessEnabled[source_dev * num_devices + dest_dev];
+bool get_p2p_access(int dev, int dev_to_access) {
+  TORCH_CHECK(dev >= 0 || dev < num_devices_,
+              dev, " is not a device");
+  TORCH_CHECK(dev_to_access >= 0 || dev_to_access < num_devices_,
+              dev_to_access, " is not a device");
+  TORCH_INTERNAL_ASSERT(num_devices_ >= 0, "p2p access cache not initialized");
+
+  auto &cache = p2pAccessEnabled_[dev * num_devices_ + dev_to_access];
 
   if (cache != -1) {
     return cache;
   }
 
-  c10::cuda::CUDAGuard device_guard(source_dev);
+  c10::cuda::CUDAGuard device_guard(dev);
 
   int access = 0;
-  C10_CUDA_CHECK(cudaDeviceCanAccessPeer(&access, source_dev, dest_dev));
+  C10_CUDA_CHECK(cudaDeviceCanAccessPeer(&access, dev, dev_to_access));
   if (access) {
-    cudaError_t err = cudaDeviceEnablePeerAccess(dest_dev, 0);
+    cudaError_t err = cudaDeviceEnablePeerAccess(dev_to_access, 0);
     if (err == cudaErrorPeerAccessAlreadyEnabled) {
       // ignore and clear the error if access was already enabled
       cudaGetLastError();
@@ -58,4 +62,4 @@ bool get_p2p_access(int source_dev, int dest_dev) {
   return cache;
 }
 
-}}}  // namespace at::cuda::detail
+}}  // namespace at::cuda::detail

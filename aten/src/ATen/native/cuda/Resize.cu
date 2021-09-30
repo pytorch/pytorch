@@ -4,7 +4,6 @@
 #include <torch/library.h>
 #include <ATen/native/cuda/Resize.h>
 #include <ATen/native/ResizeCommon.h>
-#include <THC/THCGeneral.hpp>  // For THCState_getPeerToPeerAccess
 
 namespace at {
 namespace native {
@@ -25,7 +24,7 @@ void resize_bytes_cuda(StorageImpl* storage, size_t size_bytes) {
   if (storage->data_ptr()) {
     // Enable p2p access when the memcpy is across devices
     at::globalContext().lazyInitCUDA();
-    at::cuda::detail::get_p2p_access(device, storage->device().index());
+    at::cuda::get_p2p_access(device, storage->device().index());
 
     C10_CUDA_CHECK(
         cudaMemcpyAsync(
