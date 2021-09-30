@@ -1,4 +1,6 @@
 #include <memory>
+#include <unordered_map>
+#include <vector>
 
 struct _frozen;
 
@@ -30,7 +32,7 @@ class builtin_registry {
   static struct _frozen* get_all_frozen_modules();
 
  private:
-  explicit builtin_registry() {}
+  explicit builtin_registry() = default;
   std::unordered_map<std::string, int> name2idx_;
   std::vector<std::unique_ptr<builtin_registry_item>> items_;
 };

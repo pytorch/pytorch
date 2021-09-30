@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 #include <torch/csrc/deploy/builtin_registry.h>
-#include "Python.h"
-#include "common/logging/logging.h"
+#include <Python.h>
 
 using namespace torch::deploy;
 
