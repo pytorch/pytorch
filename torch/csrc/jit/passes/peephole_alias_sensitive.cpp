@@ -112,13 +112,15 @@ struct PeepholeOptimizeAliasSensitiveImpl {
     if (!aliasDb_->safeToChangeAliasingRelationship(input, output)) {
       return false;
     }
-    // however we make an replace an output with an input, all of the aliasing
-    // properties of the output are not present on the input. in order to avoid
-    // re-instantiating an alias db on each change, which would be O(n^2), or
-    // inplace modifying it, which would involve invalidating all of the memory
-    // dag caches, we just keep a set of values which are "stale" (aliasing
-    // properties not up to date), and avoid doing further optimizations on
-    // values which alias them
+    // whenever we replace an output with an input, all of the aliasing
+    // properties of the output are now present on the input.
+    // For example, if the output aliases a graph output, the input will now
+    // as well.
+    // in order to avoid re-instantiating an alias db on each change, which
+    // would be O(n^2), or inplace modifying it, which would involve
+    // invalidating all of the memory dag caches, we just keep a set of values
+    // which are "stale" (aliasing properties not up to date), and avoid doing
+    // further optimizations on values which alias them
     if (aliasDb_->mayAlias({input, output}, stale_alias_values_)) {
       return false;
     }
