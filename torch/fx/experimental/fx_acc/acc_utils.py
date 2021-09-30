@@ -95,7 +95,7 @@ def draw_graph(traced: torch.fx.GraphModule, fname: str, figname: str = "fx_grap
     getattr(x, "write_" + ext.lstrip("."))(fname)
 
 
-def print_model_info(gm: torch.fx.GraphModule, header: Optional[str] = None):
+def get_model_info_str(gm: torch.fx.GraphModule, header: Optional[str] = None):
     """
     Print out info of the provided `gm`.
     If `header` is provided then it's included in the printed string.
@@ -104,7 +104,7 @@ def print_model_info(gm: torch.fx.GraphModule, header: Optional[str] = None):
     placeholder_count = get_attr_count = call_method_count = call_module_count = 0
     for node in gm.graph.nodes:
         if node.op == "call_function":
-            ops_and_counts[node.target] = ops_and_counts.get(node.target, 1) + 1
+            ops_and_counts[node.target] = ops_and_counts.get(node.target, 0) + 1
         elif node.op == "placeholder":
             placeholder_count += 1
         elif node.op == "get_attr":
@@ -137,7 +137,8 @@ def print_model_info(gm: torch.fx.GraphModule, header: Optional[str] = None):
     for op_str, count in pretty_ops_and_counts:
         model_info_str += f"> {op_str}: {count}\n"
 
-    print(model_info_str)
+    return model_info_str
+
 
 def get_unique_attr_name_in_module(mod_traced: torch.fx.GraphModule, name: str) -> str:
     """

@@ -12,7 +12,7 @@ COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-if [[ "$BUILD_ENVIRONMENT" == *-linux-xenial-py3-clang7-asan* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-clang7-asan* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" "$@"
 fi
 
@@ -250,6 +250,8 @@ else
     if which sccache > /dev/null; then
       echo 'PyTorch Build Statistics'
       sccache --show-stats
+
+      sccache --show-stats | python -m tools.stats.upload_sccache_stats
     fi
 
     assert_git_not_dirty
