@@ -1551,12 +1551,12 @@
 - name: celu_(Tensor(a!) self, Scalar alpha=1.0) -> Tensor(a!)
   self: elu_backward(grad, alpha, 1, 1.0/alpha.toFloat(), /* is_result */ true, result)
 
-- name: gelu(Tensor self, bool approximate) -> Tensor
-  self: gelu_backward(grad, self, approximate)
+- name: gelu(Tensor self, bool approximate=False) -> Tensor
+  self: gelu_backward(grad, self, approximate=false)
 
-- name: gelu_backward(Tensor grad_output, Tensor self, bool approximate) -> Tensor
-  grad_output: gelu_backward(grad, self, approximate)
-  self: gelu_double_backward(grad, grad_output, self, approximate)
+- name: gelu_backward(Tensor grad_output, Tensor self, bool approximate=False) -> Tensor
+  grad_output: gelu_backward(grad, self, approximate=false)
+  self: gelu_double_backward(grad, grad_output, self, approximate=false)
 
 - name: glu(Tensor self, int dim=-1) -> Tensor
   self: glu_backward(grad, self, dim)
