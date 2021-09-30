@@ -1015,6 +1015,34 @@ class TestFreezing(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "attempted to freeze a module that return itself"):
             m_f = torch._C._freeze_module(m_s._c)
 
+    def test_freeze_module_inlining(self):
+        @torch.jit.script
+        class Obj(object):  # noqa: B903
+            def __init__(self, x: int, y: int):
+                self.x = x
+                self.y = y
+
+        class Mod(nn.Module):
+            def __init__(self):
+                super(Mod, self).__init__()
+                self.obj = Obj(2, 3)
+
+            def forward(self, i: int):
+                print(self.obj)
+                return i
+
+        mod = torch.jit.freeze(torch.jit.script(Mod().eval()))
+        obj = mod.graph.findNode("prim::Constant")
+        self.assertTrue(torch._C._jit_object_is_non_holding(obj))
+
+        buffer = io.BytesIO()
+        torch.jit.save(mod, buffer)
+        buffer.seek(0)
+
+        loaded = torch.jit.load(buffer)
+        obj = mod.graph.findNode("prim::Constant")
+        self.assertTrue(torch._C._jit_object_is_non_holding(obj))
+
     def test_freeze_module_return_sub_module(self):
 
         class FreezeMe(nn.Module):
