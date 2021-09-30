@@ -217,7 +217,7 @@ std::shared_ptr<SugaredValue> PythonModuleValue::attr(
   return toSugaredValue(member, m, loc, /*is_constant=*/true);
 }
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
     const SourceRange& loc,
     Function& m,

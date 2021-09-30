@@ -2,12 +2,14 @@
 
 #include <ATen/MemoryOverlap.h>
 #include <ATen/core/interned_strings.h>
+#include <ATen/record_function.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/core/InferenceMode.h>
 #include <c10/util/irange.h>
 #include <caffe2/core/scope_guard.h>
 #include <caffe2/core/timer.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
@@ -63,6 +65,7 @@ namespace {
 void OptimizeGraph(
     std::shared_ptr<torch::jit::Graph>& graph,
     const StaticModuleOptions& opts) {
+  GRAPH_DUMP("Before optimizations: ", graph);
   Inline(*graph);
   ConstantPropagation(graph);
   Canonicalize(graph);
@@ -73,6 +76,9 @@ void OptimizeGraph(
   FuseInferenceOpsForSparseNN(graph);
   UseVariadicCat(graph);
   UseVariadicStack(graph);
+  if (opts.enable_out_variant) {
+    FuseSignLog1P(graph);
+  }
 
   // TODO: we can avoid this guard by moving operations
   // to exposed folders.
@@ -86,6 +92,7 @@ void OptimizeGraph(
   ConstantPropagation(graph);
   RemoveImmutableInputDictLookups(graph);
   UseVariadicTupleUnpack(graph);
+  GRAPH_DUMP("Final graph after optimizations: ", graph);
 }
 
 // remove unused input 0 from graph
@@ -1275,7 +1282,9 @@ ProcessedNode::ProcessedNode(
     Node* node,
     std::vector<const IValue*>&& inputs,
     bool enable_out_variant)
-    : node_(node), inputs_(std::move(inputs)) {
+    : node_(node),
+      inputs_(std::move(inputs)),
+      op_name_(node->kind().toQualString()) {
   // TODO leverage type information
   outputs_.resize(node->outputs().size());
 
@@ -1294,7 +1303,18 @@ ProcessedNode::ProcessedNode(
   }
 }
 
-void ProcessedNode::run() {
+std::vector<IValue> ProcessedNode::clone_inputs() const {
+  std::vector<IValue> result;
+  result.reserve(inputs_.size());
+  std::transform(
+      inputs_.begin(),
+      inputs_.end(),
+      std::back_inserter(result),
+      [](const IValue* ival) { return *ival; });
+  return result;
+}
+
+void ProcessedNode::run_impl() {
   DCHECK(verify_no_memory_overlap());
   if (fn_) {
     fn_(this);
@@ -1320,6 +1340,27 @@ void ProcessedNode::run() {
       Output(i) = std::move(stack[i]);
     }
   }
+}
+
+void ProcessedNode::run() {
+#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
+  bool pre_sampled = false;
+  if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
+    at::RecordFunction guard(at::RecordScope::FUNCTION, pre_sampled);
+    if (guard.isActive()) {
+      if (guard.needsInputs()) {
+        guard.before(get_op_name(), clone_inputs());
+      } else {
+        guard.before(get_op_name());
+      }
+    }
+    run_impl();
+  } else {
+    run_impl();
+  }
+#else
+  run_impl();
+#endif
 }
 
 static bool checkNoMemoryOverlap(const at::Tensor& a, const at::Tensor& b) {
