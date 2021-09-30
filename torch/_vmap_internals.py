@@ -87,8 +87,8 @@ def _create_batched_inputs(
 # Undos the batching (and any batch dimensions) associated with the `vmap_level`.
 def _unwrap_batched(
         batched_outputs: Union[Tensor, Tuple[Tensor, ...]],
-        out_dims: out_dims_t,
-        vmap_level: int, batch_size: int, func: Callable) -> Tuple:
+        out_dims: out_dims_t, vmap_level: int, batch_size: int, func: Callable,
+        allow_none_pass_through: bool = False) -> Tuple:
     num_outputs = _num_outputs(batched_outputs)
     out_dims_as_tuple = _as_tuple(
         out_dims, num_outputs,
@@ -101,8 +101,12 @@ def _unwrap_batched(
     if isinstance(batched_outputs, Tensor):
         out_dim = out_dims_as_tuple[0]
         return torch._remove_batch_dim(batched_outputs, vmap_level, batch_size, out_dim)  # type: ignore[return-value]
-    return tuple(torch._remove_batch_dim(out, vmap_level, batch_size, out_dim)
-                 for out, out_dim in zip(batched_outputs, out_dims_as_tuple))
+    if allow_none_pass_through:
+        return tuple((torch._remove_batch_dim(out, vmap_level, batch_size, out_dim) if out is not None else None)
+                for out, out_dim in zip(batched_outputs, out_dims_as_tuple))
+    else:
+        return tuple(torch._remove_batch_dim(out, vmap_level, batch_size, out_dim)
+                    for out, out_dim in zip(batched_outputs, out_dims_as_tuple))
 
 # Checks that `fn` returned one or more Tensors and nothing else.
 # NB: A python function that return multiple arguments returns a single tuple,
@@ -268,9 +272,9 @@ def _vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> C
     return wrapped
 
 # Warning: Do NOT use, this is a temporary workaround and may be removed.
-# This is a version of vmap that does not validate type of the outputs. This is used to enable
-# us to wrap the call to the autograd engine, which may return None when any of the inputs are
-# unsed. See the issue tracking this https://github.com/facebookresearch/functorch/issues/159.
+# This is a version of vmap that allows None to pass through. It enables us to wrap the call
+# to the autograd engine, in `autograd.grad` which may return None if any of the inputs are
+# unused. See the issue discussing this: https://github.com/facebookresearch/functorch/issues/159.
 def _unsafe_vmap_for_autograd(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Callable:
     @functools.wraps(func)
     def wrapped(*args):
@@ -280,7 +284,7 @@ def _unsafe_vmap_for_autograd(func: Callable, in_dims: in_dims_t = 0, out_dims: 
             batched_inputs, batch_size = _create_batched_inputs(in_dims, args, vmap_level, func)
             batched_outputs = func(*batched_inputs)
             # Don't validate the outputs
-            return _unwrap_batched(batched_outputs, out_dims, vmap_level, batch_size, func)
+            return _unwrap_batched(batched_outputs, out_dims, vmap_level, batch_size, func, allow_none_pass_through=True)
         finally:
             torch._C._vmapmode_decrement_nesting()
     return wrapped
