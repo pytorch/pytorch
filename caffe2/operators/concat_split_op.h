@@ -350,22 +350,24 @@ bool ConcatOp<Context>::RunOnDevice() {
     output_dims[canonical_axis] = output_channels;
   }
   output->Resize(output_dims);
-  size_t output_offset = 0;
-  for (int i = 0; i < InputSize(); ++i) {
-    auto& input = Input(i);
-    auto axis_dim = add_axis_ ? 1 : input.dim32(canonical_axis);
-    math::CopyMatrix<Context>(
-        input.itemsize(),
-        before,
-        axis_dim * after,
-        input.raw_data(),
-        axis_dim * after,
-        static_cast<char*>(output->raw_mutable_data(input_zero.dtype())) +
-            output_offset,
-        output_channels * after,
-        &context_,
-        input_zero.dtype().copy());
-    output_offset += axis_dim * after * input.itemsize();
+  if (c10::multiply_integers(output_dims.begin(), output_dims.end()) > 0) {
+    size_t output_offset = 0;
+    for (int i = 0; i < InputSize(); ++i) {
+      auto& input = Input(i);
+      auto axis_dim = add_axis_ ? 1 : input.dim32(canonical_axis);
+          math::CopyMatrix<Context>(
+              input.itemsize(),
+              before,
+              axis_dim * after,
+              input.raw_data(),
+              axis_dim * after,
+              static_cast<char*>(output->raw_mutable_data(input_zero.dtype())) +
+                  output_offset,
+              output_channels * after,
+              &context_,
+              input_zero.dtype().copy());
+      output_offset += axis_dim * after * input.itemsize();
+    }
   }
   return true;
 }
