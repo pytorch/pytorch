@@ -9,10 +9,10 @@ namespace {
   // don't have to allocate strings all the time
   std::string debugString(std::string debug, const char* file, uint32_t line) {
 #ifdef STRIP_ERROR_MESSAGES
-    return std::string("", 0);
+    return std::string();
 #else
     if (debug.empty()) {
-      return c10::str("registered at ", file, ":", line);
+      return debugString(nullptr, file, line);
     } else {
       return debug;
     }
@@ -21,7 +21,7 @@ namespace {
 
   std::string debugString(const char* debug, const char* file, uint32_t line) {
 #ifdef STRIP_ERROR_MESSAGES
-    return std::string("", 0);
+    return std::string();
 #else
     if (debug == nullptr || debug[0] == '\0') {
       return c10::str("registered at ", file, ":", line);
