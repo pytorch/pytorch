@@ -504,7 +504,7 @@ class TestAutocast(JitTestCase):
                 return torch.mm(x, y)
 
         x = torch.randn(5, 5, device="cuda", dtype=torch.float32)
-        y = torch.randn(5, 5, device= "cuda", dtype=torch.float32)
+        y = torch.randn(5, 5, device="cuda", dtype=torch.float32)
         self._test_autocast(t_autocast_cpu, "aten::autocast_to_reduced_precision", x, y)
         self._test_autocast(t_autocast_cuda, "aten::autocast_to_reduced_precision", x, y)
         self._test_autocast(t_cuda_amp_autocast, "aten::autocast_to_reduced_precision", x, y)
@@ -538,7 +538,7 @@ class TestAutocast(JitTestCase):
                     cpu_o = torch.mm(cpu0, cpu1)
                     cuda_o = torch.mm(cuda0, cuda1)
                     return cpu_o, cuda_o
-        
+
         jit_t = torch.jit.script(t)
         cpu0 = torch.randn(5, 5, device="cpu", dtype=torch.float32)
         cpu1 = torch.randn(5, 5, device="cpu", dtype=torch.float32)
@@ -559,7 +559,7 @@ class TestAutocast(JitTestCase):
         cpu1 = torch.randn(5, 5, device="cpu", dtype=torch.float32)
         cuda0 = torch.randn(5, 5, device="cuda", dtype=torch.float32)
         cuda1 = torch.randn(5, 5, device="cuda", dtype=torch.float32)
-        
+
         with torch.autocast("cpu", torch.bfloat16):
             with torch.autocast("cuda", torch.float16):
                 self._test_autocast(t, "aten::autocast_to_reduced_precision", cpu0, cpu1, cuda0, cuda1)

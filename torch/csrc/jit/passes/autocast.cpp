@@ -36,16 +36,15 @@ struct AutocastContext {
 struct AutocastScope {
   Value* instance = nullptr;
   AutocastContext context;
-  void stack(const AutocastContext& parent_context) {
-  }
+  void stack(const AutocastContext& parent_context) {}
 };
 
 bool isAutocastNode(Value* value) {
   const auto class_name = getModuleName(value);
-  return class_name.has_value() && 
+  return class_name.has_value() &&
       (*class_name == "__torch__.torch.cuda.amp.autocast_mode.autocast" ||
-      *class_name == "__torch__.torch.cpu.amp.autocast_mode.autocast" ||
-      *class_name == "__torch__.torch.autocast_mode.autocast");
+       *class_name == "__torch__.torch.cpu.amp.autocast_mode.autocast" ||
+       *class_name == "__torch__.torch.autocast_mode.autocast");
 }
 
 // If we have an autocast instance, return it
@@ -63,7 +62,9 @@ bool isAutocastNode(Value* value) {
 //  2. `prim::SetAttr` must follow `prim::CreateObject()` in the same block,
 //    but there might be other nodes in between
 //
-c10::optional<AutocastScope> parseAutocast(Value* value, const AutocastContext& context) {
+c10::optional<AutocastScope> parseAutocast(
+    Value* value,
+    const AutocastContext& context) {
   if (isAutocastNode(value)) {
     if (value->node()->kind() == prim::CreateObject) {
       AutocastScope scope;
@@ -78,22 +79,25 @@ c10::optional<AutocastScope> parseAutocast(Value* value, const AutocastContext& 
             use.user->s(attr::name) == "_enabled") {
           // Search for `prim::SetAttr[name="_enabled"]`
           auto ret = constant_as<bool>(use.user->input(1));
-          TORCH_CHECK(ret.has_value(),
-            "Autocast _enabled argument must be a constant");
+          TORCH_CHECK(
+              ret.has_value(), "Autocast _enabled argument must be a constant");
           enabled = ret.value();
-        } else if (use.user->kind() == prim::SetAttr &&
+        } else if (
+            use.user->kind() == prim::SetAttr &&
             use.user->s(attr::name) == "device") {
           // Search for `prim::SetAttr[name="device"]`
           auto ret = constant_as<std::string>(use.user->input(1));
-          TORCH_CHECK(ret.has_value(),
-            "Autocast device argument must be a constant");
+          TORCH_CHECK(
+              ret.has_value(), "Autocast device argument must be a constant");
           device = ret.value();
-        } else if (use.user->kind() == prim::SetAttr &&
+        } else if (
+            use.user->kind() == prim::SetAttr &&
             use.user->s(attr::name) == "fast_dtype") {
           // Search for `prim::SetAttr[name="fast_dtype"]`
           auto ret = constant_as<c10::ScalarType>(use.user->input(1));
-          TORCH_CHECK(ret.has_value() && ret.value() != c10::ScalarType::Undefined,
-            "Autocast dtype argument must be a constant and defined");
+          TORCH_CHECK(
+              ret.has_value() && ret.value() != c10::ScalarType::Undefined,
+              "Autocast dtype argument must be a constant and defined");
           dtype = ret.value();
         }
       }
@@ -127,7 +131,10 @@ c10::optional<AutocastScope> parseAutocast(Value* value, const AutocastContext& 
   return c10::nullopt;
 }
 
-void castTensorInputs(Node* node, Symbol cast_op, const AutocastContext& context) {
+void castTensorInputs(
+    Node* node,
+    Symbol cast_op,
+    const AutocastContext& context) {
   if (!context) {
     return;
   }
@@ -138,8 +145,7 @@ void castTensorInputs(Node* node, Symbol cast_op, const AutocastContext& context
   for (auto input : node->inputs()) {
     // TODO: update cast_op signature to take dynamic context flags
     auto input_tensor_type = input->type()->cast<TensorType>();
-    if (input_tensor_type &&
-        input->node()->kind() != cast_op) {
+    if (input_tensor_type && input->node()->kind() != cast_op) {
       casted_inputs.insert(input);
     }
   }
@@ -148,21 +154,24 @@ void castTensorInputs(Node* node, Symbol cast_op, const AutocastContext& context
 
   for (auto input : casted_inputs) {
     if (cast_op == aten::autocast_to_full_precision) {
-      const auto new_input = graph->insert(cast_op, {input,
-      graph->insertConstant(IValue(context.enabled)),
-      graph->insertConstant(IValue(context.cpu_enabled))});
+      const auto new_input = graph->insert(
+          cast_op,
+          {input,
+           graph->insertConstant(IValue(context.enabled)),
+           graph->insertConstant(IValue(context.cpu_enabled))});
       node->replaceInputWith(input, new_input);
     } else if (cast_op == aten::autocast_to_reduced_precision) {
-      
-
-      const auto new_input = graph->insert(cast_op, {input,
-      graph->insertConstant(IValue(context.enabled)),
-      graph->insertConstant(IValue(context.cpu_enabled)),
-      graph->insertConstant(IValue(context.scalar_type)),
-      graph->insertConstant(IValue(context.cpu_scalar_type))});
+      const auto new_input = graph->insert(
+          cast_op,
+          {input,
+           graph->insertConstant(IValue(context.enabled)),
+           graph->insertConstant(IValue(context.cpu_enabled)),
+           graph->insertConstant(IValue(context.scalar_type)),
+           graph->insertConstant(IValue(context.cpu_scalar_type))});
       node->replaceInputWith(input, new_input);
     } else {
-      TORCH_INTERNAL_ASSERT(false, "unrecognized cast_op symbol: ", cast_op.toQualString());
+      TORCH_INTERNAL_ASSERT(
+          false, "unrecognized cast_op symbol: ", cast_op.toQualString());
     }
   }
 }
@@ -250,7 +259,8 @@ void handleBlock(Block* block, AutocastContext initial_state) {
         break;
 
       case prim::Enter:
-        if (auto autocast_scope = parseAutocast(node->input(), current_state())) {
+        if (auto autocast_scope =
+                parseAutocast(node->input(), current_state())) {
           if (node->hasUses()) {
             // TODO: better error message
             AT_ERROR("`with autocast() as ...` is not supported");
@@ -266,8 +276,7 @@ void handleBlock(Block* block, AutocastContext initial_state) {
       case prim::Exit:
         if (isAutocastNode(node->input(0))) {
           TORCH_INTERNAL_ASSERT(!autocast_stack.empty());
-          TORCH_INTERNAL_ASSERT(
-              autocast_stack.top().instance == node->input());
+          TORCH_INTERNAL_ASSERT(autocast_stack.top().instance == node->input());
           TORCH_INTERNAL_ASSERT(
               !incompatible_amp.has_value() || !incompatible_amp.value(),
               "Unsupported case by AMP & JIT");
@@ -306,7 +315,8 @@ void handleBlock(Block* block, AutocastContext initial_state) {
       case aten::rnn_tanh_cell:
       case aten::rnn_relu_cell:
         if (!node->schema().is_mutable()) {
-          castTensorInputs(node, aten::autocast_to_reduced_precision, current_state());
+          castTensorInputs(
+              node, aten::autocast_to_reduced_precision, current_state());
         }
         break;
 
@@ -353,7 +363,8 @@ void handleBlock(Block* block, AutocastContext initial_state) {
       case aten::cdist:
       case aten::renorm:
         if (!node->schema().is_mutable()) {
-          castTensorInputs(node, aten::autocast_to_full_precision, current_state());
+          castTensorInputs(
+              node, aten::autocast_to_full_precision, current_state());
         }
         break;
 
@@ -365,7 +376,8 @@ void handleBlock(Block* block, AutocastContext initial_state) {
       case aten::cumsum:
       case aten::sum:
         if (!node->schema().is_mutable() && !hasExplicitDtypeArgument(node)) {
-          castTensorInputs(node, aten::autocast_to_full_precision, current_state());
+          castTensorInputs(
+              node, aten::autocast_to_full_precision, current_state());
         }
         break;
 
@@ -424,8 +436,11 @@ bool autocastEnabled() {
 void Autocast(const std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("\nBefore Autocast: ", graph);
   if (autocastEnabled()) {
-    AutocastContext init = {at::autocast::is_enabled(), at::autocast::is_cpu_enabled(),
-        at::autocast::get_autocast_gpu_dtype(), at::autocast::get_autocast_cpu_dtype()};
+    AutocastContext init = {
+        at::autocast::is_enabled(),
+        at::autocast::is_cpu_enabled(),
+        at::autocast::get_autocast_gpu_dtype(),
+        at::autocast::get_autocast_cpu_dtype()};
     handleBlock(graph->block(), init);
   }
   GRAPH_DUMP("\nAfter Autocast: ", graph);

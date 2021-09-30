@@ -1,9 +1,8 @@
 import torch
-import sys
 import functools
 import warnings
 
-from typing import Any, Optional, Final
+from typing import Any, Optional
 from .types import _dtype
 
 def autocast_decorator(autocast_instance, func):
@@ -140,7 +139,10 @@ class autocast(object):
         dtype(torch_dtype, optional):  Whether to use torch.float16 or torch.bfloat16.
         cache_enabled(bool, optional, default=True):  Whether the weight cache inside autocast should be enabled.
     """
-    def __init__(self, device_type : str, dtype : Optional[_dtype] = None, enabled : bool = True, cache_enabled : Optional[bool] = None):
+    def __init__(self, device_type : str,
+                 dtype : Optional[_dtype] = None,
+                 enabled : bool = True,
+                 cache_enabled : Optional[bool] = None):
         if torch._jit_internal.is_scripting():
             self._enabled = enabled
             self.device = device_type
