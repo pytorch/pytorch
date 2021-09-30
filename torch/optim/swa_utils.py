@@ -98,14 +98,10 @@ class AveragedModel(Module):
                 return averaged_model_parameter + \
                     (model_parameter - averaged_model_parameter) / (num_averaged + 1)
         self.avg_fn = avg_fn
-        modes = {
-            'parameters': False,
-            'state_dict': True,
-        }
-        try:
-            self.use_state_dict = modes[mode]
-        except KeyError:
-            raise ValueError(f'Invalid mode passed, valid values are {", ".join(modes.keys())}.')
+        modes = ['parameters', 'state_dict']
+        if mode not in modes:
+            raise ValueError(f'Invalid mode passed, valid values are {", ".join(modes)}.')
+        self.use_state_dict = mode == 'state_dict'
 
     def forward(self, *args, **kwargs):
         return self.module(*args, **kwargs)
