@@ -35,7 +35,7 @@ TsNode::TsNode(OpKind op, OpList operands,
                size_t num_outputs, torch::lazy::hash_t hash_seed)
     : Node(op, operands, shape_fn, num_outputs, hash_seed),
       shape_(lazy_tensors::Shape()) {
-  shape_ = TsGetOpShape(shape_fn);
+  shape_ = GetOpShape(shape_fn);
 }
 
 TsNode::TsNode(OpKind op, OpList operands, size_t num_outputs,
@@ -45,7 +45,7 @@ TsNode::TsNode(OpKind op, OpList operands, size_t num_outputs,
 
 void TsNode::SetShapeDeferred(
     const std::function<lazy_tensors::Shape()>& shape_fn) {
-  shape_ = TsGetOpShape(shape_fn);
+  shape_ = GetOpShape(shape_fn);
 }
 
 TsNode::TsNode(OpKind op, lazy_tensors::Shape shape, size_t num_outputs,
@@ -73,7 +73,7 @@ ShapeCache* GetShapeCache() {
   return cache;
 }
 
-lazy_tensors::Shape TsNode::TsGetOpShape(
+lazy_tensors::Shape TsNode::GetOpShape(
     const std::function<lazy_tensors::Shape()>& shape_fn) const {
   ShapeCache* shape_cache = GetShapeCache();
   auto shape = shape_cache->Get(hash());

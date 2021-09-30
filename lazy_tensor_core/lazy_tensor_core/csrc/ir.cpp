@@ -13,10 +13,6 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace {
 
-using ShapeCache =
-    lazy_tensors::util::Cache<torch::lazy::hash_t, lazy_tensors::Shape,
-                              torch::lazy::HashReducer>;
-
 struct ScopeEntry {
   std::string name;
   size_t saved_next_id = 1;
@@ -57,13 +53,6 @@ std::string GetCurrentScope() {
     }
   }
   return scope;
-}
-
-ShapeCache* GetShapeCache() {
-  static lazy_tensors::int64 shape_cache_size =
-      lazy_tensors::sys_util::GetEnvInt("LTC_IR_SHAPE_CACHE_SIZE", 4096);
-  static ShapeCache* cache = new ShapeCache(shape_cache_size);
-  return cache;
 }
 
 }  // namespace
@@ -238,17 +227,6 @@ torch::lazy::hash_t Node::GetOpHash(OpKind op,
   torch::lazy::hash_t h = torch::lazy::HashCombine(
       op.hash(), torch::lazy::Hash(shape.ToString()));
   return torch::lazy::HashCombine(h, hash_seed);
-}
-
-lazy_tensors::Shape Node::GetOpShape(
-    const std::function<lazy_tensors::Shape()>& shape_fn) const {
-  ShapeCache* shape_cache = GetShapeCache();
-  auto shape = shape_cache->Get(hash());
-  if (shape == nullptr) {
-    shape = shape_cache->Add(hash(),
-                             std::make_shared<lazy_tensors::Shape>(shape_fn()));
-  }
-  return *shape;
 }
 
 std::vector<SourceLocation> Node::GetFrameInfo() {

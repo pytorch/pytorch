@@ -35,8 +35,7 @@ class TsNode : public Node {
 
   virtual ~TsNode() {}
 
-  // TODO(whc) rename this back to GetOpShape after deleting it from Node base
-  lazy_tensors::Shape TsGetOpShape(
+  lazy_tensors::Shape GetOpShape(
       const std::function<lazy_tensors::Shape()>& shape_fn) const;
 
   // Retrieves the full shape of the IR Node. Note that if this is a
