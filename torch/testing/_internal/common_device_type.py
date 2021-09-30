@@ -191,7 +191,7 @@ except ImportError:
 #         can accept a sequence of tuple pairs of dtypes. The test template
 #         will be called with each tuple for its "dtype" argument.
 #     - @onlyNativeDeviceTypes
-#         Skips the test if the device is not native device type (currently CPU, CUDA, Meta)
+#         Skips the test if the device is not a native device type (currently CPU, CUDA, Meta)
 #     - @onlyCPU
 #         Skips the test if the device is not a CPU device
 #     - @onlyCUDA
