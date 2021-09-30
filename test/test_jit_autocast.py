@@ -173,7 +173,7 @@ class TestAutocast(JitTestCase):
         self.assertEqual(z.dtype, torch.float64)
         self.assertEqual(w.dtype, torch.float64)
 
-    @unittest.skipIf(True, "broken")
+    @unittest.skipIf(True, "broken due to lack of type propagation")
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     def test_control_flow(self):
         @torch.jit.script
@@ -356,11 +356,10 @@ class TestAutocast(JitTestCase):
             self.assertEqual(result.dtype, expected_dtype)
 
     # traced inside scripting
-    @unittest.skipIf(True, "broken")
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     def test_script_and_tracing(self):
         def helper(a, b):
-            return torch.mm(a, b) * 2.0
+            return torch.mm(a, b)
 
         traced = torch.jit.trace(helper, (self.a_fp32, self.a_fp32))
 
@@ -453,7 +452,6 @@ class TestAutocast(JitTestCase):
 
     # this is equivalent to running scripted functions inside autocast)
     # (see also test_eager_and_script)
-    @unittest.skipIf(True, "script inside autocast not supported")
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     def test_autocast_decorator_outside_jit(self):
         @autocast(enabled=True)
@@ -481,7 +479,8 @@ class TestAutocast(JitTestCase):
         jit_func = torch.jit.script(func)
         o = func(*args)
         jit_o = jit_func(*args)
-        FileCheck().check(cast_op).run(jit_func.graph_for(*args))
+        if cast_op is not None:
+            FileCheck().check(cast_op).run(jit_func.graph_for(*args))
         for o0, o1 in zip(o, jit_o):
             self.assertEqual(o0.dtype, o1.dtype)
 
@@ -532,6 +531,7 @@ class TestAutocast(JitTestCase):
 
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     def test_autocast_mixed_dtypes(self):
+
         def t(cpu0, cpu1, cuda0, cuda1):
             with torch.autocast("cpu", torch.bfloat16):
                 with torch.autocast("cuda", torch.float16):
@@ -545,6 +545,33 @@ class TestAutocast(JitTestCase):
         cuda0 = torch.randn(5, 5, device="cuda", dtype=torch.float32)
         cuda1 = torch.randn(5, 5, device="cuda", dtype=torch.float32)
         self._test_autocast(t, "aten::autocast_to_reduced_precision", cpu0, cpu1, cuda0, cuda1)
+
+    @unittest.skipIf(not TEST_CUDA, "No cuda")
+    def test_jit_executor_under_autocast(self):
+
+        def t(cpu0, cpu1, cuda0, cuda1):
+            cpu_o = torch.mm(cpu0, cpu1)
+            cuda_o = torch.mm(cuda0, cuda1)
+            return cpu_o, cuda_o
+
+        jit_t = torch.jit.script(t)
+        cpu0 = torch.randn(5, 5, device="cpu", dtype=torch.float32)
+        cpu1 = torch.randn(5, 5, device="cpu", dtype=torch.float32)
+        cuda0 = torch.randn(5, 5, device="cuda", dtype=torch.float32)
+        cuda1 = torch.randn(5, 5, device="cuda", dtype=torch.float32)
+        
+        with torch.autocast("cpu", torch.bfloat16):
+            with torch.autocast("cuda", torch.float16):
+                self._test_autocast(t, "aten::autocast_to_reduced_precision", cpu0, cpu1, cuda0, cuda1)
+
+        with torch.autocast("cpu", torch.bfloat16):
+            self._test_autocast(t, "aten::autocast_to_reduced_precision", cpu0, cpu1, cuda0, cuda1)
+
+        with torch.autocast("cuda", torch.float16):
+            self._test_autocast(t, "aten::autocast_to_reduced_precision", cpu0, cpu1, cuda0, cuda1)
+
+        # no cast op should be observed when executing outside autocast context
+        self._test_autocast(t, None, cpu0, cpu1, cuda0, cuda1)
 
 if __name__ == '__main__':
     run_tests()
