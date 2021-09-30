@@ -160,8 +160,6 @@ NodePtr Ger(const Value& input, const Value& other);
 
 NodePtr AddMatMulOp(const Value& input, const Value& weight, const Value& bias);
 
-NodePtr Dot(const Value& input, const Value& weight);
-
 NodePtr MatMul(const Value& lhs, const Value& rhs);
 
 NodePtr AdaptiveAvgPool2dBackward(const Value& grad_output, const Value& input);
