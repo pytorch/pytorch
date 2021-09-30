@@ -255,9 +255,7 @@ class PythonMethodWrapper : public torch::IMethod {
 
 struct TORCH_API Package {
   // shorthand for getting the object as a pickle resource in the package
-  ReplicatedObj loadPickle(
-      const std::string& module,
-      const std::string& file) {
+  ReplicatedObj loadPickle(const std::string& module, const std::string& file) {
     TORCH_DEPLOY_TRY
     auto I = acquireSession();
     auto loaded = I.self.attr("load_pickle")({module, file});
@@ -268,8 +266,8 @@ struct TORCH_API Package {
   InterpreterSession acquireSession() {
     TORCH_DEPLOY_TRY
     auto I = manager_->acquireOne();
-    I.self = I.impl_->createOrGetPackageImporterFromContainerFile(
-        containerFile_);
+    I.self =
+        I.impl_->createOrGetPackageImporterFromContainerFile(containerFile_);
     return I;
     TORCH_DEPLOY_SAFE_CATCH_RETHROW
   }

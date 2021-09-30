@@ -115,9 +115,8 @@ Obj InterpreterSession::fromMovable(const ReplicatedObj& obj) {
 InterpreterSession ReplicatedObj::acquireSession(
     const Interpreter* onThisInterpreter) const {
   TORCH_DEPLOY_TRY
-  InterpreterSession I = onThisInterpreter
-      ? onThisInterpreter->acquireSession()
-      : pImpl_->manager_->acquireOne();
+  InterpreterSession I = onThisInterpreter ? onThisInterpreter->acquireSession()
+                                           : pImpl_->manager_->acquireOne();
   I.self = I.fromMovable(*this);
   return I;
   TORCH_DEPLOY_SAFE_CATCH_RETHROW
@@ -221,8 +220,7 @@ Interpreter::Interpreter(InterpreterManager* manager)
     // the right version of the symbols for the interpreter which an be looked
     // up from the handle_ to this shared library. here we register the handle
     // with the code that does custom loading of python extensions.
-    auto deploySetSelfPtr =
-        (void (*)(void*))dlsym(handle_, "deploy_set_self");
+    auto deploySetSelfPtr = (void (*)(void*))dlsym(handle_, "deploy_set_self");
     AT_ASSERT(deploySetSelfPtr);
     deploySetSelfPtr(handle_);
   }
