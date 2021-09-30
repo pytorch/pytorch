@@ -154,7 +154,7 @@ void _fake_quant_per_channel_cachemask_cuda_helper(
         [=] GPU_LAMBDA (const SelfType input_val, const float scale, const scalar_t zero_point) -> SelfType {
           const float inv_scale = 1.0f / scale;
           const auto qval = std::lrint(input_val * inv_scale + zero_point);
-          const auto bounded_qval = std::fmin(quant_max, std::fmax(quant_min, qval));
+          const auto bounded_qval = fminf(quant_max, fmaxf(quant_min, qval));
           return (bounded_qval - zero_point) * scale;
       });
     });
