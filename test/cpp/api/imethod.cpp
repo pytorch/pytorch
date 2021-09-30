@@ -25,7 +25,7 @@ TEST(IMethodTest, CallMethod) {
 
   torch::deploy::InterpreterManager manager(3);
   torch::deploy::Package package = manager.loadPackage(path("SIMPLE", simple));
-  auto pyModel = package.load_pickle("model", "model.pkl");
+  auto pyModel = package.loadPickle("model", "model.pkl");
   torch::deploy::PythonMethodWrapper pyMethod(pyModel, "forward");
 
   EXPECT_EQ(scriptMethod.name(), "forward");
@@ -53,7 +53,7 @@ TEST(IMethodTest, GetArgumentNames) {
 
   torch::deploy::InterpreterManager manager(3);
   torch::deploy::Package package = manager.loadPackage(path("SIMPLE", simple));
-  auto pyModel = package.load_pickle("model", "model.pkl");
+  auto pyModel = package.loadPickle("model", "model.pkl");
   torch::deploy::PythonMethodWrapper pyMethod(pyModel, "forward");
 
   auto& pyNames = pyMethod.getArgumentNames();
