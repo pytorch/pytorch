@@ -2653,10 +2653,10 @@
     CPU: log_softmax_cpu_out
     CUDA: log_softmax_cuda_out
 
-- func: _log_softmax_backward_data(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype) -> Tensor
+- func: _log_softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
   structured_delegate: _log_softmax_backward_data.out
 
-- func: _log_softmax_backward_data.out(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype, *, Tensor(a!) out) -> Tensor(a!)
+- func: _log_softmax_backward_data.out(Tensor grad_output, Tensor output, int dim, Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   dispatch:
     CPU: log_softmax_backward_cpu_out
@@ -3910,10 +3910,10 @@
     CPU: softmax_cpu_out
     CUDA: softmax_cuda_out
 
-- func: _softmax_backward_data(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype) -> Tensor
+- func: _softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
   structured_delegate: _softmax_backward_data.out
 
-- func: _softmax_backward_data.out(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype, *, Tensor(a!) grad_input) -> Tensor(a!)
+- func: _softmax_backward_data.out(Tensor grad_output, Tensor output, int dim, Tensor self, *, Tensor(a!) grad_input) -> Tensor(a!)
   structured: True
   dispatch:
     CPU: softmax_backward_cpu_out

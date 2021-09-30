@@ -56,7 +56,7 @@ TORCH_META_FUNC(_softmax_backward_data)
 (const Tensor& grad,
  const Tensor& output,
  int64_t dim,
- ScalarType input_dtype) {
+ const Tensor& input) {
   TensorArg grad_arg{grad, "grad", 1}, output_arg{output, "output", 2};
   checkSameSize("softmax_backward", grad_arg, output_arg);
 
@@ -65,7 +65,7 @@ TORCH_META_FUNC(_softmax_backward_data)
   auto grad_input_options =
       grad.options().memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
-  bool half_to_float = grad.scalar_type() != input_dtype;
+  bool half_to_float = grad.scalar_type() != input.scalar_type();
   if (half_to_float) {
     // The code below is only valid for the CUDA implementation. It's "okay"
     // to put it here because half-to-float conversion is not supported by
@@ -75,7 +75,7 @@ TORCH_META_FUNC(_softmax_backward_data)
     // implementation of this kernel and it is not true that the grad type is
     // float and the input dtype is half (see #63057).
     if (grad.scalar_type() == ScalarType::Float &&
-        input_dtype == ScalarType::Half) {
+         input.scalar_type() == ScalarType::Half) {
       grad_input_options = grad_input_options.dtype(ScalarType::Half);
     }
   }
@@ -92,12 +92,12 @@ TORCH_META_FUNC(_log_softmax_backward_data)
 (const Tensor& grad,
  const Tensor& output,
  int64_t dim,
- ScalarType input_dtype){
+ const Tensor& input){
   int64_t dim_ = maybe_wrap_dim(dim, grad.dim());
   TensorOptions grad_input_options(
       grad.options().memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT));
 
-  bool half_to_float = grad.scalar_type() != input_dtype;
+  bool half_to_float = grad.scalar_type() != input.scalar_type();
   if (half_to_float) {
     // The code below is only valid for the CUDA implementation. It's "okay"
     // to put it here because half-to-float conversion is not supported by
@@ -107,7 +107,7 @@ TORCH_META_FUNC(_log_softmax_backward_data)
     // implementation of this kernel and it is not true that the grad type is
     // float and the input dtype is half (see #63057).
     if (grad.scalar_type() == ScalarType::Float &&
-        input_dtype == ScalarType::Half) {
+        input.scalar_type() == ScalarType::Half) {
       grad_input_options = grad_input_options.dtype(ScalarType::Half);
     }
   }
@@ -292,7 +292,7 @@ TORCH_IMPL_FUNC(softmax_backward_cpu_out)
 (const Tensor& grad,
  const Tensor& output,
  int64_t dim,
- ScalarType input_dtype,
+ const Tensor& input,
  const Tensor& grad_input) {
   int64_t dim_ = maybe_wrap_dim(dim, grad.dim());
   auto grad_ = grad.contiguous();
@@ -324,7 +324,7 @@ TORCH_IMPL_FUNC(log_softmax_backward_cpu_out) (
     const Tensor& grad,
     const Tensor& output,
     int64_t dim,
-    ScalarType input_dtype,
+    const Tensor& input,
     const Tensor& grad_input) {
   int64_t dim_ = maybe_wrap_dim(dim, grad.dim());
   auto grad_ = grad.contiguous();
