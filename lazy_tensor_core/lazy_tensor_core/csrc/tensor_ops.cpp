@@ -133,7 +133,7 @@ LazyTensor SmoothL1Loss(const LazyTensor& input, const LazyTensor& target,
       return elementwise_loss.CreateFrom(
           ir::MakeNode<ir::ops::Mean>(
               elementwise_loss.GetIrValue(), broadcasted_input.dtype(),
-              broadcasted_input.dtype(), std::vector<int64_t>({1})),
+              lazy_tensors::Shape(broadcasted_input.dtype(), std::vector<int64_t>({1}))),
           broadcasted_input.dtype());
 
     case ReductionMode::kSum:

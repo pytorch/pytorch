@@ -75,7 +75,7 @@ class LazyIR:
         clone_impl_args = ",".join(
             [f"operands.at({i})" for i in range(len(value_types))] +
             [f"{s.name}_" for s in scalar_types] +
-            ["out_dtype_", "out_shape_"])
+            ["shape()"])
         if any([isinstance(t.type, OptionalCType) for t in value_types]):
             scalar_args = ",".join([f"{s.name}_" for s in scalar_types])
             clone_impl = f"return Clone{schema.node_name}(operands, {scalar_args});"
@@ -89,14 +89,12 @@ class LazyIR:
 {clone_handcoded_decl}
 class {schema.node_name} : public Node {{
  public:
-  {schema.node_name}({node_ctor_args}, at::ScalarType out_dtype, std::vector<int64_t> out_shape)
+  {schema.node_name}({node_ctor_args}, lazy_tensors::Shape shape)
       : Node(ir::OpKind(at::aten::{func.name.name}),
               {{{base_ctor_value_args}}},
-              /*shape=*/lazy_tensors::Shape(out_dtype, out_shape),
+              shape,
               /*num_outputs=*/{len(func.returns)},
-              lazy_tensors::util::MHash({scalar_hashes})),
-        out_dtype_(out_dtype),
-        out_shape_(out_shape){comma_if_scalar_initializers}
+              lazy_tensors::util::MHash({scalar_hashes})){comma_if_scalar_initializers}
         {scalar_initializers}
 
   {{
@@ -113,9 +111,6 @@ class {schema.node_name} : public Node {{
   NodePtr Clone(OpList operands) const override {{
       {clone_impl}
   }}
-
-  c10::ScalarType out_dtype_;
-  std::vector<int64_t> out_shape_;
   {scalar_decls}
 }};
 
@@ -155,13 +150,13 @@ def gen_lazy_nativefunc_definition(f: NativeFunction, backend_index: BackendInde
         meta_args = ", ".join([f"{t.name}.to(c10::kMeta)" for t in value_types] +
                               [f"{t.name}" for t in scalar_types])
         meta_str = f"""auto out_meta = at::meta::{schema.aten_name}({meta_args});
-    auto _out_shape = out_meta.sizes().vec();
-    auto _out_dtype = out_meta.scalar_type();"""
+    auto out_shape = out_meta.sizes().vec();
+    auto out_dtype = out_meta.scalar_type();"""
     else:
         meta_args = ", ".join([f"{t.name}" for t in all_types])
         meta_str = f"""
-    auto _out_shape = torch_lazy_tensors::ir::ops::compute_shape_{schema.aten_name}({meta_args});
-    auto _out_dtype = torch_lazy_tensors::ir::ops::compute_dtype_{schema.aten_name}({meta_args});"""
+    auto out_shape = torch_lazy_tensors::ir::ops::compute_shape_{schema.aten_name}({meta_args});
+    auto out_dtype = torch_lazy_tensors::ir::ops::compute_dtype_{schema.aten_name}({meta_args});"""
 
     assert len(value_types) > 0, f"Only supporting tensor ops so far, none found in {sig}"
     first_tensor = value_types[0]
@@ -172,7 +167,7 @@ def gen_lazy_nativefunc_definition(f: NativeFunction, backend_index: BackendInde
     {lazy_tensor_decls_str}
     {meta_str}
     return bridge::AtenFromLtcTensor(l_{first_tensor.name}.CreateFrom(
-        ir::MakeNode<ir::ops::{schema.node_name}>({node_ctor_input_str}, _out_dtype, _out_shape),
+        ir::MakeNode<ir::ops::{schema.node_name}>({node_ctor_input_str}, lazy_tensors::Shape(out_dtype, out_shape)),
 
         // (whc): experiment on dtype
         // try always overriding output dtype to match the one ATen says our op should produce.
@@ -181,7 +176,7 @@ def gen_lazy_nativefunc_definition(f: NativeFunction, backend_index: BackendInde
         // (1) evaluate design goal: to always pick the IR's dtype in one place (here)
         // (2) rationalize this with Google's design, it may be a problem
         // (3) evaluate perf impact: make sure we're not actually doing casts becuase of this override
-        _out_dtype));
+        out_dtype));
 }};
 """]
 

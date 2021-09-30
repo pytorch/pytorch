@@ -115,7 +115,6 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
 
         # Generate native function impls that build IR nodes
         fm.write_with_template(f'{backend_dispatch_key}NativeFunctions.cpp', 'DispatchKeyNativeFunctions.cpp', lambda: {
-            'generated_comment': '',
             'includes': [f'#include "{path}"' for path in [
                 "lazy_tensor_core/csrc/tensor.h",
                 "lazy_tensor_core/csrc/aten_ltc_bridge.h",

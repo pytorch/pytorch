@@ -284,6 +284,7 @@ inline std::ostream& operator<<(std::ostream& stream, const Node& node) {
   return stream;
 }
 
+// TODO (@alanwaketan): Support r-value reference argument type.
 template <typename T, typename... Args>
 NodePtr MakeNode(Args&&... args) {
   return std::make_shared<T>(std::forward<Args>(args)...);
