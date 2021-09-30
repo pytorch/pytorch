@@ -1046,6 +1046,17 @@ bool AliasDb::functionalNonEscapingListUse(const Use& use) const {
   return false;
 }
 
+bool AliasDb::functionalNonEscapingTupleUse(const Use& use) const {
+  Node* n = use.user;
+  size_t offset = use.offset;
+  Value* container = n->inputs().at(offset);
+  if (!container->type()->cast<TupleType>()) {
+    return false;
+  }
+  // TODO(T97387453): Cover more ops that do not let escape tuples' elements.
+  return use.user->kind() == prim::Return;
+}
+
 // List or dict or tuple construct: create an aliasing element for the actual
 // container, then mark all inputs as wildcards, since they've gone inside the
 // container. Then, add the wildcard sets of appropriate type to the contained
@@ -1069,7 +1080,8 @@ void AliasDb::analyzeContainerConstruct(Node* node) {
   // doesn't alias the input, then we can add all inputs to the list's
   // contained elements instead of the wildcard set.
   if (container->uses().size() == 1 &&
-      functionalNonEscapingListUse(container->uses().at(0))) {
+      (functionalNonEscapingListUse(container->uses().at(0)) ||
+       functionalNonEscapingTupleUse(container->uses().at(0)))) {
     giveFreshAlias(container, false);
     for (Value* v : node->inputs()) {
       addToContainedElements(v, container);
