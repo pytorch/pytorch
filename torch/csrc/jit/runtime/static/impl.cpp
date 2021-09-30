@@ -84,8 +84,8 @@ void OptimizeGraph(
   // to exposed folders.
 #ifdef FBCODE_CAFFE2
   if (opts.enable_out_variant) {
-    FuseListUnpack(graph);
     ReplaceWithCopy(graph);
+    FuseListUnpack(graph);
     EnableStaticRuntimeLayerNorm(graph);
   }
 #endif
