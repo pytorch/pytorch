@@ -1470,12 +1470,12 @@ Tensor matmul(
   const auto has_out = out_opt.has_value();
 
   if (dim_tensor1 == 1 && dim_tensor2 == 1) {
-    return has_out ? at::native::dot_out(tensor1, tensor2, *out_opt) : tensor1.dot(tensor2);
+    return has_out ? at::dot_out(tensor1, tensor2, *out_opt) : tensor1.dot(tensor2);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 1) {
-    return has_out ? at::native::mv_out(tensor1, tensor2, *out_opt) : tensor1.mv(tensor2);
+    return has_out ? at::mv_out(tensor1, tensor2, *out_opt) : tensor1.mv(tensor2);
   } else if (dim_tensor1 == 1 && dim_tensor2 == 2) {
     // optimization: use mv instead of mm by calling mv with swapped (and transposed) args
-    return has_out ? at::native::mv_out(tensor2.t(), tensor1, *out_opt) : tensor2.t().mv(tensor1);
+    return has_out ? at::mv_out(tensor2.t(), tensor1, *out_opt) : tensor2.t().mv(tensor1);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 2) {
     return has_out ? at::mm_out(*out_opt, tensor1, tensor2) : tensor1.mm(tensor2);
   } else if (dim_tensor1 >= 3 && (dim_tensor2 == 1 || dim_tensor2 == 2)) {
