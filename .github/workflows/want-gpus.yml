@@ -1,0 +1,17 @@
+name: I love GPUs!
+
+on:
+  pull_request:
+
+jobs:
+  multilication-table-on-gpu:
+    runs-on: $${ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ "windows.8xlarge.nvidia.gpu", "linux.8xlarge.nvidia.gpu" ]
+        arg1: [1, 2, 3, 4, 5]
+        arg2: [1, 2, 3, 4, 5]
+    steps:
+      - name: Hello World
+        run: echo "Hello World" ${{ matrix.arg1 }} "x" ${{ matrix.arg2 }}
