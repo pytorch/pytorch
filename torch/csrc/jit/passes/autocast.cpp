@@ -91,30 +91,10 @@ c10::optional<AutocastScope> parseAutocast(Value* value, const AutocastContext& 
         } else if (use.user->kind() == prim::SetAttr &&
             use.user->s(attr::name) == "fast_dtype") {
           // Search for `prim::SetAttr[name="fast_dtype"]`
-          printf("try to cast as int\n");
           auto ret = constant_as<c10::ScalarType>(use.user->input(1));
-          printf("finished cast as int\n");
-          TORCH_CHECK(ret.has_value(),
-            "Autocast dtype argument must be a constant");
+          TORCH_CHECK(ret.has_value() && ret.value() != c10::ScalarType::Undefined,
+            "Autocast dtype argument must be a constant and defined");
           dtype = ret.value();
-          std::cout << "found scalar_type" << dtype << std::endl;
-          switch(dtype) {
-            case c10::ScalarType::BFloat16:
-              printf("bfloat16\n");
-              break;
-            case c10::ScalarType::Half:
-              printf("float16\n");
-              break;
-            case c10::ScalarType::Float:
-              printf("float32\n");
-              break;
-            case c10::ScalarType::Undefined:
-              printf("Undefined\n");
-              break;
-            default:
-              printf("default\n");
-              break;
-          }
         }
       }
       if (device == "cuda") {
