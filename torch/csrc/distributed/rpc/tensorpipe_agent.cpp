@@ -1010,11 +1010,6 @@ void TensorPipeAgent::pollTimeoutRpcs() {
   }
 }
 
-// TODO: Remove sync()
-void TensorPipeAgent::sync() {
-  VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is syncing (no-op)";
-}
-
 // TODO: Remove join()
 void TensorPipeAgent::join(bool shutdown) {
   VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is joining";
@@ -1040,7 +1035,8 @@ void TensorPipeAgent::join(bool shutdown) {
     }
     VLOG(1) << "RPC agent for " << workerInfo_.name_
             << " completed all client calls and is entering a barrier";
-    processGroup_->barrier()->wait();
+    barrier(rankToNameStore_, worldSize_);
+    VLOG(1) << "Finished barrier for " << workerInfo_.name_;
     {
       std::unique_lock<std::mutex> lock(callCountMutex_);
       // At this point, the count may have become non-zero again. We can't wait
@@ -1051,19 +1047,14 @@ void TensorPipeAgent::join(bool shutdown) {
       VLOG(1) << "RPC agent for " << workerInfo_.name_
               << " exited the barrier and found " << clientActiveCalls_
               << " active client calls";
-      std::vector<at::Tensor> totalClientActiveCalls = {
-          at::zeros({}, at::kLong)};
-      *totalClientActiveCalls[0].data_ptr<int64_t>() = clientActiveCalls_;
-      processGroup_->allreduce(totalClientActiveCalls)->wait();
+      bool canFinishShutdown =
+          barrier(rankToNameStore_, worldSize_, true, clientActiveCalls_);
       VLOG(1) << "RPC agent for " << workerInfo_.name_
               << " completed the allreduce and got a total of "
-              << (*totalClientActiveCalls[0].data_ptr<int64_t>())
+              << clientActiveCalls_
               << " active client calls across all workers";
-      if (*totalClientActiveCalls[0].data_ptr<int64_t>() == 0) {
-        if (shutdown) {
-          shuttingDown_ = true;
-          processGroup_->barrier()->wait();
-        }
+      if (canFinishShutdown && shutdown) {
+        shuttingDown_ = true;
         break;
       }
     }
