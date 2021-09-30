@@ -59,16 +59,16 @@ bool mkldnn_bf16_gemm(
     const c10::BFloat16 *b_data, int64_t ldb,
     float beta,
     c10::BFloat16 *c_data, int64_t ldc) {
-
   if (!use_mkldnn_bf16_matmul() ||
       (m * n * k <= 16 * 16 * 16)) {
     return false;
   }
 
   ideep::attr_t op_attr;
-  // mkldnn matmul primitive only supports 1-D bias tensors, so use
-  // mkldnn post ops to perform the add.
-  if (beta != 0.0f) op_attr = ideep::attr_t::fuse_sum();
+  // Use mkldnn post ops to perform the add.
+  if (beta != 0.0f) {
+    op_attr = ideep::attr_t::fuse_sum();
+  }
 
   ideep::tensor::dims a_strides{{1, lda}}, b_strides{{1, ldb}}, c_strides{{1, ldc}};
   if (transa != TransposeType::NoTranspose) {
@@ -97,6 +97,18 @@ bool mkldnn_bf16_gemm(
   ideep::matmul_forward::compute(
       a, b, c, alpha, beta,
       ideep::scale_t(), ideep::scale_t(), ideep::scale_t(), op_attr);
+
+  if (c.get_data_handle() != c_data){
+    // ideep will query onednn expect format of output
+    // if given output format is not expected, ideep will re-init an output buffer
+    // under this case, we need copy the re-inited buffer back to given buffer
+    ideep::tensor real_output({
+        /*sizes=*/{m, n},
+        ideep::tensor::data_type::bf16,
+        /*strides=*/c_strides},
+      c_data);
+    c.reorder_to(real_output);
+  }
 
   return true;
 }
