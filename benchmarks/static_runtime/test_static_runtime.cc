@@ -228,6 +228,29 @@ TEST(StaticRuntime, EmbeddingBag) {
   testStaticRuntime(embedding_bag_max_last_offset, args);
 }
 
+TEST(StaticRuntime, EmbeddingBagWithManagedOutput) {
+  const std::string embedding_bag_managed_output = R"JIT(
+    def forward(self, a: Tensor, b: Tensor, c: Tensor):
+        # The outputs of embedding_bag become an intermediate tensors
+        # since they are not directly returned from the graph.
+        x, y, z, _ = torch.embedding_bag(a, b, c)
+        return x + x
+  )JIT";
+
+  at::Tensor weight = torch::randn({3, 12}, at::ScalarType::Float);
+  at::Tensor input = torch::tensor({0, 1, 0, 2});
+  at::Tensor offset = torch::tensor({0, 2, 4});
+  std::vector<IValue> args{weight, input, offset};
+
+  at::Tensor weight2 = torch::randn({4, 13}, at::ScalarType::Float);
+  at::Tensor input2 = torch::tensor({0, 1, 0, 2});
+  at::Tensor offset2 = torch::tensor({0, 2, 4});
+  std::vector<IValue> args2{weight2, input2, offset2};
+
+  testStaticRuntime(embedding_bag_managed_output, args);
+  testStaticRuntime(embedding_bag_managed_output, args, args2);
+}
+
 TEST(StaticRuntime, LayerNorm) {
 #ifdef FBCODE_CAFFE2
   script::Module module("module");
