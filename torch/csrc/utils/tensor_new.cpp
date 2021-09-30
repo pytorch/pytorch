@@ -180,6 +180,8 @@ ScalarType infer_scalar_type(PyObject *obj) {
 
 void recursive_store(char* data, IntArrayRef sizes, IntArrayRef strides, int64_t dim,
                             ScalarType scalarType, int elementSize, PyObject* obj) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(data != nullptr);
+
   int64_t ndim = sizes.size();
   if (dim == ndim) {
     torch::utils::store_scalar(data, scalarType, obj);
@@ -295,9 +297,11 @@ Tensor internal_new_from_data(
 
     } else {
       tensor = at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type).pinned_memory(pin_memory));
-      recursive_store(
-          (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
-          inferred_scalar_type, tensor.dtype().itemsize(), data);
+      if (c10::multiply_integers(tensor.sizes()) !=0 ) {
+        recursive_store(
+            (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
+            inferred_scalar_type, tensor.dtype().itemsize(), data);
+      }
     }
   }
   auto device = device_opt.has_value() ? *device_opt : options.device();
