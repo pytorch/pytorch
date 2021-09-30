@@ -5,6 +5,7 @@ from numbers import Number
 from typing import Any, Dict, Optional, Tuple, Union
 import warnings
 import copyreg
+from copy import deepcopy
 
 import torch
 import torch._C as _C
@@ -125,6 +126,18 @@ class Tensor(torch._C._TensorBase):
                     new_tensor.requires_grad = self.requires_grad
             if self.grad is not None:
                 new_tensor.grad = self.grad.__deepcopy__(memo)
+
+            if not type(self) is Tensor:
+                new_tensor = new_tensor.as_subclass(type(self))  # type: ignore[arg-type]
+
+                # Plain Tensors don't have slots
+                slots_to_save = copyreg._slotnames(self.__class__)  # type: ignore[attr-defined]
+                for slot in slots_to_save:
+                    if hasattr(self, slot):
+                        setattr(new_tensor, slot, deepcopy(getattr(self, slot), memo))
+
+            new_tensor.__dict__ = deepcopy(self.__dict__, memo)
+
             memo[id(self)] = new_tensor
             return new_tensor
 
