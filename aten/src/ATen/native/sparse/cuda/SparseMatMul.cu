@@ -13,11 +13,10 @@
 #include <thrust/for_each.h>
 #include <thrust/sequence.h>
 
-#include <THC/THCThrustAllocator.cuh>
-
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDADataType.h>
 #include <ATen/cuda/CUDAUtils.h>
+#include <ATen/cuda/ThrustAllocator.h>
 #include <cusparse.h>
 #include <ATen/native/sparse/cuda/SparseCUDABlas.h>
 #include <c10/cuda/CUDACachingAllocator.h>
@@ -735,7 +734,7 @@ void sparse_sparse_matmul_cuda_kernel(
 
   auto major_dim = result.size(0);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+  at::cuda::ThrustAllocator allocator;
   auto policy = thrust::cuda::par(allocator).on(stream);
 
   // Filling the COO row indices

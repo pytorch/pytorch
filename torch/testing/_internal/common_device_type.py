@@ -17,6 +17,9 @@ from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_dtype import get_all_dtypes
 
+# The implementation should be moved here as soon as the deprecation period is over.
+from torch.testing._legacy import get_all_device_types  # noqa: F401
+
 try:
     import psutil  # type: ignore[import]
     HAS_PSUTIL = True

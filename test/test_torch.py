@@ -44,7 +44,7 @@ from torch.testing._internal.common_device_type import (
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     skipMeta,
     PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes,
-    expectedAlertNondeterministic)
+    expectedAlertNondeterministic, get_all_device_types)
 from typing import Dict, List, Tuple
 import torch.backends.quantized
 import torch.testing._internal.data
@@ -253,7 +253,7 @@ class AbstractTestCases:
                         torch.where(condition, x, y)
 
         def test_where_bool_tensor(self):
-            for d in torch.testing.get_all_device_types():
+            for d in get_all_device_types():
                 a = torch.tensor([True, False], device=d)
                 res = torch.where(a > 0)
                 self.assertEqual(1, len(res))
@@ -280,7 +280,7 @@ class AbstractTestCases:
 
             height = 5
             width = 5
-            for device in torch.testing.get_all_device_types():
+            for device in get_all_device_types():
                 for dt1 in get_all_dtypes():
                     for dt2 in get_all_dtypes():
                         for contiguous in [True, False]:
@@ -943,7 +943,7 @@ class AbstractTestCases:
                 reference[0.0, :, 0.0] = 1
 
         def test_index_add(self):
-            for device in torch.testing.get_all_device_types():
+            for device in get_all_device_types():
                 for dest_contig, src_contig, index_contig in product([True, False], repeat=3):
                     for other_sizes in ((), (4, 5)):
                         for dtype in [torch.int, torch.long]:
@@ -974,7 +974,7 @@ class AbstractTestCases:
         # specific dtypes on cuda:
         # https://github.com/pytorch/pytorch/issues/29153
         def test_index_add_all_dtypes(self):
-            for device in torch.testing.get_all_device_types():
+            for device in get_all_device_types():
                 for dtype in get_all_math_dtypes(device):
                     for idx_dtype in [torch.int, torch.long]:
                         size = [5, 5]
@@ -2694,7 +2694,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         def test_normal_shape(self):
             warned = False
-            for device in torch.testing.get_all_device_types():
+            for device in get_all_device_types():
                 tensor1 = torch.rand(1, device=device)
                 tensor4 = torch.rand(4, device=device)
                 tensor120 = torch.rand(120, device=device)
