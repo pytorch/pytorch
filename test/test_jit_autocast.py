@@ -43,7 +43,7 @@ class TestAutocast(JitTestCase):
             with autocast():
                 return torch.mm(a, b)
         result = fn(self.a_fp32.to('cpu'), self.b_fp32.to('cpu'))
-        self.assertEqual(result.dtype, torch.float16)
+        self.assertEqual(result.dtype, torch.float32)
 
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     def test_minimal_off(self):
