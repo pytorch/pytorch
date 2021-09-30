@@ -638,10 +638,10 @@ TEST(StaticRuntime, IndividualOps_Detach) {
 }
 
 TEST(StaticRuntime, IndividualOps_ExpandAs) {
-  auto a = at::randn({3,1});
-  auto b = at::randn({3,2});
-  auto c = at::randn({4,1});
-  auto d = at::randn({4,2});
+  auto a = at::randn({3, 1});
+  auto b = at::randn({3, 2});
+  auto c = at::randn({4, 1});
+  auto d = at::randn({4, 2});
   std::vector<IValue> args{a, b};
   std::vector<IValue> args2{c, d};
   testStaticRuntime(expand_as_script, args);
@@ -1325,10 +1325,10 @@ TEST(StaticRuntime, IndividualOps_FmodScalar) {
 
 TEST(StaticRuntime, QEmbeddingBagByteUnpack) {
   auto a = torch::randn({8, 16}, at::ScalarType::Float);
-  auto b = torch::randn({8*2, 16*2}, at::ScalarType::Float);
+  auto b = torch::randn({8 * 2, 16 * 2}, at::ScalarType::Float);
 
   testStaticRuntime(embedding_bag_byte_prepack_script, {a});
-  testStaticRuntime(embedding_bag_byte_prepack_script, {a},{b});
+  testStaticRuntime(embedding_bag_byte_prepack_script, {a}, {b});
 }
 
 TEST(StaticRuntime, IndividualOps_LinalgNorm_ScalarOrd) {
@@ -1469,4 +1469,54 @@ TEST(StaticRuntime, VarTupleUnpack_NotApplied) {
   torch::jit::StaticModule smodule(module);
   EXPECT_FALSE(hasNodeWithKind(smodule, "static_runtime::VarTupleUnpack"));
   EXPECT_TRUE(hasNodeWithKind(smodule, "prim::TupleUnpack"));
+}
+
+TEST(StaticRuntime, IndividualOps_RemainderTensor) {
+  const auto remainder_tensor = R"JIT(
+    def forward(self, x, y):
+        return torch.remainder(x, y).clone()
+  )JIT";
+
+  std::vector<IValue> args1 = {
+      at::randint(0, 10, {2, 2}), at::randint(0, 10, {2, 2})};
+  std::vector<IValue> args2 = {
+      at::randint(0, 10, {3, 3}), at::randint(0, 10, {3, 3})};
+
+  // Use allclose and equalnan since outputs may be NaN.
+  testStaticRuntime(
+      remainder_tensor,
+      args1,
+      /*args2*/ {},
+      /*use_alloclose*/ true,
+      /*use_equalnan*/ true);
+  testStaticRuntime(
+      remainder_tensor,
+      args1,
+      args2,
+      /*use_allclose*/ true,
+      /*use_equalnan*/ true);
+}
+
+TEST(StaticRuntime, IndividualOps_RemainderScalar) {
+  const auto remainder_scalar = R"JIT(
+    def forward(self, x, y: int):
+        return torch.remainder(x, y).clone()
+  )JIT";
+
+  std::vector<IValue> args1 = {at::randint(0, 10, {2, 2}), 4};
+  std::vector<IValue> args2 = {at::randint(0, 10, {3, 3}), 4};
+
+  // Use allclose and equalnan since outputs may be NaN.
+  testStaticRuntime(
+      remainder_scalar,
+      args1,
+      /*args2*/ {},
+      /*use_alloclose*/ true,
+      /*use_equalnan*/ true);
+  testStaticRuntime(
+      remainder_scalar,
+      args1,
+      args2,
+      /*use_allclose*/ true,
+      /*use_equalnan*/ true);
 }
