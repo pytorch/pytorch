@@ -1,8 +1,9 @@
 from io import IOBase
-from typing import Tuple
+from typing import Sized, Tuple
 from urllib.error import HTTPError, URLError
 import urllib.request as urllib
 from torch.utils.data import IterDataPipe
+from torch.utils.data.datapipes.utils.common import deprecation_warning_torchdata
 
 
 class HTTPReaderIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
@@ -19,6 +20,7 @@ class HTTPReaderIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
     def __init__(self, datapipe, timeout=None):
         self.datapipe = datapipe
         self.timeout = timeout
+        deprecation_warning_torchdata(type(self).__name__)
 
     def __iter__(self):
         for furl in self.datapipe:
@@ -39,3 +41,8 @@ class HTTPReaderIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
                                 .format(reason=e.reason, url=furl))
             except Exception:
                 raise
+
+    def __len__(self) -> int:
+        if isinstance(self.datapipe, Sized):
+            return len(self.datapipe)
+        raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
