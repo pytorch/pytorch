@@ -37,7 +37,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       return [](ProcessedNode* p_node) {
         // prepare inputs
         std::vector<IValue> stack;
-        const size_t size = p_node->inputs().second;
+        const size_t size = p_node->inputs().size();
         stack.reserve(size);
         for (const auto i : c10::irange(size)) {
           stack.emplace_back(p_node->Input(i));
@@ -61,7 +61,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     [](Node* n) -> SROperator {
       return [](ProcessedNode* p_node) {
         const auto& elems = p_node->Input(0).toTuple()->elements();
-        const size_t num_outputs = p_node->outputs().second;
+        const size_t num_outputs = p_node->outputs().size();
         TORCH_CHECK(
             num_outputs == elems.size(),
             "Number of outputs must match number of tuple elements.")
@@ -78,7 +78,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       return [](ProcessedNode* p_node) {
         // prepare inputs
         std::vector<IValue> stack;
-        const size_t size = p_node->inputs().second;
+        const size_t size = p_node->inputs().size();
         stack.reserve(size);
         for (const auto i : c10::irange(size)) {
           stack.emplace_back(p_node->Input(i));
@@ -99,9 +99,9 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     static_runtime_dict_unpack,
     [](Node*) -> SROperator {
       return [](ProcessedNode* p_node) {
-        DCHECK(p_node->inputs().second - 1 == p_node->outputs().second);
+        DCHECK(p_node->inputs().size() - 1 == p_node->outputs().size());
         auto dict = p_node->Input(0).toGenericDict();
-        for (size_t i = 1; i < p_node->inputs().second; ++i) {
+        for (size_t i = 1; i < p_node->inputs().size(); ++i) {
           auto key = p_node->Input(i);
           auto value = dict.find(key);
           TORCH_CHECK(value != dict.end(), "Key not in dict: ", key);
@@ -145,7 +145,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       return [](ProcessedNode* p_node) {
         // prepare inputs
         std::vector<IValue> stack;
-        const size_t size = p_node->inputs().second;
+        const size_t size = p_node->inputs().size();
         stack.reserve(size);
         for (const auto i : c10::irange(size)) {
           stack.emplace_back(p_node->Input(i));
@@ -154,7 +154,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         listConstruct(
             stack,
             p_node->node()->output()->type()->expectRef<ListType>(),
-            p_node->inputs().second);
+            p_node->inputs().size());
         // put output back
         p_node->Output(0) = std::move(stack[0]);
       };
@@ -167,13 +167,13 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       return [](ProcessedNode* p_node) {
         // prepare inputs
         std::vector<IValue> stack;
-        const size_t size = p_node->inputs().second;
+        const size_t size = p_node->inputs().size();
         stack.reserve(size);
         for (const auto i : c10::irange(size)) {
           stack.emplace_back(p_node->Input(i));
         }
         // run op
-        size_t num_outputs = p_node->outputs().second;
+        size_t num_outputs = p_node->outputs().size();
         listUnpack(stack, num_outputs);
         // put output back
         DCHECK_EQ(stack.size(), num_outputs);
@@ -463,9 +463,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     [](Node*) -> SROperator {
       return [](ProcessedNode* pnode) {
         size_t output_idx = 0;
-        const auto inputs = pnode->inputs();
-        for (const auto idx : c10::irange(inputs.second)) {
-          const auto tuple = inputs.first[idx];
+        for (const auto& tuple : pnode->inputs()) {
           for (auto& elem : tuple->toTuple()->elements()) {
             pnode->Output(output_idx) = elem;
             ++output_idx;

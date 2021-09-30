@@ -401,12 +401,12 @@ class TORCH_API ProcessedNode {
     inputs_[index] = ival;
   }
 
-  std::pair<const IValue*, size_t> outputs() const {
-    return {outputs_.get(), outputsSize_};
+  c10::ArrayRef<const IValue> outputs() const {
+    return c10::ArrayRef(outputs_.get(), outputsSize_);
   }
 
-  std::pair<const IValue* const*, size_t> inputs() const {
-    return {inputs_.get(), inputsSize_};
+  c10::ArrayRef<const IValue*> inputs() const {
+    return c10::ArrayRef(inputs_.get(), inputsSize_);
   }
 
   std::vector<IValue> clone_inputs() const;
