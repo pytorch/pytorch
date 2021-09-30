@@ -33,7 +33,6 @@ struct LeakyStreamInternals {
   }
 
   DeviceIndex device_index = -1;
-  int32_t stream_id = -1;
   cudaStream_t stream = nullptr;
 };
 
@@ -70,6 +69,12 @@ static std::array<LeakyStreamInternals, kStreamsPerPool>
     low_priority_streams[C10_COMPILE_TIME_MAX_GPUS];
 static std::array<LeakyStreamInternals, kStreamsPerPool>
     high_priority_streams[C10_COMPILE_TIME_MAX_GPUS];
+
+// External streams
+// We need some temporary LeakyStreamInternals to which to stage information
+// about external streams when the user attempts to set them as current.
+static thread_local LeakyStreamInternals
+    external_streams[C10_COMPILE_TIME_MAX_GPUS];
 
 // Note [StreamId assignment]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -385,12 +390,24 @@ CUDAStream getCurrentCUDAStream(DeviceIndex device_index) {
     device_index = current_device();
   }
   check_gpu(device_index);
-  return CUDAStream_fromInternals(current_streams[device_index]);
+  auto ptr = current_streams[device_index];
+  if (ptr == &external_streams[device_index]) {
+    return getStreamFromExternal(ptr->stream, ptr->device_index);
+  } else {
+    return CUDAStream_fromInternals(ptr);
+  }
 }
 
 void setCurrentCUDAStream(CUDAStream stream) {
   initCUDAStreamsOnce();
-  auto ptr = CUDAStream_internals(stream);
+  LeakyStreamInternals* ptr;
+  if (streamIdType(stream.id()) == StreamIdType::EXT) {
+    ptr = &external_streams[stream.device_index()];
+    ptr->device_index = stream.device_index();
+    ptr->stream = stream.stream();
+  } else {
+    ptr = CUDAStream_internals(stream);
+  }
   TORCH_INTERNAL_ASSERT(ptr);
   current_streams[ptr->device_index] = ptr;
 }

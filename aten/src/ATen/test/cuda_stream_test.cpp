@@ -293,3 +293,20 @@ TEST(TestStream, GenericVirtualCUDAEventTest) {
   ASSERT_TRUE(event.query());
   ASSERT_TRUE(event.flag() == c10::EventFlag::PYTORCH_DEFAULT);
 }
+
+// Verifies external streams can be created and used
+TEST(TestStream, ExternalTest) {
+  if (!at::cuda::is_available()) return;
+  at::cuda::CUDAGuard device_guard(0);
+
+  cudaStream_t cuda_stream;
+  cudaStreamCreateWithPriority(&cuda_stream, cudaStreamNonBlocking, -1);
+
+  at::cuda::CUDAStream myStream = at::cuda::getStreamFromExternal(cuda_stream, 0);
+
+  at::cuda::setCurrentCUDAStream(myStream);
+  at::cuda::CUDAStream curStream = at::cuda::getCurrentCUDAStream();
+
+  ASSERT_EQ_CUDA(myStream, curStream);
+  ASSERT_EQ_CUDA(myStream.stream(), cuda_stream);
+}
