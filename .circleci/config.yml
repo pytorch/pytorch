@@ -6927,14 +6927,14 @@ workflows:
                 - /release\/.*/
           name: binary_windows_libtorch_3_7_cpu_release_build
       - binary_windows_build:
-          build_environment: wheel 3.7 cu102
+          build_environment: wheel 3.7 cu113
           filters:
             branches:
               only:
                 - master
                 - /ci-all\/.*/
                 - /release\/.*/
-          name: binary_windows_wheel_3_7_cu102_build
+          name: binary_windows_wheel_3_7_cu113_build
       - binary_windows_test:
           build_environment: libtorch 3.7 cpu debug
           filters:
@@ -6952,7 +6952,7 @@ workflows:
           requires:
             - binary_windows_libtorch_3_7_cpu_release_build
       - binary_windows_test:
-          build_environment: wheel 3.7 cu102
+          build_environment: wheel 3.7 cu113
           executor: windows-with-nvidia-gpu
           filters:
             branches:
@@ -6960,9 +6960,9 @@ workflows:
                 - master
                 - /ci-all\/.*/
                 - /release\/.*/
-          name: binary_windows_wheel_3_7_cu102_test
+          name: binary_windows_wheel_3_7_cu113_test
           requires:
-            - binary_windows_wheel_3_7_cu102_build
+            - binary_windows_wheel_3_7_cu113_build
       - binary_linux_test:
           build_environment: manywheel 3.7m cu102 devtoolset7
           docker_image: pytorch/manylinux-cuda102
@@ -8522,19 +8522,19 @@ workflows:
           build_environment: libtorch 3.7 cpu release
           name: binary_windows_libtorch_3_7_cpu_release_build
       - binary_windows_build:
-          build_environment: wheel 3.7 cu102
-          name: binary_windows_wheel_3_7_cu102_build
+          build_environment: wheel 3.7 cu113
+          name: binary_windows_wheel_3_7_cu113_build
       - binary_windows_test:
           build_environment: libtorch 3.7 cpu debug
           name: binary_windows_libtorch_3_7_cpu_debug_test
           requires:
             - binary_windows_libtorch_3_7_cpu_debug_build
       - binary_windows_test:
-          build_environment: wheel 3.7 cu102
+          build_environment: wheel 3.7 cu113
           executor: windows-with-nvidia-gpu
-          name: binary_windows_wheel_3_7_cu102_test
+          name: binary_windows_wheel_3_7_cu113_test
           requires:
-            - binary_windows_wheel_3_7_cu102_build
+            - binary_windows_wheel_3_7_cu113_build
       - binary_linux_test:
           build_environment: manywheel 3.7m cu102 devtoolset7
           docker_image: pytorch/manylinux-cuda102
