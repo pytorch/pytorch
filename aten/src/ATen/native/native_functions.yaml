@@ -723,20 +723,17 @@
 
 - func: baddbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function, method
-  dispatch:
-    CPU: baddbmm_cpu
-    CUDA: baddbmm_cuda
+  structured_delegate: baddbmm.out
 
 - func: baddbmm_(Tensor(a!) self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   variants: method
-  dispatch:
-    CPU: baddbmm__cpu
-    CUDA: baddbmm__cuda
+  structured_delegate: baddbmm.out
 
 - func: _baddbmm_mkl_(Tensor(a!) self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   variants: function
 
 - func: baddbmm.out(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   variants: function
   dispatch:
     CPU: baddbmm_out_cpu
@@ -940,14 +937,14 @@
 - func: blackman_window.periodic(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: bmm(Tensor self, Tensor mat2) -> Tensor
+  structured_delegate: bmm.out
   variants: function, method
   dispatch:
-    CPU: bmm_cpu
-    CUDA: bmm_cuda
     SparseCPU: bmm_sparse_cpu
     SparseCUDA: bmm_sparse_cuda
 
 - func: bmm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   variants: function
   dispatch:
     CPU: bmm_out_cpu
@@ -1239,6 +1236,7 @@
   device_guard: False
   dispatch:
     MkldnnCPU: copy_mkldnn_
+    SparseCPU, SparseCUDA, SparseHIP, SparseXPU: copy_sparse_wrapper_
     CompositeExplicitAutograd: copy_
 
 - func: _copy_from(Tensor self, Tensor dst, bool non_blocking=False) -> Tensor
@@ -2762,12 +2760,16 @@
 
 - func: max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   device_check: NoCheck   # TensorIterator
+  structured_delegate: max.dim_max
   variants: function, method
   dispatch:
-    CPU, CUDA, QuantizedCPU, QuantizedCUDA: max
+    QuantizedCPU, QuantizedCUDA: qmax
 
 - func: max.dim_max(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_values) -> (Tensor(a!) values, Tensor(b!) indices)
   device_check: NoCheck   # TensorIterator
+  structured: True
+  precomputed:
+  - dim -> int dim
   dispatch:
     CPU, CUDA: max_out
 
@@ -2905,12 +2907,16 @@
 
 - func: min.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   device_check: NoCheck   # TensorIterator
+  structured_delegate: min.dim_min
   variants: function, method
   dispatch:
-    CPU, CUDA, QuantizedCPU, QuantizedCUDA: min
+    QuantizedCPU, QuantizedCUDA: qmin
 
 - func: min.dim_min(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) min, Tensor(b!) min_indices) -> (Tensor(a!) values, Tensor(b!) indices)
   device_check: NoCheck   # TensorIterator
+  structured: True
+  precomputed:
+  - dim -> int dim
   dispatch:
     CPU, CUDA: min_out
 
@@ -5375,10 +5381,10 @@
 - func: _fake_quantize_learnable_per_channel_affine_backward(Tensor grad, Tensor self, Tensor scale, Tensor zero_point, int axis, int quant_min, int quant_max, float grad_factor=1.0) -> (Tensor, Tensor, Tensor)
   variants: function
 
-- func: fused_moving_avg_obs_fake_quant(Tensor self, Tensor observer_on, Tensor fake_quant_on, Tensor(a!) running_min, Tensor(b!) running_max, Tensor(c!) scale, Tensor(d!) zero_point, float averaging_const, int quant_min, int quant_max, int ch_axis, bool per_row_fake_quant=False, bool symmetric_quant=False) -> Tensor
+- func: fused_moving_avg_obs_fake_quant(Tensor self, Tensor observer_on, Tensor fake_quant_on, Tensor(a!) running_min, Tensor(b!) running_max, Tensor(c!) scale, Tensor(d!) zero_point, float averaging_const, int quant_min, int quant_max, int ch_axis, bool per_row_fake_quant=False, bool symmetric_quant=False, bool? output_fake_quant=None) -> Tensor
   variants: function
 
-- func: _fused_moving_avg_obs_fq_helper(Tensor self, Tensor observer_on, Tensor fake_quant_on, Tensor(a!) running_min, Tensor(b!) running_max, Tensor(c!) scale, Tensor(d!) zero_point, float averaging_const, int quant_min, int quant_max, int ch_axis, bool per_row_fake_quant=False, bool symmetric_quant=False) -> (Tensor output, Tensor mask)
+- func: _fused_moving_avg_obs_fq_helper(Tensor self, Tensor observer_on, Tensor fake_quant_on, Tensor(a!) running_min, Tensor(b!) running_max, Tensor(c!) scale, Tensor(d!) zero_point, float averaging_const, int quant_min, int quant_max, int ch_axis, bool per_row_fake_quant=False, bool symmetric_quant=False, bool? output_fake_quant=None) -> (Tensor output, Tensor mask)
   dispatch:
     CPU: fused_moving_avg_obs_fake_quant_cpu
     CUDA: fused_moving_avg_obs_fake_quant_cuda
@@ -7323,27 +7329,23 @@
 - func: sort.values(Tensor self, int dim=-1, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU: sort_out_cpu
-    CUDA: sort_out_cuda
+    CompositeExplicitAutograd: sort_out
 
 - func: sort.values_stable(Tensor self, *, bool? stable, int dim=-1, bool descending=False, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  structured: True
   dispatch:
-    CPU: sort_out_cpu_stable
-    CUDA: sort_out_stable_cuda
+    CPU, CUDA: sort_stable_out
 
 - func: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
   device_check: NoCheck   # TensorIterator
   variants: method, function
   dispatch:
-    CPU: sort_cpu
-    CUDA: sort_cuda
-    QuantizedCPU: sort_quantized_cpu
+    CompositeExplicitAutograd: sort
 
 - func: sort.stable(Tensor self, *, bool? stable, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
+  structured_delegate: sort.values_stable
   variants: method, function
   dispatch:
-    CPU: sort_cpu_stable
-    CUDA: sort_stable_cuda
     QuantizedCPU: sort_quantized_cpu_stable
 
 - func: sort.dimname_values(Tensor self, Dimname dim, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
@@ -10202,6 +10204,26 @@
   python_module: fft
   variants: function
 
+- func: fft_hfft2(Tensor self, int[1]? s=None, int[1] dim=[-2,-1], str? norm=None) -> Tensor
+  use_const_ref_for_mutable_tensors: True
+  python_module: fft
+  variants: function
+
+- func: fft_hfft2.out(Tensor self, int[1]? s=None, int[1] dim=[-2,-1], str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
+  python_module: fft
+  variants: function
+
+- func: fft_ihfft2(Tensor self, int[1]? s=None, int[1] dim=[-2,-1], str? norm=None) -> Tensor
+  use_const_ref_for_mutable_tensors: True
+  python_module: fft
+  variants: function
+
+- func: fft_ihfft2.out(Tensor self, int[1]? s=None, int[1] dim=[-2,-1], str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
+  python_module: fft
+  variants: function
+
 - func: fft_fftn(Tensor self, int[1]? s=None, int[1]? dim=None, str? norm=None) -> Tensor
   python_module: fft
   variants: function
@@ -10231,6 +10253,26 @@
   variants: function
 
 - func: fft_irfftn.out(Tensor self, int[1]? s=None, int[1]? dim=None, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: fft
+  variants: function
+
+- func: fft_hfftn(Tensor self, int[1]? s=None, int[1]? dim=None, str? norm=None) -> Tensor
+  use_const_ref_for_mutable_tensors: True
+  python_module: fft
+  variants: function
+
+- func: fft_hfftn.out(Tensor self, int[1]? s=None, int[1]? dim=None, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
+  python_module: fft
+  variants: function
+
+- func: fft_ihfftn(Tensor self, int[1]? s=None, int[1]? dim=None, str? norm=None) -> Tensor
+  use_const_ref_for_mutable_tensors: True
+  python_module: fft
+  variants: function
+
+- func: fft_ihfftn.out(Tensor self, int[1]? s=None, int[1]? dim=None, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   python_module: fft
   variants: function
 
