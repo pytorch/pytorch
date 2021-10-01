@@ -144,6 +144,7 @@ void MemoryPlanner::allocate() {
   uint8_t* start = static_cast<uint8_t*>(buffer_.get());
 
   reused_tensors_ = 0;
+  auto storageIdx = 0;
   for (const auto& ms : managed_tensors_) {
     auto tensor_size = ms.first;
     if (tensor_size == 0) {
@@ -154,9 +155,13 @@ void MemoryPlanner::allocate() {
     void* src = static_cast<void*>(start + offset);
 
     for (auto* tensor : tensors) {
-      tensor->storage().set_data_ptr_noswap(
-          at::DataPtr(src, src, nullptr, tensor->device()));
-      tensor->storage().set_nbytes(tensor_size);
+      const at::Storage* storage = managed_tensor_storages_.empty() ? &tensor->storage() : managed_tensor_storages_[storageIdx++];
+      DCHECK_EQ(storage, &tensor->storage());
+      // Static runtime only does CPU tensors.
+      DCHECK_EQ(tensor->device().type(), c10::DeviceType::CPU);
+      storage->set_data_ptr_noswap(
+          at::DataPtr(src, src, nullptr, c10::Device(c10::DeviceType::CPU)));
+      storage->set_nbytes(tensor_size);
       reused_tensors_++;
     }
     reused_tensors_--;
@@ -170,14 +175,22 @@ void MemoryPlanner::deallocate() {
   managed_bytes_ = 0;
 
   // free memory used by outputs of ops in out variants
-  // but keep the TensorImpl and StorageImpl around
+  // but keep the TensorImpl and StorageImpl around.
+
+  // We don't have any guarantee that the model doesn't change the
+  // Storage for managed tensors out from under us during execution,
+  // so we have to grab the Storages each time we deallocate.
+  managed_tensor_storages_.clear();
+  managed_tensor_storages_.reserve(managed_tensors_.size());
   for (auto& ms : managed_tensors_) {
     const auto& tensors = ms.second;
     size_t max = ms.first;
     for (auto& tensor : tensors) {
       size_t current_size =
           compute_aligned_tensor_size(tensor->storage().nbytes());
+      const auto& storage = tensor->storage();
       tensor->storage().unsafeGetStorageImpl()->reset();
+      managed_tensor_storages_.push_back(&storage);
       max = std::max(max, current_size);
     }
     // Static runtime does not know the size of tensors statically, so we use
