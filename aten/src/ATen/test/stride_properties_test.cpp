@@ -27,6 +27,7 @@ inline bool CheckStrideIndices(const Tensor& t, at::MemoryFormat format) {
   // altered in ival->type()->cast<TensorType>();
   auto tt = TensorType::create(c10::nullopt, c10::nullopt, t.sizes(), t.strides(), c10::nullopt);
   TORCH_INTERNAL_ASSERT(tt->stride_properties().isComplete(), "complete stride properties is needed for the test");
+
   auto index_iter = stride_indices.begin();
   for (const auto& opt_stride : *tt->stride_properties().sizes()) {
     if (*index_iter++ != opt_stride->stride_index_.value()) {
@@ -45,5 +46,24 @@ TEST(StridePropertiesTest, StrideIndicesTest) {
       t.resize_(size, memory_format);
       EXPECT_TRUE(CheckStrideIndices(t, memory_format));
     }
+  }
+}
+
+TEST(StridePropertiesTest, ZeroStrideIndicesEagerConsistencyTest) {
+  auto permuted_tensor = at::rand({6, 3, 1, 5, 2}).permute({0, 3, 2, 1, 4}); // permute dim-1 & dim-3
+  auto tensor = permuted_tensor.expand({6, 5, 4, 3, 2}); // expand dim-2
+
+  auto temp = TensorType::create(c10::nullopt, c10::nullopt, tensor.sizes(), tensor.strides(), c10::nullopt);
+
+  // TensorIterator would preserve stride order, this is the eager reference
+  auto eager_tensor = tensor.relu();
+  auto ref_type = TensorType::create(c10::nullopt, c10::nullopt, eager_tensor.sizes(), eager_tensor.strides(), c10::nullopt);
+
+  TORCH_INTERNAL_ASSERT(temp->stride_properties().isComplete() &&
+      temp->stride_properties().isComplete(), "complete stride properties is needed for the test");
+  auto ref_iter = (*(ref_type->stride_properties().sizes())).begin();
+  for (const auto& opt_stride : *temp->stride_properties().sizes()) {
+    EXPECT_TRUE(opt_stride->stride_index_.value() == (*ref_iter)->stride_index_.value());
+    ref_iter++;
   }
 }
