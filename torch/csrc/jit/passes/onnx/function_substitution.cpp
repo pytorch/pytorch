@@ -42,7 +42,7 @@ void functionCallSubstitution(Block* block) {
               "' to aten::__interpolate");
           GRAPH_UPDATE(
               "Function in ONNX function call substitution body: ",
-              *fun_type->function()->optimized_graph());
+              toGraphFunction(*fun_type->function()).optimized_graph());
         } else {
           // Remove input[0] and the node that feeds into it
           auto input_node_0 = cur->input(0)->node();

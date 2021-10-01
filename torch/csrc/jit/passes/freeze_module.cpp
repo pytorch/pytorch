@@ -360,7 +360,7 @@ class AttributePropagator {
               "' to ",
               *user_node);
 
-          GRAPH_UPDATE("Function body: ", *function.optimized_graph());
+          GRAPH_UPDATE("Function body: ", graphFunction->optimized_graph());
           inlineCallTo(user_node, graphFunction);
           inlined = true;
         }
