@@ -302,6 +302,18 @@ std::tuple<Tensor, optional<int64_t>> roll_batch_rule(const Tensor& self, option
   return std::make_tuple(output, 0);
 }
 
+std::tuple<Tensor, optional<int64_t>> diagonal_batching_rule(
+    const Tensor &self, optional<int64_t> self_bdim,
+    int64_t offset, int64_t dim1, int64_t dim2)
+{
+  auto logical_rank = rankWithoutBatchDim(self, self_bdim);
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  auto dim1_ = maybe_wrap_dim(dim1, logical_rank) + 1;
+  auto dim2_ = maybe_wrap_dim(dim2, logical_rank) + 1;
+  auto result = at::diagonal(self_, offset, dim1_, dim2_);
+  return std::make_tuple(std::move(result), 0);
+}
+
 std::tuple<Tensor,optional<int64_t>> diagonal_backward_batch_rule(
     const Tensor& grad_input, optional<int64_t> grad_input_bdim,
     IntArrayRef input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
@@ -359,6 +371,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("squeeze.dim", squeeze_dim_batch_rule);
   VMAP_SUPPORT("_reshape_alias", _reshape_alias_batch_rule);
   VMAP_SUPPORT("roll", roll_batch_rule);
+  VMAP_SUPPORT("diagonal", diagonal_batching_rule);
   VMAP_SUPPORT("diagonal_backward", diagonal_backward_batch_rule);
   VMAP_SUPPORT("select_backward", select_backward_batch_rule);
   VMAP_SUPPORT("slice_backward", slice_backward_batch_rule);
