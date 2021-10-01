@@ -8,7 +8,7 @@ full_codegen:
   - cos
   - mm
   - mv
-  - mv.out
+  # - mv.out
 supported:
   - _log_softmax_backward_data
   - add.Tensor
