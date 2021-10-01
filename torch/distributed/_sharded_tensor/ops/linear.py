@@ -81,12 +81,13 @@ def sharded_linear(types, args, kwargs, pg):
         raise TypeError("weight needs to be ShardedTensor")
     if len(input.size()) < 2:
         raise ValueError('Input needs to have at least 2 dims')
-    if len(weight.size()) != 2:
+    weight_size = cast(torch.Size, weight.size())
+    if len(weight_size) != 2:
         raise ValueError('Weight needs to have exactly 2 dims')
     if len(bias.size()) != 1:
         raise ValueError('Bias needs to have exactly 1 dim')
 
-    if input.size()[-1] != weight.size()[1]:
+    if input.size()[-1] != weight_size[1]:
         raise ValueError(
             f'Input dim: {input.size()[1]} does not match '
             f'appropriate weight dim: {weight.size()[1]}')
