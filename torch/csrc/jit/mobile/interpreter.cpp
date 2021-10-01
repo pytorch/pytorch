@@ -121,6 +121,11 @@ bool InterpreterState::run(Stack& stack) {
           code.operators_[inst.X](stack);
           frame.step();
         } break;
+        case CALL: {
+          auto& function = frame.getCode().functions_.at(inst.X);
+          enterFrame(*function->get_code());
+          frame.step();
+        } break;
         case INTERFACE_CALL: {
           torch::jit::Function& method =
               peek(stack, 0, inst.N)

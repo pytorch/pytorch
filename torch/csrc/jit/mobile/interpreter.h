@@ -12,6 +12,7 @@ namespace jit {
 namespace mobile {
 using Stack = std::vector<c10::IValue>;
 using DebugHandle = int64_t;
+class Function;
 struct InstructionWithDebugHandle {
   InstructionWithDebugHandle(Instruction inst, DebugHandle handle)
       : instruction(inst), debug_handle(handle) {}
@@ -28,6 +29,7 @@ struct Code {
   std::vector<std::function<void(Stack&)>> operators_;
   std::vector<c10::IValue> constants_;
   std::vector<c10::TypePtr> types_;
+  std::vector<Function*> functions_;
   size_t register_size_; // Aggregated output size.
 };
 
