@@ -15,8 +15,6 @@
 
 namespace c10 {
 TypePtr parseType(const std::string& pythonStr);
-std::unordered_set<std::string> getContainedTypes(
-    std::vector<std::string>& pythonStrs);
 } // namespace c10
 
 namespace torch {
@@ -191,21 +189,22 @@ std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
 /********************** Get Type Table **********************/
 
 // Forward declare
-std::unordered_set<std::string> _get_model_contained_types(
+std::unordered_set<std::string> _get_mobile_model_contained_types(
     const std::vector<IValue>& bytecode_ivalues);
 
-std::unordered_set<std::string> _get_model_contained_types(std::istream& in) {
+std::unordered_set<std::string> _get_mobile_model_contained_types(
+    std::istream& in) {
   std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
-  return _get_model_contained_types(std::move(rai));
+  return _get_mobile_model_contained_types(std::move(rai));
 }
 
-std::unordered_set<std::string> _get_model_contained_types(
+std::unordered_set<std::string> _get_mobile_model_contained_types(
     const std::string& filename) {
   std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
-  return _get_model_contained_types(std::move(rai));
+  return _get_mobile_model_contained_types(std::move(rai));
 }
 
-std::unordered_set<std::string> _get_model_contained_types(
+std::unordered_set<std::string> _get_mobile_model_contained_types(
     std::shared_ptr<ReadAdapterInterface> rai) {
   if (!check_zip_file(rai)) {
     TORCH_CHECK(
@@ -214,12 +213,14 @@ std::unordered_set<std::string> _get_model_contained_types(
   }
   PyTorchStreamReader reader(std::move(rai));
   auto bytecode_values = get_bytecode_ivalues(reader);
-  return _get_model_contained_types(bytecode_values);
+  return _get_mobile_model_contained_types(bytecode_values);
 }
 
 // Get deduplicate type table given bytecode, and each string is a atomic type,
-// like str, Tensor and etc.
-std::unordered_set<std::string> _get_model_contained_types(
+// like str, Tensor and etc. For example,
+// input: "Dict[int, Tuple[Tensor, Tensor, Tensor]]"
+// output: {Dict, int, Tuple, Tensor}
+std::unordered_set<std::string> _get_mobile_model_contained_types(
     const std::vector<IValue>& bytecode_ivalues) {
   std::unordered_set<std::string> contained_types;
   // To avoid parsing same type twice, declare $parsed_type_names_records and
@@ -274,7 +275,7 @@ ModelCompatibilityInfo ModelCompatibilityInfo::get(
       _get_model_bytecode_version(bytecode_values);
   auto model_info = _get_model_ops_and_info(bytecode_values);
   std::unordered_set<std::string> type_table =
-      _get_model_contained_types(bytecode_values);
+      _get_mobile_model_contained_types(bytecode_values);
   return ModelCompatibilityInfo{model_bytecode_version, model_info, type_table};
 }
 
