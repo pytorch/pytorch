@@ -151,7 +151,7 @@ class TestSparseCSR(TestCase):
         ns = [5, 2, 0]
         for shape, index_dtype in zip(itertools.product(ns, ns), [torch.int32, torch.int64]):
             run_test(shape, 0, index_dtype)
-            run_test(shape, shape[0]*shape[1], index_dtype)
+            run_test(shape, shape[0] * shape[1], index_dtype)
 
     @skipMeta
     @dtypes(*get_all_dtypes())
@@ -207,7 +207,10 @@ class TestSparseCSR(TestCase):
                 a.resize_(new_shape)
 
             # resizing of columns to smaller size is not implemented
-            with self.assertRaisesRegex(RuntimeError, "torch.resize_: Resizing columns of sparse CSR tensors to a smaller value is not supported."):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "torch.resize_: Resizing columns of sparse CSR tensors to a smaller value is not supported.",
+            ):
                 new_shape = (2, 2)
                 a.resize_(new_shape)
 
