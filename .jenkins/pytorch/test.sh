@@ -285,8 +285,8 @@ test_libtorch() {
 }
 
 test_aot_model_compiler() {
-  # Test Ahead of Time model compilation
-  echo "Testing AOT model compiler"
+  echo "Testing Ahead of Time model compilation"
+  # shellcheck source=test/mobile/nnc/test_aot_compile.sh
   source test/mobile/nnc/test_aot_compile.sh
 }
 
