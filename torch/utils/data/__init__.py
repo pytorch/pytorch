@@ -20,6 +20,7 @@ from torch.utils.data.dataset import (
     Subset,
     TensorDataset,
     random_split,
+    PartitionedDataset,
 )
 from torch.utils.data.dataloader import (
     DataLoader,

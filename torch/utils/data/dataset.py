@@ -385,3 +385,55 @@ def random_split(dataset: Dataset[T], lengths: Sequence[int],
 
     indices = randperm(sum(lengths), generator=generator).tolist()
     return [Subset(dataset, indices[offset - length : offset]) for offset, length in zip(_accumulate(lengths), lengths)]
+
+
+class PartitionedDataset(Dataset[T_co]):
+    r"""An abstract class representing a partitioned and distributed :class:`Dataset`.
+
+    It is especially useful for large datasets which cannot be replicated on
+    all processes and which require global data shuffle during sampling.
+
+    All subclasses should overwrite :meth:`shuffle_inplace`, supporting the global
+    data shuffling. The combination with an appropriate :meth:`__getitem__` the implementation
+    can implement an in-place shuffle or a shuffled copie of the rank-local data.
+    Subclasses should also overwrite :meth:`global_len` :meth:`__getitem__` providing
+    the length of the global dataset (sum of lenghts of all partitions).
+
+    .. note::
+      It is best paired with :class:`~torch.utils.data.DistributedSampler`.
+
+      :meth:`__getitem__` must assume rank-local indexing
+
+    Example: assume our data to be stored as a SPMD/PGAS Tensor
+        >>> class PGASDataset(torch.utils.data.PartitionedDataset):
+        ...     def __init__(self, pgas_array):
+        ...         self.dataset = pgas_array
+        ...
+        ...     def __len__(self):  # local/per rank size
+        ...         return len(self.dataset.local)
+        ...
+        ...     def global_len(self):  # global arrray size
+        ...         return len(self.dataset)
+        ...
+        ...     def __getitem__(self, index):  # local indexing
+        ...         return self.dataset.local[index]
+        ...
+        ...     def shuffle_inplace(self, indices, partition_len):
+        ...         data[:] = data[indices]
+        ...         return True
+    """
+    def shuffle_inplace(self, indices, partition_len) -> bool:
+        r"""Shuffle the data in the dataset according to the given list of indices.
+
+        Args:
+            indices (List[int] or 1d-Array/Tensor[int]): new positions for every index in global dataset
+            partition_len (integer): number of indices used per rank
+
+        Returns:
+            ``True`` if data was shuffled, ``False`` otherwise.
+        """
+        raise NotImplementedError
+
+    def global_len(self):
+        r"""Return global length of dataset (sum of length of all partitions)."""
+        raise NotImplementedError

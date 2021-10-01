@@ -1495,6 +1495,45 @@ except RuntimeError as e:
         with self.assertRaisesRegex(ValueError, "Invalid rank"):
             sampler = DistributedSampler(dataset, 3, -1)
 
+    def test_distributed_sampler_partitioned(self):
+        from torch.utils.data.distributed import DistributedSampler
+
+        class PartedDSet(torch.utils.data.PartitionedDataset):
+            def __init__(self, data, gl):
+                self.data = data
+                self.gl = gl
+                print(data)
+
+            def __len__(self):
+                return len(self.data)
+
+            def __getitem__(self, index):
+                return self.data.__getitem__(index)
+
+            def global_len(self):
+                return self.gl
+
+            def shuffle_inplace(self, indices, partition_len):
+                # we ignore the indices and just sort
+                assert(len(self.data) >= partition_len)
+                torch.sort(self.data, out=(self.data, torch.LongTensor()))
+                return True
+
+        num_processes = 4
+        num_samples = 64
+        partsize = num_samples // num_processes
+        scanned_data = torch.IntTensor([])
+        for i in range(num_processes):
+            # input are chunks of reversed arange
+            d = PartedDSet(torch.arange((i + 1) * partsize - 1, i * partsize - 1, -1), num_samples)
+            s = DistributedSampler(d, num_ranks=num_processes, rank=i)
+            d_loader = torch.utils.data.DataLoader(d, sampler=s)
+            for data in d_loader:
+                scanned_data = torch.cat((scanned_data, data), 0)
+        # the inplace shuffle sorts, so we expect a sorted result
+        expected = torch.arange(num_processes * partsize)
+        self.assertEqual(expected, scanned_data)
+
     def test_duplicating_data_with_drop_last(self):
 
         from torch.utils.data.distributed import DistributedSampler
