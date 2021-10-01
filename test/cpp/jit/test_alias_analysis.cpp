@@ -1330,6 +1330,55 @@ TEST(AliasRegistrationTest, AliasMoveAtenListOp) {
       vmap["y"]->node(), vmap["9"]->node()));
 }
 
+TEST(
+    AliasRegistrationTest,
+    AliasMoveForTupleConstructWithSingleUseAsGraphOutput) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  auto graph_string = R"IR(
+  graph():
+    %x : Tensor = prim::MakeTestTensor()
+    %y : Tensor = prim::MakeTestTensor()
+    %z : (Tensor) = prim::TupleConstruct(%x, %y)
+    return (%z))IR";
+
+  torch::jit::parseIR(graph_string, graph.get(), vmap);
+  AliasDb aliasDb(graph);
+
+  EXPECT_TRUE(!aliasDb.mayAlias(vmap["x"], vmap["y"]));
+  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["z"], vmap["x"]));
+  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["z"], vmap["y"]));
+}
+
+TEST(AliasRegistrationTest, WildcardAliasForTupleConstructWithUses) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  auto graph_string = R"IR(
+  graph():
+    %x : Tensor = prim::MakeTestTensor()
+    %y : Tensor = prim::MakeTestTensor()
+    %z : Tensor = prim::MakeTestTensor()
+    %0 : int = prim::Constant[value=0]()
+    %a : (Tensor) = prim::TupleConstruct(%x, %y)
+    %b : (Tensor) = prim::TupleConstruct(%z)
+    %c : Tensor = prim::TupleIndex(%a, %0)
+    %d : Tensor = prim::TupleIndex(%b, %0)
+    return (%c, %d))IR";
+
+  torch::jit::parseIR(graph_string, graph.get(), vmap);
+  AliasDb aliasDb(graph);
+
+  EXPECT_TRUE(aliasDb.mayAlias(vmap["x"], vmap["y"]));
+  EXPECT_TRUE(aliasDb.mayAlias(vmap["x"], vmap["z"]));
+  EXPECT_TRUE(aliasDb.mayAlias(vmap["y"], vmap["z"]));
+  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["a"], vmap["x"]));
+  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["a"], vmap["y"]));
+  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["a"], vmap["z"]));
+  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["b"], vmap["x"]));
+  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["b"], vmap["y"]));
+  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["b"], vmap["z"]));
+}
+
 TEST(AliasRegistrationTest, PureWithAnnotationsShouldError2) {
   auto registry = torch::RegisterOperators().op(
       "foo::rand12(Tensor(a) arg1) -> Tensor(b)",
