@@ -7,7 +7,6 @@ class AdaBound(torch.optim.Optimizer):
         """
         This is an implementation of the paper "Adaptive Gradient Methods With dynamic Bound of Learning Rate,
         https://openreview.net/pdf?id=Bkg3g2R9FX "
-
         :param parameters: Model parameters
         :param initial_lr: The initial step size for Adam (As described in the paper, The optim essentially starts as
         Adam and goes towards SGD. )
