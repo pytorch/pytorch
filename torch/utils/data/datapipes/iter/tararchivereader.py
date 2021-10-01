@@ -1,5 +1,5 @@
 from torch.utils.data import IterDataPipe
-from torch.utils.data.datapipes.utils.common import validate_pathname_binary_tuple
+from torch.utils.data.datapipes.utils.common import validate_pathname_binary_tuple, deprecation_warning_torchdata
 from typing import Iterable, Iterator, Tuple, Optional, IO, cast
 from io import BufferedIOBase
 
@@ -34,6 +34,7 @@ class TarArchiveReaderIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
         self.datapipe: Iterable[Tuple[str, BufferedIOBase]] = datapipe
         self.mode: str = mode
         self.length: int = length
+        deprecation_warning_torchdata(type(self).__name__)
 
     def __iter__(self) -> Iterator[Tuple[str, BufferedIOBase]]:
         for data in self.datapipe:
@@ -56,8 +57,6 @@ class TarArchiveReaderIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
                 warnings.warn(
                     "Unable to extract files from corrupted tarfile stream {} due to: {}, abort!".format(pathname, e))
                 raise e
-            finally:
-                data_stream.close()
 
     def __len__(self):
         if self.length == -1:
