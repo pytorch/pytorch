@@ -21,7 +21,7 @@ from torch.testing._internal.common_device_type import (
     OpDTypes, instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA, dtypesIfCPU,
     onlyOnCPUAndCUDA, onlyCUDA, largeTensorTest, ops, precisionOverride)
 from torch.testing._internal.common_methods_invocations import (
-    ReductionOpInfo, reduction_ops)
+    ReductionOpInfo, reduction_ops, reference_masked_ops)
 
 # TODO: replace with make_tensor
 def _generate_input(shape, dtype, device, with_extremal):
@@ -3103,6 +3103,53 @@ class TestReductions(TestCase):
             self.assertEqual(torch.ones((2, 4), device=device, dtype=out_dtype), xb.all(1))
             self.assertEqual(torch.ones((2, 1, 4), device=device, dtype=out_dtype), xb.all(1, keepdim=True))
             self.assertEqual(torch.ones((), device=device, dtype=out_dtype), xb.all())
+
+    @ops(reference_masked_ops)
+    def test_reference_masked(self, device, dtype, op):
+        """Test masked reduction operations on strided-only tensors using
+        numpy reductions as reference.
+        """
+
+        def to_numpy(input):
+            if input.dtype is torch.bfloat16:
+                return input.cpu().to(torch.float32).numpy()
+            else:
+                return input.cpu().numpy()
+
+        def to_assert_equal(input):
+            assert_equal_kwargs = dict(equal_nan=True)
+            if input.dtype is torch.bfloat16:
+                assert_equal_kwargs['exact_dtype'] = False
+                assert_equal_kwargs['rtol'] = 1e-2
+                assert_equal_kwargs['atol'] = 1e-3
+            else:
+                assert_equal_kwargs['exact_dtype'] = True
+                if input.dtype is torch.float16:
+                    assert_equal_kwargs['rtol'] = 1e-2
+                    assert_equal_kwargs['atol'] = 1e-3
+            return assert_equal_kwargs
+
+        samples = op.sample_inputs_func(op, device, dtype, requires_grad=False)
+        for sample_input in samples:
+            t = sample_input.input
+            actual = op(t, *sample_input.args, **sample_input.kwargs)
+            expected = op.ref(to_numpy(t), *sample_input.args,
+                              **dict(
+                                  # `identity` is mapped to numpy reduction `initial` argument
+                                  identity=torch.sparse._reduction_identity(op.name, t),
+                                  **sample_input.kwargs))
+            msg = ("Failed to produce expected results! Input tensor was"
+                   " {0}, torch result is {1}, and reference result is"
+                   " {2}.").format(t, actual, expected) if t.numel() < 10 else None
+
+            # The elements of output tensors from masked reductions
+            # are well-defined when the associated output masks are
+            # True. So, here we implement masked equality test by
+            # replacing masked-out elements with zeros:
+            outmask = torch.sparse._output_mask(t, **sample_input.kwargs)
+            actual = torch.where(outmask, actual, torch.zeros_like(actual))
+            expected = np.where(outmask.cpu().numpy(), expected, np.zeros_like(expected))
+            self.assertEqual(actual, expected, msg, **to_assert_equal(t))
 
 instantiate_device_type_tests(TestReductions, globals())
 

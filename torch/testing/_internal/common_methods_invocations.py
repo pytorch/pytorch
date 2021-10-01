@@ -824,6 +824,54 @@ def sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
     return inputs
 
 
+def _generate_masked_reduction_mask(input_shape, device, **kwargs):
+    yield None
+    yield make_tensor(input_shape, device, torch.bool, requires_grad=True)
+    if len(input_shape) > 3:
+        # broadcast last mask dimension:
+        yield make_tensor(input_shape[:-1] + (1,), device, torch.bool, requires_grad=False)
+        # broadcast middle mask dimension:
+        yield make_tensor(input_shape[:1] + (1,) + input_shape[2:], device, torch.bool, requires_grad=False)
+        # broadcast first mask dimension:
+        yield make_tensor((1,) + input_shape[1:], device, torch.bool, requires_grad=False)
+        # mask.ndim < input.ndim
+        yield make_tensor(input_shape[2:], device, torch.bool, requires_grad=False)
+        # mask.ndim == 1
+        yield make_tensor(input_shape[-1:], device, torch.bool, requires_grad=False)
+        # masks that require broadcasting of inputs (mask.ndim >
+        # input.ndim) will not be supported, however, we may
+        # reconsider this if there will be demand on this kind of
+        # degenerate cases.
+
+
+def sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwargs):
+    """Sample inputs for masked reduction operators.
+
+    Masked reduction operator is a reduction operator with trailing
+    mask optional argument. A mask is a bool tensor with the same
+    shape as input or a shape that is broadcastable to input shape.
+    """
+    inputs: List[SampleInput] = []
+
+    kwargs['supports_multiple_dims'] = op_info.supports_multiple_dims
+    for sample_input in sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
+        for mask in _generate_masked_reduction_mask(sample_input.input.shape, device, **kwargs):
+            sample_input_args, sample_input_kwargs = sample_input.args, dict(mask=mask, **sample_input.kwargs)
+            inputs.append(SampleInput(sample_input.input, args=sample_input_args, kwargs=sample_input_kwargs))
+
+            if(dtype.is_floating_point and sample_input.input.ndim ==
+               2 and mask is not None and mask.shape ==
+               sample_input.input.shape):
+                # FIXME: autograd check should be disabled for the following samples
+                # generate inputs with non-finite values: nan, inf, -inf
+                for v in [torch.inf, -torch.inf, torch.nan]:
+                    t = sample_input.input.clone()
+                    t.diagonal()[:] = v
+                    inputs.append(SampleInput(t, args=sample_input_args, kwargs=sample_input_kwargs))
+
+    return inputs
+
+
 # NOTE [Reductions]:
 #
 # For testing purposes, we relax the definition of a reduction operator
@@ -5985,8 +6033,9 @@ def gradcheck_wrapper_triangular_input(op, input, *args, upper=False, **kwargs):
 def reference_reduction_numpy(f, supports_keepdims=True):
     """Wraps a NumPy reduction operator.
 
-    The wrapper function will forward dim and keepdim kwargs to the wrapped
-    function as the NumPy equivalent axis and keepdims kwargs.
+    The wrapper function will forward dim, keepdim, mask, and identity
+    kwargs to the wrapped function as the NumPy equivalent axis,
+    keepdims, where, and initiak kwargs, respectively.
 
     Args:
         f: NumPy reduction operator to wrap
@@ -5996,6 +6045,7 @@ def reference_reduction_numpy(f, supports_keepdims=True):
 
     Returns:
         Wrapped function
+
     """
     @wraps(f)
     def wrapper(x: np.ndarray, *args, **kwargs):
@@ -6017,6 +6067,20 @@ def reference_reduction_numpy(f, supports_keepdims=True):
 
         if 'keepdim' in keys and supports_keepdims:
             kwargs['keepdims'] = keepdim
+
+        if 'mask' in keys:
+            mask = kwargs.pop('mask')
+            if mask is not None:
+                kwargs['where'] = mask.cpu().numpy()
+
+        if 'identity' in keys:
+            identity = kwargs.pop('identity')
+            if identity is not None:
+                if identity.dtype is torch.bfloat16:
+                    identity = identity.cpu().to(torch.float32)
+                else:
+                    identity = identity.cpu()
+                kwargs['initial'] = identity.numpy()
 
         result = f(x, *args, **kwargs)
 
@@ -10035,6 +10099,55 @@ op_db: List[OpInfo] = [
                          dtypes=[torch.float16]),
         ),
     ),
+    ReductionOpInfo(
+        'sparse.masked_sum',
+        ref=reference_reduction_numpy(np.sum),
+        method_variant=None,
+        identity=0,
+        nan_policy='propagate',
+        supports_out=False,
+        # FIXME: autograd check likely needs to take into account the mask.
+        supports_autograd=False,
+        # FIXME: forward AD with _s_where not implemented
+        supports_forward_ad=False,
+        promotes_int_to_int64=False,
+        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+        skips=(
+            # FIXME: sum does not support passing keepdim without passing dim
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
+            # FIXME: sum reduces all dimensions when dim=[]
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
+            # FIXME: sum does not support passing None to dim
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
+            # RuntimeError: undefined value tensor
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+        ),
+        sample_inputs_func=sample_inputs_masked_reduction
+    ),
+    ReductionOpInfo(
+        'sparse.masked_amax',
+        nan_policy='propagate',
+        supports_out=False,
+        # FIXME: autograd check likely needs to take into account the mask.
+        supports_autograd=False,
+        dtypes=all_types_and(torch.float16, torch.bfloat16),
+        ref=reference_reduction_numpy(np.amax),
+        identity=(lambda input: torch.sparse._reduction_identity('max', input)),
+        skips=(
+            # FIXME: amax reduces all dimensions when dim=[]
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
+            # FIXME: amax expects non-zero dimensions
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_empty_tensor_empty_slice'),
+            # FIXME: identity (read: initial) value of amax depends on input dtype
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_identity'),
+            # RuntimeError: Unknown builtin op: aten::iinfo
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+        ),
+        sample_inputs_func=sample_inputs_masked_reduction
+    ),
     OpInfo(
         "nn.functional.nll_loss",
         ref=_NOTHING,
@@ -10089,6 +10202,8 @@ spectral_funcs = [op for op in op_db if isinstance(op, SpectralFuncInfo)]
 sparse_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse is True]
 shape_funcs = [op for op in op_db if isinstance(op, ShapeFuncInfo)]
 reduction_ops = [op for op in op_db if isinstance(op, ReductionOpInfo)]
+reference_filtered_ops = [op for op in reduction_ops if op.ref not in (_NOTHING, None)]
+reference_masked_ops = [op for op in reference_filtered_ops if op.name.startswith('sparse.masked_')]
 
 # TODO: review porting these to make_tensor
 def index_variable(shape, max_indices, device=torch.device('cpu')):
