@@ -814,10 +814,6 @@ Tensor & index_select_out_cpu_dim1_(
   return result_contig;
 }
 
-void index_add_impl(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha, const Tensor& result_) {
-  
-}
-
 TORCH_IMPL_FUNC(index_add_cpu_out)
 (const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha, const Tensor& result) {
   index_add_impl(self, dim, index, source, alpha, result);
