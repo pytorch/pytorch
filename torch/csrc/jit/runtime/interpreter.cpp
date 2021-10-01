@@ -205,7 +205,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         // potential to reduce the number of compilations for too
         // dynamic callers we might miss opportunities where a caller is
         // dynamic but a callee gets stable arguments
-        fn->get_executor()
+        toGraphFunction(*fn)
+            .get_executor()
             .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
             .code;
     ++frames.back().pc;
@@ -576,11 +577,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 frame.function->remaining_bailout_depth_ > 0
                 ? frame.function->remaining_bailout_depth_ - 1
                 : 0;
-            const Code& code = frame.function->function_table_[inst.X]
-                                   ->get_executor()
-                                   .getPlanFor(stack, remaining_bailout_depth)
-                                   .code;
-            size_t num_inputs = code.num_inputs();
+            auto& f = toGraphFunction(*frame.function->function_table_[inst.X]);
+            size_t num_inputs = f.num_inputs();
             size_t base_pointer = frame.base_pointer;
             TORCH_INTERNAL_ASSERT(stack.size() >= num_inputs);
             size_t inputs_start = stack.size() - num_inputs;
@@ -590,6 +588,10 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             }
             stack.resize(base_pointer + num_inputs);
             leaveFrame();
+
+            const Code& code = f.get_executor()
+                                   .getPlanFor(stack, remaining_bailout_depth)
+                                   .code;
             enterFrame(code, base_pointer);
             checkAndStartRecordFunction(frames.back(), stack);
             continue;
@@ -649,9 +651,10 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           case INST(FORK): {
             INST_GUARD;
             // Move inputs to a separate stack
-            Function* forked_fn = frame.function->function_table_[inst.X];
+            auto& forked_fn =
+                toGraphFunction(*frame.function->function_table_[inst.X]);
             InterpreterState forked_interpreter(
-                forked_fn->get_executor()
+                forked_fn.get_executor()
                     .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
                     .code,
                 taskLauncher_);
@@ -972,6 +975,7 @@ Code::Code(
           remaining_bailout_depth)) {}
 
 Code::Code(CodeImpl* codeImpl) : pImpl(codeImpl) {}
+Code::~Code() = default;
 
 MobileCode::MobileCode(
     const std::shared_ptr<Graph>& graph,
