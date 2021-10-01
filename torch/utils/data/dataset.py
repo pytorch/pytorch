@@ -206,10 +206,6 @@ class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
         >>> print(list(torch.utils.data.DataLoader(ds, num_workers=20, worker_init_fn=worker_init_fn)))
         [3, 4, 5, 6]
     """
-    functions: Dict[str, Callable] = {}
-    reduce_ex_hook: Optional[Callable] = None
-    getstate_hook: Optional[Callable] = None
-
     def __iter__(self) -> Iterator[T_co]:
         raise NotImplementedError
 
@@ -219,9 +215,15 @@ class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
     # No `def __len__(self)` default? Subclasses raise `TypeError` when needed.
     # See NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
 
+
+class IterDataPipe(IterableDataset):
+    functions: Dict[str, Callable] = {}
+    reduce_ex_hook : Optional[Callable] = None
+    getstate_hook: Optional[Callable] = None
+
     def __getattr__(self, attribute_name):
-        if attribute_name in IterableDataset.functions:
-            function = functools.partial(IterableDataset.functions[attribute_name], self)
+        if attribute_name in IterDataPipe.functions:
+            function = functools.partial(IterDataPipe.functions[attribute_name], self)
             return function
         else:
             raise AttributeError("'{0}' object has no attribute '{1}".format(self.__class__.__name__, attribute_name))
@@ -232,9 +234,9 @@ class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
         return self.__dict__
 
     def __reduce_ex__(self, *args, **kwargs):
-        if IterableDataset.reduce_ex_hook is not None:
+        if IterDataPipe.reduce_ex_hook is not None:
             try:
-                return IterableDataset.reduce_ex_hook(self)
+                return IterDataPipe.reduce_ex_hook(self)
             except NotImplementedError:
                 pass
         return super().__reduce_ex__(*args, **kwargs)
@@ -247,11 +249,11 @@ class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
 
     @classmethod
     def set_reduce_ex_hook(cls, hook_fn):
-        if IterableDataset.reduce_ex_hook is not None and hook_fn is not None:
+        if IterDataPipe.reduce_ex_hook is not None and hook_fn is not None:
             raise Exception("Attempt to override existing reduce_ex_hook")
-        IterableDataset.reduce_ex_hook = hook_fn
+        IterDataPipe.reduce_ex_hook = hook_fn
 
-class DFIterDataPipe(IterableDataset):
+class DFIterDataPipe(IterDataPipe):
     def _is_dfpipe(self):
         return True
 

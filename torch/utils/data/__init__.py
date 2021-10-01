@@ -16,7 +16,7 @@ from torch.utils.data.dataset import (
     Dataset as MapDataPipe,
     DFIterDataPipe,
     IterableDataset,
-    IterableDataset as IterDataPipe,
+    IterDataPipe,
     Subset,
     TensorDataset,
     random_split,
