@@ -598,7 +598,7 @@ void ProcessGroupNCCL::runHealthCheck() {
   // most communicator init issues manifest themselves.
   TORCH_CHECK(
       healthCheckData.healthCheckSuccess,
-      "ProcessGroupNCCL: Health check falure: Failed to initialize NCCL communicator on rank ",
+      "ProcessGroupNCCL: Health check failure: Failed to initialize NCCL communicator on rank ",
       rank_);
 }
 
@@ -969,6 +969,8 @@ void ProcessGroupNCCL::destroyNCCLComms(const std::string& devNCCLCommMapKey) {
   }
   // Remove communicators from the cache.
   devNCCLCommMap_.erase(devNCCLCommMapKey);
+  // Clear used device indices.
+  usedDeviceIdxs_.clear();
 }
 
 std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
