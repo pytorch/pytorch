@@ -353,7 +353,7 @@ Tensor _histc_cuda_template(
     maxvalue = maxvalue + 1;
   }
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
   TORCH_CHECK(
       !(THCNumerics<input_t>::isinf(minvalue) ||
         THCNumerics<input_t>::isinf(maxvalue) ||
