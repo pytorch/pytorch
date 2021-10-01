@@ -9,6 +9,8 @@
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
 
+#include <iostream>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -145,21 +147,28 @@ void nnc_aten_quantized_conv2d_prepack(
 	int64_t dilationH = extra_args[4];
 	int64_t dilationW = extra_args[5];
 	int64_t groups = extra_args[6];
-
-	try {
-		c10::intrusive_ptr<ConvPackedParamsBase<2>> prepacked = quantized_conv2d_prepack(
+	c10::intrusive_ptr<ConvPackedParamsBase<2>> prepacked;
+	//try {
+		prepacked = quantized_conv2d_prepack(
 				w,
 				b,
 				{strideH, strideW},
 				{paddingH, paddingW},
 				{dilationH, dilationW},
 				groups);
-	} catch (...) {
-	}
+		TORCH_INTERNAL_ASSERT(prepacked, buildErrorMessage("Quantized conv2d prepack failed"));
+	/*} catch (...) {
+
+	}*/
 
 	//TODO: prepacked object put in output buffer
 	// XXX-CustomClass-to blob
-  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+	const size_t size_bytes = sizeof(*prepacked);
+	const void* ptr = &(*prepacked);
+	std::cout << "XXX sizeof:" << size_bytes << std::endl;
+	std::cout << "XXX ptr:" << ptr << std::endl;
+
+  memcpy(buf_data[0], ptr, size_bytes);
 }
 
 at::Tensor quantized_conv2d(
@@ -204,8 +213,15 @@ void nnc_aten_quantized_conv2d(
 	}
 	double out_scale = at::q_scale(r);
 	int64_t out_zero = at::q_zero_point(r);
+
+	std::cout << "XXX nnc " << __FUNCTION__ << " out_scale:" << out_scale << std::endl;
+	std::cout << "XXX nnc " << __FUNCTION__ << " out_zero:" << out_zero << std::endl;
+
 	// TODO: how to return result scale/zero from external call?
 	// introduce extra out args?
+
+	extra_args[2] = out_scale;
+	extra_args[3] = out_zero;
 
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }

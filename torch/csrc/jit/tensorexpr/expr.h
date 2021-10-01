@@ -260,6 +260,14 @@ class TORCH_API Buf : public ExprNode<Buf> {
     return qscale_;
   };
 
+	void set_qzero(ExprPtr qzero) {
+		qzero_ = qzero;
+	}
+
+	void set_qscale(ExprPtr qscale) {
+		qscale_ = qscale;
+	}
+
   bool hasConstantDims() const {
     for (auto d : dims_) {
       if (!d->isConstant()) {

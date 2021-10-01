@@ -1433,8 +1433,13 @@ Tensor computeQuantizedConv2d(
   const BufHandle& prepacked = c10::get<BufHandle>(inputs[1]);
   const double qscale = c10::get<double>(inputs[2]);
   const int64_t qzero = c10::get<int64_t>(inputs[3]);
+  double out_qscale = 0.6f;
+  int64_t out_qzero = 66l;
   StmtPtr s = ExternalCall::make(
-      ResultBuf, "nnc_quantized_conv2d", {inp, prepacked}, {qscale, qzero});
+      ResultBuf, "nnc_quantized_conv2d", {inp, prepacked}, {qscale, qzero, out_qscale, out_qzero});
+  std::cout << "XXX quantized_conv2d out_qscale:" << out_qscale << " out_qzero:" << out_qzero << std::endl;
+  ResultBuf.node()->set_qscale(DoubleImm::make(out_qscale).node());
+  ResultBuf.node()->set_qzero(LongImm::make(out_qzero).node());
   return Tensor(ResultBuf.node(), s);
 }
 
@@ -1508,6 +1513,8 @@ Tensor computeDequantize(
   auto qscale = qbuf.node()->qscale();
   auto qzero = qbuf.node()->qzero();
   auto qbuf_dtype = qbuf.node()->dtype();
+  TORCH_INTERNAL_ASSERT(qscale, buildErrorMessage("Missing quantized scale for dequantize"));
+  TORCH_INTERNAL_ASSERT(qzero, buildErrorMessage("Missing quantized zero point for dequantize"));
   std::cout << "XXX qbuf_dtype:" << qbuf_dtype << std::endl;
   // TODO: Use default dtype?
   //auto dtype = Dtype(ScalarType::Float);
