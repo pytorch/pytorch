@@ -173,9 +173,8 @@ TORCH_META_FUNC(scatter_add)
   scatter_meta_impl(*this, self, dim, index, src, "add");
 }
 
-// For meta function, we don't use the alpha value, hence this helper function to not have alpha in the parameters list
-template <typename Meta>
-void index_add_meta_impl (Meta& meta, const Tensor& self, int64_t& dim, const Tensor& index, const Tensor& source) {
+TORCH_PRECOMPUTE_META_FUNC(index_add)
+(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha) {
   dim = maybe_wrap_dim(dim, self.dim());
   auto numel = index.numel();
 
@@ -189,19 +188,15 @@ void index_add_meta_impl (Meta& meta, const Tensor& self, int64_t& dim, const Te
   TORCH_CHECK(numel == (source.dim() == 0 ? 1 : source.size(dim)),
               "index_add_(): Number of indices should be equal to self.size(dim)");
 
-  auto& result = meta.maybe_get_output(0);
+  auto& result = maybe_get_output(0);
   bool is_defined = result.defined();
-  meta.set_output(self.sizes(), self.options());
+  set_output(self.sizes(), self.options());
   if (is_defined) {
     at::assert_no_internal_overlap(result);
     at::assert_no_overlap(result, index);
     at::assert_no_overlap(result, source);
   }
-}
 
-TORCH_PRECOMPUTE_META_FUNC(index_add)
-(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha) {
-  index_add_meta_impl(*this, self, dim, index, source);
   return TORCH_PRECOMPUTE_STRUCT(index_add)().set_dim(dim);
 }
 
@@ -820,13 +815,19 @@ Tensor & index_select_out_cpu_dim1_(
 }
 
 void index_add_impl(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha, const Tensor& result_) {
-  auto result = const_cast<Tensor&>(result_);
-  if (!result.is_same(self)) result.copy_(self);
+  
+}
+
+TORCH_IMPL_FUNC(index_add_cpu_out)
+(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha, const Tensor& result) {
+  index_add_impl(self, dim, index, source, alpha, result);
+  auto result_ = const_cast<Tensor&>(result);
+  if (!result_.is_same(self)) result_.copy_(self);
   auto numel = index.numel();
 
   auto index_contig = index.contiguous();
 
-  if (result.dim() > 1) {
+  if (result_.dim() > 1) {
     // Equivalent to:
     //   for (auto i = 0; i < numel; i++) {
     //     auto selfSlice = self.select(dim, index_data[i]);
@@ -837,11 +838,11 @@ void index_add_impl(const Tensor& self, int64_t dim, const Tensor& index, const 
     if (numel == 0) {
       return;
     }
-    auto selfSlice = result.select(dim, 0);
+    auto selfSlice = result_.select(dim, 0);
     auto sourceSlice = source.select(dim, 0);
-    auto self_stride_bytes = result.stride(dim) * elementSize(result.scalar_type());
+    auto self_stride_bytes = result_.stride(dim) * elementSize(result_.scalar_type());
     auto source_stride_bytes = source.stride(dim) * elementSize(source.scalar_type());
-    auto self_dim_size = result.size(dim);
+    auto self_dim_size = result_.size(dim);
     auto iter = TensorIterator::borrowing_binary_op(selfSlice, selfSlice, sourceSlice);
 
     AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "index_add_cpu_", [&] () {
@@ -864,30 +865,25 @@ void index_add_impl(const Tensor& self, int64_t dim, const Tensor& index, const 
     // explicitly capture all required variables to work around windows build
     // TODO: fix this when windows can correctly capture variables in nested lambda
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
-      result.scalar_type(), "index_add_", [&result, &source, &dim, &index_contig, &numel, &alpha] {
+      result_.scalar_type(), "index_add_", [&result_, &source, &dim, &index_contig, &numel, &alpha] {
       auto alpha_value = alpha.to<scalar_t>();
-      auto self_stride = result.dim() == 0 ? 1 : result.stride(dim);
+      auto self_stride = result_.dim() == 0 ? 1 : result_.stride(dim);
       auto source_stride = source.dim() == 0 ? 1 : source.stride(dim);
       // TODO: Maybe TensorAccessor can be used here?
-      auto* self_ptr = result.data_ptr<scalar_t>();
+      auto* self_ptr = result_.data_ptr<scalar_t>();
       auto* source_ptr = source.data_ptr<scalar_t>();
       AT_DISPATCH_INDEX_TYPES(index_contig.scalar_type(), "index_add_cpu_",
-        [&index_contig, &numel, &result, &self_ptr, &self_stride, &source_ptr, &source_stride, &alpha_value] {
+        [&index_contig, &numel, &result_, &self_ptr, &self_stride, &source_ptr, &source_stride, &alpha_value] {
         auto index_data = index_contig.data_ptr<index_t>();
         for (auto i = 0; i < numel; i++) {
             auto self_i = index_data[i];
-            TORCH_CHECK_INDEX((self_i >= 0) && (self_i < result.numel()), "index out of range in self");
+            TORCH_CHECK_INDEX((self_i >= 0) && (self_i < result_.numel()), "index out of range in self");
             scalar_t *self_ip = self_ptr + self_i * self_stride;
             *self_ip += *(source_ptr + i * source_stride) * alpha_value;
         }
       });
     });
   }
-}
-
-TORCH_IMPL_FUNC(index_add_cpu_out)
-(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha, const Tensor& result) {
-  index_add_impl(self, dim, index, source, alpha, result);
 }
 
 Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & index, Tensor & result) {
