@@ -21,7 +21,7 @@ namespace mkl {
 
 namespace {
 
-c10::MaybeOwned<Tensor> inline prepare_dense_matrix_for_mkl(
+c10::MaybeOwned<Tensor> prepare_dense_matrix_for_mkl(
     const Tensor& tensor) {
   if (tensor.is_non_overlapping_and_dense() ||
       is_blas_compatible_row_major_order(tensor) ||
@@ -40,7 +40,7 @@ c10::MaybeOwned<Tensor> inline prepare_dense_matrix_for_mkl(
   * `tensor` - 2D strided Tensor.
   * `row_major` - coltrol the memory layout.
 */
-c10::MaybeOwned<Tensor> inline prepare_dense_matrix_for_mkl(
+c10::MaybeOwned<Tensor> prepare_dense_matrix_for_mkl(
     const Tensor& tensor,
     bool row_major) {
   if (is_blas_compatible_row_major_order(tensor) && row_major) {
@@ -419,8 +419,13 @@ void triangular_solve_out_sparse_csr(
     return;
   }
 
-  c10::MaybeOwned<Tensor> B_ = prepare_dense_matrix_for_mkl(B);
   c10::MaybeOwned<Tensor> X_ = prepare_dense_matrix_for_mkl(X);
+  IntArrayRef X_strides = X_->strides();
+  auto ndim = X_->dim();
+  bool is_X_row_major = (ndim > 1) ? (X_strides[ndim - 1] == 1) : true;
+
+  // MKL requires same storage layout of matrices
+  c10::MaybeOwned<Tensor> B_ = prepare_dense_matrix_for_mkl(B, is_X_row_major);
 
   sparse_operation_t opA = transpose ? SPARSE_OPERATION_TRANSPOSE : SPARSE_OPERATION_NON_TRANSPOSE;
   matrix_descr descrA;
@@ -443,13 +448,9 @@ void triangular_solve_out_sparse_csr(
               B_->data_ptr<scalar_t>(),
               X_->data_ptr<scalar_t>());
         } else {
-          // TODO: support mixed memory format
-          IntArrayRef X_strides = X_->strides();
           IntArrayRef B_strides = B_->strides();
-          auto ndim = X_->dim();
-          bool is_X_row_major = (X_strides[ndim - 1] == 1);
           bool is_B_row_major = (B_strides[ndim - 1] == 1);
-          TORCH_INTERNAL_ASSERT(is_X_row_major && is_B_row_major);
+          TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!(is_X_row_major ^ is_B_row_major));
 
           auto order = is_X_row_major ? SPARSE_LAYOUT_ROW_MAJOR : SPARSE_LAYOUT_COLUMN_MAJOR;
           auto nrhs = mkl_int_cast(B.size(-1), "nrhs");
