@@ -1100,7 +1100,9 @@ def acc_ops_slice_tensor(network, target, args, kwargs, name):
         raise RuntimeError(f"slice_tensor received input {input_val} that is not part "
                            "of the TensorRT region!")
 
-    dims = kwargs["dims"]
+    ranks = len(input_val.shape) + (1 if network.has_implicit_batch_dimension else 0)
+    dims = [dim % ranks for dim in kwargs["dims"]]
+
     if network.has_implicit_batch_dimension:
         if not len(dims):
             raise RuntimeError("dim argument cannot be empty!")
@@ -1122,7 +1124,7 @@ def acc_ops_slice_tensor(network, target, args, kwargs, name):
     for i, dim in enumerate(dims):
         start[dim] = starts[i]
         stride[dim] = steps[i]
-        output_shape[dim] = (stops[i] - start[i]) // steps[i]
+        output_shape[dim] = (stops[i] - starts[i]) // steps[i]
 
     layer = network.add_slice(input_val, start=start, shape=output_shape, stride=stride)
     layer.name = name
