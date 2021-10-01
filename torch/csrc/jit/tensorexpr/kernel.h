@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
+#include <torch/csrc/jit/tensorexpr/lowerings.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
 namespace torch {
@@ -33,25 +34,6 @@ enum ElementType {
   kQintTypes = 1 << 4,
   kNonComplexOrQintTypes = kIntegralTypes | kBoolType | kFloatingPointTypes,
 };
-
-using ArgNone = c10::monostate;
-using BufList = std::vector<tensorexpr::BufHandle>;
-using IntList = std::vector<int64_t>;
-using ArgValue = c10::variant<
-    tensorexpr::BufHandle,
-    tensorexpr::VarHandle,
-    double,
-    int64_t,
-    bool,
-    BufList,
-    IntList,
-    ArgNone>;
-
-using NNCLoweringFunction = std::function<Tensor(
-    const std::vector<ArgValue>&,
-    const std::vector<ExprHandle>&,
-    const c10::optional<ScalarType>&,
-    at::Device)>;
 
 // Get the dimensions of a value.
 std::vector<ExprHandle> valueShape(const ArgValue& v);
