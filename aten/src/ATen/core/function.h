@@ -1,8 +1,10 @@
 #pragma once
+
 #include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/qualified_name.h>
-#include <mutex>
+#include <c10/util/Exception.h>
+#include <c10/util/FunctionRef.h>
 
 namespace c10 {
 struct FunctionSchema;
@@ -16,7 +18,11 @@ namespace torch {
 namespace jit {
 
 struct Graph;
-class Executor;
+struct Code;
+
+namespace mobile {
+struct Code;
+}
 
 using Stack = std::vector<at::IValue>;
 using Kwargs = std::unordered_map<std::string, at::IValue>;
@@ -48,7 +54,7 @@ struct TORCH_API Function {
       TaskLauncher taskLauncher = at::launch) = 0;
 
   virtual at::IValue operator()(
-      std::vector<at::IValue> stack,
+      Stack stack,
       const Kwargs& kwargs = Kwargs()) = 0;
 
   virtual const c10::QualifiedName& qualname() const = 0;
@@ -57,12 +63,6 @@ struct TORCH_API Function {
 
   // if this isn't yet defined, run its method_creator function
   virtual void ensure_defined() = 0;
-
-  virtual bool hasExecutor() const {
-    return true;
-  }
-
-  virtual Executor& get_executor() = 0;
 
   virtual const c10::FunctionSchema& getSchema() const = 0;
 
@@ -73,6 +73,14 @@ struct TORCH_API Function {
   virtual std::string pretty_print_schema() const = 0;
 
   virtual Function& setSchema(c10::FunctionSchema schema) = 0;
+
+  virtual void call(Stack&, c10::function_ref<void(Code&)>) {
+    TORCH_INTERNAL_ASSERT(false);
+  }
+
+  virtual void call(Stack&, c10::function_ref<void(mobile::Code&)>) {
+    TORCH_INTERNAL_ASSERT(false);
+  }
 
   virtual ~Function() {}
 };

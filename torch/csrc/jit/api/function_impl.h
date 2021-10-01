@@ -79,7 +79,7 @@ struct TORCH_API GraphFunction : public Function {
   }
 
   GraphExecutorState getDebugState() {
-    return get_graph_executor().getDebugState();
+    return get_executor().getDebugState();
   }
 
   bool is_optimized() const {
@@ -95,12 +95,7 @@ struct TORCH_API GraphFunction : public Function {
         "Method (but not graphs in general) require a single output. Use None/Tuple for 0 or 2+ outputs");
   }
 
-  Executor& get_executor() override {
-    return get_graph_executor();
-  }
-
- private:
-  GraphExecutor& get_graph_executor() {
+  GraphExecutor& get_executor() {
     ensure_defined();
     std::lock_guard<std::recursive_mutex> lock(compile_mutex);
     if (executor_) {
@@ -111,6 +106,7 @@ struct TORCH_API GraphFunction : public Function {
     return *executor_;
   }
 
+ private:
   c10::QualifiedName name_;
   // The original, non-optimized graph
   std::shared_ptr<Graph> graph_; // for debugging and for inlining
