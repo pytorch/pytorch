@@ -178,7 +178,7 @@ class TestModule(TestCase):
                     m.cuda(1)
                     with torch.cuda.device(1):
                         m(*input_device_1_args, **input_device_1_kwargs)
-                    self._assert_module_parameters_and_buffer_are(m, device, dtype)
+                    self._assert_module_parameters_and_buffer_are(m, torch.device("cuda:1"), dtype)
 
 
     @modules(module_db)
