@@ -698,10 +698,6 @@ class LazyTensor {
                                          const LazyTensor& input,
                                          const LazyTensor& buffer);
 
-  static LazyTensor log_softmax(const LazyTensor& input,
-                                lazy_tensors::int64 dim,
-                                c10::optional<at::ScalarType> dtype);
-
   static LazyTensor log_softmax_backward(const LazyTensor& grad_output,
                                          const LazyTensor& output,
                                          lazy_tensors::int64 dim);

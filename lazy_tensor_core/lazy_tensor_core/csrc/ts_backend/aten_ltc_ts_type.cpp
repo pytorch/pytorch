@@ -73,13 +73,6 @@ at::Tensor subtensor(const at::Tensor& tensor, int dim, int groups, int g) {
 
 }  // namespace
 
-at::Tensor LazyNativeFunctions::_log_softmax(const at::Tensor& self, int64_t dim,
-                                         bool /* half_to_float */) {
-  LTC_FN_COUNTER("lazy::");
-  return bridge::AtenFromLtcTensor(
-      LazyTensor::log_softmax(bridge::GetLtcTensor(self), dim, c10::nullopt));
-}
-
 at::Tensor LazyNativeFunctions::_log_softmax_backward_data(
     const at::Tensor& grad_output, const at::Tensor& output, int64_t dim,
     const at::Tensor& self) {

@@ -19,7 +19,6 @@
 #include "lazy_tensor_core/csrc/ops/index_select.h"
 #include "lazy_tensor_core/csrc/ops/leaky_relu.h"
 #include "lazy_tensor_core/csrc/ops/leaky_relu_backward.h"
-#include "lazy_tensor_core/csrc/ops/log_softmax.h"
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
 #include "lazy_tensor_core/csrc/ops/nll_loss_backward.h"
 #include "lazy_tensor_core/csrc/ops/nll_loss_forward.h"
@@ -299,10 +298,6 @@ class TSNodeLowering : public NodeLowering {
     if (node->op().op == at::aten::leaky_relu_backward) {
       return LowerLeakyReluBackward(ir::NodeCast<ir::ops::LeakyReluBackward>(
           node, ir::OpKind(at::aten::leaky_relu_backward)));
-    }
-    if (node->op().op == at::aten::log_softmax) {
-      return LowerLogSoftmax(
-          ir::NodeCast<ir::ops::LogSoftmax>(node, ir::OpKind(at::aten::log_softmax)));
     }
     if (node->op().op == at::aten::_log_softmax_backward_data) {
       return LowerLogSoftmaxBackward(ir::NodeCast<ir::ops::TSLogSoftmaxBackward>(
@@ -745,14 +740,6 @@ class TSNodeLowering : public NodeLowering {
     arguments.emplace_back(loctx()->GetOutputOp(node->operand(1)));
     arguments.push_back(node->negative_slope());
     arguments.push_back(node->self_is_result());
-    return LowerBuiltin(node, arguments);
-  }
-
-  TSOpVector LowerLogSoftmax(const ir::ops::LogSoftmax* node) {
-    std::vector<torch::jit::NamedValue> arguments;
-    arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
-    arguments.emplace_back(node->dim());
-    arguments.emplace_back(node->dtype());
     return LowerBuiltin(node, arguments);
   }
 
