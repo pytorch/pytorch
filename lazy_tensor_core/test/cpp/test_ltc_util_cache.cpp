@@ -1,12 +1,27 @@
 #include <gtest/gtest.h>
-
+#include <torch/torch.h>
 #include <string>
 
 #include "lazy_tensors/computation_client/cache.h"
 #include "lazy_tensors/computation_client/util.h"
+#include "lazy_tensor_core/csrc/ts_backend/ts_computation_client.h"
 
 namespace torch_lazy_tensors {
 namespace cpp_test {
+
+TEST(ComputationClientDataTest, Assign) {
+  auto t = torch::rand({2, 2});
+  lazy_tensors::compiler::TSComputationClient::TSData src(t, lazy_tensors::client::ShapeData(lazy_tensors::PrimitiveType::F32, {2, 2}), "cpu");
+  lazy_tensors::compiler::TSComputationClient::TSData dst(at::Tensor{}, lazy_tensors::client::ShapeData{}, "cuda");
+  dst.Assign(src);
+  ASSERT_EQ(dst.device(), src.device());
+  // TODO(krovatkin): ShapeData needs `operator==`
+  ASSERT_EQ(dst.shape().dimensions(), src.shape().dimensions());
+  ASSERT_EQ(dst.shape().element_type(), src.shape().element_type());
+  ASSERT_EQ(dst.info(), src.info());
+  ASSERT_EQ(dst.data().data_ptr(), src.data().data_ptr());
+}
+
 
 TEST(LtcUtilCacheTest, BasicTest) {
   static const int kMaxSize = 64;
