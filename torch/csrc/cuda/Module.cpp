@@ -4,6 +4,7 @@
 #include <ATen/CUDAGeneratorImpl.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <ATen/cuda/CachingHostAllocator.h>
 #include <ATen/cuda/detail/CUDAHooks.h>
 #ifdef USE_NCCL
 #include <torch/csrc/cuda/python_nccl.h>
@@ -181,13 +182,17 @@ PyObject * THCPModule_setStream_wrap(PyObject *self, PyObject *obj)
 
 PyObject * THCPModule_getCompiledVersion(PyObject *self, PyObject *noargs)
 {
+#if defined(USE_ROCM)
+  return THPUtils_packInt64((int64_t) ROCM_VERSION);
+#else
   return THPUtils_packInt64((int64_t) CUDA_VERSION);
+#endif
 }
 
 PyObject * THCPModule_cudaHostAllocator(PyObject *_unused, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
-  c10::Allocator* allocator = THCState_getCudaHostAllocator(state);
+  c10::Allocator* allocator = at::cuda::getCachingHostAllocator();
   return PyLong_FromVoidPtr(allocator);
   END_HANDLE_TH_ERRORS
 }
@@ -632,7 +637,7 @@ namespace shared {
 
 void initCudartBindings(PyObject* module);
 void initNvtxBindings(PyObject* module);
-#if defined(USE_CUDNN) || defined(__HIP_PLATFORM_HCC__)
+#if defined(USE_CUDNN) || defined(USE_ROCM)
 void initCudnnBindings(PyObject* module);
 #endif
 
@@ -644,7 +649,7 @@ void initModule(PyObject *module) {
   // so this condition might not always be true...
   shared::initCudartBindings(module);
   shared::initNvtxBindings(module);
-#if defined(USE_CUDNN) || defined(__HIP_PLATFORM_HCC__)
+#if defined(USE_CUDNN) || defined(USE_ROCM)
   shared::initCudnnBindings(module);
 #endif
   registerCudaDeviceProperties(module);
