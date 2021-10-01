@@ -2253,7 +2253,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             t = threading.Thread(target=self._run_all_reduce, args=(process_group,))
             t.daemon = True
             t.start()
-            t.join(int(get_timeout(self.id() / 5))
+            t.join(int(get_timeout(self.id()) / 5))
             self.assertTrue(t.is_alive())
 
         if prev_nccl_async_error_handling is not None:
