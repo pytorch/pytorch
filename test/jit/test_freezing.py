@@ -1015,6 +1015,34 @@ class TestFreezing(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "attempted to freeze a module that return itself"):
             m_f = torch._C._freeze_module(m_s._c)
 
+    def test_freeze_module_inlining(self):
+        @torch.jit.script
+        class Obj(object):  # noqa: B903
+            def __init__(self, x: int, y: int):
+                self.x = x
+                self.y = y
+
+        class Mod(nn.Module):
+            def __init__(self):
+                super(Mod, self).__init__()
+                self.obj = Obj(2, 3)
+
+            def forward(self, i: int):
+                print(self.obj)
+                return i
+
+        mod = torch.jit.freeze(torch.jit.script(Mod().eval()))
+        obj = mod.graph.findNode("prim::Constant")
+        self.assertTrue(torch._C._jit_object_is_non_holding(obj))
+
+        buffer = io.BytesIO()
+        torch.jit.save(mod, buffer)
+        buffer.seek(0)
+
+        loaded = torch.jit.load(buffer)
+        obj = mod.graph.findNode("prim::Constant")
+        self.assertTrue(torch._C._jit_object_is_non_holding(obj))
+
     def test_freeze_module_return_sub_module(self):
 
         class FreezeMe(nn.Module):
@@ -1278,11 +1306,11 @@ class TestFreezing(JitTestCase):
         class Parent(nn.Module):
             def __init__(self):
                 super(Parent, self).__init__()
-                self.quant = torch.quantization.QuantStub()
+                self.quant = torch.ao.quantization.QuantStub()
                 self.conv1 = nn.Conv2d(1, 1, 1).to(dtype=torch.float32)
                 self.child = Child()
                 self.child2 = Child()
-                self.dequant = torch.quantization.DeQuantStub()
+                self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x):
                 x = self.quant(x)
@@ -1293,11 +1321,11 @@ class TestFreezing(JitTestCase):
                 return x
 
         def _static_quant(model):
-            qModel = torch.quantization.QuantWrapper(model)
-            qModel.qconfig = torch.quantization.default_qconfig
-            torch.quantization.prepare(qModel, inplace=True)
+            qModel = torch.ao.quantization.QuantWrapper(model)
+            qModel.qconfig = torch.ao.quantization.default_qconfig
+            torch.ao.quantization.prepare(qModel, inplace=True)
             qModel(torch.rand(4, 1, 4, 4, dtype=torch.float32))
-            torch.quantization.convert(qModel, inplace=True)
+            torch.ao.quantization.convert(qModel, inplace=True)
             return model
 
         with override_quantized_engine('fbgemm'):
