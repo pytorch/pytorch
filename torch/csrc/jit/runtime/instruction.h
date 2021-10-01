@@ -74,6 +74,7 @@ struct Instruction {
 };
 
 bool isOpSupportedInMobile(OpCode op);
+char const* toString(OpCode op);
 
 } // namespace jit
 } // namespace torch
