@@ -400,31 +400,6 @@ Tensor slice_backward_batching_rule(const Tensor& grad, IntArrayRef input_sizes,
   return grad_physical.getPhysicalToLogicalMap().apply(grad_input);
 }
 
-Tensor diagonal_batching_rule(const Tensor& self, int64_t offset, int64_t dim1, int64_t dim2) {
-  if (!participatesInCurrentLevel(self)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-    return at::diagonal(self, offset, dim1, dim2);
-  }
-  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
-  auto dim1_physical = self_physical.getPhysicalDim(dim1);
-  auto dim2_physical = self_physical.getPhysicalDim(dim2);
-  auto result = at::diagonal(self_physical.tensor(), offset, dim1_physical, dim2_physical);
-  return self_physical.getPhysicalToLogicalMap().apply(result);
-}
-
-Tensor diagonal_backward_batching_rule(const Tensor& grad, IntArrayRef input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
-  if (!participatesInCurrentLevel(grad)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-    return at::diagonal_backward(grad, input_sizes, offset, dim1, dim2);
-  }
-  auto grad_physical = MultiBatchVmapTransform::logicalToPhysical(grad);
-  auto grad_input = at::zeros(grad_physical.getPhysicalShape(input_sizes), grad.options());
-  auto dim1_physical = getGradInputPhysicalDim(dim1, input_sizes, grad_physical.numBatchDims());
-  auto dim2_physical = getGradInputPhysicalDim(dim2, input_sizes, grad_physical.numBatchDims());
-  grad_input.diagonal(offset, dim1_physical, dim2_physical).copy_(grad_physical.tensor());
-  return grad_physical.getPhysicalToLogicalMap().apply(grad_input);
-}
-
 Tensor movedim_batching_rule(const Tensor& self, IntArrayRef source, IntArrayRef destination) {
   if (!participatesInCurrentLevel(self)) {
     c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1026,7 +1001,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   // m.impl("chunk", chunk_batching_rule);
   m.impl("tensor_split.sections", tensor_split_sections_batching_rule);
   m.impl("tensor_split.indices", tensor_split_indices_batching_rule);
-  m.impl("diagonal", diagonal_batching_rule);
   m.impl("expand", expand_batching_rule);
   m.impl("movedim.intlist", movedim_batching_rule);
   m.impl("movedim.int", static_cast<Tensor(*)(const Tensor&,int64_t,int64_t)>(native::movedim)); // composite wrt autograd
@@ -1103,10 +1077,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("is_same_size", native::is_same_size);
 // //
 // //   // backward operators
-// //   m.impl("select_backward", select_backward_batching_rule);
-// //   m.impl("slice_backward", slice_backward_batching_rule);
 // //   m.impl("trace_backward", trace_backward_batching_rule);
-// //   m.impl("diagonal_backward", diagonal_backward_batching_rule);
 // //
 // //   // Tensor.new_* operators
 //   m.impl("ones_like", ones_like_batching_rule);
