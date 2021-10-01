@@ -196,7 +196,7 @@ class DemultiplexerIterDataPipe(IterDataPipe):
                 Use -1 for the unlimited buffer
     """
     def __new__(cls, datapipe: IterDataPipe, num_instances: int,
-                classifier_fn: Callable[[T_co], int], drop_none: bool = False, buffer_size: int = 1000):
+                classifier_fn: Callable[[T_co], Optional[int]], drop_none: bool = False, buffer_size: int = 1000):
         if num_instances < 1:
             raise ValueError(f"Expected `num_instaces` larger than 0, but {num_instances} is found")
         # When num_instances == 1, demux can be replaced by filter,
@@ -215,7 +215,7 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
     """
 
     def __init__(self, datapipe: IterDataPipe[T_co], num_instances: int,
-                 classifier_fn: Callable[[T_co], int], drop_none: bool, buffer_size: int):
+                 classifier_fn: Callable[[T_co], Optional[int]], drop_none: bool, buffer_size: int):
         self.main_datapipe = datapipe
         self._datapipe_iterator: Optional[Iterator[Any]] = None
         self.num_instances = num_instances
