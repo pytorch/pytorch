@@ -1,8 +1,8 @@
+from collections import defaultdict
 from io import IOBase
-from typing import Iterable, Tuple
+from typing import DefaultDict, Iterable, Tuple, IO, Any, List, Union
 
 from torch.utils.data import IterDataPipe
-from torch.utils.data.datapipes.utils.common import get_file_binaries_from_pathnames
 
 
 class FileLoaderIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
@@ -37,14 +37,28 @@ class FileLoaderIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
         # TODO: enforce typing for each instance based on mode, otherwise
         #       `argument_validation` with this DataPipe may be potentially broken
         self.length: int = length
+        self.open_streams: DefaultDict[str, List[Union[IO[Any]]]] = defaultdict(list)
 
     # Remove annotation due to 'IOBase' is a general type and true type
     # is determined at runtime based on mode. Some `DataPipe` requiring
     # a subtype would cause mypy error.
     def __iter__(self):
-        yield from get_file_binaries_from_pathnames(self.datapipe, self.mode)
+        pathnames = self.datapipe if isinstance(self.datapipe, Iterable) else [self.datapipe, ]
+        mode = self.mode if self.mode not in ('b', 't') else 'r' + self.mode
+        for pathname in pathnames:
+            if not isinstance(pathname, str):
+                raise TypeError(f"Expected string type for pathname, but got {type(pathname)}")
+            stream = open(pathname, mode)
+            self.open_streams[pathname].append(stream)
+            yield (pathname, stream)
 
     def __len__(self):
         if self.length == -1:
             raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
         return self.length
+
+    def close_all_streams(self):
+        for _name, streams_list in self.open_streams.items():
+            for stream in streams_list:
+                stream.close()
+        self.open_streams = defaultdict(list)
