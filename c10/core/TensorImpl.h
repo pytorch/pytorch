@@ -366,17 +366,20 @@ struct C10_API TorchDispatchTypeObject {
   // Steals a reference to type_object
   TorchDispatchTypeObject(
       PyObject* type_object,
-      c10::impl::PyInterpreter* pyinterpreter);
+      c10::impl::PyInterpreter* pyinterpreter,
+      PyObject* mode_ctx = nullptr);
 
   // Releases the stolen reference to type_object
   ~TorchDispatchTypeObject();
 
   c10::impl::PyInterpreter* pyinterpreter() const;
   PyObject* ptr() const;
+  PyObject* mode_ctx() const;
 
  private:
   PyObject* data_;
   c10::impl::PyInterpreter* pyinterpreter_;
+  PyObject* mode_ctx_;
 };
 
 // NOTE [ Version Counter Sharing ]

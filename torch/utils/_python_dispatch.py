@@ -27,7 +27,7 @@ def enable_python_mode(cls) -> Iterator[None]:
     if not isinstance(cls, type) or not issubclass(cls, (torch.Tensor,)):
         raise ValueError('The argument passed to enable_python_mode '
                          'must be the type of a Tensor subclass')
-    torch._C._enter_python_mode(cls)
+    torch._C._autograd._enter_python_mode(cls, None)
     try:
         yield
     finally:

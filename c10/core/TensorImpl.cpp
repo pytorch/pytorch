@@ -613,8 +613,9 @@ void TensorImpl::copy_tensor_metadata(
 
 TorchDispatchTypeObject::TorchDispatchTypeObject(
     PyObject* type_object,
-    c10::impl::PyInterpreter* pyinterpreter)
-    : data_(type_object), pyinterpreter_(pyinterpreter) {}
+    c10::impl::PyInterpreter* pyinterpreter,
+    PyObject* mode_ctx)
+    : data_(type_object), pyinterpreter_(pyinterpreter), mode_ctx_(mode_ctx) {}
 
 TorchDispatchTypeObject::~TorchDispatchTypeObject() {
   pyinterpreter_->decref(data_, /*is_tensor*/ false);
@@ -626,6 +627,10 @@ c10::impl::PyInterpreter* TorchDispatchTypeObject::pyinterpreter() const {
 
 PyObject* TorchDispatchTypeObject::ptr() const {
   return data_;
+}
+
+PyObject* TorchDispatchTypeObject::mode_ctx() const {
+  return mode_ctx_;
 }
 
 namespace impl {

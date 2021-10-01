@@ -41,7 +41,7 @@ class TORCH_API ThreadLocalState {
   // TLS for AutogradModes
   AutogradState autograd_tls_;
 
-  std::shared_ptr<TorchDispatchTypeObject> python_mode_state_;
+  std::vector<std::shared_ptr<TorchDispatchTypeObject>> python_mode_state_;
 
   // TLS for saved tensors default hooks
   std::pair<PyObject*, PyObject*> saved_tensors_default_hooks_;

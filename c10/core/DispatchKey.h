@@ -290,7 +290,8 @@ enum class DispatchKey : uint8_t {
   // to operate on this type id.  See
   // aten/src/ATen/core/dispatch/backend_fallback_test.cpp
   // for a usage example
-  TESTING_ONLY_GenericMode,
+  // TESTING_ONLY_GenericMode,
+  PythonMode,
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ FIN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   NumDispatchKeys, // Sentinel, end of runtime keys.

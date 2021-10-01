@@ -137,8 +137,8 @@ const char* toString(DispatchKey t) {
     case DispatchKey::TESTING_ONLY_GenericWrapper:
       return "TESTING_ONLY_GenericWrapper";
 
-    case DispatchKey::TESTING_ONLY_GenericMode:
-      return "TESTING_ONLY_GenericMode";
+    case DispatchKey::PythonMode:
+      return "PythonMode";
 
     // Note [Out-of-tree vmap+grad prototype]
     // The following keys are used in the implementation of the out-of-tree
@@ -270,7 +270,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
        c10::DispatchKey::FuncTorchDynamicLayerFrontMode},
       {"TESTING_ONLY_GenericWrapper",
        c10::DispatchKey::TESTING_ONLY_GenericWrapper},
-      {"TESTING_ONLY_GenericMode", c10::DispatchKey::TESTING_ONLY_GenericMode},
+      {"PythonMode", c10::DispatchKey::PythonMode},
       {"Autograd", c10::DispatchKey::Autograd},
       {"CompositeImplicitAutograd",
        c10::DispatchKey::CompositeImplicitAutograd},

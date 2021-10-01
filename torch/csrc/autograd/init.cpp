@@ -17,12 +17,13 @@
 #include <torch/csrc/autograd/python_mode.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <c10/core/ScalarType.h>
+#include <aten/src/ATen/core/PythonModeTLS.h>
 
 #include <set>
 #include <unordered_set>
 
 struct DisableTorchDispatch {
-  DisableTorchDispatch() : guard_(c10::DispatchKey::Python) {
+  DisableTorchDispatch() : guard_(c10::DispatchKeySet({c10::DispatchKey::Python, c10::DispatchKey::PythonMode})) {
   }
   c10::impl::ExcludeDispatchKeyGuard guard_;
 };
@@ -225,6 +226,19 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
 #endif // USE_KINETO
     ;
 
+  m.def("_enter_python_mode", [](py::object type, py::object mode) {
+      torch::autograd::PythonMode::enter(type.ptr(), mode.ptr());
+      });
+  m.def("_mode_stack_size", []() {
+      return at::impl::PythonModeTLS::get_state().size();
+      });
+  m.def("_exit_python_mode", []() {
+      auto result =  torch::autograd::PythonMode::exit();
+      std::vector<py::handle> foo;
+      foo.push_back(py::handle(std::get<0>(result)));
+      foo.push_back(py::handle(std::get<1>(result)));
+      return foo;
+      });
   m.def("_enable_profiler",
         &enableProfiler,
         py::arg("config"),
@@ -515,20 +529,20 @@ static PyObject * python_exit_dual_level(PyObject* _unused, PyObject* args, PyOb
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * enter_python_mode(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  PythonMode::enter(arg);
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
+// static PyObject * enter_python_mode(PyObject* _unused, PyObject* args) {
+//   HANDLE_TH_ERRORS
+//   PythonMode::enter(arg, arg2);
+//   Py_RETURN_NONE;
+//   END_HANDLE_TH_ERRORS
+// }
 
-static PyObject * exit_python_mode(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  PythonMode::exit();
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
+//static PyObject * exit_python_mode(PyObject* _unused, PyObject* args) {
+//  HANDLE_TH_ERRORS
+//  PythonMode::exit();
+//  Py_RETURN_NONE;
+//  END_HANDLE_TH_ERRORS
+//}
+//
 // autograd methods on torch._C
 static PyMethodDef methods[] = { // NOLINT
   {"_set_grad_enabled", set_grad_enabled, METH_O, nullptr},
@@ -551,8 +565,8 @@ static PyMethodDef methods[] = { // NOLINT
   {"is_anomaly_enabled", is_anomaly_mode_enabled, METH_NOARGS, nullptr},
   {"_enter_dual_level", python_enter_dual_level, METH_NOARGS, nullptr},
   {"_exit_dual_level", castPyCFunctionWithKeywords(python_exit_dual_level), METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"_enter_python_mode", enter_python_mode, METH_O, nullptr},
-  {"_exit_python_mode", exit_python_mode, METH_NOARGS, nullptr},
+  // {"_enter_python_mode", enter_python_mode, METH_O, nullptr},
+  // {"_exit_python_mode", exit_python_mode, METH_NOARGS, nullptr},
   {nullptr, nullptr, 0, nullptr}
 };
 
