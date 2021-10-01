@@ -161,6 +161,7 @@ namespace {
         kHalf, kBFloat16, out.scalar_type(), "to_copy_out_inner_loop", [&]() { \
           const auto out_data = out.data_ptr<scalar_t>();                      \
           for (const auto idx : c10::irange(N)) {                              \
+            /* NOLINTNEXTLINE(bugprone-signed-char-misuse) */                  \
             out_data[idx] = static_cast<scalar_t>(self_data[idx]);             \
           }                                                                    \
         });                                                                    \
