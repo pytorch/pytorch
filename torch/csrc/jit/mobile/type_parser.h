@@ -9,10 +9,10 @@ class TypeParser {
   static std::unordered_set<std::string> getNonSimpleType();
   static std::unordered_set<std::string> getCustomType();
   std::unordered_set<std::string> getContainedTypes();
-  TypePtr parseNonSimple(const std::string& token);
 
  private:
   TypePtr parseTorchbindClassType();
+  TypePtr parseNonSimple(const std::string& token);
 
   void expect(const std::string& s);
 
