@@ -43,6 +43,7 @@ _functorch_lagging_meta = {
     ('any', ''),
     ('argmax', ''),
     ('argmin', ''),
+    ('argsort', ''),
     ('asin', ''),
     ('asinh', ''),
     ('atan', ''),
