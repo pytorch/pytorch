@@ -52,7 +52,7 @@ class builtin_registerer {
     va_list args;
     va_start(args, frozen_modules);
     const char* module_name = nullptr;
-    void* init_fn = nullptr;;
+    void* init_fn = nullptr;
     std::vector<std::pair<const char*, void*>> builtin_modules;
     while (true) {
       module_name = va_arg(args, const char*);
