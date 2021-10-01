@@ -116,12 +116,14 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
         # Generate native function impls that build IR nodes
         fm.write_with_template(f'{backend_dispatch_key}NativeFunctions.cpp', 'DispatchKeyNativeFunctions.cpp', lambda: {
             'includes': [f'#include "{path}"' for path in [
-                "lazy_tensor_core/csrc/tensor.h",
+                "ATen/MetaFunctions.h",
                 "lazy_tensor_core/csrc/aten_ltc_bridge.h",
+                "lazy_tensor_core/csrc/helpers.h",
+                "lazy_tensor_core/csrc/tensor.h",
+                "lazy_tensor_core/csrc/tensor_util.h",
                 f"{output_dir}/{backend_key}NativeFunctions.h",
                 f"{output_dir}/{backend_key}LazyIr.h",
                 f"{output_dir}/{backend_key}ShapeDtype.h",
-                "ATen/MetaFunctions.h",
             ]],
             'native_functions_include': '',
             'backend_namespace': 'torch_lazy_tensors',  # this is wrong

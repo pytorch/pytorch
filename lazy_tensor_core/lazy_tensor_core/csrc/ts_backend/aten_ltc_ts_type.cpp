@@ -764,17 +764,17 @@ LazyNativeFunctions::nll_loss_forward(const at::Tensor& self,
 // fallback for them because we've customized the autograd function for them
 // (backward needs saved indices from forward).
 
-std::tuple<at::Tensor, at::Tensor> LazyNativeFunctions::max_pool2d_with_indices(
-    const at::Tensor& self, at::IntArrayRef kernel_size, at::IntArrayRef stride,
-    at::IntArrayRef padding, at::IntArrayRef dilation, bool ceil_mode) {
-  return at::native::call_fallback_fn<
-      &ltc_eager_fallback, ATEN_OP(max_pool2d_with_indices)>::call(self,
-                                                                   kernel_size,
-                                                                   stride,
-                                                                   padding,
-                                                                   dilation,
-                                                                   ceil_mode);
-}
+// std::tuple<at::Tensor, at::Tensor> LazyNativeFunctions::max_pool2d_with_indices(
+//     const at::Tensor& self, at::IntArrayRef kernel_size, at::IntArrayRef stride,
+//     at::IntArrayRef padding, at::IntArrayRef dilation, bool ceil_mode) {
+//   return at::native::call_fallback_fn<
+//       &ltc_eager_fallback, ATEN_OP(max_pool2d_with_indices)>::call(self,
+//                                                                    kernel_size,
+//                                                                    stride,
+//                                                                    padding,
+//                                                                    dilation,
+//                                                                    ceil_mode);
+// }
 
 at::Tensor LazyNativeFunctions::max_pool2d_with_indices_backward(
     const at::Tensor& grad_output, const at::Tensor& self,

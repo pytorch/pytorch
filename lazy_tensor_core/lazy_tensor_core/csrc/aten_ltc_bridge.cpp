@@ -335,5 +335,15 @@ bool IsInteropView(const at::Tensor& t) {
   return impl && impl->IsInteropView();
 }
 
+// template <typename T, size_t... Indices>
+// auto TupleAtenFromLtcTensorsImpl(const std::vector<T>& tensors, std::index_sequence<Indices...>) {
+//     return std::make_tuple(tensors[Indices]...);
+// }
+
+// template <size_t N, typename T>
+// auto TupleAtenFromLtcTensors(const std::vector<T>& tensors) {
+//     return TupleAtenFromLtcTensorsImpl(tensors, std::make_index_sequence<N>{});
+// }
+
 }  // namespace bridge
 }  // namespace torch_lazy_tensors

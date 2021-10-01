@@ -5,7 +5,7 @@ from tools.codegen.model import (Type, BaseTy, BaseType, OptionalType,
 from tools.codegen.api.types import (BaseCppType, BaseCType, OptionalCType,
                                      ConstRefCType, NamedCType,
                                      MutRefCType,
-                                     VectorCType, intT, ListCType,
+                                     VectorCType, boolT, intT, ListCType,
                                      scalarT, scalarTypeT, ArrayRefCType, ArrayCType, TupleCType)
 
 valueT = BaseCppType('ir', 'Value')
@@ -34,6 +34,10 @@ def process_ir_type(typ: Type) -> Union[BaseCType, VectorCType, OptionalCType, L
             return BaseCType(valueT)
         elif typ.name == BaseTy.Scalar:
             return BaseCType(scalarT)
+        elif typ.name == BaseTy.bool:
+            return BaseCType(boolT)
+        elif typ.name == BaseTy.int:
+            return BaseCType(intT)
         else:
             raise AssertionError(f"TODO add support for type {repr(typ)}")
     elif isinstance(typ, OptionalType):

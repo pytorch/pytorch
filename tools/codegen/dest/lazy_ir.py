@@ -3,8 +3,7 @@ from dataclasses import dataclass
 from tools.codegen.context import method_with_native_function
 from tools.codegen.model import (BackendIndex, NativeFunction,
                                  NativeFunctionsGroup)
-from tools.codegen.api.types import (BaseCType, OptionalCType,
-                                     NamedCType, kernel_signature)
+from tools.codegen.api.types import (BaseCType, NamedCType, OptionalCType, VectorCType, kernel_signature)
 import tools.codegen.api.dispatcher as dispatcher
 from tools.codegen.api.lazy import LazyIrSchema, isValueType
 
@@ -29,6 +28,8 @@ def node_ctor_inputs(func: LazyIrSchema) -> str:
         else:
             if isinstance(arg.type, BaseCType) and arg.type.type.name == "vector<int64_t>":
                 node_ctor_scalars.append(f"std::vector<int64_t>({arg.name}.begin(), {arg.name}.end())")
+            if isinstance(arg.type, VectorCType):
+                node_ctor_scalars.append(f"Helpers::I64List({arg.name})")
             else:
                 node_ctor_scalars.append(f"{arg.name}")
 
@@ -133,51 +134,70 @@ def lazy_tensor_decls(value_types: List[NamedCType]) -> str:
     return "\n    ".join(lazy_tensor_decls)
 
 
-def gen_lazy_nativefunc_definition(f: NativeFunction, backend_index: BackendIndex,
+def gen_lazy_nativefunc_definition(func: NativeFunction, backend_index: BackendIndex,
                                    class_method_name: str) -> List[str]:
-    sig = kernel_signature(f, backend_index)
+    sig = kernel_signature(func, backend_index)
 
     # Lazy IR stuff
-    schema = LazyIrSchema(f.func)
+    schema = LazyIrSchema(func.func)
     all_types = schema.filtered_types()
     value_types = schema.filtered_types(values=True, scalars=False)
     scalar_types = schema.filtered_types(values=False, scalars=True)
     lazy_tensor_decls_str = lazy_tensor_decls(value_types)
     node_ctor_input_str = node_ctor_inputs(schema)
+    returns_length = len(schema.returns)
 
     # call the meta kernel if it exists, to compute output shape/dtype for our IR
-    if f.structured or f.structured_delegate is not None:
+    if func.structured or func.structured_delegate is not None:
+        meta_out = """auto out_shape = out_meta.sizes().vec();
+    auto out_dtype = out_meta.scalar_type();"""
+        if returns_length > 1:
+            meta_out = """auto out_dtype = CreateDTypeFromMetaTensors(out_meta);"""
+
         meta_args = ", ".join([f"{t.name}.to(c10::kMeta)" for t in value_types] +
                               [f"{t.name}" for t in scalar_types])
         meta_str = f"""auto out_meta = at::meta::{schema.aten_name}({meta_args});
-    auto out_shape = out_meta.sizes().vec();
-    auto out_dtype = out_meta.scalar_type();"""
+    {meta_out}"""
     else:
         meta_args = ", ".join([f"{t.name}" for t in all_types])
         meta_str = f"""
     auto out_shape = torch_lazy_tensors::ir::ops::compute_shape_{schema.aten_name}({meta_args});
     auto out_dtype = torch_lazy_tensors::ir::ops::compute_dtype_{schema.aten_name}({meta_args});"""
 
+    shape_str = """auto out_shape_shape = lazy_tensors::Shape(out_dtype, out_shape);"""
+    if returns_length > 1:
+        shape_str = """auto out_shape_shape = CreateComputationShapeFromMetaTensors(out_meta);"""
+    node_str = f"""auto node = ir::MakeNode<ir::ops::{schema.node_name}>({node_ctor_input_str}, out_shape_shape);"""
+
     assert len(value_types) > 0, f"Only supporting tensor ops so far, none found in {sig}"
     first_tensor = value_types[0]
-
-    return [f"""\
-{sig.decl(name=f"{class_method_name}::{schema.aten_name}")} {{
-    LTC_FN_COUNTER("lazy::");
-    {lazy_tensor_decls_str}
-    {meta_str}
-    return bridge::AtenFromLtcTensor(l_{first_tensor.name}.CreateFrom(
-        ir::MakeNode<ir::ops::{schema.node_name}>({node_ctor_input_str}, lazy_tensors::Shape(out_dtype, out_shape)),
-
-        // (whc): experiment on dtype
+    bridge_str = f"""auto result = bridge::AtenFromLtcTensor(l_{first_tensor.name}.CreateFrom(node,
+        // TODO (@wconstab): experiment on dtype
         // try always overriding output dtype to match the one ATen says our op should produce.
         // this diverges from most of the handwritten methods, which often do not override and
         // rely on other behavior in the lowering or copy process to make this correct.
         // (1) evaluate design goal: to always pick the IR's dtype in one place (here)
         // (2) rationalize this with Google's design, it may be a problem
         // (3) evaluate perf impact: make sure we're not actually doing casts becuase of this override
-        out_dtype));
-}};
+        out_dtype));"""
+    if returns_length > 1:
+        bridge_str = f"""std::vector<LazyTensor> lazy_tensors;
+    for (int i = 0; i < {returns_length}; i++) {{
+        lazy_tensors.push_back(l_{first_tensor.name}.CreateFrom(ir::Value(node, i), out_dtype[i]));
+    }}
+    auto result = bridge::TupleAtenFromLtcTensorsImpl(lazy_tensors, std::make_index_sequence<{returns_length}>{{}});"""
+
+    return [f"""\
+// TODO (@alanwaketan): Quite a lot inefficient copy-by-value there. Let's optimize it.
+{sig.decl(name=f"{class_method_name}::{schema.aten_name}")} {{
+    LTC_FN_COUNTER("lazy::");
+    {lazy_tensor_decls_str}
+    {meta_str}
+    {shape_str}
+    {node_str}
+    {bridge_str}
+    return result;
+}};\n
 """]
 
 
