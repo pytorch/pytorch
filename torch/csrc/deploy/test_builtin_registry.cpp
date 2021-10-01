@@ -1,13 +1,15 @@
+#include <Python.h>
 #include <gtest/gtest.h>
 #include <torch/csrc/deploy/builtin_registry.h>
-#include <Python.h>
 
 using namespace torch::deploy;
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 struct _frozen lib1_frozen_modules[] = {
     {"mod1", nullptr, 0},
     {nullptr, nullptr, 0}};
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 struct _frozen lib2_frozen_modules[] = {
     {"mod2", nullptr, 0},
     {"mod3", nullptr, 0},

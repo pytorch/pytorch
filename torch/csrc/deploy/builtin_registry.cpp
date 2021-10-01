@@ -1,5 +1,5 @@
-#include <torch/csrc/deploy/builtin_registry.h>
 #include <Python.h>
+#include <torch/csrc/deploy/builtin_registry.h>
 
 namespace torch {
 namespace deploy {
