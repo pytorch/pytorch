@@ -90,7 +90,7 @@ def sharded_linear(types, args, kwargs, pg):
     if input.size()[-1] != weight_size[1]:
         raise ValueError(
             f'Input dim: {input.size()[1]} does not match '
-            f'appropriate weight dim: {weight.size()[1]}')
+            f'appropriate weight dim: {weight_size[1]}')
     if not isinstance(weight._sharding_spec, ChunkShardingSpec):
         raise ValueError("Only ChunkShardingSpec supported for ShardedTensor ops!")
     if len(weight.local_shards()) != 1:
