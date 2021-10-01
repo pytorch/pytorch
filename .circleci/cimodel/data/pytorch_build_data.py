@@ -15,11 +15,6 @@ CONFIG_TREE_DATA = [
         ("clang", [
             ("7", [
                 ("3.6", [
-                    ("asan", [
-                        (True, [
-                            ("shard_test", [XImportant(True)]),
-                        ]),
-                    ]),
                     ("onnx", [XImportant(True)]),
                 ]),
             ]),
