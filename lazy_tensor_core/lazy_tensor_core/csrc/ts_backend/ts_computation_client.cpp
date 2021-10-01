@@ -55,8 +55,8 @@ std::vector<ComputationClient::DataPtr> TSComputationClient::ExecuteComputation(
     LTC_CHECK(
         lazy_tensors::compiler::TSComputationClient::HardwareDeviceType() !=
             at::kCUDA ||
-        ts_data->data_.device().type() == at::kCUDA);
-    stack.emplace_back(ts_data->data_);
+        ts_data->data().device().type() == at::kCUDA);
+    stack.emplace_back(ts_data->data());
   }
   interp.run(stack);
   std::vector<ComputationClient::DataPtr> results;
