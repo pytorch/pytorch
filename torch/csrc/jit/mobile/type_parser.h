@@ -11,12 +11,13 @@ class TypeParser {
   static std::unordered_set<std::string> getNonSimpleType();
   static std::unordered_set<std::string> getCustomType();
   std::unordered_set<std::string> getContainedTypes();
-  TypePtr parseNonSimple(const std::string& token);
 
  private:
   TypePtr parseNamedTuple(const std::string& qualified_name);
   TypePtr parseCustomType();
   TypePtr parseTorchbindClassType();
+  TypePtr parseNonSimple(const std::string& token);
+
   void expect(const std::string& s);
 
   template <class T>
