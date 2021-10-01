@@ -158,7 +158,8 @@ jobs:
           }
 
           if is_vanilla_build; then
-            echo "apt-get update && apt-get install -y qemu-user gdb" | docker exec -u root -i "$id" bash
+            echo "apt-get update || apt-get install libgnutls30" | docker exec -u root -i "$id" bash
+            echo "apt-get install -y qemu-user gdb" | docker exec -u root -i "$id" bash
             echo "cd workspace/build; qemu-x86_64 -g 2345 -cpu Broadwell -E ATEN_CPU_CAPABILITY=default ./bin/basic --gtest_filter=BasicTest.BasicTestCPU & gdb ./bin/basic -ex 'set pagination off' -ex 'target remote :2345' -ex 'continue' -ex 'bt' -ex='set confirm off' -ex 'quit \$_isvoid(\$_exitcode)'" | docker exec -u jenkins -i "$id" bash
           else
             echo "Skipping for ${BUILD_ENVIRONMENT}"
@@ -198,17 +199,6 @@ jobs:
           echo "(cat docker_commands.sh | docker exec -u jenkins -i "$id" bash) 2>&1" > command.sh
           unbuffer bash command.sh | ts
 
-          if [[ ${BUILD_ENVIRONMENT} == *"coverage"* ]]; then
-              echo "Retrieving C++ coverage report"
-              docker cp $id:/var/lib/jenkins/workspace/build/coverage.info ./test
-          fi
-          if [[ ${BUILD_ENVIRONMENT} == *"coverage"* || ${BUILD_ENVIRONMENT} == *"onnx"* ]]; then
-              echo "Retrieving Python coverage report"
-              docker cp $id:/var/lib/jenkins/workspace/test/.coverage ./test
-              docker cp $id:/var/lib/jenkins/workspace/test/coverage.xml ./test
-              python3 -mpip install codecov
-              python3 -mcodecov
-          fi
     - run:
         name: Report results
         no_output_timeout: "5m"
@@ -239,7 +229,3 @@ jobs:
         when: always
     - store_test_results:
         path: test-reports
-    - store_artifacts:
-        path: test/.coverage
-    - store_artifacts:
-        path: test/coverage.xml
