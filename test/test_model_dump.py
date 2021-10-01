@@ -217,6 +217,22 @@ class TestModelDump(TestCase):
             torch.jit.freeze(torch.jit.script(SimpleModel()).eval()),
             simple_model_memory)
 
+        # Make sure we can handle a model with both constants and data tensors.
+        class ComposedModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w1 = torch.zeros(1, 2)
+                self.w2 = torch.ones(2, 2)
+
+            def forward(self, arg):
+                return arg * self.w2 + self.w1
+
+        check_memory(
+            torch.jit.freeze(
+                torch.jit.script(ComposedModule()).eval(),
+                preserved_attrs=["w1"]),
+            4 * (2 + 4))
+
 
 if __name__ == '__main__':
     run_tests()
