@@ -9150,6 +9150,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),),),
     OpInfo('bucketize',
            dtypes=all_types_and(torch.bfloat16),
+           dtypesIfCUDA=all_types(),
            sample_inputs_func=sample_inputs_bucketize,
            supports_autograd=False,
            ),
