@@ -1471,6 +1471,8 @@ class TestNormalizeOperators(JitTestCase):
             "igamma",
             "igammac",
             "index_put",
+            "sparse.masked_amax",
+            "sparse.masked_sum",
             "nn.functional.conv2d",
             "nn.functional.dropout",
             "polygamma",

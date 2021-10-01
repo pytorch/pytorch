@@ -3116,23 +3116,11 @@ class TestReductions(TestCase):
             else:
                 return input.cpu().numpy()
 
-        def to_assert_equal(input):
-            assert_equal_kwargs = dict(equal_nan=True)
-            if input.dtype is torch.bfloat16:
-                assert_equal_kwargs['exact_dtype'] = False
-                assert_equal_kwargs['rtol'] = 1e-2
-                assert_equal_kwargs['atol'] = 1e-3
-            else:
-                assert_equal_kwargs['exact_dtype'] = True
-                if input.dtype is torch.float16:
-                    assert_equal_kwargs['rtol'] = 1e-2
-                    assert_equal_kwargs['atol'] = 1e-3
-            return assert_equal_kwargs
-
         samples = op.sample_inputs_func(op, device, dtype, requires_grad=False)
         for sample_input in samples:
             t = sample_input.input
             actual = op(t, *sample_input.args, **sample_input.kwargs)
+            exact_dtype = not (t.dtype is torch.bfloat16)
             expected = op.ref(to_numpy(t), *sample_input.args,
                               **dict(
                                   # `identity` is mapped to numpy reduction `initial` argument
@@ -3149,7 +3137,7 @@ class TestReductions(TestCase):
             outmask = torch.sparse._output_mask(t, **sample_input.kwargs)
             actual = torch.where(outmask, actual, torch.zeros_like(actual))
             expected = np.where(outmask.cpu().numpy(), expected, np.zeros_like(expected))
-            self.assertEqual(actual, expected, msg, **to_assert_equal(t))
+            self.assertEqual(actual, expected, msg, exact_dtype=exact_dtype)
 
 instantiate_device_type_tests(TestReductions, globals())
 
