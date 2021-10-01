@@ -7736,7 +7736,7 @@ op_db: List[OpInfo] = [
     # `softmax` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
     OpInfo('softmax',
-           aliases=('nn.functional.softmax',),
+           aliases=('special.softmax', 'nn.functional.softmax',),
            aten_name='softmax',
            dtypesIfCPU=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
@@ -7745,7 +7745,7 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            supports_out=False),
     OpInfo('softmax',
-           aliases=('nn.functional.softmax',),
+           aliases=('special.softmax', 'nn.functional.softmax',),
            variant_test_name="with_dtype",
            aten_name='softmax',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -9356,6 +9356,14 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_autograd=False,
+           skips=(
+               # resize_ is raising an error on input that requires grad on purpose
+               DecorateInfo(
+                   unittest.skip('Skipped! Resizing of variables that require grad is not supported.'),
+                   'TestGradients',
+                   'test_nondifferentiable',
+               ),
+           ),
            sample_inputs_func=sample_inputs_resize_ops),
     OpInfo('resize_as_',
            op=lambda x, other: torch.resize_as_(x.clone(), other),
@@ -9364,6 +9372,14 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_autograd=False,
+           skips=(
+               # resize_ is raising an error on input that requires grad on purpose
+               DecorateInfo(
+                   unittest.skip('Skipped! Resizing of variables that require grad is not supported.'),
+                   'TestGradients',
+                   'test_nondifferentiable',
+               ),
+           ),
            sample_inputs_func=sample_inputs_resize_ops),
     OpInfo('take_along_dim',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
