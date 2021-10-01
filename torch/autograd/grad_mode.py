@@ -95,7 +95,7 @@ class no_grad(_DecoratorContextManager):
     This context manager is thread local; it will not affect computation
     in other threads.
 
-    Also functions as a decorator. (Make sure to instantiate with parenthesis.)
+    Also functions as a decorator. (Make sure to instantiate with parentheses.)
 
     .. note::
         No-grad is one of several mechanisms that can enable or
