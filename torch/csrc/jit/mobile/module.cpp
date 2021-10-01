@@ -186,7 +186,8 @@ void Method::run(Stack& stack) const {
       owner_->getMetadata();
 
   if (observer) {
-    observer->onEnterRunMethod(instance_key);
+    observer->onEnterRunMethod(
+        copied_metadata, instance_key, function_->name());
   }
 
   auto debug_info = std::make_shared<MobileDebugInfo>();
@@ -209,8 +210,6 @@ void Method::run(Stack& stack) const {
 #endif
 
     observer->onFailRunMethod(
-        copied_metadata,
-        function_->name(),
         instance_key,
         error_message.empty() ? "Unknown exception" : error_message.c_str());
   });
@@ -219,8 +218,7 @@ void Method::run(Stack& stack) const {
     stack.insert(stack.begin(), owner_->_ivalue()); // self
     function_->run(stack);
     if (observer) {
-      observer->onExitRunMethod(
-          copied_metadata, function_->name(), instance_key);
+      observer->onExitRunMethod(instance_key);
     }
     failure_guard.release();
     // This exception must be caught first as it derived from c10::Error

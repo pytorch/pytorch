@@ -8,8 +8,7 @@ namespace tensorexpr {
 Tensor computeMatmul(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    const c10::optional<ScalarType>& outputType,
-    at::Device device) {
+    const c10::optional<ScalarType>& outputType) {
   Dtype dtype = kFloat;
   if (outputType) {
     dtype = Dtype(*outputType);
@@ -54,8 +53,7 @@ Tensor computeMatmul(
 Tensor computeAddMM(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    const c10::optional<ScalarType>& outputType,
-    at::Device device) {
+    const c10::optional<ScalarType>& outputType) {
   Dtype dtype = kFloat;
   if (outputType) {
     dtype = Dtype(*outputType);

@@ -470,7 +470,8 @@
             echo ${IOS_CERT_KEY_2022} >> cert.txt
             base64 --decode cert.txt -o Certificates.p12
             rm cert.txt
-            bundle exec fastlane install_cert
+            bundle exec fastlane install_root_cert
+            bundle exec fastlane install_dev_cert
             # install the provisioning profile
             PROFILE=PyTorch_CI_2022.mobileprovision
             PROVISIONING_PROFILES=~/Library/MobileDevice/Provisioning\ Profiles

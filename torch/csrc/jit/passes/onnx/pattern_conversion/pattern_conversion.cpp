@@ -90,9 +90,8 @@ std::unordered_map<int64_t, ConvertedIndex> MergeSliceAndSelectToIndices(
         dim = dim + rank - dim_offset;
       } else {
         std::cerr
-            << "Error: Cannot export ellipsis indexing for input "
-            << "of unknown rank. Check https://pytorch.org/docs/stable/onnx.html#indexing"
-            << "for details.";
+            << "Error: ONNX Remove Inplace Ops - Cannot export ellipsis indexing for input "
+            << "of unknown rank.";
       }
     }
     dim = dim + dim_offset;
@@ -200,8 +199,7 @@ std::vector<Value*> ReshapeToAdvancedIndexingFormat(
   if (((max_index_dim - min_index_dim + 1) != tensor_ind_count) &&
       tensor_ind_count != 0) {
     AT_ERROR(
-        "Only consecutive 1-d tensor indices are supported in exporting aten::index_put to ONNX.",
-        "Check https://pytorch.org/docs/stable/onnx.html#indexing for details");
+        "Only consecutive 1-d tensor indices are supported in exporting aten::index_put to ONNX.");
   }
 
   size_t tensor_ind_offset = tensor_ind_count == 0 ? 0 : tensor_ind_count - 1;
