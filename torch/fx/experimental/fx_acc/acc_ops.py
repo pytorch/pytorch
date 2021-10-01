@@ -1509,3 +1509,9 @@ def packed_quantized_convrelu2d_mapper(
         )
         relu_node.meta = node.meta
         return relu_node
+
+@register_acc_op_mapping(op_and_target=("call_function", torch.chunk))
+@register_acc_op_mapping(op_and_target=("call_method", "chunk"))
+@register_acc_op
+def chunk(*, input, chunks, dim=0):
+    return torch.chunk(input, chunks, dim)
