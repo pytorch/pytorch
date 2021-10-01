@@ -1009,57 +1009,59 @@ class TestFusedObsFakeQuant(TestCase):
 
         pt_op = torch.fused_moving_avg_obs_fake_quant
         # enable observer after 2 iterations and fake_quant after 4 iterations
-        for i in range(10):
-            if i > 2:
-                observer_on = 1
-            if i > 4:
-                fake_quant_on = 1
+        for output_fake_quant in [True, False]:
+            for i in range(10):
+                if i > 2:
+                    observer_on = 1
+                if i > 4:
+                    fake_quant_on = 1
 
-            x = torch.randn(5, 5, device=device)
-            out = pt_op(
-                x,
-                torch.tensor(observer_on, device=device),
-                torch.tensor(fake_quant_on, device=device),
-                in_running_min_op,
-                in_running_max_op,
-                scale,
-                zero_point,
-                avg_const,
-                0,
-                255,
-                0,
-                False,
-                symmetric_quant,
-            )
-            if observer_on:
-                (
-                    in_running_min_ref,
-                    in_running_max_ref,
-                ) = _get_tensor_min_max(
+                x = torch.randn(5, 5, device=device)
+                out = pt_op(
                     x,
-                    running_min=in_running_min_ref,
-                    running_max=in_running_max_ref,
-                    averaging_const=0.01,
+                    torch.tensor(observer_on, device=device),
+                    torch.tensor(fake_quant_on, device=device),
+                    in_running_min_op,
+                    in_running_max_op,
+                    scale,
+                    zero_point,
+                    avg_const,
+                    0,
+                    255,
+                    0,
+                    False,
+                    symmetric_quant,
+                    output_fake_quant,
                 )
+                if observer_on:
+                    (
+                        in_running_min_ref,
+                        in_running_max_ref,
+                    ) = _get_tensor_min_max(
+                        x,
+                        running_min=in_running_min_ref,
+                        running_max=in_running_max_ref,
+                        averaging_const=0.01,
+                    )
 
-            if fake_quant_on:
-                x_scale, x_zero_point = _get_scale_zp(
-                    in_running_min_ref,
-                    in_running_max_ref,
-                    torch.quint8,
-                    preserve_sparsity=symmetric_quant,
-                )
-                x_in = _fake_quantize_per_tensor_affine_reference(
-                    x, x_scale, x_zero_point, 0, 255
-                )
-                self.assertEqual(scale, x_scale)
-                self.assertEqual(zero_point, x_zero_point)
-            else:
-                x_in = x
+                if fake_quant_on and output_fake_quant:
+                    x_scale, x_zero_point = _get_scale_zp(
+                        in_running_min_ref,
+                        in_running_max_ref,
+                        torch.quint8,
+                        preserve_sparsity=symmetric_quant,
+                    )
+                    x_in = _fake_quantize_per_tensor_affine_reference(
+                        x, x_scale, x_zero_point, 0, 255
+                    )
+                    self.assertEqual(scale, x_scale)
+                    self.assertEqual(zero_point, x_zero_point)
+                else:
+                    x_in = x
 
-            self.assertEqual(in_running_min_ref, in_running_min_op)
-            self.assertEqual(in_running_max_ref, in_running_max_op)
-            torch.testing.assert_allclose(out, x_in)
+                self.assertEqual(in_running_min_ref, in_running_min_op)
+                self.assertEqual(in_running_max_ref, in_running_max_op)
+                torch.testing.assert_allclose(out, x_in)
 
         # Test empty input works
         x = torch.empty(0, 5, device=device)
