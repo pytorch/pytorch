@@ -147,7 +147,7 @@ jobs:
       NUM_TEST_SHARDS_ON_PULL_REQUEST: 1
       PR_BODY: ${{ github.event.pull_request.body }}
       NOGPU_RUNNER_TYPE: windows.4xlarge
-      ENABLE_FORCE_ON_CPU_TEST: ''
+      ENABLE_FORCE_ON_CPU_TEST: 1
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
@@ -237,10 +237,9 @@ jobs:
         run: |
           set -eux
           if [[ -z $PR_NUMBER ]]; then
-            echo not on PR
+            echo Not on PR
           else
-            wget -O pr.diff "https://patch-diff.githubusercontent.com/raw/pytorch/pytorch/pull/$PR_NUMBER.diff"
-            echo "GOT PR"
+            powershell -Command "Invoke-WebRequest https://github.com/pytorch/pytorch/pull/$PR_NUMBER.diff -OutFile pr.diff"
           fi
       - name: Test
         shell: bash
@@ -258,15 +257,6 @@ jobs:
         run: |
           # -ir => recursive include all files in pattern
           7z a "test-reports-$Env:FILE_SUFFIX.zip" -ir'!test\*.xml'
-      - uses: actions/upload-artifact@v2
-        name: Store Test Reports
-        if: always()
-        with:
-          name: test-reports-${{ matrix.config }}
-          retention-days: 14
-          if-no-files-found: error
-          path:
-            test-reports-*.zip
       - uses: seemethere/upload-artifact-s3@v3
         name: Store Test Reports on S3
         if: always()
