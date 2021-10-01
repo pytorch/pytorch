@@ -7,7 +7,7 @@ import torch.utils.show_pickle
 # from torch.utils.mobile_optimizer import optimize_for_mobile
 from torch.jit.mobile import (
     _load_for_lite_interpreter,
-    _get_model_contained_types,
+    _get_mobile_model_contained_types,
     _get_model_bytecode_version,
     _get_model_ops_and_info,
     _backport_for_mobile_to_buffer,
@@ -307,7 +307,7 @@ class testVariousModelVersions(TestCase):
         assert(ops_v6["aten::add.int"].num_schema_args == 2)
         assert(ops_v6["aten::add.Scalar"].num_schema_args == 2)
 
-    def test_get_model_contained_types(self):
+    def test_get_mobile_model_contained_types(self):
         class MyTestModule(torch.nn.Module):
             def __init__(self):
                 super(MyTestModule, self).__init__()
@@ -322,7 +322,7 @@ class testVariousModelVersions(TestCase):
 
         buffer = io.BytesIO(script_module._save_to_buffer_for_lite_interpreter())
         buffer.seek(0)
-        type_list = _get_model_contained_types(buffer)
+        type_list = _get_mobile_model_contained_types(buffer)
         assert(len(type_list) >= 0)
 
 if __name__ == '__main__':

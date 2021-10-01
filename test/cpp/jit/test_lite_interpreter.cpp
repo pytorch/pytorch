@@ -495,7 +495,7 @@ TEST(LiteInterpreterTest, GetContainTypes) {
   std::stringstream ss;
   m._save_for_mobile(ss, {}, true);
 
-  auto contained_types = _get_model_contained_types(ss);
+  auto contained_types = _get_mobile_model_contained_types(ss);
   AT_ASSERT(contained_types.size() >= 0);
 }
 
@@ -666,7 +666,7 @@ TEST(LiteInterpreterTest, isCompatibleFail) {
   auto runtime_info = RuntimeCompatibilityInfo{
       caffe2::serialize::kMaxSupportedBytecodeVersion,
       runtime_ops,
-      _get_supported_types()};
+      _get_mobile_supported_types()};
 
   auto result = is_compatible(runtime_info, model_info);
   AT_ASSERT(result.status = ModelCompatibilityStatus::ERROR);
@@ -679,7 +679,7 @@ TEST(LiteInterpreterTest, isCompatibleFail) {
   runtime_info = RuntimeCompatibilityInfo{
       caffe2::serialize::kMaxSupportedBytecodeVersion,
       runtime_ops,
-      _get_supported_types()};
+      _get_mobile_supported_types()};
   model_info.bytecode_version =
       caffe2::serialize::kMaxSupportedBytecodeVersion + 1;
 
