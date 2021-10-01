@@ -9,24 +9,29 @@ class TSComputationClient : public ComputationClient {
   using Data = client::Data;
 
  public:
-  struct TSData : public Data {
-    TSData(const at::Tensor& data, client::ShapeData shape, std::string device)
-        : Data(std::move(device), std::move(shape)), data_(data) {}
+  class TSData : public Data {
+    public:
 
-    TSData(client::ShapeData shape, std::string device)
-        : Data(std::move(device), std::move(shape)) {}
+      TSData(const at::Tensor& data, client::ShapeData shape, std::string device)
+          : Data(std::move(device), std::move(shape)), data_(data) {}
 
-    OpaqueHandle GetOpaqueHandle() override {
-      return reinterpret_cast<int64>(this);
-    }
+      TSData(client::ShapeData shape, std::string device)
+          : Data(std::move(device), std::move(shape)) {}
 
-    void Assign(const Data& data) override {
-      data_ = static_cast<const TSData&>(data).data_;
-    }
+      OpaqueHandle GetOpaqueHandle() override {
+        return reinterpret_cast<int64>(this);
+      }
 
-    bool HasValue() const override { return data_.defined(); }
+      void Assign(const Data& data) override {
+        data_ = static_cast<const TSData&>(data).data_;
+      }
 
-    at::Tensor data_;
+      bool HasValue() const override { return data_.defined(); }
+
+      at::Tensor data() { return data_; }
+
+    private:
+      at::Tensor data_;
   };
 
   DataPtr CreateDataPlaceholder(std::string device, Shape shape) override;

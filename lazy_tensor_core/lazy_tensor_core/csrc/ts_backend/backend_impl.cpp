@@ -49,7 +49,7 @@ class TSBackendImpl : public BackendImplInterface {
       c10::optional<at::ScalarType> logical_scalar_type) const override {
     const auto ts_data = std::static_pointer_cast<
         lazy_tensors::compiler::TSComputationClient::TSData>(data);
-    return ts_data->data_;
+    return ts_data->data();
   }
 
   lazy_tensors::ComputationClient::DataPtr MakeComputationDataFromTensor(
