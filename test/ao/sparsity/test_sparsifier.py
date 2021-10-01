@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 
+import itertools
 import logging
+import re
 
 import torch
 from torch import nn
@@ -78,7 +80,6 @@ class TestBaseSparsifier(TestCase):
         assert hasattr(model.seq[0], 'parametrizations')
         assert not hasattr(model.linear, 'parametrizations')
         assert hasattr(model.head, 'parametrizations')
-
 
     def test_step(self):
         model = Model()
@@ -199,6 +200,25 @@ class TestWeightNormSparsifier(TestCase):
             module = g['module']
             assert (1.0 - module.parametrizations['weight'][0].mask.mean()) > 0  # checking sparsity level did not collapse
 
+    def test_step_2_of_4(self):
+        model = Model()
+        sparsifier = WeightNormSparsifier(sparsity_level=1.0,
+                                          sparse_block_shape=(1, 4),
+                                          zeros_per_block=2)
+        sparsifier.prepare(model, config=[model.linear])
+        sparsifier.step()
+        # make sure the sparsity level is approximately 50%
+        self.assertAlmostEqual(model.linear.parametrizations['weight'][0].mask.mean().item(), 0.5, places=2)
+        # Make sure each block has exactly 50% zeros
+        module = sparsifier.module_groups[0]['module']
+        mask = module.parametrizations['weight'][0].mask
+        for row in mask:
+            for idx in range(0, len(row), 4):
+                block = row[idx:idx + 4]
+                block, _ = block.sort()
+                assert (block[:2] == 0).all()
+                assert (block[2:] != 0).all()
+
     def test_prepare(self):
         model = Model()
         sparsifier = WeightNormSparsifier()
@@ -220,3 +240,57 @@ class TestWeightNormSparsifier(TestCase):
             module = g['module']
             assert not is_parametrized(module, 'weight')
             assert not hasattr(module, 'mask')
+
+    def test_sparsity_levels(self):
+        sparsity_levels = [-1.0, 0.0, 0.5, 1.0, 2.0]
+        sparse_block_shapes = [(1, 1), (1, 4), (2, 2), (4, 1)]
+        zeros_per_blocks = [0, 1, 2, 3, 4]
+
+        testcases = itertools.tee(itertools.product(sparsity_levels,
+                                                    sparse_block_shapes,
+                                                    zeros_per_blocks))
+        # Create a config and model with all the testcases
+        model = nn.Sequential()
+        sparsifier = WeightNormSparsifier()
+
+        sparsity_per_layer_config = []
+        p = re.compile(r'[-\.\s]')
+        for sl, sbs, zpb in testcases[0]:
+            # Make sure the number of zeros is not > values in a block
+            if zpb > sbs[0] * sbs[1]:
+                continue
+            layer_name = f'{sl}_{sbs}_{zpb}'
+            layer_name = p.sub('_', layer_name)
+
+            layer = nn.Linear(12, 12, bias=False)
+            layer.weight = nn.Parameter(torch.ones(12, 12))
+            model.add_module(layer_name, layer)
+            config = {
+                'fqn': layer_name,
+                'sparsity_level': sl,
+                'sparse_block_shape': sbs,
+                'zeros_per_block': zpb
+            }
+            sparsity_per_layer_config.append(config)
+
+        sparsifier.prepare(model, sparsity_per_layer_config)
+        sparsifier.step()
+        sparsifier.squash_mask()
+        model.eval()
+
+        for sl, sbs, zpb in testcases[1]:
+            if zpb > sbs[0] * sbs[1]:
+                continue
+            layer_name = f'{sl}_{sbs}_{zpb}'
+            layer_name = p.sub('_', layer_name)
+            layer = getattr(model, layer_name)
+
+            # Level of sparsity is achieved
+            sparse_mask = (layer.weight == 0).float()
+            if zpb == 0:
+                assert sparse_mask.mean() == 0
+            else:
+                # Ratio of individual zeros in the tensor
+                true_sl = min(max(sl, 0.0), 1.0)
+                true_sl = true_sl * zpb / sbs[0] / sbs[1]
+                assert sparse_mask.mean() == true_sl
