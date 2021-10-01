@@ -526,6 +526,11 @@ void initJITBindings(PyObject* module) {
           py::arg("graph"))
       .def("_jit_pass_erase_shape_information", EraseShapeInformation)
       .def(
+          "_jit_object_is_non_holding",
+          [](Node& n) {
+            return toIValue(n.output())->toObject()->is_weak_compilation_ref();
+          })
+      .def(
           "_jit_erase_non_input_shape_information",
           [](std::shared_ptr<Graph>& g) {
             std::vector<TypePtr> input_types;
