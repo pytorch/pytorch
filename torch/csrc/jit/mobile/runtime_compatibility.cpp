@@ -7,7 +7,6 @@
 
 namespace c10 {
 TypePtr parseType(const std::string& pythonStr);
-std::unordered_set<std::string> getSupportedType();
 } // namespace c10
 
 namespace torch {
@@ -59,10 +58,10 @@ RuntimeCompatibilityInfo RuntimeCompatibilityInfo::get() {
   return RuntimeCompatibilityInfo{
       _get_runtime_bytecode_version(),
       _get_runtime_ops_and_info(),
-      _get_supported_types()};
+      _get_mobile_supported_types()};
 }
 
-std::unordered_set<std::string> _get_supported_types() {
+std::unordered_set<std::string> _get_mobile_supported_types() {
   std::unordered_set<std::string> supported_types;
   for (const auto& it : string_to_type_lut()) {
     supported_types.insert(it.first);

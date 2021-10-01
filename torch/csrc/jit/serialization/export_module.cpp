@@ -183,7 +183,7 @@ std::pair<IValue, IValue> getFunctionTuple(
       module._ivalue()->compilation_unit();
 
   for (const TypePtr& t : code->type_table()) {
-    auto type_str = t->annotation_str();
+    std::string type_str = t->annotation_str();
     if (t->kind() == TypeKind::TupleType) {
       TORCH_CHECK(
           cu->get_named_tuple(t->str()),
@@ -210,9 +210,8 @@ std::pair<IValue, IValue> getFunctionTuple(
           // "Tensor". In cpp, repr_str() will always return "Tensor" regardless
           // inferred type. When exporing custom type in bytecode, "Tensor" is
           // the preferred way to deserialize Tensor type
-          std::string type_str = it->is_inferred_type()
-              ? it->type()->str()
-              : it->type()->repr_str();
+          type_str = it->is_inferred_type() ? it->type()->str()
+                                            : it->type()->repr_str();
           named_tuple_str.append("[" + it->name() + ", " + type_str + "]");
           if (it != named_tuple_type->schema()->arguments().end() - 1) {
             named_tuple_str.append(",");

@@ -1816,13 +1816,13 @@ void initJitScriptBindings(PyObject* module) {
         std::istringstream in(buffer);
         return _get_model_bytecode_version(in);
       });
-  m.def("_get_model_contained_types", [](const std::string& filename) {
-    return _get_model_contained_types(filename);
+  m.def("_get_mobile_model_contained_types", [](const std::string& filename) {
+    return _get_mobile_model_contained_types(filename);
   });
   m.def(
-      "_get_model_contained_types_from_buffer", [](const std::string& buffer) {
+      "_get_mobile_model_contained_types_from_buffer", [](const std::string& buffer) {
         std::istringstream in(buffer);
-        return _get_model_contained_types(in);
+        return _get_mobile_model_contained_types(in);
       });
   py::class_<OperatorInfo>(m, "OperatorInfo")
       .def_readonly("num_schema_args", &OperatorInfo::num_schema_args);

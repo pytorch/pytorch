@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <test/cpp/jit/test_utils.h>
 
 #include <ATen/core/jit_type.h>
 
