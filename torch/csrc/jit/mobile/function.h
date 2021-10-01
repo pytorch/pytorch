@@ -5,7 +5,6 @@
 #include <ATen/core/function.h>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
-#include <torch/csrc/jit/mobile/executor.h>
 
 namespace torch {
 namespace jit {
@@ -25,7 +24,6 @@ class TORCH_API Function : public torch::jit::Function {
       TaskLauncher taskLauncher = at::launch) override;
   at::IValue operator()(Stack stack, const Kwargs& = {}) override;
   void ensure_defined() override {}
-  Executor& get_executor() override;
   size_t num_inputs() const override;
   void check_single_output() override;
   std::string pretty_print_schema() const override;
@@ -59,7 +57,6 @@ class TORCH_API Function : public torch::jit::Function {
   c10::QualifiedName name_;
   std::shared_ptr<Code> code_;
   at::optional<c10::FunctionSchema> schema_; // (byte-code version 4+)
-  EdgeExecutor executor_;
 };
 
 } // namespace mobile

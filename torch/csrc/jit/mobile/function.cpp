@@ -13,9 +13,7 @@ char const* toString(OpCode op);
 namespace mobile {
 
 Function::Function(c10::QualifiedName name)
-    : name_(std::move(name)),
-      code_(std::make_shared<Code>()),
-      executor_(*code_) {}
+    : name_(std::move(name)), code_(std::make_shared<Code>()) {}
 
 const c10::QualifiedName& Function::qualname() const {
   return name_;
@@ -185,10 +183,6 @@ at::IValue Function::operator()(Stack stack, const Kwargs& kwargs) {
   TORCH_INTERNAL_ASSERT(kwargs.empty());
   run(stack);
   return stack.front();
-}
-
-Executor& Function::get_executor() {
-  return executor_;
 }
 
 size_t Function::num_inputs() const {
