@@ -6,8 +6,8 @@ import torch.nn.functional as F
 import torch.jit
 import torch.jit.quantized
 
-# torch.quantization
-from torch.quantization import (
+# torch.ao.quantization
+from torch.ao.quantization import (
     QConfig,
     default_dynamic_qconfig,
     float16_dynamic_qconfig,
@@ -26,8 +26,8 @@ from torch.quantization import (
     PlaceholderObserver,
 )
 
-# torch.quantization.quantize_jit
-from torch.quantization.quantize_jit import (
+# torch.ao.quantization.quantize_jit
+from torch.ao.quantization.quantize_jit import (
     convert_jit,
     convert_dynamic_jit,
     fuse_conv_bn_jit,
@@ -2963,10 +2963,10 @@ class TestQuantizeJitOps(QuantizationTestCase):
             m = torch.nn.Sequential(torch.nn.Conv2d(1, 1, 1))
             m.eval()
             m = torch.jit.trace(m, torch.rand(4, 1, 4, 4))
-            qconfig = torch.quantization.get_default_qconfig("qnnpack")
-            prepared_model = torch.quantization.prepare_jit(m, {"": qconfig})
+            qconfig = torch.ao.quantization.get_default_qconfig("qnnpack")
+            prepared_model = torch.ao.quantization.prepare_jit(m, {"": qconfig})
             prepared_model(torch.rand(4, 1, 4, 4))
-            converted_model = torch.quantization.convert_jit(prepared_model)
+            converted_model = torch.ao.quantization.convert_jit(prepared_model)
             FileCheck().check("quantized::conv2d").run(converted_model.graph)
 
     @skipIfNoFBGEMM
