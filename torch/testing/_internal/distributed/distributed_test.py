@@ -3616,7 +3616,11 @@ class DistributedTest:
         def _assert_equal_param(self, param_gpu, param_DDP):
             self.assertEqual(len(param_gpu), len(param_DDP))
             for p_gpu, p_DDP in zip(param_gpu, param_DDP):
-                self.assertEqual(p_gpu, p_DDP)
+                self.assertEqual(p_gpu, p_DDP, allow_inf=False)
+                if p_gpu.requires_grad and p_DDP.requires_grad:
+                    self.assertTrue(p_gpu.grad is not None)
+                    self.assertTrue(p_DDP.grad is not None)
+                    self.assertEqual(p_gpu.grad, p_DDP.grad, allow_inf=False)
 
         def _test_DDP_niter(
             self,
@@ -4973,6 +4977,36 @@ class DistributedTest:
                 global_bs=global_bs,
                 offset=bs_offset,
             )
+
+        @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                         "Only Nccl & Gloo backend support DistributedDataParallel")
+        @skip_if_no_cuda_distributed
+        @skip_if_no_gpu
+        def test_DistributedDataParallel_SyncBatchNorm_Empty_Batch_Size(self):
+            group, group_id, rank = self._init_global_test()
+            gpus = [rank]         # only do single GPU per process
+            # cpu training setup
+            model = BN_NET
+            num_processes = int(WORLD_SIZE)
+            # Generate input with some empty batch sizes on certain GPUs.
+            bs_array = torch.randint(low=0, high=10, size=(num_processes,), dtype=torch.int)
+            if (bs_array != 0).all().item():
+                bs_array[0] = 0     # make sure at lease one local batch is empty
+                if num_processes > 2:
+                    bs_array[num_processes // 2] = 0    # another empty batch in the middle
+            if bs_array.sum().item() == 0:
+                bs_array[0] = 1     # make sure the batch is not fully empty
+
+            local_bs = bs_array[rank].item()
+            bs_offset = bs_array[:rank].sum().item()
+            global_bs = bs_array.sum().item()
+
+            self._test_DistributedDataParallel_SyncBatchNorm(
+                gpu_subset=gpus,
+                rank=rank,
+                local_bs=local_bs,
+                global_bs=global_bs,
+                offset=bs_offset)
 
         def _test_ddp_logging_data(self, is_gpu):
             rank = dist.get_rank()
