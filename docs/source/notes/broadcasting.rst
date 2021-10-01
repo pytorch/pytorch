@@ -11,12 +11,9 @@ automatically expanded to be of equal sizes (without making copies of the data).
 
 General semantics
 -----------------
-Two tensors are "broadcastable" if the following rules hold:
-
-- Each tensor has at least one dimension.
-- When iterating over the dimension sizes, starting at the trailing dimension,
-  the dimension sizes must either be equal, one of them is 1, or one of them
-  does not exist.
+Two tensors are "broadcastable" if when iterating over the dimension sizes,
+starting at the trailing dimension, the dimension sizes must either be equal,
+one of them is 1, or one of them does not exist.
 
 For Example::
 
@@ -24,9 +21,9 @@ For Example::
     >>> y=torch.empty(5,7,3)
     # same shapes are always broadcastable (i.e. the above rules always hold)
 
-    >>> x=torch.empty((0,))
+    >>> x=torch.empty(())
     >>> y=torch.empty(2,2)
-    # x and y are not broadcastable, because x does not have at least 1 dimension
+    # x and y are broadcastable, because x's shape does not exist
 
     # can line up trailing dimensions
     >>> x=torch.empty(5,3,4,1)
