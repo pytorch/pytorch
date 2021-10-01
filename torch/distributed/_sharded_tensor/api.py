@@ -4,7 +4,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import (
     Dict,
-    List
+    List,
+    Union
 )
 
 import threading
@@ -572,11 +573,15 @@ class ShardedTensor(object):
         """
         return self._local_shards
 
-    def size(self) -> torch.Size:
-        """
-        Returns the size of the tensor. The returned value is a subclass of tuple.
-        """
-        return self._metadata.size
+    def size(self, dim: int = None) -> Union[torch.Size, int]:
+       """
+       Returns the size of the tensor. When dim not specified, the returned
+       value is a subclass of tuple. If dim is given, we return int.
+       """
+       size = self._metadata.size
+       if dim is not None:
+           return size[dim]
+       return size
 
     def is_pinned(self) -> bool:
         """
@@ -620,9 +625,9 @@ class ShardedTensor(object):
         """
         if not self._init_rrefs:
             raise RuntimeError(
-                'ShardedTensor created with init_rrefs=False, no RRefs to remote shards available'
-            )
-        return self._remote_shards
+                    'ShardedTensor created with init_rrefs=False, no RRefs to remote shards available'
+                    )
+            return self._remote_shards
 
     def __repr__(self):
         return f'ShardedTensor({self._metadata})'
@@ -639,11 +644,11 @@ class ShardedTensor(object):
 
     def __getstate__(self):
         pg_state = ShardedTensor.ProcessGroupState(
-            distributed_c10d.get_rank(self._process_group),
-            distributed_c10d.get_rank(),
-            distributed_c10d.get_world_size(self._process_group),
-            distributed_c10d.get_world_size(),
-        )
+                distributed_c10d.get_rank(self._process_group),
+                distributed_c10d.get_rank(),
+                distributed_c10d.get_world_size(self._process_group),
+                distributed_c10d.get_world_size(),
+                )
 
         return self._local_shards, self._metadata, pg_state, self._sharding_spec, self._init_rrefs
 
@@ -651,10 +656,10 @@ class ShardedTensor(object):
         self._sharded_tensor_id = None
         if not distributed_c10d.is_initialized():
             raise RuntimeError(
-                'Need to initialize default process group using '
-                '"init_process_group" before loading ShardedTensor')
+                    'Need to initialize default process group using '
+                    '"init_process_group" before loading ShardedTensor')
 
-        self._local_shards, self._metadata, pg_state, self._sharding_spec, self._init_rrefs = state
+            self._local_shards, self._metadata, pg_state, self._sharding_spec, self._init_rrefs = state
 
         # Setup process group
         global _CURRENT_PROCESS_GROUP
@@ -667,28 +672,28 @@ class ShardedTensor(object):
         local_rank = distributed_c10d.get_rank(self._process_group)
         if pg_state.local_rank != local_rank:
             raise RuntimeError(
-                f'Local rank at save time was {pg_state.local_rank}, but at '
-                f'load time was {local_rank}')
+                    f'Local rank at save time was {pg_state.local_rank}, but at '
+                    f'load time was {local_rank}')
 
-        global_rank = distributed_c10d.get_rank()
+            global_rank = distributed_c10d.get_rank()
         if pg_state.global_rank != global_rank:
             raise RuntimeError(
-                f'Global rank at save time was {pg_state.global_rank}, but at '
-                f'load time was {global_rank}')
+                    f'Global rank at save time was {pg_state.global_rank}, but at '
+                    f'load time was {global_rank}')
 
-        local_world_size = distributed_c10d.get_world_size(self._process_group)
+            local_world_size = distributed_c10d.get_world_size(self._process_group)
         if pg_state.local_world_size != local_world_size:
             raise RuntimeError(
-                f'Local world size at save time was {pg_state.local_world_size}, '
-                f'but at load time was {local_world_size}')
+                    f'Local world size at save time was {pg_state.local_world_size}, '
+                    f'but at load time was {local_world_size}')
 
-        global_world_size = distributed_c10d.get_world_size()
+            global_world_size = distributed_c10d.get_world_size()
         if pg_state.global_world_size != global_world_size:
             raise RuntimeError(
-                f'Global world size at save time was {pg_state.global_world_size}, '
-                f'but at load time was {global_world_size}')
+                    f'Global world size at save time was {pg_state.global_world_size}, '
+                    f'but at load time was {global_world_size}')
 
-        self._post_init()
+            self._post_init()
 
 
 def _create_tensor_from_params(*size, local_device, tensor_init_params: TensorInitParams):
@@ -703,33 +708,33 @@ def _create_tensor_from_params(*size, local_device, tensor_init_params: TensorIn
 
     if create_op == CreateOp.ONES:
         return torch.ones(*size, dtype=dtype, layout=layout,
-                          device=local_device, pin_memory=pin_memory,
-                          requires_grad=requires_grad,)
+                device=local_device, pin_memory=pin_memory,
+                requires_grad=requires_grad,)
     elif create_op == CreateOp.EMPTY:
         return torch.empty(*size, dtype=dtype, layout=layout,
-                           device=local_device, requires_grad=requires_grad,
-                           # NB: memory_format param is not accepted by torch.ones
-                           memory_format=memory_format, pin_memory=pin_memory,)
+                device=local_device, requires_grad=requires_grad,
+                # NB: memory_format param is not accepted by torch.ones
+                memory_format=memory_format, pin_memory=pin_memory,)
     elif tensor_init_params.create_op == CreateOp.ZEROS:
         return torch.zeros(*size,
-                           dtype=dtype,
-                           layout=layout,
-                           device=local_device,
-                           pin_memory=pin_memory,
-                           requires_grad=requires_grad,)
+                dtype=dtype,
+                layout=layout,
+                device=local_device,
+                pin_memory=pin_memory,
+                requires_grad=requires_grad,)
     elif tensor_init_params.create_op == CreateOp.RAND:
         return torch.rand(*size,
-                          dtype=dtype,
-                          layout=layout,
-                          device=local_device,
-                          pin_memory=pin_memory,
-                          requires_grad=requires_grad,)
+                dtype=dtype,
+                layout=layout,
+                device=local_device,
+                pin_memory=pin_memory,
+                requires_grad=requires_grad,)
     elif tensor_init_params.create_op == CreateOp.FULL:
         return torch.full(size=size,
-                          fill_value=tensor_init_params.fill_value,
-                          layout=layout,
-                          dtype=dtype,
-                          requires_grad=requires_grad,
-                          device=local_device, )
+                fill_value=tensor_init_params.fill_value,
+                layout=layout,
+                dtype=dtype,
+                requires_grad=requires_grad,
+                device=local_device, )
     else:
         raise ValueError(f'Unsupported create_op: {tensor_init_params.create_op}')
