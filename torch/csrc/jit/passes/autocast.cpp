@@ -159,14 +159,14 @@ void castTensorInputs(
   WithInsertPoint insert_point(node);
 
   for (auto input : casted_inputs) {
-    if (cast_op == aten::autocast_to_full_precision) {
+    if (cast_op == aten::_autocast_to_full_precision) {
       const auto new_input = graph->insert(
           cast_op,
           {input,
            graph->insertConstant(IValue(context.enabled)),
            graph->insertConstant(IValue(context.cpu_enabled))});
       node->replaceInputWith(input, new_input);
-    } else if (cast_op == aten::autocast_to_reduced_precision) {
+    } else if (cast_op == aten::_autocast_to_reduced_precision) {
       const auto new_input = graph->insert(
           cast_op,
           {input,
@@ -217,7 +217,7 @@ void castInputsToWidestType(Node* node, const AutocastContext& context) {
     if (auto tensor_type = input->type()->cast<TensorType>()) {
       const auto dtype = tensor_type->scalarType();
       if (!dtype.has_value() || *dtype == at::ScalarType::Float) {
-        castTensorInputs(node, aten::autocast_to_full_precision, context);
+        castTensorInputs(node, aten::_autocast_to_full_precision, context);
         return;
       }
     }
@@ -322,7 +322,7 @@ void handleBlock(Block* block, AutocastContext initial_state) {
       case aten::rnn_relu_cell:
         if (!node->schema().is_mutable()) {
           castTensorInputs(
-              node, aten::autocast_to_reduced_precision, current_state());
+              node, aten::_autocast_to_reduced_precision, current_state());
         }
         break;
 
@@ -370,7 +370,7 @@ void handleBlock(Block* block, AutocastContext initial_state) {
       case aten::renorm:
         if (!node->schema().is_mutable()) {
           castTensorInputs(
-              node, aten::autocast_to_full_precision, current_state());
+              node, aten::_autocast_to_full_precision, current_state());
         }
         break;
 
@@ -383,7 +383,7 @@ void handleBlock(Block* block, AutocastContext initial_state) {
       case aten::sum:
         if (!node->schema().is_mutable() && !hasExplicitDtypeArgument(node)) {
           castTensorInputs(
-              node, aten::autocast_to_full_precision, current_state());
+              node, aten::_autocast_to_full_precision, current_state());
         }
         break;
 
