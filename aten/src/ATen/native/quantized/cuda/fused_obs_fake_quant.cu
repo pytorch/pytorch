@@ -234,7 +234,8 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cuda(
     const int64_t qmax,
     const int64_t ch_axis,
     bool per_row_fq,
-    bool symmetric_quant) {
+    bool symmetric_quant,
+    c10::optional<bool> output_fake_quant) {
   const auto x_contig = x.contiguous();
   // Calculate the size of the dimension we need to quantize over,
   // For per-channel quant we default to axis 0, since it is only for
@@ -280,31 +281,37 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cuda(
 
   float* scale_ptr = scale.data_ptr<float>();
   int32_t* zp_ptr = zero_point.data_ptr<int32_t>();
+  // If output_fake_quant has not been specified by user then default to true.
+  const bool out_fake_quant_val = output_fake_quant.has_value() ? output_fake_quant.value() : true;
+  if (out_fake_quant_val) {
+    _calc_moving_avg_qparams_helper(
+        x_contig,
+        fake_quant_on,
+        running_min,
+        running_max,
+        scale_ptr,
+        zp_ptr,
+        qmin,
+        qmax,
+        symmetric_quant,
+        size,
+        per_row_fq);
 
-  _calc_moving_avg_qparams_helper(
-      x_contig,
-      fake_quant_on,
-      running_min,
-      running_max,
-      scale_ptr,
-      zp_ptr,
-      qmin,
-      qmax,
-      symmetric_quant,
-      size,
-      per_row_fq);
-
-  if (per_row_fq) {
-    if (fake_quant_on.item().toInt()) {
-      return at::fake_quantize_per_channel_affine_cachemask(
-          x, scale, zero_point, 0, qmin, qmax);
+    if (per_row_fq) {
+      if (fake_quant_on.item().toInt()) {
+        return at::fake_quantize_per_channel_affine_cachemask(
+            x, scale, zero_point, 0, qmin, qmax);
+      } else {
+        auto mask = at::ones_like(x, at::kBool, MemoryFormat::Preserve);
+        return std::make_tuple(x.clone(), mask);
+      }
     } else {
-      auto mask = at::ones_like(x, at::kBool, MemoryFormat::Preserve);
-      return std::make_tuple(x.clone(), mask);
+        return at::_fake_quantize_per_tensor_affine_cachemask_tensor_qparams(
+            x, scale, zero_point, fake_quant_on, qmin, qmax);
     }
   } else {
-    return at::_fake_quantize_per_tensor_affine_cachemask_tensor_qparams(
-        x, scale, zero_point, fake_quant_on, qmin, qmax);
+    auto mask = at::ones_like(x, at::kBool, MemoryFormat::Preserve);
+    return std::make_tuple(x.clone(), mask);
   }
 }
 } // namespace native
