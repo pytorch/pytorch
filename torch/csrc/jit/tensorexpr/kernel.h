@@ -200,13 +200,6 @@ class TORCH_API TensorExprKernel {
   std::vector<ExprHandle> broadcastShapesMut(
       std::vector<std::vector<ExprHandle>> shapes);
 
-  ExprHandle chunk(
-      BufPtr b,
-      size_t chunkIdx,
-      int64_t dim,
-      int64_t chunks,
-      const std::vector<ExprHandle>& axes);
-
   ArgValue toArg(const torch::jit::Value* v) const;
   ExprHandle constant(const torch::jit::Value* v);
 

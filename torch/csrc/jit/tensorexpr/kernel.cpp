@@ -544,14 +544,14 @@ std::vector<int64_t> bufferSizes(BufPtr b) {
   return sizes;
 }
 
-ExprHandle TensorExprKernel::chunk(
-    BufPtr b,
+static ExprHandle chunk(
+    BufHandle b,
     size_t chunkIdx,
     int64_t dim,
     int64_t chunks,
     const std::vector<ExprHandle>& axes) {
   auto norm_dim = normalizeAndCheckIndex(dim, axes.size());
-  auto sizes = bufferSizes(b);
+  auto sizes = bufferSizes(b.node());
   size_t step = sizes[norm_dim] / chunks;
 
   std::vector<ExprHandle> indices;
@@ -564,7 +564,7 @@ ExprHandle TensorExprKernel::chunk(
     }
   }
 
-  return BufHandle(b).load(indices);
+  return b.load(indices);
 }
 
 ExprHandle TensorExprKernel::constant(const torch::jit::Value* v) {
@@ -1962,6 +1962,19 @@ Tensor tensorexpr::computeOperandValue(
       }
 
     } break;
+    case prim::ConstantChunk: {
+      return Compute(
+          "prim_constantchunk",
+          c10::fmap<DimArg>(outputShape),
+          [inputs](const std::vector<VarHandle>& axes) {
+            auto b = c10::get<BufHandle>(inputs[0]);
+            int64_t offset = c10::get<int64_t>(inputs[1]);
+            int64_t dim = c10::get<int64_t>(inputs[2]);
+            int64_t chunks = c10::get<int64_t>(inputs[3]);
+            std::vector<ExprHandle> indices(axes.begin(), axes.end());
+            return chunk(b, offset, dim, chunks, indices);
+          });
+    } break;
     case aten::acos: {
       return computeOneOperand(
           "aten_acos",
@@ -2514,51 +2527,40 @@ Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
     hasRandom_ = true;
   }
 
-  if (op == prim::ConstantChunk) {
-    return Compute(
-        "prim_constantchunk",
-        c10::fmap<DimArg>(sizesForValue(v)),
-        [this, v](const std::vector<VarHandle>& axes) {
-          auto const& n = v->node();
-          int64_t dim = n->i(attr::dim);
-          int64_t chunks = n->i(attr::chunks);
-          std::vector<ExprHandle> indices(axes.begin(), axes.end());
-          return chunk(
-              bufs_.at(n->input(0)), v->offset(), dim, chunks, indices);
-        });
-  }
+  auto outputType = findDtypeForValue(v);
+  std::vector<ExprHandle> outputShape = sizesForValue(v);
 
   std::vector<ArgValue> argInputs;
-  if (op != aten::to) {
+  if (op == prim::ConstantChunk) {
+    auto const& n = v->node();
+    argInputs.emplace_back(toArg(inputs[0]));
+    argInputs.emplace_back(static_cast<int64_t>(v->offset()));
+    argInputs.emplace_back(n->i(attr::dim));
+    argInputs.emplace_back(n->i(attr::chunks));
+  } else if (op == aten::to) {
+    argInputs.emplace_back(toArg(inputs[0]));
+  } else if (op == aten::conv2d) {
     for (auto inp : inputs) {
-      argInputs.push_back(toArg(inp));
+      argInputs.emplace_back(toArg(inp));
+    }
+    // handle optional bias
+    if (c10::get_if<ArgNone>(&argInputs[2])) {
+      Dtype dtype = outputType ? Dtype(*outputType) : kFloat;
+      std::vector<ExprHandle> biasShape;
+      biasShape.push_back(outputShape[1]);
+      auto bias_tensor = at::zeros({outputShape[1].AsNode<LongImm>()->value()});
+      unpacked_constant_tensors_.push_back(bias_tensor);
+      BufPtr buf = alloc<Buf>(
+          "conv2d_bias_opt_" + sanitizeName(v->debugName()),
+          ExprHandleVectorToExprVector(biasShape),
+          dtype);
+      constants_.push_back({buf, bias_tensor.data_ptr()});
+      argInputs[2] = BufHandle(buf);
     }
   } else {
-    argInputs.push_back(toArg(inputs[0]));
-  }
-
-  auto outputType = findDtypeForValue(v->node()->output());
-  std::vector<ExprHandle> outputShape = sizesForValue(v);
-  // handle ops optional arguments
-  // TODO: Avoid materializing optional tensors
-  switch (op) {
-    case aten::conv2d: {
-      // handle optional bias
-      if (c10::get_if<ArgNone>(&argInputs[2])) {
-        Dtype dtype = outputType ? Dtype(*outputType) : kFloat;
-        std::vector<ExprHandle> biasShape;
-        biasShape.push_back(outputShape[1]);
-        auto bias_tensor =
-            at::zeros({outputShape[1].AsNode<LongImm>()->value()});
-        unpacked_constant_tensors_.push_back(bias_tensor);
-        BufPtr buf = alloc<Buf>(
-            "conv2d_bias_opt_" + sanitizeName(v->debugName()),
-            ExprHandleVectorToExprVector(biasShape),
-            dtype);
-        constants_.push_back({buf, bias_tensor.data_ptr()});
-        argInputs[2] = BufHandle(buf);
-      }
-    } break;
+    for (auto inp : inputs) {
+      argInputs.emplace_back(toArg(inp));
+    }
   }
 
   if (NNCLoweringFunction custom_lowering = getCustomLoweringFor(op)) {
