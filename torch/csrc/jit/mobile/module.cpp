@@ -36,7 +36,7 @@ Method Module::get_method(const std::string& name) const {
 }
 
 c10::optional<Method> Module::find_method(const std::string& basename) const {
-  for (auto& fn : cu_->methods()) {
+  for (const auto& fn : cu_->methods()) {
     if (fn->name() == basename) {
       return c10::make_optional<Method>(Method(this, fn.get()));
     }
