@@ -10128,8 +10128,10 @@ op_db: List[OpInfo] = [
                          dtypes=[torch.float16], device_type='cuda'),
         ),
         decorators=[
-            DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=1e-03, rtol=1e-03)}), 'TestReductions', 'test_reference_masked'),
-            DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1e-03)}), 'TestReductions', 'test_reference_masked')],
+            DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=1e-03, rtol=1e-03)}),
+                         'TestReductions', 'test_reference_masked'),
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1e-03)}),
+                         'TestReductions', 'test_reference_masked')],
         sample_inputs_func=sample_inputs_masked_reduction
     ),
     ReductionOpInfo(
