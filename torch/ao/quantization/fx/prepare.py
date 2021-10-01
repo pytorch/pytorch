@@ -108,7 +108,6 @@ def node_arg_is_bias(node: Node, arg: Any) -> bool:
     if not isinstance(node, Node) or node.op != 'call_function':
         return False
 
-    assert not isinstance(node.target, str), "expected a function target"
     idx = BIAS_INDEX_DICT.get(node.target, None)
     return (
         idx is not None and

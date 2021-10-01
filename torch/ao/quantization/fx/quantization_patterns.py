@@ -1025,15 +1025,14 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
 
                     # get other arguments
                     kwargs = {**load_arg(quantized=torch.float)(self.linear_node.kwargs)}
-                    # pack weight
-                    bias = None
                     # all args after bias, including bias
                     other_args = load_arg(quantized=torch.float)(self.linear_node.args[2:])
+                    # bias might be either positional, or a keyword argument
                     if len(self.linear_node.args) > 2:
                         bias = load_arg(quantized=torch.float)(self.linear_node.args[2])
                         other_args = other_args[1:]  # remove the bias argument
                     else:
-                        kwargs.pop('bias', None)
+                        bias = kwargs.pop('bias', None)
 
                     prepack_args = (linear_weight, bias)
                     prepack_op = get_linear_prepack_op_for_dtype(weight_dtype)
