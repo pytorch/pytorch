@@ -11,6 +11,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/backends/backend_exception.h>
+#include <torch/csrc/jit/mobile/executor.h>
 #include <torch/csrc/jit/mobile/observer.h>
 
 namespace torch {
@@ -134,6 +135,14 @@ bool InterpreterState::run(Stack& stack) {
                   ->getMethod(code.constants_[inst.X].toStringRef());
           RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS(
               method.name(), debug_handle, stack);
+
+          if (method.hasExecutor()) {
+            auto& plan = method.get_executor().getPlanFor(stack, 0);
+            frame.step();
+            enterFrame(toEdgeExecutionPlan(plan).getCode());
+            continue;
+          }
+
           method.run(stack);
           frame.step();
         } break;
