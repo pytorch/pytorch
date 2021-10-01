@@ -972,7 +972,6 @@ Code::Code(
           remaining_bailout_depth)) {}
 
 Code::Code(CodeImpl* codeImpl) : pImpl(codeImpl) {}
-Code::~Code() = default;
 
 MobileCode::MobileCode(
     const std::shared_ptr<Graph>& graph,
