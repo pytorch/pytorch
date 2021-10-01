@@ -632,7 +632,8 @@ jobs:
           }
 
           if is_vanilla_build; then
-            echo "apt-get update && apt-get install -y qemu-user gdb" | docker exec -u root -i "$id" bash
+            echo "apt-get update || apt-get install libgnutls30" | docker exec -u root -i "$id" bash
+            echo "apt-get install -y qemu-user gdb" | docker exec -u root -i "$id" bash
             echo "cd workspace/build; qemu-x86_64 -g 2345 -cpu Broadwell -E ATEN_CPU_CAPABILITY=default ./bin/basic --gtest_filter=BasicTest.BasicTestCPU & gdb ./bin/basic -ex 'set pagination off' -ex 'target remote :2345' -ex 'continue' -ex 'bt' -ex='set confirm off' -ex 'quit \$_isvoid(\$_exitcode)'" | docker exec -u jenkins -i "$id" bash
           else
             echo "Skipping for ${BUILD_ENVIRONMENT}"
@@ -6619,26 +6620,6 @@ workflows:
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc7"
           resource_class: large
       - pytorch_linux_build:
-          name: pytorch_linux_xenial_py3_clang7_asan_build
-          requires:
-            - "docker-pytorch-linux-xenial-py3-clang7-asan"
-          build_environment: "pytorch-linux-xenial-py3-clang7-asan-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang7-asan"
-      - pytorch_linux_test:
-          name: pytorch_linux_xenial_py3_clang7_asan_test1
-          requires:
-            - pytorch_linux_xenial_py3_clang7_asan_build
-          build_environment: "pytorch-linux-xenial-py3-clang7-asan-test1"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang7-asan"
-          resource_class: large
-      - pytorch_linux_test:
-          name: pytorch_linux_xenial_py3_clang7_asan_test2
-          requires:
-            - pytorch_linux_xenial_py3_clang7_asan_build
-          build_environment: "pytorch-linux-xenial-py3-clang7-asan-test2"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang7-asan"
-          resource_class: large
-      - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_clang7_onnx_build
           requires:
             - "docker-pytorch-linux-xenial-py3-clang7-onnx"
@@ -8427,9 +8408,6 @@ workflows:
       - docker_build_job:
           name: "docker-pytorch-linux-xenial-py3-clang5-asan"
           image_name: "pytorch-linux-xenial-py3-clang5-asan"
-      - docker_build_job:
-          name: "docker-pytorch-linux-xenial-py3-clang7-asan"
-          image_name: "pytorch-linux-xenial-py3-clang7-asan"
       - docker_build_job:
           name: "docker-pytorch-linux-xenial-py3-clang7-onnx"
           image_name: "pytorch-linux-xenial-py3-clang7-onnx"
