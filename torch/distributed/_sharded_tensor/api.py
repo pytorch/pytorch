@@ -375,6 +375,9 @@ class ShardedTensor(object):
         the same `dst`. `out` should be a full size zero tensor on `dst` and
         None on all other ranks.
 
+        TODO: current only supports GPU. Will enable CPU and revise to replace
+              all_gather_object() to gather().
+
         Args:
             dst(int): The rank where full tensor is constructed. Default is 0.
             out (:class `torch.Tensor` optional): The output full tensor. Must to be provided
@@ -389,7 +392,7 @@ class ShardedTensor(object):
         world_size = dist.get_world_size(self._process_group)
 
         gathered_shards = [None] * world_size
-        # all_gather_object is not efficient. will revise this part once
+        # TODO all_gather_object is not efficient. will revise this part once
         # NCCL support for dist.gather() is ready
         with torch.cuda.device(curr_device):
             dist.all_gather_object(
