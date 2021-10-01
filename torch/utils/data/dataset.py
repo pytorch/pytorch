@@ -104,7 +104,7 @@ class Dataset(Generic[T_co]):
         cls.functions[function_name] = function
 
 
-class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
+class IterableDataset(Dataset[T_co]):
     r"""An iterable Dataset.
 
     All datasets that represent an iterable of data samples should subclass it.
@@ -216,7 +216,7 @@ class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
     # See NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
 
 
-class IterDataPipe(IterableDataset):
+class IterDataPipe(IterableDataset[T_co], metaclass=_DataPipeMeta):
     functions: Dict[str, Callable] = {}
     reduce_ex_hook : Optional[Callable] = None
     getstate_hook: Optional[Callable] = None
