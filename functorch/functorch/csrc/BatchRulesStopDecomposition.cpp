@@ -145,7 +145,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   STOP_DECOMPOSE(arctanh);
   STOP_DECOMPOSE(arctanh.out);
   STOP_DECOMPOSE(arctanh_);
-  STOP_DECOMPOSE(argsort);
   STOP_DECOMPOSE(argsort.dimname);
   STOP_DECOMPOSE(atleast_1d);
   STOP_DECOMPOSE(atleast_1d.Sequence);
