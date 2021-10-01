@@ -199,10 +199,6 @@ def _validate_output_tensor_for_gather(
                 f"Argument ``dst_tensor`` should be created on device {curr_device},"
                 f"but found on {dst_tensor.device}"
             )
-        if torch.count_nonzero(dst_tensor):
-            raise ValueError(
-                "Argument ``dst_tensor`` should be a zero tensor."
-            )
     elif dst_tensor:
         raise ValueError(
             "Argument ``dst_tensor`` must NOT be specified "
@@ -380,9 +376,9 @@ class ShardedTensor(object):
         None on all other ranks.
 
         Args:
-            dst(int): The rank where full tensor is constructed
-            out (:class `torch.Tensor` optional): The output full tensor. Needs to be provided
-            ONLY on `dst`
+            dst(int): The rank where full tensor is constructed. Default is 0.
+            out (:class `torch.Tensor` optional): The output full tensor. Must to be provided
+            ONLY on `dst` rank. Default is None.
         """
         my_rank = dist.get_rank(self._process_group)
         full_size = self.metadata().size
@@ -408,7 +404,7 @@ class ShardedTensor(object):
                 assert shards is not None, f"gathered shards cannot be None on {dst}"
                 for shard in shards:
                     metadata = shard.metadata
-                    tensor = shard.tensor.to(curr_device)
+                    tensor = shard.tensor
 
                     out_narrow_view = out
                     for dim in range(dims):
@@ -418,7 +414,7 @@ class ShardedTensor(object):
                             metadata.shard_lengths[dim],
                         )
 
-                    out_narrow_view.add_(tensor)
+                    out_narrow_view.copy_(tensor)
 
     @classmethod
     def _init_from_local_shards(
