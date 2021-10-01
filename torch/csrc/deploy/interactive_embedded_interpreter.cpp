@@ -4,6 +4,7 @@
  */
 #include <torch/csrc/deploy/deploy.h>
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 int main(int argc, char** argv) {
   // create multiple interpreter instances so the tool does not just cover the
   // simplest case with a single interpreter instance.

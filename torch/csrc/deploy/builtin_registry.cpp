@@ -100,7 +100,7 @@ std::vector<std::pair<const char*, void*>> builtin_registry::
 void builtin_registry::append_cpython_inittab() {
   for (const auto& pair : get()->get_all_builtin_modules()) {
     PyImport_AppendInittab(
-        pair.first, reinterpret_cast<PyObject* (*)(void)>(pair.second));
+        pair.first, reinterpret_cast<PyObject* (*)()>(pair.second));
   }
 }
 
