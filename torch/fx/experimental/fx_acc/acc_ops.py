@@ -185,6 +185,10 @@ def add(*, input, other):
 def unsqueeze(*, input, dim):
     return torch.unsqueeze(**locals())
 
+@register_acc_op_mapping(op_and_target=("call_function", torch.tile))
+@register_acc_op
+def tile(*, input, dims):
+    return torch.tile(**locals())
 
 @register_custom_acc_mapper_fn(
     op_and_target=("call_function", torch.stack),
