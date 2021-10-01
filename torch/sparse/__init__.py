@@ -293,16 +293,15 @@ and int32 dtypes, the identity values are {identity_float32}, {identity_uint8}, 
              'identity_uint8': dict(masked_sum='0',
                                     masked_prod='1',
                                     masked_amax=0,
-                                    masked_amin=2**8-1).get(func.__name__),
+                                    masked_amin=2 ** 8 - 1).get(func.__name__),
              'identity_int32': dict(masked_sum='0',
                                     masked_prod='1',
-                                    masked_amax=-2**31,
-                                    masked_amin=2**31-1).get(func.__name__),
+                                    masked_amax=-2 ** 31,
+                                    masked_amin=2 ** 31 - 1).get(func.__name__),
              'identity_float32': dict(masked_sum='0.0',
                                       masked_prod='1.0',
                                       masked_amax='-inf',
-                                      masked_amin='inf').get(func.__name__),
-            }
+                                      masked_amin='inf').get(func.__name__)}
         )) for k, v in docstring_templates.items())
 
     # Apply docstring templates to function doctring:
@@ -341,7 +340,7 @@ def _reduction_identity(op_name: str, input: Tensor):
     raise NotImplementedError(f'identity of {op_name} on {dtype} input')
 
 
-def _canonical_dim(dim: DimOrDims, ndim: int) -> Tuple[int]:
+def _canonical_dim(dim: DimOrDims, ndim: int) -> Tuple[int, ...]:
     """Return dim argument as a tuple of sorted dim values.
     """
     dims: List[int] = []
@@ -423,7 +422,7 @@ def masked_amax(input: Tensor,
             identity.fill_(_reduction_identity('sparse.masked_amax', input))
             mask_input = torch.where(mask, input, identity)
         dim_ = _canonical_dim(dim, mask_input.ndim)
-        return torch.amax(mask_input, dim_, keepdim).to(dtype=dtype)
+        return torch.amax(mask_input, dim_, bool(keepdim)).to(dtype=dtype)
     else:
         raise NotImplementedError(f'masked_amax of {input.layout} tensor')
 
