@@ -1,6 +1,6 @@
 # Torch
 import torch
-from torch.quantization import (
+from torch.ao.quantization import (
     MinMaxObserver,
     PerChannelMinMaxObserver,
     MovingAverageMinMaxObserver,
@@ -18,9 +18,7 @@ from torch.quantization import (
     get_observer_dict,
     prepare,
     QConfig,
-    QConfigDynamic,
     FusedMovingAvgObsFakeQuantize,
-    default_dynamic_quant_observer,
 )
 
 from torch.quantization.quantization_mappings import (
@@ -328,15 +326,15 @@ class TestObserver(QuantizationTestCase):
             qconfig = QConfig(activation=default_observer, weight=obs)
             qconfig_dict = {'' : qconfig}
             scripted = torch.jit.script(model)
-            scripted = torch.quantization.prepare_jit(scripted, qconfig_dict)
+            scripted = torch.ao.quantization.prepare_jit(scripted, qconfig_dict)
             x = torch.rand(5, 5)
             scripted(x)
-            obs_dict = torch.quantization.get_observer_state_dict(scripted)
+            obs_dict = torch.ao.quantization.get_observer_state_dict(scripted)
 
             # Load stats
             scripted_2 = torch.jit.script(model)
-            scripted_2 = torch.quantization.prepare_jit(scripted_2, qconfig_dict)
-            torch.quantization.load_observer_state_dict(scripted_2, obs_dict)
+            scripted_2 = torch.ao.quantization.prepare_jit(scripted_2, qconfig_dict)
+            torch.ao.quantization.load_observer_state_dict(scripted_2, obs_dict)
             # Verify that state_dict matches exactly with original one.
             self.assertEqual(scripted.state_dict(), scripted_2.state_dict())
 
@@ -751,13 +749,13 @@ class TestDistributed(QuantizationTestCase):
         without DataParallel in order to easily access the object IDs.
         """
         observer_types = [
-            torch.quantization.MinMaxObserver.with_args(dtype=torch.qint8),
-            torch.quantization.MovingAverageMinMaxObserver.with_args(dtype=torch.qint8),
-            torch.quantization.PerChannelMinMaxObserver.with_args(dtype=torch.qint8),
-            torch.quantization.MovingAveragePerChannelMinMaxObserver.with_args(dtype=torch.qint8),
-            torch.quantization.HistogramObserver.with_args(dtype=torch.qint8),
-            torch.quantization.RecordingObserver.with_args(dtype=torch.qint8),
-            torch.quantization.PlaceholderObserver.with_args(dtype=torch.float16),
+            torch.ao.quantization.MinMaxObserver.with_args(dtype=torch.qint8),
+            torch.ao.quantization.MovingAverageMinMaxObserver.with_args(dtype=torch.qint8),
+            torch.ao.quantization.PerChannelMinMaxObserver.with_args(dtype=torch.qint8),
+            torch.ao.quantization.MovingAveragePerChannelMinMaxObserver.with_args(dtype=torch.qint8),
+            torch.ao.quantization.HistogramObserver.with_args(dtype=torch.qint8),
+            torch.ao.quantization.RecordingObserver.with_args(dtype=torch.qint8),
+            torch.ao.quantization.PlaceholderObserver.with_args(dtype=torch.float16),
         ]
 
         for observer_type in observer_types:
@@ -779,15 +777,15 @@ class TestDistributed(QuantizationTestCase):
         However, DataParallel does not expose IDs of the replicas, so we test it
         without DataParallel in order to easily access the object IDs.
         """
-        model = torch.quantization.FakeQuantize()
+        model = torch.ao.quantization.FakeQuantize()
         buffer_ids_before = _get_buffer_ids(model)
         for _i in range(5):
             inputs = torch.rand((4, 4, 4))
             model(inputs)
-        model.apply(torch.quantization.enable_fake_quant)
-        model.apply(torch.quantization.disable_fake_quant)
-        model.apply(torch.quantization.enable_observer)
-        model.apply(torch.quantization.disable_observer)
+        model.apply(torch.ao.quantization.enable_fake_quant)
+        model.apply(torch.ao.quantization.disable_fake_quant)
+        model.apply(torch.ao.quantization.enable_observer)
+        model.apply(torch.ao.quantization.disable_observer)
         buffer_ids_after = _get_buffer_ids(model)
         self.assertEqual(
             buffer_ids_before,
@@ -806,7 +804,7 @@ class TestDistributed(QuantizationTestCase):
             device = torch.device('cuda')
 
             model = nn.Sequential(
-                torch.quantization.QuantStub(),
+                torch.ao.quantization.QuantStub(),
                 nn.Conv2d(3, 1, 1, bias=False),
                 nn.BatchNorm2d(1),
                 nn.ReLU(),
@@ -814,13 +812,13 @@ class TestDistributed(QuantizationTestCase):
                 nn.BatchNorm2d(2),
                 nn.AvgPool2d(14),
                 nn.Sigmoid(),
-                torch.quantization.DeQuantStub(),
+                torch.ao.quantization.DeQuantStub(),
             )
 
             torch.ao.quantization.fuse_modules(model, [['1', '2', '3'], ['4', '5']], inplace=True)
 
-            model.qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
-            torch.quantization.prepare_qat(model, inplace=True)
+            model.qconfig = torch.ao.quantization.get_default_qat_qconfig('fbgemm')
+            torch.ao.quantization.prepare_qat(model, inplace=True)
             model = nn.DataParallel(model, device_ids=[0, 1])
             model.to(device)
             model.train()
@@ -829,11 +827,11 @@ class TestDistributed(QuantizationTestCase):
                 inputs = torch.rand(2, 3, 28, 28).to(device)
                 model(inputs)
                 if epoch >= 1:
-                    model.apply(torch.quantization.disable_observer)
+                    model.apply(torch.ao.quantization.disable_observer)
                 if epoch >= 2:
                     model.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
                 quant_model = copy.deepcopy(model.module)
-                quant_model = torch.quantization.convert(quant_model.eval().cpu(), inplace=False)
+                quant_model = torch.ao.quantization.convert(quant_model.eval().cpu(), inplace=False)
                 with torch.no_grad():
                     out = quant_model(torch.rand(1, 3, 28, 28))
 
@@ -863,8 +861,8 @@ class TestDistributed(QuantizationTestCase):
                 [['conv', 'bn']],
             )
             # convert to QAT
-            fused_model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
-            torch.quantization.prepare_qat(fused_model, inplace=True)
+            fused_model.qconfig = torch.ao.quantization.get_default_qconfig('fbgemm')
+            torch.ao.quantization.prepare_qat(fused_model, inplace=True)
             # replace with DDP
             fused_model = nn.SyncBatchNorm.convert_sync_batchnorm(fused_model)
             self.assertTrue(
@@ -880,7 +878,7 @@ class TestDistributed(QuantizationTestCase):
             nn.Conv2d(1, 1, 1),
             nn.BatchNorm2d(1),
         )
-        m[1].qconfig = torch.quantization.default_qconfig
+        m[1].qconfig = torch.ao.quantization.default_qconfig
         m = torch.nn.SyncBatchNorm.convert_sync_batchnorm(m)
         self.assertTrue(
             hasattr(m[1], "qconfig"),
@@ -908,10 +906,10 @@ class TestDistributed(QuantizationTestCase):
                 return x
 
         model = Model()
-        model.qconfig = torch.quantization.get_default_qat_qconfig(torch.backends.quantized.engine)
+        model.qconfig = torch.ao.quantization.get_default_qat_qconfig(torch.backends.quantized.engine)
         device = torch.device('cuda:0')
         model.to(device)
-        torch.quantization.prepare_qat(model, inplace=True)
+        torch.ao.quantization.prepare_qat(model, inplace=True)
         model_devices = {p.device for p in model.parameters()} | \
             {p.device for p in model.buffers()}
         self.assertEqual(len(model_devices), 1)
@@ -940,8 +938,8 @@ class TestFusedObsFakeQuantModule(TestCase):
 
         # Run the forward on the Module
         mod = FusedMovingAvgObsFakeQuantize()
-        torch.quantization.enable_fake_quant(mod)
-        torch.quantization.enable_observer(mod)
+        torch.ao.quantization.enable_fake_quant(mod)
+        torch.ao.quantization.enable_observer(mod)
         mod.to(device)
         out = mod(x)
 
@@ -1035,13 +1033,13 @@ class TestFusedObsFakeQuantModule(TestCase):
     @settings(deadline=None)
     def test_compare_fused_obs_fq_oss_module(self, device):
         mod = FusedMovingAvgObsFakeQuantize()
-        torch.quantization.enable_fake_quant(mod)
-        torch.quantization.enable_observer(mod)
+        torch.ao.quantization.enable_fake_quant(mod)
+        torch.ao.quantization.enable_observer(mod)
         mod.to(device)
 
         mod_ref = FakeQuantize()
-        torch.quantization.enable_fake_quant(mod_ref)
-        torch.quantization.enable_observer(mod_ref)
+        torch.ao.quantization.enable_fake_quant(mod_ref)
+        torch.ao.quantization.enable_observer(mod_ref)
         mod_ref.to(device)
 
         for i in range(10):
@@ -1133,23 +1131,25 @@ class TestFusedObsFakeQuantModule(TestCase):
                                                   include_last_offset=True, scale_grad_by_freq=False, mode='sum')
                 self.emb2 = torch.nn.EmbeddingBag(num_embeddings=10, embedding_dim=12,
                                                   include_last_offset=True, scale_grad_by_freq=False, mode='sum')
+                # Note for EmbeddingBag, indices should never be quantized, only outputs
+                self.dequant = torch.quantization.DeQuantStub()
 
             def forward(self, indices):
-                return torch.cat((self.emb1(indices), self.emb2(indices)))
+                x = torch.cat((self.emb1(indices), self.emb2(indices)))
+                return self.dequant(x)
 
         model = Model()
         indices = torch.randint(0, 10, (5, 12))
         qat_mappings = get_default_qat_module_mappings()
-        float_qparams_fakequant = FakeQuantize.with_args(observer=torch.quantization.PerChannelMinMaxObserver,
-                                                        qscheme=torch.per_channel_affine_float_qparams,
-                                                        ch_axis=0,
-                                                        memoryless=True)
+        float_qparams_fakequant = FakeQuantize.with_args(observer=PerChannelMinMaxObserver,
+                                                         qscheme=torch.per_channel_affine_float_qparams,
+                                                         ch_axis=0,
+                                                         memoryless=True)
         float_qparams_qconfig = QConfig(activation=NoopObserver,
                                         weight=float_qparams_fakequant)
         model.qconfig = float_qparams_qconfig
 
-        quant_model = torch.quantization.QuantWrapper(model)
-        quant_model = torch.quantization.prepare_qat(quant_model, mapping=qat_mappings)
+        quant_model = torch.quantization.prepare_qat(model, mapping=qat_mappings)
 
         count_fake_quant = 0
         for name, mod in quant_model.named_modules():
@@ -1162,14 +1162,11 @@ class TestFusedObsFakeQuantModule(TestCase):
         quant_model(indices)
 
         convert_mappings = get_default_static_quant_module_mappings()
-        # For EmbeddingBags, input should not be quantized.
-        convert_mappings[torch.ao.quantization.stubs.QuantStub] = torch.nn.quantizable.Identity
-
         inference_gm = torch.quantization.convert(quant_model.eval().cpu(), convert_mappings)
 
         # Ensure that EmbeddingBags are now quantized
-        self.assertEqual(type(inference_gm.module.emb1), torch.nn.quantized.EmbeddingBag)
-        self.assertEqual(type(inference_gm.module.emb2), torch.nn.quantized.EmbeddingBag)
+        self.assertEqual(type(inference_gm.emb1), torch.nn.quantized.EmbeddingBag)
+        self.assertEqual(type(inference_gm.emb2), torch.nn.quantized.EmbeddingBag)
 
 
     def test_default_fused_qat_config(self):
@@ -1188,9 +1185,9 @@ class TestFusedObsFakeQuantModule(TestCase):
             model = Model()
             model.linear.weight = torch.nn.Parameter(torch.randn(2, 2))
             sample_input = torch.randn(2, 2)
-            model.qconfig = torch.quantization.get_default_qat_qconfig(qengine, version=1)
-            ref_model = torch.quantization.QuantWrapper(model)
-            ref_model = torch.quantization.prepare_qat(ref_model)
+            model.qconfig = torch.ao.quantization.get_default_qat_qconfig(qengine, version=1)
+            ref_model = torch.ao.quantization.QuantWrapper(model)
+            ref_model = torch.ao.quantization.prepare_qat(ref_model)
             ref_model(sample_input)
             count_fake_quant = 0
             for name, mod in ref_model.named_modules():
