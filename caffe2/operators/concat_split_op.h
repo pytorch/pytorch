@@ -169,25 +169,27 @@ bool SplitOp<Context>::RunOnDevice() {
   if (add_axis_) {
     output_dims.erase(output_dims.begin() + canonical_axis);
   }
-  size_t input_offset = 0;
-  for (int i = 0; i < OutputSize(); ++i) {
-    auto* output = Output(i);
-    auto axis_dim = add_axis_ ? 1 : axis_data[i];
-    if (!add_axis_) {
-      output_dims[canonical_axis] = axis_data[i];
+  if (input.raw_data() != nullptr) {
+    size_t input_offset = 0;
+    for (int i = 0; i < OutputSize(); ++i) {
+      auto* output = Output(i);
+      auto axis_dim = add_axis_ ? 1 : axis_data[i];
+      if (!add_axis_) {
+        output_dims[canonical_axis] = axis_data[i];
+      }
+      output->Resize(output_dims);
+      math::CopyMatrix<Context>(
+          input.itemsize(),
+          before,
+          axis_dim * after,
+          static_cast<const char*>(input.raw_data()) + input_offset,
+          input.dim32(canonical_axis) * after,
+          output->raw_mutable_data(input.dtype()),
+          axis_dim * after,
+          &context_,
+          input.dtype().copy());
+      input_offset += axis_dim * after * input.itemsize();
     }
-    output->Resize(output_dims);
-    math::CopyMatrix<Context>(
-        input.itemsize(),
-        before,
-        axis_dim * after,
-        static_cast<const char*>(input.raw_data()) + input_offset,
-        input.dim32(canonical_axis) * after,
-        output->raw_mutable_data(input.dtype()),
-        axis_dim * after,
-        &context_,
-        input.dtype().copy());
-    input_offset += axis_dim * after * input.itemsize();
   }
   return true;
 }
