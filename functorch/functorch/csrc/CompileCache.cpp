@@ -1,3 +1,9 @@
+// Copyright (c) Facebook, Inc. and its affiliates.
+// All rights reserved.
+//
+// This source code is licensed under the BSD-style license found in the
+// LICENSE file in the root directory of this source tree.
+
 ///
 /// This file implements a pretty complicated cache hierarchy to
 /// support fast lookup of cached compiled kernels based on input
@@ -29,6 +35,7 @@
 /// This saves precious cycles in figuring out which kernel to
 /// launch!.
 ///
+#include <functorch/csrc/CompileCache.h>
 #include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
@@ -767,3 +774,53 @@ static CompileCache* createCompileCache(
   }
 }
 } // namespace
+
+namespace at {
+namespace functorch {
+
+void initCompileCacheBindings(PyObject* module) {
+  py::handle te(module);
+
+  py::class_<CompileCache>(te, "CompileCache")
+      .def(py::init(&createCompileCache))
+      .def(
+          "__call__", [](CompileCache& self, py::args args, py::kwargs kwargs) {
+            return py::reinterpret_steal<py::object>(
+                self.pyCall(args.ptr(), kwargs.ptr()));
+          });
+
+  py::class_<CompileResultProxy>(te, "CompileResult")
+      .def(
+          "set_code",
+          [](CompileResultProxy& self, const py::object& cg) {
+            self.res->setCode(cg);
+          })
+      .def(
+          "add_shape_check",
+          [](CompileResultProxy& self,
+             const std::tuple<int, int, int, int>& indices) {
+            self.res->addShapeCheck(indices);
+          })
+      .def(
+          "set_shape_from",
+          [](CompileResultProxy& self,
+             const std::vector<std::pair<int, int>>& indices) {
+            self.res->setShapeFrom(indices);
+          })
+      .def(
+          "set_stride_args_from",
+          [](CompileResultProxy& self,
+             const std::vector<std::pair<int, int>>& indices) {
+            self.res->setStrideArgsFrom(indices);
+          })
+      .def(
+          "add_allocated_output",
+          [](CompileResultProxy& self,
+             int optionsFrom,
+             const std::vector<int>& storageOrder) {
+            self.res->addAllocatedOutput(optionsFrom, storageOrder);
+          });
+}
+
+} // namespace functorch
+} // namespace at
