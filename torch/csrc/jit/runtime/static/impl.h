@@ -114,7 +114,7 @@ class TORCH_API StaticModule {
 
  private:
   explicit StaticModule(
-      std::pair<std::shared_ptr<torch::jit::Graph>, std::shared_ptr<Module>>
+      std::pair<std::shared_ptr<torch::jit::Graph>, c10::optional<Module>>
           graph_and_module,
       const StaticModuleOptions& opts);
 
@@ -189,7 +189,7 @@ class TORCH_API StaticModule {
   StaticModuleOptions opts_;
   bool first_input_is_self_{false};
   std::shared_ptr<torch::jit::Graph> graph_;
-  std::shared_ptr<torch::jit::Module> module_;
+  c10::optional<torch::jit::Module> module_;
   c10::optional<c10::FunctionSchema> schema_;
   std::unique_ptr<StaticRuntime> cached_runtime_;
 
@@ -376,8 +376,11 @@ class TORCH_API ProcessedNode {
     return *this;
   }
 
-  ProcessedNode(ProcessedNode&&) noexcept = default;
-  ProcessedNode& operator=(ProcessedNode&&) noexcept = default;
+  // These should be noexcept, but some Android build is failing
+  // saying the noexcept specification doesn't match the calculated
+  // one. Maybe c10::variant is throwing it off?
+  ProcessedNode(ProcessedNode&&) = default;
+  ProcessedNode& operator=(ProcessedNode&&) = default;
 
   void run();
 
