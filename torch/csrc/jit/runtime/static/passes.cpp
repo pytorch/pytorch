@@ -524,10 +524,11 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
   std::vector<Node*> equally_splits_to_remove;
   for (auto it = nodes.begin(); it != nodes.end(); ++it) {
     Node* node = *it;
-    const char* node_qual_string = node->kind().toQualString();
-    if (strcmp(node_qual_string, "fb::sigrid_transforms") == 0 ||
-        strcmp(node_qual_string, "fb::sigrid_transforms_torch_bind") == 0 ||
-        strcmp(node_qual_string, "fb::equally_split") == 0) {
+    const std::string node_qual_string = node->kind().toQualString();
+    if (node_qual_string == "fb::sigrid_transforms" ||
+        node_qual_string == "fb::sigrid_transforms_torch_bind" ||
+        node_qual_string == "fb::equally_split" ||
+        node_qual_string == "fb::gather_ranges_to_dense") {
       const Value* value_out = node->outputs()[0];
       if (value_out->uses().size() > 1) {
         continue;
@@ -543,7 +544,7 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
         continue;
       }
 
-      if (strcmp(node_qual_string, "fb::equally_split") != 0) {
+      if (node_qual_string != "fb::equally_split") {
         // If any output of the ListUnpack node is unmanaged, disable fusion
         // since the fused op assumes all outputs are either managed or not.
         // "fb::equally_split" is excluded here since it does doublecheck
@@ -567,7 +568,7 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
 
       node->eraseOutput(0);
 
-      if (strcmp(node_qual_string, "fb::equally_split") == 0 &&
+      if (node_qual_string == "fb::equally_split" &&
           node->outputs().size() == 1) {
         // This captures a case of `y = fb::equally_split(x, 1, _)` where y
         // becomes just an alias of x.
