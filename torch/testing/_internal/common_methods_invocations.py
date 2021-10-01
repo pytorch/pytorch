@@ -7736,7 +7736,7 @@ op_db: List[OpInfo] = [
     # `softmax` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
     OpInfo('softmax',
-           aliases=('nn.functional.softmax',),
+           aliases=('special.softmax', 'nn.functional.softmax',),
            aten_name='softmax',
            dtypesIfCPU=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
@@ -7745,7 +7745,7 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            supports_out=False),
     OpInfo('softmax',
-           aliases=('nn.functional.softmax',),
+           aliases=('special.softmax', 'nn.functional.softmax',),
            variant_test_name="with_dtype",
            aten_name='softmax',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
