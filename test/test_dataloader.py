@@ -1146,6 +1146,10 @@ except RuntimeError as e:
 
         # iterable-style
         dataset = CountingIterableDataset(20)
+        with self.assertRaisesRegex(ValueError, "DataLoader with IterableDataset: expected unspecified shuffle"):
+            self._get_data_loader(dataset, shuffle=True)
+        with self.assertRaisesRegex(ValueError, "DataLoader with IterableDataset: expected unspecified shuffle"):
+            self._get_data_loader(dataset, shuffle=3)
         with self.assertRaisesRegex(ValueError, "DataLoader with IterableDataset: expected unspecified sampler"):
             self._get_data_loader(dataset, sampler=torch.utils.data.SequentialSampler(dataset))
         with self.assertRaisesRegex(ValueError, "DataLoader with IterableDataset: expected unspecified sampler"):
