@@ -109,13 +109,6 @@ struct TensorInfo {
   c10::ScalarType dtype;
 };
 
-TORCH_API Tensor computeOperandValue(
-    c10::Symbol op,
-    const std::vector<ArgValue>& inputs,
-    const std::vector<ExprHandle>& outputShape,
-    const c10::optional<ScalarType>& outputType,
-    at::Device = at::kCPU);
-
 class TORCH_API TensorExprKernel {
   struct ConstantDescr {
     BufPtr buf;
