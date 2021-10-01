@@ -2,6 +2,7 @@
 #include <ATen/SparseCsrTensorImpl.h>
 #include <ATen/Tensor.h>
 #include <ATen/mkl/Sparse.h>
+#include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/mkl/SparseBlasImpl.h>
 
 #include <c10/core/ScalarType.h>
@@ -20,7 +21,7 @@ namespace mkl {
 
 namespace {
 
-c10::MaybeOwned<Tensor> inline prepare_dense_matrix_for_mkl(
+c10::MaybeOwned<Tensor> prepare_dense_matrix_for_mkl(
     const Tensor& tensor) {
   if (tensor.is_non_overlapping_and_dense() ||
       is_blas_compatible_row_major_order(tensor) ||
@@ -39,7 +40,7 @@ c10::MaybeOwned<Tensor> inline prepare_dense_matrix_for_mkl(
   * `tensor` - 2D strided Tensor.
   * `row_major` - coltrol the memory layout.
 */
-c10::MaybeOwned<Tensor> inline prepare_dense_matrix_for_mkl(
+c10::MaybeOwned<Tensor> prepare_dense_matrix_for_mkl(
     const Tensor& tensor,
     bool row_major) {
   if (is_blas_compatible_row_major_order(tensor) && row_major) {
