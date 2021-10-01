@@ -17521,6 +17521,48 @@ TEST(NVFuserTest, FusionFloatPow_CUDA) {
       __FILE__);
 }
 
+TEST(NVFuserTest, FusionIssue1127_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const int numel = 4;
+
+  auto tv0 = makeConcreteTensor({numel});
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {0});
+  auto tv2 = broadcast(tv1, {true});
+
+  auto tv3 = makeConcreteTensor({numel, numel});
+  fusion.addInput(tv3);
+
+  auto tv4 = sum(tv3, {1});
+
+  auto tv5 = add(tv2, tv4);
+  fusion.addOutput(tv5);
+
+  tv1->axis(0)->parallelize(ParallelType::TIDx);
+  tv2->axis(0)->parallelize(ParallelType::TIDx);
+  tv4->axis(1)->parallelize(ParallelType::TIDx);
+  tv5->axis(0)->parallelize(ParallelType::TIDx);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor at_t0 = at::randn({numel}, options);
+  at::Tensor at_t3 = at::randn({numel, numel}, options);
+  std::vector<IValue> aten_inputs = {at_t0, at_t3};
+  auto outputs = fe.runFusion(aten_inputs);
+
+  auto ref = at_t0.sum({0}).unsqueeze(0) + at_t3.sum({1});
+
+  // This fails because tv5 is predicated and parallelized with TIDx.
+  // TODO: Add validation to detect such invalid parallelization
+  ASSERT_ANY_THROW(
+      testValidate(&fusion, outputs, aten_inputs, {ref}, __LINE__, __FILE__));
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

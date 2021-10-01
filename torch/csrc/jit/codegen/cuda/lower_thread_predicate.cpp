@@ -205,9 +205,6 @@ void ThreadPredicateMap::updateBitSet(const Expr* expr) {
   // Which dims are reductions in inputs
   ParallelTypeBitmap input_reductions;
 
-  // Which dims are bcast in inputs
-  ParallelTypeBitmap input_bcasts;
-
   SourceMap src_map;
 
   // Run through inputs and update bitsets
@@ -232,10 +229,6 @@ void ThreadPredicateMap::updateBitSet(const Expr* expr) {
 
     const auto& pred_and_src = at(tv_inp);
 
-    input_preds |= pred_and_src.limited_types;
-
-    mergeSourceMap(src_map, pred_and_src.source_map);
-
     ParallelTypeBitmap id_reductions;
     ParallelTypeBitmap id_bcasts;
     ParallelTypeBitmap id_ptypes;
@@ -243,10 +236,12 @@ void ThreadPredicateMap::updateBitSet(const Expr* expr) {
     for (auto id : tv_inp->domain()->domain()) {
       if (id->isThread()) {
         id_ptypes.set(id->getParallelType());
-        if (id->isReduction())
+        if (id->isReduction()) {
           id_reductions.set(id->getParallelType());
-        if (id->isBroadcast())
+        }
+        if (id->isBroadcast()) {
           id_bcasts.set(id->getParallelType());
+        }
       }
     }
 
@@ -266,12 +261,23 @@ void ThreadPredicateMap::updateBitSet(const Expr* expr) {
       }
     }
 
+    // Figure out which dims bcast wants to reset
+    auto this_input_preds = pred_and_src.limited_types;
+    const auto bcast_reset_mask = ~(this_input_preds & id_bcasts);
+    this_input_preds &= bcast_reset_mask;
+
+    input_preds |= this_input_preds;
+
+    // Similarly, drop non-relevant source tensors
+    auto this_src_map = pred_and_src.source_map;
+    maskSouceMap(this_src_map, bcast_reset_mask);
+    mergeSourceMap(src_map, this_src_map);
+
     id_reductions |=
         getReductionPredicateForUnusedParallelTypes(tv_inp, at(tv_inp));
 
     // Accumulate
     input_reductions |= id_reductions;
-    input_bcasts |= id_bcasts;
 
     if (id_reductions.any()) {
       // add tv_inp as a source
@@ -282,15 +288,6 @@ void ThreadPredicateMap::updateBitSet(const Expr* expr) {
   // Update map for this tv, before accumulating to other inputs
   // Add any reductions this id has to any input predicates
   auto output_preds = input_preds | input_reductions;
-
-  // Figure out which dims bcast wants to reset
-  const auto bcast_reset_mask = ~(output_preds & input_bcasts);
-
-  // Get rid of any reductions which are bcasted
-  output_preds &= bcast_reset_mask;
-
-  // Similarly, drop non-relevant source tensors
-  maskSouceMap(src_map, bcast_reset_mask);
 
   // Run through outputs and set bitset predicates
   for (auto* out_tv : ir_utils::filterByType<TensorView>(expr->outputs())) {
