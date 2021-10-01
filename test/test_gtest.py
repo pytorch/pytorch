@@ -4,21 +4,29 @@ import os
 import sys
 from pathlib import Path
 from typing import List, Any
+import torch
 from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
     TEST_SAVE_XML,
     IS_WINDOWS,
     IS_MACOS,
+    IS_IN_CI
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TEST_BINARY_DIR = REPO_ROOT / "build" / "bin"
-if IS_WINDOWS:
-    TEST_BINARY_DIR = REPO_ROOT / "build" / "torch" / "bin"
-elif IS_MACOS:
-    TEST_BINARY_DIR = REPO_ROOT.parent / "cpp-build" / "bin"
+
+if IS_IN_CI:
+    if IS_WINDOWS:
+        TEST_BINARY_DIR = REPO_ROOT / "torch" / "bin"
+    elif IS_MACOS:
+        # maybe have to set DYLD_LIBRARY_PATH to .parent / "lib"
+        TEST_BINARY_DIR = Path(torch.__file__).resolve().parent / "bin"
+        # TEST_BINARY_DIR = REPO_ROOT.parent / "cpp-build" / "bin"
 BUILD_ENVIRONMENT = os.getenv("BUILD_ENVIRONMENT", "")
+
+print(f"[remove] USING PATH {TEST_BINARY_DIR}")
 
 # This is a temporary list of tests that use this framework rather than get run
 # as regular binaries.
