@@ -427,6 +427,41 @@ def masked_amax(input: Tensor,
         raise NotImplementedError(f'masked_amax of {input.layout} tensor')
 
 
+@_apply_docstring_templates
+def masked_amin(input: Tensor,
+                dim: DimOrDims = None,
+                *,
+                keepdim: Optional[bool] = False,
+                dtype: Optional[DType] = None,
+                mask: Optional[Tensor] = None) -> Tensor:
+    """
+{masked_reduction_signature}
+
+{masked_reduction_descr}
+
+{masked_reduction_identity_dtype}
+
+{masked_reduction_args}
+
+{masked_reduction_example}
+    >>> torch.sparse.masked_amin(input, 1, mask=mask)
+    tensor([                 -3, 9223372036854775807])
+    """
+    if dtype is None:
+        dtype = input.dtype
+    if input.layout == torch.strided:
+        if mask is None:
+            mask_input = input
+        else:
+            identity = torch.empty_like(input)
+            identity.fill_(_reduction_identity('sparse.masked_amin', input))
+            mask_input = torch.where(mask, input, identity)
+        dim_ = _canonical_dim(dim, mask_input.ndim)
+        return torch.amin(mask_input, dim_, bool(keepdim)).to(dtype=dtype)
+    else:
+        raise NotImplementedError(f'masked_amin of {input.layout} tensor')
+
+
 def _output_mask(input: Tensor,
                  dim: DimOrDims = None,
                  *,
