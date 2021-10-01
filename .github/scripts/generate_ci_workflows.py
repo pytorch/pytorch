@@ -46,6 +46,7 @@ LABEL_CIFLOW_CUDA = "ciflow/cuda"
 LABEL_CIFLOW_DEFAULT = "ciflow/default"
 LABEL_CIFLOW_LIBTORCH = "ciflow/libtorch"
 LABEL_CIFLOW_LINUX = "ciflow/linux"
+LABEL_CIFLOW_SANITIZERS = "ciflow/sanitizers"
 LABEL_CIFLOW_SCHEDULED = "ciflow/scheduled"
 LABEL_CIFLOW_SLOW = "ciflow/slow"
 LABEL_CIFLOW_WIN = "ciflow/win"
@@ -236,24 +237,12 @@ WINDOWS_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="windows",
-        build_environment="win-vs2019-cuda10.2-py3",
-        cuda_version="10.2",
-        test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
-        num_test_shards=2,
-        enable_force_on_cpu_test=1,
-        ciflow_config=CIFlowConfig(
-            enabled=True,
-            trigger_action_only=True,
-            labels={LABEL_CIFLOW_CUDA, LABEL_CIFLOW_WIN}
-        ),
-    ),
-    CIWorkflow(
-        arch="windows",
         build_environment="win-vs2019-cuda11.3-py3",
         cuda_version="11.3",
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
         num_test_shards=2,
         only_run_smoke_tests_on_pull_request=True,
+        enable_force_on_cpu_test=1,
         ciflow_config=CIFlowConfig(
             enabled=True,
             run_on_canary=True,
@@ -328,16 +317,22 @@ LINUX_WORKFLOWS = [
             labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU},
         ),
     ),
+    CIWorkflow(
+        arch="linux",
+        build_environment="linux-xenial-py3.6-clang7-asan",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang7-asan",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        num_test_shards=2,
+        distributed_test=False,
+        ciflow_config=CIFlowConfig(
+            enabled=True,
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_SANITIZERS, LABEL_CIFLOW_CPU},
+        ),
+    ),
     # CIWorkflow(
     #     arch="linux",
     #     build_environment="linux-xenial-py3.6-gcc7",
     #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc7",
-    #     test_runner_type=LINUX_CPU_TEST_RUNNER,
-    # ),
-    # CIWorkflow(
-    #     arch="linux",
-    #     build_environment="linux-xenial-py3.6-clang5-asan",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-asan",
     #     test_runner_type=LINUX_CPU_TEST_RUNNER,
     # ),
     # CIWorkflow(
