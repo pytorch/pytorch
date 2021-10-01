@@ -64,16 +64,6 @@ struct BuiltinOpFunction : public Function {
     // nop
   }
 
-  bool hasExecutor() const override {
-    return false;
-  }
-
-  Executor& get_executor() override {
-    TORCH_INTERNAL_ASSERT(false , "BuiltinFunction had an Executor requested "
-      "from it. This probably indicates that the JIT calling context needs a "
-      "special case on torch::jit::tryToGraphFunction()");
-  }
-
   const c10::FunctionSchema& getSchema() const override {
     return schema_;
   }

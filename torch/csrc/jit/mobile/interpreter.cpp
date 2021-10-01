@@ -123,8 +123,8 @@ bool InterpreterState::run(Stack& stack) {
         } break;
         case CALL: {
           auto& function = frame.getCode().functions_.at(inst.X);
-          enterFrame(*function->get_code());
           frame.step();
+          enterFrame(*function->get_code());
         } break;
         case INTERFACE_CALL: {
           torch::jit::Function& method =
