@@ -1518,3 +1518,18 @@ def acc_ops_dequantize(network, target, args, kwargs, name):
     layer.name = input_val.name + ".dequant"
     layer.axis = q_axis
     return layer.get_output(0)
+
+@tensorrt_converter(acc_ops.chunk)
+def acc_ops_chunk(network, target, args, kwargs, name):
+    input = kwargs["input"]
+
+
+    if any(not isinstance(t, trt.tensorrt.ITensor) for t in tensors):
+        raise RuntimeError(
+            f"cat received inputs {tensors} that is not part " "of the TensorRT region!"
+        )
+
+    layer = network.add_concatenation(inputs=tensors)
+    layer.axis = kwargs["dim"] - (1 if network.has_implicit_batch_dimension else 0)
+    layer.name = name
+    return layer.get_output(0)
