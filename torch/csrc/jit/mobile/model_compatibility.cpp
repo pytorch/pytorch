@@ -244,7 +244,6 @@ std::unordered_set<std::string> _get_model_contained_types(
         at::TypeParser parser(type_name);
         parser.parse();
         type_tokens = parser.getContainedTypes();
-        //  type_tokens = at::getContainedTypes(type_name);
         contained_types.insert(type_tokens.begin(), type_tokens.end());
       }
     }
