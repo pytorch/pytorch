@@ -6,6 +6,7 @@ PARENT_SCOPE)
 configure_file(THCGeneral.h.in "${CMAKE_CURRENT_BINARY_DIR}/THCGeneral.h")
 
 set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS}
+  ${CMAKE_CURRENT_SOURCE_DIR}/THCCachingHostAllocator.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THCGeneral.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THCStorageCopy.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensor.cpp
@@ -27,6 +28,7 @@ install(FILES
           THCTensorMathReduce.cuh
           THCAtomics.cuh
           THCAllocator.h
+          THCCachingHostAllocator.h
           THCGenerateAllTypes.h
           THCGenerateBFloat16Type.h
           THCGenerateBoolType.h

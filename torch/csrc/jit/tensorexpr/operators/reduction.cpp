@@ -21,9 +21,7 @@ namespace tensorexpr {
 
 Tensor computeSum(
     const std::vector<ArgValue>& inputs,
-    const std::vector<ExprHandle>& outputShape,
-    const c10::optional<ScalarType>& outputType,
-    at::Device device) {
+    const c10::optional<ScalarType>& outputType) {
   std::vector<size_t> axes;
   bool keepdim = false;
   // aten::sum takes the input tensor named self.
@@ -105,8 +103,7 @@ Tensor computeSum(
 Tensor computeMean(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    const c10::optional<ScalarType>& outputType,
-    at::Device device) {
+    const c10::optional<ScalarType>& outputType) {
   Dtype dtype = kFloat;
   if (outputType) {
     dtype = Dtype(*outputType);
@@ -132,8 +129,7 @@ Tensor computeMean(
 Tensor computeAdaptiveAvgPool2d(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    const c10::optional<ScalarType>& outputType,
-    at::Device device) {
+    const c10::optional<ScalarType>& outputType) {
   Dtype dtype = kFloat;
   if (outputType) {
     dtype = Dtype(*outputType);

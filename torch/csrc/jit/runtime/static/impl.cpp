@@ -535,7 +535,8 @@ void PrepareGraphForStaticModule(
   OptimizeGraph(graph, opts);
 }
 
-std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
+std::pair<std::shared_ptr<Graph>, std::shared_ptr<Module>>
+PrepareForStaticModule(
     const torch::jit::Module& m,
     bool is_frozen,
     const StaticModuleOptions& opts) {
@@ -545,26 +546,30 @@ std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
           << opts.optimize_memory << ", optimize_graph_output_memory"
           << opts.optimize_graph_output_memory;
 
-  Module module = m.copy();
+  std::shared_ptr<Module> module_ptr;
   if (!is_frozen) {
+    auto module = m.copy();
     module.eval();
-    module = freeze_module(module);
+    module_ptr = std::make_shared<Module>(freeze_module(module));
+  } else {
+    module_ptr = std::make_shared<Module>(m.copy());
   }
 
-  Method method = module.get_method("forward");
-  auto graph = module.get_method("forward").graph();
+  Method method = module_ptr->get_method("forward");
+  auto graph = module_ptr->get_method("forward").graph();
 
   // graph->dump();
   PrepareGraphForStaticModule(graph, opts);
 
-  return std::make_pair(graph, module);
+  return std::make_pair(graph, module_ptr);
 }
 
-std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
+std::pair<std::shared_ptr<Graph>, std::shared_ptr<Module>>
+PrepareForStaticModule(
     std::shared_ptr<torch::jit::Graph> graph,
     const StaticModuleOptions& opts) {
   PrepareGraphForStaticModule(graph, opts);
-  return std::make_pair(graph, c10::nullopt);
+  return std::make_pair(graph, nullptr);
 }
 
 } // namespace
@@ -581,7 +586,7 @@ StaticModule::StaticModule(
     : StaticModule(PrepareForStaticModule(m, is_frozen, opts), opts) {}
 
 StaticModule::StaticModule(
-    std::pair<std::shared_ptr<torch::jit::Graph>, c10::optional<Module>>
+    std::pair<std::shared_ptr<torch::jit::Graph>, std::shared_ptr<Module>>
         graph_and_module,
     const StaticModuleOptions& opts)
     : opts_(opts),
@@ -600,7 +605,7 @@ StaticModule::StaticModule(
   }
 
   // handle schema
-  if (module_.has_value()) {
+  if (module_) {
     Method method = module_->get_method("forward");
     schema_ = method.function().getSchema();
     if (RemoveSelfFromGraphInput(graph_)) {

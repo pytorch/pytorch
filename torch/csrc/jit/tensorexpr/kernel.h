@@ -5,7 +5,6 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
-#include <torch/csrc/jit/tensorexpr/lowerings.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
 namespace torch {
@@ -25,6 +24,35 @@ inline std::vector<int64_t> bufferSizes(const T& t) {
   return sizes;
 }
 
+enum ElementType {
+  kAllTypes = 0,
+  kIntegralTypes = 1 << 0,
+  kFloatingPointTypes = 1 << 1,
+  kBoolType = 1 << 2,
+  kComplexTypes = 1 << 3,
+  kQintTypes = 1 << 4,
+  kNonComplexOrQintTypes = kIntegralTypes | kBoolType | kFloatingPointTypes,
+};
+
+using ArgNone = c10::monostate;
+using BufList = std::vector<tensorexpr::BufHandle>;
+using IntList = std::vector<int64_t>;
+using ArgValue = c10::variant<
+    tensorexpr::BufHandle,
+    tensorexpr::VarHandle,
+    double,
+    int64_t,
+    bool,
+    BufList,
+    IntList,
+    ArgNone>;
+
+using NNCLoweringFunction = std::function<Tensor(
+    const std::vector<ArgValue>&,
+    const std::vector<ExprHandle>&,
+    const c10::optional<ScalarType>&,
+    at::Device)>;
+
 // Get the dimensions of a value.
 std::vector<ExprHandle> valueShape(const ArgValue& v);
 
@@ -43,6 +71,18 @@ ExprHandle constant(const ArgValue& v);
 std::vector<ExprHandle> computeIndicesToBroadcast(
     const std::vector<ExprHandle>& outputAxes,
     const std::vector<ExprHandle>& inputSizes);
+
+void promoteInputs(
+    std::vector<ExprHandle>& inputs,
+    const int typeConstraints = kAllTypes);
+
+ExprHandle promoteToDtype(ExprHandle e, ScalarType dt);
+
+ExprHandle promoteIntegerToDefaultType(const ExprHandle& e);
+
+ExprHandle demoteOutput(
+    const ExprHandle& e,
+    const c10::optional<ScalarType> type);
 
 inline std::string getArgValueName(const ArgValue& a) {
   if (c10::get_if<tensorexpr::BufHandle>(&a)) {
@@ -81,6 +121,18 @@ std::vector<T> convertVecArgValue(const std::vector<ArgValue>& v) {
   }
   return res;
 }
+
+struct TensorInfo {
+  std::vector<int64_t> dims;
+  c10::ScalarType dtype;
+};
+
+TORCH_API Tensor computeOperandValue(
+    c10::Symbol op,
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device = at::kCPU);
 
 class TORCH_API TensorExprKernel {
   struct ConstantDescr {
@@ -147,6 +199,13 @@ class TORCH_API TensorExprKernel {
       const std::vector<ExprHandle>& b);
   std::vector<ExprHandle> broadcastShapesMut(
       std::vector<std::vector<ExprHandle>> shapes);
+
+  ExprHandle chunk(
+      BufPtr b,
+      size_t chunkIdx,
+      int64_t dim,
+      int64_t chunks,
+      const std::vector<ExprHandle>& axes);
 
   ArgValue toArg(const torch::jit::Value* v) const;
   ExprHandle constant(const torch::jit::Value* v);

@@ -1,4 +1,4 @@
 INTERPRETER_0.1 {
-  global: newInterpreterImpl;
+  global: new_interpreter_impl;
   local: *;
 };
