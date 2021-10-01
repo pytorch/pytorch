@@ -17,7 +17,7 @@ struct Array {
   C10_HOST_DEVICE T& operator[](int i) {
     return data[i];
   }
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
   C10_HOST_DEVICE Array() = default;
   C10_HOST_DEVICE Array(const Array&) = default;
   C10_HOST_DEVICE Array& operator=(const Array&) = default;
