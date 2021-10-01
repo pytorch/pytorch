@@ -34,8 +34,8 @@ class SimpleModel(torch.nn.Module):
 class QuantModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.quant = torch.quantization.QuantStub()
-        self.dequant = torch.quantization.DeQuantStub()
+        self.quant = torch.ao.quantization.QuantStub()
+        self.dequant = torch.ao.quantization.DeQuantStub()
         self.core = SimpleModel()
 
     def forward(self, x):
@@ -155,14 +155,14 @@ class TestModelDump(TestCase):
 
     def get_quant_model(self):
         fmodel = QuantModel().eval()
-        fmodel = torch.quantization.fuse_modules(fmodel, [
+        fmodel = torch.ao.quantization.fuse_modules(fmodel, [
             ["core.layer1", "core.relu1"],
             ["core.layer2", "core.relu2"],
         ])
-        fmodel.qconfig = torch.quantization.get_default_qconfig("qnnpack")
-        prepped = torch.quantization.prepare(fmodel)
+        fmodel.qconfig = torch.ao.quantization.get_default_qconfig("qnnpack")
+        prepped = torch.ao.quantization.prepare(fmodel)
         prepped(torch.randn(2, 16))
-        qmodel = torch.quantization.convert(prepped)
+        qmodel = torch.ao.quantization.convert(prepped)
         return qmodel
 
     @unittest.skipUnless("qnnpack" in supported_qengines, "QNNPACK not available")
