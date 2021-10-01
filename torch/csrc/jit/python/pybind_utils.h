@@ -979,7 +979,7 @@ inline py::object runAndInsertCall(
     // and then run the callee with tracing disabled.
 
     // Get the graph `Value`s that represent the input IValues
-    auto inputs = last(stack, callee.graph()->inputs().size());
+    auto inputs = last(stack, toGraphFunction(callee).graph()->inputs().size());
     auto input_values =
         fmap(inputs, [](const IValue& v) { return tracer::getValueTrace(v); });
     TORCH_INTERNAL_ASSERT(callee.getSchema().returns().size() == 1)
