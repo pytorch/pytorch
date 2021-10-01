@@ -154,7 +154,7 @@ class DataLoader(Generic[T_co]):
     pin_memory: bool
     drop_last: bool
     timeout: float
-    sampler: Union[Sampler, Iterable, None]
+    sampler: Union[Sampler, Iterable]
     prefetch_factor: int
     _iterator : Optional['_BaseDataLoaderIter']
     __initialized = False
