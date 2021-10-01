@@ -9,9 +9,10 @@ namespace at { namespace native {
 // this function. Helper functions could take the PadSpecifier instead of
 // a Tensor, so that we never accidentally give them the unprocessed pad
 // specifier tensor.
-Tensor expand_pad_specifier(const Tensor& pad_spec, const char* arg_name, int64_t ndim) {
+Tensor expand_pad_specifier(const Tensor& pad_spec, const char* arg_name, int64_t ndim, bool constant_pad_format=false) {
   auto pad_spec_ndim = pad_spec.dim();
   auto pad_spec_numel = pad_spec.numel();
+  Tensor pad_spec_;
 
   // TODO: This logic can probably be simplified
   if (pad_spec_numel == 1) {
@@ -21,11 +22,14 @@ Tensor expand_pad_specifier(const Tensor& pad_spec, const char* arg_name, int64_
       "torch.pad: Expected ", arg_name, ".size() to be either ",
       "[], [1], [2], [1, 1], [1, 2], [input.dim(), 1], or [input.dim(), 2], but got ",
       pad_spec.sizes());
-    return pad_spec.as_strided({ndim, 2}, {0, 0});
+    pad_spec_ = pad_spec.as_strided({ndim, 2}, {0, 0});
 
   } else if ((pad_spec_ndim == 2) && (pad_spec.size(0) == ndim) && (pad_spec.size(1) == 1)) {
     // size [ndim, 1] case
-    return pad_spec.as_strided({ndim, 2}, {1, 0});
+    pad_spec_ = pad_spec.as_strided({ndim, 2}, {1, 0});
+    if (constant_pad_format) {
+      pad_spec_ = pad_spec_.flip({0});
+    }
 
   } else if (pad_spec_numel == 2) {
     // size [1, 1] and [1, 2] cases
@@ -34,7 +38,8 @@ Tensor expand_pad_specifier(const Tensor& pad_spec, const char* arg_name, int64_
       "torch.pad: Expected ", arg_name, ".size() to be either ",
       "[], [1], [2], [1, 1], [1, 2], [input.dim(), 1], or [input.dim(), 2], but got ",
       pad_spec.sizes());
-    return pad_spec.as_strided({ndim, 2}, {0, 1});
+
+    pad_spec_ = pad_spec.as_strided({ndim, 2}, {0, 1});
 
   } else {
     // size [ndim, 2] case
@@ -45,8 +50,15 @@ Tensor expand_pad_specifier(const Tensor& pad_spec, const char* arg_name, int64_
       pad_spec.sizes());
     // NOTE: There is no need to restride in this case, since it's
     // already the correct shape
-    return pad_spec;
+    pad_spec_ = pad_spec;
+    if (constant_pad_format) {
+      pad_spec_ = pad_spec_.flip({0});
+    }
   }
+  if (constant_pad_format && !pad_spec_.is_contiguous()) {
+    pad_spec_ = pad_spec_.contiguous();
+  }
+  return pad_spec_;
 }
 
 // Returns slices that can be used to index the inner section of the padded
@@ -112,8 +124,6 @@ Tensor& pad_out_impl(
   TORCH_CHECK(pad_width.scalar_type() == at::ScalarType::Long,
     "torch.pad: Expected 'pad_width' to be Long dtype, but got ",
     pad_width.scalar_type());
-  TORCH_CHECK(pad_width.ge(0).all().item<bool>(),
-    "torch.pad: Expected 'pad_width' to be non-negative");
 
   PadMode mode = get_pad_mode_from_str(mode_str);
 
@@ -130,12 +140,14 @@ Tensor& pad_out_impl(
     check_device(result, "out", self.device());
   }
 
-  Tensor pad_width_ = at::native::expand_pad_specifier(pad_width, "pad_width", self.dim());
+  Tensor pad_width_ = at::native::expand_pad_specifier(
+    pad_width,
+    "pad_width",
+    self.dim(),
+    mode == PadMode::Constant);
 
   if (mode == PadMode::Constant) {
-    Scalar constant_values = constant_values_opt.value_or(
-      c10::Scalar(0));
-
+    Scalar constant_values = constant_values_opt.value_or(Scalar(0));
     c10::ScalarType scalar_type = self.scalar_type();
 
     if (c10::isIntegralType(scalar_type, true)) {
@@ -147,10 +159,9 @@ Tensor& pad_out_impl(
         " or integer type");
     }
 
-    Tensor pad_width_flipped = at::flip(pad_width_, {0});
     Tensor result_ = at::constant_pad_nd(
       self,
-      tensor_to_arrayref(pad_width_flipped),
+      tensor_to_arrayref(pad_width_),
       constant_values);
 
     if (result.defined()) {

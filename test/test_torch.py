@@ -5489,6 +5489,18 @@ else:
 
     @onlyOnCPUAndCUDA
     @dtypes(*get_all_dtypes())
+    def test_pad_neg_pad_width(self, device, dtype):
+        input = make_tensor((8, 4, 10), device, dtype, low=-9, high=9)
+        pad_width = ((-1, -3), (0, -2), (-5, 0))
+
+        result = torch.pad(input, pad_width)
+        result_expected = input[1:-3, 0:-2, 5:]
+
+        self.assertEqual(result.size(), result_expected.size())
+        self.assertEqual(result, result_expected)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(*get_all_dtypes())
     def test_pad_errors(self, device, dtype):
         input = make_tensor((3, 3, 3), device, dtype, low=-9, high=9)
 
@@ -5535,10 +5547,9 @@ else:
                     r"torch.pad: Expected 'constant_values' to be of floating point or integer type"):
                 torch.pad(input, 1, constant_values=1j)
 
-        # pad_width negative value error
-        for pad_width in [-2, (-5,), ((0, 0), (0, 0), (-10, 0)), torch.tensor(-1)]:
-            with self.assertRaisesRegex(RuntimeError, r"torch.pad: Expected 'pad_width' to be non-negative"):
-                torch.pad(input, pad_width)
+        # pad_width negative exceeding dimension size
+        with self.assertRaisesRegex(RuntimeError, r"exceeds dimension size"):
+            torch.pad(input, -2)
 
         # constant_values sequence types are not supported yet
         for constant_values in [(1, 2), torch.tensor([2, 4], device=device)]:

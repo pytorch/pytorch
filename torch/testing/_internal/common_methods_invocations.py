@@ -2502,6 +2502,34 @@ def sample_inputs_pad(op_info, device, dtype, requires_grad, **kwargs):
         ),
         kwargs=dict(mode='constant')))
 
+    inputs.append(SampleInput(
+        make_input_tensor((S, S, S)),
+        args=(
+            ((10, 2), (4, 6), (3, 1)),
+        ),
+        kwargs=dict(mode='constant')))
+
+    inputs.append(SampleInput(
+        make_input_tensor((S, S, S)),
+        args=(
+            -1,
+        ),
+        kwargs=dict(mode='constant')))
+
+    inputs.append(SampleInput(
+        make_input_tensor((S, S, S)),
+        args=(
+            (-2, 4),
+        ),
+        kwargs=dict(mode='constant')))
+
+    inputs.append(SampleInput(
+        make_input_tensor((S, S, S)),
+        args=(
+            ((-1,), (0,), (4,)),
+        ),
+        kwargs=dict(mode='constant')))
+
     return inputs
 
 # Missing to test the nondeterminism of the operation
