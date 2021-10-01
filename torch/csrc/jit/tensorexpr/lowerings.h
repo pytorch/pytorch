@@ -38,10 +38,10 @@ TORCH_API NNCLoweringFunction getStandardLoweringFor(const std::string& op);
 
 struct RegisterNNCLoweringsFunction {
   RegisterNNCLoweringsFunction(
-      const std::vector<std::string>& names,
+      const std::vector<std::string>& schemas,
       NNCLoweringFunction fn) {
-    for (auto name : names) {
-      getNNCLoweringRegistry()[name] = fn;
+    for (const auto& schema : schemas) {
+      getNNCLoweringRegistry()[schema] = fn;
     }
   }
 };
