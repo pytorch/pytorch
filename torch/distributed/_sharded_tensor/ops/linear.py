@@ -5,7 +5,7 @@ from torch.distributed._sharding_spec._internals import (
     get_split_size,
     get_chunked_dim_size,
 )
-from typing import List
+from typing import List, cast
 
 
 def sharded_linear(types, args, kwargs, pg):
