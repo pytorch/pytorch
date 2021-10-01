@@ -138,6 +138,7 @@ jobs:
       PR_BODY: ${{ github.event.pull_request.body }}
       NOGPU_RUNNER_TYPE: windows.4xlarge
       ENABLE_FORCE_ON_CPU_TEST: ''
+      RUN_SMOKE_TESTS_ONLY_ON_PR: False
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
@@ -161,7 +162,6 @@ jobs:
       TEST_CONFIG: ${{ matrix.config }}
       http_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
       https_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
-      RUN_SMOKE_TESTS_ONLY_ON_PR: False
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
     needs: [build, generate-test-matrix, ciflow_should_run]
     strategy:
