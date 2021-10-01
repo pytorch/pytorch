@@ -27,7 +27,7 @@ test_aot_model_compiler() {
   [ -f $COMPILED_MODEL ] && rm $COMPILED_MODEL
   rm "$MODEL"
 
-  if [ !success ]; then
+  if [ $success = 0 ]; then
     exit 1
   fi
 }
