@@ -1399,7 +1399,7 @@ class Module:
                     continue
                 try:
                     with torch.no_grad():
-                        param.copy_(input_param)
+                        setattr(self, name, torch.nn.Parameter(input_param))
                 except Exception as ex:
                     error_msgs.append('While copying the parameter named "{}", '
                                       'whose dimensions in the model are {} and '
