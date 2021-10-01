@@ -101,9 +101,7 @@ class TestModelDump(TestCase):
     def open_html_model(self, wd, model, extra_files=None):
         buf = io.BytesIO()
         torch.jit.save(model, buf, _extra_files=extra_files)
-        info = torch.utils.model_dump.get_model_info(buf)
-        skeleton = torch.utils.model_dump.get_inline_skeleton()
-        page = torch.utils.model_dump.burn_in_info(skeleton, info)
+        page = torch.utils.model_dump.get_info_and_burn_skeleton(buf)
         wd.get("data:text/html;charset=utf-8," + urllib.parse.quote(page))
 
     def open_section_and_get_body(self, wd, name):
