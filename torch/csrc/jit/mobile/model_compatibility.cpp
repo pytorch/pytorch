@@ -42,7 +42,7 @@ c10::IValue readArchive(
   std::shared_ptr<mobile::CompilationUnit> mobile_compilation_unit =
       std::make_shared<mobile::CompilationUnit>();
   auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
-    return objLoaderMobile(type, input, mobile_compilation_unit);
+    return objLoaderMobile(type, input, *mobile_compilation_unit);
   };
   bool bytecode_tensor_in_constants_archive =
       (archive_name == "bytecode" && !isTensorInBytecodeArchive(stream_reader));
@@ -241,7 +241,10 @@ std::unordered_set<std::string> _get_model_contained_types(
       if (parsed_type_names_records.find(type_name) ==
           parsed_type_names_records.end()) {
         parsed_type_names_records.insert(type_name);
-        type_tokens = at::getContainedTypes(type_name);
+        at::TypeParser parser(type_name);
+        parser.parse();
+        type_tokens = parser.getContainedTypes();
+        //  type_tokens = at::getContainedTypes(type_name);
         contained_types.insert(type_tokens.begin(), type_tokens.end());
       }
     }
