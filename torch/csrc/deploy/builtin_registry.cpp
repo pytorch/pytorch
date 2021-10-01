@@ -1,4 +1,5 @@
 #include <Python.h>
+#include <fmt/format.h>
 #include <torch/csrc/deploy/builtin_registry.h>
 
 namespace torch {
@@ -6,8 +7,11 @@ namespace deploy {
 
 builtin_registry_item::builtin_registry_item(
     const char* _name,
-    const struct _frozen* _frozen_modules)
-    : name(_name), frozen_modules(_frozen_modules) {
+    const struct _frozen* _frozen_modules,
+    std::vector<std::pair<const char*, void*>>&& _builtin_modules)
+    : name(_name),
+      frozen_modules(_frozen_modules),
+      builtin_modules(std::move(_builtin_modules)) {
   num_modules = 0;
   if (frozen_modules) {
     while (frozen_modules[num_modules].name != nullptr) {
@@ -79,6 +83,36 @@ struct _frozen* builtin_registry::get_all_frozen_modules() {
   }
 
   return p;
+}
+
+std::vector<std::pair<const char*, void*>> builtin_registry::
+    get_all_builtin_modules() {
+  std::vector<std::pair<const char*, void*>> all_builtin_modules;
+  for (const auto& itemptr : items()) {
+    all_builtin_modules.insert(
+        all_builtin_modules.end(),
+        itemptr->builtin_modules.begin(),
+        itemptr->builtin_modules.end());
+  }
+  return all_builtin_modules;
+}
+
+void builtin_registry::append_cpython_inittab() {
+  for (const auto& pair : get()->get_all_builtin_modules()) {
+    PyImport_AppendInittab(
+        pair.first, reinterpret_cast<PyObject* (*)(void)>(pair.second));
+  }
+}
+
+std::string builtin_registry::get_builtin_modules_csv() {
+  std::string modules_csv;
+  for (const auto& pair : get()->get_all_builtin_modules()) {
+    if (!modules_csv.empty()) {
+      modules_csv += ", ";
+    }
+    modules_csv += fmt::format("'{}'", pair.first);
+  }
+  return modules_csv;
 }
 
 } // namespace deploy
