@@ -271,11 +271,11 @@ class DataLoader(Generic[T_co]):
 
         if batch_size is not None and batch_sampler is None:
             # auto_collation without custom batch_sampler
-            batch_sampler = BatchSampler(sampler, batch_size, drop_last)
+            batch_sampler = BatchSampler(sampler, batch_size, drop_last)  # type: ignore[arg-type]
 
         self.batch_size = batch_size
         self.drop_last = drop_last
-        self.sampler = sampler
+        self.sampler = sampler  # type: ignore[assignment]
         self.batch_sampler = batch_sampler
         self.generator = generator
 
