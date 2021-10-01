@@ -1,13 +1,14 @@
-#ifndef THC_SCAN_UTILS_INC
-#define THC_SCAN_UTILS_INC
+#pragma once
 
 #include <ATen/ceil_div.h>
 #include <ATen/cuda/DeviceUtils.cuh>
-#include <THC/THCAsmUtils.cuh>
+#include <ATen/cuda/AsmUtils.cuh>
 #include <c10/macros/Macros.h>
 
 // Collection of in-kernel scan / prefix sum utilities
 
+namespace at {
+namespace cuda {
 
 // Extends the above Inclusive Scan to support segments. It has the same properties
 // but also takes a flag array that indicates the starts of "segments", i.e. individual
@@ -96,7 +97,7 @@ __device__ void exclusivePrefixScan(T* smem, T in, T* out, T* carry, BinaryFunct
 template <typename T, bool KillWARDependency, class BinaryFunction>
 __device__ void inclusiveBinaryPrefixScan(T* smem, bool in, T* out, BinaryFunction binop) {
   // Within-warp, we use warp voting.
-#if defined (__HIP_PLATFORM_HCC__)
+#if defined (USE_ROCM)
   unsigned long long int vote = WARP_BALLOT(in);
   T index = __popcll(getLaneMaskLe() & vote);
   T carry = __popcll(vote);
@@ -157,4 +158,4 @@ __device__ void exclusiveBinaryPrefixScan(T* smem, bool in, T* out, T* carry, Bi
   }
 }
 
-#endif // THC_SCAN_UTILS_INC
+}}  // namespace at::cuda

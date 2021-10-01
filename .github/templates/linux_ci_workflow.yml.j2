@@ -7,7 +7,6 @@ name: !{{ build_environment }}
 {%- endblock %}
 
 on:
-{%- if on_pull_request %}
   pull_request:
   {%- if ciflow_config.enabled %}
     {%- if ciflow_config.trigger_action_only %}
@@ -16,9 +15,6 @@ on:
     types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
     {%- endif %}
   {%- endif %}
-{%- else %}
-  # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
-{%- endif %}
 
 {%- if is_scheduled %}
   schedule:
@@ -268,6 +264,7 @@ jobs:
             -e http_proxy="!{{ common.squid_proxy }}" -e https_proxy="!{{ common.squid_proxy }}" -e no_proxy="!{{ common.squid_no_proxy }}" \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
+            --ulimit stack=10485760:83886080 \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
             --shm-size="${SHM_SIZE}" \
