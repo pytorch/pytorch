@@ -622,8 +622,9 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
     sw_mask.store(i_sw_mask_arr);
     se_mask.store(i_se_mask_arr);
 
-    // ----- The following variables are unnecessary if input_requires_grad is
-    //       false, but required to make the code well-formed.
+    // i_gInp_*_offset_arr and gInp_corner_arr variables below are unnecessary
+    // when input_requires_grad is false (they are only used within the
+    // if-blocks), but required to make the code well-formed.
 
     // When reading input values, we used mask_gather. Unfortunately, there is
     // no mask_scatter_add (the backward of mask_gather) in Intel intrinsics.
@@ -652,8 +653,6 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
 
     // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     scalar_t gInp_corner_arr[Vec::size()];
-
-    // ----- End of unnecessary variables for input_requires_grad is false.
 
     auto gx = Vec(0), gy = Vec(0);
     #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
