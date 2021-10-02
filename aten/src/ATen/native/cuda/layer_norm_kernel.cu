@@ -140,7 +140,7 @@ __global__ void ComputeGradientFusedParamsCUDAKernel(
 }
 
 template <typename T>
-__global__ void LayerNormBackwardCUDAKenrel(
+__global__ void LayerNormBackwardCUDAKernel(
     int64_t N,
     const T* dY,
     const T* X,
@@ -374,7 +374,7 @@ void LayerNormBackwardKernelImplInternal(
             scale_data,
             bias_data);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
-    LayerNormBackwardCUDAKenrel<T><<<M, kCUDANumThreads, 0, cuda_stream>>>(
+    LayerNormBackwardCUDAKernel<T><<<M, kCUDANumThreads, 0, cuda_stream>>>(
         N,
         dY_data,
         X_data,
