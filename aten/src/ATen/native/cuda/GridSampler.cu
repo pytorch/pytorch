@@ -296,7 +296,7 @@ namespace {
 // lies relative to the entire tensor, so we pass the base grad_input.data and full offset information,
 // including batch * channel offset (NC_offset).
 
-  template <typename scalar_t, typename index_t, bool input_requires_grad>
+  template <typename scalar_t, typename index_t>
   C10_LAUNCH_BOUNDS_1(256)
   __global__ void grid_sampler_2d_backward_kernel(
       const index_t nthreads,
@@ -308,7 +308,8 @@ namespace {
       const GridSamplerInterpolation interpolation_mode,
       const GridSamplerPadding padding_mode,
       bool align_corners,
-      const index_t grad_input_memory_span) {
+      const index_t grad_input_memory_span,
+      const bool input_requires_grad) {
 
     index_t C = input.sizes[1];
     index_t inp_H = input.sizes[2];
@@ -829,68 +830,37 @@ grid_sampler_2d_backward_cuda(const Tensor& grad_output, const Tensor& input,
   int64_t count = N * H * W;
   if (count > 0) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "grid_sampler_2d_backward_cuda", [&] {
-      if (input_requires_grad) {
-        if (canUse32BitIndexMath(input) && canUse32BitIndexMath(grid) &&
-            canUse32BitIndexMath(grad_output)) {
-          grid_sampler_2d_backward_kernel<scalar_t, int, true>
-            <<<GET_BLOCKS(count, 256), 256, 0, at::cuda::getCurrentCUDAStream()>>>(
-              static_cast<int>(count),
-              getTensorInfo<scalar_t, int>(grad_output),
-              getTensorInfo<scalar_t, int>(input),
-              getTensorInfo<scalar_t, int>(grid),
-              getTensorInfo<scalar_t, int>(grad_input),
-              getTensorInfo<scalar_t, int>(grad_grid),
-              static_cast<GridSamplerInterpolation>(interpolation_mode),
-              static_cast<GridSamplerPadding>(padding_mode),
-              align_corners,
-              /*grad_input_memory_span =*/static_cast<int>(grad_input.numel()));
-          C10_CUDA_KERNEL_LAUNCH_CHECK();
-        } else {
-          grid_sampler_2d_backward_kernel<scalar_t, int64_t, true>
-            <<<GET_BLOCKS(count, 256), 256, 0, at::cuda::getCurrentCUDAStream()>>>(
-              count,
-              getTensorInfo<scalar_t, int64_t>(grad_output),
-              getTensorInfo<scalar_t, int64_t>(input),
-              getTensorInfo<scalar_t, int64_t>(grid),
-              getTensorInfo<scalar_t, int64_t>(grad_input),
-              getTensorInfo<scalar_t, int64_t>(grad_grid),
-              static_cast<GridSamplerInterpolation>(interpolation_mode),
-              static_cast<GridSamplerPadding>(padding_mode),
-              align_corners,
-              /*grad_input_memory_span =*/grad_input.numel());
-          C10_CUDA_KERNEL_LAUNCH_CHECK();
-        }
+      if (canUse32BitIndexMath(input) && canUse32BitIndexMath(grid) &&
+          canUse32BitIndexMath(grad_output)) {
+        grid_sampler_2d_backward_kernel<scalar_t>
+          <<<GET_BLOCKS(count, 256), 256, 0, at::cuda::getCurrentCUDAStream()>>>(
+            static_cast<int>(count),
+            getTensorInfo<scalar_t, int>(grad_output),
+            getTensorInfo<scalar_t, int>(input),
+            getTensorInfo<scalar_t, int>(grid),
+            input_requires_grad ? getTensorInfo<scalar_t, int>(grad_input) : TensorInfo<scalar_t, int>(),
+            getTensorInfo<scalar_t, int>(grad_grid),
+            static_cast<GridSamplerInterpolation>(interpolation_mode),
+            static_cast<GridSamplerPadding>(padding_mode),
+            align_corners,
+            /*grad_input_memory_span =*/input_requires_grad ? static_cast<int>(grad_input.numel()) : 0,
+            input_requires_grad);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
-        if (canUse32BitIndexMath(input) && canUse32BitIndexMath(grid) &&
-            canUse32BitIndexMath(grad_output)) {
-          grid_sampler_2d_backward_kernel<scalar_t, int, false>
-            <<<GET_BLOCKS(count, 256), 256, 0, at::cuda::getCurrentCUDAStream()>>>(
-              static_cast<int>(count),
-              getTensorInfo<scalar_t, int>(grad_output),
-              getTensorInfo<scalar_t, int>(input),
-              getTensorInfo<scalar_t, int>(grid),
-              TensorInfo<scalar_t, int>(),  // grad_input not used
-              getTensorInfo<scalar_t, int>(grad_grid),
-              static_cast<GridSamplerInterpolation>(interpolation_mode),
-              static_cast<GridSamplerPadding>(padding_mode),
-              align_corners,
-              /*grad_input_memory_span =*/0);
-          C10_CUDA_KERNEL_LAUNCH_CHECK();
-        } else {
-          grid_sampler_2d_backward_kernel<scalar_t, int64_t, false>
-            <<<GET_BLOCKS(count, 256), 256, 0, at::cuda::getCurrentCUDAStream()>>>(
-              count,
-              getTensorInfo<scalar_t, int64_t>(grad_output),
-              getTensorInfo<scalar_t, int64_t>(input),
-              getTensorInfo<scalar_t, int64_t>(grid),
-              TensorInfo<scalar_t, int64_t>(),  // grad_input not used
-              getTensorInfo<scalar_t, int64_t>(grad_grid),
-              static_cast<GridSamplerInterpolation>(interpolation_mode),
-              static_cast<GridSamplerPadding>(padding_mode),
-              align_corners,
-              /*grad_input_memory_span =*/0);
-          C10_CUDA_KERNEL_LAUNCH_CHECK();
-        }
+        grid_sampler_2d_backward_kernel<scalar_t>
+          <<<GET_BLOCKS(count, 256), 256, 0, at::cuda::getCurrentCUDAStream()>>>(
+            count,
+            getTensorInfo<scalar_t, int64_t>(grad_output),
+            getTensorInfo<scalar_t, int64_t>(input),
+            getTensorInfo<scalar_t, int64_t>(grid),
+            input_requires_grad ? getTensorInfo<scalar_t, int64_t>(grad_input) : TensorInfo<scalar_t, int64_t>(),
+            getTensorInfo<scalar_t, int64_t>(grad_grid),
+            static_cast<GridSamplerInterpolation>(interpolation_mode),
+            static_cast<GridSamplerPadding>(padding_mode),
+            align_corners,
+            /*grad_input_memory_span =*/input_requires_grad ? grad_input.numel() : 0,
+            input_requires_grad);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     });
   }
