@@ -57,6 +57,7 @@ bool WeightedSampleOp<float, CPUContext>::RunOnDevice() {
       }
     }
   } else {
+    C10_UNUSED auto* out_idx = Output(0, {0}, at::dtype<int>());
     if (OutputSize() == 2) {
       auto* out_value = Output(1, {0}, at::dtype<float>());
       out_value->template mutable_data<float>();
