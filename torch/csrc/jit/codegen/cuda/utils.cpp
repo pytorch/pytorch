@@ -88,6 +88,56 @@ auto parseDebugDumpOptions() {
 
 } // namespace
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-function"
+void debugPrint(const c10::TensorTypePtr& type) {
+  std::stringstream sizes_s;
+  if (auto sizes = type->symbolic_sizes().sizes()) {
+    for (const auto& shape_symbol : *sizes) {
+      if (shape_symbol.is_static()) {
+        sizes_s << shape_symbol.static_size() << ", ";
+      } else {
+        sizes_s << "s(" << *reinterpret_cast<const int64_t*>(&shape_symbol)
+                << "), ";
+      }
+    }
+  } else {
+    sizes_s << "no size available";
+  }
+  std::cout << "sizes:" << sizes_s.str() << std::endl;
+  if (const auto& stride_properties = type->stride_properties().sizes()) {
+    std::stringstream stride_s;
+    std::stringstream index_s;
+    std::stringstream contig_s;
+
+    for (const auto& stride_property : *stride_properties) {
+      if (stride_property.has_value() && stride_property->stride_.has_value()) {
+        stride_s << *stride_property->stride_ << ", ";
+      } else {
+        stride_s << "?, ";
+      }
+      if (stride_property.has_value() &&
+          stride_property->stride_index_.has_value()) {
+        index_s << *stride_property->stride_index_ << ", ";
+      } else {
+        index_s << "?, ";
+      }
+      if (stride_property.has_value() &&
+          stride_property->contiguous_.has_value()) {
+        contig_s << *stride_property->contiguous_ << ", ";
+      } else {
+        contig_s << "?, ";
+      }
+    }
+    std::cout << "stride: " << stride_s.str() << std::endl;
+    std::cout << "stride index: " << index_s.str() << std::endl;
+    std::cout << "contiguous: " << contig_s.str() << std::endl;
+  } else {
+    std::cout << "no stride properties available" << std::endl;
+  }
+}
+#pragma clang diagnostic pop
+
 bool isDebugDumpEnabled(DebugDumpOption option) {
   const static auto dump_options = parseDebugDumpOptions();
   return dump_options.at(option);

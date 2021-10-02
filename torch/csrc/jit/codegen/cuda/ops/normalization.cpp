@@ -217,7 +217,8 @@ ForwardNormResult batch_norm(
     TensorView* running_var,
     const bool kTraining,
     Val* momentum,
-    Val* eps) {
+    Val* eps,
+    bool channels_last) {
   auto fusion = FusionGuard::getCurFusion();
 
   TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
@@ -240,15 +241,17 @@ ForwardNormResult batch_norm(
   // M = outer = channels
   // N = reduction = B * H * W * D
   // weight = bias = (C) tensor
-  // const size_t kChannelsDim = 1;
   const size_t kNumberOfDims =
       TensorDomain::noReductions(x->getRootDomain()).size();
+  // channels last format means C dimension is at axis kNumberOfDims-1 at x
+  size_t c_axis = channels_last ? kNumberOfDims - 1 : 1;
 
   std::vector<int> reduction_axes;
   std::vector<bool> broadcast_mask(kNumberOfDims, false);
   Val* num_features = new Double(1);
+
   for (size_t axis = 0; axis < kNumberOfDims; ++axis) {
-    if (axis != 1) {
+    if (axis != c_axis) {
       reduction_axes.push_back(axis);
       broadcast_mask[axis] = true;
       num_features = mul(num_features, x->domain()->domain()[axis]->extent());
@@ -329,7 +332,8 @@ BackwardNormResult batch_norm_backward(
     TensorView* save_invstd,
     const bool kTraining,
     Val* eps,
-    const std::vector<bool>& output_mask) {
+    const std::vector<bool>& output_mask,
+    bool channels_last) {
   TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
   TORCH_INTERNAL_ASSERT(dy != nullptr, "Grad Output is invalid.");
   TORCH_INTERNAL_ASSERT(
@@ -341,15 +345,16 @@ BackwardNormResult batch_norm_backward(
   // M = outer = channels
   // N = reduction = B * H * W * D
   // weight = bias = (C) tensor
-  const size_t kChannelsDim = 1;
   const size_t kNumberOfDims =
       TensorDomain::noReductions(x->getRootDomain()).size();
+  // channels last format means C dimension is at axis kNumberOfDims-1 at x / dy
+  size_t c_axis = channels_last ? kNumberOfDims - 1 : 1;
 
   std::vector<int> reduction_axes;
   std::vector<bool> broadcast_mask(kNumberOfDims, false);
   Val* num_features = new Double(1);
   for (size_t axis = 0; axis < kNumberOfDims; ++axis) {
-    if (axis != kChannelsDim) {
+    if (axis != c_axis) {
       reduction_axes.push_back(axis);
       broadcast_mask[axis] = true;
       num_features = mul(num_features, x->domain()->domain()[axis]->extent());

@@ -483,7 +483,8 @@ kir::ExpressionEvaluator bindKernelInputs(
     if (auto tensor_input = dynamic_cast<kir::TensorView*>(input)) {
       TORCH_INTERNAL_ASSERT(
           aten_inputs[i].isTensor(),
-          "Something went wrong configuring launch. Inputs no longer match.");
+          "Something went wrong configuring launch. Inputs no longer match at index:",
+          i);
 
       const auto aten_tensor = aten_inputs[i].toTensor();
       const auto root_domain =

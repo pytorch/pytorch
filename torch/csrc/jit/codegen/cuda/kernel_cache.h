@@ -284,9 +284,6 @@ class TORCH_CUDA_CU_API InputsIdLookup : public NonCopyable {
 //!          mostly tensor size & contiguity (see note on unique computational
 //!          graph). The assumption is assured at runtime by
 //!          `prim::CudaFusionGuard`;
-//!        - GraphCache handles permutation for I/O tensors, when they share
-//!          global stride order. This permutation facilitates dimension
-//!          collapsing, which gives simpler indexing.
 //!     b. FusionExecutorCache
 //!        - has a single `Fusion`, FusionExecutorCache handles kernel schedule
 //!          and passed scheduled tensor to `FusionExecutor` to generate code;
@@ -424,34 +421,18 @@ class GraphCache {
   //! Fusion IR.
   explicit GraphCache(const std::shared_ptr<Graph>& graph);
 
-  //! execute graph with given inputs, permutation on I/O tensors are performed.
+  //! execute graph with given inputs
   std::vector<at::Tensor> runGraphWithInputs(
       const at::ArrayRef<IValue>& inputs);
 
  private:
   //! Computation graph;
   std::shared_ptr<Graph> graph_;
-  //! TODO: poor name, we should use `eliminated_axes_` instead;
-  at::DimVector reduction_axes_;
-  bool support_permutation_;
-
-  //! helper function used at run-time to check whether a common permutation is
-  //! present, this is used to take the short-cut to skip permutation logic.
-  bool requiresPermutation();
 
   //! construct FusionExecutorCache
   void createFusion(const std::shared_ptr<Graph>& graph);
 
-  //! extract permutation for I/O tensor from accumulcated tensor type pointer
-  //! on all inputs;
-  void extractPermutation(const TensorTypePtr& acc_type);
-
  private:
-  // common permutation order used to facilitate dimension coalescing;
-  at::DimVector input_permutation_;
-  at::DimVector pw_output_permutation_;
-  at::DimVector reduction_output_permutation_;
-
   //! FusionExecutorCache that performs schedule and kernel execution;
   std::unique_ptr<FusionExecutorCache> fusion_executor_cache_;
 };

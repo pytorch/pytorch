@@ -17563,6 +17563,129 @@ TEST(NVFuserTest, FusionIssue1127_CUDA) {
       testValidate(&fusion, outputs, aten_inputs, {ref}, __LINE__, __FILE__));
 }
 
+TEST(NVFuserTest, FusionChannelsLastParser_CUDA) {
+  // This test may not pass if using a custom block sync as there may
+  // be additional calls. Skip the test as it's not specifically
+  // relevant with block synchronizatin.
+  if (std::getenv("PYTORCH_NVFUSER_USE_BLOCK_SYNC_ATOMIC")) {
+    return;
+  }
+  auto g = std::make_shared<Graph>();
+  const auto graph0_string = R"IR(
+  graph(%0 : Half(8, 4, 10, 16, strides=[640, 1, 64, 4]),
+        %1 : Half(8, 4, 10, 16, strides=[640, 160, 16, 1])):
+    %o.1 : Half(8, 4, 10, 16, strides=[640, 1, 64, 4]) = aten::mul(%0, %1) # sum_dyn.py:5:6
+    %3 : Half(8, 4, 10, 16, strides=[640, 1, 64, 4]) = aten::relu(%o.1) # sum_dyn.py:6:9
+    return (%3))IR";
+  parseIR(graph0_string, g.get());
+
+  // strides are not yet supported in the irparser.
+  {
+    auto val = g->block()->inputs()[0];
+    val->setType(val->type()->castRaw<TensorType>()->withSizesStrides(
+        {8, 4, 10, 16}, {640, 1, 64, 4}));
+  }
+
+  {
+    auto val = g->block()->inputs()[1];
+    val->setType(val->type()->castRaw<TensorType>()->withSizesStrides(
+        {8, 4, 10, 16}, {640, 160, 16, 1}));
+  }
+
+  for (auto node : g->block()->nodes()) {
+    for (auto val : node->outputs()) {
+      if (val->isCompleteTensor())
+        val->setType(val->type()->castRaw<TensorType>()->withSizesStrides(
+            {8, 4, 10, 16}, {640, 1, 64, 4}));
+    }
+  }
+
+  auto fusion = parseJitIR(g);
+  FusionGuard fg(fusion.get());
+  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
+  at::Tensor input0 =
+      at::randn({2, 2, 2, 16}, options).clone(c10::MemoryFormat::ChannelsLast);
+  at::Tensor input1 = at::randn({2, 2, 2, 16}, options);
+  auto lparams = schedulePointwise(fusion.get(), {input0, input1});
+
+  // CONSIDER:
+  // 1. this can be moved to a dedicated "golden" file
+  // 2. use a fuzzy compare (ignore non-significant whitespaces for example)
+  const std::string expected_kernel = R"(
+__global__ void CUDAGeneratedKernel(Tensor<__half, 4> T0, Tensor<__half, 4> T2, Tensor<__half, 4> T7) {
+  if ((((((((((nvfuser_index_t)blockIdx.x) * 1) + (1 - 1)) * 1) + (1 - 1)) * 128) + ((nvfuser_index_t)threadIdx.x)) < (T0.size[0] * (T0.size[1] * (T0.size[2] * T0.size[3]))))) {
+    constexpr nvfuser_index_t ki566 = 0;
+    __half T9[1];
+    constexpr nvfuser_index_t ki608 = 0;
+    T9[ki608] = 0;
+    constexpr nvfuser_index_t ki599 = 0;
+    T9[ki599]
+       = T2[((((((((((nvfuser_index_t)blockIdx.x) * 1) + ki566) * 1) + ki599) * 128) + ((nvfuser_index_t)threadIdx.x)) / (T0.size[1] * (T0.size[2] * T0.size[3]))) * (((1 * T0.size[2]) * T0.size[1]) * T0.size[3])) + ((((((((((((nvfuser_index_t)blockIdx.x) * 1) + ki566) * 1) + ki599) * 128) + ((nvfuser_index_t)threadIdx.x)) % (T0.size[1] * (T0.size[2] * T0.size[3]))) % (T0.size[2] * T0.size[3])) % T0.size[3]) * ((1 * T0.size[2]) * T0.size[1])) + (((((((((((nvfuser_index_t)blockIdx.x) * 1) + ki566) * 1) + ki599) * 128) + ((nvfuser_index_t)threadIdx.x)) % (T0.size[1] * (T0.size[2] * T0.size[3]))) / (T0.size[2] * T0.size[3])) * (1 * T0.size[2])) + ((((((((((((nvfuser_index_t)blockIdx.x) * 1) + ki566) * 1) + ki599) * 128) + ((nvfuser_index_t)threadIdx.x)) % (T0.size[1] * (T0.size[2] * T0.size[3]))) % (T0.size[2] * T0.size[3])) / T0.size[3]) * 1)];
+    __half T8[1];
+    constexpr nvfuser_index_t ki614 = 0;
+    T8[ki614] = 0;
+    constexpr nvfuser_index_t ki594 = 0;
+    T8[ki594]
+       = T0[(((((((((nvfuser_index_t)blockIdx.x) * 1) + ki566) * 1) + ki594) * 128) + ((nvfuser_index_t)threadIdx.x)) * 1)];
+    __half T10[1];
+    constexpr nvfuser_index_t ki575 = 0;
+    float T3[1];
+    T3[0]
+       = __half2float(T9[ki575]);
+    float T4[1];
+    T4[0]
+       = T3[0];
+    float T1[1];
+    T1[0]
+       = __half2float(T8[ki575]);
+    float T5[1];
+    T5[0]
+      = T1[0]
+      * T4[0];
+    float T6[1];
+    T6[0]
+       = relu(T5[0]);
+    T10[ki575]
+       = __float2half(T6[0]);
+    constexpr nvfuser_index_t ki568 = 0;
+    T7[(((((((((nvfuser_index_t)blockIdx.x) * 1) + ki566) * 1) + ki568) * 128) + ((nvfuser_index_t)threadIdx.x)) * 1)]
+       = T10[ki568];
+  }
+}
+)";
+
+  const std::string actual_kernel =
+      "\n" + codegen::generateCudaKernel(GpuLower(fusion.get()).kernel());
+
+  if (expected_kernel.size() != actual_kernel.size() ||
+      expected_kernel.compare(actual_kernel) != 0) {
+    std::cerr
+        << " Codegen mismatch, codegen possibly changed, or is incorrect. "
+        << " \n ========= EXPECTED ========= \n"
+        << expected_kernel << "\n========= ACTUAL ========== \n"
+        << actual_kernel << "\n=================" << std::endl;
+    auto it = std::mismatch(
+        expected_kernel.begin(),
+        expected_kernel.end(),
+        actual_kernel.begin(),
+        actual_kernel.end());
+    std::string actual_mismatched_snippet(it.second, actual_kernel.end());
+    actual_mismatched_snippet = actual_mismatched_snippet.substr(0, 10);
+    std::string expected_mismatched_snippet(it.first, expected_kernel.end());
+    expected_mismatched_snippet = expected_mismatched_snippet.substr(0, 10);
+    std::cerr << "First mismatch found at: " << actual_mismatched_snippet
+              << ", expected: " << expected_mismatched_snippet << std::endl;
+    TORCH_CHECK(false);
+  }
+
+  // TODO: runFusion hits assertion. I'm probably doing something wrong here.
+  // FusionExecutor fe;
+  // fe.compileFusion(fusion.get());
+  // auto outputs = fe.runFusion({input0, input1}, lparams);
+  // at::Tensor output_ref = (input0 * input1).relu();
+  // TORCH_CHECK(output_ref.equal(outputs[0]));
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

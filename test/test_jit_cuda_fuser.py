@@ -969,6 +969,26 @@ class TestCudaFuser(JitTestCase):
                     x = [7, 8, 12]
                     self._permutation_helper(x, b_axis, torch.float32, "cuda", perm0, perm1)
 
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_binary_ops_channels_last_with_bcast(self):
+        device = "cuda"
+        x = torch.randn([4, 3, 2, 5], device=device).to(memory_format=torch.channels_last)
+        w = torch.randn([2, 5], device=device)
+
+        def t(x: torch.Tensor, b: torch.Tensor):
+            o = x + b
+            return torch.relu(o)
+        t_jit = torch.jit.script(t)
+        jit_o = t_jit(x, w)
+        jit_o = t_jit(x, w)
+        jit_o = t_jit(x, w)
+        o = t(x, w)
+        self.assertEqual(o.dtype, jit_o.dtype)
+        self.assertTrue(self._compare("comparing output failed", o, jit_o, 1e-4))
+        self.assertGraphContains(t_jit.graph_for(x, w), FUSION_GUARD)
+
     def _reduction_helper(self, sizes, reduction_axis, dtype, device, perm0, perm1, keepdim=False):
         class MyReduction(torch.nn.Module):
             __constants__ = ['reduction_axis', 'keepdim']
@@ -1569,7 +1589,7 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
     def test_permutation_preservation(self):
-        sizes = [2, 2, 2, 2]
+        sizes = [2, 3, 4, 5]
         dtype = torch.float
         device = "cuda"
         x = torch.randn(sizes, dtype=dtype, device=device).to(memory_format=torch.channels_last)
@@ -1585,8 +1605,8 @@ class TestCudaFuser(JitTestCase):
         self.assertEqual(o.dtype, jit_o.dtype)
         self.assertEqual(o, jit_o)
         self.assertGraphContains(t_jit.graph_for(x), FUSION_GUARD)
-        # we should preserve permutation to inputs
-        self.assertEqual(jit_o.stride(), (1, 4, 2))
+        # TODO: we could preserve permutation to inputs
+        self.assertEqual(o.stride(), jit_o.stride())
 
         def t(x: torch.Tensor):
             o = torch.relu(x)

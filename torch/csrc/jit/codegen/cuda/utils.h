@@ -1,11 +1,14 @@
 #pragma once
 
+#include <ATen/ATen.h>
 #include <c10/util/Exception.h>
 
 namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
+
+void debugPrint(const c10::TensorTypePtr& type);
 
 //! Types of debug print-outs
 //!
@@ -105,6 +108,12 @@ class PolymorphicBase {
     return dynamic_cast<const T*>(this) != nullptr;
   }
 };
+
+template <class T, std::enable_if_t<std::is_enum<T>::value, bool> = true>
+constexpr unsigned int switch_pair(T t1, T t2) {
+  constexpr unsigned int _WORD_SHIFT = 16;
+  return ((unsigned int)t1 << _WORD_SHIFT) + (unsigned int)t2;
+}
 
 } // namespace cuda
 } // namespace fuser

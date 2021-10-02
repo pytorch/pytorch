@@ -49,6 +49,8 @@ TORCH_CUDA_CU_API void swap(Fusion& a, Fusion& b) noexcept {
   swap(a.outputs_, b.outputs_);
 
   swap(a.io_alias_, b.io_alias_);
+  swap(a.c_last_input_indices_, b.c_last_input_indices_);
+  swap(a.c_last_output_indices_, b.c_last_output_indices_);
 
   // Fixup the Statement::fusion_ links for a
   for (auto val : a.val_set_) {
@@ -112,6 +114,9 @@ IrCloner Fusion::copy(const Fusion* from, Fusion* to) {
     to->io_alias_[copied_output] = copied_input;
   }
 
+  to->c_last_input_indices_ = from->c_last_input_indices_;
+  to->c_last_output_indices_ = from->c_last_output_indices_;
+
   return ir_cloner;
 }
 
@@ -166,6 +171,8 @@ void Fusion::clear() noexcept {
   outputs_.clear();
 
   io_alias_.clear();
+  c_last_input_indices_.clear();
+  c_last_output_indices_.clear();
 }
 
 void Fusion::removeExpr(Expr* expr) {
@@ -289,6 +296,14 @@ void Fusion::replaceOutput(Val* output, Val* replacement) {
       output->as<TensorView>()->setMemoryType(MemoryType::Local);
     }
     resetTvUses();
+  }
+
+  // Temporary WAR for issue #1112
+  // (https://github.com/csarofeen/pytorch/issues/1112)
+  if (io_alias_.count(output) != 0) {
+    auto input = io_alias_[output];
+    io_alias_.erase(output);
+    io_alias_[replacement] = input;
   }
 }
 
