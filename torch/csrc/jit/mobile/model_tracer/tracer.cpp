@@ -134,7 +134,7 @@ void call_setup_methods() {
  * Call methods on the Tensor object that we expect to be called
  * in production on this Tensor.
  */
-void consume_tensor(at::Tensor& t) {
+void consume_tensor(const at::Tensor& t) {
   const at::Tensor& c = t;
   c.copy_(t.cpu());
 }
@@ -255,7 +255,7 @@ void run_model(
     std::cerr
         << "ModelTracer has not been able to load the module for the following reasons:\n"
         << ex.what()
-        << "\nPlease consider posting to the PyTorch Edge Users workplace group (https://fb.workplace.com/groups/pytorch.edge.users) with the error message."
+        << "\nPlease consider reporting a bug to PyTorch with the error message."
         << std::endl;
 
     throw ex;
@@ -309,7 +309,7 @@ int main(int argc, char* argv[]) {
       always_included_traced_ops.begin(), always_included_traced_ops.end());
 
   // If the op exist in both traced_ops and root_ops, leave it in root_ops only
-  for(const auto& root_op: root_ops) {
+  for (const auto& root_op : root_ops) {
     if (traced_operators.find(root_op) != traced_operators.end()) {
       traced_operators.erase(root_op);
     }
