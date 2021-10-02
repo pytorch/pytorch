@@ -331,7 +331,6 @@ void slow_conv2d_backward_weight_frame(
   const int64_t n = grad_output.size(0);
   const int64_t k = grad_output.size(1) * grad_output.size(2);
 
-  constexpr int64_t one = 1;
   const int64_t lda = k;
   const int64_t ldb = k;
   const int64_t ldc = m;
@@ -349,7 +348,7 @@ void slow_conv2d_backward_weight_frame(
 
 static void slow_conv2d_backward_weight_out_cpu_template(
     Tensor& grad_weight,
-    const Tensor& input_,
+    const Tensor& input,
     const Tensor& grad_output_,
     const Tensor& finput,
     IntArrayRef kernel_size,
@@ -370,7 +369,7 @@ static void slow_conv2d_backward_weight_out_cpu_template(
   grad_weight_2d = view_weight_2d(grad_weight);
 
   slow_conv2d_shape_check(
-      input_,
+      input,
       grad_output_,
       grad_weight_2d,
       {},
@@ -382,9 +381,8 @@ static void slow_conv2d_backward_weight_out_cpu_template(
       pad_width,
       true);
 
-  auto input = input_.contiguous();
   auto grad_output = grad_output_.contiguous();
-  TORCH_CHECK(grad_weight.is_contiguous(), "slow_conv2d: grad_weight must be contiguous");
+  TORCH_CHECK(finput.is_contiguous(), "slow_conv2d: finput must be contiguous");
 
   const int64_t batch_size = input.size(0);
 
