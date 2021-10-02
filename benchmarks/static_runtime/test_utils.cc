@@ -174,6 +174,13 @@ void compareResults(
 
 } // namespace
 
+std::shared_ptr<Graph> getGraphFromIR(const std::string& ir) {
+    auto graph = std::make_shared<Graph>();
+    std::unordered_map<std::string, Value*> vmap;
+    parseIR(ir, graph.get(), vmap);
+    return graph;
+}
+
 void testStaticRuntime(
     const std::string& source,
     const std::vector<IValue>& args,
