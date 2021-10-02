@@ -1151,6 +1151,9 @@ void LLVMCodeGenImpl::visit(LoadPtr v) {
       throw std::runtime_error("invalid dtype in Load");
   }
 
+  // Detect whether the vector mask is all true
+  bool unmasked_load = true;
+
   // Handle the case where the load is contiguous and unmasked efficiently
   auto idx_ramp = to<Ramp>(v->flat_index());
   if (idx_ramp) {
@@ -1802,6 +1805,9 @@ void LLVMCodeGenImpl::visit(IntrinsicsPtr v) {
 }
 
 void LLVMCodeGenImpl::visit(ExternalCallPtr v) {
+  constexpr int max_buffers = 10;
+  constexpr int max_dimensions = 40;
+
   auto& func_registry = getNNCFunctionRegistry();
   if (!func_registry.count(v->func_name())) {
     throw unimplemented_lowering(v);

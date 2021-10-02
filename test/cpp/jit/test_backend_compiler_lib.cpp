@@ -89,6 +89,7 @@ class BackendWithCompiler : public PyTorchBackendInterface {
     at::Tensor h = val1.toTensor();
 
     c10::List<at::Tensor> output_list;
+    double scalar_val = 1.0;
     for (const auto& token : handle.toList()) {
       IValue val = token;
       auto instruction = val.toTuple()->elements()[0].toStringRef();

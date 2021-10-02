@@ -270,7 +270,6 @@ c10::intrusive_ptr<ProcessGroupMPI> ProcessGroupMPI::createProcessGroupMPI(
       bool groupComm_updated = false;
       MPI_Barrier(MPI_COMM_WORLD);
       for (const auto i : c10::irange(kMaxNumRetries)) {
-        (void)i;
         if (MPI_Comm_create(MPI_COMM_WORLD, ranksGroup, &groupComm)) {
           groupComm_updated = true;
           break;

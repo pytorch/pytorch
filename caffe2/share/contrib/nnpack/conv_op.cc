@@ -152,7 +152,8 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
   auto& filter = Input(1);
   auto* Y = Output(0);
   CAFFE_ENFORCE(X.ndim() == 4, "Input dim should be 4");
-  const int C = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
+  const int N = X.dim32(0), C = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
   CAFFE_ENFORCE(filter.ndim() == 4, "");
   const int M = filter.dim32(0);
   CAFFE_ENFORCE(C % this->group_ == 0, "");
@@ -180,6 +181,12 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
     biasData = dummyBias_.data();
   }
 
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
+  const size_t batch_size = X.dim32(0);
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
+  const size_t input_channels = X.dim32(1);
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
+  const size_t output_channels = Y->dim32(1);
   const nnp_size input_size = {.width = static_cast<size_t>(X.dim32(3)),
                                .height = static_cast<size_t>(X.dim32(2))};
   // filter is MCHW

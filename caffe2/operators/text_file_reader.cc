@@ -141,6 +141,8 @@ class TextFileReaderReadOp : public Operator<CPUContext> {
                   (field > 0 && token.startDelimId == 1),
               "Invalid number of columns at row ",
               instance->rowsRead + rowsRead + 1);
+          // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
+          const auto& meta = instance->fieldMetas[field];
           char*& data = datas[field];
           convert(
               (TensorProto_DataType)instance->fieldTypes[field],

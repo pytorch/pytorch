@@ -5163,7 +5163,7 @@ std::unique_ptr<Function> CompilationUnit::define(
   if (shouldMangle) {
     // If `shouldMangle` is set, we should generate a unique name for this
     // function if there is already an existing one.
-    if (find_function(name)) {
+    if (auto fn = find_function(name)) {
       name = mangle(name);
     }
   }
