@@ -308,12 +308,11 @@ class AttributePropagator {
       }
     } else if (attr.isTuple()) {
       auto tuple = std::move(attr).toTuple();
-      std::vector<IValue>& elems = tuple->elements();
-      for (auto& elem : elems) {
-        elem = overrideGradient(elem);
+      const auto& elems = tuple->elements();
+      for (const auto idx : c10::irange(elems.size())) {
+        tuple->unsafeSetElement(idx, overrideGradient(elems[idx]));
       }
       attr = std::move(tuple);
-
     } else if (attr.isList()) {
       c10::List<IValue> elems = std::move(attr).toList();
       for (const auto i : c10::irange(elems.size())) {
