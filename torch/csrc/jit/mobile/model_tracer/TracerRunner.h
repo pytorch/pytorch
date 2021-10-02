@@ -7,6 +7,12 @@ namespace torch {
 namespace jit {
 namespace mobile {
 
+const std::vector<std::string> always_included_traced_ops = {
+    // The following are called from setup sections.
+    "aten::resize_",
+    "aten::slice.Tensor",
+};
+
 struct TracerResult {
   std::set<std::string> root_ops;
   std::set<std::string> traced_operators;

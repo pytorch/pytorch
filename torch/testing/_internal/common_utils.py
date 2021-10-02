@@ -1230,7 +1230,8 @@ def check_if_enable(test: unittest.TestCase):
                 "win": IS_WINDOWS,
                 "windows": IS_WINDOWS,
                 "linux": IS_LINUX,
-                "rocm": TEST_WITH_ROCM
+                "rocm": TEST_WITH_ROCM,
+                "asan": TEST_WITH_ASAN
             }
             if platforms == [] or any([platform_to_conditional[platform] for platform in platforms]):
                 raise unittest.SkipTest(

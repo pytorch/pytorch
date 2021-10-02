@@ -8,7 +8,8 @@ layout(set = 0, binding = 1) readonly buffer inputBuffer {
   float data[];
 }
 uInput;
-layout(set = 0, binding = 2) uniform constBlock {
+
+layout(push_constant) uniform constBlock {
   ivec4 inStrides[2];
   ivec4 outStrides[2];
   ivec4 outDims[2];

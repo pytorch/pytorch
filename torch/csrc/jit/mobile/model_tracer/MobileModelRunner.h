@@ -123,7 +123,7 @@ class MobileModelRunner {
    * For each tensor in bundled inputs, call the user-provided function 'func'.
    */
   void for_each_tensor_in_bundled_inputs(
-      std::function<void(::at::Tensor&)> const& func);
+      std::function<void(const ::at::Tensor&)> const& func);
 
   /**
    * Get the root operators directly called by this model's Bytecode.
