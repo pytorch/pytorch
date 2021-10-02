@@ -173,6 +173,33 @@ TORCH_META_FUNC(scatter_add)
   scatter_meta_impl(*this, self, dim, index, src, "add");
 }
 
+TORCH_PRECOMPUTE_META_FUNC(index_add)
+(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha) {
+  dim = maybe_wrap_dim(dim, self.dim());
+  auto numel = index.numel();
+
+  TORCH_CHECK_INDEX(index.dim() <= 1, "index_add_(): Index is supposed to be a vector");
+  TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int,
+              "index_add_(): Expected dtype int32/int64 for index");
+  TORCH_CHECK(self.scalar_type() == source.scalar_type(),
+              "index_add_(): self and source must have the same scalar type");
+  TORCH_CHECK(dim == 0 || dim < source.dim(),
+              "index_add_(): Indexing dim ", dim, " is out of bounds of tensor");
+  TORCH_CHECK(numel == (source.dim() == 0 ? 1 : source.size(dim)),
+              "index_add_(): Number of indices should be equal to self.size(dim)");
+
+  auto& result = maybe_get_output(0);
+  bool is_defined = result.defined();
+  set_output(self.sizes(), self.options());
+  if (is_defined) {
+    at::assert_no_internal_overlap(result);
+    at::assert_no_overlap(result, index);
+    at::assert_no_overlap(result, source);
+  }
+
+  return TORCH_PRECOMPUTE_STRUCT(index_add)().set_dim(dim);
+}
+
 } // namespace meta
 
 namespace native {
@@ -706,99 +733,6 @@ Tensor index_copy(const Tensor & self, int64_t dim, const Tensor & index, const 
   return self.clone(at::MemoryFormat::Preserve).index_copy_(dim, index, source);
 }
 
-
-Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source, const Scalar &alpha) {
-  dim = maybe_wrap_dim(dim, self.dim());
-
-  auto numel = index.numel();
-  TORCH_CHECK_INDEX(index.dim() <= 1, "index_add_(): Index is supposed to be a vector");
-  TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int,
-          "index_add_(): Expected dtype int32/int64 for index");
-  TORCH_CHECK(self.scalar_type() == source.scalar_type(),
-              "index_add_(): self and source must have the same scalar type");
-  TORCH_CHECK(dim == 0 || dim < source.dim(),
-              "index_add_(): Indexing dim ", dim, " is out of bounds of tensor");
-  TORCH_CHECK(numel == (source.dim() == 0 ? 1 : source.size(dim)),
-              "index_add_(): Number of indices should be equal to self.size(dim)");
-
-  at::assert_no_internal_overlap(self);
-  at::assert_no_overlap(self, index);
-  at::assert_no_overlap(self, source);
-
-  auto index_contig = index.contiguous();
-
-  if (self.dim() > 1) {
-    // Equivalent to:
-    //   for (auto i = 0; i < numel; i++) {
-    //     auto selfSlice = self.select(dim, index_data[i]);
-    //     auto sourceSlice = source.select(dim, i);
-    //     selfSlice.add_(sourceSlice);
-    //   }
-    // But much faster as this reuses the iterator from add_
-    if (numel == 0) {
-      return self;
-    }
-    auto selfSlice = self.select(dim, 0);
-    auto sourceSlice = source.select(dim, 0);
-    auto self_stride_bytes = self.stride(dim) * elementSize(self.scalar_type());
-    auto source_stride_bytes = source.stride(dim) * elementSize(source.scalar_type());
-    auto self_dim_size = self.size(dim);
-    auto iter = TensorIterator::borrowing_binary_op(selfSlice, selfSlice, sourceSlice);
-
-    AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "index_add_cpu_", [&] () {
-      auto index_data = index_contig.data_ptr<index_t>();
-      for (auto i = 0; i < numel; i++) {
-          auto self_i = index_data[i];
-          TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_dim_size), "index out of range in self");
-          auto self_data = static_cast<char*>(selfSlice.data_ptr()) + self_i * self_stride_bytes;
-          auto source_data = static_cast<char*>(sourceSlice.data_ptr()) + i * source_stride_bytes;
-          iter.unsafe_replace_operand(0, self_data);
-          iter.unsafe_replace_operand(1, self_data);
-          iter.unsafe_replace_operand(2, source_data);
-          add_stub(iter.device_type(), iter, alpha);
-      }
-    });
-  }
-  else {
-    TORCH_CHECK(source.dim() <= 1, "source.dim() (", source.dim(), ") must one or zero for given self.dim() (", self.dim(), ")");
-
-    // explicitly capture all required variables to work around windows build
-    // TODO: fix this when windows can correctly capture variables in nested lambda
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
-      self.scalar_type(), "index_add_", [&self, &source, &dim, &index_contig, &numel, &alpha] {
-      auto alpha_value = alpha.to<scalar_t>();
-      auto self_stride = self.dim() == 0 ? 1 : self.stride(dim);
-      auto source_stride = source.dim() == 0 ? 1 : source.stride(dim);
-      // TODO: Maybe TensorAccessor can beused here?
-      auto* self_ptr = self.data_ptr<scalar_t>();
-      auto* source_ptr = source.data_ptr<scalar_t>();
-      AT_DISPATCH_INDEX_TYPES(index_contig.scalar_type(), "index_add_cpu_",
-        [&index_contig, &numel, &self, &self_ptr, &self_stride, &source_ptr, &source_stride, alpha_value] {
-        auto index_data = index_contig.data_ptr<index_t>();
-        for (auto i = 0; i < numel; i++) {
-            auto self_i = index_data[i];
-            TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self.numel()), "index out of range in self");
-            scalar_t *self_ip = self_ptr + self_i * self_stride;
-            *self_ip += *(source_ptr + i * source_stride) * alpha_value;
-        }
-      });
-    });
-  }
-  return self;
-}
-
-Tensor& index_add_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  return self.index_add_(dim, index, source, 1);
-}
-
-Tensor index_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source, const Scalar &alpha) {
-  return self.clone(at::MemoryFormat::Preserve).index_add_(dim, index, source, alpha);
-}
-
-Tensor index_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  return self.clone(at::MemoryFormat::Preserve).index_add_(dim, index, source);
-}
-
 // Check that indices fall within dimension array size
 // Avoid redispatch call to min/max
 template <typename IndexType>
@@ -878,6 +812,73 @@ Tensor & index_select_out_cpu_dim1_(
       }
   });
   return result_contig;
+}
+
+TORCH_IMPL_FUNC(index_add_cpu_out)
+(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha, const Tensor& result) {
+  auto result_ = const_cast<Tensor&>(result);
+  if (!result_.is_same(self)) result_.copy_(self);
+  auto numel = index.numel();
+
+  auto index_contig = index.contiguous();
+
+  if (result_.dim() > 1) {
+    // Equivalent to:
+    //   for (auto i = 0; i < numel; i++) {
+    //     auto selfSlice = self.select(dim, index_data[i]);
+    //     auto sourceSlice = source.select(dim, i);
+    //     selfSlice.add_(sourceSlice);
+    //   }
+    // But much faster as this reuses the iterator from add_
+    if (numel == 0) {
+      return;
+    }
+    auto selfSlice = result_.select(dim, 0);
+    auto sourceSlice = source.select(dim, 0);
+    auto self_stride_bytes = result_.stride(dim) * elementSize(result_.scalar_type());
+    auto source_stride_bytes = source.stride(dim) * elementSize(source.scalar_type());
+    auto self_dim_size = result_.size(dim);
+    auto iter = TensorIterator::borrowing_binary_op(selfSlice, selfSlice, sourceSlice);
+
+    AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "index_add_cpu_", [&] () {
+      auto index_data = index_contig.data_ptr<index_t>();
+      for (auto i = 0; i < numel; i++) {
+          auto self_i = index_data[i];
+          TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_dim_size), "index out of range in self");
+          auto self_data = static_cast<char*>(selfSlice.data_ptr()) + self_i * self_stride_bytes;
+          auto source_data = static_cast<char*>(sourceSlice.data_ptr()) + i * source_stride_bytes;
+          iter.unsafe_replace_operand(0, self_data);
+          iter.unsafe_replace_operand(1, self_data);
+          iter.unsafe_replace_operand(2, source_data);
+          add_stub(iter.device_type(), iter, alpha);
+      }
+    });
+  }
+  else {
+    TORCH_CHECK(source.dim() <= 1, "source.dim() (", source.dim(), ") must one or zero for given self.dim() (", self.dim(), ")");
+
+    // explicitly capture all required variables to work around windows build
+    // TODO: fix this when windows can correctly capture variables in nested lambda
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
+      result_.scalar_type(), "index_add_", [&result_, &source, &dim, &index_contig, &numel, &alpha] {
+      auto alpha_value = alpha.to<scalar_t>();
+      auto self_stride = result_.dim() == 0 ? 1 : result_.stride(dim);
+      auto source_stride = source.dim() == 0 ? 1 : source.stride(dim);
+      // TODO: Maybe TensorAccessor can be used here?
+      auto* self_ptr = result_.data_ptr<scalar_t>();
+      auto* source_ptr = source.data_ptr<scalar_t>();
+      AT_DISPATCH_INDEX_TYPES(index_contig.scalar_type(), "index_add_cpu_",
+        [&index_contig, &numel, &result_, &self_ptr, &self_stride, &source_ptr, &source_stride, &alpha_value] {
+        auto index_data = index_contig.data_ptr<index_t>();
+        for (auto i = 0; i < numel; i++) {
+            auto self_i = index_data[i];
+            TORCH_CHECK_INDEX((self_i >= 0) && (self_i < result_.numel()), "index out of range in self");
+            scalar_t *self_ip = self_ptr + self_i * self_stride;
+            *self_ip += *(source_ptr + i * source_stride) * alpha_value;
+        }
+      });
+    });
+  }
 }
 
 Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & index, Tensor & result) {
