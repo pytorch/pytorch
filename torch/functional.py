@@ -384,11 +384,11 @@ else:
                                                tensor([0.0000, 0.6667, 1.3333, 2.0000])))
         """
         if isinstance(bins[0], int):
-            bin_edges = _VF._histogramdd_bin_edges_cts(input, bins, range=range, weight=weight, density=density)
+            bin_edges = _VF._histogramdd_bin_edges(input, bins, range=range, weight=weight, density=density)
         else:
-            bin_edges = _VF._histogramdd_bin_edges_tensor(input, bins, weight=weight, density=density)
+            bin_edges = bins
 
-        hist = _VF._histogramdd_tensor(input, bin_edges, weight=weight, density=density)
+        hist = _VF._histogramdd(input, bin_edges, weight=weight, density=density)
 
         # TODO: figure out how to return torch.return_types.histogramdd
         histogramdd_return_type = namedtuple('histogramdd_return_type', 'hist bin_edges')

@@ -7071,25 +7071,13 @@
   dispatch:
     CPU: histogram_cpu
 
-- func: _histogramdd_tensor(Tensor self, Tensor[] bins, *, Tensor? weight=None, bool density=False) -> Tensor
-  variants: method, function
-  dispatch:
-    CPU: histogramdd_cpu
-
-- func: _histogramdd_bin_edges_tensor(Tensor self, Tensor[] bins, *, Tensor? weight=None, bool density=False) -> Tensor[]
-  variants: method, function
+- func: _histogramdd_bin_edges(Tensor self, int[] bins, *, float[]? range=None, Tensor? weight=None, bool density=False) -> Tensor[]
   dispatch:
     CPU: histogramdd_bin_edges_cpu
 
-- func: _histogramdd_cts(Tensor self, int[] bins, *, float[]? range=None, Tensor? weight=None, bool density=False) -> Tensor
-  variants: method, function
+- func: _histogramdd(Tensor self, Tensor[] bins, *, Tensor? weight=None, bool density=False) -> Tensor
   dispatch:
     CPU: histogramdd_cpu
-
-- func: _histogramdd_bin_edges_cts(Tensor self, int[] bins, *, float[]? range=None, Tensor? weight=None, bool density=False) -> Tensor[]
-  variants: method, function
-  dispatch:
-    CPU: histogramdd_bin_edges_cpu
 
 - func: fmod.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
