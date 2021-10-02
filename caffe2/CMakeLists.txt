@@ -1130,10 +1130,12 @@ endif()
         add_subdirectory(${TORCH_ROOT}/test/cpp/api ${CMAKE_BINARY_DIR}/test_api)
       endif()
 
-      add_subdirectory(
-        ${TORCH_ROOT}/test/mobile/nnc
-        ${CMAKE_BINARY_DIR}/test_mobile_nnc
-      )
+      if(USE_LLVM AND LLVM_FOUND)
+        add_subdirectory(
+          ${TORCH_ROOT}/test/mobile/nnc
+          ${CMAKE_BINARY_DIR}/test_mobile_nnc
+        )
+      endif()
     endif()
   endif()
 

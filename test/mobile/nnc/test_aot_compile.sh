@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -e -o pipefail
+
 TORCH_INSTALL_DIR=$(python -c "import site; print(site.getsitepackages()[0])")/torch
 TORCH_BIN_DIR="$TORCH_INSTALL_DIR"/bin
 CURRENT_DIR="$(dirname "${BASH_SOURCE[0]}")"
@@ -10,11 +12,6 @@ COMPILED_CODE=aot_test_model.compiled.ll
 
 test_aot_model_compiler() {
   python "$CURRENT_DIR"/aot_test_model.py
-  exit_code=$?
-  if [[ $exit_code != 0 ]]; then
-    echo "Failed to save $MODEL"
-    exit 1
-  fi
 
   "$TORCH_BIN_DIR"/test_aot_model_compiler --model "$MODEL" --model_name=aot_test_model --model_version=v1 --input_dims="2,2,2"
   success=1
