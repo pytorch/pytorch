@@ -327,12 +327,8 @@ class TestAutoTracing(AutoTracingTestCase):
     @unittest.skip('FX graph mode is using fake_quantize with PTQ, TODO verify')
     def test_conv_unsupported_inplace_conv(self):
         """
-        Verifies that having an unquantizeable fp32 op which is inplace
+        Verifies that having an quantizeable op which is inplace
         is handled well
-
-        Note: hardsigmoid is actually quantizeable, just not in the mapping
-        yet.  TODO improve everyting, both this test and the logic in
-        the quantization code..
         """
         class M(torch.nn.Module):
             def __init__(self):
@@ -350,8 +346,6 @@ class TestAutoTracing(AutoTracingTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
 
-    # TODO: fix this test (iteration over the (1, 1) arg for arg_quant_infos)
-    @unittest.skip('foo')
     def test_conv_flatten_linear(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -768,8 +762,6 @@ class TestAutoTracing(AutoTracingTestCase):
         self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 1, 1),))
         print(m)
 
-    # TODO fix this test
-    @unittest.skip('foo')
     def test_unsupported_ops(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -923,38 +915,6 @@ class TestAutoTracing(AutoTracingTestCase):
             m, qconfig, (torch.randn(1, 1, 1),),
             # the module is not symbolically traceable
             do_fx_comparison=False)
-
-    # TODO(future PR): enable this test
-    @unittest.skip("this is currently broken")
-    def test_control_flow(self):
-        class Looper(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.i2h = torch.nn.Linear(5, 5)
-                self.h2h = torch.nn.Linear(5, 5)
-
-            def forward(self, x):
-                h = torch.zeros(x.shape[1:])
-                for i in range(x.shape[0]):
-                    i2h = self.i2h(x[0])
-                    h2h = self.h2h(h)
-                    h = i2h + h2h
-                return h
-
-        l = Looper().eval()
-        x = torch.randn(10, 5, 5)
-
-        l(x)
-
-        l.qconfig = torch.quantization.QConfig(activation=torch.quantization.MinMaxObserver.with_args(dtype=torch.qint8),
-                                               weight=torch.quantization.MinMaxObserver.with_args(dtype=torch.qint8))
-
-        l_prepared = _quantize_dynamic_tracing.prepare(l)
-
-        l_prepared(torch.randn(7, 5, 5))
-        l_prepared(torch.randn(13, 5, 5))
-
-        self.assertNotEqual(len(l_prepared._arithmetic_observers.op_observers), 0)
 
 
 @skipIfNoFBGEMM
