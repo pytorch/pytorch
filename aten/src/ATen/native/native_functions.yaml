@@ -2104,9 +2104,6 @@
 # `interpolation_mode` because it only supports Bilinear interpolation mode.
 # Nor does it take in `align_corners` because it only supports the mode
 # `align_corners = True`.
-#
-# `grid_sampler_2d_backward` takes in `output_mask` to optimize performance
-# for the case where `input` doesn't require gradient.
 - func: grid_sampler(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> Tensor
 
 - func: grid_sampler_2d(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> Tensor
@@ -2114,6 +2111,9 @@
     CPU: grid_sampler_2d_cpu
     CUDA: grid_sampler_2d_cuda
 
+# `grid_sampler_2d_backward` takes in `output_mask` to optimize performance for
+# the case where `input` doesn't require gradient. Gradient for `grid` is always
+# computed (only `output_mask[0]` is checked by the implementations).
 - func: grid_sampler_2d_backward(Tensor grad_output, Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners, bool[2] output_mask) -> (Tensor, Tensor)
   dispatch:
     CPU: grid_sampler_2d_backward_cpu
