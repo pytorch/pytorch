@@ -376,6 +376,15 @@ def _topk_helper(g, input, k, dim, largest=True, sorted=False, out=None):
         return g.op("TopK", input, k, axis_i=dim, largest_i=largest, sorted_i=sorted, outputs=2)
 
 
+def _lt_helper(g, input, other):
+    if _export_onnx_opset_version <= 8:
+        from torch.onnx.symbolic_opset8 import lt as _lt8
+        return _lt8(g, input, other)
+    else:
+        from torch.onnx.symbolic_opset9 import lt as _lt9
+        return _lt9(g, input, other)
+
+
 def _interpolate_warning(interpolate_mode):
     onnx_op = "onnx:Resize" if _export_onnx_opset_version >= 10 else "onnx:Upsample"
     warnings.warn("You are trying to export the model with " + onnx_op + " for ONNX opset version "
