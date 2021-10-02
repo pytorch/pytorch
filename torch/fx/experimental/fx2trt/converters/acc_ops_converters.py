@@ -62,7 +62,7 @@ def create_constant(network, tensor, name, dtype):
     return constant.get_output(0)
 
 
-def get_trt_tensor(network, input_val, name, dtype=None) -> trt.tensorrt.ITensor:
+def get_trt_tensor(network, input_val, name, dtype=None) -> "trt.tensorrt.ITensor":
     if isinstance(input_val, (torch.Tensor, int, float)):
         return create_constant(network, input_val, name, dtype)
     elif not isinstance(input_val, trt.tensorrt.ITensor):
