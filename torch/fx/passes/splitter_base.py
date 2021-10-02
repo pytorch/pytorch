@@ -11,7 +11,7 @@ from torch.fx._compatibility import compatibility
 
 from .operator_support import (
     get_node_target,
-    OperatorSupport,
+    OperatorSupportBase,
 )
 from .graph_drawer import FxGraphDrawer
 from .shape_prop import ShapeProp
@@ -82,7 +82,7 @@ class FxNetAccNodesFinder:
     def __init__(
         self,
         module: torch.fx.GraphModule,
-        operator_support: OperatorSupport,
+        operator_support: OperatorSupportBase,
         allow_non_tensor: bool,
     ):
         self.module = module
@@ -226,7 +226,7 @@ class _SplitterBase:
         self,
         module: torch.fx.GraphModule,
         sample_input: Tensors,
-        operator_support: OperatorSupport,
+        operator_support: OperatorSupportBase,
         settings: _SplitterSettingBase,
     ):
         """

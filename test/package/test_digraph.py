@@ -99,10 +99,8 @@ class TestDiGraph(PackageTestCase):
         g.add_edge("2", "3")
         g.add_edge("5", "4")
         g.add_edge("4", "3")
-        self.assertTrue(g.forward_transitive_closure("1") ==
-                        set(["1", "2", "3"]))
-        self.assertTrue(g.forward_transitive_closure("4") ==
-                        set(["4", "3"]))
+        self.assertTrue(g.forward_transitive_closure("1") == set(["1", "2", "3"]))
+        self.assertTrue(g.forward_transitive_closure("4") == set(["4", "3"]))
 
     def test_all_paths(self):
         g = DiGraph()
@@ -117,9 +115,15 @@ class TestDiGraph(PackageTestCase):
         result = g.all_paths("1", "3")
         # to get rid of indeterminism
         actual = set([i.strip("\n") for i in result.split(";")[2:-1]])
-        expected = {'"2" -> "3"', '"1" -> "7"', '"7" -> "8"',
-                    '"1" -> "2"', '"8" -> "3"'}
+        expected = {
+            '"2" -> "3"',
+            '"1" -> "7"',
+            '"7" -> "8"',
+            '"1" -> "2"',
+            '"8" -> "3"',
+        }
         self.assertEqual(actual, expected)
+
 
 if __name__ == "__main__":
     run_tests()
