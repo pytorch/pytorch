@@ -103,10 +103,10 @@ def _unwrap_batched(
         return torch._remove_batch_dim(batched_outputs, vmap_level, batch_size, out_dim)  # type: ignore[return-value]
     if allow_none_pass_through:
         return tuple((torch._remove_batch_dim(out, vmap_level, batch_size, out_dim) if out is not None else None)
-                for out, out_dim in zip(batched_outputs, out_dims_as_tuple))
+                     for out, out_dim in zip(batched_outputs, out_dims_as_tuple))
     else:
         return tuple(torch._remove_batch_dim(out, vmap_level, batch_size, out_dim)
-                    for out, out_dim in zip(batched_outputs, out_dims_as_tuple))
+                     for out, out_dim in zip(batched_outputs, out_dims_as_tuple))
 
 # Checks that `fn` returned one or more Tensors and nothing else.
 # NB: A python function that return multiple arguments returns a single tuple,
