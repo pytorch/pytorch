@@ -1,5 +1,4 @@
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/cuda/im2col.cuh>
@@ -207,7 +206,7 @@ void slow_conv_dilated_all_cuda_template(
     output.zero_();
   }
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
   /* When using ROCm, the sum evaluation is inaccurate for double
      tensors. The reason is currently unknown. Hence, we use gemv for
      computing `grad_output_n.sum(dims)` until the ROCm-sum issue is

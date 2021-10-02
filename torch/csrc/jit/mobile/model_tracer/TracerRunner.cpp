@@ -15,12 +15,6 @@ namespace torch {
 namespace jit {
 namespace mobile {
 
-const std::vector<std::string> always_included_traced_ops = {
-    // The following are called from setup sections.
-    "aten::resize_",
-    "aten::slice.Tensor",
-};
-
 // Fetched from caffe2/aten/src/ATen/native/metal/MetalAten.mm
 // Diffusion Link: https://fburl.com/diffusion/atwwmax2
 const std::vector<std::string> gpu_metal_operators = {
@@ -93,7 +87,7 @@ void call_setup_methods() {
  * Call methods on the Tensor object that we expect to be called
  * in production on this Tensor.
  */
-void consume_tensor(at::Tensor& t) {
+void consume_tensor(const at::Tensor& t) {
   const at::Tensor c = t;
   c.copy_(t.cpu());
 }
@@ -103,74 +97,55 @@ void run_model(
     std::set<std::string>& root_ops,
     std::set<std::string>& enabled_backends,
     KernelDTypeTracer::kernel_tags_type& called_kernel_tags) {
-  try {
-    // Load the module on CPU with the flag to skip the operator exists check.
-    // This is needed so that we can load any TorchBind objects (custom classes)
-    // that this model refers to so that any operators being called from those
-    // TorchBind objects can be traced by the model tracer.
-    //
-    torch::jit::mobile::MobileModelRunner module_runner(input_module_path, 0);
-    root_ops = module_runner.get_root_operators();
-    std::cout << "Got " << root_ops.size() << " Root Operators." << std::endl;
+  // Load the module on CPU with the flag to skip the operator exists check.
+  // This is needed so that we can load any TorchBind objects (custom classes)
+  // that this model refers to so that any operators being called from those
+  // TorchBind objects can be traced by the model tracer.
+  //
+  torch::jit::mobile::MobileModelRunner module_runner(input_module_path, 0);
+  root_ops = module_runner.get_root_operators();
+  std::cout << "Got " << root_ops.size() << " Root Operators." << std::endl;
 
-    if (torch::jit::mobile::MobileModelRunner::set_has_metal_gpu_operators(
-            root_ops)) {
-      std::cout << "Inferred Metal GPU Model." << std::endl;
-      root_ops.insert(gpu_metal_operators.begin(), gpu_metal_operators.end());
-      called_kernel_tags["__unused__"] = {"Float"};
-      enabled_backends.insert("Metal GPU");
+  if (torch::jit::mobile::MobileModelRunner::set_has_metal_gpu_operators(
+          root_ops)) {
+    std::cout << "Inferred Metal GPU Model." << std::endl;
+    root_ops.insert(gpu_metal_operators.begin(), gpu_metal_operators.end());
+    called_kernel_tags["__unused__"] = {"Float"};
+    enabled_backends.insert("Metal GPU");
 
-      // When we encounter a GPU model, we should call .cpu().copy_() on the
-      // tensors in the bundled inputs, since this is what will happen when
-      // such a model is executed on an iOS device (to copy the Tensor to Metal
-      // memory via a call to .metal()).
-      module_runner.for_each_tensor_in_bundled_inputs(consume_tensor);
-    } else {
-      std::cout << "Inferred CPU Model." << std::endl;
-      enabled_backends.insert("CPU");
-      torch::jit::mobile::MobileModelRunner mobile_module_runner(
-          input_module_path);
+    // When we encounter a GPU model, we should call .cpu().copy_() on the
+    // tensors in the bundled inputs, since this is what will happen when
+    // such a model is executed on an iOS device (to copy the Tensor to Metal
+    // memory via a call to .metal()).
+    module_runner.for_each_tensor_in_bundled_inputs(consume_tensor);
+  } else {
+    std::cout << "Inferred CPU Model." << std::endl;
+    enabled_backends.insert("CPU");
+    torch::jit::mobile::MobileModelRunner mobile_module_runner(
+        input_module_path);
 
-      // When we encounter a CPU model, we should call .cpu().copy_() on the
-      // tensors in the bundled inputs, since this is what will happen when
-      // such a model is executed on an Android device since the PyTorch JNI
-      // bindings call .cpu() in JIValue::newJIValueFromAtIValue().
-      module_runner.for_each_tensor_in_bundled_inputs(consume_tensor);
+    // When we encounter a CPU model, we should call .cpu().copy_() on the
+    // tensors in the bundled inputs, since this is what will happen when
+    // such a model is executed on an Android device since the PyTorch JNI
+    // bindings call .cpu() in JIValue::newJIValueFromAtIValue().
+    module_runner.for_each_tensor_in_bundled_inputs(consume_tensor);
 
-      // If a user has bundled inputs since that api was updated to accept
-      // bundled inputs for multiple methods They should go down this route.
-      // Even if they only bundle inputs for forward they will have the new
-      // style bundled inputs. Since at this time in tracer.cpp we do not know
-      // what functions have bundled inputs we must call
-      // get_bundled_inputs_functions_and_info if it exists to get the set.
-      if (mobile_module_runner.has_new_style_bundled_inputs()) {
-        auto bundled_inputs_mapping =
-            mobile_module_runner.get_many_functions_bundled_inputs();
-        for (auto& entry : bundled_inputs_mapping) {
-          std::string function_name = entry.first;
-          std::vector<std::vector<at::IValue>> bundled_inputs = entry.second;
-          std::cout << "Got " << bundled_inputs.size()
-                    << " bundled input(s) for " << function_name << "\n\n";
-          std::vector<at::IValue> results =
-              mobile_module_runner.run_with_inputs(
-                  function_name, bundled_inputs);
-
-          for (auto& result : results) {
-            // Consume the result Tensor(s) when tracing on CPU since the
-            // Android/Java JNI bindings will do the same.
-            torch::jit::mobile::for_each_tensor_in_ivalue(
-                result, consume_tensor);
-          }
-        }
-        // If get_bundled_inputs_functions_and_info does not exists we default
-        // to assuming they bundled before that change was made. If no bundled
-        // inputs are found here either an error will be thrown
-      } else {
-        std::vector<std::vector<at::IValue>> bundled_inputs =
-            mobile_module_runner.get_all_bundled_inputs();
-        std::cout << "Got " << bundled_inputs.size() << " bundled input(s)\n\n";
+    // If a user has bundled inputs since that api was updated to accept
+    // bundled inputs for multiple methods They should go down this route.
+    // Even if they only bundle inputs for forward they will have the new
+    // style bundled inputs. Since at this time in tracer.cpp we do not know
+    // what functions have bundled inputs we must call
+    // get_bundled_inputs_functions_and_info if it exists to get the set.
+    if (mobile_module_runner.has_new_style_bundled_inputs()) {
+      auto bundled_inputs_mapping =
+          mobile_module_runner.get_many_functions_bundled_inputs();
+      for (auto& entry : bundled_inputs_mapping) {
+        std::string function_name = entry.first;
+        std::vector<std::vector<at::IValue>> bundled_inputs = entry.second;
+        std::cout << "Got " << bundled_inputs.size() << " bundled input(s) for "
+                  << function_name << "\n\n";
         std::vector<at::IValue> results =
-            mobile_module_runner.run_with_inputs(bundled_inputs);
+            mobile_module_runner.run_with_inputs(function_name, bundled_inputs);
 
         for (auto& result : results) {
           // Consume the result Tensor(s) when tracing on CPU since the
@@ -178,15 +153,22 @@ void run_model(
           torch::jit::mobile::for_each_tensor_in_ivalue(result, consume_tensor);
         }
       }
-    }
-  } catch (std::exception& ex) {
-    std::cerr
-        << "ModelTracer has not been able to load the module for the following reasons:\n"
-        << ex.what()
-        << "\nPlease consider posting to the PyTorch Edge Users workplace group (https://fb.workplace.com/groups/pytorch.edge.users) with the error message."
-        << std::endl;
+      // If get_bundled_inputs_functions_and_info does not exists we default
+      // to assuming they bundled before that change was made. If no bundled
+      // inputs are found here either an error will be thrown
+    } else {
+      std::vector<std::vector<at::IValue>> bundled_inputs =
+          mobile_module_runner.get_all_bundled_inputs();
+      std::cout << "Got " << bundled_inputs.size() << " bundled input(s)\n\n";
+      std::vector<at::IValue> results =
+          mobile_module_runner.run_with_inputs(bundled_inputs);
 
-    throw ex;
+      for (auto& result : results) {
+        // Consume the result Tensor(s) when tracing on CPU since the
+        // Android/Java JNI bindings will do the same.
+        torch::jit::mobile::for_each_tensor_in_ivalue(result, consume_tensor);
+      }
+    }
   }
 }
 
@@ -217,18 +199,6 @@ TracerResult trace_run(const std::string& input_module_path) {
       always_included_traced_ops.begin(), always_included_traced_ops.end());
   TracerResult tracer_result = {
       root_ops, traced_operators, called_kernel_tags, enabled_backends};
-
-  if (tracer_result.traced_operators.size() <=
-      always_included_traced_ops.size()) {
-    throw std::runtime_error(
-        "Error traced_operators size: " +
-        std::to_string(tracer_result.traced_operators.size()) +
-        " , Expected the traced operator list " +
-        "to be bigger then the default size " +
-        std::to_string(always_included_traced_ops.size()) +
-        ". Please ensure tracer was run with " +
-        "'buck run -c pt.disable_per_op_profiling=0 -c pt.enable_record_kernel_dtype=1'");
-  }
 
   return tracer_result;
 }

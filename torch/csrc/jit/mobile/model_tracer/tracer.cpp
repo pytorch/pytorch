@@ -96,12 +96,35 @@ int main(int argc, char* argv[]) {
 
   std::cout << "Processing: " << input_module_path << std::endl;
   std::cout << "Output: " << FLAGS_build_yaml_path << std::endl;
+  torch::jit::mobile::TracerResult tracer_result;
+  try {
+    tracer_result = torch::jit::mobile::trace_run(FLAGS_model_input_path);
+  } catch (std::exception& ex) {
+    std::cerr
+        << "ModelTracer has not been able to load the module for the following reasons:\n"
+        << ex.what()
+        << "\nPlease consider posting to the PyTorch with the error message."
+        << std::endl;
 
-  torch::jit::mobile::TracerResult tracer_result =
-      torch::jit::mobile::trace_run(FLAGS_model_input_path);
+    throw ex;
+  }
+
+  if (tracer_result.traced_operators.size() <=
+          torch::jit::mobile::always_included_traced_ops.size() ||
+      tracer_result.called_kernel_tags.size() == 0) {
+    throw std::runtime_error(folly::sformat(
+        "Error traced_operators size: {}, "
+        "Kernel_metadata size: {}, "
+        "Expected kernel to be > 0 and the traced operator list "
+        "to be bigger then the default size {}. "
+        "Please report a bug in PyTorch.",
+        tracer_result.traced_operators.size(),
+        tracer_result.called_kernel_tags.size(),
+        torch::jit::mobile::always_included_traced_ops.size()));
+  }
 
   // If the op exist in both traced_ops and root_ops, leave it in root_ops only
-  for(const auto& root_op: root_ops) {
+  for (const auto& root_op : root_ops) {
     if (traced_operators.find(root_op) != traced_operators.end()) {
       traced_operators.erase(root_op);
     }
