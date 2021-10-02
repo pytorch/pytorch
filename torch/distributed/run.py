@@ -81,13 +81,14 @@ Usage
         --nproc_per_node=$NUM_TRAINERS
         YOUR_TRAINING_SCRIPT.py (--arg1 ... train script args...)
 
-2. Fault tolerant (fixed sized number of workers, no elasticity):
+2. Fault tolerant (fixed sized number of workers, no elasticity, tolerates 3 failures):
 
 ::
 
     >>> torchrun
         --nnodes=$NUM_NODES
         --nproc_per_node=$NUM_TRAINERS
+        --max_restarts=3
         --rdzv_id=$JOB_ID
         --rdzv_backend=c10d
         --rdzv_endpoint=$HOST_NODE_ADDR
@@ -100,13 +101,14 @@ node in your training cluster, but ideally you should pick a node that has a hig
 .. note::
    If no port number is specified ``HOST_NODE_ADDR`` defaults to 29400.
 
-3. Elastic (``min=1``, ``max=4``):
+3. Elastic (``min=1``, ``max=4``, tolerates up to 3 membership changes or failures):
 
 ::
 
     >>> torchrun
         --nnodes=1:4
         --nproc_per_node=$NUM_TRAINERS
+        --max_restarts=3
         --rdzv_id=$JOB_ID
         --rdzv_backend=c10d
         --rdzv_endpoint=$HOST_NODE_ADDR

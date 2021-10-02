@@ -4,7 +4,7 @@ import torch.nn.quantized as nnq
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.qat as nniqat
-from torch.quantization import (
+from torch.ao.quantization import (
     quantize,
     prepare,
     convert,
@@ -198,7 +198,7 @@ class TestFusion(QuantizationTestCase):
                                      msg="Non-fused submodule Conv")
                 self.assertEqual(type(model.classifier[0]), nni.LinearReLU)
                 self.assertEqual(type(model.classifier[1]), nn.Identity)
-                model.qconfig = torch.quantization.get_default_qat_qconfig(qengine)
+                model.qconfig = torch.ao.quantization.get_default_qat_qconfig(qengine)
                 prepare_qat(model, inplace=True)
                 self.checkObservers(model)
                 model(self.img_data_2d[0][0])
@@ -250,7 +250,7 @@ class TestFusion(QuantizationTestCase):
                                      msg="Non-fused submodule Conv")
                 self.assertEqual(type(model.classifier[0]), nni.LinearReLU)
                 self.assertEqual(type(model.classifier[1]), nn.Identity)
-                model.qconfig = torch.quantization.get_default_qconfig(qengine)
+                model.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
                 prepare(model, inplace=True)
                 self.checkObservers(model)
                 model(self.img_data_2d[0][0])
@@ -284,7 +284,7 @@ class TestFusion(QuantizationTestCase):
                 out_fused = prep_model(self.img_data_2d[0][0])
                 self.assertEqual(out_ref, out_fused)
 
-                model.qconfig = torch.quantization.get_default_qconfig(qengine)
+                model.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
                 prepare_qat(model, inplace=True)
 
                 model(self.img_data_2d[0][0])

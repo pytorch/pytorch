@@ -222,7 +222,7 @@ bool MobileModelRunner::set_has_metal_gpu_operators(
 }
 
 void MobileModelRunner::for_each_tensor_in_bundled_inputs(
-    std::function<void(::at::Tensor&)> const& func) {
+    std::function<void(const ::at::Tensor&)> const& func) {
   if (has_new_style_bundled_inputs()) {
     // Get the bundled inputs and access the arg level ivalues stored within
     auto bundled_inputs_mapping = this->get_many_functions_bundled_inputs();
@@ -231,9 +231,9 @@ void MobileModelRunner::for_each_tensor_in_bundled_inputs(
     for (auto& entry : bundled_inputs_mapping) {
       std::vector<std::vector<at::IValue>> bundled_inputs = entry.second;
       // Loop through inputs
-      for (std::vector<at::IValue>& input : bundled_inputs) {
+      for (const std::vector<at::IValue>& input : bundled_inputs) {
         // Loop through values in an input
-        for (at::IValue iv : input) {
+        for (const at::IValue& iv : input) {
           for_each_tensor_in_ivalue(iv, func);
         }
       }
