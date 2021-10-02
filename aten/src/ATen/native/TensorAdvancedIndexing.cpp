@@ -816,7 +816,6 @@ Tensor & index_select_out_cpu_dim1_(
 
 TORCH_IMPL_FUNC(index_add_cpu_out)
 (const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha, const Tensor& result) {
-  index_add_impl(self, dim, index, source, alpha, result);
   auto result_ = const_cast<Tensor&>(result);
   if (!result_.is_same(self)) result_.copy_(self);
   auto numel = index.numel();
