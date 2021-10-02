@@ -2,7 +2,6 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Dispatch.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <aten/src/ATen/TensorUtils.h>
