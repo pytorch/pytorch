@@ -1,6 +1,7 @@
 from collections import deque
 from typing import Set
 
+
 class DiGraph:
     """Really simple unweighted directed graph data structure to track dependencies.
 

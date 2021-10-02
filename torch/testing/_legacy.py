@@ -1,13 +1,13 @@
-"""This module exist to be able to deprecate the dtype getters publicly without doing so internally. The deprecated
+"""This module exist to be able to deprecate functions publicly without doing so internally. The deprecated
 public versions are defined in torch.testing._deprecated and exposed from torch.testing. The non-deprecated internal
-versions should be imported from torch.testing._internal.dtype_getters
+versions should be imported from torch.testing._internal
 """
 
 from typing import List
 
 import torch
 
-__all__ = [
+__all_dtype_getters__ = [
     "_validate_dtypes",
     "_dispatch_dtypes",
     "all_types",
@@ -30,6 +30,11 @@ __all__ = [
     "get_all_math_dtypes",
     "integral_types",
     "integral_types_and",
+]
+
+__all__ = [
+    *__all_dtype_getters__,
+    "get_all_device_types",
 ]
 
 # Functions and classes for describing the dtypes a function supports
@@ -136,3 +141,7 @@ def get_all_fp_dtypes(include_half=True, include_bfloat16=True) -> List[torch.dt
     if include_bfloat16:
         dtypes.append(torch.bfloat16)
     return dtypes
+
+
+def get_all_device_types() -> List[str]:
+    return ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']

@@ -292,7 +292,6 @@ void slow_conv2d_backward_out_cpu_template(
 
   AT_DISPATCH_FLOATING_TYPES_AND(
       kBFloat16, input.scalar_type(), "slow_conv2d_cpu_grad_input", [&] {
-    auto input_a = input.accessor<scalar_t, 4>();
     auto grad_output_a = grad_output.accessor<scalar_t, 4>();
     auto grad_input_a = grad_input.accessor<scalar_t, 4>();
     auto weight_a = weight.accessor<scalar_t, 2>();
