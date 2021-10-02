@@ -341,20 +341,32 @@ else:
         r"""
         histogramdd(input, bins, *, range=None, weight=None, density=False, out=None) -> (Tensor, Tensor[])
 
-        Computes a histogram of the values in a tensor. Interprets the elements of an
-        input tensor with innermost dimension D as D-dimensional coordinates.
+        Computes a multi-dimensional histogram of the values in a tensor.
 
-        :attr:`bins` can be a sequence of D ints or a sequence of D 1D tensors.
+        Interprets the elements of an input tensor whose innermost dimension
+        has size N as N-dimensional coordinates. For example, in an MxN matrix
+        each of the M rows defines a coordinate in N-dimensional space. If input
+        has three or more dimensions, all but the last dimension are flattened.
 
-        If :attr:`bins` is a sequence of ints, it specifies the number of equal-width
-        bins in each dimension. By default, the lower and upper range of the bins is
-        determined by the minimum and maximum elements of the input tensor in the
+        For each of the N dimensions, a strictly increasing sequence of bin edges
+        is passed or constructed defining a set of bins.
+
+        An N-dimensional histogram is computed containing the count (or total weight)
+        of values falling in each of the N-dimensional bins defined by the
+        cartesian product of the N bin sets. Elements which do not fall
+        inside any bin do not contribute to the output.
+
+        :attr:`bins` can be a sequence of N ints or a sequence of N 1D tensors.
+
+        If :attr:`bins` is a sequence of N ints, it specifies the number of equal-width
+        bins in each dimension. By default, the range of the bins in each dimension
+        is determined by the minimum and maximum elements of the input tensor in the
         corresponding dimension. The :attr:`range` argument can be provided to specify
         ranges for the bins in each dimension.
 
-        If :attr:`bins` is a sequence of 1D tensors, it specifies the sequences of bin
-        edges, each including their rightmost edge. Each bin sequence should contain
-        an increasing sequence of at least 2 elements.
+        If :attr:`bins` is a sequence of N 1D tensors, it explicitly specifies the
+        sequences of bin edges. Each tensor should contain a strictly increasing sequence
+        with at least two elements. Each should include its rightmost bin edge.
 
         Args:
             {input}
@@ -362,24 +374,27 @@ else:
                   in each dimension. If Tensor[], defines the sequences of bin edges,
                   each including their rightmost edge.
         Keyword args:
-            range (tuple of float): Defines the ranges of the bins in each dimension.
-            weight (Tensor): If provided, weight should have the same shape as input
-                             excluding its innermost dimension. Each D-dimensional
-                             coordinate in input contributes its associated weight
-                             towards its bin's result.
-            density (bool): If False, the result will contain the count (or total weight)
-                            in each bin. If True, the result is the value of the probability
-                            density function over the bins, normalized such that the integral
-                            over the range of the bins is 1.
+            range (sequence of float): Defines the ranges of the bins in each dimension.
+            weight (Tensor): By default, each value in the input has weight 1. If a weight
+                             tensor is passed, each N-dimensional coordinate in input
+                             contributes its associated weight towards its bin's result.
+                             The weight tensor should have the same shape as the :attr:`input`
+                             tensor, excluding the innermost dimension N.
+            density (bool): If False (default), the result will contain the count (or total weight)
+                            in each bin. If True, the value of each bin is the value of a
+                            piecewise-constant probability density function (pdf) over the bins
+                            such that the (Lebesgue) integral of the pdf over the range of the
+                            bins is 1.
         Returns:
-            hist (Tensor): D-dimensional Tensor containing the values of the histogram.
-            bin_edges(Tensor[]): sequence of D 1D Tensors containing the edges of the histogram bins.
+            hist (Tensor): N-dimensional Tensor containing the values of the histogram.
+            bin_edges(Tensor[]): sequence of N 1D Tensors containing the edges of the histogram bins.
 
         Example::
-            >>> torch.histogramdd(torch.tensor([[0., 0.], [1., 1.], [2., 2.]]), bins=(3, 3))
+            >>> torch.histogramdd(torch.tensor([[0., 0.], [1., 1.], [2., 2.]]), bins=(3, 3),
+                                  weight=torch.tensor([1., 2., 4.]))
             histogramdd_return_type(hist=tensor([[1., 0., 0.],
-                                                [0., 1., 0.],
-                                                [0., 0., 1.]]),
+                                                 [0., 2., 0.],
+                                                 [0., 0., 4.]]),
                                     bin_edges=(tensor([0.0000, 0.6667, 1.3333, 2.0000]),
                                                tensor([0.0000, 0.6667, 1.3333, 2.0000])))
         """
