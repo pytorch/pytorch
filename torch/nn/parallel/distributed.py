@@ -1246,9 +1246,44 @@ class DistributedDataParallel(Module, Joinable):
         self,
         state,
         hook: callable,
-        comm_hook_location=_BufferCommHookLocation.PRE_FORWARD
+        comm_hook_location=_BufferCommHookLocation.POST_FORWARD
     ):
+        r"""
+            Allows custom registration of hooks that define how buffer are
+            synchronized across ranks. The hook takes in an optional state
+            and is passed in a Dict[str, Tensor] corresponding to buffer names
+            and the buffers, and can run arbitrary reductions on buffers as
+            opposed to DDP's default broadcast from rank 0. This is useful for
+            example if a counter needs to be summed or averaged across ranks
+            every iteration.
 
+            Args:
+                state (Any): Optional state that is passed to the hook.
+                hook (Callable): Callable with the following signature:
+                                ``hook(state: object, buffers: Dict[str, torch.Tensor])
+                                -> Optional[List[torch.futures.Future[torch.Tensor]]]``
+                comm_hook_location (_BufferCommHookLocation): Enum value indicating
+                                where to run the hook.
+                                _BufferCommHookLocation.PRE_FORWARD means that the
+                                hook will run _before_ the forward pass, and
+                                _BufferCommHookLocation.POST_FORWARD means that the
+                                hook will run _after_ the forward pass.
+
+                hook (callable): Callable with the following signature:
+                             ``hook(state: object, bucket: dist.GradBucket) -> torch.futures.Future[torch.Tensor]``:
+
+                NOTE: To maximize performance, users can return a
+                    List[torch.futures.Future] from their hook, and DDP will
+                    install and await these hooks appropriately at the end of
+                    the backward pass. This will ensure all buffers are
+                    synchronized by the end of the backward pass. If this
+                    setting is used, it is recommended to pass
+                    comm_hook_location=_BufferCommHookLocation.POST_FORWARD,
+                    which will trigger the hook after the forward pass.
+                    If _BufferCommHookLocation.PRE_FORWARD is used, users must
+                    ensure appropriate synchronization when manipulating GPU
+                    buffers in the forward pass.
+            """
         assert callable(hook)
         self.buffer_hook = _BufferCommHook(
             buffer_comm_hook=hook,
@@ -1431,10 +1466,11 @@ class DistributedDataParallel(Module, Joinable):
         if not hasattr(self, 'buffer_hook'):
             self._default_broadcast_coalesced(authoritative_rank=authoritative_rank)
         else:
-            # TODO: provide option to await in backward pass.
             hook = self.buffer_hook.buffer_comm_hook
             state = self.buffer_hook.buffer_comm_hook_state
-            hook(state, self.named_module_buffers)
+            futs = hook(state, self.named_module_buffers)
+            if futs is not None:
+                self.reducer._install_post_backward_futures(futs)
 
     def _default_broadcast_coalesced(
         self, bufs=None, bucket_size=None, authoritative_rank=0

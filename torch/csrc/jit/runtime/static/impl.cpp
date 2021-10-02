@@ -2,6 +2,7 @@
 
 #include <ATen/MemoryOverlap.h>
 #include <ATen/core/interned_strings.h>
+#include <ATen/record_function.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/core/InferenceMode.h>
 #include <c10/util/irange.h>
@@ -83,8 +84,8 @@ void OptimizeGraph(
   // to exposed folders.
 #ifdef FBCODE_CAFFE2
   if (opts.enable_out_variant) {
-    FuseListUnpack(graph);
     ReplaceWithCopy(graph);
+    FuseListUnpack(graph);
     EnableStaticRuntimeLayerNorm(graph);
   }
 #endif
@@ -534,8 +535,7 @@ void PrepareGraphForStaticModule(
   OptimizeGraph(graph, opts);
 }
 
-std::pair<std::shared_ptr<Graph>, std::shared_ptr<Module>>
-PrepareForStaticModule(
+std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
     const torch::jit::Module& m,
     bool is_frozen,
     const StaticModuleOptions& opts) {
@@ -545,30 +545,26 @@ PrepareForStaticModule(
           << opts.optimize_memory << ", optimize_graph_output_memory"
           << opts.optimize_graph_output_memory;
 
-  std::shared_ptr<Module> module_ptr;
+  Module module = m.copy();
   if (!is_frozen) {
-    auto module = m.copy();
     module.eval();
-    module_ptr = std::make_shared<Module>(freeze_module(module));
-  } else {
-    module_ptr = std::make_shared<Module>(m.copy());
+    module = freeze_module(module);
   }
 
-  Method method = module_ptr->get_method("forward");
-  auto graph = module_ptr->get_method("forward").graph();
+  Method method = module.get_method("forward");
+  auto graph = module.get_method("forward").graph();
 
   // graph->dump();
   PrepareGraphForStaticModule(graph, opts);
 
-  return std::make_pair(graph, module_ptr);
+  return std::make_pair(graph, module);
 }
 
-std::pair<std::shared_ptr<Graph>, std::shared_ptr<Module>>
-PrepareForStaticModule(
+std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
     std::shared_ptr<torch::jit::Graph> graph,
     const StaticModuleOptions& opts) {
   PrepareGraphForStaticModule(graph, opts);
-  return std::make_pair(graph, nullptr);
+  return std::make_pair(graph, c10::nullopt);
 }
 
 } // namespace
@@ -585,7 +581,7 @@ StaticModule::StaticModule(
     : StaticModule(PrepareForStaticModule(m, is_frozen, opts), opts) {}
 
 StaticModule::StaticModule(
-    std::pair<std::shared_ptr<torch::jit::Graph>, std::shared_ptr<Module>>
+    std::pair<std::shared_ptr<torch::jit::Graph>, c10::optional<Module>>
         graph_and_module,
     const StaticModuleOptions& opts)
     : opts_(opts),
@@ -604,7 +600,7 @@ StaticModule::StaticModule(
   }
 
   // handle schema
-  if (module_) {
+  if (module_.has_value()) {
     Method method = module_->get_method("forward");
     schema_ = method.function().getSchema();
     if (RemoveSelfFromGraphInput(graph_)) {
@@ -1281,7 +1277,9 @@ ProcessedNode::ProcessedNode(
     Node* node,
     std::vector<const IValue*>&& inputs,
     bool enable_out_variant)
-    : node_(node), inputs_(std::move(inputs)) {
+    : node_(node),
+      inputs_(std::move(inputs)),
+      op_name_(node->kind().toQualString()) {
   // TODO leverage type information
   outputs_.resize(node->outputs().size());
 
@@ -1300,7 +1298,18 @@ ProcessedNode::ProcessedNode(
   }
 }
 
-void ProcessedNode::run() {
+std::vector<IValue> ProcessedNode::clone_inputs() const {
+  std::vector<IValue> result;
+  result.reserve(inputs_.size());
+  std::transform(
+      inputs_.begin(),
+      inputs_.end(),
+      std::back_inserter(result),
+      [](const IValue* ival) { return *ival; });
+  return result;
+}
+
+void ProcessedNode::run_impl() {
   DCHECK(verify_no_memory_overlap());
   if (fn_) {
     fn_(this);
@@ -1326,6 +1335,27 @@ void ProcessedNode::run() {
       Output(i) = std::move(stack[i]);
     }
   }
+}
+
+void ProcessedNode::run() {
+#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
+  bool pre_sampled = false;
+  if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
+    at::RecordFunction guard(at::RecordScope::FUNCTION, pre_sampled);
+    if (guard.isActive()) {
+      if (guard.needsInputs()) {
+        guard.before(get_op_name(), clone_inputs());
+      } else {
+        guard.before(get_op_name());
+      }
+    }
+    run_impl();
+  } else {
+    run_impl();
+  }
+#else
+  run_impl();
+#endif
 }
 
 static bool checkNoMemoryOverlap(const at::Tensor& a, const at::Tensor& b) {
