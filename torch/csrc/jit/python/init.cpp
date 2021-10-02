@@ -139,7 +139,7 @@ bool loadPythonClasses() {
 }
 } // anonymous namespace
 
-#if !defined(__HIP_PLATFORM_HCC__)
+#if !defined(USE_ROCM)
 TORCH_API void runJITCPPTests();
 #endif
 
@@ -526,6 +526,11 @@ void initJITBindings(PyObject* module) {
           py::arg("graph"))
       .def("_jit_pass_erase_shape_information", EraseShapeInformation)
       .def(
+          "_jit_object_is_non_holding",
+          [](Node& n) {
+            return toIValue(n.output())->toObject()->is_weak_compilation_ref();
+          })
+      .def(
           "_jit_erase_non_input_shape_information",
           [](std::shared_ptr<Graph>& g) {
             std::vector<TypePtr> input_types;
@@ -548,7 +553,7 @@ void initJITBindings(PyObject* module) {
           [](const std::shared_ptr<Graph>& graph) {
             CreateAutodiffSubgraphs(graph);
           })
-#if defined(BUILDING_TESTS) && !defined(__HIP_PLATFORM_HCC__)
+#if defined(BUILDING_TESTS) && !defined(USE_ROCM)
       .def(
           "_jit_run_cpp_tests",
           []() {
@@ -666,6 +671,18 @@ void initJITBindings(PyObject* module) {
           "_jit_set_logging_option",
           [](std::string loggingOption) -> void {
             ::torch::jit::set_jit_logging_levels(loggingOption);
+          })
+      .def(
+          "_jit_set_logging_stream",
+          [](std::string stream_name) -> void {
+            if (stream_name == "stdout") {
+              ::torch::jit::set_jit_logging_output_stream(std::cout);
+            } else if (stream_name == "stderr") {
+              ::torch::jit::set_jit_logging_output_stream(std::cerr);
+            } else {
+              std::cerr << "ERROR: only `stdout` and `stderr`"
+                        << "are supported as output options" << std::endl;
+            }
           })
       .def(
           "_jit_try_infer_type",

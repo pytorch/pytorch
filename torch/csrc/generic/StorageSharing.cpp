@@ -263,7 +263,7 @@ static PyObject * THPStorage_(shareCuda)(PyObject *_self, PyObject *noargs)
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     cudaIpcEventHandle_t ipc_event_handle;
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
     if (sent_data->event_sync_required_) {
       THCudaCheck(cudaIpcGetEventHandle(&ipc_event_handle, sent_data->event_));
     }
@@ -381,7 +381,7 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
   int64_t device = THPUtils_unpackLong(_device);
   at::cuda::CUDAGuard device_guard(device);
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
   if (PyObject_IsTrue(_event_sync_required)) {
     // Ensure that producer prepared all tensor's data
     std::string s_ipc_event_handle =
