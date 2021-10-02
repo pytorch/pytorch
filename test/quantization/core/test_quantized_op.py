@@ -26,7 +26,7 @@ from torch.testing._internal.common_quantization import skipIfNoFBGEMM, skipIfNo
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine, supported_qengines, override_qengines, _snr
 from torch.testing._internal.common_quantized import qengine_is_qnnpack
-from torch.quantization import PerChannelMinMaxObserver
+from torch.ao.quantization import PerChannelMinMaxObserver
 
 from typing import Optional
 
@@ -2452,8 +2452,8 @@ class TestQuantizedOps(TestCase):
                 y_ref = lstm(x)
 
                 # Prepare
-                lstm.qconfig = torch.quantization.get_default_qconfig(qengine)
-                lstm_prepared = torch.quantization.prepare(
+                lstm.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
+                lstm_prepared = torch.ao.quantization.prepare(
                     lstm, prepare_custom_config_dict=custom_module_config)
                 self.assertTrue(hasattr(lstm_prepared[0], 'layers'))
                 self.assertEqual(num_layers, len(lstm_prepared[0].layers))
@@ -2463,7 +2463,7 @@ class TestQuantizedOps(TestCase):
                 self.assertEqual(y_ref, y)
 
                 # Quantize
-                lstm_quantized = torch.quantization.convert(
+                lstm_quantized = torch.ao.quantization.convert(
                     lstm_prepared, convert_custom_config_dict=custom_module_config)
                 qy = lstm_quantized(qx)
 
@@ -2563,8 +2563,8 @@ class TestQuantizedOps(TestCase):
                     mha.eval()
 
                     # Prepare
-                    mha.qconfig = torch.quantization.get_default_qconfig(qengine)
-                    mha_prepared = torch.quantization.prepare(
+                    mha.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
+                    mha_prepared = torch.ao.quantization.prepare(
                         mha, prepare_custom_config_dict=custom_module_config)
 
                     # Calibrate
@@ -2575,7 +2575,7 @@ class TestQuantizedOps(TestCase):
                     self.assertEqual(y_ref[1], y[1])  # Weight
 
                     # Quantize
-                    mha_quantized = torch.quantization.convert(
+                    mha_quantized = torch.ao.quantization.convert(
                         mha_prepared,
                         convert_custom_config_dict=custom_module_config)
                     qy = mha_quantized(*q_data)

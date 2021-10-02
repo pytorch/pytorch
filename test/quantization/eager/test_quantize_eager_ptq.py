@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
 from torch.nn.utils.rnn import PackedSequence
-from torch.quantization import (
+from torch.ao.quantization import (
     quantize,
     prepare,
     convert,
@@ -79,7 +79,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
         """
         for qengine in supported_qengines:
             with override_quantized_engine(qengine):
-                qconfig = torch.quantization.get_default_qconfig(qengine)
+                qconfig = torch.ao.quantization.get_default_qconfig(qengine)
                 model = AnnotatedSingleLayerLinearModel(qengine)
                 model.qconfig = qconfig
                 model = prepare(model)
@@ -335,7 +335,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
         """
         for qengine in supported_qengines:
             with override_quantized_engine(qengine):
-                qconfig = torch.quantization.get_default_qconfig(qengine)
+                qconfig = torch.ao.quantization.get_default_qconfig(qengine)
                 model = ResNetBase().float().eval()
                 model.fuse_model()
                 model = QuantWrapper(model)
@@ -362,7 +362,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
         Test quantization of normalization layers
         """
         model = NormalizationTestModel()
-        model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
+        model.qconfig = torch.ao.quantization.get_default_qconfig('fbgemm')
         prepare(model, inplace=True)
         self.checkObservers(model)
         test_only_eval_fn(model, self.calib_data)
@@ -397,8 +397,8 @@ class TestPostTrainingStatic(QuantizationTestCase):
         for qengine in supported_qengines:
             with override_quantized_engine(qengine):
                 model = TwoLayerLinearModel()
-                model = torch.quantization.QuantWrapper(model)
-                model.qconfig = torch.quantization.get_default_qconfig(qengine)
+                model = torch.ao.quantization.QuantWrapper(model)
+                model.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
 
                 model = prepare(model)
                 # calibrate
@@ -411,8 +411,8 @@ class TestPostTrainingStatic(QuantizationTestCase):
 
                 # Create model again for eval
                 model = TwoLayerLinearModel()
-                model = torch.quantization.QuantWrapper(model)
-                model.qconfig = torch.quantization.get_default_qconfig(qengine)
+                model = torch.ao.quantization.QuantWrapper(model)
+                model.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
                 model = prepare(model)
                 model = convert(model)
                 new_state_dict = model.state_dict()
@@ -431,7 +431,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
         Test quantization of activations
         """
         model = ActivationsTestModel()
-        model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
+        model.qconfig = torch.ao.quantization.get_default_qconfig('fbgemm')
         prepare(model, inplace=True)
         self.checkObservers(model)
         test_only_eval_fn(model, self.calib_data)
@@ -473,7 +473,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
         model.fc.register_forward_pre_hook(fw_pre_hook)
         model.fc.register_forward_hook(fw_hook)
 
-        model.qconfig = torch.quantization.get_default_qconfig(qengine)
+        model.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
         model = prepare(model)
 
         def checkHooksIsPresent(model, before_convert=True):
@@ -496,7 +496,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
 
         checkHooksIsPresent(model, True)
         test_only_eval_fn(model, self.calib_data)
-        torch.quantization.convert(model, inplace=True)
+        torch.ao.quantization.convert(model, inplace=True)
         checkHooksIsPresent(model, False)
 
     @skipIfNoFBGEMM
@@ -750,9 +750,9 @@ class TestPostTrainingStatic(QuantizationTestCase):
         weight observers fails in the prepare step, as opposed to the convert step.
         """
         m = torch.nn.Sequential(torch.nn.ConvTranspose2d(1, 1, 1))
-        m.qconfig = torch.quantization.get_default_qconfig('fbgemm')
+        m.qconfig = torch.ao.quantization.get_default_qconfig('fbgemm')
         with self.assertRaises(AssertionError) as context:
-            mp = torch.quantization.prepare(m)
+            mp = torch.ao.quantization.prepare(m)
         self.assertTrue(
             str(context.exception) ==
             'Per channel weight observer is not supported yet for ConvTranspose{n}d.')
@@ -763,9 +763,9 @@ class TestPostTrainingStatic(QuantizationTestCase):
         Verifies that having qconfig==None for conv transpose does not crash
         """
         m = torch.nn.Sequential(torch.nn.ConvTranspose2d(1, 1, 1))
-        m.qconfig = torch.quantization.get_default_qconfig('fbgemm')
+        m.qconfig = torch.ao.quantization.get_default_qconfig('fbgemm')
         m[0].qconfig = None
-        mp = torch.quantization.prepare(m)
+        mp = torch.ao.quantization.prepare(m)
 
 
 @skipIfNoFBGEMM
@@ -1201,10 +1201,10 @@ class TestFunctionalModule(QuantizationTestCase):
         xq = torch.quantize_per_tensor(x, 0.01, 30, torch.quint8)
         self.checkScriptable(model, [[x]], check_save_load=True)
         if train_mode:
-            model.qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
+            model.qconfig = torch.ao.quantization.get_default_qat_qconfig('fbgemm')
             model = prepare_qat(model)
         else:
-            model.qconfig = torch.quantization.get_default_qconfig('qnnpack')
+            model.qconfig = torch.ao.quantization.get_default_qconfig('qnnpack')
             model = prepare(model)
         # Check if observers and quant/dequant nodes are inserted
         self.checkNoPrepModules(model)
@@ -1225,9 +1225,9 @@ class TestFunctionalModule(QuantizationTestCase):
 
 class TestQuantizeONNXExport(JitTestCase):
     def _test_lower_graph_impl(self, model, data):
-        model.qconfig = torch.quantization.default_qconfig
-        model = torch.quantization.prepare(model)
-        model = torch.quantization.convert(model)
+        model.qconfig = torch.ao.quantization.default_qconfig
+        model = torch.ao.quantization.prepare(model)
+        model = torch.ao.quantization.convert(model)
 
         outputs = model(data)
         input_names = ["x"]
@@ -1246,14 +1246,14 @@ class TestQuantizeONNXExport(JitTestCase):
 
     @skipIfNoFBGEMM
     def test_lower_graph_linear(self):
-        model = torch.quantization.QuantWrapper(torch.nn.Linear(5, 10, bias=True)).to(dtype=torch.float)
+        model = torch.ao.quantization.QuantWrapper(torch.nn.Linear(5, 10, bias=True)).to(dtype=torch.float)
         data_numpy = np.random.rand(1, 2, 5).astype(np.float32)
         data = torch.from_numpy(data_numpy).to(dtype=torch.float)
         self._test_lower_graph_impl(model, data)
 
     @skipIfNoFBGEMM
     def test_lower_graph_conv2d(self):
-        model = torch.quantization.QuantWrapper(torch.nn.Conv2d(3, 5, 2, bias=True)).to(dtype=torch.float)
+        model = torch.ao.quantization.QuantWrapper(torch.nn.Conv2d(3, 5, 2, bias=True)).to(dtype=torch.float)
         data_numpy = np.random.rand(1, 3, 6, 6).astype(np.float32)
         data = torch.from_numpy(data_numpy).to(dtype=torch.float)
         self._test_lower_graph_impl(model, data)
@@ -1262,7 +1262,7 @@ class TestQuantizeONNXExport(JitTestCase):
     @unittest.skip("onnx opset9 does not support quantize_per_tensor and caffe2 \
     does not support conv3d")
     def test_lower_graph_conv3d(self):
-        model = torch.quantization.QuantWrapper(torch.nn.Conv3d(3, 5, 2, bias=True)).to(dtype=torch.float)
+        model = torch.ao.quantization.QuantWrapper(torch.nn.Conv3d(3, 5, 2, bias=True)).to(dtype=torch.float)
         data_numpy = np.random.rand(1, 3, 6, 6, 6).astype(np.float32)
         data = torch.from_numpy(data_numpy).to(dtype=torch.float)
         self._test_lower_graph_impl(model, data)
