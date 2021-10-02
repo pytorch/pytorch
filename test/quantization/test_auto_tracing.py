@@ -103,8 +103,8 @@ class AutoTracingTestCase(QuantizationTestCase):
             self.assertTrue(_allclose(traced_rewritten_out, out_q))
 
 
+@skipIfNoFBGEMM
 class TestAutoTracing(AutoTracingTestCase):
-    @skipIfNoFBGEMM
     def test_fusion(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -129,7 +129,6 @@ class TestAutoTracing(AutoTracingTestCase):
         self.assertTrue(isinstance(mp.conv, nni.ConvReLU2d))
         self.assertTrue(isinstance(mp.child[0], nni.ConvReLU2d))
 
-    @skipIfNoFBGEMM
     def test_fusion2(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -149,7 +148,6 @@ class TestAutoTracing(AutoTracingTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
 
-    @skipIfNoFBGEMM
     def test_fusion_called_multiple_times(self):
         """
         Tests that fusion works if the modules to fuse get called multiple
@@ -171,7 +169,6 @@ class TestAutoTracing(AutoTracingTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
 
-    @skipIfNoFBGEMM
     def test_observers_not_touched_by_tracing(self):
         """
         Verifies that running dynamic tracing does not change any data
@@ -188,7 +185,6 @@ class TestAutoTracing(AutoTracingTestCase):
                 self.assertTrue(torch.allclose(scale, torch.ones(1)))
                 self.assertTrue(torch.equal(zp, torch.zeros(1, dtype=torch.long)))
 
-    @skipIfNoFBGEMM
     def test_multiple_modules(self):
         m = nn.Sequential(
             nn.Sequential(nn.Conv2d(1, 1, 1)),
@@ -197,47 +193,11 @@ class TestAutoTracing(AutoTracingTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
 
-    @skipIfNoFBGEMM
     def test_child_modules(self):
         m = nn.Sequential(nn.Sequential(nn.Conv2d(1, 1, 1))).eval()
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
 
-    @unittest.skip('this depends on unsupported syntax detection, currently disabled')
-    @skipIfNoFBGEMM
-    def test_iterating_over_items(self):
-        class M1(torch.nn.ModuleDict):
-            def __init__(self):
-                super().__init__()
-                self.update({
-                    '1': torch.nn.Conv2d(1, 1, 1),
-                })
-
-            def forward(self, x):
-                for name, module in self.items():
-                    x = module(x)
-                return x
-
-        class M2(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv1 = torch.nn.Conv2d(1, 1, 1)
-                self.m1 = M1()
-                self.conv2 = torch.nn.Conv2d(1, 1, 1)
-
-            def forward(self, x):
-                x = self.conv1(x)
-                x = self.m1(x)
-                x = self.conv2(x)
-                return x
-
-        m = M2().eval()
-        qconfig = torch.quantization.default_qconfig
-        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),),
-            do_fx_comparison=False, do_torchscript_checks=False)
-
-
-    @skipIfNoFBGEMM
     def test_conv(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -252,7 +212,6 @@ class TestAutoTracing(AutoTracingTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
 
-    @skipIfNoFBGEMM
     def test_conv_mod_qat(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -280,7 +239,6 @@ class TestAutoTracing(AutoTracingTestCase):
         optim = torch.optim.SGD(mp.parameters(), lr=0.01)
         optim.step()
 
-    @skipIfNoFBGEMM
     def test_conv_functional_qat(self):
 
         class M(torch.nn.Module):
@@ -315,7 +273,6 @@ class TestAutoTracing(AutoTracingTestCase):
         optim = torch.optim.SGD(mp.parameters(), lr=0.01)
         optim.step()
 
-    @skipIfNoFBGEMM
     def test_dropout_conv(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -334,7 +291,6 @@ class TestAutoTracing(AutoTracingTestCase):
         self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
 
     # TODO(future PR): implement observer sharing to match FX
-    @skipIfNoFBGEMM
     def test_cat_fp32(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -354,7 +310,6 @@ class TestAutoTracing(AutoTracingTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
 
-    @skipIfNoFBGEMM
     def test_cat_int(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -370,7 +325,6 @@ class TestAutoTracing(AutoTracingTestCase):
                 do_fx_comparison=False)
 
     @unittest.skip('FX graph mode is using fake_quantize with PTQ, TODO verify')
-    @skipIfNoFBGEMM
     def test_conv_unsupported_inplace_conv(self):
         """
         Verifies that having an unquantizeable fp32 op which is inplace
@@ -398,7 +352,6 @@ class TestAutoTracing(AutoTracingTestCase):
 
     # TODO: fix this test (iteration over the (1, 1) arg for arg_quant_infos)
     @unittest.skip('foo')
-    @skipIfNoFBGEMM
     def test_conv_flatten_linear(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -419,7 +372,6 @@ class TestAutoTracing(AutoTracingTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 1, 1),))
 
-    @skipIfNoFBGEMM
     def test_conv_add(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -436,7 +388,6 @@ class TestAutoTracing(AutoTracingTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
 
-    @skipIfNoFBGEMM
     def test_conv_scalar_add(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -452,8 +403,6 @@ class TestAutoTracing(AutoTracingTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
 
-
-    @skipIfNoFBGEMM
     def test_conv_relu_add(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -472,7 +421,6 @@ class TestAutoTracing(AutoTracingTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
 
-    @skipIfNoFBGEMM
     def test_linear_torch_relu(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -493,7 +441,6 @@ class TestAutoTracing(AutoTracingTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 1, 1),))
 
-    @skipIfNoFBGEMM
     def test_conv_functional(self):
 
         class M(torch.nn.Module):
@@ -516,7 +463,6 @@ class TestAutoTracing(AutoTracingTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
 
-    @skipIfNoFBGEMM
     def test_conv_functional_dynamic_weights(self):
         class M(torch.nn.Module):
             def __init__(self, weight2d, bias2d):
@@ -544,7 +490,6 @@ class TestAutoTracing(AutoTracingTestCase):
             # TODO enable scripting support for this
             do_torchscript_checks=False)
 
-    @skipIfNoFBGEMM
     def test_linear_functional(self):
         class LinearFunctional(nn.Module):
             def __init__(self):
@@ -562,7 +507,6 @@ class TestAutoTracing(AutoTracingTestCase):
         self._test_auto_tracing(
             model_fp32, qconfig, (torch.randn(1, 1, 4, 4),))
 
-    @skipIfNoFBGEMM
     def test_gelu_linear(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -579,7 +523,6 @@ class TestAutoTracing(AutoTracingTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 1, 1),))
 
-    @skipIfNoFBGEMM
     def test_dropout(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -598,7 +541,6 @@ class TestAutoTracing(AutoTracingTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 1, 1),))
 
-    @skipIfNoFBGEMM
     def test_add(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -611,7 +553,6 @@ class TestAutoTracing(AutoTracingTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
 
-    @skipIfNoFBGEMM
     def test_module_then_add(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -628,7 +569,6 @@ class TestAutoTracing(AutoTracingTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 1, 1),))
 
-    @skipIfNoFBGEMM
     def test_sub(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -640,7 +580,6 @@ class TestAutoTracing(AutoTracingTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
 
-    @skipIfNoFBGEMM
     def test_mul(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -652,7 +591,6 @@ class TestAutoTracing(AutoTracingTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
 
-    @skipIfNoFBGEMM
     def test_mul_int(self):
         # TODO: make all the math functions work correctly for integer types
         # TODO: make the same improvement in FX graph mode quant, if possible
@@ -670,7 +608,6 @@ class TestAutoTracing(AutoTracingTestCase):
                 # FX graph mode quant does not support this yet
                 do_fx_comparison=False)
 
-    @skipIfNoFBGEMM
     def test_div(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -682,7 +619,6 @@ class TestAutoTracing(AutoTracingTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
 
-    @skipIfNoFBGEMM
     def test_method(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -695,7 +631,6 @@ class TestAutoTracing(AutoTracingTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
 
-    @skipIfNoFBGEMM
     def test_add_linear(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -711,7 +646,6 @@ class TestAutoTracing(AutoTracingTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 1, 1),))
 
-    @skipIfNoFBGEMM
     def test_module_created_during_forward(self):
         """Some BERT models have this pattern"""
         class M(torch.nn.Module):
@@ -726,7 +660,6 @@ class TestAutoTracing(AutoTracingTestCase):
             # This syntax is not supported by FX or TorchScript
             do_fx_comparison=False, do_torchscript_checks=False)
 
-    @skipIfNoFBGEMM
     def test_module_returns_namedtuple(self):
         NamedTuple = collections.namedtuple("NamedTuple", ["x0", "x1"])
 
@@ -752,7 +685,6 @@ class TestAutoTracing(AutoTracingTestCase):
             do_fx_comparison=False, do_torchscript_checks=False)
 
     @unittest.skip('TODO build this')
-    @skipIfNoFBGEMM
     def test_module_input_types(self):
         class M(torch.nn.Module):
             def forward(self, x=None, y=None):
@@ -777,7 +709,6 @@ class TestAutoTracing(AutoTracingTestCase):
         kwargs = {'x': torch.randn(1, 1, 2, 2)}
         self._test_auto_tracing(model_fp32, qconfig, (), kwargs)
 
-    @skipIfNoFBGEMM
     def test_module_return_types(self):
         class M1(torch.nn.Module):
             def forward(self, x):
@@ -796,7 +727,6 @@ class TestAutoTracing(AutoTracingTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
 
-    @skipIfNoFBGEMM
     def test_inplace_unquantizeable_op(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -817,7 +747,6 @@ class TestAutoTracing(AutoTracingTestCase):
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
 
     @unittest.skip('this depends on unsupported syntax detection, currently disabled')
-    @skipIfNoFBGEMM
     def test_vovnet_sequential(self):
 
         class SequentialAppendList(nn.Sequential):
@@ -841,7 +770,6 @@ class TestAutoTracing(AutoTracingTestCase):
 
     # TODO fix this test
     @unittest.skip('foo')
-    @skipIfNoFBGEMM
     def test_unsupported_ops(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -854,7 +782,6 @@ class TestAutoTracing(AutoTracingTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
 
-    @skipIfNoFBGEMM
     def test_unknown_op_after_quantized(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -868,7 +795,6 @@ class TestAutoTracing(AutoTracingTestCase):
             model_fp32, qconfig, (torch.randn(1, 1, 2, 2),),
             fuse_modules=False)
 
-    @skipIfNoFBGEMM
     def test_embedding(self):
         # test subclass
 
@@ -906,7 +832,6 @@ class TestAutoTracing(AutoTracingTestCase):
             model_fp32, qconfig, (torch.LongTensor([[0]]),),
             fuse_modules=False)
 
-    @skipIfNoFBGEMM
     def test_inplace_add(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -929,7 +854,6 @@ class TestAutoTracing(AutoTracingTestCase):
 
     # this is broken because AutoQuantizationState appears in self.items
     @unittest.skip('TODO fix this')
-    @skipIfNoFBGEMM
     def test_module_calls_items(self):
         class M(torch.nn.ModuleDict):
             def __init__(self):
@@ -949,7 +873,6 @@ class TestAutoTracing(AutoTracingTestCase):
         self._test_auto_tracing(
             model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
 
-    @skipIfNoFBGEMM
     def test_subclass_of_quantizeable_module(self):
         """
         If a user creates a subclass of nn.BatchNorm2d, that subclass
@@ -978,7 +901,6 @@ class TestAutoTracing(AutoTracingTestCase):
             # the module is not symbolically traceable
             do_fx_comparison=False)
 
-    @skipIfNoFBGEMM
     def test_lstm(self):
         # building block of torchbenchmark/tts_angular
         class LSTMWithProjection(nn.Module):
@@ -1035,11 +957,14 @@ class TestAutoTracing(AutoTracingTestCase):
         self.assertNotEqual(len(l_prepared._arithmetic_observers.op_observers), 0)
 
 
+@skipIfNoFBGEMM
 class TestAutoTracingModels(AutoTracingTestCase):
     @skip_if_no_torchvision
-    @skipIfNoFBGEMM
     def test_mobilenet_v2(self):
         import torchvision
         m = torchvision.models.__dict__['mobilenet_v2'](pretrained=False).eval().float()
         qconfig = torch.quantization.default_qconfig
-        self._test_auto_tracing(m, qconfig, (torch.randn(1, 3, 224, 224),))
+        self._test_auto_tracing(
+            m, qconfig, (torch.randn(1, 3, 224, 224),),
+            # TODO fix this (reason TBD)
+            do_torchscript_checks=False)

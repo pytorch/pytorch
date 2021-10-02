@@ -255,15 +255,8 @@ def add_auto_observation(
                     # for functions, this is the parent module FQN
                     module_id_to_fqn[id(v)] = k
 
-                    # If the module has a `_calls_forward_on_each_child_module`
-                    # flag, skip it for now
-                    manual_skip = hasattr(v, '_calls_forward_on_each_child_module') \
-                        and v._calls_forward_on_each_child_module is True
                     has_qconfig = hasattr(v, 'qconfig') and v.qconfig is not None
-                    if manual_skip:
-                        assert not has_qconfig
-
-                    if has_qconfig and not is_leaf(v) and not manual_skip:
+                    if has_qconfig and not is_leaf(v):
                         if first_call:
                             if v is self:
                                 # for the top level module only, specify input
