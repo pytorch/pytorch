@@ -103,7 +103,7 @@ auto initBindings() {
   return nullptr;
 }
 
-const auto C10_UNUSED torchBindInitializer = initBindings();
+const auto torchBindInitializer = initBindings();
 
 } // namespace
 

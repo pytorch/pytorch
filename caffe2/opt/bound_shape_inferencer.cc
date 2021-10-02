@@ -436,6 +436,13 @@ void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
        op.type() == "SparseLengthsWeightedSum4BitRowwiseSparse" ||
        op.type() == "SparseLengthsSum4BitRowwiseSparse");
 
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
+  const bool isSparse =
+      (op.type() == "SparseLengthsSum4BitRowwiseSparse" ||
+       op.type() == "SparseLengthsWeightedSum4BitRowwiseSparse" ||
+       op.type() == "SparseLengthsSum8BitRowwiseSparse" ||
+       op.type() == "SparseLengthsWeightedSum8BitRowwiseSparse");
+
   if (weight) {
     CAFFE_ENFORCE_GE(
         op.input_size(),

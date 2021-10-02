@@ -280,7 +280,7 @@ void ThreadPredicateMap::insert(
 kir::Bool* ThreadPredicateMap::getPredicate(const TensorView* tv) const {
   // No thread predicate is needed when tv is an output of a
   // parallel broadcast expression.
-  if (dynamic_cast<BroadcastOp*>(tv->definition())) {
+  if (auto bop = dynamic_cast<BroadcastOp*>(tv->definition())) {
     if (getParallelBroadcastDomains(tv).any()) {
       return kir::IrBuilder(GpuLower::current()->kernel()).trueVal();
     }

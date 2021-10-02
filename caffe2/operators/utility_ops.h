@@ -686,6 +686,8 @@ class ScatterAssignOp : public Operator<Context> {
     const auto dataType = TypeMetaToDataType(data.dtype());
     const auto slicesType = TypeMetaToDataType(slices.dtype());
     const auto indicesType = TypeMetaToDataType(indices.dtype());
+    // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
+    auto* output = Output(0);
 
     auto runner = GetRunner(dataType, slicesType, indicesType);
     (this->*runner)();
