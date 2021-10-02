@@ -1067,6 +1067,9 @@ endif()
 
 # ---[ JNI
 if(BUILD_JNI)
+  if(NOT MSVC)
+    string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-variable")
+  endif()
   set(BUILD_LIBTORCH_WITH_JNI 1)
   set(FBJNI_SKIP_TESTS 1)
   add_subdirectory(android/pytorch_android)
