@@ -1,6 +1,6 @@
 import torch
 from torch.nn import Module
-from torch.quantization.observer import (
+from torch.ao.quantization.observer import (
     MovingAverageMinMaxObserver,
     HistogramObserver,
     MovingAveragePerChannelMinMaxObserver,
@@ -264,7 +264,7 @@ class FusedMovingAvgObsFakeQuantize(FakeQuantize):
     The output of this module is given by
     x_out = (clamp(round(x/scale + zero_point), quant_min, quant_max)-zero_point)*scale
 
-    Similar to :class:`~torch.quantization.FakeQuantize`, and accepts the same attributes as the
+    Similar to :class:`~torch.ao.quantization.FakeQuantize`, and accepts the same attributes as the
     base class.
 
     Attributes:
