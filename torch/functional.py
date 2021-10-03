@@ -2,6 +2,7 @@ from typing import (
     Tuple, Optional, Union, Any, Sequence, TYPE_CHECKING
 )
 from collections import namedtuple
+import itertools
 
 import torch
 import torch.nn.functional as F
@@ -334,7 +335,7 @@ if TYPE_CHECKING:
     pass
 else:
     def histogramdd(input: Tensor,
-                    bins: Union[List[Tensor], List[int]],
+                    bins: Union[List[Tensor], List[int], int],
                     range: Optional[List[float]] = None,
                     weight: Optional[Tensor] = None,
                     density: bool = False):
@@ -356,7 +357,11 @@ else:
         cartesian product of the N bin sets. Elements which do not fall
         inside any bin do not contribute to the output.
 
-        :attr:`bins` can be a sequence of N ints or a sequence of N 1D tensors.
+        :attr:`bins` can be a sequence of N 1D tensors, a sequence of N ints, or a single int.
+
+        If :attr:`bins` is a sequence of N 1D tensors, it explicitly specifies the
+        sequences of bin edges. Each tensor should contain a strictly increasing sequence
+        with at least two elements. Each should include its rightmost bin edge.
 
         If :attr:`bins` is a sequence of N ints, it specifies the number of equal-width
         bins in each dimension. By default, the range of the bins in each dimension
@@ -364,15 +369,14 @@ else:
         corresponding dimension. The :attr:`range` argument can be provided to specify
         ranges for the bins in each dimension.
 
-        If :attr:`bins` is a sequence of N 1D tensors, it explicitly specifies the
-        sequences of bin edges. Each tensor should contain a strictly increasing sequence
-        with at least two elements. Each should include its rightmost bin edge.
+        If :attr:`bins` is an int, it specifies the number of equal-width bins for all dimensions.
 
         Args:
             {input}
-            bins: int[] or Tensor[]. If int[], defines the number of equal-width bins
-                  in each dimension. If Tensor[], defines the sequences of bin edges,
-                  each including their rightmost edge.
+            bins: Tensor[], int[], or int.
+                  If Tensor[], defines the sequences of bin edges.
+                  If int[], defines the number of equal-width bins in each dimension.
+                  If int, defines the number of equal-width bins for all dimensions.
         Keyword args:
             range (sequence of float): Defines the ranges of the bins in each dimension.
             weight (Tensor): By default, each value in the input has weight 1. If a weight
@@ -398,6 +402,9 @@ else:
                                     bin_edges=(tensor([0.0000, 0.6667, 1.3333, 2.0000]),
                                                tensor([0.0000, 0.6667, 1.3333, 2.0000])))
         """
+        if isinstance(bins, int):
+            bins = list(itertools.repeat(bins, input.size()[-1]))
+
         if isinstance(bins[0], int):
             bin_edges = _VF._histogramdd_bin_edges(input, bins, range=range, weight=weight, density=density)
         else:

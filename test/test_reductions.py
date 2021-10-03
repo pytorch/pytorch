@@ -2929,9 +2929,13 @@ class TestReductions(TestCase):
 
             values = make_tensor(shape, device, dtype, low=-9, high=9, noncontiguous=not contig)
             weights = make_tensor(shape[:-1], device, dtype, low=0, high=9, noncontiguous=not contig) if weighted else None
-            bin_ct = [random.randint(1, 5) for dim in range(D)]
 
-            # Tests passing just the bin_ct
+            # Tests passing a single bin count
+            bin_ct = random.randint(1, 5)
+            self._test_histogramdd_numpy(values, bin_ct, None, weights, density)
+
+            # Tests passing a bin count for each dimension
+            bin_ct = [random.randint(1, 5) for dim in range(D)]
             self._test_histogramdd_numpy(values, bin_ct, None, weights, density)
 
             # Tests with caller-specified histogram range

@@ -282,6 +282,8 @@ Tensor& histogramdd_out_cpu(const Tensor& self, IntArrayRef bin_ct,
         c10::optional<c10::ArrayRef<double>> range,
         const c10::optional<Tensor>& weight, bool density,
         Tensor& hist, TensorList& bin_edges) {
+    TORCH_WARN("READ HERE: ", bin_ct);
+
     std::vector<Tensor> bins = histogramdd_bin_edges_cpu(self, bin_ct, range, weight, density);
 
     histogramdd_check_inputs(self, bins, weight);
