@@ -75,7 +75,6 @@
 #include <utility>
 #include <vector>
 
-
 using namespace torch::autograd::profiler;
 
 namespace torch {
@@ -1809,7 +1808,6 @@ TEST(LoopPeelerTest, SimpleNestedLoops2) {
 }
 
 TEST(JitTracing, Basic) {
-
   constexpr int batch_size = 4;
   constexpr int input_size = 256;
 
@@ -1828,7 +1826,6 @@ TEST(JitTracing, Basic) {
   pop(stack, prof_out);
 
   {
-
     stack = createStack({input, hx, cx, w_ih, w_hh});
     Code cd(traced, "traced");
     InterpreterState is{cd};
