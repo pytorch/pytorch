@@ -15,23 +15,23 @@
  * https://numpy.org/doc/stable/reference/generated/numpy.histogramdd.html
  *
  * - torch.histogramdd(input, bins, range=None, weight=None, density=False)
- *   input     - tensor with dimensions (N, D), interpreted as N coordinates in a D-dimensional space.
+ *   input     - tensor with shape (M, N). input is interpreted as M coordinates in N-dimensional space.
  *               If a tensor with more than 2 dimensions is passed, all but the last dimension will be flattened.
- *   bins      - int[] of length D or tensor list of length D. If int[], defines the number of equal-width bins
+ *   bins      - int[] of length N or tensor list of length N. If int[], defines the number of equal-width bins
  *               in each dimension. If tensor list, defines the sequences of bin edges, including rightmost edges,
  *               for each dimension.
- *   range     - float[] of length D, optional. If specified, defines the leftmost and rightmost bin edges
+ *   range     - float[] of length 2 * N, optional. If specified, defines the leftmost and rightmost bin edges
  *               for each dimension.
  *   weight    - tensor, optional. If provided, weight should have the same shape as input excluding its last dimension.
- *               Each D-dimensional coordinate in input contributes its associated weight towards its bin's result.
- *               If weight is not specified, each coordinate has weight 1 by default.
- *   density   - bool, optional. If False, the result will contain the number of samples (or total weight)
- *               in each bin. If True, the result is the value of the probability density function at the
- *               bin, normalized such that the integral over all bins is 1.
+ *               Each N-dimensional value in input contributes its associated weight towards its bin's result.
+ *               If weight is not specified, each value has weight 1 by default.
+ *   density   - bool, optional. If false (default), the result will contain the total weight in each bin.
+ *               If true, the value of each bin is the value of a piecewise-constant probability density function (pdf)
+ *               over the bins such that the (Lebesgue) integral of the pdf over the range of the bins is 1.
  *
  * Returns:
- *   hist      - D-dimensional tensor containing the values of the histogram.
- *   bin_edges - tensor list of length D containing the edges of the histogram bins in each dimension.
+ *   hist      - N-dimensional tensor containing the values of the histogram.
+ *   bin_edges - tensor list of length N containing the edges of the histogram bins in each dimension.
  *               Bins include their left edge and exclude their right edge, with the exception of the
  *               rightmost bin in each dimension which includes both of its edges.
  *
@@ -48,40 +48,52 @@ namespace {
 /* Checks properties of input tensors input, bins, and weight.
  */
 void histogramdd_check_inputs(const Tensor& input, const TensorList& bins, const c10::optional<Tensor>& weight) {
-    TORCH_CHECK(input.dim() >= 2, "torch.histogramdd: input tensor should have at least 2 dimensions");
+    TORCH_CHECK(input.dim() >= 2, "torch.histogramdd: input tensor should have at least 2 dimensions, but got ",
+                input.dim());
 
-    const int64_t D = input.size(-1);
+    const int64_t N = input.size(-1);
 
-    TORCH_CHECK(int64_t(bins.size()) == D, "torch.histogramdd: expected ", D, " sequences of bin edges for a ", D,
+    TORCH_CHECK(bins.size() == N, "torch.histogramdd: expected ", N, " sequences of bin edges for a ", N,
                 "-dimensional histogram but got ", bins.size());
 
-    for (int64_t dim = 0; dim < D; dim++) {
-        TORCH_CHECK(input.dtype() == bins[dim].dtype(), "torch.histogramdd: input tensor and bins tensor should",
-                " have the same dtype, but got input ", input.dtype(),
-                " and bins for dimension ", dim, bins[dim].dtype());
+    auto input_dtype = input.dtype();
+    for (int64_t dim = 0; dim < N; dim++) {
+        const Tensor& dim_bins = bins[dim];
 
-        TORCH_CHECK(bins[dim].dim() == 1, "torch.histogramdd: bins tensor should have dimension 1,",
-                " but got ", bins[dim].dim(), " dimensions for dimension ", dim);
+        auto bins_dtype = dim_bins.dtype();
+        TORCH_CHECK(input_dtype == bins_dtype, "torch.histogramdd: input tensor and bins tensors should",
+                " have the same dtype, but got input with dtype ", input_dtype,
+                " and bins for dimension ", dim, " with dtype ", bins_dtype);
 
-        TORCH_CHECK(bins[dim].numel() > 0, "torch.histogramdd: bins tensor should have at least 1 element,",
-                " but got ", bins[dim].numel(), " elements for dimension ", dim);
+        const int64_t dim_bins_dim = dim_bins.dim();
+        TORCH_CHECK(dim_bins_dim == 1, "torch.histogramdd: bins tensor should have one dimension,",
+                " but got ", dim_bins_dim, " dimensions in the bins tensor for dimension ", dim);
+
+        const int64_t numel = dim_bins.numel();
+        TORCH_CHECK(numel > 0, "torch.histogramdd: bins tensor should have at least 1 element,",
+                " but got ", numel, " elements in the bins tensor for dimension ", dim);
     }
 
     if (weight.has_value()) {
-        TORCH_CHECK(input.dtype() == weight.value().dtype(), "torch.histogram: if weight tensor is provided,"
+        TORCH_CHECK(input.dtype() == weight.value().dtype(), "torch.histogramdd: if weight tensor is provided,"
                 " input tensor and weight tensor should have the same dtype, but got input(", input.dtype(), ")",
                 ", and weight(", weight.value().dtype(), ")");
 
+        /* If a weight tensor is provided, we expect its shape to match that of
+         * the input tensor excluding its innermost dimension N.
+         */
         auto input_sizes = input.sizes().vec();
         input_sizes.pop_back();
 
         auto weight_sizes = weight.value().sizes().vec();
-        if (weight_sizes.empty())
-            weight_sizes = {1}; // correctly handle scalars
+        if (weight_sizes.empty()) {
+            // correctly handle scalars
+            weight_sizes = {1};
+        }
 
-        TORCH_CHECK(input_sizes == weight_sizes, "torch.histogram: if weight tensor is provided,"
-                " it should have the same shape as the input tensor excluding its last dimension, but got input ",
-                input.sizes(), " and weight ", weight.value().sizes());
+        TORCH_CHECK(input_sizes == weight_sizes, "torch.histogramdd: if weight tensor is provided it should have"
+                " the same shape as the input tensor excluding its innermost dimension, but got input with shape ",
+                input.sizes(), " and weight with shape ", weight.value().sizes());
     }
 }
 
@@ -89,15 +101,15 @@ void histogramdd_check_inputs(const Tensor& input, const TensorList& bins, const
  */
 void histogramdd_prepare_out(const Tensor& input, const std::vector<int64_t>& bin_ct,
         const Tensor& hist, const TensorList& bin_edges) {
-    const int64_t D = input.size(-1);
+    const int64_t N = input.size(-1);
 
-    TORCH_INTERNAL_ASSERT(int64_t(bin_ct.size()) == D);
-    TORCH_INTERNAL_ASSERT(int64_t(bin_edges.size()) == D);
+    TORCH_INTERNAL_ASSERT((int64_t)bin_ct.size() == N);
+    TORCH_INTERNAL_ASSERT((int64_t)bin_edges.size() == N);
 
     TORCH_CHECK(input.dtype() == hist.dtype(), "torch.histogram: input tensor and hist tensor should",
             " have the same dtype, but got input ", input.dtype(), " and hist ", hist.dtype());
 
-    for (int64_t dim = 0; dim < D; dim++) {
+    for (int64_t dim = 0; dim < N; dim++) {
         TORCH_CHECK(input.dtype() == bin_edges[dim].dtype(), "torch.histogram: input tensor and bin_edges tensor should",
                 " have the same dtype, but got input ", input.dtype(), " and bin_edges ", bin_edges[dim].dtype(),
                 " for dimension ", dim);
@@ -119,8 +131,9 @@ void histogramdd_prepare_out(const Tensor& input, TensorList bins,
 }
 
 template<typename scalar_t>
-void infer_bin_edges_from_input(const Tensor& input, const int64_t D,
+void infer_bin_edges_from_input(const Tensor& input, const int64_t N,
         std::vector<double> &leftmost_edges, std::vector<double> &rightmost_edges) {
+    // Calls aminmax on input with dim=0, reducing all but the innermost dimension of input.
     Tensor min, max;
     std::tie(min, max) = aminmax(input, 0);
 
@@ -129,40 +142,41 @@ void infer_bin_edges_from_input(const Tensor& input, const int64_t D,
     TensorAccessor<scalar_t, 1> min_accessor = min.accessor<scalar_t, 1>();
     TensorAccessor<scalar_t, 1> max_accessor = max.accessor<scalar_t, 1>();
 
-    for (int64_t dim = 0; dim < D; dim++) {
+    for (int64_t dim = 0; dim < N; dim++) {
         leftmost_edges[dim] = min_accessor[dim];
         rightmost_edges[dim] = max_accessor[dim];
     }
 }
 
-/* Determines the outermost bin edges. For simplicity when calling into _aminmax,
- * assumes that input has already been reshaped to (N, D).
+/* Determines the outermost bin edges. For simplicity when calling into aminmax,
+ * assumes that input has already been reshaped to (M, N).
  */
 std::pair<std::vector<double>, std::vector<double>>
 select_outer_bin_edges(const Tensor& input, c10::optional<c10::ArrayRef<double>> range) {
-    TORCH_INTERNAL_ASSERT(input.dim() == 2, "expected input to have shape (N, D)");
-    const int64_t D = input.size(-1);
+    TORCH_INTERNAL_ASSERT(input.dim() == 2, "expected input to have shape (M, N)");
+    const int64_t N = input.size(-1);
 
     // Default ranges for empty input matching numpy.histogram's default
-    std::vector<double> leftmost_edges(D, 0.), rightmost_edges(D, 1.);
+    std::vector<double> leftmost_edges(N, 0.);
+    std::vector<double> rightmost_edges(N, 1.);
 
     if (range.has_value()) {
         // range is specified
-        TORCH_CHECK(int64_t(range.value().size()) == 2 * D, "torch.histogramdd: for a ", D, "-dimensional histogram",
-                " range should have ", 2 * D, " elements, but got ", range.value().size());
+        TORCH_CHECK((int64_t)range.value().size() == 2 * N, "torch.histogramdd: for a ", N, "-dimensional histogram",
+                " range should have ", 2 * N, " elements, but got ", range.value().size());
 
-        for (int64_t dim = 0; dim < D; dim++) {
+        for (int64_t dim = 0; dim < N; dim++) {
             leftmost_edges[dim] = range.value()[2 * dim];
             rightmost_edges[dim] = range.value()[2 * dim + 1];
         }
     } else if (input.numel() > 0) {
         // non-empty input
         AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "histogramdd", [&]() {
-            infer_bin_edges_from_input<scalar_t>(input, D, leftmost_edges, rightmost_edges);
+            infer_bin_edges_from_input<scalar_t>(input, N, leftmost_edges, rightmost_edges);
         });
     }
 
-    for (int64_t dim = 0; dim < D; dim++) {
+    for (int64_t dim = 0; dim < N; dim++) {
         double leftmost_edge = leftmost_edges[dim];
         double rightmost_edge = rightmost_edges[dim];
 
@@ -215,9 +229,9 @@ std::pair<double, double> histc_select_outer_bin_edges(const Tensor& input,
 
 std::vector<Tensor> allocate_bin_edges_tensors(const Tensor& self) {
     TORCH_CHECK(self.dim() >= 2, "torch.histogramdd: input tensor should have at least 2 dimensions");
-    const int64_t D = self.size(-1);
-    std::vector<Tensor> bin_edges_out(D);
-    for (int64_t dim = 0; dim < D; dim++) {
+    const int64_t N = self.size(-1);
+    std::vector<Tensor> bin_edges_out(N);
+    for (int64_t dim = 0; dim < N; dim++) {
         bin_edges_out[dim] = at::empty({0}, self.options(), MemoryFormat::Contiguous);
     }
     return bin_edges_out;
@@ -258,12 +272,12 @@ std::vector<Tensor>& histogramdd_bin_edges_out_cpu(const Tensor& self, IntArrayR
         std::vector<Tensor>& bin_edges_out) {
     TensorList bin_edges_out_tl(bin_edges_out);
 
-    const int64_t D = self.size(-1);
-    Tensor reshaped_self = self.reshape({ self.numel() / D, D });
+    const int64_t N = self.size(-1);
+    Tensor reshaped_self = self.reshape({ self.numel() / N, N });
 
     auto outer_bin_edges = select_outer_bin_edges(reshaped_self, range);
 
-    for (int64_t dim = 0; dim < D; dim++) {
+    for (int64_t dim = 0; dim < N; dim++) {
         linspace_cpu_out(outer_bin_edges.first[dim], outer_bin_edges.second[dim],
                 bin_ct[dim] + 1, bin_edges_out[dim]);
     }
@@ -282,8 +296,6 @@ Tensor& histogramdd_out_cpu(const Tensor& self, IntArrayRef bin_ct,
         c10::optional<c10::ArrayRef<double>> range,
         const c10::optional<Tensor>& weight, bool density,
         Tensor& hist, TensorList& bin_edges) {
-    TORCH_WARN("READ HERE: ", bin_ct);
-
     std::vector<Tensor> bins = histogramdd_bin_edges_cpu(self, bin_ct, range, weight, density);
 
     histogramdd_check_inputs(self, bins, weight);

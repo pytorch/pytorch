@@ -2969,7 +2969,7 @@ class TestReductions(TestCase):
 
         inconsistent_dtype = torch.float32 if dtype != torch.float32 else torch.float64
 
-        with self.assertRaisesRegex(RuntimeError, 'input tensor and bins tensor should have the same dtype'):
+        with self.assertRaisesRegex(RuntimeError, 'input tensor and bins tensors should have the same dtype'):
             values = make_tensor((), device, dtype=dtype)
             bins = make_tensor((), device, dtype=inconsistent_dtype)
             torch.histogram(values, bins)
@@ -2991,7 +2991,7 @@ class TestReductions(TestCase):
             bin_edges = make_tensor((), device, dtype=inconsistent_dtype)
             torch.histogram(values, 1, out=(hist, bin_edges))
 
-        with self.assertRaisesRegex(RuntimeError, 'bins tensor should have dimension 1'):
+        with self.assertRaisesRegex(RuntimeError, 'bins tensor should have one dimension'):
             t = make_tensor((2, 2), device, dtype=dtype)
             torch.histogram(t, t)
 
@@ -3003,8 +3003,8 @@ class TestReductions(TestCase):
             values = make_tensor((), device, dtype=dtype)
             torch.histogram(values, -1)
 
-        with self.assertRaisesRegex(RuntimeError, 'if weight tensor is provided, \
-it should have the same shape as the input tensor excluding its last dimension'):
+        with self.assertRaisesRegex(RuntimeError, 'if weight tensor is provided it should have the same shape \
+as the input tensor excluding its innermost dimension'):
             values = make_tensor((2, 2), device, dtype=dtype)
             weight = make_tensor((1), device, dtype=dtype)
             torch.histogram(values, 1, weight=weight)
