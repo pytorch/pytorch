@@ -1808,26 +1808,28 @@ TEST(LoopPeelerTest, SimpleNestedLoops2) {
   }
 }
 
-TEST(JitTracing, Basic2) {
-  // run `python test_jit_fuser_te.py TestTEFuser.test_save_mobilenet`
-  // to generate `test/mobilenet_v3_large.pt`
-  Module model = torch::jit::load("test/mobilenet_v3_large.pt");
-  model.eval();
-  model = freeze_module(model);
-  auto graph = model.get_method("forward").graph();
-  GRAPH_DUMP("Before OptimizeFrozenGraph:", graph);
-  OptimizeFrozenGraph(graph, true);
-  auto x = at::randn({1, 3, 224, 224}, at::kCPU);
-  Stack stack;
-  push(stack, model._ivalue());
-  push(stack, x);
+TEST(JitTracing, Basic) {
+
+  constexpr int batch_size = 4;
+  constexpr int input_size = 256;
+
+  int hidden_size = 2 * input_size;
+
+  auto input = at::randn({batch_size, input_size}, at::kCPU);
+  auto hx = at::randn({batch_size, hidden_size}, at::kCPU);
+  auto cx = at::randn({batch_size, hidden_size}, at::kCPU);
+  auto w_ih = t_def(at::randn({4 * hidden_size, input_size}, at::kCPU));
+  auto w_hh = t_def(at::randn({4 * hidden_size, hidden_size}, at::kCPU));
+
+  auto graph = build_lstm();
+  auto stack = createStack({input, hx, cx, w_ih, w_hh});
   auto traced = TraceGraph(graph, stack);
   Tensor prof_out;
   pop(stack, prof_out);
 
   {
-    push(stack, model._ivalue());
-    push(stack, x);
+
+    stack = createStack({input, hx, cx, w_ih, w_hh});
     Code cd(traced, "traced");
     InterpreterState is{cd};
     is.run(stack);
@@ -1837,14 +1839,13 @@ TEST(JitTracing, Basic2) {
   }
 
   {
-    push(stack, model._ivalue());
-    push(stack, x);
+    stack = createStack({input, hx, cx, w_ih, w_hh});
     Code cd(graph, "graph");
     InterpreterState is{cd};
     is.run(stack);
-    Tensor traced_out;
-    pop(stack, traced_out);
-    torch::allclose(prof_out, traced_out);
+    Tensor scripted_out;
+    pop(stack, scripted_out);
+    torch::allclose(prof_out, scripted_out);
   }
 }
 

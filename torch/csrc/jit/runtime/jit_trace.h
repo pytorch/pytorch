@@ -1,5 +1,4 @@
 #include <memory>
-#include <functional>
 #include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {

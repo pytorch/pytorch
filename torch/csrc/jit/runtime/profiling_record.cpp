@@ -10,11 +10,6 @@
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
-#include "jit/ir/ir.h"
-
-#include <torch/csrc/jit/codegen/cuda/interface.h>
-#include <torch/csrc/jit/ir/ir.h>
-
 namespace torch {
 namespace jit {
 
