@@ -1,7 +1,9 @@
+#pragma once
 
 #include <ATen/core/function.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/stack.h>
+#include <torch/csrc/api/include/torch/imethod.h>
 #include <torch/csrc/jit/api/function_impl.h>
 
 namespace torch {
@@ -17,7 +19,7 @@ using ObjectPtr = c10::intrusive_ptr<c10::ivalue::Object>;
 //     ...
 // Note: because Method/Module are exposed to python these
 // classes use python method naming conventions
-struct TORCH_API Method {
+struct TORCH_API Method : public torch::IMethod {
   Method(ObjectPtr owner, Function* function);
 
   // the module that contains this method.
@@ -29,13 +31,22 @@ struct TORCH_API Method {
 
   c10::IValue operator()(
       std::vector<c10::IValue> stack,
-      const Kwargs& kwargs = Kwargs());
+      const Kwargs& kwargs = Kwargs()) const override;
+
+  // Run method async. Invocation on this function would invokes a JIT
+  // interpreter that executes ops inline, one by one, on caller's thread. A
+  // model can utilize async op, i.e. `fork`, to launch an asynchronous task
+  // which will be launched on provided `taskLauncher`.
+  c10::intrusive_ptr<c10::ivalue::Future> run_async(
+      std::vector<c10::IValue> stack,
+      const Kwargs& kwargs = Kwargs(),
+      TaskLauncher taskLauncher = at::launch);
 
   std::shared_ptr<Graph> graph() const {
     return function_->graph();
   }
 
-  const std::string& name() const {
+  const std::string& name() const override {
     return function_->name();
   }
 
@@ -52,6 +63,8 @@ struct TORCH_API Method {
   }
 
  private:
+  void setArgumentNames(std::vector<std::string>&) const override;
+
   // Methods are uniqued onwed by a single module. This raw pointer allows
   // looking up the module.
   ObjectPtr owner_;

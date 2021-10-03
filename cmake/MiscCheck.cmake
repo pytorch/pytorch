@@ -10,42 +10,24 @@ include(CheckCXXSourceCompiles)
 include(CheckCXXCompilerFlag)
 include(CMakePushCheckState)
 
-# ---[ If running on Ubuntu, check system version and compiler version.
-if(EXISTS "/etc/os-release")
-  execute_process(COMMAND
-    "sed" "-ne" "s/^ID=\\([a-z]\\+\\)$/\\1/p" "/etc/os-release"
-    OUTPUT_VARIABLE OS_RELEASE_ID
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-  execute_process(COMMAND
-    "sed" "-ne" "s/^VERSION_ID=\"\\([0-9\\.]\\+\\)\"$/\\1/p" "/etc/os-release"
-    OUTPUT_VARIABLE OS_RELEASE_VERSION_ID
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-  if(OS_RELEASE_ID STREQUAL "ubuntu")
-    if(OS_RELEASE_VERSION_ID VERSION_GREATER "17.04")
-      if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-        if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS "6.0.0")
-          message(FATAL_ERROR
-            "Please use GCC 6 or higher on Ubuntu 17.04 and higher. "
-            "For more information, see: "
-            "https://github.com/caffe2/caffe2/issues/1633"
-            )
-        endif()
-      endif()
-    endif()
-  endif()
-endif()
-
 if(NOT INTERN_BUILD_MOBILE)
   # ---[ Check that our programs run.  This is different from the native CMake
   # compiler check, which just tests if the program compiles and links.  This is
   # important because with ASAN you might need to help the compiled library find
   # some dynamic libraries.
   cmake_push_check_state(RESET)
-  CHECK_C_SOURCE_RUNS("
-  int main() { return 0; }
-  " COMPILER_WORKS)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_OSX_ARCHITECTURES MATCHES "^(x86_64|arm64)$")
+    list(APPEND CMAKE_REQUIRED_FLAGS "-arch ${CMAKE_HOST_SYSTEM_PROCESSOR}")
+  endif()
+  if(CMAKE_CROSSCOMPILING)
+    CHECK_C_SOURCE_COMPILES("
+    int main() { return 0; }
+    " COMPILER_WORKS)
+  else()
+    CHECK_C_SOURCE_RUNS("
+    int main() { return 0; }
+    " COMPILER_WORKS)
+  endif()
   if(NOT COMPILER_WORKS)
     # Force cmake to retest next time around
     unset(COMPILER_WORKS CACHE)
@@ -133,30 +115,13 @@ cmake_pop_check_state()
 
 # ---[ Check if the compiler has AVX/AVX2 support. We only check AVX2.
 if(NOT INTERN_BUILD_MOBILE)
-  cmake_push_check_state(RESET)
-  if(MSVC AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    set(CMAKE_REQUIRED_FLAGS "/arch:AVX2")
-  else()
-    set(CMAKE_REQUIRED_FLAGS "-mavx2")
-  endif()
-  CHECK_CXX_SOURCE_COMPILES(
-      "#include <immintrin.h>
-      int main() {
-        __m256i a, b;
-        a = _mm256_set1_epi8 (1);
-        b = a;
-        _mm256_add_epi8 (a,a);
-        __m256i x;
-        _mm256_extract_epi64(x, 0); // we rely on this in our AVX2 code
-        return 0;
-      }" CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
-  if(CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
+  find_package(AVX) # checks AVX and AVX2
+  if(CXX_AVX2_FOUND)
     message(STATUS "Current compiler supports avx2 extension. Will build perfkernels.")
     # Also see CMakeLists.txt under caffe2/perfkernels.
     set(CAFFE2_PERF_WITH_AVX 1)
     set(CAFFE2_PERF_WITH_AVX2 1)
   endif()
-  cmake_pop_check_state()
 endif()
 # ---[ Check if the compiler has AVX512 support.
 cmake_push_check_state(RESET)
@@ -213,10 +178,12 @@ endif()
 # -to add all (including unused) symbols into the dynamic symbol
 # -table. We need this to get symbols when generating backtrace at
 # -runtime.
-check_cxx_compiler_flag("-rdynamic" COMPILER_SUPPORTS_RDYNAMIC)
-if(${COMPILER_SUPPORTS_RDYNAMIC})
-  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -rdynamic")
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -rdynamic")
+if(NOT MSVC)
+  check_cxx_compiler_flag("-rdynamic" COMPILER_SUPPORTS_RDYNAMIC)
+  if(${COMPILER_SUPPORTS_RDYNAMIC})
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -rdynamic")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -rdynamic")
+  endif()
 endif()
 
 # ---[ If we are using msvc, set no warning flags
@@ -293,9 +260,9 @@ if(${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
   add_definitions("/DNOMINMAX")
 
   set(CMAKE_SHARED_LINKER_FLAGS
-      "${CMAKE_SHARED_LINKER_FLAGS} /ignore:4049 /ignore:4217")
+      "${CMAKE_SHARED_LINKER_FLAGS} /ignore:4049 /ignore:4217 /ignore:4099")
   set(CMAKE_EXE_LINKER_FLAGS
-      "${CMAKE_EXE_LINKER_FLAGS} /ignore:4049 /ignore:4217")
+      "${CMAKE_EXE_LINKER_FLAGS} /ignore:4049 /ignore:4217 /ignore:4099")
 endif()
 
 # ---[ If we are building on ios, or building with opengl support, we will
@@ -306,8 +273,9 @@ endif()
 # Also, we will turn off deprecated-declarations
 # due to protobuf.
 
-if(IOS)
+if(IOS AND (${IOS_ARCH} MATCHES "armv7*"))
   add_definitions("-mfpu=neon-fp16")
+  add_definitions("-arch" ${IOS_ARCH})
   add_definitions("-Wno-deprecated-declarations")
 endif()
 
@@ -315,21 +283,23 @@ endif()
 # TODO: This only works with new style gcc and clang (not the old -faddress-sanitizer).
 # Change if necessary on old platforms.
 if(USE_ASAN)
-  set(CAFFE2_ASAN_FLAG "-fsanitize=address -fPIE -pie")
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CAFFE2_ASAN_FLAG}")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CAFFE2_ASAN_FLAG}")
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${CAFFE2_ASAN_FLAG}")
-  set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} ${CAFFE2_ASAN_FLAG}")
-  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${CAFFE2_ASAN_FLAG}")
+  set(CAFFE2_ASAN_COMPILER_FLAGS "-fsanitize=address -fPIE")
+  set(CAFFE2_ASAN_LINKER_FLAGS "-pie")
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CAFFE2_ASAN_COMPILER_FLAGS}")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CAFFE2_ASAN_COMPILER_FLAGS}")
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${CAFFE2_ASAN_LINKER_FLAGS}")
+  set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} ${CAFFE2_ASAN_LINKER_FLAGS}")
+  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${CAFFE2_ASAN_LINKER_FLAGS}")
 endif()
 
 if(USE_TSAN)
-  set(CAFFE2_TSAN_FLAG "-fsanitize=thread -fPIE -pie")
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CAFFE2_TSAN_FLAG}")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CAFFE2_TSAN_FLAG}")
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${CAFFE2_TSAN_FLAG}")
-  set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} ${CAFFE2_TSAN_FLAG}")
-  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${CAFFE2_TSAN_FLAG}")
+  set(CAFFE2_TSAN_COMPILER_FLAGS "-fsanitize=thread -fPIE")
+  set(CAFFE2_TSAN_LINKER_FLAGS "-pie")
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CAFFE2_TSAN_COMPILER_FLAGS}")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CAFFE2_TSAN_COMPILER_FLAGS}")
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${CAFFE2_TSAN_LINKER_FLAGS}")
+  set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} ${CAFFE2_TSAN_LINKER_FLAGS}")
+  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${CAFFE2_TSAN_LINKER_FLAGS}")
 endif()
 
 # ---[ Create CAFFE2_BUILD_SHARED_LIBS for macros.h.in usage.

@@ -5,10 +5,12 @@
 using namespace at;
 
 void XLAFree(void *ptr) {
+  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
   free(ptr);
 }
 
 void* XLAMalloc(ptrdiff_t size) {
+  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
   return malloc(size);
 }
 
@@ -25,7 +27,7 @@ struct XLAAllocator final : public at::Allocator {
 TEST(XlaTensorTest, TestNoStorage) {
   XLAAllocator allocator;
   auto tensor_impl = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
-      DispatchKey::XLATensorId,
+      DispatchKey::XLA,
       caffe2::TypeMeta::Make<float>(),
       at::Device(DeviceType::XLA, 0));
   at::Tensor t(std::move(tensor_impl));

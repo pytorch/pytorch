@@ -13,10 +13,10 @@
 # limitations under the License.
 ##############################################################################
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core, schema
 from caffe2.python.modeling.net_modifier import NetModifier

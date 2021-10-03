@@ -6,7 +6,6 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Optional.h>
-#include <iostream>
 
 namespace c10 {
 /**
@@ -130,12 +129,13 @@ class either final {
     return std::move(right());
   }
 
-  template<class Result, class LeftMapFunc, class RightMapFunc>
-  Result map(LeftMapFunc&& leftMapFunc, RightMapFunc&& rightMapFunc) const {
+  template <class Result, class LeftFoldFunc, class RightFoldFunc>
+  Result fold(LeftFoldFunc&& leftFoldFunc, RightFoldFunc&& rightFoldFunc)
+      const {
     if (Side::left == _side) {
-      return std::forward<LeftMapFunc>(leftMapFunc)(_left);
+      return std::forward<LeftFoldFunc>(leftFoldFunc)(_left);
     } else {
-      return std::forward<RightMapFunc>(rightMapFunc)(_right);
+      return std::forward<RightFoldFunc>(rightFoldFunc)(_right);
     }
   }
 

@@ -1,11 +1,12 @@
-#include "test/cpp/jit/test_base.h"
+#include <gtest/gtest.h>
+
 #include "test/cpp/jit/test_utils.h"
 #include "torch/csrc/jit/ir/subgraph_matcher.h"
 
 namespace torch {
 namespace jit {
 
-void testTrivial1() {
+TEST(SubgraphMatcherTest, Trivial1) {
   Graph graph, pattern;
   parseIR(
       R"IR(
@@ -22,7 +23,7 @@ graph(%0):
   AT_ASSERT(!findPatternMatches(pattern, graph).empty());
 }
 
-void testTrivial2() {
+TEST(SubgraphMatcherTest, Trivial2) {
   Graph graph;
   auto* g_in = graph.addInput();
   auto* g_tanh = graph.insertNode(graph.create(aten::tanh, /*num_outputs =*/1));
@@ -45,7 +46,7 @@ void testTrivial2() {
   }
 }
 
-void testTrivial3() {
+TEST(SubgraphMatcherTest, Trivial3) {
   Graph graph, pattern;
   parseIR(
       R"IR(
@@ -64,7 +65,7 @@ graph(%a, %b):
   AT_ASSERT(!findPatternMatches(pattern, graph).empty());
 }
 
-void testTrivial4() {
+TEST(SubgraphMatcherTest, Trivial4) {
   Graph graph;
   auto* g_in0 = graph.addInput();
   auto* g_in1 = graph.addInput();
@@ -92,7 +93,7 @@ void testTrivial4() {
   }
 }
 
-void testLinear1() {
+TEST(SubgraphMatcherTest, Linear1) {
   Graph graph, pattern;
   parseIR(
       R"IR(
@@ -114,7 +115,7 @@ graph(%0):
   AT_ASSERT(!findPatternMatches(pattern, graph).empty());
 }
 
-void testLinear2() {
+TEST(SubgraphMatcherTest, Linear2) {
   Graph graph;
   auto* g_in = graph.addInput();
 
@@ -164,7 +165,7 @@ void testLinear2() {
  *      |
  *     eee
  */
-void testDiamond1() {
+TEST(SubgraphMatcherTest, Diamond1) {
   Graph graph, pattern1, pattern2;
   parseIR(
       R"IR(
@@ -215,7 +216,7 @@ graph(%0):
  *      |
  *      o1
  */
-void testDiamond2() {
+TEST(SubgraphMatcherTest, Diamond2) {
   Graph graph;
   auto* g_in = graph.addInput();
 
@@ -253,7 +254,7 @@ void testDiamond2() {
   }
 }
 
-void testXPattern() {
+TEST(SubgraphMatcherTest, XPattern) {
   Graph graph, pattern;
   parseIR(
       R"IR(
@@ -280,7 +281,7 @@ graph(%0, %1):
   AT_ASSERT(!findPatternMatches(pattern, graph).empty());
 }
 
-void testMultipleMatches() {
+TEST(SubgraphMatcherTest, MultipleMatches) {
   Graph graph, pattern;
   parseIR(
       R"IR(
@@ -301,7 +302,7 @@ graph(%t0):
   AT_ASSERT(matches.size() == 4);
 }
 
-void testOverlappingMatches() {
+TEST(SubgraphMatcherTest, OverlappingMatches) {
   Graph graph, pattern;
   parseIR(
       R"IR(
@@ -323,7 +324,7 @@ graph(%t0):
   AT_ASSERT(matches.size() == 3);
 }
 
-void testMatchInBasicBlocks1() {
+TEST(SubgraphMatcherTest, MatchInBasicBlocks1) {
   Graph graph;
   parseIR(
       R"IR(
@@ -360,7 +361,7 @@ graph(%x, %y):
   AT_ASSERT(findPatternMatches(pattern1, graph).size() == 0);
 }
 
-void testMatchInBasicBlocks2() {
+TEST(SubgraphMatcherTest, MatchInBasicBlocks2) {
   Graph graph;
   parseIR(
       R"IR(
@@ -395,13 +396,13 @@ graph(%x, %y):
   AT_ASSERT(findPatternMatches(pattern1, graph).size() == 0);
 }
 
-void testMatchesAttributes() {
+TEST(SubgraphMatcherTest, MatchesAttributes) {
   Graph graph;
   parseIR(
       R"IR(
 graph(%0):
   %a = a::a[isattr=[1,2]](%0)
-  %b = a::b[intattr=10, floatattr=3.14](%0)
+  %b = a::b[intattr=10, floatattr=3.14, complexattr=-3.14j](%0)
   %c = a::c[myattr="qqq"](%a, %b)
   return (%c))IR",
       &graph);
@@ -441,7 +442,7 @@ graph(%0):
     parseIR(
         R"IR(
 graph(%0):
-  %b = a::b[intattr=10, floatattr=3.14](%0)
+  %b = a::b[intattr=10, floatattr=3.14, complexattr=-3.14j](%0)
   return (%b))IR",
         &pattern);
     AT_ASSERT(!findPatternMatches(pattern, graph).empty());
@@ -451,7 +452,7 @@ graph(%0):
     parseIR(
         R"IR(
 graph(%0):
-  %b = a::b[intattr=10, floatattr=3.14, strattr="rrr"](%0)
+  %b = a::b[intattr=10, floatattr=3.14, complexattr=-3.14j, strattr="rrr"](%0)
   return (%b))IR",
         &pattern);
     AT_ASSERT(findPatternMatches(pattern, graph).empty());
@@ -467,15 +468,26 @@ graph(%0):
     // Lists are not supported yet, thus we shouldn't match for now.
     AT_ASSERT(findPatternMatches(pattern, graph).empty());
   }
+  {
+    Graph pattern;
+    parseIR(
+        R"IR(
+graph(%a, %b):
+  %c = a::c[myattr="q.*"](%a, %b)
+  return (%c))IR",
+        &pattern);
+    AT_ASSERT(!findPatternMatches(pattern, graph).empty());
+  }
 }
 
-void testBadPattern() {
+TEST(SubgraphMatcherTest, BadPattern) {
   Graph graph, pattern1, pattern2;
   parseIR(
       R"IR(
-graph(%0):
-  %a = a::aaa(%0)
-  return (%a))IR",
+graph(%x):
+  %y = my::op1(%x)
+  %z = my::op2(%x)
+  return (%y, %z))IR",
       &graph);
 
   parseIR(
@@ -487,6 +499,8 @@ graph(%x):
       -> (%z)
   return (%y))IR",
       &pattern1);
+  // No support for patterns with subblocks
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(findPatternMatches(pattern1, graph));
 
   parseIR(
@@ -496,25 +510,59 @@ graph(%x):
   %z = my::op2(%x)
   return (%y, %z))IR",
       &pattern2);
+  // Not supported multi-output pattern, because not the whole pattern is
+  // covered by a traversal up from the first output (`%z = ...` is not
+  // visited). See the note "Multi-output Patterns" in subgraph_matcher.h.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(findPatternMatches(pattern2, graph));
 }
 
-void testSubgraphMatching() {
-  testTrivial1();
-  testTrivial2();
-  testTrivial3();
-  testTrivial4();
-  testLinear1();
-  testLinear2();
-  testDiamond1();
-  testDiamond2();
-  testXPattern();
-  testMultipleMatches();
-  testOverlappingMatches();
-  testMatchInBasicBlocks1();
-  testMatchInBasicBlocks2();
-  testMatchesAttributes();
-  testBadPattern();
+TEST(SubgraphMatcherTest, MultiOutput) {
+  {
+    Graph graph, pattern;
+    parseIR(
+        R"IR(
+graph(%0):
+  %a = a::aaa(%0)
+  %b = b::bbb(%a)
+  %c = c::ccc(%a, %b)
+  %x = a::aaa(%c)
+  %y = b::bbb(%x)
+  %z = d::ddd(%x, %y)
+  return (%y))IR",
+        &graph);
+    parseIR(
+        R"IR(
+graph(%0):
+  %a = a::aaa(%0)
+  %b = b::bbb(%a)
+  return (%b, %a))IR",
+        &pattern);
+    AT_ASSERT(findPatternMatches(pattern, graph).size() == 2);
+  }
+  {
+    Graph graph, pattern;
+    parseIR(
+        R"IR(
+graph(%0, %1):
+  %a1, %a2 = a::aaa(%0, %1)
+  %b = b::bbb(%a1)
+  %c = c::ccc(%b)
+
+  %x1, %x2 = a::aaa(%c, %a2)
+  %y = b::bbb(%x1)
+  %z = d::ddd(%y)
+  return (%z))IR",
+        &graph);
+    parseIR(
+        R"IR(
+graph(%0, %1):
+  %a1, %a2 = a::aaa(%0, %1)
+  %b = b::bbb(%a1)
+  return (%b, %a2))IR",
+        &pattern);
+    AT_ASSERT(findPatternMatches(pattern, graph).size() == 2);
+  }
 }
 
 } // namespace jit

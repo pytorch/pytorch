@@ -6,9 +6,14 @@ namespace caffe2 {
 
 template <>
 bool TileOp<CPUContext>::RunOnDevice() {
-  return DispatchHelper<
-      TensorTypes<std::int32_t, std::int64_t, float, double, std::string>>::
-      call(this, Input(0));
+  return DispatchHelper<TensorTypes<
+      at::Half,
+      std::uint8_t,
+      std::int32_t,
+      std::int64_t,
+      float,
+      double,
+      std::string>>::call(this, Input(0));
 }
 
 template <>
@@ -66,7 +71,7 @@ bool TileOp<CPUContext>::DoRunWithType<std::string>() {
   // size from axis up
   const int inner_size = X.size_from_dim(axis);
 
-  const TypeMeta& meta = X.dtype();
+  const TypeMeta meta = X.dtype();
   const int item_size = X.itemsize();
   const char* X_ptr = reinterpret_cast<const char*>(X.raw_data());
   char* Y_ptr = reinterpret_cast<char*>(Y->raw_mutable_data(meta));

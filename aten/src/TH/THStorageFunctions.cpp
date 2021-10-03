@@ -3,42 +3,63 @@
 
 #include <TH/THStorageFunctions.hpp>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <TH/generic/THStorage.cpp>
 #include <TH/THGenerateAllTypes.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
+#include <TH/generic/THStorage.cpp>
+#include <TH/THGenerateComplexTypes.h>
+
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <TH/generic/THStorage.cpp>
 #include <TH/THGenerateHalfType.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <TH/generic/THStorage.cpp>
 #include <TH/THGenerateBoolType.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <TH/generic/THStorage.cpp>
 #include <TH/THGenerateQTypes.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <TH/generic/THStorage.cpp>
 #include <TH/THGenerateBFloat16Type.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <TH/generic/THStorageCopy.cpp>
 #include <TH/THGenerateAllTypes.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
+#include <TH/generic/THStorageCopy.cpp>
+#include <TH/THGenerateComplexTypes.h>
+
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <TH/generic/THStorageCopy.cpp>
 #include <TH/THGenerateHalfType.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <TH/generic/THStorageCopy.cpp>
 #include <TH/THGenerateBoolType.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <TH/generic/THStorageCopy.cpp>
 #include <TH/THGenerateQTypes.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <TH/generic/THStorageCopy.cpp>
 #include <TH/THGenerateBFloat16Type.h>
 
-THStorage* THStorage_new(caffe2::TypeMeta data_type) {
+#include <ATen/native/Resize.h>
+
+THStorage* THStorage_new() {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
-      data_type,
-      0,
-      getTHDefaultAllocator(),
-      true).release();
+                           c10::StorageImpl::use_byte_size_t(),
+                           0,
+                           c10::GetDefaultCPUAllocator(),
+                           true)
+                           .release();
   return storage;
 }
 
@@ -50,11 +71,6 @@ void THStorage_free(THStorage* storage) {
   c10::raw::intrusive_ptr::decref(storage);
 }
 
-ptrdiff_t THStorage_size(const THStorage *self)
-{
-  return self->numel();
-}
-
 void THStorage_retain(THStorage *storage)
 {
   if (storage) {
@@ -62,29 +78,6 @@ void THStorage_retain(THStorage *storage)
   }
 }
 
-void THStorage_resize(THStorage* storage, ptrdiff_t size) {
-  if (storage->resizable()) {
-    /* case when the allocator does not have a realloc defined */
-    at::DataPtr new_data;
-    if (size != 0) {
-      new_data = storage->allocator()->allocate(storage->itemsize() * size);
-    }
-    at::DataPtr old_data = storage->set_data_ptr(std::move(new_data));
-    ptrdiff_t old_size = storage->numel();
-    storage->set_numel(size);
-    if (old_data != nullptr) {
-      ptrdiff_t copy_size = old_size;
-      if (storage->numel() < copy_size) {
-        copy_size = storage->numel();
-      }
-      if (copy_size > 0) {
-        memcpy(
-            storage->data(),
-            old_data.get(),
-            storage->itemsize() * copy_size);
-      }
-    }
-  } else {
-    THError("Trying to resize storage that is not resizable");
-  }
+void THStorage_resizeBytes(THStorage* storage, ptrdiff_t size_bytes) {
+  at::native::resize_bytes_cpu(storage, size_bytes);
 }

@@ -80,6 +80,7 @@ QTensorProto wrapShapeInfoIntoQTensorProto(
   // precision and is_signed is not used in onnxifi workflow, but it is required
   // field
   t.set_precision(0);
+  // NOLINTNEXTLINE(modernize-use-bool-literals)
   t.set_is_signed(0);
   for (const auto i : shape_info.shape.dims()) {
     t.add_dims(i);
@@ -102,7 +103,7 @@ ShapeInfoMap BackendTransformerBase::ssaRewriteAndMapNames(
   // the parent workspace has the mapped blob names. If the blobs don't exist
   // (usually such blobs are input tensor names), we exclude them from mapping.
   std::vector<std::string> exclude_mapping;
-  for (const auto kv : input_mapping_) {
+  for (const auto& kv : input_mapping_) {
     if (!ws->HasBlob(kv.second)) {
       exclude_mapping.emplace_back(kv.first);
     }
@@ -123,7 +124,7 @@ ShapeInfoMap BackendTransformerBase::inferShapes(
     NetDef* pred_net,
     const ShapeInfoMap& shape_hints_mapped,
     const BoundShapeSpec& spec) {
-  ShapeInfoMap shape_map = shape_hints_mapped;
+  ShapeInfoMap shape_map;
 
   // Populate shapes from workplace
   const std::vector<std::string> ws_blobs = ws->Blobs();
@@ -132,6 +133,9 @@ ShapeInfoMap BackendTransformerBase::inferShapes(
     if (shape_info.dimTypeIsSet()) {
       shape_map.emplace(s, shape_info);
     }
+  }
+  for (const auto& s : shape_hints_mapped) {
+    shape_map.insert(s);
   }
   auto eng = BoundShapeInferencerRegistry()->Create("C10", spec);
   eng->InferBoundShapeAndType(*pred_net, shape_map, ws);
@@ -174,6 +178,6 @@ void BackendTransformerBase::dumpNet(
     const std::string& fname) const {
   NetDef shape_net(pred_net);
   addShapeToNet(shape_net, shape_hints);
-  WriteProtoToTextFile(shape_net, fname);
+  WriteProtoToTextFile(shape_net, fname, false);
 }
 } // namespace caffe2

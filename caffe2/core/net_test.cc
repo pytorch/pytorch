@@ -42,6 +42,7 @@ class NetTestDummyOp final : public OperatorBase {
   }
 
  protected:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const bool fail_;
 };
 
@@ -115,6 +116,7 @@ TEST(NetTest, ConstructionDeclaredOutput) {
 TEST(NetTest, DeclaredInputInsufficient) {
   Workspace ws;
   ws.CreateBlob("in");
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(
       CreateNetTestHelper(&ws, vector<string>{"unuseful_in"}, vector<string>()),
       EnforceNotMet);
@@ -123,6 +125,7 @@ TEST(NetTest, DeclaredInputInsufficient) {
 TEST(NetDeathTest, DeclaredOutputNotMet) {
   Workspace ws;
   ws.CreateBlob("in");
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(
       CreateNetTestHelper(
           &ws, vector<string>(), vector<string>{"unproduced_out"}),
@@ -164,6 +167,7 @@ void checkNumChainsAndRun(const char* spec, const int expected_num_chains) {
   net_def.set_num_workers(4);
 
   // Create all external inputs
+  // NOLINTNEXTLINE(performance-for-range-copy)
   for (auto inp : net_def.external_input()) {
     ws.CreateBlob(inp);
   }
@@ -787,8 +791,13 @@ TEST(NetTest, PendingOpsAndNetFailure) {
   Workspace ws;
   std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
 
-  // net is not stuck and returns false
-  ASSERT_FALSE(net->Run());
+  try {
+    // net is not stuck and returns false
+    ASSERT_FALSE(net->Run());
+  } catch (const caffe2::AsyncNetCancelled&) {
+    // Cancellation exception is fine since if the ops run concurrently the
+    // NotFinishingOp may be cancelled with an exception.
+  }
 }
 
 class AsyncErrorOp final : public Operator<CPUContext> {
@@ -897,6 +906,7 @@ TEST(NetTest, AsyncErrorOpTest) {
   // Throw in sync part
   auto net = AsyncErrorNet(&ws, "net1", /*throw_*/ true, /*fail_in_sync*/ true);
 #ifdef CAFFE2_USE_EXCEPTION_PTR
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(net->Run(), std::logic_error);
 #endif
 
@@ -907,6 +917,7 @@ TEST(NetTest, AsyncErrorOpTest) {
   // SetFinishedWithException in async part
   net = AsyncErrorNet(&ws, "net3", /*throw_*/ true, /*fail_in_sync*/ false);
 #ifdef CAFFE2_USE_EXCEPTION_PTR
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(net->Run(), std::logic_error);
 #endif
 
@@ -992,6 +1003,7 @@ class SyncErrorOp final : public Operator<CPUContext> {
     }
   }
 
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~SyncErrorOp() override {}
 
  private:
@@ -1041,6 +1053,7 @@ TEST(NetTest, ChainErrorTest) {
 
   auto net = ChainErrorNet(&ws, "net1", /*throw_*/ true);
 #ifdef CAFFE2_USE_EXCEPTION_PTR
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(net->Run(), std::logic_error);
 #endif
 

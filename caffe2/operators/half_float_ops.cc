@@ -123,19 +123,23 @@ bool Float16ConstantFillOp::RunOnDevice() {
   return true;
 }
 
-bool Float16UniformFillOp::RunOnDevice() {
+template <>
+bool Float16UniformFillOp<CPUContext>::RunOnDevice() {
   auto* output = Output(0, shape_, at::dtype<at::Half>());
   at::Half* out = output->template mutable_data<at::Half>();
 
   // Get a batch row by row and convert
   auto leading_dim_sz = output->size(0);
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int rowsz = output->numel() / output->size(0);
 
   vector<float> intermediate_data_;
   intermediate_data_.resize(rowsz);
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (uint64_t i = 0; i < leading_dim_sz; i++) {
     math::RandUniform<float, CPUContext>(
         rowsz, min_, max_, intermediate_data_.data(), &context_);
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (uint64_t j = 0; j < rowsz; j++) {
       out[i * rowsz + j] = intermediate_data_[j];
     }
@@ -144,7 +148,7 @@ bool Float16UniformFillOp::RunOnDevice() {
 }
 
 REGISTER_CPU_OPERATOR(Float16ConstantFill, Float16ConstantFillOp);
-REGISTER_CPU_OPERATOR(Float16UniformFill, Float16UniformFillOp);
+REGISTER_CPU_OPERATOR(Float16UniformFill, Float16UniformFillOp<CPUContext>);
 OPERATOR_SCHEMA(Float16UniformFill)
     .NumInputs(0)
     .NumOutputs(1)

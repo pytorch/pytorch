@@ -9,8 +9,7 @@
 #include "caffe2/utils/conversions.h"
 
 #ifdef __HIPCC__
-#include <hip/hip_version.h>
-#if HIP_VERSION < 210
+#if TORCH_HIP_VERSION < 210
 // rocblas doesn't fully support fp16 yet
 #define ROCBLAS_FP16 0
 #endif
@@ -119,7 +118,7 @@ void device_reduce<at::Half>(
     int N,
     Tensor* buffer,
     CUDAContext* context) {
-#if HIP_VERSION >= 210
+#if TORCH_HIP_VERSION >= 210
   auto buffer_size = 1;
 
   if (buffer->numel() != buffer_size) {
@@ -140,7 +139,7 @@ void device_reduce<at::Half>(
       reinterpret_cast<const rocblas_half*>(buffer->data<at::Half>()),
       0,
       reinterpret_cast<rocblas_half*>(out)));
-#elif HIP_VERSION < 210
+#elif TORCH_HIP_VERSION < 210
    CAFFE_THROW("HIP rocblas doesn't fully support fp16 device_reduce yet.");
 #else
   auto buffer_size = 1;
@@ -225,19 +224,24 @@ bool SumReduceLikeOp<CUDAContext>::DoRunWithType() {
              CAFFE_CUDA_NUM_THREADS,
              0,
              context_.cuda_stream()>>>(Adata, Cdata, pre, n);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       if (post >= 128) {
         reduce_sum_like<T, 512>
             <<<n, 512, 0, context_.cuda_stream()>>>(Adata, Cdata, pre, n, post);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else if (post >= 64) {
         reduce_sum_like<T, 128>
             <<<n, 128, 0, context_.cuda_stream()>>>(Adata, Cdata, pre, n, post);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else if (post >= 32) {
         reduce_sum_like<T, 64>
             <<<n, 64, 0, context_.cuda_stream()>>>(Adata, Cdata, pre, n, post);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
         reduce_sum_like<T, 32>
             <<<n, 32, 0, context_.cuda_stream()>>>(Adata, Cdata, pre, n, post);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     }
   }

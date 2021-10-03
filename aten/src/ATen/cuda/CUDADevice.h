@@ -11,7 +11,7 @@ namespace cuda {
 inline Device getDeviceFromPtr(void* ptr) {
   cudaPointerAttributes attr;
   AT_CUDA_CHECK(cudaPointerGetAttributes(&attr, ptr));
-  return {DeviceType::CUDA, static_cast<int16_t>(attr.device)};
+  return {DeviceType::CUDA, static_cast<DeviceIndex>(attr.device)};
 }
 
 }} // namespace at::cuda

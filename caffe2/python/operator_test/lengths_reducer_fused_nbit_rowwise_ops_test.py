@@ -1,9 +1,9 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
-from caffe2.python import core, dyndep, workspace
+from caffe2.python import core, workspace
 from hypothesis import given
 
 

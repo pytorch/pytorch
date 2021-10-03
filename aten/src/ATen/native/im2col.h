@@ -1,9 +1,10 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <ATen/LegacyTHFunctionsCPU.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
+
+#include <algorithm>
 
 namespace at {
 namespace native {
@@ -65,7 +66,7 @@ static void col2im(
     const int64_t dilation_h,
     const int64_t dilation_w,
     T* data_im) {
-  memset(data_im, 0, sizeof(T) * height * width * channels);
+  std::fill_n(data_im, height * width * channels, T(0));
 
   const int64_t height_col = output_height;
   const int64_t width_col = output_width;

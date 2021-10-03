@@ -1,271 +1,262 @@
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
-#include <iostream>
 
-#include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
-#include <c10/cuda/CUDACachingAllocator.h>
-#include <torch/csrc/jit/resource_guard.h>
+#include <iostream>
+#include <unordered_set>
 
 namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
-
-constexpr auto CG_NAMESPACE = "CudaCodeGen";
-constexpr auto KERNEL_NAME = "kernel";
+namespace kir {
 
 namespace {
-// See NOTE [ USE OF NVRTC AND DRIVER API ]
-static const at::cuda::NVRTC& nvrtc() {
-  return at::globalContext().getNVRTC();
-}
 
-static int ceilDiv(const int a, const int b) {
-  return (a + b - 1) / b;
-}
-
-std::pair<std::string, std::string> codeGeneration(Fusion& fusion) {
-  std::stringstream str_stream;
-
-  str_stream << "namespace " << CG_NAMESPACE << " {\n" << typeinfo << "\n";
-  std::stringstream cdg;
-  GPULower gpulw(&fusion);
-  gpulw.printKernel(str_stream, KERNEL_NAME);
-  str_stream << "\n} // namespace";
-
-  std::string func_name = std::string(CG_NAMESPACE) + "::" + KERNEL_NAME;
-
-  return std::make_pair(func_name, str_stream.str());
-};
-
-void prepare_argument(
-    std::vector<void*>& arguments,
-    std::vector<Tensor<float>>& tensor_args,
-    const at::Tensor& val) {
-  tensor_args.emplace_back();
-  Tensor<float>& t = tensor_args.back();
-  // passing address, type doesn't really matter here;
-  t.data = static_cast<float*>(val.data_ptr());
-
-  for (decltype(val.dim()) i{0}; i < val.dim(); i++) {
-    t.size[i] = val.sizes()[i];
-    t.stride[i] = val.strides()[i];
+//! Scan all primary expressions in the Kernel IR and build
+//! lists of specialized nodes and other interesting information
+class KernelIrScanner : private kir::IrVisitor {
+ public:
+  explicit KernelIrScanner(const Kernel* kernel) {
+    for (const auto& ir_node : kernel->irNodes()) {
+      ir_node->accept(this);
+    }
   }
 
-  arguments.push_back(&(tensor_args.back()));
+  const auto& summary() const {
+    return summary_;
+  }
+
+ private:
+  void visit(const kir::Sync* sync) final {
+    // TODO: Move to a dedicated validation pass
+    // which is not on the common execution/compilation path
+    if (sync->isWarHazardSync()) {
+      ++summary_.war_hazard_syncs_count;
+    }
+  }
+
+  void visit(const kir::Allocate* allocate) final {
+    switch (allocate->memoryType()) {
+      case MemoryType::Global:
+        summary_.global_allocations.push_back(allocate);
+        break;
+      case MemoryType::Shared:
+        if (ExpressionEvaluator::isConst(allocate->size())) {
+          summary_.static_smem_allocations.push_back(allocate);
+        } else {
+          summary_.dynamic_smem_allocations.push_back(allocate);
+        }
+        break;
+      case MemoryType::Local:
+        if (!ExpressionEvaluator::isConst(allocate->size())) {
+          summary_.has_dynamic_local_memory_allocations = true;
+          summary_.dynamic_lmem_allocations.emplace_back(allocate);
+        }
+        break;
+    }
+  }
+
+  void visit(const kir::UnaryOp* unary_op) final {
+    if (unary_op->operation() == UnaryOpType::RandLike) {
+      // This kernel is using random numbers
+      summary_.is_stochastic = true;
+    }
+  }
+
+  void visit(const kir::TensorIndex* tensor_index) final {
+    const auto tv = tensor_index->view();
+    const auto domain = tv->domain();
+
+    // Do we have any reductions?
+    summary_.has_block_reductions =
+        summary_.has_block_reductions || domain->hasBlockReduction();
+
+    // Do we have block broadcasts?
+    summary_.has_block_broadcasts =
+        summary_.has_block_broadcasts || domain->hasBlockBroadcast();
+
+    // Update the largest smem data type
+    if (domain->hasBlockReduction() || domain->hasGridReduction() ||
+        tv->memoryType() == MemoryType::Shared) {
+      const auto data_type = tv->dtype();
+      const size_t type_size = dataTypeSize(data_type);
+      if (type_size > max_smem_type_size_) {
+        max_smem_type_size_ = type_size;
+        summary_.largest_smem_data_type = data_type;
+      }
+    }
+
+    // Update Welford
+    if (tensor_index->definition() != nullptr &&
+        tensor_index->definition()->isA<kir::WelfordOp>()) {
+      summary_.has_welford = true;
+      summary_.has_block_welford =
+          summary_.has_block_welford || domain->hasBlockReduction();
+      summary_.has_grid_welford =
+          summary_.has_grid_welford || domain->hasGridReduction();
+    }
+  }
+
+  void visit(const kir::GridWelford* grid_welford) final {
+    const auto dom = grid_welford->welford_op()
+                         ->out()
+                         ->as<kir::TensorIndex>()
+                         ->view()
+                         ->domain();
+    updateGridReductionInLoop(dom);
+  }
+
+  void visit(const kir::GridReduction* grid_reduction) final {
+    const auto dom = grid_reduction->reduction_op()
+                         ->out()
+                         ->as<kir::TensorIndex>()
+                         ->view()
+                         ->domain();
+    updateGridReductionInLoop(dom);
+  }
+
+ private:
+  size_t max_smem_type_size_ = 0;
+  KernelSummary summary_;
+
+ private:
+  void updateGridReductionInLoop(TensorDomain* dom) {
+    ++summary_.number_of_grid_reductions;
+
+    const auto gpu_lower = GpuLower::current();
+    for (size_t i = 0; i < dom->nDims(); ++i) {
+      const auto id =
+          gpu_lower->caParallelMap().getConcreteMappedID(dom->domain()[i]);
+      summary_.has_grid_reduction_in_loop =
+          summary_.has_grid_reduction_in_loop ||
+          !(id->isThread() || id->extent()->isOneInt());
+    }
+  }
 };
 
-void prepare_argument(
-    std::vector<void*>& arguments,
-    std::vector<Tensor<float>>& tensor_args,
-    std::vector<int>& int_args,
-    std::vector<float>& float_args,
-    const IValue& val) {
-  if (val.isTensor()) {
-    prepare_argument(arguments, tensor_args, val.toTensor());
-  } else if (val.isDouble()) {
-    float_args.push_back(val.to<float>());
-    arguments.push_back(&(float_args.back()));
-  } else if (val.isInt()) {
-    int_args.push_back(val.to<int>());
-    arguments.push_back(&(int_args.back()));
-  } else {
-    TORCH_CHECK(false, "Not supported input IValue encounted.");
+//! Make sure tensors have valid allocations even when parallelized
+//! loops potentially have larger iteration counts than the number of
+//! threads.
+//!
+//! When an IterDomain of a tensor is parallelized, the IterDomain
+//! may not contribute to the allocation of the tensor. For example,
+//! it is assumed that an allocation of a local-memory tensor does not
+//! need to be accounted for an parallelied IterDomain. This is true
+//! when it is guaranteed that each thread only needs to execute the
+//! loop body once. However, if not, the allocation is invalid as it
+//! only has a space for one value per thread.
+//!
+//! ValidateAllocation checks all tensor allocations and sees if any
+//! tensor may have a parallelized loop whose iteration count may
+//! be larger than the number of threads. If so, an error is thrown if
+//! the tensor is not allocated on thread-shared memories. Note that
+//! when allocated on a shared memory (i.e., MemoryType::Shared or
+//! MemoryType::Global for tensors parallelized with threadIdx, or
+//! MemoryType::Global for tensors parallelized with blockIdx), it is
+//! assumed that allocation is properly extended for the iteration
+//! count.
+class ValidateAllocation : private kir::IrVisitor {
+ public:
+  static void validate(const Kernel* kernel) {
+    ValidateAllocation validate_allocation(kernel);
   }
+
+ private:
+  explicit ValidateAllocation(const Kernel* kernel) {
+    live_allocations_.emplace_back(std::vector<const Allocate*>());
+    for (const auto& ir_node : kernel->topLevelExprs()) {
+      ir_node->accept(this);
+    }
+    live_allocations_.pop_back();
+    TORCH_INTERNAL_ASSERT(live_allocations_.empty());
+  }
+
+  void visit(const kir::Allocate* allocate) final {
+    TORCH_INTERNAL_ASSERT(!live_allocations_.empty());
+    live_allocations_.back().push_back(allocate);
+  }
+
+  // for_loop is parallelized and its stop value is not guaranteed to
+  // be <= the number of threads, which breaks an assumption made
+  // during in the allocation lowering if it's thread-parallel and not
+  // allocated on shared or global memories, or if it's block-parallel
+  // ando not allocated on global memory.
+  void validate(const kir::ForLoop* for_loop) {
+    const auto loop_id = for_loop->iter_domain();
+    const auto gpu_lower = GpuLower::current();
+    for (const auto& allocations : live_allocations_) {
+      for (const auto& allocate : allocations) {
+        const auto tv = allocate->buffer()->as<kir::TensorView>();
+        for (const auto& axis : tv->domain()->domain()) {
+          if (!gpu_lower->caParallelMap().areMapped(loop_id, axis)) {
+            continue;
+          }
+          if (isParallelTypeThreadDim(loop_id->parallelType())) {
+            TORCH_INTERNAL_ASSERT(
+                tv->memoryType() == MemoryType::Shared ||
+                tv->memoryType() == MemoryType::Global);
+          } else if (isParallelTypeBlockDim(loop_id->parallelType())) {
+            TORCH_INTERNAL_ASSERT(tv->memoryType() == MemoryType::Global);
+          }
+        }
+      }
+    }
+  }
+
+  void visit(const kir::ForLoop* for_loop) final {
+    if (for_loop->stop() != for_loop->iter_domain()->extent() &&
+        isParallelTypeThread(for_loop->iter_domain()->parallelType())) {
+      validate(for_loop);
+    }
+
+    live_allocations_.emplace_back(std::vector<const Allocate*>());
+    for (const auto& expr : for_loop->body().exprs()) {
+      expr->accept(this);
+    }
+    live_allocations_.pop_back();
+  }
+
+  void visit(const kir::IfThenElse* ite) final {
+    for (const auto& expr : ite->thenBody().exprs()) {
+      expr->accept(this);
+    }
+    for (const auto& expr : ite->elseBody().exprs()) {
+      expr->accept(this);
+    }
+  }
+
+ private:
+  std::vector<std::vector<const Allocate*>> live_allocations_;
 };
 
 } // namespace
 
-void compileKernel(Fusion& fusion, CudaKernel& entry) {
-  // generating cuda code;
-  std::string code;
-  std::string func_name;
-  std::tie(func_name, code) = codeGeneration(fusion);
-
-  // vvv NVRTC COMPILATION vvv
-
-  // lazily construct context if non-existing yet;
-  CUcontext pctx = 0;
-  AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxGetCurrent(&pctx));
-  if (!pctx) {
-    std::unique_lock<std::mutex> cudaFreeMutexLock(
-        *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
-    cudaFree(0);
-  }
-
-  // set device for the operation;
-  const auto prior_device = at::cuda::current_device();
-  at::cuda::set_device(entry.device_);
-
-  const auto prop = at::cuda::getCurrentDeviceProperties();
-  int nvrtc_major, nvrtc_minor;
-  AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcVersion(&nvrtc_major, &nvrtc_minor));
-
-  // Short-circuits if NVRTC version too low
-  AT_ASSERT(nvrtc_major >= 6);
-  // Major and minor is determined by device properties and
-  // possibly "downcompiled" to a lower (compatible) compute architecture
-  // based on the NVRTC version
-  int major, minor;
-  major = prop->major;
-  minor = prop->minor;
-  nvrtcProgram program;
-  AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcCreateProgram(
-      &program, code.c_str(), nullptr, 0, nullptr, nullptr));
-  ResourceGuard holdProgram(
-      [&] { AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcDestroyProgram(&program)); });
-
-  const std::string compute = "--gpu-architecture=compute_" +
-      std::to_string(major) + std::to_string(minor);
-  const std::vector<const char*> args = {
-      "--std=c++11", compute.c_str(), "-default-device"};
-
-  nvrtc().nvrtcAddNameExpression(program, func_name.c_str());
-  const auto result =
-      nvrtc().nvrtcCompileProgram(program, args.size(), args.data());
-  if (result != NVRTC_SUCCESS) {
-    size_t logsize;
-    nvrtc().nvrtcGetProgramLogSize(program, &logsize);
-    std::vector<char> log(logsize);
-    nvrtc().nvrtcGetProgramLog(program, log.data());
-
-    TORCH_INTERNAL_ASSERT(
-        false, "CUDA NVRTC compile error: ", log.data(), "\n", code.c_str());
-  }
-  const char* lowered_kernel_name;
-  nvrtc().nvrtcGetLoweredName(program, func_name.c_str(), &lowered_kernel_name);
-
-  AT_CUDA_NVRTC_CHECK(result);
-  size_t ptx_size;
-  AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetPTXSize(program, &ptx_size));
-  std::vector<char> ptx;
-  ptx.resize(ptx_size);
-  AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetPTX(program, ptx.data()));
-
-  AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleLoadData(&(entry.module_), ptx.data()));
-  AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleGetFunction(
-      &(entry.function_), entry.module_, lowered_kernel_name));
-  AT_CUDA_DRIVER_CHECK(nvrtc().cuOccupancyMaxActiveBlocksPerMultiprocessor(
-      &entry.max_blocks_, entry.function_, 128, 0));
-  entry.max_blocks_ *= prop->multiProcessorCount;
+// TODO(kir): Kernel IR validation
+void Kernel::finalize(std::vector<kir::Expr*> top_level_exprs) {
+  TORCH_CHECK(top_level_exprs_.empty());
+  top_level_exprs_ = std::move(top_level_exprs);
+  predicate_map_ = std::make_unique<ThreadPredicateMap>(
+      GpuLower::current()->threadPredMap());
+  ValidateAllocation::validate(this);
+  analyze();
 }
 
-void runKernel(
-    CudaKernel& entry,
-    const at::ArrayRef<IValue>& inputs,
-    std::vector<at::Tensor>& outputs) {
-  const auto prior_device = at::cuda::current_device();
-  at::cuda::set_device(entry.device_);
-  auto stream = at::cuda::getCurrentCUDAStream();
+void Kernel::analyze() {
+  FUSER_PERF_SCOPE("Kernel::analyze");
 
-  // TODO: Proper API to establish reasonable launch configurations;
-  // Naive launch config;
-  size_t numel = outputs[0].numel();
-  const auto nBlocks = std::min(entry.max_blocks_, ceilDiv(numel, 128));
-
-  // TODO: Proper API to tranform JIT I/O Tensor to CodeGen I/O Tensor
-  std::vector<void*> arguments;
-
-  // TODO: There are better ways to do this;
-  // argument holder;
-  // host code, `T` in `Tensor<T>` doesn't really matter, as we only interact
-  // with the address; Just put a float here to simply the argument holder.
-  auto max_capacity = inputs.size() + outputs.size();
-  std::vector<Tensor<float>> tensor_args;
-  std::vector<int> int_args;
-  std::vector<float> float_args;
-  tensor_args.reserve(max_capacity);
-  int_args.reserve(max_capacity);
-  float_args.reserve(max_capacity);
-
-  // Naive I/O setup, I'm ignoring all the potential transformation (i.e. I/O
-  // allocated here from the subgraph could be, and very likely are, different
-  // from I/O expected by the generated CUDA kernel.
-  for (auto& input : inputs) {
-    prepare_argument(arguments, tensor_args, int_args, float_args, input);
-  }
-  for (auto& output : outputs) {
-    prepare_argument(arguments, tensor_args, output);
-  }
-
-  // launch kernel;
-  AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernel(
-      entry.function_,
-      nBlocks,
-      1,
-      1,
-      128,
-      1,
-      1,
-      0,
-      stream,
-      arguments.data(),
-      nullptr));
-
-  // Resets device (see at::DeviceGuard notes above)
-  at::cuda::set_device(prior_device);
-
-  /*
-    for (auto& output : outputs) {
-      output.fill_(0.24);
-    }
-   */
+  const KernelIrScanner ir_scanner(this);
+  summary_ = ir_scanner.summary();
 }
 
-// WARNING:
-// This function is here for testing purposes only
-void runTestKernel(
-    CudaKernel& entry,
-    const std::vector<at::Tensor>& inputs,
-    std::vector<at::Tensor>& outputs) {
-  const auto prior_device = at::cuda::current_device();
-  at::cuda::set_device(entry.device_);
-  auto stream = at::cuda::getCurrentCUDAStream();
-
-  // TODO: Proper API to tranform JIT I/O Tensor to CodeGen I/O Tensor
-  std::vector<void*> arguments;
-
-  // TODO: There are better ways to do this;
-  // argument holder;
-  // host code, `T` in `Tensor<T>` doesn't really matter, as we only interact
-  // with the address; Just put a float here to simply the argument holder.
-  auto max_capacity = inputs.size() + outputs.size();
-  std::vector<Tensor<float>> tensor_args;
-  std::vector<int> int_args;
-  std::vector<float> float_args;
-  tensor_args.reserve(max_capacity);
-  int_args.reserve(max_capacity);
-  float_args.reserve(max_capacity);
-
-  // Naive I/O setup, I'm ignoring all the potential transformation (i.e. I/O
-  // allocated here from the subgraph could be, and very likely are, different
-  // from I/O expected by the generated CUDA kernel.
-  for (auto& input : inputs) {
-    prepare_argument(arguments, tensor_args, input);
-  }
-  for (auto& output : outputs) {
-    prepare_argument(arguments, tensor_args, output);
-  }
-
-  // launch kernel;
-  AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernel(
-      entry.function_,
-      entry.grid_.x,
-      entry.grid_.y,
-      entry.grid_.z,
-      entry.block_.x,
-      entry.block_.y,
-      entry.block_.z,
-      0,
-      stream,
-      arguments.data(),
-      nullptr));
-
-  // Resets device (see at::DeviceGuard notes above)
-  at::cuda::set_device(prior_device);
+void Kernel::print() const {
+  kir::IrPrinter ir_printer(std::cout);
+  ir_printer.printKernel(this);
 }
 
+} // namespace kir
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

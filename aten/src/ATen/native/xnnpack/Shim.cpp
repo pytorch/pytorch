@@ -36,7 +36,7 @@ bool use_convolution2d(
     const IntArrayRef,
     const IntArrayRef,
     const int64_t,
-    const bool) {
+    bool) {
   return false;
 }
 
@@ -47,8 +47,7 @@ Tensor convolution2d(
     const IntArrayRef,
     const IntArrayRef,
     const IntArrayRef,
-    const int64_t,
-    const bool) {
+    const int64_t) {
   TORCH_CHECK(false, internal::kError);
 }
 
@@ -70,7 +69,7 @@ bool use_max_pool2d(
     const Tensor&,
     const IntArrayRef,
     const IntArrayRef,
-    const IntArrayRef,
+    IntArrayRef,
     const IntArrayRef,
     const bool,
     const float,
@@ -82,7 +81,7 @@ Tensor max_pool2d(
     const Tensor&,
     const IntArrayRef,
     const IntArrayRef,
-    const IntArrayRef,
+    IntArrayRef,
     const IntArrayRef,
     const bool,
     const float,

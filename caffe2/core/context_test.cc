@@ -22,6 +22,7 @@ TEST(CPUContextTest, TestAllocDealloc) {
   float* dst_data = static_cast<float*>(dst_data_ptr.get());
   EXPECT_NE(dst_data, nullptr);
   for (int i = 0; i < 10; ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     data[i] = i;
   }
   DeviceOption option;

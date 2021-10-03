@@ -63,18 +63,19 @@ bool BatchPermutationOp<float, CUDAContext>::RunOnDevice() {
 
   auto* Y = Output(0, X.sizes(), at::dtype<float>());
 
-  CAFFE_ENFORCE_GT(X.dim32(0), 0);
-  BatchPermutationKernel<true>
-      <<<CAFFE_GET_BLOCKS(X.numel()),
-         CAFFE_CUDA_NUM_THREADS,
-         0,
-         context_.cuda_stream()>>>(
-          X.dim32(0),
-          X.numel() / X.dim32(0),
-          X.data<float>(),
-          indices.data<int>(),
-          Y->mutable_data<float>());
-
+  if (X.dim32(0) > 0) {
+    BatchPermutationKernel<true>
+        <<<CAFFE_GET_BLOCKS(X.numel()),
+           CAFFE_CUDA_NUM_THREADS,
+           0,
+           context_.cuda_stream()>>>(
+            X.dim32(0),
+            X.numel() / X.dim32(0),
+            X.data<float>(),
+            indices.data<int>(),
+            Y->mutable_data<float>());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  }
   return true;
 }
 
@@ -84,18 +85,19 @@ bool BatchPermutationGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& dY = Input(1);
   auto* dX = Output(0, dY.sizes(), at::dtype<float>());
 
-  CAFFE_ENFORCE_GT(dY.dim32(0), 0);
-  BatchPermutationKernel<false>
-      <<<CAFFE_GET_BLOCKS(dY.numel()),
-         CAFFE_CUDA_NUM_THREADS,
-         0,
-         context_.cuda_stream()>>>(
-          dY.dim32(0),
-          dY.numel() / dY.dim32(0),
-          dY.data<float>(),
-          indices.data<int>(),
-          dX->mutable_data<float>());
-
+  if (dY.dim32(0) > 0) {
+    BatchPermutationKernel<false>
+        <<<CAFFE_GET_BLOCKS(dY.numel()),
+           CAFFE_CUDA_NUM_THREADS,
+           0,
+           context_.cuda_stream()>>>(
+            dY.dim32(0),
+            dY.numel() / dY.dim32(0),
+            dY.data<float>(),
+            indices.data<int>(),
+            dX->mutable_data<float>());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  }
   return true;
 }
 

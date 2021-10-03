@@ -1,22 +1,23 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
-import argparse
-from caffe2.proto import caffe2_pb2
-from caffe2.python import gradient_checker
-import caffe2.python.hypothesis_test_util as hu
-from caffe2.python.serialized_test import coverage
-import hypothesis as hy
+
+
 import inspect
-import numpy as np
 import os
 import shutil
 import sys
 import tempfile
 import threading
+from contextlib import contextmanager
 from zipfile import ZipFile
+
+import argparse
+import hypothesis as hy
+import numpy as np
+
+import caffe2.python.hypothesis_test_util as hu
+from caffe2.proto import caffe2_pb2
+from caffe2.python import gradient_checker
+from caffe2.python.serialized_test import coverage
 
 operator_test_type = 'operator_test'
 TOP_DIR = os.path.dirname(os.path.realpath(__file__))
@@ -27,7 +28,7 @@ _output_context = threading.local()
 
 def given(*given_args, **given_kwargs):
     def wrapper(f):
-        hyp_func = hy.given(*given_args, **given_kwargs)(f)
+        hyp_func = hy.seed(0)(hy.settings(max_examples=1)(hy.given(*given_args, **given_kwargs)(f)))
         fixed_seed_func = hy.seed(0)(hy.settings(max_examples=1)(hy.given(
             *given_args, **given_kwargs)(f)))
 
@@ -258,6 +259,16 @@ class SerializedTestCase(hu.HypothesisTestCase):
                 atol,
                 rtol,
             )
+
+    @contextmanager
+    def set_disable_serialized_check(self, val: bool):
+        orig = getattr(_output_context, 'disable_serialized_check', False)
+        try:
+            # pyre-fixme[16]: `local` has no attribute `disable_serialized_check`.
+            _output_context.disable_serialized_check = val
+            yield
+        finally:
+            _output_context.disable_serialized_check = orig
 
 
 def testWithArgs():

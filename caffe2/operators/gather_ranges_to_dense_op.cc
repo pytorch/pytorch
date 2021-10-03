@@ -91,6 +91,7 @@ are sorted by the corresponding KEY.
       }
       CAFFE_ENFORCE_GT(lengths.size(), 0, "lengths should be non-empty.");
       std::vector<TensorShape> out(lengths.size());
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int i = 0; i < lengths.size(); ++i) {
         out[i].set_data_type(in[0].data_type());
         out[i].add_dims(in[1].dims(0));
@@ -104,3 +105,11 @@ NO_GRADIENT(GatherRangesToDense);
 
 } // namespace
 } // namespace caffe2
+
+using GatherRangesToDenseCPUOp =
+    caffe2::GatherRangesToDenseOp<caffe2::CPUContext>;
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    GatherRangesToDense,
+    "_caffe2::GatherRangesToDense(Tensor data, Tensor ranges, Tensor? key, int[] lengths, int min_observation, float max_mismatched_ratio, float max_empty_ratio) -> Tensor[] outputs",
+    GatherRangesToDenseCPUOp);

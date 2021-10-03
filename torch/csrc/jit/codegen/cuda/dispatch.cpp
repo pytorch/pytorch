@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/tensor.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
 
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
@@ -8,6 +7,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 template <typename T>
 T* ptr(T& obj) {
@@ -37,7 +37,7 @@ T* ptr(T* obj) {
  * }
  *
  * And therefore dispatch should never call:
- * ptr(mutator)->handle(static_cast<Statement*>(this));
+ * ptr(mutator)->handle(this->as<Statement>());
  */
 
 template <typename T>
@@ -45,29 +45,30 @@ void Val::dispatch(T handler, Val* val) {
   switch (*(val->getValType())) {
     case ValType::Scalar:
       switch (*(val->getDataType())) {
-        case DataType::Float:
-          ptr(handler)->handle(static_cast<Float*>(val));
+        case DataType::Bool:
+          ptr(handler)->handle(val->as<Bool>());
+          return;
+        case DataType::Double:
+          ptr(handler)->handle(val->as<Double>());
           return;
         case DataType::Int:
-          ptr(handler)->handle(static_cast<Int*>(val));
+          ptr(handler)->handle(val->as<Int>());
           return;
         default:
           break;
       }
+      break;
     case ValType::IterDomain:
-      ptr(handler)->handle(static_cast<IterDomain*>(val));
+      ptr(handler)->handle(val->as<IterDomain>());
       return;
     case ValType::TensorDomain:
-      ptr(handler)->handle(static_cast<TensorDomain*>(val));
+      ptr(handler)->handle(val->as<TensorDomain>());
       return;
     case ValType::TensorView:
-      ptr(handler)->handle(static_cast<TensorView*>(val));
-      return;
-    case ValType::TensorIndex:
-      ptr(handler)->handle(static_cast<TensorIndex*>(val));
+      ptr(handler)->handle(val->as<TensorView>());
       return;
     case ValType::NamedScalar:
-      ptr(handler)->handle(static_cast<NamedScalar*>(val));
+      ptr(handler)->handle(val->as<NamedScalar>());
       return;
     default:
       break;
@@ -79,28 +80,37 @@ template <typename T>
 void Expr::dispatch(T handler, Expr* expr) {
   switch (*(expr->getExprType())) {
     case ExprType::Split:
-      ptr(handler)->handle(static_cast<Split*>(expr));
+      ptr(handler)->handle(expr->as<Split>());
       return;
     case ExprType::Merge:
-      ptr(handler)->handle(static_cast<Merge*>(expr));
-      return;
-    case ExprType::Reorder:
-      ptr(handler)->handle(static_cast<Reorder*>(expr));
+      ptr(handler)->handle(expr->as<Merge>());
       return;
     case ExprType::UnaryOp:
-      ptr(handler)->handle(static_cast<UnaryOp*>(expr));
+      ptr(handler)->handle(expr->as<UnaryOp>());
       return;
     case ExprType::BinaryOp:
-      ptr(handler)->handle(static_cast<BinaryOp*>(expr));
+      ptr(handler)->handle(expr->as<BinaryOp>());
       return;
-    case ExprType::ForLoop:
-      ptr(handler)->handle(static_cast<ForLoop*>(expr));
+    case ExprType::TernaryOp:
+      ptr(handler)->handle(expr->as<TernaryOp>());
       return;
-    case ExprType::IfThenElse:
-      ptr(handler)->handle(static_cast<IfThenElse*>(expr));
+    case ExprType::ReductionOp:
+      ptr(handler)->handle(expr->as<ReductionOp>());
       return;
-    case ExprType::Allocate:
-      ptr(handler)->handle(static_cast<Allocate*>(expr));
+    case ExprType::WelfordOp:
+      ptr(handler)->handle(expr->as<WelfordOp>());
+      return;
+    case ExprType::BroadcastOp:
+      ptr(handler)->handle(expr->as<BroadcastOp>());
+      return;
+    case ExprType::TransposeOp:
+      ptr(handler)->handle(expr->as<TransposeOp>());
+      return;
+    case ExprType::ShiftOp:
+      ptr(handler)->handle(expr->as<ShiftOp>());
+      return;
+    case ExprType::GatherOp:
+      ptr(handler)->handle(expr->as<GatherOp>());
       return;
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
@@ -110,41 +120,42 @@ void Expr::dispatch(T handler, Expr* expr) {
 template <typename T>
 void Statement::dispatch(T handler, Statement* stmt) {
   if (stmt->isVal()) {
-    ptr(handler)->handle(static_cast<Val*>(stmt));
+    ptr(handler)->handle(stmt->as<Val>());
   } else if (stmt->isExpr()) {
-    ptr(handler)->handle(static_cast<Expr*>(stmt));
+    ptr(handler)->handle(stmt->as<Expr>());
   } else
     TORCH_INTERNAL_ASSERT(false, "Unknown stmttype in dispatch!");
 }
 
 template <typename T>
-void Val::constDispatch(T handler, const Val* const val) {
+void Val::constDispatch(T handler, const Val* val) {
   switch (*(val->getValType())) {
     case ValType::Scalar:
       switch (*(val->getDataType())) {
-        case DataType::Float:
-          ptr(handler)->handle(static_cast<const Float* const>(val));
+        case DataType::Bool:
+          ptr(handler)->handle(val->as<Bool>());
+          return;
+        case DataType::Double:
+          ptr(handler)->handle(val->as<Double>());
           return;
         case DataType::Int:
-          ptr(handler)->handle(static_cast<const Int* const>(val));
+          ptr(handler)->handle(val->as<Int>());
           return;
         default:
           break;
       }
+      break;
     case ValType::IterDomain:
-      ptr(handler)->handle(static_cast<const IterDomain* const>(val));
+      ptr(handler)->handle(val->as<IterDomain>());
       return;
     case ValType::TensorDomain:
-      ptr(handler)->handle(static_cast<const TensorDomain* const>(val));
+      ptr(handler)->handle(val->as<TensorDomain>());
       return;
     case ValType::TensorView:
-      ptr(handler)->handle(static_cast<const TensorView* const>(val));
-      return;
-    case ValType::TensorIndex:
-      ptr(handler)->handle(static_cast<const TensorIndex* const>(val));
+      ptr(handler)->handle(val->as<TensorView>());
       return;
     case ValType::NamedScalar:
-      ptr(handler)->handle(static_cast<const NamedScalar* const>(val));
+      ptr(handler)->handle(val->as<NamedScalar>());
       return;
     default:
       break;
@@ -153,31 +164,40 @@ void Val::constDispatch(T handler, const Val* const val) {
 }
 
 template <typename T>
-void Expr::constDispatch(T handler, const Expr* const expr) {
+void Expr::constDispatch(T handler, const Expr* expr) {
   switch (*(expr->getExprType())) {
     case ExprType::Split:
-      ptr(handler)->handle(static_cast<const Split* const>(expr));
+      ptr(handler)->handle(expr->as<Split>());
       return;
     case ExprType::Merge:
-      ptr(handler)->handle(static_cast<const Merge* const>(expr));
-      return;
-    case ExprType::Reorder:
-      ptr(handler)->handle(static_cast<const Reorder* const>(expr));
+      ptr(handler)->handle(expr->as<Merge>());
       return;
     case ExprType::UnaryOp:
-      ptr(handler)->handle(static_cast<const UnaryOp* const>(expr));
+      ptr(handler)->handle(expr->as<UnaryOp>());
       return;
     case ExprType::BinaryOp:
-      ptr(handler)->handle(static_cast<const BinaryOp* const>(expr));
+      ptr(handler)->handle(expr->as<BinaryOp>());
       return;
-    case ExprType::ForLoop:
-      ptr(handler)->handle(static_cast<const ForLoop* const>(expr));
+    case ExprType::TernaryOp:
+      ptr(handler)->handle(expr->as<TernaryOp>());
       return;
-    case ExprType::IfThenElse:
-      ptr(handler)->handle(static_cast<const IfThenElse* const>(expr));
+    case ExprType::ReductionOp:
+      ptr(handler)->handle(expr->as<ReductionOp>());
       return;
-    case ExprType::Allocate:
-      ptr(handler)->handle(static_cast<const Allocate* const>(expr));
+    case ExprType::WelfordOp:
+      ptr(handler)->handle(expr->as<WelfordOp>());
+      return;
+    case ExprType::BroadcastOp:
+      ptr(handler)->handle(expr->as<BroadcastOp>());
+      return;
+    case ExprType::TransposeOp:
+      ptr(handler)->handle(expr->as<TransposeOp>());
+      return;
+    case ExprType::ShiftOp:
+      ptr(handler)->handle(expr->as<ShiftOp>());
+      return;
+    case ExprType::GatherOp:
+      ptr(handler)->handle(expr->as<GatherOp>());
       return;
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
@@ -185,11 +205,11 @@ void Expr::constDispatch(T handler, const Expr* const expr) {
 }
 
 template <typename T>
-void Statement::constDispatch(T handler, const Statement* const stmt) {
+void Statement::constDispatch(T handler, const Statement* stmt) {
   if (stmt->isVal()) {
-    ptr(handler)->handle(static_cast<const Val* const>(stmt));
+    ptr(handler)->handle(stmt->as<Val>());
   } else if (stmt->isExpr()) {
-    ptr(handler)->handle(static_cast<const Expr* const>(stmt));
+    ptr(handler)->handle(stmt->as<Expr>());
   } else
     TORCH_INTERNAL_ASSERT(false, "Unknown stmttype in dispatch!");
 }
@@ -203,30 +223,31 @@ void Statement::constDispatch(T handler, const Statement* const stmt) {
  * implement Statement* mutate(Statement* stmt){ stmt->mutatorDispatch(this);
  * }
  * And therefore dispatch should never call:
- *   ptr(mutator)->mutate(static_cast<Statement*>(this));
+ *   ptr(mutator)->mutate(this->as<Statement>());
  */
 template <typename T>
 Statement* Val::mutatorDispatch(T mutator, Val* val) {
   switch (*(val->getValType())) {
     case ValType::Scalar:
       switch (*(val->getDataType())) {
-        case DataType::Float:
-          return ptr(mutator)->mutate(static_cast<Float*>(val));
+        case DataType::Bool:
+          return ptr(mutator)->mutate(val->as<Bool>());
+        case DataType::Double:
+          return ptr(mutator)->mutate(val->as<Double>());
         case DataType::Int:
-          return ptr(mutator)->mutate(static_cast<Int*>(val));
+          return ptr(mutator)->mutate(val->as<Int>());
         default:
           break;
       }
+      break;
     case ValType::IterDomain:
-      return ptr(mutator)->mutate(static_cast<IterDomain*>(val));
+      return ptr(mutator)->mutate(val->as<IterDomain>());
     case ValType::TensorDomain:
-      return ptr(mutator)->mutate(static_cast<TensorDomain*>(val));
+      return ptr(mutator)->mutate(val->as<TensorDomain>());
     case ValType::TensorView:
-      return ptr(mutator)->mutate(static_cast<TensorView*>(val));
-    case ValType::TensorIndex:
-      return ptr(mutator)->mutate(static_cast<TensorIndex*>(val));
+      return ptr(mutator)->mutate(val->as<TensorView>());
     case ValType::NamedScalar:
-      return ptr(mutator)->mutate(static_cast<NamedScalar*>(val));
+      return ptr(mutator)->mutate(val->as<NamedScalar>());
     default:
       break;
   }
@@ -237,21 +258,27 @@ template <typename T>
 Statement* Expr::mutatorDispatch(T mutator, Expr* expr) {
   switch (*(expr->getExprType())) {
     case ExprType::Split:
-      return ptr(mutator)->mutate(static_cast<Split*>(expr));
+      return ptr(mutator)->mutate(expr->as<Split>());
     case ExprType::Merge:
-      return ptr(mutator)->mutate(static_cast<Merge*>(expr));
-    case ExprType::Reorder:
-      return ptr(mutator)->mutate(static_cast<Reorder*>(expr));
+      return ptr(mutator)->mutate(expr->as<Merge>());
     case ExprType::UnaryOp:
-      return ptr(mutator)->mutate(static_cast<UnaryOp*>(expr));
+      return ptr(mutator)->mutate(expr->as<UnaryOp>());
     case ExprType::BinaryOp:
-      return ptr(mutator)->mutate(static_cast<BinaryOp*>(expr));
-    case ExprType::ForLoop:
-      return ptr(mutator)->mutate(static_cast<ForLoop*>(expr));
-    case ExprType::IfThenElse:
-      return ptr(mutator)->mutate(static_cast<IfThenElse*>(expr));
-    case ExprType::Allocate:
-      return ptr(mutator)->mutate(static_cast<Allocate*>(expr));
+      return ptr(mutator)->mutate(expr->as<BinaryOp>());
+    case ExprType::TernaryOp:
+      return ptr(mutator)->mutate(expr->as<TernaryOp>());
+    case ExprType::ReductionOp:
+      return ptr(mutator)->mutate(expr->as<ReductionOp>());
+    case ExprType::WelfordOp:
+      return ptr(mutator)->mutate(expr->as<WelfordOp>());
+    case ExprType::BroadcastOp:
+      return ptr(mutator)->mutate(expr->as<BroadcastOp>());
+    case ExprType::TransposeOp:
+      return ptr(mutator)->mutate(expr->as<TransposeOp>());
+    case ExprType::ShiftOp:
+      return ptr(mutator)->mutate(expr->as<ShiftOp>());
+    case ExprType::GatherOp:
+      return ptr(mutator)->mutate(expr->as<GatherOp>());
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
   }
@@ -260,10 +287,10 @@ Statement* Expr::mutatorDispatch(T mutator, Expr* expr) {
 template <typename T>
 Statement* Statement::mutatorDispatch(T mutator, Statement* stmt) {
   if (stmt->isVal()) {
-    return ptr(mutator)->mutate(static_cast<Val*>(stmt));
+    return ptr(mutator)->mutate(stmt->as<Val>());
   }
   if (stmt->isExpr()) {
-    return ptr(mutator)->mutate(static_cast<Expr*>(stmt));
+    return ptr(mutator)->mutate(stmt->as<Expr>());
   }
   TORCH_INTERNAL_ASSERT(false, "Unknown stmttype in dispatch!");
 }
@@ -287,27 +314,19 @@ template void Val::dispatch(OptInDispatch*, Val*);
 template void Expr::dispatch(OptInDispatch, Expr*);
 template void Expr::dispatch(OptInDispatch*, Expr*);
 
-template void Statement::constDispatch(
-    OptOutConstDispatch,
-    const Statement* const);
-template void Statement::constDispatch(
-    OptOutConstDispatch*,
-    const Statement* const);
-template void Val::constDispatch(OptOutConstDispatch, const Val* const);
-template void Val::constDispatch(OptOutConstDispatch*, const Val* const);
-template void Expr::constDispatch(OptOutConstDispatch, const Expr* const);
-template void Expr::constDispatch(OptOutConstDispatch*, const Expr* const);
+template void Statement::constDispatch(OptOutConstDispatch, const Statement*);
+template void Statement::constDispatch(OptOutConstDispatch*, const Statement*);
+template void Val::constDispatch(OptOutConstDispatch, const Val*);
+template void Val::constDispatch(OptOutConstDispatch*, const Val*);
+template void Expr::constDispatch(OptOutConstDispatch, const Expr*);
+template void Expr::constDispatch(OptOutConstDispatch*, const Expr*);
 
-template void Statement::constDispatch(
-    OptInConstDispatch,
-    const Statement* const);
-template void Statement::constDispatch(
-    OptInConstDispatch*,
-    const Statement* const);
-template void Val::constDispatch(OptInConstDispatch, const Val* const);
-template void Val::constDispatch(OptInConstDispatch*, const Val* const);
-template void Expr::constDispatch(OptInConstDispatch, const Expr* const);
-template void Expr::constDispatch(OptInConstDispatch*, const Expr* const);
+template void Statement::constDispatch(OptInConstDispatch, const Statement*);
+template void Statement::constDispatch(OptInConstDispatch*, const Statement*);
+template void Val::constDispatch(OptInConstDispatch, const Val*);
+template void Val::constDispatch(OptInConstDispatch*, const Val*);
+template void Expr::constDispatch(OptInConstDispatch, const Expr*);
+template void Expr::constDispatch(OptInConstDispatch*, const Expr*);
 
 template Statement* Statement::mutatorDispatch(OptOutMutator, Statement*);
 template Statement* Statement::mutatorDispatch(OptOutMutator*, Statement*);
@@ -326,9 +345,11 @@ template Statement* Expr::mutatorDispatch(OptInMutator*, Expr*);
 void OptOutDispatch::handle(Statement* s) {
   Statement::dispatch(this, s);
 }
+
 void OptOutDispatch::handle(Expr* e) {
   Expr::dispatch(this, e);
 }
+
 void OptOutDispatch::handle(Val* v) {
   Val::dispatch(this, v);
 }
@@ -336,30 +357,36 @@ void OptOutDispatch::handle(Val* v) {
 void OptInDispatch::handle(Statement* s) {
   Statement::dispatch(this, s);
 }
+
 void OptInDispatch::handle(Expr* e) {
   Expr::dispatch(this, e);
 }
+
 void OptInDispatch::handle(Val* v) {
   Val::dispatch(this, v);
 }
 
-void OptOutConstDispatch::handle(const Statement* const s) {
+void OptOutConstDispatch::handle(const Statement* s) {
   Statement::constDispatch(this, s);
 }
-void OptOutConstDispatch::handle(const Expr* const e) {
+
+void OptOutConstDispatch::handle(const Expr* e) {
   Expr::constDispatch(this, e);
 }
-void OptOutConstDispatch::handle(const Val* const v) {
+
+void OptOutConstDispatch::handle(const Val* v) {
   Val::constDispatch(this, v);
 }
 
-void OptInConstDispatch::handle(const Statement* const s) {
+void OptInConstDispatch::handle(const Statement* s) {
   Statement::constDispatch(this, s);
 }
-void OptInConstDispatch::handle(const Expr* const e) {
+
+void OptInConstDispatch::handle(const Expr* e) {
   Expr::constDispatch(this, e);
 }
-void OptInConstDispatch::handle(const Val* const v) {
+
+void OptInConstDispatch::handle(const Val* v) {
   Val::constDispatch(this, v);
 }
 
@@ -381,9 +408,11 @@ Statement* OptInMutator::mutate(Val* v) {
 Statement* OptOutMutator::mutate(Statement* s) {
   return Statement::mutatorDispatch(this, s);
 }
+
 Statement* OptOutMutator::mutate(Expr* e) {
   return Expr::mutatorDispatch(this, e);
 }
+
 Statement* OptOutMutator::mutate(Val* v) {
   // If value is already mutated, return the mutation
   if (mutations.find(v) != mutations.end())
@@ -391,6 +420,7 @@ Statement* OptOutMutator::mutate(Val* v) {
   return Val::mutatorDispatch(this, v);
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

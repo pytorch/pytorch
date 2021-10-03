@@ -2,18 +2,11 @@
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/roi_pool_op.h"
+#include "caffe2/utils/GpuAtomics.cuh"
 
 namespace caffe2 {
 
 namespace {
-
-template <typename T>
-inline __device__ T gpu_atomic_add(const T val, T* address);
-
-template <>
-inline __device__ float gpu_atomic_add(const float val, float* address) {
-  return atomicAdd(address, val);
-}
 
 template <typename T>
 __global__ void ROIPoolForward(
@@ -114,8 +107,8 @@ __global__ void ROIPoolBackward(
     int argmax = offset_argmax_data[ph * pooled_width + pw];
     if (argmax != -1) {
       gpu_atomic_add(
-          static_cast<T>(offset_top_diff[ph * pooled_width + pw]),
-          offset_bottom_diff + argmax);
+          offset_bottom_diff + argmax,
+          static_cast<T>(offset_top_diff[ph * pooled_width + pw]));
     }
   }
 }
@@ -163,11 +156,13 @@ bool RoIPoolOp<float, CUDAContext>::RunOnDevice() {
           R.data<float>(),
           Y->template mutable_data<float>(),
           argmax_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
 template <>
-bool RoIPoolGradientOp<float, CUDAContext>::RunOnDevice() {
+C10_EXPORT bool RoIPoolGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0); // Input data to pool
   auto& R = Input(1); // RoIs
   auto& A = Input(2); // argmaxes
@@ -198,6 +193,7 @@ bool RoIPoolGradientOp<float, CUDAContext>::RunOnDevice() {
             pooled_width_,
             dX->template mutable_data<float>(),
             R.data<float>());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   return true;
 }

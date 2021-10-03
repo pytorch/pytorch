@@ -6,6 +6,7 @@
 #include <torch/csrc/autograd/variable.h>
 
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 
 #include <cstddef>
 #include <memory>
@@ -15,23 +16,22 @@
 namespace torch { namespace autograd {
 
 auto CopyBackwards::apply(variable_list&& grads) -> variable_list {
-  check_input_variables("CopyBackwards", grads, 1);
-  auto& grad = grads[0];
+  check_input_variables("CopyBackwards", grads, 1, -1, true);
+  auto grad = c10::MaybeOwned<at::Tensor>::borrowed(grads[0]);
   variable_list grad_inputs(2);
-  if (should_compute_output(0)) {
-    grad_inputs[0] = at::zeros_like(grad, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  }
-  if (should_compute_output(1)) {
-    at::DeviceGuard device_guard(src_device);
-    // TODO: What if !grad.is_cuda(), but src_device is CUDA?
-    // This code is kind of weirdly asymmetric.
-    if (grad.is_cuda() && grad.device() != src_device) {
-      grad_inputs[1] = grad.to(
-          src_options,
-          /*non_blocking=*/false,
-          /*copy=*/true);
-    } else {
-      grad_inputs[1] = grad.to(src_options);
+  if (grad->defined()) {
+    if (should_compute_output(0)) {
+      grad_inputs[0] = at::zeros_like(*grad, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    }
+    if (should_compute_output(1)) {
+      // Handle R->C copies without raising a warning
+      const auto src_type = src_options.dtype().toScalarType();
+      if (!c10::isComplexType(src_type) && grad->is_complex()) {
+        grad = c10::MaybeOwned<at::Tensor>::owned(at::real(grads[0]));
+      }
+
+      at::DeviceGuard device_guard(src_options.device());
+      grad_inputs[1] = grad->to(src_options);
     }
   }
   return grad_inputs;
@@ -40,10 +40,12 @@ auto CopyBackwards::apply(variable_list&& grads) -> variable_list {
 CopySlices::CopySlices(
     const Variable& base_var,
     at::TensorGeometry view_,
+    std::function<at::Tensor(const at::Tensor&)> view_fn_,
     std::shared_ptr<Node> fn_)
     : Node(),
       base(base_var),
       view(std::move(view_)),
+      view_fn(std::move(view_fn_)),
       fn(std::move(fn_)) {
   // Take the next_edges of fn as our own, except for index 0 which goes
   // to base instead of the view.
@@ -51,14 +53,17 @@ CopySlices::CopySlices(
   const auto num_outputs = fn->num_outputs();
   next_edges_.reserve(num_outputs);
   add_next_edge(impl::gradient_edge(base_var));
-  for (size_t i = 1; i < num_outputs; i++) {
+  for (const auto i : c10::irange(1, num_outputs)) {
     add_next_edge(fn->next_edge(i));
   }
 }
 
 auto CopySlices::apply(variable_list&& inputs) -> variable_list {
-  check_input_variables("CopySlices", inputs, 1);
+  check_input_variables("CopySlices", inputs, 1, -1, true);
   auto& grad = inputs[0];
+  if (!grad.defined()) {
+    return variable_list(num_outputs());
+  }
 
   // Acquire lock to here protect thread safety on fn
   // see Note [Thread Safety on Autograd Node]
@@ -68,11 +73,16 @@ auto CopySlices::apply(variable_list&& inputs) -> variable_list {
     throw std::runtime_error(ERR_BACKWARD_TWICE);
   }
 
-  auto result = at::empty_strided(base.sizes(), base.strides(), grad.options());
+  auto result = grad.new_empty_strided(base.sizes(), base.strides());
   result.copy_(grad);
 
-  auto offset = view.storage_offset() - base.storage_offset();
-  auto grad_slice = result.as_strided(view.sizes(), view.strides(), offset);
+  at::Tensor grad_slice;
+  if (view_fn) {
+    grad_slice = view_fn(result);
+  } else {
+    auto offset = view.storage_offset() - base.storage_offset();
+    grad_slice = result.as_strided(view.sizes(), view.strides(), offset);
+  }
 
   // TODO: We clone grad_slice because we modify it below and "fn" might save
   // it for the backward of res. We might be able to avoid the clone() if
@@ -80,11 +90,12 @@ auto CopySlices::apply(variable_list&& inputs) -> variable_list {
   auto res = (*fn)({ grad_slice.clone(at::MemoryFormat::Contiguous) });
 
   variable_list grad_inputs(num_outputs());
-  for (size_t i = 0; i < res.size(); i++) {
+  for(const auto i : c10::irange(res.size())) {
     if (should_compute_output(i)) {
       AT_ASSERT(res[i].defined());
       if (i == 0) {
         grad_slice.copy_(res[i]);
+        // NOLINTNEXTLINE(clang-analyzer-cplusplus.Move)
         grad_inputs[i] = std::move(result); // NOLINT(bugprone-use-after-move)
       } else {
         grad_inputs[i] = std::move(res[i]);

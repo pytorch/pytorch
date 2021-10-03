@@ -1,4 +1,5 @@
-#include <test/cpp/jit/test_base.h>
+#include <gtest/gtest.h>
+
 #include <test/cpp/jit/test_utils.h>
 #include <torch/csrc/jit/testing/file_check.h>
 #include "torch/csrc/jit/ir/ir.h"
@@ -7,7 +8,21 @@
 namespace torch {
 namespace jit {
 
-void testUnifyTypes() {
+TEST(JitTypeTest, IsComplete) {
+  auto tt = c10::TensorType::create(
+      at::kFloat,
+      at::kCPU,
+      c10::SymbolicShape(std::vector<c10::optional<int64_t>>({1, 49})),
+      std::vector<c10::Stride>(
+          {c10::Stride{2, true, 1},
+           c10::Stride{1, true, 1},
+           c10::Stride{0, true, c10::nullopt}}),
+      false);
+  TORCH_INTERNAL_ASSERT(!tt->isComplete());
+  TORCH_INTERNAL_ASSERT(!tt->strides().isComplete());
+}
+
+TEST(JitTypeTest, UnifyTypes) {
   auto bool_tensor = TensorType::get()->withScalarType(at::kBool);
   auto opt_bool_tensor = OptionalType::create(bool_tensor);
   auto unified_opt_bool = unifyTypes(bool_tensor, opt_bool_tensor);
@@ -17,7 +32,7 @@ void testUnifyTypes() {
   TORCH_INTERNAL_ASSERT(!tensor->isSubtypeOf(opt_bool_tensor));
   auto unified = unifyTypes(opt_bool_tensor, tensor);
   TORCH_INTERNAL_ASSERT(unified);
-  auto elem = (*unified)->expect<OptionalType>()->getElementType();
+  auto elem = (*unified)->expectRef<OptionalType>().getElementType();
   TORCH_INTERNAL_ASSERT(elem->isSubtypeOf(TensorType::get()));
 
   auto opt_tuple_none_int = OptionalType::create(
@@ -27,7 +42,7 @@ void testUnifyTypes() {
   TORCH_INTERNAL_ASSERT(out);
 
   std::stringstream ss;
-  ss << (*out)->python_str();
+  ss << (*out)->annotation_str();
   testing::FileCheck()
       .check("Optional[Tuple[Optional[int], Optional[int]]]")
       ->run(ss.str());

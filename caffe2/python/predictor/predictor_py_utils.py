@@ -1,9 +1,6 @@
 ## @package predictor_py_utils
 # Module caffe2.python.predictor.predictor_py_utils
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
 
 from caffe2.python import core, scope
 
@@ -17,7 +14,8 @@ def create_predict_net(predictor_export_meta):
     net.Proto().op.extend(predictor_export_meta.predict_net.op)
     net.Proto().partition_info.extend(predictor_export_meta.predict_net.partition_info)
     net.Proto().external_input.extend(
-        predictor_export_meta.inputs + predictor_export_meta.parameters)
+        predictor_export_meta.inputs + predictor_export_meta.parameters
+    )
     net.Proto().external_output.extend(predictor_export_meta.outputs)
     net.Proto().arg.extend(predictor_export_meta.predict_net.arg)
     if predictor_export_meta.net_type is not None:
@@ -41,7 +39,9 @@ def create_predict_init_net(ws, predictor_export_meta):
             if blob not in ws.blobs:
                 raise Exception(
                     "{} not in workspace but needed for shape: {}".format(
-                        blob, ws.blobs))
+                        blob, ws.blobs
+                    )
+                )
 
             shape = ws.blobs[blob].fetch().shape
 
@@ -51,8 +51,7 @@ def create_predict_init_net(ws, predictor_export_meta):
         with scope.EmptyDeviceScope():
             net.ConstantFill([], blob, shape=shape, value=0.0)
 
-    external_blobs = predictor_export_meta.inputs + \
-        predictor_export_meta.outputs
+    external_blobs = predictor_export_meta.inputs + predictor_export_meta.outputs
     for blob in external_blobs:
         zero_fill(blob)
 
@@ -68,17 +67,28 @@ def create_predict_init_net(ws, predictor_export_meta):
 
 def get_comp_name(string, name):
     if name:
-        return string + '_' + name
+        return string + "_" + name
     return string
 
 
+def to_first_match_dict(kv_list):
+    """
+    Construct dict from kv_list
+    """
+    d = {}
+    for item in kv_list:
+        if item.key not in d:
+            d[item.key] = item.value
+    return d
+
+
 def _ProtoMapGet(field, key):
-    '''
+    """
     Given the key, get the value of the repeated field.
     Helper function used by protobuf since it doesn't have map construct
-    '''
+    """
     for v in field:
-        if (v.key == key):
+        if v.key == key:
             return v.value
     return None
 
@@ -120,6 +130,10 @@ def GetApplicationSpecificInfo(meta_net_def, key):
     return _ProtoMapGet(meta_net_def.applicationSpecificInfo, key)
 
 
+def GetApplicationSpecificInfoDict(meta_net_def):
+    return to_first_match_dict(meta_net_def.applicationSpecificInfo)
+
+
 def AddBlobs(meta_net_def, blob_name, blob_def):
     blobs = _ProtoMapGet(meta_net_def.blobs, blob_name)
     if blobs is None:
@@ -129,12 +143,14 @@ def AddBlobs(meta_net_def, blob_name, blob_def):
     for blob in blob_def:
         blobs.append(blob)
 
+
 def ReplaceBlobs(meta_net_def, blob_name, blob_def):
     blobs = _ProtoMapGet(meta_net_def.blobs, blob_name)
     assert blobs is not None, "The blob_name:{} does not exist".format(blob_name)
     del blobs[:]
     for blob in blob_def:
         blobs.append(blob)
+
 
 def AddPlan(meta_net_def, plan_name, plan_def):
     meta_net_def.plans.add(key=plan_name, value=plan_def)
@@ -148,12 +164,28 @@ def SetBlobsOrder(meta_net_def, blobs_order):
     for blob in blobs_order:
         meta_net_def.blobsOrder.append(blob)
 
+
 def SetPreLoadBlobs(meta_net_def, pre_load_blobs):
     for blob in pre_load_blobs:
         meta_net_def.preLoadBlobs.append(blob)
 
+
+def SetRequestOnlyEmbeddings(meta_net_def, request_only_embeddings):
+    for blob in request_only_embeddings:
+        meta_net_def.requestOnlyEmbeddings.append(blob)
+
+
+def GetBlobsOrder(meta_net_def):
+    return meta_net_def.blobsOrder
+
+
 def SetTensorBoundShapes(meta_net_def, tensor_bound_shapes):
     meta_net_def.tensorBoundShapes.CopyFrom(tensor_bound_shapes)
+
+
+def SetAOTConfig(meta_net_def, aot_config):
+    meta_net_def.aotConfig.CopyFrom(aot_config)
+
 
 def GetArgumentByName(net_def, arg_name):
     for arg in net_def.arg:

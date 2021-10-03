@@ -81,7 +81,7 @@ class Q8GEMM : public benchmark::Fixture {
   inline Q8GEMM(uint32_t mr, uint32_t nr, uint32_t np, uint32_t kr)
       : mr_(mr), nr_(nr), np_(np), kr_(kr), mc_(mr), nc_(nr), kc_(kr) {}
 
-  virtual void SetUp(const benchmark::State&) override {
+   void SetUp(const benchmark::State&) override {
     std::random_device randomDevice;
     auto rng = std::mt19937(randomDevice());
     auto s32rng =
@@ -98,6 +98,9 @@ class Q8GEMM : public benchmark::Fixture {
         kcStride() * ncStride() +
         ncStride() * sizeof(int32_t) / sizeof(uint8_t));
     std::fill(w_.begin(), w_.end(), 127);
+    size_t num_zero_points_kernel = (nc_ + (nr_ -1)) & -nr_;
+    std::vector<uint8_t> kernel_zero_points(num_zero_points_kernel, 127);
+    std::vector<float> requantization_scales(num_zero_points_kernel, 0.75f);
     pytorch_pack_q8gemm_w(
         nc(),
         kc(),
@@ -110,15 +113,19 @@ class Q8GEMM : public benchmark::Fixture {
 #endif
         k(),
         b(),
+#if PYTORCH_QNNPACK_RUNTIME_QUANTIZATION
+        kernel_zero_points.data(),
+#endif
         w());
     c_.resize(mc() * nc());
     std::fill(c_.begin(), c_.end(), 0xA5);
 
     quantizationParams_ = pytorch_qnnp_compute_conv_quantization_params(
-        127, 127, 0.75f, 127, 1, 254);
+        127, kernel_zero_points.data(),
+        requantization_scales.data(), 127, 1, 254);
   }
 
-  virtual void TearDown(benchmark::State& state) override {
+   void TearDown(benchmark::State& state) override {
     state.SetItemsProcessed(
         uint64_t(state.iterations()) * 2 * mc() * nc() * kc());
     a_.clear();
@@ -231,7 +238,7 @@ class Q8GEMM_Op : public Q8GEMM {
  public:
   inline Q8GEMM_Op() : Q8GEMM(MR, NR, NP, KR) {}
 
-  virtual void SetUp(const benchmark::State& state) override {
+   void SetUp(const benchmark::State& state) override {
     mc_ = state.range(0);
     nc_ = state.range(1);
     kc_ = state.range(2);
@@ -244,7 +251,7 @@ class Q8GEMM_XZP : public Q8GEMM {
  public:
   inline Q8GEMM_XZP(uint32_t mr, uint32_t nr, uint32_t np, uint32_t kr)
       : Q8GEMM(mr, nr, np, kr) {}
-  virtual void SetUp(const benchmark::State&) override {
+   void SetUp(const benchmark::State&) override {
     std::random_device randomDevice;
     auto rng = std::mt19937(randomDevice());
     auto s32rng =
@@ -281,7 +288,7 @@ class Q8GEMM_XZP : public Q8GEMM {
         pytorch_qnnp_compute_requantization_params(0.75f, 127, 1, 254);
   }
 
-  virtual void TearDown(benchmark::State& state) override {
+   void TearDown(benchmark::State& state) override {
     state.SetItemsProcessed(
         uint64_t(state.iterations()) * 2 * mc() * nc() * kc());
     a_.clear();
@@ -330,7 +337,7 @@ class Q8GEMM_XZP_Op : public Q8GEMM_XZP {
  public:
   inline Q8GEMM_XZP_Op() : Q8GEMM_XZP(MR, NR, NP, KR) {}
 
-  virtual void SetUp(const benchmark::State& state) override {
+   void SetUp(const benchmark::State& state) override {
     mc_ = state.range(0);
     nc_ = state.range(1);
     kc_ = state.range(2);
@@ -344,7 +351,7 @@ class COMPUTE_ROW_SUM_Op : public Q8GEMM_XZP {
  public:
   inline COMPUTE_ROW_SUM_Op() : Q8GEMM_XZP(MR, NR, NP, KR) {}
 
-  virtual void SetUp(const benchmark::State& state) override {
+   void SetUp(const benchmark::State& state) override {
     mc_ = state.range(0);
     nc_ = state.range(1);
     kc_ = state.range(2);
@@ -352,7 +359,7 @@ class COMPUTE_ROW_SUM_Op : public Q8GEMM_XZP {
     Q8GEMM_XZP::SetUp(state);
   }
 
-  virtual void TearDown(benchmark::State& state) override {
+   void TearDown(benchmark::State& state) override {
     state.SetItemsProcessed(uint64_t(state.iterations()) * (mc() * kc()));
     a_.clear();
     k_.clear();
@@ -365,7 +372,7 @@ class COMPUTE_ROW_SUM_Op : public Q8GEMM_XZP {
 #if PYTORCH_QNNPACK_BENCHMARK_GEMMLOWP
 class GEMMLOWP : public benchmark::Fixture {
  public:
-  virtual void SetUp(const benchmark::State& state) override {
+   void SetUp(const benchmark::State& state) override {
     const uint_fast32_t seed =
         std::chrono::system_clock::now().time_since_epoch().count();
     auto rng =
@@ -387,7 +394,7 @@ class GEMMLOWP : public benchmark::Fixture {
     threadingContext.set_max_num_threads(1);
   }
 
-  virtual void TearDown(benchmark::State& state) override {
+   void TearDown(benchmark::State& state) override {
     state.SetItemsProcessed(
         uint64_t(state.iterations()) * 2 * mc() * nc() * kc());
     a_.clear();
@@ -617,6 +624,7 @@ BENCHMARK_TEMPLATE_F(Q8GEMM_L1, 4x8__aarch32_neon, 4, 8, 8, 1)
         w(),
         c(),
         mr() * sizeof(uint8_t),
+        0,
         quantizationParams());
   }
 }
@@ -626,7 +634,8 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMM_Op, 4x8__aarch32_neon, 4, 8, 8, 1)
   for (auto _ : state) {
     for (uint32_t m = 0; m < mc(); m += mr()) {
       const uint32_t mrr = min(mc() - m, mr());
-      for (uint32_t n = 0; n < nc(); n += nr()) {
+      for (uint32_t n = 0, channel_offset = 0; n < nc();
+          n += nr(), channel_offset += nr()) {
         const uint32_t nrr = min(nc() - n, nr());
         pytorch_q8gemm_ukernel_4x8__aarch32_neon(
             mrr,
@@ -637,6 +646,7 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMM_Op, 4x8__aarch32_neon, 4, 8, 8, 1)
             w() + n * (kcStride() * sizeof(uint8_t) + sizeof(int32_t)),
             c() + m * nc() + n,
             nc() * sizeof(uint8_t),
+            channel_offset,
             quantizationParams());
       }
     }
@@ -714,6 +724,7 @@ BENCHMARK_TEMPLATE_F(Q8GEMM_L1, 8x8__aarch64_neon, 8, 8, 8, 1)
         w(),
         c(),
         mr() * sizeof(uint8_t),
+        0,
         quantizationParams());
   }
 }
@@ -723,7 +734,8 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMM_Op, 8x8__aarch64_neon, 8, 8, 8, 1)
   for (auto _ : state) {
     for (uint32_t m = 0; m < mc(); m += mr()) {
       const uint32_t mrr = min(mc() - m, mr());
-      for (uint32_t n = 0; n < nc(); n += nr()) {
+      for (uint32_t n = 0, channel_offset = 0; n < nc();
+          n += nr(), channel_offset += nr()) {
         const uint32_t nrr = min(nc() - n, nr());
         pytorch_q8gemm_ukernel_8x8__aarch64_neon(
             mrr,
@@ -734,6 +746,7 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMM_Op, 8x8__aarch64_neon, 8, 8, 8, 1)
             w() + n * (kcStride() * sizeof(uint8_t) + sizeof(int32_t)),
             c() + m * nc() + n,
             nc() * sizeof(uint8_t),
+            channel_offset,
             quantizationParams());
       }
     }
@@ -762,6 +775,7 @@ BENCHMARK_TEMPLATE_F(Q8GEMM_L1, 4x8__neon, 4, 8, 8, 1)
         w(),
         c(),
         mr() * sizeof(uint8_t),
+        0,
         quantizationParams());
   }
 }
@@ -778,6 +792,7 @@ BENCHMARK_TEMPLATE_F(Q8GEMM_L1, 8x8__neon, 8, 8, 8, 1)
         w(),
         c(),
         mr() * sizeof(uint8_t),
+        0,
         quantizationParams());
   }
 }
@@ -787,7 +802,8 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMM_Op, 4x8__neon, 4, 8, 8, 1)
   for (auto _ : state) {
     for (uint32_t m = 0; m < mc(); m += mr()) {
       const uint32_t mrr = min(mc() - m, mr());
-      for (uint32_t n = 0; n < nc(); n += nr()) {
+      for (uint32_t n = 0, channel_offset = 0; n < nc();
+          n += nr(), channel_offset += nr()) {
         const uint32_t nrr = min(nc() - n, nr());
         pytorch_q8gemm_ukernel_4x8__neon(
             mrr,
@@ -798,6 +814,7 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMM_Op, 4x8__neon, 4, 8, 8, 1)
             w() + n * (kcStride() * sizeof(uint8_t) + sizeof(int32_t)),
             c() + m * nc() + n,
             nc() * sizeof(uint8_t),
+            channel_offset,
             quantizationParams());
       }
     }
@@ -814,7 +831,8 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMM_Op, 8x8__neon, 8, 8, 8, 1)
   for (auto _ : state) {
     for (uint32_t m = 0; m < mc(); m += mr()) {
       const uint32_t mrr = min(mc() - m, mr());
-      for (uint32_t n = 0; n < nc(); n += nr()) {
+      for (uint32_t n = 0, channel_offset = 0; n < nc();
+          n += nr(), channel_offset += nr()) {
         const uint32_t nrr = min(nc() - n, nr());
         pytorch_q8gemm_ukernel_8x8__neon(
             mrr,
@@ -825,6 +843,7 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMM_Op, 8x8__neon, 8, 8, 8, 1)
             w() + n * (kcStride() * sizeof(uint8_t) + sizeof(int32_t)),
             c() + m * nc() + n,
             nc() * sizeof(uint8_t),
+            channel_offset,
             quantizationParams());
       }
     }
@@ -933,6 +952,7 @@ BENCHMARK_TEMPLATE_F(Q8GEMM_L1, 2x4c8__sse2, 2, 4, 1, 8)
         w(),
         c(),
         mr() * sizeof(uint8_t),
+        0,
         quantizationParams());
   }
 }
@@ -949,6 +969,7 @@ BENCHMARK_TEMPLATE_F(Q8GEMM_L1, 4x4c2__sse2, 4, 4, 4, 2)
         w(),
         c(),
         mr() * sizeof(uint8_t),
+        0,
         quantizationParams());
   }
 }
@@ -958,7 +979,8 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMM_Op, 2x4c8__sse2, 2, 4, 1, 8)
   for (auto _ : state) {
     for (uint32_t m = 0; m < mc(); m += mr()) {
       const uint32_t mrr = min(mc() - m, mr());
-      for (uint32_t n = 0; n < nc(); n += nr()) {
+      for (uint32_t n = 0, channel_offset = 0; n < nc();
+          n += nr(), channel_offset += nr()) {
         const uint32_t nrr = min(nc() - n, nr());
         pytorch_q8gemm_ukernel_2x4c8__sse2(
             mrr,
@@ -969,6 +991,7 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMM_Op, 2x4c8__sse2, 2, 4, 1, 8)
             w() + n * (kcStride() * sizeof(uint8_t) + sizeof(int32_t)),
             c() + m * nc() + n,
             nc() * sizeof(uint8_t),
+            channel_offset,
             quantizationParams());
       }
     }
@@ -986,7 +1009,8 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMM_Op, 4x4c2__sse2, 4, 4, 4, 2)
   for (auto _ : state) {
     for (uint32_t m = 0; m < mc(); m += mr()) {
       const uint32_t mrr = min(mc() - m, mr());
-      for (uint32_t n = 0; n < nc(); n += nr()) {
+      for (uint32_t n = 0, channel_offset = 0; n < nc();
+          n += nr(), channel_offset += nr()) {
         const uint32_t nrr = min(nc() - n, nr());
         pytorch_q8gemm_ukernel_4x4c2__sse2(
             mrr,
@@ -997,6 +1021,7 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMM_Op, 4x4c2__sse2, 4, 4, 4, 2)
             w() + n * (kcStride() * sizeof(uint8_t) + sizeof(int32_t)),
             c() + m * nc() + n,
             nc() * sizeof(uint8_t),
+            channel_offset,
             quantizationParams());
       }
     }

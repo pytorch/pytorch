@@ -751,15 +751,28 @@ bool CudnnConvOp::DoRunWithType() {
       }
     } else {
       // Get the convolution algorithm based on the workspace limit.
-      CUDNN_ENFORCE(cudnnGetConvolutionForwardAlgorithm(
+      constexpr int nalgo = CUDNN_CONVOLUTION_FWD_ALGO_COUNT;
+      int valid_algos;
+      cudnnConvolutionFwdAlgoPerf_t algos[nalgo];
+      CUDNN_ENFORCE(cudnnGetConvolutionForwardAlgorithm_v7(
           cudnn_wrapper_.inline_cudnn_handle(),
           bottom_desc_,
           filter_desc_,
           conv_desc_,
           top_desc_,
-          CUDNN_CONVOLUTION_FWD_SPECIFY_WORKSPACE_LIMIT,
-          cudnn_ws_nbytes_limit_,
-          &algo_));
+          nalgo,
+          &valid_algos,
+          algos));
+      bool found = false;
+      for (int i = 0; i < valid_algos; i++) {
+        auto a = algos[i];
+        if (a.memory <= cudnn_ws_nbytes_limit_) {
+          algo_ = a.algo;
+          found = true;
+          break;
+        }
+      }
+      CAFFE_ENFORCE(found, "Unable to find algorithms for cuDNN forward");
     }
     for (int step = 0; step < 2; ++step) {
       cudnnStatus_t _status = cudnnGetConvolutionForwardWorkspaceSize(
@@ -1164,15 +1177,28 @@ bool CudnnConvGradientOp::DoRunWithType() {
       }
     } else {
       // choose backward algorithm for filter
-      CUDNN_ENFORCE(cudnnGetConvolutionBackwardFilterAlgorithm(
+      constexpr int nalgo = CUDNN_CONVOLUTION_BWD_FILTER_ALGO_COUNT;
+      int valid_algos;
+      cudnnConvolutionBwdFilterAlgoPerf_t algos[nalgo];
+      CUDNN_ENFORCE(cudnnGetConvolutionBackwardFilterAlgorithm_v7(
           cudnn_wrapper_.inline_cudnn_handle(),
           bottom_desc_,
           top_desc_,
           bwd_filter_conv_desc_,
           filter_desc_,
-          CUDNN_CONVOLUTION_BWD_FILTER_SPECIFY_WORKSPACE_LIMIT,
-          cudnn_ws_nbytes_limit_,
-          &bwd_filter_algo_));
+          nalgo,
+          &valid_algos,
+          algos));
+      bool found = false;
+      for (int i = 0; i < valid_algos; i++) {
+        auto a = algos[i];
+        if (a.memory <= cudnn_ws_nbytes_limit_) {
+          bwd_filter_algo_ = a.algo;
+          found = true;
+          break;
+        }
+      }
+      CAFFE_ENFORCE(found, "Unable to find algorithms for cuDNN backward filter");
     }
     // Pick dX algo if needed
     if (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2))) {
@@ -1252,15 +1278,28 @@ bool CudnnConvGradientOp::DoRunWithType() {
               bwd_data_conv_desc_, kComputeTypesToTry[bestAlgoIndex]);
         }
       } else {
-        CUDNN_ENFORCE(cudnnGetConvolutionBackwardDataAlgorithm(
+        constexpr int nalgo = CUDNN_CONVOLUTION_BWD_DATA_ALGO_COUNT;
+        int valid_algos;
+        cudnnConvolutionBwdDataAlgoPerf_t algos[nalgo];
+        CUDNN_ENFORCE(cudnnGetConvolutionBackwardDataAlgorithm_v7(
             cudnn_wrapper_.inline_cudnn_handle(),
             filter_desc_,
             top_desc_,
             bwd_data_conv_desc_,
             bottom_desc_,
-            CUDNN_CONVOLUTION_BWD_DATA_SPECIFY_WORKSPACE_LIMIT,
-            cudnn_ws_nbytes_limit_,
-            &bwd_data_algo_));
+            nalgo,
+            &valid_algos,
+            algos));
+        bool found = false;
+        for (int i = 0; i < valid_algos; i++) {
+          auto a = algos[i];
+          if (a.memory <= cudnn_ws_nbytes_limit_) {
+            bwd_data_algo_ = a.algo;
+            found = true;
+            break;
+          }
+        }
+        CAFFE_ENFORCE(found, "Unable to find algorithms for cuDNN backward data");
       }
     }
 

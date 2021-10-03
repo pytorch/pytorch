@@ -70,7 +70,6 @@ Operation createPythonOperation(const Node* op_) {
     } catch (py::error_already_set& e) {
       throw std::runtime_error(e.what());
     }
-    return 0;
   };
 }
 

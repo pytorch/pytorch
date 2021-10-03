@@ -4,7 +4,9 @@ from torch import ops
 import torch.jit as jit
 import glob
 import os
-import sys
+
+from torch.testing._internal.common_utils import TestCase, run_tests
+
 
 def get_custom_class_library_path():
     library_filename = glob.glob("build/*custom_class*")
@@ -19,17 +21,7 @@ def test_equality(f, cmp_key):
     obj2 = jit.script(f)()
     return (cmp_key(obj1), cmp_key(obj2))
 
-class TestCustomOperators(unittest.TestCase):
-    if sys.version_info < (3, 2):
-        # assertRegexpMatches renamed to assertRegex in 3.2
-        assertRegex = unittest.TestCase.assertRegexpMatches
-        # assertRaisesRegexp renamed to assertRaisesRegex in 3.2
-        assertRaisesRegex = unittest.TestCase.assertRaisesRegexp
-
-    if sys.version_info < (3, 5):
-        # assertNotRegexpMatches renamed to assertNotRegex in 3.5
-        assertNotRegex = unittest.TestCase.assertNotRegexpMatches
-
+class TestCustomOperators(TestCase):
     def setUp(self):
         ops.load_library(get_custom_class_library_path())
 
@@ -88,4 +80,4 @@ class TestCustomOperators(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    run_tests()

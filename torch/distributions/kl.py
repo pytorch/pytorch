@@ -1,6 +1,7 @@
 import math
 import warnings
 from functools import total_ordering
+from typing import Type, Dict, Callable, Tuple
 
 import torch
 from torch._six import inf
@@ -9,6 +10,7 @@ from .bernoulli import Bernoulli
 from .beta import Beta
 from .binomial import Binomial
 from .categorical import Categorical
+from .cauchy import Cauchy
 from .continuous_bernoulli import ContinuousBernoulli
 from .dirichlet import Dirichlet
 from .distribution import Distribution
@@ -29,10 +31,10 @@ from .pareto import Pareto
 from .poisson import Poisson
 from .transformed_distribution import TransformedDistribution
 from .uniform import Uniform
-from .utils import _sum_rightmost
+from .utils import _sum_rightmost, euler_constant as _euler_gamma
 
 _KL_REGISTRY = {}  # Source of truth mapping a few general (type, type) pairs to functions.
-_KL_MEMOIZE = {}  # Memoized version mapping many specific (type, type) pairs to functions.
+_KL_MEMOIZE: Dict[Tuple[Type, Type], Callable] = {}  # Memoized version mapping many specific (type, type) pairs to functions.
 
 
 def register_kl(type_p, type_q):
@@ -102,8 +104,10 @@ def _dispatch_kl(type_p, type_q):
     if not matches:
         return NotImplemented
     # Check that the left- and right- lexicographic orders agree.
-    left_p, left_q = min(_Match(*m) for m in matches).types
-    right_q, right_p = min(_Match(*reversed(m)) for m in matches).types
+    # mypy isn't smart enough to know that _Match implements __lt__
+    # see: https://github.com/python/typing/issues/760#issuecomment-710670503
+    left_p, left_q = min(_Match(*m) for m in matches).types  # type: ignore[type-var]
+    right_q, right_p = min(_Match(*reversed(m)) for m in matches).types  # type: ignore[type-var]
     left_fun = _KL_REGISTRY[left_p, left_q]
     right_fun = _KL_REGISTRY[right_p, right_q]
     if left_fun is not right_fun:
@@ -169,8 +173,6 @@ def kl_divergence(p, q):
 ################################################################################
 # KL Divergence Implementations
 ################################################################################
-
-_euler_gamma = 0.57721566490153286060
 
 # Same distributions
 
@@ -435,10 +437,7 @@ def _kl_transformed_transformed(p, q):
         raise NotImplementedError
     if p.event_shape != q.event_shape:
         raise NotImplementedError
-    # extra_event_dim = len(p.event_shape) - len(p.base_dist.event_shape)
-    extra_event_dim = len(p.event_shape)
-    base_kl_divergence = kl_divergence(p.base_dist, q.base_dist)
-    return _sum_rightmost(base_kl_divergence, extra_event_dim)
+    return kl_divergence(p.base_dist, q.base_dist)
 
 
 @register_kl(Uniform, Uniform)
@@ -796,3 +795,11 @@ def _kl_independent_independent(p, q):
         raise NotImplementedError
     result = kl_divergence(p.base_dist, q.base_dist)
     return _sum_rightmost(result, p.reinterpreted_batch_ndims)
+
+
+@register_kl(Cauchy, Cauchy)
+def _kl_cauchy_cauchy(p, q):
+    # From https://arxiv.org/abs/1905.10965
+    t1 = ((p.scale + q.scale).pow(2) + (p.loc - q.loc).pow(2)).log()
+    t2 = (4 * p.scale * q.scale).log()
+    return t1 - t2

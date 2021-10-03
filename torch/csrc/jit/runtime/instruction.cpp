@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <cstring>
 #include <iostream>
@@ -31,6 +32,7 @@ const char* OpInfo(OpCode op) {
 #define OP_INFO(x, info) \
   case x:                \
     return info;
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     FORALL_OPCODES(OP_INFO)
 #undef OP_INFO
   }
@@ -54,7 +56,8 @@ std::ostream& operator<<(std::ostream& out, Instruction inst) {
   return out;
 }
 
-static constexpr char* strOpCode[] = {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+static constexpr const char* strOpCode[] = {
 #define STR_OP(x, _) #x,
     FORALL_OPCODES(STR_OP)
 #undef STR_OP
@@ -62,7 +65,7 @@ static constexpr char* strOpCode[] = {
 
 OpCode parseOpCode(const char* str) {
   const int n = sizeof(strOpCode) / sizeof(strOpCode[0]);
-  for (int i = 0; i < n; ++i) {
+  for (const auto i : c10::irange(n)) {
     if (strcmp(strOpCode[i], str) == 0)
       return (OpCode)i;
   }
@@ -71,11 +74,12 @@ OpCode parseOpCode(const char* str) {
 
 bool isOpSupportedInMobile(OpCode op) {
   // clang-format off
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   static constexpr OpCode supported_ops_in_mobile[] {
       OP, OPN, LOAD, MOVE, STOREN, STORE, DROP, DROPR, LOADC, JF, JMP, LOOP,
       RET, GET_ATTR, SET_ATTR, LIST_CONSTRUCT, TUPLE_CONSTRUCT, WARN,
       INTERFACE_CALL, LIST_UNPACK, TUPLE_SLICE, DICT_CONSTRUCT,
-      NAMED_TUPLE_CONSTRUCT
+      NAMED_TUPLE_CONSTRUCT, CREATE_OBJECT, ISINSTANCE
   };
   // clang-format on
 

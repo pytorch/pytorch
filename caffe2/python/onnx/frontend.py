@@ -6,26 +6,22 @@
 To run this, you will need to have Caffe2 installed as well.
 """
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
+
+
+
+import collections
 import itertools
 import logging
 import re
 
 from caffe2.python import core as caffe2_core
-from caffe2.python.compatibility import container_abcs
-from caffe2.proto import caffe2_legacy_pb2
-from enum import Enum
-from onnx import (defs, checker, helper, numpy_helper, mapping,
-                  ModelProto, GraphProto, NodeProto, AttributeProto, TensorProto, OperatorSetIdProto)
-from onnx.helper import make_tensor, make_tensor_value_info, make_attribute, make_model
+from onnx import (checker, helper, numpy_helper, mapping,
+                  GraphProto, NodeProto, TensorProto, OperatorSetIdProto)
+from onnx.helper import make_tensor_value_info, make_model
 import numpy as np
 
 from caffe2.python.onnx.helper import c2_native_run_net
-from caffe2.python.onnx.error import Unsupported
 
 import caffe2.python._import_c_extension as C
 
@@ -57,7 +53,7 @@ class Caffe2Frontend(object):
     }
 
     # caffe2 arguments that are completely removed in onnx
-    _blacklist_caffe2_args = {
+    _blocklist_caffe2_args = {
         'order': {b'NCHW'},
         'cudnn_exhaustive_search': {0, 1},
         'exhaustive_search': {0, 1},
@@ -107,8 +103,8 @@ class Caffe2Frontend(object):
         else:
             raise ValueError('Could not find data field in arg: {}'.format(arg))
 
-        if name in cls._blacklist_caffe2_args:
-            assert value in cls._blacklist_caffe2_args[arg.name]
+        if name in cls._blocklist_caffe2_args:
+            assert value in cls._blocklist_caffe2_args[arg.name]
             return None
 
         return helper.make_attribute(name, value)
@@ -156,7 +152,7 @@ class Caffe2Frontend(object):
         const_tensors = []
         if isinstance(nodes, tuple):
             nodes, const_tensors = nodes
-        if not isinstance(nodes, container_abcs.Iterable):
+        if not isinstance(nodes, collections.abc.Iterable):
             nodes = [nodes]
         return nodes, const_tensors
 

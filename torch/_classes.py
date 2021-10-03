@@ -9,10 +9,12 @@ class _ClassNamespace(types.ModuleType):
     def __getattr__(self, attr):
         proxy = torch._C._get_custom_class_python_wrapper(self.name, attr)
         if proxy is None:
-            raise RuntimeError('Class {}.{} not registered!'.format(self.name, attr))
+            raise RuntimeError(f'Class {self.name}.{attr} not registered!')
         return proxy
 
 class _Classes(types.ModuleType):
+    __file__ = '_classes.py'
+
     def __init__(self):
         super(_Classes, self).__init__('torch.classes')
 
@@ -40,7 +42,7 @@ class _Classes(types.ModuleType):
         ``torch.classes.loaded_libraries`` attribute, a set that may be inspected
         for the paths of all libraries loaded using this function.
 
-        Arguments:
+        Args:
             path (str): A path to a shared library to load.
         """
         torch.ops.load_library(path)

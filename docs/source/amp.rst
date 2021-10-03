@@ -7,15 +7,16 @@ Automatic Mixed Precision package - torch.cuda.amp
 .. automodule:: torch.cuda.amp
 .. currentmodule:: torch.cuda.amp
 
-``torch.cuda.amp`` provides convenience methods for mixed precision,
+:class:`torch.cuda.amp` and :class:`torch` provide convenience methods for mixed precision,
 where some operations use the ``torch.float32`` (``float``) datatype and other operations
 use ``torch.float16`` (``half``). Some ops, like linear layers and convolutions,
 are much faster in ``float16``. Other ops, like reductions, often require the dynamic
 range of ``float32``.  Mixed precision tries to match each op to its appropriate datatype.
 
-Ordinarily, "automatic mixed precision training" uses :class:`torch.cuda.amp.autocast` and
-:class:`torch.cuda.amp.GradScaler` together, as shown in the :ref:`Automatic Mixed Precision examples<amp-examples>`.
-However, :class:`autocast` and :class:`GradScaler` are modular, and may be used separately if desired.
+Ordinarily, "automatic mixed precision training" uses :class:`torch.autocast` and
+:class:`torch.cuda.amp.GradScaler` together, as shown in the :ref:`Automatic Mixed Precision examples<amp-examples>`
+and `Automatic Mixed Precision recipe <https://pytorch.org/tutorials/recipes/recipes/amp_recipe.html>`_.
+However, :class:`torch.autocast` and :class:`GradScaler` are modular, and may be used separately if desired.
 
 .. contents:: :local:
 
@@ -23,6 +24,12 @@ However, :class:`autocast` and :class:`GradScaler` are modular, and may be used 
 
 Autocasting
 ^^^^^^^^^^^
+.. currentmodule:: torch
+
+.. autoclass:: autocast
+    :members:
+
+.. currentmodule:: torch.cuda.amp
 
 .. autoclass:: autocast
     :members:
@@ -74,8 +81,8 @@ but ``a.addmm_(b, c)`` and ``a.addmm(b, c, out=d)`` cannot.
 For best performance and stability, prefer out-of-place ops in autocast-enabled
 regions.
 
-Ops called with an explicit `dtype=...` argument are not eligible,
-and will produce output that respects the `dtype` argument.
+Ops called with an explicit ``dtype=...`` argument are not eligible,
+and will produce output that respects the ``dtype`` argument.
 
 Op-Specific Behavior
 --------------------
@@ -103,17 +110,21 @@ Ops that can autocast to ``float16``
 ``baddbmm``,
 ``bmm``,
 ``chain_matmul``,
+``multi_dot``,
 ``conv1d``,
 ``conv2d``,
 ``conv3d``,
 ``conv_transpose1d``,
 ``conv_transpose2d``,
 ``conv_transpose3d``,
+``GRUCell``,
 ``linear``,
+``LSTMCell``,
 ``matmul``,
 ``mm``,
 ``mv``,
-``prelu``
+``prelu``,
+``RNNCell``
 
 Ops that can autocast to ``float32``
 """"""""""""""""""""""""""""""""""""
@@ -136,7 +147,6 @@ Ops that can autocast to ``float32``
 ``erfinv``,
 ``exp``,
 ``expm1``,
-``gelu``,
 ``group_norm``,
 ``hinge_embedding_loss``,
 ``kl_div``,
@@ -182,11 +192,11 @@ autocast casts all inputs to ``float32`` and runs the op in ``float32``.
 ``addcmul``,
 ``atan2``,
 ``bilinear``,
-``cat``,
 ``cross``,
 ``dot``,
-``equal``,
-``stack``,
+``grid_sample``,
+``index_put``,
+``scatter_add``,
 ``tensordot``
 
 Some ops not listed here (e.g., binary ops like ``add``) natively promote

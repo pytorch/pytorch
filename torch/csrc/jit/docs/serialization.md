@@ -3,19 +3,24 @@
 This document explains the TorchScript serialization format, and the anatomy
 of a call to `torch::jit::save()` or `torch::jit::load()`.
 
-  - [Overview](#overview)
-    - [Design Notes](#design-notes)
-  - [`code/`: How code is serialized](#code-how-code-is-serialized)
-    - [Printing code objects as Python source](#printing-code-objects-as-python-source)
-    - [Placing the source code in the archive](#placing-the-source-code-in-the-archive)
-  - [`data.pkl`: How data is serialized](#datapkl-how-data-is-serialized)
-  - [`tensors/`: How tensors are serialized](#tensors-how-tensors-are-serialized)
-  - [`constants.pkl`: Constants in code](#constantspkl-constants-in-code)
-  - [`torch:jit::load()`](#torchjitload)
-  - [`__getstate__` and `__setstate__`](#getstate-and-setstate)
-  - [Appendix: `CompilationUnit` and code object ownership](#appendix-compilationunit-and-code-object-ownership)
-    - [`CompilationUnit` ownership semantics](#compilationunit-ownership-semantics)
-    - [Code object naming](#code-object-naming)
+<!-- toc -->
+
+- [Overview](#overview)
+  - [Design Notes](#design-notes)
+- [`code/`: How code is serialized](#code-how-code-is-serialized)
+  - [Printing code objects as Python source](#printing-code-objects-as-python-source)
+  - [Placing the source code in the archive](#placing-the-source-code-in-the-archive)
+- [How data is serialized](#how-data-is-serialized)
+  - [`data.pkl`: How module object state is serialized](#datapkl-how-module-object-state-is-serialized)
+  - [`data/`: How tensors are serialized](#data-how-tensors-are-serialized)
+- [`constants.pkl`: Constants in code](#constantspkl-constants-in-code)
+- [`torch:jit::load()`](#torchjitload)
+- [`__getstate__` and `__setstate__`](#__getstate__-and-__setstate__)
+- [Appendix: `CompilationUnit` and code object ownership](#appendix-compilationunit-and-code-object-ownership)
+  - [`CompilationUnit` ownership semantics](#compilationunit-ownership-semantics)
+  - [Code object naming](#code-object-naming)
+
+<!-- tocstop -->
 
 ## Overview
 
@@ -37,7 +42,7 @@ $ tree model/
 │   │   ├── bar.py.debug_pkl
 ├── data.pkl
 ├── constants.pkl
-└── tensors/
+└── data/
     ├── 0
     └── 1
 ```
@@ -111,7 +116,7 @@ serialized as well.
 `PythonPrint` works by walking a `Graph` (the IR representation of either a
 `ClassType`'s method or raw `Function`) and emitting Python code that
 corresponds to it. The rules for emitting Python code are mostly
-straightforward uninteresting. There are some extra pieces of information
+straightforward and uninteresting. There are some extra pieces of information
 that `PythonPrint` tracks, however:
 
 **Class dependencies**. While walking the graph, `PythonPrint` keeps track of
@@ -119,11 +124,6 @@ what classes are used in the graph and adds them to a list of classes that
 the current code object depends on. For example, if we are printing a
 `Module`, it will depend on its submodules, as well as any classes used in
 its methods or attributes.
-
-This information is used to write an `import` statement at the top of the
-printed source, which tells the importer that they need to go compile those
-dependencies (covered more in the "Code layout and qualified naming" section
-below).
 
 **Uses of tensor constants**. Most constants are inlined as literals, like
 strings or ints. But since tensors are potentially very large, when
@@ -216,7 +216,7 @@ That's about it; there's some additional logic to make sure that within a
 file, we place the classes in reverse-dependency order so that we compile the
 "leaf" dependencies before things that depend on them.
 
-## `data.pkl`: How data is serialized
+## How data is serialized
 
 A model is really a top-level `ScriptModule` with any number of submodules,
 parameters, attributes, and so on. We implement a subset of the Pickle format
@@ -239,6 +239,8 @@ necessary for pickling a module object.
 * **eager mode save** - `torch.save()` already produces a `pickle` archive, so
  doing the same with attributes avoids introducing yet another format
 
+### `data.pkl`: How module object state is serialized
+
 All data is written into the `data.pkl` file with the exception of tensors
 (see [the tensor section](#tensors-How-tensors-are-serialized) below).
 "Data" means all parts of the module object state, like attributes,
@@ -248,7 +250,7 @@ PyTorch functions defined in [torch/jit/_pickle.py](../../../jit/_pickle.py)
 are used to mark special data types, such as this tensor table index or
 specialized lists.
 
-## `tensors/`: How tensors are serialized
+### `data/`: How tensors are serialized
 
 During export a list of all the tensors in a model is created. Tensors can
 come from either module parameters or attributes of Tensor type.
@@ -372,7 +374,7 @@ object around in C++, all its code will stay around and methods will be
 invokable.
 
 **`Module`**: A view over a `ClassType` and the `Object` that holds its state.
-Also responsible for turning unqualified names (e.g. `foward()`) into
+Also responsible for turning unqualified names (e.g. `forward()`) into
 qualified ones for lookup in the owning `CompilationUnit` (e.g.
 `__torch__.MyModule.forward`). Owns the `Object`, which transitively owns the
 `CompilationUnit`.

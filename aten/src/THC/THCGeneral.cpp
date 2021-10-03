@@ -1,10 +1,11 @@
 #include <THC/THCGeneral.h>
 #include <TH/TH.h>
 #include <THC/THCAllocator.h>
-#include <THC/THCCachingHostAllocator.h>
 #include <THC/THCGeneral.hpp>
 
+#include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAStream.h>
+#include <ATen/cuda/CachingHostAllocator.h>
 #include <ATen/cuda/CUDAContext.h>
 
 #include <c10/cuda/CUDACachingAllocator.h>
@@ -39,13 +40,11 @@ THCState* THCState_alloc(void)
 
 void THCudaInit(THCState* state)
 {
-  if (!state->cudaHostAllocator) {
-    state->cudaHostAllocator = getTHCCachingHostAllocator();
-  }
-
-  int numDevices = 0;
-  THCudaCheck(cudaGetDeviceCount(&numDevices));
+  // We want to throw if there are no GPUs
+  int numDevices = static_cast<int>(c10::cuda::device_count_ensure_non_zero());
   state->numDevices = numDevices;
+
+  c10::cuda::CUDACachingAllocator::init(numDevices);
 
   int device = 0;
   THCudaCheck(cudaGetDevice(&device));
@@ -105,9 +104,7 @@ void THCudaShutdown(THCState* state)
 
   free(state->resourcesPerDevice);
   c10::cuda::CUDACachingAllocator::emptyCache();
-  if (state->cudaHostAllocator == getTHCCachingHostAllocator()) {
-    THCCachingHostAllocator_emptyCache();
-  }
+  at::cuda::CachingHostAllocator_emptyCache();
 
   THCudaCheck(cudaSetDevice(prevDev));
 }
@@ -143,11 +140,6 @@ int THCState_getPeerToPeerAccess(THCState* state, int dev, int devToAccess)
     THCudaCheck(cudaSetDevice(prevDev));
   }
   return state->p2pAccessEnabled[dev][devToAccess];
-}
-
-c10::Allocator* THCState_getCudaHostAllocator(THCState* state)
-{
-  return state->cudaHostAllocator;
 }
 
 THCCudaResourcesPerDevice* THCState_getDeviceResourcePtr(
@@ -216,7 +208,7 @@ void __THCublasCheck(cublasStatus_t status, const char *file, const int line)
         errmsg = "an absent device architectural feature is required";
         break;
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
       case CUBLAS_STATUS_MAPPING_ERROR:
         errmsg = "an access to GPU memory space failed";
         break;
@@ -286,53 +278,6 @@ void __THCusparseCheck(cusparseStatus_t status, const char *file, const int line
 
     _THError(file, line, "cusparse runtime error : %s", errmsg);
   }
-}
-
-void* THCudaMalloc(THCState *state, size_t size)
-{
-  return c10::cuda::CUDACachingAllocator::raw_alloc(size);
-}
-
-void THCudaFree(THCState *state, void* ptr) {
-  c10::cuda::CUDACachingAllocator::raw_delete(ptr);
-}
-
-at::DataPtr THCudaHostAlloc(THCState *state, size_t size)
-{
-  THCudaCheck(cudaGetLastError());
-  c10::Allocator* allocator = state->cudaHostAllocator;
-  return allocator->allocate(size);
-}
-
-void THCudaHostRecord(THCState *state, void *ptr) {
-  if (state->cudaHostAllocator == getTHCCachingHostAllocator()) {
-    THCCachingHostAllocator_recordEvent(ptr, at::cuda::getCurrentCUDAStream());
-  }
-}
-
-cudaError_t THCudaMemGetInfo(THCState *state,  size_t* freeBytes, size_t* totalBytes, size_t* largestBlock)
-{
-  size_t cachedBytes = 0;
-
-  *largestBlock = 0;
-  /* get info from CUDA first */
-  cudaError_t ret = cudaMemGetInfo(freeBytes, totalBytes);
-  if (ret!= cudaSuccess)
-    return ret;
-
-  int device;
-  ret = cudaGetDevice(&device);
-  if (ret!= cudaSuccess)
-    return ret;
-
-  /* not always true - our optimistic guess here */
-  *largestBlock = *freeBytes;
-
-  c10::cuda::CUDACachingAllocator::cacheInfo(device, &cachedBytes, largestBlock);
-
-  /* Adjust resulting free bytes number. largesBlock unused for now */
-  *freeBytes += cachedBytes;
-  return cudaSuccess;
 }
 
 #undef MIN_GLOBAL_SCRATCH_SPACE_PER_SM_STREAM

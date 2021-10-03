@@ -37,7 +37,12 @@ Tensor _bincount_cpu_template(
 
   const input_t* self_p = self.data_ptr<input_t>();
   if (has_weights) {
-    output = native::zeros({nbins}, weights.options());
+    output = native::zeros(
+        {nbins},
+        optTypeMetaToScalarType(weights.options().dtype_opt()),
+        weights.options().layout_opt(),
+        weights.options().device_opt(),
+        weights.options().pinned_memory_opt());
     weights_t* output_p = output.data_ptr<weights_t>();
     const weights_t* weights_p = weights.data_ptr<weights_t>();
     for (int64_t i = 0; i < self_size; i++) {
@@ -55,7 +60,11 @@ Tensor _bincount_cpu_template(
 } // namespace
 
 Tensor
-_bincount_cpu(const Tensor& self, const Tensor& weights, int64_t minlength) {
+_bincount_cpu(const Tensor& self, const c10::optional<Tensor>& weights_opt, int64_t minlength) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> weights_maybe_owned = at::borrow_from_optional_tensor(weights_opt);
+  const Tensor& weights = *weights_maybe_owned;
+
   return AT_DISPATCH_INTEGRAL_TYPES(self.scalar_type(), "bincount_cpu", [&] {
     const auto scalar = weights.scalar_type();
     if (scalar == ScalarType::Undefined || scalar == ScalarType::Float)

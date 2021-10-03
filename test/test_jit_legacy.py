@@ -1,10 +1,9 @@
 import sys
-sys.argv.append("--ge_config=legacy")
-from test_jit import *
+sys.argv.append("--jit_executor=legacy")
+from test_jit import *  # noqa: F403
 
 if __name__ == '__main__':
     run_tests()
-    if not PY2:
-        import test_jit_py3
-        suite = unittest.findTestCases(test_jit_py3)
-        unittest.TextTestRunner().run(suite)
+    import test_jit_py3
+    suite = unittest.findTestCases(test_jit_py3)
+    unittest.TextTestRunner().run(suite)

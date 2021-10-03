@@ -1,15 +1,11 @@
 #pragma once
 
-#include <THC/THCGeneral.h>
-#include <THC/THCDeviceUtils.cuh>
-
 #include <ATen/ATen.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/KernelUtils.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 
@@ -46,25 +42,25 @@ __global__ void im2col_kernel(
   CUDA_KERNEL_LOOP(index, n) {
     int64_t w_out = index % width_col;
 
-    index /= width_col;
+    int64_t idx = index / width_col;
 
-    int64_t h_out = index % height_col;
-    int64_t channel_in = index / height_col;
+    int64_t h_out = idx % height_col;
+    int64_t channel_in = idx / height_col;
     int64_t channel_out = channel_in * kernel_height * kernel_width;
     int64_t h_in = h_out * stride_height - pad_height;
     int64_t w_in = w_out * stride_width - pad_width;
 
-    data_col += (channel_out * height_col + h_out) * width_col + w_out;
-    data_im += (channel_in * height + h_in) * width + w_in;
+    dt* col = data_col + (channel_out * height_col + h_out) * width_col + w_out;
+    const dt* im = data_im + (channel_in * height + h_in) * width + w_in;
 
     for (int64_t i = 0; i < kernel_height; ++i) {
       for (int64_t j = 0; j < kernel_width; ++j) {
         int64_t h = h_in + i * dilation_height;
         int64_t w = w_in + j * dilation_width;
-        *data_col = (h >= 0 && w >= 0 && h < height && w < width)
-            ? data_im[i * dilation_height * width + j * dilation_width]
-            : ScalarConvert<int, dt>::to(0);
-        data_col += height_col * width_col;
+        *col = (h >= 0 && w >= 0 && h < height && w < width)
+            ? im[i * dilation_height * width + j * dilation_width]
+            : static_cast<dt>(0);
+        col += height_col * width_col;
       }
     }
   }
@@ -108,11 +104,11 @@ void im2col(
       height_col,
       width_col,
       data_col);
-  AT_CUDA_CHECK(cudaGetLastError());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <typename dt, typename accT>
-C10_LAUNCH_BOUNDS_1(1024)
+C10_LAUNCH_BOUNDS_1(512)
 __global__ void col2im_kernel(
     const int64_t n,
     const dt* data_col,
@@ -191,7 +187,7 @@ void col2im(
   // bottom dimension, and then in the kernel add up the top dimensions.
   // CUDA_NUM_THREADS = 1024
   col2im_kernel<dt, accT>
-      <<<GET_BLOCKS(num_kernels), CUDA_NUM_THREADS, 0, stream>>>(
+      <<<GET_BLOCKS(num_kernels, 512), 512, 0, stream>>>(
           num_kernels,
           data_col,
           height,
@@ -208,7 +204,7 @@ void col2im(
           output_height,
           output_width,
           data_im);
-  AT_CUDA_CHECK(cudaGetLastError());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 } // namespace native

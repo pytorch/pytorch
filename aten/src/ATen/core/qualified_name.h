@@ -20,7 +20,7 @@ struct QualifiedName {
 
     while (pos != std::string::npos) {
       auto atom = name.substr(startSearchFrom, pos - startSearchFrom);
-      AT_ASSERTM(
+      TORCH_INTERNAL_ASSERT(
           atom.size() > 0, "Invalid name for qualified name: '", name, "'");
       atoms_.push_back(std::move(atom));
       startSearchFrom = pos + 1;
@@ -28,9 +28,9 @@ struct QualifiedName {
     }
 
     auto finalAtom = name.substr(startSearchFrom, pos - startSearchFrom);
-    AT_ASSERTM(
+    TORCH_INTERNAL_ASSERT(
         finalAtom.size() > 0, "Invalid name for qualified name: '", name, "'");
-    atoms_.push_back(std::move(finalAtom));
+    atoms_.emplace_back(std::move(finalAtom));
 
     cacheAccessors();
   }
@@ -42,10 +42,10 @@ struct QualifiedName {
           atom.find(delimiter_) == std::string::npos,
           "Delimiter not allowed in atom");
     }
-    atoms_ = atoms;
+    atoms_ = std::move(atoms);
     cacheAccessors();
   }
-  // Unnecessary copy. Ideally we'd use somoething like std::string_view.
+  // Unnecessary copy. Ideally we'd use something like std::string_view.
   /* implicit */ QualifiedName(const char* name)
       : QualifiedName(std::string(name)) {}
 

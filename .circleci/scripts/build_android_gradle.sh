@@ -1,15 +1,44 @@
 #!/usr/bin/env bash
 set -eux -o pipefail
 
+env
+echo "BUILD_ENVIRONMENT:$BUILD_ENVIRONMENT"
+
 export ANDROID_NDK_HOME=/opt/ndk
+export ANDROID_NDK=/opt/ndk
 export ANDROID_HOME=/opt/android/sdk
 
 # Must be in sync with GRADLE_VERSION in docker image for android
 # https://github.com/pietern/pytorch-dockerfiles/blob/master/build.sh#L155
-export GRADLE_VERSION=4.10.3
+export GRADLE_VERSION=6.8.3
 export GRADLE_HOME=/opt/gradle/gradle-$GRADLE_VERSION
 export GRADLE_PATH=$GRADLE_HOME/bin/gradle
 
+# touch gradle cache files to prevent expiration
+while IFS= read -r -d '' file
+do
+  touch "$file" || true
+done < <(find /var/lib/jenkins/.gradle -type f -print0)
+
+export GRADLE_LOCAL_PROPERTIES=~/workspace/android/local.properties
+rm -f $GRADLE_LOCAL_PROPERTIES
+echo "sdk.dir=/opt/android/sdk" >> $GRADLE_LOCAL_PROPERTIES
+echo "ndk.dir=/opt/ndk" >> $GRADLE_LOCAL_PROPERTIES
+echo "cmake.dir=/usr/local" >> $GRADLE_LOCAL_PROPERTIES
+
+retry () {
+  $* || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
+}
+
+# Run custom build script
+if [[ "${BUILD_ENVIRONMENT}" == *-gradle-custom-build* ]]; then
+  # Install torch & torchvision - used to download & dump used ops from test model.
+  retry pip install torch torchvision --progress-bar off
+
+  exec "$(dirname "${BASH_SOURCE[0]}")/../../android/build_test_app_custom.sh" armeabi-v7a
+fi
+
+# Run default build
 BUILD_ANDROID_INCLUDE_DIR_x86=~/workspace/build_android/install/include
 BUILD_ANDROID_LIB_DIR_x86=~/workspace/build_android/install/lib
 
@@ -44,9 +73,6 @@ ln -s ${BUILD_ANDROID_INCLUDE_DIR_arm_v8a} ${JNI_INCLUDE_DIR}/arm64-v8a
 ln -s ${BUILD_ANDROID_LIB_DIR_arm_v8a} ${JNI_LIBS_DIR}/arm64-v8a
 fi
 
-env
-echo "BUILD_ENVIRONMENT:$BUILD_ENVIRONMENT"
-
 GRADLE_PARAMS="-p android assembleRelease --debug --stacktrace"
 if [[ "${BUILD_ENVIRONMENT}" == *-gradle-build-only-x86_32* ]]; then
     GRADLE_PARAMS+=" -PABI_FILTERS=x86"
@@ -55,20 +81,6 @@ fi
 if [ -n "{GRADLE_OFFLINE:-}" ]; then
     GRADLE_PARAMS+=" --offline"
 fi
-
-# touch gradle cache files to prevent expiration
-while IFS= read -r -d '' file
-do
-  touch "$file" || true
-done < <(find /var/lib/jenkins/.gradle -type f -print0)
-
-env
-
-export GRADLE_LOCAL_PROPERTIES=~/workspace/android/local.properties
-rm -f $GRADLE_LOCAL_PROPERTIES
-echo "sdk.dir=/opt/android/sdk" >> $GRADLE_LOCAL_PROPERTIES
-echo "ndk.dir=/opt/ndk" >> $GRADLE_LOCAL_PROPERTIES
-echo "cmake.dir=/usr/local" >> $GRADLE_LOCAL_PROPERTIES
 
 $GRADLE_PATH $GRADLE_PARAMS
 

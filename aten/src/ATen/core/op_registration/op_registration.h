@@ -6,20 +6,28 @@
  */
 
 #include <c10/core/DispatchKey.h>
-#include <ATen/core/dispatch/Dispatcher.h>
+#include <c10/core/DispatchKeySet.h>
+#include <c10/core/CompileTimeFunctionPointer.h>
+#include <ATen/core/boxing/KernelFunction.h>
+#include <ATen/core/dispatch/CppSignature.h>
+#include <ATen/core/dispatch/RegistrationHandleRAII.h>
 #include <ATen/core/op_registration/infer_schema.h>
 #if defined(EXPOSE_C2_OPS) || !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 #endif
-#include <ATen/core/OpsAlreadyMovedToC10.h>
+#include <ATen/core/ATenOpList.h>
 
 namespace c10 {
 
 namespace detail {
+// The first argument of the schema might be of type DispatchKeySet, in which case we remove it.
+// We do this because every argument in a function schema is expected to be convertable
+// to an ivalue, but DispatchKeySet is not a type we want the jit to be aware of.
+// See Note [Plumbing Keys Through The Dispatcher]
 template<class KernelFunctor>
 std::unique_ptr<FunctionSchema> inferFunctionSchemaFromFunctor() {
-  using func_type = typename c10::guts::infer_function_traits_t<KernelFunctor>::func_type;
-  return std::make_unique<FunctionSchema>(inferFunctionSchemaFlattenedReturns<func_type>("", ""));
+  using func_type = typename c10::remove_DispatchKeySet_arg_from_func<KernelFunctor>::func_type;
+  return std::make_unique<FunctionSchema>(inferFunctionSchemaFlattenedReturns<func_type>());
 }
 }
 
@@ -40,9 +48,9 @@ std::unique_ptr<FunctionSchema> inferFunctionSchemaFromFunctor() {
  * > static auto registry = c10::RegisterOperators()
  * >     .op(c10::RegisterOperators::options()
  * >         .schema("my_op")
- * >         .kernel<my_kernel_cpu>(DispatchKey::CPUTensorId));
+ * >         .kernel<my_kernel_cpu>(DispatchKey::CPU));
  */
-class CAFFE2_API RegisterOperators final {
+class TORCH_API RegisterOperators final {
 public:
   RegisterOperators();
   ~RegisterOperators();
@@ -52,7 +60,7 @@ public:
   RegisterOperators(RegisterOperators&&) noexcept;
   RegisterOperators& operator=(RegisterOperators&&) noexcept;
 
-  class CAFFE2_API Options final {
+  class TORCH_API Options final {
   public:
     Options(const Options&) = delete;
     Options(Options&&) noexcept = delete;
@@ -62,13 +70,13 @@ public:
     // internal-only for registering stack based kernels
     template<KernelFunction::BoxedKernelFunction* kernel_func>
     Options&& kernel(DispatchKey dispatch_key) && {
-      return std::move(*this).kernel(dispatch_key, KernelFunction::makeFromBoxedFunction<kernel_func>(), nullptr);
+      return std::move(*this).kernel(dispatch_key, KernelFunction::makeFromBoxedFunction<kernel_func>(), nullopt, nullptr);
     }
 
     // internal-only for registering stack based catch-all kernels
     template<KernelFunction::BoxedKernelFunction* kernel_func>
     Options&& catchAllKernel() && {
-      return std::move(*this).kernel(c10::nullopt, KernelFunction::makeFromBoxedFunction<kernel_func>(), nullptr);
+      return std::move(*this).kernel(c10::nullopt, KernelFunction::makeFromBoxedFunction<kernel_func>(), nullopt, nullptr);
     }
 
     // internal only for registering caffe2 ops
@@ -89,14 +97,14 @@ public:
      * > static auto registry = c10::RegisterOperators()
      * >     .op(c10::RegisterOperators::options()
      * >         .schema("my_op")
-     * >         .kernel<my_kernel_cpu>(DispatchKey::CPUTensorId));
+     * >         .kernel<my_kernel_cpu>(DispatchKey::CPU));
      * >
      * >
      * > // Explicitly specify full schema
      * > static auto registry = c10::RegisterOperators()
      * >     .op(c10::RegisterOperators::options()
      * >         .schema("my_op(Tensor a) -> Tensor")
-     * >         .kernel<my_kernel_cpu>(DispatchKey::CPUTensorId));
+     * >         .kernel<my_kernel_cpu>(DispatchKey::CPU));
      */
     Options&& schema(const std::string& schemaOrName) {
       TORCH_CHECK(!schemaOrName_.has_value(), "Tried to register operator ", schemaOrName," but specified schema multiple times. You can only specify the schema once per operator registration.");
@@ -127,7 +135,7 @@ public:
      * > static auto registry = c10::RegisterOperators()
      * >     .op(c10::RegisterOperators::options()
      * >         .schema("my_op")
-     * >         .kernel<my_kernel_cpu>(DispatchKey::CPUTensorId));
+     * >         .kernel<my_kernel_cpu>(DispatchKey::CPU));
      *
      * The functor constructor can take arguments to configure the kernel.
      * The arguments are defined in the kernel registration.
@@ -146,7 +154,7 @@ public:
      * > static auto registry = c10::RegisterOperators()
      * >     .op(c10::RegisterOperators::options()
      * >         .schema("my_op")
-     * >         .kernel<my_kernel_cpu>(DispatchKey::CPUTensorId, "some_configuration", 3, true));
+     * >         .kernel<my_kernel_cpu>(DispatchKey::CPU, "some_configuration", 3, true));
      */
     template<class KernelFunctor, class... ConstructorParameters>
     // enable_if: only enable it if KernelFunctor is actually a functor
@@ -157,6 +165,7 @@ public:
       return std::move(*this).kernel(
         std::move(dispatch_key),
         KernelFunction::makeFromUnboxedFunctor<false, KernelFunctor>(std::make_unique<KernelFunctor>(std::forward<ConstructorParameters>(constructorParameters)...)),
+        impl::CppSignature::make<KernelFunctor>(),
         detail::inferFunctionSchemaFromFunctor<KernelFunctor>()
       );
     }
@@ -208,6 +217,7 @@ public:
       return std::move(*this).kernel(
         c10::nullopt,
         KernelFunction::makeFromUnboxedFunctor<false, KernelFunctor>(std::make_unique<KernelFunctor>(std::forward<ConstructorParameters>(constructorParameters)...)),
+        impl::CppSignature::make<KernelFunctor>(),
         detail::inferFunctionSchemaFromFunctor<KernelFunctor>()
       );
     }
@@ -224,7 +234,7 @@ public:
      * > static auto registry = c10::RegisterOperators()
      * >     .op(c10::RegisterOperators::options()
      * >         .schema("my_op")
-     * >         .kernel<decltype(my_kernel_cpu), &my_kernel_cpu>(DispatchKey::CPUTensorId));
+     * >         .kernel<decltype(my_kernel_cpu), &my_kernel_cpu>(DispatchKey::CPU));
      */
     template<class FuncType, FuncType* kernel_func>
     // enable_if: only enable it if FuncType is actually a function
@@ -234,9 +244,10 @@ public:
 
       return std::move(*this).kernel(
         std::move(dispatch_key),
-        KernelFunction::makeFromUnboxedFunction<FuncType, kernel_func>(),
+        KernelFunction::makeFromUnboxedFunction(TORCH_FN(kernel_func)),
+        impl::CppSignature::make<FuncType>(),
         // TODO Do schema inference without relying on WrapFunctionIntoFunctor
-        detail::inferFunctionSchemaFromFunctor<typename impl::WrapFunctionIntoFunctor<FuncType, kernel_func>::type>()
+        detail::inferFunctionSchemaFromFunctor<typename impl::WrapFunctionIntoFunctor<CompileTimeFunctionPointer<FuncType, kernel_func>>::type>()
       );
     }
 
@@ -262,9 +273,10 @@ public:
 
       return std::move(*this).kernel(
         c10::nullopt,
-        KernelFunction::makeFromUnboxedFunction<FuncType, kernel_func>(),
+        KernelFunction::makeFromUnboxedFunction(TORCH_FN(kernel_func)),
+        impl::CppSignature::make<FuncType>(),
         // TODO Do schema inference without relying on WrapFunctionIntoFunctor
-        detail::inferFunctionSchemaFromFunctor<typename impl::WrapFunctionIntoFunctor<FuncType, kernel_func>::type>()
+        detail::inferFunctionSchemaFromFunctor<typename impl::WrapFunctionIntoFunctor<CompileTimeFunctionPointer<FuncType, kernel_func>>::type>()
       );
     }
 
@@ -277,6 +289,7 @@ public:
       return std::move(*this).kernel(
         std::move(dispatch_key),
         KernelFunction::makeFromUnboxedRuntimeFunction(kernel_func),
+        impl::CppSignature::make<FuncType>(),
         // TODO Do schema inference without relying on WrapFunctionIntoFunctor
         detail::inferFunctionSchemaFromFunctor<impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<FuncType>>>()
       );
@@ -291,36 +304,9 @@ public:
       return std::move(*this).kernel(
         c10::nullopt,
         KernelFunction::makeFromUnboxedRuntimeFunction(kernel_func),
+        impl::CppSignature::make<FuncType>(),
         // TODO Do schema inference without relying on WrapFunctionIntoFunctor
         detail::inferFunctionSchemaFromFunctor<impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<FuncType>>>()
-      );
-    }
-
-    // TODO Remove impl_unboxedOnlyKernel once all of aten can generate boxed kernels
-    template<class FuncType, FuncType* kernel_func>
-    // enable_if: only enable it if FuncType is actually a function
-    std::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> impl_unboxedOnlyKernel(DispatchKey dispatch_key) && {
-      static_assert(!std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
-      static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
-
-      return std::move(*this).kernel(
-        std::move(dispatch_key),
-        KernelFunction::makeFromUnboxedOnlyRuntimeFunction(kernel_func),
-        nullptr // disable function schema inference because some ops from native_functions.yaml don't support it yet
-      );
-    }
-
-    // TODO Remove impl_unboxedOnlyCatchAllKernel once all of aten can generate boxed kernels
-    template<class FuncType, FuncType* kernel_func>
-    // enable_if: only enable it if FuncType is actually a function
-    std::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> impl_unboxedOnlyCatchAllKernel() && {
-      static_assert(!std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
-      static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
-
-      return std::move(*this).kernel(
-        c10::nullopt,
-        KernelFunction::makeFromUnboxedOnlyRuntimeFunction(kernel_func),
-        nullptr // disable function schema inference because some ops from native_functions.yaml don't support it yet
       );
     }
 
@@ -338,7 +324,7 @@ public:
      * > static auto registry = c10::RegisterOperators()
      * >     .op(c10::RegisterOperators::options()
      * >         .schema("my_op")
-     * >         .kernel(DispatchKey::CPUTensorId, [] (Tensor a) -> Tensor {...}));
+     * >         .kernel(DispatchKey::CPU, [] (Tensor a) -> Tensor {...}));
      */
     template<class Lambda>
     // enable_if: only enable it if Lambda is a functor (note: lambdas are functors)
@@ -359,6 +345,7 @@ public:
       return std::move(*this).kernel(
         std::move(dispatch_key),
         KernelFunction::makeFromUnboxedLambda(std::forward<Lambda>(functor)),
+        impl::CppSignature::make<Lambda>(),
         // TODO Do schema inference without relying on WrapFunctionIntoRuntimeFunctor
         detail::inferFunctionSchemaFromFunctor<impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>()
       );
@@ -399,6 +386,7 @@ public:
       return std::move(*this).kernel(
         c10::nullopt,
         KernelFunction::makeFromUnboxedLambda(std::forward<Lambda>(lambda)),
+        impl::CppSignature::make<Lambda>(),
         // TODO Do schema inference without relying on WrapFunctionIntoRuntimeFunctor
         detail::inferFunctionSchemaFromFunctor<impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>()
       );
@@ -411,10 +399,11 @@ public:
     }
 
   private:
-    Options&& kernel(c10::optional<DispatchKey> dispatch_key, KernelFunction&& func, std::unique_ptr<FunctionSchema>&& inferred_function_schema) && {
+    Options&& kernel(c10::optional<DispatchKey> dispatch_key, KernelFunction&& func, c10::optional<impl::CppSignature> cpp_signature, std::unique_ptr<FunctionSchema>&& inferred_function_schema) && {
       KernelRegistrationConfig config;
       config.dispatch_key = dispatch_key;
       config.func = std::move(func);
+      config.cpp_signature = std::move(cpp_signature);
       config.inferred_function_schema = std::move(inferred_function_schema);
       kernels.push_back(std::move(config));
       return std::move(*this);
@@ -432,11 +421,13 @@ public:
       KernelRegistrationConfig()
         : dispatch_key(c10::nullopt)
         , func()
+        , cpp_signature(c10::nullopt)
         , inferred_function_schema(nullptr)
       {}
 
       c10::optional<DispatchKey> dispatch_key;
       KernelFunction func;
+      c10::optional<impl::CppSignature> cpp_signature;
       std::unique_ptr<FunctionSchema> inferred_function_schema;
     };
 
@@ -445,7 +436,7 @@ public:
     std::vector<KernelRegistrationConfig> kernels;
     optional<AliasAnalysisKind> aliasAnalysisKind_;
     friend class RegisterOperators;
-    friend class Module;
+    friend class Library;
   };
 
   /**
@@ -533,6 +524,7 @@ public:
      return std::move(*this).op(std::move(options).schema(schemaOrName).kernel(
        c10::nullopt,
        KernelFunction::makeFromUnboxedRuntimeFunction<AllowLegacyTypes>(func),
+       impl::CppSignature::make<FuncType>(),
        // TODO Do schema inference without relying on WrapFunctionIntoRuntimeFunctor
        detail::inferFunctionSchemaFromFunctor<impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<FuncType>>>()
      ));
@@ -563,6 +555,7 @@ public:
       return std::move(*this).op(std::move(options).schema(schemaOrName).kernel(
         c10::nullopt,
         KernelFunction::makeFromUnboxedLambda<AllowLegacyTypes>(std::forward<Lambda>(lambda)),
+        impl::CppSignature::make<Lambda>(),
         // TODO Do schema inference without relying on WrapFunctionIntoRuntimeFunctor
         detail::inferFunctionSchemaFromFunctor<impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>()
       ));
@@ -579,6 +572,7 @@ public:
       return std::move(*this).op(std::move(options).schema(schemaOrName).kernel(
         c10::nullopt,
         KernelFunction::makeFromUnboxedLambda<AllowLegacyTypes>(std::forward<Lambda>(lambda)),
+        impl::CppSignature::make<Lambda>(),
         // TODO Do schema inference without relying on WrapFunctionIntoRuntimeFunctor
         detail::inferFunctionSchemaFromFunctor<impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>()
       ));
@@ -594,381 +588,9 @@ private:
   std::vector<RegistrationHandleRAII> registrars_;
 };
 
-// --------------------------------------------------------------------------
-//
-// New style API
-//
-// --------------------------------------------------------------------------
-//
-// The basic concept behind the new style API is to be as similar to pybind11's
-// API as possible.
-//
-// A quick tour of a few usage examples:
-//
-//  auto register = torch::import()
-//
-//    // Define a schema for an operator, but provide no implementation
-//    .def("aten::mul(Tensor self, Tensor other) -> Tensor")
-//
-//    // Define a operator with exactly one implementation for all backends.
-//    .def("aten::add(Tensor self, Tensor other) -> Tensor", &add_impl)
-//
-//    // Provide an implementation for a defined operator (you can
-//    // provide multiple; one per backend).  We'll take care of calling
-//    // the correct implementation depending on if we get a CPU
-//    // tensor or a CUDA tensor
-//    .impl("aten::mul", torch::kCPU, &mul_cpu_impl)
-//    .impl("aten::mul", torch::kCUDA, &mul_cuda_impl)
-//
-// Also, you can omit the top level namespace and specify it explicitly in
-// the sub-definitions, e.g.,  torch::import().impl("aten::mul", ...)
-
-
-// Represents a C++ function that implements an operator.  Most users won't
-// interact directly with this class, except via error messages: the
-// constructors this function define the set of permissible "function"-like
-// things you can bind via the interface.
-//
-// This class erases the type of the passed in function, but durably records
-// the type via an inferred schema for the function.
-//
-// TODO: This is morally the same thing as KernelRegistrationConfig, but it's
-// opaque to the user.
-class CAFFE2_API CppFunction final {
-public:
-  // This overload accepts function pointers, e.g., CppFunction(&add_impl)
-  template <typename Func>
-  explicit CppFunction(Func* f, std::enable_if_t<guts::is_function_type<Func>::value, std::nullptr_t> = nullptr)
-    : func_(c10::KernelFunction::makeFromUnboxedRuntimeFunction(f))
-    // TODO: Don't go through WrapRuntimeKernelFunctor
-    , schema_(detail::inferFunctionSchemaFromFunctor<impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Func>>>())
-    , debug_("Func")
-    {}
-
-  // This overload accepts lambdas, e.g., CppFunction([](const Tensor& self) { ... })
-  template <typename Lambda>
-  explicit CppFunction(Lambda&& f, std::enable_if_t<guts::is_functor<std::decay_t<Lambda>>::value, std::nullptr_t> = nullptr)
-    : func_(c10::KernelFunction::makeFromUnboxedLambda(std::forward<Lambda>(f)))
-    // TODO: Don't go through WrapRuntimeKernelFunctor
-    , schema_(detail::inferFunctionSchemaFromFunctor<impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>())
-    , debug_("Lambda")
-    {}
-
-  // This static factory lets you create CppFunctions that (1) don't have boxing
-  // wrappers (because we don't support it yet) and (2) don't have schema
-  // inference (because some ops don't support it).
-  //
-  // TODO: Eliminate the necessity for this function entirely.
-  template <typename Func>
-  static CppFunction makeUnboxedOnly(Func* f) {
-    return CppFunction(
-      c10::KernelFunction::makeFromUnboxedOnlyRuntimeFunction(f),
-      /* schema */ nullptr,
-      "UnboxedOnly"
-    );
-  }
-
-  // TODO: more user friendly API
-  static CppFunction makeFallthrough() {
-    return CppFunction(
-      c10::KernelFunction::makeFallthrough(),
-      /* schema */ nullptr,
-      "Fallthrough"
-    );
-  }
-
-  // TODO: more user friendly API
-  template<KernelFunction::BoxedKernelFunction* func>
-  static CppFunction makeFromBoxedFunction() {
-    return CppFunction(
-      c10::KernelFunction::makeFromBoxedFunction<func>(),
-      /* schema */ nullptr,
-      "BoxedFunction"
-    );
-  }
-
-  CppFunction&& debug(std::string d) && {
-    debug_ = std::move(d);
-    return std::move(*this);
-  }
-
-private:
-  c10::optional<c10::DispatchKey> dispatch_key_;
-  c10::KernelFunction func_;
-  std::unique_ptr<c10::FunctionSchema> schema_;
-  std::string debug_;
-
-  // The "setter" for dispatch_key_
-  template <typename Func>
-  friend CppFunction dispatch(c10::DispatchKey, Func&&);
-
-  // The only class which actually pulls out values from CppFunction (does so
-  // destructively, felt too lazy to write accessors that I don't even
-  // want users to use)
-  friend class Module;
-
-  CppFunction(KernelFunction func, std::unique_ptr<c10::FunctionSchema> schema, std::string debug);
-};
-
-// Create a CppFunction which is associated with a specific dispatch key.
-// CppFunctions that are tagged with a DispatchKey don't get invoked /unless/
-// the dispatcher determines that the DispatchKey is the best choice for
-// a function
-template <typename Func>
-inline CppFunction dispatch(c10::DispatchKey k, Func&& raw_f) {
-  CppFunction f(std::forward<Func>(raw_f));
-  f.dispatch_key_ = k;
-  return f;
-}
-
-// Convenience overload of dispatch which accepts DeviceType
-template <typename Func>
-inline CppFunction dispatch(DeviceType type, Func&& raw_f) {
-  auto deviceTypeToDispatchKey = [](DeviceType t){
-    switch (t) {
-      // This list is synchronized with the k-constants in c10/core/DeviceType.h
-      case DeviceType::CPU:
-        return c10::DispatchKey::CPUTensorId;
-      case DeviceType::CUDA:
-        return c10::DispatchKey::CUDATensorId;
-      case DeviceType::XLA:
-        return c10::DispatchKey::XLATensorId;
-      case DeviceType::HIP:
-        return c10::DispatchKey::HIPTensorId;
-      case DeviceType::MSNPU:
-        return c10::DispatchKey::MSNPUTensorId;
-      default:
-        TORCH_CHECK(false,
-          "Device type ", t, " cannot be overloaded at dispatch time, "
-          "please file a bug report explaining what you were trying to do.");
-    }
-  };
-  return dispatch(deviceTypeToDispatchKey(type), std::forward<Func>(raw_f));
-}
-
-inline FunctionSchema schema(const char* str, AliasAnalysisKind k) {
-  FunctionSchema s = torch::jit::parseSchema(str);
-  s.setAliasAnalysis(k);
-  return s;
-}
-inline FunctionSchema schema(const char* s) {
-  return schema(s, AliasAnalysisKind::FROM_SCHEMA);
-}
-inline FunctionSchema&& schema(FunctionSchema&& s) { return std::move(s); }
-
-namespace detail {
-
-  inline c10::either<OperatorName, FunctionSchema> constructSchemaOrName(FunctionSchema&& s) {
-    return c10::make_right<OperatorName, FunctionSchema>(std::move(s));
-  }
-  inline c10::either<OperatorName, FunctionSchema> constructSchemaOrName(OperatorName&& n) {
-    return c10::make_left<OperatorName, FunctionSchema>(std::move(n));
-  }
-  inline c10::either<OperatorName, FunctionSchema> constructSchemaOrName(const char* str) {
-    auto s = torch::jit::parseSchemaOrName(str);
-    if (s.is_right()) {
-      s.right().setAliasAnalysis(AliasAnalysisKind::FROM_SCHEMA);
-    }
-    return s;
-  }
-
-}
-
-// Represents a namespace in which we can define operators.  Conventionally
-// constructed using "torch::import".
-//
-//      torch::import()
-//        .def("aten::add", ...)
-//        .def("aten::mul", ...)
-//
-class CAFFE2_API Module final {
-  c10::optional<std::string> ns_;
-
-  std::vector<RegistrationHandleRAII> registrars_;
-
-  Module(std::string ns);
-  Module();
-
-  // Use these as the constructors
-  friend Module _import_DOES_NOT_WORK_WITH_MOBILE_CUSTOM_BUILD(std::string ns);
-  friend Module import();
-
-private:
-  // Non-user visible actual implementations of functions.  These aren't
-  // public because we only implement & qualifier and not && qualifier
-  Module& _def(FunctionSchema&& schema) &;
-  Module& _def(c10::either<OperatorName, FunctionSchema>&&, CppFunction&& f) &;
-  Module& _impl(const char* name, CppFunction&& f) &;
-  Module& _fallback(CppFunction&& f) &;
-
-public:
-  Module(const Module&) = delete;
-  Module& operator=(const Module&) = delete;
-
-  Module(Module&&);
-  Module& operator=(Module&&);
-
-  // Some notes about the API design here.  We had the following constraints:
-  //
-  //  - We wanted to support both method chaining to a static variable (&& ref
-  //    qualifier) as well as regular allocate the object and then mutate it (&
-  //    ref qualifier)
-  //  - We need to support multiple "types" of arguments for schema and
-  //    functions (e.g., unnamed lambda types, regular functions, const char*,
-  //    fully instantiated schemas)
-  //  - We don't want to write exponentially many overloads
-  //  - We don't want to rely on implicit conversion to a common type,
-  //    because the C++ compiler will only be willing to do a single
-  //    implicit conversion (reducing the set of valid types which you
-  //    can invoke with); also error messages are worse when an implicit
-  //    conversion is not selected (as the compiler will not explain
-  //    why it didn't select an implicit conversion; this is different
-  //    from overloads where it will explain each candidate overload and
-  //    why it didn't apply)
-  //
-  // To solve all of these constraints at the same time, we use a trick taken
-  // from the pybind11 library: template over the argument in the user visible
-  // API, and inside of the templated function explicitly call an overloaded
-  // function to resolve the argument to a real type.  You get the good error
-  // messages from overloads, but at the same time you only need to write the
-  // overload for any given argument type once.
-  //
-  // We still have to 2x all functions in the API so we can do both && and &
-  // ref qualifiers, c'est la vie.
-
-  // Declare an operator with a schema, but don't provide any implementations
-  // for it.  You're expected to then provide implementations using the
-  // impl() method.
-  template <typename Schema>
-  Module& def(Schema&& raw_schema) & {
-    FunctionSchema s = schema(std::forward<Schema>(raw_schema));
-    return _def(std::move(s));
-  }
-  template <typename Schema>
-  Module&& def(Schema&& raw_schema) && {
-    def(std::forward<Schema>(raw_schema));
-    return std::move(*this);
-  }
-
-  // Convenience method to define an operator for a schema and then register
-  // an implementation for it.  def(n, f) is almost equivalent to def(n).impl(f),
-  // except that if n is not a schema, then the schema is inferred from the
-  // static type of f.
-  template <typename NameOrSchema, typename Func>
-  Module& def(NameOrSchema&& raw_name_or_schema, Func&& raw_f) & {
-    CppFunction f(std::forward<Func>(raw_f));
-    auto name_or_schema = detail::constructSchemaOrName(std::forward<NameOrSchema>(raw_name_or_schema));
-    return _def(std::move(name_or_schema), std::move(f));
-  }
-  template <typename NameOrSchema, typename Func>
-  Module&& def(NameOrSchema&& raw_name_or_schema, Func&& raw_f) && {
-    def(std::forward<NameOrSchema>(raw_name_or_schema), std::forward<Func>(raw_f));
-    return std::move(*this);
-  }
-
-  // Register an implementation for an operator.  You may register multiple
-  // implementations for a single operator at different dispatch keys
-  // (see torch::dispatch).  Implementations must have a corresponding
-  // declaration (from def), otherwise they are invalid.
-  template <typename Func>
-  Module& impl(const char* name, Func&& raw_f) & {
-    CppFunction f(std::forward<Func>(raw_f));
-    return _impl(name, std::move(f));
-  }
-  template <typename Func>
-  Module&& impl(const char* name, Func&& raw_f) && {
-    impl(name, std::forward<Func>(raw_f));
-    return std::move(*this);
-  }
-  // Convenience overload for directly specifying the dispatch key.  Dispatch
-  // can validly be either DeviceType or DispatchKey; check torch::dispatch for
-  // the canonical list of accepted overloads.
-  template <typename Dispatch, typename Func>
-  Module& impl(const char* name, Dispatch&& key, Func&& raw_f) & {
-    return impl(name, dispatch(std::forward<Dispatch>(key), std::forward<Func>(raw_f)));
-  }
-  template <typename Dispatch, typename Func>
-  Module&& impl(const char* name, Dispatch&& key, Func&& raw_f) && {
-    impl(name, std::forward<Dispatch>(key), std::forward<Func>(raw_f));
-    return std::move(*this);
-  }
-  // Convenience overload for unboxed only kernels.  These are quite common
-  // but will be eventually eliminated; this function makes it easy to grep for
-  // them.
-  //
-  // If you're looking how to def or impl with no DispatchKey, use the
-  // CppFunction::makeUnboxedOnly factory directly (the API is compositional;
-  // it's just that we have a LOT of impl calls that are unboxed, so there is
-  // just a little syntax sugar for this case.)
-  //
-  // TODO: Remove these overloads once the makeUnboxedOnly incidence rate
-  // goes way down
-  template <typename Dispatch, typename Func>
-  Module& impl_UNBOXED(const char* name, Dispatch&& key, Func* raw_f) & {
-    return impl(name, dispatch(std::forward<Dispatch>(key), CppFunction::makeUnboxedOnly(raw_f)));
-  }
-  template <typename Dispatch, typename Func>
-  Module&& impl_UNBOXED(const char* name, Dispatch&& key, Func* raw_f) && {
-    impl_UNBOXED(name, std::forward<Dispatch>(key), raw_f);
-    return std::move(*this);
-  }
-
-  // Register a fallback implementation for all operators which will be used
-  // if there is not a specific implementation for an operator available.
-  // Providing a DispatchKey is MANDATORY for fallback at the moment.
-  //
-  // Dispatch can validly be either DeviceType or DispatchKey; check
-  // torch::dispatch for the canonical list of accepted overloads.
-  template <typename Dispatch, typename Func>
-  Module& fallback(Dispatch&& key, Func&& raw_f) & {
-    return fallback(c10::dispatch(std::forward<Dispatch>(key), std::forward<Func>(raw_f)));
-  }
-  template <typename Dispatch, typename Func>
-  Module&& fallback(Dispatch&& key, Func&& raw_f) && {
-    fallback(std::forward<Dispatch>(key), std::forward<Func>(raw_f));
-    return std::move(*this);
-  }
-  // NB: these overloads are here for completeness, but you'll probably want to
-  // use the direct Dispatch overload
-  template <typename Func>
-  Module& fallback(Func&& raw_f) & {
-    CppFunction f((std::forward<Func>(raw_f)));
-    return _fallback(std::move(f));
-  }
-  template <typename Func>
-  Module&& fallback(Func&& raw_f) && {
-    fallback(std::forward<Func>(raw_f));
-    return std::move(*this);
-  }
-};
-
-// TODO: We'd like to support this, but custom mobile build doesn't
-// understand how to interpret registration calls that have a namespace
-// call (as this requires some non-local reasoning.)  Tracked in
-// https://github.com/pytorch/pytorch/issues/35397
-//
-// So for now, we give this a scary internal name to discourage people
-// from using it
-
-// Return the namespace corresponding to the string 'ns'
-inline Module _import_DOES_NOT_WORK_WITH_MOBILE_CUSTOM_BUILD(std::string ns) {
-  return Module(std::move(ns));
-}
-
-// Return the "top-level" namespace; subsequent definitions must be explicitly
-// namespaced
-inline Module import() {
-  return Module();
-}
-
 } // namespace c10
 
 namespace torch {
   // Old-style API
   using RegisterOperators = c10::RegisterOperators;
-
-  // New-style API
-  using c10::dispatch;
-  using c10::schema;
-  using c10::import;
 }

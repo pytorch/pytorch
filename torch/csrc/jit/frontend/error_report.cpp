@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/frontend/error_report.h>
+
 #include <c10/util/Optional.h>
 #include <torch/csrc/jit/frontend/tree.h>
 #include <torch/csrc/utils/memory.h>
@@ -25,8 +26,10 @@ void ErrorReport::CallStack::update_pending_range(const SourceRange& range) {
   calls.back().caller_range = range;
 }
 
-ErrorReport::CallStack::CallStack(const std::string& name) {
-  calls.push_back({name, c10::nullopt});
+ErrorReport::CallStack::CallStack(
+    const std::string& name,
+    const SourceRange& range) {
+  calls.push_back({name, range});
 }
 
 ErrorReport::CallStack::~CallStack() {
@@ -37,7 +40,9 @@ ErrorReport::ErrorReport(SourceRange r) : context(std::move(r)) {}
 
 void ErrorReport::CallStack::update_pending_range(const SourceRange& range) {}
 
-ErrorReport::CallStack::CallStack(const std::string& name) {}
+ErrorReport::CallStack::CallStack(
+    const std::string& name,
+    const SourceRange& range) {}
 
 ErrorReport::CallStack::~CallStack() {}
 #endif // C10_MOBILE
@@ -51,11 +56,7 @@ std::string get_stacked_errors(const std::vector<Call>& error_stack) {
       msg << "'" << it->fn_name
           << "' is being compiled since it was called from '" << callee->fn_name
           << "'\n";
-      if (callee->caller_range) {
-        callee->caller_range->highlight(msg);
-      } else {
-        msg << "<no range>\n";
-      }
+      callee->caller_range.highlight(msg);
     }
   }
   return msg.str();

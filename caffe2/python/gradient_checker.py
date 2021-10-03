@@ -1,10 +1,11 @@
 ## @package gradient_checker
 # Module caffe2.python.gradient_checker
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
+
+
+
+
+import os
 import numpy as np
 
 from caffe2.python import core, workspace, net_drawer
@@ -292,8 +293,20 @@ class GradientChecker:
         if ensure_outputs_are_inferred:
             self._assertInferTensorChecks(op, grad_ops)
 
+        full_grad_check = os.getenv('CAFFE2_FULL_GRAD_CHECK') == '1'
+
         dims_to_check = inputs[input_to_check].size
         for current_dim in range(dims_to_check):
+            # Grad check is very expensive (as it involves running the op from
+            # scratch for each of the input tensor elements). Thus, let's
+            # run it by default only on a small subset of dimensions. Here we
+            # apply very scientific approach: the first and the last 3 elements
+            # of each tensor. Pass CAFFE2_FULL_GRAD_CHECK=1 env var to enable
+            # the full check
+            if not full_grad_check and current_dim >= 3 and \
+                    current_dim + 3 < dims_to_check:
+                grad_estimate.flat[current_dim] = grad.flat[current_dim]
+                continue
             # Positive gradient
             inputs[input_to_check].flat[current_dim] += self._stepsize
             pos_loss, _ = self.GetLossAndGrad(

@@ -4,8 +4,9 @@
 #include <memory>
 
 #include <c10/core/Device.h>
-#include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/Exception.h>
+#include <c10/util/ThreadLocalDebugInfo.h>
+#include <c10/util/UniqueVoidPtr.h>
 
 namespace c10 {
 
@@ -93,7 +94,9 @@ class C10_API DataPtr {
    * be; be sure to read the source code of the Allocator
    * in question to confirm this.
    */
-  C10_NODISCARD bool compare_exchange_deleter(DeleterFnPtr expected_deleter, DeleterFnPtr new_deleter) {
+  C10_NODISCARD bool compare_exchange_deleter(
+      DeleterFnPtr expected_deleter,
+      DeleterFnPtr new_deleter) {
     return ptr_.compare_exchange_deleter(expected_deleter, new_deleter);
   }
   Device device() const {
@@ -198,8 +201,13 @@ struct C10_API InefficientStdFunctionContext {
  *
  *  Also note that this is not thread-safe, and we assume this function will
  *  only be called during initialization.
+ *
+ *  The 'priority' flag is introduced when we want to overwrite the default
+ *  allocator, since the allocators are set statically. The default priority
+ *  is 0, which means the lowest. Only higher or equal priority can overwrite
+ *  existing ones.
  */
-C10_API void SetAllocator(DeviceType t, Allocator* alloc);
+C10_API void SetAllocator(DeviceType t, Allocator* alloc, uint8_t priority = 0);
 C10_API Allocator* GetAllocator(const DeviceType& t);
 
 template <DeviceType t>
@@ -209,9 +217,41 @@ struct AllocatorRegisterer {
   }
 };
 
-#define REGISTER_ALLOCATOR(t, f)                    \
-  namespace {                                       \
+#define REGISTER_ALLOCATOR(t, f)                  \
+  namespace {                                     \
   static AllocatorRegisterer<t> g_allocator_d(f); \
   }
+
+// An interface for reporting thread local memory usage
+// per device
+struct C10_API MemoryReportingInfoBase : public c10::DebugInfoBase {
+  MemoryReportingInfoBase();
+  virtual ~MemoryReportingInfoBase() {}
+
+  /**
+   * alloc_size corresponds to the size of the ptr.
+   *
+   * total_allocated corresponds to total allocated memory.
+   *
+   * total_reserved corresponds to total size of memory pool, both used and
+   * unused, if applicable.
+   */
+  virtual void reportMemoryUsage(
+      void* ptr,
+      int64_t alloc_size,
+      int64_t total_allocated,
+      int64_t total_reserved,
+      Device device) = 0;
+
+  virtual bool memoryProfilingEnabled() const = 0;
+};
+
+C10_API bool memoryProfilingEnabled();
+C10_API void reportMemoryUsageToProfiler(
+    void* ptr,
+    int64_t alloc_size,
+    int64_t total_allocated,
+    int64_t total_reserved,
+    Device device);
 
 } // namespace c10

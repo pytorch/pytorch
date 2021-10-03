@@ -1,11 +1,16 @@
 import contextlib
+from typing import Generator
 import warnings
 
 from torch._C import default_generator
+import torch
 
 
-def set_rng_state(new_state):
+def set_rng_state(new_state: torch.Tensor) -> None:
     r"""Sets the random number generator state.
+
+    .. note: This function only works for CPU. For CUDA, please use
+             torch.manual_seed(seed), which works for both CPU and CUDA.
 
     Args:
         new_state (torch.ByteTensor): The desired state
@@ -13,17 +18,20 @@ def set_rng_state(new_state):
     default_generator.set_state(new_state)
 
 
-def get_rng_state():
+def get_rng_state() -> torch.Tensor:
     r"""Returns the random number generator state as a `torch.ByteTensor`."""
     return default_generator.get_state()
 
 
-def manual_seed(seed):
+def manual_seed(seed) -> torch._C.Generator:
     r"""Sets the seed for generating random numbers. Returns a
     `torch.Generator` object.
 
     Args:
-        seed (int): The desired seed.
+        seed (int): The desired seed. Value must be within the inclusive range
+            `[-0x8000_0000_0000_0000, 0xffff_ffff_ffff_ffff]`. Otherwise, a RuntimeError
+            is raised. Negative inputs are remapped to positive values with the formula
+            `0xffff_ffff_ffff_ffff + seed`.
     """
     seed = int(seed)
     import torch.cuda
@@ -34,7 +42,7 @@ def manual_seed(seed):
     return default_generator.manual_seed(seed)
 
 
-def seed():
+def seed() -> int:
     r"""Sets the seed for generating random numbers to a non-deterministic
     random number. Returns a 64 bit number used to seed the RNG.
     """
@@ -47,7 +55,7 @@ def seed():
     return seed
 
 
-def initial_seed():
+def initial_seed() -> int:
     r"""Returns the initial seed for generating random numbers as a
     Python `long`.
     """
@@ -58,12 +66,12 @@ _fork_rng_warned_already = False
 
 
 @contextlib.contextmanager
-def fork_rng(devices=None, enabled=True, _caller="fork_rng", _devices_kw="devices"):
+def fork_rng(devices=None, enabled=True, _caller="fork_rng", _devices_kw="devices") -> Generator:
     """
     Forks the RNG, so that when you return, the RNG is reset
     to the state that it was previously in.
 
-    Arguments:
+    Args:
         devices (iterable of CUDA IDs): CUDA devices for which to fork
             the RNG.  CPU RNG state is always forked.  By default, :meth:`fork_rng` operates
             on all devices, but will emit a warning if your machine has a lot

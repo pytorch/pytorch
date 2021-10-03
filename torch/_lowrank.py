@@ -3,17 +3,18 @@
 
 __all__ = ['svd_lowrank', 'pca_lowrank']
 
+from torch import Tensor
 import torch
-from . import _linalg_utils as _utils 
-from ._overrides import has_torch_function, handle_torch_function
+from . import _linalg_utils as _utils
+from .overrides import has_torch_function, handle_torch_function
 
+from typing import Optional, Tuple
 
-def get_approximate_basis(A,        # type: Tensor
-                          q,        # type: int
-                          niter=2,  # type: Optional[int]
-                          M=None    # type: Optional[Tensor]
-                          ):
-    # type: (...) -> Tensor
+def get_approximate_basis(A: Tensor,
+                          q: int,
+                          niter: Optional[int] = 2,
+                          M: Optional[Tensor] = None
+                          ) -> Tensor:
     """Return tensor :math:`Q` with :math:`q` orthonormal columns such
     that :math:`Q Q^H A` approximates :math:`A`. If :math:`M` is
     specified, then :math:`Q` is such that :math:`Q Q^H (A - M)`
@@ -34,7 +35,7 @@ def get_approximate_basis(A,        # type: Tensor
     .. note:: To obtain repeatable results, reset the seed for the
               pseudorandom number generator
 
-    Arguments::
+    Args::
         A (Tensor): the input tensor of size :math:`(*, m, n)`
 
         q (int): the dimension of subspace spanned by :math:`Q`
@@ -63,25 +64,27 @@ def get_approximate_basis(A,        # type: Tensor
 
     R = torch.randn(n, q, dtype=dtype, device=A.device)
 
+    # The following code could be made faster using torch.geqrf + torch.ormqr
+    # but geqrf is not differentiable
     A_H = _utils.transjugate(A)
     if M is None:
-        (Q, _) = matmul(A, R).qr()
+        Q = torch.linalg.qr(matmul(A, R)).Q
         for i in range(niter):
-            (Q, _) = matmul(A_H, Q).qr()
-            (Q, _) = matmul(A, Q).qr()
+            Q = torch.linalg.qr(matmul(A_H, Q)).Q
+            Q = torch.linalg.qr(matmul(A, Q)).Q
     else:
         M_H = _utils.transjugate(M)
-        (Q, _) = (matmul(A, R) - matmul(M, R)).qr()
+        Q = torch.linalg.qr(matmul(A, R) - matmul(M, R)).Q
         for i in range(niter):
-            (Q, _) = (matmul(A_H, Q) - matmul(M_H, Q)).qr()
-            (Q, _) = (matmul(A, Q) - matmul(M, Q)).qr()
+            Q = torch.linalg.qr(matmul(A_H, Q) - matmul(M_H, Q)).Q
+            Q = torch.linalg.qr(matmul(A, Q) - matmul(M, Q)).Q
 
     return Q
 
 
-def svd_lowrank(A, q=6, niter=2, M=None):
-    # type: (Tensor, Optional[int], Optional[int], Optional[Tensor]) -> Tuple[Tensor, Tensor, Tensor]
-    """Return the singular value decomposition ``(U, S, V)`` of a matrix,
+def svd_lowrank(A: Tensor, q: Optional[int] = 6, niter: Optional[int] = 2,
+                M: Optional[Tensor] = None) -> Tuple[Tensor, Tensor, Tensor]:
+    r"""Return the singular value decomposition ``(U, S, V)`` of a matrix,
     batches of matrices, or a sparse matrix :math:`A` such that
     :math:`A \approx U diag(S) V^T`. In case :math:`M` is given, then
     SVD is computed for the matrix :math:`A - M`.
@@ -95,12 +98,12 @@ def svd_lowrank(A, q=6, niter=2, M=None):
     .. note:: The input is assumed to be a low-rank matrix.
 
     .. note:: In general, use the full-rank SVD implementation
-              ``torch.svd`` for dense matrices due to its 10-fold
+              :func:`torch.linalg.svd` for dense matrices due to its 10-fold
               higher performance characteristics. The low-rank SVD
               will be useful for huge sparse matrices that
-              ``torch.svd`` cannot handle.
+              :func:`torch.linalg.svd` cannot handle.
 
-    Arguments::
+    Args::
         A (Tensor): the input tensor of size :math:`(*, m, n)`
 
         q (int, optional): a slightly overestimated rank of A.
@@ -117,7 +120,7 @@ def svd_lowrank(A, q=6, niter=2, M=None):
           structure with randomness: probabilistic algorithms for
           constructing approximate matrix decompositions,
           arXiv:0909.4061 [math.NA; math.PR], 2009 (available at
-          `arXiv <http://arxiv.org/abs/0909.4061>`_).
+          `arXiv <https://arxiv.org/abs/0909.4061>`_).
 
     """
     if not torch.jit.is_scripting():
@@ -127,8 +130,8 @@ def svd_lowrank(A, q=6, niter=2, M=None):
     return _svd_lowrank(A, q=q, niter=niter, M=M)
 
 
-def _svd_lowrank(A, q=6, niter=2, M=None):
-    # type: (Tensor, Optional[int], Optional[int], Optional[Tensor]) -> Tuple[Tensor, Tensor, Tensor]
+def _svd_lowrank(A: Tensor, q: Optional[int] = 6, niter: Optional[int] = 2,
+                 M: Optional[Tensor] = None) -> Tuple[Tensor, Tensor, Tensor]:
     q = 6 if q is None else q
     m, n = A.shape[-2:]
     matmul = _utils.matmul
@@ -140,16 +143,21 @@ def _svd_lowrank(A, q=6, niter=2, M=None):
 
     # Algorithm 5.1 in Halko et al 2009, slightly modified to reduce
     # the number conjugate and transpose operations
-    if m < n:
-        # computing the SVD approximation of a transpose in order to
-        # keep B shape minimal
+    if m < n or n > q:
+        # computing the SVD approximation of a transpose in
+        # order to keep B shape minimal (the m < n case) or the V
+        # shape small (the n > q case)
         Q = get_approximate_basis(A_t, q, niter=niter, M=M_t)
         Q_c = _utils.conjugate(Q)
         if M is None:
             B_t = matmul(A, Q_c)
         else:
             B_t = matmul(A, Q_c) - matmul(M, Q_c)
-        U, S, V = torch.svd(B_t)
+        assert B_t.shape[-2] == m, (B_t.shape, m)
+        assert B_t.shape[-1] == q, (B_t.shape, q)
+        assert B_t.shape[-1] <= B_t.shape[-2], B_t.shape
+        U, S, Vh = torch.linalg.svd(B_t, full_matrices=False)
+        V = Vh.conj().transpose(-2, -1)
         V = Q.matmul(V)
     else:
         Q = get_approximate_basis(A, q, niter=niter, M=M)
@@ -158,14 +166,19 @@ def _svd_lowrank(A, q=6, niter=2, M=None):
             B = matmul(A_t, Q_c)
         else:
             B = matmul(A_t, Q_c) - matmul(M_t, Q_c)
-        U, S, V = torch.svd(_utils.transpose(B))
+        B_t = _utils.transpose(B)
+        assert B_t.shape[-2] == q, (B_t.shape, q)
+        assert B_t.shape[-1] == n, (B_t.shape, n)
+        assert B_t.shape[-1] <= B_t.shape[-2], B_t.shape
+        U, S, Vh = torch.linalg.svd(B_t, full_matrices=False)
+        V = Vh.conj().transpose(-2, -1)
         U = Q.matmul(U)
 
     return U, S, V
 
 
-def pca_lowrank(A, q=None, center=True, niter=2):
-    # type: (Tensor, Optional[int], bool, int) -> Tuple[Tensor, Tensor, Tensor]
+def pca_lowrank(A: Tensor, q: Optional[int] = None, center: bool = True,
+                niter: int = 2) -> Tuple[Tensor, Tensor, Tensor]:
     r"""Performs linear Principal Component Analysis (PCA) on a low-rank
     matrix, batches of such matrices, or sparse matrix.
 
@@ -200,7 +213,7 @@ def pca_lowrank(A, q=None, center=True, niter=2):
     .. note:: To obtain repeatable results, reset the seed for the
               pseudorandom number generator
 
-    Arguments:
+    Args:
 
         A (Tensor): the input tensor of size :math:`(*, m, n)`
 
@@ -264,8 +277,5 @@ def pca_lowrank(A, q=None, center=True, niter=2):
         M = _utils.transpose(torch.sparse.mm(C_t, ones_m1_t))
         return _svd_lowrank(A, q, niter=niter, M=M)
     else:
-        c = A.sum(dim=(-2,)) / m
-        C = c.reshape(A.shape[:-2] + (1, n))
-        ones_m1 = torch.ones(A.shape[:-1] + (1, ), dtype=dtype, device=A.device)
-        M = ones_m1.matmul(C)
-        return _svd_lowrank(A - M, q, niter=niter, M=None)
+        C = A.mean(dim=(-2,), keepdim=True)
+        return _svd_lowrank(A - C, q, niter=niter, M=None)

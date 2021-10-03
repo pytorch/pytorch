@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core, workspace
 from hypothesis import given
@@ -13,7 +13,7 @@ import numpy as np
 
 class TestPairWiseLossOps(serial.SerializedTestCase):
     @given(X=hu.arrays(dims=[2, 1],
-                       elements=st.floats(min_value=0.0, max_value=10.0)),
+                       elements=hu.floats(min_value=0.0, max_value=10.0)),
            label=hu.arrays(dims=[2, 1],
                            elements=st.integers(min_value=0, max_value=1),
                            dtype=np.float32),
@@ -48,12 +48,12 @@ class TestPairWiseLossOps(serial.SerializedTestCase):
         self.assertAlmostEqual(output, new_output)
 
     @given(X=hu.arrays(dims=[2, 1],
-                       elements=st.floats(min_value=0.0, max_value=10.0)),
+                       elements=hu.floats(min_value=0.0, max_value=10.0)),
            label=hu.arrays(dims=[2, 1],
                            elements=st.integers(min_value=0, max_value=1),
                            dtype=np.float32),
            dY=hu.arrays(dims=[1],
-                        elements=st.floats(min_value=1, max_value=10)),
+                        elements=hu.floats(min_value=1, max_value=10)),
            **hu.gcs_cpu_only)
     def test_pair_wise_loss_gradient(self, X, label, dY, gc, dc):
         workspace.FeedBlob('X', X)

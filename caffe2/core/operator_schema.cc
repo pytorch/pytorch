@@ -1,7 +1,31 @@
 #include "caffe2/core/operator_schema.h"
 #include "caffe2/core/logging.h"
 
+#include <iostream>
+
+#include <c10/util/irange.h>
+
 namespace caffe2 {
+
+// NOLINTNEXTLINE(modernize-pass-by-value)
+OpSchema::OpSchema(const string& type, const string& file, const int line)
+   : type_(type), file_(file), line_(line), tensor_inference_function_(
+      [](const OperatorDef& def, const vector<TensorShape>&) {
+        vector<TensorShape> out;
+        for (int i = 0; i < def.output_size(); i++) {
+          TensorShape ts;
+          ts.set_unknown_shape(true);
+          out.push_back(ts);
+        }
+        return out;
+      }), device_inference_function_(
+      [](const OperatorDef& def) {
+        auto op_device =
+            def.has_device_option() ? def.device_option() : DeviceOption();
+        vector<DeviceOption> in_dev(def.input_size(), op_device);
+        vector<DeviceOption> out_dev(def.output_size(), op_device);
+        return std::make_pair(in_dev, out_dev);
+      }) {}
 
 bool OpSchema::Verify(const OperatorDef& def) const {
   // Check the number of inputs.
@@ -237,7 +261,7 @@ OpSchema& OpSchema::IdenticalTypeAndShapeOfMultipleInputs(
   return TensorInferenceFunction(
       [indices](const OperatorDef&, const vector<TensorShape>& input_types) {
         vector<TensorShape> out(indices.size());
-        for (int i = 0; i < indices.size(); i++) {
+        for (const auto i : c10::irange(indices.size())) {
           out[i] = input_types[indices.at(i)];
         }
         return out;
@@ -283,13 +307,14 @@ OpSchema& OpSchema::SetDoc(const string& doc) {
 
 OpSchema&
 OpSchema::Arg(const char* name, const char* description, bool required) {
+  // NOLINTNEXTLINE(modernize-use-emplace)
   args_.push_back(Argument(name, description, required));
   return *this;
 }
 
 #define DEFINE_STANDARG_ARG(name, str)                                \
-  CAFFE2_API const char* OpSchema::Arg_##name = #str;                 \
-  CAFFE2_API OpSchema& OpSchema::Arg##name(const char* description) { \
+  TORCH_API const char* OpSchema::Arg_##name = #str;                 \
+  TORCH_API OpSchema& OpSchema::Arg##name(const char* description) { \
     return Arg(#str, description, true);                              \
   }
 
@@ -447,6 +472,7 @@ std::vector<TensorFiller> OpSchema::SupplyDenseFillers(
     const std::vector<std::vector<int64_t>>& shapes) {
   std::vector<TensorFiller> fillers;
   for (const auto& shape : shapes) {
+    // NOLINTNEXTLINE(performance-inefficient-vector-operation)
     fillers.emplace_back(shape);
   }
   return fillers;
@@ -494,6 +520,22 @@ C10_EXPORT std::ostream& operator<<(std::ostream& out, const OpSchema& schema) {
     out << "Defined at " << schema.file_ << ":" << schema.line_ << std::endl;
   }
   return out;
+}
+
+OpSchema& OpSchemaRegistry::NewSchema(const string& key, const string& file, const int line) {
+  auto& m = map();
+  auto it = m.find(key);
+  if (it != m.end()) {
+    const auto& schema = it->second;
+    std::ios_base::Init init;
+    std::cerr << "Trying to register schema with name " << key
+              << " from file " << file << " line " << line
+              << ", but it is already registered from file " << schema.file()
+              << " line " << schema.line();
+    abort();
+  }
+  m.emplace(key, OpSchema(key, file, line));
+  return m[key];
 }
 
 CaffeMap<string, OpSchema>& OpSchemaRegistry::map() {

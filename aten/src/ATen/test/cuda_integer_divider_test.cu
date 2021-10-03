@@ -9,9 +9,11 @@
 #include <vector>
 
 #include <ATen/cuda/CUDAContext.h>
-#include <THC/THCIntegerDivider.cuh>
+#include <ATen/cuda/detail/IntegerDivider.cuh>
 
 using std::vector;
+using at::cuda::detail::IntDivider;
+using at::cuda::detail::DivMod;
 
 template<typename Value>
 struct TestCase {
@@ -123,6 +125,7 @@ class IntDividerTester {
 
     int numCases = testCases_.size();
     testIntDivider<Value><<<512, 512>>>(dividersBuf_, testCasesBuf_, numCases);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     dividers_.clear();
     testCases_.clear();

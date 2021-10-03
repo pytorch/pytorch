@@ -1,15 +1,14 @@
-#include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
-
+#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
 #include <torch/csrc/jit/codegen/cuda/ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/mutator.h>
-#include <torch/csrc/jit/codegen/cuda/tensor.h>
-
-#include <torch/csrc/jit/codegen/cuda/dispatch.h>
 
 #include <torch/csrc/jit/ir/ir.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <iostream>
 #include <stdexcept>
@@ -19,62 +18,105 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
+
+Statement::Statement(const Statement* src, IrCloner* ir_cloner) {
+  name_ = src->name_;
+  fusion_ = ir_cloner->fusion();
+  ir_cloner->registerClone(src, this);
+}
 
 Val* Statement::asVal() {
   TORCH_INTERNAL_ASSERT(isVal(), "Cannot cast to Val as this is not a Val.");
-  return static_cast<Val*>(this);
+  return this->as<Val>();
 }
 
 Expr* Statement::asExpr() {
   TORCH_INTERNAL_ASSERT(isExpr(), "Cannot cast to Expr as this is not a Expr.");
-  return static_cast<Expr*>(this);
+  return this->as<Expr>();
+}
+
+void Statement::print() const {
+  IrPrinter ir_printer(std::cout);
+  ir_printer.handle(this);
+  std::cout << std::endl;
 }
 
 // When we create a Val we immediately register them with the active fusion.
-Val::Val(ValType _vtype, DataType _dtype) : vtype_{_vtype}, dtype_{_dtype} {
+Val::Val(ValType _vtype, DataType _dtype, bool register_val)
+    : vtype_(_vtype), dtype_(_dtype) {
   Fusion* fusion = FusionGuard::getCurFusion();
-  if (fusion != nullptr) {
-    this->name_ = fusion->registerVal(this);
-    this->fusion_ = fusion;
-  } else {
-    TORCH_CHECK(false, "No active fusion group found when creating a Val.");
+  TORCH_CHECK(
+      fusion != nullptr, "No active fusion group found when creating a Val.");
+  fusion_ = fusion;
+  if (register_val) {
+    name_ = fusion_->registerVal(this);
   }
+}
+
+// NOTE: we don't clone the definition_ and uses_ here
+//  since they may introduce cloning cycles. Instead, we copy
+//  the original pointers and we'll fix them up later part of the
+//  Fusion copy. Neither definition_ nor uses_ are copied through
+//  this constructor now leaving them to be resolved by later stages
+//
+Val::Val(const Val* src, IrCloner* ir_cloner)
+    : Statement(src, ir_cloner),
+      vtype_(src->vtype_),
+      dtype_(src->dtype_),
+      is_fusion_input_(src->is_fusion_input_),
+      is_fusion_output_(src->is_fusion_output_) {}
+
+const std::vector<Expr*>& Val::uses() const {
+  if (vtype_ == ValType::TensorView) {
+    if (!fusion()->isTVUseInfoValid() && !fusion()->isUpdatingTVUseInfo()) {
+      fusion()->resetTvUses();
+    }
+  }
+  return uses_;
 }
 
 namespace {
 
-struct ConstCheck : OptOutConstDispatch {
+// Traverse definition of all values involved in constructing the provided val.
+// Check if all values involved are constant values, meaning the provided
+// val is also a constant value.
+class ConstCheck : OptOutConstDispatch {
  private:
-  bool is_const_ = false;
+  bool is_const_ = true;
 
-  void handle(const Float* const f) override {
-    is_const_ = f->isConst();
+  void handle(const Bool* b) override {
+    is_const_ = is_const_ && b->isConst();
   }
 
-  void handle(const Int* const i) override {
-    is_const_ = i->isConst();
+  void handle(const Double* d) override {
+    is_const_ = is_const_ && d->isConst();
   }
 
-  void handle(const Expr* const expr) override {
+  void handle(const Int* i) override {
+    is_const_ = is_const_ && i->isConst();
+  }
+
+  void handle(const NamedScalar* ns) override {
+    is_const_ = is_const_ && false;
+  }
+
+  void handle(const Expr* expr) override {
     for (auto inp : expr->inputs()) {
-      OptOutConstDispatch::handle(inp);
+      handle(inp);
     }
   }
 
-  void handle(const NamedScalar* const ns) override {
-    is_const_ = false;
-  }
-
-  void handle(const Val* const val) override {
-    const Expr* orig = FusionGuard::getCurFusion()->origin(val);
-    if (orig != nullptr)
-      handle(orig);
-    else
+  void handle(const Val* val) override {
+    if (val->definition() != nullptr) {
+      handle(val->definition());
+    } else {
       OptOutConstDispatch::handle(val);
+    }
   }
 
  public:
-  static bool isConst(const Val* const val) {
+  static bool isConst(const Val* val) {
     ConstCheck cc;
     cc.handle(val);
     return cc.is_const_;
@@ -82,10 +124,30 @@ struct ConstCheck : OptOutConstDispatch {
 };
 
 } // namespace
+
 bool Val::isConstScalar() const {
   if (!isScalar())
     return false;
   return ConstCheck::isConst(this);
+}
+
+c10::optional<int64_t> Val::getInt() const {
+  if (isConstScalar() && isAnInt()) {
+    if (this->getValType() == ValType::Scalar) {
+      return this->as<Int>()->value();
+    }
+  }
+  return c10::optional<int64_t>();
+}
+
+bool Val::isZeroInt() const {
+  auto int_val = getInt();
+  return int_val.has_value() && int_val.value() == 0;
+}
+
+bool Val::isOneInt() const {
+  auto int_val = getInt();
+  return int_val.has_value() && int_val.value() == 1;
 }
 
 c10::optional<DataType> Val::getDataType() const {
@@ -94,138 +156,62 @@ c10::optional<DataType> Val::getDataType() const {
   return dtype_;
 }
 
-Expr* Val::getOrigin() {
-  return (fusion_->origin(this));
-}
+bool Val::isProducerOf(const Val* other) const {
+  TORCH_INTERNAL_ASSERT(other != nullptr);
+  TORCH_INTERNAL_ASSERT(fusion() == other->fusion());
 
-void Scope::insert_before(Expr* ref, Expr* expr) {
-  auto it = exprs_.begin();
-  while (it != exprs_.end()) {
-    if ((*it)->sameAs(ref))
-      break;
-    it++;
-  }
-  if (it != exprs_.end())
-    exprs_.insert(it, expr);
-}
-
-void Scope::insert_after(Expr* ref, Expr* expr) {
-  auto it = exprs_.begin();
-  while (it != exprs_.end()) {
-    if (*it == ref)
-      break;
-    it++;
-  }
-  if (it != exprs_.end())
-    exprs_.insert(++it, expr);
-}
-
-void Scope::erase(Expr* ref) {
-  auto it = exprs_.begin();
-  while (it != exprs_.end()) {
-    if (*it == ref)
-      break;
-    it++;
-  }
-  if (it != exprs_.end())
-    exprs_.erase(it);
-}
-
-bool Scope::contains(Expr* expr) const {
-  for (auto e : exprs_)
-    if (e == expr)
-      return true;
-  return false;
-}
-
-bool Scope::sameAs(const Scope& other) const {
-  if (other.exprs().size() != this->exprs().size())
+  if (definition() == nullptr) {
     return false;
-  for (decltype(exprs().size()) i{0}; i < exprs().size(); i++)
-    if (other.exprs()[i] != exprs()[i])
-      return false;
-  return true;
-}
-
-bool IRInputOutput::hasInput(const Val* const input) const {
-  for (auto val : inputs_)
-    if (val == input)
-      return true;
-  return false;
-}
-
-bool IRInputOutput::hasOutput(const Val* const output) const {
-  for (auto val : outputs_)
-    if (val == output)
-      return true;
-  return false;
-}
-
-void IRInputOutput::replaceInput(Val* replace, Val* with) {
-  bool changed = false;
-  for (decltype(inputs_.size()) i{0}; i < inputs_.size(); i++) {
-    if (inputs_[i] == replace) {
-      inputs_[i] = with;
-      changed = true;
-      break;
-    }
   }
-  TORCH_INTERNAL_ASSERT(
-      changed,
-      "Error detected when trying to replace input ",
-      replace,
-      " with ",
-      with,
-      " .");
+  return std::any_of(
+      definition()->inputs().begin(),
+      definition()->inputs().end(),
+      [other](const Val* input) { return input == other; });
 }
 
-void IRInputOutput::replaceOutput(Val* replace, Val* with) {
-  bool changed = false;
-  for (decltype(outputs_.size()) i{0}; i < outputs_.size(); i++) {
-    if (outputs_[i] == replace) {
-      outputs_[i] = with;
-      changed = true;
-      break;
-    }
-  }
-  TORCH_INTERNAL_ASSERT(
-      changed,
-      "Error detected when trying to replace output ",
-      replace,
-      " with ",
-      with,
-      " .");
-}
-
-void IRInputOutput::removeInput(Val* val) {
-  auto it = inputs_.begin();
-  for (; it != inputs_.end(); ++it) {
-    if ((*it) == val)
-      break;
-  }
-  TORCH_INTERNAL_ASSERT(it != inputs_.end());
-  inputs_.erase(it);
-}
-
-void IRInputOutput::removeOutput(Val* val) {
-  auto it = outputs_.begin();
-  for (; it != outputs_.end(); ++it) {
-    if ((*it) == val)
-      break;
-  }
-  TORCH_INTERNAL_ASSERT(it != outputs_.end());
-  outputs_.erase(it);
+bool Val::isConsumerOf(const Val* other) const {
+  return other->isProducerOf(this);
 }
 
 // We don't register with the active fusion in Expr as this needs to be done
 // after inputs and outputs are registered with the Expr
-Expr::Expr(ExprType _type) : type_{_type} {
+Expr::Expr(ExprType type) : type_{type} {
   Fusion* fusion = FusionGuard::getCurFusion();
   if (fusion == nullptr)
     TORCH_CHECK(false, "No active fusion group found when creating an Expr.");
-  this->fusion_ = fusion;
+  fusion_ = fusion;
 }
 
+Expr::Expr(const Expr* src, IrCloner* ir_cloner)
+    : Statement(src, ir_cloner),
+      type_(src->type_),
+      inputs_(ir_cloner->clone(src->inputs_)),
+      outputs_(ir_cloner->clone(src->outputs_)) {}
+
+bool Expr::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (!other->isA<Expr>()) {
+    return false;
+  }
+  const Expr* other_expr = other->as<Expr>();
+  if (getExprType() != other_expr->getExprType()) {
+    return false;
+  }
+  if (inputs().size() != other_expr->inputs().size() ||
+      outputs().size() != other_expr->outputs().size()) {
+    return false;
+  }
+  for (const auto i : c10::irange(inputs().size())) {
+    if (!input(i)->sameAs(other_expr->input(i))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

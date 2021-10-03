@@ -4,132 +4,106 @@
 
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
 
+#include <c10/util/irange.h>
+
 #include <iostream>
 
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
-struct Fusion;
-
-struct Statement;
-
-struct Val;
-struct Expr;
-
-struct UnaryOp;
-struct BinaryOp;
-
-struct ForLoop;
-struct IfThenElse;
-
-struct TensorDomain;
-struct TensorView;
-struct IterDomain;
-struct TensorIndex;
-
-struct TensorContiguity;
-
-struct Split;
-struct Merge;
-struct Reorder;
-
-struct Float;
-struct Int;
-struct Add;
-
-/*
- * Define pretty printing functions for all nodes. handle is used so we can take
- * advantage of OptInConstDispatch. Where we will throw an error if a print
- * function is not defined for a node. Stream operator << is also provided for
- * Fusion&, Fusion* and Statement* which allow us to print any node through
- * stream operator <<.
- */
-
-struct TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
-  std::ostream& os;
-  bool print_inline_ = false;
-
-  // Track the indentation size for pretty printing
-  int indent_size = 0;
+//! Define pretty printing functions for IR nodes
+//!
+//! This class is intended for debug printing, so it attempts
+//! to handle invalid states as well.
+//!
+class TORCH_CUDA_CU_API IrPrinter : public OptInConstDispatch {
+ public:
+  explicit IrPrinter(std::ostream& os) : os_(os) {}
 
   // Indent the generated code
   void indent() {
-    for (int i = 0; i < indent_size; i++)
-      os << "  ";
+    for (const auto i : c10::irange(indent_size_)) {
+      (void)i; // Suppress unused variable warning
+      os_ << "  ";
+    }
   }
 
   void resetIndent() {
-    indent_size = 0;
+    indent_size_ = 0;
   }
 
-  void printHeader(Fusion* fusion, const std::string& kernel_name_);
+  bool printInline() const {
+    return print_inline_;
+  }
 
- public:
-  IRPrinter(std::ostream& _os) : os(_os) {}
-
-  virtual void handle(Fusion* const f);
+  virtual void handle(Fusion* f);
 
   // handle calls some non const fusion ops,
   // eventhough fusion should remain unchanged.
   // Need to look into this.
-  virtual void handle(const Fusion* const f) {
+  virtual void handle(const Fusion* f) {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
     handle(const_cast<Fusion*>(f));
   }
+
   virtual void handle(Fusion& f) {
     handle(&f);
   }
 
-  virtual void handle(const Statement* const s) {
-    OptInConstDispatch::handle(s);
-  };
+  void handle(const Statement* s) override;
+  void handle(const Val* v) override;
+  void handle(const Expr* e) override;
 
-  virtual void handle(const Val* const v) {
-    OptInConstDispatch::handle(v);
-  };
-  virtual void handle(const Expr* const e) {
-    OptInConstDispatch::handle(e);
-  };
+  void handle(const TensorDomain*) override;
+  void handle(const TensorView*) override;
+  void handle(const IterDomain*) override;
 
-  virtual void handle(const TensorDomain* const);
-  virtual void handle(const TensorView* const);
-  virtual void handle(const IterDomain* const);
-  virtual void handle(const TensorIndex* const);
-  virtual void handle(const TensorContiguity* const);
+  void handle(const Bool*) override;
+  void handle(const Double*) override;
+  void handle(const Int*) override;
+  void handle(const NamedScalar*) override;
 
-  virtual void handle(const Float* const);
-  virtual void handle(const Int* const);
-  virtual void handle(const NamedScalar* const);
+  void handle(const UnaryOp*) override;
+  void handle(const BinaryOp*) override;
+  void handle(const TernaryOp*) override;
+  void handle(const ReductionOp*) override;
+  void handle(const WelfordOp*) override;
+  void handle(const BroadcastOp*) override;
+  void handle(const TransposeOp*) override;
+  void handle(const ShiftOp*) override;
+  void handle(const GatherOp*) override;
 
-  virtual void handle(const UnaryOp* const);
-  virtual void handle(const BinaryOp* const);
+  void handle(const Split*) override;
+  void handle(const Merge*) override;
 
-  virtual void handle(const ForLoop* const);
-  virtual void handle(const IfThenElse* const);
-  virtual void handle(const Allocate* const);
-
-  virtual void handle(const Split* const);
-  virtual void handle(const Merge* const);
-  virtual void handle(const Reorder* const);
-
-  void print_inline(const Statement* const stmt) {
+  void print_inline(const Statement* stmt) {
     bool prev = print_inline_;
     print_inline_ = true;
     handle(stmt);
     print_inline_ = prev;
   }
 
-  void printKernel(
-      const std::vector<Expr*>& exprs,
-      const std::string& kernel_name);
+ protected:
+  std::ostream& os() {
+    return os_;
+  }
+
+ private:
+  std::ostream& os_;
+  bool print_inline_ = false;
+  int indent_size_ = 0;
 };
 
-TORCH_CUDA_API std::ostream& operator<<(
+TORCH_CUDA_CU_API std::ostream& operator<<(
     std::ostream& os,
-    const Statement* const stmt);
-TORCH_CUDA_API std::ostream& operator<<(std::ostream& os, Fusion* f);
-TORCH_CUDA_API std::ostream& operator<<(std::ostream& os, Fusion& f);
+    const Statement* stmt);
 
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream& os, Fusion* f);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream& os, Fusion& f);
+
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

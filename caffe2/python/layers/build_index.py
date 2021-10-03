@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import numpy as np
 
@@ -32,7 +32,7 @@ class MapToRange(ModelLayer):
 
         self.handler = self.create_param(
             param_name='handler',
-            shape=None,
+            shape=[],
             initializer=('LongIndexCreate', {'max_elements': self.max_index}),
             optimizer=model.NoOptim
         )

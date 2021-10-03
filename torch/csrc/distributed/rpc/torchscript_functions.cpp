@@ -1,33 +1,56 @@
-#include <torch/csrc/distributed/rpc/torchscript_functions.h>
-
+#include <ATen/ThreadLocalState.h>
+#include <fmt/format.h>
+#include <torch/csrc/autograd/record_function_ops.h>
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/message.h>
+#include <torch/csrc/distributed/rpc/profiler/remote_profiler_manager.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/script_call.h>
+#include <torch/csrc/distributed/rpc/torchscript_functions.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
 
-c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
+c10::intrusive_ptr<JitFuture> rpcTorchscript(
     const std::string& dstWorkerName,
     const c10::QualifiedName& qualifiedName,
     const c10::FunctionSchema& functionSchema,
     std::vector<c10::IValue>& stack,
-    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
-  auto scriptCall =
-      std::make_unique<ScriptCall>(qualifiedName, std::move(stack));
+    const float rpcTimeoutSeconds,
+    const bool isAsyncExecution) {
+  // This dummy tensor holds an at::RecordFunction when profiling is enabled.
+  // This is because at::RecordFunction is not yet registered as a TorchScript
+  // custom class (https://github.com/pytorch/pytorch/issues/35026)
+  at::Tensor handle = at::zeros(1);
+  auto shouldProfile = torch::autograd::profiler::profilerEnabled() &&
+      !torch::distributed::rpc::RemoteProfilerManager::getInstance()
+           .isCurrentKeySet();
+  if (shouldProfile) {
+    auto rpcAsyncJitKey = fmt::format(
+        "rpc_async_jit#{}({} -> {})",
+        qualifiedName
+            .qualifiedName(), /* name of torchscript function being run */
+        RpcAgent::getCurrentRpcAgent()->getWorkerInfo().name_,
+        dstWorkerName);
+    handle = torch::autograd::profiler::record_function_enter(rpcAsyncJitKey);
+    auto& remoteProfilerManager =
+        torch::distributed::rpc::RemoteProfilerManager::getInstance();
+    remoteProfilerManager.setCurrentKey(rpcAsyncJitKey);
+  }
+  auto scriptCall = std::make_unique<ScriptCall>(
+      qualifiedName, std::move(stack), isAsyncExecution);
   auto rpcAgentPtr = RpcAgent::getCurrentRpcAgent();
-  auto futMessage = autograd::sendMessageWithAutograd(
+  auto jitFuture = autograd::sendMessageWithAutograd(
       *rpcAgentPtr,
       rpcAgentPtr->getWorkerInfo(dstWorkerName),
       std::move(*scriptCall).toMessage(),
       true /*forceGradRecording*/,
-      rf);
+      rpcTimeoutSeconds);
 
-  // Get function return type to construct c10::ivalue::Future.
+  // Get function return type to construct JitFuture.
   auto returns = functionSchema.returns();
   // Script call only allows single IValue returned.
   TORCH_INTERNAL_ASSERT(
@@ -39,15 +62,22 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
 
   // Create a JIT future and pass it to futMessage's callback to set state
   // of the JIT future.
-  auto futPtr = c10::make_intrusive<c10::ivalue::Future>(returnType);
-  futMessage->addCallback([futPtr, futMessage]() {
-    if (futMessage->hasError()) {
-      c10::ivalue::Future::FutureError jitFutErr(futMessage->error()->what());
-      futPtr->setError(std::move(jitFutErr));
+  auto futPtr = jitFuture->createInstance(returnType);
+  jitFuture->addCallback(at::wrapPropagateTLSState([futPtr](JitFuture& future) {
+    if (future.hasError()) {
+      futPtr->setError(future.exception_ptr());
     } else {
-      futPtr->markCompleted(deserializeRespToIValue(futMessage->constValue()));
+      futPtr->markCompleted(
+          deserializeRespToIValue(
+              *future.constValue().toCustomClass<Message>()),
+          future.storages());
     }
-  });
+  }));
+  if (shouldProfile) {
+    auto profiledFutPtr =
+        torch::autograd::profiler::_call_end_callbacks_on_fut(handle, futPtr);
+    return profiledFutPtr;
+  }
   return futPtr;
 }
 
@@ -56,7 +86,8 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
     const c10::QualifiedName& qualifiedName,
     const c10::FunctionSchema& functionSchema,
     std::vector<c10::IValue>& stack,
-    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
+    const float rpcTimeoutSeconds,
+    const bool isAsyncExecution) {
   auto rpcAgentPtr = RpcAgent::getCurrentRpcAgent();
   auto dstWorkerInfo = rpcAgentPtr->getWorkerInfo(dstWorkerName);
   auto& ctx = RRefContext::getInstance();
@@ -78,19 +109,22 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         qualifiedName,
         std::move(stack),
         userRRefPtr->rrefId(),
-        userRRefPtr->forkId());
+        userRRefPtr->forkId(),
+        isAsyncExecution);
 
-    auto fm = torch::distributed::autograd::sendMessageWithAutograd(
+    auto jitFuture = torch::distributed::autograd::sendMessageWithAutograd(
         *rpcAgentPtr,
         dstWorkerInfo,
         std::move(*scriptRemoteCall).toMessage(),
         true /*forceGradRecording*/,
-        rf);
+        rpcTimeoutSeconds /* timeout */);
 
+    userRRefPtr->registerOwnerCreationFuture(jitFuture);
     ctx.addPendingUser(userRRefPtr->forkId(), userRRefPtr);
-    fm->addCallback([forkId{userRRefPtr->forkId()}, fm]() {
-      callback::confirmPendingUser(fm, forkId);
-    });
+    jitFuture->addCallback(at::wrapPropagateTLSState(
+        [forkId{userRRefPtr->forkId()}](JitFuture& future) {
+          callback::confirmPendingUser(future, forkId);
+        }));
 
     return userRRefPtr;
   } else {
@@ -102,16 +136,21 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         qualifiedName,
         std::move(stack),
         ownerRRefPtr->rrefId(),
-        ownerRRefPtr->rrefId());
+        ownerRRefPtr->rrefId(),
+        isAsyncExecution);
 
-    auto fm = torch::distributed::autograd::sendMessageWithAutograd(
+    auto jitFuture = torch::distributed::autograd::sendMessageWithAutograd(
         *rpcAgentPtr,
         dstWorkerInfo,
         std::move(*scriptRemoteCall).toMessage(),
         true /*forceGradRecording*/,
-        rf);
+        rpcTimeoutSeconds /* timeout */);
 
-    fm->addCallback([fm]() { callback::finishCreatingOwnerRRef(fm); });
+    ownerRRefPtr->registerOwnerCreationFuture(jitFuture);
+    jitFuture->addCallback(at::wrapPropagateTLSState(
+        [ownerRRefId = ownerRRefPtr->rrefId()](JitFuture& future) {
+          callback::finishCreatingOwnerRRef(future, ownerRRefId);
+        }));
     return ownerRRefPtr;
   }
 }

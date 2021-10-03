@@ -30,4 +30,3 @@ for i, test in ipairs(tests) do
         end
     end
 end
-

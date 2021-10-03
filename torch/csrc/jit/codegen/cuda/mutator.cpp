@@ -1,56 +1,42 @@
-#include <torch/csrc/jit/codegen/cuda/mutator.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/mutator.h>
 
 #include <vector>
 
 namespace torch {
 namespace jit {
 namespace fuser {
-
-void OptOutMutator::mutate(Fusion* fusion) {
-  std::vector<Expr*> orig_exprs = fusion->exprs();
-
-  /*
-   * We go through all the exprs, in topologically sorted order. We call mutate
-   * on them which could insert nodes, removes nodes, or both. These operations
-   * modify the dag and the Fusion will keep track of what has/hasn't been
-   * changed by the origin dependency tracking that it does. If an operation is
-   * added, and its output node is a val which previously was the output of
-   * another expresion, that older expresion will be removed as we can only
-   * assign a Val once due to our SSA restriction. Therefore we don't need to
-   * manually track what expressions stayed constant or were changed.
-   */
-
-  for (Statement* stmt : orig_exprs)
-    mutate(stmt);
-}
+namespace cuda {
 
 // MUTATE FUNCTIONS FOR VALS
 
 Statement* OptOutMutator::mutate(IterDomain* id) {
-  Val* s = mutateAsVal(id->size())->asVal();
-  if (!s->sameAs(id->size())) {
-    Val* mutated_val =
-        new IterDomain(s, id->parallel_method(), id->isReduction());
-    registerMutation(id, mutated_val);
-    return mutated_val;
-  }
-  return id;
+  Val* s = mutateAsVal(id->start())->asVal();
+  Val* e = mutateAsVal(id->extent())->asVal();
+  if (s->sameAs(id->start()) && e->sameAs(id->extent()))
+    return id;
+
+  Val* mutated_val = new IterDomain(
+      s, e, id->getParallelType(), id->getIterType(), id->isRFactorProduct());
+  registerMutation(id, mutated_val);
+  return mutated_val;
 }
 
 Statement* OptOutMutator::mutate(TensorDomain* td) {
   std::vector<IterDomain*> dom;
   bool mutated = false;
-  for (decltype(td->size()) i = 0; i < td->size(); i++) {
-    IterDomain* id = static_cast<IterDomain*>(mutateAsVal(td->axis(i)));
+  for (const auto i : c10::irange(td->nDims())) {
+    IterDomain* id = mutateAsVal(td->axis(i))->as<IterDomain>();
     dom.push_back(id);
     if (!id->sameAs(td->axis(i)))
       mutated = true;
   }
 
   if (mutated) {
-    Val* mutated_val = new TensorDomain(dom);
+    Val* mutated_val = new TensorDomain(
+        td->getRootDomain(), td->getRFactorDomain(), dom, td->contiguity());
     registerMutation(td, mutated_val);
     return mutated_val;
   }
@@ -58,101 +44,58 @@ Statement* OptOutMutator::mutate(TensorDomain* td) {
 }
 
 Statement* OptOutMutator::mutate(TensorView* tv) {
-  TensorDomain* td = static_cast<TensorDomain*>(mutateAsVal(tv->domain()));
+  TensorDomain* td = mutateAsVal(tv->domain())->as<TensorDomain>();
 
-  TensorView* computeAtView = nullptr;
-  if (tv->hasComputeAt())
-    computeAtView =
-        static_cast<TensorView*>(mutateAsVal(tv->getComputeAtView()));
-
-  if (!tv->domain()->sameAs(td) ||
-      (tv->hasComputeAt() && !tv->getComputeAtView()->sameAs(computeAtView))) {
+  if (!tv->domain()->sameAs(td)) {
     TensorView* mutated_tv = new TensorView(td, tv->getDataType().value());
-    if (tv->hasComputeAt()) {
-      mutated_tv->setComputeAt(computeAtView, (int)(tv->getComputeAtAxis()));
-    }
     registerMutation(tv, mutated_tv);
     return mutated_tv;
   }
   return tv;
 }
 
-Statement* OptOutMutator::mutate(TensorIndex* ti) {
-  std::vector<Statement*> inds;
-  for (auto* ind : ti->indices())
-    inds.push_back(mutateAsVal(ind));
-
-  bool changed = false;
-  for (decltype(inds.size()) i{0}; i < inds.size(); i++) {
-    TORCH_INTERNAL_ASSERT(inds[i]->isVal() && inds[i]->asVal()->isAnInt());
-    if (!inds[i]->sameAs(ti->index(i)))
-      changed = true;
-  }
-
-  if (!changed)
-    return ti;
-
-  std::vector<Val*> valInds(inds.size(), nullptr);
-  for (decltype(inds.size()) i{0}; i < inds.size(); i++)
-    valInds[i] = inds[i]->asVal();
-
-  Val* mutated_val = new TensorIndex(ti->view(), valInds);
-  registerMutation(ti, mutated_val);
-  return mutated_val;
+Statement* OptOutMutator::mutate(Bool* b) {
+  return b;
 }
 
-Statement* OptOutMutator::mutate(Float* n) {
-  return n;
+Statement* OptOutMutator::mutate(Double* d) {
+  return d;
 }
-Statement* OptOutMutator::mutate(Int* n) {
-  return n;
+
+Statement* OptOutMutator::mutate(Int* i) {
+  return i;
 }
-Statement* OptOutMutator::mutate(NamedScalar* n) {
-  return n;
+
+Statement* OptOutMutator::mutate(NamedScalar* ns) {
+  return ns;
 }
 
 // MUTATE FUNCTIONS FOR EXPRESSIONS.
 
-Statement* OptOutMutator::mutate(Allocate* a) {
-  TensorView* tv = static_cast<TensorView*>(mutateAsVal(a->buffer()));
-  Val* ext = mutateAsVal(a->extent())->asVal();
-  if (ext->sameAs(a->extent()) && tv->sameAs(a->buffer()))
-    return a;
-  FusionGuard::getCurFusion()->removeExpr(a);
-  return new Allocate(tv, ext);
-}
-
 Statement* OptOutMutator::mutate(Split* s) {
-  TensorDomain* o = static_cast<TensorDomain*>(mutateAsVal(s->out()));
-  TensorDomain* i = static_cast<TensorDomain*>(mutateAsVal(s->in()));
-  Int* fact = static_cast<Int*>(mutateAsVal(s->factor()));
+  IterDomain* ot = mutateAsVal(s->outer())->as<IterDomain>();
+  IterDomain* inr = mutateAsVal(s->inner())->as<IterDomain>();
+  IterDomain* in = mutateAsVal(s->in())->as<IterDomain>();
+  Val* fact = mutateAsVal(s->factor())->as<Val>();
 
-  if (o->sameAs(s->out()) && i->sameAs(s->in()) && fact->sameAs(s->factor()))
+  if (ot->sameAs(s->outer()) && inr->sameAs(s->inner()) &&
+      in->sameAs(s->in()) && areEqualScalars(fact, s->factor())) {
     return s;
+  }
   FusionGuard::getCurFusion()->removeExpr(s);
-  return new Split(o, i, s->axis(), fact);
+  return new Split(ot, inr, in, fact, s->innerSplit());
 }
 
 Statement* OptOutMutator::mutate(Merge* m) {
-  TensorDomain* o = static_cast<TensorDomain*>(mutateAsVal(m->out()));
-  TensorDomain* i = static_cast<TensorDomain*>(mutateAsVal(m->in()));
+  IterDomain* ot = mutateAsVal(m->out())->as<IterDomain>();
+  IterDomain* otr = mutateAsVal(m->outer())->as<IterDomain>();
+  IterDomain* in = mutateAsVal(m->inner())->as<IterDomain>();
 
-  if (o->sameAs(m->out()) && i->sameAs(m->in()))
+  if (ot->sameAs(m->out()) && otr->sameAs(m->outer()) && in->sameAs(m->inner()))
     return m;
 
   FusionGuard::getCurFusion()->removeExpr(m);
-  return new Merge(o, i, m->axis());
-}
-
-Statement* OptOutMutator::mutate(Reorder* ro) {
-  TensorDomain* o = static_cast<TensorDomain*>(mutateAsVal(ro->out()));
-  TensorDomain* i = static_cast<TensorDomain*>(mutateAsVal(ro->in()));
-
-  if (o->sameAs(ro->out()) && i->sameAs(ro->in()))
-    return ro;
-
-  FusionGuard::getCurFusion()->removeExpr(ro);
-  return new Reorder(o, i, ro->pos2axis());
+  return new Merge(ot, otr, in);
 }
 
 Statement* OptOutMutator::mutate(UnaryOp* uop) {
@@ -175,69 +118,109 @@ Statement* OptOutMutator::mutate(BinaryOp* bop) {
   return new BinaryOp(bop->getBinaryOpType(), out, lhs, rhs);
 }
 
-Statement* OptOutMutator::mutate(ForLoop* n) {
-  return n;
+Statement* OptOutMutator::mutate(TernaryOp* top) {
+  Val* out = mutateAsVal(top->out())->asVal();
+  Val* in1 = mutateAsVal(top->in1())->asVal();
+  Val* in2 = mutateAsVal(top->in2())->asVal();
+  Val* in3 = mutateAsVal(top->in3())->asVal();
+  if (out == top->out() && in1 == top->in1() && in2 == top->in2() &&
+      in3 == top->in3())
+    return top;
+  FusionGuard::getCurFusion()->removeExpr(top);
+  return new TernaryOp(top->getTernaryOpType(), out, in1, in2, in3);
 }
 
-Statement* OptOutMutator::mutate(IfThenElse* n) {
-  return n;
+Statement* OptOutMutator::mutate(ReductionOp* rop) {
+  Val* out = mutateAsVal(rop->out())->asVal();
+  Val* in = mutateAsVal(rop->in())->asVal();
+  Val* init = rop->init();
+  if (out->sameAs(rop->out()) && in->sameAs(rop->in()) &&
+      init->sameAs(rop->init()))
+    return rop;
+
+  return new ReductionOp(rop->getReductionOpType(), init, out, in);
 }
 
-// START REPLACE ALL
+namespace {
+inline bool compareOptional(Val* a, Val* b) {
+  if (!a || !b) {
+    return (!a && !b);
+  }
+  return a->sameAs(b);
+}
 
-void ReplaceAll::replaceInpOut() {
-  Fusion* fusion = FusionGuard::getCurFusion();
-  for (auto it : mutations) {
-    Val* val = it.first;
-    if (fusion->hasInput(val)) {
-      fusion->replaceInput(it.first, it.second);
-    } else if (fusion->hasOutput(val)) {
-      fusion->replaceOutput(it.first, it.second);
-    }
+} // namespace
+
+Statement* OptOutMutator::mutate(WelfordOp* wop) {
+  Val* out_avg = mutateAsVal(wop->outAvg())->asVal();
+  Val* out_var = mutateAsVal(wop->outVar())->asVal();
+  Val* out_N = mutateAsVal(wop->outN())->asVal();
+
+  Val* in_avg = mutateAsVal(wop->inAvg())->asVal();
+  Val* in_var = wop->inVar() ? mutateAsVal(wop->inVar())->asVal() : nullptr;
+  Val* in_N = mutateAsVal(wop->inN())->asVal();
+
+  Val* init_avg =
+      wop->initAvg() ? mutateAsVal(wop->initAvg())->asVal() : nullptr;
+  Val* init_var =
+      wop->initVar() ? mutateAsVal(wop->initVar())->asVal() : nullptr;
+  Val* init_N = mutateAsVal(wop->initN())->asVal();
+
+  const bool out_compare = out_avg->sameAs(wop->outAvg()) &&
+      out_var->sameAs(wop->outVar()) && out_N->sameAs(wop->outN());
+  const bool in_compare = in_avg->sameAs(wop->inAvg()) &&
+      compareOptional(in_var, wop->inVar()) && in_N->sameAs(wop->inN());
+  const bool init_compare = compareOptional(init_avg, wop->initAvg()) &&
+      compareOptional(init_var, wop->initVar()) && init_N->sameAs(wop->initN());
+
+  if (out_compare && init_compare && in_compare) {
+    return wop;
+  } else {
+    return new WelfordOp(
+        out_avg,
+        out_var,
+        out_N,
+        init_avg,
+        init_var,
+        init_N,
+        in_avg,
+        in_var,
+        in_N);
   }
 }
 
-void ReplaceAll::instancesOf(Val* instance, Val* with) {
-  Fusion* fusion = FusionGuard::getCurFusion();
-  std::unordered_map<Val*, Val*> replacement_map;
-  replacement_map[instance] = with;
-  ReplaceAll::instancesOf(replacement_map);
+Statement* OptOutMutator::mutate(BroadcastOp* bop) {
+  return bop;
 }
 
-void ReplaceAll::instancesOf(std::unordered_map<Val*, Val*> replacement_map) {
-  Fusion* fusion = FusionGuard::getCurFusion();
-
-  ReplaceAll ra(std::move(replacement_map));
-  // Get a copy because this will be modified in place, we shouldn't auto
-  // iterate on it
-  std::vector<Expr*> to_mutate;
-  for (Expr* expr : fusion->unordered_exprs())
-    to_mutate.push_back(expr);
-
-  for (Expr* expr : to_mutate)
-    ra.mutate(expr);
-
-  ra.replaceInpOut();
+Statement* OptOutMutator::mutate(TransposeOp* top) {
+  return top;
 }
 
-void ReplaceAll::instancesWithin(Val* instance, Val* with, Expr* within) {
-  if (within == nullptr)
-    return;
-  FusionGuard fg(within->fusion());
-  ReplaceAll ra(instance, with);
-  ra.mutate(within);
+Statement* OptOutMutator::mutate(ShiftOp* sop) {
+  Val* out = mutateAsVal(sop->out())->asVal();
+  Val* in = mutateAsVal(sop->in())->asVal();
+
+  if (out->sameAs(sop->out()) && in->sameAs(sop->in()))
+    return sop;
+  auto offsets = sop->offsets();
+  FusionGuard::getCurFusion()->removeExpr(sop);
+  return new ShiftOp(out, in, offsets);
 }
 
-void ReplaceAll::instancesWithin(
-    std::unordered_map<Val*, Val*> replacement_map,
-    Expr* within) {
-  if (within == nullptr)
-    return;
-  FusionGuard fg(within->fusion());
-  ReplaceAll ra(std::move(replacement_map));
-  ra.mutate(within);
+Statement* OptOutMutator::mutate(GatherOp* op) {
+  Val* out = mutateAsVal(op->out())->asVal();
+  Val* in = mutateAsVal(op->in())->asVal();
+
+  if (out->sameAs(op->out()) && in->sameAs(op->in()))
+    return op;
+  auto window_shape = op->windowShape();
+  auto pad_width = op->padWidth();
+  FusionGuard::getCurFusion()->removeExpr(op);
+  return new GatherOp(out, in, window_shape, pad_width);
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

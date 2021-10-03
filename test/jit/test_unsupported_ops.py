@@ -1,6 +1,5 @@
 import os
 import sys
-from textwrap import dedent
 
 import torch
 import unittest
@@ -8,7 +7,7 @@ import unittest
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.jit_utils import JitTestCase, execWrapper
+from torch.testing._internal.jit_utils import JitTestCase
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -31,61 +30,26 @@ class TestUnsupportedOps(JitTestCase):
         def ones():
             return torch.ones([2], requires_grad=True)
 
+        with self.assertRaisesRegexWithHighlight(Exception,
+                                                 "Keyword argument requires_grad unknown",
+                                                 "torch.ones"):
+            torch.jit.script(ones)
+
         def randn():
             return torch.randn([2], requires_grad=True)
+
+        with self.assertRaisesRegexWithHighlight(Exception,
+                                                 "Keyword argument requires_grad unknown",
+                                                 "torch.randn"):
+            torch.jit.script(randn)
 
         def zeros():
             return torch.zeros([2], requires_grad=True)
 
-        for func in [ones, randn, zeros]:
-            func()
-            with self.assertRaisesRegex(Exception, "Keyword argument requires_grad unknown"):
-                torch.jit.script(func)
-
-    def test_tensor_options_behavior_mismatch(self):
-        # Any schema declaration which contains a non-optional (ScalarType dtype, Layout layout, Device device)
-        # tuple is implicitly made to be optional for pytorch eager code. This makes the schema incorrect for JIT / C++ api.
-
-        # Complete issue and set of ops is https://github.com/pytorch/pytorch/issues/30763
-        # only testing one here because they should be fixed all at once
-        # ezyang: But actually, I handled all of the _like overloads first
-        # because they're special
-
-        with self.assertRaisesRegex(Exception, "Argument layout not provided."):
-            def foo():
-                return torch.sparse_coo_tensor((2, 2), dtype=torch.double)
-            foo()
-            print(torch.jit.script(foo).graph)
-
-    def test_ops_bound_in_functional(self):
-        ops_bound_in_functional = "unique",
-        tensor = torch.tensor([2])
-        funcs_template = dedent('''
-        def func():
-            return torch.{op}()
-        ''')
-        for op in ops_bound_in_functional:
-            funcs_str = funcs_template.format(op=op)
-            scope = {}
-            execWrapper(funcs_str, globals(), scope)
-            f = scope['func']
-            with self.assertRaisesRegex(Exception, "Unknown builtin op"):
-                cu = torch.jit.CompilationUnit(funcs_str)
-
-        def unique_consec():
-            x = torch.tensor([1])
-            return torch.unique_consecutive(x, return_inverse=False, return_counts=True, dim=0)
-
-        self.assertNotEqual(unique_consec(), torch.jit.script(unique_consec)())
-
-        def tensordot():
-            a = torch.arange(60.).reshape(3, 4, 5)
-            b = torch.arange(24.).reshape(4, 3, 2)
-            torch.tensordot(a, b, dims=([1, 0], [0, 1]))
-
-        tensordot()
-        with self.assertRaisesRegex(Exception, "Argument dims_self"):
-            torch.jit.script(tensordot)
+        with self.assertRaisesRegexWithHighlight(Exception,
+                                                 "Keyword argument requires_grad unknown",
+                                                 "torch.zeros"):
+            torch.jit.script(zeros)
 
     @unittest.skipIf(not torch._C.has_lapack, "PyTorch compiled without Lapack")
     def test_init_ops(self):

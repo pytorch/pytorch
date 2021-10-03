@@ -1,6 +1,13 @@
 import ctypes
 import torch
 
+from ._utils import _dummy_type
+
+
+if not hasattr(torch._C, '_CudaStreamBase'):
+    # Define dummy base classes
+    torch._C.__dict__['_CudaStreamBase'] = _dummy_type('_CudaStreamBase')
+    torch._C.__dict__['_CudaEventBase'] = _dummy_type('_CudaEventBase')
 
 class Stream(torch._C._CudaStreamBase):
     r"""Wrapper around a CUDA stream.
@@ -9,12 +16,16 @@ class Stream(torch._C._CudaStreamBase):
     device, independent from other streams.  See :ref:`cuda-semantics` for
     details.
 
-    Arguments:
+    Args:
         device(torch.device or int, optional): a device on which to allocate
             the stream. If :attr:`device` is ``None`` (default) or a negative
             integer, this will use the current device.
-        priority(int, optional): priority of the stream. Lower numbers
-                                 represent higher priorities.
+        priority(int, optional): priority of the stream. Can be either
+            -1 (high priority) or 0 (low priority). By default, streams have
+            priority 0.
+
+    .. note:: Although CUDA versions >= 11 support more than two levels of
+        priorities, in PyTorch, we only support two levels of priorities.
     """
 
     def __new__(cls, device=None, priority=0, **kwargs):
@@ -24,8 +35,8 @@ class Stream(torch._C._CudaStreamBase):
     def wait_event(self, event):
         r"""Makes all future work submitted to the stream wait for an event.
 
-        Arguments:
-            event (Event): an event to wait for.
+        Args:
+            event (torch.cuda.Event): an event to wait for.
 
         .. note:: This is a wrapper around ``cudaStreamWaitEvent()``: see
            `CUDA Stream documentation`_ for more info.
@@ -34,7 +45,7 @@ class Stream(torch._C._CudaStreamBase):
            operations are affected.
 
         .. _CUDA Stream documentation:
-           http://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html
+           https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html
         """
         event.wait(self)
 
@@ -44,7 +55,7 @@ class Stream(torch._C._CudaStreamBase):
         All future work submitted to this stream will wait until all kernels
         submitted to a given stream at the time of call complete.
 
-        Arguments:
+        Args:
             stream (Stream): a stream to synchronize.
 
         .. note:: This function returns without waiting for currently enqueued
@@ -55,8 +66,8 @@ class Stream(torch._C._CudaStreamBase):
     def record_event(self, event=None):
         r"""Records an event.
 
-        Arguments:
-            event (Event, optional): event to record. If not given, a new one
+        Args:
+            event (torch.cuda.Event, optional): event to record. If not given, a new one
                 will be allocated.
 
         Returns:
@@ -99,6 +110,29 @@ class Stream(torch._C._CudaStreamBase):
                 .format(self.device, self.cuda_stream))
 
 
+class ExternalStream(Stream):
+    r"""Wrapper around an externally allocated CUDA stream.
+
+    This class is used to wrap streams allocated in other libraries in order
+    to facilitate data exchange and multi-library interactions.
+
+    .. note:: This class doesn't manage the stream life-cycle, it is the user
+       responsibility to keep the referenced stream alive while this class is
+       being used.
+
+    Args:
+        stream_ptr(int): Integer representation of the `cudaStream_t` value.
+            allocated externally.
+        device(torch.device or int, optional): the device where the stream
+            was originally allocated. if device is specified incorrectly,
+            subsequent launches using this stream may fail.
+    """
+
+    def __new__(cls, stream_ptr, device=None, **kwargs):
+        with torch.cuda.device(device):
+            return super(Stream, cls).__new__(cls, stream_ptr=stream_ptr, **kwargs)
+
+
 class Event(torch._C._CudaEventBase):
     r"""Wrapper around a CUDA event.
 
@@ -111,7 +145,7 @@ class Event(torch._C._CudaEventBase):
     same device may record the event. However, streams on any device can wait on
     the event.
 
-    Arguments:
+    Args:
         enable_timing (bool, optional): indicates if the event should measure time
             (default: ``False``)
         blocking (bool, optional): if ``True``, :meth:`wait` will be blocking (default: ``False``)

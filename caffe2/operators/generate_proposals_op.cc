@@ -14,6 +14,7 @@ size_t ComputeStartIndex(
   DCHECK_EQ(index.size(), tensor.dim());
 
   size_t ret = 0;
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (int i = 0; i < index.size(); i++) {
     ret += index[i] * tensor.size_from_dim(i + 1);
   }
@@ -211,6 +212,7 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
     Eigen::Map<ERMatXf>(bbox_deltas_per_dim.data(), A, K) =
         Eigen::Map<const ERMatXf, 0, EigenOuterStride>(
             bbox_deltas_tensor.data() + j * K, A, K, stride);
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < order.size(); ++i) {
       bbox_deltas_sorted(i, j) = bbox_deltas_per_dim[order[i]];
     }
@@ -236,6 +238,7 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
   // 2. clip proposals to image (may result in proposals with zero area
   // that will be removed in the next step)
   proposals = utils::clip_boxes(
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       proposals, im_info[0], im_info[1], clip_angle_thresh_, legacy_plus_one_);
 
   // 3. remove predicted boxes with either height or width < min_size
@@ -246,6 +249,7 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
   // 6. apply loose nms (e.g. threshold = 0.7)
   // 7. take after_nms_topN (e.g. 300)
   // 8. return the top proposals (-> RoIs top)
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   if (post_nms_topN > 0 && post_nms_topN < keep.size()) {
     keep = utils::nms_cpu(
         proposals,
@@ -327,6 +331,7 @@ bool GenerateProposalsOp<CPUContext>::RunOnDevice() {
   for (int i = 0; i < num_images; i++) {
     roi_counts += im_boxes[i].rows();
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   const int roi_col_count = box_dim + 1;
   auto* out_rois = Output(0, {roi_counts, roi_col_count}, at::dtype<float>());
   auto* out_rois_probs = Output(1, {roi_counts}, at::dtype<float>());
@@ -415,25 +420,6 @@ SHOULD_NOT_DO_GRADIENT(GenerateProposalsCPP);
 } // namespace caffe2
 
 // clang-format off
-C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
-    GenerateProposals2,
-    "__caffe2::GenerateProposals("
-      "Tensor scores, "
-      "Tensor bbox_deltas, "
-      "Tensor im_info, "
-      "Tensor anchors, "
-      "float spatial_scale, "
-      "int pre_nms_topN, "
-      "int post_nms_topN, "
-      "float nms_thresh, "
-      "float min_size, "
-      "bool angle_bound_on, "
-      "int angle_bound_lo, "
-      "int angle_bound_hi, "
-      "float clip_angle_thresh, "
-      "bool legacy_plus_one"
-    ") -> (Tensor output_0, Tensor output_1)",
-    caffe2::GenerateProposalsOp<caffe2::CPUContext>);
 C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     GenerateProposals,
     "_caffe2::GenerateProposals("

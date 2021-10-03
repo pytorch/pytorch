@@ -38,7 +38,9 @@ bool UpsampleBilinearOp<float, CPUContext>::RunOnDevice() {
   const int num_channels = X.dim32(1);
   const int input_height = X.dim32(2);
   const int input_width = X.dim32(3);
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int output_width = input_width * width_scale_;
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int output_height = input_height * height_scale_;
   auto* Y = Output(
       0,
@@ -50,20 +52,28 @@ bool UpsampleBilinearOp<float, CPUContext>::RunOnDevice() {
   int channels = num_channels * batch_size;
 
   const float rheight = (output_height > 1)
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       ? (float)(input_height - 1) / (output_height - 1)
       : 0.f;
   const float rwidth =
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       (output_width > 1) ? (float)(input_width - 1) / (output_width - 1) : 0.f;
   for (int h2 = 0; h2 < output_height; ++h2) {
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     const float h1r = rheight * h2;
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     const int h1 = h1r;
     const int h1p = (h1 < input_height - 1) ? 1 : 0;
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     const float h1lambda = h1r - h1;
     const float h0lambda = (float)1. - h1lambda;
     for (int w2 = 0; w2 < output_width; ++w2) {
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       const float w1r = rwidth * w2;
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       const int w1 = w1r;
       const int w1p = (w1 < input_width - 1) ? 1 : 0;
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       const float w1lambda = w1r - w1;
       const float w0lambda = (float)1. - w1lambda;
       const float* Xdata = &input[h1 * input_width + w1];
@@ -116,21 +126,29 @@ bool UpsampleBilinearGradientOp<float, CPUContext>::RunOnDevice() {
   int channels = num_channels * batch_size;
 
   const float rheight = (input_height > 1)
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       ? (float)(output_height - 1) / (input_height - 1)
       : 0.f;
   const float rwidth =
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       (input_width > 1) ? (float)(output_width - 1) / (input_width - 1) : 0.f;
 
   for (int h2 = 0; h2 < input_height; ++h2) {
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     const float h1r = rheight * h2;
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     const int h1 = h1r;
     const int h1p = (h1 < output_height - 1) ? 1 : 0;
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     const float h1lambda = h1r - h1;
     const float h0lambda = (float)1. - h1lambda;
     for (int w2 = 0; w2 < input_width; ++w2) {
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       const float w1r = rwidth * w2;
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       const int w1 = w1r;
       const int w1p = (w1 < output_width - 1) ? 1 : 0;
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       const float w1lambda = w1r - w1;
       const float w0lambda = (float)1. - w1lambda;
       float* pos1 = &dXdata[h1 * output_width + w1];

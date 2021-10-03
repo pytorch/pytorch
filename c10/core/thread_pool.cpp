@@ -3,9 +3,9 @@
 namespace c10 {
 
 ThreadPool::ThreadPool(
-      int pool_size,
-      int numa_node_id,
-      std::function<void()> init_thread)
+    int pool_size,
+    int numa_node_id,
+    std::function<void()> init_thread)
     : threads_(pool_size < 0 ? defaultNumThreads() : pool_size),
       running_(true),
       complete_(true),
@@ -13,7 +13,7 @@ ThreadPool::ThreadPool(
       total_(threads_.size()),
       numa_node_id_(numa_node_id) {
   for (std::size_t i = 0; i < threads_.size(); ++i) {
-    threads_[i] = std::thread([this, i, init_thread](){
+    threads_[i] = std::thread([this, i, init_thread]() {
       if (init_thread) {
         init_thread();
       }
@@ -43,6 +43,7 @@ size_t ThreadPool::size() const {
 }
 
 size_t ThreadPool::numAvailable() const {
+  std::unique_lock<std::mutex> lock(mutex_);
   return available_;
 }
 
@@ -55,7 +56,7 @@ bool ThreadPool::inThreadPool() const {
   return false;
 }
 
-void ThreadPool::run(const std::function<void()>& func) {
+void ThreadPool::run(std::function<void()> func) {
   if (threads_.size() == 0) {
     throw std::runtime_error("No threads to run a task");
   }
@@ -63,7 +64,7 @@ void ThreadPool::run(const std::function<void()>& func) {
 
   // Set task and signal condition variable so that a worker thread will
   // wake up and use the task.
-  tasks_.push(task_element_t(func));
+  tasks_.emplace(std::move(func));
   complete_ = false;
   condition_.notify_one();
 }
@@ -94,7 +95,7 @@ void ThreadPool::main_loop(std::size_t index) {
     // useful in the event that the function contains
     // shared_ptr arguments bound via bind.
     {
-      auto tasks = tasks_.front();
+      task_element_t tasks = std::move(tasks_.front());
       tasks_.pop();
       // Decrement count, indicating thread is no longer available.
       --available_;
@@ -114,21 +115,27 @@ void ThreadPool::main_loop(std::size_t index) {
         LOG(ERROR) << "Exception in thread pool task: unknown";
       }
 
-      // Update status of empty, maybe
-      // Need to recover the lock first
-      lock.lock();
-
-      // Increment count, indicating thread is available.
-      ++available_;
-      if (tasks_.empty() && available_ == total_) {
-        complete_ = true;
-        completed_.notify_one();
-      }
-
-      // Deliberately hold the lock on the backedge, so this thread has an
-      // opportunity to acquire a new task before another thread acquires
-      // the lock.
+      // Destruct tasks before taking the lock.  As tasks
+      // are user provided std::function, they can run
+      // arbitrary code during destruction, including code
+      // that can reentrantly call into ThreadPool (which would
+      // cause a deadlock if we were holding the lock).
     }
+
+    // Update status of empty, maybe
+    // Need to recover the lock first
+    lock.lock();
+
+    // Increment count, indicating thread is available.
+    ++available_;
+    if (tasks_.empty() && available_ == total_) {
+      complete_ = true;
+      completed_.notify_one();
+    }
+
+    // Deliberately hold the lock on the backedge, so this thread has an
+    // opportunity to acquire a new task before another thread acquires
+    // the lock.
   } // while running_
 }
 

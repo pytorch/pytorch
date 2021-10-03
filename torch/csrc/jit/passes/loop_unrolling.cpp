@@ -2,8 +2,11 @@
 
 #include <ATen/core/interned_strings.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <torch/csrc/jit/ir/constants.h>
+#include <torch/csrc/jit/ir/ir_views.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 
 namespace torch {
@@ -33,9 +36,12 @@ bool isForLoop(Node* node) {
 int64_t limitedBlockSize(Block* body, int64_t limit) {
   auto it = body->nodes().begin();
   auto end = body->nodes().end();
-  for (int64_t i = 0; i < limit; ++i, ++it) {
+  for (int64_t i = 0; i < limit; ++it) {
     for (Block* subblock : it->blocks()) {
       i += limitedBlockSize(subblock, limit - i);
+    }
+    if (!it->notExecutedOp()) {
+      ++i;
     }
     if (it == end) {
       return i;
@@ -123,7 +129,8 @@ void repeatBody(Block* body, size_t times, Block* dest) {
   std::vector<Value*> io = dest->inputs().vec();
   TORCH_INTERNAL_ASSERT(
       !body->inputs().at(0)->hasUses(), "loop counter should be unused");
-  for (size_t i = 0; i < times; ++i) {
+  for (const auto i : c10::irange(times)) {
+    (void)i; // Suppress unused variable warning
     io[0] = body->inputs().at(0);
     io = insertBlockCopy(*graph, body, io);
   }
@@ -160,8 +167,6 @@ void replaceLoopCounter(Node* loop) {
 void unroll(Node* loop) {
   Graph* graph = loop->owningGraph();
   Block* body = loop->blocks().at(0);
-  if (!isSmallBlock(body))
-    return;
 
   // We will be using a "mutable" counter outside of the loop instead of the
   // default one, because this will allow us to share it between the unrolled
@@ -195,7 +200,6 @@ void unroll(Node* loop) {
   Block* dest = loop->addBlock();
   repeatBody(body, kUnrollFactor, dest);
   loop->eraseBlock(0);
-  body = dest;
 
   // Change the iteration counts of both loops
   Value* iter_count = loop->inputs().at(0);
@@ -210,26 +214,179 @@ void unroll(Node* loop) {
            graph->insert(aten::mul, {unrolled_iter_count, kUnrollFactor})}));
 }
 
-void UnrollLoops(Block* block) {
+bool UnrollLoops(Block* block, bool constant_only) {
+  bool changed = false;
   for (auto it = block->nodes().begin(); it != block->nodes().end();) {
     // XXX: unroll might destroy the current node, so we need to pre-increment
     // the iterator
     Node* node = *it;
     ++it;
     for (Block* subblock : node->blocks()) {
-      UnrollLoops(subblock);
+      changed |= UnrollLoops(subblock, constant_only);
     }
-    if (isForLoop(node)) {
-      unroll(node);
+    if (!isForLoop(node)) {
+      continue;
     }
+    if (constant_only) {
+      if (node->inputs().at(0)->node()->kind() != prim::Constant) {
+        continue;
+      }
+    } else if (!isSmallBlock(node->blocks().at(0))) {
+      continue;
+    }
+
+    unroll(node);
+    changed = true;
   }
+  return changed;
 }
 
 } // anonymous namespace
 
-void UnrollLoops(std::shared_ptr<Graph>& graph) {
-  UnrollLoops(graph->block());
-  EliminateDeadCode(graph);
+static void addCondAsOutput(Node* loop) {
+  LoopView loop_view(loop);
+  loop->addInput(loop_view.inputCond());
+  auto block_cond_input = loop_view.bodyBlock()->addInput();
+  block_cond_input->copyMetadata(loop_view.inputCond());
+  auto cond_output_index =
+      loop_view.bodyBlock()->registerOutput(loop_view.nextCond());
+  loop_view.bodyBlock()->outputs()[cond_output_index]->copyMetadata(
+      loop_view.nextCond());
+  auto cond_output = loop->addOutput();
+  cond_output->copyMetadata(loop_view.nextCond());
+}
+
+bool LoopsPeeler::run(const std::shared_ptr<Graph>& graph) {
+  GRAPH_DUMP("Before LoopsPeeler", graph);
+  collectLoops(graph->block());
+  peelLoops();
+  GRAPH_DUMP("After LoopsPeeler", graph);
+  return true;
+}
+
+void LoopsPeeler::collectLoop(Node* n) {
+  if (callback_(n)) {
+    if (in_loop_) {
+      GRAPH_DEBUG("Loop ", getHeader(in_loop_), " will be unrolled");
+      loops_to_peel_.push_back(in_loop_);
+      in_loop_ = nullptr;
+    }
+  }
+}
+
+void LoopsPeeler::collectLoops(Block* block) {
+  // we do a pre-order traversal to reduce the number
+  // of peeled loops.
+  for (auto n : block->nodes()) {
+    collectLoop(n);
+  }
+  collectLoop(block->return_node());
+
+  // process child blocks
+  for (auto n : block->nodes()) {
+    auto old_in_loop_ = in_loop_;
+    if (n->kind() == prim::Loop) {
+      in_loop_ = n;
+    }
+    for (auto b : n->blocks()) {
+      collectLoops(b);
+    }
+    in_loop_ = old_in_loop_;
+  }
+}
+
+void LoopsPeeler::peelLoops() {
+  for (auto loop : loops_to_peel_) {
+    PeelLoop(loop, num_iterations_);
+  }
+}
+
+bool PeelProfilingLoops(const std::shared_ptr<Graph>& graph) {
+  auto peel_predicate = [](Node* n) {
+    for (auto i : n->inputs()) {
+      if (i->type()->isSubtypeOf(TensorType::get())) {
+        return true;
+      }
+    }
+
+    return false;
+  };
+
+  LoopsPeeler lp(peel_predicate);
+  return lp.run(graph);
+}
+
+Node* PeelLoop(Node* n, size_t times) {
+  GRAPH_DEBUG("Peeling the loop ", getHeader(n), " ", times, " times");
+
+  auto graph = n->owningGraph();
+  auto orig_loop = LoopView(n);
+
+  WithInsertPoint wip(n);
+  auto times_const = graph->insertConstant(static_cast<int64_t>(times));
+  // N.B. even though a caller may request to peel `times` iterations
+  // `maxTripCount` of the original loop might be less than that
+  // so we should take the minimum of the two
+  auto min_trip_count =
+      graph->insert(prim::min, {orig_loop.maxTripCount(), times_const});
+
+  // make the peeled clone
+  auto peeled_copy = graph->createClone(n, [](Value* v) { return v; });
+  addCondAsOutput(peeled_copy);
+
+  LoopView new_lv(peeled_copy);
+  graph->insertNode(peeled_copy);
+  // only run until the peeled count
+  new_lv.replaceMaxTripCount(min_trip_count);
+
+  // substract `maxTripCount` of the original loop by the number iterations
+  // the peeled loop runs
+  auto new_max_trip_count =
+      graph->insert(aten::sub, {orig_loop.maxTripCount(), min_trip_count});
+  orig_loop.replaceMaxTripCount(new_max_trip_count);
+  // update the termination condition
+  auto cond_index = peeled_copy->outputs().size() - 1;
+  orig_loop.replaceInputCondition(peeled_copy->output(cond_index));
+
+  static const size_t LOOP_DEPS_WITH_COND_OFFSET = 2;
+  for (size_t i = 0; i < peeled_copy->outputs().size() -
+           1 /* leave off the termination condition */;
+       i++) {
+    n->replaceInput(LOOP_DEPS_WITH_COND_OFFSET + i, peeled_copy->output(i));
+  }
+
+  // the induction variable also needs to be adjusted by the number of
+  // iterations the peeled loop runs
+  {
+    WithInsertPoint peeled_wip(*orig_loop.bodyBlock()->nodes().begin());
+    // we can't create the expression: `new_counter` = `old_counter` + 1 yet
+    // because when we
+    // run `old_counter->replaceAllUsesWith(new_counter)`, we will get
+    // `new_counter = new_counter + 1`
+    auto adjusted_iter_counter =
+        graph->insert(aten::add, {min_trip_count, min_trip_count});
+    orig_loop.currentTripCount()->replaceAllUsesWith(adjusted_iter_counter);
+    adjusted_iter_counter->node()->replaceInput(
+        0, orig_loop.currentTripCount());
+  }
+
+  return peeled_copy;
+}
+
+bool UnrollLoops(std::shared_ptr<Graph>& graph) {
+  bool changed = UnrollLoops(graph->block(), false);
+  if (changed) {
+    EliminateDeadCode(graph);
+  }
+  return changed;
+}
+
+bool UnrollConstantLoops(std::shared_ptr<Graph>& graph) {
+  bool changed = UnrollLoops(graph->block(), true);
+  if (changed) {
+    EliminateDeadCode(graph);
+  }
+  return changed;
 }
 
 } // namespace jit

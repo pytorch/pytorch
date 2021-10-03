@@ -2,90 +2,98 @@
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
-#include <torch/csrc/jit/codegen/cuda/arith.h>
-#include <torch/csrc/jit/codegen/cuda/index_compute.h>
-#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
-#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
-#include <torch/csrc/jit/codegen/cuda/predicate_compute.h>
-#include <torch/csrc/jit/codegen/cuda/transform_iter.h>
+#include <torch/csrc/jit/codegen/cuda/compute_at_map.h>
+#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/kernel.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
+#include <torch/csrc/jit/codegen/cuda/lower_predicate.h>
+#include <torch/csrc/jit/codegen/cuda/lower_shift.h>
+#include <torch/csrc/jit/codegen/cuda/lower_trivial_reductions.h>
+#include <torch/csrc/jit/codegen/cuda/parallel_dimension_map.h>
+#include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 
-#include <map>
+#include <memory>
 #include <ostream>
-#include <stack>
 
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
-// TODO: Change lowering so it can be called multiple times. It would be good to
-// keep user references intact so they can lower it as they describe the kernel.
-// Right now we can only lower once.
+// TODO: we frequently use pairwise root mapping from consumers to producers.
+// This information is implicitly in the computeAtMaps, but there's no isolated
+// container for this information that we can reuse. Would be nice to generate
+// such a structure and propagate it through lowering.
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+class TORCH_CUDA_CU_API GpuLower {
+  class KernelIrMapper;
 
-struct TORCH_CUDA_API GPULower : public OptOutDispatch {
+ public:
+  GpuLower() = default;
+
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  explicit GpuLower(Fusion* fusion) : fusion_(fusion) {
+    lower();
+  }
+
+  kir::Kernel* kernel() const;
+
+  //! Converts a Fusion IR value into the Kernel IR equivalent
+  kir::Val* lowerValue(const Val* val);
+
+  //! Converts a Fusion IR expression into the Kernel IR equivalent
+  kir::Expr* lowerExpr(const Expr* expr);
+
+  //! Returns the currently active lowering object
+  //! (or nullptr if no lowering is in progress)
+  static GpuLower* current();
+
+  const ThreadPredicateMap& threadPredMap() const {
+    return thread_pred_map_;
+  }
+
+  const ComputeAtMap& caLoopMap() const {
+    return ca_loop_map_;
+  }
+
+  const ComputeAtMap& caIndexMap() const {
+    return ca_index_map_;
+  }
+
+  const ComputeAtMap& caParallelMap() const {
+    return ca_parallel_map_;
+  }
+
+  const auto& trivialReductionInfo() const {
+    return trivial_reduction_info_;
+  }
+
+  const HaloInfo& haloInfo() const {
+    return halo_info_;
+  }
+
+  HaloInfo& haloInfo() {
+    return halo_info_;
+  }
+
+  const ParallelDimensionMap& parallelDimensionMap() const {
+    return parallel_dimension_map_;
+  }
+
+  ParallelDimensionMap& parallelDimensionMap() {
+    return parallel_dimension_map_;
+  }
+
+  PredicateElimination& predicateElimination() {
+    return pred_elimination_;
+  }
+
+  const PredicateElimination& predicateElimination() const {
+    return pred_elimination_;
+  }
+
  private:
-  bool lowered = false;
-  Fusion* fusion_;
-  std::vector<Expr*> lowered_exprs;
-  Expr* active_scope = nullptr;
-  // Track the last computeAt TensorView and axis
-  const TensorView* active_view;
-  unsigned int active_view_axis;
-
-  // Open a new inner most for loop
-  void openFor(IterDomain*);
-  // Close the inner most for loop
-  void closeScope();
-  // Close all for loops
-  void resetScope();
-  // Clear out the last recorded computeAtView
-  void clearActiveView();
-  // Set active views from computeAtView
-  void setActiveView(const TensorView* const);
-  // Grab the index variables of the active loop nest
-  std::vector<Val*> getLoopIndices();
-  // Grab the iterDomains of the active loops
-  std::vector<IterDomain*> getLoopIterDomains();
-  // Gets the indexing of a TensorView producer. These are values consumed in a
-  // TensorView Expr. We use the consumer (left hand side of the =) to compute
-  // the indexing into the consumer.
-  TensorIndex* getProducerIndex(TensorView* producer, TensorView* consumer);
-  TensorIndex* getGlobalProducerIndex(
-      TensorView* producer,
-      TensorView* consumer);
-  TensorIndex* getLocalProducerIndex(
-      TensorView* producer,
-      TensorView* consumer);
-  TensorIndex* getConsumerIndex(TensorView* consumer);
-  TensorIndex* getGlobalConsumerIndex(TensorView* consumer);
-  TensorIndex* getLocalConsumerIndex(TensorView* consumer);
-
-  // Track how far our for loop scope is
-  unsigned int computeForDepth();
-  // Push an expr to the active scope
-  void pushBack(Expr* expr);
-  // Return the parent of the active scope
-  Expr* parentScope();
-
-  // Get Register allocation statement for tensorview
-  Allocate* getAlloc(TensorView*);
-  // Get a predicate based on a particular tensorview
-  IfThenElse* getPredicate(const TensorView* const);
-
-  // Custom dispatch for Expr, want to find out of it's a TV op
-  void handle(Expr*) final;
-
-  // Remake operations with TensorIndex
-  void handle(UnaryOp*) final;
-  void handle(BinaryOp*) final;
-
-  // Ignore split/merge/reorder operations,
-  // we don't want to print them.
-  void handle(Split*) final {}
-  void handle(Merge*) final {}
-  void handle(Reorder*) final {}
-
-  // Update for loop structure based on producing provided TensorView
-  void updateView(TensorView*);
+  void lower();
 
   // TensorViews are all based on symbolic sizes. When we first initialize them
   // we don't know if they're inputs or outputs which would mean that they have
@@ -93,19 +101,30 @@ struct TORCH_CUDA_API GPULower : public OptOutDispatch {
   // not have this information. Since we need to have the correct information in
   // the kernel being fetched for shapes, we want to replace input and output
   // tensors to reference the runtime structure containing sizes.
-  void replaceSizes();
+  void replaceSymbolicSizes();
 
- public:
-  // Init printer on ostream
-  GPULower(Fusion* _fusion) : fusion_(_fusion) {}
+ private:
+  // Lowered Kernel IR
+  std::unique_ptr<kir::Kernel> kernel_;
 
-  // print generated code to ostream
-  std::vector<Expr*> getLoweredExprs();
-  std::ostream& printKernel(
-      std::ostream& _os,
-      const std::string& kernel_name = "CUDAGeneratedKernel");
+  // Fusion IR node to Kernel IR node mapping
+  std::unordered_map<const Val*, kir::Val*> kir_val_map_;
+  std::unordered_map<const Expr*, kir::Expr*> kir_expr_map_;
+
+  // Some stateful information during lowering
+  ThreadPredicateMap thread_pred_map_;
+  PredicateElimination pred_elimination_;
+  ComputeAtMap ca_loop_map_;
+  ComputeAtMap ca_index_map_;
+  ComputeAtMap ca_parallel_map_;
+  TrivialReductionInfo trivial_reduction_info_;
+  HaloInfo halo_info_;
+  ParallelDimensionMap parallel_dimension_map_;
+
+  Fusion* fusion_ = nullptr;
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

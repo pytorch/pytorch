@@ -1,5 +1,6 @@
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm
+import sys
 import unittest
 
 # NOTE: this needs to be run in a brand new process
@@ -12,7 +13,7 @@ TEST_CUDA = torch.cuda.is_available()
 TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
 
 if not TEST_CUDA:
-    print('CUDA not available, skipping tests')
+    print('CUDA not available, skipping tests', file=sys.stderr)
     TestCase = object  # noqa: F811
 
 

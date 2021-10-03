@@ -1,4 +1,3 @@
-from __future__ import print_function
 import argparse
 from collections import namedtuple
 import torch
@@ -6,7 +5,9 @@ import gc
 import sys
 import json
 import copy
+import time
 
+from .fuser import set_fuser
 from .runner import get_nn_runners
 
 
@@ -41,16 +42,33 @@ def pretty_print(benchresult, colwidth=16, sep=' '):
         items.append(fit_str(to_str(thing)))
     return sep.join(items)
 
+# shim for torch.cuda.Event when running on cpu
+class Event(object):
+    def __init__(self, enable_timing):
+        pass
+
+    def record(self):
+        self.time = time.perf_counter()
+
+    def elapsed_time(self, end_event):
+        assert isinstance(end_event, Event)
+        return end_event.time - self.time
+
 
 def trainbench(name, rnn_creator, nloops=100, warmup=10,
                seqLength=100, numLayers=1, inputSize=512, hiddenSize=512,
                miniBatch=64, device='cuda', seed=None):
     def train_batch(modeldef):
         # CUDA events for timing
-        fwd_start_event = torch.cuda.Event(enable_timing=True)
-        fwd_end_event = torch.cuda.Event(enable_timing=True)
-        bwd_start_event = torch.cuda.Event(enable_timing=True)
-        bwd_end_event = torch.cuda.Event(enable_timing=True)
+        if device == 'cuda':
+            timer_class = torch.cuda.Event
+        else:
+            timer_class = Event
+
+        fwd_start_event = timer_class(enable_timing=True)
+        fwd_end_event = timer_class(enable_timing=True)
+        bwd_start_event = timer_class(enable_timing=True)
+        bwd_end_event = timer_class(enable_timing=True)
 
         gc.collect()
 
@@ -74,17 +92,18 @@ def trainbench(name, rnn_creator, nloops=100, warmup=10,
         bwd_end_event.record()
 
         if modeldef.backward is not None:
-            for param in modeldef.params:
-                assert param.grad is not None
-                param.grad.data.zero_()
+            with torch.no_grad():
+                for param in modeldef.params:
+                    assert param.grad is not None
+                    param.grad.zero_()
 
-        torch.cuda.synchronize()
+        if device == 'cuda':
+            torch.cuda.synchronize()
 
         fwd_time = fwd_start_event.elapsed_time(fwd_end_event)
         bwd_time = bwd_start_event.elapsed_time(bwd_end_event)
         return fwd_time, bwd_time
 
-    assert device == 'cuda'
     creator_args = creator_args = {
         'seqLength': seqLength, 'numLayers': numLayers,
         'inputSize': inputSize, 'hiddenSize': hiddenSize,
@@ -201,15 +220,15 @@ if __name__ == '__main__':
     parser.add_argument('--group', nargs='*', default=default_groups, help='Which group to run. cnns, rnns, etc.')
     parser.add_argument('--fuser', default='te', type=str,
                         help='The fuser backend to use. One of: te, old, or none')
+    parser.add_argument('--executor', default=None, type=str,
+                        help='The executor to use. One of: legacy, simple, profiling')
     parser.add_argument('--cuda_pointwise_loop_level', default=None, type=int)
     parser.add_argument('--cuda_pointwise_block_count', default=None, type=int)
     parser.add_argument('--cuda_pointwise_block_size', default=None, type=int)
 
     args = parser.parse_args()
-    assert args.fuser in ['te', 'old', 'none']
-    torch._C._jit_set_texpr_fuser_enabled(args.fuser == 'te')
-    torch._C._jit_override_can_fuse_on_gpu(args.fuser == 'old')
-    torch._C._jit_set_bailout_depth(20)
+    set_fuser(args.fuser, args.executor)
+
     if args.cuda_pointwise_loop_level:
         torch._C._jit_set_te_cuda_pointwise_loop_levels(args.cuda_pointwise_loop_level)
     if args.cuda_pointwise_block_count:
@@ -226,7 +245,7 @@ if __name__ == '__main__':
     vlrnns = ['vl_cudnn', 'vl_jit', 'vl_py']
 
     if args.print_json:
-        print_stderr = lambda *args, **kwargs: None    # noqa
+        print_stderr = lambda *args, **kwargs: None    # noqa: E731,F811
     print_stderr(args)
 
     bench_args = copy.deepcopy(vars(args))
@@ -236,6 +255,7 @@ if __name__ == '__main__':
     del bench_args['cnns']
     del bench_args['variable_lstms']
     del bench_args['fuser']
+    del bench_args['executor']
     del bench_args['cuda_pointwise_loop_level']
     del bench_args['cuda_pointwise_block_count']
     del bench_args['cuda_pointwise_block_size']

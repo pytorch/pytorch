@@ -15,13 +15,14 @@ export PATH="~/anaconda/bin:${PATH}"
 source ~/anaconda/bin/activate
 
 # Install dependencies
-conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing requests --yes
+conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi requests typing_extensions --yes
+conda install -c conda-forge valgrind --yes
 export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 
 # sync submodules
 cd ${PROJ_ROOT}
 git submodule sync
-git submodule update --init --recursive
+git submodule update --init --recursive --jobs 0
 
 # run build script
 chmod a+x ${PROJ_ROOT}/scripts/build_ios.sh
@@ -30,8 +31,12 @@ cat ${PROJ_ROOT}/scripts/build_ios.sh
 echo "########################################################"
 echo "IOS_ARCH: ${IOS_ARCH}"
 echo "IOS_PLATFORM: ${IOS_PLATFORM}"
+echo "USE_PYTORCH_METAL: ${USE_PYTORCH_METAL}"
+echo "USE_COREML_DELEGATE: ${USE_COREML_DELEGATE}"
 export IOS_ARCH=${IOS_ARCH}
 export IOS_PLATFORM=${IOS_PLATFORM}
+export USE_PYTORCH_METAL=${USE_PYTORCH_METAL}
+export USE_COREML_DELEGATE=${USE_COREML_DELEGATE}
 unbuffer ${PROJ_ROOT}/scripts/build_ios.sh 2>&1 | ts
 
 #store the binary

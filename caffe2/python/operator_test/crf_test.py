@@ -1,21 +1,21 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 from caffe2.python import workspace, crf, brew
 from caffe2.python.model_helper import ModelHelper
 import numpy as np
 from scipy.special import logsumexp
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
-from hypothesis import given
-import unittest
+from hypothesis import given, settings
 
 
 class TestCRFOp(hu.HypothesisTestCase):
 
     @given(num_tags=st.integers(2, 4),
            num_words=st.integers(2, 15))
+    @settings(deadline=10000)
     def test_crf_with_loss_op(self, num_tags, num_words):
         model = ModelHelper(name='external')
         embeddings_dim = 200
@@ -59,6 +59,7 @@ class TestCRFOp(hu.HypothesisTestCase):
 
     @given(num_tags=st.integers(1, 4),
            num_words=st.integers(2, 4))
+    @settings(deadline=10000)
     def test_crf_gradient(self, num_tags, num_words):
         base_model = ModelHelper(name='base_model')
         transitions = np.random.randn(

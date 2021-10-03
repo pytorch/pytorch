@@ -2,6 +2,8 @@
 #include <cstdlib>
 #include <iomanip>
 #include <sstream>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <ATen/core/function.h>
@@ -16,6 +18,67 @@
 namespace torch {
 namespace jit {
 
+class JitLoggingConfig {
+ public:
+  static JitLoggingConfig& getInstance() {
+    static JitLoggingConfig instance;
+    return instance;
+  }
+  JitLoggingConfig(JitLoggingConfig const&) = delete;
+  void operator=(JitLoggingConfig const&) = delete;
+
+ private:
+  std::string logging_levels;
+  std::unordered_map<std::string, size_t> files_to_levels;
+  std::ostream* out;
+
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  JitLoggingConfig() {
+    const char* jit_log_level = std::getenv("PYTORCH_JIT_LOG_LEVEL");
+    logging_levels.assign(jit_log_level == nullptr ? "" : jit_log_level);
+    out = &std::cerr;
+    parse();
+  }
+  void parse();
+
+ public:
+  std::string getLoggingLevels() {
+    return this->logging_levels;
+  }
+  void setLoggingLevels(std::string levels) {
+    this->logging_levels = levels;
+    parse();
+  }
+
+  std::unordered_map<std::string, size_t> getFilesToLevels() {
+    return this->files_to_levels;
+  }
+
+  void setOutputStream(std::ostream& out_stream) {
+    this->out = &out_stream;
+  }
+
+  std::ostream& getOutputStream() {
+    return *(this->out);
+  }
+};
+
+std::string get_jit_logging_levels() {
+  return JitLoggingConfig::getInstance().getLoggingLevels();
+}
+
+void set_jit_logging_levels(std::string level) {
+  JitLoggingConfig::getInstance().setLoggingLevels(level);
+}
+
+void set_jit_logging_output_stream(std::ostream& stream) {
+  JitLoggingConfig::getInstance().setOutputStream(stream);
+}
+
+std::ostream& get_jit_logging_output_stream() {
+  return JitLoggingConfig::getInstance().getOutputStream();
+}
+
 // gets a string representation of a node header
 // (e.g. outputs, a node kind and outputs)
 std::string getHeader(const Node* node) {
@@ -24,15 +87,11 @@ std::string getHeader(const Node* node) {
   return ss.str();
 }
 
-static std::unordered_map<std::string, size_t> parseJITLogOption(
-    const char* option) {
+void JitLoggingConfig::parse() {
   std::stringstream in_ss;
-  in_ss << "function:";
-  if (option) {
-    in_ss << option;
-  }
+  in_ss << "function:" << this->logging_levels;
 
-  std::unordered_map<std::string, size_t> files_to_levels;
+  std::unordered_map<std::string, size_t> new_files_to_levels;
   std::string line;
   while (std::getline(in_ss, line, ':')) {
     if (line.size() == 0) {
@@ -41,21 +100,20 @@ static std::unordered_map<std::string, size_t> parseJITLogOption(
 
     auto index_at = line.find_last_of('>');
     auto begin_index = index_at == std::string::npos ? 0 : index_at + 1;
-    size_t logging_level = index_at == std::string::npos ? 1 : index_at + 2;
+    size_t logging_level = index_at == std::string::npos ? 0 : index_at + 1;
     auto end_index = line.find_last_of('.') == std::string::npos
         ? line.size()
         : line.find_last_of('.');
     auto filename = line.substr(begin_index, end_index - begin_index);
-    files_to_levels.insert({filename, logging_level});
+    new_files_to_levels.insert({filename, logging_level});
   }
 
-  return files_to_levels;
+  this->files_to_levels = new_files_to_levels;
 }
 
 bool is_enabled(const char* cfname, JitLoggingLevels level) {
-  static const char* c_log_level = std::getenv("PYTORCH_JIT_LOG_LEVEL");
-  static const std::unordered_map<std::string, size_t> files_to_levels =
-      parseJITLogOption(c_log_level);
+  const std::unordered_map<std::string, size_t> files_to_levels =
+      JitLoggingConfig::getInstance().getFilesToLevels();
   std::string fname{cfname};
   fname = c10::detail::StripBasename(fname);
   auto end_index = fname.find_last_of('.') == std::string::npos
@@ -76,9 +134,9 @@ bool is_enabled(const char* cfname, JitLoggingLevels level) {
 // a dummy function to give to PythonPrint
 std::string log_function(const std::shared_ptr<torch::jit::Graph>& graph) {
   torch::jit::GraphFunction func("source_dump", graph, nullptr);
-  std::vector<at::Tensor> tensors;
-  std::vector<c10::NamedTypePtr> deps;
-  PythonPrint pp(tensors, deps);
+  std::vector<at::IValue> constants;
+  PrintDepsTable deps;
+  PythonPrint pp(constants, deps);
   pp.printFunction(func);
   return pp.str();
 }

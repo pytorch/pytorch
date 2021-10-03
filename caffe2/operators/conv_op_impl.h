@@ -510,6 +510,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   CAFFE_ENFORCE_EQ(C, filter.dim32(1) * group_);
 
   int kernel_dims_size = 1;
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (int i = 0; i < kernel_.size(); ++i) {
     CAFFE_ENFORCE_EQ(filter.dim32(i + 2), kernel_[i]);
     kernel_dims_size *= kernel_[i];

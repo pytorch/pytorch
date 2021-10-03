@@ -3,8 +3,7 @@
   (decl (list) (option))
   (list
     (raise
-      (option
-        (apply
-          (variable (ident Exception))
-          (list (string_literal hello))
-          (list))))))
+      (apply
+        (variable (ident Exception))
+        (list (string_literal hello))
+        (list)))))

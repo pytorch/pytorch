@@ -1,9 +1,10 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
-
-
 r"""
-`torch.distributed.launch` is a module that spawns up multiple distributed
+``torch.distributed.launch`` is a module that spawns up multiple distributed
 training processes on each of the training nodes.
+
+.. warning::
+
+    This module is going to be deprecated in favor of :ref:`torchrun <launcher-api>`.
 
 The utility can be used for single-node distributed training, in which one or
 more processes per node will be spawned. The utility can be used for either
@@ -86,19 +87,19 @@ Set your device to local rank using either
 
 ::
 
-    >>> torch.cuda.set_device(arg.local_rank)  # before your code runs
+    >>> torch.cuda.set_device(args.local_rank)  # before your code runs
 
 or
 
 ::
 
-    >>> with torch.cuda.device(arg.local_rank):
+    >>> with torch.cuda.device(args.local_rank):
     >>>    # your code to run
 
 3. In your training program, you are supposed to call the following function
-at the beginning to start the distributed backend. You need to make sure that
-the init_method uses ``env://``, which is the only supported ``init_method``
-by this module.
+at the beginning to start the distributed backend. It is strongly recommended
+that ``init_method=env://``. Other init methods (e.g. ``tcp://``) may work,
+but ``env://`` is the one that is officially supported by this module.
 
 ::
 
@@ -114,8 +115,8 @@ here is how to configure it.
 ::
 
     model = torch.nn.parallel.DistributedDataParallel(model,
-                                                      device_ids=[arg.local_rank],
-                                                      output_device=arg.local_rank)
+                                                      device_ids=[args.local_rank],
+                                                      output_device=args.local_rank)
 
 Please ensure that ``device_ids`` argument is set to be the only GPU device id
 that your code will be operating on. This is generally the local rank of the
@@ -137,126 +138,55 @@ will not pass ``--local_rank`` when you specify this flag.
     https://github.com/pytorch/pytorch/issues/12042 for an example of
     how things can go wrong if you don't do this correctly.
 
+
+
 """
 
+import logging
+import warnings
 
-import sys
-import subprocess
-import os
-from argparse import ArgumentParser, REMAINDER
+from torch.distributed.run import get_args_parser, run
 
 
-def parse_args():
-    """
-    Helper function parsing the command line options
-    @retval ArgumentParser
-    """
-    parser = ArgumentParser(description="PyTorch distributed training launch "
-                                        "helper utility that will spawn up "
-                                        "multiple distributed processes")
+logger = logging.getLogger(__name__)
 
-    # Optional arguments for the launch helper
-    parser.add_argument("--nnodes", type=int, default=1,
-                        help="The number of nodes to use for distributed "
-                             "training")
-    parser.add_argument("--node_rank", type=int, default=0,
-                        help="The rank of the node for multi-node distributed "
-                             "training")
-    parser.add_argument("--nproc_per_node", type=int, default=1,
-                        help="The number of processes to launch on each node, "
-                             "for GPU training, this is recommended to be set "
-                             "to the number of GPUs in your system so that "
-                             "each process can be bound to a single GPU.")
-    parser.add_argument("--master_addr", default="127.0.0.1", type=str,
-                        help="Master node (rank 0)'s address, should be either "
-                             "the IP address or the hostname of node 0, for "
-                             "single node multi-proc training, the "
-                             "--master_addr can simply be 127.0.0.1")
-    parser.add_argument("--master_port", default=29500, type=int,
-                        help="Master node (rank 0)'s free port that needs to "
-                             "be used for communication during distributed "
-                             "training")
-    parser.add_argument("--use_env", default=False, action="store_true",
-                        help="Use environment variable to pass "
-                             "'local rank'. For legacy reasons, the default value is False. "
-                             "If set to True, the script will not pass "
-                             "--local_rank as argument, and will instead set LOCAL_RANK.")
-    parser.add_argument("-m", "--module", default=False, action="store_true",
-                        help="Changes each process to interpret the launch script "
-                             "as a python module, executing with the same behavior as"
-                             "'python -m'.")
-    parser.add_argument("--no_python", default=False, action="store_true",
-                        help="Do not prepend the training script with \"python\" - just exec "
-                             "it directly. Useful when the script is not a Python script.")
 
-    # positional
-    parser.add_argument("training_script", type=str,
-                        help="The full path to the single GPU training "
-                             "program/script to be launched in parallel, "
-                             "followed by all the arguments for the "
-                             "training script")
+def parse_args(args):
+    parser = get_args_parser()
+    parser.add_argument(
+        "--use_env",
+        default=False,
+        action="store_true",
+        help="Use environment variable to pass "
+        "'local rank'. For legacy reasons, the default value is False. "
+        "If set to True, the script will not pass "
+        "--local_rank as argument, and will instead set LOCAL_RANK.",
+    )
+    return parser.parse_args(args)
 
-    # rest from the training program
-    parser.add_argument('training_script_args', nargs=REMAINDER)
-    return parser.parse_args()
 
-def main():
-    args = parse_args()
+def launch(args):
+    if args.no_python and not args.use_env:
+        raise ValueError(
+            "When using the '--no_python' flag,"
+            " you must also set the '--use_env' flag."
+        )
+    run(args)
 
-    # world size in terms of number of processes
-    dist_world_size = args.nproc_per_node * args.nnodes
 
-    # set PyTorch distributed related environmental variables
-    current_env = os.environ.copy()
-    current_env["MASTER_ADDR"] = args.master_addr
-    current_env["MASTER_PORT"] = str(args.master_port)
-    current_env["WORLD_SIZE"] = str(dist_world_size)
-
-    processes = []
-
-    if 'OMP_NUM_THREADS' not in os.environ and args.nproc_per_node > 1:
-        current_env["OMP_NUM_THREADS"] = str(1)
-        print("*****************************************\n"
-              "Setting OMP_NUM_THREADS environment variable for each process "
-              "to be {} in default, to avoid your system being overloaded, "
-              "please further tune the variable for optimal performance in "
-              "your application as needed. \n"
-              "*****************************************".format(current_env["OMP_NUM_THREADS"]))
-
-    for local_rank in range(0, args.nproc_per_node):
-        # each process's rank
-        dist_rank = args.nproc_per_node * args.node_rank + local_rank
-        current_env["RANK"] = str(dist_rank)
-        current_env["LOCAL_RANK"] = str(local_rank)
-
-        # spawn the processes
-        with_python = not args.no_python
-        cmd = []
-        if with_python:
-            cmd = [sys.executable, "-u"]
-            if args.module:
-                cmd.append("-m")
-        else:
-            if not args.use_env:
-                raise ValueError("When using the '--no_python' flag, you must also set the '--use_env' flag.")
-            if args.module:
-                raise ValueError("Don't use both the '--no_python' flag and the '--module' flag at the same time.")
-
-        cmd.append(args.training_script)
-
-        if not args.use_env:
-            cmd.append("--local_rank={}".format(local_rank))
-
-        cmd.extend(args.training_script_args)
-
-        process = subprocess.Popen(cmd, env=current_env)
-        processes.append(process)
-
-    for process in processes:
-        process.wait()
-        if process.returncode != 0:
-            raise subprocess.CalledProcessError(returncode=process.returncode,
-                                                cmd=cmd)
+def main(args=None):
+    warnings.warn(
+        "The module torch.distributed.launch is deprecated\n"
+        "and will be removed in future. Use torchrun.\n"
+        "Note that --use_env is set by default in torchrun.\n"
+        "If your script expects `--local_rank` argument to be set, please\n"
+        "change it to read from `os.environ['LOCAL_RANK']` instead. See \n"
+        "https://pytorch.org/docs/stable/distributed.html#launch-utility for \n"
+        "further instructions\n",
+        FutureWarning,
+    )
+    args = parse_args(args)
+    launch(args)
 
 
 if __name__ == "__main__":

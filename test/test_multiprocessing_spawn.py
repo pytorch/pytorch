@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 import os
 import random
@@ -7,7 +6,7 @@ import sys
 import time
 import unittest
 
-from torch.testing._internal.common_utils import (PY3, TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN)
+from torch.testing._internal.common_utils import (TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN)
 import torch.multiprocessing as mp
 
 
@@ -53,6 +52,15 @@ def test_success_first_then_exception_func(i, arg):
 def test_nested_child_body(i, ready_queue, nested_child_sleep):
     ready_queue.put(None)
     time.sleep(nested_child_sleep)
+
+
+def test_infinite_task(i):
+    while True:
+        time.sleep(1)
+
+
+def test_process_exit(idx):
+    sys.exit(12)
 
 
 def test_nested(i, pids_queue, nested_child_sleep, start_method):
@@ -185,9 +193,26 @@ class _TestMultiProcessing(object):
 class SpawnTest(TestCase, _TestMultiProcessing):
     start_method = 'spawn'
 
+    def test_exception_raises(self):
+        with self.assertRaises(mp.ProcessRaisedException):
+            mp.spawn(test_success_first_then_exception_func, args=(), nprocs=1)
+
+    def test_signal_raises(self):
+        context = mp.spawn(test_infinite_task, args=(), nprocs=1, join=False)
+        for pid in context.pids():
+            os.kill(pid, signal.SIGTERM)
+        with self.assertRaises(mp.ProcessExitedException):
+            context.join()
+
+    def test_process_exited(self):
+        with self.assertRaises(mp.ProcessExitedException) as e:
+            mp.spawn(test_process_exit, args=(), nprocs=1)
+            self.assertEqual(12, e.exit_code)
+
+
 @unittest.skipIf(
-    IS_WINDOWS or not PY3,
-    "Fork is only available on Unix, get_context is only available in PY3",
+    IS_WINDOWS,
+    "Fork is only available on Unix",
 )
 class ForkTest(TestCase, _TestMultiProcessing):
     start_method = 'fork'

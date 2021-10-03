@@ -1,4 +1,7 @@
-#include <THC/THCAtomics.cuh>
+#include <ATen/ceil_div.h>
+#include <ATen/cuda/Atomic.cuh>
+#include <ATen/cuda/DeviceUtils.cuh>
+#include <ATen/cuda/AsmUtils.cuh>
 
 namespace at {
 namespace native {
@@ -65,7 +68,7 @@ struct TopKTypeConfig<int16_t> {
   typedef uint32_t RadixType;
 
   static inline __device__ RadixType convert(int16_t v) {
-    assert(sizeof(short) == 2);
+    static_assert(sizeof(short) == 2, "");
     return 32768u + v;
   }
 
@@ -79,7 +82,7 @@ struct TopKTypeConfig<int32_t> {
   typedef uint32_t RadixType;
 
   static inline __device__ RadixType convert(int32_t v) {
-    assert(sizeof(int) == 4);
+    static_assert(sizeof(int) == 4, "");
     return 2147483648u + v;
   }
 
@@ -93,7 +96,7 @@ struct TopKTypeConfig<int64_t> {
   typedef uint64_t RadixType;
 
   static inline __device__ RadixType convert(int64_t v) {
-    assert(sizeof(int64_t) == 8);
+    static_assert(sizeof(int64_t) == 8, "");
     return 9223372036854775808ull + v;
   }
 
@@ -123,7 +126,7 @@ struct TopKTypeConfig<at::Half> {
   typedef uint32_t RadixType;
 
   static inline __device__ RadixType convert(at::Half v) {
-#if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)
+#if defined(__CUDA_ARCH__) || defined(USE_ROCM)
     RadixType x = __half_as_ushort(v);
     RadixType mask = (x & 0x00008000) ? 0x0000ffff : 0x00008000;
     return (v == v) ? (x ^ mask) : 0xffff;
@@ -134,7 +137,7 @@ struct TopKTypeConfig<at::Half> {
   }
 
   static inline __device__ at::Half deconvert(RadixType v) {
-#if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)
+#if defined(__CUDA_ARCH__) || defined(USE_ROCM)
     RadixType mask = (v & 0x00008000) ? 0x00008000 : 0x0000ffff;
     return __ushort_as_half(v ^ mask);
 #else
@@ -201,13 +204,13 @@ __device__ void countRadixUsingMask(
         TopKTypeConfig<scalar_t>::convert(doLdg(&data[i * withinSliceStride]));
 
     bool hasVal = ((val & desiredMask) == desired);
-    bitwise_t digitInRadix =
-        Bitfield<bitwise_t>::getBitfield(val, radixDigitPos, RadixBits);
+    bitwise_t digitInRadix = at::cuda::Bitfield<bitwise_t>::getBitfield(
+        val, radixDigitPos, RadixBits);
 
 #pragma unroll
     for (uint32_t j = 0; j < RadixSize; ++j) {
       bool vote = hasVal && (digitInRadix == j);
-#if defined(__HIP_PLATFORM_HCC__)
+#if defined(USE_ROCM)
       counts[j] += __popcll(WARP_BALLOT(vote));
 #else
       counts[j] += __popc(WARP_BALLOT(vote, ACTIVE_MASK()));
@@ -216,10 +219,10 @@ __device__ void countRadixUsingMask(
   }
 
   // Now, for each warp, sum values
-  if (getLaneId() == 0) {
+  if (at::cuda::getLaneId() == 0) {
 #pragma unroll
     for (uint32_t i = 0; i < RadixSize; ++i) {
-      gpuAtomicAdd(&smem[i], counts[i]);
+      gpuAtomicAddNoReturn(&smem[i], counts[i]);
     }
   }
 
@@ -256,7 +259,7 @@ __device__ scalar_t findPattern(
 
   // All threads participate in the loop, in order to sync on the flag
   index_t numIterations =
-      THCRoundUp(sliceSize, static_cast<index_t>(blockDim.x));
+      round_up(sliceSize, static_cast<index_t>(blockDim.x));
   for (index_t i = threadIdx.x; i < numIterations; i += blockDim.x) {
     bool inRange = (i < sliceSize);
     scalar_t v = inRange ? doLdg(&data[i * withinSliceStride])
@@ -341,9 +344,9 @@ __device__ void radixSelect(
       /* threads will return from the function. */
       if (count == 1 && kToFind == 1) {
         /* There is a unique answer. */
-        desired =
-            Bitfield<bitwise_t>::setBitfield(desired, i, digitPos, RADIX_BITS);
-        desiredMask = Bitfield<bitwise_t>::setBitfield(
+        desired = at::cuda::Bitfield<bitwise_t>::setBitfield(
+            desired, i, digitPos, RADIX_BITS);
+        desiredMask = at::cuda::Bitfield<bitwise_t>::setBitfield(
             desiredMask, RADIX_MASK, digitPos, RADIX_BITS);
 
         /* The answer is now the unique element v such that: */
@@ -365,8 +368,9 @@ __device__ void radixSelect(
     auto found_non_unique = [&](int i, int count) -> bool {
       if (count >= kToFind) {
         desired =
-            Bitfield<bitwise_t>::setBitfield(desired, i, digitPos, RADIX_BITS);
-        desiredMask = Bitfield<bitwise_t>::setBitfield(
+            at::cuda::Bitfield<bitwise_t>::setBitfield(
+                desired, i, digitPos, RADIX_BITS);
+        desiredMask = at::cuda::Bitfield<bitwise_t>::setBitfield(
             desiredMask, RADIX_MASK, digitPos, RADIX_BITS);
 
         /* The top-Kth element v must now be one such that: */

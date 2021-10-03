@@ -1,17 +1,16 @@
 #pragma once
 
+#include <c10/util/Exception.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/tensor.h>
-#include <torch/csrc/jit/codegen/cuda/transform_iter.h>
-
 #include <algorithm>
+#include <unordered_map>
 #include <vector>
 
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 /*
  * compute_at is a relative property between two TensorViews which marks at what
@@ -119,64 +118,57 @@ namespace fuser {
  *
  */
 
-struct TORCH_CUDA_API TransformReplay : public TransformIter {
- private:
-  /*
-   * Functions to backward propagate influence from split/merge/reorder
-   */
-  void replayBackward(Split* expr);
-  void replayBackward(Merge* expr);
-  void replayBackward(Reorder* expr);
+class TensorDomain;
+class TensorView;
+class RootDomainMap;
 
-  // Entry for backward influence propagation on td following record
-  TensorDomain* replayBackward(TensorDomain* td, bool generate_record = false);
-
-  /*
-   * Replay functions, takes a TensorView and steps through the operations in
-   * "record" based on influence axes. Will also update influence and propagate
-   * it forward.
-   */
-  TensorView* replay(Split* expr, TensorView* tv);
-  TensorView* replay(Merge* expr, TensorView* tv);
-  TensorView* replay(Reorder* expr, TensorView* tv);
-
-  /*
-   * Takes replay_ref and replays its transformations on replay_target
-   * Replays from begining of both TensorDomains. could be more efficient to try
-   * and find a common ancestor to start from, but that's outside the scope of
-   * this work for now.
-   *
-   */
-  TensorView* runReplay(
-      TensorView* replay_ref,
-      TensorView* replay_target,
-      int compute_at_axis);
-
-  // Running influence vector
-  std::vector<bool> influence;
-
-  // compute_at_axis
-  int compute_at_axis;
-
-  // In the replay we won't apply all transformations, but will need relative
-  // axes for later transformations. axis_map[full transform position] = partial
-  // transform position Full transform position is relative to if we played all
-  // transformations if full transform position is not in partial transform
-  // position it will return -1
-  // axis_map[fake_pos] = real_pos
-  std::vector<int> axis_map;
-
+class TORCH_CUDA_CU_API TransformReplay {
  public:
-  static TensorView* replay(
-      TensorView* replay_ref,
-      TensorView* replay_target,
-      int compute_at_axis);
+  // Replay producer as consumer, returns {producer, producer_compute_at_axis}.
+  static std::pair<TensorDomain*, unsigned int> replayPasC(
+      const TensorView* producer,
+      const TensorView* consumer,
+      int consumer_compute_at_axis);
+  static std::pair<TensorDomain*, unsigned int> replayPasC(
+      const TensorView* producer,
+      const TensorView* consumer,
+      int consumer_compute_at_axis,
+      const RootDomainMap& root_map);
 
-  static TensorView* fullReplay(
-      TensorView* replay_ref,
-      TensorView* replay_target);
+  // Replay producer as consumer, returns {replayed_consumer_domain,
+  // consumer_compute_at_axis}.
+  static std::pair<TensorDomain*, unsigned int> replayCasP(
+      const TensorView* consumer,
+      const TensorView* producer,
+      int producer_compute_at_axis);
+  static std::pair<TensorDomain*, unsigned int> replayCasP(
+      const TensorView* consumer,
+      const TensorView* producer,
+      int producer_compute_at_axis,
+      const RootDomainMap& root_map);
+
+  // Self replay.
+  static TensorDomain* fullSelfReplay(
+      const TensorDomain* new_self_root,
+      const TensorDomain* self);
 };
 
+class TORCH_CUDA_CU_API TransformPropagator {
+ private:
+  bool replayPasC(TensorView* producer_tv, TensorView* consumer_tv = nullptr);
+  bool replayCasP(TensorView* consumer_tv, TensorView* producer_tv = nullptr);
+
+  TransformPropagator(TensorView* from);
+
+ private:
+  std::unordered_map<TensorView*, unsigned int> replayed_pos;
+  TensorView* starting_tv = nullptr;
+
+ public:
+  static void from(TensorView* tv);
+};
+
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

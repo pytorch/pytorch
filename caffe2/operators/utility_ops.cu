@@ -8,6 +8,7 @@
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/flatten_op.h"
+#include "caffe2/utils/GpuAtomics.cuh"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
@@ -26,16 +27,8 @@ bool WeightedSumOp<CUDAContext>::RunOnDevice() {
 
 template <>
 bool SumOp<CUDAContext>::RunOnDevice() {
-  if (Input(0).IsType<float>()) {
-    return DoRunWithType<float, float>();
-  } else if (Input(0).IsType<at::Half>()) {
-    return DoRunWithType<at::Half, at::Half>();
-  } else if (Input(0).IsType<int32_t>()) {
-    return DoRunWithType<int32_t, int32_t>();
-  } else {
-    CAFFE_THROW("Unsupported inputs");
-  }
-  return false;
+  return DispatchHelper<TensorTypes<float, at::Half, int32_t, int64_t>>::call(
+      this, Input(0));
 }
 
 REGISTER_CUDA_OPERATOR(Print, PrintOp<CUDAContext>);
@@ -78,6 +71,7 @@ bool NanCheckOp<CUDAContext>::RunOnDevice() {
       0,
       context_.cuda_stream()>>>(
       N, X.data<float>(), scratch_.mutable_data<bool>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   bool result = false;
   {
@@ -164,7 +158,7 @@ __global__ void AxpySliceKernel(
       float a = *alpha[b];
       const float* x_offset = X[b] + (i * slice_size);
       for (int j = threadIdx.x; j < slice_size; j += blockDim.x) {
-        atomicAdd(&y_offset[j], a * x_offset[j]);
+        gpu_atomic_add(&y_offset[j], a * x_offset[j]);
       }
     }
   }
@@ -189,19 +183,22 @@ __global__ void AxpySliceKernel2(
     T_INDEX idx = Indices[i];
     float* y_offset = Y + (idx * slice_size);
     for (int j = threadIdx.x; j < slice_size; j += blockDim.x) {
-      atomicAdd(&y_offset[j], alpha[0] * X[(i * slice_size) + j]);
+      gpu_atomic_add(&y_offset[j], alpha[0] * X[(i * slice_size) + j]);
     }
   }
 }
 
 template <>
-bool ScatterWeightedSumOp<float, CUDAContext>::RunOnDevice() {
-  return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(this, Input(2));
+bool ScatterWeightedSumOp<CUDAContext>::RunOnDevice() {
+  const auto& x0 = Input(0);
+  const auto x0Type = TypeMetaToDataType(x0.dtype());
+  CAFFE_ENFORCE_EQ(x0Type, TensorProto_DataType_FLOAT, "Only float type is allowed for X0 on GPU.");
+  return ScatterWeightedSumOp<CUDAContext>::template DoRun<float>();
 }
 
 template <>
-template <typename Index>
-bool ScatterWeightedSumOp<float, CUDAContext>::DoRunWithType() {
+template <typename T, typename Index>
+bool ScatterWeightedSumOp<CUDAContext>::DoRunWithType() {
   CAFFE_ENFORCE_EQ(InputSize() % 2, 1);
   auto& X0 = Input(0);
   auto& weight0 = Input(1);
@@ -259,6 +256,7 @@ bool ScatterWeightedSumOp<float, CUDAContext>::DoRunWithType() {
         indices.template data<Index>(),
         data,
         M);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     // when only one input exists to update data buffer,
     // avoid copying pointers to device array to prevent
@@ -278,13 +276,14 @@ bool ScatterWeightedSumOp<float, CUDAContext>::DoRunWithType() {
         indices.template data<Index>(),
         data,
         M);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   return true;
 }
 
 REGISTER_CUDA_OPERATOR(
     ScatterWeightedSum,
-    ScatterWeightedSumOp<float, CUDAContext>);
+    ScatterWeightedSumOp<CUDAContext>);
 
 namespace {
 
@@ -323,6 +322,7 @@ void ScatterAssignOp<CUDAContext>::DoScatterAssign(
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(data, idxs, slicesData, N, K, block_size);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 REGISTER_CUDA_OPERATOR(ScatterAssign, ScatterAssignOp<CUDAContext>);
@@ -349,6 +349,8 @@ bool RangeOp<CUDAContext>::DoRunOnDevice(
       0,
       context_.cuda_stream()>>>(
       N, output->template mutable_data<T>(), start, step);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

@@ -22,10 +22,6 @@ set(Caffe2_GPU_TEST_SRCS)
 set(Caffe2_CPU_INCLUDE)
 set(Caffe2_GPU_INCLUDE)
 
-# Caffe2_MAIN_LIBS is a list of the libraries that a dependent library should
-# depend on when it links against Caffe2.
-set(Caffe2_MAIN_LIBS)
-
 # Lists for Caffe2 dependency libraries, for CPU and CUDA respectively.
 set(Caffe2_DEPENDENCY_LIBS "")
 set(Caffe2_CUDA_DEPENDENCY_LIBS "")

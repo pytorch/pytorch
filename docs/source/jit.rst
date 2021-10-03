@@ -10,11 +10,18 @@ TorchScript
 
 
 .. toctree::
-   :maxdepth: 1
-   :caption: Language Reference
-   :hidden:
+    :maxdepth: 1
+    :caption: Language Reference
+    :hidden:
 
-   language_reference <jit_language_reference>
+    jit_language_reference
+
+
+.. toctree::
+    :maxdepth: 1
+
+    jit_language_reference_v2
+
 
 .. contents:: :local:
     :depth: 2
@@ -40,25 +47,27 @@ For an end-to-end example of converting a PyTorch model to TorchScript and runni
 Creating TorchScript Code
 --------------------------
 
-.. autofunction:: script(obj)
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
 
-.. autofunction:: trace(func, example_inputs, optimize=None, check_trace=True, check_inputs=None, check_tolerance=1e-5)
-
-.. autofunction:: trace_module(mod, inputs, optimize=None, check_trace=True, check_inputs=None, check_tolerance=1e-5)
-
-.. autoclass:: ScriptModule()
-    :members:
-
-.. autoclass:: ScriptFunction()
-
-.. autofunction:: save
-
-.. autofunction:: load
-
-.. autofunction:: ignore
-
-.. autofunction:: unused
-
+    script
+    trace
+    script_if_tracing
+    trace_module
+    fork
+    wait
+    ScriptModule
+    ScriptFunction
+    freeze
+    optimize_for_inference
+    save
+    load
+    ignore
+    unused
+    isinstance
+    Attribute
+    annotate
 
 Mixing Tracing and Scripting
 ----------------------------
@@ -167,7 +176,7 @@ TorchScript is a statically typed subset of Python, so many Python features appl
 directly to TorchScript. See the full :ref:`language-reference` for details.
 
 
-.. _Builtin functions:
+.. _builtin functions:
 
 Built-in Functions and Modules
 ------------------------------
@@ -207,40 +216,40 @@ Disable JIT for Debugging
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 .. envvar:: PYTORCH_JIT
 
-    Setting the environment variable ``PYTORCH_JIT=0`` will disable all script
-    and tracing annotations. If there is hard-to-debug error in one of your
-    TorchScript model, you can use this flag to force everything to run using native
-    Python. Since TorchScript (scripting and tracing) are disabled with this flag,
-    you can use tools like ``pdb`` to debug the model code.
+Setting the environment variable ``PYTORCH_JIT=0`` will disable all script
+and tracing annotations. If there is hard-to-debug error in one of your
+TorchScript models, you can use this flag to force everything to run using native
+Python. Since TorchScript (scripting and tracing) is disabled with this flag,
+you can use tools like ``pdb`` to debug the model code.  For example::
 
-    Given an example 
+    @torch.jit.script
+    def scripted_fn(x : torch.Tensor):
+        for i in range(12):
+            x = x + x
+        return x
 
-        @torch.jit.script
-        def scripted_fn(x : torch.Tensor):
-            for i in range(12):
-                x = x + x
-            return x
+    def fn(x):
+        x = torch.neg(x)
+        import pdb; pdb.set_trace()
+        return scripted_fn(x)
 
+    traced_fn = torch.jit.trace(fn, (torch.rand(4, 5),))
+    traced_fn(torch.rand(3, 4))
 
-        def fn(x):
-            x = torch.neg(x)
-            import pdb; pdb.set_trace()
-            return scripted_fn(x)
+Debugging this script with ``pdb`` works except for when we invoke the
+:func:`@torch.jit.script <torch.jit.script>` function. We can globally disable
+JIT, so that we can call the :func:`@torch.jit.script <torch.jit.script>`
+function as a normal Python function and not compile it. If the above script
+is called ``disable_jit_example.py``, we can invoke it like so::
 
-        traced_fn = torch.jit.trace(fn, (torch.rand(4, 5),))
-        traced_fn(torch.rand(3, 4))
+    $ PYTORCH_JIT=0 python disable_jit_example.py
 
-    Debugging this script with ``pdb`` works except for when we invoke the :func:`@torch.jit.script <torch.jit.script>`
-    function. We can globally disable JIT, so that we can call the :func:`@torch.jit.script <torch.jit.script>`
-    function as a normal Python function and not compile it. If the above script
-    is called ``disable_jit_example.py``, we can invoke it like so::
+and we will be able to step into the :func:`@torch.jit.script
+<torch.jit.script>` function as a normal Python function. To disable the
+TorchScript compiler for a specific function, see
+:func:`@torch.jit.ignore <torch.jit.ignore>`.
 
-        $ PYTORCH_JIT=0 python disable_jit_example.py
-
-    and we will be able to step into the :func:`@torch.jit.script <torch.jit.script>` function as a normal Python
-    function. To disable the TorchScript compiler for a specific function, see
-    :func:`@torch.jit.ignore <torch.jit.ignore>`.
-
+.. _inspecting-code:
 
 Inspecting Code
 ~~~~~~~~~~~~~~~
@@ -292,6 +301,8 @@ You can use this to ensure TorchScript (tracing or scripting) has captured
 your model code correctly.
 
 
+.. _interpreting-graphs:
+
 Interpreting Graphs
 ~~~~~~~~~~~~~~~~~~~
 TorchScript also has a representation at a lower level than the code pretty-
@@ -322,7 +333,7 @@ including control flow operators for loops and conditionals. As an example:
 
     ...
 
-``graph`` follows the same rules described in the `Inspecting Code`_ section
+``graph`` follows the same rules described in the :ref:`inspecting-code` section
 with regard to ``forward`` method lookup.
 
 The example script above produces the graph::
@@ -465,7 +476,7 @@ In this case, data-dependent control flow like this can be captured using
     #print(str(scripted_fn.graph).strip())
 
     for input_tuple in [inputs] + check_inputs:
-        torch.testing.assert_allclose(fn(*input_tuple), scripted_fn(*input_tuple))
+        torch.testing.assert_close(fn(*input_tuple), scripted_fn(*input_tuple))
 
 .. testoutput::
     :hide:
@@ -537,14 +548,6 @@ rather build up the result tensor out-of-place with ``torch.cat``:
 
     ...
 
-.. _Builtin functions:
-
-Built-in Functions and Modules
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-See :ref:`builtin-functions` for a full reference of supported functions.
-
-
 Frequently Asked Questions
 --------------------------
 
@@ -555,18 +558,18 @@ best practices?
 
       cpu_model = gpu_model.cpu()
       sample_input_cpu = sample_input_gpu.cpu()
-      traced_cpu = torch.jit.trace(traced_cpu, sample_input_cpu)
-      torch.jit.save(traced_cpu, "cpu.pth")
+      traced_cpu = torch.jit.trace(cpu_model, sample_input_cpu)
+      torch.jit.save(traced_cpu, "cpu.pt")
 
-      traced_gpu = torch.jit.trace(traced_gpu, sample_input_gpu)
-      torch.jit.save(traced_gpu, "gpu.pth")
+      traced_gpu = torch.jit.trace(gpu_model, sample_input_gpu)
+      torch.jit.save(traced_gpu, "gpu.pt")
 
       # ... later, when using the model:
 
       if use_gpu:
-        model = torch.jit.load("gpu.pth")
+        model = torch.jit.load("gpu.pt")
       else:
-        model = torch.jit.load("cpu.pth")
+        model = torch.jit.load("cpu.pt")
 
       model(input)
 
@@ -582,7 +585,9 @@ Q: How do I store attributes on a :class:`ScriptModule`?
 
     .. testcode::
 
-        class Model(nn.Module):
+        import torch
+
+        class Model(torch.nn.Module):
             def __init__(self):
                 super(Model, self).__init__()
                 self.x = 2
@@ -608,13 +613,11 @@ Q: How do I store attributes on a :class:`ScriptModule`?
     3. Constants - Annotating a class member as ``Final`` (or adding it to a list called
     ``__constants__`` at the class definition level) will mark the contained names
     as constants. Constants are saved directly in the code of the model. See
-    `Python-defined Constants`_ for details.
+    `builtin-constants` for details.
 
-    4. Attributes - Values that are a `supported type`_ can be added as mutable
+    4. Attributes - Values that are a `supported type` can be added as mutable
     attributes. Most types can be inferred but some may need to be specified, see
-    `Module Attributes`_ for details.
-
-
+    `module attributes` for details.
 
 Q: I would like to trace module's method but I keep getting this error:
 
@@ -627,6 +630,15 @@ Q: I would like to trace module's method but I keep getting this error:
       - On the other hand, invoking ``trace`` with module's instance (e.g. ``my_module``) creates a new module and correctly copies parameters into the new module, so they can accumulate gradients if required.
 
     To trace a specific method on a module, see :func:`torch.jit.trace_module <torch.jit.trace_module>`
+
+Known Issues
+---------------
+
+If you're using ``Sequential`` with TorchScript, the inputs of some
+of the ``Sequential`` submodules may be falsely inferred to be
+``Tensor``, even if they're annotated otherwise. The canonical
+solution is to subclass ``nn.Sequential`` and redeclare ``forward``
+with the input typed correctly.
 
 Appendix
 --------
@@ -741,12 +753,13 @@ TorchScript Classes
     for simple record-like types (think a ``NamedTuple`` with methods
     attached).
 
-Everything in a user defined `TorchScript Class`_ is exported by default, functions
-can be decorated with :func:`@torch.jit.ignore <torch.jit.ignore>` if needed.
+Everything in a user defined `TorchScript Class <torchscript-class>`_ is
+exported by default, functions can be decorated with :func:`@torch.jit.ignore
+<torch.jit.ignore>` if needed.
 
 Attributes
 ^^^^^^^^^^
-The TorchScript compiler needs to know the types of `module attributes`_. Most types
+The TorchScript compiler needs to know the types of `module attributes`. Most types
 can be inferred from the value of the member. Empty lists and dicts cannot have their
 types inferred and must have their types annotated with `PEP 526-style <https://www.python.org/dev/peps/pep-0526/#class-and-instance-variable-annotations>`_ class annotations.
 If a type cannot be inferred and is not explicitly annotated, it will not be added as an attribute
@@ -790,25 +803,10 @@ New API:
 
     m = torch.jit.script(MyModule())
 
-Python 2
-""""""""
-If you are stuck on Python 2 and cannot use the class annotation syntax, you can use the ``__annotations__`` class member to directly apply type annotations.
-
-.. testcode::
-
-    from typing import Dict
-
-    class MyModule(torch.jit.ScriptModule):
-        __annotations__ = {'my_dict': Dict[str, int]}
-
-        def __init__(self):
-            super(MyModule, self).__init__()
-            self.my_dict = {}
-            self.my_int = 20
 
 Constants
 ^^^^^^^^^
-The ``Final`` type constructor can be used to mark members as `constant`_. If members are not marked constant, they will be copied to the resulting :class:`ScriptModule` as an attribute. Using ``Final`` opens opportunities for optimization if the value is known to be fixed and gives additional type safety.
+The ``Final`` type constructor can be used to mark members as `constant`. If members are not marked constant, they will be copied to the resulting :class:`ScriptModule` as an attribute. Using ``Final`` opens opportunities for optimization if the value is known to be fixed and gives additional type safety.
 
 Old API:
 
@@ -854,7 +852,7 @@ New API:
 Variables
 ^^^^^^^^^
 Containers are assumed to have type ``Tensor`` and be non-optional (see
-`Default Types`_ for more information). Previously, ``torch.jit.annotate`` was used to
+`Default Types` for more information). Previously, ``torch.jit.annotate`` was used to
 tell the TorchScript compiler what the type should be. Python 3 style type hints are
 now supported.
 
@@ -871,3 +869,11 @@ now supported.
         if flag:
             b = 2
         return x, b
+
+References
+~~~~~~~~~~
+.. toctree::
+    :maxdepth: 1
+
+    jit_python_reference
+    jit_unsupported

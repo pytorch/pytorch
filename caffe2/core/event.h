@@ -55,7 +55,7 @@ typedef void (*EventResetFunction)(Event*);
 typedef std::function<void()> EventCallbackFunction;
 typedef void (*EventSetCallbackFunction)(Event*, EventCallbackFunction);
 
-class CAFFE2_API Event {
+class TORCH_API Event {
  public:
   explicit Event(const DeviceOption& option)
       : event_(), type_(option.device_type()), option_(option) {
@@ -107,8 +107,8 @@ class CAFFE2_API Event {
     event_resetter_[type_](this);
 #ifdef CAFFE2_USE_EXCEPTION_PTR
     caught_exception_ = nullptr;
-    exception_timestamp_ = 0;
 #endif // CAFFE2_USE_EXCEPTION_PTR
+    error_timestamp_ = 0;
   }
 
   const DeviceOption& GetDeviceOption() const {
@@ -126,6 +126,11 @@ class CAFFE2_API Event {
   }
 
   void SetFinished(const char* err_msg = nullptr) {
+    typedef std::chrono::high_resolution_clock clock;
+    error_timestamp_ = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                           clock::now().time_since_epoch())
+                           .count();
+
     CAFFE_ENFORCE(event_finished_setter_[type_]);
     return event_finished_setter_[type_](this, err_msg);
   }
@@ -175,9 +180,6 @@ class CAFFE2_API Event {
 #ifdef CAFFE2_USE_EXCEPTION_PTR
     if (!caught_exception_) {
       caught_exception_ = std::current_exception();
-      typedef std::chrono::high_resolution_clock clock;
-      exception_timestamp_ =
-          clock::now().time_since_epoch() / std::chrono::milliseconds(1);
     }
     CAFFE_ENFORCE(caught_exception_, "No exception found");
 #else
@@ -199,13 +201,8 @@ class CAFFE2_API Event {
 #endif // CAFFE2_USE_EXCEPTION_PTR
   }
 
-  int64_t ExceptionTimestamp() const {
-#ifdef CAFFE2_USE_EXCEPTION_PTR
-    return exception_timestamp_;
-#else
-    VLOG(1) << "No support for exceptions in Event";
-    return 0;
-#endif // CAFFE2_USE_EXCEPTION_PTR
+  int64_t ErrorTimestamp() const {
+    return error_timestamp_;
   }
 
   void RethrowException() const {
@@ -229,20 +226,17 @@ class CAFFE2_API Event {
 
 #ifdef CAFFE2_USE_EXCEPTION_PTR
   std::exception_ptr caught_exception_;
-  int64_t exception_timestamp_{};
 #endif // CAFFE2_USE_EXCEPTION_PTR
+  int64_t error_timestamp_{};
 
   static EventCreateFunction event_creator_[MaxDeviceTypes];
   static EventRecordFunction event_recorder_[MaxDeviceTypes];
-  static EventWaitFunction event_waiter_[MaxDeviceTypes]
-                                        [MaxDeviceTypes];
+  static EventWaitFunction event_waiter_[MaxDeviceTypes][MaxDeviceTypes];
   static EventFinishFunction event_finisher_[MaxDeviceTypes];
 
   static EventQueryFunction event_querier_[MaxDeviceTypes];
-  static EventErrorMessageFunction
-      event_err_msg_getter_[MaxDeviceTypes];
-  static EventSetFinishedFunction
-      event_finished_setter_[MaxDeviceTypes];
+  static EventErrorMessageFunction event_err_msg_getter_[MaxDeviceTypes];
+  static EventSetFinishedFunction event_finished_setter_[MaxDeviceTypes];
   static EventResetFunction event_resetter_[MaxDeviceTypes];
 
   static EventSetCallbackFunction event_callback_setter_[MaxDeviceTypes];

@@ -2,21 +2,27 @@ from .module import Module
 from .utils import _pair, _quadruple, _ntuple
 from .. import functional as F
 
+from torch import Tensor
+from ..common_types import _size_2_t, _size_4_t, _size_6_t
+from typing import Sequence, Tuple
+
 
 # TODO: grad_output size asserts in THNN
 
 
 class _ConstantPadNd(Module):
     __constants__ = ['padding', 'value']
+    value: float
+    padding: Sequence[int]
 
-    def __init__(self, value):
+    def __init__(self, value: float) -> None:
         super(_ConstantPadNd, self).__init__()
         self.value = value
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.pad(input, self.padding, 'constant', self.value)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         return 'padding={}, value={}'.format(self.padding, self.value)
 
 
@@ -31,8 +37,8 @@ class ConstantPad1d(_ConstantPadNd):
             (:math:`\text{padding\_left}`, :math:`\text{padding\_right}`)
 
     Shape:
-        - Input: :math:`(N, C, W_{in})`
-        - Output: :math:`(N, C, W_{out})` where
+        - Input: :math:`(C, W_{in})` or :math:`(N, C, W_{in})`.
+        - Output: :math:`(C, W_{out})` or :math:`(N, C, W_{out})`, where
 
           :math:`W_{out} = W_{in} + \text{padding\_left} + \text{padding\_right}`
 
@@ -63,8 +69,9 @@ class ConstantPad1d(_ConstantPadNd):
                  [ 3.5000,  3.5000,  3.5000, -3.6372,  0.1182, -1.8652,  3.5000]]])
 
     """
+    padding: Tuple[int, int]
 
-    def __init__(self, padding, value):
+    def __init__(self, padding: _size_2_t, value: float):
         super(ConstantPad1d, self).__init__(value)
         self.padding = _pair(padding)
 
@@ -80,8 +87,8 @@ class ConstantPad2d(_ConstantPadNd):
             :math:`\text{padding\_right}`, :math:`\text{padding\_top}`, :math:`\text{padding\_bottom}`)
 
     Shape:
-        - Input: :math:`(N, C, H_{in}, W_{in})`
-        - Output: :math:`(N, C, H_{out}, W_{out})` where
+        - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, H_{out}, W_{out})` or :math:`(C, H_{out}, W_{out})`, where
 
           :math:`H_{out} = H_{in} + \text{padding\_top} + \text{padding\_bottom}`
 
@@ -112,8 +119,9 @@ class ConstantPad2d(_ConstantPadNd):
 
     """
     __constants__ = ['padding', 'value']
+    padding: Tuple[int, int, int, int]
 
-    def __init__(self, padding, value):
+    def __init__(self, padding: _size_4_t, value: float) -> None:
         super(ConstantPad2d, self).__init__(value)
         self.padding = _quadruple(padding)
 
@@ -131,8 +139,9 @@ class ConstantPad3d(_ConstantPadNd):
             :math:`\text{padding\_front}`, :math:`\text{padding\_back}`)
 
     Shape:
-        - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})`
-        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` where
+        - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})` or :math:`(C, D_{in}, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` or
+          :math:`(C, D_{out}, H_{out}, W_{out})`, where
 
           :math:`D_{out} = D_{in} + \text{padding\_front} + \text{padding\_back}`
 
@@ -150,19 +159,21 @@ class ConstantPad3d(_ConstantPadNd):
         >>> output = m(input)
 
     """
+    padding: Tuple[int, int, int, int, int, int]
 
-    def __init__(self, padding, value):
+    def __init__(self, padding: _size_6_t, value: float) -> None:
         super(ConstantPad3d, self).__init__(value)
         self.padding = _ntuple(6)(padding)
 
 
 class _ReflectionPadNd(Module):
     __constants__ = ['padding']
+    padding: Sequence[int]
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.pad(input, self.padding, 'reflect')
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         return '{}'.format(self.padding)
 
 
@@ -177,8 +188,8 @@ class ReflectionPad1d(_ReflectionPadNd):
             (:math:`\text{padding\_left}`, :math:`\text{padding\_right}`)
 
     Shape:
-        - Input: :math:`(N, C, W_{in})`
-        - Output: :math:`(N, C, W_{out})` where
+        - Input: :math:`(C, W_{in})` or :math:`(N, C, W_{in})`.
+        - Output: :math:`(C, W_{out})` or :math:`(N, C, W_{out})`, where
 
           :math:`W_{out} = W_{in} + \text{padding\_left} + \text{padding\_right}`
 
@@ -199,8 +210,9 @@ class ReflectionPad1d(_ReflectionPadNd):
                  [7., 6., 5., 4., 5., 6., 7., 6.]]])
 
     """
+    padding: Tuple[int, int]
 
-    def __init__(self, padding):
+    def __init__(self, padding: _size_2_t) -> None:
         super(ReflectionPad1d, self).__init__()
         self.padding = _pair(padding)
 
@@ -216,8 +228,8 @@ class ReflectionPad2d(_ReflectionPadNd):
             :math:`\text{padding\_right}`, :math:`\text{padding\_top}`, :math:`\text{padding\_bottom}`)
 
     Shape:
-        - Input: :math:`(N, C, H_{in}, W_{in})`
-        - Output: :math:`(N, C, H_{out}, W_{out})` where
+        - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, H_{out}, W_{out})` or :math:`(C, H_{out}, W_{out})` where
 
           :math:`H_{out} = H_{in} + \text{padding\_top} + \text{padding\_bottom}`
 
@@ -249,19 +261,73 @@ class ReflectionPad2d(_ReflectionPadNd):
                   [7., 6., 7., 8., 7.]]]])
 
     """
+    padding: Tuple[int, int, int, int]
 
-    def __init__(self, padding):
+    def __init__(self, padding: _size_4_t) -> None:
         super(ReflectionPad2d, self).__init__()
         self.padding = _quadruple(padding)
 
 
+class ReflectionPad3d(_ReflectionPadNd):
+    r"""Pads the input tensor using the reflection of the input boundary.
+
+    For `N`-dimensional padding, use :func:`torch.nn.functional.pad()`.
+
+    Args:
+        padding (int, tuple): the size of the padding. If is `int`, uses the same
+            padding in all boundaries. If a 6-`tuple`, uses
+            (:math:`\text{padding\_left}`, :math:`\text{padding\_right}`,
+            :math:`\text{padding\_top}`, :math:`\text{padding\_bottom}`,
+            :math:`\text{padding\_front}`, :math:`\text{padding\_back}`)
+
+    Shape:
+        - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})` or :math:`(C, D_{in}, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` or :math:`(C, D_{out}, H_{out}, W_{out})`,
+          where
+
+          :math:`D_{out} = D_{in} + \text{padding\_front} + \text{padding\_back}`
+
+          :math:`H_{out} = H_{in} + \text{padding\_top} + \text{padding\_bottom}`
+
+          :math:`W_{out} = W_{in} + \text{padding\_left} + \text{padding\_right}`
+
+    Examples::
+
+        >>> m = nn.ReflectionPad3d(1)
+        >>> input = torch.arange(8, dtype=torch.float).reshape(1, 1, 2, 2, 2)
+        >>> m(input)
+        tensor([[[[[7., 6., 7., 6.],
+                   [5., 4., 5., 4.],
+                   [7., 6., 7., 6.],
+                   [5., 4., 5., 4.]],
+                  [[3., 2., 3., 2.],
+                   [1., 0., 1., 0.],
+                   [3., 2., 3., 2.],
+                   [1., 0., 1., 0.]],
+                  [[7., 6., 7., 6.],
+                   [5., 4., 5., 4.],
+                   [7., 6., 7., 6.],
+                   [5., 4., 5., 4.]],
+                  [[3., 2., 3., 2.],
+                   [1., 0., 1., 0.],
+                   [3., 2., 3., 2.],
+                   [1., 0., 1., 0.]]]]])
+    """
+    padding: Tuple[int, int, int, int, int, int]
+
+    def __init__(self, padding: _size_6_t) -> None:
+        super(ReflectionPad3d, self).__init__()
+        self.padding = _ntuple(6)(padding)
+
+
 class _ReplicationPadNd(Module):
     __constants__ = ['padding']
+    padding: Sequence[int]
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.pad(input, self.padding, 'replicate')
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         return '{}'.format(self.padding)
 
 
@@ -276,8 +342,8 @@ class ReplicationPad1d(_ReplicationPadNd):
             (:math:`\text{padding\_left}`, :math:`\text{padding\_right}`)
 
     Shape:
-        - Input: :math:`(N, C, W_{in})`
-        - Output: :math:`(N, C, W_{out})` where
+        - Input: :math:`(C, W_{in})` or :math:`(N, C, W_{in})`.
+        - Output: :math:`(C, W_{out})` or :math:`(N, C, W_{out})`, where
 
           :math:`W_{out} = W_{in} + \text{padding\_left} + \text{padding\_right}`
 
@@ -298,8 +364,9 @@ class ReplicationPad1d(_ReplicationPadNd):
                  [4., 4., 4., 4., 5., 6., 7., 7.]]])
 
     """
+    padding: Tuple[int, int]
 
-    def __init__(self, padding):
+    def __init__(self, padding: _size_2_t) -> None:
         super(ReplicationPad1d, self).__init__()
         self.padding = _pair(padding)
 
@@ -315,8 +382,8 @@ class ReplicationPad2d(_ReplicationPadNd):
             :math:`\text{padding\_right}`, :math:`\text{padding\_top}`, :math:`\text{padding\_bottom}`)
 
     Shape:
-        - Input: :math:`(N, C, H_{in}, W_{in})`
-        - Output: :math:`(N, C, H_{out}, W_{out})` where
+        - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, H_{out}, W_{out})` or :math:`(C, H_{out}, W_{out})`, where
 
           :math:`H_{out} = H_{in} + \text{padding\_top} + \text{padding\_bottom}`
 
@@ -348,8 +415,9 @@ class ReplicationPad2d(_ReplicationPadNd):
                   [6., 6., 7., 8., 8.]]]])
 
     """
+    padding: Tuple[int, int, int, int]
 
-    def __init__(self, padding):
+    def __init__(self, padding: _size_4_t) -> None:
         super(ReplicationPad2d, self).__init__()
         self.padding = _quadruple(padding)
 
@@ -367,8 +435,9 @@ class ReplicationPad3d(_ReplicationPadNd):
             :math:`\text{padding\_front}`, :math:`\text{padding\_back}`)
 
     Shape:
-        - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})`
-        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` where
+        - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})` or :math:`(C, D_{in}, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` or :math:`(C, D_{out}, H_{out}, W_{out})`,
+          where
 
           :math:`D_{out} = D_{in} + \text{padding\_front} + \text{padding\_back}`
 
@@ -386,8 +455,9 @@ class ReplicationPad3d(_ReplicationPadNd):
         >>> output = m(input)
 
     """
+    padding: Tuple[int, int, int, int, int, int]
 
-    def __init__(self, padding):
+    def __init__(self, padding: _size_6_t) -> None:
         super(ReplicationPad3d, self).__init__()
         self.padding = _ntuple(6)(padding)
 
@@ -403,8 +473,8 @@ class ZeroPad2d(ConstantPad2d):
             :math:`\text{padding\_right}`, :math:`\text{padding\_top}`, :math:`\text{padding\_bottom}`)
 
     Shape:
-        - Input: :math:`(N, C, H_{in}, W_{in})`
-        - Output: :math:`(N, C, H_{out}, W_{out})` where
+        - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, H_{out}, W_{out})` or :math:`(C, H_{out}, W_{out})`, where
 
           :math:`H_{out} = H_{in} + \text{padding\_top} + \text{padding\_bottom}`
 
@@ -436,6 +506,7 @@ class ZeroPad2d(ConstantPad2d):
                   [ 0.0000, -0.9162, -0.5436, -0.6446,  0.0000]]]])
 
     """
+    padding: Tuple[int, int, int, int]
 
-    def __init__(self, padding):
+    def __init__(self, padding: _size_4_t) -> None:
         super(ZeroPad2d, self).__init__(padding, 0.)

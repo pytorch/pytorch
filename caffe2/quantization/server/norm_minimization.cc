@@ -8,11 +8,17 @@
 
 #include <immintrin.h>
 
+#include <c10/util/irange.h>
+
 using namespace std;
 
 namespace dnnlowp {
 
 #undef NDEBUG
+
+// Use fp16_min as the small scale cutoff because we don't want to use scales in fp16 subnormal range.
+// This is to be consistent with Glow and FakeLowP implementation for NNPI.
+constexpr float SMALL_SCALE_THRESHOLD = 6.1e-5f;
 
 static float
 GetNorm(float begin, float end, float density, NormMinimization::Kind kind) {
@@ -53,11 +59,14 @@ TensorQuantizationParams NormMinimization::NonlinearQuantizationParamsSearch(
   }
   VLOG(2) << "Using the nonlinear quantile search";
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   float min, max;
   vector<float> bins_f(dnnlowp::adjust_hist_to_include_zero(hist, &min, &max));
   int nbins = bins_f.size();
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   float bin_width = (max - min) / nbins;
-  if (bin_width == 0) {
+  float scale = (max - min) / float((1 << precision) - 1);
+  if (bin_width == 0 || scale < SMALL_SCALE_THRESHOLD) {
     QuantizationFactory* qfactory = QuantizationFactory::GetDefaultInstance();
     return qfactory->ChooseQuantizationParams(
         min, max, precision, preserve_sparsity);
@@ -114,12 +123,14 @@ TensorQuantizationParams NormMinimization::NonlinearQuantizationParamsSearch(
     // calculate the norm
     double norm = 0;
     double dst_bin_width =
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         bin_width * (next_end_bin - next_start_bin + 1) / dst_nbins;
 
     // go over each histogram bin and accumulate errors
     for (int src_bin = 0; src_bin < nbins; ++src_bin) {
       // distances from the beginning of first dst_bin to the beginning and
       // end of src_bin
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       double src_bin_begin = (src_bin - next_start_bin) * bin_width;
       double src_bin_end = src_bin_begin + bin_width;
 
@@ -138,19 +149,24 @@ TensorQuantizationParams NormMinimization::NonlinearQuantizationParamsSearch(
         // if src_bin is entirely within 1 dst_bin
         double delta_begin = src_bin_begin - dst_bin_of_begin_center;
         double delta_end = src_bin_end - dst_bin_of_begin_center;
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         norm += GetNorm(delta_begin, delta_end, density, kind_);
       } else {
         double delta_begin = src_bin_begin - dst_bin_of_begin_center;
         double delta_end = dst_bin_width / 2;
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         norm += GetNorm(delta_begin, delta_end, density, kind_);
 
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         norm += (dst_bin_of_end - dst_bin_of_begin - 1) *
+            // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
             GetNorm(-dst_bin_width / 2, dst_bin_width / 2, density, kind_);
 
         double dst_bin_of_end_center =
             dst_bin_of_end * dst_bin_width + dst_bin_width / 2;
         delta_begin = -dst_bin_width / 2;
         delta_end = src_bin_end - dst_bin_of_end_center;
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         norm += GetNorm(delta_begin, delta_end, density, kind_);
       }
     }
@@ -170,7 +186,9 @@ TensorQuantizationParams NormMinimization::NonlinearQuantizationParamsSearch(
   VLOG(2) << "best quantization range covers "
           << (double)selected_sum / total * 100 << " %%";
 
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   max = min + bin_width * (end_bin + 1);
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   min = min + bin_width * start_bin;
 
   VLOG(2) << "Org min " << org_min << " org max " << org_max << " found min "
@@ -185,13 +203,22 @@ TensorQuantizationParams NormMinimization::ChooseQuantizationParams(
     bool preserve_sparsity,
     int precision) {
   VLOG(2) << "Using the brute force search";
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   float min, max;
   vector<float> bins_f(dnnlowp::adjust_hist_to_include_zero(hist, &min, &max));
   int nbins = bins_f.size();
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   float bin_width = (max - min) / nbins;
 
+  float scale = (max - min) / float((1 << precision) - 1);
+  if (bin_width == 0 || scale < SMALL_SCALE_THRESHOLD) {
+    QuantizationFactory* qfactory = QuantizationFactory::GetDefaultInstance();
+    return qfactory->ChooseQuantizationParams(
+        min, max, precision, preserve_sparsity);
+  }
   int dst_nbins = 1 << precision;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   int zero_bin = round(-min / bin_width);
 
   vector<pair<int, float>> best_start_bins(nbins + 1);
@@ -219,8 +246,10 @@ TensorQuantizationParams NormMinimization::ChooseQuantizationParams(
       }
     }
 
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     float dst_bin_width = bin_width * nbins_selected / dst_nbins;
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int start_bin;
     for (start_bin = start_bin_begin; start_bin < start_bin_end; ++start_bin) {
       float norm = 0;
@@ -239,18 +268,22 @@ TensorQuantizationParams NormMinimization::ChooseQuantizationParams(
         for (int src_bin = 0; src_bin < nbins; ++src_bin) {
           // distances from the beginning of first dst_bin to the beginning and
           // end of src_bin
+          // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
           float src_bin_begin = (src_bin - start_bin) * bin_width;
           float src_bin_end = src_bin_begin + bin_width;
 
           // which dst_bins the beginning and end of src_bin belong to?
           int dst_bin_of_begin = std::min(
+              // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
               (1 << precision) - 1.0f,
               std::max(0.0f, floorf(src_bin_begin / dst_bin_width)));
           int dst_bin_of_end = std::min(
+              // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
               (1 << precision) - 1.0f,
               std::max(0.0f, floorf(src_bin_end / dst_bin_width)));
 
           float dst_bin_of_begin_center =
+              // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
               dst_bin_of_begin * dst_bin_width + dst_bin_width / 2;
           float density = bins_f[src_bin] / bin_width;
           float delta_begin = src_bin_begin - dst_bin_of_begin_center;
@@ -262,10 +295,12 @@ TensorQuantizationParams NormMinimization::ChooseQuantizationParams(
             float delta_end = dst_bin_width / 2;
             norm += GetNorm(delta_begin, delta_end, density, kind_);
 
+            // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
             norm += (dst_bin_of_end - dst_bin_of_begin - 1) *
                 GetNorm(-dst_bin_width / 2, dst_bin_width / 2, density, kind_);
 
             float dst_bin_of_end_center =
+                // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
                 dst_bin_of_end * dst_bin_width + dst_bin_width / 2;
             delta_begin = -dst_bin_width / 2;
             delta_end = src_bin_end - dst_bin_of_end_center;
@@ -295,7 +330,7 @@ TensorQuantizationParams NormMinimization::ChooseQuantizationParams(
   }
 
   float total_sum = 0;
-  for (int i = 0; i < bins_f.size(); ++i) {
+  for (const auto i : c10::irange(bins_f.size())) {
     total_sum += bins_f[i];
   }
   float selected_sum = 0;
@@ -307,7 +342,9 @@ TensorQuantizationParams NormMinimization::ChooseQuantizationParams(
   VLOG(2) << "best quantization range covers " << selected_sum / total_sum * 100
           << " %%";
 
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   max = min + bin_width * (best_start_bin + best_nbins_selected);
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   min = min + bin_width * (best_start_bin);
 
   QuantizationFactory* qfactory = QuantizationFactory::GetDefaultInstance();

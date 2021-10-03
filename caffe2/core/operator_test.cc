@@ -114,14 +114,14 @@ TEST(OperatorTest, ExceptionWorks) {
     // This should not happen - exception should throw above.
     LOG(FATAL) << "This should not happen.";
   } catch (const EnforceNotMet& err) {
-    LOG(INFO) << err.msg();
+    LOG(INFO) << err.what();
   }
   try {
     op->RunAsync();
     // This should not happen - exception should throw above.
     LOG(FATAL) << "This should not happen.";
   } catch (const EnforceNotMet& err) {
-    LOG(INFO) << err.msg();
+    LOG(INFO) << err.what();
   }
 }
 
@@ -152,6 +152,7 @@ TEST(OperatorTest, CannotUseUninitializedBlob) {
   op_def.set_type("JustTest");
   op_def.add_input("input");
   op_def.add_output("output");
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_THROW(CreateOperator(op_def, &ws), EnforceNotMet);
 }
 
@@ -192,6 +193,7 @@ TEST(OperatorTest, CannotAccessParameterWithWrongType) {
   EXPECT_NE(ws.CreateBlob("input"), nullptr);
   OperatorBase op(op_def, &ws);
   EXPECT_FLOAT_EQ(op.GetSingleArgument<float>("arg0", 0.0), 0.1);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_THROW(op.GetSingleArgument<int>("arg0", 0), EnforceNotMet);
 }
 
@@ -209,6 +211,7 @@ TEST(OperatorDeathTest, DISABLED_CannotAccessRepeatedParameterWithWrongType) {
   auto args = op.GetRepeatedArgument<float>("arg0");
   EXPECT_EQ(args.size(), 1);
   EXPECT_FLOAT_EQ(args[0], 0.1f);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   EXPECT_DEATH(op.GetRepeatedArgument<int>("arg0"),
                "Argument does not have the right field: expected ints");
 }
@@ -246,6 +249,7 @@ TEST(OperatorTest, TestSetUpInputOutputCount) {
   EXPECT_NE(nullptr, ws.CreateBlob("input2"));
 #ifndef CAFFE2_NO_OPERATOR_SCHEMA
   // JustTest will only accept one single input.
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(CreateOperator(op_def, &ws));
 #endif
 
@@ -254,6 +258,7 @@ TEST(OperatorTest, TestSetUpInputOutputCount) {
   op_def.add_output("output2");
 #ifndef CAFFE2_NO_OPERATOR_SCHEMA
   // JustTest will only produce one single output.
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(CreateOperator(op_def, &ws));
 #endif
 }
@@ -406,6 +411,7 @@ TEST(EnginePrefTest, PerOpEnginePref) {
   SetPerOpEnginePref({});
 
   // Invalid operator type
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_THROW(
       SetPerOpEnginePref({{CPU, {{"NO_EXIST", {"BAR"}}}}}), EnforceNotMet);
 }

@@ -1,9 +1,9 @@
 #ifndef CAFFE2_OPERATORS_GELU_OP_H_
 #define CAFFE2_OPERATORS_GELU_OP_H_
 
-#include "caffe2/core/export_caffe2_op_to_c10.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/context.h"
+#include "caffe2/core/export_caffe2_op_to_c10.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/operators/elementwise_ops.h"
 

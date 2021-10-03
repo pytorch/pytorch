@@ -1,8 +1,9 @@
 #pragma once
-#include <ATen/ATen.h>
 
 #include <cstddef>
 #include <exception>
+
+#include <c10/util/SmallVector.h>
 
 #ifdef _OPENMP
 #define INTRA_OP_PARALLEL
@@ -12,21 +13,14 @@
 
 namespace at {
 
-template <class F>
-inline void parallel_for(
-    const int64_t begin,
-    const int64_t end,
-    const int64_t grain_size,
-    const F& f) {
-  TORCH_CHECK(grain_size >= 0);
-  if (begin >= end) {
-    return;
-  }
 #ifdef _OPENMP
+namespace internal {
+template <typename F>
+inline void invoke_parallel(int64_t begin, int64_t end, int64_t grain_size, const F& f) {
   std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
   std::exception_ptr eptr;
 
-#pragma omp parallel if (!omp_in_parallel() && ((end - begin) > grain_size))
+#pragma omp parallel
   {
     // choose number of tasks based on grain size and number of threads
     // can't use num_threads clause due to bugs in GOMP's thread pool (See #32008)
@@ -40,6 +34,7 @@ inline void parallel_for(
     int64_t begin_tid = begin + tid * chunk_size;
     if (begin_tid < end) {
       try {
+        internal::ThreadIdGuard tid_guard(tid);
         f(begin_tid, std::min(end, chunk_size + begin_tid));
       } catch (...) {
         if (!err_flag.test_and_set()) {
@@ -51,7 +46,37 @@ inline void parallel_for(
   if (eptr) {
     std::rethrow_exception(eptr);
   }
+}
+} // namespace internal
+#endif // _OPENMP
+
+
+template <class F>
+inline void parallel_for(
+    const int64_t begin,
+    const int64_t end,
+    const int64_t grain_size,
+    const F& f) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(grain_size >= 0);
+  if (begin >= end) {
+    return;
+  }
+
+#ifdef _OPENMP
+  at::internal::lazy_init_num_threads();
+  const auto numiter = end - begin;
+  const bool use_parallel = (
+    numiter > grain_size && numiter > 1 &&
+    omp_get_max_threads() > 1 && !omp_in_parallel());
+  if (!use_parallel) {
+    internal::ThreadIdGuard tid_guard(0);
+    f(begin, end);
+    return;
+  }
+
+  internal::invoke_parallel(begin, end, grain_size, f);
 #else
+  internal::ThreadIdGuard tid_guard(0);
   f(begin, end);
 #endif
 }
@@ -67,34 +92,36 @@ inline scalar_t parallel_reduce(
   TORCH_CHECK(grain_size >= 0);
   if (begin >= end) {
     return ident;
-  } else if (in_parallel_region() || get_num_threads() == 1) {
-    return f(begin, end, ident);
-  } else {
-    const int64_t num_results = divup((end - begin), grain_size);
-    std::vector<scalar_t> results(num_results);
-    scalar_t* results_data = results.data();
-    std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
-    std::exception_ptr eptr;
-#pragma omp parallel for if ((end - begin) >= grain_size)
-    for (int64_t id = 0; id < num_results; id++) {
-      int64_t i = begin + id * grain_size;
-      try {
-        results_data[id] = f(i, i + std::min(end - i, grain_size), ident);
-      } catch (...) {
-        if (!err_flag.test_and_set()) {
-          eptr = std::current_exception();
-        }
-      }
-    }
-    if (eptr) {
-      std::rethrow_exception(eptr);
-    }
-    scalar_t result = ident;
-    for (auto partial_result : results) {
-      result = sf(result, partial_result);
-    }
-    return result;
   }
+
+#ifdef _OPENMP
+  at::internal::lazy_init_num_threads();
+  const bool use_parallel = (
+      (end - begin) <= grain_size ||
+      in_parallel_region() ||
+      get_num_threads() == 1);
+  if (!use_parallel) {
+    internal::ThreadIdGuard tid_guard(0);
+    return f(begin, end, ident);
+  }
+
+  c10::SmallVector<scalar_t, 64> results(at::get_num_threads(), ident);
+  internal::invoke_parallel(begin, end, grain_size,
+    [&](const int64_t my_begin, const int64_t my_end) {
+      const auto tid = at::get_thread_num();
+      results[tid] = f(my_begin, my_end, ident);
+    }
+  );
+
+  scalar_t result = ident;
+  for (auto partial_result : results) {
+    result = sf(result, partial_result);
+  }
+  return result;
+#else
+  internal::ThreadIdGuard tid_guard(0);
+  return f(begin, end, ident);
+#endif
 }
 
 } // namespace at

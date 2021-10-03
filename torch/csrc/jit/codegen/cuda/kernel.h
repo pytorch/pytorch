@@ -1,92 +1,180 @@
 #pragma once
 
-#include <ATen/cuda/CUDAContext.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
+#include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
+#include <torch/csrc/jit/codegen/cuda/utils.h>
 
-#include <torch/csrc/jit/codegen/cuda/fusion.h>
-
-/*
- * The exposed APIs in this file is used by manager.h/cpp
- *
- * code here handles CUDA code generation and execution from Fusion IR.
- * NVRTC is used for kernel compilation. CUDA Driver API is used to load and
- * execute compiled kernel.
- *
- * A stringify trick is used to unify the IO data structure for kernel
- * execution. We stringify the data structure and assert it direclty in the
- * generated CUDA source to avoid runtime search of header files.
- * The header file is included twice: one time as a c++ code to allow host code
- * to prepare IO data; the other time for stringify.
- */
+#include <memory>
+#include <utility>
+#include <vector>
 
 namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
+namespace kir {
 
-// include IO data structure for host code
-#define STRINGIFY(...) __VA_ARGS__
-#include <torch/csrc/jit/codegen/cuda/data_struct_str.h>
-#undef STRINGIFY
+//! Summary of interesting facts about the kernel
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+struct KernelSummary {
+  //! Count of WAR (write-after-read) hazard barriers
+  int war_hazard_syncs_count = 0;
 
-class CudaKernel {
- public:
-  CudaKernel() = default;
+  //! List of global buffers
+  std::vector<const kir::Allocate*> global_allocations;
 
-  CUmodule& getModule() {
-    return module_;
-  }
+  //! List of dynamic shared memory buffers
+  std::vector<const kir::Allocate*> dynamic_smem_allocations;
 
-  CUfunction& getFunction() {
-    return function_;
-  }
+  //! List of static shared memory buffers
+  std::vector<const kir::Allocate*> static_smem_allocations;
 
-  int16_t device_;
-  CUmodule module_;
-  CUfunction function_;
-  int max_blocks_;
+  //! Indicate the need to generate random numbers
+  bool is_stochastic = false;
 
-  // WARNING:
-  // Block and Grid dimension setting is here for testing purposes only
-  // These are not here for general use and only for use with
-  // the runTestKernel() function.
-  void block(unsigned int x = 1, unsigned int y = 1, unsigned int z = 1) {
-    block_ = dim3(x, y, z);
-  }
-  void grid(unsigned int x = 1, unsigned int y = 1, unsigned int z = 1) {
-    grid_ = dim3(x, y, z);
-  }
+  //! Do we have any block reductions?
+  bool has_block_reductions = false;
 
-  dim3 block_;
-  dim3 grid_;
+  //! Number of static grid reductions
+  int number_of_grid_reductions = 0;
+
+  //! Do we have any grid reduction in a loop?
+  bool has_grid_reduction_in_loop = false;
+
+  //! Do we have any block broadcasts?
+  bool has_block_broadcasts = false;
+
+  //! Do we have any welford op?
+  bool has_welford = false;
+
+  //! Do we have any welford op?
+  bool has_block_welford = false;
+
+  //! Do we have any welford op?
+  bool has_grid_welford = false;
+
+  //! Largest shared memory buffer base type
+  DataType largest_smem_data_type = DataType::Null;
+
+  //! Do we have allocations of dynamic local memory?
+  bool has_dynamic_local_memory_allocations = false;
+
+  //! List of dynamic local memory buffers.
+  //! Only used for debugging.
+  std::vector<const kir::Allocate*> dynamic_lmem_allocations;
 };
 
-// include IO data structure for stringification
-#define STRINGIFY(...) #__VA_ARGS__
-static auto typeinfo =
-#include "data_struct_str.h"
-    ;
-#undef STRINGIFY
+//! Container for a lowered Kernel IR
+//!
+//! TODO(kir): currently, it is just pointing to nodes owned
+//!  by a Fusion object. The goal is to have the Kernel object
+//!  own the Kernel IR nodes
+//!
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+class TORCH_CUDA_CU_API Kernel final : public NonCopyable {
+ public:
+  Kernel() = default;
 
-// compile Fusion to CUDA functions:
-// 1. JIT compilation via nvrtc to generate CUDA c++ kernel code;
-// 2. CUDA Drive API to load CUDA c++ kernel code as function_;
-TORCH_CUDA_API void compileKernel(Fusion& fusion, CudaKernel& entry);
+  //! Finalize a kernel definition
+  //!
+  //! At this point we have a complete kernel definition and we can
+  //! run analysis passes to build a KernelSummary
+  //!
+  void finalize(std::vector<kir::Expr*> top_level_exprs);
 
-// run loaded kernel through Function.
-// inputs/outputs is given in the sense of a PyTorch JIT ir node. This function
-// wraps IO data structure for tensors on host.
-TORCH_CUDA_API void runKernel(
-    CudaKernel& entry,
-    const at::ArrayRef<IValue>& inputs,
-    std::vector<at::Tensor>& outputs);
+  //! Register input as an input of the kernel
+  void addInput(Val* input) {
+    inputs_.push_back(input);
+    input_set_.insert(input);
+  }
 
-// Facility API to run kernel in tests.
-TORCH_CUDA_API void runTestKernel(
-    CudaKernel& entry,
-    const std::vector<at::Tensor>& inputs,
-    std::vector<at::Tensor>& outputs);
+  //! Register output as an output of the kernel
+  void addOutput(Val* output) {
+    outputs_.push_back(output);
+    output_set_.insert(output);
+  }
 
+  const auto& inputs() const {
+    return inputs_;
+  }
+
+  const auto& outputs() const {
+    return outputs_;
+  }
+
+  bool isInput(Val* val) const {
+    return input_set_.find(val) != input_set_.end();
+  }
+
+  bool isOutput(Val* val) const {
+    return output_set_.find(val) != output_set_.end();
+  }
+
+  const auto& topLevelExprs() const {
+    return top_level_exprs_;
+  }
+
+  const auto& irNodes() const {
+    return ir_nodes_;
+  }
+
+  const KernelSummary& summary() const {
+    return summary_;
+  }
+
+  const ThreadPredicateMap& predicateMap() const {
+    return *predicate_map_;
+  }
+
+  //! Register a new Kernel IR node
+  //!
+  //! \note This is a specialized helper for kir::IrBuilder, not
+  //!   intendted for general use
+  //!
+  void registerIrNode(kir::Passkey passkey, std::unique_ptr<kir::Node> node) {
+    TORCH_CHECK(passkey.kernel == this);
+    ir_nodes_.push_back(std::move(node));
+  }
+
+  //! Allocates a new value identifier
+  kir::ValueId newValueId(kir::Passkey passkey) {
+    TORCH_CHECK(passkey.kernel == this);
+    return next_value_id_++;
+  }
+
+  //! Debug dump of the Kernel IR
+  void print() const;
+
+ private:
+  // Analyze the kernel IR and caches the summary of interesting data
+  void analyze();
+
+ private:
+  // Kernel IR nodes
+  std::vector<std::unique_ptr<kir::Node>> ir_nodes_;
+
+  // Top level statements
+  std::vector<kir::Expr*> top_level_exprs_;
+
+  // Kernel inputs and outputs
+  std::vector<Val*> inputs_;
+  std::vector<Val*> outputs_;
+  std::unordered_set<Val*> input_set_;
+  std::unordered_set<Val*> output_set_;
+
+  // Used to allocate unique value IDs
+  kir::ValueId next_value_id_ = 1;
+
+  // Summary of interesting kernel data
+  KernelSummary summary_;
+
+  // Predicate map
+  // TODO(kir): consider a simpler, kernel IR based version
+  std::unique_ptr<ThreadPredicateMap> predicate_map_;
+};
+
+} // namespace kir
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

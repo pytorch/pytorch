@@ -2,7 +2,7 @@
 
 namespace caffe2 {
 
-REGISTER_CPU_OPERATOR(RowWiseCounter, RowWiseCounterOp<float>);
+REGISTER_CPU_OPERATOR(RowWiseCounter, RowWiseCounterOp);
 OPERATOR_SCHEMA(RowWiseCounter)
     .NumInputs(4)
     .NumOutputs(2)

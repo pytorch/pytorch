@@ -13,40 +13,51 @@ inline std::vector<c10::IValue> makeStack(Inputs&&... inputs) {
   return {std::forward<Inputs>(inputs)...};
 }
 
-inline at::Tensor dummyTensor(c10::DispatchKeySet ks) {
+inline at::Tensor dummyTensor(c10::DispatchKeySet ks, bool requires_grad=false) {
   auto* allocator = c10::GetCPUAllocator();
   int64_t nelements = 1;
   auto dtype = caffe2::TypeMeta::Make<float>();
+  int64_t size_bytes = nelements * dtype.itemsize();
   auto storage_impl = c10::make_intrusive<c10::StorageImpl>(
-    dtype,
-    nelements,
-    allocator->allocate(nelements * dtype.itemsize()),
-    allocator,
-    /*resizable=*/true);
-  return at::detail::make_tensor<c10::TensorImpl>(storage_impl, ks);
+      c10::StorageImpl::use_byte_size_t(),
+      size_bytes,
+      allocator->allocate(size_bytes),
+      allocator,
+      /*resizable=*/true);
+  at::Tensor t = at::detail::make_tensor<c10::TensorImpl>(storage_impl, ks, dtype);
+  // TODO: We add this to simulate the ideal case where we only have Autograd backend keys
+  //       on Tensor when it requires grad. But currently Autograd keys are added in TensorImpl
+  //       constructor by default.
+  if (!requires_grad) {
+    t.unsafeGetTensorImpl()->remove_autograd_key();
+  }
+  return t;
 }
 
-inline at::Tensor dummyTensor(c10::DispatchKey dispatch_key) {
-  return dummyTensor(c10::DispatchKeySet(dispatch_key));
+inline at::Tensor dummyTensor(c10::DispatchKey dispatch_key, bool requires_grad=false) {
+  return dummyTensor(c10::DispatchKeySet(dispatch_key), requires_grad);
 }
 
 template<class... Args>
 inline std::vector<c10::IValue> callOp(const c10::OperatorHandle& op, Args... args) {
   auto stack = makeStack(std::forward<Args>(args)...);
-  c10::Dispatcher::singleton().callBoxed(op, &stack);
+  op.callBoxed(&stack);
   return stack;
 }
 
 template<class Result, class... Args>
 inline Result callOpUnboxed(const c10::OperatorHandle& op, Args... args) {
-  return c10::Dispatcher::singleton()
-      .template callUnboxed<Result, Args...>(op, std::forward<Args>(args)...);
+  return op.typed<Result(Args...)>().call(std::forward<Args>(args)...);
 }
 
 template<class Result, class... Args>
 inline Result callOpUnboxedWithDispatchKey(const c10::OperatorHandle& op, c10::DispatchKey dispatchKey, Args... args) {
-  return c10::Dispatcher::singleton()
-      .template callUnboxedWithDispatchKey<Result, Args...>(op, dispatchKey, std::forward<Args>(args)...);
+  return op.typed<Result(Args...)>().callWithDispatchKey(dispatchKey, std::forward<Args>(args)...);
+}
+
+template<class Result, class... Args>
+inline Result callOpUnboxedWithPrecomputedDispatchKeySet(const c10::OperatorHandle& op, c10::DispatchKeySet ks, Args... args) {
+  return op.typed<Result(Args...)>().redispatch(ks, std::forward<Args>(args)...);
 }
 
 inline void expectDoesntFindKernel(const char* op_name, c10::DispatchKey dispatch_key) {
@@ -71,6 +82,22 @@ inline void expectThrows(Functor&& functor, const char* expectMessageContains) {
   }
   ADD_FAILURE() << "Expected to throw exception containing \""
     << expectMessageContains << "\" but didn't throw";
+}
+
+template<class T, size_t N>
+void expectListEquals(c10::ArrayRef<T> expected, std::array<T, N> actual) {
+  EXPECT_EQ(expected.size(), actual.size());
+  for (size_t i = 0; i < expected.size(); ++i) {
+    EXPECT_EQ(expected[i], actual[i]);
+  }
+}
+
+template<class T>
+void expectListEquals(c10::ArrayRef<T> expected, c10::ArrayRef<T> actual) {
+  EXPECT_EQ(expected.size(), actual.size());
+  for (size_t i = 0; i < expected.size(); ++i) {
+    EXPECT_EQ(expected[i], actual[i]);
+  }
 }
 
 template<class T>

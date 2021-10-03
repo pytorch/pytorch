@@ -56,6 +56,14 @@ void OptimizerParamState::serialize(torch::serialize::OutputArchive& archive) co
     "You must override it in your subclass of torch::optim::OptimizerCloneableParamState<YourOptimizerParamState>.");
 }
 
+double OptimizerOptions::get_lr() const {
+  TORCH_CHECK(false, "double get_lr() has not been overidden and implemented in subclass of torch::optim::OptimizerOptions, you must override it in your subclass.");
+}
+
+void OptimizerOptions::set_lr(const double lr) {
+  TORCH_CHECK(false, "double set_lr() has not been overidden and implemented in subclass of torch::optim::OptimizerOptions, you must override it in your subclass.");
+}
+
 std::unique_ptr<OptimizerOptions> OptimizerOptions::clone() const {
   TORCH_CHECK(false,
       "clone() has not been implemented for torch::optim::OptimizerOptions. ",

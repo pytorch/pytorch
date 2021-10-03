@@ -143,25 +143,22 @@ the structure of the code.
 ProcessGroup
 ------------
 
-- `ProcessGroup.hpp <https://github.com/pytorch/pytorch/blob/v1.4.0/torch/lib/c10d/ProcessGroup.hpp>`__:
+- `ProcessGroup.hpp <https://github.com/pytorch/pytorch/blob/v1.7.0/torch/lib/c10d/ProcessGroup.hpp>`__:
   contains the abstract API of all process group implementations. The ``c10d``
-  library provides 4 implementations out of the box, namely,
-  `ProcessGroupGloo`, `ProcessGroupNCCL`, `ProcessGroupMPI`, and
-  `ProcessGroupRoundRobin`, where `ProcessGroupRoundRobin` is a composition of
-  multiple process group instances and launches collective communications in a
-  round-robin manner. ``DistributedDataParallel`` uses
-  ``ProcessGroup::broadcast()`` to send model states from the process with rank
-  0 to others during initialization and ``ProcessGroup::allreduce()`` to sum
-  gradients.
+  library provides 3 implementations out of the box, namely,
+  `ProcessGroupGloo`, `ProcessGroupNCCL`, and `ProcessGroupMPI`.
+  ``DistributedDataParallel`` uses ``ProcessGroup::broadcast()`` to send
+  model states from the process with rank 0 to others during initialization
+  and ``ProcessGroup::allreduce()`` to sum gradients.
 
 
-- `Store.hpp <https://github.com/pytorch/pytorch/blob/v1.4.0/torch/lib/c10d/Store.hpp>`__:
+- `Store.hpp <https://github.com/pytorch/pytorch/blob/v1.7.0/torch/lib/c10d/Store.hpp>`__:
   assists the rendezvous service for process group instances to find each other.
 
 DistributedDataParallel
 -----------------------
 
-- `distributed.py <https://github.com/pytorch/pytorch/blob/v1.4.0/torch/nn/parallel/distributed.py>`__:
+- `distributed.py <https://github.com/pytorch/pytorch/blob/v1.7.0/torch/nn/parallel/distributed.py>`__:
   is the Python entry point for DDP. It implements the initialization steps and
   the ``forward`` function for the ``nn.parallel.DistributedDataParallel``
   module which call into C++ libraries. Its ``_sync_param`` function performs
@@ -170,12 +167,12 @@ DistributedDataParallel
   all other processes. The inter-process parameter synchronization happens in
   ``Reducer.cpp``.
 
-- `comm.h <https://github.com/pytorch/pytorch/blob/v1.4.0/torch/csrc/distributed/c10d/comm.h>`__:
+- `comm.h <https://github.com/pytorch/pytorch/blob/v1.7.0/torch/csrc/distributed/c10d/comm.h>`__:
   implements the coalesced broadcast helper function which is invoked to
   broadcast model states during initialization and synchronize model buffers
   before the forward pass.
 
-- `reducer.h <https://github.com/pytorch/pytorch/blob/v1.4.0/torch/csrc/distributed/c10d/comm.h>`__:
+- `reducer.h <https://github.com/pytorch/pytorch/blob/v1.7.0/torch/csrc/distributed/c10d/reducer.h>`__:
   provides the core implementation for gradient synchronization in the backward
   pass. It has three entry point functions:
 

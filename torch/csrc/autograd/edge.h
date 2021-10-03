@@ -4,7 +4,7 @@
 #include <functional>
 #include <memory>
 
-#include <torch/csrc/utils/hash.h>
+#include <c10/util/hash.h>
 
 namespace torch { namespace autograd {
 
@@ -50,7 +50,7 @@ struct hash<torch::autograd::Edge> {
   using argument_type = torch::autograd::Edge;
   using return_type = size_t;
   return_type operator()(const argument_type& edge) const noexcept {
-    return torch::get_hash(edge.function, edge.input_nr);
+    return c10::get_hash(edge.function, edge.input_nr);
   }
 };
 } // namespace std

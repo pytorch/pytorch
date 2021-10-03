@@ -1,7 +1,5 @@
 #include <torch/csrc/autograd/python_cpp_function.h>
-#include <torch/csrc/autograd/record_function.h>
-#include <torch/csrc/distributed/autograd/context/container.h>
-#include <torch/csrc/distributed/autograd/engine/dist_engine.h>
+#include <torch/csrc/distributed/autograd/autograd.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/object_ptr.h>
@@ -17,17 +15,22 @@ namespace {
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
-constexpr auto kDistAutogradBackwardProfilingKey =
-    "torch::distributed::autograd::backward";
-
-PyObject* dist_autograd_init(PyObject* /* unused */) {
+PyObject* dist_autograd_init(PyObject* _unused, PyObject* noargs) {
   auto autograd_module =
       THPObjectPtr(PyImport_ImportModule("torch.distributed.autograd"));
   if (!autograd_module) {
     throw python_error();
   }
 
-  auto module = py::handle(autograd_module).cast<py::module>();
+  auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
+  if (!torch_C_module) {
+    throw python_error();
+  }
+
+  auto torch_C_m = py::handle(torch_C_module).cast<py::module>();
+  auto m = torch_C_m.def_submodule("_distributed_autograd", "distributed autograd bindings");
+
+  auto module = py::handle(m).cast<py::module>();
 
   auto distAutogradContext =
       shared_ptr_class_<DistAutogradContext>(module, "DistAutogradContext")
@@ -39,7 +42,11 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
               "_recv_functions",
               [](const DistAutogradContext& ctx) {
                 std::map<int64_t, py::object> funcs;
-                for (const auto& map_entry : ctx.recvFunctions()) {
+                auto recvFunctions = ctx.recvFunctions();
+
+                // Acquire GIL only when necessary to avoid deadlocks.
+                pybind11::gil_scoped_acquire ag;
+                for (const auto& map_entry : recvFunctions) {
                   funcs.emplace(
                       map_entry.first,
                       py::reinterpret_steal<py::object>(
@@ -47,12 +54,17 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
                               map_entry.second)));
                 }
                 return funcs;
-              })
+              },
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "_send_functions",
               [](const ContextPtr& ctx) {
                 std::map<int64_t, py::object> funcs;
-                for (const auto& map_entry : ctx->sendFunctions()) {
+                auto sendFunctions = ctx->sendFunctions();
+
+                // Acquire GIL only when necessary to avoid deadlocks.
+                pybind11::gil_scoped_acquire ag;
+                for (const auto& map_entry : sendFunctions) {
                   funcs.emplace(
                       map_entry.first,
                       py::reinterpret_steal<py::object>(
@@ -60,15 +72,20 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
                               map_entry.second)));
                 }
                 return funcs;
-              })
-          .def("_known_worker_ids", &DistAutogradContext::getKnownWorkerIds);
+              },
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_known_worker_ids",
+              &DistAutogradContext::getKnownWorkerIds,
+              py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_new_context",
       []() -> const ContextPtr {
         return DistAutogradContainer::getInstance().newContext();
       },
-      py::return_value_policy::reference);
+      py::return_value_policy::reference,
+      py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_release_context",
@@ -77,9 +94,10 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
       },
       py::call_guard<py::gil_scoped_release>());
 
-  module.def("_get_max_id", []() {
-    return DistAutogradContainer::getInstance().getMaxId();
-  });
+  module.def(
+      "_get_max_id",
+      []() { return DistAutogradContainer::getInstance().getMaxId(); },
+      py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_is_valid_context",
@@ -93,14 +111,16 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
       [](int64_t context_id) -> const ContextPtr {
         return DistAutogradContainer::getInstance().retrieveContext(context_id);
       },
-      py::return_value_policy::reference);
+      py::return_value_policy::reference,
+      py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_current_context",
       []() -> const ContextPtr {
         return DistAutogradContainer::getInstance().currentContext();
       },
-      py::return_value_policy::reference);
+      py::return_value_policy::reference,
+      py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_init",
@@ -117,22 +137,7 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
 
   module.def(
       "backward",
-      [](int64_t contextId,
-         const std::vector<torch::Tensor>& roots,
-         bool retainGraph = false) {
-        RECORD_FUNCTION(
-            kDistAutogradBackwardProfilingKey, std::vector<c10::IValue>());
-        torch::autograd::variable_list variables;
-        for (const auto& root : roots) {
-          variables.emplace_back(root);
-        }
-        try {
-          DistEngine::getInstance().execute(contextId, variables, retainGraph);
-        } catch (python_error& e) {
-          // FIXME: crashes if exception type is not RuntimeError
-          throw std::runtime_error(e.what());
-        }
-      },
+      backward,
       R"(
 backward(context_id: int, roots: List[Tensor], retain_graph = False) -> None
 
@@ -166,9 +171,9 @@ Arguments:
 Example::
     >>> import torch.distributed.autograd as dist_autograd
     >>> with dist_autograd.context() as context_id:
-    >>>      pred = model.forward()
-    >>>      loss = loss_func(pred, loss)
-    >>>      dist_autograd.backward(context_id, loss)
+    >>>     pred = model.forward()
+    >>>     loss = loss_func(pred, loss)
+    >>>     dist_autograd.backward(context_id, loss)
 )",
       py::arg("contextId"),
       py::arg("roots"),
@@ -180,7 +185,11 @@ Example::
       [](int64_t contextId) -> py::dict {
         const auto& autogradContext =
             DistAutogradContainer::getInstance().retrieveContext(contextId);
-        return torch::jit::toPyObject(IValue(autogradContext->getGradients()));
+        auto ival = IValue(autogradContext->getGradients());
+
+        // Acquire GIL only for pyobject conversion.
+        pybind11::gil_scoped_acquire ag;
+        return torch::jit::toPyObject(ival);
       },
       R"(
 get_gradients(context_id: int) -> Dict[Tensor, Tensor]
@@ -200,15 +209,16 @@ Returns:
 Example::
     >>> import torch.distributed.autograd as dist_autograd
     >>> with dist_autograd.context() as context_id:
-    >>>      t1 = torch.rand((3, 3), requires_grad=True)
-    >>>      t2 = torch.rand((3, 3), requires_grad=True)
-    >>>      loss = t1 + t2
-    >>>      dist_autograd.backward(context_id, [loss.sum()])
-    >>>      grads = dist_autograd.get_gradients(context_id)
-    >>>      print(grads[t1])
-    >>>      print(grads[t2])
+    >>>     t1 = torch.rand((3, 3), requires_grad=True)
+    >>>     t2 = torch.rand((3, 3), requires_grad=True)
+    >>>     loss = t1 + t2
+    >>>     dist_autograd.backward(context_id, [loss.sum()])
+    >>>     grads = dist_autograd.get_gradients(context_id)
+    >>>     print(grads[t1])
+    >>>     print(grads[t2])
 )",
-      py::arg("context_id"));
+      py::arg("context_id"),
+      py::call_guard<py::gil_scoped_release>());
 
   Py_RETURN_TRUE;
 }
@@ -216,7 +226,7 @@ Example::
 
 static PyMethodDef methods[] = { // NOLINT
     {"_dist_autograd_init",
-     (PyCFunction)dist_autograd_init,
+     dist_autograd_init,
      METH_NOARGS,
      nullptr},
     {nullptr, nullptr, 0, nullptr}};

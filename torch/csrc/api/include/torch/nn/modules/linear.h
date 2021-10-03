@@ -16,8 +16,9 @@ namespace nn {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Identity ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// A placeholder identity operator that is argument-insensitive.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Identity to learn
+/// See https://pytorch.org/docs/master/generated/torch.nn.Identity.html to learn
 /// about the exact behavior of this module.
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API IdentityImpl : public Cloneable<IdentityImpl> {
  public:
   void reset() override;
@@ -37,7 +38,7 @@ TORCH_MODULE(Identity);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Linear ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies a linear transformation with optional bias.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Linear to learn
+/// See https://pytorch.org/docs/master/generated/torch.nn.Linear.html to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::LinearOptions` class to learn what
@@ -47,6 +48,7 @@ TORCH_MODULE(Identity);
 /// ```
 /// Linear model(LinearOptions(5, 2).bias(false));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API LinearImpl : public Cloneable<LinearImpl> {
  public:
   LinearImpl(int64_t in_features, int64_t out_features)
@@ -85,7 +87,7 @@ TORCH_MODULE(Linear);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Flatten ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// A placeholder for Flatten operator
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Flatten to learn
+/// See https://pytorch.org/docs/master/generated/torch.nn.Flatten.html to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::FlattenOptions` class to learn what
@@ -95,6 +97,7 @@ TORCH_MODULE(Linear);
 /// ```
 /// Flatten model(FlattenOptions().start_dim(2).end_dim(4));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API FlattenImpl : public Cloneable<FlattenImpl> {
  public:
   explicit FlattenImpl(const FlattenOptions& options_ = {});
@@ -118,10 +121,52 @@ class TORCH_API FlattenImpl : public Cloneable<FlattenImpl> {
 /// module storage semantics.
 TORCH_MODULE(Flatten);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Unflatten ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// A placeholder for unflatten operator
+/// See https://pytorch.org/docs/master/generated/torch.nn.Unflatten.html to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::UnflattenOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// Unflatten model(UnflattenOptions(0, {2, 2}));
+/// Unflatten model(UnflattenOptions("B", {{"B1", 2}, {"B2", 2}}));
+/// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
+class TORCH_API UnflattenImpl : public Cloneable<UnflattenImpl> {
+ public:
+  UnflattenImpl(int64_t dim, std::vector<int64_t> sizes)
+    : UnflattenImpl(UnflattenOptions(dim, sizes)) {}
+  UnflattenImpl(std::string dimname, UnflattenOptions::namedshape_t namedshape)
+    : UnflattenImpl(UnflattenOptions(dimname, namedshape)) {}
+  explicit UnflattenImpl(UnflattenOptions options_);
+
+  void reset() override;
+
+  /// Pretty prints the `Unflatten` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// Applies an unflatten transform on the `input`.
+  Tensor forward(const Tensor& input);
+
+  /// The options used to configure this module.
+  UnflattenOptions options;
+};
+
+/// A `ModuleHolder` subclass for `UnflattenImpl`.
+/// See the documentation for `UnflattenImpl` class to learn what methods it
+/// provides, and examples of how to use `Unflatten` with `torch::nn::UnflattenOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(Unflatten);
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Bilinear ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies a billinear transformation with optional bias.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Bilinear to learn
+/// See https://pytorch.org/docs/master/generated/torch.nn.Bilinear.html to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::BilinearOptions` class to learn what
@@ -131,6 +176,7 @@ TORCH_MODULE(Flatten);
 /// ```
 /// Bilinear model(BilinearOptions(3, 2, 4).bias(false));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API BilinearImpl : public Cloneable<BilinearImpl> {
  public:
   BilinearImpl(int64_t in1_features, int64_t in2_features, int64_t out_features) : BilinearImpl(BilinearOptions(in1_features, in2_features, out_features)) {}
@@ -143,8 +189,8 @@ class TORCH_API BilinearImpl : public Cloneable<BilinearImpl> {
   /// Pretty prints the `Bilinear` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
 
-  /// Applies a bilinear transform on the `input1` and `input2` tensor by multiplying 
-  /// with the `weight` and optionally adding the `bias`, if `with_bias` 
+  /// Applies a bilinear transform on the `input1` and `input2` tensor by multiplying
+  /// with the `weight` and optionally adding the `bias`, if `with_bias`
   /// is true in the options.
   Tensor forward(const Tensor& input1, const Tensor& input2);
 

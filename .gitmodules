@@ -54,7 +54,7 @@
     ignore = dirty
     path = third_party/zstd
     url = https://github.com/facebook/zstd.git
-[submodule "third-party/cpuinfo"]
+[submodule "third_party/cpuinfo"]
     ignore = dirty
     path = third_party/cpuinfo
     url = https://github.com/pytorch/cpuinfo.git
@@ -122,3 +122,23 @@
     ignore = dirty
     path = third_party/XNNPACK
     url = https://github.com/google/XNNPACK.git
+[submodule "third_party/fmt"]
+    ignore = dirty
+    path = third_party/fmt
+    url = https://github.com/fmtlib/fmt.git
+[submodule "third_party/tensorpipe"]
+    ignore = dirty
+    path = third_party/tensorpipe
+    url = https://github.com/pytorch/tensorpipe.git
+[submodule "third_party/cudnn_frontend"]
+	path = third_party/cudnn_frontend
+	url = https://github.com/NVIDIA/cudnn-frontend.git
+[submodule "third_party/kineto"]
+    path = third_party/kineto
+    url = https://github.com/pytorch/kineto
+[submodule "third_party/pocketfft"]
+	path = third_party/pocketfft
+	url = https://github.com/mreineck/pocketfft
+[submodule "third_party/breakpad"]
+	path = third_party/breakpad
+	url = https://github.com/driazati/breakpad.git

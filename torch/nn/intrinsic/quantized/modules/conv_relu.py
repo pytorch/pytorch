@@ -1,12 +1,57 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 import torch
 import torch.nn.intrinsic
 import torch.nn.intrinsic.qat
+import torch.nn.functional as F
 import torch.nn.quantized as nnq
 
 from torch.nn.utils import fuse_conv_bn_weights
 
+_reverse_repeat_padding = nnq.modules.conv._reverse_repeat_padding
+
+class ConvReLU1d(nnq.Conv1d):
+    r"""
+    A ConvReLU1d module is a fused module of Conv1d and ReLU
+
+    We adopt the same interface as :class:`torch.nn.quantized.Conv1d`.
+
+    Attributes:
+        Same as torch.nn.quantized.Conv1d
+
+    """
+    _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU1d  # type: ignore[assignment]
+
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
+                 padding=0, dilation=1, groups=1, bias=True,
+                 padding_mode='zeros'):
+        super(ConvReLU1d, self).__init__(
+            in_channels, out_channels, kernel_size, stride=stride,
+            padding=padding, dilation=dilation, groups=groups, bias=bias,
+            padding_mode=padding_mode)
+
+    def forward(self, input):
+        # Temporarily using len(shape) instead of ndim due to JIT issue
+        # https://github.com/pytorch/pytorch/issues/23890
+        if len(input.shape) != 3:
+            raise ValueError("Input shape must be `(N, C, L)`!")
+        if self.padding_mode != 'zeros':
+            # Padding in Conv1d is stored as (p, p), need to get (p,)
+            _reversed_padding_repeated_twice = _reverse_repeat_padding(self.padding[:1])
+            input = F.pad(input, _reversed_padding_repeated_twice,
+                          mode=self.padding_mode)
+        return torch.ops.quantized.conv1d_relu(
+            input, self._packed_params, self.scale, self.zero_point)
+
+    def _get_name(self):
+        return 'QuantizedConvReLU1d'
+
+    @classmethod
+    def from_float(cls, mod):
+        if type(mod) == torch.nn.intrinsic.qat.ConvBnReLU1d:
+            mod.weight, mod.bias = fuse_conv_bn_weights(
+                mod.weight, mod.bias, mod.bn.running_mean, mod.bn.running_var,
+                mod.bn.eps, mod.bn.weight, mod.bn.bias)
+        return super(ConvReLU1d, cls).from_float(mod)
 
 class ConvReLU2d(nnq.Conv2d):
     r"""
@@ -18,7 +63,7 @@ class ConvReLU2d(nnq.Conv2d):
         Same as torch.nn.quantized.Conv2d
 
     """
-    _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU2d
+    _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU2d  # type: ignore[assignment]
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
@@ -33,9 +78,12 @@ class ConvReLU2d(nnq.Conv2d):
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 4:
             raise ValueError("Input shape must be `(N, C, H, W)`!")
+        if self.padding_mode != 'zeros':
+            _reversed_padding_repeated_twice = _reverse_repeat_padding(self.padding)
+            input = F.pad(input, _reversed_padding_repeated_twice,
+                          mode=self.padding_mode)
         return torch.ops.quantized.conv2d_relu(
-            input, self._packed_params, self.stride, self.padding,
-            self.dilation, self.groups, self.scale, self.zero_point)
+            input, self._packed_params, self.scale, self.zero_point)
 
     def _get_name(self):
         return 'QuantizedConvReLU2d'
@@ -44,8 +92,8 @@ class ConvReLU2d(nnq.Conv2d):
     def from_float(cls, mod):
         if type(mod) == torch.nn.intrinsic.qat.ConvBnReLU2d:
             mod.weight, mod.bias = fuse_conv_bn_weights(
-                mod.weight, mod.bias, mod.running_mean, mod.running_var,
-                mod.eps, mod.gamma, mod.beta)
+                mod.weight, mod.bias, mod.bn.running_mean, mod.bn.running_var,
+                mod.bn.eps, mod.bn.weight, mod.bn.bias)
         return super(ConvReLU2d, cls).from_float(mod)
 
 
@@ -55,15 +103,15 @@ class ConvReLU3d(nnq.Conv3d):
 
     We adopt the same interface as :class:`torch.nn.quantized.Conv3d`.
 
-    .. note::
     Attributes: Same as torch.nn.quantized.Conv3d
 
     """
-    _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU3d
+    _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU3d  # type: ignore[assignment]
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
                  padding_mode='zeros'):
+        assert padding_mode != 'reflect', "Conv3d does not support reflection padding"
         super(ConvReLU3d, self).__init__(
             in_channels, out_channels, kernel_size, stride=stride,
             padding=padding, dilation=dilation, groups=groups, bias=bias,
@@ -74,14 +122,26 @@ class ConvReLU3d(nnq.Conv3d):
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 5:
             raise ValueError("Input shape must be `(N, C, D, H, W)`!")
+        if self.padding_mode != 'zeros':
+            _reversed_padding_repeated_twice = _reverse_repeat_padding(self.padding)
+            input = F.pad(input, _reversed_padding_repeated_twice,
+                          mode=self.padding_mode)
         return torch.ops.quantized.conv3d_relu(
-            input, self._packed_params, self.stride, self.padding,
-            self.dilation, self.groups, self.scale, self.zero_point)
+            input, self._packed_params, self.scale, self.zero_point)
 
     def _get_name(self):
         return 'QuantizedConvReLU3d'
 
     @classmethod
     def from_float(cls, mod):
-        # TODO: Add qat support for ConvReLU3d and ConvBnReLU3d
+        if type(mod) == torch.nn.intrinsic.qat.ConvBnReLU3d:
+            mod.weight, mod.bias = fuse_conv_bn_weights(
+                mod.weight,
+                mod.bias,
+                mod.bn.running_mean,
+                mod.bn.running_var,
+                mod.bn.eps,
+                mod.bn.weight,
+                mod.bn.bias,
+            )
         return super(ConvReLU3d, cls).from_float(mod)

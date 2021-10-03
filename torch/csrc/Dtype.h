@@ -9,6 +9,7 @@ const int DTYPE_NAME_LEN = 64;
 struct TORCH_API THPDtype {
   PyObject_HEAD
   at::ScalarType scalar_type;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   char name[DTYPE_NAME_LEN + 1];
 };
 
@@ -21,9 +22,6 @@ inline bool THPDtype_Check(PyObject *obj) {
 inline bool THPPythonScalarType_Check(PyObject *obj) {
   return obj == (PyObject*)(&PyFloat_Type) ||
     obj == (PyObject*)(&PyBool_Type) ||
-#if PY_MAJOR_VERSION == 2
-    obj == (PyObject*)(&PyInt_Type) ||
-#endif
     obj == (PyObject*)(&PyLong_Type);
 }
 

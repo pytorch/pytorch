@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 
@@ -9,28 +9,23 @@ namespace native {
 
 DEFINE_DISPATCH(qelu_stub);
 
-Tensor& quantized_elu_out(Tensor& result, const Tensor& self, Scalar alpha,
-    Scalar scale, Scalar input_scale) {
-  qelu_stub(self.device().type(), self, alpha, result);
-  return result;
-}
-
-Tensor& quantized_elu_(Tensor& self, Scalar alpha, Scalar scale,
-    Scalar input_scale) {
-  Tensor qy = at::_empty_affine_quantized(self.sizes(), self.options(),
-      self.q_scale(), self.q_zero_point());
-  qelu_stub(self.device().type(), self, alpha, qy);
-  // This can be optimized in a later PR if necessary.
-  self.copy_(qy);
-  return self;
-}
-
 Tensor quantized_elu(
-    const Tensor& qx, Scalar alpha, Scalar scale, Scalar input_scale) {
-  Tensor qy = at::_empty_affine_quantized(qx.sizes(), qx.options(),
-      qx.q_scale(), qx.q_zero_point());
-  qelu_stub(qx.device().type(), qx, alpha, qy);
+    const Tensor& qx, double output_scale, int64_t output_zero_point, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale) {
+  Tensor qy = at::_empty_affine_quantized(qx.sizes(), qx.options(), output_scale, output_zero_point);
+  qelu_stub(qx.device().type(), qx, alpha, scale, input_scale, qy);
   return qy;
+}
+
+Tensor quantized_celu(const Tensor& qx, double output_scale, int64_t output_zero_point, const Scalar& alpha) {
+  TORCH_CHECK(alpha.to<double>() != 0,
+      "ZeroDivisionError: alpha cannot be 0 for CELU");
+  double inv_alpha = 1. / alpha.to<double>();
+  return quantized_elu(qx, output_scale, output_zero_point, alpha, Scalar(1.0), Scalar(inv_alpha));
+}
+
+TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
+  m.impl(TORCH_SELECTIVE_NAME("quantized::elu"), quantized_elu);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::celu"), quantized_celu);
 }
 
 }}  // namespace at::native

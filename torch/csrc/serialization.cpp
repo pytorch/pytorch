@@ -61,14 +61,8 @@ static inline ssize_t doPartialPythonReadBuffered(PyObject* fildes, void* buf, s
   THPObjectPtr r(PyObject_CallMethod(fildes, "read", "i", nbytes));
   if (!r) throw python_error();
 
-  // read output is String (Python 2) / Bytes (Python 3)
-#if PY_MAJOR_VERSION >= 3
   auto size = PyBytes_GET_SIZE(r.get());
   const void* py_buf = PyBytes_AsString(r.get());
-#else
-  auto size = PyString_GET_SIZE(r.get());
-  const void* py_buf = PyString_AsString(r.get());
-#endif
 
   // we read EOF
   if (size == 0) {
@@ -83,20 +77,16 @@ static inline ssize_t doPartialPythonReadBuffered(PyObject* fildes, void* buf, s
 
 // Either does fildes.readinto(buf) or fildes.write(buf)
 static inline ssize_t doPartialPythonIO(PyObject* fildes, void* buf, size_t nbytes, bool is_read) {
-#if PY_MAJOR_VERSION >= 3
   auto rw_flag = is_read ? PyBUF_WRITE : PyBUF_READ;
   THPObjectPtr memview(PyMemoryView_FromMemory(
       reinterpret_cast<char*>(buf), nbytes, rw_flag));
-#else
-  THPObjectPtr memview(PyBuffer_FromReadWriteMemory(buf, nbytes));
-#endif
   if (!memview) throw python_error();
 
-  char* method = "write";
+  std::string method = "write";
   if (is_read) {
     method = "readinto";
   }
-  THPObjectPtr r(PyObject_CallMethod(fildes, method, "O", memview.get()));
+  THPObjectPtr r(PyObject_CallMethod(fildes, method.c_str(), "O", memview.get()));
   if (r) {
     return PyLong_AsSsize_t(r.get());
   }
@@ -130,8 +120,8 @@ void doRead(io fildes, void* raw_buf, size_t nbytes) {
     ssize_t r = doPartialRead(fildes, buf, std::min<size_t>(nbytes, 1073741824));
     if (r < 0) {
       int err = errno;
-      AT_ASSERTM(err != 0, "read(): impossible! r < 0, but no errno was set");
-      AT_ASSERTM(err != EAGAIN, "read(): non-blocking fd ", fildes,
+      TORCH_INTERNAL_ASSERT(err != 0, "read(): impossible! r < 0, but no errno was set");
+      TORCH_INTERNAL_ASSERT(err != EAGAIN, "read(): non-blocking fd ", fildes,
                                 " read EAGAIN; cowardly refusing to spin-wait");
       if (err == EINTR) {
         continue;
@@ -162,8 +152,8 @@ void doWrite(io fildes, void* raw_buf, size_t nbytes) {
     ssize_t r = doPartialWrite(fildes, buf, std::min<size_t>(nbytes, 1073741824));
     if (r < 0) {
       int err = errno;
-      AT_ASSERTM(err != 0, "write(): impossible! r < 0, but no errno was set");
-      AT_ASSERTM(err != EAGAIN, "write(): non-blocking fd ", fildes,
+      TORCH_INTERNAL_ASSERT(err != 0, "write(): impossible! r < 0, but no errno was set");
+      TORCH_INTERNAL_ASSERT(err != EAGAIN, "write(): non-blocking fd ", fildes,
                                 " read EAGAIN; cowardly refusing to spin-wait");
       if (err == EINTR) {
         continue;
@@ -177,17 +167,26 @@ void doWrite(io fildes, void* raw_buf, size_t nbytes) {
   }
 }
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <torch/csrc/generic/serialization.cpp>
 #include <TH/THGenerateAllTypes.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
+#include <torch/csrc/generic/serialization.cpp>
+#include <TH/THGenerateComplexTypes.h>
+
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <torch/csrc/generic/serialization.cpp>
 #include <TH/THGenerateHalfType.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <torch/csrc/generic/serialization.cpp>
 #include <TH/THGenerateBFloat16Type.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <torch/csrc/generic/serialization.cpp>
 #include <TH/THGenerateBoolType.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <torch/csrc/generic/serialization.cpp>
 #include <TH/THGenerateQTypes.h>

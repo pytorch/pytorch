@@ -1,5 +1,7 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
+#include <torch/csrc/autograd/autograd.h>
 
 namespace torch { namespace autograd {
 
@@ -8,25 +10,196 @@ VariableInfo::VariableInfo(const Variable& var)
   , device(var.device())
   , scalar_type(var.scalar_type())
   , size(var.sizes().vec())
-  , requires_grad(var.requires_grad()) {
+  , requires_grad(var.requires_grad())
+  , is_empty(false) {
 }
+
+VariableInfo::VariableInfo() : requires_grad(false), is_empty(true) {}
 
 Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
-  return at::zeros(size,
-    at::TensorOptions(scalar_type).device(device).layout(layout));
+  if (is_empty) {
+    // Return undefined tensor.
+    return at::Tensor();
+  } else {
+    return at::zeros(
+        size, at::TensorOptions(scalar_type).device(device).layout(layout));
+  }
 }
 
-variable_list _wrap_outputs(const variable_list &input_vars,
+// This function has two main goals:
+//  1) Use the user-provided jvp function to populate the the outputs' forward gradient
+//  2) Perform error checking to ensure that view and inplace ops are properly handled
+//
+// For 1) we have to:
+//  - Create a variable_list of grad_inputs based on the function inputs
+//  - Call the user jvp function with these to get the grad_outputs
+//  - Set the forward grad field on each output based on these grad_outputs
+//
+// For 2) we want to check the following:
+//  - If an output is a view, then the generated forward grad must be a view as well and
+//    the output's base's forward grad must be the output's forward grad's base.
+//  - If an input was modified inplace (it must be an output as well) we make sure that its
+//    forward grad was also modified inplace and already present on the corresponding output.
+void _process_forward_mode_AD(const variable_list &inputs,
+  std::unordered_map<at::TensorImpl*, size_t> inputs_mapping,
+  const at::ArrayRef<c10::optional<Variable>> raw_outputs,
+  const optional_variable_list &outputs,
   const std::unordered_set<at::TensorImpl*> &non_differentiable,
   const std::unordered_set<at::TensorImpl*> &dirty_inputs,
-  const at::ArrayRef<Variable> raw_outputs,
+  _jvp_fn_t jvp_user_function) {
+
+  // TODO handle multiple levels here
+  uint64_t level = 0;
+
+  const auto num_inputs = inputs.size();
+  const auto num_outputs = outputs.size();
+
+  // The tracking info below are used to perform the view and inplace checks.
+  // They are lazily initialized to reduce the cost of this function in the common
+  // case where the user is not using forward mode AD.
+  variable_list input_grads;
+  std::vector<int64_t> grad_versions;
+  std::vector<at::TensorImpl*> grad_impls;
+  std::unordered_map<at::TensorImpl*, size_t> inputs_bases;
+
+  auto init_tracked_info = [&] () {
+    input_grads.resize(num_inputs);
+    grad_versions.resize(num_inputs);
+    grad_impls.resize(num_inputs);
+
+    for (const auto i: c10::irange(num_inputs)) {
+      const auto& inp = inputs[i];
+      if (inp.is_view() && impl::get_view_autograd_meta(inp)->has_fw_view()) {
+        inputs_bases.emplace(impl::get_view_autograd_meta(inp)->get_forward_view().base_.unsafeGetTensorImpl(), i);
+      } else {
+        inputs_bases.emplace(inp.unsafeGetTensorImpl(), i);
+      }
+
+    }
+  };
+
+  bool any_input_has_grad = false;
+  // Extract the input's forward gradients and record any info we will need later
+  for (const auto i : c10::irange(num_inputs)) {
+    const auto& inp = inputs[i];
+    if (!inp.defined()) {
+      continue;
+    }
+    const auto& fw_grad = inp._fw_grad(level);
+    if (fw_grad.defined()) {
+      if (!any_input_has_grad) {
+        any_input_has_grad = true;
+        init_tracked_info();
+      }
+      input_grads[i] = fw_grad;
+      grad_versions[i] = fw_grad._version();
+      grad_impls[i] = fw_grad.unsafeGetTensorImpl();
+    }
+  }
+
+  // If no input has forward grad, nothing to do here
+  if (!any_input_has_grad) {
+    return;
+  }
+
+
+  auto forward_grads = jvp_user_function(inputs, input_grads);
+
+
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  const auto num_forward_grads = forward_grads.size();
+  // contrary to backward mode, we don't allow returning too many gradients
+  TORCH_CHECK(num_forward_grads == num_outputs, "Function's jvp returned "
+              "an invalid number of of forward gradients (expected ", num_outputs,
+              " but got ", num_forward_grads, ")");
+
+  for (const auto i : c10::irange(num_outputs)) {
+    const auto& out = outputs[i].has_value()? outputs[i].value() : at::Tensor();
+    const auto& out_grad = forward_grads[i];
+    if (!out.defined()) {
+      TORCH_CHECK(!out_grad.defined(), "Function's jvp returned a gradient at position ", i, ", but "
+                  " the corresponding forward output is not a differentiable Tensor");
+      continue;
+    }
+
+    TORCH_INTERNAL_ASSERT(raw_outputs[i].has_value());
+    auto out_tensor_impl = raw_outputs[i].value().unsafeGetTensorImpl();
+    bool is_input = inputs_mapping.count(out_tensor_impl) > 0;
+    bool is_modified = dirty_inputs.count(out_tensor_impl) > 0;
+
+    if (is_modified) {
+      TORCH_CHECK(is_input, "Only input Tensors should be given to ctx.mark_dirty(). If a Tensor is not an input, there"
+                 " is no need to pass it to mark_dirty().");
+      auto inp_idx = inputs_mapping[out_tensor_impl];
+      if (grad_impls[inp_idx]) {
+        // If there was already a forward grad for that input
+        // Just make sure that it is modified inplace and returned as-is
+        TORCH_CHECK(out_grad._version() != grad_versions[inp_idx], "An inplace custom Function is not modifying the "
+                    "forward mode gradients inplace. If the forward is modifying an input inplace, then the jvp "
+                    "function must modify the corresponding gradient inplace.")
+        TORCH_CHECK(out_grad.unsafeGetTensorImpl() == grad_impls[inp_idx], "An inplace custom Function is not returning the "
+                    "forward mode gradients as-is. If the forward is modifying an input inplace, then the jvp "
+                    "function must modify the gradient inplace and return it as-is.")
+      } else {
+        // If that Tensor didn't had gradients already, set the newly returned one
+        // We could also use inputs[inp_idx] here as it is the same as out
+        out._set_fw_grad(out_grad, level, /* is_inplace_op */ true);
+      }
+    } else {
+      // At this point, outputs[i] cannot be one of the input (raw_outputs[i] might be but was changed by the backward code)
+      TORCH_INTERNAL_ASSERT(!is_input);
+
+      if (out.is_view() && impl::get_view_autograd_meta(out)->has_fw_view()) {
+        // If the output is a view
+        const auto& out_view_info = impl::get_view_autograd_meta(out)->get_forward_view();
+        if (inputs_bases.count(out_view_info.base_.unsafeGetTensorImpl())) {
+          // And it is a view of an input (either that input is its base or they have a common base)
+          const auto matching_input_idx = inputs_bases[out_view_info.base_.unsafeGetTensorImpl()];
+          const auto& matching_input = inputs[matching_input_idx];
+
+          const auto& matching_input_grad = matching_input._fw_grad(level);
+
+          // If the matching input has a forward grad, the user should have returned a view of that Tensor
+          if (matching_input_grad.defined()) {
+            TORCH_CHECK(out_grad.is_view() && impl::get_view_autograd_meta(out_grad)->has_fw_view(),
+                        "A custom Function's forward is returning a view but the jvp is not returning a view.");
+
+            const auto& out_grad_base = impl::get_view_autograd_meta(out_grad)->get_forward_view().base_;
+            if (matching_input_grad.is_view() && impl::get_view_autograd_meta(matching_input_grad)->has_fw_view()) {
+              // If the matching input's grad is a view, ensure that the out_grad is a view of the same base
+              const auto& matching_input_grad_base = impl::get_view_autograd_meta(matching_input_grad)->get_forward_view().base_;
+              TORCH_CHECK(matching_input_grad_base.unsafeGetTensorImpl() == out_grad_base.unsafeGetTensorImpl(),
+                          "A custom Function is returning a view but the jvp is not returning a view of the same base as "
+                          "the given grad input.");
+            } else {
+              // If the matching input's grad is not a view, then it must be the output gradient's base
+              TORCH_CHECK(matching_input_grad.unsafeGetTensorImpl() == out_grad_base.unsafeGetTensorImpl(),
+                          "A custom Function is returning a view but the jvp is not returning a view of the given grad input.");
+            }
+          } else {
+            // We have a view op where the input didn't have a forward grad but the user returned one for the output
+            // To ensure that we maintain the view/inplace constraints, we consider this as an inplace op
+            // This case CANNOT happen in codegen as all view ops are mapping from one Tensor to one Tensor and so the output
+            // of the view cannot have a forward grad if the base does not.
+            out._set_fw_grad(out_grad, level, /* is_inplace_op */ true);
+            return;
+          }
+
+        }
+      }
+
+      out._set_fw_grad(out_grad, level, /* is_inplace_op */ false);
+    }
+  }
+}
+
+optional_variable_list _process_backward_mode_ad(
+  const std::unordered_map<at::TensorImpl*, size_t> &inputs_mapping,
+  const std::unordered_set<at::TensorImpl*> &non_differentiable,
+  const std::unordered_set<at::TensorImpl*> &dirty_inputs,
+  const at::ArrayRef<c10::optional<Variable>> raw_outputs,
   const std::shared_ptr<Node> &cdata) {
 
-  std::unordered_set<at::TensorImpl*> inputs;
-  inputs.reserve(input_vars.size());
-  for (auto& var : input_vars) {
-    inputs.emplace(var.unsafeGetTensorImpl());
-  }
 
   int num_outputs = raw_outputs.size();
 
@@ -53,7 +226,7 @@ variable_list _wrap_outputs(const variable_list &input_vars,
       // Here, `y` requires_grad (!).
     } else if (is_modified) {
       if (var.is_leaf() && var.requires_grad()) {
-        throw std::runtime_error("a leaf Variable that requires grad has been used in an in-place operation.");
+        TORCH_CHECK(false, "a leaf Variable that requires grad has been used in an in-place operation.");
       }
       // No need to mark as modified Tensors that are not inputs.
       if (!is_input) {
@@ -72,7 +245,7 @@ variable_list _wrap_outputs(const variable_list &input_vars,
 
       // If the input was modified, transplant the grad_fn in the graph:
       // grad_fn <- variable <- self  ==>  grad_fn <- self <- variable
-      var.grad().reset();
+      var.mutable_grad().reset();
       impl::clear_hooks(var);
       if (auto grad_acc_fn = impl::try_get_grad_accumulator(var)) {
         auto grad_acc = dynamic_cast<AccumulateGrad*>(grad_acc_fn.get());
@@ -95,19 +268,30 @@ variable_list _wrap_outputs(const variable_list &input_vars,
     }
   };
 
-  std::vector<torch::autograd::Variable> outputs;
+  optional_variable_list outputs;
   std::unordered_set<at::TensorImpl*> outputs_impl; // For dirty_inputs check
   outputs.reserve(num_outputs);
   int num_diff_outputs = 0;
 
 
-  for (auto i = 0; i < num_outputs; ++i) {
-    auto out_tensor_impl = raw_outputs[i].unsafeGetTensorImpl();
-    bool is_input = inputs.count(out_tensor_impl) > 0;
-    bool is_modified = dirty_inputs.count(out_tensor_impl) > 0;
-    bool is_differentiable = cdata && non_differentiable.count(out_tensor_impl) == 0;
+  for (const auto i : c10::irange(num_outputs)) {
+    // For outputs that are not tensors, put a placeholder undefined input.
+    if (!raw_outputs[i].has_value()) {
+      if (cdata) {
+        auto output_nr = cdata->add_input_metadata(Node::undefined_input());
+        AT_ASSERT(i == (int)output_nr);
+      }
+      outputs.emplace_back();
+      continue;
+    }
 
-    Variable var = raw_outputs[i];
+    Variable var = raw_outputs[i].value();
+
+    auto out_tensor_impl = var.unsafeGetTensorImpl();
+    bool is_input = inputs_mapping.count(out_tensor_impl) > 0;
+    bool is_modified = dirty_inputs.count(out_tensor_impl) > 0;
+    bool is_differentiable = cdata && non_differentiable.count(out_tensor_impl) == 0
+                              && isDifferentiableType(var.scalar_type());
 
     if (cdata) {
       auto output_nr = cdata->add_input_metadata(var);
@@ -120,9 +304,9 @@ variable_list _wrap_outputs(const variable_list &input_vars,
     // return and input that is a view as is).
     // See NOTE [ View + Inplace detection ] for why we replace everything by a warning.
     if (!(is_input && is_modified) && var.is_view()) {
-      // NB: is_view() ==> get_autograd_meta()
-      auto diff_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(var));
-      diff_view_meta->creation_meta = CreationMeta::IN_CUSTOM_FUNCTION;
+      // is_view() => diff_view_meta
+      auto diff_view_meta = impl::get_view_autograd_meta(var);
+      diff_view_meta->set_creation_meta(CreationMeta::IN_CUSTOM_FUNCTION);
     }
 
     if (is_differentiable) {
@@ -137,10 +321,11 @@ variable_list _wrap_outputs(const variable_list &input_vars,
   // See NOTE [ View + Inplace detection ] for more details
   if (num_diff_outputs > 1) {
     for (auto& var: outputs) {
-      if (var.is_view()) {
-        // NB: is_view() ==> get_autograd_meta()
-        auto diff_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(var));
-        diff_view_meta->creation_meta = CreationMeta::MULTI_OUTPUT_NODE;
+      if (var.has_value()) {
+        auto diff_view_meta = impl::get_view_autograd_meta(var.value());
+        if (diff_view_meta && diff_view_meta->has_bw_view()) {
+          diff_view_meta->set_creation_meta(CreationMeta::MULTI_OUTPUT_NODE);
+        }
       }
     }
   }
@@ -155,7 +340,31 @@ variable_list _wrap_outputs(const variable_list &input_vars,
   return outputs;
 }
 
-void check_variable_result(const Variable& original, const Variable& result, std::string hook_name) {
+
+
+optional_variable_list _wrap_outputs(const variable_list &input_vars,
+  const std::unordered_set<at::TensorImpl*> &non_differentiable,
+  const std::unordered_set<at::TensorImpl*> &dirty_inputs,
+  const at::ArrayRef<c10::optional<Variable>> raw_outputs,
+  const std::shared_ptr<Node> &cdata,
+  _jvp_fn_t jvp_user_function) {
+
+  std::unordered_map<at::TensorImpl*, size_t> inputs_mapping;
+  inputs_mapping.reserve(input_vars.size());
+  for (const auto i: c10::irange(input_vars.size())) {
+    inputs_mapping.emplace(input_vars[i].unsafeGetTensorImpl(), i);
+  }
+
+  auto outputs = _process_backward_mode_ad(inputs_mapping, non_differentiable, dirty_inputs, raw_outputs, cdata);
+
+  // This must happen after the backward processing as we expect the computations happening here to track
+  // backward mode gradients.
+  _process_forward_mode_AD(input_vars, inputs_mapping, raw_outputs, outputs, non_differentiable, dirty_inputs, jvp_user_function);
+
+  return outputs;
+}
+
+void check_variable_result(const at::TensorBase& original, const at::TensorBase& result, std::string hook_name) {
   if (!original.options().type_equal(result.options())) {
     std::stringstream ss;
     ss << "hook '" << hook_name << "' has changed the type of value (";
@@ -230,6 +439,10 @@ void AutogradContext::mark_non_differentiable(const variable_list &outputs) {
   for(auto& var : outputs) {
     non_differentiable_.insert(var.unsafeGetTensorImpl());
   }
+}
+
+void AutogradContext::set_materialize_grads(bool value) {
+  materialize_grads_ = value;
 }
 
 const std::unordered_set<at::TensorImpl*>& AutogradContext::get_and_bump_dirty() const {

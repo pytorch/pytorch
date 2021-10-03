@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <exception>
 #include <ostream>
 #include <string>
@@ -13,75 +14,120 @@
 namespace c10 {
 namespace {
 DeviceType parse_type(const std::string& device_string) {
-  static const std::array<std::pair<std::string, DeviceType>, 9> types = {{
-      {"cpu", DeviceType::CPU},
-      {"cuda", DeviceType::CUDA},
-      {"mkldnn", DeviceType::MKLDNN},
-      {"opengl", DeviceType::OPENGL},
-      {"opencl", DeviceType::OPENCL},
-      {"ideep", DeviceType::IDEEP},
-      {"hip", DeviceType::HIP},
-      {"msnpu", DeviceType::MSNPU},
-      {"xla", DeviceType::XLA},
-  }};
+  static const std::array<
+      std::pair<const char*, DeviceType>,
+      static_cast<size_t>(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)>
+      types = {{
+          {"cpu", DeviceType::CPU},
+          {"cuda", DeviceType::CUDA},
+          {"xpu", DeviceType::XPU},
+          {"mkldnn", DeviceType::MKLDNN},
+          {"opengl", DeviceType::OPENGL},
+          {"opencl", DeviceType::OPENCL},
+          {"ideep", DeviceType::IDEEP},
+          {"hip", DeviceType::HIP},
+          {"ve", DeviceType::VE},
+          {"fpga", DeviceType::FPGA},
+          {"ort", DeviceType::ORT},
+          {"xla", DeviceType::XLA},
+          {"lazy", DeviceType::Lazy},
+          {"vulkan", DeviceType::Vulkan},
+          {"mlc", DeviceType::MLC},
+          {"meta", DeviceType::Meta},
+          {"hpu", DeviceType::HPU},
+      }};
   auto device = std::find_if(
       types.begin(),
       types.end(),
-      [device_string](const std::pair<std::string, DeviceType>& p) {
-        return p.first == device_string;
+      [&device_string](const std::pair<const char*, DeviceType>& p) {
+        return p.first && p.first == device_string;
       });
   if (device != types.end()) {
     return device->second;
   }
-  AT_ERROR(
-      "Expected one of cpu, cuda, mkldnn, opengl, opencl, ideep, hip, msnpu device type at start of device string: ", device_string);
+  TORCH_CHECK(
+      false,
+      "Expected one of cpu, cuda, xpu, mkldnn, opengl, opencl, ideep, hip, ve, ort, mlc, xla, lazy, vulkan, meta, hpu device type at start of device string: ",
+      device_string);
 }
+enum DeviceStringParsingState { START, INDEX_START, INDEX_REST, ERROR };
+
 } // namespace
 
-// `std::regex` is still in a very incomplete state in GCC 4.8.x,
-// so we have to do our own parsing, like peasants.
-// https://stackoverflow.com/questions/12530406/is-gcc-4-8-or-earlier-buggy-about-regular-expressions
-//
-// Replace with the following code once we shed our GCC skin:
-//
-// static const std::regex regex(
-//     "(cuda|cpu)|(cuda|cpu):([0-9]+)|([0-9]+)",
-//     std::regex_constants::basic);
-// std::smatch match;
-// const bool ok = std::regex_match(device_string, match, regex);
-// TORCH_CHECK(ok, "Invalid device string: '", device_string, "'");
-// if (match[1].matched) {
-//   type_ = parse_type_from_string(match[1].str());
-// } else {
-//   if (match[2].matched) {
-//     type_ = parse_type_from_string(match[1].str());
-//   } else {
-//     type_ = Type::CUDA;
-//   }
-//   AT_ASSERT(match[3].matched);
-//   index_ = std::stoi(match[3].str());
-// }
 Device::Device(const std::string& device_string) : Device(Type::CPU) {
   TORCH_CHECK(!device_string.empty(), "Device string must not be empty");
-  auto index = device_string.find(':');
-  if (index == std::string::npos) {
-    type_ = parse_type(device_string);
-  } else {
-    std::string s;
-    s = device_string.substr(0, index);
-    TORCH_CHECK(!s.empty(), "Device string must not be empty");
-    type_ = parse_type(s);
 
-    std::string device_index = device_string.substr(index + 1);
-    try {
-      index_ = c10::stoi(device_index);
-    } catch (const std::exception &) {
-      AT_ERROR("Could not parse device index '", device_index,
-               "' in device string '", device_string, "'");
+  std::string device_name, device_index_str;
+  DeviceStringParsingState pstate = DeviceStringParsingState::START;
+
+  // The code below tries to match the string in the variable
+  // device_string against the regular expression:
+  // ([a-zA-Z_]+)(?::([1-9]\\d*|0))?
+  for (size_t i = 0;
+       pstate != DeviceStringParsingState::ERROR && i < device_string.size();
+       ++i) {
+    const char ch = device_string.at(i);
+    switch (pstate) {
+      case DeviceStringParsingState::START:
+        if (ch != ':') {
+          if (isalpha(ch) || ch == '_') {
+            device_name.push_back(ch);
+          } else {
+            pstate = DeviceStringParsingState::ERROR;
+          }
+        } else {
+          pstate = DeviceStringParsingState::INDEX_START;
+        }
+        break;
+
+      case DeviceStringParsingState::INDEX_START:
+        if (isdigit(ch)) {
+          device_index_str.push_back(ch);
+          pstate = DeviceStringParsingState::INDEX_REST;
+        } else {
+          pstate = DeviceStringParsingState::ERROR;
+        }
+        break;
+
+      case DeviceStringParsingState::INDEX_REST:
+        if (device_index_str.at(0) == '0') {
+          pstate = DeviceStringParsingState::ERROR;
+          break;
+        }
+        if (isdigit(ch)) {
+          device_index_str.push_back(ch);
+        } else {
+          pstate = DeviceStringParsingState::ERROR;
+        }
+        break;
+
+      case DeviceStringParsingState::ERROR:
+        // Execution won't reach here.
+        break;
     }
-    TORCH_CHECK(index_ >= 0,
-             "Device index must be non-negative, got ", index_);
   }
+
+  const bool has_error = device_name.empty() ||
+      pstate == DeviceStringParsingState::ERROR ||
+      (pstate == DeviceStringParsingState::INDEX_START &&
+       device_index_str.empty());
+
+  TORCH_CHECK(!has_error, "Invalid device string: '", device_string, "'");
+
+  try {
+    if (!device_index_str.empty()) {
+      index_ = c10::stoi(device_index_str);
+    }
+  } catch (const std::exception&) {
+    TORCH_CHECK(
+        false,
+        "Could not parse device index '",
+        device_index_str,
+        "' in device string '",
+        device_string,
+        "'");
+  }
+  type_ = parse_type(device_name);
   validate();
 }
 

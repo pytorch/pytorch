@@ -1,10 +1,11 @@
 import torch
+from typing import Iterable, Optional
 
 
-def parameters_to_vector(parameters):
+def parameters_to_vector(parameters: Iterable[torch.Tensor]) -> torch.Tensor:
     r"""Convert parameters to one vector
 
-    Arguments:
+    Args:
         parameters (Iterable[Tensor]): an iterator of Tensors that are the
             parameters of a model.
 
@@ -23,10 +24,10 @@ def parameters_to_vector(parameters):
     return torch.cat(vec)
 
 
-def vector_to_parameters(vec, parameters):
+def vector_to_parameters(vec: torch.Tensor, parameters: Iterable[torch.Tensor]) -> None:
     r"""Convert one vector to the parameters
 
-    Arguments:
+    Args:
         vec (Tensor): a single vector represents the parameters of a model.
         parameters (Iterable[Tensor]): an iterator of Tensors that are the
             parameters of a model.
@@ -53,13 +54,13 @@ def vector_to_parameters(vec, parameters):
         pointer += num_param
 
 
-def _check_param_device(param, old_param_device):
+def _check_param_device(param: torch.Tensor, old_param_device: Optional[int]) -> int:
     r"""This helper function is to check if the parameters are located
     in the same device. Currently, the conversion between model parameters
     and single vector form is not supported for multiple allocations,
     e.g. parameters in different GPUs, or mixture of CPU/GPU.
 
-    Arguments:
+    Args:
         param ([Tensor]): a Tensor of a parameter of a model
         old_param_device (int): the device where the first parameter of a
                                 model is allocated.

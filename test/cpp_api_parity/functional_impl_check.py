@@ -102,7 +102,7 @@ def test_forward(unit_test_class, test_params):
         # Check that forward outputs are equal
         unit_test_class.assertEqual(
             python_output, cpp_output,
-            message=generate_error_msg("forward output", cpp_output, python_output))
+            msg=generate_error_msg("forward output", cpp_output, python_output))
 
     run_cpp_test_fn_and_check_output()
 
@@ -131,7 +131,7 @@ def compute_cpp_function_call(test_params_dict, arg_dict, functional_name):
     if 'cpp_function_call' in test_params_dict:
         return test_params_dict['cpp_function_call']
     elif 'cpp_options_args' in test_params_dict:
-        cpp_forward_args_symbols = [arg_name for arg_name, _ in 
+        cpp_forward_args_symbols = [arg_name for arg_name, _ in
                                     arg_dict['input'] + arg_dict['target'] + arg_dict['extra_args']]
         return 'F::{}({}, {})'.format(
             functional_name, ", ".join(cpp_forward_args_symbols), test_params_dict['cpp_options_args'])
@@ -193,6 +193,7 @@ def write_test_to_test_class(
             device=device,
             test_instance_class=test_instance_class,
         )
+        try_remove_folder(test_params.cpp_tmp_folder)
         unit_test_name = 'test_torch_nn_functional_{}'.format(test_params.functional_variant_name)
         unit_test_class.functional_test_params_map[unit_test_name] = test_params
 

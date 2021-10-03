@@ -1,6 +1,6 @@
 project(libshm C CXX)
-cmake_minimum_required(VERSION 2.6 FATAL_ERROR)
-cmake_policy(VERSION 2.6)
+cmake_minimum_required(VERSION 2.8.12 FATAL_ERROR)
+cmake_policy(VERSION 2.8.12)
 
 set(TORCH_ROOT ${CMAKE_CURRENT_LIST_DIR}/../../../)
 include(${TORCH_ROOT}/cmake/public/threads.cmake)
@@ -23,11 +23,14 @@ else()
 endif()
 
 add_library(shm SHARED core.cpp)
+if(HAVE_SOVERSION)
+  set_target_properties(shm PROPERTIES
+      VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
+endif()
 
 target_include_directories(shm PUBLIC
   ${CMAKE_BINARY_DIR}/aten/src # provides "ATen/TypeExtendedInterface.h" to ATen.h
   ${TORCH_ROOT}/torch/lib # provides "libshm/libshm.h"
-  ${CMAKE_BINARY_DIR}/caffe2/aten/src # provides <TH/THGeneral.h> to THC.h
   )
 
 add_executable(torch_shm_manager manager.cpp)

@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/inline_fork_wait.h>
 
 namespace torch {
@@ -28,6 +29,9 @@ void InlineForkWait(
   for (auto it = reversed.begin(); it != reversed.end(); it++) {
     auto node = *it;
     if (node->kind() == prim::fork) {
+      // Account for the case where the aten::wait call isn't present in
+      // the current graph.
+      node->output()->replaceAllUsesWith(future_remap.at(node->output()));
       it.destroyCurrent();
     } else if (node->kind() == aten::wait) {
       AT_ASSERT(node->inputs().size() == 1);
@@ -54,6 +58,7 @@ void InlineForkWait(
 void InlineForkWait(const std::shared_ptr<Graph>& graph) {
   std::unordered_map<Value*, Value*> future_remap;
   InlineForkWait(graph->block(), future_remap);
+  GRAPH_DUMP("After InlineForkWait: ", graph);
 }
 
 } // namespace jit

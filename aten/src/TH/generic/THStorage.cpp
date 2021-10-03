@@ -2,6 +2,10 @@
 #define TH_GENERIC_FILE "TH/generic/THStorage.cpp"
 #else
 
+#include <ATen/MapAllocator.h>
+#include <c10/core/CPUAllocator.h>
+#include <c10/util/irange.h>
+
 #include <new>
 
 scalar_t* THStorage_(data)(const THStorage *self)
@@ -13,11 +17,6 @@ scalar_t* THStorage_(data)(const THStorage *self)
 #endif
 }
 
-ptrdiff_t THStorage_(size)(const THStorage *self)
-{
-  return THStorage_size(self);
-}
-
 size_t THStorage_(elementSize)()
 {
   return sizeof(scalar_t);
@@ -25,24 +24,21 @@ size_t THStorage_(elementSize)()
 
 THStorage* THStorage_(new)(void)
 {
-#ifdef THQUANTIZED
-  return THStorage_new(caffe2::TypeMeta::Make<quantized_t>());
-#else
-  return THStorage_new(caffe2::TypeMeta::Make<scalar_t>());
-#endif
+  return THStorage_new();
 }
 
 THStorage* THStorage_(newWithSize)(ptrdiff_t size)
 {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
+                           c10::StorageImpl::use_byte_size_t(),
 #ifdef THQUANTIZED
-      caffe2::TypeMeta::Make<quantized_t>(),
+                           size * sizeof(quantized_t),
 #else
-      caffe2::TypeMeta::Make<scalar_t>(),
+                           size * sizeof(scalar_t),
 #endif
-      size,
-      getTHDefaultAllocator(),
-      true).release();
+                           c10::GetDefaultCPUAllocator(),
+                           true)
+                           .release();
   return storage;
 }
 
@@ -50,32 +46,34 @@ THStorage* THStorage_(newWithAllocator)(ptrdiff_t size,
                                         at::Allocator *allocator)
 {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
+                           c10::StorageImpl::use_byte_size_t(),
 #ifdef THQUANTIZED
-      caffe2::TypeMeta::Make<quantized_t>(),
+                           size * sizeof(quantized_t),
 #else
-      caffe2::TypeMeta::Make<scalar_t>(),
+                           size * sizeof(scalar_t),
 #endif
-      size,
-      allocator,
-      true).release();
+                           allocator,
+                           true)
+                           .release();
   return storage;
 }
 
 
 THStorage* THStorage_(newWithMapping)(const char *filename, ptrdiff_t size, int flags)
 {
-  auto type_meta = caffe2::TypeMeta::Make<scalar_t>();
   size_t actual_size = -1;
-  THStorage* storage = c10::make_intrusive<at::StorageImpl>(
-      type_meta,
-      size,
-      THMapAllocator::makeDataPtr(
-          filename, flags, size * type_meta.itemsize(), &actual_size),
-      /* allocator */ nullptr,
-      false).release();
+  THStorage* storage =
+      c10::make_intrusive<at::StorageImpl>(
+          c10::StorageImpl::use_byte_size_t(),
+          size * sizeof(scalar_t),
+          at::MapAllocator::makeDataPtr(
+              filename, flags, size * sizeof(scalar_t), &actual_size),
+          /* allocator */ nullptr,
+          false)
+          .release();
 
   if (size <= 0) {
-    storage->set_numel(actual_size / type_meta.itemsize());
+    storage->set_nbytes(actual_size);
   }
 
   return storage;
@@ -102,39 +100,45 @@ void THStorage_(free)(THStorage *storage)
 THStorage* THStorage_(newWithDataAndAllocator)(at::DataPtr&& data, ptrdiff_t size,
                                                at::Allocator* allocator) {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
+                           c10::StorageImpl::use_byte_size_t(),
 #ifdef THQUANTIZED
-      caffe2::TypeMeta::Make<quantized_t>(),
+                           size * sizeof(quantized_t),
 #else
-      caffe2::TypeMeta::Make<scalar_t>(),
+                           size * sizeof(scalar_t),
 #endif
-      size,
-      std::move(data),
-      allocator,
-      allocator != nullptr).release();
+                           std::move(data),
+                           allocator,
+                           allocator != nullptr)
+                           .release();
   return storage;
 }
 
-void THStorage_(resize)(THStorage *storage, ptrdiff_t size)
-{
-  return THStorage_resize(storage, size);
+void THStorage_(resizeBytes)(THStorage* storage, ptrdiff_t size_bytes) {
+  return THStorage_resizeBytes(storage, size_bytes);
 }
 
 void THStorage_(fill)(THStorage *storage, scalar_t value)
 {
-  ptrdiff_t i;
-  for(i = 0; i < storage->numel(); i++)
+  const auto type_meta = caffe2::TypeMeta::Make<scalar_t>();
+  const size_t numel = storage->nbytes() / type_meta.itemsize();
+  for (const auto i : c10::irange(numel)) {
     THStorage_(data)(storage)[i] = value;
+  }
 }
 
 void THStorage_(set)(THStorage *self, ptrdiff_t idx, scalar_t value)
 {
-  THArgCheck((idx >= 0) && (idx < self->numel()), 2, "out of bounds");
+  const auto type_meta = caffe2::TypeMeta::Make<scalar_t>();
+  const auto numel = static_cast<int64_t>(self->nbytes() / type_meta.itemsize());
+  THArgCheck((idx >= 0) && (idx < numel), 2, "out of bounds");
   THStorage_(data)(self)[idx] = value;
 }
 
 scalar_t THStorage_(get)(const THStorage *self, ptrdiff_t idx)
 {
-  THArgCheck((idx >= 0) && (idx < self->numel()), 2, "out of bounds");
+  const auto type_meta = caffe2::TypeMeta::Make<scalar_t>();
+  const auto numel = static_cast<int64_t>(self->nbytes() / type_meta.itemsize());
+  THArgCheck((idx >= 0) && (idx < numel), 2, "out of bounds");
   return THStorage_(data)(self)[idx];
 }
 
