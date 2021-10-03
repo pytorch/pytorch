@@ -139,13 +139,11 @@ void infer_bin_edges_from_input(const Tensor& input, const int64_t N,
 
     TORCH_INTERNAL_ASSERT(min.is_contiguous() && max.is_contiguous());
 
-    TensorAccessor<scalar_t, 1> min_accessor = min.accessor<scalar_t, 1>();
-    TensorAccessor<scalar_t, 1> max_accessor = max.accessor<scalar_t, 1>();
+    const scalar_t *min_data = min.data_ptr<scalar_t>();
+    std::copy(min_data, min_data + N, leftmost_edges.begin());
 
-    for (int64_t dim = 0; dim < N; dim++) {
-        leftmost_edges[dim] = min_accessor[dim];
-        rightmost_edges[dim] = max_accessor[dim];
-    }
+    const scalar_t *max_data = max.data_ptr<scalar_t>();
+    std::copy(max_data, max_data + N, rightmost_edges.begin());
 }
 
 /* Determines the outermost bin edges. For simplicity when calling into aminmax,
@@ -180,8 +178,7 @@ select_outer_bin_edges(const Tensor& input, c10::optional<c10::ArrayRef<double>>
         double leftmost_edge = leftmost_edges[dim];
         double rightmost_edge = rightmost_edges[dim];
 
-        TORCH_CHECK(!(std::isinf(leftmost_edge) || std::isinf(rightmost_edge) ||
-                std::isnan(leftmost_edge) || std::isnan(rightmost_edge)),
+        TORCH_CHECK(std::isfinite(leftmost_edge) && std::isfinite(rightmost_edge),
                 "torch.histogramdd: dimension ", dim, "'s range [",
                 leftmost_edge, ", ", rightmost_edge, "] is not finite");
 
@@ -396,6 +393,7 @@ Tensor& histogram_histc_cpu_out(const Tensor& self, int64_t bin_ct,
             c10::optional<Tensor>(), false, hist, bin_edges, false);
     return hist;
 }
+
 Tensor histogram_histc_cpu(const Tensor& self, int64_t bin_ct,
         const Scalar& min, const Scalar& max) {
     Tensor hist = at::empty({0}, self.options(), MemoryFormat::Contiguous);
