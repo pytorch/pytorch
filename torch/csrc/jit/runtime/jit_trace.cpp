@@ -59,6 +59,7 @@ Node* traceNode(Node* node, TracingData& td, Stack& stack) {
 }
 
 void eraseAllOutputs(Node* opt_pn) {
+  // NOLINTNEXTLINE
   for (int i = opt_pn->outputs().size() - 1; i >= 0; i--) {
     opt_pn->eraseOutput(i);
   }
@@ -118,7 +119,7 @@ void traceLoopCounter(Node* n, ProfilingRecord* pr, TracingData& td) {
     // frame_id is unused
     int64_t frame_id = 0;
     pop(stack, frame_id);
-    int64_t loop_counter;
+    int64_t loop_counter = 0;
     pop(stack, loop_counter);
     WithInsertPoint wip(td.traced_graph_->block());
     auto lc = td.traced_graph_->insertConstant(loop_counter);
