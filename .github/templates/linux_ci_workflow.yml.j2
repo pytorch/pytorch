@@ -361,14 +361,4 @@ jobs:
           s3-bucket: doc-previews
           path: cppdocs/
           s3-prefix: pytorch/${{ github.event.pull_request.number }}/cppdocs
-      - name: Archive artifacts into zip
-        run: |
-          zip -r "docs_${DOCS_TYPE}.zip" "${GITHUB_WORKSPACE}/pytorch.github.io" "${GITHUB_WORKSPACE}/cppdocs"
-      - uses: actions/upload-artifact@v2
-        name: Store PyTorch Build Artifacts
-        with:
-          name: docs_${{ matrix.docs_type }}
-          path: docs_${{ matrix.docs_type }}.zip
-          if-no-files-found: error
-      !{{ common.teardown_ec2_linux() }}
 {%- endif -%}
