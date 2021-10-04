@@ -116,52 +116,44 @@ torch::lazy::hash_t OpKind::hash() const {
   return torch::lazy::StringHash(op.toQualString());
 }
 
-Node::Node(OpKind op, OpList operands, lazy_tensors::Shape shape,
-           size_t num_outputs, torch::lazy::hash_t hash_seed)
+Node::Node(OpKind op, OpList operands,
+           const std::vector<at::ScalarType>& at_dtypes,
+           const std::vector<std::vector<int64_t>>& at_shapes,
+           size_t num_outputs,
+           torch::lazy::hash_t node_hash, torch::lazy::hash_t dag_hash)
     : op_(std::move(op)),
+      at_dtypes_(at_dtypes),
+      at_shapes_(at_shapes),
       num_outputs_(num_outputs),
-      node_hash_(torch::lazy::HashCombine(op_.hash(), hash_seed)),
-      hash_(node_hash_) {
+      node_hash_(node_hash),
+      dag_hash_(dag_hash) {
+  LTC_CHECK_EQ(at_dtypes.size(), at_shapes.size());
   metadata_.scope = GetCurrentScope();
   metadata_.frame_info = GetFrameInfo();
   for (auto& operand : operands) {
-    // Ideally, optional operands should be filtered by the leaf node classes, but it's just much easier to do it here.
-    // TODO(alanwaketan): Find a way to move the below logic to the leaf node classes.
+    // Ideally, optional operands should be filtered by the leaf node classes,
+    // but it's just much easier to do it here.
+    // TODO(alanwaketan): Find a way to move the below logic to the leaf node
+    // classes.
     if (!operand) {
       continue;
     }
 
     AddOperand(operand.node, operand.index);
-    hash_ = torch::lazy::HashCombine(hash_, operand.hash());
   }
 }
 
-Node::Node(OpKind op, OpList operands, lazy_tensors::Shape shape,
-           size_t num_outputs, torch::lazy::hash_t hash_seed,
-           const std::vector<at::ScalarType>& at_dtypes, const std::vector<std::vector<int64_t>>& at_shapes)
-    : Node(std::move(op), operands, shape, num_outputs, hash_seed) {
-  LTC_CHECK_EQ(at_dtypes.size(), at_shapes.size());
-  at_dtypes_ = at_dtypes;
-  at_shapes_ = at_shapes;
-}
-
-Node::Node(OpKind op, OpList operands,
-           const std::function<lazy_tensors::Shape()>& shape_fn,
-           size_t num_outputs, torch::lazy::hash_t hash_seed)
-    : Node(std::move(op), operands, lazy_tensors::Shape(), num_outputs,
-           hash_seed) {}
-
-Node::Node(OpKind op, OpList operands, size_t num_outputs,
-           torch::lazy::hash_t hash_seed)
-    : Node(std::move(op), operands, lazy_tensors::Shape(), num_outputs,
-           hash_seed) {}
-
-Node::Node(OpKind op, lazy_tensors::Shape shape, size_t num_outputs,
-           torch::lazy::hash_t hash_seed)
+Node::Node(OpKind op, const std::vector<at::ScalarType>& at_dtypes,
+           const std::vector<std::vector<int64_t>>& at_shapes,
+           size_t num_outputs,
+           torch::lazy::hash_t node_hash)
     : op_(std::move(op)),
+      at_dtypes_(at_dtypes),
+      at_shapes_(at_shapes),
       num_outputs_(num_outputs),
-      node_hash_(GetOpHash(op_, shape, hash_seed)),
-      hash_(node_hash_) {
+      node_hash_(node_hash),
+      dag_hash_(node_hash) {
+  LTC_CHECK_EQ(at_dtypes.size(), at_shapes.size());
   metadata_.scope = GetCurrentScope();
   metadata_.frame_info = GetFrameInfo();
 }
@@ -214,19 +206,6 @@ std::string Node::ToString() const {
 
 NodePtr Node::Clone(OpList operands) const {
   LTC_ERROR() << "Cloning not implemented for node: " << *this;
-}
-
-torch::lazy::hash_t Node::GetOpHash(OpKind op,
-                                     const lazy_tensors::Shape& shape,
-                                     torch::lazy::hash_t hash_seed) {
-  if (lazy_tensors::Shape::IsDynamicMode()) {
-    torch::lazy::hash_t h = torch::lazy::HashCombine(
-        op.hash(), torch::lazy::Hash(shape.rank()));
-    return torch::lazy::HashCombine(h, hash_seed);
-  }
-  torch::lazy::hash_t h = torch::lazy::HashCombine(
-      op.hash(), torch::lazy::Hash(shape.ToString()));
-  return torch::lazy::HashCombine(h, hash_seed);
 }
 
 std::vector<SourceLocation> Node::GetFrameInfo() {

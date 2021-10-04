@@ -97,9 +97,8 @@ class {schema.node_name} : public {self.node_base} {{
       : {self.node_base}(ir::OpKind(at::aten::{func.name.name}),
               {{{base_ctor_value_args}}},
               convertShape(out_dtypes, out_shapes),
-              /*num_outputs=*/{len(func.returns)},
-              torch::lazy::MHash({scalar_hashes}),
-              out_dtypes, out_shapes){comma_if_scalar_initializers}
+              /* num_outputs= */{len(func.returns)},
+              torch::lazy::MHash({scalar_hashes})){comma_if_scalar_initializers}
         {scalar_initializers}
 
   {{

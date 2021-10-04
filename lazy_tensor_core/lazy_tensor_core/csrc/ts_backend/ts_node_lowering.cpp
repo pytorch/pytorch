@@ -453,7 +453,7 @@ class TSNodeLowering : public NodeLowering {
     const ir::Output& input = conv_backward->operand(1);
     const ir::Output& weight = conv_backward->operand(2);
     return lazy_tensors::ShapeUtil::MakeTupleShape(
-        {input.shape(), weight.shape(), self.shape()});
+        {GetShapeFromTsOutput(input), GetShapeFromTsOutput(weight), GetShapeFromTsOutput(self)});
   }
 
   static lazy_tensors::Shape InferConvolutionOverrideable(
@@ -464,12 +464,14 @@ class TSNodeLowering : public NodeLowering {
     // TODO: Shape::dimensions() returns a Span and converting it to
     // a vector of int is awkard. Clean up this after we switch to a
     // PyTorch shape.
+    const auto input_shape = GetShapeFromTsOutput(operands[0]);
     const auto& input_size =
-        std::vector<int64_t>(operands[0].shape().dimensions().begin(),
-                             operands[0].shape().dimensions().end());
+        std::vector<int64_t>(input_shape.dimensions().begin(),
+                             input_shape.dimensions().end());
+    const auto weight_shape = GetShapeFromTsOutput(operands[1]);
     const auto& weight_size =
-        std::vector<int64_t>(operands[1].shape().dimensions().begin(),
-                             operands[1].shape().dimensions().end());
+        std::vector<int64_t>(weight_shape.dimensions().begin(),
+                             weight_shape.dimensions().end());
     const auto& dilation = conv->dilation();
     const auto& padding = conv->padding();
     const auto& stride = conv->stride();
@@ -478,11 +480,11 @@ class TSNodeLowering : public NodeLowering {
 
     if (!conv->transposed()) {
       return lazy_tensors::Shape(
-          operands[0].shape().element_type(),
+          input_shape.element_type(),
           at::native::conv_output_size(input_size, weight_size, padding, stride,
                                        dilation));
     } else {
-      return lazy_tensors::Shape(operands[0].shape().element_type(),
+      return lazy_tensors::Shape(input_shape.element_type(),
                                  at::native::conv_input_size(
                                      input_size, weight_size, padding,
                                      output_padding, stride, dilation, groups));
