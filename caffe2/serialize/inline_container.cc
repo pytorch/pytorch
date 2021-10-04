@@ -80,7 +80,7 @@ PyTorchStreamReader::PyTorchStreamReader(
     std::shared_ptr<ReadAdapterInterface> in,
     c10::optional<intrusive_ptr<MmapStorageRegion>> mmapping)
     : ar_(std::make_unique<mz_zip_archive>()), in_(std::move(in)),
-      mmapping_(mmapping) {
+      mmapping_(std::move(mmapping)) {
   init();
 }
 
