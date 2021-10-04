@@ -47,6 +47,7 @@ struct IncrementRAII final {
 // are still not sure if you need it or not, consult your local
 // C++ expert.
 //
+#if !defined(C10_MOBILE)
 template <class T>
 class LeftRight final {
  public:
@@ -186,5 +187,37 @@ class LeftRight final {
   std::array<T, 2> _data;
   std::mutex _writeMutex;
 };
+#else
+
+// LeftRight for mobile builds is a pass-through (just to maintain API
+// compatibility) with the non-mobile build.
+template <class T>
+class LeftRight final {
+ public:
+  template <class... Args>
+  explicit LeftRight(const Args&... args) : _data{args...} {}
+
+  // Copying and moving would not be threadsafe.
+  // Needs more thought and careful design to make that work.
+  LeftRight(const LeftRight&) = delete;
+  LeftRight(LeftRight&&) noexcept = delete;
+  LeftRight& operator=(const LeftRight&) = delete;
+  LeftRight& operator=(LeftRight&&) noexcept = delete;
+
+  template <typename F>
+  auto read(F&& readFunc) const -> typename std::result_of<F(const T&)>::type {
+    return readFunc(_data);
+  }
+
+  // Throwing an exception in writeFunc is ok but causes the state to be either
+  // the old or the new state, depending on if the first or the second call to
+  // writeFunc threw.
+  template <typename F>
+  auto write(F&& writeFunc) -> typename std::result_of<F(T&)>::type {
+    return writeFunc(_data);
+  }
+  T _data;
+};
+#endif
 
 } // namespace c10
