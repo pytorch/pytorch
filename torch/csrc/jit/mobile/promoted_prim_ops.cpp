@@ -176,7 +176,7 @@ void dictIndex(Stack& stack) {
   push(stack, value->value());
 }
 
-static const std::array<mobile::prim_op_fn_register, 16> op_reg = {
+static const mobile::prim_op_fn_register op_reg[] = {
     mobile::prim_op_fn_register("prim::TupleIndex", tupleIndex),
     mobile::prim_op_fn_register("aten::Bool.Tensor", boolTensor),
     mobile::prim_op_fn_register("aten::format", aten_format),
