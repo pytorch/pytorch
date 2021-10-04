@@ -230,9 +230,13 @@ void testStaticRuntime(
       compareResults(expect, actual, use_allclose, use_equalnan);
     } else {
       // run static runtime again to exercise the memory planner
+      // and allocate managed tensors.
       actual = smodule(args, {});
       smodule.runtime().check_for_memory_leak();
-      // second run
+      compareResults(expect, actual, use_allclose, use_equalnan);
+      // third run to use the allocated managed tensors.
+      actual = smodule(args, {});
+      smodule.runtime().check_for_memory_leak();
       compareResults(expect, actual, use_allclose, use_equalnan);
     }
   }
