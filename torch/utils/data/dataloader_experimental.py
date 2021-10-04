@@ -55,14 +55,11 @@ class _ThreadingDataLoader2:
         for thread, req_queue, res_queue in self.threads:
             clean_me(thread, req_queue, res_queue)
 
-
-def sharding_worker_init_fn(worker_init_fn, worker_id):
+def _sharding_worker_init_fn(worker_init_fn, worker_id):
     if worker_init_fn is not None:
         worker_init_fn(worker_id)
     torch.utils.data.backward_compatibility.worker_init_fn(
         worker_id)
-
-
 class DataLoader2:
     def __new__(cls,
                 dataset,
@@ -102,9 +99,8 @@ class DataLoader2:
                         collate_fn = torch.utils.data._utils.collate.default_collate
             torch.utils.data.graph_settings.apply_shuffle_settings(datapipe, shuffle=shuffle)
             if parallelism_mode == 'mp' or num_workers == 0:
-
                 my_worker_init_fn = functools.partial(
-                    sharding_worker_init_fn, worker_init_fn)
+                    _sharding_worker_init_fn, worker_init_fn)
 
                 # Note: It is safe to pass shuffle=True to the old DataLoader, as shuffle does nothing
                 # for Iterable, but required to set Pipes correctly.
