@@ -233,7 +233,7 @@ $5 = torch._ops.aten.kl_div($0, $1, 2, log_target=True)''')
                 return "arf"
 
         # Wobbles depending on NDEBUG mode of pybind11
-        self.assertRaisesRegexp(
+        self.assertRaisesRegex(
             RuntimeError, "Unable to cast", lambda: A(torch.zeros(1)).neg(),
         )
         self.assertExpectedRaisesInline(
@@ -459,6 +459,12 @@ $6 = torch._ops.aten.add_($1, $5)''')
             with enable_python_mode(LoggingTensor):
                 with enable_python_mode(LoggingTensor):
                     pass
+    
+    def test_tolist_numpy_with_python_mode(self) -> None:
+        x = LoggingTensor(torch.tensor([2.0, 3.0], requires_grad=True))
+        with self.assertRaisesRegex(RuntimeError, "is not supported for tensor subclasses."):
+            x.tolist()
+            x.numpy()            
 
     def test_enable_python_mode_subclass_autograd_device_check(self) -> None:
         class NonWrapperSublass(torch.Tensor):
