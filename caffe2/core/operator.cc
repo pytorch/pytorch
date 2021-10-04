@@ -831,7 +831,7 @@ std::function<void(const OperatorDef&)> GetOperatorLogger() {
 }
 
 c10::optional<int> OperatorBase::argumentIndexWithName(
-    const std::string& name) const {
+    c10::string_view name) const {
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   return getFunctionSchema().argumentIndexWithName(name);

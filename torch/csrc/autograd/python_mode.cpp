@@ -1,7 +1,7 @@
 #include <torch/csrc/autograd/python_mode.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/autograd/python_variable.h>
-#include <ATen/PythonModeTLS.h>
+#include <ATen/core/PythonModeTLS.h>
 #include <c10/core/TensorImpl.h>
 
 namespace torch { namespace autograd {

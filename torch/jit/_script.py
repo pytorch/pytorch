@@ -449,7 +449,7 @@ if _enabled:
         setattr(RecursiveScriptClass, method_name, method_template)
 
     # this is a Python 'non-data descriptor' that causes the first access
-    # to ScriptModule's forward to lookup the forward method and stash
+    # to ScriptModule's forward to look up the forward method and stash
     # it in the objects dict. Due to the standard rules for attribute lookup,
     # subsequent lookups will just directly return the previously looked up method.
     # This is necessary because nn.Module defines forward as a method. If we
@@ -785,13 +785,6 @@ if _enabled:
                 # It's fairly trivial to save enough info to warn in this case.
                 return super(RecursiveScriptModule, self).__setattr__(attr, value)
 
-        def __getstate__(self):
-            raise pickle.PickleError(
-                "ScriptModules cannot be deepcopied using copy.deepcopy or saved using torch.save. "
-                + "Mixed serialization of script and non-script modules is not supported. "
-                + "For purely script modules use my_script_module.save(<filename>) instead."
-            )
-
         def __copy__(self):
             return torch.jit._recursive.wrap_cpp_module(copy.copy(self._c))
 
@@ -881,6 +874,7 @@ if _enabled:
         "forward",
         "register_buffer",
         "register_parameter",
+        "register_module",
         "add_module",
         "_apply",
         "apply",

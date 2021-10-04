@@ -37,7 +37,7 @@ if is_available():
         _register_builtin_comm_hook,
         _broadcast_coalesced,
         _compute_bucket_assignment_by_size,
-        _verify_model_across_ranks,
+        _verify_params_across_processes,
         _test_python_store,
         _DistributedDebugLevel,
         _get_debug_mode,

@@ -1,3 +1,4 @@
+#include <c10/core/ScalarType.h>
 #include <gtest/gtest.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/irparser.h>
@@ -57,6 +58,13 @@ bool testHasInplaceOp(const std::string& jit_script) {
   return HasInplaceOp(graph, alias_db);
 }
 
+bool testModuleHasOp(const std::string& jit_script, const char* op_name) {
+  script::Module module("module");
+  module.define(jit_script);
+
+  return forwardHasOp(module, op_name);
+}
+
 Node* getNodeWithKind(const StaticModule& smodule, const std::string& kind) {
   for (auto& pnode : smodule.nodes()) {
     if (std::string(pnode.node()->kind().toQualString()) == kind) {
@@ -66,6 +74,10 @@ Node* getNodeWithKind(const StaticModule& smodule, const std::string& kind) {
   return nullptr;
 }
 
+bool hasNodeWithKind(const StaticModule& smodule, const std::string& kind) {
+  return getNodeWithKind(smodule, kind) != nullptr;
+}
+
 } // namespace
 
 TEST(StaticRuntime, InPlace) {
@@ -73,6 +85,13 @@ TEST(StaticRuntime, InPlace) {
   EXPECT_TRUE(testHasInplaceOp(reshape_inplace_script_1));
   EXPECT_TRUE(testHasInplaceOp(sigmoid_inplace_script));
   EXPECT_FALSE(testHasInplaceOp(sigmoid_out_script));
+}
+
+TEST(StaticRuntime, ModuleHasOp) {
+  EXPECT_TRUE(testModuleHasOp(reshape_inplace_script, "aten::sigmoid_"));
+  EXPECT_TRUE(testModuleHasOp(reshape_inplace_script_1, "aten::reshape"));
+  EXPECT_TRUE(testModuleHasOp(sigmoid_inplace_script, "aten::clone"));
+  EXPECT_FALSE(testModuleHasOp(reshape_inplace_script_1, "aten::add_"));
 }
 
 TEST(StaticRuntime, CanEnableStaticRuntime) {
@@ -207,6 +226,29 @@ TEST(StaticRuntime, EmbeddingBag) {
   testStaticRuntime(embedding_bag_sum_last_offset, args);
   testStaticRuntime(embedding_bag_mean_last_offset, args);
   testStaticRuntime(embedding_bag_max_last_offset, args);
+}
+
+TEST(StaticRuntime, EmbeddingBagWithManagedOutput) {
+  const std::string embedding_bag_managed_output = R"JIT(
+    def forward(self, a: Tensor, b: Tensor, c: Tensor):
+        # The outputs of embedding_bag become an intermediate tensors
+        # since they are not directly returned from the graph.
+        x, y, z, _ = torch.embedding_bag(a, b, c)
+        return x + x
+  )JIT";
+
+  at::Tensor weight = torch::randn({3, 12}, at::ScalarType::Float);
+  at::Tensor input = torch::tensor({0, 1, 0, 2});
+  at::Tensor offset = torch::tensor({0, 2, 4});
+  std::vector<IValue> args{weight, input, offset};
+
+  at::Tensor weight2 = torch::randn({4, 13}, at::ScalarType::Float);
+  at::Tensor input2 = torch::tensor({0, 1, 0, 2});
+  at::Tensor offset2 = torch::tensor({0, 2, 4});
+  std::vector<IValue> args2{weight2, input2, offset2};
+
+  testStaticRuntime(embedding_bag_managed_output, args);
+  testStaticRuntime(embedding_bag_managed_output, args, args2);
 }
 
 TEST(StaticRuntime, LayerNorm) {
@@ -596,15 +638,19 @@ TEST(StaticRuntime, IndividualOps_to) {
     testStaticRuntime(to_script_3, args2, {a2, a2_other, c, d, e}); // to.other
     testStaticRuntime(to_script_4, {a}, {a2});
   };
-  // float->float, NCHW->NHWC
-  test_to(at::ScalarType::Float, true, true, c10::MemoryFormat::ChannelsLast);
-  // float->half
-  test_to(at::ScalarType::Half, true, false, c10::MemoryFormat::Preserve);
-  // float->float
-  test_to(at::ScalarType::Float, false, false, c10::MemoryFormat::Contiguous);
-  // TODO: check if fbgemm is enabled properly in this case
-  // half->float, NCHW->NHWC
-  test_to(at::ScalarType::Half, false, true, c10::MemoryFormat::ChannelsLast);
+  for (const bool non_blocking : {false, true}) {
+    for (const bool copy : {false, true}) {
+      // float->float, NCHW->NHWC
+      test_to(at::ScalarType::Float, non_blocking, copy, c10::MemoryFormat::ChannelsLast);
+      // float->half
+      test_to(at::ScalarType::Half, non_blocking, copy, c10::MemoryFormat::Preserve);
+      // float->float
+      test_to(at::ScalarType::Float, non_blocking, copy, c10::MemoryFormat::Contiguous);
+      // TODO: check if fbgemm is enabled properly in this case
+      // half->float, NCHW->NHWC
+      test_to(at::ScalarType::Half, non_blocking, copy, c10::MemoryFormat::ChannelsLast);
+    }
+  }
 }
 
 TEST(StaticRuntime, IndividualOps_Detach) {
@@ -619,10 +665,10 @@ TEST(StaticRuntime, IndividualOps_Detach) {
 }
 
 TEST(StaticRuntime, IndividualOps_ExpandAs) {
-  auto a = at::randn({3,1});
-  auto b = at::randn({3,2});
-  auto c = at::randn({4,1});
-  auto d = at::randn({4,2});
+  auto a = at::randn({3, 1});
+  auto b = at::randn({3, 2});
+  auto c = at::randn({4, 1});
+  auto d = at::randn({4, 2});
   std::vector<IValue> args{a, b};
   std::vector<IValue> args2{c, d};
   testStaticRuntime(expand_as_script, args);
@@ -938,7 +984,7 @@ TEST(StaticRuntime, FusionPass) {
 
 TEST(
     ProcessedNode,
-    VerifyOutputsNotOverlappingWithImmutableInputsWithImmutableArguments) {
+    VerifyNoMemoryOverlapWithImmutableInputsWithImmutableArguments) {
   script::Module module("module");
   // Not using out= variant.
   module.define(sigmoid_script);
@@ -950,15 +996,15 @@ TEST(
   ProcessedNode pnode(sigmoid_node, std::move(ivalue_inputs), true);
 
   pnode.Output(0) = b;
-  EXPECT_TRUE(pnode.verify_outputs_not_overlapping_with_immutable_inputs());
+  EXPECT_TRUE(pnode.verify_no_memory_overlap());
 
   pnode.Output(0) = a;
-  EXPECT_FALSE(pnode.verify_outputs_not_overlapping_with_immutable_inputs());
+  EXPECT_FALSE(pnode.verify_no_memory_overlap());
 }
 
 TEST(
     ProcessedNode,
-    VerifyOutputsNotOverlappingWithImmutableInputsWithMutableArguments) {
+    VerifyNoMemoryOverlapWithImmutableInputsWithMutableArguments) {
   script::Module module("module");
   // Using out= variant.
   module.define(sigmoid_inplace_script);
@@ -970,10 +1016,40 @@ TEST(
   ProcessedNode pnode(sigmoid_node, std::move(ivalue_inputs), true);
 
   pnode.Output(0) = b;
-  EXPECT_TRUE(pnode.verify_outputs_not_overlapping_with_immutable_inputs());
+  EXPECT_TRUE(pnode.verify_no_memory_overlap());
 
   pnode.Output(0) = a;
-  EXPECT_TRUE(pnode.verify_outputs_not_overlapping_with_immutable_inputs());
+  EXPECT_TRUE(pnode.verify_no_memory_overlap());
+}
+
+TEST(ProcessedNode, VerifyNoMemoryOverlapWithOverlappingOutputs) {
+  auto g = std::make_shared<torch::jit::Graph>();
+  torch::jit::parseIR(
+      R"IR(
+    graph(%0):
+      %1 : Tensor, %2 : Tensor = prim::ListUnpack(%0)
+      return (%1, %2))IR",
+      g.get());
+  torch::jit::StaticModule smodule(g);
+  Node* list_unpack_node = getNodeWithKind(smodule, "prim::ListUnpack");
+  {
+    auto a = at::randn({2, 3});
+    IValue ivalue(a);
+    std::vector<const IValue*> inputs{&ivalue};
+    ProcessedNode list_unpack_pnode(list_unpack_node, std::move(inputs), /*enable_out_variant=*/true);
+    ASSERT_EQ(list_unpack_pnode.outputs().size(), 2);
+    EXPECT_TRUE(list_unpack_pnode.verify_no_memory_overlap());
+  }
+  {
+    auto a = at::randn({2, 3});
+    IValue ivalue(a);
+    std::vector<const IValue*> inputs{&ivalue};
+    ProcessedNode list_unpack_pnode(list_unpack_node, std::move(inputs), /*enable_out_variant=*/true);
+    auto b = at::randn({2, 3});
+    list_unpack_pnode.Output(0) = b;
+    list_unpack_pnode.Output(1) = b;
+    EXPECT_FALSE(list_unpack_pnode.verify_no_memory_overlap());
+  }
 }
 
 TEST(StaticRuntime, IndividualOps_isinstance) {
@@ -1081,6 +1157,21 @@ TEST(StaticRuntime, IndividualOps_Argmin) {
 
   testStaticRuntime(argmin_with_keep_dim_script, args_a);
   testStaticRuntime(argmin_with_keep_dim_script, args_a, args_b);
+}
+
+TEST(StaticRuntime, IndividualOps_Softmax) {
+  auto a = at::randn({2, 3});
+  auto b = at::randn({3, 3, 3});
+
+  testStaticRuntime(softmax_script, {a, 0});
+  testStaticRuntime(softmax_script, {a, 1});
+
+  testStaticRuntime(softmax_script, {b, 0});
+  testStaticRuntime(softmax_script, {b, 1});
+  testStaticRuntime(softmax_script, {b, 2});
+
+  testStaticRuntime(softmax_script_with_dtype, {a, 1, at::ScalarType::Float});
+  testStaticRuntime(softmax_script_with_dtype, {b, 1, at::ScalarType::Float});
 }
 
 TEST(StaticRuntime, IndividualOps_GetItem_Dict) {
@@ -1261,10 +1352,10 @@ TEST(StaticRuntime, IndividualOps_FmodScalar) {
 
 TEST(StaticRuntime, QEmbeddingBagByteUnpack) {
   auto a = torch::randn({8, 16}, at::ScalarType::Float);
-  auto b = torch::randn({8*2, 16*2}, at::ScalarType::Float);
+  auto b = torch::randn({8 * 2, 16 * 2}, at::ScalarType::Float);
 
   testStaticRuntime(embedding_bag_byte_prepack_script, {a});
-  testStaticRuntime(embedding_bag_byte_prepack_script, {a},{b});
+  testStaticRuntime(embedding_bag_byte_prepack_script, {a}, {b});
 }
 
 TEST(StaticRuntime, IndividualOps_LinalgNorm_ScalarOrd) {
@@ -1339,4 +1430,120 @@ TEST(StaticRuntime, IndividualOps_Nonzero) {
 
   auto b = at::randint(0, 2, {4, 3, 2});
   testStaticRuntime(nonzero_tensor, {a}, {b});
+}
+
+TEST(StaticRuntime, SignedLog1p) {
+  std::vector<IValue> args1 = {at::randn({2, 2})};
+  testStaticRuntime(signed_log1p_script, args1, {}, true);
+
+  std::vector<IValue> args2 = {at::randn({3, 3, 3})};
+  testStaticRuntime(signed_log1p_script, args1, args2, true);
+}
+
+TEST(StaticRuntime, RemoveImmutableInputDictLookupsWithImmutableInputDict) {
+  script::Module module("module");
+  module.define(getitem_immutable_input_dict_script);
+  torch::jit::StaticModule smodule(module);
+  EXPECT_FALSE(hasNodeWithKind(smodule, "aten::__getitem__"));
+  EXPECT_TRUE(hasNodeWithKind(smodule, "static_runtime::dict_unpack"));
+
+  auto a = at::randn({2, 4});
+  auto b = at::randn({2, 4});
+  c10::Dict<c10::IValue, c10::IValue> dict(
+      c10::IntType::get(), c10::TensorType::get());
+  dict.insert(0, a);
+  dict.insert(1, b);
+  testStaticRuntime(getitem_immutable_input_dict_script, {dict});
+
+  c10::Dict<c10::IValue, c10::IValue> dict0(
+      c10::IntType::get(), c10::TensorType::get());
+  auto a0 = at::randn({3, 4});
+  auto b0 = at::randn({3, 4});
+  dict0.insert(0, a0);
+  dict0.insert(1, b0);
+  testStaticRuntime(getitem_immutable_input_dict_script, {dict0});
+}
+
+TEST(StaticRuntime, RemoveImmutableInputDictLookupsWithMutableInputDict) {
+  script::Module module("module");
+  module.define(getitem_mutable_input_dict_script);
+  torch::jit::StaticModule smodule(module);
+  EXPECT_TRUE(hasNodeWithKind(smodule, "aten::__getitem__"));
+  EXPECT_FALSE(hasNodeWithKind(smodule, "static_runtime::dict_unpack"));
+}
+
+TEST(StaticRuntime, VarTupleUnpack) {
+  script::Module module("module");
+  module.define(var_tuple_unpack_script);
+  torch::jit::StaticModule smodule(module);
+  EXPECT_FALSE(hasNodeWithKind(smodule, "prim::TupleUnpack"));
+  EXPECT_TRUE(hasNodeWithKind(smodule, "static_runtime::VarTupleUnpack"));
+
+  auto a = at::randn({2, 2});
+  auto b = at::randn({3, 3, 3});
+  std::vector<IValue> args1{c10::ivalue::Tuple::create(a, a), c10::ivalue::Tuple::create(1, 2)};
+  std::vector<IValue> args2{c10::ivalue::Tuple::create(b, b), c10::ivalue::Tuple::create(1, 2)};
+
+  testStaticRuntime(var_tuple_unpack_script, args1);
+  testStaticRuntime(var_tuple_unpack_script, args1, args2);
+}
+
+TEST(StaticRuntime, VarTupleUnpack_NotApplied) {
+  script::Module module("module");
+  // In this script, the optimization is not applied since there is a computation between
+  // the TupleUnpack nodes.
+  module.define(var_tuple_unpack_not_applied_script);
+  torch::jit::StaticModule smodule(module);
+  EXPECT_FALSE(hasNodeWithKind(smodule, "static_runtime::VarTupleUnpack"));
+  EXPECT_TRUE(hasNodeWithKind(smodule, "prim::TupleUnpack"));
+}
+
+TEST(StaticRuntime, IndividualOps_RemainderTensor) {
+  const auto remainder_tensor = R"JIT(
+    def forward(self, x, y):
+        return torch.remainder(x, y).clone()
+  )JIT";
+
+  std::vector<IValue> args1 = {
+      at::randint(0, 10, {2, 2}), at::randint(0, 10, {2, 2})};
+  std::vector<IValue> args2 = {
+      at::randint(0, 10, {3, 3}), at::randint(0, 10, {3, 3})};
+
+  // Use allclose and equalnan since outputs may be NaN.
+  testStaticRuntime(
+      remainder_tensor,
+      args1,
+      /*args2*/ {},
+      /*use_alloclose*/ true,
+      /*use_equalnan*/ true);
+  testStaticRuntime(
+      remainder_tensor,
+      args1,
+      args2,
+      /*use_allclose*/ true,
+      /*use_equalnan*/ true);
+}
+
+TEST(StaticRuntime, IndividualOps_RemainderScalar) {
+  const auto remainder_scalar = R"JIT(
+    def forward(self, x, y: int):
+        return torch.remainder(x, y).clone()
+  )JIT";
+
+  std::vector<IValue> args1 = {at::randint(0, 10, {2, 2}), 4};
+  std::vector<IValue> args2 = {at::randint(0, 10, {3, 3}), 4};
+
+  // Use allclose and equalnan since outputs may be NaN.
+  testStaticRuntime(
+      remainder_scalar,
+      args1,
+      /*args2*/ {},
+      /*use_alloclose*/ true,
+      /*use_equalnan*/ true);
+  testStaticRuntime(
+      remainder_scalar,
+      args1,
+      args2,
+      /*use_allclose*/ true,
+      /*use_equalnan*/ true);
 }

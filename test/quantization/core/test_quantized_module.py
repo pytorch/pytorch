@@ -4,9 +4,9 @@ import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
-import torch.quantization
+import torch.ao.quantization
 
-from torch.quantization import (
+from torch.ao.quantization import (
     get_default_static_quant_module_mappings,
     default_float_qparams_observer,
     PerChannelMinMaxObserver,
@@ -103,8 +103,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         zero_point = 3
         qlinear = class_map[use_fused](in_features, out_features)
 
-        qlinear_copy = qlinear  # deepcopy does not work right now
-        # qlinear_copy = copy.deepcopy(qlinear)
+        qlinear_copy = copy.deepcopy(qlinear)
         self.checkScriptable(qlinear_copy, [[X_q]], check_save_load=True)
         # Run module with default-initialized parameters.
         # This tests that the constructor is correct.
@@ -155,15 +154,16 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                          linear_unpack(loaded_qlinear._packed_params._packed_params))
         self.assertEqual(qlinear.scale, loaded_qlinear.scale)
         self.assertEqual(qlinear.zero_point, loaded_qlinear.zero_point)
-        # make sure loaded_qlinear has the same dir as qlinear since
-        # scripting the module will add __overloads__ to __dict__
-        self.checkScriptable(loaded_qlinear, [[X_q]], check_save_load=True)
+        # scripting will add __overloads__ to __dict__, which is why we script a copy
+        # to be able to do the check in the next line
+        self.checkScriptable(copy.deepcopy(loaded_qlinear), [[X_q]], check_save_load=True)
         self.assertTrue(dir(qlinear) == dir(loaded_qlinear))
         self.assertEqual(qlinear._weight_bias(), loaded_qlinear._weight_bias())
         self.assertEqual(qlinear._weight_bias(), torch.ops.quantized.linear_unpack(qlinear._packed_params._packed_params))
         Z_q2 = loaded_qlinear(X_q)
         self.assertEqual(Z_q, Z_q2)
 
+        # Test serialization
         b = io.BytesIO()
         torch.save(qlinear, b)
         b.seek(0)
@@ -171,6 +171,25 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(qlinear.weight(), loaded.weight())
         self.assertEqual(qlinear.scale, loaded.scale)
         self.assertEqual(qlinear.zero_point, loaded.zero_point)
+
+        # Test copy and deepcopy
+        copied_linear = copy.copy(qlinear)
+        self.assertEqual(copied_linear.bias(), qlinear.bias())
+        self.assertEqual(copied_linear.scale, qlinear.scale)
+        self.assertEqual(copied_linear.zero_point,
+                         qlinear.zero_point)
+        Y_copied = copied_linear(X_q)
+        np.testing.assert_array_almost_equal(
+            Z_q.int_repr().numpy(), Y_copied.int_repr().numpy(), decimal=0)
+
+        deepcopied_linear = copy.deepcopy(qlinear)
+        self.assertEqual(deepcopied_linear.bias(), qlinear.bias())
+        self.assertEqual(deepcopied_linear.scale, qlinear.scale)
+        self.assertEqual(deepcopied_linear.zero_point,
+                         qlinear.zero_point)
+        Y_deepcopied = copied_linear(X_q)
+        np.testing.assert_array_almost_equal(
+            Z_q.int_repr().numpy(), Y_deepcopied.int_repr().numpy(), decimal=0)
 
         # Test JIT
         self.checkScriptable(qlinear, [[X_q]], check_save_load=True)
@@ -181,12 +200,12 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         for mut in modules_under_test:
             # Test from_float.
             float_linear = mut(in_features, out_features).float()
-            float_linear.qconfig = torch.quantization.default_qconfig
-            torch.quantization.prepare(float_linear, inplace=True)
+            float_linear.qconfig = torch.ao.quantization.default_qconfig
+            torch.ao.quantization.prepare(float_linear, inplace=True)
             float_linear(X.float())
             # Sequential allows swapping using "convert".
             quantized_float_linear = torch.nn.Sequential(float_linear)
-            quantized_float_linear = torch.quantization.convert(quantized_float_linear, inplace=True)
+            quantized_float_linear = torch.ao.quantization.convert(quantized_float_linear, inplace=True)
 
             # Smoke test to make sure the module actually runs
             quantized_float_linear(X_q)
@@ -342,13 +361,13 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
         # Test from_float
         fused_conv_module = torch.nn.intrinsic._FusedModule(conv_module)
-        fused_conv_module.qconfig = torch.quantization.default_qconfig
-        torch.quantization.prepare(fused_conv_module, inplace=True)
+        fused_conv_module.qconfig = torch.ao.quantization.default_qconfig
+        torch.ao.quantization.prepare(fused_conv_module, inplace=True)
         fused_conv_module(X.float())
         converted_qconv_module = fused_conv_module
         reference_mapping = get_default_static_quant_module_mappings()
         reference_mapping[type(conv_module)] = type(qconv_module)
-        torch.quantization.convert(converted_qconv_module, mapping=reference_mapping, inplace=True)
+        torch.ao.quantization.convert(converted_qconv_module, mapping=reference_mapping, inplace=True)
 
         # Smoke test to make sure the module actually runs
         if use_bias:
@@ -948,7 +967,7 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
             # Test from_float
             float_linear = mut(in_features, out_features).float()
             if use_default_observer:
-                float_linear.qconfig = torch.quantization.default_dynamic_qconfig
+                float_linear.qconfig = torch.ao.quantization.default_dynamic_qconfig
             prepare_dynamic(float_linear)
             float_linear(X.float())
             quantized_float_linear = nnqd.Linear.from_float(float_linear)

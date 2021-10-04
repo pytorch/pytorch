@@ -6,10 +6,10 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/core/DimVector.h>
 #include <ATen/native/Copy.h>
-#include <ATen/native/cpu/CatKernel.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TypeProperties.h>
+#include <ATen/native/TensorShape.h>
 #include <ATen/native/cpu/CatKernel.h>
 #include <ATen/native/cpu/StackKernel.h>
 #include <ATen/NativeFunctions.h>
@@ -94,25 +94,6 @@ std::vector<Tensor> broadcast_tensors(TensorList tensors) {
   return expand_outplace(tensors);
 }
 
-// Check to see if the shape of tensors is compatible
-// for being concatenated along a given dimension.
-static inline void check_cat_shape_except_dim(const Tensor & first, const Tensor & second, int64_t dimension, int64_t index) {
-  int64_t first_dims = first.dim();
-  int64_t second_dims = second.dim();
-  TORCH_CHECK(first_dims == second_dims, "torch.cat(): Tensors must have same number of dimensions: got ",
-              first_dims, " and ", second_dims);
-  for (int64_t dim = 0; dim < first_dims; dim++) {
-    if (dim == dimension) {
-      continue;
-    }
-    int64_t first_dim_size = first.sizes()[dim];
-    int64_t second_dim_size = second.sizes()[dim];
-    TORCH_CHECK(first_dim_size == second_dim_size, "torch.cat(): Sizes of tensors must match except in dimension ",
-                dimension, ". Got ", first_dim_size, " and ", second_dim_size, " in dimension ", dim,
-                " (The offending index is ", index, ")");
-  }
-}
-
 static bool should_skip(const Tensor& t) {
   return t.numel() == 0 && t.dim() == 1;
 }
@@ -193,6 +174,12 @@ Tensor & _cat_out_cpu(TensorList tensors, int64_t dim, Tensor& result) {
   result_size[dim] = cat_dim_size;
 
   // skip resizing if size of result is same as expected
+  // raise a warning while resizing if output has one or more elements
+  // See https://github.com/pytorch/pytorch/pull/62560#discussion_r687363362
+  // for understanding why at::native::resize_output is not called directly.
+  // if (at::native::resize_output_check(result, result_size)) {
+  // TODO: restore the above, see https://github.com/pytorch/pytorch/issues/64709
+
   if (result.sizes() != result_size) {
     result.resize_(result_size, first_tensor_mem_format);
   }
@@ -299,6 +286,23 @@ Tensor& cat_out(TensorList tensors, Dimname dim, Tensor& result) {
 Tensor cat(TensorList tensors, Dimname dim) {
   TORCH_CHECK(!tensors.empty(), "expected a non-empty list of Tensors");
   return at::cat(tensors, dimname_to_position(tensors[0], dim));
+}
+
+// torch.concat, alias for torch.cat
+Tensor& concat_out(TensorList tensors, Dimname dim, Tensor& result) {
+  return at::cat_out(result, tensors, dimname_to_position(tensors[0], dim));
+}
+
+Tensor concat(TensorList tensors, Dimname dim) {
+  return at::cat(tensors, dimname_to_position(tensors[0], dim));
+}
+
+Tensor & concat_out(TensorList tensors, int64_t dim, Tensor & result) {
+  return at::cat_out(result, tensors, dim);
+}
+
+Tensor concat(TensorList tensors, int64_t dim) {
+  return at::cat(tensors, dim);
 }
 
 static bool sizes_match_except(IntArrayRef s1, IntArrayRef s2, int64_t dim_except /* should already be wrapped */) {
@@ -1497,9 +1501,14 @@ bool inline maybe_native_stack(Tensor& result, TensorList tensors, int64_t dim) 
     result_sizes.insert(result_sizes.begin() + dim, tensors.size());
 
     // skip resizing if size of result is same as expected
+    // raise a warning while resizing if output has one or more elements
+    // at::native::resize_output(result, result_sizes);
+    // TODO: restore the above, see https://github.com/pytorch/pytorch/issues/64709
+
     if (result.sizes() != result_sizes) {
       result.resize_(result_sizes);
     }
+
     stack_serial_stub(kCPU, result, tensors, dim);
     return true;
   }
@@ -2042,6 +2051,8 @@ Tensor flatten(const Tensor& self, Dimname start_dim, Dimname end_dim, Dimname o
 
 Tensor flatten(const Tensor& self, DimnameList dims, Dimname out_dim) {
   auto positions = dimnames_to_positions(self, dims);
+  TORCH_CHECK(positions.size() > 0,
+      "flatten(tensor, dims, out_dim): dims cannot be empty");
   for (const auto i : c10::irange(positions.size() - 1)) {
     if (positions[i] + 1 == positions[i + 1]) continue;
     TORCH_CHECK(positions[i] + 1 == positions[i + 1],
@@ -2142,30 +2153,85 @@ std::vector<Tensor> unbind(const Tensor& self, Dimname dim) {
 }
 
 std::vector<Tensor> meshgrid(TensorList tensors) {
+  TORCH_WARN_ONCE("torch.meshgrid: in an upcoming release, it will be required to pass the "
+                  "indexing argument.");
+  return native::meshgrid(tensors, /*indexing=*/"ij");
+}
+
+std::vector<Tensor> meshgrid(TensorList tensors,
+                             c10::string_view indexing) {
   int64_t size = tensors.size();
   TORCH_CHECK(size > 0, "meshgrid expects a non-empty TensorList");
+
+  for(const auto i: c10::irange(size - 1)){
+    TORCH_CHECK(tensors[i].dtype() == tensors[i+1].dtype(), "meshgrid expects all tensors to have the same dtype");
+    TORCH_CHECK(tensors[i].device() == tensors[i+1].device(), "meshgrid expects all tensors to have the same device");
+  }
+
+  // Input tensors is of type TensorList, which is an alias to a
+  // constant array slice, which doesn't allow for mutations. We may
+  // need to swap our first two elements if indexing is "ij", so we
+  // unconditionally create a vector that we can reorder to keep the
+  // implementation simple.
+  //
+  // We are not concerned with the performance of this relative to
+  // constructor a grid for each input.
+  std::vector<std::reference_wrapper<const Tensor>> tensor_refs(tensors.begin(),
+                                                                tensors.end());
+
+  // Whether or not to swap the first two tensors.
+  //
+  // We only swap if there are at least two* input tensors (obviously)
+  // and if indexing is "xy".
+  //
+  // A reminder about "xy" semantics: "xy" semantics implies that the
+  // output grids are in the cartesian coordinate system. Thus the
+  // first dimension is the "x" axis (corresponding to column) and the
+  // second dimension is the "y" axis (corresponding to row). Tensors,
+  // however, generally consider the first axis to be the row and the
+  // second axis to be the columns. Thus we flip the two dimensions in
+  // contrast to "ij" indexing.
+  //
+  // It turns out that it's easiest to implement this by just swapping
+  // the first two inputs. However, the order of the outputs still
+  // must correspond to the order of the inputs. Thus we also must
+  // swap the outputs if we swapped the inputs.
+  //
+  // * Why do we even support this function for exactly one input?
+  bool swap_first_and_second_tensors;
+
+  if (indexing == "xy") {
+    // We can only swap if there are multiple tensors.
+    swap_first_and_second_tensors = size >= 2;
+    if (swap_first_and_second_tensors) {
+      std::swap(tensor_refs[0], tensor_refs[1]);
+    }
+  } else {
+    // Only "xy" and "ij" are supported, and we already checked for
+    // "xy" above. Only "ij" remains as a valid mode.
+    TORCH_CHECK(indexing == "ij",
+                "torch.meshgrid: indexing must be one of \"xy\" or \"ij\", "
+                "but received: ", indexing);
+    swap_first_and_second_tensors = false;
+  }
+
   std::vector<int64_t> shape(size);
   for(const auto i: c10::irange(size)){
-    switch (tensors[i].dim()) {
-    case 0:
-      shape[i] = 1;
-      break;
-    case 1:
-      shape[i] = tensors[i].size(0);
-      break;
-    default:
-      AT_ERROR("Expected scalar or 1D tensor in the tensor list but got: ", tensors[i]);
-    }
-  }
-  for(const auto i: c10::irange(size - 1)){
-      TORCH_CHECK(tensors[i].dtype() == tensors[i+1].dtype(), "meshgrid expects all tensors to have the same dtype");
-      TORCH_CHECK(tensors[i].device() == tensors[i+1].device(), "meshgrid expects all tensors to have the same device");
+    TORCH_CHECK(tensor_refs[i].get().dim() <= 1,
+                "torch.meshgrid: Expected 0D or 1D tensor in the tensor list but got: ", tensor_refs[i]);
+    shape[i] = tensor_refs[i].get().numel();  // treat 0D tensors as if they were a 1D tensor
   }
   std::vector<Tensor> grids;
+  std::vector<int64_t> view_shape(size, 1);
   for(const auto i: c10::irange(size)){
-    std::vector<int64_t> view_shape(size, 1);
-    view_shape[i] = -1;
-    grids.push_back(tensors[i].view(view_shape).expand(shape));
+    view_shape[i] = -1;  // select this dimension to infer
+    grids.push_back(tensor_refs[i].get().view(view_shape).expand(shape));
+    view_shape[i] = 1;  // restore to previous value
+  }
+
+  // Remember we need to also swap the outputs if we swapped the inputs.
+  if (swap_first_and_second_tensors) {
+    std::swap(grids[0], grids[1]);
   }
   return grids;
 }
@@ -2301,10 +2367,7 @@ Tensor diag_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t diagon
   }
 
   // Input was a matrix but was not square
-  auto grad_input = at::zeros(input_sizes, grad.options());
-  auto diag = grad_input.diagonal(diagonal);
-  diag.copy_(grad);
-  return grad_input;
+  return at::diagonal_backward(grad, input_sizes, diagonal, 0, 1);
 }
 
 Tensor diagonal_backward(const Tensor & grad, IntArrayRef input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
