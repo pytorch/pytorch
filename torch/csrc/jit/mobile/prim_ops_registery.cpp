@@ -4,15 +4,12 @@ namespace torch {
 namespace jit {
 namespace mobile {
 
-std::unordered_map<std::string, std::function<void(Stack&)>>& primOpsFnTable() {
-  static std::unordered_map<std::string, std::function<void(Stack&)>>
-      prim_ops_fn;
+std::unordered_map<std::string, StackFn>& primOpsFnTable() {
+  static std::unordered_map<std::string, StackFn> prim_ops_fn;
   return prim_ops_fn;
 }
 
-void registerPrimOpsFunction(
-    const std::string& name,
-    const std::function<void(Stack&)>& fn) {
+void registerPrimOpsFunction(const std::string& name, const StackFn& fn) {
   primOpsFnTable()[name] = fn;
 }
 
@@ -20,7 +17,7 @@ bool hasPrimOpsFn(const std::string& name) {
   return primOpsFnTable().count(name);
 }
 
-std::function<void(Stack&)>& getPrimOpsFn(const std::string& name) {
+StackFn& getPrimOpsFn(const std::string& name) {
   TORCH_CHECK(
       hasPrimOpsFn(name),
       "Prim Ops Function for ",
