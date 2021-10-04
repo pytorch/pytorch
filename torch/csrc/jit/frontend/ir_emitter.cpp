@@ -1678,7 +1678,7 @@ struct to_ir {
               << "Union type annotation `" << type_hint->repr_str()
               << "` can hold " << vector_repr.str() << ", but none of "
               << "those list types can hold the types of the given dict"
-              << " elements, which were unified to " << candidate->repr_str();
+              << " elements.";
         } else {
           refined_type_hint = candidate;
         }
