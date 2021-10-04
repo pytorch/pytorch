@@ -264,7 +264,7 @@ def compute_loss(params, data, targets):
     preds = func_model(params, data)
     return torch.mean((preds - targets) ** 2)
 
-per_sample_grads = vmap(compute_loss, (None, 0, 0))(params, data, targets)
+per_sample_grads = vmap(grad(compute_loss), (None, 0, 0))(params, data, targets)
 ```
 
 If you're making an ensemble of models, you may find
