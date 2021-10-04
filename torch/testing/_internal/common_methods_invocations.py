@@ -4620,10 +4620,6 @@ def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs)
 
     sample_inputs = []
     for (input_shape, kwargs), probabilities_target in itertools.product(input_shape_and_kwargs, (False, True)):
-        # FIXME:
-        if "weight" in kwargs and not probabilities_target:
-            continue
-
         input = make_tensor(input_shape, device=device, dtype=dtype, requires_grad=requires_grad)
 
         if probabilities_target:
@@ -7821,10 +7817,11 @@ op_db: List[OpInfo] = [
         supports_out=False,
         gradcheck_fast_mode=False,
         skips=(
-            SkipInfo(
+            DecorateInfo(
+                unittest.skip("Skipped!"),
                 "TestJit",
                 "test_variant_consistency_jit",
-                dtypes=(torch.float32,),
+                dtypes=(torch.float32, torch.complex64),
             ),
         ),
     ),
