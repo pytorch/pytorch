@@ -2980,6 +2980,9 @@ class TestVmapOperatorsOpInfo(TestCase):
             try:
                 for loop_out, batched_out in get_fallback_and_vmap_exhaustive(op.op, arg_values, kwarg_values):
                     self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
+                for a_op in op.aliases:
+                    for loop_out, batched_out in get_fallback_and_vmap_exhaustive(a_op, arg_values, kwarg_values):
+                        self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
             except Exception as e:
                 # Checking if we're throwing an error because of dynamic shapes.
                 if "dynamic" in e.args[0]:
@@ -3045,6 +3048,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('quantile'),
         xfail('ravel'),
         xfail('renorm'),
+        xfail('repeat_interleave'),
         xfail('resize_as_'),
         xfail('resolve_conj'),
         xfail('resolve_neg'),
@@ -3083,6 +3087,9 @@ class TestVmapOperatorsOpInfo(TestCase):
                 kwarg_values = sample_input.kwargs
                 for _ in get_fallback_and_vmap_exhaustive(op.op, arg_values, kwarg_values, compute_loop_out=False):
                     pass
+                for a_op in op.aliases:
+                    for _ in get_fallback_and_vmap_exhaustive(a_op, arg_values, kwarg_values, compute_loop_out=False):
+                        pass
         check_vmap_fallback(self, test, op)
 
     def test_isnan(self, device):
