@@ -55,9 +55,15 @@ pip install expecttest
 if [ "${CU_VERSION:-}" == cpu ] ; then
     # conda install -y pytorch torchvision cpuonly -c pytorch-nightly
     # use pip to install pytorch as conda can frequently pick older release
-    pip install torch torchvision -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html --pre
+    # TEMPORARY FIX PYTORCH VERSION DUE TO REVERTED log_softmax PR
+    # https://github.com/facebookresearch/functorch/pull/160#issuecomment-932389442
+    # pip install torch torchvision -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html --pre
+    pip install torch==1.11.0.dev20211001+cpu torchvision -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html --pre
     PYTORCH_VERSION="$(python -c "import torch; print(torch.__version__)")" python setup.py develop bdist_wheel -d $WHEELS_FOLDER
 else
-    conda install -y pytorch torchvision cudatoolkit=10.2 -c pytorch-nightly
+    # conda install -y pytorch== torchvision cudatoolkit=10.2 -c pytorch-nightly
+    # TEMPORARY FIX PYTORCH VERSION DUE TO REVERTED log_softmax PR
+    # https://github.com/facebookresearch/functorch/pull/160#issuecomment-932389442
+    pip install torch==1.11.0.dev20211001+cu102 torchvision -f https://download.pytorch.org/whl/nightly/cu102/torch_nightly.html --pre
     PYTORCH_VERSION="$(python -c "import torch; print(torch.__version__)")" python setup.py develop bdist_wheel -d $WHEELS_FOLDER
 fi
