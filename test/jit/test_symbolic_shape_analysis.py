@@ -119,7 +119,7 @@ class TestSymbolicShapeAnalysis(JitTestCase):
     def test_unary_shape_fns_inplace(self):
         def mul_inplace(x: torch.Tensor):
             y = x.mul_(2)
-            return y 
+            return y
 
         unary_ops = [
             mul_inplace

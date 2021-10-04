@@ -651,22 +651,15 @@ const at::optional<const FunctionSchema*> getInplaceVariant(
     // Need to check that all args are the same except for the first, which
     // is almost the same except for the Alias info
     const FunctionSchema* schema = &variant->schema();
-    // TODO: try this out. If the tests fail, then we know something is wrong
-    if (!schema->isSubtypeOf(base_schema, true)) {
+    if (!schema->isSubtypeOf(base_schema, false)) {
       continue;
     }
 
     Argument self_arg = schema->arguments()[0];
-    if (*self_arg.type() != *base_schema.arguments()[0].type()) {
-      continue;
-    }
     if (!self_arg.alias_info()->isWrite()) {
       continue;
     }
-    // Lastly check the return types are the same
-    if (schema->returns().size() != 1) {
-      continue;
-    }
+
     Argument ret_arg = schema->returns()[0];
     if (!ret_arg.alias_info()->isWrite()) {
       continue;
