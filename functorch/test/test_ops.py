@@ -206,19 +206,24 @@ class TestOperators(TestCase):
             self.skipTest("Skipped! NYI: inplace-testing not supported.")
             return
 
-        for sample in samples:
-            fn, primals = normalize_op_for_vjp(op, sample)
-            result = fn(*primals)
-            cotangents = tree_map(lambda x: torch.randn_like(x), result)
+        def _test(_op):
+            for sample in samples:
+                fn, primals = normalize_op_for_vjp(_op, sample)
+                result = fn(*primals)
+                cotangents = tree_map(lambda x: torch.randn_like(x), result)
 
-            out, vjp_fn = vjp(fn, *primals)
-            self.assertEqual(out, result)
-            result_vjps = vjp_fn(cotangents)
+                out, vjp_fn = vjp(fn, *primals)
+                self.assertEqual(out, result)
+                result_vjps = vjp_fn(cotangents)
 
-            _, vjp_fn = ref_vjp(fn, *primals)
-            expected_vjps = vjp_fn(cotangents)
+                _, vjp_fn = ref_vjp(fn, *primals)
+                expected_vjps = vjp_fn(cotangents)
 
-            self.assertEqual(result_vjps, expected_vjps)
+                self.assertEqual(result_vjps, expected_vjps)
+
+        _test(op)
+        for a_op in op.aliases:
+            _test(a_op)
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjpvjp', vjp_fail)
@@ -452,6 +457,7 @@ class TestOperators(TestCase):
         xfail('put'),
         xfail('quantile'),
         xfail('renorm'),
+        xfail('repeat_interleave'),
         xfail('scatter_add'),
         xfail('solve'),
         xfail('sort'),
@@ -493,7 +499,10 @@ class TestOperators(TestCase):
                 fn, args = get_vjpfull_variant(op, sample)
                 for _ in get_fallback_and_vmap_exhaustive(fn, args, {}, compute_loop_out=False):
                     pass
-
+                for a_op in op.aliases:
+                    fn, args = get_vjpfull_variant(a_op, sample)
+                    for _ in get_fallback_and_vmap_exhaustive(fn, args, {}, compute_loop_out=False):
+                        pass
         check_vmap_fallback(self, test, op, dry_run=False)
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
@@ -559,7 +568,6 @@ class TestOperators(TestCase):
                 expected_vjps = vjp_fn(cotangents)
 
                 self.assertEqual(result_vjps, expected_vjps)
-
 
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestOperators, globals(), only_for=only_for)
