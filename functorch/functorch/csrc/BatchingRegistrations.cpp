@@ -291,28 +291,6 @@ Tensor transpose_int_batching_rule(const Tensor& self, int64_t dim0, int64_t dim
   return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
-Tensor permute_batching_rule(const Tensor& self, IntArrayRef dims) {
-  if (!participatesInCurrentLevel(self)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-    return self.permute(dims);
-  }
-
-  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
-  auto dims_physical = self_physical.getPhysicalDims(dims);
-
-  VmapDimVector all_dims_physical;
-  all_dims_physical.reserve(self_physical.tensor().dim());
-  for (int64_t bdim = 0; bdim < self_physical.numBatchDims(); bdim++) {
-    all_dims_physical.push_back(bdim);
-  }
-  all_dims_physical.insert(
-      all_dims_physical.end(),
-      dims_physical.begin(),
-      dims_physical.end());
-  auto result = self_physical.tensor().permute(all_dims_physical);
-  return self_physical.getPhysicalToLogicalMap().apply(result);
-}
-
 static int64_t getGradInputPhysicalDim(int64_t dim, IntArrayRef input_sizes, int64_t num_batch_dims) {
   return maybe_wrap_dim(dim, input_sizes.size()) + num_batch_dims;
 }
@@ -963,7 +941,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   // NB: static_cast because there's another variant of narrow. However, we don't
   // want to support the other variant yet bc it isn't documented...
   m.impl("numpy_T", native::numpy_T); // composite wrt autograd
-  m.impl("permute", permute_batching_rule);
   m.impl("reshape_as", native::reshape_as); // composite wrt autograd
   m.impl("slice.Tensor", slice_batching_rule);
   m.impl("split.Tensor", split_batching_rule);
