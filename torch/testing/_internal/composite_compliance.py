@@ -1,4 +1,5 @@
 import torch
+from torch import Tensor
 import contextlib
 from typing import Iterator
 from torch.utils._pytree import tree_map
@@ -14,20 +15,28 @@ def no_dispatch() -> Iterator[None]:
     finally:
         del guard
 
+def check_attr_consistency(wrapper_tensor, metadata_name, metadata_accessor):
+    elem = wrapper_tensor.elem
+    metadata_wrapper_tensor = metadata_accessor(wrapper_tensor)
+    metadata_elem = metadata_accessor(elem)
+    if metadata_wrapper_tensor == metadata_elem:
+        return
+    raise RuntimeError(
+        f"This operator is not CompositeImplicitAutograd compliant: the "
+        f"{metadata_name} of the tensor was modified directly without "
+        f"going through the PyTorch dispatcher.")
+
 def check_metadata_consistency(wrapper_tensor):
     if not isinstance(wrapper_tensor, CompositeCompliantTensor):
         return
-    elem = wrapper_tensor.elem
-    if wrapper_tensor.shape != elem.shape:
-        raise RuntimeError(
-            "This operator is not CompositeImplicitAutograd compliant: the "
-            "shape of the tensor was modified directly without "
-            "going through the PyTorch dispatcher.")
-    if wrapper_tensor.dtype != elem.dtype:
-        raise RuntimeError(
-            "This operator is not CompositeImplicitAutograd compliant: the "
-            "dtype of the tensor was modified directly without "
-            "going through the PyTorch dispatcher.")
+    things_to_check = {
+        'shape': Tensor.size,
+        'dtype': lambda x: x.dtype,
+        'device': lambda x: x.device,
+        'numel': Tensor.numel
+    }
+    for metadata_name, metadata_accessor in things_to_check.items():
+        check_attr_consistency(wrapper_tensor, metadata_name, metadata_accessor)
 
 def is_view_fn(func):
     return func.__name__ in {
@@ -118,13 +127,20 @@ class CompositeCompliantTensor(torch.Tensor):
         if is_view_fn(func):
             # Autograd asserts that for B = A.view_fn(...), B and A's storages
             # are the same. Here we try to make B alias A to avoid those asserts.
+            # See https://github.com/pytorch/pytorch/issues/65339 for more information
+            # about the issue.
             with no_dispatch():
                 # Idea: this is a weird way of getting a storage that aliases the input.
-                # 1. under no_dispatch, all of the wrapper tensors look like meta tensors
-                # 2. we run func, which ends up running the meta tensor version of the view op
-                # 3. the result is one or more meta tensor that aliases the input.
-                # 4. we set the storage of the wrapper tensor results to be
-                #    the meta tensor(s) that aliases the input
+                # This is a workaround for #65339.
+                # 1. under no_dispatch, all of the wrapper tensors look like regular
+                #    tensors with special storage (the storage is nullptr and
+                #    advertises CPU/CUDA device.
+                # 2. we run func, which ends up running the view operation
+                # 3. All view operations reuse the input's storage and return
+                #    result Tensor(s) with new sizes/strides/offset that alias
+                #    the input.
+                # 4. we set the storage (and sizes/strides/offset) of the wrapper
+                #    tensor results to be that of the tensors that alias the input
                 result = func(*args, **kwargs)
                 if isinstance(result, tuple) or isinstance(result, list):
                     for a, b in zip(rs, result):
@@ -163,10 +179,10 @@ def _check_composite_compliance(op, args, kwargs):
             op(*args, **kwargs)
     except RuntimeError as err:
         raise RuntimeError(f"CompositeImplicitAutograd compilance check failed with "
-                           f"the following error. If you are adding an OpInfo of an "
+                           f"the above error. If you are adding an OpInfo of an "
                            f"existing operator, please feel free to skip this test "
                            f"because the problem was pre-existing and file an issue. "
                            f"Otherwise, if you added a new operator, please read "
                            f"through the CompositeImplicitAutograd Compliance section in "
                            f"aten/src/ATen/native/README.md for how to resolve this. "
-                           f"Got error message: {err.args[0]}")
+                           ) from err
