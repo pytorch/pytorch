@@ -283,7 +283,7 @@ std::tuple<Tensor, optional<int64_t>> _reshape_alias_batch_rule(const Tensor& se
   return std::make_tuple(at::reshape(self, new_shape), bdim);
 }
 
-std::tuple<Tensor, optional<int64_t>> roll_batch_rule(const Tensor& self, optional<int64_t> bdim, c10::ArrayRef<long> shifts, c10::ArrayRef<long> dims) {
+std::tuple<Tensor, optional<int64_t>> roll_batch_rule(const Tensor& self, optional<int64_t> bdim, IntArrayRef shifts, IntArrayRef dims) {
   TORCH_INTERNAL_ASSERT(bdim.has_value());
 
   auto self_ = moveBatchDimToFront(self, bdim);
