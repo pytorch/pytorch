@@ -1,10 +1,12 @@
-
 #include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
+
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
-#include <torch/csrc/jit/codegen/cuda/scheduler.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
+
+#include <c10/util/irange.h>
 
 namespace torch {
 namespace jit {
@@ -12,6 +14,26 @@ namespace fuser {
 namespace cuda {
 
 namespace {
+
+// Check device of TensorType in all inputs ensure all tensors are on cuda
+// devices.
+// return common device index (or -1 if device differs).
+int getCommonDeviceCUDA(const at::ArrayRef<IValue>& inputs) {
+  int index = -1;
+  for (const auto& input : inputs) {
+    if (!input.isTensor()) {
+      continue;
+    }
+    const auto& device = input.toTensor().device();
+    TORCH_CHECK(device.is_cuda(), "nvfuser only supports cuda device");
+    auto cur_index = device.index();
+    if (index != -1 && index != cur_index) {
+      return -1;
+    }
+    index = (int)cur_index; // NOLINT
+  }
+  return index;
+}
 
 // TODO: temporary hack to resolve my is_constructible issue;
 std::vector<size_t> toVector(const at::DimVector& small_vec) {
@@ -21,63 +43,69 @@ std::vector<size_t> toVector(const at::DimVector& small_vec) {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunused-function"
 void debugPrint(const TensorTypePtr& type) {
-  printf("\nsizes:");
+  std::stringstream sizes_s;
   if (auto sizes = type->symbolic_sizes().sizes()) {
-    // for (const auto& shape_symbol : sizes.value()) {
-    int rank = static_cast<int>(sizes->size());
-    for (int i = 0; i < rank; i++) {
-      const auto& shape_symbol = sizes.value()[i];
+    for (const auto& shape_symbol : *sizes) {
       if (shape_symbol.is_static()) {
-        printf("%ld, ", shape_symbol.static_size());
+        sizes_s << shape_symbol.static_size() << ", ";
       } else {
-        printf("s(%ld), ", *reinterpret_cast<const int64_t*>(&shape_symbol));
+        sizes_s << "s(" << *reinterpret_cast<const int64_t*>(&shape_symbol)
+                << "), ";
       }
     }
   } else {
-    printf("no size available\n");
+    sizes_s << "no size available";
   }
+  std::cout << "sizes:" << sizes_s.str() << std::endl;
   if (const auto& stride_properties = type->stride_properties().sizes()) {
-    int rank = static_cast<int>(stride_properties->size());
-    printf("\nstride: ");
-    for (int i = 0; i < rank; i++) {
-      if ((*stride_properties)[i].has_value() &&
-          (*stride_properties)[i]->stride_.has_value()) {
-        printf("%ld, ", (*stride_properties)[i]->stride_.value());
+    std::stringstream stride_s;
+    std::stringstream index_s;
+    std::stringstream contig_s;
+
+    for (const auto& stride_property : *stride_properties) {
+      if (stride_property.has_value() && stride_property->stride_.has_value()) {
+        stride_s << *stride_property->stride_ << ", ";
       } else {
-        printf("?, ");
+        stride_s << "?, ";
+      }
+      if (stride_property.has_value() &&
+          stride_property->stride_index_.has_value()) {
+        index_s << *stride_property->stride_index_ << ", ";
+      } else {
+        index_s << "?, ";
+      }
+      if (stride_property.has_value() &&
+          stride_property->contiguous_.has_value()) {
+        contig_s << *stride_property->contiguous_ << ", ";
+      } else {
+        contig_s << "?, ";
       }
     }
-    printf("\nstride index: ");
-    for (int i = 0; i < rank; i++) {
-      if ((*stride_properties)[i].has_value() &&
-          (*stride_properties)[i]->stride_index_.has_value()) {
-        printf("%ld, ", (*stride_properties)[i]->stride_index_.value());
-      } else {
-        printf("?, ");
-      }
-    }
-    printf("\ncontiguous: ");
-    for (int i = 0; i < rank; i++) {
-      if ((*stride_properties)[i].has_value() &&
-          (*stride_properties)[i]->contiguous_.has_value()) {
-        printf("%d, ", (*stride_properties)[i]->contiguous_.value());
-      } else {
-        printf("?, ");
-      }
-    }
+    std::cout << "stride: " << stride_s.str() << std::endl;
+    std::cout << "stride index: " << index_s.str() << std::endl;
+    std::cout << "contiguous: " << contig_s.str() << std::endl;
   } else {
-    printf("no stride properties available\n");
+    std::cout << "no stride properties available" << std::endl;
   }
 }
 #pragma clang diagnostic pop
 
-at::DimVector graphReductionAxes(const std::shared_ptr<Graph>& graph) {
+at::DimVector graphReductionAxes(
+    const std::shared_ptr<Graph>& graph,
+    bool& simple_reduction) {
   FUSER_PERF_SCOPE("graphReductionAxes");
+  simple_reduction = true;
 
   at::DimVector reduction_axes;
   // TODO: let check that we have only single reduction node in the graph.
+  int reduction_count = 0;
   for (const auto& n : graph->nodes()) {
-    if (isReductionNode(n)) {
+    if (isReductionToSizeNode(n)) {
+      // TODO: we don't support permutation with ReductionToSize;
+      simple_reduction = false;
+      reduction_axes.clear();
+      return reduction_axes;
+    } else if (isReductionNode(n)) {
       // TODO: we should return empty when `keepdim` is True?
       auto dims_list = constant_as<c10::List<int64_t>>(n->input(1));
       TORCH_INTERNAL_ASSERT(
@@ -85,16 +113,22 @@ at::DimVector graphReductionAxes(const std::shared_ptr<Graph>& graph) {
       for (const auto dim : dims_list->vec()) {
         reduction_axes.emplace_back(static_cast<int>(dim));
       }
+      ++reduction_count;
       // we should return here, but we don't!
       // We continue the traversal and check for other reduction node. Because
-      // our permutation doesn't really support intermediate reduction; Continue
-      // traversal would trigger the `TORCH_INTERNAL_ASSERT`, it's not ideal but
-      // at least it's not silent error.
+      // our permutation doesn't really support intermediate reduction, hence we
+      // mark simple_reduction as false;
+      if (reduction_count != 1) {
+        simple_reduction = false;
+        return reduction_axes;
+      }
     }
+    // TODO: this doesn't apply any more, clean it up
   }
   return reduction_axes;
 }
 
+// TODO(CONTIGUITY)
 at::DimVector getPermutationPerSortedStride(const TensorTypePtr& type) {
   FUSER_PERF_SCOPE("getPermutationPerSortedStride");
 
@@ -112,10 +146,11 @@ at::DimVector getPermutationPerSortedStride(const TensorTypePtr& type) {
   const int rank = static_cast<int>(stride_properties->size());
 
   // stores axes with stride_index;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::set<int> ordered_axes;
 
   // TODO: this does not support broadcast yet;
-  for (int i = 0; i < rank; i++) {
+  for (const auto i : c10::irange(rank)) {
     if ((*stride_properties)[i].has_value() &&
         (*stride_properties)[i]->stride_index_.has_value()) {
       ordered_axes.insert((*stride_properties)[i]->stride_index_.value());
@@ -149,6 +184,7 @@ at::DimVector inversePermutation(
   int rank = static_cast<int>(permuted.size());
 
   if (!reduction_axes.empty()) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int red_rank = rank - static_cast<int>(reduction_axes.size());
 
     // see [ NOTE - reduction in graph ] part 1.
@@ -171,57 +207,67 @@ at::DimVector inversePermutation(
     }
 
     at::DimVector permutation(red_rank, -1);
-    for (int i = 0; i < red_rank; i++) {
+    for (const auto i : c10::irange(red_rank)) {
       permutation[adjusted_permutation[i]] = i;
     }
     return permutation;
   } else {
     at::DimVector permutation(rank, -1);
-    for (int i = 0; i < rank; i++) {
+    for (const auto i : c10::irange(rank)) {
       permutation[permuted[i]] = i;
     }
     return permutation;
   }
 }
 
+void encodeBuffer(size_t value, std::string& buffer) {
+  const char* v = reinterpret_cast<char*>(&value);
+  for (size_t i = 0; i < sizeof(size_t); i++) {
+    buffer.push_back(*(v++));
+  }
+}
+
 } // namespace
 
 InputsIdLookup::IdLookupReturn InputsIdLookup::lookupId(
-    const at::ArrayRef<IValue>& inputs) {
+    const at::ArrayRef<IValue>& inputs,
+    const SchedulerRuntimeInfo* additional_info) {
   IdLookupReturn ret;
-  std::stringstream encoded_inputs;
+
+  // lock mutex_ because we are touching encoding_
+  std::lock_guard<std::mutex> guard(mutex_);
+  encoding_.clear();
   for (const auto& input : inputs) {
     if (input.isTensor()) {
-      auto input_tensor = input.toTensor();
+      auto& input_tensor = input.toTensor();
 
-      encoded_inputs << ";";
-      auto sep = "";
       for (auto size : input_tensor.sizes()) {
-        encoded_inputs << sep << size;
-        sep = ",";
+        encodeBuffer(size, encoding_);
+        encoding_.push_back(' ');
       }
-      encoded_inputs << "@";
-      sep = "";
+      encoding_.push_back('X');
+      encoding_.push_back(' ');
       for (auto stride : input_tensor.strides()) {
-        encoded_inputs << sep << stride;
-        sep = ",";
+        encodeBuffer(stride, encoding_);
+        encoding_.push_back(' ');
       }
+      encoding_.push_back('d');
+      encodeBuffer(input_tensor.device().index(), encoding_);
     } else {
       // encode s for scalar;
-      encoded_inputs << ";s";
+      encoding_.push_back('s');
     }
+    encoding_.push_back(';');
   }
-  auto& id_iter_pair = encoding_lookup_[encoded_inputs.str()];
-
-  // short-cut to leave LRU entry as is;
-  if (id_iter_pair.lru_iter == used_entry_.begin()) {
-    ret.id = id_iter_pair.id;
-    return ret;
+  if (additional_info) {
+    encodeBuffer(additional_info->getCommonAlignmentSize(), encoding_);
   }
 
-  if (id_iter_pair.id == 0) {
+  auto& entry = encoding_lookup_[encoding_];
+
+  if (entry.id == 0) {
     // no entry existed for given input set, set id for given entry
-    id_iter_pair.id = current_id_++;
+    entry.id = current_id_++;
     if (used_entry_.size() == max_cache_size_) {
       // pop least recently used cache;
       const auto& remove_iter = encoding_lookup_.find(used_entry_.back());
@@ -231,221 +277,449 @@ InputsIdLookup::IdLookupReturn InputsIdLookup::lookupId(
       encoding_lookup_.erase(remove_iter);
     }
   } else {
-    used_entry_.erase(id_iter_pair.lru_iter);
+    // short-cut to leave LRU entry as is
+    if (entry.lru_iter == used_entry_.begin()) {
+      ret.id = entry.id;
+      return ret;
+    }
+
+    used_entry_.erase(entry.lru_iter);
   }
 
-  ret.id = id_iter_pair.id;
-  id_iter_pair.lru_iter =
-      used_entry_.insert(used_entry_.begin(), encoded_inputs.str());
+  ret.id = entry.id;
+  entry.lru_iter = used_entry_.insert(used_entry_.begin(), encoding_);
   return ret;
 }
 
-FusionExecutorCache::FusionExecutorCache(
-    std::unique_ptr<Fusion>&& fusion,
-    at::Device device)
-    : device_(device), fusion_(std::move(fusion)) {
-  FUSER_PERF_SCOPE("FusionExecutorCache::FusionExecutorCache");
-  // avoid putting `has_reduction_` in the initializer list
-  has_reduction_ = fusion_->hasReduction();
-}
+FusionExecutorCache::FusionExecutorCache(std::unique_ptr<Fusion> fusion)
+    : fusion_(std::move(fusion)) {}
 
 std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
+    const at::ArrayRef<IValue>& inputs) {
+  FUSER_PERF_SCOPE("FusionExecutorCache::runFusionWithInputs");
+
+  SchedulerRuntimeInfo runtime_info(fusion(), inputs);
+
+  auto id_lookup_ret = inputs_id_lookup_.lookupId(inputs, &runtime_info);
+  if (id_lookup_ret.eviction) {
+    evictCache(id_lookup_ret.evict_id);
+  }
+
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  const size_t unique_id = id_lookup_ret.id;
+  auto kernel_runtime = getKernelRuntimeFor(inputs, unique_id);
+  most_recent_runtime_ = kernel_runtime;
+  return kernel_runtime->runWithInput(inputs, unique_id);
+}
+
+void FusionExecutorCache::evictCache(size_t cache_id) {
+  auto it = id_to_kernel_runtime_.find(cache_id);
+  TORCH_INTERNAL_ASSERT(it != id_to_kernel_runtime_.end());
+  it->second->evictCache(cache_id);
+  id_to_kernel_runtime_.erase(it);
+}
+
+FusionKernelRuntime* FusionExecutorCache::getKernelRuntimeFor(
     const at::ArrayRef<IValue>& inputs,
     size_t unique_id) {
-  FUSER_PERF_SCOPE("runFusionWithInputs");
-  LaunchParams launch_params;
-  if (code_to_fe_lookup_.count(unique_id) == 0) {
-    // enter when we get a new input set. We need to search for compatible
-    // entries in cached `FusionExecutor` or compile new one as needed.
+  // Check for id hit case
+  auto id_it = id_to_kernel_runtime_.find(unique_id);
+  if (id_it != id_to_kernel_runtime_.end()) {
+    return id_it->second;
+  }
 
-    // caching strategy is different for pw-fusion and reduction-fusion.
-    if (has_reduction_) {
-      // Grab the fusion to analyze for heuristics
-      FusionGuard fg(fusion_.get());
+  // Access kernels associated with the common device id
+  auto dev_id = getCommonDeviceCUDA(inputs);
+  TORCH_INTERNAL_ASSERT(dev_id >= 0);
+  auto& kernel_runtimes = kernel_runtimes_[dev_id];
 
-      TensorView* reduction_tv = nullptr;
-      // Use dependency check to find the reduction tv as it returns used values
-      // instead of exprs.
+  // Check for re-use hit case
+  //  a kernel runtime is re-usable if all the compiled
+  //  kernels have the same heuristic parameters
+  std::unique_ptr<FusionHeuristics> new_heuristics;
 
-      // The call is relatively heavy weight, consider caching
-      auto used_vals = DependencyCheck::getAllValsBetween(
-          {fusion_->inputs().begin(), fusion_->inputs().end()},
-          fusion_->outputs());
-
-      // Find the reduction tensor view, make sure there's only one
-      for (auto val : used_vals) {
-        if (val->getValType().value() == ValType::TensorView) {
-          auto tv = val->as<TensorView>();
-          if (tv->hasReduction()) {
-            TORCH_INTERNAL_ASSERT(
-                reduction_tv == nullptr,
-                "Already found a reduction tensorview, cannot handle fusion of multiple reductions.");
-            reduction_tv = tv;
-          }
+  auto reuse_it = std::find_if(
+      kernel_runtimes.begin(),
+      kernel_runtimes.end(),
+      [&inputs, &new_heuristics](auto& kernel_runtime) {
+        auto maybe_heuristics = kernel_runtime->getMaybeHeuristicsFor(inputs);
+        if (!maybe_heuristics.has_value()) {
+          return false;
         }
-      }
+        new_heuristics = std::move(maybe_heuristics.value());
+        return true;
+      });
 
-      TORCH_INTERNAL_ASSERT(
-          reduction_tv != nullptr,
-          "Could not find the reduction tensor view in the fusion.");
-
-      // Generate the reduction parameters
-      auto reduction_params =
-          getReductionHeuristics(fusion_.get(), inputs, reduction_tv);
-
-      TORCH_INTERNAL_ASSERT(
-          reduction_params.has_value(),
-          "Error getting reduction heuristics for scheduling.");
-
-      launch_params = reduction_params.value().lparams;
-
-      auto fusion_executor =
-          &red_fusion_executor_cache_[reduction_params.value()];
-
-      if (!fusion_executor->compiled()) {
-        // HEURISTIC NOT COMPILED, COMPILE A KERNEL
-        Fusion fusion = *fusion_;
-
-        FusionGuard fg(&fusion);
-
-        // Heavy weight call
-        auto used_vals = DependencyCheck::getAllValsBetween(
-            {fusion.inputs().begin(), fusion.inputs().end()}, fusion.outputs());
-
-        TensorView* reduction_tv = nullptr;
-
-        for (auto val : used_vals) {
-          if (val->getValType().value() == ValType::TensorView) {
-            auto tv = val->as<TensorView>();
-            if (tv->hasReduction()) {
-              TORCH_INTERNAL_ASSERT(
-                  reduction_tv == nullptr,
-                  "Already found a reduction tensorview, cannot handle fusion of multiple reductions.");
-              reduction_tv = tv;
-            }
-          }
-        }
-
-        TORCH_INTERNAL_ASSERT(
-            reduction_tv != nullptr,
-            "Could not find the reduction tensor view in the fusion.");
-
-        // Heavy weight call
-        auto outputsOfReduction =
-            DependencyCheck::getAllOutputsOf({reduction_tv});
-
-        auto tv_entries =
-            ir_utils::filterByType<TensorView>(outputsOfReduction);
-
-        std::vector<TensorView*> tvOutputsOfReduction(
-            tv_entries.begin(), tv_entries.end());
-
-        scheduleReduction(
-            &fusion,
-            reduction_params.value(),
-            reduction_tv,
-            tvOutputsOfReduction);
-
-        // This means we have not found a previously generated kernel that's
-        // compatible with the new reduction params. We need to finish codegen.
-        CompileOptions options;
-        options.device = device_;
-        fusion_executor->compileFusion(&fusion, options);
-      }
-      // record new short cut to `FusionExecutor`
-      code_to_fe_lookup_[unique_id] = fusion_executor;
-
-    } else {
-      // Handle pointwise operations
-      if (!pw_fusion_executor_cache_) {
-        pw_fusion_executor_cache_ = std::make_unique<FusionExecutor>();
-        CompileOptions options;
-        options.device = device_;
-        // no need to copy fusion_, as we are not generating more than 1 kernel
-        // for PW.
-        scheduleFusion(fusion_.get(), inputs);
-        pw_fusion_executor_cache_->compileFusion(fusion_.get(), options);
-      }
-      // record new short cut to `FusionExecutor`
-      code_to_fe_lookup_[unique_id] = pw_fusion_executor_cache_.get();
+  FusionKernelRuntime* kernel_runtime = nullptr;
+  if (reuse_it != kernel_runtimes.end()) {
+    kernel_runtime = reuse_it->get();
+    kernel_runtime->updateHeuristicsLaunchParams(new_heuristics.get());
+  } else {
+    // graph miss, need to re-build an optimized graph for this case
+    kernel_runtimes.emplace_back(
+        std::make_unique<FusionKernelRuntime>(fusion_.get(), inputs));
+    kernel_runtime = kernel_runtimes.back().get();
+    if (profiling_) {
+      kernel_runtime->profile(true);
     }
   }
 
-  return code_to_fe_lookup_[unique_id]->runFusion(
-      inputs, launch_params, unique_id);
+  id_to_kernel_runtime_[unique_id] = kernel_runtime;
+  return kernel_runtime;
 }
 
-GraphCache::InputsRequirement::InputsRequirement(
-    const std::shared_ptr<Graph>& graph,
-    const std::vector<size_t>& reduction_axes) {
-  FUSER_PERF_SCOPE("InputsRequirement::InputsRequirement");
+FusionKernelRuntime::FusionKernelRuntime(
+    Fusion* fusion,
+    const at::ArrayRef<IValue>& inputs) {
+  FUSER_PERF_SCOPE("FusionKernelRuntime::FusionKernelRuntime");
 
-  // run over inputs to extract common types;
-  TensorTypePtr acc_type = TensorType::get();
-  for (const auto& input : graph->inputs()) {
-    // only check tensor types;
-    if (auto input_type = input->type()->cast<TensorType>()) {
-      vec_optional_ttp.emplace_back(input_type);
-      if (acc_type->dim().has_value()) {
-        // TODO: I think merge cannot handle broadcast - Go verify it later;
-        // TODO: Since we are only handling permutation here, we should just
-        //       merge the stride_index_;
-        acc_type = acc_type->merge(input_type);
-      } else {
-        acc_type = input_type;
+  // Make a copy of fusion and do segmentation and translation
+  //  on this copy
+  auto fusion_copy = std::make_unique<Fusion>(*fusion);
+
+  // Run segmentation on the copied fusion
+  SchedulerRuntimeInfo runtime_info(fusion_copy.get(), inputs, true);
+
+  //! Try to schedule the complete fusion
+  const auto maybe_complete_fusion_heuristic =
+      SchedulerEntry::proposeHeuristics(fusion_copy.get(), runtime_info);
+
+  //! Decide if this fusion is segmented or not
+  const bool segmented = !maybe_complete_fusion_heuristic.has_value();
+
+  if (segmented) {
+    // Take ownership and segment transformed fusion
+    segmented_fusion_ =
+        SegmentCandidateFinder::segment(std::move(fusion_copy), inputs);
+    heuristics_ = segmented_fusion_->makeInitialHeuristics(inputs);
+    executors_ =
+        std::vector<FusionExecutor>(segmented_fusion_->groups().size());
+    if (isDebugDumpEnabled(DebugDumpOption::FusionSegments)) {
+      segmented_fusion_->print();
+    }
+  } else {
+    auto complete_fusion_heuristic = maybe_complete_fusion_heuristic.value();
+
+    // Translate welfords if apply
+    if (fusion_copy->hasWelford()) {
+      bool translated = SegmentCandidateFinder::TranslateWelfordInFusion(
+          fusion_copy.get(), inputs);
+      if (translated) {
+        complete_fusion_heuristic = ScheduleHeuristic::Normalization;
       }
-    } else {
-      vec_optional_ttp.emplace_back(c10::nullopt);
+    }
+    // Take ownership of the transformed fusion
+    single_kernel_fusion_ = std::move(fusion_copy);
+
+    single_kernel_fusion_data_cache_ = std::make_unique<HeuristicSummary>(
+        single_kernel_fusion_.get(), complete_fusion_heuristic, runtime_info);
+
+    heuristics_ = std::make_unique<FusionHeuristics>(
+        complete_fusion_heuristic,
+        runtime_info,
+        single_kernel_fusion_data_cache_.get());
+
+    executors_ = std::vector<FusionExecutor>(1);
+    // In the case that the fusion isn't segmented but user
+    //  wants segmented fusion in the debug print. Will
+    //  print math of the composite fusion as placeholder
+    if (isDebugDumpEnabled(DebugDumpOption::FusionSegments)) {
+      single_kernel_fusion_->printMath();
     }
   }
-  extractPermutation(acc_type, reduction_axes);
+
+  is_segmented_ = segmented;
 }
 
-GraphCache::InputsRequirement::InputsRequirement(
+std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
     const at::ArrayRef<IValue>& inputs,
-    const std::vector<size_t>& reduction_axes) {
-  FUSER_PERF_SCOPE("InputsRequirement::InputsRequirement");
+    size_t input_id,
+    SegmentedGroup* sg) {
+  FUSER_PERF_SCOPE("FusionKernelRuntime::runKernelWithInput");
+  // This function will be called once on un-segmented fusion,
+  //  for segmented fusion, this function will be called on each segment
+  //  In the case of segmented fusion, segmented group needs to be given so
+  //   a kernel is compiled and run for a segmented group
+  //  In the case of complete fusion, sg = nullptr, and the original fusion
+  //   is complied and run
+  auto group_id = sg ? sg->groupId() : 0;
+  const int device_index = getCommonDeviceCUDA(inputs);
+  TORCH_CHECK(device_index >= 0, "device is not coherent for fusion inputs");
 
-  // run over inputs to extract common types;
-  TensorTypePtr acc_type = TensorType::get();
-  for (const auto& input : inputs) {
-    // only check tensor types;
-    if (input.isTensor()) {
-      // TensorType::create populates stride properties;
-      // auto input_type = TensorType::create(input.toTensor());
-      // vec_optional_ttp.emplace_back(input_type);
-      vec_optional_ttp.emplace_back(TensorType::create(input.toTensor()));
-      if (acc_type->dim().has_value()) {
-        // TODO: I think merge cannot handle broadcast - Go verify it later;
-        // TODO: Since we are only handling permutation here, we should just
-        //       merge the stride_index_;
-        acc_type = acc_type->merge(vec_optional_ttp.back().value());
-      } else {
-        acc_type = vec_optional_ttp.back().value();
-      }
+  LaunchParams launch_params;
+
+  auto scheduler_entry = schedulers()[group_id].get();
+
+  // Check that the heuristics are matched, in the case of segmented fusion
+  TORCH_INTERNAL_ASSERT(!sg || scheduler_entry->heuristc() == sg->heuristic());
+
+  if (!executors_[group_id].compiled()) {
+    FUSER_PERF_SCOPE("FusionKernelRuntime::runKernelWithInput::Compile");
+    std::unique_ptr<Fusion> fusion_to_run;
+    if (sg) {
+      // Running a segment group as a single kernel,
+      //  make a fusion to run from segmented fusion
+      fusion_to_run = segmented_fusion_->makeFusion(sg);
     } else {
-      vec_optional_ttp.emplace_back(c10::nullopt);
+      // Without a segmented group defaults to compiling the
+      //  complete fusion
+      fusion_to_run = std::make_unique<Fusion>(*single_kernel_fusion_);
+    }
+    CompileOptions options;
+    options.device = c10::Device(DeviceType::CUDA, device_index);
+    options.index_mode = scheduler_entry->indexMode();
+    FusionGuard fg(fusion_to_run.get());
+    scheduler_entry->schedule(fusion_to_run.get());
+    // Load launch params for reduction and normalization kernels
+    if (scheduler_entry->hasReductionParam()) {
+      launch_params = scheduler_entry->reductionParams().lparams;
+    } else {
+      launch_params = scheduler_entry->pointwiseParams().lparams;
+    }
+    executors_[group_id].compileFusion(
+        fusion_to_run.get(), options, inputs, launch_params);
+  } else {
+    FUSER_PERF_SCOPE("FusionKernelRuntime::runKernelWithInput::FetchFromCache");
+    // Load launch params for reduction and normalization kernels
+    if (scheduler_entry->hasReductionParam()) {
+      launch_params = scheduler_entry->reductionParams().lparams;
+    } else {
+      launch_params = scheduler_entry->pointwiseParams().lparams;
     }
   }
-  extractPermutation(acc_type, reduction_axes);
+
+  if (profiling_) {
+    FUSER_PERF_SCOPE("FusionKernelRuntime::runKernelWithInput::profiling_");
+    most_recent_executor_log_.fusion_executor = &executors_[group_id];
+    most_recent_executor_log_.launch_constraints = launch_params;
+    if (scheduler_entry->hasReductionParam()) {
+      most_recent_executor_log_.reduction_params =
+          scheduler_entry->reductionParams();
+    } else {
+      most_recent_executor_log_.pointwise_params =
+          scheduler_entry->pointwiseParams();
+    }
+  }
+
+  return executors_[group_id].runFusion(inputs, launch_params, input_id);
 }
 
-bool GraphCache::InputsRequirement::requiresPermutation() {
+std::vector<at::Tensor> FusionKernelRuntime::runMultiKernelWithInput(
+    const at::ArrayRef<IValue>& inputs,
+    size_t input_id) {
+  FUSER_PERF_SCOPE("FusionKernelRuntime::runMultiKernelWithInput");
+
+  TORCH_INTERNAL_ASSERT(
+      inputs.size() == segmented_fusion_->inputs().size(),
+      "Inputs were not set up correctly, received ",
+      inputs.size(),
+      " inputs but expecting ",
+      segmented_fusion_->inputs().size());
+
+  // Map to keep track of currently available tensors
+  std::unordered_map<Val*, IValue> tensor_map;
+
+  // Bind input in the tensor_map
+  for (size_t i = 0; i < inputs.size(); i++) {
+    tensor_map.emplace(segmented_fusion_->inputs()[i], inputs[i]);
+
+    // Bind tensorview inputs values in case some segmented group
+    //  needs it down the road.
+    // TODO: we probably have done this already up to this point
+    //      should consider caching the expression evaluators, both
+    //      more convenient and safer than replication
+    if (inputs[i].isTensor()) {
+      auto aten_tensor = inputs[i].toTensor();
+      TORCH_INTERNAL_ASSERT(
+          segmented_fusion_->inputs()[i]->getValType() == ValType::TensorView);
+      auto input_tv = segmented_fusion_->inputs()[i]->as<TensorView>();
+      auto root_dom = TensorDomain::noReductions(input_tv->getRootDomain());
+      for (size_t dim = 0; dim < root_dom.size(); dim++) {
+        const auto extent = root_dom[dim]->extent();
+        const auto value = aten_tensor.sizes()[dim];
+        tensor_map.emplace(extent, value);
+      }
+    }
+  }
+
+  // Keep track of groups that has run
+  std::vector<bool> group_ran(segmented_fusion_->groups().size(), false);
+
+  while (!std::all_of(
+      group_ran.begin(), group_ran.end(), [](bool b) { return b; })) {
+    bool one_ran = false;
+
+    // Find the first segment with all inputs available to run
+    for (size_t group_i = 0; group_i < segmented_fusion_->groups().size();
+         group_i++) {
+      auto& group = segmented_fusion_->groups()[group_i];
+      if (group_ran[group_i]) {
+        continue;
+      }
+      const auto& group_inputs = group->inputs();
+      bool ready_to_run = std::all_of(
+          group_inputs.begin(), group_inputs.end(), [&tensor_map](Val* val) {
+            return tensor_map.find(val) != tensor_map.end();
+          });
+
+      if (ready_to_run) {
+        std::vector<IValue> group_runtime_inputs;
+        group_runtime_inputs.reserve(group_inputs.size());
+
+        // Prepare input vector
+        for (auto input : group_inputs) {
+          group_runtime_inputs.push_back(tensor_map.at(input));
+        }
+
+        // Run graph segment
+        auto group_runtime_outputs =
+            runKernelWithInput(group_runtime_inputs, input_id, group);
+
+        const auto& group_outputs = group->outputs();
+
+        // Insert graph segment output to tensor map
+        for (size_t group_out_i = 0; group_out_i < group_outputs.size();
+             group_out_i++) {
+          tensor_map.emplace(
+              group_outputs[group_out_i], group_runtime_outputs[group_out_i]);
+        }
+        group_ran[group_i] = true;
+        one_ran = true;
+      }
+    }
+    TORCH_INTERNAL_ASSERT(
+        one_ran,
+        "Couldn't run all groups, something must have gone wrong in segmentation.");
+  }
+
+  // Produce final global output
+  std::vector<IValue> fusion_outputs;
+  for (auto output : segmented_fusion_->outputs()) {
+    const auto iter = tensor_map.find(output);
+    if (iter != tensor_map.end()) {
+      fusion_outputs.push_back(iter->second);
+    } else {
+      // This is the check for an empty tensor;
+      TORCH_INTERNAL_ASSERT(
+          output->as<TensorView>()->nDims() == 0 &&
+              output->getDataType().has_value() &&
+              output->getDataType().value() == DataType::Float,
+          "Non empty tensor cannot be found at tensor_map in ",
+          __FUNCTION__);
+      fusion_outputs.emplace_back(at::Tensor());
+    }
+  }
+
+  std::vector<at::Tensor> fusion_output_tensors;
+  std::transform(
+      fusion_outputs.begin(),
+      fusion_outputs.end(),
+      std::back_inserter(fusion_output_tensors),
+      [](IValue ival) {
+        TORCH_INTERNAL_ASSERT(
+            ival.isTensor(), "Cannot output non-tensor objects from a fusion.");
+        return ival.toTensor();
+      });
+
+  return fusion_output_tensors;
+}
+
+const std::vector<FusionKernelRuntime::SchedulerEntryPtr>& FusionKernelRuntime::
+    schedulers() {
+  return heuristics_->heuristicsList();
+}
+
+void FusionKernelRuntime::updateHeuristicsLaunchParams(
+    FusionHeuristics* update_heuristics) {
+  FUSER_PERF_SCOPE("FusionKernelRuntime::updateHeuristicsLaunchParams");
+  auto scheduler_list_length = heuristics_->heuristicsList().size();
+  TORCH_INTERNAL_ASSERT(
+      update_heuristics->heuristicsList().size() == scheduler_list_length);
+  for (size_t i = 0; i < scheduler_list_length; i++) {
+    auto& schedulerPtr = heuristics_->heuristicsList()[i];
+    if (schedulerPtr->hasReductionParam()) {
+      schedulerPtr->updateLaunchConstraint(
+          update_heuristics->heuristicsList()[i]->reductionParams().lparams);
+    } else {
+      schedulerPtr->updateLaunchConstraint(
+          update_heuristics->heuristicsList()[i]->pointwiseParams().lparams);
+    }
+  }
+}
+
+c10::optional<FusionKernelRuntime::HeuristicsPtr> FusionKernelRuntime::
+    getMaybeHeuristicsFor(const at::ArrayRef<IValue>& inputs) {
+  FUSER_PERF_SCOPE("FusionKernelRuntime::getMaybeHeuristicsFor");
+  auto complete_fusion = is_segmented_ ? segmented_fusion_->completeFusion()
+                                       : single_kernel_fusion_.get();
+  SchedulerRuntimeInfo runtime_info(complete_fusion, inputs, true);
+
+  c10::optional<FusionKernelRuntime::HeuristicsPtr> ret;
+  // Segmented case, need to iterate over all segmented groups
+  if (is_segmented_) {
+    ret = std::make_unique<FusionHeuristics>();
+    size_t total_groups = segmented_fusion_->groups().size();
+    for (size_t group_index = 0; group_index < total_groups; group_index++) {
+      auto group = segmented_fusion_->groups()[group_index];
+
+      auto maybe_scheduler_entry = group->getMaybeSchedulerEntry(runtime_info);
+      if (!maybe_scheduler_entry.has_value()) {
+        return c10::nullopt;
+      }
+      auto scheduler_entry = std::move(maybe_scheduler_entry.value());
+      if (!scheduler_entry->sameAs(
+              heuristics_->heuristicsList()[group_index].get())) {
+        return c10::nullopt;
+      }
+      ret.value()->emplaceBack(std::move(scheduler_entry));
+    }
+
+    return ret;
+  }
+
+  // Un-segmented case, just check the complete fusion
+  auto& complete_fusion_scheduler = schedulers()[0];
+  auto complete_fusion_heuristic = complete_fusion_scheduler->heuristc();
+  if (!SchedulerEntry::canSchedule(
+          complete_fusion_heuristic,
+          complete_fusion,
+          runtime_info,
+          single_kernel_fusion_data_cache_.get())) {
+    return c10::nullopt;
+  }
+
+  ret = std::make_unique<FusionHeuristics>(
+      complete_fusion_heuristic,
+      runtime_info,
+      single_kernel_fusion_data_cache_.get());
+  if (!complete_fusion_scheduler->sameAs(
+          ret.value()->heuristicsList()[0].get())) {
+    return c10::nullopt;
+  }
+
+  return ret;
+}
+
+bool GraphCache::requiresPermutation() {
+  if (!support_permutation_) {
+    return false;
+  }
+
   const size_t input_rank = input_permutation_.size();
-  for (size_t i = 0; i < input_rank; i++) {
+  for (const auto i : c10::irange(input_rank)) {
     if (input_permutation_[i] != (long)i) {
       return true;
     }
   }
   // Check if output agrees
   const size_t pw_output_rank = pw_output_permutation_.size();
-  for (size_t i = 0; i < pw_output_rank; i++) {
+  for (const auto i : c10::irange(pw_output_rank)) {
     TORCH_INTERNAL_ASSERT(
         pw_output_permutation_[i] == (long)i,
         "permutation of output and input is not consistent");
   }
   const size_t reduction_output_rank = reduction_output_permutation_.size();
-  for (size_t i = 0; i < reduction_output_rank; i++) {
+  for (const auto i : c10::irange(reduction_output_rank)) {
     TORCH_INTERNAL_ASSERT(
         reduction_output_permutation_[i] == (long)i,
         "permutation of output and input is not consistent");
@@ -453,116 +727,22 @@ bool GraphCache::InputsRequirement::requiresPermutation() {
   return false;
 }
 
-// TODO: tests!
-bool GraphCache::InputsRequirement::complyWith(
-    const InputsRequirement& expect) {
-  FUSER_PERF_SCOPE("InputsRequirement::complyWith");
-
-  if (device_ != expect.device_ ||
-      input_permutation_ != expect.input_permutation_ ||
-      pw_output_permutation_ != expect.pw_output_permutation_ ||
-      reduction_output_permutation_ != expect.reduction_output_permutation_ ||
-      vec_optional_ttp.size() != expect.vec_optional_ttp.size()) {
-    return false;
-  }
-
-  // trick here is, `this` is always well defined while `expect` could has
-  // missing options;
-  for (size_t i = 0; i < vec_optional_ttp.size(); i++) {
-    // TensorType has to match, otherwise it's not compatible to our graph.
-    auto expect_vec_optional_ttp_i = expect.vec_optional_ttp[i];
-    TORCH_INTERNAL_ASSERT(
-        vec_optional_ttp[i].has_value() ==
-        expect_vec_optional_ttp_i.has_value());
-    if (expect_vec_optional_ttp_i.has_value()) {
-      // We assume that dimensionality should always match.
-      TORCH_INTERNAL_ASSERT(
-          (*expect_vec_optional_ttp_i)->symbolic_sizes().sizes().has_value() &&
-              (*expect_vec_optional_ttp_i)
-                  ->stride_properties()
-                  .sizes()
-                  .has_value() &&
-              (*expect_vec_optional_ttp_i)->dim().has_value() &&
-              (*vec_optional_ttp[i])->dim().value() &&
-              (*expect_vec_optional_ttp_i)->dim().value() ==
-                  (*vec_optional_ttp[i])->dim().value(),
-          "expect fixed rank of tensors");
-
-      int rank = static_cast<int>((*expect_vec_optional_ttp_i)->dim().value());
-      auto vec_shape_symbol_ex =
-          (*expect_vec_optional_ttp_i)->symbolic_sizes().sizes().value();
-      auto vec_optional_stride_ex =
-          (*expect_vec_optional_ttp_i)->stride_properties().sizes().value();
-      auto vec_shape_symbol =
-          (*vec_optional_ttp[i])->symbolic_sizes().sizes().value();
-      auto vec_optional_stride =
-          (*vec_optional_ttp[i])->stride_properties().sizes().value();
-      for (int j = 0; j < rank; j++) {
-        // if broadcast rule differs, compliance is broken;
-        if ((vec_shape_symbol_ex[j].is_static() &&
-             vec_shape_symbol_ex[j].static_size() == 1) ^
-            (vec_shape_symbol[j].is_static() &&
-             vec_shape_symbol[j].static_size() == 1)) {
-          return false;
-        }
-
-        const auto& vec_optional_stride_ex_j = vec_optional_stride_ex[j];
-        const auto& vec_optional_stride_j = vec_optional_stride[j];
-        // if contiguity / stride index differ, compliance is broken;
-        if (vec_optional_stride_ex_j.has_value() !=
-            vec_optional_stride_j.has_value()) {
-          return false;
-        }
-        if (vec_optional_stride_ex_j.has_value() &&
-            (vec_optional_stride_ex_j->stride_index_ !=
-                 vec_optional_stride_j->stride_index_ ||
-             vec_optional_stride_ex_j->contiguous_ !=
-                 vec_optional_stride_j->contiguous_)) {
-          return false;
-        }
-      }
-    }
-  }
-  return true;
-}
-
-void GraphCache::InputsRequirement::extractPermutation(
-    const TensorTypePtr& acc_type,
-    const std::vector<size_t>& reduction_axes) {
+void GraphCache::extractPermutation(const TensorTypePtr& acc_type) {
   input_permutation_ = getPermutationPerSortedStride(acc_type);
   reduction_output_permutation_ =
-      inversePermutation(input_permutation_, reduction_axes);
+      inversePermutation(input_permutation_, toVector(reduction_axes_));
   pw_output_permutation_ = inversePermutation(input_permutation_, {});
-  TORCH_CHECK(
-      acc_type->device().has_value(), "requires fixed device for all inputs");
-  device_ = acc_type->device();
 }
 
-FusionExecutorCache* GraphCache::appendFusionExecutorCache(
-    const InputsRequirement& input_stack) {
-  FUSER_PERF_SCOPE("createFusionExecutorCache");
-
-  input_stacks_.emplace_back(input_stack);
-  std::shared_ptr<Graph> parsing_graph = graph_->copy();
-  // assign inputs on parsing_graph to accommodate legacy executor, where input
-  // type might be missing/incomplete;
-  // This is purely overhead for profiling executor;
-  for (size_t i = 0; i < input_stack.vec_optional_ttp.size(); i++) {
-    // skip scalar inputs;
-    if (input_stack.vec_optional_ttp[i].has_value()) {
-      parsing_graph->inputs()[i]->setType(
-          input_stack.vec_optional_ttp[i].value());
-    }
-  }
+void GraphCache::createFusion(const std::shared_ptr<Graph>& graph) {
+  FUSER_PERF_SCOPE("GraphCache::createFusion");
 
   // permute inputs on `Graph` to sort dimensions on common stride order;
-  if (input_stacks_.back().requiresPermutation()) {
-    auto input_permutation = input_stacks_.back().input_permutation_;
-
+  if (requiresPermutation()) {
     // TODO: lambda is a bad idea, the logic in this function is too tricky and
     //       should be properly tested to ensure correctness.
-    // lambda to permute `TensorType` axes per `input_permutation`
-    auto type_permute_fn = [&input_permutation](const TensorTypePtr& type) {
+    // lambda to permute `TensorType` axes per `input_permutation_`
+    auto type_permute_fn = [this](const TensorTypePtr& type) {
       // std::vector<c10::ShapeSymbol> vec_shape_symbol =
       // type->symbolic_sizes().sizes().value();
       auto vec_shape_symbol = type->symbolic_sizes().sizes().value();
@@ -572,18 +752,21 @@ FusionExecutorCache* GraphCache::appendFusionExecutorCache(
 
       int rank = static_cast<int>(type->dim().value());
 
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       std::vector<c10::ShapeSymbol> permuted_vec_ss;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       std::vector<c10::optional<c10::Stride>> permuted_vec_optional_stride;
-      for (int i = 0; i < rank; i++) {
-        permuted_vec_ss.emplace_back(vec_shape_symbol[input_permutation[i]]);
+      for (const auto i : c10::irange(rank)) {
+        permuted_vec_ss.emplace_back(
+            vec_shape_symbol[this->input_permutation_[i]]);
         // permutation doesn't change contiguity info, nor does it change
         // stride; The only thing affected is stride_index_;
         if (vec_optional_stride[i].has_value()) {
           c10::optional<size_t> index = vec_optional_stride[i]->stride_index_;
           if (index.has_value()) {
-            for (int j = 0; j < rank; j++) {
+            for (const auto j : c10::irange(rank)) {
               // follow the permutation to resolve the new stride_index;
-              if (input_permutation[j] == (long)index.value()) {
+              if (this->input_permutation_[j] == (long)index.value()) {
                 index = j;
                 break;
               }
@@ -605,8 +788,7 @@ FusionExecutorCache* GraphCache::appendFusionExecutorCache(
           permuted_vec_optional_stride,
           type->requires_grad());
     }; // closing lambda
-
-    for (auto input : parsing_graph->inputs()) {
+    for (auto input : graph->inputs()) {
       if (auto input_type = input->type()->cast<TensorType>()) {
         input->setType(type_permute_fn(input_type));
       }
@@ -614,7 +796,7 @@ FusionExecutorCache* GraphCache::appendFusionExecutorCache(
 
     if (!reduction_axes_.empty()) {
       // see [ NOTE - reduction in graph ] part 2.
-      for (auto n : parsing_graph->nodes()) {
+      for (auto n : graph->nodes()) {
         if (isReductionNode(n)) {
           auto dims_list = constant_as<c10::List<int64_t>>(n->input(1));
           TORCH_INTERNAL_ASSERT(
@@ -622,34 +804,32 @@ FusionExecutorCache* GraphCache::appendFusionExecutorCache(
           std::vector<int64_t> adjusted_reduction_axes;
           for (const auto dim : dims_list->vec()) {
             // adjust reduction axis to be the permuted axis;
-            for (size_t j = 0; j < input_permutation.size(); j++) {
+            for (const auto j : c10::irange(input_permutation_.size())) {
               // follow the permutation to resolve the new reduction axes;
-              if (input_permutation[j] == dim) {
+              if (input_permutation_[j] == dim) {
                 adjusted_reduction_axes.emplace_back(j);
                 break;
               }
             }
           }
-          parsing_graph->setInsertPoint(n);
+          graph->setInsertPoint(n);
           auto const_ival_axes =
-              parsing_graph->insertConstant(IValue(adjusted_reduction_axes));
+              graph->insertConstant(IValue(adjusted_reduction_axes));
           n->replaceInput(1, const_ival_axes);
         }
       }
     }
   }
 
-  TORCH_INTERNAL_ASSERT(
-      input_stacks_.back().device_.has_value(),
-      "device is not set for fusion executor, something went wrong in NvFuser");
-  fe_cache_.emplace_back(std::make_unique<FusionExecutorCache>(
-      parseJitIR(parsing_graph), input_stacks_.back().device_.value()));
-  return fe_cache_.back().get();
+  fusion_executor_cache_ =
+      std::make_unique<FusionExecutorCache>(parseJitIR(graph));
 }
 
-GraphCache::GraphCache(std::shared_ptr<Graph> graph)
-    : graph_(std::move(graph)) {
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+GraphCache::GraphCache(const std::shared_ptr<Graph>& graph) {
   FUSER_PERF_SCOPE("GraphCache::GraphCache");
+  TORCH_INTERNAL_ASSERT(
+      IsNewExecutorEnabled(), "legacy executor is not supported by nvfuser");
 
   // [ NOTE - reduction in graph ]
   //
@@ -661,104 +841,73 @@ GraphCache::GraphCache(std::shared_ptr<Graph> graph)
   // 2. adjust reduction axes for the permutation;
   //    permute changes the semantics of axes, we need to update the reduction
   //    axes in the graph in order to match the behavior;
-  reduction_axes_ = graphReductionAxes(graph_);
+  reduction_axes_ = graphReductionAxes(graph, support_permutation_);
 
-  // compile a kernel if we have enough information from graph (profiling
-  // record)
-  if (IsNewExecutorEnabled()) {
-    appendFusionExecutorCache(
-        InputsRequirement(graph_, toVector(reduction_axes_)));
+  // TODO: reduction with permutation is tricky now as we might support complex
+  // topology in graph with segmented fusion.
+  if (support_permutation_) {
+    // run over inputs to extract common types;
+    TensorTypePtr acc_type = TensorType::get();
+    for (const auto& input : graph->inputs()) {
+      // only check tensor types;
+      if (auto input_type = input->type()->cast<TensorType>()) {
+        if (acc_type->dim().has_value()) {
+          // TODO: I think merge cannot handle broadcast - Go verify it later;
+          // TODO: Since we are only handling permutation here, we should just
+          //       merge the stride_index_;
+          acc_type = acc_type->merge(*input_type);
+        } else {
+          acc_type = input_type;
+        }
+      }
+    }
+    extractPermutation(acc_type);
   }
+  createFusion(graph);
 }
 
 std::vector<at::Tensor> GraphCache::runGraphWithInputs(
     const at::ArrayRef<IValue>& inputs) {
-  FUSER_PERF_SCOPE("runGraphWithInputs");
-  // get unique id `unique_id` for given input set `inputs`;
-  auto id_lookup_ret = inputs_id_lookup_.lookupId(inputs);
-  const size_t unique_id = id_lookup_ret.id;
-
-  // if we went over the cache size for short-cut, we evict entries using LRU;
-  if (id_lookup_ret.eviction) {
-    auto index_lookup_iter = code_to_index_lookup_.find(id_lookup_ret.evict_id);
-    TORCH_INTERNAL_ASSERT(
-        index_lookup_iter != code_to_index_lookup_.end(),
-        "evicting cache entry not found in lookup table");
-    // evict nested cache in FusionExecutorCache
-    fe_cache_[index_lookup_iter->second]->evictCache(index_lookup_iter->first);
-    code_to_index_lookup_.erase(index_lookup_iter);
-  }
-
-  FusionExecutorCache* fusion_executor_cache = nullptr;
-
-  if (code_to_index_lookup_.count(unique_id) == 0) {
-    InputsRequirement input_stack(inputs, toVector(reduction_axes_));
-    for (size_t i = 0; i < fe_cache_.size(); i++) {
-      if (input_stack.complyWith(input_stacks_[i])) {
-        // found compliable fe_cache_ entry
-        fusion_executor_cache = fe_cache_[i].get();
-        // record short cut to designated fusion executor
-        code_to_index_lookup_[unique_id] = i;
-        break;
-      }
-    }
-    if (!fusion_executor_cache) {
-      // This is the ugly bit, each level of cache has their own entry. At this
-      // point, we are creating an instance of FusionExecutorCache as well as a
-      // cache entry for GraphCache;
-      // But we are not creating any cache entry for nested structures. We only
-      // create cache entry below when we later call
-      // `fusion_executor_cache->runFusionWithInputs`
-      fusion_executor_cache = appendFusionExecutorCache(input_stack);
-      // record short cut to designated fusion executor
-      code_to_index_lookup_[unique_id] = fe_cache_.size() - 1;
-    }
-  } else {
-    // take short cut to designated fusion executor
-    fusion_executor_cache = fe_cache_[code_to_index_lookup_[unique_id]].get();
-  }
-  InputsRequirement* input_requirement =
-      &input_stacks_[code_to_index_lookup_[unique_id]];
+  FUSER_PERF_SCOPE("GraphCache::runGraphWithInputs");
 
   // GraphCache need to permute inputs/outputs to accommodate dimension
   // coalescing
-  if (input_requirement->requiresPermutation()) {
+  if (requiresPermutation()) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<IValue> permuted_inputs;
     permuted_inputs.reserve(inputs.size());
     for (const auto& input : inputs) {
+      // NOLINTNEXTLINE(bugprone-branch-clone)
       if (input.isTensor()) {
         permuted_inputs.emplace_back(
-            input.toTensor().permute(input_requirement->input_permutation_));
+            input.toTensor().permute(input_permutation_));
       } else {
         permuted_inputs.emplace_back(input);
       }
     }
-    auto outputs =
-        fusion_executor_cache->runFusionWithInputs(permuted_inputs, unique_id);
+    auto outputs = fusion_executor_cache_->runFusionWithInputs(permuted_inputs);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<at::Tensor> permuted_outputs;
     permuted_outputs.reserve(outputs.size());
     for (const auto& output : outputs) {
       // This is to address the issue that not all outputs from a reduction
       // fusion are reduced tensor; We support intermediate tensors to be output
-      if (static_cast<size_t>(output.dim()) ==
-          input_requirement->pw_output_permutation_.size()) {
-        permuted_outputs.emplace_back(
-            output.permute(input_requirement->pw_output_permutation_));
+      if (static_cast<size_t>(output.dim()) == pw_output_permutation_.size()) {
+        permuted_outputs.emplace_back(output.permute(pw_output_permutation_));
       } else if (
           static_cast<size_t>(output.dim()) ==
-          input_requirement->reduction_output_permutation_.size()) {
+          reduction_output_permutation_.size()) {
         permuted_outputs.emplace_back(
-            output.permute(input_requirement->reduction_output_permutation_));
+            output.permute(reduction_output_permutation_));
       } else {
         TORCH_INTERNAL_ASSERT(
             false,
-            "Something went wrong with integration permutation, can't find a consistent permutation for output in fusion",
-            *graph_);
+            "Something went wrong with integration permutation, can't find a consistent permutation for output in fusion");
       }
     }
     return permuted_outputs;
   } else {
-    return fusion_executor_cache->runFusionWithInputs(inputs, unique_id);
+    return fusion_executor_cache_->runFusionWithInputs(inputs);
   }
 }
 

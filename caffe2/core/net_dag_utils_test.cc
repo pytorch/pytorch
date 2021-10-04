@@ -57,7 +57,7 @@ class DagUtilTestContext {
 };
 
 void PrintChains(const dag_utils::ExecutionChains& chains) {
-  for (const auto kv : chains) {
+  for (const auto& kv : chains) {
     std::stringstream ss;
     ss << kv.first << ": ";
     for (const auto& v : kv.second) {

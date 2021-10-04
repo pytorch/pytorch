@@ -1,6 +1,5 @@
 #version 450 core
 layout(std430) buffer;
-layout(std430) uniform;
 layout(set = 0, binding = 0) writeonly buffer outputBuffer {
   float data[];
 }
@@ -9,7 +8,8 @@ layout(set = 0, binding = 1) readonly buffer inputBuffer {
   float data[];
 }
 uInput;
-layout(set = 0, binding = 2) uniform constBlock {
+
+layout(push_constant) uniform constBlock {
   ivec4 inStrides[2];
   ivec4 outStrides[2];
   ivec4 outDims[2];
@@ -17,7 +17,7 @@ layout(set = 0, binding = 2) uniform constBlock {
 }
 uConst;
 
-layout(local_size_x_id = 1, local_size_y_id = 2, local_size_z_id = 3) in;
+layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
 
 void main() {
   ivec3 pos = ivec3(gl_GlobalInvocationID);

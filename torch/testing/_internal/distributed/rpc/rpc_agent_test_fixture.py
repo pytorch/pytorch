@@ -1,3 +1,4 @@
+import os
 from abc import ABC, abstractmethod
 
 import torch.testing._internal.dist_utils
@@ -5,11 +6,21 @@ import torch.testing._internal.dist_utils
 
 class RpcAgentTestFixture(ABC):
     @property
-    def world_size(self):
+    def world_size(self) -> int:
         return 4
 
     @property
     def init_method(self):
+        use_tcp_init = os.environ.get("RPC_INIT_WITH_TCP", None)
+        if use_tcp_init == "1":
+            master_addr = os.environ["MASTER_ADDR"]
+            master_port = os.environ["MASTER_PORT"]
+            return f"tcp://{master_addr}:{master_port}"
+        else:
+            return self.file_init_method
+
+    @property
+    def file_init_method(self):
         return torch.testing._internal.dist_utils.INIT_METHOD_TEMPLATE.format(
             file_name=self.file_name
         )

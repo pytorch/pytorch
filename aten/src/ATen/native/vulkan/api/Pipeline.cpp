@@ -18,14 +18,19 @@ typename Pipeline::Layout::Factory::Handle Pipeline::Layout::Factory::operator()
       descriptor.descriptor_set_layout,
       "Invalid Vulkan descriptor set layout!");
 
+  VkPushConstantRange push_constant;
+  push_constant.offset = 0;
+  push_constant.size = descriptor.push_constant_size;
+  push_constant.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
   const VkPipelineLayoutCreateInfo pipeline_layout_create_info{
     VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
     nullptr,
     0u,
     1u,
     &descriptor.descriptor_set_layout,
-    0u,
-    nullptr,
+    1u,
+    &push_constant,
   };
 
   VkPipelineLayout pipeline_layout{};
@@ -100,39 +105,32 @@ typename Pipeline::Factory::Handle Pipeline::Factory::operator()(
       descriptor.shader_module,
       "Invalid Vulkan shader module!");
 
-  constexpr uint32_t x_offset = 0u;
-  constexpr uint32_t x_size = sizeof(Shader::WorkGroup::x);
-  constexpr uint32_t y_offset = x_offset + x_size;
-  constexpr uint32_t y_size = sizeof(Shader::WorkGroup::y);
-  constexpr uint32_t z_offset = y_offset + y_size;
-  constexpr uint32_t z_size = sizeof(Shader::WorkGroup::z);
-
   constexpr VkSpecializationMapEntry specialization_map_entires[3]{
     // X
     {
-      1u,
-      x_offset,
-      x_size,
+      0u,
+      offsetof(Shader::WorkGroup, data[0u]),
+      sizeof(Shader::WorkGroup::data[0u]),
     },
     // Y
     {
-      2u,
-      y_offset,
-      y_size,
+      1u,
+      offsetof(Shader::WorkGroup, data[1u]),
+      sizeof(Shader::WorkGroup::data[1u]),
     },
     // Z
     {
-      3u,
-      z_offset,
-      z_size,
+      2u,
+      offsetof(Shader::WorkGroup, data[2u]),
+      sizeof(Shader::WorkGroup::data[2u]),
     },
   };
 
   const VkSpecializationInfo specialization_info{
     3u,
     specialization_map_entires,
-    sizeof(Shader::WorkGroup),
-    &descriptor.work_group,
+    sizeof(descriptor.local_work_group),
+    &descriptor.local_work_group,
   };
 
   const VkComputePipelineCreateInfo compute_pipeline_create_info{
@@ -170,6 +168,14 @@ typename Pipeline::Factory::Handle Pipeline::Factory::operator()(
     pipeline,
     Deleter(device_),
   };
+}
+
+Pipeline::Cache::Cache(Factory factory)
+  : cache_(std::move(factory)) {
+}
+
+void Pipeline::Cache::purge() {
+  cache_.purge();
 }
 
 } // namespace api

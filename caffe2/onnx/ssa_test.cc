@@ -38,7 +38,7 @@ TEST(SsaTest, ConvReluInplace) {
   EXPECT_EQ("Y", net.external_output(0));
 }
 
-TEST(SsaTest, FC_FC_FC_InPlace_Output) {
+TEST(SsaTest, FC_Relu_FC_InPlace_Output) {
   caffe2::NetDef net;
   auto* op = net.add_op();
   op->set_type("FC");
@@ -47,10 +47,8 @@ TEST(SsaTest, FC_FC_FC_InPlace_Output) {
   op->add_input("b0");
   op->add_output("Y");
   op = net.add_op();
-  op->set_type("FC");
+  op->set_type("Relu");
   op->add_input("Y");
-  op->add_input("W1");
-  op->add_input("b1");
   op->add_output("Y");
   op = net.add_op();
   op->set_type("FC");

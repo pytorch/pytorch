@@ -105,7 +105,6 @@ class TestModels(TestCase):
         )
         self.exportTest(toC(alexnet()), toC(x))
 
-    @disableScriptTest()
     def test_mnist(self):
         x = Variable(torch.randn(BATCH_SIZE, 1, 28, 28).fill_(1.0))
         self.exportTest(toC(MNIST()), toC(x))
@@ -130,7 +129,7 @@ class TestModels(TestCase):
 
     @unittest.skip("This model takes too much memory")
     def test_vgg19_bn(self):
-        # VGG 19-layer model (configuration 'E') with batch normalization
+        # VGG 19-layer model (configuration "E") with batch normalization
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(vgg19_bn()), toC(x))
 
@@ -141,8 +140,7 @@ class TestModels(TestCase):
 
     @disableScriptTest()  # None type in outputs
     def test_inception(self):
-        x = Variable(
-            torch.randn(BATCH_SIZE, 3, 299, 299) + 1.)
+        x = Variable(torch.randn(BATCH_SIZE, 3, 299, 299))
         self.exportTest(toC(inception_v3()), toC(x))
 
     def test_squeezenet(self):
@@ -158,7 +156,6 @@ class TestModels(TestCase):
         sqnet_v1_1 = SqueezeNet(version=1.1)
         self.exportTest(toC(sqnet_v1_1), toC(x))
 
-    @disableScriptTest()
     def test_densenet(self):
         # Densenet-121 model
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
@@ -168,14 +165,14 @@ class TestModels(TestCase):
     def test_dcgan_netD(self):
         netD = _netD(1)
         netD.apply(weights_init)
-        input = Variable(torch.Tensor(bsz, 3, imgsz, imgsz).normal_(0, 1))
+        input = Variable(torch.empty(bsz, 3, imgsz, imgsz).normal_(0, 1))
         self.exportTest(toC(netD), toC(input))
 
     @disableScriptTest()
     def test_dcgan_netG(self):
         netG = _netG(1)
         netG.apply(weights_init)
-        input = Variable(torch.Tensor(bsz, nz, 1, 1).normal_(0, 1))
+        input = Variable(torch.empty(bsz, nz, 1, 1).normal_(0, 1))
         self.exportTest(toC(netG), toC(input))
 
     @skipIfUnsupportedMinOpsetVersion(10)
@@ -184,7 +181,7 @@ class TestModels(TestCase):
         self.exportTest(toC(FakeQuantNet()), toC(x))
 
     @skipIfUnsupportedMinOpsetVersion(10)
-    def test_qat_resnet(self):
+    def test_qat_resnet_pertensor(self):
         # Quantize ResNet50 model
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         qat_resnet50 = resnet50()
@@ -193,14 +190,35 @@ class TestModels(TestCase):
         qat_resnet50.qconfig = quantization.QConfig(
             activation=quantization.default_fake_quant, weight=quantization.default_fake_quant)
         quantization.prepare_qat(qat_resnet50, inplace=True)
-        qat_resnet50.apply(torch.quantization.enable_observer)
-        qat_resnet50.apply(torch.quantization.enable_fake_quant)
+        qat_resnet50.apply(torch.ao.quantization.enable_observer)
+        qat_resnet50.apply(torch.ao.quantization.enable_fake_quant)
 
         _ = qat_resnet50(x)
         for module in qat_resnet50.modules():
             if isinstance(module, quantization.FakeQuantize):
                 module.calculate_qparams()
-        qat_resnet50.apply(torch.quantization.disable_observer)
+        qat_resnet50.apply(torch.ao.quantization.disable_observer)
+
+        self.exportTest(toC(qat_resnet50), toC(x))
+
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_qat_resnet_per_channel(self):
+        # Quantize ResNet50 model
+        x = torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0)
+        qat_resnet50 = resnet50()
+
+        qat_resnet50.qconfig = quantization.QConfig(
+            activation=quantization.default_fake_quant,
+            weight=quantization.default_per_channel_weight_fake_quant)
+        quantization.prepare_qat(qat_resnet50, inplace=True)
+        qat_resnet50.apply(torch.ao.quantization.enable_observer)
+        qat_resnet50.apply(torch.ao.quantization.enable_fake_quant)
+
+        _ = qat_resnet50(x)
+        for module in qat_resnet50.modules():
+            if isinstance(module, quantization.FakeQuantize):
+                module.calculate_qparams()
+        qat_resnet50.apply(torch.ao.quantization.disable_observer)
 
         self.exportTest(toC(qat_resnet50), toC(x))
 
@@ -245,5 +263,5 @@ class TestModels(TestCase):
         self.exportTest(toC(r2plus1d_18()), toC(x), rtol=1e-3, atol=1e-5)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()

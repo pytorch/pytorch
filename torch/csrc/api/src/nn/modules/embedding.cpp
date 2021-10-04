@@ -14,6 +14,7 @@ namespace F = torch::nn::functional;
 namespace torch {
 namespace nn {
 EmbeddingImpl::EmbeddingImpl(const EmbeddingOptions& options_) : options(options_) { // NOLINT(modernize-pass-by-value)
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 
@@ -79,10 +80,21 @@ torch::Tensor EmbeddingImpl::forward(const Tensor& input) {
 }
 
 EmbeddingBagImpl::EmbeddingBagImpl(const EmbeddingBagOptions& options_) : options(options_) { // NOLINT(modernize-pass-by-value)
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 
 void EmbeddingBagImpl::reset() {
+  if (options.padding_idx().has_value()) {
+    auto padding_idx = options.padding_idx().value();
+    if (padding_idx > 0) {
+      TORCH_CHECK(padding_idx < options.num_embeddings(), "Padding_idx must be within num_embeddings");
+    }
+    else if (padding_idx < 0) {
+      TORCH_CHECK(padding_idx >= -options.num_embeddings(), "Padding_idx must be within num_embedding");
+      options.padding_idx(options.num_embeddings() + padding_idx);
+    }
+  }
   if (!options._weight().defined()) {
     weight = register_parameter(
         "weight", torch::empty({options.num_embeddings(), options.embedding_dim()}));
@@ -96,6 +108,10 @@ void EmbeddingBagImpl::reset() {
 }
 
 void EmbeddingBagImpl::reset_parameters() {
+  if (options.padding_idx().has_value()) {
+    torch::NoGradGuard no_grad;
+    weight[options.padding_idx().value()].fill_(0);
+  }
   torch::nn::init::normal_(weight);
 }
 
@@ -110,7 +126,8 @@ torch::Tensor EmbeddingBagImpl::forward(const Tensor& input, const Tensor& offse
     options.mode(),
     options.sparse(),
     per_sample_weights,
-    options.include_last_offset());
+    options.include_last_offset(),
+    options.padding_idx());
 }
 
 void EmbeddingBagImpl::pretty_print(std::ostream& stream) const {
@@ -133,6 +150,9 @@ void EmbeddingBagImpl::pretty_print(std::ostream& stream) const {
   }
   if (options.include_last_offset()) {
     stream << ", include_last_offset=" << std::boolalpha << options.include_last_offset();
+  }
+  if (options.padding_idx().has_value()) {
+    stream << ", padding_idx=" << options.padding_idx().value();
   }
   stream << ")";
 }

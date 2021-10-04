@@ -40,11 +40,11 @@ bool available(
          (4 == weight.ndimension()) &&
          (weight.size(Layout::Filter::height) > 0) &&
          (weight.size(Layout::Filter::width) > 0) &&
-         (c10::DeviceType::CPU == weight.device().type()) &&
+         (weight.device().is_cpu()) &&
          (kFloat == weight.scalar_type()) &&
          // Bias
          ((bias && bias->defined()) ? ((1 == bias->ndimension()) &&
-                                       (c10::DeviceType::CPU == bias->device().type()) &&
+                                       (bias->device().is_cpu()) &&
                                        (kFloat == bias->scalar_type()) &&
                                        ((transposed ? (weight.size(Layout::Filter::input) == (bias->size(0) / groups))
                                                     : (weight.size(Layout::Filter::output) == (bias->size(0))))))
@@ -75,7 +75,7 @@ bool available(
 bool usable(const Tensor& input) {
        // Input
   return (4 == input.ndimension()) &&
-         (c10::DeviceType::CPU == input.device().type()) &&
+         (input.device().is_cpu()) &&
          (kFloat == input.scalar_type()) &&
          (input.size(Layout::Activation4D::batch) >= 0) &&
          (input.size(Layout::Activation4D::channels) > 0) &&
@@ -128,6 +128,7 @@ const Tensor reorder_weights_for_transpose_conv(const Tensor& weight_nhwc,
 
   TORCH_CHECK(weight_nhwc.size(0) % num_groups == 0, "The number of groups cannot be satisfied by the provided weight tensor.");
 
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int input_channels_per_group = weight_nhwc.size(0) / num_groups;
   int output_channels_per_group = weight_nhwc.size(1);
   int kernel_width = weight_nhwc.size(3);
@@ -202,7 +203,9 @@ ContextConv2D create(
 
 
   xnn_operator_t convolution_op{};
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   xnn_status create_status;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   std::array<int64_t, 4> weight_sizes;
 
   if (transposed) {
@@ -319,55 +322,47 @@ Tensor run(
       padded_input_nhwc.names());
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   xnn_status setup_status;
-  if ((context.cached_input_ptr != padded_input_nhwc.data_ptr<float>()) ||
-      (context.cached_output_ptr != output.data_ptr<float>()) ||
-      (padded_input_nhwc.size(Layout::Activation4D::batch) !=
-        context.batch_size) ||
-      (padded_input_nhwc.size(Layout::Activation4D::channels) !=
-        context.input_channels) ||
-      (padded_input_nhwc.size(Layout::Activation4D::height) !=
-        context.input_height) ||
-      (padded_input_nhwc.size(Layout::Activation4D::width) !=
-        context.input_width)
-      ) {
 
-      if (context.transposed_) {
-        setup_status = xnn_setup_deconvolution2d_nhwc_f32(
-          context.op.get(),                                      // operator
-          padded_input_nhwc.size(Layout::Activation4D::batch),   // batch_size
-          padded_input_nhwc.size(Layout::Activation4D::height),  // input_height
-          padded_input_nhwc.size(Layout::Activation4D::width),   // input_width
-          context.output_padding_[0],                            // adjustment_height
-          context.output_padding_[1],                            // adjustment_width
-          padded_input_nhwc.data_ptr<float>(),                   // input
-          output.data_ptr<float>(),                              // output
-          caffe2::pthreadpool_());                               // threadpool
+  /*
+   * Input Pointer Caching:
+   * Previously, we cached the input/output pointers and dimension parameters
+   * so that if the same pointers and parameters are used, this setup could be
+   * skipped.
+   * However, XNNPack has integrated offsets with its indirection buffer, so the
+   * buffer does not need to be recalculated even if activation tensor pointer
+   * changes as long as tensor dimensions are the same. Thus, the aforementioned
+   * manual caching is not needed here.
+   */
 
-      } else {
-        setup_status = xnn_setup_convolution2d_nhwc_f32(
-          context.op.get(),                                      // operator
-          padded_input_nhwc.size(Layout::Activation4D::batch),   // batch_size
-          padded_input_nhwc.size(Layout::Activation4D::height),  // input_height
-          padded_input_nhwc.size(Layout::Activation4D::width),   // input_width
-          padded_input_nhwc.data_ptr<float>(),                   // input
-          output.data_ptr<float>(),                              // output
-          caffe2::pthreadpool_());
-      }
+  if (context.transposed_) {
+    setup_status = xnn_setup_deconvolution2d_nhwc_f32(
+      context.op.get(),                                      // operator
+      padded_input_nhwc.size(Layout::Activation4D::batch),   // batch_size
+      padded_input_nhwc.size(Layout::Activation4D::height),  // input_height
+      padded_input_nhwc.size(Layout::Activation4D::width),   // input_width
+      context.output_padding_[0],                            // adjustment_height
+      context.output_padding_[1],                            // adjustment_width
+      padded_input_nhwc.data_ptr<float>(),                   // input
+      output.data_ptr<float>(),                              // output
+      caffe2::pthreadpool_());                               // threadpool
 
-      TORCH_CHECK(
-          xnn_status_success == setup_status,
-          (context.transposed_ ? "xnn_setup_deconvolution2d_nhwc_f32 failed!"
-                               : "xnn_setup_convolution2d_nhwc_f32 failed!"));
-
-      // Cache values to avoid setup for the next round
-      context.cached_input_ptr = padded_input_nhwc.data_ptr<float>();
-      context.cached_output_ptr = output.data_ptr<float>();
-      context.batch_size = padded_input_nhwc.size(Layout::Activation4D::batch);
-      context.input_channels = padded_input_nhwc.size(Layout::Activation4D::channels);
-      context.input_height = padded_input_nhwc.size(Layout::Activation4D::height);
-      context.input_width = padded_input_nhwc.size(Layout::Activation4D::width);
+  } else {
+    setup_status = xnn_setup_convolution2d_nhwc_f32(
+      context.op.get(),                                      // operator
+      padded_input_nhwc.size(Layout::Activation4D::batch),   // batch_size
+      padded_input_nhwc.size(Layout::Activation4D::height),  // input_height
+      padded_input_nhwc.size(Layout::Activation4D::width),   // input_width
+      padded_input_nhwc.data_ptr<float>(),                   // input
+      output.data_ptr<float>(),                              // output
+      caffe2::pthreadpool_());
   }
+
+  TORCH_CHECK(
+      xnn_status_success == setup_status,
+      (context.transposed_ ? "xnn_setup_deconvolution2d_nhwc_f32 failed!"
+                            : "xnn_setup_convolution2d_nhwc_f32 failed!"));
 
   const xnn_status run_status = xnn_run_operator(
       context.op.get(),         // operator
@@ -388,8 +383,8 @@ c10::intrusive_ptr<xnnpack::Conv2dOpContext>
         std::vector<int64_t> padding,
         std::vector<int64_t> dilation,
         int64_t groups,
-        c10::optional<Scalar> output_min,
-        c10::optional<Scalar> output_max) {
+        const c10::optional<Scalar>& output_min,
+        const c10::optional<Scalar>& output_max) {
       return xnnpack::XNNPackConv2dOpContext::create_context(
           std::move(weight),
           std::move(bias),
@@ -410,8 +405,8 @@ c10::intrusive_ptr<xnnpack::TransposeConv2dOpContext>
         std::vector<int64_t> output_padding,
         std::vector<int64_t> dilation,
         int64_t groups,
-        c10::optional<Scalar> output_min,
-        c10::optional<Scalar> output_max) {
+        const c10::optional<Scalar>& output_min,
+        const c10::optional<Scalar>& output_max) {
       return xnnpack::XNNPackTransposeConv2dOpContext::create_context(
           std::move(weight),
           std::move(bias),
@@ -428,6 +423,21 @@ Tensor conv2d_clamp_run(
     const Tensor& input,
     const c10::intrusive_ptr<xnnpack::Conv2dOpContext>& op_context) {
   return op_context->run(input);
+}
+
+// Op is registered to have Any argument as we plan to reuse it for prepacked conv2d of other backends
+std::tuple<IntArrayRef, c10::optional<IntArrayRef>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t>
+unpack_prepacked_sizes_conv2d(const IValue& ivalue) {
+  auto op_context = ivalue.toCustomClass<xnnpack::Conv2dOpContext>();
+  const auto tuple = op_context->unpack();
+  const auto& bias = std::get<1>(tuple);
+  return std::make_tuple(
+      std::get<0>(tuple).sizes(),
+      (bias && bias->defined()) ? c10::optional<IntArrayRef>(bias->sizes()) : c10::nullopt,
+      std::get<2>(tuple),
+      std::get<3>(tuple),
+      std::get<4>(tuple),
+      std::get<5>(tuple));
 }
 
 Tensor conv2d_transpose_clamp_run(

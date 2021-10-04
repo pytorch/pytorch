@@ -6,7 +6,7 @@
 namespace caffe2 {
 
 template <typename T, class Context>
-class CAFFE2_API SparseLpRegularizerOp final : public Operator<Context> {
+class TORCH_API SparseLpRegularizerOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   template <class... Args>

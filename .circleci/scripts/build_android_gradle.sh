@@ -10,7 +10,7 @@ export ANDROID_HOME=/opt/android/sdk
 
 # Must be in sync with GRADLE_VERSION in docker image for android
 # https://github.com/pietern/pytorch-dockerfiles/blob/master/build.sh#L155
-export GRADLE_VERSION=4.10.3
+export GRADLE_VERSION=6.8.3
 export GRADLE_HOME=/opt/gradle/gradle-$GRADLE_VERSION
 export GRADLE_PATH=$GRADLE_HOME/bin/gradle
 

@@ -6,12 +6,23 @@ namespace c10 {
 namespace detail {
 namespace infer_schema {
 namespace {
+
+std::string fastToString(size_t x) {
+  if (C10_LIKELY(x < 10)) {
+    std::string result;
+    result.push_back('_');
+    result.push_back('0' + x);
+    return result;
+  }
+  return "_" + c10::guts::to_string(x);
+}
+
 std::vector<Argument> createArgumentVector(c10::ArrayRef<ArgumentDef> args) {
   std::vector<Argument> result;
   result.reserve(args.size());
   for (size_t i = 0; i < args.size(); ++i) {
     // Arguments are named "_<index>"
-    result.push_back(Argument("_" + c10::guts::to_string(i), (*args[i].getTypeFn)()));
+    result.emplace_back(fastToString(i), (*args[i].getTypeFn)());
   }
   return result;
 }
@@ -20,6 +31,10 @@ std::vector<Argument> createArgumentVector(c10::ArrayRef<ArgumentDef> args) {
 // because then the template is smaller and that benefits binary size
 C10_EXPORT FunctionSchema make_function_schema(std::string&& name, std::string&& overload_name, c10::ArrayRef<ArgumentDef> arguments, c10::ArrayRef<ArgumentDef> returns) {
   return FunctionSchema(std::move(name), std::move(overload_name), createArgumentVector(arguments), createArgumentVector(returns));
+}
+
+C10_EXPORT FunctionSchema make_function_schema(c10::ArrayRef<ArgumentDef> arguments, c10::ArrayRef<ArgumentDef> returns) {
+  return make_function_schema("", "", arguments, returns);
 }
 }
 }
@@ -35,14 +50,22 @@ C10_EXPORT c10::optional<std::string> findSchemaDifferences(const FunctionSchema
   }
 
   for (size_t i = 0; i < lhs.arguments().size(); ++i) {
-    if (*lhs.arguments()[i].type() != *rhs.arguments()[i].type()) {
+    const TypePtr& leftType = lhs.arguments()[i].type();
+    const TypePtr& rightType = rhs.arguments()[i].type();
+    // Type::operator== is virtual. Comparing pointers first is
+    // cheaper, particularly when one of the types is a singleton like
+    // NumberType or AnyType.
+    if (leftType.get() != rightType.get() && *leftType != *rightType) {
       return "Type mismatch in argument " + guts::to_string(i+1) + ": " + lhs.arguments()[i].type()->str() +
                " vs " + rhs.arguments()[i].type()->str();
     }
   }
 
   for (size_t i = 0; i < lhs.returns().size(); ++i) {
-    if (*lhs.returns()[i].type() != *rhs.returns()[i].type()) {
+    const TypePtr& leftType = lhs.returns()[i].type();
+    const TypePtr& rightType = rhs.returns()[i].type();
+    // See above about comparing pointers first.
+    if (leftType.get() != rightType.get() && *leftType != *rightType) {
       return "Type mismatch in return " + guts::to_string(i+1) + ": " + lhs.returns()[i].type()->str() +
                " vs " + rhs.returns()[i].type()->str();
     }

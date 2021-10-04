@@ -11,8 +11,9 @@ python -m tools.code_analyzer.op_deps_processor \
 
 import argparse
 import yaml
+from typing import Any, List
 
-from ..autograd.utils import CodeTemplate
+from tools.codegen.code_template import CodeTemplate
 
 BAZEL_OUTPUT = CodeTemplate("""\
 TORCH_DEPS = {
@@ -46,12 +47,12 @@ DOT_OP_DEP = CodeTemplate("""\
 """)
 
 
-def load_op_deps(fname):
+def load_op_deps(fname: str) -> Any:
     with open(fname, 'r') as stream:
         return yaml.safe_load(stream)
 
 
-def process_base_ops(graph, base_ops):
+def process_base_ops(graph: Any, base_ops: List[str]) -> None:
     # remove base ops from all `depends` lists to compress the output graph
     for op in graph:
         op['depends'] = [
@@ -64,7 +65,13 @@ def process_base_ops(graph, base_ops):
         'depends': [{'name': name} for name in base_ops]})
 
 
-def convert(fname, graph, output_template, op_template, op_dep_template):
+def convert(
+    fname: str,
+    graph: Any,
+    output_template: CodeTemplate,
+    op_template: CodeTemplate,
+    op_dep_template: CodeTemplate,
+) -> None:
     ops = []
     for op in graph:
         op_name = op['name']

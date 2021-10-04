@@ -12,15 +12,16 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <c10/util/StringUtil.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/frontend/source_range.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/testing/file_check.h>
+
 #include <algorithm>
 #include <iostream>
 #include <sstream>
 #include <string>
-
-#include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/testing/file_check.h>
 
 namespace torch {
 namespace jit {
@@ -43,7 +44,7 @@ struct Check {
       std::string str,
       c10::optional<size_t> count = c10::nullopt)
       : type_(type), search_str_(std::move(str)) {
-    count_ = std::move(count);
+    count_ = count;
   };
 
   CheckType type_;
@@ -86,7 +87,7 @@ namespace {
 size_t assertFind(
     const SourceRange& search_range,
     const std::string& sub,
-    std::function<void(std::ostream& out)> extra_msg = nullptr) {
+    const std::function<void(std::ostream& out)>& extra_msg = nullptr) {
   auto pos = search_range.source()->text().find(sub, search_range.start());
   if (pos == std::string::npos || (pos + sub.size()) > search_range.end()) {
     auto found_range =
@@ -166,7 +167,7 @@ struct FileCheckImpl {
     run(test_file);
   }
 
-  TORCH_API void addCheck(Check check) {
+  TORCH_API void addCheck(const Check& check) {
     // consecutive CHECK_DAGs & CHECK_NOTs need to be evaluated as a group
     if (groups.size() == 0 ||
         (check.type_ != CHECK_NOT && check.type_ != CHECK_DAG)) {
@@ -186,9 +187,10 @@ struct FileCheckImpl {
       CheckType type,
       const std::string& s,
       c10::optional<size_t> count = c10::nullopt) {
-    addCheck(Check(type, s, std::move(count)));
+    addCheck(Check(type, s, count));
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool has_run = false;
 
   friend std::ostream& operator<<(std::ostream& out, const FileCheckImpl& fc);
@@ -344,9 +346,9 @@ struct FileCheckImpl {
       }
 
       bool found_highlight = true;
-      for (auto pos = highlight_start_offset; pos < highlight_end_offset;
-           ++pos) {
-        if (source->text()[pos] != '~') {
+      for (const auto posi :
+           c10::irange(highlight_start_offset, highlight_end_offset)) {
+        if (source->text()[posi] != '~') {
           found_highlight = false;
         }
       }
@@ -548,7 +550,11 @@ FileCheck* FileCheck::check_count(
     const std::string& str,
     size_t count,
     bool exactly) {
-  fcImpl->addCheck(CHECK_COUNT, str, count);
+  TORCH_INTERNAL_ASSERT(
+      count != 0 || exactly, "Count == 0 && !exactly doesn't do anything");
+  if (count) {
+    fcImpl->addCheck(CHECK_COUNT, str, count);
+  }
   if (exactly) {
     fcImpl->addCheck(CHECK_NOT, str);
   }

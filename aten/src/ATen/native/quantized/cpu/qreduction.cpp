@@ -8,7 +8,7 @@
 namespace at {
 namespace native {
 #ifdef USE_PYTORCH_QNNPACK
-Tensor qnnpack_mean(const Tensor& input, IntArrayRef dim) {
+Tensor qnnpack_mean(const Tensor& input, IntArrayRef dim, bool keepdim) {
   Tensor output;
   TORCH_CHECK(
       input.ndimension() == 4,
@@ -31,10 +31,15 @@ Tensor qnnpack_mean(const Tensor& input, IntArrayRef dim) {
   initQNNPACK();
   const auto scale = input_contig.q_scale();
   const auto zero_point = input_contig.q_zero_point();
-
   const auto outC = inC;
+
   output = at::_empty_affine_quantized(
-      {batch_size, outC}, at::device(kCPU).dtype(kQUInt8), scale, zero_point);
+      keepdim ? IntArrayRef{batch_size, outC, 1, 1}
+              : IntArrayRef{batch_size, outC},
+      at::device(kCPU).dtype(kQUInt8),
+      scale,
+      zero_point);
+
   pytorch_qnnp_operator_t qnnpack_operator{nullptr};
   const pytorch_qnnp_status createStatus =
       pytorch_qnnp_create_global_average_pooling_nwc_q8(
@@ -76,39 +81,28 @@ Tensor qnnpack_mean(const Tensor& input, IntArrayRef dim) {
 }
 #endif
 Tensor& mean_out_quantized_cpu(
-    Tensor& result,
     const Tensor& self,
     IntArrayRef dim,
     bool keepdim,
-    c10::optional<ScalarType> opt_dtype) {
+    c10::optional<ScalarType> opt_dtype,
+    Tensor& result) {
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
       self.scalar_type() == kQUInt8 &&
       // QNNPACK currently is only supported for NCHW + dim=(2, 3)
       // Remove these checks after generic version is implemented.
-      self.ndimension() == 4 &&
-      dim.size() == 2 &&
-      dim[0] == 2 &&
-      dim[1] == 3
-     ){
-    result = qnnpack_mean(self, dim);
+      self.ndimension() == 4 && dim.size() == 2 && dim[0] == 2 && dim[1] == 3) {
+    result = qnnpack_mean(self, dim, keepdim);
     return result;
   }
 #endif
   auto self_dequantized = self.dequantize();
-  auto result_dequantized =
-      at::native::mean_cpu_gpu(self_dequantized, dim, keepdim, opt_dtype);
+  auto result_dequantized = at::mean(self_dequantized, dim, keepdim, opt_dtype);
   result = at::quantize_per_tensor(
       result_dequantized,
       self.q_scale(),
       self.q_zero_point(),
       opt_dtype.value_or(self.scalar_type()));
-  return result;
-}
-
-Tensor mean_quantized_cpu(const Tensor& self, optional<ScalarType> dtype) {
-  Tensor result;
-  mean_out_quantized_cpu(result, self, IntArrayRef{}, false, dtype);
   return result;
 }
 
@@ -118,7 +112,7 @@ Tensor mean_quantized_cpu(
     bool keepdim,
     optional<ScalarType> dtype) {
   Tensor result;
-  mean_out_quantized_cpu(result, self, dim, keepdim, dtype);
+  mean_out_quantized_cpu(self, dim, keepdim, dtype, result);
   return result;
 }
 
@@ -138,7 +132,7 @@ Tensor& mean_out_quantized_cpu(
     bool keepdim,
     c10::optional<ScalarType> opt_dtype) {
   return mean_out_quantized_cpu(
-      result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
+      self, dimnames_to_positions(self, dim), keepdim, opt_dtype, result);
 }
 
 } // namespace native

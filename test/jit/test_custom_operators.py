@@ -53,37 +53,42 @@ class TestCustomOperators(JitTestCase):
         self.assertEqual(output, torch.tensor(-0.01))
 
     def test_passing_too_many_args(self):
-        with self.assertRaisesRegex(
+        with self.assertRaisesRegexWithHighlight(
             RuntimeError,
-            r"aten::relu\(\) expected at most 1 argument\(s\) but received 2 argument\(s\)"
+            r"aten::relu\(\) expected at most 1 argument\(s\) but received 2 argument\(s\)",
+            ""
         ):
             torch.ops.aten.relu(1, 2)
 
     def test_passing_too_few_args(self):
-        with self.assertRaisesRegex(
+        with self.assertRaisesRegexWithHighlight(
             RuntimeError,
-            r"aten::relu\(\) is missing value for argument 'self'."
+            r"aten::relu\(\) is missing value for argument 'self'.",
+            ""
         ):
             torch.ops.aten.relu()
 
     def test_passing_one_positional_but_not_the_second(self):
-        with self.assertRaisesRegex(
+        with self.assertRaisesRegexWithHighlight(
             RuntimeError,
-            r"aten::type_as\(\) is missing value for argument 'other'."
+            r"aten::type_as\(\) is missing value for argument 'other'.",
+            ""
         ):
             torch.ops.aten.type_as(torch.ones(5, 5))
 
     def test_passing_an_argument_both_as_positional_and_kwarg(self):
-        with self.assertRaisesRegex(
+        with self.assertRaisesRegexWithHighlight(
             RuntimeError,
-            "Argument 'self' specified both as positional and keyword argument"
+            "Argument 'self' specified both as positional and keyword argument",
+            ""
         ):
             torch.ops._test.leaky_relu(torch.ones(5), self=torch.ones(5))
 
     def test_passing_unknown_kwargs(self):
-        with self.assertRaisesRegex(
+        with self.assertRaisesRegexWithHighlight(
             RuntimeError,
-            "Unknown keyword argument 'foo' for operator '_test::leaky_relu'"
+            "Unknown keyword argument 'foo' for operator '_test::leaky_relu'",
+            ""
         ):
             torch.ops._test.leaky_relu(torch.ones(5), foo=torch.ones(5))
 

@@ -2,42 +2,30 @@
 #define THC_GENERIC_FILE "THC/generic/THCStorageCopy.cpp"
 #else
 
-#ifdef __HIP_PLATFORM_HCC__
-#include <hip/hip_version.h>
-#endif
+#include <c10/cuda/CUDAFunctions.h>
 
 void THCStorage_(copyCPU)(THCState *state, THCStorage *self, struct THStorage *src)
 {
   THArgCheck(self->nbytes() == src->nbytes(), 2, "size does not match");
   cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
-#if HIP_VERSION >= 301
-  THCudaCheck(hipMemcpyWithStream(
-      THCStorage_(data)(state, self),
+  at::cuda::memcpy_and_sync(THCStorage_(data)(state, self),
       THStorage_(data)(src),
       self->nbytes(),
       cudaMemcpyHostToDevice,
-      stream));
-#else
-  THCudaCheck(cudaMemcpyAsync(
-      THCStorage_(data)(state, self),
-      THStorage_(data)(src),
-      self->nbytes(),
-      cudaMemcpyHostToDevice,
-      stream));
-  THCudaCheck(cudaStreamSynchronize(stream));
-#endif
+      stream);
+
 }
 
 #define TH_CUDA_STORAGE_IMPLEMENT_COPY(TYPEC)                                 \
   void THCStorage_(copy##TYPEC)(                                              \
       THCState * state, THCStorage * self, struct TH##TYPEC##Storage * src) { \
-    THCTensor* selfTensor = THCTensor_(newWithStorage1d)(                     \
-        state, self, 0, src->nbytes() / sizeof(scalar_t), 1);                 \
-    struct TH##TYPEC##Tensor* srcTensor = TH##TYPEC##Tensor_newWithStorage1d( \
-        src, 0, src->nbytes() / sizeof(scalar_t), 1);                         \
-    THCTensor_(copy)(state, selfTensor, srcTensor);                           \
-    TH##TYPEC##Tensor_free(srcTensor);                                        \
-    THCTensor_(free)(state, selfTensor);                                      \
+    at::Tensor selfTensor = tensor_reclaim(                                   \
+      THCTensor_(newWithStorage1d)(                                           \
+          state, self, 0, src->nbytes() / sizeof(scalar_t), 1));              \
+    at::Tensor srcTensor = tensor_reclaim(                                    \
+        TH##TYPEC##Tensor_newWithStorage1d(                                   \
+            src, 0, src->nbytes() / sizeof(scalar_t), 1));                    \
+    selfTensor.copy_(srcTensor);                                              \
   }
 
 // TODO: Add cross-dtype storage copy for complex storage
@@ -61,34 +49,24 @@ void THStorage_(copyCuda)(THCState *state, THStorage *self, struct THCStorage *s
 {
   THArgCheck(self->nbytes() == src->nbytes(), 2, "size does not match");
   cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
-#if HIP_VERSION >= 301
-  THCudaCheck(hipMemcpyWithStream(
+  at::cuda::memcpy_and_sync(
       THStorage_(data)(self),
       THCStorage_(data)(state, src),
       self->nbytes(),
       cudaMemcpyDeviceToHost,
-      stream));
-#else
-  THCudaCheck(cudaMemcpyAsync(
-      THStorage_(data)(self),
-      THCStorage_(data)(state, src),
-      self->nbytes(),
-      cudaMemcpyDeviceToHost,
-      stream));
-  THCudaCheck(cudaStreamSynchronize(stream));
-#endif
+      stream);
 }
 
 #define TH_CUDA_STORAGE_IMPLEMENT_COPYTO(TYPEC)                               \
   void TH_CONCAT_4(TH, TYPEC, Storage_copyCuda, Real)(                        \
       THCState * state, TH##TYPEC##Storage * self, struct THCStorage * src) { \
-    TH##TYPEC##Tensor* selfTensor = TH##TYPEC##Tensor_newWithStorage1d(       \
-        self, 0, self->nbytes() / sizeof(scalar_t), 1);                       \
-    struct THCTensor* srcTensor = THCTensor_(newWithStorage1d)(               \
-        state, src, 0, src->nbytes() / sizeof(scalar_t), 1);                  \
-    THCTensor_(copy)(state, selfTensor, srcTensor);                           \
-    THCTensor_(free)(state, srcTensor);                                       \
-    TH##TYPEC##Tensor_free(selfTensor);                                       \
+    at::Tensor selfTensor = tensor_reclaim(                                   \
+        TH##TYPEC##Tensor_newWithStorage1d(                                   \
+            self, 0, self->nbytes() / sizeof(scalar_t), 1));                  \
+    at::Tensor srcTensor = tensor_reclaim(                                    \
+        THCTensor_(newWithStorage1d)(                                         \
+            state, src, 0, src->nbytes() / sizeof(scalar_t), 1));             \
+    selfTensor.copy_(srcTensor);                                              \
   }
 
 // TODO: Add cross-dtype storage copy for complex storage

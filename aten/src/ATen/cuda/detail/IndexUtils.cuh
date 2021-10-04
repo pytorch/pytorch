@@ -8,7 +8,7 @@ namespace at {
 namespace cuda {
 namespace detail {
 
-TORCH_CUDA_API bool maybeOverlappingIndices(const at::Tensor& t);
+TORCH_CUDA_CU_API bool maybeOverlappingIndices(const at::Tensor& t);
 using at::native::canUse32BitIndexMath;
 
 template <typename scalar, typename IndexType>

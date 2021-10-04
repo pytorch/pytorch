@@ -1,20 +1,21 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 ## @package process
 # Module doxygen.process
 # Script to insert preamble for doxygen and regen API docs
 
-import glob, os, shutil
+import os
+import shutil
 
 # Module caffe2...caffe2.python.control_test
-def insert(originalfile,first_line,description):
-    with open(originalfile,'r') as f:
+def insert(originalfile, first_line, description):
+    with open(originalfile, 'r') as f:
         f1 = f.readline()
-        if(f1.find(first_line)<0):
+        if(f1.find(first_line) < 0):
             docs = first_line + description + f1
-            with open('newfile.txt','w') as f2:
+            with open('newfile.txt', 'w') as f2:
                 f2.write(docs)
                 f2.write(f.read())
-            os.rename('newfile.txt',originalfile)
+            os.rename('newfile.txt', originalfile)
         else:
             print('already inserted')
 
@@ -29,15 +30,15 @@ for root, dirs, files in os.walk("."):
     for file in files:
         if (file.endswith(".py") and not file.endswith("_test.py") and not file.endswith("__.py")):
             filepath = os.path.join(root, file)
-            print("filepath: " + filepath)
+            print(("filepath: " + filepath))
             directory = os.path.dirname(filepath)[2:]
-            directory = directory.replace("/",".")
-            print "directory: " + directory
+            directory = directory.replace("/", ".")
+            print("directory: " + directory)
             name = os.path.splitext(file)[0]
             first_line = "## @package " + name
             description = "\n# Module " + directory + "." + name + "\n"
-            print first_line,description
-            insert(filepath,first_line,description)
+            print(first_line, description)
+            insert(filepath, first_line, description)
 
 if os.path.exists("doxygen/doxygen-python"):
     print("Looks like you ran this before, so we need to cleanup those old files...")

@@ -1,13 +1,24 @@
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/NumericLimits.cuh>
+#include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/cuda/NumericLimits.cuh>
-#include <THC/THCNumerics.cuh>
-#include <ATen/cuda/CUDAContext.h>
-#include <THC/THCGeneral.h>
-#include <cub/device/device_scan.cuh>
+#include <ATen/NumericUtils.h>
+#include <ATen/native/Resize.h>
+#include <ATen/native/ReduceOps.h>
+#include <c10/util/accumulate.h>
+
+#include <ATen/cuda/cub.cuh>
 
 
 namespace at { namespace native {
+
+static c10::MaybeOwned<Tensor> contiguous_out_arg(const Tensor &tensor) {
+  if (tensor.is_contiguous()) {
+    return c10::MaybeOwned<Tensor>::borrowed(tensor);
+  }
+  return c10::MaybeOwned<Tensor>::owned(at::empty(tensor.sizes(), tensor.options()));
+}
 
 template <typename integer>
 constexpr inline integer ceil_div(integer n, integer m) {
@@ -16,7 +27,7 @@ constexpr inline integer ceil_div(integer n, integer m) {
 
 template<typename scalar_t, typename idx_t, typename BinaryOperation>
 __device__ void binary_op_update(const scalar_t lhs, scalar_t& rhs, const idx_t lhs_idx, idx_t& rhs_idx, BinaryOperation binary_op) {
-  if(!THCNumerics<scalar_t>::isnan(rhs) && (THCNumerics<scalar_t>::isnan(lhs) || !binary_op(rhs, lhs))) {
+  if(!at::_isnan(rhs) && (at::_isnan(lhs) || !binary_op(rhs, lhs))) {
     rhs = lhs;
     rhs_idx = lhs_idx;
   }
@@ -128,17 +139,17 @@ __global__ void tensor_kernel_scan_innermost_dim_with_indices(const scalar_t *se
  */
 template<typename scalar_t, class BinaryFunction>
 __global__ void tensor_kernel_scan_outer_dim_with_indices(scalar_t *self_, scalar_t *values_, int64_t *indices_,
-                  int num_orows, int num_irows, int row_size, scalar_t init, BinaryFunction binary_op) {
-  for (int orow = blockIdx.x; orow < num_orows; orow += gridDim.x) {
-    for (int irow = blockIdx.y * blockDim.x + threadIdx.x; irow < num_irows; irow += gridDim.y * blockDim.x) {
+                  const uint32_t num_orows, const uint32_t num_irows, const uint32_t row_size, scalar_t init, BinaryFunction binary_op) {
+  for (uint32_t orow = blockIdx.x; orow < num_orows; orow += gridDim.x) {
+    for (uint32_t irow = blockIdx.y * blockDim.x + threadIdx.x; irow < num_irows; irow += gridDim.y * blockDim.x) {
       scalar_t *self = self_ + orow * row_size * num_irows + irow;
       scalar_t *values = values_ + orow * row_size * num_irows + irow;
       int64_t *indices = indices_ + orow * row_size * num_irows + irow;
       scalar_t out = init;
       int64_t out_idx = 0;
 
-      for (int64_t col = 0; col < row_size; ++col) {
-        if(THCNumerics<scalar_t>::isnan(*self) || (!THCNumerics<scalar_t>::isnan(out) && binary_op(*self, out))) {
+      for (auto col = decltype(row_size){0}; col < row_size; ++col) {
+        if(at::_isnan(*self) || (!at::_isnan(out) && binary_op(*self, out))) {
           out = *self;
           out_idx = col;
         }
@@ -152,29 +163,45 @@ __global__ void tensor_kernel_scan_outer_dim_with_indices(scalar_t *self_, scala
   }
 }
 
+void check_fits_in_unsigned(int64_t val, const char* name) {
+  constexpr auto umax = std::numeric_limits<uint32_t>::max();
+  TORCH_CHECK(
+      val >= 0 && val <= umax, name, " must fit in a 32-bit uint32_t value");
+}
+
+
 template<typename scalar_t, class BinaryFunction>
-__host__ void scan_outer_dim_with_indices(const Tensor& self, Tensor& values, Tensor& indices,
-                                       int dim, scalar_t init, BinaryFunction binary_op) {
-  int row_size = self.size(dim);
+__host__ void scan_outer_dim_with_indices(
+    const Tensor& self, const Tensor& values, const Tensor& indices,
+    int dim, scalar_t init, BinaryFunction binary_op) {
+  int64_t row_size = self.size(dim);
   auto sizes = self.sizes();
 
   // Treat all outer dimensions (i.e. dim_ < dim) as one.
-  int num_orows = std::accumulate(sizes.begin(), sizes.begin() + dim, 1, std::multiplies<int>());
+  const int64_t num_orows = c10::multiply_integers(sizes.begin(), sizes.begin() + dim);
 
   // Treat all inner dimensions (i.e. dim > dimension) as one.
-  int num_irows = std::accumulate(sizes.begin() + dim + 1, sizes.end(), 1, std::multiplies<int>());
+  const int64_t num_irows = c10::multiply_integers(sizes.begin() + dim + 1, sizes.end());
+  //for performance reasons, cuda kernels use uint32_t for loops over irows, orows and row,
+  //make sure that input is not bigger than supported by uint32_t
+  check_fits_in_unsigned(num_irows, "num_irows");
+  check_fits_in_unsigned(num_orows, "num_orows");
+  check_fits_in_unsigned(row_size, "row_size");
+
 
   dim3 threads(std::min(512, int(num_irows)));
-  int maxGridDim = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
-  dim3 grid(std::min(maxGridDim, num_orows), std::min(maxGridDim, ceil_div(num_irows, int(threads.x))));
+  int64_t maxGridDim = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
+  dim3 grid(std::min(maxGridDim, num_orows), std::min(maxGridDim, ceil_div(num_irows, int64_t{threads.x})));
   tensor_kernel_scan_outer_dim_with_indices<scalar_t><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
     self.data_ptr<scalar_t>(), values.data_ptr<scalar_t>(), indices.data_ptr<int64_t>(),
     num_orows, num_irows, row_size, init, binary_op);
-  AT_CUDA_CHECK(cudaGetLastError());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <typename scalar_t, class BinaryFunction>
-__host__ void scan_innermost_dim_with_indices(const Tensor& self, Tensor& values, Tensor& indices, scalar_t init, BinaryFunction binary_op) {
+__host__ void scan_innermost_dim_with_indices(
+    const Tensor& self, const Tensor& values, const Tensor& indices,
+    scalar_t init, BinaryFunction binary_op) {
   int ndim = self.dim();
   // Treat all outer dimensions as a single dimension.
   int row_size = self.size(ndim - 1);
@@ -186,37 +213,35 @@ __host__ void scan_innermost_dim_with_indices(const Tensor& self, Tensor& values
   tensor_kernel_scan_innermost_dim_with_indices<scalar_t, 16, 32><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
     self.data_ptr<scalar_t>(), values.data_ptr<scalar_t>(), indices.data_ptr<int64_t>(),
     num_rows, row_size, init, binary_op);
-  AT_CUDA_CHECK(cudaGetLastError());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template<typename scalar_t, typename BinaryFunction>
 void scan_dim_with_indices(const Tensor& self, Tensor& values, Tensor& indices, //int64_t dim) {
      int64_t dim, scalar_t init, BinaryFunction binary_op) {
   int ndim = self.dim();
-  Tensor self_ = self.contiguous();
-  Tensor values_ = values.contiguous();
-  Tensor indices_ = indices.contiguous();
-  bool copy_values = !values.is_contiguous();
-  bool copy_indices = !indices.is_contiguous();
-   if (dim == ndim - 1) {
-     scan_innermost_dim_with_indices<scalar_t>(self_, values_, indices_, init, binary_op);
-   } else {
-     scan_outer_dim_with_indices<scalar_t>(self_, values_, indices_, dim, init, binary_op);
-   }
-   if (copy_values){
-     values.copy_(values_);
-   }
-   if (copy_indices){
-     indices.copy_(indices_);
-   }
+  auto self_ = self.expect_contiguous();
+  auto values_ = contiguous_out_arg(values);
+  auto indices_ = contiguous_out_arg(indices);
+  if (dim == ndim - 1) {
+    scan_innermost_dim_with_indices<scalar_t>(*self_, *values_, *indices_, init, binary_op);
+  } else {
+    scan_outer_dim_with_indices<scalar_t>(*self_, *values_, *indices_, dim, init, binary_op);
+  }
+  if (!values.is_same(*values_)) {
+    values.copy_(*values_);
+  }
+  if (!indices.is_same(*indices_)) {
+    indices.copy_(*indices_);
+  }
 }
 
 void cummax_helper_cuda(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim) {
   TensorArg output_arg{ values, "output", 1 };
   TensorArg indices_arg{ indices, "indices", 2 };
   TensorArg input_arg{ self, "input", 3 };
-  checkAllSameGPU("cummax", {output_arg, indices_arg, input_arg});
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::Half,
+  checkAllSameGPU(__func__, {output_arg, indices_arg, input_arg});
+  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16,
     self.scalar_type(), "cummax_cuda", [&]() {
     scalar_t init = self.is_floating_point() ? (-1*std::numeric_limits<scalar_t>::infinity()) : std::numeric_limits<scalar_t>::lowest();
     scan_dim_with_indices<scalar_t>(self, values, indices, dim, init, std::greater_equal<scalar_t>());
@@ -227,8 +252,8 @@ void cummin_helper_cuda(const Tensor& self, Tensor& values, Tensor& indices, int
   TensorArg output_arg{ values, "output", 1 };
   TensorArg indices_arg{ indices, "indices", 2 };
   TensorArg input_arg{ self, "input", 3 };
-  checkAllSameGPU("cummin", {output_arg, indices_arg, input_arg});
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::Half,
+  checkAllSameGPU(__func__, {output_arg, indices_arg, input_arg});
+  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16,
     self.scalar_type(), "cummin_cuda", [&]() {
     scalar_t init = self.is_floating_point() ? std::numeric_limits<scalar_t>::infinity() : std::numeric_limits<scalar_t>::max();
     scan_dim_with_indices<scalar_t>(self, values, indices, dim, init, std::less_equal<scalar_t>());
@@ -254,16 +279,16 @@ void cummin_helper_cuda(const Tensor& self, Tensor& values, Tensor& indices, int
  */
 template<typename scalar_t, class BinaryOp>
 __global__ void tensor_kernel_scan_outer_dim(scalar_t *tgt_, scalar_t *src_,
-                                              unsigned num_orows, unsigned num_irows, unsigned row_size,
-                                              scalar_t init, BinaryOp binary_op)
+                                              const uint32_t num_orows, const uint32_t num_irows, const uint32_t row_size,
+                                              const scalar_t init, BinaryOp binary_op)
 {
-  for (unsigned orow = blockIdx.x; orow < num_orows; orow += gridDim.x) {
-    for (unsigned irow = blockIdx.y * blockDim.x + threadIdx.x; irow < num_irows; irow += gridDim.y * blockDim.x) {
+  for (uint32_t orow = blockIdx.x; orow < num_orows; orow += gridDim.x) {
+    for (uint32_t irow = blockIdx.y * blockDim.x + threadIdx.x; irow < num_irows; irow += gridDim.y * blockDim.x) {
       scalar_t *src = src_ + orow * row_size * num_irows + irow;
       scalar_t *tgt = tgt_ + orow * row_size * num_irows + irow;
       scalar_t acc = init;
 
-      for (unsigned col = 0; col < row_size; ++col) {
+      for (uint32_t col = 0; col < row_size; ++col) {
         acc = binary_op(acc, *src);
         *tgt = acc;
 
@@ -286,12 +311,12 @@ __global__ void tensor_kernel_scan_outer_dim(scalar_t *tgt_, scalar_t *src_,
  */
 template<typename T, int num_threads_x, int num_threads_y, class BinaryFunction>
 __device__ void tensor_kernel_scan_innermost_dim_impl(T* row_buf, T *tgt_, T *src_,
-                                      unsigned num_rows, unsigned row_size,
+                                      const uint32_t num_rows, const uint32_t row_size,
                                       T init, BinaryFunction binary_op){
-  for (unsigned block_row = blockIdx.x * blockDim.y;
+  for (uint32_t block_row = blockIdx.x * blockDim.y;
        block_row < num_rows;
        block_row += blockDim.y * gridDim.x) {
-    unsigned row = block_row + threadIdx.y;
+    uint32_t row = block_row + threadIdx.y;
     T block_total = init;
 
     T *row_src = src_ + row * row_size;
@@ -299,10 +324,10 @@ __device__ void tensor_kernel_scan_innermost_dim_impl(T* row_buf, T *tgt_, T *sr
 
     // Perform scan on one block at a time, keeping track of the total value of
     // all blocks processed so far.
-    for (unsigned block_col = 0; block_col < row_size; block_col += 2 * num_threads_x) {
+    for (uint32_t block_col = 0; block_col < row_size; block_col += 2 * num_threads_x) {
       // Load data into shared memory (two values per thread).
-      unsigned col1 = block_col + threadIdx.x;
-      unsigned col2 = block_col + num_threads_x + threadIdx.x;
+      uint32_t col1 = block_col + threadIdx.x;
+      uint32_t col2 = block_col + num_threads_x + threadIdx.x;
       if (row < num_rows) {
         if (col1 < row_size) {
           row_buf[threadIdx.x] = row_src[col1];
@@ -324,18 +349,18 @@ __device__ void tensor_kernel_scan_innermost_dim_impl(T* row_buf, T *tgt_, T *sr
       __syncthreads();
 
       // Parallel reduction (up-sweep).
-      for (unsigned s = num_threads_x, d = 1; s >= 1; s >>= 1, d <<= 1) {
+      for (uint32_t s = num_threads_x, d = 1; s >= 1; s >>= 1, d <<= 1) {
         if (row < num_rows && threadIdx.x < s) {
-          unsigned offset = (2 * threadIdx.x + 1) * d - 1;
+          uint32_t offset = (2 * threadIdx.x + 1) * d - 1;
           row_buf[offset + d] = binary_op(row_buf[offset], row_buf[offset + d]);
         }
         __syncthreads();
       }
 
       // Down-sweep.
-      for (unsigned s = 2, d = num_threads_x / 2; d >= 1; s <<= 1, d >>= 1) {
+      for (uint32_t s = 2, d = num_threads_x / 2; d >= 1; s <<= 1, d >>= 1) {
         if (row < num_rows && threadIdx.x < s - 1) {
-          unsigned offset = 2 * (threadIdx.x + 1) * d - 1;
+          uint32_t offset = 2 * (threadIdx.x + 1) * d - 1;
           row_buf[offset + d] = binary_op(row_buf[offset], row_buf[offset + d]);
         }
         __syncthreads();
@@ -361,8 +386,8 @@ __global__ typename std::enable_if<!c10::is_complex<T>::value, void>::type
 tensor_kernel_scan_innermost_dim(
     T* tgt_,
     T* src_,
-    unsigned num_rows,
-    unsigned row_size,
+    const uint32_t num_rows,
+    const uint32_t row_size,
     T init,
     BinaryFunction binary_op) {
   __shared__ T sbuf[num_threads_y][2 * num_threads_x];
@@ -381,8 +406,8 @@ __global__ typename std::enable_if<c10::is_complex<T>::value, void>::type
 tensor_kernel_scan_innermost_dim(
     T* tgt_,
     T* src_,
-    unsigned num_rows,
-    unsigned row_size,
+    const uint32_t num_rows,
+    const uint32_t row_size,
     T init,
     BinaryFunction binary_op) {
   // As we cannot directly initialize shared array for complex types
@@ -399,23 +424,18 @@ tensor_kernel_scan_innermost_dim(
       row_buf, tgt_, src_, num_rows, row_size, init, binary_op);
 }
 
-void check_fits_in_unsigned(int64_t val, const char* name) {
-  constexpr auto umax = std::numeric_limits<unsigned>::max();
-  TORCH_CHECK(
-      val >= 0 && val <= umax, name, " must fit in a 32-bit unsigned value");
-}
 
 template<typename scalar_t, class BinaryFunction>
-__host__ void scan_outer_dim(const Tensor& self, Tensor& result,
-                                       int dim, scalar_t init, BinaryFunction binary_op) {
-  int64_t row_size = self.size(dim);
+__host__ void scan_outer_dim(const Tensor& self, const Tensor& result,
+                             int dim, scalar_t init, BinaryFunction binary_op) {
+  const int64_t row_size = self.size(dim);
   auto sizes = self.sizes();
 
   // Treat all outer dimensions (i.e. dim_ < dim) as one.
-  int64_t num_orows = std::accumulate(sizes.begin(), sizes.begin() + dim, 1, std::multiplies<int64_t>());
+  const int64_t num_orows = c10::multiply_integers(sizes.begin(), sizes.begin() + dim);
 
   // Treat all inner dimensions (i.e. dim > dimension) as one.
-  int64_t num_irows = std::accumulate(sizes.begin() + dim + 1, sizes.end(), 1, std::multiplies<int64_t>());
+  const int64_t num_irows = c10::multiply_integers(sizes.begin() + dim + 1, sizes.end());
 
   dim3 threads(std::min(512, int(num_irows)));
   int64_t maxGridDim = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
@@ -428,11 +448,12 @@ __host__ void scan_outer_dim(const Tensor& self, Tensor& result,
   tensor_kernel_scan_outer_dim<scalar_t><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
     result.data_ptr<scalar_t>(), self.data_ptr<scalar_t>(),
     num_orows, num_irows, row_size, init, binary_op);
-  AT_CUDA_CHECK(cudaGetLastError());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <typename scalar_t, class BinaryFunction>
-void scan_innermost_dim(const Tensor& self, Tensor& result, scalar_t init, BinaryFunction binary_op) {
+void scan_innermost_dim(const Tensor& self, const Tensor& result,
+                        scalar_t init, BinaryFunction binary_op) {
   int64_t ndim = self.dim();
   // Treat all outer dimensions as a single dimension.
   int64_t row_size = self.size(ndim - 1);
@@ -448,87 +469,29 @@ void scan_innermost_dim(const Tensor& self, Tensor& result, scalar_t init, Binar
   tensor_kernel_scan_innermost_dim<scalar_t, 16, 32><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
     result.data_ptr<scalar_t>(), self.data_ptr<scalar_t>(),
     num_rows, row_size, init, binary_op);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<typename scalar_t, class func_t>
-__global__ void transform_vals(scalar_t * a, scalar_t * b, scalar_t * out, func_t binary_op){
-   *out = binary_op(*a, *b);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template<typename scalar_t, typename BinaryFunction>
-void scan_cub(const Tensor& self, Tensor& result, scalar_t init, BinaryFunction binary_op) {
-  int64_t size = self.numel();
-  // non synchronizing cub call
-  // even though cub is supposed to support tensors with int_max elements, in reality it doesn't,
-  // so split at int_max/2
-  constexpr int max_cub_size = std::numeric_limits<int>::max() / 2 + 1; // 2**30
-  for (int64_t i = 0; i < size; i += max_cub_size) {
-    int size_cub = std::min<int64_t>(size - i, max_cub_size);
-    Tensor first_elem; // need to save it for all iterations other than first
-    if (i > 0) {
-      // need to temporarily transform first element of the range we are
-      // operating on; self might be multi-d, but we need to index a single
-      // element
-      auto self_view = at::_unsafe_view(self, -1);
-      first_elem = self_view[i].clone();
-      transform_vals<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
-          self.data_ptr<scalar_t>() + i,
-          result.data_ptr<scalar_t>() + i - 1,
-          self.data_ptr<scalar_t>() + i,
-          binary_op);
-    }
-    size_t temp_storage_bytes = 0;
-    AT_CUDA_CHECK(cub::DeviceScan::InclusiveScan(
-        nullptr,
-        temp_storage_bytes,
-        self.data_ptr<scalar_t>() + i,
-        result.data_ptr<scalar_t>() + i,
-        binary_op,
-        size_cub,
-        at::cuda::getCurrentCUDAStream()));
-    auto temp_storage = at::native::empty_cuda(
-        {static_cast<int64_t>(temp_storage_bytes)},
-        self.options().dtype(kByte));
-    AT_CUDA_CHECK(cub::DeviceScan::InclusiveScan(
-        temp_storage.data_ptr(),
-        temp_storage_bytes,
-        self.data_ptr<scalar_t>() + i,
-        result.data_ptr<scalar_t>() + i,
-        binary_op,
-        size_cub,
-        at::cuda::getCurrentCUDAStream()));
-    if (i > 0) {
-      if (self.data_ptr<scalar_t>() != result.data_ptr<scalar_t>()) {
-        // restore modified first element only if it's not an inplace operation
-        auto self_view = at::_unsafe_view(self, -1);
-        self_view[i].copy_(first_elem, /*non_blocking=*/true);
-      }
-    }
-  }
-}
-
-template<typename scalar_t, typename BinaryFunction>
-void scan_dim(const Tensor& self, Tensor& result,
+void scan_dim(const Tensor& self, const Tensor& result,
      int64_t dim, scalar_t init, BinaryFunction binary_op) {
   int ndim = self.dim();
-  Tensor self_ = self.contiguous();
-  bool copy_result = !result.is_contiguous();
-  Tensor result_ = result.contiguous();
+  auto self_ = self.expect_contiguous();
+  auto result_ = contiguous_out_arg(result);
 
   if (self.numel() == self.size(dim)) {
-    scan_cub<scalar_t>(self_, result_, init, binary_op);
+    cuda::cub::inclusive_scan(self_->data_ptr<scalar_t>(), result_->data_ptr<scalar_t>(), binary_op, self.numel());
   } else if (dim == ndim - 1) {
-    scan_innermost_dim<scalar_t>(self_, result_, init, binary_op);
+    scan_innermost_dim<scalar_t>(*self_, *result_, init, binary_op);
   } else {
-    scan_outer_dim<scalar_t>(self_, result_, dim, init, binary_op);
+    scan_outer_dim<scalar_t>(*self_, *result_, dim, init, binary_op);
   }
-  if (copy_result) {
-    result.copy_(result_);
+  if (!result.is_same(*result_)) {
+    result.copy_(*result_);
   }
 }
 
-Tensor& _logcumsumexp_out_cuda(Tensor& result, const Tensor& self, int64_t dim) {
+Tensor& _logcumsumexp_out_cuda(const Tensor& self, int64_t dim, Tensor& result) {
   result.resize_(self.sizes());
   if (self.dim() == 0) {
     result.fill_(self);
@@ -542,96 +505,65 @@ Tensor& _logcumsumexp_out_cuda(Tensor& result, const Tensor& self, int64_t dim) 
 
   TensorArg output_arg{ result, "output", 1 };
   TensorArg input_arg{ self, "input", 2 };
-  checkAllSameGPU("logcumsumexp", {output_arg, input_arg});
+  checkAllSameGPU(__func__, {output_arg, input_arg});
 
-  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Half,
-    self.scalar_type(), "logcumsumexp_cuda", [&]() {
-    scalar_t init = -std::numeric_limits<scalar_t>::infinity();
-    auto log_add_exp = [] C10_HOST_DEVICE (const scalar_t x, const scalar_t y) -> scalar_t {
-      return ::log1p(std::exp(std::min(x, y) - std::max(x, y))) +
-          std::max(x, y);
-    };
-    scan_dim<scalar_t>(self, result, wrap_dim, init, log_add_exp);
-  });
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half, ScalarType::BFloat16,
+      self.scalar_type(), "logcumsumexp_cuda",
+      [&]() {
+        using accscalar_t = acc_type<scalar_t, true>;
+        scalar_t init = -std::numeric_limits<scalar_t>::infinity();
+        auto log_add_exp = [] C10_HOST_DEVICE (const scalar_t x, const scalar_t y) -> scalar_t {
+          scalar_t min = at::_isnan(y) ? y : std::min<scalar_t>(x,y); //std::min returns first arg if one of the args is nan
+          scalar_t max = at::_isnan(y) ? y : std::max<scalar_t>(x,y); //std::max returns first arg if one of the args is nan
+          if (min != max || ::isfinite(static_cast<accscalar_t>(min))) {
+          // nan will be propagated here
+              return ::log1p(std::exp(min - max)) + max;
+          } else {
+          // special case to correctly handle infinite inputs
+             return x;
+          }
+        };
+        scan_dim<scalar_t>(self, result, wrap_dim, init, log_add_exp);
+      });
 
   return result;
 }
 
 Tensor _logcumsumexp_cuda(const Tensor& self, int64_t dim) {
   Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
-  return _logcumsumexp_out_cuda(result, self, dim);
+  return _logcumsumexp_out_cuda(self, dim, result);
 }
 
-Tensor& _cumsum_out_cuda(Tensor& result, const Tensor& self, int64_t dim) {
-  TensorArg output_arg{result, "output", 1};
-  TensorArg input_arg{self, "input", 2};
-  checkAllSameGPU("cumsum", {output_arg, input_arg});
-  checkSameType("cumsum", output_arg, input_arg);
-
-  result.resize_(self.sizes());
-  if (self.dim() == 0) {
-    result.fill_(self);
-    return result;
-  }
-  if (self.numel() == 0) {
-    result.zero_();
-    return result;
-  }
-  auto wrap_dim = maybe_wrap_dim(dim, self.dim());
-
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(
-      at::ScalarType::Half, self.scalar_type(), "cumsum_cuda", [&]() {
+void cumsum_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
+      ScalarType::Half, ScalarType::BFloat16,
+      self.scalar_type(), "cumsum_cuda",
+      [&]() {
         scalar_t init = 0;
         scan_dim<scalar_t>(
             self,
             result,
-            wrap_dim,
+            dim,
             init,
             std::plus<scalar_t>());
       });
-
-  return result;
 }
 
-Tensor _cumsum_cuda(const Tensor& self, int64_t dim) {
-  Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
-  return _cumsum_out_cuda(result, self, dim);
-}
-
-Tensor& _cumprod_out_cuda(Tensor& result, const Tensor& self, int64_t dim) {
-  TensorArg output_arg{result, "output", 1};
-  TensorArg input_arg{self, "input", 2};
-  checkAllSameGPU("cumprod", {output_arg, input_arg});
-  checkSameType("cumprod", output_arg, input_arg);
-
-  result.resize_(self.sizes());
-  if (self.dim() == 0) {
-    result.fill_(self);
-    return result;
-  }
-  if (self.numel() == 0) {
-    result.zero_();
-    return result;
-  }
-  auto wrap_dim = maybe_wrap_dim(dim, self.dim());
-
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(
-      at::ScalarType::Half, self.scalar_type(), "cumprod_cuda", [&]() {
+void cumprod_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
+      ScalarType::Half, ScalarType::BFloat16, self.scalar_type(), "cumprod_cuda", [&]() {
         scalar_t init = 1;
         scan_dim<scalar_t>(
             self,
             result,
-            wrap_dim,
+            dim,
             init,
             std::multiplies<scalar_t>());
       });
-
-  return result;
 }
 
-Tensor _cumprod_cuda(const Tensor& self, int64_t dim) {
-  Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
-  return _cumprod_out_cuda(result, self, dim);
-}
+REGISTER_DISPATCH(cumsum_stub, &cumsum_cuda_kernel);
+REGISTER_DISPATCH(cumprod_stub, &cumprod_cuda_kernel);
 
 }} // namespace at::native

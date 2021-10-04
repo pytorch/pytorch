@@ -8,9 +8,10 @@
 namespace torch {
 namespace jit {
 
-// try to match a list if inputs and keyword 'attributes' to this schema,
-// if it works return the flat list of positional inputs to the call
-// if it returns nullopt, then failure_messages contains a good error report
+// Try to match a list of inputs and keyword 'attributes' to this
+// schema. Return the flat list of positional inputs to the call or
+// `c10::nullopt` on failure (`failure_messages` contains a good error
+// report in this case)
 
 struct MatchedSchema {
   std::vector<Value*> inputs;
@@ -23,7 +24,7 @@ TORCH_API MatchedSchema matchSchema(
     const SourceRange& loc,
     Graph& graph,
     at::ArrayRef<NamedValue> args,
-    at::ArrayRef<NamedValue> kwarg,
+    at::ArrayRef<NamedValue> kwargs,
     const c10::optional<NamedValue>& self = c10::nullopt);
 
 TORCH_API std::pair<size_t, MatchedSchema> matchSchemas(
@@ -31,7 +32,7 @@ TORCH_API std::pair<size_t, MatchedSchema> matchSchemas(
     const SourceRange& loc,
     Graph& graph,
     at::ArrayRef<NamedValue> args,
-    at::ArrayRef<NamedValue> kwarg,
+    at::ArrayRef<NamedValue> kwargs,
     const c10::optional<NamedValue>& self = c10::nullopt,
     bool render_errors = false);
 
@@ -43,8 +44,8 @@ TORCH_API Value* emitBuiltinCall(
     const SourceRange& loc,
     Graph& graph,
     Symbol name,
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
     const c10::optional<NamedValue>& self = c10::nullopt);
 
 TORCH_API c10::optional<size_t> findInputWithName(

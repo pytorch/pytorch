@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/vec.h>
 #include <ATen/ATen.h>
 
 #include <c10/mobile/CPUCachingAllocator.h>
@@ -23,6 +23,7 @@ TEST(CPUCachingAllocatorTest, check_alloc_outside_free_inside) {
   {
     c10::WithCPUCachingAllocatorGuard cachine_allocator_guard(
         &caching_allocator);
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
     float* data_ptr = a.data_ptr<float>();
     a.reset();
     a = at::rand({23, 23});

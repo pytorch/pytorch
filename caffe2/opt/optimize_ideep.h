@@ -8,7 +8,7 @@
 namespace caffe2 {
 namespace opt {
 
-CAFFE2_API void OptimizeForMkldnn(
+TORCH_API void OptimizeForMkldnn(
     nom::repr::NNModule* nn,
     caffe2::Workspace* ws,
     bool training_mode = false);

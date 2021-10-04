@@ -9,8 +9,9 @@ namespace jit {
 
 namespace {
 
-int device(const autograd::Variable& v) {
-  return v.device().is_cuda() ? v.get_device() : -1;
+at::Device device(const autograd::Variable& v) {
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
+  return v.device();
 }
 
 bool isEqual(at::IntArrayRef lhs, at::IntArrayRef rhs) {
@@ -50,21 +51,23 @@ TEST(ArgumentSpecTest, CompleteArgumentSpec_CUDA) {
   auto const GF = at::CUDA(at::kFloat);
   auto const GD = at::CUDA(at::kDouble);
 
-  auto list = createStack({var(CF, {1}, true),
-                           var(CD, {1, 2}, false),
-                           var(GF, {}, true),
-                           var(GD, {4, 5, 6}, false),
-                           undef()});
+  auto list = createStack(
+      {var(CF, {1}, true),
+       var(CD, {1, 2}, false),
+       var(GF, {}, true),
+       var(GD, {4, 5, 6}, false),
+       undef()});
 
   // make sure we have some non-standard strides
   list[1].toTensor().transpose_(0, 1);
 
   // same list but different backing values
-  auto list2 = createStack({var(CF, {1}, true),
-                            var(CD, {1, 2}, false),
-                            var(GF, {}, true),
-                            var(GD, {4, 5, 6}, false),
-                            undef()});
+  auto list2 = createStack(
+      {var(CF, {1}, true),
+       var(CD, {1, 2}, false),
+       var(GF, {}, true),
+       var(GD, {4, 5, 6}, false),
+       undef()});
   list2[1].toTensor().transpose_(0, 1);
 
   CompleteArgumentSpec a(true, list);
@@ -142,21 +145,23 @@ TEST(ArgumentSpecTest, Basic_CUDA) {
 
   ArgumentSpecCreator arg_spec_creator(*graph);
 
-  auto list = createStack({var(CF, {1}, true),
-                           var(CD, {1, 2}, false),
-                           var(GF, {}, true),
-                           var(GD, {4, 5, 6}, false),
-                           undef()});
+  auto list = createStack(
+      {var(CF, {1}, true),
+       var(CD, {1, 2}, false),
+       var(GF, {}, true),
+       var(GD, {4, 5, 6}, false),
+       undef()});
 
   // make sure we have some non-standard strides
   list[1].toTensor().transpose_(0, 1);
 
   // same list but different backing values
-  auto list2 = createStack({var(CF, {1}, true),
-                            var(CD, {1, 2}, false),
-                            var(GF, {}, true),
-                            var(GD, {4, 5, 6}, false),
-                            undef()});
+  auto list2 = createStack(
+      {var(CF, {1}, true),
+       var(CD, {1, 2}, false),
+       var(GF, {}, true),
+       var(GD, {4, 5, 6}, false),
+       undef()});
   list2[1].toTensor().transpose_(0, 1);
 
   ArgumentSpec a = arg_spec_creator.create(true, list);

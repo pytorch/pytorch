@@ -13,6 +13,8 @@ class _ClassNamespace(types.ModuleType):
         return proxy
 
 class _Classes(types.ModuleType):
+    __file__ = '_classes.py'
+
     def __init__(self):
         super(_Classes, self).__init__('torch.classes')
 
@@ -40,7 +42,7 @@ class _Classes(types.ModuleType):
         ``torch.classes.loaded_libraries`` attribute, a set that may be inspected
         for the paths of all libraries loaded using this function.
 
-        Arguments:
+        Args:
             path (str): A path to a shared library to load.
         """
         torch.ops.load_library(path)

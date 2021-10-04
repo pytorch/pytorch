@@ -3,11 +3,11 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/rmac_regions_op.h"
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 #include <cfloat>
 #endif
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 namespace rocprim {
 #else
 namespace cub {
@@ -195,6 +195,7 @@ bool RMACRegionsOp<CUDAContext>::RunOnDevice() {
       overlap_,
       scales_,
       num_rois_.mutable_data<int>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   // Bit awkward, but the size of the output tensor depends on the output of
   // NumRMACRegionsKernel (number of RoIs), so need to copy that to CPU
@@ -211,6 +212,7 @@ bool RMACRegionsOp<CUDAContext>::RunOnDevice() {
       0,
       context_.cuda_stream()>>>(
       W, H, N, num_rois_.data<int>(), output->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return true;
 }

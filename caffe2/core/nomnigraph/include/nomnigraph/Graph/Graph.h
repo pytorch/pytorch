@@ -40,11 +40,11 @@ class Node;
 
 // \brief Edge within a Graph.
 template <typename T, typename... U>
-class Edge : public StorageType<U...> {
+class Edge : public ::StorageType<U...> {
  public:
   using NodeRef = typename Graph<T, U...>::NodeRef;
   Edge(NodeRef tail, NodeRef head, U... args)
-      : StorageType<U...>(std::forward<U...>(args)...),
+      : ::StorageType<U...>(std::forward<U...>(args)...),
         tail_(tail),
         head_(head) {
     DEBUG_PRINT("Creating instance of Edge: %p\n", this);
@@ -74,17 +74,17 @@ class Edge : public StorageType<U...> {
 
 // \brief Node within a Graph.
 template <typename T, typename... U>
-class Node : public StorageType<T>, public Notifier<Node<T, U...>> {
+class Node : public ::StorageType<T>, public Notifier<Node<T, U...>> {
  public:
   using NodeRef = typename Graph<T, U...>::NodeRef;
   using EdgeRef = typename Graph<T, U...>::EdgeRef;
 
   /// \brief Create a node with data.
-  explicit Node(T&& data) : StorageType<T>(std::move(data)) {
+  explicit Node(T&& data) : ::StorageType<T>(std::move(data)) {
     DEBUG_PRINT("Creating instance of Node: %p\n", this);
   }
   /// \brief Create an empty node.
-  explicit Node() : StorageType<T>() {}
+  explicit Node() : ::StorageType<T>() {}
   Node(Node&&) = default;
   Node(const Node&) = delete;
   Node& operator=(const Node&) = delete;

@@ -6,6 +6,71 @@
 #include <vector>
 
 namespace at {
+
+namespace meta {
+TORCH_META_FUNC(fractional_max_pool2d) (
+  const at::Tensor& input,
+  IntArrayRef pool_size,
+  IntArrayRef output_size,
+  const at::Tensor& randomSamples
+) {
+  TORCH_CHECK(
+      pool_size.size() == 2,
+      "fractional_max_pool2d: kernel_size must either be a single Int or tuple of Ints")
+  TORCH_CHECK(
+      output_size.size() == 2,
+      "fractional_max_pool2d: output_size must either be a single Int or tuple of Ints")
+  int64_t numBatch = 1;
+  int64_t planeDim = 0;
+  int64_t heightDim = 1;
+  int64_t widthDim = 2;
+  int64_t outputH = output_size[0];
+  int64_t outputW = output_size[1];
+  int64_t poolSizeH = pool_size[0];
+  int64_t poolSizeW = pool_size[1];
+
+  int64_t ndims = input.ndimension();
+  TORCH_CHECK(ndims == 3 || ndims == 4,
+              "fractional_max_pool2d(): Expected 3D or 4D tensor, but got: ", input.sizes());
+  for (int64_t i = 1; i < ndims; ++i) {
+    TORCH_CHECK(input.size(i) > 0,
+                "fractional_max_pool2d(): Expected input to have non-zero size for non-batch dimensions, but got",
+                input.sizes(), " with dimension ", i, " being empty.");
+  }
+
+
+  if (ndims == 4) {
+    numBatch = input.size(0);
+    planeDim++;
+    heightDim++;
+    widthDim++;
+  }
+
+  /* sizes */
+  int64_t numPlanes = input.size(planeDim);
+  int64_t inputH = input.size(heightDim);
+  int inputW = input.size(widthDim);
+
+  TORCH_CHECK(outputH + poolSizeH - 1 <= inputH,
+    "fractional_max_pool2d(): pool height ", poolSizeH,
+    " too large relative to input height ", inputH);
+  TORCH_CHECK(outputW + poolSizeW - 1 <= inputW,
+    "fractional_max_pool2d(): pool width ", poolSizeW,
+    " too large relative to input width ", inputW);
+
+  if (ndims == 3) {
+    set_output(0, {numPlanes, outputH, outputW}, input.options());
+    /* indices will contain the locations for each output point */
+    set_output(1, {numPlanes, outputH, outputW}, input.options().dtype(kLong));
+  } else {
+    set_output(0, {numBatch, numPlanes, outputH, outputW}, input.options());
+    /* indices will contain the locations for each output point */
+    set_output(1, {numBatch, numPlanes, outputH, outputW}, input.options().dtype(kLong));
+  }
+}
+
+} // namespace meta
+
 namespace native {
 namespace {
 
@@ -52,6 +117,7 @@ static void fractional_max_pool2d_out_single_batch_frame(
           randomSamplesForPlane[1], inputH, outputH, poolSizeH);
 
       /* loop over output */
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int h, w;
 
       scalar_t* inputForPlane = input + plane * inputW * inputH;
@@ -122,30 +188,29 @@ static void fractional_max_pool2d_out_frame(
     });
   }
 
-void fractional_max_pool2d_out_cpu_template(
-  const at::Tensor& input_,
-  at::Tensor& output,
-  IntArrayRef output_size,
-  IntArrayRef pool_size,
-  at::Tensor& indices,
-  const at::Tensor& randomSamples) {
+} // anonymous namespace
 
-  int numBatch = 1;
-  int planeDim = 0;
-  int heightDim = 1;
-  int widthDim = 2;
-  int outputH = output_size[0];
-  int outputW = output_size[1];
-  int poolSizeH = pool_size[0];
-  int poolSizeW = pool_size[1];
+TORCH_IMPL_FUNC(fractional_max_pool2d_out_cpu) (
+  const at::Tensor& input_,
+  IntArrayRef pool_size,
+  IntArrayRef output_size,
+  const at::Tensor& randomSamples,
+  const at::Tensor& output,
+  const at::Tensor& indices) {
+
+  int64_t numBatch = 1;
+  int64_t planeDim = 0;
+  int64_t heightDim = 1;
+  int64_t widthDim = 2;
+  int64_t outputH = output_size[0]; // output.size(heightDim)
+  int64_t outputW = output_size[1]; // output.size(widthDim)
+  int64_t poolSizeH = pool_size[0];
+  int64_t poolSizeW = pool_size[1];
 
   /* get contiguous input */
   auto input = input_.contiguous();
 
-  int ndims = input.ndimension();
-  TORCH_CHECK(input.numel() > 0 && (ndims == 3 || ndims == 4),
-    "non-empty 3D or 4D (batch mode) tensor expected for input, but got: ",
-    ndims);
+  int64_t ndims = input.ndimension();
 
   if (ndims == 4) {
     numBatch = input.size(0);
@@ -155,27 +220,9 @@ void fractional_max_pool2d_out_cpu_template(
   }
 
   /* sizes */
-  int numPlanes = input.size(planeDim);
-  int inputH = input.size(heightDim);
-  int inputW = input.size(widthDim);
-
-  TORCH_CHECK(outputH + poolSizeH - 1 <= inputH,
-    "fractional_max_pool2d(): pool height ", poolSizeH,
-    " too large relative to input height ", inputH);
-  TORCH_CHECK(outputW + poolSizeW - 1 <= inputW,
-    "fractional_max_pool2d(): pool width ", poolSizeW,
-    " too large relative to input width ", inputW);
-
-  if (ndims == 3) {
-    /* resize output */
-    output.resize_({numPlanes, outputH, outputW});
-    /* indices will contain the locations for each output point */
-    indices.resize_({numPlanes, outputH, outputW});
-  } else {
-    output.resize_({numBatch, numPlanes, outputH, outputW});
-    /* indices will contain the locations for each output point */
-    indices.resize_({numBatch, numPlanes, outputH, outputW});
-  }
+  int64_t numPlanes = input.size(planeDim);
+  int64_t inputH = input.size(heightDim);
+  int64_t inputW = input.size(widthDim);
 
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(),
   "fractional_max_pool2d_out_frame", [&] {
@@ -196,6 +243,8 @@ void fractional_max_pool2d_out_cpu_template(
   );
 }
 
+namespace {
+
 template <typename scalar_t>
 static void fractional_max_pool2d_backward_out_single_batch_frame(
   scalar_t* gradInput,
@@ -210,6 +259,7 @@ static void fractional_max_pool2d_backward_out_single_batch_frame(
       scalar_t* gradOutputForPlane = gradOutput + plane * outputW * outputH;
       int64_t* indicesForPlane = indices + plane * outputW * outputH;
 
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int h, w;
       for (h = 0; h < outputH; ++h) {
         for (w = 0; w < outputW; ++w) {
@@ -313,49 +363,12 @@ Tensor& fractional_max_pool2d_backward_out_cpu_template(
 
 } // namespace
 
-std::tuple<Tensor&, Tensor&> fractional_max_pool2d_out_cpu(
-  at::Tensor& output,
-  at::Tensor& indices,
+Tensor& fractional_max_pool2d_backward_out_cpu(const at::Tensor& gradOutput_,
   const at::Tensor& input,
   IntArrayRef pool_size,
   IntArrayRef output_size,
-  const at::Tensor& randomSamples)
-{
-  fractional_max_pool2d_out_cpu_template(
-    input,
-    output,
-    output_size,
-    pool_size,
-    indices,
-    randomSamples);
-  return std::tuple<Tensor&, Tensor&>(output, indices);
-}
-
-std::tuple<Tensor, Tensor> fractional_max_pool2d_cpu(
-  const at::Tensor& input,
-  IntArrayRef pool_size,
-  IntArrayRef output_size,
-  const at::Tensor& randomSamples)
-{
-  Tensor output = at::empty({0}, input.options());
-  Tensor indices = at::empty({0}, input.options().dtype(kLong));
-  fractional_max_pool2d_out_cpu_template(
-    input,
-    output,
-    output_size,
-    pool_size,
-    indices,
-    randomSamples);
-  return std::tuple<Tensor, Tensor>(output, indices);
-}
-
-Tensor& fractional_max_pool2d_backward_out_cpu(
-  at::Tensor& gradInput,
-  const at::Tensor& gradOutput_,
-  const at::Tensor& input,
-  IntArrayRef pool_size,
-  IntArrayRef output_size,
-  const at::Tensor& indices)
+  const at::Tensor& indices,
+  at::Tensor& gradInput)
 {
   gradInput.resize_as_(input);
   fractional_max_pool2d_backward_out_cpu_template(

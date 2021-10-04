@@ -1,3 +1,185 @@
+################################################################################################
+# Exclude and prepend functionalities
+function(exclude OUTPUT INPUT)
+set(EXCLUDES ${ARGN})
+foreach(EXCLUDE ${EXCLUDES})
+        list(REMOVE_ITEM INPUT "${EXCLUDE}")
+endforeach()
+set(${OUTPUT} ${INPUT} PARENT_SCOPE)
+endfunction(exclude)
+
+function(prepend OUTPUT PREPEND)
+set(OUT "")
+foreach(ITEM ${ARGN})
+        list(APPEND OUT "${PREPEND}${ITEM}")
+endforeach()
+set(${OUTPUT} ${OUT} PARENT_SCOPE)
+endfunction(prepend)
+
+
+################################################################################################
+# Clears variables from list
+# Usage:
+#   caffe_clear_vars(<variables_list>)
+macro(caffe_clear_vars)
+  foreach(_var ${ARGN})
+    unset(${_var})
+  endforeach()
+endmacro()
+
+################################################################################################
+# Prints list element per line
+# Usage:
+#   caffe_print_list(<list>)
+function(caffe_print_list)
+  foreach(e ${ARGN})
+    message(STATUS ${e})
+  endforeach()
+endfunction()
+
+################################################################################################
+# Reads set of version defines from the header file
+# Usage:
+#   caffe_parse_header(<file> <define1> <define2> <define3> ..)
+macro(caffe_parse_header FILENAME FILE_VAR)
+  set(vars_regex "")
+  set(__parnet_scope OFF)
+  set(__add_cache OFF)
+  foreach(name ${ARGN})
+    if("${name}" STREQUAL "PARENT_SCOPE")
+      set(__parnet_scope ON)
+    elseif("${name}" STREQUAL "CACHE")
+      set(__add_cache ON)
+    elseif(vars_regex)
+      set(vars_regex "${vars_regex}|${name}")
+    else()
+      set(vars_regex "${name}")
+    endif()
+  endforeach()
+  if(EXISTS "${FILENAME}")
+    file(STRINGS "${FILENAME}" ${FILE_VAR} REGEX "#define[ \t]+(${vars_regex})[ \t]+[0-9]+" )
+  else()
+    unset(${FILE_VAR})
+  endif()
+  foreach(name ${ARGN})
+    if(NOT "${name}" STREQUAL "PARENT_SCOPE" AND NOT "${name}" STREQUAL "CACHE")
+      if(${FILE_VAR})
+        if(${FILE_VAR} MATCHES ".+[ \t]${name}[ \t]+([0-9]+).*")
+          string(REGEX REPLACE ".+[ \t]${name}[ \t]+([0-9]+).*" "\\1" ${name} "${${FILE_VAR}}")
+        else()
+          set(${name} "")
+        endif()
+        if(__add_cache)
+          set(${name} ${${name}} CACHE INTERNAL "${name} parsed from ${FILENAME}" FORCE)
+        elseif(__parnet_scope)
+          set(${name} "${${name}}" PARENT_SCOPE)
+        endif()
+      else()
+        unset(${name} CACHE)
+      endif()
+    endif()
+  endforeach()
+endmacro()
+
+################################################################################################
+# Parses a version string that might have values beyond major, minor, and patch
+# and set version variables for the library.
+# Usage:
+#   caffe2_parse_version_str(<library_name> <version_string>)
+function(caffe2_parse_version_str LIBNAME VERSIONSTR)
+  string(REGEX REPLACE "^([0-9]+).*$" "\\1" ${LIBNAME}_VERSION_MAJOR "${VERSIONSTR}")
+  string(REGEX REPLACE "^[0-9]+\\.([0-9]+).*$" "\\1" ${LIBNAME}_VERSION_MINOR  "${VERSIONSTR}")
+  string(REGEX REPLACE "[0-9]+\\.[0-9]+\\.([0-9]+).*$" "\\1" ${LIBNAME}_VERSION_PATCH "${VERSIONSTR}")
+  set(${LIBNAME}_VERSION_MAJOR ${${LIBNAME}_VERSION_MAJOR} ${ARGN} PARENT_SCOPE)
+  set(${LIBNAME}_VERSION_MINOR ${${LIBNAME}_VERSION_MINOR} ${ARGN} PARENT_SCOPE)
+  set(${LIBNAME}_VERSION_PATCH ${${LIBNAME}_VERSION_PATCH} ${ARGN} PARENT_SCOPE)
+  set(${LIBNAME}_VERSION "${${LIBNAME}_VERSION_MAJOR}.${${LIBNAME}_VERSION_MINOR}.${${LIBNAME}_VERSION_PATCH}" PARENT_SCOPE)
+endfunction()
+
+###
+# Removes common indentation from a block of text to produce code suitable for
+# setting to `python -c`, or using with pycmd. This allows multiline code to be
+# nested nicely in the surrounding code structure.
+#
+# This function respsects PYTHON_EXECUTABLE if it defined, otherwise it uses
+# `python` and hopes for the best. An error will be thrown if it is not found.
+#
+# Args:
+#     outvar : variable that will hold the stdout of the python command
+#     text   : text to remove indentation from
+#
+function(dedent outvar text)
+  # Use PYTHON_EXECUTABLE if it is defined, otherwise default to python
+  if("${PYTHON_EXECUTABLE}" STREQUAL "")
+    set(_python_exe "python")
+  else()
+    set(_python_exe "${PYTHON_EXECUTABLE}")
+  endif()
+  set(_fixup_cmd "import sys; from textwrap import dedent; print(dedent(sys.stdin.read()))")
+  file(WRITE "${CMAKE_BINARY_DIR}/indented.txt" "${text}")
+  execute_process(
+    COMMAND "${_python_exe}" -c "${_fixup_cmd}"
+    INPUT_FILE "${CMAKE_BINARY_DIR}/indented.txt"
+    RESULT_VARIABLE _dedent_exitcode
+    OUTPUT_VARIABLE _dedent_text)
+  if(NOT _dedent_exitcode EQUAL 0)
+    message(ERROR " Failed to remove indentation from: \n\"\"\"\n${text}\n\"\"\"
+    Python dedent failed with error code: ${_dedent_exitcode}")
+    message(FATAL_ERROR " Python dedent failed with error code: ${_dedent_exitcode}")
+  endif()
+  # Remove supurflous newlines (artifacts of print)
+  string(STRIP "${_dedent_text}" _dedent_text)
+  set(${outvar} "${_dedent_text}" PARENT_SCOPE)
+endfunction()
+
+
+function(pycmd_no_exit outvar exitcode cmd)
+  # Use PYTHON_EXECUTABLE if it is defined, otherwise default to python
+  if("${PYTHON_EXECUTABLE}" STREQUAL "")
+    set(_python_exe "python")
+  else()
+    set(_python_exe "${PYTHON_EXECUTABLE}")
+  endif()
+  # run the actual command
+  execute_process(
+    COMMAND "${_python_exe}" -c "${cmd}"
+    RESULT_VARIABLE _exitcode
+    OUTPUT_VARIABLE _output)
+  # Remove supurflous newlines (artifacts of print)
+  string(STRIP "${_output}" _output)
+  set(${outvar} "${_output}" PARENT_SCOPE)
+  set(${exitcode} "${_exitcode}" PARENT_SCOPE)
+endfunction()
+
+
+###
+# Helper function to run `python -c "<cmd>"` and capture the results of stdout
+#
+# Runs a python command and populates an outvar with the result of stdout.
+# Common indentation in the text of `cmd` is removed before the command is
+# executed, so the caller does not need to worry about indentation issues.
+#
+# This function respsects PYTHON_EXECUTABLE if it defined, otherwise it uses
+# `python` and hopes for the best. An error will be thrown if it is not found.
+#
+# Args:
+#     outvar : variable that will hold the stdout of the python command
+#     cmd    : text representing a (possibly multiline) block of python code
+#
+function(pycmd outvar cmd)
+  dedent(_dedent_cmd "${cmd}")
+  pycmd_no_exit(_output _exitcode "${_dedent_cmd}")
+
+  if(NOT _exitcode EQUAL 0)
+    message(ERROR " Failed when running python code: \"\"\"\n${_dedent_cmd}\n\"\"\"")
+    message(FATAL_ERROR " Python command failed with error code: ${_exitcode}")
+  endif()
+  # Remove supurflous newlines (artifacts of print)
+  string(STRIP "${_output}" _output)
+  set(${outvar} "${_output}" PARENT_SCOPE)
+endfunction()
+
+
 ##############################################################################
 # Macro to update cached options.
 macro(caffe2_update_option variable value)
@@ -135,8 +317,8 @@ function(caffe2_binary_target target_name_or_src)
   if(DEFINED Caffe2_MODULES)
     target_link_libraries(${__target} ${Caffe2_MODULES})
   endif()
-  if(USE_TBB)
-    target_include_directories(${__target} PUBLIC ${TBB_ROOT_DIR}/include)
+  if(USE_TBB AND NOT USE_SYSTEM_TBB)
+    target_include_directories(${__target} PUBLIC ${TBB_INCLUDE_DIR})
   endif()
   install(TARGETS ${__target} DESTINATION bin)
 endfunction()
@@ -155,21 +337,6 @@ function(caffe2_hip_binary_target target_name_or_src)
   target_compile_options(${__target} PRIVATE ${HIP_CXX_FLAGS})
   target_include_directories(${__target} PRIVATE ${Caffe2_HIP_INCLUDE})
 endfunction()
-
-##############################################################################
-# Multiplex between loading executables for CUDA versus HIP (AMD Software Stack).
-# Usage:
-#   torch_cuda_based_add_executable(cuda_target)
-#
-macro(torch_cuda_based_add_executable cuda_target)
-  if(USE_ROCM)
-    hip_add_executable(${cuda_target} ${ARGN})
-  elseif(USE_CUDA)
-    cuda_add_executable(${cuda_target} ${ARGN})
-  else()
-
-  endif()
-endmacro()
 
 
 ##############################################################################
@@ -221,6 +388,11 @@ endmacro()
 #   torch_compile_options(lib_name)
 function(torch_compile_options libname)
   set_property(TARGET ${libname} PROPERTY CXX_STANDARD 14)
+
+  # ---[ Check if warnings should be errors.
+  if(WERROR)
+    target_compile_options(${libname} PRIVATE -Werror)
+  endif()
 
   if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     # until they can be unified, keep these lists synced with setup.py
@@ -274,7 +446,7 @@ function(torch_compile_options libname)
 
     if(MSVC)
     elseif(WERROR)
-      target_compile_options(${libname} PRIVATE -Werror -Wno-strict-overflow)
+      target_compile_options(${libname} PRIVATE -Wno-strict-overflow)
     endif()
   endif()
 
@@ -292,11 +464,6 @@ function(torch_compile_options libname)
   # Use -O2 for release builds (-O3 doesn't improve perf, and -Os results in perf regression)
   target_compile_options(${libname} PRIVATE "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O2>")
 
-  # ---[ Check if warnings should be errors.
-  # TODO: Dedupe with WERROR check above
-  if(WERROR)
-    target_compile_options(${libname} PRIVATE -Werror)
-  endif()
 endfunction()
 
 

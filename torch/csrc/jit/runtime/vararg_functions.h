@@ -2,6 +2,7 @@
 #include <ATen/core/List.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
 
 namespace torch {
@@ -10,6 +11,10 @@ namespace jit {
 void tupleUnpack(Stack& stack);
 
 void format(Stack& stack, size_t num_inputs);
+
+void einsum(Stack& stack, size_t num_inputs);
+
+void percentFormat(Stack& stack, size_t num_inputs);
 
 void listUnpack(Stack& stack, size_t num_outputs);
 
@@ -20,11 +25,19 @@ void namedTupleConstruct(
     at::TupleTypePtr type,
     size_t num_inputs);
 
-void listConstruct(Stack& stack, at::ListTypePtr list_type, size_t num_inputs);
+void listConstruct(
+    Stack& stack,
+    const at::ListType& list_type,
+    size_t num_inputs);
 
-void dictConstruct(Stack& stack, at::DictTypePtr type, size_t num_inputs);
+void dictConstruct(Stack& stack, const at::DictType& type, size_t num_inputs);
 
-void createObject(Stack& stack, at::ClassTypePtr type);
+// as weak_ref will create a Object with a non-owning CompilationUnit reference,
+// for use as a constant in the Graph to avoid a reference cycle
+void createObject(
+    Stack& stack,
+    const at::ClassTypePtr& type,
+    bool as_weak_ref = false);
 
 void isinstance(Stack& stack, at::ArrayRef<at::TypePtr> types);
 

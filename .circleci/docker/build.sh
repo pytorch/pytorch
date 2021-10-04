@@ -40,9 +40,7 @@ function extract_all_from_image_name() {
   done
 }
 
-if [[ "$image" == *-trusty* ]]; then
-  UBUNTU_VERSION=14.04
-elif [[ "$image" == *-xenial* ]]; then
+if [[ "$image" == *-xenial* ]]; then
   UBUNTU_VERSION=16.04
 elif [[ "$image" == *-artful* ]]; then
   UBUNTU_VERSION=17.10
@@ -79,21 +77,14 @@ TRAVIS_DL_URL_PREFIX="https://s3.amazonaws.com/travis-python-archives/binaries/u
 # from scratch
 case "$image" in
   pytorch-linux-xenial-py3.8)
-    # TODO: This is a hack, get rid of this as soon as you get rid of the travis downloads
-    TRAVIS_DL_URL_PREFIX="https://s3.amazonaws.com/travis-python-archives/binaries/ubuntu/16.04/x86_64"
-    TRAVIS_PYTHON_VERSION=3.8
+    ANACONDA_PYTHON_VERSION=3.8
+    CMAKE_VERSION=3.10.3
     GCC_VERSION=7
     # Do not install PROTOBUF, DB, and VISION as a test
     ;;
-  pytorch-linux-xenial-py3.6-gcc4.8)
-    ANACONDA_PYTHON_VERSION=3.6
-    GCC_VERSION=4.8
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ;;
   pytorch-linux-xenial-py3.6-gcc5.4)
     ANACONDA_PYTHON_VERSION=3.6
+    CMAKE_VERSION=3.10.3
     GCC_VERSION=5
     PROTOBUF=yes
     DB=yes
@@ -102,67 +93,45 @@ case "$image" in
     ;;
   pytorch-linux-xenial-py3.6-gcc7.2)
     ANACONDA_PYTHON_VERSION=3.6
+    CMAKE_VERSION=3.10.3
     GCC_VERSION=7
     # Do not install PROTOBUF, DB, and VISION as a test
     ;;
   pytorch-linux-xenial-py3.6-gcc7)
     ANACONDA_PYTHON_VERSION=3.6
+    CMAKE_VERSION=3.10.3
     GCC_VERSION=7
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ;;
-  pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4)
-    CUDA_VERSION=9.2
-    CUDNN_VERSION=7
-    ANACONDA_PYTHON_VERSION=3.6
-    GCC_VERSION=5
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ;;
-  pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7)
-    CUDA_VERSION=9.2
-    CUDNN_VERSION=7
-    ANACONDA_PYTHON_VERSION=3.6
-    GCC_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ;;
-  pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7)
-    CUDA_VERSION=10.0
-    CUDNN_VERSION=7
-    ANACONDA_PYTHON_VERSION=3.6
-    GCC_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ;;
-  pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7)
-    CUDA_VERSION=10.1
-    CUDNN_VERSION=7
-    ANACONDA_PYTHON_VERSION=3.6
-    GCC_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
     ;;
   pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7)
     CUDA_VERSION=10.2
     CUDNN_VERSION=7
     ANACONDA_PYTHON_VERSION=3.6
+    CMAKE_VERSION=3.10.3
     GCC_VERSION=7
     PROTOBUF=yes
     DB=yes
     VISION=yes
     KATEX=yes
     ;;
-  pytorch-linux-xenial-cuda11.0-cudnn8-py3-gcc7)
-    CUDA_VERSION=11.0
+  pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7)
+    CUDA_VERSION=11.1
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.6
+    CMAKE_VERSION=3.10.3
+    GCC_VERSION=7
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    ;;
+  pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7)
+    CUDA_VERSION=11.3.0 # Deviating from major.minor to conform to nvidia's Docker image names
+    CUDNN_VERSION=8
+    ANACONDA_PYTHON_VERSION=3.6
+    CMAKE_VERSION=3.10.3
     GCC_VERSION=7
     PROTOBUF=yes
     DB=yes
@@ -172,6 +141,15 @@ case "$image" in
   pytorch-linux-xenial-py3-clang5-asan)
     ANACONDA_PYTHON_VERSION=3.6
     CLANG_VERSION=5.0
+    CMAKE_VERSION=3.10.3
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ;;
+  pytorch-linux-xenial-py3-clang7-asan)
+    ANACONDA_PYTHON_VERSION=3.6
+    CLANG_VERSION=7
+    CMAKE_VERSION=3.10.3
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -179,6 +157,7 @@ case "$image" in
   pytorch-linux-xenial-py3-clang7-onnx)
     ANACONDA_PYTHON_VERSION=3.6
     CLANG_VERSION=7
+    CMAKE_VERSION=3.10.3
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -186,16 +165,17 @@ case "$image" in
   pytorch-linux-xenial-py3-clang5-android-ndk-r19c)
     ANACONDA_PYTHON_VERSION=3.6
     CLANG_VERSION=5.0
+    CMAKE_VERSION=3.10.3
     LLVMDEV=yes
     PROTOBUF=yes
     ANDROID=yes
     ANDROID_NDK_VERSION=r19c
-    GRADLE_VERSION=4.10.3
-    CMAKE_VERSION=3.7.0
+    GRADLE_VERSION=6.8.3
     NINJA_VERSION=1.9.0
     ;;
   pytorch-linux-xenial-py3.6-clang7)
     ANACONDA_PYTHON_VERSION=3.6
+    CMAKE_VERSION=3.10.3
     CLANG_VERSION=7
     PROTOBUF=yes
     DB=yes
@@ -207,7 +187,7 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    VULKAN_SDK_VERSION=1.2.148.0
+    VULKAN_SDK_VERSION=1.2.162.1
     SWIFTSHADER=yes
     ;;
   pytorch-linux-bionic-py3.8-gcc9)
@@ -226,11 +206,11 @@ case "$image" in
     DB=yes
     VISION=yes
     ;;
-  pytorch-linux-bionic-cuda10.2-cudnn7-py3.8-gcc9)
+  pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7)
     CUDA_VERSION=10.2
     CUDNN_VERSION=7
-    ANACONDA_PYTHON_VERSION=3.8
-    GCC_VERSION=9
+    ANACONDA_PYTHON_VERSION=3.9
+    GCC_VERSION=7
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -243,31 +223,31 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    KATEX=yes
+    ROCM_VERSION=3.9
     ;;
-  pytorch-linux-bionic-cuda11.0-cudnn8-py3.8-gcc9)
-    CUDA_VERSION=11.0
-    CUDNN_VERSION=8
-    ANACONDA_PYTHON_VERSION=3.8
+  pytorch-linux-bionic-rocm4.1-py3.6)
+    ANACONDA_PYTHON_VERSION=3.6
     GCC_VERSION=9
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    KATEX=yes
+    ROCM_VERSION=4.1
     ;;
-  pytorch-linux-bionic-rocm3.7-py3.6)
+  pytorch-linux-bionic-rocm4.2-py3.6)
     ANACONDA_PYTHON_VERSION=3.6
+    GCC_VERSION=9
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ROCM_VERSION=3.7
+    ROCM_VERSION=4.2
     ;;
-  pytorch-linux-bionic-rocm3.8-py3.6)
+  pytorch-linux-bionic-rocm4.3.1-py3.6)
     ANACONDA_PYTHON_VERSION=3.6
+    GCC_VERSION=9
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ROCM_VERSION=3.8
+    ROCM_VERSION=4.3.1
     ;;
   *)
     # Catch-all for builds that are not hardcoded.
@@ -275,6 +255,9 @@ case "$image" in
     DB=yes
     VISION=yes
     echo "image '$image' did not match an existing build configuration"
+    if [[ "$image" == *xenial* ]]; then
+      CMAKE_VERSION=3.10.3
+    fi
     if [[ "$image" == *py* ]]; then
       extract_version_from_image_name py ANACONDA_PYTHON_VERSION
     fi
@@ -309,7 +292,7 @@ if [ -n "${JENKINS:-}" ]; then
   JENKINS_GID=$(id -g jenkins)
 fi
 
-tmp_tag="tmp-$(cat /dev/urandom | tr -dc 'a-z' | fold -w 32 | head -n 1)"
+tmp_tag=$(basename "$(mktemp -u)" | tr '[:upper:]' '[:lower:]')
 
 # Build image
 # TODO: build-arg THRIFT is not turned on for any image, remove it once we confirm
@@ -334,7 +317,6 @@ docker build \
        --build-arg "GLIBC_VERSION=${GLIBC_VERSION}" \
        --build-arg "CLANG_VERSION=${CLANG_VERSION}" \
        --build-arg "ANACONDA_PYTHON_VERSION=${ANACONDA_PYTHON_VERSION}" \
-       --build-arg "TRAVIS_PYTHON_VERSION=${TRAVIS_PYTHON_VERSION}" \
        --build-arg "GCC_VERSION=${GCC_VERSION}" \
        --build-arg "CUDA_VERSION=${CUDA_VERSION}" \
        --build-arg "CUDNN_VERSION=${CUDNN_VERSION}" \
@@ -374,19 +356,6 @@ if [[ "$OS" == "ubuntu" ]]; then
     echo "UBUNTU_VERSION=$UBUNTU_VERSION, but:"
     drun lsb_release -a
     exit 1
-  fi
-fi
-
-if [ -n "$TRAVIS_PYTHON_VERSION" ]; then
-  if [[ "$TRAVIS_PYTHON_VERSION" != nightly ]]; then
-    if !(drun python --version 2>&1 | grep -qF "Python $TRAVIS_PYTHON_VERSION"); then
-      echo "TRAVIS_PYTHON_VERSION=$TRAVIS_PYTHON_VERSION, but:"
-      drun python --version
-      exit 1
-    fi
-  else
-    echo "Please manually check nightly is OK:"
-    drun python --version
   fi
 fi
 

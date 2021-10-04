@@ -51,4 +51,3 @@ pip install -e caffe2/
 # License
 
 [MIT License](LICENSE)
-

@@ -8,7 +8,7 @@
 
 namespace caffe2 {
 
-TensorProto::DataType TypeMetaToDataType(const TypeMeta& meta) {
+TensorProto::DataType TypeMetaToDataType(const TypeMeta meta) {
   static_assert(
       sizeof(int) == 4, "int in this compiler does not equal to 4 bytes.");
   static std::map<TypeIdentifier, TensorProto::DataType> data_type_map{
@@ -36,7 +36,7 @@ TensorProto::DataType TypeMetaToDataType(const TypeMeta& meta) {
       it == data_type_map.end() ? TensorProto_DataType_UNDEFINED : it->second);
 }
 
-const TypeMeta& DataTypeToTypeMeta(const TensorProto::DataType& dt) {
+const TypeMeta DataTypeToTypeMeta(const TensorProto::DataType& dt) {
   static std::map<TensorProto::DataType, TypeMeta> type_meta_map{
       {TensorProto_DataType_FLOAT, TypeMeta::Make<float>()},
       {TensorProto_DataType_INT32, TypeMeta::Make<int>()},

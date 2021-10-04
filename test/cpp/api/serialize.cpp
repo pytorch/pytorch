@@ -387,6 +387,7 @@ TEST(SerializeTest, XOR) {
     loss.backward();
     optimizer.step();
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     running_loss = running_loss * 0.99 + loss.sum().item<float>() * 0.01;
     ASSERT_LT(epoch, 3000);
     epoch++;
@@ -493,8 +494,8 @@ TEST(SerializeTest, Optim_Adagrad) {
   std::vector<int64_t> step_buffers;
   const auto& params_ = optim1.param_groups()[0].params();
   const auto& optim1_state = optim1.state();
-  for (size_t i = 0; i < params_.size(); i++) {
-    auto key_ = c10::guts::to_string(params_[i].unsafeGetTensorImpl());
+  for (const auto & param : params_) {
+    auto key_ = c10::guts::to_string(param.unsafeGetTensorImpl());
     const AdagradParamState& curr_state_ = static_cast<const AdagradParamState&>(*(optim1_state.at(key_).get()));
     sum_buffers.emplace_back(curr_state_.sum());
     step_buffers.emplace_back(curr_state_.step());
@@ -811,6 +812,7 @@ TEST(SerializeTest, XOR_CUDA) {
     loss.backward();
     optimizer.step();
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     running_loss = running_loss * 0.99 + loss.sum().item<float>() * 0.01;
     ASSERT_LT(epoch, 3000);
     epoch++;

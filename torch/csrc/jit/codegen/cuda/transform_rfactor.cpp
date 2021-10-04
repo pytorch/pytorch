@@ -9,6 +9,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 namespace {
 
@@ -47,13 +48,13 @@ class ReplayRFactor : public ReplayTransformations {
       return ReplayTransformations::handle(s);
 
     // outer loop size
-    Val* oe = ceilDiv(mapped->extent(), s->factor());
+    Val* remainder = ceilDiv(mapped->extent(), s->factor());
 
     // Manually replay the split, making reduction = false and rfactor = true
     // outer IterDomain
     IterDomain* ido = new IterDomain(
         new Int(0),
-        oe->as<Int>(),
+        s->innerSplit() ? remainder->as<Int>() : s->factor(),
         mapped->getParallelType(),
         rfactor_outer ? IterType::Reduction : IterType::Iteration,
         true); // broadcast
@@ -61,13 +62,13 @@ class ReplayRFactor : public ReplayTransformations {
     // inner IterDomain
     IterDomain* idi = new IterDomain(
         new Int(0),
-        s->factor(),
+        s->innerSplit() ? s->factor() : remainder->as<Int>(),
         mapped->getParallelType(),
         rfactor_inner ? IterType::Reduction : IterType::Iteration,
         true);
 
     // Generate the split node
-    new Split(ido, idi, mapped, s->factor());
+    new Split(ido, idi, mapped, s->factor(), s->innerSplit());
 
     // Remove mapped id from leaf IDs
     leaf_ids_.erase(mapped);
@@ -152,7 +153,7 @@ class ReplayRFactor : public ReplayTransformations {
 TensorDomain* TransformRFactor::runReplay(
     TensorDomain* orig_td,
     std::vector<int> axes) {
-  FUSER_PERF_SCOPE("runReplay");
+  FUSER_PERF_SCOPE("TransformRFactor::runReplay");
 
   TORCH_CHECK(!axes.empty(), "No axes provided to rfactor replay.");
 
@@ -303,7 +304,7 @@ TensorDomain* TransformRFactor::runReplay(
 TensorDomain* TransformRFactor::runReplay2(
     TensorDomain* orig_td,
     std::vector<int> axes) {
-  FUSER_PERF_SCOPE("runReplay2");
+  FUSER_PERF_SCOPE("TransformRFactor::runReplay2");
 
   int ndims = (int)orig_td->nDims();
 
@@ -393,6 +394,7 @@ TensorDomain* TransformRFactor::runReplay2(
       new_root, new_domain, std::vector<bool>(new_root.size(), true));
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

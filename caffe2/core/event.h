@@ -55,7 +55,7 @@ typedef void (*EventResetFunction)(Event*);
 typedef std::function<void()> EventCallbackFunction;
 typedef void (*EventSetCallbackFunction)(Event*, EventCallbackFunction);
 
-class CAFFE2_API Event {
+class TORCH_API Event {
  public:
   explicit Event(const DeviceOption& option)
       : event_(), type_(option.device_type()), option_(option) {

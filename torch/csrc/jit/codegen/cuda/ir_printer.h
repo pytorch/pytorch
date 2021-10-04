@@ -1,15 +1,16 @@
-
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
+#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 
 #include <iostream>
 
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 //! Prints computation Fusion IR nodes
 //!
@@ -25,7 +26,7 @@ namespace fuser {
 //
 //! \sa IrTransformPrinter
 //!
-class TORCH_CUDA_API IrMathPrinter : public IrPrinter {
+class TORCH_CUDA_CU_API IrMathPrinter : public IrPrinter {
  public:
   IrMathPrinter(std::ostream& os) : IrPrinter(os) {}
 
@@ -41,27 +42,17 @@ class TORCH_CUDA_API IrMathPrinter : public IrPrinter {
 //!
 //! \sa IrMathPrinter
 //!
-class TORCH_CUDA_API IrTransformPrinter : public IrPrinter {
+class TORCH_CUDA_CU_API IrTransformPrinter : public IrPrinter {
  public:
   IrTransformPrinter(std::ostream& os) : IrPrinter(os) {}
 
-  void handle(const UnaryOp* const uop) override {
-    if (printInline()) {
-      IrPrinter::handle(uop);
-    }
-  }
+  void handle(Fusion* f) override;
 
-  void handle(const BinaryOp* const bop) override {
-    if (printInline()) {
-      IrPrinter::handle(bop);
-    }
-  }
-
-  void handle(Fusion* f) override {
-    IrPrinter::handle(f);
-  }
+ private:
+  void printTransforms(TensorView* tv);
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

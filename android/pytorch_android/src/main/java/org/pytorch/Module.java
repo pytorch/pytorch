@@ -4,6 +4,7 @@ package org.pytorch;
 
 import com.facebook.soloader.nativeloader.NativeLoader;
 import com.facebook.soloader.nativeloader.SystemDelegate;
+import java.util.Map;
 
 /** Java wrapper for torch::jit::Module. */
 public class Module {
@@ -15,14 +16,16 @@ public class Module {
    * device.
    *
    * @param modelPath path to file that contains the serialized TorchScript module.
+   * @param extraFiles map with extra files names as keys, content of them will be loaded to values.
    * @param device {@link org.pytorch.Device} to use for running specified module.
    * @return new {@link org.pytorch.Module} object which owns torch::jit::Module.
    */
-  public static Module load(final String modelPath, final Device device) {
+  public static Module load(
+      final String modelPath, final Map<String, String> extraFiles, final Device device) {
     if (!NativeLoader.isInitialized()) {
       NativeLoader.init(new SystemDelegate());
     }
-    return new Module(new NativePeer(modelPath, device));
+    return new Module(new NativePeer(modelPath, extraFiles, device));
   }
 
   /**
@@ -32,7 +35,7 @@ public class Module {
    * @return new {@link org.pytorch.Module} object which owns torch::jit::Module.
    */
   public static Module load(final String modelPath) {
-    return load(modelPath, Device.CPU);
+    return load(modelPath, null, Device.CPU);
   }
 
   Module(INativePeer nativePeer) {

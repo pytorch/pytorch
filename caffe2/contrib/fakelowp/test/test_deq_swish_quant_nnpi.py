@@ -1,11 +1,11 @@
-
-
 import numpy as np
 import caffe2.python.fakelowp.init_shared_libs  # noqa
 from caffe2.python import core, workspace
 from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
 from caffe2.python.fakelowp.test_utils import print_test_debug_info
 import caffe2.python.serialized_test.serialized_test_util as serial
+import datetime
+from hypothesis import settings
 
 core.GlobalInit(["caffe2", "--caffe2_log_level=-3", "--glow_global_fp16=1"])
 
@@ -24,6 +24,7 @@ class DeqSwishQuantTest(serial.SerializedTestCase):
     def _swish(self, x):
         return np.float32(x) * self._sigmoid(x)
 
+    @settings(deadline=datetime.timedelta(seconds=10))
     def test_swish_int8(self):
         np.random.seed(0)
         workspace.ResetWorkspace()

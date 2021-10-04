@@ -40,13 +40,15 @@ class BlobTestNonDefaultConstructible {
 };
 } // namespace
 
-CAFFE_KNOWN_TYPE(BlobTestFoo);
-CAFFE_KNOWN_TYPE(BlobTestBar);
-CAFFE_KNOWN_TYPE(BlobTestNonDefaultConstructible);
+CAFFE_KNOWN_TYPE_NOEXPORT(BlobTestFoo);
+CAFFE_KNOWN_TYPE_NOEXPORT(BlobTestBar);
+CAFFE_KNOWN_TYPE_NOEXPORT(BlobTestNonDefaultConstructible);
 
 class BlobTestFooSerializer : public BlobSerializerBase {
  public:
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   BlobTestFooSerializer() {}
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~BlobTestFooSerializer() override {}
   /**
    * Serializes a Blob. Note that this blob has to contain Tensor,
@@ -105,6 +107,7 @@ TEST(BlobTest, Blob) {
 
 TEST(BlobTest, BlobUninitialized) {
   Blob blob;
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_THROW(blob.Get<int>(), EnforceNotMet);
 }
 
@@ -115,6 +118,7 @@ TEST(BlobTest, BlobWrongType) {
   EXPECT_FALSE(blob.IsType<int>());
   // When not null, we should only call with the right type.
   EXPECT_NE(&blob.Get<BlobTestFoo>(), nullptr);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_THROW(blob.Get<int>(), EnforceNotMet);
 }
 
@@ -133,6 +137,7 @@ TEST(BlobTest, BlobMove) {
   EXPECT_TRUE(blob1.Reset(foo.release()) != nullptr);
   Blob blob2;
   blob2 = std::move(blob1);
+  // NOLINTNEXTLINE(bugprone-use-after-move,hicpp-avoid-goto,clang-analyzer-cplusplus.Move,cppcoreguidelines-avoid-goto)
   ASSERT_THROW(blob1.Get<BlobTestFoo>(), EnforceNotMet);
   EXPECT_EQ(&blob2.Get<BlobTestFoo>(), fooPtr);
   Blob blob3{std::move(blob2)};
@@ -141,12 +146,14 @@ TEST(BlobTest, BlobMove) {
 
 TEST(BlobTest, BlobNonConstructible) {
   Blob blob;
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_THROW(blob.Get<BlobTestNonDefaultConstructible>(), EnforceNotMet);
   // won't work because it's not default constructible
   // blob.GetMutable<BlobTestNonDefaultConstructible>();
   EXPECT_FALSE(
       blob.GetMutableOrNull<BlobTestNonDefaultConstructible>() != nullptr);
   EXPECT_TRUE(blob.Reset(new BlobTestNonDefaultConstructible(42)) != nullptr);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_NO_THROW(blob.Get<BlobTestNonDefaultConstructible>());
   ASSERT_TRUE(
       blob.GetMutableOrNull<BlobTestNonDefaultConstructible>() != nullptr);
@@ -166,6 +173,7 @@ TEST(BlobTest, BlobShareExternalPointer) {
 
 TEST(BlobTest, BlobShareExternalObject) {
   Blob blob;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   BlobTestFoo foo;
   EXPECT_EQ(blob.ShareExternal<BlobTestFoo>(&foo), &foo);
   EXPECT_TRUE(blob.IsType<BlobTestFoo>());
@@ -232,6 +240,7 @@ TEST(TensorNonTypedTest, NonDefaultConstructible) {
 
   // this doesn't compile - good!
   // auto* ptr = tensor.mutable_data<BlobTestNonDefaultConstructible>();
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   EXPECT_THROW(
       tensor.raw_mutable_data(
           TypeMeta::Make<BlobTestNonDefaultConstructible>()),
@@ -363,6 +372,7 @@ TYPED_TEST(TensorCPUTest, TensorShareDataRawPointer) {
   dims[0] = 2;
   dims[1] = 3;
   dims[2] = 5;
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-c-arrays)
   std::unique_ptr<TypeParam[]> raw_buffer(new TypeParam[2 * 3 * 5]);
   Tensor tensor(dims, CPU);
   tensor.ShareExternalPointer(raw_buffer.get());
@@ -380,6 +390,7 @@ TYPED_TEST(TensorCPUTest, TensorShareDataRawPointerWithMeta) {
   dims[0] = 2;
   dims[1] = 3;
   dims[2] = 5;
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-c-arrays)
   std::unique_ptr<TypeParam[]> raw_buffer(new TypeParam[2 * 3 * 5]);
   Tensor tensor(dims, CPU);
   TypeMeta meta = TypeMeta::Make<TypeParam>();
@@ -510,6 +521,7 @@ TYPED_TEST(TensorCPUDeathTest, CannotAccessRawDataWhenEmpty) {
   Tensor tensor(CPU);
   EXPECT_EQ(tensor.dim(), 1);
   EXPECT_EQ(tensor.numel(), 0);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(tensor.raw_data());
 }
 
@@ -517,6 +529,7 @@ TYPED_TEST(TensorCPUDeathTest, CannotAccessDataWhenEmpty) {
   Tensor tensor(CPU);
   EXPECT_EQ(tensor.dim(), 1);
   EXPECT_EQ(tensor.numel(), 0);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(tensor.data<TypeParam>());
 }
 
@@ -597,10 +610,12 @@ TEST(TensorTest, CopyAndAssignment) {
   testing::randomFill(x.template mutable_data<float>(), 16 * 17);
   EXPECT_TRUE(x.defined());
 
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   Tensor y(x);
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   Tensor z = x;
-  testing::assertTensorEquals(x, y);
-  testing::assertTensorEquals(x, z);
+  testing::assertTensorEquals(x, y, 0);
+  testing::assertTensorEquals(x, z, 0);
 }
 
 TEST(TensorDeathTest, CannotCastDownLargeDims) {
@@ -609,6 +624,7 @@ TEST(TensorDeathTest, CannotCastDownLargeDims) {
   Tensor tensor(vector<int64_t>{large_number}, CPU);
   EXPECT_EQ(tensor.dim(), 1);
   EXPECT_EQ(tensor.size(0), large_number);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_THROW(tensor.dim32(0), EnforceNotMet);
 }
 
@@ -672,14 +688,23 @@ TEST(TensorDeathTest, CannotCastDownLargeDims) {
     EXPECT_EQ(new_tensor.size(1), 3);                                     \
   }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
 TEST_SERIALIZATION_WITH_TYPE(bool, int32_data)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
 TEST_SERIALIZATION_WITH_TYPE(double, double_data)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
 TEST_SERIALIZATION_WITH_TYPE(float, float_data)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
 TEST_SERIALIZATION_WITH_TYPE(int, int32_data)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
 TEST_SERIALIZATION_WITH_TYPE(int8_t, int32_data)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
 TEST_SERIALIZATION_WITH_TYPE(int16_t, int32_data)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
 TEST_SERIALIZATION_WITH_TYPE(uint8_t, int32_data)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
 TEST_SERIALIZATION_WITH_TYPE(uint16_t, int32_data)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
 TEST_SERIALIZATION_WITH_TYPE(int64_t, int64_data)
 
 TEST(TensorTest, TensorSerialization_CustomType) {
@@ -695,6 +720,7 @@ TEST(TensorTest, TensorSerialization_CustomType) {
   EXPECT_EQ(proto.name(), "test");
   EXPECT_EQ(proto.type(), "Tensor");
   Blob new_blob;
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   EXPECT_NO_THROW(DeserializeBlob(serialized, &new_blob));
   EXPECT_TRUE(BlobIsTensorType(new_blob, CPU));
   const TensorCPU& new_tensor = blob.Get<TensorCPU>();
@@ -738,6 +764,7 @@ TEST(TensorTest, Half) {
     EXPECT_EQ(tensor_proto.int32_data().size(), kSize);
   }
   Blob new_blob;
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   EXPECT_NO_THROW(DeserializeBlob(serialized, &new_blob));
   EXPECT_TRUE(BlobIsTensorType(new_blob, CPU));
   const TensorCPU& new_tensor = blob.Get<TensorCPU>();
@@ -769,6 +796,7 @@ TEST(QTensorTest, QTensorSerialization) {
   srand(0);
   for (int i = 0; i < 6; ++i) {
     for (int j = 0; j < 5; ++j) {
+      // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
       qtensor->SetBitAtIndex(j, i, rand() % 2);
     }
   }
@@ -807,6 +835,7 @@ class VectorCursor : public db::Cursor {
   explicit VectorCursor(StringMap* data) : data_(data) {
     pos_ = 0;
   }
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~VectorCursor() override {}
   void Seek(const string& /* unused */) override {}
   void SeekToFirst() override {}
@@ -894,10 +923,8 @@ TYPED_TEST(TypedTensorTest, BigTensorSerialization) {
     }
     StringMap data;
     std::mutex mutex;
-    /*auto db = CreateDB("minidb", db_source, WRITE);*/
     auto acceptor = [&](const std::string& key, const std::string& value) {
       std::lock_guard<std::mutex> guard(mutex);
-      /*db->NewTransaction()->Put(key, value);*/
       data.emplace_back(key, value);
     };
     SerializeBlob(blob, "test", acceptor);
@@ -963,7 +990,9 @@ struct DummyType {
 
 class DummyTypeSerializer : public BlobSerializerBase {
  public:
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   DummyTypeSerializer() {}
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~DummyTypeSerializer() override {}
   void Serialize(
       const void* pointer,
@@ -974,7 +1003,8 @@ class DummyTypeSerializer : public BlobSerializerBase {
     const auto& container = *static_cast<const DummyType*>(pointer);
     for (int k = 0; k < container.n_chunks; ++k) {
       std::string serialized_chunk = container.serialize(name, k);
-      acceptor(c10::str(name, kChunkIdSeparator, k), serialized_chunk);
+      acceptor(
+          c10::str(name, kChunkIdSeparator, k), std::move(serialized_chunk));
     }
   }
 };
@@ -988,7 +1018,7 @@ class DummyTypeDeserializer : public BlobDeserializerBase {
 };
 } // namespace
 
-CAFFE_KNOWN_TYPE(DummyType);
+CAFFE_KNOWN_TYPE_NOEXPORT(DummyType);
 
 namespace {
 REGISTER_BLOB_SERIALIZER((TypeMeta::Id<DummyType>()), DummyTypeSerializer);
@@ -1052,7 +1082,7 @@ TEST(CustomChunkSize, BigTensorSerialization) {
   int64_t d2 = FLAGS_caffe2_test_big_tensor_size
       ? FLAGS_caffe2_test_big_tensor_size / d1
       : static_cast<int64_t>(std::numeric_limits<int>::max()) + 1;
-  int64_t size = d1 * d2;
+  BlobSerializationOptions options;
 
   Blob blob;
   TensorCPU* tensor = BlobGetMutableTensor(&blob, CPU);
@@ -1065,15 +1095,18 @@ TEST(CustomChunkSize, BigTensorSerialization) {
     std::lock_guard<std::mutex> guard(mutex);
     counter++;
   };
-  SerializeBlob(blob, "test", acceptor, size);
+  options.set_chunk_size(d1 * d2);
+  SerializeBlob(blob, "test", acceptor, options);
   EXPECT_EQ(counter, 1);
 
   counter = 0;
-  SerializeBlob(blob, "test", acceptor, (size / 2) + 1);
+  options.set_chunk_size((d1 * d2) / 2 + 1);
+  SerializeBlob(blob, "test", acceptor, options);
   EXPECT_EQ(counter, 2);
 
   counter = 0;
-  SerializeBlob(blob, "test", acceptor, kNoChunking);
+  options.set_chunk_size(-1);
+  SerializeBlob(blob, "test", acceptor, options);
   EXPECT_EQ(counter, 1);
 }
 
@@ -1190,24 +1223,31 @@ static caffe2::BlobProto CreateProtoWithInt32Data(
     int32_t data = 0;
     switch (dataType) {
       case caffe2::TensorProto_DataType_INT32:
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,clang-analyzer-security.insecureAPI.rand)
         data = static_cast<int32_t>(rand() % 0xffffffff);
         break;
       case caffe2::TensorProto_DataType_BOOL:
+        // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
         data = static_cast<uint8_t>(rand() % 0x00000001);
         break;
       case caffe2::TensorProto_DataType_UINT8:
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,clang-analyzer-security.insecureAPI.rand)
         data = static_cast<uint8_t>(rand() % 0x000000ff);
         break;
       case caffe2::TensorProto_DataType_INT8:
+        // NOLINTNEXTLINE(bugprone-signed-char-misuse,cppcoreguidelines-avoid-magic-numbers,clang-analyzer-security.insecureAPI.rand)
         data = static_cast<int8_t>(rand() % 0x000000ff);
         break;
       case caffe2::TensorProto_DataType_UINT16:
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,clang-analyzer-security.insecureAPI.rand)
         data = static_cast<uint16_t>(rand() % 0x0000ffff);
         break;
       case caffe2::TensorProto_DataType_INT16:
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,clang-analyzer-security.insecureAPI.rand)
         data = static_cast<int16_t>(rand() % 0x0000ffff);
         break;
       case caffe2::TensorProto_DataType_FLOAT16:
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,clang-analyzer-security.insecureAPI.rand)
         data = static_cast<uint16_t>(rand() % 0x0000ffff);
         break;
       default:

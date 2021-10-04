@@ -1,10 +1,8 @@
 
 import torch
-import tempfile
 from torch.utils import ThroughputBenchmark
-from torch.testing import assert_allclose
 
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase, TemporaryFileName
 
 class TwoLayerNet(torch.jit.ScriptModule):
     def __init__(self, D_in, H, D_out):
@@ -57,7 +55,7 @@ class TestThroughputBenchmark(TestCase):
             # or just unpack the list of inputs
             module_result = module(*inputs[i])
             bench_result = bench.run_once(*inputs[i])
-            assert_allclose(bench_result, module_result)
+            torch.testing.assert_close(bench_result, module_result)
 
         stats = bench.benchmark(
             num_calling_threads=4,
@@ -76,8 +74,8 @@ class TestThroughputBenchmark(TestCase):
         self.linear_test(TwoLayerNetModule)
 
     def test_profiling(self):
-        with tempfile.NamedTemporaryFile(delete=False) as f:
-            self.linear_test(TwoLayerNetModule, profiler_output_path=f.name)
+        with TemporaryFileName() as fname:
+            self.linear_test(TwoLayerNetModule, profiler_output_path=fname)
 
 
 if __name__ == '__main__':

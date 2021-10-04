@@ -22,7 +22,7 @@ inline std::tuple<size_t, size_t> calc_num_tasks_and_chunk_size(
   return std::make_tuple(num_tasks, chunk_size);
 }
 
-CAFFE2_API void _parallel_run(
+TORCH_API void _parallel_run(
   const int64_t begin,
   const int64_t end,
   const int64_t grain_size,
@@ -41,6 +41,7 @@ inline void parallel_for(
     return;
   }
   if ((end - begin) < grain_size || in_parallel_region()) {
+    internal::ThreadIdGuard tid_guard(0);
     f(begin, end);
     return;
   }
@@ -67,6 +68,7 @@ inline scalar_t parallel_reduce(
     return ident;
   }
   if ((end - begin) < grain_size || in_parallel_region()) {
+    internal::ThreadIdGuard tid_guard(0);
     return f(begin, end, ident);
   }
   size_t num_tasks, chunk_size;

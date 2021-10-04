@@ -12,7 +12,7 @@ namespace c10 {
 /// numbering system which is not visible to the user.  HOWEVER, we
 /// guarantee that StreamId 0 is always a valid stream, and corresponds
 /// to some sort of "default" stream.
-using StreamId = int32_t;
+using StreamId = int64_t;
 
 // NB: I decided not to call the above StreamIndex to avoid confusion with
 // DeviceIndex.  This way, you access device index with index(), and stream id
@@ -54,11 +54,12 @@ using StreamId = int32_t;
  * functionality (e.g., get the cudaStream_t of a CUDA stream.)  There are
  * wrapper classes which provide this functionality, e.g., CUDAStream.
  */
-class Stream final {
-private:
+class C10_API Stream final {
+ private:
   Device device_;
   StreamId id_;
-public:
+
+ public:
   enum Unsafe { UNSAFE };
   enum Default { DEFAULT };
 
@@ -69,16 +70,13 @@ public:
   /// we don't require backends to give any guarantees about non-zero
   /// StreamIds; they are welcome to allocate in whatever way they like.
   explicit Stream(Unsafe, Device device, StreamId id)
-    : device_(device)
-    , id_(id) {}
+      : device_(device), id_(id) {}
 
   /// Construct the default stream of a Device.  The default stream is
   /// NOT the same as the current stream; default stream is a fixed stream
   /// that never changes, whereas the current stream may be changed by
   /// StreamGuard.
-  explicit Stream(Default, Device device)
-    : device_(device)
-    , id_(0) {}
+  explicit Stream(Default, Device device) : device_(device), id_(0) {}
 
   bool operator==(const Stream& other) const noexcept {
     return this->device_ == other.device_ && this->id_ == other.id_;
@@ -87,10 +85,18 @@ public:
     return !(*this == other);
   }
 
-  Device device() const noexcept { return device_; }
-  DeviceType device_type() const noexcept { return device_.type(); }
-  DeviceIndex device_index() const noexcept { return device_.index(); }
-  StreamId id() const noexcept { return id_; }
+  Device device() const noexcept {
+    return device_;
+  }
+  DeviceType device_type() const noexcept {
+    return device_.type();
+  }
+  DeviceIndex device_index() const noexcept {
+    return device_.index();
+  }
+  StreamId id() const noexcept {
+    return id_;
+  }
 
   // Enqueues a wait instruction in the stream's work queue.
   // This instruction is a no-op unless the event is marked
@@ -100,6 +106,14 @@ public:
   void wait(const T& event) const {
     event.block(*this);
   }
+
+  // Return whether all asynchronous work previously enqueued on this stream
+  // has completed running on the device.
+  bool query() const;
+
+  // Wait (by blocking the calling thread) until all asynchronous work enqueued
+  // on this stream has completed running on the device.
+  void synchronize() const;
 
   // The purpose of this function is to more conveniently permit binding
   // of Stream to and from Python.  Without packing, I have to setup a whole
@@ -111,24 +125,41 @@ public:
   uint64_t pack() const noexcept {
     // Are you here because this static assert failed?  Make sure you ensure
     // that the bitmasking code below is updated accordingly!
-    static_assert(sizeof(DeviceType) == 2, "DeviceType is not 16-bit");
-    static_assert(sizeof(DeviceIndex) == 2, "DeviceIndex is not 16-bit");
-    static_assert(sizeof(StreamId) == 4, "DeviceIndex is not 32-bit");
+    static_assert(sizeof(DeviceType) == 1, "DeviceType is not 8-bit");
+    static_assert(sizeof(DeviceIndex) == 1, "DeviceIndex is not 8-bit");
+    static_assert(sizeof(StreamId) == 8, "StreamId is not 64-bit");
     // Concat these together into a 64-bit integer
     // See Note [Hazard when concatenating signed integers]
-    uint64_t bits =
-        static_cast<uint64_t>(static_cast<uint16_t>(device_type())) << 48
-      | static_cast<uint64_t>(static_cast<uint16_t>(device_index())) << 32
-      | static_cast<uint64_t>(static_cast<uint32_t>(id()));
+    uint64_t bits = static_cast<uint64_t>(static_cast<uint8_t>(device_type()))
+            << 56 |
+        static_cast<uint64_t>(static_cast<uint8_t>(device_index())) << 48 |
+        // Remove the sign extension part of the 64-bit address because
+        // the id might be used to hold a pointer.
+        (static_cast<uint64_t>(id()) & ((1ull << 48) - 1));
+    TORCH_INTERNAL_ASSERT(
+        static_cast<DeviceIndex>((bits >> 48) & 0xFFull) == device_index(),
+        "DeviceIndex is not correctly packed");
+    TORCH_INTERNAL_ASSERT(
+        static_cast<DeviceType>((bits >> 56)) == device_type(),
+        "DeviceType is not correctly packed");
+    // Re-extend the sign of stream_id for checking
+    uint64_t mask = (1ull << 47);
+    TORCH_INTERNAL_ASSERT(
+        static_cast<StreamId>(((bits & 0xFFFFFFFFFFFFull) ^ mask) - mask) ==
+            id(),
+        "DeviceType is not correctly packed");
     return bits;
   }
 
   static Stream unpack(uint64_t bits) {
-    auto stream_id = static_cast<StreamId>(bits) & 0xFFFFFFFFull;
-    bits >>= 32;
-    auto device_index = static_cast<DeviceIndex>(bits) & 0xFFFFull;
-    bits >>= 16;
-    auto device_type = static_cast<DeviceType>(bits);
+    // Re-extend the sign of stream_id
+    uint64_t mask = (1ull << 47);
+    const auto stream_id =
+        (static_cast<StreamId>(bits & 0xFFFFFFFFFFFFull) ^ mask) - mask;
+    bits >>= 48;
+    const auto device_index = static_cast<DeviceIndex>(bits & 0xFFull);
+    bits >>= 8;
+    const auto device_type = static_cast<DeviceType>(bits);
     TORCH_CHECK(isValidDeviceType(device_type));
     // Unfortunately, we can't check if the StreamId is valid here; it
     // will be checked upon first use.
@@ -145,10 +176,10 @@ C10_API std::ostream& operator<<(std::ostream& stream, const Stream& s);
 } // namespace c10
 
 namespace std {
-  template <>
-  struct hash<c10::Stream> {
-    size_t operator()(c10::Stream s) const noexcept {
-      return std::hash<uint64_t>{}(s.pack());
-    }
-  };
+template <>
+struct hash<c10::Stream> {
+  size_t operator()(c10::Stream s) const noexcept {
+    return std::hash<uint64_t>{}(s.pack());
+  }
+};
 } // namespace std

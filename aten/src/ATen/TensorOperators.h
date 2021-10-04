@@ -99,10 +99,10 @@ _(!=,x.ne(y), y.ne(x))
 static inline Tensor operator op(const Tensor & x, const Tensor & y) { \
   return body; \
 } \
-static inline Tensor operator op(const Tensor & x, Scalar y) { \
+static inline Tensor operator op(const Tensor & x, const Scalar& y) { \
   return body; \
 } \
-static inline Tensor operator op(Scalar x, const Tensor & y) { \
+static inline Tensor operator op(const Scalar& x, const Tensor & y) { \
   return reverse_scalar_body; \
 }
 

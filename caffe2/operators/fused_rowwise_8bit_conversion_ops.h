@@ -81,6 +81,7 @@ class FloatToFused8BitRowwiseQuantizedOp : public Operator<Context> {
       CAFFE_ENFORCE(is_half);
 
       vector<float> tmp(input_columns);
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (size_t row = 0; row < input_rows; ++row) {
         convert(tmp.data(), input_data + row * input_columns, input_columns);
         if (out_sb_half) {
@@ -161,6 +162,7 @@ class Fused8BitRowwiseQuantizedToFloatOp : public Operator<Context> {
       CAFFE_ENFORCE(is_half);
 
       vector<float> tmp(input_columns);
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (size_t row = 0; row < input_rows; ++row) {
         if (in_sb_half) {
           FusedNBitRowwiseQuantizedSBHalfToFloat(

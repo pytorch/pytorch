@@ -5,13 +5,16 @@
 #include <cmath>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <sstream>
 #include <type_traits>
 // For quantize_val
 #include <ATen/native/quantized/affine_quantizer.h>
 #include <c10/core/ScalarType.h>
+#include <ATen/quantized/Quantizer.h>
 
 using namespace at;
+#ifndef ATEN_CPU_STATIC_DISPATCH
 
 TEST(TestQTensor, QuantDequantAPIs) {
   auto num_elements = 10;
@@ -101,9 +104,8 @@ TEST(TestQTensor, EmptyQuantized) {
   int zero_point = 10;
   int val = 100;
   int numel = 10;
-  Tensor q = at::_empty_affine_quantized({numel},
-                                         at::device(at::kCPU).dtype(kQUInt8),
-                                         scale, zero_point);
+  Tensor q = at::_empty_affine_quantized(
+      {numel}, at::device(at::kCPU).dtype(kQUInt8), scale, zero_point);
   // Assigning to QTensor
   auto* q_data = q.data_ptr<quint8>();
   for (int i = 0; i < numel; ++i) {
@@ -142,7 +144,140 @@ TEST(TestQTensor, EmptyPerchannelQuantized) {
   for (int i = 0; i < numel; ++i) {
     ASSERT_EQ(
         r_data[i],
-        (val - zero_points[i].item().to<int>()) *
-            scales[i].item().to<float>());
+        (val - zero_points[i].item().to<int>()) * scales[i].item().to<float>());
   }
 }
+
+TEST(TestQTensor, QuantizePerChannel4d) {
+  int C = 64, H = 10, W = 10;
+  auto scales = rand({C}).toType(kDouble);
+  auto zero_points = randint(10, {C}).toType(kLong);
+  int ch_axis = 1;
+  // create 4d tensor where each H x W image is a range(0, H*W)
+  Tensor tensor = at::empty({1, C, H, W}, at::device(at::kCPU).dtype(kFloat));
+  auto* tensor_data = tensor.data_ptr<float>();
+  for (int c = 0, i = 0; c < C; ++c) {
+    for (int e = 0; e < H * W; ++e, ++i) {
+      tensor_data[i] = e;
+    }
+  }
+  // quantize and check values
+  Tensor q = at::native::quantize_per_channel(
+      tensor, scales, zero_points, ch_axis, kQUInt8);
+  auto* q_data = (uint8_t*)q.data_ptr<quint8>();
+  for (int c = 0, i = 0; c < C; ++c) {
+    float inv_scale = 1.0f / static_cast<float>(scales[c].item<double>());
+    int64_t zero_point = zero_points[c].item<int64_t>();
+    for (int e = 0; e < H * W; ++e, ++i) {
+      // downsize qval to 255 if val is greater than max uint8_t value
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,bugprone-narrowing-conversions)
+      int qval = std::min<int>(zero_point + std::nearbyint(e * inv_scale), 255);
+      ASSERT_EQ((int)q_data[i], qval);
+    }
+  }
+}
+
+TEST(TestQTensor, QuantizePerChannel4dChannelsLast) {
+  int C = 64, H = 10, W = 10;
+  auto scales = rand({C}).toType(kDouble);
+  auto zero_points = randint(10, {C}).toType(kLong);
+  int ch_axis = 1;
+  // create 4d tensor where each H x W image is a range(0, H*W)
+  Tensor tensor = at::empty(
+      {1, C, H, W},
+      at::device(at::kCPU).dtype(kFloat).memory_format(
+          at::MemoryFormat::ChannelsLast));
+  auto* tensor_data = tensor.data_ptr<float>();
+  for (int e = 0, i = 0; e < H * W; ++e) {
+    for (int c = 0; c < C; ++c, ++i) {
+      tensor_data[i] = e;
+    }
+  }
+
+  // quantize and check values
+  Tensor q = at::native::quantize_per_channel(
+      tensor, scales, zero_points, ch_axis, kQUInt8);
+  auto* q_data = (uint8_t*)q.data_ptr<quint8>();
+  for (int e = 0, i = 0; e < H * W; ++e) {
+    for (int c = 0; c < C; ++c, ++i) {
+      float inv_scale = 1.0f / static_cast<float>(scales[c].item<double>());
+      int64_t zero_point = zero_points[c].item<int64_t>();
+      // downsize qval to 255 if val is greater than max uint8_t value
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,bugprone-narrowing-conversions)
+      int qval = std::min<int>(zero_point + std::nearbyint(e * inv_scale), 255);
+      ASSERT_EQ((int)q_data[i], qval);
+    }
+  }
+}
+
+TEST(TestQTensor, FromBlobQuantizedPerTensor) {
+  const float scale = 0.1;
+  const int64_t zero_point = 10;
+  std::vector<int64_t> shape = {10, 10};
+  auto numel = c10::multiply_integers(shape);
+
+  TensorOptions options(at::kQUInt8);
+
+  auto custom_vec = std::make_unique<std::vector<uint8_t>>();
+  custom_vec->reserve(numel);
+
+  uint8_t* custom_data = custom_vec->data();
+  for (auto i = 0; i < numel; ++i) {
+    custom_data[i] = i;
+  }
+  bool customDataDeleted{false};
+  auto deleteWhenDone = custom_vec.release();
+  auto deleter = [deleteWhenDone, custom_data, &customDataDeleted](void* inp) {
+    ASSERT_EQ((void*)inp, (void*)custom_data);
+    delete deleteWhenDone;
+    customDataDeleted = true;
+  };
+  {
+  Tensor qtensor = at::from_blob_quantized_per_tensor_affine(custom_data, shape, deleter, scale, zero_point, options);
+
+  uint8_t* q_data = (uint8_t*)qtensor.data_ptr<quint8>();
+  for (auto i = 0; i < numel; ++i) {
+    ASSERT_EQ((int)custom_data[i], (int)q_data[i]);
+  }
+  ASSERT_EQ((float)qtensor.q_scale(), (float)scale);
+  ASSERT_EQ(qtensor.q_zero_point(), zero_point);
+  }
+  TORCH_CHECK(customDataDeleted);
+}
+
+TEST(TestQTensor, FromBlobQuantizedPerChannel) {
+  int C = 64, H = 10, W = 5;
+  std::vector<int64_t> shape = {1, C, H, W};
+  auto scales = rand({C}).toType(kDouble);
+  auto zero_points = randint(10, {C}).toType(kLong);
+  auto numel = c10::multiply_integers(shape);
+  int ch_axis = 1;
+  TensorOptions options(at::kQUInt8);
+
+  auto custom_vec = std::make_unique<std::vector<uint8_t>>();
+  custom_vec->reserve(numel);
+
+  uint8_t* custom_data = custom_vec->data();
+  for (auto i = 0; i < numel; ++i) {
+    custom_data[i] = i;
+  }
+  bool customDataDeleted{false};
+  auto deleteWhenDone = custom_vec.release();
+  auto deleter = [deleteWhenDone, custom_data, &customDataDeleted](void* inp) {
+    ASSERT_EQ((void*)inp, (void*)custom_data);
+    delete deleteWhenDone;
+    customDataDeleted = true;
+  };
+  {
+  Tensor qtensor = at::from_blob_quantized_per_channel_affine(custom_data, shape, deleter, scales, zero_points, ch_axis, options);
+  uint8_t* q_data = (uint8_t*)qtensor.data_ptr<quint8>();
+  for (auto i = 0; i < numel; ++i) {
+    ASSERT_EQ((int)custom_data[i], (int)q_data[i]);
+  }
+  ASSERT_TRUE(at::allclose(qtensor.q_per_channel_scales(), scales));
+  ASSERT_TRUE(at::allclose(qtensor.q_per_channel_zero_points(), zero_points));
+  ASSERT_TRUE(qtensor.is_quantized());
+  }
+  TORCH_CHECK(customDataDeleted);
+}
+#endif // ATEN_CPU_STATIC_DISPATCH

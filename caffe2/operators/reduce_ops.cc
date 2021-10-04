@@ -1,10 +1,11 @@
 #include "caffe2/operators/reduce_ops.h"
 
+#include <c10/util/accumulate.h>
+#include "caffe2/utils/math.h"
+
 #include <algorithm>
 #include <functional>
 #include <vector>
-
-#include "caffe2/utils/math.h"
 
 namespace caffe2 {
 
@@ -18,8 +19,7 @@ void ComputeReduceMinMaxGradient(
     const T* X_data,
     const T* Y_data,
     T* dX_data) {
-  const int dX_size = std::accumulate(
-      dX_dims.cbegin(), dX_dims.cend(), 1, std::multiplies<int>());
+  const auto dX_size = c10::multiply_integers(dX_dims.cbegin(), dX_dims.cend());
   const int ndim = dX_dims.size();
   std::vector<int> index(ndim, 0);
   for (int dX_index = 0; dX_index < dX_size; ++dX_index) {
@@ -29,6 +29,45 @@ void ComputeReduceMinMaxGradient(
         Y_data[dY_index] == X_data[dX_index] ? dY_data[dY_index] : T(0);
     math::utils::IncreaseIndexInDims(ndim, dX_dims.data(), index.data());
   }
+}
+
+std::vector<TensorShape> ReduceShapeInference(
+    const OperatorDef& def,
+    const std::vector<TensorShape>& in) {
+  if (in.size() != 1) {
+    return std::vector<TensorShape>{
+        CreateTensorShape({}, TensorProto_DataType_UNDEFINED)};
+  }
+
+  const auto& dims = in.front().dims();
+  ArgumentHelper helper(def);
+  std::vector<TensorShape> out;
+  out.emplace_back();
+  auto& ts = out.back();
+  auto axis = helper.GetRepeatedArgument<int32_t>("axes");
+  std::sort(axis.begin(), axis.end());
+  auto keepdims = helper.GetSingleArgument<bool>("keepdims", true);
+  size_t cursor = 0;
+  int32_t id = 0;
+  for (const auto d : dims) {
+    if (cursor < axis.size() && id == axis[cursor]) {
+      if (keepdims) {
+        ts.add_dims(d == 0 ? 0 : 1);
+      }
+      ++cursor;
+    } else {
+      ts.add_dims(d);
+    }
+    ++id;
+  }
+  if (ts.dims_size() == 0 && dims.size() != 0) {
+    ts.add_dims(1);
+  }
+  if (cursor != axis.size()) {
+    ts.set_unknown_shape(true);
+  }
+  ts.set_data_type(in.front().data_type());
+  return out;
 }
 
 } // namespace
@@ -202,43 +241,7 @@ Y:
 </details>
 
 )DOC")
-    .TensorInferenceFunction([](const OperatorDef& def,
-                                const std::vector<TensorShape>& in) {
-      if (in.size() != 1) {
-        return std::vector<TensorShape>{
-            CreateTensorShape({}, TensorProto_DataType_UNDEFINED)};
-      }
-
-      const auto& dims = in.front().dims();
-      ArgumentHelper helper(def);
-      std::vector<TensorShape> out;
-      out.emplace_back();
-      auto& ts = out.back();
-      auto axis = helper.GetRepeatedArgument<int32_t>("axes");
-      std::sort(axis.begin(), axis.end());
-      auto keepdims = helper.GetSingleArgument<bool>("keepdims", true);
-      size_t cursor = 0;
-      int32_t id = 0;
-      for (const auto d : dims) {
-        if (cursor < axis.size() && id == axis[cursor]) {
-          if (keepdims) {
-            ts.add_dims(d == 0 ? 0 : 1);
-          }
-          ++cursor;
-        } else {
-          ts.add_dims(d);
-        }
-        ++id;
-      }
-      if (ts.dims_size() == 0 && dims.size() != 0) {
-        ts.add_dims(1);
-      }
-      if (cursor != axis.size()) {
-        ts.set_unknown_shape(true);
-      }
-      ts.set_data_type(in.front().data_type());
-      return out;
-    })
+    .TensorInferenceFunction(ReduceShapeInference)
     .Arg("axes", "(*Tuple(int)*): list of axes to reduce")
     .Arg(
         "keepdims",
@@ -318,6 +321,7 @@ Y:
 
 
 )DOC")
+    .TensorInferenceFunction(ReduceShapeInference)
     .Arg("axes", "(*Tuple(int)*): list of axes to reduce")
     .Arg(
         "keepdims",
@@ -338,8 +342,7 @@ bool L1Reducer<CPUContext>::Backward(
     T* dX_data,
     CPUContext* /* context */) const {
   const float kEps = 1e-12f;
-  const int dX_size = std::accumulate(
-      dX_dims.cbegin(), dX_dims.cend(), 1, std::multiplies<int>());
+  const auto dX_size = c10::multiply_integers(dX_dims.cbegin(), dX_dims.cend());
   const int ndim = dX_dims.size();
   std::vector<int> index(ndim, 0);
   for (int dX_index = 0; dX_index < dX_size; ++dX_index) {
@@ -369,8 +372,7 @@ bool L2Reducer<CPUContext>::Backward(
     T* dX_data,
     CPUContext* /* context */) const {
   const float kEps = 1e-12f;
-  const int dX_size = std::accumulate(
-      dX_dims.cbegin(), dX_dims.cend(), 1, std::multiplies<int>());
+  const auto dX_size = c10::multiply_integers(dX_dims.cbegin(), dX_dims.cend());
   const int ndim = dX_dims.size();
   std::vector<int> index(ndim, 0);
   for (int dX_index = 0; dX_index < dX_size; ++dX_index) {

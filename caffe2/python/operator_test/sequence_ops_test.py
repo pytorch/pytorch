@@ -11,7 +11,7 @@ import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
 import unittest
-import os
+from caffe2.python import workspace
 
 
 def _gen_test_add_padding(with_pad_data=True,
@@ -107,7 +107,7 @@ class TestSequenceOps(serial.SerializedTestCase):
            args=_gen_test_add_padding(with_pad_data=True),
            ret_lengths=st.booleans(),
            **hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_add_padding(
         self, start_pad_width, end_pad_width, args, ret_lengths, gc, dc
     ):
@@ -128,6 +128,127 @@ class TestSequenceOps(serial.SerializedTestCase):
             reference=partial(
                 _add_padding_ref, start_pad_width, end_pad_width, ret_lengths
             )
+        )
+
+    def _local_test_add_padding_shape_and_type(
+        self,
+        data,
+        start_pad_width,
+        end_pad_width,
+        ret_lengths,
+        lengths=None,
+    ):
+        if ret_lengths and lengths is None:
+            return
+
+        workspace.ResetWorkspace()
+        workspace.FeedBlob("data", data)
+        if lengths is not None:
+            workspace.FeedBlob("lengths", np.array(lengths).astype(np.int32))
+
+        op = core.CreateOperator(
+            'AddPadding',
+            ['data'] if lengths is None else ['data', 'lengths'],
+            ['output', 'lengths_out'] if ret_lengths else ['output'],
+            padding_width=start_pad_width,
+            end_padding_width=end_pad_width
+        )
+
+        add_padding_net = core.Net("add_padding_net")
+        add_padding_net.Proto().op.extend([op])
+        assert workspace.RunNetOnce(
+            add_padding_net
+        ), "Failed to run the add_padding_net"
+
+        shapes, types = workspace.InferShapesAndTypes(
+            [add_padding_net],
+        )
+
+        expected_shape = list(data.shape)
+        expected_shape[0] += (1 if lengths is None else len(lengths)) * (start_pad_width + end_pad_width)
+        self.assertEqual(shapes["output"], expected_shape)
+        self.assertEqual(types["output"], core.DataType.FLOAT)
+        if ret_lengths:
+            if lengths is None:
+                self.assertEqual(shapes["lengths_out"], [1])
+            else:
+                self.assertEqual(shapes["lengths_out"], [len(lengths)])
+            self.assertEqual(types["lengths_out"], core.DataType.INT32)
+
+
+    def test_add_padding_shape_and_type_3(
+        self
+    ):
+        for start_pad_width in range(3):
+            for end_pad_width in range(3):
+                for ret_lengths in [True, False]:
+                    self._local_test_add_padding_shape_and_type(
+                        data=np.random.rand(1, 2).astype(np.float32),
+                        lengths=None,
+                        start_pad_width=start_pad_width,
+                        end_pad_width=end_pad_width,
+                        ret_lengths=ret_lengths,
+                    )
+
+    def test_add_padding_shape_and_type_4(
+        self
+    ):
+        for start_pad_width in range(3):
+            for end_pad_width in range(3):
+                for ret_lengths in [True, False]:
+                    self._local_test_add_padding_shape_and_type(
+                        data=np.random.rand(3, 1, 2).astype(np.float32),
+                        lengths=[1, 1, 1],
+                        start_pad_width=start_pad_width,
+                        end_pad_width=end_pad_width,
+                        ret_lengths=ret_lengths,
+                    )
+
+    def test_add_padding_shape_and_type_5(
+        self
+    ):
+        for start_pad_width in range(3):
+            for end_pad_width in range(3):
+                for ret_lengths in [True, False]:
+                    self._local_test_add_padding_shape_and_type(
+                        data=np.random.rand(3, 2, 1).astype(np.float32),
+                        lengths=None,
+                        start_pad_width=start_pad_width,
+                        end_pad_width=end_pad_width,
+                        ret_lengths=ret_lengths,
+                    )
+
+    @given(start_pad_width=st.integers(min_value=0, max_value=3),
+           end_pad_width=st.integers(min_value=0, max_value=3),
+           num_dims=st.integers(min_value=1, max_value=4),
+           num_groups=st.integers(min_value=0, max_value=4),
+           ret_lengths=st.booleans(),
+           **hu.gcs)
+    @settings(deadline=1000)
+    def test_add_padding_shape_and_type(
+        self, start_pad_width, end_pad_width, num_dims, num_groups, ret_lengths, gc, dc
+    ):
+        np.random.seed(666)
+        lengths = []
+        for _ in range(num_groups):
+            lengths.append(np.random.randint(0, 3))
+        if sum(lengths) == 0:
+            lengths = []
+
+        data_shape = []
+        for _ in range(num_dims):
+            data_shape.append(np.random.randint(1, 4))
+        if sum(lengths) > 0:
+            data_shape[0] = sum(lengths)
+
+        data = np.random.randn(*data_shape).astype(np.float32)
+
+        self._local_test_add_padding_shape_and_type(
+            data=data,
+            lengths=lengths if len(lengths) else None,
+            start_pad_width=start_pad_width,
+            end_pad_width=end_pad_width,
+            ret_lengths=ret_lengths,
         )
 
     @given(start_pad_width=st.integers(min_value=1, max_value=2),
@@ -279,7 +400,7 @@ class TestSequenceOps(serial.SerializedTestCase):
                              min_size=0,
                              max_size=10),
            **hu.gcs_cpu_only)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_find_duplicate_elements(self, elements, gc, dc):
         mapping = {
             0: "a",

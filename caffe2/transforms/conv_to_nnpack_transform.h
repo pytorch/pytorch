@@ -7,7 +7,7 @@
 
 namespace caffe2 {
 
-class CAFFE2_API ConvToNNPackTransform : public SingleOpTransform {
+class TORCH_API ConvToNNPackTransform : public SingleOpTransform {
  protected:
   // Specify what the op needs to be to match the pattern.
   bool MatchOperator(const OperatorDef& op) override {
