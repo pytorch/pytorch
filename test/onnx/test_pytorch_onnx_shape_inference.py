@@ -1,7 +1,9 @@
 import unittest
 import torch
 import numpy as np
-from torch.onnx.symbolic_helper import _set_onnx_shape_inference
+from torch.onnx.symbolic_helper import (_set_onnx_shape_inference,
+                                        _onnx_main_opset,
+                                        _set_opset_version)
 
 def expect_tensor(scalar_type, shape=None):
     def verify(actual_type):
@@ -15,7 +17,6 @@ def expect_tensor(scalar_type, shape=None):
 class TestONNXShapeInference(unittest.TestCase):
     def __init__(self, *args, **kwargs):
         unittest.TestCase.__init__(self, *args, **kwargs)
-        from torch.onnx.symbolic_helper import _onnx_main_opset, _set_opset_version
         self.opset_version = _onnx_main_opset
         _set_onnx_shape_inference(True)
         _set_opset_version(self.opset_version)
