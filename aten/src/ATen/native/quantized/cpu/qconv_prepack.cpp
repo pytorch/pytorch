@@ -26,6 +26,9 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
         int64_t groups,
         bool transpose) {
   std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " USE_FBGEMM " << __FUNCTION__<< std::endl;
+  std::cout << "XXX weight:" << weight.sizes()
+    << " bias:" << bias.value().sizes()
+    << std::endl;
   TORCH_CHECK(
       weight.ndimension() == kSpatialDim + 2,
       "Weights are expected to have ",

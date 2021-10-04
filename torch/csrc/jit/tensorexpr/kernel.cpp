@@ -690,7 +690,8 @@ std::vector<ExprHandle> TensorExprKernel::sizesForValue(
     return {};
   }
   if (v->type()->kind() == TypeKind::ClassType) {
-    return {};
+    //TODO: enough to fill sizeof(prepacked_weight)
+    return {int64_t{1024}};
   }
 
   known_sizes_[v] = inferSizesForValue(v);
@@ -1404,18 +1405,35 @@ Tensor computeQuantizedConv2dPrepack(
   }
 
   BufHandle ResultBuf("quantized_conv2d_prepack", outputShape, dtype);
-  const BufHandle& w = c10::get<BufHandle>(inputs[0]);
+  const BufHandle& qw = c10::get<BufHandle>(inputs[0]);
   const BufHandle& b = c10::get<BufHandle>(inputs[1]);
   auto strides = _pair_int(inputs[2]);
   auto padding = _pair_int(inputs[3]);
   auto dilation = _pair_int(inputs[4]);
   int groups = c10::get<int64_t>(inputs[5]);
-
+  TORCH_INTERNAL_ASSERT(
+      qw.node()->qscale(),
+      buildErrorMessage("quantized_conv2d_prepack: Expects quantized weights, qscale is missing"));
+  TORCH_INTERNAL_ASSERT(
+      qw.node()->qzero(),
+      buildErrorMessage("quantized_conv2d_prepack: Expects quantized weights, qzero is missing"));
+  const double qw_qscale = to<DoubleImm>(qw.node()->qscale())->value();
+  // immediateAs<double>(w.node()->qscale())
+  const int64_t qw_qzero = to<LongImm>(qw.node()->qzero())->value();
+  // immediateAs<int64_t>(w.node()->qzero())
+  std::cout << "XXX " << __FUNCTION__ << " qw_qscale:" << qw_qscale << " qw_qzero:" << qw_qzero << std::endl;
   StmtPtr s = ExternalCall::make(
       ResultBuf,
       "nnc_quantized_conv2d_prepack",
-      {w, b},
-      {strides[0], strides[1], padding[0], padding[1], dilation[0], dilation[1], groups});
+      {qw, b},
+      {
+      strides[0], strides[1],
+      padding[0], padding[1],
+      dilation[0], dilation[1],
+      groups,
+      qw_qscale, qw_qzero,
+      (int64_t) qw.dtype().scalar_type()
+      });
   return Tensor(ResultBuf.node(), s);
 }
 
@@ -1428,18 +1446,24 @@ Tensor computeQuantizedConv2d(
     dtype = Dtype(*outputType);
   }
 
+  const double out_qscale = c10::get<double>(inputs[2]);
+  const int64_t out_qzero = c10::get<int64_t>(inputs[3]);
+  std::cout << "XXX " << __FUNCTION__ << " out_qscale:" << out_qscale << " out_qzero:" << out_qzero << std::endl;
   BufHandle ResultBuf("quantized_conv2d", outputShape, dtype);
-  const BufHandle& inp = c10::get<BufHandle>(inputs[0]);
-  const BufHandle& prepacked = c10::get<BufHandle>(inputs[1]);
-  const double qscale = c10::get<double>(inputs[2]);
-  const int64_t qzero = c10::get<int64_t>(inputs[3]);
-  double out_qscale = 0.6f;
-  int64_t out_qzero = 66l;
-  StmtPtr s = ExternalCall::make(
-      ResultBuf, "nnc_quantized_conv2d", {inp, prepacked}, {qscale, qzero, out_qscale, out_qzero});
-  std::cout << "XXX quantized_conv2d out_qscale:" << out_qscale << " out_qzero:" << out_qzero << std::endl;
   ResultBuf.node()->set_qscale(DoubleImm::make(out_qscale).node());
   ResultBuf.node()->set_qzero(LongImm::make(out_qzero).node());
+  const BufHandle& inp = c10::get<BufHandle>(inputs[0]);
+  const double qx_qscale = to<DoubleImm>(inp.node()->qscale())->value();
+  const int64_t qx_qzero = to<LongImm>(inp.node()->qzero())->value();
+  const int64_t qx_qdtype = (int64_t) inp.dtype().scalar_type();
+  std::cout << "XXX " << __FUNCTION__ << " qx_qscale:" << qx_qscale << " qx_qzero:" << qx_qzero << " qx_qdtype:" << qx_qdtype << std::endl;
+
+  const BufHandle& prepacked = c10::get<BufHandle>(inputs[1]);
+  StmtPtr s = ExternalCall::make(
+      ResultBuf, "nnc_quantized_conv2d",
+      {inp, prepacked},
+      {qx_qscale, qx_qzero, qx_qdtype, out_qscale, out_qzero});
+  // TODO: decode out_qscale, out_qzero properly
   return Tensor(ResultBuf.node(), s);
 }
 
@@ -1480,10 +1504,10 @@ Tensor computeQuantizePerTensor(
   const BufHandle& inp = c10::get<BufHandle>(inputs[0]);
 
 	auto inp_dtype = inp.node()->dtype();
-  qscale = promoteToDtype(qscale, inp_dtype.scalar_type());
-  qzero = promoteToDtype(qzero, inp_dtype.scalar_type());
+  auto prom_qscale = promoteToDtype(qscale, inp_dtype.scalar_type());
+  auto prom_qzero = promoteToDtype(qzero, inp_dtype.scalar_type());
   ExprHandle exprHandle = promoteToDtype(
-      tensorOrConstant(inputs[0], indices) / qscale + qzero + FloatImm::make(0.5f),
+      tensorOrConstant(inputs[0], indices) / prom_qscale + prom_qzero + FloatImm::make(0.5f),
       dtype.scalar_type());
 
   BufPtr buf = alloc<Buf>(

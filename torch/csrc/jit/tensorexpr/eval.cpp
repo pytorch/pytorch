@@ -855,7 +855,10 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       dim->accept(this);
       total_byte_size *= value_.intValue();
     }
+    std::cout << "XXX Allocate total_byte_size:" << total_byte_size
+              << std::endl;
     auto int_count = (total_byte_size + sizeof(int) - 1) / sizeof(int);
+    std::cout << "XXX Allocate int_count:" << int_count << std::endl;
     std::unique_ptr<std::vector<int>> buffer(new std::vector<int>(int_count));
     auto iter = buffer_mapping_.find(b);
     if (iter != buffer_mapping_.end() && iter->second != nullptr) {

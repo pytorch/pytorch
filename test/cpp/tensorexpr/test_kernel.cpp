@@ -1855,7 +1855,7 @@ TEST_F(Kernel, QuantConv2dDequantInt8) {
         %qxz : int = prim::Constant[value=130]()
         %qxs : float = prim::Constant[value=0.1]()
         %qdti : int = prim::Constant[value=12]()
-        %qwz : int = prim::Constant[value=130]()
+        %qwz : int = prim::Constant[value=13]()
         %qws : float = prim::Constant[value=0.1]()
         %qcz : int = prim::Constant[value=14]()
         %qcs : float = prim::Constant[value=0.2]()
@@ -1872,14 +1872,14 @@ TEST_F(Kernel, QuantConv2dDequantInt8) {
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);
 
-  auto x = at::rand({1, 3, 3, 3}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto x = at::rand({1, 3, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
   auto w = at::rand({2, 3, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
   auto b = at::rand({2}, TensorOptions(kCPU).dtype(at::kFloat));
   auto q = at::quantize_per_tensor(x, 0.1f, 130, at::kQUInt8);
   auto qw = at::quantize_per_tensor(w, 0.1f, 12, at::kQInt8);
   auto qcp = quantized_conv2d_prepack(qw, b, {1, 1}, {0, 0}, {1, 1}, 1);
   auto qc = quantized_conv2d(q, qcp, 0.2f, 14);
-  auto y_expected = at::dequantize(q);
+  auto y_expected = at::dequantize(qc);
 
   TensorExprKernel k(graph);
   StmtPtr s = k.getCodeGenStmt();
@@ -1887,6 +1887,8 @@ TEST_F(Kernel, QuantConv2dDequantInt8) {
   std::vector<IValue> stack = {IValue(x), IValue(w), IValue(b)};
   k.run(stack);
   auto y = stack[0].toTensor();
+  std::cout << "XXX y:" << y << std::endl;
+  std::cout << "XXX y_expected:" << y_expected << std::endl;
   CHECK_EQ(almostEqual(y_expected, y), 1);
 #endif
 }
@@ -1908,7 +1910,7 @@ TEST_F(Kernel, DISABLED_QuantConv2dDequantInt8_PrepackParam) {
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);
 
-  auto x = at::rand({1, 3, 3, 3}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto x = at::rand({1, 3, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
   auto w = at::rand({2, 3, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
   auto b = at::rand({2}, TensorOptions(kCPU).dtype(at::kFloat));
   auto q = at::quantize_per_tensor(x, 0.1f, 130, at::kQUInt8);
@@ -1923,6 +1925,8 @@ TEST_F(Kernel, DISABLED_QuantConv2dDequantInt8_PrepackParam) {
   std::vector<IValue> stack = {IValue(x), IValue(qcp)};
   k.run(stack);
   auto y = stack[0].toTensor();
+  std::cout << "XXX y:" << y << std::endl;
+  std::cout << "XXX y_expected:" << y_expected << std::endl;
   CHECK_EQ(almostEqual(y_expected, y), 1);
 #endif
 }
@@ -1950,7 +1954,7 @@ TEST_F(Kernel, DISABLED_QuantConv2dDequantUInt8) {
   auto qw = at::quantize_per_tensor(w, 0.1f, 130, at::kQUInt8);
   auto qcp = quantized_conv2d_prepack(qw, b, {1, 1}, {0, 0}, {1, 1}, 1);
   auto qc = quantized_conv2d(q, qcp, 0.2f, 140);
-  auto y_expected = at::dequantize(q);
+  auto y_expected = at::dequantize(qc);
 
   TensorExprKernel k(graph);
   StmtPtr s = k.getCodeGenStmt();
@@ -1969,6 +1973,8 @@ TEST_F(Kernel, DISABLED_QuantConv2dDequantUInt8) {
   std::vector<IValue> stack = {IValue(x), IValue(qcp)};
   k.run(stack);
   auto y = stack[0].toTensor();
+  std::cout << "XXX y:" << y << std::endl;
+  std::cout << "XXX y_expected:" << y_expected << std::endl;
   CHECK_EQ(almostEqual(y_expected, y), 1);
 #endif
 }

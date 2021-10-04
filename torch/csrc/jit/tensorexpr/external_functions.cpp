@@ -1,13 +1,18 @@
 #include <torch/csrc/jit/tensorexpr/external_functions.h>
 
+#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/native/xnnpack/OpContext.h>
 #include <ATen/native/quantized/cpu/conv_packed_params.h>
+#include <ATen/native/quantized/cpu/conv_serialization.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
+#include <c10/core/TensorOptions.h>
+#include <ATen/quantized/Quantizer.h>
 
 #include <iostream>
 
@@ -131,42 +136,68 @@ void nnc_aten_quantized_conv2d_prepack(
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors =
-      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+  std::vector<void*> buf_data_vec;
+  std::vector<std::vector<int64_t>> buf_dims_vec;
+  std::vector<c10::ScalarType> buf_dtypes_vec;
+  int64_t buf_dims_idx = 0;
+  for (const auto i : c10::irange(bufs_num)) {
+    buf_data_vec.push_back(buf_data[i]);
+    buf_dims_vec.emplace_back();
+    // NOLINTNEXTLINE(clang-diagnostic-unused-variable,clang-analyzer-deadcode.DeadStores)
+    for (const auto dim : c10::irange(buf_ranks[i])) {
+      buf_dims_vec[i].push_back(buf_dims[buf_dims_idx++]);
+    }
+    buf_dtypes_vec.push_back(static_cast<c10::ScalarType>(buf_dtypes[i]));
+  }
 
-  at::Tensor& r = tensors[0];
-  const at::Tensor& w = tensors[1];
-	//TODO: handle optional bias
-  const at::Tensor& b = tensors[2];
-	TORCH_INTERNAL_ASSERT(args_num == 7 && bufs_num == 3);
+  // constructQuantized r, w, float b
+	const double w_qscale = extra_args[7];
+	const int64_t w_qzero = extra_args[8];
+	const c10::ScalarType w_qdtype = static_cast<c10::ScalarType>(extra_args[9]);
+  at::Tensor qw = at::from_blob_quantized_per_tensor_affine(
+			buf_data_vec[1],
+			buf_dims_vec[1],
+			[](void*){},
+			w_qscale,
+			w_qzero,
+			//TODO: do we need Byte/Char or should it be QUInt8, QInt8 from the start?
+			at::TensorOptions(toQIntType(w_qdtype))
+	);
 
-	int64_t strideH = extra_args[0];
-	int64_t strideW = extra_args[1];
-	int64_t paddingH = extra_args[2];
-	int64_t paddingW = extra_args[3];
-	int64_t dilationH = extra_args[4];
-	int64_t dilationW = extra_args[5];
-	int64_t groups = extra_args[6];
-	c10::intrusive_ptr<ConvPackedParamsBase<2>> prepacked;
-	//try {
-		prepacked = quantized_conv2d_prepack(
-				w,
-				b,
-				{strideH, strideW},
-				{paddingH, paddingW},
-				{dilationH, dilationW},
-				groups);
-		TORCH_INTERNAL_ASSERT(prepacked, buildErrorMessage("Quantized conv2d prepack failed"));
-	/*} catch (...) {
+  at::Tensor b = at::from_blob(
+			buf_data_vec[2], 
+			buf_dims_vec[2],
+			at::TensorOptions()
+			 .dtype(buf_dtypes_vec[2])
+			 .layout(at::kStrided)
+			 .device(at::kCPU)
+			 .requires_grad(false));
 
-	}*/
+  int64_t strideH = extra_args[0];
+  int64_t strideW = extra_args[1];
+  int64_t paddingH = extra_args[2];
+  int64_t paddingW = extra_args[3];
+  int64_t dilationH = extra_args[4];
+  int64_t dilationW = extra_args[5];
+  int64_t groups = extra_args[6];
+	c10::List<int64_t> strides = {strideH, strideW};
+	c10::List<int64_t> paddings = {paddingH, paddingW};
+	c10::List<int64_t> dilations = {dilationH, dilationW};
+	c10::intrusive_ptr<ConvPackedParamsBase<2>> prepacked = quantized_conv2d_prepack(
+			qw,
+			b,
+			strides,
+			paddings,
+			dilations,
+			groups);
+	TORCH_INTERNAL_ASSERT(prepacked, buildErrorMessage("Quantized conv2d prepack failed"));
+	ConvParamsSerializationType serialized = serialize_conv<2>(prepacked);
 
-	//TODO: prepacked object put in output buffer
-	// XXX-CustomClass-to blob
-	const size_t size_bytes = sizeof(*prepacked);
-	const void* ptr = &(*prepacked);
-	std::cout << "XXX sizeof:" << size_bytes << std::endl;
-	std::cout << "XXX ptr:" << ptr << std::endl;
+  size_t size_bytes = sizeof(serialized);
+  const void* ptr = &serialized;
+  std::cout << "XXX sizeof(serialized):" << sizeof(serialized) << std::endl;
+  std::cout << "XXX sizeof(ConvParamsSerializationType):" << sizeof(ConvParamsSerializationType) << std::endl;
+	size_bytes = 1024;
 
   memcpy(buf_data[0], ptr, size_bytes);
 }
@@ -196,32 +227,50 @@ void nnc_aten_quantized_conv2d(
     int64_t* extra_args) {
   std::vector<at::Tensor> tensors =
       constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+  std::vector<void*> buf_data_vec;
+  std::vector<std::vector<int64_t>> buf_dims_vec;
+  std::vector<c10::ScalarType> buf_dtypes_vec;
+  int64_t buf_dims_idx = 0;
+  for (const auto i : c10::irange(bufs_num)) {
+    buf_data_vec.push_back(buf_data[i]);
+    buf_dims_vec.emplace_back();
+    // NOLINTNEXTLINE(clang-diagnostic-unused-variable,clang-analyzer-deadcode.DeadStores)
+    for (const auto dim : c10::irange(buf_ranks[i])) {
+      buf_dims_vec[i].push_back(buf_dims[buf_dims_idx++]);
+    }
+    buf_dtypes_vec.push_back(static_cast<c10::ScalarType>(buf_dtypes[i]));
+  }
 
-  at::Tensor& r = tensors[0];
-  const at::Tensor& x = tensors[1];
-  auto convPackedParams = reinterpret_cast<ConvPackedParamsBase<2>*>(buf_data[2]);
-	double qscale = extra_args[0];
-	int64_t qzero = extra_args[1];
+	const double x_qscale = extra_args[0];
+	const int64_t x_qzero = extra_args[1];
+	const c10::ScalarType x_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
+  at::Tensor qx = at::from_blob_quantized_per_tensor_affine(
+			buf_data_vec[1],
+			buf_dims_vec[1],
+			[](void*){},
+			x_qscale,
+			x_qzero,
+			//TODO: do we need Byte/Char or should it be QUInt8, QInt8 from the start?
+			at::TensorOptions(toQIntType(x_qdtype))
+	);
+  auto serialized = reinterpret_cast<ConvParamsSerializationType*>(buf_data[2]);
+	auto convPackedParams = deserialize_conv<2>(*serialized);
+  double out_qscale = extra_args[3];
+  int64_t out_qzero = extra_args[4];
+  std::cout << "XXX nnc " << __FUNCTION__ << " out_qscale:" << out_qscale << std::endl;
+  std::cout << "XXX nnc " << __FUNCTION__ << " out_qzero:" << out_qzero << std::endl;
 
-	try {
-		r = quantized_conv2d(
-				x,
-				c10::intrusive_ptr<ConvPackedParamsBase<2>>::unsafe_steal_from_new(convPackedParams),
-				qscale,
-				qzero);
-	} catch (...) {
-	}
-	double out_scale = at::q_scale(r);
-	int64_t out_zero = at::q_zero_point(r);
+	//For test:
+  //auto w = at::rand({2, 3, 2, 2}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  //auto b = at::rand({2}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  //auto qw = at::quantize_per_tensor(w, 0.1f, 12, at::kQInt8);
+  //auto convPackedParams = quantized_conv2d_prepack(qw, b, {1, 1}, {0, 0}, {1, 1}, 1);
+	//---
 
-	std::cout << "XXX nnc " << __FUNCTION__ << " out_scale:" << out_scale << std::endl;
-	std::cout << "XXX nnc " << __FUNCTION__ << " out_zero:" << out_zero << std::endl;
-
-	// TODO: how to return result scale/zero from external call?
-	// introduce extra out args?
-
-	extra_args[2] = out_scale;
-	extra_args[3] = out_zero;
+	auto r = convPackedParams->apply(qx, out_qscale, out_qzero);
+	std::cout << "XXX " << __FUNCTION__ << " result tensor:" << r << std::endl;
+  // TODO: how to return result scale/zero from external call?
+  // introduce extra out args?
 
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
