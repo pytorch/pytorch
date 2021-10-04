@@ -103,10 +103,25 @@ static DynamicLayer popDynamicLayer() {
   return result;
 }
 
+static int64_t pushDynamicLayer(DynamicLayer&& dynamic_layer) {
+  auto& dynamicLayerStack = dynamicLayerStackAccessor();
+  int64_t layerId = 1 + dynamicLayerStack.size();
+  TORCH_INTERNAL_ASSERT(layerId == dynamic_layer.layerId());
+  dynamicLayerStack.emplace_back(dynamic_layer);
+
+  if (layerId == 2) {
+    c10::impl::tls_set_dispatch_key_included(kDynamicLayerFrontModeKey, true);
+    c10::impl::tls_set_dispatch_key_included(kDynamicLayerBackModeKey, true);
+  }
+
+  return layerId;
+}
+
 static int64_t pushDynamicLayer(DispatchKey key, optional<int64_t> batch_size = nullopt) {
   auto& dynamicLayerStack = dynamicLayerStackAccessor();
   TORCH_INTERNAL_ASSERT(key != DispatchKey::Undefined);
   TORCH_INTERNAL_ASSERT(key != DispatchKey::Batched);
+
   auto layerId = 1 + dynamicLayerStack.size();
   dynamicLayerStack.emplace_back(key, layerId, batch_size);
 
@@ -356,7 +371,7 @@ struct WithoutTop {
   WithoutTop(): layer_(popDynamicLayer()) {
   }
   ~WithoutTop() {
-    pushDynamicLayer(layer_.key());
+    pushDynamicLayer(std::move(layer_));
   }
 
   bool prev_grad_enabled_;
