@@ -1,5 +1,5 @@
 from torch.utils.data import IterDataPipe
-from torch.utils.data.datapipes.utils.common import validate_pathname_binary_tuple
+from torch.utils.data.datapipes.utils.common import validate_pathname_binary_tuple, deprecation_warning_torchdata
 from typing import Iterable, Iterator, Tuple, IO, cast
 from io import BufferedIOBase
 
@@ -9,14 +9,14 @@ import zipfile
 import warnings
 
 class ZipArchiveReaderIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
-    r""" :class:`ZipArchiveReaderIterDataPipe`.
+    r""":class:`ZipArchiveReaderIterDataPipe`.
 
-    Iterable data pipe to extract zip binary streams from input iterable which contains a tuple of pathname and
-    zip binary stream. This yields a tuple of pathname and extracted binary stream.
+    Iterable DataPipe to extract zip binary streams from input iterable which contains a tuple of path name and
+    zip binary stream. This yields a tuple of path name and extracted binary stream.
 
     Args:
-        datapipe: Iterable datapipe that provides tuples of pathname and zip binary stream
-        length: Nominal length of the datapipe
+        datapipe: Iterable DataPipe that provides tuples of path name and zip binary stream
+        length: Nominal length of the DataPipe
 
     Note:
         The opened file handles will be closed automatically if the default DecoderDataPipe
@@ -31,6 +31,7 @@ class ZipArchiveReaderIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
         super().__init__()
         self.datapipe: Iterable[Tuple[str, BufferedIOBase]] = datapipe
         self.length: int = length
+        deprecation_warning_torchdata(type(self).__name__)
 
     def __iter__(self) -> Iterator[Tuple[str, BufferedIOBase]]:
         for data in self.datapipe:

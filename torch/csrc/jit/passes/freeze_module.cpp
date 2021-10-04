@@ -308,12 +308,11 @@ class AttributePropagator {
       }
     } else if (attr.isTuple()) {
       auto tuple = std::move(attr).toTuple();
-      std::vector<IValue>& elems = tuple->elements();
-      for (auto& elem : elems) {
-        elem = overrideGradient(elem);
+      const auto& elems = tuple->elements();
+      for (const auto idx : c10::irange(elems.size())) {
+        tuple->unsafeSetElement(idx, overrideGradient(elems[idx]));
       }
       attr = std::move(tuple);
-
     } else if (attr.isList()) {
       c10::List<IValue> elems = std::move(attr).toList();
       for (const auto i : c10::irange(elems.size())) {
@@ -466,6 +465,16 @@ class AttributePropagator {
               }
             } else {
               attr = overrideGradient(attr);
+            }
+            if (attr.isObject()) {
+              if (object_memo_.count(attr.toObject())) {
+                attr = object_memo_[attr.toObject()];
+              } else {
+                auto weak_class_obj =
+                    attr.toObject()->copy_to_weak_compilation_ref();
+                object_memo_[attr.toObject()] = weak_class_obj;
+                attr = weak_class_obj;
+              }
             }
             if (auto attrVal = tryInsertConstant(*graph, attr)) {
               paramConst = *attrVal;
@@ -758,6 +767,13 @@ class AttributePropagator {
 
   // Contains the attributes names (e.g. {"self", "subModule", "a"}
   std::deque<std::string> names_;
+
+  // see [Constant Object Weak CompilationUnit Reference]
+  std::unordered_map<
+      c10::intrusive_ptr<at::ivalue::Object>,
+      c10::intrusive_ptr<at::ivalue::Object>>
+      object_memo_;
+
 }; // class AttributePropagator
 
 void checkModuleDoesNotReturnSelf(const Module& module) {

@@ -113,7 +113,7 @@ class TORCH_API StaticModule {
 
  private:
   explicit StaticModule(
-      std::pair<std::shared_ptr<torch::jit::Graph>, std::shared_ptr<Module>>
+      std::pair<std::shared_ptr<torch::jit::Graph>, c10::optional<Module>>
           graph_and_module,
       const StaticModuleOptions& opts);
 
@@ -188,7 +188,7 @@ class TORCH_API StaticModule {
   StaticModuleOptions opts_;
   bool first_input_is_self_{false};
   std::shared_ptr<torch::jit::Graph> graph_;
-  std::shared_ptr<torch::jit::Module> module_;
+  c10::optional<torch::jit::Module> module_;
   c10::optional<c10::FunctionSchema> schema_;
   std::unique_ptr<StaticRuntime> cached_runtime_;
 
@@ -368,6 +368,8 @@ class TORCH_API ProcessedNode {
     return inputs_;
   }
 
+  std::vector<IValue> clone_inputs() const;
+
   bool has_out_variant() const {
     return static_cast<bool>(fn_);
   }
@@ -378,13 +380,20 @@ class TORCH_API ProcessedNode {
 
   bool verify_no_memory_overlap() const;
 
+  const char* get_op_name() const {
+    return op_name_;
+  }
+
  private:
+  void run_impl();
+
   Node* node_;
   c10::optional<Operation> op_;
   std::function<void(ProcessedNode*)> fn_;
   std::function<void(ProcessedNode*)> native_fn_;
   std::vector<const IValue*> inputs_; // unowned
   std::vector<IValue> outputs_;
+  const char* op_name_;
 };
 
 } // namespace jit
