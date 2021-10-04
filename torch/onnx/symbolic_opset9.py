@@ -2540,8 +2540,22 @@ def _any(g, input):
     input_sum = sym_help._reducesum_helper(g, input, keepdims_i=0)
     return gt(g, input_sum, g.op("Constant", value_t=torch.LongTensor([0])))
 
-def _all(g, input):
-    return g.op("Not", _any(g, g.op("Not", input)))
+def _all(g, *args):
+    # aten::all(Tensor self)
+    if len(args) == 1:
+        return g.op("Not", _any(g, g.op("Not", args[0])))
+    # aten::all(Tensor self, int dim, bool keepdim)
+    else:
+        input, dim, keepdim = args
+        # If the input dtype is Bool, we cast it to Int type, in order to
+        # be able to utilize the ReduceMin operation
+        if input.type().scalarType() == 'Bool':
+            input = g.op("Cast", input, to_i=sym_help.cast_pytorch_to_onnx["Int"])
+        dim = _parse_arg(dim, "i")
+        keepdim = _parse_arg(keepdim, "b")
+        result = g.op("ReduceMin", input, axes_i=[dim], keepdims_i=keepdim)
+        result = g.op("Cast", result, to_i=sym_help.cast_pytorch_to_onnx["Bool"])
+        return result
 
 
 @parse_args("v", "i", "i", "i")
