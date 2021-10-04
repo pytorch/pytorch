@@ -142,19 +142,6 @@ concurrency:
           rm -f test-reports-*.zip
           zip -r "test-reports-${FILE_SUFFIX}.zip" test -i '*.xml'
 {%- endif %}
-      - uses: actions/upload-artifact@v2
-        name: Store Test Reports
-        if: always()
-        with:
-{%- if name == 'linux' or name == 'windows' %}
-          name: test-reports-${{ matrix.config }}
-{%- else %}
-          name: test-reports-!{{ name }}
-{%- endif %}
-          retention-days: 14
-          if-no-files-found: error
-          path:
-            test-reports-*.zip
       - uses: !{{ upload_artifact_s3_action }}
         name: Store Test Reports on S3
         if: always()
