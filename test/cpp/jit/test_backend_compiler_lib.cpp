@@ -1,3 +1,5 @@
+#include <ATen/Utils.h>
+#include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/backends/backend.h>
 #include <torch/csrc/jit/backends/backend_exception.h>
 
@@ -105,10 +107,19 @@ class BackendWithCompiler : public PyTorchBackendInterface {
           auto sub = instruction.substr(15);
           // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
           const_val = stod(sub);
-        } else if (instruction == "aten::add") {
-          output_list.emplace_back(x.add(h, const_val));
-        } else if (instruction == "aten::sub") {
-          output_list.emplace_back(x.sub(h, const_val));
+        } else if (instruction == "aten::add" || instruction == "aten::sub") {
+          TORCH_CHECK(
+              x.ndimension() == 0, "The backend only support 0-dim tensors.");
+          auto y =
+              at::detail::empty_cpu(x.sizes(), {}, {}, {}, {}, c10::nullopt);
+          if (instruction == "aten::add") {
+            y.data_ptr<float>()[0] =
+                x.data_ptr<float>()[0] + h.data_ptr<float>()[0];
+          } else {
+            y.data_ptr<float>()[0] =
+                x.data_ptr<float>()[0] - h.data_ptr<float>()[0];
+          }
+          output_list.emplace_back(y);
         } else {
           TORCH_CHECK(
               false,
