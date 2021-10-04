@@ -150,6 +150,14 @@ Node::Node(OpKind op, OpList operands, lazy_tensors::Shape shape,
   }
 }
 
+Node::Node(OpKind op, OpList operands, lazy_tensors::Shape shape,
+           size_t num_outputs, lazy_tensors::hash_t hash_seed,
+           at::ScalarType at_dtype, const std::vector<int64_t>& at_shape)
+    : Node(std::move(op), operands, shape, num_outputs, hash_seed) {
+  at_dtype_ = at_dtype;
+  at_shape_ = at_shape;
+}
+
 Node::Node(OpKind op, OpList operands,
            const std::function<lazy_tensors::Shape()>& shape_fn,
            size_t num_outputs, lazy_tensors::hash_t hash_seed)
