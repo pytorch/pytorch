@@ -152,6 +152,11 @@ bool isListOfInts(const TypePtr& type) {
       type->cast<ListType>()->getElementType()->cast<IntType>();
 }
 
+bool isListOfTensors(const TypePtr& type) {
+  return type->cast<ListType>() &&
+      type->cast<ListType>()->getElementType()->cast<TensorType>();
+}
+
 c10::optional<size_t> normIndex(int64_t index, size_t len) {
   if (index < 0) {
     index = index + len;
@@ -234,9 +239,10 @@ struct SymbolicShapeNodeAnalyzer {
 
       if (auto tt = type->castRaw<TensorType>()) {
         addTensorInputMetaData(node_->input(node_index), graph_index);
-      } else if (
-          type->cast<ListType>() &&
-          type->cast<ListType>()->getElementType()->cast<TensorType>()) {
+      } else if (isListOfTensors(type)) {
+        // waiting for more use cases to decide on best generalization
+        TORCH_INTERNAL_ASSERT(
+            node_->kind() == aten::cat, "TODO: generalize logic");
         // When we have partially evaluate a list of Tensors like cat(tensor[])
         // We have a few problems:
         // - optimizing out calls to the length of the list: len(tensors)
@@ -632,10 +638,13 @@ struct SymbolicShapeGraphAnalyzer {
       if (curr->kind() == prim::Constant) {
         continue;
       }
-      // TODO: generalize logic to for other tensor input ops when they are added
+      // TODO: generalize logic to for other tensor input ops when they are
+      // added
       if (curr->kind() == prim::ListConstruct) {
         auto uses = curr->output()->uses();
-        if (!std::all_of(uses.begin(), uses.end(), [](const Use& use) { return use.user->kind() == aten::cat; })) {
+        if (!std::all_of(uses.begin(), uses.end(), [](const Use& use) {
+              return use.user->kind() == aten::cat;
+            })) {
           GRAPH_DEBUG("Non cat list use ", getHeader(curr));
           return c10::nullopt;
         }
@@ -768,13 +777,14 @@ struct SymbolicShapeGraphAnalyzer {
     std::vector<Value*> node_inputs;
     // TODO: generalize logic
     if (curr->kind() == aten::cat) {
-      TORCH_INTERNAL_ASSERT(curr->input(0)->node()->kind() == prim::ListConstruct);
-      for (Value * v: curr->input(0)->node()->inputs()) {
+      TORCH_INTERNAL_ASSERT(
+          curr->input(0)->node()->kind() == prim::ListConstruct);
+      for (Value* v : curr->input(0)->node()->inputs()) {
         node_inputs.push_back(v);
       }
       node_inputs.push_back(curr->namedInput("dim"));
     } else {
-      for (Value * v: curr->inputs()) {
+      for (Value* v : curr->inputs()) {
         node_inputs.push_back(v);
       }
     }
@@ -799,7 +809,10 @@ struct SymbolicShapeGraphAnalyzer {
     WithInsertPoint guard(large_shape_compute_graph->block());
     std::unordered_map<Value*, Value*> value_map;
     insertGraph(
-        *large_shape_compute_graph, *partial_eval_graph, partial_eval_inputs, value_map);
+        *large_shape_compute_graph,
+        *partial_eval_graph,
+        partial_eval_inputs,
+        value_map);
 
     for (size_t i = 0; i < curr->outputs().size(); ++i) {
       Value* new_list_output = value_map[partial_eval_graph->outputs().at(i)];
