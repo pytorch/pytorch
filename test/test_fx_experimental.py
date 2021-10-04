@@ -1471,8 +1471,6 @@ class TestNormalizeOperators(JitTestCase):
             "igamma",
             "igammac",
             "index_put",
-            "sparse.masked_amax",
-            "sparse.masked_sum",
             "nn.functional.conv2d",
             "nn.functional.dropout",
             "polygamma",
@@ -1503,6 +1501,9 @@ class TestNormalizeOperators(JitTestCase):
 
         # Unsupported input types
         if op.name in op_skip:
+            return
+
+        if op.name.startswith('sparse.masked_'):
             return
 
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
