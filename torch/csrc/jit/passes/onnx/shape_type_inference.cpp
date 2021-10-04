@@ -1356,11 +1356,7 @@ void ComputeConstant(Node* n, int opset_version) {
                 .sizes();
         if (input0_shape_size.has_value()) {
           auto input0_shape_value = input0_shape_size.value();
-          // For opset_versions > 13, for n->inputs().size() > 1,
-          // the shape inference is handled via onnx shape inference
-          // For opset_versions < 13, we ensure the attribute axes is not
-          // present as in cases with axes attr present, the shape inference is
-          // handled via onnx shape inference
+          // Other cases are handled via onnx shape inference
           if ((opset_version >= 13 && n->inputs().size() == 1) ||
               (opset_version < 13 && !n->hasAttributeS("axes"))) {
             auto final_shape = ComputeShapeFromSqueeze(input0_shape_value);
