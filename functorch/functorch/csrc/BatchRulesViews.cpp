@@ -354,6 +354,40 @@ std::tuple<Tensor,optional<int64_t>> slice_backward_batch_rule(
   return std::make_tuple(std::move(result), 0);
 }
 
+std::tuple<Tensor, optional<int64_t>> expand_batch_rule(
+    const Tensor &self, optional<int64_t> self_bdim, IntArrayRef size, bool implicit)
+{
+  auto self_dim = self.dim();
+  TORCH_CHECK(static_cast<uint64_t>(self_dim - 1) <= size.size(),
+              "expand: the number of sizes provided (", size.size(), ") ",
+              "must be greater or equal to the number of dimensions in the tensor (", static_cast<uint64_t>(self_dim - 1), ")");
+
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  auto self_sizes = self_.sizes();
+  auto batch_size = self_sizes[0];
+
+  c10::SmallBuffer<int64_t, 5> size_(size.size() + 1);
+  size_[0] = batch_size;
+  std::copy(size.cbegin(), size.cend(), size_.begin() + 1);
+
+  // Here, we know we are expanding a (logical) tensor to a larger number
+  // of dimensions. We have to be careful because we can't call expand directly
+  // due to the presence of batch dimensions.
+  //
+  // As an example, let B0 be a batch dimension and consider expand(Tensor[B0, 3], [2, 3]).
+  // The result should be a tensor of size [B0, 2, 3].
+  // A physical view of size [B0, 3] can't directly be expanded to size [B0, 2, 3]
+  // so the strategy here is to view it first as a tensor of size [B0, 1, 3] and
+  // then expand.
+  auto extra_dims = size.size() - (self_dim - 1);
+  VmapDimVector view_shape(size_.size(), /*init_value*/1);
+  view_shape[0] = batch_size;
+  std::copy(self_sizes.cbegin() + 1, self_sizes.cend(),
+            view_shape.begin() + 1 + extra_dims);
+
+  return std::make_tuple(self_.view(view_shape).expand(size_, implicit), 0);
+}
+
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("diag", diag_batch_rule);
   VMAP_SUPPORT("chunk", chunk_batching_rule);
@@ -375,6 +409,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("diagonal_backward", diagonal_backward_batch_rule);
   VMAP_SUPPORT("select_backward", select_backward_batch_rule);
   VMAP_SUPPORT("slice_backward", slice_backward_batch_rule);
+  VMAP_SUPPORT("expand", expand_batch_rule);
 }
 
 }}
