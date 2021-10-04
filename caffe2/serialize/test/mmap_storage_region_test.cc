@@ -14,7 +14,10 @@
 #include <fstream> // ofstream
 #include <gtest/gtest.h>
 #include <string>
+#include <torch/csrc/jit/mobile/import.h>
+#include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/serialization/storage_context.h>
+#include <torch/torch.h>
 #include <unistd.h> // close(...)
 
 namespace caffe2 {
@@ -96,6 +99,106 @@ TEST(MmapStorageRegionTest, Test1) {
   std::filesystem::remove(filename);
 }
 
+TEST(MmapStorageRegionTest, TestLoadModule) {
+  if (!MmapStorageRegion::isSupportedByPlatform()) {
+    GTEST_SKIP() << "MmapStorageRegion not supported on this platform";
+  }
+
+  const int dim0 = 3;
+  const int dim1 = 2;
+  const std::string filename = "addition_model.ptl";
+
+  torch::jit::Module original_model("addition_model");
+  original_model.register_parameter("w1", torch::rand({dim0, dim1}), false);
+  original_model.register_parameter("w2", torch::rand({dim0, dim1}), false);
+  original_model.define(R"(
+    def forward(self, input):
+      return self.w1 + self.w2 + input
+  )");
+  original_model.eval();
+
+  original_model._save_for_mobile(filename);
+
+  std::vector<torch::jit::IValue> input;
+  input.emplace_back(torch::rand({dim0, dim1}));
+
+  at::Tensor original_output = original_model.forward(input).toTensor();
+
+  auto get_loaded_output_tensor = [&]() {
+    torch::jit::mobile::Module loaded_model =
+        torch::jit::_load_for_mobile(filename);
+
+    return loaded_model.forward(input).toTensor();
+  };
+
+  at::Tensor loaded_output = get_loaded_output_tensor();
+
+  // At the end of the call to get_loaded_output_tensor the MmapStorageRegion
+  // is deconstructed (which I confirmed with print statements)
+
+  for (int i = 0; i < dim0; i++) {
+    for (int j = 0; j < dim1; j++) {
+      ASSERT_FLOAT_EQ(
+        original_output[i][j].item<float>(),
+        loaded_output[i][j].item<float>());
+    }
+  }
+
+  std::filesystem::remove(filename);
+}
+
+TEST(MmapStorageRegionTest, TestMmapLifetime) {
+  if (!MmapStorageRegion::isSupportedByPlatform()) {
+    GTEST_SKIP() << "MmapStorageRegion not supported on this platform";
+  }
+
+  const int dim0 = 3;
+  const int dim1 = 2;
+  const std::string filename = "test_model.ptl";
+
+  const at::Tensor weight = torch::rand({dim0, dim1});
+
+  torch::jit::Module original_model("test_model");
+  original_model.register_parameter("weight", weight, false);
+  original_model.define(R"(
+    def forward(self, input):
+      return self.weight
+  )");
+  original_model.eval();
+
+  original_model._save_for_mobile(filename);
+
+  const auto get_output_tensor = [&]() {
+    torch::jit::mobile::Module loaded_model =
+        torch::jit::_load_for_mobile(filename);
+
+    std::vector<torch::jit::IValue> input;
+    input.emplace_back(torch::rand({dim0, dim1}));
+
+    // This tensor comes directly from the mmap region
+    return loaded_model.forward(input).toTensor();
+  };
+
+  at::Tensor output = get_output_tensor();
+
+  // Tensor should persist past the lifetime of the model
+  // (MmapStorageRegion should not be deconstructed yet)
+  for (int i = 0; i < dim0; i++) {
+    for (int j = 0; j < dim1; j++) {
+      ASSERT_FLOAT_EQ(
+        weight[i][j].item<float>(),
+        output[i][j].item<float>());
+    }
+  }
+
+  // Clear the reference to the Tensor
+  output = at::empty({0});
+
+  // At this point, the MmapStorageRegion is deconstructed (which I confirmed
+  // with print statements)
+
+  std::filesystem::remove(filename);
+}
 
 } // namespace
 } // namespace serialize

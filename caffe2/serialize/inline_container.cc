@@ -16,6 +16,7 @@
 #include "caffe2/serialize/file_adapter.h"
 #include "caffe2/serialize/inline_container.h"
 #include "caffe2/serialize/istream_adapter.h"
+#include "caffe2/serialize/mmap_storage_region.h"
 #include "caffe2/serialize/read_adapter_interface.h"
 
 #include "miniz.h"
@@ -71,6 +72,15 @@ PyTorchStreamReader::PyTorchStreamReader(std::istream* in)
 PyTorchStreamReader::PyTorchStreamReader(
     std::shared_ptr<ReadAdapterInterface> in)
     : ar_(std::make_unique<mz_zip_archive>()), in_(std::move(in)) {
+  init();
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+PyTorchStreamReader::PyTorchStreamReader(
+    std::shared_ptr<ReadAdapterInterface> in,
+    c10::optional<intrusive_ptr<MmapStorageRegion>> mmapping)
+    : ar_(std::make_unique<mz_zip_archive>()), in_(std::move(in)),
+      mmapping_(mmapping) {
   init();
 }
 
@@ -255,8 +265,25 @@ std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(const std::string
   mz_zip_archive_file_stat stat;
   mz_zip_reader_file_stat(ar_.get(), key, &stat);
   valid("retrieving file meta-data for ", name.c_str());
-  at::DataPtr retval = c10::GetCPUAllocator()->allocate(stat.m_uncomp_size);
-  mz_zip_reader_extract_to_mem(ar_.get(), key, retval.get(), stat.m_uncomp_size, 0);
+
+  at::DataPtr retval;
+  if (mmapping_.has_value() && !stat.m_method) {
+    // Data is uncompressed (!stat.m_method) and can be read with mmap
+    // The logic to compute cur_file_ofs below is copied from miniz.c
+    mz_uint64 cur_file_ofs = stat.m_local_header_ofs;
+    DataPtr pLocal_header =
+        mmapping_->get()->getData(cur_file_ofs, DeviceType::CPU);
+    const uint8_t* pLocal_header_ptr = (uint8_t*) pLocal_header.get();
+    cur_file_ofs +=
+      MZ_ZIP_LOCAL_DIR_HEADER_SIZE +
+      MZ_READ_LE16(pLocal_header_ptr + MZ_ZIP_LDH_FILENAME_LEN_OFS) +
+      MZ_READ_LE16(pLocal_header_ptr + MZ_ZIP_LDH_EXTRA_LEN_OFS);
+    retval = mmapping_->get()->getData(cur_file_ofs, DeviceType::CPU);
+  } else {
+    retval = c10::GetDefaultCPUAllocator()->allocate(stat.m_uncomp_size);
+    mz_zip_reader_extract_to_mem(ar_.get(), key, retval.get(), stat.m_uncomp_size, 0);
+  }
+
   valid("reading file ", name.c_str());
 
   return std::make_tuple(std::move(retval), stat.m_uncomp_size);

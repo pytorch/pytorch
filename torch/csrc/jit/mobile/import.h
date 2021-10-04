@@ -4,7 +4,9 @@
 #include <istream>
 #include <memory>
 
+#include <c10/util/intrusive_ptr.h>
 #include <caffe2/serialize/file_adapter.h>
+#include <caffe2/serialize/mmap_storage_region.h>
 
 namespace torch {
 namespace jit {
@@ -27,6 +29,13 @@ TORCH_API mobile::Module _load_for_mobile(
 TORCH_API mobile::Module _load_for_mobile(
     const std::string& filename,
     c10::optional<at::Device> device,
+    ExtraFilesMap& extra_files);
+
+TORCH_API mobile::Module _load_for_mobile(
+    std::unique_ptr<ReadAdapterInterface> rai,
+    c10::optional<at::intrusive_ptr<caffe2::serialize::MmapStorageRegion>>
+        mmapping,
+    c10::optional<c10::Device> device,
     ExtraFilesMap& extra_files);
 
 TORCH_API mobile::Module _load_for_mobile(

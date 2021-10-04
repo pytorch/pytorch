@@ -1,3 +1,4 @@
+#include <c10/util/Optional.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/parse_bytecode.h>
 #include <torch/csrc/jit/mobile/parse_operators.h>
@@ -474,6 +475,8 @@ c10::IValue BytecodeDeserializer::readArchive(
 // call this method directly.
 mobile::Module _load_for_mobile_impl(
     std::unique_ptr<ReadAdapterInterface> rai,
+    c10::optional<at::intrusive_ptr<caffe2::serialize::MmapStorageRegion>>
+        mmapping,
     c10::optional<c10::Device> device,
     ExtraFilesMap& extra_files,
     uint64_t module_load_options);
@@ -513,7 +516,12 @@ mobile::Module _load_for_mobile(
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
   std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
-  auto module = _load_for_mobile(std::move(rai), device, extra_files);
+  c10::optional<c10::intrusive_ptr<caffe2::serialize::MmapStorageRegion>>
+      mmapping = caffe2::serialize::MmapStorageRegion::isSupportedByPlatform()
+      ? c10::optional<c10::intrusive_ptr<caffe2::serialize::MmapStorageRegion>>(
+            c10::make_intrusive<caffe2::serialize::MmapStorageRegion>(filename))
+      : c10::nullopt;
+  auto module = _load_for_mobile(std::move(rai), mmapping, device, extra_files);
   return module;
 }
 
@@ -523,8 +531,13 @@ mobile::Module _load_for_mobile(
     ExtraFilesMap& extra_files,
     uint64_t module_load_options) {
   std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
+  c10::optional<c10::intrusive_ptr<caffe2::serialize::MmapStorageRegion>>
+      mmapping = caffe2::serialize::MmapStorageRegion::isSupportedByPlatform()
+      ? c10::optional<c10::intrusive_ptr<caffe2::serialize::MmapStorageRegion>>(
+            c10::make_intrusive<caffe2::serialize::MmapStorageRegion>(filename))
+      : c10::nullopt;
   auto module = _load_for_mobile_impl(
-      std::move(rai), device, extra_files, module_load_options);
+      std::move(rai), mmapping, device, extra_files, module_load_options);
   return module;
 }
 
@@ -532,13 +545,30 @@ mobile::Module _load_for_mobile(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device,
     ExtraFilesMap& extra_files) {
+  auto module =
+      _load_for_mobile(std::move(rai), c10::nullopt, device, extra_files);
+  return module;
+}
+
+mobile::Module _load_for_mobile(
+    std::unique_ptr<ReadAdapterInterface> rai,
+    c10::optional<at::intrusive_ptr<caffe2::serialize::MmapStorageRegion>>
+        mmapping,
+    c10::optional<c10::Device> device,
+    ExtraFilesMap& extra_files) {
   auto module = _load_for_mobile_impl(
-      std::move(rai), device, extra_files, _default_mobile_module_load_options);
+      std::move(rai),
+      mmapping,
+      device,
+      extra_files,
+      _default_mobile_module_load_options);
   return module;
 }
 
 mobile::Module _load_for_mobile_impl(
     std::unique_ptr<ReadAdapterInterface> rai,
+    c10::optional<at::intrusive_ptr<caffe2::serialize::MmapStorageRegion>>
+        mmapping,
     c10::optional<c10::Device> device,
     ExtraFilesMap& extra_files,
     uint64_t module_load_options) {
@@ -557,7 +587,8 @@ mobile::Module _load_for_mobile_impl(
   }
 
   const size_t model_size = rai != nullptr ? rai->size() : 0;
-  auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
+  auto reader =
+      torch::make_unique<PyTorchStreamReader>(std::move(rai), mmapping);
   BytecodeDeserializer deserializer(std::move(reader), module_load_options);
 
   std::string error_message;

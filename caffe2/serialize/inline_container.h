@@ -11,8 +11,10 @@
 
 #include <c10/core/Allocator.h>
 #include <c10/core/Backend.h>
+#include <c10/util/Optional.h>
 
 #include "caffe2/serialize/istream_adapter.h"
+#include "caffe2/serialize/mmap_storage_region.h"
 #include "caffe2/serialize/read_adapter_interface.h"
 #include "caffe2/serialize/versions.h"
 
@@ -98,6 +100,9 @@ class TORCH_API PyTorchStreamReader final {
   explicit PyTorchStreamReader(const std::string& file_name);
   explicit PyTorchStreamReader(std::istream* in);
   explicit PyTorchStreamReader(std::shared_ptr<ReadAdapterInterface> in);
+  explicit PyTorchStreamReader(
+    std::shared_ptr<ReadAdapterInterface> in,
+    c10::optional<intrusive_ptr<MmapStorageRegion>> mmapping);
 
   // return dataptr, size
   std::tuple<at::DataPtr, size_t> getRecord(const std::string& name);
@@ -124,6 +129,7 @@ class TORCH_API PyTorchStreamReader final {
   std::shared_ptr<ReadAdapterInterface> in_;
   int64_t version_;
   std::mutex reader_lock_;
+  c10::optional<intrusive_ptr<MmapStorageRegion>> mmapping_;
 };
 
 class TORCH_API PyTorchStreamWriter final {
