@@ -166,17 +166,7 @@ void numToTensorBool(Stack& stack) {
   push(stack, at::scalar_to_tensor(b));
 }
 
-void dictIndex(Stack& stack) {
-  auto key = pop(stack);
-  auto dict = pop(stack).toGenericDict();
-  auto value = dict.find(key);
-  if (value == dict.end()) {
-    AT_ERROR("KeyError: ", key);
-  }
-  push(stack, value->value());
-}
-
-static const mobile::prim_op_fn_register op_reg[] = {
+static const C10_UNUSED std::array<mobile::prim_op_fn_register, 14> op_reg = {
     mobile::prim_op_fn_register("prim::TupleIndex", tupleIndex),
     mobile::prim_op_fn_register("aten::Bool.Tensor", boolTensor),
     mobile::prim_op_fn_register("aten::format", aten_format),
