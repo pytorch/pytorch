@@ -332,6 +332,11 @@
   mat2: self.transpose(1, 2).conj().bmm(grad)
   result: self_t.bmm(mat2_p) + self_p.bmm(mat2_t)
 
+- name: matmul(Tensor self, Tensor other) -> Tensor
+  self: at::matmul(grad, other.transpose(-2, -1).conj())
+  other: at::matmul(self.transpose(-2, -1).conj(), grad)
+  result: at::matmul(self_t, other_p) + at::matmul(self_p, other_t)
+
 - name: cat(Tensor[] tensors, int dim=0) -> Tensor
   tensors: cat_tensors_backward(grad, to_args_sizes(tensors), to_args_scalartypes(tensors), dim)
   result: cat_jvp(tensors, dim)

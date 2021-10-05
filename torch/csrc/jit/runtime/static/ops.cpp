@@ -235,7 +235,7 @@ Tensor& linear_out(
     // Fused op is marginally faster.
     return at::cpu::addmm_out(output, *bias, input, weight.t());
   }
-  at::native::matmul_out(input, weight.t(), output);
+  at::matmul_out(output, input, weight.t());
   if (bias->defined()) {
     at::cpu::add_(output, *bias);
   }
@@ -1594,11 +1594,11 @@ REGISTER_OPERATOR_FUNCTOR(aten::matmul, aten_matmul, [](Node* n) -> SROperator {
     const auto& in1_t = p_node->Input(1).toTensor();
 
     if (p_node->Output(0).isNone()) {
-      p_node->Output(0) = at::native::matmul(in0_t, in1_t);
+      p_node->Output(0) = at::matmul(in0_t, in1_t);
     } else {
       auto& out_t = p_node->Output(0).toTensor();
       fastResizeToZero(out_t);
-      at::native::matmul_out(in0_t, in1_t, out_t);
+      at::matmul_out(out_t, in0_t, in1_t);
     }
   };
 });
