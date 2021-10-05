@@ -135,6 +135,7 @@ jobs:
       PR_BODY: ${{ github.event.pull_request.body }}
       NOGPU_RUNNER_TYPE: windows.4xlarge
       ENABLE_FORCE_ON_CPU_TEST: !{{ enable_force_on_cpu_test }}
+      RUN_SMOKE_TESTS_ONLY_ON_PR: !{{ only_run_smoke_tests_on_pull_request }}
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
@@ -158,7 +159,6 @@ jobs:
       TEST_CONFIG: ${{ matrix.config }}
       http_proxy: "!{{ common.squid_proxy }}"
       https_proxy: "!{{ common.squid_proxy }}"
-      RUN_SMOKE_TESTS_ONLY_ON_PR: !{{ only_run_smoke_tests_on_pull_request }}
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
     needs: [build, generate-test-matrix, !{{ ciflow_config.root_job_name }}]
     strategy:
