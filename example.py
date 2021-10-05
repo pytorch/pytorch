@@ -20,6 +20,7 @@ supported_ops = {
     torch.ops.aten.expand,
     torch.ops.aten.eye,
     torch.ops.aten.neg,
+    torch.ops.aten.exp,
 }
 
 @contextlib.contextmanager
@@ -190,6 +191,13 @@ def cos_jvp_rule(unpacked_jvp_tensor):
     x_primal, x_tangent = unpacked_jvp_tensor
     return (x_primal.cos(), opt_mul(-x_primal.sin(), x_tangent)),
 
+# NB: You can call transforms INSIDE rules.
+def exp_jvp_rule(unpacked_jvp_tensor):
+    x_primal, x_tangent = unpacked_jvp_tensor
+    assert x_primal.dim() > 0  # To demonstrate vmap inside jvp
+    result = vmap(torch.exp)(x_primal)
+    return (result, opt_mul(x_primal.exp(), x_tangent)),
+
 def neg_jvp_rule(unpacked_jvp_tensor):
     x_primal, x_tangent = unpacked_jvp_tensor
     return (-x_primal, opt_apply(lambda x: -x, x_tangent)),
@@ -238,6 +246,7 @@ jvp_rules = {
     torch.ops.aten.detach: detach_jvp_rule,
     torch.ops.aten.to: to_jvp_rule,
     torch.ops.aten.sum: sum_jvp_rule,
+    torch.ops.aten.exp: exp_jvp_rule,
 }
 
 def get_jvp_torch_dispatch(subclass):
@@ -401,3 +410,9 @@ def foo(x):
 
 res = jacfwd(jacfwd(foo))(x)
 assert torch.allclose(res, torch.diagflat(-torch.sin(x)))
+
+# test for calling vmap inside a jvp rule (see exp_jvp_rule)
+x = torch.randn(1)
+t = torch.ones(1)
+p_out, t_out = jvp(torch.exp, (x,), (t,))
+assert torch.allclose(t_out, x.exp())
