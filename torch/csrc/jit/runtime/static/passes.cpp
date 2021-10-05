@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
+#include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 
 namespace torch {
@@ -27,6 +28,32 @@ bool HasInplaceOp(Block* block, const AliasDb& alias_db) {
   return false;
 }
 
+bool graphHasOp(std::shared_ptr<Graph>& graph, const char* op_name) {
+  DepthFirstGraphNodeIterator graph_it(graph);
+  for (auto node = graph_it.next(); node != nullptr; node = graph_it.next()) {
+    const char* node_qual_string = node->kind().toQualString();
+    if (strcmp(node_qual_string, op_name) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+} // namespace
+
+bool HasInplaceOp(std::shared_ptr<Graph>& graph, const AliasDb& alias_db) {
+  return HasInplaceOp(graph->block(), alias_db);
+}
+
+bool forwardHasOp(
+    const torch::jit::script::Module& module,
+    const char* op_name) {
+  using Method = ::torch::jit::Method;
+  Method method = module.get_method("forward");
+  auto graph = method.graph();
+  return graphHasOp(graph, op_name);
+}
+
+namespace {
 C10_UNUSED
 void ConcatAddMulReplaceNaNClip(std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
@@ -64,7 +91,7 @@ void ConcatAddMulReplaceNaNClip(std::shared_ptr<torch::jit::Graph>& graph) {
         return (%res))IR";
   std::string fused_pattern = R"IR(
     graph(%a, %b, %c, %d, %e, %f, %g, %h, %i, %j):
-        %res = fb::concat_add_mul_replacenan_clip(%c, %e, %a, %i, %j)
+        %res = fb::concat_add_mul_replacenan_clip(%c, %e, %a, %i, %j, %b)
         return (%res))IR";
 
   SubgraphRewriter fuse;
@@ -388,10 +415,6 @@ void UseVariadicTupleUnpack(const std::shared_ptr<Graph>& graph) {
   }
 }
 
-bool HasInplaceOp(std::shared_ptr<Graph>& graph, const AliasDb& alias_db) {
-  return HasInplaceOp(graph->block(), alias_db);
-}
-
 void ReplaceWithCopy(
     std::shared_ptr<torch::jit::Graph>& graph,
     bool outputs_are_immutable) {
@@ -494,14 +517,19 @@ void ReplaceWithCopy(
 // NB: The alias type of the fused op needs to be changed to
 // c10::AliasAnalysisKind::PURE_FUNCTION to make alias analysis work.
 void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
+  AliasDb alias_db(
+      graph, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
+  const std::vector<Value*> graph_outputs(
+      graph->outputs().begin(), graph->outputs().end());
   auto nodes = graph->nodes();
   std::vector<Node*> equally_splits_to_remove;
   for (auto it = nodes.begin(); it != nodes.end(); ++it) {
     Node* node = *it;
-    const char* node_qual_string = node->kind().toQualString();
-    if (strcmp(node_qual_string, "fb::sigrid_transforms") == 0 ||
-        strcmp(node_qual_string, "fb::sigrid_transforms_torch_bind") == 0 ||
-        strcmp(node_qual_string, "fb::equally_split") == 0) {
+    const std::string node_qual_string = node->kind().toQualString();
+    if (node_qual_string == "fb::sigrid_transforms" ||
+        node_qual_string == "fb::sigrid_transforms_torch_bind" ||
+        node_qual_string == "fb::equally_split" ||
+        node_qual_string == "fb::gather_ranges_to_dense") {
       const Value* value_out = node->outputs()[0];
       if (value_out->uses().size() > 1) {
         continue;
@@ -517,6 +545,17 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
         continue;
       }
 
+      if (node_qual_string != "fb::equally_split") {
+        // If any output of the ListUnpack node is unmanaged, disable fusion
+        // since the fused op assumes all outputs are either managed or not.
+        // "fb::equally_split" is excluded here since it does doublecheck
+        // individual outputs without having this assumption.
+        const std::vector<Value*> list_unpack_outputs_vec(
+            list_unpack_outputs.begin(), list_unpack_outputs.end());
+        if (alias_db.mayContainAlias(list_unpack_outputs_vec, graph_outputs)) {
+          continue;
+        }
+      }
       // handle outputs
       for (Value* out : list_unpack_outputs) {
         Value* new_out = node->addOutput();
@@ -530,7 +569,7 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
 
       node->eraseOutput(0);
 
-      if (strcmp(node_qual_string, "fb::equally_split") == 0 &&
+      if (node_qual_string == "fb::equally_split" &&
           node->outputs().size() == 1) {
         // This captures a case of `y = fb::equally_split(x, 1, _)` where y
         // becomes just an alias of x.
