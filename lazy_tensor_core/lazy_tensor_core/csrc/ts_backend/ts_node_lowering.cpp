@@ -474,28 +474,48 @@ class TSNodeLowering : public NodeLowering {
       const ir::ops::ConvolutionOverrideable* conv) {
     const auto& operands = conv->operands();
     LTC_CHECK(!operands.empty());
-    const auto& input_size = operands[0].shape().dimensions();
+
     const auto& weight_size = operands[1].shape().dimensions();
     const auto& dilation = conv->dilation();
     const auto& padding = conv->padding();
     const auto& stride = conv->stride();
+    const auto& output_padding = conv->output_padding();
 
-    // Shape computation logic copied from conv_output_size
-    constexpr int input_batch_size_dim = 0;
+    constexpr int input_batch_size_dim = 0;   // also grad_input
+    constexpr int output_batch_size_dim = 0;  // also grad_output
     constexpr int weight_output_channels_dim = 0;
-    bool has_dilation = dilation.size() > 0;
-    auto dim = input_size.size();
-    std::vector<int64_t> output_size(dim);
-    output_size[0] = input_size[input_batch_size_dim];
-    output_size[1] = weight_size[weight_output_channels_dim];
-    for (size_t d = 2; d < dim; ++d) {
-      auto dilation_ = has_dilation ? dilation[d - 2] : 1;
-      auto kernel = dilation_ * (weight_size[d] - 1) + 1;
-      output_size[d] =
-          (input_size[d] + (2 * padding[d - 2]) - kernel) / stride[d - 2] + 1;
+    constexpr int weight_input_channels_dim = 1;
+    if (!conv->transposed()) {
+      // Shape computation logic copied from conv_output_size
+      const auto& input_size = operands[0].shape().dimensions();
+      bool has_dilation = dilation.size() > 0;
+      auto dim = input_size.size();
+      std::vector<int64_t> output_size(dim);
+      output_size[0] = input_size[input_batch_size_dim];
+      output_size[1] = weight_size[weight_output_channels_dim];
+      for (size_t d = 2; d < dim; ++d) {
+        auto dilation_ = has_dilation ? dilation[d - 2] : 1;
+        auto kernel = dilation_ * (weight_size[d] - 1) + 1;
+        output_size[d] =
+            (input_size[d] + (2 * padding[d - 2]) - kernel) / stride[d - 2] + 1;
+      }
+      return lazy_tensors::Shape(operands[0].shape().element_type(),
+                                 output_size);
+    } else {
+      // Shape computation logic copied from conv_input_size
+      const auto& output_size = operands[0].shape().dimensions();
+      auto dim = output_size.size();
+      std::vector<int64_t> input_size(dim);
+      input_size[0] = output_size[output_batch_size_dim];
+      input_size[1] = weight_size[weight_input_channels_dim] * conv->groups();
+      for (size_t d = 2; d < dim; ++d) {
+        int kernel = dilation[d - 2] * (weight_size[d] - 1) + 1;
+        input_size[d] = (output_size[d] - 1) * stride[d - 2] -
+                        (2 * padding[d - 2]) + kernel + output_padding[d - 2];
+      }
+      return lazy_tensors::Shape(operands[0].shape().element_type(),
+                                 input_size);
     }
-
-    return lazy_tensors::Shape(operands[0].shape().element_type(), output_size);
   }
 
   static lazy_tensors::Shape InferEmbeddingDenseBackward(
