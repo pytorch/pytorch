@@ -150,13 +150,13 @@ def _prepare_fx(model: torch.nn.Module,
     r""" Internal helper function for prepare_fx
     Args:
       `model`, `qconfig_dict`, `prepare_custom_config_dict`, `equalization_qonfig_dict`:
-      see docs for :func:`~torch.quantization.prepare_fx`
+      see docs for :func:`~torch.ao.quantization.prepare_fx`
       `is_standalone_module`: a boolean flag indicates whether we are
       quantizing a standalone module or not, a standalone module
       is a submodule of the parent module that is not inlined in the
 forward graph of the parent module,
       the way we quantize standalone module is described in:
-      :func:`~torch.quantization._prepare_standalone_module_fx`
+      :func:`~torch.ao.quantization._prepare_standalone_module_fx`
     """
     if prepare_custom_config_dict is None:
         prepare_custom_config_dict = {}
@@ -235,7 +235,7 @@ def _prepare_standalone_module_fx(
 def fuse_fx(model: torch.nn.Module,
             fuse_custom_config_dict: Dict[str, Any] = None) -> GraphModule:
     r""" Fuse modules like conv+bn, conv+bn+relu etc, model must be in eval mode.
-    Fusion rules are defined in torch.quantization.fx.fusion_pattern.py
+    Fusion rules are defined in torch.ao.quantization.fx.fusion_pattern.py
     Args:
         `model`: a torch.nn.Module model
         `fuse_custom_config_dict`: Dictionary for custom configurations for fuse_fx, e.g.
@@ -253,7 +253,7 @@ def fuse_fx(model: torch.nn.Module,
 
     Example:
     ```python
-    from torch.quantization import fuse_fx
+    from torch.ao.quantization import fuse_fx
     m = Model().eval()
     m = fuse_fx(m)
     ```
@@ -412,8 +412,8 @@ def prepare_fx(
     Example:
     ```python
     import torch
-    from torch.quantization import get_default_qconfig
-    from torch.quantization import prepare_fx
+    from torch.ao.quantization import get_default_qconfig
+    from torch.ao.quantization import prepare_fx
 
     float_model.eval()
     qconfig = get_default_qconfig('fbgemm')
@@ -446,9 +446,9 @@ def prepare_qat_fx(
     r""" Prepare a model for quantization aware training
     Args:
       `model`: torch.nn.Module model, must be in train mode
-      `qconfig_dict`: see :func:`~torch.quantization.prepare_fx`
-      `prepare_custom_config_dict`: see :func:`~torch.quantization.prepare_fx`
-      `backend_config_dict`: see :func:`~torch.quantization.prepare_fx`
+      `qconfig_dict`: see :func:`~torch.ao.quantization.prepare_fx`
+      `prepare_custom_config_dict`: see :func:`~torch.ao.quantization.prepare_fx`
+      `backend_config_dict`: see :func:`~torch.ao.quantization.prepare_fx`
 
     Return:
       A GraphModule with fake quant modules (configured by qconfig_dict), ready for
@@ -457,8 +457,8 @@ def prepare_qat_fx(
     Example:
     ```python
     import torch
-    from torch.quantization import get_default_qat_qconfig
-    from torch.quantization import prepare_fx
+    from torch.ao.quantization import get_default_qat_qconfig
+    from torch.ao.quantization import prepare_fx
 
     qconfig = get_default_qat_qconfig('fbgemm')
     def train_loop(model, train_data):
@@ -487,7 +487,7 @@ def _convert_fx(
         convert_custom_config_dict: Dict[str, Any] = None,
         is_standalone_module: bool = False,
         _remove_qconfig: bool = True) -> QuantizedGraphModule:
-    """ `is_standalone_module`: see docs in :func:`~torch.quantization.prepare_standalone_module_fx`
+    """ `is_standalone_module`: see docs in :func:`~torch.ao.quantization.prepare_standalone_module_fx`
     """
     if convert_custom_config_dict is None:
         convert_custom_config_dict = {}
@@ -568,7 +568,7 @@ def convert_fx(
 def _convert_standalone_module_fx(
         graph_module: GraphModule, is_reference: bool = False,
         convert_custom_config_dict: Dict[str, Any] = None) -> QuantizedGraphModule:
-    r""" [Internal use only] Convert a model produced by :func:`~torch.quantization.prepare_standalone_module_fx`
+    r""" [Internal use only] Convert a model produced by :func:`~torch.ao.quantization.prepare_standalone_module_fx`
     and convert it to a quantized model
 
     Returns a quantized standalone module, whether input/output is quantized is
