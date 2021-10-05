@@ -231,6 +231,12 @@ class EncoderBase {
       bool use_external_data_format = false,
       const std::string& onnx_file_path = std::string());
 
+  unsigned long long int GetGraphProtoSize(
+      onnx::GraphProto* graph_proto,
+      const std::shared_ptr<Graph>& graph,
+      const std::map<std::string, at::Tensor>& initializers =
+          std::map<std::string, at::Tensor>());
+
   virtual void EncodeTensor(
       onnx::TensorProto* tensor_proto,
       const at::Tensor& tensor,
@@ -251,6 +257,14 @@ class EncoderBase {
               dynamic_axes = std::unordered_map<
                   std::string,
                   std::unordered_map<int64_t, std::string>>());
+
+  void EncodeValueInfoType(
+      onnx::TypeProto* onnx_type,
+      const TypePtr node_type,
+      const Value* n,
+      const std::unordered_map<
+          std::string,
+          std::unordered_map<int64_t, std::string>>& dynamic_axes);
 
   void AddAttribute(
       onnx::NodeProto* node_proto,
@@ -333,21 +347,19 @@ EncoderBase::EncoderBase(
   model_proto_.set_producer_version(onnx_torch::PRODUCER_VERSION);
 }
 
-void EncoderBase::EncodeValueInfo(
-    onnx::GraphProto* graph_proto,
-    onnx::ValueInfoProto* v,
+void EncoderBase::EncodeValueInfoType(
+    onnx::TypeProto* onnx_type,
+    const TypePtr node_type,
     const Value* n,
     const std::unordered_map<
         std::string,
         std::unordered_map<int64_t, std::string>>& dynamic_axes) {
-  std::string name = n->debugName();
-  v->set_name(name);
-
-  auto tensorTypeToONNXType = [&dynamic_axes, &name, n, this](
+  auto tensorTypeToONNXType = [&dynamic_axes, n, this](
                                   const TensorTypePtr& t,
-                                  onnx::TypeProto_Tensor* tensor_type) {
+                                  onnx::TypeProto_Tensor* onnx_tensor_type) {
+    std::string name = n->debugName();
     if (t->dim()) {
-      onnx::TensorShapeProto* shape = tensor_type->mutable_shape();
+      onnx::TensorShapeProto* shape = onnx_tensor_type->mutable_shape();
       auto sizes = t->symbolic_sizes().sizes().value();
       for (const auto i : c10::irange(sizes.size())) {
         shape->add_dim();
@@ -374,32 +386,46 @@ void EncoderBase::EncodeValueInfo(
       }
     }
     if (t->scalarType()) {
-      tensor_type->set_elem_type(ATenTypeToOnnxType(t->scalarType().value()));
+      onnx_tensor_type->set_elem_type(
+          ATenTypeToOnnxType(t->scalarType().value()));
     }
   };
 
-  if (TensorTypePtr node_type = n->type()->cast<TensorType>()) {
-    if (node_type->dim() || node_type->scalarType()) {
+  if (TensorTypePtr tensor_type = node_type->cast<TensorType>()) {
+    if (tensor_type->dim() || tensor_type->scalarType()) {
       // Encode type if either shape or dtype exists.
-      onnx::TypeProto* onnx_type = v->mutable_type();
-      onnx::TypeProto_Tensor* tensor_type = onnx_type->mutable_tensor_type();
-      tensorTypeToONNXType(node_type, tensor_type);
+      onnx::TypeProto_Tensor* onnx_tensor_type =
+          onnx_type->mutable_tensor_type();
+      tensorTypeToONNXType(tensor_type, onnx_tensor_type);
     }
-  } else if (BoolTypePtr node_type = n->type()->cast<BoolType>()) {
-    onnx::TypeProto* onnx_type = v->mutable_type();
-    onnx::TypeProto_Tensor* tensor_type = onnx_type->mutable_tensor_type();
-    tensor_type->set_elem_type(ATenTypeToOnnxType(at::kBool));
-  } else if (ListTypePtr list_type = n->type()->cast<ListType>()) {
-    auto elem_type = list_type->getElementType();
-    if (TensorTypePtr inner_node_type = elem_type->cast<TensorType>()) {
-      onnx::TypeProto* onnx_type = v->mutable_type();
-      onnx::TypeProto_Sequence* sequence_type =
-          onnx_type->mutable_sequence_type();
-      onnx::TypeProto_Tensor* tensor_type =
-          sequence_type->mutable_elem_type()->mutable_tensor_type();
-      tensorTypeToONNXType(inner_node_type, tensor_type);
-    }
+  } else if (BoolTypePtr bool_type = node_type->cast<BoolType>()) {
+    onnx::TypeProto_Tensor* onnx_tensor_type = onnx_type->mutable_tensor_type();
+    onnx_tensor_type->set_elem_type(ATenTypeToOnnxType(at::kBool));
+  } else if (IntTypePtr int_type = node_type->cast<IntType>()) {
+    onnx::TypeProto_Tensor* onnx_tensor_type = onnx_type->mutable_tensor_type();
+    onnx_tensor_type->set_elem_type(ATenTypeToOnnxType(at::kLong));
+  } else if (FloatTypePtr float_type = node_type->cast<FloatType>()) {
+    onnx::TypeProto_Tensor* onnx_tensor_type = onnx_type->mutable_tensor_type();
+    onnx_tensor_type->set_elem_type(ATenTypeToOnnxType(at::kFloat));
+  } else if (ListTypePtr list_type = node_type->cast<ListType>()) {
+    auto list_elem_type = list_type->getElementType();
+    onnx::TypeProto_Sequence* sequence_type =
+        onnx_type->mutable_sequence_type();
+    onnx::TypeProto* onnx_tensor_type = sequence_type->mutable_elem_type();
+    EncodeValueInfoType(onnx_tensor_type, list_elem_type, n, dynamic_axes);
   }
+}
+
+void EncoderBase::EncodeValueInfo(
+    onnx::GraphProto* graph_proto,
+    onnx::ValueInfoProto* v,
+    const Value* n,
+    const std::unordered_map<
+        std::string,
+        std::unordered_map<int64_t, std::string>>& dynamic_axes) {
+  std::string name = n->debugName();
+  v->set_name(name);
+  EncodeValueInfoType(v->mutable_type(), n->type(), n, dynamic_axes);
 }
 
 void EncoderBase::EncodeGraph(
@@ -581,7 +607,6 @@ void EncoderBase::AddInitializersIntoGraphProto(
     bool use_external_data_format,
     const std::string& onnx_file_path) {
   AT_ASSERT(block->inputs().size() >= initializers.size());
-
   for (auto input : block->inputs()) {
     auto name_tensor_pair = initializers.find(input->debugName());
     if (name_tensor_pair == initializers.end()) {
@@ -596,6 +621,38 @@ void EncoderBase::AddInitializersIntoGraphProto(
         use_external_data_format,
         onnx_file_path);
   }
+}
+
+unsigned long long int EncoderBase::GetGraphProtoSize(
+    onnx::GraphProto* graph_proto,
+    const std::shared_ptr<Graph>& graph,
+    const std::map<std::string, at::Tensor>& initializers) {
+  unsigned long long int sizes = 0;
+  for (auto input : graph->inputs()) {
+    auto name_tensor_pair = initializers.find(input->debugName());
+    if (name_tensor_pair == initializers.end()) {
+      continue;
+    }
+    onnx::GraphProto* graph_proto_copy = new onnx::GraphProto(*graph_proto);
+    auto tensor_proto = graph_proto_copy->add_initializer();
+    const at::Tensor tensor = name_tensor_pair->second;
+    for (auto d : tensor.sizes()) {
+      tensor_proto->add_dims(d);
+    }
+    tensor_proto->set_data_type(ATenTypeToOnnxType(tensor.scalar_type()));
+    at::Tensor t;
+    if (tensor.is_quantized()) {
+      t = tensor.contiguous();
+    } else {
+      t = tensor.contiguous().cpu();
+    }
+    tensor_proto->set_raw_data(std::string(
+        static_cast<char*>(t.data_ptr()), t.element_size() * t.numel()));
+    sizes += tensor_proto->ByteSizeLong();
+    delete graph_proto_copy;
+    graph_proto_copy = nullptr;
+  }
+  return sizes;
 }
 
 void EncoderBase::AddAttribute(
@@ -726,6 +783,10 @@ class GraphEncoder : public EncoderBase {
     return raw_data_export_map_;
   }
 
+  bool get_use_external_data_format() {
+    return use_external_data_format_;
+  }
+
  private:
   void EncodeTensor(
       onnx::TensorProto* tensor_proto,
@@ -736,6 +797,7 @@ class GraphEncoder : public EncoderBase {
 
   RawDataExportMap raw_data_export_map_;
   bool defer_weight_export_;
+  bool use_external_data_format_;
 };
 
 GraphEncoder::GraphEncoder(
@@ -754,8 +816,21 @@ GraphEncoder::GraphEncoder(
     bool use_external_data_format,
     const std::string& onnx_file_path)
     : EncoderBase(operator_export_type, strip_doc),
-      defer_weight_export_(defer_weight_export) {
+      defer_weight_export_(defer_weight_export),
+      use_external_data_format_(use_external_data_format) {
   validateGraph(graph, operator_export_type);
+  // If graph proto size exceed maximum protobuf size of 2GB, set
+  // use_external_data_format to true.
+  if (!use_external_data_format && !onnx_file_path.empty() &&
+      GetGraphProtoSize(model_proto_.mutable_graph(), graph, initializers) >
+          INT_MAX) {
+    GRAPH_DEBUG(
+        "Exporting model exceed maximum protobuf size of 2GB. Storing model parameters in external data files");
+    use_external_data_format = true;
+    // use_external_data_format_ is one of graph_encoder private variable set
+    // for return `use_external_data_format` value.
+    use_external_data_format_ = use_external_data_format;
+  }
 
   if (use_external_data_format) {
     TORCH_CHECK(
@@ -895,7 +970,8 @@ std::string pretty_print_onnx(
 std::tuple<
     std::shared_ptr<::ONNX_NAMESPACE::ModelProto>,
     RawDataExportMap,
-    SymbolDimMap>
+    SymbolDimMap,
+    bool>
 export_onnx(
     const std::shared_ptr<Graph>& graph,
     const std::map<std::string, at::Tensor>& initializers,
@@ -929,7 +1005,8 @@ export_onnx(
       std::make_shared<::ONNX_NAMESPACE::ModelProto>(
           graph_encoder.get_model_proto()),
       graph_encoder.get_raw_data_export_map(),
-      graph_encoder.get_symbol_dim_param_map());
+      graph_encoder.get_symbol_dim_param_map(),
+      graph_encoder.get_use_external_data_format());
 }
 
 std::string serialize_model_proto_to_string(
@@ -938,7 +1015,7 @@ std::string serialize_model_proto_to_string(
   TORCH_CHECK(
       proto_size <= INT_MAX,
       "Exporting model exceed maximum protobuf size of 2GB. "
-      "Please call torch.onnx.export with use_external_data_format=True.");
+      "Please call torch.onnx.export without setting use_external_data_format parameter.");
   return model_proto->SerializeAsString();
 }
 
