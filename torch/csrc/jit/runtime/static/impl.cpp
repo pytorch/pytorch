@@ -226,7 +226,6 @@ LivenessMap GetLivenessMap(
     // have deps, otherwise they die immediately
     if (v->uses().size()) {
       live_values_use_chain[v] = FastSet<const Node*>(v->uses().size());
-      ;
     }
 
     // record the relationship between v (Value) and its uses (Node)
