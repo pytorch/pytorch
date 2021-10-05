@@ -2,10 +2,12 @@ backend: Lazy
 cpp_namespace: torch_lazy_tensors
 full_codegen:
   - _log_softmax
-  - mean
   - addcdiv
   - addcmul
   - cos
+  - gelu
+  - gelu_backward
+  - mean
   - mm
   - mv
   # - mv.out
@@ -40,8 +42,6 @@ supported:
   - native_batch_norm_backward
   - nll_loss_backward
   - nll_loss_forward
-  - gelu
-  - gelu_backward
   - max_pool2d_with_indices
   - max_pool2d_with_indices_backward
   - max_pool3d_with_indices

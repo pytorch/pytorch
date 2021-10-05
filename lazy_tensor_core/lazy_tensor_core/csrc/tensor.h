@@ -565,10 +565,6 @@ class LazyTensor {
 
   static LazyTensor ge(const LazyTensor& input, const LazyTensor& other);
 
-  static LazyTensor gelu(const LazyTensor& input);
-  static LazyTensor gelu_backward(const LazyTensor& grad,
-                                  const LazyTensor& input);
-
   static LazyTensor ger(const LazyTensor& input, const LazyTensor& vec2);
 
   static LazyTensor gt(const LazyTensor& input, const at::Scalar& other);
