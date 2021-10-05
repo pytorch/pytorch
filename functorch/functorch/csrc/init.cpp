@@ -158,7 +158,9 @@ bool dump_tensor(const Tensor& self) {
 }
 
 int64_t _grad_increment_nesting() {
-  return initAndPushDynamicLayer(at::DispatchKey::Autograd);
+  // See NOTE [grad and vjp interaction with no_grad]
+  bool prev_grad_mode = c10::GradMode::is_enabled();
+  return initAndPushDynamicLayer(at::DispatchKey::Autograd, nullopt, prev_grad_mode);
 }
 
 int64_t _grad_decrement_nesting() {
