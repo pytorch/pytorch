@@ -47,7 +47,6 @@ struct IncrementRAII final {
 // are still not sure if you need it or not, consult your local
 // C++ expert.
 //
-#if !defined(C10_MOBILE)
 template <class T>
 class LeftRight final {
  public:
@@ -187,22 +186,21 @@ class LeftRight final {
   std::array<T, 2> _data;
   std::mutex _writeMutex;
 };
-#else
 
-// LeftRight for mobile builds is a pass-through (just to maintain API
+// LeftRightForMobile is a pass-through (just to maintain API
 // compatibility) with the non-mobile build.
 template <class T>
-class LeftRight final {
+class LeftRightForMobile final {
  public:
   template <class... Args>
-  explicit LeftRight(const Args&... args) : _data{args...} {}
+  explicit LeftRightForMobile(const Args&... args) : _data{args...} {}
 
   // Copying and moving would not be threadsafe.
   // Needs more thought and careful design to make that work.
-  LeftRight(const LeftRight&) = delete;
-  LeftRight(LeftRight&&) noexcept = delete;
-  LeftRight& operator=(const LeftRight&) = delete;
-  LeftRight& operator=(LeftRight&&) noexcept = delete;
+  LeftRightForMobile(const LeftRightForMobile&) = delete;
+  LeftRightForMobile(LeftRightForMobile&&) noexcept = delete;
+  LeftRightForMobile& operator=(const LeftRightForMobile&) = delete;
+  LeftRightForMobile& operator=(LeftRightForMobile&&) noexcept = delete;
 
   template <typename F>
   auto read(F&& readFunc) const -> typename std::result_of<F(const T&)>::type {
@@ -218,6 +216,5 @@ class LeftRight final {
   }
   T _data;
 };
-#endif
 
 } // namespace c10

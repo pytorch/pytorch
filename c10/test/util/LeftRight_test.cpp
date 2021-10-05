@@ -1,4 +1,3 @@
-#if !defined(C10_MOBILE)
 #include <c10/util/LeftRight.h>
 #include <gtest/gtest.h>
 #include <vector>
@@ -245,4 +244,3 @@ TEST(LeftRightTest, givenVector_whenWriteThrowsException_thenResetsToOldState) {
   read = obj.read([](const vector<int>& obj) { return obj; });
   EXPECT_EQ((vector<int>{5}), read);
 }
-#endif
