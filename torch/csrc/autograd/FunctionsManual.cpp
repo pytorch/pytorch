@@ -1080,8 +1080,9 @@ Tensor pinv_jvp(
          + (dAh - pinvA.matmul(A.matmul(dAh))).matmul(pinvAh.matmul(pinvA));
   }
   else {
-    auto K = dAh.matmul(pinvAh);
-    return (K - K.transpose(-1, -2).conj() - pinvA.matmul(A).matmul(K)).matmul(pinvA)
+    auto K = pinvA.matmul(dA);
+    auto Kh = K.transpose(-1, -2).conj();
+    return (Kh - K - pinvA.matmul(A).matmul(Kh)).matmul(pinvA)
          + (pinvA.matmul(pinvAh)).matmul(dAh - (dAh.matmul(A)).matmul(pinvA));
   }
 }
