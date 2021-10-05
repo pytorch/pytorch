@@ -93,7 +93,6 @@ class BackendWithCompiler : public PyTorchBackendInterface {
 
     c10::List<at::Tensor> output_list;
     auto start_us = autograd::profiler::getTime() / 1000;
-    double scalar_val = 1.0;
     for (const auto& token : handle.toList()) {
       IValue val = token;
       auto instruction = val.toTuple()->elements()[0].toStringRef();

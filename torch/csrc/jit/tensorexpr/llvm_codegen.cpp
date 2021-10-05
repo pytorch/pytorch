@@ -320,6 +320,10 @@ void LLVMCodeGen::call_raw(const std::vector<void*>& args) {
   value<float>(const_cast<void**>(args.data()));
 }
 
+void LLVMCodeGen::call_with_numel(void** args, int64_t /* numel */) {
+  value<float>(const_cast<void**>(args));
+}
+
 void LLVMCodeGen::call(const std::vector<CallArg>& args) {
   auto& buf_args = buffer_args();
   if (args.size() != buf_args.size()) {
@@ -934,6 +938,9 @@ void LLVMCodeGenImpl::visit(CastPtr v) {
 
   bool destUnsigned = v->dtype().scalar_type() == ScalarType::Byte ||
       v->dtype().scalar_type() == ScalarType::Bool;
+  bool srcUnsigned =
+      v->src_value()->dtype().scalar_type() == ScalarType::Byte ||
+      v->src_value()->dtype().scalar_type() == ScalarType::Bool;
 
   // Scalar casts
   if (srcType->isFPOrFPVectorTy()) {
@@ -973,7 +980,7 @@ void LLVMCodeGenImpl::visit(CastPtr v) {
     throw unimplemented_lowering(v);
   }
   if (dstType->isFPOrFPVectorTy()) {
-    if (destUnsigned) {
+    if (srcUnsigned) {
       value_ = irb_.CreateUIToFP(value_, dstType);
     } else {
       value_ = irb_.CreateSIToFP(value_, dstType);
@@ -1143,9 +1150,6 @@ void LLVMCodeGenImpl::visit(LoadPtr v) {
     default:
       throw std::runtime_error("invalid dtype in Load");
   }
-
-  // Detect whether the vector mask is all true
-  bool unmasked_load = true;
 
   // Handle the case where the load is contiguous and unmasked efficiently
   auto idx_ramp = to<Ramp>(v->flat_index());
@@ -1798,9 +1802,6 @@ void LLVMCodeGenImpl::visit(IntrinsicsPtr v) {
 }
 
 void LLVMCodeGenImpl::visit(ExternalCallPtr v) {
-  constexpr int max_buffers = 10;
-  constexpr int max_dimensions = 40;
-
   auto& func_registry = getNNCFunctionRegistry();
   if (!func_registry.count(v->func_name())) {
     throw unimplemented_lowering(v);

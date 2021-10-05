@@ -344,6 +344,27 @@ struct TORCH_API ProfilerResult {
 #endif // USE_KINETO
 };
 
+/*
+ * This API is used by backends to record latency of events that
+ * happened in the backend but were not visible to pytorch runtime.
+ * For example, if part of the model is lowered to a dsp backend, then
+ * the execution of that part of the model is delegated to the backend.
+ * When backend finishes execution it has an option to provide profiling
+ * information (latency only at th emoment) corresponding to different operators
+ * that were executed in the backend.
+ * When such events are recorded by backend using this API, the event
+ * records will be collected by active kineto profiler. If no kineto profiler
+ * is active then the event is ignored.
+ * This provides us with a way to generate all the profiling information
+ * for a model regardless of where model (or part of it) executed.
+ * @param start_time_us: start time in us of the event
+ * @param end_time_us: end time in us of the event
+ * @param debug_handle: debug handle to correlate this event/op with
+ * model level module/source information
+ * @param scope: scope of the event, e.g. LITE_INTERPRETER, RECORD_FN etc.
+ * @param event_name: name of the event, e.g. op name
+ * @param backend_name: name of the backend where the event took place.
+ */
 TORCH_API void reportBackendEventToActiveKinetoProfiler(
     const int64_t start_time_us,
     const int64_t end_time_us,

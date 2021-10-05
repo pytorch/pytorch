@@ -68,6 +68,7 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_subgraph_matcher.cpp
   ${JIT_TEST_ROOT}/test_subgraph_rewriter.cpp
   ${JIT_TEST_ROOT}/test_subgraph_utils.cpp
+  ${JIT_TEST_ROOT}/test_union.cpp
   ${JIT_TEST_ROOT}/test_utils.cpp
   ${JIT_TEST_ROOT}/test_script_profile.cpp
   ${JIT_TEST_ROOT}/test_jit_logging_levels.cpp
@@ -75,6 +76,7 @@ set(JIT_TEST_SRCS
 
 if(USE_CUDA)
   list(APPEND JIT_TEST_SRCS ${JIT_TEST_ROOT}/test_gpu.cpp)
+  list(APPEND JIT_TEST_SRCS ${JIT_TEST_ROOT}/test_gpu_shift.cpp)
 endif()
 
 add_executable(test_jit
@@ -97,6 +99,9 @@ endif(MSVC)
 
 target_link_libraries(test_jit PRIVATE ${JIT_TEST_DEPENDENCIES})
 target_include_directories(test_jit PRIVATE ${ATen_CPU_INCLUDE})
+if(NOT MSVC)
+  target_compile_options(test_jit PRIVATE -Wno-unused-variable)
+endif()
 
 if(LINUX)
   #Update to target_link_options when CMake version can be upgraded
