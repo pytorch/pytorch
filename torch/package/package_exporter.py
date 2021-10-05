@@ -18,7 +18,9 @@ from typing import (
     Sequence,
     Set,
     Union,
+    cast
 )
+from torch.types import Storage
 
 import torch
 from torch.serialization import location_tag, normalize_storage_type
@@ -788,21 +790,37 @@ class PackageExporter:
         )
 
     def _persistent_id(self, obj):
-        if torch.is_storage(obj):
-            storage_type = normalize_storage_type(type(obj))
-            location = location_tag(obj)
+        if torch.is_storage(obj) or isinstance(obj, torch.storage.TypedStorage):
+            if isinstance(obj, torch.storage.TypedStorage):
+                # TODO: Once we decide to break serialization FC, we can
+                # remove this case
+                storage = obj._storage
+                storage_type_str = obj.pickle_storage_type()
+                storage_type = getattr(torch, storage_type_str)
+                dtype = obj.dtype
+                storage_numel = obj.size()
+
+
+            else:
+                storage = obj
+                storage_type = normalize_storage_type(type(storage))
+                dtype = torch.uint8
+                storage_numel = storage.nbytes()
+
+            storage = cast(Storage, storage)
+            location = location_tag(storage)
 
             # serialize storage if not already written
-            storage_present = self.storage_context.has_storage(obj)
-            storage_id = self.storage_context.get_or_add_storage(obj)
+            storage_present = self.storage_context.has_storage(storage)
+            storage_id = self.storage_context.get_or_add_storage(storage)
             if not storage_present:
-                if obj.device.type != "cpu":
-                    obj = obj.cpu()
-                num_bytes = obj.size() * obj.element_size()
+                if storage.device.type != "cpu":
+                    storage = storage.cpu()
+                num_bytes = storage.nbytes()
                 self.zip_file.write_record(
-                    f".data/{storage_id}.storage", obj.data_ptr(), num_bytes
+                    f".data/{storage_id}.storage", storage.data_ptr(), num_bytes
                 )
-            return ("storage", storage_type, storage_id, location, obj.size())
+            return ("storage", storage_type, storage_id, location, storage_numel)
 
         if hasattr(obj, "__reduce_package__"):
             if _gate_torchscript_serialization and isinstance(

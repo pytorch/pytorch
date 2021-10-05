@@ -172,6 +172,7 @@ struct PythonArgs {
   inline std::vector<int64_t> intlistWithDefault(int i, std::vector<int64_t> default_intlist);
   inline c10::optional<at::Generator> generator(int i);
   inline at::Storage storage(int i);
+  inline at::Storage storage(int i, at::ScalarType& storage_scalar_type, bool& is_typed_storage);
   inline c10::Stream stream(int i);
   inline at::ScalarType scalartype(int i);
   inline at::ScalarType scalartypeWithDefault(int i, at::ScalarType default_scalartype);
@@ -697,6 +698,18 @@ inline c10::optional<at::Generator> PythonArgs::generator(int i) {
 inline at::Storage PythonArgs::storage(int i) {
   if (!args[i]) return at::Storage();
   return createStorage(args[i]);
+}
+
+inline at::Storage PythonArgs::storage(int i, at::ScalarType& storage_scalar_type, bool& is_typed_storage) {
+  at::Storage storage;
+  if (!args[i]) {
+    storage = at::Storage();
+    is_typed_storage = false;
+    storage_scalar_type = at::ScalarType::Undefined;
+  } else {
+    storage = createStorageGetType(args[i], storage_scalar_type, is_typed_storage);
+  }
+  return storage;
 }
 
 inline c10::Stream PythonArgs::stream(int i) {

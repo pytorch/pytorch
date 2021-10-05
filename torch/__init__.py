@@ -19,7 +19,7 @@ from .autocast_mode import autocast
 if sys.version_info < (3,):
     raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
 
-from ._utils import _import_dotted_name
+from ._utils import _import_dotted_name, classproperty
 from ._utils_internal import get_file_path, prepare_multiprocessing_environment, \
     USE_RTLD_GLOBAL_WITH_LIBTORCH, USE_GLOBAL_DEPS
 # TODO(torch_deploy) figure out how to freeze version.py in fbcode build
@@ -521,70 +521,99 @@ __all__.extend(['e', 'pi', 'nan', 'inf'])
 ################################################################################
 
 from ._tensor import Tensor
-from .storage import _StorageBase
+from .storage import _StorageBase, TypedStorage
 
+# NOTE: New <type>Storage classes should never be added. When adding a new
+# dtype, use torch.storage.TypedStorage directly.
 
-class DoubleStorage(_C.DoubleStorageBase, _StorageBase):
+class UntypedStorage(_C.ByteStorageBase, _StorageBase):
     pass
 
+class ByteStorage(TypedStorage):
+    @classproperty
+    def dtype(self):
+        return torch.uint8
 
-class FloatStorage(_C.FloatStorageBase, _StorageBase):
-    pass
+class DoubleStorage(TypedStorage):
+    @classproperty
+    def dtype(self):
+        return torch.double
 
+class FloatStorage(TypedStorage):
+    @classproperty
+    def dtype(self):
+        return torch.float
 
-class HalfStorage(_C.HalfStorageBase, _StorageBase):
-    pass
+class HalfStorage(TypedStorage):
+    @classproperty
+    def dtype(self):
+        return torch.half
 
+class LongStorage(TypedStorage):
+    @classproperty
+    def dtype(self):
+        return torch.long
 
-class LongStorage(_C.LongStorageBase, _StorageBase):
-    pass
+class IntStorage(TypedStorage):
+    @classproperty
+    def dtype(self):
+        return torch.int
 
+class ShortStorage(TypedStorage):
+    @classproperty
+    def dtype(self):
+        return torch.short
 
-class IntStorage(_C.IntStorageBase, _StorageBase):
-    pass
+class CharStorage(TypedStorage):
+    @classproperty
+    def dtype(self):
+        return torch.int8
 
+class BoolStorage(TypedStorage):
+    @classproperty
+    def dtype(self):
+        return torch.bool
 
-class ShortStorage(_C.ShortStorageBase, _StorageBase):
-    pass
+class BFloat16Storage(TypedStorage):
+    @classproperty
+    def dtype(self):
+        return torch.bfloat16
 
+class ComplexDoubleStorage(TypedStorage):
+    @classproperty
+    def dtype(self):
+        return torch.cdouble
 
-class CharStorage(_C.CharStorageBase, _StorageBase):
-    pass
+class ComplexFloatStorage(TypedStorage):
+    @classproperty
+    def dtype(self):
+        return torch.cfloat
 
+class QUInt8Storage(TypedStorage):
+    @classproperty
+    def dtype(self):
+        return torch.quint8
 
-class ByteStorage(_C.ByteStorageBase, _StorageBase):
-    pass
+class QInt8Storage(TypedStorage):
+    @classproperty
+    def dtype(self):
+        return torch.qint8
 
+class QInt32Storage(TypedStorage):
+    @classproperty
+    def dtype(self):
+        return torch.qint32
 
-class BoolStorage(_C.BoolStorageBase, _StorageBase):
-    pass
-
-
-class BFloat16Storage(_C.BFloat16StorageBase, _StorageBase):
-    pass
-
-class ComplexDoubleStorage(_C.ComplexDoubleStorageBase, _StorageBase):
-    pass
-
-class ComplexFloatStorage(_C.ComplexFloatStorageBase, _StorageBase):
-    pass
-
-class QUInt8Storage(_C.QUInt8StorageBase, _StorageBase):
-    pass
-
-class QInt8Storage(_C.QInt8StorageBase, _StorageBase):
-    pass
-
-class QInt32Storage(_C.QInt32StorageBase, _StorageBase):
-    pass
-
-class QUInt4x2Storage(_C.QUInt4x2StorageBase, _StorageBase):
-    pass
+class QUInt4x2Storage(TypedStorage):
+    @classproperty
+    def dtype(self):
+        return torch.quint4x2
 
 _storage_classes = {
-    DoubleStorage, FloatStorage, LongStorage, IntStorage, ShortStorage,
-    CharStorage, ByteStorage, HalfStorage, BoolStorage, QUInt8Storage, QInt8Storage,
-    QInt32Storage, BFloat16Storage, ComplexFloatStorage, ComplexDoubleStorage, QUInt4x2Storage
+    UntypedStorage, DoubleStorage, FloatStorage, LongStorage, IntStorage,
+    ShortStorage, CharStorage, ByteStorage, HalfStorage, BoolStorage,
+    QUInt8Storage, QInt8Storage, QInt32Storage, BFloat16Storage,
+    ComplexFloatStorage, ComplexDoubleStorage, QUInt4x2Storage
 }
 
 # The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
@@ -647,19 +676,7 @@ from .functional import *  # noqa: F403
 # Remove unnecessary members
 ################################################################################
 
-del DoubleStorageBase
-del FloatStorageBase
-del LongStorageBase
-del IntStorageBase
-del ShortStorageBase
-del CharStorageBase
 del ByteStorageBase
-del BoolStorageBase
-del QUInt8StorageBase
-del BFloat16StorageBase
-del ComplexDoubleStorageBase
-del ComplexFloatStorageBase
-del QUInt4x2StorageBase
 
 ################################################################################
 # Define _assert
