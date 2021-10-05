@@ -503,6 +503,9 @@ Tensor cudnn_convolution_relu(
     return output_t;
   }
 
+  auto& ctx = at::globalContext();
+  bool allow_tf32 = ctx.allowTF32CuDNN();
+
   raw_cudnn_convolution_add_relu_out(
       output_t,
       input,
@@ -523,7 +526,7 @@ Tensor cudnn_convolution_relu(
       groups,
       false, // benchmark
       false, // deterministic
-      input.dim() == 4 // enable allow_tf32 for conv2d
+      allow_tf32  // allow_tf32
   );
 
   return output_t;
@@ -556,6 +559,9 @@ Tensor cudnn_convolution_add_relu(
     return output_t;
   }
 
+  auto& ctx = at::globalContext();
+  bool allow_tf32 = ctx.allowTF32CuDNN();
+
   raw_cudnn_convolution_add_relu_out(
       output_t,
       input,
@@ -576,7 +582,7 @@ Tensor cudnn_convolution_add_relu(
       groups,
       false, // benchmark
       false, // deterministic
-      input.dim() == 4 // enable allow_tf32 for conv2d
+      allow_tf32  // allow_tf32
   );
 
   return output_t;
