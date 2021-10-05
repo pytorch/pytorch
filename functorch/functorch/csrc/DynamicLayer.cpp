@@ -33,7 +33,7 @@ class DynamicLayerStackHolder : public c10::DebugInfoBase {
   DynamicLayerStackHolder() {}
   virtual ~DynamicLayerStackHolder() {}
 
-  std::vector<DynamicLayer> dynamicLayerStack = { DynamicLayer(DispatchKey::Autograd, 1) };
+  std::vector<DynamicLayer> dynamicLayerStack = { DynamicLayer(DispatchKey::Autograd, 1, nullopt, true) };
 };
 
 thread_local std::shared_ptr<DynamicLayerStackHolder> kDynamicLayerStack;
@@ -117,13 +117,16 @@ static int64_t pushDynamicLayer(DynamicLayer&& dynamic_layer) {
   return layerId;
 }
 
-static int64_t pushDynamicLayer(DispatchKey key, optional<int64_t> batch_size = nullopt) {
+static int64_t pushDynamicLayer(
+    DispatchKey key,
+    optional<int64_t> batch_size = nullopt,
+    optional<bool> prev_grad_mode = nullopt) {
   auto& dynamicLayerStack = dynamicLayerStackAccessor();
   TORCH_INTERNAL_ASSERT(key != DispatchKey::Undefined);
   TORCH_INTERNAL_ASSERT(key != DispatchKey::Batched);
 
   auto layerId = 1 + dynamicLayerStack.size();
-  dynamicLayerStack.emplace_back(key, layerId, batch_size);
+  dynamicLayerStack.emplace_back(key, layerId, batch_size, prev_grad_mode);
 
   if (layerId == 2) {
     // std::cout << "DynamicLayer on" << std::endl;
@@ -134,10 +137,16 @@ static int64_t pushDynamicLayer(DispatchKey key, optional<int64_t> batch_size = 
   return layerId;
 }
 
-int64_t initAndPushDynamicLayer(DispatchKey key, optional<int64_t> batch_size) {
-  auto layerId = pushDynamicLayer(key, batch_size);
+int64_t initAndPushDynamicLayer(
+    DispatchKey key,
+    optional<int64_t> batch_size,
+    optional<bool> prev_grad_mode) {
+  auto layerId = pushDynamicLayer(key, batch_size, prev_grad_mode);
   auto& data = getGlobalDynmetaData();
   TORCH_INTERNAL_ASSERT(data.find(layerId) == data.end());
+  if (key == DispatchKey::Autograd) {
+    TORCH_INTERNAL_ASSERT(prev_grad_mode.has_value());
+  }
   data[layerId] = std::make_shared<bool>(true);
   return layerId;
 }
@@ -374,7 +383,6 @@ struct WithoutTop {
     pushDynamicLayer(std::move(layer_));
   }
 
-  bool prev_grad_enabled_;
   DynamicLayer layer_;
 };
 
@@ -393,6 +401,11 @@ struct SaveLocalDispatchKeySet {
 void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   auto cur_level = getDynamicLayerStack().back().layerId();
   auto cur_key = getDynamicLayerStack().back().key();
+
+  optional<bool> prev_grad_mode = getDynamicLayerStack().back().prevGradMode();
+  if (cur_key == DispatchKey::Autograd) {
+    TORCH_INTERNAL_ASSERT(prev_grad_mode.has_value());
+  }
 
   auto unwrap = [&](const Tensor& tensor) {
     if (!tensor.defined()) {
@@ -457,7 +470,13 @@ void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* 
   c10::impl::tls_set_dispatch_key_included(kDynamicLayerBackModeKey, true);
 
   // Re-dispatch
-  op.callBoxed(stack);
+  if (cur_key == DispatchKey::Autograd && *prev_grad_mode == false) {
+    // See NOTE [grad and vjp interaction with no_grad]
+    c10::AutoGradMode guard(*prev_grad_mode);
+    op.callBoxed(stack);
+  } else {
+    op.callBoxed(stack);
+  }
 
   // Step 4, 5, 6
   if (cur_key == DispatchKey::Autograd) {

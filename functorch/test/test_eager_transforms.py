@@ -485,12 +485,12 @@ class TestGradTransform(TestCase):
                 tensor(3.1400)))""")
         self.assertEqual(buf, expected)
 
-    @unittest.expectedFailure
     def test_no_grad_outside(self, device):
-        x = torch.randn([], device=device)
+        x = torch.randn([], device=device, requires_grad=True)
         with torch.no_grad():
             y = grad(torch.sin)(x)
         self.assertEqual(y, x.cos())
+        self.assertFalse(y.requires_grad)
 
     def test_no_grad_inside(self, device):
         def f(x):
@@ -504,28 +504,36 @@ class TestGradTransform(TestCase):
         y = grad(grad(f))(x)
         self.assertEqual(y, 2)
 
-    @unittest.expectedFailure
+        x = torch.randn([], device=device, requires_grad=True)
+        y = grad(f)(x)
+        z, = torch.autograd.grad(y, x)
+        self.assertEqual(z, 2)
+
     def test_no_grad_mixed(self, device):
         def f(x):
             with torch.no_grad():
                 shift = x ** 2
             return x ** 2 - shift
 
-        x = torch.randn([], device=device)
+        x = torch.randn([], device=device, requires_grad=True)
         with torch.no_grad():
             y = grad(f)(x)
 
         self.assertEqual(y, 2 * x)
+        self.assertFalse(y.requires_grad)
 
     def test_no_grad_nested_simple(self, device):
         def h(x):
             with torch.no_grad():
-                shift = grad(lambda x: x ** 3)(x)
+                shift = grad(lambda x: 0.25 * x ** 4)(x)
             return x ** 3 - shift
 
-        x = torch.tensor(2., device=device)
+        x = torch.tensor(1.5, device=device, requires_grad=True)
         y = grad(h)(x)
-        self.assertEqual(y, 6 * x)
+        self.assertEqual(y, 3 * x ** 2)
+
+        z, = torch.autograd.grad(y, x)
+        self.assertEqual(z, 6 * x)
 
     def test_no_grad_nested_complicated(self, device):
         def f(x):
@@ -539,10 +547,13 @@ class TestGradTransform(TestCase):
                 shift = grad(f)(x)
             return r1 - shift
 
-        x = torch.randn([])
+        x = torch.randn([], requires_grad=True)
         y = grad(g)(x)
         # The only differential part of g is x ** 3
         self.assertEqual(y, 6 * x)
+
+        z, = torch.autograd.grad(y, x)
+        self.assertEqual(z, 6)
 
     def test_no_grad_value(self, device):
         def h(x):
@@ -550,11 +561,13 @@ class TestGradTransform(TestCase):
                 gvalue, value = grad_and_value(lambda x: x ** 3)(x)
             return x ** 3 - value
 
-        x = torch.tensor(2., device=device)
+        x = torch.tensor(1.6, device=device, requires_grad=True)
         y = grad(h)(x)
-        self.assertEqual(y, 6 * x)
+        self.assertEqual(y, 3 * x ** 2)
 
-    @unittest.expectedFailure
+        z, = torch.autograd.grad(y, x)
+        self.assertEqual(z, 6 * x)
+
     def test_no_grad_outside_vjp(self, device):
         def h(x):
             return x ** 2
@@ -562,42 +575,45 @@ class TestGradTransform(TestCase):
         x = torch.tensor(2., requires_grad=True, device=device)
         with torch.no_grad():
             out, vjp_fn = vjp(h, x)
-            y, = vjp_fn(1.)
+            y, = vjp_fn(torch.tensor(1., device=device))
 
         self.assertEqual(y, 2 * x)
         self.assertFalse(y.requires_grad)
         self.assertFalse(out.requires_grad)
 
-    @unittest.expectedFailure
     def test_no_grad_outside_vjp_fn(self, device):
         def h(x):
             return x ** 2
 
-        x = torch.tensor(2., requires_grad=True, device=device)
+        x = torch.tensor(3.14, requires_grad=True, device=device)
         out, vjp_fn = vjp(h, x)
         with torch.no_grad():
-            y, = vjp_fn(1.)
+            y, = vjp_fn(torch.tensor(1., device=device))
 
         self.assertEqual(y, 2 * x)
         self.assertFalse(y.requires_grad)
         self.assertTrue(out.requires_grad)
 
-    @unittest.expectedFailure
+        z, = torch.autograd.grad(out, x)
+        self.assertEqual(z, 2 * x)
+
     def test_no_grad_outside_vjp_only(self, device):
         def h(x):
             return x ** 2
 
-        x = torch.tensor(2., requires_grad=True, device=device)
+        x = torch.tensor(3.14, requires_grad=True, device=device)
         with torch.no_grad():
             out, vjp_fn = vjp(h, x)
-        y, = vjp_fn(1.)
+        y, = vjp_fn(torch.tensor(1., device=device))
 
         self.assertEqual(y, 2 * x)
         self.assertFalse(out.requires_grad)
 
-        # This one is a little weird. `vjp_fn` didn't save enough info
-        # during the forward pass for the output to be differentiable.
-        self.assertFalse(y.requires_grad)
+        # This one is a little weird...
+        self.assertTrue(y.requires_grad)
+
+        z, = torch.autograd.grad(y, x)
+        self.assertEqual(z, 2)
 
 class TestVmapOfGrad(TestCase):
     def test_per_sample_grads_inplace_view(self, device):
