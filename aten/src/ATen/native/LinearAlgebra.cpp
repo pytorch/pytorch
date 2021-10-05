@@ -1268,9 +1268,6 @@ void baddbmm_with_gemm_(const Tensor &result, const Tensor &mat1, const Tensor &
   const int64_t ldb = mat1_strides[transpose_b ? 2 : 1];
   const int64_t ldc = result_strides[1];
 
-  auto mat1_batch_stride = mat1_strides[0];
-  auto mat2_batch_stride = mat2_strides[0];
-
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "baddbmm_with_gemm", [&] {
     using opmath_t = at::opmath_type<scalar_t>;
     const auto alpha = alpha_.to<opmath_t>();
