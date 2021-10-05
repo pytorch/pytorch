@@ -5,6 +5,7 @@
 #include <c10/util/ExclusivelyOwned.h>
 #include <c10/util/MaybeOwned.h>
 #include <atomic>
+#include <climits>
 #include <stdexcept>
 
 namespace pybind11 {
@@ -113,12 +114,15 @@ class C10_API intrusive_ptr_target {
 #pragma GCC diagnostic ignored "-Wexceptions"
 #endif
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        refcount_.load() == 0,
+        // Second condition is there to accommodate
+        // unsafe_adapt_non_heap_allocated.
+        refcount_.load() == 0 || refcount_.load() > 1000000000,
         "Tried to destruct an intrusive_ptr_target that still has intrusive_ptr to it");
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         // See ~intrusive_ptr for optimization that will frequently result in 1
         // at destruction time.
-        weakcount_.load() == 1 || weakcount_.load() == 0,
+        weakcount_.load() == 1 || weakcount_.load() == 0 ||
+            weakcount_.load() > 1000000000,
         "Tried to destruct an intrusive_ptr_target that still has weak_intrusive_ptr to it");
 #if defined(_MSC_VER) && !defined(__clang__)
 #pragma warning(pop)
@@ -473,6 +477,27 @@ class intrusive_ptr final {
    */
   static intrusive_ptr unsafe_steal_from_new(TTarget* raw_ptr) {
     return intrusive_ptr(raw_ptr);
+  }
+
+  /**
+   * Turn an instance of TTarget that should not be reference counted
+   * (e.g., allocated into an arena with placement new) into an
+   * intrusive_ptr. This is gratuitously unsafe and should only be
+   * used if you can guarantee that the pointer will not escape and be
+   * refcounted as normal.
+   *
+   * The reason this method exists is for manually sharing
+   * StorageImpls across Tensors in the static runtime. It needs
+   * access to private intrusive_ptr members so that the refcounts can
+   * be initialized to custom values.
+   */
+  static intrusive_ptr unsafe_adapt_non_heap_allocated(TTarget* raw_ptr) {
+    intrusive_ptr result(raw_ptr, raw::DontIncreaseRefcount{});
+    // INT_MAX is impractically huge for a reference count, while being
+    // in no danger of overflowing.
+    result.target_->refcount_.store(INT_MAX, std::memory_order_relaxed);
+    result.target_->weakcount_.store(INT_MAX, std::memory_order_relaxed);
+    return result;
   }
 
   /**

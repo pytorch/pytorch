@@ -143,41 +143,48 @@ void MemoryPlanner::allocate() {
   size_t offset = 0;
   uint8_t* start = static_cast<uint8_t*>(buffer_.get());
 
-  const bool have_managed_tensor_storages = !managed_tensor_storages_.empty();
+  const bool have_managed_tensor_storage_impls =
+      !managed_tensor_storage_impls_.empty();
   reused_tensors_ = 0;
-  auto storageIdx = 0;
   for (const auto& ms : managed_tensors_) {
     auto tensor_size = ms.first;
     if (tensor_size == 0) {
       continue;
     }
     const auto& tensors = ms.second;
+    // NOLINTNEXTLINE
+    const auto managedTensorIdx = &ms - &managed_tensors_[0];
     DCHECK_LE(offset + tensor_size, managed_bytes_);
     void* src = static_cast<void*>(start + offset);
 
-#define INNER_TENSOR_LOOP_BODY(tensor, storage)                             \
-  do {                                                                      \
-    DCHECK_EQ(tensor->device().type(), c10::DeviceType::CPU);               \
-    storage.set_data_ptr_noswap(                                            \
-        at::DataPtr(src, src, nullptr, c10::Device(c10::DeviceType::CPU))); \
-    storage.set_nbytes(tensor_size);                                        \
-    reused_tensors_++;                                                      \
+#define UPDATE_STORAGE(storageImpl)                                 \
+  do {                                                              \
+    (storageImpl)                                                   \
+        .set_data_ptr_noswap(at::DataPtr(                           \
+            src, src, nullptr, c10::Device(c10::DeviceType::CPU))); \
+    (storageImpl).set_nbytes(tensor_size);                          \
   } while (0)
 
-    if (C10_UNLIKELY(!have_managed_tensor_storages)) {
+    if (C10_UNLIKELY(!have_managed_tensor_storage_impls)) {
       for (auto* tensor : tensors) {
-        const auto& storage = tensor->storage();
-        INNER_TENSOR_LOOP_BODY(tensor, storage);
+        auto& storageImpl = *tensor->storage().unsafeGetStorageImpl();
+        DCHECK_EQ((tensor)->device().type(), c10::DeviceType::CPU);
+        UPDATE_STORAGE((storageImpl));
       }
     } else {
+      // Because the tensors share the same storageImpl, we only have to update
+      // once.
+      auto& storageImpl = managed_tensor_storage_impls_[managedTensorIdx];
+      UPDATE_STORAGE(storageImpl);
       for (auto* tensor : tensors) {
-        const auto& storage = *managed_tensor_storages_[storageIdx++];
-        DCHECK_EQ(&storage, &tensor->storage());
-        INNER_TENSOR_LOOP_BODY(tensor, storage);
+        // Either this tensor has the StorageImpl it's supposed to, or
+        // some other tensor aliases it.
+        DCHECK(&storageImpl == tensor->storage().unsafeGetStorageImpl());
       }
     }
-#undef INNER_TENSOR_LOOP_BODY
-    reused_tensors_--;
+#undef UPDATE_STORAGE
+    reused_tensors_ += tensors.size();
+    reused_tensors_ -= 1;
 
     offset += tensor_size;
   }
@@ -192,19 +199,56 @@ void MemoryPlanner::deallocate() {
 
   // We don't have any guarantee that the model doesn't change the
   // Storage for managed tensors out from under us during execution,
-  // so we have to grab the Storages each time we deallocate.
-  managed_tensor_storages_.clear();
-  managed_tensor_storages_.reserve(num_managed_tensors_);
+  // so we have to check the Storages each time we deallocate.
+  const bool firstTime = managed_tensor_storage_impls_.empty();
+  managed_tensor_storage_impls_.reserve(managed_tensors_.size());
+  size_t storageIdx = 0;
   for (auto& ms : managed_tensors_) {
     const auto& tensors = ms.second;
     size_t max = ms.first;
+    if (C10_LIKELY(!firstTime)) {
+      managed_tensor_storage_impls_[storageIdx].reset();
+    }
     for (auto& tensor : tensors) {
       const auto& storage = tensor->storage();
       size_t current_size = compute_aligned_tensor_size(storage.nbytes());
-      storage.unsafeGetStorageImpl()->reset();
-      managed_tensor_storages_.push_back(&storage);
+      at::StorageImpl* tensorStorageImpl = storage.unsafeGetStorageImpl();
+      // Comparing pointers to objects that aren't part of the same
+      // array is UB, but we're doing memory allocation here and we
+      // need this, so cast to uintptr_t.
+      if (C10_UNLIKELY(firstTime)) {
+        tensorStorageImpl->reset();
+
+        at::StorageImpl* newImpl;
+        DCHECK(
+            managed_tensor_storage_impls_.size() == storageIdx ||
+            managed_tensor_storage_impls_.size() == storageIdx + 1);
+        if (managed_tensor_storage_impls_.size() == storageIdx) {
+          managed_tensor_storage_impls_.emplace_back(
+              std::move(*tensorStorageImpl));
+        }
+        newImpl = &managed_tensor_storage_impls_.back();
+        tensor->unsafeGetTensorImpl()->set_storage_keep_dtype(at::Storage(
+            c10::intrusive_ptr<
+                at::StorageImpl>::unsafe_adapt_non_heap_allocated(newImpl)));
+      } else if (C10_UNLIKELY(
+                     tensorStorageImpl !=
+                     &managed_tensor_storage_impls_[storageIdx])) {
+        tensorStorageImpl->reset();
+
+        // If somehow the tensor got different storage, put it back to
+        // the shared impl for this group.
+        tensor->unsafeGetTensorImpl()->set_storage_keep_dtype(
+            at::Storage(c10::intrusive_ptr<at::StorageImpl>::
+                            unsafe_adapt_non_heap_allocated(
+                                &managed_tensor_storage_impls_[storageIdx])));
+      }
+      DCHECK_EQ(
+          tensor->storage().unsafeGetStorageImpl(),
+          &managed_tensor_storage_impls_[storageIdx]);
       max = std::max(max, current_size);
     }
+    storageIdx++;
     // Static runtime does not know the size of tensors statically, so we use
     // the tensor size from the previous run to allocate tensors for the next
     // run (following C2 tradition), exploiting the fact that tensor storage

@@ -73,14 +73,17 @@ class MemoryPlanner {
   // Thus, if memonger is disabled, all vectors are of size 1.
   std::vector<std::pair<size_t, std::vector<at::Tensor*>>> managed_tensors_;
 
-  // Invariant: either managed_tensor_storages_ is empty, or its
-  // length is equal to that of managed_tensors_ and each element is
-  // the result of calling storage() on the corresponding managed
-  // tensor() as of the last deallocate() call.
-  // We cache the storage pointers directly so that we don't have to
-  // take an extra cache miss per Tensor reading them from the
-  // TensorImpl object.
-  std::vector<const at::Storage*> managed_tensor_storages_;
+  // Invariant: either managed_tensor_storage_impls_ is empty, or its
+  // length is equal to that of managed_tensors_ (one per size, not
+  // one per tensor) and each element is the storageImpl for all the
+  // tensors of that size as of the last deallocate() call.
+  //
+  // We allocate StorageImpls ourselves so that 1) we don't have to
+  // take an extra two cache misses per Tensor first reading the
+  // Storage (i.e., StorageImpl pointer) from the TensorImpl object
+  // and then second dereferencing it and 2) our memory access pattern
+  // during allocate() has high locality.
+  std::vector<at::StorageImpl> managed_tensor_storage_impls_;
   at::DataPtr buffer_; // allocated each time we call Run()
   size_t num_managed_tensors_{0};
   size_t managed_bytes_{0};
