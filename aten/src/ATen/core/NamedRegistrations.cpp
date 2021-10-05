@@ -1,6 +1,7 @@
 #include <torch/library.h>
 
 #include <ATen/core/boxing/KernelFunction.h>
+#include <ATen/native/Copy.h>
 
 using torch::CppFunction;
 
@@ -117,7 +118,7 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("clone", CppFunction::makeFallthrough());
   m.impl("conj", CppFunction::makeFallthrough());
   m.impl("contiguous", CppFunction::makeFallthrough());
-  m.impl("copy_", CppFunction::makeFallthrough());
+  m.impl("copy_", at::native::copy_named_);
   m.impl("cos", CppFunction::makeFallthrough());
   m.impl("cos.out", CppFunction::makeFallthrough());
   m.impl("cos_", CppFunction::makeFallthrough());
