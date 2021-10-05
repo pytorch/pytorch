@@ -9280,6 +9280,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_bucketize,
            supports_autograd=False,
            skips=(
+               # JIT tests don't work with Tensor keyword arguments
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            )),
     OpInfo('cat',
