@@ -78,7 +78,20 @@ struct ConstantTableValue : public SugaredValue {
                              << " is out of bounds (constant table has "
                              << constants_->size() << " entries)";
     }
-    Value* value = m.graph()->insertConstant(constants_->at(offset), loc);
+    auto ivalue = constants_->at(offset);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    Value* value;
+
+    // see [Constant Object Weak CompilationUnit Reference]
+    if (ivalue.isObject() && !ivalue.toObject()->is_weak_compilation_ref()) {
+      auto obj = ivalue.toObject();
+      if (!non_holding_object_cache.count(obj)) {
+        non_holding_object_cache[obj] = obj->copy_to_weak_compilation_ref();
+      }
+      value = m.graph()->insertConstant(non_holding_object_cache[obj], loc);
+    } else {
+      value = m.graph()->insertConstant(constants_->at(offset), loc);
+    }
 
     // specializing tensor type on compilation messes up typing relations
     value->setType(unshapedType(value->type()));
@@ -87,6 +100,10 @@ struct ConstantTableValue : public SugaredValue {
   }
 
  private:
+  std::unordered_map<
+      c10::intrusive_ptr<at::ivalue::Object>,
+      c10::intrusive_ptr<at::ivalue::Object>>
+      non_holding_object_cache;
   const std::vector<at::IValue>* constants_;
 };
 

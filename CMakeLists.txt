@@ -195,6 +195,9 @@ cmake_dependent_option(
     USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
     "USE_CUDNN" OFF)
 cmake_dependent_option(
+    BUILD_NVFUSER_BENCHMARK "Build C++ binaries for nvfuser benchmarks" ON
+    "USE_CUDA;BUILD_TEST" OFF)
+cmake_dependent_option(
   USE_WHOLE_CUDNN "Use whole-library linking for cuDNN" OFF
     "USE_STATIC_CUDNN" OFF)
 cmake_dependent_option(
@@ -535,6 +538,14 @@ if(ANDROID OR IOS OR DEFINED ENV{BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN})
     # c10/macros/Macros.h, so it needs to be explicitly set here.
     string(APPEND CMAKE_CXX_FLAGS " -DC10_MOBILE")
   endif()
+
+  if(DEFINED ENV{PYTORCH_MOBILE_TRIM_DISPATCH_KEY_SET})
+    # If PYTORCH_MOBILE_TRIM_DISPATCH_KEY_SET is defined (env var),
+    # then define C10_MOBILE_TRIM_DISPATCH_KEYS, which limits the
+    # number of dispatch keys in OperatorEntry::dispatchTable_
+    # to reduce peak memory during library initialization.
+    string(APPEND CMAKE_CXX_FLAGS " -DC10_MOBILE_TRIM_DISPATCH_KEYS")
+  endif()
 endif()
 
 # INTERN_BUILD_ATEN_OPS is used to control whether to build ATen/TH operators.
@@ -733,7 +744,6 @@ if(NOT MSVC)
   string(APPEND CMAKE_CXX_FLAGS " -Wno-unknown-pragmas")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-sign-compare")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-parameter")
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-variable")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-function")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-result")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-local-typedefs")
@@ -1057,6 +1067,9 @@ endif()
 
 # ---[ JNI
 if(BUILD_JNI)
+  if(NOT MSVC)
+    string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-variable")
+  endif()
   set(BUILD_LIBTORCH_WITH_JNI 1)
   set(FBJNI_SKIP_TESTS 1)
   add_subdirectory(android/pytorch_android)
