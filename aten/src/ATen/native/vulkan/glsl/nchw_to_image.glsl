@@ -9,7 +9,8 @@ layout(set = 0, binding = 0) uniform PRECISION restrict writeonly image3D uImage
 layout(set = 0, binding = 1) buffer  PRECISION restrict readonly  Buffer {
   float data[];
 } uBuffer;
-layout(set = 0, binding = 2) uniform PRECISION restrict           Block {
+
+layout(push_constant) uniform PRECISION restrict Block {
   ivec4 size;
   ivec4 offset;
 } uBlock;
