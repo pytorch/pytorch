@@ -326,6 +326,14 @@ class Binding:
     def defn(self) -> str:
         return f"{self.type} {self.name}"
 
+    def with_name(self, name: str) -> 'Binding':
+        return Binding(
+            name=name,
+            nctype=self.nctype,
+            argument=self.argument,
+            default=self.default
+        )
+
 # An Expr is a C++ expression.  It has a C++ string representing its syntax,
 # as well as a CType saying what it provides.
 

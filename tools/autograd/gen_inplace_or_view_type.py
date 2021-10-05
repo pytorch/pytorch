@@ -332,12 +332,7 @@ def emit_view_body(fn: NativeFunctionWithDifferentiabilityInfo, var: str) -> Tup
     return call, rhs_value
 
 def modifies_arguments(f: NativeFunction) -> bool:
-    # See Note [Functionalization: Mutation Removal]
-    # replace_() is a special operator that's only used by the functionalization pass,
-    # and should always call its composite kernel implementation.
-    # The only reason it goes through the dispatcher is to show up in python traces.
-    return f.func.kind() in [SchemaKind.inplace, SchemaKind.out] \
-        and str(f.func.name) != 'replace_'
+    return f.func.kind() in [SchemaKind.inplace, SchemaKind.out]
 
 @with_native_function_with_differentiability_info
 def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:

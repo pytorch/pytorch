@@ -2222,10 +2222,11 @@ std::vector<Tensor> meshgrid(TensorList tensors,
     shape[i] = tensor_refs[i].get().numel();  // treat 0D tensors as if they were a 1D tensor
   }
   std::vector<Tensor> grids;
+  std::vector<int64_t> view_shape(size, 1);
   for(const auto i: c10::irange(size)){
-    std::vector<int64_t> view_shape(size, 1);
-    view_shape[i] = -1;
+    view_shape[i] = -1;  // select this dimension to infer
     grids.push_back(tensor_refs[i].get().view(view_shape).expand(shape));
+    view_shape[i] = 1;  // restore to previous value
   }
 
   // Remember we need to also swap the outputs if we swapped the inputs.
@@ -2514,12 +2515,6 @@ std::vector<Tensor> unflatten_dense_tensors(const Tensor& flat, TensorList tenso
     }
   }
   return outputs;
-}
-
-// See Note [Functionalization: Mutation Removal]
-Tensor& replace_(Tensor& self, const Tensor& other) {
-  TORCH_INTERNAL_ASSERT(false, "Found a call to replace_(). It is only expected to be called by the functionalization pass");
-  return self;
 }
 
 at::Tensor slice_scatter(const at::Tensor& base, const at::Tensor& mutated_view, int64_t dim, c10::optional<int64_t> start, c10::optional<int64_t> end, int64_t step) {

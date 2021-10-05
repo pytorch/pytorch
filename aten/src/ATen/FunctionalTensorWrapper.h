@@ -39,7 +39,7 @@ namespace at {
 // See Note [Functionalization: Mutation Removal] for details on mutation removal.
 
 struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
-  // Note that value is not taken by reference: internally, the wrapper will change the value tensor that it points to over time.``:w
+  // Note that value is not taken by reference: internally, the wrapper will change the value tensor that it points to over time.
   explicit FunctionalTensorWrapper(Tensor value);
   // Additional constructor to create a FunctionalTensorWrapper directly from an underlying tensor that was created from a view.
   // For example, the code b = a.view1() will generate a constructor call to FunctionalTensorWrapper(b, a, view1_meta)
@@ -138,8 +138,6 @@ TORCH_API void sync(const c10::optional<Tensor>& t);
 TORCH_API void sync(const c10::List<Tensor> t_list);
 TORCH_API void sync(const at::TensorList t_list);
 TORCH_API void sync(const c10::List<c10::optional<Tensor>> t_list);
-
-void commit_update(Tensor& self);
 
 Tensor create_functional_tensor_with_view_meta(const Tensor& view_to_wrap, const Tensor& base, functionalization::ViewMeta meta, int64_t out_idx = 0);
 std::vector<Tensor> create_functional_tensor_with_view_meta(const c10::List<Tensor>& view_to_wrap, const Tensor& base, functionalization::ViewMeta meta);

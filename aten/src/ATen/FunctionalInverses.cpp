@@ -106,7 +106,13 @@ Tensor permute_inverse(const Tensor& base, const Tensor& mutated_view, at::IntAr
 }
 
 Tensor _reshape_alias_inverse(const Tensor& base, const Tensor& mutated_view, at::IntArrayRef size, at::IntArrayRef stride) {
-    return mutated_view._reshape_alias(base.sizes(), base.strides());
+    // Note that I'm directly calling reshape(), and ignoring the strides.
+    // _reshape_alias() isn't available from user code, and is an implementation detail of reshape().
+    // Specifically, passing in the strides directly can get us into trouble in cases like:
+    // b = a[0]; c = b.reshape(...); c.add_(1); print(a)
+    // When we eventually run the _reshape_alias_inverse() call here, if we were to pass in both sizes and strides,
+    // The call would fail because `mutated_view` doesn't have enough bytes of storage.
+    return mutated_view.reshape(base.sizes());
 }
 
 Tensor select_inverse(const Tensor& base, const Tensor& mutated_view, int64_t dim, int64_t index) {

@@ -37,6 +37,10 @@ from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType,
 
 options_ctype = NamedCType("options", ConstRefCType(BaseCType(tensorOptionsT)))
 
+intVec_ctype = VectorCType(BaseCType(intT))
+optionalScalar_ctype = OptionalCType(BaseCType(scalarT))
+optionalTensor_ctype = OptionalCType(BaseCType(tensorT))
+
 class UnsatError(RuntimeError):
     pass
 
@@ -195,20 +199,29 @@ Check this module for more information.
             options = direct_solve(options_ctype)
             return f'{options}.pinned_memory_opt()'
 
+        # We can always do translations from value types to reference types, like vector<int> -> IntArrayRef
+        elif goal.type == BaseCType(intArrayRefT):
+            return direct_solve(NamedCType(goal.name, intVec_ctype))
+        elif goal.type == BaseCType(optionalScalarRefT):
+            return direct_solve(NamedCType(goal.name, optionalScalar_ctype))
+        elif goal.type == BaseCType(optionalTensorRefT):
+            return direct_solve(NamedCType(goal.name, optionalTensor_ctype))
+
+
         # Note [translation from C++ reference to value types]
         # The below cases are all for when we have an argument with a reference type,
         # and a corresponding goal with a value type.
         # These are needed when we populate the inputs to a lambda capture and we need
         # to guarantee the lifetime of each captured argument.
-        elif goal.type == VectorCType(BaseCType(intT)):
+        elif goal.type == intVec_ctype:
             intArrayRef_ctype = NamedCType(goal.name, BaseCType(intArrayRefT))
             argname = direct_solve(intArrayRef_ctype)
             return f'{argname}.vec()'
-        elif goal.type == OptionalCType(BaseCType(scalarT)):
+        elif goal.type == optionalScalar_ctype:
             optionalScalarRef_ctype = NamedCType(goal.name, BaseCType(optionalScalarRefT))
             argname = direct_solve(optionalScalarRef_ctype)
             return f'{argname}.has_value() ? c10::make_optional({argname}) : c10::nullopt'
-        elif goal.type == OptionalCType(BaseCType(scalarT)):
+        elif goal.type == optionalTensor_ctype:
             optionalTensorRef_ctype = NamedCType(goal.name, BaseCType(optionalTensorRefT))
             argname = direct_solve(optionalTensorRef_ctype)
             return f'{argname}.has_value() ? c10::make_optional({argname}) : c10::nullopt'

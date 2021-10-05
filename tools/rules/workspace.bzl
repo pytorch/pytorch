@@ -12,9 +12,9 @@ def _impl(repository_ctx):
 _patched_rule = repository_rule(
     implementation = _impl,
     attrs = {
-        "patches": attr.label_list(),
-        "patch_strip": attr.int(),
         "build_file": attr.label(),
+        "patch_strip": attr.int(),
+        "patches": attr.label_list(),
     },
 )
 

@@ -2,6 +2,7 @@
 #include <ATen/FunctionalTensorWrapper.h>
 
 #include <ATen/FunctionalInverses.h>
+#include <ATen/TensorUtils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <c10/util/Exception.h>
@@ -21,13 +22,13 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   shallow_copy_from(value_.getIntrusivePtr());
   storage_ = functional_storage;
   storage_access_should_throw_ = false;
-  key_set_ = c10::DispatchKeySet(c10::DispatchKeySet(c10::DispatchKey::Functionalize));
+  key_set_ = c10::DispatchKeySet(c10::DispatchKey::Functionalize) | value_.key_set();
 }
 
 FunctionalTensorWrapper::FunctionalTensorWrapper(Tensor value)
   : c10::TensorImpl(
       c10::Storage(c10::make_intrusive<functionalization::FunctionalStorageImpl>(value)),
-      c10::DispatchKeySet(DispatchKey::Functionalize),
+      c10::DispatchKeySet(DispatchKey::Functionalize) | value.key_set(),
       value.dtype()
     ),
     value_(value)
@@ -36,14 +37,14 @@ FunctionalTensorWrapper::FunctionalTensorWrapper(Tensor value)
 }
 
 // Note [Functionalization: Alias Removal]
-// When someone calls a view() op during the functionalization pass, we fork the current tensor into a view,
-// and link this current tensor and the new one together to preserve the aliasing relationship.
+// When someone calls a view() op during the functionalization pass, e.g. 'b = a.view(...)',
+// we link `b` and `a` to a shared Alias object to preserve the aliasing relationship.
 //
 // How do we do that?
 //
 // Every FunctionalTensorWrapper contains a dummy FunctionalStorageImpl, which subclasses from c10::StorageImpl.
 // It doesn't contain any data (similar to MetaTensor storage), but it contains an Alias object that knows about the base tensor.
-// Both the new and old tensor point to the same FunctionalStorageImpl.
+// When a tensor is created through a view operation, both the new and old tensor point to the same FunctionalStorageImpl.
 //
 // As mutations are applied to any of the views, we also queue each mutation up on the Alias object, so we can replay them.
 // When the user requests a tensor that's had a view taken, we check if it's up to date.
@@ -94,6 +95,9 @@ FunctionalTensorWrapper::FunctionalTensorWrapper(Tensor value)
 // |    underyling_storage     |                             |      underyling_storage       |
 // . - - - - - - - - - - - - - .                             . - - - - - - - - - - - - - - - .
 //
+// This constructor is only used by view ops.
+// - view_value: The output tensor that we need to wrap.
+// - base: The "base" of the view that `view_value` was generated from.
 // See Note [Functionalization: Alias Removal Part 2] for more details on the mutation replay logic.
 FunctionalTensorWrapper::FunctionalTensorWrapper(Tensor view_value, const FunctionalTensorWrapper* base, functionalization::ViewMeta meta)
   : c10::TensorImpl(
@@ -309,12 +313,6 @@ void sync(const c10::List<c10::optional<Tensor>> t_list) {
   for (const auto i : c10::irange(t_list.size())) {
     sync(t_list[i]);
   }
-}
-
-void commit_update(Tensor& self) {
-  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self));
-  auto functional_base_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(self);
-  functional_base_impl->commit_update();
 }
 
 Tensor create_functional_tensor_with_view_meta(const at::Tensor& view_to_wrap, const at::Tensor& base, functionalization::ViewMeta meta, int64_t out_idx) {

@@ -105,14 +105,6 @@ namespace {
   }
 }
 
-at::Tensor& replace_(at::Tensor& self, const at::Tensor& other) {
-  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self));
-  TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(other));
-  auto self_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(self);
-  self_impl->replace_(other);
-  return self;
-}
-
 TORCH_LIBRARY_IMPL(_, Functionalize, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&functionalizeFallback>());
 }
@@ -120,12 +112,6 @@ TORCH_LIBRARY_IMPL(_, Functionalize, m) {
 // see Note [ADInplaceOrView key]
 TORCH_LIBRARY_IMPL(_, ADInplaceOrView, m) {
       m.fallback(torch::CppFunction::makeFallthrough());
-}
-
-TORCH_LIBRARY_IMPL(aten, Functionalize, m) {
-  // We need this for the functionalization pass: These are all operators used by
-  // the functionalization machinery, which themselves shouldn't call into the functionalization pass.
-  m.impl("replace_", TORCH_FN(replace_));
 }
 
 }
