@@ -175,7 +175,7 @@ def build_constructor_arg_db():
             'qconfig': torch.ao.quantization.default_qconfig,
         }),
         torch.nn.qat.EmbeddingBag: ((10, 12), {
-            'qconfig': torch.quantization.default_qconfig
+            'qconfig': torch.ao.quantization.default_qconfig
         }),
         torch.nn.quantizable.LSTM: ((5, 6), {}),
         torch.nn.quantizable.LSTMCell: ((5, 6), {}),

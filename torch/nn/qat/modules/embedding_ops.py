@@ -36,7 +36,7 @@ class EmbeddingBag(nn.EmbeddingBag):
 
     @classmethod
     def from_float(cls, mod):
-        r"""Create a qat module from a float module or qparams_dict
+        r"""Create a qat module from a float module
 
             Args: `mod` a float module, either produced by torch.quantization utilities
             or directly from user
@@ -45,6 +45,8 @@ class EmbeddingBag(nn.EmbeddingBag):
             cls._FLOAT_MODULE.__name__
         assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
         assert mod.qconfig, 'Input float module must have a valid qconfig'
+        assert mod.qconfig.weight().qscheme == torch.per_channel_affine_float_qparams, \
+            'Embedding Bag weights requires a qscheme of torch.per_channel_affine_float_qparams'
 
         qconfig = mod.qconfig
         qat_embedding_bag = cls(mod.num_embeddings, mod.embedding_dim, mod.max_norm, mod.norm_type,

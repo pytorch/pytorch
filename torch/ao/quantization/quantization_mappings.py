@@ -85,7 +85,6 @@ DEFAULT_QAT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.Conv3d: nnqat.Conv3d,
     nn.Linear: nnqat.Linear,
     nn.EmbeddingBag: nnqat.EmbeddingBag,
-    nn.Identity: nn.quantizable.Identity,
     nn.modules.linear.NonDynamicallyQuantizableLinear: nnqat.Linear,
     # Intrinsic modules:
     nni.ConvBn1d: nniqat.ConvBn1d,
