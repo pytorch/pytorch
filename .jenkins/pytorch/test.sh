@@ -491,6 +491,11 @@ test_docs_test() {
   .jenkins/pytorch/docs-test.sh
 }
 
+test_lazy_tensor_core() {
+  lazy_tensor_core/test/cpp/build/test_ptltc
+  assert_git_not_dirty
+}
+
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
