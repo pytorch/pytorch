@@ -1343,11 +1343,33 @@ TEST(
     return (%z))IR";
 
   torch::jit::parseIR(graph_string, graph.get(), vmap);
-  AliasDb aliasDb(graph);
+  AliasDb aliasDb(
+      graph, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
 
   EXPECT_TRUE(!aliasDb.mayAlias(vmap["x"], vmap["y"]));
   EXPECT_TRUE(aliasDb.mayContainAlias(vmap["z"], vmap["x"]));
   EXPECT_TRUE(aliasDb.mayContainAlias(vmap["z"], vmap["y"]));
+}
+
+TEST(
+    AliasRegistrationTest,
+    WildcareAliasForTupleConstructWithSingleUseAsGraphOutputWithDisablePreciseTupleContainerAnalysis) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  auto graph_string = R"IR(
+  graph():
+    %x : Tensor = prim::MakeTestTensor()
+    %y : Tensor = prim::MakeTestTensor()
+    %z : (Tensor) = prim::TupleConstruct(%x, %y)
+    return (%z))IR";
+
+  torch::jit::parseIR(graph_string, graph.get(), vmap);
+  // enablePreciseTupleContainerAnalysis = false.
+  AliasDb aliasDb(graph);
+
+  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["z"], vmap["x"]));
+  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["z"], vmap["y"]));
+  EXPECT_TRUE(aliasDb.mayAlias(vmap["x"], vmap["y"]));
 }
 
 TEST(AliasRegistrationTest, WildcardAliasForTupleConstructWithUses) {
@@ -1366,7 +1388,8 @@ TEST(AliasRegistrationTest, WildcardAliasForTupleConstructWithUses) {
     return (%c, %d))IR";
 
   torch::jit::parseIR(graph_string, graph.get(), vmap);
-  AliasDb aliasDb(graph);
+  AliasDb aliasDb(
+      graph, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
 
   EXPECT_TRUE(aliasDb.mayAlias(vmap["x"], vmap["y"]));
   EXPECT_TRUE(aliasDb.mayAlias(vmap["x"], vmap["z"]));
