@@ -96,7 +96,7 @@ class Data {
 
   virtual bool HasValue() const = 0;
 
- protected:
+ private:
   std::string device_;
   ShapeData shape_;
   std::shared_ptr<Info> info_;
