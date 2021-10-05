@@ -122,7 +122,7 @@ Value* TracingState::getValue(const IValue& var) {
   } else if (var.isTuple()) {
     return graph
         ->insertNode(graph->createTuple(fmap(
-            var.toTuple()->elements(),
+            var.toTupleRef().elements(),
             [&](const IValue& val) { return getValue(val); })))
         ->output();
   } else if (var.isGenericDict()) {
@@ -270,7 +270,7 @@ Value* TracingState::getOutput(const IValue& iv, size_t i) {
                 [&](const IValue& ival) { return getOutput(ival, i); })))
         ->output();
   } else if (iv.isTuple()) {
-    auto tuple = iv.toTuple()->elements();
+    const auto& tuple = iv.toTupleRef().elements();
     auto tuple_node = graph->createTuple(
         fmap(tuple, [&](const IValue& ival) { return getOutput(ival, i); }));
     graph->insertNode(tuple_node);
@@ -347,12 +347,13 @@ static IValue addInput(
     auto elem_values = unpack_node->outputs();
     auto elem_types = tuple_type->elements();
     auto tuple = input.toTuple();
-    auto elems = tuple->elements();
+    const auto& elems = tuple->elements();
     size_t num_elems = elems.size();
     AT_ASSERT(
         elem_values.size() == num_elems && elem_types.size() == num_elems);
     for (const auto i : c10::irange(num_elems)) {
-      elems[i] = addInput(state, elems.at(i), elem_types[i], elem_values[i]);
+      tuple->unsafeSetElement(
+          i, addInput(state, elems.at(i), elem_types[i], elem_values[i]));
     }
     return tuple;
   } else if (auto dict_type = type->cast<DictType>()) {
@@ -546,7 +547,7 @@ void TracingState::setValue(const IValue& v, Value* value) {
       setValue(outputs.get(i), unpack_node->outputs()[i]);
     }
   } else if (v.isTuple()) {
-    auto outputs = v.toTuple()->elements();
+    const auto& outputs = v.toTupleRef().elements();
     Node* unpack_node = graph->insertNode(graph->createTupleUnpack(value));
     for (const auto i : c10::irange(outputs.size())) {
       setValue(outputs[i], unpack_node->outputs()[i]);

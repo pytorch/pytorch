@@ -142,8 +142,8 @@ void compareResults(
     return;
   } else if (expect.isTuple()) {
     EXPECT_TRUE(actual.isTuple());
-    auto lhs = expect.toTuple()->elements();
-    auto rhs = actual.toTuple()->elements();
+    auto lhs = expect.toTupleRef().elements();
+    auto rhs = actual.toTupleRef().elements();
     EXPECT_TRUE(lhs.size() == rhs.size());
     for (size_t i = 0; i < lhs.size(); i++) {
       compareResults(lhs[i], rhs[i]);
@@ -230,9 +230,13 @@ void testStaticRuntime(
       compareResults(expect, actual, use_allclose, use_equalnan);
     } else {
       // run static runtime again to exercise the memory planner
+      // and allocate managed tensors.
       actual = smodule(args, {});
       smodule.runtime().check_for_memory_leak();
-      // second run
+      compareResults(expect, actual, use_allclose, use_equalnan);
+      // third run to use the allocated managed tensors.
+      actual = smodule(args, {});
+      smodule.runtime().check_for_memory_leak();
       compareResults(expect, actual, use_allclose, use_equalnan);
     }
   }
