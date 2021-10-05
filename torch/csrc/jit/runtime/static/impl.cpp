@@ -535,8 +535,7 @@ void PrepareGraphForStaticModule(
   OptimizeGraph(graph, opts);
 }
 
-std::pair<std::shared_ptr<Graph>, std::shared_ptr<Module>>
-PrepareForStaticModule(
+std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
     const torch::jit::Module& m,
     bool is_frozen,
     const StaticModuleOptions& opts) {
@@ -546,30 +545,26 @@ PrepareForStaticModule(
           << opts.optimize_memory << ", optimize_graph_output_memory"
           << opts.optimize_graph_output_memory;
 
-  std::shared_ptr<Module> module_ptr;
+  Module module = m.copy();
   if (!is_frozen) {
-    auto module = m.copy();
     module.eval();
-    module_ptr = std::make_shared<Module>(freeze_module(module));
-  } else {
-    module_ptr = std::make_shared<Module>(m.copy());
+    module = freeze_module(module);
   }
 
-  Method method = module_ptr->get_method("forward");
-  auto graph = module_ptr->get_method("forward").graph();
+  Method method = module.get_method("forward");
+  auto graph = module.get_method("forward").graph();
 
   // graph->dump();
   PrepareGraphForStaticModule(graph, opts);
 
-  return std::make_pair(graph, module_ptr);
+  return std::make_pair(graph, module);
 }
 
-std::pair<std::shared_ptr<Graph>, std::shared_ptr<Module>>
-PrepareForStaticModule(
+std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
     std::shared_ptr<torch::jit::Graph> graph,
     const StaticModuleOptions& opts) {
   PrepareGraphForStaticModule(graph, opts);
-  return std::make_pair(graph, nullptr);
+  return std::make_pair(graph, c10::nullopt);
 }
 
 } // namespace
@@ -586,7 +581,7 @@ StaticModule::StaticModule(
     : StaticModule(PrepareForStaticModule(m, is_frozen, opts), opts) {}
 
 StaticModule::StaticModule(
-    std::pair<std::shared_ptr<torch::jit::Graph>, std::shared_ptr<Module>>
+    std::pair<std::shared_ptr<torch::jit::Graph>, c10::optional<Module>>
         graph_and_module,
     const StaticModuleOptions& opts)
     : opts_(opts),
@@ -605,7 +600,7 @@ StaticModule::StaticModule(
   }
 
   // handle schema
-  if (module_) {
+  if (module_.has_value()) {
     Method method = module_->get_method("forward");
     schema_ = method.function().getSchema();
     if (RemoveSelfFromGraphInput(graph_)) {
@@ -725,7 +720,7 @@ std::vector<at::Tensor> StaticModule::operator()(
   return runtime()(inps);
 }
 c10::IValue StaticModule::operator()(
-    const std::vector<c10::IValue>& args,
+    c10::ArrayRef<c10::IValue> args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
   return runtime()(args, kwargs);
 }
@@ -806,7 +801,7 @@ std::vector<at::Tensor> StaticRuntime::operator()(
 }
 
 void StaticRuntime::set_inputs(
-    const std::vector<c10::IValue>& args,
+    c10::ArrayRef<c10::IValue> args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
   if (!kwargs.empty()) {
     // This is not ideal
@@ -842,8 +837,32 @@ void StaticRuntime::set_inputs(
   }
 }
 
+c10::IValue StaticRuntime::moveOutputsToTuple(size_t num_outputs) {
+  switch (num_outputs) {
+    case 1:
+      return c10::ivalue::Tuple::create(std::move(*outputs_[0]));
+    case 2:
+      return c10::ivalue::Tuple::create(
+          std::move(*outputs_[0]), std::move(*outputs_[1]));
+    case 3:
+      return c10::ivalue::Tuple::create(
+          std::move(*outputs_[0]),
+          std::move(*outputs_[1]),
+          std::move(*outputs_[2]));
+    default: {
+      std::vector<c10::IValue> outputs;
+      outputs.reserve(static_module_.num_outputs());
+      for (const auto i : c10::irange(static_module_.num_outputs())) {
+        // use move here. Otherwise, clean up outputs_[i] explicitly
+        outputs.emplace_back(std::move(*outputs_[i]));
+      }
+      return c10::ivalue::Tuple::create(std::move(outputs));
+    }
+  }
+}
+
 c10::IValue StaticRuntime::operator()(
-    const std::vector<c10::IValue>& args,
+    c10::ArrayRef<c10::IValue> args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
   // We assume inference workloads, so we do not need
   // autograd. Enabling this is a significant win on dispatcher
@@ -884,13 +903,7 @@ c10::IValue StaticRuntime::operator()(
 
   // no need to keep references of outputs in static runtime anymore
   if (static_module_.num_outputs() > 1) {
-    std::vector<c10::IValue> outputs;
-    outputs.reserve(static_module_.num_outputs());
-    for (const auto i : c10::irange(static_module_.num_outputs())) {
-      // use move here. Otherwise, clean up outputs_[i] explicitly
-      outputs.emplace_back(std::move(*outputs_[i]));
-    }
-    return c10::ivalue::Tuple::create(std::move(outputs));
+    return moveOutputsToTuple(static_module_.num_outputs());
   }
 
 #ifndef NDEBUG
@@ -919,7 +932,7 @@ std::string generate_latency_json(const std::string& label, double millis) {
 } // namespace
 
 void StaticRuntime::benchmark(
-    const std::vector<c10::IValue>& args,
+    c10::ArrayRef<c10::IValue> args,
     const std::unordered_map<std::string, c10::IValue>& kwargs,
     const int warmup_runs,
     const int main_runs,
@@ -1010,7 +1023,7 @@ void StaticRuntime::benchmark(
 }
 
 float StaticRuntime::benchmark_model(
-    const std::vector<c10::IValue>& args,
+    c10::ArrayRef<c10::IValue> args,
     const std::unordered_map<std::string, c10::IValue>& kwargs,
     const int warmup_runs,
     const int main_runs) {
@@ -1047,7 +1060,7 @@ bool display_ivalue(const IValue& iv) {
     std::cout << "Dict {" << iv.toGenericDict().size() << "}\n";
     return true;
   } else if (iv.isTuple()) {
-    std::cout << "Tuple {" << iv.toTuple()->elements().size() << "}\n";
+    std::cout << "Tuple {" << iv.toTupleRef().elements().size() << "}\n";
     return true;
   } else if (iv.isInt()) {
     std::cout << "int {" << iv.toInt() << "}\n";
@@ -1081,7 +1094,7 @@ void display_pnode_info(const ProcessedNode& pnode) {
 }
 
 void StaticRuntime::display_nodes(
-    const std::vector<c10::IValue>& args,
+    c10::ArrayRef<c10::IValue> args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
   c10::InferenceMode mode;
   if (planner_) {
@@ -1113,7 +1126,7 @@ void StaticRuntime::display_nodes(
 }
 
 StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
-    const std::vector<c10::IValue>& args,
+    c10::ArrayRef<c10::IValue> args,
     const std::unordered_map<std::string, c10::IValue>& kwargs,
     const int warmup_runs,
     const int main_runs) {
@@ -1186,13 +1199,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
     // no need to keep references of outputs in static runtime anymore
     c10::IValue output;
     if (static_module_.num_outputs() > 1) {
-      std::vector<c10::IValue> outputs;
-      outputs.reserve(static_module_.num_outputs());
-      for (const auto i : c10::irange(static_module_.num_outputs())) {
-        // use move here. Otherwise, clean up outputs_[i] explicitly
-        outputs.emplace_back(std::move(*outputs_[i]));
-      }
-      output = c10::ivalue::Tuple::create(std::move(outputs));
+      output = moveOutputsToTuple(static_module_.num_outputs());
     }
 
 #ifndef NDEBUG

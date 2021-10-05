@@ -3,6 +3,7 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/ArrayRef.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -113,7 +114,7 @@ class TORCH_API StaticModule {
 
  private:
   explicit StaticModule(
-      std::pair<std::shared_ptr<torch::jit::Graph>, std::shared_ptr<Module>>
+      std::pair<std::shared_ptr<torch::jit::Graph>, c10::optional<Module>>
           graph_and_module,
       const StaticModuleOptions& opts);
 
@@ -129,7 +130,7 @@ class TORCH_API StaticModule {
   // This interface only works if StaticModule was initialized
   // with a TorchScript module, otherwise use the above interface
   c10::IValue operator()(
-      const std::vector<c10::IValue>& args,
+      c10::ArrayRef<c10::IValue> args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
   const Graph& graph() const {
@@ -160,7 +161,7 @@ class TORCH_API StaticModule {
     return nodes_;
   }
 
-  bool is_optimizable_container_type(Node* n) const {
+  bool is_optimizable_container_type(const Node* n) const {
     auto it = node_is_optimizable_container_type_.find(n);
     return it != node_is_optimizable_container_type_.end();
   }
@@ -188,7 +189,7 @@ class TORCH_API StaticModule {
   StaticModuleOptions opts_;
   bool first_input_is_self_{false};
   std::shared_ptr<torch::jit::Graph> graph_;
-  std::shared_ptr<torch::jit::Module> module_;
+  c10::optional<torch::jit::Module> module_;
   c10::optional<c10::FunctionSchema> schema_;
   std::unique_ptr<StaticRuntime> cached_runtime_;
 
@@ -210,7 +211,7 @@ class TORCH_API StaticModule {
   FastMap<const Value*, std::vector<const Value*>>
       value_to_same_storage_values_;
 
-  FastSet<Node*> node_is_optimizable_container_type_;
+  FastSet<const Node*> node_is_optimizable_container_type_;
 };
 
 class TORCH_API StaticRuntime {
@@ -227,15 +228,15 @@ class TORCH_API StaticRuntime {
   // This interface only works if StaticModule was initialized
   // with a TorchScript module, otherwise use the above interface
   c10::IValue operator()(
-      const std::vector<c10::IValue>& args,
+      c10::ArrayRef<c10::IValue> args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
   void display_nodes(
-      const std::vector<c10::IValue>& args,
+      c10::ArrayRef<c10::IValue> args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
   void benchmark(
-      const std::vector<c10::IValue>& args,
+      c10::ArrayRef<c10::IValue> args,
       const std::unordered_map<std::string, c10::IValue>& kwargs,
       const int warmup_runs,
       const int main_runs,
@@ -243,7 +244,7 @@ class TORCH_API StaticRuntime {
       bool generate_ai_pep_output = false);
 
   float benchmark_model(
-      const std::vector<c10::IValue>& args,
+      c10::ArrayRef<c10::IValue> args,
       const std::unordered_map<std::string, c10::IValue>& kwargs,
       const int warmup_runs,
       const int main_runs);
@@ -266,7 +267,7 @@ class TORCH_API StaticRuntime {
   };
 
   IndividualMetrics benchmark_individual_ops(
-      const std::vector<c10::IValue>& args,
+      c10::ArrayRef<c10::IValue> args,
       const std::unordered_map<std::string, c10::IValue>& kwargs,
       const int warmup_runs,
       const int main_runs);
@@ -308,7 +309,7 @@ class TORCH_API StaticRuntime {
  private:
   // helper method for copying input args/kwargs into inputs_
   void set_inputs(
-      const std::vector<c10::IValue>& args,
+      c10::ArrayRef<c10::IValue> args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
   // clean up owning refs of input IValues
@@ -317,6 +318,8 @@ class TORCH_API StaticRuntime {
       ival = IValue();
     }
   }
+
+  IValue moveOutputsToTuple(size_t num_outputs);
 
   // Memory planning is only enabled if sm->opts().cleanup_activations is true.
   // Otherwise, the memory used by activations is cached inside the static

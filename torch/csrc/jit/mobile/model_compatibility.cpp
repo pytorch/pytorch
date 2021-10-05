@@ -34,7 +34,7 @@ c10::IValue readArchive(
   std::shared_ptr<mobile::CompilationUnit> mobile_compilation_unit =
       std::make_shared<mobile::CompilationUnit>();
   auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
-    return objLoaderMobile(type, input, mobile_compilation_unit);
+    return objLoaderMobile(type, input, *mobile_compilation_unit);
   };
   bool bytecode_tensor_in_constants_archive =
       (archive_name == "bytecode" && !isTensorInBytecodeArchive(stream_reader));
@@ -51,9 +51,7 @@ c10::IValue readArchive(
 }
 
 std::vector<IValue> get_bytecode_ivalues(PyTorchStreamReader& reader) {
-  std::vector<IValue> bytecode_values;
-  bytecode_values = readArchive("bytecode", reader).toTuple()->elements();
-  return bytecode_values;
+  return std::move(*readArchive("bytecode", reader).toTuple()).elements().vec();
 }
 
 /********************** Bytecode **********************/
@@ -154,11 +152,11 @@ std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
   // loop over all the functions in the bytecode
   for (const auto i : c10::irange(1, bytecode_ivalues.size())) {
     // descend to the operators list
-    auto method_tuple = bytecode_ivalues.at(i).toTuple()->elements();
-    auto operators_tuple = method_tuple.at(1).toTuple()->elements()[1];
-    auto operators = operators_tuple.toTuple()->elements()[1];
-    for (auto& op_tuple : operators.toTuple()->elements()) {
-      auto op = op_tuple.toTuple()->elements();
+    const auto& method_tuple = bytecode_ivalues.at(i).toTupleRef().elements();
+    auto operators_tuple = method_tuple.at(1).toTupleRef().elements()[1];
+    auto operators = operators_tuple.toTupleRef().elements()[1];
+    for (auto& op_tuple : operators.toTupleRef().elements()) {
+      const auto& op = op_tuple.toTupleRef().elements();
 
       // grab name
       std::string op_name = op.at(0).toStringRef();

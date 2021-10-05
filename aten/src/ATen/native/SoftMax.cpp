@@ -373,6 +373,11 @@ Tensor softmax(const Tensor& input_, const int64_t dim_, c10::optional<ScalarTyp
   return result;
 }
 
+// special_softmax, alias for softmax
+Tensor special_softmax(const Tensor& input_, const int64_t dim_, c10::optional<ScalarType> dtype) {
+  return at::softmax(input_, dim_, dtype);
+}
+
 Tensor log_softmax(const Tensor& input_, const int64_t dim_) {
   auto result = [&]() {
     NoNamesGuard guard;
