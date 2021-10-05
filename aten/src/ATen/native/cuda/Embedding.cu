@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/util/Exception.h>
 #include <c10/macros/Macros.h>
@@ -15,7 +16,7 @@ namespace at { namespace native {
 
 namespace {
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 static const int BLOCKDIMY = 16;
 #else
 static const int BLOCKDIMY = 32;
@@ -82,7 +83,7 @@ __global__ void embedding_backward_feature_kernel
           (dst_row == indices_batch[chunk_start - batch_start + threadIdx.x]);
         if(threadIdx.x >= n_this_chunk)
           match_found_this_thread = 0;
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
         unsigned long long int matchmask = WARP_BALLOT(match_found_this_thread);
         int first_remaining_peer = __ffsll(matchmask) - 1;
 #else
@@ -95,7 +96,7 @@ __global__ void embedding_backward_feature_kernel
           matchmask ^= (1 << first_remaining_peer);
           while(matchmask)
           {
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
             first_remaining_peer = __ffsll(matchmask) - 1;
 #else
             first_remaining_peer = __ffs(matchmask) - 1;
@@ -238,7 +239,7 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
     auto indices_contig = indices.contiguous();
     auto grad_weight = at::zeros({num_weights, grad_.size(-1)}, grad_.options());
     int64_t stride = grad_weight.stride(0);
-    dim3 grid(THCCeilDiv(stride, (int64_t)C10_WARP_SIZE));
+    dim3 grid(ceil_div(stride, (int64_t)C10_WARP_SIZE));
     dim3 block(C10_WARP_SIZE, BLOCKDIMY);
 
     AT_DISPATCH_FLOATING_TYPES_AND2(
