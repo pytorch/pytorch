@@ -235,7 +235,6 @@ Allocator* getCPUAllocator() {
 //    means the allow_tf32 flags are overrided and tf32 is force disabled
 // override_allow_tf32_flag = false
 //    means the original allow_tf32 flags are followed
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local bool override_allow_tf32_flag = false;
 
 NoTF32Guard::NoTF32Guard() {

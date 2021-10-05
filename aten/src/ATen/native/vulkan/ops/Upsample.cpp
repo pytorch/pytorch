@@ -73,21 +73,17 @@ Tensor upsample_nearest2d(
           },
           VK_KERNEL(upsample_nearest2d),
           v_output.extents(),
-          context->gpu().adapter->local_work_group_size(),
-          // Write-only access bypasses synchronization but inserts appropriate
-          // barriers if necessary.
+          adaptive_work_group_size(v_output.extents()),
+          // Shader parameters
+          block,
+          // Textures
           v_output.image(
               command_buffer,
               vTensor::Stage::Compute,
               vTensor::Access::Write),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
           v_input.image(
               command_buffer,
-              vTensor::Stage::Compute),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
+              vTensor::Stage::Compute));
     }
     else {
       TORCH_CHECK(false, "Not implemented!");
@@ -101,7 +97,7 @@ Tensor upsample_nearest2d(
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl("upsample_nearest2d", TORCH_FN(upsample_nearest2d));
+  m.impl(TORCH_SELECTIVE_NAME("aten::upsample_nearest2d"), TORCH_FN(upsample_nearest2d));
 }
 
 #endif /* USE_VULKAN_API */

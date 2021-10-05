@@ -19,9 +19,11 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-Tensor* computeSum(
+Tensor computeSum(
     const std::vector<ArgValue>& inputs,
-    const c10::optional<ScalarType>& outputType) {
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
   std::vector<size_t> axes;
   bool keepdim = false;
   // aten::sum takes the input tensor named self.
@@ -100,10 +102,11 @@ Tensor* computeSum(
       reductionDims);
 }
 
-Tensor* computeMean(
+Tensor computeMean(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    const c10::optional<ScalarType>& outputType) {
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
   Dtype dtype = kFloat;
   if (outputType) {
     dtype = Dtype(*outputType);
@@ -117,20 +120,20 @@ Tensor* computeMean(
     // When dims argument is not specified, reduce over all dimensions
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int64_t idx = 0; idx < InputBuf.ndim(); idx++) {
-      // NOLINTNEXTLINE(modernize-use-emplace)
-      mean_dims_expr.push_back(idx);
+      mean_dims_expr.emplace_back(idx);
     }
   }
-  return new Tensor(
+  return Tensor(
       ResultBuf.node(),
       ExternalCall::make(
           ResultBuf, "nnc_aten_mean", {InputBuf}, mean_dims_expr));
 }
 
-Tensor* computeAdaptiveAvgPool2d(
+Tensor computeAdaptiveAvgPool2d(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    const c10::optional<ScalarType>& outputType) {
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
   Dtype dtype = kFloat;
   if (outputType) {
     dtype = Dtype(*outputType);
@@ -138,7 +141,7 @@ Tensor* computeAdaptiveAvgPool2d(
   BufHandle ResultBuf("adaptive_avgpool2d", outputShape, dtype);
   // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   auto out_size_param = c10::get<IntList>(inputs[1]);
-  return new Tensor(
+  return Tensor(
       ResultBuf.node(),
       ExternalCall::make(
           ResultBuf,

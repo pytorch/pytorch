@@ -1,3 +1,4 @@
+#include <ATen/native/ReduceOps.h>
 #include <ATen/native/TensorCompare.h>
 
 #include <numeric>
@@ -19,8 +20,8 @@ namespace at { namespace native { namespace {
 
 template <typename scalar_t, typename scalar_t_2 = int64_t, typename loop1d_t>
 static inline void compare_base_kernel_core(
-    Tensor& result1,
-    Tensor& result2,
+    const Tensor& result1,
+    const Tensor& result2,
     const Tensor& self,
     int64_t dim,
     bool keepdim,
@@ -60,7 +61,7 @@ static inline void compare_base_kernel_core(
 }
 
 template <typename scalar_t, typename scalar_t_2=int64_t, typename func_t>
-static inline void compare_base_kernel(Tensor& result1, Tensor& result2,
+static inline void compare_base_kernel(const Tensor& result1, const Tensor& result2,
     const Tensor& self,
     int64_t dim,
     bool keepdim,
@@ -88,19 +89,15 @@ static inline void compare_base_kernel(Tensor& result1, Tensor& result2,
 }
 
 static void min_kernel_impl(
-    Tensor& result,
-    Tensor& indice,
+    const Tensor& result,
+    const Tensor& indice,
     const Tensor& self,
     int64_t dim,
     bool keepdim) {
-  auto wrap_dim = maybe_wrap_dim(dim, self.dim());
-  int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
-
-  TORCH_CHECK(result.scalar_type() == self.scalar_type() && indice.scalar_type() == kLong,
-    "Expect dtype ", self.scalar_type(), "and torch.long, but got ", result.scalar_type(), "and", indice.scalar_type());
+  int64_t self_dim_size = ensure_nonempty_size(self, dim);
 
   AT_DISPATCH_ALL_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Bool, self.scalar_type(), "min_cpu", [&] {
-    compare_base_kernel<scalar_t>(result, indice, self, wrap_dim, keepdim, [&] (
+    compare_base_kernel<scalar_t>(result, indice, self, dim, keepdim, [&] (
       scalar_t* result_data, int64_t* indice_data,
       const scalar_t* self_data, auto self_dim_stride) {
         using value_t = typename c10::scalar_value_type<scalar_t>::type;
@@ -125,19 +122,15 @@ static void min_kernel_impl(
 }
 
 static void max_kernel_impl(
-    Tensor& result,
-    Tensor& indice,
+    const Tensor& result,
+    const Tensor& indice,
     const Tensor& self,
     int64_t dim,
     bool keepdim) {
-  auto wrap_dim = maybe_wrap_dim(dim, self.dim());
-  int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
-
-  TORCH_CHECK(result.scalar_type() == self.scalar_type() && indice.scalar_type() == kLong,
-    "Expect dtype ", self.scalar_type(), "and torch.long, but got ", result.scalar_type(), "and", indice.scalar_type());
+  int64_t self_dim_size = ensure_nonempty_size(self, dim);
 
   AT_DISPATCH_ALL_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Bool, self.scalar_type(), "max_cpu", [&] {
-    compare_base_kernel<scalar_t>(result, indice, self, wrap_dim, keepdim, [&] (
+    compare_base_kernel<scalar_t>(result, indice, self, dim, keepdim, [&] (
       scalar_t* result_data, int64_t* indice_data,
       const scalar_t* self_data, auto self_dim_stride) {
         using value_t = typename c10::scalar_value_type<scalar_t>::type;
@@ -161,12 +154,12 @@ static void max_kernel_impl(
   });
 }
 
-static void _aminmax_kernel_impl(
-    Tensor& min_result,
-    Tensor& max_result,
+static void aminmax_kernel(
     const Tensor& self,
     int64_t dim,
-    bool keepdim) {
+    bool keepdim,
+    Tensor& min_result,
+    Tensor& max_result) {
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
@@ -174,7 +167,7 @@ static void _aminmax_kernel_impl(
     "Expect min and max dtype ", self.scalar_type(),
     " but got ", min_result.scalar_type(), " and ", max_result.scalar_type());
 
-  AT_DISPATCH_ALL_TYPES_AND(ScalarType::Bool, self.scalar_type(), "_aminmax_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(ScalarType::Bool, self.scalar_type(), "aminmax_cpu", [&] {
     compare_base_kernel<scalar_t, scalar_t>(min_result, max_result, self, wrap_dim, keepdim, [&] (
       scalar_t* min_result_data, scalar_t* max_result_data,
       const scalar_t* self_data, auto self_dim_stride) {
@@ -344,7 +337,7 @@ static void clamp_kernel_impl(TensorIterator& iter) {
   });
 }
 
-static void clamp_scalar_kernel_impl(TensorIterator& iter, Scalar min_, Scalar max_) {
+static void clamp_scalar_kernel_impl(TensorIteratorBase& iter, const Scalar& min_, const Scalar& max_) {
   AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.common_dtype(), "clamp_scalar_cpu", [&]() {
     const auto min = min_.to<scalar_t>();
     const auto max = max_.to<scalar_t>();
@@ -414,19 +407,12 @@ static void clamp_min_scalar_kernel_impl(TensorIterator& iter, Scalar min_) {
 
 } // anonymous namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(max_stub, &max_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(min_stub, &min_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_DISPATCH(_aminmax_stub, &_aminmax_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(aminmax_stub, &aminmax_kernel);
 REGISTER_DISPATCH(where_kernel, &where_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(mode_stub, &mode_kernel_impl);
 REGISTER_DISPATCH(clamp_stub, &clamp_kernel_impl);
 REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel_impl);

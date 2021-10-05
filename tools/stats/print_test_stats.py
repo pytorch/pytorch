@@ -16,12 +16,11 @@ from typing import (Any, DefaultDict, Dict, Iterable, Iterator, List, Optional,
                     Set, Tuple, cast)
 from xml.dom import minidom
 
-import requests
 from typing_extensions import TypedDict
 from tools.stats.s3_stat_parser import (newify_case, get_S3_object_from_bucket, get_test_stats_summaries_for_job,
                                         Report, Status, Commit, HAVE_BOTO3, Version2Case, VersionedReport,
                                         Version1Report, Version2Report, ReportMetaMeta)
-
+from tools.stats.scribe import send_to_scribe, rds_write, register_rds_schema, schema_from_sample
 
 
 SimplerSuite = Dict[str, Version2Case]
@@ -610,7 +609,8 @@ class TestSuite:
         sorted_tests = sorted(self.test_cases.values(), key=lambda x: x.time)
         test_count = len(sorted_tests)
         print(f"class {self.name}:")
-        print(f"    tests: {test_count} failed: {self.failed_count} skipped: {self.skipped_count} errored: {self.errored_count}")
+        print(
+            f"    tests: {test_count} failed: {self.failed_count} skipped: {self.skipped_count} errored: {self.errored_count}")
         print(f"    run_time: {self.total_time:.2f} seconds")
         print(f"    avg_time: {self.total_time/test_count:.2f} seconds")
         if test_count >= 2:
@@ -630,7 +630,6 @@ class TestFile:
 
     def append(self, test_case: TestCase, test_type: str) -> None:
         is_multi_test = self.name == 'test_cpp_extensions_aot' or \
-            self.name == 'distributed/test_distributed_fork' or \
             self.name == 'distributed/test_distributed_spawn' or \
             self.name == 'distributed/test_c10d_gloo' or \
             self.name == 'cpp'  # The caffe2 cpp tests spawn duplicate test cases as well.
@@ -645,7 +644,8 @@ class TestFile:
                 self.test_suites[suite_name].update(test_case)
                 self.total_time += test_case.time
             else:
-                raise RuntimeWarning(f'Duplicate test case {test_case.name} in suite {suite_name} called from {self.name}')
+                raise RuntimeWarning(
+                    f'Duplicate test case {test_case.name} in suite {suite_name} called from {self.name}')
         else:
             self.test_suites[suite_name].append(test_case)
             self.total_time += test_case.time
@@ -698,7 +698,7 @@ def build_info() -> ReportMetaMeta:
         "build_sha1": os.environ.get("CIRCLE_SHA1", ""),
         "build_base_commit": get_base_commit(os.environ.get("CIRCLE_SHA1", "HEAD")),
         "build_branch": os.environ.get("CIRCLE_BRANCH", ""),
-        "build_job": os.environ.get("JOB_BASE_NAME", ""),
+        "build_job": os.environ.get("JOB_BASE_NAME", os.environ.get("CIRCLE_JOB", "")),
         "build_workflow_id": os.environ.get("CIRCLE_WORKFLOW_ID", ""),
         "build_start_time_epoch": str(int(os.path.getmtime(os.path.realpath(__file__)))),
     }
@@ -729,33 +729,21 @@ def build_message(
 
 
 def send_report_to_scribe(reports: Dict[str, TestFile]) -> None:
-    access_token = os.environ.get("SCRIBE_GRAPHQL_ACCESS_TOKEN")
-
-    if not access_token:
-        print("No scribe access token provided, skip sending report!")
-        return
-    print("Scribe access token provided, sending report...")
-    url = "https://graph.facebook.com/scribe_logs"
     meta_info = build_info()
-    r = requests.post(
-        url,
-        data={
-            "access_token": access_token,
-            "logs": json.dumps(
-                [
-                    {
-                        "category": "perfpipe_pytorch_test_times",
-                        "message": json.dumps(build_message(test_file, test_suite, test_case, meta_info)),
-                        "line_escape": False,
-                    }
-                    for test_file in reports.values()
-                    for test_suite in test_file.test_suites.values()
-                    for test_case in test_suite.test_cases.values()
-                ]
-            ),
-        },
+    logs = json.dumps(
+        [
+            {
+                "category": "perfpipe_pytorch_test_times",
+                "message": json.dumps(build_message(test_file, test_suite, test_case, meta_info)),
+                "line_escape": False,
+            }
+            for test_file in reports.values()
+            for test_suite in test_file.test_suites.values()
+            for test_case in test_suite.test_cases.values()
+        ]
     )
-    r.raise_for_status()
+    # no need to print send result as exceptions will be captured and print later.
+    send_to_scribe(logs)
 
 
 def assemble_s3_object(
@@ -767,7 +755,7 @@ def assemble_s3_object(
         **build_info(),  # type: ignore[misc]
         'total_seconds': total_seconds,
         'format_version': 2,
-        'files' : {
+        'files': {
             name: {
                 'total_seconds': test_file.total_time,
                 'suites': {
@@ -792,15 +780,22 @@ def assemble_s3_object(
 
 
 def send_report_to_s3(head_report: Version2Report) -> None:
-    job = os.environ.get('JOB_BASE_NAME')
+    job = os.getenv('JOB_BASE_NAME', os.environ.get('CIRCLE_JOB'))
     sha1 = os.environ.get('CIRCLE_SHA1')
     branch = os.environ.get('CIRCLE_BRANCH', '')
     now = datetime.datetime.utcnow().isoformat()
+
+    # SHARD_NUMBER and TEST_CONFIG are specific to GHA, as these details would be included in CIRCLE_JOB already
+    shard = os.environ.get('SHARD_NUMBER', '')
+    test_config = os.environ.get('TEST_CONFIG')
+
+    job_report_dirname = f'{job}{f"-{test_config}" if test_config is not None else ""}{shard}'
+
     if branch not in ['master', 'nightly'] and not branch.startswith("release/"):
         pr = os.environ.get('CIRCLE_PR_NUMBER', 'unknown')
-        key = f'pr_test_time/{pr}/{sha1}/{job}/{now}Z.json.bz2'  # Z meaning UTC
+        key = f'pr_test_time/{pr}/{sha1}/{job_report_dirname}/{now}Z.json.bz2'  # Z meaning UTC
     else:
-        key = f'test_time/{sha1}/{job}/{now}Z.json.bz2'  # Z meaning UTC
+        key = f'test_time/{sha1}/{job_report_dirname}/{now}Z.json.bz2'  # Z meaning UTC
     obj = get_S3_object_from_bucket('ossci-metrics', key)
     # use bz2 because the results are smaller than gzip, and the
     # compression time penalty we pay is only about half a second for
@@ -808,6 +803,30 @@ def send_report_to_s3(head_report: Version2Report) -> None:
     # because for some reason zlib doesn't seem to play nice with the
     # gunzip command whereas Python's bz2 does work with bzip2
     obj.put(Body=bz2.compress(json.dumps(head_report).encode()))
+
+
+def upload_failures_to_rds(reports: Dict[str, TestFile]) -> None:
+    """
+    We have 40k+ tests, so saving every test for every commit is not very
+    feasible for PyTorch. Most of these are things we don't care about anyways,
+    so this code filters out failures and saves only those to the DB.
+    """
+    # Gather all failures across the entire report
+    failures = []
+    for file in reports.values():
+        for suite in file.test_suites.values():
+            for case in suite.test_cases.values():
+                if case.errored or case.failed:
+                    failures.append({
+                        "name": case.name,
+                        "suite": suite.name,
+                        "file": file.name,
+                        "status": "failure" if case.failed else "error"
+                    })
+
+    if len(failures) > 0:
+        register_rds_schema("test_failures", schema_from_sample(failures[0]))
+        rds_write("test_failures", failures, only_on_master=False)
 
 
 def print_regressions(head_report: Report, *, num_prev_commits: int) -> None:
@@ -880,6 +899,7 @@ def reports_has_no_tests(reports: Dict[str, TestFile]) -> bool:
                 return False
     return True
 
+
 if __name__ == '__main__':
     import argparse
     import sys
@@ -938,6 +958,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     reports_by_file = parse_reports(args.folder)
+
+    upload_failures_to_rds(reports_by_file)
     if reports_has_no_tests(reports_by_file):
         print(f"No tests in reports found in {args.folder}")
         sys.exit(0)
@@ -948,7 +970,7 @@ if __name__ == '__main__':
         print(f"ERROR ENCOUNTERED WHEN UPLOADING TO SCRIBE: {e}")
 
     # longest_tests can contain duplicates as the same tests can be spawned from different files
-    longest_tests : List[TestCase] = []
+    longest_tests: List[TestCase] = []
     total_time = 0.0
     for filename, test_filename in reports_by_file.items():
         for suite_name, test_suite in test_filename.test_suites.items():

@@ -42,7 +42,6 @@
 namespace torch { namespace autograd {
 
 namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool in_bad_autograd_fork =
     false; // True for children forked after engine's thread pool init
 
@@ -68,28 +67,23 @@ static void track_bad_autograd_forks() {
 //    backward call we use the caller thread to drive engine execution.
 // This is used when handling reentrant backwards calls;
 // See Note [Reentrant backwards]
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local int worker_device = NO_DEVICE;
 
 // This variable is true if ALL invocations in the stack of re-entrant engine
 // invocations are imperative backwards. This special variable is needed for the
 // gradient checkpointing feature only.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local bool checkpoint_valid = true;
 
 // Number of nested reentrant backwards calls currently on this thread
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local int current_depth = 0;
 
 // For all device threads (i.e. CUDA, XLA), total_depth represents the total nested
 //   reentrant backwards depths over all device threads.
 // For CPU devices, it is the total depth associated with the original backward call.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local int total_depth = 0;
 
 // The current GraphTask being executed by this thread. This helps
 // queue_callback() to find the target GraphTask to append final callbacks.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_TLS_static(std::shared_ptr<GraphTask>, tls_current_graph_task);
 #define current_graph_task (tls_current_graph_task.get())
 
@@ -107,7 +101,6 @@ C10_DEFINE_TLS_static(std::shared_ptr<GraphTask>, tls_current_graph_task);
 // because we reached the maximum depth, the new thread will just reuse the same
 // ReadyQueue with the parent thread for performance improvement.
 // see Note [Reentrant backwards] for more details.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_TLS_static(std::shared_ptr<ReadyQueue>, tls_local_ready_queue);
 #define local_ready_queue (tls_local_ready_queue.get())
 
@@ -414,7 +407,11 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
       }
 
       if (task.fn_ && !local_graph_task->has_error_.load()) {
-        AutoGradMode grad_mode(local_graph_task->grad_mode_);
+        // Set the ThreadLocalState before calling the function.
+        // NB: The ThreadLocalStateGuard doesn't set the grad_mode because GraphTask
+        // always saves ThreadLocalState without grad_mode.
+        at::ThreadLocalStateGuard tls_guard(local_graph_task->thread_locals_);
+
         try {
           // The guard sets the thread_local current_graph_task on construction
           // and restores it on exit. The current_graph_task variable helps
@@ -422,7 +419,18 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
           // callbacks.
           GraphTaskGuard guard(local_graph_task);
           NodeGuard ndguard(task.fn_);
-          evaluate_function(local_graph_task, task.fn_.get(), task.inputs_, local_graph_task->cpu_ready_queue_);
+          {
+            RECORD_FUNCTION(
+                c10::str(
+                    "autograd::engine::evaluate_function: ",
+                    task.fn_.get()->name()),
+                std::vector<c10::IValue>());
+            evaluate_function(
+                local_graph_task,
+                task.fn_.get(),
+                task.inputs_,
+                local_graph_task->cpu_ready_queue_);
+          }
         } catch (std::exception& e) {
           thread_on_exception(local_graph_task, task.fn_, e);
         }
@@ -577,6 +585,12 @@ void GraphTask::exec_post_processing() {
     //  2. The callback's results can safely be used on (user-facing) caller_current_streams
     //     after backward().
     c10::MultiStreamGuard g(caller_current_streams_filtered);
+
+    // Set the ThreadLocalState before calling the function.
+    // NB: The ThreadLocalStateGuard doesn't set the grad_mode because GraphTask
+    // always saves ThreadLocalState without grad_mode.
+    at::ThreadLocalStateGuard tls_guard(this->thread_locals_);
+
     // WARNING: Don't use a range-for loop here because more callbacks may be
     // added in between callback calls, so iterators may become invalidated.
     // NOLINTNEXTLINE(modernize-loop-convert)
@@ -618,12 +632,6 @@ static variable_list call_post_hooks(Node& fn, variable_list outputs, const vari
     outputs = (*hook)(outputs, inputs);
   }
   return outputs;
-}
-
-static bool is_compatible_type(const at::TensorOptions& expected, const at::TensorOptions& actual) {
-  // Types are compatible if they exactly match or if the gradient is a sparse
-  // version of the expected type.
-  return expected.type_equal(actual) || (actual.is_sparse() && expected.device().type() == actual.device().type());
 }
 
 void set_device(int device) {
@@ -687,22 +695,37 @@ void validate_outputs(
     if (c10::typeMetaToScalarType(metadata.options().dtype()) != grad.scalar_type()) {
       grad = grad.to(c10::typeMetaToScalarType(metadata.options().dtype()));
     }
-    if (grad.device() != metadata.device() &&
-        grad.dim() == 0) {
-      grad = grad.to(metadata.device());
-    }
-    if (!is_compatible_type(metadata.options(), grad.options())) {
+    if (grad.dtype() != metadata.dtype()) {
        std::stringstream ss;
-       ss << "invalid gradient at index " << i << " - expected type ";
-       ss << metadata.options() << " but got " << grad.options();
+       ss << "invalid gradient at index " << i << " - expected dtype ";
+       ss << metadata.dtype() << " but got " << grad.dtype();
        AT_ERROR(format_error(ss.str()));
     }
-    auto grad_device = grad.device();
-    if (grad_device != metadata.device()) {
-      std::stringstream ss;
-      ss << "invalid gradient at index " << i << " - expected device ";
-      ss << metadata.device() << " but got " << grad_device;
-      AT_ERROR(format_error(ss.str()));
+    if (grad.layout() != metadata.layout()) {
+       // TODO: Currently we only support (*, Sparse) combination for (tensor.layout(), tensor.grad.layout())
+       // In future, there will be an oppportunity to support more combinations of layouts if they are composable
+       // (example., operations like addition etc., are well defined between tensors of different layouts.),
+       // as well as all parts of autograd like AccumulateGrad correctly handle this.
+       if (!grad.is_sparse()) {
+        std::stringstream ss;
+        ss << "invalid gradient at index " << i << " - expected layout ";
+        ss << metadata.layout() << " but got " << grad.layout();
+        AT_ERROR(format_error(ss.str()));
+       }
+    }
+
+    if (grad.device() != metadata.device()) {
+      // quick hack for: https://github.com/pytorch/pytorch/issues/65016 but should be eventually removed
+      if (!(metadata.is_tensor_subclass() || grad.unsafeGetTensorImpl()->is_python_dispatch())) {
+        if (grad.dim() == 0) {
+          grad = grad.to(metadata.device());
+        } else {
+          std::stringstream ss;
+          ss << "invalid gradient at index " << i << " - expected device ";
+          ss << metadata.device() << " but got " << grad.device();
+          AT_ERROR(format_error(ss.str()));
+        }
+      }
     }
     // We should not build graph for Tensors that are not differentiable
     TORCH_INTERNAL_ASSERT(isDifferentiableType(grad.scalar_type()));
@@ -765,11 +788,6 @@ void Engine::evaluate_function(
     Node* func,
     InputBuffer& inputs,
     const std::shared_ptr<ReadyQueue>& cpu_ready_queue) {
-  // Set the ThreadLocalState before calling the function.
-  // NB: The ThreadLocalStateGuard doesn't set the grad_mode because GraphTask
-  // always saves ThreadLocalState without grad_mode.
-  at::ThreadLocalStateGuard tls_guard(graph_task->thread_locals_);
-
   // The InputBuffer::adds that supplied incoming grads took pains to
   // ensure they're safe to consume in the context of the present
   // func's stream (if applicable). So we guard onto that stream
@@ -1114,7 +1132,6 @@ Engine& Engine::get_base_engine() {
   return engine;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<EngineStub> engine_stub(Engine::get_base_engine);
 
 void set_default_engine_stub(EngineStub stub) {
@@ -1200,8 +1217,7 @@ auto Engine::start_device_threads() -> void {
   // types), and pre-allocate the device_ready_queues_ to ensure safe reading on it.
   device_ready_queues_ = std::vector<std::shared_ptr<ReadyQueue>>(num_devices);
   for (auto& queue : device_ready_queues_)    {
-    // NOLINTNEXTLINE(modernize-make-shared)
-    queue.reset(new ReadyQueue());
+    queue = std::make_shared<ReadyQueue>();
   }
 
   thread_pool_shared_ = std::make_shared<ThreadPoolShared>();
@@ -1245,7 +1261,7 @@ void GraphTask::stash_current_streams() {
   caller_current_streams_.resize(num_gpus);
   if (num_gpus > 0) {
     for (c10::DeviceIndex idx = 0; idx < num_gpus;  idx++) {
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
       // If the build targets ROCM, stash streams for all visible devices unconditionally, to work around
       // https://github.com/pytorch/pytorch/issues/59750.
       // TODO: Remove ROCM-specific behavior when https://github.com/pytorch/pytorch/issues/59750 is fixed.

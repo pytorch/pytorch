@@ -57,6 +57,7 @@ Creation Ops
     as_tensor
     as_strided
     from_numpy
+    frombuffer
     zeros
     zeros_like
     ones
@@ -87,6 +88,7 @@ Indexing, Slicing, Joining, Mutating Ops
     :nosignatures:
 
     cat
+    concat
     conj
     chunk
     dsplit
@@ -351,6 +353,9 @@ Pointwise Ops
     polygamma
     positive
     pow
+    quantized_batch_norm
+    quantized_max_pool1d
+    quantized_max_pool2d
     rad2deg
     real
     reciprocal
@@ -384,6 +389,7 @@ Reduction Ops
     argmin
     amax
     amin
+    aminmax
     all
     any
     max
@@ -391,6 +397,7 @@ Reduction Ops
     dist
     logsumexp
     mean
+    nanmean
     median
     nanmedian
     mode
@@ -571,6 +578,8 @@ BLAS and LAPACK Operations
     symeig
     lobpcg
     trapz
+    trapezoid
+    cumulative_trapezoid
     triangular_solve
     vdot
 

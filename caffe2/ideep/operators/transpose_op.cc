@@ -31,7 +31,6 @@ class IDEEPTransposeOp final : public IDEEPOperator {
   OUTPUT_TAGS(OUTPUT);
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(Transpose, IDEEPTransposeOp);
 
 } // namespace

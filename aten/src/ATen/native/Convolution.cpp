@@ -23,7 +23,6 @@ constexpr int MIOPEN_DIM_MAX = 5;
 
 namespace at { namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(convolution_depthwise3x3_winograd_stub);
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -839,9 +838,14 @@ at::Tensor _convolution(
     weight = view4d(weight);
   }
 
-  at::MemoryFormat cudnn_memory_format = at::MemoryFormat::Contiguous;
-  if (cudnn_conv_use_channels_last(input, weight)) {
-    cudnn_memory_format = (k == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
+  at::MemoryFormat backend_memory_format = at::MemoryFormat::Contiguous;
+
+  if (detail::getCUDAHooks().compiledWithCuDNN() && cudnn_conv_use_channels_last(input, weight)) {
+    backend_memory_format = (k == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
+  }
+
+  if (detail::getCUDAHooks().compiledWithMIOpen() && miopen_conv_use_channels_last(input, weight)) {
+    backend_memory_format = (k == 5) ? at::MemoryFormat::Contiguous /*at::MemoryFormat::ChannelsLast3d*/ : at::MemoryFormat::ChannelsLast;
   }
 
   Tensor output;
@@ -854,7 +858,7 @@ at::Tensor _convolution(
       auto dilation = params.dilation;
       if (params.use_cudnn_depthwise(input, weight)) {
         output = at::cudnn_convolution(
-            input.contiguous(cudnn_memory_format), weight,
+            input.contiguous(backend_memory_format), weight,
             padding, stride, dilation, params.groups, params.benchmark, params.deterministic, params.allow_tf32);
         if (bias.defined()) {
           output.add_(reshape_bias(input.dim(), bias));
@@ -862,11 +866,11 @@ at::Tensor _convolution(
 
       } else if (params.use_miopen(input, weight, bias.defined())){
         output = at::miopen_depthwise_convolution(
-            input.contiguous(), weight, bias,
+            input.contiguous(backend_memory_format), weight, bias,
             padding, stride, dilation, params.groups, params.benchmark, params.deterministic);
       } else {
           if (input.ndimension() == 4) {
-              output = at::thnn_conv_depthwise2d(input.contiguous(), weight, kernel_size, bias, stride, padding, dilation);
+              output = at::_conv_depthwise2d(input.contiguous(), weight, kernel_size, bias, stride, padding, dilation);
           }
           else {
              TORCH_CHECK(input.ndimension() == 5);
@@ -883,14 +887,14 @@ at::Tensor _convolution(
 
     if (params.transposed) {
       output = at::cudnn_convolution_transpose(
-          input.contiguous(cudnn_memory_format), weight,
+          input.contiguous(backend_memory_format), weight,
           params.padding, params.output_padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic, params.allow_tf32);
       if (bias.defined()) {
         output.add_(reshape_bias(input.dim(), bias));
       }
     } else {
       output = at::cudnn_convolution(
-          input.contiguous(cudnn_memory_format), weight,
+          input.contiguous(backend_memory_format), weight,
           params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic, params.allow_tf32);
       if (bias.defined()) {
         output.add_(reshape_bias(input.dim(), bias));
@@ -906,11 +910,11 @@ at::Tensor _convolution(
 
     if (params.transposed) {
       output = at::miopen_convolution_transpose(
-          input.contiguous(), weight, bias,
+          input.contiguous(backend_memory_format), weight, bias,
           params.padding, params.output_padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
     } else {
       output = at::miopen_convolution(
-          input.contiguous(), weight, bias,
+          input.contiguous(backend_memory_format), weight, bias,
           params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
     }
   } else if (params.use_mkldnn(input, weight)) {

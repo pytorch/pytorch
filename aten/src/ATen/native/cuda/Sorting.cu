@@ -1,17 +1,14 @@
 #include <ATen/ATen.h>
+#include <ATen/ceil_div.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/SortingUtils.h>
 #include <c10/macros/Macros.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/SortingRadixSelect.cuh>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/MemoryOverlap.h>
-#include <THC/THCDeviceUtils.cuh> // only for THCRoundUp?
-#include <THC/THCNumerics.cuh>
-#include <THC/THCScanUtils.cuh>
-#include <THC/THCTensorMathReduce.cuh> // AddOp
 
 #include <cassert>
 #include <cstdlib>
@@ -194,7 +191,7 @@ struct KthValueLauncher {
     }
 
     dim3 block(std::min(
-        THCRoundUp(slice_size, (int64_t)C10_WARP_SIZE), (int64_t)1024));
+        round_up(slice_size, (int64_t)C10_WARP_SIZE), (int64_t)1024));
     auto stream = at::cuda::getCurrentCUDAStream();
     gatherKthValue<scalar_t, index_t, all_dims><<<grid, block, 0, stream>>>(
         self_info,
@@ -231,7 +228,7 @@ struct MedianLauncher {
     }
 
     dim3 block(std::min(
-        THCRoundUp(slice_size, (int64_t)C10_WARP_SIZE), (int64_t)1024));
+        round_up(slice_size, (int64_t)C10_WARP_SIZE), (int64_t)1024));
     auto stream = at::cuda::getCurrentCUDAStream();
     gatherMedian<scalar_t, index_t, all_dims><<<grid, block, 0, stream>>>(
         values_info,
@@ -379,7 +376,10 @@ Tensor median_impl(const Tensor& self, bool ignore_nan) {
   NoNamesGuard guard;
 
   int64_t size = self.numel();
-  TORCH_CHECK(size > 0, "median() input tensor cannot be empty");
+  // Return nan for empty tensors
+  if (size <= 0) {
+    return at::full({}, std::numeric_limits<float>::quiet_NaN()).to(self.options());
+  }
 
   // Sort input tensor to efficiently query for median element
   Tensor sorted = std::get<0>(self.flatten().sort());

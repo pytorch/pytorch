@@ -79,10 +79,8 @@
 
 namespace py = pybind11;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject* module;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 THPGenerator *THPDefaultCPUGenerator = nullptr;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -108,7 +106,7 @@ static PyObject * THPModule_initNames(PyObject *self, PyObject *arg)
     THPUtils_assert(THPUtils_checkString(module_name.get()),
         "expected __module__ to be a string");
     std::string name = THPUtils_unpackString(module_name.get());
-    names.push_back(name + "." + type->tp_name);
+    names.emplace_back(name + "." + type->tp_name);
     type->tp_name = names.back().c_str();
   }
   Py_RETURN_NONE;
@@ -510,7 +508,7 @@ PyObject *THPModule_setBenchmarkCuDNN(PyObject *_unused, PyObject *arg)
 {
   THPUtils_assert(PyBool_Check(arg), "set_benchmark_cudnn expects a bool, "
           "but got %s", THPUtils_typename(arg));
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
   if (arg == Py_False) {
     TORCH_WARN_ONCE("Disabling benchmark mode for MIOpen is NOT supported. Overriding value to True");
     arg = Py_True;
@@ -769,7 +767,6 @@ bool THDPBFloat16Storage_init(PyObject *module);
 bool THDPComplexDoubleStorage_init(PyObject *module);
 bool THDPComplexFloatStorage_init(PyObject *module);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::vector<PyMethodDef> methods;
 
 // In Python we can't use the trick of C10_LOG_API_USAGE_ONCE
@@ -921,7 +918,7 @@ PyObject* initModule() {
     return PyModule_AddObject(module, name, v) == 0;
   };
 
-#if defined(USE_CUDNN) || defined(__HIP_PLATFORM_HCC__)
+#if defined(USE_CUDNN) || defined(USE_ROCM)
   PyObject *has_cudnn = Py_True;
 #else
   PyObject *has_cudnn = Py_False;
@@ -1094,5 +1091,4 @@ struct call_duplicate_guard {
   call_duplicate_guard() { pytorch_duplicate_guard(); }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static call_duplicate_guard _call_duplicate_guard;

@@ -22,7 +22,6 @@ struct adagrad_update_prefetch_inlined {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseAdagradFusedWithSparseLengthsSumGradient)
     .NumInputs(6)
     .NumOutputs(2)
@@ -55,7 +54,6 @@ SparseLengthsIndicesInGradientSumGradient operator.
     .Output(1, "output_moment", "Updated moment")
     .Arg("epsilon", "Default 1e-5");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseAdagradFusedWithSparseLengthsSumGradient,
     SparseAdagradFusedWithSparseLengthsSumGradientOp<
@@ -67,7 +65,6 @@ REGISTER_CPU_OPERATOR(
 
 // Match the GPU Approx op, here Approx and Exact are the same for
 // SparseAdagradFusedWithSparseLengthsSumGradient op
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseAdagradFusedWithSparseLengthsSumGradientApprox)
     .NumInputs(6)
     .NumOutputs(2)
@@ -100,7 +97,6 @@ SparseLengthsIndicesInGradientSumGradient operator.
     .Output(1, "output_moment", "Updated moment")
     .Arg("epsilon", "Default 1e-5");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseAdagradFusedWithSparseLengthsSumGradientApprox,
     SparseAdagradFusedWithSparseLengthsSumGradientOp<
@@ -110,7 +106,6 @@ REGISTER_CPU_OPERATOR(
         adagrad_update_prefetch_inlined,
         /*is_mean=*/false>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseAdagradFusedWithSparseLengthsMeanGradient)
     .NumInputs(6)
     .NumOutputs(2)
@@ -143,7 +138,6 @@ SparseLengthsIndicesInGradientMeanGradient operator.
     .Output(1, "output_moment", "Updated moment")
     .Arg("epsilon", "Default 1e-5");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseAdagradFusedWithSparseLengthsMeanGradient,
     SparseAdagradFusedWithSparseLengthsSumGradientOp<
@@ -155,7 +149,6 @@ REGISTER_CPU_OPERATOR(
 
 // Match the GPU Approx op, here Approx and Exact are the same for
 // SparseAdagradFusedWithSparseLengthsMeanGradient op
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseAdagradFusedWithSparseLengthsMeanGradientApprox)
     .NumInputs(6)
     .NumOutputs(2)
@@ -188,7 +181,6 @@ SparseLengthsIndicesInGradientMeanGradient operator.
     .Output(1, "output_moment", "Updated moment")
     .Arg("epsilon", "Default 1e-5");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseAdagradFusedWithSparseLengthsMeanGradientApprox,
     SparseAdagradFusedWithSparseLengthsSumGradientOp<
@@ -198,7 +190,6 @@ REGISTER_CPU_OPERATOR(
         adagrad_update_prefetch_inlined,
         /*is_mean=*/true>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseAdagradFusedWithSparseLengthsWeightedSumGradient)
     .NumInputs(7)
     .NumOutputs(3)
@@ -236,7 +227,6 @@ SparseLengthsIndicesInGradientWeightedSumWithMainInputGradient operator.
     .Output(2, "aux_grad", "Auxiliary gradient")
     .Arg("epsilon", "Default 1e-5");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseAdagradFusedWithSparseLengthsWeightedSumGradient,
     SparseAdagradFusedWithSparseLengthsWeightedSumGradientOp<
@@ -245,7 +235,6 @@ REGISTER_CPU_OPERATOR(
         int,
         adagrad_update_prefetch_inlined>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseAdagradFusedWithSparseLengthsWeightedSumGradientApprox)
     .NumInputs(7)
     .NumOutputs(3)
@@ -286,7 +275,6 @@ SparseLengthsIndicesInGradientWeightedSumWithMainInputGradient operator.
     .Output(2, "aux_grad", "Auxiliary gradients")
     .Arg("epsilon", "Default 1e-5");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseAdagradFusedWithSparseLengthsWeightedSumGradientApprox,
     SparseAdagradFusedWithSparseLengthsWeightedSumGradientApproxOp<

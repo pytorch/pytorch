@@ -39,7 +39,6 @@ class StringJoinOpTest : public testing::Test {
   Workspace ws_;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(StringJoinOpTest, testString1DJoin) {
   std::vector<std::string> input = {"a", "xx", "c"};
 
@@ -60,7 +59,6 @@ TEST_F(StringJoinOpTest, testString1DJoin) {
   EXPECT_EQ(outputData[2], "c,");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(StringJoinOpTest, testString2DJoin) {
   std::vector<std::vector<std::string>> input = {{"aa", "bb", "cc"},
                                                  {"dd", "ee", "ff"}};
@@ -83,7 +81,6 @@ TEST_F(StringJoinOpTest, testString2DJoin) {
   EXPECT_EQ(outputData[1], "dd,ee,ff,");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(StringJoinOpTest, testFloat1DJoin) {
   std::vector<float> input = {3.90f, 5.234f, 8.12f};
 
@@ -104,7 +101,6 @@ TEST_F(StringJoinOpTest, testFloat1DJoin) {
   EXPECT_EQ(outputData[2], "8.12,");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(StringJoinOpTest, testFloat2DJoin) {
   std::vector<std::vector<float>> input = {{1.23f, 2.45f, 3.56f},
                                            {4.67f, 5.90f, 6.32f}};
@@ -127,7 +123,6 @@ TEST_F(StringJoinOpTest, testFloat2DJoin) {
   EXPECT_EQ(outputData[1], "4.67,5.9,6.32,");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(StringJoinOpTest, testLong2DJoin) {
   std::vector<std::vector<int64_t>> input = {{100, 200}, {1000, 2000}};
 

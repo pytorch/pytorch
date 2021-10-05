@@ -78,20 +78,16 @@ Tensor mean(
           keepdim ? VK_KERNEL(mean) : VK_KERNEL(mean2d),
           v_input.extents(),
           context->gpu().adapter->local_work_group_size(),
-          // Write-only access bypasses synchronization but inserts appropriate
-          // barriers if necessary.
+          // Shader parameters
+          block,
+          // Textures
           v_output.image(
               command_buffer,
               vTensor::Stage::Compute,
               vTensor::Access::Write),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
           v_input.image(
               command_buffer,
-              vTensor::Stage::Compute),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
+              vTensor::Stage::Compute));
     }
     else {
       TORCH_CHECK(false, "Not implemented!");
@@ -105,7 +101,7 @@ Tensor mean(
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl("mean.dim", TORCH_FN(mean));
+  m.impl(TORCH_SELECTIVE_NAME("aten::mean.dim"), TORCH_FN(mean));
 }
 
 #endif /* USE_VULKAN_API */

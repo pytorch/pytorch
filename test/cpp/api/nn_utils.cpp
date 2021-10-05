@@ -16,7 +16,6 @@ namespace rnn_utils = torch::nn::utils::rnn;
 struct NNUtilsTest : torch::test::SeedingFixture {};
 struct PackedSequenceTest : torch::test::SeedingFixture {};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(NNUtilsTest, ClipGradNorm) {
   auto l = Linear(10, 10);
   float max_norm = 2;
@@ -109,7 +108,6 @@ TEST_F(NNUtilsTest, ClipGradNorm) {
 
 // Check that clip_grad_norm_ raises an error if the norm of a gradient
 // is non-finite
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(NNUtilsTest, ClipGradNormErrorIfNonfinite) {
   double inf = std::numeric_limits<double>::infinity();
   double nan = std::numeric_limits<double>::quiet_NaN();
@@ -278,7 +276,6 @@ TEST_F(NNUtilsTest, ClipGradNormErrorIfNonfinite) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(NNUtilsTest, ClipGradValue) {
   auto l = Linear(10, 10);
   float clip_value = 2.5;
@@ -316,7 +313,6 @@ TEST_F(NNUtilsTest, ClipGradValue) {
   ASSERT_TRUE(torch::allclose(p1.grad(), p2.grad()));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(NNUtilsTest, ConvertParameters) {
   std::vector<torch::Tensor> parameters{
     torch::arange(9, torch::kFloat32),
@@ -419,7 +415,6 @@ void assert_is_same_packed_sequence(const rnn_utils::PackedSequence& a, const rn
   ASSERT_TRUE(a.unsorted_indices().is_same(b.unsorted_indices()));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(PackedSequenceTest, WrongOrder) {
   auto a = torch::ones({25, 300});
   auto b = torch::ones({22, 300});
@@ -431,7 +426,6 @@ TEST_F(PackedSequenceTest, WrongOrder) {
     c10::Error);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(PackedSequenceTest, TotalLength) {
   torch::Tensor padded, lengths;
   std::tie(padded, lengths) = PackedSequenceTest_padded_sequence(torch::kFloat);
@@ -480,7 +474,6 @@ TEST_F(PackedSequenceTest, TotalLength) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(PackedSequenceTest, To) {
   for (bool enforce_sorted : std::vector<bool>{true, false}) {
     torch::Tensor padded, lengths;
@@ -504,7 +497,6 @@ TEST_F(PackedSequenceTest, To) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(NNUtilsTest, PackSequence) {
   auto _compatibility_test = [&](
       torch::ArrayRef<torch::Tensor> sequences,
@@ -596,7 +588,6 @@ TEST_F(NNUtilsTest, PackSequence) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(NNUtilsTest, PackPaddedSequence) {
   auto generate_test_case = [&](
       torch::ArrayRef<int64_t> sorted_lengths,
@@ -732,7 +723,6 @@ TEST_F(NNUtilsTest, PackPaddedSequence) {
       "empty tensor");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(NNUtilsTest, PadSequence) {
   auto pad = [&](const torch::Tensor& tensor, int64_t length) {
     torch::NoGradGuard no_grad;

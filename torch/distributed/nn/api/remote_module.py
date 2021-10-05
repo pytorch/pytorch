@@ -21,8 +21,8 @@ import torch
 import torch.distributed.rpc as rpc
 from torch import Tensor, device, dtype, nn
 from torch.distributed.nn.jit import instantiator
+from torch.distributed import _remote_device
 from torch.distributed.rpc.internal import _internal_rpc_pickler
-from torch.distributed.utils import _parse_remote_device
 from torch.nn import Module
 from torch.nn.parameter import Parameter
 from torch.utils.hooks import RemovableHandle
@@ -288,11 +288,13 @@ class _RemoteModule(nn.Module):
         """
         return self.module_rref
 
+    @torch.jit.export
     def __getstate__(self):
         raise RuntimeError(
             "Cannot pickle RemoteModule in python pickler. RemoteModule can only be pickled when using RPC"
         )
 
+    @torch.jit.export
     def __setstate__(self, state):
         raise RuntimeError(
             "Cannot unpickle RemoteModule in python pickler. RemoteModule can only be unpickled when using RPC"
@@ -413,19 +415,21 @@ class _RemoteModule(nn.Module):
     def extra_repr(self) -> str:  # type: ignore[return]
         _raise_not_supported(self.extra_repr.__name__)
 
-    def _prepare_init(self, remote_device: str) -> bool:
+    def _prepare_init(self, remote_device_str: str) -> bool:
         """
         Prepares the initializaiton and returns whether to enable automatically moving CPU tensors to CUDA devices.
         """
         # Sanity check.
         assert rpc._is_current_rpc_agent_set(), "RemoteModule only works in RPC."
 
-        self.on, self.device = _parse_remote_device(remote_device)
+        remote_device = _remote_device(remote_device_str)
+        self.on = remote_device.worker_name() if remote_device.worker_name() is not None else remote_device.rank()
+        self.device = str(remote_device.device())
         agent = rpc._get_current_rpc_agent()
         # If the device map of the remote worker is set,
         # then enable moving any input CPU tensors to the same cuda device.
         self.is_device_map_set = bool(
-            agent._get_device_map(agent.get_worker_info(self.on))
+            agent._get_device_map(agent.get_worker_info(self.on))  # type: ignore[arg-type]
         )
         # ``enable_moving_cpu_tensors_to_cuda`` is less strict than ``is_device_map_set``:
         # If ``enable_moving_cpu_tensors_to_cuda`` is true, but the device map is not set,

@@ -9,7 +9,6 @@ namespace {
 // process' thread-pool, but since those threads don't exist, the thread-pool
 // is corrupt. It's leaked in order to prevent segfaults.
 // Ref: https://github.com/pytorch/pytorch/issues/54752#issuecomment-810315302
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool leak_corrupted_threadpool = false;
 
 void child_atfork() {
@@ -84,7 +83,7 @@ size_t getDefaultNumThreads();
 PThreadPool* pthreadpool() {
   static auto threadpool =
     std::make_unique<PThreadPool>(getDefaultNumThreads());
-#ifndef WIN32
+#if !(defined(WIN32)) && !(defined(__XROS__))
   static std::once_flag flag;
   std::call_once(flag, []() {
     pthread_atfork(nullptr, nullptr, child_atfork);

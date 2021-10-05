@@ -50,7 +50,6 @@ class TORCH_API RemoteProfilerManager {
   local_id_t getNextLocalId();
   std::unordered_map<ProfilingId, std::string, ProfilingId::Hash>
       profiledRpcKeys_;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static thread_local c10::optional<std::string> currentThreadLocalKey_;
   std::mutex mutex_;
   local_id_t currentLocalId_;

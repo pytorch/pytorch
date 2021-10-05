@@ -9,8 +9,9 @@ import hypothesis
 from hypothesis import given
 import hypothesis.strategies as st
 import numpy as np
+import unittest
 
-from caffe2.python import core
+from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
 
 
@@ -50,17 +51,16 @@ class TestAdam(hu.HypothesisTestCase):
         # Make up for lost minibatches.
         mom2_out = (beta2**k * mom2) + (1 - beta2) * np.square(grad)
         param_out = param
-        m = mom1
+        mom1_out = mom1
 
         # For catchup
-        for _ in range(k - 1):
-            m *= beta1
-            update = m / (np.sqrt(mom2_out) + epsilon)
-            param_out += LR * update
-        # For the single step update
-        mom1_out = m * beta1 + grad * (1 - beta1)
+        assert k >= 1
+        for i in range(k):
+            mom1_out *= beta1
+            if i == k - 1:
+                mom1_out += grad * (1 - beta1)
+            param_out += LR * mom1_out / (np.sqrt(mom2_out) + epsilon)
         grad_out = mom1_out / (np.sqrt(mom2_out) + epsilon)
-        param_out += + LR * grad_out
 
         return param_out, mom1_out, mom2_out, last_seen_out
 
@@ -213,15 +213,16 @@ class TestAdam(hu.HypothesisTestCase):
             ref_sparse,
             input_device_options=input_device_options)
 
+    @unittest.skipIf(not workspace.has_cuda_support, "no cuda support")
     @given(inputs=hu.tensors(n=4),
-           ITER=st.integers(min_value=0, max_value=10000),
-           LR=st.floats(min_value=0.01, max_value=0.99,
+           ITER=st.integers(min_value=0, max_value=10),
+           LR=st.floats(min_value=0.000001, max_value=0.1,
                         allow_nan=False, allow_infinity=False),
-           beta1=st.floats(min_value=0.01, max_value=0.99,
+           beta1=st.floats(min_value=0.0, max_value=0.99999,
                            allow_nan=False, allow_infinity=False),
-           beta2=st.floats(min_value=0.01, max_value=0.99,
+           beta2=st.floats(min_value=0.9, max_value=0.999999,
                            allow_nan=False, allow_infinity=False),
-           epsilon=st.floats(min_value=0.01, max_value=0.99,
+           epsilon=st.floats(min_value=0.00001, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
            data_strategy=st.data(),
            **hu.gcs)

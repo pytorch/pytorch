@@ -120,12 +120,10 @@ bool ElementwiseLinearDNNLowPOp<T>::GetQuantizationParameters_() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     ElementwiseLinear,
     DNNLOWP,
     ElementwiseLinearDNNLowPOp<uint8_t>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8ElementwiseLinear,
     DNNLOWP,

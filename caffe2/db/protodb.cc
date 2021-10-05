@@ -104,10 +104,8 @@ class ProtoDB : public DB {
   string source_;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CAFFE2_DB(ProtoDB, ProtoDB);
 // For lazy-minded, one can also call with lower-case name.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CAFFE2_DB(protodb, ProtoDB);
 
 }  // namespace db

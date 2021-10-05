@@ -26,15 +26,11 @@
 
 namespace torch {
 namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::unordered_map<at::DeprecatedTypeProperties*, PyTypeObject*> attype_to_py_storage_type;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::unordered_map<PyTypeObject*, at::DeprecatedTypeProperties*> py_storage_type_to_attype;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::array<THPDtype*, static_cast<int>(at::ScalarType::NumOptions)> dtype_registry = {};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::array<THPLayout*, static_cast<int>(at::Layout::NumOptions)> layout_registry = {};
 
 at::Backend get_backend(bool is_cuda, bool is_sparse) {
@@ -66,6 +62,9 @@ PyTypeObject* getPyTypeObject(
   // TODO: https://github.com/pytorch/pytorch/issues/47442
   if (storage.device_type() == at::DeviceType::Meta) {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "python bindings for meta storage objects not supported");
+  }
+  if (storage.data() == nullptr && storage.nbytes() != 0) {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "python bindings to nullptr storage (e.g., from torch.Tensor._make_wrapper_subclass) are currently unsafe and thus disabled.  See https://github.com/pytorch/pytorch/issues/61669 for more details");
   }
   at::ScalarType scalarType = at::typeMetaToScalarType(dtype);
   auto attype = &at::getDeprecatedTypeProperties(

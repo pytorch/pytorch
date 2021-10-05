@@ -1,8 +1,11 @@
-import sys
-
 import torch
 from torch._C import _add_docstr, _special  # type: ignore[attr-defined]
 from torch._torch_docs import common_args, multi_dim_common
+
+__all__ = ['entr', 'psi', 'digamma', 'gammaln', 'polygamma', 'erf', 'erfc', 'erfinv',
+           'erfcx', 'logit', 'logsumexp', 'expit', 'exp2', 'expm1', 'xlog1py', 'xlogy',
+           'i0', 'i0e', 'i1', 'i1e', 'ndtr', 'ndtri', 'log1p', 'sinc', 'round', 'log_softmax',
+           'zeta', 'multigammaln', 'gammainc', 'gammaincc', 'softmax']
 
 Tensor = torch.Tensor
 
@@ -586,9 +589,38 @@ round(input, *, out=None) -> Tensor
 Alias for :func:`torch.round`.
 """)
 
+softmax = _add_docstr(_special.special_softmax,
+                      r"""
+softmax(input, dim, *, dtype=None) -> Tensor
+
+Computes the softmax function.
+
+Softmax is defined as:
+
+:math:`\text{Softmax}(x_{i}) = \frac{\exp(x_i)}{\sum_j \exp(x_j)}`
+
+It is applied to all slices along dim, and will re-scale them so that the elements
+lie in the range `[0, 1]` and sum to 1.
+
+Args:
+    input (Tensor): input
+    dim (int): A dimension along which softmax will be computed.
+    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+        If specified, the input tensor is cast to :attr:`dtype` before the operation
+        is performed. This is useful for preventing data type overflows. Default: None.
+
+Examples::
+    >>> t = torch.ones(2, 2)
+    >>> torch.special.softmax(t, 0)
+    tensor([[0.5000, 0.5000],
+            [0.5000, 0.5000]])
+
+""")
+
 log_softmax = _add_docstr(_special.special_log_softmax,
                           r"""
 log_softmax(input, dim, *, dtype=None) -> Tensor
+
 Computes softmax followed by a logarithm.
 
 While mathematically equivalent to log(softmax(x)), doing these two
@@ -641,4 +673,129 @@ Example::
     tensor([1.6449, 0.0823])
     >>> torch.special.zeta(2, torch.tensor([1., 2.]))
     tensor([1.6449, 0.6449])
+""".format(**common_args))
+
+multigammaln = _add_docstr(_special.special_multigammaln,
+                           r"""
+multigammaln(input, p, *, out=None) -> Tensor
+
+Computes the `multivariate log-gamma function
+<https://en.wikipedia.org/wiki/Multivariate_gamma_function>`_ with dimension
+:math:`p` element-wise, given by
+
+.. math::
+    \log(\Gamma_{p}(a)) = C + \displaystyle \sum_{i=1}^{p} \log\left(\Gamma\left(a - \frac{i - 1}{2}\right)\right)
+
+where :math:`C = \log(\pi) \times \frac{p (p - 1)}{4}` and :math:`\Gamma(\cdot)` is the Gamma function.
+
+All elements must be greater than :math:`\frac{p - 1}{2}`, otherwise an error would be thrown.
+""" + """
+
+Args:
+    input (Tensor): the tensor to compute the multivariate log-gamma function
+    p (int): the number of dimensions
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.empty(2, 3).uniform_(1, 2)
+    >>> a
+    tensor([[1.6835, 1.8474, 1.1929],
+            [1.0475, 1.7162, 1.4180]])
+    >>> torch.special.multigammaln(a, 2)
+    tensor([[0.3928, 0.4007, 0.7586],
+            [1.0311, 0.3901, 0.5049]])
+""".format(**common_args))
+
+gammainc = _add_docstr(_special.special_gammainc,
+                       r"""
+gammainc(input, other, *, out=None) -> Tensor
+
+Computes the regularized lower incomplete gamma function:
+
+.. math::
+    \text{out}_{i} = \frac{1}{\Gamma(\text{input}_i)} \int_0^{\text{other}_i} t^{\text{input}_i-1} e^{-t} dt
+
+where both :math:`\text{input}_i` and :math:`\text{other}_i` are weakly positive
+and at least one is strictly positive.
+If both are zero or either is negative then :math:`\text{out}_i=\text{nan}`.
+:math:`\Gamma(\cdot)` in the equation above is the gamma function,
+
+.. math::
+    \Gamma(\text{input}_i) = \int_0^\infty t^{(\text{input}_i-1)} e^{-t} dt.
+
+See :func:`torch.special.gammaincc` and :func:`torch.special.gammaln` for related functions.
+
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
+and float inputs.
+
+.. note::
+    The backward pass with respect to :attr:`input` is not yet supported.
+    Please open an issue on PyTorch's Github to request it.
+
+""" + r"""
+Args:
+    input (Tensor): the first non-negative input tensor
+    other (Tensor): the second non-negative input tensor
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a1 = torch.tensor([4.0])
+    >>> a2 = torch.tensor([3.0, 4.0, 5.0])
+    >>> a = torch.special.gammaincc(a1, a2)
+    tensor([0.3528, 0.5665, 0.7350])
+    tensor([0.3528, 0.5665, 0.7350])
+    >>> b = torch.special.gammainc(a1, a2) + torch.special.gammaincc(a1, a2)
+    tensor([1., 1., 1.])
+
+""".format(**common_args))
+
+gammaincc = _add_docstr(_special.special_gammaincc,
+                        r"""
+gammaincc(input, other, *, out=None) -> Tensor
+
+Computes the regularized upper incomplete gamma function:
+
+.. math::
+    \text{out}_{i} = \frac{1}{\Gamma(\text{input}_i)} \int_{\text{other}_i}^{\infty} t^{\text{input}_i-1} e^{-t} dt
+
+where both :math:`\text{input}_i` and :math:`\text{other}_i` are weakly positive
+and at least one is strictly positive.
+If both are zero or either is negative then :math:`\text{out}_i=\text{nan}`.
+:math:`\Gamma(\cdot)` in the equation above is the gamma function,
+
+.. math::
+    \Gamma(\text{input}_i) = \int_0^\infty t^{(\text{input}_i-1)} e^{-t} dt.
+
+See :func:`torch.special.gammainc` and :func:`torch.special.gammaln` for related functions.
+
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
+and float inputs.
+
+.. note::
+    The backward pass with respect to :attr:`input` is not yet supported.
+    Please open an issue on PyTorch's Github to request it.
+
+""" + r"""
+Args:
+    input (Tensor): the first non-negative input tensor
+    other (Tensor): the second non-negative input tensor
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a1 = torch.tensor([4.0])
+    >>> a2 = torch.tensor([3.0, 4.0, 5.0])
+    >>> a = torch.special.gammaincc(a1, a2)
+    tensor([0.6472, 0.4335, 0.2650])
+    >>> b = torch.special.gammainc(a1, a2) + torch.special.gammaincc(a1, a2)
+    tensor([1., 1., 1.])
+
 """.format(**common_args))

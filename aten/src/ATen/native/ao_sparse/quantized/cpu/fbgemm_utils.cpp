@@ -69,7 +69,6 @@ torch::class_<LinearPackedParamsBase> register_linear_params() {
 }
 
 namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto linear_params = register_linear_params();
 }  // namespace
 

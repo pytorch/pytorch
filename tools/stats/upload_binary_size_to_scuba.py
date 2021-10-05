@@ -9,9 +9,13 @@ import sys
 import time
 import zipfile
 
-import requests
-
 from typing import Any, Dict, Generator, List
+from tools.stats.scribe import (
+    send_to_scribe,
+    rds_write,
+    register_rds_schema,
+    schema_from_sample,
+)
 
 
 def get_size(file_dir: str) -> int:
@@ -24,12 +28,21 @@ def get_size(file_dir: str) -> int:
         return 0
 
 
+def base_data() -> Dict[str, Any]:
+    return {
+        "run_duration_seconds": int(
+            time.time() - os.path.getmtime(os.path.realpath(__file__))
+        ),
+    }
+
+
 def build_message(size: int) -> Dict[str, Any]:
     build_env_split: List[Any] = os.environ.get("BUILD_ENVIRONMENT", "").split()
     pkg_type, py_ver, cu_ver, *_ = build_env_split + [None, None, None]
     os_name = os.uname()[0].lower()
     if os_name == "darwin":
         os_name = "macos"
+
     return {
         "normal": {
             "os": os_name,
@@ -46,34 +59,26 @@ def build_message(size: int) -> Dict[str, Any]:
             "time": int(time.time()),
             "size": size,
             "commit_time": int(os.environ.get("COMMIT_TIME", "0")),
-            "run_duration": int(time.time() - os.path.getmtime(os.path.realpath(__file__))),
+            "run_duration": int(
+                time.time() - os.path.getmtime(os.path.realpath(__file__))
+            ),
         },
     }
 
 
 def send_message(messages: List[Dict[str, Any]]) -> None:
-    access_token = os.environ.get("SCRIBE_GRAPHQL_ACCESS_TOKEN")
-    if not access_token:
-        raise ValueError("Can't find access token from environment variable")
-    url = "https://graph.facebook.com/scribe_logs"
-    r = requests.post(
-        url,
-        data={
-            "access_token": access_token,
-            "logs": json.dumps(
-                [
-                    {
-                        "category": "perfpipe_pytorch_binary_size",
-                        "message": json.dumps(message),
-                        "line_escape": False,
-                    }
-                    for message in messages
-                ]
-            ),
-        },
+    logs = json.dumps(
+        [
+            {
+                "category": "perfpipe_pytorch_binary_size",
+                "message": json.dumps(message),
+                "line_escape": False,
+            }
+            for message in messages
+        ]
     )
-    print(r.text)
-    r.raise_for_status()
+    res = send_to_scribe(logs)
+    print(res)
 
 
 def report_android_sizes(file_dir: str) -> None:
@@ -120,7 +125,9 @@ def report_android_sizes(file_dir: str) -> None:
                 "int": {
                     "time": int(time.time()),
                     "commit_time": int(os.environ.get("COMMIT_TIME", "0")),
-                    "run_duration": int(time.time() - os.path.getmtime(os.path.realpath(__file__))),
+                    "run_duration": int(
+                        time.time() - os.path.getmtime(os.path.realpath(__file__))
+                    ),
                     "size": comp_size,
                     "raw_size": uncomp_size,
                 },
@@ -135,14 +142,42 @@ if __name__ == "__main__":
     )
     if len(sys.argv) == 2:
         file_dir = sys.argv[1]
-    print("checking dir: " + file_dir)
+
+    if os.getenv("IS_GHA", "0") == "1":
+        sample_lib = {
+            "library": "abcd",
+            "size": 1234,
+        }
+        sample_data = {
+            **base_data(),
+            **sample_lib,
+        }
+        register_rds_schema("binary_size", schema_from_sample(sample_data))
 
     if "-android" in os.environ.get("BUILD_ENVIRONMENT", ""):
         report_android_sizes(file_dir)
     else:
-        size = get_size(file_dir)
-        # Sending the message anyway if no size info is collected.
-        try:
-            send_message([build_message(size)])
-        except Exception:
-            logging.exception("can't send message")
+        if os.getenv("IS_GHA", "0") == "1":
+            build_path = pathlib.Path("build") / "lib"
+            libraries = [
+                (path.name, os.stat(path).st_size) for path in build_path.glob("*")
+            ]
+            data = []
+            for name, size in libraries:
+                if name.strip() == "":
+                    continue
+                library_data = {
+                    "library": name,
+                    "size": size,
+                }
+                data.append({**base_data(), **library_data})
+            rds_write("binary_size", data)
+            print(json.dumps(data, indent=2))
+        else:
+            print("checking dir: " + file_dir)
+            size = get_size(file_dir)
+            # Sending the message anyway if no size info is collected.
+            try:
+                send_message([build_message(size)])
+            except Exception:
+                logging.exception("can't send message")

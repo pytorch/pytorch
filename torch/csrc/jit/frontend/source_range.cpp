@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 
@@ -164,7 +165,7 @@ C10_EXPORT void SourceRange::print_with_context(
       AT_ASSERT(hightlight_begin == 0 || str[hightlight_begin - 1] == '\n');
       AT_ASSERT(highlight_end == range_end || str[highlight_end] == '\n');
       // determine amount of empty space vs highlighted space
-      for (size_t i = hightlight_begin; i < highlight_end; i++) {
+      for (const auto i : c10::irange(hightlight_begin, highlight_end)) {
         if (str[i] == ' ' || i < start()) {
           empty_space++;
         } else {

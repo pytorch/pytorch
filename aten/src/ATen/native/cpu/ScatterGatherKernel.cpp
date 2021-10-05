@@ -20,7 +20,6 @@ public:
     *self_data = *self_data && *src_data;
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static ReduceMultiply reduce_multiply;
 
 class ReduceAdd {
@@ -30,7 +29,6 @@ public:
     *self_data += *src_data;
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static ReduceAdd reduce_add;
 
 class TensorAssign {
@@ -40,7 +38,6 @@ public:
     *self_data = *src_data;
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static TensorAssign tensor_assign;
 
 template <bool is_scatter_like = true>
@@ -103,15 +100,9 @@ struct _cpu_scatter_gather_dim_loop {
 template <bool is_scatter_like = true>
 struct cpu_scatter_gather_base_kernel {
   template <typename func_t>
-  void operator()(Tensor& self, int64_t dim,
+  void operator()(const Tensor& self, int64_t dim,
     const Tensor& index, const Scalar& value,
     const std::string& method_name, func_t& kernel_func) {
-    // no-op if index is empty
-    if (index.numel() == 0) {
-      return;
-    }
-
-    dim = maybe_wrap_dim(dim, self.dim());
 
     auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
     auto index_strides = ensure_nonempty_vec(index.strides().vec());
@@ -196,21 +187,9 @@ struct cpu_scatter_gather_base_kernel {
   }
 
   template <typename func_t>
-  void operator()(Tensor& self, int64_t dim,
+  void operator()(const Tensor& self, int64_t dim,
     const Tensor& index, const Tensor& src,
     const std::string& method_name, func_t& kernel_func) {
-
-    // no-op if index is empty
-    if (index.numel() == 0) {
-      return;
-    }
-
-    dim = maybe_wrap_dim(dim, self.dim());
-
-    scatter_gather_dtype_check(method_name, self, index, src);
-    if (!is_scatter_like) {
-      gather_shape_check(self, dim, index, src);
-    }
 
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
@@ -295,30 +274,30 @@ struct cpu_scatter_gather_base_kernel {
   }
 };
 
-void gather_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim, const Tensor& index) {
+void gather_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim, const Tensor& index) {
   cpu_scatter_gather_base_kernel</*is_scatter_like=*/false>()(
     result, dim, index, self,
     "gather_out_cpu", tensor_assign);
 }
 
-void scatter_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
+void scatter_cpu_kernel(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
   cpu_scatter_gather_base_kernel<>()(
     self, dim, index, src, "scatter_cpu_", tensor_assign);
 }
 
-void scatter_fill_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, const Scalar& value) {
+void scatter_fill_cpu_kernel(const Tensor& self, int64_t dim, const Tensor& index, const Scalar& value) {
   cpu_scatter_gather_base_kernel<>()(
     self, dim, index, value, "scatter_fill_cpu_", tensor_assign);
 }
 
-void scatter_add_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
+void scatter_add_cpu_kernel(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
   cpu_scatter_gather_base_kernel<>()(
     self, dim, index, src,
     "scatter_add_", reduce_add);
 
 }
 
-void scatter_reduce_cpu_kernel(Tensor& self, const int64_t dim, const Tensor& index,
+void scatter_reduce_cpu_kernel(const Tensor& self, const int64_t dim, const Tensor& index,
                                const Tensor& src, const SCATTER_GATHER_OP& reduce) {
   switch (reduce) {
   case SCATTER_GATHER_OP::REDUCE_ADD :
@@ -332,7 +311,7 @@ void scatter_reduce_cpu_kernel(Tensor& self, const int64_t dim, const Tensor& in
   }
 }
 
-void scatter_scalar_reduce_cpu_kernel(Tensor& self, const int64_t dim, const Tensor& index,
+void scatter_scalar_reduce_cpu_kernel(const Tensor& self, const int64_t dim, const Tensor& index,
                                       const Scalar& value, const SCATTER_GATHER_OP& reduce) {
   switch (reduce) {
   case SCATTER_GATHER_OP::REDUCE_ADD :
@@ -348,17 +327,11 @@ void scatter_scalar_reduce_cpu_kernel(Tensor& self, const int64_t dim, const Ten
 
 } // anonymous namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(gather_stub, &gather_cpu_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(scatter_stub, &scatter_cpu_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(scatter_fill_stub, &scatter_fill_cpu_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(scatter_add_stub, &scatter_add_cpu_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(scatter_reduce_stub, &scatter_reduce_cpu_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(scatter_scalar_reduce_stub, &scatter_scalar_reduce_cpu_kernel);
 
 }} // namespace at::native

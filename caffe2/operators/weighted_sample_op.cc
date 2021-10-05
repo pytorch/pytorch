@@ -68,10 +68,8 @@ bool WeightedSampleOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(WeightedSample, WeightedSampleOp<float, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(WeightedSample)
     .NumInputs(1, 2)
     .NumOutputs(1, 2)
@@ -114,6 +112,5 @@ contains the index(es) of the sampled output.
         "The output tensor contains value(s) selected by the sampled index(es)"
         "It is a 1-D Tensor of size (batch_size x 1)");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(WeightedSample);
 } // namespace caffe2

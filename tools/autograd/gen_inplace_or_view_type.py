@@ -53,11 +53,14 @@ VIEW_FUNCTIONS = {
     '_values': 'self',
     'indices': 'self',
     'values': 'self',
+    'crow_indices': 'self',
+    'col_indices': 'self',
     # sparse_coo ctor output should really be views of both indices and values,
     # but we only supports making as view of a single variable, and indices is
     # discrete anyways.
     # FIXME: clone indices on construction.
     'sparse_coo_tensor_with_dims_and_tensors': 'values',
+    '_reshape_alias': 'self',
 }
 
 for key in VIEW_FUNCTIONS_WITH_METADATA_CHANGE:
@@ -121,6 +124,10 @@ WRAPPER_REGISTRATION = CodeTemplate("""\
 m.impl("${unqual_operator_name_with_overload}",
        TORCH_FN(${class_type}::${type_wrapper_name})
 );
+""")
+
+AUTOGRAD_NOT_IMPLEMENTED_REGISTRATION = CodeTemplate("""\
+m.impl("${unqual_operator_name_with_overload}", torch::autograd::autogradNotImplementedFallback());
 """)
 
 INPLACE_REDISPATCH = CodeTemplate("""\

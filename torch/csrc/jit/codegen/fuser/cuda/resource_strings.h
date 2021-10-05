@@ -13,7 +13,7 @@ tensor as input. Correct code for this case is generated, however, nvrtc does
 not know how to handle int*_t integer types, so typedefs help it handle those
 cases*/
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 static auto type_declarations_template = CodeTemplate(R"(
 ${RuntimeHeader}
 ${HalfHeader}
@@ -37,7 +37,6 @@ struct TensorInfo<T, 0> {
 };
 )");
 #else
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto type_declarations_template = CodeTemplate(R"(
 typedef unsigned char uint8_t;
 typedef signed char int8_t;
@@ -170,7 +169,6 @@ constexpr auto rand_init = R"(
   Philox rnd(seed, idx, offset);
 )";
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto cuda_compilation_unit_template = CodeTemplate(R"(
 ${type_declarations}
 
@@ -214,7 +212,7 @@ void ${kernelName}(IndexType totalElements, ${formals} ${RandParam}) {
 // with __half2float(). All mathematical operations are done on float
 // values, and if needed the intermediate float representation is
 // converted to half with __float2half() when writing to a half tensor.
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 constexpr auto half_support_literal =
     R"(
 typedef __half half;
@@ -264,7 +262,7 @@ typedef __half half;
 )";
 #endif
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 constexpr auto bfloat16_support_literal =
     R"(
 #ifndef __align__

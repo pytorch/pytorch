@@ -36,7 +36,6 @@ _(aten, _cast_Half) \
 _(aten, _cast_Int) \
 _(aten, _cast_Long) \
 _(aten, _cast_Short) \
-_(aten, _cat) \
 _(aten, _ceil) \
 _(aten, _clamp_max) \
 _(aten, _clamp_min) \
@@ -59,8 +58,6 @@ _(aten, _cufft_clear_plan_cache) \
 _(aten, _cufft_get_plan_cache_max_size) \
 _(aten, _cufft_get_plan_cache_size) \
 _(aten, _cufft_set_plan_cache_max_size) \
-_(aten, _cumprod) \
-_(aten, _cumsum) \
 _(aten, _denseDims) \
 _(aten, _dimI) \
 _(aten, _dimV) \
@@ -192,6 +189,9 @@ _(aten, any) \
 _(aten, arange) \
 _(aten, argmax) \
 _(aten, argmin) \
+_(aten, amax) \
+_(aten, amin) \
+_(aten, aminmax) \
 _(aten, as_strided) \
 _(aten, as_tensor) \
 _(aten, atan2) \
@@ -208,6 +208,8 @@ _(aten, avg_pool3d_forward) \
 _(aten, baddbmm) \
 _(aten, bartlett_window) \
 _(aten, batch_norm) \
+_(aten, _batch_norm_impl_index) \
+_(aten, _batch_norm_impl_index_backward) \
 _(aten, bernoulli) \
 _(aten, bilinear) \
 _(aten, binary_cross_entropy) \
@@ -223,7 +225,6 @@ _(aten, bmm) \
 _(aten, broadcast_tensors) \
 _(aten, broadcast_to) \
 _(aten, cartesian_prod) \
-_(aten, cat) \
 _(aten, cauchy) \
 _(aten, ceil) \
 _(aten, celu) \
@@ -350,6 +351,7 @@ _(aten, full_like) \
 _(aten, gather) \
 _(aten, gcd) \
 _(aten, gelu) \
+_(aten, gelu_backward) \
 _(aten, geometric) \
 _(aten, geqrf) \
 _(aten, get_device) \
@@ -383,10 +385,6 @@ _(aten, hsplit) \
 _(aten, hstack) \
 _(aten, hypot) \
 _(aten, i0_) \
-_(aten, igamma) \
-_(aten, igamma_) \
-_(aten, igammac) \
-_(aten, igammac_) \
 _(aten, ifft) \
 _(aten, index) \
 _(aten, index_add) \
@@ -404,6 +402,7 @@ _(aten, is_complex) \
 _(aten, is_contiguous) \
 _(aten, is_cuda) \
 _(aten, is_mlc) \
+_(aten, is_ort) \
 _(aten, is_distributed) \
 _(aten, is_floating_point) \
 _(aten, is_inference) \
@@ -453,7 +452,6 @@ _(aten, margin_ranking_loss) \
 _(aten, masked_fill) \
 _(aten, masked_scatter) \
 _(aten, masked_select) \
-_(aten, matmul) \
 _(aten, matrix_rank) \
 _(aten, matrix_exp) \
 _(aten, max) \
@@ -475,6 +473,7 @@ _(aten, max_unpool3d_backward) \
 _(aten, max_unpool3d_forward) \
 _(aten, max_values) \
 _(aten, mean) \
+_(aten, nanmean) \
 _(aten, median) \
 _(aten, nanmedian) \
 _(aten, meshgrid) \
@@ -516,13 +515,14 @@ _(aten, multilabel_margin_loss_backward) \
 _(aten, multilabel_margin_loss_forward) \
 _(aten, multinomial) \
 _(aten, mv) \
-_(aten, mvlgamma) \
 _(aten, nansum) \
 _(aten, nan_to_num) \
 _(aten, narrow) \
 _(aten, narrow_copy) \
 _(aten, native_batch_norm) \
 _(aten, native_batch_norm_backward) \
+_(aten, native_layer_norm) \
+_(aten, native_layer_norm_backward) \
 _(aten, native_clone) \
 _(aten, native_get_device) \
 _(aten, native_norm) \
@@ -533,6 +533,10 @@ _(aten, native_zero) \
 _(aten, special_ndtr) \
 _(aten, nextafter) \
 _(aten, special_ndtri) \
+_(aten, logical_and) \
+_(aten, logical_not) \
+_(aten, logical_or) \
+_(aten, logical_xor) \
 _(aten, bitwise_and) \
 _(aten, bitwise_not) \
 _(aten, bitwise_or) \
@@ -647,7 +651,6 @@ _(aten, smooth_l1_loss_forward) \
 _(aten, soft_margin_loss) \
 _(aten, soft_margin_loss_backward) \
 _(aten, soft_margin_loss_forward) \
-_(aten, softmax) \
 _(aten, _softmax) \
 _(aten, _softmax_backward_data) \
 _(aten, softplus) \
@@ -696,8 +699,8 @@ _(aten, th_resize_as) \
 _(aten, th_tensor) \
 _(aten, th_zero) \
 _(aten, thnn_conv2d) \
-_(aten, thnn_conv2d_backward) \
-_(aten, thnn_conv2d_forward) \
+_(aten, _slow_conv2d_backward) \
+_(aten, _slow_conv2d_forward) \
 _(aten, tile) \
 _(aten, slow_conv3d) \
 _(aten, slow_conv3d_backward) \

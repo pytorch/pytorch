@@ -295,7 +295,6 @@ class ClangTidy(Check):
     common_options = [
         "--clang-tidy-exe",
         ".clang-tidy-bin/clang-tidy",
-        "--parallel",
     ]
 
     def filter_files(self, files: List[str]) -> List[str]:
@@ -303,14 +302,15 @@ class ClangTidy(Check):
 
     async def quick(self, files: List[str]) -> CommandResult:
         return await shell_cmd(
-            [sys.executable, "tools/linter/clang_tidy", "--paths"]
+            [sys.executable, "-m", "tools.linter.clang_tidy", "--paths"]
             + [os.path.join(REPO_ROOT, f) for f in files]
             + self.common_options,
         )
 
     async def full(self) -> None:
         await shell_cmd(
-            [sys.executable, "tools/linter/clang_tidy"] + self.common_options
+            [sys.executable, "-m", "tools.linter.clang_tidy"] + self.common_options,
+            redirect=False,
         )
 
 

@@ -4,7 +4,6 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorCompare.h>
 #include <ATen/native/cuda/Loops.cuh>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 
 
 namespace at { namespace native {
@@ -60,7 +59,7 @@ void clamp_kernel_impl(TensorIterator& iter) {
   });
 }
 
-void clamp_scalar_kernel_impl(TensorIterator& iter, Scalar min, Scalar max) {
+void clamp_scalar_kernel_impl(TensorIteratorBase& iter, const Scalar& min, const Scalar& max) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "clamp_scalar_cuda", [&] {
     const auto lower = min.to<scalar_t>();
     const auto upper = max.to<scalar_t>();

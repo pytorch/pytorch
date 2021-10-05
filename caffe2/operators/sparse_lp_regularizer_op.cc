@@ -79,11 +79,9 @@ bool SparseLpRegularizerOp<float, CPUContext>::DoRunWithType() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseLpRegularizer,
     SparseLpRegularizerOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLpRegularizer)
     .NumInputs(2, 3)
     .NumOutputs(1)
@@ -103,7 +101,6 @@ OPERATOR_SCHEMA(SparseLpRegularizer)
 Given a sparse matrix, apply Lp regularization.  Currently only L1 and L2 are implemented.
 )DOC");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(SparseLpNorm);
 
 } // namespace caffe2

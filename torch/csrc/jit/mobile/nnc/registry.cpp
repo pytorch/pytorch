@@ -5,7 +5,6 @@ namespace jit {
 namespace mobile {
 namespace nnc {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_REGISTRY(NNCKernelRegistry, NNCKernel);
 
 } // namespace nnc

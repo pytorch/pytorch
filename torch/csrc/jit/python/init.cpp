@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/batch_mm.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/canonicalize_graph_fuser_ops.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
@@ -98,6 +99,7 @@
 #include <torch/csrc/jit/tensorexpr/tensorexpr_init.h>
 
 #include <c10/macros/Export.h>
+#include <c10/util/irange.h>
 #include <c10/util/signal_handler.h>
 #include <caffe2/serialize/inline_container.h>
 
@@ -137,7 +139,7 @@ bool loadPythonClasses() {
 }
 } // anonymous namespace
 
-#if !defined(__HIP_PLATFORM_HCC__)
+#if !defined(USE_ROCM)
 TORCH_API void runJITCPPTests();
 #endif
 
@@ -408,6 +410,10 @@ void initJITBindings(PyObject* module) {
           py::arg("value_name_pairs") =
               std::vector<std::pair<std::string, std::string>>())
       .def("_jit_pass_constant_pooling", ConstantPooling)
+      // RemoveInplaceOps is used by CoreML so it must be removed with care.
+      .def(
+          "_jit_pass_remove_inplace_ops",
+          [](const std::shared_ptr<Graph>& g) { return RemoveInplaceOps(g); })
       .def(
           "_jit_pass_create_functional_graphs",
           [](std::shared_ptr<Graph>& g) { return CreateFunctionalGraphs(g); })
@@ -471,7 +477,7 @@ void initJITBindings(PyObject* module) {
             // we want full shape specialization. The alternative would be to
             // have a "complete type inference" function in ArguemntSpecCreator.
             auto g_inputs = graph->inputs();
-            for (size_t i = 0; i < inputs.size(); ++i) {
+            for (const auto i : c10::irange(inputs.size())) {
               if (stack[i].isTensor()) {
                 g_inputs[i]->setType(stack[i].type());
               }
@@ -487,7 +493,7 @@ void initJITBindings(PyObject* module) {
               stack.push_back(toTypeInferredIValue(obj));
             }
             auto g_inputs = graph->inputs();
-            for (size_t i = 0; i < inputs.size(); ++i) {
+            for (const auto i : c10::irange(inputs.size())) {
               if (stack[i].isTensor()) {
                 g_inputs[i]->setType(stack[i].type());
               }
@@ -520,11 +526,34 @@ void initJITBindings(PyObject* module) {
           py::arg("graph"))
       .def("_jit_pass_erase_shape_information", EraseShapeInformation)
       .def(
+          "_jit_object_is_non_holding",
+          [](Node& n) {
+            return toIValue(n.output())->toObject()->is_weak_compilation_ref();
+          })
+      .def(
+          "_jit_erase_non_input_shape_information",
+          [](std::shared_ptr<Graph>& g) {
+            std::vector<TypePtr> input_types;
+            for (Value* v : g->inputs()) {
+              if (auto tt = v->type()->cast<TensorType>()) {
+                input_types.push_back(tt);
+              } else {
+                input_types.push_back(nullptr);
+              }
+            }
+            EraseShapeInformation(g);
+            for (size_t i = 0; i < input_types.size(); ++i) {
+              if (input_types[i]) {
+                g->inputs().at(i)->setType(input_types[i]);
+              }
+            }
+          })
+      .def(
           "_jit_pass_create_autodiff_subgraphs",
           [](const std::shared_ptr<Graph>& graph) {
             CreateAutodiffSubgraphs(graph);
           })
-#if defined(BUILDING_TESTS) && !defined(__HIP_PLATFORM_HCC__)
+#if defined(BUILDING_TESTS) && !defined(USE_ROCM)
       .def(
           "_jit_run_cpp_tests",
           []() {
@@ -566,6 +595,8 @@ void initJITBindings(PyObject* module) {
       .def("_jit_override_can_fuse_on_gpu", &overrideCanFuseOnGPU)
       .def("_jit_can_fuse_on_cpu", &canFuseOnCPU)
       .def("_jit_can_fuse_on_gpu", &canFuseOnGPU)
+      .def("_jit_can_fuse_on_cpu_legacy", &canFuseOnCPULegacy)
+      .def("_jit_override_can_fuse_on_cpu_legacy", &overrideCanFuseOnCPULegacy)
       .def(
           "_jit_differentiate",
           [](Graph& g) {
@@ -642,6 +673,18 @@ void initJITBindings(PyObject* module) {
             ::torch::jit::set_jit_logging_levels(loggingOption);
           })
       .def(
+          "_jit_set_logging_stream",
+          [](std::string stream_name) -> void {
+            if (stream_name == "stdout") {
+              ::torch::jit::set_jit_logging_output_stream(std::cout);
+            } else if (stream_name == "stderr") {
+              ::torch::jit::set_jit_logging_output_stream(std::cerr);
+            } else {
+              std::cerr << "ERROR: only `stdout` and `stderr`"
+                        << "are supported as output options" << std::endl;
+            }
+          })
+      .def(
           "_jit_try_infer_type",
           [](py::object obj) -> InferredType {
             return tryToInferType(std::move(obj));
@@ -688,8 +731,6 @@ void initJITBindings(PyObject* module) {
       .def("_jit_texpr_set_fallback_allowed", &tensorexpr::setFallbackAllowed)
       .def("_jit_set_texpr_reductions_enabled", &setTexprReductionsEnabled)
       .def("_jit_texpr_reductions_enabled", &texprReductionsEnabled)
-      .def("_jit_set_texpr_parallel_cpu_enabled", &setTexprParallelCPUEnabled)
-      .def("_jit_texpr_parallel_cpu_enabled", &texprParallelCPUEnabled)
       .def(
           "_jit_set_te_generate_block_code",
           [](bool gen_block_code) {
@@ -870,6 +911,7 @@ void initJITBindings(PyObject* module) {
             }
             return retval;
           })
+      .def("_jit_pass_batch_mm", BatchMM)
       .def("_jit_decay_packed_param_input_types", [](Graph& g) {
         for (Value* i : g.inputs()) {
           if (i->type() ==
@@ -1160,7 +1202,7 @@ void initJITBindings(PyObject* module) {
               [operations, symbol](py::args args, py::kwargs kwargs) {
                 std::vector<py::handle> overloaded_args;
                 size_t total_arg_num = args.size() + kwargs.size();
-                for (size_t i = 0; i < args.size(); ++i) {
+                for (const auto i : c10::irange(args.size())) {
                   is_tensor_and_append_overloaded(
                       args[i].ptr(), &overloaded_args);
                   is_tensor_list_and_append_overloaded(
@@ -1257,11 +1299,15 @@ void initJITBindings(PyObject* module) {
           [](const FunctionSchema& self, const FunctionSchema& other) {
             return self == other;
           })
-      .def("__str__", [](FunctionSchema& self) {
-        std::stringstream ss;
-        ss << self;
-        return ss.str();
-      });
+      .def(
+          "__str__",
+          [](FunctionSchema& self) {
+            std::stringstream ss;
+            ss << self;
+            return ss.str();
+          })
+      .def_property_readonly(
+          "is_mutable", [](FunctionSchema& self) { return self.is_mutable(); });
   py::class_<Argument>(m, "Argument")
       .def_property_readonly("name", [](Argument& self) { return self.name(); })
       .def_property_readonly("type", [](Argument& self) { return self.type(); })
@@ -1376,7 +1422,7 @@ void initJITBindings(PyObject* module) {
     py::function f = py::cast<py::function>(args[0]);
     py::tuple args_tup(args.size() - 1);
 
-    for (size_t i = 1; i < args.size(); ++i) {
+    for (const auto i : c10::irange(1, args.size())) {
       args_tup[i - 1] = args[i];
     }
 

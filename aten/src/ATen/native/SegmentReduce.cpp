@@ -7,9 +7,7 @@
 namespace at {
 namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(_segment_reduce_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(_segment_reduce_backward_stub);
 
 namespace {
@@ -109,7 +107,7 @@ Tensor _segment_reduce_cpu_kernel(
   output_shape[axis] = segment_count;
   auto output = at::empty(output_shape, data.options());
 
-  AT_DISPATCH_INDEX_TYPES(lengths.type(), "_segment_reduce_cpu_kernel1", [&]() {
+  AT_DISPATCH_INDEX_TYPES(lengths.scalar_type(), "_segment_reduce_cpu_kernel1", [&]() {
     const auto* lengths_data = lengths.data_ptr<index_t>();
     _segment_reduce_cpu_kernel1(
         reduction, data, lengths_data, axis, initial, output, segment_count);
@@ -211,7 +209,7 @@ Tensor _segment_reduce_cpu_backward_kernel(
   auto grad_input = at::zeros({data_contig.sizes()}, grad_contig.options());
 
   AT_DISPATCH_INDEX_TYPES(
-      lengths_contig.type(), "_segment_reduce_cpu_backward_kernel1", [&]() {
+      lengths_contig.scalar_type(), "_segment_reduce_cpu_backward_kernel1", [&] {
         const auto* lengths_data = lengths_contig.data_ptr<index_t>();
         _segment_reduce_cpu_backward_kernel1(
             grad_contig,
@@ -271,14 +269,10 @@ Tensor segment_reduce_kernel(
 
 REGISTER_ARCH_DISPATCH(
     _segment_reduce_stub,
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     DEFAULT,
     &_segment_reduce_cpu_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_AVX_DISPATCH(_segment_reduce_stub, &_segment_reduce_cpu_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_AVX2_DISPATCH(_segment_reduce_stub, &_segment_reduce_cpu_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_AVX512_DISPATCH(_segment_reduce_stub, &_segment_reduce_cpu_kernel);
 REGISTER_VSX_DISPATCH(_segment_reduce_stub, &_segment_reduce_cpu_kernel);
 
 // Currently some computation is being duplicated across forward and backward.
@@ -315,14 +309,11 @@ Tensor _segment_reduce_backward_kernel(
 
 REGISTER_ARCH_DISPATCH(
     _segment_reduce_backward_stub,
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     DEFAULT,
     &_segment_reduce_cpu_backward_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_AVX_DISPATCH(
+REGISTER_AVX512_DISPATCH(
     _segment_reduce_backward_stub,
     &_segment_reduce_cpu_backward_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_AVX2_DISPATCH(
     _segment_reduce_backward_stub,
     &_segment_reduce_cpu_backward_kernel);

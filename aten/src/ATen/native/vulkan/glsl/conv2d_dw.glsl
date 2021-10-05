@@ -9,9 +9,11 @@ layout(set = 0, binding = 0) uniform PRECISION restrict writeonly image3D   uOut
 layout(set = 0, binding = 1) uniform PRECISION                    sampler3D uInput;
 layout(set = 0, binding = 2) uniform PRECISION                    sampler2D uKernel;
 layout(set = 0, binding = 3) uniform PRECISION                    sampler1D uBias;
-layout(set = 0, binding = 4) uniform PRECISION restrict           Block {
+
+layout(push_constant) uniform PRECISION restrict Block {
   ivec4 size;
   ivec4 kernel;
+  ivec2 ikernel;
   ivec2 stride;
   ivec2 padding;
   ivec2 dilate;
@@ -33,7 +35,7 @@ void main() {
     vec4 sum = texelFetch(uBias, pos.z, 0);
 
     for (int y = start.y, ky = kstart.y; y < end.y; y += uBlock.dilate.y, ++ky) {
-      for (int x = start.x, kx = kstart.x + ky * uBlock.size.w; x < end.x; x += uBlock.dilate.x, ++kx) {
+      for (int x = start.x, kx = kstart.x + ky * uBlock.ikernel.x; x < end.x; x += uBlock.dilate.x, ++kx) {
         sum = fma(
             texelFetch(uInput, ivec3(x, y, pos.z), 0),
             texelFetch(uKernel, ivec2(kx, pos.z), 0),

@@ -15,6 +15,7 @@
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/callstack_debug_info_serialization.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
+#include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/csrc/jit/serialization/python_print.h>
@@ -36,6 +37,19 @@ namespace jit {
 
 char const* toString(OpCode op);
 
+IValue to_tuple(std::vector<IValue> ivalues) {
+  return c10::ivalue::Tuple::create(std::move(ivalues));
+}
+
+IValue Table(const std::vector<std::pair<std::string, IValue>>& entries) {
+  std::vector<IValue> ivalue_entries;
+  ivalue_entries.reserve(entries.size());
+  for (const auto& e : entries) {
+    ivalue_entries.push_back(to_tuple({e.first, e.second}));
+  }
+  return to_tuple(std::move(ivalue_entries));
+}
+
 namespace {
 
 ExportModuleExtraFilesHook& GetExtraFilesHook() {
@@ -43,50 +57,33 @@ ExportModuleExtraFilesHook& GetExtraFilesHook() {
   return func;
 }
 
-ExportModuleMobileInfoConverter& GetMobileInfoConverter() {
-  static ExportModuleMobileInfoConverter func = nullptr;
-  return func;
-}
-
-static IValue Tup(std::vector<IValue> ivalues) {
-  return c10::ivalue::Tuple::create(std::move(ivalues));
-}
-
-static IValue Table(
-    const std::vector<std::pair<std::string, IValue>>& entries) {
-  std::vector<IValue> ivalue_entries;
-  ivalue_entries.reserve(entries.size());
-  for (const auto& e : entries) {
-    ivalue_entries.push_back(Tup({e.first, e.second}));
-  }
-  return Tup(std::move(ivalue_entries));
-}
-
 std::pair<IValue, IValue> getFunctionTuple(
     const Module& module,
     const Function& func,
-    BackendDebugInfoRecorder& debug_info_recorder) {
+    BackendDebugInfoRecorder& debug_info_recorder,
+    const std::basic_string<char>& qn,
+    TypeNameUniquer& type_name_uniquer_) {
   auto graph = func.graph()->copy();
 
   Inline(*graph);
 
   std::shared_ptr<MobileCode> code;
   code = std::make_shared<MobileCode>(
-      graph,
-      func.name(),
-      BytecodeEmitDefaultValueForUnspecifiedArgMode::
-          is_enabled() /* emit_default_input_instructions */);
+      graph, func.name(), BytecodeEmitMode::is_default_value_for_unspecified_arg_enabled() /* emit_default_input_instructions */, BytecodeEmitMode::is_default_args_before_out_args_enabled() /* enable_defaults_args_with_out_args */);
   auto instructions_copy = code->instructions();
 
   // operator names
   std::vector<c10::OperatorName> opnames;
   std::vector<std::string> method_names;
   std::vector<int64_t> op_debug_handles;
+  int next_new_op_index = 0;
   for (size_t i = 0; i < instructions_copy.size(); ++i) {
     Instruction ins = instructions_copy[i];
-    if (ins.op == OP || ins.op == OPN) {
+    if ((ins.op == OP || ins.op == OPN) && ins.X == next_new_op_index) {
+      // Found a new op (assumes new operators ordered by ascending ins.X)
       auto node = code->instructions_source()[i];
       opnames.emplace_back(node->schema().operator_name());
+      next_new_op_index++;
     }
     // CALL nodes at this point represent built-in (i.e. non-Graph)
     // functions that were not inlined. Here we convert the CALL
@@ -153,7 +150,7 @@ std::pair<IValue, IValue> getFunctionTuple(
   std::vector<IValue> instructions;
   instructions.reserve(instructions_copy.size());
   for (Instruction ins : instructions_copy) {
-    instructions.emplace_back(Tup({toString(ins.op), ins.X, ins.N}));
+    instructions.emplace_back(to_tuple({toString(ins.op), ins.X, ins.N}));
   }
 
   // operators
@@ -171,11 +168,11 @@ std::pair<IValue, IValue> getFunctionTuple(
     if (it != op_to_specified_args.end()) {
       num_args = it->second;
     }
-    if (BytecodeEmitDefaultValueForUnspecifiedArgMode::is_enabled()) {
-      operators.emplace_back(Tup({opname.name, opname.overload_name}));
+    if (BytecodeEmitMode::is_default_value_for_unspecified_arg_enabled()) {
+      operators.emplace_back(to_tuple({opname.name, opname.overload_name}));
     } else {
       operators.emplace_back(
-          Tup({opname.name, opname.overload_name, num_args}));
+          to_tuple({opname.name, opname.overload_name, num_args}));
     }
   }
 
@@ -211,14 +208,22 @@ std::pair<IValue, IValue> getFunctionTuple(
   auto register_size = static_cast<int>(code->register_size());
 
   auto codeTable = Table(
-      {{"instructions", Tup(instructions)},
-       {"operators", Tup(operators)},
-       {"constants", Tup(constants)},
-       {"types", Tup(types)},
+      {{"instructions", to_tuple(instructions)},
+       {"operators", to_tuple(operators)},
+       {"constants", to_tuple(constants)},
+       {"types", to_tuple(types)},
        {"register_size", register_size}});
 
   // schema
   const auto& schema = func.getSchema();
+  auto type_printer =
+      [&](const c10::ConstTypePtr& t) -> c10::optional<std::string> {
+    auto namedType = t->cast<c10::NamedType>();
+    if (namedType && namedType->name()) {
+      return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
+    }
+    return c10::nullopt;
+  };
   TORCH_CHECK(
       schema.overload_name().empty(), // @TODO: is this check correct?
       "Overloads are not supported in mobile modules.");
@@ -227,7 +232,7 @@ std::pair<IValue, IValue> getFunctionTuple(
   TORCH_CHECK(
       !schema.is_varret(),
       "A variable number of return values is not supported in mobile modules.");
-  auto makeArgTuple = [](const std::vector<Argument>& args) {
+  auto makeArgTuple = [&](const std::vector<Argument>& args) {
     std::vector<IValue> argTables;
     for (auto&& arg : args) {
       TORCH_CHECK(
@@ -236,13 +241,24 @@ std::pair<IValue, IValue> getFunctionTuple(
       TORCH_CHECK(
           !arg.kwarg_only(),
           "Keyword-only arguments are not supported in mobile modules.");
+      /*
+        This part adds the argument's name, type and default_value in
+        `bytecode.pkl` This has to be consistent with the `code/` directory
+        which has annotated py code of the entire module. `type_printer` uses
+        `TypeNameUniquer` to get the managled name of the argument. This helps
+        in having the right object reference when a class method is called using
+        the `self` argument.
+
+        arg.type()->annotation_str(type_printer) => mangled unique name of the
+        module/submodule
+      */
       argTables.emplace_back(Table({
           {"name", arg.name()},
-          {"type", arg.type()->annotation_str()},
+          {"type", arg.type()->annotation_str(type_printer)},
           {"default_value", arg.default_value()},
       }));
     }
-    return Tup(argTables);
+    return to_tuple(argTables);
   };
   auto schemaTable = Table({
       {"arguments", makeArgTuple(schema.arguments())},
@@ -250,8 +266,7 @@ std::pair<IValue, IValue> getFunctionTuple(
   });
 
   // function tuple
-  auto bytecode_vals =
-      Tup({func.qualname().qualifiedName(), codeTable, schemaTable});
+  auto bytecode_vals = to_tuple({qn, codeTable, schemaTable});
 
   c10::optional<IValue> debug_info_vals;
   // module debug info
@@ -263,7 +278,7 @@ std::pair<IValue, IValue> getFunctionTuple(
   IValue module_debug_tuple = c10::ivalue::Tuple::create(op_debug_handles);
   auto function_debug_info =
       Table({{"function_debug_handles", module_debug_tuple}});
-  debug_info_vals = Tup({func.qualname().qualifiedName(), function_debug_info});
+  debug_info_vals = to_tuple({qn, function_debug_info});
   return std::make_pair(bytecode_vals, debug_info_vals);
 }
 
@@ -273,19 +288,23 @@ void setstateTuple(
     std::vector<c10::IValue>& elements,
     std::unordered_set<std::string>& qn_cache,
     std::vector<c10::IValue>& debug_info_elements,
-    BackendDebugInfoRecorder& debug_info_recorder) {
+    BackendDebugInfoRecorder& debug_info_recorder,
+    TypeNameUniquer& type_name_uniquer_) {
   if (!ivalue.isObject())
     return;
   auto obj = ivalue.toObject();
   auto type = obj->type();
   if (checkHasValidSetGetState(type)) {
     Function& setstate = type->getMethod("__setstate__");
-    const auto qn = setstate.qualname().qualifiedName();
+    const auto qn =
+        type_name_uniquer_.getUniqueName(obj->type()).qualifiedName() + "." +
+        setstate.name();
     if (qn_cache.find(qn) != qn_cache.end()) {
       return;
     }
     if (setstate.isGraphFunction()) {
-      auto func_tuple = getFunctionTuple(module, setstate, debug_info_recorder);
+      auto func_tuple = getFunctionTuple(
+          module, setstate, debug_info_recorder, qn, type_name_uniquer_);
       elements.push_back(func_tuple.first);
       qn_cache.emplace(qn);
       debug_info_elements.push_back(func_tuple.second);
@@ -298,7 +317,8 @@ void setstateTuple(
           elements,
           qn_cache,
           debug_info_elements,
-          debug_info_recorder);
+          debug_info_recorder,
+          type_name_uniquer_);
     }
   }
 }
@@ -382,7 +402,8 @@ void moduleMethodsTuple(
     const Module& module,
     std::vector<c10::IValue>& elements, // note: appended to in-place
     std::vector<c10::IValue>& debug_info_elements,
-    BackendDebugInfoRecorder& debug_info_recorder) {
+    BackendDebugInfoRecorder& debug_info_recorder,
+    TypeNameUniquer& type_name_uniquer_) {
   auto methods = module.get_methods();
   std::unordered_set<std::string> qn_cache;
   // top level methods
@@ -391,8 +412,8 @@ void moduleMethodsTuple(
     if (qn_cache.find(qn) != qn_cache.end()) {
       continue;
     }
-    auto func_tuple =
-        getFunctionTuple(module, method.function(), debug_info_recorder);
+    auto func_tuple = getFunctionTuple(
+        module, method.function(), debug_info_recorder, qn, type_name_uniquer_);
     elements.push_back(func_tuple.first);
     qn_cache.emplace(qn);
     debug_info_elements.push_back(func_tuple.second);
@@ -405,16 +426,12 @@ void moduleMethodsTuple(
       elements,
       qn_cache,
       debug_info_elements,
-      debug_info_recorder);
+      debug_info_recorder,
+      type_name_uniquer_);
 }
 
 void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook) {
   GetExtraFilesHook() = std::move(hook);
-}
-
-void SetExportModuleMobileInfoConverter(
-    ExportModuleMobileInfoConverter converter) {
-  GetMobileInfoConverter() = std::move(converter);
 }
 
 void ScriptModuleSerializer::serialize(
@@ -446,7 +463,6 @@ void ScriptModuleSerializer::serialize(
         /*use_storage_context=*/true);
 
     writeByteCode(module, save_mobile_debug_info);
-    writeMobileMetadata(module, extra_files);
   } else {
     writeArchive(
         c10::ivalue::Tuple::create(ivalue_constants),
@@ -561,31 +577,6 @@ void ScriptModuleSerializer::writeExtraFiles(
   }
 }
 
-void ScriptModuleSerializer::writeMobileMetadata(
-    const Module& module,
-    const ExtraFilesMap& extra_files) {
-  auto hook = GetExtraFilesHook();
-  auto converter = GetMobileInfoConverter();
-  if (!converter) {
-    return;
-  }
-  ExtraFilesMap files_to_write = extra_files;
-  // merge hook files and extra files
-  if (hook) {
-    ExtraFilesMap hook_files = hook(module);
-    files_to_write.insert(hook_files.begin(), hook_files.end());
-  }
-  auto content_to_write = converter(module, files_to_write);
-  if (!content_to_write.empty()) {
-    writeArchive(
-        content_to_write,
-        /*archive_name=*/"metadata",
-        /*archive_dir=*/"",
-        /*tensor_dir=*/"metadata/");
-    ;
-  }
-}
-
 void ScriptModuleSerializer::updateSourceRangeTags(
     const SourceRangeRecords& ranges) {
   for (const auto& range : ranges) {
@@ -652,8 +643,12 @@ void ScriptModuleSerializer::writeByteCode(
   debug_info_elements.emplace_back(static_cast<int64_t>(version_to_write));
 
   moduleMethodsTuple(
-      module, elements, debug_info_elements, debug_info_recorder);
-  auto telements = Tup(std::move(elements));
+      module,
+      elements,
+      debug_info_elements,
+      debug_info_recorder,
+      type_name_uniquer_);
+  auto telements = to_tuple(std::move(elements));
   writeArchive(
       telements,
       /*archive_name=*/"bytecode",
@@ -661,7 +656,7 @@ void ScriptModuleSerializer::writeByteCode(
       /*tensor_dir=*/"constants/",
       /*use_storage_context=*/true);
 
-  auto debug_info_telements = Tup(std::move(debug_info_elements));
+  auto debug_info_telements = to_tuple(std::move(debug_info_elements));
 
   // At the moment keeping this feature experimental
   // since we have not evaluated how this affect model size
@@ -836,7 +831,8 @@ void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
   std::vector<c10::IValue> elements;
   std::vector<c10::IValue> debug_info_elements;
   BackendDebugInfoRecorder dummy;
-  moduleMethodsTuple(m, elements, debug_info_elements, dummy);
+  TypeNameUniquer dummy_uniquer = TypeNameUniquer();
+  moduleMethodsTuple(m, elements, debug_info_elements, dummy, dummy_uniquer);
   for (const auto& element : elements) {
     auto table = element.toTuple()->elements()[1];
     auto row =
@@ -847,7 +843,7 @@ void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
         row->elements().at(0).toStringRef());
     const auto& ops_list = row->elements().at(1).toTuple()->elements();
     for (const auto& op : ops_list) {
-      auto op_item = op.toTuple()->elements();
+      const auto& op_item = op.toTuple()->elements();
       TORCH_CHECK(
           op_item.size() >= 2,
           "There should be either two parts (name and overload name), ",
@@ -871,14 +867,23 @@ std::vector<std::string> export_opnames(const script::Module& m) {
 // Thread local flag (only happens in export, i.e. on server side)
 // to control if instructions for bytecode default inputs are emitted
 // or not. It's the major difference between bytecode v5 and v6.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local bool emitBytecodeDefaultInputs =
     caffe2::serialize::kProducedBytecodeVersion <= 5 ? true : false;
-bool BytecodeEmitDefaultValueForUnspecifiedArgMode::is_enabled() {
+bool BytecodeEmitMode::is_default_value_for_unspecified_arg_enabled() {
   return emitBytecodeDefaultInputs;
 }
-void BytecodeEmitDefaultValueForUnspecifiedArgMode::set_enabled(bool enabled) {
+void BytecodeEmitMode::set_default_value_for_unspecified_arg_enabled(
+    bool enabled) {
   emitBytecodeDefaultInputs = enabled;
+}
+
+thread_local bool emitDefautlArgsWithOutArgs =
+    caffe2::serialize::kProducedBytecodeVersion <= 6 ? false : true;
+bool BytecodeEmitMode::is_default_args_before_out_args_enabled() {
+  return emitDefautlArgsWithOutArgs;
+}
+void BytecodeEmitMode::set_default_args_before_out_args_enabled(bool enabled) {
+  emitDefautlArgsWithOutArgs = enabled;
 }
 
 } // namespace jit

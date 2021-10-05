@@ -138,12 +138,10 @@ void SpatialBNGradientOp<CPUContext>::ComputeXGradient(
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SpatialBNGradient, SpatialBNGradientOp<CPUContext>);
 
 // Input: X, scale, dY, mean, variance, dscale, dbias
 // Output: dX, dscale, dbias
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SpatialBNGradient)
     .NumInputs({5, 7})
     .NumOutputs(3)
@@ -188,7 +186,6 @@ class GetSpatialBNGradient : public GradientMakerBase {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(SpatialBN, GetSpatialBNGradient);
 
 } // namespace caffe2

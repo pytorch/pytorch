@@ -10,7 +10,7 @@ namespace at {
 struct TORCH_API CPUGeneratorImpl : public c10::GeneratorImpl {
   // Constructors
   CPUGeneratorImpl(uint64_t seed_in = default_rng_seed_val);
-  ~CPUGeneratorImpl() = default;
+  ~CPUGeneratorImpl() override = default;
 
   // CPUGeneratorImpl methods
   std::shared_ptr<CPUGeneratorImpl> clone() const;

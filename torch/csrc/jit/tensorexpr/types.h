@@ -20,6 +20,16 @@ TORCH_API std::ostream& operator<<(std::ostream& stream, const Dtype& dtype);
 
 using ScalarType = c10::ScalarType;
 
+enum ElementType {
+  kAllTypes = 0,
+  kIntegralTypes = 1 << 0,
+  kFloatingPointTypes = 1 << 1,
+  kBoolType = 1 << 2,
+  kComplexTypes = 1 << 3,
+  kQintTypes = 1 << 4,
+  kNonComplexOrQintTypes = kIntegralTypes | kBoolType | kFloatingPointTypes,
+};
+
 // Data types for scalar and vector elements.
 class TORCH_API Dtype {
  public:
@@ -71,13 +81,11 @@ class TORCH_API Dtype {
   int lanes_; // the width of the element for a vector time
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern TORCH_API Dtype kHandle;
 
 #define NNC_DTYPE_DECLARATION(ctype, name) extern TORCH_API Dtype k##name;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, NNC_DTYPE_DECLARATION)
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, NNC_DTYPE_DECLARATION)
 #undef NNC_DTYPE_DECLARATION
 
 template <typename T>
@@ -88,7 +96,7 @@ TORCH_API Dtype ToDtype();
   inline Dtype ToDtype<ctype>() {            \
     return k##name;                          \
   }
-AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, NNC_TODTYPE_DECLARATION)
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, NNC_TODTYPE_DECLARATION)
 #undef NNC_TODTYPE_DECLARATION
 
 TORCH_API Dtype ToDtype(ScalarType type);

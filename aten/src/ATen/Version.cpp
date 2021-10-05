@@ -108,11 +108,11 @@ std::string used_cpu_capability() {
     case native::CPUCapability::DEFAULT:
       ss << "NO AVX";
       break;
-    case native::CPUCapability::AVX:
-      ss << "AVX";
-      break;
     case native::CPUCapability::AVX2:
       ss << "AVX2";
+      break;
+    case native::CPUCapability::AVX512:
+      ss << "AVX512";
       break;
 #endif
     default:
@@ -182,6 +182,10 @@ std::string show_config() {
 
   if (hasCUDA()) {
     ss << detail::getCUDAHooks().showConfig();
+  }
+
+  if (hasORT()) {
+    ss << detail::getORTHooks().showConfig();
   }
 
   ss << "  - Build settings: ";

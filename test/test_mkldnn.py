@@ -354,6 +354,41 @@ class TestMkldnn(TestCase):
     def test_relu_inplace_bf16(self):
         self._test_relu_bf16_base("relu_")
 
+    def test_gelu(self):
+        m = torch.nn.GELU()
+        x = torch.randn((4, 5), dtype=torch.float32) * 10
+        x1 = x.clone().requires_grad_()
+        x2 = x.clone().to_mkldnn().requires_grad_()
+        y1 = m(x1)
+        y2 = m(x2).to_dense()
+        loss1 = y1.sum()
+        loss2 = y2.sum()
+        loss1.backward()
+        loss2.backward()
+        self.assertEqual(y1, y2)
+        self.assertEqual(x1.grad, x2.grad.to_dense())
+
+    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
+    def test_gelu_bf16(self):
+        m = torch.nn.GELU()
+        x = torch.randn((4, 5), dtype=torch.float32) * 10
+        x1 = x.clone().to_mkldnn().requires_grad_()
+        x2 = x.clone().to_mkldnn(torch.bfloat16).requires_grad_()
+        if has_bf16_support():
+            y1 = m(x1).to_dense()
+            y2 = m(x2).to_dense()
+            loss1 = y1.sum()
+            loss2 = y2.sum()
+            loss1.backward()
+            loss2.backward()
+            self.assertEqual(y1, y2.to(torch.float32), atol=1e-1, rtol=0)
+            self.assertEqual(x1.grad.to_dense(), x2.grad.to_dense(torch.float32), atol=1e-2, rtol=0)
+        else:
+            msg = r"bf16 path needs the cpu support avx512bw, avx512vl and avx512dq"
+            self.assertRaisesRegex(RuntimeError,
+                                   msg,
+                                   lambda: m(x2))
+
     def _test_max_pool_base(self, dim, input):
         pool_module = {2: torch.nn.MaxPool2d, 3: torch.nn.MaxPool3d}
         for stride in [1, 2, 3]:
@@ -993,7 +1028,7 @@ class TestMkldnn(TestCase):
                 loaded(*inputs).to_dense())
 
     def _test_tracing(self, module, inputs):
-        traced = torch.jit.trace(module, inputs, check_trace=False)
+        traced = torch.jit.trace(module, inputs)
         self.assertEqual(
             module(*inputs).to_dense(),
             traced(*inputs).to_dense())

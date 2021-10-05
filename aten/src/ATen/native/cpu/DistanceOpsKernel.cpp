@@ -440,13 +440,9 @@ static void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const
 
 }  // anonymous namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(pdist_forward_stub, &pdist_forward_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(pdist_backward_stub, &pdist_backward_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(cdist_stub, &cdist_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(cdist_backward_stub, &cdist_backward_kernel_impl);
 
 }}  // namespace at::native

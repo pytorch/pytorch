@@ -3,11 +3,9 @@
 namespace caffe2 {
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Where, WhereOp<CPUContext>);
 
 // Input: C, X, Y, output: Z
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Where)
     .NumInputs(3)
     .NumOutputs(1)
@@ -22,14 +20,11 @@ produces one output data (Tensor) where z = c ? x : y is applied elementwise.
     .Input(2, "Y", "input tensor")
     .Output(0, "Z", "output tensor");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(Where);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(IsMemberOf, IsMemberOfOp<CPUContext>);
 
 // Input: X, output: Y
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(IsMemberOf)
     .NumInputs(1)
     .NumOutputs(1)
@@ -95,7 +90,6 @@ Y:
     .Input(0, "X", "Input tensor of any shape")
     .Output(0, "Y", "Output tensor (same size as X containing booleans)");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(IsMemberOf);
 
 } // namespace

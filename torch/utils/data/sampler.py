@@ -1,7 +1,7 @@
 import torch
 from torch import Tensor
 
-from typing import Iterator, Optional, Sequence, List, TypeVar, Generic, Sized
+from typing import Iterator, Iterable, Optional, Sequence, List, TypeVar, Generic, Sized, Union
 
 T_co = TypeVar('T_co', covariant=True)
 
@@ -112,10 +112,12 @@ class RandomSampler(Sampler[int]):
     def __iter__(self) -> Iterator[int]:
         n = len(self.data_source)
         if self.generator is None:
+            seed = int(torch.empty((), dtype=torch.int64).random_().item())
             generator = torch.Generator()
-            generator.manual_seed(int(torch.empty((), dtype=torch.int64).random_().item()))
+            generator.manual_seed(seed)
         else:
             generator = self.generator
+
         if self.replacement:
             for _ in range(self.num_samples // 32):
                 yield from torch.randint(high=n, size=(32,), dtype=torch.int64, generator=generator).tolist()
@@ -141,7 +143,8 @@ class SubsetRandomSampler(Sampler[int]):
         self.generator = generator
 
     def __iter__(self) -> Iterator[int]:
-        return (self.indices[i] for i in torch.randperm(len(self.indices), generator=self.generator))
+        for i in torch.randperm(len(self.indices), generator=self.generator):
+            yield self.indices[i]
 
     def __len__(self) -> int:
         return len(self.indices)
@@ -184,7 +187,7 @@ class WeightedRandomSampler(Sampler[int]):
 
     def __iter__(self) -> Iterator[int]:
         rand_tensor = torch.multinomial(self.weights, self.num_samples, self.replacement, generator=self.generator)
-        return iter(rand_tensor.tolist())
+        yield from iter(rand_tensor.tolist())
 
     def __len__(self) -> int:
         return self.num_samples
@@ -206,7 +209,7 @@ class BatchSampler(Sampler[List[int]]):
         [[0, 1, 2], [3, 4, 5], [6, 7, 8]]
     """
 
-    def __init__(self, sampler: Sampler[int], batch_size: int, drop_last: bool) -> None:
+    def __init__(self, sampler: Union[Sampler[int], Iterable[int]], batch_size: int, drop_last: bool) -> None:
         # Since collections.abc.Iterable does not check for `__getitem__`, which
         # is one way for an object to be an iterable, we don't do an `isinstance`
         # check here.

@@ -1,6 +1,7 @@
 set(TENSOREXPR_TEST_ROOT ${TORCH_ROOT}/test/cpp/tensorexpr)
 
 set(TENSOREXPR_TEST_SRCS
+  ${TENSOREXPR_TEST_ROOT}/test_approx.cpp
   ${TENSOREXPR_TEST_ROOT}/test_aten.cpp
   ${TENSOREXPR_TEST_ROOT}/test_boundsinference.cpp
   ${TENSOREXPR_TEST_ROOT}/test_conv.cpp
@@ -13,12 +14,11 @@ set(TENSOREXPR_TEST_SRCS
   ${TENSOREXPR_TEST_ROOT}/test_kernel.cpp
   ${TENSOREXPR_TEST_ROOT}/test_loopnest.cpp
   ${TENSOREXPR_TEST_ROOT}/test_memdependency.cpp
+  ${TENSOREXPR_TEST_ROOT}/test_ops.cpp
   ${TENSOREXPR_TEST_ROOT}/test_reductions.cpp
   ${TENSOREXPR_TEST_ROOT}/test_registerizer.cpp
   ${TENSOREXPR_TEST_ROOT}/test_simplify.cpp
   ${TENSOREXPR_TEST_ROOT}/test_te_fuser_pass.cpp
-  ${TENSOREXPR_TEST_ROOT}/test_train.cpp
-  ${TENSOREXPR_TEST_ROOT}/test_train_impl.cpp
   ${TENSOREXPR_TEST_ROOT}/test_type.cpp
 )
 

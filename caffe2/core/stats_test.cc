@@ -49,7 +49,6 @@ ExportedStatMap filterMap(
 
 #define EXPECT_SUBSET(map, sub) EXPECT_EQ(filterMap((map), (sub)), (sub))
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StatsTest, StatsTestClass) {
   MyCaffeClass a("first");
   MyCaffeClass b("second");
@@ -69,7 +68,6 @@ TEST(StatsTest, StatsTestClass) {
       toMap(StatRegistry::get().publish()));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StatsTest, StatsTestDuration) {
   struct TestStats {
     // NOLINTNEXTLINE(modernize-pass-by-value)
@@ -92,7 +90,6 @@ TEST(StatsTest, StatsTestDuration) {
   EXPECT_GT(sumIt->second, 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StatsTest, StatsTestSimple) {
   struct TestStats {
     // NOLINTNEXTLINE(modernize-pass-by-value)
@@ -123,7 +120,6 @@ TEST(StatsTest, StatsTestSimple) {
       toMap(reg2.publish()), ExportedStatMap({{"i1/s3", 0}, {"i2/s3", 0}}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StatsTest, StatsTestStatic) {
   struct TestStats {
     // NOLINTNEXTLINE(modernize-pass-by-value)

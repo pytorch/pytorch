@@ -487,7 +487,6 @@ c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params_fp16(
 static std::unordered_map<
     std::string,
     c10::intrusive_ptr<CellParamsBase> (*)(CellParamsSerializationType)>
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     cell_params_deserializers = {
         {"quantized", &QuantizedCellParams::__setstate__},
         {"quantized_dynamic", &QuantizedCellParamsDynamic::__setstate__},
@@ -1396,7 +1395,6 @@ bool _use_cudnn_rnn_flatten_weight() {
         std::move(packed_output.data), std::move(std::get<1>(result)));     \
   }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 ONE_HIDDEN_RNN(gru, GRUCell<CellParams>)
 ONE_HIDDEN_QRNN(quantized_gru, GRUCell<QRNNCellParamsWrapper>)
 
@@ -1457,27 +1455,17 @@ std::tuple<Tensor, Tensor> quantized_gru_data_legacy(
 }
 
 using tanf_cell_type = SimpleCell<tanh_f, CellParams>;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 ONE_HIDDEN_RNN(rnn_tanh, tanf_cell_type)
 using relu_cell_type = SimpleCell<relu_f, CellParams>;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 ONE_HIDDEN_RNN(rnn_relu, relu_cell_type);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(lstm_cudnn_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(lstm_packed_cudnn_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(lstm_miopen_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(lstm_packed_miopen_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_NO_CPU_DISPATCH(lstm_cudnn_stub, lstm_fn);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_NO_CPU_DISPATCH(lstm_packed_cudnn_stub, lstm_packed_fn);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_NO_CPU_DISPATCH(lstm_miopen_stub, lstm_fn);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_NO_CPU_DISPATCH(lstm_packed_miopen_stub, lstm_packed_fn);
 
 std::tuple<Tensor, Tensor, Tensor> lstm(
@@ -1993,10 +1981,8 @@ DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(quantized_rnn_tanh_cell_dynamic, simple_hx_typ
 
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto ensure_linear_params_registered = register_linear_params();
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto cell_params_base_registry =
     torch::class_<CellParamsBase>("rnn", "CellParamsBase")
         .def_pickle(

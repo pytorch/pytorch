@@ -55,34 +55,30 @@ std::unique_ptr<PropagateGradientsReq> PropagateGradientsReq::fromMessage(
       payload_size,
       *rpc::RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
       message.tensors());
-  std::vector<at::IValue> tupleElements = tuple.toTuple()->elements();
+  const auto& tupleElements = tuple.toTuple()->elements();
 
   // Build PropagateGradientsReq.
   TORCH_INTERNAL_ASSERT(tupleElements.size() >= 3);
 
   // Retrieve retainGraph.
   bool retainGraph = tupleElements.back().toBool();
-  tupleElements.pop_back();
 
   // Build AutogradMetadata.
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t autogradContextId, autogradMessageId;
-  autogradMessageId = tupleElements.back().toInt();
-  tupleElements.pop_back();
-  autogradContextId = tupleElements.back().toInt();
-  tupleElements.pop_back();
+  autogradMessageId = tupleElements[tupleElements.size() - 2].toInt();
+  autogradContextId = tupleElements[tupleElements.size() - 3].toInt();
 
   AutogradMetadata autogradMetadata(autogradContextId, autogradMessageId);
 
   // Retrieve the gradient tensors.
-  std::vector<Variable> grads(tupleElements.size());
-  for(const auto i : c10::irange(tupleElements.size())) {
+  std::vector<Variable> grads(tupleElements.size() - 3);
+  for(const auto i : c10::irange(tupleElements.size() - 3)) {
     grads[i] = tupleElements[i].toTensor();
   }
 
-  // NOLINTNEXTLINE(modernize-make-unique)
-  return std::unique_ptr<PropagateGradientsReq>(
-      new PropagateGradientsReq(autogradMetadata, grads, retainGraph));
+  return std::make_unique<PropagateGradientsReq>(
+    autogradMetadata, grads, retainGraph);
 }
 
 const AutogradMetadata& PropagateGradientsReq::getAutogradMetadata() {

@@ -54,10 +54,10 @@ struct DeepAndWideFast : torch::nn::Module {
       auto wide_offset = at::add(wide, mu_);
       auto wide_normalized = at::mul(wide_offset, sigma_);
       // Placeholder for ReplaceNaN
-      auto wide_preproc = at::native::clamp(wide_normalized, -10.0, 10.0);
+      auto wide_preproc = at::cpu::clamp(wide_normalized, -10.0, 10.0);
 
       auto user_emb_t = at::native::transpose(user_emb, 1, 2);
-      auto dp_unflatten = at::native::bmm_cpu(ad_emb_packed, user_emb_t);
+      auto dp_unflatten = at::cpu::bmm(ad_emb_packed, user_emb_t);
       // auto dp = at::native::flatten(dp_unflatten, 1);
       auto dp = dp_unflatten.view({dp_unflatten.size(0), 1});
       auto input = at::native::_cat_cpu({dp, wide_preproc}, 1);
@@ -87,7 +87,7 @@ struct DeepAndWideFast : torch::nn::Module {
       at::add_out(prealloc_tensors[0], wide, mu_);
       at::mul_out(prealloc_tensors[1], prealloc_tensors[0], sigma_);
 
-      at::native::clamp_out(
+      at::native::clip_out(
           prealloc_tensors[1], -10.0, 10.0, prealloc_tensors[2]);
 
       // Potential optimization: original tensor could be pre-transposed.
@@ -103,7 +103,7 @@ struct DeepAndWideFast : torch::nn::Module {
       }
 
       // Potential optimization: call MKLDNN directly.
-      at::native::bmm_out_cpu(
+      at::cpu::bmm_out(
           ad_emb_packed, prealloc_tensors[3], prealloc_tensors[4]);
 
       if (prealloc_tensors[5].data_ptr() != prealloc_tensors[4].data_ptr()) {
@@ -138,3 +138,5 @@ torch::jit::Module getLeakyReLUScriptModel();
 torch::jit::Module getLeakyReLUConstScriptModel();
 
 torch::jit::Module getLongScriptModel();
+
+torch::jit::Module getSignedLog1pModel();

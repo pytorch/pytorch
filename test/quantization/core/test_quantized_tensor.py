@@ -377,8 +377,14 @@ class TestQuantizedTensor(TestCase):
             dqr_cuda = torch.quantize_per_channel(r.to(device), scales.to(
                 device), zero_points.to(device), axis, dtype)
             dqr_cuda = dqr_cuda.to('cpu')
+
             self.assertEqual('cuda', dqr.device.type)
+            self.assertEqual('cuda', dqr.q_per_channel_scales().device.type)
+            self.assertEqual('cuda', dqr.q_per_channel_zero_points().device.type)
+
             self.assertEqual('cpu', dqr_cuda.device.type)
+            self.assertEqual('cpu', dqr_cuda.q_per_channel_scales().device.type)
+            self.assertEqual('cpu', dqr_cuda.q_per_channel_zero_points().device.type)
 
     @unittest.skipIf(not torch.cuda.is_available() or TEST_WITH_ROCM, 'CUDA is not available')
     def test_compare_per_tensor_device_numerics(self):
@@ -1081,6 +1087,12 @@ class TestQuantizedTensor(TestCase):
             buffer.seek(0)
             model_loaded = torch.jit.load(buffer)
             self.assertEqual(model_loaded(), model())
+
+    def test_bfp16_quantize(self):
+        X = torch.randn(5 , 10)
+        quantized_X = X.to(torch.bfloat16)
+        dedequantized_X = quantized_X.to(torch.float32)
+        torch.testing.assert_allclose(X, dedequantized_X, rtol=1e-4, atol=5e-3)
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"

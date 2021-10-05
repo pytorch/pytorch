@@ -4,7 +4,6 @@ namespace at {
 namespace sequence_number {
 
 namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local uint64_t sequence_nr_ = 0;
 } // namespace
 

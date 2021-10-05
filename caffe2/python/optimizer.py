@@ -1514,6 +1514,7 @@ class AdamOptimizer(Optimizer):
         rowWise=False,
         engine="",
         enableRAdam=False,
+        use_smart_decay=False,  # See https://fburl.com/2jdiwrhy for context.
         **kwargs
     ):
         super(AdamOptimizer, self).__init__()
@@ -1529,6 +1530,18 @@ class AdamOptimizer(Optimizer):
         self.rowWise = rowWise
         self.engine = engine
         self.enableRAdam = enableRAdam
+        if use_smart_decay:
+            if rowWise:
+                raise NotImplementedError(('Smart decay is not implemented for rowWise Adam.  '
+                                           'Set rowWise or use_smart_decay to False.'))
+            if enableRAdam:
+                raise NotImplementedError(('Smart decay is not implemented for RAdam.  '
+                                           'Set enableRAdam or use_smart_decay to False.'))
+            if use_lr_adaption:
+                raise NotImplementedError(('Smart decay is not implemented with lr_adaption.  '
+                                           'Set use_lr_adaption or use_smart_decay to False.'))
+
+        self.use_smart_decay = use_smart_decay
         self.init_kwargs = kwargs
 
     def _run(self, net, param_init_net, param_info):
@@ -1558,6 +1571,14 @@ class AdamOptimizer(Optimizer):
                 [param], param + "_second_moment", value=0.0
             )
 
+        # Initialize "minibatch in which this parameter was last seen" for smart decay.
+        if self.use_smart_decay:
+            shapes, _ = workspace.InferShapesAndTypes([param_init_net])
+            last_seen = param_init_net.ConstantFill(
+                [], param + "_last_seen", shape=[shapes[param][0]], value=0, dtype=core.DataType.INT64
+            )
+            self._aux_params.local.append(last_seen)
+
         self._aux_params.shared.append(iteration)
         self._aux_params.local.append(m1)
         self._aux_params.local.append(m2)
@@ -1570,6 +1591,10 @@ class AdamOptimizer(Optimizer):
             )
 
         output_blobs = [param, m1, m2]
+
+        if self.use_smart_decay:
+            output_blobs.append(last_seen)
+
         if self.use_lr_adaption:
             effective_grad = str(param) + "_effective_grad"
             output_blobs.append(effective_grad)
@@ -1578,6 +1603,8 @@ class AdamOptimizer(Optimizer):
             grad = self.dedup(net, self.sparse_dedup_aggregator, grad)
             if self.rowWise:
                 op = "RowWiseSparseAdam"
+            elif self.use_smart_decay:
+                op = "SmartDecaySparseAdam"
             else:
                 op = "SparseAdam"
 
@@ -1590,6 +1617,14 @@ class AdamOptimizer(Optimizer):
                     beta2=self.beta2,
                     epsilon=self.epsilon,
                     enableRAdam=self.enableRAdam,
+                )
+            elif op == "SmartDecaySparseAdam":
+                net.__getattr__(op)(
+                    [param, m1, m2, last_seen, grad.indices, grad.values, lr, iteration],
+                    output_blobs,
+                    beta1=self.beta1,
+                    beta2=self.beta2,
+                    epsilon=self.epsilon,
                 )
             else:
                 assert (

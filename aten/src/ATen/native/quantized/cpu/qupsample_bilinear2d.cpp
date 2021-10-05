@@ -30,6 +30,9 @@ static void upsample_bilinear2d_out_frame(
   auto* odata = static_cast<scalar_t*>(output.data_ptr());
 
   channels = channels * nbatch;
+  if (channels == 0 || output_height == 0 || output_width == 0) {
+    return;
+  }
   auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(idata);
   auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(odata);
 
@@ -179,7 +182,6 @@ Tensor upsample_bilinear2d_quantized_cpu(
   return upsample_bilinear2d_quantized_cpu(input, osize, align_corners, scale_h, scale_w);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qupsample_bilinear2d_nhwc_stub);
 } // namespace native
 } // namespace at
