@@ -18,8 +18,10 @@
 namespace at {
 namespace native {
 
+#if !CUB_SUPPORTS_SCAN_BY_KEY()
 template<typename index_t>
 void embedding_dense_backward_cuda_scan(Tensor &sorted_indices, Tensor &count);
+#endif
 
 namespace {
 
@@ -184,7 +186,11 @@ Tensor embedding_bag_backward_cuda_sum_avg(
 
     if (scale_grad_by_freq) {
       count = at::empty_like(indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+#if CUB_SUPPORTS_SCAN_BY_KEY()
+      // TODO
+#else
       embedding_dense_backward_cuda_scan<index_t>(sorted_indices, count);
+#endif
     }
   });
   return embedding_backward_cuda_kernel(grad, orig_indices, sorted_indices,

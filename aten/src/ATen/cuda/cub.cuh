@@ -5,6 +5,8 @@
 #include <iterator>
 #include <limits>
 
+#include <ATen/cuda/cub_macros.cuh>
+
 // include cub in a safe manner, see:
 // https://github.com/pytorch/pytorch/pull/55292
 #undef CUB_NS_POSTFIX //undef to avoid redefinition warnings
@@ -55,13 +57,8 @@ struct cuda_type<c10::Half> {
   using type = __half;
 };
 
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11050
-// cub sort support for __nv_bfloat16 is added to cub 1.13 in
-// https://github.com/NVIDIA/cub/pull/306 and according to
-// https://github.com/NVIDIA/cub#releases, 1.13 is included in
-// CUDA Toolkit 11.5
+#if CUB_SUPPORTS_NV_BFLOAT16()
 
-// waiting for https://github.com/NVIDIA/cub/pull/306 to land on CUDA
 template<>
 struct cuda_type<c10::BFloat16> {
   using type = __nv_bfloat16;
@@ -325,5 +322,25 @@ inline void unique(InputIteratorT input, OutputIteratorT output, NumSelectedIter
   CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceSelect::Unique,
     input, output, num_selected_out, num_items, at::cuda::getCurrentCUDAStream());
 }
+
+#if CUB_SUPPORTS_SCAN_BY_KEY()
+
+template <typename KeysInputIteratorT, typename ValuesInputIteratorT, typename ValuesOutputIteratorT>
+inline void inclusive_sum_by_key(KeysInputIteratorT keys, ValuesInputIteratorT input, ValuesOutputIteratorT output, int64_t num_items) {
+  TORCH_CHECK(num_items <= std::numeric_limits<int>::max(),
+    "cub InclusiveSumByKey does not support more than INT_MAX elements");
+  CUB_WRAPPER(cub::DeviceScan::InclusiveSumByKey,
+      keys, input, output, num_items, detail::cub::Equality(), at::cuda::getCurrentCUDAStream());
+}
+
+template <typename KeysInputIteratorT, typename ValuesInputIteratorT, typename ValuesOutputIteratorT, typename ScanOpT>
+inline void inclusive_scan_by_key(KeysInputIteratorT keys, ValuesInputIteratorT input, ValuesOutputIteratorT output, ScanOpT scan_op, int64_t num_items) {
+  TORCH_CHECK(num_items <= std::numeric_limits<int>::max(),
+    "cub InclusiveSumByKey does not support more than INT_MAX elements");
+  CUB_WRAPPER(cub::DeviceScan::InclusiveScanByKey,
+      keys, input, output, scan_op, num_items, detail::cub::Equality(), at::cuda::getCurrentCUDAStream());
+}
+
+#endif
 
 }}}  // namespace at::cuda::cub
