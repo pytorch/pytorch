@@ -63,6 +63,9 @@ PyTypeObject* getPyTypeObject(
   if (storage.device_type() == at::DeviceType::Meta) {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "python bindings for meta storage objects not supported");
   }
+  if (storage.data() == nullptr && storage.nbytes() != 0) {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "python bindings to nullptr storage (e.g., from torch.Tensor._make_wrapper_subclass) are currently unsafe and thus disabled.  See https://github.com/pytorch/pytorch/issues/61669 for more details");
+  }
   at::ScalarType scalarType = at::typeMetaToScalarType(dtype);
   auto attype = &at::getDeprecatedTypeProperties(
       at::dispatchKeyToBackend(c10::computeDispatchKey(scalarType, c10::nullopt, storage.device_type())),
