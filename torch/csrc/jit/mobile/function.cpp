@@ -142,7 +142,7 @@ int64_t Function::get_debug_handle(size_t pc) const {
   TORCH_CHECK(
       pc < code_->instructions_with_handles_.size(),
       "Module debug info index out of boundary.");
-  return code_->instructions_with_handles_[pc].debug_handle;
+  return code_->instructions_with_handles_[pc].get_debug_handle();
 }
 
 void Function::setSchema(c10::FunctionSchema schema) {
@@ -178,7 +178,7 @@ int64_t Function::getExceptionDebugHandle() const {
   // via internal method of getInterpretersExceptionPC
   // which returns the PC of where the interpreter is.
   // Although .at will do bounds check anyway.
-  return code_->instructions_with_handles_.at(pc).debug_handle;
+  return code_->instructions_with_handles_.at(pc).get_debug_handle();
 }
 
 } // namespace mobile

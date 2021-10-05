@@ -108,12 +108,16 @@ void parseInstructions(
     OpCode op_code = opCodeCache.parse(*ins_item[0].toString());
     int X = ins_item[1].toInt();
     int N = ins_item[2].toInt();
+#if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
     if (!debug_handles_list.empty()) {
       int64_t debug_handle = debug_handles_list[j];
       function->append_instruction(op_code, X, N, debug_handle);
     } else {
       function->append_instruction(op_code, X, N);
     }
+#else
+    function->append_instruction(op_code, X, N);
+#endif
   }
 }
 
