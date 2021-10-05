@@ -9,32 +9,12 @@ namespace jit {
 namespace mobile {
 using Stack = std::vector<c10::IValue>;
 using DebugHandle = int64_t;
-#if !defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
-struct InstructionWithDebugHandle {
-  InstructionWithDebugHandle(Instruction inst, DebugHandle)
-      : instruction(inst) {}
-  C10_NODISCARD DebugHandle get_debug_handle() const {
-    return -1;
-  }
-  Instruction instruction;
-};
-#else
-struct InstructionWithDebugHandle {
-  InstructionWithDebugHandle(Instruction inst, DebugHandle handle)
-      : instruction(inst), debug_handle(handle) {}
-  C10_NODISCARD DebugHandle get_debug_handle() const {
-    return debug_handle;
-  }
-  Instruction instruction;
-  DebugHandle debug_handle;
-};
-#endif
-
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct Code {
   // TODO: Combine instructions and debug handles vector
   // into std::vector<<std::pair<Instruction, DebugHandle>>
-  std::vector<InstructionWithDebugHandle> instructions_with_handles_;
+  std::vector<Instruction> instructions_;
+  std::vector<DebugHandle> debug_handles_;
   std::vector<c10::OperatorName> op_names_;
   std::vector<std::function<void(Stack&)>> operators_;
   std::vector<c10::IValue> constants_;
