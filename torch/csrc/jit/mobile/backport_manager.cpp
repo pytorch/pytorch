@@ -82,10 +82,11 @@ void get_model_stream(PyTorchStreamReader& reader, std::stringstream& out) {
     return !out ? 0 : nbytes;
   };
   PyTorchStreamWriter writer(writer_func);
+
   selective_copy(
       reader,
       writer,
-      std::unordered_set<std::string>({"version"}),
+      std::unordered_set<std::string>(),
       std::unordered_set<std::string>());
 }
 
@@ -194,10 +195,7 @@ std::stringstream update_bytecode_version(
 
   std::vector<IValue> bytecode_values = get_bytecode_ivalues(reader_bytecode);
   std::unordered_set<std::string> excluded_files{
-      "constants.pkl",
-      "bytecode.pkl",
-      "version",
-  };
+      "constants.pkl", "bytecode.pkl"};
 
   std::unordered_set<std::string> excluded_dirs{
       "constants",
@@ -317,10 +315,7 @@ std::stringstream backport_v5_to_v4(std::stringstream& input_model_stream) {
   // 2) Copy everything to new output, except some specific files and dirs
   // (usually version, bytecode.pkl and bytecode folder are skipped)
   std::unordered_set<std::string> excluded_files{
-      "constants.pkl",
-      "bytecode.pkl",
-      "version",
-  };
+      "constants.pkl", "bytecode.pkl"};
 
   std::unordered_set<std::string> excluded_dirs{
       "constants",
@@ -647,7 +642,7 @@ bool BackportManager::backport(
   selective_copy(
       last_model_reader,
       final_writer,
-      std::unordered_set<std::string>({"version"}),
+      std::unordered_set<std::string>(),
       std::unordered_set<std::string>());
 
   return backport_success;

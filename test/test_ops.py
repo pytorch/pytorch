@@ -676,6 +676,16 @@ class TestGradients(TestCase):
 
         self._forward_grad_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
 
+    # Functions that do not support autograd should not fail in forward mode
+    # Inplace functions (such as "resize_") are expected to fail in forward mode and should be skipped
+    # Test only when supports_autograd=False and for double dtype
+    @ops(filter(lambda op: not op.supports_autograd, op_db), dtypes=OpDTypes.supported, allowed_dtypes=(torch.double,))
+    def test_nondifferentiable(self, device, dtype, op):
+        # Expecting no errors
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
+        sample = samples[0]
+        result = op(sample.input, *sample.args, **sample.kwargs)
+
 # types.LambdaType gave false positives
 def is_lambda(lamb):
     LAMBDA = lambda: 0  # noqa: E731
