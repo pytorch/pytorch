@@ -62,7 +62,7 @@ TEST(TorchpyTest, InitTwice) {
 
 TEST(TorchpyTest, DifferentInterps) {
   torch::deploy::InterpreterManager m(2);
-  m.reigsterModuleSource("check_none", "check = id(None)\n");
+  m.registerModuleSource("check_none", "check = id(None)\n");
   int64_t id0 = 0, id1 = 0;
   {
     auto I = m.allInstances()[0].acquireSession();
@@ -267,7 +267,7 @@ TEST(TorchpyTest, DisarmHook) {
 
 TEST(TorchpyTest, RegisterModule) {
   torch::deploy::InterpreterManager m(2);
-  m.reigsterModuleSource("foomodule", "def add1(x): return x + 1\n");
+  m.registerModuleSource("foomodule", "def add1(x): return x + 1\n");
   for (const auto& interp : m.allInstances()) {
     auto I = interp.acquireSession();
     AT_ASSERT(3 == I.global("foomodule", "add1")({2}).toIValue().toInt());
@@ -383,7 +383,7 @@ TEST(TorchpyTest, UsesDistributed) {
 
 TEST(TorchpyTest, Autograd) {
   torch::deploy::InterpreterManager m(2);
-  m.reigsterModuleSource("autograd_test", R"PYTHON(
+  m.registerModuleSource("autograd_test", R"PYTHON(
 import torch
 
 x = torch.ones(5)  # input tensor
