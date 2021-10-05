@@ -107,8 +107,8 @@ TEST(TorchpyTest, MultiSerialSimpleModel) {
   size_t ninterp = 3;
   std::vector<at::Tensor> outputs;
 
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   for (const auto i : c10::irange(ninterp)) {
+    (void)i;
     outputs.push_back(model({input.alias()}).toTensor());
   }
 
@@ -151,11 +151,12 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
   std::vector<at::Tensor> outputs;
 
   std::vector<std::future<at::Tensor>> futures;
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   for (const auto i : c10::irange(nthreads)) {
+    (void)i;
     futures.push_back(std::async(std::launch::async, [&model]() {
       auto input = torch::ones({10, 20});
-      for (const auto i : c10::irange(100)) {
+      for (const auto j : c10::irange(100)) {
+        (void)j;
         model({input.alias()}).toTensor();
       }
       auto result = model({input.alias()}).toTensor();
@@ -230,8 +231,8 @@ TEST(TorchpyTest, TaggingRace) {
   constexpr int64_t trials = 4;
   constexpr int64_t nthreads = 16;
   torch::deploy::InterpreterManager m(nthreads);
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   for (const auto n : c10::irange(trials)) {
+    (void)n;
     at::Tensor t = torch::empty(2);
     std::atomic<int64_t> success(0);
     std::atomic<int64_t> failed(0);
@@ -283,6 +284,7 @@ TEST(TorchpyTest, FxModule) {
   std::vector<at::Tensor> outputs;
   auto input = torch::ones({5, 10});
   for (const auto i : c10::irange(nthreads)) {
+    (void)i;
     outputs.push_back(model({input.alias()}).toTensor());
   }
 
