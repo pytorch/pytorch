@@ -20,6 +20,7 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/TracerMode.h>
 #include <c10/core/Backend.h>
+#include <c10/core/DispatchKeySet.h>
 #include <c10/core/Layout.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
@@ -175,6 +176,8 @@ ScalarType infer_scalar_type(PyObject *obj) {
 
 void recursive_store(char* data, IntArrayRef sizes, IntArrayRef strides, int64_t dim,
                             ScalarType scalarType, int elementSize, PyObject* obj) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(data != nullptr);
+
   int64_t ndim = sizes.size();
   if (dim == ndim) {
     torch::utils::store_scalar(data, scalarType, obj);
@@ -279,9 +282,11 @@ Tensor internal_new_from_data(
     // looks like for mode-based dispatch keys and C++ tensor extensions.
     c10::impl::ExcludeDispatchKeyGuard functorch_guard(c10::DispatchKey::FuncTorchDynamicLayerBackMode);
     tensor = at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type).pinned_memory(pin_memory));
-    recursive_store(
-        (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
-        inferred_scalar_type, tensor.dtype().itemsize(), data);
+    if (c10::multiply_integers(tensor.sizes()) !=0 ) {
+      recursive_store(
+          (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
+          inferred_scalar_type, tensor.dtype().itemsize(), data);
+    }
   }
   auto device = device_opt.has_value() ? *device_opt : options.device();
   pybind11::gil_scoped_release no_gil;
@@ -325,42 +330,31 @@ Tensor legacy_new_from_sequence(
 // TODO: Rewrite this using dispatchKeyToTensorOptions
 void check_base_legacy_new(c10::DispatchKey dispatch_key, at::Layout expected_layout) {
   if (expected_layout == c10::kStrided) {
-    TORCH_CHECK(
-        dispatch_key == c10::DispatchKey::CPU ||
-            dispatch_key == c10::DispatchKey::CUDA ||
-            dispatch_key == c10::DispatchKey::HIP ||
-            dispatch_key == c10::DispatchKey::XLA ||
-            dispatch_key == c10::DispatchKey::Lazy ||
-            dispatch_key == c10::DispatchKey::XPU,
-        "new(): expected DispatchKey: ",
+    constexpr c10::DispatchKeySet expected_key_set({
         c10::DispatchKey::CPU,
-        " or ",
         c10::DispatchKey::CUDA,
-        " or ",
         c10::DispatchKey::HIP,
-        " or ",
         c10::DispatchKey::XLA,
-        " or ",
         c10::DispatchKey::Lazy,
-        " or ",
         c10::DispatchKey::XPU,
+        c10::DispatchKey::HPU,
+    });
+    TORCH_CHECK(expected_key_set.has(dispatch_key),
+        "new(): expected key in ",
+        expected_key_set,
         " but got: ",
         dispatch_key);
   } else if(expected_layout == c10::kSparse) {
     // NOTE: no sparse XLA or Lazy
-    TORCH_CHECK(
-        dispatch_key == c10::DispatchKey::SparseCPU ||
-            dispatch_key == c10::DispatchKey::SparseCUDA ||
-            dispatch_key == c10::DispatchKey::SparseHIP ||
-            dispatch_key == c10::DispatchKey::SparseXPU,
-        "new(): expected DispatchKey: ",
+    constexpr c10::DispatchKeySet expected_key_set({
         c10::DispatchKey::SparseCPU,
-        " or ",
         c10::DispatchKey::SparseCUDA,
-        " or ",
         c10::DispatchKey::SparseHIP,
-        " or ",
         c10::DispatchKey::SparseXPU,
+    });
+    TORCH_CHECK(expected_key_set.has(dispatch_key),
+        "new(): expected key in ",
+        expected_key_set,
         " but got: ",
         dispatch_key);
   } else {
