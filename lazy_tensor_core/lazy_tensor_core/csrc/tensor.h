@@ -944,8 +944,6 @@ class LazyTensor {
                                               const at::Scalar& upper,
                                               bool training);
 
-  static LazyTensor rsqrt(const LazyTensor& input);
-
   static LazyTensor rsub(
       const LazyTensor& input, const LazyTensor& other, const at::Scalar& alpha,
       c10::optional<at::ScalarType> logical_element_type = c10::nullopt);
@@ -975,7 +973,7 @@ class LazyTensor {
                            lazy_tensors::int64 index);
 
   static void silu_out(LazyTensor& input, LazyTensor& out);
-  static LazyTensor sigmoid(const LazyTensor& input);
+
   static LazyTensor sigmoid_backward(const LazyTensor& grad_output,
                                      const LazyTensor& output);
 
