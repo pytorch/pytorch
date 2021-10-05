@@ -5,6 +5,7 @@ full_codegen:
   - addcdiv
   - addcmul
   - cos
+  - dropout
   - gelu
   - gelu_backward
   - mean

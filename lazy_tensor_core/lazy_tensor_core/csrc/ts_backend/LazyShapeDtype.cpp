@@ -16,9 +16,18 @@ namespace torch_lazy_tensors{
 namespace ir {
 namespace ops {
 
+std::vector<int64_t> compute_shape_dropout(const at::Tensor& input, double p, bool train) {
+  return input.sizes().vec();
+}
+
+c10::ScalarType compute_dtype_dropout(const at::Tensor& input, double p, bool train) {
+  return input.scalar_type();
+}
+
 std::vector<int64_t> compute_shape_mean(const at::Tensor& self, c10::optional<at::ScalarType> dtype) {
   return std::vector<int64_t>({1});
 }
+
 c10::ScalarType compute_dtype_mean(const at::Tensor& self, c10::optional<at::ScalarType> dtype) {
   if (dtype.has_value()) {
     return dtype.value();
@@ -26,11 +35,11 @@ c10::ScalarType compute_dtype_mean(const at::Tensor& self, c10::optional<at::Sca
   return self.scalar_type();
 }
 
-std::vector<int64_t> compute_shape_mv(const at::Tensor & self, const at::Tensor & vec) {
+std::vector<int64_t> compute_shape_mv(const at::Tensor& self, const at::Tensor& vec) {
   return std::vector<int64_t>({self.size(0)});
 }
 
-c10::ScalarType compute_dtype_mv(const at::Tensor & self, const at::Tensor & vec) {
+c10::ScalarType compute_dtype_mv(const at::Tensor& self, const at::Tensor& vec) {
   return self.scalar_type();
 }
 
