@@ -65,7 +65,8 @@ tensorOptionsT = BaseCppType('at', 'TensorOptions')
 typeAndSizeT = BaseCppType('torch::autograd::generated', 'TypeAndSize')
 tensorGeometryT = BaseCppType('at', 'TensorGeometry')
 
-# variable types, this is a slight abuse
+# Types representing template parameters.  Technically, we probably shouldn't
+# represent them this way in codegen, but it was pretty convenient.
 scalar_t = BaseCppType('', 'scalar_t')
 opmath_t = BaseCppType('', 'opmath_t')
 
@@ -301,13 +302,6 @@ class Binding:
     argument: Union[Argument, TensorOptionsArguments, SelfArgument]
     # TODO: maybe don't represent default here
     default: Optional[str] = None
-
-    # Bindings decay into expressions (forgetting information about themselves)
-    def expr(self) -> 'Expr':
-        return Expr(
-            expr=self.name,
-            type=self.nctype
-        )
 
     def rename(self, name: str) -> 'Binding':
         return Binding(

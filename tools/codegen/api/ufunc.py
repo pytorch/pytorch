@@ -112,6 +112,23 @@ class UfunctorBindings:
     ctor: List[Binding]
     apply: List[Binding]
 
+# ufunctors are a CUDA-only concept representing functors that take some of
+# their arguments on a host-side constructor, and the rest in the device-side
+# apply.  E.g.,
+#
+# template <typename scalar_t>
+# struct CUDAFunctorOnSelf_add {
+#   using opmath_t = at::opmath_type<scalar_t>;
+#   opmath_t other_;
+#   opmath_t alpha_;
+#   CUDAFunctorOnSelf_add(opmath_t other, opmath_t alpha) : other_(other), alpha_(alpha) {}
+#   __device__ scalar_t operator()(scalar_t self) {
+#     return ufunc::add(static_cast<opmath_t>(self), other_, alpha_);
+#   }
+# };
+#
+# The ctor refers to the constructor CUDAFunctorOnSelf_add, while apply refers
+# to the operator() definition
 def ufunctor_arguments(g: NativeFunctionsGroup, *, scalar_tensor: Optional[int], scalar_t: BaseCppType) -> UfunctorBindings:
     ctor = []
     apply = []
@@ -130,9 +147,23 @@ def ufunctor_arguments(g: NativeFunctionsGroup, *, scalar_tensor: Optional[int],
     assert scalar_tensor is None
     return UfunctorBindings(ctor=ctor, apply=apply)
 
+# ufuncs are the inner loop template functions that you wrote in ufunc/add.h
+# which do the actual computation in question.  E.g.,
+#
+# template <typename T>
+# C10_HOST_DEVICE T add(T self, T other, T alpha) __ubsan_ignore_undefined__ {
+#   return self + alpha * other;
+# }
+#
+# In this file, we refer to T as compute_t which is bound by caller
 def ufunc_arguments(g: NativeFunctionsGroup, *, compute_t: CType) -> List[Binding]:
     return [ufunc_argument(a, compute_t=compute_t) for a in g.functional.func.arguments.flat_non_out]
 
+# Stubs are the DispatchStub trampolines that CPU kernels use to get to their
+# vectorized versions.  E.g.,
+#
+# using structured_binary_fn_alpha = void(*)(TensorIteratorBase&, const Scalar& alpha);
+# DECLARE_DISPATCH(structured_binary_fn_alpha, add_stub);
 def stub_arguments(g: NativeFunctionsGroup) -> List[Binding]:
     # stubs drop all tensor arguments (they are implicit in the TensorIterator
     # argument and keep everything else)

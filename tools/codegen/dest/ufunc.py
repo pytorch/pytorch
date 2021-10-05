@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from typing import Union, Optional, List, Tuple, Dict, Sequence
 from tools.codegen.api.translate import translate
 from tools.codegen.utils import Target
-from tools.codegen.model import NativeFunctionsGroup, ScalarType, UfuncKey, DispatchKey, BaseType, BaseTy
+from tools.codegen.model import NativeFunctionsGroup, ScalarType, UfuncKey, DispatchKey, BaseType, BaseTy, Argument
 import tools.codegen.api.ufunc as ufunc
 from tools.codegen.api.ufunc import UfunctorBindings
 import tools.codegen.api.structured as structured
@@ -111,28 +111,36 @@ def compute_ufunc_cuda_functors(g: NativeFunctionsGroup) -> Tuple[Dict[ScalarTyp
     else:
         keys = [UfuncKey.CUDAFunctor]
     for k in keys:
-        prefix = ""
-        lk = k
-        if k not in loops:
-            prefix = f"{k}_"
-            if UfuncKey.ScalarOnly in loops:
-                lk = UfuncKey.ScalarOnly
-            elif UfuncKey.Generic in loops:
-                lk = UfuncKey.Generic
-            else:
-                assert False
-        supported_dtypes = loops[lk].supported_dtypes
-        ufunc_name = loops[lk].name
-        name = f"{prefix}{ufunc_name}"
+        # If the key was directly defined, skip functor codegen; we assume the
+        # user already done it for us
+        if k in loops:
+            ufunctor_sig = UfunctorSignature(g, scalar_tensor=scalar_tensor_lookup[k], name=loops[k].name)
+            for dtype in loops[k].supported_dtypes:
+                ufunctor_sigs.setdefault(dtype, {})[k] = ufunctor_sig
+            continue
 
+        # Otherwise, look in ANY of the generic entries.  For simplicity of
+        # codegen, both ScalarOnly and Generic are defined, the ufunc name
+        # must match  (if they didn't match, we'd have to generate distinct
+        # functors per dtype, which is awful, so we're not going to do it unless
+        # someone really forces us to)
+        ufunc_name = None
+        supported_dtypes = set()
+        for lk in [UfuncKey.ScalarOnly, UfuncKey.Generic]:
+            if ufunc_name is None:
+                ufunc_name = loops[lk].name
+            else:
+                assert ufunc_name == loops[lk].name, "ScalarOnly and Generic must have same ufunc name"
+            supported_dtypes |= loops[lk].supported_dtypes
+        assert ufunc_name is not None
+
+        name = f"{k}_{ufunc_name}"
         ufunctor_sig = UfunctorSignature(g, scalar_tensor=scalar_tensor_lookup[k], name=name)
         for dtype in supported_dtypes:
             ufunctor_sigs.setdefault(dtype, {})[k] = ufunctor_sig
 
         ufunc_sig = UfuncSignature(g, name=f"ufunc::{ufunc_name}", compute_t=BaseCType(opmath_t))
-
         apply_ctx = ufunctor_sig.fields() + ufunctor_sig.arguments().apply
-
         ufunctors.append(f"""
 template <typename scalar_t>
 struct {ufunctor_sig.name} {{
@@ -312,13 +320,13 @@ def compute_ufunc_cpu_dtype_body(g: NativeFunctionsGroup, dtype: ScalarType, inn
     body = []
     ctx = []
     for b in parent_ctx:
-        if b.argument.type != BaseType(BaseTy.Scalar):
+        if isinstance(b.argument, Argument) and b.argument.type != BaseType(BaseTy.Scalar):
             continue
         body.append(f"auto _s_{b.name} = {b.name}.to<scalar_t>();")
         ctx.append(Expr(f"_s_{b.name}", NamedCType(b.nctype.name, BaseCType(scalar_t))))
     if vec_loop is not None:
         for b in parent_ctx:
-            if b.argument.type != BaseType(BaseTy.Scalar):
+            if isinstance(b.argument, Argument) and b.argument.type != BaseType(BaseTy.Scalar):
                 continue
             body.append(f"auto _v_{b.name} = at::vec::Vectorized<scalar_t>(_s_{b.name});")
             ctx.append(Expr(f"_v_{b.name}", NamedCType(b.nctype.name, VectorizedCType(BaseCType(scalar_t)))))
@@ -343,20 +351,26 @@ def compute_ufunc_cpu_dtype_body(g: NativeFunctionsGroup, dtype: ScalarType, inn
                 argument=a,
             ))
 
+    def with_ctx(b: Sequence[Binding]) -> List[Union[Expr, Binding]]:
+        r: List[Union[Expr, Binding]] = []
+        r.extend(ctx)
+        r.extend(b)
+        return r
+
     body_str = '\n'.join(body)
     if vec_loop is not None:
         return f"""
 {body_str}
 cpu_kernel_vec(iter,
-  [=]({', '.join(b.decl() for b in scalar_bindings)}) {{ return {scalar_loop.call(ctx + scalar_bindings)}; }},
-  [=]({', '.join(b.decl() for b in vec_bindings)}) {{ return {vec_loop.call(ctx + vec_bindings)}; }}
+  [=]({', '.join(b.decl() for b in scalar_bindings)}) {{ return {scalar_loop.call(with_ctx(scalar_bindings))}; }},
+  [=]({', '.join(b.decl() for b in vec_bindings)}) {{ return {vec_loop.call(with_ctx(vec_bindings))}; }}
 );
 """
     else:
         return f"""
 {body_str}
 cpu_kernel(iter,
-  [=]({', '.join(b.decl() for b in scalar_bindings)}) {{ return {scalar_loop.call(ctx + scalar_bindings)}; }}
+  [=]({', '.join(b.decl() for b in scalar_bindings)}) {{ return {scalar_loop.call(with_ctx(scalar_bindings))}; }}
 );
 """
 

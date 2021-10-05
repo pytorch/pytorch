@@ -19,7 +19,7 @@ C10_HOST_DEVICE T add(T self, T other, T alpha) __ubsan_ignore_undefined__ {
 #if !defined(__CUDACC__) && !defined(__HIPCC__)
 using vec::Vectorized;
 template <typename T>
-C10_HOST_DEVICE Vectorized<T> add(Vectorized<T> self, Vectorized<T> other, Vectorized<T> alpha) __ubsan_ignore_undefined__ {
+Vectorized<T> add(Vectorized<T> self, Vectorized<T> other, Vectorized<T> alpha) __ubsan_ignore_undefined__ {
   return vec::fmadd(other, alpha, self);
 }
 #endif

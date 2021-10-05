@@ -2,12 +2,10 @@ from typing import List, Union, Optional
 
 from tools.codegen.context import with_native_function_and_index
 from tools.codegen.utils import mapMaybe
-from tools.codegen.model import NativeFunction, NativeFunctionsGroup, BackendIndex, \
-    BackendMetadata, assert_never, is_ufunc_dispatch_key
+from tools.codegen.model import NativeFunction, NativeFunctionsGroup, BackendIndex
 from tools.codegen.api.types import kernel_signature
 import tools.codegen.api.meta as meta
 import tools.codegen.api.structured as structured
-import tools.codegen.api.ufunc as ufunc
 
 @with_native_function_and_index
 def gen_unstructured(f: NativeFunction, backend_index: BackendIndex) -> Optional[str]:
@@ -15,8 +13,6 @@ def gen_unstructured(f: NativeFunction, backend_index: BackendIndex) -> Optional
     metadata = backend_index.get_kernel(f)
     if metadata is None:
         return None
-    # ufuncs MUST be structured
-    assert isinstance(metadata, BackendMetadata)
     if "legacy::" in metadata.kernel:
         return None
     else:
@@ -30,13 +26,9 @@ def gen_structured(g: NativeFunctionsGroup, backend_index: BackendIndex) -> List
     metadata = backend_index.get_kernel(g)
     if metadata is None:
         return []
-    if is_ufunc_dispatch_key(backend_index.dispatch_key) and g.functional.ufunc_inner_loop:
-        kernel = ufunc.kernel_name(g, backend_index.dispatch_key)
-    else:
-        kernel = metadata.kernel
     prefix = '' if backend_index.external else 'TORCH_API '
     return [f"""\
-struct {prefix}structured_{kernel} : public at::meta::structured_{meta_name} {{
+struct {prefix}structured_{metadata.kernel} : public at::meta::structured_{meta_name} {{
 void impl({', '.join(a.decl() for a in out_args)});
 }};
 """]

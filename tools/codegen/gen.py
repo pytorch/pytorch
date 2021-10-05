@@ -9,7 +9,6 @@ import functools
 import json
 from dataclasses import dataclass
 import hashlib
-import subprocess
 
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.model import (Argument, DispatchKey, FunctionSchema,
@@ -903,19 +902,14 @@ class FileManager:
     template_dir: str
     dry_run: bool
     filenames: Set[str]
-    clang_format: bool
 
-    def __init__(self, install_dir: str, template_dir: str, dry_run: bool, clang_format: bool=False) -> None:
+    def __init__(self, install_dir: str, template_dir: str, dry_run: bool) -> None:
         self.install_dir = install_dir
         self.template_dir = template_dir
         self.filenames = set()
         self.dry_run = dry_run
-        self.clang_format = clang_format
 
     def _write_if_changed(self, filename: str, contents: str) -> None:
-        if self.clang_format and (filename.endswith('.h') or filename.endswith('.cpp') or filename.endswith('.cu')):
-            proc = subprocess.run(['clang-format'], input=contents, capture_output=True, check=True, universal_newlines=True)  # type: ignore
-            contents = proc.stdout
         old_contents: Optional[str]
         try:
             with open(filename, 'r') as f:
@@ -1078,10 +1072,6 @@ def main() -> None:
         '--rocm',
         action='store_true',
         help='reinterpret CUDA as ROCm/HIP and adjust filepaths accordingly')
-    parser.add_argument(
-        '--clang-format',
-        action='store_true',
-        help='run clang-format on generated sources')
     # TODO: --op_registration_whitelist will be removed when all call-sites
     # for gen.py are moved over to using the operator YAML file for mobile
     # custom build.
@@ -1143,8 +1133,7 @@ def main() -> None:
         return FileManager(
             install_dir=install_dir,
             template_dir=template_dir,
-            dry_run=options.output_dependencies,
-            clang_format=options.clang_format
+            dry_run=options.output_dependencies
         )
 
     core_fm = make_file_manager(core_install_dir)
