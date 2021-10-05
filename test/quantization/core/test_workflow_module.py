@@ -21,11 +21,6 @@ from torch.ao.quantization import (
     FusedMovingAvgObsFakeQuantize,
 )
 
-from torch.quantization.quantization_mappings import (
-    get_default_qat_module_mappings,
-    get_default_static_quant_module_mappings,
-)
-
 import torch.nn as nn
 
 # Standard library
