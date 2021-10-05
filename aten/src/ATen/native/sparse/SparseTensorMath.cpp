@@ -1213,7 +1213,7 @@ Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum) {
 
   if (sum_all_sparse_dim) {
     // return a dense tensor if sum over all sparse dims
-    new_values = new_values.sum(0);
+    new_values = new_values.sum(0, false, input.scalar_type());
     return new_values;
   }
   else { // !sum_all_sparse_dim

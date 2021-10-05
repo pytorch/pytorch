@@ -1531,6 +1531,18 @@ class TestSparse(TestCase):
             S = self._gen_sparse(sparse_dims, nnz, with_size, dtype, device, coalesced)[0]
             run_tests(S.requires_grad_(True), test_dim)
 
+    @dtypes(torch.int8, torch.int16, torch.int32, torch.int64)
+    def test_sparse_sum_int(self, device, dtype):
+        x = torch.sparse_coo_tensor([[0, 1], [1, 0]], [1, 2], dtype=dtype, device=device)
+
+        # https://github.com/pytorch/pytorch/issues/65392
+        self.assertEqual(torch.sparse.sum(x).dtype, torch.int64)
+        self.assertEqual(torch.sparse.sum(x, dim=0).dtype, dtype)
+        self.assertEqual(torch.sparse.sum(x, dtype=dtype).dtype, dtype)
+        self.assertEqual(torch.sparse.sum(x, dim=0, dtype=dtype).dtype, dtype)
+        self.assertEqual(torch.sparse.sum(x, dim=(0, 1)).dtype, dtype)
+        self.assertEqual(torch.sparse.sum(x, dim=(0, 1), dtype=dtype).dtype, dtype)
+
     def _test_basic_ops_shape(self, nnz_x1, nnz_x2, shape_i, shape_v, dtype, device, coalesced):
         shape = shape_i + (shape_v)
         x1, _, _ = self._gen_sparse(len(shape_i), nnz_x1, shape, dtype, device, coalesced)
