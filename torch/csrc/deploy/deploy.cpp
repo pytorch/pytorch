@@ -81,7 +81,7 @@ InterpreterManager::InterpreterManager(size_t nInterp) : resources_(nInterp) {
   // Since torch::deploy::Obj.toIValue cannot infer empty list, we hack it to
   // return None for empty list.
   // TODO(jwtan): Make the discovery of these modules easier.
-  reigsterModuleSource(
+  registerModuleSource(
       "GetArgumentNamesModule",
       "from inspect import signature\n"
       "from typing import Callable, Optional\n"
