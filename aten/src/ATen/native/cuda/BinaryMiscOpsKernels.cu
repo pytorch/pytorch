@@ -11,8 +11,16 @@
 
 namespace at { namespace native {
 
+void l1_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "l1_cuda", [&]() {
+    gpu_kernel(iter, [] GPU_LAMBDA (scalar_t a, scalar_t b) -> scalar_t {
+      return std::abs(a - b);
+    });
+  });
+}
+
 void smooth_l1_kernel_cuda(TensorIterator& iter, double beta) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "smooth_l1_cuda", [&iter, beta]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "smooth_l1_cuda", [&iter, beta]() {
     scalar_t beta_val(beta);
     gpu_kernel(iter, [beta_val] GPU_LAMBDA (scalar_t a, scalar_t b) -> scalar_t {
       auto z = ::abs(a - b);
@@ -68,6 +76,7 @@ void xlog1py_kernel_cuda(TensorIteratorBase& iter) {
   });
 }
 
+REGISTER_DISPATCH(l1_stub, &l1_kernel_cuda);
 REGISTER_DISPATCH(smooth_l1_stub, &smooth_l1_kernel_cuda);
 REGISTER_DISPATCH(huber_stub, &huber_kernel_cuda);
 REGISTER_DISPATCH(mse_stub, &mse_kernel_cuda);

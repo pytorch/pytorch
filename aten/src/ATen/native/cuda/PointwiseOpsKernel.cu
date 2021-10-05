@@ -33,8 +33,33 @@ void addcdiv_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
   });
 }
 
+void l1_backward_cuda_kernel(TensorIterator& iter, const Scalar& norm) {
+  if (isComplexType(iter.dtype())) {
+    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "l1_backward_cuda_complex", [&]() {
+      auto norm_val = norm.to<scalar_t>();
+      gpu_kernel(iter, [norm_val]GPU_LAMBDA(scalar_t input, scalar_t target, scalar_t grad_output) -> scalar_t {
+        const auto z = input - target;
+        if (z == scalar_t{0.}) {
+          return scalar_t{0.};
+        } else {
+          return (z / std::abs(z)) * norm_val * grad_output;
+        }
+      });
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "l1_backward_cuda_real", [&]() {
+      auto norm_val = norm.to<scalar_t>();
+      gpu_kernel(iter, [norm_val]GPU_LAMBDA(scalar_t input, scalar_t target, scalar_t grad_output) -> scalar_t {
+        const auto x = input - target;
+        // sign(x) * norm_val * grad_output
+        return ((scalar_t{0} < x) - (x < scalar_t{0})) * norm_val * grad_output;
+      });
+    });
+  }
+}
+
 void smooth_l1_backward_cuda_kernel(TensorIterator& iter, const Scalar& norm, double beta) {
-  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "smooth_l1_backward_cuda", [&iter, &norm, beta] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "smooth_l1_backward_cuda", [&iter, &norm, beta]() {
       auto norm_val = norm.to<scalar_t>();
       scalar_t beta_val(beta);
       gpu_kernel(iter, [norm_val, beta_val]GPU_LAMBDA(scalar_t input, scalar_t target, scalar_t grad_output) -> scalar_t {
@@ -77,6 +102,7 @@ void mse_backward_cuda_kernel(TensorIterator& iter, const Scalar& value) {
 
 REGISTER_DISPATCH(addcdiv_stub, &addcdiv_cuda_kernel);
 REGISTER_DISPATCH(addcmul_stub, &addcmul_cuda_kernel);
+REGISTER_DISPATCH(l1_backward_stub, &l1_backward_cuda_kernel);
 REGISTER_DISPATCH(smooth_l1_backward_stub, &smooth_l1_backward_cuda_kernel);
 REGISTER_DISPATCH(huber_backward_stub, &huber_backward_cuda_kernel);
 REGISTER_DISPATCH(mse_backward_stub, &mse_backward_cuda_kernel);

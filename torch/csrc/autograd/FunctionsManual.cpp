@@ -1229,26 +1229,8 @@ Tensor log_sigmoid_double_backward(const Tensor & grad, const Tensor & input) {
   return grad * (z - 1) * z;
 }
 
-Tensor softmax_double_backward(const Tensor & grad, const Tensor & grad_output, int dim, const Tensor & output) {
-  const auto& gO = grad_output;
-  const auto& ggI = grad;
-
-  auto ggI_output = ggI * output;
-  auto ggI_out_sum = ggI_output.sum(dim, true);
-  auto ggI_out_sum_output = ggI_out_sum * output;
-  auto gO_out_sum = (gO * output).sum(dim, true);
-
-  // gI calculation
-  auto gI_t0 = ggI_output * (gO - gO_out_sum);
-  auto gI_t1 = output * ((ggI_output * gO).sum(dim, true).sub_(gO_out_sum * ggI_out_sum));
-  auto gI_t2 = ggI_out_sum_output * gO;
-  auto gI_t3 = ggI_out_sum_output * gO_out_sum;
-  return gI_t0 - gI_t1 - gI_t2 + gI_t3;
-}
-
-Tensor log_softmax_double_backward(const Tensor & grad, const Tensor & grad_output, int dim, const Tensor & output) {
-  auto z = output.exp();
-  return z * grad_output.sum(dim, true) * ((grad * z).sum(dim, true) - grad);
+Tensor softmax_double_backward(const Tensor& grad, const Tensor& grad_output, int dim, const Tensor& output) {
+  return grad_output * grad - (output * grad_output).sum(dim, true) * grad - grad_output * (output * grad).sum(dim, true);
 }
 
 // NOTE: [How to write vmap-compatible backward formulas]
@@ -1334,6 +1316,29 @@ Tensor smooth_l1_loss_double_backward(const Tensor & grad, const Tensor & input,
     grad_input /= input.numel();
   }
   return grad_input;
+}
+
+// This is a helper function to compute gradients of functions C x C -> R of the form f(x-y)
+// If we get g = \grad f(x-y), we have that the gradient wrt x is g and the gradient with respect
+// to y is -g.
+std::tuple<Tensor, Tensor> c_to_r_norm_backward(const Tensor & grad, const Tensor & x, const Tensor & y) {
+  return std::make_tuple(handle_r_to_c(x.scalar_type(), grad),
+                         handle_r_to_c(y.scalar_type(), -grad));
+}
+
+Tensor l1_loss_double_backward(const Tensor & grad, const Tensor & grad_output, const Tensor & input, const Tensor & target, int64_t reduction) {
+  if (input.is_complex() || target.is_complex()) {
+    const auto z = input - target;
+    const auto ret = sgn_backward(at::sgn(z), grad, z) * grad_output;
+    if (reduction == at::Reduction::Mean) {
+      const auto n = c10::multiply_integers(at::infer_size(input.sizes(), target.sizes()));
+      return ret / n;
+    } else {
+      return ret;
+    }
+  } else {
+    return at::zeros_like(input);
+  }
 }
 
 Tensor smooth_l1_loss_double_backward_grad_output(const Tensor & grad, const Tensor & grad_output, const Tensor & input, const Tensor & target, int64_t reduction, double beta) {
