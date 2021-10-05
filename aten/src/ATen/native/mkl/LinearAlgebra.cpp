@@ -33,9 +33,9 @@ void mkl_gemm_batched(
 
 void mkl_gemm_batched(
     const TransposeType trans_A, const TransposeType trans_B,
-    const int batch_size, const int M, const int N, const int K, const c10::complex<float> alpha,
-    const c10::complex<float>** A, const int lda, const c10::complex<float>** B, const int ldb,
-    const c10::complex<float> beta, c10::complex<float>** C, const int ldc) {
+    const int batch_size, const int M, const int N, const int K, const c10::complex<double> alpha,
+    const c10::complex<double>** A, const int lda, const c10::complex<double>** B, const int ldb,
+    const c10::complex<double> beta, c10::complex<double>** C, const int ldc) {
   TORCH_INTERNAL_ASSERT(false, "mkl_gemm_batched: ATen not compiled with MKL support");
 }
 
