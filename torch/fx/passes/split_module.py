@@ -137,8 +137,10 @@ def split_module(
     for node in m.graph.nodes:
         if node.op == 'placeholder':
             base_mod_env[node.name] = base_mod_graph.placeholder(node.name)
+            base_mod_env[node.name].meta = node.meta.copy()
         elif node.op == 'get_attr':
             base_mod_env[node.name] = base_mod_graph.get_attr(node.target)
+            base_mod_env[node.name].meta = node.meta.copy()
             attr_val = m
             for atom in node.target.split('.'):
                 if not hasattr(attr_val, atom):

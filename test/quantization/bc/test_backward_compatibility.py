@@ -14,7 +14,7 @@ import torch.nn.intrinsic.quantized as nniq
 from torch.testing._internal.common_utils import TestCase, IS_AVX512_VNNI_SUPPORTED
 from torch.testing._internal.common_quantized import override_qengines, qengine_is_fbgemm
 
-from torch.quantization import MinMaxObserver, PerChannelMinMaxObserver
+from torch.ao.quantization import MinMaxObserver, PerChannelMinMaxObserver
 
 def remove_prefix(text, prefix):
     if text.startswith(prefix):
@@ -107,10 +107,10 @@ class TestSerialization(TestCase):
             def _eval_fn(model, data):
                 model(data)
 
-            qconfig_dict = {'': torch.quantization.default_qconfig}
-            scripted_q = torch.quantization.quantize_jit(
+            qconfig_dict = {'': torch.ao.quantization.default_qconfig}
+            scripted_q = torch.ao.quantization.quantize_jit(
                 scripted, qconfig_dict, _eval_fn, [input_tensor])
-            traced_q = torch.quantization.quantize_jit(
+            traced_q = torch.ao.quantization.quantize_jit(
                 traced, qconfig_dict, _eval_fn, [input_tensor])
 
             torch.jit.save(scripted_q, scripted_module_file)
@@ -175,7 +175,7 @@ class TestSerialization(TestCase):
     @override_qengines
     def test_conv2d_graph(self):
         module = nn.Sequential(
-            torch.quantization.QuantStub(),
+            torch.ao.quantization.QuantStub(),
             nn.Conv2d(3, 3, kernel_size=3, stride=1, padding=0, dilation=1,
                       groups=1, bias=True, padding_mode="zeros"),
         )
@@ -184,7 +184,7 @@ class TestSerialization(TestCase):
     @override_qengines
     def test_conv2d_nobias_graph(self):
         module = nn.Sequential(
-            torch.quantization.QuantStub(),
+            torch.ao.quantization.QuantStub(),
             nn.Conv2d(3, 3, kernel_size=3, stride=1, padding=0, dilation=1,
                       groups=1, bias=False, padding_mode="zeros"),
         )
@@ -195,7 +195,7 @@ class TestSerialization(TestCase):
         # tests the same thing as test_conv2d_graph, but for version 2 of
         # ConvPackedParams{n}d
         module = nn.Sequential(
-            torch.quantization.QuantStub(),
+            torch.ao.quantization.QuantStub(),
             nn.Conv2d(3, 3, kernel_size=3, stride=1, padding=0, dilation=1,
                       groups=1, bias=True, padding_mode="zeros"),
         )
@@ -206,7 +206,7 @@ class TestSerialization(TestCase):
         # tests the same thing as test_conv2d_nobias_graph, but for version 2 of
         # ConvPackedParams{n}d
         module = nn.Sequential(
-            torch.quantization.QuantStub(),
+            torch.ao.quantization.QuantStub(),
             nn.Conv2d(3, 3, kernel_size=3, stride=1, padding=0, dilation=1,
                       groups=1, bias=False, padding_mode="zeros"),
         )
@@ -217,7 +217,7 @@ class TestSerialization(TestCase):
         # tests the same thing as test_conv2d_graph, but for version 3 of
         # ConvPackedParams{n}d
         module = nn.Sequential(
-            torch.quantization.QuantStub(),
+            torch.ao.quantization.QuantStub(),
             nn.Conv2d(3, 3, kernel_size=3, stride=1, padding=0, dilation=1,
                       groups=1, bias=True, padding_mode="zeros"),
         )
@@ -228,7 +228,7 @@ class TestSerialization(TestCase):
         # tests the same thing as test_conv2d_nobias_graph, but for version 3 of
         # ConvPackedParams{n}d
         module = nn.Sequential(
-            torch.quantization.QuantStub(),
+            torch.ao.quantization.QuantStub(),
             nn.Conv2d(3, 3, kernel_size=3, stride=1, padding=0, dilation=1,
                       groups=1, bias=False, padding_mode="zeros"),
         )
@@ -294,7 +294,7 @@ class TestSerialization(TestCase):
 
         model = Model()
         model.linear.weight = torch.nn.Parameter(torch.randn(5, 5))
-        model.qconfig = torch.quantization.get_default_qat_qconfig("fbgemm")
-        ref_model = torch.quantization.QuantWrapper(model)
-        ref_model = torch.quantization.prepare_qat(ref_model)
+        model.qconfig = torch.ao.quantization.get_default_qat_qconfig("fbgemm")
+        ref_model = torch.ao.quantization.QuantWrapper(model)
+        ref_model = torch.ao.quantization.prepare_qat(ref_model)
         self._test_obs(ref_model, input_size=[5, 5], generate=False, check_numerics=False)
