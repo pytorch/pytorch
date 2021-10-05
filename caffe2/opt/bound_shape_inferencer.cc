@@ -180,6 +180,12 @@ void BoundShapeInferencer::InferOps(
     InferTranspose(op);
   } else if (op.type() == "Bucketize") {
     InferBucketize(op);
+  } else if (op.type() == "Clip") {
+    InferClip(op);
+  } else if (op.type() == "Div") {
+    InferDiv(op);
+  } else if (op.type() == "Mean") {
+    InferMean(op);
   } else {
     InferCommonOp(op);
   }
@@ -958,6 +964,42 @@ void BoundShapeInferencer::InferLpNorm(const OperatorDef& op) {
   if (it != shape_info_.end()) {
     it->second.setDimType(std::vector<TensorBoundShape::DimType>(
         it->second.shape.dims_size(), TensorBoundShape_DimType_CONSTANT));
+  }
+}
+
+void BoundShapeInferencer::InferClip(const OperatorDef& op) {
+  CAFFE_ENFORCE_EQ(op.output_size(), 1, op.type(), " must have 1 output");
+  InferCommonOp(op);
+  auto it = shape_info_.find(op.output(0));
+  if (it != shape_info_.end()) {
+    auto it_input = shape_info_.find(op.input(0));
+    if (it_input != shape_info_.end()) {
+      it->second.setDimType(it_input->second.getDimType());
+    }
+  }
+}
+
+void BoundShapeInferencer::InferMean(const OperatorDef& op) {
+  CAFFE_ENFORCE_EQ(op.output_size(), 1, op.type(), " must have at 1 output");
+  InferCommonOp(op);
+  auto it = shape_info_.find(op.output(0));
+  if (it != shape_info_.end()) {
+    auto it_input = shape_info_.find(op.input(0));
+    if (it_input != shape_info_.end()) {
+      it->second.setDimType(it_input->second.getDimType());
+    }
+  }
+}
+
+void BoundShapeInferencer::InferDiv(const OperatorDef& op) {
+  CAFFE_ENFORCE_EQ(op.output_size(), 1, op.type(), " must have 1 output");
+  InferCommonOp(op);
+  auto it = shape_info_.find(op.output(0));
+  if (it != shape_info_.end()) {
+    auto it_input = shape_info_.find(op.input(0));
+    if (it_input != shape_info_.end()) {
+      it->second.setDimType(it_input->second.getDimType());
+    }
   }
 }
 
