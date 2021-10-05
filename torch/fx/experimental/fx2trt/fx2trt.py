@@ -109,6 +109,16 @@ class TRTModule(torch.nn.Module):
         self.output_names = state_dict[prefix + "output_names"]
         self._initialize()
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop('context', None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        if self.engine:
+            self.context = self.engine.create_execution_context()
+
     def forward(self, *inputs):
         with torch.autograd.profiler.record_function("TRTModule:Forward"):
             self._check_initialized()
@@ -271,11 +281,11 @@ class TRTInterpreter(torch.fx.Interpreter):
         input_specs: List[InputTensorSpec],
         explicit_batch_dimension: bool = False,
         explicit_precision: bool = False,
-        logger_level=trt.Logger.WARNING,
+        logger_level=None,
     ):
         super().__init__(module)
 
-        self.logger = trt.Logger(logger_level)
+        self.logger = trt.Logger(logger_level or trt.Logger.WARNING)
         self.builder = trt.Builder(self.logger)
 
         flag = 0
