@@ -9,6 +9,13 @@ if(NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 endif()
 
+if(BUILD_BINARY)
+  add_library(aot_compiler SHARED
+          ${TORCH_SRC_DIR}/csrc/jit/mobile/nnc/aot_compiler.cpp
+          )
+  install(TARGETS aot_compiler DESTINATION lib)
+endif()
+
 if(NOT BUILD_PYTHON)
   return()
 endif()
@@ -429,10 +436,4 @@ if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
           )
   # Pybind11 requires explicit linking of the torch_python library
   target_link_libraries(nnapi_backend torch torch_python)
-endif()
-
-if(BUILD_BINARY)
-  add_library(aot_compiler SHARED
-          ${TORCH_SRC_DIR}/csrc/jit/mobile/nnc/aot_compiler.cpp
-          )
 endif()
