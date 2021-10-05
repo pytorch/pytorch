@@ -4,6 +4,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <algorithm>
+#include <unordered_map>
 #include <vector>
 
 namespace torch {
@@ -119,37 +120,52 @@ namespace cuda {
 
 class TensorDomain;
 class TensorView;
+class RootDomainMap;
 
 class TORCH_CUDA_CU_API TransformReplay {
  public:
   // Replay producer as consumer, returns {producer, producer_compute_at_axis}.
   static std::pair<TensorDomain*, unsigned int> replayPasC(
-      const TensorDomain* producer,
-      const TensorDomain* consumer,
+      const TensorView* producer,
+      const TensorView* consumer,
       int consumer_compute_at_axis);
+  static std::pair<TensorDomain*, unsigned int> replayPasC(
+      const TensorView* producer,
+      const TensorView* consumer,
+      int consumer_compute_at_axis,
+      const RootDomainMap& root_map);
 
-  // Replay producer as consumer, returns {producer, producer_compute_at_axis}.
-  static std::pair<TensorView*, unsigned int> replayPasC(
-      TensorView* producer,
-      TensorView* consumer,
-      int consumer_compute_at_axis);
-
-  // Replay producer as consumer, returns {consumer, consumer_compute_at_axis}.
+  // Replay producer as consumer, returns {replayed_consumer_domain,
+  // consumer_compute_at_axis}.
   static std::pair<TensorDomain*, unsigned int> replayCasP(
-      const TensorDomain* consumer,
-      const TensorDomain* producer,
+      const TensorView* consumer,
+      const TensorView* producer,
       int producer_compute_at_axis);
-
-  // Replay producer as consumer, returns {consumer, consumer_compute_at_axis}.
-  static std::pair<TensorView*, unsigned int> replayCasP(
-      TensorView* consumer,
-      TensorView* producer,
-      int producer_compute_at_axis);
+  static std::pair<TensorDomain*, unsigned int> replayCasP(
+      const TensorView* consumer,
+      const TensorView* producer,
+      int producer_compute_at_axis,
+      const RootDomainMap& root_map);
 
   // Self replay.
   static TensorDomain* fullSelfReplay(
       const TensorDomain* new_self_root,
       const TensorDomain* self);
+};
+
+class TORCH_CUDA_CU_API TransformPropagator {
+ private:
+  bool replayPasC(TensorView* producer_tv, TensorView* consumer_tv = nullptr);
+  bool replayCasP(TensorView* consumer_tv, TensorView* producer_tv = nullptr);
+
+  TransformPropagator(TensorView* from);
+
+ private:
+  std::unordered_map<TensorView*, unsigned int> replayed_pos;
+  TensorView* starting_tv = nullptr;
+
+ public:
+  static void from(TensorView* tv);
 };
 
 } // namespace cuda
