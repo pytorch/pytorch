@@ -97,10 +97,10 @@ class TORCH_CUDA_CU_API SchedulerRuntimeInfo {
 
  private:
   std::unique_ptr<ExpressionEvaluator> expression_evaluator_ = nullptr;
-  Fusion* complete_fusion_;
+  Fusion* complete_fusion_ = nullptr;
   std::unordered_map<TensorView*, size_t> alignment_map_;
   std::unordered_map<TensorView*, size_t> vectorword_map_;
-  size_t common_alignment_size_;
+  size_t common_alignment_size_ = 0;
   KernelIndexMode index_mode_ = KernelIndexMode::INT64;
 };
 
@@ -182,6 +182,15 @@ class TORCH_CUDA_CU_API SchedulerEntry {
   explicit SchedulerEntry(ScheduleHeuristic heuristic, bool has_reduction_param)
       : heuristc_(heuristic), has_reduction_param_(has_reduction_param) {}
 
+  ReductionParams& rparams() {
+    return rparams_;
+  };
+
+  PointwiseParams& pparams() {
+    return pparams_;
+  }
+
+ private:
   //! What kind of heuristics does this entry have?
   const ScheduleHeuristic heuristc_;
 
@@ -195,7 +204,7 @@ class TORCH_CUDA_CU_API SchedulerEntry {
   PointwiseParams pparams_;
 
   //! Kernel Index Mode
-  KernelIndexMode index_mode_;
+  KernelIndexMode index_mode_ = KernelIndexMode::INT64;
 };
 
 //! Hash function for a scheduler entry

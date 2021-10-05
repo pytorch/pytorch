@@ -704,6 +704,7 @@ struct CudaGraphFuser {
     bchunk->removeInput(producer_index);
     // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
     for (const auto i : c10::irange(nchunks)) {
+      (void)i; // Suppress unused variable warning
       bchunk->eraseOutput(nchunks * producer_index);
     }
 
@@ -1511,7 +1512,6 @@ void alterBatchNormImplIndex(Node* node) {
   }
 
   if (!bn_index_out_indices.empty()) {
-    auto graph = node->owningGraph();
     // we output index to 0 so backwards go through native_batch_norm, which is
     // what we support;
     auto const_1 = node->owningGraph()->insertConstant(IValue(0));
@@ -1599,13 +1599,11 @@ void alterBatchNormImplIndexBackward(Node* node) {
         1));
     empty_tensor->moveBefore(node);
 
-    for (auto iter = bn_buffer_in_indices.begin();
-         iter != bn_buffer_in_indices.end();
-         ++iter) {
-      subgraph->inputs()[*iter]->setType(
-          node->inputs()[*iter]->type()->cast<TensorType>()->withScalarType(
+    for (const auto& item : bn_buffer_in_indices) {
+      subgraph->inputs()[item]->setType(
+          node->inputs()[item]->type()->cast<TensorType>()->withScalarType(
               at::ScalarType::Float));
-      node->replaceInput(*iter, empty_tensor->output());
+      node->replaceInput(item, empty_tensor->output());
     }
   }
 }

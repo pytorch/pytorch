@@ -37,19 +37,19 @@ class ConstCheck : IrVisitor {
 
   using IrVisitor::visit;
 
-  void visit(const Bool* b) {
+  void visit(const Bool* b) override {
     is_const_ = is_const_ && b->isConst();
   }
 
-  void visit(const Double* d) {
+  void visit(const Double* d) override {
     is_const_ = is_const_ && d->isConst();
   }
 
-  void visit(const Int* i) {
+  void visit(const Int* i) override {
     is_const_ = is_const_ && i->isConst();
   }
 
-  void visit(const NamedScalar* ns) {
+  void visit(const NamedScalar* ns) override {
     is_const_ = is_const_ && false;
   }
 

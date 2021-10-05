@@ -1198,13 +1198,17 @@ class IrParser {
                   format == MemoryFormat::ChannelsLast);
 
               if (node->kind() ==
-                  c10::Symbol::fromQualString("aten::native_batch_norm")) {
+                      c10::Symbol::fromQualString("aten::native_batch_norm") ||
+                  node->kind() ==
+                      c10::Symbol::fromQualString(
+                          "aten::_batch_norm_impl_index")) {
+                // TODO: output 3 & 4 are not created
+                //       we are not creating these outputs because codegen
+                //       currently lacks the support.
                 value_map.emplace(
                     node->output(0)->unique(),
                     ValueHolder(result.output, format));
-
                 value_map.emplace(node->output(1)->unique(), result.mean);
-
                 value_map.emplace(node->output(2)->unique(), result.invstd);
               } else if (
                   node->kind() ==
@@ -1212,20 +1216,6 @@ class IrParser {
                 value_map.emplace(
                     node->output()->unique(),
                     ValueHolder(result.output, format));
-              } else if (
-                  node->kind() ==
-                  c10::Symbol::fromQualString("aten::_batch_norm_impl_index")) {
-                value_map.emplace(
-                    node->output(0)->unique(),
-                    ValueHolder(result.output, format));
-
-                value_map.emplace(node->output(1)->unique(), result.mean);
-
-                value_map.emplace(node->output(2)->unique(), result.invstd);
-
-                // TODO: output 3 & 4 are not created
-                //       we are not creating these outputs because codegen
-                //       currently lacks the support.
               }
             },
             [](const Node* node) -> bool { return true; },

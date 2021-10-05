@@ -27,7 +27,9 @@
 #include <nvfuser_resources/warp.h>
 #include <nvfuser_resources/welford.h>
 
+#ifndef USE_ROCM
 #include <cuda_occupancy.h>
+#endif
 
 #include <fstream>
 
@@ -718,8 +720,10 @@ NvrtcFunction nvrtcCompile(
     }
   }
 
+#ifndef USE_ROCM
   // keeping the string outside the loop for lifetime
   std::string max_register_usage = "--maxrregcount=";
+  uint32_t max_register = 0;
   if (opt_block_size.has_value() && opt_block_size.value() > 0) {
     int num_partition = 0;
     int reg_allocation_granularity = 0;
@@ -739,7 +743,7 @@ NvrtcFunction nvrtcCompile(
     int effective_max_reg_per_warp = max_reg_per_warp /
         reg_allocation_granularity * reg_allocation_granularity;
     // The maximum possible count allowed by ptxas is 255
-    auto max_register = static_cast<uint32_t>(
+    max_register = static_cast<uint32_t>(
         std::min(effective_max_reg_per_warp / warp_size, 255));
 
     if (compile_to_sass) {
@@ -750,6 +754,7 @@ NvrtcFunction nvrtcCompile(
       option_vals.push_back((void*)(intptr_t)max_register);
     }
   }
+#endif
 
   at::globalContext().getNVRTC().nvrtcAddNameExpression(
       program, func_name.c_str());

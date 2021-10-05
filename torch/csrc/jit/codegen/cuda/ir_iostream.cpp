@@ -220,9 +220,6 @@ void IrPrinter::handle(const UnaryOp* uop) {
     if (op_type == UnaryOpType::RandLike) {
       os_ << "(";
       handle(uop->in());
-    } else {
-      os_ << "(";
-      handle(uop->in());
     }
     os_ << ")";
   }

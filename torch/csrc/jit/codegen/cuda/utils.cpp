@@ -145,12 +145,12 @@ bool isDebugDumpEnabled(DebugDumpOption option) {
 
 bool useFallback() {
   const char* disable_fb_env = getenv("PYTORCH_NVFUSER_DISABLE_FALLBACK");
-  return !(disable_fb_env ? atoi(disable_fb_env) : 0);
+  return !(disable_fb_env ? atoi(disable_fb_env) : false);
 }
 
 bool disableRNGUnrolling() {
   const char* disable_rng_unroll = getenv("PYTORCH_NVFUSER_DISABLE_RNG_UNROLL");
-  return disable_rng_unroll ? atoi(disable_rng_unroll) : 0;
+  return disable_rng_unroll ? atoi(disable_rng_unroll) : false;
 }
 
 } // namespace cuda

@@ -320,7 +320,7 @@ bool PredicateElimination::needsPredicate(Expr* expr) const {
   // Always predicate integer division and related ops as we don't
   // know what values are in the out-of-bound region and they may
   // cause exceptions
-  filters.push_back([](Expr* expr) {
+  filters.emplace_back([](Expr* expr) {
     auto dt = expr->outputs()[0]->getDataType().value();
     return (
         (dt == DataType::Int || dt == DataType::Int32) &&
@@ -333,7 +333,7 @@ bool PredicateElimination::needsPredicate(Expr* expr) const {
 
   // Skip if MisalignedVectorize is involved for now. This could be
   // relaxed.
-  filters.push_back([](Expr* expr) {
+  filters.emplace_back([](Expr* expr) {
     std::vector<const std::vector<Val*>*> inputs_and_outputs = {
         &(expr->inputs()), &(expr->outputs())};
     for (const auto& inputs_or_outputs : inputs_and_outputs) {
@@ -353,7 +353,7 @@ bool PredicateElimination::needsPredicate(Expr* expr) const {
   });
 
   // Shift is not supported yet.
-  filters.push_back([](Expr* expr) {
+  filters.emplace_back([](Expr* expr) {
     auto& halo_info = GpuLower::current()->haloInfo();
     auto input_tvs = ir_utils::filterByType<TensorView>(expr->inputs());
     return halo_info.needsShiftPredicate(expr) ||
@@ -365,7 +365,7 @@ bool PredicateElimination::needsPredicate(Expr* expr) const {
 
   // Predicates the expression if any producer-consumer pair of the
   // expression needs to be predicated
-  filters.push_back([](Expr* expr) {
+  filters.emplace_back([](Expr* expr) {
     for (auto output : ir_utils::filterByType<TensorView>(expr->outputs())) {
       for (auto input : ir_utils::filterByType<TensorView>(expr->inputs())) {
         if (PredicateAnalyzer::needsPredicate(input, output)) {
@@ -377,7 +377,7 @@ bool PredicateElimination::needsPredicate(Expr* expr) const {
   });
 
   // Predicates Welford ops
-  filters.push_back([](Expr* expr) { return expr->isA<WelfordOp>(); });
+  filters.emplace_back([](Expr* expr) { return expr->isA<WelfordOp>(); });
 
   // If this is a reduction, and if we omit the predicate for the
   // input, the input may have a garbabe value, which must not be used
@@ -385,7 +385,7 @@ bool PredicateElimination::needsPredicate(Expr* expr) const {
   // another reduction with the same binary op, which is a common
   // pattern with rfactor, the input should be safe to use with no
   // predication.
-  filters.push_back([this](Expr* expr) {
+  filters.emplace_back([this](Expr* expr) {
     if (expr->isA<ReductionOp>()) {
       auto input = expr->inputs()[0]->as<TensorView>();
       auto input_def = input->definition();

@@ -711,7 +711,7 @@ class SingleReductionScheduler : public SchedulerEntry {
 
   void schedule(Fusion* fusion) override {
     FUSER_PERF_SCOPE("Schedule Single Reduction");
-    scheduleReduction(fusion, rparams_);
+    scheduleReduction(fusion, rparams());
   }
 
  private:
@@ -721,7 +721,7 @@ class SingleReductionScheduler : public SchedulerEntry {
       HeuristicSummary* data_cache = nullptr) {
     auto param = getReductionHeuristics(fusion, runtime_info, data_cache);
     TORCH_INTERNAL_ASSERT(param.has_value());
-    rparams_ = param.value();
+    rparams() = param.value();
   }
 };
 
@@ -750,7 +750,7 @@ class PointWiseScheduler : public SchedulerEntry {
 
   void schedule(Fusion* fusion) override {
     FUSER_PERF_SCOPE("Schedule PointWise Fusion");
-    schedulePointwise(fusion, pparams_);
+    schedulePointwise(fusion, pparams());
   }
 
   void computeHeuristics(
@@ -759,7 +759,7 @@ class PointWiseScheduler : public SchedulerEntry {
       HeuristicSummary* data_cache = nullptr) {
     auto pparam = getPointwiseHeuristics(fusion, runtime_info, data_cache);
     TORCH_INTERNAL_ASSERT(pparam.has_value());
-    pparams_ = pparam.value();
+    pparams() = pparam.value();
   }
 };
 
@@ -775,7 +775,7 @@ class NormalizationScheduler : public SchedulerEntry {
 
   void schedule(Fusion* fusion) override {
     FUSER_PERF_SCOPE("Schedule Normalization Fusion");
-    scheduleNormalization(fusion, rparams_);
+    scheduleNormalization(fusion, rparams());
   }
 
   static bool canScheduleCompileTime(Fusion* fusion) {
@@ -904,9 +904,9 @@ class NormalizationScheduler : public SchedulerEntry {
       Fusion* fusion,
       SchedulerRuntimeInfo& runtime_info,
       HeuristicSummary* data_cache = nullptr) {
-    auto rparams = getNormalizationHeuristics(fusion, runtime_info, data_cache);
-    TORCH_INTERNAL_ASSERT(rparams.has_value());
-    rparams_ = rparams.value();
+    auto params = getNormalizationHeuristics(fusion, runtime_info, data_cache);
+    TORCH_INTERNAL_ASSERT(params.has_value());
+    rparams() = params.value();
   }
 
   static bool checkEquivalence(
