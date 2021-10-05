@@ -158,7 +158,6 @@ def register_acc_op(acc_op: Callable):
     _acc_ops.add(acc_op)
     return acc_op
 
-
 def register_acc_op_mapping(
     op_and_target: Tuple[str, Union[str, Callable]],
     arg_replacement_tuples: Optional[
