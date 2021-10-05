@@ -34,6 +34,7 @@
 #include <torch/csrc/jit/passes/update_differentiable_graph_requires_grad.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <future>
+#include <utility>
 
 C10_DEFINE_bool(
     torch_jit_enable_new_executor,
@@ -500,7 +501,9 @@ void runNoGradOptimizations(std::shared_ptr<Graph>& graph) {
 }
 
 void ProfilingGraphExecutorImpl::runProfilingOptimizations(
-    std::shared_ptr<Graph>& copy) {
+    std::shared_ptr<Graph>& copy,
+    c10::optional<size_t> remaining_bailout_depth,
+    std::vector<std::unique_ptr<Function>>& fallback_functions) {
   GRAPH_DEBUG("Before runProfilingOptimizations:\n", *copy);
   if (!getGraphExecutorOptimize()) {
     runNooptPassPipeline(copy);
@@ -536,14 +539,16 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
       UpdateDifferentiableGraphRequiresGrad(gradient.f, false);
       GRAPH_DEBUG("After UpdateDifferentiableGraphRequiresGrad ", *gradient.f);
       // replaces fallback graphs inserted by TE Fuser
-      replaceFallbackGraphWithFallbackFunction(gradient.f->block());
+      replaceFallbackGraphWithFallbackFunction(
+          gradient.f->block(), remaining_bailout_depth, fallback_functions);
       packGradient(gradient, dnode);
       GRAPH_DEBUG("Finished optimizing diff node ", idx++);
     }
     InlineAutodiffSubgraphs(
         copy,
         getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
-    replaceFallbackGraphWithFallbackFunction(copy->block());
+    replaceFallbackGraphWithFallbackFunction(
+        copy->block(), remaining_bailout_depth, fallback_functions);
     RemoveProfilingNodes(copy);
     GRAPH_DEBUG(
         "After InlineAutodiffSubgraphs and Removing Profiling Nodes\n", *copy);
@@ -689,16 +694,28 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
 
   if (!optimized_compilation_) {
     auto copy = pr_->graph()->copy();
-    std::future<ExecutionPlan> fut =
-        std::async(std::launch::async, [this, copy]() mutable {
+    auto func_name = function_name_;
+    auto bail_depth = remaining_bailout_depth_;
+    std::future<
+        std::pair<ExecutionPlan, std::vector<std::unique_ptr<Function>>>>
+        fut =
+            // we pass all the state needed to run the optimized compilation in
+            // case this PE instance somehow gets destroyed before this task is
+            // finished
+        std::async(std::launch::async, [func_name, bail_depth, copy]() mutable {
           std::cerr << "starting an async optimized compilation\n";
+          std::vector<std::unique_ptr<Function>> fallback_functions;
           ProfilingRecord::removeProfileCounter(copy->block());
-          runProfilingOptimizations(copy);
+          ProfilingGraphExecutorImpl::runProfilingOptimizations(
+              copy, bail_depth, fallback_functions);
           // replaces a fallback graph inserted by
           // specialize_autogradzero if one exists
-          replaceFallbackGraphWithFallbackFunction(copy->block());
+          ProfilingGraphExecutorImpl::replaceFallbackGraphWithFallbackFunction(
+              copy->block(), bail_depth, fallback_functions);
           GRAPH_DUMP("Optimized Graph: ", copy);
-          return ExecutionPlan(copy, function_name_, *remaining_bailout_depth_);
+          return std::make_pair(
+              ExecutionPlan(copy, func_name, *bail_depth),
+              std::move(fallback_functions));
         });
     optimized_compilation_ = std::move(fut);
   }
@@ -706,7 +723,8 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
   if (optimized_compilation_->wait_for(std::chrono::seconds(0)) ==
       std::future_status::ready) {
     std::cerr << "the optimized compilation is ready, let's use it\n";
-    optimized_plan_ = optimized_compilation_->get();
+    optimized_plan_ = optimized_compilation_->get().first;
+    fallback_functions_ = std::move(optimized_compilation_->get().second);
     return *optimized_plan_;
   }
 
@@ -782,18 +800,19 @@ Function* createFallbackPathFunction(
 }
 
 void ProfilingGraphExecutorImpl::replaceFallbackGraphWithFallbackFunction(
-    Block* b) {
+    Block* b,
+    c10::optional<size_t> remaining_bailout_depth,
+    std::vector<std::unique_ptr<Function>>& fallback_functions) {
   Stack s;
   for (auto it = b->nodes().begin(); it != b->nodes().end();) {
     if (it->kind() == prim::FallbackGraph) {
       auto fallback_func = createFallbackPathFunction(
           it->g(attr::Subgraph)->block(), "fallback_function");
-      TORCH_INTERNAL_ASSERT(*remaining_bailout_depth_ > 0);
+      TORCH_INTERNAL_ASSERT(*remaining_bailout_depth > 0);
       GRAPH_DEBUG(
-          "getPlanFor for", getHeader(*it), " ", *remaining_bailout_depth_);
-      fallback_func->get_executor().getPlanFor(
-          s, *remaining_bailout_depth_ - 1);
-      fallback_functions_.emplace_back(fallback_func);
+          "getPlanFor for", getHeader(*it), " ", *remaining_bailout_depth);
+      fallback_func->get_executor().getPlanFor(s, *remaining_bailout_depth - 1);
+      fallback_functions.emplace_back(fallback_func);
       WithInsertPoint wip{*it};
       auto function_call = insertFallbackFunctionCall(
           b->owningGraph(), fallback_func, it->inputs());
@@ -803,7 +822,8 @@ void ProfilingGraphExecutorImpl::replaceFallbackGraphWithFallbackFunction(
       it.destroyCurrent();
     } else {
       for (Block* ib : it->blocks()) {
-        replaceFallbackGraphWithFallbackFunction(ib);
+        replaceFallbackGraphWithFallbackFunction(
+            ib, remaining_bailout_depth, fallback_functions);
       }
       it++;
     }

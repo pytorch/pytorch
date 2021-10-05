@@ -35,10 +35,18 @@ struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
       Stack& stack,
       size_t remaining_bailout_depth);
   void runProfilingInsensitiveOptimizations(std::shared_ptr<Graph>& graph);
-  void runProfilingOptimizations(std::shared_ptr<Graph>& graph);
-  void replaceFallbackGraphWithFallbackFunction(Block* b);
+  static void runProfilingOptimizations(
+      std::shared_ptr<Graph>& graph,
+      c10::optional<size_t> remaining_bailout_depth,
+      std::vector<std::unique_ptr<Function>>& fallback_functions);
+  static void replaceFallbackGraphWithFallbackFunction(
+      Block* b,
+      c10::optional<size_t> remaining_bailout_depth,
+      std::vector<std::unique_ptr<Function>>& fallback_functions);
   std::unique_ptr<ProfilingRecord> pr_;
-  c10::optional<std::future<ExecutionPlan>> optimized_compilation_;
+  c10::optional<std::future<
+      std::pair<ExecutionPlan, std::vector<std::unique_ptr<Function>>>>>
+      optimized_compilation_;
   c10::optional<ExecutionPlan>
       profiling_plan_; // plan to run in order to profiling the code
   c10::optional<ExecutionPlan> optimized_plan_;
