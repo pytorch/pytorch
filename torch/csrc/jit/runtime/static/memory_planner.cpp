@@ -229,8 +229,8 @@ void MemoryPlanner::deallocate() {
         }
         newImpl = &managed_tensor_storage_impls_.back();
         tensor->unsafeGetTensorImpl()->set_storage_keep_dtype(at::Storage(
-            c10::intrusive_ptr<
-                at::StorageImpl>::unsafe_adapt_non_heap_allocated(newImpl)));
+            c10::intrusive_ptr<at::StorageImpl>::
+                unsafe_adapt_non_heap_allocated(newImpl, tensors.size())));
       } else if (C10_UNLIKELY(
                      tensorStorageImpl !=
                      &managed_tensor_storage_impls_[storageIdx])) {
@@ -241,7 +241,8 @@ void MemoryPlanner::deallocate() {
         tensor->unsafeGetTensorImpl()->set_storage_keep_dtype(
             at::Storage(c10::intrusive_ptr<at::StorageImpl>::
                             unsafe_adapt_non_heap_allocated(
-                                &managed_tensor_storage_impls_[storageIdx])));
+                                &managed_tensor_storage_impls_[storageIdx],
+                                tensors.size())));
       }
       DCHECK_EQ(
           tensor->storage().unsafeGetStorageImpl(),
