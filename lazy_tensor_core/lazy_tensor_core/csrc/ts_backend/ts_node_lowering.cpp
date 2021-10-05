@@ -1,6 +1,7 @@
 #include "lazy_tensor_core/csrc/ts_backend/ts_node_lowering.h"
 
 #include <ATen/core/Reduction.h>
+#include <ATen/native/ConvUtils.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
 #include <torch/jit.h>
 
@@ -44,10 +45,10 @@
 #include "lazy_tensor_core/csrc/ops/update_slice.h"
 #include "lazy_tensor_core/csrc/ops/view.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
+#include "lazy_tensor_core/csrc/ts_backend/LazyLazyIr.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_computation_client.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_lowering_context.h"
 #include "lazy_tensors/permutation_util.h"
-#include "lazy_tensor_core/csrc/ts_backend/LazyLazyIr.h"
 
 namespace torch_lazy_tensors {
 namespace compiler {
@@ -474,28 +475,33 @@ class TSNodeLowering : public NodeLowering {
       const ir::ops::ConvolutionOverrideable* conv) {
     const auto& operands = conv->operands();
     LTC_CHECK(!operands.empty());
-    const auto& input_size = operands[0].shape().dimensions();
-    const auto& weight_size = operands[1].shape().dimensions();
+
+    // TODO: Shape::dimensions() returns a Span and converting it to
+    // a vector of int is awkard. Clean up this after we switch to a
+    // PyTorch shape.
+    const auto& input_size =
+        std::vector<int64_t>(operands[0].shape().dimensions().begin(),
+                             operands[0].shape().dimensions().end());
+    const auto& weight_size =
+        std::vector<int64_t>(operands[1].shape().dimensions().begin(),
+                             operands[1].shape().dimensions().end());
     const auto& dilation = conv->dilation();
     const auto& padding = conv->padding();
     const auto& stride = conv->stride();
+    const auto& output_padding = conv->output_padding();
+    const auto& groups = conv->groups();
 
-    // Shape computation logic copied from conv_output_size
-    constexpr int input_batch_size_dim = 0;
-    constexpr int weight_output_channels_dim = 0;
-    bool has_dilation = dilation.size() > 0;
-    auto dim = input_size.size();
-    std::vector<int64_t> output_size(dim);
-    output_size[0] = input_size[input_batch_size_dim];
-    output_size[1] = weight_size[weight_output_channels_dim];
-    for (size_t d = 2; d < dim; ++d) {
-      auto dilation_ = has_dilation ? dilation[d - 2] : 1;
-      auto kernel = dilation_ * (weight_size[d] - 1) + 1;
-      output_size[d] =
-          (input_size[d] + (2 * padding[d - 2]) - kernel) / stride[d - 2] + 1;
+    if (!conv->transposed()) {
+      return lazy_tensors::Shape(
+          operands[0].shape().element_type(),
+          at::native::conv_output_size(input_size, weight_size, padding, stride,
+                                       dilation));
+    } else {
+      return lazy_tensors::Shape(operands[0].shape().element_type(),
+                                 at::native::conv_input_size(
+                                     input_size, weight_size, padding,
+                                     output_padding, stride, dilation, groups));
     }
-
-    return lazy_tensors::Shape(operands[0].shape().element_type(), output_size);
   }
 
   static lazy_tensors::Shape InferEmbeddingDenseBackward(
