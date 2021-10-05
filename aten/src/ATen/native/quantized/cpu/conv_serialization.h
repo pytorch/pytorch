@@ -257,8 +257,8 @@ ConvParamsSerializationTypeV3 serialize_conv(
   at::Tensor weight;
   c10::optional<at::Tensor> bias;
   std::tie(weight, bias) = params->unpack();
-  std::cout << "XXX " << __FUNCTION__ << " weight:" << weight
-            << " bias:" << bias.value() << " stride:" << stride << std::endl;
+//  std::cout << "XXX " << __FUNCTION__ << " weight:" << weight
+//            << " bias:" << bias.value() << " stride:" << stride << std::endl;
 
   std::vector<c10::optional<at::Tensor>> tensors;
   tensors.emplace_back();
@@ -334,6 +334,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
 
 #ifdef USE_FBGEMM
   if (ctx.qEngine() == at::QEngine::FBGEMM) {
+    /*
     std::cout << "XXX " << __FUNCTION__ << " w:" << weight.value()
               << " bias:" << bias.value() << " stride:" << stride[0] << " "
               << stride[1]
@@ -342,6 +343,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
               //      << " dilation:" << dilation
               << " groups:" << groups << " transpose:" << transpose
               << std::endl;
+              */
     return PackedConvWeight<kSpatialDim>::prepack(
         weight.value(),
         bias,

@@ -192,6 +192,8 @@ void nnc_aten_quantized_conv2d_prepack(
 			groups);
 	TORCH_INTERNAL_ASSERT(prepacked, buildErrorMessage("Quantized conv2d prepack failed"));
 	ConvParamsSerializationType serialized = serialize_conv<2>(prepacked);
+  static std::vector<ConvParamsSerializationType> cache;
+  cache.push_back(serialized);
 
   size_t size_bytes = sizeof(serialized);
   const void* ptr = &serialized;

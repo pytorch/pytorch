@@ -164,7 +164,7 @@ int main(int argc, char** argv) {
   m.eval();
   auto frozen_m = torch::jit::freeze_module(m.clone());
   auto graph = frozen_m.get_method("forward").graph();
-  std::vector<c10::optional<at::Tensor>> example_inputs = {at::rand({1, 3, 224, 224})};
+  std::vector<c10::optional<at::Tensor>> example_inputs = {at::rand({1, 4, 224, 224})};
 
   torch::jit::RemoveTensorMutation(graph);
   torch::jit::EliminateDeadCode(graph->block());
@@ -178,6 +178,7 @@ int main(int argc, char** argv) {
   torch::jit::PropagateShapesOnGraph(graph);
   torch::jit::PeepholeOptimize(graph, false);
   torch::jit::ConstantPropagation(graph);
+  std::cout << "XXX_GRAPH_AFTER_SHAPE" << std::endl;
   graph->dump();
 
   auto compile_spec = createCompileSpec();
