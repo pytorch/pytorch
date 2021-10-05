@@ -110,23 +110,20 @@ int main(int argc, char* argv[]) {
   }
 
   if (tracer_result.traced_operators.size() <=
-          torch::jit::mobile::always_included_traced_ops.size() ||
-      tracer_result.called_kernel_tags.size() == 0) {
-    throw std::runtime_error(folly::sformat(
-        "Error traced_operators size: {}, "
-        "Kernel_metadata size: {}, "
-        "Expected kernel to be > 0 and the traced operator list "
-        "to be bigger then the default size {}. "
-        "Please report a bug in PyTorch.",
+      torch::jit::mobile::always_included_traced_ops.size()) {
+    throw std::runtime_error(c10::str(
+        "Error traced_operators size: ",
         tracer_result.traced_operators.size(),
-        tracer_result.called_kernel_tags.size(),
-        torch::jit::mobile::always_included_traced_ops.size()));
+        ". Expected the traced operator list to be bigger then the default size ",
+        torch::jit::mobile::always_included_traced_ops.size(),
+        ". Please report a bug in PyTorch."));
   }
 
   // If the op exist in both traced_ops and root_ops, leave it in root_ops only
-  for (const auto& root_op : root_ops) {
-    if (traced_operators.find(root_op) != traced_operators.end()) {
-      traced_operators.erase(root_op);
+  for (const auto& root_op : tracer_result.root_ops) {
+    if (tracer_result.traced_operators.find(root_op) !=
+        tracer_result.traced_operators.end()) {
+      tracer_result.traced_operators.erase(root_op);
     }
   }
 
@@ -134,13 +131,13 @@ int main(int argc, char* argv[]) {
   yaml_out << "operators:" << std::endl;
   printOpsYAML(
       yaml_out,
-      root_ops,
+      tracer_result.root_ops,
       false /* is_used_for_training */,
       true /* is_root_operator */,
       false /* include_all_overloads */);
   printOpsYAML(
       yaml_out,
-      traced_operators,
+      tracer_result.traced_operators,
       false /* is_used_for_training */,
       false /* is_root_operator */,
       false /* include_all_overloads */);

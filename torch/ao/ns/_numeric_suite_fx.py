@@ -2,7 +2,7 @@ import collections
 
 import torch
 import torch.nn as nn
-import torch.quantization.quantize_fx as quantize_fx
+import torch.ao.quantization.quantize_fx as quantize_fx
 from torch.fx import GraphModule
 from torch.fx.graph import Node
 from torch.ao.ns.fx.mappings import (
@@ -122,9 +122,9 @@ class NSTracer(quantize_fx.QuantizationTracer):
     modules as leaf modules.
     """
     def is_leaf_module(self, m: torch.nn.Module, module_qualified_name : str) -> bool:
-        if isinstance(m, torch.quantization.ObserverBase):
+        if isinstance(m, torch.ao.quantization.ObserverBase):
             return True
-        elif isinstance(m, torch.quantization.FakeQuantizeBase):
+        elif isinstance(m, torch.ao.quantization.FakeQuantizeBase):
             return True
         return super().is_leaf_module(m, module_qualified_name)
 
