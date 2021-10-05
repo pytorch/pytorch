@@ -24,9 +24,6 @@ class TSComputationClient : public ComputationClient {
 
       void Assign(const Data& data) override {
         data_ = static_cast<const TSData&>(data).data_;
-        SetInfo(static_cast<const TSData&>(data).info_);
-        device_ = data.device();
-        shape_ = data.shape();
       }
 
       bool HasValue() const override { return data_.defined(); }
