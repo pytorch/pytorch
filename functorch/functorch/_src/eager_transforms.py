@@ -88,27 +88,75 @@ def _autograd_grad(outputs, inputs, grad_outputs=None, retain_graph=False, creat
                         for gi, inp in zip(grad_inputs, inputs))
     return grad_inputs
 
+# NOTE [grad and vjp interaction with no_grad]
+#
+# def f(x):
+#   with torch.no_grad():
+#     c = x ** 2
+#   return x - c
+#
+# The thing to consider is if enable_grad is on/off before grad gets called.
+#
+# Case 1: enable_grad is on.
+# grad(f)(x)
+# In this case, `grad` should respect the inner torch.no_grad.
+#
+# Case 2: enable_grad is off
+# with torch.no_grad():
+#   grad(f)(x)
+# In this case, `grad` should respect the inner torch.no_grad, but not the
+# outer one. This is because `grad` is a "function transform": its result
+# should not depend on the result of a context manager outside of `f`.
+#
+# This gives us the following desired behavior:
+# - (nested) grad transforms must obey torch.no_grad inside them
+# - (nested) grad transforms should not obey torch.no_grad outside them
+#
+# To achieve this behavior, upon entering grad/vjp:
+# - we save the current ("previous") is_grad_enabled (*)
+# - we unconditionally enable grad.
+#
+# Inside DynamicLayerBackFallback, when we're temporarily popping `grad` layer
+# off the stack:
+# - if grad_mode is disabled, then we do nothing. (there is a torch.no_grad
+#   active, all subsequent grad transforms must obey it).
+# - if grad_mode is enabled, and the previous is_grad_enabled (*) is False,
+#   then we temporarily restore the previous `is_grad_enabled`. This is
+#   because we're crossing the boundary from a `grad` outside the
+#   no_grad to a `grad` inside the no_grad.
+#
+# NB: vjp has some interesting behavior because the vjp's callable can be called
+# under a different grad_mode than the forward computation...
+#
+# TODO: forward-mode AD: does it also respect no_grad? What does that mean
+# for our jvp transform?
+
+
 # How do we increment and decrement the nesting? I don't think we can.
 def vjp(f, *primals):
     level = _grad_increment_nesting()
     try:
-        primals = _wrap_all_tensors(primals, level)
-        diff_primals = _create_differentiable(primals, level)
-        primals_out = f(*diff_primals)
+        # See NOTE [grad and vjp interaction with no_grad]
+        with torch.enable_grad():
+            primals = _wrap_all_tensors(primals, level)
+            diff_primals = _create_differentiable(primals, level)
+            primals_out = f(*diff_primals)
 
-        results = _undo_create_differentiable(primals_out, level)
-        flat_diff_primals, primals_spec = tree_flatten(diff_primals)
-        flat_primals_out, primals_out_spec = tree_flatten(primals_out)
+            results = _undo_create_differentiable(primals_out, level)
+            flat_diff_primals, primals_spec = tree_flatten(diff_primals)
+            flat_primals_out, primals_out_spec = tree_flatten(primals_out)
 
-        for primal_out in flat_primals_out:
-            assert isinstance(primal_out, torch.Tensor)
-            if primal_out.is_floating_point() or primal_out.is_complex():
-                continue
-            raise RuntimeError("vjp(f, ...): All outputs of f must be "
-                               "floating-point or complex Tensors, got Tensor "
-                               f"with dtype {primal_out.dtype}")
+            for primal_out in flat_primals_out:
+                assert isinstance(primal_out, torch.Tensor)
+                if primal_out.is_floating_point() or primal_out.is_complex():
+                    continue
+                raise RuntimeError("vjp(f, ...): All outputs of f must be "
+                                   "floating-point or complex Tensors, got Tensor "
+                                   f"with dtype {primal_out.dtype}")
 
-        def wrapper(cotangents, retain_graph=True, create_graph=True):
+        def wrapper(cotangents, retain_graph=True, create_graph=None):
+            if create_graph is None:
+                create_graph = torch.is_grad_enabled()
             flat_cotangents, cotangents_spec = tree_flatten(cotangents)
             if primals_out_spec != cotangents_spec:
                 raise RuntimeError(
@@ -236,30 +284,32 @@ def grad_and_value(f, argnums=0, has_aux=False):
         level = _grad_increment_nesting()
         output, aux, grad_input = None, None, None
         try:
-            args = _wrap_all_tensors(args, level)
-            kwargs = _wrap_all_tensors(kwargs, level)
-            diff_args = _slice_argnums(args, argnums)
-            tree_map_(partial(_create_differentiable, level=level), diff_args)
+            # See NOTE [grad and vjp interaction with no_grad]
+            with torch.enable_grad():
+                args = _wrap_all_tensors(args, level)
+                kwargs = _wrap_all_tensors(kwargs, level)
+                diff_args = _slice_argnums(args, argnums)
+                tree_map_(partial(_create_differentiable, level=level), diff_args)
 
-            output = f(*args, **kwargs)
-            if has_aux:
-                output, aux = output
+                output = f(*args, **kwargs)
+                if has_aux:
+                    output, aux = output
 
-            if not isinstance(output, torch.Tensor):
-                raise RuntimeError('grad_and_value(f)(*args): Expected f(*args)'
-                                   f'to return a Tensor, got {type(output)}')
-            if output.dim() != 0:
-                raise RuntimeError('grad_and_value(f)(*args): Expected f(*args)'
-                                   'to return a scalar Tensor, got tensor with '
-                                   f'{output.dim()} dims. Maybe you wanted to'
-                                   'use the vjp or jacrev APIs instead?')
+                if not isinstance(output, torch.Tensor):
+                    raise RuntimeError('grad_and_value(f)(*args): Expected f(*args)'
+                                       f'to return a Tensor, got {type(output)}')
+                if output.dim() != 0:
+                    raise RuntimeError('grad_and_value(f)(*args): Expected f(*args)'
+                                       'to return a scalar Tensor, got tensor with '
+                                       f'{output.dim()} dims. Maybe you wanted to'
+                                       'use the vjp or jacrev APIs instead?')
 
-            flat_diff_args, spec = tree_flatten(diff_args)
+                flat_diff_args, spec = tree_flatten(diff_args)
 
-            # NB: need create_graph so that backward pass isn't run in no_grad mode
-            flat_outputs = _as_tuple(output)
-            flat_grad_input = _autograd_grad(flat_outputs, flat_diff_args, create_graph=True)
-            grad_input = tree_unflatten(flat_grad_input, spec)
+                # NB: need create_graph so that backward pass isn't run in no_grad mode
+                flat_outputs = _as_tuple(output)
+                flat_grad_input = _autograd_grad(flat_outputs, flat_diff_args, create_graph=True)
+                grad_input = tree_unflatten(flat_grad_input, spec)
 
         finally:
             if grad_input is not None:
