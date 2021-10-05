@@ -26,7 +26,6 @@ Error::Error(std::string msg, std::string backtrace, const void* caller)
     if (cw_hwnd) {
       ShowWindow(cw_hwnd, SW_NORMAL);
     }
-      
     // In debug builds, calling `abort` leads to a message box being shown and
     // this way we can have the console shown as the top window.
     abort();
