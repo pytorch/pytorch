@@ -232,7 +232,13 @@ if(INTERN_BUILD_ATEN_OPS)
   file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/aten/src/ATen/native/quantized/cpu/kernels)
   foreach(i RANGE ${NUM_CPU_CAPABILITY_NAMES})
     foreach(IMPL ${cpu_kernel_cpp_in})
+      # Handle checked in sources
       string(REPLACE "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/" "" NAME ${IMPL})
+      # Handle code generated sources (assumption: these don't conflict, which
+      # they shouldn't because the code generated names are all
+      # UfuncCPUKernel_blah)
+      string(REPLACE "${CMAKE_BINARY_DIR}/aten/src/ATen/" "" NAME ${NAME})
+      message(${NAME})
       list(GET CPU_CAPABILITY_NAMES ${i} CPU_CAPABILITY)
       set(NEW_IMPL ${CMAKE_BINARY_DIR}/aten/src/ATen/${NAME}.${CPU_CAPABILITY}.cpp)
       add_custom_command(OUTPUT ${NEW_IMPL}
