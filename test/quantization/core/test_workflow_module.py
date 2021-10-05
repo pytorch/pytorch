@@ -1131,12 +1131,9 @@ class TestFusedObsFakeQuantModule(TestCase):
                                                   include_last_offset=True, scale_grad_by_freq=False, mode='sum')
                 self.emb2 = torch.nn.EmbeddingBag(num_embeddings=10, embedding_dim=12,
                                                   include_last_offset=True, scale_grad_by_freq=False, mode='sum')
-                # Note for EmbeddingBag, indices should never be quantized, only outputs
-                self.dequant = torch.quantization.DeQuantStub()
 
             def forward(self, indices):
-                x = torch.cat((self.emb1(indices), self.emb2(indices)))
-                return self.dequant(x)
+                return torch.cat((self.emb1(indices), self.emb2(indices)))
 
         model = Model()
         indices = torch.randint(0, 10, (5, 12))
