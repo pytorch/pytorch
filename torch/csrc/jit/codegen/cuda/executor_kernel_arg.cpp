@@ -11,18 +11,82 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+namespace {
+
+template <typename T, typename nvfuser_index_t>
+std::unique_ptr<TensorArgAbstract> getTensorArg(int nDims) {
+  switch (nDims) {
+    case (0):
+      return std::make_unique<TensorArg<
+          TensorArgCodegen<T, 0, nvfuser_index_t>,
+          nvfuser_index_t>>();
+    case (1):
+      return std::make_unique<TensorArg<
+          TensorArgCodegen<T, 1, nvfuser_index_t>,
+          nvfuser_index_t>>();
+    case (2):
+      return std::make_unique<TensorArg<
+          TensorArgCodegen<T, 2, nvfuser_index_t>,
+          nvfuser_index_t>>();
+    case (3):
+      return std::make_unique<TensorArg<
+          TensorArgCodegen<T, 3, nvfuser_index_t>,
+          nvfuser_index_t>>();
+    case (4):
+      return std::make_unique<TensorArg<
+          TensorArgCodegen<T, 4, nvfuser_index_t>,
+          nvfuser_index_t>>();
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    case (5):
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      return std::make_unique<TensorArg<
+          TensorArgCodegen<T, 5, nvfuser_index_t>,
+          nvfuser_index_t>>();
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    case (6):
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      return std::make_unique<TensorArg<
+          TensorArgCodegen<T, 6, nvfuser_index_t>,
+          nvfuser_index_t>>();
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    case (7):
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      return std::make_unique<TensorArg<
+          TensorArgCodegen<T, 7, nvfuser_index_t>,
+          nvfuser_index_t>>();
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    case (8):
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      return std::make_unique<TensorArg<
+          TensorArgCodegen<T, 8, nvfuser_index_t>,
+          nvfuser_index_t>>();
+    default:
+      TORCH_INTERNAL_ASSERT(
+          false,
+          "Tried to gerneate a tensor to run a generated kernel with ",
+          nDims,
+          " dimensions, however it must be a 1-8 dimensional tensor.");
+  }
+  return nullptr;
+}
+
+template <typename INDEX_MODE>
 std::unique_ptr<TensorArgAbstract> getTensorArg(
     c10::ScalarType dtype,
     int nDims) {
   switch (dtype) {
+    case c10::ScalarType::Double:
+      return getTensorArg<double, INDEX_MODE>(nDims);
     case c10::ScalarType::Float:
-      return getTensorArg<float>(nDims);
+      return getTensorArg<float, INDEX_MODE>(nDims);
     case c10::ScalarType::Half:
-      return getTensorArg<at::Half>(nDims);
+      return getTensorArg<at::Half, INDEX_MODE>(nDims);
     case c10::ScalarType::Bool:
-      return getTensorArg<bool>(nDims);
+      return getTensorArg<bool, INDEX_MODE>(nDims);
     case c10::ScalarType::Long:
-      return getTensorArg<int64_t>(nDims);
+      return getTensorArg<int64_t, INDEX_MODE>(nDims);
+    case c10::ScalarType::Int:
+      return getTensorArg<int32_t, INDEX_MODE>(nDims);
     default:
       TORCH_CHECK(
           false,
@@ -32,13 +96,33 @@ std::unique_ptr<TensorArgAbstract> getTensorArg(
   }
 }
 
+} // namespace
+
+std::unique_ptr<TensorArgAbstract> getTensorArg(
+    c10::ScalarType dtype,
+    int nDims,
+    KernelIndexMode index_mode) {
+  switch (index_mode) {
+    case KernelIndexMode::INT32:
+      return getTensorArg<int>(dtype, nDims);
+    case KernelIndexMode::INT64:
+      return getTensorArg<int64_t>(dtype, nDims);
+    default:
+      break;
+  }
+
+  TORCH_INTERNAL_ASSERT(false, "unknown index mode");
+  return nullptr;
+}
+
 // Push a tensor to the arguments
 void KernelArgumentHolder::push(const at::Tensor& tensor) {
   changed_ = true;
   int nDims = tensor.ndimension();
 
   c10::ScalarType dtype = tensor.scalar_type();
-  std::unique_ptr<TensorArgAbstract> tensor_arg = getTensorArg(dtype, nDims);
+  std::unique_ptr<TensorArgAbstract> tensor_arg =
+      getTensorArg(dtype, nDims, index_mode_);
   tensor_arg->setPointer(tensor.data_ptr());
   for (const auto i : c10::irange(nDims)) {
     tensor_arg->setSize(i, tensor.sizes()[i]);
@@ -54,13 +138,17 @@ void KernelArgumentHolder::push(const IValue& val) {
       val.isScalar(),
       "Tried to push an arg to run in a fused kernel, expected a scalar but got, ",
       val);
-  switch (val.toScalar().type()) {
+  auto scalar_val = val.toScalar();
+  switch (scalar_val.type()) {
     // NOLINTNEXTLINE(bugprone-branch-clone)
     case c10::ScalarType::Double:
-      arguments_.push_back(std::make_unique<FloatArg>((float)val.toDouble()));
+      arguments_.push_back(std::make_unique<DoubleArg>(scalar_val.toDouble()));
       return;
     case c10::ScalarType::Long:
-      arguments_.push_back(std::make_unique<LongArg>(val.toInt()));
+      arguments_.push_back(std::make_unique<LongArg>(scalar_val.toLong()));
+      return;
+    case c10::ScalarType::Bool:
+      arguments_.push_back(std::make_unique<BoolArg>(scalar_val.toBool()));
       return;
     default:
       TORCH_INTERNAL_ASSERT(
@@ -72,8 +160,8 @@ void KernelArgumentHolder::push(const IValue& val) {
       " Tried to create argument to send to a fused kernel, but got a non-scalar type.");
 }
 
-void KernelArgumentHolder::push(const uint64_t& val) {
-  arguments_.push_back(std::make_unique<ULongArg>(val));
+void KernelArgumentHolder::push(const at::PhiloxCudaState& val) {
+  arguments_.push_back(std::make_unique<PhiloxCudaStateArg>(val));
 }
 
 // Create buffer, flatten arguments into it, align by 8 Bytes, return pointers
@@ -109,17 +197,16 @@ void KernelArgumentHolder::push(const std::vector<at::Tensor>& tensors) {
 }
 
 void KernelArgumentHolder::appendPhiloxRNGSeed(uint64_t rand_offset) {
-  std::pair<uint64_t, uint64_t> philox_engine_inputs;
+  at::PhiloxCudaState philox_engine_inputs;
   auto gen = at::cuda::detail::getDefaultCUDAGenerator();
   {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen.mutex());
     philox_engine_inputs =
-        at::check_generator<at::CUDAGeneratorImpl>(gen)->philox_engine_inputs(
+        at::check_generator<at::CUDAGeneratorImpl>(gen)->philox_cuda_state(
             rand_offset);
   }
-  push(philox_engine_inputs.first);
-  push(philox_engine_inputs.second);
+  push(philox_engine_inputs);
 }
 
 } // namespace cuda
