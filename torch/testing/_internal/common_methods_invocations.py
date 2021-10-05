@@ -5646,10 +5646,10 @@ def sample_inputs_l1_loss(op_info, device, dtype, requires_grad, **kwargs):
     float_dtype = torch.float64
 
     sample_inputs.extend(
-       [
-           SampleInput(make(dtype=dtype), args=(make(dtype=float_dtype),)),
-           SampleInput(make(dtype=float_dtype), args=(make(dtype=dtype),)),
-       ]
+        [
+            SampleInput(make(dtype=dtype), args=(make(dtype=float_dtype),)),
+            SampleInput(make(dtype=float_dtype), args=(make(dtype=dtype),)),
+        ]
     )
 
     return sample_inputs

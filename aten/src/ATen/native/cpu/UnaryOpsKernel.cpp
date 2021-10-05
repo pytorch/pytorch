@@ -288,19 +288,22 @@ void neg_kernel(TensorIteratorBase& iter) {
 
 void sign_kernel(TensorIteratorBase& iter){
   if(iter.dtype() == ScalarType::Bool){
-      cpu_kernel(iter, [](bool x) -> bool { return x; });
+      cpu_kernel(iter, [=](bool x) -> bool { return x; });
   } else {
     AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, ScalarType::Half, iter.dtype(), "sign_cpu", [&]() {
-        auto neg_one_vec = Vectorized<scalar_t>(static_cast<scalar_t>(-1));
         auto zero_vec = Vectorized<scalar_t>(static_cast<scalar_t>(0));
-        auto pos_one_vec = Vectorized<scalar_t>(static_cast<scalar_t>(1));
+        auto one_vec = Vectorized<scalar_t>(static_cast<scalar_t>(1));
 
         cpu_kernel_vec(
           iter,
-          [](scalar_t a) -> scalar_t { return (0 < a) - (a < 0); },
+          [=](scalar_t a) -> scalar_t { return (0 < a) - (a < 0); },
           [=](Vectorized<scalar_t> self_vec){
-              auto neg_and_pos_vec = Vectorized<scalar_t>::blendv(neg_one_vec, pos_one_vec, self_vec > pos_one_vec);
-              return Vectorized<scalar_t>::blendv(neg_and_pos_vec, zero_vec, self_vec == zero_vec);
+
+              // Comparison operators returns bitmask.
+              auto left = Vectorized<scalar_t>::blendv(zero_vec, one_vec, zero_vec < self_vec);
+              auto right = Vectorized<scalar_t>::blendv(zero_vec, one_vec, self_vec < zero_vec);
+
+              return left - right;
           });
     });
   }
