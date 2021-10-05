@@ -47,6 +47,7 @@ LABEL_CIFLOW_DEFAULT = "ciflow/default"
 LABEL_CIFLOW_LIBTORCH = "ciflow/libtorch"
 LABEL_CIFLOW_LINUX = "ciflow/linux"
 LABEL_CIFLOW_SANITIZERS = "ciflow/sanitizers"
+LABEL_CIFLOW_ONNX = "ciflow/onnx"
 LABEL_CIFLOW_SCHEDULED = "ciflow/scheduled"
 LABEL_CIFLOW_SLOW = "ciflow/slow"
 LABEL_CIFLOW_WIN = "ciflow/win"
@@ -329,16 +330,22 @@ LINUX_WORKFLOWS = [
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_SANITIZERS, LABEL_CIFLOW_CPU},
         ),
     ),
+    CIWorkflow(
+        arch="linux",
+        build_environment="linux-xenial-py3.6-clang7-onnx",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang7-onnx",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        num_test_shards=2,
+        distributed_test=False,
+        ciflow_config=CIFlowConfig(
+            enabled=True,
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_ONNX, LABEL_CIFLOW_CPU},
+        ),
+    ),
     # CIWorkflow(
     #     arch="linux",
     #     build_environment="linux-xenial-py3.6-gcc7",
     #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc7",
-    #     test_runner_type=LINUX_CPU_TEST_RUNNER,
-    # ),
-    # CIWorkflow(
-    #     arch="linux",
-    #     build_environment="linux-xenial-py3.6-clang7-onnx",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang7-onnx",
     #     test_runner_type=LINUX_CPU_TEST_RUNNER,
     # ),
     CIWorkflow(
