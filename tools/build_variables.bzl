@@ -348,7 +348,17 @@ core_sources_full = core_sources_full_mobile + [
     "torch/csrc/jit/tensorexpr/external_functions_codegen.cpp",
 ]
 
-libtorch_core_sources = sorted(core_sources_common + core_sources_full + core_trainer_sources + libtorch_profiler_sources)
+lazy_tensor_core_sources = [
+    "torch/csrc/lazy/core/hash.cpp",
+]
+
+libtorch_core_sources = sorted(
+    core_sources_common +
+    core_sources_full +
+    core_trainer_sources +
+    libtorch_profiler_sources +
+    lazy_tensor_core_sources,
+)
 
 # These files are the only ones that are supported on Windows.
 libtorch_distributed_base_sources = [
