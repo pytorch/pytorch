@@ -385,21 +385,20 @@ static PyObject* THPVariable_make_wrapper_subclass(PyObject*, PyObject* args, Py
   TORCH_CHECK_TYPE(PyObject_FastGetAttrString(cls, "__torch_dispatch__").ptr() != nullptr,
     ((PyTypeObject*)cls)->tp_name, " must define __torch_dispatch__");
 
-  at::Tensor data;
   const auto options = TensorOptions()
-      .dtype(r.scalartype(4))
-      .device(r.device(6))
-      .layout(r.layoutOptional(5))
-      // NB: long standing issue, requires_grad is not respected here; you
-      // have to set it post facto, see https://github.com/pytorch/pytorch/issues/26428
-      // .requires_grad(r.toBool(7))
-      .pinned_memory(r.toBool(7));
+    .dtype(r.scalartype(4))
+    .device(r.device(6))
+    .layout(r.layoutOptional(5))
+    // NB: long standing issue, requires_grad is not respected here; you
+    // have to set it post facto, see https://github.com/pytorch/pytorch/issues/26428
+    // .requires_grad(r.toBool(7))
+    .pinned_memory(r.toBool(7));
 
   // don't bother releasing GIL here, as we are not allocating any nontrivial
   // data
   // TODO: for_blob produces non-resizable tensors, we might want this to be
   // resizable (have to define a custom allocator in that case)
-  data = at::for_blob(nullptr, r.intlist(1))
+  auto data = at::for_blob(nullptr, r.intlist(1))
         // TODO: make strides argument optional. I vaguely remember optional<IntArrayRef> being problematic, need to test.
         .strides(r.intlist(2))
         .context(nullptr, [](void *ctx) {})

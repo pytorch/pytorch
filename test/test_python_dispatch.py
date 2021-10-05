@@ -1,6 +1,6 @@
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
-from torch.utils._pytree import tree_map, tree_flatten
+from torch.utils._pytree import tree_map
 from torch.utils._python_dispatch import enable_python_mode
 
 from typing import Iterator, List
