@@ -1,7 +1,7 @@
 import torch
 from torch import Tensor
 
-from typing import Iterator, Optional, Sequence, List, TypeVar, Generic, Sized
+from typing import Iterator, Iterable, Optional, Sequence, List, TypeVar, Generic, Sized, Union
 
 T_co = TypeVar('T_co', covariant=True)
 
@@ -209,7 +209,7 @@ class BatchSampler(Sampler[List[int]]):
         [[0, 1, 2], [3, 4, 5], [6, 7, 8]]
     """
 
-    def __init__(self, sampler: Sampler[int], batch_size: int, drop_last: bool) -> None:
+    def __init__(self, sampler: Union[Sampler[int], Iterable[int]], batch_size: int, drop_last: bool) -> None:
         # Since collections.abc.Iterable does not check for `__getitem__`, which
         # is one way for an object to be an iterable, we don't do an `isinstance`
         # check here.
