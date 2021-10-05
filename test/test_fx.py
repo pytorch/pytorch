@@ -250,6 +250,16 @@ class TestFX(JitTestCase):
         m = MyModule()
         self.checkGraphModule(m, (input,))
 
+    def test_fx_and_or(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                return x & x, x | x
+
+        input = torch.LongTensor(10).random_(0, 1024)
+
+        m = MyModule()
+        self.checkGraphModule(m, (input,))
+
     def test_dict(self):
         class MyDictMod(torch.nn.Module):
             def forward(self, d):
@@ -1697,6 +1707,18 @@ class TestFX(JitTestCase):
 
         self.assertTrue('typing.List[float]' in str(graph))
 
+    def test_layout(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return torch.empty_like(x, layout=torch.strided, pin_memory=False).fill_(0)
+
+        traced = symbolic_trace(M())
+        x = torch.rand(5, 9, 3, 4)
+        self.assertEqual(traced(x), torch.zeros_like(x))
+
     def test_ellipsis(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -2455,6 +2477,27 @@ class TestFX(JitTestCase):
         self.assertIn("a_lifted_leaf2", traced.code)
         self.assertEqual(27, traced(2))
         self.assertIs(a_lifted_leaf2, real_a_lifed_leaf2)
+
+    def test_profiler_ranges_side_effect(self):
+        g = torch.fx.Graph()
+        handle = g.call_function(torch.ops.profiler._record_function_enter, ('test_range',))
+        g.call_function(torch.ops.profiler._record_function_exit, (handle,))
+        g.output(None)
+
+        found_targets = {}
+        for node in g.nodes:
+            if node.op == 'call_function':
+                found_targets.setdefault(node.target)
+        self.assertEqual(
+            found_targets.keys(), [torch.ops.profiler._record_function_enter, torch.ops.profiler._record_function_exit])
+
+        g.eliminate_dead_code()
+        found_targets = {}
+        for node in g.nodes:
+            if node.op == 'call_function':
+                found_targets.setdefault(node.target)
+        self.assertEqual(
+            found_targets.keys(), [torch.ops.profiler._record_function_enter, torch.ops.profiler._record_function_exit])
 
     def test_ast_rewriter_wrapped_via_decorator(self):
         class F(torch.nn.Module):
@@ -3347,8 +3390,6 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
             raise AssertionError(msg)
 
     def test_public_api_surface(self):
-        mod = torch.fx
-
         non_back_compat_objects = {}
 
         def check_symbols_have_bc_designation(m, prefix):
@@ -3367,8 +3408,8 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
                     if v not in _MARKED_WITH_COMATIBLITY:
                         non_back_compat_objects.setdefault(v)
 
-        check_symbols_have_bc_designation(mod, ['torch', 'fx'])
-
+        check_symbols_have_bc_designation(torch.fx, ['torch', 'fx'])
+        check_symbols_have_bc_designation(torch.fx.passes, ['torch', 'fx', 'passes'])
 
         non_back_compat_strs = [torch.typename(obj) for obj in non_back_compat_objects.keys()]
         # Only want objects in torch.fx
