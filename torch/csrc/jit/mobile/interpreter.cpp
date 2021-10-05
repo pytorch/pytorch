@@ -58,8 +58,9 @@ bool InterpreterState::run(Stack& stack) {
 
       // If no valid debug handle found then just log pc.
       // This is possible when we did not save debug handles
-      DebugHandle debug_handle =
-          code_->debug_handles_.size() >= pc ? pc : code_->debug_handles_.at(pc);
+      DebugHandle debug_handle = pc >= code_->debug_handles_.size()
+          ? pc
+          : code_->debug_handles_.at(pc);
 
       // std::cout << "RUNNING " << pc << " "
       //           << code_->instructions_with_handles_[pc].instruction;
