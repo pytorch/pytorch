@@ -718,6 +718,10 @@ Modules that provide quantization functions and classes
     - This module implements modules which are used to perform fake quantization
       during QAT.
 
+  * - :ref:`torch_quantization_qconfig`
+    - This module defines `QConfig` and `QConfigDynamic` objects which are used
+      to configure quantization settings for individual ops.
+
   * - :ref:`torch_nn_intrinsic`
     - This module implements the combined (fused) modules conv + relu which can
       then be quantized.
