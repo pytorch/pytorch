@@ -182,7 +182,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   STOP_DECOMPOSE(conv_transpose1d);
   STOP_DECOMPOSE(conv_transpose3d.input);
   STOP_DECOMPOSE(cosine_embedding_loss);
-  STOP_DECOMPOSE(cosine_similarity);
   STOP_DECOMPOSE(ctc_loss.IntList);
   STOP_DECOMPOSE(ctc_loss.Tensor);
   STOP_DECOMPOSE(cudnn_is_acceptable);
