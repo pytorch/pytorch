@@ -148,6 +148,9 @@ if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
   done
 fi
 
+# Some Caffe2 tests fail when run using AVX512 ISA, see https://github.com/pytorch/pytorch/issues/66111
+export DNNL_MAX_CPU_ISA=AVX2
+
 pip install --user pytest-sugar
 "$PYTHON" \
   -m pytest \
