@@ -68,7 +68,7 @@
   _modelPath = [self _save:modelSpecs
                 identifier:[NSString stringWithCString:identifier.c_str()
                                               encoding:NSUTF8StringEncoding]];
-  NSError* error;
+  NSError* error = nil;
   NSURL* compiledModelPath = nil;
   if (@available(iOS 11.0, macOS 10.13, *)) {
     compiledModelPath =
@@ -113,12 +113,11 @@
 
 - (id<MLFeatureProvider>)forwardWithInputs:
     (const std::vector<PTMCoreMLFeatureSpecs>&)inputs {
-  NSError* error;
+  NSError* error = nil;
   PTMCoreMLFeatureProvider* inputFeature = [[PTMCoreMLFeatureProvider alloc]
       initWithFeatureSpecs:inputs
              CoreMLVersion:self.coreMLVersion];
   if (inputFeature == nil) {
-    NSLog(@"inputFeature is not initialized.");
     return nil;
   }
   if (@available(iOS 11.0, macOS 10.13, *)) {
@@ -136,14 +135,14 @@
 
     return outputFeature;
   } else {
-    TORCH_CHECK("Core ML is available on iOS 11.0 and above");
+    TORCH_CHECK(false, "Core ML is available on iOS 11.0 and above");
     return nil;
   }
 }
 
 - (BOOL)cleanup {
   NSFileManager* fileManager = [NSFileManager defaultManager];
-  NSError* error;
+  NSError* error = nil;
   if (![fileManager fileExistsAtPath:_modelPath]) {
     [fileManager removeItemAtPath:_modelPath error:&error];
   }
