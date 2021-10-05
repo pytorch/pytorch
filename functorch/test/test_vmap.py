@@ -1234,6 +1234,37 @@ class TestVmapOperators(Namespace.TestVmapBase):
         with self.assertRaisesRegex(RuntimeError, msg):
             vmap(lambda x: x.clone(memory_format=torch.channels_last_3d))(torch.randn(B0))
 
+    @parametrize("case",
+                 (
+                     (torch.clamp_min_, TensorFactory.randn),
+                     (torch.clamp_max_, TensorFactory.randn),
+                 ), name_fn=lambda x: x[0].__name__)
+    def test_clamp_inplace_variant(self, case):
+        test = self._vmap_test
+
+        def get_number(getter):
+            return getter([]).item()
+
+        op, getter = case
+        device = 'cpu'
+        B0, B1 = 7, 11
+
+        # Single vmap: op(Tensor, Tensor)
+        test(op, (getter([B0, 3], device), getter([B0, 3], device)), check_propagates_grad=False)
+        test(op, (getter([B0], device), getter([B0], device)), check_propagates_grad=False)
+        test(op, (getter([2, B0, 3], device), getter([2, B0, 3], device)), in_dims=(1, 1), check_propagates_grad=False)
+        test(op, (getter([B0, 2, 3], device), getter([2, B0, 3], device)),
+             in_dims=(0, 1), out_dims=1, check_propagates_grad=False)
+        test(op, (getter([B0, 2, 3], device), getter([1, 1], device)), in_dims=(0, None), check_propagates_grad=False)
+        test(op, (getter([B0, 3], device), getter([B0, 3], device)), in_dims=(0, 0), check_propagates_grad=False)
+
+        # Nested vmap: op(Tensor, Tensor)
+        test(vmap(op), (getter([B0, B1, 2, 3], device), getter([B0, B1, 1, 3], device)), check_propagates_grad=False)
+
+        # Python number overload: op(Tensor, Number)
+        number = get_number(getter)
+        self._test_unary(lambda t: op(t, number), getter, device, check_propagates_grad=False)
+
     @parametrize('case', [
         subtest(_make_case(torch.clamp_min), name='clamp_min'),
         subtest(_make_case(torch.clamp_max), name='clamp_max'),
@@ -1255,7 +1286,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(op, (getter([B0], device), getter([2, B0, 3], device)),
              in_dims=(0, 1), out_dims=1)
         test(op, (getter([B0], device), getter([2, 3], device)), in_dims=(0, None))
-        test(op, (getter([2, 3], device), getter([B0, 3], device)), in_dims=(0, None))
+        test(op, (getter([2, 3], device), getter([B0, 3], device)), in_dims=(None, 0))
 
         # Nested vmap: op(Tensor, Tensor)
         test(vmap(op), (getter([B0, B1, 2, 3], device), getter([B0, B1, 3], device)))
@@ -3069,7 +3100,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('hstack'),
         xfail('linalg.multi_dot'),
         xfail('nanmean'),
-        xfail('nn.functional.cosine_similarity'),
         xfail('nn.functional.layer_norm'),
         xfail('nn.functional.nll_loss'),
         xfail('vstack'),
