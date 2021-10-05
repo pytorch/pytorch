@@ -230,17 +230,15 @@ static void slow_conv3d_update_output_frame(
   const int64_t ldb = k;
   const int64_t ldc = m;
 
-  for (int64_t group = 0; group < groups; ++group) {
-    at::native::cpublas::gemm(
-        TransposeType::NoTranspose,
-        TransposeType::NoTranspose,
-        m, n, k,
-        static_cast<scalar_t>(1),
-        finput[group * k].data(), lda,
-        weight[group * n].data(), ldb,
-        static_cast<scalar_t>(beta),
-        output[group * n].data(), ldc);
-  }
+  at::native::cpublas::gemm_batched_with_stride(
+      TransposeType::NoTranspose,
+      TransposeType::NoTranspose,
+      groups, m, n, k,
+      static_cast<scalar_t>(1),
+      finput.data(), lda, finput.stride(0) * k,
+      weight.data(), ldb, weight.stride(0) * n,
+      static_cast<scalar_t>(beta),
+      output.data(), ldc, output.stride(0) * n);
 }
 
 template <typename scalar_t>
@@ -270,17 +268,15 @@ void slow_conv3d_backward_update_grad_input_frame(
   const int64_t ldb = n;
   const int64_t ldc = m;
 
-  for (int64_t group = 0; group < groups; ++group) {
-    at::native::cpublas::gemm(
-        TransposeType::NoTranspose,
-        TransposeType::Transpose,
-        m, n, k,
-        static_cast<scalar_t>(1),
-        grad_output[group * k].data(), lda,
-        weight[group * k].data(), ldb,
-        static_cast<scalar_t>(0),
-        fgrad_input[group * n].data(), ldc);
-  }
+  at::native::cpublas::gemm_batched_with_stride(
+      TransposeType::NoTranspose,
+      TransposeType::Transpose,
+      groups, m, n, k,
+      static_cast<scalar_t>(1),
+      grad_output.data(), lda, grad_output.stride(0) * k,
+      weight.data(), ldb, weight.stride(0) * k,
+      static_cast<scalar_t>(0),
+      fgrad_input.data(), ldc, fgrad_input.stride(0) * n);
 
   Unfold3dAccCPU(
       c10::CppTypeToScalarType<scalar_t>::value,
