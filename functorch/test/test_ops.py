@@ -471,7 +471,6 @@ class TestOperators(TestCase):
         xfail('vdot'),
         xfail('view_as_complex'),
         xfail('nanmean'),
-        xfail('nn.functional.cosine_similarity'),
         xfail('nn.functional.layer_norm'),
         xfail('nn.functional.nll_loss'),
         xfail('block_diag'),

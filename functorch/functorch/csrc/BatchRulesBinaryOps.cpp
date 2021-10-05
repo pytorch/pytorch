@@ -178,8 +178,10 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   POINTWISE_BOXED(clamp.Tensor);
   BINARY_POINTWISE2(clamp_min, Tensor);
   UNARY_POINTWISE(clamp_min);
+  POINTWISE_BOXED(clamp_min_);
   BINARY_POINTWISE2(clamp_max, Tensor);
   UNARY_POINTWISE(clamp_max);
+  POINTWISE_BOXED(clamp_max_);
 
   // Commented out so we have a test op
   // BINARY_SCALAR_2(copysign, Tensor, Scalar);
@@ -263,6 +265,10 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("div_.Scalar", inplacePlumbing1<
      DECLTYPE_AUTO(&unary_inplace_batch_rule<ScalarInplaceT, &Tensor::div_, const Scalar&>),
      const Scalar&>);
+  m.impl("clamp_min_.Tensor", inplacePlumbing2<
+     DECLTYPE_AUTO(&binary_pointwise_inplace_batch_rule<TensorInplaceT, &Tensor::clamp_min_>)>);
+  m.impl("clamp_max_.Tensor", inplacePlumbing2<
+     DECLTYPE_AUTO(&binary_pointwise_inplace_batch_rule<TensorInplaceT, &Tensor::clamp_max_>)>);
 
   m.impl("masked_fill_.Scalar", inplacePlumbing2<
      DECLTYPE_AUTO(&binary_pointwise_inplace_batch_rule<TensorScalarInplaceT, &Tensor::masked_fill_, const Scalar&>), const Scalar&>);
