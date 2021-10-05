@@ -293,6 +293,20 @@ class ProcessGroupNCCLTest(TestCase):
                 tensors[i],
             )
 
+        # Avg (only available for NCCL 2.10+)
+        if torch.cuda.nccl.version() >= (2, 10, 0):
+            tensors = [torch.tensor([i + 1.]).cuda(i) for i in range(self.num_gpus)]
+
+            allreduce(tensors, c10d.ReduceOp.AVG)
+
+            for i in range(self.num_gpus):
+                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+                ndev = float(self.num_gpus)
+                self.assertEqualIgnoreType(
+                    torch.tensor([ndev * (ndev + 1.) / (2. * ndev)]),
+                    tensors[i],
+                )
+
         # Product
         tensors = []
         for i in range(self.num_gpus):
@@ -2003,7 +2017,7 @@ class DistributedDataParallelTest(
     # A list of tests for ddp with activation checkpointing
     # when gradient_as_bucket_view=True, False.
     # Most of the tests are referred to
-    # https://github.com/facebookresearch/fairscale/blob/master/tests/nn/pipe/test_checkpoint_ddp.py
+    # https://github.com/facebookresearch/fairscale/blob/main/tests/nn/pipe/test_checkpoint_ddp.py
     class CheckpointOnceModule(nn.Module):
         def __init__(self):
             super().__init__()
