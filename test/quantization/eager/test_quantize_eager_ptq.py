@@ -530,7 +530,6 @@ class TestPostTrainingStatic(QuantizationTestCase):
         model.emb.qconfig = float_qparams_weight_only_qconfig
         prepare(model, inplace=True)
         convert(model, inplace=True)
-        print(model)
         self.assertTrue('QuantizedEmbedding' in str(model))
         self.assertTrue('DynamicQuantizedLinear' in str(model))
 
