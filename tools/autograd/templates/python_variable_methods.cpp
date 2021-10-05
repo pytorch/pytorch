@@ -68,6 +68,48 @@ static PyObject * THPVariable__is_view(PyObject *self, PyObject* args)
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable__to_functional_tensor(PyObject *self, PyObject* args)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = THPVariable_Unpack(self);
+  auto wrapped = at::functionalization::impl::to_functional_tensor(self_);
+  return wrap(wrapped);
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable__from_functional_tensor(PyObject *self, PyObject* args)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = THPVariable_Unpack(self);
+  auto unwrapped = at::functionalization::impl::from_functional_tensor(self_);
+  return wrap(unwrapped);
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable__is_functional_tensor(PyObject *self, PyObject* args)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = THPVariable_Unpack(self);
+  if (at::functionalization::impl::isFunctionalTensor(self_)) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable__sync(PyObject *self, PyObject* args)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = THPVariable_Unpack(self);
+  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self_));
+  auto wrapped_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(self_);
+  wrapped_impl->apply_updates();
+  wrapped_impl->regenerate_from_base();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 // implemented on the python object bc no support for first-class functions in native_functions.yaml
 // See: ATen/native/README.md for more context
 static PyObject * THPVariable_apply_(PyObject* self, PyObject* arg)
@@ -1191,6 +1233,10 @@ PyMethodDef variable_methods[] = {
   {"__invert__", THPVariable_invert, METH_NOARGS, NULL},
   {"__matmul__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_matmul>), METH_VARARGS | METH_KEYWORDS, NULL},
   {"_is_view", THPVariable__is_view, METH_NOARGS, NULL},
+  {"_is_functional_tensor", THPVariable__is_functional_tensor, METH_NOARGS, NULL},
+  {"_to_functional_tensor", THPVariable__to_functional_tensor, METH_NOARGS, NULL},
+  {"_from_functional_tensor", THPVariable__from_functional_tensor, METH_NOARGS, NULL},
+  {"_sync", THPVariable__sync, METH_NOARGS, NULL},
   {"apply_", THPVariable_apply_, METH_O, NULL},
   {"bfloat16", castPyCFunctionWithKeywords(THPVariable_bfloat16), METH_VARARGS | METH_KEYWORDS, NULL},
   {"byte", castPyCFunctionWithKeywords(THPVariable_byte), METH_VARARGS | METH_KEYWORDS, NULL},

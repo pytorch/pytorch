@@ -1,6 +1,6 @@
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
-from torch.utils._pytree import tree_map
+from torch.utils._pytree import tree_map, tree_flatten
 from torch.utils._python_dispatch import enable_python_mode
 
 from typing import Iterator, List
@@ -36,7 +36,7 @@ class LoggingTensor(torch.Tensor):
         # memory for the class in question, but it should still
         # advertise the same device as before
         r = torch.Tensor._make_wrapper_subclass(
-            cls, elem.size(),
+            cls, elem.size(), elem.stride(),
             # TODO: clone strides and storage aliasing
             dtype=elem.dtype, layout=elem.layout,
             device=elem.device, requires_grad=elem.requires_grad
@@ -496,6 +496,188 @@ $6 = torch._ops.aten.add_($1, $5)''')
         z.sum().backward(torch.tensor(1))
         self.assertEqual(x.grad, y)
         self.assertEqual(y.grad, x)
+
+
+class FunctionalTensor(torch.Tensor):
+
+    elem: torch.Tensor
+
+    __slots__ = ['elem', 'elem_']
+
+    @staticmethod
+    def __new__(cls, elem, *args, **kwargs):
+        # r = torch.Tensor._make_wrapper_subclass(cls, elem)
+        r = torch.Tensor._make_wrapper_subclass(
+            cls, elem.size(), elem.stride(),
+            dtype=elem.dtype, layout=elem.layout,
+            device='meta', requires_grad=elem.requires_grad
+        )
+        if elem._is_functional_tensor():
+            r.elem_ = elem
+            r.elem = r.elem_
+        else:
+            r.elem_ = elem
+            r.elem = r.elem_._to_functional_tensor()
+        return r
+
+    def __repr__(self):
+        assert self.elem._is_functional_tensor()
+        self.elem._sync()
+        return f"FunctionalTensor({self.elem._from_functional_tensor()})"
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        def unwrap(e):
+            if not isinstance(e, torch.Tensor):
+                return e
+            if isinstance(e, FunctionalTensor):
+                return e.elem
+            # This can happen if I do FunctionalTensor(torch.ones(2)) + torch.ones(2)
+            assert not e._is_functional_tensor()
+            return e._to_functional_tensor()
+
+        def wrap(e):
+            if not isinstance(e, torch.Tensor):
+                return e
+            assert not isinstance(e, FunctionalTensor)
+            assert e._is_functional_tensor()
+            return FunctionalTensor(e)
+
+        unwrapped_args = tree_map(unwrap, args)
+        if func.__name__ == 'add_':
+            unwrapped_res = unwrapped_args[0].add_(*unwrapped_args[1:], **kwargs)
+        else:
+            unwrapped_res = func(*unwrapped_args, **kwargs)
+        res = tree_map(wrap, unwrapped_res)
+        return res
+
+class TestFunctionalization(TestCase):
+
+    def test_functionalization(self):
+        def f5(x, *, logging: bool):
+            # test: everything
+            with capture_logs() as logs:
+                tmp = torch.ones(2, 2)
+                y = x.view(8)
+                z0 = y.reshape(2, 4)
+                z1 = z0.transpose(1, 0)
+                z1.unsqueeze_(0)
+                z1.squeeze_()
+                z2, z3 = z1.split(2)
+                z2.add_(tmp)
+            if logging:
+                self.assertExpectedInline('\n'.join(logs), """\
+$1 = torch._ops.aten.view($0, [8])
+$2 = torch._ops.aten._reshape_alias($1, [2, 4], [4, 1])
+$3 = torch._ops.aten.transpose($2, 1, 0)
+$4 = torch._ops.aten.view($0, [8])
+$5 = torch._ops.aten._reshape_alias($4, [2, 4], [4, 1])
+$6 = torch._ops.aten.transpose($5, 1, 0)
+$7 = torch._ops.aten.unsqueeze($6, 0)
+$8 = torch._ops.aten.view($0, [8])
+$9 = torch._ops.aten._reshape_alias($8, [2, 4], [4, 1])
+$10 = torch._ops.aten.transpose($9, 1, 0)
+$11 = torch._ops.aten.unsqueeze($10, 0)
+$12 = torch._ops.aten.squeeze($11)
+$13, $14 = torch._ops.aten.split($12, 2)
+$15 = torch._ops.aten.add($13, tensor([[1., 1.],
+        [1., 1.]]))""")
+            else:
+                return z2
+
+        def f4(x, *, logging: bool):
+            # test: view + inplace op (transpose_)
+            with capture_logs() as logs:
+                tmp = torch.ones(4)
+                x.transpose_(1, 0)
+                y = x[0]
+                y.add_(tmp)
+            if logging:
+                self.assertExpectedInline('\n'.join(logs), """\
+$1 = torch._ops.aten.transpose($0, 1, 0)
+$2 = torch._ops.aten.select($1, 0, 0)
+$3 = torch._ops.aten.add($2, tensor([1., 1., 1., 1.]))""")
+            else:
+                return y
+
+        def f3(x, *, logging: bool):
+            # test: view ops that return multiple tensors (split)
+            with capture_logs() as logs:
+                tmp = torch.ones(2)
+                y1, y2 = x.split(2)
+                y3 = y2.diagonal()
+                y3.add_(tmp)
+            if logging:
+                self.assertExpectedInline('\n'.join(logs), """\
+$1, $2 = torch._ops.aten.split($0, 2)
+$3 = torch._ops.aten.diagonal($2)
+$4 = torch._ops.aten.add($3, tensor([1., 1.]))""")
+            else:
+                return y3
+
+        def f2(x, *, logging: bool):
+            # test: view ops that take a subset of the original tensor (select/diagonal)
+            with capture_logs() as logs:
+                tmp = torch.ones(2)
+                y = x.permute(1, 0)
+                z1 = y[0]
+                z2 = z1.reshape(2, 2)
+                z3 = z2.diagonal()
+                z3.add_(tmp)
+            if logging:
+                self.assertExpectedInline('\n'.join(logs), """\
+$1 = torch._ops.aten.permute($0, [1, 0])
+$2 = torch._ops.aten.select($1, 0, 0)
+$3 = torch._ops.aten._reshape_alias($2, [2, 2], [4, 2])
+$4 = torch._ops.aten.diagonal($3)
+$5 = torch._ops.aten.add($4, tensor([1., 1.]))""")
+            else:
+                return z3
+
+        def f1(x, *, logging: bool):
+            # simple test: 1 view op, 1 inplace op
+            with capture_logs() as logs:
+                tmp = torch.ones(4, 2)
+                y = x.view(4, 2)
+                y.add_(tmp)
+                z = x + tmp
+            if logging:
+                self.assertExpectedInline('\n'.join(logs), """\
+$1 = torch._ops.aten.view($0, [4, 2])
+$2 = torch._ops.aten.add($1, tensor([[1., 1.],
+        [1., 1.],
+        [1., 1.],
+        [1., 1.]]))
+$3 = torch._ops.aten.view($2, [4, 2])
+$4 = torch._ops.aten.add($3, tensor([[1., 1.],
+        [1., 1.],
+        [1., 1.],
+        [1., 1.]]))""")
+            else:
+                return y
+
+        def assert_functionalization(func, inpt):
+            input_clone = inpt.clone()
+            input_functional = FunctionalTensor(input_clone)
+
+            # Runs expecttests for LoggingTensor output.
+            func(FunctionalTensor(LoggingTensor(inpt.clone())), logging=True)
+
+            # Compare outputs (and mutated inputs), with and without functionalization.
+            out_ref = func(inpt, logging=False)
+            out_functional = func(input_functional, logging=False)
+
+            # We need to sync the input tensors first, in case there are any queued mutations left.
+            input_functional.elem._sync()
+            out_functional.elem._sync()
+            self.assertEqual(out_ref, out_functional.elem._from_functional_tensor())
+            self.assertEqual(inpt, input_functional.elem._from_functional_tensor())  # input mutations should still occur
+
+        assert_functionalization(f1, torch.ones(4, 2))
+        assert_functionalization(f2, torch.ones(4, 2))
+        assert_functionalization(f3, torch.ones(4, 2))
+        assert_functionalization(f4, torch.ones(4, 2))
+        assert_functionalization(f5, torch.ones(4, 2))
 
 if __name__ == '__main__':
     run_tests()
