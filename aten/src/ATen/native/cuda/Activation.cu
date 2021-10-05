@@ -710,7 +710,8 @@ void GeluCUDAKernelImpl(TensorIteratorBase& it, bool approximate) {
       gpu_kernel(it, [] GPU_LAMBDA(scalar_t x) -> scalar_t {
         constexpr T_ACC kBeta = M_SQRT2 * M_2_SQRTPI * T_ACC(0.5);
         constexpr T_ACC kKappa = 0.044715;
-        auto inner = kBeta * (static_cast<T_ACC>(x) + kKappa * c10::cuda::compat::pow(static_cast<T_ACC>(x), T_ACC(3)));
+        auto x_cube = static_cast<T_ACC>(x) * static_cast<T_ACC>(x) * static_cast<T_ACC>(x);
+        auto inner = kBeta * (static_cast<T_ACC>(x) + kKappa * x_cube);
         return T_ACC(0.5) * static_cast<T_ACC>(x) * (T_ACC(1) + c10::cuda::compat::tanh(inner));
       });
     });
@@ -733,7 +734,9 @@ void GeluBackwardCUDAKernelImpl(TensorIteratorBase& it, bool approximate) {
           gpu_kernel(it, [] GPU_LAMBDA(scalar_t dy, scalar_t x) -> scalar_t {
             constexpr T_ACC kBeta = M_SQRT2 * M_2_SQRTPI * T_ACC(0.5);
             constexpr T_ACC kKappa = 0.044715;
-            auto inner = kBeta * (static_cast<T_ACC>(x) + kKappa * c10::cuda::compat::pow(static_cast<T_ACC>(x), T_ACC(3)));
+            auto x_sq = static_cast<T_ACC>(x) * static_cast<T_ACC>(x);
+            auto x_cube = x_sq * static_cast<T_ACC>(x);
+            auto inner = kBeta * (static_cast<T_ACC>(x) + kKappa * x_cube);
             auto tanh_inner = c10::cuda::compat::tanh(inner);
 
             auto left = T_ACC(0.5) * static_cast<T_ACC>(x);
@@ -742,7 +745,6 @@ void GeluBackwardCUDAKernelImpl(TensorIteratorBase& it, bool approximate) {
             auto left_derivative = 0.5 * right;
 
             auto tanh_derivative = T_ACC(1) - tanh_inner * tanh_inner;
-            auto x_sq = static_cast<T_ACC>(x) * static_cast<T_ACC>(x);
             auto inner_derivative = kBeta * (T_ACC(1) + T_ACC(3) * kKappa * x_sq);
             auto right_derivative = left * tanh_derivative * inner_derivative;
 

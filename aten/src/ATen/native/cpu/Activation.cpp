@@ -203,11 +203,13 @@ void GeluKernelImpl(TensorIteratorBase& it, bool approximate) {
           [](scalar_t x) {
             constexpr scalar_t kBeta = M_SQRT2 * M_2_SQRTPI * 0.5;
             constexpr scalar_t kKappa = 0.044715;
-            auto inner = kBeta * (x + kKappa * std::pow(x, scalar_t(3)));
+            auto x_cube = x * x * x;
+            auto inner = kBeta * (x + kKappa * x_cube);
             return scalar_t(0.5) * scalar_t(x) * (scalar_t(1) + std::tanh(inner));
           },
           [&](Vec x_vec) {
-            auto inner_vec = kBetaVec * (x_vec + kKappaVec * x_vec.pow(kThreeVec));
+            auto x_cube = x_vec * x_vec * x_vec;
+            auto inner_vec = kBetaVec * (x_vec + kKappaVec * x_cube);
             return kPointFiveVec * x_vec * (kOneVec + inner_vec.tanh());
           },
           grain_size);
@@ -248,7 +250,9 @@ void GeluBackwardKernelImpl(TensorIteratorBase& it, bool approximate) {
           [](scalar_t dy, scalar_t x) {
             constexpr scalar_t kBeta = M_SQRT2 * M_2_SQRTPI * 0.5;
             constexpr scalar_t kKappa = 0.044715;
-            auto inner = kBeta * (x + kKappa * std::pow(x, scalar_t(3)));
+            auto x_sq = x * x;
+            auto x_cube = x * x * x;
+            auto inner = kBeta * (x + kKappa * x_cube);
             auto tanh_inner = std::tanh(inner);
 
             auto left = scalar_t(0.5) * x;
@@ -258,14 +262,16 @@ void GeluBackwardKernelImpl(TensorIteratorBase& it, bool approximate) {
 
             auto tanh_derivative = scalar_t(1) - tanh_inner * tanh_inner;
             auto inner_derivative =
-              kBeta * (scalar_t(1) + scalar_t(3) * kKappa * x * x);
+              kBeta * (scalar_t(1) + scalar_t(3) * kKappa * x_sq);
             auto right_derivative = left * tanh_derivative * inner_derivative;
 
             return dy * (left_derivative + right_derivative);
           },
           [&](Vec dy_vec, Vec x_vec) {
+            auto x_sq = x_vec * x_vec;
+            auto x_cube = x_vec * x_vec * x_vec;
             auto inner_vec =
-                kBetaVec * (x_vec + kKappaVec * x_vec.pow(kThreeVec));
+                kBetaVec * (x_vec + kKappaVec * x_cube);
             auto tanh_inner_vec = inner_vec.tanh();
 
             auto left_vec = kPointFiveVec * x_vec;
@@ -276,7 +282,7 @@ void GeluBackwardKernelImpl(TensorIteratorBase& it, bool approximate) {
             auto tanh_derivative_vec =
                 kOneVec - tanh_inner_vec * tanh_inner_vec;
             auto inner_derivative_vec =
-                kBetaVec * (kOneVec + kThreeVec * kKappaVec * x_vec * x_vec);
+                kBetaVec * (kOneVec + kThreeVec * kKappaVec * x_sq);
             auto right_derivative_vec =
                 left_vec * tanh_derivative_vec * inner_derivative_vec;
 
