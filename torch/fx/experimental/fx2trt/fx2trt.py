@@ -281,11 +281,11 @@ class TRTInterpreter(torch.fx.Interpreter):
         input_specs: List[InputTensorSpec],
         explicit_batch_dimension: bool = False,
         explicit_precision: bool = False,
-        logger_level=trt.Logger.WARNING,
+        logger_level=None,
     ):
         super().__init__(module)
 
-        self.logger = trt.Logger(logger_level)
+        self.logger = trt.Logger(logger_level or trt.Logger.WARNING)
         self.builder = trt.Builder(self.logger)
 
         flag = 0

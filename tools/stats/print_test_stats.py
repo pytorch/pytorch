@@ -20,7 +20,7 @@ from typing_extensions import TypedDict
 from tools.stats.s3_stat_parser import (newify_case, get_S3_object_from_bucket, get_test_stats_summaries_for_job,
                                         Report, Status, Commit, HAVE_BOTO3, Version2Case, VersionedReport,
                                         Version1Report, Version2Report, ReportMetaMeta)
-from tools.stats.scribe import send_to_scribe
+from tools.stats.scribe import send_to_scribe, rds_write, register_rds_schema, schema_from_sample
 
 
 SimplerSuite = Dict[str, Version2Case]
@@ -805,6 +805,30 @@ def send_report_to_s3(head_report: Version2Report) -> None:
     obj.put(Body=bz2.compress(json.dumps(head_report).encode()))
 
 
+def upload_failures_to_rds(reports: Dict[str, TestFile]) -> None:
+    """
+    We have 40k+ tests, so saving every test for every commit is not very
+    feasible for PyTorch. Most of these are things we don't care about anyways,
+    so this code filters out failures and saves only those to the DB.
+    """
+    # Gather all failures across the entire report
+    failures = []
+    for file in reports.values():
+        for suite in file.test_suites.values():
+            for case in suite.test_cases.values():
+                if case.errored or case.failed:
+                    failures.append({
+                        "name": case.name,
+                        "suite": suite.name,
+                        "file": file.name,
+                        "status": "failure" if case.failed else "error"
+                    })
+
+    if len(failures) > 0:
+        register_rds_schema("test_failures", schema_from_sample(failures[0]))
+        rds_write("test_failures", failures, only_on_master=False)
+
+
 def print_regressions(head_report: Report, *, num_prev_commits: int) -> None:
     sha1 = os.environ.get("CIRCLE_SHA1", "HEAD")
 
@@ -934,6 +958,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     reports_by_file = parse_reports(args.folder)
+
+    upload_failures_to_rds(reports_by_file)
     if reports_has_no_tests(reports_by_file):
         print(f"No tests in reports found in {args.folder}")
         sys.exit(0)
