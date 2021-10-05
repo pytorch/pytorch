@@ -122,9 +122,10 @@ bool InterpreterState::run(Stack& stack) {
           frame.step();
         } break;
         case CALL: {
-          auto& function = frame.getCode().functions_.at(inst.X);
+          auto& function = *frame.getCode().functions_.at(inst.X);
           frame.step();
-          enterFrame(*function->get_code());
+          function.call(
+              stack, [&](const mobile::Code& code) { enterFrame(code); });
         } break;
         case INTERFACE_CALL: {
           torch::jit::Function& method =
@@ -135,15 +136,9 @@ bool InterpreterState::run(Stack& stack) {
           RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS(
               method.name(), debug_handle, stack);
 
-          // FIXME (zhxchen17)
-          if (auto f = dynamic_cast<mobile::Function*>(&method)) {
-            frame.step();
-            enterFrame(*f->get_code());
-            continue;
-          }
-
-          method.run(stack);
           frame.step();
+          method.call(
+              stack, [&](const mobile::Code& code) { enterFrame(code); });
         } break;
         case LOAD:
           stack.emplace_back(reg(inst.X));
