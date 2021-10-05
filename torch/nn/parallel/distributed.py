@@ -460,6 +460,11 @@ class DistributedDataParallel(Module, Joinable):
                       gradients. If hitting such errors, please fix it by
                       referring to the :meth:`~torch.optim.Optimizer.zero_grad`
                       function in ``torch/optim/optimizer.py`` as a solution.
+        move_inputs_to_device (bool): When set to ``True``, will move input
+                      arguments and kwargs to the DDP device. If ``False``,
+                      inputs will not be moved and user is responsible for
+                      making sure all inputs reside on the appropriate device.
+                      Default is ``True``.
 
 
     Attributes:
@@ -483,6 +488,7 @@ class DistributedDataParallel(Module, Joinable):
         find_unused_parameters=False,
         check_reduction=False,
         gradient_as_bucket_view=False,
+        move_inputs_to_device=True,
     ):
 
         super(DistributedDataParallel, self).__init__()
@@ -555,6 +561,7 @@ class DistributedDataParallel(Module, Joinable):
         self.require_backward_grad_sync = True
         self.require_forward_param_sync = True
         self.gradient_as_bucket_view = gradient_as_bucket_view
+        self.move_inputs_to_device = move_inputs_to_device
         if hasattr(module, "_ddp_params_and_buffers_to_ignore"):
             self.parameters_to_ignore = module._ddp_params_and_buffers_to_ignore
         else:
@@ -900,7 +907,10 @@ class DistributedDataParallel(Module, Joinable):
                 self._check_global_requires_backward_grad_sync(is_joined_rank=False)
 
             if self.device_ids:
-                inputs, kwargs = self.to_kwargs(inputs, kwargs, self.device_ids[0])
+                if self.move_inputs_to_device:
+                    inputs, kwargs = self.to_kwargs(
+                        inputs, kwargs, self.device_ids[0]
+                    )
                 output = self.module(*inputs[0], **kwargs[0])
             else:
                 output = self.module(*inputs, **kwargs)
