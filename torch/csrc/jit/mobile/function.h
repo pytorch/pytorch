@@ -29,6 +29,8 @@ class TORCH_API Function : public torch::jit::Function {
   std::string pretty_print_schema() const override;
   const std::string& name() const override;
   const c10::QualifiedName& qualname() const override;
+  void call(Stack&, c10::function_ref<void(const mobile::Code&)>) override;
+
   void append_instruction(OpCode op, int X, int N, int64_t dbg_handle = -1);
   bool append_operator(
       const std::string& name,

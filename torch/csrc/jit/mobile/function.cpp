@@ -175,8 +175,7 @@ void Function::run(Stack&& stack) {
 c10::intrusive_ptr<c10::ivalue::Future> Function::runAsync(
     Stack& stack,
     TaskLauncher taskLauncher) {
-  TORCH_INTERNAL_ASSERT(
-      false, "runAsync() is not supported for torch::jit::mobile::Function.");
+  TORCH_INTERNAL_ASSERT(false);
 }
 
 at::IValue Function::operator()(Stack stack, const Kwargs& kwargs) {
@@ -194,9 +193,11 @@ void Function::check_single_output() {
 }
 
 std::string Function::pretty_print_schema() const {
-  TORCH_INTERNAL_ASSERT(
-      false,
-      "pretty_print_schema() is not supported for torch::jit::mobile::Function.");
+  TORCH_INTERNAL_ASSERT(false);
+}
+
+void Function::call(Stack&, c10::function_ref<void(const mobile::Code&)> f) {
+  f(*code_);
 }
 
 const std::shared_ptr<Code> Function::get_code() const {
