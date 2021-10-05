@@ -180,6 +180,7 @@ class autocast(object):
 
     def __enter__(self):
         if torch._jit_internal.is_scripting():
+            assert self.fast_dtype is not None
             return self
 
         self.prev_cache_enabled = torch.is_autocast_cache_enabled()
