@@ -1046,7 +1046,6 @@ struct __attribute__((visibility("hidden"))) CustomLibraryImpl
   }
 
   at::optional<TLSIndex> tls_lookup_symbol(Elf64_Xword r_info) {
-    const uint32_t r_type = ELF64_R_TYPE(r_info);
     const uint32_t r_sym = ELF64_R_SYM(r_info);
 
     if (r_sym == 0) {
