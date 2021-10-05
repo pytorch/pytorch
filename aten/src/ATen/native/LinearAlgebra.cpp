@@ -1262,7 +1262,7 @@ void baddbmm_with_gemm_(const Tensor &result, const Tensor &mat1, const Tensor &
   const int64_t batch_size = mat1_sizes[0];
   const int64_t m = result_sizes[2];
   const int64_t n = result_sizes[1];
-  const int64_t k = mat2_sizes[2];
+  const int64_t k = mat2_sizes[1];
 
   const int64_t lda = mat2_strides[transpose_a ? 2 : 1];
   const int64_t ldb = mat1_strides[transpose_b ? 2 : 1];
