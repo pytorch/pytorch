@@ -341,21 +341,21 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
   shared_ptr_class_<::c10d::Reducer>(module, "Reducer")
       .def(
           py::init<
-              std::vector<std::vector<at::Tensor>>,
+              std::vector<at::Tensor>,
               std::vector<std::vector<size_t>>,
               std::vector<size_t>,
               c10::intrusive_ptr<::c10d::ProcessGroup>,
-              std::vector<std::vector<bool>>,
+              std::vector<bool>,
               int64_t,
               bool,
               bool,
               std::unordered_map<size_t, std::string>,
               int64_t>(),
-          py::arg("replicas"),
+          py::arg("params"),
           py::arg("bucket_indices"),
           py::arg("per_bucket_size_limits"),
           py::arg("process_group"),
-          py::arg("expect_sparse_gradients") = std::vector<std::vector<bool>>(),
+          py::arg("expect_sparse_gradients") = std::vector<bool>(),
           py::arg("bucket_bytes_cap") = ::c10d::kDefaultBucketBytesCap,
           py::arg("find_unused_parameters") = false,
           py::arg("gradient_as_bucket_view") = false,
@@ -378,6 +378,14 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           },
           py::call_guard<py::gil_scoped_release>())
       .def("get_backward_stats", &::c10d::Reducer::get_backward_stats)
+      .def("_install_post_backward_futures", [](::c10d::Reducer& reducer, const std::vector<std::shared_ptr<jit::PythonFutureWrapper>>& futs) {
+              c10::List<c10::intrusive_ptr<c10::ivalue::Future>> futures(c10::FutureType::create(c10::TensorType::get()));
+              for (const auto & fut : futs) {
+              futures.push_back(fut->fut);
+              }
+              reducer.install_futures(std::move(futures));
+          },
+          py::call_guard<py::gil_scoped_release>())
       .def(
           "_rebuild_buckets",
           &::c10d::Reducer::rebuild_buckets,
@@ -397,8 +405,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           &::c10d::Reducer::set_forward_pass_work_handle,
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "_get_local_used_maps",
-          &::c10d::Reducer::get_local_used_maps_on_device)
+          "_get_local_used_map",
+          &::c10d::Reducer::get_local_used_map_on_device)
       .def(
           "_set_ddp_runtime_logging_sample_rate",
           &::c10d::Reducer::set_ddp_runtime_logging_sample_rate,
@@ -490,11 +498,15 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       py::call_guard<py::gil_scoped_release>());
 
   py::enum_<::c10d::ReduceOp>(module, "ReduceOp", R"(
-An enum-like class for available reduction operations: ``SUM``, ``PRODUCT``,
-``MIN``, ``MAX``, ``BAND``, ``BOR``, and ``BXOR``.
+An enum-like class for available reduction operations: ``SUM``, ``AVG``,
+``PRODUCT``, ``MIN``, ``MAX``, ``BAND``, ``BOR``, and ``BXOR``.
 
-Note that ``BAND``, ``BOR``, and ``BXOR`` reductions are not available when
+``BAND``, ``BOR``, and ``BXOR`` reductions are not available when
 using the ``NCCL`` backend.
+
+``AVG`` divides values by the world size before summing across ranks.
+``AVG`` is only available with the ``NCCL`` backend,
+and only for NCCL versions 2.10 or later.
 
 Additionally, ``MAX``, ``MIN`` and ``PRODUCT`` are not supported for complex tensors.
 
@@ -502,6 +514,7 @@ The values of this class can be accessed as attributes, e.g., ``ReduceOp.SUM``.
 They are used in specifying strategies for reduction collectives, e.g.,
 :func:`reduce`, :func:`all_reduce_multigpu`, etc.)")
       .value("SUM", ::c10d::ReduceOp::SUM)
+      .value("AVG", ::c10d::ReduceOp::AVG)
       .value("PRODUCT", ::c10d::ReduceOp::PRODUCT)
       .value("MIN", ::c10d::ReduceOp::MIN)
       .value("MAX", ::c10d::ReduceOp::MAX)
@@ -1564,19 +1577,19 @@ Example::
       py::call_guard<py::gil_scoped_release>());
 
   module.def(
-      "_verify_model_across_ranks",
+      "_verify_params_across_processes",
       [](const c10::intrusive_ptr<::c10d::ProcessGroup>& process_group,
-         const std::vector<std::vector<at::Tensor>>& model_replicas,
+         const std::vector<at::Tensor>& params,
          const c10::optional<std::shared_ptr<::c10d::Logger>>& logger) {
              if (logger.has_value()) {
                 std::weak_ptr<::c10d::Logger> logger_weakref = logger.value();
-                verify_replica0_across_processes(process_group, model_replicas, {logger_weakref});
+                verify_params_across_processes(process_group, params, {logger_weakref});
              } else {
-                verify_replica0_across_processes(process_group, model_replicas, {});
+                verify_params_across_processes(process_group, params, {});
              }
       },
       py::arg("process_group"),
-      py::arg("replicas"),
+      py::arg("params"),
       py::arg("logger") = c10::optional<std::shared_ptr<::c10d::Logger>>{},
       py::call_guard<py::gil_scoped_release>());
 
