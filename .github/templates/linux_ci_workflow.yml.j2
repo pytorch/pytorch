@@ -112,7 +112,9 @@ jobs:
       {%- if not is_libtorch %}
       - name: Archive artifacts into zip
         run: |
-          zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .pytorch-test-times.json
+          # Don't merge LazyTensor specific hacks back to master.
+          zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .pytorch-test-times.json \
+          lazy_tensor_core/build/ lazy_tensor_core/test/cpp/build/
       - uses: !{{ common.upload_artifact_s3_action }}
         name: Store PyTorch Build Artifacts on S3
         with:
