@@ -2707,11 +2707,15 @@
 - func: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, float margin=0.0, int reduction=Mean) -> Tensor
 
 - func: matmul(Tensor self, Tensor other) -> Tensor
-  structured_delegate: matmul.out
   variants: function, method
+  device_check: NoCheck   # Composite
+  dispatch:
+    CompositeExplicitAutograd: matmul
 
 - func: matmul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  structured: True
+  device_check: NoCheck   # Composite
+  dispatch:
+    CompositeExplicitAutograd: matmul_out
 
 - func: matrix_rank.tol(Tensor self, float tol, bool symmetric=False) -> Tensor
 

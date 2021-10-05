@@ -48,29 +48,6 @@ TORCH_META_FUNC(mm)(const Tensor & self, const Tensor & mat2) {
   set_output(0, {self.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
 }
 
-TORCH_META_FUNC(matmul)(const Tensor & tensor1, const Tensor & tensor2) {
-  const auto dim_tensor1 = tensor1.dim();
-  const auto dim_tensor2 = tensor2.dim();
-  TORCH_CHECK(dim_tensor1 != 0 && dim_tensor2 != 0, "both arguments to matmul need to be at least 1D, but they are ",
-           dim_tensor1, "D and ", dim_tensor2, "D");
-  auto names = at::namedinference::compute_matmul_outnames(tensor1, tensor2);
-  if (dim_tensor1 == 1 && dim_tensor2 == 1) {
-    set_output(0, {1}, {}, tensor1.options(), std::move(names));
-  } else if (dim_tensor1 == 1) {
-    set_output(0, tensor2.sizes(), {}, tensor1.options(), std::move(names));
-  } else if (dim_tensor2 == 1) {
-    set_output(0, tensor1.sizes(), {}, tensor1.options(), std::move(names));
-  } else {
-    const int64_t n = tensor1.sizes().end()[-2];
-    const IntArrayRef batch_tensor1(tensor1.sizes().data(), dim_tensor1 - 2);
-    const int64_t p = tensor2.sizes().back();
-    const IntArrayRef batch_tensor2(tensor2.sizes().data(), dim_tensor2 - 2);
-    DimVector output_shape = infer_size_dimvector(batch_tensor1, batch_tensor2);
-    output_shape.append({n, p});
-    set_output(0, output_shape, {}, tensor1.options(), std::move(names));
-  }
-}
-
 template <typename Meta>
 void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm, const c10::optional<Tensor>& self_baddbmm = nullopt) {
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
@@ -1497,75 +1474,97 @@ The behavior depends on the dimensionality of the Tensors as follows:
   must be broadcastable).  For example, if tensor1 is a (j x 1 x n x m) Tensor
   and tensor2 is a (k x m x p) Tensor, the returned tensor will be an (j x k x n x p) Tensor.
 */
-TORCH_IMPL_FUNC(matmul_out)(const Tensor& tensor1, const Tensor& tensor2, const Tensor &result) {
-  {
-    NoNamesGuard guard;
-    const auto dim_tensor1 = tensor1.dim();
-    const auto dim_tensor2 = tensor2.dim();
+Tensor& matmul_out(const Tensor& tensor1, const Tensor& tensor2, Tensor& result) {
+  auto maybe_outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
+  NoNamesGuard guard;
+  const auto dim_tensor1 = tensor1.dim();
+  const auto dim_tensor2 = tensor2.dim();
+  TORCH_CHECK(dim_tensor1 != 0 && dim_tensor2 != 0,
+              "both arguments to matmul need to be at least 1D, but they are ",
+              dim_tensor1, "D and ", dim_tensor2, "D");
 
-    if (dim_tensor1 == 1 && dim_tensor2 == 1) {
-      at::dot_out(const_cast<Tensor&>(result), tensor1, tensor2);
-    } else if (dim_tensor1 == 2 && dim_tensor2 == 1) {
-      at::mv_out(const_cast<Tensor&>(result), tensor1, tensor2);
-    } else if (dim_tensor1 == 1 && dim_tensor2 == 2) {
-      // optimization: use mv instead of mm by calling mv with swapped (and transposed) args
-      at::mv_out(const_cast<Tensor&>(result), tensor2.t(), tensor1);
-    } else if (dim_tensor1 == 2 && dim_tensor2 == 2) {
-      at::mm_out(const_cast<Tensor&>(result), tensor1, tensor2);
-    } else if (dim_tensor1 >= 3 && (dim_tensor2 == 1 || dim_tensor2 == 2)) {
-      // optimization: use mm instead of bmm by folding tensor1's batch into
-      // its leading matrix dimension.
+  if (dim_tensor1 == 1 && dim_tensor2 == 1) {
+    at::dot_out(result, tensor1, tensor2);
+  } else if (dim_tensor1 == 2 && dim_tensor2 == 1) {
+    at::mv_out(result, tensor1, tensor2);
+  } else if (dim_tensor1 == 1 && dim_tensor2 == 2) {
+    // optimization: use mv instead of mm by calling mv with swapped (and transposed) args
+    at::mv_out(result, tensor2.t(), tensor1);
+  } else if (dim_tensor1 == 2 && dim_tensor2 == 2) {
+    at::mm_out(result, tensor1, tensor2);
+  } else if (dim_tensor1 >= 3 && dim_tensor2 >= 3) {
+    // We are multiplying b1 x n x m1 by b2 x m2 x p (where b1 and b2 can be lists);
+    // we track m1 vs m2 separately even though they must match for nicer error messages
+    const IntArrayRef batch_tensor1(tensor1.sizes().data(), dim_tensor1 - 2);
+    const int64_t n = tensor1.sizes().cend()[-2];
+    const int64_t m1 = tensor1.sizes().back();
+    const IntArrayRef batch_tensor2(tensor2.sizes().data(), dim_tensor2 - 2);
+    const int64_t m2 = tensor2.sizes().cend()[-2];
+    const int64_t p = tensor2.sizes().back();
+    auto output_shape = infer_size_dimvector(batch_tensor1, batch_tensor2);
 
-      // Why not tensor1.view(-1, sizes_1.back())?
-      // If the last dim is 0, then view(-1, 0) won't work because the -1 becomes ambiguous.
-      // This can happen in e.g. [3, 5, 0] @ [0, 0].
-      const auto sizes_1 = tensor1.sizes();
-      const auto batch_product = c10::multiply_integers(sizes_1.cbegin(), sizes_1.cend() - 1);
-      const auto t1 = tensor1.expect_contiguous()->view({batch_product, sizes_1.back()});
-      const auto output = dim_tensor2 == 2
-                            ? at::_unsafe_view(at::mm_out(const_cast<Tensor&>(result), t1, tensor2), result.sizes())
-                            : at::_unsafe_view(at::mv_out(const_cast<Tensor&>(result), t1, tensor2), result.sizes());
-      result.set_(output);
-    } else if (dim_tensor1 == 1 && dim_tensor2 >= 3) {
-      // optimization: transpose the batch of matrices to call `mv_out`
-      at::matmul_out(const_cast<Tensor &>(result), tensor2.transpose(-2, -1), tensor1);
-    } else if (dim_tensor2 == 2 && dim_tensor2 >= 3) {
-      // optimization: transpose the batch of matrices to call `mm_out`
-
-      // FIXME This does two extra copies as the returned result from BLAS is already C-transposed,
-      // so transposing its strides it would already be C-contiguous
-      at::matmul_out(const_cast<Tensor &>(result), tensor2.transpose(-2, -1), tensor1.t());
-      result.set_(result.transpose_(-2, -1).contiguous());
-    } else {
-      // Both matrices have 3 dims or more
-      // We are multiplying b1 x n x m1 by b2 x m2 x p (where b1 and b2 can be lists);
-      // we track m1 vs m2 separately even though they must match for nicer error messages
-      const int64_t n = tensor1.sizes().cend()[-2];
-      const int64_t m1 = tensor1.sizes().back();
-      const int64_t m2 = tensor2.sizes().cend()[-2];
-      const int64_t p = tensor2.sizes().back();
-
-      const auto result_sizes = result.sizes();
-      const auto batch_dims = IntArrayRef(result_sizes.data(), result_sizes.size() - 2);
-
-      const auto tensor1_expand_size = [batch_dims, n, m1]{ DimVector ret(batch_dims);
+    const auto tensor1_expand_size = [output_shape, n, m1]{ DimVector ret(output_shape);
                                                             ret.append({n, m1});
                                                             return ret; }();
-      const auto tensor2_expand_size = [batch_dims, m2, p]{ DimVector ret(batch_dims);
+    const auto tensor2_expand_size = [output_shape, m2, p]{ DimVector ret(output_shape);
                                                             ret.append({m2, p});
                                                             return ret; }();
 
-      const int64_t expand_batch_product = c10::multiply_integers(batch_dims);
+    const int64_t expand_batch_product = c10::multiply_integers(output_shape);
 
-      // flatten expanded batches
-      const auto tensor1_expanded = tensor1.expand(tensor1_expand_size)
-                                           .reshape({expand_batch_product, n, m1});
-      const auto tensor2_expanded = tensor2.expand(tensor2_expand_size)
-                                           .reshape({expand_batch_product, m2, p});
+    // flatten expanded batches
+    const auto tensor1_expanded = tensor1.expand(tensor1_expand_size)
+                                         .reshape({expand_batch_product, n, m1});
+    const auto tensor2_expanded = tensor2.expand(tensor2_expand_size)
+                                         .reshape({expand_batch_product, m2, p});
+    output_shape.append({n, p});
 
-      result.set_(at::_unsafe_view(at::bmm_out(const_cast<Tensor&>(result), tensor1_expanded, tensor2_expanded), std::move(result_sizes)));
+    result.set_(at::_unsafe_view(at::bmm_out(result, tensor1_expanded, tensor2_expanded),output_shape));
+  } else {
+    // dim_tensor1 >=3 && (dim_tensor2 == 1 || dim_tensor2 == 2) ||
+    // dim_tensor2 >=3 && (dim_tensor1 == 1 || dim_tensor1 == 2)
+    // optimization: use mm instead of bmm by folding the large tensor's batch into
+    // its leading matrix dimension.
+    const auto transpose = dim_tensor2 > dim_tensor1;
+    const auto t1 = transpose ? MaybeOwned<Tensor>::owned(tensor2.transpose(-2, -1))
+                              : MaybeOwned<Tensor>::borrowed(tensor1);
+    const auto t2 = transpose && dim_tensor1 == 2
+                      ? MaybeOwned<Tensor>::owned(tensor1.t())
+                      : MaybeOwned<Tensor>::borrowed(transpose ? tensor1 : tensor2);
+    // Invariant: t1->dim() >= 3 && (t2->dim() == 1 || t2->dim() == 2)
+
+    // Why not t1->view(-1, sizes_1.back())?
+    // If the last dim is 0, then view(-1, 0) won't work because the -1 becomes ambiguous.
+    // This can happen in e.g. [3, 5, 0] @ [0, 0].
+    const auto sizes_1 = t1->sizes();
+    auto output_size = DimVector((size_t *) sizes_1.begin(), (size_t *) sizes_1.end() - 1);
+    const auto batch_product = c10::multiply_integers(output_size);
+
+    // Readjust output_size if we are multiplying by a matrix
+    const auto t2_is_matrix = t2->dim() == 2;
+    if (t2_is_matrix) {
+      output_size.push_back(t2->sizes()[1]);
+    }
+    const auto t1_folded = t1->expect_contiguous()->view({batch_product, sizes_1.back()});
+    const auto output = t2_is_matrix
+                          ? at::_unsafe_view(at::mm_out(result, t1_folded, *t2), output_size)
+                          : at::_unsafe_view(at::mv_out(result, t1_folded, *t2), output_size);
+    if (transpose && t2_is_matrix) {
+      // FIXME This path does two extra copies as the returned result from BLAS is already C-transposed
+      result.set_(output.transpose_(-2, -1).contiguous());
+    } else {
+      result.set_(output);
     }
   }
+  guard.reset();
+  at::namedinference::propagate_names_if_nonempty(result, maybe_outnames);
+  return result;
+}
+
+Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
+  Tensor result = at::empty({0}, tensor1.options());
+  at::matmul_out(result, tensor1, tensor2);
+  return result;
 }
 
 // torch.linalg.matmul, alias for torch.matmul
