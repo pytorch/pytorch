@@ -197,6 +197,7 @@ WINDOWS_BLOCKLIST = [
     "distributed/elastic/agent/server/test/api_test",
     "distributed/elastic/multiprocessing/api_test",
     "distributed/_sharded_tensor/test_sharded_tensor",
+    "distributed/_sharded_tensor/ops/test_linear",
 ]
 
 ROCM_BLOCKLIST = [
@@ -205,6 +206,7 @@ ROCM_BLOCKLIST = [
     "distributed/rpc/test_tensorpipe_agent",
     "distributed/rpc/cuda/test_tensorpipe_agent",
     "distributed/_sharded_tensor/test_sharded_tensor",
+    "distributed/_sharded_tensor/ops/test_linear",
     "test_determination",
     "test_multiprocessing",
     "test_jit_legacy",
@@ -339,6 +341,7 @@ DISTRIBUTED_TESTS = [
     "distributed/elastic/multiprocessing/api_test",
     "distributed/_sharding_spec/test_sharding_spec",
     "distributed/_sharded_tensor/test_sharded_tensor",
+    "distributed/_sharded_tensor/ops/test_linear",
 ]
 
 # Dictionary matching test modules (in TESTS) to lists of test cases (within that test_module) that would be run when
