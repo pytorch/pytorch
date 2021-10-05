@@ -17,6 +17,9 @@ from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_dtype import get_all_dtypes
 
+# The implementation should be moved here as soon as the deprecation period is over.
+from torch.testing._legacy import get_all_device_types  # noqa: F401
+
 try:
     import psutil  # type: ignore[import]
     HAS_PSUTIL = True
@@ -1034,6 +1037,18 @@ def onlyCPU(fn):
 
 def onlyCUDA(fn):
     return onlyOn('cuda')(fn)
+
+
+def disablecuDNN(fn):
+
+    @wraps(fn)
+    def disable_cudnn(self, *args, **kwargs):
+        if self.device_type == 'cuda' and self.has_cudnn():
+            with torch.backends.cudnn.flags(enabled=False):
+                return fn(self, *args, **kwargs)
+        return fn(self, *args, **kwargs)
+
+    return disable_cudnn
 
 
 def expectedFailureCUDA(fn):
