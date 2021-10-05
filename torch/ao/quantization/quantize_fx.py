@@ -53,23 +53,24 @@ def _fuse_fx(
 class Scope(object):
     """ Scope object that records the module path and the module type
     of a module. Scope is used to track the information of the module
-    that contains a Node in a Graph of GraphModule. For example:
-    class Sub(torch.nn.Module):
-        def forward(self, x):
-            # This will be a call_method Node in GraphModule,
-            # scope for this would be (module_path="sub", module_type=Sub)
-            return x.transpose(1, 2)
+    that contains a Node in a Graph of GraphModule. For example::
 
-    class M(torch.nn.Module):
-        def __init__(self):
-            self.sub = Sub()
+        class Sub(torch.nn.Module):
+            def forward(self, x):
+                # This will be a call_method Node in GraphModule,
+                # scope for this would be (module_path="sub", module_type=Sub)
+                return x.transpose(1, 2)
 
-        def forward(self, x):
-            # This will be a call_method Node as well,
-            # scope for this would be (module_path="", None)
-            x = x.transpose(1, 2)
-            x = self.sub(x)
-            return x
+        class M(torch.nn.Module):
+            def __init__(self):
+                self.sub = Sub()
+
+            def forward(self, x):
+                # This will be a call_method Node as well,
+                # scope for this would be (module_path="", None)
+                x = x.transpose(1, 2)
+                x = self.sub(x)
+                return x
 
     """
     def __init__(self, module_path: str, module_type: Any):
@@ -78,8 +79,7 @@ class Scope(object):
         self.module_type = module_type
 
 class ScopeContextManager(object):
-    """ A context manager to track the Scope of Node during symbolic
-    tracing.
+    """ A context manager to track the Scope of Node during symbolic tracing.
     When entering a forward function of a Module, we'll update the scope information of
     the current module, and when we exit, we'll restore the previous scope information.
     """

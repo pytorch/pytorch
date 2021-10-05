@@ -15,8 +15,8 @@ Top-level quantization APIs
 .. autofunction:: fuse_fx
 .. autofunction:: _prepare_standalone_module_fx
 .. autofunction:: _convert_standalone_module_fx
-.. autoclass: Scope
-.. autoclass: ScopeContextManager
+.. autoclass:: Scope
+.. autoclass:: ScopeContextManager
 
 .. currentmodule:: torch
 
