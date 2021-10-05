@@ -58,8 +58,10 @@ class EmbeddingBag(nn.EmbeddingBag):
         return qat_embedding_bag
 
     def to_float(self):
-        embedding_bag = torch.nn.EmbeddingBag(self.in_features, self.out_features, self.bias is not None)
+        embedding_bag = torch.nn.EmbeddingBag(self.num_embeddings, self.embedding_dim, self.max_norm,
+                                              self.norm_type, self.scale_grad_by_freq, self.mode, self.sparse,
+                                              None, self.include_last_offset, self.padding_idx,
+                                              self.device, self.dtype)
         embedding_bag.weight = torch.nn.Parameter(self.weight.detach())
-
         embedding_bag.train(self.training)
         return embedding_bag
