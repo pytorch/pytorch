@@ -23,13 +23,13 @@ namespace {
 bool autocast_enabled = false;
 
 struct AutocastContext {
-  bool enabled = false;
+  bool gpu_enabled = false;
   bool cpu_enabled = false;
-  c10::ScalarType scalar_type = c10::ScalarType::Undefined;
+  c10::ScalarType gpu_scalar_type = c10::ScalarType::Undefined;
   c10::ScalarType cpu_scalar_type = c10::ScalarType::Undefined;
 
   operator bool() const {
-    return enabled || cpu_enabled;
+    return gpu_enabled || cpu_enabled;
   }
 };
 
@@ -65,75 +65,76 @@ bool isAutocastNode(Value* value) {
 c10::optional<AutocastScope> parseAutocast(
     Value* value,
     const AutocastContext& context) {
-  if (isAutocastNode(value)) {
-    if (value->node()->kind() == prim::CreateObject) {
-      AutocastScope scope;
-      scope.instance = value;
-      scope.context = context;
-      c10::optional<bool> enabled;
-      std::string device;
-      c10::ScalarType dtype = c10::ScalarType::Undefined;
-      for (Use use : value->uses()) {
-        // TODO: support runtime flag
-        if (use.user->kind() == prim::SetAttr &&
-            use.user->s(attr::name) == "_enabled") {
-          // Search for `prim::SetAttr[name="_enabled"]`
-          auto ret = constant_as<bool>(use.user->input(1));
-          TORCH_CHECK(
-              ret.has_value(), "Autocast _enabled argument must be a constant");
-          enabled = ret.value();
-        } else if (
-            use.user->kind() == prim::SetAttr &&
-            use.user->s(attr::name) == "device") {
-          // Search for `prim::SetAttr[name="device"]`
-          auto ret = constant_as<std::string>(use.user->input(1));
-          TORCH_CHECK(
-              ret.has_value(), "Autocast device argument must be a constant");
-          device = ret.value();
-        } else if (
-            use.user->kind() == prim::SetAttr &&
-            use.user->s(attr::name) == "fast_dtype") {
-          // Search for `prim::SetAttr[name="fast_dtype"]`
-          auto ret = constant_as<c10::ScalarType>(use.user->input(1));
-          TORCH_CHECK(
-              ret.has_value() && ret.value() != c10::ScalarType::Undefined,
-              "Autocast dtype argument must be a constant and defined");
-          dtype = ret.value();
-        }
+  if (!isAutocastNode(value)) {
+    // Not an autocast...
+    return c10::nullopt;
+  }
+  if (value->node()->kind() == prim::CreateObject) {
+    AutocastScope scope;
+    scope.instance = value;
+    scope.context = context;
+    c10::optional<bool> enabled;
+    std::string device;
+    c10::ScalarType dtype = c10::ScalarType::Undefined;
+    for (Use use : value->uses()) {
+      // TODO: support runtime flag
+      if (use.user->kind() == prim::SetAttr &&
+          use.user->s(attr::name) == "_enabled") {
+        // Search for `prim::SetAttr[name="_enabled"]`
+        auto ret = constant_as<bool>(use.user->input(1));
+        TORCH_CHECK(
+            ret.has_value(), "Autocast _enabled argument must be a constant");
+        enabled = ret.value();
+      } else if (
+          use.user->kind() == prim::SetAttr &&
+          use.user->s(attr::name) == "device") {
+        // Search for `prim::SetAttr[name="device"]`
+        auto ret = constant_as<std::string>(use.user->input(1));
+        TORCH_CHECK(
+            ret.has_value(), "Autocast device argument must be a constant");
+        device = ret.value();
+      } else if (
+          use.user->kind() == prim::SetAttr &&
+          use.user->s(attr::name) == "fast_dtype") {
+        // Search for `prim::SetAttr[name="fast_dtype"]`
+        auto ret = constant_as<c10::ScalarType>(use.user->input(1));
+        TORCH_CHECK(
+            ret.has_value() && ret.value() != c10::ScalarType::Undefined,
+            "Autocast dtype argument must be a constant and defined");
+        dtype = ret.value();
       }
-      TORCH_CHECK(enabled.has_value(), "Autocast missing _enabled attribute");
-      TORCH_CHECK(
-          dtype != c10::ScalarType::Undefined,
-          "Autocast missing fast_dtype attribute");
-      TORCH_CHECK(!device.empty(), "Autocast missing device attribute");
-      if (device == "cuda") {
-        scope.context.enabled = enabled.value();
-        scope.context.scalar_type = dtype;
-      } else if (device == "cpu") {
-        scope.context.cpu_enabled = enabled.value();
-        scope.context.cpu_scalar_type = dtype;
-      } else {
-        TORCH_INTERNAL_ASSERT(
-            false, "unrecognized device for autocast pass: ", device);
-      }
-      return scope;
-    } else {
-      // We only support simple and static autocast expressions. For example,
-      // the following should report an error (since the autocast would not
-      // work as expected)
-      //
-      //    autocast_on = autocast(enabled=True)
-      //    autocast_off = autocast(enabled=False)
-      //    with autocast_on if condition else autocast_off:
-      //        ...
-      //
-      // TODO: better error message
-      //
-      AT_ERROR("Unsupported autocast syntax");
     }
+    TORCH_CHECK(enabled.has_value(), "Autocast missing _enabled attribute");
+    TORCH_CHECK(
+        dtype != c10::ScalarType::Undefined,
+        "Autocast missing fast_dtype attribute");
+    TORCH_CHECK(!device.empty(), "Autocast missing device attribute");
+    if (device == "cuda") {
+      scope.context.gpu_enabled = enabled.value();
+      scope.context.gpu_scalar_type = dtype;
+    } else if (device == "cpu") {
+      scope.context.cpu_enabled = enabled.value();
+      scope.context.cpu_scalar_type = dtype;
+    } else {
+      TORCH_INTERNAL_ASSERT(
+          false, "unrecognized device for autocast pass: ", device);
+    }
+    return scope;
+  } else {
+    // We only support simple and static autocast expressions. For example,
+    // the following should report an error (since the autocast would not
+    // work as expected)
+    //
+    //    autocast_on = autocast(enabled=True)
+    //    autocast_off = autocast(enabled=False)
+    //    with autocast_on if condition else autocast_off:
+    //        ...
+    //
+    // TODO: better error message
+    //
+    AT_ERROR("Unsupported autocast syntax");
   }
 
-  // Not an autocast...
   return c10::nullopt;
 }
 
@@ -163,16 +164,16 @@ void castTensorInputs(
       const auto new_input = graph->insert(
           cast_op,
           {input,
-           graph->insertConstant(IValue(context.enabled)),
+           graph->insertConstant(IValue(context.gpu_enabled)),
            graph->insertConstant(IValue(context.cpu_enabled))});
       node->replaceInputWith(input, new_input);
     } else if (cast_op == aten::_autocast_to_reduced_precision) {
       const auto new_input = graph->insert(
           cast_op,
           {input,
-           graph->insertConstant(IValue(context.enabled)),
+           graph->insertConstant(IValue(context.gpu_enabled)),
            graph->insertConstant(IValue(context.cpu_enabled)),
-           graph->insertConstant(IValue(context.scalar_type)),
+           graph->insertConstant(IValue(context.gpu_scalar_type)),
            graph->insertConstant(IValue(context.cpu_scalar_type))});
       node->replaceInputWith(input, new_input);
     } else {
@@ -183,25 +184,11 @@ void castTensorInputs(
 }
 
 bool hasExplicitDtypeArgument(Node* node) {
-  const auto& actual_args = node->inputs();
-  const auto& formal_args = node->schema().arguments();
-  TORCH_INTERNAL_ASSERT(actual_args.size() == formal_args.size());
-
-  // Try to identify the `dtype` optional paramater
-  Value* dtype_arg = nullptr;
-  for (size_t i = 0; i < formal_args.size(); ++i) {
-    const auto& formal = formal_args[i];
-    if (auto type = formal.type()->cast<OptionalType>()) {
-      if (formal.name() == "dtype" &&
-          type->getElementType()->kind() == TypeKind::IntType) {
-        dtype_arg = actual_args[i];
-        break;
-      }
-    }
+  if (node->hasNamedInput("dtype")) {
+    Value* dtype_arg = node->namedInput("dtype");
+    return dtype_arg->type()->kind() != TypeKind::NoneType;
   }
-
-  // Have we found a `dtype` argument and it is set to `None`?
-  return dtype_arg && dtype_arg->type()->kind() != TypeKind::NoneType;
+  return false;
 }
 
 void castInputsToWidestType(Node* node, const AutocastContext& context) {
@@ -224,6 +211,22 @@ void castInputsToWidestType(Node* node, const AutocastContext& context) {
   }
 }
 
+// [Note: implicit type promotion in Autocast]
+//
+// Casting policy below mostly follows pytorch/aten/src/ATen/autocast.cpp, with
+// a few exceptions, e.g. `aten::add`, which is needed to be put to promotion
+// list for JIT autocast.
+// The reason is that in eager amp, some binary ops promote inputs implicitly
+// inside the operation, e.g. `aten::add` with fp16 & fp32 inputs would both be
+// casted to fp32. In backward, autograd would cast dgrad to match their
+// scalar_type in forward graph. So inputs with mismatched scalar_type would
+// get the different dgrad.
+// While in JIT, autodiff doesn't do this, so implicit cast is not visible to
+// autodiff and backward dgrad for mismatched inputs would ended up with dgrads
+// in the same scalar_type. This has caused downstream operations, which
+// expects dgrad to be the same scalar type to throw mismatch error.
+//
+// TODO: Use the list from AMP eager directly
 void handleBlock(Block* block, AutocastContext initial_state) {
   std::stack<AutocastScope> autocast_stack;
 
@@ -403,6 +406,7 @@ void handleBlock(Block* block, AutocastContext initial_state) {
       // add, sub, mul, div were added to autocast jit, because aten implicit
       // type promotion is not visible to JIT and could cause dtype mismatch on
       // backward
+      // see [Note: implicit type promotion in Autocast]
       case aten::add:
       case aten::sub:
       case aten::mul:
