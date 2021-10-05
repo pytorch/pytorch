@@ -39,7 +39,7 @@ std::unordered_map<int64_t, Value*> InsertSymbolicShapesCompute(const ShapeCompu
 }
 
 
-void GenerateGuard(Node * tensorexpr_graph_node) {
+c10::optional<std::unordered_map<int64_t, Value*>>  GenerateGuard(Node * tensorexpr_graph_node) {
     auto tensorexpr_graph =  SubgraphUtils::getSubgraph(tensorexpr_graph_node);
     std::unordered_map<size_t, int64_t> shape_to_sym_shape;
     for (Value * v: tensorexpr_graph->inputs()) {
@@ -47,7 +47,7 @@ void GenerateGuard(Node * tensorexpr_graph_node) {
             continue;
         }
         if (!v->type()->expect<TensorType>()->sizes().concrete_sizes()) {
-            return;
+            return c10::nullopt;
         }
         auto tt = v->type()->expect<TensorType>();
         std::vector<at::ShapeSymbol> shape_vec = *tt->symbolic_sizes().sizes();
@@ -55,7 +55,9 @@ void GenerateGuard(Node * tensorexpr_graph_node) {
             c10::fmap(shape_vec, [&](const at::ShapeSymbol& shape) {
               auto value = shape.value();
               TORCH_INTERNAL_ASSERT(value >= 0, "Expected complete tensor");
-              if (shape_to_sym_shape.count(static_cast<size_t>(value))) {
+              if (value == 1) {
+                  return value;
+              } else if (shape_to_sym_shape.count(static_cast<size_t>(value))) {
                   return shape_to_sym_shape[value];
               } else {
                   auto new_shape_symbol = at::ShapeSymbol::newSymbol().value();
@@ -68,10 +70,10 @@ void GenerateGuard(Node * tensorexpr_graph_node) {
 
     auto maybe_shape_compute_mapping = PropagateShapesAndBuildLargeShapeComputeGraph(tensorexpr_graph, *tensorexpr_graph->nodes().begin(), *tensorexpr_graph->nodes().end());
     if (!maybe_shape_compute_mapping) {
-        return;
+        return c10::nullopt;
     }
 
-    InsertSymbolicShapesCompute(*maybe_shape_compute_mapping, tensorexpr_graph_node);
+    return InsertSymbolicShapesCompute(*maybe_shape_compute_mapping, tensorexpr_graph_node);
 }
 
 

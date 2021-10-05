@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/symbolic_shape_runtime_compute.h>
 #include "ATen/core/interned_strings.h"
+#include "c10/util/Exception.h"
 
 namespace torch {
 namespace jit {
@@ -38,9 +39,29 @@ TEST(ShapeAnalysisTest, Basic) {
   output->node()->addInput(x_inp);
   output->node()->addInput(y_inp);
   output->node()->g_(attr::Subgraph, subgraph);
-  GenerateGuard(output->node());
-  g.registerOutput(output);
+  auto maybe_map = GenerateGuard(output->node());
+  TORCH_INTERNAL_ASSERT(maybe_map.has_value());
+  auto map = *maybe_map;
   g.dump();
+  for (const auto& pair: map) {
+    std::cout << pair.first << " : ";
+    pair.second->node()->dump();
+    std::cout << "\n";
+  }
+  // TODO: add test for corrrectness of computed map
+  // std::unordered_set<int64_t> added_values;
+  // auto subgraph_x = subgraph->inputs().at(0);
+  // for (auto val: *subgraph_x->type()->expect<TensorType>()->symbolic_sizes().sizes()) {
+  //   if (val.value() == 1) {
+  //     continue;
+  //   }
+  //   TORCH_INTERNAL_ASSERT(map->count(val.value()));
+  //   if (added_values.count(val.value())) {
+  //     continue;
+  //   }
+  // }
+
+  // g.dump();
 }
 
 
