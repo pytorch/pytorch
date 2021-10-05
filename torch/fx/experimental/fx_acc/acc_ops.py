@@ -1541,3 +1541,9 @@ def packed_quantized_convrelu2d_mapper(
         )
         relu_node.meta = node.meta
         return relu_node
+
+@register_acc_op_mapping(op_and_target=("call_function", torch.nn.functional.gelu))
+@register_acc_op_mapping(op_and_target=("call_method", "gelu"))
+@register_acc_op
+def gelu(*, input):
+    return torch.nn.functional.gelu(**locals())
