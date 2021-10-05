@@ -664,8 +664,6 @@ jobs:
           if [[ ${BUILD_ENVIRONMENT} == *"multigpu"* ]]; then
             echo ".jenkins/pytorch/multigpu-test.sh" >> docker_commands.sh
           elif [[ ${BUILD_ENVIRONMENT} == *onnx* ]]; then
-            echo "pip install click mock tabulate networkx==2.0" >> docker_commands.sh
-            echo "pip -q install --user \"file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx\"" >> docker_commands.sh
             echo ".jenkins/caffe2/test.sh" >> docker_commands.sh
           else
             echo ".jenkins/pytorch/test.sh" >> docker_commands.sh
@@ -6621,26 +6619,6 @@ workflows:
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc7"
           resource_class: large
       - pytorch_linux_build:
-          name: pytorch_linux_xenial_py3_clang7_onnx_build
-          requires:
-            - "docker-pytorch-linux-xenial-py3-clang7-onnx"
-          build_environment: "pytorch-linux-xenial-py3-clang7-onnx-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang7-onnx"
-      - pytorch_linux_test:
-          name: pytorch_linux_xenial_py3_clang7_onnx_ort_test1
-          requires:
-            - pytorch_linux_xenial_py3_clang7_onnx_build
-          build_environment: "pytorch-linux-xenial-py3-clang7-onnx-ort_test1"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang7-onnx"
-          resource_class: large
-      - pytorch_linux_test:
-          name: pytorch_linux_xenial_py3_clang7_onnx_ort_test2
-          requires:
-            - pytorch_linux_xenial_py3_clang7_onnx_build
-          build_environment: "pytorch-linux-xenial-py3-clang7-onnx-ort_test2"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang7-onnx"
-          resource_class: large
-      - pytorch_linux_build:
           name: pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_build
           requires:
             - "docker-pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
@@ -8409,9 +8387,6 @@ workflows:
       - docker_build_job:
           name: "docker-pytorch-linux-xenial-py3-clang5-asan"
           image_name: "pytorch-linux-xenial-py3-clang5-asan"
-      - docker_build_job:
-          name: "docker-pytorch-linux-xenial-py3-clang7-onnx"
-          image_name: "pytorch-linux-xenial-py3-clang7-onnx"
       - docker_build_job:
           name: "docker-pytorch-linux-xenial-py3.6-gcc5.4"
           image_name: "pytorch-linux-xenial-py3.6-gcc5.4"
