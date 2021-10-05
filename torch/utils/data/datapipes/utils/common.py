@@ -54,7 +54,6 @@ def get_file_binaries_from_pathnames(pathnames: Iterable, mode: str):
                             .format(type(pathname)))
         yield (pathname, open(pathname, mode))
 
-
 def validate_pathname_binary_tuple(data):
     if not isinstance(data, tuple):
         raise TypeError("pathname binary data should be tuple type, but got {}".format(type(data)))
@@ -64,3 +63,9 @@ def validate_pathname_binary_tuple(data):
         raise TypeError("pathname binary tuple should have string type pathname, but got {}".format(type(data[0])))
     if not isinstance(data[1], BufferedIOBase):
         raise TypeError("pathname binary tuple should have BufferedIOBase based binary type, but got {}".format(type(data[1])))
+
+# Warns user that the DataPipe has been moved to TorchData and will be removed from `torch`
+def deprecation_warning_torchdata(name):
+    warnings.warn(f"{name} and its functional API are deprecated and will be removed from the package `torch`. "
+                  f"Please import those features from the new package TorchData: https://github.com/pytorch/data",
+                  DeprecationWarning)
