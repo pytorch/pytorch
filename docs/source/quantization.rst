@@ -706,7 +706,7 @@ Modules that provide quantization functions and classes
       other helper functions for things like quantizing the input to your
       model and performing critical fusions like conv+relu.
 
-  * - :ref:`torch_quantize_fx`
+  * - :ref:`torch_quantization_quantize_fx`
     - This module implements the functions you call directly to convert your
       model from FP32 to quantized form using FX.
 

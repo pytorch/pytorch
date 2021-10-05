@@ -1,6 +1,6 @@
-.. _torch_quantize_fx:
+.. _torch_quantization_quantize_fx:
 
-torch.quantize_fx
+torch.quantization.quantize_fx
 ------------------
 .. automodule:: torch.ao.quantization.quantize_fx
 
