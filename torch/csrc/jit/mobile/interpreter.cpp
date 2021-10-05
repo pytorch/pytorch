@@ -122,9 +122,10 @@ bool InterpreterState::run(Stack& stack) {
           frame.step();
         } break;
         case CALL: {
-          auto& function = frame.getCode().functions_.at(inst.X);
+          auto& function = *frame.getCode().functions_.at(inst.X);
           frame.step();
-          enterFrame(*function->get_code());
+          function.call(
+              stack, [&](const mobile::Code& code) { enterFrame(code); });
         } break;
         case INTERFACE_CALL: {
           torch::jit::Function& method =
