@@ -189,9 +189,13 @@ struct AliasDb::WriteRegistry {
   std::unordered_set<Node*> writesToAllWildcards_;
 };
 
-AliasDb::AliasDb(std::shared_ptr<Graph> graph, bool isFrozen)
+AliasDb::AliasDb(
+    std::shared_ptr<Graph> graph,
+    bool isFrozen,
+    bool enablePreciseTupleContainerAnalysis)
     : graph_(std::move(graph)),
       isFrozen_(isFrozen),
+      enablePreciseTupleContainerAnalysis_(enablePreciseTupleContainerAnalysis),
       memoryDAGBuilder_(std::make_unique<MemoryDAGBuilder>()),
       writeRegistry_(std::make_unique<AliasDb::WriteRegistry>()) {
   analyze(graph_);
@@ -1047,6 +1051,9 @@ bool AliasDb::functionalNonEscapingListUse(const Use& use) const {
 }
 
 bool AliasDb::functionalNonEscapingTupleUse(const Use& use) const {
+  if (!enablePreciseTupleContainerAnalysis_) {
+    return false;
+  }
   Node* n = use.user;
   size_t offset = use.offset;
   Value* container = n->inputs().at(offset);

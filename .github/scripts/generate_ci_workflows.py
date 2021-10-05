@@ -178,9 +178,9 @@ class CIWorkflow:
         # If num_test_shards_on_pull_request is not user-defined, default to num_test_shards unless we are
         # only running smoke tests on the pull request.
         if self.num_test_shards_on_pull_request == -1:
-            # Don't waste resources on runner spinup and cooldown for another shard if we are only running a few tests
+            # Don't run the default if we are only running smoke tests
             if self.only_run_smoke_tests_on_pull_request:
-                self.num_test_shards_on_pull_request = 1
+                self.num_test_shards_on_pull_request = 0
             else:
                 self.num_test_shards_on_pull_request = self.num_test_shards
         self.assert_valid()
