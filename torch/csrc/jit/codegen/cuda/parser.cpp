@@ -1989,7 +1989,6 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
   return false;
 }
 
-
 void insertProfileNodesForCUDAFuser_(Block* block, ProfilingRecord* pr) {
   for (const auto& n : block->nodes()) {
     for (size_t offset = 0; offset < n->inputs().size(); offset++) {

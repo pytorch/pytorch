@@ -2060,8 +2060,8 @@ skip_ops = [
     't',
     # Tanh Gelu approximation is not supported
     # Reference: https://github.com/pytorch/pytorch/pull/61439
-    'nn.functional.gelu'
-    'conj'
+    'nn.functional.gelu',
+    'conj',
     'view',
     'reshape',
 ]

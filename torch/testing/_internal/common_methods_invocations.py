@@ -2931,17 +2931,6 @@ def sample_inputs_interpolate(mode, self, device, dtype, requires_grad):
 
     return sample_inputs
 
-def sample_inputs_gelu(self, device, dtype, requires_grad):
-    N = 5
-    inputs = []
-    for _ in range(1, N):
-        for approximate in [False, True]:
-            inputs.append(SampleInput(
-                make_tensor((N * 2, N * 2), device=device, dtype=dtype,
-                            requires_grad=requires_grad, low=-3, high=3),
-                kwargs=dict(approximate=approximate)))
-    return inputs
-
 def sample_inputs_max_min_reduction_with_dim(op_info, device, dtype, requires_grad, **kwargs):
     inputs = []
     args_for_reduction_with_dim = (

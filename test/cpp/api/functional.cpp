@@ -963,7 +963,7 @@ TEST_F(FunctionalTest, TanhGELU) {
   const auto inner = std::sqrt(2 / M_PI) * (x + 0.044715 * x.pow(3.0));
   const auto y_exp = 0.5 * x * (1.0 + inner.tanh());
   const auto y = F::gelu(x, true /* approximate */);
-  ASSERT_TRUE(torch::allclose(y, y_exp));
+  ASSERT_TRUE(torch::allclose(y, y_exp, 1.4e-06, 1e-05));
 }
 
 TEST_F(FunctionalTest, Hardshrink) {

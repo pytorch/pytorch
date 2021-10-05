@@ -191,18 +191,19 @@ void GeluKernelImpl(TensorIteratorBase& it, bool approximate) {
     grain_size = it.numel() / at::get_num_threads();
   }
   if (approximate) {
-    AT_DISPATCH_FLOATING_TYPES(it.dtype(), "GeluKernelImpl", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND(
+        ScalarType::BFloat16, it.dtype(), "GeluKernelImpl", [&]() {
       using Vec = vec::Vectorized<scalar_t>;
-      const Vec kBetaVec(M_SQRT2 * M_2_SQRTPI * 0.5);
-      const Vec kKappaVec(0.044715);
-      const Vec kOneVec(1);
-      const Vec kThreeVec(3);
-      const Vec kPointFiveVec(0.5);
+      const Vec kBetaVec(scalar_t(M_SQRT2 * M_2_SQRTPI * 0.5));
+      const Vec kKappaVec(scalar_t(0.044715));
+      const Vec kOneVec(scalar_t(1));
+      const Vec kThreeVec(scalar_t(3));
+      const Vec kPointFiveVec(scalar_t(0.5));
       cpu_kernel_vec(
           it,
           [](scalar_t x) {
-            constexpr scalar_t kBeta = M_SQRT2 * M_2_SQRTPI * 0.5;
-            constexpr scalar_t kKappa = 0.044715;
+            const scalar_t kBeta = M_SQRT2 * M_2_SQRTPI * 0.5;
+            const scalar_t kKappa = 0.044715;
             auto x_cube = x * x * x;
             auto inner = kBeta * (x + kKappa * x_cube);
             return scalar_t(0.5) * scalar_t(x) * (scalar_t(1) + std::tanh(inner));
@@ -238,18 +239,19 @@ void GeluKernelImpl(TensorIteratorBase& it, bool approximate) {
 
 void GeluBackwardKernelImpl(TensorIteratorBase& it, bool approximate) {
   if (approximate) {
-    AT_DISPATCH_FLOATING_TYPES(it.dtype(), "GeluBackwardKernelImpl", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND(
+        ScalarType::BFloat16, it.dtype(), "GeluBackwardKernelImpl", [&]() {
       using Vec = vec::Vectorized<scalar_t>;
-      const Vec kBetaVec(M_SQRT2 * M_2_SQRTPI * 0.5);
-      const Vec kKappaVec(0.044715);
-      const Vec kOneVec(1);
-      const Vec kThreeVec(3);
-      const Vec kPointFiveVec(0.5);
+      const Vec kBetaVec(scalar_t(M_SQRT2 * M_2_SQRTPI * 0.5));
+      const Vec kKappaVec(scalar_t(0.044715));
+      const Vec kOneVec(scalar_t(1));
+      const Vec kThreeVec(scalar_t(3));
+      const Vec kPointFiveVec(scalar_t(0.5));
       cpu_kernel_vec(
           it,
           [](scalar_t dy, scalar_t x) {
-            constexpr scalar_t kBeta = M_SQRT2 * M_2_SQRTPI * 0.5;
-            constexpr scalar_t kKappa = 0.044715;
+            const scalar_t kBeta = M_SQRT2 * M_2_SQRTPI * 0.5;
+            const scalar_t kKappa = 0.044715;
             auto x_sq = x * x;
             auto x_cube = x * x * x;
             auto inner = kBeta * (x + kKappa * x_cube);
