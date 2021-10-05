@@ -204,11 +204,11 @@ class BytecodeDeserializer final {
   c10::IValue readArchive(
       const std::string& archive_name,
       std::shared_ptr<mobile::CompilationUnit> mcu);
-  void parseFunctionSchema(
-      const std::string& function_name,
-      IValue* schemaTable,
-      const int64_t& model_version,
-      mobile::Function* function);
+  // void parseFunctionSchema(
+  //     const std::string& function_name,
+  //     IValue* schemaTable,
+  //     const int64_t& model_version,
+  //     mobile::Function* function);
   std::shared_ptr<CompilationUnit> compilation_unit_;
   std::unordered_set<std::string> imported_libs_;
   std::unique_ptr<PyTorchStreamReader> reader_{};
@@ -230,62 +230,63 @@ TypePtr BytecodeDeserializer::resolveTypeName(const c10::QualifiedName& qn) {
 // It requires compilation_unit_ when parsing function schema. Keep it in
 // BytecodeDeserializer. It may be refacotred later to make it independent
 // of the specific BytecodeDeserializer, like parsing other tables
-void BytecodeDeserializer::parseFunctionSchema(
-    const std::string& function_name,
-    IValue* schemaTable,
-    const int64_t& model_version,
-    mobile::Function* function) {
-  // function schema
-  if (schemaTable) { // (schema is optional for back compat)
-    auto parseArgList = [this](std::vector<IValue>&& argTables) {
-      std::vector<c10::Argument> args;
-      for (auto&& argTable : std::move(argTables)) {
-        auto argTableElements =
-            std::move(*std::move(argTable).toTuple()).elements();
-        auto name =
-            expect_field(argTableElements, "name", BYTECODE_INDEX_ARGUMENT_NAME)
-                .toStringRef();
-        c10::TypePtr type = resolveTypeName(
-            (expect_field(
-                 argTableElements, "type", BYTECODE_INDEX_ARGUMENT_TYPE))
-                .toStringRef());
-        IValue default_value = expect_field(
-            argTableElements,
-            "default_value",
-            BYTECODE_INDEX_ARGUMENT_DEFAULT_VALUE);
-        args.emplace_back(
-            name,
-            std::move(type),
-            c10::nullopt /*N*/,
-            std::move(default_value));
-      }
-      return args;
-    };
-    auto schemaTableElements =
-        std::move(*std::move(*schemaTable).toTuple()).elements();
-    std::vector<IValue> arg_list =
-        std::move(*expect_field(
-                       schemaTableElements,
-                       "arguments",
-                       BYTECODE_INDEX_SCHEMA_ARGUMENTS)
-                       .toTuple())
-            .elements();
-    std::vector<IValue> ret_list =
-        std::move(
-            *expect_field(
-                 schemaTableElements, "returns", BYTECODE_INDEX_SCHEMA_RETURNS)
-                 .toTuple())
-            .elements();
-    c10::FunctionSchema schema(
-        function_name,
-        "" /*overload_name*/,
-        parseArgList(std::move(arg_list)),
-        parseArgList(std::move(ret_list)),
-        false /*is_varargs*/,
-        false /*is_varret*/);
-    // function->setSchema(std::move(schema));
-  }
-}
+// void BytecodeDeserializer::parseFunctionSchema(
+//     const std::string& function_name,
+//     IValue* schemaTable,
+//     const int64_t& model_version,
+//     mobile::Function* function) {
+//   // function schema
+//   if (schemaTable) { // (schema is optional for back compat)
+//     auto parseArgList = [this](std::vector<IValue>&& argTables) {
+//       std::vector<c10::Argument> args;
+//       for (auto&& argTable : std::move(argTables)) {
+//         auto argTableElements =
+//             std::move(*std::move(argTable).toTuple()).elements();
+//         auto name =
+//             expect_field(argTableElements, "name",
+//             BYTECODE_INDEX_ARGUMENT_NAME)
+//                 .toStringRef();
+//         c10::TypePtr type = resolveTypeName(
+//             (expect_field(
+//                  argTableElements, "type", BYTECODE_INDEX_ARGUMENT_TYPE))
+//                 .toStringRef());
+//         IValue default_value = expect_field(
+//             argTableElements,
+//             "default_value",
+//             BYTECODE_INDEX_ARGUMENT_DEFAULT_VALUE);
+//         args.emplace_back(
+//             name,
+//             std::move(type),
+//             c10::nullopt /*N*/,
+//             std::move(default_value));
+//       }
+//       return args;
+//     };
+//     auto schemaTableElements =
+//         std::move(*std::move(*schemaTable).toTuple()).elements();
+//     std::vector<IValue> arg_list =
+//         std::move(*expect_field(
+//                        schemaTableElements,
+//                        "arguments",
+//                        BYTECODE_INDEX_SCHEMA_ARGUMENTS)
+//                        .toTuple())
+//             .elements();
+//     std::vector<IValue> ret_list =
+//         std::move(
+//             *expect_field(
+//                  schemaTableElements, "returns",
+//                  BYTECODE_INDEX_SCHEMA_RETURNS) .toTuple())
+//             .elements();
+//     c10::FunctionSchema schema(
+//         function_name,
+//         "" /*overload_name*/,
+//         parseArgList(std::move(arg_list)),
+//         parseArgList(std::move(ret_list)),
+//         false /*is_varargs*/,
+//         false /*is_varret*/);
+//     // function->setSchema(std::move(schema));
+//   }
+// }
 
 void BytecodeDeserializer::parseMethods(
     std::vector<IValue>&& vals,
