@@ -145,20 +145,20 @@ int64_t Function::get_debug_handle(size_t pc) const {
   return code_->instructions_with_handles_[pc].debug_handle;
 }
 
-void Function::setSchema(c10::FunctionSchema schema) {
-  schema_ = std::move(schema);
-}
+// void Function::setSchema(c10::FunctionSchema schema) {
+//   schema_ = std::move(schema);
+// }
 
-const at::optional<c10::FunctionSchema>& Function::getSchema() const {
-  return schema_;
-}
+// const at::optional<c10::FunctionSchema>& Function::getSchema() const {
+//   return schema_;
+// }
 
 bool Function::run(Stack& stack) const {
-  const auto& schema = getSchema();
-  if (schema) { // if we have a schema then resolve optional args if any
-    schema->checkAndNormalizeInputs(
-        stack, std::unordered_map<std::string, IValue>{} /*kwargs*/);
-  }
+  // const auto& schema = getSchema();
+  // if (schema) { // if we have a schema then resolve optional args if any
+  //   schema->checkAndNormalizeInputs(
+  //       stack, std::unordered_map<std::string, IValue>{} /*kwargs*/);
+  // }
   InterpreterState interp_state(code_);
   return interp_state.run(stack);
 }

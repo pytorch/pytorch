@@ -283,7 +283,7 @@ void BytecodeDeserializer::parseFunctionSchema(
         parseArgList(std::move(ret_list)),
         false /*is_varargs*/,
         false /*is_varret*/);
-    function->setSchema(std::move(schema));
+    // function->setSchema(std::move(schema));
   }
 }
 
@@ -377,8 +377,8 @@ void BytecodeDeserializer::parseMethods(
 
     function->set_register_size(register_size);
 
-    parseFunctionSchema(
-        function_name, schemaTable, model_version, function.get());
+    // parseFunctionSchema(
+    // function_name, schemaTable, model_version, function.get());
 
     mcu.register_function(std::move(function));
   }

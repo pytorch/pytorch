@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/core/function_schema.h>
+// #include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
 #include <vector>
 
@@ -34,8 +34,8 @@ class Function {
   int64_t get_debug_handle(size_t pc) const;
   const std::shared_ptr<Code> get_code() const;
 
-  void setSchema(c10::FunctionSchema schema);
-  const at::optional<c10::FunctionSchema>& getSchema() const;
+  // void setSchema(c10::FunctionSchema schema);
+  // const at::optional<c10::FunctionSchema>& getSchema() const;
 
   // Returns the debug handle corresponding to where the execution
   // is halted due to exception.
@@ -45,7 +45,7 @@ class Function {
  private:
   c10::QualifiedName name_;
   std::shared_ptr<Code> code_;
-  at::optional<c10::FunctionSchema> schema_; // (byte-code version 4+)
+  // at::optional<c10::FunctionSchema> schema_; // (byte-code version 4+)
 };
 
 } // namespace mobile
