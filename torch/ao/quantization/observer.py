@@ -113,7 +113,7 @@ class _ObserverBase(ObserverBase):
     r"""Internal common base for all qint/quint8 observers.
 
     This base is for commonly used parameters used internally.
-    Users should use `~torch.quantization.observer.ObserverBase` as a base class
+    Users should use `~torch.ao.quantization.observer.ObserverBase` as a base class
     for custom observers.
 
     Args:
@@ -497,7 +497,7 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
     is the incoming tensor, and :math:`c` is the ``averaging_constant``.
 
     The scale and zero point are then computed as in
-    :class:`~torch.quantization.observer.MinMaxObserver`.
+    :class:`~torch.ao.quantization.observer.MinMaxObserver`.
 
     .. note:: Only works with ``torch.per_tensor_affine`` quantization scheme.
 
@@ -561,7 +561,7 @@ class PerChannelMinMaxObserver(_ObserverBase):
         quant_max: Maximum quantization value. If unspecified, it will follow the 8-bit setup.
 
     The quantization parameters are computed the same way as in
-    :class:`~torch.quantization.observer.MinMaxObserver`, with the difference
+    :class:`~torch.ao.quantization.observer.MinMaxObserver`, with the difference
     that the running min/max values are stored per channel.
     Scales and zero points are thus computed per channel as well.
 
@@ -745,7 +745,7 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         quant_max: Maximum quantization value. If unspecified, it will follow the 8-bit setup.
 
     The quantization parameters are computed the same way as in
-    :class:`~torch.quantization.observer.MovingAverageMinMaxObserver`, with the
+    :class:`~torch.ao.quantization.observer.MovingAverageMinMaxObserver`, with the
     difference that the running min/max values are stored per channel.
     Scales and zero points are thus computed per channel as well.
 
@@ -824,7 +824,7 @@ class HistogramObserver(_ObserverBase):
         The search for the min/max values ensures the minimization of the
         quantization error with respect to the floating point model.
     3. Compute the scale and zero point the same way as in the
-        :class:`~torch.quantization.MinMaxObserver`
+        :class:`~torch.ao.quantization.MinMaxObserver`
     """
     histogram: torch.Tensor
     min_val: torch.Tensor
@@ -1267,7 +1267,7 @@ class NoopObserver(ObserverBase):
 def _is_observer_script_module(mod, obs_type_name):
     """Returns true if given mod is an instance of Observer script module."""
     if isinstance(mod, torch.jit.RecursiveScriptModule):
-        # qualified name looks like '__torch__.torch.quantization.observer.___torch_mangle_2.MinMaxObserver'
+        # qualified name looks like '__torch__.torch.ao.quantization.observer.___torch_mangle_2.MinMaxObserver'
         suffix = mod._c.qualified_name.split(".", 1)[1]
         name = re.sub(r"\.___torch_mangle_\d+", "", suffix)
         return obs_type_name in name
@@ -1276,8 +1276,8 @@ def _is_observer_script_module(mod, obs_type_name):
 
 def _is_activation_post_process(module):
     return (
-        isinstance(module, torch.quantization.ObserverBase)
-        or isinstance(module, torch.quantization.FakeQuantize)
+        isinstance(module, torch.ao.quantization.ObserverBase)
+        or isinstance(module, torch.ao.quantization.FakeQuantize)
         or _is_observer_script_module(module, "quantization.observer")
     )
 
@@ -1315,7 +1315,7 @@ def load_observer_state_dict(mod, obs_dict):
     r"""
     Given input model and a state_dict containing model observer stats,
     load the stats back into the model. The observer state_dict can be saved
-    using torch.quantization.get_observer_state_dict
+    using torch.ao.quantization.get_observer_state_dict
     """
     missing_keys: List[str] = []
     unexpected_keys: List[str] = []

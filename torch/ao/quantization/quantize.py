@@ -7,7 +7,7 @@ import torch.nn as nn
 import torch.nn.quantized as nnq
 from torch.nn.intrinsic import _FusedModule
 
-from torch.quantization.quantization_mappings import (
+from torch.ao.quantization.quantization_mappings import (
     get_default_dynamic_quant_module_mappings,
     get_default_static_quant_module_mappings,
     get_default_qat_module_mappings,
@@ -18,15 +18,15 @@ from torch.quantization.quantization_mappings import (
 )
 
 from torch.ao.quantization.stubs import DeQuantStub, QuantWrapper
-from torch.quantization.qconfig import (
+from torch.ao.quantization.qconfig import (
     add_module_to_qconfig_obs_ctr,
     default_dynamic_qconfig,
     float16_dynamic_qconfig,
     float_qparams_weight_only_qconfig)
 
 def is_activation_post_process(module):
-    return (isinstance(module, torch.quantization.ObserverBase) or
-            isinstance(module, torch.quantization.FakeQuantizeBase))
+    return (isinstance(module, torch.ao.quantization.ObserverBase) or
+            isinstance(module, torch.ao.quantization.FakeQuantizeBase))
 
 def _propagate_qconfig_helper(module, qconfig_dict, allow_list=None,
                               qconfig_parent=None, prefix=''):
@@ -54,7 +54,7 @@ def _propagate_qconfig_helper(module, qconfig_dict, allow_list=None,
     module_qconfig = qconfig_dict.get(prefix, module_qconfig)
     module_qconfig = getattr(module, 'qconfig', module_qconfig)
 
-    torch.quantization.qconfig.assert_valid_qconfig(module_qconfig, module)
+    torch.ao.quantization.qconfig.assert_valid_qconfig(module_qconfig, module)
 
     qconfig_with_device_check = add_module_to_qconfig_obs_ctr(module_qconfig, module)
     module.qconfig = qconfig_with_device_check
