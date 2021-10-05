@@ -1306,11 +1306,11 @@ class TestFreezing(JitTestCase):
         class Parent(nn.Module):
             def __init__(self):
                 super(Parent, self).__init__()
-                self.quant = torch.quantization.QuantStub()
+                self.quant = torch.ao.quantization.QuantStub()
                 self.conv1 = nn.Conv2d(1, 1, 1).to(dtype=torch.float32)
                 self.child = Child()
                 self.child2 = Child()
-                self.dequant = torch.quantization.DeQuantStub()
+                self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x):
                 x = self.quant(x)
@@ -1321,11 +1321,11 @@ class TestFreezing(JitTestCase):
                 return x
 
         def _static_quant(model):
-            qModel = torch.quantization.QuantWrapper(model)
-            qModel.qconfig = torch.quantization.default_qconfig
-            torch.quantization.prepare(qModel, inplace=True)
+            qModel = torch.ao.quantization.QuantWrapper(model)
+            qModel.qconfig = torch.ao.quantization.default_qconfig
+            torch.ao.quantization.prepare(qModel, inplace=True)
             qModel(torch.rand(4, 1, 4, 4, dtype=torch.float32))
-            torch.quantization.convert(qModel, inplace=True)
+            torch.ao.quantization.convert(qModel, inplace=True)
             return model
 
         with override_quantized_engine('fbgemm'):
