@@ -1098,7 +1098,7 @@ def run_prepare_fx_on_standalone_modules(
 
         standalone_module = modules[root_node.target]
         prepare = \
-            torch.quantization.quantize_fx._prepare_standalone_module_fx  # type: ignore[attr-defined]
+            torch.ao.quantization.quantize_fx._prepare_standalone_module_fx  # type: ignore[attr-defined]
         observed_standalone_module = \
             prepare(standalone_module, sm_qconfig_dict, sm_prepare_config_dict)
         preserved_attributes = \
@@ -1170,10 +1170,10 @@ def prepare(
     # {
     #   # match a single node
     #   (<class 'torch.nn.modules.conv.Conv3d'>:
-    #     <class 'torch.quantization.fx.quantize.ConvRelu'>),
+    #     <class 'torch.ao.quantization.fx.quantize.ConvRelu'>),
     #   # match multiple nodes in reverse order
     #   ((<function relu at 0x7f766a7360d0>, <built-in function add>):
-    #     <class 'torch.quantization.fx.quantize.Add'>),
+    #     <class 'torch.ao.quantization.fx.quantize.Add'>),
     # }
     quant_patterns = backend_config_dict["quant_patterns"]
     patterns: Dict[Pattern, QuantizeHandler] = get_combined_dict(
