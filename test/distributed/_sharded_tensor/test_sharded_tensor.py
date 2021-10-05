@@ -1,6 +1,7 @@
-from functools import wraps
 import math
 import io
+import itertools
+import pickle
 import sys
 import torch
 import torch.distributed as dist
@@ -8,8 +9,9 @@ from torch.distributed import rpc
 from torch.distributed import _sharded_tensor
 from torch.distributed._sharded_tensor import (
     load_with_process_group,
-    state_dict_hook,
     pre_load_state_dict_hook,
+    shard_parameter,
+    state_dict_hook,
 )
 from torch.distributed._sharding_spec import (
     ChunkShardingSpec,
@@ -23,10 +25,8 @@ from torch.distributed._sharded_tensor.api import (
     _create_tensor_from_params,
 )
 from torch.testing._internal.common_distributed import (
-    MultiProcessTestCase,
     requires_nccl,
     skip_if_lt_x_gpu,
-    TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import (
     TestCase,
@@ -34,6 +34,11 @@ from torch.testing._internal.common_utils import (
     run_tests,
     sandcastle_skip_if,
 )
+from torch.testing._internal.distributed._sharded_tensor import (
+    ShardedTensorTestBase,
+    with_comms,
+)
+
 if TEST_WITH_DEV_DBG_ASAN:
     print("Skip dev-asan as torch + multiprocessing spawn have known issues", file=sys.stderr)
     sys.exit(0)
@@ -58,70 +63,53 @@ class MyShardedModel1(torch.nn.Module):
         self.random_tensor1 = torch.nn.Parameter(torch.rand(2, 2))
         self.submodule = MyShardedModel2(spec, group)
 
-class ShardedTensorTestBase(object):
+class TestShardedTensorMetadata(TestCase):
+    def test_serialize_and_deserialize(self):
+        shard_metadatas = [
+            ShardMetadata(
+                shard_offsets=[0, 0],
+                shard_lengths=[5, 5],
+                placement="rank:0/cuda:0",
+            ),
+            ShardMetadata(
+                shard_offsets=[0, 5],
+                shard_lengths=[5, 5],
+                placement="rank:1/cuda:1",
+            ),
+            ShardMetadata(
+                shard_offsets=[5, 0],
+                shard_lengths=[5, 5],
+                placement="rank:2/cuda:2",
+            ),
+            ShardMetadata(
+                shard_offsets=[5, 5],
+                shard_lengths=[5, 5],
+                placement="rank:3/cuda:3",
+            )
+        ]
 
-    @property
-    def world_size(self):
-        return 4
+        dtypes = [
+            torch.float, torch.double, torch.cfloat, torch.cdouble, torch.half,
+            torch.bfloat16, torch.uint8, torch.int8, torch.short, torch.int,
+            torch.long, torch.bool]
 
-    def init_pg(self):
-        dist.init_process_group(
-            backend="nccl",
-            world_size=self.world_size,
-            rank=self.rank,
-            init_method=f"file://{self.file_name}",
-        )
+        layouts = [torch.strided, torch.sparse_coo]
+        requires_grads = [True, False]
+        memory_formats = [torch.contiguous_format, torch.channels_last, torch.preserve_format]
+        pin_memories = [True, False]
 
-    def init_rpc(self):
-        rpc_backend_options = rpc.TensorPipeRpcBackendOptions()
-        rpc_backend_options.init_method = f"file://{self.file_name}"
-        for rank in range(self.world_size):
-            rpc_backend_options.set_device_map(f'worker{rank}', {rank : self.rank, self.rank : rank})
+        for tensor_properties_input in itertools.product(dtypes, layouts, requires_grads, memory_formats, pin_memories):
+            dtype, layout, requires_grad, memory_format, pin_memory = tensor_properties_input
 
-        rpc.init_rpc(
-            name="worker%d" % self.rank,
-            rank=self.rank,
-            world_size=self.world_size,
-            rpc_backend_options=rpc_backend_options,
-        )
+            expected_st_metadata = _sharded_tensor.ShardedTensorMetadata(
+                shard_metadatas,
+                (10, 10),
+                _sharded_tensor.TensorProperties(dtype, layout, requires_grad, memory_format, pin_memory)
+            )
 
-    def init_comms(self):
-        self.init_rpc()
-        self.init_pg()
-
-    def destroy_comms(self):
-        # Wait for all ranks to reach here before starting shutdown.
-        dist.barrier()
-
-        rpc.shutdown()
-        dist.destroy_process_group()
-
-    def setUp(self) -> None:
-        super().setUp()
-        self._spawn_processes()
-
-    def verify_sharded_tensor(self, st1, st2):
-        st1_local_shards = st1.local_shards()
-        st2_local_shards = st2.local_shards()
-        self.assertEqual(len(st1_local_shards), len(st2_local_shards))
-        for i, st1_local_shard in enumerate(st1_local_shards):
-            self.assertEqual(st1_local_shard.tensor, st2_local_shards[i].tensor)
-            self.assertEqual(st1_local_shard.metadata, st2_local_shards[i].metadata)
-
-        self.assertEqual(st1.metadata(), st2.metadata())
-        self.assertEqual(st1.sharding_spec(), st2.sharding_spec())
-        self.assertEqual(len(st1.remote_shards()), len(st2.remote_shards()))
-
-
-def with_comms(func):
-    @wraps(func)
-    def wrapper(self):
-        if torch.cuda.device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
-        self.init_comms()
-        func(self)
-        self.destroy_comms()
-    return wrapper
+            pickled_obj = pickle.dumps(expected_st_metadata)
+            st_metadata = pickle.loads(pickled_obj)
+            self.assertEqual(expected_st_metadata, st_metadata)
 
 class TestCreateTensorFromParams(TestCase):
     @sandcastle_skip_if(torch.cuda.device_count() < 1, 'CUDA GPU is needed')
@@ -249,7 +237,92 @@ class TestCreateTensorFromParams(TestCase):
         expected_tensor = torch.full((h, w), fill_value=fill_value, device=local_device, dtype=torch.double)
         self.assertEqual(expected_tensor, local_tensor)
 
-class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
+
+class TestShardParameter(ShardedTensorTestBase):
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_shard_parameter(self):
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+
+        fc = torch.nn.Linear(12, 12).cuda(self.rank)
+        weight_og = fc.weight.clone()
+        shard_parameter(fc, 'weight', spec)
+
+        # Verify.
+        self.assertTrue(isinstance(fc.weight, _sharded_tensor.ShardedTensor))
+        local_shards = fc.weight.local_shards()
+        self.assertEqual(1, len(local_shards))
+        self.assertEqual(torch.Size([3, 12]), local_shards[0].tensor.size())
+        self.assertEqual(torch.narrow(weight_og, 0, 3 * self.rank, 3), local_shards[0].tensor)
+
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_shard_parameter_errors(self):
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+
+        fc = torch.nn.Linear(12, 12).cuda(self.rank)
+        with self.assertRaisesRegex(ValueError, 'does not match with src_rank'):
+            shard_parameter(fc, 'weight', spec, src_rank=self.rank)
+
+        with self.assertRaisesRegex(ValueError, 'does not have parameter'):
+            shard_parameter(fc, 'foo', spec)
+
+        with self.assertRaisesRegex(ValueError, 'Expected Linear.bias to be a Tensor, but found str'):
+            del fc.bias
+            fc.bias = "foo"
+            shard_parameter(fc, 'bias', spec)
+
+        with self.assertRaisesRegex(ValueError, 'not a contiguous Tensor'):
+            fc.bias = torch.rand(10, 10).cuda(self.rank).t()
+            shard_parameter(fc, 'bias', spec)
+
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                f"rank:{self.rank}/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+        with self.assertRaisesRegex(ValueError, 'does not match with sharding_spec'):
+            shard_parameter(fc, 'weight', spec)
+
+        spec = EnumerableShardingSpec([
+            ShardMetadata(
+                shard_offsets=[0, 0],
+                shard_lengths=[5, 5],
+                placement="rank:0/cuda:0",
+            ),
+            ShardMetadata(
+                shard_offsets=[5, 0],
+                shard_lengths=[5, 5],
+                placement="rank:1/cuda:1",
+            ),
+        ])
+        with self.assertRaisesRegex(ValueError, 'Only ChunkShardingspec is supported.'):
+            shard_parameter(fc, 'weight', spec)
+
+
+class TestShardedTensorChunked(ShardedTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -683,7 +756,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
         spec = ChunkShardingSpec(dim=0, placements=["rank:0/cuda:1"])
         sharded_tensor = _sharded_tensor.empty(spec, 10, 20)
         tensor = torch.empty(10, 20)
-        with self.assertRaisesRegex(RuntimeError, "torch function 'add' not supported for ShardedTensor!"):
+        with self.assertRaisesRegex(RuntimeError, "not supported for ShardedTensor!"):
             torch.add(sharded_tensor, tensor)
 
         spec = ChunkShardingSpec(dim=0, placements=["rank:0/cuda:1"])
@@ -830,8 +903,8 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
         module_load.load_state_dict(state_dict_deser, strict=False)
 
         # Verify after load.
-        self.verify_sharded_tensor(m.sharded_tensor1, module_load.sharded_tensor1)
-        self.verify_sharded_tensor(m.submodule.sharded_tensor2, module_load.submodule.sharded_tensor2)
+        self.assert_sharded_tensor_equal(m.sharded_tensor1, module_load.sharded_tensor1)
+        self.assert_sharded_tensor_equal(m.submodule.sharded_tensor2, module_load.submodule.sharded_tensor2)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -866,8 +939,8 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
             module_load.load_state_dict(state_dict_deser, strict=False)
 
         # Verify after load.
-        self.verify_sharded_tensor(m.sharded_tensor1, module_load.sharded_tensor1)
-        self.verify_sharded_tensor(m.submodule.sharded_tensor2, module_load.submodule.sharded_tensor2)
+        self.assert_sharded_tensor_equal(m.sharded_tensor1, module_load.sharded_tensor1)
+        self.assert_sharded_tensor_equal(m.submodule.sharded_tensor2, module_load.submodule.sharded_tensor2)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -942,7 +1015,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
             state_dict_deser = torch.load(buffer)
 
 
-class TestShardedTensorEnumerable(ShardedTensorTestBase, MultiProcessTestCase):
+class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -1432,7 +1505,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase, MultiProcessTestCase):
                 self.assertEqual((5, 5), shard.tensor.size())
 
 
-class TestShardedTensorFromLocalShards(ShardedTensorTestBase, MultiProcessTestCase):
+class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)

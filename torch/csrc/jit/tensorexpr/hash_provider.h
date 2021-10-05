@@ -92,7 +92,7 @@ class TORCH_API HashProvider : public IRVisitor {
     CACHE_GUARD();                               \
     putHash(v, hash_combine(#Name, v->value())); \
   }
-  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_VISIT);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_VISIT);
 #undef IMM_VISIT
 
   void visit(CastPtr v) override;
@@ -281,6 +281,14 @@ class TORCH_API HashProvider : public IRVisitor {
   }
 
   size_t te_hash(at::Half d) {
+    // memcpy as type punning. Should be optimized out.
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    int16_t n;
+    std::memcpy(&n, &d, sizeof d);
+    return te_hash(n);
+  }
+
+  size_t te_hash(at::BFloat16 d) {
     // memcpy as type punning. Should be optimized out.
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int16_t n;

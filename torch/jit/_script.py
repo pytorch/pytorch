@@ -26,7 +26,7 @@ from torch.jit._builtins import _register_builtin
 from torch._six import with_metaclass
 from torch.jit.frontend import get_jit_def, get_default_args, get_jit_class_def
 from torch._jit_internal import _qualified_name
-from torch.jit._fuser import _graph_for
+from torch.jit._fuser import _graph_for, _script_method_graph_for
 from torch.jit._state import (
     _try_get_jit_cached_function,
     _try_get_jit_cached_overloads,
@@ -47,7 +47,7 @@ from torch._classes import classes
 
 type_trace_db = JitTypeTraceStore()  # DB to hold all call traces from MonkeyType
 
-torch._C.ScriptMethod.graph_for = _graph_for  # type: ignore[attr-defined]
+torch._C.ScriptMethod.graph_for = _script_method_graph_for  # type: ignore[attr-defined]
 torch._C.ScriptFunction.graph_for = _graph_for  # type: ignore[attr-defined]
 ScriptFunction = torch._C.ScriptFunction
 ScriptFunction.__doc__ = """
@@ -449,7 +449,7 @@ if _enabled:
         setattr(RecursiveScriptClass, method_name, method_template)
 
     # this is a Python 'non-data descriptor' that causes the first access
-    # to ScriptModule's forward to lookup the forward method and stash
+    # to ScriptModule's forward to look up the forward method and stash
     # it in the objects dict. Due to the standard rules for attribute lookup,
     # subsequent lookups will just directly return the previously looked up method.
     # This is necessary because nn.Module defines forward as a method. If we
@@ -712,7 +712,7 @@ if _enabled:
             return "original_name={}".format(self.original_name)
 
         def graph_for(self, *args, **kwargs):
-            return self.forward.graph_for(*args, **kwargs)
+            return self.forward.graph_for(self, *args, **kwargs)
 
         @property
         def original_name(self):
@@ -784,13 +784,6 @@ if _enabled:
                 #   s.save()   <--- this doesn't have `python_attr`
                 # It's fairly trivial to save enough info to warn in this case.
                 return super(RecursiveScriptModule, self).__setattr__(attr, value)
-
-        def __getstate__(self):
-            raise pickle.PickleError(
-                "ScriptModules cannot be deepcopied using copy.deepcopy or saved using torch.save. "
-                + "Mixed serialization of script and non-script modules is not supported. "
-                + "For purely script modules use my_script_module.save(<filename>) instead."
-            )
 
         def __copy__(self):
             return torch.jit._recursive.wrap_cpp_module(copy.copy(self._c))
@@ -881,6 +874,7 @@ if _enabled:
         "forward",
         "register_buffer",
         "register_parameter",
+        "register_module",
         "add_module",
         "_apply",
         "apply",

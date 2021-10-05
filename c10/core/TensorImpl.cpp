@@ -25,7 +25,7 @@ static std::string noop_name_fn(const PyInterpreter*) {
   return "<unloaded interpreter>";
 }
 
-static void noop_decref_fn(const PyInterpreter*, PyObject*) {
+static void noop_decref_fn(const PyInterpreter*, PyObject*, bool) {
   // no-op
 }
 
@@ -40,7 +40,8 @@ static c10::intrusive_ptr<TensorImpl> noop_detach_fn(
 static void noop_dispatch_fn(
     const PyInterpreter*,
     const c10::OperatorHandle& op,
-    torch::jit::Stack* stack) {
+    torch::jit::Stack* stack,
+    const std::shared_ptr<TorchDispatchTypeObject>& type) {
   TORCH_INTERNAL_ASSERT(
       0,
       "attempted to dispatch (__torch_dispatch__) an operator on Tensor with nontrivial PyObject after corresponding interpreter died");
@@ -83,8 +84,9 @@ const at::Tensor& TensorImpl::grad() const {
   return autograd_meta_->grad();
 }
 
-const at::Tensor& TensorImpl::_fw_grad(uint64_t level, const at::Tensor& self)
-    const {
+const at::Tensor& TensorImpl::_fw_grad(
+    uint64_t level,
+    const at::TensorBase& self) const {
   // See TensorImpl::grad() above for explanation about the line below
   if (!autograd_meta_)
     return impl::GetAutogradMetaFactory()->undefined_tensor();
@@ -92,8 +94,8 @@ const at::Tensor& TensorImpl::_fw_grad(uint64_t level, const at::Tensor& self)
 }
 
 void TensorImpl::_set_fw_grad(
-    const at::Tensor& new_grad,
-    const at::Tensor& self,
+    const at::TensorBase& new_grad,
+    const at::TensorBase& self,
     uint64_t level,
     bool is_inplace_op) {
   if (!autograd_meta_)
@@ -368,7 +370,8 @@ void TensorImpl::release_resources() {
   if (owns_pyobj_) {
     TORCH_INTERNAL_ASSERT(pyobj_interpreter_ != nullptr);
     TORCH_INTERNAL_ASSERT(pyobj_ != nullptr);
-    pyobj_interpreter_.load(std::memory_order_acquire)->decref(pyobj_);
+    pyobj_interpreter_.load(std::memory_order_acquire)
+        ->decref(pyobj_, /*is_tensor*/ true);
     // NB: this destructor can only be entered when there are no
     // references to this C++ object (obviously), NOR any references
     // to the PyObject (if there are references to the PyObject,
@@ -606,6 +609,23 @@ void TensorImpl::copy_tensor_metadata(
   if (!dest_impl->is_inference()) {
     dest_impl->set_version_counter(std::move(version_counter));
   }
+}
+
+TorchDispatchTypeObject::TorchDispatchTypeObject(
+    PyObject* type_object,
+    c10::impl::PyInterpreter* pyinterpreter)
+    : data_(type_object), pyinterpreter_(pyinterpreter) {}
+
+TorchDispatchTypeObject::~TorchDispatchTypeObject() {
+  pyinterpreter_->decref(data_, /*is_tensor*/ false);
+}
+
+c10::impl::PyInterpreter* TorchDispatchTypeObject::pyinterpreter() const {
+  return pyinterpreter_;
+}
+
+PyObject* TorchDispatchTypeObject::ptr() const {
+  return data_;
 }
 
 namespace impl {

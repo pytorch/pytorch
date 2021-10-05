@@ -1,7 +1,9 @@
 import torch
 from torch.fx.graph_module import GraphModule
 from typing import Callable, List, Dict, Any, Optional
+from torch.fx._compatibility import compatibility
 
+@compatibility(is_backward_compatible=True)
 class Partition:
     def __init__(self, name: str):
         self.name: str = name
@@ -23,6 +25,7 @@ class Partition:
             f" parition dependents: {self.partition_dependents}"
 
 # Creates subgraphs out of main graph
+@compatibility(is_backward_compatible=True)
 def split_module(
     m: GraphModule,
     root_m: torch.nn.Module,
@@ -134,8 +137,10 @@ def split_module(
     for node in m.graph.nodes:
         if node.op == 'placeholder':
             base_mod_env[node.name] = base_mod_graph.placeholder(node.name)
+            base_mod_env[node.name].meta = node.meta.copy()
         elif node.op == 'get_attr':
             base_mod_env[node.name] = base_mod_graph.get_attr(node.target)
+            base_mod_env[node.name].meta = node.meta.copy()
             attr_val = m
             for atom in node.target.split('.'):
                 if not hasattr(attr_val, atom):
