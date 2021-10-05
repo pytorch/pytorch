@@ -106,6 +106,13 @@ struct TORCH_API GraphFunction : public Function {
     return *executor_;
   }
 
+  void call(
+      Stack& stack,
+      size_t bailOut,
+      c10::function_ref<void(const Code&)> f) override {
+    f(get_executor().getPlanFor(stack, bailOut).code);
+  }
+
  private:
   c10::QualifiedName name_;
   // The original, non-optimized graph

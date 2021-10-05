@@ -74,11 +74,11 @@ struct TORCH_API Function {
 
   virtual Function& setSchema(c10::FunctionSchema schema) = 0;
 
-  virtual void call(Stack&, c10::function_ref<void(Code&)>) {
+  virtual void call(Stack&, size_t, c10::function_ref<void(const Code&)>) {
     TORCH_INTERNAL_ASSERT(false);
   }
 
-  virtual void call(Stack&, c10::function_ref<void(mobile::Code&)>) {
+  virtual void call(Stack&, c10::function_ref<void(const mobile::Code&)>) {
     TORCH_INTERNAL_ASSERT(false);
   }
 
