@@ -10,6 +10,26 @@
 
 namespace c10 {
 
+namespace {
+inline bool is_contiguous_strides(
+    const IntArrayRef sizes,
+    const IntArrayRef strides) {
+  int n_dim = static_cast<int>(sizes.size());
+
+  if (n_dim == 0 || strides[n_dim-1] != 1) {
+    return false;
+  }
+
+  for (int i = n_dim - 2; i >= 0; i--) {
+    if (strides[i] != strides[i+1] * sizes[i+1]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+} // namespace
+
 TypeVerbosity type_verbosity() {
   static const char* c_verbosity = std::getenv("PYTORCH_JIT_TYPE_VERBOSITY");
   static TypeVerbosity verbosity = c_verbosity ?
@@ -1407,21 +1427,67 @@ VaryingShape<Stride> TensorType::computeStrideProps(
     at::IntArrayRef sizes,
     at::IntArrayRef strides,
     bool tensor_contiguity) {
-  std::vector<size_t> stride_indices(sizes.size());
-  std::iota(stride_indices.begin(), stride_indices.end(), 0);
+  int n_dim = static_cast<int>(sizes.size());
+  std::vector<size_t> stride_indices(n_dim);
 
-  std::sort(
-      stride_indices.begin(),
-      stride_indices.end(),
-      [&strides](const int& a, const int& b) {
-        // break ties in case of unsqueezed dims
-        // i.e. (1, 1, 5)
-        if (strides[a] == strides[b]) {
-          return a > b;
+  // Sorting strides in ascending order
+  // Example:
+  //  Prior to sorting
+  //  Idx:     [0,   1,  2,  3]
+  //  sizes:   [8,   1, 10, 16]
+  //  Strides: [160, 1, 16,  1]
+  //  After sorting
+  //  Idx:     [1,  3,  2,   0]
+  //  sizes:   [1, 16, 10,   8]
+  //  Strides: [1,  1, 16, 160]
+  //
+  // The logic below follows what TensorIterator uses in its logic:
+  //   1. Fast_set_up is the short-cut to identify a. channels_last and
+  //      b. contiguous format, which is what we have in the below logic.
+  //   2. In more generla cases, it does best effort to preserve permutatoin.
+  if (is_channels_last_strides_2d(sizes, strides) || is_channels_last_strides_3d(sizes, strides)) {
+    // case 1.a. short cut channels last
+    std::iota(stride_indices.rbegin() + 1, stride_indices.rend() - 1, 2);
+    stride_indices[0] = 1;
+    stride_indices[n_dim - 1] = 0;
+  } else if (is_contiguous_strides(sizes, strides)) {
+    // case 1.b. short cut contiguous
+    std::iota(stride_indices.rbegin(), stride_indices.rend(), 0);
+  } else {
+    std::iota(stride_indices.begin(), stride_indices.end(), 0);
+    // case 2.
+    //
+    // For broadcasted dimension where stride is 0, we have to stick to
+    // TensorIterator behavior in eager, where they introduce an ambiguous
+    // comparison result to preserve permutation by best effort.
+    // For more details, see NOTE: [Computing output strides]
+    auto should_swap = [&](size_t a, size_t b) {
+      if (strides[a] == 0 || strides[b] == 0) {
+        return 0;
+      } else if (strides[a] < strides[b]) {
+        return -1;
+      } else if (strides[a] > strides[b]) {
+        return 1;
+      } else { // strides[a] == strides[b]
+        if (sizes[a] < sizes[b] || a > b ) {
+          return 1;
         }
-        return strides[a] < strides[b];
-      });
-
+      }
+      return 0;
+    };
+    for (int i = 1; i < n_dim; i++) {
+      int dim1 = i;
+      for (int dim0 = i - 1; dim0 >= 0; dim0--) {
+        int comparison = should_swap(stride_indices[dim0], stride_indices[dim1]);
+        if (comparison > 0) {
+          std::swap(stride_indices[dim0], stride_indices[dim1]);
+          dim1 = dim0;
+        } else if (comparison < 0) {
+          break;
+        }
+      }
+    }
+  }
   std::vector<Stride> stride_properties;
   for (size_t i = 0; i < stride_indices.size(); i++) {
     bool contiguous_ = tensor_contiguity;
