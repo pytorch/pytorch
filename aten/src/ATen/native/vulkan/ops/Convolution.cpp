@@ -806,8 +806,7 @@ void Conv2dOpContext::conv2d_winograd_2_3(
             vTensor::Stage::Compute),
         packed_.v_bias.buffer(
             command_buffer,
-            vTensor::Stage::Compute),
-        context->resource().pool.uniform(block).object);
+            vTensor::Stage::Compute));
   }
   command_pool.submit(context->gpu().queue, command_buffer);
 }
