@@ -2,12 +2,12 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Dispatch.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <aten/src/ATen/TensorUtils.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/cuda/Loops.cuh>
+#include <ATen/native/Resize.h>
 
 constexpr float EPSILON = 1e-12;
 
@@ -162,7 +162,7 @@ Tensor& binary_cross_entropy_backward_out_cuda(const Tensor& grad, const Tensor&
 // -----------------------------------
 namespace {
 
-const int NLL_LOSS_THREADS = 32;
+constexpr int NLL_LOSS_THREADS = 32;
 
 #define AT_DISPATCH_NLL_LOSS_INDEX_TYPES(TYPE, NAME, ...)                   \
   [&] {                                                                     \
@@ -213,13 +213,23 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_1d(
   int t = static_cast<int>(*target);
   if (t != static_cast<int>(ignore_index)) {
     CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
-    scalar_t cur_weight =
-        weights != nullptr ? weights[t] : static_cast<scalar_t>(1);
-    *output = -cur_weight * input[t];
+    const auto cur_weight = weights != nullptr ? weights[t] : scalar_t{1};
     *total_weight = cur_weight;
-    if (size_average && *total_weight > 0) {
-      *output /= *total_weight;
+
+    if (size_average) {
+      // If we try to normalize a zero then we return a NaN
+      if (cur_weight == 0) {
+        *output = std::numeric_limits<scalar_t>::quiet_NaN();
+      } else {
+        *output = -input[t];
+      }
+    } else {
+      *output = -cur_weight * input[t];
     }
+  } else {
+    // If the only element was omited, we get 0. See the discussion in
+    // https://github.com/pytorch/pytorch/pull/64572#issuecomment-926504162
+    *output = scalar_t{0};
   }
 }
 
@@ -262,10 +272,7 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
       total_weight_acc += acc_weight[i];
     }
     *total_weight = static_cast<scalar_t>(total_weight_acc);
-    if (size_average && nframe == 0) {
-      // Mean reduction on empty tensors produces NaN
-      *output = std::numeric_limits<scalar_t>::quiet_NaN();
-    } else if (size_average && total_weight_acc != 0) {
+    if (size_average) {
       *output = static_cast<scalar_t>(output_acc / total_weight_acc);
     } else {
       *output = static_cast<scalar_t>(output_acc);
@@ -276,11 +283,14 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
 void nll_loss_forward_out_cuda_template(
     const Tensor& output,
     const Tensor& total_weight,
-    const Tensor& input,
-    const Tensor& target,
+    const Tensor& input_,
+    const Tensor& target_,
     const Tensor& weight,
     int64_t reduction,
     int64_t ignore_index) {
+  auto input = *input_.expect_contiguous();
+  auto target = *target_.expect_contiguous();
+
   int64_t n_classes = input.size(-1);
   int64_t n_dims = input.dim();
   int64_t batch_size = n_dims == 1 ? 1 : input.size(0);
@@ -288,7 +298,7 @@ void nll_loss_forward_out_cuda_template(
   auto weight_ = weight.defined() ? weight.contiguous() : weight;
 
   if (reduction == Reduction::None && n_dims == 2) {
-    output.resize_({batch_size});
+    at::native::resize_output(output, {batch_size});
     if (batch_size == 0) {
       // This guards from unnecessary operations and launching CUDA kernel with
       // 0 blocks.
@@ -324,11 +334,22 @@ void nll_loss_forward_out_cuda_template(
     return;
   }
 
-  output.resize_({});
+  // produce scalar outputs for the reduction case
+  at::native::resize_output(output, {});
   total_weight.resize_({});
 
-  auto input_ = input.contiguous();
-  auto target_ = target.contiguous();
+  if (target.numel() == 0) {
+    // Here target (and input) have zero elements
+    // Mean reduction on empty tensors produces NaN. See the discussion in
+    // https://github.com/pytorch/pytorch/pull/64572#issuecomment-926504162
+    if (reduction == Reduction::Mean) {
+      output.fill_(std::numeric_limits<double>::quiet_NaN());
+    } else {
+      output.zero_();
+    }
+    total_weight.zero_();
+    return;
+  }
 
   if (n_dims == 1) {
     AT_DISPATCH_FLOATING_TYPES_AND2(
@@ -345,8 +366,8 @@ void nll_loss_forward_out_cuda_template(
                     <<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
                         output.data_ptr<scalar_t>(),
                         total_weight.data_ptr<scalar_t>(),
-                        input_.data_ptr<scalar_t>(),
-                        target_.data_ptr<index_t>(),
+                        input.data_ptr<scalar_t>(),
+                        target.data_ptr<index_t>(),
                         weight_.defined() ? weight_.data_ptr<scalar_t>()
                                           : nullptr,
                         reduction == at::Reduction::Mean,
@@ -374,8 +395,8 @@ void nll_loss_forward_out_cuda_template(
                        at::cuda::getCurrentCUDAStream()>>>(
                         output.data_ptr<scalar_t>(),
                         total_weight.data_ptr<scalar_t>(),
-                        input_.data_ptr<scalar_t>(),
-                        target_.data_ptr<index_t>(),
+                        input.data_ptr<scalar_t>(),
+                        target.data_ptr<index_t>(),
                         weight_.defined() ? weight_.data_ptr<scalar_t>()
                                           : nullptr,
                         reduction == at::Reduction::Mean,
@@ -421,16 +442,15 @@ __global__ void nll_loss_backward_reduce_cuda_kernel_1d(
   int n_classes,
   int64_t ignore_index
 ) {
-  if (*total_weight <= 0) {
-    return;
-  }
-  scalar_t norm = size_average ? (static_cast<scalar_t>(1) / *total_weight) : static_cast<scalar_t>(1);
   int t = static_cast<int>(*target);
   if (t != static_cast<int>(ignore_index)) {
     CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
-    grad_input[t] = -(weights != nullptr ? weights[t] : static_cast<scalar_t>(1)) * norm * grad_output[0];
+    const auto grad = -(size_average ? *grad_output / *total_weight
+                                     : *grad_output);
+    grad_input[t] = weights != nullptr ? weights[t] * grad
+                                       : grad;
   }
-};
+}
 
 template <typename scalar_t, typename index_t>
 __global__ void nll_loss_backward_reduce_cuda_kernel_2d(
@@ -444,29 +464,33 @@ __global__ void nll_loss_backward_reduce_cuda_kernel_2d(
     int ndim,
     int n_classes,
     int64_t ignore_index) {
-  if (*total_weight <= 0) {
-    return;
-  }
-  scalar_t norm = size_average ? (static_cast<scalar_t>(1) / *total_weight) : static_cast<scalar_t>(1);
+  const auto grad = -(size_average ? *grad_output / *total_weight
+                                   : *grad_output);
 
   for (int i = threadIdx.x; i < nframe; i += NLL_LOSS_THREADS) {
     int t = target[i];
     if (t != static_cast<int>(ignore_index)) {
       CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
-      grad_input[i * ndim + t] = -(weights != nullptr ? weights[t] : static_cast<scalar_t>(1)) * norm * grad_output[0];
+      grad_input[i * ndim + t] = weights != nullptr ? weights[t] * grad
+                                                    : grad;
     }
   }
-};
+}
 
 void nll_loss_backward_out_cuda_template(
-    const Tensor& grad_input,
-    const Tensor& grad_output,
-    const Tensor& input,
-    const Tensor& target,
+    const Tensor& grad_input_,
+    const Tensor& grad_output_,
+    const Tensor& input_,
+    const Tensor& target_,
     const Tensor& total_weight,
     const Tensor& weight,
     int64_t reduction,
     int64_t ignore_index) {
+  auto target = *target_.expect_contiguous();
+  auto input = *input_.expect_contiguous();
+  auto grad_input = *grad_input_.expect_contiguous();
+  auto grad_output = *grad_output_.expect_contiguous();
+
   int64_t n_dims = input.dim();
   int64_t n_classes = input.size(-1);
   int64_t batch_size = n_dims == 1 ? 1 : input.size(0);
@@ -474,7 +498,6 @@ void nll_loss_backward_out_cuda_template(
   auto weight_ = weight.defined() ? weight.contiguous() : weight;
 
   if (reduction == at::Reduction::None && n_dims == 2) {
-    check_dim_size(grad_output, 1, 0, batch_size);
     if (batch_size == 0) {
       // This guards from unnecessary operations and launching CUDA kernel with 0 blocks.
       return;
@@ -507,9 +530,6 @@ void nll_loss_backward_out_cuda_template(
         });
     return;
   }
-
-  auto target_ = target.contiguous();
-  TORCH_CHECK(grad_output.numel() == 1);
 
   if (n_dims == 1) {
     AT_DISPATCH_FLOATING_TYPES_AND2(

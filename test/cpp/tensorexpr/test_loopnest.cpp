@@ -1405,7 +1405,7 @@ TEST(LoopNest, ScheduleSplitAThenInline) {
   LoopNest l({b}, {a, b});
   std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(a.buf()).at(0);
   LoopNest::splitWithMask(loops[0], 4);
-  ASSERT_THROWS_WITH(l.computeInline(a.buf()), "compound indices");
+  ASSERT_FALSE(l.computeInline(a.buf()));
 }
 
 // Split a Compute then inline another Compute into it.
@@ -1446,7 +1446,7 @@ TEST(LoopNest, ScheduleSplitTwiceThenInline) {
   std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(a.buf()).at(0);
   LoopNest::splitWithMask(loops[0], 4, &i_inner);
   LoopNest::splitWithMask(i_inner, 2);
-  ASSERT_THROWS_WITH(l.computeInline(a.buf()), "compound indices");
+  ASSERT_FALSE(l.computeInline(a.buf()));
 }
 
 // Inline a Compute, then split.
@@ -1511,7 +1511,7 @@ TEST(LoopNest, ScheduleSplitInlineSimplify) {
   LoopNest l({b}, {a, b});
   std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(a.buf()).at(0);
   LoopNest::splitWithMask(loops[0], 4);
-  ASSERT_THROWS_WITH(l.computeInline(a.buf()), "compound indices");
+  ASSERT_FALSE(l.computeInline(a.buf()));
 }
 
 // Inline a Compute with two consumers.
@@ -1622,7 +1622,7 @@ TEST(LoopNest, ScheduleInlineThreeMixedSplit) {
   loops = l.getAllLoopNestsWritingToBuf(c.buf()).at(0);
   LoopNest::splitWithMask(loops[0], 2);
 
-  ASSERT_THROWS_WITH(l.computeInline(a.buf()), "compound indices");
+  ASSERT_FALSE(l.computeInline(a.buf()));
 }
 
 // Check that inlining works for output tensors too
@@ -1663,7 +1663,48 @@ TEST(LoopNest, ScheduleInlineOutputTensors) {
 # CHECK:       y[m2, n2, k2] = (k2 * m2) * n2 + m2;)IR");
 }
 
-TEST(LoopNest, ScheduleInlineBufferIndicesWithCast) {
+TEST(LoopNest, ScheduleInlineWithCompoundIndices) {
+  // Input IR:
+  //     for (int64_t i = 0; i < 100; i++) {
+  //       A[i*2,i] = i * 500ll;
+  //     }
+  //     for (int64_t j = 0; j < 100; j++) {
+  //       B[0ll,j] = A[0, j] + j * 100ll;
+  //     }
+  BufHandle a_buf("A", {20, 100}, kLong);
+  BufHandle b_buf("B", {20, 100}, kLong);
+  VarHandle i("i", kLong);
+  VarHandle j("j", kLong);
+  auto forI = For::make(
+      i,
+      0,
+      100,
+      Store::make(a_buf, {i * 2, i}, Mul::make(i, static_cast<int64_t>(500))));
+  auto forJ = For::make(
+      j,
+      0,
+      100,
+      Store::make(
+          b_buf,
+          {static_cast<int64_t>(0), j},
+          Add::make(
+              Load::make(a_buf, {static_cast<int64_t>(0), j}),
+              Mul::make(j, static_cast<int64_t>(100)))));
+  auto par = Block::make({forI, forJ});
+
+  LoopNest l(par, {b_buf.node()});
+  // Inlining should fail since the producer has compound expr as index.
+  ASSERT_FALSE(l.computeInline(a_buf.node()));
+
+  // The input statement must remain as is.
+  checkIR(l.root_stmt(), R"IR(
+    # CHECK: for (int64_t i = 0;
+    # CHECK-NEXT:   A[
+    # CHECK: for (int64_t j = 0;
+    # CHECK-NEXT:   B[)IR");
+}
+
+TEST(LoopNest, ScheduleInlineConsumerIndicesWithCast) {
   // Input IR:
   //     for (int64_t i = 0; i < 100; i++) {
   //       A[0ll,i] = i * 500ll;
@@ -1696,7 +1737,45 @@ TEST(LoopNest, ScheduleInlineBufferIndicesWithCast) {
   auto par = Block::make({forI, forJ});
 
   LoopNest l(par, {b_buf.node()});
-  l.computeInline(a_buf.node());
+  ASSERT_TRUE(l.computeInline(a_buf.node()));
+
+  checkIR(l.root_stmt(), R"IR(
+    # CHECK: for (int64_t j = 0; j < 100; j++) {
+    # CHECK:   B[0ll, j] = j * 500ll + j * 100ll;
+    # CHECK: })IR");
+}
+
+TEST(LoopNest, ScheduleInlineProducerIndicesWithCast) {
+  // Input IR:
+  //     for (int64_t i = 0; i < 100; i++) {
+  //       A[(int64_t)0,i] = i * 500ll;
+  //     }
+  //     for (int64_t j = 0; j < 100; j++) {
+  //       B[0ll,j] = A[0ll, j] + j * 100ll;
+  //     }
+  BufHandle a_buf("A", {20, 100}, kLong);
+  BufHandle b_buf("B", {20, 100}, kLong);
+  VarHandle i("i", kLong);
+  VarHandle j("j", kLong);
+  auto forI = For::make(
+      i,
+      0,
+      100,
+      Store::make(a_buf, {0, i}, Mul::make(i, static_cast<int64_t>(500))));
+  auto forJ = For::make(
+      j,
+      0,
+      100,
+      Store::make(
+          b_buf,
+          {static_cast<int64_t>(0), j},
+          Add::make(
+              Load::make(a_buf, {static_cast<int64_t>(0), j}),
+              Mul::make(j, static_cast<int64_t>(100)))));
+  auto par = Block::make({forI, forJ});
+
+  LoopNest l(par, {b_buf.node()});
+  ASSERT_TRUE(l.computeInline(a_buf.node()));
 
   checkIR(l.root_stmt(), R"IR(
     # CHECK: for (int64_t j = 0; j < 100; j++) {
@@ -3590,9 +3669,7 @@ TEST(LoopNest, DetectInlineRankMismatch) {
       {{kTotalSize / 2, "i"}, {2, "j"}},
       [&](const VarHandle& i, const VarHandle& j) { return a.load(i, j); });
   LoopNest l({reshape}, {a, reshape});
-  ASSERT_THROWS_WITH(
-      l.computeInline(l.getLoopBodyFor(a)),
-      "Number of indices doesn't match buf rank in the fuser.");
+  ASSERT_FALSE(l.computeInline(l.getLoopBodyFor(a)));
 }
 
 TEST(LoopNest, CacheReadsSimple) {

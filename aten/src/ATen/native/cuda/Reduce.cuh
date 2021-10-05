@@ -4,10 +4,9 @@
 #include <ATen/ATen.h>
 #include <ATen/core/Array.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/detail/FunctionTraits.h>
-#include <THC/THCDeviceUtils.cuh>
-#include <THC/THCGeneral.hpp>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/MemoryAccess.cuh>
@@ -936,8 +935,6 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
 
   if (!can_use_32bit_indexing) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
-      // Dim 0 is always the reduced dimension
-      AT_ASSERT(sub_iter.strides(0)[0] == 0);
       int64_t sub_iter_base_idx = sub_iter.view_offsets()[0];
 
       gpu_reduce_kernel<scalar_t, out_scalar_t, vt0>(sub_iter, ops, ident,
