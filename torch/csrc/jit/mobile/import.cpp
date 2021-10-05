@@ -328,10 +328,9 @@ void BytecodeDeserializer::parseMethods(
     const std::string& function_name = m_tuple[0].toStringRef();
     auto codeTableElements =
         std::move(*std::move(m_tuple[1]).toTuple()).elements();
-    IValue* schemaTable = // older files do not store function schema
-        (model_version > 0x4L || (model_version == 0x4L && m_tuple.size() >= 3))
-        ? &m_tuple[2]
-        : nullptr;
+    // IValue* schemaTable = // older files do not store function schema
+    //     (model_version > 0x4L || (model_version == 0x4L && m_tuple.size() >=
+    //     3)) ? &m_tuple[2] : nullptr;
     auto function =
         std::make_unique<mobile::Function>(c10::QualifiedName(function_name));
 
