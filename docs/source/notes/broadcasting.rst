@@ -25,6 +25,10 @@ For Example::
     >>> y=torch.empty(2,2)
     # x and y are broadcastable, because x's shape does not exist
 
+    >>> x=torch.empty((0,))
+    >>> y=torch.empty(2)
+    # x and y are not broadcastable, because their shapes mismatch, 0 != 2
+    
     # can line up trailing dimensions
     >>> x=torch.empty(5,3,4,1)
     >>> y=torch.empty(  3,1,1)
