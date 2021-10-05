@@ -233,9 +233,10 @@ LivenessMap GetLivenessMap(
     {
       // Restrict the scope of live_values_use_chain_v because
       // later rehashing may cause it to dangle.
+      auto& live_values_use_chain_v = live_values_use_chain.at(v);
       for (const auto& u : v->uses()) {
         const auto* node = u.user;
-        live_values_use_chain.at(v).insert(node);
+        live_values_use_chain_v.insert(node);
         live_nodes_def_chain[node].insert(v);
       }
     }
