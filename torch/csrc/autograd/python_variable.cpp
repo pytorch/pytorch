@@ -45,6 +45,7 @@
 #include <utility>
 #include <vector>
 
+
 using namespace at;
 using namespace torch;
 using namespace torch::autograd;
@@ -154,18 +155,20 @@ static bool check_has_torch_dispatch(PyObject *obj) {
   );
 }
 
-static std::unordered_map<c10::Device, PyObject*> device_to_py_ten_class_;
+
+static PyObject* device_to_py_class_ [static_cast<size_t>(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
 
 void RegisterPythonTensorClass(std::string device, PyObject* python_tensor_class) {
-  // TODO: needs to be threadsafe
   c10::Device dev(device);
-  dev.set_index(0);
-  device_to_py_ten_class_[device] = python_tensor_class;
+  if (dev.type() == kCPU || dev.type() == kCUDA) {
+    // TODO: should I throw something else?
+    throw new std::runtime_error("Cannot override classes for kCPU or kCUDA");
+  }
+  device_to_py_class_[static_cast<size_t>(dev.type())] = python_tensor_class;
 }
 
 static PyObject* getPythonTensorClass(c10::Device d) {
-  d.set_index(0);
-  return device_to_py_ten_class_[d];
+  return device_to_py_class_[static_cast<size_t>(d.type())];
 }
 
 // TODO: Make this take Variable by const reference
@@ -212,6 +215,11 @@ PyObject * THPVariable_Wrap(at::TensorBase var)
     } else {
       status = c10::impl::PyInterpreterStatus::MAYBE_UNINITIALIZED;
     }
+  }
+
+  if (static_cast<size_t>(var.device().type()) <= static_cast<size_t>(c10::kCUDA)) {
+    return THPVariable_NewWithVar(
+      (PyTypeObject*)THPVariableClass, std::move(var), status);
   }
 
   if (auto clazz = getPythonTensorClass(var.device())) {
