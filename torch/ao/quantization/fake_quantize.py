@@ -267,6 +267,15 @@ class FusedMovingAvgObsFakeQuantize(FakeQuantize):
     Similar to :class:`~torch.quantization.FakeQuantize`, and accepts the same attributes as the
     base class.
 
+    Attributes:
+        fake_quantize_enabled: used to check if the incoming tensor should be fake_quantized in the forward call.
+            If the tensor value is set to 0, the module returns the input tensor as is.
+        observer_enabled: used to check if the moving average min/max calculations should be performed on the incoming tensor.
+            If the tensor value is set to 0, the min/max values in the observer aren't updated.
+        output_fake_quant: additional attribute used in the case where the FakeQuantize module is used at the output of an operator.
+            It is used to give the user additional control to disable fake quantization at the otutput of ops.
+            Defaults to True (always fake quantize output).
+
     """
 
     def __init__(
@@ -283,6 +292,7 @@ class FusedMovingAvgObsFakeQuantize(FakeQuantize):
         self.quant_max: int = quant_max
         self.register_buffer("fake_quant_enabled", torch.tensor([1], dtype=torch.long))
         self.register_buffer("observer_enabled", torch.tensor([1], dtype=torch.long))
+        self.output_fake_quant: bool = True
         self.is_symmetric_quant = _is_symmetric_quant(self.activation_post_process.qscheme)
 
         self.quant_min, self.quant_max = self.activation_post_process.quant_min, self.activation_post_process.quant_max
@@ -294,10 +304,11 @@ class FusedMovingAvgObsFakeQuantize(FakeQuantize):
     @torch.jit.export
     def extra_repr(self) -> str:
         return (
-            "fake_quant_enabled={}, observer_enabled={}, scale={}, zero_point={}, "
+            "fake_quant_enabled={}, observer_enabled={}, output_fake_quant={}, scale={}, zero_point={}, "
             "dtype={}, quant_min={}, quant_max={}, qscheme={}, reduce_range={}".format(
                 self.fake_quant_enabled,
                 self.observer_enabled,
+                self.output_fake_quant,
                 self.scale,
                 self.zero_point,
                 self.dtype,
@@ -323,6 +334,7 @@ class FusedMovingAvgObsFakeQuantize(FakeQuantize):
             self.ch_axis,
             self.is_per_channel,
             self.is_symmetric_quant,
+            self.output_fake_quant,
         )
 
 default_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMaxObserver, quant_min=0, quant_max=255,
