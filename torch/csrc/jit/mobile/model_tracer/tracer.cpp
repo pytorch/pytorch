@@ -159,7 +159,7 @@ void call_setup_methods() {
  * Call methods on the Tensor object that we expect to be called
  * in production on this Tensor.
  */
-void consume_tensor(at::Tensor& t) {
+void consume_tensor(const at::Tensor& t) {
   at::Tensor c = t;
   c.copy_(t.cpu());
 }
