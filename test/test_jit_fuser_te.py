@@ -841,7 +841,7 @@ class TestTEFuser(JitTestCase):
                 inputs = get_lstm_inputs(device)
                 ge = self.checkTrace(LSTMCellC, inputs)
                 graph = ge.graph_for(*inputs)
-                self.assertLastGraphAllFused()
+                self.assertAllFused(ge.graph_for(*inputs))
                 # XXX: TE fuser can handle concats inside a fusion group.
                 # FileCheck().check("FusedConcat").check_next("return").run(str(graph))
 
