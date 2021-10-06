@@ -43,7 +43,6 @@ from .graph_module import (
 
 from .pattern_utils import (
     MatchResult,
-    get_default_output_activation_post_process_map,
 )
 
 from .match_utils import (
@@ -59,7 +58,7 @@ from .utils import (
     get_new_attr_name_with_prefix,
     NON_QUANTIZABLE_WEIGHT_OPS,
     WEIGHT_INDEX_DICT,
-    FUNCTIONAL_OPS_WITH_BIAS,
+    BIAS_INDEX_DICT,
 )
 
 from ..fuser_method_mappings import DEFAULT_OP_LIST_TO_FUSER_METHOD
@@ -105,24 +104,16 @@ def node_arg_is_weight(node: Node, arg: Any) -> bool:
                 return True
     return False
 
-CONV_OPS_WITH_BIAS = {
-    torch.nn.functional.conv1d,
-    torch.nn.functional.conv2d,
-    torch.nn.functional.conv3d,
-}
-CONV_BIAS_ARG_INDEX = 2
-
 def node_arg_is_bias(node: Node, arg: Any) -> bool:
-    if isinstance(node, Node) and node.op == 'call_function':
-        if node.target in CONV_OPS_WITH_BIAS:
-            for i, node_arg in enumerate(node.args):
-                if arg is node_arg and i == CONV_BIAS_ARG_INDEX:
-                    return True
-        elif node.target in FUNCTIONAL_OPS_WITH_BIAS:
-            for kwarg_name, kwarg_value in node.kwargs.items():
-                if kwarg_name == 'bias' and arg is kwarg_value:
-                    return True
-    return False
+    if not isinstance(node, Node) or node.op != 'call_function':
+        return False
+
+    idx = BIAS_INDEX_DICT.get(node.target, None)
+    return (
+        idx is not None and
+        ((len(node.args) > idx and arg is node.args[idx]) or
+            node.kwargs.get('bias', None) is arg)
+    )
 
 def get_standalone_module_configs(
     node: Node,
@@ -590,10 +581,9 @@ def maybe_insert_output_observer_for_node(
     if should_insert_observer:
         act_post_process_ctr = qconfig.activation
         if activation_is_int8_quantized(qconfig):
-            act_post_process_ctr = \
-                get_default_output_activation_post_process_map().get(
-                    matched_pattern,
-                    act_post_process_ctr)
+            act_post_process_ctr = qhandler.get_activation_ctr(
+                qconfig,
+                matched_pattern)
         observer = act_post_process_ctr()
         new_obs = insert_observer(node, node, observer, model, modules, graph, node_name_to_scope, "output")
         # set the type, so the next node can read it
@@ -1100,7 +1090,7 @@ def run_prepare_fx_on_standalone_modules(
 
         standalone_module = modules[root_node.target]
         prepare = \
-            torch.quantization.quantize_fx._prepare_standalone_module_fx  # type: ignore[attr-defined]
+            torch.ao.quantization.quantize_fx._prepare_standalone_module_fx  # type: ignore[attr-defined]
         observed_standalone_module = \
             prepare(standalone_module, sm_qconfig_dict, sm_prepare_config_dict)
         preserved_attributes = \
@@ -1172,10 +1162,10 @@ def prepare(
     # {
     #   # match a single node
     #   (<class 'torch.nn.modules.conv.Conv3d'>:
-    #     <class 'torch.quantization.fx.quantize.ConvRelu'>),
+    #     <class 'torch.ao.quantization.fx.quantize.ConvRelu'>),
     #   # match multiple nodes in reverse order
     #   ((<function relu at 0x7f766a7360d0>, <built-in function add>):
-    #     <class 'torch.quantization.fx.quantize.Add'>),
+    #     <class 'torch.ao.quantization.fx.quantize.Add'>),
     # }
     quant_patterns = backend_config_dict["quant_patterns"]
     patterns: Dict[Pattern, QuantizeHandler] = get_combined_dict(

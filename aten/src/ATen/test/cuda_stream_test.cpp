@@ -173,6 +173,7 @@ TEST(TestStream, StreamPoolTest) {
   if (!at::cuda::is_available()) return;
   std::vector<at::cuda::CUDAStream> streams{};
   for (const auto i : c10::irange(200)) {
+    (void)i;
     streams.emplace_back(at::cuda::getStreamFromPool());
   }
 
