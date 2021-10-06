@@ -580,6 +580,7 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
                     torch.nn.Linear(dim1, dim2),
                     torch.nn.Linear(dim2, dim1),
                 )
+
             def forward(self, x):
                 x = self.inner_nn_squential(x)
                 return x
