@@ -230,6 +230,7 @@ When indexing into a tensor for reading, the following patterns are not supporte
 
   # Tensor indices that includes negative values.
   data[torch.tensor([[1, 2], [2, -3]]), torch.tensor([-2, 3])]
+  # Workarounds: use positive index values.
 
 Writes / Sets
 ~~~~~~~~~~~~~
@@ -238,12 +239,24 @@ When indexing into a Tensor for writing, the following patterns are not supporte
 
   # Multiple tensor indices if any has rank >= 2
   data[torch.tensor([[1, 2], [2, 3]]), torch.tensor([2, 3])] = new_data
+  # Workarounds: use single tensor index with rank >= 2,
+  #              or multiple consecutive tensor indices with rank == 1.
 
   # Multiple tensor indices that are not consecutive
   data[torch.tensor([2, 3]), :, torch.tensor([1, 2])] = new_data
+  # Workarounds: transpose `data` such that tensor indices are consecutive.
 
   # Tensor indices that includes negative values.
   data[torch.tensor([1, -2]), torch.tensor([-2, 3])] = new_data
+  # Workarounds: use positive index values.
+
+  # Implicit broadcasting required for new_data.
+  data[torch.tensor([[0, 2], [1, 1]]), 1:3] = new_data
+  # Workarounds: expand new_data explicitly.
+  # Example:
+  #   data shape: [3, 4, 5]
+  #   new_data shape: [5]
+  #   expected new_data shape after broadcasting: [2, 2, 2, 5]
 
 Adding support for operators
 ----------------------------
@@ -307,11 +320,11 @@ If the operator is an ATen operator (shows up in the TorchScript graph with the 
 
 * Define the symbolic function in ``torch/onnx/symbolic_opset<version>.py``, for example
   `torch/onnx/symbolic_opset9.py <https://github.com/pytorch/pytorch/blob/master/torch/onnx/symbolic_opset9.py>`_.
-  Make sure the function has the same name as the ATen function, which may declared in
+  Make sure the function has the same name as the ATen function, which may be declared in
   ``torch/_C/_VariableFunctions.pyi`` or ``torch/nn/functional.pyi`` (these files are generated at
   build time, so will not appear in your checkout until you build PyTorch).
 * The first arg is always the ONNX graph that is being built for export.
-  Other arg names must EXACTLY match the names in ``_VariableFunctions.pyi``,
+  Other arg names must EXACTLY match the names in the ``.pyi`` file,
   because dispatch is done with keyword arguments.
 * In the symbolic function, if the operator is in the
   `ONNX standard operator set <https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_,
@@ -365,8 +378,8 @@ See the ``symbolic_opset*.py`` files for more examples.
 torch.autograd.Functions
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
-If the operator is defined in a sub-class of :class:`torch.autograd.Function`,
-there are two ways to export it.
+If the operator is a sub-class of :class:`torch.autograd.Function`, there are two ways
+to export it.
 
 Static Symbolic Method
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -388,11 +401,11 @@ PythonOp Symbolic
 ~~~~~~~~~~~~~~~~~
 
 Alternatively, you can register a custom symbolic function.
-This gives the symoblic function access to more info through the
+This gives the symbolic function access to more info through the
 TorchScript ``Node`` object for the original operation, which gets passed in as the second
 argument (after the ``Graph`` object).
 
-All autograd ``Function``s are emitted in the TorchScript graph as ``prim::PythonOp`` nodes.
+All autograd ``Function``\ s appear in the TorchScript graph as ``prim::PythonOp`` nodes.
 In order to differentiate between different ``Function`` subclasses, the
 symbolic function should use the ``name`` kwarg which gets set to the name of the class.
 
@@ -400,11 +413,12 @@ symbolic function should use the ``name`` kwarg which gets set to the name of th
 the ``prim`` namespace, so for this use case, there's a back door: register the
 symbolic for ``"::prim_PythonOp"``.
 
-Please also consider adding shape inference logic when you regiester a custom symbolic function
-via setType API. This can help the exporter to obtain correct shape inference.
-An example of setType is test_aten_embedding_2 in test_operators.py.
-Although it is not required to add shape inference logic,
-the exporter emits a warning message if it is not added.
+Custom symbolic functions should add type and shape information by calling ``setType(...)``
+on Value objects before returning them (implemented in C++ by
+``torch::jit::Value::setType``). This is not required, but it can help the exporter's
+shape and type inference for down-stream nodes. For a non-trivial example of ``setType``, see
+``test_aten_embedding_2`` in
+`test_operators.py <https://github.com/pytorch/pytorch/blob/master/test/onnx/test_operators.py>`_.
 
 The example below shows how you can access ``requires_grad`` via the ``Node`` object::
 
@@ -430,13 +444,17 @@ The example below shows how you can access ``requires_grad`` via the ``Node`` ob
             print("arg {}: {}, requires grad: {}".format(i, arg, requires_grad))
 
         name = kwargs["name"]
+        ret = None
         if name == "MyClip":
-            return g.op("Clip", args[0], min_f=args[1])
+            ret = g.op("Clip", args[0], min_f=args[1])
         elif name == "MyRelu":
-            return g.op("Relu", args[0])
+            ret = g.op("Relu", args[0])
         else:
             # Logs a warning and returns None
             return _unimplemented("prim::PythonOp", "unknown node kind: " + name)
+        # Copy type and shape from original node.
+        ret.setType(n.type())
+        return ret
 
     from torch.onnx import register_custom_op_symbolic
     register_custom_op_symbolic("::prim_PythonOp", symbolic_pythonop, 1)
@@ -481,7 +499,7 @@ You can export it as one or a combination of standard ONNX ops, or as a custom o
 The example above exports it as a custom operator in the "custom_domain" opset.
 When exporting a custom operator, you can specify the custom domain version using the
 ``custom_opsets`` dictionary at export. If not specified, the custom opset version defaults to 1.
-The runtime that conumes the model needs to support the custom op. See
+The runtime that consumes the model needs to support the custom op. See
 `Caffe2 custom ops <https://caffe2.ai/docs/custom-operators.html>`_,
 `ONNX Runtime custom ops <https://github.com/microsoft/onnxruntime/blob/master/docs/AddingCustomOp.md>`_,
 or your runtime of choice's documentation.

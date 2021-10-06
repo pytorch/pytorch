@@ -336,10 +336,10 @@ void CppPrinter::visit(ExternalCallPtr v) {
 }
 
 void CppPrinter::visit(LetPtr v) {
-  if (v->dtype().lanes() == 1) {
+  if (v->var()->dtype().lanes() == 1) {
     emitIndent();
-    os() << v->dtype().ToCppString() << " " << *v->var() << " = " << *v->value()
-         << ";" << std::endl;
+    os() << v->var()->dtype().ToCppString() << " " << *v->var() << " = "
+         << *v->value() << ";" << std::endl;
   } else {
     vector_vars_[v->var()] = v->value();
   }
