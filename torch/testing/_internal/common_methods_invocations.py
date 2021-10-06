@@ -7875,8 +7875,8 @@ op_db: List[OpInfo] = [
            skips=(
                # RuntimeError:
                # adaptive_avg_pool2d(Tensor input, int[2] output_size) -> (Tensor):
-               # Expected a value of type 'List[int]' for argument 'output_size' but instead found type 'Tuple[NoneType, int]'.
-               # :
+               # Expected a value of type 'List[int]' for argument 'output_size' but
+               # instead found type 'Tuple[NoneType, int]'. :
                #   File "<string>", line 3
                # def the_method(i0):
                #     return torch.nn.functional.adaptive_avg_pool2d(i0, (None, 7))
@@ -7892,8 +7892,8 @@ op_db: List[OpInfo] = [
            skips=(
                # RuntimeError:
                # adaptive_avg_pool3d(Tensor input, int[3] output_size) -> (Tensor):
-               # Expected a value of type 'List[int]' for argument 'output_size' but instead found type 'Tuple[NoneType, NoneType]'.
-               # :
+               # Expected a value of type 'List[int]' for argument 'output_size' but
+               # instead found type 'Tuple[NoneType, NoneType]'. :
                #   File "<string>", line 3
                #
                # def the_method(i0):
@@ -7911,8 +7911,8 @@ op_db: List[OpInfo] = [
            skips=(
                # RuntimeError:
                # adaptive_avg_pool3d(Tensor input, int[3] output_size) -> (Tensor):
-               # Expected a value of type 'List[int]' for argument 'output_size' but instead found type 'Tuple[NoneType, NoneType, NoneType]'.
-               # :
+               # Expected a value of type 'List[int]' for argument 'output_size' but
+               # instead found type 'Tuple[NoneType, NoneType, NoneType]'. :
                #   File "<string>", line 3
                #
                # def the_method(i0):
