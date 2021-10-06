@@ -8361,6 +8361,8 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_rot90),
+    # To test reference numerics against multiple values of argument `decimals`,
+    # we make multiple OpInfo entries with each entry corresponding to different value of decimals.
     UnaryUfuncInfo('round',
                    ref=np.round,
                    aliases=('special.round',),
