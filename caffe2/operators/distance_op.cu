@@ -4,6 +4,7 @@
 #include "caffe2/operators/distance_op.h"
 #include "caffe2/utils/conversions.h"
 
+#include <ATen/cuda/cub.cuh>
 #include <cub/block/block_reduce.cuh>
 
 namespace caffe2 {

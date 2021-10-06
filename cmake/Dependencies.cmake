@@ -1622,6 +1622,11 @@ if(NOT INTERN_BUILD_MOBILE)
     list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-fPIC")
   endif()
 
+  # include cub in a safe manner, see:
+  # https://github.com/pytorch/pytorch/pull/55292
+  # https://github.com/NVIDIA/cub/releases/tag/1.14.0
+  list(APPEND CUDA_NVCC_FLAGS "-DCUB_WRAPPED_NAMESPACE=at_cuda_detail")
+
   if(CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
     message(STATUS "Found CUDA with FP16 support, compiling with torch.cuda.HalfTensor")
     list(APPEND CUDA_NVCC_FLAGS "-DCUDA_HAS_FP16=1" "-D__CUDA_NO_HALF_OPERATORS__" "-D__CUDA_NO_HALF_CONVERSIONS__"

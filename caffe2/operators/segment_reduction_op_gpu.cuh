@@ -1,3 +1,4 @@
+#include <ATen/cuda/cub.cuh>
 #include <cub/block/block_reduce.cuh>
 #include <cub/device/device_reduce.cuh>
 #include <cub/device/device_scan.cuh>

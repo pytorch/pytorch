@@ -5,6 +5,7 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/operator_fallback_gpu.h"
 
+#include <ATen/cuda/cub.cuh>
 #include <cub/block/block_reduce.cuh>
 
 namespace caffe2 {
