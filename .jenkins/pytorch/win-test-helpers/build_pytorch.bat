@@ -16,13 +16,25 @@ set CMAKE_VERBOSE_MAKEFILE=1
 set INSTALLER_DIR=%SCRIPT_HELPERS_DIR%\installation-helpers
 
 call %INSTALLER_DIR%\install_mkl.bat
-call %INSTALLER_DIR%\install_magma.bat
-call %INSTALLER_DIR%\install_sccache.bat
-call %INSTALLER_DIR%\install_miniconda3.bat
+if errorlevel 1 exit /b
+if not errorlevel 0 exit /b
 
+call %INSTALLER_DIR%\install_magma.bat
+if errorlevel 1 exit /b
+if not errorlevel 0 exit /b
+
+call %INSTALLER_DIR%\install_sccache.bat
+if errorlevel 1 exit /b
+if not errorlevel 0 exit /b
+
+call %INSTALLER_DIR%\install_miniconda3.bat
+if errorlevel 1 exit /b
+if not errorlevel 0 exit /b
 
 :: Install ninja and other deps
 if "%REBUILD%"=="" ( pip install -q "ninja==1.10.0.post1" dataclasses typing_extensions "expecttest==0.1.3" )
+if errorlevel 1 exit /b
+if not errorlevel 0 exit /b
 
 :: Override VS env here
 pushd .
@@ -31,6 +43,8 @@ if "%VC_VERSION%" == "" (
 ) else (
     call "C:\Program Files (x86)\Microsoft Visual Studio\%VC_YEAR%\%VC_PRODUCT%\VC\Auxiliary\Build\vcvarsall.bat" x64 -vcvars_ver=%VC_VERSION%
 )
+if errorlevel 1 exit /b
+if not errorlevel 0 exit /b
 @echo on
 popd
 
@@ -90,6 +104,8 @@ if "%USE_CUDA%"=="1" (
   :: CMake requires a single command as CUDA_NVCC_EXECUTABLE, so we push the wrappers
   :: randomtemp.exe and sccache.exe into a batch file which CMake invokes.
   curl -kL https://github.com/peterjc123/randomtemp-rust/releases/download/v0.4/randomtemp.exe --output %TMP_DIR_WIN%\bin\randomtemp.exe
+  if errorlevel 1 exit /b
+  if not errorlevel 0 exit /b
   echo @"%TMP_DIR_WIN%\bin\randomtemp.exe" "%TMP_DIR_WIN%\bin\sccache.exe" "%CUDA_PATH%\bin\nvcc.exe" %%* > "%TMP_DIR%/bin/nvcc.bat"
   cat %TMP_DIR%/bin/nvcc.bat
   set CUDA_NVCC_EXECUTABLE=%TMP_DIR%/bin/nvcc.bat
@@ -110,6 +126,8 @@ if "%REBUILD%" == "" (
     echo cd /D "%CD%" >> %TMP_DIR_WIN%/ci_scripts/pytorch_env_restore_helper.bat
 
     aws s3 cp "s3://ossci-windows/Restore PyTorch Environment.lnk" "C:\Users\circleci\Desktop\Restore PyTorch Environment.lnk"
+    if errorlevel 1 exit /b
+    if not errorlevel 0 exit /b
   )
 )
 :: tests if BUILD_ENVIRONMENT contains cuda11 as a substring
@@ -122,6 +140,8 @@ python setup.py install --cmake && sccache --show-stats && (
     echo NOTE: To run `import torch`, please make sure to activate the conda environment by running `call %CONDA_PARENT_DIR%\Miniconda3\Scripts\activate.bat %CONDA_PARENT_DIR%\Miniconda3` in Command Prompt before running Git Bash.
   ) else (
     7z a %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torch %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\caffe2 && copy /Y "%TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z" "%PYTORCH_FINAL_PACKAGE_DIR%\"
+    if errorlevel 1 exit /b
+    if not errorlevel 0 exit /b
 
     :: export test times so that potential sharded tests that'll branch off this build will use consistent data
     python test/run_test.py --export-past-test-times %PYTORCH_FINAL_PACKAGE_DIR%/.pytorch-test-times.json
@@ -130,3 +150,7 @@ python setup.py install --cmake && sccache --show-stats && (
     copy /Y "build\.ninja_log" "%PYTORCH_FINAL_PACKAGE_DIR%\"
   )
 )
+
+sccache --show-stats > stats.txt
+python -m tools.stats.upload_sccache_stats stats.txt
+rm stats.txt
