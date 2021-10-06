@@ -202,28 +202,44 @@ static void slow_conv2d_update_output_frame(
       output.data(), ldc);
 }
 
+template <typename scalar_t>
 void slow_conv2d_backward_update_grad_input_frame(
-    Tensor& grad_input,
-    const Tensor& grad_output,
-    const Tensor& weight,
-    Tensor& fgrad_input,
+    TensorAccessor<scalar_t, 3> grad_input,
+    TensorAccessor<scalar_t, 3> grad_output,
+    TensorAccessor<scalar_t, 2> weight,
+    scalar_t *fgrad_input,
     int64_t kernel_height,
     int64_t kernel_width,
     int64_t stride_height,
     int64_t stride_width,
     int64_t pad_height,
     int64_t pad_width) {
-  auto grad_output_2d = grad_output.reshape(
-      {grad_output.size(0), grad_output.size(1) * grad_output.size(2)});
-  at::mm_out(fgrad_input, weight, grad_output_2d);
+  // Compute fgrad_input = weight.T * grad_output.reshape({grad_output.shape(0), -1})
+  // Note gemm expects fortran order, so all 3 matrices are transposed.
+  // Swapping argument order cancels this, since C == AB <=> T(C) == T(B)T(A)
+  const int64_t m = grad_output.size(1) * grad_output.size(2);
+  const int64_t n = weight.size(1);
+  const int64_t k = weight.size(0);
 
-  grad_input.zero_();
-  TORCH_INTERNAL_ASSERT(fgrad_input.scalar_type() == grad_input.scalar_type());
+  const int64_t lda = m;
+  const int64_t ldb = n;
+  const int64_t ldc = m;
+
+  at::native::cpublas::gemm(
+      TransposeType::NoTranspose,
+      TransposeType::Transpose,
+      m, n, k,
+      static_cast<scalar_t>(1),
+      grad_output.data(), lda,
+      weight.data(), ldb,
+      static_cast<scalar_t>(0),
+      fgrad_input, ldc);
+
   unfolded2d_acc_stub(
       kCPU,
-      grad_input.scalar_type(),
-      fgrad_input.data_ptr(),
-      grad_input.data_ptr(),
+      c10::CppTypeToScalarType<scalar_t>::value,
+      fgrad_input,
+      grad_input.data(),
       kernel_height,
       kernel_width,
       stride_height,
@@ -270,43 +286,68 @@ void slow_conv2d_backward_out_cpu_template(
   const Tensor input = input_.contiguous();
   const Tensor grad_output = grad_output_.contiguous();
   grad_input.resize_as_(input);
-  const Tensor tweight = weight.transpose(0, 1);
+  grad_input.zero_();
+  TORCH_CHECK(grad_input.is_contiguous(), "slow_conv2d: grad_input must be contiguous");
   const int64_t batch_size = input.size(0);
-  at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
-    NoGradGuard no_grad;
-    AutoDispatchBelowADInplaceOrView non_variable_type_mode;
-    auto fgrad_input = at::empty(finput.sizes().slice(1), finput.options());
-    for (int64_t t = start; t < end; t++) {
-      Tensor grad_input_t = grad_input[t];
-      Tensor grad_output_t = grad_output[t];
-      slow_conv2d_backward_update_grad_input_frame(
-          grad_input_t,
-          grad_output_t,
-          tweight,
-          fgrad_input,
-          kernel_height,
-          kernel_width,
-          stride_height,
-          stride_width,
-          pad_height,
-          pad_width);
-    }
+
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      kBFloat16, input.scalar_type(), "slow_conv2d_cpu_grad_input", [&] {
+    auto grad_output_a = grad_output.accessor<scalar_t, 4>();
+    auto grad_input_a = grad_input.accessor<scalar_t, 4>();
+    auto weight_a = weight.accessor<scalar_t, 2>();
+
+    at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
+      auto fgrad_input = std::make_unique<scalar_t[]>(
+          c10::multiply_integers(finput.sizes().slice(1)));
+      for (int64_t t = start; t < end; t++) {
+        auto grad_input_t = grad_input_a[t];
+        auto grad_output_t = grad_output_a[t];
+        slow_conv2d_backward_update_grad_input_frame(
+            grad_input_t,
+            grad_output_t,
+            weight_a,
+            fgrad_input.get(),
+            kernel_height,
+            kernel_width,
+            stride_height,
+            stride_width,
+            pad_height,
+            pad_width);
+      }
+    });
   });
 }
 
+template <typename scalar_t>
 void slow_conv2d_backward_weight_frame(
-    Tensor& grad_weight,
-    Tensor& grad_output,
-    const Tensor& finput) {
-  auto grad_output_2d = grad_output.view(
-      {grad_output.size(0), grad_output.size(1) * grad_output.size(2)});
-  const Tensor tfinput = finput.transpose(0, 1);
-  grad_weight.addmm_(grad_output_2d, tfinput);
+    TensorAccessor<scalar_t, 2> grad_weight,
+    TensorAccessor<scalar_t, 3> grad_output,
+    TensorAccessor<scalar_t, 2> finput) {
+  // Compute grad_weight += grad_output.reshape({grad_output.shape(0), -1}) * finput.T
+  // Note gemm expects fortran order, so all 3 matrices are transposed.
+  // Swapping argument order cancels this, since C == AB <=> T(C) == T(B)T(A)
+  const int64_t m = finput.size(0);
+  const int64_t n = grad_output.size(0);
+  const int64_t k = grad_output.size(1) * grad_output.size(2);
+
+  const int64_t lda = k;
+  const int64_t ldb = k;
+  const int64_t ldc = m;
+
+  at::native::cpublas::gemm(
+      TransposeType::Transpose,
+      TransposeType::NoTranspose,
+      m, n, k,
+      static_cast<scalar_t>(1),
+      finput.data(), lda,
+      grad_output.data(), ldb,
+      static_cast<scalar_t>(1),
+      grad_weight.data(), ldc);
 }
 
 static void slow_conv2d_backward_weight_out_cpu_template(
     Tensor& grad_weight,
-    const Tensor& input_,
+    const Tensor& input,
     const Tensor& grad_output_,
     const Tensor& finput,
     IntArrayRef kernel_size,
@@ -327,7 +368,7 @@ static void slow_conv2d_backward_weight_out_cpu_template(
   grad_weight_2d = view_weight_2d(grad_weight);
 
   slow_conv2d_shape_check(
-      input_,
+      input,
       grad_output_,
       grad_weight_2d,
       {},
@@ -339,20 +380,25 @@ static void slow_conv2d_backward_weight_out_cpu_template(
       pad_width,
       true);
 
-  auto input = input_.contiguous();
   auto grad_output = grad_output_.contiguous();
+  TORCH_CHECK(finput.is_contiguous(), "slow_conv2d: finput must be contiguous");
 
   const int64_t batch_size = input.size(0);
-  for (int64_t t = 0; t < batch_size; t++) {
-    Tensor grad_output_t = grad_output[t];
-    Tensor finput_t;
-    if (grad_weight_2d.defined()) {
-      finput_t = finput[t];
-    }
 
-    slow_conv2d_backward_weight_frame(
-        grad_weight_2d, grad_output_t, finput_t);
-  }
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      kBFloat16, input.scalar_type(), "slow_conv2d_cpu_grad_weight", [&] {
+    auto grad_output_a = grad_output.accessor<scalar_t, 4>();
+    auto grad_weight_2d_a = grad_weight_2d.accessor<scalar_t, 2>();
+    auto finput_a = finput.accessor<scalar_t, 3>();
+
+    for (int64_t t = 0; t < batch_size; t++) {
+      auto grad_output_t = grad_output_a[t];
+      auto finput_t = finput_a[t];
+
+      slow_conv2d_backward_weight_frame(
+          grad_weight_2d_a, grad_output_t, finput_t);
+    }
+  });
 }
 
 } // namespace
