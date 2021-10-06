@@ -1295,6 +1295,8 @@ def sample_inputs_cosine_similarity(op_info, device, dtype, requires_grad, **kwa
             yield SampleInput(make_arg(input_shape), args=(make_arg(input_shape),), kwargs=kwargs)
         # Test for Broadcasting
         yield SampleInput(make_arg((1, 2, 3)), args=(make_arg((2, 1, 3)),), kwargs={'dim': -1})
+        yield SampleInput(make_arg((1, 2, 3)), args=(make_arg((2, 1, 3)),), kwargs={'dim': -2})
+        yield SampleInput(make_arg((2, 3)), args=(make_arg((2, 1, 3)),), kwargs={'dim': -1})
 
     return list(generator())
 
