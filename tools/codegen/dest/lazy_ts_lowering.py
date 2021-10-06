@@ -5,7 +5,7 @@ from enum import Enum
 from tools.codegen.context import method_with_native_function
 from tools.codegen.model import (NativeFunction, NativeFunctionsGroup,
                                  BackendIndex)
-from tools.codegen.api.lazy import LazyIrSchema
+from tools.codegen.api.lazy import LazyIrSchema, isValueType
 
 
 @dataclass(frozen=True)
@@ -41,10 +41,18 @@ case at::aten::{schema.aten_name}:
 """, ]
 
         elif self.target == LazyTsLowering.TsLoweringTarget.LOWERING:
-            emplace_arg_values = [f'loctx->GetOutputOp(node->operand({i}))' for i in range(len(schema.positional_values))]
-            emplace_arg_scalars = [f'"{t.name}", node->{t.name}_' for t in schema.positional_scalars]
-            emplace_arguments = "\n    ".join(
-                [f"arguments.emplace_back({a});" for a in emplace_arg_values + emplace_arg_scalars])
+            emplace_arguments = []
+            iValue = 0
+            iScalar = 0
+            for value in schema.positional_arg_types:
+                if isValueType(value.type):
+                    emplace_arguments.append(f'loctx->GetOutputOp(node->operand({iValue}))')
+                    iValue = iValue + 1
+                    continue
+                emplace_arguments.append(f'"{value.name}", node->{value.name}_')
+
+            emplace_arguments_str = "\n    ".join(
+                [f"arguments.emplace_back({a});" for a in emplace_arguments])
             emplace_kwarg_values = [f'loctx->GetOutputOp(node->operand({i}))' for i in range(len(schema.keyword_values))]
             emplace_kwarg_scalars = [f'"{t.name}", node->{t.name}_' for t in schema.keyword_scalars]
             assert len(schema.keyword_values) == 0, "TODO the logic for operand(i) is broken if there are kw values"
@@ -56,9 +64,9 @@ TSOpVector Lower{schema.node_name}(std::shared_ptr<torch::jit::GraphFunction> fu
                                    const ir::ops::{schema.node_name}* node) {{
     std::vector<torch::jit::NamedValue> arguments;
     std::vector<torch::jit::NamedValue> kwarguments;
-    arguments.reserve({len(emplace_arg_values + emplace_arg_scalars)});
+    arguments.reserve({len(emplace_arguments)});
     kwarguments.reserve({len(emplace_kwarg_values + emplace_kwarg_scalars)});
-    {emplace_arguments}
+    {emplace_arguments_str}
     {emplace_kwarguments}
     TSOpVector {schema.aten_name}_out = LowerBuiltin(function, node, arguments, kwarguments);
     LTC_CHECK_EQ({schema.aten_name}_out.size(), {len(func.returns)});

@@ -3,8 +3,8 @@ from dataclasses import dataclass
 from tools.codegen.context import method_with_native_function
 from tools.codegen.model import (BackendIndex, NativeFunction,
                                  NativeFunctionsGroup)
-from tools.codegen.api.types import (BaseCType, OptionalCType,
-                                     NamedCType, kernel_signature)
+from tools.codegen.api.types import (BaseCType, OptionalCType, NamedCType,
+                                     VectorCType, kernel_signature)
 import tools.codegen.api.dispatcher as dispatcher
 from tools.codegen.api.lazy import LazyIrSchema, isValueType
 
@@ -14,7 +14,6 @@ def node_ctor_inputs(func: LazyIrSchema) -> str:
     Produce a formatted string with the arguments as passed into the constructor of a node class.
     """
     node_ctor_values = []
-    node_ctor_scalars = []
     for arg in func.filtered_types():
         if isValueType(arg.type):
             if isinstance(arg.type, BaseCType):
@@ -27,12 +26,12 @@ def node_ctor_inputs(func: LazyIrSchema) -> str:
             else:
                 raise AssertionError("TODO not sure if there are other valid types to handle here")
         else:
-            if isinstance(arg.type, BaseCType) and arg.type.type.name == "vector<int64_t>":
-                node_ctor_scalars.append(f"std::vector<int64_t>({arg.name}.begin(), {arg.name}.end())")
+            if isinstance(arg.type, VectorCType):
+                node_ctor_values.append(f"Helpers::I64List({arg.name})")
             else:
-                node_ctor_scalars.append(f"{arg.name}")
+                node_ctor_values.append(f"{arg.name}")
 
-    node_ctor_inputs_str = ",\n                              ".join(node_ctor_values + node_ctor_scalars)
+    node_ctor_inputs_str = ",\n                              ".join(node_ctor_values)
     return node_ctor_inputs_str
 
 
@@ -70,23 +69,20 @@ class LazyIR:
         base_ctor_value_args = ", ".join(base_ctor_value_args_list)
         members_to_string = "\n    ".join([f'lazy_tensors::ToString("{t.name}", {t.name}_, ss);' for t in scalar_types])
 
-        # clone needs hand-overrides for cases where there are optional Tensor? args,
-        # unless we clean up the OpList API to deal unambiguously with optionals.
-        clone_impl_args = ",".join(
-            [f"operands.at({i})" for i in range(len(value_types))] +
-            [f"{s.name}_" for s in scalar_types] +
-            ["out_dtype_", "out_shape_"])
-        if any([isinstance(t.type, OptionalCType) for t in value_types]):
-            scalar_args = ",".join([f"{s.name}_" for s in scalar_types])
-            clone_impl = f"return Clone{schema.node_name}(operands, {scalar_args});"
-            clone_decl_args = ", ".join([f"{i.cpp_type()} {i.name}" for i in scalar_types])
-            clone_handcoded_decl = f"NodePtr Clone{schema.node_name}(OpList operands, {clone_decl_args});"
-        else:
-            clone_impl = f"ir::MakeNode<ir::ops::{schema.node_name}>({clone_impl_args});"
-            clone_handcoded_decl = ""
+        clone_impl_args = []
+        iValue = 0
+        for value in all_types:
+            if isValueType(value.type):
+                clone_impl_args.append(f"operands.at({iValue})")
+                iValue = iValue + 1
+                continue
+            clone_impl_args.append(f"{value.name}_")
+        clone_impl_args.extend(["out_dtype_", "out_shape_"])
+
+        clone_impl_args_str = ",".join(clone_impl_args)
+        clone_impl = f"ir::MakeNode<ir::ops::{schema.node_name}>({clone_impl_args_str});"
 
         return [f"""\
-{clone_handcoded_decl}
 class {schema.node_name} : public Node {{
  public:
   {schema.node_name}({node_ctor_args}, at::ScalarType out_dtype, std::vector<int64_t> out_shape)
@@ -130,9 +126,9 @@ def lazy_tensor_decls(value_types: List[NamedCType]) -> str:
         elif isinstance(t.type, OptionalCType):
             lazy_tensor_decls.append(
                 f"c10::optional<LazyTensor> l_{t.name} =  "
-                "{t.name}.has_value() ? "
-                "c10::make_optional(bridge::GetLtcTensor({t.name}.value())) : "
-                "c10::nullopt;")
+                f"{t.name}.has_value() ? "
+                f"c10::make_optional(bridge::GetLtcTensor({t.name}.value())) : "
+                f"c10::nullopt;")
         else:
             raise AssertionError("TODO not sure if there are other valid types to handle here")
     return "\n    ".join(lazy_tensor_decls)

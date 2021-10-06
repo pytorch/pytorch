@@ -8,6 +8,7 @@ full_codegen:
   - dropout
   - gelu
   - gelu_backward
+  - layer_norm
   - mean
   - mm
   - mv

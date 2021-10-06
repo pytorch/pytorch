@@ -117,8 +117,9 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
         fm.write_with_template(f'{backend_dispatch_key}NativeFunctions.cpp', 'DispatchKeyNativeFunctions.cpp', lambda: {
             'generated_comment': '',
             'includes': [f'#include "{path}"' for path in [
-                "lazy_tensor_core/csrc/tensor.h",
                 "lazy_tensor_core/csrc/aten_ltc_bridge.h",
+                "lazy_tensor_core/csrc/helpers.h",
+                "lazy_tensor_core/csrc/tensor.h",
                 f"{output_dir}/{backend_key}NativeFunctions.h",
                 f"{output_dir}/{backend_key}LazyIr.h",
                 f"{output_dir}/{backend_key}ShapeDtype.h",
