@@ -1820,7 +1820,8 @@ void initJitScriptBindings(PyObject* module) {
     return _get_mobile_model_contained_types(filename);
   });
   m.def(
-      "_get_mobile_model_contained_types_from_buffer", [](const std::string& buffer) {
+      "_get_mobile_model_contained_types_from_buffer",
+      [](const std::string& buffer) {
         std::istringstream in(buffer);
         return _get_mobile_model_contained_types(in);
       });
