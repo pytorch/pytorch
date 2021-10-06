@@ -28,7 +28,7 @@ For Example::
     >>> x=torch.empty((0,))
     >>> y=torch.empty(2)
     # x and y are not broadcastable, because their trailing dimension mismatch 0 != 2
-    
+
     # can line up trailing dimensions
     >>> x=torch.empty(5,3,4,1)
     >>> y=torch.empty(  3,1,1)
