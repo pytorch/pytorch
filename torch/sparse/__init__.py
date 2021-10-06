@@ -161,7 +161,7 @@ def sum(input: Tensor, dim: DimOrDims = None,
         dim (int or tuple of ints): a dimension or a list of dimensions to reduce. Default: reduce
             over all dims.
         dtype (:class:`torch.dtype`, optional): the desired data type of returned Tensor.
-            Default: dtype of :attr:`input`.
+            Default: dtype of :attr:`input` or ``torch.int64`` when :attr:`input` is of integer type.
 
     Example::
 

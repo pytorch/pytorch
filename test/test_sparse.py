@@ -1531,16 +1531,31 @@ class TestSparse(TestCase):
             S = self._gen_sparse(sparse_dims, nnz, with_size, dtype, device, coalesced)[0]
             run_tests(S.requires_grad_(True), test_dim)
 
-    @dtypes(torch.int8, torch.int16, torch.int32, torch.int64)
+    @dtypes(torch.int8, torch.int16, torch.int32, torch.int64, torch.float32, torch.float64)
     def test_sparse_sum_int(self, device, dtype):
         x = torch.sparse_coo_tensor([[0, 1], [1, 0]], [1, 2], dtype=dtype, device=device)
+        y = x.to_dense()
+        self.assertEqual(x.dtype, y.dtype)
 
         # https://github.com/pytorch/pytorch/issues/65392
-        self.assertEqual(torch.sparse.sum(x).dtype, torch.int64)
-        self.assertEqual(torch.sparse.sum(x, dim=0).dtype, dtype)
+        params = [
+            {},
+            {"dim": 0},
+            {"dim": (0, 1)},
+            {"dtype": dtype},
+            {"dim": 0, "dtype": dtype},
+            {"dim": (0, 1), "dtype": dtype}
+        ]
+        for p in params:
+            self.assertEqual(torch.sparse.sum(x, **p).dtype, torch.sum(y, **p).dtype)
+
+        if dtype in (torch.int8, torch.int16, torch.int32, torch.int64):
+            self.assertEqual(torch.sparse.sum(x).dtype, torch.int64)
+            self.assertEqual(torch.sparse.sum(x, dim=0).dtype, torch.int64)
+            self.assertEqual(torch.sparse.sum(x, dim=(0, 1)).dtype, torch.int64)
+
         self.assertEqual(torch.sparse.sum(x, dtype=dtype).dtype, dtype)
         self.assertEqual(torch.sparse.sum(x, dim=0, dtype=dtype).dtype, dtype)
-        self.assertEqual(torch.sparse.sum(x, dim=(0, 1)).dtype, dtype)
         self.assertEqual(torch.sparse.sum(x, dim=(0, 1), dtype=dtype).dtype, dtype)
 
     def _test_basic_ops_shape(self, nnz_x1, nnz_x2, shape_i, shape_v, dtype, device, coalesced):

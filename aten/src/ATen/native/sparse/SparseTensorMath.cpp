@@ -1174,7 +1174,7 @@ Tensor _sparse_sum(const SparseTensor& input, ScalarType dtype) {
 }
 
 Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum, ScalarType dtype) {
-  return at::_sparse_sum(input.to(dtype), dims_to_sum);
+  return at::_sparse_sum(input, dims_to_sum).to(dtype);
 }
 
 Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum) {
@@ -1213,7 +1213,7 @@ Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum) {
 
   if (sum_all_sparse_dim) {
     // return a dense tensor if sum over all sparse dims
-    new_values = new_values.sum(0, false, input.scalar_type());
+    new_values = new_values.sum(0);
     return new_values;
   }
   else { // !sum_all_sparse_dim
@@ -1240,7 +1240,15 @@ Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum) {
     if (sum_all_sparse_dim) new_sizes.emplace(new_sizes.begin(), 1);
 
     // use coalesce() to do sum reduction
-    SparseTensor new_sparse = at::_sparse_coo_tensor_with_dims_and_tensors(new_sparse_dim, new_dense_dim, new_sizes, new_indices, new_values, input.options());
+    SparseTensor new_sparse;
+    if (isIntegralType(input.scalar_type(), /*includeBool=*/false)) {
+      new_sparse = at::_sparse_coo_tensor_with_dims_and_tensors(new_sparse_dim, new_dense_dim, new_sizes,
+                                                                new_indices, new_values.to(ScalarType::Long),
+                                                                input.options().dtype(ScalarType::Long));
+    } else {
+      new_sparse = at::_sparse_coo_tensor_with_dims_and_tensors(new_sparse_dim, new_dense_dim, new_sizes,
+                                                                new_indices, new_values, input.options());
+    }
     new_sparse = new_sparse.coalesce();
     return new_sparse;
   }
