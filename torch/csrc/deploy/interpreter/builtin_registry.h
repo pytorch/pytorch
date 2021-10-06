@@ -97,7 +97,6 @@ class BuiltinRegisterer {
   explicit BuiltinRegisterer(
       const char* name,
       const struct _frozen* frozenModules) {
-    // if (builtinRegistryAllowList && !strstr(builtinRegistryAllowList, name)) {
     if (allowLibrary && !allowLibrary(name)) {
       fprintf(stderr, "Skip %s since it's rejected by the allowLibrary method\n", name);
       return;

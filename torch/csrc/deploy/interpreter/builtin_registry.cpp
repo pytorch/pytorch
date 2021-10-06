@@ -1,6 +1,6 @@
 #include <Python.h>
-#include <torch/csrc/deploy/interpreter/builtin_registry.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/deploy/interpreter/builtin_registry.h>
 
 namespace torch {
 namespace deploy {
@@ -94,14 +94,12 @@ struct _frozen* BuiltinRegistry::getAllFrozenModules() {
 }
 
 void BuiltinRegistry::sanityCheck() {
-  auto* cpythonInternalFrozens =
-      getItem("cpython_internal");
+  auto* cpythonInternalFrozens = getItem("cpython_internal");
   // Num frozen builtins shouldn't change (unless modifying the underlying
   // cpython version)
   TORCH_INTERNAL_ASSERT(
       cpythonInternalFrozens != nullptr &&
-          cpythonInternalFrozens->numModules ==
-              NUM_FROZEN_PY_BUILTIN_MODULES,
+          cpythonInternalFrozens->numModules == NUM_FROZEN_PY_BUILTIN_MODULES,
       "Missing python builtin frozen modules");
 
   auto* frozenpython = getItem("frozenpython");
