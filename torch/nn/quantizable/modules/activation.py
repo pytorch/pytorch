@@ -222,9 +222,9 @@ class MultiheadAttention(nn.MultiheadAttention):
     @classmethod
     def from_observed(cls, other):
         converted = torch.ao.quantization.convert(other, mapping=None,
-                                               inplace=False,
-                                               remove_qconfig=True,
-                                               convert_custom_config_dict=None)
+                                                  inplace=False,
+                                                  remove_qconfig=True,
+                                                  convert_custom_config_dict=None)
         # Remove the parameters for the bias_k and bias_v to quantize them
         # TODO: This is a potential source of accuracy drop.
         #       quantized cat takes the scale and zp of the first
