@@ -24,6 +24,7 @@ from torch.utils.data.datapipes.iter.grouping import (
     BucketBatcherIterDataPipe as BucketBatcher,
     GrouperIterDataPipe as Grouper,
     UnBatcherIterDataPipe as UnBatcher,
+    HashJoinerIterDataPipe as HashJoiner,
 )
 from torch.utils.data.datapipes.iter.httpreader import (
     HTTPReaderIterDataPipe as HttpReader,
@@ -61,6 +62,7 @@ __all__ = ['Batcher',
            'Filter',
            'Forker',
            'Grouper',
+           'HashJoiner',
            'HttpReader',
            'IterableWrapper',
            'LineReader',

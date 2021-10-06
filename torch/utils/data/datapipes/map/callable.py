@@ -32,7 +32,8 @@ class MapperMapDataPipe(MapDataPipe[T_co]):
     Map DataPipe to run a function over each item from the source DataPipe.
     The function can be any regular python function or partial object. Lambda
     function is not recommended as it is not supported by pickle.
-    args:
+
+    Args:
         datapipe: Source Map DataPipe
         fn: Function called over each item
         fn_args: Positional arguments for `fn`
