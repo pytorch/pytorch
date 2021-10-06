@@ -142,8 +142,8 @@ void round_decimals_kernel_cuda(TensorIteratorBase& iter, int64_t decimals) {
         }
         ten_pow_decimals = static_cast<scalar_t>(std::pow(10, decimals));
         gpu_kernel(iter, [ten_pow_decimals, neg_flag]GPU_LAMBDA(scalar_t a) -> scalar_t {
-          return neg_flag ? std::rint(a / ten_pow_decimals) * ten_pow_decimals
-                          : std::rint(a * ten_pow_decimals) / ten_pow_decimals;
+          return neg_flag ? std::nearbyint(a / ten_pow_decimals) * ten_pow_decimals
+                          : std::nearbyint(a * ten_pow_decimals) / ten_pow_decimals;
         });
       });
 }
