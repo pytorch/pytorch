@@ -396,6 +396,8 @@ jobs:
         run: |
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
+          elif [[ $BUILD_ENVIRONMENT == *onnx* ]]; then
+            TEST_COMMAND=.jenkins/caffe2/test.sh
           else
             TEST_COMMAND=.jenkins/pytorch/test.sh
           fi
