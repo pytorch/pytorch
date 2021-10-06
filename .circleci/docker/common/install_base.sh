@@ -107,11 +107,13 @@ case "$ID" in
 esac
 
 # Install Valgrind separately since the apt-get version is too old.
+OS_VERSION=$(grep -oP '(?<=^VERSION_ID=).+' /etc/os-release | tr -d '"')
+if [[ $ID == centos && $OS_VERSION == 7 ]]; then WGET_FLAG="--no-check-certificate" ; else WGET_FLAG=""; fi
 mkdir valgrind_build && cd valgrind_build
 VALGRIND_VERSION=3.16.1
-if ! wget http://valgrind.org/downloads/valgrind-${VALGRIND_VERSION}.tar.bz2
+if ! wget $WGET_FLAG http://valgrind.org/downloads/valgrind-${VALGRIND_VERSION}.tar.bz2
 then
-  wget https://sourceware.org/ftp/valgrind/valgrind-${VALGRIND_VERSION}.tar.bz2
+  wget $WGET_FLAG https://sourceware.org/ftp/valgrind/valgrind-${VALGRIND_VERSION}.tar.bz2
 fi
 tar -xjf valgrind-${VALGRIND_VERSION}.tar.bz2
 cd valgrind-${VALGRIND_VERSION}
