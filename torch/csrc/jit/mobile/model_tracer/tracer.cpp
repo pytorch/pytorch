@@ -159,7 +159,7 @@ void call_setup_methods() {
  * Call methods on the Tensor object that we expect to be called
  * in production on this Tensor.
  */
-void consume_tensor(const at::Tensor& t) {
+void consume_tensor(at::Tensor& t) {
   const at::Tensor c = t;
   c.copy_(t.cpu());
 }
@@ -170,7 +170,6 @@ void run_model(
     std::set<std::string>& enabled_backends,
     torch::jit::mobile::KernelDTypeTracer::kernel_tags_type&
         called_kernel_tags) {
-  try {
     // Load the module on CPU with the flag to skip the operator exists check.
     // This is needed so that we can load any TorchBind objects (custom classes)
     // that this model refers to so that any operators being called from those
@@ -246,15 +245,7 @@ void run_model(
         }
       }
     }
-  } catch (std::exception& ex) {
-    std::cerr
-        << "ModelTracer has not been able to load the module for the following reasons:\n"
-        << ex.what()
-        << "\nPlease consider reporting a bug to PyTorch with the error message."
-        << std::endl;
 
-    throw ex;
-  }
 }
 
 /**
@@ -290,11 +281,20 @@ int main(int argc, char* argv[]) {
   torch::jit::mobile::KernelDTypeTracer::kernel_tags_type called_kernel_tags;
 
   using torch::jit::MobileModuleLoadOptions;
+  try {
+    // run with QNNPACK
+    run_model(input_module_path, root_ops, enabled_backends, called_kernel_tags);
+    at::globalContext().setQEngine(at::QEngine::FBGEMM);
+    run_model(input_module_path, root_ops, enabled_backends, called_kernel_tags);
+  } catch (std::exception& ex) {
+    std::cerr
+        << "ModelTracer has not been able to load the module for the following reasons:\n"
+        << ex.what()
+        << "\nPlease consider reporting a bug to PyTorch with the error message."
+        << std::endl;
 
-  // run with QNNPACK
-  run_model(input_module_path, root_ops, enabled_backends, called_kernel_tags);
-  at::globalContext().setQEngine(at::QEngine::FBGEMM);
-  run_model(input_module_path, root_ops, enabled_backends, called_kernel_tags);
+    throw ex;
+  }
 
   traced_operators = op_tracer.getCalledOperators();
   called_kernel_tags.insert(
