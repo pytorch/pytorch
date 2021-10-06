@@ -22,6 +22,10 @@
 #include <arm_neon.h>
 #endif
 
+#if defined(__aarch64__) && !defined(__ARM_NEON)
+  This should break the build if reachable
+#endif
+
 namespace at {
 namespace native {
 namespace {
