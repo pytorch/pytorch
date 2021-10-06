@@ -1,7 +1,7 @@
 import torch.fx
 import torchvision.models as models
 from torch.fx.experimental.fx2trt.fx2trt import TRTInterpreter, InputTensorSpec, TRTModule
-from torch.quantization.quantize_fx import prepare_fx, convert_fx
+from torch.ao.quantization.quantize_fx import prepare_fx, convert_fx
 import torch.fx.experimental.fx_acc.acc_tracer as acc_tracer
 import copy
 from torch.fx.passes import shape_prop
@@ -25,11 +25,11 @@ def build_int8_trt(rn18):
     # data = torch.randn(1, 32)
     # data = torch.randn(1, 64, 10, 10)
     # TensorRT only supports symmetric quantization
-    qconfig = torch.quantization.QConfig(
-        activation=torch.quantization.observer.HistogramObserver.with_args(
+    qconfig = torch.ao.quantization.QConfig(
+        activation=torch.ao.quantization.observer.HistogramObserver.with_args(
             qscheme=torch.per_tensor_symmetric, dtype=torch.qint8
         ),
-        weight=torch.quantization.default_weight_observer
+        weight=torch.ao.quantization.default_weight_observer
     )
     prepared = prepare_fx(rn18, {"": qconfig})
     for _ in range(10):
@@ -55,11 +55,11 @@ def build_int8_trt_implicit_quant(rn18):
     rn18 = copy.deepcopy(rn18)
     data = torch.randn(1, 3, 224, 224)
     # Quantization
-    qconfig = torch.quantization.QConfig(
-        activation=torch.quantization.observer.HistogramObserver.with_args(
+    qconfig = torch.ao.quantization.QConfig(
+        activation=torch.ao.quantization.observer.HistogramObserver.with_args(
             qscheme=torch.per_tensor_symmetric, reduce_range=True
         ),
-        weight=torch.quantization.default_per_channel_weight_observer
+        weight=torch.ao.quantization.default_per_channel_weight_observer
     )
     prepared = prepare_fx(rn18, {"": qconfig})
     for _ in range(10):

@@ -10,7 +10,7 @@ int main(int argc, char** argv) {
   // simplest case with a single interpreter instance.
   torch::deploy::InterpreterManager m(2);
   auto I = m.acquireOne();
-  c10::ArrayRef<torch::deploy::Obj> no_args;
-  I.global("pdb", "set_trace")(no_args);
+  c10::ArrayRef<torch::deploy::Obj> noArgs;
+  I.global("pdb", "set_trace")(noArgs);
   return 0;
 }
