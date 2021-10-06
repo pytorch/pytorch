@@ -16,8 +16,14 @@
  *
  */
 
+#include <ATen/core/dispatch/ObservedOperators.h>
 #include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/jit/mobile/import.h>
+#include <torch/csrc/jit/mobile/model_tracer/KernelDTypeTracer.h>
+#include <torch/csrc/jit/mobile/model_tracer/MobileModelRunner.h>
+#include <torch/csrc/jit/mobile/model_tracer/OperatorCallTracer.h>
 #include <torch/csrc/jit/mobile/model_tracer/TensorUtils.h>
+#include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/mobile/parse_operators.h>
 #include <torch/script.h>
 
@@ -44,6 +50,36 @@ C10_DEFINE_string(
     std::cerr << "You must specify the flag --" #name "\n"; \
     return 1;                                               \
   }
+
+const std::vector<std::string> always_included_traced_ops = {
+    // The following are called from setup sections.
+    "aten::resize_",
+    "aten::slice.Tensor",
+};
+
+// Fetched from caffe2/aten/src/ATen/native/metal/MetalAten.mm
+// Diffusion Link: https://fburl.com/diffusion/atwwmax2
+const std::vector<std::string> gpu_metal_operators = {
+    "aten::conv2d",
+    "aten::add.Tensor",
+    "aten::add_.Tensor",
+    "aten::addmm",
+    "aten::empty.memory_format",
+    "aten::empty_strided",
+    "aten::log_softmax.int",
+    "aten::max_pool2d",
+    "aten::mul.Tensor",
+    "aten::relu",
+    "aten::relu_",
+    "aten::sigmoid",
+    "aten::sub.Tensor",
+    "aten::upsample_nearest2d.vec",
+    "aten::view",
+    "aten::adaptive_avg_pool2d",
+    "aten::hardtanh_",
+    "aten::reshape",
+    "aten::flatten.using_ints",
+};
 
 void printOpYAML(
     std::ostream& out,
@@ -73,6 +109,59 @@ void printOpsYAML(
   for (auto& it : operator_list) {
     printOpYAML(out, 2, it, false, is_root_operator, false);
   }
+}
+
+/**
+ * These are a collection of some common ATen methods that are usually
+ * called outside of the Model's forward() run, and they need to be
+ * traced to ensure that the used operators are included in the build.
+ * If/When this list becomes too long, we can consider making it a
+ * per-model list.
+ */
+void call_setup_methods() {
+  at::zeros({2, 2});
+  at::ones({2, 2});
+  at::Tensor t1 = at::empty({7, 7});
+  at::Tensor t2 = t1.fill_(3);
+  at::narrow(t2, 1, 0, 1);
+  at::eq(t1, t2);
+  const volatile bool nz = at::zeros({1}).is_nonzero();
+  (void)nz;
+
+  // Create a byte tensor and copy it
+  auto zb = at::zeros({10}, at::kByte);
+  auto zf = at::zeros({10}, at::kFloat);
+  zb.copy_(zf);
+  t2.div(1);
+
+  // Typically, failures show up in CopyKernel.cpp, so enumerating
+  // common dtypes that may show up.
+  const auto all_dtypes_for_copy = {
+      at::kByte,
+      at::kFloat,
+      at::kInt,
+      at::kChar,
+      at::kDouble,
+      at::kShort,
+      at::kLong};
+  for (const auto dtype : all_dtypes_for_copy) {
+    auto tensor1 = at::empty({10}, dtype);
+    tensor1.copy_(at::zeros({10}, at::kFloat));
+  }
+
+  torch::zeros({0, 0}, torch::ScalarType::Float);
+  std::vector<float> storage(20, 1.0);
+  std::vector<int64_t> sizes({2, 10});
+  torch::from_blob(storage.data(), at::IntArrayRef(sizes), at::kFloat);
+}
+
+/**
+ * Call methods on the Tensor object that we expect to be called
+ * in production on this Tensor.
+ */
+void consume_tensor(const at::Tensor& t) {
+  const at::Tensor c = t;
+  c.copy_(t.cpu());
 }
 
 void run_model(
@@ -214,13 +303,12 @@ int main(int argc, char* argv[]) {
   traced_operators.insert(
       always_included_traced_ops.begin(), always_included_traced_ops.end());
 
-  if (traced_operators.size() <=
-      torch::jit::mobile::always_included_traced_ops.size()) {
+  if (traced_operators.size() <= always_included_traced_ops.size()) {
     throw std::runtime_error(c10::str(
         "Error traced_operators size: ",
         traced_operators.size(),
         ". Expected the traced operator list to be bigger then the default size ",
-        torch::jit::mobile::always_included_traced_ops.size(),
+        always_included_traced_ops.size(),
         ". Please report a bug in PyTorch."));
   }
 
@@ -235,13 +323,13 @@ int main(int argc, char* argv[]) {
   yaml_out << "operators:" << std::endl;
   printOpsYAML(
       yaml_out,
-      tracer_result.root_ops,
+      root_ops,
       false /* is_used_for_training */,
       true /* is_root_operator */,
       false /* include_all_overloads */);
   printOpsYAML(
       yaml_out,
-      tracer_result.traced_operators,
+      traced_operators,
       false /* is_used_for_training */,
       false /* is_root_operator */,
       false /* include_all_overloads */);
