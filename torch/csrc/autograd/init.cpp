@@ -327,9 +327,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   py::class_<c10::InferenceMode>(_C_m, "_InferenceMode")
       .def(py::init<bool>());
 
-  _C_m.def("_register_py_class_for_device", [](std::string device, py::object python_type_class) {
-    auto clazz = python_type_class.ptr();
-    RegisterPythonTensorClass(device, clazz);
+  _C_m.def("_register_py_class_for_device", [](const std::string& device, py::object python_type_class) {
+    auto cls = python_type_class.ptr();
+    registerPythonTensorClass(device, cls);
   });
 
   py::class_<DisableTorchDispatch>(_C_m, "_DisableTorchDispatch")
