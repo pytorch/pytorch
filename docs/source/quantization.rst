@@ -676,3 +676,14 @@ An e2e example::
   m.qconfig = some_qconfig
   # turn off quantization for conv2
   m.conv2.qconfig = None
+
+Numerical Debugging (prototype)
+-------------------------------
+
+.. warning ::
+     Numerical debugging tooling is early prototype and subject to change.
+
+* :ref:`torch_ao_ns_numeric_suite`
+  Eager mode numeric suite
+* :ref:`torch_ao_ns_numeric_suite_fx`
+  FX numeric suite
