@@ -1,5 +1,5 @@
 from torch.utils.data import IterDataPipe
-from torch.utils.data.datapipes.utils.common import validate_pathname_binary_tuple
+from torch.utils.data.datapipes.utils.common import validate_pathname_binary_tuple, deprecation_warning_torchdata
 from typing import Iterable, Iterator, Tuple, Optional, IO, cast
 from io import BufferedIOBase
 
@@ -34,11 +34,13 @@ class TarArchiveReaderIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
         self.datapipe: Iterable[Tuple[str, BufferedIOBase]] = datapipe
         self.mode: str = mode
         self.length: int = length
+        deprecation_warning_torchdata(type(self).__name__)
 
     def __iter__(self) -> Iterator[Tuple[str, BufferedIOBase]]:
         for data in self.datapipe:
             validate_pathname_binary_tuple(data)
             pathname, data_stream = data
+            folder_name = os.path.dirname(pathname)
             try:
                 # typing.cast is used here to silence mypy's type checker
                 tar = tarfile.open(fileobj=cast(Optional[IO[bytes]], data_stream), mode=self.mode)
@@ -49,14 +51,12 @@ class TarArchiveReaderIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
                     if extracted_fobj is None:
                         warnings.warn("failed to extract file {} from source tarfile {}".format(tarinfo.name, pathname))
                         raise tarfile.ExtractError
-                    inner_pathname = os.path.normpath(os.path.join(pathname, tarinfo.name))
+                    inner_pathname = os.path.normpath(os.path.join(folder_name, tarinfo.name))
                     yield (inner_pathname, extracted_fobj)  # type: ignore[misc]
             except Exception as e:
                 warnings.warn(
                     "Unable to extract files from corrupted tarfile stream {} due to: {}, abort!".format(pathname, e))
                 raise e
-            finally:
-                data_stream.close()
 
     def __len__(self):
         if self.length == -1:
