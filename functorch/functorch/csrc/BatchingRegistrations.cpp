@@ -407,17 +407,6 @@ Tensor contiguous_batching_rule(const Tensor& self, MemoryFormat memory_format) 
   return physical_view.getPhysicalToLogicalMap().apply(result);
 }
 
-Tensor view_batching_rule(const Tensor& self, IntArrayRef size) {
-  if (!participatesInCurrentLevel(self)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-    return self.view(size);
-  }
-  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
-  auto size_physical = self_physical.getPhysicalShape(size);
-  auto result = self_physical.tensor().view(size_physical);
-  return self_physical.getPhysicalToLogicalMap().apply(result);
-}
-
 Tensor view_as_complex_batching_rule(const Tensor& self) {
   if (!participatesInCurrentLevel(self)) {
     c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -952,7 +941,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("unbind.int", unbind_batching_rule);
   m.impl("unfold", unfold_batching_rule);
   m.impl("unsqueeze_", unsqueeze__batching_rule);
-  m.impl("view", view_batching_rule);
   m.impl("view_as", native::view_as); // composite wrt autograd
 
   m.impl("addmm", addmm_batching_rule);
