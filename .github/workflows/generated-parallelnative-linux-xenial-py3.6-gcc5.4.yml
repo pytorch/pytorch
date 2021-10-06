@@ -5,7 +5,7 @@ name: parallelnative-linux-xenial-py3.6-gcc5.4
 
 on:
   pull_request:
-    types: [unassigned]
+    types: [opened, synchronize, reopened, unassigned]
   push:
     branches:
       - master

@@ -5,7 +5,7 @@ name: periodic-win-vs2019-cuda11.1-py3
 
 on:
   pull_request:
-    types: [unassigned]
+    types: [opened, synchronize, reopened, unassigned]
   schedule:
     - cron: 45 0,4,8,12,16,20 * * *
   workflow_dispatch:

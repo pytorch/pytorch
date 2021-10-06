@@ -5,7 +5,7 @@ name: periodic-libtorch-linux-xenial-cuda11.1-py3.6-gcc7
 
 on:
   pull_request:
-    types: [unassigned]
+    types: [opened, synchronize, reopened, unassigned]
   schedule:
     - cron: 45 0,4,8,12,16,20 * * *
   workflow_dispatch:
