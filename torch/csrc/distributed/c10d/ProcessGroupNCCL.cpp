@@ -562,7 +562,7 @@ void ProcessGroupNCCL::runHealthCheck() {
       const auto key = getKeyFromDevices(rankDevice);
       // OpType does not matter, only need to set to not go through send/recv
       // path.
-      auto& ncclComms = getNCCLComm(key, rankDevice, OpType::ALLREDUCE); // NOLINT
+      getNCCLComm(key, rankDevice, OpType::ALLREDUCE);
       // Now destroy the communicators and remove them from cache so we don't
       // use destroyed communicators.
       destroyNCCLComms(key);

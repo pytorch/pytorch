@@ -438,7 +438,8 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
   void runHealthCheck();
 
   // Destroys initialized NCCL communicators in devNCCLComMap_ given by input
-  // key. Throws if there are no communicators to destroy.
+  // key. Throws if there are no communicators to destroy. Also removes
+  // communicators from the cache and clears used device indices.
   void destroyNCCLComms(const std::string& devNCCLCommMapKey);
 
   void workCleanupLoop();
