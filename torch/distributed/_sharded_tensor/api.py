@@ -367,14 +367,14 @@ class ShardedTensor(object):
         sharded tensor.
 
         The API needs to be called on all ranks in SPMD fashion. All ranks should have
-        the same ``dst``. ``out`` should be a tensor of the same size as the overall 
+        the same ``dst``. ``out`` should be a tensor of the same size as the overall
         size of the sharded tensor on ``dst`` and ``None`` on all other ranks.
 
         Args:
-            dst(int): The rank where full tensor is constructed. 
+            dst(int): The rank where full tensor is constructed.
                 Default: 0
-            out (:class `torch.Tensor`, optional): The output full tensor. 
-                Must to be provided ONLY on ``dst`` rank. 
+            out (:class `torch.Tensor`, optional): The output full tensor.
+                Must to be provided ONLY on ``dst`` rank.
                 Default: ``None``
         """
         rank = dist.get_rank(self._process_group)
@@ -392,7 +392,7 @@ class ShardedTensor(object):
         device = torch.device(f"cuda:{rank % world_size}")
         with torch.cuda.device(device):
             dist.all_gather_object(
-                obj=shard_tensors,
+                obj=local_shards,
                 object_list=gathered_shards,
                 group=self._process_group,
             )
