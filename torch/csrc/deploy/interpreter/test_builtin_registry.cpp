@@ -9,7 +9,8 @@ namespace deploy {
 bool allowLibrary(const std::string& libname) {
   return libname == "lib1" || libname == "lib2";
 }
-} }
+} // namespace deploy
+} // namespace torch
 
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 struct _frozen lib1FrozenModules[] = {
@@ -31,8 +32,7 @@ TEST(BuiltinRegistryTest, SimpleTest) {
   EXPECT_EQ(lib1FrozenModules, items[0]->frozenModules);
   EXPECT_EQ(lib2FrozenModules, items[1]->frozenModules);
 
-  struct _frozen* allFrozenModules =
-      BuiltinRegistry::getAllFrozenModules();
+  struct _frozen* allFrozenModules = BuiltinRegistry::getAllFrozenModules();
   EXPECT_EQ("mod1", allFrozenModules[0].name);
   EXPECT_EQ("mod2", allFrozenModules[1].name);
   EXPECT_EQ("mod3", allFrozenModules[2].name);
