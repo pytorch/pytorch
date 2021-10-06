@@ -58,6 +58,6 @@ if [ "${CU_VERSION:-}" == cpu ] ; then
     pip install torch torchvision -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html --pre
     PYTORCH_VERSION="$(python -c "import torch; print(torch.__version__)")" python setup.py develop bdist_wheel -d $WHEELS_FOLDER
 else
-    conda install -y pytorch== torchvision cudatoolkit=10.2 -c pytorch-nightly
+    conda install -y pytorch torchvision cudatoolkit=10.2 -c pytorch-nightly
     PYTORCH_VERSION="$(python -c "import torch; print(torch.__version__)")" python setup.py develop bdist_wheel -d $WHEELS_FOLDER
 fi
