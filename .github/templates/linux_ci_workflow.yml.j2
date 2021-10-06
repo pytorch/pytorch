@@ -9,11 +9,7 @@ name: !{{ build_environment }}
 on:
   pull_request:
   {%- if ciflow_config.enabled %}
-    {%- if ciflow_config.trigger_action_only %}
-    types: [!{{ ciflow_config.trigger_action }}]
-    {%- else %}
     types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
-    {%- endif %}
   {%- endif %}
 
 {%- if is_scheduled %}
