@@ -226,7 +226,11 @@ std::tuple<Tensor,optional<int64_t>> scatter_value_batch_rule(
   return std::make_tuple(result, 0);
 }
 
-std::tuple<Tensor,optional<int64_t>> scatter_src_batch_rule(
+namespace {
+
+template <typename Func>
+inline std::tuple<Tensor,optional<int64_t>> scatter_batch_rule(
+    Func f,
     const Tensor& self, optional<int64_t> self_bdim,
     int64_t dim,
     const Tensor& index, optional<int64_t> index_bdim,
@@ -254,12 +258,32 @@ std::tuple<Tensor,optional<int64_t>> scatter_src_batch_rule(
   src_ = ensure_has_bdim(src_, src_bdim.has_value(), batch_size);
   auto physical_dim = getPhysicalDim(self_, /*has_batch_dim*/true, dim);
 
-  auto result = at::scatter(self_, physical_dim, index_, src_);
+  auto result = f(self_, physical_dim, index_, src_);
   // result should have same shape as self
   if (self_logical_rank == 0) {
     result = result.squeeze(-1);
   }
   return std::make_tuple(result, 0);
+}
+
+} // namespace
+
+std::tuple<Tensor,optional<int64_t>> scatter_src_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim,
+    int64_t dim,
+    const Tensor& index, optional<int64_t> index_bdim,
+    const Tensor& src, optional<int64_t> src_bdim) {
+  return scatter_batch_rule(ATEN_FN2(scatter, src),
+                            self, self_bdim, dim, index, index_bdim, src, src_bdim);
+}
+
+std::tuple<Tensor,optional<int64_t>> scatter_add_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim,
+    int64_t dim,
+    const Tensor& index, optional<int64_t> index_bdim,
+    const Tensor& src, optional<int64_t> src_bdim) {
+  return scatter_batch_rule(ATEN_FN(scatter_add),
+                            self, self_bdim, dim, index, index_bdim, src, src_bdim);
 }
 
 std::tuple<Tensor,optional<int64_t>> gather_batch_rule(
@@ -336,6 +360,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("gather_backward", gather_backward_batch_rule);
   VMAP_SUPPORT("scatter.value", scatter_value_batch_rule);
   VMAP_SUPPORT("scatter.src", scatter_src_batch_rule);
+  VMAP_SUPPORT("scatter_add", scatter_add_batch_rule);
 }
 
 }}
