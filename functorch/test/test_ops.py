@@ -458,7 +458,6 @@ class TestOperators(TestCase):
         xfail('quantile'),
         xfail('renorm'),
         xfail('repeat_interleave'),
-        xfail('scatter_add'),
         xfail('solve'),
         xfail('sort'),
         xfail('symeig'),
