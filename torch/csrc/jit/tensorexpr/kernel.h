@@ -37,6 +37,7 @@ enum ElementType {
 using ArgNone = c10::monostate;
 using BufList = std::vector<tensorexpr::BufHandle>;
 using IntList = std::vector<int64_t>;
+using DoubleList = std::vector<double>;
 using ArgValue = c10::variant<
     tensorexpr::BufHandle,
     tensorexpr::VarHandle,
@@ -44,6 +45,7 @@ using ArgValue = c10::variant<
     int64_t,
     bool,
     BufList,
+    DoubleList,
     IntList,
     ArgNone>;
 
@@ -97,6 +99,8 @@ inline std::string getArgValueName(const ArgValue& a) {
     return "bool";
   } else if (c10::get_if<BufList>(&a)) {
     return "BufList";
+  } else if (c10::get_if<DoubleList>(&a)) {
+    return "DoubleList";
   } else if (c10::get_if<IntList>(&a)) {
     return "IntList";
   } else if (c10::get_if<ArgNone>(&a)) {
