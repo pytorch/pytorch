@@ -1707,6 +1707,18 @@ class TestFX(JitTestCase):
 
         self.assertTrue('typing.List[float]' in str(graph))
 
+    def test_layout(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return torch.empty_like(x, layout=torch.strided, pin_memory=False).fill_(0)
+
+        traced = symbolic_trace(M())
+        x = torch.rand(5, 9, 3, 4)
+        self.assertEqual(traced(x), torch.zeros_like(x))
+
     def test_ellipsis(self):
         class M(torch.nn.Module):
             def __init__(self):

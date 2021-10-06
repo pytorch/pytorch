@@ -53,7 +53,9 @@ ALLOW_LIST = [
     ("aten::thnn_conv2d_forward", datetime.date(2021, 9, 30)),
     ("aten::thnn_conv2d_backward", datetime.date(2021, 9, 30)),
     ("aten::_log_softmax_backward_data", datetime.date(2021, 10, 21)),
-    ("aten::_softmax_backward_data", datetime.date(2021, 10, 21))
+    ("aten::_softmax_backward_data", datetime.date(2021, 10, 21)),
+    ("aten::fused_moving_avg_obs_fake_quant", datetime.date(2021, 10, 21)),
+    ("aten::_fused_moving_avg_obs_fq_helper", datetime.date(2021, 10, 21))
 ]
 
 ALLOW_LIST_COMPILED = [
