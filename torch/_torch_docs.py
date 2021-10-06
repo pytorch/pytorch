@@ -8228,8 +8228,7 @@ to the closest integer.
     This function rounds to even in halfway cases
     Eg. round(2.5) will be 2.
 
-    See also :func:`torch.rint`, :func:`torch.ceil`, :func:`torch.floor`,
-    :func:`torch.trunc`.
+    See also :func:`torch.ceil`, :func:`torch.floor`, :func:`torch.trunc`.
 
 Args:
     {input}
