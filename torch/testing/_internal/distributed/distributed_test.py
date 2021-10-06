@@ -4978,9 +4978,9 @@ class DistributedTest:
                 offset=bs_offset,
             )
 
-        @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
-                         "Only Nccl & Gloo backend support DistributedDataParallel")
-        @skip_if_no_cuda_distributed
+        @sandcastle_skip_if(
+            BACKEND != 'nccl' and BACKEND != 'gloo',
+            "Only Nccl & Gloo backend support DistributedDataParallel")
         @skip_if_no_gpu
         def test_DistributedDataParallel_SyncBatchNorm_Empty_Batch_Size(self):
             group, group_id, rank = self._init_global_test()
