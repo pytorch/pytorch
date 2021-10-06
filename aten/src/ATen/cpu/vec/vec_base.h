@@ -739,8 +739,10 @@ template<class T, typename Op>
 static inline Vectorized<T> bitwise_binary_op(const Vectorized<T> &a, const Vectorized<T> &b, Op op) {
   static constexpr uint32_t element_no = VECTOR_WIDTH / sizeof(intmax_t);
   __at_align__ intmax_t buffer[element_no];
-  const intmax_t *a_ptr = reinterpret_cast<const intmax_t*>((const T*) a);
-  const intmax_t *b_ptr = reinterpret_cast<const intmax_t*>((const T*) b);
+  intmax_t a_ptr[element_no];
+  intmax_t b_ptr[element_no];
+  std::memcpy(&a_ptr, &a, sizeof(intmax_t) * element_no);
+  std::memcpy(&b_ptr, &b, sizeof(intmax_t) * element_no);
   for (uint32_t i = 0U; i < element_no; ++ i) {
     buffer[i] = op(a_ptr[i], b_ptr[i]);
   }
