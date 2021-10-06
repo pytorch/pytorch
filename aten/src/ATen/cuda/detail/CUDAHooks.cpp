@@ -53,7 +53,13 @@ int64_t current_device();
 // let's not if we don't need to!)
 std::unique_ptr<THCState, void (*)(THCState*)> CUDAHooks::initCUDA() const {
   C10_LOG_API_USAGE_ONCE("aten.init.cuda");
-  THCState* thc_state = new THCState();
+  // NOTE: THCState is now an empty struct but this pointer is passed
+  // to every THC function. So we can't remove it before the rest of THC.
+  auto thc_state = std::unique_ptr<THCState, void (*)(THCState*)>(
+      new THCState(),
+      [](THCState* p) {
+        delete p;
+      });
 
   // Force the update to enable unit testing. This code get executed before unit tests
   // have a chance to enable vitals.
@@ -67,10 +73,7 @@ std::unique_ptr<THCState, void (*)(THCState*)> CUDAHooks::initCUDA() const {
   magma_init();
 #endif
 
-  return std::unique_ptr<THCState, void (*)(THCState*)>(
-      thc_state, [](THCState* p) {
-        delete p;
-      });
+  return thc_state;
 }
 
 const Generator& CUDAHooks::getDefaultCUDAGenerator(DeviceIndex device_index) const {
