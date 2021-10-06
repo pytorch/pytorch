@@ -286,7 +286,7 @@ test_aot_compilation() {
   echo "Testing Ahead of Time compilation"
   if [ -f "$TORCH_BIN_DIR"/test_mobile_nnc ]; then "$TORCH_BIN_DIR"/test_mobile_nnc --gtest_output=xml:$TEST_REPORTS_DIR/test_mobile_nnc.xml; fi
   # shellcheck source=test/mobile/nnc/test_aot_compile.sh
-  if [ -f "$TORCH_BIN_DIR"/test_aot_model_compiler ]; then source test/mobile/nnc/test_aot_compile.sh; fi
+  if [ -f "$TORCH_BIN_DIR"/aot_model_compiler_test ]; then source test/mobile/nnc/test_aot_compile.sh; fi
 }
 
 test_vulkan() {
