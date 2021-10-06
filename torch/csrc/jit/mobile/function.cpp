@@ -1,6 +1,5 @@
-#include <torch/csrc/jit/mobile/function.h>
-
 #include <caffe2/serialize/inline_container.h>
+#include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/prim_ops_registery.h>
 #include <torch/csrc/jit/runtime/instruction.h>
@@ -40,13 +39,14 @@ bool Function::append_operator(
   // Keep the original opname in code_
   code_->op_names_.emplace_back(name, overload_name);
   const auto& opname = code_->op_names_.back();
+  const auto full_name = c10::toString(opname);
 
   std::function<void(Stack&)> fn;
 
   const std::vector<c10::Argument>* pArgs = nullptr;
-  bool promoted_op = mobile::hasPrimOpsFn(name);
+  bool promoted_op = mobile::hasPrimOpsFn(full_name);
   if (promoted_op) {
-    fn = mobile::getPrimOpsFn(name);
+    fn = mobile::getPrimOpsFn(full_name);
   } else {
     std::shared_ptr<Operator> jit_op = findOperatorFor(opname);
     if (jit_op) {

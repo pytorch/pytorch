@@ -166,7 +166,7 @@ void numToTensorBool(Stack& stack) {
   push(stack, at::scalar_to_tensor(b));
 }
 
-static const C10_UNUSED std::array<mobile::prim_op_fn_register, 14> op_reg = {
+static const C10_UNUSED std::array<mobile::prim_op_fn_register, 13> op_reg = {
     mobile::prim_op_fn_register("prim::TupleIndex", tupleIndex),
     mobile::prim_op_fn_register("aten::Bool.Tensor", boolTensor),
     mobile::prim_op_fn_register("aten::format", aten_format),
@@ -179,7 +179,6 @@ static const C10_UNUSED std::array<mobile::prim_op_fn_register, 14> op_reg = {
     mobile::prim_op_fn_register("aten::__isnot__", isNot),
     mobile::prim_op_fn_register("aten::dim", dim),
     mobile::prim_op_fn_register("prim::Uninitialized", unInitialized),
-    mobile::prim_op_fn_register("aten::to.prim_dtype", toPrimDType),
     mobile::prim_op_fn_register("prim::is_cuda", isCuda)
     // TODO: (@pavithran) size is overloaded with int[] and Tensor
     // so this throws error expecting int not Tensor
