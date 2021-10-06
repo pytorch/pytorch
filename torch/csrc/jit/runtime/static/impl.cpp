@@ -76,6 +76,11 @@ void OptimizeGraph(
   FuseInferenceOpsForSparseNN(graph);
   UseVariadicCat(graph);
   UseVariadicStack(graph);
+  UseVariadicOp(
+      graph,
+      c10::Symbol::fromQualString("fb::sigrid_transforms_torch_bind"),
+      c10::Symbol::fromQualString("fb::variadic_sigrid_transforms_torch_bind"),
+      1 /* list_idx */);
   if (opts.enable_out_variant) {
     FuseSignLog1P(graph);
   }
@@ -1281,11 +1286,11 @@ ProcessedNode::ProcessedNode(
     bool enable_out_variant)
     : node_(node),
       inputs_(std::move(inputs)),
-      inputsSize_(inputsSize),
+      inputs_size_(inputsSize),
       op_name_(node->kind().toQualString()) {
   // TODO leverage type information
-  outputsSize_ = node->outputs().size();
-  outputs_ = std::make_unique<IValue[]>(outputsSize_);
+  outputs_size_ = node->outputs().size();
+  outputs_ = std::make_unique<IValue[]>(outputs_size_);
 
   if (enable_out_variant) {
     if (OutVariant fn = getOutOfPlaceOperation(node)) {
@@ -1308,7 +1313,7 @@ ProcessedNode::ProcessedNode(
 
 std::vector<IValue> ProcessedNode::clone_inputs() const {
   std::vector<IValue> result;
-  result.reserve(inputsSize_);
+  result.reserve(inputs_size_);
   std::transform(
       inputs().begin(),
       inputs().end(),
@@ -1379,12 +1384,12 @@ static bool checkNoMemoryOverlap(const at::Tensor& a, const at::Tensor& b) {
 }
 
 bool ProcessedNode::verify_no_memory_overlap() const {
-  for (const auto i : c10::irange(outputsSize_)) {
+  for (const auto i : c10::irange(outputs_size_)) {
     if (!outputs_[i].isTensor()) {
       continue;
     }
     const auto& out0_t = outputs_[i].toTensor();
-    for (const auto j : c10::irange(i + 1, outputsSize_)) {
+    for (const auto j : c10::irange(i + 1, outputs_size_)) {
       if (!outputs_[j].isTensor()) {
         continue;
       }

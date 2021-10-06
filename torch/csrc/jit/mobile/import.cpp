@@ -88,16 +88,6 @@ using caffe2::serialize::ReadAdapterInterface;
 
 OpCode parseOpCode(const char* str);
 
-std::string operator_str(
-    const std::string& name,
-    const std::string& overloadname) {
-  std::string result = name;
-  if (!overloadname.empty()) {
-    result += "." + overloadname;
-  }
-  return result;
-}
-
 TypePtr resolveTypeNameMobile(
     const c10::QualifiedName& qn,
     std::shared_ptr<CompilationUnit> compilation_unit) {
@@ -427,7 +417,8 @@ mobile::Module BytecodeDeserializer::deserialize(
   bool has_debug_handles{false};
   if (reader_->hasRecord("mobile_debug_handles.pkl")) {
     debug_handles =
-        readArchive("mobile_debug_handles", mcu).toTuple()->elements();
+        std::move(*readArchive("mobile_debug_handles", mcu).toTuple())
+            .elements();
     has_debug_handles = true;
   }
   parseMethods(std::move(bvals), std::move(debug_handles), *mcu);

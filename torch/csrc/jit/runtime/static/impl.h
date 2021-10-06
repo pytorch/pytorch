@@ -161,7 +161,7 @@ class TORCH_API StaticModule {
     return nodes_;
   }
 
-  bool is_optimizable_container_type(Node* n) const {
+  bool is_optimizable_container_type(const Node* n) const {
     auto it = node_is_optimizable_container_type_.find(n);
     return it != node_is_optimizable_container_type_.end();
   }
@@ -211,7 +211,7 @@ class TORCH_API StaticModule {
   FastMap<const Value*, std::vector<const Value*>>
       value_to_same_storage_values_;
 
-  FastSet<Node*> node_is_optimizable_container_type_;
+  FastSet<const Node*> node_is_optimizable_container_type_;
 };
 
 class TORCH_API StaticRuntime {
@@ -343,14 +343,14 @@ class TORCH_API ProcessedNode {
   ProcessedNode(const ProcessedNode& rhs)
       : node_(rhs.node_),
         fn_(rhs.fn_),
-        inputs_(std::make_unique<const IValue*[]>(rhs.inputsSize_)),
-        outputs_(std::make_unique<IValue[]>(rhs.outputsSize_)),
-        inputsSize_(rhs.inputsSize_),
-        outputsSize_(rhs.outputsSize_) {
+        inputs_(std::make_unique<const IValue*[]>(rhs.inputs_size_)),
+        outputs_(std::make_unique<IValue[]>(rhs.outputs_size_)),
+        inputs_size_(rhs.inputs_size_),
+        outputs_size_(rhs.outputs_size_) {
     std::copy(
-        rhs.inputs_.get(), rhs.inputs_.get() + inputsSize_, inputs_.get());
+        rhs.inputs_.get(), rhs.inputs_.get() + inputs_size_, inputs_.get());
     std::copy(
-        rhs.outputs_.get(), rhs.outputs_.get() + outputsSize_, outputs_.get());
+        rhs.outputs_.get(), rhs.outputs_.get() + outputs_size_, outputs_.get());
   }
 
   ProcessedNode& operator=(const ProcessedNode& rhs) {
@@ -359,19 +359,19 @@ class TORCH_API ProcessedNode {
     }
     node_ = rhs.node_;
     fn_ = rhs.fn_;
-    if (!inputs_ || inputsSize_ != rhs.inputsSize_) {
-      inputs_ = std::make_unique<const IValue*[]>(rhs.inputsSize_);
-      inputsSize_ = rhs.inputsSize_;
+    if (!inputs_ || inputs_size_ != rhs.inputs_size_) {
+      inputs_ = std::make_unique<const IValue*[]>(rhs.inputs_size_);
+      inputs_size_ = rhs.inputs_size_;
     }
     std::copy(
-        rhs.inputs_.get(), rhs.inputs_.get() + inputsSize_, inputs_.get());
+        rhs.inputs_.get(), rhs.inputs_.get() + inputs_size_, inputs_.get());
 
-    if (!outputs_ || outputsSize_ != rhs.outputsSize_) {
-      outputs_ = std::make_unique<IValue[]>(rhs.outputsSize_);
-      outputsSize_ = rhs.outputsSize_;
+    if (!outputs_ || outputs_size_ != rhs.outputs_size_) {
+      outputs_ = std::make_unique<IValue[]>(rhs.outputs_size_);
+      outputs_size_ = rhs.outputs_size_;
     }
     std::copy(
-        rhs.outputs_.get(), rhs.outputs_.get() + outputsSize_, outputs_.get());
+        rhs.outputs_.get(), rhs.outputs_.get() + outputs_size_, outputs_.get());
 
     return *this;
   }
@@ -390,13 +390,13 @@ class TORCH_API ProcessedNode {
 
   // Input is readonly
   const IValue& Input(size_t i) const {
-    DCHECK(i < inputsSize_);
+    DCHECK(i < inputs_size_);
     return *inputs_[i];
   }
 
   // Output is readwrite
   IValue& Output(size_t i) {
-    DCHECK(i < outputsSize_);
+    DCHECK(i < outputs_size_);
     return outputs_[i];
   }
 
@@ -404,12 +404,12 @@ class TORCH_API ProcessedNode {
     inputs_[index] = ival;
   }
 
-  c10::ArrayRef<const IValue> outputs() const {
-    return c10::ArrayRef(outputs_.get(), outputsSize_);
+  C10_NODISCARD c10::ArrayRef<const IValue> outputs() const {
+    return c10::ArrayRef(outputs_.get(), outputs_size_);
   }
 
-  c10::ArrayRef<const IValue*> inputs() const {
-    return c10::ArrayRef(inputs_.get(), inputsSize_);
+  C10_NODISCARD c10::ArrayRef<const IValue*> inputs() const {
+    return c10::ArrayRef(inputs_.get(), inputs_size_);
   }
 
   std::vector<IValue> clone_inputs() const;
@@ -437,8 +437,8 @@ class TORCH_API ProcessedNode {
   c10::variant<OutVariant, NativeFunction, Operation> fn_;
   std::unique_ptr<const IValue*[]> inputs_; // unowned
   std::unique_ptr<IValue[]> outputs_;
-  size_t inputsSize_;
-  size_t outputsSize_;
+  size_t inputs_size_;
+  size_t outputs_size_;
   const char* op_name_;
 };
 
