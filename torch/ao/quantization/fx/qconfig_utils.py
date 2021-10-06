@@ -1,7 +1,7 @@
 import torch
 from collections import OrderedDict, defaultdict
 from typing import Union, Callable, Any, Dict, Tuple, Set
-from torch.quantization.qconfig import add_module_to_qconfig_obs_ctr, QConfigAny
+from torch.ao.quantization.qconfig import add_module_to_qconfig_obs_ctr, QConfigAny
 
 import re
 
