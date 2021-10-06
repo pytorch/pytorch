@@ -4256,7 +4256,8 @@ cosine_similarity = _add_docstr(
     r"""
 cosine_similarity(x1, x2, dim=1, eps=1e-8) -> Tensor
 
-Returns cosine similarity between x1 and x2, computed along dim.
+Returns cosine similarity between x1 and x2, computed along dim. x1 and x2 must be broadcastable
+to a common shape. `dim` refers to the dimension in this common shape.
 
 .. math ::
     \text{similarity} = \dfrac{x_1 \cdot x_2}{\max(\Vert x_1 \Vert _2 \cdot \Vert x_2 \Vert _2, \epsilon)}
@@ -4265,9 +4266,8 @@ Supports :ref:`type promotion <type-promotion-doc>`.
 
 Args:
     x1 (Tensor): First input.
-    x2 (Tensor): Second input (with the same number of dimensions as x1, matching x1 size at dimension `dim`,
-        and broadcastable with x1 at other dimensions).
-    dim (int, optional): Dimension of vectors. Default: 1
+    x2 (Tensor): Second input.
+    dim (int, optional): Dimension along which cosine similarity is computed. Default: 1
     eps (float, optional): Small value to avoid division by zero.
         Default: 1e-8
 
