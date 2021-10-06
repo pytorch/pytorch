@@ -4,7 +4,7 @@
 // https://github.com/NVIDIA/cub/pull/306
 #if CUB_VERSION >= 101300
 #define CUB_SUPPORTS_NV_BFLOAT16() true
-#elif
+#else
 #define CUB_SUPPORTS_NV_BFLOAT16() false
 #endif
 
@@ -12,6 +12,6 @@
 // https://github.com/NVIDIA/cub/pull/326
 #if CUB_VERSION >= 101400
 #define CUB_SUPPORTS_WRAPPED_NAMESPACE() true
-#elif
+#else
 #define CUB_SUPPORTS_WRAPPED_NAMESPACE() false
 #endif
