@@ -1597,9 +1597,9 @@ class TestQuantizedOps(TestCase):
                                  X_hat.q_zero_point()))
 
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
-                                              min_side=1, max_side=10),
+                                              min_side=1, max_side=6),
                        qparams=hu.qparams()),
-           k=st.integers(1, 10),
+           k=st.integers(1, 6),
            dim=st.integers(1, 4),
            largest=st.booleans(),
            sorted=st.booleans())

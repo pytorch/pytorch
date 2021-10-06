@@ -1683,7 +1683,7 @@ class StandaloneModuleQuantizeHandler(QuantizeHandler):
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         assert node.op == 'call_module'
-        convert = torch.quantization.quantize_fx._convert_standalone_module_fx  # type: ignore[attr-defined]
+        convert = torch.ao.quantization.quantize_fx._convert_standalone_module_fx  # type: ignore[attr-defined]
         # We know that observed standalone module is a GraphModule since
         # it's produced by us
         observed_standalone_module : GraphModule = modules[str(node.target)]  # type: ignore[assignment]
