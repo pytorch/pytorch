@@ -381,4 +381,4 @@ class LSTM(torch.nn.Module):
     @classmethod
     def from_observed(cls, other):
         return torch.ao.quantization.convert(other, inplace=False,
-                                          remove_qconfig=True)
+                                             remove_qconfig=True)
