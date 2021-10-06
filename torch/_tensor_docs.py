@@ -3652,13 +3652,6 @@ See :func:`torch.std`
 See :func:`torch.std`
 """)
 
-add_docstr_all('storage',
-               r"""
-storage() -> torch.Storage
-
-Returns the underlying storage.
-""")
-
 add_docstr_all('storage_offset',
                r"""
 storage_offset() -> int
@@ -3674,13 +3667,6 @@ Example::
     >>> x[3:].storage_offset()
     3
 
-""")
-
-add_docstr_all('storage_type',
-               r"""
-storage_type() -> type
-
-Returns the type of the underlying storage.
 """)
 
 add_docstr_all('stride',
