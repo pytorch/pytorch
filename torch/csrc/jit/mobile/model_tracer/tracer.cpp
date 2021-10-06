@@ -292,12 +292,14 @@ int main(int argc, char* argv[]) {
       always_included_traced_ops.begin(), always_included_traced_ops.end());
 
   if (traced_operators.size() <= always_included_traced_ops.size()) {
-    throw std::runtime_error(c10::str(
-        "Error traced_operators size: ",
-        traced_operators.size(),
-        ". Expected the traced operator list to be bigger then the default size ",
-        always_included_traced_ops.size(),
-        ". Please report a bug in PyTorch."));
+    std::cerr
+        << c10::str(
+               "Error traced_operators size: ",
+               traced_operators.size(),
+               ". Expected the traced operator list to be bigger then the default size ",
+               always_included_traced_ops.size(),
+               ". Please report a bug in PyTorch.")
+        << std::endl;
   }
 
   // If the op exist in both traced_ops and root_ops, leave it in root_ops only
