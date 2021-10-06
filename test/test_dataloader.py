@@ -1524,6 +1524,28 @@ except RuntimeError as e:
         ):
             self.assertEqual(list(fn()), list(fn()))
 
+        for sampler in (
+            RandomSampler(self.dataset, num_samples=5, replacement=True),
+            RandomSampler(self.dataset, replacement=False),
+            WeightedRandomSampler(weights, num_samples=5, replacement=True),
+            WeightedRandomSampler(weights, num_samples=5, replacement=False),
+            SubsetRandomSampler(range(10)),
+        ):
+            torch.manual_seed(0)
+            l1 = list(sampler) + list(sampler)
+
+            torch.manual_seed(0)
+            l2 = list(sampler) + list(sampler)
+            self.assertEqual(l1, l2)
+
+            its = (iter(sampler), iter(sampler))
+            ls = ([], [])
+            for idx in range(len(sampler)):
+                for i in range(2):
+                    if idx == 0:
+                        torch.manual_seed(0)
+                    ls[i].append(next(its[i]))
+            self.assertEqual(ls[0], ls[1])
 
     def _test_sampler(self, **kwargs):
         indices = range(2, 12)  # using a regular iterable
