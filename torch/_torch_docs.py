@@ -8219,13 +8219,23 @@ Alias of :func:`torch.vstack`.
 
 add_docstr(torch.round,
            r"""
-round(input, *, out=None) -> Tensor
+round(input, *, decimals=0, out=None) -> Tensor
 
 Returns a new tensor with each of the elements of :attr:`input` rounded
 to the closest integer.
 
+.. note::
+    This function rounds to even in halfway cases
+    Eg. round(2.5) will be 2.
+
+    See also :func:`torch.rint`, :func:`torch.ceil`, :func:`torch.floor`,
+    :func:`torch.trunc`.
+
 Args:
     {input}
+    decimals (int): Number of decimal places to round to (default: 0).
+        If decimals is negative, it specifies the number of positions
+        to the left of the decimal point.
 
 Keyword args:
     {out}
