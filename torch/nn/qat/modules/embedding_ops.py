@@ -30,7 +30,7 @@ class EmbeddingBag(nn.EmbeddingBag):
         assert qconfig, 'qconfig must be provided for QAT module'
         assert qconfig.weight().qscheme == torch.per_channel_affine_float_qparams, \
             'Embedding Bag weights requires a qscheme of torch.per_channel_affine_float_qparams Got ' + \
-            qconfig.weight().qscheme
+            str(qconfig.weight().qscheme)
         self.qconfig = qconfig
         self.weight_fake_quant = qconfig.weight(factory_kwargs=factory_kwargs)
 
@@ -50,7 +50,7 @@ class EmbeddingBag(nn.EmbeddingBag):
         assert mod.qconfig, 'Input float module must have a valid qconfig'
         assert mod.qconfig.weight().qscheme == torch.per_channel_affine_float_qparams, \
             'Embedding Bag weights requires a qscheme of torch.per_channel_affine_float_qparams Got ' + \
-            mod.qconfig.weight().qscheme
+            mod.qconfig.weight().qscheme.__name__
 
         qconfig = mod.qconfig
         qat_embedding_bag = cls(mod.num_embeddings, mod.embedding_dim, mod.max_norm, mod.norm_type,
