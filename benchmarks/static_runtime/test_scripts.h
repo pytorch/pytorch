@@ -221,13 +221,13 @@ const auto flatten_script_2 = R"JIT(
 const auto clone_script_0 = R"JIT(
   def forward(self, input):
       a = torch.clone(input)
-      return (a + a)
+      return (a * a)
 )JIT";
 
 const auto clone_script_1 = R"JIT(
   def forward(self, input: Tensor, memory_format: int):
       a = torch.clone(input, memory_format=memory_format)
-      return (a + a)
+      return (a * a)
 )JIT";
 
 const auto aten_sum = R"JIT(
