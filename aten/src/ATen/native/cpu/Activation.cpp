@@ -206,7 +206,7 @@ void GeluKernelImpl(TensorIteratorBase& it, bool approximate) {
             const scalar_t kKappa = 0.044715;
             auto x_cube = x * x * x;
             auto inner = kBeta * (x + kKappa * x_cube);
-            return scalar_t(0.5) * scalar_t(x) * (scalar_t(1) + std::tanh(inner));
+            return scalar_t(0.5) * x * (scalar_t(1) + std::tanh(inner));
           },
           [&](Vec x_vec) {
             auto x_cube = x_vec * x_vec * x_vec;
@@ -253,7 +253,7 @@ void GeluBackwardKernelImpl(TensorIteratorBase& it, bool approximate) {
             const scalar_t kBeta = M_SQRT2 * M_2_SQRTPI * 0.5;
             const scalar_t kKappa = 0.044715;
             auto x_sq = x * x;
-            auto x_cube = x * x * x;
+            auto x_cube = x_sq * x;
             auto inner = kBeta * (x + kKappa * x_cube);
             auto tanh_inner = std::tanh(inner);
 

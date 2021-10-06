@@ -7,11 +7,11 @@
 
 namespace at { namespace native {
 
-Tensor mkldnn_gelu(const Tensor& input) {
+Tensor mkldnn_gelu(const Tensor& input, bool approximate) {
   TORCH_CHECK(false, "mkldnn_gelu: ATen not compiled with MKLDNN support");
 }
 
-Tensor mkldnn_gelu_backward(const Tensor& grad_output, const Tensor& input) {
+Tensor mkldnn_gelu_backward(const Tensor& grad_output, const Tensor& input, bool approximate) {
   TORCH_CHECK(false, "mkldnn_gelu_backward: ATen not compiled with MKLDNN support");
 }
 

@@ -329,7 +329,7 @@ TORCH_IMPL_FUNC(gelu_out_cpu) (
   const Tensor& self, bool approximate, const Tensor& result
 ) {
 #if AT_MKLDNN_ENABLED()
-  if (use_mkldnn(self)) {
+  if (use_mkldnn(self) && !approximate) {
     const ideep::tensor& x = itensor_from_tensor(self);
     ideep::tensor y = itensor_from_tensor(result);
     ideep::eltwise_forward::compute(
