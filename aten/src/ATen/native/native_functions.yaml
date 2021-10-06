@@ -1238,6 +1238,9 @@
     MkldnnCPU: copy_mkldnn_
     SparseCPU, SparseCUDA, SparseHIP, SparseXPU: copy_sparse_wrapper_
     Named: named_copy_
+    QuantizedCPU: copy_quantized_cpu_
+    QuantizedXPU: copy_quantized_xpu_
+    QuantizedCUDA: copy_quantized_cuda_
     CompositeExplicitAutograd: copy_
 
 - func: _copy_from(Tensor self, Tensor dst, bool non_blocking=False) -> Tensor

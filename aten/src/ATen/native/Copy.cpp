@@ -180,21 +180,6 @@ Tensor& copy_(Tensor & self, const Tensor & src, bool non_blocking) {
     return self;
   }
 
-  if (self.is_quantized() && !src.is_quantized()) {
-    return quantized_copy_from_float_cpu_(self, src);
-  }
-
-  if (self.is_quantized() && src.is_quantized()) {
-    TORCH_CHECK(self.qscheme() == src.qscheme(),
-                "Quantized Copy only works with same qscheme");
-    TORCH_CHECK(self.scalar_type() == src.scalar_type());
-    set_quantizer_(self, src.quantizer());
-  }
-
-  if (!self.is_quantized() && src.is_quantized()) {
-    TORCH_CHECK(false, "Copying from quantized Tensor to non-quantized Tensor is not allowed, please use dequantize to get a float Tensor from a quantized Tensor");
-  }
-
   if (self.device().type() == at::kVulkan || src.device().type() == at::kVulkan) {
   #ifdef USE_VULKAN_API
     return vulkan::ops::copy_(self, src);
