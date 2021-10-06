@@ -1,6 +1,7 @@
 #include <ATen/core/jit_type.h>
 #include <c10/util/string_view.h>
 #include <torch/csrc/jit/frontend/parser_constants.h>
+#include <torch/csrc/jit/mobile/runtime_compatibility.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/custom_class.h>
 #include <queue>
@@ -16,6 +17,12 @@ using torch::jit::valid_single_char_tokens;
 
 namespace c10 {
 namespace {
+
+// Torchbind custom class always starts with the follow prefix, so use it as an
+// identifier for torchbind custom class type
+static constexpr const char* kTypeTorchbindCustomClass =
+    "__torch__.torch.classes";
+
 bool isSpecialChar(char a) {
   for (const char* c = valid_single_char_tokens; *c; c++) {
     if (a == *c)
@@ -30,16 +37,30 @@ TypeParser::TypeParser(std::string pythonStr)
   lex();
 }
 
-TypePtr TypeParser::parse() {
-  std::string token = next();
-  auto simpleTypeIt = string_to_type_lut().find(token);
-  if (simpleTypeIt != string_to_type_lut().end()) {
-    if (cur() != "]" && cur() != "," && cur() != "") {
-      TORCH_CHECK(
-          false, "Simple type ", token, " is followed by ", "invalid chars.");
-    }
-    return simpleTypeIt->second;
-  } else if (token == "List") {
+// The list of non-simple types supported by currrent parser.
+std::unordered_set<std::string> TypeParser::getNonSimpleType() {
+  static std::unordered_set<std::string> nonSimpleTypes{
+      "List", "Union", "Optional", "Future", "Dict", "Tuple"};
+  return nonSimpleTypes;
+}
+
+// The list of custom types supported by currrent parser.
+std::unordered_set<std::string> TypeParser::getCustomType() {
+  static std::unordered_set<std::string> customeTypes{
+      kTypeTorchbindCustomClass};
+  return customeTypes;
+}
+
+// Given a PyThon str, get all contained types. It's usually used for
+// compatibility check between model and runtime. For example:
+// PyThon string: "Dict[int, Tuple[Tensor, Tensor, Tensor]]"
+// contained type is: [Dict, int, Tuple, Tensor]
+std::unordered_set<std::string> TypeParser::getContainedTypes() {
+  return contained_types_;
+}
+
+TypePtr TypeParser::parseNonSimple(const std::string& token) {
+  if (token == "List") {
     return CreateSingleElementType<ListType>();
   } else if (token == "Optional") {
     return CreateSingleElementType<OptionalType>();
@@ -61,10 +82,27 @@ TypePtr TypeParser::parse() {
         expectChar(',');
       }
     }
-    expectChar(']');
-    return TupleType::create(std::move(types));
+    expect("]");
+    return TupleType::create(types);
+  }
+  return nullptr;
+}
+
+TypePtr TypeParser::parse() {
+  std::string token = next();
+  auto simpleTypeIt = string_to_type_lut().find(token);
+  if (simpleTypeIt != string_to_type_lut().end()) {
+    if (cur() != "]" && cur() != "," && cur() != "") {
+      TORCH_CHECK(
+          false, "Simple type ", token, " is followed by ", "invalid chars.");
+    }
+    contained_types_.insert(token);
+    return simpleTypeIt->second;
+  } else if (getNonSimpleType().find(token) != getNonSimpleType().end()) {
+    contained_types_.insert(token);
+    return parseNonSimple(token);
   } else if (token == "__torch__") {
-    return parseClassType();
+    return parseTorchbindClassType();
   } else {
     TORCH_CHECK(
         false,
@@ -76,7 +114,7 @@ TypePtr TypeParser::parse() {
   return nullptr;
 }
 
-TypePtr TypeParser::parseClassType() {
+TypePtr TypeParser::parseTorchbindClassType() {
   static constexpr std::array<const char*, 5> expected_atoms = {
       ".", "torch", ".", "classes", "."};
   for (const auto& atom : expected_atoms) {
@@ -86,7 +124,6 @@ TypePtr TypeParser::parseClassType() {
   std::string ns = next();
   expectChar('.');
   std::string classname = next();
-
   std::string customClassName = "__torch__.torch.classes.";
   customClassName.reserve(
       customClassName.size() + ns.size() + 1 + classname.size());
@@ -172,7 +209,8 @@ C10_NODISCARD c10::string_view TypeParser::cur() const {
 }
 
 TORCH_API TypePtr parseType(const std::string& pythonStr) {
-  TypeParser paser(pythonStr);
-  return paser.parse();
+  TypeParser parser(pythonStr);
+  return parser.parse();
 }
+
 } // namespace c10
