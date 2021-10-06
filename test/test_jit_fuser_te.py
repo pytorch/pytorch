@@ -2028,6 +2028,7 @@ works_list = [
     'remainder.autodiffed',
     'reshape',
     'round',
+    'round.decimals_0',
     'rsub',
     'rsub.rsub_tensor',
     'rsqrt',
