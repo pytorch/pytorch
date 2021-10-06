@@ -372,6 +372,18 @@ std::tuple<Tensor,optional<int64_t>> slice_backward_batch_rule(
   return std::make_tuple(std::move(result), 0);
 }
 
+std::tuple<Tensor, optional<int64_t>> view_batching_rule(
+    const Tensor &self, optional<int64_t> self_bdim, IntArrayRef size)
+{
+  TORCH_INTERNAL_ASSERT(self_bdim.has_value());
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  VmapDimVector size_(size.size() + 1);
+  // copy batch size
+  size_[0] = self_.size(0);
+  std::copy(size.cbegin(), size.cend(), size_.begin() + 1);
+  return std::make_tuple(self_.view(size_), 0);
+}
+
 std::tuple<Tensor, optional<int64_t>> expand_batch_rule(
     const Tensor &self, optional<int64_t> self_bdim, IntArrayRef size, bool implicit)
 {
@@ -428,6 +440,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("diagonal_backward", diagonal_backward_batch_rule);
   VMAP_SUPPORT("select_backward", select_backward_batch_rule);
   VMAP_SUPPORT("slice_backward", slice_backward_batch_rule);
+  VMAP_SUPPORT("view", view_batching_rule);
   VMAP_SUPPORT("expand", expand_batch_rule);
 }
 
