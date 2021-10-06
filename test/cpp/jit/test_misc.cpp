@@ -1392,15 +1392,42 @@ TEST(OffThreadCompilation, Basic) {
   torch::jit::parseIR(graph_string, graph.get());
 
   GraphFunction f("fallbackGraphs", graph, nullptr);
+  auto& ge = f.get_executor();
 
-  for (size_t i = 0; i < getNumProfiledRuns() + 40; i++) {
-    auto x = at::randn({1}, at::kCPU);
-    auto y = at::randn({1}, at::kCPU);
-    auto stack = createStack({x, y});
+  bool old_comp_mode = getCompilationMode();
+  getCompilationMode() = true;
+  size_t old_num_profiled_runs = getNumProfiledRuns();
+  getNumProfiledRuns() = 1;
+
+  auto x = at::randn({1}, at::kCPU);
+  auto y = at::randn({1}, at::kCPU);
+  auto stack = createStack({x, y});
+  auto& profiled_plan = ge.getPlanFor(stack, getBailoutDepth());
+  f.run(stack);
+  at::Tensor expected;
+  pop(stack, expected);
+  auto& must_be_profiled_plan = ge.getPlanFor(stack, getBailoutDepth());
+  ASSERT_EQ(profiled_plan.graph, must_be_profiled_plan.graph);
+  static const size_t RUNS = 40;
+  bool switched_to_optimized = false;
+  for (size_t i = 0; i < RUNS; i++) {
+    stack = createStack({x, y});
+    // don't switch order since we want to guarantee that we will be
+    // comparing the results of the optimized run
+    auto& could_be_optimized = ge.getPlanFor(stack, getBailoutDepth());
     f.run(stack);
-    at::Tensor at;
-    pop(stack, at);
+    at::Tensor actual;
+    pop(stack, actual);
+    ASSERT_TRUE(at::allclose(actual, expected));
+    if (could_be_optimized.graph != profiled_plan.graph) {
+      switched_to_optimized = true;
+      break;
+    }
   }
+
+  ASSERT_TRUE(switched_to_optimized);
+  getCompilationMode() = old_comp_mode;
+  getNumProfiledRuns() = old_num_profiled_runs;
 }
 
 TEST(FallbackGraphsTest, Basic) {

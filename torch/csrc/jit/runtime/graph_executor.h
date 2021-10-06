@@ -108,6 +108,7 @@ TORCH_API bool getFusionGroupInlining();
 TORCH_API void debugSetAutodiffSubgraphInlining(bool state);
 TORCH_API std::shared_ptr<Graph> lastExecutedOptimizedGraph();
 
+TORCH_API std::atomic<bool>& getCompilationMode();
 TORCH_API std::atomic<bool>& getProfilingMode();
 TORCH_API std::atomic<bool>& getExecutorMode();
 TORCH_API std::atomic<size_t>& getNumProfiledRuns();

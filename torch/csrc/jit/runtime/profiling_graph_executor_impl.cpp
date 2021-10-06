@@ -71,6 +71,11 @@ static std::atomic<bool> profiling_mode{true};
 
 static std::atomic<size_t> num_profiled_runs{kDefaultNumProfiledRuns};
 static std::atomic<size_t> bailout_depth{kDefaultBailoutDepth};
+static std::atomic<bool> comp_async_mode{false};
+
+std::atomic<bool>& getCompilationMode() {
+  return comp_async_mode;
+}
 
 std::atomic<bool>& getProfilingMode() {
   return profiling_mode;
@@ -688,21 +693,23 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
 
   // profile until a graph is ready
   if (!pr_->ready()) {
-    std::cerr << "still profiling!!\n";
     return *profiling_plan_;
   }
+
+  // deferred just makes compilation lazy but we still compile sync-ly
+  auto comp_mode =
+      (getCompilationMode()) ? std::launch::async : std::launch::deferred;
 
   if (!optimized_compilation_) {
     auto copy = pr_->graph()->copy();
     auto func_name = function_name_;
     auto bail_depth = remaining_bailout_depth_;
+    // we pass all the state needed to run the optimized compilation in
+    // case this PE instance somehow gets destroyed before this task is
+    // finished
     std::future<
         std::pair<ExecutionPlan, std::vector<std::unique_ptr<Function>>>>
-        fut =
-            // we pass all the state needed to run the optimized compilation in
-            // case this PE instance somehow gets destroyed before this task is
-            // finished
-        std::async(std::launch::async, [func_name, bail_depth, copy]() mutable {
+        fut = std::async(comp_mode, [func_name, bail_depth, copy]() mutable {
           std::cerr << "starting an async optimized compilation\n";
           std::vector<std::unique_ptr<Function>> fallback_functions;
           ProfilingRecord::removeProfileCounter(copy->block());
@@ -720,15 +727,17 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
     optimized_compilation_ = std::move(fut);
   }
 
-  if (optimized_compilation_->wait_for(std::chrono::seconds(0)) ==
-      std::future_status::ready) {
-    std::cerr << "the optimized compilation is ready, let's use it\n";
-    optimized_plan_ = optimized_compilation_->get().first;
-    fallback_functions_ = std::move(optimized_compilation_->get().second);
+  if (comp_mode == std::launch::deferred ||
+      optimized_compilation_->wait_for(std::chrono::seconds(0)) ==
+          std::future_status::ready) {
+    auto comp_result = optimized_compilation_->get();
+    GRAPH_DEBUG("Compilation is ready for ", this);
+    optimized_plan_ = comp_result.first;
+    fallback_functions_ = std::move(comp_result.second);
     return *optimized_plan_;
   }
 
-  std::cerr << "still compiling!!\n";
+  GRAPH_DEBUG("Async compilation is still running for ", this);
 
   // run profiled graph once more
   return *profiling_plan_;
@@ -742,7 +751,6 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getPlanFor(
   // IMPORTANT: This is a hot path of calling a torchscript function. Try not to
   // add any code above this.
   if (optimized_plan_) {
-    std::cout << "using the optimized plan!\n";
     return *optimized_plan_;
   }
 
