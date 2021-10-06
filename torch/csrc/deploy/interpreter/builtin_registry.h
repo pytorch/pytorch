@@ -24,6 +24,7 @@
 #include <memory>
 #include <unordered_map>
 #include <vector>
+#include <gtest/gtest.h>
 
 struct _frozen;
 
@@ -60,28 +61,31 @@ struct BuiltinRegistryItem {
  */
 class BuiltinRegistry {
  public:
-  static BuiltinRegistry* get();
-  // for unittest
-  static void clear() {
-    get()->items_.clear();
-  }
+  static void runPreInitialization();
+  static void runPostInitialization();
+
+ private:
+  static struct _frozen* getAllFrozenModules();
+  // call this after all the registration is done.
+  static void sanityCheck();
+  static void appendCPythonInittab();
+  static std::string getBuiltinModulesCSV();
+
   static void registerBuiltin(std::unique_ptr<BuiltinRegistryItem> item);
   static const std::vector<std::unique_ptr<BuiltinRegistryItem>>& items() {
     return get()->items_;
   }
-  static BuiltinRegistryItem* getItem(const std::string& name);
   static int totalNumModules();
-  static struct _frozen* getAllFrozenModules();
-  // call this after all the registration is done.
-  static void sanityCheck();
+  static BuiltinRegistry* get();
+  static BuiltinRegistryItem* getItem(const std::string& name);
   static std::vector<std::pair<const char*, void*>> getAllBuiltinModules();
-  static void appendCPythonInittab();
-  static std::string getBuiltinModulesCSV();
 
- private:
   explicit BuiltinRegistry() = default;
   std::unordered_map<std::string, int> name2idx_;
   std::vector<std::unique_ptr<BuiltinRegistryItem>> items_;
+
+  friend class BuiltinRegisterer;
+  FRIEND_TEST(BuiltinRegistryTest, SimpleTest);
 };
 
 /*
@@ -102,50 +106,7 @@ class BuiltinRegisterer {
  public:
   explicit BuiltinRegisterer(
       const char* name,
-      const struct _frozen* frozenModules...) {
-    // if (builtinRegistryAllowList && !strstr(builtinRegistryAllowList, name)) {
-    if (allowLibrary && !allowLibrary(name)) {
-      fprintf(stderr, "Skip %s since it's rejected by the allowLibrary method\n", name);
-      return;
-    }
-    // gather builtin modules for this lib
-    va_list args;
-    va_start(args, frozenModules);
-    const char* moduleName = nullptr;
-    void* initFn = nullptr;
-    std::vector<std::pair<const char*, void*>> builtinModules;
-    while (true) {
-      moduleName = va_arg(args, const char*);
-      // encounter end of sequence
-      if (moduleName == nullptr) {
-        break;
-      }
-      initFn = va_arg(args, void*);
-      // skip null init function. This can happen if we create weak reference
-      // to init functions defined in another library. Depending on if we
-      // link with that library, the init function pointer will be the real
-      // implementation or nullptr. tensorrt is a good example. If this is
-      // a CPU build, we will not link with the tensorrt library, so the init
-      // function will be nullptr; on the other hand if this is a GPU build,
-      // we link with the tensorrt library, so the init function will not be
-      // nullptr.
-      if (initFn == nullptr) {
-        continue;
-      }
-      builtinModules.emplace_back(moduleName, initFn);
-    }
-
-    // note: don't call glog api in this method since this method is usually
-    // called before glog get setup
-    fprintf(
-        stderr,
-        "Registering torch::deploy builtin library %s (idx %lu) with %lu builtin modules\n",
-        name,
-        BuiltinRegistry::items().size(),
-        builtinModules.size());
-    BuiltinRegistry::registerBuiltin(std::make_unique<BuiltinRegistryItem>(
-        name, frozenModules, std::move(builtinModules)));
-  }
+      const struct _frozen* frozenModules...);
 };
 
 } // namespace deploy
