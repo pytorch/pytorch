@@ -53,6 +53,7 @@ LABEL_CIFLOW_SLOW = "ciflow/slow"
 LABEL_CIFLOW_WIN = "ciflow/win"
 LABEL_CIFLOW_XLA = "ciflow/xla"
 LABEL_CIFLOW_NOARCH = "ciflow/noarch"
+LABEL_CIFLOW_VULKAN = "ciflow/vulkan"
 LABEL_CIFLOW_PREFIX = "ciflow/"
 
 
@@ -342,12 +343,6 @@ LINUX_WORKFLOWS = [
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_ONNX, LABEL_CIFLOW_CPU},
         ),
     ),
-    # CIWorkflow(
-    #     arch="linux",
-    #     build_environment="linux-xenial-py3.6-gcc7",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc7",
-    #     test_runner_type=LINUX_CPU_TEST_RUNNER,
-    # ),
     CIWorkflow(
         arch="linux",
         build_environment="linux-bionic-cuda10.2-py3.9-gcc7",
@@ -452,60 +447,18 @@ LINUX_WORKFLOWS = [
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_XLA, LABEL_CIFLOW_NOARCH},
         ),
     ),
-    # CIWorkflow(
-    #     arch="linux",
-    #     build_environment="linux-bionic-rocm3.9-py3.6",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm3.9-py3.6",
-    #     test_runner_type=LINUX_CPU_TEST_RUNNER,
-    # ),
-    # CIWorkflow(
-    #     arch="linux",
-    #     build_environment="linux-xenial-py3.6-clang5-android-ndk-r19c-x86_32",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
-    #     test_runner_type=LINUX_CPU_TEST_RUNNER,
-    # ),
-    # CIWorkflow(
-    #     arch="linux",
-    #     build_environment="linux-xenial-py3.6-clang5-android-ndk-r19c-x86_64",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
-    #     test_runner_type=LINUX_CPU_TEST_RUNNER,
-    # ),
-    # CIWorkflow(
-    #     arch="linux",
-    #     build_environment="linux-xenial-py3.6-clang5-android-ndk-r19c-arm-v7a",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
-    #     test_runner_type=LINUX_CPU_TEST_RUNNER,
-    # ),
-    # CIWorkflow(
-    #     arch="linux",
-    #     build_environment="linux-xenial-py3.6-clang5-android-ndk-r19c-arm-v8a",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
-    #     test_runner_type=LINUX_CPU_TEST_RUNNER,
-    # ),
-    # CIWorkflow(
-    #     arch="linux",
-    #     build_environment="linux-xenial-py3.6-clang5-mobile",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-asan",
-    #     test_runner_type=LINUX_CPU_TEST_RUNNER,
-    # ),
-    # CIWorkflow(
-    #     arch="linux",
-    #     build_environment="linux-xenial-py3.6-clang5-mobile-custom-dynamic",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
-    #     test_runner_type=LINUX_CPU_TEST_RUNNER,
-    # ),
-    # CIWorkflow(
-    #     arch="linux",
-    #     build_environment="linux-xenial-py3.6-clang5-mobile-custom-static",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
-    #     test_runner_type=LINUX_CPU_TEST_RUNNER,
-    # ),
-    # CIWorkflow(
-    #     arch="linux",
-    #     build_environment="linux-xenial-py3.6-clang5-mobile-code-analysis",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
-    #     test_runner_type=LINUX_CPU_TEST_RUNNER,
-    # ),
+    CIWorkflow(
+        arch="linux",
+        build_environment="linux-vulkan-bionic-py3.6-clang9",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.6-clang9",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        num_test_shards=1,
+        distributed_test=False,
+        ciflow_config=CIFlowConfig(
+            enabled=True,
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_VULKAN},
+        ),
+    ),
 ]
 
 
