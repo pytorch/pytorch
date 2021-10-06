@@ -72,6 +72,7 @@ class VariadicUpdater {
         op_node->inputs().end());
 
     auto var_op_node = op_node->owningGraph()->create(variadic_op_, inputs);
+    var_op_node->output()->setType(op_node->output()->type());
     GRAPH_UPDATE("Adding\n", *var_op_node);
     var_op_node->insertBefore(op_node);
     GRAPH_UPDATE("Replacing\n", *op_node, "with\n", *var_op_node);
