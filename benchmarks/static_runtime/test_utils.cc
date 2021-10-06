@@ -174,6 +174,13 @@ void compareResults(
 
 } // namespace
 
+std::shared_ptr<Graph> getGraphFromIR(const std::string& ir) {
+    auto graph = std::make_shared<Graph>();
+    std::unordered_map<std::string, Value*> vmap;
+    parseIR(ir, graph.get(), vmap);
+    return graph;
+}
+
 void testStaticRuntime(
     const std::string& source,
     const std::vector<IValue>& args,
@@ -223,9 +230,13 @@ void testStaticRuntime(
       compareResults(expect, actual, use_allclose, use_equalnan);
     } else {
       // run static runtime again to exercise the memory planner
+      // and allocate managed tensors.
       actual = smodule(args, {});
       smodule.runtime().check_for_memory_leak();
-      // second run
+      compareResults(expect, actual, use_allclose, use_equalnan);
+      // third run to use the allocated managed tensors.
+      actual = smodule(args, {});
+      smodule.runtime().check_for_memory_leak();
       compareResults(expect, actual, use_allclose, use_equalnan);
     }
   }
