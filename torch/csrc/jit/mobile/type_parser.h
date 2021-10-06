@@ -14,20 +14,20 @@ class TypeParser {
   TypePtr parseTorchbindClassType();
   TypePtr parseNonSimple(const std::string& token);
 
-  void expect(const std::string& s);
-
+  void expect(const char* s);
+  void expectChar(char c);
   template <class T>
   TypePtr CreateSingleElementType();
 
   void lex();
 
   std::string next();
-
-  std::string& cur();
+  void advance();
+  C10_NODISCARD c10::string_view cur() const;
 
   std::string pythonStr_;
   size_t start_;
-  std::string next_token_;
+  c10::string_view next_token_;
 
   // Store all contained types when parsing a string
   std::unordered_set<std::string> contained_types_;
