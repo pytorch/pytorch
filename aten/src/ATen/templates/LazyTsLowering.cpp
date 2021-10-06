@@ -41,6 +41,7 @@ TSOpVector LowerBuiltin(
 
 ${lowering_definitions}
 
+// TODO(alanwaketan): Change 'std::shared_ptr<torch::jit::GraphFunction>' to 'const torch::jit::GraphFunction&'.
 TSOpVector LowerToTSCodegen(std::shared_ptr<torch::jit::GraphFunction> function,
                             ts_backend::TSLoweringContext* loctx,
                             const ir::Node* node) {
