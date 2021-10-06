@@ -523,16 +523,6 @@ class TestPostTrainingStatic(QuantizationTestCase):
 
     @skipIfNoFBGEMM
     def test_embedding_linear_dynamic(self):
-        class EmbeddingWithLinearDynamic(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.emb = torch.nn.Embedding(num_embeddings=10, embedding_dim=12)
-                self.fc = torch.nn.Linear(5, 5)
-
-            def forward(self, indices, linear_in):
-                return self.emb(indices), self.fc(linear_in)
-
-        model = EmbeddingWithLinearDynamic()
         qconfig_dict = {'fc' : default_dynamic_qconfig}
         model = EmbeddingWithLinear()
         quantize_dynamic(model, qconfig_dict, inplace=True)
