@@ -1,4 +1,10 @@
+#pragma once
+
+#if !defined(USE_ROCM)
 #include <cub/version.cuh>
+#else
+#define CUB_VERSION 0
+#endif
 
 // cub sort support for __nv_bfloat16 is added to cub 1.13 in:
 // https://github.com/NVIDIA/cub/pull/306
