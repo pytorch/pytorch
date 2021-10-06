@@ -12,9 +12,18 @@ from base64 import b64decode, b64encode
 from datetime import timedelta
 from typing import Any, Optional, Tuple, cast
 
-from torch.distributed import Store, TCPStore, FileStore
+from torch.distributed import FileStore, Store, TCPStore
+from torch.distributed.elastic.events import (
+    NodeState,
+    construct_and_record_rdzv_event,
+)
 
-from .api import RendezvousConnectionError, RendezvousParameters, RendezvousStateError, RendezvousError
+from .api import (
+    RendezvousConnectionError,
+    RendezvousError,
+    RendezvousParameters,
+    RendezvousStateError,
+)
 from .dynamic_rendezvous import RendezvousBackend, Token
 from .utils import _matches_machine_hostname, parse_rendezvous_endpoint
 
@@ -148,9 +157,11 @@ def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
             )
 
             if is_server:
-                log.info(
-                    f"Process {os.getpid()} hosts the TCP store for the C10d rendezvous backend."
+                msg = f"Process {os.getpid()} hosts the TCP store for the C10d rendezvous backend."
+                construct_and_record_rdzv_event(
+                    run_id=params.run_id, message=msg, node_state=NodeState.INIT
                 )
+                log.info(msg)
 
             break
         except (ValueError, RuntimeError) as exc:
@@ -166,6 +177,7 @@ def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
                 ) from exc
 
     return store
+
 
 def _create_file_store(params: RendezvousParameters) -> FileStore:
     # If a user specifies an endpoint, we treat it as a path to a file.
@@ -189,6 +201,7 @@ def _create_file_store(params: RendezvousParameters) -> FileStore:
         ) from exc
 
     return store
+
 
 def create_backend(params: RendezvousParameters) -> Tuple[C10dRendezvousBackend, Store]:
     """Creates a new :py:class:`C10dRendezvousBackend` from the specified
@@ -229,11 +242,23 @@ def create_backend(params: RendezvousParameters) -> Tuple[C10dRendezvousBackend,
     # not have the required functionality (e.g. compare_set) yet.
     store_type = params.get("store_type", "tcp").strip().lower()
     store: Store
-    if store_type == "file":
-        store = _create_file_store(params)
-    elif store_type == "tcp":
-        store = _create_tcp_store(params)
-    else:
-        raise ValueError("Invalid store type given. Currently only supports file and tcp.")
 
-    return C10dRendezvousBackend(store, params.run_id), store
+    try:
+        if store_type == "file":
+            store = _create_file_store(params)
+        elif store_type == "tcp":
+            store = _create_tcp_store(params)
+        else:
+            raise ValueError("Invalid store type given. Currently only supports file and tcp.")
+
+        backend = C10dRendezvousBackend(store, params.run_id)
+
+    except Exception as e:
+        construct_and_record_rdzv_event(
+            message=f"{type(e).__name__}: {str(e)}",
+            run_id=params.run_id,
+            node_state=NodeState.FAILED,
+        )
+        raise
+
+    return backend, store

@@ -14,7 +14,12 @@ DEFINE_DISPATCH(cdist_stub);
 DEFINE_DISPATCH(cdist_backward_stub);
 
 Tensor pairwise_distance(const Tensor& x1, const Tensor& x2, double p, double eps, bool keepdim) {
-  return at::norm(x1 - x2 + eps, p, 1, keepdim);
+  // Since either x1 or x2 could be broadcasted
+  auto x1_dim = x1.dim();
+  auto x2_dim = x2.dim();
+  auto output_dim = x1_dim > x2_dim ? x1_dim : x2_dim;
+  auto innermost_dim = output_dim - 1;
+  return at::norm(x1 - x2 + eps, p, innermost_dim, keepdim);
 }
 
 // This is to guarantee that the contiguous memory is passed to the backward pass
@@ -235,9 +240,12 @@ Tensor _pdist_backward(const Tensor& grad, const Tensor& self, const double p, c
 }
 
 Tensor cosine_similarity(const Tensor& x1, const Tensor& x2, int64_t dim, double eps) {
-  TORCH_CHECK(x1.sizes() == x2.sizes(), "cosine_similarity requires both inputs to have the same sizes, but x1 has ",
-              x1.sizes(), " and x2 has ", x2.sizes())
+  TORCH_CHECK(x1.ndimension() == x2.ndimension(), "cosine_similarity requires both inputs to have the same number of dimensions, but x1 has ",
+              x1.ndimension(), " and x2 has ", x2.ndimension());
+  TORCH_CHECK(x1.ndimension() == 0 || x1.size(dim) == x2.size(dim), "cosine_similarity requires both inputs to have the same size at dimension ", dim, "but x1 has ",
+  x1.size(dim), " and x2 has ", x2.size(dim));
   auto commonDtype = at::result_type(x1, x2);
+  TORCH_CHECK(at::isFloatingType(commonDtype), "expected common dtype to be floating point, yet common dtype is ", commonDtype);
   Tensor x1_ = x1.to(commonDtype);
   Tensor x2_ = x2.to(commonDtype);
   // Follow scipy impl to improve numerical precision

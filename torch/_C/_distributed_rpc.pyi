@@ -8,7 +8,6 @@ from ._distributed_c10d import ProcessGroup, Store
 
 # This module is defined in torch/csrc/distributed/rpc/init.cpp
 
-_DEFAULT_NUM_SEND_RECV_THREADS: int
 _DEFAULT_INIT_METHOD: str
 _DEFAULT_NUM_WORKER_THREADS: int
 _UNSET_RPC_TIMEOUT: float
@@ -65,36 +64,6 @@ class PyRRef:
     def _set_profiling_future(self, profilingFuture: Future): ...
     def __repr__(self) -> str: ...
     ...
-
-class ProcessGroupRpcBackendOptions(RpcBackendOptions):
-    num_send_recv_threads: int
-    def __init__(
-        self,
-        num_send_recv_threads: int,
-        rpc_timeout: float,
-        init_method: str
-    ): ...
-
-class ProcessGroupAgent(RpcAgent):
-    def __init__(
-        self,
-        store: Store,
-        worker_name: str,
-        pg: ProcessGroup,
-        numSendRecvThreads: int,
-        rpcTimeout: timedelta
-    ): ...
-    @overload
-    def get_worker_info(self) -> WorkerInfo: ...
-    @overload
-    def get_worker_info(self, workerName: str) -> WorkerInfo: ...
-    @overload
-    def get_worker_info(self, id: int) -> WorkerInfo: ...
-    def get_worker_infos(self) -> List[WorkerInfo]: ...
-    def _get_device_map(self, dst: WorkerInfo) -> Dict[torch.device, torch.device]: ...
-    def join(self): ...
-    def shutdown(self): ...
-    def sync(self): ...
 
 class _TensorPipeRpcBackendOptionsBase(RpcBackendOptions):
     num_worker_threads: int

@@ -352,7 +352,11 @@ class NaiveTypePropagator {
         break;
       }
       case aten::_softmax_backward_data: {
-        node->output()->setType(getInputTensorType(node, 0));
+        auto out_type = getInputTensorType(node, 0);
+        if (auto opt_ivalue = toIValue(node->input(3))) {
+          out_type = out_type->withScalarType(opt_ivalue->toScalarType());
+        }
+        node->output()->setType(out_type);
         break;
       }
       case aten::amax:

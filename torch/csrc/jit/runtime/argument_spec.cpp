@@ -1,4 +1,4 @@
-
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
 
 namespace torch {
@@ -270,7 +270,7 @@ void ArgumentSpecCreator::specializeTypes(
   //        to investigate the uses of the inputs in detail to change the
   //        accesses/ unwrapping
   auto inputs = graph.inputs();
-  for (size_t i = 0; i < inputs.size(); ++i) {
+  for (const auto i : c10::irange(inputs.size())) {
     auto t = result_stack.back()[i];
     if (auto ot = t->cast<OptionalType>()) {
       // if an optional input hasn't been specialized above, it is None

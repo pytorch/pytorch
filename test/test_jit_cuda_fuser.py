@@ -2528,7 +2528,7 @@ class TestCudaFuser(JitTestCase):
             eager_out = t_jit(eager_out)
 
         graph_in = a.clone()
-        g = torch.cuda._Graph()
+        g = torch.cuda.CUDAGraph()
         s = torch.cuda.Stream()
         s.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(s):

@@ -31,14 +31,12 @@ TensorView* softmax(TensorView* x, int dim) {
 TensorView* softmax_backward(
     TensorView* dy,
     TensorView* y,
-    int dim,
-    TensorView* x) {
+    int dim) {
   TORCH_INTERNAL_ASSERT(dy != nullptr, "Grad Output is invalid.");
   TORCH_INTERNAL_ASSERT(y != nullptr, "Output is invalid.");
-  TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
 
   const int kNumberOfDims =
-      TensorDomain::noReductions(x->getRootDomain()).size();
+      TensorDomain::noReductions(y->getRootDomain()).size();
   const int kReductionAxis = (dim < 0) ? dim + kNumberOfDims : dim;
   TORCH_INTERNAL_ASSERT(kReductionAxis >= 0 && kReductionAxis < kNumberOfDims);
 

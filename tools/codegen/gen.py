@@ -1,5 +1,5 @@
 import os
-from typing import List, Dict, Optional, Tuple, Set, Callable, Any, Union, Sequence
+from typing import List, Dict, Optional, Tuple, Set, Callable, Any, Union, Sequence, TypeVar, Iterable
 from typing_extensions import Literal
 import yaml
 from collections import OrderedDict, defaultdict, namedtuple
@@ -8,6 +8,7 @@ import pathlib
 import functools
 import json
 from dataclasses import dataclass
+import hashlib
 
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.model import (Argument, DispatchKey, FunctionSchema,
@@ -33,6 +34,8 @@ from tools.codegen.context import (method_with_native_function,
                                    with_native_function_and_indices,
                                    with_native_function)
 import tools.codegen.dest as dest
+
+T = TypeVar('T')
 
 # Welcome to the ATen code generator v2!  The ATen code generator is
 # responsible for parsing native_functions.yaml and then generating
@@ -212,7 +215,7 @@ class ComputeOperators:
     ]
 
     @method_with_native_function
-    def __call__(self, f: NativeFunction) -> Optional[str]:
+    def __call__(self, f: NativeFunction) -> str:
         sig = DispatcherSignature.from_schema(f.func)
         name = f.func.name.unambiguous_name()
         call_method_name = 'call'
@@ -247,7 +250,7 @@ struct TORCH_API {name} {{
   using schema = {sig.type()};
   using ptr_schema = schema*;
   // See Note [static constexpr char* members for windows NVCC]
-  STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(name, "aten::{str(f.func.name.name)}")
+  STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(name, "aten::{f.func.name.name}")
   STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(overload_name, "{f.func.name.overload_name}")
   STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(schema_str, {cpp_string(str(f.func))})
   static {sig.defn(name=call_method_name, is_redispatching_fn=False)};
@@ -255,9 +258,17 @@ struct TORCH_API {name} {{
 }};"""
         elif self.target is Target.DEFINITION:
             defns = f"""
-STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, name, "aten::{str(f.func.name)}")
+STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, name, "aten::{f.func.name.name}")
 STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, overload_name, "{f.func.name.overload_name}")
-STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, schema_str, {cpp_string(str(f.func))})"""
+STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, schema_str, {cpp_string(str(f.func))})
+
+// aten::{f.func}
+static C10_NOINLINE c10::TypedOperatorHandle<{name}::schema> create_{name}_typed_handle() {{
+  return c10::Dispatcher::singleton()
+      .findSchemaOrThrow({name}::name, {name}::overload_name)
+      .typed<{name}::schema>();
+}}
+"""
 
             for is_redispatching_fn in [False, True]:
                 if is_redispatching_fn:
@@ -272,9 +283,7 @@ STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, schema_str, {cpp_string(str(f.
                 defns += f"""
 // aten::{f.func}
 {sig.defn(name=method_name, is_redispatching_fn=is_redispatching_fn)} {{
-    static auto op = c10::Dispatcher::singleton()
-        .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
-        .typed<{sig.type()}>();
+    static auto op = create_{name}_typed_handle();
     return op.{dispatcher_call}({dispatcher_exprs_str});
 }}
 """
@@ -447,9 +456,98 @@ def compute_meta_function_declaration(g: NativeFunctionsGroup) -> Optional[str]:
         parent_class = g.out.structured_inherits
         if parent_class is None:
             parent_class = "at::impl::MetaBase"
+        meta_return = "void"
+        precomputed = g.out.precomputed if g.structured else None
+
+        if precomputed:
+            # Generate the template declaration with one bool parameter for each
+            # precomputed element. Each parameter is true if the corresponding (in
+            # terms of position) precomputed element has been set.
+            precomputed_elements = [elem for replace_list in precomputed.replace.values() for elem in replace_list]
+            precomputed_template_parameters = [elem.name.upper() for elem in precomputed_elements]
+            precomputed_template_params_str = ", ".join(f"bool {param} = false" for param in precomputed_template_parameters)
+            precompute_template_decl = f"template <{precomputed_template_params_str}>"
+
+            # Generate a string containing declarations of all precomputed elements.
+            precomputed_elements_with_cpp_types = [
+                structured.argument_type(elem, binds=elem.name)
+                for elem in precomputed_elements
+            ]
+
+            precomputed_elements_decl = ";\n".join(
+                f"{elem.cpp_type(strip_ref=True)} {elem.name}" for elem in precomputed_elements_with_cpp_types
+            )
+
+            # Generate "setter" methods for each precomputed element. Each method will return
+            # a new instance of precompute_out with the template parameter that corresponds to
+            # the member set by the method to true (to indicate that it has been set).
+            setter_methods = []
+            for i, elem in enumerate(precomputed_elements):
+                # Generate the signature. The return type will be the same
+                # as the type of `this` but with the template parameter
+                # corresponding to the element set by this method set to true.
+                # The assert generated below will ensure that this template
+                # parameter is false on the type of `this`.
+                return_ty_templates = ", ".join(
+                    precomputed_template_parameters[:i] + ["true"] + precomputed_template_parameters[i + 1:]
+                )
+                return_ty = f"precompute_out<{return_ty_templates}>"
+                elem_cpp_ty = precomputed_elements_with_cpp_types[i].cpp_type(strip_ref=True)
+                signature = f"{return_ty} set_{elem.name}({elem_cpp_ty} value)"
+
+                # Generate an assert which checks that the
+                # template parameter corresponding to the precomputed
+                # element that is set by this method is false on the
+                # class corresponding to the object that `this` points to.
+                # This ensures that each element can be set only once.
+                assert_msg = f"\"{precomputed_elements[i].name} already set\""
+                assert_stmt = f"static_assert({precomputed_template_parameters[i]} == false, {assert_msg});"
+
+                # Generate the new object construction block. All state
+                # except the element that this method sets is copied from the
+                # object that `this` points to. The value for the element that
+                # the method sets is taken from a method parameter.
+                construction_stmts = []
+                construction_stmts.append(f"{return_ty} ret;")
+
+                for j, elem in enumerate(precomputed_elements):
+                    if i == j:
+                        construction_stmts.append(f"ret.{elem.name} = value;")
+                    else:
+                        construction_stmts.append(f"ret.{elem.name} = this->{elem.name};")
+
+                construction_stmts.append("return ret;")
+                construction_block = "\n".join(construction_stmts)
+
+                setter_methods.append(f"""
+                    {signature} {{
+                        {assert_stmt}
+                        {construction_block}
+                    }}
+                """)
+            setter_methods_decl = "\n".join(setter_methods)
+
+            # Meta should return an instance of the struct containing the precomputed elements.
+            meta_return_template_params = ", ".join(["true"] * len(precomputed_template_parameters))
+            # This typedef (actually a using statement) is needed so that TORCH_META_FUNC can reuse the return
+            # type (which has a variable number of template parameters).
+            meta_return_typedef = f"using meta_return_ty = precompute_out <{meta_return_template_params}>;"
+            meta_return = "meta_return_ty"
+            precomputed_decl = f"""
+                {precompute_template_decl}
+                struct TORCH_API precompute_out {{
+                    {setter_methods_decl}
+                    {precomputed_elements_decl};
+            }};"""
+        else:
+            meta_return_typedef = ""
+            precomputed_decl = ""
+
         return f"""\
 struct TORCH_API structured_{name} : public {parent_class} {{
-    void meta({args_str});
+    {precomputed_decl}
+    {meta_return_typedef}
+    {meta_return} meta({args_str});
 }};
 """
 
@@ -790,6 +888,12 @@ def compute_registration_declarations(f: NativeFunction, backend_indices: Dict[D
 def _read_template(template_fn: str) -> CodeTemplate:
     return CodeTemplate.from_file(template_fn)
 
+
+# String hash that's stable across different executions, unlike builtin hash
+def string_stable_hash(s: str) -> int:
+    sha1 = hashlib.sha1(s.encode('latin1')).digest()
+    return int.from_bytes(sha1, byteorder='little')
+
 # A small abstraction for writing out generated files and keeping track
 # of what files have been written (so you can write out a list of output
 # files)
@@ -817,7 +921,7 @@ class FileManager:
                 f.write(contents)
 
     def write_with_template(self, filename: str, template_fn: str,
-                            env_callable: Callable[[], Union[str, Dict[str, object]]]) -> None:
+                            env_callable: Callable[[], Union[str, Dict[str, Any]]]) -> None:
         filename = '{}/{}'.format(self.install_dir, filename)
         assert filename not in self.filenames, "duplicate file write {filename}"
         self.filenames.add(filename)
@@ -837,8 +941,66 @@ class FileManager:
                 assert_never(env)
 
 
-    def write(self, filename: str, env_callable: Callable[[], Union[str, Union[str, Dict[str, object]]]]) -> None:
+    def write(self, filename: str, env_callable: Callable[[], Union[str, Union[str, Dict[str, Any]]]]) -> None:
         self.write_with_template(filename, filename, env_callable)
+
+    def write_sharded(
+            self,
+            filename: str,
+            items: Iterable[T],
+            *,
+            key_fn: Callable[[T], str],
+            env_callable: Callable[[T], Dict[str, List[str]]],
+            num_shards: int,
+            base_env: Optional[Dict[str, Any]] = None,
+            sharded_keys: Set[str]
+    ) -> None:
+
+        everything: Dict[str, Any] = {'shard_id': 'Everything'}
+        shards: List[Dict[str, Any]] = [{'shard_id': f'_{i}'} for i in range(num_shards)]
+        all_shards = [everything] + shards
+
+        if base_env is not None:
+            for shard in all_shards:
+                shard.update(base_env)
+
+        for key in sharded_keys:
+            for shard in all_shards:
+                if key in shard:
+                    assert isinstance(shard[key], list), "sharded keys in base_env must be a list"
+                    shard[key] = shard[key].copy()
+                else:
+                    shard[key] = []
+
+
+        def merge_env(into: Dict[str, List[str]], from_: Dict[str, List[str]]) -> None:
+            for k, v in from_.items():
+                assert k in sharded_keys, f"undeclared sharded key {k}"
+                into[k] += v
+
+        for item in items:
+            key = key_fn(item)
+            sid = string_stable_hash(key) % num_shards
+            env = env_callable(item)
+
+            merge_env(shards[sid], env)
+            merge_env(everything, env)
+
+        dot_pos = filename.rfind('.')
+        if dot_pos == -1:
+            dot_pos = len(filename)
+        base_filename = filename[:dot_pos]
+        extension = filename[dot_pos:]
+
+        for shard in all_shards:
+            shard_id = shard['shard_id']
+            self.write_with_template(f"{base_filename}{shard_id}{extension}",
+                                     filename,
+                                     lambda: shard)
+
+        # filenames is used to track compiled files, but FooEverything.cpp isn't meant to be compiled
+        self.filenames.discard(
+            f"{self.install_dir}/{base_filename}Everything{extension}")
 
     def write_outputs(self, filename: str) -> None:
         """Write a file containing the list of all outputs which are
@@ -1023,13 +1185,11 @@ def main() -> None:
 
         fm.write_with_template(f'Register{dispatch_key}.cpp', 'RegisterDispatchKey.cpp', lambda: {
             'extra_cuda_headers': extra_cuda_headers if is_cuda_dispatch_key(dispatch_key) else '',
-            'legacy_th_headers':
-                '#include <ATen/LegacyTHFunctionsCUDA.h>' if dispatch_key == DispatchKey.CUDA else
-                '',
             'external_backend_headers': '',
             'namespaced_headers': f'#include <ATen/{dispatch_key}Functions.h>' if dispatch_key in functions_keys else '',
             'DispatchKey': dispatch_key,
             'dispatch_namespace': dispatch_key.lower(),
+            'dispatch_helpers': dest.gen_registration_helpers(backend_indices[dispatch_key]),
             'dispatch_namespaced_definitions': list(concatMap(
                 dest.RegisterDispatchKey(
                     backend_indices[dispatch_key],
@@ -1108,10 +1268,18 @@ def main() -> None:
         'schema_registrations': list(mapMaybe(RegisterSchema(schema_selector), native_functions)),
     })
 
-    cpu_fm.write('Operators.cpp', lambda: {
-        'definitions': list(mapMaybe(ComputeOperators(
-            Target.DEFINITION), native_functions)),
-    })
+    def key_func(fn: NativeFunction) -> str:
+        return fn.func.name.unambiguous_name()
+
+    cpu_fm.write_sharded(
+        'Operators.cpp',
+        native_functions,
+        key_fn=key_func,
+        env_callable=lambda fn: {
+            'definitions': [ComputeOperators(Target.DEFINITION)(fn)]},
+        num_shards=5,
+        sharded_keys={'definitions'}
+    )
     cpu_fm.write('Operators.h', lambda: {
         'declarations': list(mapMaybe(ComputeOperators(
             Target.DECLARATION), native_functions)),

@@ -235,8 +235,7 @@ bool matchAtenFuncToUse(
     c10::optional<int> n) {
   Node* node = use.user;
   return node->kind() == Symbol::aten(func_name) &&
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      (!n.has_value() || n.value() == use.offset);
+      (!n.has_value() || static_cast<size_t>(n.value()) == use.offset);
 }
 
 bool matchCallFuncToUse(
@@ -246,8 +245,7 @@ bool matchCallFuncToUse(
   Node* node = use.user;
   return node->kind() == prim::CallFunction &&
       getFuncName(node->inputs()[0]) == func_name &&
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      (!n.has_value() || n.value() == use.offset);
+      (!n.has_value() || static_cast<size_t>(n.value()) == use.offset);
 }
 
 // Check any use of `v` matches the aten function call
@@ -518,15 +516,13 @@ bool useQuantizable(const Use& use, QuantType quant_type) {
   if (quant_type == QuantType::STATIC) {
     for (const auto& func_input : _observe_inputs_aten_func) {
       if (matchAtenFuncToUse(use, func_input.func_name, c10::nullopt)) {
-        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-        return use.offset == func_input.arg_index;
+        return use.offset == static_cast<size_t>(func_input.arg_index);
       }
     }
 
     for (const auto& func_input : _observe_inputs_call_func) {
       if (matchCallFuncToUse(use, func_input.func_name, c10::nullopt)) {
-        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-        return use.offset == func_input.arg_index;
+        return use.offset == static_cast<size_t>(func_input.arg_index);
       }
     }
   }

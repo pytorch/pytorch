@@ -212,6 +212,7 @@ constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
     DispatchKey::AutogradCPU,
     DispatchKey::AutogradCUDA,
     DispatchKey::AutogradXLA,
+    DispatchKey::AutogradLazy,
     DispatchKey::AutogradNestedTensor,
     DispatchKey::AutogradMLC,
     DispatchKey::AutogradHPU,
@@ -247,7 +248,7 @@ constexpr DispatchKeySet autogradother_backends = DispatchKeySet(
     {DispatchKey::HIP,
      DispatchKey::VE,
      DispatchKey::FPGA,
-     DispatchKey::MSNPU,
+     DispatchKey::ORT,
      DispatchKey::Vulkan,
      DispatchKey::Metal,
      DispatchKey::QuantizedCPU,
@@ -278,6 +279,10 @@ C10_API bool isBackendDispatchKey(DispatchKey t);
 
 // Resolve alias dispatch key to DispatchKeySet if applicable
 C10_API DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t);
+
+// Resolve alias dispatch key to DispatchKeySet if applicable,
+// and chek if k is a part of that set
+C10_API bool runtimeDispatchKeySetHas(DispatchKey t, DispatchKey k);
 
 // Returns a DispatchKeySet of all backend keys mapped to Autograd dispatch key
 // t, DispatchKeySet is empty if t is not alias of DispatchKey::Autograd.

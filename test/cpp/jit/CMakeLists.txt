@@ -44,6 +44,7 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_dce.cpp
   ${JIT_TEST_ROOT}/test_fuser.cpp
   ${JIT_TEST_ROOT}/test_graph_executor.cpp
+  ${JIT_TEST_ROOT}/test_graph_iterator.cpp
   ${JIT_TEST_ROOT}/test_cs_debug_info_serialization.cpp
   ${JIT_TEST_ROOT}/test_inliner.cpp
   ${JIT_TEST_ROOT}/test_interface.cpp
@@ -61,9 +62,11 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_qualified_name.cpp
   ${JIT_TEST_ROOT}/test_save_load.cpp
   ${JIT_TEST_ROOT}/test_schema_matching.cpp
+  ${JIT_TEST_ROOT}/test_stack_opt.cpp
   ${JIT_TEST_ROOT}/test_subgraph_matcher.cpp
   ${JIT_TEST_ROOT}/test_subgraph_rewriter.cpp
   ${JIT_TEST_ROOT}/test_subgraph_utils.cpp
+  ${JIT_TEST_ROOT}/test_union.cpp
   ${JIT_TEST_ROOT}/test_utils.cpp
   ${JIT_TEST_ROOT}/test_script_profile.cpp
   ${JIT_TEST_ROOT}/test_jit_logging_levels.cpp
@@ -94,6 +97,9 @@ endif(MSVC)
 
 target_link_libraries(test_jit PRIVATE ${JIT_TEST_DEPENDENCIES})
 target_include_directories(test_jit PRIVATE ${ATen_CPU_INCLUDE})
+if(NOT MSVC)
+  target_compile_options(test_jit PRIVATE -Wno-unused-variable)
+endif()
 
 if(LINUX)
   #Update to target_link_options when CMake version can be upgraded

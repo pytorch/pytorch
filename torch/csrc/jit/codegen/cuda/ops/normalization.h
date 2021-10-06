@@ -33,8 +33,7 @@ TORCH_CUDA_CU_API TensorView* softmax(TensorView* x, int dim);
 TORCH_CUDA_CU_API TensorView* softmax_backward(
     TensorView* dy,
     TensorView* y,
-    const int dim,
-    TensorView* x);
+    const int dim);
 
 TORCH_CUDA_CU_API ForwardNormResult layer_norm(
     TensorView* x,

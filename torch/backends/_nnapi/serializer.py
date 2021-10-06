@@ -404,8 +404,8 @@ class _NnapiSerializer(object):
                 self.compute_operand_shape(operand_id, dim, f"args[{arg_idx}].shape[{dim}]")
         return operand_id
 
-    def add_tensor_operand_for_weight(self, tensor):
-        toper = self.torch_tensor_to_operand(tensor, DimOrder.UNKNOWN_CONSTANT)
+    def add_tensor_operand_for_weight(self, tensor, dim_order=DimOrder.UNKNOWN_CONSTANT):
+        toper = self.torch_tensor_to_operand(tensor, dim_order)
         operand_id = len(self.operands)
         self.operands.append(toper)
         tsize = tensor_size(toper.op_type, toper.shape)
@@ -418,6 +418,9 @@ class _NnapiSerializer(object):
             buf_num,
             offset,
             tsize))
+        # For NHWC NNAPI op, lay out data in the same dim order by permuting torch tensor
+        if dim_order == DimOrder.CHANNELS_LAST:
+            tensor = tensor.permute(0, 2, 3, 1)
         self.used_weights.append(tensor)
         return operand_id
 
@@ -456,6 +459,9 @@ class _NnapiSerializer(object):
             array.array("i", value).tobytes(),
             (len(value),))
 
+    def has_operand_for_jitval(self, jitval):
+        return jitval in self.jitval_operand_map
+
     def get_tensor_operand_by_jitval(self, jitval):
         operand_id = self.jitval_operand_map[jitval]
         return (operand_id, self.operands[operand_id])
@@ -469,11 +475,11 @@ class _NnapiSerializer(object):
                 raise Exception("Flexible size is not supported for this operand.")
         return op_id, oper
 
-    def get_tensor_operand_or_constant(self, jitval):
+    def get_tensor_operand_or_constant(self, jitval, dim_order=DimOrder.PRESUMED_CONTIGUOUS):
         operand_id = self.jitval_operand_map.get(jitval)
         if operand_id is None:
             _, value = self.get_constant_value(jitval, "TensorType")
-            operand_id = self.add_tensor_operand_for_weight(value)
+            operand_id = self.add_tensor_operand_for_weight(value, dim_order)
         return (operand_id, self.operands[operand_id])
 
     def get_tensor_operand_for_weight(self, jitval):
@@ -581,11 +587,9 @@ class _NnapiSerializer(object):
         dilations = [pc[5], pc[6]]
         output_padding = [pc[7], pc[8]]
         group_num = pc[9]
-        transpose = pc[10]
 
         assert len(pc) == 11
         assert output_padding == [0, 0]
-        assert transpose == 0
 
         return self.get_conv_pool_args_2d_common(kernel_size, strides, paddings, dilations, group_num)
 
@@ -803,10 +807,14 @@ class _NnapiSerializer(object):
             self.add_qconv2d(node, NNAPI_FuseCode.FUSED_NONE),
         "quantized::conv2d_relu": lambda self, node:
             self.add_qconv2d(node, NNAPI_FuseCode.FUSED_RELU),
+        "quantized::conv_transpose2d": lambda self, node:
+            self.add_qconv2d(node, NNAPI_FuseCode.FUSED_NONE, transpose=True),
         "quantized::add": lambda self, node:
             self.add_qadd(node, NNAPI_OperationCode.ADD, NNAPI_FuseCode.FUSED_NONE),
         "quantized::add_relu": lambda self, node:
             self.add_qadd(node, NNAPI_OperationCode.ADD, NNAPI_FuseCode.FUSED_RELU),
+        "quantized::mul": lambda self, node:
+            self.add_qadd(node, NNAPI_OperationCode.MUL, NNAPI_FuseCode.FUSED_NONE),
     }
 
     def add_node(self, node):
@@ -940,9 +948,12 @@ class _NnapiSerializer(object):
         start_ctype, start_dim = self.get_constant_value(node.inputsAt(1), "IntType")
         end_ctype, end_dim = self.get_constant_value(node.inputsAt(2), "IntType")
 
-        if in_oper.dim_order != DimOrder.PRESUMED_CONTIGUOUS:
+        # channels last with channels == 1 or (height & width both 1)
+        is_trivial_flatten = len(in_oper.shape) == 4 and (
+            in_oper.shape[1] == 1 or (in_oper.shape[2] == 1 and in_oper.shape[3] == 1))
+        if in_oper.dim_order != DimOrder.PRESUMED_CONTIGUOUS and not is_trivial_flatten:
             raise Exception(
-                "Currently, reshape is not supported on NHWC tensors")
+                "Currently, flatten is not supported on NHWC tensors unless C=1 or H=W=1")
 
         if start_dim < 0:
             start_dim += len(in_oper.shape)
@@ -962,7 +973,7 @@ class _NnapiSerializer(object):
         if non_flattened_dims.count(0) > 1:
             raise Exception("Only 1 dim can be flexible")
 
-        out_oper = in_oper._replace(shape=out_shape)
+        out_oper = in_oper._replace(shape=out_shape, dim_order=DimOrder.PRESUMED_CONTIGUOUS)
         out_id = self.add_tensor_operand(node.outputsAt(0), out_oper)
 
         for idx, dim in enumerate(out_shape):
@@ -1230,9 +1241,14 @@ class _NnapiSerializer(object):
         assert node.inputsAt(0).type().kind() == "TensorType"
         assert node.inputsAt(1).type().kind() == "TensorType"
 
-        # TODO: Should support constant as either operand.
-        in0_id, in0_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
-        in1_id, in1_oper = self.get_tensor_operand_by_jitval(node.inputsAt(1))
+        if self.has_operand_for_jitval(node.inputsAt(0)):
+            in0_id, in0_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
+            in1_id, in1_oper = self.get_tensor_operand_or_constant(node.inputsAt(1), in0_oper.dim_order)
+        elif self.has_operand_for_jitval(node.inputsAt(1)):
+            in1_id, in1_oper = self.get_tensor_operand_by_jitval(node.inputsAt(1))
+            in0_id, in0_oper = self.get_tensor_operand_or_constant(node.inputsAt(0), in1_oper.dim_order)
+        else:
+            raise Exception(f"Can't do a NNAPI binary op: {opcode} on two constants")
 
         assert in0_oper.op_type == in1_oper.op_type
         in0_id, in0_oper, in1_id, in1_oper = self.transpose_for_broadcast(
@@ -1780,7 +1796,7 @@ class _NnapiSerializer(object):
         self.add_operation(NNAPI_OperationCode.LOG_SOFTMAX, inputs, outputs)
 
 
-    def add_qconv2d(self, node, fuse_code):
+    def add_qconv2d(self, node, fuse_code, transpose=False):
         assert node.inputsSize() == 4
         assert node.outputsSize() == 1
 
@@ -1837,7 +1853,7 @@ class _NnapiSerializer(object):
             unsigned_weight,
             bias_id,
             args,
-            False,  # transpose
+            transpose,
             fuse_code,
         )
 

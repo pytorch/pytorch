@@ -1,17 +1,15 @@
 #include <ATen/ATen.h>
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
+#include <ATen/cuda/CachingHostAllocator.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/cuda/CUDAStream.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
-#include <THC/THC.h>
 
-#ifdef __HIP_PLATFORM_HCC__
-#include <hip/hip_version.h>
-#endif
+#include <THC/THC.h>
 
 namespace at {
 namespace native {
@@ -222,7 +220,7 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
   if (non_blocking) {
     AT_CUDA_CHECK(cudaMemcpyAsync(dst, src, nbytes, kind, stream));
     void* ptr = (dst_device == kCPU ? dst : src);
-    AT_CUDA_CHECK(THCCachingHostAllocator_recordEvent(ptr, stream));
+    AT_CUDA_CHECK(CachingHostAllocator_recordEvent(ptr, stream));
   } else {
     at::cuda::memcpy_and_sync(dst, src, nbytes, kind, stream);
   }

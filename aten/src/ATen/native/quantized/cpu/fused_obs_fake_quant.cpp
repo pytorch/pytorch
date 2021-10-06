@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <cmath>
 #include <tuple>
@@ -59,7 +60,6 @@ std::tuple<at::Tensor, at::Tensor> choose_qparams_fake_quant(
   if (per_row_fake_quant) {
     float* x_min_data = inp_running_min.data_ptr<float>();
     float* x_max_data = inp_running_max.data_ptr<float>();
-
     for (const auto i : c10::irange(inp_running_min.numel())) {
 #ifdef USE_FBGEMM
       fbgemm::TensorQuantizationParams x_qparams{};
@@ -143,21 +143,59 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cpu(
     const int64_t quant_max,
     const int64_t ch_axis,
     bool per_row_fake_quant,
-    bool symmetric_quant) {
+    bool symmetric_quant,
+    c10::optional<bool> output_fake_quant) {
   // Calculate min/max
   auto observe = observer_on.item().toInt();
-  if (observe) {
-    calculate_moving_average(
-        self,
-        running_min,
-        running_max,
-        averaging_const,
-        per_row_fake_quant,
-        ch_axis);
+  // Calculate the size of the dimension we need to quantize over,
+  // For per-channel quant we default to axis 0, since it is only for
+  // weight quantization currently.
+  if (per_row_fake_quant) {
+    at::Tensor y = self;
+    if (self.dim() != 2) {
+      auto res = DimVector(self.sizes());
+      std::iota(res.begin(), res.end(), 0);
+      res[ch_axis] = 0;
+      res[0] = ch_axis;
+
+      y = self.permute(res);
+      y = y.flatten(1);
+    }
+    int64_t size = self.size(ch_axis);
+    if (running_min.numel() == 0) {
+      float inf = std::numeric_limits<float>::infinity();
+      running_min.resize_(size).fill_(inf);
+      running_max.resize_(size).fill_(-inf);
+      scale.resize_(size);
+      zero_point.resize_(size);
+    }
+    if (observe) {
+      calculate_moving_average(
+          y,
+          running_min,
+          running_max,
+          averaging_const,
+          per_row_fake_quant,
+          ch_axis);
+    }
+  } else {
+    if (observe) {
+      calculate_moving_average(
+          self,
+          running_min,
+          running_max,
+          averaging_const,
+          per_row_fake_quant,
+          ch_axis);
+    }
   }
   // Calculate qparams and fake_quantize
   auto fake_quant = fake_quant_on.item().toInt();
-  if (fake_quant) {
+  // If output_fake_quant has not been specified by user then default to true.
+  auto out_fake_quant_val =
+      output_fake_quant.has_value() ? output_fake_quant.value() : true;
+
+  if (fake_quant && out_fake_quant_val) {
     return choose_qparams_fake_quant(
         self,
         running_min,
@@ -187,7 +225,11 @@ at::Tensor fused_moving_avg_obs_fake_quant(
     const int64_t quant_max,
     const int64_t ch_axis,
     bool per_row_fake_quant,
-    bool symmetric_quant) {
+    bool symmetric_quant,
+    c10::optional<bool> output_fake_quant) {
+  if (self.numel() == 0) {
+    return self.clone();
+  }
   const auto res = at::_fused_moving_avg_obs_fq_helper(
       self,
       observer_on,
@@ -201,7 +243,8 @@ at::Tensor fused_moving_avg_obs_fake_quant(
       quant_max,
       ch_axis,
       per_row_fake_quant,
-      symmetric_quant);
+      symmetric_quant,
+      output_fake_quant);
   return std::get<0>(res);
 }
 } // namespace native

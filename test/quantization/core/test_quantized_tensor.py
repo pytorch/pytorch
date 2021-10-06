@@ -1088,6 +1088,12 @@ class TestQuantizedTensor(TestCase):
             model_loaded = torch.jit.load(buffer)
             self.assertEqual(model_loaded(), model())
 
+    def test_bfp16_quantize(self):
+        X = torch.randn(5 , 10)
+        quantized_X = X.to(torch.bfloat16)
+        dedequantized_X = quantized_X.to(torch.float32)
+        torch.testing.assert_allclose(X, dedequantized_X, rtol=1e-4, atol=5e-3)
+
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
                        "\tpython test/test_quantization.py TESTNAME\n\n"

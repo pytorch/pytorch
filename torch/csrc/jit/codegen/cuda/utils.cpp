@@ -5,6 +5,7 @@
 
 #include <cstdlib>
 #include <unordered_map>
+#include <iostream>
 
 namespace torch {
 namespace jit {

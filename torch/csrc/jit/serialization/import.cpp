@@ -47,7 +47,8 @@ void postSetStateValidate(const IValue& v) {
     // const auto attrType = objType->getAttribute(i);
     // Verify that all the non-optional attributes have been initialized
     // TODO: Issue #20497
-    if (attrType->kind() != TypeKind::OptionalType &&
+    if (attrType->kind() != TypeKind::UnionType &&
+        attrType->kind() != TypeKind::OptionalType &&
         attrType->kind() != TypeKind::NoneType) {
       TORCH_CHECK(
           !slot.isNone(),
@@ -159,7 +160,7 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
     } else {
       auto dict = std::move(input).toGenericDict();
       auto obj = c10::ivalue::Object::create(type, n);
-      for (size_t i = 0; i < n; ++i) {
+      for (const auto i : c10::irange(n)) {
         obj->setSlot(i, dict.at(cls->getAttributeName(i)));
       }
       return obj;

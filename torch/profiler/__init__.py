@@ -9,5 +9,5 @@ examine their input shapes and stack traces, study device kernel activity and vi
 '''
 
 from .profiler import profile, schedule, supported_activities, tensorboard_trace_handler, ProfilerAction, ProfilerActivity
-from torch.autograd import kineto_available, _supported_kineto_activities, DeviceType
+from torch.autograd import kineto_available, _supported_activities, DeviceType
 from torch.autograd.profiler import record_function

@@ -1,7 +1,9 @@
 #include <ATen/ATen.h>
+#include <ATen/ceil_div.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/Loops.cuh>
+#include <c10/cuda/CUDAGuard.h>
+
 #include <cmath>
 
 namespace at {
@@ -123,6 +125,9 @@ void _calculate_moving_average(
     const float averaging_const,
     const int64_t size,
     bool per_row_fq) {
+  at::cuda::OptionalCUDAGuard device_guard;
+  device_guard.set_index(x.get_device());
+
   at::Tensor x_min, x_max;
 
   int64_t* observer_on_data = observer_on.data_ptr<int64_t>();
@@ -135,7 +140,7 @@ void _calculate_moving_average(
     float* x_min_data = x_min.data_ptr<float>();
     float* x_max_data = x_max.data_ptr<float>();
     int num_threads = std::min(size, (int64_t)512);
-    const uint64_t num_blocks = cuda::ATenCeilDiv<uint64_t>(size, num_threads);
+    const uint64_t num_blocks = ceil_div<uint64_t>(size, num_threads);
 
     // Moving Average Min/Max observer for activations
     MovingAverageMinMax<<<num_blocks, num_threads, 0, cuda_stream>>>(
@@ -176,13 +181,16 @@ void _calc_moving_avg_qparams_helper(
     bool symmetric_quant,
     const int64_t size,
     bool per_row_fq = false) {
+  at::cuda::OptionalCUDAGuard device_guard;
+  device_guard.set_index(x.get_device());
+
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   int64_t* fake_quant_on_data = fake_quant_on.data_ptr<int64_t>();
   if (per_row_fq) {
     float* running_min_data = running_min.data_ptr<float>();
     float* running_max_data = running_max.data_ptr<float>();
     int num_threads = std::min(size, (int64_t)512);
-    const uint64_t num_blocks = cuda::ATenCeilDiv<uint64_t>(size, num_threads);
+    const uint64_t num_blocks = ceil_div<uint64_t>(size, num_threads);
     ChooseQuantizationParamsKernelImpl<<<num_blocks, num_threads, 0, cuda_stream>>>(
         fake_quant_on_data,
         running_min_data,
@@ -226,46 +234,84 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cuda(
     const int64_t qmax,
     const int64_t ch_axis,
     bool per_row_fq,
-    bool symmetric_quant) {
+    bool symmetric_quant,
+    c10::optional<bool> output_fake_quant) {
   const auto x_contig = x.contiguous();
-  int64_t size = per_row_fq ? x.size(0) : 1;
-  _calculate_moving_average(
-      x_contig,
-      observer_on,
-      running_min,
-      running_max,
-      averaging_const,
-      size,
-      per_row_fq);
+  // Calculate the size of the dimension we need to quantize over,
+  // For per-channel quant we default to axis 0, since it is only for
+  // weight quantization currently.
+  int64_t size = 1;
+  if (per_row_fq) {
+    at::Tensor y = x;
+    if (x.dim() != 2) {
+      auto res = DimVector(x.sizes());
+      std::iota(res.begin(), res.end(), 0);
+      res[ch_axis] = 0;
+      res[0] = ch_axis;
 
+      y = x.permute(res);
+      y = y.flatten(1);
+    }
+    size = x.size(ch_axis);
+    if (running_min.numel() == 0) {
+      float inf = std::numeric_limits<float>::infinity();
+      running_min.resize_(size).fill_(inf);
+      running_max.resize_(size).fill_(-inf);
+      scale.resize_(size);
+      zero_point.resize_(size);
+    }
+    _calculate_moving_average(
+        y,
+        observer_on,
+        running_min,
+        running_max,
+        averaging_const,
+        size,
+        per_row_fq);
+  } else {
+    _calculate_moving_average(
+        x_contig,
+        observer_on,
+        running_min,
+        running_max,
+        averaging_const,
+        size,
+        per_row_fq);
+  }
 
   float* scale_ptr = scale.data_ptr<float>();
   int32_t* zp_ptr = zero_point.data_ptr<int32_t>();
+  // If output_fake_quant has not been specified by user then default to true.
+  const bool out_fake_quant_val = output_fake_quant.has_value() ? output_fake_quant.value() : true;
+  if (out_fake_quant_val) {
+    _calc_moving_avg_qparams_helper(
+        x_contig,
+        fake_quant_on,
+        running_min,
+        running_max,
+        scale_ptr,
+        zp_ptr,
+        qmin,
+        qmax,
+        symmetric_quant,
+        size,
+        per_row_fq);
 
-  _calc_moving_avg_qparams_helper(
-      x_contig,
-      fake_quant_on,
-      running_min,
-      running_max,
-      scale_ptr,
-      zp_ptr,
-      qmin,
-      qmax,
-      symmetric_quant,
-      size,
-      per_row_fq);
-
-  if (per_row_fq) {
-    if (fake_quant_on.item().toInt()) {
-      return at::fake_quantize_per_channel_affine_cachemask(
-          x, scale, zero_point, 0, qmin, qmax);
+    if (per_row_fq) {
+      if (fake_quant_on.item().toInt()) {
+        return at::fake_quantize_per_channel_affine_cachemask(
+            x, scale, zero_point, 0, qmin, qmax);
+      } else {
+        auto mask = at::ones_like(x, at::kBool, MemoryFormat::Preserve);
+        return std::make_tuple(x.clone(), mask);
+      }
     } else {
-      auto mask = at::ones_like(x, at::kBool, MemoryFormat::Preserve);
-      return std::make_tuple(x.clone(), mask);
+        return at::_fake_quantize_per_tensor_affine_cachemask_tensor_qparams(
+            x, scale, zero_point, fake_quant_on, qmin, qmax);
     }
   } else {
-    return at::_fake_quantize_per_tensor_affine_cachemask_tensor_qparams(
-        x, scale, zero_point, fake_quant_on, qmin, qmax);
+    auto mask = at::ones_like(x, at::kBool, MemoryFormat::Preserve);
+    return std::make_tuple(x.clone(), mask);
   }
 }
 } // namespace native

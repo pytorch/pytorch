@@ -1574,31 +1574,23 @@ class IrParser {
 
     {
       auto ptr_op = getOperatorForLiteral(
-          "aten::_softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor");
+          "aten::_softmax_backward_data(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
           {
-            MemoryFormat format;
-            std::list<Val*> list_val;
-            std::tie(format, list_val) = getConsistentValues(
-                MemoryFormat::Contiguous,
-                value_map[node->inputs()[0]->unique()],
-                value_map[node->inputs()[1]->unique()]);
-            auto grad_output_t = list_val.front();
-            list_val.pop_front();
-            auto output_t = list_val.front();
-            list_val.pop_front();
-            auto grad_output = grad_output_t->as<TensorView>();
-            auto output = output_t->as<TensorView>();
+            auto grad_output =
+                value_map[node->input(0)->unique()]->as<TensorView>();
+
+            auto output = value_map[node->input(1)->unique()]->as<TensorView>();
 
             auto dim_value = constant_as<int>(node->input(2));
             TORCH_INTERNAL_ASSERT(
                 dim_value.has_value(), "dim in softmax is not valid");
 
-            auto input = value_map[node->input(3)->unique()]->as<TensorView>();
-
+            // input_dtype here is ignored! type_inference handles it
             auto grad_input =
-                softmax_backward(grad_output, output, dim_value.value(), input);
+                softmax_backward(grad_output, output, dim_value.value());
+
             value_map.emplace(node->output()->unique(), grad_input);
           },
           [](const Node* node) -> bool {

@@ -21,7 +21,7 @@ class LLVMCodeGenImpl;
 class TORCH_API LLVMCodeGen : public CodeGen {
  public:
   explicit LLVMCodeGen(
-      Stmt* stmt,
+      StmtPtr stmt,
       const std::vector<BufferArg>& args,
       at::Device device = at::kCPU,
       const std::string& kernel_func_name = "func",
@@ -29,13 +29,14 @@ class TORCH_API LLVMCodeGen : public CodeGen {
       c10::optional<std::string> triple = c10::nullopt,
       c10::optional<std::string> cpu = c10::nullopt,
       c10::optional<std::string> attrs = c10::nullopt);
-  explicit LLVMCodeGen(Stmt* stmt);
+  explicit LLVMCodeGen(StmtPtr stmt);
 
   LLVMCodeGen() = delete;
   ~LLVMCodeGen() override;
 
   TORCH_API void call(const std::vector<CallArg>& args) override;
   TORCH_API void call_raw(const std::vector<void*>& args) override;
+  TORCH_API void call_with_numel(void** args, int64_t numel) override;
 
   at::Tensor empty_strided(
       c10::IntArrayRef size,
@@ -73,7 +74,7 @@ class TORCH_API LLVMCodeGen : public CodeGen {
 struct TORCH_API LLVMCodeGenBuilder {
   using BufferArg = CodeGen::BufferArg;
 
-  LLVMCodeGenBuilder(Stmt* stmt, std::vector<BufferArg> args)
+  LLVMCodeGenBuilder(StmtPtr stmt, std::vector<BufferArg> args)
       : stmt_(stmt), args_(std::move(args)) {}
 
   LLVMCodeGenBuilder& device(at::Device device) {
@@ -112,7 +113,7 @@ struct TORCH_API LLVMCodeGenBuilder {
   }
 
  private:
-  Stmt* stmt_;
+  StmtPtr stmt_;
   std::vector<BufferArg> args_;
   at::Device device_ = at::kCPU;
   std::string kernelFuncName_ = "func";

@@ -831,6 +831,15 @@ void TensorIteratorBase::build_comparison_op(const Tensor& out, const Tensor& a,
   build(config);
 }
 
+void TensorIteratorBase::build_ternary_op(const Tensor& out, const Tensor& a,
+    const Tensor& b, const Tensor& c) {
+  build(TensorIteratorConfig()
+      .add_owned_output(out)
+      .add_owned_input(a)
+      .add_owned_input(b)
+      .add_owned_input(c));
+}
+
 // This cannot be a function because TensorIteratorConfig is not
 // copyable or movable, so it can't be returned from the function.
 #define BINARY_OP_CONFIG()                              \
@@ -1343,9 +1352,9 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
 
   if (is_meta_) return;
 
-  // XLA tensors don't have storage, so they don't have an underlying data pointer.
+  // XLA and lazy tensors don't have storage, so they don't have an underlying data pointer.
   // Nothing beyond this point is important for meta functions, so it's fine to exit early here.
-  if (common_device_.type() == DeviceType::XLA) return;
+  if (common_device_.type() == DeviceType::XLA || common_device_.type() == DeviceType::Lazy) return;
 
   for (auto& op : operands_) {
     TORCH_INTERNAL_ASSERT(op.tensor->defined());
