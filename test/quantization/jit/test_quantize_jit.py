@@ -84,6 +84,46 @@ import unittest
 class TestQuantizeJitPasses(QuantizationTestCase):
     """Test graph mode quantization passes used by quantize_jit"""
 
+    def test_skip_dequant_constant_prop(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 5, 3).float()
+
+            def forward(self, x):
+                return self.conv(x)
+
+        m = torch.jit.script(M())
+        observer = (
+            default_per_channel_weight_observer.with_args(ch_axis=1)
+        )
+        qconfig_dict = {"": QConfig(activation=default_observer, weight=observer)}
+        m = prepare_jit(m, qconfig_dict)
+        data = torch.randn(1, 3, 10, 10, dtype=torch.float)
+
+        m(data)
+        m = convert_jit(m, debug=True)
+
+        freezed = torch.jit.freeze(m)
+        freezed(data)
+
+        # After freezing, weight becomes Constant.
+        # We have this pattern in the original graph: Constant f32_weight -> quant -> dequant
+        # After skipping dequant during Constant Propagation, the resulting graph will be:
+        # Constant int8_weight -> dequant
+        FileCheck().check_count("aten::quantize_per_tensor", 2, exactly=True).run(freezed.graph)
+        FileCheck().check_count("aten::quantize_per_channel", 0, exactly=True).run(freezed.graph)
+        FileCheck().check_count("aten::dequantize", 3, exactly=True).run(freezed.graph)
+        FileCheck().check("aten::quantize_per_tensor").check_next("aten::dequantize").check_not(
+            "aten::quantize_per_channel"
+        ).check("aten::dequantize").check_next("aten::conv2d").check_next(
+            "aten::quantize_per_tensor"
+        ).check_next(
+            "aten::dequantize"
+        ).run(
+            freezed.graph
+        )
+
     def test_foldbn_trivial(self):
         bn_module = {2: torch.nn.BatchNorm2d, 3: torch.nn.BatchNorm3d}
         conv_module = {2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
