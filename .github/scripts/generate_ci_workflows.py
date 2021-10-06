@@ -469,7 +469,8 @@ LINUX_WORKFLOWS = [
         num_test_shards=2,
         distributed_test=False,
         timeout_after=360,
-        is_scheduled="45 0,4,8,12,16,20 * * *",
+        # Only run this on master 4 times per day since it does take a while
+        is_scheduled="0 */4 * * *",
         ciflow_config=CIFlowConfig(
             enabled=True,
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_SLOW_GRADCHECK, LABEL_CIFLOW_SLOW},

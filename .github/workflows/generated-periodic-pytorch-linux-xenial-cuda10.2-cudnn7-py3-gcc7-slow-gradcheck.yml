@@ -7,7 +7,7 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, unassigned]
   schedule:
-    - cron: 45 0,4,8,12,16,20 * * *
+    - cron: 0 */4 * * *
   workflow_dispatch:
 
 env:
