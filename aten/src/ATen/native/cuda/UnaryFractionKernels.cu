@@ -117,17 +117,6 @@ __host__ __device__ static inline double nearbyint_wrapper(double a) {
   return ::nearbyint(a);
 }
 
-__host__ __device__ static inline c10::complex<float> nearbyint_wrapper(c10::complex<float> a) {
-  return c10::complex<float>(::nearbyintf(static_cast<float>(a.real())), ::nearbyintf(static_cast<float>(a.imag())));
-}
-
-#pragma push
-#pragma diag_suppress 177   // Function was declared but never referenced
-__host__ __device__ static inline c10::complex<double> nearbyint_wrapper(c10::complex<double> a) {
-  return c10::complex<double>(::nearbyint(static_cast<double>(a.real())), ::nearbyint(static_cast<double>(a.imag())));
-}
-#pragma pop
-
 void round_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
@@ -138,18 +127,6 @@ void round_kernel_cuda(TensorIteratorBase& iter) {
           return nearbyint_wrapper(a);
         });
       });
-}
-
-template <typename T>
-inline C10_HOST_DEVICE T round_upto_decimals(T x, int64_t decimals) {
-    if (decimals >= 0) {
-        auto ten_raise_to_decs = static_cast<T>(std::pow(10, decimals));
-        return std::rint(x * ten_raise_to_decs) / ten_raise_to_decs;
-    } else {
-        decimals = -decimals;
-        auto ten_raise_to_decs = static_cast<T>(std::pow(10, decimals));
-        return std::rint(x / ten_raise_to_decs) * ten_raise_to_decs;
-    }
 }
 
 void round_decimals_kernel_cuda(TensorIteratorBase& iter, int64_t decimals) {
