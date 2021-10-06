@@ -32,7 +32,6 @@ struct LeakyStreamInternals {
     // if (stream) cudaStreamDestroy(stream);
   }
 
-  DeviceIndex device_index = -1;
   cudaStream_t stream = nullptr;
 };
 
@@ -69,12 +68,6 @@ static std::array<LeakyStreamInternals, kStreamsPerPool>
     low_priority_streams[C10_COMPILE_TIME_MAX_GPUS];
 static std::array<LeakyStreamInternals, kStreamsPerPool>
     high_priority_streams[C10_COMPILE_TIME_MAX_GPUS];
-
-// External streams
-// We need some temporary LeakyStreamInternals to which to stage information
-// about external streams when the user attempts to set them as current.
-static thread_local LeakyStreamInternals
-    external_streams[C10_COMPILE_TIME_MAX_GPUS];
 
 // Note [StreamId assignment]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -166,48 +159,8 @@ static bool pointer_within(const T* ptr, const A& arr) {
       std::less<const T*>()(ptr, arr.data() + arr.size());
 }
 
-static StreamId CUDAStream_getStreamId(const LeakyStreamInternals* ptr) {
-  // Hypothetically, we could store the stream ID in the stream.  But that
-  // introduces a degree of freedom which could lead to bugs (where we
-  // misnumber streams in the pool, or overwrite the number).  Better
-  // to just compute it based on the metric that actually matters,
-  // which is how we map IDs back into the vectors.
-
-  DeviceIndex device_index = ptr->device_index;
-
-  // Check if it's the default stream
-  if (ptr == &default_streams[device_index]) {
-    return makeStreamId(StreamIdType::DEFAULT, 0);
-  }
-
-  // Check if it's a low priority stream
-  // NB: Because ptr may not necessarily lie within the array, we must use
-  // std::less and similar templates to avoid UB that arises when
-  // doing an operator< comparison.
-  if (pointer_within<LeakyStreamInternals>(
-          ptr, low_priority_streams[device_index])) {
-    return makeStreamId(
-        StreamIdType::LOW, ptr - low_priority_streams[device_index].data());
-  }
-
-  // Check if it's a high priority stream
-  if (pointer_within<LeakyStreamInternals>(
-          ptr, high_priority_streams[device_index])) {
-    return makeStreamId(
-        StreamIdType::HIGH, ptr - high_priority_streams[device_index].data());
-  }
-
-  TORCH_INTERNAL_ASSERT(
-      0,
-      "Could not compute stream ID for ",
-      ptr,
-      " on device ",
-      device_index,
-      " (something has gone horribly wrong!)");
-}
-
 // Thread-local current streams
-static thread_local LeakyStreamInternals** current_streams = nullptr;
+static thread_local StreamId* current_streams = nullptr;
 
 // Populates global values and creates a default stream for each device.
 // Note: the default stream on each device is signified by a nullptr,
@@ -228,7 +181,6 @@ static void initGlobalStreamState() {
 
   // Initializes default streams
   for (const auto i : c10::irange(num_gpus)) {
-    default_streams[i].device_index = i;
     low_priority_counters[i] = 0;
     high_priority_counters[i] = 0;
   }
@@ -244,9 +196,6 @@ static void initDeviceStreamState(DeviceIndex device_index) {
   for (const auto i : c10::irange(kStreamsPerPool)) {
     auto& lowpri_stream = low_priority_streams[device_index][i];
     auto& hipri_stream = high_priority_streams[device_index][i];
-
-    lowpri_stream.device_index = device_index;
-    hipri_stream.device_index = device_index;
 
     C10_CUDA_CHECK(cudaStreamCreateWithPriority(
         &lowpri_stream.stream, kDefaultFlags, kLowPriority));
@@ -265,10 +214,9 @@ static void initCUDAStreamsOnce() {
   }
 
   // Inits current streams (thread local) to default streams
-  current_streams =
-      (LeakyStreamInternals**)malloc(num_gpus * sizeof(LeakyStreamInternals*));
+  current_streams = (StreamId*)malloc(num_gpus * sizeof(StreamId));
   for (const auto i : c10::irange(num_gpus)) {
-    current_streams[i] = &default_streams[i];
+    current_streams[i] = makeStreamId(StreamIdType::DEFAULT, 0);
   }
 }
 
@@ -284,59 +232,49 @@ static uint32_t get_idx(std::atomic<uint32_t>& counter) {
   return raw_idx % kStreamsPerPool;
 }
 
+CUDAStream CUDAStreamForId(DeviceIndex device_index, StreamId stream_id) {
+  return CUDAStream(
+      CUDAStream::UNCHECKED,
+      Stream(
+          Stream::UNSAFE,
+          c10::Device(DeviceType::CUDA, device_index),
+          stream_id));
+}
+
+} // anonymous namespace
+
 // See Note [StreamId assignment]
-LeakyStreamInternals* CUDAStream_internals(CUDAStream s) {
-  c10::DeviceIndex device_index = s.device_index();
-  StreamIdType st = streamIdType(s.unwrap().id());
-  size_t si = streamIdIndex(s.unwrap().id());
+cudaStream_t CUDAStream::stream() const {
+  c10::DeviceIndex device_index = stream_.device_index();
+  StreamId stream_id = stream_.id();
+  StreamIdType st = streamIdType(stream_id);
+  size_t si = streamIdIndex(stream_id);
   switch (st) {
     case StreamIdType::DEFAULT:
       TORCH_INTERNAL_ASSERT(
           si == 0,
           "Unrecognized stream ",
-          s.unwrap(),
+          stream_,
           " (I think this should be the default stream, but I got a non-zero index ",
           si,
           ").",
           " Did you manufacture the StreamId yourself?  Don't do that; use the",
           " official API like c10::cuda::getStreamFromPool() to get a new stream.");
-      return &default_streams[device_index];
+      return default_streams[device_index].stream;
     case StreamIdType::LOW:
-      return &low_priority_streams[device_index][si];
+      return low_priority_streams[device_index][si].stream;
     case StreamIdType::HIGH:
-      return &high_priority_streams[device_index][si];
+      return high_priority_streams[device_index][si].stream;
+    case StreamIdType::EXT:
+      return reinterpret_cast<cudaStream_t>(stream_id);
     default:
       TORCH_INTERNAL_ASSERT(
           0,
           "Unrecognized stream ",
-          s.unwrap(),
+          stream_,
           " (I didn't recognize the stream type, ",
           st,
           ")");
-  }
-}
-
-CUDAStream CUDAStream_fromInternals(const LeakyStreamInternals* ptr) {
-  return CUDAStream(
-      CUDAStream::UNCHECKED,
-      Stream(
-          Stream::UNSAFE,
-          c10::Device(DeviceType::CUDA, ptr->device_index),
-          CUDAStream_getStreamId(ptr)));
-}
-
-} // anonymous namespace
-
-cudaStream_t CUDAStream::stream() const {
-  int64_t stream_id = unwrap().id();
-  if (streamIdType(stream_id) == StreamIdType::EXT) {
-    // In this case this is a externally allocated stream
-    // we don't need to manage its life cycle
-    return reinterpret_cast<cudaStream_t>(stream_id);
-  } else {
-    auto ptr = CUDAStream_internals(*this);
-    TORCH_INTERNAL_ASSERT(ptr);
-    return ptr->stream;
   }
 }
 
@@ -357,23 +295,18 @@ CUDAStream getStreamFromPool(
 
   if (isHighPriority) {
     const auto idx = get_idx(high_priority_counters[device_index]);
-    return CUDAStream_fromInternals(&high_priority_streams[device_index][idx]);
+    return CUDAStreamForId(device_index, makeStreamId(StreamIdType::HIGH, idx));
   }
 
   const auto idx = get_idx(low_priority_counters[device_index]);
-  return CUDAStream_fromInternals(&low_priority_streams[device_index][idx]);
+  return CUDAStreamForId(device_index, makeStreamId(StreamIdType::LOW, idx));
 }
 
 CUDAStream getStreamFromExternal(
     cudaStream_t ext_stream,
     DeviceIndex device_index) {
-  return CUDAStream(
-      CUDAStream::UNCHECKED,
-      // The stream pointer will be the actual id
-      Stream(
-          Stream::UNSAFE,
-          c10::Device(DeviceType::CUDA, device_index),
-          reinterpret_cast<int64_t>(ext_stream)));
+  // The stream pointer will be the actual id
+  return CUDAStreamForId(device_index, reinterpret_cast<int64_t>(ext_stream));
 }
 
 CUDAStream getDefaultCUDAStream(DeviceIndex device_index) {
@@ -382,34 +315,21 @@ CUDAStream getDefaultCUDAStream(DeviceIndex device_index) {
     device_index = current_device();
   }
   check_gpu(device_index);
-  return CUDAStream_fromInternals(&default_streams[device_index]);
+  return CUDAStreamForId(device_index, makeStreamId(StreamIdType::DEFAULT, 0));
 }
+
 CUDAStream getCurrentCUDAStream(DeviceIndex device_index) {
   initCUDAStreamsOnce();
   if (device_index == -1) {
     device_index = current_device();
   }
   check_gpu(device_index);
-  auto ptr = current_streams[device_index];
-  if (ptr == &external_streams[device_index]) {
-    return getStreamFromExternal(ptr->stream, ptr->device_index);
-  } else {
-    return CUDAStream_fromInternals(ptr);
-  }
+  return CUDAStreamForId(device_index, current_streams[device_index]);
 }
 
 void setCurrentCUDAStream(CUDAStream stream) {
   initCUDAStreamsOnce();
-  LeakyStreamInternals* ptr;
-  if (streamIdType(stream.id()) == StreamIdType::EXT) {
-    ptr = &external_streams[stream.device_index()];
-    ptr->device_index = stream.device_index();
-    ptr->stream = stream.stream();
-  } else {
-    ptr = CUDAStream_internals(stream);
-  }
-  TORCH_INTERNAL_ASSERT(ptr);
-  current_streams[ptr->device_index] = ptr;
+  current_streams[stream.device_index()] = stream.id();
 }
 
 std::ostream& operator<<(std::ostream& stream, const CUDAStream& s) {
