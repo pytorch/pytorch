@@ -160,6 +160,11 @@ ReplicatedObj InterpreterSession::createMovable(Obj obj) {
   TORCH_CHECK(
       manager_,
       "Can only create a movable object when the session was created from an interpreter that is part of a InterpreterManager");
+
+  TORCH_CHECK(
+      impl_->isOwner(obj),
+      "Cannot create movable from an object that lives in different session");
+
   auto pickled = impl_->pickle(self, obj);
   return ReplicatedObj(std::make_shared<ReplicatedObjImpl>(
       manager_->nextObjectId_++, std::move(pickled), manager_));
