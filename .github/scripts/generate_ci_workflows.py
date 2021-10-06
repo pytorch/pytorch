@@ -69,11 +69,6 @@ class CIFlowConfig:
     root_job_condition: str = ''
     label_conditions: str = ''
 
-    # trigger_action_only controls if we listen only on the trigger_action of a pull_request.
-    # If it's False, we listen on all default pull_request actions, this is useful when
-    # ciflow (via probot) is not automated yet.
-    trigger_action_only: bool = False
-
     def gen_root_job_condition(self) -> None:
         # CIFlow conditions:
         #  - Workflow should always run on push
@@ -195,8 +190,6 @@ class CIWorkflow:
             assert self.test_runner_type in WINDOWS_RUNNERS, err_message
 
         if self.ciflow_config.enabled:
-            # make sure if LABEL_CIFLOW_DEFAULT is set, we then need to set trigger_action_only to False
-            assert self.ciflow_config.trigger_action_only != (LABEL_CIFLOW_DEFAULT in self.ciflow_config.labels)
             assert LABEL_CIFLOW_ALL in self.ciflow_config.labels
             assert LABEL_CIFLOW_ALL in self.ciflow_config.label_conditions
             if self.arch == 'linux':
@@ -260,7 +253,6 @@ WINDOWS_WORKFLOWS = [
         is_scheduled="45 0,4,8,12,16,20 * * *",
         ciflow_config=CIFlowConfig(
             enabled=True,
-            trigger_action_only=True,
             labels={LABEL_CIFLOW_SCHEDULED, LABEL_CIFLOW_WIN, LABEL_CIFLOW_CUDA}
         ),
     ),
@@ -291,7 +283,6 @@ LINUX_WORKFLOWS = [
     #    test_runner_type=LINUX_CPU_TEST_RUNNER,
     #    ciflow_config=CIFlowConfig(
     #        enabled=True,
-    #        trigger_action_only=True,
     #        labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU},
     #    ),
     # ),
@@ -302,7 +293,6 @@ LINUX_WORKFLOWS = [
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         ciflow_config=CIFlowConfig(
             enabled=True,
-            trigger_action_only=True,
             labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU},
         ),
     ),
@@ -315,7 +305,6 @@ LINUX_WORKFLOWS = [
         exclude_test=True,
         ciflow_config=CIFlowConfig(
             enabled=True,
-            trigger_action_only=True,
             labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU},
         ),
     ),
@@ -352,7 +341,6 @@ LINUX_WORKFLOWS = [
         ciflow_config=CIFlowConfig(
             enabled=True,
             run_on_canary=True,
-            trigger_action_only=True,
             labels={LABEL_CIFLOW_SLOW, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA}
         ),
     ),
@@ -369,7 +357,6 @@ LINUX_WORKFLOWS = [
         num_test_shards=2,
         ciflow_config=CIFlowConfig(
             enabled=True,
-            trigger_action_only=True,
             labels=set([LABEL_CIFLOW_SLOW, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA]),
         ),
     ),
@@ -381,7 +368,6 @@ LINUX_WORKFLOWS = [
         is_libtorch=True,
         ciflow_config=CIFlowConfig(
             enabled=True,
-            trigger_action_only=True,
             labels=set([LABEL_CIFLOW_LIBTORCH, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA]),
         ),
     ),
@@ -404,7 +390,6 @@ LINUX_WORKFLOWS = [
         is_libtorch=True,
         ciflow_config=CIFlowConfig(
             enabled=True,
-            trigger_action_only=True,
             labels=set([LABEL_CIFLOW_LIBTORCH, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA]),
         ),
     ),
@@ -417,7 +402,6 @@ LINUX_WORKFLOWS = [
         is_scheduled="45 0,4,8,12,16,20 * * *",
         ciflow_config=CIFlowConfig(
             enabled=True,
-            trigger_action_only=True,
             labels={LABEL_CIFLOW_SCHEDULED, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA}
         ),
     ),
@@ -430,7 +414,6 @@ LINUX_WORKFLOWS = [
         is_scheduled="45 0,4,8,12,16,20 * * *",
         ciflow_config=CIFlowConfig(
             enabled=True,
-            trigger_action_only=True,
             labels={LABEL_CIFLOW_SCHEDULED, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_LIBTORCH, LABEL_CIFLOW_CUDA},
         ),
     ),
