@@ -9708,12 +9708,6 @@ class TestNN(NNTestCase):
         self.assertEqual(input1.grad, torch.zeros_like(input1))
         self.assertEqual(input2.grad, input1 * 1e8)
 
-        # Check error when inputs are not the same shape
-        input1 = torch.randn(2, 2, 1)
-        input2 = torch.randn(2, 1, 3)
-        with self.assertRaises(RuntimeError):
-            F.cosine_similarity(input1, input2)
-
         # Check type promotion, issue #61454
         input = torch.tensor(12.)
         out = F.cosine_similarity(input.to(torch.int8), input, dim=-1)
