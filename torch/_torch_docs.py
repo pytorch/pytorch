@@ -8247,6 +8247,11 @@ Example::
     tensor([ 0.9920,  0.6077,  0.9734, -1.0362])
     >>> torch.round(a)
     tensor([ 1.,  1.,  1., -1.])
+    >>> # Halfway values
+    >>> torch.round(torch.tensor([-0.5, 0.5, 1.5, 2.5]))
+    tensor([-0., 0., 2., 2.])
+    >>> torch.round(torch.tensor([0.1234567]), decimals=3)
+    tensor([0.1230])
 """.format(**common_args))
 
 add_docstr(torch.rsqrt,
