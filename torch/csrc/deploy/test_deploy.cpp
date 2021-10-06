@@ -176,6 +176,28 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
   }
 }
 
+TEST(TorchpyTest, ErrorsReplicatingObj) {
+  torch::deploy::InterpreterManager manager(4);
+  torch::deploy::Package p = manager.loadPackage(path("SIMPLE", simple));
+  auto replicatedObj = p.loadPickle("model", "model.pkl");
+  // Acquire two different interpreters
+  auto session1 = replicatedObj.acquireSession();
+  auto session2 = p.acquireSession();
+  // Create an obj reference on interpreter 1
+  auto obj = session1.fromMovable(replicatedObj);
+  // should throw an error when trying to access obj from different session
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW(session2.createMovable(obj), c10::Error);
+  try {
+    session2.createMovable(obj);
+  } catch (c10::Error& error) {
+    EXPECT_TRUE(
+        error.msg().find(
+            "Cannot create movable from an object that lives in different session") !=
+        std::string::npos);
+  }
+}
+
 TEST(TorchpyTest, ThrowsSafely) {
   // See explanation in deploy.h
   torch::deploy::InterpreterManager manager(3);
