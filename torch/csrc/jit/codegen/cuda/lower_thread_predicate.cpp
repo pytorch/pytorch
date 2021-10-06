@@ -66,7 +66,9 @@ kir::Bool* getPredicatePerParallelType(
       ->as<kir::Bool>();
 }
 
-kir::Bool* getPredicateFromPredicateInfo(
+} // namespace
+
+kir::Bool* ThreadPredicateMap::getPredicateFromPredicateInfo(
     const ThreadPredicateMap::PredicateInfo& pred_info) {
   kir::SimplifyingIrBuilder ir_builder(GpuLower::current()->kernel());
 
@@ -87,6 +89,8 @@ kir::Bool* getPredicateFromPredicateInfo(
 
   return pred;
 }
+
+namespace {
 
 void mergeSourceMap(
     ThreadPredicateMap::SourceMap& dst,
@@ -412,6 +416,38 @@ void ThreadPredicateMap::print() const {
     std::cout << "{" << kv.second.redundant_types.toString() << "}\n";
   }
   std::cout << "--------------------------------\n\n";
+}
+
+c10::optional<ThreadPredicateMap::PredicateInfo> ThreadPredicateMap::
+    mergeForUnswitch(
+        const ThreadPredicateMap::PredicateInfo& info_x,
+        const ThreadPredicateMap::PredicateInfo& info_y) {
+  // Generally, we just need to take a union of two
+  // ParallelTypeBitmaps. However, when source_map isn't empty for BID
+  // types, it's not valid to just merge source tensors. For example, when
+  // one pred_info has a non-empty source map, and another has an
+  // empty map, it would need a predicate like "T1_pred && blockIdx.x
+  // == 0". This isn't expressible in the current PredicateInfo
+  // logic since when source map isn't empty for BID, it would only
+  // generate the flags based on source tensors and ignore blockIdx.x ==
+  // 0. Since this should be really a rare courner case, it just
+  // simply returns null if source_map isn't empty.
+
+  const auto bid_source_map_found = std::any_of(
+      kParallelTypeBIDs.begin(), kParallelTypeBIDs.end(), [&](const auto pt) {
+        return info_x.source_map.find(pt) != info_x.source_map.end() ||
+            info_y.source_map.find(pt) != info_y.source_map.end();
+      });
+
+  if (bid_source_map_found) {
+    return {};
+  }
+
+  PredicateInfo merged_info;
+  merged_info.limited_types = info_x.limited_types | info_y.limited_types;
+  merged_info.redundant_types = info_x.redundant_types | info_y.redundant_types;
+
+  return merged_info;
 }
 
 } // namespace cuda
