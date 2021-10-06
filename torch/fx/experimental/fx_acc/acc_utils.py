@@ -78,9 +78,7 @@ def build_raw_tensor_meta(
     stride=None,
     memory_format=None,
     is_quantized=None,
-    qscheme=None,
-    q_scale=None,
-    q_zero_point=None,
+    qparams=None,
 ):
     return TensorMetadata(**locals())
 

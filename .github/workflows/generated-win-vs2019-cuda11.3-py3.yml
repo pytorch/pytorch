@@ -42,9 +42,15 @@ jobs:
 
   ciflow_should_run:
     runs-on: ubuntu-18.04
-    if: ${{ (github.repository_owner == 'pytorch') && ((github.event_name != 'pull_request') || (github.event.assignee.login != 'pytorchbot' ) || (github.event.action !='unassigned') || (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cuda') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/win'))) }}
     env:
+      IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == 'unassigned') && (github.event.assigneed.login == 'pytorchbot') }}
+      LABEL_CONDITIONS: ${{ contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cuda') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/win') }}
       LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+    if: ${{ (github.repository_owner == 'pytorch') && (
+            (github.event_name == 'push') ||
+            (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cuda') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/win')) ||
+            ((github.event_name == 'pull_request' && github.event.action != 'unassigned') && !contains(join(github.event.pull_request.labels.*.name), 'ciflow/')))
+         }}
     steps:
       - name: noop
         run: echo running ciflow_should_run
@@ -52,9 +58,6 @@ jobs:
         run: echo "${LABELS}"
   build:
     runs-on: "windows.4xlarge"
-    defaults:
-      run:
-        working-directory: pytorch-${{ github.run_id }}
     needs: [ciflow_should_run]
     env:
       JOB_BASE_NAME: win-vs2019-cuda11.3-py3-build
@@ -68,10 +71,9 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          submodules: recursive
-          path: pytorch-${{ github.run_id }}
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
+          submodules: recursive
       - name: Display EC2 information
         shell: bash
         run: |
@@ -142,10 +144,11 @@ jobs:
     env:
       TEST_RUNNER_TYPE: windows.8xlarge.nvidia.gpu
       NUM_TEST_SHARDS: 2
-      NUM_TEST_SHARDS_ON_PULL_REQUEST: 1
+      NUM_TEST_SHARDS_ON_PULL_REQUEST: 0
       PR_BODY: ${{ github.event.pull_request.body }}
       NOGPU_RUNNER_TYPE: windows.4xlarge
-      ENABLE_FORCE_ON_CPU_TEST: ''
+      ENABLE_FORCE_ON_CPU_TEST: 1
+      RUN_SMOKE_TESTS_ONLY_ON_PR: True
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
@@ -169,24 +172,13 @@ jobs:
       TEST_CONFIG: ${{ matrix.config }}
       http_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
       https_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
-      RUN_SMOKE_TESTS_ONLY_ON_PR: True
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
     needs: [build, generate-test-matrix, ciflow_should_run]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
-    defaults:
-      run:
-        working-directory: pytorch-${{ github.run_id }}
     steps:
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          submodules: recursive
-          path: pytorch-${{ github.run_id }}
-          # deep clone, to allow use of git merge-base
-          fetch-depth: 0
       - name: Display EC2 information
         shell: bash
         run: |
@@ -204,6 +196,12 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          # deep clone, to allow use of git merge-base
+          fetch-depth: 0
+          submodules: recursive
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
@@ -248,15 +246,6 @@ jobs:
         run: |
           # -ir => recursive include all files in pattern
           7z a "test-reports-$Env:FILE_SUFFIX.zip" -ir'!test\*.xml'
-      - uses: actions/upload-artifact@v2
-        name: Store Test Reports
-        if: always()
-        with:
-          name: test-reports-${{ matrix.config }}
-          retention-days: 14
-          if-no-files-found: error
-          path:
-            pytorch-${{ github.run_id }}/test-reports-*.zip
       - uses: seemethere/upload-artifact-s3@v3
         name: Store Test Reports on S3
         if: always()
@@ -264,7 +253,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            pytorch-${{ github.run_id }}/test-reports-*.zip
+            test-reports-*.zip
       - name: Install render_test_results dependencies
         if: always()
         shell: bash
