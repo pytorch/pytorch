@@ -1446,11 +1446,12 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
 
     # some qhandlers override the activations constructor
     def get_activation_ctr(self, qconfig, pattern) -> Optional[Callable]:
-        if activation_dtype(qconfig) == torch.float16:
-            return qconfig.activation
-        else:
+        act_dtype = activation_dtype(qconfig)
+        if act_dtype == torch.quint8:
             return get_default_output_activation_post_process_map().get(
-                pattern, None)
+                pattern, qconfig.activation)
+        else:
+            return qconfig.activation
 
     def convert(self,
                 node: Node,
@@ -1682,7 +1683,7 @@ class StandaloneModuleQuantizeHandler(QuantizeHandler):
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         assert node.op == 'call_module'
-        convert = torch.quantization.quantize_fx._convert_standalone_module_fx  # type: ignore[attr-defined]
+        convert = torch.ao.quantization.quantize_fx._convert_standalone_module_fx  # type: ignore[attr-defined]
         # We know that observed standalone module is a GraphModule since
         # it's produced by us
         observed_standalone_module : GraphModule = modules[str(node.target)]  # type: ignore[assignment]
