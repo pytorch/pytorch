@@ -150,6 +150,30 @@ struct FunctionCallee {
 #endif
 } // namespace
 
+class LLVMCodeGenCallee {
+ public:
+  LLVMCodeGenCallee(
+      std::unique_ptr<llvm::orc::PytorchLLVMJIT> jit,
+      void* kernelAddress)
+      : jit_(std::move(jit)), kernelAddress_(kernelAddress) {}
+
+  llvm::orc::PytorchLLVMJIT* getJIT() {
+    return jit_.get();
+  }
+
+  void* getKernelAddress() {
+    return kernelAddress_;
+  }
+
+  void setKernelAddress(void* kernelAddress) {
+    kernelAddress_ = kernelAddress;
+  }
+
+ private:
+  std::unique_ptr<llvm::orc::PytorchLLVMJIT> jit_;
+  void* kernelAddress_;
+};
+
 class LLVMCodeGenImpl : public IRVisitor {
  private:
   std::unique_ptr<llvm::LLVMContext> context_;
@@ -215,6 +239,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   ~LLVMCodeGenImpl() = default;
 
   llvm::JITTargetAddress getKernelAddress() const;
+  std::unique_ptr<llvm::orc::PytorchLLVMJIT> releaseJIT();
 
   void visit(AddPtr v) override;
   void visit(SubPtr v) override;
@@ -314,7 +339,14 @@ LLVMCodeGen::LLVMCodeGen(
     c10::optional<std::string> attrs)
     : CodeGen(stmt, args, device, kernel_func_name),
       impl_(std::make_unique<
-            LLVMCodeGenImpl>(stmt, args, device, dtype, triple, cpu, attrs)) {}
+            LLVMCodeGenImpl>(stmt, args, device, dtype, triple, cpu, attrs)) {
+  callee_ = std::make_unique<LLVMCodeGenCallee>(
+      impl_->releaseJIT(), (void*)impl_->getKernelAddress());
+}
+
+void LLVMCodeGen::cleanup_memory() {
+  impl_.reset(nullptr);
+}
 
 void LLVMCodeGen::call_raw(const std::vector<void*>& args) {
   value<float>(const_cast<void**>(args.data()));
@@ -352,11 +384,14 @@ at::Tensor LLVMCodeGen::empty_strided(
       size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 }
 
-void* LLVMCodeGen::getKernelAddress(LLVMCodeGenImpl* impl) {
-  return (void*)impl->getKernelAddress();
+void* LLVMCodeGen::getKernelAddress(LLVMCodeGenCallee* callee) {
+  return (void*)callee->getKernelAddress();
 }
 
 std::string LLVMCodeGen::getCodeText(const std::string& attr /*=""*/) {
+  TORCH_INTERNAL_ASSERT(
+      impl_.get(),
+      "LLVMCodeGen memory has been cleaned up. So, code text is not available at this point");
   if (attr == "asm") {
     return impl_->getASMCodeText();
   } else {
@@ -366,6 +401,10 @@ std::string LLVMCodeGen::getCodeText(const std::string& attr /*=""*/) {
 
 llvm::JITTargetAddress LLVMCodeGenImpl::getKernelAddress() const {
   return kernelAddress_;
+}
+
+std::unique_ptr<llvm::orc::PytorchLLVMJIT> LLVMCodeGenImpl::releaseJIT() {
+  return std::move(jit_);
 }
 
 namespace {
