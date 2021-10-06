@@ -55,6 +55,7 @@ LABEL_CIFLOW_XLA = "ciflow/xla"
 LABEL_CIFLOW_NOARCH = "ciflow/noarch"
 LABEL_CIFLOW_VULKAN = "ciflow/vulkan"
 LABEL_CIFLOW_PREFIX = "ciflow/"
+LABEL_CIFLOW_SLOW_GRADCHECK = "ciflow/slow-gradcheck"
 
 
 @dataclass
@@ -150,6 +151,7 @@ class CIWorkflow:
     only_run_smoke_tests_on_pull_request: bool = False
     num_test_shards_on_pull_request: int = -1
     distributed_test: bool = True
+    timeout_after: int = 240
 
     # The following variables will be set as environment variables,
     # so it's easier for both shell and Python scripts to consume it if false is represented as the empty string.
@@ -440,6 +442,21 @@ LINUX_WORKFLOWS = [
         ciflow_config=CIFlowConfig(
             enabled=True,
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_VULKAN},
+        ),
+    ),
+    CIWorkflow(
+        arch="linux",
+        build_environment="periodic-pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-slow-gradcheck",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
+        test_runner_type=LINUX_CUDA_TEST_RUNNER,
+        num_test_shards=2,
+        distributed_test=False,
+        timeout_after=360,
+        # Only run this on master 4 times per day since it does take a while
+        is_scheduled="0 */4 * * *",
+        ciflow_config=CIFlowConfig(
+            enabled=True,
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_SLOW_GRADCHECK, LABEL_CIFLOW_SLOW},
         ),
     ),
 ]

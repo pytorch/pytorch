@@ -38,7 +38,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-slow-* || $TEST_CONFIG == 'slow' ]]; then
   export PYTORCH_TEST_SKIP_FAST=1
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *old-gradcheck* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *slow-gradcheck* ]]; then
   export PYTORCH_TEST_WITH_SLOW_GRADCHECK=ON
 fi
 
