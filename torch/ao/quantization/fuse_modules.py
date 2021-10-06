@@ -3,10 +3,10 @@ import copy
 
 import torch.nn as nn
 
-from torch.quantization.fuser_method_mappings import get_fuser_method
+from torch.ao.quantization.fuser_method_mappings import get_fuser_method
 # for backward compatiblity
-from torch.quantization.fuser_method_mappings import fuse_conv_bn  # noqa: F401
-from torch.quantization.fuser_method_mappings import fuse_conv_bn_relu  # noqa: F401
+from torch.ao.quantization.fuser_method_mappings import fuse_conv_bn  # noqa: F401
+from torch.ao.quantization.fuser_method_mappings import fuse_conv_bn_relu  # noqa: F401
 
 from typing import List, Optional
 
@@ -103,7 +103,7 @@ def fuse_modules(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_mo
         fuser_func: Function that takes in a list of modules and outputs a list of fused modules
                     of the same length. For example,
                     fuser_func([convModule, BNModule]) returns the list [ConvBNModule, nn.Identity()]
-                    Defaults to torch.quantization.fuse_known_modules
+                    Defaults to torch.ao.quantization.fuse_known_modules
         `fuse_custom_config_dict`: custom configuration for fusion
 
     .. code-block:: python
