@@ -42,12 +42,6 @@ if [[ "$BUILD_ENVIRONMENT" == *old-gradcheck* ]]; then
   export PYTORCH_TEST_WITH_SLOW_GRADCHECK=ON
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
-  export PYTORCH_COLLECT_COVERAGE=1
-  export COVERAGE_RCFILE="$PWD/.coveragerc" # coverage config file needed for plug-ins and settings to work
-  pip install -e tools/coverage_plugins_package # allows coverage to run with JitPlugin for JIT coverage
-fi
-
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   # Used so that only cuda specific versions of tests are generated
   # mainly used so that we're not spending extra cycles testing cpu
@@ -147,14 +141,12 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX512-* || $TEST_CONFIG == 'nogpu_NO_AVX
   export ATEN_CPU_CAPABILITY=avx2
 fi
 
-if [[ "$BUILD_ENVIRONMENT" != *coverage* ]]; then
-  # if PR_NUMBER exist, use it to grab PR contents.
-  DETERMINE_FROM=$(mktemp)
-  if [ -n "$PR_NUMBER" ]; then
-    get_pr_change_files "$PR_NUMBER" "$DETERMINE_FROM"
-  else
-    file_diff_from_base "$DETERMINE_FROM"
-  fi
+# if PR_NUMBER exist, use it to grab PR contents.
+DETERMINE_FROM=$(mktemp)
+if [ -n "$PR_NUMBER" ]; then
+  get_pr_change_files "$PR_NUMBER" "$DETERMINE_FROM"
+else
+  file_diff_from_base "$DETERMINE_FROM"
 fi
 
 test_python_legacy_jit() {
@@ -292,7 +284,7 @@ test_libtorch() {
 }
 
 test_vulkan() {
-  if [[ "$BUILD_ENVIRONMENT" == *vulkan-linux* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" == *vulkan* ]]; then
     ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_TEST_DIR"
     ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_TEST_DIR"
     export VK_ICD_FILENAMES=/var/lib/jenkins/swiftshader/build/Linux/vk_swiftshader_icd.json
@@ -515,7 +507,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *jit_legacy-test || "${JOB_BASE_NAME}" == *jit
 elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
-elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 || "${SHARD_NUMBER}" == 1 ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 || ("${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1) ]]; then
   if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-cuda11.1*-test1* ]]; then
     test_torch_deploy
   fi
@@ -523,14 +515,14 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 || "$
   install_torchvision
   test_python_shard1
   test_aten
-elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 || "${SHARD_NUMBER}" == 2 ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 || ("${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1) ]]; then
   install_torchvision
   test_python_shard2
   test_libtorch
   test_custom_script_ops
   test_custom_backend
   test_torch_function_benchmark
-elif [[ "${BUILD_ENVIRONMENT}" == *vulkan-linux* ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
   test_vulkan
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
@@ -553,15 +545,4 @@ else
   if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc7-test* || "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc5.4-test* ]]; then
     test_python_gloo_with_tls
   fi
-fi
-
-if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
-  pushd test
-  echo "Generating XML coverage report"
-  time python -mcoverage xml
-  popd
-  pushd build
-  echo "Generating lcov coverage report for C++ sources"
-  time lcov --capture --directory . --output-file coverage.info
-  popd
 fi
