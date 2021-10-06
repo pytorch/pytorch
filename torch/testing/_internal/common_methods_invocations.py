@@ -13,7 +13,7 @@ import numpy as np
 from torch._six import inf
 import collections.abc
 
-from typing import Any, Callable, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 from torch.testing import make_non_contiguous, make_tensor
 from torch.testing._internal.common_dtype import (
@@ -3062,7 +3062,7 @@ def sample_inputs_avgpool1d(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     # Order: input_shape, kernel_size, kwargs
-    cases = (
+    cases: List[Tuple[Tuple[int, ...], Union[int, Tuple[int, ...]], Dict]] = [
         ((2, 3, 9), (3,), dict()),
         ((1, 3, 9), 3, dict(stride=1, padding=1, ceil_mode=True, count_include_pad=False)),
         ((1, 3, 9), (6,), dict(stride=(3,), padding=(2,), ceil_mode=True, count_include_pad=True)),
@@ -3072,7 +3072,7 @@ def sample_inputs_avgpool1d(op_info, device, dtype, requires_grad, **kwargs):
         ((1, 2, 9), (7,), dict(stride=(3,), padding=(3,), ceil_mode=True)),
         ((1, 2, 9), (7,), dict(stride=(3,), ceil_mode=False)),
         ((1, 2, 9), (7,), dict(stride=(3,), ceil_mode=True)),
-    )
+    ]
 
     def generator():
         for input_shape, kernel_size, kwargs in cases:
@@ -3084,7 +3084,7 @@ def sample_inputs_avgpool3d(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     # Order: input_shape, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override
-    cases = (
+    cases: List[Tuple[Tuple[int, ...], Union[int, Tuple[int, ...]], Dict]] = [
         ((2, 3, 3, 4, 4), (2, 2, 2), dict()),
         ((1, 2, 4, 4, 4), 2, dict(stride=1, padding=1, ceil_mode=True,
                                   count_include_pad=False, divisor_override=2)),
@@ -3099,7 +3099,7 @@ def sample_inputs_avgpool3d(op_info, device, dtype, requires_grad, **kwargs):
                                           count_include_pad=True, divisor_override=None)),
         ((0, 1, 4, 5, 4), (2, 3, 1), dict(stride=(2, 1, 2), padding=0, ceil_mode=False,
                                           count_include_pad=True, divisor_override=None)),
-    )
+    ]
 
     def generator():
         for input_shape, kernel_size, kwargs in cases:
