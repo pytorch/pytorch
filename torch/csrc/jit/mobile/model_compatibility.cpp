@@ -4,11 +4,18 @@
 #include <torch/csrc/jit/api/compilation_unit.h> // removed after using simple type_resolver/obj_loader
 #include <torch/csrc/jit/mobile/import.h> // removed after using simple type_resolver/obj_loader
 #include <torch/csrc/jit/mobile/model_compatibility.h>
+#include <torch/csrc/jit/mobile/type_parser.h>
+#include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 
 #include <sstream>
 #include <string>
+#include <unordered_set>
 #include <vector>
+
+namespace c10 {
+TypePtr parseType(const std::string& pythonStr);
+} // namespace c10
 
 namespace torch {
 namespace jit {
@@ -180,6 +187,74 @@ std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
   return result;
 }
 
+/********************** Get Type Table **********************/
+
+// Forward declare
+std::unordered_set<std::string> _get_mobile_model_contained_types(
+    const std::vector<IValue>& bytecode_ivalues);
+
+std::unordered_set<std::string> _get_mobile_model_contained_types(
+    std::istream& in) {
+  std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
+  return _get_mobile_model_contained_types(std::move(rai));
+}
+
+std::unordered_set<std::string> _get_mobile_model_contained_types(
+    const std::string& filename) {
+  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
+  return _get_mobile_model_contained_types(std::move(rai));
+}
+
+std::unordered_set<std::string> _get_mobile_model_contained_types(
+    std::shared_ptr<ReadAdapterInterface> rai) {
+  if (!check_zip_file(rai)) {
+    TORCH_CHECK(
+        false,
+        "Failed to open .ptl file please ensure the model was exported for mobile");
+  }
+  PyTorchStreamReader reader(std::move(rai));
+  auto bytecode_values = get_bytecode_ivalues(reader);
+  return _get_mobile_model_contained_types(bytecode_values);
+}
+
+// Get deduplicate type table given bytecode, and each string is a atomic type,
+// like str, Tensor and etc. For example,
+// input: "Dict[int, Tuple[Tensor, Tensor, Tensor]]"
+// output: {Dict, int, Tuple, Tensor}
+std::unordered_set<std::string> _get_mobile_model_contained_types(
+    const std::vector<IValue>& bytecode_ivalues) {
+  std::unordered_set<std::string> contained_types;
+  // To avoid parsing same type twice, declare $parsed_type_names_records and
+  // use type name (string, ex: "Dict[int, Tuple[Tensor, Tensor, Tensor]]") as
+  // the hash to record which types are parsed.
+  std::unordered_set<std::string> parsed_type_names_records;
+  for (const auto i : c10::irange(1, bytecode_ivalues.size())) {
+    auto method_tuple = bytecode_ivalues.at(i).toTuple()->elements();
+    auto type_table_tuple =
+        method_tuple.at(1).toTuple()->elements()[BYTECODE_INDEX_TYPE];
+    auto type_table =
+        type_table_tuple.toTuple()->elements()[1].toTuple()->elements();
+    // type_table is a list of IValue, and each IValue is a string,
+    // for example: "Dict[int, Tuple[Tensor, Tensor, Tensor]]"
+    for (const auto& type_definition : type_table) {
+      std::unordered_set<std::string> type_tokens;
+      std::string type_name = type_definition.toString()->string();
+
+      // parse the type only if it's new, and insert it in the record
+      if (parsed_type_names_records.find(type_name) ==
+          parsed_type_names_records.end()) {
+        parsed_type_names_records.insert(type_name);
+        at::TypeParser parser(type_name);
+        parser.parse();
+        type_tokens = parser.getContainedTypes();
+        contained_types.insert(type_tokens.begin(), type_tokens.end());
+      }
+    }
+  }
+
+  return contained_types;
+}
+
 /********************** Compatibility Checker **********************/
 
 ModelCompatibilityInfo ModelCompatibilityInfo::get(std::istream& in) {
@@ -200,11 +275,13 @@ ModelCompatibilityInfo ModelCompatibilityInfo::get(
         false, "Failed to open zip file for model compatibility information");
   }
   PyTorchStreamReader reader(std::move(rai));
-  auto bytecode_values = get_bytecode_ivalues(reader);
+  std::vector<IValue> bytecode_values = get_bytecode_ivalues(reader);
   uint64_t model_bytecode_version =
       _get_model_bytecode_version(bytecode_values);
   auto model_info = _get_model_ops_and_info(bytecode_values);
-  return ModelCompatibilityInfo{model_bytecode_version, model_info};
+  std::unordered_set<std::string> type_table =
+      _get_mobile_model_contained_types(bytecode_values);
+  return ModelCompatibilityInfo{model_bytecode_version, model_info, type_table};
 }
 
 ModelCompatCheckResult is_compatible(
@@ -219,6 +296,19 @@ ModelCompatCheckResult is_compatible(
     s << "model bytecode version " << model_info.bytecode_version
       << "is greater than the runtimes " << runtime_info.bytecode_version;
     result.errors.emplace_back(s.str());
+  }
+
+  std::unordered_set<std::string> supported_type = runtime_info.supported_types;
+
+  // Check type table
+  for (const auto& type_name : model_info.type_table) {
+    if (supported_type.find(type_name) == supported_type.end()) {
+      result.status = ModelCompatibilityStatus::ERROR;
+      std::ostringstream s;
+      s << "Primitive type: '" << type_name
+        << "' is not supported in current runtime";
+      result.errors.push_back(s.str());
+    }
   }
 
   // Check operators
