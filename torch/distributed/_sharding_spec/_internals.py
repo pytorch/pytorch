@@ -11,7 +11,7 @@ class ShardMetadata(object):
     offsets, lengths and device placement.
 
     Args:
-        shard_offsets(List[int]): Offsets in the orignal tensor indicating
+        shard_offsets(List[int]): Offsets in the original tensor indicating
             the start offsets for this shard. Should have the same rank as
             the original tensor.
         shard_lengths(List[int]): Lengths indicating the length of each
