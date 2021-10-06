@@ -62,7 +62,7 @@ def create_constant(network, tensor, name, dtype):
     return constant.get_output(0)
 
 
-def get_trt_tensor(network, input_val, name, dtype=None):
+def get_trt_tensor(network, input_val, name, dtype=None) -> "trt.tensorrt.ITensor":
     if isinstance(input_val, (torch.Tensor, int, float)):
         return create_constant(network, input_val, name, dtype)
     elif not isinstance(input_val, trt.tensorrt.ITensor):
@@ -578,6 +578,76 @@ def acc_ops_softmax(network, target, args, kwargs, name):
     layer.name = name
     return layer.get_output(0)
 
+@tensorrt_converter(acc_ops.tile)
+def acc_ops_tile(network, target, args, kwargs, name):
+    input_val = kwargs["input"]
+
+    if not isinstance(input_val, trt.tensorrt.ITensor):
+        raise RuntimeError(
+            f"tile received input {input_val} that is not part "
+            "of the TensorRT region!"
+        )
+
+    dims = kwargs["dims"]
+    n_input_dims = len(input_val.shape) + (1 if network.has_implicit_batch_dimension else 0)
+
+    if len(dims) > n_input_dims:
+        assert not network.has_implicit_batch_dimension
+        layer = network.add_shuffle(input_val)
+        layer.name = f"{name}_reshape"
+        num_preceding_ones = len(dims) - n_input_dims
+
+        if len(get_dynamic_dims(input_val.shape)) > 1:
+            input_shape_layer = network.add_shape(input_val)
+            input_shape_layer.name = f"{name}_input_shape"
+            preceding_ones = network.add_constant(
+                (num_preceding_ones,), np.ascontiguousarray([1] * num_preceding_ones, np.int32)
+            ).get_output(0)
+            reshape_layer = network.add_concatenation([preceding_ones, input_shape_layer.get_output(0)])
+            reshape_layer.axis = 0
+            reshape_layer.name = f"{name}_reshape_dims"
+            layer.set_input(1, reshape_layer.get_output(0))
+        else:
+            layer.reshape_dims = (1,) * (len(dims) - n_input_dims) + tuple(input_val.shape)
+        input_val = layer.get_output(0)
+    else:
+        dims = (1,) * (n_input_dims - len(dims)) + dims
+
+    if network.has_implicit_batch_dimension:
+        assert dims[0] == 1, "Can't tile the batch dim when it's implicit."
+        dims = dims[1:]
+
+    starts = [0] * len(dims)
+    shapes = [i * j for i, j in zip(input_val.shape, dims)]
+    # If there's dynmaic dim then there would be negative dims in shapes which is not allowed.
+    # Here we build a dummy shapes array.
+    if has_dynamic_shape(input_val.shape):
+        shapes = [1] * len(dims)
+    strides = [1] * len(dims)
+    layer = network.add_slice(input_val, starts, shapes, strides)
+    layer.mode = trt.SliceMode.WRAP
+    layer.name = name
+
+    if has_dynamic_shape(input_val.shape):
+        starts_tensor = network.add_constant(
+            (len(dims),), np.ascontiguousarray([0] * len(dims), np.int32)
+        ).get_output(0)
+        dims_tensor = network.add_constant(
+            (len(dims),), np.ascontiguousarray(dims, np.int32)
+        ).get_output(0)
+        input_shape_layer = network.add_shape(input_val)
+        input_shape_layer.name = f"{name}_slice_input_shape"
+        slice_shapes_tensor = add_binary_elementwise_layer(
+            network,
+            input_shape_layer.get_output(0),
+            dims_tensor,
+            trt.ElementWiseOperation.PROD,
+            f"{name}_slice_shapes",
+        )
+        layer.set_input(1, starts_tensor)
+        layer.set_input(2, slice_shapes_tensor)
+
+    return layer.get_output(0)
 
 @tensorrt_converter(acc_ops.relu)
 def acc_ops_relu(network, target, args, kwargs, name):
@@ -1100,7 +1170,9 @@ def acc_ops_slice_tensor(network, target, args, kwargs, name):
         raise RuntimeError(f"slice_tensor received input {input_val} that is not part "
                            "of the TensorRT region!")
 
-    dims = kwargs["dims"]
+    ranks = len(input_val.shape) + (1 if network.has_implicit_batch_dimension else 0)
+    dims = [dim % ranks for dim in kwargs["dims"]]
+
     if network.has_implicit_batch_dimension:
         if not len(dims):
             raise RuntimeError("dim argument cannot be empty!")
@@ -1122,7 +1194,7 @@ def acc_ops_slice_tensor(network, target, args, kwargs, name):
     for i, dim in enumerate(dims):
         start[dim] = starts[i]
         stride[dim] = steps[i]
-        output_shape[dim] = (stops[i] - start[i]) // steps[i]
+        output_shape[dim] = (stops[i] - starts[i]) // steps[i]
 
     layer = network.add_slice(input_val, start=start, shape=output_shape, stride=stride)
     layer.name = name
@@ -1403,23 +1475,6 @@ def acc_ops_cat(network, target, args, kwargs, name):
     return layer.get_output(0)
 
 
-@tensorrt_converter(acc_ops.transpose)
-def acc_ops_transpose(network, target, args, kwargs, name):
-    input_val, dim_0, dim_1 = kwargs["input"], kwargs["dim0"], kwargs["dim1"]
-
-    # TODO: Remove this after enabling const folding in fx_acc
-    if isinstance(input_val, torch.Tensor):
-        return input_val.transpose(dim_0, dim_1).contiguous()
-
-    if not isinstance(input_val, trt.tensorrt.ITensor):
-        raise RuntimeError(
-            f"transpose received input {input_val} that is not part "
-            "of the TensorRT region!"
-        )
-
-    return add_transpose_layer(network, input_val, dim_0, dim_1, name)
-
-
 @tensorrt_converter(acc_ops.matmul)
 def acc_ops_matmul(network, target, args, kwargs, name):
     input_val = get_trt_tensor(network, kwargs["input"], f"{name}_input")
@@ -1451,7 +1506,8 @@ def acc_ops_sigmoid(network, target, args, kwargs, name):
 @tensorrt_converter(acc_ops.permute)
 def acc_ops_permute(network, target, args, kwargs, name):
     input_val = kwargs["input"]
-    permutation = kwargs["permutation"]
+    ranks = len(input_val.shape) + (1 if network.has_implicit_batch_dimension else 0)
+    permutation = [i % ranks for i in kwargs["permutation"]]
 
     if not isinstance(input_val, trt.tensorrt.ITensor):
         raise RuntimeError(
@@ -1477,8 +1533,9 @@ def acc_ops_quantize_per_tensor(network, target, args, kwargs, name):
         raise RuntimeError(f"{name} received input {input_val} that is not part "
                            "of the TensorRT region!")
 
-    q_scale = acc_utils.get_field_from_acc_out_ty(kwargs["acc_out_ty"], "q_scale")
-    q_zero_point = acc_utils.get_field_from_acc_out_ty(kwargs["acc_out_ty"], "q_zero_point")
+    qparams = acc_utils.get_field_from_acc_out_ty(kwargs["acc_out_ty"], "qparams")
+    q_scale = qparams["scale"]
+    q_zero_point = qparams["zero_point"]
     dtype = acc_utils.get_field_from_acc_out_ty(kwargs["acc_out_ty"], "dtype")
     if dtype not in (torch.quint8, torch.qint8, torch.qint32):
         raise RuntimeError("Only support (torch.quint8, torch.qint8, torch.qint32) "
@@ -1488,40 +1545,96 @@ def acc_ops_quantize_per_tensor(network, target, args, kwargs, name):
         raise RuntimeError(f"Only support zero_point == 0, get {q_zero_point}")
 
     scale_layer = network.add_constant((1,), trt.Weights(np.ascontiguousarray([float(q_scale)], dtype=np.float32)))
-    scale_layer.name = input_val.name + ".quant.scale"
+    scale_layer.name = input_val.name + ".per_tensor_quant.scale"
     scale = scale_layer.get_output(0)
     # assert trt.__version__ > "8.0", "Explicit quantize op is only supported in "
     # "TensorRT 8.0 or above, current TensorRT version:" + trt.__version__
     layer = network.add_quantize(input=input_val, scale=scale)
     layer.axis = 0
-    layer.name = input_val.name + ".quant"
+    layer.name = input_val.name + ".per_tensor_quant"
     return layer.get_output(0)
 
-@tensorrt_converter(acc_ops.dequantize)
-def acc_ops_dequantize(network, target, args, kwargs, name):
-    input_val = kwargs["input"]
+
+@tensorrt_converter(acc_ops.quantize_per_channel)
+def acc_ops_quantize_per_channel(network, target, args, kwargs, name):
+    input_val = get_trt_tensor(network, kwargs["input"], f"{name}_input")
 
     if not isinstance(input_val, trt.tensorrt.ITensor):
         raise RuntimeError(f"{name} received input {input_val} that is not part "
                            "of the TensorRT region!")
 
-    q_scale = acc_utils.get_field_from_acc_out_ty(kwargs["input_tensor_meta"], "q_scale")
-    q_zero_point = acc_utils.get_field_from_acc_out_ty(kwargs["input_tensor_meta"], "q_zero_point")
-    dtype = acc_utils.get_field_from_acc_out_ty(kwargs["input_tensor_meta"], "dtype")
+    qparams = acc_utils.get_field_from_acc_out_ty(kwargs["acc_out_ty"], "qparams")
+    q_per_channel_scales = qparams["scale"]
+    q_per_channel_zero_points = qparams["zero_point"]
+    q_per_channel_axis = qparams["axis"]
+    dtype = acc_utils.get_field_from_acc_out_ty(kwargs["acc_out_ty"], "dtype")
+    if dtype not in (torch.quint8, torch.qint8, torch.qint32):
+        raise RuntimeError("Only support (torch.quint8, torch.qint8, torch.qint32) "
+                           f"quantized type in quantize_per_tensor, get {dtype}.")
+
+    # Make sure zero_points are all 0 because only symmetric quantization
+    # is supported in TensorRT
+    if not torch.equal(
+            q_per_channel_zero_points,
+            torch.zeros(q_per_channel_zero_points.shape, dtype=q_per_channel_zero_points.dtype)):
+        raise RuntimeError(f"Only support zero_point == 0, get {q_per_channel_zero_points}")
+
+    if not torch.all(torch.ge(q_per_channel_scales, 0)):
+        raise RuntimeError(f"All scale values must be >= 0, get {q_per_channel_scales}")
+
+    scale_layer = network.add_constant(
+        q_per_channel_scales.shape,
+        trt.Weights(np.ascontiguousarray(q_per_channel_scales, dtype=np.float32)))
+    scale_layer.name = input_val.name + ".per_channel_quant.scale"
+    scale = scale_layer.get_output(0)
+    # assert trt.__version__ > "8.0", "Explicit quantize op is only supported in "
+    # "TensorRT 8.0 or above, current TensorRT version:" + trt.__version__
+    layer = network.add_quantize(input=input_val, scale=scale)
+    layer.axis = q_per_channel_axis
+    layer.name = input_val.name + ".per_channel_quant"
+    return layer.get_output(0)
+
+
+@tensorrt_converter(acc_ops.dequantize)
+def acc_ops_dequantize(network, target, args, kwargs, name):
+    input_val = kwargs["input"]
+    input_val_tensor_meta = kwargs["_itensor_to_tensor_meta"][input_val]
+
+    if not isinstance(input_val, trt.tensorrt.ITensor):
+        raise RuntimeError(f"{name} received input {input_val} that is not part "
+                           "of the TensorRT region!")
+
+    qparams = acc_utils.get_field_from_acc_out_ty(input_val_tensor_meta, "qparams")
+    qscheme = qparams["qscheme"]
+    if qscheme == torch.per_tensor_affine:
+        q_scale = qparams["scale"]
+        q_zero_point = qparams["zero_point"]
+        q_axis = 0
+        scale_shape = (1,)
+        if q_zero_point != 0:
+            raise RuntimeError(f"Only support zero_point == 0, get {q_zero_point}")
+    elif qscheme == torch.per_channel_affine:
+        q_scale = qparams["scale"]
+        q_zero_point = qparams["zero_point"]
+        q_axis = qparams["axis"]
+        scale_shape = q_scale.shape
+        if not torch.equal(q_zero_point, torch.zeros(q_zero_point.shape, dtype=q_zero_point.dtype)):
+            raise RuntimeError(f"Only support zero_point == 0, get {q_zero_point}")
+    else:
+        raise RuntimeError("Unsupported qscheme in dequantize: {qscheme}")
+
+    dtype = acc_utils.get_field_from_acc_out_ty(input_val_tensor_meta, "dtype")
 
     if dtype not in (torch.quint8, torch.qint8, torch.qint32):
         raise RuntimeError("Only support (torch.quint8, torch.qint8, torch.qint32) "
                            f"quantized type in dequantize, get {dtype}.")
 
-    if q_zero_point != 0:
-        raise RuntimeError(f"Only support zero_point == 0, get {q_zero_point}")
-
-    scale_layer = network.add_constant((1,), trt.Weights(np.ascontiguousarray([q_scale], dtype=np.float32)))
+    scale_layer = network.add_constant(scale_shape, trt.Weights(np.ascontiguousarray(q_scale, dtype=np.float32)))
     scale_layer.name = input_val.name + ".dequant.scale"
     scale = scale_layer.get_output(0)
     # assert trt.__version__ > "8.0", "Explicit dequantize op is only supported in "
     # "TensorRT 8.0 or above, current TensorRT version:" + trt.__version__
     layer = network.add_dequantize(input=input_val, scale=scale)
     layer.name = input_val.name + ".dequant"
-    layer.axis = 0
+    layer.axis = q_axis
     return layer.get_output(0)
