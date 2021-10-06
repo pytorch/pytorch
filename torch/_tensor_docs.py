@@ -2423,7 +2423,7 @@ See :func:`torch.argmax`
 
 add_docstr_all('argwhere',
                r"""
-argwhere() -> LongTensor
+argwhere() -> Tensor
 
 See :func:`torch.argwhere`
 """)

@@ -131,7 +131,6 @@ const std::unordered_map<Symbol, Symbol>& getOperatorAliasMap() {
       {aten::swapaxes, aten::transpose},
       {aten::swapaxes_, aten::transpose_},
       {aten::moveaxis, aten::movedim},
-      {aten::argwhere, aten::nonzero},
       {aten::special_erf, aten::erf},
       {aten::special_erfc, aten::erfc},
       {aten::special_erfinv, aten::erfinv},

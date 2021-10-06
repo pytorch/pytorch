@@ -5871,7 +5871,7 @@ Example::
 
 add_docstr(torch.argwhere,
            r"""
-argwhere(input) -> LongTensor
+argwhere(input) -> Tensor
 
 Returns a tensor containing the indices of all non-zero elements of
 :attr:`input`.  Each row in the result contains the indices of a non-zero
@@ -5885,8 +5885,7 @@ non-zero elements in the :attr:`input` tensor.
 .. note::
     This function is similar to NumPy's `argwhere`.
 
-    When :attr:`input` is on CUDA, :func:`torch.nonzero() <torch.nonzero>` causes
-    host-device synchronization.
+    When :attr:`input` is on CUDA, this function causes host-device synchronization.
 
 Args:
     {input}
