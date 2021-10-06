@@ -172,6 +172,13 @@ std::tuple<Tensor, Tensor> _euclidean_dist_backward(const Tensor & grad, const T
             x2 * ratio.sum(-2, false).unsqueeze(-1) - ratio.transpose(-2, -1).matmul(x1)};
 }
 
+Tensor narrow_copy_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t dimension, int64_t start, int64_t length) {
+  Tensor out = at::zeros(input_sizes, grad.options());
+  Tensor narrowed = out.narrow(dimension, start, length);
+  narrowed.copy_(grad);
+  return out;
+}
+
 Tensor norm_backward(const Tensor& grad, const Tensor& self, const optional<Scalar> & p_, const Tensor& norm) {
   return norm_backward(grad, self, p_, norm, {}, true);
 }

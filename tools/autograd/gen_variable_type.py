@@ -108,6 +108,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'index', 'masked_fill', 'cross', 'lu_unpack', 'renorm', '_conj_physical',
     'scatter', 'scatter_add', 'sigmoid', 'sigmoid_backward', 'trapezoid', 'cumulative_trapezoid',
     'conj_physical_', '_neg_view', '_reshape_alias', '_det_lu_based_helper', 'lu_solve', '_lu_with_info',
+    'narrow_copy',
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {

@@ -1019,6 +1019,9 @@
   self: grad * at::isfinite(self)
   result: auto_element_wise
 
+  name: narrow_copy(Tensor self, int dim, int start, int length) -> Tensor
+  self: narrow_copy_backward(grad, self.sizes(), dim, start, length)
+
 - name: native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)
   input, weight, bias: "grad.defined() ? native_batch_norm_backward(grad, input, weight, running_mean, running_var, result1, result2, training, eps, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
 
