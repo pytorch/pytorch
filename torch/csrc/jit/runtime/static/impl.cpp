@@ -76,6 +76,11 @@ void OptimizeGraph(
   FuseInferenceOpsForSparseNN(graph);
   UseVariadicCat(graph);
   UseVariadicStack(graph);
+  UseVariadicOp(
+      graph,
+      c10::Symbol::fromQualString("fb::sigrid_transforms_torch_bind"),
+      c10::Symbol::fromQualString("fb::variadic_sigrid_transforms_torch_bind"),
+      1 /* list_idx */);
   if (opts.enable_out_variant) {
     FuseSignLog1P(graph);
   }
