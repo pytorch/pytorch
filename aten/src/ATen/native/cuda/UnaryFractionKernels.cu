@@ -157,8 +157,16 @@ void round_decimals_kernel_cuda(TensorIteratorBase& iter, int64_t decimals) {
       ScalarType::Half, ScalarType::BFloat16,
       iter.dtype(), "round_cuda",
       [&]() {
-        gpu_kernel(iter, [decimals]GPU_LAMBDA(scalar_t a) -> scalar_t {
-          return round_upto_decimals(a, decimals);
+        bool neg_flag = false;
+        scalar_t ten_pow_decimals;
+        if (decimals < 0) {
+          decimals = -decimals;
+          neg_flag = true;
+        }
+        ten_pow_decimals = static_cast<scalar_t>(std::pow(10, decimals));
+        gpu_kernel(iter, [ten_pow_decimals, neg_flag]GPU_LAMBDA(scalar_t a) -> scalar_t {
+          return neg_flag ? std::rint(a / ten_pow_decimals) * ten_pow_decimals
+                          : std::rint(a * ten_pow_decimals) / ten_pow_decimals;
         });
       });
 }

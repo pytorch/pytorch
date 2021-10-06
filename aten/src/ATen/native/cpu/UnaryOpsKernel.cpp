@@ -660,23 +660,19 @@ static void erfcx_kernel(TensorIteratorBase& iter){
   });
 }
 
-template <typename T>
-inline T round_upto_decimals(T x, int64_t decimals) {
-  if (decimals >= 0) {
-    auto ten_raise_to_decs = static_cast<T>(std::pow(10, decimals));
-    return std::rint(x * ten_raise_to_decs) / ten_raise_to_decs;
-  } else {
-    decimals = -decimals;
-    auto decs = static_cast<T>(std::pow(10, decimals));
-    return std::rint(x / decs) * decs;
-  }
-}
-
 void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
   AT_DISPATCH_FLOATING_TYPES_AND(
       ScalarType::BFloat16, iter.dtype(), "round_cpu", [&]() {
-        cpu_kernel(iter, [decimals](scalar_t a) -> scalar_t {
-          return round_upto_decimals(a, decimals);
+        bool neg_flag = false;
+        scalar_t ten_pow_decimals;
+        if (decimals < 0) {
+          decimals = -decimals;
+          neg_flag = true;
+        }
+        ten_pow_decimals = static_cast<scalar_t>(std::pow(10, decimals));
+        cpu_kernel(iter, [ten_pow_decimals, neg_flag](scalar_t a) -> scalar_t {
+          return neg_flag ? std::rint(a / ten_pow_decimals) * ten_pow_decimals
+                          : std::rint(a * ten_pow_decimals) / ten_pow_decimals;
         });
       });
 }
