@@ -12,11 +12,13 @@ from torch.ao.quantization.fake_quantize import (
     default_fused_wt_fake_quant,
     FusedMovingAvgObsFakeQuantize,
     default_fused_per_channel_wt_fake_quant,
+    default_embedding_fake_quant,
 )
 
 from .observer import (
     HistogramObserver,
     MovingAverageMinMaxObserver,
+    NoopObserver,
     PlaceholderObserver,
     default_debug_observer,
     default_dynamic_quant_observer,
@@ -121,6 +123,9 @@ def get_default_qconfig(backend='fbgemm'):
     else:
         qconfig = default_qconfig
     return qconfig
+
+default_embedding_qat_qconfig = QConfig(activation=NoopObserver,
+                                        weight=default_embedding_fake_quant)
 
 def get_default_qat_qconfig(backend='fbgemm', version=1):
     # Histogram observer is too slow for quantization aware training

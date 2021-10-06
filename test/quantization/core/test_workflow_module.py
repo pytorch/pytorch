@@ -1132,13 +1132,8 @@ class TestFusedObsFakeQuantModule(TestCase):
 
         model = Model()
         indices = torch.randint(0, 10, (5, 12))
-        float_qparams_fakequant = FakeQuantize.with_args(observer=PerChannelMinMaxObserver,
-                                                         qscheme=torch.per_channel_affine_float_qparams,
-                                                         ch_axis=0,
-                                                         memoryless=True)
-        float_qparams_qconfig = QConfig(activation=NoopObserver,
-                                        weight=float_qparams_fakequant)
-        model.qconfig = float_qparams_qconfig
+
+        model.qconfig = torch.ao.quantization.default_embedding_qat_qconfig
 
         quant_model = torch.quantization.prepare_qat(model)
 

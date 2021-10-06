@@ -4,6 +4,7 @@ from torch.ao.quantization.observer import (
     MovingAverageMinMaxObserver,
     HistogramObserver,
     MovingAveragePerChannelMinMaxObserver,
+    PerChannelMinMaxObserver,
     _with_args,
 )
 import re
@@ -344,6 +345,12 @@ default_per_channel_weight_fake_quant = FakeQuantize.with_args(observer=MovingAv
                                                                qscheme=torch.per_channel_symmetric,
                                                                reduce_range=False,
                                                                ch_axis=0)
+
+default_embedding_fake_quant = FakeQuantize.with_args(observer=PerChannelMinMaxObserver,
+                                                      qscheme=torch.per_channel_affine_float_qparams,
+                                                      ch_axis=0,
+                                                      memoryless=True)
+
 default_histogram_fake_quant = FakeQuantize.with_args(observer=HistogramObserver,
                                                       quant_min=0,
                                                       quant_max=255,
