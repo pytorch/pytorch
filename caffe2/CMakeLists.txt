@@ -1142,9 +1142,6 @@ endif()
         ${TORCH_ROOT}/test/mobile/nnc
         ${CMAKE_BINARY_DIR}/test_mobile_nnc
       )
-
-      add_subdirectory(${TORCH_ROOT}/test/cpp/lazy
-                       ${CMAKE_BINARY_DIR}/test_lazy)
     endif()
   endif()
 
