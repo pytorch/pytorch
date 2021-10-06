@@ -140,6 +140,29 @@ void round_kernel_cuda(TensorIteratorBase& iter) {
       });
 }
 
+template <typename T>
+inline C10_HOST_DEVICE T round_upto_decimals(T x, int64_t decimals) {
+    if (decimals >= 0) {
+        auto ten_raise_to_decs = static_cast<T>(std::pow(10, decimals));
+        return std::rint(x * ten_raise_to_decs) / ten_raise_to_decs;
+    } else {
+        decimals = -decimals;
+        auto ten_raise_to_decs = static_cast<T>(std::pow(10, decimals));
+        return std::rint(x / ten_raise_to_decs) * ten_raise_to_decs;
+    }
+}
+
+void round_decimals_kernel_cuda(TensorIteratorBase& iter, int64_t decimals) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half, ScalarType::BFloat16,
+      iter.dtype(), "round_cuda",
+      [&]() {
+        gpu_kernel(iter, [decimals]GPU_LAMBDA(scalar_t a) -> scalar_t {
+          return round_upto_decimals(a, decimals);
+        });
+      });
+}
+
 // We manually overload trunc because std::trunc does not work with std::complex types and ROCm.
 template <typename scalar_t>
 __host__ __device__ static inline scalar_t trunc_wrapper(scalar_t a) {
@@ -174,6 +197,7 @@ REGISTER_DISPATCH(frac_stub, &frac_kernel_cuda);
 REGISTER_DISPATCH(floor_stub, &floor_kernel_cuda);
 REGISTER_DISPATCH(reciprocal_stub, &reciprocal_kernel_cuda);
 REGISTER_DISPATCH(round_stub, &round_kernel_cuda);
+REGISTER_DISPATCH(round_decimals_stub, &round_decimals_kernel_cuda);
 REGISTER_DISPATCH(trunc_stub, &trunc_kernel_cuda);
 
 }} // namespace at::native
