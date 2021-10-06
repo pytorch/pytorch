@@ -684,8 +684,8 @@ class TestUtilityFuns(TestCase):
         assert next(iter).kind() == "custom_namespace::custom_op"
 
     def test_custom_opsets_gelu(self):
-        def gelu(g, self):
-            return g.op("com.microsoft::Gelu", self).setType(self.type())
+        def gelu(g, self, approximate):
+            return g.op("com.microsoft::Gelu", self, approximate).setType(self.type())
 
         register_custom_op_symbolic("::gelu", gelu, 1)
         model = torch.nn.GELU()
@@ -695,7 +695,7 @@ class TestUtilityFuns(TestCase):
                           opset_version=self.opset_version, custom_opsets={"com.microsoft": 1})
 
         graph = onnx.load(io.BytesIO(f.getvalue()))
-        assert graph.graph.node[0].op_type == "Gelu"
+        assert graph.graph.node[1].op_type == "Gelu"
         assert graph.opset_import[0].version == self.opset_version
         assert graph.opset_import[1].domain == 'com.microsoft'
         assert graph.opset_import[1].version == 1
