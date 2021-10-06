@@ -1785,7 +1785,7 @@ Note:
 Args:
     dim (int): dimension along which to index
     index (Tensor): indices of ``source`` to select from,
-            should have type either `torch.int64` or `torch.int32`
+            should have dtype either `torch.int64` or `torch.int32`
     source (Tensor): the tensor containing values to add
 
 Keyword args:
