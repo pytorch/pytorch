@@ -131,22 +131,7 @@ static PyObject * THPModule_initExtension(PyObject *_unused, PyObject *shm_manag
   auto module = THPObjectPtr(PyImport_ImportModule("torch"));
   if (!module) throw python_error();
 
-  THPDoubleStorage_postInit(module);
-  THPFloatStorage_postInit(module);
-  THPHalfStorage_postInit(module);
-  THPLongStorage_postInit(module);
-  THPIntStorage_postInit(module);
-  THPShortStorage_postInit(module);
-  THPCharStorage_postInit(module);
   THPByteStorage_postInit(module);
-  THPBoolStorage_postInit(module);
-  THPQUInt8Storage_postInit(module);
-  THPQUInt4x2Storage_postInit(module);
-  THPQInt8Storage_postInit(module);
-  THPQInt32Storage_postInit(module);
-  THPBFloat16Storage_postInit(module);
-  THPComplexDoubleStorage_postInit(module);
-  THPComplexFloatStorage_postInit(module);
   THPAutograd_initFunctions();
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -718,19 +703,7 @@ static PyMethodDef TorchMethods[] = {
   {nullptr, nullptr, 0, nullptr}
 };
 
-bool THCPDoubleStorage_init(PyObject *module);
-bool THCPFloatStorage_init(PyObject *module);
-bool THCPHalfStorage_init(PyObject *module);
-bool THCPLongStorage_init(PyObject *module);
-bool THCPIntStorage_init(PyObject *module);
-bool THCPShortStorage_init(PyObject *module);
-bool THCPCharStorage_init(PyObject *module);
 bool THCPByteStorage_init(PyObject *module);
-bool THCPBoolStorage_init(PyObject *module);
-bool THCPBFloat16Storage_init(PyObject *module);
-bool THCPComplexDoubleStorage_init(PyObject *module);
-bool THCPComplexFloatStorage_init(PyObject *module);
-
 void THCPStream_init(PyObject *module);
 void THCPEvent_init(PyObject *module);
 void THCPGraph_init(PyObject *module);
@@ -753,19 +726,7 @@ void initBindings(PyObject *module);
 }} // namespace torch::mlc
 #endif
 
-bool THDPDoubleStorage_init(PyObject *module);
-bool THDPFloatStorage_init(PyObject *module);
-// TODO: fix
-//bool THDPHalfStorage_init(PyObject *module);
-bool THDPLongStorage_init(PyObject *module);
-bool THDPIntStorage_init(PyObject *module);
-bool THDPShortStorage_init(PyObject *module);
-bool THDPCharStorage_init(PyObject *module);
 bool THDPByteStorage_init(PyObject *module);
-bool THDPBoolStorage_init(PyObject *module);
-bool THDPBFloat16Storage_init(PyObject *module);
-bool THDPComplexDoubleStorage_init(PyObject *module);
-bool THDPComplexFloatStorage_init(PyObject *module);
 
 static std::vector<PyMethodDef> methods;
 
@@ -870,41 +831,14 @@ PyObject* initModule() {
 #ifdef USE_MLCOMPUTE
   torch::mlc::init_bindings(module);
 #endif
-  ASSERT_TRUE(THPDoubleStorage_init(module));
-  ASSERT_TRUE(THPFloatStorage_init(module));
-  ASSERT_TRUE(THPHalfStorage_init(module));
-  ASSERT_TRUE(THPLongStorage_init(module));
-  ASSERT_TRUE(THPIntStorage_init(module));
-  ASSERT_TRUE(THPShortStorage_init(module));
-  ASSERT_TRUE(THPCharStorage_init(module));
   ASSERT_TRUE(THPByteStorage_init(module));
-  ASSERT_TRUE(THPBoolStorage_init(module));
-  ASSERT_TRUE(THPQUInt8Storage_init(module));
-  ASSERT_TRUE(THPQInt8Storage_init(module));
-  ASSERT_TRUE(THPQInt32Storage_init(module));
-  ASSERT_TRUE(THPQUInt4x2Storage_init(module));
-  ASSERT_TRUE(THPBFloat16Storage_init(module));
-  ASSERT_TRUE(THPComplexDoubleStorage_init(module));
-  ASSERT_TRUE(THPComplexFloatStorage_init(module));
 
 #ifdef USE_CUDA
   // This will only initialise base classes and attach them to library namespace
   // They won't be ready for real usage until importing cuda module, that will
   // complete the process (but it defines Python classes before calling back into
   // C, so these lines have to execute first)..
-  ASSERT_TRUE(THCPDoubleStorage_init(module));
-  ASSERT_TRUE(THCPFloatStorage_init(module));
-  ASSERT_TRUE(THCPHalfStorage_init(module));
-  ASSERT_TRUE(THCPLongStorage_init(module));
-  ASSERT_TRUE(THCPIntStorage_init(module));
-  ASSERT_TRUE(THCPShortStorage_init(module));
-  ASSERT_TRUE(THCPCharStorage_init(module));
   ASSERT_TRUE(THCPByteStorage_init(module));
-  ASSERT_TRUE(THCPBoolStorage_init(module));
-  ASSERT_TRUE(THCPBFloat16Storage_init(module));
-  ASSERT_TRUE(THCPComplexDoubleStorage_init(module));
-  ASSERT_TRUE(THCPComplexFloatStorage_init(module));
-
   THCPStream_init(module);
   THCPEvent_init(module);
   THCPGraph_init(module);

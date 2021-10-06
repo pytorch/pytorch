@@ -341,10 +341,9 @@ class HashJoinerIterDataPipe(IterDataPipe):
                  source_iterdatapipe: IterDataPipe,
                  map_datapipe: MapDataPipe,
                  key_fn: Callable,
-                 merge_fn: Callable = tuple):
+                 merge_fn: Callable = lambda a, b: (a, b)):
         self.source_iterdatapipe = source_iterdatapipe
         self.map_datapipe = map_datapipe
-        self.map_len = len(map_datapipe)
         self.key_fn = key_fn
         self.merge_fn = merge_fn
         self.length = -1
@@ -354,9 +353,9 @@ class HashJoinerIterDataPipe(IterDataPipe):
             key = self.key_fn(item)
             try:
                 map_item = self.map_datapipe[key]
-                yield self.merge_fn(item, map_item)
             except (KeyError, IndexError):
                 raise KeyError(f"key_fn maps {item} to {key}, which is not a valid key in the given MapDataPipe.")
+            yield self.merge_fn(item, map_item)
 
     def __len__(self) -> int:
         if self.length == -1:

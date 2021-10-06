@@ -1377,6 +1377,49 @@ class TestFunctionalIterDataPipe(TestCase):
         for data2, exp2 in zip(filter_dp, expected_dp6):
             self.assertEqual(data2, exp2)
 
+    def test_hashjoiner_datapipe(self):
+        source_dp = dp.iter.IterableWrapper(range(10))
+        map_dp = MDP(["even", "odd"])
+
+        # Functional Test: ensure the hash join is working and return tuple by default
+        def odd_even(i: int) -> int:
+            return i % 2
+        result_dp = source_dp.hashjoin(map_dp, odd_even)
+
+        def odd_even_string(i: int) -> str:
+            return "odd" if i % 2 else "even"
+
+        expected_res = [(i, odd_even_string(i)) for i in range(10)]
+        self.assertEqual(expected_res, list(result_dp))
+
+        # Functional Test: ensure that a custom merge function works
+        def custom_merge(a, b):
+            return f"{a} is a {b} number."
+
+        result_dp = source_dp.hashjoin(map_dp, odd_even, custom_merge)
+        expected_res2 = [f"{i} is a {odd_even_string(i)} number."for i in range(10)]
+        self.assertEqual(expected_res2, list(result_dp))
+
+        # Functional Test: raises error when key is invalid
+        def odd_even_bug(i: int) -> int:
+            return 2 if i == 0 else i % 2
+
+        result_dp = dp.iter.HashJoiner(source_dp, map_dp, odd_even_bug)
+        it = iter(result_dp)
+        with self.assertRaisesRegex(KeyError, "is not a valid key in the given MapDataPipe"):
+            next(it)
+
+        # Reset Test:
+        n_elements_before_reset = 4
+        result_dp = source_dp.hashjoin(map_dp, odd_even)
+        res_before_reset, res_after_reset = reset_after_n_next_calls(result_dp, n_elements_before_reset)
+        self.assertEqual(expected_res[:n_elements_before_reset], res_before_reset)
+        self.assertEqual(expected_res, res_after_reset)
+
+        # __len__ Test: returns the length of source DataPipe
+        result_dp = source_dp.hashjoin(map_dp, odd_even)
+        self.assertEqual(len(source_dp), len(result_dp))
+
     def test_sampler_datapipe(self):
         input_dp = dp.iter.IterableWrapper(range(10))
         # Default SequentialSampler
