@@ -39,7 +39,8 @@ import tempfile
 import json
 import __main__  # type: ignore[import]
 import errno
-from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union
+import ctypes
+from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union, List
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -1230,7 +1231,8 @@ def check_if_enable(test: unittest.TestCase):
                 "win": IS_WINDOWS,
                 "windows": IS_WINDOWS,
                 "linux": IS_LINUX,
-                "rocm": TEST_WITH_ROCM
+                "rocm": TEST_WITH_ROCM,
+                "asan": TEST_WITH_ASAN
             }
             if platforms == [] or any([platform_to_conditional[platform] for platform in platforms]):
                 raise unittest.SkipTest(
@@ -2811,6 +2813,44 @@ def get_tensors_from(args, kwargs):
                [v for v in kwargs.values() if isinstance(v, Tensor)])
 
 
+# Returns scalar tensor representation of a list of integer byte values
+def bytes_to_scalar(byte_list: List[int], dtype: torch.dtype, device: torch.device):
+    dtype_to_ctype: Dict[torch.dtype, Any] = {
+        torch.int8: ctypes.c_int8,
+        torch.uint8: ctypes.c_uint8,
+        torch.int16: ctypes.c_int16,
+        torch.int32: ctypes.c_int32,
+        torch.int64: ctypes.c_int64,
+        torch.bool: ctypes.c_bool,
+        torch.float32: ctypes.c_float,
+        torch.complex64: ctypes.c_float,
+        torch.float64: ctypes.c_double,
+        torch.complex128: ctypes.c_double,
+    }
+    ctype = dtype_to_ctype[dtype]
+    num_bytes = ctypes.sizeof(ctype)
+
+    def check_bytes(byte_list):
+        for byte in byte_list:
+            assert 0 <= byte <= 255
+
+    if dtype.is_complex:
+        assert len(byte_list) == (num_bytes * 2)
+        check_bytes(byte_list)
+        real = ctype.from_buffer((ctypes.c_byte * num_bytes)(
+            *byte_list[:num_bytes])).value
+        imag = ctype.from_buffer((ctypes.c_byte * num_bytes)(
+            *byte_list[num_bytes:])).value
+        res = real + 1j * imag
+    else:
+        assert len(byte_list) == num_bytes
+        check_bytes(byte_list)
+        res = ctype.from_buffer((ctypes.c_byte * num_bytes)(
+            *byte_list)).value
+
+    return torch.tensor(res, device=device, dtype=dtype)
+
+
 def has_breakpad():
     # We always build with breakpad in CI
     if IS_IN_CI:
@@ -2853,3 +2893,22 @@ def sandcastle_skip_if(condition, reason):
 def dtype_name(dtype):
     """ Returns the pretty name of the dtype (e.g. torch.int64 -> int64). """
     return str(dtype).split('.')[1]
+
+
+def set_single_threaded_if_parallel_tbb(fn):
+    """Set test to be single threaded for parallel tbb.
+
+    See https://github.com/pytorch/pytorch/issues/64571#issuecomment-914691883
+    """
+    if not IS_TBB:
+        return fn
+
+    @wraps(fn)
+    def wrap_fn(*args, **kwargs):
+        num_threads = torch.get_num_threads()
+        torch.set_num_threads(1)
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            torch.set_num_threads(num_threads)
+    return wrap_fn
