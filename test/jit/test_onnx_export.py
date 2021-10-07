@@ -358,7 +358,7 @@ class TestONNXExport(JitTestCase):
     def test_sourcerange_propagation(self):
         class ExpandingModule(torch.nn.Module):
             def __init__(self):
-                super(ExpandingModule, self).__init__()
+                super().__init__()
                 # Will be expanded during ONNX export
                 self.ln = torch.nn.LayerNorm([1])
 
@@ -373,5 +373,4 @@ class TestONNXExport(JitTestCase):
 
         # Ensure that every node in the graph has a valid source range
         for node in graph.nodes():
-            srng = node.sourceRange()
-            assert srng is not None and len(srng) > 0
+            self.assertTrue(node.sourceRange())
