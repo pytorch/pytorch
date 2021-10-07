@@ -149,7 +149,7 @@ class TORCH_CUDA_CU_API SegmentedGroup {
   //! Utility to convert edge vector to value vector
   std::vector<Val*> edgesToVals(const std::vector<SegmentedEdge*>& se_v);
 
-  //! Reset method to call at begining of each
+  //! Reset method to call at beginning of each
   //!  merge node iteration
   void clearTraversalInfo();
 
