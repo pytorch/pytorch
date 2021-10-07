@@ -1,18 +1,31 @@
 import math
 import operator
+from typing import Optional
 
-import torch.fx.experimental.fx_acc.acc_ops as acc_ops
-import torch.fx.experimental.fx_acc.acc_utils as acc_utils
 import numpy as np
 import tensorrt as trt
 import torch
+import torch.fx.experimental.fx_acc.acc_ops as acc_ops
+import torch.fx.experimental.fx_acc.acc_utils as acc_utils
 from torch.fx.experimental.fx2trt.fx2trt import (
     tensorrt_converter,
     torch_dtype_from_trt,
     get_dynamic_dims,
 )
-from typing import Optional
 
+try:
+    TRT_LOGGER = trt.Logger()
+    trt.init_libnvinfer_plugins(TRT_LOGGER, '')
+except AttributeError:
+    pass
+
+def get_trt_plugin(plugin_name, field_collection, version=None, plugin_namespace=""):
+    plugin_registry = trt.get_plugin_registry()
+    plugin_creator = plugin_registry.get_plugin_creator(plugin_name, version, plugin_namespace)
+    plugin = plugin_creator.create_plugin(name=plugin_name, field_collection=field_collection)
+
+    assert plugin is not None, f"Plugin: {plugin_name} could not be fetched"
+    return plugin
 
 def to_numpy(tensor: Optional[torch.Tensor]):
     """
@@ -1637,4 +1650,29 @@ def acc_ops_dequantize(network, target, args, kwargs, name):
     layer = network.add_dequantize(input=input_val, scale=scale)
     layer.name = input_val.name + ".dequant"
     layer.axis = q_axis
+    return layer.get_output(0)
+
+@tensorrt_converter(acc_ops.gelu)
+def acc_ops_gelu(network, target, args, kwargs, name):
+    input_val = kwargs["input"]
+    if not isinstance(input_val, trt.tensorrt.ITensor):
+        raise RuntimeError(
+            f"GELU received input {input_val} that is not part "
+            "of the TensorRT region!"
+        )
+    if network.has_implicit_batch_dimension:
+        raise RuntimeError(
+            "GeLU converter currently doesn't support implicit batch dimension"
+        )
+
+    plugin_name = "CustomGeluPluginDynamic"
+    # type_id 0 for float32, 1 for  float16
+    type_id = trt.PluginField("type_id", np.array(0, dtype=np.int32), trt.PluginFieldType.INT32)
+    field_collection = trt.PluginFieldCollection([type_id])
+    plugin_version = "1"
+
+    plugin = get_trt_plugin(plugin_name, field_collection, plugin_version)
+
+    layer = network.add_plugin_v2([input_val], plugin)
+    layer.name = name
     return layer.get_output(0)
