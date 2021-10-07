@@ -33,7 +33,10 @@ class BaseCppType:
 byteT = BaseCppType('', 'uint8_t')
 charT = BaseCppType('', 'int8_t')
 shortT = BaseCppType('', 'int16_t')
-intT = BaseCppType('', 'int32_t')  # WARNING: THIS IS 32-BIT!!!
+# It would be more symmetric for this to be called intT, but it easy to mix
+# this up with JIT int (which is int64_t in C++), so we intentionally don't
+# define intT to make it obvious when you've stuffed it up
+int32T = BaseCppType('', 'int32_t')
 longT = BaseCppType('', 'int64_t')
 halfT = BaseCppType('at', 'Half')
 doubleT = BaseCppType('', 'double')

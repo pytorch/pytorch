@@ -1,18 +1,31 @@
 import math
 import operator
+from typing import Optional
 
-import torch.fx.experimental.fx_acc.acc_ops as acc_ops
-import torch.fx.experimental.fx_acc.acc_utils as acc_utils
 import numpy as np
 import tensorrt as trt
 import torch
+import torch.fx.experimental.fx_acc.acc_ops as acc_ops
+import torch.fx.experimental.fx_acc.acc_utils as acc_utils
 from torch.fx.experimental.fx2trt.fx2trt import (
     tensorrt_converter,
     torch_dtype_from_trt,
     get_dynamic_dims,
 )
-from typing import Optional
 
+try:
+    TRT_LOGGER = trt.Logger()
+    trt.init_libnvinfer_plugins(TRT_LOGGER, '')
+except AttributeError:
+    pass
+
+def get_trt_plugin(plugin_name, field_collection, version=None, plugin_namespace=""):
+    plugin_registry = trt.get_plugin_registry()
+    plugin_creator = plugin_registry.get_plugin_creator(plugin_name, version, plugin_namespace)
+    plugin = plugin_creator.create_plugin(name=plugin_name, field_collection=field_collection)
+
+    assert plugin is not None, f"Plugin: {plugin_name} could not be fetched"
+    return plugin
 
 def to_numpy(tensor: Optional[torch.Tensor]):
     """
@@ -1554,6 +1567,47 @@ def acc_ops_quantize_per_tensor(network, target, args, kwargs, name):
     layer.name = input_val.name + ".per_tensor_quant"
     return layer.get_output(0)
 
+
+@tensorrt_converter(acc_ops.quantize_per_channel)
+def acc_ops_quantize_per_channel(network, target, args, kwargs, name):
+    input_val = get_trt_tensor(network, kwargs["input"], f"{name}_input")
+
+    if not isinstance(input_val, trt.tensorrt.ITensor):
+        raise RuntimeError(f"{name} received input {input_val} that is not part "
+                           "of the TensorRT region!")
+
+    qparams = acc_utils.get_field_from_acc_out_ty(kwargs["acc_out_ty"], "qparams")
+    q_per_channel_scales = qparams["scale"]
+    q_per_channel_zero_points = qparams["zero_point"]
+    q_per_channel_axis = qparams["axis"]
+    dtype = acc_utils.get_field_from_acc_out_ty(kwargs["acc_out_ty"], "dtype")
+    if dtype not in (torch.quint8, torch.qint8, torch.qint32):
+        raise RuntimeError("Only support (torch.quint8, torch.qint8, torch.qint32) "
+                           f"quantized type in quantize_per_tensor, get {dtype}.")
+
+    # Make sure zero_points are all 0 because only symmetric quantization
+    # is supported in TensorRT
+    if not torch.equal(
+            q_per_channel_zero_points,
+            torch.zeros(q_per_channel_zero_points.shape, dtype=q_per_channel_zero_points.dtype)):
+        raise RuntimeError(f"Only support zero_point == 0, get {q_per_channel_zero_points}")
+
+    if not torch.all(torch.ge(q_per_channel_scales, 0)):
+        raise RuntimeError(f"All scale values must be >= 0, get {q_per_channel_scales}")
+
+    scale_layer = network.add_constant(
+        q_per_channel_scales.shape,
+        trt.Weights(np.ascontiguousarray(q_per_channel_scales, dtype=np.float32)))
+    scale_layer.name = input_val.name + ".per_channel_quant.scale"
+    scale = scale_layer.get_output(0)
+    # assert trt.__version__ > "8.0", "Explicit quantize op is only supported in "
+    # "TensorRT 8.0 or above, current TensorRT version:" + trt.__version__
+    layer = network.add_quantize(input=input_val, scale=scale)
+    layer.axis = q_per_channel_axis
+    layer.name = input_val.name + ".per_channel_quant"
+    return layer.get_output(0)
+
+
 @tensorrt_converter(acc_ops.dequantize)
 def acc_ops_dequantize(network, target, args, kwargs, name):
     input_val = kwargs["input"]
@@ -1572,6 +1626,13 @@ def acc_ops_dequantize(network, target, args, kwargs, name):
         scale_shape = (1,)
         if q_zero_point != 0:
             raise RuntimeError(f"Only support zero_point == 0, get {q_zero_point}")
+    elif qscheme == torch.per_channel_affine:
+        q_scale = qparams["scale"]
+        q_zero_point = qparams["zero_point"]
+        q_axis = qparams["axis"]
+        scale_shape = q_scale.shape
+        if not torch.equal(q_zero_point, torch.zeros(q_zero_point.shape, dtype=q_zero_point.dtype)):
+            raise RuntimeError(f"Only support zero_point == 0, get {q_zero_point}")
     else:
         raise RuntimeError("Unsupported qscheme in dequantize: {qscheme}")
 
@@ -1589,4 +1650,29 @@ def acc_ops_dequantize(network, target, args, kwargs, name):
     layer = network.add_dequantize(input=input_val, scale=scale)
     layer.name = input_val.name + ".dequant"
     layer.axis = q_axis
+    return layer.get_output(0)
+
+@tensorrt_converter(acc_ops.gelu)
+def acc_ops_gelu(network, target, args, kwargs, name):
+    input_val = kwargs["input"]
+    if not isinstance(input_val, trt.tensorrt.ITensor):
+        raise RuntimeError(
+            f"GELU received input {input_val} that is not part "
+            "of the TensorRT region!"
+        )
+    if network.has_implicit_batch_dimension:
+        raise RuntimeError(
+            "GeLU converter currently doesn't support implicit batch dimension"
+        )
+
+    plugin_name = "CustomGeluPluginDynamic"
+    # type_id 0 for float32, 1 for  float16
+    type_id = trt.PluginField("type_id", np.array(0, dtype=np.int32), trt.PluginFieldType.INT32)
+    field_collection = trt.PluginFieldCollection([type_id])
+    plugin_version = "1"
+
+    plugin = get_trt_plugin(plugin_name, field_collection, plugin_version)
+
+    layer = network.add_plugin_v2([input_val], plugin)
+    layer.name = name
     return layer.get_output(0)
