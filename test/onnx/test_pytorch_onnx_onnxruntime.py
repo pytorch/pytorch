@@ -314,7 +314,7 @@ class TestONNXRuntime(unittest.TestCase):
             scripting_remained_onnx_input_idx = remained_onnx_input_idx
             tracing_remained_onnx_input_idx = remained_onnx_input_idx
 
-        if self.is_script_test_enabled:
+        if self.is_script_test_enabled and not isinstance(model, torch.jit.ScriptModule):
             script_model = torch.jit.script(model)
             _run_test(script_model, scripting_remained_onnx_input_idx, flatten=False)
 
