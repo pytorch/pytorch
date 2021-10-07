@@ -15,6 +15,7 @@
 #include "lazy_tensor_core/csrc/ir_util.h"
 #include "lazy_tensor_core/csrc/python_util.h"
 #include "lazy_tensor_core/csrc/tensor_aten_ops.h"
+#include "lazy_tensor_core/csrc/tensor_distributed.h"
 #include "lazy_tensor_core/csrc/tensor_impl.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensor_core/csrc/torch_util.h"
@@ -167,7 +168,7 @@ std::shared_ptr<ir::Value> AllReduceInPlace(
     const std::shared_ptr<ir::Value>& token, double scale,
     const std::vector<std::vector<lazy_tensors::int64>>& replica_groups) {
   std::vector<LazyTensor> xtensors = GetLtcTensors(tensors, /*want_all=*/true);
-  return std::make_shared<ir::Value>(LazyTensor::all_reduce(
+  return std::make_shared<ir::Value>(lazy_tensor_distributed::all_reduce(
       &xtensors, *token, GetReduceType(reduce_type), scale, replica_groups));
 }
 
@@ -177,9 +178,9 @@ std::pair<at::Tensor, std::shared_ptr<ir::Value>> AllReduce(
     const std::vector<std::vector<lazy_tensors::int64>>& replica_groups) {
   LazyTensor result;
   ir::Value new_token;
-  std::tie(result, new_token) =
-      LazyTensor::all_reduce(bridge::GetLtcTensor(input), *token,
-                             GetReduceType(reduce_type), scale, replica_groups);
+  std::tie(result, new_token) = lazy_tensor_distributed::all_reduce(
+      bridge::GetLtcTensor(input), *token, GetReduceType(reduce_type), scale,
+      replica_groups);
   return std::pair<at::Tensor, std::shared_ptr<ir::Value>>(
       bridge::AtenFromLtcTensor(std::move(result)),
       std::make_shared<ir::Value>(new_token));
@@ -192,7 +193,7 @@ std::pair<at::Tensor, std::shared_ptr<ir::Value>> AllToAll(
     const std::vector<std::vector<lazy_tensors::int64>>& replica_groups) {
   LazyTensor result;
   ir::Value new_token;
-  std::tie(result, new_token) = LazyTensor::all_to_all(
+  std::tie(result, new_token) = lazy_tensor_distributed::all_to_all(
       bridge::GetLtcTensor(input), *token, split_dimension, concat_dimension,
       split_count, replica_groups);
   return std::pair<at::Tensor, std::shared_ptr<ir::Value>>(
@@ -206,7 +207,7 @@ std::pair<at::Tensor, std::shared_ptr<ir::Value>> CollectivePermute(
         source_target_pairs) {
   LazyTensor result;
   ir::Value new_token;
-  std::tie(result, new_token) = LazyTensor::collective_permute(
+  std::tie(result, new_token) = lazy_tensor_distributed::collective_permute(
       bridge::GetLtcTensor(input), *token, source_target_pairs);
   return std::pair<at::Tensor, std::shared_ptr<ir::Value>>(
       bridge::AtenFromLtcTensor(std::move(result)),

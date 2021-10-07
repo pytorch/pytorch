@@ -182,37 +182,6 @@ class LazyTensor {
       const std::vector<at::Tensor>& tensors,
       const std::vector<std::string>& devices);
 
-  //////////////////////////////////////////////////////////////////////////////
-  // Special operators follows here, listed in alphabetical order.
-  //////////////////////////////////////////////////////////////////////////////
-  static std::pair<LazyTensor, ir::Value> all_reduce(
-      const LazyTensor& input, const ir::Value& token,
-      AllReduceType reduce_type, double scale,
-      std::vector<std::vector<lazy_tensors::int64>> groups);
-
-  static ir::Value all_reduce_(
-      LazyTensor& input, const ir::Value& token, AllReduceType reduce_type,
-      double scale, std::vector<std::vector<lazy_tensors::int64>> groups);
-
-  static ir::Value all_reduce(
-      std::vector<LazyTensor>* inputs, const ir::Value& token,
-      AllReduceType reduce_type, double scale,
-      std::vector<std::vector<lazy_tensors::int64>> groups);
-
-  static std::pair<LazyTensor, ir::Value> all_to_all(
-      const LazyTensor& input, const ir::Value& token,
-      lazy_tensors::int64 split_dimension, lazy_tensors::int64 concat_dimension,
-      lazy_tensors::int64 split_count,
-      std::vector<std::vector<lazy_tensors::int64>> groups);
-
-  static std::pair<LazyTensor, ir::Value> collective_permute(
-      const LazyTensor& input, const ir::Value& token,
-      std::vector<std::pair<lazy_tensors::int64, lazy_tensors::int64>>
-          source_target_pairs);
-
-  static LazyTensor get_dimensions_size(
-      const LazyTensor& input, std::vector<lazy_tensors::int64> dimensions);
-
  private:
   struct SyncTensorsConfig {
     // Whether we want to force data on the target tensors (hence trimming
