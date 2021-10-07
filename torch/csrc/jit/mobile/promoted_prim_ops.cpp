@@ -166,7 +166,17 @@ void numToTensorBool(Stack& stack) {
   push(stack, at::scalar_to_tensor(b));
 }
 
-static const C10_UNUSED std::array<mobile::prim_op_fn_register, 13> op_reg = {
+void dictIndex(Stack& stack) {
+  auto key = pop(stack);
+  auto dict = pop(stack).toGenericDict();
+  auto value = dict.find(key);
+  if (value == dict.end()) {
+    AT_ERROR("KeyError: ", key);
+  }
+  push(stack, value->value());
+}
+
+static const C10_UNUSED std::array<mobile::prim_op_fn_register, 15> op_reg = {
     mobile::prim_op_fn_register("prim::TupleIndex", tupleIndex),
     mobile::prim_op_fn_register("aten::Bool.Tensor", boolTensor),
     mobile::prim_op_fn_register("aten::format", aten_format),
@@ -179,7 +189,9 @@ static const C10_UNUSED std::array<mobile::prim_op_fn_register, 13> op_reg = {
     mobile::prim_op_fn_register("aten::__isnot__", isNot),
     mobile::prim_op_fn_register("aten::dim", dim),
     mobile::prim_op_fn_register("prim::Uninitialized", unInitialized),
-    mobile::prim_op_fn_register("prim::is_cuda", isCuda)
+    mobile::prim_op_fn_register("prim::is_cuda", isCuda),
+    mobile::prim_op_fn_register("aten::__getitem__.Dict_str", dictIndex),
+    mobile::prim_op_fn_register("prim::unchecked_cast", noop),
     // TODO: (@pavithran) size is overloaded with int[] and Tensor
     // so this throws error expecting int not Tensor
     // mobile::prim_op_fn_register("aten::size", size)
