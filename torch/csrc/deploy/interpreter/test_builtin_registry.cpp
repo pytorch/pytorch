@@ -51,9 +51,7 @@ TEST(BuiltinRegistryTest, SimpleTest) {
   EXPECT_EQ(builtin2, allBuiltinModules[1].second);
 
   std::string expectedBuiltinModulesCSV = "'lib1.builtin1', 'lib1.builtin2'";
-  EXPECT_EQ(
-      expectedBuiltinModulesCSV,
-      BuiltinRegistry::getBuiltinModulesCSV());
+  EXPECT_EQ(expectedBuiltinModulesCSV, BuiltinRegistry::getBuiltinModulesCSV());
 }
 
 } // namespace deploy

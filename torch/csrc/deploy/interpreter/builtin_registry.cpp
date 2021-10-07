@@ -1,7 +1,7 @@
 #include <Python.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/deploy/interpreter/builtin_registry.h>
 #include <fmt/format.h>
+#include <torch/csrc/deploy/interpreter/builtin_registry.h>
 
 namespace torch {
 namespace deploy {
@@ -17,11 +17,10 @@ extern "C" PyObject* initModule(void);
 REGISTER_TORCH_DEPLOY_BUILTIN(cpython_internal, PyImport_FrozenModules);
 REGISTER_TORCH_DEPLOY_BUILTIN(frozenpython, _PyImport_FrozenModules);
 REGISTER_TORCH_DEPLOY_BUILTIN(
-  frozentorch,
-  _PyImport_FrozenModules_torch,
-  "torch._C",
-  initModule
-);
+    frozentorch,
+    _PyImport_FrozenModules_torch,
+    "torch._C",
+    initModule);
 
 BuiltinRegistryItem::BuiltinRegistryItem(
     const char* _name,
@@ -59,7 +58,7 @@ void BuiltinRegistry::runPreInitialization() {
   appendCPythonInittab();
 }
 
-const char *metaPathSetupTemplate = R"PYTHON(
+const char* metaPathSetupTemplate = R"PYTHON(
 import sys
 # We need to register a custom meta path finder because we are registering
 # `torch._C` as a builtin module.
@@ -84,10 +83,7 @@ void BuiltinRegistry::runPostInitialization() {
   std::string replaceKey = "<<<DEPLOY_BUILTIN_MODULES_CSV>>>";
   auto itr = metaPathSetupScript.find(replaceKey);
   if (itr != std::string::npos) {
-    metaPathSetupScript.replace(
-        itr,
-        replaceKey.size(),
-        getBuiltinModulesCSV());
+    metaPathSetupScript.replace(itr, replaceKey.size(), getBuiltinModulesCSV());
   }
   int r = PyRun_SimpleString(metaPathSetupScript.c_str());
   TORCH_INTERNAL_ASSERT(r == 0);
@@ -199,9 +195,14 @@ std::string BuiltinRegistry::getBuiltinModulesCSV() {
   return modulesCSV;
 }
 
-BuiltinRegisterer::BuiltinRegisterer(const char*name, const struct _frozen* frozenModules...) {
+BuiltinRegisterer::BuiltinRegisterer(
+    const char* name,
+    const struct _frozen* frozenModules...) {
   if (allowLibrary && !allowLibrary(name)) {
-    fprintf(stderr, "Skip %s since it's rejected by the allowLibrary method\n", name);
+    fprintf(
+        stderr,
+        "Skip %s since it's rejected by the allowLibrary method\n",
+        name);
     return;
   }
   // gather builtin modules for this lib
