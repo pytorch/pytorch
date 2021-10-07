@@ -245,8 +245,12 @@ Tensor cudnn_convolution_forward(
   TensorArg output{ output_t, "result", 0 };
   convolution_shape_check(c, input, weight, output, padding, stride, dilation, groups);
 
+ // See #4500
   Tensor weight_contig = weight->contiguous(memory_format);
+  // Make sure that NC11 strides follow formula
+  weight_contig.resize_(weight_contig.sizes(), memory_format);
   Tensor input_contig = input->contiguous(memory_format);
+  input_contig.resize_(input_contig.sizes(), memory_format);
 
   raw_cudnn_convolution_forward_out(
       *output, input_contig, weight_contig,
@@ -340,8 +344,13 @@ Tensor cudnn_convolution_backward_input(
   TensorArg grad_input{ grad_input_t, "result", 0 };
   convolution_shape_check(c, grad_input, weight, grad_output, padding, stride, dilation, groups);
 
+  // See #4500
   Tensor weight_contig = weight->contiguous(memory_format);
+  // Make sure that NC11 strides follow formula
+  weight_contig.resize_(weight_contig.sizes(), memory_format);
+
   Tensor grad_output_contig = grad_output->contiguous(memory_format);
+  grad_output_contig.resize_(grad_output_contig.sizes(), memory_format);
 
   raw_cudnn_convolution_backward_input_out(
       *grad_input, grad_output_contig, weight_contig,
@@ -430,9 +439,12 @@ Tensor cudnn_convolution_backward_weight(
   auto layout = cudnn_conv_suggest_memory_format(input_t, grad_output_t);
 
   Tensor grad_output_contig_t = grad_output_t.contiguous(layout);
+  // Make sure that NC11 strides follow formula
+  grad_output_contig_t.resize_(grad_output_contig_t.sizes(), layout);
   TensorArg grad_output_contig{ grad_output_contig_t, "grad_output", 1 };
 
   Tensor input_contig_t = input_t.contiguous(layout);
+  input_contig_t.resize_(input_contig_t.sizes(), layout);
   TensorArg input{ input_contig_t, "input", 2};
 
   checkAllSameType(c, {grad_output_contig, input});
