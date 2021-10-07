@@ -28,7 +28,7 @@ login() {
 
 
 # Only run these steps if not on github actions
-if [[ -n "${GITHUB_ACTIONS}" ]]; then
+if [[ -z "${GITHUB_ACTIONS}" ]]; then
   # Retry on timeouts (can happen on job stampede).
   retry login "${registry}"
   # Logout on exit
