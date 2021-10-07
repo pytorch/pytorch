@@ -860,6 +860,40 @@ class TestFunctionalIterDataPipe(TestCase):
         self.assertEqual(len(input_dp), len(dp2))
         self.assertEqual(len(input_dp), len(dp3))
 
+    def test_mux_datapipe(self):
+
+        # Functional Test: Elements are yielded one at a time from each DataPipe, until they are all exhausted
+        input_dp1 = dp.iter.IterableWrapper(range(4))
+        input_dp2 = dp.iter.IterableWrapper(range(4, 8))
+        input_dp3 = dp.iter.IterableWrapper(range(8, 12))
+        output_dp = input_dp1.mux(input_dp2, input_dp3)
+        expected_output = [0, 4, 8, 1, 5, 9, 2, 6, 10, 3, 7, 11]
+        self.assertEqual(len(expected_output), len(output_dp))
+        self.assertEqual(expected_output, list(output_dp))
+
+        # Functional Test: Uneven input Data Pipes
+        input_dp1 = dp.iter.IterableWrapper([1, 2, 3, 4])
+        input_dp2 = dp.iter.IterableWrapper([10])
+        input_dp3 = dp.iter.IterableWrapper([100, 200, 300])
+        output_dp = input_dp1.mux(input_dp2, input_dp3)
+        expected_output = [1, 10, 100, 2, 200, 3, 300, 4]
+        self.assertEqual(len(expected_output), len(output_dp))
+        self.assertEqual(expected_output, list(output_dp))
+
+        # Functional Test: Empty Data Pipe
+        input_dp1 = dp.iter.IterableWrapper([0, 1, 2, 3])
+        input_dp2 = dp.iter.IterableWrapper([])
+        output_dp = input_dp1.mux(input_dp2)
+        self.assertEqual(len(input_dp1), len(output_dp))
+        self.assertEqual(list(input_dp1), list(output_dp))
+
+        # __len__ Test: raises TypeError when __len__ is called and an input doesn't have __len__
+        input_dp1 = dp.iter.IterableWrapper(range(10))
+        input_dp_no_len = IDP_NoLen(range(10))
+        output_dp = input_dp1.mux(input_dp_no_len)
+        with self.assertRaises(TypeError):
+            len(output_dp)
+
     def test_demux_datapipe(self):
         input_dp = dp.iter.IterableWrapper(range(10))
 
@@ -1556,40 +1590,6 @@ class TestFunctionalMapDataPipe(TestCase):
             self.assertEqual(
                 map_dp[index], torch.tensor(input_dp[index], dtype=torch.int).sum()
             )
-
-    def test_mux_datapipe(self):
-
-        # Test Case: Elements are yielded one at a time from each DataPipe, until they are all exhausted
-        input_dp1 = dp.iter.IterableWrapper(range(4))
-        input_dp2 = dp.iter.IterableWrapper(range(4, 8))
-        input_dp3 = dp.iter.IterableWrapper(range(8, 12))
-        output_dp = input_dp1.mux(input_dp2, input_dp3)
-        expected_output = [0, 4, 8, 1, 5, 9, 2, 6, 10, 3, 7, 11]
-        self.assertEqual(len(expected_output), len(output_dp))
-        self.assertEqual(expected_output, list(output_dp))
-
-        # Test Case: Uneven input Data Pipes
-        input_dp1 = dp.iter.IterableWrapper([1, 2, 3, 4])
-        input_dp2 = dp.iter.IterableWrapper([10])
-        input_dp3 = dp.iter.IterableWrapper([100, 200, 300])
-        output_dp = input_dp1.mux(input_dp2, input_dp3)
-        expected_output = [1, 10, 100, 2, 200, 3, 300, 4]
-        self.assertEqual(len(expected_output), len(output_dp))
-        self.assertEqual(expected_output, list(output_dp))
-
-        # Test Case: Empty Data Pipe
-        input_dp1 = dp.iter.IterableWrapper([0, 1, 2, 3])
-        input_dp2 = dp.iter.IterableWrapper([])
-        output_dp = input_dp1.mux(input_dp2)
-        self.assertEqual(len(input_dp1), len(output_dp))
-        self.assertEqual(list(input_dp1), list(output_dp))
-
-        # Test Case: raises TypeError when __len__ is called and an input doesn't have __len__
-        input_dp1 = dp.iter.IterableWrapper(range(10))
-        input_dp_no_len = IDP_NoLen(range(10))
-        output_dp = input_dp1.mux(input_dp_no_len)
-        with self.assertRaises(TypeError):
-            len(output_dp)
 
 # Metaclass conflict for Python 3.6
 # Multiple inheritance with NamedTuple is not supported for Python 3.9
