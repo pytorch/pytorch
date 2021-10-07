@@ -46,9 +46,6 @@ const string storeKeyActiveCallCount = "ACTIVE_CALLS";
 const string storeKeyReady = "READY";
 static std::atomic<int> barrierId(0);
 
-// A mutex and a cv to guard access to the call counts and watch for changes.
-std::mutex barrierMutex_;
-
 std::tuple<std::string, std::string, std::string> getNextKeyIds() {
   barrierId++;
   std::string processCountKey =
@@ -60,21 +57,6 @@ std::tuple<std::string, std::string, std::string> getNextKeyIds() {
   return std::make_tuple(processCountKey, activeCallCountKey, barrierKey);
 }
 
-// Parse the key value to return, split based on "_"
-std::tuple<int, int> parseKeyValue(string keyValue) {
-  std::string delimiter = "_";
-  int numProcess = std::stoi(keyValue.substr(0, keyValue.find(delimiter)));
-  int totalActiveCalls =
-      std::stoi(keyValue.substr(keyValue.find(delimiter) + 1));
-  return std::make_tuple(numProcess, totalActiveCalls);
-}
-
-// Creates a key value of form "{process_num}_{total_active_client_calls}"
-std::string createKeyValue(int nextProcessNum, int totalActiveCalls) {
-  return std::to_string(nextProcessNum) + "_" +
-      std::to_string(totalActiveCalls);
-}
-
 // Synchronize process with all other agent processes strictly using store
 // Block until all ``RpcAgent``s reach this method.
 // Returns true if there are 0 active calls amongst all rpc agents
@@ -83,7 +65,6 @@ bool syncCallCount(
     ::c10d::PrefixStore store,
     const int worldSize,
     int activeCalls) {
-  std::unique_lock<std::mutex> lock(barrierMutex_);
   std::string processCountKey, activeCallCountKey, readyKey;
   std::tie(processCountKey, activeCallCountKey, readyKey) = getNextKeyIds();
 
