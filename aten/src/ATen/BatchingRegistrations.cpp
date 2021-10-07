@@ -1025,6 +1025,8 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("size.int", static_cast<int64_t (*)(const Tensor&, int64_t)>(native::size));
   m.impl("_add_batch_dim", native::_add_batch_dim);
   m.impl("_remove_batch_dim", native::_remove_batch_dim);
+  m.impl("_make_dual", native::_make_dual);
+  m.impl("is_same_size", native::is_same_size);
 
   m.impl("sum.dim_IntList", sum_batching_rule);
   m.impl("is_complex", native::is_complex);

@@ -4324,6 +4324,27 @@ class TestAutograd(TestCase):
                                 with self.assertRaisesRegex(RuntimeError, fail_msg):
                                     run()
 
+    def test_gradcheck_forward_ad_batched_grad(self):
+        x = torch.rand(2, dtype=torch.double, requires_grad=True)
+
+        # multiple inputs and outputs with non-tensors inputs
+        def fn1(a: torch.Tensor, b: int):
+            return a.clone(), a + 1
+        gradcheck(fn1, (x, 1), check_forward_ad=True, check_batched_grad=True)
+
+        # unrelated inputs: tangent for c is None
+        def fn2(a: torch.Tensor, c: torch.Tensor):
+            return a.clone()
+        gradcheck(fn1, (x, x.clone()), check_forward_ad=True, check_batched_grad=True)
+
+        # We want a test that produces an error for forward-AD + batched grad
+        # but there aren't very many...the example below fails in OpInfo but not here
+        # TODO: figure out why that is the case
+        # x = torch.randn(2, 3, dtype=torch.double, requires_grad=True)
+        # msg = "gradcheck failed while testing batched gradient computation with forward ad"
+        # with self.assertRaisesRegex(RuntimeError, msg):
+        #     gradcheck(torch.einsum, ("ij->i", x), check_forward_ad=True, check_batched_grad=True)
+
     def test_version_counter(self):
         x = torch.randn(1, 2)
 
@@ -7442,6 +7463,25 @@ class TestAutogradFunctional(TestCase):
 
         self.assertEqual(hvp, torch.mm(hes, v.unsqueeze(1)).squeeze(1))
         self.assertEqual(vhp, torch.mm(v.unsqueeze(0), hes).squeeze(0))
+
+class TestAutogradForwardModeBatchedGrad(TestCase):
+    def test_out_of_place_basic(self):
+        # Maybe we can remove these redundant tests once we have OpInfos
+        # For example you should just run python test/test_ops.py -k test_forward_mode_AD_
+        #
+        # The additional value these tests provide it lets us think about
+        # coverage in a more high-level way, i.e., in terms of functionality that
+        # map more directly to the implementation, instead of on a per-op basis
+        # where it may not be immediately obvious what "functionality" a particular
+        # op may be relying on.
+        a = torch.rand(4, 4, dtype=torch.double, requires_grad=True)
+        b = torch.rand(4, 4, dtype=torch.double, requires_grad=True)
+        self.assertTrue(gradcheck(torch.sin, a))
+        self.assertTrue(gradcheck(torch.add, (a, b)))
+
+    def test_out_of_place_not_same_layout(self):
+        # TODO: we need an op that does this
+        pass
 
 class TestAutogradForwardMode(TestCase):
     def tearDown(self):
