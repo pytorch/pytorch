@@ -309,6 +309,27 @@ utility
 
       if should_checkpoint:
         save_checkpoint(checkpoint_path)
+
+9. (Recommended) On worker errors, this tool will summarize the details of the error
+   (e.g. time, rank, host, pid, traceback, etc). On each node, the first error (by timestamp)
+   is heuristically reported as the "Root Cause" error. To get tracebacks as part of this
+   error summary print out, you must decorate your main entrypoint function in your
+   training script as shown in the example below. If not decorated, then the summary
+   will not include the traceback of the exception and will only contain the exitcode.
+   For details on torchelastic error handling see: https://pytorch.org/docs/stable/elastic/errors.html
+
+::
+
+  from torch.distributed.elastic.multiprocessing.errors import record
+
+  @record
+  def main():
+      # do train
+      pass
+
+  if __name__ == "__main__":
+      main()
+
 """
 import logging
 import os
@@ -602,7 +623,7 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
     if "OMP_NUM_THREADS" not in os.environ and nproc_per_node > 1:
         omp_num_threads = 1
         log.warning(
-            f"*****************************************\n"
+            f"\n*****************************************\n"
             f"Setting OMP_NUM_THREADS environment variable for each process to be "
             f"{omp_num_threads} in default, to avoid your system being overloaded, "
             f"please further tune the variable for optimal performance in "
