@@ -356,11 +356,6 @@ class Vectorized<ComplexDbl> {
     return {vec_sqrt(_vec0), vec_sqrt(_vec1)};
   }
 
-  void dump() const {
-    std::cout << _vec0[0] << "," << _vec0[1] << ",";
-    std::cout << _vec1[0] << "," << _vec1[1] << std::endl;
-  }
-
   Vectorized<ComplexDbl> sqrt() const {
     return map(std::sqrt);
   }
