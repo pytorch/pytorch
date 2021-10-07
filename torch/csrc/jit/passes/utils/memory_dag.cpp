@@ -66,16 +66,6 @@ bool MemoryDAG::mayContainAlias(Element* a, Element* b) const {
   return mayContainAliasImpl(a, b);
 }
 
-const MemoryLocations& MemoryDAG::getAllContainedMemoryLocations(
-    const Element* elem) const {
-  if (C10_UNLIKELY(!elem->cachedAllContainedMemoryLocations_.has_value())) {
-    elem->cachedAllContainedMemoryLocations_ = MemoryLocations();
-    collectAllContainedMemoryLocations(
-        elem, *elem->cachedAllContainedMemoryLocations_);
-  }
-  return *elem->cachedAllContainedMemoryLocations_;
-}
-
 void MemoryDAG::collectAllContainedMemoryLocations(
     const Element* elem,
     MemoryLocations& cont) const {
@@ -84,20 +74,6 @@ void MemoryDAG::collectAllContainedMemoryLocations(
   if (cont.test(compIdx)) {
     return;
   }
-
-  if (C10_UNLIKELY(!elem->cachedAllContainedMemoryLocations_.has_value())) {
-    MemoryLocations cache;
-    collectAllContainedMemoryLocationsImpl(elem, cache);
-    elem->cachedAllContainedMemoryLocations_ = std::move(cache);
-  }
-  cont |= *elem->cachedAllContainedMemoryLocations_;
-}
-
-void MemoryDAG::collectAllContainedMemoryLocationsImpl(
-    const Element* elem,
-    MemoryLocations& cont) const {
-  unsigned compIdx = elem->index;
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!cont.test(compIdx));
   cont.set(compIdx);
 
   for (const auto& mem_loc : getMemoryLocations(elem)) {
@@ -110,8 +86,13 @@ void MemoryDAG::collectAllContainedMemoryLocationsImpl(
 }
 
 bool MemoryDAG::mayContainAliasImpl(const Element* a, const Element* b) const {
-  return getAllContainedMemoryLocations(a).intersects(
-      getAllContainedMemoryLocations(b));
+  MemoryLocations all_a_mlocs;
+  MemoryLocations all_b_mlocs;
+
+  collectAllContainedMemoryLocations(a, all_a_mlocs);
+  collectAllContainedMemoryLocations(b, all_b_mlocs);
+
+  return all_a_mlocs.intersects(all_b_mlocs);
 }
 
 bool MemoryDAG::mayContainAlias(
@@ -208,7 +189,6 @@ void MemoryDAG::setWildcards(
   // For every element, if the cache contains `MemoryLocationFoo`, then we must
   // add `WildcardBar` to it.
   for (const std::unique_ptr<Element>& e : this->indexToElementMap_) {
-    e->cachedAllContainedMemoryLocations_.reset();
     if (e->values.empty()) {
       // This element is a wildcard element, we can skip it.
       continue;
