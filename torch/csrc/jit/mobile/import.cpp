@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/parse_bytecode.h>
+#include <torch/csrc/jit/mobile/parse_operators.h>
 
 #include <ATen/core/ivalue.h>
 #include <c10/util/ScopeExit.h>
@@ -87,16 +88,6 @@ using caffe2::serialize::ReadAdapterInterface;
 
 OpCode parseOpCode(const char* str);
 
-std::string operator_str(
-    const std::string& name,
-    const std::string& overloadname) {
-  std::string result = name;
-  if (!overloadname.empty()) {
-    result += "." + overloadname;
-  }
-  return result;
-}
-
 TypePtr resolveTypeNameMobile(
     const c10::QualifiedName& qn,
     std::shared_ptr<CompilationUnit> compilation_unit) {
@@ -128,13 +119,13 @@ c10::StrongTypePtr typeResolverMobile(
 }
 
 c10::intrusive_ptr<c10::ivalue::Object> objLoaderMobile(
-    at::StrongTypePtr type,
-    IValue input,
-    std::shared_ptr<mobile::CompilationUnit> mobile_compilation_unit) {
+    const at::StrongTypePtr& type,
+    const IValue& input,
+    mobile::CompilationUnit& mobile_compilation_unit) {
   auto cls = type.type_->expect<at::ClassType>();
   auto qn = cls->name();
   c10::QualifiedName method_name(qn.value(), "__setstate__");
-  auto setstate = mobile_compilation_unit->find_function(method_name);
+  auto setstate = mobile_compilation_unit.find_function(method_name);
   auto find_custom_class_with_setstate = [&qn]() -> c10::ClassTypePtr {
     auto custom_class_type = torch::jit::getCustomClass(qn->qualifiedName());
     if (custom_class_type && custom_class_type->findMethod("__setstate__")) {
@@ -159,9 +150,7 @@ c10::intrusive_ptr<c10::ivalue::Object> objLoaderMobile(
     auto obj = c10::ivalue::Object::create(type, ndict);
     auto it = dict.begin();
     for (const auto i : c10::irange(ndict)) {
-      std::stringstream name;
-      name << it->key();
-      cls->addOrCheckAttribute(name.str(), it->key().type());
+      cls->addOrCheckAttribute(it->key().toStringRef(), it->key().type());
       obj->setSlot(i, it->value());
       ++it;
     }
@@ -181,19 +170,6 @@ bool isTensorInBytecodeArchive(
 }
 
 namespace {
-void print_unsupported_ops_and_throw(
-    const std::unordered_set<std::string>& unsupported_ops) {
-  std::string error_message("{");
-  for (const auto& op_name : unsupported_ops) {
-    error_message += op_name + ", ";
-  }
-  error_message += "}";
-  TORCH_CHECK(
-      false,
-      "Following ops cannot be found. ",
-      "Check fburl.com/missing_ops for the fix.",
-      error_message);
-}
 
 // The deserializer class which loads the bytecode package from bc files.
 class BytecodeDeserializer final {
@@ -223,17 +199,6 @@ class BytecodeDeserializer final {
       IValue* schemaTable,
       const int64_t& model_version,
       mobile::Function* function);
-  /**
-   * Loads operators by looking them up in the Dispatcher and returns
-   * the set of operator names (with overload) that are not supported
-   * by the current runtime.
-   *
-   * Accepts an operator_cache, which allows you to cache operator
-   * functions for the entire model. This is keyed on
-   * c10::OperatorName. The value may not be what you're looking for
-   * even if the key is the same. You need to call has_same_arg_num()
-   * on the value to ensure that the number of arguments are the same.
-   */
   std::shared_ptr<CompilationUnit> compilation_unit_;
   std::unordered_set<std::string> imported_libs_;
   std::unique_ptr<PyTorchStreamReader> reader_{};
@@ -247,39 +212,6 @@ BytecodeDeserializer::BytecodeDeserializer(
     : compilation_unit_(std::make_shared<CompilationUnit>()),
       reader_(std::move(reader)),
       module_load_options_(module_load_options) {}
-
-std::unordered_set<std::string> load_and_find_unsupported_operator_names(
-    const std::vector<IValue>& ops_list,
-    mobile::Function* function,
-    int64_t model_version,
-    mobile::Function::OperatorCacheType& operator_cache) {
-  std::unordered_set<std::string> unsupported_op_names;
-  // ops_list is the list of operator names that were read in from
-  // bytecode.plk for the method that is currently being processed.
-  for (const auto& op : ops_list) {
-    auto op_item = op.toTuple()->elements();
-    TORCH_CHECK(
-        op_item.size() >= 2,
-        "There should be either two parts (name and overload name), ",
-        "or three parts (name, overload name and number of specified args) ",
-        "for an operator");
-    c10::optional<int> num_args;
-    if (op_item.size() > 2) {
-      num_args = op_item[2].toInt();
-    }
-    auto op_found = function->append_operator(
-        op_item[0].toString()->string(),
-        op_item[1].toString()->string(),
-        num_args,
-        model_version,
-        operator_cache);
-    if (!op_found) {
-      unsupported_op_names.emplace(operator_str(
-          op_item[0].toString()->string(), op_item[1].toString()->string()));
-    }
-  }
-  return unsupported_op_names;
-}
 
 TypePtr BytecodeDeserializer::resolveTypeName(const c10::QualifiedName& qn) {
   return resolveTypeNameMobile(qn, compilation_unit_);
@@ -345,21 +277,6 @@ void BytecodeDeserializer::parseFunctionSchema(
   }
 }
 
-void parseOperators(
-    const std::vector<IValue>& ops_list,
-    const int64_t& model_version,
-    const uint64_t& module_load_options,
-    mobile::Function* function,
-    mobile::Function::OperatorCacheType& operator_cache) {
-  std::unordered_set<std::string> unsupported_op_names =
-      load_and_find_unsupported_operator_names(
-          ops_list, function, model_version, operator_cache);
-  if ((module_load_options & MobileModuleLoadOptions::OPERATOR_CHECK) &&
-      !unsupported_op_names.empty()) {
-    print_unsupported_ops_and_throw(unsupported_op_names);
-  }
-}
-
 void BytecodeDeserializer::parseMethods(
     std::vector<IValue>&& vals,
     c10::optional<std::vector<IValue>>&& debug_handles,
@@ -392,9 +309,6 @@ void BytecodeDeserializer::parseMethods(
         debug_handles->size() == vals.size(),
         "The numbers of bytecode values and debug info values do not match.");
   }
-
-  // A Global Cache for Operator functions across all methods in the model.
-  mobile::Function::OperatorCacheType operator_cache;
 
   // Process all methods in this mobile module.
   for (const auto i : c10::irange(method_i_start, vals.size())) {
@@ -445,11 +359,7 @@ void BytecodeDeserializer::parseMethods(
         function_name, ins_list, debug_handles_m_tuple, function.get());
 
     parseOperators(
-        ops_list,
-        model_version,
-        module_load_options_,
-        function.get(),
-        operator_cache);
+        ops_list, model_version, module_load_options_, function.get());
 
     parseConstants(consts_list, function.get());
 
@@ -507,7 +417,8 @@ mobile::Module BytecodeDeserializer::deserialize(
   bool has_debug_handles{false};
   if (reader_->hasRecord("mobile_debug_handles.pkl")) {
     debug_handles =
-        readArchive("mobile_debug_handles", mcu).toTuple()->elements();
+        std::move(*readArchive("mobile_debug_handles", mcu).toTuple())
+            .elements();
     has_debug_handles = true;
   }
   parseMethods(std::move(bvals), std::move(debug_handles), *mcu);
@@ -528,7 +439,7 @@ c10::IValue BytecodeDeserializer::readArchive(
   };
 
   auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
-    return objLoaderMobile(type, input, mcu);
+    return objLoaderMobile(type, input, *mcu);
   };
 
   bool bytecode_tensor_in_constants_archive =

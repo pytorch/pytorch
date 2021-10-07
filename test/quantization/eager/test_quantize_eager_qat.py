@@ -6,7 +6,7 @@ from torch.nn import Conv2d, BatchNorm2d, ReLU, init
 from torch.nn.intrinsic.qat import ConvBn2d, ConvBnReLU2d
 from torch.nn.modules.utils import _pair
 import torch.nn.quantized as nnq
-from torch.quantization import (
+from torch.ao.quantization import (
     prepare,
     convert,
     prepare_qat,
@@ -112,8 +112,8 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
         for qengine in supported_qengines:
             with override_quantized_engine(qengine):
                 model = TwoLayerLinearModel()
-                model = torch.quantization.QuantWrapper(model)
-                model.qconfig = torch.quantization.get_default_qat_qconfig(qengine)
+                model = torch.ao.quantization.QuantWrapper(model)
+                model.qconfig = torch.ao.quantization.get_default_qat_qconfig(qengine)
                 model = prepare_qat(model)
 
                 fq_state_dict = model.state_dict()
@@ -128,15 +128,15 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
 
                 # Create model again for eval. Check result using quantized state_dict
                 model = TwoLayerLinearModel()
-                model = torch.quantization.QuantWrapper(model)
-                model.qconfig = torch.quantization.get_default_qat_qconfig(qengine)
-                torch.quantization.prepare_qat(model, inplace=True)
+                model = torch.ao.quantization.QuantWrapper(model)
+                model.qconfig = torch.ao.quantization.get_default_qat_qconfig(qengine)
+                torch.ao.quantization.prepare_qat(model, inplace=True)
                 new_state_dict = model.state_dict()
 
                 # Check to make sure the model after prepare_qat has the same state_dict as original.
                 self.assertEqual(set(fq_state_dict.keys()), set(new_state_dict.keys()))
 
-                torch.quantization.convert(model, inplace=True)
+                torch.ao.quantization.convert(model, inplace=True)
                 model.eval()
                 model.load_state_dict(quant_state_dict)
                 out = model(x)
@@ -145,10 +145,10 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                 # Check model created using prepare has same state dict as quantized state_dict
                 model = TwoLayerLinearModel()
                 model.eval()
-                model = torch.quantization.QuantWrapper(model)
-                model.qconfig = torch.quantization.get_default_qconfig(qengine)
-                torch.quantization.prepare(model, inplace=True)
-                torch.quantization.convert(model, inplace=True)
+                model = torch.ao.quantization.QuantWrapper(model)
+                model.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
+                torch.ao.quantization.prepare(model, inplace=True)
+                torch.ao.quantization.convert(model, inplace=True)
                 self.assertEqual(set(model.state_dict().keys()), set(quant_state_dict.keys()))
                 model.eval()
                 model.load_state_dict(quant_state_dict)
@@ -175,7 +175,7 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
         model.fc.register_forward_pre_hook(fw_pre_hook)
         model.fc.register_forward_hook(fw_hook)
 
-        model.qconfig = torch.quantization.get_default_qat_qconfig(qengine)
+        model.qconfig = torch.ao.quantization.get_default_qat_qconfig(qengine)
         model = prepare_qat(model)
 
         def checkHooksIsPresent(model, before_convert=True):
@@ -194,14 +194,14 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
         checkHooksIsPresent(model, True)
         x = torch.rand(2, 5, dtype=torch.float)
         model(x)
-        torch.quantization.convert(model, inplace=True)
+        torch.ao.quantization.convert(model, inplace=True)
         checkHooksIsPresent(model, False)
 
     def test_add_scalar_uses_input_qparams(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.quant = torch.quantization.QuantStub()
+                self.quant = torch.ao.quantization.QuantStub()
                 self.ff = torch.nn.quantized.FloatFunctional()
 
             def forward(self, x):
@@ -210,10 +210,10 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                 return x
 
         m = M()
-        m.qconfig = torch.quantization.default_qconfig
-        mp = torch.quantization.prepare_qat(m)
+        m.qconfig = torch.ao.quantization.default_qconfig
+        mp = torch.ao.quantization.prepare_qat(m)
         mp(torch.randn(4, 4))
-        mq = torch.quantization.convert(mp)
+        mq = torch.ao.quantization.convert(mp)
         res = mq(torch.randn(4, 4))
         eps = 1e-5
         self.assertTrue(torch.abs(mq.quant.scale - res.q_scale()) < eps)
@@ -222,7 +222,7 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.quant = torch.quantization.QuantStub()
+                self.quant = torch.ao.quantization.QuantStub()
                 self.ff = torch.nn.quantized.FloatFunctional()
 
             def forward(self, x):
@@ -231,10 +231,10 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                 return x
 
         m = M()
-        m.qconfig = torch.quantization.default_qconfig
-        mp = torch.quantization.prepare_qat(m)
+        m.qconfig = torch.ao.quantization.default_qconfig
+        mp = torch.ao.quantization.prepare_qat(m)
         mp(torch.randn(4, 4))
-        mq = torch.quantization.convert(mp)
+        mq = torch.ao.quantization.convert(mp)
         res = mq(torch.randn(4, 4))
         eps = 1e-5
         self.assertTrue(torch.abs(mq.quant.scale * 2 - res.q_scale()) < eps)
@@ -473,7 +473,7 @@ class _ReferenceConvBnNd(torch.nn.Conv2d, torch.nn.modules.conv._ConvNd):
     @classmethod
     def from_float(cls, mod, qconfig=None):
         r"""Create a qat module from a float module or qparams_dict
-            Args: `mod` a float module, either produced by torch.quantization utilities
+            Args: `mod` a float module, either produced by torch.ao.quantization utilities
             or directly from user
         """
         assert type(mod) == cls._FLOAT_MODULE, 'qat.' + cls.__name__ + '.from_float only works for ' + \
@@ -604,7 +604,7 @@ class TestConvBNQATModule(TestCase):
                 freeze_bn=True,
                 qconfig=default_qat_qconfig
             ).to(dtype=torch.double)
-            qat_op.apply(torch.quantization.disable_fake_quant)
+            qat_op.apply(torch.ao.quantization.disable_fake_quant)
             if freeze_bn:
                 qat_op.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
             else:
@@ -752,8 +752,8 @@ class TestConvBNQATModule(TestCase):
                 qconfig=default_qat_qconfig
             ).to(dtype=torch.double)
 
-            qat_op.apply(torch.quantization.disable_fake_quant)
-            qat_ref_op.apply(torch.quantization.disable_fake_quant)
+            qat_op.apply(torch.ao.quantization.disable_fake_quant)
+            qat_ref_op.apply(torch.ao.quantization.disable_fake_quant)
 
             # align inputs and internal parameters
             qat_ref_op.weight = torch.nn.Parameter(qat_op.weight.detach().clone())
@@ -786,8 +786,8 @@ class TestConvBNQATModule(TestCase):
                     qat_ref_op.freeze_bn_stats()
 
                 if i > 3:
-                    qat_op.apply(torch.quantization.disable_observer)
-                    qat_ref_op.apply(torch.quantization.disable_observer)
+                    qat_op.apply(torch.ao.quantization.disable_observer)
+                    qat_ref_op.apply(torch.ao.quantization.disable_observer)
 
                 result_ref = qat_ref_op(input)
                 result_actual = qat_op(input_clone)

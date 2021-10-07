@@ -42,8 +42,8 @@ class SignedLog1pBench : public benchmark::Fixture {
   }
 
   void runNNC(benchmark::State& state) {
-    Placeholder input_ph(
-        "input", kFloat, {input_size_int_[0], input_size_int_[1]});
+    BufHandle input_ph(
+        "input", {input_size_int_[0], input_size_int_[1]}, kFloat);
     Tensor abs_result = Compute(
         "aten_abs",
         {{input_size_int_[0], "M"}, {input_size_int_[1], "N"}},
@@ -56,8 +56,8 @@ class SignedLog1pBench : public benchmark::Fixture {
         [&](const VarHandle& m, const VarHandle& n) {
           return log1p(abs_result.load(m, n));
         });
-    Tensor sign_result = computeSign(
-        {input_ph.handle()}, {input_size_int_[0], input_size_int_[1]});
+    Tensor sign_result =
+        computeSign({input_ph}, {input_size_int_[0], input_size_int_[1]});
     Tensor output = Compute(
         "aten_mul",
         {{input_size_int_[0], "M"}, {input_size_int_[1], "N"}},
@@ -90,8 +90,8 @@ class SignedLog1pBench : public benchmark::Fixture {
   }
 
   void runNNCLogVml(benchmark::State& state) {
-    Placeholder input_ph(
-        "input", kFloat, {input_size_int_[0], input_size_int_[1]});
+    BufHandle input_ph(
+        "input", {input_size_int_[0], input_size_int_[1]}, kFloat);
     Tensor abs_result = Compute(
         "aten_abs",
         {{input_size_int_[0], "M"}, {input_size_int_[1], "N"}},
@@ -104,8 +104,8 @@ class SignedLog1pBench : public benchmark::Fixture {
         [&](const VarHandle& m, const VarHandle& n) {
           return log_vml(abs_result.load(m, n) + ExprHandle(1));
         });
-    Tensor sign_result = computeSign(
-        {input_ph.handle()}, {input_size_int_[0], input_size_int_[1]});
+    Tensor sign_result =
+        computeSign({input_ph}, {input_size_int_[0], input_size_int_[1]});
     Tensor output = Compute(
         "aten_mul",
         {{input_size_int_[0], "M"}, {input_size_int_[1], "N"}},
