@@ -243,12 +243,11 @@ class TestOptim(TestCase):
             scheduler_constructors
         )
 
-    def _test_complex_optimizer(self, optimizer):
-        lr = 0.001
+    def _test_complex_optimizer(self, optimizer_constructor):
         complex_param = torch.randn(5, 5, dtype=torch.complex64, requires_grad=True)
-        complex_opt = optimizer([complex_param], lr=lr)
+        complex_opt = optimizer_constructor(complex_param)
         real_param = torch.view_as_real(complex_param).detach().requires_grad_()
-        real_opt = optimizer([real_param], lr=lr)
+        real_opt = optimizer_constructor(real_param)
 
         for i in range(3):
             complex_param.grad = torch.randn_like(complex_param)
@@ -336,7 +335,21 @@ class TestOptim(TestCase):
 
     def test_sgd_complex(self):
         for optimizer in [optim.SGD, optim_mt.SGD]:
-            self._test_complex_optimizer(optimizer)
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.001)
+            )
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.001, momentum=1)
+            )
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.001, momentum=1, weight_decay=1)
+            )
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.001, nesterov=True, momentum=1, weight_decay=1)
+            )
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.001, momentum=1, dampening=0.5, weight_decay=1)
+            )
 
     def test_multi_tensor_optimizers(self):
         if not torch.cuda.is_available():
