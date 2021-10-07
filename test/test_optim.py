@@ -243,6 +243,22 @@ class TestOptim(TestCase):
             scheduler_constructors
         )
 
+    def _test_complex_optimizer(self, optimizer):
+        lr = 0.001
+        complex_param = torch.randn(5, 5, dtype=torch.complex64, requires_grad=True)
+        complex_opt = optimizer([complex_param], lr=lr)
+        real_param = torch.view_as_real(complex_param).detach().requires_grad_()
+        real_opt = optimizer([real_param], lr=lr)
+
+        for i in range(3):
+            complex_param.grad = torch.randn_like(complex_param)
+            real_param.grad = torch.view_as_real(complex_param.grad)
+
+            complex_opt.step()
+            real_opt.step()
+
+            self.assertEqual(torch.view_as_real(complex_param), real_param)
+
     def _build_params_dict(self, weight, bias, **kwargs):
         return [{'params': [weight]}, dict(params=[bias], **kwargs)]
 
@@ -317,6 +333,10 @@ class TestOptim(TestCase):
                 lambda params: optimizer(params, lr=0.005),
                 [lambda opt: StepLR(opt, gamma=0.99999, step_size=300)]
             )
+
+    def test_sgd_complex(self):
+        for optimizer in [optim.SGD, optim_mt.SGD]:
+            self._test_complex_optimizer(optimizer)
 
     def test_multi_tensor_optimizers(self):
         if not torch.cuda.is_available():
