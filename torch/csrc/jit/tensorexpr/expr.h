@@ -214,7 +214,12 @@ class TORCH_API Buf : public ExprNode<Buf> {
       ExprPtr initializer = nullptr,
       ExprPtr qscale = nullptr,
       ExprPtr qzero = nullptr)
-      : Buf(alloc<Var>(name_hint, kHandle), dims, dtype, initializer, qscale, qzero) {}
+      : Buf(alloc<Var>(name_hint, kHandle),
+            dims,
+            dtype,
+            initializer,
+            qscale,
+            qzero) {}
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Buf(VarPtr var,
@@ -260,13 +265,13 @@ class TORCH_API Buf : public ExprNode<Buf> {
     return qscale_;
   };
 
-	void set_qzero(ExprPtr qzero) {
-		qzero_ = qzero;
-	}
+  void set_qzero(ExprPtr qzero) {
+    qzero_ = qzero;
+  }
 
-	void set_qscale(ExprPtr qscale) {
-		qscale_ = qscale;
-	}
+  void set_qscale(ExprPtr qscale) {
+    qscale_ = qscale;
+  }
 
   bool hasConstantDims() const {
     for (auto d : dims_) {
