@@ -206,6 +206,9 @@ The following environment variables are made available to you in your script:
 
 12. ``TORCHELASTIC_RUN_ID`` - Equal to the rendezvous ``run_id`` (e.g. unique job id).
 
+13. ``PYTHON_EXEC`` - System executable override. If provided, the python user script will
+    use the value of ``PYTHON_EXEC`` as executable. The `sys.executable` is used by default.
+
 **Deployment:**
 
 1. (Not needed for the C10d backend) Start the rendezvous backend server and get the endpoint (to be
@@ -642,7 +645,7 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
         cmd_args.append(args.training_script)
     else:
         if with_python:
-            cmd = sys.executable
+            cmd = os.getenv("PYTHON_EXEC", sys.executable)
             cmd_args.append("-u")
             if args.module:
                 cmd_args.append("-m")
