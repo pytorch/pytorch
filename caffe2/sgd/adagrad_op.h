@@ -506,7 +506,7 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
 
     for (auto i = 0; i < n; ++i) {
       auto idx = indices[i];
-      float freq = (count[idx] > 0 && counter_halflife_ > 0)
+      float freq = (counter_halflife_ > 0 && count[idx] > 0)
           ? counter_halflife_ / count[idx]
           : 1.0;
       if (block_size == 1) {
