@@ -2,6 +2,7 @@
 
 #include <torch/csrc/jit/codegen/cuda/index_compute.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
+#include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 
@@ -96,6 +97,10 @@ class TORCH_CUDA_CU_API UnswitchPredicate {
 
   // The predicates that have been generated.
   std::vector<kir::Bool*> predicates_;
+
+  //! Thread predicate for unswitched expressions. Predicate is false
+  //! if this optional value is null.
+  c10::optional<ThreadPredicateMap::PredicateInfo> merged_thread_pred_;
 
   std::vector<kir::ForLoop*> for_loops_;
 };

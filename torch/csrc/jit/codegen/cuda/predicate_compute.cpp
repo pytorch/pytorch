@@ -262,23 +262,25 @@ kir::Bool* UnswitchPredicate::get(
     kir::ForLoop* unrolled_loop) {
   FUSER_PERF_SCOPE("GpuLower::Lower::UnswitchPredicate::get");
 
-  kir::IrBuilder ir_builder(GpuLower::current()->kernel());
+  kir::SimplifyingIrBuilder ir_builder(GpuLower::current()->kernel());
 
   UnswitchPredicate up(outer_loops, unrolled_loop);
 
-  kir::Val* unroll_pred = nullptr;
-  for (auto pred : up.predicates_) {
-    if (pred->isConst() && pred->value().value()) {
-      continue;
-    } else if (unroll_pred == nullptr) {
-      unroll_pred = pred;
-    } else {
-      unroll_pred = ir_builder.andExpr(unroll_pred, pred);
-    }
+  if (!up.merged_thread_pred_.has_value()) {
+    // No intersection in thread predicates.
+    return ir_builder.falseVal();
   }
 
-  return unroll_pred == nullptr ? ir_builder.trueVal()
-                                : unroll_pred->as<kir::Bool>();
+  kir::Val* unswitch_pred = ir_builder.trueVal();
+  for (auto pred : up.predicates_) {
+    unswitch_pred = ir_builder.andExpr(unswitch_pred, pred);
+  }
+
+  kir::Bool* thread_pred = ThreadPredicateMap::getPredicateFromPredicateInfo(
+      up.merged_thread_pred_.value());
+  unswitch_pred = ir_builder.andExpr(unswitch_pred, thread_pred);
+
+  return unswitch_pred->as<kir::Bool>();
 }
 
 void UnswitchPredicate::predicateOn(kir::Expr* tv_expr) {
@@ -290,11 +292,18 @@ void UnswitchPredicate::predicateOn(kir::Expr* tv_expr) {
 
   const auto gpu_lower = GpuLower::current();
 
+  auto out_tv = firstTensorViewOutput(tv_expr);
+
+  auto thread_pred =
+      gpu_lower->threadPredMap().getPredicateInfo(out_tv->fuserTv());
+  if (merged_thread_pred_.has_value()) {
+    merged_thread_pred_ = ThreadPredicateMap::mergeForUnswitch(
+        merged_thread_pred_.value(), thread_pred);
+  }
+
   if (gpu_lower->predicateElimination().canOmitPredicate(tv_expr)) {
     return;
   }
-
-  auto out_tv = firstTensorViewOutput(tv_expr);
 
   auto ref_pred_info =
       Index::getReferenceRootPredicates(out_tv, for_loops_, true);
@@ -366,7 +375,8 @@ void UnswitchPredicate::openIte(kir::IfThenElse* ite) {
 UnswitchPredicate::UnswitchPredicate(
     std::vector<kir::ForLoop*> outer_loops,
     kir::ForLoop* unrolled_loop)
-    : for_loops_(std::move(outer_loops)) {
+    : merged_thread_pred_(ThreadPredicateMap::PredicateInfo()),
+      for_loops_(std::move(outer_loops)) {
   openLoop(unrolled_loop);
 }
 

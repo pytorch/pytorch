@@ -73,7 +73,23 @@ class TORCH_CUDA_CU_API ThreadPredicateMap {
   //! blockBroadcast unless it is predicated by limited_types_
   ParallelTypeBitmap getParallelBroadcastDomains(const TensorView* tv) const;
 
+  //! Get a PredicateInfo for a given tensor. If it's an output of
+  //! a parallel broadcast, unmask the limited_types_ bit of the
+  //! corresponding parallel type since it must join the broadcast
+  //! operation although the valid input is only available at one of
+  //! the threads/blocks.
+  PredicateInfo getPredicateInfo(const TensorView* tv) const;
+
   void print() const;
+
+  //! Merge two instances of PredicateInfo for unswitch predicates.
+  static c10::optional<PredicateInfo> mergeForUnswitch(
+      const PredicateInfo& info_x,
+      const PredicateInfo& info_y);
+
+  //! Generate a Bool value from PredicateInfo.
+  static kir::Bool* getPredicateFromPredicateInfo(
+      const ThreadPredicateMap::PredicateInfo& pred_info);
 
  private:
   // Update the thread_predicates bitset based on provided Expr
@@ -94,13 +110,6 @@ class TORCH_CUDA_CU_API ThreadPredicateMap {
 
   //! Insert a new mapping
   void insert(const TensorView* tv, const PredicateInfo& pred_and_src);
-
-  //! Get a PredicateInfo for a given tensor. If it's an output of
-  //! a parallel broadcast, unmask the limited_types_ bit of the
-  //! corresponding parallel type since it must join the broadcast
-  //! operation although the valid input is only available at one of
-  //! the threads/blocks.
-  PredicateInfo getPredicateInfo(const TensorView* tv) const;
 
  private:
   MapType thread_predicates_;

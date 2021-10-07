@@ -17686,6 +17686,36 @@ __global__ void CUDAGeneratedKernel(Tensor<__half, 4> T0, Tensor<__half, 4> T2, 
   // TORCH_CHECK(output_ref.equal(outputs[0]));
 }
 
+TEST(NVFuserTest, FusionThreadPredicateUnswitch_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeConcreteTensor({10, 1024});
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {1});
+  auto tv2 = add(tv1, new Double(1));
+  auto tv3 = add(tv2, new Double(1));
+
+  fusion.addOutput(tv3);
+
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->computeAt(tv3, -1);
+  tv3->axis(0)->parallelize(ParallelType::Unswitch);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({10, 1024}, options);
+  std::vector<IValue> aten_inputs = {t0};
+  auto outputs = fe.runFusion(aten_inputs);
+
+  auto ref = sum(t0, {1}) + 2;
+
+  testValidate(&fusion, outputs, aten_inputs, {ref}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

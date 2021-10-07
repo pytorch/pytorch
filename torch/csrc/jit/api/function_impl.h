@@ -136,8 +136,9 @@ struct TORCH_API GraphFunction : public Function {
   std::shared_ptr<Graph> graph_; // for debugging and for inlining
 
   // Optimized graph, computed lazily. Used for inlining.
+  // NOLINTNEXTLINE
   mutable c10::optional<std::shared_ptr<Graph>>
-      optimized_graphs_[SpecializationKey::TotalCount];
+      optimized_graphs_[SpecializationKey::TotalCount]; // NOLINT
 
   // GraphFunctions are invokable from multiple threads, so this lock needs to
   // be held when we're initializing graph executor for the first time or
@@ -148,7 +149,7 @@ struct TORCH_API GraphFunction : public Function {
 
   // executor_[0] - autocast off
   // executor_[1] - autocast on
-  GraphExecutor executors_[SpecializationKey::TotalCount];
+  GraphExecutor executors_[SpecializationKey::TotalCount]; // NOLINT
 
   // an optional function that actually creates the method when
   // ensure_defined() is called. This is used by the compiler so
