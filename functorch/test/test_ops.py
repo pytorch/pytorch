@@ -437,7 +437,6 @@ class TestOperators(TestCase):
         xfail('nanmedian'),
         xfail('nanquantile'),
         xfail('nn.functional.adaptive_avg_pool2d'),
-        xfail('nn.functional.avg_pool2d'),
         xfail('nn.functional.conv_transpose2d'),
         xfail('nn.functional.cross_entropy', 'mean'),
         xfail('nn.functional.cross_entropy', 'none'),
