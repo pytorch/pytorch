@@ -497,16 +497,25 @@ RegisterNNCLoweringFunction aten_gelu(
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
        at::Device device) {
-      return computeOneOperand(
+      return computeOneOperandWithCondition(
           "aten_gelu",
           inputs,
           outputShape,
           outputType,
-          [](const ExprHandle& a) {
-            auto m_sqrt1_2 = Cast::make(a.dtype(), M_SQRT1_2);
+          [](const ExprHandle& a, const ExprHandle& approximate) {
             auto one = Cast::make(a.dtype(), 1.);
             auto point_five = Cast::make(a.dtype(), .5);
-            return a * point_five * (one + erf(a * m_sqrt1_2));
+
+            auto m_sqrt1_2 = Cast::make(a.dtype(), M_SQRT1_2);
+            auto gelu = a * point_five * (one + erf(a * m_sqrt1_2));
+
+            auto beta = Cast::make(a.dtype(), M_SQRT2 * M_2_SQRTPI * 0.5);
+            auto kappa = Cast::make(a.dtype(), 0.044715);
+            auto a_cube = a * a * a;
+            auto inner = beta * (a + kappa * a_cube);
+            auto tanh_gelu = point_five * a * (one + tanh(inner));
+
+            return ifThenElse(approximate, gelu, tanh_gelu);
           });
     });
 

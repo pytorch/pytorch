@@ -957,7 +957,6 @@ TEST_F(FunctionalTest, GELU) {
   ASSERT_TRUE(torch::allclose(y, y_exp, 1.4e-06, 1e-05));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, TanhGELU) {
   const auto x = torch::linspace(-3.0, 3.0, 100);
   const auto inner = std::sqrt(2 / M_PI) * (x + 0.044715 * x.pow(3.0));
