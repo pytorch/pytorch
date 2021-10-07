@@ -91,7 +91,6 @@ class BackendWithCompiler : public PyTorchBackendInterface {
     at::Tensor h = val1.toTensor();
 
     c10::List<at::Tensor> output_list;
-    double scalar_val = 1.0;
     for (const auto& token : handle.toList()) {
       IValue val = token;
       auto instruction = val.toTuple()->elements()[0].toStringRef();
@@ -108,8 +107,6 @@ class BackendWithCompiler : public PyTorchBackendInterface {
           // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
           const_val = stod(sub);
         } else if (instruction == "aten::add" || instruction == "aten::sub") {
-          TORCH_CHECK(
-              x.ndimension() == 0, "The backend only support 0-dim tensors.");
           auto y =
               at::detail::empty_cpu(x.sizes(), {}, {}, {}, {}, c10::nullopt);
           if (instruction == "aten::add") {
