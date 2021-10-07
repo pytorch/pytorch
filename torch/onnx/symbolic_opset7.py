@@ -1,4 +1,5 @@
 from torch.onnx.symbolic_helper import _block_list_in_opset, parse_args
+from torch import tensor 
 import torch.onnx.symbolic_helper as sym_help
 
 import torch.onnx.symbolic_opset9 as sym_opset9
@@ -73,6 +74,6 @@ for block_listed_op in block_listed_operators:
 
 @parse_args("v", "f", "f", "v")
 def uniform(g, self, from_, to_, generator, out=None):
-    from_ = g.op("Constant", value_t=torch.tensor(from_, dtype=torch.float))
-    to_ = g.op("Constant", value_t=torch.tensor(to_, dtype=torch.float))
+    from_ = g.op("Constant", value_t=tensor(from_, dtype=torch.float))
+    to_ = g.op("Constant", value_t=tensor(to_, dtype=torch.float))
     return g.op("Uniform", self, from_, to_, generator, upper_i=1)
