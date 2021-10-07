@@ -358,11 +358,11 @@ bool ConcatOp<Context>::RunOnDevice() {
     output_dims[canonical_axis] = output_channels;
   }
 
-  output->Resize(output_dims);
   auto *const output_ptr = static_cast<char*>(output->raw_mutable_data(input_zero.dtype()));
   if(output_ptr == nullptr){
     return true;
   }
+  output->Resize(output_dims);
 
   size_t output_offset = 0;
   for (int i = 0; i < InputSize(); ++i) {
