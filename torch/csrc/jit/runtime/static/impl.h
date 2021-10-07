@@ -160,7 +160,7 @@ class TORCH_API StaticModule {
     return nodes_;
   }
 
-  bool is_optimizable_container_type(Node* n) const {
+  bool is_optimizable_container_type(const Node* n) const {
     auto it = node_is_optimizable_container_type_.find(n);
     return it != node_is_optimizable_container_type_.end();
   }
@@ -210,7 +210,7 @@ class TORCH_API StaticModule {
   FastMap<const Value*, std::vector<const Value*>>
       value_to_same_storage_values_;
 
-  FastSet<Node*> node_is_optimizable_container_type_;
+  FastSet<const Node*> node_is_optimizable_container_type_;
 };
 
 class TORCH_API StaticRuntime {
