@@ -86,7 +86,7 @@ SupportedMobileModelCheckerRegistry register_model_versions;
         out_file.write(source.encode("utf-8"))
 
 
-def main(argv: List[Any]) -> int:
+def main(argv: List[Any]) -> None:
     """This binary generates 3 files:
 
     1. selected_mobile_ops.h: Primary operators used by templated selective build and Kernel Function
