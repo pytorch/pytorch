@@ -818,7 +818,7 @@ at::Tensor _convolution(
     }
     if (input.size(1) == 0) {
       // set channel dim of weight to 0 since input also has channels=0
-      o[input_channels_dim] = 1;
+      o[input_channels_dim] = 0;
       return input.view(o);
     }
     auto weight_view = at::_unsafe_view(weight, -1);
