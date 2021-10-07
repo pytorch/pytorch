@@ -1577,3 +1577,9 @@ def packed_quantized_convrelu2d_mapper(
 @register_acc_op
 def gelu(*, input):
     return torch.nn.functional.gelu(**locals())
+
+@register_acc_op_mapping(op_and_target=("call_function", torch.cumsum))
+@register_acc_op_mapping(op_and_target=("call_method", "cumsum"))
+@register_acc_op
+def cumsum(*, input, dim, dtype=None):
+    return torch.cumsum(**locals())
