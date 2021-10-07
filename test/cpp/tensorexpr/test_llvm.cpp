@@ -1793,6 +1793,19 @@ TEST(LLVM, CustomTarget) {
       ->run(ss.str());
 }
 
+TEST(LLVM, CodeGenKernelFuncName) {
+  BufHandle a("A", {1}, kInt);
+  BufHandle b("B", {1}, kInt);
+  std::vector<int32_t> a_buffer = {42};
+  std::vector<int32_t> b_buffer = {-11};
+
+  auto store = b.store({0}, a.load(0));
+  LLVMCodeGen cg(store, {a, b});
+  // Check that the kernel function name used by LLVMCodeGen
+  // is not empty.
+  ASSERT_NE(cg.kernel_func_name(), "");
+}
+
 } // namespace jit
 } // namespace torch
 
