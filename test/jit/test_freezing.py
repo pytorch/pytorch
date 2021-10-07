@@ -1012,6 +1012,34 @@ class TestFreezing(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "attempted to freeze a module that return itself"):
             m_f = torch._C._freeze_module(m_s._c)
 
+    def test_freeze_module_inlining(self):
+        @torch.jit.script
+        class Obj(object):  # noqa: B903
+            def __init__(self, x: int, y: int):
+                self.x = x
+                self.y = y
+
+        class Mod(nn.Module):
+            def __init__(self):
+                super(Mod, self).__init__()
+                self.obj = Obj(2, 3)
+
+            def forward(self, i: int):
+                print(self.obj)
+                return i
+
+        mod = torch.jit.freeze(torch.jit.script(Mod().eval()))
+        obj = mod.graph.findNode("prim::Constant")
+        self.assertTrue(torch._C._jit_object_is_non_holding(obj))
+
+        buffer = io.BytesIO()
+        torch.jit.save(mod, buffer)
+        buffer.seek(0)
+
+        loaded = torch.jit.load(buffer)
+        obj = mod.graph.findNode("prim::Constant")
+        self.assertTrue(torch._C._jit_object_is_non_holding(obj))
+
     def test_freeze_module_return_sub_module(self):
 
         class FreezeMe(nn.Module):
@@ -1275,11 +1303,11 @@ class TestFreezing(JitTestCase):
         class Parent(nn.Module):
             def __init__(self):
                 super(Parent, self).__init__()
-                self.quant = torch.quantization.QuantStub()
+                self.quant = torch.ao.quantization.QuantStub()
                 self.conv1 = nn.Conv2d(1, 1, 1).to(dtype=torch.float32)
                 self.child = Child()
                 self.child2 = Child()
-                self.dequant = torch.quantization.DeQuantStub()
+                self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x):
                 x = self.quant(x)
@@ -1290,11 +1318,11 @@ class TestFreezing(JitTestCase):
                 return x
 
         def _static_quant(model):
-            qModel = torch.quantization.QuantWrapper(model)
-            qModel.qconfig = torch.quantization.default_qconfig
-            torch.quantization.prepare(qModel, inplace=True)
+            qModel = torch.ao.quantization.QuantWrapper(model)
+            qModel.qconfig = torch.ao.quantization.default_qconfig
+            torch.ao.quantization.prepare(qModel, inplace=True)
             qModel(torch.rand(4, 1, 4, 4, dtype=torch.float32))
-            torch.quantization.convert(qModel, inplace=True)
+            torch.ao.quantization.convert(qModel, inplace=True)
             return model
 
         with override_quantized_engine('fbgemm'):
@@ -1608,7 +1636,7 @@ class TestFrozenOptimizations(JitTestCase):
     @unittest.skipIf(not TEST_CUDA, "Optimization currently only run for GPU")
     def test_linear_concat_complex(self):
         """
-            Testing that the interleaving of multiple optimizations does not 
+            Testing that the interleaving of multiple optimizations does not
             cause errors, and gets optimized as expected
         """
         class ModMultLinear(nn.Module):
@@ -1689,7 +1717,7 @@ class TestFrozenOptimizations(JitTestCase):
                 mod_to_device = eager_mod.cuda()
                 test_vals_to_device = [t.cuda() if isinstance(t, torch.Tensor) else t for t in test_vals]
             else:
-                mod_to_device = eager_mod 
+                mod_to_device = eager_mod
                 test_vals_to_device = test_vals
 
             script_mod = torch.jit.script(mod_to_device)
@@ -1832,6 +1860,54 @@ class TestFrozenOptimizations(JitTestCase):
 
                 self.assertEqual(mod(inp), scripted_mod(inp))
                 self.assertEqual(mod(inp), scripted_mod(inp))
+
+    def test_linear_transpose(self):
+        class ModLinear(torch.nn.Module):
+            def __init__(self):
+                super(ModLinear, self).__init__()
+                self.bias = torch.nn.Parameter(torch.rand(30))
+                self.weight = torch.nn.Parameter(torch.rand([30, 20]))
+
+            def forward(self, x):
+                return torch._C._nn.linear(x, self.weight, self.bias)
+
+        mod_eager = ModLinear().eval()
+        test_val = torch.rand([50, 20])
+        self.check_linear_optimizations_2(mod_eager, 1, 0, "transpose_frozen_linear", (test_val,))
+
+    def test_linear_non_constant_weight(self):
+        class ModLinear(torch.nn.Module):
+            def __init__(self):
+                super(ModLinear, self).__init__()
+                self.bias = torch.nn.Parameter(torch.rand(30))
+
+            def forward(self, x, weight):
+                return torch._C._nn.linear(x, weight, self.bias)
+
+        mod_eager = ModLinear().eval()
+        test_val = torch.rand([50, 20])
+        test_weight = torch.rand([30, 20])
+        self.check_linear_optimizations_2(mod_eager, 1, 1, "transpose_frozen_linear", (test_val, test_weight))
+
+    def check_linear_optimizations_2(self, eager_mod, orig_linears, new_linears, opt_pass, test_vals):
+        # TODO: merge with check_linear_optimizations once both diffs land
+        mod_to_device = eager_mod
+        test_vals_to_device = test_vals
+
+        script_mod = torch.jit.script(mod_to_device)
+        op_graph = script_mod.graph
+
+        FileCheck().check_count("aten::linear", orig_linears, exactly=True).run(op_graph)
+        # successively no-ops with non-const inputs
+        self.run_pass(opt_pass, op_graph)
+        FileCheck().check_count("aten::linear", orig_linears, exactly=True).run(op_graph)
+
+        script_mod = torch.jit.freeze(script_mod)
+        op_graph = script_mod.graph
+        self.run_pass(opt_pass, op_graph)
+        FileCheck().check_count("aten::linear", new_linears, exactly=True).run(op_graph)
+
+        self.assertEqual(mod_to_device(*test_vals_to_device), script_mod(*test_vals_to_device))
 
     @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     def test_collapse_adjacent_conversions(self):
