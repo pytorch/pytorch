@@ -5,7 +5,7 @@ name: periodic-linux-xenial-cuda11.1-py3.6-gcc7
 
 on:
   pull_request:
-    types: [unassigned]
+    types: [opened, synchronize, reopened, unassigned]
   schedule:
     - cron: 45 0,4,8,12,16,20 * * *
   workflow_dispatch:
@@ -394,6 +394,8 @@ jobs:
         run: |
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
+          elif [[ $BUILD_ENVIRONMENT == *onnx* ]]; then
+            TEST_COMMAND=.jenkins/caffe2/test.sh
           else
             TEST_COMMAND=.jenkins/pytorch/test.sh
           fi
@@ -425,6 +427,7 @@ jobs:
             -e http_proxy="http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -e https_proxy="http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -e no_proxy="localhost,127.0.0.1,github.com,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock" \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
+            --ulimit stack=10485760:83886080 \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
             --shm-size="${SHM_SIZE}" \
@@ -463,15 +466,6 @@ jobs:
           # Remove any previous test reports if they exist
           rm -f test-reports-*.zip
           zip -r "test-reports-${FILE_SUFFIX}.zip" test -i '*.xml'
-      - uses: actions/upload-artifact@v2
-        name: Store Test Reports
-        if: always()
-        with:
-          name: test-reports-${{ matrix.config }}
-          retention-days: 14
-          if-no-files-found: error
-          path:
-            test-reports-*.zip
       - uses: seemethere/upload-artifact-s3@v3
         name: Store Test Reports on S3
         if: always()
