@@ -24,14 +24,9 @@ struct TORCH_API GraphFunction : public Function {
 
   void run(Stack& stack) override;
 
-  void run(Stack&& stack) override;
-
   c10::intrusive_ptr<c10::ivalue::Future> runAsync(
       Stack& stack,
       TaskLauncher taskLauncher = at::launch) override;
-
-  IValue operator()(std::vector<IValue> stack, const Kwargs& kwargs = Kwargs())
-      override;
 
   std::shared_ptr<Graph> graph() const {
     return graph_;
@@ -53,10 +48,6 @@ struct TORCH_API GraphFunction : public Function {
     return name_;
   }
 
-  const std::string& name() const override {
-    return name_.name();
-  }
-
   // if this isn't yet defined, run its method_creator function
   void ensure_defined() override;
 
@@ -71,13 +62,6 @@ struct TORCH_API GraphFunction : public Function {
 
   const FunctionSchema& getSchema() const override;
 
-  std::string pretty_print_schema() const override {
-    AT_ASSERT(schema_);
-    std::stringstream ss;
-    ss << *schema_;
-    return ss.str();
-  }
-
   GraphExecutorState getDebugState() {
     return get_executor().getDebugState();
   }
@@ -89,7 +73,7 @@ struct TORCH_API GraphFunction : public Function {
     return true;
   }
 
-  void check_single_output() override {
+  void check_single_output() {
     TORCH_CHECK(
         graph()->outputs().size() == 1,
         "Method (but not graphs in general) require a single output. Use None/Tuple for 0 or 2+ outputs");
