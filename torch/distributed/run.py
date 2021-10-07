@@ -397,7 +397,7 @@ def get_args_parser() -> ArgumentParser:
         "--rdzv_id",
         action=env,
         type=str,
-        default="none",
+        default="",
         help="User-defined group id.",
     )
     parser.add_argument(

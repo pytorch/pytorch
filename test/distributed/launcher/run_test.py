@@ -602,3 +602,23 @@ class ElasticLaunchTest(unittest.TestCase):
     def test_get_override_executable(self):
         os.environ["PYTHON_EXEC"] = "python"
         self._test_launch_user_script_python()
+
+    def test_default_args(self):
+        with patch("torch.distributed.run.elastic_launch") as elastic_launch_mock:
+            launch.main(["--nnodes=1", "--nproc_per_node=1", "test_file.py"])
+            _, kw_args = elastic_launch_mock.call_args
+            config = kw_args["config"]
+            self.assertEqual(1, config.max_nodes)
+            self.assertEqual(1, config.min_nodes)
+            self.assertEqual(1, config.nproc_per_node)
+            self.assertEqual("", config.run_id)
+            self.assertEqual("default", config.role)
+            self.assertEqual("127.0.0.1", config.rdzv_endpoint)
+            self.assertEqual("static", config.rdzv_backend)
+            self.assertDictEqual({"rank": 0, "timeout": 900}, config.rdzv_configs)
+            self.assertEqual(-1, config.rdzv_timeout)
+            self.assertEqual(0, config.max_restarts)
+            self.assertEqual(5, config.monitor_interval)
+            self.assertEqual("spawn", config.start_method)
+            self.assertEqual(None, config.log_dir)
+            self.assertDictEqual({}, config.metrics_cfg)
