@@ -222,7 +222,7 @@ def _nop_compile(x, _):
 
 def _outs_and_grads(fn, inps):
     outs = fn(*inps)
-    [out.sum().backward() for out in outs]
+    [out.sum().backward(retain_graph=True) for out in outs]
     grads = [inp.grad for inp in inps]
     for inp in inps:
         inp.grad = None
