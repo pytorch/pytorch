@@ -145,6 +145,12 @@ Node::Node(OpKind op, OpList operands, lazy_tensors::Shape shape,
   metadata_.scope = GetCurrentScope();
   metadata_.frame_info = GetFrameInfo();
   for (auto& operand : operands) {
+    // Ideally, optional operands should be filtered by the leaf node classes, but it's just much easier to do it here.
+    // TODO(alanwaketan): Find a way to move the below logic to the leaf node classes.
+    if (!operand) {
+      continue;
+    }
+
     AddOperand(operand.node, operand.index);
     hash_ = lazy_tensors::util::HashCombine(hash_, operand.hash());
   }

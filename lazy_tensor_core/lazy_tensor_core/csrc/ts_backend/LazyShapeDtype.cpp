@@ -10,6 +10,7 @@
  * manual intervention to implement compute_shape_{op} and compute_dtype_{op}.
  *
  */
+
 #include "lazy_tensor_core/csrc/ts_backend/LazyShapeDtype.h"
 
 namespace torch_lazy_tensors{
@@ -24,14 +25,28 @@ std::vector<c10::ScalarType> compute_dtype_dropout(const at::Tensor& input, doub
   return {input.scalar_type()};
 }
 
-std::vector<std::vector<int64_t>> compute_shape_layer_norm(const at::Tensor& input, at::IntArrayRef normalized_shape,
-    const c10::optional<at::Tensor>& weight, const c10::optional<at::Tensor>& bias, double eps, bool cudnn_enable) {
-  return {input.sizes().vec()};
+std::vector<std::vector<int64_t>> compute_shape_native_layer_norm(const at::Tensor & input,
+    at::IntArrayRef normalized_shape, const c10::optional<at::Tensor> & weight, const c10::optional<at::Tensor> & bias,
+    double eps) {
+  // Copied from aten/src/ATen/native/layer_norm.cpp::layer_norm_cpu_out.
+  auto input_shape = input.sizes().vec();
+  const size_t axis = input.dim() - normalized_shape.size();
+
+  std::vector<int64_t> stat_shape;
+  for (const auto idx : c10::irange(axis)) {
+    stat_shape.emplace_back(input_shape[idx]);
+  }
+  for (const auto idx : c10::irange(axis, input.dim())) {
+    (void)idx; // Suppress unused variable warning
+    stat_shape.emplace_back(1);
+  }
+
+  return {std::move(input_shape), stat_shape, std::move(stat_shape)};
 }
 
-std::vector<c10::ScalarType> compute_dtype_layer_norm(const at::Tensor& input, at::IntArrayRef normalized_shape,
-    const c10::optional<at::Tensor>& weight, const c10::optional<at::Tensor>& bias, double eps, bool cudnn_enable) {
-  return {input.scalar_type()};
+std::vector<c10::ScalarType> compute_dtype_native_layer_norm(const at::Tensor & input, at::IntArrayRef normalized_shape,
+    const c10::optional<at::Tensor> & weight, const c10::optional<at::Tensor> & bias, double eps) {
+  return {input.scalar_type(), input.scalar_type(), input.scalar_type()};
 }
 
 std::vector<std::vector<int64_t>> compute_shape_mean(const at::Tensor& self, c10::optional<at::ScalarType> dtype) {

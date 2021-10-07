@@ -8,10 +8,10 @@ full_codegen:
   - dropout
   - gelu
   - gelu_backward
-  - layer_norm
   - mean
   - mm
   - mv
+  - native_layer_norm
   - topk
 supported:
   - _log_softmax_backward_data
