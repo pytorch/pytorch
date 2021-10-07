@@ -91,6 +91,9 @@ class ElasticLaunchTest(unittest.TestCase):
         shutil.rmtree(self.test_dir)
 
     def test_launch_user_script_python(self):
+        self._test_launch_user_script_python()
+
+    def _test_launch_user_script_python(self):
         run_id = str(uuid.uuid4().int)
         nnodes = 1
         nproc_per_node = 4
@@ -592,3 +595,10 @@ class ElasticLaunchTest(unittest.TestCase):
             ]
         )
         # nothing to validate, just make sure it runs
+
+    def test_get_default_executable(self):
+        self.assertEqual(sys.executable, launch.get_executable())
+
+    def test_get_override_executable(self):
+        os.environ["PYTHON_EXEC"] = "python"
+        self._test_launch_user_script_python()
