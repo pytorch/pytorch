@@ -87,4 +87,6 @@ if [[ "$BUILD_ENVIRONMENT" == *ort_test2* ]]; then
 fi
 
 # Our CI expects both coverage.xml and .coverage to be within test/
-mv .coverage test/.coverage
+if [ -d .coverage ]; then
+  mv .coverage test/.coverage
+fi
