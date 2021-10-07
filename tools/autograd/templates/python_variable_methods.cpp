@@ -52,6 +52,11 @@ using namespace torch::autograd::utils;
 
 namespace torch { namespace autograd {
 
+// generated return_types start here
+namespace {
+  ${py_return_types}
+}
+
 static PyObject * THPVariable__is_view(PyObject *self, PyObject* args)
 {
   HANDLE_TH_ERRORS

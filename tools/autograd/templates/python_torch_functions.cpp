@@ -70,12 +70,25 @@ static PyMethodDef torch_functions_shard[] = {
   ${py_method_defs}
 };
 
-void gatherTorchFunctions${shard_id}(std::vector<PyMethodDef> &torch_functions) {
+// generated return_types start here
+namespace {
+  ${py_return_types}
+
+  // hold onto generated return type.
+  PyTypeObject* return_types[] = {
+    ${py_return_types_array}
+  };
+}
+
+void gatherTorchFunctionsAndReturnTypes${shard_id}(std::vector<PyMethodDef> &torch_functions, std::vector<PyTypeObject*> &return_types_vec) {
   constexpr size_t num_functions = sizeof(torch_functions_shard) / sizeof(torch_functions_shard[0]);
   torch_functions.insert(
     torch_functions.end(),
     torch_functions_shard,
     torch_functions_shard + num_functions);
+
+  constexpr size_t num_returns = sizeof(return_types) / sizeof(return_types[0]);
+  return_types_vec.insert(return_types_vec.end(), return_types, return_types + num_returns);
 }
 
 // generated methods start here

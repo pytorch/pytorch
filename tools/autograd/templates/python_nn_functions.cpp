@@ -22,6 +22,16 @@ using namespace torch::autograd::utils;
 
 namespace torch { namespace autograd {
 
+// generated return_types start here
+namespace {
+  ${py_return_types}
+
+  // hold onto generated return type.
+  PyTypeObject* return_types[] = {
+    ${py_return_types_array}
+  };
+}
+
 static PyObject* THPNNVariableFunctionsModule = NULL;
 
 static PyObject * THPVariable__parse_to(PyObject* module, PyObject* args, PyObject* kwargs)
@@ -94,6 +104,12 @@ void initNNFunctions(PyObject* module) {
   // steals a reference to nn
   if (PyModule_AddObject(module, "_nn", nn) != 0) {
     throw python_error();
+  }
+
+  auto return_module = PyObject_GetAttrString(module, "_return_types");
+  constexpr size_t num_returns = sizeof(return_types) / sizeof(return_types[0]);
+  for (int i = 0; i < num_returns; i++) {
+    PyModule_AddType(return_module, return_types[i]);
   }
 }
 

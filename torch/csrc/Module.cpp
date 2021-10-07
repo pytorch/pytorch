@@ -836,6 +836,18 @@ PyObject* initModule() {
      methods.data()
   };
   ASSERT_TRUE(module = PyModule_Create(&torchmodule));
+
+  static struct PyModuleDef def = {
+      PyModuleDef_HEAD_INIT, "torch._C._return_types", NULL, -1, {}};
+  PyObject* return_types = PyModule_Create(&def);
+  if (!return_types) {
+    throw python_error();
+  }
+  // steals a reference to linalg
+  if (PyModule_AddObject(module, "_return_types", return_types) != 0) {
+    throw python_error();
+  }
+
   ASSERT_TRUE(THPGenerator_init(module));
   ASSERT_TRUE(THPException_init(module));
   THPSize_init(module);
