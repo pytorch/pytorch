@@ -133,8 +133,7 @@ std::vector<int> soft_nms_cpu_upright(
 
     // Find proposal with max score among remaining proposals
     int max_pos;
-    // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-    auto max_score = GetSubArray(*out_scores, pending).maxCoeff(&max_pos);
+    GetSubArray(*out_scores, pending).maxCoeff(&max_pos);
     int i = pending[max_pos];
     keep.push_back(i);
 
@@ -635,8 +634,7 @@ std::vector<int> soft_nms_cpu_rotated(
 
     // Find proposal with max score among remaining proposals
     int max_pos;
-    // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-    auto max_score = GetSubArray(*out_scores, pending).maxCoeff(&max_pos);
+    GetSubArray(*out_scores, pending).maxCoeff(&max_pos);
     int i = pending[max_pos];
     keep.push_back(i);
 

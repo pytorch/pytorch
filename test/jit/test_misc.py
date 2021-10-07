@@ -218,16 +218,12 @@ class TestMisc(JitTestCase):
             return mod_list[0].forward(x) + mod_list[1].forward(x)
 
         scripted_M_mod = torch.jit.script(M())
-        # Temporarily test empty output because lite interpreter does not support interface call
-        # Replace it with the issubset call when interface call is supported.
-        self.assertTrue(len(torch.jit.export_opnames(scripted_M_mod)) == 0)
-        # self.assertTrue(set(['aten::mul.Scalar', 'aten::mul.Tensor', 'aten::reciprocal']).issubset(
-        #     set(torch.jit.export_opnames(scripted_M_mod))))
+        self.assertTrue(set(['aten::mul.Scalar', 'aten::mul.Tensor', 'aten::reciprocal']).issubset(
+            set(torch.jit.export_opnames(scripted_M_mod))))
 
         scripted_M_mod.sub = torch.jit.script(FooMod())
-        self.assertTrue(len(torch.jit.export_opnames(scripted_M_mod)) == 0)
-        # self.assertTrue(set(['aten::add.Tensor', 'aten::mul.Scalar']).issubset(
-        #     set(torch.jit.export_opnames(scripted_M_mod))))
+        self.assertTrue(set(['aten::add.Tensor', 'aten::mul.Scalar']).issubset(
+            set(torch.jit.export_opnames(scripted_M_mod))))
 
     def test_broadcasting_list(self):
         """
