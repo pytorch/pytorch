@@ -216,8 +216,8 @@ def create_python_bindings(
         py_methods.append(method_impl(name, module, overloads, method=method))
         py_method_defs.append(method_def(name, module, overloads, method=method))
         py_forwards.extend(forward_decls(name, overloads, method=method))
-        py_return_types.append(return_type_def(name, module, overloads, method=method))
-        py_return_types_array.append(return_type_def(name, module, overloads, method=method, array_call=True))
+        py_return_types.append(generate_return_type_def(overloads))
+        py_return_types_array.append(generate_return_type_array(overloads))
 
     fm.write_with_template(filename, filename, lambda: {
         'generated_comment': '@' + f'generated from {fm.template_dir}/{filename}',
@@ -251,8 +251,8 @@ def create_python_bindings_sharded(
             'py_forwards': list(forward_decls(kv[0], kv[1], method=method)),
             'py_methods': [method_impl(kv[0], module, kv[1], method=method)],
             'py_method_defs': [method_def(kv[0], module, kv[1], method=method)],
-            'py_return_types': [return_type_def(kv[0], module, kv[1], method=method)],
-            'py_return_types_array': [return_type_def(kv[0], module, kv[1], method=method, array_call=True)]
+            'py_return_types': [generate_return_type_def(kv[1])],
+            'py_return_types_array': [generate_return_type_array(kv[1])]
         }
 
     fm.write_sharded(
@@ -265,7 +265,7 @@ def create_python_bindings_sharded(
         key_fn=key_func,
         env_callable=env_func,
         num_shards=num_shards,
-        sharded_keys={'py_forwards', 'py_methods', 'py_method_defs', 'py_return_types','py_return_types_array'}
+        sharded_keys={'py_forwards', 'py_methods', 'py_method_defs', 'py_return_types', 'py_return_types_array'}
     )
 
 def load_signatures(
@@ -411,7 +411,34 @@ def gen_namedtuple_typename_key(f: NativeFunction) -> str:
     fieldnames = namedtuple_fieldnames(f.func.returns)
     return '_'.join([name] + fieldnames)
 
-def emit_namedtuple_typedefs(
+def emit_namedtuple_call(
+    overloads: Sequence[PythonSignatureNativeFunctionPair]
+) -> Tuple[List[str], Dict[str, str]]:
+    """
+    Generate block of named tuple type def inits, and add typeref snippets
+    to declarations that use them
+    """
+    typenames: Dict[str, str] = {}    # map from unique name + field name lists to typedef name
+    typedefs: List[str] = []          # typedef declarations and init code
+
+    for overload in overloads:
+        fieldnames = namedtuple_fieldnames(overload.function.func.returns)
+        if not fieldnames:
+            continue
+
+        name = cpp.name(overload.function.func)  # use @with_native_function?
+        tn_key = gen_namedtuple_typename_key(overload.function)
+        typename = typenames.get(tn_key)
+        if typename is None:
+            typename = f'NamedTuple{"" if not typedefs else len(typedefs)}'
+            typenames[tn_key] = typename
+            typedefs.append(f"""\
+static PyTypeObject {typename} = *get_{name}_namedtuple();""")
+
+    return typedefs, typenames
+
+
+def create_namedtuple(
     overloads: Sequence[PythonSignatureNativeFunctionPair]
 ) -> Tuple[List[str], Dict[str, str]]:
     """
@@ -434,18 +461,58 @@ def emit_namedtuple_typedefs(
             fieldsname = f'NamedTuple_fields{"" if not flddefs else len(flddefs)}'
             flddefnames[fn_key] = fieldsname
             fields = ', '.join(f'{{"{fn}", ""}}' for fn in fieldnames)
-            flddefs.append(f"""""")
+
+        name = cpp.name(overload.function.func)  # use @with_native_function?
+        tn_key = gen_namedtuple_typename_key(overload.function)
+        typename = typenames.get(tn_key)
+        # if typename is None and array_call:
+        #     typedefs.append(f"get_{name}_namedtuple(),")
+
+        if typename is None:
+            typename = f'{name}NamedTuple{"" if not typedefs else len(typedefs)}'
+            typenames[tn_key] = typename
+            typedefs.append(f"""\
+PyTypeObject* get_{name}_namedtuple() {{
+    static PyStructSequence_Field {fieldsname}[] = {{ {fields},  {{nullptr}} }};
+    static PyTypeObject {typename};
+    static bool is_initialized = false;
+    static PyStructSequence_Desc desc = {{ "torch.return_types.{name}", nullptr, {fieldsname}, {len(fieldnames)} }};
+    if (!is_initialized) {{
+        PyStructSequence_InitType(&{typename}, &desc);
+        {typename}.tp_repr = (reprfunc)torch::utils::returned_structseq_repr;
+        is_initialized = true;
+    }}
+
+    return &{typename};
+}}
+""")
+
+    return "\n".join(typedefs)
+
+def generate_return_type_def(
+    overloads: Sequence[PythonSignatureNativeFunctionPair],
+) -> str:
+    defs = create_namedtuple(overloads)
+    return defs
+
+def generate_return_type_array(
+    overloads: Sequence[PythonSignatureNativeFunctionPair],
+) -> str:
+    typenames: Dict[str, str] = {}    # map from unique name + field name lists to typedef name
+    typedefs: List[str] = []          # typedef declarations and init code
+
+    for overload in overloads:
+        fieldnames = namedtuple_fieldnames(overload.function.func.returns)
+        if not fieldnames:
+            continue
 
         name = cpp.name(overload.function.func)  # use @with_native_function?
         tn_key = gen_namedtuple_typename_key(overload.function)
         typename = typenames.get(tn_key)
         if typename is None:
-            typename = f'NamedTuple{"" if not typedefs else len(typedefs)}'
-            typenames[tn_key] = typename
-            typedefs.append(f"""\
-static PyTypeObject {typename} = *get_{name}_namedtuple();""")
+            typedefs.append(f"get_{name}_namedtuple(),")
 
-    return flddefs + typedefs, typenames
+    return "\n".join(typedefs)
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -527,7 +594,7 @@ def method_impl(
     """
     pycname = get_pycname(name)
     noarg = is_noarg(overloads)
-    namedtuple_inits, namedtuple_typenames = emit_namedtuple_typedefs(overloads)
+    namedtuple_inits, namedtuple_typenames = emit_namedtuple_call(overloads)
 
     method_header = ['HANDLE_TH_ERRORS']
     method_header += namedtuple_inits
@@ -661,76 +728,6 @@ static PyObject * {pycname}(PyObject* self_, PyObject* args);
         return (f"""\
 static PyObject * {pycname}(PyObject* self_, PyObject* args, PyObject* kwargs);
 """,)
-
-def emit_my_namedtuple_typedefs(
-    overloads: Sequence[PythonSignatureNativeFunctionPair], array_call: bool = False
-) -> Tuple[List[str], Dict[str, str]]:
-    """
-    Generate block of named tuple type def inits, and add typeref snippets
-    to declarations that use them
-    """
-    flddefnames: Dict[str, str] = {}  # map from unique field name lists to field def name
-    flddefs: List[str] = []           # field def declarations
-    typenames: Dict[str, str] = {}    # map from unique name + field name lists to typedef name
-    typedefs: List[str] = []          # typedef declarations and init code
-
-    for overload in overloads:
-        fieldnames = namedtuple_fieldnames(overload.function.func.returns)
-        if not fieldnames:
-            continue
-
-        fn_key = '_'.join(fieldnames)
-        fieldsname = flddefnames.get(fn_key)
-        if fieldsname is None:
-            fieldsname = f'NamedTuple_fields{"" if not flddefs else len(flddefs)}'
-            flddefnames[fn_key] = fieldsname
-            fields = ', '.join(f'{{"{fn}", ""}}' for fn in fieldnames)
-
-        name = cpp.name(overload.function.func)  # use @with_native_function?
-        tn_key = gen_namedtuple_typename_key(overload.function)
-        typename = typenames.get(tn_key)
-        if typename is None and array_call:
-            typedefs.append(f"get_{name}_namedtuple(),")
-
-        if typename is None and not array_call:
-            typename = f'{name}NamedTuple{"" if not typedefs else len(typedefs)}'
-            typenames[tn_key] = typename
-            typedefs.append(f"""\
-PyTypeObject* get_{name}_namedtuple() {{
-    static PyStructSequence_Field {fieldsname}[] = {{ {fields},  {{nullptr}} }};
-    static PyTypeObject {typename};
-    static bool is_initialized = false;
-    static PyStructSequence_Desc desc = {{ "torch.return_types.{name}", nullptr, {fieldsname}, {len(fieldnames)} }};
-    if (!is_initialized){{
-        if (PyStructSequence_InitType2(&{typename}, &desc) != 0) {{
-            std::cout << "ERR" << std::endl;
-            PyErr_Print();
-        }}
-        {typename}.tp_repr = (reprfunc)torch::utils::returned_structseq_repr;
-        is_initialized = true;
-    }}
-    
-    return &{typename};
-}}
-""")
-
-    defs = "\n".join(typedefs)
-    if defs != "":
-        return defs + "\n", typenames
-    else:
-        return defs, typenames
-
-
-def return_type_def(
-    name: BaseOperatorName,
-    module: Optional[str],
-    overloads: Sequence[PythonSignatureNativeFunctionPair],
-    *,
-    method: bool,
-    array_call: bool=False
-) -> str:
-    defs, names = emit_my_namedtuple_typedefs(overloads, array_call)
-    return defs
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
