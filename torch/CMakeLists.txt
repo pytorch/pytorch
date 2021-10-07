@@ -9,13 +9,6 @@ if(NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 endif()
 
-if(BUILD_BINARY)
-  add_library(aot_compiler SHARED
-          ${TORCH_SRC_DIR}/csrc/jit/mobile/nnc/aot_compiler.cpp
-          )
-  install(TARGETS aot_compiler DESTINATION lib)
-endif()
-
 if(NOT BUILD_PYTHON)
   return()
 endif()
