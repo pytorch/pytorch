@@ -1037,7 +1037,6 @@ void TensorPipeAgent::join(bool shutdown) {
     VLOG(1) << "RPC agent for " << workerInfo_.name_
             << " completed all client calls and is entering a barrier";
     syncCallCount(shutdownStore_, worldSize_);
-    VLOG(1) << "Finished barrier for " << workerInfo_.name_;
     {
       std::unique_lock<std::mutex> lock(callCountMutex_);
       // At this point, the count may have become non-zero again. We can't wait
