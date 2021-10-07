@@ -243,6 +243,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/passes/fold_conv_bn.cpp",
     "torch/csrc/jit/passes/frozen_conv_add_relu_fusion.cpp",
     "torch/csrc/jit/passes/frozen_conv_folding.cpp",
+    "torch/csrc/jit/passes/frozen_linear_transpose.cpp",
     "torch/csrc/jit/passes/frozen_ops_to_mkldnn.cpp",
     "torch/csrc/jit/passes/frozen_graph_optimizations.cpp",
     "torch/csrc/jit/passes/remove_expands.cpp",
@@ -348,17 +349,7 @@ core_sources_full = core_sources_full_mobile + [
     "torch/csrc/jit/tensorexpr/external_functions_codegen.cpp",
 ]
 
-lazy_tensor_core_sources = [
-    "torch/csrc/lazy/core/hash.cpp",
-]
-
-libtorch_core_sources = sorted(
-    core_sources_common +
-    core_sources_full +
-    core_trainer_sources +
-    libtorch_profiler_sources +
-    lazy_tensor_core_sources,
-)
+libtorch_core_sources = sorted(core_sources_common + core_sources_full + core_trainer_sources + libtorch_profiler_sources)
 
 # These files are the only ones that are supported on Windows.
 libtorch_distributed_base_sources = [
@@ -441,6 +432,14 @@ jit_sources_full = [
 ]
 
 libtorch_core_jit_sources = sorted(jit_sources_full)
+
+torch_mobile_tracer_sources = [
+    "torch/csrc/jit/mobile/model_tracer/tracer.cpp",
+    "torch/csrc/jit/mobile/model_tracer/TensorUtils.cpp",
+    "torch/csrc/jit/mobile/model_tracer/MobileModelRunner.cpp",
+    "torch/csrc/jit/mobile/model_tracer/OperatorCallTracer.cpp",
+    "torch/csrc/jit/mobile/model_tracer/KernelDTypeTracer.cpp",
+]
 
 torch_mobile_core = [
     # backend_debug_info.cpp provides
