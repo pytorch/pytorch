@@ -1596,56 +1596,40 @@ class TestQuantizedOps(TestCase):
                                  msg=error_message.format(name + '.zero_point', scale,
                                  X_hat.q_zero_point()))
 
-    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
-                                              min_side=1, max_side=6),
-                       qparams=hu.qparams()),
-           k=st.integers(1, 6),
-           dim=st.integers(1, 4),
-           largest=st.booleans(),
-           sorted=st.booleans())
-    def test_qtopk(self, X, k, dim, largest, sorted):
-        X, (scale, zero_point, torch_type) = X
-        qX = torch.quantize_per_tensor(torch.from_numpy(X), scale, zero_point, torch_type)
-        assume(dim < X.ndim)
-        assume(k < X.shape[dim])
+    def test_qtopk(self):
+        x_dims = [3, 4]  # Num elements in the shape
+        sides = [3, 5]  # Side of the tensor generated
+        dims = [0, 1, 2, 3]  # dimension over which to perform topk
+        largest = [False, True]  # Return largest or smallest element
+        sorted = [False, True]  # Return sorted or not
+        dtypes = [torch.qint8, torch.quint8]
+        is_nhwc = [False, True]  # Is input in the NHWC format?
 
-        unquantized_out = torch.topk(qX.dequantize(), k, dim=dim, largest=largest, sorted=sorted)
+        test_cases = itertools.product(x_dims, sides, dims, largest, sorted, dtypes, is_nhwc)
+        k = 2
+        for x_dim, side, dim, larg, sort, dtype, nhwc in test_cases:
+            if nhwc and x_dim != 4:  # NHWC requires 4 dimensions
+                continue
+            if dim >= x_dim:  # Dimension to find top-k for should exist
+                continue
+            shape = [side] * x_dim
+            X, scale, zp = _get_random_tensor_and_q_params(shape, 1.0, dtype)
+            qX = torch.quantize_per_tensor(X, scale, zp, dtype)
 
-        values = torch.quantize_per_tensor(torch.from_numpy(X), scale, zero_point, torch_type)
-        indices = torch.tensor(torch.from_numpy(X)).long()
+            if nhwc:
+                qX = qX.permute([0, 3, 1, 2])
+                X = np.transpose(X, [0, 3, 1, 2])
 
-        quantized_out = torch.topk(qX, k, dim=dim, largest=largest, sorted=sorted)
+            unquantized_out = torch.topk(qX.dequantize(), k, dim=dim, largest=larg, sorted=sort)
 
-        assert(len(unquantized_out) == len(quantized_out))
-        torch.testing.assert_close(quantized_out[0].dequantize(), unquantized_out[0])
-        torch.testing.assert_close(quantized_out[1], unquantized_out[1])
+            values = torch.quantize_per_tensor(X, scale, zp, dtype)
+            indices = torch.tensor(X).long()
 
-    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
-                                              min_side=1, max_side=10),
-                       qparams=hu.qparams()),
-           k=st.integers(1, 10),
-           dim=st.integers(1, 4),
-           largest=st.booleans(),
-           sorted=st.booleans())
-    def test_qtopk_nhwc(self, X, k, dim, largest, sorted):
-        # X is NHWC, we permute to view as NCHW but keep NHWC in memory
-        X, (scale, zero_point, torch_type) = X
-        qX = torch.quantize_per_tensor(torch.from_numpy(X), scale, zero_point, torch_type).permute([0, 3, 1, 2])
-        X = np.transpose(X, [0, 3, 1, 2])
-        assume(dim < X.ndim)
-        assume(k < X.shape[dim])
+            quantized_out = torch.topk(qX, k, dim=dim, largest=larg, sorted=sort)
 
-        unquantized_out = torch.topk(qX.dequantize(), k, dim=dim, largest=largest, sorted=sorted)
-
-        values = torch.quantize_per_tensor(torch.from_numpy(X), scale, zero_point, torch_type)
-        indices = torch.tensor(torch.from_numpy(X)).long()
-
-        quantized_out = torch.topk(qX, k, dim=dim, largest=largest, sorted=sorted)
-
-        assert(len(unquantized_out) == len(quantized_out))
-        torch.testing.assert_close(quantized_out[0].dequantize(), unquantized_out[0])
-        torch.testing.assert_close(quantized_out[1], unquantized_out[1])
-
+            assert(len(unquantized_out) == len(quantized_out))
+            torch.testing.assert_close(quantized_out[0].dequantize(), unquantized_out[0])
+            torch.testing.assert_close(quantized_out[1], unquantized_out[1])
 
     """Tests quantize concatenation (both fused and not)."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
