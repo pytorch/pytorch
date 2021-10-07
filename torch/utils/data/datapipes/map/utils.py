@@ -24,7 +24,7 @@ class SequenceWrapperMapDataPipe(MapDataPipe):
                 self.sequence = copy.deepcopy(sequence)
             except TypeError:
                 warnings.warn(
-                    "The input iterable can not be deepcopied, "
+                    "The input sequence can not be deepcopied, "
                     "please be aware of in-place modification would affect source data"
                 )
                 self.sequence = sequence
