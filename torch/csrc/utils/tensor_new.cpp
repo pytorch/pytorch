@@ -92,12 +92,16 @@ Tensor new_with_tensor(c10::TensorOptions options, at::ScalarType scalar_type, c
   return other.alias();
 }
 
-std::vector<int64_t> compute_sizes(PyObject* seq) {
+std::vector<int64_t> compute_sizes(PyObject* seq, ScalarType scalar_type) {
+  bool is_storage = isStorage(seq);
   std::vector<int64_t> sizes;
   THPObjectPtr handle;
   while (PySequence_Check(seq)) {
     auto length = PySequence_Length(seq);
     if (length < 0) throw python_error();
+    if (is_storage) {
+      length /= elementSize(scalar_type);
+    }
     sizes.push_back(length);
     if (sizes.size() > MAX_DIMS) {
       throw ValueError("too many dimensions '%s'", Py_TYPE(seq)->tp_name);
@@ -218,7 +222,6 @@ Tensor internal_new_from_data(
     bool copy_numpy,
     bool type_inference,
     bool pin_memory = false) {
-
   if (THPUtils_checkString(data)) {
     throw TypeError("new(): invalid data type '%s'", Py_TYPE(data)->tp_name);
   }
@@ -261,7 +264,7 @@ Tensor internal_new_from_data(
   }
 #endif
 
-  auto sizes = compute_sizes(data);
+  auto sizes = compute_sizes(data, scalar_type);
   ScalarType inferred_scalar_type = type_inference ? infer_scalar_type(data) : scalar_type;
   // This exists to prevent us from tracing the call to empty().  The actual
   // autograd code doesn't really matter, because requires_grad is always false
@@ -281,11 +284,24 @@ Tensor internal_new_from_data(
     // what the extensibility mechanism for this function (internal_new_from_data)
     // looks like for mode-based dispatch keys and C++ tensor extensions.
     c10::impl::ExcludeDispatchKeyGuard functorch_guard(c10::DispatchKey::FuncTorchDynamicLayerBackMode);
-    tensor = at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type).pinned_memory(pin_memory));
-    if (c10::multiply_integers(tensor.sizes()) !=0 ) {
-      recursive_store(
-          (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
-          inferred_scalar_type, tensor.dtype().itemsize(), data);
+
+    if (isStorage(data)) {
+      ScalarType storage_scalar_type;
+      bool is_typed_storage = false;
+      Storage storage = createStorageGetType(data, storage_scalar_type, is_typed_storage);
+      TORCH_CHECK(!is_typed_storage || storage_scalar_type == scalar_type,
+          "Expected a Storage of type ", scalar_type,
+          " or an UntypedStorage, but got ", storage_scalar_type);
+      tensor = at::empty(sizes, at::initialTensorOptions().dtype(is_typed_storage ? storage_scalar_type : inferred_scalar_type).pinned_memory(pin_memory).device(storage.device()));
+      tensor.set_(storage);
+
+    } else {
+      tensor = at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type).pinned_memory(pin_memory));
+      if (c10::multiply_integers(tensor.sizes()) !=0 ) {
+        recursive_store(
+            (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
+            inferred_scalar_type, tensor.dtype().itemsize(), data);
+      }
     }
   }
   auto device = device_opt.has_value() ? *device_opt : options.device();
@@ -499,18 +515,17 @@ Tensor legacy_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_t
     at::OptionalDeviceGuard device_guard(deviceOptional);
     return at::empty({0}, build_options(options, scalar_type));
   } else if (r.idx == 1) {
-    THPObjectPtr dtype_attr(PyObject_GetAttrString(r.pyobject(0), "dtype"));
-    if (!dtype_attr) throw python_error();
-    at::ScalarType storage_scalar_type = reinterpret_cast<THPDtype*>(
-        dtype_attr.get())->scalar_type;
-    TORCH_CHECK(
+    at::ScalarType storage_scalar_type;
+    bool is_typed_storage = false;
+    at::Storage storage = r.storage(0, storage_scalar_type, is_typed_storage);
+    if (storage_scalar_type != at::ScalarType::Undefined && is_typed_storage) {
+      TORCH_CHECK(
         storage_scalar_type == scalar_type,
-        "Expected Storage of type ",
-        scalar_type,
-        " but got type ",
-        storage_scalar_type,
+        "Expected a Storage of type ", scalar_type,
+        " or an UntypedStorage, but got type ", storage_scalar_type,
         " for argument 1 'storage'");
-    return new_with_storage(options, scalar_type, r.storage(0));
+    }
+    return new_with_storage(options, scalar_type, storage);
   } else if (r.idx == 2) {
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return at::unsafeTensorFromTH(cdata, true);
@@ -562,18 +577,17 @@ Tensor legacy_tensor_new(c10::DispatchKey dispatch_key, at::ScalarType scalar_ty
     at::OptionalDeviceGuard device_guard(deviceOptional);
     return at::empty({0}, build_options(options, scalar_type));
   } else if (r.idx == 1) {
-    THPObjectPtr dtype_attr(PyObject_GetAttrString(r.pyobject(0), "dtype"));
-    if (!dtype_attr) throw python_error();
-    at::ScalarType storage_scalar_type = reinterpret_cast<THPDtype*>(
-        dtype_attr.get())->scalar_type;
-    TORCH_CHECK(
+    at::ScalarType storage_scalar_type;
+    bool is_typed_storage = false;
+    at::Storage storage = r.storage(0, storage_scalar_type, is_typed_storage);
+    if (storage_scalar_type != at::ScalarType::Undefined && is_typed_storage) {
+      TORCH_CHECK(
         storage_scalar_type == scalar_type,
-        "Expected Storage of type ",
-        scalar_type,
-        " but got type ",
-        storage_scalar_type,
+        "Expected a Storage of type ", scalar_type,
+        " or an UntypedStorage, but got type ", storage_scalar_type,
         " for argument 1 'storage'");
-    return new_with_storage(options, scalar_type, r.storage(0));
+    }
+    return new_with_storage(options, scalar_type, storage);
   } else if (r.idx == 2) {
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return at::unsafeTensorFromTH(cdata, true);

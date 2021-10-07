@@ -169,17 +169,6 @@ def gen_build_workflows_tree():
         binary_build_definitions.get_nightly_uploads,
     ]
 
-    slow_gradcheck_functions = [
-        pytorch_build_definitions.get_workflow_jobs
-    ]
-    slow_gradcheck_jobs = [f(only_slow_gradcheck=True) for f in slow_gradcheck_functions]
-    slow_gradcheck_jobs.extend(
-        cimodel.data.simple.docker_definitions.get_workflow_jobs(
-            # sort for consistency
-            sorted(generate_required_docker_images(slow_gradcheck_jobs))
-        )
-    )
-
     return {
         "workflows": {
             "binary_builds": {
@@ -193,10 +182,6 @@ def gen_build_workflows_tree():
             "master_build": {
                 "when": r"<< pipeline.parameters.run_master_build >>",
                 "jobs": master_build_jobs,
-            },
-            "slow_gradcheck_build": {
-                "when": r"<< pipeline.parameters.run_slow_gradcheck_build >>",
-                "jobs": slow_gradcheck_jobs,
             },
         }
     }
@@ -221,7 +206,6 @@ YAML_SOURCES = [
     File("job-specs/docker_jobs.yml"),
     Header("Workflows"),
     Treegen(gen_build_workflows_tree, 0),
-    File("workflows/workflows-scheduled-ci.yml"),
     File("workflows/workflows-ecr-gc.yml"),
     File("workflows/workflows-promote.yml"),
 ]
