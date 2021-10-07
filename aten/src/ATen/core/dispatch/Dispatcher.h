@@ -286,7 +286,7 @@ private:
 #if defined(C10_MOBILE)
   LeftRight<ska::flat_hash_map<OperatorName, OperatorHandle>> operatorLookupTable_;
 #else
-  LeftRightForMobile<ska::flat_hash_map<OperatorName, OperatorHandle>> operatorLookupTable_;
+  LeftRightNoOpWrapper<ska::flat_hash_map<OperatorName, OperatorHandle>> operatorLookupTable_;
 #endif
   // Map from namespace to debug string (saying, e.g., where the library was defined)
   ska::flat_hash_map<std::string, std::string> libraries_;
