@@ -48,8 +48,8 @@ fi
 
 docker push "${image}:${tag}"
 
-docker save -o "${IMAGE_NAME}:${tag}.tar" "${image}:${tag}"
-
 if [ -z "${DOCKER_SKIP_S3_UPLOAD:-}" ]; then
+  trap "rm -rf ${IMAGE_NAME}:${tag}.tar" EXIT
+  docker save -o "${IMAGE_NAME}:${tag}.tar" "${image}:${tag}"
   aws s3 cp "${IMAGE_NAME}:${tag}.tar" "s3://ossci-linux-build/pytorch/base/${IMAGE_NAME}:${tag}.tar" --acl public-read
 fi
