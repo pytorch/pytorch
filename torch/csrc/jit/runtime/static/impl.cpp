@@ -76,6 +76,11 @@ void OptimizeGraph(
   FuseInferenceOpsForSparseNN(graph);
   UseVariadicCat(graph);
   UseVariadicStack(graph);
+  UseVariadicOp(
+      graph,
+      c10::Symbol::fromQualString("fb::sigrid_transforms_torch_bind"),
+      c10::Symbol::fromQualString("fb::variadic_sigrid_transforms_torch_bind"),
+      1 /* list_idx */);
   if (opts.enable_out_variant) {
     FuseSignLog1P(graph);
   }
@@ -229,15 +234,10 @@ LivenessMap GetLivenessMap(
     }
 
     // record the relationship between v (Value) and its uses (Node)
-    {
-      // Restrict the scope of live_values_use_chain_v because
-      // later rehashing may cause it to dangle.
-      auto& live_values_use_chain_v = live_values_use_chain.at(v);
-      for (const auto& u : v->uses()) {
-        const auto* node = u.user;
-        live_values_use_chain_v.insert(node);
-        live_nodes_def_chain[node].insert(v);
-      }
+    for (const auto& u : v->uses()) {
+      const auto* node = u.user;
+      live_values_use_chain.at(v).insert(node);
+      live_nodes_def_chain[node].insert(v);
     }
 
     // FIXME(penguin): the following alias refinement seems to assume
