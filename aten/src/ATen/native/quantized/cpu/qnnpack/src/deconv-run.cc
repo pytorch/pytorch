@@ -73,7 +73,6 @@ struct QnnpackDeleter {
 };
 
 enum pytorch_qnnp_status qnnpackDeConv(
-    const conv_param_t& deconv_p,
     const pytorch_qnnp_operator_t deconvolution,
     void* packed_weights,
     const size_t batch_size,
@@ -94,21 +93,18 @@ enum pytorch_qnnp_status qnnpackDeConv(
     return pytorch_qnnp_status_success;
   }
   // Check all invalid parameters
-  const size_t kernel_width = deconv_p.kernel_dims[0];
-  const size_t kernel_height = deconv_p.kernel_dims[1];
+  const size_t kernel_width = deconvolution->kernel_width;
+  const size_t kernel_height = deconvolution->kernel_height;
 
   // Support vars
-  const size_t group_input_channels = deconv_p.group_input_channels;
-  const size_t group_output_channels = deconv_p.group_output_channels;
+  const size_t group_input_channels = deconvolution->group_input_channels;
+  const size_t group_output_channels = deconvolution->group_output_channels;
   const uint32_t mr = pytorch_qnnp_params.q8conv.mr;
   const uint32_t nr = pytorch_qnnp_params.q8conv.nr;
   const uint32_t kr = pytorch_qnnp_params.q8conv.kr;
   const size_t k_stride = (group_input_channels + (kr - 1)) & -kr;
   const size_t n_stride = (group_output_channels + (nr - 1)) & -nr;
 
-  // deconvolution->kernel_zero_point = deconv_p.kernel_zero_points;
-  // const float kernel_scale = deconv_p.kernel_scale;
-  // const float deconvolution_scale = input_scale * kernel_scale / output_scale;
   deconvolution->conv_quantization_params =
       pytorch_qnnp_compute_conv_quantization_params(
           input_zero_point,
@@ -119,15 +115,26 @@ enum pytorch_qnnp_status qnnpackDeConv(
           output_max);
 
   // Setup the kernel
-  const std::array<size_t, 2> output_dims =
-      deconv_p.compute_output_dims({input_width, input_height});
+  const std::array<size_t, 2> output_dims = conv_param_t::compute_output_dims(
+      {input_width, input_height},
+      {deconvolution->input_padding_top,
+       deconvolution->input_padding_left,
+       deconvolution->input_padding_bottom,
+       deconvolution->input_padding_right},
+      {deconvolution->adjustment_width, deconvolution->adjustment_height},
+      {kernel_width, kernel_height},
+      {deconvolution->dilation_width, deconvolution->dilation_height},
+      {deconvolution->stride_width, deconvolution->stride_height},
+      deconvolution->transpose);
   const size_t output_width = output_dims[0];
   const size_t output_height = output_dims[1];
   const size_t kernel_size = kernel_height * kernel_width;
   const size_t output_size = output_height * output_width;
 
-  const size_t input_pixel_stride = deconv_p.input_channels;
-  const size_t output_pixel_stride = deconv_p.output_channels;
+  const size_t input_pixel_stride =
+      deconvolution->group_input_channels * deconvolution->groups;
+  const size_t output_pixel_stride =
+      deconvolution->group_output_channels * deconvolution->groups;
 
   if (deconvolution->input != input ||
       deconvolution->batch_size != batch_size ||
