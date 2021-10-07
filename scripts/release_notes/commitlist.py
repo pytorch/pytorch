@@ -125,6 +125,15 @@ class CommitList:
             if keywordInFile(file, ['torch/quantization', 'test/quantization', 'aten/src/ATen/native/quantized', 'torch/nn/quantiz']):
                 category = 'quantization'
                 break
+            if keywordInFile(file, ['torch/package', 'test/package'] ):
+                category = 'package'
+                break
+            if keywordInFile(file, ['torch/csrc/jit/mobile', 'aten/src/ATen/native/metal', 'test/mobile'] ):
+                category = 'mobile'
+                break
+            if keywordInFile(file, ['aten/src/ATen/native/LinearAlgebra.cpp', 'test/test_linalg.py', 'torch/linalg']):
+                category = 'linalg_frontend'
+                break
 
         return Commit(commit_hash, category, 'Untopiced', title)
 

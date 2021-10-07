@@ -10,18 +10,18 @@ import json
 categories = [
     'Uncategorized',
     'distributed', # done
-    'mobile',
+    'mobile', # done
     'jit',
     'visualization',
     'onnx', # done
     'caffe2', # done
-    'quantization',
+    'quantization', # done
     'amd',
     'cuda',
     'benchmark',
     'profiler',
     'performance_as_product',
-    'package',
+    'package', # done
     'dispatcher',
     'releng',
     'fx', # done
@@ -36,7 +36,8 @@ categories = [
     'build_frontend',
     'memory_format_frontend',
     'foreach_frontend', # done
-    'dataloader_frontend' # done
+    'dataloader_frontend', # done
+    'dataloader_frontend' # mostly covered
 ]
 
 topics = [
