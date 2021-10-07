@@ -409,9 +409,8 @@ def _get_param_count_list(method_graph, args_params):
 def _resolve_and_flatten_graph_inputs(model, args_params):
     sig = inspect.signature(model.forward)
     ordered_list_keys = list(sig.parameters.keys())
-    resolved_args = []
+    resolved_args = []  # type: ignore[var-annotated]
     if isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.ScriptFunction):
-        resolved_args += []
         for i, var in enumerate(args_params):
             if var is not None:
                 resolved_args += [var]
