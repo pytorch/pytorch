@@ -16,6 +16,7 @@
 #include <thread>
 
 #include <fmt/format.h>
+#include <torch/csrc/deploy/interpreter/builtin_registry.h>
 
 namespace py = pybind11;
 using namespace py::literals;
@@ -108,8 +109,6 @@ FOREACH_LIBRARY(DECLARE_LIBRARY_INIT)
 extern "C" PyObject* initModule(void);
 extern "C" __attribute__((__weak__)) PyObject* PyInit_tensorrt(void);
 
-extern "C" struct _frozen _PyImport_FrozenModules[];
-extern "C" struct _frozen _PyImport_FrozenModules_torch[];
 extern "C"
     __attribute__((__weak__)) struct _frozen _PyImport_FrozenModules_tensorrt[];
 
@@ -186,74 +185,17 @@ import warnings
 warnings.simplefilter("ignore")
 )RAW";
 
-// These numbers of modules should not change as long as the cpython version
-// embedded in the build remains fixed
-static const size_t NUM_FROZEN_PY_BUILTIN_MODULES = 6;
-static const size_t NUM_FROZEN_PY_STDLIB_MODULES = 680;
+using torch::deploy::BuiltinRegistry;
+// TODO(shunting) move this to the tensorrt code
+REGISTER_TORCH_DEPLOY_BUILTIN(tensorrt, _PyImport_FrozenModules_tensorrt);
 
-// We need to preserve the existing FrozenModules list, since it includes
-// important importlib machinery. This code is adapted from the similar
-// `PyImport_ExtendInittab`.
-int extendFrozenModules(
-    struct _frozen* frozenpython,
-    struct _frozen* frozentorch,
-    struct _frozen* frozentensorrt) {
-  struct _frozen* p = nullptr;
-  size_t a = 0, b = 0, c = 0, d = 0;
-  int res = 0;
-
-  /* Count the number of entries in both tables */
-  for (a = 0; frozenpython[a].name != nullptr; a++) {
-    // std::cout << "frozenpython[" << a << "]: " << frozenpython[a].name <<
-    // std::endl;
-  }
-  for (b = 0; frozentorch[b].name != nullptr; b++) {
-    // std::cout << "frozentorch[" << b << "]: " << frozentorch[b].name <<
-    // std::endl;
-  }
-  for (c = 0; PyImport_FrozenModules[c].name != nullptr; c++) {
-    // std::cout << "oldfrozen[" << c << "]: " << PyImport_FrozenModules[c].name
-    // << std::endl;
-  }
-  if (frozentensorrt) {
-    for (d = 0; frozentensorrt[d].name != nullptr; d++) {
-      // std::cout << "oldfrozen[" << d << "]: " <<
-      // PyImport_FrozenModules[d].name
-      // << std::endl;
-    }
-  }
-
-  // Num frozen builtins shouldn't change (unless modifying the underlying
-  // cpython version)
-  TORCH_INTERNAL_ASSERT(
-      c == NUM_FROZEN_PY_BUILTIN_MODULES,
-      "Missing python builtin frozen modules");
-  // Check a+b together since in OSS a is empty and b contains stdlib+torch,
-  // while in fbcode they are separated due to thirdparty2 frozenpython. No
-  // fixed number of torch modules to check for, but there should be at least
-  // one.
-  TORCH_INTERNAL_ASSERT(
-      a + b > NUM_FROZEN_PY_STDLIB_MODULES + 1,
-      "Missing frozen python stdlib or torch modules");
-
-  /* Allocate new memory for the combined table */
-  if (a + b + c + d <= SIZE_MAX / sizeof(struct _frozen) - 1) {
-    size_t size = sizeof(struct _frozen) * (a + b + c + d + 1);
-    p = (_frozen*)PyMem_Realloc(p, size);
-  }
+int extendFrozenModules() {
+  struct _frozen* p = BuiltinRegistry::getAllFrozenModules();
   if (p == nullptr) {
     return -1;
   }
-
-  /* Copy the tables into the new memory */
-  memcpy(p, PyImport_FrozenModules, (c + 1) * sizeof(struct _frozen));
-  memcpy(p + c, frozenpython, (a + 1) * sizeof(struct _frozen));
-  memcpy(p + a + c, frozentorch, (b + 1) * sizeof(struct _frozen));
-  if (frozentensorrt) {
-    memcpy(p + a + c + b, frozentensorrt, (d + 1) * sizeof(struct _frozen));
-  }
   PyImport_FrozenModules = p;
-  return res;
+  return 0;
 }
 
 static py::object global_impl(const char* module, const char* name) {
@@ -312,10 +254,8 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterImpl
       PyImport_AppendInittab("tensorrt.tensorrt", PyInit_tensorrt);
     }
 
-    int ret = extendFrozenModules(
-        _PyImport_FrozenModules,
-        _PyImport_FrozenModules_torch,
-        _PyImport_FrozenModules_tensorrt);
+    BuiltinRegistry::sanityCheck();
+    int ret = extendFrozenModules();
     TORCH_INTERNAL_ASSERT(ret == 0);
 
     PyPreConfig preconfig;
@@ -371,9 +311,9 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterImpl
 
     // we cache these so we don't have to repeat the conversion of strings into
     // Python and hash table lookups to get to these object
-    save_storage = global_impl("torch._deploy", "_save_storages");
-    load_storage = global_impl("torch._deploy", "_load_storages");
-    get_package = global_impl("torch._deploy", "_get_package");
+    saveStorage = global_impl("torch._deploy", "_save_storages");
+    loadStorage = global_impl("torch._deploy", "_load_storages");
+    getPackage = global_impl("torch._deploy", "_get_package");
     objects = global_impl("torch._deploy", "_deploy_objects");
     // Release the GIL that PyInitialize acquires
     PyEval_SaveThread();
@@ -385,16 +325,16 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterImpl
     // note: this leads the referneces to these objects, but we are about to
     // deinit python anyway so it doesn't matter
     objects.release();
-    save_storage.release();
-    load_storage.release();
-    get_package.release();
+    saveStorage.release();
+    loadStorage.release();
+    getPackage.release();
     if (Py_FinalizeEx() != 0) {
       exit(1); // can't use TORCH_INTERNAL_ASSERT because we are in a
                // non-throwing destructor.
     }
   }
 
-  void set_find_module(
+  void setFindModule(
       std::function<at::optional<std::string>(const std::string&)> find_module)
       override {
     std::function<py::object(const std::string&)> wrapped_find_module =
@@ -410,10 +350,10 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterImpl
         .attr("append")(register_module_importer);
   }
 
-  torch::deploy::InterpreterSessionImpl* acquire_session() override;
-  py::object save_storage;
-  py::object load_storage;
-  py::object get_package;
+  torch::deploy::InterpreterSessionImpl* acquireSession() override;
+  py::object saveStorage;
+  py::object loadStorage;
+  py::object getPackage;
   py::dict objects;
   std::mutex init_lock_;
 };
@@ -426,18 +366,18 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterSessionImpl
     return wrap(global_impl(module, name));
   }
 
-  Obj from_ivalue(IValue value) override {
+  Obj fromIValue(IValue value) override {
     return wrap(torch::jit::toPyObject(value));
   }
-  Obj create_or_get_package_importer_from_container_file(
+  Obj createOrGetPackageImporterFromContainerFile(
       const std::shared_ptr<caffe2::serialize::PyTorchStreamReader>&
-          container_file_) override {
+          containerFile_) override {
     InitLockAcquire guard(interp_->init_lock_);
-    return wrap(interp_->get_package(container_file_));
+    return wrap(interp_->getPackage(containerFile_));
   }
 
   PickledObject pickle(Obj container, Obj obj) override {
-    py::tuple result = interp_->save_storage(unwrap(container), unwrap(obj));
+    py::tuple result = interp_->saveStorage(unwrap(container), unwrap(obj));
     py::bytes bytes = py::cast<py::bytes>(result[0]);
     py::list storages = py::cast<py::list>(result[1]);
     py::list dtypes = py::cast<py::list>(result[2]);
@@ -458,7 +398,7 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterSessionImpl
         std::move(dtypes_c),
         std::move(container_file)};
   }
-  Obj unpickle_or_get(int64_t id, const PickledObject& obj) override {
+  Obj unpickleOrGet(int64_t id, const PickledObject& obj) override {
     py::dict objects = interp_->objects;
     py::object id_p = py::cast(id);
     if (objects.contains(id_p)) {
@@ -479,8 +419,8 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterSessionImpl
               obj.storages_[i], scalarTypeToTypeMeta(obj.types_[i])));
       storages[i] = std::move(new_storage);
     }
-    py::object result = interp_->load_storage(
-        id, obj.container_file_, py::bytes(obj.data_), storages);
+    py::object result = interp_->loadStorage(
+        id, obj.containerFile_, py::bytes(obj.data_), storages);
     return wrap(result);
   }
   void unload(int64_t id) override {
@@ -511,7 +451,7 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterSessionImpl
     return wrap(call(unwrap(obj), m_args));
   }
 
-  Obj call_kwargs(
+  Obj callKwargs(
       Obj obj,
       std::vector<at::IValue> args,
       std::unordered_map<std::string, c10::IValue> kwargs) override {
@@ -528,10 +468,10 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterSessionImpl
     return wrap(call(unwrap(obj), py_args, py_kwargs));
   }
 
-  Obj call_kwargs(Obj obj, std::unordered_map<std::string, c10::IValue> kwargs)
+  Obj callKwargs(Obj obj, std::unordered_map<std::string, c10::IValue> kwargs)
       override {
     std::vector<at::IValue> args;
-    return call_kwargs(obj, args, kwargs);
+    return callKwargs(obj, args, kwargs);
   }
 
   bool hasattr(Obj obj, const char* attr) override {
@@ -571,12 +511,12 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterSessionImpl
 };
 
 torch::deploy::InterpreterSessionImpl* ConcreteInterpreterImpl::
-    acquire_session() {
+    acquireSession() {
   return new ConcreteInterpreterSessionImpl(this);
 }
 
 extern "C" __attribute__((visibility("default")))
 torch::deploy::InterpreterImpl*
-new_interpreter_impl(void) {
+newInterpreterImpl(void) {
   return new ConcreteInterpreterImpl();
 }
