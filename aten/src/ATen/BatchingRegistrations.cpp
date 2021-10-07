@@ -61,7 +61,7 @@ Tensor sum_batching_rule(const Tensor& self, IntArrayRef dims, bool keepdim, opt
   // >>> x = torch.randn(B0)  # the per-examples are all scalars
   // >>> vmap(partial(torch.sum, dim=0), x)
   // then we replicate the behavior of sum(scalar_tensor, dim=0).
-  if (/*logical*/self.dim() == 0 && dims.size() == 1 && is_allowed_dim_on_scalar_tensor(dims[0])) {
+  if (/*logical*/self.dim() == 0 && (dims.size() == 0 || (dims.size() == 1 && is_allowed_dim_on_scalar_tensor(dims[0])))) {
     return self.clone();
   }
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
@@ -538,6 +538,14 @@ static void checkBasicAsStridedValidForSlice(
       "`tensor` can only access some memory in range [", base_offset, ", ",
       *max_slice_loc, "]. This is not supported inside of vmap, please try to",
       "rewrite the `as_strided` call as a sequence of PyTorch view operations");
+}
+
+Tensor _reshape_alias_batching_rule(const Tensor& self, IntArrayRef sizes, IntArrayRef strides) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto physical_shape = self_physical.getPhysicalShape(sizes);
+  auto physical_strides = self_physical.getPhysicalStrides(strides);
+  auto result = self_physical.tensor()._reshape_alias(physical_shape, physical_strides);
+  return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
 Tensor _new_with_same_meta_batching_rule(
@@ -1083,6 +1091,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("numpy_T", native::numpy_T); // composite wrt autograd
   m.impl("permute", permute_batching_rule);
   m.impl("reshape", reshape_batching_rule);
+  m.impl("_reshape_alias", _reshape_alias_batching_rule);
   m.impl("reshape_as", native::reshape_as); // composite wrt autograd
   m.impl("select.int", select_batching_rule);
   m.impl("slice.Tensor", slice_batching_rule);

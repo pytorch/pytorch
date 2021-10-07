@@ -652,14 +652,14 @@ class TestGradients(TestCase):
     def _forward_grad_helper(self, device, dtype, op, variant):
         if op.supports_forward_ad:
             self._grad_test_helper(device, dtype, op, variant, check_forward_ad=True, check_backward_ad=False,
-                                   check_undefined_grad=False, check_batched_grad=False)
+                                   check_undefined_grad=False, check_batched_grad=(op.check_batched_grad and not op.inplace_variant))
         else:
             err_msg = r"Trying to use forward AD with .* that does not support it\."
             hint_msg = ("Running forward AD for an OP that has does not support it did not "
                         "raise any error. If your op supports forward AD, you should set supports_forward_ad=True")
             with self.assertRaisesRegex(NotImplementedError, err_msg, msg=hint_msg):
                 self._grad_test_helper(device, dtype, op, variant, check_forward_ad=True, check_backward_ad=False,
-                                       check_undefined_grad=False, check_batched_grad=False)
+                                       check_undefined_grad=False, check_batched_grad=(op.check_batched_grad and not op.inplace_variant))
 
     @_gradcheck_ops(op_db)
     def test_forward_mode_AD(self, device, dtype, op):

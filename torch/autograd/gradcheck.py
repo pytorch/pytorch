@@ -6,7 +6,7 @@ import collections
 from itertools import product
 import warnings
 from typing import Callable, Union, Optional, Iterable, List, Tuple, Dict
-from torch._vmap_internals import vmap
+from torch._vmap_internals import vmap, _vmap
 import functools
 
 

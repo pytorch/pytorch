@@ -622,6 +622,7 @@ class OpInfo(object):
             assert not (supports_gradgrad and not supports_autograd), (
                 "supports_gradgrad refines the part of autograd is supported, so it should "
                 "not be set if supports_autograd is False")
+        # TODO: fix this
         if check_batched_grad is None:
             check_batched_grad = supports_autograd
         else:
@@ -7445,6 +7446,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            supports_inplace_autograd=False,
            supports_forward_ad=True,
+           check_batched_grad=False,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, skipCUDAIfRocm],
            sample_inputs_func=sample_inputs_linalg_matrix_power,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
