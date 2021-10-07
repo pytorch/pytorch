@@ -330,6 +330,9 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
 
   ::c10d::PrefixStore rankToNameStore_;
   ::c10d::PrefixStore nameToAddressStore_;
+  // Store keys that will used to count joined processes and active calls during
+  // the shutdown process
+  ::c10d::PrefixStore shutdownStore_;
   const int worldSize_;
 
   // The join method is required to behave like a barrier and perform collective

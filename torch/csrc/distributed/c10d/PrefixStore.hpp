@@ -20,17 +20,6 @@ class TORCH_API PrefixStore : public Store {
       const std::vector<uint8_t>& expectedValue,
       const std::vector<uint8_t>& desiredValue) override;
 
-  std::string compareSet(
-      const std::string& key,
-      const std::string& currentValue,
-      const std::string& newValue) {
-    std::vector<uint8_t> value = compareSet(
-        key,
-        std::vector<uint8_t>(currentValue.begin(), currentValue.end()),
-        std::vector<uint8_t>(newValue.begin(), newValue.end()));
-    return std::string(value.begin(), value.end());
-  }
-
   std::vector<uint8_t> get(const std::string& key) override;
 
   int64_t add(const std::string& key, int64_t value) override;

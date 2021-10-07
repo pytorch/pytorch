@@ -377,6 +377,7 @@ TensorPipeAgent::TensorPipeAgent(
           tensorpipe::ContextOptions().name(workerInfo_.name_))),
       rankToNameStore_("names", store),
       nameToAddressStore_("addrs", store),
+      shutdownStore_("shutdown", store),
       worldSize_(worldSize),
       processGroup_(std::move(processGroup)) {
   // collect worker names
@@ -1035,7 +1036,7 @@ void TensorPipeAgent::join(bool shutdown) {
     }
     VLOG(1) << "RPC agent for " << workerInfo_.name_
             << " completed all client calls and is entering a barrier";
-    barrier(rankToNameStore_, worldSize_);
+    syncCallCount(shutdownStore_, worldSize_);
     VLOG(1) << "Finished barrier for " << workerInfo_.name_;
     {
       std::unique_lock<std::mutex> lock(callCountMutex_);
@@ -1048,13 +1049,15 @@ void TensorPipeAgent::join(bool shutdown) {
               << " exited the barrier and found " << clientActiveCalls_
               << " active client calls";
       bool canFinishShutdown =
-          barrier(rankToNameStore_, worldSize_, true, clientActiveCalls_);
+          syncCallCount(shutdownStore_, worldSize_, clientActiveCalls_);
       VLOG(1) << "RPC agent for " << workerInfo_.name_
               << " completed the allreduce and got a total of "
               << clientActiveCalls_
               << " active client calls across all workers";
-      if (canFinishShutdown && shutdown) {
+      if (shutdown) {
         shuttingDown_ = true;
+      }
+      if (canFinishShutdown) {
         break;
       }
     }

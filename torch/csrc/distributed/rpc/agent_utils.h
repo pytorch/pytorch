@@ -16,12 +16,11 @@ std::unordered_map<std::string, worker_id_t> collectNames(
     const std::string& selfName,
     const int worldSize);
 
-// This performs a barrier using a store.
+// This performs a synchronization of all call counts by using store.
 // All RPC peers wait for others to join to exit at the same time.
-bool barrier(
+bool syncCallCount(
     ::c10d::PrefixStore store,
     const int worldSize,
-    bool checkCalls = false,
     int activeCalls = 0);
 
 } // namespace rpc
