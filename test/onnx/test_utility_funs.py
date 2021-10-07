@@ -741,8 +741,8 @@ class TestUtilityFuns(TestCase):
         class QModule(torch.nn.Module):
             def __init__(self):
                 super(QModule, self).__init__()
-                self.quant1 = torch.quantization.QuantStub()
-                self.dequant = torch.quantization.DeQuantStub()
+                self.quant1 = torch.ao.quantization.QuantStub()
+                self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x):
                 res = self.quant1(x)
@@ -751,9 +751,9 @@ class TestUtilityFuns(TestCase):
         model = QModule()
         torch.backends.quantized.engine = "qnnpack"
         pt_inputs = (torch.randn(1, 2, 3, 4))
-        model.qconfig = torch.quantization.default_qconfig
-        q_model = torch.quantization.prepare(model, inplace=False)
-        q_model = torch.quantization.convert(q_model, inplace=False)
+        model.qconfig = torch.ao.quantization.default_qconfig
+        q_model = torch.ao.quantization.prepare(model, inplace=False)
+        q_model = torch.ao.quantization.convert(q_model, inplace=False)
 
         q_model.eval()
 
