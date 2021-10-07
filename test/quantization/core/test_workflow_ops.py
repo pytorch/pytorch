@@ -693,10 +693,8 @@ class TestFakeQuantizeOps(TestCase):
     def _test_forward_per_channel_cachemask_impl(self, device):
         torch_types = (torch.qint8, torch.quint8)
         float_types = (torch.float32, torch.float16, torch.float64)
-        if device == 'cpu':
-            zero_point_types = (torch.int, torch.float32, torch.float16)
-        else:
-            zero_point_types = (torch.int,)
+        zero_point_types = (torch.int, torch.float32, torch.float16)
+
         for torch_type, float_type, zero_point_type in itertools.product(torch_types, float_types, zero_point_types):
             X = torch.randn(1, 2, 4, 4, dtype=float_type).to(device)
             # pick the scale + zp so that some values get clipped
@@ -808,10 +806,7 @@ class TestFakeQuantizeOps(TestCase):
         X, (scale, zero_point, axis, torch_type) = X
         quant_min = torch.iinfo(torch_type).min
         quant_max = torch.iinfo(torch_type).max
-        if device == 'cpu':
-            zero_point_types = (torch.int, torch.float, torch.float16)
-        else:
-            zero_point_types = (torch.int,)
+        zero_point_types = (torch.int, torch.float, torch.float16)
 
         for zero_point_type in zero_point_types:
             X = to_tensor(X, device)
@@ -829,11 +824,7 @@ class TestFakeQuantizeOps(TestCase):
     def _test_backward_per_channel_cachemask_impl(self, device):
         torch_types = (torch.qint8, torch.quint8)
         float_types = (torch.float32, torch.float16, torch.float64)
-        # TODO Support float zero_points for CUDA.
-        if device == 'cpu':
-            zero_point_types = (torch.int, torch.float32, torch.float16)
-        else:
-            zero_point_types = (torch.int,)
+        zero_point_types = (torch.int, torch.float32, torch.float16)
 
         for torch_type, float_type, zero_point_type in itertools.product(torch_types, float_types, zero_point_types):
             X = torch.randn(1, 2, 4, 4, dtype=float_type).to(device)
@@ -959,10 +950,6 @@ class TestFakeQuantizeOps(TestCase):
         axis = 1
         for i in range(20):
             for torch_type, float_type, device, zero_type in itertools.product(torch_types, float_types, devices, zero_types):
-                # TODO(future PR): Support float zero_points for CUDA.
-                if device.type == 'cuda' and zero_type != torch.int32:
-                    continue
-
                 X = torch.randn(3, 3, device=device).to(float_type)
                 scales = (10 * torch.randn(3, device=device)).abs()
                 scale = scales.mean().to(float).item()
@@ -1009,59 +996,57 @@ class TestFusedObsFakeQuant(TestCase):
 
         pt_op = torch.fused_moving_avg_obs_fake_quant
         # enable observer after 2 iterations and fake_quant after 4 iterations
-        for output_fake_quant in [True, False]:
-            for i in range(10):
-                if i > 2:
-                    observer_on = 1
-                if i > 4:
-                    fake_quant_on = 1
+        for i in range(10):
+            if i > 2:
+                observer_on = 1
+            if i > 4:
+                fake_quant_on = 1
 
-                x = torch.randn(5, 5, device=device)
-                out = pt_op(
+            x = torch.randn(5, 5, device=device)
+            out = pt_op(
+                x,
+                torch.tensor(observer_on, device=device),
+                torch.tensor(fake_quant_on, device=device),
+                in_running_min_op,
+                in_running_max_op,
+                scale,
+                zero_point,
+                avg_const,
+                0,
+                255,
+                0,
+                False,
+                symmetric_quant,
+            )
+            if observer_on:
+                (
+                    in_running_min_ref,
+                    in_running_max_ref,
+                ) = _get_tensor_min_max(
                     x,
-                    torch.tensor(observer_on, device=device),
-                    torch.tensor(fake_quant_on, device=device),
-                    in_running_min_op,
-                    in_running_max_op,
-                    scale,
-                    zero_point,
-                    avg_const,
-                    0,
-                    255,
-                    0,
-                    False,
-                    symmetric_quant,
-                    output_fake_quant,
+                    running_min=in_running_min_ref,
+                    running_max=in_running_max_ref,
+                    averaging_const=0.01,
                 )
-                if observer_on:
-                    (
-                        in_running_min_ref,
-                        in_running_max_ref,
-                    ) = _get_tensor_min_max(
-                        x,
-                        running_min=in_running_min_ref,
-                        running_max=in_running_max_ref,
-                        averaging_const=0.01,
-                    )
 
-                if fake_quant_on and output_fake_quant:
-                    x_scale, x_zero_point = _get_scale_zp(
-                        in_running_min_ref,
-                        in_running_max_ref,
-                        torch.quint8,
-                        preserve_sparsity=symmetric_quant,
-                    )
-                    x_in = _fake_quantize_per_tensor_affine_reference(
-                        x, x_scale, x_zero_point, 0, 255
-                    )
-                    self.assertEqual(scale, x_scale)
-                    self.assertEqual(zero_point, x_zero_point)
-                else:
-                    x_in = x
+            if fake_quant_on:
+                x_scale, x_zero_point = _get_scale_zp(
+                    in_running_min_ref,
+                    in_running_max_ref,
+                    torch.quint8,
+                    preserve_sparsity=symmetric_quant,
+                )
+                x_in = _fake_quantize_per_tensor_affine_reference(
+                    x, x_scale, x_zero_point, 0, 255
+                )
+                self.assertEqual(scale, x_scale)
+                self.assertEqual(zero_point, x_zero_point)
+            else:
+                x_in = x
 
-                self.assertEqual(in_running_min_ref, in_running_min_op)
-                self.assertEqual(in_running_max_ref, in_running_max_op)
-                torch.testing.assert_allclose(out, x_in)
+            self.assertEqual(in_running_min_ref, in_running_min_op)
+            self.assertEqual(in_running_max_ref, in_running_max_op)
+            torch.testing.assert_allclose(out, x_in)
 
         # Test empty input works
         x = torch.empty(0, 5, device=device)
