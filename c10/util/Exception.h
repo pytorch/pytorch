@@ -160,6 +160,19 @@ C10_API void set_warning_handler(WarningHandler* handler) noexcept(true);
 /// Gets the global warning handler.
 C10_API WarningHandler* get_warning_handler() noexcept(true);
 
+class C10_API WarningHandlerGuard {
+  WarningHandler* prev_handler_;
+
+ public:
+  WarningHandlerGuard(WarningHandler* new_handler)
+      : prev_handler_(c10::Warning::get_warning_handler()) {
+    c10::Warning::set_warning_handler(new_handler);
+  }
+  ~WarningHandlerGuard() {
+    c10::Warning::set_warning_handler(prev_handler_);
+  }
+};
+
 /// The TORCH_WARN_ONCE macro is difficult to test for. Use
 /// setWarnAlways(true) to turn it into TORCH_WARN, which can be
 /// tested for more easily.

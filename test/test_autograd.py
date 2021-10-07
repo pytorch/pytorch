@@ -8881,6 +8881,14 @@ class TestAutogradDeviceType(TestCase):
         out = torch.signbit(x)
         self.assertFalse(out.requires_grad)
 
+    def test_warning_in_backward(self, device):
+        a = torch.zeros((), device=device, requires_grad=True)
+        b = torch._C._nn._test_warn_in_autograd(a)
+
+        with self.assertWarnsRegex(UserWarning, "Warn from backward"):
+            b.backward()
+
+
 class TestAutogradInferenceMode(TestCase):
     def _is_inference_tensor(self, tensor):
         try:
