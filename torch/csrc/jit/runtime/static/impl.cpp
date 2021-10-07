@@ -76,24 +76,25 @@ void OptimizeGraph(
   FuseInferenceOpsForSparseNN(graph);
   UseVariadicCat(graph);
   UseVariadicStack(graph);
-  UseVariadicOp(
-      graph,
-      c10::Symbol::fromQualString("fb::sigrid_transforms_torch_bind"),
-      c10::Symbol::fromQualString("fb::variadic_sigrid_transforms_torch_bind"),
-      1 /* list_idx */);
-  if (opts.enable_out_variant) {
-    FuseSignLog1P(graph);
-  }
 
-  // TODO: we can avoid this guard by moving operations
-  // to exposed folders.
-#ifdef FBCODE_CAFFE2
   if (opts.enable_out_variant) {
+    UseVariadicOp(
+        graph,
+        c10::Symbol::fromQualString("fb::sigrid_transforms_torch_bind"),
+        c10::Symbol::fromQualString(
+            "fb::variadic_sigrid_transforms_torch_bind"),
+        1 /* list_idx */);
+    FuseSignLog1P(graph);
+
+    // TODO: we can avoid this guard by moving operations
+    // to exposed folders.
+#ifdef FBCODE_CAFFE2
     ReplaceWithCopy(graph);
     FuseListUnpack(graph);
     EnableStaticRuntimeLayerNorm(graph);
-  }
 #endif
+  }
+
   ConstantPropagation(graph);
   RemoveImmutableInputDictLookups(graph);
   UseVariadicTupleUnpack(graph);
