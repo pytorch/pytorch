@@ -108,7 +108,7 @@ c10::IValue preprocess(
     const torch::jit::BackendDebugHandleGenerator& generate_debug_handles) {
   const std::string& method_name = "forward";
   auto method = mod.get_method(method_name);
-  auto graph = method.function().graph()->copy();
+  auto graph = toGraphFunction(method.function()).graph()->copy();
   auto sizes = getInputSizesForMethod(method_compile_spec, method_name);
 
   std::string llvm_asm_code;

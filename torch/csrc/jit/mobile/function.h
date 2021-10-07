@@ -18,16 +18,12 @@ class TORCH_API Function : public torch::jit::Function {
  public:
   explicit Function(c10::QualifiedName name);
   void run(Stack& stack) override;
-  void run(Stack&& stack) override;
   c10::intrusive_ptr<c10::ivalue::Future> runAsync(
       Stack& stack,
       TaskLauncher taskLauncher = at::launch) override;
-  at::IValue operator()(Stack stack, const Kwargs& = {}) override;
+  at::IValue operator()(Stack& stack);
   void ensure_defined() override {}
   size_t num_inputs() const override;
-  void check_single_output() override;
-  std::string pretty_print_schema() const override;
-  const std::string& name() const override;
   const c10::QualifiedName& qualname() const override;
   void call(Stack&, c10::function_ref<void(const mobile::Code&)>) override;
 

@@ -11,16 +11,11 @@ namespace jit {
 
 char const* toString(OpCode op);
 namespace mobile {
-
 Function::Function(c10::QualifiedName name)
     : name_(std::move(name)), code_(std::make_shared<Code>()) {}
 
 const c10::QualifiedName& Function::qualname() const {
   return name_;
-}
-
-const std::string& Function::name() const {
-  return name_.name();
 }
 
 void Function::append_instruction(OpCode op, int X, int N, int64_t dbg_handle) {
@@ -168,32 +163,20 @@ void Function::run(Stack& stack) {
   interp_state.run(stack);
 }
 
-void Function::run(Stack&& stack) {
-  run(stack);
-}
-
 c10::intrusive_ptr<c10::ivalue::Future> Function::runAsync(
     Stack& stack,
     TaskLauncher taskLauncher) {
-  TORCH_INTERNAL_ASSERT(false);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
+  return {};
 }
 
-at::IValue Function::operator()(Stack stack, const Kwargs& kwargs) {
-  TORCH_INTERNAL_ASSERT(kwargs.empty());
+at::IValue Function::operator()(Stack& stack) {
   run(stack);
   return stack.front();
 }
 
 size_t Function::num_inputs() const {
   return schema_->arguments().size();
-}
-
-void Function::check_single_output() {
-  TORCH_CHECK(schema_->returns().size() == 1);
-}
-
-std::string Function::pretty_print_schema() const {
-  TORCH_INTERNAL_ASSERT(false);
 }
 
 void Function::call(Stack&, c10::function_ref<void(const mobile::Code&)> f) {

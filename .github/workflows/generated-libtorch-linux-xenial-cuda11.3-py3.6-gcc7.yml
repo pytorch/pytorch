@@ -5,7 +5,7 @@ name: libtorch-linux-xenial-cuda11.3-py3.6-gcc7
 
 on:
   pull_request:
-    types: [unassigned]
+    types: [opened, synchronize, reopened, unassigned]
   push:
     branches:
       - master
