@@ -69,3 +69,10 @@ def _floor_divide(g, self, other):
 
 for block_listed_op in block_listed_operators:
     vars()[block_listed_op] = _block_list_in_opset(block_listed_op)
+
+
+@parse_args("v", "f", "f", "v")
+def uniform(g, self, from_, to_, generator_, out=None):
+    from_ = g.op("Constant", value_t=torch.tensor(from_, dtype=torch.float))
+    to_ = g.op("Constant", value_t=torch.tensor(to_, dtype=torch.float))
+    return g.op("Uniform", self, from_, to_, generator_, upper_i=1)

@@ -52,9 +52,3 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
         new_running_mean.setType(running_mean.type())
         new_running_var.setType(running_var.type())
         return res
-
-@parse_args("v", "f", "f", "v")
-def uniform(g, self, from_, to_, generator_, out=None):
-    from_ = g.op("Constant", value_t=torch.tensor(from_, dtype=torch.float))
-    to_ = g.op("Constant", value_t=torch.tensor(to_, dtype=torch.float))
-    return g.op("Uniform", self, from_, to_, generator_, upper_i=1)
