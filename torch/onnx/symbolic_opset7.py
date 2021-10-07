@@ -72,7 +72,7 @@ for block_listed_op in block_listed_operators:
 
 
 @parse_args("v", "f", "f", "v")
-def uniform(g, self, from_, to_, generator_, out=None):
+def uniform(g, self, from_, to_, generator, out=None):
     from_ = g.op("Constant", value_t=torch.tensor(from_, dtype=torch.float))
     to_ = g.op("Constant", value_t=torch.tensor(to_, dtype=torch.float))
     return g.op("Uniform", self, from_, to_, generator_, upper_i=1)
