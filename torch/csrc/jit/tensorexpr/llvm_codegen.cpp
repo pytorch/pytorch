@@ -150,16 +150,45 @@ struct FunctionCallee {
 #endif
 } // namespace
 
+class LLVMCodeGenCallee {
+ public:
+  LLVMCodeGenCallee(llvm::orc::PytorchLLVMJIT* jit, void* kernelAddress)
+      : jit_(jit), kernelAddress_(kernelAddress) {}
+
+  llvm::orc::PytorchLLVMJIT* getJIT() {
+    return jit_;
+  }
+
+  void* getKernelAddress() {
+    return kernelAddress_;
+  }
+
+  void setKernelAddress(void* kernelAddress) {
+    kernelAddress_ = kernelAddress;
+  }
+
+ private:
+  // This is not necessarily needed in the callee. We just need the JIT to be
+  // alive for the call to this kernel to work. Since the JIT is owned by the
+  // PytorchLLVMJITCache, we don't need to save them here.
+  //
+  // Retaining a pointer to the JIT here only to denote that this is necessary
+  // for the calls to work.
+  llvm::orc::PytorchLLVMJIT* jit_;
+  void* kernelAddress_;
+};
+
 class LLVMCodeGenImpl : public IRVisitor {
  private:
   std::unique_ptr<llvm::LLVMContext> context_;
   llvm::IRBuilder<> irb_;
-  std::unique_ptr<llvm::orc::PytorchLLVMJIT> jit_;
+  llvm::orc::PytorchLLVMJIT* jit_;
   std::unique_ptr<llvm::Module> module_;
   llvm::Function* fn_;
   llvm::BasicBlock* bb_;
   llvm::Value* value_{nullptr};
   llvm::JITTargetAddress kernelAddress_;
+  std::string kernel_func_name_;
 
 #define LLVM_TYPE_DECLARE(_1, Name) llvm::Type* Name##Ty_;
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, LLVM_TYPE_DECLARE);
@@ -209,9 +238,8 @@ class LLVMCodeGenImpl : public IRVisitor {
       const std::vector<CodeGen::BufferArg>& args,
       at::Device device,
       Dtype dtype,
-      c10::optional<std::string> triple,
-      c10::optional<std::string> cpu,
-      c10::optional<std::string> attrs);
+      std::string kernel_func_name,
+      llvm::orc::PytorchLLVMJIT* jit);
   ~LLVMCodeGenImpl() = default;
 
   llvm::JITTargetAddress getKernelAddress() const;
@@ -312,12 +340,27 @@ LLVMCodeGen::LLVMCodeGen(
     c10::optional<std::string> triple,
     c10::optional<std::string> cpu,
     c10::optional<std::string> attrs)
-    : CodeGen(stmt, args, device, kernel_func_name),
-      impl_(std::make_unique<
-            LLVMCodeGenImpl>(stmt, args, device, dtype, triple, cpu, attrs)) {}
+    : CodeGen(stmt, args, device) {
+  auto jit = llvm::orc::PytorchLLVMJITCache::getPytorchLLVMJITInstance(
+      triple, cpu, attrs);
+  auto unique_kernel_func_name = jit->getUniqueFunctionName(kernel_func_name);
+  set_kernel_func_name(unique_kernel_func_name);
+  impl_ = std::make_unique<LLVMCodeGenImpl>(
+      stmt, args, device, dtype, unique_kernel_func_name, jit);
+  callee_ = std::make_unique<LLVMCodeGenCallee>(
+      jit, (void*)impl_->getKernelAddress());
+}
+
+void LLVMCodeGen::cleanup_memory() {
+  impl_.reset(nullptr);
+}
 
 void LLVMCodeGen::call_raw(const std::vector<void*>& args) {
   value<float>(const_cast<void**>(args.data()));
+}
+
+void LLVMCodeGen::call_with_numel(void** args, int64_t /* numel */) {
+  value<float>(const_cast<void**>(args));
 }
 
 void LLVMCodeGen::call(const std::vector<CallArg>& args) {
@@ -348,11 +391,14 @@ at::Tensor LLVMCodeGen::empty_strided(
       size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 }
 
-void* LLVMCodeGen::getKernelAddress(LLVMCodeGenImpl* impl) {
-  return (void*)impl->getKernelAddress();
+void* LLVMCodeGen::getKernelAddress(LLVMCodeGenCallee* callee) {
+  return (void*)callee->getKernelAddress();
 }
 
 std::string LLVMCodeGen::getCodeText(const std::string& attr /*=""*/) {
+  TORCH_INTERNAL_ASSERT(
+      impl_.get(),
+      "LLVMCodeGen memory has been cleaned up. So, code text is not available at this point");
   if (attr == "asm") {
     return impl_->getASMCodeText();
   } else {
@@ -364,21 +410,17 @@ llvm::JITTargetAddress LLVMCodeGenImpl::getKernelAddress() const {
   return kernelAddress_;
 }
 
-namespace {
-// Global mutex to protect LLVM initialization.  TargetRegistry::lookupTarget
-// in particular is not thread-safe.
-static std::mutex llvmInitMutex;
-} // namespace
-
 LLVMCodeGenImpl::LLVMCodeGenImpl(
     StmtPtr stmt,
     const std::vector<CodeGen::BufferArg>& args,
     at::Device device,
     Dtype dtype,
-    c10::optional<std::string> triple,
-    c10::optional<std::string> cpu,
-    c10::optional<std::string> attrs)
-    : context_(std::make_unique<llvm::LLVMContext>()), irb_(getContext()) {
+    std::string kernel_func_name,
+    llvm::orc::PytorchLLVMJIT* jit)
+    : context_(std::make_unique<llvm::LLVMContext>()),
+      irb_(getContext()),
+      jit_(jit),
+      kernel_func_name_(std::move(kernel_func_name)) {
   // Manually map types to LLVM types.
   ByteTy_ = llvm::Type::getInt8Ty(getContext());
   CharTy_ = llvm::Type::getInt8Ty(getContext());
@@ -391,14 +433,6 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   Int8PtrTy_ = llvm::Type::getInt8PtrTy(getContext());
   VoidTy_ = llvm::Type::getVoidTy(getContext());
   BoolTy_ = ByteTy_;
-
-  {
-    std::lock_guard<std::mutex> g(llvmInitMutex);
-    llvm::InitializeAllTargets();
-    llvm::InitializeAllTargetMCs();
-    llvm::InitializeAllAsmPrinters();
-    jit_ = std::make_unique<llvm::orc::PytorchLLVMJIT>(triple, cpu, attrs);
-  }
 
   module_ = std::make_unique<llvm::Module>("pytorch", getContext());
   module_->setDataLayout(jit_->getDataLayout());
@@ -435,7 +469,7 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   emitKernel(stmt, params);
 
   jit_->addModule(std::move(module_), std::move(context_));
-  auto sym = jit_->findSymbol("wrapper");
+  auto sym = jit_->findSymbol(kernel_func_name_);
   kernelAddress_ = assertSuccess(sym.getAddress());
 }
 
@@ -467,7 +501,7 @@ void LLVMCodeGenImpl::emitWrapper(const std::vector<llvm::Type*>& params) {
   auto wrapper = llvm::Function::Create(
       llvm::FunctionType::get(IntTy_, {voidPtrPtrTy}, false),
       llvm::Function::ExternalLinkage,
-      "wrapper",
+      kernel_func_name_,
       module_.get());
   auto wrapBB = llvm::BasicBlock::Create(getContext(), "wrapBB", wrapper);
   irb_.SetInsertPoint(wrapBB);
@@ -1147,9 +1181,6 @@ void LLVMCodeGenImpl::visit(LoadPtr v) {
       throw std::runtime_error("invalid dtype in Load");
   }
 
-  // Detect whether the vector mask is all true
-  bool unmasked_load = true;
-
   // Handle the case where the load is contiguous and unmasked efficiently
   auto idx_ramp = to<Ramp>(v->flat_index());
   if (idx_ramp) {
@@ -1801,9 +1832,6 @@ void LLVMCodeGenImpl::visit(IntrinsicsPtr v) {
 }
 
 void LLVMCodeGenImpl::visit(ExternalCallPtr v) {
-  constexpr int max_buffers = 10;
-  constexpr int max_dimensions = 40;
-
   auto& func_registry = getNNCFunctionRegistry();
   if (!func_registry.count(v->func_name())) {
     throw unimplemented_lowering(v);

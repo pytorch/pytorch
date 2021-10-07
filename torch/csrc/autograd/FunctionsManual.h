@@ -71,7 +71,7 @@ at::Tensor reverse_dim(const at::Tensor& t, int64_t dim);
 at::Tensor prod_safe_zeros_backward(const at::Tensor &grad, const at::Tensor& inp, int64_t dim);
 at::Tensor prod_backward(const at::Tensor& grad, const at::Tensor& input, const at::Tensor& result);
 at::Tensor prod_backward(at::Tensor grad, const at::Tensor& input, at::Tensor result, int64_t dim, bool keepdim);
-at::Tensor solve_jvp(const at::Tensor& input_primal, const at::Tensor& input_tangent, const at::Tensor& other_tangent, const at::Tensor& result);
+at::Tensor solve_jvp(const Tensor& X, const Tensor& A, const Tensor& dA, const Tensor& dB);
 at::Tensor solve_backward_self(const at::Tensor & grad, const at::Tensor & self, const at::Tensor & A);
 at::Tensor solve_backward_A(const at::Tensor & grad, const at::Tensor & self, const at::Tensor & A, const at::Tensor & solution);
 at::Tensor cumsum_backward(const at::Tensor & grad, int64_t dim);
@@ -122,7 +122,6 @@ Tensor binary_cross_entropy_target_backward(
 at::Tensor binary_cross_entropy_with_logits_target_backward(const at::Tensor& grad_output, const at::Tensor& self, const at::Tensor& target, const c10::optional<at::Tensor>& weight, const c10::optional<at::Tensor>& pos_weight, int64_t reduction);
 at::Tensor log_sigmoid_double_backward(const at::Tensor & grad, const at::Tensor & input);
 at::Tensor softmax_double_backward(const at::Tensor & grad, const at::Tensor & grad_output, int dim, const at::Tensor & output);
-at::Tensor log_softmax_double_backward(const at::Tensor & grad, const at::Tensor & grad_output, int dim, const at::Tensor & output);
 at::Tensor binary_cross_entropy_double_backward(const at::Tensor & grad_output, const at::Tensor & grad, const at::Tensor & input, const at::Tensor & target, const c10::optional<at::Tensor>& weight, int64_t reduction);
 at::Tensor binary_cross_entropy_double_backward_grad_output(const at::Tensor & grad, const at::Tensor & input, const at::Tensor & target, const c10::optional<at::Tensor>& weight, int64_t reduction);
 at::Tensor l1_loss_double_backward(const at::Tensor & grad, const at::Tensor & grad_output, const at::Tensor & input, const at::Tensor & target, int64_t reduction);
@@ -166,6 +165,13 @@ std::tuple<Tensor, Tensor> triangular_solve_backward(
     const Tensor & b, const Tensor & a, const Tensor & x,
     const bool upper, const bool transpose, const bool unitriangular,
     std::array<bool, 2> output_mask);
+Tensor triangular_solve_jvp(
+  const Tensor& X, const Tensor& A,
+  const Tensor& dA, const Tensor& dB,
+  const bool upper,
+  const bool transpose,
+  const bool unitriangular
+);
 std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(const Tensor& grad_out, const Tensor& i1, const Tensor& i2, const Tensor& i3,
                                                        IntArrayRef expand1, IntArrayRef expand2, IntArrayRef expand3,
                                                        IntArrayRef sumdim, std::array<bool, 3> grad_mask);
@@ -202,6 +208,13 @@ Tensor constant_pad_nd_backward(const Tensor& grad, IntArrayRef pad);
 std::tuple<Tensor, Tensor> cholesky_solve_backward(
     const Tensor& grad_x, const Tensor& self,
     const Tensor& input2, const Tensor& result, const bool upper);
+Tensor cholesky_solve_jvp(
+    const Tensor& X,
+    const Tensor& U,
+    const Tensor& dU,
+    const Tensor& dB,
+    const bool upper
+);
 std::tuple<Tensor, Tensor, Tensor>
 infinitely_differentiable_native_group_norm_backward(
     const Tensor& dY,
@@ -255,12 +268,12 @@ std::tuple<Tensor, Tensor> lu_solve_backward(
   const Tensor& LU_data,
   const Tensor& LU_pivots
 );
-Tensor lu_solve_forward_AD(
-  const Tensor& B_t,
-  const Tensor& LU_data_t,
+Tensor lu_solve_jvp(
+  const Tensor& X,
   const Tensor& LU_data,
-  const Tensor& LU_pivots,
-  const Tensor& X
+  const Tensor& dLU_data,
+  const Tensor& dB,
+  const Tensor& LU_pivots
 );
 Tensor lu_unpack_backward(
   const variable_list& grads,
