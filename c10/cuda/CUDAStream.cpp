@@ -4,7 +4,6 @@
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
-#include <array>
 #include <atomic>
 #include <cstdint>
 #include <mutex>
@@ -16,25 +15,6 @@ namespace cuda {
 
 namespace {
 
-// Internal implementation that leaks the stream. It's not intended to be used
-// outside of this file.
-struct LeakyStreamInternals {
-  LeakyStreamInternals() = default;
-  C10_DISABLE_COPY_AND_ASSIGN(LeakyStreamInternals);
-
-  ~LeakyStreamInternals() {
-    // NB: this code is invoked only in the destruction of global variables
-    // (since we never shrink the corresponding vectors). At this point the CUDA
-    // runtime might be already destroyed and invoking cudaStreamDestroy leads
-    // to a crash. It's likely an issue in CUDA, but to be safe - let's just
-    // "forget" the destruction.
-
-    // if (stream) cudaStreamDestroy(stream);
-  }
-
-  cudaStream_t stream = nullptr;
-};
-
 // Global stream state and constants
 static DeviceIndex num_gpus = -1;
 static constexpr int kStreamsPerPoolBits = 5;
@@ -43,12 +23,12 @@ static constexpr unsigned int kDefaultFlags = cudaStreamNonBlocking;
 static constexpr int kStreamTypeBits = 3;
 
 // Note: lower numbers are higher priorities, zero is default priority
-static int kHighPriority = -1;
-static int kLowPriority = 0;
+static constexpr int kHighPriority = -1;
+static constexpr int kLowPriority = 0;
 
 // Default streams
 static std::once_flag init_flag;
-static LeakyStreamInternals default_streams[C10_COMPILE_TIME_MAX_GPUS];
+static cudaStream_t default_streams[C10_COMPILE_TIME_MAX_GPUS];
 
 // Non-default streams
 // Note: the number of CUDA devices is determined at run time,
@@ -58,16 +38,18 @@ static LeakyStreamInternals default_streams[C10_COMPILE_TIME_MAX_GPUS];
 // the low and high priority counters track, for each device, the next stream
 // in the pool to be returned when a stream is requested (round-robin fashion
 // , see the note in CUDAStream.h).
-//
-// unique_ptr<T[]> is used instead of vector<T> because T might be non-movable
-// and non-copyable.
+// The streams are "leaked": they are created but never destroyed because the
+// destruction of global variables could happen after the CUDA runtime has
+// already been destroyed and thus invoking cudaStreamDestroy could lead to a
+// crash. It's likely an issue in CUDA, but to be safe - let's just "forget"
+// the destruction.
 static std::once_flag device_flags[C10_COMPILE_TIME_MAX_GPUS];
 static std::atomic<uint32_t> low_priority_counters[C10_COMPILE_TIME_MAX_GPUS];
 static std::atomic<uint32_t> high_priority_counters[C10_COMPILE_TIME_MAX_GPUS];
-static std::array<LeakyStreamInternals, kStreamsPerPool>
-    low_priority_streams[C10_COMPILE_TIME_MAX_GPUS];
-static std::array<LeakyStreamInternals, kStreamsPerPool>
-    high_priority_streams[C10_COMPILE_TIME_MAX_GPUS];
+static cudaStream_t low_priority_streams[C10_COMPILE_TIME_MAX_GPUS]
+                                        [kStreamsPerPool];
+static cudaStream_t high_priority_streams[C10_COMPILE_TIME_MAX_GPUS]
+                                         [kStreamsPerPool];
 
 // Note [StreamId assignment]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -153,14 +135,8 @@ StreamId makeStreamId(StreamIdType st, size_t si) {
       static_cast<StreamId>(st);
 }
 
-template <typename T, typename A>
-static bool pointer_within(const T* ptr, const A& arr) {
-  return std::greater_equal<const T*>()(ptr, arr.data()) &&
-      std::less<const T*>()(ptr, arr.data() + arr.size());
-}
-
 // Thread-local current streams
-static thread_local StreamId* current_streams = nullptr;
+static thread_local std::unique_ptr<StreamId[]> current_streams = nullptr;
 
 // Populates global values and creates a default stream for each device.
 // Note: the default stream on each device is signified by a nullptr,
@@ -198,9 +174,9 @@ static void initDeviceStreamState(DeviceIndex device_index) {
     auto& hipri_stream = high_priority_streams[device_index][i];
 
     C10_CUDA_CHECK(cudaStreamCreateWithPriority(
-        &lowpri_stream.stream, kDefaultFlags, kLowPriority));
+        &lowpri_stream, kDefaultFlags, kLowPriority));
     C10_CUDA_CHECK(cudaStreamCreateWithPriority(
-        &hipri_stream.stream, kDefaultFlags, kHighPriority));
+        &hipri_stream, kDefaultFlags, kHighPriority));
   }
 }
 
@@ -214,7 +190,7 @@ static void initCUDAStreamsOnce() {
   }
 
   // Inits current streams (thread local) to default streams
-  current_streams = (StreamId*)malloc(num_gpus * sizeof(StreamId));
+  current_streams = std::make_unique<StreamId[]>(num_gpus);
   for (const auto i : c10::irange(num_gpus)) {
     current_streams[i] = makeStreamId(StreamIdType::DEFAULT, 0);
   }
@@ -260,11 +236,11 @@ cudaStream_t CUDAStream::stream() const {
           ").",
           " Did you manufacture the StreamId yourself?  Don't do that; use the",
           " official API like c10::cuda::getStreamFromPool() to get a new stream.");
-      return default_streams[device_index].stream;
+      return default_streams[device_index];
     case StreamIdType::LOW:
-      return low_priority_streams[device_index][si].stream;
+      return low_priority_streams[device_index][si];
     case StreamIdType::HIGH:
-      return high_priority_streams[device_index][si].stream;
+      return high_priority_streams[device_index][si];
     case StreamIdType::EXT:
       return reinterpret_cast<cudaStream_t>(stream_id);
     default:
