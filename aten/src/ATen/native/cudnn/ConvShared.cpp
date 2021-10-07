@@ -245,7 +245,7 @@ Tensor cudnn_convolution_forward(
   TensorArg output{ output_t, "result", 0 };
   convolution_shape_check(c, input, weight, output, padding, stride, dilation, groups);
 
- // See #4500
+  // See #4500
   Tensor weight_contig = weight->contiguous(memory_format);
   // Make sure that NC11 strides follow formula
   weight_contig.resize_(weight_contig.sizes(), memory_format);
