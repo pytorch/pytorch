@@ -1108,7 +1108,7 @@ class TestONNXRuntime(unittest.TestCase):
     @skipScriptTest()  # ScriptModule could not be exported without the Input Descriptor for optional inputs
     def test_none_as_input(self):
         class Model(torch.nn.Module):
-            def forward(self, x, y:Optional[Tensor]):
+            def forward(self, x, y: Optional[Tensor]):
                 if y is not None:
                     return x + y
                 return x
@@ -1119,7 +1119,7 @@ class TestONNXRuntime(unittest.TestCase):
     @skipScriptTest([7, 8, 9, 10, 11, 12, 13, 14])
     def test_none_as_input_script(self):
         class Model(torch.nn.Module):
-            def forward(self, x, y:Optional[Tensor] = torch.ones(2, 3)):
+            def forward(self, x, y: Optional[Tensor] = torch.ones(2, 3)):
                 if y is not None:
                     return x + y
                 return x
@@ -1130,7 +1130,7 @@ class TestONNXRuntime(unittest.TestCase):
     @skipScriptTest()  # ScriptModule could not be exported without the Input Descriptor for optional inputs
     def test_none_as_tuple_input(self):
         class Model(torch.nn.Module):
-            def forward(self, x, y:Tuple[Optional[Tensor], Optional[Tensor]]):
+            def forward(self, x, y: Tuple[Optional[Tensor], Optional[Tensor]]):
                 if y[0] is not None:
                     return x + y[0]
                 if y[1] is not None:
