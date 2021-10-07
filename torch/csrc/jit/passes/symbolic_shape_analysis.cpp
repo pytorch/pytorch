@@ -180,12 +180,12 @@ struct SymbolicShapeAnalyzer {
       std::shared_ptr<Graph> shape_compute_graph,
       const AliasDb& db)
       : graph_(shape_compute_graph->copy()), node_(n) {
-    std::cout << "XXX SymbolicShapeAnalyzer ctor node:" << n->kind().toQualString() << std::endl;
-    std::cout << "XXX SymbolicShapeAnalyzer ctor output:" << n->output()->debugName() << std::endl;
+    //std::cout << "XXX SymbolicShapeAnalyzer ctor node:" << n->kind().toQualString() << std::endl;
+    //std::cout << "XXX SymbolicShapeAnalyzer ctor output:" << n->output()->debugName() << std::endl;
     // NB: shape compute graphs may have less inputs than their node
     // counterparts to allow e.g. sharing one single unary definition
     for (size_t i = 0; i < graph_->inputs().size(); i++) {
-      std::cout << "XXX input " << i << std::endl;
+      //std::cout << "XXX input " << i << std::endl;
       auto type = node_->input(i)->type();
 
       if (auto opt_type =
@@ -200,7 +200,7 @@ struct SymbolicShapeAnalyzer {
       }
 
       if (auto tt = type->castRaw<TensorType>()) {
-        std::cout << "XXX TensorType" << std::endl;
+        //std::cout << "XXX TensorType" << std::endl;
         // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
         c10::SymbolicShape symbolic_shapes = tt->symbolic_sizes();
 
@@ -211,7 +211,7 @@ struct SymbolicShapeAnalyzer {
 
         if (symbolic_shapes.isComplete() &&
             !symbolic_shape_analysis_test_mode) {
-          std::cout << "XXX TensorType " << __LINE__ << " " << *tt->sizes().concrete_sizes() << std::endl;
+          //std::cout << "XXX TensorType " << __LINE__ << " " << *tt->sizes().concrete_sizes() << std::endl;
           replaceWithIValue(
               graph_->inputs().at(i), *tt->sizes().concrete_sizes());
           continue;
@@ -219,7 +219,7 @@ struct SymbolicShapeAnalyzer {
         // TODO: remove, all constant tensors should have typed sizes
         if (toIValue(node_->input(i))) {
           auto size = constant_as<at::Tensor>(node_->input(i))->sizes();
-          std::cout << "XXX TensorType " << __LINE__ << " size:"<< size << std::endl;
+          //std::cout << "XXX TensorType " << __LINE__ << " size:"<< size << std::endl;
           if (!symbolic_shape_analysis_test_mode) {
             replaceWithIValue(graph_->inputs().at(i), size);
           } else {
@@ -231,7 +231,7 @@ struct SymbolicShapeAnalyzer {
 
         // we can't optimize a tensor without fixed rank
         if (symbolic_shapes.rank()) {
-          std::cout << "XXX TensorType" << __LINE__ << std::endl;
+          //std::cout << "XXX TensorType" << __LINE__ << std::endl;
           node_symbolic_input_indices_.emplace_back(i, symbolic_shapes);
         }
       } else if (
@@ -314,8 +314,8 @@ struct SymbolicShapeAnalyzer {
     }
     std::unordered_map<Value*, int64_t> symbolic_shape_values;
     substituteInputTensorProperties(&symbolic_shape_values);
-    GRAPH_DUMP("Done with partial evaluation", graph_);
-    std::cout << "graph:\n" << *graph_ << std::endl;
+    //GRAPH_DUMP("Done with partial evaluation", graph_);
+    //std::cout << "graph:\n" << *graph_ << std::endl;
 
     extractOutputShape(symbolic_shape_values);
   }
@@ -536,7 +536,7 @@ void PropagateShapesWithShapeFunction(
 
 void PropagateShapesOnBlock(Block* b, const AliasDb& db) {
   for (Node* n : b->nodes()) {
-    std::cout << "XXX PropagateShapesOnBlock node:" << n->kind().toQualString() << std::endl;
+    //std::cout << "XXX PropagateShapesOnBlock node:" << n->kind().toQualString() << std::endl;
     // TODO: handle loop
     if (n->kind() == prim::If) {
       IfView if_v(n);
@@ -544,7 +544,7 @@ void PropagateShapesOnBlock(Block* b, const AliasDb& db) {
       PropagateShapesOnBlock(if_v.elseBlock(), db);
       mergeTypes(if_v.thenOutputs(), if_v.elseOutputs(), if_v.outputs());
     } else if (n->maybeSchema()) {
-      std::cout << "XXX " << __FUNCTION__ << " " << __LINE__ << " " << n->schema() << std::endl;
+      //std::cout << "XXX " << __FUNCTION__ << " " << __LINE__ << " " << n->schema() << std::endl;
       if (auto maybe_graph = shapeComputeGraphForSchema(n->schema())) {
         PropagateShapesWithShapeFunction(n, *maybe_graph, db);
       }
@@ -554,7 +554,7 @@ void PropagateShapesOnBlock(Block* b, const AliasDb& db) {
       n->output()->setType(
           orig_type->createWithContained(std::move(new_types)));
     } else {
-      std::cout << "XXX " << __FUNCTION__ << " " << __LINE__ << std::endl;
+      //std::cout << "XXX " << __FUNCTION__ << " " << __LINE__ << std::endl;
     }
   }
 }

@@ -645,6 +645,21 @@ ArgValue TensorExprKernel::toArg(const torch::jit::Value* v) const {
       return val.toIntVector();
     } else if (val.isDoubleList()) {
       return val.toDoubleVector();
+    } else if (val.isTensor()) {
+      const auto t = val.toTensor();
+      c10::ScalarType dtype = c10::typeMetaToScalarType(t.dtype());
+      switch (dtype) {
+        case ScalarType::Float:
+          return t.item().toFloat();
+        case ScalarType::Long:
+          return t.item().toLong();
+        default:
+          std::stringstream ss;
+          ss << "dtype:" << dtype << std::endl;
+          throw unsupported_dtype(
+              "Unsupported dtype of conversion constant 0-dim Tensor to scalar " +
+              ss.str());
+      }
     } else {
       throw unsupported_dtype(val.type()->str());
     }
@@ -1421,7 +1436,7 @@ Tensor computeQuantizedConv2dPrepack(
       qw.node()->qzero(),
       buildErrorMessage(
           "quantized_conv2d_prepack: Expects quantized weights, qzero is missing"));
-  const double qw_qscale = to<FloatImm>(qw.node()->qscale())->value();
+  const double qw_qscale = to<DoubleImm>(qw.node()->qscale())->value();
   // immediateAs<double>(w.node()->qscale())
   const int64_t qw_qzero = to<LongImm>(qw.node()->qzero())->value();
   // immediateAs<int64_t>(w.node()->qzero())
@@ -1458,10 +1473,10 @@ Tensor computeQuantizedConv2d(
   std::cout << "XXX " << __FUNCTION__ << " out_qscale:" << out_qscale
             << " out_qzero:" << out_qzero << std::endl;
   BufHandle ResultBuf("quantized_conv2d", outputShape, dtype);
-  ResultBuf.node()->set_qscale(FloatImm::make(out_qscale).node());
+  ResultBuf.node()->set_qscale(DoubleImm::make(out_qscale).node());
   ResultBuf.node()->set_qzero(LongImm::make(out_qzero).node());
   const BufHandle& inp = c10::get<BufHandle>(inputs[0]);
-  const double qx_qscale = to<FloatImm>(inp.node()->qscale())->value();
+  const double qx_qscale = to<DoubleImm>(inp.node()->qscale())->value();
   const int64_t qx_qzero = to<LongImm>(inp.node()->qzero())->value();
   const int64_t qx_qdtype = (int64_t)inp.dtype().scalar_type();
   std::cout << "XXX " << __FUNCTION__ << " qx_qscale:" << qx_qscale
@@ -1482,7 +1497,6 @@ Tensor computeQuantizedConv2dRelu(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType) {
-  std::cout << "XXX " << __FUNCTION__ << ":" << __LINE__ << std::endl;
   Dtype dtype = kFloat;
   if (outputType) {
     dtype = Dtype(*outputType);
@@ -1490,16 +1504,14 @@ Tensor computeQuantizedConv2dRelu(
 
   const double out_qscale = c10::get<double>(inputs[2]);
   const int64_t out_qzero = c10::get<int64_t>(inputs[3]);
-  std::cout << "XXX " << __FUNCTION__ << " out_qscale:" << out_qscale
-            << " out_qzero:" << out_qzero << std::endl;
   BufHandle ResultBuf("quantized_conv2d_relu", outputShape, dtype);
-  ResultBuf.node()->set_qscale(FloatImm::make(out_qscale).node());
+  ResultBuf.node()->set_qscale(DoubleImm::make(out_qscale).node());
   ResultBuf.node()->set_qzero(LongImm::make(out_qzero).node());
-  const BufHandle& inp = c10::get<BufHandle>(inputs[0]);
+  const BufHandle& x = c10::get<BufHandle>(inputs[0]);
   ExprPtr qscale_ptr = IRSimplifier::simplify(inp.node()->qscale());
   std::cout << "XXX " << __FUNCTION__ << " qscale_ptr:" << *qscale_ptr
             << std::endl;
-  const double qx_qscale = to<FloatImm>(qscale_ptr)->value();
+  const double qx_qscale = to<DoubleImm>(qscale_ptr)->value();
   const int64_t qx_qzero =
       to<LongImm>(IRSimplifier::simplify(inp.node()->qzero()))->value();
   const int64_t qx_qdtype = (int64_t)inp.dtype().scalar_type();
@@ -1527,18 +1539,16 @@ Tensor computeQuantizedAdd(
 
   const double out_qscale = c10::get<double>(inputs[2]);
   const int64_t out_qzero = c10::get<int64_t>(inputs[3]);
-  std::cout << "XXX " << __FUNCTION__ << " out_qscale:" << out_qscale
-            << " out_qzero:" << out_qzero << std::endl;
 
   BufHandle ResultBuf("quantized_add", outputShape, dtype);
-  ResultBuf.node()->set_qscale(FloatImm::make(out_qscale).node());
+  ResultBuf.node()->set_qscale(DoubleImm::make(out_qscale).node());
   ResultBuf.node()->set_qzero(LongImm::make(out_qzero).node());
   const BufHandle& a = c10::get<BufHandle>(inputs[0]);
-  const double qa_qscale = to<FloatImm>(a.node()->qscale())->value();
+  const double qa_qscale = to<DoubleImm>(a.node()->qscale())->value();
   const int64_t qa_qzero = to<LongImm>(a.node()->qzero())->value();
   const int64_t qa_qdtype = (int64_t)a.dtype().scalar_type();
   const BufHandle& b = c10::get<BufHandle>(inputs[1]);
-  const double qb_qscale = to<FloatImm>(b.node()->qscale())->value();
+  const double qb_qscale = to<DoubleImm>(b.node()->qscale())->value();
   const int64_t qb_qzero = to<LongImm>(b.node()->qzero())->value();
   const int64_t qb_qdtype = (int64_t)b.dtype().scalar_type();
 
@@ -1561,17 +1571,12 @@ Tensor computeQuantizePerTensor(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType) {
-  std::cout << "XXX " << __FUNCTION__ << std::endl;
   auto output_sizes_expr = ExprHandleVectorToExprVector(outputShape);
   std::vector<VarPtr> vars;
   for (const auto& os : outputShape) {
     vars.push_back(alloc<Var>(
         "",
         os.node()->dtype().scalar_type() == ScalarType::Long ? kLong : kInt));
-  }
-  std::cout << "XXX " << __FUNCTION__ << std::endl;
-  for (const auto& arg : inputs) {
-    std::cout << "XXX " << getArgValueName(arg) << std::endl;
   }
   auto axes = VarVectorToVarHandleVector(vars);
   std::vector<ExprHandle> indices(axes.begin(), axes.end());
@@ -1580,7 +1585,7 @@ Tensor computeQuantizePerTensor(
   if (auto qscale_b = c10::get_if<BufHandle>(&inputs[1])) {
     std::vector<ExprHandle> idxs;
     idxs.push_back(LongImm::make(0l));
-    qscale = qscale_b->load(idxs);
+    qscale = qscale_b->load({LongImm::make(0l)}); // idxs);
   } else {
     qscale = constant(inputs[1]);
   }
@@ -1593,19 +1598,7 @@ Tensor computeQuantizePerTensor(
   } else {
     qzero = constant(inputs[2]);
   }
-  std::cout << "XXX " << __FUNCTION__ << ":" << __LINE__
-            << " print qscale raw:" << qscale << std::endl;
-  ExprPtr qscale_ptr = IRSimplifier::simplify(qscale.node());
-  std::cout << "XXX print qscale simplified:" << std::endl;
-  print(qscale_ptr);
-  // const double qscale_value = to<FloatImm>(qscale_ptr)->value();
-  // std::cout << "XXX qscale_value:" << qscale_value << std::endl;
-
-  qscale = FloatImm::make(0.1f);
-  qzero = LongImm::make(13);
-
   const int64_t qdtype = c10::get<int64_t>(inputs[3]);
-  std::cout << "XXX " << __FUNCTION__ << " qdtype:" << qdtype << std::endl;
   const auto dtype = [qdtype]() {
     // TODO: replace 12 and 13 with literals
     if (13l == qdtype) {
@@ -1616,11 +1609,11 @@ Tensor computeQuantizePerTensor(
     throw malformed_input("Unsupported quantized dtype");
   }();
   // Q(x, scale, zero) = round(x / scale + zero)
-  const BufHandle& inp = c10::get<BufHandle>(inputs[0]);
+  const BufHandle& x = c10::get<BufHandle>(inputs[0]);
 
-  auto inp_dtype = inp.node()->dtype();
-  auto prom_qscale = promoteToDtype(qscale, inp_dtype.scalar_type());
-  auto prom_qzero = promoteToDtype(qzero, inp_dtype.scalar_type());
+  auto x_dtype = x.node()->dtype();
+  auto prom_qscale = promoteToDtype(qscale, x_dtype.scalar_type());
+  auto prom_qzero = promoteToDtype(qzero, x_dtype.scalar_type());
   ExprHandle exprHandle = promoteToDtype(
       tensorOrConstant(inputs[0], indices) / prom_qscale + prom_qzero +
           FloatImm::make(0.5f),
@@ -1696,7 +1689,7 @@ Tensor computeUpsampleNearest2d(
     std::cout << "XXX " << getArgValueName(arg) << std::endl;
   }
   const BufHandle& qx = c10::get<BufHandle>(inputs[0]);
-  const double qx_qscale = to<FloatImm>(qx.node()->qscale())->value();
+  const double qx_qscale = to<DoubleImm>(qx.node()->qscale())->value();
   const int64_t qx_qzero = to<LongImm>(qx.node()->qzero())->value();
   const int64_t qx_qdtype = (int64_t)qx.dtype().scalar_type();
   std::cout << "XXX " << __FUNCTION__ << " qx_qscale:" << qx_qscale
@@ -1704,7 +1697,7 @@ Tensor computeUpsampleNearest2d(
             << std::endl;
 
   BufHandle ResultBuf("quantized_upsample_nearest2d", outputShape, dtype);
-  ResultBuf.node()->set_qscale(FloatImm::make(qx_qscale).node());
+  ResultBuf.node()->set_qscale(DoubleImm::make(qx_qscale).node());
   ResultBuf.node()->set_qzero(LongImm::make(qx_qzero).node());
 
   int64_t output_size_h = -1;
@@ -3538,6 +3531,13 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
             << std::endl;
   // auto sizes = *tt->sizes().concrete_sizes();
   auto sizes = const_tensor.sizes();
+  if (sizes.size() == 0) {
+    std::cout << "XXX " << __FUNCTION__ << " " << __LINE__
+              << " v->debugName():" << v->debugName()
+              << " ITEM_TENSOR_SKIP_BINDING" << std::endl;
+    return;
+  }
+
   std::vector<ExprHandle> te_sizes;
   te_sizes.reserve(sizes.size());
   for (auto s : sizes) {

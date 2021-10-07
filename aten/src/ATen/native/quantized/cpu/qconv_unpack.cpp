@@ -92,7 +92,6 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeight<
         at::native::fbgemm_utils::TransposeConvTensorUnpackConversion<
             kSpatialDim>(unpacked_weights, groups);
   }
-  std::cout << "XXX quantized_unpack fbgemm w.size:" << unpacked_weights.sizes() << std::endl;
   return std::tuple<at::Tensor, c10::optional<at::Tensor>>(
       unpacked_weights, bias);
 }
