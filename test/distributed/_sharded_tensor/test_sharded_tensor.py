@@ -1693,6 +1693,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
         )
 
     @with_comms(backend="gloo")
+    @skip_if_lt_x_gpu(4)
     def test_init_from_local_shards_invalid_pin_memory(self):
         # pin memory can only be on dense cpu
         local_shard_metadata = ShardMetadata(
