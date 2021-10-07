@@ -443,6 +443,14 @@ jit_sources_full = [
 
 libtorch_core_jit_sources = sorted(jit_sources_full)
 
+torch_mobile_tracer_sources = [
+    "torch/csrc/jit/mobile/model_tracer/tracer.cpp",
+    "torch/csrc/jit/mobile/model_tracer/TensorUtils.cpp",
+    "torch/csrc/jit/mobile/model_tracer/MobileModelRunner.cpp",
+    "torch/csrc/jit/mobile/model_tracer/OperatorCallTracer.cpp",
+    "torch/csrc/jit/mobile/model_tracer/KernelDTypeTracer.cpp",
+]
+
 torch_mobile_core = [
     # backend_debug_info.cpp provides
     # __torch__.torch.classes.backend.BackendDebugInfo class
