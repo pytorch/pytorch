@@ -377,12 +377,7 @@ void NodeToONNX(
     WithInsertPoint insert_point_guard(new_block);
     WithCurrentScope scope_guard(*g, n->scope());
     py::object raw_output = onnx.attr("_run_symbolic_function")(
-        g,
-        new_block,
-        n,
-        py_inputs,
-        env,
-        operator_export_type);
+        g, new_block, n, py_inputs, env, operator_export_type);
 
     // Find new nodes that have been created by _run_symbolic_function and
     // propagate metadata
