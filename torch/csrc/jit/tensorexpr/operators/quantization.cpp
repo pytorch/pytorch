@@ -35,6 +35,10 @@ int64_t immQDType(const BufHandle& qx) {
   return (int64_t)qx.dtype().scalar_type();
 }
 
+double isQuantized(const BufHandle& qx) {
+  return qx.node()->qscale() && qx.node()->qzero();
+}
+
 BufHandle makeQBufHandle(
     const std::string& name_hint,
     const std::vector<ExprHandle>& dims,
@@ -254,48 +258,6 @@ Tensor computeDequantize(
   BufPtr buf = alloc<Buf>(
       "dequantize", ExprHandleVectorToExprVector(outputShape), dtype);
   return Tensor(buf, vars, y.node());
-}
-
-Tensor computeUpsampleNearest2d(
-    const std::vector<ArgValue>& inputs,
-    const std::vector<ExprHandle>& outputShape,
-    const c10::optional<ScalarType>& outputType) {
-  Dtype dtype = kFloat;
-  if (outputType) {
-    dtype = Dtype(*outputType);
-  }
-  const BufHandle& qx = c10::get<BufHandle>(inputs[0]);
-  const auto qx_qscale = immQScale(qx);
-  const auto qx_qzero = immQZero(qx);
-
-  int64_t output_size_h = -1;
-  int64_t output_size_w = -1;
-  if (auto output_sizes = c10::get_if<IntList>(&inputs[1])) {
-    output_size_h = (*output_sizes)[0];
-    output_size_w = (*output_sizes)[1];
-  }
-
-  double scale_factor_h = -1.f;
-  double scale_factor_w = -1.f;
-  if (auto scale_factors = c10::get_if<DoubleList>(&inputs[2])) {
-    scale_factor_h = (*scale_factors)[0];
-    scale_factor_w = (*scale_factors)[1];
-  }
-
-  auto ResultBuf = makeQBufHandle(
-      "quantized_upsample_nearest2d", outputShape, dtype, qx_qscale, qx_qzero);
-  StmtPtr s = ExternalCall::make(
-      ResultBuf,
-      "nnc_quantized_upsample_nearest2d",
-      {qx},
-      {qx_qscale,
-       qx_qzero,
-       immQDType(qx),
-       output_size_h,
-       output_size_w,
-       scale_factor_h,
-       scale_factor_w});
-  return Tensor(ResultBuf.node(), s);
 }
 
 } // namespace tensorexpr

@@ -1409,6 +1409,56 @@ Tensor computePrepackedLinearClampRun(
   return Tensor(ResultBuf.node(), s);
 }
 
+Tensor computeUpsampleNearest2d(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType) {
+  Dtype dtype = kFloat;
+  if (outputType) {
+    dtype = Dtype(*outputType);
+  }
+  int64_t output_size_h = -1;
+  int64_t output_size_w = -1;
+  if (auto output_sizes = c10::get_if<IntList>(&inputs[1])) {
+    output_size_h = (*output_sizes)[0];
+    output_size_w = (*output_sizes)[1];
+  }
+
+  double scale_factor_h = -1.f;
+  double scale_factor_w = -1.f;
+  if (auto scale_factors = c10::get_if<DoubleList>(&inputs[2])) {
+    scale_factor_h = (*scale_factors)[0];
+    scale_factor_w = (*scale_factors)[1];
+  }
+  const BufHandle& x = c10::get<BufHandle>(inputs[0]);
+
+  BufHandle ResultBuf("upsample_nearest2d", outputShape, dtype);
+  double qx_qscale = -1.f;
+  int64_t qx_qzero = -1l;
+  int64_t qx_qdtype = -1l;
+  if (isQuantized(x)) {
+    qx_qscale = immQScale(x);
+    qx_qzero = immQZero(x);
+    qx_qdtype = immQDType(x);
+
+    ResultBuf.node()->set_qscale(DoubleImm::make(qx_qscale).node());
+    ResultBuf.node()->set_qzero(DoubleImm::make(qx_qzero).node());
+  }
+
+  StmtPtr s = ExternalCall::make(
+      ResultBuf,
+      "nnc_upsample_nearest2d",
+      {x},
+      {qx_qscale,
+       qx_qzero,
+       qx_qdtype,
+       output_size_h,
+       output_size_w,
+       scale_factor_h,
+       scale_factor_w});
+  return Tensor(ResultBuf.node(), s);
+}
+
 Tensor tensorexpr::computeOperandValue(
     c10::Symbol op,
     const std::vector<ArgValue>& inputs,

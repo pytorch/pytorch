@@ -289,7 +289,7 @@ void nnc_aten_quantized_add(
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
-void nnc_aten_quantized_upsample_nearest2d(
+void nnc_aten_upsample_nearest2d(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -299,16 +299,19 @@ void nnc_aten_quantized_upsample_nearest2d(
     int64_t* extra_args) {
   std::vector<at::Tensor> tensors =
       constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+  at::Tensor x = tensors[0];
   const double x_qscale = extra_args[0];
   const int64_t x_qzero = extra_args[1];
-  const c10::ScalarType x_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
-  at::Tensor qx = at::from_blob_quantized_per_tensor_affine(
-      buf_data[1],
-      tensors[1].sizes(),
-      [](void*) {},
-      x_qscale,
-      x_qzero,
-      at::TensorOptions(toQIntType(x_qdtype)));
+  const int64_t qdtype = extra_args[2];
+  if (qdtype != -1) {
+    at::Tensor qx = at::from_blob_quantized_per_tensor_affine(
+        buf_data[1],
+        tensors[1].sizes(),
+        [](void*) {},
+        x_qscale,
+        x_qzero,
+        at::TensorOptions(toQIntType(static_cast<c10::ScalarType>(qdtype))));
+  }
 
   int64_t output_size_h = extra_args[3];
   int64_t output_size_w = extra_args[4];
@@ -331,7 +334,7 @@ void nnc_aten_quantized_upsample_nearest2d(
     scales_w = scale_factor_w;
   }
 
-  auto r = at::upsample_nearest2d(qx, output_size_arg, scale_factors_arg);
+  auto r = at::upsample_nearest2d(x, output_size_arg, scale_factors_arg);
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
@@ -490,9 +493,9 @@ const static RegisterNNCExternalFunction nnc_quantized_conv2d_relu(
 const static RegisterNNCExternalFunction nnc_quantized_add(
     "nnc_quantized_add",
     nnc_aten_quantized_add);
-const static RegisterNNCExternalFunction nnc_quantized_upsample_nearest2d(
-    "nnc_quantized_upsample_nearest2d",
-    nnc_aten_quantized_upsample_nearest2d);
+const static RegisterNNCExternalFunction nnc_upsample_nearest2d(
+    "nnc_upsample_nearest2d",
+    nnc_aten_upsample_nearest2d);
 const static RegisterNNCExternalFunction nnc_adaptive_avg_pool2d(
     "nnc_aten_adaptive_avg_pool2d",
     nnc_aten_adaptive_avg_pool2d);
