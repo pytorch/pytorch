@@ -166,13 +166,13 @@ def build_constructor_arg_db():
         torch.nn.UpsamplingNearest2d: ((), {}),
         torch.nn.ZeroPad2d: ((0,), {}),
         torch.nn.qat.Conv2d: ((3, 3, 3), {
-            'qconfig': torch.quantization.default_qconfig,
+            'qconfig': torch.ao.quantization.default_qconfig,
         }),
         torch.nn.qat.Conv3d: ((3, 3, 3), {
-            'qconfig': torch.quantization.default_qconfig,
+            'qconfig': torch.ao.quantization.default_qconfig,
         }),
         torch.nn.qat.Linear: ((5, 2), {
-            'qconfig': torch.quantization.default_qconfig,
+            'qconfig': torch.ao.quantization.default_qconfig,
         }),
         torch.nn.quantizable.LSTM: ((5, 6), {}),
         torch.nn.quantizable.LSTMCell: ((5, 6), {}),
