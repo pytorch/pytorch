@@ -16,29 +16,15 @@ class ShardedTensorTestBase(MultiProcessTestCase):
         return 4
 
     def init_pg(self, backend="nccl"):
-        if backend == "nccl":
-            dist.init_process_group(
-                backend="nccl",
-                world_size=self.world_size,
-                rank=self.rank,
-                init_method=f"file://{self.file_name}",
-            )
-        elif backend == "gloo":
-            dist.init_process_group(
-                backend="gloo",
-                world_size=self.world_size,
-                rank=self.rank,
-                init_method=f"file://{self.file_name}",
-            )
-        elif backend == "mpi":
-            dist.init_process_group(
-                backend="mpi",
-                world_size=self.world_size,
-                rank=self.rank,
-                init_method=f"file://{self.file_name}",
-            )
-        else:
+        if backend not in ["nccl", "gloo", "mpi"]:
             raise RuntimeError(f"Backend {backend} not supported!")
+
+        dist.init_process_group(
+            backend=backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            init_method=f"file://{self.file_name}",
+        )
 
     def init_rpc(self):
         rpc_backend_options = rpc.TensorPipeRpcBackendOptions()
