@@ -104,6 +104,9 @@
 - func: _unpack_dual(Tensor(a) dual, int level) -> (Tensor(a) primal, Tensor tangent)
   variants: function
 
+# Maybe more comments here?
+- func: _new_with_same_meta(Tensor self, int[] size, int[] stride, int storage_offset, int nelement_in_storage) -> Tensor
+
 - func: rename_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
   variants: method
 
