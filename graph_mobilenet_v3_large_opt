@@ -1,0 +1,275 @@
+graph(%self : __torch__.torchvision.models.mobilenetv3.___torch_mangle_515.MobileNetV3,
+      %x.1 : Tensor):
+  %2 : int[] = prim::Constant[value=[1, 1]]()
+  %3 : int = prim::Constant[value=1]() # :0:0
+  %4 : int = prim::Constant[value=2]() # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py:442:45
+  %5 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65b6dc960)]() # :0:0
+  %6 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65dfb74e0)]() # :0:0
+  %7 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65dfbc850)]() # :0:0
+  %8 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65dfbf0f0)]() # :0:0
+  %9 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65dfc2220)]() # :0:0
+  %10 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65dfc5dd0)]() # :0:0
+  %11 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65dfcaf10)]() # :0:0
+  %12 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65dfcefa0)]() # :0:0
+  %13 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65dfd3810)]() # :0:0
+  %14 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65dfd8d50)]() # :0:0
+  %15 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65dfddfe0)]() # :0:0
+  %16 : str = prim::Constant[value="AssertionError: "]() # :0:0
+  %17 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65dfe3330)]() # :0:0
+  %18 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65dfe8860)]() # :0:0
+  %19 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65dfeec80)]() # :0:0
+  %20 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65dff8440)]() # :0:0
+  %21 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65dfcf1a0)]() # :0:0
+  %22 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e00ab60)]() # :0:0
+  %23 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e013b40)]() # :0:0
+  %24 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e01df80)]() # :0:0
+  %25 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e029b30)]() # :0:0
+  %26 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e0334a0)]() # :0:0
+  %27 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e03bbf0)]() # :0:0
+  %28 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e044a70)]() # :0:0
+  %29 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e04ef00)]() # :0:0
+  %30 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e05f5c0)]() # :0:0
+  %31 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e06ca20)]() # :0:0
+  %32 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e0839b0)]() # :0:0
+  %33 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e0a77c0)]() # :0:0
+  %34 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e0bb3d0)]() # :0:0
+  %35 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e0ceb80)]() # :0:0
+  %36 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e0ee370)]() # :0:0
+  %37 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e001cf0)]() # :0:0
+  %38 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e002a60)]() # :0:0
+  %39 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e131b90)]() # :0:0
+  %40 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e144160)]() # :0:0
+  %41 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e1563c0)]() # :0:0
+  %42 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e18b9b0)]() # :0:0
+  %43 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e1b7a60)]() # :0:0
+  %44 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e1f6ef0)]() # :0:0
+  %45 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e26cc20)]() # :0:0
+  %46 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e2dbd20)]() # :0:0
+  %47 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e35b670)]() # :0:0
+  %48 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e3ad7f0)]() # :0:0
+  %49 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e4250b0)]() # :0:0
+  %50 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e508840)]() # :0:0
+  %51 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e5c2e60)]() # :0:0
+  %52 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e6577e0)]() # :0:0
+  %53 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e6b4130)]() # :0:0
+  %54 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e7361c0)]() # :0:0
+  %55 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e819a00)]() # :0:0
+  %56 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e8f37b0)]() # :0:0
+  %57 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e95e2b0)]() # :0:0
+  %58 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e977e70)]() # :0:0
+  %59 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e993870)]() # :0:0
+  %60 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e995180)]() # :0:0
+  %61 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e997650)]() # :0:0
+  %62 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e9993f0)]() # :0:0
+  %63 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e9b3050)]() # :0:0
+  %64 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e9ceae0)]() # :0:0
+  %65 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e9d03d0)]() # :0:0
+  %66 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e9d28c0)]() # :0:0
+  %67 : __torch__.torch.classes.xnnpack.Conv2dOpContext = prim::Constant[value=object(0x55c65e9d40b0)]() # :0:0
+  %68 : int = prim::Constant[value=-1]()
+  %69 : __torch__.torch.classes.xnnpack.LinearOpContext = prim::Constant[value=object(0x55c65e9d6a50)]() # :0:0
+  %70 : __torch__.torch.classes.xnnpack.LinearOpContext = prim::Constant[value=object(0x55c65e100770)]() # :0:0
+  %71 : Tensor = prepacked::conv2d_clamp_run(%x.1, %5)
+  %input.1 : Tensor = aten::hardswish_(%71) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %73 : Tensor = prepacked::conv2d_clamp_run(%input.1, %6)
+  %74 : Tensor = prepacked::conv2d_clamp_run(%73, %7)
+  %result.1 : Tensor = aten::add_(%74, %input.1, %3) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:97:12
+  %76 : Tensor = prepacked::conv2d_clamp_run(%result.1, %8)
+  %77 : Tensor = prepacked::conv2d_clamp_run(%76, %9)
+  %78 : Tensor = prepacked::conv2d_clamp_run(%77, %10)
+  %79 : Tensor = prepacked::conv2d_clamp_run(%78, %11)
+  %80 : Tensor = prepacked::conv2d_clamp_run(%79, %12)
+  %81 : Tensor = prepacked::conv2d_clamp_run(%80, %13)
+  %result0.1 : Tensor = aten::add_(%81, %78, %3) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:97:12
+  %83 : Tensor = prepacked::conv2d_clamp_run(%result0.1, %14)
+  %84 : Tensor = prepacked::conv2d_clamp_run(%83, %15)
+  %85 : int[] = aten::size(%84) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1129:51
+  %86 : int = aten::len(%85) # <string>:5:9
+  %87 : bool = aten::gt(%86, %4) # <string>:5:9
+   = prim::If(%87) # <string>:5:2
+    block0():
+      -> ()
+    block1():
+       = prim::RaiseException(%16) # <string>:5:2
+      -> ()
+  %scale.1 : Tensor = aten::adaptive_avg_pool2d(%84, %2) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1130:11
+  %89 : Tensor = prepacked::conv2d_clamp_run(%scale.1, %17)
+  %90 : Tensor = prepacked::conv2d_clamp_run(%89, %18)
+  %91 : Tensor = aten::hardsigmoid_(%90) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1827:15
+  %input0.1 : Tensor = aten::mul(%91, %84) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:39:15
+  %93 : Tensor = prepacked::conv2d_clamp_run(%input0.1, %19)
+  %94 : Tensor = prepacked::conv2d_clamp_run(%93, %20)
+  %95 : Tensor = prepacked::conv2d_clamp_run(%94, %21)
+  %96 : int[] = aten::size(%95) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1129:51
+  %97 : int = aten::len(%96) # <string>:5:9
+  %98 : bool = aten::gt(%97, %4) # <string>:5:9
+   = prim::If(%98) # <string>:5:2
+    block0():
+      -> ()
+    block1():
+       = prim::RaiseException(%16) # <string>:5:2
+      -> ()
+  %scale0.1 : Tensor = aten::adaptive_avg_pool2d(%95, %2) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1130:11
+  %100 : Tensor = prepacked::conv2d_clamp_run(%scale0.1, %22)
+  %101 : Tensor = prepacked::conv2d_clamp_run(%100, %23)
+  %102 : Tensor = aten::hardsigmoid_(%101) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1827:15
+  %input1.1 : Tensor = aten::mul(%102, %95) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:39:15
+  %104 : Tensor = prepacked::conv2d_clamp_run(%input1.1, %24)
+  %result1.1 : Tensor = aten::add_(%104, %93, %3) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:97:12
+  %106 : Tensor = prepacked::conv2d_clamp_run(%result1.1, %25)
+  %107 : Tensor = prepacked::conv2d_clamp_run(%106, %26)
+  %108 : int[] = aten::size(%107) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1129:51
+  %109 : int = aten::len(%108) # <string>:5:9
+  %110 : bool = aten::gt(%109, %4) # <string>:5:9
+   = prim::If(%110) # <string>:5:2
+    block0():
+      -> ()
+    block1():
+       = prim::RaiseException(%16) # <string>:5:2
+      -> ()
+  %scale1.1 : Tensor = aten::adaptive_avg_pool2d(%107, %2) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1130:11
+  %112 : Tensor = prepacked::conv2d_clamp_run(%scale1.1, %27)
+  %113 : Tensor = prepacked::conv2d_clamp_run(%112, %28)
+  %114 : Tensor = aten::hardsigmoid_(%113) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1827:15
+  %input2.1 : Tensor = aten::mul(%114, %107) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:39:15
+  %116 : Tensor = prepacked::conv2d_clamp_run(%input2.1, %29)
+  %result2.1 : Tensor = aten::add_(%116, %result1.1, %3) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:97:12
+  %118 : Tensor = prepacked::conv2d_clamp_run(%result2.1, %30)
+  %input3.1 : Tensor = aten::hardswish_(%118) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %120 : Tensor = prepacked::conv2d_clamp_run(%input3.1, %31)
+  %input4.1 : Tensor = aten::hardswish_(%120) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %122 : Tensor = prepacked::conv2d_clamp_run(%input4.1, %32)
+  %123 : Tensor = prepacked::conv2d_clamp_run(%122, %33)
+  %input5.1 : Tensor = aten::hardswish_(%123) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %125 : Tensor = prepacked::conv2d_clamp_run(%input5.1, %34)
+  %input6.1 : Tensor = aten::hardswish_(%125) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %127 : Tensor = prepacked::conv2d_clamp_run(%input6.1, %35)
+  %result3.1 : Tensor = aten::add_(%127, %122, %3) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:97:12
+  %129 : Tensor = prepacked::conv2d_clamp_run(%result3.1, %36)
+  %input7.1 : Tensor = aten::hardswish_(%129) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %131 : Tensor = prepacked::conv2d_clamp_run(%input7.1, %37)
+  %input8.1 : Tensor = aten::hardswish_(%131) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %133 : Tensor = prepacked::conv2d_clamp_run(%input8.1, %38)
+  %result4.1 : Tensor = aten::add_(%133, %result3.1, %3) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:97:12
+  %135 : Tensor = prepacked::conv2d_clamp_run(%result4.1, %39)
+  %input9.1 : Tensor = aten::hardswish_(%135) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %137 : Tensor = prepacked::conv2d_clamp_run(%input9.1, %40)
+  %input10.1 : Tensor = aten::hardswish_(%137) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %139 : Tensor = prepacked::conv2d_clamp_run(%input10.1, %41)
+  %result5.1 : Tensor = aten::add_(%139, %result4.1, %3) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:97:12
+  %141 : Tensor = prepacked::conv2d_clamp_run(%result5.1, %42)
+  %input11.1 : Tensor = aten::hardswish_(%141) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %143 : Tensor = prepacked::conv2d_clamp_run(%input11.1, %43)
+  %input12.1 : Tensor = aten::hardswish_(%143) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %145 : int[] = aten::size(%input12.1) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1129:51
+  %146 : int = aten::len(%145) # <string>:5:9
+  %147 : bool = aten::gt(%146, %4) # <string>:5:9
+   = prim::If(%147) # <string>:5:2
+    block0():
+      -> ()
+    block1():
+       = prim::RaiseException(%16) # <string>:5:2
+      -> ()
+  %scale2.1 : Tensor = aten::adaptive_avg_pool2d(%input12.1, %2) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1130:11
+  %149 : Tensor = prepacked::conv2d_clamp_run(%scale2.1, %44)
+  %150 : Tensor = prepacked::conv2d_clamp_run(%149, %45)
+  %151 : Tensor = aten::hardsigmoid_(%150) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1827:15
+  %input13.1 : Tensor = aten::mul(%151, %input12.1) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:39:15
+  %153 : Tensor = prepacked::conv2d_clamp_run(%input13.1, %46)
+  %154 : Tensor = prepacked::conv2d_clamp_run(%153, %47)
+  %input14.1 : Tensor = aten::hardswish_(%154) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %156 : Tensor = prepacked::conv2d_clamp_run(%input14.1, %48)
+  %input15.1 : Tensor = aten::hardswish_(%156) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %158 : int[] = aten::size(%input15.1) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1129:51
+  %159 : int = aten::len(%158) # <string>:5:9
+  %160 : bool = aten::gt(%159, %4) # <string>:5:9
+   = prim::If(%160) # <string>:5:2
+    block0():
+      -> ()
+    block1():
+       = prim::RaiseException(%16) # <string>:5:2
+      -> ()
+  %scale3.1 : Tensor = aten::adaptive_avg_pool2d(%input15.1, %2) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1130:11
+  %162 : Tensor = prepacked::conv2d_clamp_run(%scale3.1, %49)
+  %163 : Tensor = prepacked::conv2d_clamp_run(%162, %50)
+  %164 : Tensor = aten::hardsigmoid_(%163) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1827:15
+  %input16.1 : Tensor = aten::mul(%164, %input15.1) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:39:15
+  %166 : Tensor = prepacked::conv2d_clamp_run(%input16.1, %51)
+  %result6.1 : Tensor = aten::add_(%166, %153, %3) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:97:12
+  %168 : Tensor = prepacked::conv2d_clamp_run(%result6.1, %52)
+  %input17.1 : Tensor = aten::hardswish_(%168) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %170 : Tensor = prepacked::conv2d_clamp_run(%input17.1, %53)
+  %input18.1 : Tensor = aten::hardswish_(%170) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %172 : int[] = aten::size(%input18.1) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1129:51
+  %173 : int = aten::len(%172) # <string>:5:9
+  %174 : bool = aten::gt(%173, %4) # <string>:5:9
+   = prim::If(%174) # <string>:5:2
+    block0():
+      -> ()
+    block1():
+       = prim::RaiseException(%16) # <string>:5:2
+      -> ()
+  %scale4.1 : Tensor = aten::adaptive_avg_pool2d(%input18.1, %2) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1130:11
+  %176 : Tensor = prepacked::conv2d_clamp_run(%scale4.1, %54)
+  %177 : Tensor = prepacked::conv2d_clamp_run(%176, %55)
+  %178 : Tensor = aten::hardsigmoid_(%177) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1827:15
+  %input19.1 : Tensor = aten::mul(%178, %input18.1) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:39:15
+  %180 : Tensor = prepacked::conv2d_clamp_run(%input19.1, %56)
+  %181 : Tensor = prepacked::conv2d_clamp_run(%180, %57)
+  %input20.1 : Tensor = aten::hardswish_(%181) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %183 : Tensor = prepacked::conv2d_clamp_run(%input20.1, %58)
+  %input21.1 : Tensor = aten::hardswish_(%183) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %185 : int[] = aten::size(%input21.1) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1129:51
+  %186 : int = aten::len(%185) # <string>:5:9
+  %187 : bool = aten::gt(%186, %4) # <string>:5:9
+   = prim::If(%187) # <string>:5:2
+    block0():
+      -> ()
+    block1():
+       = prim::RaiseException(%16) # <string>:5:2
+      -> ()
+  %scale5.1 : Tensor = aten::adaptive_avg_pool2d(%input21.1, %2) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1130:11
+  %189 : Tensor = prepacked::conv2d_clamp_run(%scale5.1, %59)
+  %190 : Tensor = prepacked::conv2d_clamp_run(%189, %60)
+  %191 : Tensor = aten::hardsigmoid_(%190) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1827:15
+  %input22.1 : Tensor = aten::mul(%191, %input21.1) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:39:15
+  %193 : Tensor = prepacked::conv2d_clamp_run(%input22.1, %61)
+  %result7.1 : Tensor = aten::add_(%193, %180, %3) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:97:12
+  %195 : Tensor = prepacked::conv2d_clamp_run(%result7.1, %62)
+  %input23.1 : Tensor = aten::hardswish_(%195) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %197 : Tensor = prepacked::conv2d_clamp_run(%input23.1, %63)
+  %input24.1 : Tensor = aten::hardswish_(%197) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %199 : int[] = aten::size(%input24.1) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1129:51
+  %200 : int = aten::len(%199) # <string>:5:9
+  %201 : bool = aten::gt(%200, %4) # <string>:5:9
+   = prim::If(%201) # <string>:5:2
+    block0():
+      -> ()
+    block1():
+       = prim::RaiseException(%16) # <string>:5:2
+      -> ()
+  %scale6.1 : Tensor = aten::adaptive_avg_pool2d(%input24.1, %2) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1130:11
+  %203 : Tensor = prepacked::conv2d_clamp_run(%scale6.1, %64)
+  %204 : Tensor = prepacked::conv2d_clamp_run(%203, %65)
+  %205 : Tensor = aten::hardsigmoid_(%204) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1827:15
+  %input25.1 : Tensor = aten::mul(%205, %input24.1) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:39:15
+  %207 : Tensor = prepacked::conv2d_clamp_run(%input25.1, %66)
+  %result8.1 : Tensor = aten::add_(%207, %result7.1, %3) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:97:12
+  %209 : Tensor = prepacked::conv2d_clamp_run(%result8.1, %67)
+  %x0.1 : Tensor = aten::hardswish_(%209) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %211 : int[] = aten::size(%x0.1) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1129:51
+  %212 : int = aten::len(%211) # <string>:5:9
+  %213 : bool = aten::gt(%212, %4) # <string>:5:9
+   = prim::If(%213) # <string>:5:2
+    block0():
+      -> ()
+    block1():
+       = prim::RaiseException(%16) # <string>:5:2
+      -> ()
+  %x1.1 : Tensor = aten::adaptive_avg_pool2d(%x0.1, %2) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1130:11
+  %x2.1 : Tensor = aten::flatten(%x1.1, %3, %68) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torchvision/models/mobilenetv3.py:178:12
+  %216 : Tensor = prepacked::linear_clamp_run(%x2.1, %69)
+  %input26.1 : Tensor = aten::hardswish_(%216) # /Users/ivankobzarev/anaconda3/lib/python3.8/site-packages/torch/nn/functional.py:1940:15
+  %218 : Tensor = prepacked::linear_clamp_run(%input26.1, %70)
+  return (%218)
+

@@ -14,6 +14,7 @@
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
+#include <torch/csrc/jit/tensorexpr/graph_opt.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/script.h>
@@ -163,7 +164,7 @@ int main(int argc, char** argv) {
   m.eval();
   auto frozen_m = torch::jit::freeze_module(m.clone());
   auto graph = frozen_m.get_method("forward").graph();
-  std::vector<c10::optional<at::Tensor>> example_inputs = {at::rand({1, 3, 224, 224})};
+  std::vector<c10::optional<at::Tensor>> example_inputs = {at::rand({1, 4, 224, 224})};
 
   torch::jit::RemoveTensorMutation(graph);
   torch::jit::EliminateDeadCode(graph->block());

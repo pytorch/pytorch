@@ -536,6 +536,50 @@ TEST(Expr, BitwiseOps) {
   ASSERT_EQ(eval.value<int>(), 11);
 }
 
+TEST(Expr, Cast) {
+  ExprHandle x(0.5f);
+  ExprHandle scale(0.1f);
+  ExprHandle zero(130.f);
+  ExprHandle qf = x / scale + zero;
+  ExprHandle qu = Cast::make(Dtype(kByte), x / scale + zero);
+  SimpleIRExprEval evalqf(qf);
+  auto res_qf = evalqf.value<float>();
+  printf("XXX res_qf:%f\n", res_qf);
+
+  SimpleIRExprEval evalqu(qu);
+  auto res_qu = evalqu.value<uint8_t>();
+  printf("XXX res_qu:%u\n", res_qu);
+
+  ExprHandle dq = (qu - zero) * scale;
+  SimpleIRExprEval evaldq(dq);
+  auto res_dq = evaldq.value<float>();
+  printf("XXX res_dq:%f\n", res_dq);
+}
+
+ExprHandle castUint8(ExprHandle e) {
+  return Cast::make(Dtype(kByte), e);
+}
+
+ExprHandle castFloat(ExprHandle e) {
+  return Cast::make(Dtype(kFloat), e);
+}
+
+ExprHandle castDouble(ExprHandle e) {
+  return Cast::make(Dtype(kDouble), e);
+}
+
+TEST(Expr, Cast2) {
+  ExprHandle x(0.5f);
+  ExprHandle scale(0.1f);
+  ExprHandle zero(130.f);
+
+  ExprHandle f = castFloat(castDouble(castFloat(castUint8(castDouble(x) / scale + zero)) - zero) * scale);
+
+  SimpleIRExprEval eval(f);
+  auto res_f = eval.value<float>();
+  printf("XXX res_f:%f\n", res_f);
+}
+
 TEST(Expr, DynamicShapeAdd) {
   auto testWithSize = [](int32_t size) {
     VarHandle n("n", kInt);

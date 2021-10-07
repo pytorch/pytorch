@@ -6,3 +6,4 @@
 #include <torch/csrc/jit/tensorexpr/operators/reduction.h>
 #include <torch/csrc/jit/tensorexpr/operators/softmax.h>
 #include <torch/csrc/jit/tensorexpr/operators/unary.h>
+//#include <torch/csrc/jit/tensorexpr/operators/quantization.h>

@@ -1,39 +1,23 @@
-<<<<<<< HEAD
 #include <torch/csrc/jit/mobile/nnc/aot_compiler.h>
-=======
-// (c) Facebook, Inc. and its affiliates. Confidential and proprietary.
-
-#include <aot_compiler.h>
->>>>>>> 19fdba7164 ([aot_compiler] Add passes, fix long dim)
 
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #include <torch/csrc/jit/ir/ir.h>
-<<<<<<< HEAD
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/constant_propagation.h>
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
-=======
 #include <torch/csrc/jit/jit_opt_limit.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/tensorexpr/graph_opt.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 
->>>>>>> 19fdba7164 ([aot_compiler] Add passes, fix long dim)
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
-<<<<<<< HEAD
-#include <torch/csrc/jit/tensorexpr/graph_opt.h>
-#include <torch/csrc/jit/tensorexpr/ir.h>
-#include <torch/csrc/jit/tensorexpr/kernel.h>
-=======
->>>>>>> 19fdba7164 ([aot_compiler] Add passes, fix long dim)
 
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
@@ -45,11 +29,7 @@ namespace nnc {
 
 std::vector<int64_t> getConstSizes(const BufPtr b) {
   std::vector<int64_t> r;
-<<<<<<< HEAD
   for (const auto& dim : b->dims()) {
-=======
-  for (auto dim : b->dims()) {
->>>>>>> 19fdba7164 ([aot_compiler] Add passes, fix long dim)
     LongImmPtr imm_dim = to<LongImm>(dim);
     // TODO: assert it's actually immediate
     int64_t s = imm_dim->value();
@@ -58,21 +38,13 @@ std::vector<int64_t> getConstSizes(const BufPtr b) {
   return r;
 }
 
-<<<<<<< HEAD
 void compileFunction(
-=======
-void get_compiled_function(
->>>>>>> 19fdba7164 ([aot_compiler] Add passes, fix long dim)
     std::shared_ptr<tensorexpr::TensorExprKernel> kernel,
     Function* func) {
   std::vector<at::Tensor> parameters;
 
   auto const_descriptors = kernel->getConstantDescriptors();
-<<<<<<< HEAD
   for (const auto& cd : const_descriptors) {
-=======
-  for (auto cd : const_descriptors) {
->>>>>>> 19fdba7164 ([aot_compiler] Add passes, fix long dim)
     auto sizes = getConstSizes(cd.buf);
     at::Tensor const_tensor = at::from_blob(cd.ptr, sizes).clone();
     parameters.push_back(const_tensor);
