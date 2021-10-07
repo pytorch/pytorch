@@ -89,9 +89,9 @@ struct Output {
   std::string ToString() const;
 
   // The node providing the output.
-  const Node* node = nullptr;
+  const Node* node {nullptr};
   // The index in the node's output this output refers to.
-  size_t index = 0;
+  size_t index {0};
 };
 
 inline std::ostream& operator<<(std::ostream& stream, const Output& output) {
@@ -293,7 +293,7 @@ inline std::ostream& operator<<(std::ostream& stream, const Node& node) {
   return stream;
 }
 
-// TODO (@alanwaketan): Support r-value reference argument type.
+// TODO(alanwaketan): Support r-value reference argument type.
 template <typename T, typename... Args>
 NodePtr MakeNode(Args&&... args) {
   return std::make_shared<T>(std::forward<Args>(args)...);

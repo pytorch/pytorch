@@ -6,6 +6,7 @@ from tools.codegen.context import method_with_native_function
 from tools.codegen.model import (NativeFunction, NativeFunctionsGroup,
                                  BackendIndex)
 from tools.codegen.api.lazy import LazyIrSchema, isValueType
+from tools.codegen.api.types import OptionalCType
 
 
 @dataclass(frozen=True)
@@ -42,12 +43,12 @@ case at::aten::{schema.aten_name}:
 
         elif self.target == LazyTsLowering.TsLoweringTarget.LOWERING:
             emplace_arguments = []
-            iValue = 0
-            iScalar = 0
             for value in schema.positional_arg_types:
                 if isValueType(value.type):
-                    emplace_arguments.append(f'loctx->GetOutputOp(node->operand({iValue}))')
-                    iValue = iValue + 1
+                    if isinstance(value.type, OptionalCType):
+                        emplace_arguments.append(f"node->has_{value.name} ? loctx->GetOutputOp(node->operand(i++)) : nullptr")
+                        continue
+                    emplace_arguments.append('loctx->GetOutputOp(node->operand(i++))')
                     continue
                 emplace_arguments.append(f'"{value.name}", node->{value.name}_')
 
@@ -66,6 +67,7 @@ TSOpVector Lower{schema.node_name}(std::shared_ptr<torch::jit::GraphFunction> fu
     std::vector<torch::jit::NamedValue> kwarguments;
     arguments.reserve({len(emplace_arguments)});
     kwarguments.reserve({len(emplace_kwarg_values + emplace_kwarg_scalars)});
+    size_t i = 0;
     {emplace_arguments_str}
     {emplace_kwarguments}
     TSOpVector {schema.aten_name}_out = LowerBuiltin(function, node, arguments, kwarguments);

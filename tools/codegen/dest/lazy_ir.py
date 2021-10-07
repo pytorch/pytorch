@@ -20,9 +20,9 @@ def node_ctor_inputs(func: LazyIrSchema) -> str:
                 node_ctor_values.append(f"l_{arg.name}.GetIrValue()")
             elif isinstance(arg.type, OptionalCType):
                 node_ctor_values.append(
-                    f"l_{arg.name}.has_value() ? "
-                    f"l_{arg.name}.value().GetIrValue() : "
-                    f"torch_lazy_tensors::ir::ops::kNullValue")
+                    f"l_{arg.name} ? "
+                    f"c10::make_optional(l_{arg.name}->GetIrValue()) : "
+                    "c10::nullopt")
             else:
                 raise AssertionError("TODO not sure if there are other valid types to handle here")
         else:
@@ -53,28 +53,33 @@ class LazyIR:
         value_types = schema.filtered_types(values=True, scalars=False)
         scalar_types = schema.filtered_types(values=False, scalars=True)
 
-        node_ctor_args = ", ".join([f"{i.cpp_type()} {i.name}" for i in all_types])
+        node_ctor_args = ", ".join([f"const {i.cpp_type()}& {i.name}" for i in all_types])
         scalar_initializers = ",\n        ".join([f"{t.name}_({t.name})" for t in scalar_types])
         comma_if_scalar_initializers = ",\n" if len(scalar_initializers) else ""
         scalar_decls = "\n  ".join([f"{t.cpp_type()} {t.name}_;" for t in scalar_types])
         scalar_hashes = ", ".join([f"{f.name}" for f in scalar_types])
         base_ctor_value_args_list = []
+        optional_values = []
         for t in value_types:
             if isinstance(t.type, BaseCType):
                 base_ctor_value_args_list.append(f"{t.name}")
             elif isinstance(t.type, OptionalCType):
-                base_ctor_value_args_list.append(f"{t.name}.has_value() ? {t.name}.value() : kNullValue")
+                base_ctor_value_args_list.append(f"{t.name}.value_or(kNullValue)")
+                optional_values.append(t.name)
             else:
                 raise AssertionError("TODO not sure if there are other valid types to handle here")
         base_ctor_value_args = ", ".join(base_ctor_value_args_list)
+        has_optional_decls = "\n  ".join([f"bool has_{value}: 1;" for value in optional_values])
+        has_optional_defs = "\n    ".join([f"has_{value} = !!{value};" for value in optional_values])
         members_to_string = "\n    ".join([f'lazy_tensors::ToString("{t.name}", {t.name}_, ss);' for t in scalar_types])
 
         clone_impl_args = []
-        iValue = 0
         for value in all_types:
             if isValueType(value.type):
-                clone_impl_args.append(f"operands.at({iValue})")
-                iValue = iValue + 1
+                if isinstance(value.type, OptionalCType):
+                    clone_impl_args.append(f"(has_{value.name} ? c10::make_optional(operands.at(i++)) : c10::nullopt)")
+                    continue
+                clone_impl_args.append("operands.at(i++)")
                 continue
             clone_impl_args.append(f"{value.name}_")
         clone_impl_args.extend(["at_dtypes()", "at_shapes()"])
@@ -83,6 +88,7 @@ class LazyIR:
         clone_impl = f"ir::MakeNode<ir::ops::{schema.node_name}>({clone_impl_args_str});"
 
         return [f"""\
+// TODO(alanwaketan): Public members don't need to have _ suffix.
 class {schema.node_name} : public Node {{
  public:
   {schema.node_name}({node_ctor_args}, const std::vector<at::ScalarType>& out_dtypes, const std::vector<std::vector<int64_t>>& out_shapes)
@@ -95,7 +101,7 @@ class {schema.node_name} : public Node {{
         {scalar_initializers}
 
   {{
-    //  throw std::runtime_error("need to hash scalars properly");
+    {has_optional_defs}
   }}
 
   std::string ToString() const override {{
@@ -106,9 +112,12 @@ class {schema.node_name} : public Node {{
   }}
 
   NodePtr Clone(OpList operands) const override {{
+      size_t i = 0;
       {clone_impl}
   }}
+
   {scalar_decls}
+  {has_optional_decls}
 }};
 
 """, ]
@@ -122,8 +131,8 @@ def lazy_tensor_decls(value_types: List[NamedCType]) -> str:
         elif isinstance(t.type, OptionalCType):
             lazy_tensor_decls.append(
                 f"c10::optional<LazyTensor> l_{t.name} =  "
-                f"{t.name}.has_value() ? "
-                f"c10::make_optional(bridge::GetLtcTensor({t.name}.value())) : "
+                f"{t.name} ? "
+                f"bridge::TryGetLtcTensor(*{t.name}) : "
                 f"c10::nullopt;")
         else:
             raise AssertionError("TODO not sure if there are other valid types to handle here")
@@ -182,7 +191,7 @@ def gen_lazy_nativefunc_definition(func: NativeFunction, backend_index: BackendI
     auto result = bridge::TupleAtenFromLtcTensors<{returns_length}>(lazy_tensors);"""
 
     return [f"""\
-// TODO (@alanwaketan): Quite a lot inefficient copy-by-value there. Let's optimize it.
+// TODO(alanwaketan): Quite a lot inefficient copy-by-value there. Let's optimize it.
 {sig.decl(name=f"{class_method_name}::{schema.aten_name}")} {{
     LTC_FN_COUNTER("lazy::");
     {lazy_tensor_decls_str}
