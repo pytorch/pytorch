@@ -5,7 +5,6 @@ import torch.onnx.symbolic_opset9 as sym_opset9
 
 from torch.onnx.symbolic_helper import parse_args, _unimplemented, _block_list_in_opset, _try_get_scalar_type
 from torch.onnx.symbolic_opset9 import _cast_Float  # type: ignore[attr-defined]
-from torch.onnx.symbolic_opset7 import div  # noqa: F401
 
 import warnings
 
@@ -280,3 +279,9 @@ def repeat(g, self, repeats):
         if diff_dims > 0:
             self = sym_opset9.view(g, self, g.op("Constant", value_t=torch.tensor([1] * diff_dims + sizes)))
     return g.op("Tile", self, repeats)
+
+@parse_args("v", "f", "f", "v")
+def uniform(g, self, from_, to_, generator, out=None):
+    from_ = g.op("Constant", value_t=torch.tensor(from_, dtype=torch.float))
+    to_ = g.op("Constant", value_t=torch.tensor(to_, dtype=torch.float))
+    return g.op("Uniform", self, from_, to_, generator, upper_i=1)

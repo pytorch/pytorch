@@ -1,6 +1,4 @@
-from torch.onnx.symbolic_helper import _block_list_in_opset, parse_args
-from torch import tensor 
-import torch.onnx.symbolic_helper as sym_help
+from torch.onnx.symbolic_helper import _block_list_in_opset
 
 import torch.onnx.symbolic_opset9 as sym_opset9
 
@@ -45,35 +43,5 @@ def min(g, self, dim_or_y=None, keepdim=None):
     return sym_opset9.min(g, self, dim_or_y, keepdim)
 
 
-def div(g, self, other, *args):
-    if len(args) == 0:
-        return sym_opset9.true_divide(g, self, other)
-    else:
-        return _div_rounding_mode(g, self, other, *args)
-
-
-@parse_args("v", "v", "s")
-def _div_rounding_mode(g, self, other, rounding_mode):
-    if rounding_mode == "floor":
-        return _floor_divide(g, self, other)
-    else:
-        return sym_opset9._div_rounding_mode(g, self, other, rounding_mode)
-
-
-def _floor_divide(g, self, other):
-    if sym_help._is_fp(self) or sym_help._is_fp(other):
-        out = sym_opset9.true_divide(g, self, other)
-        return g.op("Floor", out)
-    else:
-        raise RuntimeError("Integer floor division requires ONNX opset 9 or greater")
-
-
 for block_listed_op in block_listed_operators:
     vars()[block_listed_op] = _block_list_in_opset(block_listed_op)
-
-
-@parse_args("v", "f", "f", "v")
-def uniform(g, self, from_, to_, generator, out=None):
-    from_ = g.op("Constant", value_t=tensor(from_, dtype=torch.float))
-    to_ = g.op("Constant", value_t=tensor(to_, dtype=torch.float))
-    return g.op("Uniform", self, from_, to_, generator, upper_i=1)
