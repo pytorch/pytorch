@@ -332,7 +332,7 @@ class ShardedTensor(object):
     def _init_from_local_shards(
         cls,
         local_shards: List[Shard],
-        *overall_size,
+        *global_size,
         process_group=None,
         init_rrefs=False,
     ):
@@ -344,7 +344,7 @@ class ShardedTensor(object):
 
         local_shard_metadatas: List[ShardMetadata] = []
         local_sharded_tensor_metadata: Optional[ShardedTensorMetadata] = None
-        global_size = torch.Size(check_tensor_size_and_flatten(overall_size))
+        global_size = torch.Size(check_tensor_size_and_flatten(global_size))
 
         if len(local_shards) > 0:
             local_shards_dtype = local_shards[0].tensor.dtype
@@ -463,9 +463,9 @@ class ShardedTensor(object):
                 global_metadata_rank = rank
             elif global_sharded_tensor_metadata.size != rank_metadata.size:
                 raise ValueError(
-                    f'ShardedTensor overall_size does not match from different ranks! '
-                    f'Found overall_size={global_sharded_tensor_metadata.size} on rank {global_metadata_rank}, '
-                    f'and overall_size={rank_metadata.size} on rank {rank}'
+                    f'ShardedTensor global_size does not match from different ranks! '
+                    f'Found global_size={global_sharded_tensor_metadata.size} on rank {global_metadata_rank}, '
+                    f'and global_size={rank_metadata.size} on rank {rank}'
                 )
             # don't need to check layout and memory format as we already checked in local shards validation stage
             elif global_sharded_tensor_metadata.tensor_properties.dtype != rank_metadata.tensor_properties.dtype:
@@ -499,7 +499,7 @@ class ShardedTensor(object):
         # check if shards_metadata have overlap shards
         validate_non_overlapping_shards_metadata(global_sharded_tensor_metadata.shards_metadata)
 
-        # check if the shards_metadata is compatible with overall size of the sharded tensor.
+        # check if the shards_metadata is compatible with global size of the sharded tensor.
         check_tensor(global_sharded_tensor_metadata.shards_metadata, global_sharded_tensor_metadata.size)
 
         # done validation, add to metadata and local_shards
