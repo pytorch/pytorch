@@ -624,19 +624,26 @@ TEST(StaticRuntime, IndividualOps_to) {
     std::vector<IValue> args0{a, b, c, d, e};
     std::vector<IValue> args1{a, b, c, d};
     std::vector<IValue> args2{a, other, c, d, e};
+    std::vector<IValue> args3{a, c10::nullopt, c, d};
 
-    testStaticRuntime(to_script_0, args0); // to.dtype
-    testStaticRuntime(to_script_1, args0); // to.dtype, strided
-    testStaticRuntime(to_script_2, args1); // to.prim_dtype
-    testStaticRuntime(to_script_3, args2); // to.other
-    testStaticRuntime(to_script_4, {a}); // alias
+    testStaticRuntime(to_script_dtype, args0);
+    testStaticRuntime(to_script_dtype_strided, args0);
+    testStaticRuntime(to_script_prim_dtype, args1);
+    if (!d) {
+      testStaticRuntime(to_script_prim_dtype, args3);
+    }
+    testStaticRuntime(to_script_other, args2);
+    testStaticRuntime(to_script_alias, {a});
 
     // dynamic shapes
-    testStaticRuntime(to_script_0, args0, {a2, b, c, d, e}); // to.dtype
-    testStaticRuntime(to_script_1, args0, {a2, b, c, d, e}); // to.dtype
-    testStaticRuntime(to_script_2, args1, {a2, b, c, d}); // to.prim_dtype
-    testStaticRuntime(to_script_3, args2, {a2, a2_other, c, d, e}); // to.other
-    testStaticRuntime(to_script_4, {a}, {a2});
+    testStaticRuntime(to_script_dtype, args0, {a2, b, c, d, e});
+    testStaticRuntime(to_script_dtype_strided, args0, {a2, b, c, d, e});
+    testStaticRuntime(to_script_prim_dtype, args1, {a2, b, c, d});
+    if (!d) {
+      testStaticRuntime(to_script_prim_dtype, args3, {a2, c10::nullopt, c, d});
+    }
+    testStaticRuntime(to_script_other, args2, {a2, a2_other, c, d, e});
+    testStaticRuntime(to_script_alias, {a}, {a2});
   };
   for (const bool non_blocking : {false, true}) {
     for (const bool copy : {false, true}) {
