@@ -5,7 +5,7 @@ name: periodic-win-vs2019-cuda11.1-py3
 
 on:
   pull_request:
-    types: [unassigned]
+    types: [opened, synchronize, reopened, unassigned]
   schedule:
     - cron: 45 0,4,8,12,16,20 * * *
   workflow_dispatch:
@@ -146,6 +146,7 @@ jobs:
       PR_BODY: ${{ github.event.pull_request.body }}
       NOGPU_RUNNER_TYPE: windows.4xlarge
       ENABLE_FORCE_ON_CPU_TEST: ''
+      RUN_SMOKE_TESTS_ONLY_ON_PR: False
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
@@ -169,7 +170,6 @@ jobs:
       TEST_CONFIG: ${{ matrix.config }}
       http_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
       https_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
-      RUN_SMOKE_TESTS_ONLY_ON_PR: False
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
     needs: [build, generate-test-matrix, ciflow_should_run]
     strategy:
@@ -244,15 +244,6 @@ jobs:
         run: |
           # -ir => recursive include all files in pattern
           7z a "test-reports-$Env:FILE_SUFFIX.zip" -ir'!test\*.xml'
-      - uses: actions/upload-artifact@v2
-        name: Store Test Reports
-        if: always()
-        with:
-          name: test-reports-${{ matrix.config }}
-          retention-days: 14
-          if-no-files-found: error
-          path:
-            test-reports-*.zip
       - uses: seemethere/upload-artifact-s3@v3
         name: Store Test Reports on S3
         if: always()
