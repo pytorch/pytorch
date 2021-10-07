@@ -275,6 +275,10 @@ void NodeToONNX(
                  env.begin(), env.end(), [&outputs, i](const auto& vt) {
                    return vt.second == outputs[i];
                  }));
+        // Update ONNX value debug name with ATen value debug name if existed.
+        // Skip if ONNX value already exist in environment.
+        // This implies the op is a noop, and the value is owned by
+        // other node created elsewhere.
         if (old->hasDebugName() && !exist_in_env) {
           auto old_name = outputs[i]->debugName();
           auto new_name = old->debugNameBase();
