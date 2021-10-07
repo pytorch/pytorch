@@ -85,6 +85,7 @@ std::tuple<Tensor,optional<int64_t>> index_batch_rule(
   return std::make_tuple(at::index(self_, List<optional<Tensor>>(indices_)), 0);
 }
 
+// plumbing done since we don't support List<optional<Tensor>> in codegen
 Tensor index_plumbing(const Tensor & self, const List<optional<Tensor>> & indices
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -128,6 +129,7 @@ void index_put__batch_rule(
   at::index_put_(self_, List<optional<Tensor>>(indices_), values, accumulate);
 }
 
+// plumbing done since we don't support List<optional<Tensor>> in codegen
 Tensor& index_put__plumbing(Tensor & self, const List<optional<Tensor>> & indices
 , const Tensor & values, bool accumulate) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
