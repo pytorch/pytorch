@@ -92,7 +92,7 @@ TEST(CustomOperatorTest, ListParameters) {
       op->schema().arguments()[1].type()->isSubtypeOf(*ListType::ofFloats()));
   ASSERT_EQ(op->schema().arguments()[2].name(), "complexdoubles");
   ASSERT_TRUE(op->schema().arguments()[2].type()->isSubtypeOf(
-      ListType::ofComplexDoubles()));
+      *ListType::ofComplexDoubles()));
   ASSERT_EQ(op->schema().arguments()[3].name(), "tensors");
   ASSERT_TRUE(
       op->schema().arguments()[3].type()->isSubtypeOf(*ListType::ofTensors()));

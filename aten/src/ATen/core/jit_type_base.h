@@ -92,6 +92,13 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
   bool isSubtypeOf(const Type& rhs) const {
     return isSubtypeOfExt(rhs, nullptr);
   }
+  // Compatibility shim to accommodate existing code that passes shared_ptrs around.
+  // Ideally, we would just delete this, but it should be harmless.
+  template <typename T>
+  typename std::enable_if<std::is_base_of<Type, T>::value, bool>::type
+  isSubtypeOf(const std::shared_ptr<T>& rhs) const {
+    return isSubtypeOf(*rhs);
+  }
 
   // How this type will appear in FunctionSchema declarations
   virtual std::string str() const = 0;
