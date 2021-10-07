@@ -1009,6 +1009,14 @@ if(NOT INTERN_BUILD_MOBILE)
   add_dependencies(torch_cpu Caffe2_PROTO)
 endif()
 
+# Build model tracer for tracing-based selective build
+if(NOT BUILD_LITE_INTERPRETER AND NOT INTERN_BUILD_MOBILE)
+  add_subdirectory(
+    ${TORCH_ROOT}/torch/csrc/jit/mobile/model_tracer
+    ${CMAKE_BINARY_DIR}/model_tracer
+  )
+endif()
+
 # Codegen selected_mobile_ops.h for template selective build
 if(BUILD_LITE_INTERPRETER AND SELECTED_OP_LIST)
   add_custom_command(
@@ -1130,13 +1138,12 @@ endif()
         add_subdirectory(${TORCH_ROOT}/test/cpp/api ${CMAKE_BINARY_DIR}/test_api)
       endif()
 
-      add_subdirectory(
-        ${TORCH_ROOT}/test/mobile/nnc
-        ${CMAKE_BINARY_DIR}/test_mobile_nnc
-      )
-
-      add_subdirectory(${TORCH_ROOT}/test/cpp/lazy
-                       ${CMAKE_BINARY_DIR}/test_lazy)
+      if(USE_LLVM AND LLVM_FOUND)
+        add_subdirectory(
+          ${TORCH_ROOT}/test/mobile/nnc
+          ${CMAKE_BINARY_DIR}/test_mobile_nnc
+        )
+      endif()
     endif()
   endif()
 
