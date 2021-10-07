@@ -1,4 +1,6 @@
+#include <ATen/ArrayRef.h>
 #include <ATen/ATen.h>
+#include <ATen/ceil_div.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/Dispatch.h>
@@ -79,17 +81,28 @@ QTensorImpl* get_qtensorimpl(const TensorBase& self) {
   return static_cast<QTensorImpl*>(self.unsafeGetTensorImpl());
 }
 
-int64_t get_sub_byte_tensor_size(int64_t size_bytes, at::ScalarType t) {
+int64_t get_sub_byte_tensor_size(IntArrayRef sizes, size_t dtype_itemsize, at::ScalarType t) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t new_size_bytes;
+  int64_t element_per_byte;
   switch(t) {
     case at::ScalarType::QUInt4x2:
-      new_size_bytes = std::ceil(size_bytes * 0.5);
+      element_per_byte = 2;
+      break;
+    case at::ScalarType::QUInt2x4:
+      element_per_byte = 4;
       break;
     default:
-      new_size_bytes = size_bytes;
+      element_per_byte = 1;
   }
-  return new_size_bytes;
+  // zero dim tensor
+  if (sizes.size() == 0) {
+    return c10::multiply_integers(sizes) * dtype_itemsize;
+  }
+  // Consider most inner dim as cols
+  int64_t cols = sizes.at(sizes.size()-1);
+  int64_t bytes_per_row = cols * dtype_itemsize;
+  // align qtensor most inner dim, compute ceil (bytes_per_row / element_per_byte)
+  return c10::multiply_integers(IntArrayRef(sizes.data(), sizes.size() - 1)) * at::ceil_div(bytes_per_row, element_per_byte);
 }
 
 inline Tensor new_qtensor(
@@ -109,13 +122,12 @@ inline Tensor new_qtensor(
 
   at::DispatchKey tensorDispatchKey = options.computeDispatchKey();
   native::check_size_nonnegative(sizes);
-  int64_t nelements = c10::multiply_integers(sizes);
   auto dtype = options.dtype();
   TORCH_CHECK(
       isQIntType(typeMetaToScalarType(dtype)),
       "ScalarType is not supported in new_qtensor.");
   auto scalar_type = typeMetaToScalarType(dtype);
-  int64_t size_bytes = get_sub_byte_tensor_size(nelements * dtype.itemsize(), scalar_type);
+  int64_t size_bytes = get_sub_byte_tensor_size(sizes, dtype.itemsize(), scalar_type);
 
   auto storage = c10::make_intrusive<StorageImpl>(
       StorageImpl::use_byte_size_t(),
