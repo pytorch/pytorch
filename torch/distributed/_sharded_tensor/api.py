@@ -454,7 +454,6 @@ class ShardedTensor(object):
         global_sharded_tensor_metadata = None
         global_metadata_rank = 0
 
-        # for i in range(1, len(gathered_metadatas)):
         for rank, rank_metadata in enumerate(gathered_metadatas):
             if rank_metadata is None:
                 continue
