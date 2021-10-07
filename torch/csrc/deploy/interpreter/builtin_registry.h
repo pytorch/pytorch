@@ -7,18 +7,20 @@
  * 1. merge the frozen modules for the builtin into PyImport_FrozenModules
  * 2. appending PyInit methods for modules implemented in C++ to the CPython
  *    builtin module list via methods like PyImport_AppendInittab
- * 3. tweak the sys.meta_path a bit to force loading non-toplevel moduels for the
- *    torch::deploy builtin via the CPython builtin module importer.
+ * 3. tweak the sys.meta_path a bit to force loading non-toplevel moduels for
+ * the torch::deploy builtin via the CPython builtin module importer.
  *
- * Doing all these things again and again manually is cumbersome and error-prone.
- * This builtin registry library supports open registration for torch::deploy
- * builtins. It does the work above by a single line of code invoking
- * REGISTER_TORCH_DEPLOY_BUILTIN macro. Here is an example for numpy:
+ * Doing all these things again and again manually is cumbersome and
+ * error-prone. This builtin registry library supports open registration for
+ * torch::deploy builtins. It does the work above by a single line of code
+ * invoking REGISTER_TORCH_DEPLOY_BUILTIN macro. Here is an example for numpy:
  *
- *   REGISTER_TORCH_DEPLOY_BUILTIN(numpy, numpy_frozen_modules, <list of name, PyInit function pairs>)
+ *   REGISTER_TORCH_DEPLOY_BUILTIN(numpy, numpy_frozen_modules, <list of name,
+ * PyInit function pairs>)
  *
- * Calling REGISTER_TORCH_DEPLOY_BUILTIN macro will instantiate a BuiltinRegisterer
- * object. The constructor of BuiltinRegisterer does the real registration work.
+ * Calling REGISTER_TORCH_DEPLOY_BUILTIN macro will instantiate a
+ * BuiltinRegisterer object. The constructor of BuiltinRegisterer does the real
+ * registration work.
  */
 #include <memory>
 #include <unordered_map>
@@ -49,8 +51,8 @@ struct BuiltinRegistryItem {
 
 /*
  * BuiltinRegistry maintains all the registered torch::deploy builtins. This
- * class is a singleton. Calling BuiltinRegistry::get() returns the single object
- * instance.
+ * class is a singleton. Calling BuiltinRegistry::get() returns the single
+ * object instance.
  *
  * The state of this class is basically a list of BuiltinRegistryItem registered
  * so far.
@@ -98,7 +100,10 @@ class BuiltinRegisterer {
       const char* name,
       const struct _frozen* frozenModules) {
     if (allowLibrary && !allowLibrary(name)) {
-      fprintf(stderr, "Skip %s since it's rejected by the allowLibrary method\n", name);
+      fprintf(
+          stderr,
+          "Skip %s since it's rejected by the allowLibrary method\n",
+          name);
       return;
     }
     // note: don't call glog api in this method since this method is usually
