@@ -117,13 +117,16 @@ def _gen_torch_functional_registered_ops():
     # but we are currently only able to compile some of the functions. additionally,
     # some functions directly map to their aten:: implementations.
     # TODO: add support for more ops
-    ops = ["stft", "istft", "lu", "cdist", "norm", "unique", "unique_consecutive"]
-    return set(getattr(torch.functional, name) for name in ops)
+    opnames = ["stft", "istft", "lu", "cdist", "norm", "unique", "unique_consecutive"]
+    ops = [getattr(torch.functional, name) for name in opnames]
+    linalg_opnames = ["tensordot"]
+    ops += [getattr(torch.linalg.functional, name) for name in linalg_opnames]
+    return set(ops)
 
 _functional_registered_ops = _gen_torch_functional_registered_ops()
 
 def _is_special_functional_bound_op(fn):
-    return fn in _functional_registered_ops or fn is torch.linalg.tensordot
+    return fn in _functional_registered_ops
 
 # lazily built to ensure the correct initialization order
 def _get_builtin_table():
