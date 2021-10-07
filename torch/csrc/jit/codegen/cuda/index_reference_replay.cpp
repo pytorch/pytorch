@@ -304,13 +304,14 @@ IndexCompute getReferenceIndexing(
   // Send to the other version of reference indexing that directly takes the
   // index map
   return getReferenceIndexing(
-      loop_structure, reference_tensor, initial_index_map, {});
+      loop_structure, reference_tensor, initial_index_map, {}, {});
 }
 
 IndexCompute getReferenceIndexing(
     const std::vector<kir::ForLoop*>& loop_structure,
     TensorDomain* reference_tensor,
     std::unordered_map<kir::IterDomain*, kir::Val*> index_map,
+    std::unordered_set<kir::IterDomain*> zero_domains,
     std::unordered_set<IterDomain*> preferred_paths,
     std::unordered_map<kir::IterDomain*, kir::Val*> halo_extent_map) {
   auto gpu_lower = GpuLower::current();
@@ -357,6 +358,7 @@ IndexCompute getReferenceIndexing(
       // reference_extent_map, // Seems this is not necessary, see comment above
       // in this function
       {},
+      zero_domains,
       std::unordered_set<kir::IterDomain*>(),
       reference_tensor->contiguity(),
       kir_preferred_path,

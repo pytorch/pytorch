@@ -88,6 +88,7 @@ IndexCompute getReferenceIndexing(
     const std::vector<kir::ForLoop*>& loop_structure,
     TensorDomain* reference_domain,
     std::unordered_map<kir::IterDomain*, kir::Val*> index_map,
+    std::unordered_set<kir::IterDomain*> zero_domains,
     std::unordered_set<IterDomain*> preferred_path,
     std::unordered_map<kir::IterDomain*, kir::Val*> halo_extent_map = {});
 

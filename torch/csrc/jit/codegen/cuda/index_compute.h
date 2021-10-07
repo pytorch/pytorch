@@ -92,7 +92,7 @@ class IndexCompute : public BackwardVisitor {
   std::unordered_map<kir::IterDomain*, kir::Val*> extent_map_; // NOLINT
 
   // Keeps track of domains that do not contribute to indexing
-  std::unordered_set<kir::IterDomain*> zero_; // NOLINT
+  std::unordered_set<kir::IterDomain*> zero_domains_; // NOLINT
 
   // This set keeps track of IterDomain's that have had a zero index merged into
   // them. This happens if we do something like tv->axis(0)->split(4) then
@@ -122,6 +122,10 @@ class IndexCompute : public BackwardVisitor {
     return extent_map_;
   }
 
+  const std::unordered_set<kir::IterDomain*>& zeroDomains() const {
+    return zero_domains_;
+  }
+
   const std::unordered_set<kir::IterDomain*>& zeroMergedIn() const {
     return zero_merged_in_;
   }
@@ -131,6 +135,7 @@ class IndexCompute : public BackwardVisitor {
       const TensorDomain* _td,
       std::unordered_map<kir::IterDomain*, kir::Val*> initial_index_map,
       std::unordered_map<kir::IterDomain*, kir::Val*> _extent_map,
+      std::unordered_set<kir::IterDomain*> zero_domains,
       std::unordered_set<kir::IterDomain*> _zero_merged_in,
       const std::vector<bool>& _root_contiguity,
       std::unordered_set<kir::IterDomain*> preferred_paths = {},
@@ -156,6 +161,7 @@ class IndexSwizzle : public IndexCompute {
       const TensorView* tv,
       std::unordered_map<kir::IterDomain*, kir::Val*> initial_index_map,
       std::unordered_map<kir::IterDomain*, kir::Val*> extent_map,
+      std::unordered_set<kir::IterDomain*> zero_domains,
       std::unordered_set<kir::IterDomain*> zero_merged_in);
 
   void run() override;

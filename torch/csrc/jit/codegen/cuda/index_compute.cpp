@@ -568,7 +568,7 @@ void IndexCompute::handle(Split* split) {
 
   // If both are zero, the split input is also zero
   if (inner_zero && outer_zero) {
-    zero_.emplace(in_id);
+    zero_domains_.emplace(in_id);
   }
 
   if (zero_merged_in) {
@@ -618,8 +618,8 @@ void IndexCompute::handle(Merge* merge) {
     index_map_[inner_id] = zero;
     extent_map_[outer_id] = zero;
     extent_map_[inner_id] = zero;
-    zero_.emplace(outer_id);
-    zero_.emplace(inner_id);
+    zero_domains_.emplace(outer_id);
+    zero_domains_.emplace(inner_id);
     return;
   }
 
@@ -726,6 +726,7 @@ IndexCompute::IndexCompute(
     const TensorDomain* _td,
     std::unordered_map<kir::IterDomain*, kir::Val*> initial_index_map,
     std::unordered_map<kir::IterDomain*, kir::Val*> extent_map,
+    std::unordered_set<kir::IterDomain*> zero_domains,
     std::unordered_set<kir::IterDomain*> zero_merged_in,
     const std::vector<bool>& root_contiguity,
     std::unordered_set<kir::IterDomain*> preferred_paths,
@@ -733,6 +734,7 @@ IndexCompute::IndexCompute(
     : td_(_td),
       index_map_(std::move(initial_index_map)),
       extent_map_(std::move(extent_map)),
+      zero_domains_(std::move(zero_domains)),
       zero_merged_in_(std::move(zero_merged_in)),
       preferred_paths_(std::move(preferred_paths)),
       reference_halo_extent_map_(std::move(reference_halo_extent_map)) {
@@ -755,22 +757,6 @@ IndexCompute::IndexCompute(
           index_map_.erase(id);
         }
       }
-    }
-  }
-
-  // Initialize the zero_ set with domains that do not contibute to
-  // the resulting index. Any domain that is mapped to Int(0), except
-  // for vectorized ones, is included in this set.
-  const auto gpu_lower = GpuLower::current();
-  for (auto dom : td_->domain()) {
-    auto kir_dom = gpu_lower->lowerValue(dom)->as<kir::IterDomain>();
-    auto it = index_map_.find(kir_dom);
-    if (it == index_map_.end()) {
-      continue;
-    }
-    auto idx = it->second;
-    if (idx->isZeroInt() && !isParallelTypeVectorize(dom->getParallelType())) {
-      zero_.emplace(kir_dom);
     }
   }
 }
@@ -805,7 +791,7 @@ bool IndexCompute::hasZeroMerged(kir::IterDomain* id) const {
 }
 
 bool IndexCompute::isZero(kir::IterDomain* id) const {
-  return zero_.find(id) != zero_.end();
+  return zero_domains_.find(id) != zero_domains_.end();
 }
 
 IndexCompute IndexCompute::updateIndexCompute(
@@ -820,6 +806,7 @@ IndexCompute IndexCompute::updateIndexCompute(
 
   std::unordered_map<kir::IterDomain*, kir::Val*> updated_index_map;
   std::unordered_map<kir::IterDomain*, kir::Val*> updated_extent_map;
+  std::unordered_set<kir::IterDomain*> updated_zero_domains;
   std::unordered_set<kir::IterDomain*> updated_zero_merged_in;
 
   for (auto id_entry : id_map) {
@@ -834,6 +821,10 @@ IndexCompute IndexCompute::updateIndexCompute(
 
     updated_extent_map[new_id] = getExtent(prev_id);
 
+    if (zero_domains_.find(prev_id) != zero_domains_.end()) {
+      updated_zero_domains.emplace(new_id);
+    }
+
     if (zero_merged_in_.find(prev_id) != zero_merged_in_.end()) {
       updated_zero_merged_in.emplace(new_id);
     }
@@ -843,6 +834,7 @@ IndexCompute IndexCompute::updateIndexCompute(
       new_td,
       updated_index_map,
       updated_extent_map,
+      updated_zero_domains,
       updated_zero_merged_in,
       root_contiguity,
       {},
@@ -977,11 +969,13 @@ IndexSwizzle::IndexSwizzle(
     const TensorView* tv,
     std::unordered_map<kir::IterDomain*, kir::Val*> initial_index_map,
     std::unordered_map<kir::IterDomain*, kir::Val*> extent_map,
+    std::unordered_set<kir::IterDomain*> zero_domains,
     std::unordered_set<kir::IterDomain*> zero_merged_in)
     : IndexCompute(
           tv->domain(),
           std::move(initial_index_map),
           std::move(extent_map),
+          std::move(zero_domains),
           std::move(zero_merged_in),
           std::vector<bool>(tv->getRootDomain().size(), false)),
       tv_(tv),
@@ -1048,8 +1042,13 @@ void IndexSwizzle::handle(Expr* e) {
 
 namespace {
 
-// Used for local and shared index mapping
-std::unordered_map<kir::ForLoop*, kir::Val*> indexMapFromTV(
+// Used for local and shared index mapping. Returns a map from loops
+// to loop indices as well as a set of loops that do not contribute to
+// indexing.
+std::pair<
+    std::unordered_map<kir::ForLoop*, kir::Val*>,
+    std::unordered_set<kir::ForLoop*>>
+indexMapFromTV(
     const TensorView* tv,
     const std::vector<kir::ForLoop*>& loops,
     const std::pair<kir::ForLoop*, int64_t>& alloc_point,
@@ -1063,8 +1062,6 @@ std::unordered_map<kir::ForLoop*, kir::Val*> indexMapFromTV(
   if (alloc_loop == nullptr) {
     within_alloc = true;
   }
-
-  const auto zero = ir_builder.create<kir::Int>(0);
 
   const bool is_global = tv->getMemoryType() == MemoryType::Global;
   const bool is_shared = tv->getMemoryType() == MemoryType::Shared;
@@ -1100,6 +1097,12 @@ std::unordered_map<kir::ForLoop*, kir::Val*> indexMapFromTV(
     return corresponding_domain->getParallelType() == id->parallelType();
   };
 
+  // Track domains that do not contibute to the resulting
+  // index. Previously, index->isZeroInt() was used to detect such
+  // domains, but that's not a reliable method as we may set an
+  // initial index to zero for unswitch.
+  std::unordered_set<kir::ForLoop*> zero_loops;
+
   for (auto loop : loops) {
     kir::Val* idx = nullptr;
     const auto same_parallel_type =
@@ -1111,7 +1114,8 @@ std::unordered_map<kir::ForLoop*, kir::Val*> indexMapFromTV(
           (loop->iter_domain()->isThread() && is_global)) {
         idx = loop->index();
       } else {
-        idx = zero;
+        idx = ir_builder.zeroVal();
+        zero_loops.insert(loop);
       }
     } else if (
         // For shared-memory tensors, when a domain is parallelized by
@@ -1132,7 +1136,10 @@ std::unordered_map<kir::ForLoop*, kir::Val*> indexMapFromTV(
         // parallel type
         (loop->iter_domain()->isThread() && is_local && same_parallel_type) ||
         loop->vectorize()) {
-      idx = zero;
+      idx = ir_builder.zeroVal();
+      if (!loop->vectorize()) {
+        zero_loops.insert(loop);
+      }
     } else {
       idx = loop->index();
     }
@@ -1144,7 +1151,7 @@ std::unordered_map<kir::ForLoop*, kir::Val*> indexMapFromTV(
     }
   }
   // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
-  return loop_to_ind_map;
+  return {loop_to_ind_map, zero_loops};
 }
 
 //! Set "pragma unroll" required for loops that indexing of Local
@@ -1506,7 +1513,9 @@ std::vector<kir::Val*> Index::getNonGlobalProducerStridedIndices(
   // regular compute at maps to line up its iter domains with the for loops.
   auto alloc_point =
       loop_utils::getAllocPoint(producer_tv, loops, p2c_alloc_map, true);
-  std::unordered_map<kir::ForLoop*, kir::Val*> loop_to_ind_map =
+  std::unordered_map<kir::ForLoop*, kir::Val*> loop_to_ind_map;
+  std::unordered_set<kir::ForLoop*> zero_loops;
+  std::tie(loop_to_ind_map, zero_loops) =
       indexMapFromTV(producer_tv, loops, alloc_point, false);
 
   ensureStaticIndexing(producer_tv, alloc_point.first, loops, p2c_alloc_map);
@@ -1514,6 +1523,8 @@ std::vector<kir::Val*> Index::getNonGlobalProducerStridedIndices(
   // Map loop nests to indicies, zeroing out those not used due to locality of
   // memory
   std::unordered_map<kir::IterDomain*, kir::Val*> ref_id_to_ind_map;
+  // Track which domains are not used
+  std::unordered_set<kir::IterDomain*> ref_zero_domains;
 
   // Due to rfactor/initialization reference_domain may be bigger than loop nest
   // structure, ignore IterDomains that aren't present in the loop nest when
@@ -1523,6 +1534,9 @@ std::vector<kir::Val*> Index::getNonGlobalProducerStridedIndices(
     auto ref_axis = gpu_lower->lowerValue(reference_domain->axis(loop_i))
                         ->as<kir::IterDomain>();
     ref_id_to_ind_map[ref_axis] = loop_to_ind_map[loops[loop_i]];
+    if (zero_loops.count(loops[loop_i]) > 0) {
+      ref_zero_domains.insert(ref_axis);
+    }
   }
 
   // Map everything we can from reference to producer using compute at index
@@ -1573,7 +1587,11 @@ std::vector<kir::Val*> Index::getNonGlobalProducerStridedIndices(
 
   // Index into the reference tensor
   auto ref_compute = getReferenceIndexing(
-      loops, reference_domain, ref_id_to_ind_map, preferred_paths);
+      loops,
+      reference_domain,
+      ref_id_to_ind_map,
+      ref_zero_domains,
+      preferred_paths);
 
   // Forward vectorized IDs to index into producer correctly
   // We want p_id to be vectorized like consumer just for the indexing, then we
@@ -1615,6 +1633,7 @@ std::vector<kir::Val*> Index::getNonGlobalProducerStridedIndices(
       producer_tv,
       producer_indexing.indexMap(),
       producer_indexing.extentMap(),
+      producer_indexing.zeroDomains(),
       producer_indexing.zeroMergedIn());
 
   index_swizzle.run();
@@ -1901,7 +1920,9 @@ std::vector<kir::Val*> Index::getNonGlobalConsumerStridedIndices(
   auto reference_id_map = reference.concrete_to_id;
 
   auto alloc_point = loop_utils::getAllocPoint(consumer_tv, loops);
-  std::unordered_map<kir::ForLoop*, kir::Val*> loop_to_ind_map =
+  std::unordered_map<kir::ForLoop*, kir::Val*> loop_to_ind_map;
+  std::unordered_set<kir::ForLoop*> zero_loops;
+  std::tie(loop_to_ind_map, zero_loops) =
       indexMapFromTV(consumer_tv, loops, alloc_point, true);
 
   ensureStaticIndexing(consumer_tv, alloc_point.first, loops);
@@ -1909,6 +1930,7 @@ std::vector<kir::Val*> Index::getNonGlobalConsumerStridedIndices(
   // Map loop nests to indicies, zeroing out those not used due to locality of
   // memory
   std::unordered_map<kir::IterDomain*, kir::Val*> ref_id_to_ind_map;
+  std::unordered_set<kir::IterDomain*> ref_zero_domains;
 
   // Due to rfactor/initialization reference_domain may be bigger than loop nest
   // structure, ignore IterDomains that aren't present in the loop nest when
@@ -1918,6 +1940,9 @@ std::vector<kir::Val*> Index::getNonGlobalConsumerStridedIndices(
     auto ref_axis = gpu_lower->lowerValue(reference_domain->axis(loop_i))
                         ->as<kir::IterDomain>();
     ref_id_to_ind_map[ref_axis] = loop_to_ind_map[loops[loop_i]];
+    if (zero_loops.count(loops[loop_i]) > 0) {
+      ref_zero_domains.insert(ref_axis);
+    }
   }
 
   // Map everything we can from reference to consumer using compute at index
@@ -1942,7 +1967,11 @@ std::vector<kir::Val*> Index::getNonGlobalConsumerStridedIndices(
 
   // Index into the reference tensor
   auto ref_compute = getReferenceIndexing(
-      loops, reference_domain, ref_id_to_ind_map, preferred_paths);
+      loops,
+      reference_domain,
+      ref_id_to_ind_map,
+      ref_zero_domains,
+      preferred_paths);
 
   const auto reference_halo_extent_map = getReferenceHaloExtentMap(
       reference,
@@ -1961,6 +1990,7 @@ std::vector<kir::Val*> Index::getNonGlobalConsumerStridedIndices(
       consumer_tv,
       consumer_indexing.indexMap(),
       consumer_indexing.extentMap(),
+      consumer_indexing.zeroDomains(),
       consumer_indexing.zeroMergedIn());
 
   index_swizzle.run();
@@ -2196,7 +2226,7 @@ std::pair<std::vector<kir::Val*>, bool> Index::getConsumerRootPredIndices(
 
   // Index into the reference tensor
   auto ref_compute =
-      getReferenceIndexing(loops, reference_domain, ref_id_to_ind_map, {});
+      getReferenceIndexing(loops, reference_domain, ref_id_to_ind_map, {}, {});
 
   const auto reference_halo_extent_map = getReferenceHaloExtentMap(
       reference, consumer_tv, ref_2_consumer, ref_compute.extentMap());
@@ -2474,6 +2504,7 @@ std::pair<std::vector<Index::RootPredicateInfo>, ReferenceTensor> Index::
       loops,
       reference_domain,
       ref_id_to_ind_map,
+      {},
       {},
       reference_halo_extent_map);
 
