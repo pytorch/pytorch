@@ -344,7 +344,7 @@ void ProcessGroupWrapper::runCollectiveChecks(
   auto finger_print = CollectiveFingerPrint(op_type, tensors);
   try {
     glooPg_->monitoredBarrier(options, /* waitAllRanks */ true);
-  } catch (const std::exception& e) {
+  } catch (const std::runtime_error& e) {
     // Attach collective info to the exception and re-raise.
     std::stringstream ss;
     ss << finger_print;
