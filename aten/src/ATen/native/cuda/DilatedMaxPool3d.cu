@@ -1,9 +1,9 @@
 #include <ATen/AccumulateType.h>
+#include <ATen/ceil_div.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/Pool.h>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
@@ -98,8 +98,8 @@ void max_pool3d_with_indices_out_frame(
   dim3 block(32, 8);
 
   while (totalZ > 0) {
-    dim3 grid(cuda::ATenCeilDiv(owidth, static_cast<int>(block.x)),
-              cuda::ATenCeilDiv(oheight, static_cast<int>(block.y)),
+    dim3 grid(ceil_div(owidth, static_cast<int>(block.x)),
+              ceil_div(oheight, static_cast<int>(block.y)),
               totalZ > 65535 ? 65535 : totalZ);
 
     max_pool3d_with_indices_single_out_frame
@@ -164,8 +164,8 @@ void max_pool3d_with_indices_backward_out_frame(
   dim3 block(32, 8);
 
   while (totalZ > 0) {
-    dim3 grid(cuda::ATenCeilDiv(owidth, static_cast<int>(block.x)),
-              cuda::ATenCeilDiv(oheight, static_cast<int>(block.y)),
+    dim3 grid(ceil_div(owidth, static_cast<int>(block.x)),
+              ceil_div(oheight, static_cast<int>(block.y)),
               totalZ > 65535 ? 65535 : totalZ);
 
     max_pool3d_with_indices_backward_single_out_frame
