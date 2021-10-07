@@ -10,6 +10,7 @@ from .overrides import (
     handle_torch_function)
 from ._jit_internal import boolean_dispatch, List
 from ._jit_internal import _overload as overload
+from torch.linalg import tensordot
 
 Tensor = torch.Tensor
 from torch import _VF
@@ -34,9 +35,11 @@ __all__ = [
     'split',
     'stft',
     'svd_lowrank',
+    'tensordot',
     'unique',
     'unique_consecutive',
 ]
+
 
 def broadcast_tensors(*tensors):
     r"""broadcast_tensors(*tensors) -> List of Tensors
