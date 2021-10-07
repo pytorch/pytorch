@@ -69,8 +69,9 @@ bool MemoryDAG::mayContainAlias(Element* a, Element* b) const {
 const MemoryLocations& MemoryDAG::getAllContainedMemoryLocations(
     const Element* elem) const {
   if (C10_UNLIKELY(!elem->cachedAllContainedMemoryLocations_.has_value())) {
+    MemoryLocations cache;
     elem->cachedAllContainedMemoryLocations_ = MemoryLocations();
-    collectAllContainedMemoryLocations(
+    collectAllContainedMemoryLocationsImpl(
         elem, *elem->cachedAllContainedMemoryLocations_);
   }
   return *elem->cachedAllContainedMemoryLocations_;
