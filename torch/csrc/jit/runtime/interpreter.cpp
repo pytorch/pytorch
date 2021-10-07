@@ -276,6 +276,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             push(stack, IValue());
             push(stack, IValue());
             push(stack, IValue());
+            ++frames.back().pc;
             callFunction(f, stack);
             continue;
           }
