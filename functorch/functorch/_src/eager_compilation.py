@@ -128,11 +128,10 @@ def create_compiled_function(flat_fn, fw_compiler, bw_compiler, partition_fn):
 
                 bw_args = fw_outs[num_outs:] + fw_outs[0:num_outs]
                 compiled_bw = bw_compiler(bw_module, bw_args)
-
             fw_outs = compiled_fw(*flat_args)
             if not isinstance(fw_outs, list):
                 fw_outs = [fw_outs]
-            ctx.activations = fw_outs[num_outs:]
+            ctx.save_for_backward(*fw_outs[num_outs:])
             if num_outs == 1:
                 return fw_outs[0]
             return tuple(fw_outs[0:num_outs])
@@ -141,24 +140,28 @@ def create_compiled_function(flat_fn, fw_compiler, bw_compiler, partition_fn):
         def backward(ctx, *flat_args):
             # hmm... this doesn't feel right. todo
             contiguous_args = [t.contiguous() for t in flat_args]
-            out = compiled_bw(*ctx.activations, *contiguous_args)
+            out = compiled_bw(*ctx.saved_tensors, *contiguous_args)
             if not isinstance(out, list):
                 out = [out]
             out_iter = iter(out)
             grad_out = [next(out_iter) if p else None for p in ctx.needs_input_grad]
             return tuple(grad_out)
-        
+
     return CompiledFunction
 
 
+# using this reduces the overhead by about 50%
+# import tree
 def compiled_function(fn, fw_compiler, bw_compiler, partition_fn=default_partition):
     saved_fn = None
 
     def returned_function(*args, **kwargs):
         nonlocal saved_fn
-        flattened_args, args_spec = pytree.tree_flatten((args, kwargs))
+        # flattened_args = tree.flatten((args, kwargs))
+        flattened_args, _ = pytree.tree_flatten((args, kwargs))
 
         if saved_fn is None:
+            flattened_args, args_spec = pytree.tree_flatten((args, kwargs))
             def flat_fn(*args):
                 args, kwargs = pytree.tree_unflatten(args, args_spec)
                 return fn(*args, **kwargs)
