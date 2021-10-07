@@ -1,7 +1,22 @@
 workspace(name = "pytorch")
 
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
-load("//tools/rules:workspace.bzl", "new_patched_local_repository", "new_empty_repository")
+load("//tools/rules:workspace.bzl", "new_patched_local_repository")
+
+http_archive(
+    name = "rules_cuda",
+    sha256 = "f80438bee9906e9ecb1a8a4ae2365374ac1e8a283897281a2db2fb7fcf746333",
+    strip_prefix = "runtime-b1c7cce21ba4661c17ac72421c6a0e2015e7bef3/third_party/rules_cuda",
+    urls = ["https://github.com/tensorflow/runtime/archive/b1c7cce21ba4661c17ac72421c6a0e2015e7bef3.tar.gz"],
+)
+
+load("@rules_cuda//cuda:dependencies.bzl", "rules_cuda_dependencies")
+
+rules_cuda_dependencies()
+
+load("@rules_cc//cc:repositories.bzl", "rules_cc_toolchains")
+
+rules_cc_toolchains()
 
 http_archive(
     name = "bazel_skylib",
@@ -12,6 +27,7 @@ http_archive(
 
 http_archive(
     name = "com_google_googletest",
+    sha256 = "720614598ba49dd214d9d0c40b8ac4b1352fff7f2bb387a3f24bf080383828cb",
     strip_prefix = "googletest-cd6b9ae3243985d4dc725abd513a874ab4161f3e",
     urls = [
         "https://github.com/google/googletest/archive/cd6b9ae3243985d4dc725abd513a874ab4161f3e.tar.gz",
@@ -19,10 +35,10 @@ http_archive(
 )
 
 http_archive(
-  name = "pybind11_bazel",
-  strip_prefix = "pybind11_bazel-7f397b5d2cc2434bbd651e096548f7b40c128044",
-  urls = ["https://github.com/pybind/pybind11_bazel/archive/7f397b5d2cc2434bbd651e096548f7b40c128044.zip"],
-  sha256 = "e4a9536f49d4a88e3c5a09954de49c4a18d6b1632c457a62d6ec4878c27f1b5b",
+    name = "pybind11_bazel",
+    sha256 = "e4a9536f49d4a88e3c5a09954de49c4a18d6b1632c457a62d6ec4878c27f1b5b",
+    strip_prefix = "pybind11_bazel-7f397b5d2cc2434bbd651e096548f7b40c128044",
+    urls = ["https://github.com/pybind/pybind11_bazel/archive/7f397b5d2cc2434bbd651e096548f7b40c128044.zip"],
 )
 
 new_local_repository(
@@ -33,6 +49,7 @@ new_local_repository(
 
 http_archive(
     name = "com_github_glog",
+    sha256 = "f28359aeba12f30d73d9e4711ef356dc842886968112162bc73002645139c39c",
     strip_prefix = "glog-0.4.0",
     urls = [
         "https://github.com/google/glog/archive/v0.4.0.tar.gz",
@@ -41,11 +58,11 @@ http_archive(
 
 http_archive(
     name = "com_github_gflags_gflags",
+    sha256 = "34af2f15cf7367513b352bdcd2493ab14ce43692d2dcd9dfc499492966c64dcf",
     strip_prefix = "gflags-2.2.2",
     urls = [
         "https://github.com/gflags/gflags/archive/v2.2.2.tar.gz",
     ],
-    sha256 = "34af2f15cf7367513b352bdcd2493ab14ce43692d2dcd9dfc499492966c64dcf",
 )
 
 new_local_repository(
@@ -121,11 +138,11 @@ new_local_repository(
 
 new_patched_local_repository(
     name = "tbb",
+    build_file = "//third_party:tbb.BUILD",
+    patch_strip = 1,
     patches = [
         "@//third_party:tbb.patch",
     ],
-    patch_strip = 1,
-    build_file = "//third_party:tbb.BUILD",
     path = "third_party/tbb",
 )
 
@@ -138,8 +155,8 @@ new_local_repository(
 http_archive(
     name = "mkl",
     build_file = "//third_party:mkl.BUILD",
-    strip_prefix = "lib",
     sha256 = "59154b30dd74561e90d547f9a3af26c75b6f4546210888f09c9d4db8f4bf9d4c",
+    strip_prefix = "lib",
     urls = [
         "https://anaconda.org/anaconda/mkl/2020.0/download/linux-64/mkl-2020.0-166.tar.bz2",
     ],
@@ -156,11 +173,12 @@ http_archive(
 
 http_archive(
     name = "rules_python",
-    url = "https://github.com/bazelbuild/rules_python/releases/download/0.0.1/rules_python-0.0.1.tar.gz",
     sha256 = "aa96a691d3a8177f3215b14b0edc9641787abaaa30363a080165d06ab65e1161",
+    url = "https://github.com/bazelbuild/rules_python/releases/download/0.0.1/rules_python-0.0.1.tar.gz",
 )
 
 load("@pybind11_bazel//:python_configure.bzl", "python_configure")
+
 python_configure(name = "local_config_python")
 
 load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")
@@ -171,13 +189,14 @@ load("@rules_python//python:repositories.bzl", "py_repositories")
 
 py_repositories()
 
-local_repository(
-    name = "local_config_cuda",
-    path = "third_party/tensorflow_cuda_bazel_build",
+new_local_repository(
+    name = "cuda",
+    build_file = "@//third_party:cuda.BUILD",
+    path = "/usr/local/cuda",
 )
 
-# Wrapper to expose local_config_cuda in an agnostic way
-new_empty_repository(
-    name = "cuda",
-    build_file = "//third_party:cuda.BUILD",
+new_local_repository(
+    name = "cudnn",
+    build_file = "@//third_party:cudnn.BUILD",
+    path = "/usr/",
 )

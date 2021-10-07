@@ -11,3 +11,8 @@ build:no-tty --show_progress_rate_limit 10
 build:gpu --define=cuda=true
 # define a separate build folder for faster switching between configs
 build:gpu --platform_suffix=-gpu
+# rules_cuda configuration
+build:gpu --@rules_cuda//cuda:enable_cuda
+build:gpu --@rules_cuda//cuda:cuda_targets=sm_52
+build:gpu --@rules_cuda//cuda:compiler=nvcc
+build:gpu --repo_env=CUDA_PATH=/usr/local/cuda

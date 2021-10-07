@@ -261,7 +261,7 @@ void multilabel_margin_loss_forward_out_cuda_template(
                     reduction == at::Reduction::Mean);
             C10_CUDA_KERNEL_LAUNCH_CHECK();
           });
-      at::cuda::sum_out(
+      at::sum_out(
           output,
           output_tmp,
           at::IntArrayRef(std::vector<int64_t>{}),
