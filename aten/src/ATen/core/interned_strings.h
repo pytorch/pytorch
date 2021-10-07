@@ -381,11 +381,14 @@ namespace c10 {
   _(aten, special_gammaincc)         \
   _(aten, mvlgamma)                  \
   _(aten, special_multigammaln)      \
+  _(aten, softmax)                   \
+  _(aten, special_softmax)           \
   _(aten, has_torch_function)        \
   _(aten, hardswish)                 \
   _(aten, hardswish_)                \
   _(aten, hardsigmoid_)              \
   _(aten, hardtanh_)                 \
+  _(aten, dequantize)                \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
   _(onnx, Concat)                    \
