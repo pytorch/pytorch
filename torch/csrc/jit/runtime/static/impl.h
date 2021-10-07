@@ -405,11 +405,11 @@ class TORCH_API ProcessedNode {
   }
 
   C10_NODISCARD c10::ArrayRef<const IValue> outputs() const {
-    return c10::ArrayRef(outputs_.get(), outputs_size_);
+    return c10::ArrayRef<const IValue>(outputs_.get(), outputs_size_);
   }
 
   C10_NODISCARD c10::ArrayRef<const IValue*> inputs() const {
-    return c10::ArrayRef(inputs_.get(), inputs_size_);
+    return c10::ArrayRef<const IValue*>(inputs_.get(), inputs_size_);
   }
 
   std::vector<IValue> clone_inputs() const;

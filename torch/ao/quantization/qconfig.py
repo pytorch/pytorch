@@ -21,6 +21,7 @@ from .observer import (
     default_debug_observer,
     default_dynamic_quant_observer,
     default_float_qparams_observer,
+    default_float_qparams_observer_4bit,
     default_observer,
     default_per_channel_weight_observer,
     default_placeholder_observer,
@@ -99,6 +100,10 @@ float_qparams_weight_only_qconfig = QConfigDynamic(
     activation=default_placeholder_observer,
     weight=default_float_qparams_observer)
 
+float_qparams_weight_only_qconfig_4bit = QConfigDynamic(
+    activation=default_placeholder_observer,
+    weight=default_float_qparams_observer_4bit)
+
 default_qat_qconfig = QConfig(activation=default_fake_quant,
                               weight=default_weight_fake_quant)
 
@@ -173,7 +178,6 @@ def assert_valid_qconfig(qconfig: Optional[Union[QConfig, QConfigDynamic]],
         )
         assert not is_per_channel, \
             'Per channel weight observer is not supported yet for ConvTranspose{n}d.'
-
 QConfigAny = Union[QConfig,
                    QConfigDynamic, None]
 
