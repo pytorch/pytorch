@@ -1692,7 +1692,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
             placement=f"rank:{self.rank}/cpu"
         )
 
-    @with_comms(backend="gloo")
+    @with_comms(init_rpc=False, backend="gloo")
     @skip_if_lt_x_gpu(4)
     def test_init_from_local_shards_invalid_pin_memory(self):
         # pin memory can only be on dense cpu
