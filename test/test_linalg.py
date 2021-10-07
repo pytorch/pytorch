@@ -4984,24 +4984,9 @@ class TestLinalg(TestCase):
         self.assertTrue(ans.is_contiguous())
         assertEqual(ans, expected)
 
-        # We do not do any broadcasting on y, so this is fine
+        # test out
         out = torch.empty_like(ans)
         ans = torch.matmul(x, y, out=out)
-        self.assertIs(ans, out)
-        self.assertTrue(ans.is_contiguous())
-        assertEqual(ans, expected)
-
-        # test y.mT @ x.mT
-        xt = x.transpose(-2, -1) if x.ndim > 1 else x
-        yt = y.transpose(-2, -1) if y.ndim > 1 else y
-        expected = np.matmul(yt.cpu(), xt.cpu())
-
-        ans = torch.matmul(yt, xt)
-        self.assertTrue(ans.is_contiguous())
-        assertEqual(ans, expected)
-
-        out = torch.empty_like(ans)
-        ans = torch.matmul(yt, xt, out=out)
         self.assertIs(ans, out)
         self.assertTrue(ans.is_contiguous())
         assertEqual(ans, expected)
