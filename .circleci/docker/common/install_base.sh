@@ -44,6 +44,10 @@ install_ubuntu() {
     wget \
     vim
 
+  # Should resolve issues related to various apt package repository cert issues
+  # see: https://github.com/pytorch/pytorch/issues/65931
+  apt-get install -y libgnutls30
+
   # Cleanup package manager
   apt-get autoclean && apt-get clean
   rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
