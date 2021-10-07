@@ -156,18 +156,6 @@ Tensor& index_put__plumbing(Tensor & self, const List<optional<Tensor>> & indice
   return self;
 }
 
-Tensor ensure_has_bdim(const Tensor& tensor, bool has_bdim, int64_t batch_size) {
-  if (has_bdim) {
-    return tensor;
-  }
-  const auto sizes = tensor.sizes();
-  DimVector expanded_shape;
-  expanded_shape.reserve(sizes.size());
-  expanded_shape.emplace_back(batch_size);
-  expanded_shape.insert(expanded_shape.end(), sizes.begin(), sizes.end());
-  return tensor.expand(expanded_shape);
-}
-
 int64_t bdim_size(
     const Tensor& a, optional<int64_t> a_bdim,
     const Tensor& b, optional<int64_t> b_bdim,
