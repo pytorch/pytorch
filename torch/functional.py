@@ -344,32 +344,45 @@ else:
 
         Computes a multi-dimensional histogram of the values in a tensor.
 
-        Interprets the elements of an input tensor whose innermost dimension
-        has size N as N-dimensional coordinates. For example, in an MxN matrix
-        each of the M rows defines a coordinate in N-dimensional space. If input
-        has three or more dimensions, all but the last dimension are flattened.
+        Interprets the elements of an input tensor whose innermost dimension has size N
+        as a collection of N-dimensional points. Maps each of the points into a set of
+        N-dimensional bins and returns the number of points (or total weight) in each bin.
 
-        For each of the N dimensions, a strictly increasing sequence of bin edges
-        is passed or constructed defining a set of bins.
+        :attr:`input` must be a tensor with at least 2 dimensions.
+        If input has shape (M, N), each of its M rows defines a point in N-dimensional space.
+        If input has three or more dimensions, all but the last dimension are flattened.
 
-        An N-dimensional histogram is computed containing the count (or total weight)
-        of values falling in each of the N-dimensional bins defined by the
-        cartesian product of the N bin sets. Elements which do not fall
-        inside any bin do not contribute to the output.
+        Each dimension is independently associated with its own strictly increasing sequence
+        of bin edges. Bin edges may be specified explicitly by passing a sequence of 1D
+        tensors. Alternatively, bin edges may be constructed automatically by passing a
+        sequence of integers specifying the number of equal-width bins in each dimension.
+
+        For each N-dimensional point in input:
+            - Each of its coordinates is binned independently among the bin edges
+              corresponding to its dimension
+            - Binning results are combined to identify the N-dimensional bin (if any)
+              into which the point falls
+            - If the point falls into a bin, the bin's count (or total weight) is incremented
+            - Points which do not fall into any bin do not contribute to the output
 
         :attr:`bins` can be a sequence of N 1D tensors, a sequence of N ints, or a single int.
 
-        If :attr:`bins` is a sequence of N 1D tensors, it explicitly specifies the
-        sequences of bin edges. Each tensor should contain a strictly increasing sequence
-        with at least two elements. Each should include its rightmost bin edge.
+        If :attr:`bins` is a sequence of N 1D tensors, it explicitly specifies the N sequences
+        of bin edges. Each 1D tensor should contain a strictly increasing sequence with at
+        least one element. A sequence of K bin edges defines K-1 bins, explicitly specifying
+        the left and right edges of all bins. Every bin is exclusive of its left edge. Only
+        the rightmost bin is inclusive of its right edge.
 
-        If :attr:`bins` is a sequence of N ints, it specifies the number of equal-width
-        bins in each dimension. By default, the range of the bins in each dimension
-        is determined by the minimum and maximum elements of the input tensor in the
-        corresponding dimension. The :attr:`range` argument can be provided to specify
-        ranges for the bins in each dimension.
+        If :attr:`bins` is a sequence of N ints, it specifies the number of equal-width bins
+        in each dimension. By default, the leftmost and rightmost bin edges in each dimension
+        are determined by the minimum and maximum elements of the input tensor in the
+        corresponding dimension. The :attr:`range` argument can be provided to manually
+        specify the leftmost and rightmost bin edges in each dimension.
 
         If :attr:`bins` is an int, it specifies the number of equal-width bins for all dimensions.
+
+        .. note::
+            See also :func:`torch.histogram`.
 
         Args:
             {input}
@@ -378,29 +391,36 @@ else:
                   If int[], defines the number of equal-width bins in each dimension.
                   If int, defines the number of equal-width bins for all dimensions.
         Keyword args:
-            range (sequence of float): Defines the ranges of the bins in each dimension.
+            range (sequence of float): Defines the leftmost and rightmost bin edges
+                                       in each dimension.
             weight (Tensor): By default, each value in the input has weight 1. If a weight
                              tensor is passed, each N-dimensional coordinate in input
                              contributes its associated weight towards its bin's result.
                              The weight tensor should have the same shape as the :attr:`input`
-                             tensor, excluding the innermost dimension N.
+                             tensor excluding its innermost dimension N.
             density (bool): If False (default), the result will contain the count (or total weight)
-                            in each bin. If True, the value of each bin is the value of a
-                            piecewise-constant probability density function (pdf) over the bins
-                            such that the (Lebesgue) integral of the pdf over the range of the
-                            bins is 1.
+                            in each bin. If True, each count (weight) is divided by the total count
+                            (total weight), then divided by the volume of its associated bin.
         Returns:
             hist (Tensor): N-dimensional Tensor containing the values of the histogram.
-            bin_edges(Tensor[]): sequence of N 1D Tensors containing the edges of the histogram bins.
+            bin_edges(Tensor[]): sequence of N 1D Tensors containing the bin edges.
 
         Example::
-            >>> torch.histogramdd(torch.tensor([[0., 0.], [1., 1.], [2., 2.]]), bins=(3, 3),
-                                  weight=torch.tensor([1., 2., 4.]))
-            histogramdd_return_type(hist=tensor([[1., 0., 0.],
-                                                 [0., 2., 0.],
-                                                 [0., 0., 4.]]),
-                                    bin_edges=(tensor([0.0000, 0.6667, 1.3333, 2.0000]),
-                                               tensor([0.0000, 0.6667, 1.3333, 2.0000])))
+            >>> torch.histogramdd(torch.tensor([[0., 1.], [1., 0.], [2., 0.], [2., 2.]]), bins=(3, 3),
+                                  weight=torch.tensor([1., 2., 4., 8.]))
+                histogramdd_return_type(hist=tensor([[0., 1., 0.],
+                                                     [2., 0., 0.],
+                                                     [4., 0., 8.]]),
+                                        bin_edges=(tensor([0.0000, 0.6667, 1.3333, 2.0000]),
+                                                   tensor([0.0000, 0.6667, 1.3333, 2.0000])))
+
+            >>> torch.histogramdd(torch.tensor([[0., 0.], [1., 1.], [2., 2.]]), bins=(2, 2),
+                                  range=(0., 1., 0., 1.), density=True)
+                histogramdd_return_type(hist=tensor([[2., 0.],
+                                                     [0., 2.]]),
+                                        bin_edges=(tensor([0.0000, 0.5000, 1.0000]),
+                                                   tensor([0.0000, 0.5000, 1.0000])))
+
         """
         if isinstance(bins, int):
             bins = list(itertools.repeat(bins, input.size()[-1]))

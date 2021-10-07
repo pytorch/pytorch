@@ -14,6 +14,8 @@
 /* Implements a numpy-like histogramdd function running on cpu
  * https://numpy.org/doc/stable/reference/generated/numpy.histogramdd.html
  *
+ * See the docstr for torch.histogramdd in torch/functional.py for further explanation.
+ *
  * - torch.histogramdd(input, bins, range=None, weight=None, density=False)
  *   input     - tensor with shape (M, N). input is interpreted as M coordinates in N-dimensional space.
  *               If a tensor with more than 2 dimensions is passed, all but the last dimension will be flattened.
