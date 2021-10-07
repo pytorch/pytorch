@@ -493,11 +493,11 @@ static void check_shape_forward(const at::Tensor& input,
     std::vector<int64_t> kernel_shape;
     bool kernel_size_correct = true;
 
-    TORCH_CHECK(input.size(1) == (weight_sizes[1] * groups),
-             "Given groups=", groups, ", weight of size ", weight_sizes,
-             ", expected input", input.sizes(), " to have ",
-             (weight_sizes[1] * groups), " channels, but got ", input.size(1),
-             " channels instead");
+    // TORCH_CHECK(input.size(1) == (weight_sizes[1] * groups),
+    //          "Given groups=", groups, ", weight of size ", weight_sizes,
+    //          ", expected input", input.sizes(), " to have ",
+    //          (weight_sizes[1] * groups), " channels, but got ", input.size(1),
+    //          " channels instead");
     TORCH_CHECK(!bias.defined() || (bias.ndimension() == 1 && bias.size(0) == weight_sizes[0]),
              "Given weight of size ", weight_sizes,
              ", expected bias to be 1-dimensional with ", weight_sizes[0], " elements",
