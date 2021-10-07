@@ -8,8 +8,6 @@
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/Unfold2d.h>
 
-#include <iostream>
-
 namespace at {
 namespace native {
 
@@ -59,15 +57,6 @@ static inline void slow_conv2d_shape_check(
   const int64_t dim_width = 3;
 
   // Allow for empty batch size and channel size but not other dimensions
-  // bool valid_empty = ndim == 4 && input.size(dim_batch) == 0 &&
-  //     input.size(dim_planes) != 0 && input.size(dim_height) != 0 &&
-  //     input.size(dim_width) != 0;
-
-  // TORCH_CHECK(
-  //     (input.numel() > 0 || valid_empty) && ndim == 4,
-  //     "non-empty 4D input tensor expected but got: ",
-  //     input.sizes());
-
   TORCH_CHECK(ndim == 4, "Expected 4D input tensor, but got:", input.sizes());
   for (int64_t dim = 2; dim < ndim; ++dim) {
     TORCH_CHECK(input.size(dim) != 0,
@@ -117,7 +106,6 @@ static inline void slow_conv2d_shape_check(
     if (weight.dim() == 2) {
       n_input_plane /= (kernel_height * kernel_width);
     }
-    std::cout << ">>>>> WEIGHT DEFINED.\n";
     if (input.size(1) != 0) {
       check_dim_size(input, ndim, dim_planes, n_input_plane);
     }
@@ -540,6 +528,7 @@ std::tuple<Tensor, Tensor> slow_conv2d_forward_cpu(
       padding,
       output,
       finput);
+
   return std::make_tuple(output, finput);
 }
 
@@ -570,7 +559,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_backward_out_cpu(
     at::sum_out(grad_bias, grad_output, IntArrayRef{0, 2, 3});
   }
 
-  if (grad_weight.defined()) {
+  if (grad_weight.defined() && grad_input.numel() != 0) {
     grad_weight.resize_(weight.sizes());
     grad_weight.zero_();
     slow_conv2d_backward_weight_out_cpu_template(

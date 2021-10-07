@@ -12746,16 +12746,17 @@ class TestNNDeviceType(NNTestCase):
         output.sum().backward()
         self.assertEqualTypeString(output, input)
 
-    def _test_module_empty_input(self, module, inp, check_size=True):
+    def _test_module_empty_input(self, module, inp, check_size=True, check_parameters=True):
         inp.requires_grad_(True)
         out = module(inp)
         gO = torch.rand_like(out)
         out.backward(gO)
         if check_size:
             self.assertEqual(out.size(), inp.size())
-        for p in module.parameters():
-            if p.requires_grad:
-                self.assertEqual(p.grad, torch.zeros_like(p.grad))
+        if check_parameters:
+            for p in module.parameters():
+                if p.requires_grad:
+                    self.assertEqual(p.grad, torch.zeros_like(p.grad))
         self.assertEqual(inp.grad, torch.zeros_like(inp))
 
     def _test_module_empty_inputs(self, module, inputs):
@@ -13971,17 +13972,18 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(mod.bias.grad, torch.tensor([0., 0, 0], device=device))
 
     def test_conv_empty_channel(self, device):
-        mod = torch.nn.Conv1d(16, 33, 3, stride=2).to(device)
-        inp = torch.randn(2, 0, 15, device=device)
-        self._test_module_empty_input(mod, inp, check_size=False)
+        for in_channels in [0, 2]:
+            mod = torch.nn.Conv1d(in_channels, 8, 2, stride=2).to(device)
+            inp = torch.randn(2, 0, 15, device=device)
+            self._test_module_empty_input(mod, inp, check_size=False, check_parameters=False)
 
-        mod = torch.nn.Conv2d(16, 33, 3, stride=2).to(device)
-        inp = torch.randn(2, 0, 50, 100, device=device)
-        self._test_module_empty_input(mod, inp, check_size=False)
+            mod = torch.nn.Conv2d(in_channels, 33, 3, stride=2).to(device)
+            inp = torch.randn(2, 0, 50, 100, device=device)
+            self._test_module_empty_input(mod, inp, check_size=False, check_parameters=False)
 
-        mod = torch.nn.Conv3d(16, 33, 3, stride=2).to(device)
-        inp = torch.randn(2, 0, 50, 20, 40, device=device)
-        self._test_module_empty_input(mod, inp, check_size=False)
+            mod = torch.nn.Conv3d(in_channels, 33, 3, stride=2).to(device)
+            inp = torch.randn(2, 0, 50, 20, 40, device=device)
+            self._test_module_empty_input(mod, inp, check_size=False, check_parameters=False)
 
     def test_group_conv_empty(self, device):
         mod = torch.nn.Conv2d(4, 4, stride=2, kernel_size=3, padding=1, groups=4).to(device)
