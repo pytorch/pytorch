@@ -59,22 +59,10 @@ void GraphFunction::run(Stack& stack) {
   get_executor().run(stack);
 }
 
-void GraphFunction::run(Stack&& stack) {
-  run(stack);
-}
-
 c10::intrusive_ptr<c10::ivalue::Future> GraphFunction::runAsync(
     Stack& stack,
     TaskLauncher taskLauncher) {
   return get_executor().runAsync(stack, std::move(taskLauncher));
-}
-
-IValue GraphFunction::operator()(
-    std::vector<IValue> stack,
-    const Kwargs& kwargs) {
-  getSchema().checkAndNormalizeInputs(stack, kwargs);
-  run(stack);
-  return stack.front();
 }
 
 void GraphFunction::ensure_defined() {

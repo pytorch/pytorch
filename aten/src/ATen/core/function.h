@@ -47,19 +47,23 @@ struct TORCH_API Function {
 
   virtual void run(Stack& stack) = 0;
 
-  virtual void run(Stack&& stack) = 0;
-
   virtual c10::intrusive_ptr<c10::ivalue::Future> runAsync(
       Stack& stack,
       TaskLauncher taskLauncher = at::launch) = 0;
 
-  virtual at::IValue operator()(
-      Stack stack,
-      const Kwargs& kwargs = Kwargs()) = 0;
+  at::IValue operator()(
+    Stack stack,
+    const Kwargs& kwargs = Kwargs()) {
+    getSchema().checkAndNormalizeInputs(stack, kwargs);
+    run(stack);
+    return stack.front();
+  }
 
   virtual const c10::QualifiedName& qualname() const = 0;
 
-  virtual const std::string& name() const = 0;
+  const std::string& name() const {
+    return qualname().name();
+  }
 
   // if this isn't yet defined, run its method_creator function
   virtual void ensure_defined() = 0;
@@ -68,18 +72,14 @@ struct TORCH_API Function {
 
   virtual size_t num_inputs() const = 0;
 
-  virtual void check_single_output() = 0;
-
-  virtual std::string pretty_print_schema() const = 0;
-
   virtual Function& setSchema(c10::FunctionSchema schema) = 0;
 
   virtual void call(Stack&, size_t, c10::function_ref<void(const Code&)>) {
-    TORCH_INTERNAL_ASSERT(false);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
   }
 
   virtual void call(Stack&, c10::function_ref<void(const mobile::Code&)>) {
-    TORCH_INTERNAL_ASSERT(false);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
   }
 
   virtual ~Function() {}
