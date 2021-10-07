@@ -235,7 +235,8 @@ class AliasDb {
       bool add_wildcard_to_contained_elems = true);
   Element* getOrCreateElement(const Value* value);
 
-  const AliasTypeSet* mapTypeToAliasTypeSetPtr(const TypePtr& type) const;
+  c10::optional<AliasTypeSet> mapTypeToAliasTypeSetPtr(
+      const TypePtr& type) const;
   bool functionalNonEscapingListUse(const Use& use) const;
   bool functionalNonEscapingTupleUse(const Use& use) const;
 

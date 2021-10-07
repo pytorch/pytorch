@@ -196,8 +196,6 @@ LivenessMap GetLivenessMap(
   std::vector<const Value*> values_in_creation_order;
   FastMap<const Value*, size_t> values_to_idx_in_creation_order;
   for (const auto* node : graph->nodes()) {
-    values_to_idx_in_creation_order.reserve(
-        values_to_idx_in_creation_order.size() + node->outputs().size());
     for (const auto* v : node->outputs()) {
       values_to_idx_in_creation_order.emplace(
           v, values_in_creation_order.size());
@@ -221,7 +219,6 @@ LivenessMap GetLivenessMap(
 
     auto& v_live_set = liveness_map[v] = {};
 
-    v_live_set.reserve(live_values_use_chain.size());
     for (const auto& live_v : live_values_use_chain) {
       v_live_set.insert(live_v.first);
       liveness_map.at(live_v.first).insert(v);
@@ -230,7 +227,7 @@ LivenessMap GetLivenessMap(
     // only add values to the live set if they
     // have deps, otherwise they die immediately
     if (v->uses().size()) {
-      live_values_use_chain[v] = FastSet<const Node*>(v->uses().size());
+      live_values_use_chain[v] = {};
     }
 
     // record the relationship between v (Value) and its uses (Node)
