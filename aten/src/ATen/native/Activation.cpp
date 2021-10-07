@@ -346,7 +346,7 @@ TORCH_IMPL_FUNC(gelu_backward_out_cpu) (
   const Tensor& grad, const Tensor& self, bool approximate, const Tensor& grad_input
 ) {
 #if AT_MKLDNN_ENABLED()
-  if (use_mkldnn(self)) {
+  if (use_mkldnn(self) && !approximate) {
     const ideep::tensor& x = itensor_from_tensor(self);
     ideep::tensor grady = itensor_from_tensor(grad);
     ideep::tensor gradx = itensor_from_tensor(grad_input);
