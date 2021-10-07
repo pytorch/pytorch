@@ -158,35 +158,12 @@ Node::Node(OpKind op, const std::vector<at::ScalarType>& at_dtypes,
   metadata_.frame_info = GetFrameInfo();
 }
 
-Node::~Node() {
-  for (size_t i = 0; i < operands_as_outputs_.size(); ++i) {
-    operands_[i]->RemoveUse(Use(this, i, operands_as_outputs_[i].index));
-  }
-}
+Node::~Node() {}
 
 void Node::AddOperand(NodePtr node, size_t index) {
   LTC_CHECK_LT(index, node->num_outputs());
   operands_.push_back(std::move(node));
   operands_as_outputs_.push_back(Output(operands_.back().get(), index));
-  operands_.back()->AddUse(Use(this, operands_.size() - 1, index));
-}
-
-void Node::ReplaceOperand(size_t operand_no, NodePtr node, size_t index) {
-  LTC_CHECK_LT(index, node->num_outputs());
-  Output* output = &operands_as_outputs_.at(operand_no);
-  operands_[operand_no]->RemoveUse(Use(this, operand_no, output->index));
-  node->AddUse(Use(this, operand_no, index));
-  *output = Output(node.get(), index);
-  operands_[operand_no] = std::move(node);
-}
-
-void Node::ReplaceAllUsesWith(NodePtr node, size_t index) {
-  // A call to ReplaceOperand() will end up calling RemoveUse() into the
-  // current node, so snapshot the current uses and iterate over them.
-  std::vector<Use> current_uses(uses_.begin(), uses_.end());
-  for (auto& use : current_uses) {
-    use.node->ReplaceOperand(use.operand_index, node, index);
-  }
 }
 
 std::string Node::ToString() const {

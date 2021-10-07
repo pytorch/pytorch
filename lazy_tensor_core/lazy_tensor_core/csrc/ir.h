@@ -181,8 +181,6 @@ class Node {
 
   const Output& operand(size_t i) const { return operands_as_outputs_.at(i); }
 
-  const std::set<Use>& uses() const { return uses_; }
-
   torch::lazy::hash_t node_hash() const { return node_hash_; }
 
   torch::lazy::hash_t hash() const { return dag_hash_; }
@@ -197,10 +195,6 @@ class Node {
     return user_meta;
   }
 
-  void ReplaceOperand(size_t operand_no, NodePtr node, size_t index = 0);
-
-  void ReplaceAllUsesWith(NodePtr node, size_t index = 0);
-
   virtual std::string ToString() const;
 
   virtual NodePtr Clone(OpList operands) const;
@@ -214,10 +208,6 @@ class Node {
   // Adds node's index output number as operand.
   void AddOperand(NodePtr node, size_t index = 0);
 
-  void AddUse(Use use) { uses_.insert(std::move(use)); }
-
-  void RemoveUse(const Use& use) { uses_.erase(use); }
-
   static std::vector<SourceLocation> GetFrameInfo();
 
   // The ID of the operation captured by this node.
@@ -228,8 +218,6 @@ class Node {
   // Outputs do not hold references on the nodes, and neither do the uses, since
   // otherwise we get into circular reference counting.
   std::vector<Output> operands_as_outputs_;
-  // We use a set for uses, as we want deterministic use sequencing.
-  std::set<Use> uses_;
   // The hash value of this node.
   torch::lazy::hash_t node_hash_ = 0;
   // The hash value of the graph rooted at this node.

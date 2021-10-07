@@ -19,22 +19,6 @@ TEST(IrTest, TestScalarCreate) {
   ASSERT_TRUE(scalar != nullptr);
 }
 
-TEST(IrTest, TestReplace) {
-  ir::NodePtr scalar1 = ir::ops::ScalarOp(1.0, PrimitiveType::F32);
-  ir::NodePtr scalar2 = ir::ops::ScalarOp(2.0, PrimitiveType::F32);
-  ir::Value add = scalar1 + scalar2;
-  EXPECT_EQ(scalar1->uses().size(), 1);
-  EXPECT_EQ(scalar2->uses().size(), 1);
-
-  ir::NodePtr scalar3 = ir::ops::ScalarOp(3.0, PrimitiveType::F32);
-  scalar1->ReplaceAllUsesWith(scalar3);
-  EXPECT_EQ(scalar1->uses().size(), 0);
-  EXPECT_EQ(scalar3->uses().size(), 1);
-
-  add->ReplaceOperand(0, scalar1);
-  EXPECT_EQ(scalar1->uses().size(), 1);
-}
-
 TEST(IrTest, TestHash) {
   ir::NodePtr scalar1 = ir::ops::ScalarOp(1.0, PrimitiveType::F32);
   ir::NodePtr scalar2 = ir::ops::ScalarOp(2.0, PrimitiveType::F32);
