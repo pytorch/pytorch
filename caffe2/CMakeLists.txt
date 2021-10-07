@@ -1024,8 +1024,8 @@ if(BUILD_LITE_INTERPRETER AND SELECTED_OP_LIST)
     add_custom_command(
       OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
       COMMAND
-      "${PYTHON_EXECUTABLE}" -m tools.lite_interpreter.gen_oplist
-      --yaml_file_path "${SELECTED_OP_LIST}"
+      "${PYTHON_EXECUTABLE}" -m tools.code_analyzer.gen_oplist
+      --model_file_list_path "${SELECTED_OP_LIST}"
       --output_dir "${CMAKE_BINARY_DIR}/aten/src/ATen"
       WORKING_DIRECTORY "${TORCH_ROOT}")
   else ()

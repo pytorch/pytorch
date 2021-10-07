@@ -7,13 +7,15 @@ from functools import reduce
 from typing import Set
 
 import yaml
-from gen_op_registration_allowlist import canonical_name
 from tools.codegen.selective_build.selector import *
 from tools.codegen.code_template import CodeTemplate
 from tools.lite_interpreter.gen_selected_mobile_ops_header import (
     write_selected_mobile_ops,
 )
 
+def canonical_name(opname: str) -> str:
+    # Skip the overload name part as it's not supported by code analyzer yet.
+    return opname.split('.', 1)[0]
 
 def canonical_opnames(opnames):
     return [canonical_name(opname) for opname in opnames]
@@ -75,11 +77,11 @@ SupportedMobileModelCheckerRegistry register_model_versions;
     # Generate SupportedMobileModelsRegistration.cpp
     md5_hashes = set()
     for model_dict in model_dicts:
-        debug_info = json.loads(model_dict["debug_info"][0])
-
-        if debug_info["is_new_style_rule"]:
-            for asset, asset_info in debug_info["asset_info"].items():
-                md5_hashes.update(asset_info["md5_hash"])
+        if "debug_info" in model_dict:
+            debug_info = json.loads(model_dict["debug_info"][0])
+            if debug_info["is_new_style_rule"]:
+                for asset, asset_info in debug_info["asset_info"].items():
+                    md5_hashes.update(asset_info["md5_hash"])
 
     supported_hashes = ""
     for md5 in md5_hashes:
@@ -132,16 +134,23 @@ def main(argv):
     )
     options = parser.parse_args()
 
-    assert options.model_file_list_path[0] == "@"
-    model_file_list_path = options.model_file_list_path[1:]
+    if (os.path.isfile(options.model_file_list_path)):
+        print("Processing model file: ", options.model_file_list_path)
+        model_dicts = []
+        model_dict = yaml.safe_load(open(options.model_file_list_path))
+        model_dicts.append(model_dict)
+    else:
+        print("Processing model directory: ", options.model_file_list_path)
+        assert options.model_file_list_path[0] == "@"
+        model_file_list_path = options.model_file_list_path[1:]
 
-    model_dicts = []
-    with open(model_file_list_path) as model_list_file:
-        model_file_names = model_list_file.read().split()
-        for model_file_name in model_file_names:
-            with open(model_file_name, "rb") as model_file:
-                model_dict = yaml.safe_load(model_file)
-                model_dicts.append(model_dict)
+        model_dicts = []
+        with open(model_file_list_path) as model_list_file:
+            model_file_names = model_list_file.read().split()
+            for model_file_name in model_file_names:
+                with open(model_file_name, "rb") as model_file:
+                    model_dict = yaml.safe_load(model_file)
+                    model_dicts.append(model_dict)
 
     selective_builders = list(
         map(
