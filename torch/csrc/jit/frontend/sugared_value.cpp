@@ -153,7 +153,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     }
   } else if (auto classType = value_->type()->cast<ClassType>()) {
     // This is a class, emit the proper attribute lookup
-    if (auto method = classType->findMethod(field)) {
+    if (classType->findMethod(field)) {
       return std::make_shared<MethodValue>(getValue(), field);
     }
     if (classType->hasAttribute(field)) {
@@ -169,7 +169,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     }
   } else if (auto iface = value_->type()->cast<InterfaceType>()) {
     // accessing methods of interfaces
-    if (auto schema = iface->getMethod(field)) {
+    if (iface->getMethod(field)) {
       return std::make_shared<MethodValue>(getValue(), field);
     }
   } else if (auto enum_type = value_->type()->cast<EnumType>()) {

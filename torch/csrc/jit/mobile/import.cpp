@@ -90,16 +90,6 @@ using caffe2::serialize::ReadAdapterInterface;
 
 OpCode parseOpCode(const char* str);
 
-std::string operator_str(
-    const std::string& name,
-    const std::string& overloadname) {
-  std::string result = name;
-  if (!overloadname.empty()) {
-    result += "." + overloadname;
-  }
-  return result;
-}
-
 TypePtr resolveTypeNameMobile(
     const c10::QualifiedName& qn,
     std::shared_ptr<CompilationUnit> compilation_unit) {
@@ -184,15 +174,14 @@ bool isTensorInBytecodeArchive(
 namespace {
 
 void tryRegisterMethod(const std::vector<c10::Argument>& args, Function& func) {
-  if (args.empty()) {
-    return;
-  }
-
-  if (args[0].name() != "self") {
+  if (args.empty() || args[0].name() != "self") {
     return;
   }
 
   if (auto cls = args[0].type()->castRaw<ClassType>()) {
+    if (C10_UNLIKELY(cls->findMethod(func.name()))) {
+      return;
+    }
     cls->addMethod(&func);
   }
 }
