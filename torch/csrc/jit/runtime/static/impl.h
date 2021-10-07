@@ -32,6 +32,40 @@ using FastSet = std::unordered_set<Key>;
 TORCH_API bool canEnableStaticRuntime(
     const std::shared_ptr<torch::jit::Graph>& graph);
 
+// Group values used by `graph` into three categories:
+//
+// - input_or_constant_aliases:
+//     values that are either inputs or contain aliases of inputs
+//     or constants.
+// - output_aliases:
+//     values that are either outputs or contain aliases of outputs
+//     and are not in input_or_constant_aliases.
+// Values that dont't show up in input_or_constant_aliases and output_aliases
+// are
+//     created and consumed within the graph.
+class ValueGroup {
+ public:
+  explicit ValueGroup() = default;
+  void init(const std::shared_ptr<torch::jit::Graph>& graph, AliasDb& db);
+
+  bool isInputAlias(const Value* value) const {
+    return input_or_constant_aliases_.find(value) !=
+        input_or_constant_aliases_.end();
+  }
+
+  bool isOutputAlias(const Value* value) const {
+    return output_aliases_.find(value) != output_aliases_.end();
+  }
+
+  bool isAlwaysAlive(const Value* value) const {
+    return isInputAlias(value) || isOutputAlias(value);
+  }
+
+ private:
+  FastSet<const Value*> input_or_constant_aliases_;
+  FastSet<const Value*> output_aliases_;
+};
+
 struct TORCH_API StaticModuleOptions {
   // to batch allocate (deallocate) tensor storage for all non-escaping
   // temporary tensors
@@ -174,8 +208,8 @@ class TORCH_API StaticModule {
     return value_to_same_storage_values_;
   }
 
-  const FastSet<const Value*>& external_values() const {
-    return external_values_;
+  const ValueGroup& value_group() const {
+    return value_group_;
   }
 
   bool first_input_is_self() const {
@@ -202,10 +236,8 @@ class TORCH_API StaticModule {
   // map a node idx (in graph order) to a vector of ssa_defs for node inputs
   FastMap<int, std::vector<DefInfo>> node_inputs_ssa_def_map_;
 
-  // Bookkeeping for MemoryPlanner in StaticRuntime
-  // values whose live-time exceeds that of running one inference (e.g., input,
-  // output, prim::Constants, and their aliases)
-  FastSet<const Value*> external_values_;
+  ValueGroup value_group_;
+
   // map a value to the set of values that may share the same storage with it
   FastMap<const Value*, std::vector<const Value*>>
       value_to_same_storage_values_;

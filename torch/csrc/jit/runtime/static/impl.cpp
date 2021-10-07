@@ -143,42 +143,6 @@ bool mayContainAlias(
   return db.mayContainAlias(as, bs);
 }
 
-// Get set of all inputs/outputs/constants (always alive) and their aliases
-FastSet<const Value*> GetAlwaysAliveValues(
-    const std::shared_ptr<torch::jit::Graph>& graph,
-    AliasDb& db) {
-  // a set of Values whose live-range exceed current inference
-  FastSet<const Value*> always_alive;
-
-  // mark inputs, constants, outputs as always_alive
-  for (const auto* input : graph->inputs()) {
-    always_alive.insert(input);
-  }
-  for (const auto* output : graph->outputs()) {
-    always_alive.insert(output);
-  }
-  for (const auto* node : graph->nodes()) {
-    if (node->kind() == prim::Constant) {
-      for (const auto* output : node->outputs()) {
-        always_alive.insert(output);
-      }
-    }
-  }
-
-  // insert aliases of always live Values
-  for (const auto* node : graph->nodes()) {
-    // constants are already in the always_alive set
-    if (node->kind() != prim::Constant) {
-      for (const auto* v : node->outputs()) {
-        if (mayContainAlias(db, {v}, always_alive)) {
-          always_alive.insert(v);
-        }
-      }
-    }
-  }
-  return always_alive;
-}
-
 //  Map each value to all values that are alive at the same time.
 using LivenessMap = FastMap<const Value*, FastSet<const Value*>>;
 
@@ -186,7 +150,7 @@ using LivenessMap = FastMap<const Value*, FastSet<const Value*>>;
 //  while keeping track of the live values.
 LivenessMap GetLivenessMap(
     const std::shared_ptr<torch::jit::Graph>& graph,
-    const FastSet<const Value*>& always_alive,
+    const ValueGroup& value_group,
     AliasDb& db) {
   // map a Value to a set of Values that overlap live-ranges with the Value's
   FastMap<const Value*, FastSet<const Value*>> liveness_map;
@@ -283,7 +247,7 @@ LivenessMap GetLivenessMap(
 
   for (const auto* node : graph->nodes()) {
     for (const auto* v : node->outputs()) {
-      if (always_alive.count(v) == 0) {
+      if (!value_group.isAlwaysAlive(v)) {
         add_live_value_fn(v);
       }
     }
@@ -296,7 +260,7 @@ LivenessMap GetLivenessMap(
   }
 
   for (const auto& v : live_values_use_chain) {
-    TORCH_CHECK(always_alive.count(v.first));
+    TORCH_CHECK(value_group.isAlwaysAlive(v.first));
   }
 
   for (const auto* node : graph->nodes()) {
@@ -426,7 +390,7 @@ GetMemoryPlanningCandidates(
 // and debug.
 FastMap<const Value*, std::vector<const Value*>> GenerateSameStorageValues(
     const LivenessMap& alive_during,
-    const FastSet<const Value*>& always_alive,
+    const ValueGroup& value_group,
     const std::pair<std::vector<const Value*>, std::vector<const Value*>>&
         optimizable,
     AliasDb& db) {
@@ -470,7 +434,7 @@ FastMap<const Value*, std::vector<const Value*>> GenerateSameStorageValues(
       same_storage_values[v] = {v};
     }
     // skip always alive values (alias inputs/outputs/weights)
-    if (always_alive.count(v)) {
+    if (value_group.isAlwaysAlive(v)) {
       continue;
     }
     for (const auto& p : same_storage_values) {
@@ -487,16 +451,14 @@ FastMap<const Value*, std::vector<const Value*>> GenerateSameStorageValues(
   // to preserve determinism
   std::vector<const Value*> seen;
 
-  auto compute_liveset_fn =
-      [&always_alive, &alive_during, &same_storage_values](
-          FastSet<const Value*>& live, const Value* v) {
-        for (const auto* sv : same_storage_values.at(v)) {
-          const auto& l = alive_during.count(sv) ? alive_during.at(sv)
-                                                 : FastSet<const Value*>{};
-          live.insert(l.begin(), l.end());
-        }
-        live.insert(always_alive.begin(), always_alive.end());
-      };
+  auto compute_liveset_fn = [&alive_during, &same_storage_values](
+                                FastSet<const Value*>& live, const Value* v) {
+    for (const auto* sv : same_storage_values.at(v)) {
+      const auto& l = alive_during.count(sv) ? alive_during.at(sv)
+                                             : FastSet<const Value*>{};
+      live.insert(l.begin(), l.end());
+    }
+  };
 
   // check if same_storage_values[s] intersects with live
   auto intersect_fn = [&same_storage_values](
@@ -512,7 +474,7 @@ FastMap<const Value*, std::vector<const Value*>> GenerateSameStorageValues(
   };
 
   for (const auto* v : optimizable_values) {
-    if (always_alive.count(v)) {
+    if (value_group.isAlwaysAlive(v)) {
       continue;
     }
     // get values that are live during the lifetime of v
@@ -521,7 +483,7 @@ FastMap<const Value*, std::vector<const Value*>> GenerateSameStorageValues(
     for (const auto* s : seen) {
       // if live(same_storage_values[v]) and same_storage_values[s]
       // do not overlap, then s and v can share the same storage
-      if (!intersect_fn(live, s)) {
+      if (!intersect_fn(live, s) && !value_group.isAlwaysAlive(s)) {
         share_storage_fn(v, s);
         // since s is added to same_storage_values[v], live needs
         // to be recomputed, so bail out here
@@ -574,6 +536,52 @@ std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
 }
 
 } // namespace
+
+void ValueGroup::init(
+    const std::shared_ptr<torch::jit::Graph>& graph,
+    AliasDb& db) {
+  input_or_constant_aliases_.clear();
+  output_aliases_.clear();
+  // Build `input_or_constant_aliases` as we look through nodes forwardly from
+  // the graph's inputs and add aliases of the inputs being created by the
+  // nodes.
+  input_or_constant_aliases_.insert(
+      graph->inputs().begin(), graph->inputs().end());
+  for (const auto* node : graph->nodes()) {
+    if (node->kind() == prim::Constant) {
+      for (const auto* output : node->outputs()) {
+        input_or_constant_aliases_.insert(output);
+      }
+    }
+  }
+  for (const auto* node : graph->nodes()) {
+    if (node->kind() == prim::Constant) {
+      // Constants are already in `input_or_constant_aliases`.
+      continue;
+    }
+    for (const auto* v : node->outputs()) {
+      if (mayContainAlias(db, {v}, input_or_constant_aliases_)) {
+        input_or_constant_aliases_.insert(v);
+      }
+    }
+  }
+
+  // Build `output_aliases` as we look through nodes reversely so that we can
+  // start from the output values, and follow the flows backwardly from there.
+  output_aliases_.insert(graph->outputs().begin(), graph->outputs().end());
+  for (const auto* node : graph->nodes().reverse()) {
+    if (node->kind() == prim::Constant) {
+      // Constants cannot create any aliases.
+      continue;
+    }
+    for (const auto* v : node->outputs()) {
+      if (mayContainAlias(db, {v}, output_aliases_) &&
+          !mayContainAlias(db, {v}, input_or_constant_aliases_)) {
+        output_aliases_.insert(v);
+      }
+    }
+  }
+}
 
 StaticModule::StaticModule(
     std::shared_ptr<torch::jit::Graph> g,
@@ -691,14 +699,15 @@ StaticModule::StaticModule(
   }
 
   // Prepare for memory planning
-  AliasDb alias_db(graph_);
-  external_values_ = GetAlwaysAliveValues(graph_, alias_db);
+  AliasDb alias_db(
+      graph_, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
+  value_group_.init(graph_, alias_db);
 
   if (opts_.optimize_memory) {
-    auto lm = GetLivenessMap(graph_, external_values_, alias_db);
+    auto lm = GetLivenessMap(graph_, value_group_, alias_db);
     auto values = GetMemoryPlanningCandidates(graph_, node_has_out_variant);
     value_to_same_storage_values_ =
-        GenerateSameStorageValues(lm, external_values_, values, alias_db);
+        GenerateSameStorageValues(lm, value_group_, values, alias_db);
   }
 }
 
@@ -874,7 +883,7 @@ c10::IValue StaticRuntime::operator()(
       planner_ = std::make_unique<MemoryPlanner>(
           this,
           static_module_.values_share_same_storage(),
-          static_module_.external_values(),
+          static_module_.value_group(),
           static_module_.opts().enable_out_variant,
           static_module_.opts().optimize_graph_output_memory);
     }
@@ -1103,7 +1112,7 @@ void StaticRuntime::display_nodes(
       planner_ = std::make_unique<MemoryPlanner>(
           this,
           static_module_.values_share_same_storage(),
-          static_module_.external_values(),
+          static_module_.value_group(),
           static_module_.opts().enable_out_variant,
           static_module_.opts().optimize_graph_output_memory);
     }
@@ -1172,7 +1181,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
         planner_ = std::make_unique<MemoryPlanner>(
             this,
             static_module_.values_share_same_storage(),
-            static_module_.external_values(),
+            static_module_.value_group(),
             static_module_.opts().enable_out_variant,
             static_module_.opts().optimize_graph_output_memory);
       }
