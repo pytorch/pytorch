@@ -1804,6 +1804,12 @@ TEST(LLVM, CodeGenKernelFuncName) {
   // Check that the kernel function name used by LLVMCodeGen
   // is not empty.
   ASSERT_NE(cg.kernel_func_name(), "");
+
+  // Do another codegen and ensure that the kernel func name is different
+  // from the one above.
+  LLVMCodeGen cg2(store, {a, b});
+  ASSERT_NE(cg2.kernel_func_name(), "");
+  ASSERT_NE(cg.kernel_func_name(), cg2.kernel_func_name());
 }
 
 } // namespace jit

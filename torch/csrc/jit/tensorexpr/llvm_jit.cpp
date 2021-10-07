@@ -18,6 +18,7 @@
 #include <llvm/Support/CFGUpdate.h>
 #include <llvm/Support/DynamicLibrary.h>
 #include <llvm/Support/Host.h>
+#include <llvm/Support/TargetSelect.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Target/TargetMachine.h>
 
@@ -314,6 +315,50 @@ void dumpCFG(const llvm::cfg::Update<llvm::BasicBlock*>& update) {
   update.dump();
 }
 #endif
+
+std::string PytorchLLVMJIT::getUniqueFunctionName(const std::string& name) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto it = existing_functions_.find(name);
+  if (it == existing_functions_.end()) {
+    existing_functions_[name] = 0;
+    return name;
+  }
+  existing_functions_[name] = it->second + 1;
+  std::string unique_name = name + "_" + std::to_string(it->second + 1);
+  return unique_name;
+}
+
+std::unordered_map<std::string, std::unique_ptr<PytorchLLVMJIT>>
+    PytorchLLVMJITCache::jit_cache_;
+std::mutex PytorchLLVMJITCache::mutex_;
+
+PytorchLLVMJIT* PytorchLLVMJITCache::getPytorchLLVMJITInstance(
+    c10::optional<std::string> triple,
+    c10::optional<std::string> cpu,
+    c10::optional<std::string> attrs) {
+  std::string cacheKey = getCacheKey(triple, cpu, attrs);
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto it = jit_cache_.find(cacheKey);
+  if (it != jit_cache_.end()) {
+    return it->second.get();
+  }
+  llvm::InitializeAllTargets();
+  llvm::InitializeAllTargetMCs();
+  llvm::InitializeAllAsmPrinters();
+  auto jit = std::make_unique<PytorchLLVMJIT>(triple, cpu, attrs);
+  auto jit_to_return = jit.get();
+  jit_cache_[cacheKey] = std::move(jit);
+  return jit_to_return;
+}
+
+std::string PytorchLLVMJITCache::getCacheKey(
+    c10::optional<std::string> triple,
+    c10::optional<std::string> cpu,
+    c10::optional<std::string> attrs) {
+  return "triple:" + std::string(triple ? *triple : "") +
+      "cpu:" + std::string(cpu ? *cpu : "") +
+      "attrs:" + std::string(attrs ? *attrs : "");
+}
 
 } // end namespace orc
 } // end namespace llvm
