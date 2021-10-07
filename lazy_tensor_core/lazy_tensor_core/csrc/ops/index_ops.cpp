@@ -15,6 +15,7 @@
 #include "lazy_tensor_core/csrc/ops/permute.h"
 #include "lazy_tensor_core/csrc/ops/scalar.h"
 #include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
+#include "lazy_tensor_core/csrc/tensor_aten_ops.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/permutation_util.h"
@@ -142,9 +143,9 @@ std::vector<LazyTensor> WrapIndicesOnce(
                                             base.GetDevice()),
         base.GetDevice());
     LazyTensor wrap_cond =
-        LazyTensor::lt(indices[dim_idx], at::Scalar(int64_t(0)));
+        tensor_aten_ops::lt(indices[dim_idx], at::Scalar(int64_t(0)));
     canonical_indices.push_back(
-        LazyTensor::where(wrap_cond, wrapped_dim_index, dim_index));
+        tensor_aten_ops::where(wrap_cond, wrapped_dim_index, dim_index));
   }
   return canonical_indices;
 }
@@ -221,7 +222,8 @@ LazyTensor IndexByTensors(const LazyTensor& base,
       canonical_indices.front().shape().get().rank();
   // Stack the indices to allow the whole multi-indexing to be dispatched with a
   // single gather.
-  LazyTensor indices_nd = LazyTensor::stack(canonical_indices, indices_rank);
+  LazyTensor indices_nd =
+      tensor_aten_ops::stack(canonical_indices, indices_rank);
   return LazyTensor::Create(
       ir::MakeNode<ir::ops::IndexGet>(base.GetIrValue(),
                                       indices_nd.GetIrValue(), start_dim),
@@ -240,7 +242,8 @@ ir::Value IndexPutByTensors(
       canonical_indices.front().shape().get().rank();
   // Stack the indices to allow the whole multi-indexing to be dispatched with a
   // single scatter.
-  LazyTensor indices_nd = LazyTensor::stack(canonical_indices, indices_rank);
+  LazyTensor indices_nd =
+      tensor_aten_ops::stack(canonical_indices, indices_rank);
   return ir::MakeNode<ir::ops::Permute>(
       ir::MakeNode<ir::ops::IndexPut>(base.GetIrValue(),
                                       indices_nd.GetIrValue(), start_dim,

@@ -14,6 +14,7 @@
 #include "lazy_tensor_core/csrc/ir_dump_util.h"
 #include "lazy_tensor_core/csrc/ir_util.h"
 #include "lazy_tensor_core/csrc/python_util.h"
+#include "lazy_tensor_core/csrc/tensor_aten_ops.h"
 #include "lazy_tensor_core/csrc/tensor_impl.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensor_core/csrc/torch_util.h"
@@ -367,7 +368,7 @@ py::object LtcNms(const at::Tensor& boxes, const at::Tensor& scores,
   at::Tensor num_valid;
   {
     NoGilSection nogil;
-    auto nms_result = LazyTensor::nms(
+    auto nms_result = tensor_aten_ops::nms(
         bridge::GetLtcTensor(boxes), bridge::GetLtcTensor(scores),
         bridge::GetLtcTensor(score_threshold),
         bridge::GetLtcTensor(iou_threshold), output_size);
