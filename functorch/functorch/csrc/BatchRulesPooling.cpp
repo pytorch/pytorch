@@ -67,6 +67,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   EXISTING_BDIM(_adaptive_avg_pool2d);
   EXISTING_BDIM(avg_pool2d);
   m.impl("max_pool2d_with_indices_backward", max_pool2d_with_indices_backward_plumbing);
+  EXISTING_BDIM_ALL_BOXED(avg_pool2d_backward);
 }
 
 }}
