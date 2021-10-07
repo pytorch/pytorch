@@ -2535,13 +2535,29 @@ def isnan(g, input):
     output = g.op("IsNaN", input)
     return output
 
-def _any(g, input):
+def _any(g, *args):
+    # aten::any(Tensor self)
+    if len(args) == 1:
+        input = args[0]
+        dim, keepdim = None, 0
+    # aten::any(Tensor self, int dim, bool keepdim)
+    else:
+        input, dim, keepdim = args
+        dim = [_parse_arg(dim, "i")]
+        keepdim = _parse_arg(keepdim, "i")
     input = _cast_Long(g, input, False)  # type: ignore[name-defined]
-    input_sum = sym_help._reducesum_helper(g, input, keepdims_i=0)
+    input_sum = sym_help._reducesum_helper(g, input,
+                                           axes_i=dim, keepdims_i=keepdim)
     return gt(g, input_sum, g.op("Constant", value_t=torch.LongTensor([0])))
 
-def _all(g, input):
-    return g.op("Not", _any(g, g.op("Not", input)))
+def _all(g, *args):
+    input = g.op("Not", args[0])
+    # aten::all(Tensor self)
+    if len(args) == 1:
+        return g.op("Not", _any(g, input))
+    # aten::all(Tensor self, int dim, bool keepdim)
+    else:
+        return g.op("Not", _any(g, input, args[1], args[2]))
 
 
 @parse_args("v", "i", "i", "i")
