@@ -544,10 +544,7 @@ class TestGradients(TestCase):
                 if is_iterable_of_tensors(sample.input):
                     n = len(sample.input)
                     inputs = (inputs[:n], *inputs[n:])
-                print(inputs[0].size())
-                print("inputs: ", inputs)
                 output = op.gradcheck_wrapper(variant, *inputs, **sample.kwargs)
-                print("nice")
                 if sample.output_process_fn_grad is not None:
                     return sample.output_process_fn_grad(output)
                 return output
