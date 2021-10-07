@@ -397,7 +397,7 @@ filegroup(
 )
 
 filegroup(
-    name = "thc_srcs_cu",
+    name = "thc_cu_srcs",
     srcs = [
         "aten/src/THC/THCSleep.cu",
         "aten/src/THC/THCStorage.cu",
@@ -406,7 +406,7 @@ filegroup(
 )
 
 filegroup(
-    name = "aten_srcs_cu",
+    name = "aten_cu_srcs",
     srcs = [
         "aten/src/ATen/cuda/detail/IndexUtils.cu",
         "aten/src/ATen/native/cuda/Activation.cu",
@@ -697,8 +697,8 @@ torch_cuda_half_options = [
 cu_library(
     name = "aten_cuda",
     srcs = if_cuda([
-        ":aten_srcs_cu",
-        ":thc_srcs_cu",
+        ":aten_cu_srcs",
+        ":thc_cu_srcs",
     ]),
     copts = ATEN_COPTS + torch_cuda_half_options,
     visibility = ["//visibility:public"],
@@ -1964,7 +1964,6 @@ cc_library(
     deps = [
         ":caffe2",
         ":torch_headers",
-        "@pybind11",
     ] + if_cuda([
         ":torch_distributed_cuda",
         "@cuda//:nvToolsExt",
@@ -2006,6 +2005,7 @@ cc_library(
     deps = [
         ":shm",
         ":torch",
+        "@pybind11",
     ],
 )
 
