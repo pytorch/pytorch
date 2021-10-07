@@ -11,7 +11,7 @@ at::Tensor _make_dual(const at::Tensor& primal, const at::Tensor& tangent, int64
               "already has a forward gradient at the same level ", level, " is not supported.");
 
   auto dual_tensor = primal.view(primal.sizes());
-  dual_tensor._set_fw_grad(tangent, level, /* is_inplace_op */ false);
+  dual_tensor._set_fw_grad(tangent, level, /* is_inplace_op */ false, /* is_make_dual */ true);
   return dual_tensor;
 }
 

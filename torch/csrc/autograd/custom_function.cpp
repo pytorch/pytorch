@@ -143,7 +143,7 @@ void _process_forward_mode_AD(const variable_list &inputs,
       } else {
         // If that Tensor didn't had gradients already, set the newly returned one
         // We could also use inputs[inp_idx] here as it is the same as out
-        out._set_fw_grad(out_grad, level, /* is_inplace_op */ true);
+        out._set_fw_grad(out_grad, level, /* is_inplace_op */ true, /* is_make_dual */ false);
       }
     } else {
       // At this point, outputs[i] cannot be one of the input (raw_outputs[i] might be but was changed by the backward code)
@@ -181,14 +181,14 @@ void _process_forward_mode_AD(const variable_list &inputs,
             // To ensure that we maintain the view/inplace constraints, we consider this as an inplace op
             // This case CANNOT happen in codegen as all view ops are mapping from one Tensor to one Tensor and so the output
             // of the view cannot have a forward grad if the base does not.
-            out._set_fw_grad(out_grad, level, /* is_inplace_op */ true);
+            out._set_fw_grad(out_grad, level, /* is_inplace_op */ true, /* is_make_dual */ false);
             return;
           }
 
         }
       }
 
-      out._set_fw_grad(out_grad, level, /* is_inplace_op */ false);
+      out._set_fw_grad(out_grad, level, /* is_inplace_op */ false, /* is_make_dual */ false);
     }
   }
 }

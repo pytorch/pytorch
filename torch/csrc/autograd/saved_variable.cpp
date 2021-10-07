@@ -205,7 +205,7 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   if (fw_grad_ && !fw_grad_->empty()) {
     // TODO(albanD) This needs to be updated when moving to multiple levels
     auto new_fw_grad = fw_grad_->value(/* level */ 0);
-    var._set_fw_grad(new_fw_grad, /* level */ 0, /* is_inplace_op */ false);
+    var._set_fw_grad(new_fw_grad, /* level */ 0, /* is_inplace_op */ false, /* is_make_dual */ false);
   }
 
   return var;

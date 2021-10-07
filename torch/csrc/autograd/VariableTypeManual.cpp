@@ -145,7 +145,7 @@ Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool n
     } else {
       new_fw_grad = src_fw_grad;
     }
-    self._set_fw_grad(new_fw_grad, /* level */ 0, /* is_inplace_op */ true);
+    self._set_fw_grad(new_fw_grad, /* level */ 0, /* is_inplace_op */ true,  /* is_make_dual */ false);
   }
 
   return self;

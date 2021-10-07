@@ -431,8 +431,8 @@ class TORCH_API Tensor: public TensorBase {
   /// Note that the given new_grad might not be used directly if it has different
   /// metadata (size/stride/storage offset) compared to this Tensor. In that case,
   /// new_grad content will be copied into a new Tensor
-  void _set_fw_grad(const TensorBase& new_grad, uint64_t level, bool is_inplace_op) const {
-    impl_->_set_fw_grad(new_grad, *this, level, is_inplace_op);
+  void _set_fw_grad(const TensorBase& new_grad, uint64_t level, bool is_inplace_op, bool is_make_dual) const {
+    impl_->_set_fw_grad(new_grad, *this, level, is_inplace_op, is_make_dual);
   }
 
 
