@@ -16,8 +16,8 @@ except ImportError:
     from yaml import SafeDumper as Dumper  # type: ignore[misc]
 YamlDumper = Dumper
 
-# A custom loader for YAML to let us also keep track of line numbers
-# of each entry in the YAML file, and error on duplicate keys in the yaml.
+# A custom loader for YAML that errors on duplicate keys.
+# This doesn't happen by default: see https://github.com/yaml/pyyaml/issues/165
 class YamlLoader(Loader):
     def construct_mapping(self, node, deep=False):  # type: ignore[no-untyped-def]
         mapping = []
