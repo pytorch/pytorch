@@ -26,11 +26,14 @@ login() {
     docker login -u AWS --password-stdin "$1"
 }
 
-# Retry on timeouts (can happen on job stampede).
-retry login "${registry}"
 
-# Logout on exit
-trap "docker logout ${registry}" EXIT
+# Only run these steps if not on github actions
+if [[ -n "${GITHUB_ACTIONS}" ]]; then
+  # Retry on timeouts (can happen on job stampede).
+  retry login "${registry}"
+  # Logout on exit
+  trap "docker logout ${registry}" EXIT
+fi
 
 # export EC2=1
 # export JENKINS=1
