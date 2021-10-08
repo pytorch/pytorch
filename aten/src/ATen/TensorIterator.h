@@ -9,6 +9,7 @@
 #include <ATen/core/TensorBase.h>
 #include <ATen/TensorMeta.h>
 
+#include <array>
 #include <bitset>
 
 namespace at {
@@ -75,16 +76,16 @@ constexpr int64_t GRAIN_SIZE = 32768;
 
 // Storage for a non-owning Tensor, without needing to include Tensor.h
 class TORCH_API OpaqueOptionalTensorRef {
-  alignas(alignof(TensorBase)) char data_[sizeof(TensorBase)];
+  alignas(alignof(TensorBase)) std::array<char, sizeof(TensorBase)> data_;
 public:
   OpaqueOptionalTensorRef();
   ~OpaqueOptionalTensorRef();
 
   OptionalTensorRef* get() {
-    return reinterpret_cast<OptionalTensorRef*>(&data_[0]);
+    return reinterpret_cast<OptionalTensorRef*>(data_.data());
   }
   const OptionalTensorRef* get() const {
-    return reinterpret_cast<const OptionalTensorRef*>(&data_[0]);
+    return reinterpret_cast<const OptionalTensorRef*>(data_.data());
   }
 
   OptionalTensorRef& operator*() { return *get(); }
