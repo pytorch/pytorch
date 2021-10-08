@@ -4,6 +4,7 @@
 #include <ATen/CUDAGeneratorImpl.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/codegen/cuda/executor_utils.h>
 #include <torch/csrc/jit/codegen/fuser/cuda/resource_strings.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
@@ -45,18 +46,9 @@ class ScopedVarName {
   VarPtr var_ = nullptr;
 };
 
-static int as_int(ExprPtr expr) {
-  auto v = to<IntImm>(expr);
-  if (!v) {
-    throw malformed_input(
-        "cuda_codegen: non Int expr interpreted as int", expr);
-  }
-
-  return v->value();
-}
-
 static bool is_zero(ExprPtr expr) {
-  return as_int(expr) == 0;
+  auto v = intValue(expr);
+  return v && *v == 0;
 }
 
 static const at::cuda::NVRTC& nvrtc() {
@@ -107,6 +99,8 @@ std::string CudaPrinter::dtypeToCppString(const Dtype& dtype) {
       return "bool";
     case ScalarType::Half:
       return "half";
+    case ScalarType::BFloat16:
+      return "__nv_bfloat16";
     case ScalarType::Char:
       return "char";
     case ScalarType::Byte:
@@ -222,11 +216,11 @@ void CudaPrinter::print_flat_alloc(AllocatePtr alloc) {
   // TODO: this should be merged with the storage flattener.
   int64_t flat_size = 1;
   for (auto dim : dims) {
-    IntImmPtr dim_i = to<IntImm>(dim);
+    auto dim_i = intValue(dim);
     if (dim_i) {
-      flat_size *= dim_i->value();
+      flat_size *= *dim_i;
     } else {
-      throw std::runtime_error("Only IntImm dimensions are supported for now");
+      throw std::runtime_error("Only integer dimensions are supported for now");
     }
   }
   os() << dtypeToCppString(alloc->dtype()) << " " << (*alloc->buffer_var())
@@ -260,20 +254,15 @@ void CudaPrinter::visit(ForPtr v) {
 }
 
 void CudaPrinter::visit(CastPtr v) {
-  if (v->dtype().scalar_type() == ScalarType::Half) {
-    os() << "__float2half(";
-    v->src_value()->accept(this);
-    os() << ")";
-    return;
-  } else if (v->src_value()->dtype().scalar_type() == ScalarType::Half) {
-    os() << "__half2float(";
-    v->src_value()->accept(this);
-    os() << ")";
-    return;
-  }
-
-  os() << "(" << dtypeToCppString(v->dtype()) << ")";
-  os() << "(";
+  std::string castFn = v->dtype().scalar_type() == ScalarType::Half
+      ? "__float2half"
+      : v->dtype().scalar_type() == ScalarType::BFloat16 ? "__float2bfloat16"
+      : v->src_value()->dtype().scalar_type() == ScalarType::Half
+      ? "__half2float"
+      : v->src_value()->dtype().scalar_type() == ScalarType::BFloat16
+      ? "__bfloat162float"
+      : ("(" + dtypeToCppString(v->dtype()) + ")");
+  os() << castFn << "(";
   v->src_value()->accept(this);
   os() << ")";
 }
@@ -329,7 +318,8 @@ void CudaPrinter::visit(LoadPtr v) {
     return;
   }
   if (v->dtype().scalar_type() == ScalarType::Bool ||
-      v->dtype().scalar_type() == ScalarType::Half) {
+      v->dtype().scalar_type() == ScalarType::Half ||
+      v->dtype().scalar_type() == ScalarType::BFloat16) {
     // There's no __ldg overload for bool or half.
     os() << *v->base_handle() << "[" << *v->flat_index() << "]";
     return;
@@ -519,7 +509,7 @@ void CudaPrinter::visit(BlockPtr v) {
 
 void CudaPrinter::visit(LetPtr v) {
   emitIndent();
-  os() << dtypeToCppString(v->dtype());
+  os() << dtypeToCppString(v->var()->dtype());
   os() << " " << *v->var() << " = ";
   v->value()->accept(this);
   os() << ";" << std::endl;
@@ -832,7 +822,7 @@ StmtPtr GPUMetaVarRewriter::mutate(BlockPtr v) {
     bool need_sync = false;
     // We never mask loops, they'll mask their contents.
     if (!segment.mask()) {
-      TORCH_INTERNAL_ASSERT(segment.stmts().size() == 1);
+      TORCH_INTERNAL_ASSERT(segment.stmts().size() == 1, buildErrorMessage());
       stmts.push_back(segment.stmts()[0]);
       continue;
     }
@@ -936,7 +926,7 @@ void CudaCodeGen::Initialize() {
   HalfChecker halfChecker(buffer_args());
   stmt_v->accept(&halfChecker);
 
-#if __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 #if ROCM_VERSION < 40200
   os() << "#include <hip/hip_runtime.h>" << std::endl;
   if (halfChecker.hasHalf()) {
@@ -953,10 +943,13 @@ void CudaCodeGen::Initialize() {
   if (halfChecker.hasHalf()) {
     os() << fuser::cuda::half_support_literal << std::endl;
   }
+  if (halfChecker.hasBFloat16()) {
+    os() << fuser::cuda::bfloat16_support_literal << std::endl;
+  }
 
   std::string func_name = GetUniqueFuncName(kernel_func_name());
   os() << "extern \"C\" __global__" << std::endl;
-#ifdef USE_ROCM
+#if defined(USE_ROCM)
   // CUDA has a default limit of threads per block (=flat work group size)
   // of 1024, but ROCm uses 256 by default. At the time of writing
   // (#45506), I am unaware of a stricter limit that TensorExpr imposes
@@ -1041,6 +1034,29 @@ void CudaCodeGen::Initialize() {
     }
   }
 
+  // Precompute block and thread extents for call_with_numel().  If
+  // precomputation can't be done (block/thread extents aren't
+  // constant), then disallow call_with_numel.
+  auto block_extents = metavar_rewriter_->gpu_block_extents();
+  auto thread_extents = metavar_rewriter_->gpu_thread_extents();
+  bool canCallWithNumel =
+      !has_random_ && block_extents.size() > 0 && thread_extents.size() > 0;
+  for (size_t i = 1; i < block_extents.size() && canCallWithNumel; i++) {
+    canCallWithNumel = canCallWithNumel && block_extents[i]->isConstant() &&
+        immediateAs<int>(block_extents[i]) == 1;
+  }
+  for (size_t i = 1; i < thread_extents.size() && canCallWithNumel; i++) {
+    canCallWithNumel = canCallWithNumel && thread_extents[i]->isConstant() &&
+        immediateAs<int>(thread_extents[i]) == 1;
+  }
+  if (canCallWithNumel && thread_extents[0]->isConstant()) {
+    // We assume block_extents[0] is output.numel()/thread_block_size_.
+    thread_block_size_ = immediateAs<int>(thread_extents[0]);
+  } else {
+    // Disable call_with_numel.
+    thread_block_size_ = -1;
+  }
+
   GRAPH_DEBUG(
       "Fused TE CUDA kernel:\n",
       oss_.str(),
@@ -1053,6 +1069,59 @@ void CudaCodeGen::Initialize() {
       ")");
 
   CompileToNVRTC(oss_.str(), func_name);
+}
+
+void CudaCodeGen::call_with_numel(void** args, int64_t numel) {
+  if (C10_UNLIKELY(numel == 0)) {
+    return;
+  }
+  if (C10_UNLIKELY(thread_block_size_ <= 0)) {
+    TORCH_INTERNAL_ASSERT(
+        thread_block_size_ >= 0,
+        "call_with_numel() requires a precomputed thread block size");
+  }
+
+  auto const& buffer_args = this->buffer_args();
+  size_t gpu_block_extents =
+      (numel + thread_block_size_ - 1) / thread_block_size_;
+  size_t gpu_thread_extents = thread_block_size_;
+
+  // In CUDA we need to pass pointers to pointers for buffers, thus we need to
+  // go over args and add an extra indirection for such non-scalar
+  // arguments.
+  // Why? See some details here:
+  // https://stackoverflow.com/questions/34388712/cannot-understand-how-jcuda-culaunchkernel-work
+  std::vector<void*> ptr_to_args(buffer_args.size());
+  for (size_t i = 0; i < buffer_args.size(); i++) {
+    ptr_to_args[i] =
+        // NOLINTNEXTLINE: const_cast
+        buffer_args[i].isVar() ? args[i] : const_cast<void**>(&args[i]);
+  }
+
+  const auto device = this->device().index();
+  const auto prior_device = at::cuda::current_device();
+  if (prior_device != device) {
+    at::cuda::set_device(device);
+  }
+
+  auto stream = at::cuda::getCurrentCUDAStream();
+  fuser::cuda::executor_utils::initializeCudaContext();
+  AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernel(
+      function_,
+      gpu_block_extents,
+      1,
+      1,
+      gpu_thread_extents,
+      1,
+      1,
+      0,
+      stream,
+      ptr_to_args.data(),
+      nullptr));
+
+  if (prior_device != device) {
+    at::cuda::set_device(prior_device);
+  }
 }
 
 void CudaCodeGen::call_raw(const std::vector<void*>& raw_args) {
@@ -1146,6 +1215,7 @@ void CudaCodeGen::call_raw(const std::vector<void*>& raw_args) {
   }
   // Launch the kernels
   auto stream = at::cuda::getCurrentCUDAStream();
+  fuser::cuda::executor_utils::initializeCudaContext();
   AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernel(
       function_,
       gpu_block_extents_v[0],
@@ -1195,21 +1265,12 @@ at::Tensor CudaCodeGen::empty_strided(
 void CudaCodeGen::CompileToNVRTC(
     const std::string& code,
     const std::string& func_name) {
-  CUcontext pctx = nullptr;
-  AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxGetCurrent(&pctx));
+  fuser::cuda::executor_utils::initializeCudaContext();
   // Note: hacked at::DeviceGuard since at::DeviceGuard was failing to work
   // properly in some scenarios
   auto prior_device = at::cuda::current_device();
   if (prior_device != this->device().index()) {
     at::cuda::set_device(this->device().index());
-  }
-  // cudaSetDevice does not have to really change the underlying device if it
-  // doesn't have to, so calling cudaFree to force that change
-  if (!pctx) {
-    std::unique_lock<std::mutex> cudaFreeMutexLock(
-        *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
-    cudaFree(nullptr);
-    AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxGetCurrent(&pctx));
   }
   // Acquires device and NVRTC properties (for compile arch and occupancy
   // calculations)
@@ -1226,14 +1287,14 @@ void CudaCodeGen::CompileToNVRTC(
   AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcCreateProgram(
       &program, code.c_str(), nullptr, 0, nullptr, nullptr));
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
   std::vector<const char*> args = {"--std=c++14"};
 #if ROCM_VERSION >= 40200
   args.push_back("-hip-pch");
 #endif
 #else
   const std::string compute = std::string("--gpu-architecture=") +
-#if CUDA_VERSION >= 11010
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
       // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
       // which gives better backwards compatibility to work on older driver,
       // (since older driver doesn't necessrily recognize PTX emitted by new
@@ -1272,7 +1333,7 @@ void CudaCodeGen::CompileToNVRTC(
   size_t ptx_size;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<char> ptx;
-#if CUDA_VERSION >= 11010
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
   // compile_to_sass determines whether we are generating SASS or PTX, hence
   // the different API.
   auto getSize = compile_to_sass

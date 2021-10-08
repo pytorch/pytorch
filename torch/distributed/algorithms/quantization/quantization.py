@@ -10,7 +10,12 @@ TORCH_HALF_MIN = torch.finfo(torch.float16).min
 TORCH_HALF_MAX = torch.finfo(torch.float16).max
 
 class DQuantType(Enum):
-    FP16 = "fp16"
+    """
+    Different quantization methods for auto_quantize API are identified here.
+    auto_quantize API currently supports fp16 and bfp16 methods.
+    """
+    FP16 = "fp16",
+    BFP16 = "bfp16"
 
     def __str__(self) -> str:
         return self.value
@@ -26,6 +31,8 @@ def _quantize_tensor(tensor, qtype):
         )
     if (qtype == DQuantType.FP16):
         return _fp32_to_fp16_with_clamp(tensor)
+    elif (qtype == DQuantType.BFP16):
+        return torch.ops.q._FloatToBfloat16Quantized(tensor)
     else:
         raise RuntimeError(
             f'Quantization type {qtype} is not supported'
@@ -38,13 +45,8 @@ def _quantize_tensor_list(tensor_list, qtype):
         raise RuntimeError(
             f"_quantize_tensor_list expecting list of torch.Tensor as input but found {type(tensor_list)}"
         )
-    if (qtype == DQuantType.FP16):
-        quantized_tensor_list = [_quantize_tensor(t, qtype) for t in tensor_list]
-        return quantized_tensor_list
-    else:
-        raise RuntimeError(
-            f'Quantization type {qtype} is not supported'
-        )
+    quantized_tensor_list = [_quantize_tensor(t, qtype) for t in tensor_list]
+    return quantized_tensor_list
 
 def _dequantize_tensor(tensor, qtype, quant_loss=None):
     if not isinstance(tensor, torch.Tensor):
@@ -60,6 +62,13 @@ def _dequantize_tensor(tensor, qtype, quant_loss=None):
             return tensor.float()
         else:
             return tensor.float() / quant_loss
+    elif (qtype == DQuantType.BFP16):
+        if tensor.dtype != torch.float16:
+            raise RuntimeError(
+                f"tensor dtype is {tensor.dtype} while expected to be FP16."
+            )
+        else:
+            return torch.ops.q._Bfloat16QuantizedToFloat(tensor)
     else:
         raise RuntimeError(
             f'Quantization type {qtype} is not supported'
@@ -73,13 +82,8 @@ def _dequantize_tensor_list(tensor_list, qtype, quant_loss=None):
         raise RuntimeError(
             f"_dequantize_tensor_list expecting list of torch.Tensor as input but found {type(tensor_list)}"
         )
-    elif (qtype == DQuantType.FP16):
-        dequantized_tensor_list = [_dequantize_tensor(t, qtype) for t in tensor_list]
-        return dequantized_tensor_list
-    else:
-        raise RuntimeError(
-            f'Quantization type {qtype} is not supported'
-        )
+    dequantized_tensor_list = [_dequantize_tensor(t, qtype) for t in tensor_list]
+    return dequantized_tensor_list
 
 
 def auto_quantize(func, qtype, quant_loss=None):
@@ -87,8 +91,9 @@ def auto_quantize(func, qtype, quant_loss=None):
     This is a prototype API that automatically quantize the input tensors, choose the precision types, and
     pass other necessary arguments and then dequantizes the output.
     Currently it only supports:
-        . FP16 quantization method
+        . FP16 and BFP16 quantization method supported for gloo and nccl backends
         . all_gather, all_to_all collective ops
+    Note: BFP16 only supports 2D tensors.
     Args:
         func (callable): A function representing collective operations.
         qtype (QuantType): Quantization method
@@ -120,6 +125,16 @@ def auto_quantize(func, qtype, quant_loss=None):
             for i, t in enumerate(_dequantize_tensor_list(out_tensors, qtype, quant_loss=quant_loss)):
                 tensors[i] = t
 
+        elif (func == dist.all_to_all_single):
+            tensors = args[0]
+            out_splits = kwargs.get('out_splits', None)
+            in_splits = kwargs.get('in_splits', None)
+            # Quantizing the input/output tensor
+            input_tensors = _quantize_tensor(args[1], qtype)
+            out_tensors = _quantize_tensor(tensors, qtype)
+            dist.all_to_all_single(out_tensors, input_tensors, out_splits, in_splits, group=group)
+            for i, t in enumerate(_dequantize_tensor(out_tensors, qtype, quant_loss=quant_loss)):
+                tensors[i] = t
         else:
             raise RuntimeError(
                 f"The collective op {func} is not supported yet"

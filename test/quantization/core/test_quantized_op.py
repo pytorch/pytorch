@@ -26,7 +26,7 @@ from torch.testing._internal.common_quantization import skipIfNoFBGEMM, skipIfNo
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine, supported_qengines, override_qengines, _snr
 from torch.testing._internal.common_quantized import qengine_is_qnnpack
-from torch.quantization import PerChannelMinMaxObserver
+from torch.ao.quantization import PerChannelMinMaxObserver
 
 from typing import Optional
 
@@ -1596,56 +1596,40 @@ class TestQuantizedOps(TestCase):
                                  msg=error_message.format(name + '.zero_point', scale,
                                  X_hat.q_zero_point()))
 
-    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
-                                              min_side=1, max_side=10),
-                       qparams=hu.qparams()),
-           k=st.integers(1, 10),
-           dim=st.integers(1, 4),
-           largest=st.booleans(),
-           sorted=st.booleans())
-    def test_qtopk(self, X, k, dim, largest, sorted):
-        X, (scale, zero_point, torch_type) = X
-        qX = torch.quantize_per_tensor(torch.from_numpy(X), scale, zero_point, torch_type)
-        assume(dim < X.ndim)
-        assume(k < X.shape[dim])
+    def test_qtopk(self):
+        x_dims = [3, 4]  # Num elements in the shape
+        sides = [3, 5]  # Side of the tensor generated
+        dims = [0, 1, 2, 3]  # dimension over which to perform topk
+        largest = [False, True]  # Return largest or smallest element
+        sorted = [False, True]  # Return sorted or not
+        dtypes = [torch.qint8, torch.quint8]
+        is_nhwc = [False, True]  # Is input in the NHWC format?
 
-        unquantized_out = torch.topk(qX.dequantize(), k, dim=dim, largest=largest, sorted=sorted)
+        test_cases = itertools.product(x_dims, sides, dims, largest, sorted, dtypes, is_nhwc)
+        k = 2
+        for x_dim, side, dim, larg, sort, dtype, nhwc in test_cases:
+            if nhwc and x_dim != 4:  # NHWC requires 4 dimensions
+                continue
+            if dim >= x_dim:  # Dimension to find top-k for should exist
+                continue
+            shape = [side] * x_dim
+            X, scale, zp = _get_random_tensor_and_q_params(shape, 1.0, dtype)
+            qX = torch.quantize_per_tensor(X, scale, zp, dtype)
 
-        values = torch.quantize_per_tensor(torch.from_numpy(X), scale, zero_point, torch_type)
-        indices = torch.tensor(torch.from_numpy(X)).long()
+            if nhwc:
+                qX = qX.permute([0, 3, 1, 2])
+                X = np.transpose(X, [0, 3, 1, 2])
 
-        quantized_out = torch.topk(qX, k, dim=dim, largest=largest, sorted=sorted)
+            unquantized_out = torch.topk(qX.dequantize(), k, dim=dim, largest=larg, sorted=sort)
 
-        assert(len(unquantized_out) == len(quantized_out))
-        torch.testing.assert_close(quantized_out[0].dequantize(), unquantized_out[0])
-        torch.testing.assert_close(quantized_out[1], unquantized_out[1])
+            values = torch.quantize_per_tensor(X, scale, zp, dtype)
+            indices = torch.tensor(X).long()
 
-    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
-                                              min_side=1, max_side=10),
-                       qparams=hu.qparams()),
-           k=st.integers(1, 10),
-           dim=st.integers(1, 4),
-           largest=st.booleans(),
-           sorted=st.booleans())
-    def test_qtopk_nhwc(self, X, k, dim, largest, sorted):
-        # X is NHWC, we permute to view as NCHW but keep NHWC in memory
-        X, (scale, zero_point, torch_type) = X
-        qX = torch.quantize_per_tensor(torch.from_numpy(X), scale, zero_point, torch_type).permute([0, 3, 1, 2])
-        X = np.transpose(X, [0, 3, 1, 2])
-        assume(dim < X.ndim)
-        assume(k < X.shape[dim])
+            quantized_out = torch.topk(qX, k, dim=dim, largest=larg, sorted=sort)
 
-        unquantized_out = torch.topk(qX.dequantize(), k, dim=dim, largest=largest, sorted=sorted)
-
-        values = torch.quantize_per_tensor(torch.from_numpy(X), scale, zero_point, torch_type)
-        indices = torch.tensor(torch.from_numpy(X)).long()
-
-        quantized_out = torch.topk(qX, k, dim=dim, largest=largest, sorted=sorted)
-
-        assert(len(unquantized_out) == len(quantized_out))
-        torch.testing.assert_close(quantized_out[0].dequantize(), unquantized_out[0])
-        torch.testing.assert_close(quantized_out[1], unquantized_out[1])
-
+            assert(len(unquantized_out) == len(quantized_out))
+            torch.testing.assert_close(quantized_out[0].dequantize(), unquantized_out[0])
+            torch.testing.assert_close(quantized_out[1], unquantized_out[1])
 
     """Tests quantize concatenation (both fused and not)."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
@@ -2414,6 +2398,9 @@ class TestQuantizedOps(TestCase):
         custom_module_config = {
             'float_to_observed_custom_module_class': {
                 torch.nn.LSTM: torch.nn.quantizable.LSTM
+            },
+            'observed_to_quantized_custom_module_class': {
+                torch.nn.quantizable.LSTM: torch.nn.quantizable.LSTM
             }
         }
 
@@ -2449,8 +2436,8 @@ class TestQuantizedOps(TestCase):
                 y_ref = lstm(x)
 
                 # Prepare
-                lstm.qconfig = torch.quantization.get_default_qconfig(qengine)
-                lstm_prepared = torch.quantization.prepare(
+                lstm.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
+                lstm_prepared = torch.ao.quantization.prepare(
                     lstm, prepare_custom_config_dict=custom_module_config)
                 self.assertTrue(hasattr(lstm_prepared[0], 'layers'))
                 self.assertEqual(num_layers, len(lstm_prepared[0].layers))
@@ -2460,7 +2447,8 @@ class TestQuantizedOps(TestCase):
                 self.assertEqual(y_ref, y)
 
                 # Quantize
-                lstm_quantized = torch.quantization.convert(lstm_prepared)
+                lstm_quantized = torch.ao.quantization.convert(
+                    lstm_prepared, convert_custom_config_dict=custom_module_config)
                 qy = lstm_quantized(qx)
 
                 snr = _snr(y, qy)
@@ -2471,6 +2459,13 @@ class TestQuantizedOps(TestCase):
                         power > min_power or mse < max_mse,
                         msg=(f"Error is too high: SNR(dB): {power}, "
                              f"Signal: {signal}, MSE: {mse}"))
+
+                # Trace
+                jit_qmodule = torch.jit.trace(lstm_quantized, qx)
+
+                # Script
+                # TODO: Fix the scripting in the torch/nn/quantizable/modules/rnn.py
+                # jit_qmodule = torch.jit.script(lstm_quantized)
 
     @override_qengines
     def test_custom_module_multi_head_attention(self):
@@ -2552,8 +2547,8 @@ class TestQuantizedOps(TestCase):
                     mha.eval()
 
                     # Prepare
-                    mha.qconfig = torch.quantization.get_default_qconfig(qengine)
-                    mha_prepared = torch.quantization.prepare(
+                    mha.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
+                    mha_prepared = torch.ao.quantization.prepare(
                         mha, prepare_custom_config_dict=custom_module_config)
 
                     # Calibrate
@@ -2564,7 +2559,7 @@ class TestQuantizedOps(TestCase):
                     self.assertEqual(y_ref[1], y[1])  # Weight
 
                     # Quantize
-                    mha_quantized = torch.quantization.convert(
+                    mha_quantized = torch.ao.quantization.convert(
                         mha_prepared,
                         convert_custom_config_dict=custom_module_config)
                     qy = mha_quantized(*q_data)
@@ -2602,7 +2597,6 @@ class TestDynamicQuantizedLinear(TestCase):
     def test_qlinear(self, batch_size, input_channels, output_channels,
                      use_bias, use_relu, use_multi_dim_input, use_channelwise, reduce_range):
         if torch.backends.quantized.engine == 'qnnpack':
-            use_relu = False
             reduce_range = False
 
         qlinear_prepack = torch.ops.quantized.linear_prepack
@@ -2779,6 +2773,38 @@ class TestDynamicQuantizedLinear(TestCase):
         self.assertEqual(Y_fp32, Y_fp32_ref,
                          msg="torch.ops.quantized.fbgemm_linear_dynamic results are off")
 
+    @skipIfNoFBGEMM
+    def test_qlinear_dynamic_fp16(self):
+
+        options = itertools.product(
+            (2, 4),         # batch_size
+            (4, 5, 12),     # input_channels
+            (4, 7, 8),      # output_channels
+            (True, False),  # use_bias
+            (True, False),  # use_relu
+        )
+        for batch_size, input_channels, output_channels, use_bias, use_relu in options:
+            qlinear_prepack = torch.ops.quantized.linear_prepack_fp16
+            if use_relu:
+                qlinear_dynamic = torch.ops.quantized.linear_relu_dynamic_fp16
+            else:
+                qlinear_dynamic = torch.ops.quantized.linear_dynamic_fp16
+
+            x = torch.randn(batch_size, input_channels)
+            w = torch.randn(output_channels, input_channels)
+            bias = torch.randn(output_channels) if use_bias else None
+
+            w_packed = qlinear_prepack(w, bias)
+            out = qlinear_dynamic(x, w_packed)
+
+            # qlinear_dynamic_fp16 uses FP32 activation tensors and FP16 weight tensors
+            # output is FP32
+            w_fp16 = w.to(torch.float16).to(torch.float32)
+            ref = F.linear(x, w_fp16, bias)
+            if use_relu:
+                ref.relu_()
+
+            self.assertEqual(out, ref)
 
 class TestDynamicQuantizedRNNOp(TestCase):
     """Tests the correctness of the dynamic quantized lstm/gru."""
@@ -3314,6 +3340,9 @@ class TestQuantizedEmbeddingOps(TestCase):
         if bit_rate == 4:
             pt_op = torch.ops.quantized.embedding_bag_4bit_rowwise_offsets
             pt_prepack_op = torch.ops.quantized.embedding_bag_4bit_prepack
+        elif bit_rate == 2:
+            pt_op = torch.ops.quantized.embedding_bag_2bit_rowwise_offsets
+            pt_prepack_op = torch.ops.quantized.embedding_bag_2bit_prepack
 
         weights = torch.from_numpy((np.random.random_sample((
             num_embeddings, embedding_dim)) + 1).astype(np.float32))
@@ -3478,6 +3507,33 @@ class TestQuantizedEmbeddingOps(TestCase):
                                                fallback_to_no_sparse,
                                                sparsity=sparsity,
                                                atol=0.1, rtol=1e-2)
+
+    """ Tests the correctness of the embedding_bag_2bit quantized operator """
+    @given(num_embeddings=st.integers(10, 100),
+           embedding_dim=st.integers(5, 50).filter(lambda x: x % 8 == 0),
+           num_offsets=st.integers(1, 20),
+           use_32bit_indices=st.booleans(),
+           use_32bit_offsets=st.booleans(),
+           enable_per_sample_weights=st.booleans(),
+           include_last_offset=st.booleans(),
+           fallback_to_no_sparse=st.booleans(),
+           sparsity=st.sampled_from([0.0, 0.5, 0.7]))
+    def test_embedding_bag_2bit(self, num_embeddings,
+                                embedding_dim, num_offsets,
+                                use_32bit_indices,
+                                use_32bit_offsets,
+                                enable_per_sample_weights,
+                                include_last_offset,
+                                fallback_to_no_sparse,
+                                sparsity):
+        self.embedding_bag_rowwise_offsets_run(2, num_embeddings,
+                                               embedding_dim, num_offsets,
+                                               use_32bit_indices, use_32bit_offsets,
+                                               enable_per_sample_weights,
+                                               include_last_offset,
+                                               fallback_to_no_sparse,
+                                               sparsity=sparsity,
+                                               atol=1.0, rtol=1e-1)
 
     """ Tests the correctness of the quantized embedding lookup operator """
     @given(num_embeddings=st.integers(10, 100),

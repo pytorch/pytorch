@@ -46,6 +46,10 @@ class TORCH_API CodeGen {
     stmt_ = stmt_->accept_mutator(mutator);
   }
 
+  void apply_visitor(IRVisitor* visitor) {
+    stmt_->accept(visitor);
+  }
+
   std::vector<BufferArg>& buffer_args() {
     return buffer_args_;
   }
@@ -64,17 +68,21 @@ class TORCH_API CodeGen {
     return ("");
   }
 
-  // There are two ways to invoke the codegen:
-  //  1) with a vector of CallArgs
-  //  2) with a vector of raw 'void*' pointers
-  //
-  // The codegen knows types of all inputs from the buffer args, that's why
-  // 'void*' pointers suffice.
-  //
-  // TODO: Eventually we might consider killing the CallArgs version, but
-  // currently only LLVM codegen implements call_raw.
+  // TODO: Figure out how to unify these call interfaces.
+
+  /// Call a function with a vector of CallArgs, which are tagged
+  /// unions that properly type the arguments.
   virtual void call(const std::vector<CallArg>& args) = 0;
+
+  /// Call a function faster than a regular `call` by assuming that
+  /// the generated kernel already knows the type of the arguments, so
+  /// they can be type-punned with `void*`s.
   virtual void call_raw(const std::vector<void*>& args) = 0;
+
+  /// Call a function even faster than a regular call, by assuming
+  /// that the number of thread blocks can be derived from `numel` via
+  /// a simple division, rather than evaluating an expression.
+  virtual void call_with_numel(void** args, int64_t numel);
 
   virtual at::Tensor empty_strided(
       c10::IntArrayRef size,
@@ -91,6 +99,10 @@ class TORCH_API CodeGen {
     return kernel_func_name_;
   }
 
+  void set_kernel_func_name(std::string kernel_func_name) {
+    kernel_func_name_ = std::move(kernel_func_name);
+  }
+
  protected:
   static void* argToPtr(const BufferArg& bufferArg, const CallArg& callArg);
 
@@ -103,7 +115,6 @@ class TORCH_API CodeGen {
 
 class CodeGen::BufferArg {
  public:
-  BufferArg(const Placeholder& buffer) : buf_(buffer.data()) {}
   BufferArg(Tensor tensor) : buf_(tensor.buf()) {}
   BufferArg(const VarHandle& var) : var_(var.node()), isVar_(true) {}
   BufferArg(const BufHandle& buf) : buf_(buf.node()) {}
@@ -149,7 +160,7 @@ class CodeGen::CallArg {
     memcpy(&data_, &v, sizeof(Type)); \
   }
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, ARG_TYPE_CTOR);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, ARG_TYPE_CTOR);
 #undef ARG_TYPE_CTOR
 
   void* data() const {
@@ -161,7 +172,7 @@ class CodeGen::CallArg {
     return (Type*)&data_;          \
   }
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, ARG_PTR_DEFINE);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, ARG_PTR_DEFINE);
 #undef ARG_PTR_DEFINE
 
  private:

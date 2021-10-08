@@ -43,6 +43,8 @@ namespace at {
 // at namespace already.
 namespace {
 
+${dispatch_helpers}
+
 ${dispatch_anonymous_definitions}
 
 TORCH_LIBRARY_IMPL(aten, ${DispatchKey}, m) {

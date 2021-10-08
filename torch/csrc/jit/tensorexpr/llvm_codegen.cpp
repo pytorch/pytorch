@@ -150,16 +150,45 @@ struct FunctionCallee {
 #endif
 } // namespace
 
+class LLVMCodeGenCallee {
+ public:
+  LLVMCodeGenCallee(llvm::orc::PytorchLLVMJIT* jit, void* kernelAddress)
+      : jit_(jit), kernelAddress_(kernelAddress) {}
+
+  llvm::orc::PytorchLLVMJIT* getJIT() {
+    return jit_;
+  }
+
+  void* getKernelAddress() {
+    return kernelAddress_;
+  }
+
+  void setKernelAddress(void* kernelAddress) {
+    kernelAddress_ = kernelAddress;
+  }
+
+ private:
+  // This is not necessarily needed in the callee. We just need the JIT to be
+  // alive for the call to this kernel to work. Since the JIT is owned by the
+  // PytorchLLVMJITCache, we don't need to save them here.
+  //
+  // Retaining a pointer to the JIT here only to denote that this is necessary
+  // for the calls to work.
+  llvm::orc::PytorchLLVMJIT* jit_;
+  void* kernelAddress_;
+};
+
 class LLVMCodeGenImpl : public IRVisitor {
  private:
   std::unique_ptr<llvm::LLVMContext> context_;
   llvm::IRBuilder<> irb_;
-  std::unique_ptr<llvm::orc::PytorchLLVMJIT> jit_;
+  llvm::orc::PytorchLLVMJIT* jit_;
   std::unique_ptr<llvm::Module> module_;
   llvm::Function* fn_;
   llvm::BasicBlock* bb_;
   llvm::Value* value_{nullptr};
   llvm::JITTargetAddress kernelAddress_;
+  std::string kernel_func_name_;
 
 #define LLVM_TYPE_DECLARE(_1, Name) llvm::Type* Name##Ty_;
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, LLVM_TYPE_DECLARE);
@@ -209,9 +238,8 @@ class LLVMCodeGenImpl : public IRVisitor {
       const std::vector<CodeGen::BufferArg>& args,
       at::Device device,
       Dtype dtype,
-      c10::optional<std::string> triple,
-      c10::optional<std::string> cpu,
-      c10::optional<std::string> attrs);
+      std::string kernel_func_name,
+      llvm::orc::PytorchLLVMJIT* jit);
   ~LLVMCodeGenImpl() = default;
 
   llvm::JITTargetAddress getKernelAddress() const;
@@ -231,7 +259,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   void visit(CompareSelectPtr v) override;
 
 #define IMM_VISIT_DECLARE(_1, Name) void visit(Name##ImmPtr v) override;
-  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_VISIT_DECLARE);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_VISIT_DECLARE);
 #undef IMM_VISIT_DECLARE
 
   void visit(CastPtr v) override;
@@ -275,17 +303,17 @@ class LLVMCodeGenImpl : public IRVisitor {
 };
 
 extern "C" {
-typedef void (*ParallelCallee)(int index, int8_t* packed_data);
+typedef void (*ParallelCallee)(int64_t index, int8_t* packed_data);
 void DispatchParallel(
     int8_t* func,
-    int start,
-    int stop,
+    int64_t start,
+    int64_t stop,
     int8_t* packed_data) noexcept {
   // TODO: preserve the func type.
   try {
     ParallelCallee callee = reinterpret_cast<ParallelCallee>(func);
     at::parallel_for(start, stop, 1, [&](int64_t f_begin, int64_t f_end) {
-      for (int index = f_begin; index < f_end; index++) {
+      for (int64_t index = f_begin; index < f_end; index++) {
         callee(index, packed_data);
       }
     });
@@ -312,12 +340,27 @@ LLVMCodeGen::LLVMCodeGen(
     c10::optional<std::string> triple,
     c10::optional<std::string> cpu,
     c10::optional<std::string> attrs)
-    : CodeGen(stmt, args, device, kernel_func_name),
-      impl_(std::make_unique<
-            LLVMCodeGenImpl>(stmt, args, device, dtype, triple, cpu, attrs)) {}
+    : CodeGen(stmt, args, device) {
+  auto jit = llvm::orc::PytorchLLVMJITCache::getPytorchLLVMJITInstance(
+      triple, cpu, attrs);
+  auto unique_kernel_func_name = jit->getUniqueFunctionName(kernel_func_name);
+  set_kernel_func_name(unique_kernel_func_name);
+  impl_ = std::make_unique<LLVMCodeGenImpl>(
+      stmt, args, device, dtype, unique_kernel_func_name, jit);
+  callee_ = std::make_unique<LLVMCodeGenCallee>(
+      jit, (void*)impl_->getKernelAddress());
+}
+
+void LLVMCodeGen::cleanup_memory() {
+  impl_.reset(nullptr);
+}
 
 void LLVMCodeGen::call_raw(const std::vector<void*>& args) {
   value<float>(const_cast<void**>(args.data()));
+}
+
+void LLVMCodeGen::call_with_numel(void** args, int64_t /* numel */) {
+  value<float>(const_cast<void**>(args));
 }
 
 void LLVMCodeGen::call(const std::vector<CallArg>& args) {
@@ -348,11 +391,14 @@ at::Tensor LLVMCodeGen::empty_strided(
       size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 }
 
-void* LLVMCodeGen::getKernelAddress(LLVMCodeGenImpl* impl) {
-  return (void*)impl->getKernelAddress();
+void* LLVMCodeGen::getKernelAddress(LLVMCodeGenCallee* callee) {
+  return (void*)callee->getKernelAddress();
 }
 
 std::string LLVMCodeGen::getCodeText(const std::string& attr /*=""*/) {
+  TORCH_INTERNAL_ASSERT(
+      impl_.get(),
+      "LLVMCodeGen memory has been cleaned up. So, code text is not available at this point");
   if (attr == "asm") {
     return impl_->getASMCodeText();
   } else {
@@ -364,21 +410,17 @@ llvm::JITTargetAddress LLVMCodeGenImpl::getKernelAddress() const {
   return kernelAddress_;
 }
 
-namespace {
-// Global mutex to protect LLVM initialization.  TargetRegistry::lookupTarget
-// in particular is not thread-safe.
-static std::mutex llvmInitMutex;
-} // namespace
-
 LLVMCodeGenImpl::LLVMCodeGenImpl(
     StmtPtr stmt,
     const std::vector<CodeGen::BufferArg>& args,
     at::Device device,
     Dtype dtype,
-    c10::optional<std::string> triple,
-    c10::optional<std::string> cpu,
-    c10::optional<std::string> attrs)
-    : context_(std::make_unique<llvm::LLVMContext>()), irb_(getContext()) {
+    std::string kernel_func_name,
+    llvm::orc::PytorchLLVMJIT* jit)
+    : context_(std::make_unique<llvm::LLVMContext>()),
+      irb_(getContext()),
+      jit_(jit),
+      kernel_func_name_(std::move(kernel_func_name)) {
   // Manually map types to LLVM types.
   ByteTy_ = llvm::Type::getInt8Ty(getContext());
   CharTy_ = llvm::Type::getInt8Ty(getContext());
@@ -391,14 +433,6 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   Int8PtrTy_ = llvm::Type::getInt8PtrTy(getContext());
   VoidTy_ = llvm::Type::getVoidTy(getContext());
   BoolTy_ = ByteTy_;
-
-  {
-    std::lock_guard<std::mutex> g(llvmInitMutex);
-    llvm::InitializeAllTargets();
-    llvm::InitializeAllTargetMCs();
-    llvm::InitializeAllAsmPrinters();
-    jit_ = std::make_unique<llvm::orc::PytorchLLVMJIT>(triple, cpu, attrs);
-  }
 
   module_ = std::make_unique<llvm::Module>("pytorch", getContext());
   module_->setDataLayout(jit_->getDataLayout());
@@ -435,7 +469,7 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   emitKernel(stmt, params);
 
   jit_->addModule(std::move(module_), std::move(context_));
-  auto sym = jit_->findSymbol("wrapper");
+  auto sym = jit_->findSymbol(kernel_func_name_);
   kernelAddress_ = assertSuccess(sym.getAddress());
 }
 
@@ -467,7 +501,7 @@ void LLVMCodeGenImpl::emitWrapper(const std::vector<llvm::Type*>& params) {
   auto wrapper = llvm::Function::Create(
       llvm::FunctionType::get(IntTy_, {voidPtrPtrTy}, false),
       llvm::Function::ExternalLinkage,
-      "wrapper",
+      kernel_func_name_,
       module_.get());
   auto wrapBB = llvm::BasicBlock::Create(getContext(), "wrapBB", wrapper);
   irb_.SetInsertPoint(wrapBB);
@@ -537,10 +571,6 @@ void LLVMCodeGenImpl::emitKernel(
 
   irb_.CreateRet(value_);
 
-  if (llvm::verifyFunction(*fn_, &llvm::outs())) {
-    throw std::runtime_error("Function verification failed");
-  }
-
   // print graph debug info before optimization
   llvm::SmallVector<char, 0> asmBuffer;
   llvm::raw_svector_ostream asmStream(asmBuffer);
@@ -549,6 +579,10 @@ void LLVMCodeGenImpl::emitKernel(
   }
   GRAPH_DEBUG(
       "\nLLVM module before optimizations\n\n", asmStream.str().str(), "\n");
+
+  if (llvm::verifyFunction(*fn_, &llvm::outs())) {
+    throw std::runtime_error("Function verification failed");
+  }
 
   optimize(*module_);
 
@@ -902,6 +936,12 @@ void LLVMCodeGenImpl::visit(HalfImmPtr v) {
   value_ = llvm::ConstantFP::get(HalfTy_, v->value());
 }
 
+void LLVMCodeGenImpl::visit(BFloat16ImmPtr v) {
+  TORCH_INTERNAL_ASSERT(
+      false,
+      buildErrorMessage("Fuser's LLVM codegen does not support bfloat16"));
+}
+
 void LLVMCodeGenImpl::visit(BoolImmPtr v) {
   value_ = llvm::ConstantInt::get(BoolTy_, v->value());
 }
@@ -928,6 +968,9 @@ void LLVMCodeGenImpl::visit(CastPtr v) {
 
   bool destUnsigned = v->dtype().scalar_type() == ScalarType::Byte ||
       v->dtype().scalar_type() == ScalarType::Bool;
+  bool srcUnsigned =
+      v->src_value()->dtype().scalar_type() == ScalarType::Byte ||
+      v->src_value()->dtype().scalar_type() == ScalarType::Bool;
 
   // Scalar casts
   if (srcType->isFPOrFPVectorTy()) {
@@ -967,7 +1010,7 @@ void LLVMCodeGenImpl::visit(CastPtr v) {
     throw unimplemented_lowering(v);
   }
   if (dstType->isFPOrFPVectorTy()) {
-    if (destUnsigned) {
+    if (srcUnsigned) {
       value_ = irb_.CreateUIToFP(value_, dstType);
     } else {
       value_ = irb_.CreateSIToFP(value_, dstType);
@@ -1138,14 +1181,11 @@ void LLVMCodeGenImpl::visit(LoadPtr v) {
       throw std::runtime_error("invalid dtype in Load");
   }
 
-  // Detect whether the vector mask is all true
-  bool unmasked_load = true;
-
   // Handle the case where the load is contiguous and unmasked efficiently
   auto idx_ramp = to<Ramp>(v->flat_index());
   if (idx_ramp) {
-    auto stride_imm = to<IntImm>(idx_ramp->stride());
-    if (stride_imm && stride_imm->value() == 1) {
+    auto stride_imm = intValue(idx_ramp->stride());
+    if (stride_imm && *stride_imm == 1) {
       v->base_handle()->accept(this);
       auto base = this->value_;
       idx_ramp->base()->accept(this);
@@ -1256,7 +1296,7 @@ void LLVMCodeGenImpl::processParallelFor(ForPtr v) {
 
   // Create the new body closure code.
   auto func_type =
-      llvm::FunctionType::get(VoidTy_, {IntTy_, Int8PtrTy_}, false);
+      llvm::FunctionType::get(VoidTy_, {LongTy_, Int8PtrTy_}, false);
   llvm::Function* func = llvm::Function::Create(
       func_type, llvm::Function::PrivateLinkage, "func", module_.get());
   auto func_body = llvm::BasicBlock::Create(getContext(), "func_body", func);
@@ -1268,6 +1308,10 @@ void LLVMCodeGenImpl::processParallelFor(ForPtr v) {
       packed_func_args_raw, packed_caller_args->getType());
 
   // Unpack the arguments from the opaque buffer.
+  if (v->var()->dtype().scalar_type() != c10::kLong) {
+    index = irb_.CreateIntCast(
+        index, dtypeToLLVM(v->var()->dtype()), v->var()->dtype().is_signed());
+  }
   body_closure_args = unpackFuncArgs(packed_func_args, body_arg_vars.size());
   // Set the codegen to the new func.
   // TODO: this should be replaced by RAII wrappers.
@@ -1290,12 +1334,14 @@ void LLVMCodeGenImpl::processParallelFor(ForPtr v) {
       irb_.CreatePointerCast(packed_caller_args, Int8PtrTy_);
   llvm::Value* func_value = irb_.CreatePointerCast(func, Int8PtrTy_);
   llvm::FunctionType* dispatcher_fntype = llvm::FunctionType::get(
-      VoidTy_, {Int8PtrTy_, IntTy_, IntTy_, Int8PtrTy_}, false);
+      VoidTy_, {Int8PtrTy_, LongTy_, LongTy_, Int8PtrTy_}, false);
   FunctionCallee dispatcher_callee =
       module_->getOrInsertFunction("DispatchParallel", dispatcher_fntype);
   llvm::Function* dispatcher =
       llvm::cast<llvm::Function>(dispatcher_callee.getCallee());
   dispatcher->addFnAttr(llvm::Attribute::NoUnwind);
+  start = irb_.CreateIntCast(start, LongTy_, true);
+  stop = irb_.CreateIntCast(stop, LongTy_, true);
   irb_.CreateCall(
       dispatcher, {func_value, start, stop, packed_caller_args_ptr});
   value_ = llvm::ConstantInt::get(IntTy_, 0);
@@ -1320,7 +1366,7 @@ void LLVMCodeGenImpl::visit(ForPtr v) {
   irb_.SetInsertPoint(condBlock);
 
   // Set up phi node for index variable.
-  auto idx = irb_.CreatePHI(IntTy_, 2);
+  auto idx = irb_.CreatePHI(start->getType(), 2);
   idx->addIncoming(start, preheader);
   if (!varToVal_.count(v->var())) {
     varToVal_.emplace(v->var(), idx);
@@ -1345,7 +1391,8 @@ void LLVMCodeGenImpl::visit(ForPtr v) {
   body = irb_.GetInsertBlock();
 
   // Increment the index variable and branch back to loop test.
-  auto inc = irb_.CreateAdd(idx, llvm::ConstantInt::getSigned(IntTy_, 1));
+  auto inc =
+      irb_.CreateAdd(idx, llvm::ConstantInt::getSigned(start->getType(), 1));
   irb_.CreateBr(condBlock);
   idx->addIncoming(inc, body);
 
@@ -1430,8 +1477,8 @@ void LLVMCodeGenImpl::visit(StorePtr v) {
   // Handle the case where the store is contiguous and unmasked efficiently
   auto idx_ramp = to<Ramp>(v->flat_index());
   if (idx_ramp) {
-    auto stride_imm = to<IntImm>(idx_ramp->stride());
-    if (stride_imm && stride_imm->value() == 1) {
+    auto stride_imm = intValue(idx_ramp->stride());
+    if (stride_imm && *stride_imm == 1) {
       idx_ramp->base()->accept(this);
       auto first_idx = value_;
 
@@ -1524,7 +1571,10 @@ void LLVMCodeGenImpl::emitIsNan(IntrinsicsPtr v) {
   if (!v->param(0)->dtype().is_floating_point()) {
     value_ = toVec(llvm::ConstantInt::get(dstType, 0), v->dtype().lanes());
   } else {
-    TORCH_INTERNAL_ASSERT(v->dtype().scalar_type() == ScalarType::Int);
+    TORCH_INTERNAL_ASSERT(
+        v->dtype().scalar_type() == ScalarType::Int,
+        buildErrorMessage(
+            "Unexpected non-Int dtype of Intrinsics' result value in the fuser."));
     auto is_nan = irb_.CreateFCmpUNO(
         value_, llvm::ConstantFP::get(value_->getType(), 0.));
     if (v->dtype().lanes() > 1) {
@@ -1751,11 +1801,11 @@ void LLVMCodeGenImpl::visit(IntrinsicsPtr v) {
   } else {
     TORCH_INTERNAL_ASSERT(
         false,
-        v,
-        "Unimplemented lowering:",
-        v->op_type(),
-        " for input of dtype",
-        v->dtype().scalar_dtype());
+        buildErrorMessage(
+            std::string("Unimplemented lowering for intrinsic '") +
+            std::to_string(v->op_type()) + "' for input of dtype " +
+            std::to_string(v->dtype().scalar_dtype()) +
+            " in LLVM codegen of the fuser."));
   }
 
   std::vector<llvm::Value*> params;
@@ -1782,9 +1832,6 @@ void LLVMCodeGenImpl::visit(IntrinsicsPtr v) {
 }
 
 void LLVMCodeGenImpl::visit(ExternalCallPtr v) {
-  constexpr int max_buffers = 10;
-  constexpr int max_dimensions = 40;
-
   auto& func_registry = getNNCFunctionRegistry();
   if (!func_registry.count(v->func_name())) {
     throw unimplemented_lowering(v);
