@@ -241,11 +241,12 @@ static void slow_conv3d_update_output_frame(
       output.data(), ldc, output.stride(0) * n);
 }
 
+template <typename scalar_t>
 void slow_conv3d_backward_update_grad_input_frame(
-    Tensor& grad_input,
-    const Tensor& grad_output,
-    const Tensor& weight,
-    Tensor& fgrad_input,
+    TensorAccessor<scalar_t, 4> grad_input,
+    TensorAccessor<scalar_t, 4> grad_output,
+    TensorAccessor<scalar_t, 2> weight,
+    TensorAccessor<scalar_t, 2> fgrad_input,
     int64_t kernel_depth,
     int64_t kernel_height,
     int64_t kernel_width,
@@ -256,28 +257,30 @@ void slow_conv3d_backward_update_grad_input_frame(
     int64_t pad_height,
     int64_t pad_width,
     int64_t groups) {
-  if (groups > 1) {
-    auto n = grad_output.size(0);
-    auto d = grad_output.size(1);
-    auto h = grad_output.size(2);
-    auto w = grad_output.size(3);
-    auto grad_output_2d = grad_output.reshape({groups, n / groups, d * h * w});
-    auto weight_g =
-        weight.reshape({groups, weight.size(0), weight.size(1) / groups});
-    auto fgrad_input_g = fgrad_input.reshape(
-        {groups, fgrad_input.size(0) / groups, fgrad_input.size(1)});
+  // Compute fgrad_input = weight.T * grad_output.reshape({grad_output.shape(0), -1})
+  // Note gemm expects fortran order, so all 3 matrices are transposed.
+  // Swapping argument order cancels this, since C == AB <=> T(C) == T(B)T(A)
+  const int64_t m = grad_output.size(1) * grad_output.size(2) * grad_output.size(3);
+  const int64_t n = weight.size(1);
+  const int64_t k = weight.size(0) / groups;
 
-    at::bmm_out(fgrad_input_g, weight_g, grad_output_2d);
-  } else {
-    auto grad_output_2d = grad_output.reshape(
-        {grad_output.size(0),
-         grad_output.size(1) * grad_output.size(2) * grad_output.size(3)});
-    at::mm_out(fgrad_input, weight, grad_output_2d);
-  }
-  TORCH_CHECK(fgrad_input.scalar_type() == grad_input.scalar_type());
+  const int64_t lda = m;
+  const int64_t ldb = n;
+  const int64_t ldc = m;
+
+  at::native::cpublas::gemm_batched_with_stride(
+      TransposeType::NoTranspose,
+      TransposeType::Transpose,
+      groups, m, n, k,
+      static_cast<scalar_t>(1),
+      grad_output.data(), lda, grad_output.stride(0) * k,
+      weight.data(), ldb, weight.stride(0) * k,
+      static_cast<scalar_t>(0),
+      fgrad_input.data(), ldc, fgrad_input.stride(0) * n);
+
   Unfold3dAccCPU(
-      fgrad_input.scalar_type(),
-      fgrad_input.data_ptr(),
+      c10::CppTypeToScalarType<scalar_t>::value,
+      fgrad_input.data(),
       grad_input.size(0),
       grad_input.size(1),
       grad_input.size(2),
@@ -294,7 +297,7 @@ void slow_conv3d_backward_update_grad_input_frame(
       pad_depth,
       pad_height,
       pad_width,
-      grad_input.data_ptr());
+      grad_input.data());
 }
 
 void slow_conv3d_backward_out_cpu_template(
@@ -303,7 +306,7 @@ void slow_conv3d_backward_out_cpu_template(
     const Tensor& input,
     const Tensor& weight,
     const Tensor& finput,
-    Tensor& fgrad_input,
+    const Tensor& fgrad_input,
     IntArrayRef kernel_size,
     IntArrayRef stride,
     IntArrayRef padding,
@@ -343,29 +346,26 @@ void slow_conv3d_backward_out_cpu_template(
   TORCH_CHECK(fgrad_input.is_contiguous(), "fgrad_input must be contiguous")
   fgrad_input.zero_();
 
-  // if the weight is grouped, we need to transpose for each individual
-  // group instead of the entire weight2d
-  Tensor tweight2d;
-  if (groups > 1) {
-    tweight2d =
-        weight2d.reshape({groups, weight2d.size(0) / groups, weight2d.size(1)})
-            .permute({0, 2, 1})
-            .reshape({weight2d.size(1), weight2d.size(0)});
-  } else {
-    tweight2d = weight2d.transpose(0, 1);
-  }
   const int64_t batch_size = input.size(0);
-  at::parallel_for(
-      0, batch_size, CONV3D_GRAIN_SALT, [&](int64_t start, int64_t end) {
-        AutoDispatchBelowADInplaceOrView non_variable_type_mode;
+
+
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      kBFloat16, input.scalar_type(), "slow_conv3d_cpu_grad_input", [&] {
+    at::parallel_for(0, batch_size, CONV3D_GRAIN_SALT,
+                    [&](int64_t start, int64_t end) {
+        auto grad_input_a = grad_input.accessor<scalar_t, 5>();
+        auto grad_output_a = grad_output_contiguous.accessor<scalar_t, 5>();
+        auto fgrad_input_a = fgrad_input.accessor<scalar_t, 3>();
+        auto weight_2d_a = weight2d.accessor<scalar_t, 2>();
+
         for (int64_t t = start; t < end; t++) {
-          Tensor grad_input_t = grad_input[t];
-          Tensor grad_output_t = grad_output_contiguous[t];
-          Tensor fgrad_input_t = fgrad_input[t];
+          auto grad_input_t = grad_input_a[t];
+          auto grad_output_t = grad_output_a[t];
+          auto fgrad_input_t = fgrad_input_a[t];
           slow_conv3d_backward_update_grad_input_frame(
               grad_input_t,
               grad_output_t,
-              tweight2d,
+              weight_2d_a,
               fgrad_input_t,
               kernel_depth,
               kernel_height,
@@ -378,12 +378,12 @@ void slow_conv3d_backward_out_cpu_template(
               pad_width,
               groups);
         }
-      });
+    });
+  });
 }
 
-void slow_conv3d_backward_parameters_frame(
+void slow_conv3d_backward_weight_frame(
     Tensor& grad_weight,
-    Tensor& grad_bias,
     Tensor& grad_output,
     const Tensor& finput,
     int64_t groups) {
@@ -396,50 +396,22 @@ void slow_conv3d_backward_parameters_frame(
             {grad_output.size(0),
              grad_output.size(1) * grad_output.size(2) * grad_output.size(3)});
 
-  if (grad_weight.defined()) {
-    if (groups > 1) {
-      auto grad_weight_g = grad_weight.reshape(
-          {groups, grad_weight.size(0) / groups, grad_weight.size(1)});
-      Tensor tfinput =
-          finput.reshape({groups, finput.size(0) / groups, finput.size(1)})
-              .permute({0, 2, 1})
-              .contiguous();
-      grad_weight_g.baddbmm_(grad_output_2d, tfinput);
-    } else {
-      const Tensor tfinput = finput.transpose(0, 1);
-      grad_weight.addmm_(grad_output_2d, tfinput);
-    }
-  }
-
-  if (grad_bias.defined()) {
-    AT_DISPATCH_FLOATING_TYPES_AND(
-        at::ScalarType::BFloat16,
-        grad_output.scalar_type(),
-        "slow_conv3d_backward_parameters",
-        [&] {
-          auto grad_bias_acc = grad_bias.accessor<scalar_t, 1>();
-          if (groups > 1) {
-            grad_output_2d = grad_output_2d.reshape(
-                {grad_output.size(0),
-                 grad_output.size(1) * grad_output.size(2) *
-                     grad_output.size(3)});
-          }
-          auto grad_output_2d_acc = grad_output_2d.accessor<scalar_t, 2>();
-          const auto sz = grad_output_2d.size(1);
-          for (int64_t i = 0; i < grad_bias.size(0); i++) {
-            scalar_t sum = 0;
-            for (int64_t k = 0; k < sz; k++) {
-              sum += grad_output_2d_acc[i][k];
-            }
-            grad_bias_acc[i] += sum;
-          }
-        });
+  if (groups > 1) {
+    auto grad_weight_g = grad_weight.reshape(
+        {groups, grad_weight.size(0) / groups, grad_weight.size(1)});
+    Tensor tfinput =
+        finput.reshape({groups, finput.size(0) / groups, finput.size(1)})
+            .permute({0, 2, 1})
+            .contiguous();
+    grad_weight_g.baddbmm_(grad_output_2d, tfinput);
+  } else {
+    const Tensor tfinput = finput.transpose(0, 1);
+    grad_weight.addmm_(grad_output_2d, tfinput);
   }
 }
 
 static void slow_conv3d_backward_parameters_out_cpu_template(
     Tensor& grad_weight,
-    Tensor& grad_bias,
     const Tensor& input,
     const Tensor& grad_output,
     const Tensor& finput,
@@ -450,7 +422,6 @@ static void slow_conv3d_backward_parameters_out_cpu_template(
     int64_t groups) {
   CheckedFrom c = "slow_conv3d_backward_parameters_cpu";
   auto grad_weight_arg = TensorArg(grad_weight, "grad_weight_arg", 0);
-  auto grad_bias_arg = TensorArg(grad_bias, "grad_bias_arg", 0);
 
   const int64_t kernel_depth = kernel_size[0];
   const int64_t kernel_height = kernel_size[1];
@@ -466,7 +437,7 @@ static void slow_conv3d_backward_parameters_out_cpu_template(
       input,
       grad_output,
       grad_weight,
-      grad_bias,
+      {},
       kernel_depth,
       kernel_height,
       kernel_width,
@@ -479,27 +450,17 @@ static void slow_conv3d_backward_parameters_out_cpu_template(
       groups,
       true);
 
-  Tensor grad_weight_2d;
-  if (grad_weight.defined()) {
-    checkContiguous(c, grad_weight_arg);
-    grad_weight_2d = view_weight_2d(grad_weight);
-  }
-
-  if (grad_bias.defined()) {
-    checkContiguous(c, grad_bias_arg);
-  }
+  Tensor grad_weight_2d = view_weight_2d(grad_weight);
+  checkContiguous(c, grad_weight_arg);
 
   auto grad_output_contiguous = grad_output.contiguous();
 
   const int64_t batch_size = input.size(0);
   for (int64_t t = 0; t < batch_size; t++) {
     Tensor grad_output_t = grad_output_contiguous[t];
-    Tensor finput_t;
-    if (grad_weight_2d.defined()) {
-      finput_t = finput[t];
-    }
-    slow_conv3d_backward_parameters_frame(
-        grad_weight_2d, grad_bias, grad_output_t, finput_t, groups);
+    Tensor finput_t = finput[t];
+    slow_conv3d_backward_weight_frame(
+        grad_weight_2d, grad_output_t, finput_t, groups);
   }
 }
 
@@ -677,29 +638,22 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv3d_backward_out_cpu(const Tensor&
         self,
         weight,
         finput,
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-        const_cast<Tensor&>(
-            fgrad_input), // cast away auto-generated const of buffer
+        fgrad_input,
         kernel_size,
         stride,
         padding,
         groups);
   }
 
+  if (grad_bias.defined()) {
+    at::sum_out(grad_bias, grad_output, IntArrayRef{0, 2, 3, 4});
+  }
+
   if (grad_weight.defined()) {
     grad_weight.resize_(weight.sizes());
     grad_weight.zero_();
-  }
-
-  if (grad_bias.defined()) {
-    grad_bias.resize_({grad_output.size(1)});
-    grad_bias.zero_();
-  }
-
-  if (grad_weight.defined() || grad_bias.defined()) {
     slow_conv3d_backward_parameters_out_cpu_template(
         grad_weight,
-        grad_bias,
         self,
         grad_output,
         finput,

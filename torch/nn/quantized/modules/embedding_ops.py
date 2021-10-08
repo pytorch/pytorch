@@ -149,6 +149,10 @@ class Embedding(torch.nn.Module):
 
         dtype = weight_observer.dtype
 
+        is_float_qparams_qconfig = weight_observer.qscheme == torch.per_channel_affine_float_qparams
+        assert is_float_qparams_qconfig, \
+            'Embedding quantization is only supported with float_qparams_weight_only_qconfig.'
+
         assert dtype == torch.quint8, 'The only supported dtype for nnq.Embedding is torch.quint8'
 
         # Run the observer to calculate qparams.
@@ -218,16 +222,23 @@ class EmbeddingBag(Embedding):
             mod (Module): a float module, either produced by torch.quantization
                           utilities or provided by user
         """
-        assert type(mod) == nn.EmbeddingBag, 'nnq.' + cls.__name__ + '.from_float only works for ' + \
-            nn.EmbeddingBag.__name__
-        assert hasattr(mod, 'qconfig'), 'EmbeddingBag input float module must have qconfig defined'
-        from torch.quantization.qconfig import float_qparams_weight_only_qconfig
-        if mod.qconfig is not None and mod.qconfig.weight is not None:
-            weight_observer = mod.qconfig.weight()
+        if hasattr(mod, 'weight_fake_quant'):
+            weight_observer = mod.weight_fake_quant
+            activation_post_process = mod.activation_post_process
         else:
-            weight_observer = float_qparams_weight_only_qconfig.weight()
+            assert type(mod) == nn.EmbeddingBag, 'nnq.' + cls.__name__ + '.from_float only works for ' + \
+                nn.EmbeddingBag.__name__
+            assert hasattr(mod, 'qconfig'), 'EmbeddingBag input float module must have qconfig defined'
+            from torch.quantization.qconfig import float_qparams_weight_only_qconfig
+            if mod.qconfig is not None and mod.qconfig.weight is not None:
+                weight_observer = mod.qconfig.weight()
+            else:
+                weight_observer = float_qparams_weight_only_qconfig.weight()
 
         dtype = weight_observer.dtype
+        is_float_qparams_qconfig = weight_observer.qscheme == torch.per_channel_affine_float_qparams
+        assert is_float_qparams_qconfig, \
+            'EmbeddingBag quantization is only supported with float_qparams_weight_only_qconfig.'
 
         assert dtype == torch.quint8 or dtype == torch.quint4x2, \
             'The only supported dtype for nnq.EmbeddingBag is torch.quint8 and torch.quint4x2'
