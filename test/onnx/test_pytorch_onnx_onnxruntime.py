@@ -73,7 +73,6 @@ def to_numpy(elem):
     else:
         return RuntimeError("Input has unknown type.")
 
-
 def convert_to_onnx(model, input=None, opset_version=9, do_constant_folding=True,
                     keep_initializers_as_inputs=True, dynamic_axes=None,
                     input_names=None, output_names=None,
