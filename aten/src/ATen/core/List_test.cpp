@@ -1148,7 +1148,6 @@ TEST(ListTest, canAccessTensorByReference) {
 TEST(ListTest, toTypedList) {
   List<std::string> stringList({"one", "two"});
   auto genericList = impl::toList(std::move(stringList));
-  EXPECT_EQ(stringList.size(), 0);
   EXPECT_EQ(genericList.size(), 2);
   stringList = c10::impl::toTypedList<std::string>(std::move(genericList));
   EXPECT_EQ(stringList.size(), 2);
