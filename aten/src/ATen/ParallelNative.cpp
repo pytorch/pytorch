@@ -1,6 +1,7 @@
 #include <ATen/Config.h>
 #if AT_PARALLEL_NATIVE
 #include <ATen/Parallel.h>
+#include <ATen/ParallelFuture.h>
 #include <ATen/PTThreadPool.h>
 
 #ifndef C10_MOBILE

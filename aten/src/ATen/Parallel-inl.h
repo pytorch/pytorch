@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/Exception.h>
 #include <c10/util/SmallVector.h>
 
 namespace at {
