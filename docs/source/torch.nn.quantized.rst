@@ -1,8 +1,6 @@
 torch.nn.quantized
 ------------------
 
-:orphan:
-
 This module implements the quantized versions of the nn modules and functionals.
 
 Functional interface

@@ -1,8 +1,6 @@
 torch.nn.intrinsic.qat
 --------------------------------
 
-:orphan:
-
 This module implements the versions of those fused operations needed for
 quantization aware training.
 

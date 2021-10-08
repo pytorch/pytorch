@@ -1,8 +1,6 @@
 torch.nn.quantized.dynamic
 --------------------------
 
-:orphan:
-
 .. automodule:: torch.nn.quantized.dynamic
 
 Linear

@@ -1,7 +1,5 @@
 .. _torch_quantization_fake_quantize:
 
-:orphan:
-
 torch.quantization.fake_quantize
 --------------------------------
 

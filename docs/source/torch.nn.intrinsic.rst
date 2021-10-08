@@ -1,7 +1,5 @@
 .. _torch_nn_intrinsic:
 
-:orphan:
-
 torch.nn.intrinsic
 --------------------------------
 

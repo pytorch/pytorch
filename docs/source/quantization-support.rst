@@ -1,8 +1,6 @@
 Quantization API Reference
 -------------------------------
 
-:orphan:
-
 Modules that provide quantization functions and classes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -55,6 +53,21 @@ Modules that provide quantization functions and classes
     - Dynamically quantized :class:`~torch.nn.Linear`, :class:`~torch.nn.LSTM`,
       :class:`~torch.nn.LSTMCell`, :class:`~torch.nn.GRUCell`, and
       :class:`~torch.nn.RNNCell`.
+
+.. toctree::
+    :hidden:
+
+    torch.nn.intrinsic
+    torch.nn.intrinsic.qat
+    torch.nn.intrinsic.quantized
+    torch.nn.qat
+    torch.quantization
+    torch.nn.quantized
+    torch.nn.quantized.dynamic
+    torch.ao.quantization.quantize_fx
+    torch.quantization.observer
+    torch.quantization.fake_quantize
+    torch.quantization.qconfig
 
 Quantized ``torch.Tensor`` operations
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
