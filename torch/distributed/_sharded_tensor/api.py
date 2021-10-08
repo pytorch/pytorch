@@ -637,11 +637,14 @@ class ShardedTensor(object):
             return sharded_linear(types, args, kwargs, self._process_group)
         elif func == torch.nn.init.uniform_:
             sharded_tensor = kwargs['tensor']
-            if sharded_tensor is None: raise ValueError("sharded_tensor shouldn't be None!")
+            if sharded_tensor is None:
+                raise ValueError("sharded_tensor shouldn't be None!")
             a = kwargs['a']
-            if a is None: raise ValueError("a shouldn't be None!")
+            if a is None:
+                raise ValueError("a shouldn't be None!")
             b = kwargs['b']
-            if b is None: raise ValueError("b shouldn't be None!")
+            if b is None:
+                raise ValueError("b shouldn't be None!")
             return _uniform_(sharded_tensor=sharded_tensor, a=a, b=b)
 
         raise RuntimeError(
