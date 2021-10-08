@@ -114,8 +114,8 @@ core_sources_common = [
     "torch/csrc/jit/runtime/vararg_functions.cpp",
     "torch/csrc/jit/mobile/promoted_prim_ops.cpp",
     "torch/csrc/jit/mobile/prim_ops_registery.cpp",
-    "torch/csrc/jit/serialization/import_read.cpp",
-    "torch/csrc/jit/serialization/unpickler.cpp",
+    # "torch/csrc/jit/serialization/import_read.cpp",
+    # "torch/csrc/jit/serialization/unpickler.cpp",
 ]
 
 libtorch_sources_common = core_sources_common
