@@ -355,7 +355,7 @@ class TestONNXExport(JitTestCase):
             torch.onnx.export_to_pretty_string(
                 torch.jit.script(mod), (x_in,), f)
 
-    def test_sourcerange_propagation(self):
+    def test_source_range_propagation(self):
         class ExpandingModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
