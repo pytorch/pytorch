@@ -401,6 +401,11 @@ std::vector<ExprHandle> TensorExprKernel::sizesForValue(
   if (v->type()->isSubtypeOf(NoneType::get())) {
     return {};
   }
+  if (v->type()->kind() == TypeKind::ClassType) {
+    // TODO: By prepack class name run corresponding op with random inputs with
+    // the same sizes and get the size of the result.
+    return {int64_t{1024}};
+  }
 
   known_sizes_[v] = inferSizesForValue(v);
   return known_sizes_.at(v);

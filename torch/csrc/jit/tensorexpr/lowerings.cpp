@@ -1410,6 +1410,10 @@ RegisterNNCLoweringFunction quantized_add(
     "quantized::add",
     computeQuantizedAdd);
 
+RegisterNNCLoweringFunction quantized_conv2d_prepack(
+    "quantized::conv2d_prepack",
+    computeQuantizedConv2dPrepack);
+
 RegisterNNCLoweringFunction aten_adaptive_avg_pool2d(
     "aten::adaptive_avg_pool2d",
     computeAdaptiveAvgPool2d);
