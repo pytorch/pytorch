@@ -21,7 +21,7 @@ using Tensor = at::Tensor;
 
 class ConcatLinearLayers {
  public:
-  ConcatLinearLayers(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {}
+  explicit ConcatLinearLayers(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {}
 
   bool run() {
     handleBlockAndSubblocks(graph_->block());
@@ -76,6 +76,7 @@ class ConcatLinearLayers {
 
   void mergeLinearLayers(std::vector<Node*>& compatible_layers) {
     graph_modified = true;
+    assert(!compatible_layers.empty());
     Node* base_node = compatible_layers[0];
 
     // Scope needed to make sure we free the WithInsertPoint guard
@@ -209,8 +210,8 @@ class ConcatLinearLayers {
 
   void handleBlockAndSubblocks(Block* block) {
     for (auto node : block->nodes()) {
-      for (Block* block : node->blocks()) {
-        handleBlockAndSubblocks(block);
+      for (Block* subblock : node->blocks()) {
+        handleBlockAndSubblocks(subblock);
       }
     }
 
