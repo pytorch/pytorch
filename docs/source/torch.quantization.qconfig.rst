@@ -1,5 +1,7 @@
 .. _torch_quantization_qconfig:
 
+:orphan:
+
 torch.quantization.qconfig
 ---------------------------
 
