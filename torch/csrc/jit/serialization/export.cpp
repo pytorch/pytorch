@@ -293,9 +293,7 @@ class GraphEncoder {
       bool use_external_data_format = false,
       const std::string& onnx_file_path = std::string());
 
-  void EncodeTypeProto(
-      onnx::TypeProto* type_proto,
-      const TypePtr& node_type);
+  void EncodeTypeProto(onnx::TypeProto* type_proto, const TypePtr& node_type);
 
   void EncodeLocalFunctionOpsetImport(
       onnx::FunctionProto* func_proto,
