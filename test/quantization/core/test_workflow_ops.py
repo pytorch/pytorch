@@ -1,7 +1,7 @@
 import torch
 import math
 from typing import Tuple
-from torch.quantization import (
+from torch.ao.quantization import (
     FakeQuantize,
     MovingAverageMinMaxObserver,
     default_observer,
@@ -293,8 +293,8 @@ class TestFakeQuantizeOps(TestCase):
 
     def test_forward_backward_per_tensor_with_amp(self):
         net = nn.Sequential(nn.Conv2d(1, 1, 3))
-        net.qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
-        net_prep = torch.quantization.prepare_qat(net)
+        net.qconfig = torch.ao.quantization.get_default_qat_qconfig('fbgemm')
+        net_prep = torch.ao.quantization.prepare_qat(net)
 
         with torch.cuda.amp.autocast():
             x = torch.randn(4, 1, 5, 5)
@@ -336,7 +336,7 @@ class TestFakeQuantizeOps(TestCase):
         for float_type, torch_type, X, tensor_qparams in itertools.product(float_types, torch_types, Xs, tensor_qparam):
             # pick the scale + zp so that some values get clipped
             X = X.to(float_type)
-            obs = torch.quantization.MinMaxObserver(torch_type)
+            obs = torch.ao.quantization.MinMaxObserver(torch_type)
             obs.to(device)
             obs(X * 0.75)
             scale, zero_point = obs.calculate_qparams()
@@ -367,7 +367,7 @@ class TestFakeQuantizeOps(TestCase):
             X = torch.randn(4, 8).to(device).to(float_type)
             X.requires_grad_()
             # pick the scale + zp so that some values get clipped
-            obs = torch.quantization.MinMaxObserver(torch_type)
+            obs = torch.ao.quantization.MinMaxObserver(torch_type)
             obs.to(device)
             obs(X * 0.75)
             scale, zero_point = obs.calculate_qparams()
@@ -523,7 +523,7 @@ class TestFakeQuantizeOps(TestCase):
 
         X = to_tensor(X, device)
         X.requires_grad_()
-        fq_module = torch.quantization.default_fake_quant().to(device)
+        fq_module = torch.ao.quantization.default_fake_quant().to(device)
         Y_prime = fq_module(X)
         assert fq_module.scale is not None
         assert fq_module.zero_point is not None
@@ -547,7 +547,7 @@ class TestFakeQuantizeOps(TestCase):
         fixed_scale = fq_module.scale.clone()
         fixed_zero_point = fq_module.zero_point.clone()
         # run fq module and make sure the quantization parameters does not change
-        torch.quantization.enable_observer(fq_module)
+        torch.ao.quantization.enable_observer(fq_module)
         fq_module(X)
         self.assertEqual(fixed_scale, fq_module.scale)
         self.assertEqual(fixed_zero_point, fq_module.zero_point)
@@ -575,7 +575,7 @@ class TestFakeQuantizeOps(TestCase):
             self.assertEqual(loaded_fq_module.calculate_qparams(), fq_module.calculate_qparams())
 
     def test_fake_quant_control(self):
-        for fq_module in [torch.quantization.default_fake_quant(),
+        for fq_module in [torch.ao.quantization.default_fake_quant(),
                           _LearnableFakeQuantize.with_args(observer=MovingAverageMinMaxObserver, quant_min=0,
                                                            quant_max=255,
                                                            dtype=torch.quint8, qscheme=torch.per_tensor_affine,
@@ -588,7 +588,7 @@ class TestFakeQuantizeOps(TestCase):
             if type(fq_module) == _LearnableFakeQuantize:
                 fq_module.toggle_fake_quant(False)
             else:
-                torch.quantization.disable_fake_quant(fq_module)
+                torch.ao.quantization.disable_fake_quant(fq_module)
             X = torch.rand(20, 10, dtype=torch.float32)
             Y = fq_module(X)
             # Fake quant is disabled,output is identical to input
@@ -603,8 +603,8 @@ class TestFakeQuantizeOps(TestCase):
                 fq_module.toggle_observer_update(False)
                 fq_module.toggle_fake_quant(True)
             else:
-                torch.quantization.disable_observer(fq_module)
-                torch.quantization.enable_fake_quant(fq_module)
+                torch.ao.quantization.disable_observer(fq_module)
+                torch.ao.quantization.enable_fake_quant(fq_module)
             X = 10.0 * torch.rand(20, 10, dtype=torch.float32) - 5.0
             Y = fq_module(X)
             self.assertNotEqual(Y, X)
@@ -614,7 +614,7 @@ class TestFakeQuantizeOps(TestCase):
             if type(fq_module) == _LearnableFakeQuantize:
                 fq_module.toggle_observer_update(True)
             else:
-                torch.quantization.enable_observer(fq_module)
+                torch.ao.quantization.enable_observer(fq_module)
             Y = fq_module(X)
             self.assertNotEqual(Y, X)
             # Observer is enabled, scale and zero-point are different
@@ -633,8 +633,8 @@ class TestFakeQuantizeOps(TestCase):
 
         m = Model()
 
-        m.qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
-        torch.quantization.prepare_qat(m, inplace=True)
+        m.qconfig = torch.ao.quantization.get_default_qat_qconfig('fbgemm')
+        torch.ao.quantization.prepare_qat(m, inplace=True)
 
         scale_shape_before = m.linear.activation_post_process.scale.shape
         zero_point_shape_before = m.linear.activation_post_process.zero_point.shape
@@ -701,7 +701,7 @@ class TestFakeQuantizeOps(TestCase):
             X = torch.randn(1, 2, 4, 4, dtype=float_type).to(device)
             # pick the scale + zp so that some values get clipped
             axis = 1
-            obs = torch.quantization.PerChannelMinMaxObserver(axis, torch_type).to(device)
+            obs = torch.ao.quantization.PerChannelMinMaxObserver(axis, torch_type).to(device)
             obs(X * 0.75)
             scale, zero_point = obs.calculate_qparams()
             # TODO(future PR): fix the wrong dtype in obs.calculate_qparams and remove the cast
@@ -839,7 +839,7 @@ class TestFakeQuantizeOps(TestCase):
             X = torch.randn(1, 2, 4, 4, dtype=float_type).to(device)
             # pick the scale + zp so that some values get clipped
             axis = 1
-            obs = torch.quantization.PerChannelMinMaxObserver(axis, torch_type).to(device)
+            obs = torch.ao.quantization.PerChannelMinMaxObserver(axis, torch_type).to(device)
             obs(X * 0.75)
             scale, zero_point = obs.calculate_qparams()
             # TODO(future PR): fix the wrong dtype in obs.calculate_qparams and remove the cast
