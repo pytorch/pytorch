@@ -3,14 +3,12 @@
 #include <c10d/ProcessGroup.hpp>
 #include <torch/csrc/utils/pybind.h>
 
-
 namespace c10d {
 
 // PyProcessGroup is a pybind11 trampoline class to allow a Python
 // class to inherit from torch.distributed.ProcessGroup
 class PyProcessGroup : public ProcessGroup {
  public:
-
   // PyWork is a pybind11 trampoline class to allow a Python
   // class to inherit from torch.distributed.Work
   class PyWork : public ProcessGroup::Work {
@@ -19,11 +17,10 @@ class PyProcessGroup : public ProcessGroup {
 
     virtual bool wait(std::chrono::milliseconds timeout = kNoTimeout) override {
       PYBIND11_OVERRIDE(
-          bool,                 /* Return type */
-          ProcessGroup::Work,   /* Parent class */
-          wait,                 /* Name of function in C++ */
-          timeout
-      );
+          bool, /* Return type */
+          ProcessGroup::Work, /* Parent class */
+          wait, /* Name of function in C++ */
+          timeout);
     }
   };
 
@@ -31,9 +28,9 @@ class PyProcessGroup : public ProcessGroup {
 
   virtual const std::string getBackendName() const override {
     PYBIND11_OVERRIDE_PURE(
-        std::string,        /* Return type */
-        ProcessGroup,       /* Parent class */
-        getBackendName,     /* Name of function in C++ */
+        std::string, /* Return type */
+        ProcessGroup, /* Parent class */
+        getBackendName, /* Name of function in C++ */
     );
   }
 
@@ -42,25 +39,23 @@ class PyProcessGroup : public ProcessGroup {
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) {
     PYBIND11_OVERRIDE(
-        c10::intrusive_ptr<ProcessGroup::Work>,   /* Return type */
-        ProcessGroup,                             /* Parent class */
-        allgather,                                /* Name of function in C++ */
+        c10::intrusive_ptr<ProcessGroup::Work>, /* Return type */
+        ProcessGroup, /* Parent class */
+        allgather, /* Name of function in C++ */
         outputTensors,
         inputTensors,
-        opts
-    );
+        opts);
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> allreduce(
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override {
     PYBIND11_OVERRIDE(
-        c10::intrusive_ptr<ProcessGroup::Work>,   /* Return type */
-        ProcessGroup,                             /* Parent class */
-        allreduce,                                /* Name of function in C++ */
+        c10::intrusive_ptr<ProcessGroup::Work>, /* Return type */
+        ProcessGroup, /* Parent class */
+        allreduce, /* Name of function in C++ */
         tensors,
-        opts
-    );
+        opts);
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> broadcast(
@@ -68,11 +63,10 @@ class PyProcessGroup : public ProcessGroup {
       const BroadcastOptions& opts = BroadcastOptions()) override {
     PYBIND11_OVERRIDE(
         c10::intrusive_ptr<ProcessGroup::Work>, /* Return type */
-        ProcessGroup,                           /* Parent class */
-        broadcast,                              /* Name of function in C++ */
+        ProcessGroup, /* Parent class */
+        broadcast, /* Name of function in C++ */
         tensors,
-        opts
-    );
+        opts);
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(
@@ -80,13 +74,12 @@ class PyProcessGroup : public ProcessGroup {
       std::vector<std::vector<at::Tensor>>& inputTensors,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) {
     PYBIND11_OVERRIDE(
-        c10::intrusive_ptr<ProcessGroup::Work>,   /* Return type */
-        ProcessGroup,                             /* Parent class */
-        reduce_scatter,                           /* Name of function in C++ */
+        c10::intrusive_ptr<ProcessGroup::Work>, /* Return type */
+        ProcessGroup, /* Parent class */
+        reduce_scatter, /* Name of function in C++ */
         outputTensors,
         inputTensors,
-        opts
-    );
+        opts);
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> send(
@@ -94,13 +87,12 @@ class PyProcessGroup : public ProcessGroup {
       int dstRank,
       int tag) {
     PYBIND11_OVERRIDE(
-        c10::intrusive_ptr<ProcessGroup::Work>,   /* Return type */
-        ProcessGroup,                             /* Parent class */
-        send,                                     /* Name of function in C++ */
+        c10::intrusive_ptr<ProcessGroup::Work>, /* Return type */
+        ProcessGroup, /* Parent class */
+        send, /* Name of function in C++ */
         tensors,
         dstRank,
-        tag
-    );
+        tag);
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> recv(
@@ -108,15 +100,13 @@ class PyProcessGroup : public ProcessGroup {
       int srcRank,
       int tag) {
     PYBIND11_OVERRIDE(
-        c10::intrusive_ptr<ProcessGroup::Work>,   /* Return type */
-        ProcessGroup,                             /* Parent class */
-        recv,                                     /* Name of function in C++ */
+        c10::intrusive_ptr<ProcessGroup::Work>, /* Return type */
+        ProcessGroup, /* Parent class */
+        recv, /* Name of function in C++ */
         tensors,
         srcRank,
-        tag
-    );
+        tag);
   }
-
 };
 
 } // namespace c10d
