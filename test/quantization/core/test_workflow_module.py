@@ -1118,6 +1118,40 @@ class TestFusedObsFakeQuantModule(TestCase):
         self.assertEqual(obs.quant_min, 0)
         self.assertEqual(obs.quant_max, 127)
 
+    def test_embedding_bag_qat_config(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.emb1 = torch.nn.EmbeddingBag(num_embeddings=10, embedding_dim=12,
+                                                  include_last_offset=True, scale_grad_by_freq=False, mode='sum')
+                self.emb2 = torch.nn.EmbeddingBag(num_embeddings=10, embedding_dim=12,
+                                                  include_last_offset=True, scale_grad_by_freq=False, mode='sum')
+
+            def forward(self, indices):
+                return torch.cat((self.emb1(indices), self.emb2(indices)))
+
+        model = Model()
+        indices = torch.randint(0, 10, (5, 12))
+
+        model.qconfig = torch.ao.quantization.default_embedding_qat_qconfig
+
+        quant_model = torch.quantization.prepare_qat(model)
+
+        count_fake_quant = 0
+        for name, mod in quant_model.named_modules():
+            if name.endswith('weight_fake_quant'):
+                count_fake_quant += 1
+                self.assertEqual(type(mod), FakeQuantize)
+        self.assertEqual(count_fake_quant, 2)
+
+        quant_model(indices)
+        inference_gm = torch.quantization.convert(quant_model.eval().cpu())
+
+        # Ensure that EmbeddingBags are now quantized
+        self.assertEqual(type(inference_gm.emb1), torch.nn.quantized.EmbeddingBag)
+        self.assertEqual(type(inference_gm.emb2), torch.nn.quantized.EmbeddingBag)
+
+
     def test_default_fused_qat_config(self):
         class Model(nn.Module):
             def __init__(self):
