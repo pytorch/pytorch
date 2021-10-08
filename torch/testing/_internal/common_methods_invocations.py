@@ -3,6 +3,7 @@ from itertools import product, chain
 import itertools
 import collections
 import copy
+from enum import Enum
 import operator
 import random
 import numbers
@@ -35,7 +36,7 @@ from torch.testing._internal.common_utils import \
      random_fullrank_matrix_distinct_singular_value,
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, TEST_SCIPY,
      torch_to_numpy_dtype_dict, TEST_WITH_ASAN,
-     GRADCHECK_NONDET_TOL, skipIfTBB)
+     GRADCHECK_NONDET_TOL)
 import torch.testing._internal.opinfo_helper as opinfo_helper
 
 from setuptools import distutils
@@ -1295,6 +1296,8 @@ def sample_inputs_cosine_similarity(op_info, device, dtype, requires_grad, **kwa
             yield SampleInput(make_arg(input_shape), args=(make_arg(input_shape),), kwargs=kwargs)
         # Test for Broadcasting
         yield SampleInput(make_arg((1, 2, 3)), args=(make_arg((2, 1, 3)),), kwargs={'dim': -1})
+        yield SampleInput(make_arg((1, 2, 3)), args=(make_arg((2, 1, 3)),), kwargs={'dim': -2})
+        yield SampleInput(make_arg((2, 3)), args=(make_arg((2, 1, 3)),), kwargs={'dim': -1})
 
     return list(generator())
 
@@ -3546,7 +3549,7 @@ def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwarg
     tensor = make_tensor((31,), device, dtype, low=None, high=None,
                          requires_grad=requires_grad)
 
-    if self.ndimensional:
+    if self.ndimensional == SpectralFuncType.ND:
         return [
             SampleInput(nd_tensor, kwargs=dict(s=(3, 10), dim=(1, 2), norm='ortho')),
             SampleInput(nd_tensor, kwargs=dict(norm='ortho')),
@@ -3555,6 +3558,15 @@ def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwarg
 
             *(SampleInput(nd_tensor, kwargs=dict(dim=dim))
                 for dim in [-1, -2, -3, (0, -1)]),
+        ]
+    elif self.ndimensional == SpectralFuncType.TwoD:
+        return [
+            SampleInput(nd_tensor, kwargs=dict(s=(3, 10), dim=(1, 2), norm='ortho')),
+            SampleInput(nd_tensor, kwargs=dict(norm='ortho')),
+            SampleInput(nd_tensor, kwargs=dict(s=(6, 8))),
+            SampleInput(tensor, kwargs=dict(dim=0)),
+            SampleInput(nd_tensor, kwargs=dict(dim=(0, -1))),
+            SampleInput(nd_tensor, kwargs=dict(dim=(-3, -2, -1))),
         ]
     else:
         return [
@@ -3577,6 +3589,8 @@ def sample_inputs_repeat_interleave(op_info, device, dtype, requires_grad, **kwa
         SampleInput(make_input((2, 3, 4)), kwargs=dict(repeats=torch.arange(3, device=device), dim=1))
     ]
 
+SpectralFuncType = Enum('SpectralFuncType', ('OneD', 'TwoD', 'ND'))
+
 # Metadata class for Fast Fourier Transforms in torch.fft.
 class SpectralFuncInfo(OpInfo):
     """Operator information for torch.fft transforms. """
@@ -3586,7 +3600,7 @@ class SpectralFuncInfo(OpInfo):
                  *,
                  ref=None,  # Reference implementation (probably in np.fft namespace)
                  dtypes=floating_and_complex_types(),
-                 ndimensional: bool,  # Whether dim argument can be a tuple
+                 ndimensional: SpectralFuncType,
                  sample_inputs_func=sample_inputs_spectral_ops,
                  decorators=None,
                  **kwargs):
@@ -3898,6 +3912,19 @@ def sample_inputs_legacy_solve(op_info, device, dtype, requires_grad=False, **kw
     # Reverses tensor order
     for sample in out:
         sample.input, sample.args = sample.args[0], (sample.input,)
+
+    return out
+
+
+def sample_inputs_cholesky_solve(op_info, device, dtype, requires_grad=False, **kwargs):
+    out = sample_inputs_linalg_cholesky_inverse(
+        op_info, device, dtype, requires_grad=False
+    )
+
+    for sample in out:
+        psd_matrix = sample.input
+        sample.input = make_tensor(psd_matrix.shape, device, dtype, requires_grad=requires_grad, low=None, high=None)
+        sample.args = (psd_matrix.requires_grad_(requires_grad),)
 
     return out
 
@@ -6025,13 +6052,16 @@ def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):
     return op(input + input.conj().transpose(-2, -1), *args, **kwargs)
 
 
-def gradcheck_wrapper_triangular_input(op, input, *args, upper=False, **kwargs):
+def gradcheck_wrapper_triangular_input(op, *args, upper=False, idx=0, **kwargs):
     """Gradcheck wrpper for functions that take lower or upper triangular matrices as input.
 
     They require a modified function because the finite-difference algorithm
     for calculating derivatives does not preserve the triangular property of the input.
+    `idx` is used to specific which `args[idx]` is to be triangularized.
     """
-    return op(input.triu() if upper else input.tril(), upper)
+    triangular_arg = args[idx].triu() if upper else args[idx].tril()
+    modified_args = args[:idx] + (triangular_arg,) + args[idx + 1:]
+    return op(*modified_args, upper)
 
 
 def reference_reduction_numpy(f, supports_keepdims=True):
@@ -6579,6 +6609,19 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
                # cholesky_inverse does not correctly warn when resizing out= inputs
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),)),
+    OpInfo('cholesky_solve',
+           op=torch.cholesky_solve,
+           dtypes=floating_and_complex_types(),
+           sample_inputs_func=sample_inputs_cholesky_solve,
+           check_batched_gradgrad=False,
+           supports_forward_ad=True,
+           gradcheck_wrapper=lambda *args, **kwargs: gradcheck_wrapper_triangular_input(*args, idx=1, **kwargs),
+           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
+           skips=(
+               # cholesky_solve does not correctly warn when resizing out= inputs
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
+               # Gradcheck for complex generates invalid inputs for this function, i.e. NaNs.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD', dtypes=complex_types()),)),
     OpInfo('chunk',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            sample_inputs_func=sample_inputs_chunk,
@@ -6935,13 +6978,21 @@ op_db: List[OpInfo] = [
     SpectralFuncInfo('fft.fft',
                      aten_name='fft_fft',
                      ref=np.fft.fft,
-                     ndimensional=False,
+                     ndimensional=SpectralFuncType.OneD,
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types()),
+    SpectralFuncInfo('fft.fft2',
+                     aten_name='fft_fft2',
+                     ref=np.fft.fft2,
+                     ndimensional=SpectralFuncType.TwoD,
+                     dtypes=all_types_and_complex_and(torch.bool),
+                     default_test_dtypes=floating_and_complex_types(),
+                     decorators=[precisionOverride(
+                         {torch.float: 1e-4, torch.cfloat: 1e-4})],),
     SpectralFuncInfo('fft.fftn',
                      aten_name='fft_fftn',
                      ref=np.fft.fftn,
-                     ndimensional=True,
+                     ndimensional=SpectralFuncType.ND,
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
                      decorators=[precisionOverride(
@@ -6949,14 +7000,26 @@ op_db: List[OpInfo] = [
     SpectralFuncInfo('fft.hfft',
                      aten_name='fft_hfft',
                      ref=np.fft.hfft,
-                     ndimensional=False,
+                     ndimensional=SpectralFuncType.OneD,
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
                      check_batched_gradgrad=False),
+    SpectralFuncInfo('fft.hfft2',
+                     aten_name='fft_hfft2',
+                     ref=scipy.fft.hfft2 if has_scipy_fft else None,
+                     ndimensional=SpectralFuncType.TwoD,
+                     dtypes=all_types_and_complex_and(torch.bool),
+                     default_test_dtypes=floating_and_complex_types(),
+                     check_batched_gradgrad=False,
+                     decorators=[
+                         DecorateInfo(
+                             precisionOverride({torch.float: 2e-4, torch.cfloat: 2e-4}),
+                             'TestFFT', 'test_reference_nd')],
+                     ),
     SpectralFuncInfo('fft.hfftn',
                      aten_name='fft_hfftn',
                      ref=scipy.fft.hfftn if has_scipy_fft else None,
-                     ndimensional=True,
+                     ndimensional=SpectralFuncType.ND,
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
                      check_batched_gradgrad=False,
@@ -6968,15 +7031,24 @@ op_db: List[OpInfo] = [
     SpectralFuncInfo('fft.rfft',
                      aten_name='fft_rfft',
                      ref=np.fft.rfft,
-                     ndimensional=False,
+                     ndimensional=SpectralFuncType.OneD,
                      dtypes=all_types_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
                      check_batched_grad=False,
                      check_batched_gradgrad=False),
+    SpectralFuncInfo('fft.rfft2',
+                     aten_name='fft_rfft2',
+                     ref=np.fft.rfft2,
+                     ndimensional=SpectralFuncType.TwoD,
+                     dtypes=all_types_and(torch.bool),
+                     default_test_dtypes=floating_and_complex_types(),
+                     check_batched_grad=False,
+                     check_batched_gradgrad=False,
+                     decorators=[precisionOverride({torch.float: 1e-4})],),
     SpectralFuncInfo('fft.rfftn',
                      aten_name='fft_rfftn',
                      ref=np.fft.rfftn,
-                     ndimensional=True,
+                     ndimensional=SpectralFuncType.ND,
                      dtypes=all_types_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
                      check_batched_grad=False,
@@ -6985,13 +7057,24 @@ op_db: List[OpInfo] = [
     SpectralFuncInfo('fft.ifft',
                      aten_name='fft_ifft',
                      ref=np.fft.ifft,
-                     ndimensional=False,
+                     ndimensional=SpectralFuncType.OneD,
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types()),
+    SpectralFuncInfo('fft.ifft2',
+                     aten_name='fft_ifft2',
+                     ref=np.fft.ifft2,
+                     ndimensional=SpectralFuncType.TwoD,
+                     dtypes=all_types_and_complex_and(torch.bool),
+                     default_test_dtypes=floating_and_complex_types(),
+                     decorators=[
+                         DecorateInfo(
+                             precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
+                             'TestFFT', 'test_reference_nd')],
+                     ),
     SpectralFuncInfo('fft.ifftn',
                      aten_name='fft_ifftn',
                      ref=np.fft.ifftn,
-                     ndimensional=True,
+                     ndimensional=SpectralFuncType.ND,
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
                      decorators=[
@@ -7002,14 +7085,27 @@ op_db: List[OpInfo] = [
     SpectralFuncInfo('fft.ihfft',
                      aten_name='fft_ihfft',
                      ref=np.fft.ihfft,
-                     ndimensional=False,
+                     ndimensional=SpectralFuncType.OneD,
                      dtypes=all_types_and(torch.bool),
                      default_test_dtypes=floating_types(),
                      check_batched_grad=False),
+    SpectralFuncInfo('fft.ihfft2',
+                     aten_name='fft_ihfft2',
+                     ref=scipy.fft.ihfftn if has_scipy_fft else None,
+                     ndimensional=SpectralFuncType.TwoD,
+                     dtypes=all_types_and(torch.bool),
+                     default_test_dtypes=floating_types(),
+                     check_batched_grad=False,
+                     check_batched_gradgrad=False,
+                     decorators=[
+                         DecorateInfo(
+                             precisionOverride({torch.float: 2e-4}),
+                             'TestFFT', 'test_reference_nd')],
+                     ),
     SpectralFuncInfo('fft.ihfftn',
                      aten_name='fft_ihfftn',
                      ref=scipy.fft.ihfftn if has_scipy_fft else None,
-                     ndimensional=True,
+                     ndimensional=SpectralFuncType.ND,
                      dtypes=all_types_and(torch.bool),
                      default_test_dtypes=floating_types(),
                      check_batched_grad=False,
@@ -7022,14 +7118,26 @@ op_db: List[OpInfo] = [
     SpectralFuncInfo('fft.irfft',
                      aten_name='fft_irfft',
                      ref=np.fft.irfft,
-                     ndimensional=False,
+                     ndimensional=SpectralFuncType.OneD,
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
                      check_batched_gradgrad=False),
+    SpectralFuncInfo('fft.irfft2',
+                     aten_name='fft_irfft2',
+                     ref=np.fft.irfft2,
+                     ndimensional=SpectralFuncType.TwoD,
+                     dtypes=all_types_and_complex_and(torch.bool),
+                     default_test_dtypes=floating_and_complex_types(),
+                     check_batched_gradgrad=False,
+                     decorators=[
+                         DecorateInfo(
+                             precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
+                             'TestFFT', 'test_reference_nd')],
+                     ),
     SpectralFuncInfo('fft.irfftn',
                      aten_name='fft_irfftn',
                      ref=np.fft.irfftn,
-                     ndimensional=True,
+                     ndimensional=SpectralFuncType.ND,
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
                      check_batched_gradgrad=False,
@@ -7853,8 +7961,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1e-03)}),
                    'TestCommon', 'test_reference_testing'
-               ),
-               skipIfTBB(),
+               )
            ],
            sample_inputs_func=sample_inputs_layer_norm,),
     OpInfo('nn.functional.pad',
@@ -8731,6 +8838,8 @@ op_db: List[OpInfo] = [
            supports_out=False,
            sample_inputs_func=sample_inputs_legacy_solve,
            check_batched_gradgrad=False,
+           supports_forward_ad=True,
+           gradcheck_wrapper=lambda *args, **kwargs: gradcheck_wrapper_triangular_input(*args, idx=1, **kwargs),
            decorators=[skipCUDAIfNoMagma]),
     UnaryUfuncInfo('trunc',
                    aliases=('fix', ),
@@ -9366,7 +9475,10 @@ op_db: List[OpInfo] = [
     OpInfo('resize_',
            op=lambda x, shape: x.clone().resize_(shape),
            method_variant=None,
-           inplace_variant=None,
+           inplace_variant=torch.Tensor.resize_,
+           # the test fails because resize_ doesn't work with imag views as expected by the test
+           # https://github.com/pytorch/pytorch/issues/65945
+           test_neg_view=False,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_autograd=False,
