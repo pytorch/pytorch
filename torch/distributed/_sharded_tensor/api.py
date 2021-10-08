@@ -57,11 +57,42 @@ class Shard(object):
     """
     Container which holds the data for a shard as a Tensor and also
     the associated metadata for that shard.
-    """
-    __slots__ = ['tensor', 'metadata']
 
+    Args:
+        tensor(torch.Tensor):
+        metadata(:class `torch.distributed._sharded_tensor.ShardMetadata`, optional):
+            metadata for this shard, including offsets, lengths and device placement.
+            If None, must provide `shard_offsets` with optional rank information to
+            build the metadata under the hood.
+        shard_offsets(List[int], optional): list of integers specify the offset
+            of this shard on each dimension.
+        rank(int, optional): Specifies the rank for this shard. If None, we assume
+            this is a local placement without rank.
+    """
     tensor: torch.Tensor
-    metadata: ShardMetadata
+    metadata: Optional[ShardMetadata] = None
+    shard_offsets: Optional[List[int]] = None
+    rank: Optional[int] = None
+
+    def __post_init__(self):
+        if self.shard_offsets is not None:
+            shard_lengths = list(self.tensor.size())
+            local_device = str(self.tensor.device)
+            placement = f"rank:{self.rank}/{local_device}" if self.rank is not None else local_device
+            shard_meta = ShardMetadata(
+                shard_offsets=self.shard_offsets,
+                shard_lengths=shard_lengths,
+                placement=placement
+            )
+            if self.metadata is not None:
+                assert shard_meta == self.metadata, \
+                    f"Provided both metadata and shard_offsets/rank, but they mismatched! " \
+                    f"metadata: {self.metadata}, shard_offsets implied metadata: {shard_meta}"
+            else:
+                self.metadata = shard_meta
+        elif self.metadata is None:
+            raise ValueError("Must specify either metadata or shard_offsets/rank!")
+
 
 @dataclass
 class TensorProperties(object):
