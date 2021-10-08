@@ -246,19 +246,23 @@ class QConvTranspose final {
   }
 };
 
-std::tuple<IntArrayRef, c10::optional<IntArrayRef>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t>
+IValue
 unpack_quantized_prepacked_sizes_conv2d(const IValue& ivalue) {
   auto params = ivalue.toCustomClass<ConvPackedParamsBase<2>>();
   at::Tensor weight;
   c10::optional<at::Tensor> bias;
   std::tie(weight, bias) = params->unpack();
-  return std::make_tuple(
+  c10::optional<IntArrayRef> bias_sizes = c10::nullopt;
+  if (bias && bias->defined()) {
+    bias_sizes = bias->sizes();
+  }
+  return IValue(std::make_tuple(
       weight.sizes(),
-      (bias && bias->defined()) ? c10::optional<IntArrayRef>(bias->sizes()) : c10::nullopt,
+      bias_sizes,
       params->stride(),
       params->padding(),
       params->dilation(),
-      params->groups());
+      params->groups()));
 }
 
 TORCH_LIBRARY_IMPL(quantized, CatchAll, m) {
