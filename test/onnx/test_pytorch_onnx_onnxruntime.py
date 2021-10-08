@@ -2,6 +2,7 @@
 
 import unittest
 import onnxruntime
+import onnx
 import torch
 import torchvision
 
@@ -13,7 +14,7 @@ import os
 import random
 
 import model_defs.word_language_model as word_language_model
-import onnx
+#import onnx
 
 import torch.nn.functional as F
 from torch.nn.utils import rnn as rnn_utils
@@ -6888,6 +6889,57 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 5, 5)
         self.run_test(Det(), x)
+
+    def test_linalg_norm(self):
+        class Det(torch.nn.Module):
+            def forward(self, x):
+                return torch.linalg.norm(x, dim=(1,2))
+
+        x = torch.randn(2, 3, 5, 5)
+        self.run_test(Det(), x)
+    
+    def test_linalg_matrix_norm(self):
+        '''class OrdNone(torch.nn.Module):
+            def forward(self, x):
+                return torch.linalg.matrix_norm(x)
+
+        x = torch.randn(2, 3, 5, 5)
+        self.run_test(OrdNone(), x)'''
+
+        class OrdFro(torch.nn.Module):
+            def forward(self, x):
+                return torch.linalg.matrix_norm(x, ord='fro')
+
+        x = torch.randn(2, 3, 5, 5)
+        self.run_test(OrdFro(), x)
+
+        '''class OrdNuc(torch.nn.Module):
+            def forward(self, x):
+                return torch.linalg.matrix_norm(x, ord='nuc')
+
+        x = torch.randn(2, 3, 5, 5)
+        self.run_test(OrdNuc(), x)'''
+
+        class OrdInf(torch.nn.Module):
+            def forward(self, x):
+                return torch.linalg.matrix_norm(x, ord=float('inf')), torch.linalg.matrix_norm(x, ord=-float('inf'))
+
+        x = torch.randn(2, 3, 5, 5)
+        self.run_test(OrdInf(), x)
+
+        class OrdOne(torch.nn.Module):
+            def forward(self, x):
+                return torch.linalg.matrix_norm(x, ord=1), torch.linalg.matrix_norm(x, ord=-1)
+
+        x = torch.randn(2, 3, 5, 5)
+        self.run_test(OrdOne(), x)
+    
+        class OrdTwo(torch.nn.Module):
+            def forward(self, x):
+                return torch.linalg.matrix_norm(x, ord=2), torch.linalg.matrix_norm(x, ord=-2)
+
+        x = torch.randn(2, 3, 5, 5)
+        self.run_test(OrdTwo(), x)
 
     # This test checks output scalar type in the ONNX graph should not be null
     # https://github.com/pytorch/pytorch/issues/28607

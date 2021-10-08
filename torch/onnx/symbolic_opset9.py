@@ -2897,6 +2897,70 @@ def index(g, self, index):
             return sym_help._reshape_helper(g, self, final_shape)
 
 
+@parse_args("v", "s", "is", "i", "v")
+def linalg_norm(g, self, ord, dim, keepdim, dtype):
+    if dim is None:
+        pass
+    elif len(dim) == 1:
+        output = linalg_vector_norm(g, self, ord, dim, keepdim, dtype)
+    else:
+        output = linalg_matrix_norm(g, self, ord, dim, keepdim, dtype)
+
+
+    '''overrun_cond = g.op("Not", g.op("Equal", diag_size, g.op("Constant", value_t=torch.tensor(0, dtype=torch.int64))))
+    if_op = g.op("If", overrun_cond)
+    if_node = if_op.node()
+
+    if_block = _add_block(if_node)
+    gather_indices_if_block = if_block.op("Add", gather_indices, select_window)
+    gather_indices_if_block = sym_help._unsqueeze_helper(if_block, gather_indices_if_block, [rank - 1])
+    final_non_overrun_ = if_block.op("GatherND", result, gather_indices_if_block, batch_dims_i=rank - 2)
+    _add_output_to_block(if_block, final_non_overrun_)
+
+    else_block = _add_block(if_node)
+    final_overrun_ = zeros(else_block, gather_shape, 6, None, None)
+    _add_output_to_block(else_block, final_overrun_)'''
+    return output
+
+@parse_args("v", "f", "is", "i", "v")
+def linalg_vector_norm(g, self, ord, dim, keepdim, dtype):
+    if ord is None:
+        ord = g.op("Constant", value_t=torch.LongTensor([2]))
+        result = sym_help._reducesum_helper(g, g.op("Pow", g.op("Abs", self), ord),
+                                            axes_i=dim, keepdims_i=keepdim)
+        #result = g.op("Pow", result, g.op("Div", g.op("Constant", value_t=torch.LongTensor([1])), ord))
+        return g.op("Sqrt", result)
+    return result
+
+@parse_args("v", "v", "is", "i", "v")
+def linalg_matrix_norm(g, self, ord, dim, keepdim, dtype):
+    ord_value = sym_help._parse_arg(ord, "s")
+    if ord_value == 'fro':
+        return frobenius_norm(g, self, dim, keepdim)
+    else:
+        ord_value = sym_help._parse_arg(ord, "f")
+        if ord_value == math.inf:
+            dim[0], dim[1] = dim[1], dim[0]
+            sum = sym_help._reducesum_helper(g, g.op("Abs", self), axes_i=[dim[0]], keepdims_i=keepdim)
+            dim[1] += 1
+            out, vl = max(g, sum, dim_or_y=g.op("Constant", value_t=torch.LongTensor([dim[1]])), keepdim=keepdim)
+            return out
+        if ord_value == -math.inf:
+            dim[0], dim[1] = dim[1], dim[0]
+            sum = sym_help._reducesum_helper(g, g.op("Abs", self), axes_i=[dim[0]], keepdims_i=keepdim)
+            dim[1] += 1
+            out, vl = min(g, sum, dim_or_y=g.op("Constant", value_t=torch.LongTensor([dim[1]])), keepdim=keepdim)
+            return out
+        if ord_value == 1:
+            sum = sym_help._reducesum_helper(g, g.op("Abs", self), axes_i=[dim[0]], keepdims_i=keepdim)
+            out, vl = max(g, sum, dim_or_y=g.op("Constant", value_t=torch.LongTensor([dim[1]])), keepdim=keepdim)
+            return out
+        if ord_value == -1:
+            sum = sym_help._reducesum_helper(g, g.op("Abs", self), axes_i=[dim[0]], keepdims_i=keepdim)
+            out, vl = min(g, sum, dim_or_y=g.op("Constant", value_t=torch.LongTensor([dim[1]])), keepdim=keepdim)
+            return out
+    return frobenius_norm(g, self, dim, keepdim)
+
 @parse_args("v", "is", "i")
 def frobenius_norm(g, self, dim=None, keepdim=False):
     sqr = g.op("Mul", self, self)
