@@ -766,6 +766,10 @@ class SimpleIREvaluatorImpl : public IRVisitor {
         val = value().as<int64_t>();
       } else if (value().dtype() == kInt) {
         val = value().intValue();
+      } else if (value().dtype() == kDouble) {
+        val = (int64_t)(value().as<double>());
+      } else if (value().dtype() == kFloat) {
+        val = (int64_t)(value().as<float>());
       } else {
         throw malformed_input(
             "extra_args in ExternalCalls must have int64 dtype", v);
