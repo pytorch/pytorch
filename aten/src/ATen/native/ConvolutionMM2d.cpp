@@ -558,7 +558,8 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_backward_out_cpu(
     at::sum_out(grad_bias, grad_output, IntArrayRef{0, 2, 3});
   }
 
-  if (grad_weight.defined() && grad_input.numel() != 0) {
+
+  if (grad_weight.defined()) {
     grad_weight.resize_(weight.sizes());
     grad_weight.zero_();
     slow_conv2d_backward_weight_out_cpu_template(
