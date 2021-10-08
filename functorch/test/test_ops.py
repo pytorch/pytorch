@@ -505,7 +505,6 @@ class TestOperators(TestCase):
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjpvmap', vjp_fail.union({
         xfail('__getitem__'),
-        xfail('broadcast_to'),
         xfail('clamp', ''),
         xfail('dsplit'),
         xfail('fill_'),

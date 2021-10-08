@@ -159,7 +159,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   STOP_DECOMPOSE(blackman_window);
   STOP_DECOMPOSE(blackman_window.periodic);
   STOP_DECOMPOSE(block_diag);
-  STOP_DECOMPOSE(broadcast_to);
   STOP_DECOMPOSE(can_cast);
   STOP_DECOMPOSE(cartesian_prod);
   STOP_DECOMPOSE(cat.names);

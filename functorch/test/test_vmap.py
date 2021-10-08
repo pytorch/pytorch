@@ -2973,7 +2973,6 @@ class TestVmapOperatorsOpInfo(TestCase):
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', {
         # These are ops that we can't generate fallbacks for
-        xfail('broadcast_to'),
         xfail('dsplit'),
         xfail('fill_'),
         xfail('gradient'),
@@ -3023,7 +3022,6 @@ class TestVmapOperatorsOpInfo(TestCase):
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', {
         # xfail('__getitem__'),
-        xfail('broadcast_to'),
         xfail('cdist'),
         xfail('complex'),
         xfail('copysign'),
