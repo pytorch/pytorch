@@ -601,7 +601,7 @@ class TestHub(TestCase):
             'ailzhang/torchhub_example',
             'mnist',
             source='github',
-            pretrained=False,
+            pretrained=True,
             verbose=False)
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
                          SUM_OF_HUB_EXAMPLE)
@@ -614,7 +614,7 @@ class TestHub(TestCase):
             local_dir,
             'mnist',
             source='local',
-            pretrained=False,
+            pretrained=True,
             verbose=False)
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
                          SUM_OF_HUB_EXAMPLE)
@@ -624,7 +624,7 @@ class TestHub(TestCase):
         hub_model = hub.load(
             'ailzhang/torchhub_example:ci/test_slash',
             'mnist',
-            pretrained=False,
+            pretrained=True,
             verbose=False)
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
                          SUM_OF_HUB_EXAMPLE)
@@ -636,7 +636,7 @@ class TestHub(TestCase):
         hub_model = hub.load(
             'ailzhang/torchhub_example',
             'mnist',
-            pretrained=False,
+            pretrained=True,
             verbose=False)
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
                          SUM_OF_HUB_EXAMPLE)
@@ -668,7 +668,7 @@ class TestHub(TestCase):
         hub_model = hub.load(
             'ailzhang/torchhub_example',
             'mnist_zip',
-            pretrained=False,
+            pretrained=True,
             verbose=False)
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
                          SUM_OF_HUB_EXAMPLE)
@@ -679,7 +679,7 @@ class TestHub(TestCase):
         hub_model = hub.load(
             'ailzhang/torchhub_example',
             'mnist_zip_1_6',
-            pretrained=False,
+            pretrained=True,
             verbose=False)
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
                          SUM_OF_HUB_EXAMPLE)
