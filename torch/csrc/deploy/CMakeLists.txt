@@ -47,6 +47,10 @@ add_executable(deploy_benchmark ${DEPLOY_DIR}/example/benchmark.cpp)
 target_include_directories(deploy_benchmark PRIVATE ${PYTORCH_ROOT}/torch)
 target_link_libraries(deploy_benchmark PUBLIC torch_deploy)
 
+add_executable(interactive_embedded_interpreter ${DEPLOY_DIR}/interactive_embedded_interpreter.cpp)
+target_include_directories(interactive_embedded_interpreter PRIVATE ${PYTORCH_ROOT}/torch)
+target_link_libraries(interactive_embedded_interpreter PUBLIC torch_deploy)
+
 if(INSTALL_TEST)
   install(TARGETS test_deploy DESTINATION bin)
   install(TARGETS torch_deploy DESTINATION lib)
