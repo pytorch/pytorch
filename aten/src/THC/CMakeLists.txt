@@ -6,7 +6,6 @@ PARENT_SCOPE)
 configure_file(THCGeneral.h.in "${CMAKE_CURRENT_BINARY_DIR}/THCGeneral.h")
 
 set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS}
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCCachingHostAllocator.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THCGeneral.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THCStorageCopy.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensor.cpp
@@ -26,15 +25,7 @@ install(FILES
           THCStorageCopy.h
           THCTensor.h
           THCTensorMathReduce.cuh
-          THCAsmUtils.cuh
           THCAtomics.cuh
-          THCScanUtils.cuh
-          THCAllocator.h
-          THCCachingHostAllocator.h
-          THCDeviceTensor.cuh
-          THCDeviceTensor-inl.cuh
-          THCDeviceTensorUtils.cuh
-          THCDeviceTensorUtils-inl.cuh
           THCGenerateAllTypes.h
           THCGenerateBFloat16Type.h
           THCGenerateBoolType.h
@@ -50,9 +41,7 @@ install(FILES
           THCGenerateComplexFloatType.h
           THCGenerateComplexTypes.h
           THCGenerateComplexDoubleType.h
-          THCIntegerDivider.cuh
           THCNumerics.cuh
-          THCThrustAllocator.cuh
           # See Note [TH abstraction violation]
           THCTensor.hpp
           THCStorage.hpp
