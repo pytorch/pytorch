@@ -17849,8 +17849,6 @@ TEST(NVFuserTest, FusionNonContigOutputs_CUDA) {
 
   tv1->setContiguity(false);
 
-  fusion.printKernel();
-
   FusionExecutor fe;
   fe.compileFusion(&fusion);
 
