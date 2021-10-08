@@ -9578,7 +9578,7 @@ If :attr:`dim` is not given, the last dimension of the `input` is chosen.
 
 If :attr:`largest` is ``False`` then the `k` smallest elements are returned.
 
-A namedtuple of `(values, indices)` is returned, where the `values` and
+A namedtuple of `(values, indices)` is returned with the `values` and
 `indices` of the largest `k` elements of each row of the `input` tensor in the
 given dimension `dim`.
 
