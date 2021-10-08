@@ -449,6 +449,36 @@ Note that you can use ``torch.profiler`` (recommended, only available after 1.8.
 
 Please refer to the `profiler documentation <https://pytorch.org/docs/master/profiler.html>`__ for a full overview of profiler features.
 
+Lazy Model Materialization
+--------------------------
+
+.. warning::
+    This is an experimental feature and is subject to change. If you experience
+    any issues, let us know by opening a GitHub issue.
+
+.. autofunction:: torch.distributed.nn.utils.describe
+.. autofunction:: torch.distributed.nn.utils.is_described
+
+describe() vs. skip_init()
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Although they sound similar ``describe()`` and ``torch.nn.utils.skip_init()``
+serve different purposes. ``describe()`` is meant for lazy model materialization
+and targets model users, while ``skip_init()`` is meant for optimized module
+initialization and targets model authors.
+
+Technical differences between the two functions are:
+
+- ``describe()`` returns a module where all its parameters and buffers reside on
+  the meta device, while ``skip_init()`` returns a module where some or all its
+  parameters or buffers are empty tensors allocated on a real device.
+- ``describe()`` does not require any code changes in the module, while
+  ``skip_init()`` expects the module and its submodules to take a ``device``
+  argument. This means ``skip_init()`` is intrusive, but also guaranteed to
+  work; on the other hand ``describe()`` can potentially fail to construct a
+  module if the module initializes its state in an unconventional way that
+  conflicts with the meta device.
+
 Autograd-enabled communication primitives
 -----------------------------------------
 
