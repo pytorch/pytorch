@@ -37,7 +37,6 @@ categories = [
     'memory_format_frontend',
     'foreach_frontend', # done
     'dataloader_frontend', # done
-    'dataloader_frontend' # mostly covered
 ]
 
 topics = [

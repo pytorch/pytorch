@@ -1,5 +1,5 @@
 import argparse
-from common import run, topics, commit_files_changed, commit_title
+from common import run, topics, commit_files_changed, commit_title, get_features
 from collections import defaultdict
 import os
 import csv
@@ -76,7 +76,7 @@ class CommitList:
 
     def keywordInFile(file, keywords):
         for key in keywords:
-            if key in keywords:
+            if key in file:
                 return True
         return False
 
@@ -88,10 +88,6 @@ class CommitList:
             return Commit(commit_hash, 'caffe2', 'Untopiced', title)
 
         labels = []
-        pr_number = parse_pr_number(body, commit_hash, title)
-        if pr_number is not None:
-            labels = gh_labels(pr_number)
-
         if 'Reverted' in labels:
             return Commit(commit_hash, 'skip', 'Untopiced', title)
 
@@ -100,13 +96,13 @@ class CommitList:
         for file in files_changed:
             file_lowercase = file.lower()
             # datapipe(s), torch/utils/data, test_{dataloader, datapipe}
-            if keywordInFile(file, ['torch/utils/data', 'test_dataloader', 'test_datapipe'])
+            if CommitList.keywordInFile(file, ['torch/utils/data', 'test_dataloader', 'test_datapipe']):
                 category = 'dataloader_frontend'
                 break
-            if keywordInFile(file, ['torch/csrc/api', 'test/cpp/api']
+            if CommitList.keywordInFile(file, ['torch/csrc/api', 'test/cpp/api']):
                 category = 'cpp_frontend'
                 break
-            if keywordInFile(file, ['distributed', 'c10d']):
+            if CommitList.keywordInFile(file, ['distributed', 'c10d']):
                 category = 'distributed'
                 break
             if ('vulkan' in file_lowercase):
@@ -118,20 +114,20 @@ class CommitList:
             if 'onnx' in file_lowercase:
                 category = 'onnx'
                 break
-            if keywordInFile(file, ['torch/fx', 'test_fx'] ):
+            if CommitList.keywordInFile(file, ['torch/fx', 'test_fx'] ):
                 category = 'fx'
                 break
             # torch/quantization, test/quantization, aten/src/ATen/native/quantized, torch/nn/{quantized, quantizable}
-            if keywordInFile(file, ['torch/quantization', 'test/quantization', 'aten/src/ATen/native/quantized', 'torch/nn/quantiz']):
+            if CommitList.keywordInFile(file, ['torch/quantization', 'test/quantization', 'aten/src/ATen/native/quantized', 'torch/nn/quantiz']):
                 category = 'quantization'
                 break
-            if keywordInFile(file, ['torch/package', 'test/package'] ):
+            if CommitList.keywordInFile(file, ['torch/package', 'test/package'] ):
                 category = 'package'
                 break
-            if keywordInFile(file, ['torch/csrc/jit/mobile', 'aten/src/ATen/native/metal', 'test/mobile'] ):
+            if CommitList.keywordInFile(file, ['torch/csrc/jit/mobile', 'aten/src/ATen/native/metal', 'test/mobile'] ):
                 category = 'mobile'
                 break
-            if keywordInFile(file, ['aten/src/ATen/native/LinearAlgebra.cpp', 'test/test_linalg.py', 'torch/linalg']):
+            if CommitList.keywordInFile(file, ['aten/src/ATen/native/LinearAlgebra.cpp', 'test/test_linalg.py', 'torch/linalg']):
                 category = 'linalg_frontend'
                 break
 
@@ -151,7 +147,7 @@ class CommitList:
 
         log_lines = commits.split('\n')
         hashes, titles = zip(*[log_line.split(' ', 1) for log_line in log_lines])
-        return [categorize(commit_hash, title) for commit_hash, title in zip(hashes, titles)]
+        return [CommitList.categorize(commit_hash, title) for commit_hash, title in zip(hashes, titles)]
 
     def filter(self, *, category=None, topic=None):
         commits = self.commits
