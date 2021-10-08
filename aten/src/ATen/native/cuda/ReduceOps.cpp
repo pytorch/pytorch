@@ -39,12 +39,12 @@ void linalg_vector_norm_kernel_cuda(TensorIterator& iter, Scalar ord) {
 }
 
 
-void min_kernel_impl(Tensor& result, Tensor& indice, const Tensor& self, int64_t dim, bool keepdim) {
+void min_kernel_impl(const Tensor& result, const Tensor& indice, const Tensor& self, int64_t dim, bool keepdim) {
   at::TensorIterator iter = make_reduction("min", result, indice, self, dim, keepdim, self.scalar_type(), kLong);
   min_launch_kernel(iter);
 }
 
-void max_kernel_impl(Tensor& result, Tensor& indice, const Tensor& self, int64_t dim, bool keepdim) {
+void max_kernel_impl(const Tensor& result, const Tensor& indice, const Tensor& self, int64_t dim, bool keepdim) {
   at::TensorIterator iter = make_reduction("max", result, indice, self, dim, keepdim, self.scalar_type(), kLong);
   max_launch_kernel(iter);
 }
