@@ -45,7 +45,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, skipCUDAIfRocmVersionLessThan, skipCUDAIfNotMiopenSuggestNHWC, \
-    onlyOnCPUAndCUDA, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, skipMeta
+    onlyOnCPUAndCUDA, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, skipMeta, get_all_device_types
 from torch.nn import MultiheadAttention
 
 from hypothesis import given
@@ -1418,20 +1418,22 @@ class TestNN(NNTestCase):
         self.assertEqual(m.param_name, param3)
 
     def test_add_module_raises_error_if_attr_exists(self):
-        m = nn.Module()
-        m.attribute_name = 5
-        with self.assertRaises(KeyError):
-            m.add_module('attribute_name', nn.Module())
+        methods_to_test = ['add_module', 'register_module']
+        for fn in methods_to_test:
+            m = nn.Module()
+            m.attribute_name = 5
+            with self.assertRaises(KeyError):
+                getattr(m, fn)('attribute_name', nn.Module())
 
-        del m.attribute_name
-        m.register_buffer('attribute_name', torch.rand(5))
-        with self.assertRaises(KeyError):
-            m.add_module('attribute_name', nn.Module())
+            del m.attribute_name
+            m.register_buffer('attribute_name', torch.rand(5))
+            with self.assertRaises(KeyError):
+                getattr(m, fn)('attribute_name', nn.Module())
 
-        del m.attribute_name
-        m.register_parameter('attribute_name', nn.Parameter())
-        with self.assertRaises(KeyError):
-            m.add_module('attribute_name', nn.Module())
+            del m.attribute_name
+            m.register_parameter('attribute_name', nn.Parameter())
+            with self.assertRaises(KeyError):
+                getattr(m, fn)('attribute_name', nn.Module())
 
     @unittest.expectedFailure
     def test_getattr_with_property(self):
@@ -1835,24 +1837,26 @@ class TestNN(NNTestCase):
         check()
 
     def test_add_module(self):
-        l = nn.Linear(10, 20)
-        net = nn.Module()
-        net.l = l
-        net.l2 = l
-        net.add_module('empty', None)
-        self.assertEqual(net.l, l)
-        self.assertEqual(net.l2, l)
-        self.assertEqual(net.empty, None)
-        net.add_module('l3', l)
-        self.assertEqual(net.l3, l)
-        l3 = nn.Linear(20, 10)
-        net.add_module('l', l3)
-        self.assertEqual(net.l, l3)
-        self.assertRaises(TypeError, lambda: net.add_module('x', 'non-module'))
-        self.assertRaisesRegex(TypeError, 'module name should be a string. Got int',
-                               lambda: net.add_module(1, l))
-        self.assertRaisesRegex(TypeError, 'module name should be a string. Got NoneType',
-                               lambda: net.add_module(None, l))
+        methods_to_test = ['add_module', 'register_module']
+        for fn in methods_to_test:
+            l = nn.Linear(10, 20)
+            net = nn.Module()
+            net.l = l
+            net.l2 = l
+            getattr(net, fn)('empty', None)
+            self.assertEqual(net.l, l)
+            self.assertEqual(net.l2, l)
+            self.assertEqual(net.empty, None)
+            getattr(net, fn)('l3', l)
+            self.assertEqual(net.l3, l)
+            l3 = nn.Linear(20, 10)
+            getattr(net, fn)('l', l3)
+            self.assertEqual(net.l, l3)
+            self.assertRaises(TypeError, lambda: getattr(net, fn)('x', 'non-module'))
+            self.assertRaisesRegex(TypeError, 'module name should be a string. Got int',
+                                   lambda: getattr(net, fn)(1, l))
+            self.assertRaisesRegex(TypeError, 'module name should be a string. Got NoneType',
+                                   lambda: getattr(net, fn)(None, l))
 
     def test_module_to_argparse(self):
         net = nn.Sequential(nn.Linear(3, 3))
@@ -8686,7 +8690,7 @@ class TestNN(NNTestCase):
         # checking error message when RNN has seq_len = 0
         for module in (nn.RNN, nn.LSTM, nn.GRU):
             for bidirectional in [True, False]:
-                for device in torch.testing.get_all_device_types():
+                for device in get_all_device_types():
                     input = torch.ones(0, 10, 5)
                     rnn = module(5, 6, bidirectional=bidirectional)
                     if device == 'cuda':
@@ -9703,12 +9707,6 @@ class TestNN(NNTestCase):
         torch.cosine_similarity(input1, input2, 0).sum().backward()
         self.assertEqual(input1.grad, torch.zeros_like(input1))
         self.assertEqual(input2.grad, input1 * 1e8)
-
-        # Check error when inputs are not the same shape
-        input1 = torch.randn(2, 2, 1)
-        input2 = torch.randn(2, 1, 3)
-        with self.assertRaises(RuntimeError):
-            F.cosine_similarity(input1, input2)
 
         # Check type promotion, issue #61454
         input = torch.tensor(12.)
@@ -11134,12 +11132,6 @@ class TestNN(NNTestCase):
                         self.assertEqual(gr, gr_expected, atol=3e-4, rtol=0)
 
     def test_fold_invalid_arg(self):
-        # input wrong dimension
-
-        fold = nn.Fold(output_size=(4, 5), kernel_size=(2, 3))
-        with self.assertRaisesRegex(NotImplementedError, r"Only 3D input Tensors are supported"):
-            fold(torch.randn(1, 5))
-
         # input.size(1) not divisible by \prod(kernel_size)
 
         fold = nn.Fold(output_size=(4, 5), kernel_size=(2, 3))
@@ -17329,6 +17321,7 @@ class TestNNDeviceType(NNTestCase):
         self._nll_loss_helper([2, 3, 5, 0], "sum", zero, device)
         self._nll_loss_helper([2, 3, 5, 7, 0], "sum", zero, device)
 
+    @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
     def test_nll_loss_total_weight_is_zero(self, device):
 
         def helper(input_size):
@@ -17337,7 +17330,25 @@ class TestNNDeviceType(NNTestCase):
             target_size = (input_size[0], ) + tuple(input_size[2:])
             target = torch.zeros(target_size, dtype=torch.long, device=device)
             weight = torch.zeros([num_channels], device=device)
-            self.assertEqual(F.nll_loss(input, target, weight).item(), 0)
+            self.assertEqual(F.nll_loss(input, target, weight, reduction="sum").item(), 0.)
+            self.assertEqual(F.nll_loss(input, target, weight, reduction="mean").item(), float("nan"))
+            self.assertEqual(F.nll_loss(input, target, weight, reduction="none"), torch.zeros(target.shape, device=device))
+
+        helper([2, 3])
+        helper([2, 3, 5, 7])
+        helper([2, 3, 5, 7, 9])
+
+    @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
+    def test_nll_loss_all_ignored(self, device):
+
+        def helper(input_size):
+            input = torch.ones(input_size, device=device)
+            num_channels = input_size[1]
+            target_size = (input_size[0], ) + tuple(input_size[2:])
+            target = torch.zeros(target_size, dtype=torch.long, device=device)
+            self.assertEqual(F.nll_loss(input, target, ignore_index=0, reduction="sum").item(), 0)
+            self.assertEqual(F.nll_loss(input, target, ignore_index=0, reduction="mean").item(), float("nan"))
+            self.assertEqual(F.nll_loss(input, target, ignore_index=0, reduction="none"), torch.zeros(target.shape, device=device))
 
         helper([2, 3])
         helper([2, 3, 5, 7])
