@@ -17219,12 +17219,16 @@ class TestNNDeviceType(NNTestCase):
     @skipCUDAIfNoCudnn
     @dtypes(torch.float, torch.float16)
     def test_cudnn_convolution_relu(self, device, dtype):
-        for batch, groups, kernel_size, memory_format in product((1, 2, 3),
-                                                                 (1, 2, 4),
-                                                                 ((1, 1), (3, 3)),
-                                                                 (torch.channels_last, torch.contiguous_format)):
-            inp = torch.rand(batch, groups, 8, 8, dtype=dtype, device=device)
-            w = torch.randn(8, groups, kernel_size[0], kernel_size[1], dtype=dtype, device=device)
+        for batch, groups, image_size, kernel_size, memory_format in \
+                product((1, 2, 3),
+                        (1, 2, 4),
+                        ((1, 1), (8, 8)),
+                        ((1, 1), (3, 3)),
+                        (torch.channels_last, torch.contiguous_format)):
+            if image_size[0] < kernel_size[0]:
+                continue
+            inp = torch.rand(batch, groups, *image_size, dtype=dtype, device=device)
+            w = torch.randn(8, groups, *kernel_size, dtype=dtype, device=device)
             conv2d_out = torch.conv2d(inp, w, None, (1, 1), (0, 0), (1, 1), 1)
             inp = inp.to(memory_format=memory_format)
             w = w.to(memory_format=memory_format)
@@ -17238,12 +17242,16 @@ class TestNNDeviceType(NNTestCase):
     @dtypes(torch.float, torch.float16)
     @precisionOverride({torch.half: 0.002, torch.float: 1e-4})
     def test_cudnn_convolution_add_relu(self, device, dtype):
-        for batch, groups, kernel_size, memory_format in product((1, 2, 3),
-                                                                 (1, 2, 4),
-                                                                 ((1, 1), (3, 3)),
-                                                                 (torch.channels_last, torch.contiguous_format)):
-            inp = torch.rand(batch, groups, 8, 8, dtype=dtype, device=device)
-            w = torch.randn(8, groups, kernel_size[0], kernel_size[1], dtype=dtype, device=device)
+        for batch, groups, image_size, kernel_size, memory_format in \
+            product((1, 2, 3),
+                    (1, 2, 4),
+                    ((1, 1), (8, 8)),
+                    ((1, 1), (3, 3)),
+                    (torch.channels_last, torch.contiguous_format)):
+            if image_size[0] < kernel_size[0]:
+                continue
+            inp = torch.rand(batch, groups, *image_size, dtype=dtype, device=device)
+            w = torch.randn(8, groups, *kernel_size, dtype=dtype, device=device)
             conv2d_out = torch.conv2d(inp, w, None, (1, 1), (0, 0), (1, 1), 1)
             alpha = 2.0
             z = torch.randn_like(conv2d_out)
