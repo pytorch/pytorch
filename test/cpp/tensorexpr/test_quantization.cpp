@@ -196,7 +196,8 @@ TEST_F(Quantization, QuantAddDequantInt8) {
   std::vector<IValue> stack = fmap<IValue>(inputs);
   k.run(stack);
   auto y = stack[0].toTensor();
-  if (!almostEqual(y_expected, y)) {
+  bool check = almostEqual(y_expected, y);
+  if (!check) {
     std::cout << "x1:\n" << x1 << std::endl;
     std::cout << "q1:\n" << q1 << std::endl;
     std::cout << "x2:\n" << x2 << std::endl;
@@ -204,7 +205,7 @@ TEST_F(Quantization, QuantAddDequantInt8) {
     std::cout << "y_expected:\n" << y_expected << std::endl;
     std::cout << "y:\n" << y << std::endl;
   }
-  // CHECK_EQ(almostEqual(y_expected, y), 1);
+  CHECK_EQ(check, 1);
 #endif
 }
 
@@ -248,7 +249,7 @@ TEST_F(Quantization, QuantAddDequantUInt8) {
     std::cout << "y_expected:\n" << y_expected << std::endl;
     std::cout << "y:\n" << y << std::endl;
   }
-  // CHECK_EQ(almostEqual(y_expected, y), 1);
+  CHECK_EQ(almostEqual(y_expected, y), 1);
 #endif
 }
 
