@@ -204,7 +204,7 @@ std::string MobileModelRunner::get_extra_file_contents(
     std::string const& extra_file_name) {
   std::unordered_map<std::string, std::string> extra;
   extra[extra_file_name] = "";
-  //  torch::jit::_load_extra_only_for_mobile(file_path, c10::nullopt, extra);
+  torch::jit::_load_extra_only_for_mobile(file_path, c10::nullopt, extra);
   return extra[extra_file_name];
 }
 
