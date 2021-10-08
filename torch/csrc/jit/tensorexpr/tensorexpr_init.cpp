@@ -23,22 +23,16 @@ ArgValue convertPyToArgValue(py::handle inp) {
   if (py::isinstance<BufHandle>(inp)) {
     return py::cast<BufHandle>(inp);
   } else if (py::isinstance<VarHandle>(inp)) {
-    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << std::endl;
     return py::cast<VarHandle>(inp);
   } else if (py::isinstance<py::bool_>(inp)) {
-    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << std::endl;
     return py::cast<bool>(inp);
   } else if (py::isinstance<py::float_>(inp)) {
-    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << std::endl;
     return py::cast<double>(inp);
   } else if (py::isinstance<py::int_>(inp)) {
-    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << std::endl;
     return py::cast<int64_t>(inp);
   } else if (py::isinstance<py::none>(inp)) {
-    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << std::endl;
     return ArgNone();
   } else if (py::isinstance<py::list>(inp)) {
-    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << std::endl;
     auto l = py::cast<py::list>(inp);
     if (l.size() == 0) {
       return std::vector<BufHandle>();
@@ -232,12 +226,7 @@ void initTensorExprBindings(PyObject* module) {
             return self.load(v);
           })
       .def("buf", [](Tensor& self) { return BufHandle(self.buf()); })
-      .def("stmt", &Tensor::stmt)
-      .def("__str__", [](Tensor& self) {
-        std::stringstream ss;
-        ss << self;
-        return ss.str();
-      });
+      .def("stmt", &Tensor::stmt);
   py::class_<Cast, std::shared_ptr<Cast>>(te, "Cast")
       .def_static("make", &Cast::make)
       .def(
