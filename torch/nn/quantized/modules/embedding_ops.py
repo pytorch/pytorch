@@ -135,13 +135,13 @@ class Embedding(torch.nn.Module):
         r"""Create a quantized embedding module from a float module
 
         Args:
-            mod (Module): a float module, either produced by torch.quantization
+            mod (Module): a float module, either produced by torch.ao.quantization
                           utilities or provided by user
         """
         assert type(mod) == nn.Embedding, 'nnq.' + cls.__name__ + '.from_float only works for ' + \
             nn.Embedding.__name__
         assert hasattr(mod, 'qconfig'), 'Embedding input float module must have qconfig defined'
-        from torch.quantization import float_qparams_weight_only_qconfig
+        from torch.ao.quantization import float_qparams_weight_only_qconfig
         if mod.qconfig is not None and mod.qconfig.weight is not None:
             weight_observer = mod.qconfig.weight()
         else:
@@ -220,7 +220,7 @@ class EmbeddingBag(Embedding):
         r"""Create a quantized embedding_bag module from a float module
 
         Args:
-            mod (Module): a float module, either produced by torch.quantization
+            mod (Module): a float module, either produced by torch.ao.quantization
                           utilities or provided by user
         """
         if hasattr(mod, 'weight_fake_quant'):
