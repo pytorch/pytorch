@@ -2804,7 +2804,7 @@ class TestReductions(TestCase):
         self.assertEqual(actual_bin_edges, expected_bin_edges)
 
     @onlyCPU
-    @dtypes(torch.float32, torch.float64)
+    @dtypes(torch.float32)
     def test_histogram(self, device, dtype):
         shapes = (
             (),
@@ -2873,13 +2873,18 @@ class TestReductions(TestCase):
             return t.cpu().numpy()
 
         # Wrapper around numpy.histogram performing conversions between torch tensors and numpy arrays.
-        def reference_histogramdd(self, t, bins, bin_range, weights, density, dtype):
+        def reference_histogramdd(t, bins, bin_range, weights, density, dtype):
             (np_t, np_bins, np_weights) = map(to_np, [t, bins, weights])
 
             # numpy.histogramdd accepts only (N, D) shapes
-            D = t.size(-1)
-            reshaped_t = np.reshape(np_t, (np_t.size // D, D))
-            reshaped_wt = np.reshape(np_weights, (np_t.size // D,)) if np_weights is not None else None
+            D = np_t.shape[-1]
+            N = np.prod(np_t.shape[:-1])
+            reshaped_t = np.reshape(np_t, (N, D))
+            reshaped_wt = np.reshape(np_weights, (N,)) if np_weights is not None else None
+
+            # numpy.histogramdd throws an error for D=0
+            if D == 0:
+                return (torch.tensor(float('nan') if density else 0.), [])
 
             # numpy.histogramdd expects range to be specified as a sequence of D (lower, upper) tuples
             reshaped_range = None if not bin_range else [(bin_range[2 * i], bin_range[2 * i + 1]) for i in range(D)]
@@ -2890,7 +2895,7 @@ class TestReductions(TestCase):
             return (torch.from_numpy(np_hist).to(dtype), [torch.from_numpy(t).to(dtype) for t in np_bin_edges])
 
         (actual_hist, actual_bin_edges) = torch.histogramdd(t, bins, range=bin_range, weight=weights, density=density)
-        (expected_hist, expected_bin_edges) = reference_histogramdd(self, t, bins, bin_range, weights, density, actual_hist.dtype)
+        (expected_hist, expected_bin_edges) = reference_histogramdd(t, bins, bin_range, weights, density, actual_hist.dtype)
 
         D = len(actual_bin_edges)
         self.assertEqual(D, len(expected_bin_edges))
@@ -2907,7 +2912,7 @@ class TestReductions(TestCase):
                 self.assertEqual(actual_bin_edges[dim], expected_bin_edges[dim], atol=1e-5, rtol=1e-5)
             # Calls numpy.histogram again, passing torch's actual_bin_edges as the bins argument
             (expected_hist, expected_bin_edges) = reference_histogramdd(
-                self, t, actual_bin_edges, bin_range, weights, density, actual_hist.dtype)
+                t, actual_bin_edges, bin_range, weights, density, actual_hist.dtype)
             self.assertEqual(D, len(expected_bin_edges))
 
         self.assertEqual(actual_hist, expected_hist)
@@ -2915,13 +2920,18 @@ class TestReductions(TestCase):
             self.assertEqual(actual_bin_edges[dim], expected_bin_edges[dim])
 
     @onlyCPU
-    @dtypes(torch.float32, torch.float64)
+    @dtypes(torch.float32)
     def test_histogramdd(self, device, dtype):
         shapes = (
             (1, 5),
             (3, 5),
             (1, 5, 1),
-            (2, 3, 5))
+            (2, 3, 5),
+            (7, 7, 7, 7),
+            (16, 8, 4, 2),
+            (10, 10, 10),
+            (7, 0, 3),
+            (5, 0),)
 
         for contig, bins_contig, weighted, density, shape in \
                 product([True, False], [True, False], [True, False], [True, False], shapes):
@@ -2961,7 +2971,7 @@ class TestReductions(TestCase):
             self._test_histogramdd_numpy(values, bin_edges, None, weights, density)
 
     @onlyCPU
-    @dtypes(torch.float32, torch.float64)
+    @dtypes(torch.float32)
     def test_histogram_error_handling(self, device, dtype):
         with self.assertRaisesRegex(RuntimeError, 'not implemented for'):
             values = make_tensor((), device, dtype=torch.int32)

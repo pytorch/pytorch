@@ -425,7 +425,7 @@ else:
         if isinstance(bins, int):
             bins = list(itertools.repeat(bins, input.size()[-1]))
 
-        if isinstance(bins[0], int):
+        if bins and isinstance(bins[0], int):
             bin_edges = _VF._histogramdd_bin_edges(input, bins, range=range, weight=weight, density=density)
         else:
             bin_edges = bins

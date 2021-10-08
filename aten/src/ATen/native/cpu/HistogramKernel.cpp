@@ -6,7 +6,9 @@
 
 #include <algorithm>
 #include <mutex>
+#include <numeric>
 #include <tuple>
+#include <functional>
 #include <ATen/TensorIndexing.h>
 
 namespace at { namespace native {
@@ -80,6 +82,11 @@ void histogramdd_cpu_contiguous(Tensor& hist, const TensorList& bin_edges,
     for (int64_t dim = 0; dim < D; dim++) {
         TORCH_INTERNAL_ASSERT(bin_edges[dim].is_contiguous());
         TORCH_INTERNAL_ASSERT(hist.size(dim) + 1 == bin_edges[dim].numel());
+    }
+
+    if (D == 0) {
+        // hist is an empty tensor in this case; nothing to do here
+        return;
     }
 
     TensorAccessor<input_t, 2> accessor_in = input.accessor<input_t, 2>();
@@ -188,7 +195,8 @@ void histogramdd_out_cpu_template(const Tensor& self, const c10::optional<Tensor
     hist.fill_(0);
 
     const int64_t D = self.size(-1);
-    const int64_t N = self.numel() / D;
+    const int64_t N = std::accumulate(self.sizes().begin(), self.sizes().end() - 1,
+            (int64_t)1, std::multiplies<int64_t>());
 
     const Tensor reshaped_input = self.reshape({N, D});
 
