@@ -29,6 +29,7 @@ install_ubuntu() {
     automake \
     build-essential \
     ca-certificates \
+    curl \
     git \
     libatlas-base-dev \
     libc6-dbg \
@@ -38,14 +39,14 @@ install_ubuntu() {
     libjpeg-dev \
     libasound2-dev \
     libsndfile-dev \
-    libssl-dev \
-    openssl \
     software-properties-common \
     sudo \
     wget \
     vim
 
-  apt-get remove -y libcurl3
+  # Should resolve issues related to various apt package repository cert issues
+  # see: https://github.com/pytorch/pytorch/issues/65931
+  apt-get install -y libgnutls30
 
   # Cleanup package manager
   apt-get autoclean && apt-get clean
@@ -70,6 +71,7 @@ install_centos() {
     bzip2 \
     cmake \
     cmake3 \
+    curl \
     gcc \
     gcc-c++ \
     gflags-devel \
@@ -80,10 +82,8 @@ install_centos() {
     hiredis-devel \
     libstdc++-devel \
     libsndfile-devel \
-    libssl-dev \
     make \
     opencv-devel \
-    openssl \
     sudo \
     wget \
     vim
@@ -110,23 +110,10 @@ case "$ID" in
     ;;
 esac
 
-# Install curl separately since the apt-get version is too old
-mkdir curl_build && cd curl_build
-CURL_VERSION=7.79.1
-wget https://curl.se/download/curl-${CURL_VERSION}.tar.gz
-tar -xzf curl-${CURL_VERSION}.tar.gz
-cd curl-${CURL_VERSION}
-PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig LDFLAGS=-Wl,-rpath,/usr/local/lib/ \
-               ./configure --with-openssl
-make -j 4
-sudo make install
-cd ../../
-rm -rf curl_build
-
 # Install Valgrind separately since the apt-get version is too old.
 mkdir valgrind_build && cd valgrind_build
 VALGRIND_VERSION=3.16.1
-wget https://sourceware.org/ftp/valgrind/valgrind-${VALGRIND_VERSION}.tar.bz2
+wget https://ossci-linux.s3.amazonaws.com/valgrind-${VALGRIND_VERSION}.tar.bz2
 tar -xjf valgrind-${VALGRIND_VERSION}.tar.bz2
 cd valgrind-${VALGRIND_VERSION}
 ./configure --prefix=/usr/local
