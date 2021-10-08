@@ -4983,7 +4983,7 @@ class DistributedTest:
             gpus = [rank]         # only do single GPU per process
             # cpu training setup
             model = BN_NET
-            num_processes = int(WORLD_SIZE)
+            num_processes = dist.get_world_size()
             # Generate input with some empty batch sizes on certain GPUs.
             bs_array = torch.randint(low=0, high=10, size=(num_processes,), dtype=torch.int)
             if (bs_array != 0).all().item():
