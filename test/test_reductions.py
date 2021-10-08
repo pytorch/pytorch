@@ -2803,6 +2803,21 @@ class TestReductions(TestCase):
         self.assertEqual(actual_hist, expected_hist)
         self.assertEqual(actual_bin_edges, expected_bin_edges)
 
+        # Test passing non-contiguous output tensors
+        hist_out = make_tensor(expected_hist.shape, device=expected_hist.device, dtype=expected_hist.dtype,
+                               noncontiguous=True)
+        bin_edges_out = make_tensor(expected_bin_edges.shape, device=expected_bin_edges.device, dtype=expected_bin_edges.dtype,
+                                    noncontiguous=True)
+
+        # Doesn't pass a 'range' kwarg unless necessary because the override of histogram with Tensor bins doesn't accept one
+        if bin_range:
+            torch.histogram(t, bins, range=bin_range, weight=weights, density=density, out=(hist_out, bin_edges_out))
+        else:
+            torch.histogram(t, bins, weight=weights, density=density, out=(hist_out, bin_edges_out))
+
+        self.assertEqual(hist_out, expected_hist)
+        self.assertEqual(bin_edges_out, expected_bin_edges)
+
     @onlyCPU
     @dtypes(torch.float32)
     def test_histogram(self, device, dtype):
