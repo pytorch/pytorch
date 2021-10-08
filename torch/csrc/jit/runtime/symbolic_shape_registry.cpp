@@ -193,6 +193,22 @@ const std::string shape_compute_functions =
         def max_pool2d_with_indices(input: List[int], kernel_size: List[int], stride: List[int], padding: List[int], dilation: List[int], ceil_mode: bool):
           out = max_pool2d(input, kernel_size, stride, padding, dilation, ceil_mode)
           return (out, out)
+
+        def upsample_nearest2d(input: List[int], output_size: Optional[List[int]], scale_factors: Optional[List[float]]):
+          out: List[int] = []
+          out.append(input[0])
+          out.append(input[1])
+          if output_size is not None:
+            out.append(output_size[0])
+            out.append(output_size[1])
+            return out
+
+          if scale_factors is not None:
+            out.append(int(input[2] * scale_factors[0]))
+            out.append(int(input[3] * scale_factors[1]))
+            return out
+          assert 0, "Either output_size or scale_factors must be presented"
+
     )"
     R"(
 
@@ -519,6 +535,12 @@ const std::string shape_compute_functions =
           for i in range(end_dim + 1, len(input)):
             shape.append(input[i])
           return shape
+
+        def quantized_prepacked_conv2d(input: List[int], conv2dOpContext: Any):
+          assert isinstance(conv2dOpContext, __torch__.torch.classes.quantized.Conv2dPackedParamsBase)
+          (weight, bias, stride, padding, dilation, groups) = ops.quantized.conv2d_unpack_sizes(conv2dOpContext)
+          return conv2d(input, weight, bias, stride, padding, dilation, groups)
+
     )"
 #ifdef USE_XNNPACK
     R"(
@@ -556,6 +578,10 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::mul.Scalar(Tensor self, Scalar other) -> Tensor", "unary"},
       {"aten::div.Tensor(Tensor self, Tensor other) -> Tensor", "broadcast"},
       {"aten::div.Scalar(Tensor self, Scalar other) -> Tensor", "unary"},
+      {"aten::sub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor", "broadcast"},
+      {"aten::sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)", "broadcast"},
+      {"aten::sub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", "unary"},
+      {"aten::sub_.Scalar(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)", "unary"},
       {"aten::contiguous(Tensor(a) self, *, MemoryFormat memory_format=contiguous_format) -> Tensor(a)", "unary"},
       {"aten::gt.Tensor(Tensor self, Tensor other) -> Tensor", "broadcast"},
       {"aten::rsub.Tensor(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", "unary"},
@@ -612,8 +638,13 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)", "expand_one_unused"},
       {"aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "mean_dim"},
       {"aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor", "addmm"},
+      {"aten::upsample_nearest2d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> (Tensor)", "upsample_nearest2d"},
       {"aten::quantize_per_tensor(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor", "unary"},
+      {"aten::quantize_per_tensor.tensor_qparams(Tensor self, Tensor scale, Tensor zero_point, ScalarType dtype) -> Tensor", "unary"},
       {"aten::dequantize(Tensor self) -> Tensor", "unary"},
+      {"quantized::conv2d.new(Tensor qx, __torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weight, float output_scale, int output_zero_point) -> Tensor", "quantized_prepacked_conv2d"},
+      {"quantized::conv2d_relu.new(Tensor qx, __torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weight, float output_scale, int output_zero_point) -> Tensor", "quantized_prepacked_conv2d"},
+      {"quantized::add(Tensor qa, Tensor qb, float scale, int zero_point) -> Tensor qc", "broadcast"},
 #ifdef USE_XNNPACK
       {"prepacked::conv2d_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.Conv2dOpContext W_prepack) -> Tensor Y", "prepacked_conv2d_clamp_run"},
       {"prepacked::linear_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.LinearOpContext W_prepack) -> Tensor Y", "prepacked_linear_clamp_run"},
