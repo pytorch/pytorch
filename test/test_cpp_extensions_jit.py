@@ -921,6 +921,7 @@ class TestCppExtensionJIT(common.TestCase):
 
     @unittest.skipIf(TEST_WITH_ASAN, "ASAN disables the crash handler's signal handler")
     @unittest.skipIf(not has_breakpad(), "Built without breakpad")
+    @unittest.skipIf(os.environ.get("TEST_CONFIG") == "force_on_cpu", "fails on force_on_cpu config, tracked w/ #65253")
     def test_crash_handler(self):
         with tempfile.TemporaryDirectory() as temp_dir, tempfile.NamedTemporaryFile(delete=not sys.platform == "win32") as stderr:
             # Use multiprocessing to spin up a separate process to make catching

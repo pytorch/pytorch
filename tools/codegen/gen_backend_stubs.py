@@ -231,6 +231,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                 'namespaced_headers': '',
                 'DispatchKey': dispatch_key,
                 'dispatch_namespace': dispatch_key.lower(),
+                'dispatch_helpers': dest.gen_registration_helpers(backend_indices[dispatch_key]),
                 'dispatch_namespaced_definitions': list(concatMap(
                     dest.RegisterDispatchKey(
                         backend_indices[dispatch_key],

@@ -4,7 +4,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import (
     Dict,
-    List
+    List,
+    Optional,
 )
 
 import threading
@@ -20,9 +21,12 @@ from torch.distributed._sharding_spec import (
 )
 from torch.distributed._sharding_spec._internals import (
     check_tensor,
-    validate_non_overlapping_shards_metadata
+    validate_non_overlapping_shards_metadata,
+    get_split_size,
+    get_chunked_dim_size,
 )
-
+from torch.types import Number
+from .ops import sharded_linear
 
 # Tracking for sharded tensor objects.
 _sharded_tensor_lock = threading.Lock()
@@ -70,6 +74,13 @@ class TensorProperties(object):
     memory_format: torch.memory_format = field(default=torch.contiguous_format)
     pin_memory: bool = False
 
+
+class MEM_FORMAT_ENCODING(Enum):
+    TORCH_CONTIGUOUS_FORMAT = 0
+    TORCH_CHANNELS_LAST = 1
+    TORCH_PRESERVE_FORMAT = 2
+
+
 @dataclass
 class ShardedTensorMetadata(object):
     """
@@ -93,15 +104,15 @@ class ShardedTensorMetadata(object):
         # Since torch.memory_format cannot be pickled!
         memory_format = self.tensor_properties.memory_format
         if memory_format == torch.contiguous_format:
-            mem_format_encoding = 0
+            mem_format_encoding = MEM_FORMAT_ENCODING.TORCH_CONTIGUOUS_FORMAT
         elif memory_format == torch.channels_last:
-            mem_format_encoding = 1
+            mem_format_encoding = MEM_FORMAT_ENCODING.TORCH_CHANNELS_LAST
         elif memory_format == torch.preserve_format:
-            mem_format_encoding = 1
+            mem_format_encoding = MEM_FORMAT_ENCODING.TORCH_PRESERVE_FORMAT
         else:
             raise RuntimeError(f'Invalid torch.memory_format: {memory_format}')
 
-        # Keep old seriazation to ensure backward compatibility
+        # Keep old serialization to ensure backward compatibility
         return (
             self.shards_metadata,
             self.size,
@@ -118,11 +129,11 @@ class ShardedTensorMetadata(object):
     ):
         (self.shards_metadata, self.size, dtype, layout, requires_grad, mem_format_encoding, pin_memory) = state
 
-        if mem_format_encoding == 0:
+        if mem_format_encoding == MEM_FORMAT_ENCODING.TORCH_CONTIGUOUS_FORMAT:
             memory_format = torch.contiguous_format
-        elif mem_format_encoding == 1:
+        elif mem_format_encoding == MEM_FORMAT_ENCODING.TORCH_CHANNELS_LAST:
             memory_format = torch.channels_last
-        elif mem_format_encoding == 2:
+        elif mem_format_encoding == MEM_FORMAT_ENCODING.TORCH_PRESERVE_FORMAT:
             memory_format = torch.preserve_format
         else:
             raise RuntimeError(f'Invalid torch.memory_format encoding: {mem_format_encoding}')
@@ -143,18 +154,50 @@ def _register_remote_shards(sharded_tensor_id: int, rrefs: List[rpc.RRef[Shard]]
 
 class CreateOp(Enum):
     EMPTY = 0
-    ONES = 1
+    FULL = 1
+    ONES = 2
+    RAND = 3
+    ZEROS = 4
 
 
 @dataclass
 class TensorInitParams(object):
     """ Container for list of common params to create new local tensor. """
 
-    __slots__ = ['create_op', 'tensor_properties']
-
     create_op: CreateOp
-    tensor_properties: TensorProperties
 
+    # needed when create_op is FULL
+    # default set to False (not None) since None is incompatible with Number.
+    fill_value: Number = field(default=False)
+
+    tensor_properties: TensorProperties = field(
+        default=TensorProperties(dtype=torch.get_default_dtype(),
+                                 layout=torch.strided,
+                                 requires_grad=False,
+                                 memory_format=torch.contiguous_format,
+                                 pin_memory=False))
+
+def _validate_output_tensor_for_gather(
+    my_rank: int,
+    dst_rank: int,
+    size: torch.Size,
+    dst_tensor: Optional[torch.Tensor],
+) -> None:
+    if dst_rank == my_rank:
+        if dst_tensor is None:
+            raise ValueError(
+                f"Argument ``dst_tensor`` must be specified on destination rank {dst_rank}"
+            )
+        if tuple(size) != (dst_tensor.size()):
+            raise ValueError(
+                f"Argument ``dst_tensor`` have size {tuple(dst_tensor.size())},"
+                f"but should be {tuple(size)}"
+            )
+    elif dst_tensor:
+        raise ValueError(
+            "Argument ``dst_tensor`` must NOT be specified "
+            "on non-destination ranks."
+        )
 
 class ShardedTensor(object):
     """
@@ -314,6 +357,67 @@ class ShardedTensor(object):
         # Barrier for all RPCs to finish on all ranks.
         rpc.api._all_gather(None)
 
+    def gather(
+        self,
+        dst: int = 0,
+        out: Optional[torch.Tensor] = None,
+    ) -> None:
+        """
+        Creates a full :class:`Tensor` on rank ``dst`` by gathering all shards of the
+        sharded tensor.
+
+        The API needs to be called on all ranks in SPMD fashion. All ranks should have
+        the same ``dst``. ``out`` should be a tensor of the same size as the overall
+        size of the sharded tensor on ``dst`` and ``None`` on all other ranks.
+
+        Args:
+            dst(int): The rank where full tensor is constructed.
+                Default: 0
+            out (:class `torch.Tensor`, optional): The output full tensor.
+                Must to be provided ONLY on ``dst`` rank.
+                Default: ``None``
+        """
+        rank = dist.get_rank(self._process_group)
+        full_size = self.metadata().size
+        _validate_output_tensor_for_gather(rank, dst, full_size, out)
+
+        local_shards = self.local_shards()
+
+        world_size = dist.get_world_size(self._process_group)
+
+        gathered_shards = [None] * world_size
+        # will revise this part with CPU support and use dist.gather()
+        # once NCCL support for gather() is ready
+        # https://github.com/pytorch/pytorch/issues/66187
+        device = torch.device(f"cuda:{rank % world_size}")
+        with torch.cuda.device(device):
+            dist.all_gather_object(
+                obj=local_shards,
+                object_list=gathered_shards,
+                group=self._process_group,
+            )
+
+        if rank == dst:
+            dims = len(full_size)
+            for shards in gathered_shards:
+                if shards is None:
+                    raise RuntimeError(
+                        'Gathered shards cannot be None on dst rank {dst}'
+                    )
+                for shard in shards:
+                    metadata = shard.metadata
+                    tensor = shard.tensor
+
+                    out_narrow_view = out
+                    for dim in range(dims):
+                        out_narrow_view = out_narrow_view.narrow(
+                            dim,
+                            metadata.shard_offsets[dim],
+                            metadata.shard_lengths[dim],
+                        )
+
+                    out_narrow_view.copy_(tensor)
+
     @classmethod
     def _init_from_local_shards(
         cls,
@@ -443,14 +547,14 @@ class ShardedTensor(object):
         remote_devices = self._sharding_spec.placements  # type: ignore[attr-defined]
         chunks = len(remote_devices)
         # split_size computed similar to 'torch.chunk'
-        split_size = (dim_size + chunks - 1) // chunks
+        split_size = get_split_size(dim_size, chunks)
 
         shards_metadata = []
         for idx, remote_device in enumerate(remote_devices):
             rank, local_device = self._parse_and_validate_remote_device(remote_device)
 
             # Adjust the sharding dim for this rank.
-            sharded_dim_size = min(dim_size, split_size * (idx + 1)) - split_size * idx
+            sharded_dim_size = get_chunked_dim_size(dim_size, split_size, idx)
 
             if sharded_dim_size > 0:
                 # Build sharding_metadata.
@@ -529,7 +633,9 @@ class ShardedTensor(object):
         return self._sharding_spec
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
-        if func == torch.nn.init.uniform_:
+        if func == torch.nn.functional.linear:
+            return sharded_linear(types, args, kwargs, self._process_group)
+        elif func == torch.nn.init.uniform_:
             sharded_tensor = kwargs['tensor']
             if sharded_tensor is None: raise ValueError("sharded_tensor shouldn't be None!")
             a = kwargs['a']
@@ -537,8 +643,10 @@ class ShardedTensor(object):
             b = kwargs['b']
             if b is None: raise ValueError("b shouldn't be None!")
             return _uniform_(sharded_tensor=sharded_tensor, a=a, b=b)
-        else:
-            raise RuntimeError(f"torch function '{func.__name__}' not supported for ShardedTensor!")
+
+        raise RuntimeError(
+            f"torch function '{func.__name__}', with args: {args} and "
+            f"kwargs: {kwargs} not supported for ShardedTensor!")
 
     def metadata(self) -> ShardedTensorMetadata:
         """
@@ -608,7 +716,7 @@ class ShardedTensor(object):
         return self._remote_shards
 
     def __repr__(self):
-        return str(self._metadata)
+        return f'ShardedTensor({self._metadata})'
 
     @dataclass
     class ProcessGroupState:
@@ -693,6 +801,27 @@ def _create_tensor_from_params(*size, local_device, tensor_init_params: TensorIn
                            device=local_device, requires_grad=requires_grad,
                            # NB: memory_format param is not accepted by torch.ones
                            memory_format=memory_format, pin_memory=pin_memory,)
+    elif tensor_init_params.create_op == CreateOp.ZEROS:
+        return torch.zeros(*size,
+                           dtype=dtype,
+                           layout=layout,
+                           device=local_device,
+                           pin_memory=pin_memory,
+                           requires_grad=requires_grad,)
+    elif tensor_init_params.create_op == CreateOp.RAND:
+        return torch.rand(*size,
+                          dtype=dtype,
+                          layout=layout,
+                          device=local_device,
+                          pin_memory=pin_memory,
+                          requires_grad=requires_grad,)
+    elif tensor_init_params.create_op == CreateOp.FULL:
+        return torch.full(size=size,
+                          fill_value=tensor_init_params.fill_value,
+                          layout=layout,
+                          dtype=dtype,
+                          requires_grad=requires_grad,
+                          device=local_device, )
     else:
         raise ValueError(f'Unsupported create_op: {tensor_init_params.create_op}')
 

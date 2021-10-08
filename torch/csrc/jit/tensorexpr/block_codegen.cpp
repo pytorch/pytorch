@@ -16,6 +16,8 @@ std::string blockDtypeCppString(const Dtype& dtype) {
       return "1";
     case ScalarType::Half:
       return "2";
+    case ScalarType::BFloat16:
+      return "2";
     // NOLINTNEXTLINE(bugprone-branch-clone)
     case ScalarType::Char:
       return "1";
@@ -76,7 +78,7 @@ void BlockAnalysis::visit(ForPtr v) {
     v->body()->accept(this);
   } else if (loop_options.is_gpu_thread_index()) {
     auto block_size = v->stop();
-    block_size_ = to<IntImm>(block_size)->value();
+    block_size_ = *intValue(block_size);
     v->body()->accept(this);
   } else {
     IRVisitor::visit(v);
@@ -185,15 +187,14 @@ void BlockPrinter::PrintArguments(const std::unordered_set<BufPtr>& bufs) {
 
     // The dims for the multi-dim tensors
     for (unsigned long d = 0; d < num_dims; d++) {
-      auto dim_val = to<IntImm>(multidimbuf->dim(d));
-      this->dim_values_map.emplace(this->dim_names[d], dim_val->value());
+      auto dim_val = *intValue(multidimbuf->dim(d));
+      this->dim_values_map.emplace(this->dim_names[d], dim_val);
     }
 
     // The dimensions for the flattened tensors
-    auto val = to<IntImm>(buf->dim(0));
+    auto val = *intValue(buf->dim(0));
     if (block_analysis_->is_buf_store_target(buf)) {
-      this->dim_values_map.emplace(
-          this->flat_dim_names[num_dims - 1], val->value());
+      this->dim_values_map.emplace(this->flat_dim_names[num_dims - 1], val);
     }
   }
 

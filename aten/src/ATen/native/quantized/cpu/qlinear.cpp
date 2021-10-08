@@ -280,6 +280,8 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
   size_t cols_w = input_contig.size(input_contig.dim() - 1);
   auto input_scale = input_contig.q_scale();
 
+  // QNNPack is not thread safe
+  std::lock_guard<std::mutex> lock(qnnp_mutex_);
   if (!this->input_scale.has_value() ||
       this->input_scale.value() != input_scale) {
     // Get the original weight and adjust it to uint8 from int8
