@@ -93,7 +93,8 @@ class TORCH_API TensorExprKernel {
       const std::shared_ptr<Graph>& subgraph,
       std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings =
           {},
-      bool pre_alloc = false);
+      bool pre_alloc = false,
+      const std::string& kernel_func_name = "func");
 
   void run(Stack& stack);
   void runFast(
@@ -105,7 +106,6 @@ class TORCH_API TensorExprKernel {
   }
 
   StmtPtr getCodeGenStmt();
-
   std::string getCodeText(const std::string& attr = "") {
     return codegen_->getCodeText(attr);
   }
@@ -131,7 +131,7 @@ class TORCH_API TensorExprKernel {
     kBlockCodeGen,
   };
 
-  void compile();
+  void compile(const std::string& kernel_func_name = "func");
   void genInputDebugNames();
   void runKernel(Stack& stack);
 

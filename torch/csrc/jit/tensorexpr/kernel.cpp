@@ -1277,7 +1277,7 @@ void TensorExprKernel::preAllocIntermediateBufs(
   }
 }
 
-void TensorExprKernel::compile() {
+void TensorExprKernel::compile(const std::string& kernel_func_name) {
   GRAPH_DUMP("TensorExprKernel graph:", graph_);
 
   device_ = *pickDeviceType(graph_);
@@ -1365,20 +1365,21 @@ void TensorExprKernel::compile() {
       stmt,
       bufferArgs_,
       device_,
-      SubgraphUtils::generateNameForGraph(graph_));
+      kernel_func_name);
 }
 
 TensorExprKernel::TensorExprKernel(
     const std::shared_ptr<Graph>& subgraph,
     std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings,
-    bool pre_alloc /*= false*/)
+    bool pre_alloc /*= false*/,
+    const std::string& kernel_func_name)
     : graph_(subgraph),
       code_(subgraph, ""),
       custom_lowerings_(std::move(custom_lowerings)),
       pre_alloc_(pre_alloc) {
   allow_fallback_ = fallbackAllowed();
   if (!allow_fallback_) {
-    compile();
+    compile(kernel_func_name);
     return;
   }
 
@@ -1388,7 +1389,7 @@ TensorExprKernel::TensorExprKernel(
   }
 
   try {
-    compile();
+    compile(kernel_func_name);
   } catch (...) {
     use_fallback_ = true;
   }

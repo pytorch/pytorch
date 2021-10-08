@@ -91,6 +91,10 @@ std::string getNncKernelId(const std::string& method_name) {
       ":" + version_token;
 }
 
+std::string getNncKernelFuncName(const std::string& method_name) {
+  return "nnc_" + FLAGS_model_name + "_" + FLAGS_model_version + "_" + method_name;
+}
+
 void writeOutputLlvmAssembly(const std::string& asm_code) {
   std::string output_llvm_file_name = FLAGS_output_llvm;
   if (output_llvm_file_name.empty()) {
@@ -110,9 +114,9 @@ c10::IValue preprocess(
   auto method = mod.get_method(method_name);
   auto graph = method.function().graph()->copy();
   auto sizes = getInputSizesForMethod(method_compile_spec, method_name);
+  auto kernel_func_name = getNncKernelFuncName(method_name);
 
-  std::string llvm_asm_code;
-  auto compiled = torch::jit::mobile::nnc::aotCompile(method_name, graph, sizes);
+  auto compiled = torch::jit::mobile::nnc::aotCompile(method_name, graph, sizes, kernel_func_name);
   writeOutputLlvmAssembly(compiled.second);
 
   auto func = std::move(compiled.first);
