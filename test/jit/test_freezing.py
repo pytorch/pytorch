@@ -6,7 +6,6 @@ from typing import Any
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch._C import parse_ir
 from torch.jit._recursive import wrap_cpp_module
 from torch.testing import FileCheck
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
@@ -1611,6 +1610,135 @@ class TestFrozenOptimizations(JitTestCase):
             test_conv_fusion(use_bias, nn.Conv2d, False, pytorch_op, False,
                              add_tensor=torch.rand(1).to(torch.int), expect_success=False)
 
+    @unittest.skipIf(not TEST_CUDA, "Optimization currently only run for GPU")
+    def test_linear_concat(self):
+        out_dimms = [[5, 10], [1, 5]]
+
+        for w1_dim, w2_dim in out_dimms:
+            class ModMultLinear(nn.Module):
+                def __init__(self, w1_dim, w2_dim):
+                    super(ModMultLinear, self).__init__()
+                    self.w1 = nn.Parameter(torch.rand([w1_dim, 5]))
+                    self.b1 = nn.Parameter(torch.rand([w1_dim]))
+                    self.w2 = nn.Parameter(torch.rand([w2_dim, 5]))
+                    self.b2 = nn.Parameter(torch.rand([w2_dim]))
+
+                def forward(self, in_tensor1):
+                    res1 = torch._C._nn.linear(in_tensor1, self.w1, self.b1)
+                    res2 = torch._C._nn.linear(in_tensor1, self.w2, self.b2)
+                    return res1, res2
+
+            mod_eager = ModMultLinear(w1_dim, w2_dim).eval()
+
+            test_val1 = torch.rand([50, 5])
+            self.check_linear_optimizations(mod_eager, 2, 1, (test_val1, ))
+
+    @unittest.skipIf(not TEST_CUDA, "Optimization currently only run for GPU")
+    def test_linear_concat_complex(self):
+        """
+            Testing that the interleaving of multiple optimizations does not
+            cause errors, and gets optimized as expected
+        """
+        class ModMultLinear(nn.Module):
+            def __init__(self):
+                super(ModMultLinear, self).__init__()
+                w1_dim = 5
+                w2_dim = 10
+                self.w1 = nn.Parameter(torch.rand([w1_dim, 5]))
+                self.b1 = nn.Parameter(torch.rand([w1_dim]))
+                self.w2 = nn.Parameter(torch.rand([w2_dim, 5]))
+                self.b2 = nn.Parameter(torch.rand([w2_dim]))
+
+            def forward(self, in_tensor1):
+                res1 = torch._C._nn.linear(in_tensor1, self.w1, self.b1)
+                res3 = torch._C._nn.linear(res1, self.w2, self.b2)
+                res2 = torch._C._nn.linear(in_tensor1, self.w2, self.b2)
+                res4 = torch._C._nn.linear(res1, self.w1, self.b1)
+                return res2, res3, res4
+
+        mod_eager = ModMultLinear().eval()
+        test_val1 = torch.rand([50, 5])
+        self.check_linear_optimizations(mod_eager, 4, 2, (test_val1, ))
+
+    @unittest.skipIf(not TEST_CUDA, "Optimization currently only run for GPU")
+    def test_linear_concat_different_input(self):
+        """
+        There should be no change to the graph due to the optimization pass
+        due to the two input tensors being different
+        """
+
+        # Freezing requires that the graph be a module
+        class ModMultLinear(nn.Module):
+            def __init__(self, w1_dim, w2_dim):
+                super(ModMultLinear, self).__init__()
+                self.w1 = nn.Parameter(torch.rand([w1_dim, 5]))
+                self.b1 = nn.Parameter(torch.rand([w1_dim]))
+                self.w2 = nn.Parameter(torch.rand([w2_dim, 5]))
+                self.b2 = nn.Parameter(torch.rand([w2_dim]))
+
+            def forward(self, in_tensor1, in_tensor2):
+                res1 = torch._C._nn.linear(in_tensor1, self.w1, self.b1)
+                res2 = torch._C._nn.linear(in_tensor2, self.w2, self.b2)
+                return res1, res2
+
+        mod_eager = ModMultLinear(5, 5).eval()
+        test_val1 = torch.rand([50, 5])
+        test_val2 = torch.rand([50, 5])
+        self.check_linear_optimizations(mod_eager, 2, 2, (test_val1, test_val2))
+
+    @unittest.skipIf(not TEST_CUDA, "Optimization currently only run for GPU")
+    def test_linear_multiple_blocks(self):
+        class ModMultLinear(nn.Module):
+            def __init__(self, w1_dim, w2_dim):
+                super(ModMultLinear, self).__init__()
+                self.w1 = nn.Parameter(torch.rand([w1_dim, 5]))
+                self.b1 = nn.Parameter(torch.rand([w1_dim]))
+                self.w2 = nn.Parameter(torch.rand([w2_dim, 5]))
+                self.b2 = nn.Parameter(torch.rand([w2_dim]))
+
+            def forward(self, in_tensor1, in_tensor2, cond: bool):
+                res1 = torch._C._nn.linear(in_tensor1, self.w1, self.b1)
+                if cond:
+                    res3 = torch._C._nn.linear(in_tensor2, self.w2, self.b2)
+                    res4 = torch._C._nn.linear(in_tensor1, self.w2, self.b1)
+                else:
+                    raise AssertionError()
+                res2 = torch._C._nn.linear(in_tensor1, self.w2, self.b1)
+                return res1, res2, res3, res4
+
+        mod_eager = ModMultLinear(5, 5).eval()
+        test_val1 = torch.rand([50, 5])
+        test_val2 = torch.rand([50, 5])
+        self.check_linear_optimizations(mod_eager, 4, 3, (test_val1, test_val2, True))
+
+    def check_linear_optimizations(self, eager_mod, orig_linears, new_linears, test_vals):
+        for is_cuda in [False, True]:
+            if is_cuda:
+                mod_to_device = eager_mod.cuda()
+                test_vals_to_device = [t.cuda() if isinstance(t, torch.Tensor) else t for t in test_vals]
+            else:
+                mod_to_device = eager_mod
+                test_vals_to_device = test_vals
+
+            script_mod = torch.jit.script(mod_to_device)
+            op_graph = script_mod.graph
+
+            FileCheck().check_count("aten::linear", orig_linears, exactly=True).run(op_graph)
+            # successively no-ops with non-const inputs
+            self.run_pass("concat_frozen_linear", op_graph)
+            FileCheck().check_count("aten::linear", orig_linears, exactly=True).run(op_graph)
+
+            script_mod = torch.jit.freeze(script_mod)
+            op_graph = script_mod.graph
+            self.run_pass("concat_frozen_linear", op_graph)
+            if is_cuda:
+                FileCheck().check_count("aten::linear", new_linears, exactly=True).run(op_graph)
+            else:
+                FileCheck().check_count("aten::linear", orig_linears, exactly=True).run(op_graph)
+
+            self.assertEqual(mod_to_device(*test_vals_to_device), script_mod(*test_vals_to_device))
+
+
     def test_optimize_freeze_module(self):
         in_channels, out_channels = 3, 32
         conv = torch.nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=2, bias=True)
@@ -2099,7 +2227,7 @@ class TestFrozenOptimizations(JitTestCase):
                             %35 : Tensor = {mkldnn_opname}{inplace_str}(%34)
                             return ({inplace_tgt})
                         """
-                        g = parse_ir(graph_str)
+                        g = torch._C.parse_ir(graph_str)
                         m = self.createFunctionFromGraph(g)
                         x = torch.rand(size)
                         # `inplace=False` is intentional, otherwise we modify the input
@@ -2122,7 +2250,6 @@ class TestFrozenOptimizations(JitTestCase):
             scripted = torch.jit.freeze(torch.jit.script(mod))
             optimized = torch.jit.optimize_for_inference(scripted)
             inp = torch.rand([20, 20])
-            print(optimized.graph)
             # a1 cant be inplaced for first use, can for second
             FileCheck().check("ScalarMul_").check("ScalarMul(").check("ScalarMul_").run(optimized.graph)
             self.assertEqual(optimized(inp), mod(inp))
