@@ -106,6 +106,7 @@ class TORCH_API TensorExprKernel {
   }
 
   StmtPtr getCodeGenStmt();
+
   std::string getCodeText(const std::string& attr = "") {
     return codegen_->getCodeText(attr);
   }
