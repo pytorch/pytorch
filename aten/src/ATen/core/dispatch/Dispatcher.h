@@ -283,7 +283,7 @@ private:
   void checkSchemaCompatibility(const OperatorHandle& op, const FunctionSchema& schema, const std::string& debug);
 
   std::list<OperatorDef> operators_;
-#if defined(C10_MOBILE)
+#if !defined(C10_MOBILE)
   LeftRight<ska::flat_hash_map<OperatorName, OperatorHandle>> operatorLookupTable_;
 #else
   LeftRightNoOpWrapper<ska::flat_hash_map<OperatorName, OperatorHandle>> operatorLookupTable_;
