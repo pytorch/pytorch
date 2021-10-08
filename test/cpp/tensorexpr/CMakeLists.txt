@@ -15,6 +15,7 @@ set(TENSOREXPR_TEST_SRCS
   ${TENSOREXPR_TEST_ROOT}/test_loopnest.cpp
   ${TENSOREXPR_TEST_ROOT}/test_memdependency.cpp
   ${TENSOREXPR_TEST_ROOT}/test_ops.cpp
+  ${TENSOREXPR_TEST_ROOT}/test_quantization.cpp
   ${TENSOREXPR_TEST_ROOT}/test_reductions.cpp
   ${TENSOREXPR_TEST_ROOT}/test_registerizer.cpp
   ${TENSOREXPR_TEST_ROOT}/test_simplify.cpp

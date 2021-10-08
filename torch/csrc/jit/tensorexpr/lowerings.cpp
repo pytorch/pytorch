@@ -22,6 +22,7 @@ NNCLoweringFunction getStandardLoweringFor(const std::string& op) {
 
 namespace {
 RegisterNNCLoweringFunction aten_dropout("aten::dropout", computeNoop);
+RegisterNNCLoweringFunction aten_contiguous("aten::contiguous", computeNoop);
 
 RegisterNNCLoweringFunction prepacked_conv2d_clamp_run(
     "prepacked::conv2d_clamp_run",
@@ -1389,9 +1390,37 @@ RegisterNNCLoweringFunction aten_addmm("aten::addmm", computeAddMM);
 
 RegisterNNCLoweringFunction aten_mean("aten::mean", computeMean);
 
+RegisterNNCLoweringFunction aten_quantize_per_tensor(
+    "aten::quantize_per_tensor",
+    computeQuantizePerTensor);
+
+RegisterNNCLoweringFunction aten_dequantize(
+    "aten::dequantize",
+    computeDequantize);
+
+RegisterNNCLoweringFunction quantized_conv2d_prepack(
+    "quantized::conv2d_prepack",
+    computeQuantizedConv2dPrepack);
+
+RegisterNNCLoweringFunction quantized_conv2d(
+    "quantized::conv2d",
+    computeQuantizedConv2d);
+
+RegisterNNCLoweringFunction quantized_conv2d_relu(
+    "quantized::conv2d_relu",
+    computeQuantizedConv2dRelu);
+
+RegisterNNCLoweringFunction quantized_add(
+    "quantized::add",
+    computeQuantizedAdd);
+
 RegisterNNCLoweringFunction aten_adaptive_avg_pool2d(
     "aten::adaptive_avg_pool2d",
     computeAdaptiveAvgPool2d);
+
+RegisterNNCLoweringFunction aten_upsample_nearest2d(
+    "aten::upsample_nearest2d",
+    computeUpsampleNearest2d);
 
 RegisterNNCLoweringFunction aten_add(
     "aten::add",

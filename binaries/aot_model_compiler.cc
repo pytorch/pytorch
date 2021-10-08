@@ -6,7 +6,15 @@
 #include <torch/csrc/jit/backends/backend_preprocess.h>
 #include <torch/csrc/jit/mobile/nnc/aot_compiler.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
+#include "torch/csrc/jit/passes/constant_propagation.h"
+#include "torch/csrc/jit/passes/dead_code_elimination.h"
+#include "torch/csrc/jit/passes/symbolic_shape_analysis.h"
+#include "torch/csrc/jit/passes/peephole.h"
+#include "torch/csrc/jit/passes/remove_mutation.h"
+#include "torch/csrc/jit/passes/shape_analysis.h"
 #include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
+#include <torch/csrc/jit/tensorexpr/kernel.h>
+#include <torch/csrc/jit/tensorexpr/graph_opt.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/script.h>
@@ -156,7 +164,21 @@ int main(int argc, char** argv) {
   m.eval();
   auto frozen_m = torch::jit::freeze_module(m.clone());
   auto graph = frozen_m.get_method("forward").graph();
+  std::vector<c10::optional<at::Tensor>> example_inputs = {at::rand({1, 4, 224, 224})};
+
+  torch::jit::RemoveTensorMutation(graph);
+  torch::jit::EliminateDeadCode(graph->block());
+  graph = torch::jit::tensorexpr::removeUnusedSelfArgument(graph);
+
+  torch::jit::tensorexpr::annotateInputShapes(graph, example_inputs);
   torch::jit::OptimizeFrozenGraph(graph, true);
+  torch::jit::PropagateShapesOnGraph(graph);
+  torch::jit::PeepholeOptimize(graph, false);
+  torch::jit::ConstantPropagation(graph);
+  torch::jit::PropagateShapesOnGraph(graph);
+  torch::jit::PeepholeOptimize(graph, false);
+  torch::jit::ConstantPropagation(graph);
+  graph->dump();
 
   auto compile_spec = createCompileSpec();
   auto any_dict_ty =
