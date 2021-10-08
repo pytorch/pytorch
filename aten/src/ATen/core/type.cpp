@@ -961,7 +961,7 @@ UnionType::UnionType(std::vector<TypePtr> reference, TypeKind kind) : Type(kind)
     std::stringstream msg;
     msg << "After type unification was performed, the Union with the "
         << "original types {";
-    for (auto i = 0; i < reference.size(); ++i) {
+    for (const auto i : c10::irange(reference.size())) {
       msg << reference[i]->repr_str();
       if (i > 0) {
         msg << ",";
