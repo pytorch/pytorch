@@ -1,7 +1,5 @@
 .. _torch_quantization:
 
-:orphan:
-
 torch.quantization
 ------------------
 .. automodule:: torch.quantization
