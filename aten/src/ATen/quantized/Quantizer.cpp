@@ -146,7 +146,7 @@ Tensor PerTensorAffineQuantizer::quantize(const Tensor& rtensor) {
 // TODO: move this fix to separate PR
   TORCH_CHECK(
       rtensor.scalar_type() == kFloat,
-      "quantize only works on Float Tensor, got ", rtensor.scalar_type());
+      "Quantize only works on Float Tensor, got ", rtensor.scalar_type());
   // Here we need a std::intrusive_ptr<Quantizer>.. but actually "this" is the
   // quantizer that can be reused, so I'm using intrusive_from_this here
   Tensor qtensor = new_qtensor(
@@ -205,7 +205,11 @@ Tensor PerChannelAffineFloatQParamsQuantizer::quantize(const Tensor& rtensor) {
 // TODO: move this fix to separate PR
  TORCH_CHECK(
       rtensor.scalar_type() == kFloat,
+<<<<<<< HEAD
+      "Quantize only works on Float Tensor, got ", rtensor.scalar_type());
+=======
       "quantize only works on Float Tensor, got ", rtensor.scalar_type());
+>>>>>>> 03b84a748d ([WIP] working POC of quantization via dynamic tracing)
  Tensor qtensor = new_qtensor(
       rtensor.sizes(),
       rtensor.options().dtype(scalar_type_),
