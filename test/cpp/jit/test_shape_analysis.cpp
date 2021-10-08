@@ -5,7 +5,9 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/symbolic_shape_runtime_compute.h>
+#include <torch/csrc/jit/runtime/graph_iterator.h>
 #include "ATen/core/interned_strings.h"
+#include "Functions.h"
 #include "c10/util/Exception.h"
 
 namespace torch {
@@ -24,30 +26,36 @@ TEST(ShapeAnalysisTest, Basic) {
         %28 : Tensor = aten::hardswish(%25)
         return (%28))IR";
   torch::jit::parseIR(graph_string, subgraph.get());
-  Graph g;
-  auto x_inp = g.addInput("x_inp");
-  auto y_inp = g.addInput("y_inp");
-  auto x_type = TensorType::get()->withSizes({10, 5});
-  auto y_type = TensorType::get()->withSizes({4, 5});
+  std::shared_ptr<Graph> g = std::make_shared<Graph>();
+  auto x_inp = g->addInput("x_inp");
+  auto y_inp = g->addInput("y_inp");
+  auto x_type = TensorType::create(at::rand({10, 5}));
+  auto y_type = TensorType::create(at::rand({4, 5}));
   x_inp->setType(x_type);
   y_inp->setType(y_type);
   subgraph->inputs().at(0)->setType(x_type);
   subgraph->inputs().at(1)->setType(y_type);
   x_inp->setType(TensorType::get()->withSizes({10, 5}));
   y_inp->setType(TensorType::get()->withSizes({4, 5}));
-  auto output = g.insertNode(g.create(prim::TensorExprGroup))->output();
+  auto output = g->insertNode(g->create(prim::TensorExprGroup))->output();
   output->node()->addInput(x_inp);
   output->node()->addInput(y_inp);
   output->node()->g_(attr::Subgraph, subgraph);
   auto maybe_map = GenerateGuard(output->node());
   TORCH_INTERNAL_ASSERT(maybe_map.has_value());
   auto map = *maybe_map;
-  g.dump();
-  for (const auto& pair: map) {
-    std::cout << pair.first << " : ";
-    pair.second->node()->dump();
-    std::cout << "\n";
+  g->dump();
+  DepthFirstGraphNodeIterator graph_it(g);
+  Node * if_node = nullptr;
+  for (auto node = graph_it.next(); node != nullptr; node = graph_it.next()) {
+    if (node->kind() == prim::If) {
+      if_node = node;
+      break;
+    }
   }
+  TORCH_INTERNAL_ASSERT(if_node != nullptr);
+
+
   // TODO: add test for corrrectness of computed map
   // std::unordered_set<int64_t> added_values;
   // auto subgraph_x = subgraph->inputs().at(0);
