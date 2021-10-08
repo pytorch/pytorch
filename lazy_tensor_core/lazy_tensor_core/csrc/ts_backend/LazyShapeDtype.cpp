@@ -49,6 +49,27 @@ std::vector<c10::ScalarType> compute_dtype_native_layer_norm(const at::Tensor & 
   return {input.scalar_type(), input.scalar_type(), input.scalar_type()};
 }
 
+std::vector<std::vector<int64_t>> compute_shape_native_layer_norm_backward(const at::Tensor& grad_out,
+    const at::Tensor& input, at::IntArrayRef normalized_shape, const at::Tensor& mean, const at::Tensor& rstd,
+    const c10::optional<at::Tensor>& weight, const c10::optional<at::Tensor>& bias, ::std::array<bool,3> output_mask) {
+  std::vector<std::vector<int64_t>> shapes;
+  shapes.push_back(output_mask[0] ? input.sizes().vec() : std::vector<int64_t>{});
+  shapes.push_back(output_mask[1] && weight ? weight->sizes().vec() : std::vector<int64_t>{});
+  shapes.push_back(output_mask[2] && bias ? bias->sizes().vec() : std::vector<int64_t>{});
+  return shapes;
+}
+
+std::vector<c10::ScalarType> compute_dtype_native_layer_norm_backward(const at::Tensor& grad_out,
+    const at::Tensor& input, at::IntArrayRef normalized_shape, const at::Tensor& mean, const at::Tensor& rstd,
+    const c10::optional<at::Tensor>& weight, const c10::optional<at::Tensor>& bias, ::std::array<bool,3> output_mask)
+{
+  std::vector<c10::ScalarType> dtypes;
+  dtypes.push_back(input.scalar_type());
+  dtypes.push_back(weight && weight->defined() ? weight->scalar_type() : input.scalar_type());
+  dtypes.push_back(bias && weight->defined() ? bias->scalar_type() : input.scalar_type());
+  return dtypes;
+}
+
 std::vector<std::vector<int64_t>> compute_shape_mean(const at::Tensor& self, c10::optional<at::ScalarType> dtype) {
   return {{}};
 }

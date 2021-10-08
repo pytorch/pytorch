@@ -26,8 +26,8 @@ def node_ctor_inputs(func: LazyIrSchema) -> str:
             else:
                 raise AssertionError("TODO not sure if there are other valid types to handle here")
         else:
-            if isinstance(arg.type, VectorCType):
-                node_ctor_values.append(f"Helpers::I64List({arg.name})")
+            if isinstance(arg.type, VectorCType) and isinstance(arg.type.elem, BaseCType):
+                node_ctor_values.append(f"lazy_tensors::util::ToVector<{arg.type.elem.type}>({arg.name})")
             else:
                 node_ctor_values.append(f"{arg.name}")
 
@@ -91,7 +91,8 @@ class LazyIR:
 // TODO(alanwaketan): Public members don't need to have _ suffix.
 class {schema.node_name} : public Node {{
  public:
-  {schema.node_name}({node_ctor_args}, const std::vector<at::ScalarType>& out_dtypes, const std::vector<std::vector<int64_t>>& out_shapes)
+  {schema.node_name}({node_ctor_args}, const std::vector<at::ScalarType>& out_dtypes,
+      const std::vector<std::vector<int64_t>>& out_shapes)
       : Node(ir::OpKind(at::aten::{func.name.name}),
               {{{base_ctor_value_args}}},
               convertShape(out_dtypes, out_shapes),
