@@ -502,7 +502,7 @@ TensorView* TensorView::welfordRfactorHelper(
 
     // construct a trivial root domain map
     std::unordered_map<IterDomain*, IterDomain*> id_map;
-    for (size_t i = 0; i < root.size(); i++) {
+    for (const auto i : c10::irange(root.size())) {
       id_map[this_root[i]] = root[i];
     }
 
@@ -823,7 +823,7 @@ void TensorView::clearReductionIterDomains() {
 
   std::vector<IterDomain*> new_root;
   std::vector<bool> new_contig;
-  for (size_t i = 0; i < getRootDomain().size(); i++) {
+  for (const auto i : c10::irange(getRootDomain().size())) {
     if (!getRootDomain()[i]->isReduction()) {
       new_root.push_back(getRootDomain()[i]);
       new_contig.push_back(domain()->contiguity()[i]);
@@ -868,7 +868,7 @@ TensorViewBuilder& TensorViewBuilder::shape(std::vector<int64_t> shape) {
 TensorView* TensorViewBuilder::build() const {
   // Build the domain
   std::vector<IterDomain*> domain(ndims_, nullptr);
-  for (size_t i = 0; i < ndims_; i++) {
+  for (const auto i : c10::irange(ndims_)) {
     if (shape_.empty() || shape_[i] == -1) {
       domain[i] = new IterDomain(new Int(0), new Int());
     } else {

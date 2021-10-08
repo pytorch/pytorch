@@ -148,7 +148,7 @@ void PrecomputedIntegersBase<IRContext>::initializeValueList(
   values_ = std::vector<int64_t>(num_of_values_, -1);
 
   // Fill in constants and assign evaluator indices
-  for (int i = 0; i < num_of_values_; i++) {
+  for (const auto i : c10::irange(num_of_values_)) {
     // Use an expression evaluator to test if value is const
     auto const_val = const_evaluator.evaluate(sorted_value_list[i]);
     if (const_val.has_value()) {
@@ -222,7 +222,7 @@ NaiveIntegerMachine<IRContext>::NaiveIntegerMachine(
 
 template <typename IRContext>
 void NaiveIntegerMachine<IRContext>::run() {
-  for (int i = 0; i < num_of_instructions_; i++) {
+  for (const auto i : c10::irange(num_of_instructions_)) {
     // Skip this instruction if the dest location
     //  has already been computed or is constant.
     if (precomputed_integers_.defined_[dest_[i]] ||
@@ -398,7 +398,7 @@ void KernelPrecomputedIntegers::bindTensorMetaData(
       at_tensor.ndimension() == static_cast<int>(root_domain.size()),
       "Something went wrong configuring launch. Inputs do not match.");
 
-  for (size_t dim = 0; dim < root_domain.size(); dim++) {
+  for (const auto dim : c10::irange(root_domain.size())) {
     auto extent = root_domain[dim]->extent();
     auto value = at_tensor.sizes()[dim];
     bindValue(extent->evaluatorIndex(), value);
@@ -448,7 +448,7 @@ void KernelPrecomputedIntegers::bindKernelInputs(
   auto kernel = lower_->kernel();
   const auto& inputs = kernel->inputs();
 
-  for (size_t i = 0; i < inputs.size(); i++) {
+  for (const auto i : c10::irange(inputs.size())) {
     const auto input = inputs[i];
     if (auto tensor_input = dynamic_cast<kir::TensorView*>(input)) {
       const auto aten_tensor = aten_inputs[i].toTensor();
@@ -503,7 +503,7 @@ void FusionPrecomputedIntegers::bindTensorMetaData(
       at_tensor.ndimension() == static_cast<int>(root_domain.size()),
       "Something went wrong configuring launch. Inputs do not match.");
 
-  for (size_t dim = 0; dim < root_domain.size(); dim++) {
+  for (const auto dim : c10::irange(root_domain.size())) {
     auto extent = root_domain[dim]->extent();
     auto value = at_tensor.sizes()[dim];
     precomputedIntegersBaseType::bindValue(extent->evaluatorIndex(), value);
@@ -518,7 +518,7 @@ void FusionPrecomputedIntegers::bindFusionInputs(
 
   const auto& inputs = fusion_->inputs();
 
-  for (size_t i = 0; i < inputs.size(); i++) {
+  for (const auto i : c10::irange(inputs.size())) {
     const auto input = inputs[i];
     if (auto tensor_input = dynamic_cast<TensorView*>(input)) {
       const auto aten_tensor = aten_inputs[i].toTensor();

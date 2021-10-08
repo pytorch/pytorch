@@ -77,7 +77,7 @@ std::vector<SegmentedGroup::NeighborGroup> SegmentedGroup::
   std::vector<bool> can_merge(true, neighbors.size());
 
   // Find neighbors with a level that is only 1 differant than this groups level
-  for (size_t i = 0; i < neighbors.size(); i++) {
+  for (const auto i : c10::irange(neighbors.size())) {
     if (std::abs(neighbors[i].group->level_ - level_) > 1) {
       can_merge[i] = false;
     }
@@ -86,7 +86,7 @@ std::vector<SegmentedGroup::NeighborGroup> SegmentedGroup::
   // Check neighbor of neighbors we're considering, if any of them are merged
   // with another node, make sure the resulting edge wouldn't have a level
   // difference of 1
-  for (size_t i = 0; i < neighbors.size(); i++) {
+  for (const auto i : c10::irange(neighbors.size())) {
     if (!can_merge[i]) {
       continue;
     }
@@ -120,7 +120,7 @@ std::vector<SegmentedGroup::NeighborGroup> SegmentedGroup::
   }
 
   std::vector<NeighborGroup> merge_candidates;
-  for (size_t i = 0; i < neighbors.size(); i++) {
+  for (const auto i : c10::irange(neighbors.size())) {
     if (can_merge[i]) {
       merge_candidates.push_back(neighbors[i]);
     }
@@ -213,7 +213,7 @@ std::ostream& operator<<(std::ostream& os, const SegmentedGroup* group) {
       [](auto expr_a, auto expr_b) -> bool {
         return expr_a->name() < expr_b->name();
       });
-  for (size_t i = 0; i < expr_to_print.size(); i++) {
+  for (const auto i : c10::irange(expr_to_print.size())) {
     os << expr_to_print[i]->name();
     if (i + 1 != expr_to_print.size())
       os << ", ";
@@ -951,7 +951,7 @@ GroupDependencyAnalysis::GroupSet GroupDependencyAnalysis::getCommonProducersOf(
 
   // Get intersection of producers
   GroupSet common_producers = *(known_producers_of_.at(groups[0]));
-  for (size_t i = 1; i < groups.size(); i++) {
+  for (const auto i : c10::irange(1, groups.size())) {
     common_producers = groupSetIntersection(
         common_producers, *(known_producers_of_.at(groups[i])));
   }
@@ -1119,7 +1119,7 @@ std::ostream& operator<<(
 
   // Do a reverse look up to check the order of sorted groups
   std::unordered_map<SegmentedGroup*, size_t> group_order;
-  for (size_t i = 0; i < sorted_groups_to_print.size(); i++) {
+  for (const auto i : c10::irange(sorted_groups_to_print.size())) {
     group_order[sorted_groups_to_print[i]] = i;
   }
 
@@ -1905,7 +1905,7 @@ void TranslateApplicableWelford::translateSingleWelford(WelfordOp* welford) {
   //  counting.
   Val* num_features = new Double(1);
   std::vector<bool> broadcast_mask(in_root.size(), false);
-  for (size_t i = 0; i < in_root.size(); i++) {
+  for (const auto i : c10::irange(in_root.size())) {
     if (out_root[i]->isReduction()) {
       red_axes.push_back(i);
       broadcast_mask[i] = true;
@@ -2045,9 +2045,8 @@ class CombineReductions {
 
       // Merge one pair of reduction groups at a time, and need
       //  the pass to update dependency info along the way to avoid cycles
-      for (size_t first_group_index = 0;
-           first_group_index < groups_with_reductions_.size();
-           first_group_index++) {
+      for (const auto first_group_index :
+           c10::irange(groups_with_reductions_.size())) {
         if (merged_groups) {
           // Need to break and re-enter this loop because
           // groups_with_reductions_ will be updated
@@ -2059,9 +2058,8 @@ class CombineReductions {
         auto first_group_signature =
             group_reduction_signature_map_.at(first_group);
 
-        for (size_t second_group_index = first_group_index + 1;
-             second_group_index < groups_with_reductions_.size();
-             second_group_index++) {
+        for (const auto second_group_index : c10::irange(
+                 first_group_index + 1, groups_with_reductions_.size())) {
           if (merged_groups) {
             // Need to break and re-enter this loop because
             // groups_with_reductions_ will be updated
@@ -2416,7 +2414,7 @@ class CombineReductions {
         return false;
       }
 
-      for (size_t i = 0; i < reduction_axes_.size(); i++) {
+      for (const auto i : c10::irange(reduction_axes_.size())) {
         if (reduction_axes_[i] != reduction_signature->reduction_axes_[i]) {
           return false;
         }
@@ -2479,7 +2477,7 @@ class CombineReductions {
       //  but T2 and T3 below are not
       //    T0 [R(1), R(1), R(i0), I(i1)]
       //    T1 [R(1), R(i0), I(i1)]
-      for (size_t i = 0; i < root_domain_size_; i++) {
+      for (const auto i : c10::irange(root_domain_size_)) {
         if (root_domain[i]->isReduction()) {
           reduction_axes_.push_back(i);
         }

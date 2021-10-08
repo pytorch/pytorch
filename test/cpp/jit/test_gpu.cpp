@@ -835,7 +835,7 @@ TEST(NVFuserTest, FusionTensor_CUDA) {
     TORCH_CHECK((int64_t)fuser_tensor->nDims() == tensor.dim());
     TORCH_CHECK(fuser_tensor->getDataType().value() == DataType::Float);
     TORCH_CHECK(fuser_tensor->domain() != nullptr);
-    for (int i = 0; i < static_cast<int>(fuser_tensor->nDims()); i++) {
+    for (const auto i : c10::irange(fuser_tensor->nDims())) {
       // size 1 dimension are makred as broadcast
       TORCH_CHECK(
           fuser_tensor->axis(i)->isBroadcast() == (tensor.sizes()[i] == 1));
@@ -858,7 +858,7 @@ TEST(NVFuserTest, FusionTensor_CUDA) {
     TORCH_CHECK((int64_t)fuser_tensor->nDims() == tensor.dim());
     TORCH_CHECK(fuser_tensor->getDataType().value() == DataType::Float);
     TORCH_CHECK(fuser_tensor->domain() != nullptr);
-    for (int i = 0; i < static_cast<int>(fuser_tensor->nDims()); i++) {
+    for (const auto i : c10::irange(fuser_tensor->nDims())) {
       // size 1 dimension are makred as broadcast
       TORCH_CHECK(fuser_tensor->axis(i)->isBroadcast() == false);
     }
@@ -875,7 +875,7 @@ TEST(NVFuserTest, FusionTensor_CUDA) {
     TORCH_CHECK((int64_t)fuser_tensor->nDims() == tensor.dim());
     TORCH_CHECK(fuser_tensor->getDataType().value() == DataType::Float);
     TORCH_CHECK(fuser_tensor->domain() != nullptr);
-    for (int i = 0; i < static_cast<int>(fuser_tensor->nDims()); i++) {
+    for (const auto i : c10::irange(fuser_tensor->nDims())) {
       // size 1 dimension are makred as broadcast
       TORCH_CHECK(fuser_tensor->axis(i)->isBroadcast() == false);
     }
@@ -986,16 +986,18 @@ TEST(NVFuserTest, FusionTVReorder_CUDA) {
       tv->domain()->domain().begin(), tv->domain()->domain().end());
 
   tv->reorder(shift_left);
-  for (int i = 0; i < (int)tv->nDims(); i++)
+  for (const auto i : c10::irange(tv->nDims())) {
     TORCH_CHECK(ref[i]->sameAs(tv->axis(i - 1)));
+  }
 
   tv = makeSymbolicTensor(3);
   ref = std::vector<IterDomain*>(
       tv->domain()->domain().begin(), tv->domain()->domain().end());
 
   tv->reorder(shift_left);
-  for (int i = 0; i < (int)tv->nDims(); i++)
+  for (const auto i : c10::irange(tv->nDims())) {
     TORCH_CHECK(ref[i]->sameAs(tv->axis(i - 1)));
+  }
 
   tv = makeSymbolicTensor(3);
   ref = std::vector<IterDomain*>(
@@ -1003,8 +1005,9 @@ TEST(NVFuserTest, FusionTVReorder_CUDA) {
 
   tv->reorder(shift_right);
   TORCH_CHECK(ref[ref.size() - 1]->sameAs(tv->axis(0)));
-  for (int i = 1; i < (int)tv->nDims(); i++)
+  for (const auto i : c10::irange(1, tv->nDims())) {
     TORCH_CHECK(ref[i - 1]->sameAs(tv->axis(i)));
+  }
 
   tv = makeSymbolicTensor(3);
   ref = std::vector<IterDomain*>(
@@ -2785,9 +2788,9 @@ void checkIdMapped(
   TORCH_INTERNAL_ASSERT(root0.size() == should_map0.size());
   TORCH_INTERNAL_ASSERT(root1.size() == should_map1.size());
   size_t idx0 = 0;
-  for (size_t i = 0; i < root0.size(); ++i) {
+  for (const auto i : c10::irange(root0.size())) {
     size_t idx1 = 0;
-    for (size_t j = 0; j < root1.size(); ++j) {
+    for (const auto j : c10::irange(root1.size())) {
       if (should_map0[i] && should_map1[j] && idx0 == idx1) {
         checkIdMapped(map, v0, root0[i], v1, root1[j], true);
       } else {
@@ -6792,7 +6795,7 @@ TEST(NVFuserTest, FusionReductionMultiConsumer_CUDA) {
 }
 
 TEST(NVFuserTest, FusionComputeAtExprOrder1_CUDA) {
-  for (int i = 0; i < 2; ++i) {
+  for (const auto i : c10::irange(2)) {
     Fusion fusion;
     FusionGuard fg(&fusion);
 
@@ -8308,10 +8311,10 @@ TEST(NVFuserTest, FusionMagicSchedulerLayerNormBackward_CUDA) {
   const size_t kOuterNumDims = kM - kN;
 
   std::vector<int64_t> outer_shape;
-  for (size_t idx = 0; idx < kOuterNumDims; ++idx) {
+  for (const auto idx : c10::irange(kOuterNumDims)) {
     outer_shape.push_back(shape[idx]);
   }
-  for (size_t idx = kOuterNumDims; idx < kM; ++idx) {
+  for (const auto idx : c10::irange(kOuterNumDims, kM)) {
     outer_shape.push_back(1);
   }
 
@@ -9562,7 +9565,7 @@ TEST(NVFuserTest, FusionTraversalOrder2_CUDA) {
 }
 
 TEST(NVFuserTest, FusionTraversalOrder3_CUDA) {
-  for (int i = 0; i < 2; ++i) {
+  for (const auto i : c10::irange(2)) {
     Fusion fusion;
     FusionGuard fg(&fusion);
 
@@ -9875,7 +9878,7 @@ TEST(NVFuserTest, FusionLSTMCell_CUDA) {
   FusionGuard fg(&fusion);
 
   TensorView* tvs[16];
-  for (size_t i = 0; i < 16; i++) {
+  for (const auto i : c10::irange(16)) {
     tvs[i] = makeSymbolicTensor(2);
     fusion.addInput(tvs[i]);
   }
@@ -10573,8 +10576,8 @@ TEST(NVFuserTest, FusionDisjointSet_CUDA) {
 
   // Now each of the three groups should be equivalent within each
   // group
-  for (size_t gi = 0; gi < groups.size(); ++gi) {
-    for (size_t gj = 0; gj < groups.size(); ++gj) {
+  for (const auto gi : c10::irange(groups.size())) {
+    for (const auto gj : c10::irange(groups.size())) {
       for (auto i : groups[gi]) {
         for (auto j : groups[gj]) {
           TORCH_CHECK(
@@ -13487,7 +13490,7 @@ TEST(NVFuserTest, FusionVectorizeMisalignedPointwiseMergeSymbolicPass_CUDA) {
   auto c2 = tv2->cache_before();
 
   // Merge all dimensions together except inner-most dim
-  for (int idx = 0; idx < kNumDims - 2; ++idx) {
+  for (const auto idx : c10::irange(kNumDims - 2)) {
     tv2->merge(0);
   }
   // Split inner-most dim
@@ -14744,7 +14747,7 @@ TEST(NVFuserTest, FusionSBAR_CUDA) {
 
   const size_t kNumberOfDims = x->nDims();
   std::vector<bool> broadcast_mask(kNumberOfDims, false);
-  for (size_t axis = 0; axis < kNumberOfDims - 1; ++axis) {
+  for (const auto axis : c10::irange(kNumberOfDims - 1)) {
     broadcast_mask[axis] = true;
   }
 
@@ -15977,7 +15980,7 @@ TEST(NVFuserTest, FusionSegfaultReduction_CUDA) {
   std::vector<int> outer_reduction_axes;
   std::vector<bool> outer_broadcast_mask(numDims, false);
   Val* N = new Double(1);
-  for (size_t axis = 0; axis < numDims; ++axis) {
+  for (const auto axis : c10::irange(numDims)) {
     if (axis != 1) {
       outer_reduction_axes.push_back(axis);
       at_sum_axes.push_back(axis);
@@ -16646,7 +16649,7 @@ TEST(NVFuserTest, FusionParallelDimensionMap1_CUDA) {
   const auto& pdmap = gpulw.parallelDimensionMap();
   auto kir_tv1 = gpulw.lowerValue(tv1)->as<kir::TensorView>();
   auto kir_tv2 = gpulw.lowerValue(tv2)->as<kir::TensorView>();
-  for (size_t i = 0; i < kir_tv1->domain()->domain().size(); ++i) {
+  for (const auto i : c10::irange(kir_tv1->domain()->domain().size())) {
     auto dom1 = kir_tv1->domain()->domain()[i];
     auto dom2 = kir_tv2->domain()->domain()[i];
     TORCH_INTERNAL_ASSERT(pdmap.equalDim(dom1->extent(), dom2->extent()));

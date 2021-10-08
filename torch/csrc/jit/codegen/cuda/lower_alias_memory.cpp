@@ -169,7 +169,8 @@ class BufferReuseDebugPrinter {
   void printAllocInfo(const kir::Allocate* alloc);
 
   std::stringstream& indent() {
-    for (int i = 0; i < indent_level_; i++) {
+    for (const auto i : c10::irange(indent_level_)) {
+      (void)i; // Suppress unused variable warning
       os_ << "  ";
     }
     return os_;
@@ -567,7 +568,7 @@ class BufferUseDefInfo {
     std::unordered_set<IterDomain*> serial_producer_root_set(
         serial_root_id.begin(), serial_root_id.end());
 
-    for (size_t idx = 0; idx < producer_root.size(); idx++) {
+    for (const auto idx : c10::irange(producer_root.size())) {
       if (producer_root[idx]->isBroadcast() &&
           !consumer_root[idx]->isBroadcast()) {
         // Check if this broadcast contributed to any serial
@@ -660,8 +661,7 @@ class BufferUseDefInfo {
       return nullptr;
     }
 
-    for (size_t idx = 0, end_idx = current_stack_.size() - 1; idx < end_idx;
-         idx++) {
+    for (const auto idx : c10::irange(current_stack_.size() - 1)) {
       if (current_stack_[idx] == allocate_loop_info) {
         return current_stack_[idx + 1];
       }
@@ -1075,7 +1075,7 @@ class AllocateReuseModifier {
     }
 
     // Check index map for the corresponding axes.
-    for (size_t id_it = 0; id_it < alloc_domains.size(); id_it++) {
+    for (const auto id_it : c10::irange(alloc_domains.size())) {
       if (!GpuLower::current()->caIndexMap().areMapped(
               alloc_domains[id_it], reuse_domains[id_it])) {
         return false;

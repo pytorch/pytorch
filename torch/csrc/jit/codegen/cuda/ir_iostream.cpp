@@ -438,7 +438,7 @@ void IrTransformPrinter::printTransforms(TensorView* tv) {
       {tv->domain()->domain().begin(), tv->domain()->domain().end()});
 
   os() << " root domain : (";
-  for (size_t root_idx = 0; root_idx < root_domain.size(); root_idx++) {
+  for (const auto root_idx : c10::irange(root_domain.size())) {
     IrPrinter::handle(root_domain[root_idx]);
     if (root_idx + 1 < root_domain.size()) {
       os() << ",";

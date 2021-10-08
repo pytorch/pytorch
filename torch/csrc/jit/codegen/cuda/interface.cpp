@@ -218,7 +218,7 @@ RegisterOperators size_eq_guard({
                   return;
                 }
 
-                for (size_t i = 0; i < inp.size(); i++) {
+                for (const auto i : c10::irange(inp.size())) {
                   if (((inp[i] == 1) != (ref[i] == 1))) {
                     ret = false;
                     break;

@@ -160,7 +160,7 @@ class AllocationInserter : public kir::MutableIrVisitor {
     auto fuser_tv = info.buffer->fuserTv();
 
     std::vector<kir::IterDomain*> init_dims;
-    for (size_t axis_i = info.alloc_pos; axis_i < fuser_tv->nDims(); axis_i++) {
+    for (const auto axis_i : c10::irange(info.alloc_pos, fuser_tv->nDims())) {
       if (info.buffer->fuserTv()->axis(axis_i)->isReduction() ||
           info.buffer->fuserTv()->axis(axis_i)->isBroadcast()) {
         continue;
@@ -370,7 +370,7 @@ class AllocationInserter : public kir::MutableIrVisitor {
 
     info.allocation_domains = std::make_unique<std::vector<kir::IterDomain*>>();
 
-    for (size_t axis_i = 0; axis_i < fuser_tv->nDims(); axis_i++) {
+    for (const auto axis_i : c10::irange(fuser_tv->nDims())) {
       const auto local_id =
           gpu_lower->lowerValue(fuser_tv->axis(axis_i))->as<kir::IterDomain>();
 

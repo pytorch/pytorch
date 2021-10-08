@@ -433,7 +433,7 @@ BestEffortReplay::BestEffortReplay(
     }
 
     // Take replay expr inputs out of map:
-    for (size_t t_i = 0; t_i < target_id_inps.size(); t_i++) {
+    for (const auto t_i : c10::irange(target_id_inps.size())) {
       auto t_inp = target_id_inps[t_i];
       auto r_orig_inp = target2replay_id_map_.at(t_inp);
       auto r_maybe_forwarded_inp = replay_inps[t_i];

@@ -146,7 +146,7 @@ std::vector<Val*> maybeBroadcast(const std::vector<Val*>& vals) {
       size_t tv_dims = TensorDomain::noReductions(tv->getRootDomain()).size();
       if (tv_dims < n_dims) {
         std::vector<bool> bcast_flags(n_dims, false);
-        for (size_t j = 0; j < n_dims - tv_dims; j++) {
+        for (const auto j : c10::irange(n_dims - tv_dims)) {
           bcast_flags[j] = true;
         }
         out_vals[i] = broadcast(tv, bcast_flags);
@@ -805,7 +805,7 @@ TensorView* transpose(
 
   auto new2old = ir_utils::normalizeOld2New(old2new, inp_domain.size());
 
-  for (size_t i = 0; i < out_domain.size(); ++i) {
+  for (const auto i : c10::irange(out_domain.size())) {
     auto in_id = inp_domain[new2old[i]];
     out_domain[i] = in_id->clone();
   }
@@ -1074,7 +1074,7 @@ TensorView* sum_to(TensorView* in, const std::vector<Int*>& sum_to_size) {
   bool reduction_within_shape = false;
 
   // Reduce rest of the dims with keep_dim
-  for (int i = leading_dims; i < int(root.size()); i++) {
+  for (const auto i : c10::irange(leading_dims, root.size())) {
     if (sum_to_size[i - leading_dims]->isOneInt() &&
         !root[i]->extent()->isOneInt()) {
       inner_red_dims[i - leading_dims] = true;
@@ -1120,7 +1120,7 @@ TensorView* sum_to(TensorView* in, const std::vector<int64_t>& sum_to_size) {
   bool reduction_within_shape = false;
 
   // Reduce rest of the dims with keep_dim
-  for (int i = leading_dims; i < int(root.size()); i++) {
+  for (const auto i : c10::irange(leading_dims, root.size())) {
     if (sum_to_size[i - leading_dims] == 1 && !root[i]->extent()->isOneInt()) {
       inner_red_dims[i - leading_dims] = true;
       reduce_dims.push_back(i);
@@ -1157,7 +1157,7 @@ TensorView* shift(TensorView* inp, const std::vector<int>& offsets, bool pad) {
     auto inp_dom = TensorDomain::noReductions(inp->getRootDomain());
     const auto ndims = inp_dom.size();
     std::vector<IterDomain*> out_dom;
-    for (size_t i = 0; i < ndims; ++i) {
+    for (const auto i : c10::irange(ndims)) {
       const auto inp_axis = inp_dom[i];
       const auto offset = offsets[i];
       if (offset == 0) {
@@ -1268,7 +1268,7 @@ TensorView* gather(
   std::vector<IterDomain*> out_dom;
   std::vector<IterDomain*> out_gather_dom;
 
-  for (size_t i = 0; i < ndims; ++i) {
+  for (const auto i : c10::irange(ndims)) {
     const auto inp_axis = inp_dom[i];
     const auto window_dim = window_shape[i];
     const auto pad_left = pad_width[i][0];

@@ -686,7 +686,7 @@ void ComputeAt::updateSiblings() {
             "Error replaying multiple output expressions in computeAt.");
 
         // Propagate any root parallelization as fullSelfReplay expects it.
-        for (size_t i = 0; i < sibling_tv->getRootDomain().size(); i++) {
+        for (const auto i : c10::irange(sibling_tv->getRootDomain().size())) {
           auto id = tv->getRootDomain()[i];
           auto sibling_id = sibling_tv->getRootDomain()[i];
           if (id->getParallelType() != ParallelType::Serial &&

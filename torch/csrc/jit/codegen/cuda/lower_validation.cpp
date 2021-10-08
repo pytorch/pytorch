@@ -71,7 +71,7 @@ class ValidateParallelType : public IterVisitor {
     auto out_n = wop->outN()->as<TensorView>();
     TORCH_INTERNAL_ASSERT(out_avg->nDims() == out_var->nDims());
     TORCH_INTERNAL_ASSERT(out_avg->nDims() == out_n->nDims());
-    for (size_t i = 0; i < out_avg->nDims(); i++) {
+    for (const auto i : c10::irange(out_avg->nDims())) {
       // TODO: can be cleaner.
       convertIterDomain(out_avg->axis(i), out_var->axis(i));
       convertIterDomain(out_avg->axis(i), out_n->axis(i));
@@ -165,7 +165,7 @@ void checkContiguity(
     TensorView* tv) {
   TORCH_INTERNAL_ASSERT(tv->getMemoryType() == MemoryType::Global);
 
-  for (size_t idx = 0; idx < tv->getRootDomain().size(); ++idx) {
+  for (const auto idx : c10::irange(tv->getRootDomain().size())) {
     auto root = tv->getRootDomain()[idx];
     if (domains.find(root) != domains.end()) {
       TORCH_INTERNAL_ASSERT(
@@ -199,7 +199,7 @@ void checkContiguity(
           .mapConsumerToProducer(consumer->domain(), producer->domain());
 
   std::unordered_map<IterDomain*, bool> producer_domain_contiguity;
-  for (size_t idx = 0; idx < producer->getRootDomain().size(); ++idx) {
+  for (const auto idx : c10::irange(producer->getRootDomain().size())) {
     auto root = producer->getRootDomain()[idx];
     auto contiguity = producer->domain()->contiguity()[idx];
     producer_domain_contiguity.insert({root, contiguity});
@@ -402,7 +402,7 @@ void validateVectorize(Fusion* fusion) {
     bool has_vectorize_dim = false;
     bool has_misaligned_vectorize_dim = false;
 
-    for (size_t i = 0; i < tv->nDims(); i++) {
+    for (const auto i : c10::irange(tv->nDims())) {
       IterDomain* id = tv->axis(i);
       IterDomain* concrete_id =
           GpuLower::current()->caParallelMap().getConcreteMappedID(id);
@@ -475,7 +475,7 @@ void validateParallelize(Fusion* fusion) {
       const auto parallel_bcast_doms =
           pred_map.getParallelBroadcastDomains(producer);
       ParallelTypeBitmap pt_map;
-      for (size_t i = 0; i < producer->nDims(); ++i) {
+      for (const auto i : c10::irange(producer->nDims())) {
         // If a producer axis is threaded, either with threadIdx or
         // blockIdx, there must be a mapped consumer axis with the
         // same ParallelType. An exception is when the producer is

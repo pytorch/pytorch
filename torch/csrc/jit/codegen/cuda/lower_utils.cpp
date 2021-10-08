@@ -201,7 +201,7 @@ kir::Expr* applyReplacements(
     const std::unordered_map<kir::Expr*, kir::Expr*>& expr_replacement_map,
     kir::Expr* expr) {
   auto handle_scope = [&](kir::Scope& scope) {
-    for (size_t i = 0; i < scope.size(); ++i) {
+    for (const auto i : c10::irange(scope.size())) {
       scope[i] = applyReplacements(expr_replacement_map, scope[i]);
     }
   };

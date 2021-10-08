@@ -259,7 +259,7 @@ BroadcastOp::BroadcastOp(Val* out, Val* in, std::vector<bool> is_broadcast_dims)
     c_mapped.insert(pair_entry.second);
   }
 
-  for (size_t i = 0; i < c_root.size(); ++i) {
+  for (const auto i : c10::irange(c_root.size())) {
     const auto c_id = c_root[i];
     if (c_mapped.find(c_id) != c_mapped.end()) {
       continue;
@@ -611,7 +611,7 @@ bool GatherOp::sameAs(const Statement* other) const {
   if (windowShape().size() != other_op->windowShape().size()) {
     return false;
   }
-  for (size_t i = 0; i < windowShape().size(); ++i) {
+  for (const auto i : c10::irange(windowShape().size())) {
     if (!windowShape()[i]->sameAs(other_op->windowShape()[i])) {
       return false;
     }
@@ -619,7 +619,7 @@ bool GatherOp::sameAs(const Statement* other) const {
   if (padWidth().size() != other_op->padWidth().size()) {
     return false;
   }
-  for (size_t i = 0; padWidth().size(); ++i) {
+  for (const auto i : c10::irange(padWidth().size())) {
     if (!padWidth()[i][0]->sameAs(other_op->padWidth()[i][0]) ||
         !padWidth()[i][1]->sameAs(other_op->padWidth()[i][1])) {
       return false;
@@ -1034,19 +1034,19 @@ bool TensorDomain::sameAs(const Statement* const other) const {
     return false;
   }
 
-  for (size_t i = 0; i < nDims(); i++) {
+  for (const auto i : c10::irange(nDims())) {
     if (!(axis(i)->sameAs(other_td->axis(i)))) {
       return false;
     }
   }
 
-  for (size_t i = 0; i < getRootDomain().size(); i++) {
+  for (const auto i : c10::irange(getRootDomain().size())) {
     if (!(getRootDomain()[i]->sameAs(other_td->getRootDomain()[i]))) {
       return false;
     }
   }
 
-  for (size_t i = 0; i < getRFactorDomain().size(); i++) {
+  for (const auto i : c10::irange(getRFactorDomain().size())) {
     if (!(getRFactorDomain()[i]->sameAs(other_td->getRFactorDomain()[i]))) {
       return false;
     }

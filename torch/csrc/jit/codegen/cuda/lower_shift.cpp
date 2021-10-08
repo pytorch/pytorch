@@ -187,7 +187,7 @@ kir::Bool* ShiftPredicateInserter::getPredicate(
 
   kir::Bool* predicate = nullptr;
 
-  for (size_t i = 0; i < root_domain.size(); ++i) {
+  for (const auto i : c10::irange(root_domain.size())) {
     auto root_id = root_domain[i];
     auto kir_root_id = gpu_lower->lowerValue(root_id)->as<kir::IterDomain>();
 
@@ -368,7 +368,7 @@ void AxisHaloInfo::merge(int pos, kir::Int* other) {
 }
 
 void AxisHaloInfo::merge(const AxisHaloInfo& other) {
-  for (size_t i = 0; i < widths_.size(); ++i) {
+  for (const auto i : c10::irange(widths_.size())) {
     merge(i, other.width(i));
   }
 }
@@ -509,7 +509,7 @@ void HaloInfo::propagateRootAxisInfo(
   auto gpu_lower = GpuLower::current();
   kir::SimplifyingIrBuilder ir_builder(gpu_lower->kernel());
 
-  for (size_t i = 0; i < c_root.size(); ++i) {
+  for (const auto i : c10::irange(c_root.size())) {
     auto c_id = c_root[i];
     auto it = c2p.find(c_id);
     if (it == c2p.end()) {
@@ -945,7 +945,7 @@ bool HaloInfo::extentEqual(IterDomain* id1, IterDomain* id2) const {
          (x_def->isA<kir::BinaryOp>() && y_def->isA<kir::BinaryOp>() &&
           x_def->as<kir::BinaryOp>()->operation() ==
               y_def->as<kir::BinaryOp>()->operation()))) {
-      for (size_t i = 0; i < x_def->inputs().size(); ++i) {
+      for (const auto i : c10::irange(x_def->inputs().size())) {
         auto x_input = dynamic_cast<kir::Int*>(x_def->inputs()[i]);
         auto y_input = dynamic_cast<kir::Int*>(y_def->inputs()[i]);
         // Both must be kir::Int
@@ -992,7 +992,7 @@ bool HaloInfo::needsShiftPredicate(Expr* expr) const {
   auto consumer_td = ir_utils::getTVOutput(expr)->domain();
   auto shift_expr = dynamic_cast<ShiftOp*>(expr);
   auto gather_expr = dynamic_cast<GatherOp*>(expr);
-  for (size_t i = 0; i < consumer_td->getRootDomain().size(); ++i) {
+  for (const auto i : c10::irange(consumer_td->getRootDomain().size())) {
     auto consumer_id = consumer_td->getRootDomain()[i];
     const auto consumer_halo_info = getRootAxisInfo(consumer_id);
     if (consumer_halo_info.hasHalo() ||

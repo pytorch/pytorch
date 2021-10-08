@@ -384,7 +384,7 @@ kir::Bool* PredicateCompute::getInlinePredicate(
   }
 
   kir::Val* cond = preds[0];
-  for (size_t i = 1; i < preds.size(); i++) {
+  for (const auto i : c10::irange(1, preds.size())) {
     cond = ir_builder.andExpr(cond, preds[i]);
   }
 

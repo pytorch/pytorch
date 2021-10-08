@@ -397,7 +397,7 @@ kir::Val* getProducerIndexWithGather(
 
   // Consumer axis that corresponds to the producer axis
   int consumer_axis = -1;
-  for (size_t i = 0; i <= producer_root_axis; ++i) {
+  for (const auto i : c10::irange(producer_root_axis + 1)) {
     if (producer_tv->getRootDomain()[i]->isReduction()) {
       continue;
     }
@@ -1332,7 +1332,7 @@ std::vector<kir::Val*> Index::getGlobalProducerStridedIndices(
   std::vector<kir::Val*> strides(root_dom.size(), nullptr);
   {
     int stride_i = 0;
-    for (size_t i = 0; i < root_dom.size(); i++) {
+    for (const auto i : c10::irange(root_dom.size())) {
       if (root_dom[i]->isReduction() ||
           root_dom[i]->getIterType() == IterType::BroadcastWithoutStride) {
         strides[i] = zero;
@@ -1348,7 +1348,7 @@ std::vector<kir::Val*> Index::getGlobalProducerStridedIndices(
   // if we have rfactor we can't simplify the indexing like this, we would need
   // to fix contiguity size to be rfactor size not root size
   if (root_dom.size() == producer_tv->domain()->contiguity().size()) {
-    for (size_t i = 0; i < root_dom.size(); i++) {
+    for (const auto i : c10::irange(root_dom.size())) {
       auto dim = root_dom.size() - i - 1;
       if (root_dom[dim]->isReduction()) {
         continue;
@@ -1524,7 +1524,7 @@ std::vector<kir::Val*> Index::getNonGlobalProducerStridedIndices(
   // structure, ignore IterDomains that aren't present in the loop nest when
   // indexing reference.
   TORCH_INTERNAL_ASSERT(loops.size() <= reference_domain->nDims());
-  for (size_t loop_i = 0; loop_i < loops.size(); loop_i++) {
+  for (const auto loop_i : c10::irange(loops.size())) {
     auto ref_axis = gpu_lower->lowerValue(reference_domain->axis(loop_i))
                         ->as<kir::IterDomain>();
     ref_id_to_ind_map[ref_axis] = loop_to_ind_map[loops[loop_i]];
@@ -1704,7 +1704,7 @@ std::vector<kir::Val*> Index::getNonGlobalProducerStridedIndices(
 
     // Compute striding for this index.
     kir::Val* stride = nullptr;
-    for (size_t j = i + 1; j < root_dom.size(); j++) {
+    for (const auto j : c10::irange(i + 1, root_dom.size())) {
       if (skip_indexing.count(root_dom[j])) {
         continue;
       }
@@ -1792,7 +1792,7 @@ std::vector<kir::Val*> Index::getGlobalConsumerStridedIndices(
   std::vector<kir::Val*> strides(root_dom.size(), zero);
   {
     int stride_i = 0;
-    for (size_t i = 0; i < root_dom.size(); i++) {
+    for (const auto i : c10::irange(root_dom.size())) {
       if (root_dom[i]->isReduction() ||
           root_dom[i]->getIterType() == IterType::BroadcastWithoutStride) {
         strides[i] = zero;
@@ -1808,7 +1808,7 @@ std::vector<kir::Val*> Index::getGlobalConsumerStridedIndices(
   // if we have rfactor we can't simplify the indexing like this, we would need
   // to fix contiguity size to be rfactor size not root size
   if (root_dom.size() == consumer_tv->domain()->contiguity().size()) {
-    for (size_t i = 0; i < root_dom.size(); i++) {
+    for (const auto i : c10::irange(root_dom.size())) {
       auto dim = root_dom.size() - i - 1;
       if (root_dom[dim]->isReduction()) {
         continue;
@@ -1930,7 +1930,7 @@ std::vector<kir::Val*> Index::getNonGlobalConsumerStridedIndices(
   // structure, ignore IterDomains that aren't present in the loop nest when
   // indexing reference.
   TORCH_INTERNAL_ASSERT(loops.size() <= reference_domain->nDims());
-  for (size_t loop_i = 0; loop_i < loops.size(); loop_i++) {
+  for (const auto loop_i : c10::irange(loops.size())) {
     auto ref_axis = gpu_lower->lowerValue(reference_domain->axis(loop_i))
                         ->as<kir::IterDomain>();
     ref_id_to_ind_map[ref_axis] = loop_to_ind_map[loops[loop_i]];
@@ -2021,7 +2021,7 @@ std::vector<kir::Val*> Index::getNonGlobalConsumerStridedIndices(
 
     // Compute striding for this index.
     kir::Val* stride = nullptr;
-    for (size_t j = i + 1; j < root_dom.size(); j++) {
+    for (const auto j : c10::irange(i + 1, root_dom.size())) {
       if (root_dom[j]->isBroadcast() || root_dom[j]->isReduction() ||
           gpu_lower->trivialReductionInfo().isDerived(root_dom[j])) {
         continue;
@@ -2212,7 +2212,7 @@ std::pair<std::vector<kir::Val*>, bool> Index::getConsumerRootPredIndices(
   // Due to rfactor/initialization reference_domain may be bigger than loop nest
   // structure
   TORCH_INTERNAL_ASSERT(loops.size() <= reference_domain->nDims());
-  for (size_t loop_i = 0; loop_i < loops.size(); loop_i++) {
+  for (const auto loop_i : c10::irange(loops.size())) {
     auto ref_axis = gpu_lower->lowerValue(reference_domain->axis(loop_i))
                         ->as<kir::IterDomain>();
     ref_id_to_ind_map[ref_axis] = loop_to_ind_map[loops[loop_i]];
@@ -2403,7 +2403,7 @@ std::pair<std::vector<Index::RootPredicateInfo>, ReferenceTensor> Index::
         "Invalid reference generated.");
     bool within_unswitch = false;
     const auto one = ir_builder.create<kir::Int>(1);
-    for (size_t loop_i = 0; loop_i < loops.size(); loop_i++) {
+    for (const auto loop_i : c10::irange(loops.size())) {
       auto loop = loops[loop_i];
       auto ref_id = reference_domain->axis(loop_i);
       if (loop->iter_domain()->parallelType() == ParallelType::Unroll ||
@@ -2435,7 +2435,7 @@ std::pair<std::vector<Index::RootPredicateInfo>, ReferenceTensor> Index::
   // Due to rfactor/initialization reference_domain may be bigger than loop nest
   // structure
   TORCH_INTERNAL_ASSERT(loops.size() <= reference_domain->nDims());
-  for (size_t loop_i = 0; loop_i < loops.size(); loop_i++) {
+  for (const auto loop_i : c10::irange(loops.size())) {
     auto loop = loops[loop_i];
     auto ind = loop_to_ind_map[loops[loop_i]];
     auto ref_axis = reference_domain->axis(loop_i);

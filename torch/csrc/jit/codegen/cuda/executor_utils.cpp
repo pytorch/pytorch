@@ -208,7 +208,7 @@ bool checkSameStride(const std::vector<c10::IValue>& tensors) {
   if (tensors.size() < 2) {
     return true;
   }
-  for (size_t idx = 0; idx < tensors.size() - 1; ++idx) {
+  for (const auto idx : c10::irange(tensors.size() - 1)) {
     auto current = tensors[idx];
     auto next = tensors[idx + 1];
     if (!current.isTensor() || !next.isTensor()) {
@@ -221,7 +221,7 @@ bool checkSameStride(const std::vector<c10::IValue>& tensors) {
       return false;
     }
 
-    for (int64_t i = 0; i < current_tensor.ndimension(); ++i) {
+    for (const auto i : c10::irange(current_tensor.ndimension())) {
       if (current_tensor.stride(i) != next_tensor.stride(i)) {
         return false;
       }
@@ -240,7 +240,7 @@ bool checkSameContiguity(const std::vector<c10::IValue>& tensors) {
   // Determine if the reference tensor is contiguous
   const auto& reference_tensor = reference.toTensor();
   int64_t expected_stride = 1;
-  for (int64_t i = 1; i <= reference_tensor.ndimension(); ++i) {
+  for (const auto i : c10::irange(1, reference_tensor.ndimension() + 1)) {
     int64_t ind = reference_tensor.ndimension() - i;
     if (reference_tensor.size(ind) == 1) {
       continue;
@@ -292,7 +292,7 @@ void validateKernelInputs(
 
   std::stringstream msg;
   bool mismatch = false;
-  for (size_t i = 0; i < inputs.size(); ++i) {
+  for (const auto i : c10::irange(inputs.size())) {
     const IValue& arg = inputs[i];
     const Val* param = fusion->inputs()[i];
     mismatch = !validateKernelArg(arg, param, device, msg) || mismatch;
@@ -317,7 +317,7 @@ void validateKernelOutputs(
 
   std::stringstream msg;
   bool mismatch = false;
-  for (size_t i = 0; i < outputs.size(); ++i) {
+  for (const auto i : c10::irange(outputs.size())) {
     const at::Tensor& arg = outputs[i];
     const Val* param = fusion->outputs()[i];
     mismatch = !validateKernelArg(arg, param, device, msg) || mismatch;
@@ -479,7 +479,7 @@ kir::ExpressionEvaluator bindKernelInputs(
   kir::ExpressionEvaluator expr_eval;
   const auto& inputs = kernel->inputs();
 
-  for (size_t i = 0; i < inputs.size(); i++) {
+  for (const auto i : c10::irange(inputs.size())) {
     const auto input = inputs[i];
 
     if (auto tensor_input = dynamic_cast<kir::TensorView*>(input)) {
@@ -495,7 +495,7 @@ kir::ExpressionEvaluator bindKernelInputs(
           aten_tensor.ndimension() == static_cast<int>(root_domain.size()),
           "Something went wrong configuring launch. Inputs no longer match.");
 
-      for (size_t dim = 0; dim < root_domain.size(); dim++) {
+      for (const auto dim : c10::irange(root_domain.size())) {
         const auto extent = root_domain[dim]->extent();
         const auto value = aten_tensor.sizes()[dim];
         bool should_bind = true;

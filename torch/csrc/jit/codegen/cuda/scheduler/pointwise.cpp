@@ -85,7 +85,7 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
 
   std::vector<int64_t> elem_counts(ref_root.size(), 1);
   int64_t n_elems = 1;
-  for (size_t ref_i = 0; ref_i < ref_root.size(); ref_i++) {
+  for (const auto ref_i : c10::irange(ref_root.size())) {
     auto inferred_val =
         runtime_info.expressionEvaluator().evaluate(ref_root[ref_i]->extent());
     TORCH_INTERNAL_ASSERT(
@@ -220,7 +220,7 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
     auto max_dims =
         std::max_element(mapping_count.begin(), mapping_count.end());
 
-    for (int64_t i = 0; i < (int64_t)ref_root.size(); i++) {
+    for (const auto i : c10::irange(ref_root.size())) {
       transfer_size_1d = transfer_size_1d * elem_counts[i] * (*max_dims);
     }
 
@@ -228,14 +228,11 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
     if (true || n_elems * 2 > device_multiprocessor_count * kThreadX) {
       int64_t min_total_transfer = std::numeric_limits<int64_t>::max();
 
-      for (int64_t break_point_i = 0; break_point_i < (int64_t)ref_root.size();
-           break_point_i++) {
+      for (const auto break_point_i : c10::irange(ref_root.size())) {
         // Number of elements in the right side of reference tv with
         // break_point_i
         int64_t cur_right_elem_count = 1;
-        for (int64_t right_i = break_point_i;
-             right_i < (int64_t)ref_root.size();
-             right_i++) {
+        for (const auto right_i : c10::irange(break_point_i, ref_root.size())) {
           cur_right_elem_count = cur_right_elem_count * elem_counts[right_i];
         }
 
@@ -257,14 +254,12 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
         // Estimate transfer cost with this break point
         int64_t cur_transfer_size = 1;
 
-        for (int64_t left_i = 0; left_i < break_point_i; left_i++) {
+        for (const auto left_i : c10::irange(break_point_i)) {
           cur_transfer_size =
               cur_transfer_size * elem_counts[left_i] * (*left_max_dims);
         }
 
-        for (int64_t right_i = break_point_i;
-             right_i < (int64_t)ref_root.size();
-             right_i++) {
+        for (const auto right_i : c10::irange(break_point_i, ref_root.size())) {
           cur_transfer_size =
               cur_transfer_size * elem_counts[right_i] * (*right_max_dims);
         }

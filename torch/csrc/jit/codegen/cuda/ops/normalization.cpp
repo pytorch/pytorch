@@ -28,10 +28,7 @@ TensorView* softmax(TensorView* x, int dim) {
   return y;
 }
 
-TensorView* softmax_backward(
-    TensorView* dy,
-    TensorView* y,
-    int dim) {
+TensorView* softmax_backward(TensorView* dy, TensorView* y, int dim) {
   TORCH_INTERNAL_ASSERT(dy != nullptr, "Grad Output is invalid.");
   TORCH_INTERNAL_ASSERT(y != nullptr, "Output is invalid.");
 
@@ -84,7 +81,7 @@ ForwardNormResult layer_norm(
 
   std::vector<int> outer_reduction_axes(kOuterNumDims);
   std::vector<bool> outer_broadcast_mask(kNumberOfDims, false);
-  for (size_t idx = 0; idx < kOuterNumDims; ++idx) {
+  for (const auto idx : c10::irange(kOuterNumDims)) {
     outer_reduction_axes[idx] = idx;
     outer_broadcast_mask[idx] = true;
   }
@@ -92,7 +89,7 @@ ForwardNormResult layer_norm(
   std::vector<int> inner_reduction_axes(kNormShapeNumDims);
   std::vector<bool> inner_broadcast_mask(kNumberOfDims, false);
   Val* num_features = new Double(1);
-  for (size_t idx = 0; idx < kNormShapeNumDims; ++idx) {
+  for (const auto idx : c10::irange(kNormShapeNumDims)) {
     const size_t axis = kNumberOfDims - 1 - idx;
     inner_reduction_axes[idx] = axis;
     inner_broadcast_mask[axis] = true;
@@ -152,7 +149,7 @@ BackwardNormResult layer_norm_backward(
 
   std::vector<int> outer_reduction_axes(kOuterNumDims);
   std::vector<bool> outer_broadcast_mask(kNumberOfDims, false);
-  for (size_t idx = 0; idx < kOuterNumDims; ++idx) {
+  for (const auto idx : c10::irange(kOuterNumDims)) {
     outer_reduction_axes[idx] = idx;
     outer_broadcast_mask[idx] = true;
   }
@@ -160,7 +157,7 @@ BackwardNormResult layer_norm_backward(
   std::vector<int> inner_reduction_axes(kNormShapeNumDims);
   std::vector<bool> inner_broadcast_mask(kNumberOfDims, false);
   Val* num_features = new Double(1);
-  for (size_t idx = 0; idx < kNormShapeNumDims; ++idx) {
+  for (const auto idx : c10::irange(kNormShapeNumDims)) {
     const size_t axis = kNumberOfDims - 1 - idx;
     inner_reduction_axes[idx] = axis;
     inner_broadcast_mask[axis] = true;
@@ -248,7 +245,7 @@ ForwardNormResult batch_norm(
   std::vector<bool> broadcast_mask(kNumberOfDims, false);
   Val* num_features = new Double(1);
 
-  for (size_t axis = 0; axis < kNumberOfDims; ++axis) {
+  for (const auto axis : c10::irange(kNumberOfDims)) {
     if (axis != c_axis) {
       reduction_axes.push_back(axis);
       broadcast_mask[axis] = true;
@@ -351,7 +348,7 @@ BackwardNormResult batch_norm_backward(
   std::vector<int> reduction_axes;
   std::vector<bool> broadcast_mask(kNumberOfDims, false);
   Val* num_features = new Double(1);
-  for (size_t axis = 0; axis < kNumberOfDims; ++axis) {
+  for (const auto axis : c10::irange(kNumberOfDims)) {
     if (axis != c_axis) {
       reduction_axes.push_back(axis);
       broadcast_mask[axis] = true;
@@ -469,7 +466,7 @@ ForwardNormResult instance_norm(
   std::vector<int> x_reduction_axes;
   std::vector<bool> x_broadcast_mask(kNumberOfDims, false);
   Val* N = new Double(1);
-  for (size_t axis = 0; axis < kNumberOfDims; ++axis) {
+  for (const auto axis : c10::irange(kNumberOfDims)) {
     if (axis != kBatchDim && axis != kChannelsDim) {
       x_reduction_axes.push_back(axis);
       x_broadcast_mask[axis] = true;
@@ -480,7 +477,7 @@ ForwardNormResult instance_norm(
   B = mul(B, x->domain()->domain()[kBatchDim]->extent());
 
   std::vector<bool> channels_only_broadcast_mask(kNumberOfDims, false);
-  for (size_t axis = 0; axis < kNumberOfDims; ++axis) {
+  for (const auto axis : c10::irange(kNumberOfDims)) {
     if (axis != kChannelsDim) {
       channels_only_broadcast_mask[axis] = true;
     }

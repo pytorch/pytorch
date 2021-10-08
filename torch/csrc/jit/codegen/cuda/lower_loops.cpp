@@ -128,7 +128,7 @@ void LoopNestGenerator::handle(Expr* expr) {
 
   // Fill the entire loop structure by Looking at each axis
   // individually in out's domain
-  for (size_t out_i = 0; out_i < out_tv->nDims(); out_i++) {
+  for (const auto out_i : c10::irange(out_tv->nDims())) {
     // Note: It is not safe to skip trivial reduction axes as they could be
     // inlined with other tensor views. This happens in
     // NVFuserTest.FusionBNRepro_CUDA as of this commit on norm_hack_2_rebased
@@ -200,8 +200,8 @@ void LoopNestGenerator::handle(Expr* expr) {
     n_loops_to_close = std::min(n_loops_to_close, max_close);
   }
 
-  for (int64_t i_loop_close = 0; i_loop_close < n_loops_to_close;
-       i_loop_close++) {
+  for (const auto i_loop_close : c10::irange(n_loops_to_close)) {
+    (void)i_loop_close; // Suppress unused variable warning
     closeFor();
   }
 

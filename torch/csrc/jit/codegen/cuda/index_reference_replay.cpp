@@ -276,7 +276,7 @@ IndexCompute getReferenceIndexing(
 
   TORCH_INTERNAL_ASSERT(loop_structure.size() <= reference_tensor->nDims());
   int magic_zero_loop = -1;
-  for (size_t loop_i = 0; loop_i < loop_structure.size(); loop_i++) {
+  for (const auto loop_i : c10::irange(loop_structure.size())) {
     auto ref_axis = reference_tensor->axis(loop_i);
     auto kir_ref_axis = gpu_lower->lowerValue(ref_axis)->as<kir::IterDomain>();
     auto loop = loop_structure[loop_i];

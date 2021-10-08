@@ -20,7 +20,7 @@ namespace {
 std::deque<std::deque<TensorView*>> tvChains(
     std::deque<std::deque<Val*>> val_chains) {
   std::deque<std::deque<TensorView*>> tv_chains(val_chains.size());
-  for (size_t i = 0; i < val_chains.size(); i++) {
+  for (const auto i : c10::irange(val_chains.size())) {
     auto tv_iterable = ir_utils::filterByType<TensorView>(val_chains[i]);
     tv_chains[i] =
         std::deque<TensorView*>(tv_iterable.begin(), tv_iterable.end());
@@ -822,7 +822,7 @@ class NormalizationScheduler : public SchedulerEntry {
     root_map.build(true);
 
     // red_ops.size()>1 checked before
-    for (size_t it = 1; it < reduction_tvs.size(); it++) {
+    for (const auto it : c10::irange(1, reduction_tvs.size())) {
       if (!checkEquivalence(
               reduction_tvs[it - 1], reduction_tvs[it], root_map)) {
         return false;

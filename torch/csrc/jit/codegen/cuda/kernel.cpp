@@ -127,7 +127,7 @@ class KernelIrScanner : private kir::IrVisitor {
     ++summary_.number_of_grid_reductions;
 
     const auto gpu_lower = GpuLower::current();
-    for (size_t i = 0; i < dom->nDims(); ++i) {
+    for (const auto i : c10::irange(dom->nDims())) {
       const auto id =
           gpu_lower->caParallelMap().getConcreteMappedID(dom->domain()[i]);
       summary_.has_grid_reduction_in_loop =

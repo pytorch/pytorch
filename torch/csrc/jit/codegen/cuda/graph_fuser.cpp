@@ -149,7 +149,7 @@ struct CudaGraphFuser {
     std::unordered_map<Value*, Value*> inner_to_outer;
     auto inner_inputs = producer_subgraph->inputs();
     auto outer_inputs = producer_group->inputs();
-    for (size_t i = 0; i < inner_inputs.size(); ++i) {
+    for (const auto i : c10::irange(inner_inputs.size())) {
       inner_to_outer[inner_inputs[i]] = outer_inputs[i];
     }
 
@@ -161,13 +161,14 @@ struct CudaGraphFuser {
       temporary_nodes.emplace_back(outer);
       auto inner_outputs = inner->outputs();
       auto outer_outputs = outer->outputs();
-      for (size_t i = 0; i < inner_outputs.size(); ++i)
+      for (const auto i : c10::irange(inner_outputs.size())) {
         inner_to_outer[inner_outputs[i]] = outer_outputs[i];
+      }
     }
 
     // Replace uses of producer_group outputs and destroy the producer
     auto subgraph_outputs = producer_subgraph->outputs();
-    for (size_t i = 0; i < subgraph_outputs.size(); ++i) {
+    for (const auto i : c10::irange(subgraph_outputs.size())) {
       auto outer_output = inner_to_outer.at(subgraph_outputs[i]);
       producer_group->outputs()[i]->replaceAllUsesWith(outer_output);
     }
@@ -183,7 +184,7 @@ struct CudaGraphFuser {
       Node* merged = mergeNodeIntoGroup(consumer_group, node);
       // If any of the outputs are still used then we need to add them
       auto outputs = node->outputs();
-      for (size_t i = 0; i < outputs.size(); ++i) {
+      for (const auto i : c10::irange(outputs.size())) {
         auto output = outputs[i];
         if (output->uses().size() == 0)
           continue;
@@ -277,7 +278,7 @@ struct CudaGraphFuser {
     // remapping nodes that used the input to the newly-merged node
     // n is not an input when the fusion group is empty
     auto inputs = group->inputs();
-    for (size_t i = 0; i < n->outputs().size(); ++i) {
+    for (const auto i : c10::irange(n->outputs().size())) {
       auto it = std::find(inputs.begin(), inputs.end(), n->outputs()[i]);
       if (it != inputs.end()) {
         size_t p = it - inputs.begin();
@@ -297,7 +298,7 @@ struct CudaGraphFuser {
     // have a valid mapping
     group->insertBefore(n);
     Node* mergedNode = mergeNodeIntoGroup(group, n);
-    for (size_t i = 0; i < n->outputs().size(); i++) {
+    for (const auto i : c10::irange(n->outputs().size())) {
       getSubgraph(group).registerOutput(mergedNode->output(i));
       auto sel = group->addOutput();
       sel->copyMetadata(n->output(i));
@@ -350,7 +351,7 @@ struct CudaGraphFuser {
 
     // We need to apply this to all outputs from producer->node();
     auto producer_outputs = producer->node()->outputs();
-    for (size_t i = 0; i < producer_outputs.size(); i++) {
+    for (const auto i : c10::irange(producer_outputs.size())) {
       if (producer_outputs[i]->uses().size() != 0) {
         getSubgraph(group).registerOutput(merged->outputs()[i]);
         Value* new_producer = group->addOutput();
@@ -388,7 +389,7 @@ struct CudaGraphFuser {
       return;
     }
     auto& subgraph = getSubgraph(group);
-    for (size_t i = 0; i < chunk->outputs().size(); ++i) {
+    for (const auto i : c10::irange(chunk->outputs().size())) {
       // Find the input to the FusionGroup (group)
       auto* replacement_val = existingFusedChunk->outputs().at(i);
       auto* val = chunk->outputs().at(i);
@@ -438,7 +439,7 @@ struct CudaGraphFuser {
 
     // Replace tensors inputs with broadcasted values
     auto new_tensors_it = new_tensors.begin();
-    for (size_t i = 0; i < node->inputs().size(); ++i) {
+    for (const auto i : c10::irange(node->inputs().size())) {
       if (node->inputs()[i]->type()->isSubtypeOf(TensorType::get())) {
         AT_ASSERT(new_tensors_it != new_tensors.end());
         node->replaceInput(i, *(new_tensors_it++));
@@ -453,7 +454,7 @@ struct CudaGraphFuser {
     Node* bchunk =
         chunk->owningGraph()->create(prim::BroadcastingChunk, nchunks);
     bchunk->addInput(chunk->input());
-    for (size_t i = 0; i < nchunks; ++i) {
+    for (const auto i : c10::irange(nchunks)) {
       auto* old_output = chunk->outputs().at(i);
       auto* new_output = bchunk->outputs().at(i);
       new_output->copyMetadata(old_output);
@@ -603,7 +604,7 @@ struct CudaGraphFuser {
       if (it != bchunk_inputs.end()) {
         chunked_inputs.emplace_back();
         auto input_index = std::distance(bchunk_inputs.begin(), it);
-        for (size_t chunk = 0; chunk < nchunks; ++chunk) {
+        for (const auto chunk : c10::irange(nchunks)) {
           chunked_inputs.back().push_back(
               bchunk->outputs().at(nchunks * input_index + chunk));
         }
@@ -775,15 +776,13 @@ struct CudaGraphFuser {
       WithInsertPoint guard(bchunk->next());
 
       // Split the bchunk into bchunks.inputs().size() number of chunk nodes.
-      for (size_t input_offset = 0; input_offset < bchunk->inputs().size();
-           input_offset++) {
+      for (const auto input_offset : c10::irange(bchunk->inputs().size())) {
         auto* input = bchunk->inputs().at(input_offset);
 
         Node* new_chunk =
             graph->insertNode(graph->create(prim::ConstantChunk, input, 0));
         new_chunk->copyAttributes(*bchunk);
-        for (size_t output_offset = 0; output_offset < nchunks;
-             output_offset++) {
+        for (const auto output_offset : c10::irange(nchunks)) {
           auto new_output = new_chunk->addOutput();
           auto old_output =
               bchunk->outputs().at(input_offset * nchunks + output_offset);
@@ -823,7 +822,7 @@ struct CudaGraphFuser {
     auto inputs = fusion_group->inputs();
     auto sinputs = subgraph->inputs();
     AT_ASSERT(inputs.size() == sinputs.size());
-    for (size_t i = 0; i < inputs.size(); ++i) {
+    for (const auto i : c10::irange(inputs.size())) {
       if (inputs[i]->type()->isSubtypeOf(TensorType::get())) {
         shape_of[sinputs[i]] = graph->insert(aten::size, {inputs[i]});
       }
@@ -836,7 +835,7 @@ struct CudaGraphFuser {
     auto outputs = fusion_group->outputs();
     auto soutputs = subgraph->outputs();
     AT_ASSERT(outputs.size() == soutputs.size());
-    for (size_t i = 0; i < outputs.size(); ++i) {
+    for (const auto i : c10::irange(outputs.size())) {
       if (usedOnlyInDtypeAndSize(outputs[i]))
         continue;
       if (soutputs[i]->type()->isSubtypeOf(TensorType::get())) {
@@ -1278,7 +1277,7 @@ void guardFusionGroup(Node* fusion) {
   std::vector<Value*> tensor_inputs_to_check;
   std::set<size_t> profiled_ivalue_indices;
 
-  for (size_t index = 0; index < fusion->inputs().size(); index++) {
+  for (const auto index : c10::irange(fusion->inputs().size())) {
     Value* input = fusion->inputs()[index];
     if (input->type()->cast<TensorType>()) {
       // We only check inputs of the fusion group and expect NNC to infer
@@ -1304,7 +1303,7 @@ void guardFusionGroup(Node* fusion) {
   // insert the if block first;
   auto versioning_if =
       fusion->owningGraph()->create(prim::If, fusion->outputs().size());
-  for (size_t idx = 0; idx < fusion->outputs().size(); ++idx) {
+  for (const auto idx : c10::irange(fusion->outputs().size())) {
     versioning_if->output(idx)->setType(fusion->output(idx)->type());
     fusion->output(idx)->replaceAllUsesWith(versioning_if->output(idx));
   }
@@ -1499,7 +1498,7 @@ void alterBatchNormImplIndex(Node* node) {
   std::set<size_t> bn_buffer_out_indices;
 
   auto subgraph = node->g(attr::Subgraph);
-  for (size_t i = 0; i < subgraph->outputs().size(); i++) {
+  for (const auto i : c10::irange(subgraph->outputs().size())) {
     auto val = subgraph->outputs()[i];
     if (val->node()->kind() == aten::_batch_norm_impl_index &&
         val->offset() == 4) {

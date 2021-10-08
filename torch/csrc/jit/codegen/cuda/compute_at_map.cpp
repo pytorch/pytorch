@@ -264,7 +264,8 @@ void ComputeAtMap::build(Fusion* fusion, GpuLower* gpu_lower) {
             "Only supported case is welford op where all outputs tvs have idential domains.");
         // p->f, c->c
         std::unordered_map<IterDomain*, IterDomain*> c2f_root_map;
-        for (size_t i = 0; i < first_output_tv->getRootDomain().size(); i++) {
+        for (const auto i :
+             c10::irange(first_output_tv->getRootDomain().size())) {
           c2f_root_map.insert(std::make_pair(
               c_tv->getRootDomain()[i], first_output_tv->getRootDomain()[i]));
         }

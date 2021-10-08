@@ -64,7 +64,8 @@ std::vector<size_t> toVector(const at::DimVector& small_vec) {
 
 void encodeBuffer(size_t value, std::string& buffer) {
   const char* v = reinterpret_cast<char*>(&value);
-  for (size_t i = 0; i < sizeof(size_t); i++) {
+  for (const auto i : c10::irange(sizeof(size_t))) {
+    (void)i; // Suppress unused variable warning
     buffer.push_back(*(v++));
   }
 }
@@ -406,13 +407,13 @@ void FusionKernelRuntime::prepareRuntimeOrder() {
   std::unordered_set<Val*> available_input;
 
   // setup the order tensor dimensions are bound
-  for (size_t i : c10::irange(segmented_fusion_->inputs().size())) {
+  for (const size_t i : c10::irange(segmented_fusion_->inputs().size())) {
     auto input_val = segmented_fusion_->inputs()[i];
     available_input.insert(input_val);
 
     if (auto input_tv = dynamic_cast<TensorView*>(input_val)) {
       auto root_dom = TensorDomain::noReductions(input_tv->getRootDomain());
-      for (size_t dim : c10::irange(root_dom.size())) {
+      for (const size_t dim : c10::irange(root_dom.size())) {
         const auto extent = root_dom[dim]->extent();
         available_input.insert(extent);
         runtime_workspace_.group_extent_binding_order.push_back(extent);
@@ -428,7 +429,8 @@ void FusionKernelRuntime::prepareRuntimeOrder() {
     bool one_ran = false;
 
     // Find the first segment with all inputs available to run
-    for (size_t group_i : c10::irange(segmented_fusion_->groups().size())) {
+    for (const size_t group_i :
+         c10::irange(segmented_fusion_->groups().size())) {
       auto& group = segmented_fusion_->groups()[group_i];
       if (group_ran[group_i]) {
         continue;
@@ -444,7 +446,7 @@ void FusionKernelRuntime::prepareRuntimeOrder() {
         const auto& group_outputs = group->outputs();
 
         // Insert graph segment output to tensor map
-        for (size_t group_out_i : c10::irange(group_outputs.size())) {
+        for (const size_t group_out_i : c10::irange(group_outputs.size())) {
           available_input.insert(group_outputs[group_out_i]);
         }
         group_ran[group_i] = true;
@@ -472,7 +474,7 @@ std::vector<at::Tensor> FusionKernelRuntime::runWithInput(
 
     int extent_index_ = 0;
     // Bind input in the tensor_map
-    for (size_t i = 0; i < inputs.size(); i++) {
+    for (const auto i : c10::irange(inputs.size())) {
       runtime_workspace_.tensor_map.emplace(
           segmented_fusion_->inputs()[i], inputs[i]);
 
@@ -562,7 +564,7 @@ void FusionKernelRuntime::updateHeuristicsLaunchParams(
   auto scheduler_list_length = heuristics_->heuristicsList().size();
   TORCH_INTERNAL_ASSERT(
       update_heuristics->heuristicsList().size() == scheduler_list_length);
-  for (size_t i = 0; i < scheduler_list_length; i++) {
+  for (const auto i : c10::irange(scheduler_list_length)) {
     auto& schedulerPtr = heuristics_->heuristicsList()[i];
     if (schedulerPtr->hasReductionParam()) {
       schedulerPtr->updateLaunchConstraint(
@@ -590,7 +592,7 @@ c10::optional<FusionKernelRuntime::HeuristicsPtr> FusionKernelRuntime::
   if (is_segmented_) {
     ret = std::make_unique<FusionHeuristics>();
     size_t total_groups = segmented_fusion_->groups().size();
-    for (size_t group_index = 0; group_index < total_groups; group_index++) {
+    for (const auto group_index : c10::irange(total_groups)) {
       auto group = segmented_fusion_->groups()[group_index];
 
       auto maybe_scheduler_entry = group->getMaybeSchedulerEntry(runtime_info);

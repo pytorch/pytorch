@@ -83,7 +83,7 @@ void parallelizeAllLike(
     if (tv->isFusionInput()) {
       continue;
     }
-    for (size_t i = 0; i < tv->domain()->domain().size(); i++) {
+    for (const auto i : c10::irange(tv->domain()->domain().size())) {
       tv->axis(i)->parallelize(
           ca_loop_map.getConcreteMappedID(tv->axis(i))->getParallelType());
     }
@@ -1150,7 +1150,7 @@ void multiReductionInliner(
 
   if (reference_tv != reduction_tv) {
     std::vector<int> rfactor_axes;
-    for (size_t i = 0; i < reference_tv->nDims(); i++) {
+    for (const auto i : c10::irange(reference_tv->nDims())) {
       if (reference_tv->axis((int)i)->isReduction() &&
           reference_tv->axis((int)i)->isRFactorProduct()) {
         rfactor_axes.push_back((int)i);
@@ -1280,7 +1280,7 @@ void multiReductionInliner(
     // transfers.
     for (auto tv : ir_utils::allTvs(fusion)) {
       if (!keep_unrolled.count(tv)) {
-        for (size_t i = 0; i < tv->nDims(); i++) {
+        for (const auto i : c10::irange(tv->nDims())) {
           auto id = tv->axis((int)i);
           if (id->getParallelType() == ParallelType::Unroll ||
               id->getParallelType() == ParallelType::Vectorize ||
@@ -1312,7 +1312,7 @@ void multiReductionInliner(
     if (reference_tv != reduction_tv) {
       // Compute at rfactor into following reduction, keep outside first
       // reduction iter domain in the rfactor tensor view
-      for (size_t i = 0; i < rfactor_tvs.size(); i++) {
+      for (const auto i : c10::irange(rfactor_tvs.size())) {
         if (!rparams.reduction_unroll) {
           auto rfactor_tv = rfactor_tvs[i];
           auto rfactor_tv_dom = rfactor_tv->domain()->domain();
@@ -1585,7 +1585,7 @@ std::vector<int64_t> mappedInputsOutputs(TensorView* reference_tv) {
         in_out_tv_domain.begin(), in_out_tv_domain.end());
     auto in_out_dtype_size = dataTypeSize(in_out_tv->getDataType().value());
 
-    for (size_t ref_i = 0; ref_i < ref_root_domain.size(); ref_i++) {
+    for (const auto ref_i : c10::irange(ref_root_domain.size())) {
       auto ref_id = ref_root_domain[ref_i];
 
       // If reference id is broadcast or reduction

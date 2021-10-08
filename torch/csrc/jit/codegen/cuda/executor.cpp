@@ -555,7 +555,7 @@ std::vector<at::Tensor> FusionExecutor::allocOutputs(
   const auto kernel = lowered_.kernel();
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<at::Tensor> outputs;
-  for (size_t i = 0; i < kernel->outputs().size(); ++i) {
+  for (const auto i : c10::irange(kernel->outputs().size())) {
     TORCH_INTERNAL_ASSERT(
         kernel->outputs()[i]->isA<kir::TensorView>(),
         "Cannot allocate outputs that are not tensors.");

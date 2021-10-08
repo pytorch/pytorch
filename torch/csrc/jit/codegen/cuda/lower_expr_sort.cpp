@@ -398,7 +398,7 @@ std::vector<ExprGroup*> ExprGroup::getMergeCandidates(
   std::vector<bool> can_merge(true, neighbors.size());
 
   // Find neighbors with a level that is only 1 differant than this groups level
-  for (size_t i = 0; i < neighbors.size(); i++) {
+  for (const auto i : c10::irange(neighbors.size())) {
     if (std::abs(neighbors[i]->payload()->level - payload()->level) > 1) {
       can_merge[i] = false;
     }
@@ -407,7 +407,7 @@ std::vector<ExprGroup*> ExprGroup::getMergeCandidates(
   // Check neighbor of neighbors we're considering, if any of them are merged
   // with another node, make sure the resulting edge wouldn't have a level
   // difference of 1
-  for (size_t i = 0; i < neighbors.size(); i++) {
+  for (const auto i : c10::irange(neighbors.size())) {
     if (!can_merge[i]) {
       continue;
     }
@@ -445,7 +445,7 @@ std::vector<ExprGroup*> ExprGroup::getMergeCandidates(
   }
 
   std::vector<ExprGroup*> merge_candidates;
-  for (size_t i = 0; i < neighbors.size(); i++) {
+  for (const auto i : c10::irange(neighbors.size())) {
     if ((can_merge[i] && !fallback_mode_enabled) ||
         (!can_merge[i] && fallback_mode_enabled)) {
       merge_candidates.push_back(neighbors[i]);
@@ -528,10 +528,10 @@ ExprGroup* ExprSegmentationSorter::makeEmptyGroup(Expr* expr) {
   if (ir_utils::isTVOp(expr)) {
     auto out_tv = expr->outputs()[0]->as<TensorView>();
     // Grab all id's that are shared with other tensors.
-    for (size_t tv_i = 0; tv_i < out_tv->getComputeAtPosition(); tv_i++) {
+    for (const auto tv_i : c10::irange(out_tv->getComputeAtPosition())) {
       group->payload()->ca_domains_.push_back(out_tv->axis(tv_i));
     }
-    for (size_t tv_i = 0; tv_i < out_tv->getMaxProducerPosition(); tv_i++) {
+    for (const auto tv_i : c10::irange(out_tv->getMaxProducerPosition())) {
       group->payload()->pa_domains_.push_back(out_tv->axis(tv_i));
     }
   }
@@ -866,7 +866,7 @@ ExprGroup* ExprSegmentationSorter::makeMergedNode(
     auto producer_of_consumer_edge = consumer_group_edge->producer_val_;
     if (producer_of_consumer_edge->isA<TensorView>()) {
       auto tv = producer_of_consumer_edge->as<TensorView>();
-      for (size_t tv_i = 0; tv_i < tv->getComputeAtPosition(); tv_i++) {
+      for (const auto tv_i : c10::irange(tv->getComputeAtPosition())) {
         ca_ids.emplace(GpuLower::current()->caLoopMap().getConcreteMappedID(
             tv->axis(tv_i)));
       }
@@ -881,7 +881,7 @@ ExprGroup* ExprSegmentationSorter::makeMergedNode(
     auto consumer_of_producer_edge = producer_group_edge->consumer_val_;
     if (consumer_of_producer_edge->isA<TensorView>()) {
       auto tv = consumer_of_producer_edge->as<TensorView>();
-      for (size_t tv_i = 0; tv_i < tv->getMaxProducerPosition(); tv_i++) {
+      for (const auto tv_i : c10::irange(tv->getMaxProducerPosition())) {
         pa_ids.emplace(GpuLower::current()->caLoopMap().getConcreteMappedID(
             tv->axis(tv_i)));
       }
@@ -937,7 +937,7 @@ bool canReducePA(ExprGroup* group) {
     // If this consumer_tv doesn't map to the last producer domain of this group
     // it can't decide if it can be reduced
     bool has_matching_pa = false;
-    for (size_t i = 0; i < consumer_tv->getMaxProducerPosition(); i++) {
+    for (const auto i : c10::irange(consumer_tv->getMaxProducerPosition())) {
       if (GpuLower::current()->caLoopMap().areMapped(
               consumer_tv->axis(i), group_pa_last_id)) {
         has_matching_pa = true;
