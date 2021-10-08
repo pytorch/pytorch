@@ -170,7 +170,7 @@ class TestBenchmarkUtils(TestCase):
     @unittest.skipIf(IS_SANDCASTLE, "C++ timing is OSS only.")
     def test_timer_tiny_fast_snippet(self):
         timer = benchmark_utils.Timer(
-            'auto x = 1;',
+            'auto x = 1;(void)x;',
             timer=timeit.default_timer,
             language=benchmark_utils.Language.CPP,
         )
