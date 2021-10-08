@@ -609,11 +609,16 @@ class QUInt4x2Storage(TypedStorage):
     def dtype(self):
         return torch.quint4x2
 
+class QUInt2x4Storage(TypedStorage):
+    @classproperty
+    def dtype(self):
+        return torch.quint2x4
+
 _storage_classes = {
     UntypedStorage, DoubleStorage, FloatStorage, LongStorage, IntStorage,
     ShortStorage, CharStorage, ByteStorage, HalfStorage, BoolStorage,
     QUInt8Storage, QInt8Storage, QInt32Storage, BFloat16Storage,
-    ComplexFloatStorage, ComplexDoubleStorage, QUInt4x2Storage
+    ComplexFloatStorage, ComplexDoubleStorage, QUInt4x2Storage, QUInt2x4Storage,
 }
 
 # The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
