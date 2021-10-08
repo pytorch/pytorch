@@ -57,6 +57,8 @@ def process_ir_type(typ: Type) -> Union[BaseCType, VectorCType, OptionalCType, L
             return ListCType(OptionalCType(BaseCType(valueT)))
         elif str(typ.elem) == 'int':
             return VectorCType(BaseCType(intT))
+        elif str(typ.elem) == 'bool':
+            return VectorCType(BaseCType(boolT))
         else:
             raise AssertionError(f"TODO add support for type {repr(typ)}")
     else:

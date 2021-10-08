@@ -12,6 +12,7 @@ full_codegen:
   - mm
   - mv
   - native_layer_norm
+  - native_layer_norm_backward
   - topk
 supported:
   - _log_softmax_backward_data

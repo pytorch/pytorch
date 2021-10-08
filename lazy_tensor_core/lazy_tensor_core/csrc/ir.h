@@ -273,7 +273,7 @@ class Node {
   // The IR framework user can attach a user defined metadata object deriving
   // from UserMetaData.
   std::shared_ptr<UserMetaData> user_metadata_;
-  // ATEN dType and shapes
+  // ATEN dTypes and shapes. They are plural because operators can have tuple outputs.
   std::vector<at::ScalarType> at_dtypes_;
   std::vector<std::vector<int64_t>> at_shapes_;
 };
