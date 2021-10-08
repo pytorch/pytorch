@@ -99,6 +99,10 @@ class TORCH_API CodeGen {
     return kernel_func_name_;
   }
 
+  void set_kernel_func_name(std::string kernel_func_name) {
+    kernel_func_name_ = std::move(kernel_func_name);
+  }
+
  protected:
   static void* argToPtr(const BufferArg& bufferArg, const CallArg& callArg);
 

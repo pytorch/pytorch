@@ -173,6 +173,7 @@ class TestPublicBindings(unittest.TestCase):
             "QInt8StorageBase",
             "qscheme",
             "QUInt4x2StorageBase",
+            "QUInt2x4StorageBase",
             "QUInt8StorageBase",
             "read_vitals",
             "REMOVE_DROPOUT",
