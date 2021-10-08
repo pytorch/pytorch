@@ -529,10 +529,6 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
     return c10::make_intrusive<Tuple>(std::move(elements_));
   }
 
-  static c10::intrusive_ptr<Tuple> create(std::initializer_list<IValue> elements_) {
-    return create(c10::ArrayRef<IValue>(elements_));
-  }
-
   static c10::intrusive_ptr<Tuple> create(c10::ArrayRef<IValue> elements_) {
     switch (elements_.size()) {
       case 1:
