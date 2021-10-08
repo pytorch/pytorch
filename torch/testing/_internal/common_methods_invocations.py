@@ -8156,7 +8156,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_linear,
            dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
            dtypesIfROCM=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.int32, torch.int64,
+                                                       torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
                                                                 *[torch.bfloat16] if CUDA11OrLater else []),
            # linear calls mm under the hood which is nondeterministic on CUDA
