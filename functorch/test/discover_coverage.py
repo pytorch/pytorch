@@ -3,6 +3,7 @@ import copy
 from torch.testing._internal.common_methods_invocations import op_db
 from enum import Enum
 from functorch_lagging_op_db import functorch_lagging_op_db
+import functorch._src.top_operators_github_usage as top_ops
 
 # Importing these files make modifications to the op_db that we need
 import test_ops
@@ -150,6 +151,33 @@ def get_ops_covered_by_opinfos():
             ops[alias.op] = opinfo
     return ops
 
+def get_top_ops_not_covered_by_opinfo(torch_threshold=0, nn_fn_threshold=0):
+    denylist = set({
+        'tensor', 'load', 'zeros', 'no_grad', 'save', 'from_numpy',
+        'manual_seed', 'ones', 'randn', 'arange', 'rand',
+        'empty', 'randperm', 'linspace', 'set_grad_enabled',
+        'isnan', 'set_default_tensor_type', 'set_num_threads',
+        'set_printoptions', 'isfinite', 'range', 'numel',
+        'set_default_dtype', 'sparse_coo_tensor', 'set_rng_state',
+        'get_rng_state', 'get_default_dtype', 'initial_seed',
+        'get_num_threads', 'quantize_per_tensor', 'logspace',
+        'hann_window', 'is_tensor', 'as_tensor', 'randint', 'full', 'eye',
+        'equal',
+    })
+    torch_ops = [op[0] for op in top_ops.top_torch[:torch_threshold]]
+    nn_fn_ops = [op[0] for op in top_ops.top_nn_functional[:nn_fn_threshold]]
+    ops = torch_ops + nn_fn_ops
+
+    ops_with_opinfo = []
+    for op in op_db:
+        ops_with_opinfo.append(op.name)
+        ops_with_opinfo.extend([op.name for op in op.aliases])
+    ops_with_opinfo = set(ops_with_opinfo)
+
+    result = [op for op in ops if op not in ops_with_opinfo]
+    result = [op for op in result if op not in denylist]
+    return result
+
 def get_covered_ops(ops_list, invert=False):
     ops_covered_by_opinfo = get_ops_covered_by_opinfos()
     overridable_outplace_ops = ops_list
@@ -236,3 +264,11 @@ for test in tests:
 method_only_ops = get_method_only_ops_we_care_about()
 # for op in method_only_ops:
 #     print(f'    {op},')
+
+top_ops_not_covered_by_opinfo = get_top_ops_not_covered_by_opinfo(100, 25)
+for op in top_ops_not_covered_by_opinfo:
+    print(op)
+
+# top_ops_not_covered_by_opinfo = get_top_ops_not_covered_by_opinfo(200, 50)
+# for op in top_ops_not_covered_by_opinfo:
+#     print(op)
