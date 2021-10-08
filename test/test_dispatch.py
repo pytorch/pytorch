@@ -786,6 +786,12 @@ CPU: registered at {}:5 :: () -> () [ boxed unboxed ]
 '''.format(extension_path),
             impls[0])
 
+    def test_dispatch_print_registrations_for_dispatch_key_invalid(self):
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "could not parse dispatch key: invalid_key"):
+            C._dispatch_print_registrations_for_dispatch_key('invalid_key')
+
 class TestPythonDispatcher(TestCase):
     def test_basic(self):
         dispatcher = PythonDispatcher()

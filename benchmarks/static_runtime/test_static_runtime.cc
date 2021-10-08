@@ -228,6 +228,29 @@ TEST(StaticRuntime, EmbeddingBag) {
   testStaticRuntime(embedding_bag_max_last_offset, args);
 }
 
+TEST(StaticRuntime, EmbeddingBagWithManagedOutput) {
+  const std::string embedding_bag_managed_output = R"JIT(
+    def forward(self, a: Tensor, b: Tensor, c: Tensor):
+        # The outputs of embedding_bag become an intermediate tensors
+        # since they are not directly returned from the graph.
+        x, y, z, _ = torch.embedding_bag(a, b, c)
+        return x + x
+  )JIT";
+
+  at::Tensor weight = torch::randn({3, 12}, at::ScalarType::Float);
+  at::Tensor input = torch::tensor({0, 1, 0, 2});
+  at::Tensor offset = torch::tensor({0, 2, 4});
+  std::vector<IValue> args{weight, input, offset};
+
+  at::Tensor weight2 = torch::randn({4, 13}, at::ScalarType::Float);
+  at::Tensor input2 = torch::tensor({0, 1, 0, 2});
+  at::Tensor offset2 = torch::tensor({0, 2, 4});
+  std::vector<IValue> args2{weight2, input2, offset2};
+
+  testStaticRuntime(embedding_bag_managed_output, args);
+  testStaticRuntime(embedding_bag_managed_output, args, args2);
+}
+
 TEST(StaticRuntime, LayerNorm) {
 #ifdef FBCODE_CAFFE2
   script::Module module("module");
@@ -601,29 +624,40 @@ TEST(StaticRuntime, IndividualOps_to) {
     std::vector<IValue> args0{a, b, c, d, e};
     std::vector<IValue> args1{a, b, c, d};
     std::vector<IValue> args2{a, other, c, d, e};
+    std::vector<IValue> args3{a, c10::nullopt, c, d};
 
-    testStaticRuntime(to_script_0, args0); // to.dtype
-    testStaticRuntime(to_script_1, args0); // to.dtype, strided
-    testStaticRuntime(to_script_2, args1); // to.prim_dtype
-    testStaticRuntime(to_script_3, args2); // to.other
-    testStaticRuntime(to_script_4, {a}); // alias
+    testStaticRuntime(to_script_dtype, args0);
+    testStaticRuntime(to_script_dtype_strided, args0);
+    testStaticRuntime(to_script_prim_dtype, args1);
+    if (!d) {
+      testStaticRuntime(to_script_prim_dtype, args3);
+    }
+    testStaticRuntime(to_script_other, args2);
+    testStaticRuntime(to_script_alias, {a});
 
     // dynamic shapes
-    testStaticRuntime(to_script_0, args0, {a2, b, c, d, e}); // to.dtype
-    testStaticRuntime(to_script_1, args0, {a2, b, c, d, e}); // to.dtype
-    testStaticRuntime(to_script_2, args1, {a2, b, c, d}); // to.prim_dtype
-    testStaticRuntime(to_script_3, args2, {a2, a2_other, c, d, e}); // to.other
-    testStaticRuntime(to_script_4, {a}, {a2});
+    testStaticRuntime(to_script_dtype, args0, {a2, b, c, d, e});
+    testStaticRuntime(to_script_dtype_strided, args0, {a2, b, c, d, e});
+    testStaticRuntime(to_script_prim_dtype, args1, {a2, b, c, d});
+    if (!d) {
+      testStaticRuntime(to_script_prim_dtype, args3, {a2, c10::nullopt, c, d});
+    }
+    testStaticRuntime(to_script_other, args2, {a2, a2_other, c, d, e});
+    testStaticRuntime(to_script_alias, {a}, {a2});
   };
-  // float->float, NCHW->NHWC
-  test_to(at::ScalarType::Float, true, true, c10::MemoryFormat::ChannelsLast);
-  // float->half
-  test_to(at::ScalarType::Half, true, false, c10::MemoryFormat::Preserve);
-  // float->float
-  test_to(at::ScalarType::Float, false, false, c10::MemoryFormat::Contiguous);
-  // TODO: check if fbgemm is enabled properly in this case
-  // half->float, NCHW->NHWC
-  test_to(at::ScalarType::Half, false, true, c10::MemoryFormat::ChannelsLast);
+  for (const bool non_blocking : {false, true}) {
+    for (const bool copy : {false, true}) {
+      // float->float, NCHW->NHWC
+      test_to(at::ScalarType::Float, non_blocking, copy, c10::MemoryFormat::ChannelsLast);
+      // float->half
+      test_to(at::ScalarType::Half, non_blocking, copy, c10::MemoryFormat::Preserve);
+      // float->float
+      test_to(at::ScalarType::Float, non_blocking, copy, c10::MemoryFormat::Contiguous);
+      // TODO: check if fbgemm is enabled properly in this case
+      // half->float, NCHW->NHWC
+      test_to(at::ScalarType::Half, non_blocking, copy, c10::MemoryFormat::ChannelsLast);
+    }
+  }
 }
 
 TEST(StaticRuntime, IndividualOps_Detach) {
@@ -638,10 +672,10 @@ TEST(StaticRuntime, IndividualOps_Detach) {
 }
 
 TEST(StaticRuntime, IndividualOps_ExpandAs) {
-  auto a = at::randn({3,1});
-  auto b = at::randn({3,2});
-  auto c = at::randn({4,1});
-  auto d = at::randn({4,2});
+  auto a = at::randn({3, 1});
+  auto b = at::randn({3, 2});
+  auto c = at::randn({4, 1});
+  auto d = at::randn({4, 2});
   std::vector<IValue> args{a, b};
   std::vector<IValue> args2{c, d};
   testStaticRuntime(expand_as_script, args);
@@ -1325,10 +1359,10 @@ TEST(StaticRuntime, IndividualOps_FmodScalar) {
 
 TEST(StaticRuntime, QEmbeddingBagByteUnpack) {
   auto a = torch::randn({8, 16}, at::ScalarType::Float);
-  auto b = torch::randn({8*2, 16*2}, at::ScalarType::Float);
+  auto b = torch::randn({8 * 2, 16 * 2}, at::ScalarType::Float);
 
   testStaticRuntime(embedding_bag_byte_prepack_script, {a});
-  testStaticRuntime(embedding_bag_byte_prepack_script, {a},{b});
+  testStaticRuntime(embedding_bag_byte_prepack_script, {a}, {b});
 }
 
 TEST(StaticRuntime, IndividualOps_LinalgNorm_ScalarOrd) {
@@ -1469,4 +1503,54 @@ TEST(StaticRuntime, VarTupleUnpack_NotApplied) {
   torch::jit::StaticModule smodule(module);
   EXPECT_FALSE(hasNodeWithKind(smodule, "static_runtime::VarTupleUnpack"));
   EXPECT_TRUE(hasNodeWithKind(smodule, "prim::TupleUnpack"));
+}
+
+TEST(StaticRuntime, IndividualOps_RemainderTensor) {
+  const auto remainder_tensor = R"JIT(
+    def forward(self, x, y):
+        return torch.remainder(x, y).clone()
+  )JIT";
+
+  std::vector<IValue> args1 = {
+      at::randint(0, 10, {2, 2}), at::randint(0, 10, {2, 2})};
+  std::vector<IValue> args2 = {
+      at::randint(0, 10, {3, 3}), at::randint(0, 10, {3, 3})};
+
+  // Use allclose and equalnan since outputs may be NaN.
+  testStaticRuntime(
+      remainder_tensor,
+      args1,
+      /*args2*/ {},
+      /*use_alloclose*/ true,
+      /*use_equalnan*/ true);
+  testStaticRuntime(
+      remainder_tensor,
+      args1,
+      args2,
+      /*use_allclose*/ true,
+      /*use_equalnan*/ true);
+}
+
+TEST(StaticRuntime, IndividualOps_RemainderScalar) {
+  const auto remainder_scalar = R"JIT(
+    def forward(self, x, y: int):
+        return torch.remainder(x, y).clone()
+  )JIT";
+
+  std::vector<IValue> args1 = {at::randint(0, 10, {2, 2}), 4};
+  std::vector<IValue> args2 = {at::randint(0, 10, {3, 3}), 4};
+
+  // Use allclose and equalnan since outputs may be NaN.
+  testStaticRuntime(
+      remainder_scalar,
+      args1,
+      /*args2*/ {},
+      /*use_alloclose*/ true,
+      /*use_equalnan*/ true);
+  testStaticRuntime(
+      remainder_scalar,
+      args1,
+      args2,
+      /*use_allclose*/ true,
+      /*use_equalnan*/ true);
 }
