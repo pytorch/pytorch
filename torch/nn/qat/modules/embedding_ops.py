@@ -20,11 +20,10 @@ class EmbeddingBag(nn.EmbeddingBag):
     """
     _FLOAT_MODULE = nn.EmbeddingBag
 
-    def __init__(self, num_embeddings, embedding_dim, max_norm = None,
-                 norm_type = 2.0, scale_grad_by_freq = False, mode = 'mean',
-                 sparse = False, _weight = None,
-                 include_last_offset = False, padding_idx = None,
-                 qconfig=None, device=None, dtype=None) -> None:
+    def __init__(self, num_embeddings, embedding_dim, max_norm=None,
+                 norm_type=2.0, scale_grad_by_freq=False, mode='mean',
+                 sparse=False, _weight=None, include_last_offset=False,
+                 padding_idx=None, qconfig=None, device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         super().__init__(num_embeddings, embedding_dim, max_norm, norm_type,
                          scale_grad_by_freq, mode, sparse, _weight,
@@ -36,7 +35,7 @@ class EmbeddingBag(nn.EmbeddingBag):
         self.qconfig = qconfig
         self.weight_fake_quant = qconfig.weight(factory_kwargs=factory_kwargs)
 
-    def forward(self, input, offsets = None, per_sample_weights = None) -> Tensor:
+    def forward(self, input, offsets=None, per_sample_weights=None) -> Tensor:
         return F.embedding_bag(input, self.weight_fake_quant(self.weight), offsets,
                                self.max_norm, self.norm_type,
                                self.scale_grad_by_freq, self.mode, self.sparse,
