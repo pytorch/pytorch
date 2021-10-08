@@ -184,7 +184,6 @@ class LLVMCodeGenImpl : public IRVisitor {
   llvm::BasicBlock* bb_;
   llvm::Value* value_{nullptr};
   llvm::JITTargetAddress kernelAddress_;
-  std::string kernel_func_name_;
 
 #define LLVM_TYPE_DECLARE(_1, Name) llvm::Type* Name##Ty_;
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, LLVM_TYPE_DECLARE);
@@ -234,7 +233,6 @@ class LLVMCodeGenImpl : public IRVisitor {
       const std::vector<CodeGen::BufferArg>& args,
       at::Device device,
       Dtype dtype,
-      std::string kernel_func_name,
       c10::optional<std::string> triple,
       c10::optional<std::string> cpu,
       c10::optional<std::string> attrs);
@@ -340,15 +338,8 @@ LLVMCodeGen::LLVMCodeGen(
     c10::optional<std::string> cpu,
     c10::optional<std::string> attrs)
     : CodeGen(stmt, args, device, kernel_func_name),
-      impl_(std::make_unique<LLVMCodeGenImpl>(
-          stmt,
-          args,
-          device,
-          dtype,
-          this->kernel_func_name(),
-          triple,
-          cpu,
-          attrs)) {
+      impl_(std::make_unique<
+            LLVMCodeGenImpl>(stmt, args, device, dtype, triple, cpu, attrs)) {
   callee_ = std::make_unique<LLVMCodeGenCallee>(
       impl_->releaseJIT(), (void*)impl_->getKernelAddress());
 }
@@ -427,13 +418,10 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
     const std::vector<CodeGen::BufferArg>& args,
     at::Device device,
     Dtype dtype,
-    std::string kernel_func_name,
     c10::optional<std::string> triple,
     c10::optional<std::string> cpu,
     c10::optional<std::string> attrs)
-    : context_(std::make_unique<llvm::LLVMContext>()),
-      irb_(getContext()),
-      kernel_func_name_(std::move(kernel_func_name)) {
+    : context_(std::make_unique<llvm::LLVMContext>()), irb_(getContext()) {
   // Manually map types to LLVM types.
   ByteTy_ = llvm::Type::getInt8Ty(getContext());
   CharTy_ = llvm::Type::getInt8Ty(getContext());
@@ -490,7 +478,7 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   emitKernel(stmt, params);
 
   jit_->addModule(std::move(module_), std::move(context_));
-  auto sym = jit_->findSymbol(kernel_func_name_);
+  auto sym = jit_->findSymbol("wrapper");
   kernelAddress_ = assertSuccess(sym.getAddress());
 }
 
@@ -522,7 +510,7 @@ void LLVMCodeGenImpl::emitWrapper(const std::vector<llvm::Type*>& params) {
   auto wrapper = llvm::Function::Create(
       llvm::FunctionType::get(IntTy_, {voidPtrPtrTy}, false),
       llvm::Function::ExternalLinkage,
-      kernel_func_name_,
+      "wrapper",
       module_.get());
   auto wrapBB = llvm::BasicBlock::Create(getContext(), "wrapBB", wrapper);
   irb_.SetInsertPoint(wrapBB);
