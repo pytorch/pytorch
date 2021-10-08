@@ -51,7 +51,6 @@ static inline void slow_conv2d_shape_check(
   }
 
   const int64_t ndim = input.dim();
-  const int64_t dim_batch = 0;
   const int64_t dim_planes = 1;
   const int64_t dim_height = 2;
   const int64_t dim_width = 3;
