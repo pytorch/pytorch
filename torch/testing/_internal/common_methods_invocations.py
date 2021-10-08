@@ -2121,7 +2121,7 @@ def sample_inputs_linalg_pinv_singular(op_info, device, dtype, requires_grad=Fal
         for batch, m, n in product(batches, size, size):
             for k in range(min(3, min(m, n))):
                 # Note that by making the columns of `a` and `b` orthonormal we make sure that
-                # the product matrix `a @ b.t()` has condition number when restricted to its image
+                # the product matrix `a @ b.t()` has condition number 1 when restricted to its image
                 a = torch.rand(*batch, m, k, device=device, dtype=dtype).qr().Q.requires_grad_(requires_grad)
                 b = torch.rand(*batch, n, k, device=device, dtype=dtype).qr().Q.requires_grad_(requires_grad)
                 yield SampleInput(a, args=(b,))
