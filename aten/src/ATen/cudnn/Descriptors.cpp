@@ -24,6 +24,12 @@ inline cudnnDataType_t getDataType(const at::Tensor& t) {
 } // anonymous namespace
 
 
+void TensorDescriptor::set(const at::Tensor &t, at::MemoryFormat memory_format, size_t pad) {
+  set(getDataType(t), t.sizes(), t.strides(), pad,
+    memory_format == at::MemoryFormat::ChannelsLast ||
+    memory_format == at::MemoryFormat::ChannelsLast3d);
+}
+
 void TensorDescriptor::set(const at::Tensor &t, size_t pad) {
   auto memory_format = t.suggest_memory_format();
   set(getDataType(t), t.sizes(), t.strides(), pad,
