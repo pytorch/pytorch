@@ -754,7 +754,7 @@ class PythonProcessGroupTest(MultiProcessTestCase):
 
     def test_get_backend_name(self):
         dpg = DummyProcessGroup(0, 1)
-        self.assertEqual("Dummy", dpg.backend())
+        self.assertEqual("Dummy", dpg.name())
 
     @staticmethod
     def create_dummy(store, rank, size, timeout):

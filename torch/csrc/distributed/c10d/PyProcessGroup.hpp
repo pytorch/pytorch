@@ -13,9 +13,9 @@ class PyProcessGroup : public ProcessGroup {
   // class to inherit from torch.distributed.Work
   class PyWork : public ProcessGroup::Work {
    public:
-    PyWork() {}
+    PyWork() = default;
 
-    virtual bool wait(std::chrono::milliseconds timeout = kNoTimeout) override {
+    bool wait(std::chrono::milliseconds timeout = kNoTimeout) override {
       PYBIND11_OVERRIDE(
           bool, /* Return type */
           ProcessGroup::Work, /* Parent class */
@@ -26,7 +26,7 @@ class PyProcessGroup : public ProcessGroup {
 
   using ProcessGroup::ProcessGroup;
 
-  virtual const std::string getBackendName() const override {
+  const std::string getBackendName() const override {
     PYBIND11_OVERRIDE_PURE(
         std::string, /* Return type */
         ProcessGroup, /* Parent class */
@@ -34,10 +34,10 @@ class PyProcessGroup : public ProcessGroup {
     );
   }
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> allgather(
+  c10::intrusive_ptr<ProcessGroup::Work> allgather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
-      const AllgatherOptions& opts = AllgatherOptions()) {
+      const AllgatherOptions& opts = AllgatherOptions()) override {
     PYBIND11_OVERRIDE(
         c10::intrusive_ptr<ProcessGroup::Work>, /* Return type */
         ProcessGroup, /* Parent class */
@@ -47,7 +47,7 @@ class PyProcessGroup : public ProcessGroup {
         opts);
   }
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> allreduce(
+  c10::intrusive_ptr<ProcessGroup::Work> allreduce(
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override {
     PYBIND11_OVERRIDE(
@@ -58,7 +58,7 @@ class PyProcessGroup : public ProcessGroup {
         opts);
   }
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> broadcast(
+  c10::intrusive_ptr<ProcessGroup::Work> broadcast(
       std::vector<at::Tensor>& tensors,
       const BroadcastOptions& opts = BroadcastOptions()) override {
     PYBIND11_OVERRIDE(
@@ -69,10 +69,10 @@ class PyProcessGroup : public ProcessGroup {
         opts);
   }
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(
+  c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
-      const ReduceScatterOptions& opts = ReduceScatterOptions()) {
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) override {
     PYBIND11_OVERRIDE(
         c10::intrusive_ptr<ProcessGroup::Work>, /* Return type */
         ProcessGroup, /* Parent class */
@@ -82,10 +82,10 @@ class PyProcessGroup : public ProcessGroup {
         opts);
   }
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> send(
+  c10::intrusive_ptr<ProcessGroup::Work> send(
       std::vector<at::Tensor>& tensors,
       int dstRank,
-      int tag) {
+      int tag) override {
     PYBIND11_OVERRIDE(
         c10::intrusive_ptr<ProcessGroup::Work>, /* Return type */
         ProcessGroup, /* Parent class */
@@ -95,10 +95,10 @@ class PyProcessGroup : public ProcessGroup {
         tag);
   }
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> recv(
+  c10::intrusive_ptr<ProcessGroup::Work> recv(
       std::vector<at::Tensor>& tensors,
       int srcRank,
-      int tag) {
+      int tag) override {
     PYBIND11_OVERRIDE(
         c10::intrusive_ptr<ProcessGroup::Work>, /* Return type */
         ProcessGroup, /* Parent class */

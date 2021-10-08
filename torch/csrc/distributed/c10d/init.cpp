@@ -968,7 +968,7 @@ Arguments:
           .def(py::init<int, int>())
           .def("rank", &::c10d::ProcessGroup::getRank)
           .def("size", &::c10d::ProcessGroup::getSize)
-          .def("backend", &::c10d::ProcessGroup::getBackendName)
+          .def("name", &::c10d::ProcessGroup::getBackendName)
 
           .def(
               "broadcast",
