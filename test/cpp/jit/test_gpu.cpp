@@ -17867,6 +17867,80 @@ TEST(NVFuserTest, FusionNonContigOutputs_CUDA) {
   testValidate(&fusion, {at_output}, {at_input}, {at_ref}, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, FusionIssue1133_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = sum(tv1, {1});
+  auto tv3 = add(tv2, new Double(1));
+
+  fusion.addOutput(tv3);
+
+  tv0->computeAt(tv3, 1);
+
+  const int split_factor = 32;
+
+  tv2->split(-1, split_factor);
+  tv1->computeAt(tv2, -2);
+
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+
+  tv3->axis(0)->parallelize(ParallelType::Unswitch);
+
+  tv1->setMemoryType(MemoryType::Shared);
+  tv2->setMemoryType(MemoryType::Shared);
+
+  // Both tv1 and tv2 should be allocated at the top-level scope
+  GpuLower gpulw(&fusion);
+  bool tv1_validated = false;
+  bool tv2_validated = false;
+  for (const auto& kir_node : gpulw.kernel()->topLevelExprs()) {
+    if (auto alloc = dynamic_cast<kir::Allocate*>(kir_node)) {
+      auto size = alloc->size();
+      if (!(alloc->buffer()->name() == 1 || alloc->buffer()->name() == 2)) {
+        // There should be no allocation other than those for tv1 and tv2
+        TORCH_CHECK(false, "Invalid allocation detected");
+      }
+      TORCH_CHECK(size->isA<kir::Int>(), "Invalid allocation size");
+      TORCH_CHECK(size->as<kir::Int>()->isConst(), "Allocation not constant");
+      auto size_int = size->as<kir::Int>()->value().value();
+      if (alloc->buffer()->name() == 1) {
+        TORCH_CHECK(
+            size_int == split_factor,
+            "Invalid allocation size: ",
+            size->as<kir::Int>()->value().value());
+        tv1_validated = true;
+      } else {
+        TORCH_CHECK(
+            size_int == 1,
+            "Invalid allocation size: ",
+            size->as<kir::Int>()->value().value());
+        tv2_validated = true;
+      }
+    }
+  }
+
+  TORCH_CHECK(tv1_validated, "Failed to validate tv1 allocation");
+  TORCH_CHECK(tv2_validated, "Failed to validate tv2 allocation");
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({99, 101}, options);
+  std::vector<IValue> aten_inputs = {t0};
+  auto outputs = fe.runFusion(aten_inputs);
+
+  auto ref = (t0 + 1).sum({1}) + 1;
+
+  testValidate(&fusion, outputs, aten_inputs, {ref}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

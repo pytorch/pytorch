@@ -20,12 +20,24 @@ namespace {
 class AllocationInserter : public kir::MutableIrVisitor {
  private:
   struct AllocationInformation {
-    // The for loop that the allocation must be placed in, nullptr if not within
-    // a loop
-    kir::ForLoop* for_loop = nullptr;
+    // The for loop that the initialization of this allocation must be
+    // placed in, nullptr if not within a loop
+    kir::ForLoop* init_for_loop = nullptr;
 
-    // The expression that this allocation must be placed before
-    kir::Expr* place_before = nullptr;
+    // The expression that the initialization of this allocation must
+    // be placed before
+    kir::Expr* init_place_before = nullptr;
+
+    // Keep track of the actual allocation loop. This can be different
+    // from init_for_loop only with unswitched shared memory allocations,
+    // which are moved outer loops to avoid duplicated allocations
+    // (see issue #1133).
+    kir::ForLoop* alloc_for_loop = nullptr;
+
+    // The expression that this allocation must be placed
+    // before. Similar to alloc_for_loop, this is different from
+    // init_place_before only with unswitched shared memory allocations.
+    kir::Expr* alloc_place_before = nullptr;
 
     // The allocation position relative to buffer
     size_t alloc_pos = 0;
@@ -49,9 +61,13 @@ class AllocationInserter : public kir::MutableIrVisitor {
   // Find allocation point
   void findAllocationPosition(AllocationInformation& info, kir::Expr* expr) {
     size_t alloc_pos = 0;
-    kir::ForLoop* for_loop = nullptr;
+    kir::ForLoop* init_for_loop = nullptr;
     auto fuser_tv = info.buffer->fuserTv();
     size_t fl_idx_next = 0;
+
+    bool outer_alloc_found = false;
+    kir::ForLoop* alloc_for_loop = nullptr;
+    size_t alloc_fl_idx_next = 0;
 
     for (auto fl : for_loops) {
       if (alloc_pos == fuser_tv->getComputeAtPosition()) {
@@ -76,6 +92,13 @@ class AllocationInserter : public kir::MutableIrVisitor {
         break;
       }
 
+      // Shared memory must be allocated outside of unswitched
+      // domains. See issue #1133.
+      if (fl_id->parallelType() == ParallelType::Unswitch &&
+          fuser_tv->getMemoryType() == MemoryType::Shared) {
+        outer_alloc_found = true;
+      }
+
       auto local_id = gpu_lower->lowerValue(fuser_tv->axis(alloc_pos))
                           ->as<kir::IterDomain>();
 
@@ -83,24 +106,46 @@ class AllocationInserter : public kir::MutableIrVisitor {
         alloc_pos++;
       }
 
-      for_loop = fl;
+      init_for_loop = fl;
       ++fl_idx_next;
+
+      if (!outer_alloc_found) {
+        alloc_for_loop = fl;
+        ++alloc_fl_idx_next;
+      }
     }
 
     info.alloc_pos = alloc_pos;
-    info.for_loop = for_loop;
+    info.init_for_loop = init_for_loop;
 
-    if (info.for_loop == nullptr) {
-      info.place_before = for_loops.size() > 0 ? for_loops[0] : expr;
+    if (info.init_for_loop == nullptr) {
+      info.init_place_before = for_loops.size() > 0 ? for_loops[0] : expr;
     } else {
-      if (info.for_loop == for_loops.back()) {
+      if (info.init_for_loop == for_loops.back()) {
         // Inline allocation, place before expr
-        info.place_before = expr;
+        info.init_place_before = expr;
       } else {
         // Place allocation after the last computeAt axis
         // TODO: may be more efficient to place before the first non-computeAt
         // axis
-        info.place_before = for_loops.at(fl_idx_next);
+        info.init_place_before = for_loops.at(fl_idx_next);
+      }
+    }
+
+    // Set the allocation loop and the place_before expression in the
+    // same way as the initialization loop and place_before expression
+    if (!outer_alloc_found) {
+      info.alloc_for_loop = info.init_for_loop;
+      info.alloc_place_before = info.init_place_before;
+    } else {
+      info.alloc_for_loop = alloc_for_loop;
+      if (info.alloc_for_loop == nullptr) {
+        info.alloc_place_before = for_loops.size() > 0 ? for_loops[0] : expr;
+      } else {
+        // Since there must be an inner unswitched domain,
+        // alloc_for_loop should never be the inner-most loop.
+        TORCH_INTERNAL_ASSERT(info.alloc_for_loop != for_loops.back());
+        info.init_place_before = for_loops.at(alloc_fl_idx_next);
       }
     }
   }
@@ -560,20 +605,20 @@ class AllocationInserter : public kir::MutableIrVisitor {
           !kir::ExpressionEvaluator::isConst(alloc.alloc_expr->size())) {
         continue;
       }
-      if (alloc.for_loop == nullptr) {
+      if (alloc.alloc_for_loop == nullptr) {
         auto place_before_it = std::find(
-            loop_nests_.begin(), loop_nests_.end(), alloc.place_before);
+            loop_nests_.begin(), loop_nests_.end(), alloc.alloc_place_before);
         TORCH_INTERNAL_ASSERT(
             place_before_it != loop_nests_.end(),
             "Could not figure out where to place allocation. ",
             "Use of the buffer, ",
             toString(alloc.buffer),
             ", could not be found.",
-            toString(alloc.place_before));
+            toString(alloc.alloc_place_before));
         loop_nests_.insert(place_before_it, alloc.alloc_expr);
       } else {
-        alloc.for_loop->body().insert_before(
-            alloc.place_before, alloc.alloc_expr);
+        alloc.init_for_loop->body().insert_before(
+            alloc.alloc_place_before, alloc.alloc_expr);
       }
     }
 
@@ -582,15 +627,15 @@ class AllocationInserter : public kir::MutableIrVisitor {
       if (alloc.init_expr == nullptr) {
         continue;
       }
-      if (alloc.for_loop == nullptr) {
+      if (alloc.init_for_loop == nullptr) {
         auto place_before_it = std::find(
-            loop_nests_.begin(), loop_nests_.end(), alloc.place_before);
+            loop_nests_.begin(), loop_nests_.end(), alloc.init_place_before);
         // Don't need a check here as if the allocation placement succeeded
         // this will too
         loop_nests_.insert(place_before_it, alloc.init_expr);
       } else {
-        alloc.for_loop->body().insert_before(
-            alloc.place_before, alloc.init_expr);
+        alloc.init_for_loop->body().insert_before(
+            alloc.init_place_before, alloc.init_expr);
       }
     }
   }
