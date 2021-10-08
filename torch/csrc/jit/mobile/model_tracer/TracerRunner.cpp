@@ -88,7 +88,7 @@ void call_setup_methods() {
  * in production on this Tensor.
  */
 void consume_tensor(const at::Tensor& t) {
-  const at::Tensor c = t;
+  const at::Tensor& c = t;
   c.copy_(t.cpu());
 }
 
