@@ -529,7 +529,16 @@ class ShardedTensor(object):
         return self._sharding_spec
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
-        raise RuntimeError(f"torch function '{func.__name__}' not supported for ShardedTensor!")
+        if func == torch.nn.init.uniform_:
+            sharded_tensor = kwargs['tensor']
+            if sharded_tensor is None: raise ValueError("sharded_tensor shouldn't be None!")
+            a = kwargs['a']
+            if a is None: raise ValueError("a shouldn't be None!")
+            b = kwargs['b']
+            if b is None: raise ValueError("b shouldn't be None!")
+            return _uniform_(sharded_tensor=sharded_tensor, a=a, b=b)
+        else:
+            raise RuntimeError(f"torch function '{func.__name__}' not supported for ShardedTensor!")
 
     def metadata(self) -> ShardedTensorMetadata:
         """
@@ -686,3 +695,17 @@ def _create_tensor_from_params(*size, local_device, tensor_init_params: TensorIn
                            memory_format=memory_format, pin_memory=pin_memory,)
     else:
         raise ValueError(f'Unsupported create_op: {tensor_init_params.create_op}')
+
+
+def _uniform_(sharded_tensor: ShardedTensor, a: float = 0., b: float = 1.) -> ShardedTensor:
+    r"""
+    Fills the Tensor in sharded_tensor.local_shards with values drawn from the uniform
+    distribution :math:`\mathcal{U}(a, b)`.
+    Args:
+        sharded_tensor: tensor sharded across devices
+        a: the lower bound of the uniform distribution
+        b: the upper bound of the uniform distribution
+    """
+    for i in range(len(sharded_tensor.local_shards())):
+        torch.nn.init.uniform_(sharded_tensor.local_shards()[i].tensor, a=a, b=b)
+    return sharded_tensor

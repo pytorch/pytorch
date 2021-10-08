@@ -1569,49 +1569,13 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase, MultiProcessTestCa
 
 
 class TestShardedTensorNNInit(ShardedTensorTestBase, MultiProcessTestCase):
-    """ Testing torch.nn.init like functions """
-
-    @with_comms
-    @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_init_sharded_tensor_with_normal(self):
-        """ Test _sharded_tensor.normal_(...) """
-
-        spec = ChunkShardingSpec(
-            dim=0,
-            placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
-            ],
-        )
-        h, w = 8, 2
-        expected_h = 2
-        expected_device = torch.device(f"cuda:{self.rank}")
-        mean, std = 10, 20
-
-        seed = 1234
-        dtype = torch.double
-
-        sharded_tensor = _sharded_tensor.empty(spec, h, w, dtype=dtype)
-        self.assertEqual(1, len(sharded_tensor.local_shards()))
-
-        # Clone local tensor to ensure torch.nn.init starts from the same input
-        local_tensor_clone = torch.clone(sharded_tensor.local_shards()[0].tensor)
-        torch.manual_seed(seed)
-        _sharded_tensor.normal_(sharded_tensor, mean=mean, std=std)
-
-        torch.manual_seed(seed)
-        torch.nn.init.normal_(local_tensor_clone, mean=mean, std=std)
-        self.assertEqual(local_tensor_clone, sharded_tensor.local_shards()[0].tensor)
-
+    """ Testing torch.nn.init functions for ShardedTensor """
 
     @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_init_sharded_tensor_with_uniform(self):
-        """ Test _sharded_tensor.uniform_(...) """
+        """ Test torch.nn.init.uniform_(ShardedTensor, a, b) """
 
         spec = ChunkShardingSpec(
             dim=0,
@@ -1636,46 +1600,10 @@ class TestShardedTensorNNInit(ShardedTensorTestBase, MultiProcessTestCase):
         # Clone local tensor to ensure torch.nn.init starts from the same input
         local_tensor_clone = torch.clone(sharded_tensor.local_shards()[0].tensor)
         torch.manual_seed(seed)
-        _sharded_tensor.uniform_(sharded_tensor, a=a, b=b)
+        torch.nn.init.uniform_(sharded_tensor, a=a, b=b)
 
         torch.manual_seed(seed)
         torch.nn.init.uniform_(local_tensor_clone, a=a, b=b)
-        self.assertEqual(local_tensor_clone, sharded_tensor.local_shards()[0].tensor)
-
-
-    @with_comms
-    @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_init_sharded_tensor_with_kaiming_uniform(self):
-        """ Test _sharded_tensor.kaiming_uniform_(...) """
-
-        spec = ChunkShardingSpec(
-            dim=0,
-            placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
-            ],
-        )
-        h, w = 8, 2
-        expected_h = 2
-        expected_device = torch.device(f"cuda:{self.rank}")
-        a, mode, nonlinearity = 0, 'fan_in', 'leaky_relu'
-
-        seed = 1234
-        dtype = torch.float
-
-        sharded_tensor = _sharded_tensor.empty(spec, h, w, dtype=dtype)
-        self.assertEqual(1, len(sharded_tensor.local_shards()))
-
-        # Clone local tensor to ensure torch.nn.init starts from the same input
-        local_tensor_clone = torch.clone(sharded_tensor.local_shards()[0].tensor)
-        torch.manual_seed(seed)
-        _sharded_tensor.kaiming_uniform_(sharded_tensor, a=a, mode=mode, nonlinearity=nonlinearity)
-
-        torch.manual_seed(seed)
-        torch.nn.init.kaiming_uniform_(local_tensor_clone, a=a, mode=mode, nonlinearity=nonlinearity)
         self.assertEqual(local_tensor_clone, sharded_tensor.local_shards()[0].tensor)
 
 
