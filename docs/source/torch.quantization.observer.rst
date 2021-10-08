@@ -1,7 +1,5 @@
 .. _torch_quantization_observer:
 
-:orphan:
-
 torch.quantization.observer
 ---------------------------
 
