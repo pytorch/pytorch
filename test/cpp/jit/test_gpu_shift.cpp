@@ -2143,6 +2143,8 @@ TEST(NVFuserTest, FusionHdiff_CUDA) {
   // Scheduling
   /////////////////////////////////
 
+  out->setContiguity(false);
+
   // Step 1: 2D Tiling
 
   const int tile_x = 32;
@@ -2316,6 +2318,8 @@ TEST(NVFuserTest, FusionHdiffPartialSplit_CUDA) {
                   sub(fly0, shift(fly0, {0, 1, 0}, false)))));
 
   fusion.addOutput(out);
+
+  out->setContiguity(false);
 
   /////////////////////////////////
   // Scheduling

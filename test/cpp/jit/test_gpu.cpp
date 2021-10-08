@@ -8639,9 +8639,7 @@ TEST(NVFuserTest, FusionPersistentSoftmaxLocalSmem_CUDA) {
       __FILE__);
 }
 
-// DISABLED. TODO: https://github.com/csarofeen/pytorch/issues/743
 TEST(NVFuserTest, FusionPersistentNormLocalShared_CUDA) {
-  return;
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -8704,6 +8702,9 @@ TEST(NVFuserTest, FusionPersistentNormLocalShared_CUDA) {
 
   fusion.addOutput(sx_norm_gamma_beta);
   fusion.addOutput(dx_norm_gamma_beta);
+
+  sx_norm_gamma_beta->setContiguity(false);
+  dx_norm_gamma_beta->setContiguity(false);
 
   // Read Input into Shared Memory
   // Read Input minus Input_Mean into Shared Memory
@@ -17831,6 +17832,39 @@ TEST(NVFuserTest, FusionThreadPredicateUnswitch_CUDA) {
   auto ref = sum(t0, {1}) + 2;
 
   testValidate(&fusion, outputs, aten_inputs, {ref}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionNonContigOutputs_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+  fusion.addOutput(tv1);
+
+  tv1->setContiguity(false);
+
+  fusion.printKernel();
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor at_input = at::randn({10}, options);
+  at::Tensor at_output = at::empty_strided({10}, {2}, options);
+  auto returned_outputs = fe.runFusion({at_input}, {at_output});
+
+  // Returned outputs should only contain one tensor that is the same
+  // as the output tensor given to runFusion
+  TORCH_CHECK(returned_outputs.size() == 1);
+  TORCH_CHECK(returned_outputs[0].is_same(at_output));
+  TORCH_CHECK(!returned_outputs[0].is_contiguous());
+
+  auto at_ref = at_input + 1;
+
+  testValidate(&fusion, {at_output}, {at_input}, {at_ref}, __LINE__, __FILE__);
 }
 
 } // namespace jit

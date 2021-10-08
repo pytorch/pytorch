@@ -166,6 +166,14 @@ class TORCH_CUDA_CU_API TensorView : public Val {
     return domain_;
   }
 
+  void setContiguity(const std::vector<bool>& contig) {
+    domain()->setContiguity(contig);
+  }
+
+  void setContiguity(bool contig) {
+    setContiguity(std::vector<bool>(getRootDomain().size(), contig));
+  }
+
   bool hasReduction() const;
   bool hasBlockReduction() const;
   bool hasGridReduction() const;

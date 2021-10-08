@@ -1068,6 +1068,15 @@ bool TensorDomain::sameAs(
   return true;
 }
 
+void TensorDomain::setContiguity(const std::vector<bool>& contig) {
+  TORCH_INTERNAL_ASSERT(
+      getRootDomain().size() == contig.size(),
+      "Invalid contiguity vector: ",
+      contig);
+
+  contiguity_ = contig;
+}
+
 bool TensorDomain::hasReduction() const {
   return has_nontrivial_reduction_;
 }

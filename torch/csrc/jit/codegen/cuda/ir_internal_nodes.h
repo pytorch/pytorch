@@ -673,6 +673,8 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
     return contiguity_;
   }
 
+  void setContiguity(const std::vector<bool>& contig);
+
   std::string getContiguityString() const {
     std::stringstream ss;
     for (auto b : contiguity()) {
@@ -765,7 +767,7 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
   std::vector<IterDomain*> no_bcast_domain_;
   std::vector<IterDomain*> no_reduction_domain_;
   const std::vector<IterDomain*> rfactor_domain_;
-  const std::vector<bool> contiguity_;
+  std::vector<bool> contiguity_;
   bool has_nontrivial_reduction_;
 };
 
