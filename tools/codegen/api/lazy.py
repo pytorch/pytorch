@@ -45,24 +45,13 @@ def process_ir_type(typ: Type) -> Union[BaseCType, VectorCType, OptionalCType, L
         else:
             raise AssertionError(f"TODO add support for type {repr(typ)}")
     elif isinstance(typ, OptionalType):
-        if str(typ.elem) == 'Tensor':
-            return OptionalCType(BaseCType(valueT))
-        elif str(typ.elem) == 'ScalarType':
-            return OptionalCType(BaseCType(scalarTypeT))
-        else:
-            raise AssertionError(f"TODO add support for type {repr(typ)}")
+        return OptionalCType(process_ir_type(typ.elem))
     elif isinstance(typ, ListType):
-        if str(typ.elem) == 'Tensor':
-            return VectorCType(BaseCType(valueT))
-        elif str(typ.elem) == 'Tensor?':
+        if str(typ.elem) == 'Tensor?':
             # TODO(whc) is this actually correct? or should it use a Vector like above
             return ListCType(OptionalCType(BaseCType(valueT)))
-        elif str(typ.elem) == 'int':
-            return VectorCType(BaseCType(longT))
-        elif str(typ.elem) == 'bool':
-            return VectorCType(BaseCType(boolT))
         else:
-            raise AssertionError(f"TODO add support for type {repr(typ)}")
+            return VectorCType(process_ir_type(typ.elem))
     else:
         raise AssertionError(f"unrecognized type {repr(typ)}")
 
