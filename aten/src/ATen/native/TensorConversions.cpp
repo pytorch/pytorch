@@ -123,7 +123,7 @@ Tensor _autocast_to_reduced_precision(const Tensor& self, bool cuda_enabled, boo
       ((self.device().is_cuda() && cuda_enabled) ||
       (self.device().is_cpu() && cpu_enabled))
       ) {
-    at::ScalarType target;
+    at::ScalarType target = at::ScalarType::Undefined;
     if (self.device().is_cuda()) {
       target = cuda_dtype;
     } else if (self.device().is_cpu()) {
