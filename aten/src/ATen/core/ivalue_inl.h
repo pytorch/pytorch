@@ -529,10 +529,6 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
     return c10::make_intrusive<Tuple>(std::move(elements_));
   }
 
-  static c10::intrusive_ptr<Tuple> create(std::initializer_list<IValue> elements_) {
-    return create(c10::ArrayRef<IValue>(elements_));
-  }
-
   static c10::intrusive_ptr<Tuple> create(c10::ArrayRef<IValue> elements_) {
     switch (elements_.size()) {
       case 1:
@@ -1754,12 +1750,12 @@ inline c10::intrusive_ptr<ivalue::Tuple> IValue::toTuple() const& {
   AT_ASSERT(isTuple(), "Expected Tuple but got ", tagKind());
   return toIntrusivePtr<ivalue::Tuple>();
 }
-inline const ivalue::Tuple& IValue::toTupleRef() const {
+inline ivalue::Tuple& IValue::toTupleRef() const {
   AT_ASSERT(isTuple(), "Expected Tuple but got ", tagKind());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
       "called toTupleRef on null intrusive_ptr IValue");
-  return *static_cast<const c10::ivalue::Tuple*>(
+  return *static_cast<c10::ivalue::Tuple*>(
       payload.u.as_intrusive_ptr);
 }
 
