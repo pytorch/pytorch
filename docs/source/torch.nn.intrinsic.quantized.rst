@@ -1,6 +1,8 @@
 torch.nn.intrinsic.quantized
 --------------------------------------
 
+:orphan:
+
 This module implements the quantized implementations of fused operations like conv + relu.
 
 .. automodule:: torch.nn.intrinsic.quantized

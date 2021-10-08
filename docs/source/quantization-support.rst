@@ -1,6 +1,8 @@
 Quantization API Reference
 -------------------------------
 
+:orphan:
+
 Modules that provide quantization functions and classes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
