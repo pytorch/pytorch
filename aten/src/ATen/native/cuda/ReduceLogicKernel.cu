@@ -3,8 +3,10 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/ReduceOps.h>
-#include <ATen/Dispatch.h>
 #include <ATen/CUDAFunctions.h>
+#include <ATen/Dispatch.h>
+#include <ATen/NamedTensorUtils.h>
+#include <ATen/core/Tensor.h>
 
 namespace at { namespace native {
 
