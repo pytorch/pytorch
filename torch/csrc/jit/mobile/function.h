@@ -19,7 +19,8 @@ class Function {
   c10::IValue operator()(Stack& stack) const;
   const std::string& name() const;
   TORCH_API const c10::QualifiedName& qualname() const;
-  void append_instruction(OpCode op, int X, int N, int64_t dbg_handle = -1);
+  void append_instruction(OpCode op, int X, int N, int64_t dbg_handle);
+  void append_instruction(OpCode op, int X, int N);
   bool append_operator(
       const std::string& name,
       const std::string& overload_name,
