@@ -349,7 +349,17 @@ core_sources_full = core_sources_full_mobile + [
     "torch/csrc/jit/tensorexpr/external_functions_codegen.cpp",
 ]
 
-libtorch_core_sources = sorted(core_sources_common + core_sources_full + core_trainer_sources + libtorch_profiler_sources)
+lazy_tensor_core_sources = [
+    "torch/csrc/lazy/core/hash.cpp",
+]
+
+libtorch_core_sources = sorted(
+    core_sources_common +
+    core_sources_full +
+    core_trainer_sources +
+    libtorch_profiler_sources +
+    lazy_tensor_core_sources,
+)
 
 # These files are the only ones that are supported on Windows.
 libtorch_distributed_base_sources = [
@@ -432,14 +442,6 @@ jit_sources_full = [
 ]
 
 libtorch_core_jit_sources = sorted(jit_sources_full)
-
-torch_mobile_tracer_sources = [
-    "torch/csrc/jit/mobile/model_tracer/tracer.cpp",
-    "torch/csrc/jit/mobile/model_tracer/TensorUtils.cpp",
-    "torch/csrc/jit/mobile/model_tracer/MobileModelRunner.cpp",
-    "torch/csrc/jit/mobile/model_tracer/OperatorCallTracer.cpp",
-    "torch/csrc/jit/mobile/model_tracer/KernelDTypeTracer.cpp",
-]
 
 torch_mobile_core = [
     # backend_debug_info.cpp provides
