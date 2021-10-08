@@ -4,7 +4,9 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
+#include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 
 namespace torch {
 namespace jit {
@@ -256,26 +258,48 @@ bool IsUninitializedNode(Node* n) {
 
 // Infer shape and type of the uninitialized_output from the corresponding
 // output of the other subblock. prim::Uninitialized node is proven to be
-// unused. So replace this node with a constant of the inferred shape and type.
+// unused. So replace this node with a Constant (TensorType) or
+// Sequence (ListType) of the inferred shape and type.
 void InferShapeTypeForUninitializedOutput(
     Graph* graph,
     Block* block,
     Value* uninitialized_output,
-    Value* other_output) {
-  auto output_type = other_output->type()->expect<TensorType>();
-  auto elem_type = at::initialTensorOptions().dtype(output_type->scalarType());
-  Node* const_node = graph->create(::c10::onnx::Constant, 1);
+    Value* other_output,
+    int opset_version) {
+  Node* const_node = nullptr;
+  if (auto output_type = other_output->type()->cast<TensorType>()) {
+    auto elem_type =
+        at::initialTensorOptions().dtype(output_type->scalarType());
+    const_node = graph->create(::c10::onnx::Constant, 1);
 
-  if (output_type->sizes().concrete_sizes().has_value()) {
-    auto size = output_type->sizes().concrete_sizes().value();
-    const_node->t_(attr::value, at::zeros(size, elem_type));
-    const_node->output()->setType(other_output->type());
-    const_node->output()->copyMetadata(other_output);
-  } else {
-    const_node->t_(attr::value, at::zeros({}, elem_type));
-    const_node->output()->setType(
-        TensorType::create(*(output_type->scalarType()), at::kCPU, {}, {}));
+    if (output_type->sizes().concrete_sizes().has_value()) {
+      auto size = output_type->sizes().concrete_sizes().value();
+      const_node->t_(attr::value, at::zeros(size, elem_type));
+      const_node->output()->setType(other_output->type());
+    } else {
+      const_node->t_(attr::value, at::zeros({}, elem_type));
+      const_node->output()->setType(
+          TensorType::create(*(output_type->scalarType()), at::kCPU, {}, {}));
+    }
+  } else if (auto output_type = other_output->type()->cast<ListType>()) {
+    TypePtr elem = output_type->getElementType();
+    const_node = graph->create(::c10::onnx::SequenceEmpty, 1);
+    if (elem->cast<TensorType>() &&
+        elem->cast<TensorType>()->scalarType().has_value()) {
+      auto scalar_type = elem->cast<TensorType>()->scalarType().value();
+      auto onnx_type = ATenTypeToOnnxType(scalar_type);
+      const_node->i_(attr::dtype, onnx_type);
+      const_node->output()->setType(other_output->type());
+    } else {
+      std::cerr
+          << "Warning: UninitializedOutput - Invalid elem Type of ListTensor found."
+          << std::endl;
+      const_node->output()->setType(other_output->type());
+    }
   }
+
+  const ParamMap empty_params_dict = {};
+  ONNXShapeTypeInference(const_node, empty_params_dict, opset_version);
   const_node->insertBefore(block->return_node());
   uninitialized_output->replaceAllUsesWith(const_node->output());
   uninitialized_output->node()->destroy();
@@ -302,7 +326,7 @@ void InferShapeTypeForUninitializedOutput(
 //       -> (%1, %y.1, %7)
 //   ...
 
-void ONNXFixupUninitializedOutput(Node* node) {
+void ONNXFixupUninitializedOutput(Node* node, int opset_version) {
   if (node->kind() != ::c10::onnx::If) {
     return;
   }
@@ -338,11 +362,19 @@ void ONNXFixupUninitializedOutput(Node* node) {
 
     if (IsUninitializedNode(then_block_output->node())) {
       InferShapeTypeForUninitializedOutput(
-          graph, then_block, then_block_output, else_block_output);
+          graph,
+          then_block,
+          then_block_output,
+          else_block_output,
+          opset_version);
       if_node->outputs()[i]->setType(then_block->outputs()[i]->type());
     } else if (IsUninitializedNode(else_block_output->node())) {
       InferShapeTypeForUninitializedOutput(
-          graph, else_block, else_block_output, then_block_output);
+          graph,
+          else_block,
+          else_block_output,
+          then_block_output,
+          opset_version);
       if_node->outputs()[i]->setType(else_block->outputs()[i]->type());
     }
   }
@@ -440,7 +472,7 @@ std::vector<Value*> FixupONNXIfNode(Node* node, int opset_version) {
   }
   GRAPH_DUMP("Graph before fixing controlflow: ", node->owningGraph());
   FixupONNXSubblockOutputs(node);
-  ONNXFixupUninitializedOutput(node);
+  ONNXFixupUninitializedOutput(node, opset_version);
   // Copy type of block output to node output.
   ONNXMergeIfBlockOutputShapes(node);
 
