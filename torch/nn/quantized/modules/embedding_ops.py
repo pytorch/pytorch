@@ -153,7 +153,8 @@ class Embedding(torch.nn.Module):
         assert is_float_qparams_qconfig, \
             'Embedding quantization is only supported with float_qparams_weight_only_qconfig.'
 
-        assert dtype == torch.quint8, 'The only supported dtype for nnq.Embedding is torch.quint8'
+        assert dtype == torch.quint8, \
+            f'The only supported weight dtype for nnq.Embedding is torch.quint8, got {dtype}'
 
         # Run the observer to calculate qparams.
         weight_observer(mod.weight)
@@ -241,7 +242,7 @@ class EmbeddingBag(Embedding):
             'EmbeddingBag quantization is only supported with float_qparams_weight_only_qconfig.'
 
         assert dtype == torch.quint8 or dtype == torch.quint4x2, \
-            'The only supported dtype for nnq.EmbeddingBag is torch.quint8 and torch.quint4x2'
+            f'The only supported dtype for nnq.EmbeddingBag is torch.quint8 and torch.quint4x2, got {dtype}'
 
         # Run the observer to calculate qparams.
         weight_observer(mod.weight)
