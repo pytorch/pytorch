@@ -36,7 +36,7 @@ class MemoryPlanner {
   explicit MemoryPlanner(
       StaticRuntime* runtime,
       const FastMap<const Value*, std::vector<const Value*>>&,
-      const FastSet<const Value*>& external_values,
+      const ValueGroup& value_group,
       bool enable_out_variant,
       bool manage_graph_output_memory);
   // disable copying and moving
