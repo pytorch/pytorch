@@ -3386,7 +3386,7 @@ TEST(LoopNest, NotNormalizeAndSplitWithTail) {
   //     A[x] = x * 2;
   //   }
   const int kTotalSize = 10;
-  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle a_buf("A", {kTotalSize}, kInt);
   VarHandle x("x", kInt);
   auto for_stmt = For::make(x, 5, 15, Store::make(a_buf, {x}, x * 2));
   auto parent_block = Block::make({for_stmt});
