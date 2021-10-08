@@ -121,11 +121,24 @@ struct ParallelRegionGuard {
 
 namespace internal {
 
-void _parallel_run(
+inline std::tuple<size_t, size_t> calc_num_tasks_and_chunk_size(
+    int64_t begin, int64_t end, int64_t grain_size) {
+  if ((end - begin) < grain_size) {
+    return std::make_tuple(1, std::max((int64_t)0, end - begin));
+  }
+  // Choose number of tasks based on grain size and number of threads.
+  size_t chunk_size = divup((end - begin), get_num_threads());
+  // Make sure each task is at least grain_size size.
+  chunk_size = std::max((size_t)grain_size, chunk_size);
+  size_t num_tasks = divup((end - begin), chunk_size);
+  return std::make_tuple(num_tasks, chunk_size);
+}
+
+void invoke_parallel(
   const int64_t begin,
   const int64_t end,
   const int64_t grain_size,
-  const std::function<void(int64_t, int64_t, size_t)>& f) {
+  const std::function<void(int64_t, int64_t)>& f) {
   at::internal::lazy_init_num_threads();
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -149,7 +162,7 @@ void _parallel_run(
       int64_t local_end = std::min(end, (int64_t)(chunk_size + local_start));
       try {
         ParallelRegionGuard guard(task_id);
-        f(local_start, local_end, task_id);
+        f(local_start, local_end);
       } catch (...) {
         if (!state.err_flag.test_and_set()) {
           state.eptr = std::current_exception();

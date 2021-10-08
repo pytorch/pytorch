@@ -124,8 +124,10 @@ bool complyWith(
       if (j != 0 && inner_dim != -1) {
         // we are not looking at dim-j, but dim-sorted_index, which
         // is the j-th fastest dim;
-        // TODO: merge this with above and put a long comment there
-        if (t_strides[sorted_index] < t_strides[inner_dim]) {
+        // Note: we ignore 0-stride dimension, since eager logic on stride
+        // indices is ambiguous
+        if (t_strides[sorted_index] != 0 && t_strides[inner_dim] != 0 &&
+            t_strides[sorted_index] < t_strides[inner_dim]) {
           return false;
         }
       }
