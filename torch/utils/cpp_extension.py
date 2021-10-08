@@ -55,7 +55,15 @@ def _nt_quote_args(args: Optional[List[str]]) -> List[str]:
 def _find_cuda_home() -> Optional[str]:
     r'''Finds the CUDA install path.'''
     # Guess #1
-    cuda_home = os.environ.get('CUDA_HOME') or os.environ.get('CUDA_PATH')
+    cuda_home = None
+    if torch.version.cuda:
+        cuda_version = torch.version.cuda.replace('.', '_')
+        cuda_home = os.environ.get('CUDA_PATH_V' + cuda_version)
+    if cuda_home is None:
+        cuda_home = os.environ.get('CUDA_HOME')
+    if cuda_home is None:
+        cuda_home = os.environ.get('CUDA_PATH')
+
     if cuda_home is None:
         # Guess #2
         try:
@@ -1735,13 +1743,19 @@ def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> 
 
 
 def _get_exec_path(module_name, path):
-    if IS_WINDOWS and TORCH_LIB_PATH not in os.getenv('PATH', '').split(';'):
-        torch_lib_in_path = any(
-            os.path.exists(p) and os.path.samefile(p, TORCH_LIB_PATH)
-            for p in os.getenv('PATH', '').split(';')
-        )
-        if not torch_lib_in_path:
-            os.environ['PATH'] = f"{TORCH_LIB_PATH};{os.getenv('PATH', '')}"
+    if IS_WINDOWS:
+        paths = os.getenv('PATH', '').split(os.pathsep)
+        if TORCH_LIB_PATH not in paths:
+            torch_lib_in_path = any(
+                os.path.exists(p) and os.path.samefile(p, TORCH_LIB_PATH)
+                for p in paths
+            )
+            if not torch_lib_in_path:
+                paths.insert(0, TORCH_LIB_PATH)
+        if torch.cuda.is_available():
+            paths.insert(0, _join_cuda_home('extras', 'CUPTI', 'lib64'))
+        os.environ['PATH'] = os.pathsep.join(paths)
+
     return os.path.join(path, f'{module_name}{EXEC_EXT}')
 
 
