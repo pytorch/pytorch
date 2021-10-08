@@ -978,6 +978,27 @@ class TestQuantizedOps(TestCase):
         np.testing.assert_equal(qC, qC_hat.int_repr(),
                                 "Quantized multiplication failed.")
 
+    """Tests that quantized add works with broadcasting"""
+    def test_qadd_broadcast(self):
+        A = torch.randn(1, 1, 4, 4)
+        B = torch.randn(2, 1, 4, 4)
+        qA = torch.quantize_per_tensor(A, 0.02, 0, torch.quint8)
+        qB = torch.quantize_per_tensor(B, 0.04, 2, torch.quint8)
+
+        output_scale = 0.01
+        output_zp = 1
+
+        # ground truth
+        C = qA.dequantize() + qB.dequantize()
+        qC = torch.quantize_per_tensor(C, output_scale, output_zp, torch.quint8)
+
+        # quantized
+        qC_hat_1 = torch.ops.quantized.add(qA, qB, output_scale, output_zp)
+        qC_hat_2 = torch.ops.quantized.add(qB, qA, output_scale, output_zp)
+
+        self.assertTrue(torch.allclose(qC.dequantize(), qC_hat_1.dequantize()))
+        self.assertTrue(torch.allclose(qC.dequantize(), qC_hat_2.dequantize()))
+
     """Tests channel shuffle operation on quantized tensors."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=2, max_side=32, max_numel=10**5),
