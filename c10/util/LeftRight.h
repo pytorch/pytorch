@@ -3,6 +3,7 @@
 #include <atomic>
 #include <functional>
 #include <mutex>
+#include <shared_mutex>
 #include <thread>
 
 namespace c10 {
@@ -187,33 +188,36 @@ class LeftRight final {
   std::mutex _writeMutex;
 };
 
-// LeftRightNoOpWrapper is a pass-through (just to maintain API
-// compatibility with the non-mobile build).
+// RWSafeLeftRightWrapper is API compatible with LeftRight and uses a
+// read-write lock to protect T (data).
 template <class T>
-class LeftRightNoOpWrapper final {
+class RWSafeLeftRightWrapper final {
  public:
   template <class... Args>
-  explicit LeftRightNoOpWrapper(const Args&... args) : _data{args...} {}
+  explicit RWSafeLeftRightWrapper(const Args&... args) : _data{args...} {}
 
-  // LeftRightNoOpWrapper is not copyable or moveable since LeftRight
+  // RWSafeLeftRightWrapper is not copyable or moveable since LeftRight
   // is not copyable or moveable.
-  LeftRightNoOpWrapper(const LeftRightNoOpWrapper&) = delete;
-  LeftRightNoOpWrapper(LeftRightNoOpWrapper&&) noexcept = delete;
-  LeftRightNoOpWrapper& operator=(const LeftRightNoOpWrapper&) = delete;
-  LeftRightNoOpWrapper& operator=(LeftRightNoOpWrapper&&) noexcept = delete;
+  RWSafeLeftRightWrapper(const RWSafeLeftRightWrapper&) = delete;
+  RWSafeLeftRightWrapper(RWSafeLeftRightWrapper&&) noexcept = delete;
+  RWSafeLeftRightWrapper& operator=(const RWSafeLeftRightWrapper&) = delete;
+  RWSafeLeftRightWrapper& operator=(RWSafeLeftRightWrapper&&) noexcept = delete;
 
   template <typename F>
   auto read(F&& readFunc) const -> typename std::result_of<F(const T&)>::type {
+    std::shared_lock lock(mutex_);
     return readFunc(_data);
   }
 
   template <typename F>
   auto write(F&& writeFunc) -> typename std::result_of<F(T&)>::type {
+    std::unique_lock lock(mutex_);
     return writeFunc(_data);
   }
 
  private:
   T _data;
+  std::shared_mutex mutex_;
 };
 
 } // namespace c10
