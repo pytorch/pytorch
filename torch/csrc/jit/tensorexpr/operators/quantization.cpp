@@ -41,12 +41,12 @@ double isQuantized(const BufHandle& qx) {
 }
 
 BufHandle makeQBufHandle(
-    const std::string& name_hint,
+    const std::string& name,
     const std::vector<ExprHandle>& dims,
     Dtype dtype,
     const ExprPtr qscale,
     const ExprPtr qzero) {
-  BufHandle ResultBuf("quantized_conv2d", dims, dtype);
+  BufHandle ResultBuf(name, dims, dtype);
   ResultBuf.node()->set_qscale(qscale);
   ResultBuf.node()->set_qzero(qzero);
   return ResultBuf;
