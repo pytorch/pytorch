@@ -63,7 +63,7 @@ namespace internal {
 OpaqueOptionalTensorRef::OpaqueOptionalTensorRef() {
   static_assert(alignof(OptionalTensorRef) == alignof(TensorBase), "");
   static_assert(sizeof(OptionalTensorRef) == sizeof(TensorBase), "");
-  new (data_) OptionalTensorRef();
+  new (data_.data()) OptionalTensorRef();
 }
 
 OpaqueOptionalTensorRef::~OpaqueOptionalTensorRef() {
