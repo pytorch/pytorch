@@ -94,6 +94,8 @@ class TORCH_API Logger {
   // optimization.
   void log_if_graph_static(bool is_static) {
     ddp_logging_data_->ints_map["can_set_static_graph"] = is_static;
+    // It is useful to report the iteration that training finished at.
+    ddp_logging_data_->ints_map["iteration"] = reducer_->num_iterations_;
     at::LogPyTorchDDPUsage(*ddp_logging_data_);
   }
 
