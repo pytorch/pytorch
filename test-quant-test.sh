@@ -9,7 +9,4 @@ DEBUG=1 CXX_FLAGS="-g"  USE_LLVM=/home/ivankobzarev/llvm90install USE_XNNPACK=1 
   -DCMAKE_BUILD_TYPE=Debug \
   -DBUILD_TEST=ON \
   -DUSE_LLVM=/home/ivankobzarev/llvm90install \
-  && ./build/bin/test_tensorexpr --gtest_filter="Kernel.QuantDequant*" \
-  && ./build/bin/test_tensorexpr --gtest_filter="Kernel.QuantConv2dDequant*" \
-  && ./build/bin/test_tensorexpr --gtest_filter="Kernel.QuantConv2dReluDequant*" \
-  && ./build/bin/test_tensorexpr --gtest_filter="Kernel.QuantAddDequant*"
+  && ./build/bin/test_tensorexpr --gtest_filter="Quantization.QuantAdd*"
