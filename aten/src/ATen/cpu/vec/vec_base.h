@@ -739,12 +739,14 @@ template<class T, typename Op>
 static inline Vectorized<T> bitwise_binary_op(const Vectorized<T> &a, const Vectorized<T> &b, Op op) {
   static constexpr uint32_t element_no = VECTOR_WIDTH / sizeof(intmax_t);
   __at_align__ intmax_t buffer[element_no];
-  intmax_t a_ptr[element_no];
-  intmax_t b_ptr[element_no];
-  std::memcpy(&a_ptr, &a, sizeof(intmax_t) * element_no);
-  std::memcpy(&b_ptr, &b, sizeof(intmax_t) * element_no);
+  // We should be using memcpy (through .store) in order to respect the strict aliasing rule
+  // see: https://github.com/pytorch/pytorch/issues/66119
+  std::array<intmax_t, element_no> a_arr;
+  std::array<intmax_t, element_no> b_arr;
+  a.store(&a_arr);
+  b.store(&b_arr);
   for (uint32_t i = 0U; i < element_no; ++ i) {
-    buffer[i] = op(a_ptr[i], b_ptr[i]);
+    buffer[i] = op(a_arr[i], b_arr[i]);
   }
   return Vectorized<T>::loadu(buffer);
 }
