@@ -23,13 +23,21 @@ supported_ops = {
     torch.ops.aten.exp,
 }
 
-@contextlib.contextmanager
-def no_dispatch():
-    guard = torch._C._DisableTorchDispatch()  # type: ignore[attr-defined]
-    try:
-        yield
-    finally:
-        del guard
+# Part 1: The mode stack.
+# The mode stack lives at a PythonMode dispatch key that is at the very beginning of
+# all dispatch keys! It is separate from the Python dispatch key, which lives after
+# autograd.
+#
+# The mode stack holds (subclass type object, mode instance) objects.
+# The subclass is the subclass of the current transform (each transform dynamically
+# allocates a subclass) while the mode instance holds metadata associated with
+# the subclass.
+#
+# Whenever something is in the mode stack, we unconditionally dispatch to the
+# subclass's __torch_dispatch__.
+#
+# TODO: Could we just save the metadata on the subclass type object?
+# TODO: Does dispatchkey::PythonMode need to be separte from dispatchkey::Python
 
 def pop_mode_stack():
     return torch._C._autograd._exit_python_mode()
@@ -81,6 +89,18 @@ def batched_fallback(func, subclass, args, kwargs):
     result = torch.stack(results)
     return subclass(result, 0)
 
+# Part 2: the BatchedTensor object
+# There is a base BatchedTensor object that all vmap transforms dynamically subclass.
+# It has a torch_dispatch which basically calls a "batched fallback" in lieu of
+# having batching rules.
+#
+# There is also special behavior for randomness: when someone calls torch.randn,
+# we check the mode instance for some metadata (the batch_size and the randomness
+# behavior)
+#
+# TODO: right now the torch_dispatch is passed the subclass type object,
+# but I think that's equivalent to `cls`...
+
 def get_torch_dispatch(subclass):
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         ctx = temporarily_pop_mode_stack if mode_stack_size() > 0 else noop
@@ -130,6 +150,15 @@ def gen_batchedtensor_subclass():
             return get_torch_dispatch(GeneratedBatchedTensor)(cls, func, types, args, kwargs)
     return GeneratedBatchedTensor
 
+# Part 3: VmapMode and functional vmap
+#
+# VmapMode creates a new BatchedTensor subclass for use and stores some
+# metadata (batch_size, randomness setting).
+#
+# On entry it pushes something onto the mode stack; on exit it removes something.
+#
+# The vmap API is a wrapper around VmapMode.
+
 class VmapMode():
     def __init__(self, batch_size, randomness):
         self.batch_size = batch_size
@@ -166,6 +195,11 @@ def vmap(f, in_dims=(0,), randomness="error"):
             return batched_out.expand(batch_size, *batched_out.shape)
     return wrapped
 
+# Part 4: JVP transform
+#
+# We define a JVPTensor, a JVPMode (which holds no metadata), and
+# JVP formulas.
+
 def opt_apply(lamb, optional):
     if optional is None:
         return optional
@@ -191,7 +225,11 @@ def cos_jvp_rule(unpacked_jvp_tensor):
     x_primal, x_tangent = unpacked_jvp_tensor
     return (x_primal.cos(), opt_mul(-x_primal.sin(), x_tangent)),
 
-# NB: You can call transforms INSIDE rules.
+# Part 4.5
+# NB: You can call transforms INSIDE rules !!!! because of how the mode stack works.
+#
+# This means that decomposition/functionalization could be transforms that
+# are called inside of e.g. batching rules
 def exp_jvp_rule(unpacked_jvp_tensor):
     x_primal, x_tangent = unpacked_jvp_tensor
     assert x_primal.dim() > 0  # To demonstrate vmap inside jvp
@@ -344,6 +382,9 @@ def jvp(f, primals, tangents):
     results = tree_map(unwrap, results)
     primals_out, tangents_out = zip(*results)
     return tree_unflatten(primals_out, spec), tree_unflatten(tangents_out, spec)
+
+# Part 5: Examples that show everything works
+# We test various compositions of `vmap` and `jvp`.
 
 # basic vmap test
 x = torch.randn(3, 2, 5, 7)
