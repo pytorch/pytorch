@@ -1,6 +1,5 @@
-#include <torch/csrc/jit/mobile/function.h>
-
 #include <caffe2/serialize/inline_container.h>
+#include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/prim_ops_registery.h>
 #include <torch/csrc/jit/runtime/instruction.h>
@@ -27,8 +26,16 @@ void Function::append_instruction(OpCode op, int X, int N, int64_t dbg_handle) {
       isOpSupportedInMobile(op),
       toString(op),
       " is not supported in mobile module.");
-  code_->instructions_with_handles_.emplace_back(
-      Instruction(op, X, N), dbg_handle);
+  code_->instructions_.emplace_back(op, X, N);
+  code_->debug_handles_.emplace_back(dbg_handle);
+}
+
+void Function::append_instruction(OpCode op, int X, int N) {
+  TORCH_CHECK(
+      isOpSupportedInMobile(op),
+      toString(op),
+      " is not supported in mobile module.");
+  code_->instructions_.emplace_back(op, X, N);
 }
 
 bool Function::append_operator(
@@ -40,13 +47,14 @@ bool Function::append_operator(
   // Keep the original opname in code_
   code_->op_names_.emplace_back(name, overload_name);
   const auto& opname = code_->op_names_.back();
+  const auto full_name = c10::toString(opname);
 
   std::function<void(Stack&)> fn;
 
   const std::vector<c10::Argument>* pArgs = nullptr;
-  bool promoted_op = mobile::hasPrimOpsFn(name);
+  bool promoted_op = mobile::hasPrimOpsFn(full_name);
   if (promoted_op) {
-    fn = mobile::getPrimOpsFn(name);
+    fn = mobile::getPrimOpsFn(full_name);
   } else {
     std::shared_ptr<Operator> jit_op = findOperatorFor(opname);
     if (jit_op) {
@@ -140,9 +148,9 @@ void Function::set_register_size(size_t size) {
 int64_t Function::get_debug_handle(size_t pc) const {
   TORCH_CHECK(code_, "Valid code must exist.");
   TORCH_CHECK(
-      pc < code_->instructions_with_handles_.size(),
+      pc < code_->debug_handles_.size(),
       "Module debug info index out of boundary.");
-  return code_->instructions_with_handles_[pc].debug_handle;
+  return code_->debug_handles_[pc];
 }
 
 void Function::setSchema(c10::FunctionSchema schema) {
@@ -174,11 +182,7 @@ const std::shared_ptr<Code> Function::get_code() const {
 
 int64_t Function::getExceptionDebugHandle() const {
   size_t pc = getInterpretersExceptionPC();
-  // we dont do bounds check given that pc is obtained
-  // via internal method of getInterpretersExceptionPC
-  // which returns the PC of where the interpreter is.
-  // Although .at will do bounds check anyway.
-  return code_->instructions_with_handles_.at(pc).debug_handle;
+  return (pc < code_->debug_handles_.size()) ? code_->debug_handles_[pc] : -1;
 }
 
 } // namespace mobile
