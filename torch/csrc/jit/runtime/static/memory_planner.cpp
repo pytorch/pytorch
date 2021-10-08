@@ -51,7 +51,7 @@ MemoryPlanner::MemoryPlanner(
     StaticRuntime* runtime,
     const FastMap<const Value*, std::vector<const Value*>>&
         value_to_same_storage_values,
-    const FastSet<const Value*>& external_values,
+    const ValueGroup& value_group,
     bool enable_out_variant,
     bool manage_graph_output_memory) {
   // collect register indices of outputs of ops with out variant
@@ -62,7 +62,7 @@ MemoryPlanner::MemoryPlanner(
       if (pnode.has_out_variant()) {
         for (const auto i : c10::irange(pnode.outputs().size())) {
           const Value* out_v = pnode.node()->outputs()[i];
-          if (external_values.count(out_v)) {
+          if (value_group.isAlwaysAlive(out_v)) {
             continue;
           }
           // Types are stored in the underlying TorchScript IR
