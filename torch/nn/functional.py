@@ -1557,6 +1557,11 @@ def rrelu(
 
     See :class:`~torch.nn.RReLU` for more details.
     """
+    if lower > upper:
+        raise ValueError(
+            "RReLU: Given lower bound ({}) is greater than "
+            "the given upper bound ({})".format(lower, upper)
+        )
     if has_torch_function_unary(input):
         return handle_torch_function(
             rrelu, (input,), input, lower=lower, upper=upper, training=training, inplace=inplace
