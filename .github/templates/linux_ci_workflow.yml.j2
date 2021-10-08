@@ -7,18 +7,10 @@ name: !{{ build_environment }}
 {%- endblock %}
 
 on:
-{%- if on_pull_request %}
   pull_request:
   {%- if ciflow_config.enabled %}
-    {%- if ciflow_config.trigger_action_only %}
-    types: [!{{ ciflow_config.trigger_action }}]
-    {%- else %}
     types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
-    {%- endif %}
   {%- endif %}
-{%- else %}
-  # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
-{%- endif %}
 
 {%- if is_scheduled %}
   schedule:
@@ -232,11 +224,13 @@ jobs:
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-        # Time out the test phase after 3.5 hours
-        timeout-minutes: 210
+        # Time out the test phase after !{{ timeout_after }} minutes
+        timeout-minutes: !{{ timeout_after }}
         run: |
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
+          elif [[ $BUILD_ENVIRONMENT == *onnx* ]]; then
+            TEST_COMMAND=.jenkins/caffe2/test.sh
           else
             TEST_COMMAND=.jenkins/pytorch/test.sh
           fi
@@ -268,6 +262,7 @@ jobs:
             -e http_proxy="!{{ common.squid_proxy }}" -e https_proxy="!{{ common.squid_proxy }}" -e no_proxy="!{{ common.squid_no_proxy }}" \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
+            --ulimit stack=10485760:83886080 \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
             --shm-size="${SHM_SIZE}" \
@@ -364,14 +359,4 @@ jobs:
           s3-bucket: doc-previews
           path: cppdocs/
           s3-prefix: pytorch/${{ github.event.pull_request.number }}/cppdocs
-      - name: Archive artifacts into zip
-        run: |
-          zip -r "docs_${DOCS_TYPE}.zip" "${GITHUB_WORKSPACE}/pytorch.github.io" "${GITHUB_WORKSPACE}/cppdocs"
-      - uses: actions/upload-artifact@v2
-        name: Store PyTorch Build Artifacts
-        with:
-          name: docs_${{ matrix.docs_type }}
-          path: docs_${{ matrix.docs_type }}.zip
-          if-no-files-found: error
-      !{{ common.teardown_ec2_linux() }}
 {%- endif -%}

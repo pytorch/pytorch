@@ -17,7 +17,7 @@ void CompareDivMod(int32_t v, int32_t divisor) {
   int fixed_q = fixed.Div(v);
   int fixed_r = fixed.Mod(v);
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
   EXPECT_EQ(native_q, fixed_q)
       << v << " / " << divisor << " magic " << fixed.magic() << " shift "
       << fixed.shift() << " quot " << fixed_q << " " << native_q;
