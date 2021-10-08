@@ -7302,7 +7302,7 @@ class DistributedTest:
                 # Other ranks should not pass barrier since rank 0 failed.
                 err_regex = (
                     f"Rank {self.rank} successfully reached monitoredBarrier,"
-                    f" but received errors while waiting to be unblocked by rank"
+                    f" but received errors while waiting for send/recv from rank"
                     f" {src_rank}"
                 )
                 with self.assertRaisesRegex(RuntimeError, err_regex):
@@ -7440,7 +7440,7 @@ class DistributedTest:
             elif self.rank == 1:
                 err_regex = (
                     f"Rank {self.rank} successfully reached monitoredBarrier,"
-                    f" but received errors while waiting to be unblocked by rank"
+                    f" but received errors while waiting for send/recv from rank"
                     f" {src_rank}"
                 )
                 with self.assertRaisesRegex(RuntimeError, err_regex):
