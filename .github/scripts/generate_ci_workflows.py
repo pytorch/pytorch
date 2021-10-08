@@ -202,6 +202,9 @@ class CIWorkflow:
                 assert LABEL_CIFLOW_CUDA in self.ciflow_config.labels
             if self.test_runner_type in CPU_RUNNERS:
                 assert LABEL_CIFLOW_CPU in self.ciflow_config.labels
+            if self.is_scheduled:
+                assert LABEL_CIFLOW_DEFAULT not in self.ciflow_config.labels
+                assert LABEL_CIFLOW_SCHEDULED in self.ciflow_config.labels
 
     def generate_workflow_file(self, workflow_template: jinja2.Template) -> None:
         output_file_path = GITHUB_DIR / f"workflows/generated-{self.build_environment}.yml"
@@ -446,7 +449,7 @@ LINUX_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="linux",
-        build_environment="periodic-pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-slow-gradcheck",
+        build_environment="periodic-linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         num_test_shards=2,
@@ -456,7 +459,7 @@ LINUX_WORKFLOWS = [
         is_scheduled="0 */4 * * *",
         ciflow_config=CIFlowConfig(
             enabled=True,
-            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_SLOW_GRADCHECK, LABEL_CIFLOW_SLOW},
+            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_SLOW_GRADCHECK, LABEL_CIFLOW_SLOW, LABEL_CIFLOW_SCHEDULED},
         ),
     ),
 ]
