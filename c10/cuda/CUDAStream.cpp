@@ -16,6 +16,7 @@ namespace cuda {
 namespace {
 
 // Global stream state and constants
+static std::once_flag init_flag;
 static DeviceIndex num_gpus = -1;
 static constexpr int kStreamsPerPoolBits = 5;
 static constexpr int kStreamsPerPool = 1 << kStreamsPerPoolBits;
@@ -25,10 +26,6 @@ static constexpr int kStreamTypeBits = 3;
 // Note: lower numbers are higher priorities, zero is default priority
 static constexpr int kHighPriority = -1;
 static constexpr int kLowPriority = 0;
-
-// Default streams
-static std::once_flag init_flag;
-static cudaStream_t default_streams[C10_COMPILE_TIME_MAX_GPUS];
 
 // Non-default streams
 // Note: the number of CUDA devices is determined at run time,
@@ -138,11 +135,7 @@ StreamId makeStreamId(StreamIdType st, size_t si) {
 // Thread-local current streams
 static thread_local std::unique_ptr<StreamId[]> current_streams = nullptr;
 
-// Populates global values and creates a default stream for each device.
-// Note: the default stream on each device is signified by a nullptr,
-// and so is not created as usual.
-// In particular, we don't need to switch devices when creating the
-// streams.
+// Populates global values.
 // Warning: this function must only be called once!
 static void initGlobalStreamState() {
   num_gpus = device_count();
@@ -154,12 +147,6 @@ static void initGlobalStreamState() {
       "max number of gpus expected (",
       C10_COMPILE_TIME_MAX_GPUS,
       "). Increase that and recompile.");
-
-  // Initializes default streams
-  for (const auto i : c10::irange(num_gpus)) {
-    low_priority_counters[i] = 0;
-    high_priority_counters[i] = 0;
-  }
 }
 
 // Creates the low and high priority stream pools for the specified device
@@ -178,6 +165,9 @@ static void initDeviceStreamState(DeviceIndex device_index) {
     C10_CUDA_CHECK(cudaStreamCreateWithPriority(
         &hipri_stream, kDefaultFlags, kHighPriority));
   }
+
+  low_priority_counters[device_index] = 0;
+  high_priority_counters[device_index] = 0;
 }
 
 // Init front-end to ensure initialization only occurs once
@@ -236,7 +226,7 @@ cudaStream_t CUDAStream::stream() const {
           ").",
           " Did you manufacture the StreamId yourself?  Don't do that; use the",
           " official API like c10::cuda::getStreamFromPool() to get a new stream.");
-      return default_streams[device_index];
+      return nullptr;
     case StreamIdType::LOW:
       return low_priority_streams[device_index][si];
     case StreamIdType::HIGH:
