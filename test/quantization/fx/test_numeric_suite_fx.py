@@ -2044,7 +2044,7 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
     @unittest.skip("TODO: broken by https://github.com/pytorch/pytorch/pull/61687, will enable later")
     def test_resnet18(self):
         import torchvision
-        m = torchvision.models.quantization.resnet18(pretrained=True, quantize=False).eval()
+        m = torchvision.models.quantization.resnet18(pretrained=False, quantize=False).eval()
         qconfig_dict = {'': torch.ao.quantization.default_qconfig}
         self._test_match_shadow_activations(
             m, (torch.randn(1, 3, 224, 224),),
@@ -2056,7 +2056,7 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
     @unittest.skip("TODO: broken by https://github.com/pytorch/pytorch/pull/61687, will enable later")
     def test_mobilenet_v2(self):
         import torchvision
-        m = torchvision.models.quantization.mobilenet_v2(pretrained=True, quantize=False).eval()
+        m = torchvision.models.quantization.mobilenet_v2(pretrained=False, quantize=False).eval()
         qconfig_dict = {'': torch.ao.quantization.default_qconfig}
         self._test_match_shadow_activations(
             m, (torch.randn(1, 3, 224, 224),),
