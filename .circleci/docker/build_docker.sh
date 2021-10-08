@@ -28,7 +28,6 @@ login() {
 
 # Retry on timeouts (can happen on job stampede).
 retry login "${registry}"
-
 # Logout on exit
 trap "docker logout ${registry}" EXIT
 
@@ -45,5 +44,6 @@ trap "docker logout ${registry}" EXIT
 
 docker push "${image}:${tag}"
 
+trap "rm -rf ${IMAGE_NAME}:${tag}.tar" EXIT
 docker save -o "${IMAGE_NAME}:${tag}.tar" "${image}:${tag}"
 aws s3 cp "${IMAGE_NAME}:${tag}.tar" "s3://ossci-linux-build/pytorch/base/${IMAGE_NAME}:${tag}.tar" --acl public-read
