@@ -685,6 +685,37 @@ class TestFunctionalIterDataPipe(TestCase):
                 with self.assertRaises(AttributeError):
                     p = pickle.dumps(datapipe)
 
+    def test_iterable_wrapper_datapipe(self):
+
+        input_ls = list(range(10))
+        input_dp = dp.iter.IterableWrapper(input_ls)
+
+        # Functional Test: values are unchanged and in the same order
+        self.assertEqual(input_ls, list(input_dp))
+
+        # Functional Test: deep copy by default when an iterator is initialized (first element is read)
+        it = iter(input_dp)
+        self.assertEqual(0, next(it))  # The deep copy only happens when the first element is read
+        input_ls.append(50)
+        self.assertEqual(list(range(1, 10)), list(it))
+
+        # Functional Test: shallow copy
+        input_ls2 = [1, 2, 3]
+        input_dp_shallow = dp.iter.IterableWrapper(input_ls2, deepcopy=False)
+        input_ls2.append(10)
+        self.assertEqual([1, 2, 3, 10], list(input_dp_shallow))
+
+        # Reset Test: reset the DataPipe
+        input_ls = list(range(10))
+        input_dp = dp.iter.IterableWrapper(input_ls)
+        n_elements_before_reset = 5
+        res_before_reset, res_after_reset = reset_after_n_next_calls(input_dp, n_elements_before_reset)
+        self.assertEqual(input_ls[:n_elements_before_reset], res_before_reset)
+        self.assertEqual(input_ls, res_after_reset)
+
+        # __len__ Test: inherits length from sequence
+        self.assertEqual(len(input_ls), len(input_dp))
+
     def test_concat_datapipe(self):
         input_dp1 = dp.iter.IterableWrapper(range(10))
         input_dp2 = dp.iter.IterableWrapper(range(5))
