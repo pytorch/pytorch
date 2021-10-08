@@ -511,19 +511,6 @@ at::Tensor LazyNativeFunctions::ge(const at::Tensor& self,
       LazyTensor::ge(bridge::GetLtcTensor(self), bridge::GetLtcTensor(other)));
 }
 
-at::Tensor LazyNativeFunctions::gelu(const at::Tensor& self) {
-  LTC_FN_COUNTER("lazy::");
-  return bridge::AtenFromLtcTensor(
-      LazyTensor::gelu(bridge::GetLtcTensor(self)));
-}
-
-at::Tensor LazyNativeFunctions::gelu_backward(const at::Tensor& grad,
-                                              const at::Tensor& self) {
-  LTC_FN_COUNTER("lazy::");
-  return bridge::AtenFromLtcTensor(LazyTensor::gelu_backward(
-      bridge::GetLtcTensor(grad), bridge::GetLtcTensor(self)));
-}
-
 at::Tensor LazyNativeFunctions::gt(const at::Tensor& self,
                                    const at::Scalar& other) {
   LTC_FN_COUNTER("lazy::");

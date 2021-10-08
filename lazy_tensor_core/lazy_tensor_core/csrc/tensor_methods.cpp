@@ -1282,16 +1282,6 @@ LazyTensor LazyTensor::ge(const LazyTensor& input, const LazyTensor& other) {
   return DispatchComparisonOp(at::aten::ge, input, other);
 }
 
-LazyTensor LazyTensor::gelu(const LazyTensor& input) {
-  return input.CreateFrom(ir::ops::Gelu(input.GetIrValue()));
-}
-
-LazyTensor LazyTensor::gelu_backward(const LazyTensor& grad,
-                                     const LazyTensor& input) {
-  return input.CreateFrom(
-      ir::ops::GeluBackward(grad.GetIrValue(), input.GetIrValue()));
-}
-
 LazyTensor LazyTensor::ger(const LazyTensor& input, const LazyTensor& vec2) {
   return input.CreateFrom(ir::ops::Ger(input.GetIrValue(), vec2.GetIrValue()));
 }
