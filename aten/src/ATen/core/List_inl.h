@@ -63,7 +63,7 @@ List<T> toTypedList(impl::GenericList list) {
   // as List<Tensor> before we changed that argument to be List<optional<Tensor>>. When deserializing, we
   // have list.use_count() == 1 and can deserialize the List<Tensor> directly as List<optional<Tensor>>.
   TORCH_CHECK(*list.impl_->elementType == *getTypePtr<T>()
-    || (list.use_count() == 1 && list.impl_->elementType->isSubtypeOf(getTypePtr<T>()))
+    || (list.use_count() == 1 && list.impl_->elementType->isSubtypeOf(*getTypePtr<T>()))
     , "Tried to cast a List<", toString(list.impl_->elementType), "> to a List<", toString(getTypePtr<T>()), ">. Types mismatch.");
   return List<T>(std::move(list.impl_));
 }

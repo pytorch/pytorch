@@ -63,7 +63,7 @@ void checkONNXCompatibility(const c10::FunctionSchema& schema) {
     if (type->kind() == TypeKind::ListType) {
       const auto& elem_type =
           reinterpret_cast<ListType*>(type.get())->getElementType();
-      if (elem_type->isSubtypeOf(TensorType::get())) {
+      if (elem_type->isSubtypeOf(*TensorType::get())) {
         AT_ASSERTM(
             !has_tensor_list,
             "ONNX export supports at most one TensorList as input.");
@@ -97,7 +97,7 @@ void preprocessCaffe2Ops(Block* block) {
             origin_input->mustBeNone()) {
           continue;
         }
-        if (type->isSubtypeOf(TensorType::get())) {
+        if (type->isSubtypeOf(*TensorType::get())) {
           it->addInput(origin_input);
         } else if (
             type->kind() == TypeKind::BoolType ||
@@ -119,7 +119,7 @@ void preprocessCaffe2Ops(Block* block) {
           AT_ASSERT(
               list_node->kind() == prim::ListConstruct ||
               list_node->kind() == prim::Constant);
-          if (elem_type->isSubtypeOf(TensorType::get())) {
+          if (elem_type->isSubtypeOf(*TensorType::get())) {
             AT_ASSERT(list_node->kind(), prim::ListConstruct);
             const auto& tensor_list = origin_input->node()->inputs();
             for (const auto& t : tensor_list) {

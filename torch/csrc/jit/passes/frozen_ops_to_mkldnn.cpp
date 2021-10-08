@@ -755,7 +755,7 @@ void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
       body_node->replaceInput(1, node->outputs().at(1));
     }
     if (body_node->kind() == aten::mul &&
-        body_node->input(1)->type()->isSubtypeOf(NumberType::get())) {
+        body_node->input(1)->type()->isSubtypeOf(*NumberType::get())) {
       body_node->replaceWithNewSymbol(Symbol::prim("MKLDNNScalarMul"));
       body_node->destroy();
       continue;
@@ -1022,7 +1022,7 @@ class MKLDNNSubgraphSlicer {
     if (n->kind() == aten::mul) {
       return n->input(0)->type()->cast<TensorType>() &&
           (n->input(1)->type()->cast<TensorType>() ||
-           n->input(1)->type()->isSubtypeOf(NumberType::get()));
+           n->input(1)->type()->isSubtypeOf(*NumberType::get()));
     }
 
     if (n->kind() == aten::dropout) {

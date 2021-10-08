@@ -47,7 +47,7 @@ bool IsCondCastRequired(Value* cond_val) {
       return *scalar_type != c10::kBool;
     }
   }
-  return !type->isSubtypeOf(BoolType::get());
+  return !type->isSubtypeOf(*BoolType::get());
 }
 
 bool IsErasableSequence(const Node* loop_node, size_t i) {
@@ -337,7 +337,7 @@ void ONNXFixupUninitializedOutput(Node* node, int opset_version) {
 
   // Check if the input to ONNX If node is node Bool, and insert
   // cast to Bool if needed.
-  if (!if_node->input()->type()->isSubtypeOf(BoolType::get())) {
+  if (!if_node->input()->type()->isSubtypeOf(*BoolType::get())) {
     Node* cast_node = CreateCastToBoolNode(if_node->input(), graph);
     cast_node->insertBefore(if_node);
     if_node->replaceInputWith(if_node->input(), cast_node->output());
