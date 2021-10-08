@@ -452,13 +452,57 @@ void validateVectorize(Fusion* fusion) {
   }
 }
 
+namespace {
+
+// Validate parallelization of a single tensor
+void validateParallelizationOfTensor(TensorView* tv) {
+  // Each ParallelType can be used only once.
+  ParallelTypeBitmap pt_map;
+  for (size_t i = 0; i < tv->nDims(); ++i) {
+    auto axis = tv->axis(i);
+    auto ptype = axis->getParallelType();
+    if (!isParallelTypeThread(ptype)) {
+      continue;
+    }
+
+    TORCH_INTERNAL_ASSERT(
+        !pt_map.get(ptype),
+        "Multiple use of ",
+        ptype,
+        " in tensor t",
+        tv->name(),
+        ": ",
+        tv);
+    pt_map.set(ptype);
+  }
+
+  // If this tensor is predicated by a paralel type, it should not be
+  // used to parallelize any domain of this tensor
+
+  const auto thread_pred =
+      GpuLower::current()->threadPredMap().getPredicateInfo(tv);
+
+  auto predicated_parallel_types = pt_map & thread_pred.limited_types;
+
+  TORCH_INTERNAL_ASSERT(
+      predicated_parallel_types.none(),
+      "Invalid parallelization of tensor t",
+      tv->name(),
+      ". The tensor is parallelized with ",
+      predicated_parallel_types.toString(),
+      ", but it's invalid to use the types as the tensor is also predicated with them.",
+      ", thread prd: ",
+      thread_pred.limited_types.toString());
+}
+
+} // namespace
+
 void validateParallelize(Fusion* fusion) {
   FUSER_PERF_SCOPE("GpuLower::Lower::validateParallelize");
   FusionGuard fg(fusion);
 
   const auto& par_map = GpuLower::current()->caParallelMap();
   const auto& loop_map = GpuLower::current()->caLoopMap();
-  const auto& index_map = GpuLower::current()->caIndexMap();
   const auto& pred_map = GpuLower::current()->threadPredMap();
 
   auto exprs = ExprSort::getExprs(fusion);
@@ -467,6 +511,11 @@ void validateParallelize(Fusion* fusion) {
     if (!ir_utils::isTVOp(expr)) {
       continue;
     }
+    // Validate parallelization of each consumer by itself
+    for (auto consumer : ir_utils::filterByType<TensorView>(expr->outputs())) {
+      validateParallelizationOfTensor(consumer);
+    }
+    // Validate parallelization between a producer and a consumer
     for (auto producer : ir_utils::filterByType<TensorView>(expr->inputs())) {
       // Parallelization on input tensors have no effect.
       if (producer->isFusionInput()) {
@@ -474,7 +523,6 @@ void validateParallelize(Fusion* fusion) {
       }
       const auto parallel_bcast_doms =
           pred_map.getParallelBroadcastDomains(producer);
-      ParallelTypeBitmap pt_map;
       for (const auto i : c10::irange(producer->nDims())) {
         // If a producer axis is threaded, either with threadIdx or
         // blockIdx, there must be a mapped consumer axis with the
@@ -489,19 +537,10 @@ void validateParallelize(Fusion* fusion) {
         if (!isParallelTypeThread(producer_ptype)) {
           continue;
         }
-        // Each ParallelType can be used only once.
-        TORCH_INTERNAL_ASSERT(
-            !pt_map.get(producer_ptype),
-            "Multiple use of ",
-            producer_ptype,
-            " in tensor t",
-            producer->name(),
-            ": ",
-            producer);
-        pt_map.set(producer_ptype);
         // When the producer axis is a broadcast, it is not really
         // parallelized unless thread-predicated
-        if (producer_axis->isBroadcast() && parallel_bcast_doms.none()) {
+        if (producer_axis->isBroadcast() &&
+            !parallel_bcast_doms.get(producer_ptype)) {
           continue;
         }
         // No constraint on the consumer tensor when the producer
@@ -517,27 +556,17 @@ void validateParallelize(Fusion* fusion) {
           continue;
         }
         // There must be a consumer axis that uses the same indexing
-        // with the same parallel type as the producer axis. The index
-        // map is used to to find such an axis. In addition, even when
-        // no mapped axis is found in the index map, but when an
-        // mapped axis exists in the loop map, the producer and
-        // consumer axes may still use the same indexing. That only
-        // happens when the producer is derived from a root axis that
-        // is an input to any leaf CA axes. In such a case, the axis
-        // in the reference tensor that maps to
-        // the producer axis is created based on the consumer, so both
-        // the producer and consumer axes should have the same
-        // indexing. See issue #995 as well as the
-        // FusionValidateParallelize6 test for a concrete example.
+        // with the same parallel type as the producer axis. The loop
+        // map is used to to find such an axis. Broadcast forwarding
+        // does not cause any inconsistent parallelization as indexing
+        // takes care of the forwarding.
         for (auto consumer :
              ir_utils::filterByType<TensorView>(expr->outputs())) {
           auto it = std::find_if(
               consumer->domain()->domain().begin(),
               consumer->domain()->domain().end(),
               [&](IterDomain* consumer_axis) {
-                return index_map.areMapped(producer_axis, consumer_axis) ||
-                    (loop_map.areMapped(producer_axis, consumer_axis) &&
-                     ir_utils::derivedFromRootCAAxes(producer, producer_axis));
+                return loop_map.areMapped(producer_axis, consumer_axis);
               });
           TORCH_INTERNAL_ASSERT(
               it != consumer->domain()->domain().end(),

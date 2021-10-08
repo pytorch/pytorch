@@ -17667,21 +17667,8 @@ TEST(NVFuserTest, FusionIssue1127_CUDA) {
   tv4->axis(1)->parallelize(ParallelType::TIDx);
   tv5->axis(0)->parallelize(ParallelType::TIDx);
 
-  FusionExecutor fe;
-  fe.compileFusion(&fusion);
-
-  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  at::Tensor at_t0 = at::randn({numel}, options);
-  at::Tensor at_t3 = at::randn({numel, numel}, options);
-  std::vector<IValue> aten_inputs = {at_t0, at_t3};
-  auto outputs = fe.runFusion(aten_inputs);
-
-  auto ref = at_t0.sum({0}).unsqueeze(0) + at_t3.sum({1});
-
-  // This fails because tv5 is predicated and parallelized with TIDx.
-  // TODO: Add validation to detect such invalid parallelization
-  ASSERT_ANY_THROW(
-      testValidate(&fusion, outputs, aten_inputs, {ref}, __LINE__, __FILE__));
+  // Lowering should fail since tv5 is predicated and paralellized with TIDx.
+  ASSERT_ANY_THROW(fusion.printKernel());
 }
 
 TEST(NVFuserTest, FusionChannelsLastParser_CUDA) {

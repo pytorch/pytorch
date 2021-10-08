@@ -59,6 +59,13 @@ class TORCH_CUDA_CU_API ThreadPredicateMap {
   //! Build a map from each tensor to PredicateInfo.
   void build(Fusion* fusion);
 
+  //! Get a PredicateInfo for a given tensor. If it's an output of
+  //! a parallel broadcast, unmask the limited_types_ bit of the
+  //! corresponding parallel type since it must join the broadcast
+  //! operation although the valid input is only available at one of
+  //! the threads/blocks.
+  PredicateInfo getPredicateInfo(const TensorView* tv) const;
+
   //! Returns a flag set that indicates which parallel types should be
   //! predicated.
   ParallelTypeBitmap getPredicatedParallelTypes(const TensorView* tv) const;
@@ -72,13 +79,6 @@ class TORCH_CUDA_CU_API ThreadPredicateMap {
   //! Even when a domain is broadcast and parallelized, it does not need
   //! blockBroadcast unless it is predicated by limited_types_
   ParallelTypeBitmap getParallelBroadcastDomains(const TensorView* tv) const;
-
-  //! Get a PredicateInfo for a given tensor. If it's an output of
-  //! a parallel broadcast, unmask the limited_types_ bit of the
-  //! corresponding parallel type since it must join the broadcast
-  //! operation although the valid input is only available at one of
-  //! the threads/blocks.
-  PredicateInfo getPredicateInfo(const TensorView* tv) const;
 
   void print() const;
 

@@ -437,12 +437,16 @@ void GpuLower::lower() {
   ca_loop_map_ = ComputeAtMap(ComputeAtMap::MappingMode::LOOP);
   ca_loop_map_.build(fusion_, current());
 
-  validateParallelize(fusion_);
-
   parallelDimensionMap().build(fusion_);
   if (isDebugDumpEnabled(DebugDumpOption::ParallelDimensions)) {
     std::cout << parallelDimensionMap().toString();
   }
+
+  // Compute thread predicates. Depends on parallel_dimension_map_
+  thread_pred_map_.build(fusion_);
+
+  // Depends on thread_pred_map_
+  validateParallelize(fusion_);
 
   // Scan the whole fusion and build mappings about halo extensions of
   // all IterDomains
@@ -451,9 +455,6 @@ void GpuLower::lower() {
   partialSplitMap().build(fusion_);
 
   validatePartialSplit(fusion_);
-
-  // Compute thread predicates
-  thread_pred_map_.build(fusion_);
 
   // Detects all exprssions that don't need predicates
   predicateElimination().build(fusion_);
