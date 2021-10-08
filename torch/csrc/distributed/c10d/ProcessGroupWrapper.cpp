@@ -341,8 +341,21 @@ void ProcessGroupWrapper::runCollectiveChecks(
   c10d::BarrierOptions options;
   // TODO: we should use wrapped pg_'s timeout here, but C++ ProcessGroup API
   // does not expose timeout.
-  glooPg_->monitoredBarrier(options, /* waitAllRanks */ true);
   auto finger_print = CollectiveFingerPrint(op_type, tensors);
+  try {
+    glooPg_->monitoredBarrier(options, /* waitAllRanks */ true);
+  } catch (const std::runtime_error& e) {
+    // Attach collective info to the exception and re-raise.
+    std::stringstream ss;
+    ss << finger_print;
+    auto collective_info = ss.str();
+    auto err_msg = c10::str(
+        "ProcessGroupWrapper: Monitored Barrier encountered error running collective: ",
+        collective_info,
+        ". Error: \n",
+        e.what());
+    TORCH_CHECK(false, err_msg);
+  }
   // Will throw if an ill-formed collective is detected.
   finger_print.verify(glooPg_);
 }
