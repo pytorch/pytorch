@@ -246,6 +246,20 @@ class QConvTranspose final {
   }
 };
 
+std::tuple<IntArrayRef, c10::optional<IntArrayRef>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t>
+unpack_quantized_prepacked_sizes_conv2d(const IValue& ivalue) {
+  auto params = ivalue.toCustomClass<ConvPackedParamsBase<2>>();
+  at::Tensor weight;
+  c10::optional<at::Tensor> bias;
+  std::tie(weight, bias) = params->unpack();
+  return std::make_tuple(
+      weight.sizes(),
+      (bias && bias->defined()) ? c10::optional<IntArrayRef>(bias->sizes()) : c10::nullopt,
+      params->stride(),
+      params->padding(),
+      params->dilation(),
+      params->groups());
+}
 
 TORCH_LIBRARY_IMPL(quantized, CatchAll, m) {
   // conv_unpack is deprecated, please use conv2d_unpack for 2D conv.
@@ -253,6 +267,7 @@ TORCH_LIBRARY_IMPL(quantized, CatchAll, m) {
   // We use  conv2d_unpack to be consistent with conv3d_unpack
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv1d_unpack"), TORCH_FN(QConv1dUnpackWeightsInt8::run));
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d_unpack"), TORCH_FN(QConvUnpackWeightsInt8<2>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d_unpack_sizes"), TORCH_FN(unpack_quantized_prepacked_sizes_conv2d));
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv3d_unpack"), TORCH_FN(QConvUnpackWeightsInt8<3>::run));
 
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d_stride"), TORCH_FN(QConvStride<2>::run));

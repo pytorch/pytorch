@@ -57,6 +57,8 @@ inline std::string getArgValueName(const ArgValue& a) {
     return "bool";
   } else if (c10::get_if<BufList>(&a)) {
     return "BufList";
+  } else if (c10::get_if<DoubleList>(&a)) {
+    return "DoubleList";
   } else if (c10::get_if<IntList>(&a)) {
     return "IntList";
   } else if (c10::get_if<ArgNone>(&a)) {

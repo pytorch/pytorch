@@ -17,6 +17,20 @@
 namespace torch {
 namespace jit {
 
+namespace {
+bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor> inputs) {
+  double maxValue = 0.0;
+  for (auto& tensor : inputs) {
+    maxValue = fmax(tensor.abs().max().item<float>(), maxValue);
+  }
+  return diff.abs().max().item<float>() < 2e-6 * maxValue;
+}
+
+bool almostEqual(const at::Tensor& a, const at::Tensor& b) {
+  return checkRtol(a - b, {a, b});
+}
+} // namespace
+
 using namespace torch::indexing;
 using namespace torch::jit::tensorexpr;
 

@@ -4,6 +4,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorGeometry.h>
+#include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/util/irange.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -342,6 +343,22 @@ ArgValue TensorExprKernel::toArg(const torch::jit::Value* v) const {
       return ArgNone();
     } else if (val.isIntList()) {
       return val.toIntVector();
+    } else if (val.isDoubleList()) {
+      return val.toDoubleVector();
+    } else if (val.isTensor()) {
+      const auto t = val.toTensor();
+      c10::ScalarType dtype = c10::typeMetaToScalarType(t.dtype());
+      switch (dtype) {
+        case ScalarType::Float:
+          return t.item().toFloat();
+        case ScalarType::Long:
+          return t.item().toLong();
+        default:
+          std::stringstream ss;
+          ss << "Unsupported tensor dtype:" << dtype
+             << " for conversion constant 0-dim Tensor to scalar" << std::endl;
+          throw unsupported_dtype(ss.str());
+      }
     } else {
       throw unsupported_dtype(val.type()->str());
     }
@@ -1214,19 +1231,23 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
     return;
   }
   auto const_tensor = toIValue(v)->toTensor();
-
+  auto scalar_type = c10::typeMetaToScalarType(const_tensor.options().dtype());
   const auto& tt = v->type()->expect<TensorType>();
-  auto sizes = *tt->sizes().concrete_sizes();
+  auto sizes = const_tensor.sizes();
+  if (sizes.size() == 0) {
+    // Skipping binding 0-dim tensor as a buffer to use it as a scalar
+    return;
+  }
+
   std::vector<ExprHandle> te_sizes;
   te_sizes.reserve(sizes.size());
   for (auto s : sizes) {
     te_sizes.push_back(s);
   }
-
   BufPtr buf = alloc<Buf>(
       "const_" + sanitizeName(v->debugName()),
       ExprHandleVectorToExprVector(te_sizes),
-      ToDtype(static_cast<ScalarType>(*tt->scalarType())));
+      ToDtype(scalar_type));
 
   if (!const_tensor.is_contiguous()) {
     const_tensor = const_tensor.clone().contiguous();
