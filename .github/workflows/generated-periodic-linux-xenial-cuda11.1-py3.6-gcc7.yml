@@ -389,8 +389,8 @@ jobs:
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-        # Time out the test phase after 3.5 hours
-        timeout-minutes: 210
+        # Time out the test phase after 240 minutes
+        timeout-minutes: 240
         run: |
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
