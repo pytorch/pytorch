@@ -264,6 +264,10 @@ class GraphEncoder {
       bool use_external_data_format = false,
       const std::string& onnx_file_path = std::string());
 
+  void EncodeTypeProto(
+      onnx::TypeProto* type_proto,
+      const TypePtr& node_type);
+
   void EncodeLocalFunctionOpsetImport(
       onnx::FunctionProto* func_proto,
       const Node* n,
@@ -540,7 +544,6 @@ void GraphEncoder::EncodeValueInfoType(
   } else if (OptionalTypePtr optional_type = node_type->cast<OptionalType>()) {
     auto elem_type = optional_type->getElementType();
     if (TensorTypePtr inner_node_type = elem_type->cast<TensorType>()) {
-      onnx::TypeProto* onnx_type = v->mutable_type();
       onnx::TypeProto_Optional* onnx_optional_type =
           onnx_type->mutable_optional_type();
       onnx::TypeProto_Tensor* tensor_type =
@@ -550,7 +553,6 @@ void GraphEncoder::EncodeValueInfoType(
       auto list_elem_type = inner_node_type->getElementType();
       if (TensorTypePtr inner_list_node_type =
               list_elem_type->cast<TensorType>()) {
-        onnx::TypeProto* onnx_type = v->mutable_type();
         onnx::TypeProto_Optional* onnx_optional_type =
             onnx_type->mutable_optional_type();
         onnx::TypeProto_Sequence* onnx_optional_sequence_type =
@@ -944,7 +946,6 @@ void GraphEncoder::AddAttribute(
         auto tp = attr->add_type_protos();
         EncodeTypeProto(tp, v);
       }
-      auto tps = attr->mutable_tp();
     } break;
     case AttributeKind::g: {
       attr->set_type(onnx::AttributeProto_AttributeType_GRAPH);
@@ -1070,7 +1071,7 @@ void GraphEncoder::EncodeLocalFunction(
   }
 }
 
-void EncoderBase::EncodeTypeProto(
+void GraphEncoder::EncodeTypeProto(
     onnx::TypeProto* type_proto,
     const TypePtr& node_type) {
   if (node_type->kind() == TypeKind::TensorType) {
