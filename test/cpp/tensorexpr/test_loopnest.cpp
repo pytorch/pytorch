@@ -3382,20 +3382,20 @@ TEST(LoopNest, NotNormalizeAndSplitWithTail) {
   LoopNest l({b});
 
   // Input IR:
-  //   for (int x = 5; x < 10; x++) {
+  //   for (int x = 5; x < 15; x++) {
   //     A[x] = x * 2;
   //   }
-  const int kTotalSize = 5;
+  const int kTotalSize = 10;
   BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
   VarHandle x("x", kInt);
-  auto for_stmt = For::make(x, 5, 10, Store::make(a_buf, {x}, x * 2));
+  auto for_stmt = For::make(x, 5, 15, Store::make(a_buf, {x}, x * 2));
   auto parent_block = Block::make({for_stmt});
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr x_inner;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr x_tail;
-  LoopNest::splitWithTail(for_stmt, 10, &x_inner, &x_tail);
+  LoopNest::splitWithTail(for_stmt, 8, &x_inner, &x_tail);
 
   auto x_outer_result = IRSimplifier::simplify(for_stmt);
   std::ostringstream oss_outer;
@@ -3412,8 +3412,8 @@ TEST(LoopNest, NotNormalizeAndSplitWithTail) {
   oss_tail << *x_tail_result;
   const std::string& expected_tail_ir =
       R"IR(
-        # CHECK: for (int x_tail = 0; x_tail < 5; x_tail++) {
-        # CHECK:   A[x_tail + 5] = 2 * (x_tail + 5);
+        # CHECK: for (int x_tail = 0; x_tail < 2; x_tail++) {
+        # CHECK:   A[x_tail + 13] = 2 * (x_tail + 13);
       )IR";
   torch::jit::testing::FileCheck().run(expected_tail_ir, oss_tail.str());
 }
