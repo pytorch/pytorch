@@ -30,7 +30,7 @@ static inline bool isIntOrFloatUsedAsList(
 
 /// Returns true if `type` is a Tuple in which all the elements have the
 /// same type or if it's a subtype of `list_type_`.
-inline bool convertibleToList(const TypePtr& type, const TypePtr& list_type_) {
+bool convertibleToList(const TypePtr& type, const TypePtr& list_type_) {
   auto list_type = list_type_->castRaw<ListType>();
   if (!list_type) {
     return false;
