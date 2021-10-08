@@ -1989,7 +1989,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
             sharded_tensor = _sharded_tensor.init_from_local_shards(local_shards, sharded_tensor_metadata, init_rrefs=True)
 
 
-class TestShardedTensorNNInit(ShardedTensorTestBase, MultiProcessTestCase):
+class TestShardedTensorNNInit(ShardedTensorTestBase):
     """ Testing torch.nn.init functions for ShardedTensor """
 
     @with_comms
