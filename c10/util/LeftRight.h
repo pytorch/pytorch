@@ -205,19 +205,19 @@ class RWSafeLeftRightWrapper final {
 
   template <typename F>
   auto read(F&& readFunc) const -> typename std::result_of<F(const T&)>::type {
-    std::shared_lock<std::shared_mutex> lock(mutex_);
+    std::shared_lock<std::shared_timed_mutex> lock(mutex_);
     return readFunc(_data);
   }
 
   template <typename F>
   auto write(F&& writeFunc) -> typename std::result_of<F(T&)>::type {
-    std::unique_lock<std::shared_mutex> lock(mutex_);
+    std::unique_lock<std::shared_timed_mutex> lock(mutex_);
     return writeFunc(_data);
   }
 
  private:
   T _data;
-  mutable std::shared_mutex mutex_;
+  mutable std::shared_timed_mutex mutex_;
 };
 
 } // namespace c10
