@@ -1,7 +1,5 @@
 .. _torch_quantization_quantize_fx:
 
-:orphan:
-
 torch.quantization.quantize_fx
 ------------------------------
 .. automodule:: torch.ao.quantization.quantize_fx
