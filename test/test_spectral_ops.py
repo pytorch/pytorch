@@ -12,7 +12,8 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, onlyOnCPUAndCUDA,
      skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, OpDTypes, skipIf)
-from torch.testing._internal.common_methods_invocations import spectral_funcs, SpectralFuncInfo
+from torch.testing._internal.common_methods_invocations import (
+    spectral_funcs, SpectralFuncInfo, SpectralFuncType)
 
 from setuptools import distutils
 from typing import Optional, List
@@ -202,7 +203,7 @@ class TestFFT(TestCase):
             return (input, s, dim, norm)
 
     @onlyOnCPUAndCUDA
-    @ops([op for op in spectral_funcs if not op.ndimensional])
+    @ops([op for op in spectral_funcs if op.ndimensional == SpectralFuncType.OneD])
     def test_reference_1d(self, device, dtype, op):
         if op.ref is None:
             raise unittest.SkipTest("No reference implementation")
@@ -287,7 +288,7 @@ class TestFFT(TestCase):
     @onlyOnCPUAndCUDA
     @ops(spectral_funcs)
     def test_empty_fft(self, device, dtype, op):
-        t = torch.empty(0, device=device, dtype=dtype)
+        t = torch.empty(1, 0, device=device, dtype=dtype)
         match = r"Invalid number of data points \([-\d]*\) specified"
 
         with self.assertRaisesRegex(RuntimeError, match):
@@ -349,14 +350,14 @@ class TestFFT(TestCase):
          allowed_dtypes=[torch.half, torch.bfloat16])
     def test_fft_half_and_bfloat16_errors(self, device, dtype, op):
         # TODO: Remove torch.half error when complex32 is fully implemented
-        x = torch.randn(64, device=device).to(dtype)
+        x = torch.randn(8, 8, device=device).to(dtype)
         with self.assertRaisesRegex(RuntimeError, "Unsupported dtype "):
             op(x)
 
     # nd-fft tests
     @onlyOnCPUAndCUDA
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
-    @ops([op for op in spectral_funcs if op.ndimensional])
+    @ops([op for op in spectral_funcs if op.ndimensional == SpectralFuncType.ND])
     def test_reference_nd(self, device, dtype, op):
         if op.ref is None:
             raise unittest.SkipTest("No reference implementation")
@@ -429,7 +430,7 @@ class TestFFT(TestCase):
                     forward != torch.fft.fftn or x.is_complex()))
 
     @onlyOnCPUAndCUDA
-    @ops([op for op in spectral_funcs if op.ndimensional],
+    @ops([op for op in spectral_funcs if op.ndimensional == SpectralFuncType.ND],
          allowed_dtypes=[torch.float, torch.cfloat])
     def test_fftn_invalid(self, device, dtype, op):
         a = torch.rand(10, 10, 10, device=device, dtype=dtype)

@@ -1583,3 +1583,9 @@ def gelu(*, input):
 @register_acc_op
 def cumsum(*, input, dim, dtype=None):
     return torch.cumsum(**locals())
+
+@register_acc_op_mapping(op_and_target=("call_function", torch.chunk))
+@register_acc_op_mapping(op_and_target=("call_method", "chunk"))
+@register_acc_op
+def chunk(*, input, chunks, dim=0):
+    return torch.chunk(input, chunks, dim)
