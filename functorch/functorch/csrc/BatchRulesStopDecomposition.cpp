@@ -503,7 +503,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   STOP_DECOMPOSE(randperm.out);
   STOP_DECOMPOSE(range);
   STOP_DECOMPOSE(range.step);
-  STOP_DECOMPOSE(ravel);
   STOP_DECOMPOSE(refine_names);
   STOP_DECOMPOSE(rename);
   STOP_DECOMPOSE(rename_);
