@@ -1357,3 +1357,6 @@ default_dynamic_quant_observer = PlaceholderObserver.with_args(
 default_float_qparams_observer = PerChannelMinMaxObserver.with_args(
     dtype=torch.quint8, qscheme=torch.per_channel_affine_float_qparams, ch_axis=0
 )
+default_float_qparams_observer_4bit = PerChannelMinMaxObserver.with_args(
+    dtype=torch.quint4x2, qscheme=torch.per_channel_affine_float_qparams, ch_axis=0
+)
