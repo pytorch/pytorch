@@ -497,7 +497,8 @@ ForwardNormResult instance_norm(
       auto mean_hat = mul(running_mean, rev_momentum);
       auto new_mean_hat = add(mean_hat, current_mean_hat);
 
-      // NS: static_cast to workaround VC++ error, see https://godbolt.org/z/6Prd77xYs
+      // NS: static_cast to workaround VC++ error, see
+      // https://godbolt.org/z/6Prd77xYs
       auto new_mean_sum = sum(new_mean_hat, {static_cast<int>(kBatchDim)});
       auto new_mean_channels_only = div(new_mean_sum, B);
       fusion->addOutput(new_mean_channels_only);
@@ -509,7 +510,8 @@ ForwardNormResult instance_norm(
       auto var_hat = mul(running_var, rev_momentum);
       auto new_var_hat = add(var_hat, current_var_hat);
 
-      // NS: static_cast to workaround VC++ error, see https://godbolt.org/z/6Prd77xYs
+      // NS: static_cast to workaround VC++ error, see
+      // https://godbolt.org/z/6Prd77xYs
       auto new_var_sum = sum(new_var_hat, {static_cast<int>(kBatchDim)});
       auto new_var_channels_only = div(new_var_sum, B);
       fusion->addOutput(new_var_channels_only);
