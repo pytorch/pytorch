@@ -188,15 +188,15 @@ class LeftRight final {
 };
 
 // LeftRightNoOpWrapper is a pass-through (just to maintain API
-// compatibility) with the non-mobile build.
+// compatibility with the non-mobile build).
 template <class T>
 class LeftRightNoOpWrapper final {
  public:
   template <class... Args>
   explicit LeftRightNoOpWrapper(const Args&... args) : _data{args...} {}
 
-  // Copying and moving would not be threadsafe.
-  // Needs more thought and careful design to make that work.
+  // LeftRightNoOpWrapper is not copyable or moveable since LeftRight
+  // is not copyable or moveable.
   LeftRightNoOpWrapper(const LeftRightNoOpWrapper&) = delete;
   LeftRightNoOpWrapper(LeftRightNoOpWrapper&&) noexcept = delete;
   LeftRightNoOpWrapper& operator=(const LeftRightNoOpWrapper&) = delete;
@@ -211,6 +211,8 @@ class LeftRightNoOpWrapper final {
   auto write(F&& writeFunc) -> typename std::result_of<F(T&)>::type {
     return writeFunc(_data);
   }
+
+ private:
   T _data;
 };
 
