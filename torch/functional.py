@@ -331,14 +331,15 @@ def einsum(*args):
 
 # Wrapper around _histogramdd and _histogramdd_bin_edges needed due to (Tensor, Tensor[]) return type.
 if TYPE_CHECKING:
-    # The JIT doesn't understand Union, so leave untyped for mypy
-    pass
-else:
+    # The JIT doesn't understand Union, so only add type annotation for mypy
     def histogramdd(input: Tensor,
                     bins: Union[List[Tensor], List[int], int],
                     range: Optional[List[float]] = None,
                     weight: Optional[Tensor] = None,
                     density: bool = False):
+        pass
+else:
+    def histogramdd(input, bins, range, weight, density):
         r"""
         histogramdd(input, bins, *, range=None, weight=None, density=False, out=None) -> (Tensor, Tensor[])
 
