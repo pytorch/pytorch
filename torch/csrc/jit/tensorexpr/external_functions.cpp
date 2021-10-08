@@ -140,8 +140,7 @@ void nnc_aten_quantized_conv2d(
       x_qscale,
       x_qzero,
       at::TensorOptions(toQIntType(x_qdtype)));
-  auto serialized = reinterpret_cast<ConvParamsSerializationType*>(buf_data[2]);
-  auto convPackedParams = deserialize_conv<2>(*serialized);
+  auto convPackedParams = reinterpret_cast<ConvPackedParamsBase<2>*>(buf_data[2]);
   const double out_qscale = extra_args[3];
   const int64_t out_qzero = extra_args[4];
   auto r = convPackedParams->apply(qx, out_qscale, out_qzero);
@@ -168,8 +167,7 @@ void nnc_aten_quantized_conv2d_relu(
       x_qscale,
       x_qzero,
       at::TensorOptions(toQIntType(x_qdtype)));
-  auto serialized = reinterpret_cast<ConvParamsSerializationType*>(buf_data[2]);
-  auto convPackedParams = deserialize_conv<2>(*serialized);
+  auto convPackedParams = reinterpret_cast<ConvPackedParamsBase<2>*>(buf_data[2]);
   const double out_qscale = extra_args[3];
   const int64_t out_qzero = extra_args[4];
   auto r = convPackedParams->apply(qx, out_qscale, out_qzero);
