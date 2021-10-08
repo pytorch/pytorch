@@ -26,8 +26,16 @@ void Function::append_instruction(OpCode op, int X, int N, int64_t dbg_handle) {
       isOpSupportedInMobile(op),
       toString(op),
       " is not supported in mobile module.");
-  code_->instructions_with_handles_.emplace_back(
-      Instruction(op, X, N), dbg_handle);
+  code_->instructions_.emplace_back(op, X, N);
+  code_->debug_handles_.emplace_back(dbg_handle);
+}
+
+void Function::append_instruction(OpCode op, int X, int N) {
+  TORCH_CHECK(
+      isOpSupportedInMobile(op),
+      toString(op),
+      " is not supported in mobile module.");
+  code_->instructions_.emplace_back(op, X, N);
 }
 
 bool Function::append_operator(
@@ -140,9 +148,9 @@ void Function::set_register_size(size_t size) {
 int64_t Function::get_debug_handle(size_t pc) const {
   TORCH_CHECK(code_, "Valid code must exist.");
   TORCH_CHECK(
-      pc < code_->instructions_with_handles_.size(),
+      pc < code_->debug_handles_.size(),
       "Module debug info index out of boundary.");
-  return code_->instructions_with_handles_[pc].debug_handle;
+  return code_->debug_handles_[pc];
 }
 
 void Function::setSchema(c10::FunctionSchema schema) {
@@ -174,11 +182,7 @@ const std::shared_ptr<Code> Function::get_code() const {
 
 int64_t Function::getExceptionDebugHandle() const {
   size_t pc = getInterpretersExceptionPC();
-  // we dont do bounds check given that pc is obtained
-  // via internal method of getInterpretersExceptionPC
-  // which returns the PC of where the interpreter is.
-  // Although .at will do bounds check anyway.
-  return code_->instructions_with_handles_.at(pc).debug_handle;
+  return (pc < code_->debug_handles_.size()) ? code_->debug_handles_[pc] : -1;
 }
 
 } // namespace mobile
