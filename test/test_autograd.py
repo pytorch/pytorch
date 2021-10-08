@@ -8882,6 +8882,8 @@ class TestAutogradDeviceType(TestCase):
         self.assertFalse(out.requires_grad)
 
     def test_warning_in_backward(self, device):
+        # Test warning during backward are always propagated as python warnings (gh-50209)
+        # NOTE: For device=cuda, warning gets propagated from a worker thread
         a = torch.zeros((), device=device, requires_grad=True)
         b = torch._C._nn._test_warn_in_autograd(a)
 

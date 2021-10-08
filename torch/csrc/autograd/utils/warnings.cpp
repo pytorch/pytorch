@@ -12,6 +12,9 @@ void DelayWarningHandler::process(
 
 void DelayWarningHandler::replay_warnings() {
   std::lock_guard<std::mutex> lock(mutex_);
+  TORCH_INTERNAL_ASSERT(
+      c10::Warning::get_warning_handler() != this,
+      "DelayWarningHandler cannot replay warnings into itself, this will cause a deadlock");
   for (const auto& warning : warnings_) {
     c10::Warning::warn(warning.source_location, warning.msg, warning.verbatim);
   }
