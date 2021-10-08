@@ -17124,12 +17124,8 @@ TEST(NVFuserTest, FusionIssue1099_CUDA) {
   auto ref_t2 = t0 + 2;
   auto ref_t3 = t3 + 3;
 
-  // Validation still fails due to #1102.
-  // TODO: Enable validation
-#if 0
   testValidate(
       &fusion, outputs, aten_inputs, {ref_t2, ref_t3}, __LINE__, __FILE__);
-#endif
 }
 
 // Repro of issue #1080
@@ -17463,6 +17459,127 @@ TEST(NVFuserTest, FusionGridWelfordWithNonExactParallelDimensions2_CUDA) {
   testValidate(
       &fusion, outputs, aten_inputs, {ref1, ref2, ref3}, __LINE__, __FILE__);
 #endif
+}
+
+// Repro of issue #1102
+TEST(NVFuserTest, FusionPredicateParallelizedDomains_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  // Just to make TIDx/y/z non-exact
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = add(tv1, new Double(1));
+  auto tv3 = add(tv2, new Double(1));
+  fusion.addOutput(tv3);
+
+  auto tv4 = makeSymbolicTensor(1);
+  fusion.addInput(tv4);
+
+  auto tv5 = add(tv4, new Double(1));
+  auto tv6 = add(tv5, new Double(1));
+  auto tv7 = add(tv6, new Double(1));
+  auto tv8 = add(tv7, new Double(1));
+  auto tv9 = sum(tv8, {0});
+  fusion.addOutput(tv9);
+
+  tv1->split(0, 5);
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv1->setMemoryType(MemoryType::Shared);
+  tv2->split(0, 6);
+  tv2->axis(-1)->parallelize(ParallelType::TIDy);
+  tv2->setMemoryType(MemoryType::Shared);
+  tv3->split(0, 7);
+  tv3->axis(-1)->parallelize(ParallelType::TIDz);
+
+  tv9->split(0, 4);
+  tv4->computeAt(tv9, 1);
+
+  tv4->axis(-1)->parallelize(ParallelType::TIDx);
+  tv5->axis(-1)->parallelize(ParallelType::TIDy);
+  tv6->axis(-1)->parallelize(ParallelType::TIDz);
+  tv7->axis(-1)->parallelize(ParallelType::TIDz);
+  tv8->axis(-1)->parallelize(ParallelType::TIDz);
+  tv9->axis(-1)->parallelize(ParallelType::TIDz);
+  tv9->axis(0)->parallelize(ParallelType::BIDx);
+
+  tv5->setMemoryType(MemoryType::Shared);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({17}, options);
+  at::Tensor t4 = at::randn({19}, options);
+  std::vector<IValue> aten_inputs = {t0, t4};
+  auto outputs = fe.runFusion(aten_inputs);
+
+  auto ref1 = t0 + 3;
+  auto ref2 = sum(t4 + 4);
+
+  testValidate(&fusion, outputs, aten_inputs, {ref1, ref2}, __LINE__, __FILE__);
+}
+
+// Repro of #1102 and #1129
+TEST(NVFuserTest, FusionSmemPredicateUnswitch_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+  auto tv1 = makeSymbolicTensor(1);
+  fusion.addInput(tv1);
+
+  auto tv2 = add(tv0, new Double(1));
+  auto tv3 = add(tv2, new Double(1));
+  auto tv4 = add(tv3, new Double(1));
+  auto tv5 = add(tv4, new Double(1));
+  fusion.addOutput(tv5);
+
+  // Just to make TIDx/y/z non-exact
+  auto tvx = add(tv1, new Double(1));
+  auto tvy = add(tvx, new Double(1));
+  auto tvz = add(tvy, new Double(1));
+  fusion.addOutput(tvz);
+
+  tv5->split(0, 4);
+  tv0->computeAt(tv5, 1);
+
+  tv0->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->axis(-1)->parallelize(ParallelType::TIDy);
+  tv3->axis(-1)->parallelize(ParallelType::TIDz);
+  tv4->axis(-1)->parallelize(ParallelType::TIDx);
+  tv5->axis(-1)->parallelize(ParallelType::TIDy);
+  tv5->axis(0)->parallelize(ParallelType::Unswitch);
+
+  tvx->split(0, 5);
+  tvx->axis(-1)->parallelize(ParallelType::TIDx);
+  tvy->split(0, 6);
+  tvy->axis(-1)->parallelize(ParallelType::TIDy);
+  tvz->split(0, 7);
+  tvz->axis(-1)->parallelize(ParallelType::TIDz);
+
+  for (auto tv : {tv2, tv3, tv4, tvx, tvy}) {
+    tv->setMemoryType(MemoryType::Shared);
+  }
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({17}, options);
+  at::Tensor t1 = at::randn({19}, options);
+  std::vector<IValue> aten_inputs = {t0, t1};
+  auto outputs = fe.runFusion(aten_inputs);
+
+  auto ref1 = t0 + 4;
+  auto ref2 = t1 + 3;
+
+  // TODO: this needs a fix for #1133
+  // testValidate(&fusion, outputs, aten_inputs, {ref1, ref2}, __LINE__,
+  // __FILE__);
 }
 
 // Repro of issue #1136

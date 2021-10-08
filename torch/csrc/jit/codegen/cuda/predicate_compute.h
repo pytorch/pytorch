@@ -23,6 +23,51 @@ class PredicateCompute {
       PredicateType pred_type);
 };
 
+//! Parallelized domains may need to be predicated with threading
+//! indices and IterDomain extents. For example, if a domain is
+//! parallelized by TIDx, when TIDx is not exact, i.e., it can be
+//! larger than the extents of domains parallelized by TIDx,
+//! threadIdx.x may be larger than the IterDomain extent. This can be
+//! harmless for Local tensors, however, for it would
+//! result in out-of-bounds access for Shared tensors as they are
+//! allocated based on tensor shapes rather than threading
+//! dimensions.
+class ParallelizedDomainPredicate {
+ public:
+  //! Predicate information for parallelized domains
+  class PredicateInfo {
+   public:
+    explicit PredicateInfo(ParallelType pt) : pt_(pt) {}
+
+    //! Adds a domain that is parallized by the same paralell type
+    bool addDomain(kir::IterDomain* id);
+
+    const std::vector<kir::IterDomain*>& ids() const {
+      return ids_;
+    }
+
+    //! Generates a predicate Val from predicate information
+    kir::Bool* getPredicate() const;
+
+   private:
+    ParallelType pt_;
+    //! Domains parallelized by the same parallel type
+    std::vector<kir::IterDomain*> ids_;
+  };
+
+  //! Returns a predicate Val for parallelied domains of an expression.
+  static kir::Bool* getPredicate(
+      const kir::Expr* expr,
+      const std::vector<kir::ForLoop*>& loops);
+
+  //! Returns predicate information for parallelied domains of an
+  //! expression.
+  static std::unordered_map<ParallelType, PredicateInfo, TypeHash>
+  getPredicateMap(
+      const kir::Expr* expr,
+      const std::vector<kir::ForLoop*>& loops);
+};
+
 //! Keys to identify unique unswitch predicates. Just consists of a
 //! predicated concrete domain if not parallelized. If parallelized,
 //! pick one for each different parallelization. When the same
@@ -91,11 +136,18 @@ class TORCH_CUDA_CU_API UnswitchPredicate {
   void openIte(kir::IfThenElse*);
 
  private:
-  // Track which iter domains have been predicated
+  // Track which root iter domains have been predicated
   std::unordered_set<UnswitchPredicateKey, UnswitchPredicateKeyHash>
       predicated_keys_;
 
-  // The predicates that have been generated.
+  //! Track which parallelized domains have been predicated
+  std::unordered_map<
+      ParallelType,
+      ParallelizedDomainPredicate::PredicateInfo,
+      TypeHash>
+      parallelized_dom_predicates_;
+
+  //! The predicates that have been generated.
   std::vector<kir::Bool*> predicates_;
 
   //! Thread predicate for unswitched expressions. Predicate is false

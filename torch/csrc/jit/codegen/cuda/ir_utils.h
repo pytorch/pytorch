@@ -96,6 +96,10 @@ class FilteredView {
     return cend();
   }
 
+  bool empty() const {
+    return begin() == end();
+  }
+
  private:
   const InputIt input_it_;
   const InputIt last_;

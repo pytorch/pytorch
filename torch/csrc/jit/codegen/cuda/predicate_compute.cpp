@@ -54,6 +54,134 @@ bool isOutputLocal(const kir::Expr* expr) {
 
 } // namespace
 
+bool ParallelizedDomainPredicate::PredicateInfo::addDomain(
+    kir::IterDomain* id) {
+  const auto gpu_lower = GpuLower::current();
+  auto concrete_id = gpu_lower->caIndexMap().getConcreteMappedID(id);
+  if (std::find(ids_.begin(), ids_.end(), concrete_id) == ids_.end()) {
+    ids_.push_back(concrete_id);
+    return true;
+  } else {
+    return false;
+  }
+}
+
+kir::Bool* ParallelizedDomainPredicate::PredicateInfo::getPredicate() const {
+  const auto gpu_lower = GpuLower::current();
+  kir::SimplifyingIrBuilder ir_builder(gpu_lower->kernel());
+
+  kir::Bool* pred = nullptr;
+
+  auto index =
+      ir_builder.create<kir::NamedScalar>(stringifyThread(pt_), DataType::Int);
+
+  for (const auto& pred_id : ids()) {
+    // Just sanity check that pred_id is concrete
+    TORCH_INTERNAL_ASSERT(
+        pred_id == gpu_lower->caIndexMap().getConcreteMappedID(pred_id));
+    auto new_pred = ir_builder.ltExpr(index, pred_id->extent());
+    pred = ir_builder.andExpr(pred, new_pred)->as<kir::Bool>();
+  }
+
+  return pred;
+}
+
+std::unordered_map<
+    ParallelType,
+    ParallelizedDomainPredicate::PredicateInfo,
+    TypeHash>
+ParallelizedDomainPredicate::getPredicateMap(
+    const kir::Expr* expr,
+    const std::vector<kir::ForLoop*>& loops) {
+  const auto gpu_lower = GpuLower::current();
+  kir::IrBuilder ir_builder(gpu_lower->kernel());
+
+  auto output_tvs = ir_utils::filterByType<kir::TensorView>(expr->outputs());
+
+  if (output_tvs.empty()) {
+    return {};
+  }
+
+  // Initialize a map with empty predicate info
+  std::unordered_map<ParallelType, PredicateInfo, TypeHash> map;
+  for (auto pt : kParallelTypeThreads) {
+    map.insert({pt, PredicateInfo(pt)});
+  }
+
+  // For each loop, check if it's parallelized by an non-exact
+  // threading dimension. If yes and it's used in the given expr, the
+  // domain needs to be protected by a predicate on the thread/block
+  // index.
+  for (auto loop : loops) {
+    auto loop_id = loop->iter_domain();
+    auto loop_ptype = loop_id->parallelType();
+    // Not necessary to add a predicate if the paralle type is exact
+    if (!isParallelTypeThread(loop_ptype) ||
+        gpu_lower->parallelDimensionMap().isExact(loop_ptype)) {
+      continue;
+    }
+    for (auto tv : output_tvs) {
+      // Check if the loop domain is used by the output tensor
+      auto it = std::find_if(
+          tv->domain()->domain().begin(),
+          tv->domain()->domain().end(),
+          [&](auto tv_id) {
+            return gpu_lower->caIndexMap().areMapped(loop_id, tv_id);
+          });
+      if (it == tv->domain()->domain().end()) {
+        continue;
+      }
+
+      kir::IterDomain* tv_id = *it;
+
+      // If the corresponding domain is a broadcast, it's not really used.
+      if (tv_id->isBroadcast()) {
+        continue;
+      }
+
+      // If it's a root domain, it should be covered by the root
+      // predicates, so no extra predicate is required.
+      if (std::find(
+              tv->domain()->rootDomain().begin(),
+              tv->domain()->rootDomain().end(),
+              tv_id) != tv->domain()->rootDomain().end()) {
+        continue;
+      }
+
+      // tv_id needs to be predicated. Adds it to the PredicateInfo map.
+      auto& info = map.at(loop_ptype);
+      info.addDomain(tv_id);
+    }
+  }
+
+  return map;
+}
+
+kir::Bool* ParallelizedDomainPredicate::getPredicate(
+    const kir::Expr* expr,
+    const std::vector<kir::ForLoop*>& loops) {
+  kir::SimplifyingIrBuilder ir_builder(GpuLower::current()->kernel());
+
+  auto pred_map = getPredicateMap(expr, loops);
+
+  kir::Val* pred = ir_builder.trueVal();
+
+  for (auto pt : kParallelTypeThreads) {
+    auto pred_info_it = pred_map.find(pt);
+    if (pred_info_it != pred_map.end()) {
+      const auto& pred_info = pred_info_it->second;
+      auto tid_pred = pred_info.getPredicate();
+      pred = ir_builder.andExpr(pred, tid_pred);
+    }
+  }
+
+  if (pred) {
+    return pred->as<kir::Bool>();
+  } else {
+    return nullptr;
+  }
+}
+
 UnswitchPredicateKey::UnswitchPredicateKey()
     : predicated_concrete_id_(nullptr) {
   for (auto pt : kParallelTypeThreads) {
@@ -241,6 +369,12 @@ kir::Bool* PredicateCompute::getInlinePredicate(
     return nullptr;
   }
 
+  auto parallel_dom_pred =
+      ParallelizedDomainPredicate::getPredicate(expr, loops);
+  if (parallel_dom_pred) {
+    preds.push_back(parallel_dom_pred);
+  }
+
   if (thread_pred != nullptr && !is_true(thread_pred)) {
     preds.push_back(thread_pred);
   }
@@ -291,6 +425,7 @@ void UnswitchPredicate::predicateOn(kir::Expr* tv_expr) {
   }
 
   const auto gpu_lower = GpuLower::current();
+  kir::IrBuilder ir_builder(gpu_lower->kernel());
 
   auto out_tv = firstTensorViewOutput(tv_expr);
 
@@ -335,6 +470,26 @@ void UnswitchPredicate::predicateOn(kir::Expr* tv_expr) {
     }
     if (add_pred) {
       predicates_.push_back(pred);
+    }
+  }
+
+  // Adds new predicates for parallelized domains
+  auto pred_map =
+      ParallelizedDomainPredicate::getPredicateMap(tv_expr, for_loops_);
+  for (auto pt : kParallelTypeThreads) {
+    auto pred_info_it = pred_map.find(pt);
+    if (pred_info_it == pred_map.end()) {
+      continue;
+    }
+    const auto& new_info = pred_info_it->second;
+    auto& predicated =
+        parallelized_dom_predicates_
+            .insert({pt, ParallelizedDomainPredicate::PredicateInfo{pt}})
+            .first->second;
+    for (auto id : new_info.ids()) {
+      if (predicated.addDomain(id)) {
+        predicates_.push_back(new_info.getPredicate());
+      }
     }
   }
 }
