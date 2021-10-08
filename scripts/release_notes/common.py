@@ -28,6 +28,8 @@ categories = [
     'code_coverage',
     'vulkan', # done
     'skip',
+    'nn_frontend',
+    'linalg_frontend',
     'cpp_frontend',
     'python_frontend',
     'complex_frontend',
@@ -37,6 +39,7 @@ categories = [
     'memory_format_frontend',
     'foreach_frontend', # done
     'dataloader_frontend', # done
+    'sparse_frontend'
 ]
 
 topics = [
