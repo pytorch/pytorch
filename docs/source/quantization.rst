@@ -565,7 +565,7 @@ cover typical CNN and RNN models
     torch.quantization
     torch.nn.quantized
     torch.nn.quantized.dynamic
-    torch.ao.quantization.quantize_fx
+    torch.quantization.quantize_fx
     torch.quantization.observer
     torch.quantization.fake_quantize
 
