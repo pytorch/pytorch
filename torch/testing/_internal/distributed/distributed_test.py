@@ -3616,11 +3616,7 @@ class DistributedTest:
         def _assert_equal_param(self, param_gpu, param_DDP):
             self.assertEqual(len(param_gpu), len(param_DDP))
             for p_gpu, p_DDP in zip(param_gpu, param_DDP):
-                self.assertEqual(p_gpu, p_DDP, allow_inf=False)
-                if p_gpu.requires_grad and p_DDP.requires_grad:
-                    self.assertTrue(p_gpu.grad is not None)
-                    self.assertTrue(p_DDP.grad is not None)
-                    self.assertEqual(p_gpu.grad, p_DDP.grad, allow_inf=False)
+                self.assertEqual(p_gpu, p_DDP)
 
         def _test_DDP_niter(
             self,
