@@ -62,7 +62,7 @@ TEST(TorchpyTest, InitTwice) {
 
 TEST(TorchpyTest, DifferentInterps) {
   torch::deploy::InterpreterManager m(2);
-  m.reigsterModuleSource("check_none", "check = id(None)\n");
+  m.registerModuleSource("check_none", "check = id(None)\n");
   int64_t id0 = 0, id1 = 0;
   {
     auto I = m.allInstances()[0].acquireSession();
@@ -176,6 +176,28 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
   }
 }
 
+TEST(TorchpyTest, ErrorsReplicatingObj) {
+  torch::deploy::InterpreterManager manager(4);
+  torch::deploy::Package p = manager.loadPackage(path("SIMPLE", simple));
+  auto replicatedObj = p.loadPickle("model", "model.pkl");
+  // Acquire two different interpreters
+  auto session1 = replicatedObj.acquireSession();
+  auto session2 = p.acquireSession();
+  // Create an obj reference on interpreter 1
+  auto obj = session1.fromMovable(replicatedObj);
+  // should throw an error when trying to access obj from different session
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW(session2.createMovable(obj), c10::Error);
+  try {
+    session2.createMovable(obj);
+  } catch (c10::Error& error) {
+    EXPECT_TRUE(
+        error.msg().find(
+            "Cannot create movable from an object that lives in different session") !=
+        std::string::npos);
+  }
+}
+
 TEST(TorchpyTest, ThrowsSafely) {
   // See explanation in deploy.h
   torch::deploy::InterpreterManager manager(3);
@@ -267,7 +289,7 @@ TEST(TorchpyTest, DisarmHook) {
 
 TEST(TorchpyTest, RegisterModule) {
   torch::deploy::InterpreterManager m(2);
-  m.reigsterModuleSource("foomodule", "def add1(x): return x + 1\n");
+  m.registerModuleSource("foomodule", "def add1(x): return x + 1\n");
   for (const auto& interp : m.allInstances()) {
     auto I = interp.acquireSession();
     AT_ASSERT(3 == I.global("foomodule", "add1")({2}).toIValue().toInt());
@@ -383,7 +405,7 @@ TEST(TorchpyTest, UsesDistributed) {
 
 TEST(TorchpyTest, Autograd) {
   torch::deploy::InterpreterManager m(2);
-  m.reigsterModuleSource("autograd_test", R"PYTHON(
+  m.registerModuleSource("autograd_test", R"PYTHON(
 import torch
 
 x = torch.ones(5)  # input tensor
