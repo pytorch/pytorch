@@ -394,7 +394,7 @@ void NodeToONNX(
 
     py::object opset_version = onnx_symbolic.attr("_export_onnx_opset_version");
     py::object is_registered_op = onnx_registry.attr("is_registered_op")(
-        "prim_PythonOp", "", opset_version);
+        "PythonOp", "prim", opset_version);
     if (!py::hasattr(pyobj, "symbolic") &&
         (!PyObject_IsTrue(is_registered_op.ptr()))) {
       // Simply clone the node, unless either
