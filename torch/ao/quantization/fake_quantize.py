@@ -9,6 +9,7 @@ from torch.ao.quantization.observer import (
     MovingAverageMinMaxObserver,
     HistogramObserver,
     MovingAveragePerChannelMinMaxObserver,
+    PerChannelMinMaxObserver,
     _with_args,
 )
 import re
@@ -16,7 +17,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Tuple
 
 def _is_per_channel(qscheme: 'torch.qscheme') -> bool:
-    return qscheme in [torch.per_channel_symmetric, torch.per_channel_affine]
+    return qscheme in [torch.per_channel_symmetric, torch.per_channel_affine, torch.per_channel_affine_float_qparams]
 
 def _is_per_tensor(qscheme: 'torch.qscheme') -> bool:
     return qscheme in [torch.per_tensor_symmetric, torch.per_tensor_affine]
@@ -361,6 +362,14 @@ default_per_channel_weight_fake_quant = FakeQuantize.with_args(observer=MovingAv
                                                                ch_axis=0)
 """
 Default fake_quant for per-channel weights.
+"""
+
+default_embedding_fake_quant = FakeQuantize.with_args(observer=PerChannelMinMaxObserver,
+                                                      qscheme=torch.per_channel_affine_float_qparams,
+                                                      ch_axis=0,
+                                                      memoryless=True)
+"""
+Default fake_quant for embeddings.
 """
 
 default_histogram_fake_quant = FakeQuantize.with_args(observer=HistogramObserver,

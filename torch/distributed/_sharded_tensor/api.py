@@ -4,7 +4,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import (
     Dict,
-    List
+    List,
+    Optional,
 )
 
 import threading
@@ -176,6 +177,27 @@ class TensorInitParams(object):
                                  memory_format=torch.contiguous_format,
                                  pin_memory=False))
 
+def _validate_output_tensor_for_gather(
+    my_rank: int,
+    dst_rank: int,
+    size: torch.Size,
+    dst_tensor: Optional[torch.Tensor],
+) -> None:
+    if dst_rank == my_rank:
+        if dst_tensor is None:
+            raise ValueError(
+                f"Argument ``dst_tensor`` must be specified on destination rank {dst_rank}"
+            )
+        if tuple(size) != (dst_tensor.size()):
+            raise ValueError(
+                f"Argument ``dst_tensor`` have size {tuple(dst_tensor.size())},"
+                f"but should be {tuple(size)}"
+            )
+    elif dst_tensor:
+        raise ValueError(
+            "Argument ``dst_tensor`` must NOT be specified "
+            "on non-destination ranks."
+        )
 
 class ShardedTensor(object):
     """
@@ -334,6 +356,67 @@ class ShardedTensor(object):
 
         # Barrier for all RPCs to finish on all ranks.
         rpc.api._all_gather(None)
+
+    def gather(
+        self,
+        dst: int = 0,
+        out: Optional[torch.Tensor] = None,
+    ) -> None:
+        """
+        Creates a full :class:`Tensor` on rank ``dst`` by gathering all shards of the
+        sharded tensor.
+
+        The API needs to be called on all ranks in SPMD fashion. All ranks should have
+        the same ``dst``. ``out`` should be a tensor of the same size as the overall
+        size of the sharded tensor on ``dst`` and ``None`` on all other ranks.
+
+        Args:
+            dst(int): The rank where full tensor is constructed.
+                Default: 0
+            out (:class `torch.Tensor`, optional): The output full tensor.
+                Must to be provided ONLY on ``dst`` rank.
+                Default: ``None``
+        """
+        rank = dist.get_rank(self._process_group)
+        full_size = self.metadata().size
+        _validate_output_tensor_for_gather(rank, dst, full_size, out)
+
+        local_shards = self.local_shards()
+
+        world_size = dist.get_world_size(self._process_group)
+
+        gathered_shards = [None] * world_size
+        # will revise this part with CPU support and use dist.gather()
+        # once NCCL support for gather() is ready
+        # https://github.com/pytorch/pytorch/issues/66187
+        device = torch.device(f"cuda:{rank % world_size}")
+        with torch.cuda.device(device):
+            dist.all_gather_object(
+                obj=local_shards,
+                object_list=gathered_shards,
+                group=self._process_group,
+            )
+
+        if rank == dst:
+            dims = len(full_size)
+            for shards in gathered_shards:
+                if shards is None:
+                    raise RuntimeError(
+                        'Gathered shards cannot be None on dst rank {dst}'
+                    )
+                for shard in shards:
+                    metadata = shard.metadata
+                    tensor = shard.tensor
+
+                    out_narrow_view = out
+                    for dim in range(dims):
+                        out_narrow_view = out_narrow_view.narrow(
+                            dim,
+                            metadata.shard_offsets[dim],
+                            metadata.shard_lengths[dim],
+                        )
+
+                    out_narrow_view.copy_(tensor)
 
     @classmethod
     def _init_from_local_shards(
