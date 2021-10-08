@@ -783,14 +783,8 @@ void initJitScriptBindings(PyObject* module) {
 
   py::class_<MobileCode>(m, "MobileCode")
       .def(py::init<std::shared_ptr<Graph>, std::string>())
-      .def("instructions", [](MobileCode& self) -> std::vector<IValue> {
-        auto instructions_copy = self.instructions();
-        std::vector<IValue> instructions;
-        instructions.reserve(instructions_copy.size());
-        for (const Instruction& ins : instructions_copy) {
-          instructions.emplace_back(to_tuple({toString(ins.op), ins.X, ins.N}));
-        }
-        return instructions;
+      .def("bytecode_table", [](MobileCode& self) -> IValue {
+        return self.bytecode_table();
       });
 
   auto object_class =

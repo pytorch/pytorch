@@ -13419,16 +13419,18 @@ dedent """
 
         mobileCode = torch._C.MobileCode(foo.graph, "foo")
         instructions = mobileCode.instructions()
-        expected = [('LOADC', 1, 0),
-                    ('LOADC', 2, 0),
-                    ('LIST_CONSTRUCT', 0, 2),
-                    ('LOADC', 0, 0),
-                    ('LOADC', 0, 0),
-                    ('LOADC', 0, 0),
-                    ('LOADC', 0, 0),
-                    ('OP', 0, 0),
-                    ('RET', 0, 0)]
-        self.assertTrue(expected, instructions)
+        expected_inst = [('LOADC', 1, 0),
+            ('LOADC', 2, 0),
+            ('LIST_CONSTRUCT', 0, 2),
+            ('LOADC', 0, 0),
+            ('LOADC', 0, 0),
+            ('LOADC', 0, 0),
+            ('LOADC', 0, 0),
+            ('OP', 0, 0),
+            ('RET', 0, 0)]
+        self.assertTrue(expected_inst, instructions)
+        constants = mobileCode.constant_table()
+        print(constants)
 
 
     def test_mutable_dce_list(self):

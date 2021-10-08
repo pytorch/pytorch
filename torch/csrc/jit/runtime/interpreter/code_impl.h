@@ -13,6 +13,7 @@
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/interpreter/preprocess_graph.h>
+#include <torch/csrc/jit/serialization/export.h>
 
 namespace torch {
 namespace jit {
@@ -128,6 +129,8 @@ struct CodeImpl {
   std::vector<BailoutBlock> bailout_blocks_;
   std::vector<std::unique_ptr<Function>> bailout_functions_;
   size_t remaining_bailout_depth_;
+
+  IValue bytecode_table_;
 
   CodeImpl(
       const std::shared_ptr<Graph>& graph,
@@ -784,6 +787,7 @@ struct MobileCodeImpl : CodeImpl {
     // we deferred the emission of bailout blocks so they appear at the end
     // emit them now and patch up the jumps
     insertBailoutBlocks();
+    generateCodeTable();
   }
 
   void process_ops_for_mobile() {
@@ -815,6 +819,146 @@ struct MobileCodeImpl : CodeImpl {
       node = graph_it.next();
     }
   }
+
+  void generateCodeTable() {
+    auto instructions_copy = instructions();
+    // operator names
+    std::vector<c10::OperatorName> opnames;
+    std::vector<std::string> method_names;
+    int next_new_op_index = 0;
+    for (size_t i = 0; i < instructions_copy.size(); ++i) {
+      Instruction ins = instructions_copy[i];
+      if ((ins.op == OP || ins.op == OPN) && ins.X == next_new_op_index) {
+        // Found a new op (assumes new operators ordered by ascending ins.X)
+        auto node = instructions_source()[i];
+        opnames.emplace_back(node->schema().operator_name());
+        next_new_op_index++;
+      }
+      // CALL nodes at this point represent built-in (i.e. non-Graph)
+      // functions that were not inlined. Here we convert the CALL
+      // instructions for these functions into INTERFACE_CALL instructions
+      // s.t. at runtime, we will look up the Function* on the Type of the
+      // 0th argument in the stack and call that directly.
+      if (ins.op == CALL) {
+        auto node = instructions_source()[i];
+        if (node->kind() == prim::CallMethod) {
+          // NB: replacing instruction
+          auto method_name_idx = constant_table().size() + method_names.size();
+          method_names.emplace_back(node->s(attr::name));
+          Instruction new_instr{
+              INTERFACE_CALL,
+              static_cast<int32_t>(method_name_idx),
+              static_cast<uint16_t>(node->inputs().size())};
+          instructions_copy[i] = new_instr;
+        } else {
+          TORCH_INTERNAL_ASSERT(
+              false, "Unsupported node kind on CALL opcode for mobile");
+        }
+      } else if (ins.op == RET) {
+        auto node = instructions_source()[i];
+        for (const auto& input : node->inputs()) {
+          const auto& input_type = input->type();
+          if (input_type->kind() == TypeKind::TupleType) {
+            if (const auto& name_typed_input =
+                    input_type->cast<at::NamedType>()) {
+              TORCH_CHECK(
+                  !name_typed_input->name(),
+                  "A named tuple type is not supported in mobile module. ",
+                  "Workaround: instead of using a named tuple type's fields, ",
+                  "use a dictionary type's key-value pair itmes or ",
+                  "a pytorch class (class Foo(torch.nn.Module))'s attributes.'");
+            }
+          } else if (
+              input_type->kind() == TypeKind::ListType ||
+              input_type->kind() == TypeKind::DictType) {
+            for (const TypePtr& element_type : input_type->containedTypes()) {
+              TORCH_CHECK(
+                  element_type->kind() != TypeKind::ClassType,
+                  "Returining a list or dictionary with pytorch class type ",
+                  "is not supported in mobile module "
+                  "(List[Foo] or Dict[int, Foo] for class Foo(torch.nn.Module)). "
+                  "Workaround: instead of using pytorch class as their element type, ",
+                  "use a combination of list, dictionary, and single types.");
+            }
+          }
+        }
+      } else {
+        TORCH_CHECK(
+            isOpSupportedInMobile(ins.op),
+            toString(ins.op),
+            " is not supported in mobile module.");
+      }
+    }
+
+    // instructions
+    std::vector<IValue> instructions;
+    instructions.reserve(instructions_copy.size());
+    for (Instruction ins : instructions_copy) {
+      instructions.emplace_back(to_tuple({toString(ins.op), ins.X, ins.N}));
+    }
+
+    // operators
+    std::vector<IValue> operators;
+    auto op_to_specified_args = op_to_num_specified_args();
+    operators.reserve(opnames.size());
+    for (const auto& opname : opnames) {
+      auto unique_name = c10::toString(opname);
+      // For operator with vararg, adding default arguments would be confusing
+      // and is not allowed. For an operator with num_args = -1, it means the
+      // number of arguments is not available for this operator, we don't do any
+      // backward compatibility adaptation at runtime.
+      int num_args = -1;
+      auto it = op_to_specified_args.find(unique_name);
+      if (it != op_to_specified_args.end()) {
+        num_args = it->second;
+      }
+      if (BytecodeEmitMode::is_default_value_for_unspecified_arg_enabled()) {
+        operators.emplace_back(to_tuple({opname.name, opname.overload_name}));
+      } else {
+        operators.emplace_back(
+            to_tuple({opname.name, opname.overload_name, num_args}));
+      }
+    }
+
+    // constants
+    //
+    // Make a copy of the constants and append the method names
+    // that we emitted for the converted INTERFACE_CALL nodes above.
+    auto constants = constant_table();
+    for (auto& method_name : method_names) {
+      constants.emplace_back(std::move(method_name));
+    }
+
+    // types
+    std::vector<IValue> types;
+    types.reserve(type_table_.size());
+    static const std::string torch_prefix("__torch__");
+    static const std::string class_prefix("__torch__.torch.classes");
+    for (const TypePtr& t : type_table_) {
+      auto type_str = t->annotation_str();
+      if (type_str.find(torch_prefix) == 0) {
+        TORCH_CHECK(
+            type_str.find(class_prefix) == 0,
+            "__torch__ types other than torchbind (__torch__.torch.classes)"
+            "are not supported in lite interpreter. ",
+            "Workaround: instead of using arbitrary class type (class Foo()), ",
+            "define a pytorch class (class Foo(torch.nn.Module)).");
+      }
+      types.emplace_back(type_str);
+    }
+
+    // since the register location is embedded into the bytecode, pass the
+    // register size
+    auto register_size = static_cast<int>(register_size_);
+
+    auto codeTable = Table(
+        {{"instructions", to_tuple(instructions)},
+         {"operators", to_tuple(operators)},
+         {"constants", to_tuple(constants)},
+         {"types", to_tuple(types)},
+         {"register_size", register_size}});
+    bytecode_table_ = codeTable;
+  };
 
  private:
   void emitOperator(Node* node) override {
