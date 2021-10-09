@@ -193,17 +193,17 @@ class LeftRight final {
 template <class T>
 class RWSafeLeftRightWrapper final {
 #if defined(__MACH__)
-// Compiler error: 'shared_timed_mutex' is unavailable: introduced in
-// macOS 10.12
-using mutexType = std::mutex;
-// Compiler error: 'shared_lock' is unavailable: introduced in
-// macOS 10.12
-using rLockType = std::unique_lock<std::mutex>;
-using wLockType = std::unique_lock<std::mutex>;
+  // Compiler error: 'shared_timed_mutex' is unavailable: introduced in
+  // macOS 10.12
+  using mutexType = std::mutex;
+  // Compiler error: 'shared_lock' is unavailable: introduced in
+  // macOS 10.12
+  using rLockType = std::unique_lock<std::mutex>;
+  using wLockType = std::unique_lock<std::mutex>;
 #else
-using mutexType = std::shared_timed_mutex;
-using rLockType = std::shared_lock<std::shared_timed_mutex>;
-using wLockType = std::unique_lock<std::shared_timed_mutex>;
+  using mutexType = std::shared_timed_mutex;
+  using rLockType = std::shared_lock<std::shared_timed_mutex>;
+  using wLockType = std::unique_lock<std::shared_timed_mutex>;
 #endif
 
  public:
