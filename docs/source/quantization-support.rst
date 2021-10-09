@@ -71,7 +71,7 @@ This module contains FX graph mode quantization APIs (prototype).
     ScopeContextManager
 
 torch (quantization related functions)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This describes the quantization related functions of the `torch` namespace.
 
@@ -273,7 +273,7 @@ quantization aware training.
     freeze_bn_stats
 
 torch.nn.intrinsic.quantized
-~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This module implements the quantized implementations of fused operations
 like conv + relu. No BatchNorm variants as it's usually folded into convolution
@@ -294,7 +294,7 @@ for inference.
     LinearReLU
 
 torch.nn.intrinsic.quantized.dynamic
-~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This module implements the quantized dynamic implementations of fused operations
 like linear + relu.
@@ -365,7 +365,7 @@ This module implements the quantized versions of the nn layers such as
     InstanceNorm3d
 
 torch.nn.quantized.functional
-~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This module implements the quantized versions of the functional layers such as
 ~`torch.nn.functional.conv2d` and `torch.nn.functional.relu`. Note:
@@ -402,7 +402,7 @@ This module implements the quantized versions of the functional layers such as
     upsample_nearest
 
 torch.nn.quantized.dynamic
-~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Dynamically quantized :class:`~torch.nn.Linear`, :class:`~torch.nn.LSTM`,
 :class:`~torch.nn.LSTMCell`, :class:`~torch.nn.GRUCell`, and

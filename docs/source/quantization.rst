@@ -479,6 +479,13 @@ The :doc:`Quantization API Reference <quantization-support>` contains documentat
 of quantization APIs, such as quantization passes, quantized tensor operations,
 and supported quantized modules and functions.
 
+.. toctree::
+    :hidden:
+
+    quantization-support
+    torch_ao_ns_numeric_suite
+    torch_ao_ns_numeric_suite_fx
+
 Quantized Tensors
 ---------------------------------------
 

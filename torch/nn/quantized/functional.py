@@ -395,7 +395,8 @@ def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
                                           dilation, ceil_mode, return_indices)
 
 def celu(input: Tensor, scale: float, zero_point: int, alpha: float = 1.) -> Tensor:
-    r"""celu(input, scale, zero_point, alpha=1.) -> Tensor
+    r"""
+    celu(input, scale, zero_point, alpha=1.) -> Tensor
 
     Applies the quantized CELU function element-wise.
     .. math::
@@ -500,7 +501,7 @@ def hardsigmoid(input: Tensor) -> Tensor:
     return torch._C._nn.hardsigmoid(input)
 
 def clamp(input: Tensor, min_: float, max_: float) -> Tensor:
-    r"""float(input, min_, max_) -> Tensor
+    r"""float(input, min\_, max\_) -> Tensor
 
     Applies the clamp function element-wise.
     See :class:`~torch.nn.quantized.clamp` for more details.
