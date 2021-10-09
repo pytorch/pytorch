@@ -110,6 +110,49 @@ Tensor computeQuantizePerTensor(
   return Tensor(buf, vars, exprHandle.node());
 }
 
+Tensor computeQuantizePerTensorExternalCall(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
+  Dtype dtype = kFloat;
+  if (outputType) {
+    dtype = Dtype(*outputType);
+  }
+
+  const BufHandle& x = c10::get<BufHandle>(inputs[0]);
+  const auto qscale = c10::get<double>(inputs[1]);
+  const auto qzero = c10::get<int64_t>(inputs[2]);
+  const auto qdtype = c10::get<int64_t>(inputs[3]);
+
+  auto ResultBuf =
+      makeQBufHandle("quantize_per_tensor", outputShape, dtype, qscale, qzero);
+  StmtPtr s = ExternalCall::make(
+      ResultBuf, "nnc_quantize_per_tensor", {x}, {qscale, qzero, qdtype});
+  return Tensor(ResultBuf.node(), s);
+}
+
+Tensor computeDequantizeExternalCall(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
+  Dtype dtype = kFloat;
+  if (outputType) {
+    dtype = Dtype(*outputType);
+  }
+
+  const BufHandle& qx = c10::get<BufHandle>(inputs[0]);
+  const double qscale = immQScale(qx);
+  const int64_t qzero = immQZero(qx);
+  const int64_t qdtype = immQDType(qx);
+
+  BufHandle ResultBuf("dequantize", outputShape, dtype);
+  StmtPtr s = ExternalCall::make(
+      ResultBuf, "nnc_dequantize", {qx}, {qscale, qzero, qdtype});
+  return Tensor(ResultBuf.node(), s);
+}
+
 Tensor computeQuantizedConv2dPrepack(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,

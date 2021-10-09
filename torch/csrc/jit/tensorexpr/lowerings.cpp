@@ -1392,11 +1392,13 @@ RegisterNNCLoweringFunction aten_mean("aten::mean", computeMean);
 
 RegisterNNCLoweringFunction aten_quantize_per_tensor(
     "aten::quantize_per_tensor",
-    computeQuantizePerTensor);
+    // computeQuantizePerTensor);
+    computeQuantizePerTensorExternalCall);
 
 RegisterNNCLoweringFunction aten_dequantize(
     "aten::dequantize",
-    computeDequantize);
+    // computeDequantize);
+    computeDequantizeExternalCall);
 
 RegisterNNCLoweringFunction quantized_conv2d(
     "quantized::conv2d",

@@ -40,14 +40,14 @@ class Quantization : public ::testing::Test {
   }
 };
 
-TEST_F(Quantization, Quant) {
+TEST_F(Quantization, QuantUInt8) {
 #ifdef TORCH_ENABLE_LLVM
   const auto graph_string = R"IR(
       graph(%x.1 : Float(2, 2, strides=[2, 1], device=cpu)):
         %2 : int = prim::Constant[value=13]()
         %3 : int = prim::Constant[value=130]()
         %4 : float = prim::Constant[value=0.1]()
-        %q.1 : Float(2, 2) = aten::quantize_per_tensor(%x.1, %4, %3, %2)
+        %q.1 : QUInt8(2, 2) = aten::quantize_per_tensor(%x.1, %4, %3, %2)
         return (%q.1))IR";
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);
@@ -83,7 +83,7 @@ TEST_F(Quantization, QuantDequantInt8) {
         %2 : int = prim::Constant[value=12]()
         %3 : int = prim::Constant[value=13]()
         %4 : float = prim::Constant[value=0.1]()
-        %q.1 : Float(2, 2) = aten::quantize_per_tensor(%x.1, %4, %3, %2)
+        %q.1 : QInt8(2, 2) = aten::quantize_per_tensor(%x.1, %4, %3, %2)
         %6 : Float(2, 2) = aten::dequantize(%q.1)
         return (%6))IR";
   auto graph = std::make_shared<Graph>();
@@ -121,7 +121,7 @@ TEST_F(Quantization, QuantDequantUInt8) {
         %2 : int = prim::Constant[value=13]()
         %3 : int = prim::Constant[value=130]()
         %4 : float = prim::Constant[value=0.1]()
-        %q.1 : Float(2, 2) = aten::quantize_per_tensor(%x.1, %4, %3, %2)
+        %q.1 : QUInt8(2, 2) = aten::quantize_per_tensor(%x.1, %4, %3, %2)
         %6 : Float(2, 2) = aten::dequantize(%q.1)
         return (%6))IR";
   auto graph = std::make_shared<Graph>();
@@ -175,9 +175,9 @@ TEST_F(Quantization, QuantAddDequantInt8) {
         %qs2 : float = prim::Constant[value=0.1]()
         %qza : int = prim::Constant[value=13]()
         %qsa : float = prim::Constant[value=0.1]()
-        %q1 : Float(2, 2) = aten::quantize_per_tensor(%x1, %qs1, %qz1, %2)
-        %q2 : Float(2, 2) = aten::quantize_per_tensor(%x2, %qs2, %qz2, %2)
-        %qa : Float(2, 2) = quantized::add(%q1, %q2, %qsa, %qza)
+        %q1 : QInt8(2, 2) = aten::quantize_per_tensor(%x1, %qs1, %qz1, %2)
+        %q2 : QInt8(2, 2) = aten::quantize_per_tensor(%x2, %qs2, %qz2, %2)
+        %qa : QInt8(2, 2) = quantized::add(%q1, %q2, %qsa, %qza)
         %6 : Float(2, 2) = aten::dequantize(%qa)
         return (%6))IR";
   auto graph = std::make_shared<Graph>();
@@ -216,13 +216,13 @@ TEST_F(Quantization, QuantAddDequantUInt8) {
         %2 : int = prim::Constant[value=13]()
         %qz1 : int = prim::Constant[value=130]()
         %qs1 : float = prim::Constant[value=0.1]()
-        %qz2 : int = prim::Constant[value=140]()
-        %qs2 : float = prim::Constant[value=0.2]()
-        %qza : int = prim::Constant[value=150]()
-        %qsa : float = prim::Constant[value=0.3]()
-        %q1 : Float(2, 2) = aten::quantize_per_tensor(%x1, %qs1, %qz1, %2)
-        %q2 : Float(2, 2) = aten::quantize_per_tensor(%x2, %qs2, %qz2, %2)
-        %qa : Float(2, 2) = quantized::add(%q1, %q2, %qsa, %qza)
+        %qz2 : int = prim::Constant[value=130]()
+        %qs2 : float = prim::Constant[value=0.1]()
+        %qza : int = prim::Constant[value=130]()
+        %qsa : float = prim::Constant[value=0.1]()
+        %q1 : QUInt8(2, 2) = aten::quantize_per_tensor(%x1, %qs1, %qz1, %2)
+        %q2 : QUInt8(2, 2) = aten::quantize_per_tensor(%x2, %qs2, %qz2, %2)
+        %qa : QUInt8(2, 2) = quantized::add(%q1, %q2, %qsa, %qza)
         %6 : Float(2, 2) = aten::dequantize(%qa)
         return (%6))IR";
   auto graph = std::make_shared<Graph>();
@@ -231,9 +231,15 @@ TEST_F(Quantization, QuantAddDequantUInt8) {
   auto x1 = at::rand({2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
   auto x2 = at::rand({2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
   auto q1 = at::quantize_per_tensor(x1, 0.1f, 130, at::kQUInt8);
-  auto q2 = at::quantize_per_tensor(x2, 0.2f, 140, at::kQUInt8);
-  auto qa = quantized_add(q1, q2, 0.3f, 150);
+  auto q2 = at::quantize_per_tensor(x2, 0.1f, 130, at::kQUInt8);
+  auto qa = quantized_add(q1, q2, 0.1f, 130);
   auto y_expected = at::dequantize(qa);
+  std::cout << "x1:\n" << x1 << std::endl;
+  std::cout << "q1:\n" << q1 << std::endl;
+  std::cout << "x2:\n" << x2 << std::endl;
+  std::cout << "q2:\n" << q2 << std::endl;
+  std::cout << "y_expected:\n" << y_expected << std::endl;
+
   TensorExprKernel k(graph);
   std::vector<at::Tensor> inputs = {x1, x2};
   StmtPtr s = k.getCodeGenStmt();
@@ -241,12 +247,9 @@ TEST_F(Quantization, QuantAddDequantUInt8) {
   std::vector<IValue> stack = fmap<IValue>(inputs);
   k.run(stack);
   auto y = stack[0].toTensor();
+  std::cout << "y:\n" << y << std::endl;
+
   if (!almostEqual(y_expected, y)) {
-    std::cout << "x1:\n" << x1 << std::endl;
-    std::cout << "q1:\n" << q1 << std::endl;
-    std::cout << "x2:\n" << x2 << std::endl;
-    std::cout << "q2:\n" << q2 << std::endl;
-    std::cout << "y_expected:\n" << y_expected << std::endl;
     std::cout << "y:\n" << y << std::endl;
   }
   CHECK_EQ(almostEqual(y_expected, y), 1);

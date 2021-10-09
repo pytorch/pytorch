@@ -486,6 +486,14 @@ llvm::Type* LLVMCodeGenImpl::dtypeToLLVM(Dtype dtype) {
 
     AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
+    case ScalarType::QInt8:
+      return CharTy_;
+      break;
+
+    case ScalarType::QUInt8:
+      return ByteTy_;
+      break;
+
     default:
       throw unsupported_dtype();
   }
