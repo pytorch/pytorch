@@ -7343,9 +7343,7 @@ class DistributedTest:
             # tests expected behavior when nonzero rank hangs.
             nccl_pg = dist.new_group(
                 ranks=list(i for i in range(int(self.world_size))),
-                # provide sufficient timeout so communicators
-                # can be initialized in ctor.
-                timeout=timedelta(seconds=15),
+                timeout=timedelta(seconds=2),
                 backend=dist.Backend.NCCL,
             )
             gloo_pg = dist.new_group(
@@ -7356,7 +7354,7 @@ class DistributedTest:
             # Let all ranks call allreduce first to set up communicators etc.
             # Directly simulating error here will run into store issue described
             # in https://github.com/pytorch/pytorch/issues/54524.
-            nccl_pg.allreduce(tensors).wait(timedelta(seconds=5))
+            nccl_pg.allreduce(tensors).wait()
             # All ranks besides 0 call into allreduce. This is to simulate a
             # desync across the world, where some ranks call into
             # monitored_barrier() and others are stuck in collective comm. In
@@ -7389,8 +7387,6 @@ class DistributedTest:
                     gloo_pg.monitored_barrier(
                         monitored_barrier_timeout_seconds, wait_all_ranks=wait_all_ranks
                     )
-
-            self._barrier(timeout=30)
 
         @with_nccl_blocking_wait
         @require_backend({"gloo", "nccl"})
