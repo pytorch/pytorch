@@ -7474,8 +7474,9 @@ class TestAutogradForwardModeBatchedGrad(TestCase):
         self.assertTrue(gradcheck(torch.add, (a, b)))
 
     def test_out_of_place_not_same_layout(self):
-        input = torch.zeros([2, 2]).transpose(0,1).contiguous().transpose(0,1)
+        input = torch.zeros([2, 2]).transpose(0, 1).contiguous().transpose(0, 1)
         tangent = torch.zeros([2, 2, 2])
+
         def jvp(tangent):
             with fwAD.dual_level():
                 dual_tensor = fwAD.make_dual(input, tangent)
@@ -7483,9 +7484,10 @@ class TestAutogradForwardModeBatchedGrad(TestCase):
         torch._vmap_internals._vmap(jvp, 0, 0)(tangent)
 
     def test_out_of_place_not_same_layout_inplace_on_view(self):
-        input = torch.zeros([2, 2]).transpose(0,1).contiguous().transpose(0,1)
+        input = torch.zeros([2, 2]).transpose(0, 1).contiguous().transpose(0, 1)
         tangent = torch.zeros([2, 2, 2])
         another_batched_arg = torch.zeros([2, 2, 2])
+
         def jvp(tangent, another_batched_arg):
             with fwAD.dual_level():
                 dual_tensor = fwAD.make_dual(input, tangent)

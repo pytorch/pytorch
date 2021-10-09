@@ -655,7 +655,8 @@ class TestGradients(TestCase):
         # TODO: clean up how attributes are passed to gradcheck from OpInfos
         if op.supports_forward_ad:
             self._grad_test_helper(device, dtype, op, variant, check_forward_ad=True, check_backward_ad=False,
-                                   check_undefined_grad=False, check_batched_grad=(op.check_batched_grad and not op.inplace_variant),
+                                   check_undefined_grad=False,
+                                   check_batched_grad=(op.check_batched_grad and not op.inplace_variant),
                                    check_batched_forward_grad=(not op.inplace_variant and op.check_batched_forward_grad))
         else:
             err_msg = r"Trying to use forward AD with .* that does not support it\."
@@ -663,7 +664,8 @@ class TestGradients(TestCase):
                         "raise any error. If your op supports forward AD, you should set supports_forward_ad=True")
             with self.assertRaisesRegex(NotImplementedError, err_msg, msg=hint_msg):
                 self._grad_test_helper(device, dtype, op, variant, check_forward_ad=True, check_backward_ad=False,
-                                       check_undefined_grad=False, check_batched_grad=(op.check_batched_grad and not op.inplace_variant),
+                                       check_undefined_grad=False,
+                                       check_batched_grad=(op.check_batched_grad and not op.inplace_variant),
                                        check_batched_forward_grad=(not op.inplace_variant and op.check_batched_forward_grad))
 
     @_gradcheck_ops(op_db)
