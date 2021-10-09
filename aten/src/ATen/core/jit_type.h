@@ -1661,7 +1661,7 @@ TORCH_API c10::optional<TypePtr> unifyTypeList(
 namespace detail {
 template <typename T>
 struct getTypePtr_ final {
-  static TypePtr call() {
+  static decltype(auto) call() {
     TypePtr res = []() {
       try {
         return getCustomClassType<T>();
@@ -1680,144 +1680,144 @@ struct getTypePtr_ final {
 
 template <>
 struct getTypePtr_<at::IValue> final {
-  static TypePtr call() {
+  static decltype(auto) call() {
     return AnyType::get();
   }
 };
 
 template <>
 struct getTypePtr_<at::Tensor> final {
-  static TypePtr call() {
+  static decltype(auto) call() {
     return TensorType::get();
   }
 };
 template <>
 struct getTypePtr_<c10::Storage> final {
-  static TypePtr call() {
+  static decltype(auto) call() {
     return StorageType::get();
   }
 };
 template <>
 struct getTypePtr_<c10::Stream> final {
-  static TypePtr call() {
+  static decltype(auto) call() {
     return StreamObjType::get();
   }
 };
 template <>
 struct getTypePtr_<double> final {
-  static TypePtr call() {
+  static decltype(auto) call() {
     return FloatType::get();
   }
 };
 template <>
 struct getTypePtr_<c10::complex<double>> final {
-  static TypePtr call() {
+  static decltype(auto) call() {
     return ComplexType::get();
   }
 };
 template <>
 struct getTypePtr_<int64_t> final {
-  static TypePtr call() {
+  static decltype(auto) call() {
     return IntType::get();
   }
 };
 template <>
 struct getTypePtr_<c10::ScalarType> final {
-  static TypePtr call() {
+  static decltype(auto) call() {
     return IntType::get();
   }
 };
 template <>
 struct getTypePtr_<c10::Device> final {
-  static TypePtr call() {
+  static decltype(auto) call() {
     return DeviceObjType::get();
   }
 };
 template <>
 struct getTypePtr_<c10::Layout> final {
-  static TypePtr call() {
+  static decltype(auto) call() {
     return IntType::get();
   }
 };
 template <>
 struct getTypePtr_<c10::MemoryFormat> final {
-  static TypePtr call() {
+  static decltype(auto) call() {
     return IntType::get();
   }
 };
 template <>
 struct getTypePtr_<bool> final {
-  static TypePtr call() {
+  static decltype(auto) call() {
     return BoolType::get();
   }
 };
 template <>
 struct getTypePtr_<at::Scalar> final {
-  static TypePtr call() {
+  static decltype(auto) call() {
     return NumberType::get();
   }
 };
 template <>
 struct getTypePtr_<c10::QScheme> final {
-  static TypePtr call() {
+  static decltype(auto) call() {
     return QSchemeType::get();
   }
 };
 template <>
 struct getTypePtr_<at::Generator> final {
-  static TypePtr call() {
+  static decltype(auto) call() {
     return OptionalType::create(GeneratorType::get());
   }
 };
 template <>
 struct getTypePtr_<std::string> final {
-  static TypePtr call() {
+  static decltype(auto) call() {
     return StringType::get();
   }
 };
 template <>
 struct getTypePtr_<c10::string_view> final {
-  static TypePtr call() {
+  static decltype(auto) call() {
     return StringType::get();
   }
 };
 template <>
 struct getTypePtr_<at::Dimname> final {
-  static TypePtr call() {
+  static decltype(auto) call() {
     return StringType::get();
   }
 };
 template <class T>
 struct getTypePtr_<std::vector<T>> final {
-  static TypePtr call() {
+  static decltype(auto) call() {
     static auto type = ListType::create(getTypePtr_<T>::call());
     return type;
   }
 };
 template <class T>
 struct getTypePtr_<c10::ArrayRef<T>> final {
-  static TypePtr call() {
+  static decltype(auto) call() {
     static auto type = ListType::create(getTypePtr_<T>::call());
     return type;
   }
 };
 template <class T>
 struct getTypePtr_<c10::List<T>> final {
-  static TypePtr call() {
+  static decltype(auto) call() {
     static auto type = ListType::create(getTypePtr_<T>::call());
     return type;
   }
 };
 template <class T, size_t N>
 struct getTypePtr_<std::array<T, N>> final {
-  static TypePtr call() {
+  static decltype(auto) call() {
     static auto type = ListType::create(getTypePtr_<T>::call());
     return type;
   }
 };
 template <class K, class V>
 struct getTypePtr_<std::unordered_map<K, V>> final {
-  static TypePtr call() {
+  static decltype(auto) call() {
     static auto type =
         DictType::create(getTypePtr_<K>::call(), getTypePtr_<V>::call());
     return type;
@@ -1825,7 +1825,7 @@ struct getTypePtr_<std::unordered_map<K, V>> final {
 };
 template <class K, class V>
 struct getTypePtr_<c10::Dict<K, V>> final {
-  static TypePtr call() {
+  static decltype(auto) call() {
     static auto type =
         DictType::create(getTypePtr_<K>::call(), getTypePtr_<V>::call());
     return type;
@@ -1833,14 +1833,14 @@ struct getTypePtr_<c10::Dict<K, V>> final {
 };
 template <class T>
 struct getTypePtr_<at::optional<T>> final {
-  static TypePtr call() {
+  static decltype(auto) call() {
     static auto type = OptionalType::create(getTypePtr_<T>::call());
     return type;
   }
 };
 template <class... Contained>
 struct getTypePtr_<std::tuple<Contained...>> final {
-  static TypePtr call() {
+  static decltype(auto) call() {
     std::vector<TypePtr> contained_types = {
       (getTypePtr_<Contained>::call())...
     };
@@ -1849,16 +1849,23 @@ struct getTypePtr_<std::tuple<Contained...>> final {
 };
 template <>
 struct getTypePtr_<void> final {
-  static TypePtr call() {
+  static decltype(auto) call() {
     return NoneType::get();
   }
 };
 } // namespace detail
 template <class T>
-inline TypePtr getTypePtr() {
+inline decltype(auto) getTypePtr() {
   // TODO: static_assert that a templated function exists, and throw a friendly
   // error message if not
   return detail::getTypePtr_<T>::call();
+}
+
+template <class T>
+inline TypePtr getTypePtrCopy() {
+  // TODO: static_assert that a templated function exists, and throw a friendly
+  // error message if not
+  return getTypePtr<T>();
 }
 
 using TypeEnv = std::unordered_map<std::string, TypePtr>;
