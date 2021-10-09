@@ -276,6 +276,41 @@ void nnc_prepacked_conv2d_clamp_run(
 
 #endif // USE_XNNPACK
 
+void nnc_aten_embedding(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int8_t* buf_dtypes,
+    int64_t args_num,
+    int64_t* extra_args) {
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+
+  /*
+struct TORCH_API embedding {
+  using schema = at::Tensor (const at::Tensor &, const at::Tensor &, int64_t, bool, bool);
+  using ptr_schema = schema*;
+  // See Note [static constexpr char* members for windows NVCC]
+  STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(name, "aten::embedding")
+  STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(overload_name, "")
+  STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(schema_str, "embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor")
+  static at::Tensor call(const at::Tensor & weight, const at::Tensor & indices, int64_t padding_idx, bool scale_grad_by_freq, bool sparse);
+  static at::Tensor redispatch(c10::DispatchKeySet dispatchKeySet, const at::Tensor & weight, const at::Tensor & indices, int64_t padding_idx, bool scale_grad_by_freq, bool sparse);
+};
+   */
+  at::Tensor& r = tensors[0];
+  const at::Tensor& weight = tensors[1];
+  const at::Tensor& indices = tensors[2];
+  try {
+    r = at::embedding(weight, indices);
+  } catch (...) {
+  }
+  // TODO: have to copy output because at::embedding doesnt have an out variant
+  // and NNC's external calls don't support allocations
+  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+}
+
 #ifndef C10_MOBILE
 
 const static RegisterNNCExternalFunction nnc_conv2d(
@@ -297,6 +332,10 @@ const static RegisterNNCExternalFunction nnc_addmm(
 const static RegisterNNCExternalFunction nnc_triangular_solve(
     "nnc_aten_triangular_solve",
     nnc_aten_triangular_solve);
+
+const static RegisterNNCExternalFunction nnc_embedding(
+    "nnc_aten_embedding",
+    nnc_aten_embedding);
 
 #ifdef USE_XNNPACK
 const static RegisterNNCExternalFunction reg_nnc_prepacked_linear_clamp_run(

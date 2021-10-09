@@ -1412,6 +1412,7 @@ RegisterNNCLoweringFunction aten_add(
           : computeTwoOperand(
                 "aten_add", inputs, outputShape, outputType, add_lambda);
     });
+RegisterNNCLoweringFunction aten_embedding("aten::embedding", computeEmbedding);
 
 } // namespace
 
