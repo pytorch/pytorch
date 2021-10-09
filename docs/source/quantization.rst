@@ -566,6 +566,8 @@ cover typical CNN and RNN models
     torch.nn.quantized
     torch.nn.quantized.dynamic
     torch.quantization.quantize_fx
+    torch.quantization.observer
+    torch.quantization.fake_quantize
 
 Quantization Customizations
 ---------------------------
@@ -710,6 +712,14 @@ Modules that provide quantization functions and classes
   * - :ref:`torch_quantization_quantize_fx`
     - This module implements the functions you call directly to convert your
       model from FP32 to quantized form using FX.
+
+  * - :ref:`torch_quantization_observer`
+    - This module implements observers which are used to collect statistics about
+      the values observed during calibration (PTQ) or training (QAT).
+
+  * - :ref:`torch_quantization_fake_quantize`
+    - This module implements modules which are used to perform fake quantization
+      during QAT.
 
   * - :ref:`torch_nn_intrinsic`
     - This module implements the combined (fused) modules conv + relu which can
