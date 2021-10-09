@@ -18,6 +18,7 @@ import torch.cuda
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 import torch.utils.cpp_extension
 import torch.hub as hub
+from torch.profiler import kineto_available
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
 from torch.testing._internal.common_utils import has_breakpad, load_tests, retry, IS_SANDCASTLE, IS_WINDOWS, TEST_WITH_ASAN
@@ -784,6 +785,8 @@ class TestCrashHandler(TestCase):
             torch.utils._crash_handler.disable_minidumps()
 
 
+@unittest.skipIf(kineto_available() and not torch.cuda.is_available(),
+                 "torch_cpu will transitively depend on cuda libraries if building with kineto enabled")
 @unittest.skipIf(IS_SANDCASTLE, "cpp_extension is OSS only")
 class TestStandaloneCPPJIT(TestCase):
     def test_load_standalone(self):
