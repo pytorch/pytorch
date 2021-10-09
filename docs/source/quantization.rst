@@ -483,8 +483,8 @@ and supported quantized modules and functions.
     :hidden:
 
     quantization-support
-    torch_ao_ns_numeric_suite
-    torch_ao_ns_numeric_suite_fx
+    torch.ao.ns._numeric_suite
+    torch.ao.ns._numeric_suite_fx
 
 Quantized Tensors
 ---------------------------------------
