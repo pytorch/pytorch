@@ -395,10 +395,10 @@ def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
                                           dilation, ceil_mode, return_indices)
 
 def celu(input: Tensor, scale: float, zero_point: int, alpha: float = 1.) -> Tensor:
-    r"""
-    celu(input, scale, zero_point, alpha=1.) -> Tensor
+    r"""celu(input, scale, zero_point, alpha=1.) -> Tensor
 
     Applies the quantized CELU function element-wise.
+
     .. math::
         \text{CELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x / \alpha) - 1))
 
