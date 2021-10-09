@@ -67,8 +67,6 @@ This module contains FX graph mode quantization APIs (prototype).
     prepare_qat_fx
     convert_fx
     fuse_fx
-    Scope
-    ScopeContextManager
 
 torch (quantization related functions)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
