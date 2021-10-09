@@ -568,6 +568,7 @@ cover typical CNN and RNN models
     torch.quantization.quantize_fx
     torch.quantization.observer
     torch.quantization.fake_quantize
+    torch.quantization.qconfig
 
 Quantization Customizations
 ---------------------------
@@ -720,6 +721,10 @@ Modules that provide quantization functions and classes
   * - :ref:`torch_quantization_fake_quantize`
     - This module implements modules which are used to perform fake quantization
       during QAT.
+
+  * - :ref:`torch_quantization_qconfig`
+    - This module defines `QConfig` and `QConfigDynamic` objects which are used
+      to configure quantization settings for individual ops.
 
   * - :ref:`torch_nn_intrinsic`
     - This module implements the combined (fused) modules conv + relu which can
