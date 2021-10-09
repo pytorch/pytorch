@@ -1649,3 +1649,48 @@ lu.__doc__ = _lu_impl.__doc__
 
 def align_tensors(*tensors):
     raise RuntimeError('`align_tensors` not yet implemented.')
+
+# TODOs:
+# TODO: This function needs better documentation, examples, and something similar to:
+#       torch.nonzero's doc: https://pytorch.org/docs/stable/generated/torch.nonzero.html
+# TODO: Add testing (OpInfo and test_unravel_index in test_functional? (if exists, not sure))
+# TODO: More checks? Verify with nonzero.
+def unravel_index(
+    indices: torch.Tensor,
+    shape: Tuple[int, ...],
+    *,
+    as_tuple: bool=False
+) -> torch.Tensor:
+    r"""Converts flat indices into unraveled coordinates for the given target shape.
+
+    This is a PyTorch implementation of NumPy's `unravel_index` (TODO: add link).
+
+    Args:
+        indices: A tensor containing flattened indices to be unraveled, can be of `dtype` `torch.int64`
+                 or `torch.int32`.
+        shape: The shape used for unravelling the `indices`.
+    
+    Keyword Args:
+        as_tuple: A boolean value, which if `True` will return the unraveled `indices` as tuple,
+                  else a `Tensor` will be returned.
+    
+    Returns:
+        unraveled coordinates from the given `indices`, and `shape`. See description of `as_tuple` for
+        returning tuples.
+    """
+    if (not isinstance(shape, Tensor)):
+        try:
+            shape = torch.tensor(shape)
+        except:
+            raise ValueError("Incorrect dtype passed for shape: {shape}, should be convertible"
+                             " to PyTorch's tensor class.")
+
+    # List to store unraveled indices, to be converted to a tuple/tensor depending on
+    # to_tuple kw-only arg
+    coords = list()
+    for dim in reversed(shape):
+        coords.append(indices % dim)
+        indices = torch.div(indices, dim, rounding_mode='trunc')
+
+    coords = torch.stack(coords[::-1], dim=-1)
+    return tuple(coords) if as_tuple else coords
