@@ -192,6 +192,20 @@ class LeftRight final {
 // read-write lock to protect T (data).
 template <class T>
 class RWSafeLeftRightWrapper final {
+#if defined(__MACH__)
+// Compiler error: 'shared_timed_mutex' is unavailable: introduced in
+// macOS 10.12
+using mutexType = std::mutex;
+// Compiler error: 'shared_lock' is unavailable: introduced in
+// macOS 10.12
+using rLockType = std::unique_lock<std::mutex>;
+using wLockType = std::unique_lock<std::mutex>;
+#else
+using mutexType = std::shared_timed_mutex;
+using rLockType = std::shared_lock<std::shared_timed_mutex>;
+using wLockType = std::unique_lock<std::shared_timed_mutex>;
+#endif
+
  public:
   template <class... Args>
   explicit RWSafeLeftRightWrapper(const Args&... args) : _data{args...} {}
@@ -205,19 +219,19 @@ class RWSafeLeftRightWrapper final {
 
   template <typename F>
   auto read(F&& readFunc) const -> typename std::result_of<F(const T&)>::type {
-    std::shared_lock<std::shared_timed_mutex> lock(mutex_);
+    rLockType lock(mutex_);
     return readFunc(_data);
   }
 
   template <typename F>
   auto write(F&& writeFunc) -> typename std::result_of<F(T&)>::type {
-    std::unique_lock<std::shared_timed_mutex> lock(mutex_);
+    wLockType lock(mutex_);
     return writeFunc(_data);
   }
 
  private:
   T _data;
-  mutable std::shared_timed_mutex mutex_;
+  mutable mutexType mutex_;
 };
 
 } // namespace c10
