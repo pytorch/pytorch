@@ -140,7 +140,7 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
       } else if (
           kernel_size == 1 &&
           std::all_of(
-              stride_.begin(), stride_.end(), [](auto e) { return e == 1; }) &&
+              stride_.begin(), stride_.end(), [](const auto& e) { return e == 1; }) &&
           !any_padding) {
         ukernel_type = group_input_channels >= SIZE_MAX
             ? pytorch_qnnp_ukernel_type_xzp_gemm
