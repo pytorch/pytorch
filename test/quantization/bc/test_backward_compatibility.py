@@ -17,7 +17,7 @@ from torch.fx import GraphModule
 from torch.testing._internal.common_utils import TestCase, IS_AVX512_VNNI_SUPPORTED
 from torch.testing._internal.common_quantized import override_qengines, qengine_is_fbgemm
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
-from .torch_package_models import LinearReluFunctional
+from torch.testing._internal.quantization_torch_package_models import LinearReluFunctional
 
 from torch.ao.quantization import MinMaxObserver, PerChannelMinMaxObserver
 import torch.ao.quantization.quantize_fx as quantize_fx
@@ -190,7 +190,7 @@ class TestSerialization(TestCase):
 
             # save the model with torch.package
             with torch.package.PackageExporter(package_file) as exp:
-                exp.intern('quantization.bc.torch_package_models')
+                exp.intern('torch.testing._internal.quantization_torch_package_models')
                 exp.save_pickle(package_name, resource_name_model, fp32_module)
 
             # do the quantization transforms and save the result
