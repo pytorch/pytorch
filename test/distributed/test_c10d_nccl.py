@@ -2378,6 +2378,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @with_nccl_blocking_wait
     @requires_nccl()
     @skip_if_lt_x_gpu(3)
+    @sandcastle_skip("Test is flaky: https://github.com/pytorch/pytorch/issues/66354")
     def test_nccl_timeout(self):
         store = c10d.FileStore(self.file_name, self.world_size)
 
