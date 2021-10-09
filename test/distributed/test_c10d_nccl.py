@@ -657,13 +657,11 @@ class DistributedDataParallelTest(
         # otherwise process will be taken down and we can't check for errors.
         os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "0"
         os.environ["NCCL_BLOCKING_WAIT"] = "1"
-        # TODO: smaller timeout can fail since PG NCCl does health check in
-        # constructor. Look into reducing this test's runtime.
+        timeout = timedelta(seconds=2)
         store = c10d.FileStore(self.file_name, self.world_size)
-        # provide sufficient timeout to initialize NCCL comm.
-        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size, timeout=timedelta(seconds=15))
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size, timeout=timeout)
         pg_gloo = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
-        pg.barrier().wait(timedelta(seconds=5))
+        pg.barrier().wait()
         # Simulate stuckness in rank 0.
         if self.rank == 0:
             pg_gloo.barrier().wait()
@@ -672,7 +670,7 @@ class DistributedDataParallelTest(
         if self.rank != 0:
             # Time out due to rank 0 not calling into allreduce.
             with self.assertRaises(RuntimeError):
-                pg.allreduce([inp]).wait(timedelta(seconds=5))
+                pg.allreduce([inp]).wait()
 
             # Now when nonzero rank attempts to use communicator, original failure reason should be logged.j
             try:
@@ -2265,14 +2263,14 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             store,
             self.rank,
             self.world_size,
-            timeout=timedelta(seconds=10),
+            timeout=timedelta(seconds=self.op_timeout_sec),
         )
         process_group.allreduce(torch.rand(10).cuda(self.rank))
         if self.rank == 0:
             work = process_group.allreduce(torch.rand(10).cuda(self.rank))
             with self.assertRaisesRegex(RuntimeError, self.blocking_wait_error_msg):
                 # Operation would time out in blocking mode.
-                work.wait(timeout=timedelta(seconds=self.op_timeout_sec))
+                work.wait()
             # Run some GPU operations to make sure cuda has not gotten stuck.
             # It was observed cuda could get stuck if NCCL communicators were
             # not properly aborted before throwing RuntimeError.
@@ -2341,13 +2339,13 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             store,
             self.rank,
             self.world_size,
-            timeout=timedelta(seconds=10),
+            timeout=timedelta(seconds=self.op_timeout_sec),
         )
         process_group.barrier().wait()
         if self.rank == 0:
             with self.assertRaisesRegex(RuntimeError, self.blocking_wait_error_msg):
                 # This should timeout
-                process_group.barrier().wait(timeout=timedelta(seconds=self.op_timeout_sec))
+                process_group.barrier().wait()
 
     def _run_invalid_nccl_blocking_wait_env(self, val):
         os.environ["NCCL_BLOCKING_WAIT"] = val
@@ -2384,20 +2382,21 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
 
         # Initialize process_group.
+        timeout = 1
         process_group = c10d.ProcessGroupNCCL(
-            store, self.rank, self.world_size, timeout=timedelta(seconds=10)
+            store, self.rank, self.world_size, timeout=timedelta(seconds=timeout)
         )
-        process_group.allreduce(torch.rand(10).cuda(self.rank)).wait(timeout=timedelta(seconds=1))
+        process_group.allreduce(torch.rand(10).cuda(self.rank)).wait()
 
         if self.rank == 0:
             # This should timeout in about 1 second.
             start = time.time()
             # Watchdog may abort timed out work resulting in NCCL error instead of operation timed out.
             with self.assertRaisesRegex(RuntimeError, self.blocking_wait_error_msg):
-                process_group.allreduce(torch.rand(10).cuda(self.rank)).wait(timeout=timedelta(seconds=1))
+                process_group.allreduce(torch.rand(10).cuda(self.rank)).wait()
         else:
             # Sleep to ensure timeout.
-            time.sleep(2)
+            time.sleep(2 * timeout)
 
             self._wait_for_comm_abort(process_group)
 
@@ -2547,14 +2546,14 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         if self.rank == 0:
             with self.assertRaisesRegex(
-                RuntimeError, "Health check failure"
+                RuntimeError, "Timed out initializing process group"
             ):
                 c10d.init_process_group(
                     backend="nccl",
                     rank=self.rank,
                     world_size=self.world_size,
                     store=store,
-                    timeout=timedelta(seconds=10),
+                    timeout=timedelta(seconds=1),
                 )
 
     @requires_nccl()
@@ -2566,12 +2565,12 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             rank=self.rank,
             world_size=self.world_size,
             store=store,
-            timeout=timedelta(seconds=10),
+            timeout=timedelta(seconds=1),
         )
 
         if self.rank == 0:
             with self.assertRaisesRegex(
-                RuntimeError, "Health check failure"
+                RuntimeError, "Timed out initializing process group"
             ):
                 c10d.new_group([0, 1], timeout=timedelta(seconds=1))
 
@@ -2589,12 +2588,12 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             rank=self.rank,
             world_size=self.world_size,
             store=store,
-            timeout=timedelta(seconds=10),
+            timeout=timedelta(seconds=1),
         )
 
         if self.rank == 1:
             with self.assertRaisesRegex(
-                RuntimeError, "Health check failure"
+                RuntimeError, "Timed out initializing process group"
             ):
                 c10d.new_group([0, 1], timeout=timedelta(seconds=1))
 
