@@ -2675,6 +2675,7 @@ def gradcheck(fn, inputs, **kwargs):
     default_values = {
         "check_batched_grad": True,
         "fast_mode": True,
+        "check_batched_forward_grad": True,
     }
 
     if os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0FF") == "ON":
@@ -2695,6 +2696,7 @@ def gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
     default_values = {
         "check_batched_grad": True,
         "fast_mode": True,
+        "check_batched_forward_grad": True,
     }
 
     if os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0FF") == "ON":
