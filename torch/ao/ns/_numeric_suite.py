@@ -58,10 +58,18 @@ def compare_weights(
     quantized weights. This dict can be used to compare and compute the quantization
     error of the weights of float and quantized models.
 
-    Example usage:
-        wt_compare_dict = compare_weights(float_model.state_dict(), qmodel.state_dict())
+    Example usage::
+
+        wt_compare_dict = compare_weights(
+            float_model.state_dict(), qmodel.state_dict())
         for key in wt_compare_dict:
-            print(key, compute_error(wt_compare_dict[key]['float'], wt_compare_dict[key]['quantized'].dequantize()))
+            print(
+                key,
+                compute_error(
+                    wt_compare_dict[key]['float'],
+                    wt_compare_dict[key]['quantized'].dequantize()
+                )
+            )
 
     Args:
         float_dict: state dict of the float model
@@ -140,8 +148,7 @@ def get_logger_dict(mod: nn.Module, prefix: str = "") -> Dict[str, Dict]:
     This is mainly used for quantization accuracy debug.
 
     Type of loggers supported:
-        ShadowLogger: used to log the outputs of the quantized module and its
-            matching float shadow module,
+        ShadowLogger: used to log the outputs of the quantized module and its matching float shadow module,
         OutputLogger: used to log the outputs of the modules
 
     Args:
@@ -150,6 +157,7 @@ def get_logger_dict(mod: nn.Module, prefix: str = "") -> Dict[str, Dict]:
 
     Return:
         target_dict: the dictionary used to save all logger stats
+
     """
     torch._C._log_api_usage_once("quantization_api._numeric_suite.get_logger_dict")
 
@@ -301,7 +309,8 @@ def prepare_model_with_stubs(
     r"""Prepare the model by attaching the float module to its matching quantized
     module as the shadow if the float module type is in module_swap_list.
 
-    Example usage:
+    Example usage::
+
         prepare_model_with_stubs(float_model, q_model, module_swap_list, Logger)
         q_model(data)
         ob_dict = get_logger_dict(q_model)
@@ -365,7 +374,8 @@ def compare_model_stub(
     and it will save the outputs of the quantized module and float module that
     can be used to compute the module level quantization error.
 
-    Example usage:
+    Example usage::
+
         module_swap_list = [torchvision.models.quantization.resnet.QuantizableBasicBlock]
         ob_dict = compare_model_stub(float_model,qmodel,module_swap_list, data)
         for key in ob_dict:
@@ -459,10 +469,17 @@ def compare_model_outputs(
     float model at matching locations. This dict can be used to compare and
     compute the propagation quantization error.
 
-    Example usage:
+    Example usage::
+
         act_compare_dict = compare_model_outputs(float_model, qmodel, data)
         for key in act_compare_dict:
-            print(key, compute_error(act_compare_dict[key]['float'], act_compare_dict[key]['quantized'].dequantize()))
+            print(
+                key,
+                compute_error(
+                    act_compare_dict[key]['float'],
+                    act_compare_dict[key]['quantized'].dequantize()
+                )
+            )
 
     Args:
         float_model: float model used to generate the q_model
