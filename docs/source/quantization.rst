@@ -41,7 +41,6 @@ Quantization requires users to be aware of three concepts:
 #. Backend: Refers to kernels that support quantization, usually with different numerics.
 #. Quantization engine (torch.backends.quantization.engine): When a quantized model is executed, the qengine specifies which backend is to be used for execution. It is important to ensure that the qengine is consistent with the Qconfig.
 
-
 Natively supported backends
 ---------------------------
 
@@ -522,6 +521,18 @@ Please see the following tutorials for more information about FX Graph Mode Quan
 - `FX Graph Mode Post Training Static Quantization <https://pytorch.org/tutorials/prototype/fx_graph_mode_ptq_static.html>`_
 - `FX Graph Mode Post Training Dynamic Quantization <https://pytorch.org/tutorials/prototype/fx_graph_mode_ptq_dynamic.html>`_
 
+Quantization API Reference
+---------------------------
+
+The :doc:`Quantization API Reference <quantization-support>` contains documentation
+of quantization APIs, such as quantization passes, quantized tensor operations,
+and supported quantized modules and functions.
+
+.. toctree::
+    :hidden:
+
+    quantization-support
+
 Quantized Tensors
 ---------------------------------------
 
@@ -548,27 +559,6 @@ quantized data (represented as int8/uint8/int32) along with quantization
 parameters like scale and zero\_point. Quantized Tensors allow for many
 useful operations making quantized arithmetic easy, in addition to
 allowing for serialization of data in a quantized format.
-
-.. include:: quantization-support.rst
-    :end-before: end-of-part-included-in-quantization.rst
-
-The :doc:`list of supported operations <quantization-support>` is sufficient to
-cover typical CNN and RNN models
-
-.. toctree::
-    :hidden:
-
-    torch.nn.intrinsic
-    torch.nn.intrinsic.qat
-    torch.nn.intrinsic.quantized
-    torch.nn.qat
-    torch.quantization
-    torch.nn.quantized
-    torch.nn.quantized.dynamic
-    torch.quantization.quantize_fx
-    torch.quantization.observer
-    torch.quantization.fake_quantize
-    torch.quantization.qconfig
 
 Quantization Customizations
 ---------------------------
@@ -693,57 +683,3 @@ An e2e example::
   m.qconfig = some_qconfig
   # turn off quantization for conv2
   m.conv2.qconfig = None
-
-
-Modules that provide quantization functions and classes
--------------------------------------------------------
-
-.. list-table::
-
-  * - :ref:`torch_quantization`
-    - This module implements the functions you call directly to convert your
-      model from FP32 to quantized form. For example the
-      :func:`~torch.quantization.prepare` is used in post training quantization
-      to prepares your model for the calibration step and
-      :func:`~torch.quantization.convert` actually converts the weights to int8
-      and replaces the operations with their quantized counterparts. There are
-      other helper functions for things like quantizing the input to your
-      model and performing critical fusions like conv+relu.
-
-  * - :ref:`torch_quantization_quantize_fx`
-    - This module implements the functions you call directly to convert your
-      model from FP32 to quantized form using FX.
-
-  * - :ref:`torch_quantization_observer`
-    - This module implements observers which are used to collect statistics about
-      the values observed during calibration (PTQ) or training (QAT).
-
-  * - :ref:`torch_quantization_fake_quantize`
-    - This module implements modules which are used to perform fake quantization
-      during QAT.
-
-  * - :ref:`torch_quantization_qconfig`
-    - This module defines `QConfig` and `QConfigDynamic` objects which are used
-      to configure quantization settings for individual ops.
-
-  * - :ref:`torch_nn_intrinsic`
-    - This module implements the combined (fused) modules conv + relu which can
-      then be quantized.
-  * - :doc:`torch.nn.intrinsic.qat`
-    - This module implements the versions of those fused operations needed for
-      quantization aware training.
-  * - :doc:`torch.nn.intrinsic.quantized`
-    - This module implements the quantized implementations of fused operations
-      like conv + relu.
-  * - :doc:`torch.nn.qat`
-    - This module implements versions of the key nn modules **Conv2d()** and
-      **Linear()** which run in FP32 but with rounding applied to simulate the
-      effect of INT8 quantization.
-  * - :doc:`torch.nn.quantized`
-    - This module implements the quantized versions of the nn layers such as
-      ~`torch.nn.Conv2d` and `torch.nn.ReLU`.
-
-  * - :doc:`torch.nn.quantized.dynamic`
-    - Dynamically quantized :class:`~torch.nn.Linear`, :class:`~torch.nn.LSTM`,
-      :class:`~torch.nn.LSTMCell`, :class:`~torch.nn.GRUCell`, and
-      :class:`~torch.nn.RNNCell`.
