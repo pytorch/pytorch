@@ -55,7 +55,7 @@ ALLOW_LIST = [
     ("aten::_log_softmax_backward_data", datetime.date(2021, 10, 21)),
     ("aten::_softmax_backward_data", datetime.date(2021, 10, 21)),
     ("aten::fused_moving_avg_obs_fake_quant", datetime.date(2021, 10, 21)),
-    ("aten::_fused_moving_avg_obs_fq_helper", datetime.date(2021, 10, 21))
+    ("aten::_fused_moving_avg_obs_fq_helper", datetime.date(2021, 10, 21)),
     ("aten::_baddbmm_mkl_", datetime.date(2021, 10, 31)),
 ]
 
