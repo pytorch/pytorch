@@ -276,21 +276,21 @@ RegisterNNCLoweringFunction aten_min(
           });
     });
 
-RegisterNNCLoweringFunction aten_max(
-    "aten::max",
-    [](const std::vector<ArgValue>& inputs,
-       const std::vector<ExprHandle>& outputShape,
-       const c10::optional<ScalarType>& outputType,
-       at::Device device) {
-      return computeTwoOperand(
-          "aten_max",
-          inputs,
-          outputShape,
-          outputType,
-          [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return Max::make(boolToInteger(lhs), boolToInteger(rhs), false);
-          });
-    });
+// RegisterNNCLoweringFunction aten_max(
+//     "aten::max",
+//     [](const std::vector<ArgValue>& inputs,
+//        const std::vector<ExprHandle>& outputShape,
+//        const c10::optional<ScalarType>& outputType,
+//        at::Device device) {
+//       return computeTwoOperand(
+//           "aten_max",
+//           inputs,
+//           outputShape,
+//           outputType,
+//           [](const ExprHandle& lhs, const ExprHandle& rhs) {
+//             return Max::make(boolToInteger(lhs), boolToInteger(rhs), false);
+//           });
+//     });
 
 RegisterNNCLoweringFunction aten_masked_fill(
     "aten::masked_fill",
@@ -1389,6 +1389,7 @@ RegisterNNCLoweringFunction aten_conv1d("aten::conv1d", computeConv1d);
 RegisterNNCLoweringFunction aten_addmm("aten::addmm", computeAddMM);
 
 RegisterNNCLoweringFunction aten_mean("aten::mean", computeMean);
+RegisterNNCLoweringFunction aten_max("aten::max", computeMax);
 
 RegisterNNCLoweringFunction aten_adaptive_avg_pool2d(
     "aten::adaptive_avg_pool2d",
