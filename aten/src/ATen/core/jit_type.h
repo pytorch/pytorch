@@ -1062,7 +1062,7 @@ struct TORCH_API TupleType : public NamedType {
 
   bool compare(
       const Type& rhs,
-      std::function<bool(const TypePtr, const TypePtr)> fn) const {
+      std::function<bool(const Type&, const Type&)> fn) const {
     if (rhs.kind() != kind()) {
       return false;
     }
@@ -1072,7 +1072,7 @@ struct TORCH_API TupleType : public NamedType {
     if (l_elements.size() != r_elements.size())
       return false;
     for (size_t i = 0; i < l_elements.size(); ++i) {
-      if (!fn(l_elements[i], r_elements[i]))
+      if (!fn(*l_elements[i], *r_elements[i]))
         return false;
     }
     return true;
