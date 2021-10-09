@@ -6,7 +6,7 @@ import collections
 from itertools import product
 import warnings
 from typing import Callable, Union, Optional, Iterable, List, Tuple, Dict
-from torch._vmap_internals import vmap
+from torch._vmap_internals import vmap, _vmap
 import functools
 
 
@@ -756,7 +756,6 @@ Expected:
 """.strip()
 
 def _test_batched_grad_forward_ad(func, inputs) -> bool:
-    print("input: ", inputs)
     fwAD = torch.autograd.forward_ad   # To avoid early import issues (do we need this?)
     assert isinstance(inputs, tuple)
 
@@ -764,10 +763,7 @@ def _test_batched_grad_forward_ad(func, inputs) -> bool:
         def is_differentiable_dtype(input):
             dtype = input.dtype
             return dtype in (torch.float, torch.double, torch.cfloat, torch.cdouble)
-        # TODO: do we care about collections of tensors, i.e., for a op like `cat` (since iter_tensors handles this)
-        # Do we have any tests that test gradcheck with subclassing anyway?
-        if not is_tensor_like(current_input) or not is_differentiable_dtype(current_input):
-            continue
+
         def jvp(tangent: torch.Tensor):
             with fwAD.dual_level():
                 dual = fwAD.make_dual(current_input, tangent)
@@ -783,17 +779,19 @@ def _test_batched_grad_forward_ad(func, inputs) -> bool:
                     else:
                         ret.append(torch.zeros([], dtype=primal_out.dtype, device=primal_out.device).expand(primal_out.shape))
                 return tuple(ret)
+        if not is_tensor_like(current_input) or not is_differentiable_dtype(current_input):
+            continue
 
         tangents = [torch.randn_like(current_input) for _ in range(2)]
         expected = [jvp(t) for t in tangents]
         expected = [torch.stack(shards) for shards in zip(*expected)]
 
         try:
-            result = _vmap(jvp)(torch.stack(tangents))  # Is there any reason we should use non-underscored vmap like the below?
+            result = _vmap(jvp)(torch.stack(tangents))
         except RuntimeError as ex:
-            # Rethrow to provide a better error message, otherwise final callsite would be at .grad
+            # Rethrow to provide a better error message
             raise GradcheckError(
-                f'While computing batched gradients, got: {ex}\n\n{FAILED_BATCHED_GRAD_MSG}')
+                f'While computing batched gradients, got: {ex}\n\n{FAILED_BATCHED_GRAD_MSG_FWD_AD}')
 
         for input_idx, (res, exp) in enumerate(zip(result, expected)):
             if torch.allclose(res, exp):
@@ -1250,6 +1248,7 @@ def gradcheck(
     check_undefined_grad: bool = True,
     check_grad_dtypes: bool = False,
     check_batched_grad: bool = False,
+    check_batched_forward_grad: bool = False,
     check_forward_ad: bool = False,
     check_backward_ad: bool = True,
     fast_mode: bool = False,
@@ -1301,6 +1300,8 @@ def gradcheck(
             are supported and treated as zeros, for ``Tensor`` outputs.
         check_batched_grad (bool, optional): if True, check if we can compute
             batched gradients using prototype vmap support. Defaults to False.
+        check_batched_forward_grad (bool, optional): if True, checks if we can compute
+            batched forward gradients using forward ad and prototype vmap support. Defaults to False.
         check_forward_ad (bool, optional): if True, check that the gradients computed with forward
             mode AD match the numerical ones. Defaults to False.
         check_backward_ad (bool, optional): if False, do not perform any checks that rely on
@@ -1317,6 +1318,9 @@ def gradcheck(
         "Expected at least one of check_forward_ad or check_backward_ad to be True"
     assert not (check_undefined_grad and not check_backward_ad), \
         "Setting check_undefined_grad=True requires check_backward_ad to be True"
+    assert not (check_batched_forward_grad and not (check_forward_ad and check_batched_grad)), (
+        "Setting check_batched_forward_grad=True requires check_forward_ad and check_batched_grad "
+        "to both be True")
     args = locals().copy()
     args.pop("raise_exception")
     if not raise_exception:
@@ -1329,7 +1333,8 @@ def gradcheck(
 
 
 def _gradcheck_helper(func, inputs, eps, atol, rtol, check_sparse_nnz, nondet_tol, check_undefined_grad,
-                      check_grad_dtypes, check_batched_grad, check_forward_ad, check_backward_ad, fast_mode):
+                      check_grad_dtypes, check_batched_grad, check_batched_forward_grad, check_forward_ad,
+                      check_backward_ad, fast_mode):
     tupled_inputs = _as_tuple(inputs)
     _check_inputs(tupled_inputs, check_sparse_nnz)
 
@@ -1342,7 +1347,7 @@ def _gradcheck_helper(func, inputs, eps, atol, rtol, check_sparse_nnz, nondet_to
                          rtol, atol, check_grad_dtypes, check_forward_ad=check_forward_ad,
                          check_backward_ad=check_backward_ad, nondet_tol=nondet_tol)
 
-    if check_batched_grad and check_forward_ad:
+    if check_batched_grad and check_forward_ad and check_batched_forward_grad:
         _test_batched_grad_forward_ad(func, tupled_inputs)
 
     # Short circuit because remaining tests rely on backward AD to be implemented
