@@ -82,6 +82,10 @@ class TORCH_CUDA_CU_API UnrollPass {
   // keep track if we're within an unrolled loop
   bool look_for_unroll_ = true;
 
+  // Indicates if the currently visited expression is inside a
+  // unswitched path
+  bool unswitched_loop_ = false;
+
   // As we generate inline predicates check if we actually generated a
   // non-trivial one.
   bool non_trivial_pred_found_ = false;

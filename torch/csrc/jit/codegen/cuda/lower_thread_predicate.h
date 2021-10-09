@@ -82,11 +82,6 @@ class TORCH_CUDA_CU_API ThreadPredicateMap {
 
   void print() const;
 
-  //! Merge two instances of PredicateInfo for unswitch predicates.
-  static c10::optional<PredicateInfo> mergeForUnswitch(
-      const PredicateInfo& info_x,
-      const PredicateInfo& info_y);
-
   //! Generate a Bool value from PredicateInfo.
   static kir::Bool* getPredicateFromPredicateInfo(
       const ThreadPredicateMap::PredicateInfo& pred_info);

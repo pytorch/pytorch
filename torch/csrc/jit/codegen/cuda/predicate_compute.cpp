@@ -400,19 +400,10 @@ kir::Bool* UnswitchPredicate::get(
 
   UnswitchPredicate up(outer_loops, unrolled_loop);
 
-  if (!up.merged_thread_pred_.has_value()) {
-    // No intersection in thread predicates.
-    return ir_builder.falseVal();
-  }
-
   kir::Val* unswitch_pred = ir_builder.trueVal();
   for (auto pred : up.predicates_) {
     unswitch_pred = ir_builder.andExpr(unswitch_pred, pred);
   }
-
-  kir::Bool* thread_pred = ThreadPredicateMap::getPredicateFromPredicateInfo(
-      up.merged_thread_pred_.value());
-  unswitch_pred = ir_builder.andExpr(unswitch_pred, thread_pred);
 
   return unswitch_pred->as<kir::Bool>();
 }
@@ -428,13 +419,6 @@ void UnswitchPredicate::predicateOn(kir::Expr* tv_expr) {
   kir::IrBuilder ir_builder(gpu_lower->kernel());
 
   auto out_tv = firstTensorViewOutput(tv_expr);
-
-  auto thread_pred =
-      gpu_lower->threadPredMap().getPredicateInfo(out_tv->fuserTv());
-  if (merged_thread_pred_.has_value()) {
-    merged_thread_pred_ = ThreadPredicateMap::mergeForUnswitch(
-        merged_thread_pred_.value(), thread_pred);
-  }
 
   if (gpu_lower->predicateElimination().canOmitPredicate(tv_expr)) {
     return;
