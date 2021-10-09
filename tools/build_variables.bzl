@@ -241,6 +241,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/passes/remove_mutation.cpp",
     "torch/csrc/jit/passes/prepack_folding.cpp",
     "torch/csrc/jit/passes/fold_conv_bn.cpp",
+    "torch/csrc/jit/passes/frozen_concat_linear.cpp",
     "torch/csrc/jit/passes/frozen_conv_add_relu_fusion.cpp",
     "torch/csrc/jit/passes/frozen_conv_folding.cpp",
     "torch/csrc/jit/passes/frozen_linear_transpose.cpp",
@@ -349,7 +350,17 @@ core_sources_full = core_sources_full_mobile + [
     "torch/csrc/jit/tensorexpr/external_functions_codegen.cpp",
 ]
 
-libtorch_core_sources = sorted(core_sources_common + core_sources_full + core_trainer_sources + libtorch_profiler_sources)
+lazy_tensor_core_sources = [
+    "torch/csrc/lazy/core/hash.cpp",
+]
+
+libtorch_core_sources = sorted(
+    core_sources_common +
+    core_sources_full +
+    core_trainer_sources +
+    libtorch_profiler_sources +
+    lazy_tensor_core_sources,
+)
 
 # These files are the only ones that are supported on Windows.
 libtorch_distributed_base_sources = [
