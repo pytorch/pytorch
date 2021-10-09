@@ -1384,6 +1384,7 @@ RegisterNNCLoweringFunction aten_log_softmax(
     });
 
 RegisterNNCLoweringFunction aten_conv2d("aten::conv2d", computeConv2d);
+RegisterNNCLoweringFunction aten_conv1d("aten::conv1d", computeConv1d);
 
 RegisterNNCLoweringFunction aten_addmm("aten::addmm", computeAddMM);
 
