@@ -41,6 +41,55 @@ Quantization requires users to be aware of three concepts:
 #. Backend: Refers to kernels that support quantization, usually with different numerics.
 #. Quantization engine (torch.backends.quantization.engine): When a quantized model is executed, the qengine specifies which backend is to be used for execution. It is important to ensure that the qengine is consistent with the Qconfig.
 
+Natively supported backends
+---------------------------
+
+Today, PyTorch supports the following backends for running quantized operators efficiently:
+
+* x86 CPUs with AVX2 support or higher (without AVX2 some operations have
+  inefficient implementations), via `fbgemm` (`<https://github.com/pytorch/FBGEMM>`_).
+* ARM CPUs (typically found in mobile/embedded devices), via
+  `qnnpack` (`<https://github.com/pytorch/QNNPACK>`_).
+
+The corresponding implementation is chosen automatically based on the PyTorch build mode, though users
+have the option to override this by setting `torch.backends.quantization.engine` to `fbgemm` or `qnnpack`.
+
+.. note::
+
+  At the moment PyTorch doesn't provide quantized operator implementations on CUDA -
+  this is the direction for future work. Move the model to CPU in order to test the
+  quantized functionality.
+
+  Quantization-aware training (through :class:`~torch.quantization.FakeQuantize`,
+  which emulates quantized numerics in fp32) supports both CPU and CUDA.
+
+
+When preparing a quantized model, it is necessary to ensure that qconfig
+and the engine used for quantized computations match the backend on which
+the model will be executed. The qconfig controls the type of observers used
+during the quantization passes. The qengine controls whether `fbgemm` or
+`qnnpack` specific packing function is used when packing weights for linear
+and convolution functions and modules. For example:
+
+Default settings for fbgemm::
+
+    # set the qconfig for PTQ
+    qconfig = torch.quantization.get_default_qconfig('fbgemm')
+    # or, set the qconfig for QAT
+    qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
+    # set the qengine to control weight packing
+    torch.backends.quantized.engine = 'fbgemm'
+
+Default settings for qnnpack::
+
+    # set the qconfig for PTQ
+    qconfig = torch.quantization.get_default_qconfig('qnnpack')
+    # or, set the qconfig for QAT
+    qconfig = torch.quantization.get_default_qat_qconfig('qnnpack')
+    # set the qengine to control weight packing
+    torch.backends.quantized.engine = 'qnnpack'
+
+
 Quantization API Summary
 ---------------------------------------
 
@@ -511,54 +560,6 @@ parameters like scale and zero\_point. Quantized Tensors allow for many
 useful operations making quantized arithmetic easy, in addition to
 allowing for serialization of data in a quantized format.
 
-Natively supported backends
----------------------------
-
-Today, PyTorch supports the following backends for running quantized operators efficiently:
-
-* x86 CPUs with AVX2 support or higher (without AVX2 some operations have
-  inefficient implementations), via `fbgemm` (`<https://github.com/pytorch/FBGEMM>`_).
-* ARM CPUs (typically found in mobile/embedded devices), via
-  `qnnpack` (`<https://github.com/pytorch/QNNPACK>`_).
-
-The corresponding implementation is chosen automatically based on the PyTorch build mode, though users
-have the option to override this by setting `torch.backends.quantization.engine` to `fbgemm` or `qnnpack`.
-
-.. note::
-
-  At the moment PyTorch doesn't provide quantized operator implementations on CUDA -
-  this is the direction for future work. Move the model to CPU in order to test the
-  quantized functionality.
-
-  Quantization-aware training (through :class:`~torch.quantization.FakeQuantize`,
-  which emulates quantized numerics in fp32) supports both CPU and CUDA.
-
-
-When preparing a quantized model, it is necessary to ensure that qconfig
-and the engine used for quantized computations match the backend on which
-the model will be executed. The qconfig controls the type of observers used
-during the quantization passes. The qengine controls whether `fbgemm` or
-`qnnpack` specific packing function is used when packing weights for linear
-and convolution functions and modules. For example:
-
-Default settings for fbgemm::
-
-    # set the qconfig for PTQ
-    qconfig = torch.quantization.get_default_qconfig('fbgemm')
-    # or, set the qconfig for QAT
-    qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
-    # set the qengine to control weight packing
-    torch.backends.quantized.engine = 'fbgemm'
-
-Default settings for qnnpack::
-
-    # set the qconfig for PTQ
-    qconfig = torch.quantization.get_default_qconfig('qnnpack')
-    # or, set the qconfig for QAT
-    qconfig = torch.quantization.get_default_qat_qconfig('qnnpack')
-    # set the qengine to control weight packing
-    torch.backends.quantized.engine = 'qnnpack'
-
 Quantization Customizations
 ---------------------------
 
@@ -576,11 +577,12 @@ Quantization workflows work by adding (e.g. adding observers as
 means that the model stays a regular ``nn.Module``-based instance throughout the
 process and thus can work with the rest of PyTorch APIs.
 
-Model Preparation for Quantization (Eager Mode)
------------------------------------------------
+
+Model Preparation for Quantization
+----------------------------------
 
 It is necessary to currently make some modifications to the model definition
-prior to Eager mode quantization. This is because currently quantization works on a module
+prior to quantization. This is because currently quantization works on a module
 by module basis. Specifically, for all quantization techniques, the user needs to:
 
 1. Convert any operations that require output requantization (and thus have
