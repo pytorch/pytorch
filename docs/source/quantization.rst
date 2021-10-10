@@ -565,7 +565,6 @@ cover typical CNN and RNN models
     torch.quantization
     torch.nn.quantized
     torch.nn.quantized.dynamic
-    torch.quantization.quantize_fx
 
 Quantization Customizations
 ---------------------------
@@ -706,10 +705,6 @@ Modules that provide quantization functions and classes
       and replaces the operations with their quantized counterparts. There are
       other helper functions for things like quantizing the input to your
       model and performing critical fusions like conv+relu.
-
-  * - :ref:`torch_quantization_quantize_fx`
-    - This module implements the functions you call directly to convert your
-      model from FP32 to quantized form using FX.
 
   * - :ref:`torch_nn_intrinsic`
     - This module implements the combined (fused) modules conv + relu which can
