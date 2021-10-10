@@ -393,6 +393,46 @@ def masked_sum(input: Tensor,
 
 
 @_apply_docstring_templates
+def masked_prod(input: Tensor,
+                dim: DimOrDims = None,
+                *,
+                keepdim: Optional[bool] = False,
+                dtype: Optional[DType] = None,
+                mask: Optional[Tensor] = None) -> Tensor:
+    """
+{masked_reduction_signature}
+
+{masked_reduction_descr}
+
+{masked_reduction_identity}
+
+{masked_reduction_args}
+
+{masked_reduction_example}
+    >>> torch.sparse.masked_prod(input, 1, mask=mask)
+    tensor([3,  1])
+    """
+    if input.layout == torch.strided:
+        mask_input = input if mask is None else torch.where(mask, input, torch.ones_like(input))
+        if dim is None:
+            result = torch.prod(mask_input)
+            if keepdim:
+                result = result.reshape((1,) * mask_input.ndim)
+        elif isinstance(dim, int):
+            result = torch.prod(mask_input, dim, bool(keepdim), dtype=dtype)
+        else:
+            # Workaround https://github.com/pytorch/pytorch/issues/56586
+            result = mask_input
+            for d in reversed(_canonical_dim(dim, mask_input.ndim)):
+                result = result.prod(dim=d, keepdim=bool(keepdim))
+        if dtype is not None:
+            result = result.to(dtype=dtype)
+        return result
+    else:
+        raise NotImplementedError(f'masked_prod of {input.layout} tensor')
+
+
+@_apply_docstring_templates
 def masked_amax(input: Tensor,
                 dim: DimOrDims = None,
                 *,
