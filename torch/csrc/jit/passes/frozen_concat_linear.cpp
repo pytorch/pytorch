@@ -21,7 +21,8 @@ using Tensor = at::Tensor;
 
 class ConcatLinearLayers {
  public:
-  explicit ConcatLinearLayers(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {}
+  explicit ConcatLinearLayers(std::shared_ptr<Graph> graph)
+      : graph_(std::move(graph)) {}
 
   bool run() {
     handleBlockAndSubblocks(graph_->block());
