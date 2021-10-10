@@ -54,9 +54,11 @@ const int min_items_to_complete = 1;
 
 struct RunPython {
   static torch::deploy::ReplicatedObj load_and_wrap(
+      torch::deploy::InterpreterManager& manager,
       torch::deploy::Package& package) {
-    auto I = package.acquireSession();
-    auto obj = I.self.attr("load_pickle")({"model", "model.pkl"});
+    auto I = manager.acquireOne();
+    auto pkg = I.getPackage(package);
+    auto obj = pkg.attr("load_pickle")({"model", "model.pkl"});
     if (cuda) {
       obj = I.global("gpu_wrapper", "GPUWrapper")({obj});
     }
@@ -66,22 +68,25 @@ struct RunPython {
   RunPython(
       torch::deploy::Package& package,
       std::vector<at::IValue> eg,
-      const torch::deploy::Interpreter* interps)
-      : obj_(load_and_wrap(package)), eg_(std::move(eg)), interps_(interps) {}
+      torch::deploy::InterpreterManager& manager)
+      : obj_(load_and_wrap(manager, package)),
+        eg_(std::move(eg)),
+        manager_(manager) {}
   void operator()(int i) {
     auto I = obj_.acquireSession();
+    auto self = I.fromMovable(obj_);
     if (cuda) {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       std::vector<at::IValue> eg2 = {i};
       eg2.insert(eg2.end(), eg_.begin(), eg_.end());
-      I.self(eg2);
+      self(eg2);
     } else {
-      I.self(eg_);
+      self(eg_);
     }
   }
   torch::deploy::ReplicatedObj obj_;
   std::vector<at::IValue> eg_;
-  const torch::deploy::Interpreter* interps_;
+  torch::deploy::InterpreterManager& manager_;
 };
 
 // def to_device(i, d):
@@ -195,9 +200,10 @@ struct Benchmark {
     std::vector<at::IValue> eg;
     {
       auto I = package.acquireSession();
+      auto pkg = I.getPackage(package);
 
       eg = I.global("builtins", "tuple")(
-                I.self.attr("load_pickle")({"model", "example.pkl"}))
+                pkg.attr("load_pickle")({"model", "example.pkl"}))
                .toIValue()
                .toTuple()
                ->elements();
@@ -207,8 +213,7 @@ struct Benchmark {
     if (strategy_ == "jit") {
       run_one_work_item = RunJIT(file_to_run_, std::move(eg));
     } else {
-      run_one_work_item =
-          RunPython(package, std::move(eg), manager_.allInstances().data());
+      run_one_work_item = RunPython(package, std::move(eg), manager_);
     }
 
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)

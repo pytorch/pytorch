@@ -1,4 +1,5 @@
 #include <dlfcn.h>
+#include <pybind11/pytypes.h>
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
@@ -329,8 +330,15 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterSessionImpl
     return wrap(interp_->getPackage(containerFile_));
   }
 
-  PickledObject pickle(Obj container, Obj obj) override {
-    py::tuple result = interp_->saveStorage(unwrap(container), unwrap(obj));
+  PickledObject pickle(Obj obj, c10::optional<Obj> importer) override {
+    py::handle importer_obj;
+    if (importer.has_value()) {
+      importer_obj = unwrap(*importer);
+    } else {
+      importer_obj = py::none();
+    }
+
+    py::tuple result = interp_->saveStorage(importer_obj, unwrap(obj));
     py::bytes bytes = py::cast<py::bytes>(result[0]);
     py::list storages = py::cast<py::list>(result[1]);
     py::list dtypes = py::cast<py::list>(result[2]);

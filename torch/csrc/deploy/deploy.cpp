@@ -117,7 +117,6 @@ InterpreterSession ReplicatedObj::acquireSession(
   TORCH_DEPLOY_TRY
   InterpreterSession I = onThisInterpreter ? onThisInterpreter->acquireSession()
                                            : pImpl_->manager_->acquireOne();
-  I.self = I.fromMovable(*this);
   return I;
   TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
@@ -155,7 +154,12 @@ void ReplicatedObj::unload(const Interpreter* onThisInterpreter) {
   TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
-ReplicatedObj InterpreterSession::createMovable(Obj obj) {
+Obj InterpreterSession::getPackage(const Package& package) {
+  return impl_->createOrGetPackageImporterFromContainerFile(
+      package.containerFile_);
+}
+
+ReplicatedObj InterpreterSession::createMovable(Obj obj, Package* package) {
   TORCH_DEPLOY_TRY
   TORCH_CHECK(
       manager_,
@@ -165,7 +169,11 @@ ReplicatedObj InterpreterSession::createMovable(Obj obj) {
       impl_->isOwner(obj),
       "Cannot create movable from an object that lives in different session");
 
-  auto pickled = impl_->pickle(self, obj);
+  c10::optional<Obj> packageImporter;
+  if (package != nullptr) {
+    packageImporter = getPackage(*package);
+  }
+  auto pickled = impl_->pickle(obj, packageImporter);
   return ReplicatedObj(std::make_shared<ReplicatedObjImpl>(
       manager_->nextObjectId_++, std::move(pickled), manager_));
   TORCH_DEPLOY_SAFE_CATCH_RETHROW
@@ -297,7 +305,8 @@ void LoadBalancer::free(int where) {
 void PythonMethodWrapper::setArgumentNames(
     std::vector<std::string>& argumentNamesOut) const {
   auto session = model_.acquireSession();
-  auto method = session.self.attr(methodName_.c_str());
+  auto self = session.fromMovable(model_);
+  auto method = self.attr(methodName_.c_str());
   auto iArgumentNames =
       session.global("GetArgumentNamesModule", "getArgumentNames")({method})
           .toIValue();
@@ -315,5 +324,38 @@ void PythonMethodWrapper::setArgumentNames(
   }
 }
 
+Package::Package(
+    const std::string& uri,
+    InterpreterManager*
+        pm) // or really any of the constructors to our zip file format
+    : manager_(pm),
+      containerFile_(
+          std::make_shared<caffe2::serialize::PyTorchStreamReader>(uri)) {}
+
+Package::Package(
+    std::shared_ptr<caffe2::serialize::ReadAdapterInterface> reader,
+    InterpreterManager* pm)
+    : manager_(pm),
+      containerFile_(
+          std::make_shared<caffe2::serialize::PyTorchStreamReader>(reader)) {}
+
+ReplicatedObj Package::loadPickle(
+    const std::string& module,
+    const std::string& file) {
+  TORCH_DEPLOY_TRY
+  auto I = acquireSession();
+  auto self =
+      I.impl_->createOrGetPackageImporterFromContainerFile(containerFile_);
+  auto loaded = self.attr("load_pickle")({module, file});
+  return I.createMovable(loaded, this);
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
+}
+
+InterpreterSession Package::acquireSession() {
+  TORCH_DEPLOY_TRY
+  auto I = manager_->acquireOne();
+  return I;
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
+}
 } // namespace deploy
 } // namespace torch

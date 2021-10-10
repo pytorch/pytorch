@@ -25,8 +25,10 @@ void compare_torchpy_jit(const char* model_filename, const char* jit_filename) {
   auto model = p.loadPickle("model", "model.pkl");
   at::IValue eg;
   {
-    auto I = p.acquireSession();
-    eg = I.self.attr("load_pickle")({"model", "example.pkl"}).toIValue();
+    auto I = m.acquireOne();
+    eg = I.getPackage(p)
+             .attr("load_pickle")({"model", "example.pkl"})
+             .toIValue();
   }
 
   at::Tensor output = model(eg.toTuple()->elements()).toTensor();
@@ -398,8 +400,9 @@ TEST(TorchpyTest, UsesDistributed) {
   torch::deploy::InterpreterManager m(1);
   torch::deploy::Package p = m.loadPackage(model_filename);
   {
-    auto I = p.acquireSession();
-    I.self.attr("import_module")({"uses_distributed"});
+    auto I = m.acquireOne();
+    auto pkg = I.getPackage(p);
+    pkg.attr("import_module")({"uses_distributed"});
   }
 }
 

@@ -34,12 +34,14 @@ TEST(TorchDeployGPUTest, SimpleModel) {
   auto model = p.loadPickle("model", "model.pkl");
   {
     auto M = model.acquireSession();
-    M.self.attr("to")({"cuda"});
+    auto self = M.fromMovable(model);
+    self.attr("to")({"cuda"});
   }
   std::vector<at::IValue> inputs;
   {
     auto I = p.acquireSession();
-    auto eg = I.self.attr("load_pickle")({"model", "example.pkl"}).toIValue();
+    auto pkg = I.getPackage(p);
+    auto eg = pkg.attr("load_pickle")({"model", "example.pkl"}).toIValue();
     inputs = eg.toTuple()->elements();
     inputs[0] = inputs[0].toTensor().to("cuda");
   }
@@ -62,7 +64,8 @@ TEST(TorchDeployGPUTest, UsesDistributed) {
   torch::deploy::Package p = m.loadPackage(model_filename);
   {
     auto I = p.acquireSession();
-    I.self.attr("import_module")({"uses_distributed"});
+    auto pkg = I.getPackage(p);
+    pkg.attr("import_module")({"uses_distributed"});
   }
 }
 
@@ -77,7 +80,8 @@ TEST(TorchDeployGPUTest, TensorRT) {
   auto makeModel = p.loadPickle("make_trt_module", "model.pkl");
   {
     auto I = makeModel.acquireSession();
-    auto model = I.self(at::ArrayRef<at::IValue>{});
+    auto self = I.fromMovable(makeModel);
+    auto model = self(at::ArrayRef<at::IValue>{});
     auto input = at::ones({1, 2, 3}).cuda();
     auto output = input * 2;
     ASSERT_TRUE(

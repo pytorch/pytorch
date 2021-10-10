@@ -101,7 +101,7 @@ struct InterpreterSessionImpl {
   virtual Obj createOrGetPackageImporterFromContainerFile(
       const std::shared_ptr<caffe2::serialize::PyTorchStreamReader>&
           containerFile_) = 0;
-  virtual PickledObject pickle(Obj container, Obj obj) = 0;
+  virtual PickledObject pickle(Obj obj, c10::optional<Obj> importer) = 0;
   virtual Obj unpickleOrGet(int64_t id, const PickledObject& obj) = 0;
   virtual void unload(int64_t id) = 0;
 
