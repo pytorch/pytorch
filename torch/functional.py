@@ -339,7 +339,7 @@ if TYPE_CHECKING:
                     density: bool = False):
         pass
 else:
-    def histogramdd(input, bins, range, weight, density):
+    def histogramdd(input, bins, range = None, weight = None, density = False):
         r"""
         histogramdd(input, bins, *, range=None, weight=None, density=False, out=None) -> (Tensor, Tensor[])
 
