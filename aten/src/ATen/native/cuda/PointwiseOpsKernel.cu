@@ -5,7 +5,6 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/PointwiseOps.h>
-#include <THC/THCNumerics.cuh>
 
 namespace at { namespace native {
 

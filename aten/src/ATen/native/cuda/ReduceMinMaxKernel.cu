@@ -4,11 +4,11 @@
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/NumericLimits.cuh>
-#include <THC/THCNumerics.cuh>
 #include <ATen/native/ReduceOps.h>
-#include<ATen/native/ReduceAllOps.h>
+#include <ATen/native/ReduceAllOps.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/TensorCompare.h>
+#include <ATen/NumericUtils.h>
 
 
 namespace at { namespace native {
@@ -16,7 +16,7 @@ namespace at { namespace native {
 template <typename acc_t>
 struct MaxNanFunctor {
   __device__ __forceinline__ acc_t operator()(acc_t a, acc_t b) const {
-      return (THCNumerics<acc_t>::isnan(a) || a > b) ? a : b;
+      return (at::_isnan(a) || a > b) ? a : b;
   }
 };
 
@@ -30,7 +30,7 @@ void max_values_kernel_cuda_impl(TensorIterator& iter) {
 template <typename acc_t>
 struct MinNanFunctor {
   __device__ __forceinline__ acc_t operator()(acc_t a, acc_t b) const {
-      return (THCNumerics<acc_t>::isnan(a) || a < b) ? a : b;
+      return (at::_isnan(a) || a < b) ? a : b;
   }
 };
 
