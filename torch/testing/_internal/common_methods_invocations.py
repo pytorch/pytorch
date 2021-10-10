@@ -10528,6 +10528,23 @@ op_db: List[OpInfo] = [
         ),
         sample_inputs_func=sample_inputs_masked_reduction
     ),
+    ReductionOpInfo(
+        '_masked.amin',
+        nan_policy='propagate',
+        supports_out=False,
+        # FIXME: autograd check likely needs to take into account the mask.
+        supports_autograd=False,
+        dtypes=all_types_and(torch.float16, torch.bfloat16),
+        ref=reference_reduction_numpy(np.amin),
+        skips=(
+            # FIXME: amax reduces all dimensions when dim=[]
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
+            # RuntimeError: Unknown builtin op: aten::iinfo
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+        ),
+        sample_inputs_func=sample_inputs_masked_reduction
+    ),
     OpInfo(
         "nn.functional.nll_loss",
         ref=_NOTHING,
