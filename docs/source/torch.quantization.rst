@@ -5,8 +5,7 @@ torch.quantization
 .. automodule:: torch.quantization
 
 This module implements the functions you call
-directly to convert your model from FP32 to quantized form with Eager
-mode quantization. For
+directly to convert your model from FP32 to quantized form. For
 example the :func:`~torch.quantization.prepare` is used in post training
 quantization to prepares your model for the calibration step and
 :func:`~torch.quantization.convert` actually converts the weights to int8 and
@@ -43,9 +42,22 @@ Utility functions
 .. autofunction:: propagate_qconfig_
 .. autofunction:: default_eval_fn
 
+Observers
+~~~~~~~~~~~~~~~
+.. autoclass:: ObserverBase
+    :members:
+.. autoclass:: MinMaxObserver
+.. autoclass:: MovingAverageMinMaxObserver
+.. autoclass:: PerChannelMinMaxObserver
+.. autoclass:: MovingAveragePerChannelMinMaxObserver
+.. autoclass:: HistogramObserver
+.. autoclass:: FakeQuantize
+.. autoclass:: NoopObserver
+
 Debugging utilities
 ~~~~~~~~~~~~~~~~~~~
 .. autofunction:: get_observer_dict
+.. autoclass:: RecordingObserver
 
 .. currentmodule:: torch
 
