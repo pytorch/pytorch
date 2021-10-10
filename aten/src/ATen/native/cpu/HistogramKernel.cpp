@@ -194,14 +194,14 @@ void histogramdd_out_cpu_template(const Tensor& self, const c10::optional<Tensor
         Tensor& hist, const TensorList& bin_edges) {
     hist.fill_(0);
 
-    const int64_t D = self.size(-1);
-    const int64_t N = std::accumulate(self.sizes().begin(), self.sizes().end() - 1,
+    const int64_t N = self.size(-1);
+    const int64_t M = std::accumulate(self.sizes().begin(), self.sizes().end() - 1,
             (int64_t)1, std::multiplies<int64_t>());
 
-    const Tensor reshaped_input = self.reshape({N, D});
+    const Tensor reshaped_input = self.reshape({M, N});
 
     const auto reshaped_weight = weight.has_value()
-            ? c10::optional<Tensor>(weight.value().reshape({N}))
+            ? c10::optional<Tensor>(weight.value().reshape({M}))
             : c10::optional<Tensor>();
 
     std::vector<Tensor> bin_edges_contig(bin_edges.size());
@@ -214,19 +214,25 @@ void histogramdd_out_cpu_template(const Tensor& self, const c10::optional<Tensor
                 hist, bin_edges_contig, reshaped_input, reshaped_weight);
     });
 
-    // Converts the bin totals to a probability density function
+    /* Divides each bin's value by the total count/weight in all bins,
+     * and by the bin's volume.
+     */
     if (density) {
-        auto hist_sum = hist.sum().item();
-
-        std::vector<int64_t> shape(D, 1), reps(hist.sizes().vec());
-
-        for (int64_t dim = 0; dim < D; dim++) {
-            std::swap(shape[dim], reps[dim]);
-            hist.div_(bin_edges[dim].diff().reshape(shape).repeat(reps));
-            std::swap(shape[dim], reps[dim]);
-        }
-
+        const auto hist_sum = hist.sum().item();
         hist.div_(hist_sum);
+
+         /* For each dimension, divides each bin's value
+          * by the bin's length in that dimension.
+          */
+        for (int64_t dim = 0; dim < N; dim++) {
+            const auto bin_lengths = bin_edges[dim].diff();
+
+            // Used to reshape bin_lengths to align with the corresponding dimension of hist.
+            std::vector<int64_t> shape(N, 1);
+            shape[dim] = bin_lengths.numel();
+
+            hist.div_(bin_lengths.reshape(shape));
+        }
     }
 }
 
