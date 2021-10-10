@@ -47,8 +47,10 @@ namespace at { namespace native {
 
 enum class CPUCapability {
   DEFAULT = 0,
-#ifdef HAVE_VSX_CPU_DEFINITION
+#if defined(HAVE_VSX_CPU_DEFINITION)
   VSX = 1,
+#elif defined(HAVE_ZVECTOR_CPU_DEFINITION)
+  ZVECTOR = 1,
 #else
   AVX2 = 1,
   AVX512 = 2,
@@ -80,6 +82,9 @@ struct TORCH_API DispatchStubImpl {
 #ifdef HAVE_VSX_CPU_DEFINITION
       , void *VSX
 #endif
+#ifdef HAVE_ZVECTOR_CPU_DEFINITION
+      , void *ZVECTOR
+#endif
   );
 
   /**
@@ -97,6 +102,9 @@ struct TORCH_API DispatchStubImpl {
 #endif
 #ifdef HAVE_VSX_CPU_DEFINITION
     , void *VSX
+#endif
+#ifdef HAVE_ZVECTOR_CPU_DEFINITION
+    , void *ZVECTOR
 #endif
   );
 
@@ -135,6 +143,9 @@ private:
 #ifdef HAVE_VSX_CPU_DEFINITION
       , reinterpret_cast<void*>(VSX)
 #endif
+#ifdef HAVE_ZVECTOR_CPU_DEFINITION
+      , reinterpret_cast<void*>(ZVECTOR)
+#endif
       )
     );
   }
@@ -163,6 +174,9 @@ public:
 #endif
 #ifdef HAVE_VSX_CPU_DEFINITION
   static FnPtr VSX;
+#endif
+#ifdef HAVE_ZVECTOR_CPU_DEFINITION
+  static FnPtr ZVECTOR;
 #endif
 private:
   DispatchStubImpl impl;
@@ -221,11 +235,18 @@ struct RegisterHIPDispatch {
 #define REGISTER_VSX_DISPATCH(name, fn)
 #endif
 
+#ifdef HAVE_ZVECTOR_CPU_DEFINITION
+#define REGISTER_ZVECTOR_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, ZVECTOR, fn)
+#else
+#define REGISTER_ZVECTOR_DISPATCH(name, fn)
+#endif
+
 #define REGISTER_NO_CPU_DISPATCH(name, fn_type)                                \
   REGISTER_ARCH_DISPATCH(name, DEFAULT, static_cast<fn_type>(nullptr))         \
   REGISTER_AVX512_DISPATCH(name, static_cast<fn_type>(nullptr))                \
   REGISTER_AVX2_DISPATCH(name, static_cast<fn_type>(nullptr))                  \
-  REGISTER_VSX_DISPATCH(name, static_cast<fn_type>(nullptr))
+  REGISTER_VSX_DISPATCH(name, static_cast<fn_type>(nullptr))                   \
+  REGISTER_ZVECTOR_DISPATCH(name, static_cast<fn_type>(nullptr))
 
 #define REGISTER_CUDA_DISPATCH(name, fn) \
   static RegisterCUDADispatch<decltype(fn), struct name> name ## __register(name, fn);

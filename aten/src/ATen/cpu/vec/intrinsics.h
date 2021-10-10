@@ -25,6 +25,9 @@
 #elif defined(__GNUC__) && defined(__IWMMXT__)
 /* GCC-compatible compiler, targeting ARM with WMMX */
 #include <mmintrin.h>
+#elif defined(__s390x__)
+// targets Z/architecture
+// we will include vecintrin later
 #elif (defined(__GNUC__) || defined(__xlC__)) &&                               \
         (defined(__VEC__) || defined(__ALTIVEC__))
 /* XLC or GCC-compatible compiler, targeting PowerPC with VMX/VSX */

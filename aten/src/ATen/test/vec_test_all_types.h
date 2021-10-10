@@ -32,7 +32,7 @@ CACHE_ALIGN #define
 #endif
 #if defined(CPU_CAPABILITY_DEFAULT) || defined(_MSC_VER)
 #define TEST_AGAINST_DEFAULT 1
-#elif !defined(CPU_CAPABILITY_AVX512) && !defined(CPU_CAPABILITY_AVX2) && !defined(CPU_CAPABILITY_VSX)
+#elif !defined(CPU_CAPABILITY_AVX512) && !defined(CPU_CAPABILITY_AVX2) && !defined(CPU_CAPABILITY_VSX) && !defined(CPU_CAPABILITY_ZVECTOR)
 #define TEST_AGAINST_DEFAULT 1
 #else
 #undef TEST_AGAINST_DEFAULT
@@ -47,7 +47,7 @@ CACHE_ALIGN #define
     return __VA_ARGS__(std::forward<decltype(args)>(args)...); \
   }
 
-#if defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_AVX2) || \
+#if defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_AVX2) || \
   defined(CPU_CAPABILITY_AVX512) && (defined(__GNUC__) || defined(__GNUG__))
 #undef CHECK_DEQUANT_WITH_LOW_PRECISION
 #define CHECK_WITH_FMA 1
@@ -1174,7 +1174,7 @@ std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_multiply(Compl
     T x_imag = x.imag();
     T y_real = y.real();
     T y_imag = y.imag();
-#if defined(CPU_CAPABILITY_VSX)
+#if defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_ZVECTOR)
     //check multiplication considerin swap and fma
     T rr = x_real * y_real;
     T ii = x_imag * y_real;
@@ -1214,7 +1214,7 @@ std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_division(Compl
     T y_real = y.real();
     T y_imag = y.imag();
     PreventFma noFma;
-#if defined(CPU_CAPABILITY_VSX)
+#if defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_ZVECTOR)
     //check multiplication considerin swap and fma
     T rr = x_real * y_real;
     T ii = x_imag * y_real;
