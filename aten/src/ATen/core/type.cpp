@@ -1337,8 +1337,8 @@ bool TupleType::isSubtypeOfExt(const Type& rhs_, std::ostream* why_not) const {
   };
   bool names_match = !rhs->schema() || test_names_match(schema(), rhs->schema());
   // co-variant rules for tuples
-  return names_match && compare(*rhs, [&](const TypePtr a, const TypePtr b) {
-    return a->isSubtypeOfExt(*b, why_not);
+  return names_match && compare(*rhs, [&](const Type& a, const Type& b) {
+    return a.isSubtypeOfExt(b, why_not);
   });
 }
 
@@ -1354,7 +1354,7 @@ bool ListType::isSubtypeOfExt(const Type& rhs_, std::ostream* why_not) const {
 
  bool TupleType::operator==(const Type& rhs) const {
    bool typesSame =
-       compare(rhs, [](const TypePtr a, const TypePtr b) { return *a == *b; });
+       compare(rhs, [](const Type& a, const Type& b) { return a == b; });
    if (!typesSame) {
      return false;
   }
