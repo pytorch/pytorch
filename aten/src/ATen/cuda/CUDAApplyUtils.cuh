@@ -300,14 +300,14 @@ struct ApplyOp2 {
 __device__ __forceinline__
 static void apply(detail::TensorInfo<scalar1, IndexType> &a,
                   detail::TensorInfo<scalar2, IndexType> &b,
-                  const Op &op, int n, IndexType linearIndex,
+                  const Op &op, int64_t n, IndexType linearIndex,
                   Offsets... aOffsets, Offsets... bOffsets) {
   // Convert `linearIndex` into an offset of `a`
-  const IndexType aOffset = sizeof...(Offsets) < n ?
+  const IndexType aOffset = static_cast<int64_t>(sizeof...(Offsets)) < n ?
     detail::IndexToOffset<scalar1, IndexType, ADims>::get(linearIndex, a) : 0;
 
   // Convert `linearIndex` into an offset of `b`
-  const IndexType bOffset = sizeof...(Offsets) < n ?
+  const IndexType bOffset = static_cast<int64_t>(sizeof...(Offsets)) < n ?
     detail::IndexToOffset<scalar2, IndexType, BDims>::get(linearIndex, b) : 0;
 
   ApplyOp2<Op, scalar1, scalar2, IndexType, ADims, BDims, remaining_steps - 1, const IndexType, Offsets...>::apply(

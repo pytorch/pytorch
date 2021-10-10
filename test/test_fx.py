@@ -716,6 +716,34 @@ class TestFX(JitTestCase):
         traced2.graph.lint()
         traced2(torch.rand(4, 4))
 
+    def test_tensor_attribute_coalseced(self):
+
+        def count_attrs(fx_module):
+            targets = set()
+            for node in traced.graph.nodes:
+                if node.op == 'get_attr':
+                    targets.add(node.target)
+            return len(targets)
+
+        val = torch.tensor(5)
+
+        def f(x):
+            return x + val + val
+        traced = symbolic_trace(f)
+        traced.graph.lint()
+        self.assertEqual(count_attrs(traced), 1)
+
+        val2 = torch.tensor(5)
+
+        def f(x):
+            val = torch.tensor(5)
+            return x + val + val2
+
+        traced = symbolic_trace(f)
+        traced.graph.lint()
+        self.assertEqual(count_attrs(traced), 2)
+
+
     def test_symbolic_trace_sequential(self):
         class Simple(torch.nn.Module):
             def forward(self, x):
@@ -1706,6 +1734,18 @@ class TestFX(JitTestCase):
         output : torch.fx.Node = graph.output(b)
 
         self.assertTrue('typing.List[float]' in str(graph))
+
+    def test_layout(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return torch.empty_like(x, layout=torch.strided, pin_memory=False).fill_(0)
+
+        traced = symbolic_trace(M())
+        x = torch.rand(5, 9, 3, 4)
+        self.assertEqual(traced(x), torch.zeros_like(x))
 
     def test_ellipsis(self):
         class M(torch.nn.Module):
@@ -3165,7 +3205,7 @@ class TestOperatorSignatures(JitTestCase):
                     raise RuntimeError(f'Did not match any schemas for op {op.name}!')
 
         except Exception as e:
-            assert op.name in known_no_schema or "nn.functional" in op.name or "sparse.masked_" in op.name
+            assert op.name in known_no_schema or "nn.functional" in op.name or "_masked." in op.name
 
 
 class TestFXAPIBackwardCompatibility(JitTestCase):

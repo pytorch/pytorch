@@ -1503,7 +1503,7 @@ class TestNormalizeOperators(JitTestCase):
         if op.name in op_skip:
             return
 
-        if op.name.startswith('sparse.masked_'):
+        if op.name.startswith('_masked.'):
             return
 
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)

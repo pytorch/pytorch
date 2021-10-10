@@ -3124,7 +3124,7 @@ class TestReductions(TestCase):
             expected = op.ref(to_numpy(t), *sample_input.args,
                               **dict(
                                   # `identity` is mapped to numpy reduction `initial` argument
-                                  identity=torch.sparse._reduction_identity(op.name, t),
+                                  identity=torch._masked._reduction_identity(op.name, t),
                                   **sample_input.kwargs))
             msg = ("Failed to produce expected results! Input tensor was"
                    " {0}, torch result is {1}, and reference result is"
@@ -3134,7 +3134,7 @@ class TestReductions(TestCase):
             # are well-defined when the associated output masks are
             # True. So, here we implement masked equality test by
             # replacing masked-out elements with zeros:
-            outmask = torch.sparse._output_mask(t, **sample_input.kwargs)
+            outmask = torch._masked._output_mask(t, **sample_input.kwargs)
             actual = torch.where(outmask, actual, torch.zeros_like(actual))
             expected = np.where(outmask.cpu().numpy(), expected, np.zeros_like(expected))
             self.assertEqual(actual, expected, msg, exact_dtype=exact_dtype)
