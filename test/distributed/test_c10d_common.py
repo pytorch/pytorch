@@ -694,7 +694,8 @@ class CommTest(AbstractCommTest, MultiProcessTestCase):
 
 class DummyWork(dist.Work):
     def wait(self, timeout=5.0):
-        torch.cuda.current_stream().synchronize()
+        if torch.cuda.is_available():
+            torch.cuda.current_stream().synchronize()
         return True
 
 
