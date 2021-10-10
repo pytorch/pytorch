@@ -88,7 +88,6 @@ if [ "${TRACING_BASED}" == 1 ]; then
 else
   CMAKE_ARGS+=("-DTRACING_BASED=OFF")
 fi
-
 CMAKE_ARGS+=("-DUSE_LITE_INTERPRETER_PROFILER=OFF")
 
 # Don't build binaries or tests (only the library)
