@@ -41,7 +41,9 @@ void checkCPUTensor(const std::string& fn_name, const Tensor& t) {
 }
 
 void checkFloatTensor(const std::string& fn_name, const Tensor& t) {
-  TORCH_CHECK(t.scalar_type() == kFloat, fn_name, " expects a Float Tensor.");
+  TORCH_CHECK(
+      t.scalar_type() == kFloat, fn_name, " expects a Float Tensor, got ",
+      t.scalar_type());
 }
 
 void checkSameDevice(
