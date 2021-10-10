@@ -424,14 +424,24 @@ else:
 
         """
         if isinstance(bins, int):
+            # If a single int is passed, repeat it for all dimensions
             bins = list(itertools.repeat(bins, input.size()[-1]))
 
         if bins and isinstance(bins[0], int):
+            """
+            If bins is int[], the histogram kernel runs faster knowing that the bin edges form
+            a linear progression (see comments in aten/src/ATen/native/cpu/HistogramKernel.cpp).
+            However, we end up constructing the bin edge tensors twice because
+            _histogramdd_from_bin_cts cannot pass back (Tensor, Tensor[]).
+            """
             bin_edges = _VF._histogramdd_bin_edges(input, bins, range=range, weight=weight, density=density)
+            hist = _VF._histogramdd_from_bin_cts(input, bins, range=range, weight=weight, density=density)
         else:
+            """
+            If bins is Tensor[] we simply return it back.
+            """
             bin_edges = bins
-
-        hist = _VF._histogramdd(input, bin_edges, weight=weight, density=density)
+            hist = _VF._histogramdd_from_bin_tensors(input, bin_edges, weight=weight, density=density)
 
         # TODO: figure out how to return torch.return_types.histogramdd
         histogramdd_return_type = namedtuple('histogramdd_return_type', 'hist bin_edges')

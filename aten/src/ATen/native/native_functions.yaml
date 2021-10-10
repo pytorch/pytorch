@@ -7075,7 +7075,11 @@
   dispatch:
     CPU: histogramdd_bin_edges_cpu
 
-- func: _histogramdd(Tensor self, Tensor[] bins, *, Tensor? weight=None, bool density=False) -> Tensor
+- func: _histogramdd_from_bin_cts(Tensor self, int[] bins, *, float[]? range=None, Tensor? weight=None, bool density=False) -> Tensor
+  dispatch:
+    CPU: histogramdd_cpu
+
+- func: _histogramdd_from_bin_tensors(Tensor self, Tensor[] bins, *, Tensor? weight=None, bool density=False) -> Tensor
   dispatch:
     CPU: histogramdd_cpu
 
