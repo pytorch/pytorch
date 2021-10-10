@@ -1,7 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/ThrustAllocator.h>
-#include <THC/THCGeneral.h>
 #include <thrust/execution_policy.h>
 
 #include <tuple>

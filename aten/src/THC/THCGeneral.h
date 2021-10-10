@@ -12,29 +12,6 @@
 
 #include <cusparse.h>
 
-#ifndef THAssert
-#define THAssert(exp)                                                   \
-  do {                                                                  \
-    if (!(exp)) {                                                       \
-      _THError(__FILE__, __LINE__, "assert(%s) failed", #exp);          \
-    }                                                                   \
-  } while(0)
-#endif
-
 /* Global state of THC. */
 struct THCState {};
-
-TORCH_CUDA_CPP_API void THCudaShutdown(THCState* state);
-
-#define THCAssertSameGPU(expr) if (!expr) THError("arguments are located on different GPUs")
-#define THCudaCheck(err)  __THCudaCheck(err, __FILE__, __LINE__)
-#define THCudaCheckWarn(err)  __THCudaCheckWarn(err, __FILE__, __LINE__)
-#define THCublasCheck(err)  __THCublasCheck(err,  __FILE__, __LINE__)
-#define THCusparseCheck(err)  __THCusparseCheck(err,  __FILE__, __LINE__)
-
-TORCH_CUDA_CPP_API void __THCudaCheck(cudaError_t err, const char *file, const int line);
-TORCH_CUDA_CPP_API void __THCudaCheckWarn(cudaError_t err, const char *file, const int line);
-TORCH_CUDA_CPP_API void __THCublasCheck(cublasStatus_t status, const char *file, const int line);
-TORCH_CUDA_CPP_API void __THCusparseCheck(cusparseStatus_t status, const char *file, const int line);
-
 #endif
