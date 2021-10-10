@@ -12,12 +12,6 @@
 
 #include <cusparse.h>
 
-#cmakedefine USE_MAGMA
-/* Needed for hipMAGMA to correctly identify implementation */
-#if defined(USE_MAGMA) && defined(USE_ROCM)
-#define HAVE_HIP 1
-#endif
-
 #ifndef THAssert
 #define THAssert(exp)                                                   \
   do {                                                                  \
