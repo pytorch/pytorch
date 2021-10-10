@@ -22,6 +22,11 @@ Top-level quantization APIs
 .. autofunction:: prepare
 .. autofunction:: prepare_qat
 .. autofunction:: convert
+.. autoclass:: QConfig
+.. autoclass:: QConfigDynamic
+
+.. FIXME: The following doesn't display correctly.
+   .. autoattribute:: default_qconfig
 
 Preparing model for quantization
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
