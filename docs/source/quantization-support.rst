@@ -1,80 +1,44 @@
-Quantization API Reference
+Quantization Operation coverage
 -------------------------------
 
-Modules that provide quantization functions and classes
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Quantized Tensors support a limited subset of data manipulation methods of the
+regular full-precision tensor. For NN operators included in PyTorch, we
+restrict support to:
 
-.. list-table::
+   1. 8 bit weights (data\_type = qint8)
+   2. 8 bit activations (data\_type = quint8)
 
-  * - :ref:`torch_quantization`
-    - This module implements the functions you call directly to convert your
-      model from FP32 to quantized form. For example the
-      :func:`~torch.quantization.prepare` is used in post training quantization
-      to prepares your model for the calibration step and
-      :func:`~torch.quantization.convert` actually converts the weights to int8
-      and replaces the operations with their quantized counterparts. There are
-      other helper functions for things like quantizing the input to your
-      model and performing critical fusions like conv+relu.
+Note that operator implementations currently only
+support per channel quantization for weights of the **conv** and **linear**
+operators. Furthermore the minimum and the maximum of the input data is
+mapped linearly to the minimum and the maximum of the quantized data
+type such that zero is represented with no quantization error.
 
-  * - :ref:`torch_quantization_quantize_fx`
-    - This module implements the functions you call directly to convert your
-      model from FP32 to quantized form using FX.
+Additional data types and quantization schemes can be implemented through
+the `custom operator mechanism <https://pytorch.org/tutorials/advanced/torch_script_custom_ops.html>`_.
 
-  * - :ref:`torch_quantization_observer`
-    - This module implements observers which are used to collect statistics about
-      the values observed during calibration (PTQ) or training (QAT).
+Many operations for quantized tensors are available under the same API as full
+float version in ``torch`` or ``torch.nn``. Quantized version of NN modules that
+perform re-quantization are available in ``torch.nn.quantized``. Those
+operations explicitly take output quantization parameters (scale and zero\_point) in
+the operation signature.
 
-  * - :ref:`torch_quantization_fake_quantize`
-    - This module implements modules which are used to perform fake quantization
-      during QAT.
+In addition, we also support fused versions corresponding to common fusion
+patterns that impact quantization at: `torch.nn.intrinsic.quantized`.
 
-  * - :ref:`torch_quantization_qconfig`
-    - This module defines `QConfig` and `QConfigDynamic` objects which are used
-      to configure quantization settings for individual ops.
+For quantization aware training, we support modules prepared for quantization
+aware training at `torch.nn.qat` and `torch.nn.intrinsic.qat`
 
-  * - :ref:`torch_nn_intrinsic`
-    - This module implements the combined (fused) modules conv + relu which can
-      then be quantized.
-  * - :doc:`torch.nn.intrinsic.qat`
-    - This module implements the versions of those fused operations needed for
-      quantization aware training.
-  * - :doc:`torch.nn.intrinsic.quantized`
-    - This module implements the quantized implementations of fused operations
-      like conv + relu.
-  * - :doc:`torch.nn.qat`
-    - This module implements versions of the key nn modules **Conv2d()** and
-      **Linear()** which run in FP32 but with rounding applied to simulate the
-      effect of INT8 quantization.
-  * - :doc:`torch.nn.quantized`
-    - This module implements the quantized versions of the nn layers such as
-      ~`torch.nn.Conv2d` and `torch.nn.ReLU`.
+.. end-of-part-included-in-quantization.rst
 
-  * - :doc:`torch.nn.quantized.dynamic`
-    - Dynamically quantized :class:`~torch.nn.Linear`, :class:`~torch.nn.LSTM`,
-      :class:`~torch.nn.LSTMCell`, :class:`~torch.nn.GRUCell`, and
-      :class:`~torch.nn.RNNCell`.
+The following operation list is sufficient to cover typical CNN and RNN models
 
-.. toctree::
-    :hidden:
-
-    torch.nn.intrinsic
-    torch.nn.intrinsic.qat
-    torch.nn.intrinsic.quantized
-    torch.nn.qat
-    torch.quantization
-    torch.nn.quantized
-    torch.nn.quantized.dynamic
-    torch.quantization.quantize_fx
-    torch.quantization.observer
-    torch.quantization.fake_quantize
-    torch.quantization.qconfig
 
 Quantized ``torch.Tensor`` operations
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Quantized Tensors support a limited subset of data manipulation methods of the
-regular full-precision tensor. Operations that are available from the ``torch``
-namespace or as methods on Tensor for quantized tensors:
+Operations that are available from the ``torch`` namespace or as methods on
+Tensor for quantized tensors:
 
 * :func:`~torch.quantize_per_tensor` - Convert float tensor to quantized tensor
   with per-tensor scale and zero point
@@ -350,15 +314,6 @@ quantization output parameters)
 
 Quantized dtypes and quantization schemes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Note that operator implementations currently only
-support per channel quantization for weights of the **conv** and **linear**
-operators. Furthermore the minimum and the maximum of the input data is
-mapped linearly to the minimum and the maximum of the quantized data
-type such that zero is represented with no quantization error.
-
-Additional data types and quantization schemes can be implemented through
-the `custom operator mechanism <https://pytorch.org/tutorials/advanced/torch_script_custom_ops.html>`_.
 
 * :attr:`torch.qscheme` — Type to describe the quantization scheme of a tensor.
   Supported types:
