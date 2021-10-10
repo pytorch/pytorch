@@ -256,7 +256,7 @@ def amin(input: Tensor,
 {masked_reduction_args}
 
 {masked_reduction_example}
-    >>> torch.sparse.masked_amin(input, 1, mask=mask)
+    >>> torch._masked.amin(input, 1, mask=mask)
     tensor([                 -3, 9223372036854775807])
     """
     if dtype is None:
