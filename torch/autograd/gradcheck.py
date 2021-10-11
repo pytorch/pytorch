@@ -1347,7 +1347,7 @@ def _gradcheck_helper(func, inputs, eps, atol, rtol, check_sparse_nnz, nondet_to
                          rtol, atol, check_grad_dtypes, check_forward_ad=check_forward_ad,
                          check_backward_ad=check_backward_ad, nondet_tol=nondet_tol)
 
-    if check_batched_grad and check_forward_ad and check_batched_forward_grad:
+    if check_batched_forward_grad:
         _test_batched_grad_forward_ad(func, tupled_inputs)
 
     # Short circuit because remaining tests rely on backward AD to be implemented
