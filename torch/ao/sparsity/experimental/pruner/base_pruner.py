@@ -91,7 +91,7 @@ class BasePruner(BaseSparsifier):
                     param = config.get('parametrization', ZeroesParametrization)
                     parametrize.register_parametrization(module, 'weight', param(module.mask), unsafe=True)
 
-                if module.bias is not None:
+                if getattr(module, 'bias', None) is not None:
                     module.register_parameter('_bias', nn.Parameter(module.bias.detach()))
                     module.bias = None
                 self.bias_handles.append(module.register_forward_hook(BiasHook(module.parametrizations.weight[0], self.prune_bias)))
@@ -113,6 +113,8 @@ class BasePruner(BaseSparsifier):
         - config [list]: configuration elements could either be instances of
             nn.Module or dict maps. The dicts must have a key 'module' with the
             value being an instance of a nn.Module.
+
+        TODO: Dedup with the base_sparsifier
         """
         self.model = model  # TODO: Need to figure out how to load without this.
         self.config = config
@@ -134,6 +136,7 @@ class BasePruner(BaseSparsifier):
 
         for module_config in self.config:
             if type(module_config) is tuple:
+                # Special case: conv + batch norm
                 first_layer, next_layer = module_config
                 assert isinstance(first_layer, nn.Conv2d) and isinstance(next_layer, nn.BatchNorm2d)
                 module_config = {'module': module_config}
@@ -151,11 +154,34 @@ class BasePruner(BaseSparsifier):
                     module_config = {'module': module_config}
                 local_args = copy.deepcopy(self.defaults)
                 local_args.update(module_config)
-                module = local_args['module']
-                module_fqn = module_to_fqn(model, module)
+
+                # Make sure there is at least one way of handling the model
+                module = local_args.get('module', None)
+                module_fqn = local_args.get('fqn', None)
+                if module is None and module_fqn is None:
+                    # No module given for this group
+                    raise ValueError('Either `module` or `fqn` must be specified!')
+                elif module is None:
+                    # FQN is given
+                    module = fqn_to_module(model, module_fqn)
+                elif module_fqn is None:
+                    # Module is given
+                    module_fqn = module_to_fqn(model, module)
+                else:
+                    # Both Module and FQN are given
+                    module_from_fqn = fqn_to_module(model, module_fqn)
+                    assert module is module_from_fqn, \
+                        'Given both `module` and `fqn`, it is expected them to ' \
+                        'refer to the same thing!'
                 if module_fqn and module_fqn[0] == '.':
                     module_fqn = module_fqn[1:]
                 local_args['fqn'] = module_fqn
+                local_args['module'] = module
+
+                if module_fqn and module_fqn[0] == '.':
+                    module_fqn = module_fqn[1:]
+                local_args['fqn'] = module_fqn
+                local_args['module'] = module
 
             self.module_groups.append(local_args)
 
