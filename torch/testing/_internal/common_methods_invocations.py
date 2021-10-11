@@ -9281,7 +9281,7 @@ op_db: List[OpInfo] = [
            supports_autograd=False,
            skips=(
                # JIT tests don't work with Tensor keyword arguments
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.skip("Expected failure!"), 'TestJit', 'test_variant_consistency_jit'),
            )),
     OpInfo('cat',
            ref=lambda input_seq, dim=0, **kwargs: np.concatenate(input_seq, axis=dim, **kwargs),
