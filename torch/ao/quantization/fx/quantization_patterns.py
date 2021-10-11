@@ -1314,7 +1314,7 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
     def is_output_quantized(self, qconfig):
         dtypes = get_qconfig_dtypes(qconfig)
         return self.op in default_op_supported_dtypes and \
-                dtypes in default_op_supported_dtypes[self.op]
+            dtypes in default_op_supported_dtypes[self.op]
 
     def convert(self,
                 node: Node,
