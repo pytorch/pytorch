@@ -27,6 +27,7 @@ C10_DEFINE_REGISTRY(FreeCudaMemoryCallbacksRegistry, FreeMemoryCallback);
 
 namespace cuda {
 namespace CUDACachingAllocator {
+namespace THC {
 
 //
 // Yet another caching allocator for CUDA device allocations.
@@ -1457,7 +1458,7 @@ class THCCachingAllocator {
   }
 };
 
-THCCachingAllocator caching_allocator;
+THCCachingAllocator thc_caching_allocator;
 
 // Returns whether to force all allocations to bypass the caching allocator and
 // go straight to cudaMalloc.  This setting is useful when debugging GPU memory
@@ -1587,7 +1588,33 @@ void notifyCaptureDestroy(int device, MempoolId_t mempool_id) {
   caching_allocator.device_allocator[device]->notifyCaptureDestroy(mempool_id);
 }
 
-//
+void* raw_alloc(size_t nbytes) {
+  if (nbytes == 0) {
+    return nullptr;
+  }
+  int device;
+  C10_CUDA_CHECK(cudaGetDevice(&device));
+  void* r = nullptr;
+  caching_allocator.malloc(
+      &r, device, nbytes, cuda::getCurrentCUDAStream(device));
+  return r;
+}
+
+void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) {
+  if (nbytes == 0) {
+    return nullptr;
+  }
+  int device;
+  C10_CUDA_CHECK(cudaGetDevice(&device));
+  void* r = nullptr;
+  caching_allocator.malloc(&r, device, nbytes, stream);
+  return r;
+}
+
+void raw_delete(void* ptr) {
+  caching_allocator.free(ptr);
+}
+
 // In CUDA IPC, sender sends a tensor to receiver, getIpcDevPtr
 // is called by the receiving process to map the CUDA memory from the sending
 // process into its own address space.
@@ -1642,34 +1669,7 @@ std::shared_ptr<void> getIpcDevPtr(std::string handle) {
   return sp;
 }
 
-void* raw_alloc(size_t nbytes) {
-  if (nbytes == 0) {
-    return nullptr;
-  }
-  int device;
-  C10_CUDA_CHECK(cudaGetDevice(&device));
-  void* r = nullptr;
-  caching_allocator.malloc(
-      &r, device, nbytes, cuda::getCurrentCUDAStream(device));
-  return r;
-}
-
-void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) {
-  if (nbytes == 0) {
-    return nullptr;
-  }
-  int device;
-  C10_CUDA_CHECK(cudaGetDevice(&device));
-  void* r = nullptr;
-  caching_allocator.malloc(&r, device, nbytes, stream);
-  return r;
-}
-
-void raw_delete(void* ptr) {
-  caching_allocator.free(ptr);
-}
-
+} // namespace THC
 } // namespace CUDACachingAllocator
-
 } // namespace cuda
 } // namespace c10
