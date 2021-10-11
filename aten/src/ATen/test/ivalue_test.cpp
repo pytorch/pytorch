@@ -814,23 +814,31 @@ TEST(TupleElementsTest, Resize) {
   }
 }
 
-TEST(TupleElementsTest, MoveConstruct) {
+TEST(TupleElementsTest, CopyAndMoveConstruct) {
   int idx = 0;
   for (auto fromFactory : factories) {
     auto toMoveFrom = fromFactory();
     TupleElements movedInto(std::move(toMoveFrom));
-    validateTupleElements(movedInto, expectedContents[idx++]);
+    validateTupleElements(movedInto, expectedContents[idx]);
+    auto toCopyFrom = fromFactory();
+    TupleElements copiedInto(toCopyFrom);
+    validateTupleElements(copiedInto, expectedContents[idx]);
+    idx++;
   }
 }
 
-TEST(TupleElementsTest, MoveAssign) {
+TEST(TupleElementsTest, CopyAndMoveAssign) {
   int fromIdx = 0;
   for (auto fromFactory : factories) {
     for (auto toFactory : factories) {
       auto from = fromFactory();
       auto to = toFactory();
+      auto copyFrom = fromFactory();
+      auto toCopy = toFactory();
       to = std::move(from);
       validateTupleElements(to, expectedContents[fromIdx]);
+      toCopy = copyFrom;
+      validateTupleElements(toCopy, expectedContents[fromIdx]);
     }
     fromIdx++;
   }
