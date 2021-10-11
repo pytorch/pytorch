@@ -572,11 +572,6 @@ class TORCH_API LoopNest {
   void initialize(
       const std::vector<Tensor>& output_tensors,
       const std::vector<Tensor>& tensors_to_compute);
-  StmtPtr insertAllocFree(
-      StmtPtr stmt,
-      const c10::optional<std::unordered_set<BufPtr>>& interm_bufs =
-          c10::nullopt);
-
   StmtPtr root_stmt_;
 
   std::unordered_set<BufPtr> output_bufs_;
