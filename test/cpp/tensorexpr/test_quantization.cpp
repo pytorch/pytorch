@@ -40,42 +40,6 @@ class Quantization : public ::testing::Test {
   }
 };
 
-TEST_F(Quantization, QuantUInt8) {
-#ifdef TORCH_ENABLE_LLVM
-  const auto graph_string = R"IR(
-      graph(%x.1 : Float(2, 2, strides=[2, 1], device=cpu)):
-        %2 : int = prim::Constant[value=13]()
-        %3 : int = prim::Constant[value=130]()
-        %4 : float = prim::Constant[value=0.1]()
-        %q.1 : QUInt8(2, 2) = aten::quantize_per_tensor(%x.1, %4, %3, %2)
-        return (%q.1))IR";
-  auto graph = std::make_shared<Graph>();
-  parseIR(graph_string, &*graph);
-
-  auto x = at::rand({2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
-  auto y_expected = at::quantize_per_tensor(x, 0.1f, 130, at::kQUInt8);
-  TensorExprKernel k(graph);
-  std::vector<at::Tensor> inputs = {x};
-  StmtPtr s = k.getCodeGenStmt();
-
-  std::ostringstream oss;
-  oss << *s;
-
-  // Check the IR we produced
-  const std::string& verification_pattern =
-      R"IR(
-# CHECK: for
-# CHECK-NEXT: for
-# CHECK-NOT: for)IR";
-  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
-
-  std::vector<IValue> stack = fmap<IValue>(inputs);
-  k.run(stack);
-  auto y = stack[0].toTensor();
-  CHECK_EQ(almostEqual(y_expected, y), 1);
-#endif
-}
-
 TEST_F(Quantization, QuantDequantInt8) {
 #ifdef TORCH_ENABLE_LLVM
   const auto graph_string = R"IR(
@@ -96,21 +60,15 @@ TEST_F(Quantization, QuantDequantInt8) {
   std::vector<at::Tensor> inputs = {x};
   StmtPtr s = k.getCodeGenStmt();
 
-  std::ostringstream oss;
-  oss << *s;
-
-  // Check the IR we produced
-  const std::string& verification_pattern =
-      R"IR(
-# CHECK: for
-# CHECK-NEXT: for
-# CHECK-NOT: for)IR";
-  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
-
   std::vector<IValue> stack = fmap<IValue>(inputs);
   k.run(stack);
   auto y = stack[0].toTensor();
-  CHECK_EQ(almostEqual(y_expected, y), 1);
+  bool check = almostEqual(y_expected, y);
+  if (!check) {
+    std::cout << "y_expected:\n" << y_expected << std::endl;
+    std::cout << "y:\n" << y << std::endl;
+  }
+  CHECK_EQ(check, 1);
 #endif
 }
 
@@ -134,21 +92,15 @@ TEST_F(Quantization, QuantDequantUInt8) {
   std::vector<at::Tensor> inputs = {x};
   StmtPtr s = k.getCodeGenStmt();
 
-  std::ostringstream oss;
-  oss << *s;
-
-  // Check the IR we produced
-  const std::string& verification_pattern =
-      R"IR(
-# CHECK: for
-# CHECK-NEXT: for
-# CHECK-NOT: for)IR";
-  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
-
   std::vector<IValue> stack = fmap<IValue>(inputs);
   k.run(stack);
   auto y = stack[0].toTensor();
-  CHECK_EQ(almostEqual(y_expected, y), 1);
+  bool check = almostEqual(y_expected, y);
+  if (!check) {
+    std::cout << "y_expected:\n" << y_expected << std::endl;
+    std::cout << "y:\n" << y << std::endl;
+  }
+  CHECK_EQ(check, 1);
 #endif
 }
 
@@ -234,11 +186,6 @@ TEST_F(Quantization, QuantAddDequantUInt8) {
   auto q2 = at::quantize_per_tensor(x2, 0.1f, 130, at::kQUInt8);
   auto qa = quantized_add(q1, q2, 0.1f, 130);
   auto y_expected = at::dequantize(qa);
-  std::cout << "x1:\n" << x1 << std::endl;
-  std::cout << "q1:\n" << q1 << std::endl;
-  std::cout << "x2:\n" << x2 << std::endl;
-  std::cout << "q2:\n" << q2 << std::endl;
-  std::cout << "y_expected:\n" << y_expected << std::endl;
 
   TensorExprKernel k(graph);
   std::vector<at::Tensor> inputs = {x1, x2};
@@ -247,12 +194,16 @@ TEST_F(Quantization, QuantAddDequantUInt8) {
   std::vector<IValue> stack = fmap<IValue>(inputs);
   k.run(stack);
   auto y = stack[0].toTensor();
-  std::cout << "y:\n" << y << std::endl;
-
-  if (!almostEqual(y_expected, y)) {
+  bool check = almostEqual(y_expected, y);
+  if (!check) {
+    std::cout << "x1:\n" << x1 << std::endl;
+    std::cout << "q1:\n" << q1 << std::endl;
+    std::cout << "x2:\n" << x2 << std::endl;
+    std::cout << "q2:\n" << q2 << std::endl;
+    std::cout << "y_expected:\n" << y_expected << std::endl;
     std::cout << "y:\n" << y << std::endl;
   }
-  CHECK_EQ(almostEqual(y_expected, y), 1);
+  CHECK_EQ(check, 1);
 #endif
 }
 

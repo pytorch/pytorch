@@ -147,7 +147,7 @@ Tensor computeDequantizeExternalCall(
   const int64_t qzero = immQZero(qx);
   const int64_t qdtype = immQDType(qx);
 
-  BufHandle ResultBuf("dequantize", outputShape, dtype);
+  BufHandle ResultBuf("quantize", outputShape, dtype);
   StmtPtr s = ExternalCall::make(
       ResultBuf, "nnc_dequantize", {qx}, {qscale, qzero, qdtype});
   return Tensor(ResultBuf.node(), s);
