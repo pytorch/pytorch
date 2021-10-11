@@ -9,6 +9,9 @@ IMAGE_NAMES = [
     "pytorch-linux-bionic-rocm4.1-py3.6",
     "pytorch-linux-bionic-rocm4.2-py3.6",
     "pytorch-linux-bionic-rocm4.3.1-py3.6",
+    # Needed for `pytorch/xla`
+    # TODO: Remove this eventually
+    "pytorch-linux-bionic-cuda10.2-cudnn7-py3.6-clang9"
 ]
 
 # This entry should be an element from the list above
