@@ -33,9 +33,9 @@ class DenseVectorToIdListOp : public Operator<Context> {
 
     auto v_pos = 0;
     auto l_pos = 0;
-    for (auto i = 0; i < batch_size; i++) {
+    for (const auto i : c10::irange(batch_size)) {
       auto length = 0;
-      for (int j = 0; j < col_num; j++) {
+      for (const auto j : c10::irange(col_num)) {
         if ((int)(input_data[i * col_num + j] + 0.5) != 0) {
           out_values_data[v_pos++] = j;
           length++;

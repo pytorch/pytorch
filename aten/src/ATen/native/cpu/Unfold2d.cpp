@@ -2,6 +2,7 @@
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/Unfold2d.h>
 #include <ATen/native/cpu/Loops.h>
+#include <c10/util/irange.h>
 #include <cmath>
 
 namespace at {
@@ -46,7 +47,7 @@ static void unfolded2d_acc(
     int64_t output_height,
     int64_t output_width) {
   at::parallel_for(0, n_input_plane, 0, [&](int64_t start, int64_t end) {
-    for (auto nip = start; nip < end; nip++) {
+    for (const auto nip : c10::irange(start, end)) {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t kw, kh, y, x;
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -172,7 +173,7 @@ static void unfolded2d_copy(
     int64_t output_width) {
   at::parallel_for(
       0, (int64_t)n_input_plane * kH * kW, 0, [&](int64_t start, int64_t end) {
-        for (auto k = start; k < end; k++) {
+        for (const auto k : c10::irange(start, end)) {
           int64_t nip = k / (kH * kW);
           int64_t rest = k % (kH * kW);
           int64_t kh = rest / kW;

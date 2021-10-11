@@ -1,6 +1,7 @@
 #include "test/cpp/tensorexpr/padded_buffer.h"
 
 #include <c10/util/Logging.h>
+#include <c10/util/irange.h>
 #include <sstream>
 
 namespace torch {
@@ -10,7 +11,7 @@ namespace tensorexpr {
 int PaddedBufferBase::Index(const std::vector<int>& indices) const {
   DCHECK_EQ(dims_.size(), indices.size());
   int total_index = 0;
-  for (size_t i = 0; i < dims_.size(); i++) {
+  for (const auto i : c10::irange(dims_.size())) {
     total_index += indices[i] * strides_[i];
   }
   return total_index;

@@ -69,7 +69,7 @@ class PackRNNSequenceOpBase : public Operator<Context> {
     math::Set<ValT, Context>(output->numel(), 0, output_data, &context_);
 
     int32_t offset = 0;
-    for (int c = 0; c < cols; c++) {
+    for (const auto c : c10::irange(cols)) {
       for (int r = 0; r < lengths_vec[c]; r++) {
         auto input_offset = Forward ? (offset + r) : (r * cols + c);
         auto output_offset = Forward ? (r * cols + c) : (offset + r);

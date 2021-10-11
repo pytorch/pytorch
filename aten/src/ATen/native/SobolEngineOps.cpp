@@ -3,6 +3,7 @@
 #include <ATen/NativeFunctions.h>
 
 #include <ATen/native/SobolEngineOpsUtils.h>
+#include <c10/util/irange.h>
 
 #include <vector>
 
@@ -40,7 +41,7 @@ std::tuple<Tensor, Tensor> _sobol_engine_draw(const Tensor& quasi, int64_t n, co
 
     for (int64_t i = 0; i < n; i++, num_generated++) {
       l = rightmost_zero(num_generated);
-      for (int64_t j = 0; j < dimension; j++) {
+      for (const auto j : c10::irange(dimension)) {
         wquasi_data[j * wquasi_stride] ^= sobolstate_data[j * sobolstate_row_stride + l * sobolstate_col_stride];
         result_data[i * result_row_stride + j * result_col_stride] = wquasi_data[j * wquasi_stride];
       }
@@ -73,7 +74,7 @@ Tensor& _sobol_engine_ff_(Tensor& quasi, int64_t n, const Tensor& sobolstate,
 
   for (int64_t i = 0; i < n; i++, num_generated++) {
     l = rightmost_zero(num_generated);
-    for (int64_t j = 0; j < dimension; j++) {
+    for (const auto j : c10::irange(dimension)) {
       quasi_data[j * quasi_stride] ^= sobolstate_data[j * sobolstate_row_stride + l * sobolstate_col_stride];
     }
   }
@@ -102,13 +103,13 @@ Tensor& _sobol_engine_scramble_(Tensor& sobolstate, const Tensor& ltm, int64_t d
   auto ltm_d_a = ltm_dots.accessor<int64_t, 2>();
 
   /// Main scrambling loop
-  for (int64_t d = 0; d < dimension; ++d) {
-    for (int64_t j = 0; j < MAXBIT; ++j) {
+  for (const auto d : c10::irange(dimension)) {
+    for (const auto j : c10::irange(MAXBIT)) {
       int64_t vdj = ss_a[d][j], l = 1, t2 = 0;
       for (int64_t p = MAXBIT - 1; p >= 0; --p) {
         int64_t lsmdp = ltm_d_a[d][p];
         int64_t t1 = 0;
-        for (int64_t k = 0; k < MAXBIT; ++k) {
+        for (const auto k : c10::irange(MAXBIT)) {
           t1 += (bitsubseq(lsmdp, k, 1) * bitsubseq(vdj, k, 1));
         }
         t1 = t1 % 2;
@@ -131,17 +132,17 @@ Tensor& _sobol_engine_initialize_state_(Tensor& sobolstate, int64_t dimension) {
   auto ss_a = sobolstate.accessor<int64_t, 2>();
 
   /// First row of `sobolstate` is all 1s
-  for (int64_t m = 0; m < MAXBIT; ++m) {
+  for (const auto m : c10::irange(MAXBIT)) {
     ss_a[0][m] = 1;
   }
 
   /// Remaining rows of sobolstate (row 2 through dim, indexed by [1:dim])
-  for (int64_t d = 1; d < dimension; ++d) {
+  for (const auto d : c10::irange(1, dimension)) {
     int64_t p = poly[d];
     int64_t m = bit_length(p) - 1;
 
     // First m elements of row d comes from initsobolstate
-    for (int64_t i = 0; i < m; ++i) {
+    for (const auto i : c10::irange(m)) {
       ss_a[d][i] = initsobolstate[d][i];
     }
 
@@ -149,10 +150,10 @@ Tensor& _sobol_engine_initialize_state_(Tensor& sobolstate, int64_t dimension) {
     // P. Bratley and B. L. Fox. Algorithm 659: Implementing sobol's
     // quasirandom sequence generator. ACM Trans.
     // Math. Softw., 14(1):88-100, Mar. 1988.
-    for (int64_t j = m; j < MAXBIT; ++j) {
+    for (const auto j : c10::irange(m, MAXBIT)) {
       int64_t newv = ss_a[d][j - m];
       int64_t pow2 = 1;
-      for (int64_t k = 0; k < m; ++k) {
+      for (const auto k : c10::irange(m)) {
         pow2 <<= 1;
         if ((p >> (m - 1 - k)) & 1) {
           newv = newv ^ (pow2 * ss_a[d][j - k - 1]);

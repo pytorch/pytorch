@@ -1,4 +1,5 @@
 #include <ATen/native/quantized/affine_quantizer_base.h>
+#include <c10/util/irange.h>
 #include <cfenv>
 #include <climits>
 
@@ -145,7 +146,7 @@ void quantize_vec(
     T* dst,
     size_t count) {
   checkZeroPoint<typename T::underlying>("quantize_vec", zero_point);
-  for (size_t i = 0; i < count; ++i) {
+  for (const auto i : c10::irange(count)) {
     dst[i] = quantize_val<T>(scale, zero_point, src[i]);
   }
 }

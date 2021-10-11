@@ -6,6 +6,7 @@
 #include <ATen/div_rtn.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/Unfold3d.h>
+#include <c10/util/irange.h>
 
 constexpr int64_t CONV3D_GRAIN_SALT = 20;
 
@@ -358,7 +359,7 @@ void slow_conv3d_backward_out_cpu_template(
         auto fgrad_input_a = fgrad_input.accessor<scalar_t, 3>();
         auto weight_2d_a = weight2d.accessor<scalar_t, 2>();
 
-        for (int64_t t = start; t < end; t++) {
+        for (const auto t : c10::irange(start, end)) {
           auto grad_input_t = grad_input_a[t];
           auto grad_output_t = grad_output_a[t];
           auto fgrad_input_t = fgrad_input_a[t];
@@ -462,7 +463,7 @@ static void slow_conv3d_backward_parameters_out_cpu_template(
     auto grad_weight_2d_a = grad_weight_2d.accessor<scalar_t, 2>();
     auto grad_output_a = grad_output_contiguous.accessor<scalar_t, 5>();
     auto finput_a = finput.accessor<scalar_t, 3>();
-    for (int64_t t = 0; t < batch_size; t++) {
+    for (const auto t : c10::irange(batch_size)) {
       auto grad_output_t = grad_output_a[t];
       auto finput_t = finput_a[t];
       slow_conv3d_backward_weight_frame(
@@ -564,7 +565,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv3d_forward_out_cpu(const Tensor& 
 
     at::parallel_for(
         0, batch_size, CONV3D_GRAIN_SALT, [&](int64_t start, int64_t end) {
-          for (int64_t t = start; t < end; t++) {
+          for (const auto t : c10::irange(start, end)) {
             auto input_t = input_a[t];
             auto output_t = output_a[t];
             auto finput_t = finput_a[t];

@@ -12,6 +12,7 @@
 #include <c10/util/C++17.h>
 #include <c10/util/Metaprogramming.h>
 #include "caffe2/core/export_caffe2_op_to_c10.h"
+#include <c10/util/irange.h>
 
 namespace caffe2 {
 
@@ -136,7 +137,7 @@ class C10OperatorWrapper final : public Operator<Context> {
 
   void popOutputs_() {
     AT_ASSERT(stack_.size() == op_.schema().returns().size());
-    for (size_t i = 0; i < op_.schema().returns().size(); ++i) {
+    for (const auto i : c10::irange(op_.schema().returns().size())) {
       OperatorBase::SetOutputTensor(i, Tensor(std::move(stack_[i]).toTensor()));
     }
     stack_.clear();
@@ -146,7 +147,7 @@ class C10OperatorWrapper final : public Operator<Context> {
     c10::List<at::Tensor> result;
     result.reserve(InputSize());
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (size_t i = 0; i < InputSize(); ++i) {
+    for (const auto i : c10::irange(InputSize())) {
       result.emplace_back(Input(i));
     }
     return result;
@@ -156,7 +157,7 @@ class C10OperatorWrapper final : public Operator<Context> {
     c10::List<at::Tensor> result;
     result.reserve(OutputSize());
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (size_t i = 0; i < OutputSize(); ++i) {
+    for (const auto i : c10::irange(OutputSize())) {
       result.emplace_back(OperatorBase::OutputTensorOrUndefined(i));
     }
     return result;

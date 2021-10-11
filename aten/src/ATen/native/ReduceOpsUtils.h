@@ -168,7 +168,7 @@ static Tensor review_reduce_result(const Tensor& result, int ndim, DimMask mask,
   }
   auto shape = DimVector(result.sizes());
   auto stride = DimVector(result.strides());
-  for (int dim = 0; dim < ndim; dim++) {
+  for (const auto dim : c10::irange(ndim)) {
     if (mask[dim]) {
       shape.insert(shape.begin() + dim, 1);
       stride.insert(stride.begin() + dim, 0);

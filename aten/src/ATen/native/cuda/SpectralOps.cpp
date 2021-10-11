@@ -12,6 +12,7 @@
 #include <ATen/native/SpectralOpsUtils.h>
 #include <ATen/native/cuda/CuFFTUtils.h>
 #include <ATen/native/cuda/CuFFTPlanCache.h>
+#include <c10/util/irange.h>
 
 #include <cufft.h>
 #include <cufftXt.h>
@@ -229,7 +230,7 @@ static const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_
   const auto batch_size = input.sizes()[0];
   DimVector signal_size(signal_ndim + 1);
   signal_size[0] = batch_size;
-  for (int64_t i = 0; i < signal_ndim; ++i) {
+  for (const auto i : c10::irange(signal_ndim)) {
     auto in_size = input.sizes()[i + 1];
     auto out_size = out_sizes[dim[i]];
     signal_size[i + 1] = std::max(in_size, out_size);
@@ -241,7 +242,7 @@ static const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_
 
   batched_sizes[0] = batch_size;
   DimVector batched_out_sizes(batched_sizes.begin(), batched_sizes.end());
-  for (size_t i = 0; i < dim.size(); ++i) {
+  for (const auto i : c10::irange(dim.size())) {
     batched_out_sizes[i + 1] = out_sizes[dim[i]];
   }
   out.resize_(batched_out_sizes, MemoryFormat::Contiguous);
@@ -303,7 +304,7 @@ static const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_
     out_strides[dim_permute[i]] = batch_numel * out.strides()[0];
     batch_numel *= out_sizes[dim_permute[i]];
   }
-  for (int64_t i = batch_dims; i < ndim; ++i) {
+  for (const auto i : c10::irange(batch_dims, ndim)) {
     out_strides[dim_permute[i]] = out.strides()[1 + (i - batch_dims)];
   }
   return out.as_strided_(out_sizes, out_strides, out.storage_offset());

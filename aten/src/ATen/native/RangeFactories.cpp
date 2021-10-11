@@ -4,6 +4,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
+#include <c10/util/irange.h>
 #include <cmath>
 #include <limits>
 
@@ -95,7 +96,7 @@ Tensor& logspace_cpu_out(const Scalar& start, const Scalar& end, c10::optional<i
       double step = static_cast<double>(scalar_end - scalar_start) / (steps - 1);
       const int64_t halfway = steps / 2;
       at::parallel_for(0, steps, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
-        for (int64_t i=p_begin; i < p_end; i++) {
+        for (const auto i : c10::irange(p_begin, p_end)) {
           if (i < halfway) {
             data_ptr[i] = std::pow(scalar_base, scalar_start + step*i);
           } else {

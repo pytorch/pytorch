@@ -3,6 +3,7 @@
 #include <ATen/NativeFunctions.h>
 
 #include <ATen/native/Cross.h>
+#include <c10/util/irange.h>
 
 namespace at { namespace native {
 
@@ -30,7 +31,7 @@ Tensor & cross_out(const Tensor & input, const Tensor & other, const c10::option
 
   int64_t dim = -1;
   if(!dimension.has_value()) {
-    for(int64_t i = 0; i < input.dim(); i++) {
+    for (const auto i : c10::irange(input.dim())) {
       if(input.size(i) == 3) {
         dim = i;
         break;

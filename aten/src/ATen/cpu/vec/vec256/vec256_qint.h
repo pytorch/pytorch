@@ -6,6 +6,8 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <ATen/native/quantized/affine_quantizer_base.h>
+
+#include <c10/util/irange.h>
 #include <c10/util/qint32.h>
 #include <c10/util/qint8.h>
 #include <c10/util/quint8.h>
@@ -739,7 +741,7 @@ struct VectorizedQuantizedConverter {
   std::array<value_type, size_> vals;
 
   VectorizedQuantizedConverter(T val) {
-    for (size_t i = 0; i < size(); ++i) {
+    for (const auto i : c10::irange(size())) {
       vals[i] = val.val_;
     }
   }
@@ -757,9 +759,9 @@ struct VectorizedQuantizedConverter {
       Vectorized<float> zero_point,
       Vectorized<float> scale_zp_premul) const {
     float_vec_return_type rv;
-    for (int i = 0; i < float_num_vecs(); ++i) {
+    for (const auto i : c10::irange(float_num_vecs())) {
       float tmp_vals[8];
-      for (int j = 0; j < 8; ++j) {
+      for (const auto j : c10::irange(8)) {
         tmp_vals[j] = at::native::dequantize_val<T>(
             scale[j], zero_point[j], T(vals[8 * i + j]));
       }
@@ -816,7 +818,7 @@ struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
     std::array<value_type, size()> qvals;
     std::array<float, float_num_vecs() * 8> float_vals;
 
-    for (int i = 0; i < float_num_vecs(); ++i) {
+    for (const auto i : c10::irange(float_num_vecs())) {
       rhs[i].store(&float_vals[i * 8], 8);
     }
 
@@ -832,7 +834,7 @@ struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
 
   Vectorized<c10::qint32> maximum(Vectorized<c10::qint32> b) const {
     Vectorized<c10::qint32> retval;
-    for (size_t i = 0; i < size(); ++i) {
+    for (const auto i : c10::irange(size())) {
       retval.vals[i] = std::max<value_type>(vals[i], b.vals[i]);
     }
     return retval;
@@ -840,7 +842,7 @@ struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
 
   Vectorized<c10::qint32> minimum(Vectorized<c10::qint32> b) const {
     Vectorized<c10::qint32> retval;
-    for (size_t i = 0; i < size(); ++i) {
+    for (const auto i : c10::irange(size())) {
       retval.vals[i] = std::min<value_type>(vals[i], b.vals[i]);
     }
     return retval;
@@ -855,7 +857,7 @@ struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
       Vectorized<c10::qint32> zero_point,
       Vectorized<c10::qint32> q_six) {
     Vectorized<c10::qint32> retval;
-    for (size_t i = 0; i < size(); ++i) {
+    for (const auto i : c10::irange(size())) {
       retval.vals[i] = std::min<value_type>(
           std::max<value_type>(vals[i], zero_point.vals[i]), q_six.vals[i]);
     }
@@ -864,7 +866,7 @@ struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
 
   int_vec_return_type widening_subtract(Vectorized<c10::qint32> b) const {
     int_vec_return_type retval;
-    for (size_t i = 0; i < size(); ++i) {
+    for (const auto i : c10::irange(size())) {
       retval[0].vals[i] = vals[i] - b.vals[i];
     }
     return retval;
@@ -875,7 +877,7 @@ struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
       float multiplier,
       int32_t zero_point) {
     Vectorized<c10::qint32> retval;
-    for (size_t i = 0; i < size(); ++i) {
+    for (const auto i : c10::irange(size())) {
       retval.vals[i] =
           nearbyint(static_cast<float>(inp[0].vals[i]) * multiplier) +
           zero_point;
@@ -948,7 +950,7 @@ struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
     std::array<value_type, size()> qvals;
     std::array<float, float_num_vecs() * 8> float_vals;
 
-    for (int i = 0; i < float_num_vecs(); ++i) {
+    for (const auto i : c10::irange(float_num_vecs())) {
       rhs[i].store(&float_vals[i * 8], 8);
     }
 
@@ -964,7 +966,7 @@ struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
 
   Vectorized<c10::qint8> maximum(Vectorized<c10::qint8> b) const {
     Vectorized<c10::qint8> retval;
-    for (size_t i = 0; i < size(); ++i) {
+    for (const auto i : c10::irange(size())) {
       retval.vals[i] = std::max<value_type>(vals[i], b.vals[i]);
     }
     return retval;
@@ -972,7 +974,7 @@ struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
 
   Vectorized<c10::qint8> minimum(Vectorized<c10::qint8> b) const {
     Vectorized<c10::qint8> retval;
-    for (size_t i = 0; i < size(); ++i) {
+    for (const auto i : c10::irange(size())) {
       retval.vals[i] = std::min<value_type>(vals[i], b.vals[i]);
     }
     return retval;
@@ -986,7 +988,7 @@ struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
       Vectorized<c10::qint8> zero_point,
       Vectorized<c10::qint8> q_six) {
     Vectorized<c10::qint8> retval;
-    for (size_t i = 0; i < size(); ++i) {
+    for (const auto i : c10::irange(size())) {
       retval.vals[i] = std::min<value_type>(
           std::max<value_type>(vals[i], zero_point.vals[i]), q_six.vals[i]);
     }
@@ -996,8 +998,8 @@ struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
   int_vec_return_type widening_subtract(Vectorized<c10::qint8> b) const {
     int_vec_return_type retval;
     constexpr int elem_per_int_vec = size() / int_num_vecs();
-    for (size_t i = 0; i < int_num_vecs(); ++i) {
-      for (size_t j = 0; j < elem_per_int_vec; ++j) {
+    for (const auto i : c10::irange(int_num_vecs())) {
+      for (const auto j : c10::irange(elem_per_int_vec)) {
         retval[i].vals[j] =
             static_cast<int32_t>(vals[i * elem_per_int_vec + j]) -
             static_cast<int32_t>(b.vals[i * elem_per_int_vec + j]);
@@ -1013,8 +1015,8 @@ struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
     constexpr auto min_val = std::numeric_limits<value_type>::min();
     constexpr auto max_val = std::numeric_limits<value_type>::max();
     Vectorized<c10::qint8> retval;
-    for (size_t i = 0; i < int_num_vecs(); ++i) {
-      for (size_t j = 0; j < elem_per_int_vec; ++j) {
+    for (const auto i : c10::irange(int_num_vecs())) {
+      for (const auto j : c10::irange(elem_per_int_vec)) {
         int32_t rounded =
             nearbyint(static_cast<float>(inp[i].vals[j]) * multiplier) +
             zero_point;
@@ -1068,7 +1070,7 @@ struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
     std::array<value_type, size()> qvals;
     std::array<float, float_num_vecs() * 8> float_vals;
 
-    for (int i = 0; i < float_num_vecs(); ++i) {
+    for (const auto i : c10::irange(float_num_vecs())) {
       rhs[i].store(&float_vals[i * 8], 8);
     }
 
@@ -1084,7 +1086,7 @@ struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
 
   Vectorized<c10::quint8> maximum(Vectorized<c10::quint8> b) const {
     Vectorized<c10::quint8> retval;
-    for (size_t i = 0; i < size(); ++i) {
+    for (const auto i : c10::irange(size())) {
       retval.vals[i] = std::max<value_type>(vals[i], b.vals[i]);
     }
     return retval;
@@ -1092,7 +1094,7 @@ struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
 
   Vectorized<c10::quint8> minimum(Vectorized<c10::quint8> b) const {
     Vectorized<c10::quint8> retval;
-    for (size_t i = 0; i < size(); ++i) {
+    for (const auto i : c10::irange(size())) {
       retval.vals[i] = std::min<value_type>(vals[i], b.vals[i]);
     }
     return retval;
@@ -1107,7 +1109,7 @@ struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
       Vectorized<c10::quint8> zero_point,
       Vectorized<c10::quint8> q_six) {
     Vectorized<c10::quint8> retval;
-    for (size_t i = 0; i < size(); ++i) {
+    for (const auto i : c10::irange(size())) {
       retval.vals[i] = std::min<value_type>(
           std::max<value_type>(vals[i], zero_point.vals[i]), q_six.vals[i]);
     }
@@ -1117,8 +1119,8 @@ struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
   int_vec_return_type widening_subtract(Vectorized<c10::quint8> b) const {
     int_vec_return_type retval;
     constexpr int elem_per_int_vec = size() / int_num_vecs();
-    for (size_t i = 0; i < int_num_vecs(); ++i) {
-      for (size_t j = 0; j < elem_per_int_vec; ++j) {
+    for (const auto i : c10::irange(int_num_vecs())) {
+      for (const auto j : c10::irange(elem_per_int_vec)) {
         retval[i].vals[j] =
             static_cast<int32_t>(vals[i * elem_per_int_vec + j]) -
             static_cast<int32_t>(b.vals[i * elem_per_int_vec + j]);
@@ -1134,8 +1136,8 @@ struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
     constexpr auto min_val = std::numeric_limits<value_type>::min();
     constexpr auto max_val = std::numeric_limits<value_type>::max();
     Vectorized<c10::quint8> retval;
-    for (size_t i = 0; i < int_num_vecs(); ++i) {
-      for (size_t j = 0; j < elem_per_int_vec; ++j) {
+    for (const auto i : c10::irange(int_num_vecs())) {
+      for (const auto j : c10::irange(elem_per_int_vec)) {
         int32_t rounded =
             nearbyint(static_cast<float>(inp[i].vals[j]) * multiplier) +
             zero_point;

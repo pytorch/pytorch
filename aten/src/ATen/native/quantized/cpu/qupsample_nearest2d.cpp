@@ -41,18 +41,19 @@ static void upsample_nearest2d_out_frame(
     return;
   }
 
-  for (int64_t h2 = 0; h2 < output_height; ++h2) {
+  for (const auto h2 : c10::irange(output_height)) {
     const int64_t h1 =
         nearest_neighbor_compute_source_index(height_scale, h2, input_height);
 
-    for (int64_t w2 = 0; w2 < output_width; ++w2) {
+    for (const auto w2 : c10::irange(output_width)) {
       const int64_t w1 =
           nearest_neighbor_compute_source_index(width_scale, w2, input_width);
 
       const auto* pos1 = &i_p[h1 * input_width + w1];
       auto* pos2 = &o_p[h2 * output_width + w2];
 
-      for (int64_t c = 0; c < channels; ++c) {
+      for (const auto c : c10::irange(channels)) {
+        (void)c; //Suppress unused variable warning
         pos2[0] = pos1[0];
         pos1 += input_height * input_width;
         pos2 += output_height * output_width;
@@ -85,11 +86,11 @@ static void upsample_nearest2d_out_frame_nhwc(
       return;
     }
 
-    for (int64_t h2 = 0; h2 < output_height; ++h2) {
+    for (const auto h2 : c10::irange(output_height)) {
       const int64_t h1 =
           nearest_neighbor_compute_source_index(height_scale, h2, input_height);
 
-      for (int64_t w2 = 0; w2 < output_width; ++w2) {
+      for (const auto w2 : c10::irange(output_width)) {
         const int64_t w1 =
             nearest_neighbor_compute_source_index(width_scale, w2, input_width);
 

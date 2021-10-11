@@ -19,6 +19,7 @@
 #include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
 #include <c10/util/accumulate.h>
+#include <c10/util/irange.h>
 #include <c10/util/python_stub.h>
 
 // A global boolean variable to control whether we free memory when a Tensor
@@ -68,7 +69,7 @@ inline std::vector<int64_t> ToVectorint64_t(ArrayRef<int> src) {
  */
 inline int64_t size_from_dim_(int k, IntArrayRef dims) {
   int64_t r = 1;
-  for (size_t i = k; i < dims.size(); ++i) {
+  for (const auto i : c10::irange(k, dims.size())) {
     r *= dims[i];
   }
   return r;
@@ -78,7 +79,7 @@ inline int64_t size_from_dim_(int k, IntArrayRef dims) {
 inline int64_t size_to_dim_(int k, IntArrayRef dims) {
   TORCH_CHECK((unsigned)k <= dims.size());
   int64_t r = 1;
-  for (int i = 0; i < k; ++i) {
+  for (const auto i : c10::irange(k)) {
     r *= dims[i];
   }
   return r;
@@ -2143,7 +2144,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     auto old_numel = numel_;
     sizes_and_strides_.resize(src.size());
     int64_t new_numel = 1;
-    for (size_t i = 0; i < src.size(); ++i) {
+    for (const auto i : c10::irange(src.size())) {
       new_numel *= src[i];
       sizes_and_strides_.size_at_unchecked(i) = src[i];
     }

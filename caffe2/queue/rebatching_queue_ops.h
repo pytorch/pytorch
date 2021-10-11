@@ -32,7 +32,7 @@ class EnqueueRebatchingQueueOp : public Operator<CPUContext> {
     CAFFE_ENFORCE_EQ(InputSize(), queue->numBlobs() + 1);
     std::vector<const Tensor*> inputTensors;
     inputTensors.reserve(InputSize() - 1);
-    for (int i = 1; i < InputSize(); ++i) {
+    for (const auto i : c10::irange(1, InputSize())) {
       inputTensors.push_back(&Input(i));
     }
 
@@ -56,7 +56,7 @@ class DequeueRebatchingQueueOp : public Operator<CPUContext> {
 
     std::vector<Tensor*> outputTensors;
     outputTensors.reserve(OutputSize());
-    for (int i = 0; i < OutputSize(); ++i) {
+    for (const auto i : c10::irange(OutputSize())) {
       outputTensors.push_back(Output(i));
     }
 

@@ -9,6 +9,7 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 #include <c10/core/CompileTimeFunctionPointer.h>
+#include <c10/util/irange.h>
 #include <torch/library.h>
 #include <vector>
 
@@ -94,7 +95,7 @@ inline void _call_caffe2_op_from_c10(
     // We should not unwrap the list if we expect tensor list in the schema.
     torch::jit::push(*stack, outputs);
   } else {
-    for (size_t i = 0; i < outputs.size(); ++i) {
+    for (const auto i : c10::irange(outputs.size())) {
       torch::jit::push(*stack, outputs.extract(i));
     }
   }

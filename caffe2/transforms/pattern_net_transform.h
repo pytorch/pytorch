@@ -28,7 +28,7 @@ class TORCH_API PatternNetTransform : public Transform {
         "External outputs do not match!");
     ordered_ops_ = GetPatternTraversalOrder(p_);
     inverse_ops_.resize(ordered_ops_.size());
-    for (size_t i = 0; i < ordered_ops_.size(); i++) {
+    for (const auto i : c10::irange(ordered_ops_.size())) {
       inverse_ops_[ordered_ops_[i]] = i;
     }
   }

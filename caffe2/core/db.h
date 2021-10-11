@@ -4,6 +4,7 @@
 #include <mutex>
 
 #include <c10/util/Registry.h>
+#include <c10/util/irange.h>
 #include <c10/util/string_view.h>
 #include "caffe2/core/blob_serialization.h"
 #include "caffe2/proto/caffe2_pb.h"
@@ -248,7 +249,8 @@ class TORCH_API DBReader {
     *value = cursor_->value();
 
     // In sharded mode, each read skips num_shards_ records
-    for (uint32_t s = 0; s < num_shards_; s++) {
+    for (const auto s : c10::irange(num_shards_)) {
+      (void)s; // Suppress unused variable
       cursor_->Next();
       if (!cursor_->Valid()) {
         MoveToBeginning();
@@ -292,7 +294,8 @@ class TORCH_API DBReader {
 
   void MoveToBeginning() const {
     cursor_->SeekToFirst();
-    for (uint32_t s = 0; s < shard_id_; s++) {
+    for (const auto s : c10::irange(shard_id_)) {
+      (void)s; // Suppress unused variable
       cursor_->Next();
       CAFFE_ENFORCE(
           cursor_->Valid(), "Db has fewer rows than shard id: ", s, shard_id_);

@@ -24,6 +24,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/string_utils.h"
 #include "c10/util/string_utils.h"
+#include <c10/util/irange.h>
 
 using std::map;
 using std::shared_ptr;
@@ -55,12 +56,12 @@ void writeTextOutput(
   int dims_size = tensor_proto.dims_size();
   long long elem_dim_size =
       dims_size > 1 ? tensor_proto.dims(1) : tensor_proto.dims(0);
-  for (int i = 2; i < dims_size; i++) {
+  for (const auto i : c10::irange(2, dims_size)) {
     elem_dim_size *= tensor_proto.dims(i);
   }
   std::vector<std::string> lines;
   std::string dims;
-  for (int i = 0; i < dims_size; i++) {
+  for (const auto i : c10::irange(dims_size)) {
     int dim = tensor_proto.dims(i);
     if (i > 0) {
       dims += ", ";

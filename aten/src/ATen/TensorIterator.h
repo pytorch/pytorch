@@ -4,6 +4,7 @@
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/TypeCast.h>
+#include <c10/util/irange.h>
 #include <ATen/core/Dimname.h>
 #include <ATen/core/Range.h>
 #include <ATen/core/TensorBase.h>
@@ -322,9 +323,9 @@ private:
         char** base, const int64_t* strides, int64_t size0, int64_t size1) {
       PtrVector data(base, base + ntensor);
       const int64_t* outer_strides = &strides[ntensor];
-      for (int64_t i = 0; i < size1; i++) {
+      for (const auto i : c10::irange(size1)) {
         if (i > 0) {
-          for (int64_t arg = 0; arg < ntensor; arg++) {
+          for (const auto arg : c10::irange(ntensor)) {
             data[arg] += outer_strides[arg];
           }
         }
@@ -397,7 +398,7 @@ public:
 
   bool has_contiguous_first_dim() const {
     int num_tensors = ntensors();
-    for (int i = 0; i < num_tensors; i++) {
+    for (const auto i : c10::irange(num_tensors)) {
       if (strides(i)[0] != element_size(i)) {
         return false;
       }

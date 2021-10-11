@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
+#include <c10/util/irange.h>
 
 #include <algorithm>
 
@@ -30,15 +31,15 @@ static void im2col(
   const int64_t width_col = output_width;
   const int64_t channels_col = channels * kernel_h * kernel_w;
 
-  for (int64_t c_col = 0; c_col < channels_col; ++c_col) {
+  for (const auto c_col : c10::irange(channels_col)) {
     int64_t w_offset = c_col % kernel_w;
     int64_t h_offset = (c_col / kernel_w) % kernel_h;
     int64_t c_im = c_col / kernel_h / kernel_w;
 
-    for (int64_t h_col = 0; h_col < height_col; ++h_col) {
+    for (const auto h_col : c10::irange(height_col)) {
       int64_t h_im = h_col * stride_h - pad_h + h_offset * dilation_h;
 
-      for (int64_t w_col = 0; w_col < width_col; ++w_col) {
+      for (const auto w_col : c10::irange(width_col)) {
         int64_t w_im = w_col * stride_w - pad_w + w_offset * dilation_w;
         data_col[(c_col * height_col + h_col) * width_col + w_col] =
             (h_im >= 0 && w_im >= 0 && h_im < height && w_im < width)
@@ -72,15 +73,15 @@ static void col2im(
   const int64_t width_col = output_width;
   const int64_t channels_col = channels * kernel_h * kernel_w;
 
-  for (int64_t c_col = 0; c_col < channels_col; ++c_col) {
+  for (const auto c_col : c10::irange(channels_col)) {
     int64_t w_offset = c_col % kernel_w;
     int64_t h_offset = (c_col / kernel_w) % kernel_h;
     int64_t c_im = c_col / kernel_h / kernel_w;
 
-    for (int64_t h_col = 0; h_col < height_col; ++h_col) {
+    for (const auto h_col : c10::irange(height_col)) {
       int64_t h_im = h_col * stride_h - pad_h + h_offset * dilation_h;
 
-      for (int64_t w_col = 0; w_col < width_col; ++w_col) {
+      for (const auto w_col : c10::irange(width_col)) {
         int64_t w_im = w_col * stride_w - pad_w + w_offset * dilation_w;
 
         if (h_im >= 0 && h_im < height && w_im >= 0 && w_im < width)

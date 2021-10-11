@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
+#include <c10/util/irange.h>
 
 #include <tuple>
 
@@ -45,13 +46,13 @@ Tensor _bincount_cpu_template(
         weights.options().pinned_memory_opt());
     weights_t* output_p = output.data_ptr<weights_t>();
     const weights_t* weights_p = weights.data_ptr<weights_t>();
-    for (int64_t i = 0; i < self_size; i++) {
+    for (const auto i : c10::irange(self_size)) {
       output_p[self_p[i]] += weights_p[i];
     }
   } else {
     output = native::zeros({nbins}, kLong);
     int64_t* output_p = output.data_ptr<int64_t>();
-    for (int64_t i = 0; i < self_size; i++) {
+    for (const auto i : c10::irange(self_size)) {
       output_p[self_p[i]] += 1L;
     }
   }

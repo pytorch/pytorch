@@ -21,7 +21,7 @@ class FloorOp final : public Operator<Context> {
 
     const float* Xdata = X.template data<float>();
     float* Ydata = Y->template mutable_data<float>();
-    for (int i = 0; i < X.numel(); ++i) {
+    for (const auto i : c10::irange(X.numel())) {
       Ydata[i] = std::floor(Xdata[i]);
     }
     return true;

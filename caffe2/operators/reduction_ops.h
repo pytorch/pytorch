@@ -164,7 +164,7 @@ class MaxReductionOp : public Operator<Context> {
           &context_);
     } else {
       const int input_size = N * M;
-      for (int i = 0; i < batch_size; ++i) {
+      for (const auto i : c10::irange(batch_size)) {
         math::ColwiseMax<T, Context>(
             M,
             N,

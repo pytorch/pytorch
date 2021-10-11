@@ -7,6 +7,7 @@
 #include <ATen/native/cpu/GridSamplerKernel.h>
 #include <ATen/cpu/vml.h>
 #include <c10/util/C++17.h>
+#include <c10/util/irange.h>
 
 #include <algorithm>
 #include <cstring>
@@ -50,7 +51,7 @@ namespace at { namespace native { namespace {
  *      //           from the beginning of this slice.
  *      //      iii. `len` as the number of valid locations in the vectors.
  *      //           (There might not be enough near boundary.)
- *      for (int n = 0; n < input_accessor.size(0); n++) {
+ *      for (const auto n : c10::irange(input_accessor.size(0))) {
  *        grid_sample_2d_grid_slice_iterator(
  *          grid_accessor[n],
  *          [&](const Vectorized<scalar_t>& grid_x,
@@ -437,7 +438,7 @@ mask_scatter_add(const scalar_t *src, scalar_t* base_addr,
   #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
   # pragma unroll
   #endif
-  for (int64_t i = 0; i < len; i++) {
+  for (const auto i : c10::irange(len)) {
     if (mask[i] & 0x01) {
       base_addr[offsets[i]] += src[i];
     }
@@ -562,7 +563,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
     #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
     # pragma unroll
     #endif
-    for (int64_t c = 0; c < C; ++c) {
+    for (const auto c : c10::irange(C)) {
       auto inp_slice_C_ptr = inp_slice[c].data();
 
       // mask_gather zeros out the mask, so we need to make copies
@@ -645,7 +646,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
     #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
     # pragma unroll
     #endif
-    for (int64_t c = 0; c < C; ++c) {
+    for (const auto c : c10::irange(C)) {
       auto inp_slice_C_ptr = inp_slice[c].data();
       auto gInp_slice_C_ptr = gInp_slice[c].data();
       auto gOut = Vec::loadu(gOut_slice[c].data() + offset, len);
@@ -778,7 +779,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Nearest,
     #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
     # pragma unroll
     #endif
-    for (int64_t c = 0; c < C; ++c) {
+    for (const auto c : c10::irange(C)) {
       mask_scatter_add(gOut_slice[c].data() + offset, gInp_slice[c].data(),
                        gInp_offset_arr, mask_arr, len);
     }
@@ -911,13 +912,13 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
     #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
     # pragma unroll
     #endif
-    for (int64_t c = 0; c < C; ++c) {
+    for (const auto c : c10::irange(C)) {
       auto inp_slice_C_ptr = inp_slice[c].data();
 
       // Interpolate the 4 values in the x direction
       // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
       Vec interp_x[4];
-      for (int64_t i = 0; i < 4; ++i) {
+      for (const auto i : c10::irange(4)) {
         interp_x[i] =
           coeff_x[0] * get_value_bounded(inp_slice_C_ptr, ix - Vec(1), iy + Vec(-1 + i)) +
           coeff_x[1] * get_value_bounded(inp_slice_C_ptr, ix + Vec(0), iy + Vec(-1 + i)) +
@@ -965,13 +966,13 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
     #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
     # pragma unroll
     #endif
-    for (int64_t c = 0; c < C; ++c) {
+    for (const auto c : c10::irange(C)) {
       auto inp_slice_C_ptr = inp_slice[c].data();
       auto gInp_slice_C_ptr = gInp_slice[c].data();
       auto gOut = Vec::loadu(gOut_slice[c].data() + offset, len);
 
-      for (int64_t i = 0; i < 4; ++i) {
-        for (int64_t j = 0; j < 4; ++j) {
+      for (const auto i : c10::irange(4)) {
+        for (const auto j : c10::irange(4)) {
           auto xx = ix + Vec(-1 + i);
           auto yy = iy + Vec(-1 + j);
 
@@ -1078,7 +1079,7 @@ static inline void grid_sample_2d_grid_slice_iterator(
     } else {
       // If only [W] is contiguous, apply line_fn once for each h slice.
       auto grid_ptr_NH = grid_ptr;
-      for (int64_t h = 0; h < out_H; h++) {
+      for (const auto h : c10::irange(out_H)) {
         line_fn(grid_ptr_NH, grid_ptr_NH + grid_sCoor, h * out_W, out_W);
         grid_ptr_NH += grid_sH;
       }
@@ -1094,7 +1095,7 @@ static inline void grid_sample_2d_grid_slice_iterator(
     #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
     # pragma unroll
     #endif
-    for (int64_t h = 0; h < out_H; h++) {
+    for (const auto h : c10::irange(out_H)) {
       auto grid_ptr_x = grid_ptr + h * grid_sH;
       auto grid_ptr_y = grid_ptr_x + grid_sCoor;
       auto i_offsets = iVec::arange(0, grid_sW);
@@ -1140,7 +1141,7 @@ Tensor grid_sampler_2d_cpu_kernel_impl(const Tensor& input, const Tensor& grid,
     ApplyGridSample<scalar_t, 2, interp, padding, align_corners>               \
     grid_sample(inp_acc);                                                      \
     parallel_for(0, N, grain_size, [&](int64_t begin, int64_t end) {           \
-      for (int64_t n = begin; n < end; n++) {                                  \
+      for (const auto n : c10::irange(begin, end)) {                                  \
         auto out_slice = out_acc[n];                                           \
         auto inp_slice = inp_acc[n];                                           \
         grid_sample_2d_grid_slice_iterator(                                    \
@@ -1212,7 +1213,7 @@ grid_sampler_2d_backward_cpu_kernel_impl(const Tensor& grad_output_,
     ApplyGridSample<scalar_t, 2, interp, padding, align_corners>                 \
     grid_sample(inp_acc);                                                        \
     parallel_for(0, N, grain_size, [&](int64_t begin, int64_t end) {             \
-      for (int64_t n = begin; n < end; n++) {                                    \
+      for (const auto n : c10::irange(begin, end)) {                                    \
         auto gInp_slice = gInp_acc[n];                                           \
         auto gGrid_slice = gGrid_acc[n];                                         \
         auto gOut_slice = gOut_acc[n];                                           \

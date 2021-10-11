@@ -7,6 +7,7 @@
 #include <ATen/native/quantized/cpu/packed_params.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <c10/util/irange.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
 
@@ -539,7 +540,7 @@ template<typename T>
 static std::vector<T> unpair_vec(std::vector<pair_of<T>>&& vals) {
   std::vector<T> result;
   result.reserve(vals.size() * 2);
-  for (size_t i = 0; i < vals.size(); i++) {
+  for (const auto i : c10::irange(vals.size())) {
     result.push_back(std::move(vals[i].first));
     result.push_back(std::move(vals[i].second));
   }
@@ -986,7 +987,7 @@ struct PackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
     // are completed now). The sliced parts are also saved, because we will need
     // to return a tensor of final hidden state.
     auto hidden = input_hidden;
-    for (int64_t i = 0; i < num_steps; ++i) {
+    for (const auto i : c10::irange(num_steps)) {
       const int64_t batch_size = batch_sizes[i];
       auto step_input = input_ptr->narrow(0, input_offset, batch_size);
       input_offset += batch_size;
@@ -1121,7 +1122,7 @@ apply_layer_stack(const Layer<io_type, hidden_type, weight_type>& layer, const i
   auto hidden_it = hiddens.begin();
   auto weight_it = weights.begin();
   std::vector<hidden_type> final_hiddens;
-  for (int64_t l = 0; l < num_layers; ++l) {
+  for (const auto l : c10::irange(num_layers)) {
     auto layer_output = layer(layer_input, *(hidden_it++), *(weight_it++));
     final_hiddens.push_back(layer_output.final_hidden);
     layer_input = layer_output.outputs;
@@ -1177,7 +1178,7 @@ std::tuple<io_type, Tensor, Tensor> _lstm_impl(
   int64_t total_layers = layer_hx.size();
   std::vector<typename LSTMCell<cell_params>::hidden_type> hiddens;
   hiddens.reserve(total_layers);
-  for (int64_t i = 0; i < total_layers; ++i) {
+  for (const auto i : c10::irange(total_layers)) {
     hiddens.emplace_back(std::move(layer_hx[i]), std::move(layer_cx[i]));
   }
 

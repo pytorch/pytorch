@@ -10,6 +10,7 @@
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/batch_norm.h>
 #include <ATen/native/Normalization.h>
+#include <c10/util/irange.h>
 
 #include <vector>
 
@@ -156,7 +157,7 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
   // Reduce all dimensions except dim=1
   DimVector reduce_dims(ndim - 1);
   reduce_dims[0] = 0;
-  for (int64_t i = 2; i < ndim; ++i) {
+  for (const auto i : c10::irange(2, ndim)) {
     reduce_dims[i - 1] = i;
   }
 
@@ -178,7 +179,7 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
     batch_norm_cpu_collect_stats_stub(kCPU, _mean, _var_sum, input);
 
     parallel_for(0, n_input, 1, [&](int64_t b_begin, int64_t b_end) {
-      for (int64_t f = b_begin; f < b_end; ++f) {
+      for (const auto f : c10::irange(b_begin, b_end)) {
         save_mean_a[f] = _mean_a[f];
         save_var_transform_a[f] = VarTransform<accscalar_t>{}(_var_sum_a[f] / n, eps);
 
@@ -206,7 +207,7 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
 
   parallel_for(0, n_input, 1, [&](int64_t b_begin, int64_t b_end) {
     TensorIterator iter(reduce_iter);
-    for (int64_t f = b_begin; f < b_end; ++f) {
+    for (const auto f : c10::irange(b_begin, b_end)) {
       // compute variance per input
       iter.unsafe_replace_operand(0, in_data + channel_stride * f);
       accscalar_t var_sum = 0;
@@ -283,7 +284,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
   // Reduce all dimensions except dim=1
   DimVector reduce_dims(ndim - 1);
   reduce_dims[0] = 0;
-  for (int64_t i = 2; i < ndim; ++i) {
+  for (const auto i : c10::irange(2, ndim)) {
     reduce_dims[i - 1] = i;
   }
 
@@ -330,7 +331,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
       TensorIterator unary_iter_local(unary_iter);
       TensorIterator binary_iter_local(binary_iter);
 
-      for (int64_t f = b_begin; f < b_end; ++f) {
+      for (const auto f : c10::irange(b_begin, b_end)) {
         scalar_t w = weight.defined() ? weight_a[f] : 1;
 
         scalar_t mean, invstd;

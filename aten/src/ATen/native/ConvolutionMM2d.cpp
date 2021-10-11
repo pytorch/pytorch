@@ -7,6 +7,7 @@
 #include <ATen/div_rtn.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/Unfold2d.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -299,7 +300,7 @@ void slow_conv2d_backward_out_cpu_template(
     at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
       auto fgrad_input = std::make_unique<scalar_t[]>(
           c10::multiply_integers(finput.sizes().slice(1)));
-      for (int64_t t = start; t < end; t++) {
+      for (const auto t : c10::irange(start, end)) {
         auto grad_input_t = grad_input_a[t];
         auto grad_output_t = grad_output_a[t];
         slow_conv2d_backward_update_grad_input_frame(
@@ -478,7 +479,7 @@ std::tuple<Tensor&, Tensor&> slow_conv2d_forward_out_cpu(
     auto weight_2d_a = weight_2d.accessor<scalar_t, 2>();
 
     at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
-      for (int64_t t = start; t < end; t++) {
+      for (const auto t : c10::irange(start, end)) {
         auto input_t = input_a[t];
         auto output_t = output_a[t];
         auto finput_t = finput_a[t];

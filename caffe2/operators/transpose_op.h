@@ -49,7 +49,7 @@ class TransposeOp : public Operator<Context> {
     }
     const at::IntArrayRef X_dims = X.sizes();
     std::vector<std::int64_t> Y_dims(ndim);
-    for (int i = 0; i < ndim; ++i) {
+    for (const auto i : c10::irange(ndim)) {
       Y_dims[i] = X_dims[axes_[i]];
     }
     Y->Resize(Y_dims);
