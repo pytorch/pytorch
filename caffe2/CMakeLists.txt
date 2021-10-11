@@ -1007,7 +1007,7 @@ if(NOT INTERN_BUILD_MOBILE)
 endif()
 
 # Build model tracer for tracing-based selective build
-if(NOT BUILD_LITE_INTERPRETER AND NOT INTERN_BUILD_MOBILE)
+if(TRACING_BASED AND NOT BUILD_LITE_INTERPRETER AND NOT INTERN_BUILD_MOBILE)
   add_subdirectory(
     ${TORCH_ROOT}/torch/csrc/jit/mobile/model_tracer
     ${CMAKE_BINARY_DIR}/model_tracer
