@@ -312,10 +312,60 @@ struct TORCH_API TupleElements {
     }
   }
 
-  // Simply not implemented; no particular reason not to implement in
-  // the future except that it seems unnecessary.
-  TupleElements(const TupleElements&) = delete;
-  TupleElements& operator=(const TupleElements&) = delete;
+  // It would be nice to make this noncopyable to prevent people from
+  // writing code like `auto output =
+  // forward(...).toTuple()->elements()` (which does refcount bumps on
+  // each element, unlike the more efficient but verbose
+  // ```
+  // auto outputIntrusivePtr = forward(...).toTuple();
+  // const auto& output = outputIntrusivePtr->elements();
+  // ```
+  // ), but there is simply an overwhelming amount of code that does
+  // it the inefficient way.
+
+  TupleElements(const TupleElements& rhs)
+  : inlineSize_(rhs.inlineSize_) {
+    if (rhs.inlineSize_) {
+      for (const auto  ii : c10::irange(inlineSize_)) {
+        new (&elementsInline_[ii]) IValue(rhs.elementsInline_[ii]);
+      }
+    } else {
+      new (&elementsVector_) std::vector<IValue>(rhs.elementsVector_);
+    }
+  }
+
+  TupleElements& operator=(const TupleElements& rhs) {
+    if (inlineSize_) {
+      if (rhs.inlineSize_) {
+        for (const auto ii : c10::irange(std::min(inlineSize_, rhs.inlineSize_))) {
+          elementsInline_[ii] = rhs.elementsInline_[ii];
+        }
+        if (rhs.inlineSize_ > inlineSize_) {
+          for (const auto ii : c10::irange(inlineSize_, rhs.inlineSize_)) {
+            new (&elementsInline_[ii]) IValue(rhs.elementsInline_[ii]);
+          }
+        } else {
+          for (const auto ii : c10::irange(rhs.inlineSize_, inlineSize_)) {
+            elementsInline_[ii].~IValue();
+          }
+        }
+      } else {
+        destroyInline();
+        new (&elementsVector_) std::vector<IValue>(rhs.elementsVector_);
+      }
+    } else {
+      if (rhs.inlineSize_) {
+        elementsVector_.~vector();
+        for (const auto ii : c10::irange(rhs.inlineSize_)) {
+          new (&elementsInline_[ii]) IValue(rhs.elementsInline_[ii]);
+        }
+      } else {
+        elementsVector_ = rhs.elementsVector_;
+      }
+    }
+    inlineSize_ = rhs.inlineSize_;
+    return *this;
+  }
 
   TupleElements(TupleElements&& rhs) noexcept
   : inlineSize_(rhs.inlineSize_) {
