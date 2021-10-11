@@ -741,8 +741,8 @@ class TestUtilityFuns(TestCase):
         class QModule(torch.nn.Module):
             def __init__(self):
                 super(QModule, self).__init__()
-                self.quant1 = torch.quantization.QuantStub()
-                self.dequant = torch.quantization.DeQuantStub()
+                self.quant1 = torch.ao.quantization.QuantStub()
+                self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x):
                 res = self.quant1(x)
@@ -751,9 +751,9 @@ class TestUtilityFuns(TestCase):
         model = QModule()
         torch.backends.quantized.engine = "qnnpack"
         pt_inputs = (torch.randn(1, 2, 3, 4))
-        model.qconfig = torch.quantization.default_qconfig
-        q_model = torch.quantization.prepare(model, inplace=False)
-        q_model = torch.quantization.convert(q_model, inplace=False)
+        model.qconfig = torch.ao.quantization.default_qconfig
+        q_model = torch.ao.quantization.prepare(model, inplace=False)
+        q_model = torch.ao.quantization.convert(q_model, inplace=False)
 
         q_model.eval()
 
@@ -933,6 +933,52 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "prim::Constant"
         assert len(list(graph.nodes())) == 2  # onnx::Sub and onnx::Add nodes only.
 
+    def test_duplicated_output_node(self):
+        class DuplicatedOutputNet(torch.nn.Module):
+            def __init__(self, input_size, num_classes):
+                super(DuplicatedOutputNet, self).__init__()
+                self.fc1 = torch.nn.Linear(input_size, num_classes)
+
+            def forward(self, input0, input1):
+                out1 = self.fc1(input0)
+                out2 = self.fc1(input1)
+                return out1, out1, out2, out1, out2
+
+        N, D_in, H, D_out = 64, 784, 500, 10
+        pt_model = DuplicatedOutputNet(D_in, D_out)
+
+        f = io.BytesIO()
+        x = torch.randn(N, D_in)
+        dynamic_axes = {
+            'input0': {0: 'input0_dim0', 1: 'input0_dim1'},
+            'input1': {0: 'input1_dim0', 1: 'input1_dim1'},
+            'output-0': {0: 'output-0_dim0', 1: 'output-0_dim1'},
+            'output-1': {0: 'output-1_dim0', 1: 'output-1_dim1'},
+            'output-2': {0: 'output-2_dim0', 1: 'output-2_dim1'},
+            'output-3': {0: 'output-3_dim0', 1: 'output-3_dim1'},
+            'output-4': {0: 'output-4_dim0', 1: 'output-4_dim1'}}
+
+        torch.onnx.export(pt_model,
+                          (x, x),
+                          f,
+                          input_names=['input0', 'input1'],
+                          output_names=['output-0', 'output-1', 'output-2', 'output-3', 'output-4'],
+                          do_constant_folding=False,
+                          training=torch.onnx.TrainingMode.TRAINING,
+                          dynamic_axes=dynamic_axes,
+                          verbose=True,
+                          keep_initializers_as_inputs=True)
+
+        graph = onnx.load(io.BytesIO(f.getvalue()))
+        assert graph.graph.input[0].name == "input0"
+        assert graph.graph.input[1].name == "input1"
+        for i in range(5):
+            assert graph.graph.output[i].name == "output-" + str(i)
+        assert graph.graph.node[0].op_type == "Gemm"
+        assert graph.graph.node[1].op_type == "Identity"
+        assert graph.graph.node[2].op_type == "Identity"
+        assert graph.graph.node[3].op_type == "Gemm"
+        assert graph.graph.node[4].op_type == "Identity"
 
 # opset 10 tests
 TestUtilityFuns_opset10 = type(str("TestUtilityFuns_opset10"),
