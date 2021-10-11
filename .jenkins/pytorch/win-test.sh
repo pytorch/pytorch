@@ -51,7 +51,7 @@ fi
 if [[ "$TEST_CONFIG" = "force_on_cpu" ]]; then
   # run the full test suite for force_on_cpu test
   export USE_CUDA=0
-elif [[ -n $GITHUB_HEAD_REF && "$RUN_SMOKE_TESTS_ONLY_ON_PR" == "true" ]]; then
+elif [[ "$TEST_CONFIG" == "smoke_tests" ]]; then
   export RUN_SMOKE_TESTS_ONLY=1
 fi
 
@@ -73,7 +73,7 @@ run_tests() {
           "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
         fi
     else
-        if [[ "${JOB_BASE_NAME}" == *-test1 || "${SHARD_NUMBER}" == 1 ]]; then
+        if [[ "${JOB_BASE_NAME}" == *-test1 || ("${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1) ]]; then
             "$SCRIPT_HELPERS_DIR"/test_python_first_shard.bat "$DETERMINE_FROM"
 
             if [[ -z ${RUN_SMOKE_TESTS_ONLY} ]]; then
@@ -83,7 +83,7 @@ run_tests() {
               fi
             fi
 
-        elif [[ "${JOB_BASE_NAME}" == *-test2 || "${SHARD_NUMBER}" == 2 ]]; then
+        elif [[ "${JOB_BASE_NAME}" == *-test2 || ("${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1) ]]; then
             "$SCRIPT_HELPERS_DIR"/test_python_second_shard.bat "$DETERMINE_FROM"
 
             if [[ -z ${RUN_SMOKE_TESTS_ONLY} ]]; then
