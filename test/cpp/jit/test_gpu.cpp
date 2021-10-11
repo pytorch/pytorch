@@ -17581,9 +17581,7 @@ TEST(NVFuserTest, FusionSmemPredicateUnswitch_CUDA) {
   auto ref1 = t0 + 4;
   auto ref2 = t1 + 3;
 
-  // TODO: this needs a fix for #1133
-  // testValidate(&fusion, outputs, aten_inputs, {ref1, ref2}, __LINE__,
-  // __FILE__);
+  testValidate(&fusion, outputs, aten_inputs, {ref1, ref2}, __LINE__, __FILE__);
 }
 
 // Repro of issue #1136

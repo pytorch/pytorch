@@ -457,25 +457,8 @@ void UnswitchPredicate::predicateOn(kir::Expr* tv_expr) {
     }
   }
 
-  // Adds new predicates for parallelized domains
-  auto pred_map =
-      ParallelizedDomainPredicate::getPredicateMap(tv_expr, for_loops_);
-  for (auto pt : kParallelTypeThreads) {
-    auto pred_info_it = pred_map.find(pt);
-    if (pred_info_it == pred_map.end()) {
-      continue;
-    }
-    const auto& new_info = pred_info_it->second;
-    auto& predicated =
-        parallelized_dom_predicates_
-            .insert({pt, ParallelizedDomainPredicate::PredicateInfo{pt}})
-            .first->second;
-    for (auto id : new_info.ids()) {
-      if (predicated.addDomain(id)) {
-        predicates_.push_back(new_info.getPredicate());
-      }
-    }
-  }
+  // Note that non-exact parallelized leaf domains do not need to be
+  // predicated in the case of unswitch (#1182).
 }
 
 void UnswitchPredicate::openLoop(kir::ForLoop* fl) {
@@ -514,8 +497,7 @@ void UnswitchPredicate::openIte(kir::IfThenElse* ite) {
 UnswitchPredicate::UnswitchPredicate(
     std::vector<kir::ForLoop*> outer_loops,
     kir::ForLoop* unrolled_loop)
-    : merged_thread_pred_(ThreadPredicateMap::PredicateInfo()),
-      for_loops_(std::move(outer_loops)) {
+    : for_loops_(std::move(outer_loops)) {
   openLoop(unrolled_loop);
 }
 

@@ -140,19 +140,8 @@ class TORCH_CUDA_CU_API UnswitchPredicate {
   std::unordered_set<UnswitchPredicateKey, UnswitchPredicateKeyHash>
       predicated_keys_;
 
-  //! Track which parallelized domains have been predicated
-  std::unordered_map<
-      ParallelType,
-      ParallelizedDomainPredicate::PredicateInfo,
-      TypeHash>
-      parallelized_dom_predicates_;
-
   //! The predicates that have been generated.
   std::vector<kir::Bool*> predicates_;
-
-  //! Thread predicate for unswitched expressions. Predicate is false
-  //! if this optional value is null.
-  c10::optional<ThreadPredicateMap::PredicateInfo> merged_thread_pred_;
 
   std::vector<kir::ForLoop*> for_loops_;
 };
