@@ -1,8 +1,9 @@
 import os.path
 from glob import glob
 from typing import cast
-from torch.types import Storage
+
 import torch
+from torch.types import Storage
 
 # because get_storage_from_record returns a tensor!?
 class _HasStorage(object):
