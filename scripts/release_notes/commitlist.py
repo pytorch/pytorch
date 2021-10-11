@@ -95,6 +95,9 @@ class CommitList:
         files_changed = commit_files_changed(commit_hash)
         for file in files_changed:
             file_lowercase = file.lower()
+            if CommitList.keywordInFile(file, ['.circleci', 'third_party', '.jenkins']):
+                category = 'releng'
+                break
             # datapipe(s), torch/utils/data, test_{dataloader, datapipe}
             if CommitList.keywordInFile(file, ['torch/utils/data', 'test_dataloader', 'test_datapipe']):
                 category = 'dataloader_frontend'
@@ -129,6 +132,9 @@ class CommitList:
                 break
             if CommitList.keywordInFile(file, ['aten/src/ATen/native/LinearAlgebra.cpp', 'test/test_linalg.py', 'torch/linalg']):
                 category = 'linalg_frontend'
+                break
+            if CommitList.keywordInFile(file, ['torch/sparse']):
+                category = 'sparse_frontend'
                 break
 
         return Commit(commit_hash, category, 'Untopiced', title)
