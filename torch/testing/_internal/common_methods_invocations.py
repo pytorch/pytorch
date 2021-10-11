@@ -36,7 +36,7 @@ from torch.testing._internal.common_utils import \
      random_fullrank_matrix_distinct_singular_value,
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, TEST_SCIPY,
      torch_to_numpy_dtype_dict, TEST_WITH_ASAN,
-     GRADCHECK_NONDET_TOL)
+     GRADCHECK_NONDET_TOL, slowTest,)
 import torch.testing._internal.opinfo_helper as opinfo_helper
 
 from setuptools import distutils
@@ -2104,6 +2104,29 @@ def sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad=False,
         a.requires_grad = requires_grad
         out.append(SampleInput(a))
     return out
+
+def sample_inputs_linalg_pinv_singular(op_info, device, dtype, requires_grad=False, **kwargs):
+    """
+    This function produces factors `a` and `b` to generate inputs of the form `a @ b.t()` to
+    test the backward method of `linalg_pinv`. That way we always preserve the rank of the
+    input no matter the perturbations applied to it by the gradcheck.
+    Note that `pinv` is Frechet-differentiable in a rank-preserving neighborhood.
+    """
+    batches = [(), (0, ), (2, ), (1, 1)]
+    # the size of at least 30 is required to cause failures for the previous implicit implementation
+    # of the pinv's backward method, albeit it is slow.
+    size = [0, 3, 50]
+
+    def generate_samples():
+        for batch, m, n in product(batches, size, size):
+            for k in range(min(3, min(m, n))):
+                # Note that by making the columns of `a` and `b` orthonormal we make sure that
+                # the product matrix `a @ b.t()` has condition number 1 when restricted to its image
+                a = torch.rand(*batch, m, k, device=device, dtype=dtype).qr().Q.requires_grad_(requires_grad)
+                b = torch.rand(*batch, n, k, device=device, dtype=dtype).qr().Q.requires_grad_(requires_grad)
+                yield SampleInput(a, args=(b,))
+
+    return list(generate_samples())
 
 def sample_inputs_linalg_cond(op_info, device, dtype, requires_grad=False, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -9152,14 +9175,36 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            check_batched_grad=False,
            check_batched_gradgrad=False,
+           supports_forward_ad=True,
            sample_inputs_func=sample_inputs_linalg_invertible,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack]),
+    OpInfo('linalg.pinv',
+           aten_name='linalg_pinv',
+           variant_test_name='singular',
+           # pinv is Frechet-differentiable in a rank-preserving neighborhood,
+           # so we feed inputs that are the products of two full-rank factors,
+           # to avoid any rank changes caused by the perturbations in the gradcheck
+           op=lambda a, b: torch.linalg.pinv(a @ b.transpose(-1, -2)),
+           dtypes=floating_and_complex_types(),
+           supports_out=False,
+           check_batched_grad=False,
+           check_batched_gradgrad=False,
+           supports_forward_ad=True,
+           sample_inputs_func=sample_inputs_linalg_pinv_singular,
+           # Only large tensors show issues with implicit backward used prior to
+           # explicit backward implementation.
+           decorators=[slowTest, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
+           skips=(
+               # test does not work with passing lambda for op
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           )),
     OpInfo('linalg.pinv',
            aten_name='linalg_pinv',
            variant_test_name='hermitian',
            dtypes=floating_and_complex_types(),
            check_batched_grad=False,
            check_batched_gradgrad=False,
+           supports_forward_ad=True,
            sample_inputs_func=sample_inputs_linalg_pinv_hermitian,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
@@ -9386,6 +9431,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            check_batched_grad=False,
            check_batched_gradgrad=False,
+           supports_forward_ad=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            supports_out=False,
            sample_inputs_func=sample_inputs_linalg_invertible,

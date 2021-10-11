@@ -750,6 +750,10 @@
   self: -at::matmul(inverse.conj().transpose(-2, -1), at::matmul(grad, inverse.conj().transpose(-2, -1)))
   inverse: -at::matmul(at::matmul(inverse, self_t), inverse)
 
+- name: linalg_pinv(Tensor self, float rcond=1e-15, bool hermitian=False) -> Tensor
+  self: pinv_backward(grad, result, self)
+  result: pinv_jvp(self_p, result, self_t)
+
 - name: isnan(Tensor self) -> Tensor
   self: non_differentiable
 
