@@ -7735,56 +7735,9 @@ else:
         self._test_multinomial_empty(device, False, 1)
         self._test_multinomial_empty(device, False, 2)
 
-    def _generate_input(self, shape, dtype, device, with_extremal):
-        if shape == ():
-            x = torch.tensor((), dtype=dtype, device=device)
-        else:
-            if dtype.is_floating_point or dtype.is_complex:
-                # work around torch.randn not being implemented for bfloat16
-                if dtype == torch.bfloat16:
-                    x = torch.randn(*shape, device=device) * random.randint(30, 100)
-                    x = x.to(torch.bfloat16)
-                else:
-                    x = torch.randn(*shape, dtype=dtype, device=device) * random.randint(30, 100)
-                x[torch.randn(*shape) > 0.5] = 0
-                if with_extremal and dtype.is_floating_point:
-                    # Use extremal values
-                    x[torch.randn(*shape) > 0.5] = float('nan')
-                    x[torch.randn(*shape) > 0.5] = float('inf')
-                    x[torch.randn(*shape) > 0.5] = float('-inf')
-                elif with_extremal and dtype.is_complex:
-                    x[torch.randn(*shape) > 0.5] = complex('nan')
-                    x[torch.randn(*shape) > 0.5] = complex('inf')
-                    x[torch.randn(*shape) > 0.5] = complex('-inf')
-            elif dtype == torch.bool:
-                x = torch.zeros(shape, dtype=dtype, device=device)
-                x[torch.randn(*shape) > 0.5] = True
-            else:
-                x = torch.randint(15, 100, shape, dtype=dtype, device=device)
-
-        return x
-
-    def _test_where_scalar_template(self, device, dtype, exec_fn):
-        for with_extremal in [True, False]:
-            for ndims in range(0, 4):
-                shape = self._rand_shape(ndims, min_size=5, max_size=10)
-                for scalar_type in [int, float, complex]:
-                    if dtype.is_complex:
-                        # Use make_tensor when it has a flag to add extremals.
-                        condition = self._generate_input(shape, dtype, device, with_extremal).abs() > 0.5
-                    else:
-                        # Use make_tensor when it has a flag to add extremals.
-                        condition = self._generate_input(shape, dtype, device, with_extremal) > 0.5
-
-                    # Use make_tensor when it has a flag to add extremals.
-                    x = self._generate_input(shape, dtype, device, with_extremal)
-                    scalar_1 = scalar_type(random.random())
-
-                    exec_fn(scalar_type, dtype, condition, x, scalar_1)
-
     @dtypes(*(get_all_int_dtypes() + get_all_fp_dtypes() +
               get_all_complex_dtypes()))
-    def test_where_scalar_valid_combination(self, device, dtype):
+    def test_where_scalar(self, device, dtype):
 
         def checkResult(scalar_type, dtype, condition, x, scalar_1):
             def x_like(scalar):
@@ -7802,20 +7755,30 @@ else:
             scalar_t = x_like(scalar_1)
             # Remove this type promotion shenanigan once
             # torch.where supports tensors of different dtypes.
-            promoted_dtype = torch.result_type(x, scalar_t)
+            promoted_dtype = torch.result_type(x, scalar_1)
             tensor_out = torch.where(condition, x.to(promoted_dtype), scalar_t.to(promoted_dtype))
             self.assertEqual(scalar_out, tensor_out)
 
             # X = Scalar, Y = Tensor
             scalar_out = torch.where(condition, scalar_1, x)
             scalar_t = x_like(scalar_1)
-            # Remove this type promotion shenanigan once
-            # torch.where supports tensors of different dtypes.
-            promoted_dtype = torch.result_type(x, scalar_t)
             tensor_out = torch.where(condition, scalar_t.to(promoted_dtype), x.to(promoted_dtype))
             self.assertEqual(scalar_out, tensor_out)
 
-        self._test_where_scalar_template(device, dtype, checkResult)
+        for with_extremal in [True, False]:
+            for ndims in range(0, 4):
+                shape = self._rand_shape(ndims, min_size=5, max_size=10)
+                for scalar_type in [bool, int, float, complex]:
+                    condition = make_tensor(shape, dtype=torch.bool, device=device)
+
+                    x = make_tensor(shape, dtype=dtype, device=device)
+                    if shape != () and (dtype.is_complex or dtype.is_floating_point) and with_extremal:
+                        for extremal in ('nan', 'inf', '-inf'):
+                            scalar_val = float(extremal) if dtype.is_floating_point else complex(extremal)
+                            x[torch.randn(*shape) > 0.] = scalar_val
+
+                    scalar_1 = scalar_type(random.random())
+                    checkResult(scalar_type, dtype, condition, x, scalar_1)
 
     # As the test fails with Runtime Error not raised on XLA
     @onlyOnCPUAndCUDA
@@ -7823,18 +7786,19 @@ else:
         # Scalar-Scalar Version
         height = 5
         width = 5
+        # Use different values for `x` and `y`
+        # as they are the output values which are compared.
+        x1_vals = [True, 3, 7.0, 1 + 0.5j]
+        x2_vals = [False, 4, 8.0, 2 + 0.5j]
         default_dtype = torch.get_default_dtype()
         for test_default_dtype in [torch.float, torch.double]:
             torch.set_default_dtype(test_default_dtype)
-            for scalar_type_1 in [int, float, complex]:
-                for scalar_type_2 in [int, float, complex]:
-                    x1 = scalar_type_1(random.random() * random.randint(10, 20))
-                    x2 = scalar_type_2(random.random() * random.randint(20, 30))
-                    condition = torch.randn(height, width, device=device) > 0.5
+            for x1 in x1_vals:
+                for x2 in x2_vals:
+                    condition = torch.randn(height, width, device=device) > 0.0
                     common_dtype = torch.result_type(x1, x2)
-                    expected = torch.zeros((height, width), dtype=common_dtype)
-                    expected[condition] = x1
-                    expected[~condition] = x2
+                    # NumPy's aggressively promotes to double.
+                    expected = torch.from_numpy(np.where(condition.cpu().numpy(), x1, x2)).to(common_dtype)
                     result = torch.where(condition, x1, x2)
                     self.assertEqual(expected, result)
 
