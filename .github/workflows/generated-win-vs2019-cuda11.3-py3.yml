@@ -230,7 +230,7 @@ jobs:
         name: Setup Python3
         with:
           python-version: '3.x'
-      - name: Fetch Diff
+      - name: Fetch diff
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         shell: bash

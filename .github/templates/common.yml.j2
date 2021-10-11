@@ -185,6 +185,24 @@ concurrency:
 {%- endif %}
 {%- endmacro -%}
 
+{%- macro fetch_diff(name) -%}
+      - name: Fetch diff
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        shell: bash
+        run: |
+          set -eux
+          if [[ -z $PR_NUMBER ]]; then
+            echo Not on PR
+          else
+{%- if name == 'windows' %}
+            powershell -Command "Invoke-WebRequest https://github.com/pytorch/pytorch/pull/$PR_NUMBER.diff -OutFile pr.diff"
+{%- else %}
+            wget -O pr.diff "https://patch-diff.githubusercontent.com/raw/pytorch/pytorch/pull/$PR_NUMBER.diff"
+{%- endif %}
+          fi
+{%- endmacro -%}
+
 {%- macro calculate_docker_image() -%}
       - name: Calculate docker image tag
         id: calculate-tag

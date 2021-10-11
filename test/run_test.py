@@ -1008,10 +1008,7 @@ def main():
                 f"Target determinator filtered from:\n{manual_determinator.indent_list(selected_tests)}\n"
                 f"to:\n{manual_determinator.indent_list(determined_tests)}"
             )
-            print("DONE")
             selected_tests = determined_tests
-    exit(0)
-    # exit(0)
 
     has_failed = False
     failure_messages = []
