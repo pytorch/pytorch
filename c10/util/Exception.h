@@ -114,6 +114,7 @@ class C10_API Error : public std::exception {
 
 class C10_API WarningHandler {
  public:
+  virtual ~WarningHandler() = default;
   /// The default warning handler. Prints the message to stderr.
   virtual void process(
       const SourceLocation& source_location,

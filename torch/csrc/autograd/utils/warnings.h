@@ -12,6 +12,7 @@ namespace torch { namespace autograd { namespace utils {
 // in the main thread.
 class DelayWarningHandler: public at::WarningHandler {
 public:
+  ~DelayWarningHandler() override = default;
   void replay_warnings();
 
 private:
