@@ -1,0 +1,7 @@
+Executable : /opt/android_sdk/cmake/3.10.2.4988404/bin/ninja
+arguments : 
+-C
+/Users/chenlai/pytorch/android/pytorch_android_torchvision/.cxx/cmake/release/armeabi-v7a
+pytorch_vision_jni
+jvmArgs : 
+

@@ -1,0 +1,4 @@
+ninja: Entering directory `/Users/chenlai/pytorch/android/pytorch_android/.cxx/cmake/release/x86'
+[1/3] Building CXX object CMakeFiles/pytorch_jni_lite.dir/src/main/cpp/pytorch_jni_lite.cpp.o
+[2/3] Building CXX object CMakeFiles/pytorch_jni_lite.dir/src/main/cpp/pytorch_jni_common.cpp.o
+[3/3] Linking CXX shared library ../../../../build/intermediates/cmake/release/obj/x86/libpytorch_jni_lite.so

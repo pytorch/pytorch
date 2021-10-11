@@ -1,0 +1,15 @@
+/Users/chenlai/pytorch/android/pytorch_android/.cxx/cmake/release/x86/CMakeFiles/install/local.dir
+/Users/chenlai/pytorch/android/pytorch_android/.cxx/cmake/release/x86/CMakeFiles/install/strip.dir
+/Users/chenlai/pytorch/android/pytorch_android/.cxx/cmake/release/x86/CMakeFiles/install.dir
+/Users/chenlai/pytorch/android/pytorch_android/.cxx/cmake/release/x86/CMakeFiles/VulkanWrapper.dir
+/Users/chenlai/pytorch/android/pytorch_android/.cxx/cmake/release/x86/CMakeFiles/list_install_components.dir
+/Users/chenlai/pytorch/android/pytorch_android/.cxx/cmake/release/x86/CMakeFiles/rebuild_cache.dir
+/Users/chenlai/pytorch/android/pytorch_android/.cxx/cmake/release/x86/CMakeFiles/edit_cache.dir
+/Users/chenlai/pytorch/android/pytorch_android/.cxx/cmake/release/x86/CMakeFiles/pytorch_jni_lite.dir
+/Users/chenlai/pytorch/android/pytorch_android/.cxx/cmake/release/x86/fbjni/x86/CMakeFiles/install/local.dir
+/Users/chenlai/pytorch/android/pytorch_android/.cxx/cmake/release/x86/fbjni/x86/CMakeFiles/install/strip.dir
+/Users/chenlai/pytorch/android/pytorch_android/.cxx/cmake/release/x86/fbjni/x86/CMakeFiles/install.dir
+/Users/chenlai/pytorch/android/pytorch_android/.cxx/cmake/release/x86/fbjni/x86/CMakeFiles/fbjni.dir
+/Users/chenlai/pytorch/android/pytorch_android/.cxx/cmake/release/x86/fbjni/x86/CMakeFiles/list_install_components.dir
+/Users/chenlai/pytorch/android/pytorch_android/.cxx/cmake/release/x86/fbjni/x86/CMakeFiles/rebuild_cache.dir
+/Users/chenlai/pytorch/android/pytorch_android/.cxx/cmake/release/x86/fbjni/x86/CMakeFiles/edit_cache.dir

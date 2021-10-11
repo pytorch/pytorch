@@ -1,0 +1,2 @@
+ninja: Entering directory `/Users/chenlai/pytorch/android/pytorch_android_torchvision/.cxx/cmake/release/x86'
+ninja: no work to do.

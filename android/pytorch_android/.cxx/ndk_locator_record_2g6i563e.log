@@ -1,0 +1,26 @@
+[
+  {
+    "level": "INFO",
+    "message": "android.ndkVersion from module build.gradle is [not set]"
+  },
+  {
+    "level": "INFO",
+    "message": "android.ndkPath from module build.gradle is not set"
+  },
+  {
+    "level": "INFO",
+    "message": "ndk.dir in local.properties is not set"
+  },
+  {
+    "level": "INFO",
+    "message": "Not considering ANDROID_NDK_HOME because support was removed after deprecation period."
+  },
+  {
+    "level": "INFO",
+    "message": "sdkFolder is /opt/android_sdk"
+  },
+  {
+    "level": "INFO",
+    "message": "Because no explicit NDK was requested, the default version [21.1.6352462] for this Android Gradle Plugin will be used"
+  }
+]

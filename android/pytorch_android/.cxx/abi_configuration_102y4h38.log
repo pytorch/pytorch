@@ -1,0 +1,6 @@
+[
+  {
+    "level": "WARN",
+    "message": "This app only has 32-bit [armeabi-v7a] native libraries. Beginning August 1, 2019 Google Play store requires that all apps that include native libraries must provide 64-bit versions. For more information, visit https://g.co/64-bit-requirement"
+  }
+]

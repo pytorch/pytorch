@@ -1,0 +1,163 @@
+{
+  "stringTable": {
+    "0": "/Users/chenlai/pytorch/android/pytorch_android/.cxx/cmake/release/x86",
+    "1": "--target=i686-none-linux-android21 --gcc-toolchain=/opt/android_sdk/ndk/21.1.6352462/toolchains/llvm/prebuilt/darwin-x86_64 --sysroot=/opt/android_sdk/ndk/21.1.6352462/toolchains/llvm/prebuilt/darwin-x86_64/sysroot -I../../../../. -I/opt/android_sdk/ndk/21.1.6352462/sources/third_party/vulkan/src/include -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -mstackrealign -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security -O2 -DNDEBUG -fPIC -std=gnu++14",
+    "2": "--target=i686-none-linux-android21 --gcc-toolchain=/opt/android_sdk/ndk/21.1.6352462/toolchains/llvm/prebuilt/darwin-x86_64 --sysroot=/opt/android_sdk/ndk/21.1.6352462/toolchains/llvm/prebuilt/darwin-x86_64/sysroot -Dpytorch_jni_lite_EXPORTS -I../../../../src/main/cpp/libtorch_include/x86 -I/Users/chenlai/pytorch/android/libs/fbjni/cxx -I../../../../. -I/opt/android_sdk/ndk/21.1.6352462/sources/third_party/vulkan/src/include -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -mstackrealign -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security -O2 -DNDEBUG -fPIC -fexceptions -std=gnu++14",
+    "3": "--target=i686-none-linux-android21 --gcc-toolchain=/opt/android_sdk/ndk/21.1.6352462/toolchains/llvm/prebuilt/darwin-x86_64 --sysroot=/opt/android_sdk/ndk/21.1.6352462/toolchains/llvm/prebuilt/darwin-x86_64/sysroot -Dfbjni_EXPORTS -I/Users/chenlai/pytorch/android/libs/fbjni/cxx -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -mstackrealign -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security -O2 -DNDEBUG -fPIC -Wall -std=c++14 -pthread -fno-omit-frame-pointer -fexceptions -frtti -ffunction-sections -O3 -DNDEBUG -DBUILDING_FBJNI -std=gnu++14"
+  },
+  "buildFiles": [
+    "/Users/chenlai/pytorch/android/pytorch_android/CMakeLists.txt",
+    "/opt/android_sdk/ndk/21.1.6352462/build/cmake/android.toolchain.cmake",
+    "/opt/android_sdk/ndk/21.1.6352462/build/cmake/platforms.cmake",
+    "/Users/chenlai/pytorch/android/pytorch_android/src/main/cpp/cmake_macros.h.in",
+    "/Users/chenlai/pytorch/cmake/VulkanDependencies.cmake",
+    "/Users/chenlai/pytorch/android/libs/fbjni/CMakeLists.txt"
+  ],
+  "cleanCommands": [
+    "/opt/android_sdk/cmake/3.10.2.4988404/bin/ninja -C \"/Users/chenlai/pytorch/android/pytorch_android/.cxx/cmake/release/x86\" clean"
+  ],
+  "buildTargetsCommand": "/opt/android_sdk/cmake/3.10.2.4988404/bin/ninja  -C \"/Users/chenlai/pytorch/android/pytorch_android/.cxx/cmake/release/x86\" {LIST_OF_TARGETS_TO_BUILD}",
+  "libraries": {
+    "VulkanWrapper-Release-x86": {
+      "buildCommand": "/opt/android_sdk/cmake/3.10.2.4988404/bin/ninja -C \"/Users/chenlai/pytorch/android/pytorch_android/.cxx/cmake/release/x86\" VulkanWrapper",
+      "buildType": "release",
+      "toolchain": "3271920991",
+      "abi": "x86",
+      "artifactName": "VulkanWrapper",
+      "files": [
+        {
+          "src": "/opt/android_sdk/ndk/21.1.6352462/sources/third_party/vulkan/src/common/vulkan_wrapper.cpp",
+          "flagsOrdinal": 1,
+          "workingDirectoryOrdinal": 0
+        }
+      ],
+      "headers": [
+        {
+          "header": "/opt/android_sdk/ndk/21.1.6352462/sources/third_party/vulkan/src/common/vulkan_wrapper.h",
+          "workingDirectoryOrdinal": 0
+        }
+      ],
+      "output": "/Users/chenlai/pytorch/android/pytorch_android/.cxx/cmake/release/x86/libVulkanWrapper.a"
+    },
+    "pytorch_jni_lite-Release-x86": {
+      "buildCommand": "/opt/android_sdk/cmake/3.10.2.4988404/bin/ninja -C \"/Users/chenlai/pytorch/android/pytorch_android/.cxx/cmake/release/x86\" pytorch_jni_lite",
+      "buildType": "release",
+      "toolchain": "3271920991",
+      "abi": "x86",
+      "artifactName": "pytorch_jni_lite",
+      "files": [
+        {
+          "src": "/Users/chenlai/pytorch/android/pytorch_android/src/main/cpp/pytorch_jni_lite.cpp",
+          "flagsOrdinal": 2,
+          "workingDirectoryOrdinal": 0
+        },
+        {
+          "src": "/Users/chenlai/pytorch/android/pytorch_android/src/main/cpp/pytorch_jni_common.cpp",
+          "flagsOrdinal": 2,
+          "workingDirectoryOrdinal": 0
+        }
+      ],
+      "headers": [
+        {
+          "header": "/Users/chenlai/pytorch/android/pytorch_android/src/main/cpp/pytorch_jni_common.h",
+          "workingDirectoryOrdinal": 0
+        }
+      ],
+      "output": "/Users/chenlai/pytorch/android/pytorch_android/build/intermediates/cmake/release/obj/x86/libpytorch_jni_lite.so",
+      "runtimeFiles": [
+        "/Users/chenlai/pytorch/android/pytorch_android/build/intermediates/cmake/release/obj/x86/libfbjni.so"
+      ]
+    },
+    "fbjni-Release-x86": {
+      "buildCommand": "/opt/android_sdk/cmake/3.10.2.4988404/bin/ninja -C \"/Users/chenlai/pytorch/android/pytorch_android/.cxx/cmake/release/x86\" fbjni",
+      "buildType": "release",
+      "toolchain": "3271920991",
+      "abi": "x86",
+      "artifactName": "fbjni",
+      "files": [
+        {
+          "src": "/Users/chenlai/pytorch/android/libs/fbjni/cxx/fbjni/ByteBuffer.cpp",
+          "flagsOrdinal": 3,
+          "workingDirectoryOrdinal": 0
+        },
+        {
+          "src": "/Users/chenlai/pytorch/android/libs/fbjni/cxx/fbjni/OnLoad.cpp",
+          "flagsOrdinal": 3,
+          "workingDirectoryOrdinal": 0
+        },
+        {
+          "src": "/Users/chenlai/pytorch/android/libs/fbjni/cxx/fbjni/ReadableByteChannel.cpp",
+          "flagsOrdinal": 3,
+          "workingDirectoryOrdinal": 0
+        },
+        {
+          "src": "/Users/chenlai/pytorch/android/libs/fbjni/cxx/fbjni/fbjni.cpp",
+          "flagsOrdinal": 3,
+          "workingDirectoryOrdinal": 0
+        },
+        {
+          "src": "/Users/chenlai/pytorch/android/libs/fbjni/cxx/fbjni/detail/Environment.cpp",
+          "flagsOrdinal": 3,
+          "workingDirectoryOrdinal": 0
+        },
+        {
+          "src": "/Users/chenlai/pytorch/android/libs/fbjni/cxx/fbjni/detail/Exceptions.cpp",
+          "flagsOrdinal": 3,
+          "workingDirectoryOrdinal": 0
+        },
+        {
+          "src": "/Users/chenlai/pytorch/android/libs/fbjni/cxx/fbjni/detail/Hybrid.cpp",
+          "flagsOrdinal": 3,
+          "workingDirectoryOrdinal": 0
+        },
+        {
+          "src": "/Users/chenlai/pytorch/android/libs/fbjni/cxx/fbjni/detail/Meta.cpp",
+          "flagsOrdinal": 3,
+          "workingDirectoryOrdinal": 0
+        },
+        {
+          "src": "/Users/chenlai/pytorch/android/libs/fbjni/cxx/fbjni/detail/References.cpp",
+          "flagsOrdinal": 3,
+          "workingDirectoryOrdinal": 0
+        },
+        {
+          "src": "/Users/chenlai/pytorch/android/libs/fbjni/cxx/fbjni/detail/utf8.cpp",
+          "flagsOrdinal": 3,
+          "workingDirectoryOrdinal": 0
+        },
+        {
+          "src": "/Users/chenlai/pytorch/android/libs/fbjni/cxx/lyra/cxa_throw.cpp",
+          "flagsOrdinal": 3,
+          "workingDirectoryOrdinal": 0
+        },
+        {
+          "src": "/Users/chenlai/pytorch/android/libs/fbjni/cxx/lyra/lyra.cpp",
+          "flagsOrdinal": 3,
+          "workingDirectoryOrdinal": 0
+        },
+        {
+          "src": "/Users/chenlai/pytorch/android/libs/fbjni/cxx/lyra/lyra_breakpad.cpp",
+          "flagsOrdinal": 3,
+          "workingDirectoryOrdinal": 0
+        },
+        {
+          "src": "/Users/chenlai/pytorch/android/libs/fbjni/cxx/lyra/lyra_exceptions.cpp",
+          "flagsOrdinal": 3,
+          "workingDirectoryOrdinal": 0
+        }
+      ],
+      "headers": [],
+      "output": "/Users/chenlai/pytorch/android/pytorch_android/build/intermediates/cmake/release/obj/x86/libfbjni.so",
+      "runtimeFiles": []
+    }
+  },
+  "toolchains": {
+    "3271920991": {
+      "cppCompilerExecutable": "/opt/android_sdk/ndk/21.1.6352462/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang++"
+    }
+  },
+  "cFileExtensions": [],
+  "cppFileExtensions": [
+    "cpp"
+  ]
+}

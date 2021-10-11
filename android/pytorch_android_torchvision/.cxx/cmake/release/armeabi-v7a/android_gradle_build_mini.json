@@ -1,0 +1,20 @@
+{
+  "buildFiles": [
+    "/Users/chenlai/pytorch/android/pytorch_android_torchvision/CMakeLists.txt",
+    "/opt/android_sdk/ndk/21.1.6352462/build/cmake/android.toolchain.cmake",
+    "/opt/android_sdk/ndk/21.1.6352462/build/cmake/platforms.cmake"
+  ],
+  "cleanCommands": [
+    "/opt/android_sdk/cmake/3.10.2.4988404/bin/ninja -C \"/Users/chenlai/pytorch/android/pytorch_android_torchvision/.cxx/cmake/release/armeabi-v7a\" clean"
+  ],
+  "buildTargetsCommand": "/opt/android_sdk/cmake/3.10.2.4988404/bin/ninja  -C \"/Users/chenlai/pytorch/android/pytorch_android_torchvision/.cxx/cmake/release/armeabi-v7a\" {LIST_OF_TARGETS_TO_BUILD}",
+  "libraries": {
+    "pytorch_vision_jni-Release-armeabi-v7a": {
+      "artifactName": "pytorch_vision_jni",
+      "buildCommand": "/opt/android_sdk/cmake/3.10.2.4988404/bin/ninja -C \"/Users/chenlai/pytorch/android/pytorch_android_torchvision/.cxx/cmake/release/armeabi-v7a\" pytorch_vision_jni",
+      "abi": "armeabi-v7a",
+      "output": "/Users/chenlai/pytorch/android/pytorch_android_torchvision/build/intermediates/cmake/release/obj/armeabi-v7a/libpytorch_vision_jni.so",
+      "runtimeFiles": []
+    }
+  }
+}

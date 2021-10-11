@@ -1,0 +1,3 @@
+/Users/chenlai/pytorch/android/pytorch_android_torchvision/.cxx/cmake/release/armeabi-v7a/CMakeFiles/rebuild_cache.dir
+/Users/chenlai/pytorch/android/pytorch_android_torchvision/.cxx/cmake/release/armeabi-v7a/CMakeFiles/edit_cache.dir
+/Users/chenlai/pytorch/android/pytorch_android_torchvision/.cxx/cmake/release/armeabi-v7a/CMakeFiles/pytorch_vision_jni.dir

@@ -1,0 +1,8 @@
+{
+  "sdkFolder": "/opt/android_sdk",
+  "sideBySideNdkFolderNames": [
+    "21.3.6528147",
+    "21.0.6113669",
+    "21.1.6352462"
+  ]
+}
