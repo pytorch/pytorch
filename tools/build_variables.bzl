@@ -241,6 +241,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/passes/remove_mutation.cpp",
     "torch/csrc/jit/passes/prepack_folding.cpp",
     "torch/csrc/jit/passes/fold_conv_bn.cpp",
+    "torch/csrc/jit/passes/frozen_concat_linear.cpp",
     "torch/csrc/jit/passes/frozen_conv_add_relu_fusion.cpp",
     "torch/csrc/jit/passes/frozen_conv_folding.cpp",
     "torch/csrc/jit/passes/frozen_linear_transpose.cpp",
@@ -442,6 +443,14 @@ jit_sources_full = [
 ]
 
 libtorch_core_jit_sources = sorted(jit_sources_full)
+
+torch_mobile_tracer_sources = [
+    "torch/csrc/jit/mobile/model_tracer/tracer.cpp",
+    "torch/csrc/jit/mobile/model_tracer/TensorUtils.cpp",
+    "torch/csrc/jit/mobile/model_tracer/MobileModelRunner.cpp",
+    "torch/csrc/jit/mobile/model_tracer/OperatorCallTracer.cpp",
+    "torch/csrc/jit/mobile/model_tracer/KernelDTypeTracer.cpp",
+]
 
 torch_mobile_core = [
     # backend_debug_info.cpp provides
