@@ -2618,6 +2618,16 @@ class TestVmapOperators(Namespace.TestVmapBase):
             for loop_out, batched_out in get_fallback_and_vmap_exhaustive(F.one_hot, args, {}):
                 self.assertEqual(loop_out, batched_out)
 
+    def test_conj_bit(self):
+        x = torch.tensor([1+1j, 2+1j])
+        def foo(x):
+            assert not x.is_conj()
+            y = x.conj()
+            assert y.is_conj()
+            return y
+        res = vmap(foo)(x)
+        self.assertEqual(res, x.conj())
+
     def test_mode_key(self):
         def vmap_f(x):
             return x + torch.randn(())

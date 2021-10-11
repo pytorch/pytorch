@@ -62,15 +62,9 @@ void dumpTensorCout(const Tensor& tensor) {
 }
 
 c10::intrusive_ptr<TensorWrapper> makeTensorWrapperPtr(const Tensor& tensor, int64_t level, bool should_be_alive) {
-  // TODO: denylist non-cuda/cpu backends to avoid funny business
-  DispatchKeySet key_set;
-  if (tensor.is_cuda()) {
-    key_set = key_set.add(DispatchKey::CUDA);
-    key_set = key_set.add(DispatchKey::AutogradCUDA);
-  } else {
-    key_set = key_set.add(DispatchKey::CPU);
-    key_set = key_set.add(DispatchKey::AutogradCPU);
-  }
+  auto keys_to_propagate = kKeysToPropagateToWrapper | DispatchKeySet({
+      DispatchKey::AutogradCPU, DispatchKey::AutogradCUDA, DispatchKey::AutogradXLA});
+  auto key_set = getKeysToPropagateToWrapper(tensor, keys_to_propagate);
   key_set = key_set.add(kGradWrapperKey);
   if (should_be_alive) {
     return c10::make_intrusive<TensorWrapper>(key_set, tensor, level, getLifeHandleForLevel(level));
@@ -85,15 +79,9 @@ Tensor makeTensorWrapper(const Tensor& tensor, int64_t level) {
     TORCH_INTERNAL_ASSERT(wrapped->level() < level);
   }
 
-  // TODO: denylist non-cuda/cpu backends to avoid funny business
-  DispatchKeySet key_set;
-  if (tensor.is_cuda()) {
-    key_set = key_set.add(DispatchKey::CUDA);
-    key_set = key_set.add(DispatchKey::AutogradCUDA);
-  } else {
-    key_set = key_set.add(DispatchKey::CPU);
-    key_set = key_set.add(DispatchKey::AutogradCPU);
-  }
+  auto keys_to_propagate = kKeysToPropagateToWrapper | DispatchKeySet({
+      DispatchKey::AutogradCPU, DispatchKey::AutogradCUDA, DispatchKey::AutogradXLA});
+  auto key_set = getKeysToPropagateToWrapper(tensor, keys_to_propagate);
   key_set = key_set.add(kGradWrapperKey);
   auto life_handle = getLifeHandleForLevel(level);
   auto result = at::detail::make_tensor<TensorWrapper>(key_set, tensor, level, std::move(life_handle));
