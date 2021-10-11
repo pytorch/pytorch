@@ -55,8 +55,8 @@ env:
   CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
 {%- if cuda_version != "cpu" %}
   TORCH_CUDA_ARCH_LIST: "7.0"
-  USE_CUDA: 1
 {%- endif %}
+  USE_CUDA: !{{ 1 if cuda_version != "cpu" else 0 }}
 
 !{{ common.concurrency(build_environment) }}
 
