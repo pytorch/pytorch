@@ -2314,6 +2314,20 @@ class TestFX(JitTestCase):
         nf = symbolic_trace(f_higher, concrete_args={'f': lambda x: x * 2})
         self.assertEqual(nf(3, lambda x: x * 2), 6)
 
+    def test_concrete_args_default_value(self):
+        def f(a=None, b=None):
+            res = a
+            if b is not None:
+                res = res + b
+            return res
+        b_val = torch.tensor(5)
+        traced = symbolic_trace(f, concrete_args={'b': b_val})
+        inp = torch.tensor(3)
+        self.assertEqual(traced(inp), f(inp, b_val))
+        # Currently, we bake in the value of b, so this test maintains that.
+        self.assertEqual(traced(inp, inp), f(inp, b_val))
+
+
     def test_custom_traceback_raised_when_exception_source_is_graphmodule(self):
         class M(torch.nn.Module):
             def __init__(self):
