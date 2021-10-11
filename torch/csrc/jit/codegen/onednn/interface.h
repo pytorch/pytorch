@@ -10,9 +10,7 @@ namespace onednn {
 
 static std::atomic<bool> onednn_enabled{true};
 
-std::atomic<bool>& getLlgaEnabled() {
-  return onednn_enabled;
-}
+TORCH_API std::atomic<bool>& getLlgaEnabled();
 
 TORCH_API void fuseGraph(std::shared_ptr<Graph>& g);
 
