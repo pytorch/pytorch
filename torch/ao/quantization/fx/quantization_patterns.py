@@ -154,7 +154,7 @@ class QuantizeHandler(ABC):
         """
         return qconfig.activation
 
-    def is_output_quantized(self, qconfig, is_reference):
+    def is_output_quantized(self, qconfig):
         """ Returns true if the output node of convert is quantized
         when is_reference is False, we would return float node when a certain dtype
         combination is not supported (since fbgemm/qnnpack only support certain dtype
@@ -380,7 +380,7 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
         # for x + y where x and y are scalars, we do not observe anything
         return self.num_tensor_args > 0
 
-    def is_output_quantized(self, qconfig, is_reference):
+    def is_output_quantized(self, qconfig):
         dtypes = get_qconfig_dtypes(qconfig)
         return self.binary_op in binary_op_supported_dtypes and \
             dtypes in binary_op_supported_dtypes[self.binary_op]
@@ -1311,12 +1311,10 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
         elif node.op == "call_module":
             self.op = type(modules[str(node.target)])
 
-    def is_output_quantized(self, qconfig, is_reference):
+    def is_output_quantized(self, qconfig):
         dtypes = get_qconfig_dtypes(qconfig)
-        if not is_reference:
-            return self.op in default_op_supported_dtypes and \
+        return self.op in default_op_supported_dtypes and \
                 dtypes in default_op_supported_dtypes[self.op]
-        return True
 
     def convert(self,
                 node: Node,
@@ -1717,7 +1715,7 @@ class ConvReLUQuantizeHandlerNew(QuantizeHandler):
     ) -> bool:
         return False
 
-    def is_output_quantized(self, qconfig, is_reference):
+    def is_output_quantized(self, qconfig):
         return False
 
     def convert(self,
@@ -1871,7 +1869,7 @@ class LinearReLUQuantizeHandlerNew(QuantizeHandler):
     ) -> bool:
         return False
 
-    def is_output_quantized(self, qconfig, is_reference):
+    def is_output_quantized(self, qconfig):
         return False
 
     def convert(self,
