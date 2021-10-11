@@ -9,6 +9,7 @@
 
 #if CUB_SUPPORTS_WRAPPED_NAMESPACE()
 
+#define CUB_WRAPPED_NAMESPACE at_cuda_detail
 #include <cub/cub.cuh>
 
 #else
