@@ -1,6 +1,5 @@
 #include "caffe2/operators/elementwise_ops.h"
 
-#include <ATen/cuda/cub.cuh>
 #include <cub/block/block_load.cuh>
 #include <cub/block/block_reduce.cuh>
 #include <cub/device/device_reduce.cuh>

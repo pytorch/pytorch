@@ -2,7 +2,6 @@
 #include <c10/core/GeneratorImpl.h>
 #include <algorithm>
 
-#include <ATen/cuda/cub.cuh>
 #include <cub/device/device_radix_sort.cuh>
 #include "caffe2/sgd/adagrad_fused_op_gpu.cuh"
 #include "caffe2/utils/math.h"

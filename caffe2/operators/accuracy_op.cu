@@ -3,7 +3,6 @@
 #include "caffe2/utils/GpuAtomics.cuh"
 #include "caffe2/utils/math.h"
 
-#include <ATen/cuda/cub.cuh>
 #include <cub/block/block_reduce.cuh>
 
 namespace caffe2 {

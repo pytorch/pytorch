@@ -1,6 +1,5 @@
 #include <algorithm>
 
-#include <ATen/cuda/cub.cuh>
 #include <cub/block/block_reduce.cuh>
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context_gpu.h"

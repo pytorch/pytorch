@@ -3,7 +3,7 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/boolean_mask_ops.h"
 
-#include <ATen/cuda/cub.cuh>
+#include <cub/cub.cuh>
 
 namespace caffe2 {
 

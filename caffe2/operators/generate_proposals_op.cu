@@ -1,4 +1,4 @@
-#include <ATen/cuda/cub.cuh>
+#include <cub/cub.cuh>
 #include "caffe2/core/context.h"
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/generate_proposals_op.h"

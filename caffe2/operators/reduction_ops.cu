@@ -2,7 +2,7 @@
 #include "caffe2/operators/reduction_ops.h"
 #include "caffe2/utils/conversions.h"
 
-#include <ATen/cuda/cub.cuh>
+#include <cub/cub.cuh>
 
 namespace caffe2 {
 
