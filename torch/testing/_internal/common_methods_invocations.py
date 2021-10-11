@@ -8299,7 +8299,6 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=True,
            dtypesIfCPU=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-           supports_scripting=False,  # TODO: fix aliasing test
            sample_inputs_func=sample_inputs_max_pool2d),
     OpInfo('nn.functional.linear',
            aten_name='linear',
