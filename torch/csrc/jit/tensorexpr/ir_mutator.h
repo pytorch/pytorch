@@ -54,6 +54,7 @@ class TORCH_API IRMutator {
 
   virtual StmtPtr mutate(AllocatePtr v);
   virtual StmtPtr mutate(FreePtr v);
+  virtual StmtPtr mutate(BufMapPtr v);
   virtual StmtPtr mutate(LetPtr v);
   virtual StmtPtr mutate(CondPtr v);
 };
