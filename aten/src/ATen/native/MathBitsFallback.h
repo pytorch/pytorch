@@ -95,8 +95,6 @@ struct MathOpFallback {
     // set to True if there's one or mutable inputs
     c10::optional<bool> is_write;
 
-    // Mutable inputs with math bit set to True to be tracked separately
-    std::vector<std::pair<int, Tensor>> mutable_inputs;
     for (const auto i : c10::irange(num_arguments)) {
       // Three possible states:
       // 1. alias_info has no value --> out-of-place operation
@@ -125,6 +123,8 @@ struct MathOpFallback {
       return;
     }
 
+    // Mutable inputs with math bit set to True to be tracked separately
+    std::vector<std::pair<int, Tensor>> mutable_inputs;
     for (const auto i : c10::irange(num_arguments)) {
       auto& ivalue = (*stack)[stack_start + i];
       if (!(ivalue.isTensor() || ivalue.isTensorList())) {
@@ -146,12 +146,13 @@ struct MathOpFallback {
         if (mut_arg) {
           mutable_inputs.emplace_back(std::make_pair(i, tensor));
         } 
-        (*stack)[stack_start + i] = std::move(tensor.clone());
+        tensor = tensor.clone();
+        (*stack)[stack_start + i] = std::move(tensor);
       } else {
         auto tensors = std::move(ivalue).toTensorList();
         for(const auto j : c10::irange(tensors.size())) {
-          auto tensor = tensors[j];
-          if (!is_bit_set(tensor) {
+          const auto& tensor = tensors[j];
+          if (!is_bit_set(tensor)) {
             continue;
           }
           TORCH_CHECK(!mut_arg, " fallback doesn't currently support mutable TensorLists with ",
