@@ -16,6 +16,7 @@ from torch.ao.sparsity import BaseSparsifier, module_to_fqn, fqn_to_module
 SUPPORTED_MODULES = {  # added to config if None given
     nn.Linear,
     nn.Conv2d,
+    nn.Embedding,
     nn.BatchNorm2d,  # will need manual update to match conv2d
 }
 
@@ -51,6 +52,7 @@ class BasePruner(BaseSparsifier):
         self.bias_handles = []
 
         for config in self.module_groups:
+            axis = config.get('axis', 0)
             modules = []
             if use_path:
                 if type(config['module']) is tuple:  # (Conv2d, BN)
@@ -71,9 +73,11 @@ class BasePruner(BaseSparsifier):
             for module in modules:
                 if not isinstance(module, tuple(NEEDS_ZEROS)):
                     # add pruning parametrization and forward hooks
-                    mask = torch.tensor(module.weight.shape[0])
+                    mask = torch.tensor(module.weight.shape[axis])
                     param = config.get('parametrization', PruningParametrization)
-                    parametrize.register_parametrization(module, 'weight', param(mask), unsafe=True)
+                    parametrize.register_parametrization(
+                        module, 'weight', param(mask, axis),
+                        unsafe=True)
 
                     assert isinstance(module.parametrizations, ModuleDict)  # make mypy happy
                     assert isinstance(module.parametrizations.weight, ModuleList)

@@ -4,14 +4,21 @@ from typing import Any, List
 
 
 class PruningParametrization(nn.Module):
-    def __init__(self, original_outputs):
+    def __init__(self, original_outputs, axis=0):
         super().__init__()
         self.original_outputs = set(range(original_outputs.item()))
         self.pruned_outputs = set()  # Will contain indicies of outputs to prune
+        self.axis = axis
 
     def forward(self, x):
-        valid_outputs = self.original_outputs - self.pruned_outputs
-        return x[list(valid_outputs)]
+        valid_outputs = list(self.original_outputs - self.pruned_outputs)
+        if self.axis == 0:
+            return x[valid_outputs]
+        elif self.axis == 1:
+            return x[:, valid_outputs]
+        else:
+            # TODO: Need to figure out how to get over specific axis
+            raise NotImplementedError("Only 0 or 1 is supported as axis")
 
 
 class ZeroesParametrization(nn.Module):
@@ -23,6 +30,9 @@ class ZeroesParametrization(nn.Module):
         self.pruned_outputs = set()  # Will contain indicies of outputs to prune
 
     def forward(self, x):
+        """ TODO: Potential bug: if we are assigning to the .data(), this might
+        break to the parametrizations.
+        """
         x.data[list(self.pruned_outputs)] = 0
         return x
 
