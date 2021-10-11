@@ -512,9 +512,9 @@ std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
     const StaticModuleOptions& opts) {
   VLOG(1) << "StaticModuleOptions: cleanup_activations "
           << opts.cleanup_activations << ", enable_out_variant "
-          << opts.enable_out_variant << ", optimize_memory"
-          << opts.optimize_memory << ", optimize_graph_output_memory"
-          << opts.optimize_graph_output_memory;
+          << opts.enable_out_variant << ", optimize_memory "
+          << opts.optimize_memory << ", manage_output_tensors "
+          << opts.manage_output_tensors;
 
   Module module = m.copy();
   if (!is_frozen) {
@@ -605,10 +605,10 @@ StaticModule::StaticModule(
       graph_(std::move(graph_and_module.first)),
       module_(std::move(graph_and_module.second)) {
   // check opt flags
-  if (opts.optimize_graph_output_memory) {
+  if (opts.manage_output_tensors) {
     TORCH_CHECK(
-        opts_.enable_out_variant && opts_.optimize_memory,
-        "When optimize_graph_output_memory is true, enable_out_variant and optimize_memory must be set to true");
+        opts_.enable_out_variant,
+        "When manage_output_tensors is true, enable_out_variant must be set to true");
   }
   if (opts_.optimize_memory) {
     TORCH_CHECK(
@@ -737,6 +737,7 @@ std::vector<at::Tensor> StaticModule::operator()(
     const std::vector<at::Tensor>& inps) {
   return runtime()(inps);
 }
+
 c10::IValue StaticModule::operator()(
     const std::vector<c10::IValue>& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
@@ -865,6 +866,9 @@ c10::IValue StaticRuntime::operator()(
   c10::InferenceMode mode;
 
   if (planner_) {
+    DCHECK(
+        !static_module_.opts().manage_output_tensors ||
+        checkOutputTensorMemoryLeaks());
     planner_->allocate();
   }
 
@@ -888,7 +892,7 @@ c10::IValue StaticRuntime::operator()(
           static_module_.values_share_same_storage(),
           static_module_.value_group(),
           static_module_.opts().enable_out_variant,
-          static_module_.opts().optimize_graph_output_memory);
+          static_module_.opts().manage_output_tensors);
     }
     planner_->deallocate();
     // clean up owning refs of input tensors
@@ -900,16 +904,18 @@ c10::IValue StaticRuntime::operator()(
     std::vector<c10::IValue> outputs;
     outputs.reserve(static_module_.num_outputs());
     for (const auto i : c10::irange(static_module_.num_outputs())) {
+      // The exact output tensor should never be managed.
+      DCHECK(!isManagedOutputTensor(*outputs_[i]));
       // use move here. Otherwise, clean up outputs_[i] explicitly
       outputs.emplace_back(std::move(*outputs_[i]));
     }
     return c10::ivalue::Tuple::create(std::move(outputs));
   }
-
 #ifndef NDEBUG
   check_for_memory_leak(false);
 #endif
-
+  // The exact output tensor should never be managed.
+  DCHECK(!isManagedOutputTensor(*outputs_[0]));
   // use move here. Otherwise, clean up outputs_[0] explicitly
   return std::move(*outputs_[0]);
 }
@@ -1000,6 +1006,8 @@ void StaticRuntime::benchmark(
   if (planner_) {
     std::cout << "Total number of managed tensors: "
               << planner_->total_num_managed_tensors() << std::endl;
+    std::cout << "Total number of managed output tensors: "
+              << planner_->total_num_managed_output_tensors() << std::endl;
     std::cout << "Total number of unmanaged values: "
               << planner_->total_num_unmanaged() << std::endl;
     std::cout << "Total memory managed: " << planner_->total_managed()
@@ -1117,7 +1125,7 @@ void StaticRuntime::display_nodes(
           static_module_.values_share_same_storage(),
           static_module_.value_group(),
           static_module_.opts().enable_out_variant,
-          static_module_.opts().optimize_graph_output_memory);
+          static_module_.opts().manage_output_tensors);
     }
     planner_->deallocate();
     // clean up owning refs of input tensors
@@ -1186,7 +1194,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
             static_module_.values_share_same_storage(),
             static_module_.value_group(),
             static_module_.opts().enable_out_variant,
-            static_module_.opts().optimize_graph_output_memory);
+            static_module_.opts().manage_output_tensors);
       }
       planner_->deallocate();
       // clean up owning refs of input tensors
@@ -1255,13 +1263,18 @@ void StaticRuntime::check_for_memory_leak(bool output_returned) {
   for (const auto i : c10::irange(inputs_.size())) {
     TORCH_CHECK(inputs_[i].isNone(), "Input ", i, " was not cleaned up");
   }
-
   FastSet<const IValue*> output_ivalues(outputs_.begin(), outputs_.end());
   for (const auto n : c10::irange(nodes_.size())) {
     auto& pnode = nodes_[n];
     for (const auto i : c10::irange(pnode.outputs().size())) {
       const IValue* ival = &pnode.Output(i);
       const Value* val = pnode.node()->output(i);
+      if (planner_ && planner_->isManagedOutputTensorValue(val)) {
+        // `ival` contains a managed output tensor that the runtime doesn't
+        // reclaim at the end of an iteration, but the client does so
+        // by explicitly calling `StaticRuntime::deallocateOutputTensors`.
+        continue;
+      }
       const std::string error_msg = "Output " + c10::to_string(i) + ", %" +
           val->debugName() + " of node " + c10::to_string(n) +
           " was not cleaned up";
@@ -1289,6 +1302,49 @@ void StaticRuntime::check_for_memory_leak(bool output_returned) {
     }
   }
   VLOG(1) << "Finished checking for memory leak";
+}
+
+void StaticRuntime::deallocateOutputTensors() {
+  if (!static_module_.opts().manage_output_tensors) {
+    TORCH_CHECK(
+        !planner_ || planner_->numOutputBufferBytes() == 0,
+        "manage_output_tensors is disabled, but output tensor buffer is not empty.");
+    return;
+  }
+  if (planner_) {
+    planner_->deallocateOutputTensors();
+    DCHECK(checkOutputTensorMemoryLeaks());
+  }
+}
+
+bool StaticRuntime::checkOutputTensorMemoryLeaks() {
+  if (!static_module_.opts().manage_output_tensors || !planner_) {
+    return true;
+  }
+  for (const auto n : c10::irange(nodes_.size())) {
+    auto& pnode = nodes_[n];
+    for (const auto i : c10::irange(pnode.outputs().size())) {
+      const IValue* ival = &pnode.Output(i);
+      const Value* val = pnode.node()->output(i);
+      if (!planner_->isManagedOutputTensorValue(val)) {
+        continue;
+      }
+      const auto& t = ival->toTensor();
+      if (t.defined()) {
+        auto* storage_impl = t.storage().unsafeGetStorageImpl();
+        const std::string error_msg = "Output " + c10::to_string(i) + ", %" +
+            val->debugName() + " of node " + c10::to_string(n) +
+            " was not cleaned up";
+        TORCH_CHECK(storage_impl->data() == nullptr, error_msg);
+      }
+    }
+  }
+  VLOG(1) << "Finished checking for memory leak from output tensors";
+  return true;
+}
+
+bool StaticRuntime::isManagedOutputTensor(const IValue& ivalue) {
+  return planner_ && planner_->isManagedOutputTensor(ivalue);
 }
 
 ProcessedNode::ProcessedNode(
