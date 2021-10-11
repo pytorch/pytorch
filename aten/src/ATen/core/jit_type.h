@@ -1841,10 +1841,13 @@ struct getTypePtr_<at::optional<T>> final {
 template <class... Contained>
 struct getTypePtr_<std::tuple<Contained...>> final {
   static decltype(auto) call() {
-    std::vector<TypePtr> contained_types = {
-      (getTypePtr_<Contained>::call())...
-    };
-    return TupleType::create(std::move(contained_types));
+    static auto type = ([]() {
+      std::vector<TypePtr> contained_types = {
+        (getTypePtr_<Contained>::call())...
+      };
+      return TupleType::create(std::move(contained_types));
+    })();
+    return type;
   }
 };
 template <>
