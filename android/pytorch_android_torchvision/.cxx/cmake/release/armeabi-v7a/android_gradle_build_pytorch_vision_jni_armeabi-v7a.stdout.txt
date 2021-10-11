@@ -1,3 +1,0 @@
-ninja: Entering directory `/Users/chenlai/pytorch/android/pytorch_android_torchvision/.cxx/cmake/release/armeabi-v7a'
-[1/2] Building CXX object CMakeFiles/pytorch_vision_jni.dir/src/main/cpp/pytorch_vision_jni.cpp.o
-[2/2] Linking CXX shared library ../../../../build/intermediates/cmake/release/obj/armeabi-v7a/libpytorch_vision_jni.so
