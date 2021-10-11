@@ -44,7 +44,7 @@ void BFloat16QuantizedToFloat_ref(
 }
 
 at::Tensor _float_to_bfloat16_cpu(const at::Tensor& input) {
-  TENSOR_ON_CPU(input);
+  TORCH_CHECK_TENSORS_ON_SAME_CPU(input);
   // Currently it supports 2D inputs
   TENSOR_NDIM_EQUALS(input, 2);
 
@@ -66,7 +66,7 @@ at::Tensor _float_to_bfloat16_cpu(const at::Tensor& input) {
 }
 
 at::Tensor _bfloat16_to_float_cpu(const at::Tensor& input) {
-  TENSOR_ON_CPU(input);
+  TORCH_CHECK_TENSORS_ON_SAME_CPU(input);
   // Currently it supports 2D inputs
   TENSOR_NDIM_EQUALS(input, 2);
 
