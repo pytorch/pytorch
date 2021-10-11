@@ -225,17 +225,7 @@ jobs:
           set -eux
           sudo df -H
       !{{ common.parse_ref() }}
-      - name: Fetch Diff
-        env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          set -eux
-          if [[ -z $PR_NUMBER ]]; then
-            echo not on PR
-          else
-            wget -O pr.diff "https://patch-diff.githubusercontent.com/raw/pytorch/pytorch/pull/$PR_NUMBER.diff"
-            echo "GOT PR"
-          fi
+      !{{ common.fetch_diff(name='linux') }}
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}

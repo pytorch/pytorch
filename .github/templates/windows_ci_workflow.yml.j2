@@ -202,17 +202,7 @@ jobs:
         name: Setup Python3
         with:
           python-version: '3.x'
-      - name: Fetch Diff
-        env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        shell: bash
-        run: |
-          set -eux
-          if [[ -z $PR_NUMBER ]]; then
-            echo Not on PR
-          else
-            powershell -Command "Invoke-WebRequest https://github.com/pytorch/pytorch/pull/$PR_NUMBER.diff -OutFile pr.diff"
-          fi
+      !{{ common.fetch_diff(name='windows') }}
       - name: Test
         shell: bash
         env:

@@ -388,16 +388,16 @@ jobs:
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
-      - name: Fetch Diff
+      - name: Fetch diff
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
+        shell: bash
         run: |
           set -eux
           if [[ -z $PR_NUMBER ]]; then
-            echo not on PR
+            echo Not on PR
           else
             wget -O pr.diff "https://patch-diff.githubusercontent.com/raw/pytorch/pytorch/pull/$PR_NUMBER.diff"
-            echo "GOT PR"
           fi
       - name: Test
         env:
