@@ -507,10 +507,10 @@ Tensor new_full(
     c10::optional<Device> device,
     c10::optional<bool> pin_memory
     ) {
-  // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
-  return at::full(size, fill_value, self.options().merge_in(options));
+  Tensor r = self.new_empty(size, TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory));
+  r.fill_(fill_value);
+  return r;
 }
 
 namespace {
@@ -608,11 +608,9 @@ Tensor new_ones(
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options =
-      TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
-          pin_memory);
-
-  return at::ones(size, self.options().merge_in(options));
+  Tensor r = self.new_empty(size, TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory));
+  r.fill_(1.);
+  return r;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ scalar_tensor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -979,7 +977,7 @@ Tensor tril_indices_cpu(
   //
   // 3. sequential RAM + transpose: create an n X 2 Tensor, fill the Tensor
   //    sequentially, and then transpose it.
-  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "tril_indices", [&]() -> void {
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, result.scalar_type(), "tril_indices", [&]() -> void {
     // fill the Tensor with correct values
     scalar_t* result_data = result.data_ptr<scalar_t>();
     int64_t i = 0;
@@ -1017,7 +1015,7 @@ Tensor triu_indices_cpu(
   // create an empty Tensor with correct size
   auto result = at::native::empty_cpu({2, triu_size}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 
-  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "triu_indices", [&]() -> void {
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, result.scalar_type(), "triu_indices", [&]() -> void {
     // fill the Tensor with correct values
     scalar_t* result_data = result.data_ptr<scalar_t>();
     int64_t i = 0;
@@ -1099,10 +1097,9 @@ Tensor new_zeros(
     c10::optional<Device> device,
     c10::optional<bool> pin_memory
     ) {
-  // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
-
-  return at::zeros(size, self.options().merge_in(options));
+  Tensor r = self.new_empty(size, TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory));
+  r.zero_();
+  return r;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ bartlett_window ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

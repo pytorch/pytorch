@@ -42,11 +42,21 @@ ALLOW_LIST = [
     ("aten::_lu_solve_helper", datetime.date(9999, 1, 1)),
     ("aten::_lu_with_info", datetime.date(9999, 1, 1)),
     ("aten::_linalg_solve_out_helper_", datetime.date(9999, 1, 1)),
+    ("aten::select_backward", datetime.date(9999, 1, 1)),
+    ("aten::slice_backward", datetime.date(9999, 1, 1)),
+    ("aten::diagonal_backward", datetime.date(9999, 1, 1)),
     ("aten::rowwise_prune", datetime.date(9999, 1, 1)),
     ("aten::_triangular_solve_helper", datetime.date(9999, 1, 1)),
     ("aten::adaptive_avg_pool3d_backward", datetime.date(9999, 1, 1)),
     ("aten::_embedding_bag_dense_backward", datetime.date(9999, 1, 1)),
     ("aten::randperm", datetime.date(9999, 1, 1)),
+    ("aten::thnn_conv2d_forward", datetime.date(2021, 9, 30)),
+    ("aten::thnn_conv2d_backward", datetime.date(2021, 9, 30)),
+    ("aten::_log_softmax_backward_data", datetime.date(2021, 10, 21)),
+    ("aten::_softmax_backward_data", datetime.date(2021, 10, 21)),
+    ("aten::fused_moving_avg_obs_fake_quant", datetime.date(2021, 10, 21)),
+    ("aten::_fused_moving_avg_obs_fq_helper", datetime.date(2021, 10, 21)),
+    ("aten::_baddbmm_mkl_", datetime.date(2021, 10, 31)),
 ]
 
 ALLOW_LIST_COMPILED = [

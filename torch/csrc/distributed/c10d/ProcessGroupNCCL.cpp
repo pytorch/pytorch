@@ -48,12 +48,20 @@ struct AutoNcclGroup {
   }
 };
 
+#if defined(NCCL_MAJOR) && ((NCCL_MAJOR > 2) || \
+                            (NCCL_MAJOR == 2) && (NCCL_MINOR >= 10))
+#define NCCL_HAS_AVG 1
+#endif
+
 // NCCL op mapping
 const std::map<ReduceOp, ncclRedOp_t> ncclOp = {
     {ReduceOp::MIN, ncclMin},
     {ReduceOp::MAX, ncclMax},
     {ReduceOp::SUM, ncclSum},
     {ReduceOp::PRODUCT, ncclProd},
+#ifdef NCCL_HAS_AVG
+    {ReduceOp::AVG, ncclAvg},
+#endif
 };
 
 // NCCL type typing
@@ -83,15 +91,27 @@ ncclDataType_t getNcclDataType(at::ScalarType type) {
 
 ncclRedOp_t getNcclReduceOp(const ReduceOp reduceOp, at::Tensor& input) {
   try {
-    if (reduceOp == ReduceOp::SUM && input.scalar_type() == at::kBool) {
-      // For bool tensors, map sum to max, which both represent a bitwise or.
-      // This is to prevent overflow issues with sum, since we use uint8 to
-      // represent a bool (see ncclDataType mapping).
-      return ncclMax;
+    if (input.scalar_type() == at::kBool) {
+      if (reduceOp == ReduceOp::SUM) {
+        // For bool tensors, map sum to max, which both represent a bitwise or.
+        // This is to prevent overflow issues with sum, since we use uint8 to
+        // represent a bool (see ncclDataType mapping).
+        return ncclMax;
+      }
+#ifdef NCCL_HAS_AVG
+      if (reduceOp == ReduceOp::AVG) {
+        TORCH_CHECK(false, "Cannot use ReduceOp.AVG with boolean inputs");
+      }
+#endif
     }
     return ncclOp.at(reduceOp);
   } catch (const std::out_of_range& e) {
     switch (reduceOp) {
+      case ReduceOp::AVG:
+        TORCH_CHECK(false,
+                    "AVG requires NCCL 2.10+. The current version is ",
+                    NCCL_MAJOR, ".", NCCL_MINOR);
+        break;
       case ReduceOp::BAND:
         TORCH_CHECK(false, "Cannot use ReduceOp.BAND with NCCL");
         break;
@@ -919,6 +939,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   // created before encountering any communication calls. This is why we need
   // the following for loop.
   for (const auto i : c10::irange(ncclActiveGroupCounter_)) {
+    (void)i;
     C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
   }
 
@@ -958,6 +979,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
 
   // See [Group Start/End Note]
   for (const auto i : c10::irange(ncclActiveGroupCounter_)) {
+    (void)i;
     C10D_NCCL_CHECK(ncclGroupStart(), c10::nullopt);
   }
 
