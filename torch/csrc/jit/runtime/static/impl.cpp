@@ -161,6 +161,8 @@ LivenessMap GetLivenessMap(
   std::vector<const Value*> values_in_creation_order;
   FastMap<const Value*, size_t> values_to_idx_in_creation_order;
   for (const auto* node : graph->nodes()) {
+    values_to_idx_in_creation_order.reserve(
+        values_to_idx_in_creation_order.size() + node->outputs().size());
     for (const auto* v : node->outputs()) {
       values_to_idx_in_creation_order.emplace(
           v, values_in_creation_order.size());
@@ -184,6 +186,7 @@ LivenessMap GetLivenessMap(
 
     auto& v_live_set = liveness_map[v] = {};
 
+    v_live_set.reserve(live_values_use_chain.size());
     for (const auto& live_v : live_values_use_chain) {
       v_live_set.insert(live_v.first);
       liveness_map.at(live_v.first).insert(v);
@@ -192,7 +195,7 @@ LivenessMap GetLivenessMap(
     // only add values to the live set if they
     // have deps, otherwise they die immediately
     if (v->uses().size()) {
-      live_values_use_chain[v] = {};
+      live_values_use_chain[v] = FastSet<const Node*>(v->uses().size());
     }
 
     // record the relationship between v (Value) and its uses (Node)
@@ -1310,17 +1313,21 @@ ProcessedNode::ProcessedNode(
   // TODO leverage type information
   outputs_.resize(node->outputs().size());
 
-  if (enable_out_variant && (fn_ = getOutOfPlaceOperation(node))) {
-    VLOG(1) << "Switch to out variant for node: " << PrintNode(node);
-    return;
+  if (enable_out_variant) {
+    if (OutVariant fn = getOutOfPlaceOperation(node)) {
+      fn_.emplace<0>(std::move(fn));
+      VLOG(1) << "Switch to out variant for node: " << PrintNode(node);
+      return;
+    }
   }
-  if (!fn_ && (native_fn_ = getNativeOperation(node))) {
+  if (NativeFunction fn = getNativeOperation(node)) {
+    fn_.emplace<1>(std::move(fn));
     VLOG(1) << "Switch to native impl for node: " << PrintNode(node);
     return;
   }
   {
     const Operator& op = node->getOperator();
-    op_ = op.getOperation(node);
+    fn_.emplace<2>(op.getOperation(node));
     VLOG(1) << "Fallback interpreter for node: " << PrintNode(node);
   }
 }
@@ -1338,10 +1345,10 @@ std::vector<IValue> ProcessedNode::clone_inputs() const {
 
 void ProcessedNode::run_impl() {
   DCHECK(verify_no_memory_overlap());
-  if (fn_) {
-    fn_(this);
-  } else if (native_fn_) {
-    native_fn_(this);
+  if (fn_.index() == 0) {
+    c10::get<0>(fn_)(this);
+  } else if (fn_.index() == 1) {
+    c10::get<1>(fn_)(this);
   } else {
     std::vector<IValue> stack;
     const size_t size = node_->inputs().size();
@@ -1354,8 +1361,8 @@ void ProcessedNode::run_impl() {
       stack.emplace_back(static_cast<int>(size));
     }
 
-    DCHECK(op_);
-    op_->operator()(stack);
+    DCHECK(fn_.index() == 2);
+    c10::get<2>(fn_)(stack);
 
     DCHECK_EQ(stack.size(), node_->outputs().size());
     for (const auto i : c10::irange(node_->outputs().size())) {
