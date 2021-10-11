@@ -67,12 +67,11 @@ template <> struct cub::NumericTraits<c10::BFloat16>: cub::BaseTraits<cub::FLOAT
 }
 #endif
 
+#if !defined(USE_ROCM)
 namespace at { namespace native {
 namespace cub = at_cuda_detail::cub;
 }}
-namespace caffe2 {
-namespace cub = at_cuda_detail::cub;
-}
+#endif
 
 namespace at {
 namespace cuda {
