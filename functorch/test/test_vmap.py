@@ -170,8 +170,9 @@ class TestVmapAPI(TestCase):
             r"Batching rule not implemented for aten::.+; the "
             r"fallback path doesn't work on out= or view ops"
         )
-        with self.assertRaisesRegex(RuntimeError, msg):
-            vmap(torch.ravel)(tensor)
+        # TODO: find a view op
+        # with self.assertRaisesRegex(RuntimeError, msg):
+        #     vmap(torch.ravel)(tensor)
 
         def out_op(x, y):
             return torch.abs(x, out=y)
