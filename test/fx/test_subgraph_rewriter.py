@@ -491,4 +491,3 @@ class TestSubgraphRewriter(JitTestCase):
         ref_outs = comparison_fn(x)
         test_outs = traced.forward(x)
         self.assertEqual(ref_outs, test_outs)
-
