@@ -30,7 +30,9 @@ class TORCH_API CodeGen {
       : stmt_(stmt),
         buffer_args_(std::move(buffer_args)),
         device_(device),
-        kernel_func_name_(std::move(kernel_func_name)) {}
+        kernel_func_name_(std::move(kernel_func_name)) {
+    allocBuf();
+  }
 
   virtual ~CodeGen() = default;
 
@@ -98,6 +100,8 @@ class TORCH_API CodeGen {
   const std::string& kernel_func_name() const {
     return kernel_func_name_;
   }
+
+  void allocBuf();
 
  protected:
   static void* argToPtr(const BufferArg& bufferArg, const CallArg& callArg);
