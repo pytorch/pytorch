@@ -321,7 +321,7 @@ std::string getNvtxStr(
       for (const auto idx : c10::irange(shapes.size())) {
         if (shapes[idx].size() > 0) {
           s << "[";
-          for (size_t dim = 0; dim < shapes[idx].size(); ++dim) {
+          for (const auto dim : c10::irange(shapes[idx].size())) {
             s << shapes[idx][dim];
             if (dim < shapes[idx].size() - 1) {
               s << ", ";

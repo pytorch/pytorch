@@ -52,7 +52,7 @@ void AdaptiveLogSoftmaxWithLossImpl::reset() {
 
 void AdaptiveLogSoftmaxWithLossImpl::reset_parameters() {
   head->reset_parameters();
-  for (size_t i = 0; i < tail->size(); ++i) {
+  for (const auto i : c10::irange(tail->size())) {
     auto i2h = tail[i]->children()[0]->as<Linear>();
     auto h2o = tail[i]->children()[1]->as<Linear>();
     i2h->reset_parameters();

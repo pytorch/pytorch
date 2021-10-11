@@ -526,9 +526,7 @@ void Reducer::delay_all_reduce() {
   unused_parameters_.clear();
 
   // copy all gradients to buckets
-  for (size_t variable_index = 0;
-       variable_index < params_.size();
-       variable_index++) {
+  for (const auto variable_index : c10::irange(params_.size())) {
     // set unused_parameters_
     if (numGradHooksTriggeredMap_[variable_index] == 0) {
       unused_parameters_.push_back(variable_index);

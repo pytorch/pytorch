@@ -6,6 +6,7 @@
 #include <torch/csrc/utils/memory.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <cstddef>
 #include <thread>
@@ -41,7 +42,8 @@ class StatelessDataLoader : public DataLoaderBase<
       DataLoaderOptions options)
       // NOLINTNEXTLINE(performance-move-const-arg)
       : super(std::move(options)), sampler_(std::move(sampler)) {
-    for (size_t w = 0; w < this->options_.workers; ++w) {
+    for (const auto w : c10::irange(this->options_.workers)) {
+      (void)w; // Suppress unused variable warning
       // Here we copy the dataset into the worker thread closure. Each worker
       // has its own copy of the dataset. This means the dataset must be
       // trivially copiable, or else we don't expect more than one worker to

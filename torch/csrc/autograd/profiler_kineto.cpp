@@ -242,7 +242,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
     std::unordered_map<uint64_t, libkineto::GenericTraceActivity*> tidSeq2activity;
     uint64_t fwd_bwd_link_id = 1;
 
-    for (size_t idx = 0; idx < cpu_trace->activities.size(); ++idx) {
+    for (const auto idx : c10::irange(cpu_trace->activities.size())) {
       auto& kineto_event = kineto_events_[idx];
       auto& activity = cpu_trace->activities[idx];
 
@@ -458,7 +458,7 @@ std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {
       oss << ", ";
     }
     oss << "[";
-    for (size_t s_idx = 0; s_idx < shapes[t_idx].size(); ++s_idx) {
+    for (const auto s_idx : c10::irange(shapes[t_idx].size())) {
       if (s_idx > 0) {
         oss << ", ";
       }
