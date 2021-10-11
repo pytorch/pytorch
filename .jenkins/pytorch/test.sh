@@ -74,6 +74,9 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # Print GPU info
   rocminfo | grep -E 'Name:.*\sgfx|Marketing'
+
+  # Manually set NUM_TEST_SHARDS since Jenkins doesn't do it
+  export NUM_TEST_SHARDS=2
 fi
 
 # --user breaks ppc64le builds and these packages are already in ppc64le docker
