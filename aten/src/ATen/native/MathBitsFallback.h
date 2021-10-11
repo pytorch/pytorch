@@ -3,28 +3,21 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/MemoryOverlap.h>
+#include <ATen/native/Resize.h>
 #include <c10/util/irange.h>
 #include <torch/library.h>
 
 namespace at {
-
+namespace native {
 // This fallback should only be used for operations that are self inverse and have a corresponding tensor
 // bit (internally implemented using DispatchKey) to maintain the state on tensor using tensor bit.
 // Currently there are two tensor bits that trigger this fallback: conjugate bit and negative bit.
 // Conjugate bit is set on a tensor when `.conj()` is called and neg bit is set on a tensor when `.conj().imag` is called.
 
+// NOTE: To use this fallback, `clone` and `copy_` should fully understand and be able to correctly handle the semantic of your math bit.
 struct MathOpFallback {
   MathOpFallback(DispatchKey key_, string op_name_) : key(key_), op_name(op_name_) {}
   virtual bool is_bit_set(const Tensor&) = 0;
-  virtual void _set_bit(const Tensor&, bool) = 0;
-  // materializes the bit, i.e., returns a new tensor tensor containing the true output
-  // (after performing the math operation corresponding to the tensor bit) if the bit is set to 1
-  // else returns self.
-  virtual Tensor resolve_bit(const Tensor&) = 0;
-  // in-place operation corresponding to the math op represented by the bit. Im the future if this class
-  // is generalized for ops that are not self inverse, then this must be replaced by op_inverse_inplace
-  virtual Tensor& math_op_(Tensor&) = 0;
   void fallback_impl(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
     /*
       Situations to handle:
@@ -40,6 +33,18 @@ struct MathOpFallback {
         READ from an argument, but in out= operations you can skip
         conjugating inputs on entry that never get used. In the current schema we
         can't easily tell if the operation is in in-place or out= operation.
+
+        Note:
+        1. Mutable tensorlists containing tensors whose math bit set to true are disallowed.
+        2. Mutable tensors with math bit set to true are unconditionally cloned to ensure
+           correct behavior in the case when the mutable tensor shares memory with non mutable arguments. 
+           
+           If we were to in-place resolve the math bit for mutable inputs, then the non-mutable inputs sharing partial or full memory
+           with these mutable inputs would read into wrong values in the following cases:
+           1. Non mutable inputs have their math bit set to false.
+           2. Math bit for mutable input(s) is resolved before the non mutable inputs (with bit set to true and sharing memory with one or more mutable arg(s)) are cloned.
+           
+           At the end, the final value of the mutable arguments from the stack are copied into the original input mutable tensor inputs.
     */
     const auto& arguments = op.schema().arguments();
     const auto num_arguments = arguments.size();
@@ -91,24 +96,25 @@ struct MathOpFallback {
         mut_arg = true;
       }
       if (ivalue.isTensor()) {
-        auto tensor = std::move(ivalue).toTensor();
-        if (!is_bit_set(tensor)) {
+        if (!is_bit_set(ivalue.toTensor())) {
           continue;
         }
+        auto tensor = std::move(ivalue).toTensor();
         TORCH_CHECK_NOT_IMPLEMENTED(!tensor.is_meta(), op_name, " fallback does not support meta tensors.");
         if (mut_arg) {
           mutable_inputs.emplace_back(std::make_pair(i, tensor));
         } 
-        tensor = tensor.clone();
+        tensor = at::clone(tensor);
         (*stack)[stack_start + i] = std::move(tensor);
       } else if (ivalue.isTensorList()) {
         auto tensors = std::move(ivalue).toTensorList();
+        bool not_a_mut_arg = !mut_arg;
         for(const auto j : c10::irange(tensors.size())) {
           const auto& tensor = tensors[j];
           if (!is_bit_set(tensor)) {
             continue;
           }
-          TORCH_CHECK(!mut_arg, " fallback doesn't currently support mutable TensorLists with ",
+          TORCH_CHECK(not_a_mut_arg, " fallback doesn't currently support mutable TensorLists with ",
               op_name, " inputs. Please materialize all the ", op_name, " input tensor(s) in the mutable TensorList inputs before calling ", op.schema().name());
           tensors[j] = at::clone(tensor);
         }
@@ -123,6 +129,7 @@ struct MathOpFallback {
       auto& mut_arg = index_and_mutable_input.second;
       auto& ivalue = (*stack)[stack_start + i];
       auto tensor = std::move(ivalue).toTensor();
+      at::native::resize_output(mut_arg, tensor.sizes());
       mut_arg.copy_(tensor);  
       (*stack)[stack_start + i] = std::move(mut_arg);
     }
@@ -133,5 +140,5 @@ struct MathOpFallback {
   DispatchKey key;
   string op_name;
 };
-
-} // namespace at
+}
+}// namespace at

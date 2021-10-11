@@ -2,20 +2,11 @@
 #include <ATen/native/MathBitFallThroughLists.h>
 
 namespace at {
-
+namespace native {
 struct NegFallback : MathOpFallback {
   NegFallback() : MathOpFallback(DispatchKey::Negative, "negation") {}
   bool is_bit_set(const Tensor& tensor) override {
     return tensor.is_neg();
-  }
-  void _set_bit(const Tensor& tensor, bool value) override {
-    return tensor._set_neg(value);
-  }
-  Tensor resolve_bit(const Tensor& tensor) override {
-    return at::resolve_neg(tensor);
-  }
-  Tensor& math_op_(Tensor& tensor) override {
-    return tensor.neg_();
   }
 };
 
@@ -29,8 +20,6 @@ TORCH_LIBRARY_IMPL(_, Negative, m) {
 }
 
 TORCH_LIBRARY_IMPL(aten, Negative, m) {
-  // NOTE: If you are adding an in-place operation to this list, please ensure it handles the
-  // case where input tensors share memory properly [See the note in MathBitsFallback.h]
   m.impl("set_.source_Storage_storage_offset", torch::CppFunction::makeFallthrough());
   m.impl("set_.source_Tensor", torch::CppFunction::makeFallthrough());
   m.impl("set_", torch::CppFunction::makeFallthrough());
@@ -44,4 +33,5 @@ TORCH_LIBRARY_IMPL(aten, Negative, m) {
   TENSOR_UTILITIES_AND_CONSTRUCTORS(m)
 }
 
+}
 } // namespace at
