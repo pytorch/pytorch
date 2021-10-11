@@ -196,10 +196,15 @@ else:
         _load_global_deps()
     from torch._C import *  # noqa: F403
 
-# Appease the type checker; ordinarily this binding is inserted by the
-# torch._C module initialization code in C
-if TYPE_CHECKING:
-    import torch._C as _C
+import torch._C as _C
+
+def get_autocast_gpu_dtype():
+    return_dtype = _C.get_autocast_gpu_dtype()
+    return torch.bfloat16 if str(return_dtype) == str(torch.bfloat16) else torch.float16
+
+def get_autocast_cpu_dtype():
+    return_dtype = _C.get_autocast_cpu_dtype()
+    return torch.bfloat16 if str(return_dtype) == str(torch.bfloat16) else torch.float16
 
 # Check to see if we can load C extensions, and if not provide some guidance
 # on what the problem might be.
