@@ -153,25 +153,26 @@ class TestProfiler(TestCase):
         # rerun to avoid initial start overhead
         with _profile(use_cuda=use_cuda, use_kineto=True) as p:
             self.payload(use_cuda=use_cuda)
-        output = p.key_averages().table(
-            sort_by="self_cuda_time_total" if use_cuda else "self_cpu_time_total", row_limit=-1)
-        # print(output)
+
+        ss = io.StringIO()
         found_gemm = False
         found_memcpy = False
         found_mm = False
         for e in p.function_events:
+            ss.write("  " + e.name + "\n")
             if "aten::mm" in e.name:
                 found_mm = True
             if "gemm" in e.name:
                 found_gemm = True
             if "Memcpy" in e.name or "memcpy" in e.name:
                 found_memcpy = True
+
+        debug_msg = f"\navailable event names:\n{ss.getvalue()}{'-' *30}\n"
         if use_cuda:
-            self.assertTrue(found_gemm)
-            self.assertTrue(found_memcpy)
+            self.assertTrue(found_gemm, debug_msg)
+            self.assertTrue(found_memcpy, debug_msg)
         else:
-            self.assertTrue(found_mm)
-        # p.export_chrome_trace("/tmp/test_trace.json")
+            self.assertTrue(found_mm, debug_msg)
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @unittest.skipIf(not TEST_MULTIGPU, "Multiple GPUs needed")
