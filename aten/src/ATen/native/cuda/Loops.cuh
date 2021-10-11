@@ -81,7 +81,7 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
 // Because for some reason trying to enable vectorized
 // memory access introduce regression on ROCm.
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 #include <ATen/native/cuda/CUDALoops.cuh>
 #else
 #include <ATen/native/cuda/ROCmLoops.cuh>
@@ -176,7 +176,7 @@ void opmath_gpu_kernel_with_scalars(TensorIteratorBase& iter, const func_t& f) {
     // works around incorrect device guard generation for pre-structured
     // kernels device guards, but structured kernels do it right and
     // we can assume the device is already set correctly
-    const OptionalDeviceGuard device_guard(device_of(iter.tensor(1)));
+    const OptionalDeviceGuard device_guard(iter.device(1));
     gpu_kernel(iter, af);
   } else if (iter.is_cpu_scalar(2)) {
     BUnaryFunctor<arg1_t, arg2_t, return_t, func_t> bf(f, iter.scalar_value<opmath_arg2_t>(2));

@@ -11,7 +11,7 @@ namespace jit {
 
 namespace {
 size_t hashType(const c10::ConstTypePtr& type) {
-  if (auto named_type = type->cast<ClassType>()) {
+  if (auto named_type = type->castRaw<ClassType>()) {
     return get_hash(named_type->name().value());
   }
   auto hashes = fmap(type->containedTypes(), [](const TypePtr& elem) {
