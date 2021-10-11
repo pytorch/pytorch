@@ -71,10 +71,9 @@ class BasePruner(BaseSparsifier):
             for module in modules:
                 if not isinstance(module, tuple(NEEDS_ZEROS)):
                     # add pruning parametrization and forward hooks
-                    if getattr(module, 'mask', None) is None:
-                        module.register_buffer('mask', torch.tensor(module.weight.shape[0]))
+                    mask = torch.tensor(module.weight.shape[0])
                     param = config.get('parametrization', PruningParametrization)
-                    parametrize.register_parametrization(module, 'weight', param(module.mask), unsafe=True)
+                    parametrize.register_parametrization(module, 'weight', param(mask), unsafe=True)
 
                     assert isinstance(module.parametrizations, ModuleDict)  # make mypy happy
                     assert isinstance(module.parametrizations.weight, ModuleList)
@@ -86,10 +85,9 @@ class BasePruner(BaseSparsifier):
                         raise NotImplementedError("This module type is not supported yet.")
 
                 else:  # needs zeros
-                    if getattr(module, 'mask', None) is None:
-                        module.register_buffer('mask', torch.tensor(module.weight.shape[0]))
+                    mask = torch.tensor(module.weight.shape[0])
                     param = config.get('parametrization', ZeroesParametrization)
-                    parametrize.register_parametrization(module, 'weight', param(module.mask), unsafe=True)
+                    parametrize.register_parametrization(module, 'weight', param(mask), unsafe=True)
 
                 if getattr(module, 'bias', None) is not None:
                     module.register_parameter('_bias', nn.Parameter(module.bias.detach()))
@@ -182,7 +180,6 @@ class BasePruner(BaseSparsifier):
                     module_fqn = module_fqn[1:]
                 local_args['fqn'] = module_fqn
                 local_args['module'] = module
-
             self.module_groups.append(local_args)
 
         self._prepare()
@@ -209,11 +206,13 @@ class BasePruner(BaseSparsifier):
             for module in modules:
                 parametrize.remove_parametrizations(module, 'weight',
                                                     leave_parametrized=True)
+                # In case the module has a mask
                 if getattr(module._parameters, 'mask', None):
                     del module._parameters['mask']
                 elif getattr(module._buffers, 'mask', None):
                     del module._buffers['mask']
-                delattr(module, 'mask')
+                if hasattr(module, 'mask'):
+                    delattr(module, 'mask')
 
     def get_module_pruned_outputs(self, module):
         r"""Returns the set of pruned indices of module"""

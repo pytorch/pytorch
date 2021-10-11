@@ -197,8 +197,6 @@ class TestBasePruner(TestCase):
                 modules.append(module)
             for module in modules:
                 assert module.weight.device.type == device.type
-                # Check mask exists
-                assert hasattr(module, 'mask')
                 # Check parametrization exists and is correct
                 assert parametrize.is_parametrized(module)
                 assert hasattr(module, "parametrizations")
