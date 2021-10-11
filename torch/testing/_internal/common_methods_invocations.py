@@ -19,7 +19,7 @@ from torch.testing import make_non_contiguous, make_tensor
 from torch.testing._internal.common_dtype import (
     _dispatch_dtypes, floating_types, floating_types_and, complex_types, floating_and_complex_types,
     floating_and_complex_types_and, all_types_and_complex_and, all_types_and, all_types_and_complex, integral_types_and,
-    all_types, double_types, empty_types
+    all_types, double_types, empty_types, integral_types
 )
 from torch.testing._internal.common_device_type import \
     (onlyCUDA, onlyOnCPUAndCUDA, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
@@ -5048,6 +5048,24 @@ def sample_inputs_unfold(op_info, device, dtype, requires_grad, **kwargs):
     return sample_inputs
 
 
+def sample_inputs_unravel_index(op_info, device, dtype, requires_grad, **kwargs):
+    create_tensor = partial(torch.tensor, dtype=dtype, device=device, requires_grad=False)
+
+    cases = (
+        ((S, S), (25,)),
+        ((1, 2, 3), (2, 6)),
+        # ((0), ()),
+        ((45, 47), (1, 10, 10)),
+    )
+
+    sample_inputs = []
+    def generator():
+        for indices, shape in cases:
+            yield SampleInput(create_tensor(indices), args=(shape,))
+            yield SampleInput(create_tensor(indices), args=(create_tensor(shape),))
+
+    return list(generator())
+
 def sample_inputs_atan2(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     cases = (
@@ -9179,6 +9197,17 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
            ),
            sample_inputs_func=sample_inputs_unfold),
+    OpInfo('unravel_index',
+           op=lambda x, *args: torch.unravel_index(x, *args, as_tuple=True),
+           ref=np.unravel_index,
+           dtypes=integral_types(),
+           supports_autograd=False,
+           supports_out=False,
+           skips=(
+               # unravel_index is not supported by TorchScript, it's a Python-only function
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           ),
+           sample_inputs_func=sample_inputs_unravel_index),
     OpInfo('msort',
            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),

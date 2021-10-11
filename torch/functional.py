@@ -37,6 +37,7 @@ __all__ = [
     'tensordot',
     'unique',
     'unique_consecutive',
+    'unravel_index',
 ]
 
 
@@ -1669,21 +1670,29 @@ def unravel_index(
         indices: A tensor containing flattened indices to be unraveled, can be of `dtype` `torch.int64`
                  or `torch.int32`.
         shape: The shape used for unravelling the `indices`.
-    
+
     Keyword Args:
         as_tuple: A boolean value, which if `True` will return the unraveled `indices` as tuple,
                   else a `Tensor` will be returned.
-    
+
     Returns:
         unraveled coordinates from the given `indices`, and `shape`. See description of `as_tuple` for
         returning tuples.
     """
     if (not isinstance(shape, Tensor)):
+        assert isinstance(shape, (tuple,  list)), f"Shape should be either a tuple or a list, but found: {type(shape)}"
+        assert all(isinstance(item, int) for item in shape), "Expected shape to have only integral elements"
         try:
-            shape = torch.tensor(shape)
+            shape = torch.tensor(shape, dtype=torch.int64, device=indices.device)
         except:
             raise ValueError("Incorrect dtype passed for shape: {shape}, should be convertible"
                              " to PyTorch's tensor class.")
+    else:
+        assert shape.dtype in [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64], "Unsupported dtype, only integral types allowed."
+
+    # In case shape is a 0-dim tensor, return indices as it is?
+    if shape.dim() == 0:
+        return tuple(indices) if as_tuple else indices
 
     # List to store unraveled indices, to be converted to a tuple/tensor depending on
     # to_tuple kw-only arg
@@ -1692,5 +1701,6 @@ def unravel_index(
         coords.append(indices % dim)
         indices = torch.div(indices, dim, rounding_mode='trunc')
 
-    coords = torch.stack(coords[::-1], dim=-1)
+    if len(coords) != 0:
+        coords = torch.stack(coords[::-1], dim=-1)
     return tuple(coords) if as_tuple else coords
