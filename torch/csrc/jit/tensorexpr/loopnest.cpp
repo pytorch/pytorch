@@ -1224,9 +1224,6 @@ void LoopNest::prepareForCodegen(
   root_stmt_ = reduceExpander.expand(root_stmt_);
 
   root_stmt_ = FlattenIndexes(root_stmt_);
-
-  // Add allocs and frees for intermediate buffers at the global level.
-  root_stmt_ = insertAllocFree(root_stmt_, interm_bufs);
 }
 
 namespace {
