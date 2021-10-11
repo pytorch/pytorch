@@ -160,5 +160,18 @@ TORCH_API Tensor addBatchDim(const Tensor& tensor, int64_t level, int64_t dim);
 // See NOTE: [vmap-incompatible in-place operations] for the definition of this.
 TORCH_API bool inplaceIsVmapCompatible(const Tensor& self, const Tensor& other);
 
+constexpr DispatchKeySet kKeysToPropagateToWrapper({
+  DispatchKey::Negative,
+  DispatchKey::Conjugate,
+  DispatchKey::XLA,
+  DispatchKey::CUDA,
+  DispatchKey::CPU,
+});
+
+inline DispatchKeySet getKeysToPropagateToWrapper(const Tensor& tensor, DispatchKeySet to_propagate=kKeysToPropagateToWrapper) {
+  auto key_set = tensor.unsafeGetTensorImpl()->key_set();
+  return key_set & kKeysToPropagateToWrapper;
+}
+
 }
 }
