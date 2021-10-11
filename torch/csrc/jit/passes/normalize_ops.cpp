@@ -151,6 +151,7 @@ const std::unordered_map<Symbol, Symbol>& getOperatorAliasMap() {
       {aten::adjoint, aten::mH},
       {aten::special_multigammaln, aten::mvlgamma},
       {aten::special_polygamma, aten::polygamma},
+      {aten::special_softmax, aten::softmax},
       {aten::special_gammainc, aten::igamma},
       {aten::special_gammaincc, aten::igammac},
       {aten::special_gammaln, aten::lgamma}};
