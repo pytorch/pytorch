@@ -12,7 +12,7 @@ full_codegen:
   - mean
   - mm
   - mv
-  # - mv.out
+  - topk
 supported:
   - _log_softmax_backward_data
   - add.Tensor

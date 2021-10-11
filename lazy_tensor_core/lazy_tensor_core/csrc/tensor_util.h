@@ -87,4 +87,22 @@ bool RequiresRawTypeCasting(at::ScalarType scalar_type, const Device* device);
 
 lazy_tensors::PrimitiveType GetShapeDimensionType(const Device* device);
 
+template<typename... TupleType>
+std::vector<std::vector<int64_t>> CreateComputationShapeFromMetaTensors(const std::tuple<TupleType...>& tensors) {
+  std::vector<std::vector<int64_t>> shape;
+  c10::guts::apply([&shape] (const auto&... tensors) {
+      ((shape.push_back(tensors.sizes().vec())), ...);
+  }, tensors);
+  return shape;
+}
+
+template<typename... TupleType>
+std::vector<at::ScalarType> CreateDTypeFromMetaTensors(const std::tuple<TupleType...>& tensors) {
+  std::vector<at::ScalarType> dtypes;
+  c10::guts::apply([&dtypes] (const auto&... tensors) {
+      ((dtypes.push_back(tensors.scalar_type())), ...);
+  }, tensors);
+  return dtypes;
+}
+
 }  // namespace torch_lazy_tensors
