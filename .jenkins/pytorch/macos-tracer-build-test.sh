@@ -24,7 +24,7 @@ if [ "${TRACING_BASED}" == 1 ]; then
     # folder.
     BUILD_LIBTORCH_PY=$PWD/tools/build_libtorch.py
     pushd "${CPP_BUILD}/caffe2" || exit
-    VERBOSE=1 DEBUG=1 python "${BUILD_LIBTORCH_PY}"
+    VERBOSE=1 DEBUG=1 USE_KINETO=0 python "${BUILD_LIBTORCH_PY}"
     popd || exit
 
     "ls ${CPP_BUILD}/caffe2/build/bin/model_tracer"
