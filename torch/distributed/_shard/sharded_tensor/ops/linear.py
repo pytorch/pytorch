@@ -1,11 +1,12 @@
+from typing import List
+
 import torch
 import torch.distributed as dist
-from torch.distributed._sharding_spec import ChunkShardingSpec
-from torch.distributed._sharding_spec._internals import (
+from torch.distributed._shard.sharding_spec import ChunkShardingSpec
+from torch.distributed._shard.sharding_spec._internals import (
     get_split_size,
     get_chunked_dim_size,
 )
-from typing import List
 
 
 def sharded_linear(types, args, kwargs, pg):
@@ -68,7 +69,7 @@ def sharded_linear(types, args, kwargs, pg):
     5. If placements are not in order any appropriate rearrangement of rows
        are done for the (13 x 16) matrix and finally the bias term is added.
     """
-    from torch.distributed._sharded_tensor import ShardedTensor
+    from torch.distributed._shard import ShardedTensor
 
     input = args[0]
     weight = args[1]
@@ -80,16 +81,17 @@ def sharded_linear(types, args, kwargs, pg):
     if not isinstance(weight, ShardedTensor):
         raise TypeError("weight needs to be ShardedTensor")
     if len(input.size()) < 2:
-        raise ValueError('Input needs to have at least 2 dims')
+        raise ValueError("Input needs to have at least 2 dims")
     if len(weight.size()) != 2:
-        raise ValueError('Weight needs to have exactly 2 dims')
+        raise ValueError("Weight needs to have exactly 2 dims")
     if len(bias.size()) != 1:
-        raise ValueError('Bias needs to have exactly 1 dim')
+        raise ValueError("Bias needs to have exactly 1 dim")
 
     if input.size()[-1] != weight.size()[1]:
         raise ValueError(
-            f'Input dim: {input.size()[1]} does not match '
-            f'appropriate weight dim: {weight.size()[1]}')
+            f"Input dim: {input.size()[1]} does not match "
+            f"appropriate weight dim: {weight.size()[1]}"
+        )
     if not isinstance(weight._sharding_spec, ChunkShardingSpec):
         raise ValueError("Only ChunkShardingSpec supported for ShardedTensor ops!")
     if len(weight.local_shards()) != 1:
@@ -102,11 +104,18 @@ def sharded_linear(types, args, kwargs, pg):
     rank = dist.get_rank(pg)
 
     if sharding_dim == 1:
-        return _handle_row_wise_sharding(input, world_size, weight, rank, local_shard_t, bias, pg)
+        return _handle_row_wise_sharding(
+            input, world_size, weight, rank, local_shard_t, bias, pg
+        )
     elif sharding_dim == 0:
-        return _handle_col_wise_sharding(input, world_size, weight, local_shard_t, bias, pg)
+        return _handle_col_wise_sharding(
+            input, world_size, weight, local_shard_t, bias, pg
+        )
     else:
-        raise RuntimeError(f'nn.Linear weight sharded on dim {sharding_dim} not supported!')
+        raise RuntimeError(
+            f"nn.Linear weight sharded on dim {sharding_dim} not supported!"
+        )
+
 
 def _handle_col_wise_sharding(input, world_size, weight, local_shard_t, bias, pg):
     # allgather the inputs first.
@@ -131,21 +140,34 @@ def _handle_col_wise_sharding(input, world_size, weight, local_shard_t, bias, pg
     ]
 
     # distribute the outputs using all2all.
-    dist.all_to_all_single(output, combined_results, output_split_sizes=output_split_sizes, group=pg)
+    dist.all_to_all_single(
+        output, combined_results, output_split_sizes=output_split_sizes, group=pg
+    )
 
     # Check if we need to rearrange rows appropriately for output.
-    rearrange_rows = any([idx != placement.rank() for idx, placement in enumerate(weight._sharding_spec.placements)])
+    rearrange_rows = any(
+        [
+            idx != placement.rank()
+            for idx, placement in enumerate(weight._sharding_spec.placements)
+        ]
+    )
     if rearrange_rows:
         indices = []
         for placement in weight._sharding_spec.placements:
             dim_size = output_split_sizes[placement.rank()]
-            start = sum([split_size if i < placement.rank() else 0 for i, split_size in enumerate(output_split_sizes)])
+            start = sum(
+                [
+                    split_size if i < placement.rank() else 0
+                    for i, split_size in enumerate(output_split_sizes)
+                ]
+            )
             indices += list(range(start, start + dim_size))
 
         output = output.index_select(0, torch.tensor(indices, device=output.device))
 
     # add bias and return result.
     return output.t() + bias
+
 
 def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard_t, bias, pg):
     # alltoall to gather all the appropriate inputs.
@@ -167,16 +189,22 @@ def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
         # Need to re-arrange rows of input_t for all2all.
         indices: List[int] = []
         for placement in weight._sharding_spec.placements:
-            sharded_dim_size = get_chunked_dim_size(input_t_size[0], split_size, placement.rank())
+            sharded_dim_size = get_chunked_dim_size(
+                input_t_size[0], split_size, placement.rank()
+            )
             input_idx = placement.rank() * split_size
             indices += range(input_idx, input_idx + sharded_dim_size)
 
         input_t = input_t.index_select(0, torch.tensor(indices, device=input_t.device))
 
-    gathered_input = torch.empty(input_split_sizes[rank] * world_size, input_t_size[1], device=input_t.device)
+    gathered_input = torch.empty(
+        input_split_sizes[rank] * world_size, input_t_size[1], device=input_t.device
+    )
 
     # Perform alltoall
-    dist.all_to_all_single(gathered_input, input_t, input_split_sizes=input_split_sizes, group=pg)
+    dist.all_to_all_single(
+        gathered_input, input_t, input_split_sizes=input_split_sizes, group=pg
+    )
     gathered_input = gathered_input.t()
 
     # Perform local matmuls for all shards

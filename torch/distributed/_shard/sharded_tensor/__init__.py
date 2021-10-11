@@ -1,16 +1,19 @@
 # coding=utf-8
 
 import copy
+from typing import List
+
 import torch
-from torch.distributed._sharding_spec import (
+import torch.distributed as dist
+from torch.distributed import distributed_c10d
+from torch.distributed._shard.sharding_spec import (
     ChunkShardingSpec,
     ShardingSpec,
 )
-from torch.distributed._sharding_spec._internals import (
+from torch.distributed._shard.sharding_spec._internals import (
     get_chunked_dim_size,
     get_split_size,
 )
-from typing import List
 
 from .api import (
     CreateOp,
@@ -22,19 +25,19 @@ from .api import (
     TensorProperties,
     load_with_process_group,
 )
-import torch.distributed as dist
-from torch.distributed import distributed_c10d
 
 
-def empty(sharding_spec: ShardingSpec,
-          *size,
-          dtype=None,
-          layout=torch.strided,
-          requires_grad=False,
-          pin_memory=False,
-          memory_format=torch.contiguous_format,
-          process_group=None,
-          init_rrefs=False):
+def empty(
+    sharding_spec: ShardingSpec,
+    *size,
+    dtype=None,
+    layout=torch.strided,
+    requires_grad=False,
+    pin_memory=False,
+    memory_format=torch.contiguous_format,
+    process_group=None,
+    init_rrefs=False,
+):
     """
     Returns a :class:`ShardedTensor` filled with uninitialized data.
         Needs to be called on all ranks in an SPMD fashion.
@@ -66,10 +69,17 @@ def empty(sharding_spec: ShardingSpec,
     Returns:
         A :class:`ShardedTensor` object on each rank
     """
-    tensor_properties = TensorProperties(dtype=dtype, layout=layout,
-                                         requires_grad=requires_grad,
-                                         pin_memory=pin_memory, memory_format=memory_format, )
-    tensor_init_params = TensorInitParams(create_op=CreateOp.EMPTY, tensor_properties=tensor_properties, )
+    tensor_properties = TensorProperties(
+        dtype=dtype,
+        layout=layout,
+        requires_grad=requires_grad,
+        pin_memory=pin_memory,
+        memory_format=memory_format,
+    )
+    tensor_init_params = TensorInitParams(
+        create_op=CreateOp.EMPTY,
+        tensor_properties=tensor_properties,
+    )
     return ShardedTensor(
         sharding_spec,
         *size,
@@ -78,15 +88,18 @@ def empty(sharding_spec: ShardingSpec,
         init_rrefs=init_rrefs,
     )
 
-def ones(sharding_spec: ShardingSpec,
-         *size,
-         dtype=None,
-         layout=torch.strided,
-         requires_grad=False,
-         pin_memory=False,
-         memory_format=torch.contiguous_format,
-         process_group=None,
-         init_rrefs=False):
+
+def ones(
+    sharding_spec: ShardingSpec,
+    *size,
+    dtype=None,
+    layout=torch.strided,
+    requires_grad=False,
+    pin_memory=False,
+    memory_format=torch.contiguous_format,
+    process_group=None,
+    init_rrefs=False,
+):
     """
     Returns a :class:`ShardedTensor` with the scalar value 1.
         Needs to be called on all ranks in an SPMD fashion.
@@ -116,10 +129,16 @@ def ones(sharding_spec: ShardingSpec,
     Returns:
         A :class:`ShardedTensor` object on each rank
     """
-    tensor_properties = TensorProperties(dtype=dtype, layout=layout,
-                                         requires_grad=requires_grad,
-                                         pin_memory=pin_memory, memory_format=memory_format, )
-    tensor_init_params = TensorInitParams(create_op=CreateOp.ONES, tensor_properties=tensor_properties)
+    tensor_properties = TensorProperties(
+        dtype=dtype,
+        layout=layout,
+        requires_grad=requires_grad,
+        pin_memory=pin_memory,
+        memory_format=memory_format,
+    )
+    tensor_init_params = TensorInitParams(
+        create_op=CreateOp.ONES, tensor_properties=tensor_properties
+    )
     return ShardedTensor(
         sharding_spec,
         *size,
@@ -129,15 +148,17 @@ def ones(sharding_spec: ShardingSpec,
     )
 
 
-def rand(sharding_spec: ShardingSpec,
-         *size,
-         dtype=None,
-         layout=torch.strided,
-         requires_grad=False,
-         pin_memory=False,
-         memory_format=torch.contiguous_format,
-         process_group=None,
-         init_rrefs=False):
+def rand(
+    sharding_spec: ShardingSpec,
+    *size,
+    dtype=None,
+    layout=torch.strided,
+    requires_grad=False,
+    pin_memory=False,
+    memory_format=torch.contiguous_format,
+    process_group=None,
+    init_rrefs=False,
+):
     """
     Returns a :class:`ShardedTensor` filled with random numbers from a uniform distribution on the
         interval :math:`[0, 1)`. Needs to be called on all ranks in an SPMD fashion.
@@ -168,10 +189,16 @@ def rand(sharding_spec: ShardingSpec,
         A :class:`ShardedTensor` object on each rank
     """
     tensor_properties = TensorProperties(
-        dtype=dtype, layout=layout, requires_grad=requires_grad,
-        pin_memory=pin_memory, memory_format=memory_format
+        dtype=dtype,
+        layout=layout,
+        requires_grad=requires_grad,
+        pin_memory=pin_memory,
+        memory_format=memory_format,
     )
-    tensor_init_params = TensorInitParams(create_op=CreateOp.RAND, tensor_properties=tensor_properties, )
+    tensor_init_params = TensorInitParams(
+        create_op=CreateOp.RAND,
+        tensor_properties=tensor_properties,
+    )
     return ShardedTensor(
         sharding_spec,
         *size,
@@ -181,15 +208,17 @@ def rand(sharding_spec: ShardingSpec,
     )
 
 
-def zeros(sharding_spec: ShardingSpec,
-          *size,
-          dtype=None,
-          layout=torch.strided,
-          requires_grad=False,
-          pin_memory=False,
-          memory_format=torch.contiguous_format,
-          process_group=None,
-          init_rrefs=False):
+def zeros(
+    sharding_spec: ShardingSpec,
+    *size,
+    dtype=None,
+    layout=torch.strided,
+    requires_grad=False,
+    pin_memory=False,
+    memory_format=torch.contiguous_format,
+    process_group=None,
+    init_rrefs=False,
+):
     """
     Returns a :class:`ShardedTensor` filled with the scalar value 0.
         Needs to be called on all ranks in an SPMD fashion.
@@ -220,10 +249,16 @@ def zeros(sharding_spec: ShardingSpec,
         A :class:`ShardedTensor` object on each rank
     """
     tensor_properties = TensorProperties(
-        dtype=dtype, layout=layout, requires_grad=requires_grad,
-        pin_memory=pin_memory, memory_format=memory_format,
+        dtype=dtype,
+        layout=layout,
+        requires_grad=requires_grad,
+        pin_memory=pin_memory,
+        memory_format=memory_format,
     )
-    tensor_init_params = TensorInitParams(create_op=CreateOp.ZEROS, tensor_properties=tensor_properties, )
+    tensor_init_params = TensorInitParams(
+        create_op=CreateOp.ZEROS,
+        tensor_properties=tensor_properties,
+    )
     return ShardedTensor(
         sharding_spec,
         *size,
@@ -233,16 +268,18 @@ def zeros(sharding_spec: ShardingSpec,
     )
 
 
-def full(sharding_spec: ShardingSpec,
-         size,
-         fill_value=torch.types.Number,
-         dtype=None,
-         layout=torch.strided,
-         requires_grad=False,
-         pin_memory=False,
-         memory_format=torch.contiguous_format,
-         process_group=None,
-         init_rrefs=False):
+def full(
+    sharding_spec: ShardingSpec,
+    size,
+    fill_value=torch.types.Number,
+    dtype=None,
+    layout=torch.strided,
+    requires_grad=False,
+    pin_memory=False,
+    memory_format=torch.contiguous_format,
+    process_group=None,
+    init_rrefs=False,
+):
     """
     Creates a :class:`ShardedTensor` filled with fill_value. The tensor’s dtype
         is inferred from fill_value. If dtype is specified, it will override the
@@ -275,11 +312,17 @@ def full(sharding_spec: ShardingSpec,
         A :class:`ShardedTensor` object on each rank
     """
     tensor_properties = TensorProperties(
-        dtype=dtype, layout=layout, requires_grad=requires_grad,
-        pin_memory=pin_memory, memory_format=memory_format,
+        dtype=dtype,
+        layout=layout,
+        requires_grad=requires_grad,
+        pin_memory=pin_memory,
+        memory_format=memory_format,
     )
     tensor_init_params = TensorInitParams(
-        create_op=CreateOp.FULL, fill_value=fill_value, tensor_properties=tensor_properties)
+        create_op=CreateOp.FULL,
+        fill_value=fill_value,
+        tensor_properties=tensor_properties,
+    )
     return ShardedTensor(
         sharding_spec,
         *size,
@@ -290,10 +333,11 @@ def full(sharding_spec: ShardingSpec,
 
 
 def init_from_local_shards(
-        local_shards: List[Shard],
-        sharded_tensor_metadata: ShardedTensorMetadata,
-        process_group=None,
-        init_rrefs=False):
+    local_shards: List[Shard],
+    sharded_tensor_metadata: ShardedTensorMetadata,
+    process_group=None,
+    init_rrefs=False,
+):
     """
     Creates an :class:`ShardedTensor` from local shards and the global metadata.
     Needs to be called on all ranks in an SPMD fashion.
@@ -322,8 +366,9 @@ def init_from_local_shards(
         local_shards,
         sharded_tensor_metadata,
         process_group=process_group,
-        init_rrefs=init_rrefs
+        init_rrefs=init_rrefs,
     )
+
 
 def state_dict_hook(module, destination, prefix, local_metadata):
     """
@@ -333,11 +378,22 @@ def state_dict_hook(module, destination, prefix, local_metadata):
     """
     _recurse_update_dict(module, destination, prefix)
 
-def pre_load_state_dict_hook(module, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
+
+def pre_load_state_dict_hook(
+    module,
+    state_dict,
+    prefix,
+    local_metadata,
+    strict,
+    missing_keys,
+    unexpected_keys,
+    error_msgs,
+):
     """
     Pre-load state dict hook to add ShardedTensor to the module.
     """
     _recurse_update_module(module, state_dict, prefix)
+
 
 def _recurse_update_module(module, state_dict, prefix):
     for attr_name, attr in module.__dict__.items():
@@ -349,7 +405,7 @@ def _recurse_update_module(module, state_dict, prefix):
     for submodule_name, submodule in module.named_modules():
         key = prefix + submodule_name
         if submodule_name:
-            _recurse_update_module(submodule, state_dict, key + '.')
+            _recurse_update_module(submodule, state_dict, key + ".")
 
 
 def _recurse_update_dict(module, destination, prefix):
@@ -358,15 +414,17 @@ def _recurse_update_dict(module, destination, prefix):
             destination[prefix + attr_name] = attr
 
     for submodule_name, submodule in module.named_modules():
-        if submodule_name != '':
-            _recurse_update_dict(submodule, destination, prefix + submodule_name + '.')
+        if submodule_name != "":
+            _recurse_update_dict(submodule, destination, prefix + submodule_name + ".")
+
 
 def shard_parameter(
-        module: torch.nn.Module,
-        param_name: str,
-        sharding_spec: ShardingSpec,
-        src_rank=0,
-        process_group=None):
+    module: torch.nn.Module,
+    param_name: str,
+    sharding_spec: ShardingSpec,
+    src_rank=0,
+    process_group=None,
+):
     """
     Given a :class:`torch.nn.Module`, a ``param_name`` for a parameter in that
     module, it shards that parameter according to the provided
@@ -397,19 +455,27 @@ def shard_parameter(
     """
     # Perform some validation first.
     if not isinstance(sharding_spec, ChunkShardingSpec):
-        raise ValueError('Only ChunkShardingspec is supported.')
+        raise ValueError("Only ChunkShardingspec is supported.")
 
     if not hasattr(module, param_name):
-        raise ValueError(f'module: {module} does not have parameter with name: {param_name}')
+        raise ValueError(
+            f"module: {module} does not have parameter with name: {param_name}"
+        )
 
     tensor = getattr(module, param_name)
     if not isinstance(tensor, torch.Tensor):
-        raise ValueError(f'Expected {type(module).__name__}.{param_name} to be a Tensor, but found {type(tensor).__name__}')
+        raise ValueError(
+            f"Expected {type(module).__name__}.{param_name} to be a Tensor, but found {type(tensor).__name__}"
+        )
 
     if not tensor.is_contiguous():
-        raise ValueError(f'param: {param_name} is not a contiguous Tensor')
+        raise ValueError(f"param: {param_name} is not a contiguous Tensor")
 
-    pg = process_group if process_group is not None else distributed_c10d._get_default_group()
+    pg = (
+        process_group
+        if process_group is not None
+        else distributed_c10d._get_default_group()
+    )
     world_size = dist.get_world_size(pg)
     rank = dist.get_rank(pg)
 
@@ -421,12 +487,14 @@ def shard_parameter(
     for idx, entry in enumerate(gathered_list):
         if src_rank != entry[0]:  # type: ignore[index]
             raise ValueError(
-                f'src_rank={src_rank} on rank: {rank} does not '  # type: ignore[index]
-                f'match with src_rank={entry[0]} on rank: {idx}')
+                f"src_rank={src_rank} on rank: {rank} does not "  # type: ignore[index]
+                f"match with src_rank={entry[0]} on rank: {idx}"
+            )
         if sharding_spec != entry[1]:  # type: ignore[index]
             raise ValueError(
-                f'sharding_spec={sharding_spec} on rank: {rank} does not '  # type: ignore[index]
-                f'match with sharding_spec={entry[1]} on rank: {idx}')
+                f"sharding_spec={sharding_spec} on rank: {rank} does not "  # type: ignore[index]
+                f"match with sharding_spec={entry[1]} on rank: {idx}"
+            )
 
     # Rearrange chunks according to placement.
     local_metadata = None
@@ -478,10 +546,12 @@ def shard_parameter(
             requires_grad=local_shard.requires_grad,
             memory_format=torch.contiguous_format,
             pin_memory=local_shard.is_pinned(),
-        )
+        ),
     )
 
-    st = ShardedTensor._init_from_local_shards(local_shards, sharded_tensor_metadata, process_group=pg)
+    st = ShardedTensor._init_from_local_shards(
+        local_shards, sharded_tensor_metadata, process_group=pg
+    )
 
     # Manually set sharding_spec
     st._sharding_spec = sharding_spec

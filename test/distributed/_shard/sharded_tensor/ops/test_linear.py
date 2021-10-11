@@ -1,27 +1,29 @@
 import sys
-import torch
 
-from torch.distributed._sharded_tensor import (
-    shard_parameter,
-)
-from torch.distributed._sharding_spec import (
+import torch
+from torch.distributed._shard import (
     ChunkShardingSpec,
+    shard_parameter,
 )
 from torch.testing._internal.common_distributed import (
     requires_nccl,
     skip_if_lt_x_gpu,
 )
+from torch.testing._internal.common_utils import (
+    TEST_WITH_DEV_DBG_ASAN,
+)
 from torch.testing._internal.distributed._sharded_tensor import (
     ShardedTensorTestBase,
     with_comms,
 )
-from torch.testing._internal.common_utils import (
-    TEST_WITH_DEV_DBG_ASAN,
-)
 
 if TEST_WITH_DEV_DBG_ASAN:
-    print("Skip dev-asan as torch + multiprocessing spawn have known issues", file=sys.stderr)
+    print(
+        "Skip dev-asan as torch + multiprocessing spawn have known issues",
+        file=sys.stderr,
+    )
     sys.exit(0)
+
 
 class TestShardedTensorOps(ShardedTensorTestBase):
     def _run_sharded_linear(self, spec, input_size, linear_size, sharded_dim):

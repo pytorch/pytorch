@@ -13,13 +13,13 @@ import torch
 import torch.distributed as dist
 from torch.distributed import rpc
 from torch.distributed import distributed_c10d
-from torch.distributed._sharding_spec import (
+from torch.distributed._shard.sharding_spec import (
     ChunkShardingSpec,
     EnumerableShardingSpec,
     ShardMetadata,
     ShardingSpec,
 )
-from torch.distributed._sharding_spec._internals import (
+from torch.distributed._shard.sharding_spec._internals import (
     check_tensor,
     validate_non_overlapping_shards_metadata,
     get_split_size,
@@ -217,7 +217,7 @@ class ShardedTensor(object):
     torch.empty
 
     Args:
-        sharding_spec (:class:`torch.distributed._sharding_spec.ShardingSpec`): The specification
+        sharding_spec (:class:`torch.distributed._shard.sharding_spec.ShardingSpec`): The specification
             describing how to shard the Tensor.
         size (int...): a sequence of integers defining the shape of the output
             tensor. Can be a variable number of arguments or a collection like a list or tuple.
