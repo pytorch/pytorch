@@ -67,7 +67,7 @@ void* CodeGen::argToPtr(const BufferArg& bufferArg, const CallArg& callArg) {
   case ScalarType::Name:    \
     return callArg.Name##Ptr();
 
-    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
+    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
 
     default:
@@ -76,6 +76,10 @@ void* CodeGen::argToPtr(const BufferArg& bufferArg, const CallArg& callArg) {
   return nullptr;
 }
 
+void CodeGen::call_with_numel(void** args, int64_t numel) {
+  TORCH_INTERNAL_ASSERT(
+      false, "This codegen backend does not implement call_with_numel");
+}
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

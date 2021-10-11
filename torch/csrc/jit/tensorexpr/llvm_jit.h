@@ -17,7 +17,13 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-void DispatchParallel(int8_t* func, int start, int stop, int8_t* packed_data);
+extern "C" {
+void DispatchParallel(
+    int8_t* func,
+    int64_t start,
+    int64_t stop,
+    int8_t* packed_data) noexcept;
+}
 
 inline std::string formatError(llvm::Error&& err, const char* msg) {
   static constexpr char* defaultErrorMsg = "Unexpected failure in LLVM JIT";

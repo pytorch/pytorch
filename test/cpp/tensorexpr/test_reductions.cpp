@@ -26,7 +26,7 @@ using namespace torch::jit::tensorexpr;
 TEST(Reductions, ReduceSum0D_1) {
   const int M = 10;
 
-  Placeholder b(BufHandle("b", {M}, kFloat));
+  BufHandle b("b", {M}, kFloat);
   std::vector<float> in(M);
   for (int j = 0; j < M; ++j) {
     in[j] = j;
@@ -51,7 +51,7 @@ TEST(Reductions, ReduceSum0D_1) {
 TEST(Reductions, ReduceSum0D_2) {
   const int M = 10;
 
-  Placeholder b(BufHandle("b", {}, kFloat));
+  BufHandle b("b", {}, kFloat);
   std::vector<float> in(1);
   in[0] = 77.7;
 
@@ -71,7 +71,7 @@ TEST(Reductions, ReduceSum0D_2) {
 
 // Sum an array to a single value.
 TEST(Reductions, ReduceSum1D) {
-  Placeholder b(BufHandle("b", {10}, kFloat));
+  BufHandle b("b", {10}, kFloat);
   std::vector<float> in(10);
   for (int j = 0; j < 10; ++j) {
     in[j] = j;
@@ -98,7 +98,7 @@ TEST(Reductions, ReduceSum2D) {
   VarHandle m("m", kInt);
   VarHandle n("n", kInt);
 
-  Placeholder b(BufHandle("b", {m, n}, kFloat));
+  BufHandle b("b", {m, n}, kFloat);
   std::vector<float> in(M * N);
   for (int i = 0; i < M; ++i) {
     for (int j = 0; j < N; ++j) {
@@ -135,7 +135,7 @@ TEST(Reductions, ReduceSum3D) {
   const int M = 10;
   VarHandle m("m", kInt);
 
-  Placeholder b(BufHandle("b", {2, 3, m}, kFloat));
+  BufHandle b("b", {2, 3, m}, kFloat);
 
   Tensor c = Reduce("sum", {{2, "l"}, {3, "n"}}, Sum(), b, {{m, "m"}});
   LoopNest loop({c});
@@ -184,7 +184,7 @@ TEST(Reductions, ReduceSum3D) {
   }
 
   // This is the same as just reducing the original result across that axis.
-  Placeholder c_buf(BufHandle(c.buf()));
+  BufHandle c_buf(c.buf());
   Tensor e = Reduce("sum3", {{2, "l"}}, Sum(), c_buf, {{3, "m"}});
   LoopNest loop3({e});
   loop3.prepareForCodegen();
@@ -201,9 +201,9 @@ TEST(Reductions, ReduceSum3D) {
 
 // Sum a large (10 D) Tensor 5 dimensions in.
 TEST(Reductions, ReduceSum10D) {
-  Placeholder in_(BufHandle("in_", {2, 3, 2, 3, 2, 3, 2, 3, 2, 3}, kFloat));
+  BufHandle in_("in_", {2, 3, 2, 3, 2, 3, 2, 3, 2, 3}, kFloat);
   const int InputSize = 2 * 3 * 2 * 3 * 2 * 3 * 2 * 3 * 2 * 3;
-  Placeholder out_(BufHandle("out_", {2, 3, 2, 3, 2}, kFloat));
+  BufHandle out_("out_", {2, 3, 2, 3, 2}, kFloat);
   const int OutputSize = 2 * 3 * 2 * 3 * 2;
 
   std::vector<float> in(InputSize, 1.f);
@@ -236,7 +236,7 @@ TEST(Reductions, ReduceProduct) {
   const int M = 4;
   const int N = 4;
 
-  Placeholder b(BufHandle("b", {M, N}, kFloat));
+  BufHandle b("b", {M, N}, kFloat);
   std::vector<float> in(M * N);
   for (int i = 0; i < M; ++i) {
     for (int j = 0; j < N; ++j) {
@@ -272,7 +272,7 @@ TEST(Reductions, ReduceProduct) {
 
 // Maximum reductions.
 TEST(Reductions, ReduceMax) {
-  Placeholder in_(BufHandle("b", {10}, kFloat));
+  BufHandle in_("b", {10}, kFloat);
 
   std::vector<float> in(10);
   std::vector<float> out(1, -1.f);
@@ -292,7 +292,7 @@ TEST(Reductions, ReduceMax) {
 
   ASSERT_EQ(out[0], 9);
 
-  Placeholder in2_(BufHandle("b", {2, 5}, kFloat));
+  BufHandle in2_("b", {2, 5}, kFloat);
   std::vector<float> out2(2, -1.f);
 
   Tensor m2d = Reduce("max", {{2, "n"}}, Maximum(kFloat), in2_, {{5, "m"}});
@@ -312,7 +312,7 @@ TEST(Reductions, ReduceMax) {
 // Minimum reduction, with custom initialization.
 TEST(Reductions, ReduceMinCustomInitializer) {
   VarHandle minInit("minInit", kFloat);
-  Placeholder in_(BufHandle("b", {10}, kFloat));
+  BufHandle in_("b", {10}, kFloat);
 
   std::vector<float> in(10);
   std::vector<float> out(1, -1.f);
@@ -348,7 +348,7 @@ TEST(Reductions, ReduceMinCustomInitializer) {
 // TODO: this is very awkward without logical And/Or operators.
 TEST(Reductions, ReduceAnyAll) {
   VarHandle searchValue("searchValue", kInt);
-  Placeholder b(BufHandle("b", {4, 10}, kInt));
+  BufHandle b("b", {4, 10}, kInt);
 
   Reducer anyEqSV(ExprHandle(0), [](ExprHandle a, ExprHandle b) {
     return CompareSelect::make(a, 1, 1, b, kEQ);
@@ -431,8 +431,8 @@ TEST(Reductions, ReduceAnyAll) {
 }
 
 TEST(Reductions, ReduceMatmul2D) {
-  Placeholder tA(BufHandle("tA", {3, 2}, kFloat));
-  Placeholder tB(BufHandle("tB", {2, 3}, kFloat));
+  BufHandle tA("tA", {3, 2}, kFloat);
+  BufHandle tB("tB", {2, 3}, kFloat);
 
   std::vector<float> tA_(6);
   std::vector<float> tB_(6);
@@ -471,7 +471,7 @@ TEST(Reductions, ReduceMatmul2D) {
 }
 
 TEST(Reductions, ReduceRfactorLike) {
-  Placeholder in(BufHandle("in", {10, 10}, kFloat));
+  BufHandle in("in", {10, 10}, kFloat);
   std::vector<float> in_(100);
   for (int i = 0; i < 100; ++i) {
     in_[i] = i;
@@ -480,7 +480,7 @@ TEST(Reductions, ReduceRfactorLike) {
   std::vector<float> out(1, -1.f);
 
   Tensor l1 = Reduce("l1", {{10, "i"}}, Sum(), in, {{10, "j"}});
-  Placeholder in_rf(BufHandle(l1.buf()));
+  BufHandle in_rf(l1.buf());
 
   Tensor l2 = Reduce("l2", {}, Sum(), in_rf, {{10, "i"}});
 
@@ -499,8 +499,8 @@ TEST(Reductions, ReduceAsProducer) {
   const int M = 10;
   VarHandle m("m", kInt);
 
-  Placeholder a(BufHandle("a", {2, 3}, kFloat));
-  Placeholder b(BufHandle("b", {2, 3, m}, kFloat));
+  BufHandle a("a", {2, 3}, kFloat);
+  BufHandle b("b", {2, 3, m}, kFloat);
 
   Tensor c = Reduce("sum", {{2, "l1"}, {3, "n1"}}, Sum(), b, {{m, "m1"}});
   Tensor d = Compute(
@@ -542,8 +542,8 @@ TEST(Reductions, ReduceAsConsumer) {
   const int M = 10;
   VarHandle m("m", kInt);
 
-  Placeholder a(BufHandle("a", {2, 3, m}, kFloat));
-  Placeholder b(BufHandle("b", {2, 3, m}, kFloat));
+  BufHandle a("a", {2, 3, m}, kFloat);
+  BufHandle b("b", {2, 3, m}, kFloat);
 
   Tensor c = Compute(
       "scale",
@@ -588,7 +588,7 @@ TEST(Reductions, ReduceAsConsumer) {
 }
 
 TEST(Reductions, SplitReduceAxis) {
-  Placeholder in(BufHandle("in", {16, 8}, kFloat));
+  BufHandle in("in", {16, 8}, kFloat);
 
   std::vector<float> in_(16 * 8);
   for (int i = 0; i < 16; ++i) {
@@ -617,7 +617,7 @@ TEST(Reductions, SplitReduceAxis) {
 }
 
 TEST(Reductions, SplitNonReduceAxis) {
-  Placeholder in(BufHandle("in", {16, 8}, kFloat));
+  BufHandle in("in", {16, 8}, kFloat);
 
   std::vector<float> in_(16 * 8);
   for (int i = 0; i < 16; ++i) {
@@ -653,7 +653,7 @@ TEST(Reductions, ReorderedReductionInitializer) {
         SumOp(c(k, n), 0, a(k, m, n), {m})
   */
 
-  Placeholder in(BufHandle("in", {1, 12, 6}, kFloat));
+  BufHandle in("in", {1, 12, 6}, kFloat);
   std::vector<float> in_(12 * 6, 1.f);
 
   Tensor tensor_ = Reduce("sum", {{1, "k"}, {12, "n"}}, Sum(), in, {{6, "m"}});
@@ -700,7 +700,7 @@ TEST(Reductions, ReduceRfactor) {
   VarHandle m("m", kInt);
   VarHandle n("n", kInt);
 
-  Placeholder b(BufHandle("b", {m, n}, kFloat));
+  BufHandle b("b", {m, n}, kFloat);
   std::vector<float> in(M * N);
   for (int j = 0; j < M * N; ++j) {
     in[j] = j;
@@ -733,7 +733,7 @@ TEST(Reductions, Reduce3DRfactorInner) {
   VarHandle n("n", kInt);
   VarHandle k("k", kInt);
 
-  Placeholder b(BufHandle("b", {m, n, k}, kFloat));
+  BufHandle b("b", {m, n, k}, kFloat);
   std::vector<float> in(M * N * K);
   for (int j = 0; j < M * N * K; ++j) {
     in[j] = j;
@@ -766,7 +766,7 @@ TEST(Reductions, Reduce3DRfactorOuter) {
   VarHandle n("n", kInt);
   VarHandle k("k", kInt);
 
-  Placeholder b(BufHandle("b", {m, n, k}, kFloat));
+  BufHandle b("b", {m, n, k}, kFloat);
   std::vector<float> in(M * N * K);
   for (int j = 0; j < M * N * K; ++j) {
     in[j] = j;
@@ -791,7 +791,7 @@ TEST(Reductions, Reduce3DRfactorOuter) {
 }
 
 TEST(Reductions, ReduceRepeatedInternalRfactor) {
-  Placeholder in_(BufHandle("in_", {2, 3, 4, 5, 6}, kFloat));
+  BufHandle in_("in_", {2, 3, 4, 5, 6}, kFloat);
   const int InputSize = 2 * 3 * 4 * 5 * 6;
 
   std::vector<float> in(InputSize, 1.f);
@@ -840,7 +840,7 @@ TEST(Reductions, ReduceSplitTail) {
   const int N = 10;
   const int K = 10;
 
-  Placeholder b(BufHandle("b", {M, N, K}, kFloat));
+  BufHandle b("b", {M, N, K}, kFloat);
   std::vector<float> in(M * N * K);
   for (int j = 0; j < M * N * K; ++j) {
     in[j] = j;
@@ -870,7 +870,7 @@ TEST(Reductions, ReduceSplitNoTail) {
   const int M = 10;
   const int N = 10;
   const int K = 10;
-  Placeholder b(BufHandle("b", {M, N, K}, kFloat));
+  BufHandle b("b", {M, N, K}, kFloat);
   std::vector<float> in(M * N * K);
   for (int j = 0; j < M * N * K; ++j) {
     in[j] = j;
@@ -902,7 +902,7 @@ TEST(Reductions, ReduceOverSplitTail) {
   const int N = 10;
   const int K = 10;
 
-  Placeholder b(BufHandle("b", {M, N, K}, kFloat));
+  BufHandle b("b", {M, N, K}, kFloat);
   std::vector<float> in(M * N * K);
   for (int j = 0; j < M * N * K; ++j) {
     in[j] = j;
@@ -933,7 +933,7 @@ TEST(Reductions, ReduceSplitMask) {
   const int N = 10;
   const int K = 10;
 
-  Placeholder b(BufHandle("b", {M, N, K}, kFloat));
+  BufHandle b("b", {M, N, K}, kFloat);
   std::vector<float> in(M * N * K);
   for (int j = 0; j < M * N * K; ++j) {
     in[j] = j;
@@ -963,7 +963,7 @@ TEST(Reductions, ReduceSplitNoMask) {
   const int M = 10;
   const int N = 10;
   const int K = 10;
-  Placeholder b(BufHandle("b", {M, N, K}, kFloat));
+  BufHandle b("b", {M, N, K}, kFloat);
   std::vector<float> in(M * N * K);
   for (int j = 0; j < M * N * K; ++j) {
     in[j] = j;
@@ -994,7 +994,7 @@ TEST(Reductions, ReduceOverSplitMask) {
   const int N = 10;
   const int K = 10;
 
-  Placeholder b(BufHandle("b", {M, N, K}, kFloat));
+  BufHandle b("b", {M, N, K}, kFloat);
   std::vector<float> in(M * N * K);
   for (int j = 0; j < M * N * K; ++j) {
     in[j] = j;
@@ -1027,7 +1027,7 @@ TEST(Reductions, ReduceSplitRfactor) {
   const int K = 10;
   const int SPLIT_FACTOR = 4;
 
-  Placeholder b(BufHandle("b", {M, N, K}, kFloat));
+  BufHandle b("b", {M, N, K}, kFloat);
   std::vector<float> in(M * N * K);
   for (int m = 0; m < M; ++m) {
     for (int j = 0; j < N * K; ++j) {
@@ -1068,7 +1068,7 @@ TEST(Reductions, ReduceOverSplitRfactor) {
   const int K = 10;
   const int SPLIT_FACTOR = 16;
 
-  Placeholder b(BufHandle("b", {N, K}, kFloat));
+  BufHandle b("b", {N, K}, kFloat);
   std::vector<float> in(N * K);
   for (int j = 0; j < N * K; ++j) {
     in[j] = j;
@@ -1123,8 +1123,8 @@ TEST(Reductions, ReduceInlineReduction) {
   const int N = 5;
   const int K = 6;
 
-  Placeholder a_buf("a", kFloat, {M});
-  Placeholder b_buf("b", kFloat, {M, N, K});
+  BufHandle a_buf("a", {M}, kFloat);
+  BufHandle b_buf("b", {M, N, K}, kFloat);
 
   Tensor x = Reduce("x", {{M, "m1"}}, Sum(), b_buf, {{N, "n1"}, {K, "k1"}});
   Tensor y = Compute("y", {{M, "m2"}}, [&](const VarHandle& m) {
@@ -1155,8 +1155,8 @@ TEST(Reductions, ReduceInlineConsumer) {
   const int N = 5;
   const int K = 6;
 
-  Placeholder a_buf("a", kFloat, {M, N, K});
-  Placeholder b_buf("b", kFloat, {M, N, K});
+  BufHandle a_buf("a", {M, N, K}, kFloat);
+  BufHandle b_buf("b", {M, N, K}, kFloat);
 
   Tensor x = Compute(
       "x",
@@ -1208,8 +1208,8 @@ TEST(Reductions, ReduceInlineReducerInternal) {
   const int N = 5;
   const int K = 6;
 
-  Placeholder a_buf("a", kFloat, {M, N, K});
-  Placeholder b_buf("b", kFloat, {M, N, K});
+  BufHandle a_buf("a", {M, N, K}, kFloat);
+  BufHandle b_buf("b", {M, N, K}, kFloat);
 
   Tensor x = Compute(
       "x",
@@ -1265,8 +1265,8 @@ TEST(Reductions, ReductionCacheAccessesOperatorAxis) {
   int N = 3;
   int M = 2;
 
-  Placeholder a(BufHandle("a", {L, N, M}, kFloat));
-  Placeholder b(BufHandle("b", {L, N, M}, kFloat));
+  BufHandle a("a", {L, N, M}, kFloat);
+  BufHandle b("b", {L, N, M}, kFloat);
 
   Tensor c = Compute(
       "scale",
@@ -1340,8 +1340,8 @@ TEST(Reductions, ReductionCacheAccessesOuterReduceAxis) {
   int N = 3;
   int M = 2;
 
-  Placeholder a(BufHandle("a", {L, N, M}, kFloat));
-  Placeholder b(BufHandle("b", {L, N, M}, kFloat));
+  BufHandle a("a", {L, N, M}, kFloat);
+  BufHandle b("b", {L, N, M}, kFloat);
 
   Tensor c = Compute(
       "scale",
@@ -1413,8 +1413,8 @@ TEST(Reductions, ReductionCacheAccessesInnerReduceAxis) {
   int N = 3;
   int M = 2;
 
-  Placeholder a(BufHandle("a", {L, N, M}, kFloat));
-  Placeholder b(BufHandle("b", {L, N, M}, kFloat));
+  BufHandle a("a", {L, N, M}, kFloat);
+  BufHandle b("b", {L, N, M}, kFloat);
 
   Tensor c = Compute(
       "scale",
@@ -1482,8 +1482,8 @@ TEST(Reductions, ReductionCacheAccessesInnerReduceAxis) {
 }
 
 TEST(Reductions, ReductionCacheBodyAccess) {
-  Placeholder a(BufHandle("a", {24, 32, 12}, kFloat));
-  Placeholder b(BufHandle("b", {24, 32, 12}, kFloat));
+  BufHandle a("a", {24, 32, 12}, kFloat);
+  BufHandle b("b", {24, 32, 12}, kFloat);
 
   Tensor c = Compute(
       "scale",
@@ -1521,8 +1521,8 @@ TEST(Reductions, ReductionCacheBodyAccess) {
 }
 
 TEST(Reductions, ReductionCacheConsumerAccess) {
-  Placeholder a(BufHandle("a", {24, 32, 12}, kFloat));
-  Placeholder b(BufHandle("b", {24, 32, 12}, kFloat));
+  BufHandle a("a", {24, 32, 12}, kFloat);
+  BufHandle b("b", {24, 32, 12}, kFloat);
 
   Tensor c = Compute(
       "scale",
@@ -1560,8 +1560,8 @@ TEST(Reductions, ReductionCacheConsumerAccess) {
 }
 
 TEST(Reductions, ReductionSplitCacheConsumerAccess) {
-  Placeholder a(BufHandle("a", {24, 32, 12}, kFloat));
-  Placeholder b(BufHandle("b", {24, 32, 12}, kFloat));
+  BufHandle a("a", {24, 32, 12}, kFloat);
+  BufHandle b("b", {24, 32, 12}, kFloat);
 
   Tensor c = Compute(
       "scale",
@@ -1606,8 +1606,8 @@ TEST(Reductions, ReductionSplitCacheConsumerAccess) {
 }
 
 TEST(Reductions, ReductionReorderCacheConsumerAccess) {
-  Placeholder a(BufHandle("a", {24, 32, 12}, kFloat));
-  Placeholder b(BufHandle("b", {24, 32, 12}, kFloat));
+  BufHandle a("a", {24, 32, 12}, kFloat);
+  BufHandle b("b", {24, 32, 12}, kFloat);
 
   Tensor c = Compute(
       "scale",
@@ -1660,7 +1660,7 @@ TEST(Reductions, ReductionRfactorCacheTempOuter) {
   VarHandle n("n", kInt);
   VarHandle k("k", kInt);
 
-  Placeholder b(BufHandle("B", {m, n, k}, kFloat));
+  BufHandle b("B", {m, n, k}, kFloat);
   std::vector<float> in(M * N * K);
   for (int j = 0; j < M * N * K; ++j) {
     in[j] = j;
@@ -1712,7 +1712,6 @@ TEST(Reductions, ReductionRfactorCacheTempOuter) {
 #CHECK-NOT: tmp
       )IR";
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
-
   SimpleIREvaluator cg(s, {b, c, m, n, k});
 
   cg.call({in, out, M, N, K});
@@ -1727,7 +1726,7 @@ TEST(Reductions, ReductionRfactorCacheTempInner) {
   VarHandle n("n", kInt);
   VarHandle k("k", kInt);
 
-  Placeholder b(BufHandle("B", {m, n, k}, kFloat));
+  BufHandle b("B", {m, n, k}, kFloat);
   std::vector<float> in(M * N * K);
   for (int j = 0; j < M * N * K; ++j) {
     in[j] = j;
@@ -1791,7 +1790,7 @@ TEST(Reductions, ReductionVectorize) {
   std::vector<float> out_before(8, -1.f);
   std::vector<float> out_after(8, -1.f);
 
-  Placeholder in(BufHandle("in", {8, 8}, kFloat));
+  BufHandle in("in", {8, 8}, kFloat);
 
   Tensor tensor = Reduce("sum", {{8, "m"}}, Sum(), in, {{8, "n"}});
   LoopNest l_before({tensor});
@@ -1827,7 +1826,7 @@ TEST(Reductions, ReductionVectorize) {
 }
 
 TEST(Reductions, ReductionVectorizeInner) {
-  Placeholder in(BufHandle("in", {8, 8}, kFloat));
+  BufHandle in("in", {8, 8}, kFloat);
 
   Tensor tensor = Reduce("sum", {{8, "m"}}, Sum(), in, {{8, "n"}});
   LoopNest l({tensor});
@@ -1845,7 +1844,7 @@ TEST(Reductions, ReductionVectorizeRfactor) {
   std::vector<float> out_before(1, -1.f);
   std::vector<float> out_after(1, -1.f);
 
-  Placeholder in(BufHandle("in", {8, 8}, kFloat));
+  BufHandle in("in", {8, 8}, kFloat);
 
   Tensor tensor = Reduce("sum", {}, Sum(), in, {{8, "m"}, {8, "n"}});
 
@@ -1903,8 +1902,8 @@ TEST(Reductions, ReductionVectorizeRfactor) {
 TEST(Reductions, InitFunction) {
   constexpr int M = 32;
   constexpr int N = 16;
-  Placeholder A("A", kFloat, {M, N});
-  Placeholder B("B", kFloat, {N});
+  BufHandle A("A", {M, N}, kFloat);
+  BufHandle B("B", {N}, kFloat);
   Tensor C = Reduce(
       "C",
       {{N, "n"}},

@@ -152,8 +152,8 @@ TEST(THNNConvTest, Basic) {
   at::Tensor bias = torch::randn({out_channels});
 
   // run forward eagerly
-  at::Tensor output, finput, fgradinput;
-  std::tie(output, finput, fgradinput) = at::thnn_conv2d_forward(
+  at::Tensor output, finput;
+  std::tie(output, finput) = at::_slow_conv2d_forward(
       input, weight, kernel_size, bias, stride, padding);
 
   // make grad_outputs
@@ -161,12 +161,10 @@ TEST(THNNConvTest, Basic) {
       torch::randn_like(output, at::MemoryFormat::Preserve);
   at::Tensor grad_finput =
       torch::zeros_like(finput, at::MemoryFormat::Preserve);
-  at::Tensor grad_fgradinput =
-      torch::zeros_like(fgradinput, at::MemoryFormat::Preserve);
 
   // run backward eagerly
   at::Tensor grad_input, grad_weight, grad_bias;
-  std::tie(grad_input, grad_weight, grad_bias) = at::thnn_conv2d_backward(
+  std::tie(grad_input, grad_weight, grad_bias) = at::_slow_conv2d_backward(
       grad_output,
       input,
       weight,
@@ -174,7 +172,6 @@ TEST(THNNConvTest, Basic) {
       stride,
       padding,
       finput,
-      fgradinput,
       {true, true, true});
 
   // make JIT graph
@@ -188,7 +185,7 @@ TEST(THNNConvTest, Basic) {
   auto biasg = graph->addInput("bias");
 
   Value* conv = graph->insert(
-      aten::thnn_conv2d_forward,
+      aten::_slow_conv2d_forward,
       {inputg, weightg, ksz_val, biasg, kst_val, pad_val});
   auto outputs = conv->node()->outputs();
   for (auto output : outputs) {
@@ -212,7 +209,6 @@ TEST(THNNConvTest, Basic) {
   tensor_list tensor_grads_in;
   tensor_grads_in.push_back(grad_output);
   tensor_grads_in.push_back(grad_finput);
-  tensor_grads_in.push_back(grad_fgradinput);
 
   // Get outputs from the interpreter
   tensor_list tensors_out, tensor_grads_out;
@@ -223,7 +219,6 @@ TEST(THNNConvTest, Basic) {
   tensor_list expected_tensors_out, expected_tensor_grads_out;
   expected_tensors_out.push_back(output);
   expected_tensors_out.push_back(finput);
-  expected_tensors_out.push_back(fgradinput);
   expected_tensor_grads_out.push_back(grad_input);
   expected_tensor_grads_out.push_back(grad_weight);
   expected_tensor_grads_out.push_back(grad_bias);
@@ -503,23 +498,45 @@ TEST(SchemaParserTest, NestedArrays) {
   // nested arrays
   auto s = parseSchema("at::what(int[][4] foo) -> ()");
   ASSERT_TRUE(s.arguments().at(0).N() == 4);
-  ASSERT_TRUE(IntType::get()->isSubtypeOf(s.arguments()
-                                              .at(0)
-                                              .type()
-                                              ->expectRef<ListType>()
-                                              .getElementType()
-                                              ->expectRef<ListType>()
-                                              .getElementType()));
+  ASSERT_TRUE(IntType::get()->isSubtypeOf(*s.arguments()
+                                               .at(0)
+                                               .type()
+                                               ->expectRef<ListType>()
+                                               .getElementType()
+                                               ->expectRef<ListType>()
+                                               .getElementType()));
   auto s2 = parseSchema("at::what(int[][] foo) -> ()");
-  ASSERT_TRUE(IntType::get()->isSubtypeOf(s2.arguments()
-                                              .at(0)
-                                              .type()
-                                              ->expectRef<ListType>()
-                                              .getElementType()
-                                              ->expectRef<ListType>()
-                                              .getElementType()));
+  ASSERT_TRUE(IntType::get()->isSubtypeOf(*s2.arguments()
+                                               .at(0)
+                                               .type()
+                                               ->expectRef<ListType>()
+                                               .getElementType()
+                                               ->expectRef<ListType>()
+                                               .getElementType()));
 }
 
+TEST(SchemaParserTest, OutVariant) {
+  auto schema_with_out = parseSchema(
+      "at::foo(Tensor self, *, Tensor(a!) f, Tensor(b!) l) -> (Tensor(a!) f, Tensor(b!) l)");
+  ASSERT_TRUE(schema_with_out.arguments().at(1).is_out());
+  ASSERT_TRUE(schema_with_out.arguments().at(2).is_out());
+
+  auto schema_without_out =
+      parseSchema("at::foo(Tensor self, *, int scalar) -> (int)");
+
+  for (const auto& arg : schema_without_out.arguments()) {
+    ASSERT_TRUE(!arg.is_out());
+  }
+
+  auto schema_with_is_write = parseSchema(
+      "aten::ne_.Scalar(Tensor(a!) self, Scalar other) -> (Tensor(a!))");
+
+  for (const auto& arg : schema_with_is_write.arguments()) {
+    ASSERT_TRUE(!arg.is_out());
+  }
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SchemaParserTest, NamedReturns) {
   // named returns
   parseSchema("at::what(Tensor! i_will_be_written_to) -> ()");
@@ -533,7 +550,7 @@ TEST(SchemaParserTest, Futures) {
   // futures
   auto s4 = parseSchema("at::what(Future(int) foo) -> ()");
   ASSERT_TRUE(IntType::get()->isSubtypeOf(
-      s4.arguments().at(0).type()->expectRef<FutureType>().getElementType()));
+      *s4.arguments().at(0).type()->expectRef<FutureType>().getElementType()));
 }
 
 TEST(SchemaParserTest, AnnotatedAliasSets) {
@@ -547,15 +564,16 @@ TEST(SchemaParserTest, BeforeAfterSets) {
       " -> (Tensor(b|c)[](a!))");
 
   // The list itself is annotated with `a`
-  const auto& aliasInfo = *s.arguments().at(0).alias_info();
+  const AliasInfo* aliasInfo = s.arguments().at(0).alias_info();
+  ASSERT_NE(aliasInfo, nullptr);
   ASSERT_TRUE(
-      aliasInfo.beforeSets() ==
+      aliasInfo->beforeSets() ==
       std::unordered_set<Symbol>{Symbol::fromQualString("alias::a")});
-  ASSERT_TRUE(aliasInfo.isWrite());
+  ASSERT_TRUE(aliasInfo->isWrite());
 
   // Check the contained types
-  ASSERT_TRUE(!aliasInfo.containedTypes().empty());
-  const auto& containedAliasInfo = aliasInfo.containedTypes()[0];
+  ASSERT_TRUE(!aliasInfo->containedTypes().empty());
+  const auto& containedAliasInfo = aliasInfo->containedTypes()[0];
   const auto expected = std::unordered_set<Symbol>{
       Symbol::fromQualString("alias::b"),
       Symbol::fromQualString("alias::c"),
@@ -571,19 +589,20 @@ TEST(SchemaParserTest, BeforeAfterSets2) {
       " -> (Tensor(b|c)[](a!))");
 
   // The list itself is annotated with `a`
-  const auto& aliasInfo = *s.arguments().at(0).alias_info();
+  const AliasInfo* aliasInfo = s.arguments().at(0).alias_info();
+  ASSERT_NE(aliasInfo, nullptr);
   ASSERT_EQ(
-      aliasInfo.beforeSets(),
+      aliasInfo->beforeSets(),
       std::unordered_set<Symbol>{Symbol::fromQualString("alias::a")});
   ASSERT_EQ(
-      aliasInfo.afterSets(),
+      aliasInfo->afterSets(),
       std::unordered_set<Symbol>{Symbol::fromQualString("alias::a")});
-  ASSERT_TRUE(aliasInfo.isWrite());
-  ASSERT_EQ(aliasInfo.containedTypes().size(), 1);
+  ASSERT_TRUE(aliasInfo->isWrite());
+  ASSERT_EQ(aliasInfo->containedTypes().size(), 1);
 
   // Check the contained types
-  ASSERT_TRUE(!aliasInfo.containedTypes().empty());
-  const auto& containedAliasInfo = aliasInfo.containedTypes()[0];
+  ASSERT_TRUE(!aliasInfo->containedTypes().empty());
+  const auto& containedAliasInfo = aliasInfo->containedTypes()[0];
   const auto expectedBefore = std::unordered_set<Symbol>{
       Symbol::fromQualString("alias::b"),
   };
@@ -1471,11 +1490,11 @@ TEST(NoneSchemaMatchTest, Basic) {
   RegisterOperators reg({
       Operator(
           "prim::test_none() -> int?",
-          [](Stack* stack) { push(stack, IValue()); },
+          [](Stack& stack) { push(stack, IValue()); },
           aliasAnalysisFromSchema()),
       Operator(
           "prim::is_none(int? a) -> bool",
-          [](Stack* stack) {
+          [](Stack& stack) {
             IValue a = pop(stack);
             if (a.isNone()) {
               push(stack, true);
@@ -2661,6 +2680,13 @@ TEST(ComputeFlopsTest, Basic) {
   extra_args["mat_size"] = at::IValue(at::IntArrayRef(mat_sizes));
   flops = computeFlops(std::string("aten::mul"), extra_args);
   ASSERT_EQ(flops, 360);
+}
+
+TEST(TestConstant, TensorGrad) {
+  auto graph = std::make_shared<Graph>();
+  IValue ten = torch::randn({3, 5}).requires_grad_(true);
+  auto con = tryInsertConstant(*graph, ten);
+  ASSERT_TRUE(con == c10::nullopt);
 }
 
 TEST(TestMutation, Basic) {

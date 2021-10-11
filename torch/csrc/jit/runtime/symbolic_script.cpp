@@ -612,7 +612,7 @@ const std::vector<std::string> functions = {
             size = len(tensors)
             split_sizes = [0] * size
             for i in range(size):
-                if tensors[i].numel() > 0:
+                if tensors[i].size() != [0]:
                     split_sizes[i] = tensors[i].size()[dim]
 
             def backward(grad_output):
@@ -1141,7 +1141,7 @@ const std::vector<std::string> functions = {
 
             return output, backward
 
-        def layer_norm(input : Tensor,
+        def layer_norm_disabled(input : Tensor,
                        normalized_shape : List[int],
                        weight : Optional[Tensor],
                        bias : Optional[Tensor],
@@ -1208,7 +1208,7 @@ const std::vector<std::string> functions = {
         def log_softmax(self, dim: int, dtype: Optional[int]):
             result = torch.log_softmax(self, dim, dtype)
             def backward(grad_output):
-                grad_self = torch._log_softmax_backward_data(grad_output, result, dim, self)
+                grad_self = torch._log_softmax_backward_data(grad_output, result, dim, self.dtype)
                 return grad_self, None, None
 
             return result, backward
@@ -1222,7 +1222,7 @@ const std::vector<std::string> functions = {
         def softmax(self, dim: int, dtype: Optional[int]):
             result = torch.softmax(self, dim, dtype)
             def backward(grad_output):
-                grad_self = torch._softmax_backward_data(grad_output, result, dim, self)
+                grad_self = torch._softmax_backward_data(grad_output, result, dim, self.dtype)
                 return grad_self, None, None
 
             return result, backward

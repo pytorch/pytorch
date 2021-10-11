@@ -123,6 +123,21 @@ std::shared_ptr<Graph> build_mobile_export_analysis_graph() {
   return g;
 }
 
+std::shared_ptr<Graph> build_mobile_export_with_out() {
+  const auto graph_string = R"IR(
+    graph(%x.1 : Tensor,
+          %y.1 : Tensor):
+      %8 : NoneType = prim::Constant()
+      %6 : int = prim::Constant[value=1]()
+      %7 : Tensor = aten::add(%x.1, %y.1, %6, %y.1)
+      return (%8))IR";
+
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get());
+  g->lint();
+  return g;
+}
+
 std::shared_ptr<Graph> build_mobile_export_analysis_graph_nested() {
   // this is pretty much same test as build_mobile_export_analysis_graph(),
   // but some aten::slice operators are hidden under block statement to check
@@ -258,7 +273,7 @@ RegisterOperators reg({
     // because it always produces empty Tensors.
     Operator(
         "prim::MakeTestTensor() -> Tensor",
-        [](Stack* stack) { push(stack, at::Tensor()); },
+        [](Stack& stack) { push(stack, at::Tensor()); },
         aliasAnalysisFromSchema()),
 });
 } // namespace

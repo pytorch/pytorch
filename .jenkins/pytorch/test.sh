@@ -19,6 +19,11 @@ BUILD_DIR="build"
 BUILD_RENAMED_DIR="build_renamed"
 BUILD_BIN_DIR="$BUILD_DIR"/bin
 
+# GHA has test config defined for the test job, so we need to add them.
+if [[ -n "${TEST_CONFIG}" ]]; then
+    BUILD_ENVIRONMENT="${BUILD_ENVIRONMENT}-${TEST_CONFIG}"
+fi
+
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
@@ -33,14 +38,8 @@ if [[ "$BUILD_ENVIRONMENT" == *-slow-* || $TEST_CONFIG == 'slow' ]]; then
   export PYTORCH_TEST_SKIP_FAST=1
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *old-gradcheck* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *slow-gradcheck* ]]; then
   export PYTORCH_TEST_WITH_SLOW_GRADCHECK=ON
-fi
-
-if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
-  export PYTORCH_COLLECT_COVERAGE=1
-  export COVERAGE_RCFILE="$PWD/.coveragerc" # coverage config file needed for plug-ins and settings to work
-  pip install -e tools/coverage_plugins_package # allows coverage to run with JitPlugin for JIT coverage
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
@@ -142,14 +141,12 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX512-* || $TEST_CONFIG == 'nogpu_NO_AVX
   export ATEN_CPU_CAPABILITY=avx2
 fi
 
-if [[ "$BUILD_ENVIRONMENT" != *coverage* ]]; then
-  # if PR_NUMBER exist, use it to grab PR contents.
-  DETERMINE_FROM=$(mktemp)
-  if [ -n "$PR_NUMBER" ]; then
-    get_pr_change_files "$PR_NUMBER" "$DETERMINE_FROM"
-  else
-    file_diff_from_base "$DETERMINE_FROM"
-  fi
+# if PR_NUMBER exist, use it to grab PR contents.
+DETERMINE_FROM=$(mktemp)
+if [ -n "$PR_NUMBER" ]; then
+  get_pr_change_files "$PR_NUMBER" "$DETERMINE_FROM"
+else
+  file_diff_from_base "$DETERMINE_FROM"
 fi
 
 test_python_legacy_jit() {
@@ -208,6 +205,7 @@ test_aten() {
     ${SUDO} ln -sf "$TORCH_LIB_DIR"/libmkldnn* "$TEST_BASE_DIR"
     ${SUDO} ln -sf "$TORCH_LIB_DIR"/libnccl* "$TEST_BASE_DIR"
     ${SUDO} ln -sf "$TORCH_LIB_DIR"/libtorch* "$TEST_BASE_DIR"
+    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libtbb* "$TEST_BASE_DIR"
 
     ls "$TEST_BASE_DIR"
     aten/tools/run_tests.sh "$TEST_BASE_DIR"
@@ -248,6 +246,7 @@ test_libtorch() {
     ln -sf "$TORCH_LIB_DIR"/libbackend_with_compiler.so "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libjitbackend_test.so "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
+    ln -sf "$TORCH_LIB_DIR"/libshm* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libtbb* "$TORCH_BIN_DIR"
 
@@ -270,9 +269,9 @@ test_libtorch() {
     python test/cpp/jit/tests_setup.py shutdown
     # Wait for background download to finish
     wait
-    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$TORCH_BIN_DIR"/test_api --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
+    # Exclude IMethodTest that relies on torch::deploy, which will instead be ran in test_deploy.
+    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$TORCH_BIN_DIR"/test_api --gtest_filter='-IMethodTest.*' --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
     "$TORCH_BIN_DIR"/test_tensorexpr --gtest_output=xml:$TEST_REPORTS_DIR/test_tensorexpr.xml
-    "$TORCH_BIN_DIR"/test_mobile_nnc --gtest_output=xml:$TEST_REPORTS_DIR/test_mobile_nnc.xml
     if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3* ]]; then
       if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* && "${BUILD_ENVIRONMENT}" != *asan* ]]; then
         # TODO: Consider to run static_runtime_test from $TORCH_BIN_DIR (may need modify build script)
@@ -283,8 +282,15 @@ test_libtorch() {
   fi
 }
 
+test_aot_compilation() {
+  echo "Testing Ahead of Time compilation"
+  if [ -f "$TORCH_BIN_DIR"/test_mobile_nnc ]; then "$TORCH_BIN_DIR"/test_mobile_nnc --gtest_output=xml:$TEST_REPORTS_DIR/test_mobile_nnc.xml; fi
+  # shellcheck source=test/mobile/nnc/test_aot_compile.sh
+  if [ -f "$TORCH_BIN_DIR"/aot_model_compiler_test ]; then source test/mobile/nnc/test_aot_compile.sh; fi
+}
+
 test_vulkan() {
-  if [[ "$BUILD_ENVIRONMENT" == *vulkan-linux* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" == *vulkan* ]]; then
     ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_TEST_DIR"
     ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_TEST_DIR"
     export VK_ICD_FILENAMES=/var/lib/jenkins/swiftshader/build/Linux/vk_swiftshader_icd.json
@@ -483,7 +489,12 @@ test_torch_deploy() {
   ln -sf "$TORCH_LIB_DIR"/libshm* "$TORCH_BIN_DIR"
   ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
   "$TORCH_BIN_DIR"/test_deploy
+  "$TORCH_BIN_DIR"/test_api --gtest_filter='IMethodTest.*'
   assert_git_not_dirty
+}
+
+test_docs_test() {
+  .jenkins/pytorch/docs-test.sh
 }
 
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
@@ -502,26 +513,31 @@ elif [[ "${BUILD_ENVIRONMENT}" == *jit_legacy-test || "${JOB_BASE_NAME}" == *jit
 elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
-elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 || "${SHARD_NUMBER}" == 1 ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 || ("${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1) ]]; then
   if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-cuda11.1*-test1* ]]; then
     test_torch_deploy
   fi
   test_without_numpy
   install_torchvision
   test_python_shard1
-  test_distributed
   test_aten
-elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 || "${SHARD_NUMBER}" == 2 ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 || ("${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1) ]]; then
   install_torchvision
   test_python_shard2
   test_libtorch
+  test_aot_compilation
   test_custom_script_ops
   test_custom_backend
   test_torch_function_benchmark
-elif [[ "${BUILD_ENVIRONMENT}" == *vulkan-linux* ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
   test_vulkan
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
+elif [[ "${BUILD_ENVIRONMENT}" == *distributed* ]]; then
+  test_distributed
+  test_rpc
+elif [[ "${TEST_CONFIG}" = docs_test ]]; then
+  test_docs_test
 else
   install_torchvision
   install_monkeytype
@@ -529,24 +545,12 @@ else
   test_aten
   test_vec256
   test_libtorch
+  test_aot_compilation
   test_custom_script_ops
   test_custom_backend
   test_torch_function_benchmark
-  test_distributed
   test_benchmarks
-  test_rpc
   if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc7-test* || "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc5.4-test* ]]; then
     test_python_gloo_with_tls
   fi
-fi
-
-if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
-  pushd test
-  echo "Generating XML coverage report"
-  time python -mcoverage xml
-  popd
-  pushd build
-  echo "Generating lcov coverage report for C++ sources"
-  time lcov --capture --directory . --output-file coverage.info
-  popd
 fi
