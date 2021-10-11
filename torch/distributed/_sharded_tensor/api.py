@@ -838,6 +838,6 @@ def _uniform_(sharded_tensor: ShardedTensor, a: float = 0., b: float = 1.) -> Sh
         a: the lower bound of the uniform distribution
         b: the upper bound of the uniform distribution
     """
-    for i in range(len(sharded_tensor.local_shards())):
-        torch.nn.init.uniform_(sharded_tensor.local_shards()[i].tensor, a=a, b=b)
+    for shard in sharded_tensor.local_shards():
+        torch.nn.init.uniform_(shard.tensor, a=a, b=b)
     return sharded_tensor
