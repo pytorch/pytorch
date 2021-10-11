@@ -5,6 +5,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/div_rtn.h>
+#include <ATen/native/CPUBlas.h>
 #include <ATen/native/Unfold2d.h>
 
 namespace at {
@@ -135,12 +136,13 @@ static Tensor view_weight_2d(const Tensor& weight_) {
   }
 }
 
+template <typename scalar_t>
 static void slow_conv2d_update_output_frame(
-    Tensor& input,
-    Tensor& output,
-    const Tensor& weight,
-    const Tensor& bias,
-    Tensor& finput,
+    TensorAccessor<scalar_t, 3> input,
+    TensorAccessor<scalar_t, 3> output,
+    TensorAccessor<scalar_t, 2> weight,
+    bool has_bias,
+    TensorAccessor<scalar_t, 2> finput,
     int64_t kernel_height,
     int64_t kernel_width,
     int64_t stride_height,
@@ -154,69 +156,90 @@ static void slow_conv2d_update_output_frame(
     int64_t output_height,
     int64_t output_width) {
   // Note: this is a no_group conv2d
-  if ((input.ndimension() == 4) && (kernel_height == 1) && (stride_height == 1) && (pad_height == 0) &&
+  if ((kernel_height == 1) && (stride_height == 1) && (pad_height == 0) &&
       (kernel_width == 1) && (stride_width == 1) && (pad_width == 0)) {
-    auto output2d =
-        output.reshape({n_output_plane, output_height * output_width});
-    auto weight_new =
-        weight.view({n_output_plane, n_input_plane});
-    auto input_new =
-        input.view({n_input_plane, output_height * output_width});
-
-    if (bias.defined()) {
-      output.copy_(bias.unsqueeze(-1).unsqueeze(-1));
-      output2d.addmm_(weight_new, input_new, 1, 1);
-    } else {
-      at::mm_out(output2d, weight_new, input_new);
-    }
-    return;
-  }
-  unfolded2d_copy_stub(
-      kCPU,
-      finput,
-      input,
-      kernel_height,
-      kernel_width,
-      stride_height,
-      stride_width,
-      pad_height,
-      pad_width,
-      n_input_plane,
-      input_height,
-      input_width,
-      output_height,
-      output_width);
-
-  auto output2d =
-      output.reshape({n_output_plane, output_height * output_width});
-  if (bias.defined()) {
-    output.copy_(bias.unsqueeze(-1).unsqueeze(-1));
-    output2d.addmm_(weight, finput, 1, 1);
+    // 1x1 kernel, no need to unfold input and finput is already set
   } else {
-    output2d.addmm_(weight, finput, 0, 1);
+    unfolded2d_copy_stub(
+        kCPU,
+        c10::CppTypeToScalarType<scalar_t>::value,
+        finput.data(),
+        input.data(),
+        kernel_height,
+        kernel_width,
+        stride_height,
+        stride_width,
+        pad_height,
+        pad_width,
+        n_input_plane,
+        input_height,
+        input_width,
+        output_height,
+        output_width);
   }
+
+  const int beta = has_bias ? 1 : 0;
+
+  // Compute out = weight * input
+  // Note gemm expects fortran order, so all 3 matrices are transposed.
+  // Swapping argument order cancels this, since C == AB <=> T(C) == T(B)T(A)
+  const int64_t m = output_height * output_width;
+  const int64_t n = n_output_plane;
+  const int64_t k = n_input_plane * kernel_height * kernel_width;
+
+  const int64_t lda = m;
+  const int64_t ldb = k;
+  const int64_t ldc = m;
+
+  at::native::cpublas::gemm(
+      TransposeType::NoTranspose,
+      TransposeType::NoTranspose,
+      m, n, k,
+      static_cast<scalar_t>(1),
+      finput.data(), lda,
+      weight.data(), ldb,
+      static_cast<scalar_t>(beta),
+      output.data(), ldc);
 }
 
+template <typename scalar_t>
 void slow_conv2d_backward_update_grad_input_frame(
-    Tensor& grad_input,
-    const Tensor& grad_output,
-    const Tensor& weight,
-    Tensor& fgrad_input,
+    TensorAccessor<scalar_t, 3> grad_input,
+    TensorAccessor<scalar_t, 3> grad_output,
+    TensorAccessor<scalar_t, 2> weight,
+    scalar_t *fgrad_input,
     int64_t kernel_height,
     int64_t kernel_width,
     int64_t stride_height,
     int64_t stride_width,
     int64_t pad_height,
     int64_t pad_width) {
-  auto grad_output_2d = grad_output.reshape(
-      {grad_output.size(0), grad_output.size(1) * grad_output.size(2)});
-  at::mm_out(fgrad_input, weight, grad_output_2d);
+  // Compute fgrad_input = weight.T * grad_output.reshape({grad_output.shape(0), -1})
+  // Note gemm expects fortran order, so all 3 matrices are transposed.
+  // Swapping argument order cancels this, since C == AB <=> T(C) == T(B)T(A)
+  const int64_t m = grad_output.size(1) * grad_output.size(2);
+  const int64_t n = weight.size(1);
+  const int64_t k = weight.size(0);
 
-  grad_input.zero_();
+  const int64_t lda = m;
+  const int64_t ldb = n;
+  const int64_t ldc = m;
+
+  at::native::cpublas::gemm(
+      TransposeType::NoTranspose,
+      TransposeType::Transpose,
+      m, n, k,
+      static_cast<scalar_t>(1),
+      grad_output.data(), lda,
+      weight.data(), ldb,
+      static_cast<scalar_t>(0),
+      fgrad_input, ldc);
+
   unfolded2d_acc_stub(
       kCPU,
+      c10::CppTypeToScalarType<scalar_t>::value,
       fgrad_input,
-      grad_input,
+      grad_input.data(),
       kernel_height,
       kernel_width,
       stride_height,
@@ -263,43 +286,68 @@ void slow_conv2d_backward_out_cpu_template(
   const Tensor input = input_.contiguous();
   const Tensor grad_output = grad_output_.contiguous();
   grad_input.resize_as_(input);
-  const Tensor tweight = weight.transpose(0, 1);
+  grad_input.zero_();
+  TORCH_CHECK(grad_input.is_contiguous(), "slow_conv2d: grad_input must be contiguous");
   const int64_t batch_size = input.size(0);
-  at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
-    NoGradGuard no_grad;
-    AutoDispatchBelowADInplaceOrView non_variable_type_mode;
-    auto fgrad_input = at::empty(finput.sizes().slice(1), finput.options());
-    for (int64_t t = start; t < end; t++) {
-      Tensor grad_input_t = grad_input[t];
-      Tensor grad_output_t = grad_output[t];
-      slow_conv2d_backward_update_grad_input_frame(
-          grad_input_t,
-          grad_output_t,
-          tweight,
-          fgrad_input,
-          kernel_height,
-          kernel_width,
-          stride_height,
-          stride_width,
-          pad_height,
-          pad_width);
-    }
+
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      kBFloat16, input.scalar_type(), "slow_conv2d_cpu_grad_input", [&] {
+    auto grad_output_a = grad_output.accessor<scalar_t, 4>();
+    auto grad_input_a = grad_input.accessor<scalar_t, 4>();
+    auto weight_a = weight.accessor<scalar_t, 2>();
+
+    at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
+      auto fgrad_input = std::make_unique<scalar_t[]>(
+          c10::multiply_integers(finput.sizes().slice(1)));
+      for (int64_t t = start; t < end; t++) {
+        auto grad_input_t = grad_input_a[t];
+        auto grad_output_t = grad_output_a[t];
+        slow_conv2d_backward_update_grad_input_frame(
+            grad_input_t,
+            grad_output_t,
+            weight_a,
+            fgrad_input.get(),
+            kernel_height,
+            kernel_width,
+            stride_height,
+            stride_width,
+            pad_height,
+            pad_width);
+      }
+    });
   });
 }
 
+template <typename scalar_t>
 void slow_conv2d_backward_weight_frame(
-    Tensor& grad_weight,
-    Tensor& grad_output,
-    const Tensor& finput) {
-  auto grad_output_2d = grad_output.view(
-      {grad_output.size(0), grad_output.size(1) * grad_output.size(2)});
-  const Tensor tfinput = finput.transpose(0, 1);
-  grad_weight.addmm_(grad_output_2d, tfinput);
+    TensorAccessor<scalar_t, 2> grad_weight,
+    TensorAccessor<scalar_t, 3> grad_output,
+    TensorAccessor<scalar_t, 2> finput) {
+  // Compute grad_weight += grad_output.reshape({grad_output.shape(0), -1}) * finput.T
+  // Note gemm expects fortran order, so all 3 matrices are transposed.
+  // Swapping argument order cancels this, since C == AB <=> T(C) == T(B)T(A)
+  const int64_t m = finput.size(0);
+  const int64_t n = grad_output.size(0);
+  const int64_t k = grad_output.size(1) * grad_output.size(2);
+
+  const int64_t lda = k;
+  const int64_t ldb = k;
+  const int64_t ldc = m;
+
+  at::native::cpublas::gemm(
+      TransposeType::Transpose,
+      TransposeType::NoTranspose,
+      m, n, k,
+      static_cast<scalar_t>(1),
+      finput.data(), lda,
+      grad_output.data(), ldb,
+      static_cast<scalar_t>(1),
+      grad_weight.data(), ldc);
 }
 
 static void slow_conv2d_backward_weight_out_cpu_template(
     Tensor& grad_weight,
-    const Tensor& input_,
+    const Tensor& input,
     const Tensor& grad_output_,
     const Tensor& finput,
     IntArrayRef kernel_size,
@@ -320,7 +368,7 @@ static void slow_conv2d_backward_weight_out_cpu_template(
   grad_weight_2d = view_weight_2d(grad_weight);
 
   slow_conv2d_shape_check(
-      input_,
+      input,
       grad_output_,
       grad_weight_2d,
       {},
@@ -332,20 +380,25 @@ static void slow_conv2d_backward_weight_out_cpu_template(
       pad_width,
       true);
 
-  auto input = input_.contiguous();
   auto grad_output = grad_output_.contiguous();
+  TORCH_CHECK(finput.is_contiguous(), "slow_conv2d: finput must be contiguous");
 
   const int64_t batch_size = input.size(0);
-  for (int64_t t = 0; t < batch_size; t++) {
-    Tensor grad_output_t = grad_output[t];
-    Tensor finput_t;
-    if (grad_weight_2d.defined()) {
-      finput_t = finput[t];
-    }
 
-    slow_conv2d_backward_weight_frame(
-        grad_weight_2d, grad_output_t, finput_t);
-  }
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      kBFloat16, input.scalar_type(), "slow_conv2d_cpu_grad_weight", [&] {
+    auto grad_output_a = grad_output.accessor<scalar_t, 4>();
+    auto grad_weight_2d_a = grad_weight_2d.accessor<scalar_t, 2>();
+    auto finput_a = finput.accessor<scalar_t, 3>();
+
+    for (int64_t t = 0; t < batch_size; t++) {
+      auto grad_output_t = grad_output_a[t];
+      auto finput_t = finput_a[t];
+
+      slow_conv2d_backward_weight_frame(
+          grad_weight_2d_a, grad_output_t, finput_t);
+    }
+  });
 }
 
 } // namespace
@@ -410,34 +463,45 @@ std::tuple<Tensor&, Tensor&> slow_conv2d_forward_out_cpu(
                   n_input_plane * kernel_height * kernel_width,
                   output_height * output_width});
   }
-  output.resize_({batch_size, n_output_plane, output_height, output_width});
 
-  at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
-    NoGradGuard no_grad;
-    AutoDispatchBelowADInplaceOrView non_variable_type_mode;
-    for (int64_t t = start; t < end; t++) {
-      Tensor input_t = input[t].unsqueeze(0);
-      Tensor output_t = output[t];
-      Tensor finput_t = finput[t];
-      slow_conv2d_update_output_frame(
-          input_t,
-          output_t,
-          weight_2d,
-          bias,
-          finput_t,
-          kernel_height,
-          kernel_width,
-          stride_height,
-          stride_width,
-          pad_height,
-          pad_width,
-          n_input_plane,
-          input_height,
-          input_width,
-          n_output_plane,
-          output_height,
-          output_width);
-    }
+  output.resize_({batch_size, n_output_plane, output_height, output_width});
+  if (bias.defined()) {
+    output.copy_(bias.reshape({-1, 1, 1}));
+  }
+  TORCH_CHECK(output.is_contiguous() && finput.is_contiguous(),
+              "slow_conv2d output tensors must be contiguous");
+
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, input.scalar_type(), "slow_conv2d_cpu", [&]{
+    auto input_a = input.accessor<scalar_t, 4>();
+    auto output_a = output.accessor<scalar_t, 4>();
+    auto finput_a = finput.accessor<scalar_t, 3>();
+    auto weight_2d_a = weight_2d.accessor<scalar_t, 2>();
+
+    at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
+      for (int64_t t = start; t < end; t++) {
+        auto input_t = input_a[t];
+        auto output_t = output_a[t];
+        auto finput_t = finput_a[t];
+        slow_conv2d_update_output_frame(
+            input_t,
+            output_t,
+            weight_2d_a,
+            bias.defined(),
+            finput_t,
+            kernel_height,
+            kernel_width,
+            stride_height,
+            stride_width,
+            pad_height,
+            pad_width,
+            n_input_plane,
+            input_height,
+            input_width,
+            n_output_plane,
+            output_height,
+            output_width);
+      }
+    });
   });
 
   return std::tuple<Tensor&, Tensor&>(output, finput);
