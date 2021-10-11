@@ -512,7 +512,6 @@ class TestOperators(TestCase):
         xfail('gradient'),
         xfail('hsplit'),
         xfail('nn.functional.pad', 'circular'),
-        xfail('ravel'),
         xfail('resolve_conj'),
         xfail('resolve_neg'),
         xfail('unfold'),
