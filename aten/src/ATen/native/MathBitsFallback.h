@@ -50,9 +50,7 @@ struct MathOpFallback {
     const auto num_arguments = arguments.size();
     const auto stack_start = stack->size() - num_arguments;
 
-    // set to True if there's one or mutable inputs
     c10::optional<bool> is_write;
-
     for (const auto i : c10::irange(num_arguments)) {
       // Three possible states:
       // 1. alias_info has no value --> out-of-place operation
