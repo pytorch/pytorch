@@ -23,7 +23,7 @@ class SourceRangeSerializer {
 };
 
 SourceRange SourceRangeDeserializer::deserialize(const c10::IValue& iv) {
-  auto tup_elems = iv.toTuple()->elements();
+  const auto& tup_elems = iv.toTuple()->elements();
   TORCH_INTERNAL_ASSERT(tup_elems.size() == 3);
   std::shared_ptr<Source> source_ = deserialize_source(tup_elems[0]);
   int64_t start_ = tup_elems[1].toInt();
@@ -34,11 +34,12 @@ SourceRange SourceRangeDeserializer::deserialize(const c10::IValue& iv) {
 std::shared_ptr<Source> SourceRangeDeserializer::deserialize_source(
     const c10::IValue& iv) {
   auto tup = iv.toTuple();
-  if (cached_sources.count(tup)) {
-    return cached_sources.at(tup);
+  auto it = cached_sources.find(tup);
+  if (it != cached_sources.end()) {
+    return it->second;
   }
 
-  auto tup_elems = tup->elements();
+  const auto& tup_elems = tup->elements();
   TORCH_INTERNAL_ASSERT(tup_elems.size() == 3);
   std::string text_ = tup_elems[0].toString()->string();
   c10::optional<std::string> filename_ = tup_elems[1].toOptional<std::string>();
@@ -106,17 +107,18 @@ ConcreteSourceRangeUnpickler::ConcreteSourceRangeUnpickler(
       unpickled_records(nullptr) {}
 
 void ConcreteSourceRangeUnpickler::unpickle() {
+  std::lock_guard<std::mutex> guard(mutex);
   if (unpickled_records) {
     return;
   }
 
-  auto ivalues = jit::unpickle(reinterpret_cast<const char*>(data.get()), size)
-                     .toTuple()
-                     ->elements();
+  auto ivaluesTuple =
+      jit::unpickle(reinterpret_cast<const char*>(data.get()), size).toTuple();
+  const auto& ivalues = ivaluesTuple->elements();
 
   unpickled_records = std::make_shared<SourceRangeRecords>();
   for (auto& val : ivalues) {
-    auto tup_elems = val.toTuple()->elements();
+    const auto& tup_elems = val.toTuple()->elements();
     int64_t offset = tup_elems[kByteOffsetIndex].toInt();
     auto source_range = deserializer->deserialize(tup_elems[kSourceRangeIndex]);
     unpickled_records->emplace_back(offset, std::move(source_range));

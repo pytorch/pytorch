@@ -335,6 +335,13 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/utils/throughput_benchmark.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
 endif()
 
+# coreml
+if(USE_COREML_DELEGATE)
+  list(APPEND TORCH_PYTHON_SRCS ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/cpp/backend.cpp)
+  list(APPEND TORCH_PYTHON_SRCS ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/cpp/preprocess.cpp)
+endif()
+
+
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
 if(HAVE_SOVERSION)
   set_target_properties(torch_python PROPERTIES
@@ -345,6 +352,10 @@ add_dependencies(torch_python torch_python_stubs)
 if(USE_PRECOMPILED_HEADERS)
   target_precompile_headers(torch_python PRIVATE
       "$<$<COMPILE_LANGUAGE:CXX>:ATen/ATen.h>")
+endif()
+
+if(NOT MSVC)
+  target_compile_options(torch_python PRIVATE -Wno-unused-variable)
 endif()
 
 # Required workaround for generated sources

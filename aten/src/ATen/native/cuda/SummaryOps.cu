@@ -2,7 +2,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 
-#include <THC/THCAtomics.cuh>
+#include <ATen/cuda/Atomic.cuh>
 #include <THC/THCNumerics.cuh>
 
 namespace at {
@@ -353,7 +353,7 @@ Tensor _histc_cuda_template(
     maxvalue = maxvalue + 1;
   }
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
   TORCH_CHECK(
       !(THCNumerics<input_t>::isinf(minvalue) ||
         THCNumerics<input_t>::isinf(maxvalue) ||

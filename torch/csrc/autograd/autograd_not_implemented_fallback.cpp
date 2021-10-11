@@ -45,7 +45,7 @@ void _foreach_tensor(
 
 void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
   // Mimics a subset of the logic of a VariableType NotImplemented kernel
-  // - see gen_variable_type.py
+  // See gen_variable_type.py
   const auto& schema = op.schema();
   const auto& op_name = schema.operator_name().name;
   const auto& arguments = schema.arguments();
@@ -65,16 +65,17 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
   is_aliased_output.reserve(num_returns);
 
   for (const auto i : c10::irange(num_returns)) {
-    const auto& alias_info = returns[i].alias_info();
-    is_inplace_output.push_back(alias_info.has_value() && alias_info->isWrite());
-    any_is_inplace_output |= alias_info.has_value() && alias_info->isWrite();
-    is_aliased_output.push_back(alias_info.has_value());
+    const at::AliasInfo* alias_info = returns[i].alias_info();
+    is_inplace_output.push_back(alias_info != nullptr && alias_info->isWrite());
+    any_is_inplace_output |= alias_info != nullptr && alias_info->isWrite();
+    is_aliased_output.push_back(alias_info != nullptr);
+
   }
   int aliased_input_idx = -1;
   int aliased_output_idx = -1;
   for (const auto i : c10::irange(num_returns)) {
-    const auto& alias_info = returns[i].alias_info();
-    if (alias_info.has_value() && !alias_info->isWrite()) {
+    const at::AliasInfo* alias_info = returns[i].alias_info();
+    if (alias_info != nullptr && !alias_info->isWrite()) {
       TORCH_CHECK(
         aliased_output_idx == -1,
         "Expected only a single output in the operator schema to have a non-write alias annotation (i.e., 'Tensor(a)'). "
@@ -84,8 +85,8 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
     }
   }
   for (const auto i : c10::irange(num_arguments)) {
-    const auto& alias_info = arguments[i].alias_info();
-    if (alias_info.has_value() && !alias_info->isWrite()) {
+    const at::AliasInfo* alias_info = arguments[i].alias_info();
+    if (alias_info != nullptr && !alias_info->isWrite()) {
       TORCH_CHECK(
         aliased_input_idx == -1,
         "Expected only a single input in the operator schema to have a non-write alias annotation (i.e., 'Tensor(a)'). "
@@ -107,8 +108,8 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
   const bool any_requires_grad = tensors_requiring_grad_on_stack.size() > 0;
 
   _foreach_tensor([&](size_t _, size_t i, const at::Tensor& t) {
-    const auto& alias_info = arguments[i].alias_info();
-    if (alias_info.has_value() && alias_info->isWrite()) {
+    const at::AliasInfo* alias_info = arguments[i].alias_info();
+    if (alias_info != nullptr && alias_info->isWrite()) {
       check_inplace(t, any_requires_grad);
     }
   }, stack, stack_start, num_arguments);
@@ -216,8 +217,8 @@ void autogradNotImplementedInplaceOrViewFallbackImpl(const c10::OperatorHandle& 
 
   int64_t aliased_output_idx = -1;
   for (const auto i : c10::irange(num_returns)) {
-    const auto& alias_info = returns[i].alias_info();
-    if (alias_info.has_value() && !alias_info->isWrite()) {
+    const at::AliasInfo* alias_info = returns[i].alias_info();
+    if (alias_info != nullptr && !alias_info->isWrite()) {
       TORCH_CHECK(
         aliased_output_idx == -1,
         "Fallback ADInplaceOrView kernel expects only a single output in the operator schema to have a "
@@ -230,8 +231,8 @@ void autogradNotImplementedInplaceOrViewFallbackImpl(const c10::OperatorHandle& 
 
   int64_t aliased_input_idx = -1;
   for (const auto i : c10::irange(num_arguments)) {
-    const auto& alias_info = arguments[i].alias_info();
-    if (alias_info.has_value()) {
+    const at::AliasInfo* alias_info = arguments[i].alias_info();
+    if (alias_info != nullptr) {
       if (!alias_info->isWrite()) {
         TORCH_CHECK(
           aliased_input_idx == -1,
@@ -263,14 +264,14 @@ void autogradNotImplementedInplaceOrViewFallbackImpl(const c10::OperatorHandle& 
   }
 
   for (const auto i : c10::irange(num_returns)) {
-    const auto& alias_info = returns[i].alias_info();
+    const at::AliasInfo* alias_info = returns[i].alias_info();
     if (alias_info->isWrite()) {
       increment_version((*stack)[stack->size() - num_returns + i].toTensor());
     }
   }
 
   if (is_view) {
-    const c10::IValue& aliased_output_iv = (*stack)[stack->size() - num_returns + aliased_output_idx];
+    c10::IValue& aliased_output_iv = (*stack)[stack->size() - num_returns + aliased_output_idx];
     if (aliased_output_iv.isTensorList()) {
       auto aliased_output = aliased_output_iv.toTensorVector();
       // Only allow rebasing of the history if we return a single Tensor that is
@@ -287,10 +288,9 @@ void autogradNotImplementedInplaceOrViewFallbackImpl(const c10::OperatorHandle& 
       stack->at(stack->size() - num_returns + aliased_output_idx) = result;
     } else {
       TORCH_CHECK(aliased_output_iv.isTensor());
-      const at::Tensor& aliased_output = aliased_output_iv.toTensor();
       auto result = as_view(
         /* base=*/aliased_input,
-        /* tensor=*/aliased_output,
+        /* tensor=*/std::move(aliased_output_iv).toTensor(),
         /* is_bw_differentiable=*/true,
         /* is_fw_differentiable=*/true,
         /* view_func=*/[op_name=op_name](const at::Tensor&) {
