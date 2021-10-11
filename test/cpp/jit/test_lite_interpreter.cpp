@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/mobile/backport.h>
 #include <torch/csrc/jit/mobile/backport_manager.h>
 #include <torch/csrc/jit/mobile/import.h>
+#include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/mobile/parse_bytecode.h>
@@ -1361,6 +1362,72 @@ TEST(LiteInterpreterTest, OperatorCacheDifferentiatesDefaultArgs) {
   testLiteModuleCompareResultTensors(m, inputs, "forward");
   testLiteModuleCompareResultTensors(m, inputs, "forward2");
   testLiteModuleCompareResultTensors(m, inputs, "forward3");
+}
+
+TEST(RunTimeTest, RuntimeCall) {
+  //     def call(x):
+  //         return x + x
+  //
+  //     def forward(a):
+  //         a += call(a)
+  //         a += call(a)
+  //         return a
+
+  // 1. Prepare for the bytecode. In reality it can be from a customized
+  // deserializer.
+  std::vector<IValue> instructionsCall{
+      to_tuple({"STORE", 1, 0}),
+      to_tuple({"LOAD", 1, 0}),
+      to_tuple({"MOVE", 1, 0}),
+      to_tuple({"LOADC", 0, 0}),
+      to_tuple({"OP", 0, 0}),
+      to_tuple({"RET", 0, 0}),
+  };
+  std::vector<IValue> instructionsFoo{
+      to_tuple({"STORE", 1, 0}),
+      to_tuple({"LOAD", 1, 0}),
+      to_tuple({"LOAD", 1, 0}),
+      to_tuple({"MOVE", 1, 0}),
+      to_tuple({"CALL", 0, 0}),
+      to_tuple({"LOADC", 0, 0}),
+      to_tuple({"OP", 0, 0}),
+      to_tuple({"CALL", 0, 0}),
+      to_tuple({"LOADC", 0, 0}),
+      to_tuple({"OP", 0, 0}),
+      to_tuple({"RET", 0, 0}),
+  };
+  std::vector<IValue> operators{
+      to_tuple({"aten::add", "Tensor", 3}),
+  };
+  std::vector<IValue> constants{
+      1,
+  };
+  int64_t model_version = caffe2::serialize::kProducedBytecodeVersion;
+  // 2. Parse the function oo
+  auto foo = std::unique_ptr<mobile::Function>(
+      new mobile::Function(c10::QualifiedName("foo")));
+  std::vector<IValue> debug_handles_m_tuple;
+  parseInstructions("foo", instructionsFoo, debug_handles_m_tuple, foo.get());
+  parseOperators(operators, model_version, 1, foo.get());
+  parseConstants(constants, foo.get());
+  const size_t rsize = 5;
+  parseRegisterSize(rsize, foo.get());
+
+  auto call = std::unique_ptr<mobile::Function>(
+      new mobile::Function(c10::QualifiedName("call")));
+  parseInstructions(
+      "call", instructionsCall, debug_handles_m_tuple, call.get());
+  parseOperators(operators, model_version, 1, call.get());
+  parseConstants(constants, call.get());
+  parseRegisterSize(rsize, call.get());
+
+  foo->append_function(*call);
+
+  // 3. Prepare for inputs and run the function
+  std::vector<IValue> inputs{at::tensor(1)};
+  foo->run(inputs);
+  auto output = inputs[0];
+  ASSERT_EQ(output, at::tensor(7));
 }
 
 } // namespace jit

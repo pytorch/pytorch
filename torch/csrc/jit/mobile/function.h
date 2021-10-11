@@ -19,7 +19,8 @@ class Function {
   c10::IValue operator()(Stack& stack) const;
   const std::string& name() const;
   TORCH_API const c10::QualifiedName& qualname() const;
-  void append_instruction(OpCode op, int X, int N, int64_t dbg_handle = -1);
+  void append_instruction(OpCode op, int X, int N, int64_t dbg_handle);
+  void append_instruction(OpCode op, int X, int N);
   bool append_operator(
       const std::string& name,
       const std::string& overload_name,
@@ -28,6 +29,7 @@ class Function {
                                 are removed */
   void append_constant(const c10::IValue& constant);
   void append_type(const c10::TypePtr& type);
+  void append_function(mobile::Function& func);
 
   void set_register_size(size_t size);
 
