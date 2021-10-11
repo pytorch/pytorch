@@ -3698,7 +3698,9 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         if isinstance(size, (list, tuple)):
             if len(size) != dim:
                 raise ValueError(
-                    "size shape must match input shape. " "Input is {}D, size is {}".format(dim, len(size))
+                    f"Output size {size} must match the number of input spatial dimensions {list(input.shape[2:])}. "
+                    "Please, provide input tensor in (B, C, d1, d2, ...,dN) format and "
+                    "output size as (o1, o2, ...,oN)"
                 )
             output_size = size
         else:
@@ -3709,8 +3711,9 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         if isinstance(scale_factor, (list, tuple)):
             if len(scale_factor) != dim:
                 raise ValueError(
-                    "scale_factor shape must match input shape. "
-                    "Input is {}D, scale_factor is {}".format(dim, len(scale_factor))
+                    f"scale_factor {scale_factor} must match the number of input spatial dimensions {list(input.shape[2:])}. "
+                    "Please, provide input tensor in (B, C, d1, d2, ...,dN) format and "
+                    "scale_factor as (s1, s2, ...,sN)"
                 )
             scale_factors = scale_factor
         else:
