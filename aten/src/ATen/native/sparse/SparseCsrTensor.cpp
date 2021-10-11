@@ -230,7 +230,6 @@ Tensor empty_sparse_csr(
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(layout == Layout::SparseCsr);
 
   auto rows = size[0];
-  auto cols = size[1];
   int64_t nnz = 0;
 
   TensorOptions options = TensorOptions().dtype(ScalarType::Long).layout(Layout::Strided).device(device).pinned_memory(pin_memory);
