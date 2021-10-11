@@ -44,8 +44,15 @@ WORKFLOW_DATA = [
         extra_props=tuple({
             "lite_interpreter": True
         }.items()),
-    )
-]
+    ),
+    MacOsJob(
+        "10_13",
+        is_build=True,
+        is_test=True,
+        extra_props=tuple({
+            "tracer": True
+        }.items()),
+    )]
 
 
 def get_workflow_jobs():
