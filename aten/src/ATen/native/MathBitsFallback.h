@@ -40,53 +40,6 @@ struct MathOpFallback {
         READ from an argument, but in out= operations you can skip
         conjugating inputs on entry that never get used. In the current schema we
         can't easily tell if the operation is in in-place or out= operation.
-
-      Algorithm used:
-
-      1. Scan through the input arguments
-          a. Create a vector of mutable arguments that have the math bit set to True.
-          a. Additionally, if input argument has alias_info and it's mutable, set the optional variable is_write to True, else False.
-          b. is_write is only ever set for view, in-place or out= operations.
-      2. If is_write has value, and is set to False, then the operation is a view operation.
-          a. Perform the operation and return.
-      3. Iterate through all the input arguments again.
-          a. At this time, only non-mutable arguments are considered.
-          b. If the size of mutable_arguments vector is non-zero, then we iterate through mutable_inputs to check
-            if the current arg tensor in question shares memory with any of the entries in mutable_inputs.
-          c. If it does and the non-mutable arg's math bit is set to False, then we clone the non-mutable tensor arg,
-             else it is a no op.
-          d. If it doesn't then just resolve the non-mutable arg as usual.
-      4. Now we look through the mutable_inputs vector (which contains only mutable input tensors with math bit set to True).
-          a. In-place materialize the bit (math_op_) for each of the entries in the vector.
-      5. Perform the actual operation.
-      6. Perform math_op_ for each of the mutable argument tensors.
-
-    */
-
-    /*
-      Different possible cases for shared memory:
-      1. Functions with no tensorlist inputs
-        a. no mutable args
-        b. one or more mutable args
-          b.1. shared memory between mutable and non-mutable args (--handled)
-          b.2. shared memory between two or more mutable args (incorrect result but this is bad
-                and users shouldn't do it anyway)
-          b.3. shared memory between two or more non-mutable args (works fine since we never modify the memory)
-          b.4. no shared memory between args (-- works fine)
-      2. Functions with tensorlist inputs
-        a. no mutable args (-- works fine)
-        b. Mutable tensor arg(s) but non-mutable tensorlist arg
-          b.1. All the possible cases listed in 1.b (-- works fine)
-          b.2. shared memory between a tensor arg and a tensorlist arg ( -- Not currently supported)
-        c. Mutable tensorlist arg(s) ( -- Not currently supported)
-          NOTE: a few foreach ops fall in this category
-          c.1. shared memory between a mutable and non-mutable tensorlist
-          c.2. shared memory between two or more mutable tensorlist args
-          c.3. shared memory between two or more non-mutable tensorlist args
-          c.4. shared memory between two or more non-mutable tensor args
-          c.5. shared memory between a tensor and tensorlist arg
-          ...
-          c.n. no shared memory between args
     */
     const auto& arguments = op.schema().arguments();
     const auto num_arguments = arguments.size();
@@ -148,7 +101,7 @@ struct MathOpFallback {
         } 
         tensor = tensor.clone();
         (*stack)[stack_start + i] = std::move(tensor);
-      } else {
+      } else if (ivalue.isTensorList()) {
         auto tensors = std::move(ivalue).toTensorList();
         for(const auto j : c10::irange(tensors.size())) {
           const auto& tensor = tensors[j];
