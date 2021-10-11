@@ -1654,8 +1654,8 @@ def align_tensors(*tensors):
 # TODOs:
 # TODO: This function needs better documentation, examples, and something similar to:
 #       torch.nonzero's doc: https://pytorch.org/docs/stable/generated/torch.nonzero.html
-# TODO: Add testing (OpInfo and test_unravel_index in test_functional? (if exists, not sure))
-# TODO: More checks? Verify with nonzero.
+# TODO: Add tests in test/test_torch.py
+# TODO: More checks? Verify with nonzero
 def unravel_index(
     indices: torch.Tensor,
     shape: Tuple[int, ...],
