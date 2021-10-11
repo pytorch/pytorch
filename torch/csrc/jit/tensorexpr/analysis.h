@@ -248,6 +248,209 @@ class ModifiesVarChecker : public IRVisitor {
   bool found_{false};
 };
 
+// Stmt PC
+class StmtPC {
+ public:
+  void append(int32_t id) {
+    PC.emplace_back(id);
+  }
+  void pop() {
+    PC.pop_back();
+  }
+
+  const std::vector<int32_t> getPC() {
+    return PC;
+  }
+
+  bool operator==(StmtPC& pc) {
+    auto compare = pc.getPC();
+    if (PC.size() != compare.size()) {
+      return false;
+    }
+    int size = compare.size();
+    for (int i = 0; i < size; i++) {
+      if (PC.at(i) != compare.at(i)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  bool operator<(StmtPC& pc) {
+    auto compare = pc.getPC();
+    int size = PC.size() < compare.size() ? PC.size() : compare.size();
+    for (int i = 0; i < size; i++) {
+      if (PC.at(i) > compare.at(i)) {
+        return false;
+      }
+    }
+    return !(*this == pc);
+  }
+
+  bool operator>(StmtPC& pc) {
+    auto compare = pc.getPC();
+    int size = PC.size() < compare.size() ? PC.size() : compare.size();
+    for (int i = 0; i < size; i++) {
+      if (PC.at(i) < compare.at(i)) {
+        return false;
+      }
+    }
+    return !(*this == pc);
+  }
+
+  std::string getPCString() {
+    std::string pcstr = "";
+    for (int i = 0; i < PC.size(); i++) {
+      pcstr += std::to_string(PC.at(i));
+      pcstr += ":";
+    }
+    return pcstr;
+  }
+
+ private:
+  std::vector<int32_t> PC;
+};
+
+// Visit Stmts and Record their PCs
+class StmtRecorder : public IRVisitor {
+ public:
+  StmtPC getStmtPC() {
+    return pc_;
+  }
+
+ private:
+  void visit(BlockPtr v) {
+    if (flatten_) {
+      for (StmtPtr s : *v) {
+        s->accept(this);
+      }
+      return;
+    }
+
+    int count = 0;
+    for (StmtPtr s : *v) {
+      count++;
+      pc_.append(count);
+      s->accept(this);
+      pc_.pop();
+    }
+  }
+
+  void visit(CondPtr v) {
+    flatten_ = true;
+    ExprPtr condition = v->condition();
+    StmtPtr true_stmt = v->true_stmt();
+    StmtPtr false_stmt = v->false_stmt();
+    condition->accept(this);
+    if (true_stmt) {
+      true_stmt->accept(this);
+    }
+    if (false_stmt) {
+      false_stmt->accept(this);
+    }
+    flatten_ = false;
+  }
+
+  StmtPC pc_;
+  bool flatten_ = false;
+};
+
+enum AccMode { READ, WRITE, REDUCE };
+
+// Traverses the IR to identify all reads/writes to a buf, and their PCs
+using BufAccessInfo = std::tuple<StmtPtr, AccMode, StmtPC>;
+class BufAccesses : public StmtRecorder {
+ public:
+  BufAccesses(BufPtr b) : buf_(b) {}
+
+  std::vector<std::tuple<StmtPtr, AccMode, StmtPC>> accesses() {
+    return accesses_;
+  }
+
+  static std::vector<std::tuple<StmtPtr, AccMode, StmtPC>> find(
+      StmtPtr s,
+      BufPtr b) {
+    BufAccesses finder(b);
+    s->accept(&finder);
+    return finder.accesses();
+  }
+
+ private:
+  bool readsBuffer(StmtPtr s) {
+    auto loads1 = NodeFinder<Load>::find(s);
+    for (auto l : loads1) {
+      if (l->buf() == buf_) {
+        return true;
+      }
+    }
+    auto loads2 = NodeFinder<ExternalCall>::find(s);
+    for (auto l : loads2) {
+      for (auto lb : l->buf_args()) {
+        if (lb == buf_) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  bool writesBuffer(StmtPtr s) {
+    auto writes1 = NodeFinder<Store>::find(s);
+    for (auto w : writes1) {
+      if (w->buf() == buf_) {
+        return true;
+      }
+    }
+    auto writes2 = NodeFinder<ExternalCall>::find(s);
+    for (auto w : writes2) {
+      if (w->buf() == buf_) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void insertAccesses(StmtPtr s) {
+    if (readsBuffer(s) && writesBuffer(s)) {
+      auto acc = std::make_tuple(s, AccMode::REDUCE, getStmtPC());
+      accesses_.push_back(acc);
+      return;
+    }
+    if (readsBuffer(s)) {
+      auto acc = std::make_tuple(s, AccMode::READ, getStmtPC());
+      accesses_.push_back(acc);
+      return;
+    }
+    if (writesBuffer(s)) {
+      auto acc = std::make_tuple(s, AccMode::WRITE, getStmtPC());
+      accesses_.push_back(acc);
+    }
+  }
+
+  void visit(StorePtr v) {
+    insertAccesses(v);
+  }
+
+  void visit(LetPtr v) {
+    insertAccesses(v);
+  }
+
+  void visit(CondPtr v) {
+    insertAccesses(v);
+  }
+
+  void visit(AtomicAddPtr v) {
+    insertAccesses(v);
+  }
+
+  void visit(ExternalCallPtr v) {
+    insertAccesses(v);
+  }
+
+  BufPtr buf_;
+  std::vector<BufAccessInfo> accesses_;
+};
+
 // A class that analyzes the given program relevant for Block backend
 // It creates a map of multi dim buffers and their flat verions
 class CreateBufferMap : public IRVisitor {
