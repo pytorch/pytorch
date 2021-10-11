@@ -1,10 +1,7 @@
 from io import IOBase
 from typing import Sized, Tuple
-from requests import HTTPError, RequestException
 from torch.utils.data import IterDataPipe
 from torch.utils.data.datapipes.utils.common import deprecation_warning_torchdata
-
-import requests
 
 
 class HTTPReaderIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
@@ -24,9 +21,10 @@ class HTTPReaderIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
         deprecation_warning_torchdata(type(self).__name__)
 
     def __iter__(self):
+        from requests import HTTPError, RequestException, Session
         for url in self.datapipe:
             try:
-                session = requests.Session()
+                session = Session()
                 if self.timeout is None:
                     r = session.get(url, stream=True)
                 else:
