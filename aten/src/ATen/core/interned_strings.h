@@ -42,6 +42,7 @@ namespace c10 {
   _(prim, CudaFusionGroup)           \
   _(prim, CudaFusionGuard)           \
   _(prim, FunctionalGraph)           \
+  _(prim, add_optional)              \
   _(prim, DifferentiableGraph)       \
   _(prim, TensorExprGroup)           \
   _(prim, StaticSubgraph)            \
@@ -379,11 +380,14 @@ namespace c10 {
   _(aten, special_gammaincc)         \
   _(aten, mvlgamma)                  \
   _(aten, special_multigammaln)      \
+  _(aten, softmax)                   \
+  _(aten, special_softmax)           \
   _(aten, has_torch_function)        \
   _(aten, hardswish)                 \
   _(aten, hardswish_)                \
   _(aten, hardsigmoid_)              \
   _(aten, hardtanh_)                 \
+  _(aten, dequantize)                \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
   _(onnx, Concat)                    \
@@ -394,12 +398,14 @@ namespace c10 {
   _(onnx, Gather)                    \
   _(onnx, Gemm)                      \
   _(onnx, LSTM)                      \
+  _(onnx, MatMul)                    \
   _(onnx, Mul)                       \
   _(onnx, Pow)                       \
   _(onnx, RNN)                       \
   _(onnx, Shape)                     \
   _(onnx, Size)                      \
   _(onnx, Slice)                     \
+  _(onnx, Softmax)                   \
   _(onnx, Squeeze)                   \
   _(onnx, Sub)                       \
   _(onnx, Transpose)                 \
@@ -435,7 +441,9 @@ namespace c10 {
   _(onnx, ReduceL2)                  \
   _(onnx, Conv)                      \
   _(onnx, BatchNormalization)        \
+  _(onnx, ReduceMean)                \
   _(onnx, ReduceProd)                \
+  _(onnx, Relu)                      \
   _(onnx, Neg)                       \
   _(onnx, NonZero)                   \
   _(onnx, Range)                     \
