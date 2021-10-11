@@ -88,12 +88,6 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
     return (PyObject*)self.release();
   }
 
-  // torch.Storage(view_source, [offset, [size]])
-  if (num_args < 4 && THPStorage_(Check)(first_arg)) {
-    THPUtils_setError("storage views not supported");
-    return nullptr;
-  }
-
   // torch.Storage(sequence)
   if (num_args == 1 && PySequence_Check(first_arg)) {
     Py_ssize_t length = PySequence_Length(first_arg);
@@ -127,10 +121,7 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
   THPUtils_invalidArguments(args, kwargs, THPStorageStr " constructor", 6,
           "no arguments",
           "(int size)",
-          "(Sequence data)",
-          "(" THPStorageStr " view_source)",
-          "(" THPStorageStr " view_source, int offset)",
-          "(" THPStorageStr " view_source, int offset, int size)");
+          "(Sequence data)");
   return nullptr;
   END_HANDLE_TH_ERRORS
 }
@@ -318,7 +309,6 @@ typedef PyObject *(*getter)(PyObject *, void *);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyGetSetDef THPStorage_(properties)[] = {
   {"device", (getter)THPStorage_(device), nullptr, nullptr, nullptr},
-  {"dtype",  (getter)THPStorage_(dtype), nullptr, nullptr, nullptr},
   {nullptr}
 };
 
@@ -422,7 +412,7 @@ bool THPStorage_(init)(PyObject *module)
 
 void THPStorage_(postInit)(PyObject *module)
 {
-  THPStorageClass = PyObject_GetAttrString(module,(char*)TH_CONCAT_STRING_2(Real,Storage));
+  THPStorageClass = PyObject_GetAttrString(module, "UntypedStorage");
   if (!THPStorageClass) throw python_error();
 
   at::Backend backend = at::Backend::CPU;

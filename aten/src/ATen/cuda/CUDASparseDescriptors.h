@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDASparse.h>
 
@@ -39,13 +40,13 @@ class CuSparseDescriptor {
 class TORCH_CUDA_CPP_API CuSparseDnMatDescriptor
     : public CuSparseDescriptor<cusparseDnMatDescr, &cusparseDestroyDnMat> {
  public:
-  CuSparseDnMatDescriptor(const Tensor& input);
+  explicit CuSparseDnMatDescriptor(const Tensor& input);
 };
 
 class TORCH_CUDA_CPP_API CuSparseDnVecDescriptor
     : public CuSparseDescriptor<cusparseDnVecDescr, &cusparseDestroyDnVec> {
  public:
-  CuSparseDnVecDescriptor(const Tensor& input);
+  explicit CuSparseDnVecDescriptor(const Tensor& input);
 };
 
 class TORCH_CUDA_CPP_API CuSparseSpMatDescriptor
@@ -54,7 +55,7 @@ class TORCH_CUDA_CPP_API CuSparseSpMatDescriptor
 class TORCH_CUDA_CPP_API CuSparseSpMatCsrDescriptor
     : public CuSparseSpMatDescriptor {
  public:
-  CuSparseSpMatCsrDescriptor(const Tensor& input);
+  explicit CuSparseSpMatCsrDescriptor(const Tensor& input);
 
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   std::tuple<int64_t, int64_t, int64_t> get_size() {
