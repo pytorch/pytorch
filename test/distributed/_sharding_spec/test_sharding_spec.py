@@ -6,7 +6,11 @@ from torch.distributed._sharding_spec import (
     EnumerableShardingSpec,
     ShardMetadata,
 )
-from torch.distributed._sharding_spec._internals import check_tensor
+from torch.distributed._sharding_spec._internals import (
+    check_tensor,
+    get_split_size,
+    get_chunked_dim_size,
+)
 
 from torch.testing._internal.common_utils import (
     run_tests,
@@ -144,8 +148,8 @@ class TestShardingSpec(TestCase):
         with self.assertRaisesRegex(ValueError, 'shard_offsets should be >=0'):
             ShardMetadata(shard_offsets=[-1, 0], shard_lengths=[1, 1], placement="cuda:0")
 
-        with self.assertRaisesRegex(ValueError, 'shard_lengths should be > 0'):
-            ShardMetadata(shard_offsets=[0, 0], shard_lengths=[0, 1], placement="cuda:0")
+        with self.assertRaisesRegex(ValueError, 'shard_lengths should be >= 0'):
+            ShardMetadata(shard_offsets=[0, 0], shard_lengths=[-1, 1], placement="cuda:0")
 
         with self.assertRaisesRegex(ValueError, 'Empty shard list provided'):
             EnumerableShardingSpec([])
@@ -225,6 +229,20 @@ class TestShardingSpec(TestCase):
 
         with self.assertRaisesRegex(ValueError, 'does not match tensor volume'):
             check_tensor(spec.shards, torch.rand(10, 10).size())
+
+    def test_get_split_size(self):
+        self.assertEqual(3, get_split_size(11, 4))
+        self.assertEqual(3, get_split_size(12, 4))
+        self.assertEqual(4, get_split_size(13, 4))
+
+        self.assertEqual(11, get_split_size(11, 1))
+        self.assertEqual(1, get_split_size(11, 11))
+
+    def test_get_chunked_dim_size(self):
+        self.assertEqual(3, get_chunked_dim_size(11, 3, 0))
+        self.assertEqual(2, get_chunked_dim_size(11, 3, 3))
+        self.assertEqual(4, get_chunked_dim_size(13, 4, 0))
+        self.assertEqual(1, get_chunked_dim_size(13, 4, 3))
 
 if __name__ == '__main__':
     run_tests()

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
 #cmake_policy(SET CMP0022 NEW)
 #cmake_policy(SET CMP0023 NEW)
 
@@ -195,6 +195,9 @@ cmake_dependent_option(
     USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
     "USE_CUDNN" OFF)
 cmake_dependent_option(
+    BUILD_NVFUSER_BENCHMARK "Build C++ binaries for nvfuser benchmarks" ON
+    "USE_CUDA;BUILD_TEST" OFF)
+cmake_dependent_option(
   USE_WHOLE_CUDNN "Use whole-library linking for cuDNN" OFF
     "USE_STATIC_CUDNN" OFF)
 cmake_dependent_option(
@@ -214,6 +217,7 @@ option(USE_LMDB "Use LMDB" OFF)
 option(USE_MAGMA "Use MAGMA" ON)
 option(USE_METAL "Use Metal for Caffe2 iOS build" ON)
 option(USE_PYTORCH_METAL "Use Metal for PyTorch iOS build" OFF)
+option(USE_PYTORCH_METAL_EXPORT "Export Metal models on MacOSX desktop" OFF)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
 cmake_dependent_option(
     USE_MLCOMPUTE "Use ML Compute for macOS build" ON
@@ -308,7 +312,7 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_TENSORPIPE "Use TensorPipe. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
-option(USE_TBB "Use TBB" OFF)
+option(USE_TBB "Use TBB (Deprecated)" OFF)
 cmake_dependent_option(
     USE_SYSTEM_TBB "Use system-provided Intel TBB." OFF "USE_TBB" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
@@ -319,13 +323,15 @@ cmake_dependent_option(
     "BUILD_PYTHON" OFF)
 cmake_dependent_option(USE_CCACHE "Attempt using CCache to wrap the compilation" ON "UNIX" OFF)
 option(WERROR "Build with -Werror supported by the compiler" OFF)
+option(USE_COREML_DELEGATE "Use the CoreML backend through delegate APIs" OFF)
+
 
 if(USE_CCACHE)
   find_program(CCACHE_PROGRAM ccache)
   if(CCACHE_PROGRAM)
-    set(CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
-    set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
-    set(CMAKE_CUDA_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+    set(CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}" CACHE STRING "C compiler launcher")
+    set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}" CACHE STRING "CXX compiler launcher")
+    set(CMAKE_CUDA_COMPILER_LAUNCHER "${CCACHE_PROGRAM}" CACHE STRING "CUDA compiler launcher")
   else()
     message(STATUS "Could not find ccache. Consider installing ccache to speed up compilation.")
   endif()
@@ -421,6 +427,10 @@ set(OP_DEPENDENCY "" CACHE STRING
     "Path to the yaml file that contains the op dependency graph for custom build.")
 set(STATIC_DISPATCH_BACKEND "" CACHE STRING
     "Name of the backend for which static dispatch code is generated, e.g.: CPU.")
+option(
+  TRACING_BASED
+  "Master flag to build Lite Interpreter with tracing build option"
+  OFF)
 
 # This is a fix for a rare build issue on Ubuntu:
 # symbol lookup error: miniconda3/envs/pytorch-py3.7/lib/libmkl_intel_lp64.so: undefined symbol: mkl_blas_dsyrk
@@ -490,9 +500,11 @@ if(MSVC)
   endforeach(flag_var)
 
   foreach(flag_var
+      CMAKE_SHARED_LINKER_FLAGS_RELWITHDEBINFO CMAKE_STATIC_LINKER_FLAGS_RELWITHDEBINFO
+      CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO CMAKE_MODULE_LINKER_FLAGS_RELWITHDEBINFO
       CMAKE_SHARED_LINKER_FLAGS_DEBUG CMAKE_STATIC_LINKER_FLAGS_DEBUG
       CMAKE_EXE_LINKER_FLAGS_DEBUG CMAKE_MODULE_LINKER_FLAGS_DEBUG)
-    # Switch off incremental linking in debug builds
+    # Switch off incremental linking in debug/relwithdebinfo builds
     if(${flag_var} MATCHES "/INCREMENTAL" AND NOT ${flag_var} MATCHES "/INCREMENTAL:NO")
       string(REGEX REPLACE "/INCREMENTAL" "/INCREMENTAL:NO" ${flag_var} "${${flag_var}}")
     endif()
@@ -529,6 +541,14 @@ if(ANDROID OR IOS OR DEFINED ENV{BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN})
     # C10_MOBILE is derived from Android/iOS toolchain macros in
     # c10/macros/Macros.h, so it needs to be explicitly set here.
     string(APPEND CMAKE_CXX_FLAGS " -DC10_MOBILE")
+  endif()
+
+  if(DEFINED ENV{PYTORCH_MOBILE_TRIM_DISPATCH_KEY_SET})
+    # If PYTORCH_MOBILE_TRIM_DISPATCH_KEY_SET is defined (env var),
+    # then define C10_MOBILE_TRIM_DISPATCH_KEYS, which limits the
+    # number of dispatch keys in OperatorEntry::dispatchTable_
+    # to reduce peak memory during library initialization.
+    string(APPEND CMAKE_CXX_FLAGS " -DC10_MOBILE_TRIM_DISPATCH_KEYS")
   endif()
 endif()
 
@@ -688,12 +708,20 @@ if(USE_PYTORCH_METAL)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_PYTORCH_METAL")
 endif()
 
+if(USE_PYTORCH_METAL_EXPORT)
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_PYTORCH_METAL_EXPORT")
+endif()
+
 if(USE_SOURCE_DEBUG_ON_MOBILE)
   string(APPEND CMAKE_CXX_FLAGS " -DSYMBOLICATE_MOBILE_DEBUG_HANDLE")
 endif()
 
 if(USE_LITE_INTERPRETER_PROFILER)
   string(APPEND CMAKE_CXX_FLAGS " -DEDGE_PROFILER_USE_KINETO")
+endif()
+
+if(USE_COREML_DELEGATE)
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_COREML_DELEGATE")
 endif()
 
 # ---[ Allowlist file if allowlist is specified
@@ -720,7 +748,6 @@ if(NOT MSVC)
   string(APPEND CMAKE_CXX_FLAGS " -Wno-unknown-pragmas")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-sign-compare")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-parameter")
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-variable")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-function")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-result")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-local-typedefs")
@@ -1044,6 +1071,9 @@ endif()
 
 # ---[ JNI
 if(BUILD_JNI)
+  if(NOT MSVC)
+    string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-variable")
+  endif()
   set(BUILD_LIBTORCH_WITH_JNI 1)
   set(FBJNI_SKIP_TESTS 1)
   add_subdirectory(android/pytorch_android)

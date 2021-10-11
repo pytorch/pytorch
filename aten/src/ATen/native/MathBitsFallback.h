@@ -96,14 +96,14 @@ struct MathOpFallback {
     c10::optional<bool> is_write;
 
     // Mutable inputs with math bit set to True to be tracked separately
-    std::vector<Tensor> mutable_inputs;
+    std::vector<std::pair<int, Tensor>> mutable_inputs;
     for (const auto i : c10::irange(num_arguments)) {
       // Three possible states:
       // 1. alias_info has no value --> out-of-place operation
       // 2. alias_info does have a value, alias_info->is_write=True --> in-place or out= operation
       // 3. alias_info does have a value, alias_info->is_write=False --> view operation
-      const auto& alias_info = arguments[i].alias_info();
-      if (alias_info.has_value()) {
+      const AliasInfo* alias_info = arguments[i].alias_info();
+      if (alias_info != nullptr) {
         if (is_write.has_value()) {
           TORCH_CHECK(*is_write == alias_info->isWrite(),
             "Unsupported operator for ", op_name, " fallback: ", op.schema().name(),
@@ -113,17 +113,6 @@ struct MathOpFallback {
             "If you got this error on a core op, please report a bug to PyTorch.");
         } else {
           is_write = alias_info->isWrite();
-          auto& ivalue = (*stack)[stack_start + i];
-          //TODO: add a table listing all possible cases and clearly state what works/is allowed
-          if (ivalue.isTensor()) {
-            const auto& mut_arg_tensor = ivalue.toTensor();
-            if (is_bit_set(mut_arg_tensor)) {
-              mutable_inputs.emplace_back(mut_arg_tensor);
-            }
-          } else {
-            TORCH_CHECK(false, op_name, " fallback doesn't currently support mutable TensorLists.",
-              "Please materialize the ", op_name, " tensor(s) before calling ", op.schema().name());
-          }
         }
       }
     }
@@ -136,65 +125,52 @@ struct MathOpFallback {
       return;
     }
 
-    // updates for non-mutable inputs
-    bool check_for_mem_overlap_with_mut_arg = !mutable_inputs.empty();
     for (const auto i : c10::irange(num_arguments)) {
       auto& ivalue = (*stack)[stack_start + i];
       if (!(ivalue.isTensor() || ivalue.isTensorList())) {
         continue;
       }
       const auto& argument = arguments[i];
+      bool mut_arg = false;
       if (argument.alias_info()) {
         // Was already tested by is_write loop above
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(argument.alias_info()->isWrite());
-        continue;
+        mut_arg = true;
       }
       if (ivalue.isTensor()) {
         auto tensor = std::move(ivalue).toTensor();
+        if (!is_bit_set(tensor)) {
+          continue;
+        }
         TORCH_CHECK_NOT_IMPLEMENTED(!tensor.is_meta(), op_name, " fallback does not support meta tensors.");
-        bool resolve_needed = true;
-        if (check_for_mem_overlap_with_mut_arg) {
-          for (const auto& mutable_input : mutable_inputs) {
-            // check if tensor shares memory with one of the mutable tensors whose math bit is set to True.
-            // This check is crucial since we in-place materialize the bit for the mutable tensor(s) which
-            // might be sharing memory with one of the non-mutable tensors that could be reading into the wrong
-            // values if their math bit is not set to True.
-            // no op if tensor and mutable arg share memory and have math bit set to True
-            if (get_overlap_status(tensor, mutable_input) != MemOverlapStatus::NO) {
-              if (!is_bit_set(tensor)) {
-                tensor = tensor.clone();
-              }
-              resolve_needed = false;
-              break;
-            }
-          }
-        }
-        if (resolve_needed) {
-          tensor = resolve_bit(tensor);
-        }
-        (*stack)[stack_start + i] = std::move(tensor);
+        if (mut_arg) {
+          mutable_inputs.emplace_back(std::make_pair(i, tensor));
+        } 
+        (*stack)[stack_start + i] = std::move(tensor.clone());
       } else {
-        TORCH_CHECK(!is_write.has_value(), op_name, " fallback doesn't currently support operators with TensorLists and mutable inputs.",
-              "Please materialize the ", op_name, " tensor(s) before calling ", op.schema().name());
         auto tensors = std::move(ivalue).toTensorList();
         for(const auto j : c10::irange(tensors.size())) {
-          tensors[j] = resolve_bit(tensors[j]);
+          auto tensor = tensors[j];
+          if (!is_bit_set(tensor) {
+            continue;
+          }
+          TORCH_CHECK(!mut_arg, " fallback doesn't currently support mutable TensorLists with ",
+              op_name, " inputs. Please materialize all the ", op_name, " input tensor(s) in the mutable TensorList inputs before calling ", op.schema().name());
+          tensors[j] = at::clone(tensor);
         }
         (*stack)[stack_start + i] = std::move(tensors);
       }
     }
 
-    // updates for mutable inputs
-    for (auto& mutable_input : mutable_inputs) {
-      _set_bit(mutable_input, false);
-      math_op_(mutable_input);
-    }
-
     op.redispatchBoxed(dispatch_keys & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, key), stack);
 
-    for (auto& mutable_input : mutable_inputs) {
-      math_op_(mutable_input);
-      _set_bit(mutable_input, true);
+    for (std::pair<int, Tensor> &index_and_mutable_input : mutable_inputs) {
+      int i = index_and_mutable_input.first;
+      auto& mut_arg = index_and_mutable_input.second;
+      auto& ivalue = (*stack)[stack_start + i];
+      auto tensor = std::move(ivalue).toTensor();
+      mut_arg.copy_(tensor);  
+      (*stack)[stack_start + i] = std::move(mut_arg);
     }
   }
 

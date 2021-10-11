@@ -51,7 +51,7 @@ class TestPackageScript(PackageTestCase):
 
         input = torch.tensor(1)
 
-        self.assertTrue(torch.allclose(scripted(input), scripted_loaded(input)))
+        self.assertEqual(scripted(input), scripted_loaded(input))
 
     def test_different_package_interface(self):
         """Test a case where the interface defined in the package is
@@ -149,7 +149,7 @@ class TestPackageScript(PackageTestCase):
         input = torch.rand(2, 3)
         loaded_script_class = diff_fake.MyScriptClass(input)
         orig_script_class = fake.MyScriptClass(input)
-        self.assertTrue(torch.allclose(loaded_script_class.bar, orig_script_class.foo))
+        self.assertEqual(loaded_script_class.bar, orig_script_class.foo)
 
     def test_save_scriptmodule(self):
         """
@@ -506,7 +506,7 @@ class TestPackageScript(PackageTestCase):
         self.assertTrue(len(file_structure.children[".data"].children) == 1)
 
         input = torch.rand(2, 3, 4)
-        self.assertTrue(torch.allclose(loaded_mod_1(input), mod1(input)))
+        self.assertEqual(loaded_mod_1(input), mod1(input))
 
     def test_load_shared_tensors(self):
         """
@@ -525,6 +525,15 @@ class TestPackageScript(PackageTestCase):
 
         mod1 = ModWithTwoSubmodsAndTensor(shared_tensor, scripted_mod_0, scripted_mod_1)
 
+        self.assertEqual(
+            shared_tensor.storage()._cdata,
+            scripted_mod_0.tensor.storage()._cdata,
+        )
+        self.assertEqual(
+            shared_tensor.storage()._cdata,
+            scripted_mod_1.tensor.storage()._cdata,
+        )
+
         buffer = BytesIO()
         with PackageExporter(buffer) as e:
             e.intern("**")
@@ -534,13 +543,13 @@ class TestPackageScript(PackageTestCase):
         importer = PackageImporter(buffer)
         loaded_mod_1 = importer.load_pickle("res", "mod1.pkl")
 
-        self.assertTrue(
+        self.assertEqual(
             loaded_mod_1.tensor.storage()._cdata,
             loaded_mod_1.sub_mod_0.tensor.storage()._cdata,
         )
-        self.assertTrue(
+        self.assertEqual(
             loaded_mod_1.tensor.storage()._cdata,
-            loaded_mod_1.sub_mod_0.tensor.storage()._cdata,
+            loaded_mod_1.sub_mod_1.tensor.storage()._cdata,
         )
 
         loaded_mod_1.tensor.add_(torch.ones(3, 3))
@@ -591,11 +600,11 @@ class TestPackageScript(PackageTestCase):
         importer = PackageImporter(buffer_1)
         loaded_mod_1 = importer.load_pickle("res", "mod1.pkl")
 
-        self.assertTrue(
+        self.assertEqual(
             loaded_mod_1.tensor.storage()._cdata,
             loaded_mod_1.sub_mod_0.tensor.storage()._cdata,
         )
-        self.assertTrue(
+        self.assertEqual(
             loaded_mod_1.tensor.storage()._cdata,
             loaded_mod_1.sub_mod_1.tensor.storage()._cdata,
         )
@@ -630,7 +639,7 @@ class TestPackageScript(PackageTestCase):
         loaded_mod = importer_0.load_pickle("model", "model.pkl")
 
         input = torch.rand(2, 3)
-        self.assertTrue(torch.allclose(loaded_mod(input), orig_mod(input)))
+        self.assertEqual(loaded_mod(input), orig_mod(input))
 
         scripted_mod = torch.jit.script(loaded_mod)
 
@@ -643,7 +652,7 @@ class TestPackageScript(PackageTestCase):
         importer_1 = PackageImporter(buffer_1)
         loaded_mod_scripted = importer_1.load_pickle("res", "scripted_mod.pkl")
 
-        self.assertTrue(torch.allclose(loaded_mod_scripted(input), orig_mod(input)))
+        self.assertEqual(loaded_mod_scripted(input), orig_mod(input))
 
     def test_mixing_packaged_and_inline_modules(self):
         """
@@ -680,7 +689,7 @@ class TestPackageScript(PackageTestCase):
         loaded_imported = importer.load_pickle("model", "imported.pkl")
 
         input = torch.rand(2, 3)
-        self.assertTrue(torch.allclose(loaded_imported(input), imported_mod(input)))
+        self.assertEqual(loaded_imported(input), imported_mod(input))
         self.assertEqual(loaded_inline("input"), inline_mod("input"))
 
     @skipIfNoTorchVision
@@ -721,8 +730,8 @@ class TestPackageScript(PackageTestCase):
         loaded_imported = importer.load_pickle("model", "imported.pkl")
 
         input = torch.rand(2, 3)
-        self.assertTrue(torch.allclose(loaded_imported(input), imported_mod(input)))
-        self.assertTrue(torch.allclose(loaded_inline(input), inline_mod(input)))
+        self.assertEqual(loaded_imported(input), imported_mod(input))
+        self.assertEqual(loaded_inline(input), inline_mod(input))
 
     def test_tensor_sharing_pickle(self):
         """Test that saving a ScriptModule and a separately saving a tensor

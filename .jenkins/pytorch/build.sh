@@ -12,7 +12,7 @@ COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-if [[ "$BUILD_ENVIRONMENT" == *-linux-xenial-py3-clang7-asan* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-clang7-asan* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" "$@"
 fi
 
@@ -49,17 +49,12 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   nvcc --version
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
-  # enable build option in CMake
-  export USE_CPP_CODE_COVERAGE=ON
-fi
-
 if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   # enable split torch_cuda build option in CMake
   export BUILD_SPLIT_CUDA=ON
 fi
 
-if [[ ${BUILD_ENVIRONMENT} == *"pure_torch"* ]]; then
+if [[ ${BUILD_ENVIRONMENT} == *"pure_torch"* || ${BUILD_ENVIRONMENT} == *"puretorch"* ]]; then
   export BUILD_CAFFE2=OFF
 fi
 
@@ -88,6 +83,8 @@ if ! which conda; then
   else
     export USE_MKLDNN=0
   fi
+else
+  export CMAKE_PREFIX_PATH=/opt/conda
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
@@ -134,7 +131,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   exec ./scripts/build_android.sh "${build_args[@]}" "$@"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" != *android* && "$BUILD_ENVIRONMENT" == *vulkan-linux* ]]; then
+if [[ "$BUILD_ENVIRONMENT" != *android* && "$BUILD_ENVIRONMENT" == *vulkan* ]]; then
   export USE_VULKAN=1
   # shellcheck disable=SC1091
   source /var/lib/jenkins/vulkansdk/setup-env.sh
@@ -222,7 +219,11 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
 
   get_bazel
 
+  # first build the whole torch for CPU-only
   tools/bazel build --config=no-tty :torch
+  # then build selected set of targets with GPU-support.
+  # TODO: eventually this should converge to building the whole :torch with GPU-support
+  tools/bazel build --config=no-tty --config=gpu :c10
 else
   # check that setup.py would fail with bad arguments
   echo "The next three invocations are expected to fail with invalid command error messages."
@@ -249,6 +250,8 @@ else
     if which sccache > /dev/null; then
       echo 'PyTorch Build Statistics'
       sccache --show-stats
+
+      sccache --show-stats | python -m tools.stats.upload_sccache_stats
     fi
 
     assert_git_not_dirty
