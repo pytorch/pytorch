@@ -115,11 +115,11 @@ py_binary(
     ],
 )
 
+aten_generation_srcs = ["aten/src/ATen/native/native_functions.yaml"] + glob(["aten/src/ATen/templates/**"])
+
 genrule(
     name = "generated_cpp",
-    srcs = [
-        "aten/src/ATen/native/native_functions.yaml",
-    ] + glob(["aten/src/ATen/templates/**"]),
+    srcs = aten_generation_srcs,
     outs = [
         "aten/src/ATen/Declarations.yaml",
         "aten/src/ATen/RegisterBackendSelect.cpp",
@@ -134,8 +134,6 @@ genrule(
         "aten/src/ATen/RegisterSchema.cpp",
         "aten/src/ATen/CPUFunctions.h",
         "aten/src/ATen/CPUFunctions_inl.h",
-        "aten/src/ATen/CUDAFunctions.h",
-        "aten/src/ATen/CUDAFunctions_inl.h",
         "aten/src/ATen/CompositeExplicitAutogradFunctions.h",
         "aten/src/ATen/CompositeExplicitAutogradFunctions_inl.h",
         "aten/src/ATen/CompositeImplicitAutogradFunctions.h",
@@ -153,11 +151,29 @@ genrule(
         "aten/src/ATen/MetaFunctions.h",
         "aten/src/ATen/MetaFunctions_inl.h",
         "aten/src/ATen/NativeMetaFunctions.h",
+        "aten/src/ATen/RegistrationDeclarations.h",
         "aten/src/ATen/core/TensorBody.h",
         "aten/src/ATen/core/TensorMethods.cpp",
         "aten/src/ATen/core/ATenOpList.cpp",
     ],
     cmd = "$(location :gen) --source-path `dirname $(location aten/src/ATen/native/native_functions.yaml)`/.. --install_dir `dirname $(location aten/src/ATen/Declarations.yaml)`",
+    tools = [":gen"],
+)
+
+# this hack is due to https://github.com/bazelbuild/bazel/issues/281
+# since `outs` cannot be configured with if_cuda, we rerun the same command and declare cuda related files separatedly here.
+genrule(
+    name = "generated_cuda_cpp",
+    srcs = aten_generation_srcs,
+    outs = [
+        "aten/src/ATen/CUDAFunctions.h",
+        "aten/src/ATen/CUDAFunctions_inl.h",
+        "aten/src/ATen/RegisterCUDA.cpp",
+        "aten/src/ATen/RegisterQuantizedCUDA.cpp",
+        "aten/src/ATen/RegisterSparseCUDA.cpp",
+        "aten/src/ATen/RegisterSparseCsrCUDA.cpp",
+    ],
+    cmd = "$(location :gen) --source-path `dirname $(location aten/src/ATen/native/native_functions.yaml)`/.. --install_dir `dirname $(location aten/src/ATen/RegisterCUDA.cpp)`",
     tools = [":gen"],
 )
 
@@ -266,11 +282,6 @@ filegroup(
             "aten/src/ATen/detail/*.cpp",
             "aten/src/ATen/cpu/*.cpp",
         ],
-        exclude = [
-            "aten/src/ATen/SparseCUDAType.cpp",
-            "aten/src/ATen/QuantizedCUDAType.cpp",
-            "aten/src/ATen/CUDAType.cpp",
-        ],
     ),
 )
 
@@ -345,150 +356,41 @@ filegroup(
 
 filegroup(
     name = "th_srcs",
-    srcs = [
-        "aten/src/TH/THGeneral.cpp",
-        "aten/src/TH/THStorageFunctions.cpp",
-        "aten/src/TH/THTensor.cpp",
-    ],
+    srcs = glob(["aten/src/TH/*.cpp"]),
 )
 
 filegroup(
     name = "aten_cuda_cpp_srcs",
-    srcs = [
-        "aten/src/ATen/cuda/CUDABlas.cpp",
-        "aten/src/ATen/cuda/CUDAContext.cpp",
-        "aten/src/ATen/cuda/CUDAGeneratorImpl.cpp",
-        "aten/src/ATen/cuda/CUDAGraph.cpp",
-        "aten/src/ATen/cuda/CUDASolver.cpp",
-        "aten/src/ATen/cuda/CUDASparseDescriptors.cpp",
-        "aten/src/ATen/cuda/CachingHostAllocator.cpp",
-        "aten/src/ATen/cuda/CuSparseHandlePool.cpp",
-        "aten/src/ATen/cuda/CublasHandlePool.cpp",
-        "aten/src/ATen/cuda/CusolverDnHandlePool.cpp",
-        "aten/src/ATen/cuda/PinnedMemoryAllocator.cpp",
-        "aten/src/ATen/cuda/detail/CUDAHooks.cpp",
-        "aten/src/ATen/cuda/detail/LazyNVRTC.cpp",
-        "aten/src/ATen/cudnn/AutocastRNN.cpp",
-        "aten/src/ATen/cudnn/Descriptors.cpp",
-        "aten/src/ATen/cudnn/Handle.cpp",
-        "aten/src/ATen/cudnn/Types.cpp",
-        "aten/src/ATen/native/cuda/Blas.cpp",
-        "aten/src/ATen/native/cuda/Resize.cpp",
-        "aten/src/ATen/native/cuda/SpectralOps.cpp",
-        "aten/src/ATen/native/cuda/TensorShapeCUDA.cpp",
-        "aten/src/ATen/native/cudnn/AffineGridGenerator.cpp",
-        "aten/src/ATen/native/cudnn/BatchNorm.cpp",
-        "aten/src/ATen/native/cudnn/ConvShared.cpp",
-        "aten/src/ATen/native/cudnn/Conv_v7.cpp",
-        "aten/src/ATen/native/cudnn/Conv_v8.cpp",
-        "aten/src/ATen/native/cudnn/GridSampler.cpp",
-        "aten/src/ATen/native/cudnn/LossCTC.cpp",
-        "aten/src/ATen/native/cudnn/RNN.cpp",
-        "aten/src/ATen/native/miopen/BatchNorm_miopen.cpp",
-        "aten/src/ATen/native/miopen/Conv_miopen.cpp",
-        "aten/src/ATen/native/miopen/RNN_miopen.cpp",
-        "aten/src/ATen/native/sparse/cuda/SparseBlasImpl.cpp",
-        "aten/src/ATen/native/sparse/cuda/SparseBlasLegacy.cpp",
-        "aten/src/ATen/native/sparse/cuda/SparseCUDABlas.cpp",
-        "aten/src/ATen/native/sparse/cuda/SparseCUDATensor.cpp",
-        "aten/src/THC/THCGeneral.cpp",
-        "aten/src/THC/THCStorageCopy.cpp",
-        "aten/src/THC/THCTensor.cpp",
-    ],
+    srcs = glob(
+        [
+            "aten/src/ATen/cuda/*.cpp",
+            "aten/src/ATen/cuda/detail/*.cpp",
+            "aten/src/ATen/cudnn/*.cpp",
+            "aten/src/ATen/native/cuda/*.cpp",
+            "aten/src/ATen/native/cudnn/*.cpp",
+            "aten/src/ATen/native/miopen/*.cpp",
+            "aten/src/ATen/native/sparse/cuda/*.cpp",
+            "aten/src/THC/*.cpp",
+        ],
+        exclude = [
+            "aten/src/THC/THCStorage.cpp",  # included in aten/src/THC/THCGeneral.cpp
+        ],
+    ),
 )
 
 filegroup(
     name = "thc_cu_srcs",
-    srcs = [
-        "aten/src/THC/THCSleep.cu",
-        "aten/src/THC/THCStorage.cu",
-        "aten/src/THC/THCStorageCopy.cu",
-    ],
+    srcs = glob(["aten/src/THC/*.cu"]),
 )
 
 filegroup(
     name = "aten_cu_srcs",
-    srcs = [
-        "aten/src/ATen/cuda/detail/IndexUtils.cu",
-        "aten/src/ATen/native/cuda/Activation.cu",
-        "aten/src/ATen/native/cuda/AdaptiveAveragePooling.cu",
-        "aten/src/ATen/native/cuda/AdaptiveAveragePooling3d.cu",
-        "aten/src/ATen/native/cuda/AdaptiveMaxPooling2d.cu",
-        "aten/src/ATen/native/cuda/AdaptiveMaxPooling3d.cu",
-        "aten/src/ATen/native/cuda/AveragePool2d.cu",
-        "aten/src/ATen/native/cuda/AveragePool3d.cu",
-        "aten/src/ATen/native/cuda/BinaryMiscOpsKernels.cu",
-        "aten/src/ATen/native/cuda/CUDAScalar.cu",
-        "aten/src/ATen/native/cuda/Col2Im.cu",
-        "aten/src/ATen/native/cuda/Copy.cu",
-        "aten/src/ATen/native/cuda/CrossKernel.cu",
-        "aten/src/ATen/native/cuda/DilatedMaxPool2d.cu",
-        "aten/src/ATen/native/cuda/DilatedMaxPool3d.cu",
-        "aten/src/ATen/native/cuda/DistanceKernel.cu",
-        "aten/src/ATen/native/cuda/Distributions.cu",
-        "aten/src/ATen/native/cuda/Dropout.cu",
-        "aten/src/ATen/native/cuda/Embedding.cu",
-        "aten/src/ATen/native/cuda/EmbeddingBackwardKernel.cu",
-        "aten/src/ATen/native/cuda/EmbeddingBag.cu",
-        "aten/src/ATen/native/cuda/FillKernel.cu",
-        "aten/src/ATen/native/cuda/FractionalMaxPool2d.cu",
-        "aten/src/ATen/native/cuda/FractionalMaxPool3d.cu",
-        "aten/src/ATen/native/cuda/GridSampler.cu",
-        "aten/src/ATen/native/cuda/Im2Col.cu",
-        "aten/src/ATen/native/cuda/IndexKernel.cu",
-        "aten/src/ATen/native/cuda/Indexing.cu",
-        "aten/src/ATen/native/cuda/LegacyThrustHelpers.cu",
-        "aten/src/ATen/native/cuda/Lerp.cu",
-        "aten/src/ATen/native/cuda/LinearAlgebra.cu",
-        "aten/src/ATen/native/cuda/Loss.cu",
-        "aten/src/ATen/native/cuda/LossCTC.cu",
-        "aten/src/ATen/native/cuda/MaxUnpooling.cu",
-        "aten/src/ATen/native/cuda/MultiLabelMarginCriterion.cu",
-        "aten/src/ATen/native/cuda/MultinomialKernel.cu",
-        "aten/src/ATen/native/cuda/NLLLoss2d.cu",
-        "aten/src/ATen/native/cuda/NaiveConvolutionTranspose2d.cu",
-        "aten/src/ATen/native/cuda/NaiveConvolutionTranspose3d.cu",
-        "aten/src/ATen/native/cuda/NaiveDilatedConvolution.cu",
-        "aten/src/ATen/native/cuda/Normalization.cu",
-        "aten/src/ATen/native/cuda/PointwiseOpsKernel.cu",
-        "aten/src/ATen/native/cuda/PowKernel.cu",
-        "aten/src/ATen/native/cuda/RNN.cu",
-        "aten/src/ATen/native/cuda/RangeFactories.cu",
-        "aten/src/ATen/native/cuda/Reduce.cu",
-        "aten/src/ATen/native/cuda/ReflectionPad.cu",
-        "aten/src/ATen/native/cuda/Repeat.cu",
-        "aten/src/ATen/native/cuda/ReplicationPadding.cu",
-        "aten/src/ATen/native/cuda/SegmentReduce.cu",
-        "aten/src/ATen/native/cuda/SoftMax.cu",
-        "aten/src/ATen/native/cuda/Sort.cu",
-        "aten/src/ATen/native/cuda/SortImpl.cu",
-        "aten/src/ATen/native/cuda/SparseMM.cu",
-        "aten/src/ATen/native/cuda/SpectralOps.cu",
-        "aten/src/ATen/native/cuda/SummaryOps.cu",
-        "aten/src/ATen/native/cuda/TensorCompare.cu",
-        "aten/src/ATen/native/cuda/TensorFactories.cu",
-        "aten/src/ATen/native/cuda/TensorTopK.cu",
-        "aten/src/ATen/native/cuda/TensorTransformations.cu",
-        "aten/src/ATen/native/cuda/TriangularOps.cu",
-        "aten/src/ATen/native/cuda/UnaryFractionKernels.cu",
-        "aten/src/ATen/native/cuda/UnaryOpsKernel.cu",
-        "aten/src/ATen/native/cuda/UnarySpecialOpsKernel.cu",
-        "aten/src/ATen/native/cuda/Unique.cu",
-        "aten/src/ATen/native/cuda/UniqueCub.cu",
-        "aten/src/ATen/native/cuda/UpSampleBicubic2d.cu",
-        "aten/src/ATen/native/cuda/UpSampleBilinear2d.cu",
-        "aten/src/ATen/native/cuda/UpSampleLinear1d.cu",
-        "aten/src/ATen/native/cuda/UpSampleNearest1d.cu",
-        "aten/src/ATen/native/cuda/UpSampleNearest2d.cu",
-        "aten/src/ATen/native/cuda/UpSampleNearest3d.cu",
-        "aten/src/ATen/native/cuda/UpSampleTrilinear3d.cu",
-        "aten/src/ATen/native/cuda/WeightNorm.cu",
-        "aten/src/ATen/native/cuda/layer_norm_kernel.cu",
-        "aten/src/ATen/native/quantized/cuda/fake_quantize_core.cu",
-        "aten/src/ATen/native/sparse/cuda/SparseCUDATensor.cu",
-        "aten/src/ATen/native/sparse/cuda/SparseCUDATensorMath.cu",
-        "aten/src/ATen/native/sparse/cuda/SparseMatMul.cu",
-    ],
+    srcs = glob([
+        "aten/src/ATen/cuda/detail/*.cu",
+        "aten/src/ATen/native/cuda/*.cu",
+        "aten/src/ATen/native/quantized/cuda/*.cu",
+        "aten/src/ATen/native/sparse/cuda/*.cu",
+    ]),
 )
 
 header_template_rule(
@@ -562,8 +464,9 @@ cc_library(
             "aten/src/THC/generic/*.cu",
         ],
     ) + [
-        ":generated_cpp",
         ":aten_src_ATen_config",
+        ":generated_cpp",
+        ":generated_cuda_cpp",
     ],
     includes = [
         "aten/src",
@@ -672,7 +575,10 @@ cc_binary(
 
 cc_library(
     name = "aten_cuda_cpp",
-    srcs = [":aten_cuda_cpp_srcs"],
+    srcs = [
+        ":aten_cuda_cpp_srcs",
+        ":generated_cuda_cpp",
+    ],
     hdrs = [":aten_src_ATen_cuda_config"],
     copts = ATEN_COPTS,
     visibility = ["//visibility:public"],

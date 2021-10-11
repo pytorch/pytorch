@@ -399,7 +399,7 @@ void multinomial_with_replacement_kernel_impl(
       renormRows(normDist);
 
       // Prefix sum along rows
-      at::cumsum_out(prefixSum, normDist, 1);
+      at::cuda::cumsum_out(prefixSum, normDist, 1);
 
       PhiloxCudaState rng_engine_inputs;
 
