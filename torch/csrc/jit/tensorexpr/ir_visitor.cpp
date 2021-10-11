@@ -177,6 +177,11 @@ void IRVisitor::visit(FreePtr v) {
   v->buffer_var()->accept(this);
 }
 
+void IRVisitor::visit(BufMapPtr v) {
+  v->src_buf()->accept(this);
+  v->dest_buf()->accept(this);
+}
+
 void IRVisitor::visit(LetPtr v) {
   v->var()->accept(this);
   v->value()->accept(this);

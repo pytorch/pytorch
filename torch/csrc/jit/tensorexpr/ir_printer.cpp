@@ -449,6 +449,11 @@ void IRPrinter::visit(FreePtr v) {
   os() << "Free(" << *v->buffer_var() << ");";
 }
 
+void IRPrinter::visit(BufMapPtr v) {
+  os() << "Map(" << *v->src_buf()->base_handle() << ","
+       << *v->dest_buf()->base_handle() << ");";
+}
+
 void IRPrinter::visit(LetPtr v) {
   os() << dtypeToCppString(v->var()->dtype()) << " " << *v->var();
   os() << " = " << *v->value();
