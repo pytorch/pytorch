@@ -167,9 +167,9 @@ std::tuple<Tensor&, Tensor&> log_sigmoid_forward_out_cuda(const Tensor& input, T
     gpu_kernel(iter,
         [] GPU_LAMBDA (scalar_t in_) -> scalar_t {
           const acc_t in = in_;
-          const auto max = std::max(acc_t(0), -in);
-          const auto z = std::exp(-max) + std::exp(-in - max);
-          return -(max + std::log(z));
+          const auto min = std::min(acc_t(0), in);
+          const auto z = std::exp(-std::abs(in));
+          return min - std::log1p(z);
         });
   });
   return std::forward_as_tuple(result, buffer);
@@ -194,13 +194,12 @@ void log_sigmoid_backward_kernel(TensorIterator& iter) {
         [] GPU_LAMBDA (scalar_t in_, scalar_t grad_out_) -> scalar_t {
           const acc_t in = in_;
           const acc_t grad_out = grad_out_;
-          const auto max = std::max(acc_t(0), -in);
-          const auto z = std::exp(-max) + std::exp(-in - max);
 
           auto in_negative = in < acc_t(0);
           auto max_deriv = in_negative ? acc_t(1) : acc_t(0);
           auto sign = in_negative ? acc_t(1) : -acc_t(1);
-          return grad_out * (max_deriv - sign * (acc_t(1) - acc_t(1) / z));
+          const auto z = std::exp(-std::abs(in));
+          return grad_out * (max_deriv - sign * (z / (acc_t(1) + z)));
         });
   });
 }
