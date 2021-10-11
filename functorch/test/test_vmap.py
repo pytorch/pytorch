@@ -2978,7 +2978,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('gradient'),
         xfail('hsplit'),
         xfail('nn.functional.pad', 'circular'),
-        xfail('ravel'),
         xfail('resize_as_'),
         xfail('resolve_conj'),
         xfail('resolve_neg'),

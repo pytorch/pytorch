@@ -162,7 +162,8 @@ def get_top_ops_not_covered_by_opinfo(torch_threshold=0, nn_fn_threshold=0):
         'get_rng_state', 'get_default_dtype', 'initial_seed',
         'get_num_threads', 'quantize_per_tensor', 'logspace',
         'hann_window', 'is_tensor', 'as_tensor', 'randint', 'full', 'eye',
-        'equal',
+        'equal', 'enable_grad', 'seed', 'is_storage', 'hamming_window',
+        'is_floating_point', 'nn.functional.torch',
     })
     torch_ops = [op[0] for op in top_ops.top_torch[:torch_threshold]]
     nn_fn_ops = [op[0] for op in top_ops.top_nn_functional[:nn_fn_threshold]]
@@ -265,10 +266,10 @@ method_only_ops = get_method_only_ops_we_care_about()
 # for op in method_only_ops:
 #     print(f'    {op},')
 
-top_ops_not_covered_by_opinfo = get_top_ops_not_covered_by_opinfo(100, 25)
-for op in top_ops_not_covered_by_opinfo:
-    print(op)
-
-# top_ops_not_covered_by_opinfo = get_top_ops_not_covered_by_opinfo(200, 50)
+# top_ops_not_covered_by_opinfo = get_top_ops_not_covered_by_opinfo(100, 25)
 # for op in top_ops_not_covered_by_opinfo:
 #     print(op)
+
+top_ops_not_covered_by_opinfo = get_top_ops_not_covered_by_opinfo(200, 40)
+for op in top_ops_not_covered_by_opinfo:
+    print(op)
