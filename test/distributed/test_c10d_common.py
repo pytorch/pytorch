@@ -4,6 +4,7 @@ import sys
 import tempfile
 import threading
 import time
+import unittest
 from datetime import timedelta
 from itertools import product
 from sys import platform
@@ -761,6 +762,10 @@ class PythonProcessGroupTest(MultiProcessTestCase):
     def create_dummy(store, rank, size, timeout):
         return DummyProcessGroup(rank, size)
 
+    @unittest.skipIf(
+        common.IS_MACOS,
+        "Python c10d extension is not yet supported on MacOS"
+    )
     def test_collectives(self):
         dist.Backend.register_backend("dummy", PythonProcessGroupTest.create_dummy)
 
@@ -794,6 +799,10 @@ class PythonProcessGroupTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
+    @unittest.skipIf(
+        common.IS_MACOS,
+        "Python c10d extension is not yet supported on MacOS"
+    )
     def test_send_recv(self):
         dist.Backend.register_backend("dummy", PythonProcessGroupTest.create_dummy)
 
