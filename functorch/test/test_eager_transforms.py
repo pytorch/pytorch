@@ -200,6 +200,16 @@ class TestGradTransform(TestCase):
         result, vjp_fn = vjp(f, torch.tensor(1.))
         vjp_fn(result)
 
+    def test_conj_bit(self):
+        x = torch.tensor(1+1j)
+        def foo(x):
+            assert not x.is_conj()
+            y = x.conj()
+            assert y.is_conj()
+            return y
+        res = grad(foo)(x)
+        self.assertEqual(res, torch.ones_like(res))
+
     def test_composed_with_autograd(self, device):
         x = torch.randn([], requires_grad=True, device=device)
 
