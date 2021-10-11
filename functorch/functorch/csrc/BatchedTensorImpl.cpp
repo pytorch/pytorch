@@ -24,6 +24,8 @@ BatchedTensorImpl::BatchedTensorImpl(Tensor value, BatchDims bdims)
   , value_(std::move(value))
   , bdims_(std::move(bdims))
 {
+  // TODO: I don't think this ctor gets used.
+  TORCH_INTERNAL_ASSERT(false);
   TORCH_INTERNAL_ASSERT(value_.defined());
   set_storage_access_should_throw();
   set_has_contiguity_policy(HasContiguityPolicy::CustomBehavior);
@@ -147,10 +149,7 @@ const char* BatchedTensorImpl::tensorimpl_type_name() const {
 }
 
 Tensor makeBatched(const Tensor& tensor, BatchDims bdims) {
-  DispatchKeySet key_set;
-  if (tensor.is_cuda()) {
-    key_set = key_set.add(DispatchKey::CUDA);
-  }
+  DispatchKeySet key_set = getKeysToPropagateToWrapper(tensor);
   auto* batched = maybeGetBatchedImpl(tensor);
   if (batched) {
     auto requested_level = bdims.back().level();
