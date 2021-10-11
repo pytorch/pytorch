@@ -536,11 +536,16 @@ class {module_name}(torch.nn.Module):
                 # For a `call_module` node, also register all recursive submodules
                 # as used
                 if node.op == "call_module":
-                    submod = self.get_submodule(node.target)
+                    try:
+                        submod = self.get_submodule(node.target)
 
-                    for submod_name, _ in submod.named_modules():
-                        if submod_name != '':
-                            used.append('.'.join([node.target, submod_name]))
+                        for submod_name, _ in submod.named_modules():
+                            if submod_name != '':
+                                used.append('.'.join([node.target, submod_name]))
+                    except AttributeError:
+                        # Node referenced nonexistent submodule, don't need to
+                        # worry about GCing anything
+                        pass
 
         to_delete = [name for name, _ in self.named_modules()
                      if name not in used]
