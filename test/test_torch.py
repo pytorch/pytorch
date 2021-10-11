@@ -7841,20 +7841,6 @@ else:
         # Reset the original dtype
         torch.set_default_dtype(default_dtype)
 
-    @onlyOnCPUAndCUDA
-    def test_where_scalar_overflow(self, device):
-        x = make_tensor((2, 2), device=device, dtype=torch.get_default_dtype())
-        with self.assertRaises(RuntimeError):
-            torch.where(x > 1, x, 1e50)
-
-        x = make_tensor((2, 2), device=device, dtype=torch.int32)
-        with self.assertRaises(RuntimeError):
-            torch.where(x > 1, x, int(1e50))
-
-        x = make_tensor((2, 2), device=device, dtype=torch.complex64)
-        with self.assertRaises(RuntimeError):
-            torch.where(x > 1, x, 1e50 + 1j)
-
     def test_hook_remove(self, device):
         # Reference: https://github.com/pytorch/pytorch/issues/58354
         def _test_helper(remove_hook):
