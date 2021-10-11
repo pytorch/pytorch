@@ -50,7 +50,7 @@ Today, PyTorch supports the following backends for running quantized operators e
 * x86 CPUs with AVX2 support or higher (without AVX2 some operations have
   inefficient implementations), via `fbgemm` (`<https://github.com/pytorch/FBGEMM>`_).
 * ARM CPUs (typically found in mobile/embedded devices), via
-  `qnnpack` (`<https://github.com/pytorch/QNNPACK>`_).
+  `qnnpack` (`<https://github.com/pytorch/pytorch/tree/master/aten/src/ATen/native/quantized/cpu/qnnpack>`_).
 
 The corresponding implementation is chosen automatically based on the PyTorch build mode, though users
 have the option to override this by setting `torch.backends.quantization.engine` to `fbgemm` or `qnnpack`.
