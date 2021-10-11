@@ -3074,7 +3074,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('ormqr'),
         xfail('put'),
         xfail('quantile'),
-        xfail('ravel'),
         xfail('renorm'),
         xfail('repeat_interleave'),
         xfail('resize_as_'),
