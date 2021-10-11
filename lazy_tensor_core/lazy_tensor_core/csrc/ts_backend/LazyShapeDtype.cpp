@@ -16,41 +16,41 @@ namespace torch_lazy_tensors{
 namespace ir {
 namespace ops {
 
-std::vector<int64_t> compute_shape_dropout(const at::Tensor& input, double p, bool train) {
-  return input.sizes().vec();
+std::vector<std::vector<int64_t>> compute_shape_dropout(const at::Tensor& input, double p, bool train) {
+  return {input.sizes().vec()};
 }
 
-c10::ScalarType compute_dtype_dropout(const at::Tensor& input, double p, bool train) {
-  return input.scalar_type();
+std::vector<c10::ScalarType> compute_dtype_dropout(const at::Tensor& input, double p, bool train) {
+  return {input.scalar_type()};
 }
 
-std::vector<int64_t> compute_shape_layer_norm(const at::Tensor& input, at::IntArrayRef normalized_shape,
+std::vector<std::vector<int64_t>> compute_shape_layer_norm(const at::Tensor& input, at::IntArrayRef normalized_shape,
     const c10::optional<at::Tensor>& weight, const c10::optional<at::Tensor>& bias, double eps, bool cudnn_enable) {
-  return input.sizes().vec();
+  return {input.sizes().vec()};
 }
 
-c10::ScalarType compute_dtype_layer_norm(const at::Tensor& input, at::IntArrayRef normalized_shape,
+std::vector<c10::ScalarType> compute_dtype_layer_norm(const at::Tensor& input, at::IntArrayRef normalized_shape,
     const c10::optional<at::Tensor>& weight, const c10::optional<at::Tensor>& bias, double eps, bool cudnn_enable) {
-  return input.scalar_type();
+  return {input.scalar_type()};
 }
 
-std::vector<int64_t> compute_shape_mean(const at::Tensor& self, c10::optional<at::ScalarType> dtype) {
-  return std::vector<int64_t>({});
+std::vector<std::vector<int64_t>> compute_shape_mean(const at::Tensor& self, c10::optional<at::ScalarType> dtype) {
+  return {{}};
 }
 
-c10::ScalarType compute_dtype_mean(const at::Tensor& self, c10::optional<at::ScalarType> dtype) {
+std::vector<c10::ScalarType> compute_dtype_mean(const at::Tensor& self, c10::optional<at::ScalarType> dtype) {
   if (dtype.has_value()) {
-    return dtype.value();
+    return {dtype.value()};
   }
-  return self.scalar_type();
+  return {self.scalar_type()};
 }
 
-std::vector<int64_t> compute_shape_mv(const at::Tensor& self, const at::Tensor& vec) {
-  return std::vector<int64_t>({self.size(0)});
+std::vector<std::vector<int64_t>> compute_shape_mv(const at::Tensor& self, const at::Tensor& vec) {
+  return {{self.size(0)}};
 }
 
-c10::ScalarType compute_dtype_mv(const at::Tensor& self, const at::Tensor& vec) {
-  return self.scalar_type();
+std::vector<c10::ScalarType> compute_dtype_mv(const at::Tensor& self, const at::Tensor& vec) {
+  return {self.scalar_type()};
 }
 
 } // namespace ops

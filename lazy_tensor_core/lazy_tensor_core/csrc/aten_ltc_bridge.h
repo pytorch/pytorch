@@ -102,5 +102,15 @@ std::vector<at::Tensor> CreateLtcTensors(const std::vector<at::Tensor>& tensors,
 // Returns true if the tensor is a view created via interoperability.
 bool IsInteropView(const at::Tensor& t);
 
+template <size_t... Indices>
+auto TupleAtenFromLtcTensorsImpl(const std::vector<LazyTensor>& tensors, std::index_sequence<Indices...>) {
+    return std::make_tuple(AtenFromLtcTensor(tensors[Indices])...);
+}
+
+template <size_t N>
+auto TupleAtenFromLtcTensors(const std::vector<LazyTensor>& tensors) {
+    return TupleAtenFromLtcTensorsImpl(tensors, std::make_index_sequence<N>{});
+}
+
 }  // namespace bridge
 }  // namespace torch_lazy_tensors

@@ -152,10 +152,11 @@ Node::Node(OpKind op, OpList operands, lazy_tensors::Shape shape,
 
 Node::Node(OpKind op, OpList operands, lazy_tensors::Shape shape,
            size_t num_outputs, lazy_tensors::hash_t hash_seed,
-           at::ScalarType at_dtype, const std::vector<int64_t>& at_shape)
+           const std::vector<at::ScalarType>& at_dtypes, const std::vector<std::vector<int64_t>>& at_shapes)
     : Node(std::move(op), operands, shape, num_outputs, hash_seed) {
-  at_dtype_ = at_dtype;
-  at_shape_ = at_shape;
+  LTC_CHECK_EQ(at_dtypes.size(), at_shapes.size());
+  at_dtypes_ = at_dtypes;
+  at_shapes_ = at_shapes;
 }
 
 Node::Node(OpKind op, OpList operands,
