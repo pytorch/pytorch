@@ -307,7 +307,7 @@ Tensor _s_where_dispatch(
     const Tensor& other) {
   TORCH_CHECK(
       condition.device() == self.device() && self.device() == other.device(),
-      "Expected condition, x and y to be on the same device, but condition is on ",
+      "where: Expected condition, x and y to be on the same device, but condition is on ",
       condition.device(),
       " and x and y are on ",
       self.device(),
@@ -344,7 +344,7 @@ Tensor get_promoted_where_tensor(const Tensor& t, ScalarType common_dtype) {
 } // namespace
 
 Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(self.dtype() == other.dtype(), "expected scalar type ", self.dtype(), " but found ", other.dtype());
+  TORCH_CHECK(self.dtype() == other.dtype(), "where: expected scalar type ", self.dtype(), " but found ", other.dtype());
   return _s_where_dispatch(condition, self, other);
 }
 
