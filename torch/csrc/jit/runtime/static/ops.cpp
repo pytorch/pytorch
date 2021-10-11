@@ -1024,7 +1024,7 @@ REGISTER_OPERATOR_FUNCTOR(
 
         if (p_node->Output(0).isNone()) {
           // handle dtype, layout, and device
-          at::ScalarType dtype;
+          c10::optional<at::ScalarType> dtype;
           c10::Layout layout = self.layout();
           c10::Device device = self.device();
           if (p_node->Input(1).isTensor()) {
@@ -1033,7 +1033,7 @@ REGISTER_OPERATOR_FUNCTOR(
             layout = other.layout();
             device = other.device();
           } else {
-            dtype = p_node->Input(1).toScalarType();
+            dtype = p_node->Input(1).toOptional<at::ScalarType>();
           }
 
           if (memory_format == c10::MemoryFormat::Preserve) {
