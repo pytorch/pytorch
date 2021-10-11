@@ -1561,8 +1561,10 @@ class IrParser {
             if (node->inputs()[1]->node()->kind() != prim::Constant) {
               return false;
             }
+            // TODO: support dynamic input by profiling it
             if (!node->inputs()[2]->type()->isSubtypeOf(
-                    static_cast<c10::TypePtr>(NoneType::get()))) {
+                    static_cast<c10::TypePtr>(NoneType::get())) &&
+                node->inputs()[2]->node()->kind() != prim::Constant) {
               return false;
             }
             return true;
@@ -2666,6 +2668,20 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
   if (node->matches(to_dtype_schema)) {
     switch (offset) {
       case 1:
+        profileInt(pr, node, offset);
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  static auto softmax_backward_data_schema =
+      getOperatorForLiteral(
+          "aten::_softmax_backward_data(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype) -> Tensor")
+          ->schema();
+  if (node->matches(softmax_backward_data_schema)) {
+    switch (offset) {
+      case 3:
         profileInt(pr, node, offset);
         return true;
       default:
