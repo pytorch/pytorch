@@ -45,11 +45,8 @@ ${lowering_definitions}
 TSOpVector LowerToTSCodegen(std::shared_ptr<torch::jit::GraphFunction> function,
                             ts_backend::TSLoweringContext* loctx,
                             const ir::Node* node) {
-    switch (node->op().op){
     ${lowering_dispatches}
-    default:
-        return {};
-    }
+    return {};
 }
 
 } // namespace compiler

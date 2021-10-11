@@ -767,21 +767,6 @@ void LazyTensor::logical_and_out(LazyTensor& out, const LazyTensor& input,
   out.SetIrValue(ir::ops::LogicalAnd(input.GetIrValue(), other.GetIrValue()));
 }
 
-LazyTensor LazyTensor::bitwise_and(const LazyTensor& input,
-                                   const at::Scalar& other) {
-  CheckIsIntegralOrPred(input.shape(), "__and__");
-  ir::Value constant =
-      GetIrValueForScalar(other, input.shape(), input.GetDevice());
-  return input.CreateFrom(ir::ops::BitwiseAnd(input.GetIrValue(), constant));
-}
-
-LazyTensor LazyTensor::bitwise_and(const LazyTensor& input,
-                                   const LazyTensor& other) {
-  CheckIsIntegralOrPred(input.shape(), "__and__");
-  return input.CreateFrom(
-      ir::ops::BitwiseAnd(input.GetIrValue(), other.GetIrValue()));
-}
-
 void LazyTensor::bitwise_not_out(LazyTensor& out, const LazyTensor& input) {
   out.SetIrValue(ir::ops::Not(input.GetIrValue()));
 }

@@ -15,10 +15,6 @@ Value BitwiseOp(const OpKind& kind, const Value& node1, const Value& node2) {
   return node;
 }
 
-Value BitwiseAnd(const Value& node1, const Value& node2) {
-  return BitwiseOp(OpKind(at::aten::__and__), node1, node2);
-}
-
 Value BitwiseOr(const Value& node1, const Value& node2) {
   return BitwiseOp(OpKind(at::aten::__or__), node1, node2);
 }
