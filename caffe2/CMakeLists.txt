@@ -895,19 +895,18 @@ elseif(USE_CUDA)
   set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
   if(CUDA_SEPARABLE_COMPILATION)
     # Separate compilation fails when kernels using `thrust::sort_by_key`
-    # are linked with the rest of CUDA code. Workaround by linking them separately
-    set(_generated_name "torch_cuda_w_sort_by_key_intermediate_link${CMAKE_C_OUTPUT_EXTENSION}")
-    set(torch_cuda_w_sort_by_key_link_file "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/torch_cuda.dir/${CMAKE_CFG_INTDIR}/${_generated_name}")
-    cuda_wrap_srcs(torch_cuda OBJ Caffe2_GPU_W_SORT_BY_KEY_OBJ ${Caffe2_GPU_SRCS_W_SORT_BY_KEY})
-    CUDA_LINK_SEPARABLE_COMPILATION_OBJECTS("${torch_cuda_w_sort_by_key_link_file}" torch_cpu "${_options}" "${torch_cuda_SEPARABLE_COMPILATION_OBJECTS}")
-    set( torch_cuda_SEPARABLE_COMPILATION_OBJECTS )
-    # Pass compiled sort-by-key object + device-linked fatbin as extra dependencies of torch_cuda
-    cuda_add_library(torch_cuda ${Caffe2_GPU_SRCS} ${torch_cuda_w_sort_by_key_link_file} ${Caffe2_GPU_W_SORT_BY_KEY_OBJ})
+    # are linked with the rest of CUDA code. Workaround by linking them separately.
+    add_library(torch_cuda ${Caffe2_GPU_SRCS})
+    set_property(TARGET torch_cuda PROPERTY CUDA_SEPARABLE_COMPILATION ON)
+
+    add_library(torch_cuda_w_sort_by_key OBJECT ${Caffe2_GPU_SRCS_W_SORT_BY_KEY})
+    set_property(TARGET torch_cuda_w_sort_by_key PROPERTY CUDA_SEPARABLE_COMPILATION OFF)
+    target_link_libraries(torch_cuda PRIVATE torch_cuda_w_sort_by_key)
   elseif(BUILD_SPLIT_CUDA)
-    cuda_add_library(torch_cuda_cpp ${Caffe2_GPU_SRCS_CPP} ${Caffe2_GPU_SRCS_W_SORT_BY_KEY_CPP})
-    cuda_add_library(torch_cuda_cu ${Caffe2_GPU_SRCS_CU} ${Caffe2_GPU_SRCS_W_SORT_BY_KEY_CU})
+    add_library(torch_cuda_cpp ${Caffe2_GPU_SRCS_CPP} ${Caffe2_GPU_SRCS_W_SORT_BY_KEY_CPP})
+    add_library(torch_cuda_cu ${Caffe2_GPU_SRCS_CU} ${Caffe2_GPU_SRCS_W_SORT_BY_KEY_CU})
   else()
-    cuda_add_library(torch_cuda ${Caffe2_GPU_SRCS} ${Caffe2_GPU_SRCS_W_SORT_BY_KEY})
+    add_library(torch_cuda ${Caffe2_GPU_SRCS} ${Caffe2_GPU_SRCS_W_SORT_BY_KEY})
   endif()
   set(CUDA_LINK_LIBRARIES_KEYWORD)
   if(BUILD_SPLIT_CUDA)
@@ -1009,15 +1008,36 @@ if(NOT INTERN_BUILD_MOBILE)
   add_dependencies(torch_cpu Caffe2_PROTO)
 endif()
 
+# Build model tracer for tracing-based selective build
+if(TRACING_BASED AND NOT BUILD_LITE_INTERPRETER AND NOT INTERN_BUILD_MOBILE)
+  add_subdirectory(
+    ${TORCH_ROOT}/torch/csrc/jit/mobile/model_tracer
+    ${CMAKE_BINARY_DIR}/model_tracer
+  )
+endif()
+
 # Codegen selected_mobile_ops.h for template selective build
 if(BUILD_LITE_INTERPRETER AND SELECTED_OP_LIST)
-  add_custom_command(
-    OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
-    COMMAND
-    "${PYTHON_EXECUTABLE}" -m tools.lite_interpreter.gen_selected_mobile_ops_header
-    --yaml_file_path "${SELECTED_OP_LIST}"
-    --output_file_path "${CMAKE_BINARY_DIR}/aten/src/ATen"
-    WORKING_DIRECTORY "${TORCH_ROOT}")
+  message("running gen_selected_mobile_ops_header for:  '${SELECTED_OP_LIST}'")
+  if(${TRACING_BASED})
+    add_custom_command(
+      OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
+      COMMAND
+      "${PYTHON_EXECUTABLE}"
+      -m tools.code_analyzer.gen_oplist
+      --model_file_list_path "${SELECTED_OP_LIST}"
+      --output_dir "${CMAKE_BINARY_DIR}/aten/src/ATen"
+      WORKING_DIRECTORY "${TORCH_ROOT}")
+  else()
+    add_custom_command(
+      OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
+      COMMAND
+      "${PYTHON_EXECUTABLE}"
+      -m tools.lite_interpreter.gen_selected_mobile_ops_header
+      --yaml_file_path "${SELECTED_OP_LIST}"
+      --output_file_path "${CMAKE_BINARY_DIR}/aten/src/ATen"
+      WORKING_DIRECTORY "${TORCH_ROOT}")
+  endif()
 
   add_custom_target(
     __selected_mobile_ops_header_gen
@@ -1130,10 +1150,14 @@ endif()
         add_subdirectory(${TORCH_ROOT}/test/cpp/api ${CMAKE_BINARY_DIR}/test_api)
       endif()
 
-      add_subdirectory(
-        ${TORCH_ROOT}/test/mobile/nnc
-        ${CMAKE_BINARY_DIR}/test_mobile_nnc
-      )
+      if(USE_LLVM AND LLVM_FOUND)
+        add_subdirectory(
+          ${TORCH_ROOT}/test/mobile/nnc
+          ${CMAKE_BINARY_DIR}/test_mobile_nnc
+        )
+      endif()
+      add_subdirectory(${TORCH_ROOT}/test/cpp/lazy
+                       ${CMAKE_BINARY_DIR}/test_lazy)
     endif()
   endif()
 
@@ -1762,6 +1786,9 @@ if(BUILD_TEST)
     target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
     target_include_directories(${test_name} PRIVATE $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
     target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
+    if(NOT MSVC)
+      target_compile_options(${test_name} PRIVATE -Wno-unused-variable)
+    endif()
     add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
     if(INSTALL_TEST)
       install(TARGETS ${test_name} DESTINATION test)
@@ -1775,7 +1802,7 @@ if(BUILD_TEST)
   if(USE_CUDA)
     foreach(test_src ${Caffe2_GPU_TEST_SRCS})
       get_filename_component(test_name ${test_src} NAME_WE)
-      cuda_add_executable(${test_name} "${test_src}")
+      add_executable(${test_name} "${test_src}")
       target_link_libraries(${test_name} torch_library gtest_main)
       target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
       target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
