@@ -382,10 +382,10 @@ def load(repo_or_dir, model, *args, source='github', force_reload=False, verbose
     Example:
         >>> # from a github repo
         >>> repo = 'pytorch/vision'
-        >>> model = torch.hub.load(repo, 'resnet50', pretrained=False)
+        >>> model = torch.hub.load(repo, 'resnet50', pretrained=True)
         >>> # from a local directory
         >>> path = '/some/local/path/pytorch/vision'
-        >>> model = torch.hub.load(path, 'resnet50', pretrained=False)
+        >>> model = torch.hub.load(path, 'resnet50', pretrained=True)
     """
     source = source.lower()
 
