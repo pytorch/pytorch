@@ -340,6 +340,14 @@ class QuantizationTestCase(TestCase):
                               2 : self.img_data_2d,
                               3 : self.img_data_3d}
 
+        self.embed_linear_data_train = [[torch.randint(0, 10, (12, 12), dtype=torch.long),
+                                         torch.randn((12, 1), dtype=torch.float)]
+                                        for _ in range(2)]
+        self.embed_data_train = [[torch.randint(0, 10, (12, 12), dtype=torch.long),
+                                  torch.randn((12, 12), dtype=torch.float)]
+                                 for _ in range(2)]
+        self.embed_data = [[torch.randint(0, 10, (12, 1))]]
+
         # Quant types that produce statically quantized ops
         self.static_quant_types = [QuantType.STATIC, QuantType.QAT]
         # All quant types for (fx based) graph mode quantization
@@ -1682,6 +1690,22 @@ class ManualEmbeddingBagLinear(nn.Module):
         x = self.quant(x)
         x = self.linear(x)
         return self.dequant(x)
+
+class DeFusedEmbeddingBag(nn.Module):
+    r"""A module to simulate QAT embedding bag, using separate embedding
+    and bagging op, similar to described in EmbeddingBag documentation.
+
+    https://pytorch.org/docs/stable/generated/torch.nn.EmbeddingBag.html
+    """
+    def __init__(self) -> None:
+        super().__init__()
+        self.emb = nn.Embedding(num_embeddings=10, embedding_dim=12)
+        self.emb.qconfig = default_embedding_qat_qconfig
+        self.bagging_op = torch.sum
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        return self.bagging_op(self.emb(input), dim=1)
+
 class SubModelForFusion(nn.Module):
     def __init__(self):
         super().__init__()

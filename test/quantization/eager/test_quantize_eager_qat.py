@@ -20,6 +20,7 @@ from torch.ao.quantization import (
 from torch.testing._internal.common_utils import TestCase
 
 from torch.testing._internal.common_quantization import (
+    DeFusedEmbeddingBag,
     QuantizationTestCase,
     QuantStubModel,
     ManualLinearQATModel,
@@ -105,6 +106,33 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                 model = quantize_qat(model, test_only_train_fn, [self.img_data_2d_train])
                 checkQuantized(model)
 
+    def test_defused_embedding_bag(self):
+        for qengine in supported_qengines:
+            with override_quantized_engine(qengine):
+                model = DeFusedEmbeddingBag().train()
+                model = prepare_qat(model)
+                self.checkObservers(model)
+
+                test_only_train_fn(model, self.embed_data_train)
+                # make activation_post_process is not inserted for Embedding
+                self.assertFalse(hasattr(model, "activation_post_process"))
+                model = convert(model)
+
+                def checkQuantized(model):
+                    # make sure Embedding is now a QuantizedEmbedding
+                    self.assertTrue(type(model.emb), nn.quantized.EmbeddingBag)
+
+                    test_only_eval_fn(model, self.embed_data)
+                    self.checkScriptable(model, self.embed_data)
+                    self.checkNoQconfig(model)
+
+                checkQuantized(model)
+
+                model = DeFusedEmbeddingBag()
+                model = quantize_qat(model, test_only_train_fn, [self.embed_data_train])
+                checkQuantized(model)
+
+
     def test_embedding_bag_linear(self):
         for qengine in supported_qengines:
             with override_quantized_engine(qengine):
@@ -112,10 +140,7 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                 model = prepare_qat(model)
                 self.checkObservers(model)
 
-                train_indices = [[torch.randint(0, 10, (12, 12)), torch.randn((12, 1))] for _ in range(2)]
-                eval_output = [[torch.randint(0, 10, (12, 1))]]
-
-                test_only_train_fn(model, train_indices)
+                test_only_train_fn(model, self.embed_linear_data_train)
                 # make sure not activation_post_process is inserted for EmbeddingBag
                 self.assertFalse(hasattr(model, "activation_post_process"))
                 model = convert(model)
@@ -126,14 +151,14 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                     # Linear should not have been quantized
                     self.assertTrue(type(model.linear), nnq.Linear)
 
-                    test_only_eval_fn(model, eval_output)
-                    self.checkScriptable(model, eval_output)
+                    test_only_eval_fn(model, self.embed_data)
+                    self.checkScriptable(model, self.embed_data)
                     self.checkNoQconfig(model)
 
                 checkQuantized(model)
 
                 model = ManualEmbeddingBagLinear()
-                model = quantize_qat(model, test_only_train_fn, [train_indices])
+                model = quantize_qat(model, test_only_train_fn, [self.embed_linear_data_train])
                 checkQuantized(model)
 
     def test_train_save_load_eval(self):

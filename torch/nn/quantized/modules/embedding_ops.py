@@ -138,14 +138,20 @@ class Embedding(torch.nn.Module):
             mod (Module): a float module, either produced by torch.quantization
                           utilities or provided by user
         """
-        assert type(mod) == nn.Embedding, 'nnq.' + cls.__name__ + '.from_float only works for ' + \
-            nn.Embedding.__name__
-        assert hasattr(mod, 'qconfig'), 'Embedding input float module must have qconfig defined'
-        from torch.quantization import float_qparams_weight_only_qconfig
-        if mod.qconfig is not None and mod.qconfig.weight is not None:
-            weight_observer = mod.qconfig.weight()
+        if hasattr(mod, 'weight_fake_quant'):
+            assert type(mod) == nn.qat.Embedding, 'nnq.' + cls.__name__ + '.from_float ' + \
+                'with fake quant only works for ' + nn.qat.Embedding.__name__
+            weight_observer = mod.weight_fake_quant
+            activation_post_process = mod.activation_post_process
         else:
-            weight_observer = float_qparams_weight_only_qconfig.weight()
+            assert type(mod) == nn.Embedding, 'nnq.' + cls.__name__ + '.from_float only works for ' + \
+                nn.Embedding.__name__
+            assert hasattr(mod, 'qconfig'), 'Embedding input float module must have qconfig defined'
+            from torch.quantization import float_qparams_weight_only_qconfig
+            if mod.qconfig is not None and mod.qconfig.weight is not None:
+                weight_observer = mod.qconfig.weight()
+            else:
+                weight_observer = float_qparams_weight_only_qconfig.weight()
 
         dtype = weight_observer.dtype
 
