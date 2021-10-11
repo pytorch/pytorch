@@ -7738,47 +7738,42 @@ else:
     @dtypes(*(get_all_int_dtypes() + get_all_fp_dtypes() +
               get_all_complex_dtypes()))
     def test_where_scalar(self, device, dtype):
+        def create_scalar_tensor(scalar):
+            scalar_type = type(scalar)
+            complex_dtype = torch.complex64 if torch.float == torch.get_default_dtype() else torch.complex128
+            python_torch_dtype_map = {int: None,
+                                      float: torch.get_default_dtype(),
+                                      complex: complex_dtype,
+                                      bool: torch.bool}
 
-        def checkResult(scalar_type, dtype, condition, x, scalar_1):
-            def x_like(scalar):
-                complex_dtype = torch.complex64 if torch.float == torch.get_default_dtype() else torch.complex128
-                python_torch_dtype_map = {int: None,
-                                          float: torch.get_default_dtype(),
-                                          complex: complex_dtype,
-                                          bool: torch.bool}
+            dtype = python_torch_dtype_map[scalar_type]
+            return torch.tensor(scalar, dtype=dtype, device=device)
 
-                dtype = python_torch_dtype_map[scalar_type]
-                return torch.tensor(scalar, dtype=dtype, device=device)
+        def _test_where_scalar_tensor(condition, x, scalar):
+            scalar_t = create_scalar_tensor(scalar)
 
-            # X = Tensor, Y = Scalar
-            scalar_out = torch.where(condition, x, scalar_1)
-            scalar_t = x_like(scalar_1)
             # Remove this type promotion shenanigan once
             # torch.where supports tensors of different dtypes.
-            promoted_dtype = torch.result_type(x, scalar_1)
-            tensor_out = torch.where(condition, x.to(promoted_dtype), scalar_t.to(promoted_dtype))
+            promoted_dtype = torch.result_type(x, scalar)
+            promoted_scalar_t = scalar_t.to(promoted_dtype)
+            promoted_x = x.to(promoted_dtype)
+
+            # X = Tensor, Y = Scalar
+            scalar_out = torch.where(condition, x, scalar)
+            tensor_out = torch.where(condition, promoted_x, promoted_scalar_t)
             self.assertEqual(scalar_out, tensor_out)
 
             # X = Scalar, Y = Tensor
-            scalar_out = torch.where(condition, scalar_1, x)
-            scalar_t = x_like(scalar_1)
-            tensor_out = torch.where(condition, scalar_t.to(promoted_dtype), x.to(promoted_dtype))
+            scalar_out = torch.where(condition, scalar, x)
+            tensor_out = torch.where(condition, promoted_scalar_t, promoted_x)
             self.assertEqual(scalar_out, tensor_out)
 
-        for with_extremal in [True, False]:
-            for ndims in range(0, 4):
-                shape = self._rand_shape(ndims, min_size=5, max_size=10)
-                for scalar_type in [bool, int, float, complex]:
-                    condition = make_tensor(shape, dtype=torch.bool, device=device)
-
-                    x = make_tensor(shape, dtype=dtype, device=device)
-                    if shape != () and (dtype.is_complex or dtype.is_floating_point) and with_extremal:
-                        for extremal in ('nan', 'inf', '-inf'):
-                            scalar_val = float(extremal) if dtype.is_floating_point else complex(extremal)
-                            x[torch.randn(*shape) > 0.] = scalar_val
-
-                    scalar_1 = scalar_type(random.random())
-                    checkResult(scalar_type, dtype, condition, x, scalar_1)
+        for ndims in range(0, 4):
+            shape = self._rand_shape(ndims, min_size=5, max_size=10)
+            for scalar in (True, 1, 3.14, 3.14 + 2j):
+                condition = make_tensor(shape, dtype=torch.bool, device=device)
+                x = make_tensor(shape, dtype=dtype, device=device)
+                _test_where_scalar_tensor(condition, x, scalar)
 
     # As the test fails with Runtime Error not raised on XLA
     @onlyOnCPUAndCUDA
@@ -7791,13 +7786,13 @@ else:
         x1_vals = [True, 3, 7.0, 1 + 0.5j]
         x2_vals = [False, 4, 8.0, 2 + 0.5j]
         default_dtype = torch.get_default_dtype()
-        for test_default_dtype in [torch.float, torch.double]:
+        for test_default_dtype in (torch.float, torch.double):
             torch.set_default_dtype(test_default_dtype)
             for x1 in x1_vals:
                 for x2 in x2_vals:
-                    condition = torch.randn(height, width, device=device) > 0.0
+                    condition = torch.empty(height, width, dtype=torch.bool, device=device).bernoulli_()
                     common_dtype = torch.result_type(x1, x2)
-                    # NumPy's aggressively promotes to double.
+                    # NumPy aggressively promotes to double, hence cast to output to correct dtype
                     expected = torch.from_numpy(np.where(condition.cpu().numpy(), x1, x2)).to(common_dtype)
                     result = torch.where(condition, x1, x2)
                     self.assertEqual(expected, result)
