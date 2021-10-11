@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/codegen/onednn/interface.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
 
 namespace torch {
@@ -36,12 +37,18 @@ bool canFuseNode(const Node* node) {
   }
 }
 
+bool getLlgaEnvEnabled() {
+  char* env = std::getenv("TORCH_ENABLE_ONEDNN_FUSION");
+  return env != nullptr && std::strcmp(env, "1") == 0;
+}
+
 namespace {
 class RegisterInterface {
- public:
-  RegisterInterface() {
-    RegisterProfilingNode(canFuseNode);
-  }
+public:
+ RegisterInterface() {
+   RegisterProfilingNode(canFuseNode);
+   torch::jit::RegisterLlgaFuseGraph::setEnabled(getLlgaEnvEnabled());
+ }
 };
 
 static RegisterInterface register_interface_;

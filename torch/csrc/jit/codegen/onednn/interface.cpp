@@ -70,6 +70,10 @@ void fuseGraph(std::shared_ptr<Graph>& g) {
   }
 }
 
+std::atomic<bool>& getLlgaEnabled() {
+  return onednn_enabled;
+}
+
 } // namespace onednn
 } // namespace fuser
 
