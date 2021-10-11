@@ -3089,7 +3089,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('resize_as_'),
         xfail('resolve_conj'),
         xfail('resolve_neg'),
-        xfail('scatter'),
         xfail('take'),
         xfail('take_along_dim'),
         xfail('tensor_split'),
