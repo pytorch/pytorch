@@ -101,9 +101,7 @@ class TestModelDump(TestCase):
     def open_html_model(self, wd, model, extra_files=None):
         buf = io.BytesIO()
         torch.jit.save(model, buf, _extra_files=extra_files)
-        info = torch.utils.model_dump.get_model_info(buf)
-        skeleton = torch.utils.model_dump.get_inline_skeleton()
-        page = torch.utils.model_dump.burn_in_info(skeleton, info)
+        page = torch.utils.model_dump.get_info_and_burn_skeleton(buf)
         wd.get("data:text/html;charset=utf-8," + urllib.parse.quote(page))
 
     def open_section_and_get_body(self, wd, name):
@@ -218,6 +216,22 @@ class TestModelDump(TestCase):
         check_memory(
             torch.jit.freeze(torch.jit.script(SimpleModel()).eval()),
             simple_model_memory)
+
+        # Make sure we can handle a model with both constants and data tensors.
+        class ComposedModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w1 = torch.zeros(1, 2)
+                self.w2 = torch.ones(2, 2)
+
+            def forward(self, arg):
+                return arg * self.w2 + self.w1
+
+        check_memory(
+            torch.jit.freeze(
+                torch.jit.script(ComposedModule()).eval(),
+                preserved_attrs=["w1"]),
+            4 * (2 + 4))
 
 
 if __name__ == '__main__':
