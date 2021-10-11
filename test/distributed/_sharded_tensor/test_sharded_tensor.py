@@ -1989,44 +1989,5 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
             sharded_tensor = _sharded_tensor.init_from_local_shards(local_shards, sharded_tensor_metadata, init_rrefs=True)
 
 
-class TestShardedTensorNNInit(ShardedTensorTestBase):
-    """ Testing torch.nn.init functions for ShardedTensor """
-
-    @with_comms
-    @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_init_sharded_tensor_with_uniform(self):
-        """ Test torch.nn.init.uniform_(ShardedTensor, a, b) """
-
-        spec = ChunkShardingSpec(
-            dim=0,
-            placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
-            ],
-        )
-        h, w = 8, 2
-        expected_h = 2
-        expected_device = torch.device(f"cuda:{self.rank}")
-        a, b = 10, 20
-
-        seed = 1234
-        dtype = torch.double
-
-        sharded_tensor = _sharded_tensor.empty(spec, h, w, dtype=dtype)
-        self.assertEqual(1, len(sharded_tensor.local_shards()))
-
-        # Clone local tensor to ensure torch.nn.init starts from the same input
-        local_tensor_clone = torch.clone(sharded_tensor.local_shards()[0].tensor)
-        torch.manual_seed(seed)
-        torch.nn.init.uniform_(sharded_tensor, a=a, b=b)
-
-        torch.manual_seed(seed)
-        torch.nn.init.uniform_(local_tensor_clone, a=a, b=b)
-        self.assertEqual(local_tensor_clone, sharded_tensor.local_shards()[0].tensor)
-
-
 if __name__ == '__main__':
     run_tests()
