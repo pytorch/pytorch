@@ -5,7 +5,7 @@ name: linux-xenial-cuda10.2-py3.6-gcc7
 
 on:
   pull_request:
-    types: [unassigned]
+    types: [opened, synchronize, reopened, unassigned]
   push:
     branches:
       - master
@@ -391,13 +391,15 @@ jobs:
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-        # Time out the test phase after 3.5 hours
-        timeout-minutes: 210
+        # Time out the test phase after 240 minutes
+        timeout-minutes: 240
         run: |
           set -x
 
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
+          elif [[ $BUILD_ENVIRONMENT == *onnx* ]]; then
+            TEST_COMMAND=.jenkins/caffe2/test.sh
           else
             TEST_COMMAND=.jenkins/pytorch/test.sh
           fi
