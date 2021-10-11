@@ -616,7 +616,7 @@ std::vector<Tensor> tensor_split(const Tensor& self, const Tensor& tensor_indice
     auto stride = tensor_indices_or_sections.stride(0);
     auto numel = tensor_indices_or_sections.numel();
     std::vector<int64_t> indices(numel);
-    for (size_t offset = 0; offset < numel; offset++) {
+    for (const auto offset : c10::irange(numel)) {
       // indices tensor could be non-contiguous
       indices[offset] = *(indices_data + offset * stride);
     }
@@ -2222,10 +2222,11 @@ std::vector<Tensor> meshgrid(TensorList tensors,
     shape[i] = tensor_refs[i].get().numel();  // treat 0D tensors as if they were a 1D tensor
   }
   std::vector<Tensor> grids;
+  std::vector<int64_t> view_shape(size, 1);
   for(const auto i: c10::irange(size)){
-    std::vector<int64_t> view_shape(size, 1);
-    view_shape[i] = -1;
+    view_shape[i] = -1;  // select this dimension to infer
     grids.push_back(tensor_refs[i].get().view(view_shape).expand(shape));
+    view_shape[i] = 1;  // restore to previous value
   }
 
   // Remember we need to also swap the outputs if we swapped the inputs.

@@ -9,6 +9,7 @@
 #include <c10d/ProcessGroupRoundRobin.hpp>
 #endif
 #include <c10d/ProcessGroup.hpp>
+#include <c10d/PyProcessGroup.hpp>
 
 #ifdef USE_C10D_GLOO
 #include <c10d/ProcessGroupGloo.hpp>
@@ -378,6 +379,14 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           },
           py::call_guard<py::gil_scoped_release>())
       .def("get_backward_stats", &::c10d::Reducer::get_backward_stats)
+      .def("_install_post_backward_futures", [](::c10d::Reducer& reducer, const std::vector<std::shared_ptr<jit::PythonFutureWrapper>>& futs) {
+              c10::List<c10::intrusive_ptr<c10::ivalue::Future>> futures(c10::FutureType::create(c10::TensorType::get()));
+              for (const auto & fut : futs) {
+              futures.push_back(fut->fut);
+              }
+              reducer.install_futures(std::move(futures));
+          },
+          py::call_guard<py::gil_scoped_release>())
       .def(
           "_rebuild_buckets",
           &::c10d::Reducer::rebuild_buckets,
@@ -953,9 +962,13 @@ Arguments:
       .def(py::init<const std::string&, c10::intrusive_ptr<::c10d::Store>>());
 
   auto processGroup =
-      intrusive_ptr_class_<::c10d::ProcessGroup>(module, "ProcessGroup")
+      py::class_<::c10d::ProcessGroup,
+                 c10::intrusive_ptr<::c10d::ProcessGroup>,
+                 ::c10d::PyProcessGroup>(module, "ProcessGroup")
+          .def(py::init<int, int>())
           .def("rank", &::c10d::ProcessGroup::getRank)
           .def("size", &::c10d::ProcessGroup::getSize)
+          .def("name", &::c10d::ProcessGroup::getBackendName)
 
           .def(
               "broadcast",
@@ -1455,7 +1468,10 @@ Example::
       py::call_guard<py::gil_scoped_release>());
 #endif
 
-  intrusive_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
+  py::class_<::c10d::ProcessGroup::Work,
+             c10::intrusive_ptr<::c10d::ProcessGroup::Work>,
+             ::c10d::PyProcessGroup::PyWork>(module, "Work")
+      .def(py::init<>())
       .def("is_completed", &::c10d::ProcessGroup::Work::isCompleted)
       .def(
           "is_success",

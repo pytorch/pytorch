@@ -139,7 +139,7 @@ struct SchemaParser {
     std::string name;
     if (L.nextIf('[')) {
       // note: an array with a size hint can only occur at the Argument level
-      type = ListType::create(type);
+      type = ListType::create(std::move(type));
       N = c10::stoll(L.expect(TK_NUMBER).text());
       L.expect(']');
       auto container = type_parser.parseAliasAnnotation();
@@ -148,7 +148,7 @@ struct SchemaParser {
       }
       alias_info = std::move(container);
       if (L.nextIf('?')) {
-        type = OptionalType::create(type);
+        type = OptionalType::create(std::move(type));
       }
     }
     if (is_return) {
@@ -334,7 +334,7 @@ C10_EXPORT FunctionSchema parseSchema(const std::string& schema) {
   TORCH_CHECK(
       parsed.is_right(),
       "Tried to parse a function schema but only the operator name was given");
-  return parsed.right();
+  return std::move(parsed.right());
 }
 
 C10_EXPORT OperatorName parseName(const std::string& name) {
@@ -342,7 +342,7 @@ C10_EXPORT OperatorName parseName(const std::string& name) {
   TORCH_CHECK(
       parsed.is_left(),
       "Tried to parse an operator name but function schema was given");
-  return parsed.left();
+  return std::move(parsed.left());
 }
 
 } // namespace jit

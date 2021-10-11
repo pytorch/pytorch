@@ -5,7 +5,7 @@ from tools.codegen.model import (Type, BaseTy, BaseType, OptionalType,
 from tools.codegen.api.types import (BaseCppType, BaseCType, OptionalCType,
                                      ConstRefCType, NamedCType,
                                      MutRefCType,
-                                     VectorCType, boolT, intT, doubleT, ListCType,
+                                     VectorCType, boolT, longT, doubleT, ListCType,
                                      scalarT, scalarTypeT, ArrayRefCType, ArrayCType, TupleCType)
 
 valueT = BaseCppType('ir', 'Value')
@@ -35,7 +35,7 @@ def process_ir_type(typ: Type) -> Union[BaseCType, VectorCType, OptionalCType, L
         elif typ.name == BaseTy.Scalar:
             return BaseCType(scalarT)
         elif typ.name == BaseTy.int:
-            return BaseCType(intT)
+            return BaseCType(longT)
         elif typ.name == BaseTy.bool:
             return BaseCType(boolT)
         elif typ.name == BaseTy.float:
@@ -56,7 +56,7 @@ def process_ir_type(typ: Type) -> Union[BaseCType, VectorCType, OptionalCType, L
             # TODO(whc) is this actually correct? or should it use a Vector like above
             return ListCType(OptionalCType(BaseCType(valueT)))
         elif str(typ.elem) == 'int':
-            return VectorCType(BaseCType(intT))
+            return VectorCType(BaseCType(longT))
         elif str(typ.elem) == 'bool':
             return VectorCType(BaseCType(boolT))
         else:

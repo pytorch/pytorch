@@ -108,6 +108,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'index', 'masked_fill', 'cross', 'lu_unpack', 'renorm', '_conj_physical',
     'scatter', 'scatter_add', 'sigmoid', 'sigmoid_backward', 'trapezoid', 'cumulative_trapezoid',
     'conj_physical_', '_neg_view', '_reshape_alias', '_det_lu_based_helper', 'lu_solve', '_lu_with_info',
+    'linalg_pinv',
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
@@ -240,7 +241,7 @@ DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
 
 DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
     # These non-view functions return tensors with storage use_count != 1
-    'thnn_conv2d_forward', 'slow_conv3d_forward', 'channel_shuffle',
+    '_slow_conv2d_forward', 'slow_conv3d_forward', 'channel_shuffle',
 
     # If an input is returned as-is in output, we cannot guarantee its storage_impl
     # use count to be 1 either.

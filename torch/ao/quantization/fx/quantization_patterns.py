@@ -1025,18 +1025,15 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
 
                     # get other arguments
                     kwargs = {**load_arg(quantized=torch.float)(self.linear_node.kwargs)}
-                    # pack weight
-                    bias = None
                     # all args after bias, including bias
                     other_args = load_arg(quantized=torch.float)(self.linear_node.args[2:])
+                    # bias might be either positional, or a keyword argument
                     if len(self.linear_node.args) > 2:
                         bias = load_arg(quantized=torch.float)(self.linear_node.args[2])
                         other_args = other_args[1:]  # remove the bias argument
                     else:
-                        assert 'bias' in kwargs, \
-                            'expect bias provided as a keyword argument when it is not a positional argument'
-                        bias = kwargs['bias']
-                        kwargs.pop('bias')
+                        bias = kwargs.pop('bias', None)
+
                     prepack_args = (linear_weight, bias)
                     prepack_op = get_linear_prepack_op_for_dtype(weight_dtype)
                     packed_weight = quantized_graph.create_node(
@@ -1446,11 +1443,12 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
 
     # some qhandlers override the activations constructor
     def get_activation_ctr(self, qconfig, pattern) -> Optional[Callable]:
-        if activation_dtype(qconfig) == torch.float16:
-            return qconfig.activation
-        else:
+        act_dtype = activation_dtype(qconfig)
+        if act_dtype == torch.quint8:
             return get_default_output_activation_post_process_map().get(
-                pattern, None)
+                pattern, qconfig.activation)
+        else:
+            return qconfig.activation
 
     def convert(self,
                 node: Node,
@@ -1682,7 +1680,7 @@ class StandaloneModuleQuantizeHandler(QuantizeHandler):
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         assert node.op == 'call_module'
-        convert = torch.quantization.quantize_fx._convert_standalone_module_fx  # type: ignore[attr-defined]
+        convert = torch.ao.quantization.quantize_fx._convert_standalone_module_fx  # type: ignore[attr-defined]
         # We know that observed standalone module is a GraphModule since
         # it's produced by us
         observed_standalone_module : GraphModule = modules[str(node.target)]  # type: ignore[assignment]

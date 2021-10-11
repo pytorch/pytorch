@@ -25,8 +25,8 @@ std::vector<at::Tensor> constructTensors(
   for (const auto i : c10::irange(bufs_num)) {
     buf_data_vec.push_back(buf_data[i]);
     buf_dims_vec.emplace_back();
-    // NOLINTNEXTLINE(clang-diagnostic-unused-variable,clang-analyzer-deadcode.DeadStores)
     for (const auto dim : c10::irange(buf_ranks[i])) {
+      (void)dim;
       buf_dims_vec[i].push_back(buf_dims[buf_dims_idx++]);
     }
     buf_dtypes_vec.push_back(static_cast<c10::ScalarType>(buf_dtypes[i]));
