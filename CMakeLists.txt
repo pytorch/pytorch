@@ -427,6 +427,10 @@ set(OP_DEPENDENCY "" CACHE STRING
     "Path to the yaml file that contains the op dependency graph for custom build.")
 set(STATIC_DISPATCH_BACKEND "" CACHE STRING
     "Name of the backend for which static dispatch code is generated, e.g.: CPU.")
+option(
+  TRACING_BASED
+  "Master flag to build Lite Interpreter with tracing build option"
+  OFF)
 
 # This is a fix for a rare build issue on Ubuntu:
 # symbol lookup error: miniconda3/envs/pytorch-py3.7/lib/libmkl_intel_lp64.so: undefined symbol: mkl_blas_dsyrk
@@ -744,7 +748,6 @@ if(NOT MSVC)
   string(APPEND CMAKE_CXX_FLAGS " -Wno-unknown-pragmas")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-sign-compare")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-parameter")
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-variable")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-function")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-result")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-local-typedefs")
@@ -1068,6 +1071,9 @@ endif()
 
 # ---[ JNI
 if(BUILD_JNI)
+  if(NOT MSVC)
+    string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-variable")
+  endif()
   set(BUILD_LIBTORCH_WITH_JNI 1)
   set(FBJNI_SKIP_TESTS 1)
   add_subdirectory(android/pytorch_android)
