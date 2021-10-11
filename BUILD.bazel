@@ -1591,9 +1591,10 @@ genrule(
         "caffe2/contrib/aten/aten_op_template.h",
         "aten/src/ATen/Declarations.yaml",
     ],
-    outs = ["caffe2/caffe2/contrib/aten/aten_op.h"],
+    outs = ["caffe2/caffe2/contrib/aten/gen_aten_op.h"],
     cmd = """
     $(location :gen_op) \
+        --output_prefix gen_ \
         --install_dir $(@D) \
         --aten_root `dirname $(location aten/src/ATen/Declarations.yaml)`/../.. \
         --template_dir `dirname $(location caffe2/contrib/aten/aten_op_template.h)` \
