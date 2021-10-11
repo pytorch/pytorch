@@ -19,7 +19,7 @@ lazy_tensors::Shape NodeOutputShape(
 Resize::Resize(const Value& input, std::vector<lazy_tensors::int64> size)
     : Node(ir::OpKind(at::aten::resize), {input},
            [&]() { return NodeOutputShape(input, size); },
-           /*num_outputs=*/1, lazy_tensors::util::MHash(size)),
+           /*num_outputs=*/1, torch::lazy::MHash(size)),
       size_(std::move(size)) {}
 
 NodePtr Resize::Clone(OpList operands) const {

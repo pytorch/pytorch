@@ -2,7 +2,6 @@
 
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
-#include "lazy_tensors/computation_client/util.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -11,7 +10,7 @@ namespace ops {
 IndexGet::IndexGet(const ir::Value& base, const ir::Value& indices,
                    lazy_tensors::int64 start_dim)
     : Node(OpKind(at::aten::index), {base, indices},
-           /*num_outputs=*/1, lazy_tensors::util::MHash(start_dim)),
+           /*num_outputs=*/1, torch::lazy::MHash(start_dim)),
       start_dim_(start_dim) {
   SetShapeDeferred(
       [&]() { return compiler::NodeLowering::Get()->Infer(this); });

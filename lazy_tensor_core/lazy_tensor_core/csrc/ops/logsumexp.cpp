@@ -4,7 +4,6 @@
 #include "lazy_tensor_core/csrc/reduction.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensor_core/csrc/torch_util.h"
-#include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/str_join.h"
 
 namespace torch_lazy_tensors {
@@ -16,7 +15,7 @@ Logsumexp::Logsumexp(const Value& input,
                      bool keep_reduced_dimensions)
     : Node(ir::OpKind(at::aten::logsumexp), {input},
            /*num_outputs=*/1,
-           lazy_tensors::util::MHash(dimensions, keep_reduced_dimensions)),
+           torch::lazy::MHash(dimensions, keep_reduced_dimensions)),
       dimensions_(std::move(dimensions)),
       keep_reduced_dimensions_(keep_reduced_dimensions) {
   SetShapeDeferred(

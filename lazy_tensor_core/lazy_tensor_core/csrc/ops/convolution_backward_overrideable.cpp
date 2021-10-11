@@ -2,7 +2,6 @@
 
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
-#include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/str_join.h"
 
 namespace torch_lazy_tensors {
@@ -18,7 +17,7 @@ ConvolutionBackwardOverrideable::ConvolutionBackwardOverrideable(
     : Node(ir::OpKind(at::aten::convolution_backward_overrideable),
            {grad_output, input, weight},
            /*num_outputs=*/3,
-           lazy_tensors::util::MHash(stride, padding, dilation, transposed,
+           torch::lazy::MHash(stride, padding, dilation, transposed,
                                      output_padding, groups)),
       stride_(std::move(stride)),
       padding_(std::move(padding)),

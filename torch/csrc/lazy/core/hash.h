@@ -113,7 +113,10 @@ static inline hash_t Hash(const hash_t& value) {
 template <typename T>
 hash_t ContainerHash(const T& values) {
   hash_t h = c10::uint128((uint64_t)0x85ebca77c2b2ae63);
-  for (auto& value : values) {
+  // TODO(whc) had to add 'const' to 'value' below, on lazy_tensor_staging
+  // will land this change to pytorch/pytorch separately, then need to resolve
+  // this merge conflict- just make sure const is kept, and delete this comment.
+  for (const auto& value : values) {
     h = HashCombine(h, Hash(value));
   }
   return h;

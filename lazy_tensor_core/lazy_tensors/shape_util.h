@@ -2,12 +2,19 @@
 
 #include <c10/util/Optional.h>
 
-#include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/primitive_types.h"
 #include "lazy_tensors/shape.h"
 #include "lazy_tensors/span.h"
 #include "lazy_tensors/util.h"
 #include "torch/csrc/jit/tensorexpr/types.h"
+#include "torch/csrc/lazy/core/hash.h"
+
+namespace torch {
+namespace lazy {
+    // Adapters that provide torch::lazy Hash functions for lazy_tensors types
+    torch::lazy::hash_t Hash(const lazy_tensors::Shape& shape);
+}
+}
 
 namespace lazy_tensors {
 
@@ -208,7 +215,9 @@ inline at::ScalarType PrimitiveToScalarType(
     case lazy_tensors::PrimitiveType::PRED: {
       return at::ScalarType::Bool;
     }
-    default: { LTC_LOG(FATAL) << "Not implemented yet."; }
+    default: {
+      LTC_LOG(FATAL) << "Not implemented yet.";
+    }
   }
 }
 

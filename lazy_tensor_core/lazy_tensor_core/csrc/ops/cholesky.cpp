@@ -1,6 +1,5 @@
 #include "lazy_tensor_core/csrc/ops/cholesky.h"
 
-#include "lazy_tensors/computation_client/util.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -8,7 +7,7 @@ namespace ops {
 
 Cholesky::Cholesky(const Value& input, bool lower)
     : Node(ir::OpKind(at::aten::cholesky), {input}, input.shape(),
-           /*num_outputs=*/1, lazy_tensors::util::MHash(lower)),
+           /*num_outputs=*/1, torch::lazy::MHash(lower)),
       lower_(lower) {}
 
 NodePtr Cholesky::Clone(OpList operands) const {

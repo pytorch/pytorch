@@ -16,7 +16,7 @@ Diagonal::Diagonal(const Value& input, lazy_tensors::int64 offset,
            [&]() {
              return MakeDiagonalShape(input.shape(), offset, dim1, dim2);
            },
-           /*num_outputs=*/1, lazy_tensors::util::MHash(offset, dim1, dim2)),
+           /*num_outputs=*/1, torch::lazy::MHash(offset, dim1, dim2)),
       offset_(offset),
       dim1_(dim1),
       dim2_(dim2) {}

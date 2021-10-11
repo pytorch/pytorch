@@ -14,7 +14,7 @@ MseLossBackward::MseLossBackward(const Value& grad_output, const Value& input,
     : Node(ir::OpKind(at::aten::mse_loss_backward),
            {grad_output, input, target},
            /*num_outputs=*/1,
-           lazy_tensors::util::MHash(
+           torch::lazy::MHash(
                lazy_tensors::util::GetEnumValue(reduction))),
       reduction_(reduction) {
   SetShapeDeferred(

@@ -21,7 +21,7 @@ AsStrided::AsStrided(const Value& input, std::vector<lazy_tensors::int64> size,
                  input.shape().element_type(), size);
            },
            /*num_outputs=*/1,
-           lazy_tensors::util::MHash(size, stride, storage_offset)),
+           torch::lazy::MHash(size, stride, storage_offset)),
       size_(std::move(size)),
       stride_(std::move(stride)),
       storage_offset_(storage_offset) {}

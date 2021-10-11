@@ -17,7 +17,7 @@ NllLoss2dBackward::NllLoss2dBackward(const Value& grad_output,
            lazy_tensors::util::GetValuesVector<Value>(
                {grad_output, logits, labels}, {&weight, &total_weight}),
            /*num_outputs=*/1,
-           lazy_tensors::util::MHash(
+           torch::lazy::MHash(
                lazy_tensors::util::GetEnumValue(reduction), ignore_index)),
       reduction_(reduction),
       ignore_index_(ignore_index) {

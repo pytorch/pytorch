@@ -2,7 +2,6 @@
 
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
-#include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/str_join.h"
 
 namespace torch_lazy_tensors {
@@ -18,7 +17,7 @@ ConvolutionOverrideable::ConvolutionOverrideable(
     : Node(ir::OpKind(at::aten::convolution_overrideable),
            {input, weight, bias},
            /*num_outputs=*/1,
-           lazy_tensors::util::MHash(stride, padding, dilation, transposed,
+           torch::lazy::MHash(stride, padding, dilation, transposed,
                                      output_padding, groups)),
       stride_(std::move(stride)),
       padding_(std::move(padding)),
@@ -38,7 +37,7 @@ ConvolutionOverrideable::ConvolutionOverrideable(
     std::vector<lazy_tensors::int64> output_padding, lazy_tensors::int64 groups)
     : Node(ir::OpKind(at::aten::convolution_overrideable), {input, weight},
            /*num_outputs=*/1,
-           lazy_tensors::util::MHash(stride, padding, dilation, transposed,
+           torch::lazy::MHash(stride, padding, dilation, transposed,
                                      output_padding, groups)),
       stride_(std::move(stride)),
       padding_(std::move(padding)),

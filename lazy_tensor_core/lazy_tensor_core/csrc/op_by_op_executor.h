@@ -38,9 +38,9 @@ class OpByOpExecutor {
 
  private:
   using CompileCache =
-      lazy_tensors::util::Cache<lazy_tensors::hash_t,
+      lazy_tensors::util::Cache<torch::lazy::hash_t,
                                 lazy_tensors::ComputationClient::Computation,
-                                lazy_tensors::util::HashReducer>;
+                                torch::lazy::HashReducer>;
 
   explicit OpByOpExecutor(size_t compile_cache_size);
 

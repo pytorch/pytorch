@@ -40,8 +40,8 @@ class LayoutManager {
   struct DimensionsHasher {
     size_t operator()(
         const lazy_tensors::Span<const lazy_tensors::int64>& dimensions) const {
-      return lazy_tensors::util::HashReduce(
-          lazy_tensors::util::MHash(dimensions));
+      return torch::lazy::HashReduce(
+          torch::lazy::MHash(dimensions));
     }
   };
 

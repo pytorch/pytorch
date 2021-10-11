@@ -1,6 +1,5 @@
 #include "lazy_tensor_core/csrc/ops/normal.h"
 
-#include "lazy_tensors/computation_client/util.h"
 
 namespace torch_lazy_tensors {
 namespace ir {

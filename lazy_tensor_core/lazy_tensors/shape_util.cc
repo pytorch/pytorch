@@ -4,6 +4,38 @@
 #include "lazy_tensors/core/platform/hash.h"
 #include "lazy_tensors/layout_util.h"
 
+namespace torch {
+namespace lazy {
+
+torch::lazy::hash_t SingleShapeHash(const lazy_tensors::Shape& shape, torch::lazy::hash_t seed) {
+  for (auto dim : shape.layout().minor_to_major()) {
+    seed = HashCombine(seed, (uint64_t)dim);
+  }
+  for (auto dim : shape.dimensions()) {
+    seed = HashCombine(seed, (uint64_t)dim);
+  }
+  return HashCombine(seed, static_cast<int>(shape.element_type()));
+}
+
+// The hash is deterministic to enable easier debugging between separate runs.
+torch::lazy::hash_t ShapeHash(const lazy_tensors::Shape& shape) {
+  torch::lazy::hash_t hash = (uint32_t)0xa5d2d6916;
+  lazy_tensors::ShapeUtil::ForEachSubshape(shape,
+                             [&](const lazy_tensors::Shape& subshape, const lazy_tensors::ShapeIndex&) {
+                               hash = torch::lazy::SingleShapeHash(subshape, hash);
+                             });
+  return hash;
+}
+
+
+torch::lazy::hash_t Hash(const lazy_tensors::Shape& shape) {
+  auto shape_hash = ShapeHash(shape);
+  return c10::uint128(c10::Uint128High64(shape_hash),
+                      c10::Uint128Low64(shape_hash));
+}
+}  // namespace lazy
+}  // namespace torch
+
 namespace lazy_tensors {
 
 /* static */ int64 ShapeUtil::TupleElementCount(const Shape& shape) {

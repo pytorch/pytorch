@@ -1,6 +1,5 @@
 #include "lazy_tensor_core/csrc/ops/flip.h"
 
-#include "lazy_tensors/computation_client/util.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -8,7 +7,7 @@ namespace ops {
 
 Flip::Flip(const Value& input, std::vector<lazy_tensors::int64> dims)
     : Node(ir::OpKind(at::aten::flip), {input}, input.shape(),
-           /*num_outputs=*/1, lazy_tensors::util::MHash(dims)),
+           /*num_outputs=*/1, torch::lazy::MHash(dims)),
       dims_(std::move(dims)) {}
 
 NodePtr Flip::Clone(OpList operands) const {

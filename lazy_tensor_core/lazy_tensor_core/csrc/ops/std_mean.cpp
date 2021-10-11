@@ -12,7 +12,7 @@ StdMean::StdMean(const Value& input,
                  lazy_tensors::int64 correction, bool keep_reduced_dimensions)
     : Node(ir::OpKind(at::aten::std_mean), {input},
            /*num_outputs=*/2,
-           lazy_tensors::util::MHash(dimensions, correction,
+           torch::lazy::MHash(dimensions, correction,
                                      keep_reduced_dimensions)),
       dimensions_(std::move(dimensions)),
       correction_(correction),

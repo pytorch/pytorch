@@ -97,7 +97,7 @@ class {schema.node_name} : public Node {{
               {{{base_ctor_value_args}}},
               convertShape(out_dtypes, out_shapes),
               /*num_outputs=*/{len(func.returns)},
-              lazy_tensors::util::MHash({scalar_hashes}),
+              torch::lazy::MHash({scalar_hashes}),
               out_dtypes, out_shapes){comma_if_scalar_initializers}
         {scalar_initializers}
 

@@ -1,6 +1,5 @@
 #include "lazy_tensor_core/csrc/ops/threshold_backward.h"
 
-#include "lazy_tensors/computation_client/util.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -10,7 +9,7 @@ ThresholdBackward::ThresholdBackward(const Value& grad_output,
                                      const Value& input, float threshold)
     : Node(ir::OpKind(at::aten::threshold_backward), {grad_output, input},
            input.shape(), /*num_outputs=*/1,
-           lazy_tensors::util::MHash(threshold)),
+           torch::lazy::MHash(threshold)),
       threshold_(threshold) {}
 
 NodePtr ThresholdBackward::Clone(OpList operands) const {

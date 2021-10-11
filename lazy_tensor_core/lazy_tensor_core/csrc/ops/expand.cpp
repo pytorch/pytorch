@@ -12,7 +12,7 @@ Expand::Expand(const Value& input, std::vector<lazy_tensors::int64> size,
                bool is_scalar_expand)
     : Node(ir::OpKind(at::aten::expand), {input},
            /*num_outputs=*/1,
-           lazy_tensors::util::MHash(size, is_scalar_expand)),
+           torch::lazy::MHash(size, is_scalar_expand)),
       size_(std::move(size)),
       is_scalar_expand_(is_scalar_expand) {
   SetShapeDeferred(

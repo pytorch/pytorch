@@ -15,22 +15,22 @@ class Generic : public Node {
  public:
   Generic(OpKind op, lazy_tensors::Span<const Value> operands,
           lazy_tensors::Shape shape, size_t num_outputs = 1,
-          lazy_tensors::hash_t hash_seed = 0x5a2d296e9);
+          torch::lazy::hash_t hash_seed = (uint32_t)0x5a2d296e9);
 
   Generic(OpKind op, lazy_tensors::Span<const Value> operands,
           const std::function<lazy_tensors::Shape()>& shape_fn,
-          size_t num_outputs = 1, lazy_tensors::hash_t hash_seed = 0x5a2d296e9);
+          size_t num_outputs = 1, torch::lazy::hash_t hash_seed = (uint32_t)0x5a2d296e9);
 
   Generic(OpKind op, lazy_tensors::Span<const Value> operands,
-          size_t num_outputs = 1, lazy_tensors::hash_t hash_seed = 0x5a2d296e9);
+          size_t num_outputs = 1, torch::lazy::hash_t hash_seed = (uint32_t)0x5a2d296e9);
 
   Generic(OpKind op, lazy_tensors::Shape shape, size_t num_outputs,
-          lazy_tensors::hash_t hash_seed);
+          torch::lazy::hash_t hash_seed);
 
   NodePtr Clone(OpList operands) const override;
 
  private:
-  lazy_tensors::hash_t hash_seed_;
+  torch::lazy::hash_t hash_seed_;
 };
 
 }  // namespace ops

@@ -10,7 +10,7 @@ namespace ops {
 IndexSelect::IndexSelect(const Value& input, lazy_tensors::int64 dim,
                          const Value& index)
     : Node(ir::OpKind(at::aten::index_select), {input, index},
-           /*num_outputs=*/1, lazy_tensors::util::MHash(dim)),
+           /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim) {
   SetShapeDeferred(
       [&]() { return compiler::NodeLowering::Get()->Infer(this); });

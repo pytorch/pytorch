@@ -11,7 +11,7 @@ namespace ops {
 ReflectionPad2d::ReflectionPad2d(const Value& input,
                                  std::vector<lazy_tensors::int64> padding)
     : Node(OpKind(at::aten::reflection_pad2d), {input},
-           /*num_outputs=*/1, lazy_tensors::util::MHash(padding)),
+           /*num_outputs=*/1, torch::lazy::MHash(padding)),
       padding_(std::move(padding)) {
   SetShapeDeferred(
       [&]() { return compiler::NodeLowering::Get()->Infer(this); });

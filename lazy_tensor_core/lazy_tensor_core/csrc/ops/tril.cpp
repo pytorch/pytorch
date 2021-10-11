@@ -1,6 +1,5 @@
 #include "lazy_tensor_core/csrc/ops/tril.h"
 
-#include "lazy_tensors/computation_client/util.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -8,7 +7,7 @@ namespace ops {
 
 Tril::Tril(const Value& input, lazy_tensors::int64 diagonal)
     : Node(ir::OpKind(at::aten::tril), {input}, input.shape(),
-           /*num_outputs=*/1, lazy_tensors::util::MHash(diagonal)),
+           /*num_outputs=*/1, torch::lazy::MHash(diagonal)),
       diagonal_(diagonal) {}
 
 NodePtr Tril::Clone(OpList operands) const {

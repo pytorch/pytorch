@@ -2,7 +2,6 @@
 
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
-#include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/str_join.h"
 
 namespace torch_lazy_tensors {
@@ -14,7 +13,7 @@ UpsampleNearestBackward::UpsampleNearestBackward(
     std::vector<lazy_tensors::int64> input_size)
     : Node(ir::OpKind(at::aten::upsample_nearest2d_backward), {input},
            /*num_outputs=*/1,
-           lazy_tensors::util::MHash(output_size, input_size)),
+           torch::lazy::MHash(output_size, input_size)),
       output_size_(std::move(output_size)),
       input_size_(std::move(input_size)) {
   SetShapeDeferred(

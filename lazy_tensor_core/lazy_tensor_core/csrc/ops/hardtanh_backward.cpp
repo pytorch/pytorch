@@ -12,7 +12,7 @@ HardtanhBackward::HardtanhBackward(const Value& grad_output, const Value& input,
                                    const at::Scalar& max_val)
     : Node(OpKind(at::aten::hardtanh_backward), {grad_output, input},
            grad_output.shape(), /*num_outputs=*/1,
-           lazy_tensors::util::MHash(ScalarHash(min_val), ScalarHash(max_val))),
+           torch::lazy::MHash(ScalarHash(min_val), ScalarHash(max_val))),
       min_val_(min_val),
       max_val_(max_val) {}
 

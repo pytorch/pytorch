@@ -12,7 +12,7 @@ namespace ops {
 Nms::Nms(const Value& boxes, const Value& scores, const Value& score_threshold,
          const Value& iou_threshold, lazy_tensors::int64 output_size)
     : Node(ltc_nms, {boxes, scores, score_threshold, iou_threshold},
-           /*num_outputs=*/2, lazy_tensors::util::MHash(output_size)),
+           /*num_outputs=*/2, torch::lazy::MHash(output_size)),
       output_size_(output_size) {
   SetShapeDeferred(
       [&]() { return compiler::NodeLowering::Get()->Infer(this); });

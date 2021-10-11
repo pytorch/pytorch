@@ -2,7 +2,6 @@
 
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
-#include "lazy_tensors/computation_client/util.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -10,7 +9,7 @@ namespace ops {
 
 NotSupported::NotSupported(std::string description, lazy_tensors::Shape shape)
     : Node(ltc_not_supported, std::move(shape), /*num_outputs=*/1,
-           lazy_tensors::util::MHash(description)),
+           torch::lazy::MHash(description)),
       description_(std::move(description)) {}
 
 NodePtr NotSupported::Clone(OpList operands) const {

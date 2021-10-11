@@ -40,7 +40,7 @@ void PopulateTensorBuffer(const at::Tensor& tensor,
                           void* dest_buffer, size_t dest_buffer_size,
                           const Device& device);
 
-lazy_tensors::hash_t TensorHash(const at::Tensor& tensor);
+torch::lazy::hash_t TensorHash(const at::Tensor& tensor);
 
 // Retrieves the device data handles by parallel uploading data onto the
 // corresponding devices.

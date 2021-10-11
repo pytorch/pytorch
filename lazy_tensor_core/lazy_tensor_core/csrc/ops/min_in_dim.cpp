@@ -2,7 +2,6 @@
 
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensor_core/csrc/reduction.h"
-#include "lazy_tensors/computation_client/util.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -10,7 +9,7 @@ namespace ops {
 
 MinInDim::MinInDim(const Value& input, lazy_tensors::int64 dim, bool keepdim)
     : Node(ir::OpKind(at::aten::min), {input},
-           /*num_outputs=*/2, lazy_tensors::util::MHash(dim, keepdim)),
+           /*num_outputs=*/2, torch::lazy::MHash(dim, keepdim)),
       dim_(dim),
       keepdim_(keepdim) {
   SetShapeDeferred(
