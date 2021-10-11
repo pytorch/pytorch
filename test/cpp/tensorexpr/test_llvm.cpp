@@ -231,8 +231,8 @@ TEST(LLVM, BitCast) {
 
 TEST(LLVM, fastLogFloat) {
   const int kTotalSize = 128 * 128;
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kFloat);
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
@@ -261,7 +261,7 @@ TEST(LLVM, fastLogFloat) {
 }
 
 TEST(LLVM, LetTest01) {
-  Placeholder a(BufHandle("A", {1}, kFloat));
+  BufHandle a("A", {1}, kFloat);
   std::vector<float> v = {1, 0};
   std::vector<void*> args({v.data()});
   VarHandle x("x", kFloat);
@@ -276,7 +276,7 @@ TEST(LLVM, LetTest01) {
 }
 
 TEST(LLVM, LetTest02) {
-  Placeholder a(BufHandle("A", {1}, kFloat));
+  BufHandle a("A", {1}, kFloat);
   std::vector<float> v = {1, 0};
   std::vector<void*> args({v.data()});
   VarHandle x("x", kFloat);
@@ -294,7 +294,7 @@ TEST(LLVM, LetTest02) {
 }
 
 TEST(LLVM, LetTestMultitype) {
-  Placeholder a(BufHandle("A", {1}, kDouble));
+  BufHandle a("A", {1}, kDouble);
   std::vector<double> v = {1, 0};
   std::vector<void*> args({v.data()});
   VarHandle x("x", kByte);
@@ -315,7 +315,7 @@ TEST(LLVM, LetTestMultitype) {
 }
 
 TEST(LLVM, BufferTest) {
-  Placeholder a(BufHandle("A", {32}, kFloat));
+  BufHandle a("A", {32}, kFloat);
   std::vector<int32_t> v(5);
   std::vector<void*> args({v.data()});
   auto rv = IntImm::make(0);
@@ -324,7 +324,7 @@ TEST(LLVM, BufferTest) {
 }
 
 TEST(LLVM, BlockTest) {
-  Placeholder a(BufHandle("A", {32}, kInt));
+  BufHandle a("A", {32}, kInt);
   std::vector<int32_t> v = {1, 2};
   std::vector<void*> args({v.data()});
 
@@ -341,8 +341,8 @@ TEST(LLVM, BlockTest) {
 }
 
 TEST(LLVM, LoadStoreTest) {
-  Placeholder a(BufHandle("A", {1}, kInt));
-  Placeholder b(BufHandle("B", {1}, kInt));
+  BufHandle a("A", {1}, kInt);
+  BufHandle b("B", {1}, kInt);
   std::vector<int32_t> a_buffer = {42};
   std::vector<int32_t> b_buffer = {-11};
 
@@ -355,9 +355,9 @@ TEST(LLVM, LoadStoreTest) {
 }
 
 TEST(LLVM, IfThenElseTest) {
-  Placeholder a(BufHandle("A", {1}, kInt));
-  Placeholder b(BufHandle("B", {1}, kInt));
-  Placeholder c(BufHandle("C", {1}, kInt));
+  BufHandle a("A", {1}, kInt);
+  BufHandle b("B", {1}, kInt);
+  BufHandle c("C", {1}, kInt);
   std::vector<int32_t> a_buffer = {42};
   std::vector<int32_t> b_buffer = {-11};
   std::vector<int32_t> c_buffer = {1};
@@ -372,7 +372,7 @@ TEST(LLVM, IfThenElseTest) {
 
 // if (x < 10) x = x + 1
 TEST(LLVM, CondNoFalseBlockTest) {
-  Placeholder x(BufHandle("X", {1}, kInt));
+  BufHandle x("X", {1}, kInt);
   auto cmp = CompareSelect::make(x.load(0), 10, CompareSelectOperation::kLT);
   auto cond = Cond::make(cmp, x.store({0}, x.load(0) + 1), nullptr);
 
@@ -395,7 +395,7 @@ TEST(LLVM, CondNoFalseBlockTest) {
 //   x = x - 1;
 // }
 TEST(LLVM, CondTest) {
-  Placeholder x(BufHandle("X", {1}, kInt));
+  BufHandle x("X", {1}, kInt);
   auto cmp = CompareSelect::make(x.load(0), 10, CompareSelectOperation::kLT);
   auto cond =
       Cond::make(cmp, x.store({0}, x.load(0) + 1), x.store({0}, x.load(0) - 1));
@@ -431,7 +431,7 @@ TEST(LLVM, CondTest) {
 //   }
 // }
 TEST(LLVM, CondNestedTest) {
-  Placeholder x(BufHandle("X", {1}, kInt));
+  BufHandle x("X", {1}, kInt);
   auto true_cmp =
       CompareSelect::make(x.load(0), 5, CompareSelectOperation::kGT);
   auto true_cond = Cond::make(
@@ -485,8 +485,8 @@ TEST(LLVM, DirectVectorization) {
 }
 
 TEST(LLVM, VecLoadStoreTest) {
-  Placeholder a(BufHandle("A", {1}, kInt));
-  Placeholder b(BufHandle("B", {1}, kInt));
+  BufHandle a("A", {1}, kInt);
+  BufHandle b("B", {1}, kInt);
   std::vector<int32_t> a_buffer = {1, 1, 1, 1};
   std::vector<int32_t> b_buffer = {2, 2, 2, 2};
 
@@ -506,8 +506,8 @@ TEST(LLVM, VecLoadStoreTest) {
 
 #define FLOAT_INTRINSICS_TEST(Name, Lanes)                                   \
   TEST(LLVM, VecFloat_##Name##Lane##Lanes##Test) {                           \
-    Placeholder a(BufHandle("A", {1}, kFloat));                              \
-    Placeholder b(BufHandle("B", {1}, kFloat));                              \
+    BufHandle a("A", {1}, kFloat);                                           \
+    BufHandle b("B", {1}, kFloat);                                           \
     float val = 0.5f;                                                        \
     std::vector<float> a_buffer(Lanes, val);                                 \
     std::vector<float> b_buffer(Lanes, val);                                 \
@@ -544,8 +544,8 @@ FLOAT_INTRINSICS_TEST(lgamma, 8)
 
 #define DOUBLE_INTRINSICS_TEST(Name, Lanes)                                  \
   TEST(LLVM, VecDouble_##Name##Lane##Lanes##Test) {                          \
-    Placeholder a(BufHandle("A", {1}, kDouble));                             \
-    Placeholder b(BufHandle("B", {1}, kDouble));                             \
+    BufHandle a("A", {1}, kDouble);                                          \
+    BufHandle b("B", {1}, kDouble);                                          \
     float val = 0.5f;                                                        \
     std::vector<double> a_buffer(Lanes, val);                                \
     std::vector<double> b_buffer(Lanes, val);                                \
@@ -581,12 +581,12 @@ DOUBLE_INTRINSICS_TEST(lgamma, 4)
 #undef DOUBLE_INTRINSICS_TEST
 
 TEST(LLVM, VectorizerLoadStoreTest) {
-  Placeholder a(BufHandle("A", {1}, kInt));
+  BufHandle a("A", {1}, kInt);
 
   Tensor c =
       Compute("c", {{4, "i"}}, [&](const VarHandle& i) { return a.load(i); });
 
-  Placeholder c_buf(BufHandle(c.buf()));
+  BufHandle c_buf(c.buf());
   LoopNest l({c});
   StmtPtr s = l.root_stmt();
   ASSERT_TRUE(LoopNest::vectorize(to<For>(to<Block>(s)->front())));
@@ -603,13 +603,13 @@ TEST(LLVM, VectorizerLoadStoreTest) {
 }
 
 TEST(LLVM, VectorizeBitCast) {
-  Placeholder a(BufHandle("A", {128}, kInt));
+  BufHandle a("A", {128}, kInt);
 
   Tensor c = Compute("c", {{128, "i"}}, [&](const VarHandle& i) {
     return bitcast<float>(a.load(i));
   });
 
-  Placeholder c_buf(BufHandle(c.buf()));
+  BufHandle c_buf(c.buf());
   LoopNest l({c});
   StmtPtr s = l.root_stmt();
   ASSERT_TRUE(LoopNest::vectorize(to<For>(to<Block>(s)->front())));
@@ -629,8 +629,8 @@ TEST(LLVM, VectorizeBitCast) {
 
 TEST(LLVM, MemcpyTest) {
   constexpr int N = 32;
-  Placeholder a(BufHandle("A", {N}, kInt));
-  Placeholder b(BufHandle("B", {N}, kInt));
+  BufHandle a("A", {N}, kInt);
+  BufHandle b("B", {N}, kInt);
   std::vector<int32_t> a_buffer(N, 42);
   std::vector<int32_t> b_buffer(N, 0);
 
@@ -650,7 +650,7 @@ TEST(LLVM, MemcpyTest) {
 
 TEST(LLVM, BzeroTest) {
   constexpr int N = 32;
-  Placeholder b(BufHandle("B", {N}, kInt));
+  BufHandle b("B", {N}, kInt);
   std::vector<int32_t> b_buffer(N, 11);
 
   VarHandle i("i", kInt);
@@ -667,9 +667,9 @@ TEST(LLVM, BzeroTest) {
 
 TEST(LLVM, ElemwiseAdd) {
   constexpr int N = 1024;
-  Placeholder a(BufHandle("A", {N}, kInt));
-  Placeholder b(BufHandle("B", {N}, kInt));
-  Placeholder c(BufHandle("C", {N}, kInt));
+  BufHandle a("A", {N}, kInt);
+  BufHandle b("B", {N}, kInt);
+  BufHandle c("C", {N}, kInt);
   std::vector<int32_t> a_buffer(N, 41);
   std::vector<int32_t> b_buffer(N, 1);
   std::vector<int32_t> c_buffer(N, 1);
@@ -692,9 +692,9 @@ TEST(LLVM, ElemwiseAdd) {
 
 TEST(LLVM, ElemwiseAddFloat) {
   constexpr int N = 1024;
-  Placeholder a(BufHandle("A", {N}, kFloat));
-  Placeholder b(BufHandle("B", {N}, kFloat));
-  Placeholder c(BufHandle("C", {N}, kFloat));
+  BufHandle a("A", {N}, kFloat);
+  BufHandle b("B", {N}, kFloat);
+  BufHandle c("C", {N}, kFloat);
   std::vector<float> a_buffer(N, 41);
   std::vector<float> b_buffer(N, 1);
   std::vector<float> c_buffer(N, 1);
@@ -717,8 +717,8 @@ TEST(LLVM, ElemwiseAddFloat) {
 
 TEST(LLVM, ElemwiseLog10Float) {
   constexpr int N = 1024;
-  Placeholder a(BufHandle("A", {N}, kFloat));
-  Placeholder b(BufHandle("B", {N}, kFloat));
+  BufHandle a("A", {N}, kFloat);
+  BufHandle b("B", {N}, kFloat);
   std::vector<float> a_buffer(N, 10.0f);
   std::vector<float> b_buffer(N, 2.0f);
 
@@ -743,8 +743,8 @@ TEST(LLVM, ElemwiseLog10Float) {
 
 TEST(LLVM, ElemwiseLog1pFloat) {
   constexpr int N = 1024;
-  Placeholder a(BufHandle("A", {N}, kFloat));
-  Placeholder b(BufHandle("B", {N}, kFloat));
+  BufHandle a("A", {N}, kFloat);
+  BufHandle b("B", {N}, kFloat);
   std::vector<float> a_buffer(N, expf(3.0f) - 1);
   std::vector<float> b_buffer(N, 42.0f);
 
@@ -769,9 +769,9 @@ TEST(LLVM, ElemwiseLog1pFloat) {
 
 TEST(LLVM, ElemwiseMaxInt) {
   constexpr int N = 1024;
-  Placeholder a(BufHandle("A", {N}, kInt));
-  Placeholder b(BufHandle("B", {N}, kInt));
-  Placeholder c(BufHandle("C", {N}, kInt));
+  BufHandle a("A", {N}, kInt);
+  BufHandle b("B", {N}, kInt);
+  BufHandle c("C", {N}, kInt);
   std::vector<int> a_buffer(N, 41);
   std::vector<int> b_buffer(N, 1);
   std::vector<int> c_buffer(N, 1);
@@ -795,9 +795,9 @@ TEST(LLVM, ElemwiseMaxInt) {
 
 TEST(LLVM, ElemwiseMinInt) {
   constexpr int N = 1024;
-  Placeholder a(BufHandle("A", {N}, kInt));
-  Placeholder b(BufHandle("B", {N}, kInt));
-  Placeholder c(BufHandle("C", {N}, kInt));
+  BufHandle a("A", {N}, kInt);
+  BufHandle b("B", {N}, kInt);
+  BufHandle c("C", {N}, kInt);
   std::vector<int> a_buffer(N, 41);
   std::vector<int> b_buffer(N, 1);
   std::vector<int> c_buffer(N, 1);
@@ -821,9 +821,9 @@ TEST(LLVM, ElemwiseMinInt) {
 
 TEST(LLVM, ElemwiseMaxFloat) {
   constexpr int N = 1024;
-  Placeholder a(BufHandle("A", {N}, kFloat));
-  Placeholder b(BufHandle("B", {N}, kFloat));
-  Placeholder c(BufHandle("C", {N}, kFloat));
+  BufHandle a("A", {N}, kFloat);
+  BufHandle b("B", {N}, kFloat);
+  BufHandle c("C", {N}, kFloat);
   std::vector<float> a_buffer(N, 41);
   std::vector<float> b_buffer(N, 1);
   std::vector<float> c_buffer(N, 1);
@@ -847,9 +847,9 @@ TEST(LLVM, ElemwiseMaxFloat) {
 
 TEST(LLVM, ElemwiseMaxNaNFloat) {
   constexpr int N = 1024;
-  Placeholder a(BufHandle("A", {N}, kFloat));
-  Placeholder b(BufHandle("B", {N}, kFloat));
-  Placeholder c(BufHandle("C", {N}, kFloat));
+  BufHandle a("A", {N}, kFloat);
+  BufHandle b("B", {N}, kFloat);
+  BufHandle c("C", {N}, kFloat);
   std::vector<float> a_buffer(N, NAN);
   std::vector<float> b_buffer(N, 1);
   std::vector<float> c_buffer(N, 1);
@@ -874,9 +874,9 @@ TEST(LLVM, ElemwiseMaxNaNFloat) {
 
 TEST(LLVM, ElemwiseMinFloat) {
   constexpr int N = 1024;
-  Placeholder a(BufHandle("A", {N}, kFloat));
-  Placeholder b(BufHandle("B", {N}, kFloat));
-  Placeholder c(BufHandle("C", {N}, kFloat));
+  BufHandle a("A", {N}, kFloat);
+  BufHandle b("B", {N}, kFloat);
+  BufHandle c("C", {N}, kFloat);
   std::vector<float> a_buffer(N, 41);
   std::vector<float> b_buffer(N, 1);
   std::vector<float> c_buffer(N, 1);
@@ -900,9 +900,9 @@ TEST(LLVM, ElemwiseMinFloat) {
 
 TEST(LLVM, ElemwiseMinNaNFloat) {
   constexpr int N = 1024;
-  Placeholder a(BufHandle("A", {N}, kFloat));
-  Placeholder b(BufHandle("B", {N}, kFloat));
-  Placeholder c(BufHandle("C", {N}, kFloat));
+  BufHandle a("A", {N}, kFloat);
+  BufHandle b("B", {N}, kFloat);
+  BufHandle c("C", {N}, kFloat);
   std::vector<float> a_buffer(N, NAN);
   std::vector<float> b_buffer(N, 1);
   std::vector<float> c_buffer(N, 1);
@@ -927,9 +927,9 @@ TEST(LLVM, ElemwiseMinNaNFloat) {
 
 TEST(LLVM, ElemwiseMod) {
   constexpr int N = 1024;
-  Placeholder a(BufHandle("A", {N}, kInt));
-  Placeholder b(BufHandle("B", {N}, kInt));
-  Placeholder c(BufHandle("C", {N}, kInt));
+  BufHandle a("A", {N}, kInt);
+  BufHandle b("B", {N}, kInt);
+  BufHandle c("C", {N}, kInt);
   std::vector<int32_t> a_buffer(N, 41);
   std::vector<int32_t> b_buffer(N, 23);
   std::vector<int32_t> c_buffer(N, 18);
@@ -952,9 +952,9 @@ TEST(LLVM, ElemwiseMod) {
 
 TEST(LLVM, CompareSelectIntEQ) {
   constexpr int N = 1024;
-  Placeholder a(BufHandle("A", {N}, kInt));
-  Placeholder b(BufHandle("B", {N}, kInt));
-  Placeholder c(BufHandle("C", {N}, kInt));
+  BufHandle a("A", {N}, kInt);
+  BufHandle b("B", {N}, kInt);
+  BufHandle c("C", {N}, kInt);
   std::vector<int> a_buffer(N, 1);
   std::vector<int> b_buffer(N, 1);
   std::vector<int> c_buffer(N, 0);
@@ -992,9 +992,9 @@ TEST(LLVM, CompareSelectIntEQ) {
 
 TEST(LLVM, CompareSelectFloatEQ) {
   constexpr int N = 1024;
-  Placeholder a(BufHandle("A", {N}, kFloat));
-  Placeholder b(BufHandle("B", {N}, kFloat));
-  Placeholder c(BufHandle("C", {N}, kInt));
+  BufHandle a("A", {N}, kFloat);
+  BufHandle b("B", {N}, kFloat);
+  BufHandle c("C", {N}, kInt);
   std::vector<float> a_buffer(N, 1.0f);
   std::vector<float> b_buffer(N, 1.0f);
   std::vector<int> c_buffer(N, 0);
@@ -1025,9 +1025,9 @@ TEST(LLVM, CompareSelectFloatEQ) {
 
 TEST(LLVM, CompareSelectByteGT) {
   constexpr int N = 1024;
-  Placeholder a(BufHandle("A", {N}, kByte));
-  Placeholder b(BufHandle("B", {N}, kByte));
-  Placeholder c(BufHandle("C", {N}, kInt));
+  BufHandle a("A", {N}, kByte);
+  BufHandle b("B", {N}, kByte);
+  BufHandle c("C", {N}, kInt);
   std::vector<uint8_t> a_buffer(N, 0);
   std::vector<uint8_t> b_buffer(N, 0);
   std::vector<int> c_buffer(N, 0);
@@ -1065,9 +1065,9 @@ TEST(LLVM, CompareSelectByteGT) {
 
 TEST(LLVM, CompareSelectByteGE) {
   constexpr int N = 1024;
-  Placeholder a(BufHandle("A", {N}, kByte));
-  Placeholder b(BufHandle("B", {N}, kByte));
-  Placeholder c(BufHandle("C", {N}, kInt));
+  BufHandle a("A", {N}, kByte);
+  BufHandle b("B", {N}, kByte);
+  BufHandle c("C", {N}, kInt);
   std::vector<uint8_t> a_buffer(N, 0);
   std::vector<uint8_t> b_buffer(N, 0);
   std::vector<int> c_buffer(N, 0);
@@ -1100,9 +1100,9 @@ TEST(LLVM, CompareSelectByteGE) {
 
 TEST(LLVM, CompareSelectByteLT) {
   constexpr int N = 1024;
-  Placeholder a(BufHandle("A", {N}, kByte));
-  Placeholder b(BufHandle("B", {N}, kByte));
-  Placeholder c(BufHandle("C", {N}, kInt));
+  BufHandle a("A", {N}, kByte);
+  BufHandle b("B", {N}, kByte);
+  BufHandle c("C", {N}, kInt);
   std::vector<uint8_t> a_buffer(N, 0);
   std::vector<uint8_t> b_buffer(N, 128);
   std::vector<int> c_buffer(N, 0);
@@ -1140,9 +1140,9 @@ TEST(LLVM, CompareSelectByteLT) {
 
 TEST(LLVM, CompareSelectByteLE) {
   constexpr int N = 1024;
-  Placeholder a(BufHandle("A", {N}, kByte));
-  Placeholder b(BufHandle("B", {N}, kByte));
-  Placeholder c(BufHandle("C", {N}, kInt));
+  BufHandle a("A", {N}, kByte);
+  BufHandle b("B", {N}, kByte);
+  BufHandle c("C", {N}, kInt);
   std::vector<uint8_t> a_buffer(N, 0);
   std::vector<uint8_t> b_buffer(N, 128);
   std::vector<int> c_buffer(N, 0);
@@ -1174,7 +1174,7 @@ TEST(LLVM, CompareSelectByteLE) {
 }
 
 TEST(LLVM, StoreFloat) {
-  Placeholder result(BufHandle("result", {1}, kFloat));
+  BufHandle result("result", {1}, kFloat);
   std::vector<float> result_buffer = {0.0f};
   auto expr = result.store({0}, FloatImm::make(3.14f));
   LLVMCodeGen cg(expr, {result});
@@ -1190,7 +1190,7 @@ TEST(LLVM, SimpleMath01) {
   });
   LoopNest l({tensor});
   StmtPtr stmt = l.root_stmt();
-  Placeholder f_buf(BufHandle(tensor.buf()));
+  BufHandle f_buf(tensor.buf());
   LLVMCodeGen cg(stmt, {f_buf});
 
   PaddedBuffer<float> f_v(N, "f_v");
@@ -1206,13 +1206,13 @@ TEST(LLVM, SimpleMath01) {
 
 TEST(LLVM, ComputeMul) {
   const int N = 1024;
-  Placeholder a(BufHandle("a", {N}, kFloat));
-  Placeholder b(BufHandle("b", {N}, kFloat));
+  BufHandle a("a", {N}, kFloat);
+  BufHandle b("b", {N}, kFloat);
   Tensor c = Compute("c", {{N, "i"}}, [&](const VarHandle& i) {
     return a.load(i) * b.load(i);
   });
 
-  Placeholder c_buf(BufHandle(c.buf()));
+  BufHandle c_buf(c.buf());
   LoopNest l({c});
   StmtPtr s = l.root_stmt();
 
@@ -1229,14 +1229,14 @@ TEST(LLVM, ComputeMul) {
 TEST(LLVM, BroadcastAdd) {
   const int M = 32;
   const int N = 1024;
-  Placeholder a(BufHandle("a", {M, N}, kFloat));
-  Placeholder b(BufHandle("b", {N}, kFloat));
+  BufHandle a("a", {M, N}, kFloat);
+  BufHandle b("b", {N}, kFloat);
   Tensor c = Compute(
       "c", {{M, "i"}, {N, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return a.load(i, j) + b.load(j);
       });
 
-  Placeholder c_buf(BufHandle(c.buf()));
+  BufHandle c_buf(c.buf());
   LoopNest l({c});
   l.prepareForCodegen();
   StmtPtr s = l.root_stmt();
@@ -1289,9 +1289,9 @@ TEST(LLVM, LogicalRightShift) {
 TEST(LLVM, DynamicShapeAdd) {
   auto testWithSize = [](int32_t size) {
     VarHandle n("n", kInt);
-    Placeholder a(BufHandle("a", {n}, kFloat));
-    Placeholder b(BufHandle("b", {n}, kFloat));
-    Placeholder c(BufHandle("c", {n}, kFloat));
+    BufHandle a("a", {n}, kFloat);
+    BufHandle b("b", {n}, kFloat);
+    BufHandle c("c", {n}, kFloat);
     VarHandle i("i", kInt);
     StmtPtr s = For::make(i, 0, n, c.store({i}, a.load(i) + b.load(i)));
     std::vector<float> aData(size, 1.0f);
@@ -1310,9 +1310,9 @@ TEST(LLVM, DynamicShapeAdd) {
 TEST(LLVM, BindDynamicShapeAdd) {
   auto testWithSize = [](int32_t size) {
     VarHandle n("n", kInt);
-    Placeholder a(BufHandle("a", {n}, kFloat));
-    Placeholder b(BufHandle("b", {n}, kFloat));
-    Placeholder c(BufHandle("c", {n}, kFloat));
+    BufHandle a("a", {n}, kFloat);
+    BufHandle b("b", {n}, kFloat);
+    BufHandle c("c", {n}, kFloat);
     VarHandle i("i", kInt);
     StmtPtr s = For::make(i, 0, n, c.store({i}, a.load(i) + b.load(i)));
     std::vector<float> aData(size, 1.0f);
@@ -1330,8 +1330,8 @@ TEST(LLVM, BindDynamicShapeAdd) {
 TEST(LLVM, TensorDynamicShapeAdd) {
   auto testWithSize = [](int32_t size) {
     VarHandle n("n", kInt);
-    Placeholder a(BufHandle("a", {n}, kFloat));
-    Placeholder b(BufHandle("b", {n}, kFloat));
+    BufHandle a("a", {n}, kFloat);
+    BufHandle b("b", {n}, kFloat);
     Tensor c = Compute("c", {{n, "n"}}, [&](const VarHandle& i) {
       return a.load(i) + b.load(i);
     });
@@ -1353,8 +1353,8 @@ TEST(LLVM, DynamicShape2D) {
   auto testWithSize = [](int32_t M, int32_t N) {
     VarHandle m("m", kInt);
     VarHandle n("n", kInt);
-    Placeholder a(BufHandle("a", {m, n}, kFloat));
-    Placeholder b(BufHandle("b", {m, n}, kFloat));
+    BufHandle a("a", {m, n}, kFloat);
+    BufHandle b("b", {m, n}, kFloat);
     Tensor c = Compute(
         "c", {{m, "m"}, {n, "n"}}, [&](const VarHandle& i, const VarHandle& j) {
           return a.load(i, j) + b.load(i, j);
@@ -1383,7 +1383,7 @@ TEST(LLVM, EmptyStmt) {
 }
 
 TEST(LLVM, EliminatedStmt) {
-  Placeholder a(BufHandle("a", {1}, kFloat));
+  BufHandle a("a", {1}, kFloat);
 
   Tensor c = Compute("c", {{0, "m"}}, [&](const VarHandle& m) { return m; });
 
@@ -1402,7 +1402,7 @@ TEST(LLVM, SimpleReduction) {
   int N = 64;
   const int kTotalSize = M * N;
 
-  Placeholder a("a", kFloat, {1, M, N});
+  BufHandle a("a", {1, M, N}, kFloat);
 
   // TODO: why doesn't implicit vector<DimArg> work?
   std::vector<DimArg> axis = {DimArg(1)};
@@ -1439,7 +1439,7 @@ TEST(LLVM, RFactorReduction) {
   int N = 64;
   const int kTotalSize = M * N;
 
-  Placeholder a("a", kFloat, {1, M, N});
+  BufHandle a("a", {1, M, N}, kFloat);
 
   // TODO: why doesn't implicit vector<DimArg> work?
   std::vector<DimArg> axis = {DimArg(1)};
@@ -1487,7 +1487,7 @@ TEST(LLVM, RFactorVectorizedReduction) {
   int N = 64;
   const int kTotalSize = M * N;
 
-  Placeholder a("a", kFloat, {1, M, N});
+  BufHandle a("a", {1, M, N}, kFloat);
 
   Tensor b = Reduce("sum", {{1, "K"}}, Sum(), a, {{M, "M"}, {N, "N"}});
   LoopNest loopnest({b});
@@ -1652,8 +1652,8 @@ TEST(LLVM, VectorizedGEMM) {
   int N = 32;
   int K = 48;
 
-  Placeholder AP(BufHandle("A", {M, K}, kFloat));
-  Placeholder BP(BufHandle("B", {K, N}, kFloat));
+  BufHandle AP("A", {M, K}, kFloat);
+  BufHandle BP("B", {K, N}, kFloat);
   Tensor CT = Reduce(
       "gemm",
       {{M, "M"}, {N, "N"}},
@@ -1732,8 +1732,8 @@ TEST(LLVM, VectorizedGEMM) {
 TEST(LLVM, CallRaw) {
   const int M = 32;
   VarHandle N("N", kInt);
-  Placeholder a(BufHandle("a", {M, N}, kFloat));
-  Placeholder b(BufHandle("b", {N}, kFloat));
+  BufHandle a("a", {M, N}, kFloat);
+  BufHandle b("b", {N}, kFloat);
   Tensor c = Compute(
       "c", {{M, "i"}, {N, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return a.load(i, j) + b.load(j);
@@ -1772,9 +1772,9 @@ TEST(LLVM, CallRaw) {
 
 TEST(LLVM, CustomTarget) {
   constexpr int M = 16;
-  Placeholder a("a", kFloat, {M});
-  Placeholder b("b", kFloat, {M});
-  Placeholder c("c", kFloat, {M});
+  BufHandle a("a", {M}, kFloat);
+  BufHandle b("b", {M}, kFloat);
+  BufHandle c("c", {M}, kFloat);
   Tensor d = Compute("d", {{M, "m"}}, [&](const VarHandle& m) {
     return a.load(m) * b.load(m) + c.load(m);
   });

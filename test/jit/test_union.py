@@ -370,7 +370,7 @@ class TestUnion(JitTestCase):
             return x[1]
 
         with self.assertRaisesRegex(RuntimeError, "only int, float, "
-                                    "complex, Tensor and string keys "
+                                    "complex, Tensor, device and string keys "
                                     "are supported"):
             torch.jit.script(fn)
 

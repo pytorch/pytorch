@@ -12,10 +12,11 @@ from torch.nn.intrinsic import _FusedModule
 import torch.distributed as dist
 
 from torch.testing._internal.common_utils import TestCase
+from torch.ao.quantization import QuantType
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, default_dynamic_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
     propagate_qconfig_, convert, get_default_qconfig, quantize_dynamic_jit, quantize_jit, float_qparams_weight_only_qconfig, \
-    get_default_qat_qconfig, PerChannelMinMaxObserver, default_dynamic_quant_observer, QConfigDynamic, QuantType, quantize
+    get_default_qat_qconfig, PerChannelMinMaxObserver, default_dynamic_quant_observer, QConfigDynamic, quantize
 from torch.quantization.quantization_mappings import (
     get_default_dynamic_quant_module_mappings,
     get_default_qconfig_propagation_list,
@@ -1937,16 +1938,23 @@ class EmbeddingModule(torch.nn.Module):
     def forward(self, indices):
         return self.emb(indices)
 
-class EmbeddingWithLinear(torch.nn.Module):
+class EmbeddingWithStaticLinear(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.emb = torch.nn.Embedding(num_embeddings=10, embedding_dim=12)
-        self.fc = torch.nn.Linear(5, 5)
+        self.emb = torch.nn.EmbeddingBag(num_embeddings=10, embedding_dim=12)
+        self.fc = torch.nn.Linear(4, 2)
         self.emb.qconfig = float_qparams_weight_only_qconfig
         self.qconfig = default_qconfig
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
 
-    def forward(self, indices, linear_in):
-        return self.emb(indices), self.fc(linear_in)
+    def forward(self, indices, offsets, linear_in):
+        emb = self.emb(indices, offsets)
+        q_x = self.quant(linear_in)
+        fc = self.fc(q_x)
+        fc = self.dequant(fc)
+        features = torch.cat([fc] + [emb], dim=1)
+        return features
 
 class DenseTopMLP(nn.Module):
 

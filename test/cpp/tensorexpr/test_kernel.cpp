@@ -872,9 +872,9 @@ TEST_F(Kernel, SumOneAxis) {
         // Check the IR we produced
         const std::string& verification_pattern =
             R"IR(
-# CHECK: for (int64_t v = 0ll; v <
+# CHECK: for (int64_t
 # CHECK-NEXT: sum
-# CHECK-NEXT: for (int64_t v_1 = 0ll; v_1 <
+# CHECK-NEXT: for (int64_t
 # CHECK-NEXT:   sum)IR";
         torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
@@ -933,10 +933,10 @@ TEST_F(Kernel, SumMultipleAxes) {
         // Check the IR we produced
         const std::string& verification_pattern =
             R"IR(
-# CHECK: int64_t v = 0
-# CHECK: int64_t v_1 = 0
-# CHECK: int64_t v_2 = 0
-# CHECK: int64_t v_3 = 0
+# CHECK: for (int64_t
+# CHECK: for (int64_t
+# CHECK: for (int64_t
+# CHECK: for (int64_t
 # CHECK: sum)IR";
         torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
@@ -1279,8 +1279,8 @@ TEST_F(Kernel, InlineProducerIntoReduction) {
   // We should have only one loop in the end.
   const std::string& verification_pattern =
       R"IR(
-        # CHECK: for (int64_t v = 0ll; v < 5
-        # CHECK-NEXT: for (int64_t v_1 = 0ll; v_1 < 3
+        # CHECK: for (int64_t i_1 = 0ll; i_1 < 5
+        # CHECK-NEXT: for (int64_t j_1 = 0ll; j_1 < 3
         # CHECK-NEXT:   sum
         # CHECK-NOT: for)IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
@@ -1318,11 +1318,11 @@ TEST_F(Kernel, InlineReductionIntoConsumer) {
   // We should have two loops in the end.
   const std::string& verification_pattern =
       R"IR(
-        # CHECK: for (int64_t v = 0ll; v < 5
-        # CHECK-NEXT: for (int64_t v_1 = 0ll; v_1 < 3
+        # CHECK: for (int64_t i_1 = 0ll; i_1 < 5
+        # CHECK-NEXT: for (int64_t j_1 = 0ll; j_1 < 3
         # CHECK-NEXT:   sum
-        # CHECK: for (int64_t v_2 = 0ll; v_2 < 5
-        # CHECK-NEXT: for (int64_t v_3 = 0ll; v_3 < 3
+        # CHECK: for (int64_t i_2 = 0ll; i_2 < 5
+        # CHECK-NEXT: for (int64_t j_2 = 0ll; j_2 < 3
         # CHECK-NEXT:   aten_mul
         # CHECK-NOT: for)IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());

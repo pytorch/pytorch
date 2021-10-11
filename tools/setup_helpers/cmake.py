@@ -120,13 +120,13 @@ class CMake:
             return cmake_command
         cmake3 = which('cmake3')
         cmake = which('cmake')
-        if cmake3 is not None and CMake._get_version(cmake3) >= distutils.version.LooseVersion("3.5.0"):
+        if cmake3 is not None and CMake._get_version(cmake3) >= distutils.version.LooseVersion("3.10.0"):
             cmake_command = 'cmake3'
             return cmake_command
-        elif cmake is not None and CMake._get_version(cmake) >= distutils.version.LooseVersion("3.5.0"):
+        elif cmake is not None and CMake._get_version(cmake) >= distutils.version.LooseVersion("3.10.0"):
             return cmake_command
         else:
-            raise RuntimeError('no cmake or cmake3 with version >= 3.5.0 found')
+            raise RuntimeError('no cmake or cmake3 with version >= 3.10.0 found')
 
     @staticmethod
     def _get_version(cmd: str) -> Any:
@@ -357,13 +357,39 @@ class CMake:
 
         from .env import build_type
 
-        max_jobs = os.getenv('MAX_JOBS', str(multiprocessing.cpu_count()))
         build_args = ['--build', '.', '--target', 'install', '--config', build_type.build_type_string]
-        # This ``if-else'' clause would be unnecessary when cmake 3.12 becomes
-        # minimum, which provides a '-j' option: build_args += ['-j', max_jobs]
-        # would be sufficient by then.
-        if IS_WINDOWS and not USE_NINJA:  # We are likely using msbuild here
-            build_args += ['--', '/p:CL_MPCount={}'.format(max_jobs)]
-        else:
-            build_args += ['--', '-j', max_jobs]
+
+        # Determine the parallelism according to the following
+        # priorities:
+        # 1) MAX_JOBS environment variable
+        # 2) If using the Ninja build system, delegate decision to it.
+        # 3) Otherwise, fall back to the number of processors.
+
+        # Allow the user to set parallelism explicitly. If unset,
+        # we'll try to figure it out.
+        max_jobs = os.getenv('MAX_JOBS')
+
+        if max_jobs is not None or not USE_NINJA:
+            # Ninja is capable of figuring out the parallelism on its
+            # own: only specify it explicitly if we are not using
+            # Ninja.
+
+            # This lists the number of processors available on the
+            # machine. This may be an overestimate of the usable
+            # processors if CPU scheduling affinity limits it
+            # further. In the future, we should check for that with
+            # os.sched_getaffinity(0) on platforms that support it.
+            max_jobs = max_jobs or str(multiprocessing.cpu_count())
+
+            # This ``if-else'' clause would be unnecessary when cmake
+            # 3.12 becomes minimum, which provides a '-j' option:
+            # build_args += ['-j', max_jobs] would be sufficient by
+            # then. Until then, we use "--" to pass parameters to the
+            # underlying build system.
+            build_args += ['--']
+            if IS_WINDOWS and not USE_NINJA:
+                # We are likely using msbuild here
+                build_args += ['/p:CL_MPCount={}'.format(max_jobs)]
+            else:
+                build_args += ['-j', max_jobs]
         self.run(build_args, my_env)
