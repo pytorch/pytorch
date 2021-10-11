@@ -103,6 +103,16 @@ at::Tensor masked_scatter_backward(const at::Tensor & grad, const at::Tensor & m
 at::Tensor cholesky_backward(at::Tensor grad, bool upper, at::Tensor L);
 at::Tensor cholesky_jvp(const at::Tensor& input_tangent, const at::Tensor& L, bool upper);
 at::Tensor cholesky_inverse_backward(at::Tensor grad, at::Tensor L, bool upper, at::Tensor inverse);
+Tensor pinv_jvp(
+  const Tensor& A,
+  const Tensor& pinvA,
+  const Tensor& dA
+);
+Tensor pinv_backward(
+  const Tensor& grad,
+  const Tensor& pinvA,
+  const Tensor& A
+);
 at::Tensor split_with_sizes_backward(const std::vector<torch::autograd::Variable> &grads,
                                      IntArrayRef split_sizes, int64_t dim, IntArrayRef sizes, const at::TensorOptions &options);
 at::Tensor split_backward(const std::vector<torch::autograd::Variable> &grads, int64_t split_size, int64_t dim, at::IntArrayRef sizes, const at::TensorOptions &options);
@@ -122,7 +132,6 @@ Tensor binary_cross_entropy_target_backward(
 at::Tensor binary_cross_entropy_with_logits_target_backward(const at::Tensor& grad_output, const at::Tensor& self, const at::Tensor& target, const c10::optional<at::Tensor>& weight, const c10::optional<at::Tensor>& pos_weight, int64_t reduction);
 at::Tensor log_sigmoid_double_backward(const at::Tensor & grad, const at::Tensor & input);
 at::Tensor softmax_double_backward(const at::Tensor & grad, const at::Tensor & grad_output, int dim, const at::Tensor & output);
-at::Tensor log_softmax_double_backward(const at::Tensor & grad, const at::Tensor & grad_output, int dim, const at::Tensor & output);
 at::Tensor binary_cross_entropy_double_backward(const at::Tensor & grad_output, const at::Tensor & grad, const at::Tensor & input, const at::Tensor & target, const c10::optional<at::Tensor>& weight, int64_t reduction);
 at::Tensor binary_cross_entropy_double_backward_grad_output(const at::Tensor & grad, const at::Tensor & input, const at::Tensor & target, const c10::optional<at::Tensor>& weight, int64_t reduction);
 at::Tensor l1_loss_double_backward(const at::Tensor & grad, const at::Tensor & grad_output, const at::Tensor & input, const at::Tensor & target, int64_t reduction);
