@@ -1263,6 +1263,7 @@ TEST_F(AtenLtcTsTensorTest, TestMean) {
   ForEachDevice([&](const torch::Device& device) {
     torch::Tensor xla_a = CopyToDevice(a, device);
     torch::Tensor xla_b = torch::mean(xla_a);
+    ASSERT_EQ(b.sizes(), xla_b.sizes());
     AllClose(b, xla_b);
   });
 }
