@@ -954,12 +954,15 @@ if(USE_CUDA OR USE_ROCM)
   # The list of NVFUSER runtime files
   list(APPEND NVFUSER_RUNTIME_FILES
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/block_reduction.cu
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/block_sync_atomic.cu
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/block_sync_default.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/broadcast.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/fp16_support.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/grid_reduction.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/helpers.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/random_numbers.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/tensor.cu
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/welford.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/detail/PhiloxCudaStateRaw.cuh
     ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/detail/UnpackRaw.cuh
   )
@@ -1006,15 +1009,36 @@ if(NOT INTERN_BUILD_MOBILE)
   add_dependencies(torch_cpu Caffe2_PROTO)
 endif()
 
+# Build model tracer for tracing-based selective build
+if(TRACING_BASED AND NOT BUILD_LITE_INTERPRETER AND NOT INTERN_BUILD_MOBILE)
+  add_subdirectory(
+    ${TORCH_ROOT}/torch/csrc/jit/mobile/model_tracer
+    ${CMAKE_BINARY_DIR}/model_tracer
+  )
+endif()
+
 # Codegen selected_mobile_ops.h for template selective build
 if(BUILD_LITE_INTERPRETER AND SELECTED_OP_LIST)
-  add_custom_command(
-    OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
-    COMMAND
-    "${PYTHON_EXECUTABLE}" -m tools.lite_interpreter.gen_selected_mobile_ops_header
-    --yaml_file_path "${SELECTED_OP_LIST}"
-    --output_file_path "${CMAKE_BINARY_DIR}/aten/src/ATen"
-    WORKING_DIRECTORY "${TORCH_ROOT}")
+  message("running gen_selected_mobile_ops_header for:  '${SELECTED_OP_LIST}'")
+  if(${TRACING_BASED})
+    add_custom_command(
+      OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
+      COMMAND
+      "${PYTHON_EXECUTABLE}"
+      -m tools.code_analyzer.gen_oplist
+      --model_file_list_path "${SELECTED_OP_LIST}"
+      --output_dir "${CMAKE_BINARY_DIR}/aten/src/ATen"
+      WORKING_DIRECTORY "${TORCH_ROOT}")
+  else()
+    add_custom_command(
+      OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
+      COMMAND
+      "${PYTHON_EXECUTABLE}"
+      -m tools.lite_interpreter.gen_selected_mobile_ops_header
+      --yaml_file_path "${SELECTED_OP_LIST}"
+      --output_file_path "${CMAKE_BINARY_DIR}/aten/src/ATen"
+      WORKING_DIRECTORY "${TORCH_ROOT}")
+  endif()
 
   add_custom_target(
     __selected_mobile_ops_header_gen
@@ -1127,10 +1151,14 @@ endif()
         add_subdirectory(${TORCH_ROOT}/test/cpp/api ${CMAKE_BINARY_DIR}/test_api)
       endif()
 
-      add_subdirectory(
-        ${TORCH_ROOT}/test/mobile/nnc
-        ${CMAKE_BINARY_DIR}/test_mobile_nnc
-      )
+      if(USE_LLVM AND LLVM_FOUND)
+        add_subdirectory(
+          ${TORCH_ROOT}/test/mobile/nnc
+          ${CMAKE_BINARY_DIR}/test_mobile_nnc
+        )
+      endif()
+      add_subdirectory(${TORCH_ROOT}/test/cpp/lazy
+                       ${CMAKE_BINARY_DIR}/test_lazy)
     endif()
   endif()
 
@@ -1682,6 +1710,10 @@ if(BUILD_TENSOREXPR_BENCHMARK)
   add_subdirectory(${TORCH_ROOT}/benchmarks/cpp/tensorexpr ${CMAKE_BINARY_DIR}/tensorexpr_bench)
 endif()
 
+if(BUILD_NVFUSER_BENCHMARK)
+  add_subdirectory(${TORCH_ROOT}/benchmarks/cpp/nvfuser ${CMAKE_BINARY_DIR}/nvfuser_bench)
+endif()
+
 if(BUILD_CPP_BENCHMARKS)
   add_subdirectory(${TORCH_ROOT}/benchmarks/cpp ${PROJECT_BINARY_DIR}/bin)
 endif()
@@ -1755,6 +1787,9 @@ if(BUILD_TEST)
     target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
     target_include_directories(${test_name} PRIVATE $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
     target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
+    if(NOT MSVC)
+      target_compile_options(${test_name} PRIVATE -Wno-unused-variable)
+    endif()
     add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
     if(INSTALL_TEST)
       install(TARGETS ${test_name} DESTINATION test)

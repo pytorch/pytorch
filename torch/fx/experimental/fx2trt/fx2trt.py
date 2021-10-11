@@ -1,10 +1,11 @@
 import warnings
-from typing import List, NamedTuple, Iterable, Any, Optional, Tuple, Sequence
+from typing import List, NamedTuple, Iterable, Any, Optional, Tuple, Sequence, Dict
 
 import tensorrt as trt
 import torch
 import torch.fx
 from torch.fx.node import _get_qualified_name
+from torch.fx.passes.shape_prop import TensorMetadata
 
 
 TRTInterpreterResult = Tuple[Any, Sequence[str], Sequence[str]]
@@ -101,12 +102,27 @@ class TRTModule(torch.nn.Module):
     ):
         engine_bytes = state_dict[prefix + "engine"]
 
-        with trt.Logger() as logger, trt.Runtime(logger) as runtime:
-            self.engine = runtime.deserialize_cuda_engine(engine_bytes)
+        logger = trt.Logger()
+        runtime = trt.Runtime(logger)
+        self.engine = runtime.deserialize_cuda_engine(engine_bytes)
 
         self.input_names = state_dict[prefix + "input_names"]
         self.output_names = state_dict[prefix + "output_names"]
         self._initialize()
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["engine"] = bytearray(self.engine.serialize())
+        state.pop('context', None)
+        return state
+
+    def __setstate__(self, state):
+        logger = trt.Logger()
+        runtime = trt.Runtime(logger)
+        state["engine"] = runtime.deserialize_cuda_engine(state["engine"])
+        self.__dict__.update(state)
+        if self.engine:
+            self.context = self.engine.create_execution_context()
 
     def forward(self, *inputs):
         with torch.autograd.profiler.record_function("TRTModule:Forward"):
@@ -270,11 +286,11 @@ class TRTInterpreter(torch.fx.Interpreter):
         input_specs: List[InputTensorSpec],
         explicit_batch_dimension: bool = False,
         explicit_precision: bool = False,
-        logger_level=trt.Logger.WARNING,
+        logger_level=None,
     ):
         super().__init__(module)
 
-        self.logger = trt.Logger(logger_level)
+        self.logger = trt.Logger(logger_level or trt.Logger.WARNING)
         self.builder = trt.Builder(self.logger)
 
         flag = 0
@@ -305,6 +321,7 @@ class TRTInterpreter(torch.fx.Interpreter):
         self._cur_node_name: Optional[str] = None
         self._input_names: List[str] = []
         self._output_names: List[str] = []
+        self._itensor_to_tensor_meta: Dict[trt.tensorrt.ITensor, TensorMetadata] = dict()
 
     def validate_input_specs(self):
         for shape, dtpe, _, shape_ranges, has_batch_dim in self.input_specs:
@@ -385,10 +402,12 @@ class TRTInterpreter(torch.fx.Interpreter):
         max_workspace_size=1 << 25,
         fp16_mode=True,
         int8_mode=False,
-        strict_type_constraints=True,
+        force_fp32_output=False,
+        strict_type_constraints=False,
     ) -> TRTInterpreterResult:
-        # TODO hack, should check contents of args and remove fp16_mode probably
-        self.fp16_mode = fp16_mode
+        # For float outputs, we set their dtype to fp16 only if fp16_mode=True and
+        # force_fp32_output=False.
+        self.output_fp16 = not force_fp32_output and fp16_mode
 
         if int8_mode and not self.builder.platform_has_fast_int8:
             warnings.warn("Current platform doesn't support fast native int8!")
@@ -421,7 +440,23 @@ class TRTInterpreter(torch.fx.Interpreter):
 
     def run_node(self, n):
         self._cur_node_name = str(n)
-        return super().run_node(n)
+        # add "_itensor_to_tensor_meta"
+        kwargs = dict(n.kwargs)
+        kwargs["_itensor_to_tensor_meta"] = self._itensor_to_tensor_meta
+        n.kwargs = kwargs
+
+        # run the node
+        trt_node = super().run_node(n)
+
+        # remove "_itensor_to_tensor_meta"
+        kwargs = dict(n.kwargs)
+        del kwargs["_itensor_to_tensor_meta"]
+        n.kwargs = kwargs
+
+        if isinstance(trt_node, trt.tensorrt.ITensor):
+            self._itensor_to_tensor_meta[trt_node] = n.meta.get("tensor_meta")
+
+        return trt_node
 
     def placeholder(self, target, args, kwargs):
         self._input_names.append(target)
@@ -487,6 +522,6 @@ class TRTInterpreter(torch.fx.Interpreter):
             name = f"output{i}"
             output.name = name
             self.network.mark_output(output)
-            if self.fp16_mode and output.dtype == trt.float32:
+            if self.output_fp16 and output.dtype == trt.float32:
                 output.dtype = trt.float16
             self._output_names.append(name)
