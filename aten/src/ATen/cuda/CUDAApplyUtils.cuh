@@ -2,7 +2,8 @@
 
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/TensorUtils.h>
-#include <THC/THCAtomics.cuh>
+#include <ATen/ceil_div.h>
+#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/macros/Macros.h>
 #include <ATen/native/Copy.h>
@@ -273,7 +274,7 @@ template <typename Op,
           typename IndexType,
           int ADims,
           int step>
-#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void kernelPointwiseApply1(detail::TensorInfo<scalar, IndexType> a,
@@ -299,14 +300,14 @@ struct ApplyOp2 {
 __device__ __forceinline__
 static void apply(detail::TensorInfo<scalar1, IndexType> &a,
                   detail::TensorInfo<scalar2, IndexType> &b,
-                  const Op &op, int n, IndexType linearIndex,
+                  const Op &op, int64_t n, IndexType linearIndex,
                   Offsets... aOffsets, Offsets... bOffsets) {
   // Convert `linearIndex` into an offset of `a`
-  const IndexType aOffset = sizeof...(Offsets) < n ?
+  const IndexType aOffset = static_cast<int64_t>(sizeof...(Offsets)) < n ?
     detail::IndexToOffset<scalar1, IndexType, ADims>::get(linearIndex, a) : 0;
 
   // Convert `linearIndex` into an offset of `b`
-  const IndexType bOffset = sizeof...(Offsets) < n ?
+  const IndexType bOffset = static_cast<int64_t>(sizeof...(Offsets)) < n ?
     detail::IndexToOffset<scalar2, IndexType, BDims>::get(linearIndex, b) : 0;
 
   ApplyOp2<Op, scalar1, scalar2, IndexType, ADims, BDims, remaining_steps - 1, const IndexType, Offsets...>::apply(
@@ -359,7 +360,7 @@ template <typename Op,
           int step,
           int max_threads_per_block=AT_APPLY_THREADS_PER_BLOCK,
           int min_blocks_per_sm=AT_APPLY_BLOCKS_PER_SM>
-#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(max_threads_per_block, min_blocks_per_sm)
 #endif
 __global__ void
@@ -382,15 +383,17 @@ kernelPointwiseApply2(detail::TensorInfo<scalar1, IndexType> a,
    Computes ceil(a / b)
 */
 template <typename T>
+C10_DEPRECATED_MESSAGE("at::cuda::ATenCeilDiv is deprecated. Instead use at::ceil_div in <ATen/ceil_div.h>.")
 __host__ __device__ __forceinline__ T ATenCeilDiv(T a, T b) {
-  return (a + b - 1) / b;
+  // TODO: Delete when torchvision stops using this function
+  return at::ceil_div(a, b);
 }
 
 template <int step = 1>
 inline bool getApplyGrid(uint64_t totalElements, dim3& grid, int64_t curDevice, int max_threads_per_block=AT_APPLY_THREADS_PER_BLOCK) {
   if (curDevice == -1) return false;
   uint64_t numel_per_thread = static_cast<uint64_t>(max_threads_per_block) * static_cast<uint64_t>(step);
-  uint64_t numBlocks = ATenCeilDiv(totalElements, numel_per_thread);
+  uint64_t numBlocks = ceil_div(totalElements, numel_per_thread);
   uint64_t maxGridX = at::cuda::getDeviceProperties(curDevice)->maxGridSize[0];
   if (numBlocks > maxGridX)
       numBlocks = maxGridX;

@@ -31,7 +31,6 @@
 #include <type_traits>
 #include <tuple>
 
-#include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/core/Array.h>
 #include <ATen/detail/FunctionTraits.h>
@@ -165,10 +164,10 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
   } else {
     at::detail::Array<ScalarType, traits::arity> dtypes;
     for (int i = 0; i < traits::arity; i++) {
-      dtypes[i] = iter.tensor(i + 1).scalar_type();
+      dtypes[i] = iter.dtype(i + 1);
     }
     auto loader = memory::LoadWithCast<traits::arity>(dtypes);
-    auto storer = memory::StoreWithCast(iter.tensor(0).scalar_type());
+    auto storer = memory::StoreWithCast(iter.dtype(0));
     if (contiguous) {
       auto input_offset_calculator = TrivialOffsetCalculator<traits::arity>();
       auto output_offset_calculator = TrivialOffsetCalculator<1>();

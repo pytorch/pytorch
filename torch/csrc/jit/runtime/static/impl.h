@@ -3,6 +3,7 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/variant.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -31,6 +32,40 @@ using FastSet = std::unordered_set<Key>;
 
 TORCH_API bool canEnableStaticRuntime(
     const std::shared_ptr<torch::jit::Graph>& graph);
+
+// Group values used by `graph` into three categories:
+//
+// - input_or_constant_aliases:
+//     values that are either inputs or contain aliases of inputs
+//     or constants.
+// - output_aliases:
+//     values that are either outputs or contain aliases of outputs
+//     and are not in input_or_constant_aliases.
+// Values that dont't show up in input_or_constant_aliases and output_aliases
+// are
+//     created and consumed within the graph.
+class ValueGroup {
+ public:
+  explicit ValueGroup() = default;
+  void init(const std::shared_ptr<torch::jit::Graph>& graph, AliasDb& db);
+
+  bool isInputAlias(const Value* value) const {
+    return input_or_constant_aliases_.find(value) !=
+        input_or_constant_aliases_.end();
+  }
+
+  bool isOutputAlias(const Value* value) const {
+    return output_aliases_.find(value) != output_aliases_.end();
+  }
+
+  bool isAlwaysAlive(const Value* value) const {
+    return isInputAlias(value) || isOutputAlias(value);
+  }
+
+ private:
+  FastSet<const Value*> input_or_constant_aliases_;
+  FastSet<const Value*> output_aliases_;
+};
 
 struct TORCH_API StaticModuleOptions {
   // to batch allocate (deallocate) tensor storage for all non-escaping
@@ -113,7 +148,7 @@ class TORCH_API StaticModule {
 
  private:
   explicit StaticModule(
-      std::pair<std::shared_ptr<torch::jit::Graph>, std::shared_ptr<Module>>
+      std::pair<std::shared_ptr<torch::jit::Graph>, c10::optional<Module>>
           graph_and_module,
       const StaticModuleOptions& opts);
 
@@ -160,7 +195,7 @@ class TORCH_API StaticModule {
     return nodes_;
   }
 
-  bool is_optimizable_container_type(Node* n) const {
+  bool is_optimizable_container_type(const Node* n) const {
     auto it = node_is_optimizable_container_type_.find(n);
     return it != node_is_optimizable_container_type_.end();
   }
@@ -174,8 +209,8 @@ class TORCH_API StaticModule {
     return value_to_same_storage_values_;
   }
 
-  const FastSet<const Value*>& external_values() const {
-    return external_values_;
+  const ValueGroup& value_group() const {
+    return value_group_;
   }
 
   bool first_input_is_self() const {
@@ -188,7 +223,7 @@ class TORCH_API StaticModule {
   StaticModuleOptions opts_;
   bool first_input_is_self_{false};
   std::shared_ptr<torch::jit::Graph> graph_;
-  std::shared_ptr<torch::jit::Module> module_;
+  c10::optional<torch::jit::Module> module_;
   c10::optional<c10::FunctionSchema> schema_;
   std::unique_ptr<StaticRuntime> cached_runtime_;
 
@@ -202,15 +237,13 @@ class TORCH_API StaticModule {
   // map a node idx (in graph order) to a vector of ssa_defs for node inputs
   FastMap<int, std::vector<DefInfo>> node_inputs_ssa_def_map_;
 
-  // Bookkeeping for MemoryPlanner in StaticRuntime
-  // values whose live-time exceeds that of running one inference (e.g., input,
-  // output, prim::Constants, and their aliases)
-  FastSet<const Value*> external_values_;
+  ValueGroup value_group_;
+
   // map a value to the set of values that may share the same storage with it
   FastMap<const Value*, std::vector<const Value*>>
       value_to_same_storage_values_;
 
-  FastSet<Node*> node_is_optimizable_container_type_;
+  FastSet<const Node*> node_is_optimizable_container_type_;
 };
 
 class TORCH_API StaticRuntime {
@@ -368,23 +401,32 @@ class TORCH_API ProcessedNode {
     return inputs_;
   }
 
+  std::vector<IValue> clone_inputs() const;
+
   bool has_out_variant() const {
-    return static_cast<bool>(fn_);
+    return fn_.index() == 0;
   }
 
   bool has_native() const {
-    return static_cast<bool>(native_fn_);
+    return fn_.index() == 1;
   }
 
   bool verify_no_memory_overlap() const;
 
+  const char* get_op_name() const {
+    return op_name_;
+  }
+
  private:
+  void run_impl();
+
   Node* node_;
-  c10::optional<Operation> op_;
-  std::function<void(ProcessedNode*)> fn_;
-  std::function<void(ProcessedNode*)> native_fn_;
+  using OutVariant = std::function<void(ProcessedNode*)>;
+  using NativeFunction = std::function<void(ProcessedNode*)>;
+  c10::variant<OutVariant, NativeFunction, Operation> fn_;
   std::vector<const IValue*> inputs_; // unowned
   std::vector<IValue> outputs_;
+  const char* op_name_;
 };
 
 } // namespace jit
