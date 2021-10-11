@@ -206,7 +206,6 @@ void spgemm(
   IntArrayRef A_sizes = A.sizes();
   auto ndim = A.dim();
   auto m = A_sizes[ndim - 2];
-  auto k = A_sizes[ndim - 1];
 
   IntArrayRef B_sizes = B.sizes();
   auto n = B_sizes[ndim - 1];
