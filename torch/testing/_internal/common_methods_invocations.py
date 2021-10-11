@@ -9197,9 +9197,22 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
            ),
            sample_inputs_func=sample_inputs_unfold),
+    # NumPy returns output as tuple, hence 2 OpInfos required to test as_tuple behavior
     OpInfo('unravel_index',
            op=lambda x, *args: torch.unravel_index(x, *args, as_tuple=True),
+           variant_test_name='as_tuple',
            ref=np.unravel_index,
+           dtypes=integral_types(),
+           supports_autograd=False,
+           supports_out=False,
+           skips=(
+               # unravel_index is not supported by TorchScript, it's a Python-only function
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           ),
+           sample_inputs_func=sample_inputs_unravel_index),
+    OpInfo('unravel_index',
+           variant_test_name='without_as_tuple',
+           op=lambda x, *args: torch.unravel_index(x, *args),
            dtypes=integral_types(),
            supports_autograd=False,
            supports_out=False,

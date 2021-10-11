@@ -1696,6 +1696,7 @@ def unravel_index(
 
     # List to store unraveled indices, to be converted to a tuple/tensor depending on
     # to_tuple kw-only arg
+    assert torch.max(indices) < torch.prod(shape), f"Given indices {indices} should be representible for the given shape {shape}"
     coords = list()
     for dim in reversed(shape):
         coords.append(indices % dim)
@@ -1703,4 +1704,4 @@ def unravel_index(
 
     if len(coords) != 0:
         coords = torch.stack(coords[::-1], dim=-1)
-    return tuple(coords) if as_tuple else coords
+    return tuple(coords.T) if as_tuple else coords
