@@ -11,11 +11,14 @@
 // https://github.com/pytorch/pytorch/pull/55292
 #undef CUB_NS_POSTFIX //undef to avoid redefinition warnings
 #undef CUB_NS_PREFIX
+#undef CUB_NS_QUALIFIER
+#define CUB_NS_QUALIFIER ::at::cuda::detail::cub
 #define CUB_NS_PREFIX namespace at { namespace cuda { namespace detail {
 #define CUB_NS_POSTFIX }}}
 #include <cub/cub.cuh>
 #undef CUB_NS_POSTFIX
 #undef CUB_NS_PREFIX
+#undef CUB_NS_QUALIFIER
 
 #include <ATen/cuda/Exceptions.h>
 #include <c10/cuda/CUDACachingAllocator.h>
