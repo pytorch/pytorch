@@ -12,7 +12,7 @@ namespace jit {
 namespace mobile {
 using Stack = std::vector<c10::IValue>;
 using DebugHandle = int64_t;
-struct Function;
+class Function;
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct Code {
