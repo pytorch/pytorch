@@ -131,7 +131,7 @@ def _replace_submodules(gm: GraphModule, replacement: torch.nn.Module) -> None:
 
     gm.graph.lint()
 
-def add_suffix_to_graph(graph, suffix):
+def _add_suffix_to_graph(graph, suffix):
     for node in graph.nodes:
         node.name += suffix
 
@@ -327,7 +327,7 @@ def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable) -
             continue
 
         suffixed_replacement_graph = replacement_graph.__deepcopy__()
-        add_suffix_to_graph(suffixed_replacement_graph, f"_{i}")
+        _add_suffix_to_graph(suffixed_replacement_graph, f"_{i}")
         # Map replacement graph nodes to their copy in `original_graph`
         val_map: Dict[Node, Node] = {}
 
@@ -401,7 +401,7 @@ def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable) -
                 for pn_input, rn_input in zip(pn.all_input_nodes, rn.all_input_nodes):
                     gn_input = match.nodes_map[pn_input]
                     rn_input_in_original_graph = val_map[rn_input]
-                    gn.replace_input_with(gn_input, rn_input_in_original_graph)
+                    gn_input.replace_all_uses_with(rn_input_in_original_graph)
                     # We store the updated node point in case other nodes want to use it
                     match_changed_node[gn_input] = rn_input_in_original_graph
 
