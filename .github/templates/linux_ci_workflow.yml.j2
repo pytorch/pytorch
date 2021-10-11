@@ -8,9 +8,7 @@ name: !{{ build_environment }}
 
 on:
   pull_request:
-  {%- if ciflow_config.enabled %}
     types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
-  {%- endif %}
 
 {%- if is_scheduled %}
   schedule:
@@ -139,9 +137,7 @@ jobs:
 {% block test +%}
   generate-test-matrix:
     runs-on: ubuntu-18.04
-    {%- if ciflow_config.enabled %}
     needs: [!{{ ciflow_config.root_job_name }}]
-    {%- endif %}
     env:
       TEST_RUNNER_TYPE: !{{ test_runner_type }}
       ENABLE_DISTRIBUTED_TEST: !{{ enable_distributed_test }}
