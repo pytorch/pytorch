@@ -115,7 +115,10 @@ class ApiTest(unittest.TestCase):
         pf = self.failure_without_error_file(exitcode=138)
         self.assertEqual("<N/A>", pf.signal_name())
         self.assertEqual("<N/A>", pf.error_file)
-        self.assertEqual("Process failed with exitcode 138", pf.message)
+        self.assertEqual(
+            "To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html",
+            pf.message,
+        )
 
     def test_child_failed_error(self):
         pf0 = self.failure_with_error_file(exception=SentinelError("rank 0"))
@@ -134,7 +137,7 @@ class ApiTest(unittest.TestCase):
           rank: 0 (local_rank: 0)
           exitcode: 1 (pid: 997)
           error_file: /tmp/ApiTesttbb37ier/error.json
-          msg: "SentinelError: rank 0"
+          traceback: "SentinelError: rank 0"
         =============================================
         Other Failures:
         [1]:
@@ -148,7 +151,7 @@ class ApiTest(unittest.TestCase):
           rank: 2 (local_rank: 0)
           exitcode: 138 (pid: 997)
           error_file: <N/A>
-          msg: "Process failed with exitcode 138"
+          traceback: To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
         *********************************************
         """
         print(ex)
