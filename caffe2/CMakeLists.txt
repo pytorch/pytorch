@@ -1010,7 +1010,7 @@ if(NOT INTERN_BUILD_MOBILE)
 endif()
 
 # Build model tracer for tracing-based selective build
-if(NOT BUILD_LITE_INTERPRETER AND NOT INTERN_BUILD_MOBILE)
+if(TRACING_BASED AND NOT BUILD_LITE_INTERPRETER AND NOT INTERN_BUILD_MOBILE)
   add_subdirectory(
     ${TORCH_ROOT}/torch/csrc/jit/mobile/model_tracer
     ${CMAKE_BINARY_DIR}/model_tracer
@@ -1019,13 +1019,26 @@ endif()
 
 # Codegen selected_mobile_ops.h for template selective build
 if(BUILD_LITE_INTERPRETER AND SELECTED_OP_LIST)
-  add_custom_command(
-    OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
-    COMMAND
-    "${PYTHON_EXECUTABLE}" -m tools.lite_interpreter.gen_selected_mobile_ops_header
-    --yaml_file_path "${SELECTED_OP_LIST}"
-    --output_file_path "${CMAKE_BINARY_DIR}/aten/src/ATen"
-    WORKING_DIRECTORY "${TORCH_ROOT}")
+  message("running gen_selected_mobile_ops_header for:  '${SELECTED_OP_LIST}'")
+  if(${TRACING_BASED})
+    add_custom_command(
+      OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
+      COMMAND
+      "${PYTHON_EXECUTABLE}"
+      -m tools.code_analyzer.gen_oplist
+      --model_file_list_path "${SELECTED_OP_LIST}"
+      --output_dir "${CMAKE_BINARY_DIR}/aten/src/ATen"
+      WORKING_DIRECTORY "${TORCH_ROOT}")
+  else()
+    add_custom_command(
+      OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
+      COMMAND
+      "${PYTHON_EXECUTABLE}"
+      -m tools.lite_interpreter.gen_selected_mobile_ops_header
+      --yaml_file_path "${SELECTED_OP_LIST}"
+      --output_file_path "${CMAKE_BINARY_DIR}/aten/src/ATen"
+      WORKING_DIRECTORY "${TORCH_ROOT}")
+  endif()
 
   add_custom_target(
     __selected_mobile_ops_header_gen
@@ -1144,6 +1157,8 @@ endif()
           ${CMAKE_BINARY_DIR}/test_mobile_nnc
         )
       endif()
+      add_subdirectory(${TORCH_ROOT}/test/cpp/lazy
+                       ${CMAKE_BINARY_DIR}/test_lazy)
     endif()
   endif()
 
