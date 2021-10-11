@@ -130,7 +130,8 @@ Module ScriptModuleDeserializer::LEGACY_deserialize() {
         LEGACY_pickled_ivalues_.end(), list.begin(), list.end());
   } else if (proto_version >= 3) {
     LEGACY_pickled_ivalues_ =
-        LEGACY_loadPickleArchive("attributes.pkl").toTuple()->elements();
+        std::move(*LEGACY_loadPickleArchive("attributes.pkl").toTuple())
+            .elements();
   }
   LEGACY_moduleStack_.emplace_back("__torch__");
   const auto& module_def = model_def.main_module();

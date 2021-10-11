@@ -3,6 +3,7 @@ from itertools import product, chain
 import itertools
 import collections
 import copy
+from enum import Enum
 import operator
 import random
 import numbers
@@ -13,7 +14,7 @@ import numpy as np
 from torch._six import inf
 import collections.abc
 
-from typing import Any, Callable, List, Optional, Sequence, Tuple, Union, Dict
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 from torch.testing import make_non_contiguous, make_tensor
 from torch.testing._internal.common_dtype import (
@@ -35,13 +36,19 @@ from torch.testing._internal.common_utils import \
      random_fullrank_matrix_distinct_singular_value,
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, TEST_SCIPY,
      torch_to_numpy_dtype_dict, TEST_WITH_ASAN,
-     GRADCHECK_NONDET_TOL, skipIfTBB)
+     GRADCHECK_NONDET_TOL)
 import torch.testing._internal.opinfo_helper as opinfo_helper
 
 from setuptools import distutils
 
+has_scipy_fft = False
 if TEST_SCIPY:
     import scipy.special
+    try:
+        import scipy.fft
+        has_scipy_fft = True
+    except ModuleNotFoundError:
+        pass
 
 
 # Reasonable testing sizes for dimensions
@@ -1289,6 +1296,8 @@ def sample_inputs_cosine_similarity(op_info, device, dtype, requires_grad, **kwa
             yield SampleInput(make_arg(input_shape), args=(make_arg(input_shape),), kwargs=kwargs)
         # Test for Broadcasting
         yield SampleInput(make_arg((1, 2, 3)), args=(make_arg((2, 1, 3)),), kwargs={'dim': -1})
+        yield SampleInput(make_arg((1, 2, 3)), args=(make_arg((2, 1, 3)),), kwargs={'dim': -2})
+        yield SampleInput(make_arg((2, 3)), args=(make_arg((2, 1, 3)),), kwargs={'dim': -1})
 
     return list(generator())
 
@@ -2682,6 +2691,39 @@ def sample_inputs_adaptive_avg_pool2d(op_info, device, dtype, requires_grad, **k
 
     return list(generator())
 
+def sample_inputs_adaptive_avg_pool1d(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Ordered as (input shape, output size)
+    cases = (
+        ((0, 8, 8), (5,)),
+        ((3, 8, 8), 5),
+    )
+
+    def generator():
+        for input_shape, output_size in cases:
+            yield SampleInput(make_arg(input_shape), args=(output_size,))
+
+    return list(generator())
+
+def sample_inputs_adaptive_avg_pool3d(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Ordered as (input shape, output size)
+    cases = (
+        ((0, 8, 8, 8, 8), (5, 7, 4)),
+        ((1, 8, 4, 3, 7), (None, None, None)),
+        ((3, 3, 8, 8, 6), (5, 7, None)),
+        ((1, 3, 8, 8, 6), (5, None, 2)),
+        ((3, 3, 8, 8, 6), (None, 3, 2)),
+    )
+
+    def generator():
+        for input_shape, output_size in cases:
+            yield SampleInput(make_arg(input_shape), args=(output_size,))
+
+    return list(generator())
+
 def sample_inputs_max_pool2d(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -2713,7 +2755,6 @@ def sample_inputs_max_pool2d(op_info, device, dtype, requires_grad, **kwargs):
             sample_input = make_arg((N, C, H, W)) if N is not None else (make_arg((C, H, W)))
 
             yield SampleInput(sample_input, kwargs=kwargs)
-
     return list(generator())
 
 def sample_inputs_normalize(self, device, dtype, requires_grad, **kwargs):
@@ -3017,6 +3058,55 @@ def sample_inputs_avgpool2d(op_info, device, dtype, requires_grad, **kwargs):
                               args=(kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override))
         # Case with just input_shape and kernel_size
         yield SampleInput(make_arg((1, 3, 9, 9)), args=((3, 3)))
+
+    return list(generator())
+
+def sample_inputs_avgpool1d(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Order: input_shape, kernel_size, kwargs
+    cases: List[Tuple[Tuple[int, ...], Union[int, Tuple[int, ...]], Dict]] = [
+        ((2, 3, 9), (3,), dict()),
+        ((1, 3, 9), 3, dict(stride=1, padding=1, ceil_mode=True, count_include_pad=False)),
+        ((1, 3, 9), (6,), dict(stride=(3,), padding=(2,), ceil_mode=True, count_include_pad=True)),
+        ((2, 3, 9), (3,), dict(stride=(1,), padding=(1,), ceil_mode=False, count_include_pad=True)),
+        ((0, 3, 9), (6,), dict(stride=(3,), padding=(2,), ceil_mode=False, count_include_pad=True)),
+        ((1, 2, 9), (7,), dict(stride=(3,), padding=(2,), ceil_mode=False)),
+        ((1, 2, 9), (7,), dict(stride=(3,), padding=(3,), ceil_mode=True)),
+        ((1, 2, 9), (7,), dict(stride=(3,), ceil_mode=False)),
+        ((1, 2, 9), (7,), dict(stride=(3,), ceil_mode=True)),
+    ]
+
+    def generator():
+        for input_shape, kernel_size, kwargs in cases:
+            yield SampleInput(make_arg(input_shape), args=(kernel_size,), kwargs=kwargs)
+
+    return list(generator())
+
+def sample_inputs_avgpool3d(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Order: input_shape, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override
+    cases: List[Tuple[Tuple[int, ...], Union[int, Tuple[int, ...]], Dict]] = [
+        ((2, 3, 3, 4, 4), (2, 2, 2), dict()),
+        ((1, 2, 4, 4, 4), 2, dict(stride=1, padding=1, ceil_mode=True,
+                                  count_include_pad=False, divisor_override=2)),
+        ((1, 2, 5, 5, 5), (2, 3, 4), dict(stride=(1, 2, 2), padding=(0, 1, 2), ceil_mode=True,
+                                          count_include_pad=True, divisor_override=2)),
+        ((1, 2, 5, 5, 5), (2, 3, 4), dict(stride=(1, 2, 2), padding=(0, 1, 2), ceil_mode=False)),
+        ((1, 1, 7, 5, 7), (6, 3, 4), dict(stride=(2, 3, 2), padding=(3, 1, 0), ceil_mode=False,
+                                          count_include_pad=False, divisor_override=2)),
+        ((1, 1, 4, 5, 4), (2, 2, 3), dict(stride=(2, 2, 1), padding=0, ceil_mode=False,
+                                          count_include_pad=True, divisor_override=-2)),
+        ((1, 1, 6, 5, 6), (4, 5, 6), dict(stride=(2, 3, 2), padding=2, ceil_mode=True,
+                                          count_include_pad=True, divisor_override=None)),
+        ((0, 1, 4, 5, 4), (2, 3, 1), dict(stride=(2, 1, 2), padding=0, ceil_mode=False,
+                                          count_include_pad=True, divisor_override=None)),
+    ]
+
+    def generator():
+        for input_shape, kernel_size, kwargs in cases:
+            yield SampleInput(make_arg(input_shape), args=(kernel_size,), kwargs=kwargs)
 
     return list(generator())
 
@@ -3540,7 +3630,7 @@ def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwarg
     tensor = make_tensor((31,), device, dtype, low=None, high=None,
                          requires_grad=requires_grad)
 
-    if self.ndimensional:
+    if self.ndimensional == SpectralFuncType.ND:
         return [
             SampleInput(nd_tensor, kwargs=dict(s=(3, 10), dim=(1, 2), norm='ortho')),
             SampleInput(nd_tensor, kwargs=dict(norm='ortho')),
@@ -3549,6 +3639,15 @@ def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwarg
 
             *(SampleInput(nd_tensor, kwargs=dict(dim=dim))
                 for dim in [-1, -2, -3, (0, -1)]),
+        ]
+    elif self.ndimensional == SpectralFuncType.TwoD:
+        return [
+            SampleInput(nd_tensor, kwargs=dict(s=(3, 10), dim=(1, 2), norm='ortho')),
+            SampleInput(nd_tensor, kwargs=dict(norm='ortho')),
+            SampleInput(nd_tensor, kwargs=dict(s=(6, 8))),
+            SampleInput(tensor, kwargs=dict(dim=0)),
+            SampleInput(nd_tensor, kwargs=dict(dim=(0, -1))),
+            SampleInput(nd_tensor, kwargs=dict(dim=(-3, -2, -1))),
         ]
     else:
         return [
@@ -3571,6 +3670,8 @@ def sample_inputs_repeat_interleave(op_info, device, dtype, requires_grad, **kwa
         SampleInput(make_input((2, 3, 4)), kwargs=dict(repeats=torch.arange(3, device=device), dim=1))
     ]
 
+SpectralFuncType = Enum('SpectralFuncType', ('OneD', 'TwoD', 'ND'))
+
 # Metadata class for Fast Fourier Transforms in torch.fft.
 class SpectralFuncInfo(OpInfo):
     """Operator information for torch.fft transforms. """
@@ -3580,7 +3681,7 @@ class SpectralFuncInfo(OpInfo):
                  *,
                  ref=None,  # Reference implementation (probably in np.fft namespace)
                  dtypes=floating_and_complex_types(),
-                 ndimensional: bool,  # Whether dim argument can be a tuple
+                 ndimensional: SpectralFuncType,
                  sample_inputs_func=sample_inputs_spectral_ops,
                  decorators=None,
                  **kwargs):
@@ -3595,7 +3696,7 @@ class SpectralFuncInfo(OpInfo):
                          decorators=decorators,
                          sample_inputs_func=sample_inputs_func,
                          **kwargs)
-        self.ref = ref if ref is not None else _getattr_qual(np, name)
+        self.ref = ref
         self.ndimensional = ndimensional
 
 
@@ -3896,6 +3997,19 @@ def sample_inputs_legacy_solve(op_info, device, dtype, requires_grad=False, **kw
     return out
 
 
+def sample_inputs_cholesky_solve(op_info, device, dtype, requires_grad=False, **kwargs):
+    out = sample_inputs_linalg_cholesky_inverse(
+        op_info, device, dtype, requires_grad=False
+    )
+
+    for sample in out:
+        psd_matrix = sample.input
+        sample.input = make_tensor(psd_matrix.shape, device, dtype, requires_grad=requires_grad, low=None, high=None)
+        sample.args = (psd_matrix.requires_grad_(requires_grad),)
+
+    return out
+
+
 def sample_inputs_lu(op_info, device, dtype, requires_grad=False, **kwargs):
     # not needed once OpInfo tests support Iterables
     def generate_samples():
@@ -4064,35 +4178,35 @@ def _sample_inputs_svd(op_info, device, dtype, requires_grad=False, is_linalg_sv
         # loss functions for complex-valued svd have to be "gauge invariant",
         # i.e. loss functions shouldn't change when sigh of the singular vectors change.
         # the simplest choice to satisfy this requirement is to apply 'abs'.
-        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype, device=device),
+        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device),
             lambda usv: usv[1]),  # 'check_grad_s'
-        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype, device=device),
+        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device),
             lambda usv: abs(usv[0])),  # 'check_grad_u'
-        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype, device=device),
+        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device),
             lambda usv: abs(usv[2])),  # 'check_grad_v'
         # this test is important as it checks the additional term that is non-zero only for complex-valued inputs
         # and when the loss function depends both on 'u' and 'v'
-        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype, device=device),
+        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device),
             uv_loss),  # 'check_grad_uv'
-        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype, device=device)[:(S - 2)],
+        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device)[:(S - 2)],
             lambda usv: (abs(usv[0]), usv[1], abs(usv[2][..., :, :(S - 2)]))),  # 'wide'
-        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype, device=device)[:, :(S - 2)],
+        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device)[:, :(S - 2)],
             lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))),  # 'tall'
-        (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype, device=device),
+        (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype).to(device),
             lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))),  # 'batched'
-        (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype, device=device)[..., :(S - 2), :],
+        (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype).to(device)[..., :(S - 2), :],
             lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))),  # 'wide_batched'
-        (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype, device=device)[..., :, :(S - 2)],
+        (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype).to(device)[..., :, :(S - 2)],
             lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))),  # 'tall_batched'
     )
     test_cases2 = (  # some=False
-        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype, device=device)[:(S - 2)],
+        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device)[:(S - 2)],
             lambda usv: (abs(usv[0]), usv[1], abs(slice_V(usv[2])))),  # 'wide_all'
-        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype, device=device)[:, :(S - 2)],
+        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device)[:, :(S - 2)],
             lambda usv: (abs(usv[0][:, :(S - 2)]), usv[1], abs(usv[2]))),  # 'tall_all'
-        (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype, device=device)[..., :(S - 2), :],
+        (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype).to(device)[..., :(S - 2), :],
             lambda usv: (abs(usv[0]), usv[1], abs(slice_V(usv[2])))),  # 'wide_all_batched'
-        (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype, device=device)[..., :, :(S - 2)],
+        (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype).to(device)[..., :, :(S - 2)],
             lambda usv: (abs(usv[0][..., :, :(S - 2)]), usv[1], abs(usv[2]))),  # 'tall_all_batched'
     )
 
@@ -5669,34 +5783,48 @@ def sample_inputs_grid_sample(op_info, device, dtype, requires_grad, **kwargs):
     return sample_inputs
 
 def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
-    batch_size, num_classes = shape = (2, 3)
+    shape = (2, 3)
+    num_classes = shape[1]
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_weight = partial(make_tensor, shape=(num_classes,), device=device, dtype=dtype)
 
-    input_shape_and_kwargs: List[Tuple[Tuple[int, ...], Dict[str, Any]]] = [
-        ((*shape, 1), dict()),
-        ((*shape, 1, 2), dict()),
-        ((*shape, 1, 2, 3), dict()),
-        (shape, dict(weight=make_tensor((num_classes,), device=device, dtype=dtype).abs())),
-        (shape, dict(ignore_index=num_classes // 2)),
-        (shape, dict(reduction="sum")),
-        (shape, dict(reduction="mean")),
-    ]
+    def make_target(shape, zeros=False):
+        s = (shape[0], *shape[2:]) if len(shape) > 1 else ()
+        if zeros:
+            return torch.zeros(s, device=device, dtype=torch.long)
+        else:
+            return make_tensor(s,
+                               low=0,
+                               high=shape[1] if len(shape) > 1 else shape[0],
+                               device=device,
+                               dtype=torch.long)
 
-    sample_inputs = []
-    for input_shape, kwargs in input_shape_and_kwargs:
-        input = make_tensor(input_shape, device=device, dtype=dtype, requires_grad=requires_grad)
 
-        target = make_tensor(
-            (batch_size, *input_shape[2:]),
-            low=0,
-            high=num_classes,
-            device=device,
-            dtype=torch.long,
-            requires_grad=requires_grad
-        )
+    def gen_shape_kwargs():
+        # Batched, non-batched and 2d
+        shapes = (shape, (num_classes,), shape + (2, 2))
+        reductions = ('none', 'mean', 'sum')
+        for reduction, s in product(reductions, shapes):
+            yield make_input(s), make_target(s), dict(reduction=reduction)
+            yield make_input(s), make_target(s), dict(weight=make_weight(), reduction=reduction)
+            yield make_input(s), make_target(s), dict(weight=make_weight(low=0), reduction=reduction)
+            yield make_input(s), make_target(s), dict(weight=make_weight(high=0), reduction=reduction)
+            t = make_target(s)
+            ignore = num_classes // 2
+            # If "mean", nll returns NaN, so it's not differentiable at those points
+            if t.eq(ignore).all() and reduction == "mean":
+                t.fill_(0)
+            yield make_input(s), t, dict(ignore_index=num_classes // 2, reduction=reduction)
+            # Test ignoring all the targets
+            # If "mean", nll returns NaN, so it's not differentiable at those points
+            if reduction != "mean":
+                yield make_input(s), make_target(s, zeros=True), dict(ignore_index=0, reduction=reduction)
 
-        sample_inputs.append(SampleInput(input, args=(target,), kwargs=kwargs))
+    def gen_inputs():
+        for input, target, kwargs in gen_shape_kwargs():
+            yield SampleInput(input, args=(target,), kwargs=kwargs)
 
-    return sample_inputs
+    return list(gen_inputs())
 
 foreach_unary_op_db: List[OpInfo] = [
     ForeachFuncInfo('exp'),
@@ -6012,13 +6140,16 @@ def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):
     return op(input + input.conj().transpose(-2, -1), *args, **kwargs)
 
 
-def gradcheck_wrapper_triangular_input(op, input, *args, upper=False, **kwargs):
+def gradcheck_wrapper_triangular_input(op, *args, upper=False, idx=0, **kwargs):
     """Gradcheck wrpper for functions that take lower or upper triangular matrices as input.
 
     They require a modified function because the finite-difference algorithm
     for calculating derivatives does not preserve the triangular property of the input.
+    `idx` is used to specific which `args[idx]` is to be triangularized.
     """
-    return op(input.triu() if upper else input.tril(), upper)
+    triangular_arg = args[idx].triu() if upper else args[idx].tril()
+    modified_args = args[:idx] + (triangular_arg,) + args[idx + 1:]
+    return op(*modified_args, upper)
 
 
 def reference_reduction_numpy(f, supports_keepdims=True):
@@ -6566,6 +6697,19 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
                # cholesky_inverse does not correctly warn when resizing out= inputs
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),)),
+    OpInfo('cholesky_solve',
+           op=torch.cholesky_solve,
+           dtypes=floating_and_complex_types(),
+           sample_inputs_func=sample_inputs_cholesky_solve,
+           check_batched_gradgrad=False,
+           supports_forward_ad=True,
+           gradcheck_wrapper=lambda *args, **kwargs: gradcheck_wrapper_triangular_input(*args, idx=1, **kwargs),
+           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
+           skips=(
+               # cholesky_solve does not correctly warn when resizing out= inputs
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
+               # Gradcheck for complex generates invalid inputs for this function, i.e. NaNs.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD', dtypes=complex_types()),)),
     OpInfo('chunk',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            sample_inputs_func=sample_inputs_chunk,
@@ -6922,13 +7066,21 @@ op_db: List[OpInfo] = [
     SpectralFuncInfo('fft.fft',
                      aten_name='fft_fft',
                      ref=np.fft.fft,
-                     ndimensional=False,
+                     ndimensional=SpectralFuncType.OneD,
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types()),
+    SpectralFuncInfo('fft.fft2',
+                     aten_name='fft_fft2',
+                     ref=np.fft.fft2,
+                     ndimensional=SpectralFuncType.TwoD,
+                     dtypes=all_types_and_complex_and(torch.bool),
+                     default_test_dtypes=floating_and_complex_types(),
+                     decorators=[precisionOverride(
+                         {torch.float: 1e-4, torch.cfloat: 1e-4})],),
     SpectralFuncInfo('fft.fftn',
                      aten_name='fft_fftn',
                      ref=np.fft.fftn,
-                     ndimensional=True,
+                     ndimensional=SpectralFuncType.ND,
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
                      decorators=[precisionOverride(
@@ -6936,22 +7088,55 @@ op_db: List[OpInfo] = [
     SpectralFuncInfo('fft.hfft',
                      aten_name='fft_hfft',
                      ref=np.fft.hfft,
-                     ndimensional=False,
+                     ndimensional=SpectralFuncType.OneD,
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
                      check_batched_gradgrad=False),
+    SpectralFuncInfo('fft.hfft2',
+                     aten_name='fft_hfft2',
+                     ref=scipy.fft.hfft2 if has_scipy_fft else None,
+                     ndimensional=SpectralFuncType.TwoD,
+                     dtypes=all_types_and_complex_and(torch.bool),
+                     default_test_dtypes=floating_and_complex_types(),
+                     check_batched_gradgrad=False,
+                     decorators=[
+                         DecorateInfo(
+                             precisionOverride({torch.float: 2e-4, torch.cfloat: 2e-4}),
+                             'TestFFT', 'test_reference_nd')],
+                     ),
+    SpectralFuncInfo('fft.hfftn',
+                     aten_name='fft_hfftn',
+                     ref=scipy.fft.hfftn if has_scipy_fft else None,
+                     ndimensional=SpectralFuncType.ND,
+                     dtypes=all_types_and_complex_and(torch.bool),
+                     default_test_dtypes=floating_and_complex_types(),
+                     check_batched_gradgrad=False,
+                     decorators=[
+                         DecorateInfo(
+                             precisionOverride({torch.float: 2e-4, torch.cfloat: 2e-4}),
+                             'TestFFT', 'test_reference_nd')],
+                     ),
     SpectralFuncInfo('fft.rfft',
                      aten_name='fft_rfft',
                      ref=np.fft.rfft,
-                     ndimensional=False,
+                     ndimensional=SpectralFuncType.OneD,
                      dtypes=all_types_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
                      check_batched_grad=False,
                      check_batched_gradgrad=False),
+    SpectralFuncInfo('fft.rfft2',
+                     aten_name='fft_rfft2',
+                     ref=np.fft.rfft2,
+                     ndimensional=SpectralFuncType.TwoD,
+                     dtypes=all_types_and(torch.bool),
+                     default_test_dtypes=floating_and_complex_types(),
+                     check_batched_grad=False,
+                     check_batched_gradgrad=False,
+                     decorators=[precisionOverride({torch.float: 1e-4})],),
     SpectralFuncInfo('fft.rfftn',
                      aten_name='fft_rfftn',
                      ref=np.fft.rfftn,
-                     ndimensional=True,
+                     ndimensional=SpectralFuncType.ND,
                      dtypes=all_types_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
                      check_batched_grad=False,
@@ -6960,13 +7145,24 @@ op_db: List[OpInfo] = [
     SpectralFuncInfo('fft.ifft',
                      aten_name='fft_ifft',
                      ref=np.fft.ifft,
-                     ndimensional=False,
+                     ndimensional=SpectralFuncType.OneD,
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types()),
+    SpectralFuncInfo('fft.ifft2',
+                     aten_name='fft_ifft2',
+                     ref=np.fft.ifft2,
+                     ndimensional=SpectralFuncType.TwoD,
+                     dtypes=all_types_and_complex_and(torch.bool),
+                     default_test_dtypes=floating_and_complex_types(),
+                     decorators=[
+                         DecorateInfo(
+                             precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
+                             'TestFFT', 'test_reference_nd')],
+                     ),
     SpectralFuncInfo('fft.ifftn',
                      aten_name='fft_ifftn',
                      ref=np.fft.ifftn,
-                     ndimensional=True,
+                     ndimensional=SpectralFuncType.ND,
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
                      decorators=[
@@ -6977,21 +7173,59 @@ op_db: List[OpInfo] = [
     SpectralFuncInfo('fft.ihfft',
                      aten_name='fft_ihfft',
                      ref=np.fft.ihfft,
-                     ndimensional=False,
+                     ndimensional=SpectralFuncType.OneD,
                      dtypes=all_types_and(torch.bool),
                      default_test_dtypes=floating_types(),
                      check_batched_grad=False),
+    SpectralFuncInfo('fft.ihfft2',
+                     aten_name='fft_ihfft2',
+                     ref=scipy.fft.ihfftn if has_scipy_fft else None,
+                     ndimensional=SpectralFuncType.TwoD,
+                     dtypes=all_types_and(torch.bool),
+                     default_test_dtypes=floating_types(),
+                     check_batched_grad=False,
+                     check_batched_gradgrad=False,
+                     decorators=[
+                         DecorateInfo(
+                             precisionOverride({torch.float: 2e-4}),
+                             'TestFFT', 'test_reference_nd')],
+                     ),
+    SpectralFuncInfo('fft.ihfftn',
+                     aten_name='fft_ihfftn',
+                     ref=scipy.fft.ihfftn if has_scipy_fft else None,
+                     ndimensional=SpectralFuncType.ND,
+                     dtypes=all_types_and(torch.bool),
+                     default_test_dtypes=floating_types(),
+                     check_batched_grad=False,
+                     check_batched_gradgrad=False,
+                     decorators=[
+                         DecorateInfo(
+                             precisionOverride({torch.float: 2e-4}),
+                             'TestFFT', 'test_reference_nd')],
+                     ),
     SpectralFuncInfo('fft.irfft',
                      aten_name='fft_irfft',
                      ref=np.fft.irfft,
-                     ndimensional=False,
+                     ndimensional=SpectralFuncType.OneD,
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
                      check_batched_gradgrad=False),
+    SpectralFuncInfo('fft.irfft2',
+                     aten_name='fft_irfft2',
+                     ref=np.fft.irfft2,
+                     ndimensional=SpectralFuncType.TwoD,
+                     dtypes=all_types_and_complex_and(torch.bool),
+                     default_test_dtypes=floating_and_complex_types(),
+                     check_batched_gradgrad=False,
+                     decorators=[
+                         DecorateInfo(
+                             precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
+                             'TestFFT', 'test_reference_nd')],
+                     ),
     SpectralFuncInfo('fft.irfftn',
                      aten_name='fft_irfftn',
                      ref=np.fft.irfftn,
-                     ndimensional=True,
+                     ndimensional=SpectralFuncType.ND,
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
                      check_batched_gradgrad=False,
@@ -7467,7 +7701,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_out=False,
            sample_inputs_func=sample_inputs_lu,
-           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
                # we skip jit tests because `lu` is a torch function
                # RuntimeError:
@@ -7484,7 +7718,7 @@ op_db: List[OpInfo] = [
            check_batched_gradgrad=False,
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_lu_solve,
-           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack]),
     OpInfo('lu_unpack',
            op=torch.lu_unpack,
            dtypes=floating_and_complex_types(),
@@ -7712,7 +7946,7 @@ op_db: List[OpInfo] = [
     # `softmax` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
     OpInfo('softmax',
-           aliases=('nn.functional.softmax',),
+           aliases=('special.softmax', 'nn.functional.softmax',),
            aten_name='softmax',
            dtypesIfCPU=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
@@ -7721,7 +7955,7 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            supports_out=False),
     OpInfo('softmax',
-           aliases=('nn.functional.softmax',),
+           aliases=('special.softmax', 'nn.functional.softmax',),
            variant_test_name="with_dtype",
            aten_name='softmax',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -7756,8 +7990,8 @@ op_db: List[OpInfo] = [
            skips=(
                # RuntimeError:
                # adaptive_avg_pool2d(Tensor input, int[2] output_size) -> (Tensor):
-               # Expected a value of type 'List[int]' for argument 'output_size' but instead found type 'Tuple[NoneType, int]'.
-               # :
+               # Expected a value of type 'List[int]' for argument 'output_size' but
+               # instead found type 'Tuple[NoneType, int]'. :
                #   File "<string>", line 3
                # def the_method(i0):
                #     return torch.nn.functional.adaptive_avg_pool2d(i0, (None, 7))
@@ -7767,6 +8001,60 @@ op_db: List[OpInfo] = [
            supports_out=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=sample_inputs_adaptive_avg_pool2d),
+    OpInfo('nn.functional.adaptive_avg_pool1d',
+           dtypes=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+           skips=(
+               # RuntimeError:
+               # adaptive_avg_pool3d(Tensor input, int[3] output_size) -> (Tensor):
+               # Expected a value of type 'List[int]' for argument 'output_size' but
+               # instead found type 'Tuple[NoneType, NoneType]'. :
+               #   File "<string>", line 3
+               #
+               # def the_method(i0):
+               #     return torch.nn.functional.adaptive_avg_pool2d(i0, (None, None, None))
+               #            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
+               #
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           ),
+           supports_out=False,
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           sample_inputs_func=sample_inputs_adaptive_avg_pool1d),
+    OpInfo('nn.functional.adaptive_avg_pool3d',
+           dtypesIfCPU=floating_types_and(torch.half),
+           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+           skips=(
+               # RuntimeError:
+               # adaptive_avg_pool3d(Tensor input, int[3] output_size) -> (Tensor):
+               # Expected a value of type 'List[int]' for argument 'output_size' but
+               # instead found type 'Tuple[NoneType, NoneType, NoneType]'. :
+               #   File "<string>", line 3
+               #
+               # def the_method(i0):
+               #     return torch.nn.functional.adaptive_avg_pool3d(i0, (None, None, None))
+               #            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
+               #
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           ),
+           supports_out=False,
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           sample_inputs_func=sample_inputs_adaptive_avg_pool3d),
+    OpInfo('nn.functional.avg_pool1d',
+           aten_name='avg_pool1d',
+           supports_autograd=True,
+           supports_out=False,
+           dtypesIfCPU=floating_types_and(torch.int64),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           sample_inputs_func=sample_inputs_avgpool1d),
+    OpInfo('nn.functional.avg_pool3d',
+           aten_name='avg_pool3d',
+           supports_autograd=True,
+           supports_out=False,
+           dtypesIfCPU=floating_types_and(torch.int64),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           sample_inputs_func=sample_inputs_avgpool3d),
     OpInfo('nn.functional.relu',
            aten_name="relu",
            supports_autograd=True,
@@ -7815,8 +8103,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1e-03)}),
                    'TestCommon', 'test_reference_testing'
-               ),
-               skipIfTBB(),
+               )
            ],
            sample_inputs_func=sample_inputs_layer_norm,),
     OpInfo('nn.functional.pad',
@@ -8693,7 +8980,9 @@ op_db: List[OpInfo] = [
            supports_out=False,
            sample_inputs_func=sample_inputs_legacy_solve,
            check_batched_gradgrad=False,
-           decorators=[skipCPUIfNoLapack, skipCUDAIfNoMagmaAndNoCusolver]),
+           supports_forward_ad=True,
+           gradcheck_wrapper=lambda *args, **kwargs: gradcheck_wrapper_triangular_input(*args, idx=1, **kwargs),
+           decorators=[skipCUDAIfNoMagma]),
     UnaryUfuncInfo('trunc',
                    aliases=('fix', ),
                    ref=np.trunc,
@@ -9146,6 +9435,10 @@ op_db: List[OpInfo] = [
            supports_inplace_autograd=False,
            supports_scripting=False,
            op=torch.Tensor.__getitem__,
+           skips=(
+               # AssertionError: False is not true : Scalars failed to compare as equal! 0 != 104448
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', device_type='cuda'),
+           ),
            assert_jit_shape_analysis=False,  # TODO: support index.Tensor()
            sample_inputs_func=sample_inputs_getitem,),
     OpInfo('index_put',
@@ -9324,10 +9617,21 @@ op_db: List[OpInfo] = [
     OpInfo('resize_',
            op=lambda x, shape: x.clone().resize_(shape),
            method_variant=None,
-           inplace_variant=None,
+           inplace_variant=torch.Tensor.resize_,
+           # the test fails because resize_ doesn't work with imag views as expected by the test
+           # https://github.com/pytorch/pytorch/issues/65945
+           test_neg_view=False,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_autograd=False,
+           skips=(
+               # resize_ is raising an error on input that requires grad on purpose
+               DecorateInfo(
+                   unittest.skip('Skipped! Resizing of variables that require grad is not supported.'),
+                   'TestGradients',
+                   'test_nondifferentiable',
+               ),
+           ),
            sample_inputs_func=sample_inputs_resize_ops),
     OpInfo('resize_as_',
            op=lambda x, other: torch.resize_as_(x.clone(), other),
@@ -9336,6 +9640,14 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_autograd=False,
+           skips=(
+               # resize_ is raising an error on input that requires grad on purpose
+               DecorateInfo(
+                   unittest.skip('Skipped! Resizing of variables that require grad is not supported.'),
+                   'TestGradients',
+                   'test_nondifferentiable',
+               ),
+           ),
            sample_inputs_func=sample_inputs_resize_ops),
     OpInfo('take_along_dim',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -9779,7 +10091,6 @@ op_db: List[OpInfo] = [
         dtypes=floating_and_complex_types(),
         sample_inputs_func=sample_inputs_tensorinv,
         supports_forward_ad=True,
-        decorators=[skipCPUIfNoLapack, skipCUDAIfNoMagmaAndNoCusolver],
     ),
     OpInfo(
         "nn.functional.mse_loss",

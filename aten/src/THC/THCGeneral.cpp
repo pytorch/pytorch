@@ -1,11 +1,10 @@
 #include <THC/THCGeneral.h>
 #include <TH/TH.h>
-#include <THC/THCAllocator.h>
-#include <THC/THCCachingHostAllocator.h>
 #include <THC/THCGeneral.hpp>
 
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAStream.h>
+#include <ATen/cuda/CachingHostAllocator.h>
 #include <ATen/cuda/CUDAContext.h>
 
 #include <c10/cuda/CUDACachingAllocator.h>
@@ -40,10 +39,6 @@ THCState* THCState_alloc(void)
 
 void THCudaInit(THCState* state)
 {
-  if (!state->cudaHostAllocator) {
-    state->cudaHostAllocator = getTHCCachingHostAllocator();
-  }
-
   // We want to throw if there are no GPUs
   int numDevices = static_cast<int>(c10::cuda::device_count_ensure_non_zero());
   state->numDevices = numDevices;
@@ -108,9 +103,7 @@ void THCudaShutdown(THCState* state)
 
   free(state->resourcesPerDevice);
   c10::cuda::CUDACachingAllocator::emptyCache();
-  if (state->cudaHostAllocator == getTHCCachingHostAllocator()) {
-    THCCachingHostAllocator_emptyCache();
-  }
+  at::cuda::CachingHostAllocator_emptyCache();
 
   THCudaCheck(cudaSetDevice(prevDev));
 }
@@ -146,11 +139,6 @@ int THCState_getPeerToPeerAccess(THCState* state, int dev, int devToAccess)
     THCudaCheck(cudaSetDevice(prevDev));
   }
   return state->p2pAccessEnabled[dev][devToAccess];
-}
-
-c10::Allocator* THCState_getCudaHostAllocator(THCState* state)
-{
-  return state->cudaHostAllocator;
 }
 
 THCCudaResourcesPerDevice* THCState_getDeviceResourcePtr(
@@ -291,21 +279,7 @@ void __THCusparseCheck(cusparseStatus_t status, const char *file, const int line
   }
 }
 
-at::DataPtr THCudaHostAlloc(THCState *state, size_t size)
-{
-  THCudaCheck(cudaGetLastError());
-  c10::Allocator* allocator = state->cudaHostAllocator;
-  return allocator->allocate(size);
-}
-
-void THCudaHostRecord(THCState *state, void *ptr) {
-  if (state->cudaHostAllocator == getTHCCachingHostAllocator()) {
-    THCCachingHostAllocator_recordEvent(ptr, at::cuda::getCurrentCUDAStream());
-  }
-}
-
 #undef MIN_GLOBAL_SCRATCH_SPACE_PER_SM_STREAM
 #undef MIN_GLOBAL_SCRATCH_SPACE_PER_DEVICE
 
 #include <THC/THCStorage.cpp>
-#include <THC/THCAllocator.cpp>

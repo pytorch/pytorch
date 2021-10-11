@@ -482,7 +482,22 @@ TEST(LiteInterpreterTest, GetByteCodeVersion) {
   auto version_v4 = _get_model_bytecode_version(test_model_file_v4);
   AT_ASSERT(version_v4 == 4);
 }
+
 #endif // !defined(FB_XPLAT_BUILD)
+
+TEST(LiteInterpreterTest, GetContainTypes) {
+  Module m("m");
+  m.define(R"(
+    def forward(self):
+      return 3
+  )");
+
+  std::stringstream ss;
+  m._save_for_mobile(ss, {}, true);
+
+  auto contained_types = _get_mobile_model_contained_types(ss);
+  AT_ASSERT(contained_types.size() >= 0);
+}
 
 namespace {
 
@@ -631,8 +646,9 @@ TEST(LiteInterpreterTest, isCompatibleSuccess) {
   std::unordered_map<std::string, OperatorInfo> model_ops;
   model_ops["aten::add.Scalar"] = OperatorInfo{2};
 
+  std::unordered_set<std::string> types = {"List", "int"};
   auto model_info = ModelCompatibilityInfo{
-      caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops};
+      caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops, types};
 
   AT_ASSERT(
       is_compatible(runtime_info, model_info).status ==
@@ -648,7 +664,9 @@ TEST(LiteInterpreterTest, isCompatibleFail) {
   std::unordered_map<std::string, OperatorInfo> runtime_ops;
   runtime_ops["aten::add.Int"] = OperatorInfo{2};
   auto runtime_info = RuntimeCompatibilityInfo{
-      caffe2::serialize::kMaxSupportedBytecodeVersion, runtime_ops};
+      caffe2::serialize::kMaxSupportedBytecodeVersion,
+      runtime_ops,
+      _get_mobile_supported_types()};
 
   auto result = is_compatible(runtime_info, model_info);
   AT_ASSERT(result.status = ModelCompatibilityStatus::ERROR);
@@ -659,12 +677,25 @@ TEST(LiteInterpreterTest, isCompatibleFail) {
   // test trivial failure due to bytecode
   runtime_ops["aten::add.Scalar"] = OperatorInfo{2};
   runtime_info = RuntimeCompatibilityInfo{
-      caffe2::serialize::kMaxSupportedBytecodeVersion, runtime_ops};
+      caffe2::serialize::kMaxSupportedBytecodeVersion,
+      runtime_ops,
+      _get_mobile_supported_types()};
   model_info.bytecode_version =
       caffe2::serialize::kMaxSupportedBytecodeVersion + 1;
 
   result = is_compatible(runtime_info, model_info);
   AT_ASSERT(result.status = ModelCompatibilityStatus::ERROR);
+
+  // test trivial failure due to type
+  runtime_info = RuntimeCompatibilityInfo::get();
+  std::unordered_set<std::string> types = {"List", "int", "NamedTuple"};
+
+  model_info = ModelCompatibilityInfo{
+      caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops, types};
+
+  AT_ASSERT(
+      is_compatible(runtime_info, model_info).status ==
+      ModelCompatibilityStatus::ERROR);
 }
 
 TEST(LiteInterpreterTest, Eval) {
