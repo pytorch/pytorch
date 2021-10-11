@@ -39,13 +39,13 @@ class CuSparseDescriptor {
 class TORCH_CUDA_CPP_API CuSparseDnMatDescriptor
     : public CuSparseDescriptor<cusparseDnMatDescr, &cusparseDestroyDnMat> {
  public:
-  CuSparseDnMatDescriptor(const Tensor& input);
+  explicit CuSparseDnMatDescriptor(const Tensor& input);
 };
 
 class TORCH_CUDA_CPP_API CuSparseDnVecDescriptor
     : public CuSparseDescriptor<cusparseDnVecDescr, &cusparseDestroyDnVec> {
  public:
-  CuSparseDnVecDescriptor(const Tensor& input);
+  explicit CuSparseDnVecDescriptor(const Tensor& input);
 };
 
 class TORCH_CUDA_CPP_API CuSparseSpMatDescriptor
@@ -54,7 +54,7 @@ class TORCH_CUDA_CPP_API CuSparseSpMatDescriptor
 class TORCH_CUDA_CPP_API CuSparseSpMatCsrDescriptor
     : public CuSparseSpMatDescriptor {
  public:
-  CuSparseSpMatCsrDescriptor(const Tensor& input);
+  explicit CuSparseSpMatCsrDescriptor(const Tensor& input);
 };
 
 } // namespace sparse
