@@ -6,6 +6,10 @@ namespace profiler = torch::autograd::profiler;
 namespace torch {
 namespace jit {
 namespace mobile {
+
+// If we dont have kineto available then edge profiler does not
+// work since it relies on Kineto
+#ifdef USE_KINETO
 class TORCH_API KinetoEdgeCPUProfiler {
  public:
   // This profiler only profiles KINETO events
@@ -83,6 +87,12 @@ TORCH_API KinetoEdgeCPUProfiler* getCurrentEdgeProfiler();
     mobile::getCurrentEdgeProfiler()->recordBackendEvent(                    \
         start_time_us, end_time_us, debug_handle, event_name, backend_name); \
   }
+#else
+
+#define RECORD_BACKEND_EVENT_TO_EDGE_PROFILER( \
+    start_time_us, end_time_us, debug_handle, event_name, backend_name)
+
+#endif
 } // namespace mobile
 } // namespace jit
 } // namespace torch

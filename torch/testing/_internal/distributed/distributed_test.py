@@ -1197,15 +1197,12 @@ class DistributedTest:
             self._barrier()
             rank = dist.get_rank()
             if rank == 0:
-                rank_to_GPU = self._init_multigpu_helper()
-                device_id = rank_to_GPU[rank][0]
                 with self.assertRaisesRegex(
                     RuntimeError, "Tensors must be CUDA and dense"
                 ):
                     send_tensor = _build_tensor(rank + 1)
                     send_op = dist.P2POp(dist.isend, send_tensor, 1)
-                    req = dist.batch_isend_irecv([send_op])
-                    req.wait()
+                    dist.batch_isend_irecv([send_op])
 
         # NCCL Batch SEND RECV Op Error
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
@@ -1219,8 +1216,7 @@ class DistributedTest:
                 with self.assertRaisesRegex(RuntimeError, "^Invalid ``op``"):
                     send_tensor = _build_tensor(rank + 1, device_id=device_id)
                     send_op = dist.P2POp(dist.broadcast, send_tensor, 1)
-                    req = dist.batch_isend_irecv([send_op])
-                    req.wait()
+                    dist.batch_isend_irecv([send_op])
 
         # NCCL Batch SEND RECV p2p_op_list Error
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
@@ -1229,12 +1225,8 @@ class DistributedTest:
             self._barrier()
             rank = dist.get_rank()
             if rank == 0:
-                rank_to_GPU = self._init_multigpu_helper()
-                device_id = rank_to_GPU[rank][0]
                 with self.assertRaisesRegex(RuntimeError, "^Invalid ``p2p_op_list``"):
-                    send_tensor = _build_tensor(rank + 1)
-                    req = dist.batch_isend_irecv([1, 2])
-                    req.wait()
+                    dist.batch_isend_irecv([1, 2])
 
         # NCCL Batch SEND RECV Mixed Backend Error
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
@@ -1253,8 +1245,7 @@ class DistributedTest:
                     send_tensor = _build_tensor(rank + 1)
                     send_op_gloo = dist.P2POp(dist.isend, send_tensor, 1, group_gloo)
                     send_op_nccl = dist.P2POp(dist.isend, send_tensor, 1, group_nccl)
-                    req = dist.batch_isend_irecv([send_op_gloo, send_op_nccl])
-                    req.wait()
+                    dist.batch_isend_irecv([send_op_gloo, send_op_nccl])
 
         # NCCL SEND RECV
         @skip_if_no_gpu
@@ -7343,9 +7334,7 @@ class DistributedTest:
             # tests expected behavior when nonzero rank hangs.
             nccl_pg = dist.new_group(
                 ranks=list(i for i in range(int(self.world_size))),
-                # provide sufficient timeout so communicators
-                # can be initialized in ctor.
-                timeout=timedelta(seconds=15),
+                timeout=timedelta(seconds=2),
                 backend=dist.Backend.NCCL,
             )
             gloo_pg = dist.new_group(
@@ -7356,7 +7345,7 @@ class DistributedTest:
             # Let all ranks call allreduce first to set up communicators etc.
             # Directly simulating error here will run into store issue described
             # in https://github.com/pytorch/pytorch/issues/54524.
-            nccl_pg.allreduce(tensors).wait(timedelta(seconds=5))
+            nccl_pg.allreduce(tensors).wait()
             # All ranks besides 0 call into allreduce. This is to simulate a
             # desync across the world, where some ranks call into
             # monitored_barrier() and others are stuck in collective comm. In
@@ -7389,8 +7378,6 @@ class DistributedTest:
                     gloo_pg.monitored_barrier(
                         monitored_barrier_timeout_seconds, wait_all_ranks=wait_all_ranks
                     )
-
-            self._barrier(timeout=30)
 
         @with_nccl_blocking_wait
         @require_backend({"gloo", "nccl"})

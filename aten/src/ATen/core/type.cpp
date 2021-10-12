@@ -10,6 +10,10 @@
 
 namespace c10 {
 
+static_assert(
+    std::is_same<decltype(getTypePtr<std::tuple<int64_t, int64_t>>()), const TupleTypePtr&>::value,
+    "getTypePtr<std::tuple<int64_t, int64_t>> not returning const ref!");
+
 namespace {
 inline bool is_contiguous_strides(
     const IntArrayRef sizes,
@@ -961,7 +965,7 @@ UnionType::UnionType(std::vector<TypePtr> reference, TypeKind kind) : Type(kind)
     std::stringstream msg;
     msg << "After type unification was performed, the Union with the "
         << "original types {";
-    for (auto i = 0; i < reference.size(); ++i) {
+    for (const auto i : c10::irange(reference.size())) {
       msg << reference[i]->repr_str();
       if (i > 0) {
         msg << ",";
@@ -1337,8 +1341,8 @@ bool TupleType::isSubtypeOfExt(const Type& rhs_, std::ostream* why_not) const {
   };
   bool names_match = !rhs->schema() || test_names_match(schema(), rhs->schema());
   // co-variant rules for tuples
-  return names_match && compare(*rhs, [&](const TypePtr a, const TypePtr b) {
-    return a->isSubtypeOfExt(*b, why_not);
+  return names_match && compare(*rhs, [&](const Type& a, const Type& b) {
+    return a.isSubtypeOfExt(b, why_not);
   });
 }
 
@@ -1354,7 +1358,7 @@ bool ListType::isSubtypeOfExt(const Type& rhs_, std::ostream* why_not) const {
 
  bool TupleType::operator==(const Type& rhs) const {
    bool typesSame =
-       compare(rhs, [](const TypePtr a, const TypePtr b) { return *a == *b; });
+       compare(rhs, [](const Type& a, const Type& b) { return a == b; });
    if (!typesSame) {
      return false;
   }
