@@ -1,14 +1,13 @@
 #pragma once
 
 #include <ATen/core/ATenGeneral.h>
-#include <ATen/Tensor.h>
-#include <ATen/Utils.h>
-#include <ATen/core/ATenGeneral.h>
 #include <ATen/core/Generator.h>
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/detail/HIPHooksInterface.h>
+#include <ATen/detail/ORTHooksInterface.h>
 #include <c10/util/Exception.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/core/QEngine.h>
@@ -73,8 +72,14 @@ class TORCH_API Context {
   static bool hasXLA() {
     return c10::impl::hasDeviceGuardImpl(at::DeviceType::XLA);
   }
+  static bool hasLazy() {
+    return c10::impl::hasDeviceGuardImpl(at::DeviceType::Lazy);
+  }
   static bool hasMLC() {
     return c10::impl::hasDeviceGuardImpl(at::DeviceType::MLC);
+  }
+  static bool hasORT() {
+    return c10::impl::hasDeviceGuardImpl(at::DeviceType::ORT);
   }
   // defined in header so that getNonVariableType has ability to inline
   // call_once check. getNonVariableType is called fairly frequently
@@ -287,6 +292,10 @@ static inline bool hasXLA() {
 
 static inline bool hasMLC() {
   return globalContext().hasMLC();
+}
+
+static inline bool hasORT() {
+  return globalContext().hasORT();
 }
 
 // Despite its name, this function returns the number of *CUDA* GPUs.

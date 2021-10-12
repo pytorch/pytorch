@@ -59,7 +59,7 @@ void _amp_non_finite_check_and_unscale_cuda_(Tensor& scaled_grad,
       auto* found_inf_ptr = found_inf.data_ptr<float>();
       auto* inv_scale_ptr = inv_scale.data_ptr<float>();
 
-      using opmath_t = get_opmath_t<scalar_t>::opmath_t;
+      using opmath_t = at::opmath_type<scalar_t>;
 
       gpu_kernel(iter,
                  [found_inf_ptr, inv_scale_ptr] GPU_LAMBDA (scalar_t val_in) -> scalar_t {
@@ -113,6 +113,7 @@ void _amp_foreach_non_finite_check_and_unscale_cuda_(TensorList scaled_grads,
     //  - all scaled_grads are strided
     //  - all scaled_grads are non overlapping and dense
     //  - all scaled_grads are on the same device
+    //  - all scaled_grads are of the same dtype
     TORCH_CHECK(scaled_grads[0].is_cuda(), "scaled_grads must be CUDA tensors.");
     // Sets up MTA launch to use scaled_grads as-is.
     tensor_lists.emplace_back(scaled_grads.vec());
@@ -126,12 +127,13 @@ void _amp_foreach_non_finite_check_and_unscale_cuda_(TensorList scaled_grads,
     tensor_lists.resize(1);
     tensor_lists[0].reserve(scaled_grads.size());
     auto expected_device = scaled_grads[0].device();
+    const auto expected_dtype = scaled_grads[0].scalar_type();
     for (const Tensor& t : scaled_grads) {
       // Ensures GradScaler filtered scaled_grads by device.
       TORCH_CHECK(t.is_cuda(), "one of scaled_grads was not a CUDA tensor.");
       TORCH_CHECK(t.device() == expected_device, "scaled_grads must be on the same device.");
       TORCH_CHECK(t.layout() == at::kStrided, "one of scaled_grads was not a strided tensor.");
-      if (!t.is_non_overlapping_and_dense()) {
+      if (!t.is_non_overlapping_and_dense() || t.scalar_type() != expected_dtype) {
         // t is acceptable but not MTA-safe.  Falls back to single-tensor TensorIterator kernel.
         _amp_non_finite_check_and_unscale_cuda_(const_cast<Tensor&>(t),
                                                 found_inf,
@@ -152,7 +154,7 @@ void _amp_foreach_non_finite_check_and_unscale_cuda_(TensorList scaled_grads,
       auto* found_inf_ptr = found_inf.data_ptr<float>();
       auto* inv_scale_ptr = inv_scale.data_ptr<float>();
 
-      using opmath_t = get_opmath_t<scalar_t>::opmath_t;
+      using opmath_t = at::opmath_type<scalar_t>;
 
       // multi_tensor_apply guards onto tensor_lists[0][0], no need to guard explicitly.
       multi_tensor_apply<1>(tensor_lists,

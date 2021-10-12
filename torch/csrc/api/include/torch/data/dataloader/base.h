@@ -12,6 +12,7 @@
 #include <torch/csrc/utils/variadic.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <cstddef>
 #include <exception>
@@ -84,7 +85,8 @@ class DataLoaderBase {
     // Send one 'quit' message per worker. Since a worker dies (exits its
     // thread) after receiving this message, each `QuitWorker()` message will be
     // read by exactly one worker.
-    for (size_t w = 0; w < options_.workers; ++w) {
+    for (const auto w : c10::irange(options_.workers)) {
+      (void)w; // Suppress unused variable warning
       push_job(QuitWorker());
     }
     for (auto& worker : workers_) {
@@ -148,7 +150,8 @@ class DataLoaderBase {
   /// Schedules `requested_jobs` many new batches to be fetched. The actual
   /// number of jobs scheduled may be less if the DataLoader exhausts.
   void prefetch(size_t requested_jobs) {
-    for (size_t r = 0; r < requested_jobs; ++r) {
+    for (const auto r : c10::irange(requested_jobs)) {
+      (void)r; // Suppress unused variable
       if (auto batch_request = get_batch_request()) {
         this->push_job(std::move(*batch_request));
       } else {

@@ -129,7 +129,7 @@ class TestModels(TestCase):
 
     @unittest.skip("This model takes too much memory")
     def test_vgg19_bn(self):
-        # VGG 19-layer model (configuration 'E') with batch normalization
+        # VGG 19-layer model (configuration "E") with batch normalization
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(vgg19_bn()), toC(x))
 
@@ -140,8 +140,7 @@ class TestModels(TestCase):
 
     @disableScriptTest()  # None type in outputs
     def test_inception(self):
-        x = Variable(
-            torch.randn(BATCH_SIZE, 3, 299, 299) + 1.)
+        x = Variable(torch.randn(BATCH_SIZE, 3, 299, 299))
         self.exportTest(toC(inception_v3()), toC(x))
 
     def test_squeezenet(self):
@@ -191,14 +190,14 @@ class TestModels(TestCase):
         qat_resnet50.qconfig = quantization.QConfig(
             activation=quantization.default_fake_quant, weight=quantization.default_fake_quant)
         quantization.prepare_qat(qat_resnet50, inplace=True)
-        qat_resnet50.apply(torch.quantization.enable_observer)
-        qat_resnet50.apply(torch.quantization.enable_fake_quant)
+        qat_resnet50.apply(torch.ao.quantization.enable_observer)
+        qat_resnet50.apply(torch.ao.quantization.enable_fake_quant)
 
         _ = qat_resnet50(x)
         for module in qat_resnet50.modules():
             if isinstance(module, quantization.FakeQuantize):
                 module.calculate_qparams()
-        qat_resnet50.apply(torch.quantization.disable_observer)
+        qat_resnet50.apply(torch.ao.quantization.disable_observer)
 
         self.exportTest(toC(qat_resnet50), toC(x))
 
@@ -212,14 +211,14 @@ class TestModels(TestCase):
             activation=quantization.default_fake_quant,
             weight=quantization.default_per_channel_weight_fake_quant)
         quantization.prepare_qat(qat_resnet50, inplace=True)
-        qat_resnet50.apply(torch.quantization.enable_observer)
-        qat_resnet50.apply(torch.quantization.enable_fake_quant)
+        qat_resnet50.apply(torch.ao.quantization.enable_observer)
+        qat_resnet50.apply(torch.ao.quantization.enable_fake_quant)
 
         _ = qat_resnet50(x)
         for module in qat_resnet50.modules():
             if isinstance(module, quantization.FakeQuantize):
                 module.calculate_qparams()
-        qat_resnet50.apply(torch.quantization.disable_observer)
+        qat_resnet50.apply(torch.ao.quantization.disable_observer)
 
         self.exportTest(toC(qat_resnet50), toC(x))
 
@@ -264,5 +263,5 @@ class TestModels(TestCase):
         self.exportTest(toC(r2plus1d_18()), toC(x), rtol=1e-3, atol=1e-5)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()

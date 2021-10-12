@@ -212,8 +212,10 @@ constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
     DispatchKey::AutogradCPU,
     DispatchKey::AutogradCUDA,
     DispatchKey::AutogradXLA,
+    DispatchKey::AutogradLazy,
     DispatchKey::AutogradNestedTensor,
     DispatchKey::AutogradMLC,
+    DispatchKey::AutogradHPU,
     DispatchKey::AutogradXPU,
     DispatchKey::AutogradPrivateUse1,
     DispatchKey::AutogradPrivateUse2,
@@ -222,7 +224,7 @@ constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
 });
 
 constexpr DispatchKeySet autocast_dispatch_keyset = DispatchKeySet({
-    // DispatchKey::AutocastCPU,
+    DispatchKey::AutocastCPU,
     DispatchKey::AutocastCUDA,
 });
 
@@ -233,7 +235,7 @@ constexpr DispatchKeySet default_included_set = DispatchKeySet({
 });
 
 constexpr DispatchKeySet default_excluded_set = DispatchKeySet({
-    // DispatchKey::AutocastCPU,
+    DispatchKey::AutocastCPU,
     DispatchKey::AutocastCUDA,
 });
 
@@ -244,8 +246,9 @@ constexpr DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView =
 // NB: keys in this set also get associated with CompositeImplicitAutograd
 constexpr DispatchKeySet autogradother_backends = DispatchKeySet(
     {DispatchKey::HIP,
+     DispatchKey::VE,
      DispatchKey::FPGA,
-     DispatchKey::MSNPU,
+     DispatchKey::ORT,
      DispatchKey::Vulkan,
      DispatchKey::Metal,
      DispatchKey::QuantizedCPU,
@@ -255,6 +258,7 @@ constexpr DispatchKeySet autogradother_backends = DispatchKeySet(
      DispatchKey::SparseCPU,
      DispatchKey::SparseCUDA,
      DispatchKey::SparseHIP,
+     DispatchKey::SparseVE,
      DispatchKey::SparseCsrCPU,
      DispatchKey::SparseCsrCUDA,
      DispatchKey::Meta});
@@ -275,6 +279,10 @@ C10_API bool isBackendDispatchKey(DispatchKey t);
 
 // Resolve alias dispatch key to DispatchKeySet if applicable
 C10_API DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t);
+
+// Resolve alias dispatch key to DispatchKeySet if applicable,
+// and chek if k is a part of that set
+C10_API bool runtimeDispatchKeySetHas(DispatchKey t, DispatchKey k);
 
 // Returns a DispatchKeySet of all backend keys mapped to Autograd dispatch key
 // t, DispatchKeySet is empty if t is not alias of DispatchKey::Autograd.

@@ -107,15 +107,15 @@ namespace impl {
 
   // WARNING: This may return a nullptr.  If you require AutogradMeta to return
   // a materialized structure, use materialize_autograd_meta instead.
-  TORCH_API AutogradMeta* get_autograd_meta(const Variable&);
+  TORCH_API AutogradMeta* get_autograd_meta(const at::TensorBase&);
 
   // WARNING: This will return a nullptr if the Tensor is not a view.
-  TORCH_API DifferentiableViewMeta* get_view_autograd_meta(const Variable&);
+  TORCH_API DifferentiableViewMeta* get_view_autograd_meta(const at::TensorBase&);
 
   // Returns the current autograd meta, materializing it if it was previously
   // none.  This counts as a *mutating* operation, so do not call it on
   // "read-only" operators; in particular, this is NOT thread safe
-  TORCH_API AutogradMeta* materialize_autograd_meta(const Variable&);
+  TORCH_API AutogradMeta* materialize_autograd_meta(const at::TensorBase&);
 
   /// Set the gradient accumulator of the `Variable`. This is only applicable to
   /// leaf variables. Interior variables should call `set_gradient_edge()`.
@@ -169,16 +169,13 @@ namespace impl {
   /// Retrieves this `Variable`s version counter.
   TORCH_API const c10::VariableVersion& version_counter(const Variable&);
 
-  TORCH_API PyObject* pyobj(const Variable&);
-  TORCH_API void set_pyobj(const Variable&, PyObject* pyobj);
-
   TORCH_API void set_name(const Variable&, const std::string& name);
 
-  TORCH_API void add_hook(const Variable&, std::shared_ptr<FunctionPreHook> hook);
+  TORCH_API void add_hook(const at::TensorBase&, std::shared_ptr<FunctionPreHook> hook);
   TORCH_API const std::vector<std::shared_ptr<FunctionPreHook>>& hooks(const Variable&);
-  TORCH_API void clear_hooks(const Variable&);
+  TORCH_API void clear_hooks(const at::TensorBase&);
 
-  TORCH_API void create_cpp_hook(const Variable&);
+  TORCH_API void create_cpp_hook(const at::TensorBase&);
 }
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -255,10 +252,11 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
     return grad_;
   }
 
-  const Variable& fw_grad(uint64_t level, const Variable& self) const override;
+  const Variable& fw_grad(uint64_t level, const at::TensorBase& self) const override;
 
-  void set_fw_grad(const Variable& new_grad, const Variable& self, uint64_t level, bool is_inplace_op) override;
+  void set_fw_grad(const at::TensorBase& new_grad, const at::TensorBase& self, uint64_t level, bool is_inplace_op) override;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AutogradMeta(at::TensorImpl* self_impl = nullptr, bool requires_grad = false, Edge gradient_edge = Edge() ) {
     grad_fn_ = std::move(gradient_edge.function);
     requires_grad_ = false;
@@ -497,15 +495,10 @@ struct TORCH_API ViewInfo {
 /// - NO_GRAD_MODE should be set when a view in created when GradMode is disabled
 /// - MULTI_OUTPUT_NODE should be set when a Node created by codegen code returns
 ///   multiple differentiable views
-/// - MULTI_OUTPUT_SAFE should be set when a view was returned by a function
-///   that returns multiple views, and unsafe_* version of that function
-///   exists. These are note considered as views for now for the view+inplace
-///   logic! The graph won't be rewritten when an inplace is done, only a
-///   warning will be thrown.
 /// - Inference_MODE should be set when a view of normal tensor is created in InferenceMode.
 /// - DEFAULT is for all other cases
 enum class CreationMeta: uint8_t { DEFAULT, IN_CUSTOM_FUNCTION, MULTI_OUTPUT_NODE,
-                                   NO_GRAD_MODE, MULTI_OUTPUT_SAFE, INFERENCE_MODE};
+                                   NO_GRAD_MODE, INFERENCE_MODE};
 
 /// Handles correctly propagating CreationMeta when a new view is created from a previous view.
 /// In general, we don't want the new view to be _less_ restrictive than the previous view
@@ -649,6 +642,7 @@ inline Variable make_variable_differentiable_view(
       shared_view_info, creation_meta));
       return data;
     } else {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       c10::intrusive_ptr<at::TensorImpl> data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
         /*version_counter=*/0,
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
@@ -697,6 +691,7 @@ inline Variable make_variable(
     if (data.getIntrusivePtr().use_count() == 1 && data.getIntrusivePtr()->unique_version()) {
       auto data_impl = data.unsafeReleaseIntrusivePtr();
       data_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+      // NOLINTNEXTLINE(bugprone-branch-clone)
       if (requires_grad) {
         data_impl->set_autograd_meta(std::make_unique<AutogradMeta>(data_impl.get(), requires_grad));
       } else {
@@ -707,6 +702,7 @@ inline Variable make_variable(
       auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
         /*version_counter=*/0,
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+      // NOLINTNEXTLINE(bugprone-branch-clone)
       if (requires_grad) {
         data_impl_copy->set_autograd_meta(std::make_unique<AutogradMeta>(
           data_impl_copy.get(), requires_grad));

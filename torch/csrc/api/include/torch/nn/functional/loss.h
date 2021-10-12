@@ -310,7 +310,6 @@ inline Tensor cosine_embedding_loss(
 
 inline Tensor _smooth_l1_loss(const Tensor& input, const Tensor& target, double beta = 1.) {
     auto t = torch::abs(input - target);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     return torch::where(t < beta, 0.5 * torch::pow(t, 2) / beta, t - 0.5 * beta);
 }
 
@@ -825,13 +824,15 @@ inline Tensor cross_entropy(
     const Tensor& target,
     const Tensor& weight,
     int64_t ignore_index,
-    CrossEntropyFuncOptions::reduction_t reduction) {
+    CrossEntropyFuncOptions::reduction_t reduction,
+    double label_smoothing) {
   return torch::cross_entropy_loss(
       input,
       target,
       weight,
       enumtype::reduction_get_enum(reduction),
-      ignore_index);
+      ignore_index,
+      label_smoothing);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
@@ -856,7 +857,8 @@ inline Tensor cross_entropy(
       target,
       options.weight(),
       options.ignore_index(),
-      options.reduction());
+      options.reduction(),
+      options.label_smoothing());
 }
 
 // ============================================================================

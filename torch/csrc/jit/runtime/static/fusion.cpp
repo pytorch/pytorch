@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/runtime/static/fusion.h>
 
 #include <ATen/core/interned_strings.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
@@ -38,7 +39,7 @@ Operation createStaticSubgraphRuntime(const Node* node) {
   auto g = node->g(attr::Subgraph);
   auto module = std::make_shared<torch::jit::StaticModule>(g);
   auto num_inputs = module->num_inputs();
-  return [module, num_inputs](Stack* stack) {
+  return [module, num_inputs](Stack& stack) {
     RECORD_FUNCTION("Static Runtime", std::vector<c10::IValue>());
     auto inps = torch::jit::last(stack, num_inputs);
     // TODO maybe avoid call to vec
@@ -47,16 +48,15 @@ Operation createStaticSubgraphRuntime(const Node* node) {
 
     if (module->num_outputs() > 1) {
       for (auto& o : outputs.toTuple()->elements()) {
-        push_one(*stack, std::move(o));
+        push_one(stack, std::move(o));
       }
     } else {
-      push_one(*stack, std::move(outputs));
+      push_one(stack, std::move(outputs));
     }
     return 0;
   };
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators StaticSubgraphOps({torch::jit::Operator(
     prim::StaticSubgraph,
     createStaticSubgraphRuntime,
@@ -295,7 +295,7 @@ void createFusionGroups(Block* block, AliasDb* aliasDb, size_t min_size) {
   Node* prev_fusion_group =
       initial_fusion_groups.size() ? initial_fusion_groups[0] : nullptr;
 
-  for (size_t i = 1; i < initial_fusion_groups.size(); ++i) {
+  for (const auto i : c10::irange(1, initial_fusion_groups.size())) {
     // Try merging the just created fusion group into the previous one.
     // If it did not work, then put the previous fusion group into
     // fusion_groups vector - we will not touch it anymore in this loop.

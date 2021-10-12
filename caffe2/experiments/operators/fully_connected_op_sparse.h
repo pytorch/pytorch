@@ -83,9 +83,16 @@ void Sparse_mm<float, CPUContext>(
     const float* b,
     float* c,
     CPUContext* /*context*/) {
+
+  #ifdef CAFFE2_USE_MKL
+
   float alpha = 1.0, beta = 0.;
   mkl_scsrmm("N", &m, &n, &k, &alpha, "GLNC",
              acsr, ja, ia, ia+1, b, &n, &beta, c, &n);
+
+  #else
+  throw std::runtime_error("Not compiled with MKL");
+  #endif
 }
 
 }

@@ -145,12 +145,10 @@ void TestMatmul(TensorOptions T, Tensor& t, TensorOptions AccT) {
   ASSERT_ALLCLOSE(d1o.matmul(d2), d1o.unsqueeze(0).mm(d2).squeeze(0));
 
   // 2-d
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto d2o = randn({3, 5}, T);
   ASSERT_ALLCLOSE(d2.matmul(d2o), d2.mm(d2o));
 
   // > 2-d, 1-d
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto d3 = randn({5, 2, 3}, T);
   ASSERT_ALLCLOSE(
       d3.matmul(d1), d3.bmm(d1.view({1, 3, 1}).expand({5, 3, 1})).view({5, 2}));
@@ -171,9 +169,7 @@ void TestMatmul(TensorOptions T, Tensor& t, TensorOptions AccT) {
   // comparison to bmm doesn't work; instead, compare to the higher precision
   // computation (technically, we should always do this). Tolerances are
   // selected empirically.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   double atol = 1e-04;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   double rtol = 1e-06;
   d2 = randn({3, 4}, T);
   d2o = randn({4, 2}, T);
@@ -181,9 +177,7 @@ void TestMatmul(TensorOptions T, Tensor& t, TensorOptions AccT) {
 
   auto d5Acc = d5.to(AccT);
   auto d2Acc = d2.to(AccT);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto acc_result = d5Acc.view({24, 2, 3})
-                        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                         .bmm(d2Acc.expand({24, 3, 4}))
                         .view({3, 2, 4, 2, 4});
   ASSERT_ALLCLOSE_TOLERANCES(result, acc_result, atol, rtol);
@@ -194,10 +188,8 @@ void TestMatmul(TensorOptions T, Tensor& t, TensorOptions AccT) {
   // > 2-d, > 2-d
   auto d5o = randn({2, 1, 2, 4, 3, 2}, T);
   auto d5_bmm_view =
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       d5.expand({2, 3, 2, 4, 2, 3}).contiguous().view({48, 2, 3});
   auto d5o_bmm_view =
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       d5o.expand({2, 3, 2, 4, 3, 2}).contiguous().view({48, 3, 2});
   ASSERT_ALLCLOSE(
       d5.matmul(d5o), d5_bmm_view.bmm(d5o_bmm_view).view({2, 3, 2, 4, 2, 2}));
@@ -215,9 +207,7 @@ void TestStandardGammaGrad(TensorOptions T, Tensor& t) {
   ASSERT_EQUAL(empty, at::_standard_gamma_grad(empty, empty));
 
   // check scalar equals one element
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto one_scalar = ones({}, T).mul(5);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto one_with_dim = ones({1}, T).mul(5);
   ASSERT_ALLCLOSE(
       at::_standard_gamma_grad(one_scalar, one_scalar),
@@ -239,9 +229,7 @@ void TestWhere(TensorOptions T, Tensor& t) {
   ASSERT_EQUAL(empty, at::where(empty_byte, empty, empty));
 
   // check scalar equals one element
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x_scalar = ones({}, T).mul(5);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto y_scalar = ones({}, T).mul(7);
   auto cond_scalar = zeros({}, bT);
   auto x_1d = x_scalar.unsqueeze(0);
@@ -263,18 +251,14 @@ void test(TensorOptions T, TensorOptions AccT) {
   TestWhere(T, t);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestNative, NativeTestCPU) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   manual_seed(123);
 
   test(at::device(kCPU).dtype(kFloat),
        at::device(kCPU).dtype(kDouble));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestNative, NativeTestGPU) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   manual_seed(123);
 
   if (at::hasCUDA()) {

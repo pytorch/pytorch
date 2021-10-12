@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 #include <torch/library.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/vec.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/quantized/Quantizer.h>
@@ -14,13 +14,9 @@
 namespace at {
 namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qadd_relu_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qadd_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qadd_scalar_relu_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qadd_scalar_stub);
 
 namespace {
@@ -32,7 +28,6 @@ inline void check_inputs(const Tensor& qa, const Tensor& qb) {
   TORCH_CHECK(
       qa.qscheme() == qb.qscheme(),
       "Both inputs to Add must have the same quantization shceme.");
-  TORCH_CHECK(qa.numel() == qb.numel(), "Add operands must be the same size!");
   TORCH_CHECK(
       qa.scalar_type() == qb.scalar_type(),
       "Add operands should have same data type.");

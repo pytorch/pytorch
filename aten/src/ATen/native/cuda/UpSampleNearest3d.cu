@@ -1,11 +1,10 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/LegacyTHFunctionsCUDA.h>
+#include <ATen/ceil_div.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/UpSample.cuh>
 
 namespace at {
@@ -128,7 +127,7 @@ static void upsample_nearest3d_out_cuda_template(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
   TensorArg input_arg{input_, "input_", 1}, output_arg{output, "output", 2};
-  checkAllSameGPU("upsample_nearest3d_out_cuda", {input_arg, output_arg});
+  checkAllSameGPU(__func__, {input_arg, output_arg});
 
   // TODO: remove this when the cuda kernel is updated to support the channels_last memory format.
   // This is a temporary hack to prevent a silence correctness issue when calling this kernel
@@ -155,7 +154,7 @@ static void upsample_nearest3d_out_cuda_template(
   unsigned int n = output.numel() / nbatch;
   dim3 bdim{std::min<unsigned int>(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
-  dim3 gdim{cuda::ATenCeilDiv(n, bdim.x)};
+  dim3 gdim{ceil_div(n, bdim.x)};
   // safe check for int32 indexing; implicitly restrict launch config for kernel
   TORCH_CHECK(output.numel() <= std::numeric_limits<int32_t>::max());
 
@@ -203,7 +202,7 @@ static void upsample_nearest3d_backward_out_cuda_template(
   TensorArg grad_input_arg{grad_input, "grad_input", 1},
       grad_output_arg{grad_output_, "grad_output_", 2};
   checkAllSameGPU(
-      "upsample_nearest3d_backward_out_cuda",
+      __func__,
       {grad_output_arg, grad_input_arg});
 
   int output_depth = output_size[0];
@@ -226,7 +225,7 @@ static void upsample_nearest3d_backward_out_cuda_template(
   unsigned int n = grad_input.numel() / nbatch;
   dim3 bdim{std::min<unsigned int>(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
-  dim3 gdim{cuda::ATenCeilDiv(n, bdim.x)};
+  dim3 gdim{ceil_div(n, bdim.x)};
   // safe check for int32 indexing; implicitly restrict launch config for kernel
   TORCH_CHECK(grad_input.numel() <= std::numeric_limits<int32_t>::max());
 

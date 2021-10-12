@@ -3,6 +3,7 @@
 // Wrap tensor operation outputs as PyObject*
 
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/python_headers.h>
 #include <tuple>
 
@@ -142,7 +143,6 @@ inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, float, int64_t> tensors
 }
 
 inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, int64_t> tensors) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto r = THPObjectPtr{PyTuple_New(5)};
   if (!r) throw python_error();
   PyTuple_SET_ITEM(r.get(), 0, wrap(std::move(std::get<0>(tensors))));
@@ -154,7 +154,6 @@ inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor,
 }
 
 inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, float, at::Tensor, int64_t> tensors) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto r = THPObjectPtr{PyTuple_New(5)};
   if (!r) throw python_error();
   PyTuple_SET_ITEM(r.get(), 0, wrap(std::move(std::get<0>(tensors))));
@@ -178,7 +177,6 @@ inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
 }
 
 inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor> tensors) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto r = THPObjectPtr{PyTuple_New(5)};
   if (!r) throw python_error();
   PyTuple_SET_ITEM(r.get(), 0, wrap(std::move(std::get<0>(tensors))));
@@ -192,7 +190,7 @@ inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor,
 inline PyObject* wrap(at::TensorList tl) {
   auto r = THPObjectPtr{PyTuple_New(tl.size())};
   if (!r) throw python_error();
-  for (size_t i = 0; i < tl.size(); ++i) {
+  for (const auto i : c10::irange(tl.size())) {
     PyTuple_SET_ITEM(r.get(), i, wrap(tl[i]));
   }
   return r.release();
@@ -201,7 +199,7 @@ inline PyObject* wrap(at::TensorList tl) {
 inline PyObject* wrap(at::IntArrayRef list) {
   auto r = THPObjectPtr{PyTuple_New(list.size())};
   if (!r) throw python_error();
-  for (size_t i = 0; i < list.size(); ++i) {
+  for (const auto i : c10::irange(list.size())) {
     PyTuple_SET_ITEM(r.get(), i, wrap(list[i]));
   }
   return r.release();

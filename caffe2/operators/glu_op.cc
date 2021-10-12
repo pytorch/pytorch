@@ -43,7 +43,6 @@ void GluOp<float, CPUContext>::ComputeGlu(
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Glu)
     .NumInputs(1)
     .NumOutputs(1)
@@ -56,6 +55,5 @@ X(dn-1, i) * sigmoid(X(dn-1, i+N/2))
     .Input(0, "X", "1D input tensor")
     .Output(0, "Y", "1D output tensor");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Glu, GluOp<float, CPUContext>);
 } // namespace caffe2

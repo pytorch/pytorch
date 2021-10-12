@@ -104,7 +104,6 @@ static inline void slow_conv_transpose3d_shape_check(
   int dimh = 2;
   int dimw = 3;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (ndim == 5) {
     dimf++;
     dimd++;
@@ -318,8 +317,8 @@ void slow_conv_transpose3d_out_cpu_template(
           // Do GEMM (note: this is a bit confusing because gemm assumes
           // column-major matrices)
           cpublas::gemm(
-              cpublas::NoTranspose,
-              cpublas::Transpose,
+              TransposeType::NoTranspose,
+              TransposeType::Transpose,
               n,
               m,
               k,
@@ -367,8 +366,8 @@ void slow_conv_transpose3d_out_cpu_template(
           // column-major matrices)
           if (bias.defined()) {
             cpublas::gemm(
-                cpublas::Transpose,
-                cpublas::NoTranspose,
+                TransposeType::Transpose,
+                TransposeType::NoTranspose,
                 n_,
                 m_,
                 k_,
@@ -580,8 +579,8 @@ void slow_conv_transpose3d_backward_out_cpu_template(
               ? grad_columns.data_ptr<scalar_t>()
               : grad_output_n.data_ptr<scalar_t>();
           cpublas::gemm(
-              cpublas::NoTranspose,
-              cpublas::NoTranspose,
+              TransposeType::NoTranspose,
+              TransposeType::NoTranspose,
               n,
               m,
               k,
@@ -820,8 +819,8 @@ void slow_conv_transpose3d_acc_grad_parameters_cpu(
                 ? columns.data_ptr<scalar_t>()
                 : grad_output_n.data_ptr<scalar_t>();
             cpublas::gemm(
-                cpublas::Transpose,
-                cpublas::NoTranspose,
+                TransposeType::Transpose,
+                TransposeType::NoTranspose,
                 n,
                 m,
                 k,

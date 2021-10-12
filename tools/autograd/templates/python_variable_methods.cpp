@@ -606,6 +606,40 @@ static PyObject * THPVariable_float(PyObject* self, PyObject* args, PyObject* kw
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_cdouble(PyObject* self, PyObject* args, PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "cdouble(*, MemoryFormat? memory_format=None)"
+  });
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(self, args, kwargs, parsed_args);
+
+  if(r.has_torch_function()){
+    return handle_torch_function(r, self, args, kwargs, THPVariableClass, "torch.Tensor");
+  }
+
+  auto opt_memory_format = r.memoryformatOptional(0);
+  return THPVariable_to_type(self, ScalarType::ComplexDouble, opt_memory_format);
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable_cfloat(PyObject* self, PyObject* args, PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "cfloat(*, MemoryFormat? memory_format=None)"
+  });
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(self, args, kwargs, parsed_args);
+
+  if(r.has_torch_function()){
+    return handle_torch_function(r, self, args, kwargs, THPVariableClass, "torch.Tensor");
+  }
+
+  auto opt_memory_format = r.memoryformatOptional(0);
+  return THPVariable_to_type(self, ScalarType::ComplexFloat, opt_memory_format);
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_half(PyObject* self, PyObject* args, PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
@@ -867,18 +901,6 @@ static PyObject * THPVariable_new(PyObject* self, PyObject* args, PyObject* kwar
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_new_ones(PyObject* self, PyObject* args, PyObject* kwargs)
-{
-  HANDLE_TH_ERRORS
-  if (check_has_torch_function(self)) {
-    return handle_torch_function(self, "new_ones", args, kwargs);
-  }
-  auto& self_ = THPVariable_Unpack(self);
-  OptionalDeviceGuard device_guard(device_of(self_));
-  return THPVariable_Wrap(torch::utils::new_ones(legacyExtractDispatchKey(self_), self_.scalar_type(), args, kwargs));
-  END_HANDLE_TH_ERRORS
-}
-
 static PyObject * THPVariable_new_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
@@ -899,20 +921,6 @@ static PyObject * THPVariable_storage(PyObject* self, PyObject* arg)
   }
   auto& self_ = THPVariable_Unpack(self);
   return createPyObject(self_.storage(), self_.dtype());
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject * THPVariable_storage_type(PyObject* self, PyObject* arg)
-{
-  HANDLE_TH_ERRORS
-  if (check_has_torch_function(self)) {
-    return handle_torch_function(self, "storage_type");
-  }
-  auto& self_ = THPVariable_Unpack(self);
-  auto storage = THPObjectPtr(createPyObject(self_.storage(), self_.dtype()));
-  auto storage_type = (PyObject*)Py_TYPE(storage);
-  Py_INCREF(storage_type);
-  return storage_type;
   END_HANDLE_TH_ERRORS
 }
 
@@ -1085,25 +1093,29 @@ static PyObject* THPVariable_set_(
     case 1: {
       // aten::set_.source_Storage(Tensor(a!) self, Storage source) ->
       // Tensor(a!)
-      THPObjectPtr dtype_attr(PyObject_GetAttrString(_r.pyobject(0), "dtype"));
-      if (!dtype_attr) throw python_error();
-      at::ScalarType storage_scalar_type = reinterpret_cast<THPDtype*>(
-        dtype_attr.get())->scalar_type;
-      TORCH_INTERNAL_ASSERT(storage_scalar_type == self.dtype());
+      at::ScalarType storage_scalar_type;
+      bool is_typed_storage = true;
+      at::Storage storage = _r.storage(0, storage_scalar_type, is_typed_storage);
+      TORCH_CHECK(storage_scalar_type == self.dtype() || !is_typed_storage,
+        "Expected a Storage of type ", self.dtype(),
+        " or an UntypedStorage, but got type ", storage_scalar_type,
+        " for argument 1 'storage'");
       auto dispatch_set_ = [](const Tensor& self, Storage source) -> Tensor {
         pybind11::gil_scoped_release no_gil;
         return self.set_(source);
       };
-      return wrap(dispatch_set_(self, _r.storage(0)));
+      return wrap(dispatch_set_(self, storage));
     }
     case 2: {
       // aten::set_.source_Storage_storage_offset(Tensor(a!) self, Storage
       // source, int storage_offset, int[] size, int[] stride=[]) -> Tensor(a!)
-      THPObjectPtr dtype_attr(PyObject_GetAttrString(_r.pyobject(0), "dtype"));
-      if (!dtype_attr) throw python_error();
-      at::ScalarType storage_scalar_type = reinterpret_cast<THPDtype*>(
-        dtype_attr.get())->scalar_type;
-      TORCH_INTERNAL_ASSERT(storage_scalar_type == self.dtype());
+      at::ScalarType storage_scalar_type;
+      bool is_typed_storage = true;
+      at::Storage storage = _r.storage(0, storage_scalar_type, is_typed_storage);
+      TORCH_CHECK(storage_scalar_type == self.dtype() || !is_typed_storage,
+        "Expected a Storage of type ", self.dtype(),
+        " or an UntypedStorage, but got type ", storage_scalar_type,
+        " for argument 1 'storage'");
       auto dispatch_set_ = [](const Tensor& self,
                               Storage source,
                               int64_t storage_offset,
@@ -1113,7 +1125,7 @@ static PyObject* THPVariable_set_(
         return self.set_(source, storage_offset, size, stride);
       };
       return wrap(dispatch_set_(
-          self, _r.storage(0), _r.toInt64(1), _r.intlist(2), _r.intlist(3)));
+          self, storage, _r.toInt64(1), _r.intlist(2), _r.intlist(3)));
     }
     case 3: {
       // aten::set_.source_Tensor(Tensor(a!) self, Tensor source) -> Tensor(a!)
@@ -1155,6 +1167,9 @@ PyMethodDef variable_methods[] = {
   {"__le__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_le>), METH_VARARGS | METH_KEYWORDS, NULL},
   {"__gt__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_gt>), METH_VARARGS | METH_KEYWORDS, NULL},
   {"__ge__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_ge>), METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__rand__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_bitwise_and>), METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__ror__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_bitwise_or>), METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__rxor__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_bitwise_xor>), METH_VARARGS | METH_KEYWORDS, NULL},
   {"__bool__", THPVariable_bool_scalar, METH_NOARGS, NULL},
   {"__float__", THPVariable_float_scalar, METH_NOARGS, NULL},
   {"__complex__", THPVariable_complex_scalar, METH_NOARGS, NULL},
@@ -1178,8 +1193,10 @@ PyMethodDef variable_methods[] = {
   {"dim", THPVariable_dim, METH_NOARGS, NULL},
   {"has_names", THPVariable_has_names, METH_NOARGS, NULL},
   {"double", castPyCFunctionWithKeywords(THPVariable_double), METH_VARARGS | METH_KEYWORDS, NULL},
+  {"cdouble", castPyCFunctionWithKeywords(THPVariable_cdouble), METH_VARARGS | METH_KEYWORDS, NULL},
   {"element_size", THPVariable_element_size, METH_NOARGS, NULL},
   {"float", castPyCFunctionWithKeywords(THPVariable_float), METH_VARARGS | METH_KEYWORDS, NULL},
+  {"cfloat", castPyCFunctionWithKeywords(THPVariable_cfloat), METH_VARARGS | METH_KEYWORDS, NULL},
   {"get_device", THPVariable_get_device, METH_NOARGS, NULL},
   {"bool", castPyCFunctionWithKeywords(THPVariable_bool), METH_VARARGS | METH_KEYWORDS, NULL},
   {"half", castPyCFunctionWithKeywords(THPVariable_half), METH_VARARGS | METH_KEYWORDS, NULL},
@@ -1192,7 +1209,6 @@ PyMethodDef variable_methods[] = {
   {"ndimension", THPVariable_dim, METH_NOARGS, NULL},
   {"nelement", THPVariable_numel, METH_NOARGS, NULL},
   {"new", castPyCFunctionWithKeywords(THPVariable_new), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"new_ones", castPyCFunctionWithKeywords(THPVariable_new_ones), METH_VARARGS | METH_KEYWORDS, NULL},
   {"new_tensor", castPyCFunctionWithKeywords(THPVariable_new_tensor), METH_VARARGS | METH_KEYWORDS, NULL},
   {"nonzero", castPyCFunctionWithKeywords(THPVariable_nonzero), METH_VARARGS | METH_KEYWORDS, NULL},
   {"numel", THPVariable_numel, METH_NOARGS, NULL},
@@ -1201,9 +1217,8 @@ PyMethodDef variable_methods[] = {
   {"set_", castPyCFunctionWithKeywords(THPVariable_set_), METH_VARARGS | METH_KEYWORDS, NULL},
   {"short", castPyCFunctionWithKeywords(THPVariable_short), METH_VARARGS | METH_KEYWORDS, NULL},
   {"size", castPyCFunctionWithKeywords(THPVariable_size), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"storage", THPVariable_storage, METH_NOARGS, NULL},
+  {"_storage", THPVariable_storage, METH_NOARGS, NULL},
   {"storage_offset", THPVariable_storage_offset, METH_NOARGS, NULL},
-  {"storage_type", THPVariable_storage_type, METH_NOARGS, NULL},
   {"stride", castPyCFunctionWithKeywords(THPVariable_stride), METH_VARARGS | METH_KEYWORDS, NULL},
   {"to", castPyCFunctionWithKeywords(THPVariable_to), METH_VARARGS | METH_KEYWORDS, NULL},
   {"tolist", THPVariable_tolist, METH_NOARGS, NULL},

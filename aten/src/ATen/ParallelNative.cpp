@@ -1,6 +1,7 @@
 #include <ATen/Config.h>
 #if AT_PARALLEL_NATIVE
 #include <ATen/Parallel.h>
+#include <ATen/ParallelFuture.h>
 #include <ATen/PTThreadPool.h>
 
 #ifndef C10_MOBILE
@@ -23,21 +24,24 @@ namespace at {
 namespace {
 // used with _set_in_parallel_region to mark master thread
 // as in parallel region while executing parallel primitives
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local bool in_parallel_region_ = false;
 
 // thread number (task_id) set by parallel primitive
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-thread_local size_t thread_num_ = 0;
+thread_local int thread_num_ = 0;
 
 void _set_in_parallel_region(bool in_region) {
   in_parallel_region_ = in_region;
 }
 
-void _set_thread_num(size_t thread_num) {
+}  // namespace (anonymous)
+
+namespace internal {
+void set_thread_num(int thread_num) {
   thread_num_ = thread_num;
 }
+}
 
+namespace {
 void _unset_thread_num() {
   thread_num_ = 0;
 }
@@ -55,7 +59,6 @@ const int CONSUMED = -2;
 //  - NOT_SET - pool not initialized, user value is not set
 //  - positive value - pool not initialized, user value set
 //  - CONSUMED - pool is initialized
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<int> num_intraop_threads{NOT_SET};
 
 int _num_pool_threads(int nthreads) {
@@ -104,8 +107,8 @@ void _run_with_pool(const std::function<void(int, size_t)>& fn, size_t range) {
 
 // RAII guard helps to support in_parallel_region() and get_thread_num() API.
 struct ParallelRegionGuard {
-  ParallelRegionGuard(int64_t task_id) {
-    _set_thread_num(task_id);
+  ParallelRegionGuard(int task_id) {
+    internal::set_thread_num(task_id);
     _set_in_parallel_region(true);
   }
 
@@ -119,11 +122,24 @@ struct ParallelRegionGuard {
 
 namespace internal {
 
-void _parallel_run(
+inline std::tuple<size_t, size_t> calc_num_tasks_and_chunk_size(
+    int64_t begin, int64_t end, int64_t grain_size) {
+  if ((end - begin) < grain_size) {
+    return std::make_tuple(1, std::max((int64_t)0, end - begin));
+  }
+  // Choose number of tasks based on grain size and number of threads.
+  size_t chunk_size = divup((end - begin), get_num_threads());
+  // Make sure each task is at least grain_size size.
+  chunk_size = std::max((size_t)grain_size, chunk_size);
+  size_t num_tasks = divup((end - begin), chunk_size);
+  return std::make_tuple(num_tasks, chunk_size);
+}
+
+void invoke_parallel(
   const int64_t begin,
   const int64_t end,
   const int64_t grain_size,
-  const std::function<void(int64_t, int64_t, size_t)>& f) {
+  const std::function<void(int64_t, int64_t)>& f) {
   at::internal::lazy_init_num_threads();
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -147,7 +163,7 @@ void _parallel_run(
       int64_t local_end = std::min(end, (int64_t)(chunk_size + local_start));
       try {
         ParallelRegionGuard guard(task_id);
-        f(local_start, local_end, task_id);
+        f(local_start, local_end);
       } catch (...) {
         if (!state.err_flag.test_and_set()) {
           state.eptr = std::current_exception();
@@ -220,6 +236,7 @@ void set_num_threads(int nthreads) {
 }
 
 int get_num_threads() {
+  at::internal::lazy_init_num_threads();
 #ifndef C10_MOBILE
   // not initializing pool unnecessarily,
   // because pool cannot be resized after initialization
@@ -271,10 +288,10 @@ void intraop_launch(std::function<void()> func) {
 #endif // C10_MOBILE
 }
 
-std::shared_ptr<c10::ivalue::Future> intraop_launch_future(
+c10::intrusive_ptr<c10::ivalue::Future> intraop_launch_future(
     std::function<void()> func) {
 #ifndef C10_MOBILE
-  auto future = std::make_shared<c10::ivalue::Future>(c10::NoneType::get());
+  auto future = c10::make_intrusive<c10::ivalue::Future>(c10::NoneType::get());
   if (!in_parallel_region() && get_num_threads() > 1) {
     _get_intraop_pool().run(
       [func, future]() {
@@ -290,7 +307,7 @@ std::shared_ptr<c10::ivalue::Future> intraop_launch_future(
 #else
   // TODO: caffe2::PThreadPool only provides a data-parallel API.
   // Task parallelism is not currently supported.
-  auto future = std::make_shared<c10::ivalue::Future>(NoneType::get());
+  auto future = c10::make_intrusive<c10::ivalue::Future>(NoneType::get());
   func();
   future->markCompleted();
   return future;

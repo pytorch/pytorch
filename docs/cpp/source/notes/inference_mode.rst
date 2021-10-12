@@ -30,8 +30,6 @@ Inside an ``InferenceMode`` block, we make the following performance guarantees:
 - Inplace operations on inference tensors are guaranteed not to do a version bump.
 
 For more implementation details of ``InferenceMode`` please see the `RFC-0011-InferenceMode <https://github.com/pytorch/rfcs/pull/17>`_.
-Currently this guard is only available in C++ frontend, adding python frontend support
-is tracked in #56608.
 
 Migration guide from ``AutoNonVariableTypeMode``
 ------------------------------------------------

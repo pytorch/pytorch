@@ -181,7 +181,7 @@ std::vector<int64_t> ConvTransposeNdImpl<D, Derived>::_output_padding(
       max_sizes.push_back(min_sizes[d] + (*stride)[d] - 1);
     }
 
-    for (size_t i = 0; i < output_size_.value().size(); i++) {
+    for(const auto i : c10::irange(output_size_.value().size())) {
       int64_t size = output_size_.value()[i];
       int64_t min_size = min_sizes[i];
       int64_t max_size = max_sizes[i];

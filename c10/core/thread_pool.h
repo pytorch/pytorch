@@ -57,7 +57,7 @@ class C10_API ThreadPool : public c10::TaskThreadPoolBase {
 
   std::queue<task_element_t> tasks_;
   std::vector<std::thread> threads_;
-  std::mutex mutex_;
+  mutable std::mutex mutex_;
   std::condition_variable condition_;
   std::condition_variable completed_;
   std::atomic_bool running_;
@@ -74,7 +74,7 @@ class C10_API ThreadPool : public c10::TaskThreadPoolBase {
       int numa_node_id = -1,
       std::function<void()> init_thread = nullptr);
 
-  ~ThreadPool();
+  ~ThreadPool() override;
 
   size_t size() const override;
 

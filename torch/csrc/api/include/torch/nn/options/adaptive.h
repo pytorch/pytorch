@@ -26,7 +26,6 @@ struct TORCH_API AdaptiveLogSoftmaxWithLossOptions {
   TORCH_ARG(std::vector<int64_t>, cutoffs);
 
   /// value used as an exponent to compute sizes of the clusters. Default: 4.0
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, div_value) = 4.;
 
   /// If ``true``, adds a bias term to the 'head' of

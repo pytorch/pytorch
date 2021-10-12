@@ -35,6 +35,31 @@ inline std::string THPUtils_unpackString(PyObject* obj) {
   throw std::runtime_error("unpackString: expected bytes or unicode object");
 }
 
+// Unpacks PyBytes (PyString) or PyUnicode as c10::string_view
+// PyBytes are unpacked as-is. PyUnicode is unpacked as UTF-8.
+// NOTE: If `obj` is destroyed, then the non-owning c10::string_view will
+//   become invalid. If the string needs to be accessed at any point after
+//   `obj` is destroyed, then the c10::string_view should be copied into
+//   a std::string, or another owning object, and kept alive. For an example,
+//   look at how IValue and autograd nodes handle c10::string_view arguments.
+// NOTE: this method requires the GIL
+inline c10::string_view THPUtils_unpackStringView(PyObject* obj) {
+  if (PyBytes_Check(obj)) {
+    size_t size = PyBytes_GET_SIZE(obj);
+    return c10::string_view(PyBytes_AS_STRING(obj), size);
+  }
+  if (PyUnicode_Check(obj)) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    Py_ssize_t size;
+    const char* data = PyUnicode_AsUTF8AndSize(obj, &size);
+    if (!data) {
+      throw std::runtime_error("error unpacking string as utf-8");
+    }
+    return c10::string_view(data, (size_t)size);
+  }
+  throw std::runtime_error("unpackString: expected bytes or unicode object");
+}
+
 inline PyObject* THPUtils_packString(const char* str) {
   return PyUnicode_FromString(str);
 }
@@ -77,16 +102,18 @@ inline void THPUtils_internStringInPlace(PyObject** obj) {
  */
 
 // NOLINTNEXTLINE(clang-diagnostic-unused-function)
-static py::object PyObject_FastGetAttrString(PyObject *obj, char *name)
+static py::object PyObject_FastGetAttrString(PyObject *obj, const char *name)
 {
     PyTypeObject *tp = Py_TYPE(obj);
     PyObject *res = (PyObject *)nullptr;
 
     /* Attribute referenced by (char *)name */
     if (tp->tp_getattr != nullptr) {
-        res = (*tp->tp_getattr)(obj, name);
-        if (res == nullptr) {
-          PyErr_Clear();
+      // This is OK per https://bugs.python.org/issue39620
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+      res = (*tp->tp_getattr)(obj, const_cast<char*>(name));
+      if (res == nullptr) {
+        PyErr_Clear();
         }
     }
     /* Attribute referenced by (PyObject *)name */

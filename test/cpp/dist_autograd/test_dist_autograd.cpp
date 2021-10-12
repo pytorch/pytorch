@@ -65,15 +65,14 @@ TEST_F(DistAutogradTest, TestInitializedContextCleanup) {
   auto& engine = DistEngine::getInstance();
   ASSERT_EQ(0, engine.numBackwardPasses());
 
-  // Attach appropriate grad fn.
-  auto options = at::TensorOptions().requires_grad(true);
-  auto t = torch::autograd::make_variable(torch::ones({1}, options), true);
-  const auto& e = torch::autograd::impl::gradient_edge(t);
-  torch::autograd::impl::set_gradient_edge(t, e);
-  ASSERT_NE(nullptr, t.grad_fn());
+  // Build autograd graph
+  auto x = torch::randn({2, 2}, torch::requires_grad());
+  auto y = torch::randn({2, 2}, torch::requires_grad());
+  auto z = (x * x + y * y).sum();
+  ASSERT_NE(nullptr, z.grad_fn());
 
   // Execute engine.
-  engine.execute(contextId, {t}, /* retainGraph */ false);
+  engine.execute(contextId, {z}, /* retainGraph */ false);
 
   // Validate appropriate cleanup.
   ASSERT_EQ(0, engine.numBackwardPasses());

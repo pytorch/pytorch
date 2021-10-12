@@ -2,6 +2,8 @@
 
 #if AT_CUDNN_ENABLED()
 
+#include <ATen/native/cudnn/Macros.h>
+
 #include <limits>
 #include <vector>
 #include <sstream>
@@ -9,10 +11,10 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
+#include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/native/cudnn/ConvShared.h>
 
-#include <THC/THC.h>
 #include <ATen/cudnn/Types.h>
 #include <ATen/cudnn/Utils.h>
 #include <ATen/native/utils/ParamsHash.h>
@@ -129,14 +131,14 @@ struct Workspace {
     // workspace fail with some 64bit indexing error instead of an OOM error. In such case,
     // we manually fail with OOM.
     TORCH_CHECK_WITH(CUDAOutOfMemoryError, size < 1_TiB, "Not enough memory for workspace!");
-    data = THCudaMalloc(globalContext().lazyInitCUDA(), size);
+    data = c10::cuda::CUDACachingAllocator::raw_alloc(size);
   }
   Workspace(const Workspace&) = delete;
   Workspace(Workspace&&) = default;
   Workspace& operator=(Workspace&&) = default;
   ~Workspace() {
     if (data) {
-      THCudaFree(globalContext().lazyInitCUDA(), data);
+      c10::cuda::CUDACachingAllocator::raw_delete(data);
     }
   }
 
@@ -290,6 +292,7 @@ struct algorithm_search<cudnnConvolutionFwdAlgoPerf_t> {
     } else {
       size_t max_ws_size = getMaxWorkspaceSize(args, algos, num_algos);
       Workspace ws(max_ws_size);
+      at::cuda::errorIfCapturingCudnnBenchmark("cudnnFind");
       AT_CUDNN_CHECK_WITH_SHAPES(cudnnFindConvolutionForwardAlgorithmEx(
           args.handle,
           args.idesc.desc(), args.input.data_ptr(),
@@ -360,6 +363,7 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgoPerf_t> {
     } else {
       size_t max_ws_size = getMaxWorkspaceSize(args, algos, num_algos);
       Workspace ws(max_ws_size);
+      at::cuda::errorIfCapturingCudnnBenchmark("cudnnFind");
       AT_CUDNN_CHECK_WITH_SHAPES(cudnnFindConvolutionBackwardDataAlgorithmEx(
           args.handle,
           args.wdesc.desc(), args.weight.data_ptr(),
@@ -432,6 +436,7 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgoPerf_t> {
     } else {
       size_t max_ws_size = getMaxWorkspaceSize(args, algos, num_algos);
       Workspace ws(max_ws_size);
+      at::cuda::errorIfCapturingCudnnBenchmark("cudnnFind");
       AT_CUDNN_CHECK_WITH_SHAPES(cudnnFindConvolutionBackwardFilterAlgorithmEx(
           args.handle,
           args.idesc.desc(), args.input.data_ptr(),
@@ -614,6 +619,8 @@ if (args.params.dataType == CUDNN_DATA_FLOAT) {                                 
 //
 // ---------------------------------------------------------------------
 
+#if !HAS_CUDNN_V8()
+
 void raw_cudnn_convolution_forward_out_32bit(
     const Tensor& output, const Tensor& input, const Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
@@ -664,6 +671,8 @@ void raw_cudnn_convolution_forward_out(
     bool benchmark, bool deterministic, bool allow_tf32) {
   split_batch_dim_to_32bit_out(output, input, weight, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32, 1024 * 1024 * 256, raw_cudnn_convolution_forward_out_32bit);
 }
+
+#endif // !HAS_CUDNN_V8()
 
 // ---------------------------------------------------------------------
 //

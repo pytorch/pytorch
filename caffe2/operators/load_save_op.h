@@ -66,6 +66,7 @@ class LoadOp final : public Operator<Context> {
         db_name_(this->template GetSingleArgument<string>("db", "")),
         db_names_(this->template GetRepeatedArgument<string>("dbs")),
         db_type_(this->template GetSingleArgument<string>("db_type", "")),
+        db_options_(this->template GetSingleArgument<string>("db_options", "")),
         keep_device_(this->template GetSingleArgument<int>("keep_device", 0)),
         load_all_(this->template GetSingleArgument<int>("load_all", 0)),
         allow_incomplete_(
@@ -140,6 +141,9 @@ class LoadOp final : public Operator<Context> {
             : (ws_->RootFolder() + "/" + db_names_[i]);
         std::unique_ptr<DB> in_db(
             caffe2::db::CreateDB(db_type_, full_db_name, caffe2::db::READ));
+        if (!db_options_.empty()) {
+          in_db->SetOptions(db_options_);
+        }
         CAFFE_ENFORCE(
             in_db.get(),
             "Cannot find db implementation of type ",
@@ -302,6 +306,7 @@ class LoadOp final : public Operator<Context> {
   string db_name_;
   std::vector<std::string> db_names_;
   string db_type_;
+  std::string db_options_;
   bool keep_device_;
   bool load_all_;
   bool allow_incomplete_;

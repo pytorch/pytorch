@@ -1,9 +1,10 @@
-#include <ATen/native/TensorIterator.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/Parallel.h>
 #include <algorithm>
 #include <memory>
 #include <ATen/Functions.h>
 #include <ATen/TensorOperators.h>
+#include <ATen/TensorIteratorInternal.h>
 
 #include <c10/util/irange.h>
 
@@ -35,36 +36,34 @@ static bool use_two_pass_reduction(TensorIteratorBase& iter) {
 }
 
 static void two_pass_reduction(TensorIteratorBase& iter, loop2d_t loop) {
-  int max_threads = at::get_num_threads();
+  const int max_threads = at::get_num_threads();
 
   auto dst = iter.output(0);
-  auto buffer_shape = DimVector(dst.sizes());
-  buffer_shape.insert(buffer_shape.begin(), max_threads);
+  auto unsqueezed = dst.unsqueeze(0);
+  auto buffer_shape = DimVector(unsqueezed.sizes());
+  buffer_shape[0] = max_threads;
   auto buffer = at::empty(buffer_shape, dst.options());
+  // Fill with the identity
+  buffer.copy_(unsqueezed);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-  std::unique_ptr<bool[]> written(new bool[max_threads]);
-  std::fill(written.get(), written.get() + max_threads, false);
+  auto buffer_stride = buffer.strides()[0] * buffer.element_size();
+  auto buffer_0 = buffer[0];
+  auto first_reduce = TensorIterator::reduce_op(buffer_0, iter.input(0));
+  TORCH_INTERNAL_ASSERT(first_reduce.output(0).is_alias_of(buffer_0));
 
   at::parallel_for(0, iter.numel(), internal::GRAIN_SIZE, [&](int64_t begin, int64_t end) {
-    int thread_num = at::get_thread_num();
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-    written[thread_num] = true;
-    auto slice = buffer[thread_num];
-    slice.copy_(dst);
+    const auto thread_num = at::get_thread_num();
+    auto shape = first_reduce.shape();
+    auto strides = first_reduce.get_strides();
 
-    auto sub_iter = TensorIterator::reduce_op(slice, iter.input(0));
-    sub_iter.serial_for_each(loop, {begin, end});
+    // Bump output ptr so each thread has its own ouput slice
+    auto base_ptrs = first_reduce.get_base_ptrs();
+    base_ptrs[0] += buffer_stride * thread_num;
+
+    at::internal::serial_for_each(shape, strides, base_ptrs.data(),
+                                  base_ptrs.size(), loop, {begin, end});
   });
 
-  // fill any unwritten slices of the buffer with the identity
-  for (int thread_num = 0; thread_num < max_threads; thread_num++) {
-    if (!written[thread_num]) {
-      buffer[thread_num].copy_(dst);
-    }
-  }
-
-  auto unsqueezed = dst.unsqueeze(0);
   auto final_reduce = TensorIterator::reduce_op(unsqueezed, buffer);
   final_reduce.for_each(loop);
 }
@@ -110,7 +109,6 @@ static void parallel_dim_reduction(TensorIteratorBase& iter, loop2d_t loop) {
     if (should_round_columns) {
       // round columns to multiples of 128 bytes if adjacent columns are
       // contiguous in memory.
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       int64_t cols_per_128_bytes = 128 / element_size;
       std::tie(begin, end) = round_columns(iter, dim, cols_per_128_bytes, begin, end);
     }
@@ -141,8 +139,8 @@ void TensorIteratorBase::foreach_reduced_elt(loop_subiter_t loop, bool paralleli
     auto non_reduced_shape = shape.slice(reduce_dims, shape.size() - reduce_dims);
 
     int64_t non_reduced_numel = 1;
-    for (const auto i : c10::irange(non_reduced_shape.size())) {
-      non_reduced_numel *= non_reduced_shape[i];
+    for (const auto i : non_reduced_shape) {
+      non_reduced_numel *= i;
     }
     DimCounter dims {non_reduced_shape, {0, non_reduced_numel}};
     while (!dims.is_done()) {

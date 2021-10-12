@@ -2,7 +2,7 @@ import os.path as _osp
 import sys
 
 from .throughput_benchmark import ThroughputBenchmark
-from ._crash_handler import enable_minidump_collection, disable_minidump_collection
+from ._crash_handler import enable_minidumps, disable_minidumps, enable_minidumps_on_exceptions
 
 # Set the module for a given object for nicer printing
 def set_module(obj, mod):

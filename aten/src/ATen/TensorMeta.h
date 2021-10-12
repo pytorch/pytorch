@@ -23,8 +23,18 @@ namespace impl {
 //      set_output(sizes, options);
 //    }
 //
-#define TORCH_META_FUNC(name) void name::meta
-#define TORCH_META_FUNC2(name, overload) void name##_##overload::meta
+#define TORCH_META_FUNC(name) void structured_##name::meta
+#define TORCH_META_FUNC2(name, overload) void structured_##name##_##overload::meta
+
+// These are versions of TORCH_META_FUNC(2) that include a precompute_out struct as a return value.
+// They should be used when the kernel in question has precomputed values declared in native_functions.yaml and
+// the corresponding implementation should return an instance of the aforementioned struct.
+#define TORCH_PRECOMPUTE_META_FUNC(name) structured_##name::meta_return_ty structured_##name::meta
+#define TORCH_PRECOMPUTE_META_FUNC2(name, overload) structured_##name##_##overload::meta_return_ty structured_##name##_##overload::meta
+
+// Use this to create a precompute struct in a meta function.
+#define TORCH_PRECOMPUTE_STRUCT(name) structured_##name::precompute_out<>
+#define TORCH_PRECOMPUTE_STRUCT2(name, overload) structured_##name##_##overload::precompute_out<>
 
 // Use this to define the prototype for an implementation.  This takes only
 // one argument, which is the name of the dispatch key entry you're

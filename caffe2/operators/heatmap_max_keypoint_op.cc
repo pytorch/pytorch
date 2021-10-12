@@ -4,17 +4,14 @@
 namespace caffe2 {
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     HeatmapMaxKeypoint,
     HeatmapMaxKeypointOp<float, CPUContext>);
 
 // Input: heatmaps [size x size], boxes [x0, y0, x1, y1]
 // Output: keypoints (#rois, 4, #keypoints)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(HeatmapMaxKeypoint).NumInputs(2).NumOutputs(1);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(HeatmapMaxKeypoint);
 } // namespace
 
@@ -128,7 +125,6 @@ bool HeatmapMaxKeypointOp<float, CPUContext>::RunOnDevice() {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       float deltaScore;
       const float MAX_DELTA = 1.5;
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       if (std::abs(div) < 1e-4f) {
         delta << 0.0f, 0.0f;
         deltaScore = maxScore;
@@ -141,17 +137,14 @@ bool HeatmapMaxKeypointOp<float, CPUContext>::RunOnDevice() {
           delta(1) = delta(1) / larger_delta * MAX_DELTA;
         }
         deltaScore = fmax(1, 1) - b.transpose() * delta +
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             1.0 / 2.0 * delta.transpose() * A * delta;
       }
       assert(std::abs(delta(0)) <= MAX_DELTA);
       assert(std::abs(delta(1)) <= MAX_DELTA);
       // find maximum of delta scores
       keypoints(k, 0 * keypoint_count + j) =
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           x0 + (0.5 + maxX + delta(0)) * xLen / heatmap_size;
       keypoints(k, 1 * keypoint_count + j) =
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           y0 + (0.5 + maxY + delta(1)) * yLen / heatmap_size;
       keypoints(k, 2 * keypoint_count + j) = deltaScore;
       if (should_output_softmax_) {

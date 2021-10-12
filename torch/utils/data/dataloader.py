@@ -10,7 +10,7 @@ import threading
 import itertools
 import warnings
 import queue
-from typing import Any, Callable, TypeVar, Generic, Sequence, List, Optional
+from typing import Any, Callable, Iterable, TypeVar, Generic, Sequence, List, Optional, Union
 
 import multiprocessing as python_multiprocessing
 import torch
@@ -154,14 +154,14 @@ class DataLoader(Generic[T_co]):
     pin_memory: bool
     drop_last: bool
     timeout: float
-    sampler: Sampler
+    sampler: Union[Sampler, Iterable]
     prefetch_factor: int
     _iterator : Optional['_BaseDataLoaderIter']
     __initialized = False
 
     def __init__(self, dataset: Dataset[T_co], batch_size: Optional[int] = 1,
-                 shuffle: bool = False, sampler: Optional[Sampler[int]] = None,
-                 batch_sampler: Optional[Sampler[Sequence[int]]] = None,
+                 shuffle: bool = False, sampler: Union[Sampler, Iterable, None] = None,
+                 batch_sampler: Union[Sampler[Sequence], Iterable[Sequence], None] = None,
                  num_workers: int = 0, collate_fn: Optional[_collate_fn_t] = None,
                  pin_memory: bool = False, drop_last: bool = False,
                  timeout: float = 0, worker_init_fn: Optional[_worker_init_fn_t] = None,
@@ -265,11 +265,9 @@ class DataLoader(Generic[T_co]):
                 sampler = _InfiniteConstantSampler()
             else:  # map-style
                 if shuffle:
-                    # Cannot statically verify that dataset is Sized
-                    # Somewhat related: see NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
-                    sampler = RandomSampler(dataset, generator=generator)  # type: ignore[arg-type]
+                    sampler = RandomSampler(dataset, generator=generator)
                 else:
-                    sampler = SequentialSampler(dataset)  # type: ignore[arg-type]
+                    sampler = SequentialSampler(dataset)
 
         if batch_size is not None and batch_sampler is None:
             # auto_collation without custom batch_sampler
@@ -296,6 +294,8 @@ class DataLoader(Generic[T_co]):
         self._iterator = None
 
         self.check_worker_number_rationality()
+
+        torch.set_vital('Dataloader', 'enabled', 'True')  # type: ignore[attr-defined]
 
     def _get_iterator(self) -> '_BaseDataLoaderIter':
         if self.num_workers == 0:

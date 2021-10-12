@@ -35,47 +35,11 @@ that perform all or part of the computation in lower precision. Higher-level
 APIs are provided that incorporate typical workflows of converting FP32 model
 to lower precision with minimal accuracy loss.
 
-Today, PyTorch supports the following backends for running quantized operators efficiently:
+Quantization requires users to be aware of three concepts:
 
-* x86 CPUs with AVX2 support or higher (without AVX2 some operations have
-  inefficient implementations)
-* ARM CPUs (typically found in mobile/embedded devices)
-
-The corresponding implementation is chosen automatically based on the PyTorch build mode.
-
-.. note::
-
-  At the moment PyTorch doesn't provide quantized operator implementations on CUDA -
-  this is the direction for future work. Move the model to CPU in order to test the
-  quantized functionality.
-
-  Quantization-aware training (through :class:`~torch.quantization.FakeQuantize`)
-  supports both CPU and CUDA.
-
-
-.. note::
-
-    When preparing a quantized model, it is necessary to ensure that qconfig
-    and the engine used for quantized computations match the backend on which
-    the model will be executed. Quantization currently supports two backends:
-    fbgemm (for use on x86, `<https://github.com/pytorch/FBGEMM>`_) and qnnpack
-    (for use on the ARM QNNPACK library `<https://github.com/pytorch/QNNPACK>`_).
-    For example, if you are interested in quantizing a model to run on ARM, it
-    is recommended to set the qconfig by calling:
-
-    ``qconfig = torch.quantization.get_default_qconfig('qnnpack')``
-
-    for post training quantization and
-
-    ``qconfig = torch.quantization.get_default_qat_qconfig('qnnpack')``
-
-    for quantization aware training.
-
-    In addition, the torch.backends.quantized.engine parameter should be set to
-    match the backend. For using qnnpack for inference, the backend is set to
-    qnnpack as follows
-
-    ``torch.backends.quantized.engine = 'qnnpack'``
+#. Quantization Config (Qconfig): Specifies how weights and activations are to be quantized. Qconfig is needed to create a quantized model.
+#. Backend: Refers to kernels that support quantization, usually with different numerics.
+#. Quantization engine (torch.backends.quantization.engine): When a quantized model is executed, the qengine specifies which backend is to be used for execution. It is important to ensure that the qengine is consistent with the Qconfig.
 
 Quantization API Summary
 ---------------------------------------
@@ -133,22 +97,53 @@ The following table compares the differences between Eager Mode Quantization and
 +-----------------+-------------------+-------------------+
 
 
-Eager Mode Quantization
-^^^^^^^^^^^^^^^^^^^^^^^
-
-There are three types of quantization supported in Eager Mode Quantization:
+There are three types of quantization supported:
 
 1. dynamic quantization (weights quantized with activations read/stored in
    floating point and quantized for compute.)
 2. static quantization (weights quantized, activations quantized, calibration
    required post training)
-3. quantization aware training (weights quantized, activations quantized,
+3. static quantization aware training (weights quantized, activations quantized,
    quantization numerics modeled during training)
 
 Please see our `Introduction to Quantization on Pytorch
 <https://pytorch.org/blog/introduction-to-quantization-on-pytorch/>`_ blog post
 for a more comprehensive overview of the tradeoffs between these quantization
 types.
+
+Operator coverage varies between dynamic and static quantization and is captured in the table below.
+Note that for FX quantization, the corresponding functionals are also supported.
+
++---------------------------+-------------------+--------------------+
+|                           |Static             | Dynamic            |
+|                           |Quantization       | Quantization       |
++---------------------------+-------------------+--------------------+
+| | nn.Linear               | | Y               | | Y                |
+| | nn.Conv1d/2d/3d         | | Y               | | N                |
++---------------------------+-------------------+--------------------+
+| | nn.LSTM                 | | N               | | Y                |
+| | nn.GRU                  | | N               | | Y                |
++---------------------------+-------------------+--------------------+
+| | nn.RNNCell              | | N               | | Y                |
+| | nn.GRUCell              | | N               | | Y                |
+| | nn.LSTMCell             | | N               | | Y                |
++---------------------------+-------------------+--------------------+
+|nn.EmbeddingBag            | Y (activations    |                    |
+|                           | are in fp32)      | Y                  |
++---------------------------+-------------------+--------------------+
+|nn.Embedding               | Y                 | N                  |
++---------------------------+-------------------+--------------------+
+|nn.MultiheadAttention      |Not Supported      | Not supported      |
++---------------------------+-------------------+--------------------+
+|Activations                |Broadly supported  | Un-changed,        |
+|                           |                   | computations       |
+|                           |                   | stay in fp32       |
++---------------------------+-------------------+--------------------+
+
+
+Eager Mode Quantization
+^^^^^^^^^^^^^^^^^^^^^^^
+
 
 Dynamic Quantization
 ~~~~~~~~~~~~~~~~~~~~
@@ -460,7 +455,7 @@ API Example::
   qconfig_dict = {"": torch.quantization.get_default_qat_qconfig('qnnpack')}
   model_to_quantize.train()
   # prepare
-  model_prepared = quantize_fx.prepare_qat_fx(model_to_qunatize, qconfig_dict)
+  model_prepared = quantize_fx.prepare_qat_fx(model_to_quantize, qconfig_dict)
   # training loop (not shown)
   # quantize
   model_quantized = quantize_fx.convert_fx(model_prepared)
@@ -476,6 +471,20 @@ Please see the following tutorials for more information about FX Graph Mode Quan
 - `User Guide on Using FX Graph Mode Quantization <https://pytorch.org/tutorials/prototype/fx_graph_mode_quant_guide.html>`_
 - `FX Graph Mode Post Training Static Quantization <https://pytorch.org/tutorials/prototype/fx_graph_mode_ptq_static.html>`_
 - `FX Graph Mode Post Training Dynamic Quantization <https://pytorch.org/tutorials/prototype/fx_graph_mode_ptq_dynamic.html>`_
+
+Quantization API Reference
+---------------------------
+
+The :doc:`Quantization API Reference <quantization-support>` contains documentation
+of quantization APIs, such as quantization passes, quantized tensor operations,
+and supported quantized modules and functions.
+
+.. toctree::
+    :hidden:
+
+    quantization-support
+    torch.ao.ns._numeric_suite
+    torch.ao.ns._numeric_suite_fx
 
 Quantized Tensors
 ---------------------------------------
@@ -504,22 +513,53 @@ parameters like scale and zero\_point. Quantized Tensors allow for many
 useful operations making quantized arithmetic easy, in addition to
 allowing for serialization of data in a quantized format.
 
-.. include:: quantization-support.rst
-    :end-before: end-of-part-included-in-quantization.rst
+Natively supported backends
+---------------------------
 
-The :doc:`list of supported operations <quantization-support>` is sufficient to
-cover typical CNN and RNN models
+Today, PyTorch supports the following backends for running quantized operators efficiently:
 
-.. toctree::
-    :hidden:
+* x86 CPUs with AVX2 support or higher (without AVX2 some operations have
+  inefficient implementations), via `fbgemm` (`<https://github.com/pytorch/FBGEMM>`_).
+* ARM CPUs (typically found in mobile/embedded devices), via
+  `qnnpack` (`<https://github.com/pytorch/pytorch/tree/master/aten/src/ATen/native/quantized/cpu/qnnpack>`_).
 
-    torch.nn.intrinsic
-    torch.nn.intrinsic.qat
-    torch.nn.intrinsic.quantized
-    torch.nn.qat
-    torch.quantization
-    torch.nn.quantized
-    torch.nn.quantized.dynamic
+The corresponding implementation is chosen automatically based on the PyTorch build mode, though users
+have the option to override this by setting `torch.backends.quantization.engine` to `fbgemm` or `qnnpack`.
+
+.. note::
+
+  At the moment PyTorch doesn't provide quantized operator implementations on CUDA -
+  this is the direction for future work. Move the model to CPU in order to test the
+  quantized functionality.
+
+  Quantization-aware training (through :class:`~torch.quantization.FakeQuantize`,
+  which emulates quantized numerics in fp32) supports both CPU and CUDA.
+
+
+When preparing a quantized model, it is necessary to ensure that qconfig
+and the engine used for quantized computations match the backend on which
+the model will be executed. The qconfig controls the type of observers used
+during the quantization passes. The qengine controls whether `fbgemm` or
+`qnnpack` specific packing function is used when packing weights for linear
+and convolution functions and modules. For example:
+
+Default settings for fbgemm::
+
+    # set the qconfig for PTQ
+    qconfig = torch.quantization.get_default_qconfig('fbgemm')
+    # or, set the qconfig for QAT
+    qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
+    # set the qengine to control weight packing
+    torch.backends.quantized.engine = 'fbgemm'
+
+Default settings for qnnpack::
+
+    # set the qconfig for PTQ
+    qconfig = torch.quantization.get_default_qconfig('qnnpack')
+    # or, set the qconfig for QAT
+    qconfig = torch.quantization.get_default_qat_qconfig('qnnpack')
+    # set the qengine to control weight packing
+    torch.backends.quantized.engine = 'qnnpack'
 
 Quantization Customizations
 ---------------------------
@@ -538,12 +578,11 @@ Quantization workflows work by adding (e.g. adding observers as
 means that the model stays a regular ``nn.Module``-based instance throughout the
 process and thus can work with the rest of PyTorch APIs.
 
-
-Model Preparation for Quantization
-----------------------------------
+Model Preparation for Quantization (Eager Mode)
+-----------------------------------------------
 
 It is necessary to currently make some modifications to the model definition
-prior to quantization. This is because currently quantization works on a module
+prior to Eager mode quantization. This is because currently quantization works on a module
 by module basis. Specifically, for all quantization techniques, the user needs to:
 
 1. Convert any operations that require output requantization (and thus have
@@ -645,40 +684,13 @@ An e2e example::
   # turn off quantization for conv2
   m.conv2.qconfig = None
 
+Numerical Debugging (prototype)
+-------------------------------
 
-Modules that provide quantization functions and classes
--------------------------------------------------------
+.. warning ::
+     Numerical debugging tooling is early prototype and subject to change.
 
-.. list-table::
-
-  * - :ref:`torch_quantization`
-    - This module implements the functions you call directly to convert your
-      model from FP32 to quantized form. For example the
-      :func:`~torch.quantization.prepare` is used in post training quantization
-      to prepares your model for the calibration step and
-      :func:`~torch.quantization.convert` actually converts the weights to int8
-      and replaces the operations with their quantized counterparts. There are
-      other helper functions for things like quantizing the input to your
-      model and performing critical fusions like conv+relu.
-
-  * - :ref:`torch_nn_intrinsic`
-    - This module implements the combined (fused) modules conv + relu which can
-      then be quantized.
-  * - :doc:`torch.nn.intrinsic.qat`
-    - This module implements the versions of those fused operations needed for
-      quantization aware training.
-  * - :doc:`torch.nn.intrinsic.quantized`
-    - This module implements the quantized implementations of fused operations
-      like conv + relu.
-  * - :doc:`torch.nn.qat`
-    - This module implements versions of the key nn modules **Conv2d()** and
-      **Linear()** which run in FP32 but with rounding applied to simulate the
-      effect of INT8 quantization.
-  * - :doc:`torch.nn.quantized`
-    - This module implements the quantized versions of the nn layers such as
-      ~`torch.nn.Conv2d` and `torch.nn.ReLU`.
-
-  * - :doc:`torch.nn.quantized.dynamic`
-    - Dynamically quantized :class:`~torch.nn.Linear`, :class:`~torch.nn.LSTM`,
-      :class:`~torch.nn.LSTMCell`, :class:`~torch.nn.GRUCell`, and
-      :class:`~torch.nn.RNNCell`.
+* :ref:`torch_ao_ns_numeric_suite`
+  Eager mode numeric suite
+* :ref:`torch_ao_ns_numeric_suite_fx`
+  FX numeric suite

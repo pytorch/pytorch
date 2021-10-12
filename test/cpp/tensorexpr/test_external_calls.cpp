@@ -12,36 +12,29 @@
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
 #include <ATen/NativeFunctions.h>
+#include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/native/xnnpack/OpContext.h>
 
 namespace torch {
 namespace jit {
 using namespace torch::jit::tensorexpr;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExternalCall, Conv2d_float) {
-  KernelScope kernel_scope;
-
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  Placeholder Input("Input", kFloat, {1, 3, 224, 224});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  Placeholder Weight("Weight", kFloat, {16, 3, 3, 3});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  Placeholder Bias("Bias", kFloat, {16});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle Input("Input", {1, 3, 224, 224}, kFloat);
+  BufHandle Weight("Weight", {16, 3, 3, 3}, kFloat);
+  BufHandle Bias("Bias", {16}, kFloat);
   BufHandle ResultBuf("Result", {1, 16, 112, 112}, kFloat);
   int64_t stride = 2;
   int64_t pad = 1;
   int64_t dilation = 1;
   int64_t groups = 1;
 
-  Tensor* Result = new Tensor(
+  Tensor Result = Tensor(
       ResultBuf.node(),
       ExternalCall::make(
           ResultBuf,
           "nnc_aten_conv2d",
-          {BufHandle(Input.data()),
-           BufHandle(Weight.data()),
-           BufHandle(Bias.data())},
+          {Input, Weight, Bias},
           {stride, stride, pad, pad, dilation, dilation, groups}));
   LoopNest l({Result});
   l.prepareForCodegen();
@@ -52,11 +45,8 @@ TEST(ExternalCall, Conv2d_float) {
                      .layout(at::kStrided)
                      .device(at::kCPU)
                      .requires_grad(false);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor input = at::ones({1, 3, 224, 224}, options) * 5.f;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor weight = at::ones({16, 3, 3, 3}, options) * 6.f;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor bias = at::ones({16}, options) * 11.f;
   at::Tensor ref = at::conv2d(
       input,
@@ -68,13 +58,9 @@ TEST(ExternalCall, Conv2d_float) {
       groups);
 
   at::Tensor nnc_result;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> input_buf(1 * 3 * 224 * 224, 5.f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> weight_buf(16 * 3 * 3 * 3, 6.f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> bias_buf(16, 11.f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> result_buf(1 * 16 * 112 * 112, -1.f);
 
 #ifdef TORCH_ENABLE_LLVM
@@ -88,37 +74,28 @@ TEST(ExternalCall, Conv2d_float) {
   SimpleIREvaluator ir_eval(l.root_stmt(), {Input, Weight, Bias, Result});
 
   ir_eval.call({input_buf, weight_buf, bias_buf, result_buf});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   nnc_result = at::from_blob(result_buf.data(), {1, 16, 112, 112}, options);
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExternalCall, Conv2d_int) {
   // A similar test, but now using kInt tensors
-  KernelScope kernel_scope;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  Placeholder Input("Input", kInt, {1, 3, 224, 224});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  Placeholder Weight("Weight", kInt, {16, 3, 3, 3});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  Placeholder Bias("Bias", kInt, {16});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle Input("Input", {1, 3, 224, 224}, kInt);
+  BufHandle Weight("Weight", {16, 3, 3, 3}, kInt);
+  BufHandle Bias("Bias", {16}, kInt);
   BufHandle ResultBuf("Result", {1, 16, 112, 112}, kInt);
   int64_t stride = 2;
   int64_t pad = 1;
   int64_t dilation = 1;
   int64_t groups = 1;
 
-  Tensor* Result = new Tensor(
+  Tensor Result = Tensor(
       ResultBuf.node(),
       ExternalCall::make(
           ResultBuf,
           "nnc_aten_conv2d",
-          {BufHandle(Input.data()),
-           BufHandle(Weight.data()),
-           BufHandle(Bias.data())},
+          {Input, Weight, Bias},
           {stride, stride, pad, pad, dilation, dilation, groups}));
   LoopNest l({Result});
   l.prepareForCodegen();
@@ -129,11 +106,8 @@ TEST(ExternalCall, Conv2d_int) {
                      .layout(at::kStrided)
                      .device(at::kCPU)
                      .requires_grad(false);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor input = at::ones({1, 3, 224, 224}, options) * 5;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor weight = at::ones({16, 3, 3, 3}, options) * 6;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor bias = at::ones({16}, options) * 11;
   at::Tensor ref = at::conv2d(
       input,
@@ -145,13 +119,9 @@ TEST(ExternalCall, Conv2d_int) {
       groups);
 
   at::Tensor nnc_result;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int32_t> input_buf(1 * 3 * 224 * 224, 5);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int32_t> weight_buf(16 * 3 * 3 * 3, 6);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int32_t> bias_buf(16, 11);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int32_t> result_buf(1 * 16 * 112 * 112, -1);
 
 #ifdef TORCH_ENABLE_LLVM
@@ -165,29 +135,18 @@ TEST(ExternalCall, Conv2d_int) {
   SimpleIREvaluator ir_eval(l.root_stmt(), {Input, Weight, Bias, Result});
 
   ir_eval.call({input_buf, weight_buf, bias_buf, result_buf});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   nnc_result = at::from_blob(result_buf.data(), {1, 16, 112, 112}, options);
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExternalCall, Conv2d_nobias_noargs) {
-  KernelScope kernel_scope;
-
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  Placeholder Input("Input", kFloat, {1, 16, 112, 112});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  Placeholder Weight("Weight", kFloat, {16, 16, 1, 1});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle Input("Input", {1, 16, 112, 112}, kFloat);
+  BufHandle Weight("Weight", {16, 16, 1, 1}, kFloat);
   BufHandle ResultBuf("Result", {1, 16, 112, 112}, kFloat);
 
-  Tensor* Result = new Tensor(
+  Tensor Result = Tensor(
       ResultBuf.node(),
-      ExternalCall::make(
-          ResultBuf,
-          "nnc_aten_conv2d",
-          {BufHandle(Input.data()), BufHandle(Weight.data())},
-          {}));
+      ExternalCall::make(ResultBuf, "nnc_aten_conv2d", {Input, Weight}, {}));
   LoopNest l({Result});
   l.prepareForCodegen();
   l.simplify();
@@ -197,18 +156,13 @@ TEST(ExternalCall, Conv2d_nobias_noargs) {
                      .layout(at::kStrided)
                      .device(at::kCPU)
                      .requires_grad(false);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor input = at::ones({1, 16, 112, 112}, options) * 5.f;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor weight = at::ones({16, 16, 1, 1}, options) * 6.f;
   at::Tensor ref = at::conv2d(input, weight);
 
   at::Tensor nnc_result;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> input_buf(1 * 16 * 112 * 112, 5.f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> weight_buf(16 * 16 * 1 * 1, 6.f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> result_buf(1 * 16 * 112 * 112, -1.f);
 
 #ifdef TORCH_ENABLE_LLVM
@@ -222,35 +176,22 @@ TEST(ExternalCall, Conv2d_nobias_noargs) {
   SimpleIREvaluator ir_eval(l.root_stmt(), {Input, Weight, Result});
 
   ir_eval.call({input_buf, weight_buf, result_buf});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   nnc_result = at::from_blob(result_buf.data(), {1, 16, 112, 112}, options);
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExternalCall, Addmm_float) {
-  KernelScope kernel_scope;
-
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  Placeholder Input("Input", kFloat, {100, 300});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  Placeholder Mat1("Mat1", kFloat, {100, 200});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  Placeholder Mat2("Mat2", kFloat, {200, 300});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle Input("Input", {100, 300}, kFloat);
+  BufHandle Mat1("Mat1", {100, 200}, kFloat);
+  BufHandle Mat2("Mat2", {200, 300}, kFloat);
   BufHandle ResultBuf("Result", {100, 300}, kFloat);
   int64_t beta = 2;
   int64_t alpha = 2;
 
-  Tensor* Result = new Tensor(
+  Tensor Result = Tensor(
       ResultBuf.node(),
       ExternalCall::make(
-          ResultBuf,
-          "nnc_aten_addmm",
-          {BufHandle(Input.data()),
-           BufHandle(Mat1.data()),
-           BufHandle(Mat2.data())},
-          {beta, alpha}));
+          ResultBuf, "nnc_aten_addmm", {Input, Mat1, Mat2}, {beta, alpha}));
   LoopNest l({Result});
   l.prepareForCodegen();
   l.simplify();
@@ -260,29 +201,21 @@ TEST(ExternalCall, Addmm_float) {
                      .layout(at::kStrided)
                      .device(at::kCPU)
                      .requires_grad(false);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor input = at::ones({100, 300}, options) * 5.f;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor mat1 = at::ones({100, 200}, options) * 6.f;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor mat2 = at::ones({200, 300}, options) * 11.f;
   at::Tensor ref = at::addmm(input, mat1, mat2, beta, alpha);
 
   at::Tensor nnc_result;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> input_buf(100 * 300, 5.f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> mat1_buf(100 * 200, 6.f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> mat2_buf(200 * 300, 11.f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> result_buf(100 * 300, -1.f);
 
 #ifdef TORCH_ENABLE_LLVM
   LLVMCodeGen llvm_codegen(l.root_stmt(), {Input, Mat1, Mat2, Result});
 
   llvm_codegen.call({input_buf, mat1_buf, mat2_buf, result_buf});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   nnc_result = at::from_blob(result_buf.data(), {100, 300}, options);
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 #endif
@@ -290,14 +223,163 @@ TEST(ExternalCall, Addmm_float) {
   SimpleIREvaluator ir_eval(l.root_stmt(), {Input, Mat1, Mat2, Result});
 
   ir_eval.call({input_buf, mat1_buf, mat2_buf, result_buf});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   nnc_result = at::from_blob(result_buf.data(), {100, 300}, options);
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+#ifdef USE_XNNPACK
+
+TEST(ExternalCall, Prepacked_Linear_float) {
+  using namespace at::native::xnnpack;
+
+  BufHandle Input("Input", {100, 200}, kFloat);
+  BufHandle ResultBuf("Result", {100, 300}, kFloat);
+
+  // Calculate reference result using at::linear.
+  auto options = at::TensorOptions()
+                     .dtype(at::kFloat)
+                     .layout(at::kStrided)
+                     .device(at::kCPU)
+                     .requires_grad(false);
+  at::Tensor input =
+      at::linspace(-10.0, 10.0, 100 * 200, options).resize_({100, 200});
+  at::Tensor weight =
+      at::linspace(-10.0, 10.0, 300 * 200, options).resize_({300, 200});
+  at::Tensor bias = at::linspace(-10.0, 10.0, 300, options);
+  at::Tensor ref = at::linear(input, weight, bias);
+
+  // Create prepacked xnnpack context object.
+  auto linear_clamp_prepack_op =
+      c10::Dispatcher::singleton()
+          .findSchemaOrThrow("prepacked::linear_clamp_prepack", "")
+          .typed<c10::intrusive_ptr<LinearOpContext>(
+              at::Tensor,
+              c10::optional<at::Tensor>,
+              const c10::optional<at::Scalar>&,
+              const c10::optional<at::Scalar>&)>();
+  auto prepacked = linear_clamp_prepack_op.call(
+      weight, bias, c10::optional<at::Scalar>(), c10::optional<at::Scalar>());
+
+  BufHandle DummyPrepacked("DummyPrepacked", {1}, kFloat);
+  Tensor Result = Tensor(
+      ResultBuf.node(),
+      ExternalCall::make(
+          ResultBuf,
+          "nnc_prepacked_linear_clamp_run",
+          {Input, DummyPrepacked},
+          {}));
+  LoopNest l({Result});
+  l.prepareForCodegen();
+  l.simplify();
+
+  at::Tensor nnc_result;
+  std::vector<float> input_buf(
+      input.data_ptr<float>(), input.data_ptr<float>() + 100 * 200);
+  std::vector<float> result_buf(100 * 300, -1.f);
+
+#ifdef TORCH_ENABLE_LLVM
+  LLVMCodeGen llvm_codegen(l.root_stmt(), {Input, DummyPrepacked, Result});
+
+  llvm_codegen.call({input_buf, prepacked.get(), result_buf});
+  nnc_result = at::from_blob(result_buf.data(), {100, 300}, options);
+  ASSERT_TRUE(at::allclose(nnc_result, ref));
+#endif
+
+  SimpleIREvaluator ir_eval(l.root_stmt(), {Input, DummyPrepacked, Result});
+
+  ir_eval.call({input_buf, prepacked.get(), result_buf});
+  nnc_result = at::from_blob(result_buf.data(), {100, 300}, options);
+  ASSERT_TRUE(at::allclose(nnc_result, ref));
+}
+
+TEST(ExternalCall, Prepacked_Conv2d_float) {
+  using namespace at::native::xnnpack;
+
+  BufHandle Input("Input", {1, 3, 224, 224}, kFloat);
+  BufHandle ResultBuf("Result", {1, 16, 112, 112}, kFloat);
+  int64_t stride = 2;
+  int64_t pad = 1;
+  int64_t dilation = 1;
+  int64_t groups = 1;
+
+  // Calculate reference result using at::conv2d.
+  auto options = at::TensorOptions()
+                     .dtype(at::kFloat)
+                     .layout(at::kStrided)
+                     .device(at::kCPU)
+                     .requires_grad(false);
+  at::Tensor input = at::linspace(-10.0, 10.0, 1 * 3 * 224 * 224, options)
+                         .resize_({1, 3, 224, 224});
+  at::Tensor weight =
+      at::linspace(-10.0, 10.0, 16 * 3 * 3 * 3, options).resize_({16, 3, 3, 3});
+  at::Tensor bias = at::linspace(-10.0, 10.0, 16, options);
+  at::Tensor ref = at::conv2d(
+      input,
+      weight,
+      bias,
+      {stride, stride},
+      {pad, pad},
+      {dilation, dilation},
+      groups);
+
+  // Create prepacked xnnpack context object.
+  auto conv2d_clamp_prepack_op =
+      c10::Dispatcher::singleton()
+          .findSchemaOrThrow("prepacked::conv2d_clamp_prepack", "")
+          .typed<c10::intrusive_ptr<Conv2dOpContext>(
+              at::Tensor,
+              c10::optional<at::Tensor>,
+              std::vector<int64_t>,
+              std::vector<int64_t>,
+              std::vector<int64_t>,
+              int64_t,
+              const c10::optional<at::Scalar>&,
+              const c10::optional<at::Scalar>&)>();
+  auto prepacked = conv2d_clamp_prepack_op.call(
+      weight,
+      bias,
+      {stride, stride},
+      {pad, pad},
+      {dilation, dilation},
+      groups,
+      c10::optional<at::Scalar>(),
+      c10::optional<at::Scalar>());
+
+  BufHandle DummyPrepacked("DummyPrepacked", {1}, kFloat);
+  Tensor Result = Tensor(
+      ResultBuf.node(),
+      ExternalCall::make(
+          ResultBuf,
+          "nnc_prepacked_conv2d_clamp_run",
+          {Input, DummyPrepacked},
+          {}));
+  LoopNest l({Result});
+  l.prepareForCodegen();
+  l.simplify();
+
+  at::Tensor nnc_result;
+  std::vector<float> input_buf(
+      input.data_ptr<float>(), input.data_ptr<float>() + 1 * 3 * 224 * 224);
+  std::vector<float> result_buf(1 * 16 * 112 * 112, -1.f);
+
+#ifdef TORCH_ENABLE_LLVM
+  LLVMCodeGen llvm_codegen(l.root_stmt(), {Input, DummyPrepacked, Result});
+
+  llvm_codegen.call({input_buf, prepacked.get(), result_buf});
+  nnc_result = at::from_blob(result_buf.data(), {1, 16, 112, 112}, options);
+  ASSERT_TRUE(at::allclose(nnc_result, ref, 1e-03, 1e-03));
+#endif
+
+  SimpleIREvaluator ir_eval(l.root_stmt(), {Input, DummyPrepacked, Result});
+
+  ir_eval.call({input_buf, prepacked.get(), result_buf});
+  nnc_result = at::from_blob(result_buf.data(), {1, 16, 112, 112}, options);
+  ASSERT_TRUE(at::allclose(nnc_result, ref, 1e-03, 1e-03));
+}
+
+#endif // USE_XNNPACK
+
 TEST(ExternalCall, BinaryFloat) {
-  KernelScope kernel_scope;
   using TensorFunc = std::function<at::Tensor(at::Tensor, at::Tensor)>;
   using Test = std::tuple<
       std::vector<int64_t>,
@@ -307,12 +389,9 @@ TEST(ExternalCall, BinaryFloat) {
       std::string>;
   std::vector<Test> tests = {};
   tests.push_back(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Test{{100, 200}, {200, 300}, {100, 300}, at::matmul, "nnc_aten_matmul"});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   tests.push_back(Test{{100, 300}, {300}, {100}, at::mv, "nnc_aten_mv"});
   tests.push_back(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Test{{100, 200}, {200, 300}, {100, 300}, at::mm, "nnc_aten_mm"});
   for (auto curTest : tests) {
     std::vector<int64_t> aShape, bShape, resShape;
@@ -323,17 +402,13 @@ TEST(ExternalCall, BinaryFloat) {
       auto intV = std::vector<int>(v.begin(), v.end());
       return std::vector<ExprHandle>(intV.begin(), intV.end());
     };
-    Placeholder A("A", kFloat, toExprHandleVec(aShape));
-    Placeholder B("", kFloat, toExprHandleVec(bShape));
+    BufHandle A("A", toExprHandleVec(aShape), kFloat);
+    BufHandle B("B", toExprHandleVec(bShape), kFloat);
     BufHandle ResultBuf("Result", toExprHandleVec(resShape), kFloat);
 
-    Tensor* Result = new Tensor(
+    Tensor Result = Tensor(
         ResultBuf.node(),
-        ExternalCall::make(
-            ResultBuf,
-            externCallName,
-            {BufHandle(A.data()), BufHandle(B.data())},
-            {}));
+        ExternalCall::make(ResultBuf, externCallName, {A, B}, {}));
     LoopNest l({Result});
     l.prepareForCodegen();
     l.simplify();
@@ -343,9 +418,7 @@ TEST(ExternalCall, BinaryFloat) {
                        .layout(at::kStrided)
                        .device(at::kCPU)
                        .requires_grad(false);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     at::Tensor a = at::ones(c10::IntArrayRef(aShape), options) * 5.f;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     at::Tensor b = at::ones(c10::IntArrayRef(bShape), options) * 6.f;
     at::Tensor ref = torchFunc(a, b);
 
@@ -355,9 +428,7 @@ TEST(ExternalCall, BinaryFloat) {
     };
 
     at::Tensor nnc_result;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::vector<float> a_buf(prod(aShape), 5.f);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::vector<float> b_buf(prod(bShape), 6.f);
     std::vector<float> result_buf(prod(resShape), -1.f);
 
@@ -378,9 +449,7 @@ TEST(ExternalCall, BinaryFloat) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExternalCall, UnaryFloat) {
-  KernelScope kernel_scope;
   using TensorFunc = std::function<at::Tensor(at::Tensor)>;
   auto toExprHandleVec = [](std::vector<int64_t> v) {
     auto intV = std::vector<int>(v.begin(), v.end());
@@ -395,18 +464,14 @@ TEST(ExternalCall, UnaryFloat) {
   std::vector<Test> tests = {};
   tests.push_back(Test{// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                        {1, 64, 8, 9},
-                       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                        {1, 64, 5, 7},
                        [](at::Tensor x) {
-                         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                          return at::adaptive_avg_pool2d(x, {5, 7});
                        },
                        "nnc_aten_adaptive_avg_pool2d",
-                       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                        toExprHandleVec({5, 7})});
   tests.push_back(Test{// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                        {100, 200},
-                       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                        {100},
                        [](at::Tensor x) { return at::mean(x, {1}); },
                        "nnc_aten_mean",
@@ -418,13 +483,12 @@ TEST(ExternalCall, UnaryFloat) {
     std::vector<ExprHandle> externCallArgs;
     std::tie(aShape, resShape, torchFunc, externCallName, externCallArgs) =
         curTest;
-    Placeholder A("A", kFloat, toExprHandleVec(aShape));
+    BufHandle A("A", toExprHandleVec(aShape), kFloat);
     BufHandle ResultBuf("Result", toExprHandleVec(resShape), kFloat);
 
-    Tensor* Result = new Tensor(
+    Tensor Result = Tensor(
         ResultBuf.node(),
-        ExternalCall::make(
-            ResultBuf, externCallName, {BufHandle(A.data())}, externCallArgs));
+        ExternalCall::make(ResultBuf, externCallName, {A}, externCallArgs));
     LoopNest l({Result});
     l.prepareForCodegen();
     l.simplify();
@@ -434,7 +498,6 @@ TEST(ExternalCall, UnaryFloat) {
                        .layout(at::kStrided)
                        .device(at::kCPU)
                        .requires_grad(false);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     at::Tensor a = at::ones(c10::IntArrayRef(aShape), options) * 5.f;
     at::Tensor ref = torchFunc(a);
 
@@ -444,7 +507,6 @@ TEST(ExternalCall, UnaryFloat) {
     };
 
     at::Tensor nnc_result;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::vector<float> a_buf(prod(aShape), 5.f);
     std::vector<float> result_buf(prod(resShape), -1.f);
 
@@ -465,59 +527,50 @@ TEST(ExternalCall, UnaryFloat) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExternalCall, ComputeInterop) {
   // This test verifies that Tensors using external calls can be used by and can
   // use Tensors built with Compute API.
-  KernelScope kernel_scope;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  BufHandle ConvResultBuf("ConvResult", {1, 16, 112, 112}, kFloat);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  BufHandle MatmulResultBuf("MatmulResult", {1, 16, 112, 112}, kFloat);
+  BufHandle ConvResultBuf("ConvResult", {1, 16, 32, 32}, kFloat);
+  BufHandle MatmulResultBuf("MatmulResult", {1, 16, 32, 32}, kFloat);
 
-  Tensor* Input = Compute(
+  Tensor Input = Compute(
       "Input",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      {{1, "n"}, {16, "c"}, {112, "h"}, {112, "w"}},
+      {{1, "n"}, {16, "c"}, {32, "h"}, {32, "w"}},
       [&](const VarHandle& n,
           const VarHandle& c,
           const VarHandle& h,
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           const VarHandle& w) { return FloatImm::make(5.0f); });
-  Tensor* Weight = Compute(
+  Tensor Weight = Compute(
       "Weight",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {{16, "n"}, {16, "c"}, {1, "kh"}, {1, "kw"}},
       [&](const VarHandle& n,
           const VarHandle& c,
           const VarHandle& h,
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           const VarHandle& w) { return FloatImm::make(6.0f); });
 
-  Tensor* ConvResult = new Tensor(
+  Tensor ConvResult = Tensor(
       ConvResultBuf.node(),
       ExternalCall::make(
           ConvResultBuf,
           "nnc_aten_conv2d",
-          {BufHandle(Input->buf()), BufHandle(Weight->buf())},
+          {BufHandle(Input.buf()), BufHandle(Weight.buf())},
           {}));
-  Tensor* MatmulResult = new Tensor(
+  Tensor MatmulResult = Tensor(
       MatmulResultBuf.node(),
       ExternalCall::make(
           MatmulResultBuf,
           "nnc_aten_matmul",
-          {BufHandle(ConvResult->buf()), BufHandle(ConvResult->buf())},
+          {BufHandle(ConvResult.buf()), BufHandle(ConvResult.buf())},
           {}));
-  Tensor* Result = Compute(
+  Tensor Result = Compute(
       "Result",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      {{1, "n"}, {16, "c"}, {112, "h"}, {112, "w"}},
+      {{1, "n"}, {16, "c"}, {32, "h"}, {32, "w"}},
       [&](const VarHandle& n,
           const VarHandle& c,
           const VarHandle& h,
           const VarHandle& w) {
-        return ConvResult->load(n, c, h, w) + MatmulResult->load(n, c, h, w);
+        return ConvResult.load(n, c, h, w) + MatmulResult.load(n, c, h, w);
       });
 
   LoopNest l({Input, Weight, ConvResult, MatmulResult, Result});
@@ -534,25 +587,18 @@ TEST(ExternalCall, ComputeInterop) {
                      .layout(at::kStrided)
                      .device(at::kCPU)
                      .requires_grad(false);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  at::Tensor input = at::ones({1, 16, 112, 112}, options) * 5.f;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  at::Tensor input = at::ones({1, 16, 32, 32}, options) * 5.f;
   at::Tensor weight = at::ones({16, 16, 1, 1}, options) * 6.f;
   at::Tensor t = at::conv2d(input, weight);
   at::Tensor t2 = at::matmul(t, t);
   at::Tensor ref = t + t2;
 
   at::Tensor nnc_result;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  std::vector<float> input_buf(1 * 16 * 112 * 112, 5.f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  std::vector<float> input_buf(1 * 16 * 32 * 32, 5.f);
   std::vector<float> weight_buf(16 * 16 * 1 * 1, 6.f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  std::vector<float> conv_result_buf(1 * 16 * 112 * 112, -1.f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  std::vector<float> matmul_result_buf(1 * 16 * 112 * 112, -1.f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  std::vector<float> result_buf(1 * 16 * 112 * 112, -1.f);
+  std::vector<float> conv_result_buf(1 * 16 * 32 * 32, -1.f);
+  std::vector<float> matmul_result_buf(1 * 16 * 32 * 32, -1.f);
+  std::vector<float> result_buf(1 * 16 * 32 * 32, -1.f);
 
 #ifdef TORCH_ENABLE_LLVM
   LLVMCodeGen llvm_codegen(
@@ -560,7 +606,7 @@ TEST(ExternalCall, ComputeInterop) {
 
   llvm_codegen.call(
       {input_buf, weight_buf, conv_result_buf, matmul_result_buf, result_buf});
-  nnc_result = at::from_blob(result_buf.data(), {1, 16, 112, 112}, options);
+  nnc_result = at::from_blob(result_buf.data(), {1, 16, 32, 32}, options);
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 #endif
 
@@ -569,57 +615,41 @@ TEST(ExternalCall, ComputeInterop) {
 
   ir_eval.call(
       {input_buf, weight_buf, conv_result_buf, matmul_result_buf, result_buf});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  nnc_result = at::from_blob(result_buf.data(), {1, 16, 112, 112}, options);
+  nnc_result = at::from_blob(result_buf.data(), {1, 16, 32, 32}, options);
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExternalCall, Inlining) {
   // This test verifies that Tensors using external calls can be used by and
   // can use Tensors built with Compute API.
-  KernelScope kernel_scope;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle MatmulResultBuf("MatmulResult", {8, 8}, kFloat);
 
-  Tensor* A = Compute(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "A",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      {{8, "i"}, {8, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  Tensor A = Compute(
+      "A", {{8, "i"}, {8, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return FloatImm::make(5.0f);
       });
-  Tensor* B = Compute(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "B",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      {{8, "i"}, {8, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  Tensor B = Compute(
+      "B", {{8, "i"}, {8, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return FloatImm::make(4.0f);
       });
-  Tensor* MatmulResult = new Tensor(
+  Tensor MatmulResult = Tensor(
       MatmulResultBuf.node(),
       ExternalCall::make(
           MatmulResultBuf,
           "nnc_aten_matmul",
-          {BufHandle(A->buf()), BufHandle(B->buf())},
+          {BufHandle(A.buf()), BufHandle(B.buf())},
           {}));
-  Tensor* Result = Compute(
+  Tensor Result = Compute(
       "Result",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {{8, "i"}, {8, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        return MatmulResult->load(i, j) + FloatImm::make(3.0f);
+        return MatmulResult.load(i, j) + FloatImm::make(3.0f);
       });
 
-  Stmt* root_stmt =
-      new Block({A->stmt(), B->stmt(), MatmulResult->stmt(), Result->stmt()});
-  LoopNest l(root_stmt, {Result->buf()});
+  StmtPtr root_stmt = alloc<Block>(std::vector<StmtPtr>(
+      {A.stmt(), B.stmt(), MatmulResult.stmt(), Result.stmt()}));
+  LoopNest l(root_stmt, {Result.buf()});
 
   // Inlining should not inline anything here since all Bufs are either
   // defined or used in ExternalCalls
@@ -633,16 +663,12 @@ TEST(ExternalCall, Inlining) {
                      .layout(at::kStrided)
                      .device(at::kCPU)
                      .requires_grad(false);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor a = at::ones({8, 8}, options) * 5.f;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor b = at::ones({8, 8}, options) * 4.f;
   at::Tensor t = at::matmul(a, b);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor ref = t + 3.f;
 
   at::Tensor nnc_result;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> result_buf(8 * 8);
 
 #ifdef TORCH_ENABLE_LLVM
@@ -656,7 +682,6 @@ TEST(ExternalCall, Inlining) {
   SimpleIREvaluator ir_eval(l.root_stmt(), {Result});
 
   ir_eval.call({result_buf});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   nnc_result = at::from_blob(result_buf.data(), {8, 8}, options);
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 }

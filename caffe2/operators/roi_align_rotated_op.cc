@@ -162,20 +162,17 @@ void ROIAlignRotatedForward(
     // roi could have 5 or 6 columns
     const T* offset_bottom_rois = bottom_rois + n * roi_cols;
     int roi_batch_ind = 0;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (roi_cols == 6) {
       roi_batch_ind = offset_bottom_rois[0];
       offset_bottom_rois++;
     }
 
     // Do not round
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     T roi_offset = continuous_coordinate ? T(0.5) : 0;
     T roi_center_w = offset_bottom_rois[0] * spatial_scale - roi_offset;
     T roi_center_h = offset_bottom_rois[1] * spatial_scale - roi_offset;
     T roi_width = offset_bottom_rois[2] * spatial_scale;
     T roi_height = offset_bottom_rois[3] * spatial_scale;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     T theta = offset_bottom_rois[4] * M_PI / 180.0;
 
     if (continuous_coordinate) {
@@ -207,9 +204,7 @@ void ROIAlignRotatedForward(
 
     // roi_start_h and roi_start_w are computed wrt the center of RoI (x, y).
     // Appropriate translation needs to be applied after.
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     T roi_start_h = -roi_height / 2.0;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     T roi_start_w = -roi_width / 2.0;
     pre_calc_for_bilinear_interpolate(
         height,
@@ -374,11 +369,9 @@ C10_EXPORT bool RoIAlignRotatedOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(RoIAlignRotated, RoIAlignRotatedOp<float, CPUContext>);
 
 // Input: X, rois; Output: Y
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RoIAlignRotated)
     .NumInputs(2)
     .NumOutputs(1)

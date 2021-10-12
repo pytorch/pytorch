@@ -95,16 +95,14 @@ void WriteToDB(const string& filename, const int num_items,
   CAFFE_ENFORCE(data_file, "Unable to open file ", filename);
   char str_buffer[kCIFARImageNBytes];
   int label_value;
-  string serialized_protos;
   std::unique_ptr<db::Transaction> transaction(db->NewTransaction());
   for (int itemid = 0; itemid < num_items; ++itemid) {
     ReadImage(&data_file, &label_value, str_buffer);
     data->set_byte_data(str_buffer, kCIFARImageNBytes);
     label->set_int32_data(0, label_value);
-    protos.SerializeToString(&serialized_protos);
     snprintf(str_buffer, kCIFARImageNBytes, "%05d",
         offset + itemid);
-    transaction->Put(string(str_buffer), serialized_protos);
+    transaction->Put(string(str_buffer), protos.SerializeAsString());
   }
 }
 

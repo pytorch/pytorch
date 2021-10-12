@@ -90,9 +90,10 @@ class LayerNorm(Module):
     .. math::
         y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
 
-    The mean and standard-deviation are calculated separately over the last
-    certain number dimensions which have to be of the shape specified by
-    :attr:`normalized_shape`.
+    The mean and standard-deviation are calculated over the last `D` dimensions, where `D`
+    is the dimension of :attr:`normalized_shape`. For example, if :attr:`normalized_shape`
+    is ``(3, 5)`` (a 2-dimensional shape), the mean and standard-deviation are computed over
+    the last 2 dimensions of the input (i.e. ``input.mean((-2, -1))``).
     :math:`\gamma` and :math:`\beta` are learnable affine transform parameters of
     :attr:`normalized_shape` if :attr:`elementwise_affine` is ``True``.
     The standard-deviation is calculated via the biased estimator, equivalent to
@@ -122,23 +123,38 @@ class LayerNorm(Module):
             has learnable per-element affine parameters initialized to ones (for weights)
             and zeros (for biases). Default: ``True``.
 
+    Attributes:
+        weight: the learnable weights of the module of shape
+            :math:`\text{normalized\_shape}` when :attr:`elementwise_affine` is set to ``True``.
+            The values are initialized to 1.
+        bias:   the learnable bias of the module of shape
+                :math:`\text{normalized\_shape}` when :attr:`elementwise_affine` is set to ``True``.
+                The values are initialized to 0.
+
     Shape:
         - Input: :math:`(N, *)`
         - Output: :math:`(N, *)` (same shape as input)
 
     Examples::
 
-        >>> input = torch.randn(20, 5, 10, 10)
-        >>> # With Learnable Parameters
-        >>> m = nn.LayerNorm(input.size()[1:])
-        >>> # Without Learnable Parameters
-        >>> m = nn.LayerNorm(input.size()[1:], elementwise_affine=False)
-        >>> # Normalize over last two dimensions
-        >>> m = nn.LayerNorm([10, 10])
-        >>> # Normalize over last dimension of size 10
-        >>> m = nn.LayerNorm(10)
-        >>> # Activating the module
-        >>> output = m(input)
+        >>> # NLP Example
+        >>> batch, sentence_length, embedding_dim = 20, 5, 10
+        >>> embedding = torch.randn(batch, sentence_length, embedding_dim)
+        >>> layer_norm = nn.LayerNorm(embedding_dim)
+        >>> # Activate module
+        >>> layer_norm(embedding)
+        >>>
+        >>> # Image Example
+        >>> N, C, H, W = 20, 5, 10, 10
+        >>> input = torch.randn(N, C, H, W)
+        >>> # Normalize over the last three dimensions (i.e. the channel and spatial dimensions)
+        >>> # as shown in the image below
+        >>> layer_norm = nn.LayerNorm([C, H, W])
+        >>> output = layer_norm(input)
+
+    .. image:: ../_static/img/nn/layer_norm.jpg
+        :scale: 50 %
+
     """
     __constants__ = ['normalized_shape', 'eps', 'elementwise_affine']
     normalized_shape: Tuple[int, ...]

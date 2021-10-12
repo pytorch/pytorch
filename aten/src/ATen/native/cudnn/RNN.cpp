@@ -726,7 +726,8 @@ namespace {
                 (tensors.seq_length >=20 && bsize <=96) ||
                 (tensors.seq_length >=10 && bsize <=32));
       }
-    } else if (prop->major >= 8) {
+    } else if (prop->major >= 8 && prop->multiProcessorCount >= 98) {
+      // SM count check excludes A30 (similar issue to A40)
       if (prop->minor == 6) {
         // Excludes sm_86 GPU devices from using persistent rnn.
         // This is because there are some edge cases that will throw exceptions with cudnn 8.0.5 on Nvidia A40 GPU.
@@ -1405,7 +1406,7 @@ struct DropoutState {
   at::Tensor buffer;
   c10::optional<cuda::CUDAEvent> event;
   std::mutex mutex;
-#if CUDA_VERSION >= 11000
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   // cudaStreamGetCaptureInfo will never give back a capture id of 0, so 0 can serve
   // as a sentinel value that capture was not underway.
   cuda::CaptureId_t capture_id_last_lock = 0;
@@ -1423,7 +1424,7 @@ struct DropoutState {
     // could then define it before we get to unlock().
     mutex.lock();
     if (event) {
-#if CUDA_VERSION >= 11000
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
       // See Note [DropoutState and CUDA graph capture]
       cudaStreamCaptureStatus status;
       AT_CUDA_CHECK(cudaStreamGetCaptureInfo(cuda::getCurrentCUDAStream(),
@@ -1444,7 +1445,7 @@ struct DropoutState {
   void unlock() {
     if (event) {
       event->record();
-#if CUDA_VERSION >= 11000
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
       // See Note [DropoutState and CUDA graph capture]
       cudaStreamCaptureStatus status;
       AT_CUDA_CHECK(cudaStreamGetCaptureInfo(cuda::getCurrentCUDAStream(),

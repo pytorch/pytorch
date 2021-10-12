@@ -2,6 +2,7 @@
 #include <c10/core/ScalarType.h>
 #include <torch/csrc/autograd/VariableTypeUtils.h>
 #include <torch/csrc/autograd/FunctionsManual.h>
+#include <torch/csrc/autograd/functions/utils.h>
 #include <torch/csrc/utils/memory.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <ATen/TracerMode.h>
@@ -71,7 +72,7 @@ Tensor unpack_opt(const Tensor & t, const char * name, int pos) {
 
 std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos) {
   std::vector<at::Tensor> ret(tl.size());
-  for (size_t i = 0; i < tl.size(); ++i) {
+  for (const auto i : c10::irange(tl.size())) {
     const auto &t = tl[i];
     if (!t.defined()) {
       continue;
@@ -100,7 +101,7 @@ Tensor _fw_primal(c10::DispatchKeySet ks, const Tensor & self, int64_t level) {
   if (grad_fn) {
       set_history(flatten_tensor_args( result ), grad_fn);
   }
-  if (generated::details::isFwGradDefined(self)) {
+  if (isFwGradDefined(self)) {
     // Modified from original codegen
     // We explicitly want to ignore the forward grad at the given level
     TORCH_CHECK(level == 0, "Invalid level given to _fw_primal");
@@ -123,7 +124,6 @@ Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool n
     grad_fn = std::make_shared<CopyBackwards>();
     grad_fn->set_next_edges(collect_next_edges(self, src));
     grad_fn->src_options = src.options();
-    grad_fn->src_device = src.device();
   }
   {
     at::AutoDispatchBelowAutograd mode;
@@ -132,7 +132,7 @@ Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool n
   rebase_history(self , std::move(grad_fn));
 
   if (isDifferentiableType(self.scalar_type()) &&
-      (generated::details::isFwGradDefined(self) || generated::details::isFwGradDefined(src))) {
+      (isFwGradDefined(self) || isFwGradDefined(src))) {
     auto self_fw_grad = generated::details::toNonOptFwGrad(self);
     auto src_fw_grad = generated::details::toNonOptFwGrad(src);
     Tensor new_fw_grad;
@@ -203,11 +203,7 @@ Tensor detach(c10::DispatchKeySet ks, const Tensor & self) {
   })();
   namedinference::propagate_names(result, self);
 
-  // detach only backward gradients for both primal and tangent
-  if (self._fw_grad(/* level */ 0).defined()) {
-    auto new_fw_grad = self._fw_grad(/* level */ 0).detach();
-    result._set_fw_grad(new_fw_grad, /* level */ 0, /* is_inplace_op */ false);
-  }
+  // Detach the forward grads by not setting anything on the result
 
   return result;
 }
@@ -215,25 +211,14 @@ Tensor detach(c10::DispatchKeySet ks, const Tensor & self) {
 Tensor & detach_(c10::DispatchKeySet ks, Tensor & self) {
   RECORD_FUNCTION("detach_", std::vector<c10::IValue>({self}));
   if (self.is_view()) {
-    // NB: is_view() ==> get_autograd_meta()
-    auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(self));
     // See NOTE [ View + Inplace detection ]
-    if (diff_view_meta->get_creation_meta() == CreationMeta::MULTI_OUTPUT_SAFE) {
-        TORCH_WARN("This view is an output of a function that "
-                   "returns multiple views. Detaching such views inplace "
-                   "is being deprecated and will be forbidden "
-                   "starting from version 1.8. Consider using detach() instead "
-                   "of detach_(). Alternatively, create this view with an "
-                   "`unsafe_` version of the function that produced it.");
-    } else {
-      AT_ERROR("Can't detach views in-place. Use detach() instead. "
-               "If you are using DistributedDataParallel (DDP) for training, "
-               "and gradient_as_bucket_view is set as True, gradients are "
-               "views of DDP buckets, and hence detach_() cannot be called "
-               "on these gradients. To fix this error, please refer to the "
-               "Optimizer.zero_grad() function in torch/optim/optimizer.py "
-               "as the solution.");
-    }
+    AT_ERROR("Can't detach views in-place. Use detach() instead. "
+              "If you are using DistributedDataParallel (DDP) for training, "
+              "and gradient_as_bucket_view is set as True, gradients are "
+              "views of DDP buckets, and hence detach_() cannot be called "
+              "on these gradients. To fix this error, please refer to the "
+              "Optimizer.zero_grad() function in torch/optim/optimizer.py "
+              "as the solution.");
   }
   // I think the choice here is conservative.  In principle, doing
   // an in-place detach should give us the ability to just clear
@@ -245,11 +230,7 @@ Tensor & detach_(c10::DispatchKeySet ks, Tensor & self) {
   autograd_meta->set_requires_grad(false, self.unsafeGetTensorImpl());
   autograd_meta->grad_fn_.reset();
   autograd_meta->output_nr_ = 0;
-
-  // detach only backward gradients for both primal and tangent
-  if (self._fw_grad(/* level */ 0).defined()) {
-    self._fw_grad(/* level */ 0).detach_();
-  }
+  autograd_meta->fw_grad_.reset();
 
   return self;
 }
@@ -302,7 +283,8 @@ namespace ADInplaceOrView {
     })();
     std::function<at::Tensor(const at::Tensor&)> func=nullptr;
     auto result = as_view(/* base */ self, /* output */ out, /* is_bw_differentiable */ false,
-                          /* is_fw_differentiable */ true, /* view_func */ func, /* creation_meta */ CreationMeta::DEFAULT,
+                          /* is_fw_differentiable */ false, /* view_func */ func,
+                          /* creation_meta */ CreationMeta::DEFAULT,
                           /*allow_tensor_metadata_change=*/false);
 
     return result;

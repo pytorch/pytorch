@@ -18,7 +18,7 @@ class Parameter(torch.Tensor):
     Args:
         data (Tensor): parameter tensor.
         requires_grad (bool, optional): if the parameter requires gradient. See
-            :ref:`excluding-subgraphs` for more details. Default: `True`
+            :ref:`locally-disable-grad-doc` for more details. Default: `True`
     """
     def __new__(cls, data=None, requires_grad=True):
         if data is None:

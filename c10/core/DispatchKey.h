@@ -3,7 +3,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
-#include <iostream>
+#include <ostream>
 #include <string>
 #include <vector>
 
@@ -21,7 +21,6 @@ namespace c10 {
 //
 // NOTE: Keep the list in sync with `DispatchKey` in tools/codegen/model.py
 enum class DispatchKey : uint8_t {
-
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~ UNDEFINED ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // This is not a "real" tensor id, but it exists to give us a "nullopt"
   // element we can return for cases when a DispatchKeySet contains no elements.
@@ -59,13 +58,23 @@ enum class DispatchKey : uint8_t {
   // CUDA]
   FPGA, // Xilinx support lives out of tree at
   // https://gitlab.com/pytorch-complex/vitis_kernels
-  MSNPU, // unused externally, but tested at
-  // test/cpp_extensions/msnpu_extension.cpp
+
+  // ONNX Runtime, lives out of tree at https://github.com/pytorch/ort and
+  // https://github.com/microsoft/onnxruntime, and is also used to test general
+  // backend/extension machinery in the core. cf:
+  // - test/cpp_extensions/ort_extension.cpp
+  // - test/test_torch.py
+  // - aten/src/ATen/test/extension_backend_test.cpp
+  ORT,
+
   XLA, // lives out of tree at https://github.com/pytorch/xla
   MLC, // lives out of tree at https://github.com/pytorch/MLCompute
   Vulkan,
   Metal,
   XPU, // For out of tree Intel's heterogeneous computing plug-in
+  HPU, // For out of tree & closed source integration of HPU / Habana
+  VE, // For out of tree & closed source integration of SX-Aurora / NEC
+  Lazy, // For lazy tensor backends
 
   // A meta tensor is a tensor without any data associated with it.  (They
   // have also colloquially been referred to as tensors on the "null" device).
@@ -102,20 +111,24 @@ enum class DispatchKey : uint8_t {
   SparseHIP, // TODO: I think this is not actually used, due to Note
   // [Masquerading as CUDA]
   SparseXPU, // For out of tree Intel's heterogeneous computing plug-in
+  SparseVE, // For out of tree & closed source integration of SX-Aurora / NEC
 
   SparseCsrCPU,
   SparseCsrCUDA,
 
   NestedTensor, // lives out of tree at https://github.com/pytorch/nestedtensor
+
   // Here are reserved backends for user-defined backends, see Note [Private use
   // DispatchKey]
-  // To see some example about how to use this, check out MSNPU
+  // To see some example about how to use this, check out ORT
   PrivateUse1,
   PrivateUse2,
   PrivateUse3,
 
   // Define an alias key to represent end of backend dispatch keys.
   // If you add new backend keys after PrivateUse3, please also update it here.
+  // (But you shouldn't: private use keys should have higher precedence than
+  // all built-in keys)
   EndOfBackendKeys = PrivateUse3,
 
   // In some situations, it is not immediately obvious what the correct
@@ -125,6 +138,7 @@ enum class DispatchKey : uint8_t {
   // correct backend.
   BackendSelect,
 
+  Python,
   FuncTorchPython, // See Note [Out-of-tree vmap+grad prototype]
 
   // The named dispatch key is set for any tensors with named dimensions.
@@ -140,6 +154,16 @@ enum class DispatchKey : uint8_t {
   // has named dimension propagation that doesn't match that of its
   // constituent parts.
   Named,
+
+  // The Conjugate dispatch key is set for any tensors that need to perform
+  // conjugation
+  // This is implemented at a dispatch level right before any backends run
+  Conjugate,
+
+  // The Negative dispatch key is set for any tensors that need to perform
+  // negation
+  // This is implemented at a dispatch level right before any backends run
+  Negative,
 
   // See Note [Out-of-tree vmap+grad prototype]. The purpose of this key
   // is to insert code after the "autograd subsystem" runs, so this key should
@@ -212,8 +236,10 @@ enum class DispatchKey : uint8_t {
   AutogradCPU,
   AutogradCUDA,
   AutogradXLA,
+  AutogradLazy,
   AutogradXPU,
   AutogradMLC,
+  AutogradHPU,
   AutogradNestedTensor, // lives out of tree at
   // https://github.com/pytorch/nestedtensor
   // Here are some reserved pre-autograd keys for user-defined backends, see
@@ -226,7 +252,9 @@ enum class DispatchKey : uint8_t {
 
   // Autocasting precedes VariableTypeId, to ensure casts are autograd-exposed
   // and inputs are saved for backward in the post-autocast type.
-  // AutocastCPU,
+  AutocastCPU,
+  // Naughtily, AutocastCUDA is also being used for XLA.  In the terminal state,
+  // it probably should get its own Autocast key
   AutocastCUDA,
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ WRAPPERS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
@@ -329,10 +357,55 @@ static_assert(
     static_cast<uint8_t>(DispatchKey::NumDispatchKeys) < 64,
     "DispatchKey is used as index into 64-bit bitmask; you must have less than 64 entries");
 
+#if defined(C10_MOBILE_TRIM_DISPATCH_KEYS)
+/**
+ * The method below maps the dispatch key in the enum DispatchKey to an
+ * integer index in the dispatchTable_ array in OperatorEntry. The array
+ * is trimmed for mobile to reduce peak memory usage since it's
+ * unnecessary to reserve additional space for dispatch keys that will
+ * never be used on mobile.
+ */
+C10_API constexpr int getDispatchTableIndexForDispatchKey(DispatchKey dk) {
+  switch (dk) {
+    case DispatchKey::Undefined:
+      return 0;
+    case DispatchKey::CPU:
+      return 1;
+    case DispatchKey::QuantizedCPU:
+      return 2;
+    case DispatchKey::SparseCPU:
+      return 3;
+    case DispatchKey::BackendSelect:
+      return 4;
+    case DispatchKey::ADInplaceOrView:
+      return 5;
+    case DispatchKey::AutogradOther:
+      return 6;
+    case DispatchKey::AutogradCPU:
+      return 7;
+    case DispatchKey::NumDispatchKeys: // Sentinel, end of runtime keys.
+      return 8;
+    default:
+      return -1;
+  }
+}
+#else
+/**
+ * For the server use-case, make this a simple pass-through.
+ */
+C10_API constexpr int getDispatchTableIndexForDispatchKey(DispatchKey dk) {
+  return static_cast<int>(dk);
+}
+#endif
+
 C10_API const char* toString(DispatchKey);
 C10_API std::ostream& operator<<(std::ostream&, DispatchKey);
 
 C10_API DispatchKey getAutogradKeyFromBackend(DispatchKey t);
+
+// Parses a string into a dispatch key.
+// If the string cannot be correctly parsed, throws an exception.
+C10_API c10::DispatchKey parseDispatchKey(const std::string& k);
 
 // These are some convenience identifiers for dispatch keys which are
 // shorter to type than their long counterparts.  Note that some of these

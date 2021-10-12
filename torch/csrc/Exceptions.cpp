@@ -9,7 +9,6 @@
 
 #include <torch/csrc/THP.h>
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject *THPException_FatalError;
 
 #define ASSERT_TRUE(cond) if (!(cond)) return false
@@ -243,7 +242,5 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
     }
   }
 }
-
-
 
 } // namespace torch

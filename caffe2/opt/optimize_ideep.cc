@@ -242,7 +242,6 @@ bool fuseConvBNAndAffCh(repr::NNModule* nn, caffe2::Workspace* ws) {
     }
 
     auto bnOrAffChInputs = repr::nn::getInputs(bnOrAffChNode);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int numInputs = isBN ? 5 : 3;
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (bnOrAffChInputs.size() < numInputs) {
@@ -534,8 +533,6 @@ bool fuseActivation(repr::NNModule* nn, caffe2::Workspace* ws) {
       continue;
     }
     auto relu_node = consumers.front();
-    // NOLINTNEXTLINE(clang-diagnostic-unused-variable,clang-analyzer-deadcode.DeadStores)
-    auto relu = repr::nn::get<repr::Relu>(relu_node);
 
     auto relu_outputs = repr::nn::getOutputs(relu_node);
     if (relu_outputs.size() != 1) {
@@ -894,10 +891,6 @@ void preConvertFiltersFormat(repr::NNModule* nn, caffe2::Workspace* ws) {
       initValue(strides, {1, 1});
       auto pads = convTranspose->getPads();
       initValue(pads, {0, 0, 0, 0});
-      // NOLINTNEXTLINE(clang-diagnostic-unused-variable,clang-analyzer-deadcode.DeadStores)
-      auto* op = getMutableOpDef(*convTranspose);
-      // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-      auto aalgorithm = ialgo::deconvolution_direct;
       auto dataType = filter->get_data_type();
       ideep::tensor::dims filter_dims_mkldnn{filter->get_dim(1),
                                              filter->get_dim(0),

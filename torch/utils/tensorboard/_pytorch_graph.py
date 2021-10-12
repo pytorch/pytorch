@@ -270,7 +270,7 @@ def parse(graph, trace, args=None, omit_useless_nodes=True):
     return nodes_py.to_proto()
 
 
-def graph(model, args, verbose=False):
+def graph(model, args, verbose=False, use_strict_trace=True):
     """
     This method processes a PyTorch model and produces a `GraphDef` proto
     that can be logged to TensorBoard.
@@ -280,10 +280,13 @@ def graph(model, args, verbose=False):
       args (tuple): input tensor[s] for the model.
       verbose (bool): Whether to print out verbose information while
         processing.
+      use_strict_trace (bool): Whether to pass keyword argument `strict` to
+        `torch.jit.trace`. Pass False when you want the tracer to
+        record your mutable container types (list, dict)
     """
     with torch.onnx.select_model_mode_for_export(model, torch.onnx.TrainingMode.EVAL):  # TODO: move outside of torch.onnx?
         try:
-            trace = torch.jit.trace(model, args)
+            trace = torch.jit.trace(model, args, strict=use_strict_trace)
             graph = trace.graph
             torch._C._jit_pass_inline(graph)
         except RuntimeError as e:

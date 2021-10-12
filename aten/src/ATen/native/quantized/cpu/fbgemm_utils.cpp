@@ -25,7 +25,6 @@ namespace fbgemm_utils {
 namespace {
 
 bool IsChannelsLast3d(const Tensor& tensor) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (tensor.dim() != 5) {
     return false;
   }
@@ -376,7 +375,7 @@ Tensor ConvertConvWeightsToChannelLastTensor<3>(
         // serialization versions.
         [](c10::IValue v)
         -> c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> { // __setstate__
-          ConvParamsSerializationType state = parse_conv_serialized_state<kSpatialDim>(v);
+          ConvParamsSerializationTypeV3 state = parse_conv_serialized_state<kSpatialDim>(v);
           return deserialize_conv<kSpatialDim>(state);
         })
     .def("weight", [](const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& self) {
@@ -456,7 +455,14 @@ torch::class_<LinearPackedParamsBase> register_linear_params() {
                 }
 #endif // USE_PYTORCH_QNNPACK
                 TORCH_CHECK(false, "Unknown qengine");
-              });
+              })
+              .def("bias", [](const c10::intrusive_ptr<LinearPackedParamsBase>& self) {
+                   at::Tensor weight;
+                   c10::optional<at::Tensor> bias;
+                   std::tie(weight, bias) = self->unpack();
+                   return bias;
+                 })
+              .def("unpack", &LinearPackedParamsBase::unpack);
   return register_linear_params;
 }
 
@@ -518,13 +524,9 @@ torch::class_<EmbeddingPackedParamsBase> register_embedding_params() {
 
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto conv2d_params = register_conv_params<2>();
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto conv3d_params = register_conv_params<3>();
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto linear_params = register_linear_params();
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto embedding_params = register_embedding_params();
 
 } // namespace

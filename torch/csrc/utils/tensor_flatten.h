@@ -18,33 +18,14 @@ inline size_t type_id(const at::Tensor& tensor) {
 }
 
 inline at::Tensor flatten_dense_tensors(at::TensorList tensors) {
-  static auto flatten = [](const at::Tensor &t) { return t.contiguous().view({-1}); };
-  if (tensors.size() == 1)
-    return flatten(tensors[0]);
-  return at::cat(fmap(tensors, flatten));
+  return at::flatten_dense_tensors(tensors);
 }
 
 inline std::vector<at::Tensor> unflatten_dense_tensors(const at::Tensor& flat, at::TensorList tensors) {
-  std::vector<at::Tensor> outputs;
-  outputs.reserve(tensors.size());
-  size_t offset = 0;
-  for (const auto & tensor : tensors) {
-    auto numel = tensor.numel();
-    // If unflatten an empty tensor, create a new empty tensor using
-    // flat tensor Options.
-    // This can avoid the unflattened empty tensor to share the same storage
-    // with other unflatten tensors.
-    if (numel == 0) {
-      outputs.push_back(at::empty({0}, flat.options()));
-    } else {
-      outputs.push_back(flat.narrow(0, offset, numel).view(tensor.sizes()));
-      offset += numel;
-    }
-  }
-  return outputs;
+  return at::unflatten_dense_tensors(flat, tensors);
 }
 
-
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct TensorGroup {
   std::vector<at::Tensor> tensors;
   size_t size = 0;

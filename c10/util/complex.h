@@ -1,7 +1,6 @@
 #pragma once
 
 #include <complex>
-#include <iostream>
 
 #include <c10/macros/Macros.h>
 
@@ -538,7 +537,7 @@ C10_HOST_DEVICE T abs(const c10::complex<T>& z) {
   return IMPL_NAMESPACE()::abs(static_cast<IMPL_NAMESPACE()::complex<T>>(z));
 }
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 #define ROCm_Bug(x)
 #else
 #define ROCm_Bug(x) x

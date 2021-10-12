@@ -9,8 +9,6 @@ TORCH_LIBRARY_IMPL(_, Named, m) {
 }
 
 TORCH_LIBRARY_IMPL(aten, Named, m) {
-  m.impl("_bmm", CppFunction::makeFallthrough());
-  m.impl("_bmm.out", CppFunction::makeFallthrough());
   m.impl("_cdist_forward", CppFunction::makeFallthrough());
   m.impl("_fused_dropout", CppFunction::makeFallthrough());
   m.impl("_local_scalar_dense", CppFunction::makeFallthrough());
@@ -18,8 +16,7 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("_sparse_log_softmax.int", CppFunction::makeFallthrough());
   m.impl("_sparse_softmax.Dimname", CppFunction::makeFallthrough());
   m.impl("_sparse_softmax.int", CppFunction::makeFallthrough());
-  m.impl("_std", CppFunction::makeFallthrough());
-  m.impl("_var", CppFunction::makeFallthrough());
+  m.impl("_to_copy", CppFunction::makeFallthrough());
   m.impl("abs", CppFunction::makeFallthrough());
   m.impl("abs.out", CppFunction::makeFallthrough());
   m.impl("abs_", CppFunction::makeFallthrough());
@@ -119,7 +116,6 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("clamp_min_.Tensor", CppFunction::makeFallthrough());
   m.impl("clone", CppFunction::makeFallthrough());
   m.impl("conj", CppFunction::makeFallthrough());
-  m.impl("conj.out", CppFunction::makeFallthrough());
   m.impl("contiguous", CppFunction::makeFallthrough());
   m.impl("copy_", CppFunction::makeFallthrough());
   m.impl("cos", CppFunction::makeFallthrough());
@@ -237,6 +233,7 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("is_coalesced", CppFunction::makeFallthrough());
   m.impl("is_complex", CppFunction::makeFallthrough());
   m.impl("is_floating_point", CppFunction::makeFallthrough());
+  m.impl("is_inference", CppFunction::makeFallthrough());
   m.impl("is_nonzero", CppFunction::makeFallthrough());
   m.impl("is_pinned", CppFunction::makeFallthrough());
   m.impl("is_same_size", CppFunction::makeFallthrough());
@@ -447,9 +444,15 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("std.names_dim", CppFunction::makeFallthrough());
   m.impl("std.names_out", CppFunction::makeFallthrough());
   m.impl("std.out", CppFunction::makeFallthrough());
+  m.impl("std.correction", CppFunction::makeFallthrough());
+  m.impl("std.correction_out", CppFunction::makeFallthrough());
+  m.impl("std.correction_names", CppFunction::makeFallthrough());
+  m.impl("std.correction_names_out", CppFunction::makeFallthrough());
   m.impl("std_mean", CppFunction::makeFallthrough());
   m.impl("std_mean.dim", CppFunction::makeFallthrough());
   m.impl("std_mean.names_dim", CppFunction::makeFallthrough());
+  m.impl("std_mean.correction", CppFunction::makeFallthrough());
+  m.impl("std_mean.correction_names", CppFunction::makeFallthrough());
   m.impl("stride.Dimname", CppFunction::makeFallthrough());
   m.impl("stride.int", CppFunction::makeFallthrough());
   m.impl("sub.Scalar", CppFunction::makeFallthrough());
@@ -502,9 +505,15 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("var.names_dim", CppFunction::makeFallthrough());
   m.impl("var.names_out", CppFunction::makeFallthrough());
   m.impl("var.out", CppFunction::makeFallthrough());
+  m.impl("var.correction", CppFunction::makeFallthrough());
+  m.impl("var.correction_out", CppFunction::makeFallthrough());
+  m.impl("var.correction_names", CppFunction::makeFallthrough());
+  m.impl("var.correction_names_out", CppFunction::makeFallthrough());
   m.impl("var_mean", CppFunction::makeFallthrough());
   m.impl("var_mean.dim", CppFunction::makeFallthrough());
   m.impl("var_mean.names_dim", CppFunction::makeFallthrough());
+  m.impl("var_mean.correction", CppFunction::makeFallthrough());
+  m.impl("var_mean.correction_names", CppFunction::makeFallthrough());
   m.impl("zero_", CppFunction::makeFallthrough());
   m.impl("zeros_like", CppFunction::makeFallthrough());
 

@@ -24,9 +24,8 @@ struct MAGMAQueue {
 
   // Constructor
   explicit MAGMAQueue(int64_t device_id) {
-    auto& context = at::globalContext();
     cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
-#if CUDA_VERSION >= 11000
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
     // Magma operations is numerically sensitive, so TF32 should be off
     // regardless of the global flag.
     TORCH_CUDABLAS_CHECK(cublasGetMathMode(handle, &original_math_mode));
@@ -45,7 +44,7 @@ struct MAGMAQueue {
 
   // Destructor
   ~MAGMAQueue() {
-#if CUDA_VERSION >= 11000
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
     // We've manually set the math mode to CUBLAS_DEFAULT_MATH, now we
     // should restore the original math mode back
     cublasHandle_t handle = magma_queue_get_cublas_handle(magma_queue_);
@@ -56,7 +55,7 @@ struct MAGMAQueue {
 
  private:
   magma_queue_t magma_queue_;
-#if CUDA_VERSION >= 11000
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   cublasMath_t original_math_mode;
 #endif
 };
@@ -76,14 +75,14 @@ struct MagmaStreamSyncGuard {
   MagmaStreamSyncGuard() {
     auto stream = at::cuda::getCurrentCUDAStream();
     if (stream != at::cuda::getDefaultCUDAStream()) {
-      AT_CUDA_CHECK(cudaStreamSynchronize(stream));
+      at::cuda::stream_synchronize(stream);
     }
   }
 
   ~MagmaStreamSyncGuard() noexcept(false) {
     auto default_stream = at::cuda::getDefaultCUDAStream();
     if (at::cuda::getCurrentCUDAStream() != default_stream) {
-      AT_CUDA_CHECK(cudaStreamSynchronize(default_stream));
+      at::cuda::stream_synchronize(default_stream);
     }
   }
 };

@@ -13,6 +13,7 @@ class CUDAEvent;
 // c10/cuda/CUDAStream.h.
 class CUDAStream final : public CustomClassHolder {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CUDAStream(
       c10::optional<c10::Device> device = c10::nullopt,
       int64_t priority = 0) {
@@ -23,6 +24,7 @@ class CUDAStream final : public CustomClassHolder {
         c10::cuda::getStreamFromPool(priority < PRIORITY_INDEX, device_index));
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CUDAStream(c10::cuda::CUDAStream s) {
     stream_ = std::make_unique<c10::cuda::CUDAStream>(s);
   }
@@ -76,10 +78,12 @@ class CUDAStream final : public CustomClassHolder {
 // aten/src/ATen/cuda/CUDAEvent.h.
 class CUDAEvent final : public CustomClassHolder {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CUDAEvent(
       bool enable_timing = false,
       bool blocking = false,
       bool interprocess = false) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int flags = cudaEventDisableTiming;
     if (enable_timing) {
       flags = cudaEventDefault;
@@ -100,6 +104,7 @@ class CUDAEvent final : public CustomClassHolder {
   }
 
   std::string ipcHandle() {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     cudaIpcEventHandle_t handle;
     event_->ipc_handle(&handle);
     std::string str_handle((const char*)&handle, sizeof(handle));

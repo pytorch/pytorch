@@ -1,17 +1,15 @@
-#include <array>
-#include <unordered_map>
-#include <thread>
-#include <chrono>
-#include <sstream>
 #include <TH/TH.h>
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/CUDAGeneratorImpl.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <ATen/cuda/CachingHostAllocator.h>
+#include <ATen/cuda/detail/CUDAHooks.h>
 #ifdef USE_NCCL
 #include <torch/csrc/cuda/python_nccl.h>
 #endif
+#include <c10/util/irange.h>
 
 #include <torch/csrc/cuda/THCP.h>
 #include <torch/csrc/CudaIPCTypes.h>
@@ -22,6 +20,12 @@
 #include <torch/csrc/cuda/python_comm.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/python_headers.h>
+
+#include <array>
+#include <unordered_map>
+#include <thread>
+#include <chrono>
+#include <sstream>
 
 #ifndef WIN32
 #include <pthread.h>
@@ -178,13 +182,17 @@ PyObject * THCPModule_setStream_wrap(PyObject *self, PyObject *obj)
 
 PyObject * THCPModule_getCompiledVersion(PyObject *self, PyObject *noargs)
 {
+#if defined(USE_ROCM)
+  return THPUtils_packInt64((int64_t) ROCM_VERSION);
+#else
   return THPUtils_packInt64((int64_t) CUDA_VERSION);
+#endif
 }
 
 PyObject * THCPModule_cudaHostAllocator(PyObject *_unused, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
-  c10::Allocator* allocator = THCState_getCudaHostAllocator(state);
+  c10::Allocator* allocator = at::cuda::getCachingHostAllocator();
   return PyLong_FromVoidPtr(allocator);
   END_HANDLE_TH_ERRORS
 }
@@ -203,7 +211,9 @@ PyObject * THCPModule_cudaCachingAllocator_raw_alloc(PyObject *_unused, PyObject
     return nullptr;
   }
   ssize_t size = PyLong_AsSsize_t(size_o);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   cudaStream_t stream = static_cast<cudaStream_t>(PyLong_AsVoidPtr(stream_o));
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   void* mem = c10::cuda::CUDACachingAllocator::raw_alloc_with_stream(size, stream);
   return PyLong_FromVoidPtr(mem);
   END_HANDLE_TH_ERRORS
@@ -242,11 +252,12 @@ PyObject * THCPModule_cudaSleep(PyObject *_unused, PyObject *cycles)
   END_HANDLE_TH_ERRORS
 }
 
-// We need to ensure that as long as a thread will NEVER loose the GIL as long as
-// it holds the CUDA mutex. Otherwise another thread might be scheduled and try to
-// e.g. allocate a new tensor which will cause a deadlock. It's enough to have a
-// single global, because it can be only set once (cudaMutex is not recursive)
-// by the thread that owns the mutex (obviously there can be only one such thread).
+// We need to ensure that as long as a thread will NEVER loose the GIL as long
+// as it holds the CUDA mutex. Otherwise another thread might be scheduled and
+// try to e.g. allocate a new tensor which will cause a deadlock. It's enough to
+// have a single global, because it can be only set once (cudaMutex is not
+// recursive) by the thread that owns the mutex (obviously there can be only one
+// such thread).
 static PyGILState_STATE cudaMutexGILState;
 
 PyObject * THCPModule_cudaLockMutex(PyObject *module, PyObject *noargs)
@@ -262,7 +273,6 @@ PyObject * THCPModule_cudaLockMutex(PyObject *module, PyObject *noargs)
       break;
     {
       pybind11::gil_scoped_release no_gil;
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       std::this_thread::sleep_for(std::chrono::microseconds(10));
     }
   }
@@ -284,7 +294,7 @@ PyObject * THCPModule_hasPrimaryContext(PyObject *_unused, PyObject *arg)
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to has_primary_context");
   int64_t device_index = static_cast<int64_t>(THPUtils_unpackLong(arg));
-  if (at::detail::getCUDAHooks().hasPrimaryContext(device_index)) {
+  if (at::cuda::detail::hasPrimaryContext(device_index)) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -348,7 +358,7 @@ PyObject * THCPModule_memoryStats(PyObject *_unused, PyObject *arg)
       "all", "small_pool", "large_pool"
     };
     py::dict dict;
-    for (size_t i = 0; i < statTypeNames.size(); ++i) {
+    for (const auto i : c10::irange(statTypeNames.size())) {
       dict[statTypeNames[i]] = statToDict(statArray[i]);
     }
     return dict;
@@ -359,6 +369,7 @@ PyObject * THCPModule_memoryStats(PyObject *_unused, PyObject *arg)
   py::dict result;
   result["num_alloc_retries"] = stats.num_alloc_retries;
   result["num_ooms"] = stats.num_ooms;
+  result["max_split_size"] = stats.max_split_size;
   result["allocation"] = statArrayToDict(stats.allocation);
   result["segment"] = statArrayToDict(stats.segment);
   result["active"] = statArrayToDict(stats.active);
@@ -367,6 +378,8 @@ PyObject * THCPModule_memoryStats(PyObject *_unused, PyObject *arg)
   result["reserved_bytes"] = statArrayToDict(stats.reserved_bytes);
   result["active_bytes"] = statArrayToDict(stats.active_bytes);
   result["inactive_split_bytes"] = statArrayToDict(stats.inactive_split_bytes);
+  result["oversize_allocations"] = statToDict(stats.oversize_allocations);
+  result["oversize_segments"] = statToDict(stats.oversize_segments);
 
   return result.release().ptr();
   END_HANDLE_TH_ERRORS
@@ -431,6 +444,38 @@ PyObject * THCPModule_memorySnapshot(PyObject *_unused, PyObject *noargs)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject * THCPModule_cudaSetSyncDebugMode(PyObject * _unused, PyObject * arg){
+  HANDLE_TH_ERRORS
+  TORCH_WARN_ONCE("Synchronization debug mode is a prototype feature and does not yet detect all " \
+  "synchronizing operations");
+  THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to set_sync_debug_mode");
+  int64_t debug_mode = THPUtils_unpackLong(arg);
+  TORCH_CHECK(debug_mode >=0 && debug_mode <=2, "invalid value of debug_mode, expected one of 0,1,2");
+  c10::cuda::SyncDebugMode l;
+  switch (debug_mode) {
+    case 0: l = c10::cuda::SyncDebugMode::L_DISABLED; break;
+    case 1: l = c10::cuda::SyncDebugMode::L_WARN; break;
+    case 2: l = c10::cuda::SyncDebugMode::L_ERROR; break;
+    default: l = c10::cuda::SyncDebugMode::L_DISABLED; break; // can't happen
+  }
+  c10::cuda::warning_state().set_sync_debug_mode(l);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject * THCPModule_cudaGetSyncDebugMode(PyObject *self, PyObject *noargs){
+  HANDLE_TH_ERRORS
+  auto debug_mode = c10::cuda::warning_state().get_sync_debug_mode();
+  switch (debug_mode){
+    case c10::cuda::SyncDebugMode::L_DISABLED: return THPUtils_packInt32(0);
+    case c10::cuda::SyncDebugMode::L_WARN: return THPUtils_packInt32(1);
+    case c10::cuda::SyncDebugMode::L_ERROR: return THPUtils_packInt32(2);
+    default: return THPUtils_packInt32(-1); // can't happen
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+
 ////////////////////////////////////////////////////////////////////////////////
 // Cuda module initialization
 ////////////////////////////////////////////////////////////////////////////////
@@ -449,7 +494,6 @@ static void registerCudaDeviceProperties(PyObject* module) {
     .def("__repr__", [](const cudaDeviceProp &prop) {
       std::ostringstream stream;
       stream << "_CudaDeviceProperties(name='" << prop.name << "', major=" << prop.major
-             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
              << ", minor=" << prop.minor << ", total_memory=" << prop.totalGlobalMem / (1024 * 1024)
              << "MB, multi_processor_count=" << prop.multiProcessorCount << ")";
       return stream.str();
@@ -483,18 +527,7 @@ static PyObject * THCPModule_initExtension(PyObject *self, PyObject *noargs)
   if (!m) throw python_error();
 
   // Register Storage Python objects with DynamicTypes.cpp
-  THCPDoubleStorage_postInit(m);
-  THCPFloatStorage_postInit(m);
-  THCPHalfStorage_postInit(m);
-  THCPLongStorage_postInit(m);
-  THCPIntStorage_postInit(m);
-  THCPShortStorage_postInit(m);
-  THCPCharStorage_postInit(m);
   THCPByteStorage_postInit(m);
-  THCPBoolStorage_postInit(m);
-  THCPBFloat16Storage_postInit(m);
-  THCPComplexDoubleStorage_postInit(m);
-  THCPComplexFloatStorage_postInit(m);
 
   bool has_half = true;
 
@@ -514,7 +547,7 @@ static PyObject * THCPModule_initExtension(PyObject *self, PyObject *noargs)
 
   auto num_gpus = c10::cuda::device_count();
   auto default_cuda_generators = PyTuple_New(static_cast<Py_ssize_t>(num_gpus));
-  for(int i = 0; i < num_gpus; i++) {
+  for(const auto i : c10::irange(num_gpus)) {
     // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto gen = at::cuda::detail::getDefaultCUDAGenerator(i);
     auto cast_gen = (THPGenerator*)THPGenerator_initDefaultGenerator(gen);
@@ -531,6 +564,7 @@ static PyObject * THCPModule_initExtension(PyObject *self, PyObject *noargs)
 PyObject * THCPModule_getCurrentBlasHandle_wrap(PyObject *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   return PyLong_FromVoidPtr(handle);
   END_HANDLE_TH_ERRORS
@@ -567,6 +601,8 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_sleep", THCPModule_cudaSleep, METH_O, nullptr},
   {"_cuda_lock_mutex",   THCPModule_cudaLockMutex,   METH_NOARGS,  nullptr},
   {"_cuda_unlock_mutex", THCPModule_cudaUnlockMutex, METH_NOARGS,  nullptr},
+  {"_cuda_set_sync_debug_mode", THCPModule_cudaSetSyncDebugMode, METH_O, nullptr},
+  {"_cuda_get_sync_debug_mode", THCPModule_cudaGetSyncDebugMode, METH_NOARGS, nullptr},
 #ifdef USE_NCCL
   {"_nccl_version", THCPModule_nccl_version, METH_NOARGS, nullptr},
   {"_nccl_unique_id", THCPModule_nccl_unique_id, METH_NOARGS, nullptr},
@@ -590,7 +626,7 @@ namespace shared {
 
 void initCudartBindings(PyObject* module);
 void initNvtxBindings(PyObject* module);
-#if defined(USE_CUDNN) || defined(__HIP_PLATFORM_HCC__)
+#if defined(USE_CUDNN) || defined(USE_ROCM)
 void initCudnnBindings(PyObject* module);
 #endif
 
@@ -602,7 +638,7 @@ void initModule(PyObject *module) {
   // so this condition might not always be true...
   shared::initCudartBindings(module);
   shared::initNvtxBindings(module);
-#if defined(USE_CUDNN) || defined(__HIP_PLATFORM_HCC__)
+#if defined(USE_CUDNN) || defined(USE_ROCM)
   shared::initCudnnBindings(module);
 #endif
   registerCudaDeviceProperties(module);

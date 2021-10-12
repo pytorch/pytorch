@@ -13,7 +13,6 @@
 #include "caffe2/utils/math.h"
 #include "nnpack.h"
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(caffe2_profile_nnpack, false, "");
 namespace caffe2 {
 
@@ -153,8 +152,7 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
   auto& filter = Input(1);
   auto* Y = Output(0);
   CAFFE_ENFORCE(X.ndim() == 4, "Input dim should be 4");
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
-  const int N = X.dim32(0), C = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
+  const int C = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
   CAFFE_ENFORCE(filter.ndim() == 4, "");
   const int M = filter.dim32(0);
   CAFFE_ENFORCE(C % this->group_ == 0, "");
@@ -182,12 +180,6 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
     biasData = dummyBias_.data();
   }
 
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
-  const size_t batch_size = X.dim32(0);
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
-  const size_t input_channels = X.dim32(1);
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
-  const size_t output_channels = Y->dim32(1);
   const nnp_size input_size = {.width = static_cast<size_t>(X.dim32(3)),
                                .height = static_cast<size_t>(X.dim32(2))};
   // filter is MCHW
@@ -421,15 +413,10 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
               size_t(output_subsample.width),
               size_t(padding.top),
               gmacs,
-              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               profile.total * 1E3,
-              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               profile.input_transform * 1E3,
-              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               profile.kernel_transform * 1E3,
-              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               profile.block_multiplication * 1E3,
-              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               profile.output_transform * 1E3,
               gflops);
           CAFFE_ENFORCE(ret > 0);
@@ -441,7 +428,6 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(Conv, NNPACK, NNPACKConvOp);
 
 } // namespace caffe2

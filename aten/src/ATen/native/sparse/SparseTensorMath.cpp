@@ -11,6 +11,7 @@
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/BinaryOps.h>
+#include <ATen/native/Copy.h>
 #include <ATen/native/CPUBlas.h>
 
 #include <algorithm>
@@ -255,7 +256,7 @@ static SparseTensor& coalesce_(SparseTensor& tensor) {
 // values=[1., 1.] (after truncation), which sum to 2.f instead of 3.f.
 // To perform floor division the sparse tensor must be coalesced first.
 
-SparseTensor& div_out_sparse_zerodim(const SparseTensor& t, const Tensor& value, c10::optional<std::string> rounding_mode, SparseTensor& r) {
+SparseTensor& div_out_sparse_zerodim(const SparseTensor& t, const Tensor& value, c10::optional<c10::string_view> rounding_mode, SparseTensor& r) {
   TORCH_CHECK(value.dim() == 0, "Sparse division requires a scalar or ",
     "zero-dim dense tensor divisor (got shape ", value.sizes(), " for divisor)");
   TORCH_CHECK(!value.is_sparse(), "Sparse division requires a scalar or ",
@@ -309,7 +310,7 @@ SparseTensor& div_out_sparse_scalar(const SparseTensor& t, Scalar value, SparseT
   return div_out_sparse_zerodim(t, wrapped_scalar_tensor(value), r);
 }
 
-Tensor div_sparse(const Tensor& self, const Tensor& value, c10::optional<std::string> rounding_mode) {
+Tensor div_sparse(const Tensor& self, const Tensor& value, c10::optional<c10::string_view> rounding_mode) {
   auto commonDtype = at::result_type(self, value);
   if (c10::isIntegralType(commonDtype, /*include_bool=*/true) && !rounding_mode.has_value()) {
     commonDtype = typeMetaToScalarType(at::get_default_dtype());
@@ -318,11 +319,11 @@ Tensor div_sparse(const Tensor& self, const Tensor& value, c10::optional<std::st
   return div_out_sparse_zerodim(self, value, std::move(rounding_mode), result);
 }
 
-Tensor& div_sparse_(Tensor& self, const Tensor& value, c10::optional<std::string> rounding_mode) {
+Tensor& div_sparse_(Tensor& self, const Tensor& value, c10::optional<c10::string_view> rounding_mode) {
   return div_out_sparse_zerodim(self, value, std::move(rounding_mode), self);
 }
 
-SparseTensor& div_out_sparse_scalar(const SparseTensor& t, Scalar value, c10::optional<std::string> rounding_mode, SparseTensor& r) {
+SparseTensor& div_out_sparse_scalar(const SparseTensor& t, Scalar value, c10::optional<c10::string_view> rounding_mode, SparseTensor& r) {
   return div_out_sparse_zerodim(t, wrapped_scalar_tensor(value), std::move(rounding_mode), r);
 }
 
@@ -506,7 +507,7 @@ SparseTensor& add_out_sparse_contiguous(SparseTensor& r, const SparseTensor& t, 
     auto r_indices_accessor = r_indices.accessor<int64_t, 2>();
     auto src_indices_accessor = src_indices.accessor<int64_t, 2>();
 
-    AT_DISPATCH_ALL_TYPES(
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(
         commonDtype, "cadd_sparse", [&] {
           scalar_t* t_values_ptr = t_values.data_ptr<scalar_t>();
           scalar_t* s_values_ptr = s_values.data_ptr<scalar_t>();
@@ -577,7 +578,7 @@ SparseTensor& add_out_sparse_non_contiguous(SparseTensor& r, const SparseTensor&
 
     // If `t` or `src` contains non-contiguous `values`, `at::native::cpublas::axpy` doesn't work
     // and we concat the indices and values tensors instead.
-    AT_DISPATCH_ALL_TYPES(
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(
       commonDtype, "add_out_sparse_cpu", [&] {
           if (value.to<scalar_t>() != static_cast<scalar_t>(1)) {
             s_values = s_values.mul(value);
@@ -645,13 +646,15 @@ void add_dense_sparse_worker_cpu(Tensor& r, const Scalar& value, const SparseTen
   auto values_accessor = values.accessor<scalar_t, 1>();
 
   scalar_t* r_ptr = r.data_ptr<scalar_t>();
+  auto r_strides = r.strides();
   scalar_t cast_value = value.to<scalar_t>();
+  const auto sparse_dim = sparse.sparse_dim();
 
   at::parallel_for(0, sparse._nnz(), 0, [&](int64_t start, int64_t end) {
     for (auto k: c10::irange(start, end)) {
       int64_t index = r.storage_offset();
-      for (auto d: c10::irange(sparse.sparse_dim())) {
-        index += r.stride(d) * indices_accessor[d][k];
+      for (auto d: c10::irange(sparse_dim)) {
+        index += r_strides[d] * indices_accessor[d][k];
       }
       r_ptr[index] += cast_value * values_accessor[k];
     }
@@ -706,7 +709,7 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTen
       dstBuffer.add_(srcBuffer, value);
     }
   } else {
-    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool,
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Bool,
         commonDtype, "add_dense_sparse", [&] {
           add_dense_sparse_worker_cpu<scalar_t>(resultBuffer, value, sparse, indices, valuesBuffer);
         });
@@ -723,7 +726,12 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTen
 
 Tensor mul_sparse(const Tensor& self, const Tensor& other) {
   auto commonDtype = at::result_type(self, other);
-  Tensor result = at::empty({0}, self.options().dtype(commonDtype));
+  // Arbitrary (dense, sparse) and (sparse, dense) multiplication is not
+  // currently supported, but (0dim-dense, sparse) and (sparse, 0dim-dense) is.
+  // Make sure we use the sparse exemplar for result.
+  auto result_options = self.is_sparse() ?
+    self.options().dtype(commonDtype) : other.options().dtype(commonDtype);
+  Tensor result = at::empty({0}, result_options);
   return at::mul_out(result, self, other);  // redispatch!
 }
 
@@ -742,7 +750,8 @@ SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, SparseTen
   AT_ASSERT(!t_.is_cuda()); // dispatch argument
   TORCH_CHECK(!r.is_cuda(), "mul: expected 'out' to be CPU tensor, but got CUDA tensor");
   TORCH_CHECK(!src_.is_cuda(), "mul: expected 'other' to be a CPU tensor, but got a CUDA tensor");
-
+  TORCH_CHECK(src_.is_sparse(), "mul(sparse, dense) is not supported");
+  TORCH_CHECK(t_.is_sparse(), "mul(dense, sparse) is not supported");
   TORCH_CHECK(t_.sizes().equals(src_.sizes()), "mul: expected 'self' and 'other' to have same sizes, but ", t_.sizes(), " != ", src_.sizes());
 
   if (src_._nnz() == 0 || t_._nnz() == 0) {
@@ -805,7 +814,7 @@ SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, SparseTen
       s_i++;
     }
   } else {
-    AT_DISPATCH_ALL_TYPES(
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(
         commonDtype, "mul_out_sparse", [&] {
           auto r_accessor = r_buffer.accessor<scalar_t, 1>();
           auto t_accessor = t_values.accessor<scalar_t, 1>();
@@ -842,9 +851,9 @@ void s_addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, 
   scalar_t cast_alpha = alpha.to<scalar_t>();
   scalar_t cast_beta = beta.to<scalar_t>();
 
-  if (cast_beta == 0) {
+  if (cast_beta == static_cast<scalar_t>(0)) {
     r.zero_();
-  } else if (cast_beta == 1) {
+  } else if (cast_beta == static_cast<scalar_t>(1)) {
     if (!is_same_tensor(r, t)) {
       r.copy_(t);
     }
@@ -890,10 +899,10 @@ Tensor& s_addmm_out_sparse_dense_cpu(
     const Scalar& alpha
 ) {
   // TODO: This error message seems awfully opaque
-  AT_ASSERT(!t.is_cuda());
-  TORCH_CHECK(!r.is_cuda(), "addmm: expected 'out' to be CPU tensor, but got CUDA tensor");
-  TORCH_CHECK(!sparse_.is_cuda(), "addmm: expected 'mat1' to be a CPU tensor, but got a CUDA tensor");
-  TORCH_CHECK(!dense.is_cuda(), "addmm: expected 'mat2' to be a CPU tensor, but got a CUDA tensor");
+  TORCH_CHECK(!t.is_cuda(),  "Expected all tensors to be on the same device. addmm expected 't' to be CPU tensor, but got CUDA tensor");
+  TORCH_CHECK(!r.is_cuda(), "Expected all tensors to be on the same device. addmm: expected 'out' to be CPU tensor, but got CUDA tensor");
+  TORCH_CHECK(!sparse_.is_cuda(), "Expected all tensors to be on the same device. addmm: expected 'mat1' to be a CPU tensor, but got a CUDA tensor");
+  TORCH_CHECK(!dense.is_cuda(), "Expected all tensors to be on the same device. addmm: expected 'mat2' to be a CPU tensor, but got a CUDA tensor");
 
   TORCH_CHECK(sparse_.sparse_dim() == 2, "addmm: matrices expected, got ", sparse_.sparse_dim(), "D tensor");
   TORCH_CHECK(sparse_.dense_dim() == 0, "addmm: scalar values expected, got ", sparse_.dense_dim(), "D values");
@@ -923,7 +932,7 @@ Tensor& s_addmm_out_sparse_dense_cpu(
   Tensor indices = sparse_._indices();
   Tensor values      = sparse_._values();
 
-  AT_DISPATCH_ALL_TYPES(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(
       values.scalar_type(), "addmm_sparse_dense", [&] {
         s_addmm_out_sparse_dense_worker<scalar_t>(nnz, dim_i, dim_j, dim_k, r, beta, t, alpha, indices, values, dense);
       }
@@ -1169,7 +1178,7 @@ SparseTensor& _sspaddmm_out_cpu(
   int64_t dense_stride1 = dense.stride(1);
   int64_t newv_stride0 = newv.stride(0);
 
-  AT_DISPATCH_ALL_TYPES(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(
       values.scalar_type(), "sspmm", [&] {
         auto values_accessor = values.accessor<scalar_t, 1>();
         scalar_t* dense_ptr = dense.data_ptr<scalar_t>();
@@ -1447,16 +1456,35 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
       auto input_indices_1D = flatten_indices_by_dims(input_indices, input_sizes, sparse_dims_to_keep_v);
       auto input_indices_1D_accessor = input_indices_1D.accessor<int64_t, 1>();
 
-      // binary search to find matching indices
+      const auto copy_iter = TensorIteratorConfig()
+        .add_output(grad_input_values)
+        .add_input(grad_values_expand)
+        .resize_outputs(false)
+        .declare_static_shape(grad_values_expand.sizes(), /*squash_dims=*/0)
+        .build();
+      const auto device_type = kCPU;
 
+      const auto gIv_data = reinterpret_cast<char*>(grad_input_values.data_ptr());
+      const auto gOv_data = reinterpret_cast<char*>(grad_values_expand.data_ptr());
+      const auto gIv_stride = (grad_input_values.strides()[0] *
+                               grad_input_values.element_size());
+      const auto gOv_stride = (grad_values_expand.strides()[0] *
+                               grad_values_expand.element_size());
+
+      // binary search to find matching indices
       at::parallel_for(0, input_nnz, 0, [&](int64_t start, int64_t end) {
+        TensorIterator copy_iter_local(copy_iter);
+
         for (auto i: c10::irange(start, end)) {
           int64_t input_idx = input_indices_1D_accessor[i];
           int64_t l = 0, r = grad_nnz - 1;
           while (l <= r) {
             int64_t m = l + (r - l) / 2;
             if (grad_indices_1D_accessor[m] == input_idx) {
-              grad_input_values[i].copy_(grad_values_expand[m]);
+              // grad_input_values[i].copy_(grad_values_expand[m])
+              copy_iter_local.unsafe_replace_operand(0, gIv_data + i * gIv_stride);
+              copy_iter_local.unsafe_replace_operand(1, gOv_data + m * gOv_stride);
+              copy_stub(device_type, copy_iter_local, /*non_blocking=*/false);
               break;
             }
             if (grad_indices_1D_accessor[m] < input_idx) {
@@ -1586,7 +1614,7 @@ Tensor& bmm_out_sparse_cpu(const SparseTensor& self, const Tensor& mat2, Tensor&
   // Iterate through each set of 2D matrices within the 3D
   // tensor inputs, performing a matrix multiply with each one.
   int64_t start_mat_num = indices_dim0_accessor[0];
-  AT_DISPATCH_ALL_TYPES(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(
     values.scalar_type(), "bmm_sparse_dense", [&] {
       for (int64_t cur_mat_num = 0;
         (cur_mat_num < num_matrices);
@@ -1642,6 +1670,19 @@ Tensor& bmm_out_sparse_cpu(const SparseTensor& self, const Tensor& mat2, Tensor&
       }
     }
   );
+  return result;
+}
+
+Tensor& conj_physical_out_sparse(const Tensor& input, Tensor& result) {
+  TORCH_INTERNAL_ASSERT(input.is_sparse());
+  if (!is_same_tensor(result, input)) {
+    copy_sparse_to_sparse_(result, input);
+  }
+  if (!input.is_complex()) {
+    return result;
+  }
+  Tensor result_values = result._values();
+  at::conj_physical_out(result_values, input._values());
   return result;
 }
 

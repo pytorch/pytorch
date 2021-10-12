@@ -10,7 +10,7 @@ namespace at {
 namespace meta {
 
 TORCH_META_FUNC2(pow, Tensor_Tensor) (const Tensor& base, const Tensor& exp) {
-  build_binary_op(maybe_get_output(), base, exp);
+  build_borrowing_binary_op(maybe_get_output(), base, exp);
 }
 
 TORCH_META_FUNC2(pow, Tensor_Scalar) (const Tensor& base, const Scalar& exp) {
@@ -34,23 +34,14 @@ TORCH_META_FUNC2(pow, Scalar) (const Scalar& base, const Tensor& exp) {
 
 namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(pow_tensor_tensor_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(pow_tensor_scalar_stub);
 
 TORCH_IMPL_FUNC(pow_Tensor_Tensor_out) (const Tensor& base, const Tensor& exp, const Tensor& out) {
-  if (exp.dim() == 0 && exp.device().is_cpu() && base.is_cuda()) {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-    at::pow_out(const_cast<Tensor&>(out), base, exp.item()); // redispatch!
-  } else {
-    pow_tensor_tensor_stub(device_type(), *this);
-  }
+  pow_tensor_tensor_stub(device_type(), *this);
 }
 
 TORCH_IMPL_FUNC(pow_Tensor_Scalar_out) (const Tensor& base, const Scalar& exp, const Tensor& out) {
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
-  auto common_dtype = at::result_type(base, exp);
   if (exp.equal(0.0)) {
     out.fill_(1);
   } else if (exp.equal(1.0)) {
@@ -61,10 +52,7 @@ TORCH_IMPL_FUNC(pow_Tensor_Scalar_out) (const Tensor& base, const Scalar& exp, c
 }
 
 TORCH_IMPL_FUNC(pow_Scalar_out) (const Scalar& base, const Tensor& exp, const Tensor& out) {
-  // NOLINTNEXTLINE(bugprone-branch-clone)
-  if (base.isComplex() && base.toComplexDouble() == 1.0) {
-    out.fill_(1);
-  } else if (!base.isComplex() && base.toDouble() == 1.0) {
+  if (base.equal(1.0)) {
     out.fill_(1);
   } else {
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)

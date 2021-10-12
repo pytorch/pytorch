@@ -1,8 +1,10 @@
 #pragma once
 
+#include <ATen/Functions.h>
 #include <c10/macros/Macros.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <cstdint>
+#include <vector>
 
 #define FOR_ALL_EXTERNAL_FUNCTIONS(_) \
   _(nnc_aten_conv2d)                  \
@@ -26,6 +28,13 @@
 namespace torch {
 namespace jit {
 namespace tensorexpr {
+
+std::vector<at::Tensor> constructTensors(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int8_t* buf_dtypes);
 
 #ifdef C10_MOBILE
 extern "C" {

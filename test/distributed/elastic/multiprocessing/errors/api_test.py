@@ -13,7 +13,6 @@ from torch.distributed.elastic.multiprocessing.errors import (
     record,
 )
 from torch.distributed.elastic.multiprocessing.errors.error_handler import _write_error
-from torch.testing._internal.common_utils import TEST_WITH_TSAN
 
 
 class SentinelError(Exception):
@@ -45,7 +44,6 @@ def read_resource_file(resource_file: str) -> str:
         return "".join(fp.readlines())
 
 
-@unittest.skipIf(TEST_WITH_TSAN, "test incompatible with tsan")
 class ApiTest(unittest.TestCase):
     def setUp(self):
         self.test_dir = tempfile.mkdtemp(prefix=self.__class__.__name__)
@@ -84,6 +82,16 @@ class ApiTest(unittest.TestCase):
         self.assertEqual("test error message", pf.message)
         self.assertEqual(10, pf.timestamp)
 
+    def test_process_mast_error_format(self):
+        error_data = {"message": "test error message", "timestamp": "10"}
+        with open(self.test_error_file, "w") as fp:
+            json.dump(error_data, fp)
+        pf = ProcessFailure(
+            local_rank=0, pid=997, exitcode=1, error_file=self.test_error_file
+        )
+        self.assertEqual("test error message", pf.message)
+        self.assertEqual(10, pf.timestamp)
+
     def test_process_failure(self):
         pf = self.failure_with_error_file(exception=SentinelError("foobar"))
         self.assertEqual(0, pf.local_rank)
@@ -107,7 +115,10 @@ class ApiTest(unittest.TestCase):
         pf = self.failure_without_error_file(exitcode=138)
         self.assertEqual("<N/A>", pf.signal_name())
         self.assertEqual("<N/A>", pf.error_file)
-        self.assertEqual("Process failed with exitcode 138", pf.message)
+        self.assertEqual(
+            "To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html",
+            pf.message,
+        )
 
     def test_child_failed_error(self):
         pf0 = self.failure_with_error_file(exception=SentinelError("rank 0"))
@@ -126,7 +137,7 @@ class ApiTest(unittest.TestCase):
           rank: 0 (local_rank: 0)
           exitcode: 1 (pid: 997)
           error_file: /tmp/ApiTesttbb37ier/error.json
-          msg: "SentinelError: rank 0"
+          traceback: "SentinelError: rank 0"
         =============================================
         Other Failures:
         [1]:
@@ -140,7 +151,7 @@ class ApiTest(unittest.TestCase):
           rank: 2 (local_rank: 0)
           exitcode: 138 (pid: 997)
           error_file: <N/A>
-          msg: "Process failed with exitcode 138"
+          traceback: To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
         *********************************************
         """
         print(ex)

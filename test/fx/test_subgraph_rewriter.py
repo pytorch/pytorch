@@ -3,8 +3,10 @@ import sys
 
 import torch
 from torch.fx import symbolic_trace, subgraph_rewriter
-
+from torch.fx.annotate import annotate
 # Make the helper files in test/ importable
+from torch.fx.experimental.rewriter import RewritingTracer
+
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase
@@ -434,3 +436,25 @@ class TestSubgraphRewriter(JitTestCase):
 
         submod = traced.get_submodule("submod")
         self.assertEqual(type(submod), torch.nn.ReLU)
+
+    def test_subgraph_rewriter_annotations_int(self):
+
+        class M1(torch.nn.Module):
+            def forward(self, x):
+                y: int = x
+                return torch.add(x, y)
+
+        class M2(torch.nn.Module):
+            def forward(self, x):
+                y = annotate(x, int)
+                return torch.add(x, y)
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(M1())
+
+        module = M2()
+        symbolic_traced: torch.fx.GraphModule = symbolic_trace(module)
+        for n, m in zip(symbolic_traced.graph.nodes, graph.nodes):
+            if n.op == 'placeholder':
+                assert n.type == int
+                assert m.type == int

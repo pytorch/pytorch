@@ -569,6 +569,41 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
             self.assertEquals(
                 sorted(expected_node.attr.keys()), sorted(actual_node.attr.keys()))
 
+    def test_pytorch_graph_dict_input(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l = torch.nn.Linear(3, 5)
+
+            def forward(self, x):
+                return self.l(x)
+
+        class ModelDict(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l = torch.nn.Linear(3, 5)
+
+            def forward(self, x):
+                return {"out": self.l(x)}
+
+
+        dummy_input = torch.zeros(1, 3)
+
+        with self.createSummaryWriter() as w:
+            w.add_graph(Model(), dummy_input)
+
+        with self.createSummaryWriter() as w:
+            w.add_graph(Model(), dummy_input, use_strict_trace=True)
+
+        # expect error: Encountering a dict at the output of the tracer...
+        with self.assertRaises(RuntimeError):
+            with self.createSummaryWriter() as w:
+                w.add_graph(ModelDict(), dummy_input, use_strict_trace=True)
+
+        with self.createSummaryWriter() as w:
+            w.add_graph(ModelDict(), dummy_input, use_strict_trace=False)
+
+
     def test_mlp_graph(self):
         dummy_input = (torch.zeros(2, 1, 28, 28),)
 

@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/frontend/sugared_value.h>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/frontend/tree_views.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -87,7 +88,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     Function& m,
     const std::string& field) {
   // Allow method-style casts on Tensor types. e.g. x.int()
-  if (value_->type()->isSubtypeOf(TensorType::get())) {
+  if (value_->type()->isSubtypeOf(*TensorType::get())) {
     if (builtin_cast_method_to_scalar_type().count(field)) {
       return std::make_shared<TensorCastValue>(
           builtin_cast_method_to_scalar_type().at(field),
@@ -117,6 +118,8 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
            {"is_leaf", "aten"},       {"requires_grad", "prim"},
            {"layout", "prim"},        {"T", "prim"},
            {"ndim", "prim"},          {"name", "prim"},
+           {"real", "aten"},          {"imag", "aten"},
+           {"retains_grad", "aten"},  {"is_ort", "prim"},
        }},
       {TypeKind::DeviceObjType, {{"type", "prim"}, {"index", "prim"}}}};
   auto kind = value_->type()->kind();
@@ -136,7 +139,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
   if (auto tuple_type = value_->type()->cast<TupleType>()) {
     if (tuple_type->schema()) {
       auto attrs = tuple_type->schema()->arguments();
-      for (size_t i = 0; i < attrs.size(); i++) {
+      for (const auto i : c10::irange(attrs.size())) {
         if (attrs[i].name() == field) {
           auto idx = m.graph()->insertConstant(IValue(static_cast<int64_t>(i)));
           auto out_type = tuple_type->elements().at(i);
@@ -150,7 +153,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     }
   } else if (auto classType = value_->type()->cast<ClassType>()) {
     // This is a class, emit the proper attribute lookup
-    if (auto method = classType->findMethod(field)) {
+    if (classType->findMethod(field)) {
       return std::make_shared<MethodValue>(getValue(), field);
     }
     if (classType->hasAttribute(field)) {
@@ -166,7 +169,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     }
   } else if (auto iface = value_->type()->cast<InterfaceType>()) {
     // accessing methods of interfaces
-    if (auto schema = iface->getMethod(field)) {
+    if (iface->getMethod(field)) {
       return std::make_shared<MethodValue>(getValue(), field);
     }
   } else if (auto enum_type = value_->type()->cast<EnumType>()) {
@@ -199,7 +202,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
   }
 
   // Handle calling tolist() on a Tensor.
-  if (value_->type()->isSubtypeOf(TensorType::get()) && field == "tolist") {
+  if (value_->type()->isSubtypeOf(*TensorType::get()) && field == "tolist") {
     return SpecialFormValue::create(prim::tolist);
   }
 
@@ -249,7 +252,7 @@ std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
 }
 
 static bool isRecursive(const TypePtr& classType, const TypePtr& attrType) {
-  if (attrType->isSubtypeOf(classType)) {
+  if (attrType->isSubtypeOf(*classType)) {
     return true;
   }
 
@@ -331,7 +334,7 @@ void SimpleValue::setAttr(
 
   // Check type correctness
   const auto newType = newValue->type();
-  if (!newType->isSubtypeOf(expectedType)) {
+  if (!newType->isSubtypeOf(*expectedType)) {
     throw ErrorReport(loc) << "Wrong type for attribute assignment. Expected "
                            << expectedType->repr_str() << " but got "
                            << newType->repr_str();
@@ -387,7 +390,7 @@ Value* SimpleValue::len(const SourceRange& loc, Function& m) {
   TypePtr val_type = val->type();
   Graph& g = *m.graph();
   if (val_type->cast<ListType>() || val_type->cast<StringType>() ||
-      val_type->isSubtypeOf(TensorType::get())) {
+      val_type->isSubtypeOf(*TensorType::get())) {
     return g.insert(aten::len, {val}, {}, loc);
   } else {
     throw ErrorReport(loc) << "'" << val_type->repr_str() << "'"
@@ -412,7 +415,7 @@ SugaredValuePtr SimpleValue::getitem(
   } else if (auto dict_type = val_type->cast<DictType>()) {
     return std::make_shared<SimpleValue>(
         g.insert(aten::__getitem__, {val, idx}, {}, loc));
-  } else if (val_type->isSubtypeOf(TensorType::get())) {
+  } else if (val_type->isSubtypeOf(*TensorType::get())) {
     return std::make_shared<SimpleValue>(
         g.insert(aten::select, {val, 0, idx}, {}, loc));
   } else if (auto class_type = val_type->cast<ClassType>()) {
@@ -465,7 +468,7 @@ RangeValue::RangeValue(
     Function& m,
     std::vector<Value*> inputs,
     c10::optional<int64_t> static_len) {
-  for (size_t i = 0; i < inputs.size(); ++i) {
+  for (const auto i : c10::irange(inputs.size())) {
     auto typ = inputs[i]->type();
     if (!typ->cast<IntType>()) {
       throw ErrorReport(loc)
@@ -533,8 +536,7 @@ SugaredValuePtr RangeValue::getitem(
 std::vector<SugaredValuePtr> IterableTree::get_base_iterables() {
   std::vector<SugaredValuePtr> base_iters{};
 
-  // NOLINTNEXTLINE(performance-for-range-copy)
-  for (SugaredValuePtr sv : children_) {
+  for (SugaredValuePtr& sv : children_) {
     if (auto iv = std::dynamic_pointer_cast<IterableTree>(sv)) {
       std::vector<SugaredValuePtr> child_iters = iv->get_base_iterables();
       // merge child iters with the base_iters
@@ -700,7 +702,7 @@ std::shared_ptr<BuiltinFunction> BuiltinFunction::tryCreate(
         continue;
       }
       const auto concrete_type = tryEvalTypeVariables(formal_type, type_env);
-      if (!concrete_type || !self->type()->isSubtypeOf(concrete_type)) {
+      if (!concrete_type || !self->type()->isSubtypeOf(*concrete_type)) {
         continue;
       }
       return std::make_shared<BuiltinFunction>(symbol, self);

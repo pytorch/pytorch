@@ -139,12 +139,18 @@ class SmallVectorTemplateCommon : public SmallVectorBase {
     return (iterator)this->BeginX;
   }
   const_iterator begin() const {
+    return cbegin();
+  }
+  const_iterator cbegin() const {
     return (const_iterator)this->BeginX;
   }
   iterator end() {
     return (iterator)this->EndX;
   }
   const_iterator end() const {
+    return cend();
+  }
+  const_iterator cend() const {
     return (const_iterator)this->EndX;
   }
 
@@ -966,12 +972,14 @@ class SmallVector : public SmallVectorImpl<T> {
       typename Container,
       std::enable_if_t<
           std::is_convertible<
-              typename std::iterator_traits<decltype(
-                  std::declval<Container>().begin())>::iterator_category,
+              typename std::iterator_traits<
+                  decltype(std::declval<Container>()
+                               .begin())>::iterator_category,
               std::input_iterator_tag>::value &&
               std::is_convertible<
-                  typename std::iterator_traits<decltype(
-                      std::declval<Container>().end())>::iterator_category,
+                  typename std::iterator_traits<
+                      decltype(std::declval<Container>()
+                                   .end())>::iterator_category,
                   std::input_iterator_tag>::value,
           int> = 0>
   explicit SmallVector(Container&& c) : SmallVectorImpl<T>(N) {
@@ -1003,12 +1011,14 @@ class SmallVector : public SmallVectorImpl<T> {
       typename Container,
       std::enable_if_t<
           std::is_convertible<
-              typename std::iterator_traits<decltype(
-                  std::declval<Container>().begin())>::iterator_category,
+              typename std::iterator_traits<
+                  decltype(std::declval<Container>()
+                               .begin())>::iterator_category,
               std::input_iterator_tag>::value &&
               std::is_convertible<
-                  typename std::iterator_traits<decltype(
-                      std::declval<Container>().end())>::iterator_category,
+                  typename std::iterator_traits<
+                      decltype(std::declval<Container>()
+                                   .end())>::iterator_category,
                   std::input_iterator_tag>::value,
           int> = 0>
   const SmallVector& operator=(const Container& RHS) {
@@ -1037,12 +1047,14 @@ class SmallVector : public SmallVectorImpl<T> {
       typename Container,
       std::enable_if_t<
           std::is_convertible<
-              typename std::iterator_traits<decltype(
-                  std::declval<Container>().begin())>::iterator_category,
+              typename std::iterator_traits<
+                  decltype(std::declval<Container>()
+                               .begin())>::iterator_category,
               std::input_iterator_tag>::value &&
               std::is_convertible<
-                  typename std::iterator_traits<decltype(
-                      std::declval<Container>().end())>::iterator_category,
+                  typename std::iterator_traits<
+                      decltype(std::declval<Container>()
+                                   .end())>::iterator_category,
                   std::input_iterator_tag>::value,
           int> = 0>
   const SmallVector& operator=(Container&& C) {

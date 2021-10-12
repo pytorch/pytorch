@@ -44,7 +44,6 @@ static void import_libs(
   si.loadType(QualifiedName(class_name));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InterfaceTest, ModuleInterfaceSerialization) {
   auto cu = std::make_shared<CompilationUnit>();
   Module parentMod("parentMod", cu);

@@ -15,6 +15,7 @@
 #include <ATen/core/Vitals.h>
 #include <TH/TH.h>
 #include <c10/util/Logging.h>
+#include <c10/util/irange.h>
 #include <cstdlib>
 #include <libshm.h>
 #include <pybind11/pybind11.h>
@@ -78,10 +79,8 @@
 
 namespace py = pybind11;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject* module;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 THPGenerator *THPDefaultCPUGenerator = nullptr;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -107,7 +106,7 @@ static PyObject * THPModule_initNames(PyObject *self, PyObject *arg)
     THPUtils_assert(THPUtils_checkString(module_name.get()),
         "expected __module__ to be a string");
     std::string name = THPUtils_unpackString(module_name.get());
-    names.push_back(name + "." + type->tp_name);
+    names.emplace_back(name + "." + type->tp_name);
     type->tp_name = names.back().c_str();
   }
   Py_RETURN_NONE;
@@ -132,22 +131,7 @@ static PyObject * THPModule_initExtension(PyObject *_unused, PyObject *shm_manag
   auto module = THPObjectPtr(PyImport_ImportModule("torch"));
   if (!module) throw python_error();
 
-  THPDoubleStorage_postInit(module);
-  THPFloatStorage_postInit(module);
-  THPHalfStorage_postInit(module);
-  THPLongStorage_postInit(module);
-  THPIntStorage_postInit(module);
-  THPShortStorage_postInit(module);
-  THPCharStorage_postInit(module);
   THPByteStorage_postInit(module);
-  THPBoolStorage_postInit(module);
-  THPQUInt8Storage_postInit(module);
-  THPQUInt4x2Storage_postInit(module);
-  THPQInt8Storage_postInit(module);
-  THPQInt32Storage_postInit(module);
-  THPBFloat16Storage_postInit(module);
-  THPComplexDoubleStorage_postInit(module);
-  THPComplexFloatStorage_postInit(module);
   THPAutograd_initFunctions();
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -232,10 +216,8 @@ PyObject *THPModule_addDocStr(PyObject *_unused, PyObject *args)
 {
   // adds a __doc__ string to a function, similar to numpy's arr_add_docstring
   static std::vector<std::string> all_docs;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  PyObject *obj;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  PyObject *doc_obj;
+  PyObject *obj = nullptr;
+  PyObject *doc_obj = nullptr;
   if (!PyArg_ParseTuple(args, "OO", &obj, &doc_obj)) {
     return nullptr;
   }
@@ -511,7 +493,7 @@ PyObject *THPModule_setBenchmarkCuDNN(PyObject *_unused, PyObject *arg)
 {
   THPUtils_assert(PyBool_Check(arg), "set_benchmark_cudnn expects a bool, "
           "but got %s", THPUtils_typename(arg));
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
   if (arg == Py_False) {
     TORCH_WARN_ONCE("Disabling benchmark mode for MIOpen is NOT supported. Overriding value to True");
     arg = Py_True;
@@ -575,9 +557,11 @@ PyObject *THPModule_setQEngine(PyObject */* unused */, PyObject *arg)
 {
   THPUtils_assert(THPUtils_checkLong(arg), "set_qengine expects an int, "
           "but got %s", THPUtils_typename(arg));
+  HANDLE_TH_ERRORS
   auto qengine = static_cast<int>(THPUtils_unpackLong(arg));
   at::globalContext().setQEngine(static_cast<at::QEngine>(qengine));
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject *THPModule_qEngine(PyObject *_unused, PyObject *noargs)
@@ -589,7 +573,7 @@ PyObject *THPModule_supportedQEngines(PyObject *_unused, PyObject *noargs)
 {
   auto qengines = at::globalContext().supportedQEngines();
   auto list = THPObjectPtr(PyList_New(qengines.size()));
-  for (size_t i = 0; i < qengines.size(); ++i) {
+  for (const auto i : c10::irange(qengines.size())) {
     PyObject *i64 = THPUtils_packInt64(static_cast<int>(qengines[i]));
     if (!i64) {
       throw python_error();
@@ -719,19 +703,7 @@ static PyMethodDef TorchMethods[] = {
   {nullptr, nullptr, 0, nullptr}
 };
 
-bool THCPDoubleStorage_init(PyObject *module);
-bool THCPFloatStorage_init(PyObject *module);
-bool THCPHalfStorage_init(PyObject *module);
-bool THCPLongStorage_init(PyObject *module);
-bool THCPIntStorage_init(PyObject *module);
-bool THCPShortStorage_init(PyObject *module);
-bool THCPCharStorage_init(PyObject *module);
 bool THCPByteStorage_init(PyObject *module);
-bool THCPBoolStorage_init(PyObject *module);
-bool THCPBFloat16Storage_init(PyObject *module);
-bool THCPComplexDoubleStorage_init(PyObject *module);
-bool THCPComplexFloatStorage_init(PyObject *module);
-
 void THCPStream_init(PyObject *module);
 void THCPEvent_init(PyObject *module);
 void THCPGraph_init(PyObject *module);
@@ -754,21 +726,8 @@ void initBindings(PyObject *module);
 }} // namespace torch::mlc
 #endif
 
-bool THDPDoubleStorage_init(PyObject *module);
-bool THDPFloatStorage_init(PyObject *module);
-// TODO: fix
-//bool THDPHalfStorage_init(PyObject *module);
-bool THDPLongStorage_init(PyObject *module);
-bool THDPIntStorage_init(PyObject *module);
-bool THDPShortStorage_init(PyObject *module);
-bool THDPCharStorage_init(PyObject *module);
 bool THDPByteStorage_init(PyObject *module);
-bool THDPBoolStorage_init(PyObject *module);
-bool THDPBFloat16Storage_init(PyObject *module);
-bool THDPComplexDoubleStorage_init(PyObject *module);
-bool THDPComplexFloatStorage_init(PyObject *module);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::vector<PyMethodDef> methods;
 
 // In Python we can't use the trick of C10_LOG_API_USAGE_ONCE
@@ -872,41 +831,14 @@ PyObject* initModule() {
 #ifdef USE_MLCOMPUTE
   torch::mlc::init_bindings(module);
 #endif
-  ASSERT_TRUE(THPDoubleStorage_init(module));
-  ASSERT_TRUE(THPFloatStorage_init(module));
-  ASSERT_TRUE(THPHalfStorage_init(module));
-  ASSERT_TRUE(THPLongStorage_init(module));
-  ASSERT_TRUE(THPIntStorage_init(module));
-  ASSERT_TRUE(THPShortStorage_init(module));
-  ASSERT_TRUE(THPCharStorage_init(module));
   ASSERT_TRUE(THPByteStorage_init(module));
-  ASSERT_TRUE(THPBoolStorage_init(module));
-  ASSERT_TRUE(THPQUInt8Storage_init(module));
-  ASSERT_TRUE(THPQInt8Storage_init(module));
-  ASSERT_TRUE(THPQInt32Storage_init(module));
-  ASSERT_TRUE(THPQUInt4x2Storage_init(module));
-  ASSERT_TRUE(THPBFloat16Storage_init(module));
-  ASSERT_TRUE(THPComplexDoubleStorage_init(module));
-  ASSERT_TRUE(THPComplexFloatStorage_init(module));
 
 #ifdef USE_CUDA
   // This will only initialise base classes and attach them to library namespace
   // They won't be ready for real usage until importing cuda module, that will
   // complete the process (but it defines Python classes before calling back into
   // C, so these lines have to execute first)..
-  ASSERT_TRUE(THCPDoubleStorage_init(module));
-  ASSERT_TRUE(THCPFloatStorage_init(module));
-  ASSERT_TRUE(THCPHalfStorage_init(module));
-  ASSERT_TRUE(THCPLongStorage_init(module));
-  ASSERT_TRUE(THCPIntStorage_init(module));
-  ASSERT_TRUE(THCPShortStorage_init(module));
-  ASSERT_TRUE(THCPCharStorage_init(module));
   ASSERT_TRUE(THCPByteStorage_init(module));
-  ASSERT_TRUE(THCPBoolStorage_init(module));
-  ASSERT_TRUE(THCPBFloat16Storage_init(module));
-  ASSERT_TRUE(THCPComplexDoubleStorage_init(module));
-  ASSERT_TRUE(THCPComplexFloatStorage_init(module));
-
   THCPStream_init(module);
   THCPEvent_init(module);
   THCPGraph_init(module);
@@ -920,12 +852,19 @@ PyObject* initModule() {
     return PyModule_AddObject(module, name, v) == 0;
   };
 
-#if defined(USE_CUDNN) || defined(__HIP_PLATFORM_HCC__)
+#if defined(USE_CUDNN) || defined(USE_ROCM)
   PyObject *has_cudnn = Py_True;
 #else
   PyObject *has_cudnn = Py_False;
 #endif
  ASSERT_TRUE(set_module_attr("has_cudnn", has_cudnn));
+
+#if AT_MKL_ENABLED() || AT_POCKETFFT_ENABLED()
+  PyObject *has_spectral = Py_True;
+#else
+  PyObject *has_spectral = Py_False;
+#endif
+ ASSERT_TRUE(set_module_attr("has_spectral", has_spectral));
 
   // force ATen to initialize because it handles
   // setting up TH Errors so that they throw C++ exceptions
@@ -933,7 +872,7 @@ PyObject* initModule() {
 
   // Automatically translate errors thrown from pybind11 functions
   py::register_exception_translator([](std::exception_ptr e) { // NOLINT
-    if (torch::crash_handler::is_enabled()) {
+    if (torch::crash_handler::is_enabled_on_exceptions()) {
       torch::crash_handler::write_minidump();
     }
 
@@ -952,6 +891,9 @@ PyObject* initModule() {
   py_module.def("vitals_enabled", &at::vitals::torchVitalEnabled);
   py_module.def("set_vital", [](const std::string &vital, const std::string &attr, const std::string value){
     return at::vitals::VitalsAPI.setVital(vital, attr, value);
+  });
+  py_module.def("read_vitals", [](){
+    return at::vitals::VitalsAPI.readVitals();
   });
 
   py_module.def(
@@ -1083,5 +1025,4 @@ struct call_duplicate_guard {
   call_duplicate_guard() { pytorch_duplicate_guard(); }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static call_duplicate_guard _call_duplicate_guard;
