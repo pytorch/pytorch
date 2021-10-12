@@ -2,19 +2,19 @@
 #include <c10/cuda/CUDAException.h>
 #include <c10/test/util/complex_test_common.h>
 
-__global__ void test_thrust_kernel() {
-  // libcudacxx conversion
+__global__ void test_thrust_libcudacxx_kernel() {
+  // thrust/libcudacxx conversion
   {
   constexpr float num1 = float(1.23);
   constexpr float num2 = float(4.56);
-  assert(c10::complex<float>(thrust::complex<float>(num1, num2)).real() == num1);
-  assert(c10::complex<float>(thrust::complex<float>(num1, num2)).imag() == num2);
+  assert(c10::complex<float>(IMPL_NAMESPACE()::complex<float>(num1, num2)).real() == num1);
+  assert(c10::complex<float>(IMPL_NAMESPACE()::complex<float>(num1, num2)).imag() == num2);
   }
   {
   constexpr double num1 = double(1.23);
   constexpr double num2 = double(4.56);
-  assert(c10::complex<double>(thrust::complex<double>(num1, num2)).real() == num1);
-  assert(c10::complex<double>(thrust::complex<double>(num1, num2)).imag() == num2);
+  assert(c10::complex<double>(IMPL_NAMESPACE()::complex<double>(num1, num2)).real() == num1);
+  assert(c10::complex<double>(IMPL_NAMESPACE()::complex<double>(num1, num2)).imag() == num2);
   }
   // thrust/libcudacxx assignment
   auto tup = assignment::one_two_thrust_libcudacxx();
@@ -71,11 +71,11 @@ int safeDeviceCount() {
     }                                       \
   } while(0)
 
-TEST(DeviceTests, ThrustConversion) {
+TEST(DeviceTests, ThrustLibcudacxxConversion) {
   SKIP_IF_NO_GPU();
   ASSERT_EQ(cudaGetLastError(), cudaSuccess);
   cudaDeviceSynchronize();
-  test_thrust_kernel<<<1, 1>>>();
+  test_thrust_libcudacxx_kernel<<<1, 1>>>();
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   cudaDeviceSynchronize();
   ASSERT_EQ(cudaGetLastError(), cudaSuccess);
