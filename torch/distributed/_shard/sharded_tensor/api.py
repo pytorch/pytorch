@@ -413,7 +413,7 @@ class ShardedTensor(object):
                         out_narrow_view = out_narrow_view.narrow(
                             dim,
                             metadata.shard_offsets[dim],
-                            metadata.shard_lengths[dim],
+                            metadata.shard_sizes[dim],
                         )
 
                     out_narrow_view.copy_(tensor)
@@ -483,11 +483,11 @@ class ShardedTensor(object):
             if not local_shard_tensor.is_contiguous():
                 raise ValueError('Only torch.contiguous_format memory_format is currently supported')
 
-            if shard_meta.shard_lengths != list(local_shard_tensor.size()):
+            if shard_meta.shard_sizes != list(local_shard_tensor.size()):
                 raise ValueError(
                     f'Local shard tensor is incompatible with local ShardMetadata! '
                     f'local shard tensor size: {local_shard_tensor.size()}, '
-                    f'local ShardMetadata shard lengths: {shard_meta.shard_lengths}'
+                    f'local ShardMetadata shard lengths: {shard_meta.shard_sizes}'
                 )
 
             if local_shard_tensor.is_pinned() != tensor_properties.pin_memory:
@@ -594,7 +594,7 @@ class ShardedTensor(object):
             if current_rank == rank:
                 # Initialize the local shard.
                 local_shard = _create_tensor_from_params(
-                    *shard_metadata.shard_lengths, local_device=local_device,
+                    *shard_metadata.shard_sizes, local_device=local_device,
                     tensor_init_params=tensor_init_params)
                 self._local_shards.append(Shard(local_shard, shard_metadata))
 

@@ -510,7 +510,7 @@ def shard_parameter(
 
         shard_metadata = ShardMetadata(
             shard_offsets=copy.deepcopy(current_offsets),
-            shard_lengths=shard_size,
+            shard_sizes=shard_size,
             placement=placement,
         )
         shards_metadata.append(shard_metadata)
@@ -527,7 +527,7 @@ def shard_parameter(
     local_shard = tensor.narrow(
         sharding_spec.dim,  # type: ignore[arg-type]
         local_metadata.shard_offsets[sharding_spec.dim],  # type: ignore[union-attr, arg-type, index]
-        local_metadata.shard_lengths[sharding_spec.dim],  # type: ignore[union-attr, index]
+        local_metadata.shard_sizes[sharding_spec.dim],  # type: ignore[union-attr, index]
     ).contiguous()
 
     # Create ShardedTensor based on local shards.

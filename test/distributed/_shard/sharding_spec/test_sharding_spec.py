@@ -77,12 +77,12 @@ class TestShardingSpec(TestCase):
             [
                 ShardMetadata(
                     shard_offsets=[0, 0],
-                    shard_lengths=[5, 5],
+                    shard_sizes=[5, 5],
                     placement="cuda:0",
                 ),
                 ShardMetadata(
                     shard_offsets=[5, 0],
-                    shard_lengths=[5, 5],
+                    shard_sizes=[5, 5],
                     placement="cuda:1",
                 ),
             ]
@@ -94,22 +94,22 @@ class TestShardingSpec(TestCase):
             [
                 ShardMetadata(
                     shard_offsets=[0, 0],
-                    shard_lengths=[3, 3],
+                    shard_sizes=[3, 3],
                     placement="cuda:0",
                 ),
                 ShardMetadata(
                     shard_offsets=[0, 3],
-                    shard_lengths=[3, 3],
+                    shard_sizes=[3, 3],
                     placement="cuda:1",
                 ),
                 ShardMetadata(
                     shard_offsets=[3, 0],
-                    shard_lengths=[3, 3],
+                    shard_sizes=[3, 3],
                     placement="cuda:2",
                 ),
                 ShardMetadata(
                     shard_offsets=[3, 3],
-                    shard_lengths=[3, 3],
+                    shard_sizes=[3, 3],
                     placement="cuda:3",
                 ),
             ]
@@ -121,22 +121,22 @@ class TestShardingSpec(TestCase):
             [
                 ShardMetadata(
                     shard_offsets=[0, 0],
-                    shard_lengths=[2, 4],
+                    shard_sizes=[2, 4],
                     placement="cuda:0",
                 ),
                 ShardMetadata(
                     shard_offsets=[0, 4],
-                    shard_lengths=[4, 2],
+                    shard_sizes=[4, 2],
                     placement="cuda:1",
                 ),
                 ShardMetadata(
                     shard_offsets=[2, 0],
-                    shard_lengths=[4, 4],
+                    shard_sizes=[4, 4],
                     placement="cuda:2",
                 ),
                 ShardMetadata(
                     shard_offsets=[4, 4],
-                    shard_lengths=[2, 2],
+                    shard_sizes=[2, 2],
                     placement="cuda:3",
                 ),
             ]
@@ -145,19 +145,19 @@ class TestShardingSpec(TestCase):
 
         # test invalid sharding
         with self.assertRaisesRegex(ValueError, "Could not parse remote_device"):
-            ShardMetadata(shard_offsets=[0], shard_lengths=[1], placement="cuda:foo")
+            ShardMetadata(shard_offsets=[0], shard_sizes=[1], placement="cuda:foo")
 
         with self.assertRaisesRegex(ValueError, "same number of elements"):
-            ShardMetadata(shard_offsets=[0, 0], shard_lengths=[1], placement="cuda:0")
+            ShardMetadata(shard_offsets=[0, 0], shard_sizes=[1], placement="cuda:0")
 
         with self.assertRaisesRegex(ValueError, "shard_offsets should be >=0"):
             ShardMetadata(
-                shard_offsets=[-1, 0], shard_lengths=[1, 1], placement="cuda:0"
+                shard_offsets=[-1, 0], shard_sizes=[1, 1], placement="cuda:0"
             )
 
-        with self.assertRaisesRegex(ValueError, "shard_lengths should be >= 0"):
+        with self.assertRaisesRegex(ValueError, "shard_sizes should be >= 0"):
             ShardMetadata(
-                shard_offsets=[0, 0], shard_lengths=[-1, 1], placement="cuda:0"
+                shard_offsets=[0, 0], shard_sizes=[-1, 1], placement="cuda:0"
             )
 
         with self.assertRaisesRegex(ValueError, "Empty shard list provided"):
@@ -167,11 +167,11 @@ class TestShardingSpec(TestCase):
             EnumerableShardingSpec(
                 [
                     ShardMetadata(
-                        shard_offsets=[0, 0], shard_lengths=[1, 1], placement="cpu"
+                        shard_offsets=[0, 0], shard_sizes=[1, 1], placement="cpu"
                     ),
                     ShardMetadata(
                         shard_offsets=[0, 0, 0],
-                        shard_lengths=[1, 1, 1],
+                        shard_sizes=[1, 1, 1],
                         placement="cpu",
                     ),
                 ]
@@ -181,10 +181,10 @@ class TestShardingSpec(TestCase):
             EnumerableShardingSpec(
                 [
                     ShardMetadata(
-                        shard_offsets=[0, 0], shard_lengths=[3, 3], placement="cpu"
+                        shard_offsets=[0, 0], shard_sizes=[3, 3], placement="cpu"
                     ),
                     ShardMetadata(
-                        shard_offsets=[2, 0], shard_lengths=[3, 3], placement="cpu"
+                        shard_offsets=[2, 0], shard_sizes=[3, 3], placement="cpu"
                     ),
                 ]
             )
@@ -193,12 +193,12 @@ class TestShardingSpec(TestCase):
             [
                 ShardMetadata(
                     shard_offsets=[0, 0],
-                    shard_lengths=[5, 5],
+                    shard_sizes=[5, 5],
                     placement="cuda:0",
                 ),
                 ShardMetadata(
                     shard_offsets=[5, 0],
-                    shard_lengths=[5, 5],
+                    shard_sizes=[5, 5],
                     placement="cuda:1",
                 ),
             ]
@@ -211,12 +211,12 @@ class TestShardingSpec(TestCase):
             [
                 ShardMetadata(
                     shard_offsets=[0, 0],
-                    shard_lengths=[5, 5],
+                    shard_sizes=[5, 5],
                     placement="cuda:0",
                 ),
                 ShardMetadata(
                     shard_offsets=[5, 0],
-                    shard_lengths=[5, 5],
+                    shard_sizes=[5, 5],
                     placement="cuda:1",
                 ),
             ]
@@ -229,12 +229,12 @@ class TestShardingSpec(TestCase):
             [
                 ShardMetadata(
                     shard_offsets=[0, 0],
-                    shard_lengths=[5, 5],
+                    shard_sizes=[5, 5],
                     placement="cuda:0",
                 ),
                 ShardMetadata(
                     shard_offsets=[5, 5],
-                    shard_lengths=[5, 5],
+                    shard_sizes=[5, 5],
                     placement="cuda:1",
                 ),
             ]
