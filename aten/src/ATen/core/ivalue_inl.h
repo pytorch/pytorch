@@ -322,7 +322,7 @@ struct TORCH_API TupleElements {
   // ```
   // ), but there is simply an overwhelming amount of code that does
   // it the inefficient way.
-
+  // See also operator std::vector below.
   TupleElements(const TupleElements& rhs)
   : inlineSize_(rhs.inlineSize_) {
     if (rhs.inlineSize_) {
@@ -541,6 +541,17 @@ struct TORCH_API TupleElements {
       result.push_back(std::move(iv));
     }
     return result;
+  }
+
+  // More compatibility shims for the overwhelming amount of code that
+  // likes to copy tuple elements into a vector; see comment above the
+  // copy constructor.
+  operator std::vector<IValue>() const & {
+    return vec();
+  }
+
+  operator std::vector<IValue>() && {
+    return vec();
   }
 };
 
