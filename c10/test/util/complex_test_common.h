@@ -73,7 +73,8 @@ TEST(TestMemory, ThrustOrLibcudacxxReinterpretCast) {
 
   {
     c10::complex<float> z(3, 4);
-    IMPL_NAMESPACE()::complex<float> zz = *reinterpret_cast<IMPL_NAMESPACE()::complex<float>*>(&z);
+    IMPL_NAMESPACE()::complex<float> zz =
+        *reinterpret_cast<IMPL_NAMESPACE()::complex<float>*>(&z);
     ASSERT_EQ(zz.real(), float(3));
     ASSERT_EQ(zz.imag(), float(4));
   }
@@ -184,10 +185,12 @@ void test_construct_from_thrust_libcudacxx() {
   constexpr scalar_t num1 = scalar_t(1.23);
   constexpr scalar_t num2 = scalar_t(4.56);
   ASSERT_EQ(
-      c10::complex<scalar_t>(IMPL_NAMESPACE()::complex<scalar_t>(num1, num2)).real(),
+      c10::complex<scalar_t>(IMPL_NAMESPACE()::complex<scalar_t>(num1, num2))
+          .real(),
       num1);
   ASSERT_EQ(
-      c10::complex<scalar_t>(IMPL_NAMESPACE()::complex<scalar_t>(num1, num2)).imag(),
+      c10::complex<scalar_t>(IMPL_NAMESPACE()::complex<scalar_t>(num1, num2))
+          .imag(),
       num2);
 }
 

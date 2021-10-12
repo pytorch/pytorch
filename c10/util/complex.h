@@ -5,7 +5,7 @@
 #include <c10/macros/Macros.h>
 
 #if defined(__CUDACC__)
-#include <cuda.h>  // for CUDA_VERSION
+#include <cuda.h> // for CUDA_VERSION
 #endif
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
@@ -18,7 +18,7 @@
 #define USE_THRUST() true
 #define IMPL_NAMESPACE() thrust
 #endif
-#else //defined(__CUDACC__) || defined(__HIPCC__)
+#else // defined(__CUDACC__) || defined(__HIPCC__)
 #define USE_LIBCUDACXX() false
 #define USE_THRUST() false
 #define IMPL_NAMESPACE() std
@@ -66,7 +66,8 @@ namespace c10 {
 //   while we define converting constructor between float/double.
 // - For these converting constructors, upcasting is implicit, downcasting is
 //   explicit.
-// - We also define explicit casting from std::complex/thrust::complex/cuda::std::complex
+// - We also define explicit casting from
+// std::complex/thrust::complex/cuda::std::complex
 //   - Note that the conversion from thrust is not constexpr, because
 //     thrust does not define them as constexpr ????
 //
@@ -282,7 +283,7 @@ struct alignas(sizeof(T) * 2) complex {
 #if USE_LIBCUDACXX() || USE_THRUST()
   template <typename U>
   C10_HOST_DEVICE complex<T>& operator=(
-    const IMPL_NAMESPACE()::complex<U>& rhs) {
+      const IMPL_NAMESPACE()::complex<U>& rhs) {
     real_ = rhs.real();
     imag_ = rhs.imag();
     return *this;
@@ -298,7 +299,7 @@ struct alignas(sizeof(T) * 2) complex {
   template <typename U>
   C10_HOST_DEVICE explicit operator IMPL_NAMESPACE()::complex<U>() const {
     return static_cast<IMPL_NAMESPACE()::complex<U>>(
-      IMPL_NAMESPACE()::complex<T>(real(), imag()));
+        IMPL_NAMESPACE()::complex<T>(real(), imag()));
   }
 #endif
 

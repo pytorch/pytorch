@@ -138,7 +138,7 @@ template <typename T>
 C10_HOST_DEVICE inline c10::complex<T> acos(const c10::complex<T>& x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
   return static_cast<c10::complex<T>>(
-    IMPL_NAMESPACE()::acos(static_cast<IMPL_NAMESPACE()::complex<T>>(x)));
+      IMPL_NAMESPACE()::acos(static_cast<IMPL_NAMESPACE()::complex<T>>(x)));
 #elif !defined(_LIBCPP_VERSION)
   return static_cast<c10::complex<T>>(
       std::acos(static_cast<std::complex<T>>(x)));
