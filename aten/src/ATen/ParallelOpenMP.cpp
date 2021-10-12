@@ -23,6 +23,7 @@ namespace {
 // Number of threads set by the user
 std::atomic<int> num_threads{-1};
 thread_local int this_thread_id{0};
+thread_local bool in_parallel{false};
 
 } // namespace
 
@@ -91,14 +92,14 @@ namespace internal {
 void set_thread_num(int id) {
   this_thread_id = id;
 }
+
+void set_in_parallel(bool val) {
+  in_parallel = val;
+}
 }
 
 bool in_parallel_region() {
-#ifdef _OPENMP
-  return omp_in_parallel();
-#else
-  return false;
-#endif
+  return in_parallel;
 }
 
 void intraop_launch(std::function<void()> func) {

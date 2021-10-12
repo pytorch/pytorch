@@ -24,6 +24,7 @@ inline void parallel_for(
     !at::in_parallel_region() &&
     at::get_num_threads() > 1);
   if (!use_parallel) {
+    InParallelGuard p_guard;
     internal::ThreadIdGuard tid_guard(0);
     f(begin, end);
     return;
@@ -57,6 +58,7 @@ inline scalar_t parallel_reduce(
       !at::in_parallel_region() &&
       max_threads > 1);
   if (!use_parallel) {
+    InParallelGuard p_guard;
     internal::ThreadIdGuard tid_guard(0);
     return f(begin, end, ident);
   }

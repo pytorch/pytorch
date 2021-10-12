@@ -139,6 +139,7 @@ TORCH_API int get_num_interop_threads();
 TORCH_API void launch(std::function<void()> func);
 namespace internal {
 void launch_no_thread_state(std::function<void()> fn);
+TORCH_API void set_in_parallel(bool);
 } // namespace internal
 
 // Launches intra-op parallel task
@@ -146,6 +147,18 @@ TORCH_API void intraop_launch(std::function<void()> func);
 
 // Returns number of intra-op threads used by default
 TORCH_API int intraop_default_num_threads();
+
+struct InParallelGuard {
+  InParallelGuard() {
+    old_in_parallel_ = at::in_parallel_region();
+    at::internal::set_in_parallel(true);
+  }
+  ~InParallelGuard() {
+    at::internal::set_in_parallel(old_in_parallel_);
+  }
+private:
+  bool old_in_parallel_;
+};
 
 } // namespace at
 

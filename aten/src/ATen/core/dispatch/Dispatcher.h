@@ -12,6 +12,8 @@
 #include <mutex>
 #include <list>
 
+#include <ATen/Parallel.h>
+
 #include <ATen/core/grad_mode.h>
 
 #if C10_MOBILE
@@ -523,6 +525,11 @@ inline Return Dispatcher::callWithDispatchKeySlowPath(const TypedOperatorHandle<
 // See [Note: Argument forwarding in the dispatcher] for why Args doesn't use &&
 template<class Return, class... Args>
 C10_DISPATCHER_INLINE_UNLESS_MOBILE Return Dispatcher::call(const TypedOperatorHandle<Return(Args...)>& op, Args... args) const {
+  TORCH_INTERNAL_ASSERT(
+      !at::in_parallel_region(),
+      "Calling operator ", op.operator_name(), " inside of parallel regions isn't safe."
+      "Dispatch depends on thread-local masks which aren't propagated to worker threads.");
+
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   auto dispatchKeySet = op.operatorDef_->op.dispatchKeyExtractor()
     .template getDispatchKeySetUnboxed<Args...>(args...);
