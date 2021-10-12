@@ -2,6 +2,9 @@ backend: Lazy
 cpp_namespace: torch_lazy_tensors
 full_codegen:
   - _log_softmax
+  - _log_softmax_backward_data
+  - _softmax
+  - _softmax_backward_data
   - addcdiv
   - addcmul
   - cos
@@ -15,7 +18,6 @@ full_codegen:
   - native_layer_norm_backward
   - topk
 supported:
-  - _log_softmax_backward_data
   - add.Tensor
   - addcdiv_
   - as_strided
@@ -56,8 +58,6 @@ supported:
   - repeat
   - select.int
   - slice.Tensor
-  - _softmax
-  - _softmax_backward_data
   - sqrt
   - squeeze
   - squeeze.dim

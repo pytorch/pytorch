@@ -7,12 +7,8 @@
 #include "lazy_tensor_core/csrc/ops/arithmetic_ir_ops.h"
 #include "lazy_tensor_core/csrc/ops/constant.h"
 #include "lazy_tensor_core/csrc/ops/expand.h"
-#include "lazy_tensor_core/csrc/ops/log_softmax_backward.h"
 #include "lazy_tensor_core/csrc/ops/permute.h"
-#include "lazy_tensor_core/csrc/ops/softmax_backward.h"
 #include "lazy_tensor_core/csrc/ops/sum.h"
-#include "lazy_tensor_core/csrc/ops/ts_log_softmax_backward.h"
-#include "lazy_tensor_core/csrc/ops/ts_softmax_backward.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensor_core/csrc/torch_util.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
@@ -134,36 +130,6 @@ NodePtr Sigmoid(const Value& input) {
 
 NodePtr SigmoidBackward(const Value& grad_output, const Value& output) {
   return grad_output * (ScalarOp(1, output.shape()) - output) * output;
-}
-
-NodePtr LogSoftmaxBackwardOp(const Value& grad_output, const Value& output,
-                             lazy_tensors::int64 dim) {
-  return MakeNode<LogSoftmaxBackward>(
-      grad_output, output,
-      Helpers::GetCanonicalDimensionIndex(dim, grad_output.shape().rank()));
-}
-
-NodePtr TSLogSoftmaxBackwardOp(const Value& grad_output, const Value& output,
-                               lazy_tensors::int64 dim, const Value& self) {
-  return MakeNode<TSLogSoftmaxBackward>(
-      grad_output, output,
-      Helpers::GetCanonicalDimensionIndex(dim, grad_output.shape().rank()),
-      self);
-}
-
-NodePtr SoftmaxBackwardOp(const Value& grad_output, const Value& output,
-                          lazy_tensors::int64 dim) {
-  return MakeNode<SoftmaxBackward>(
-      grad_output, output,
-      Helpers::GetCanonicalDimensionIndex(dim, grad_output.shape().rank()));
-}
-
-NodePtr TSSoftmaxBackwardOp(const Value& grad_output, const Value& output,
-                            lazy_tensors::int64 dim, const Value& self) {
-  return MakeNode<TSSoftmaxBackward>(
-      grad_output, output,
-      Helpers::GetCanonicalDimensionIndex(dim, grad_output.shape().rank()),
-      self);
 }
 
 NodePtr Clamp(const Value& input, const Value& min, const Value& max) {

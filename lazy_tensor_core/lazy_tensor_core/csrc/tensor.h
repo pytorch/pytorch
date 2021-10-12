@@ -694,14 +694,6 @@ class LazyTensor {
                                          const LazyTensor& input,
                                          const LazyTensor& buffer);
 
-  static LazyTensor log_softmax_backward(const LazyTensor& grad_output,
-                                         const LazyTensor& output,
-                                         lazy_tensors::int64 dim);
-
-  static LazyTensor ts_log_softmax_backward(const LazyTensor& grad_output,
-                                            const LazyTensor& output,
-                                            lazy_tensors::int64 dim,
-                                            const LazyTensor& self);
 
   static LazyTensor log1p(const LazyTensor& input);
   static void log1p_(LazyTensor& input);
@@ -1010,12 +1002,6 @@ class LazyTensor {
                                             lazy_tensors::int64 reduction,
                                             double beta);
 
-  static LazyTensor softmax(const LazyTensor& input, lazy_tensors::int64 dim,
-                            c10::optional<at::ScalarType> dtype);
-  static LazyTensor softmax_backward(const LazyTensor& grad_output,
-                                     const LazyTensor& output,
-                                     lazy_tensors::int64 dim);
-
   static LazyTensor softplus(const LazyTensor& input, const at::Scalar& beta,
                              const at::Scalar& threshold);
   static LazyTensor softplus_backward(const LazyTensor& grad_output,
@@ -1135,11 +1121,6 @@ class LazyTensor {
   static void triu_(LazyTensor& input, lazy_tensors::int64 diagonal);
 
   static LazyTensor trunc(const LazyTensor& input);
-
-  static LazyTensor ts_softmax_backward(const LazyTensor& grad_output,
-                                        const LazyTensor& output,
-                                        lazy_tensors::int64 dim,
-                                        const LazyTensor& self);
 
   // Returns a tuple of all slices along a given dimension with that dimension
   // removed.

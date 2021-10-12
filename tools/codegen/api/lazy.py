@@ -34,6 +34,8 @@ def process_ir_type(typ: Type) -> Union[BaseCType, VectorCType, OptionalCType, L
             return BaseCType(valueT)
         elif typ.name == BaseTy.Scalar:
             return BaseCType(scalarT)
+        elif typ.name == BaseTy.ScalarType:
+            return BaseCType(scalarTypeT)
         elif typ.name == BaseTy.int:
             return BaseCType(longT)
         elif typ.name == BaseTy.bool:

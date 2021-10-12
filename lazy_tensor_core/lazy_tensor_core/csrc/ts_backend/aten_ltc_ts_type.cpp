@@ -73,31 +73,6 @@ at::Tensor subtensor(const at::Tensor& tensor, int dim, int groups, int g) {
 
 }  // namespace
 
-at::Tensor LazyNativeFunctions::_log_softmax_backward_data(
-    const at::Tensor& grad_output, const at::Tensor& output, int64_t dim,
-    const at::Tensor& self) {
-  LTC_FN_COUNTER("lazy::");
-  return bridge::AtenFromLtcTensor(LazyTensor::ts_log_softmax_backward(
-      bridge::GetLtcTensor(grad_output), bridge::GetLtcTensor(output), dim,
-      bridge::GetLtcTensor(self)));
-}
-
-at::Tensor LazyNativeFunctions::_softmax(const at::Tensor& self, int64_t dim,
-                                         bool /* half_to_float */) {
-  LTC_FN_COUNTER("lazy::");
-  return bridge::AtenFromLtcTensor(
-      LazyTensor::softmax(bridge::GetLtcTensor(self), dim, c10::nullopt));
-}
-
-at::Tensor LazyNativeFunctions::_softmax_backward_data(
-    const at::Tensor& grad_output, const at::Tensor& output, int64_t dim,
-    const at::Tensor& self) {
-  LTC_FN_COUNTER("lazy::");
-  return bridge::AtenFromLtcTensor(LazyTensor::ts_softmax_backward(
-      bridge::GetLtcTensor(grad_output), bridge::GetLtcTensor(output), dim,
-      bridge::GetLtcTensor(self)));
-}
-
 at::Tensor LazyNativeFunctions::add(const at::Tensor& self,
                                     const at::Tensor& other,
                                     const at::Scalar& alpha) {

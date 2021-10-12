@@ -97,7 +97,6 @@
 #include "lazy_tensor_core/csrc/ops/scatter.h"
 #include "lazy_tensor_core/csrc/ops/scatter_add.h"
 #include "lazy_tensor_core/csrc/ops/shrink_backward.h"
-#include "lazy_tensor_core/csrc/ops/softmax.h"
 #include "lazy_tensor_core/csrc/ops/softshrink.h"
 #include "lazy_tensor_core/csrc/ops/split.h"
 #include "lazy_tensor_core/csrc/ops/squeeze.h"
@@ -1536,21 +1535,6 @@ LazyTensor LazyTensor::log_sigmoid_backward(const LazyTensor& grad_output,
       grad_output.GetIrValue(), input.GetIrValue(), buffer.GetIrValue()));
 }
 
-LazyTensor LazyTensor::log_softmax_backward(const LazyTensor& grad_output,
-                                            const LazyTensor& output,
-                                            lazy_tensors::int64 dim) {
-  return grad_output.CreateFrom(ir::ops::LogSoftmaxBackwardOp(
-      grad_output.GetIrValue(), output.GetIrValue(), dim));
-}
-
-LazyTensor LazyTensor::ts_log_softmax_backward(const LazyTensor& grad_output,
-                                               const LazyTensor& output,
-                                               lazy_tensors::int64 dim,
-                                               const LazyTensor& self) {
-  return grad_output.CreateFrom(ir::ops::TSLogSoftmaxBackwardOp(
-      grad_output.GetIrValue(), output.GetIrValue(), dim, self.GetIrValue()));
-}
-
 LazyTensor LazyTensor::log1p(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Log1p(input.GetIrValue()));
 }
@@ -2332,34 +2316,6 @@ LazyTensor LazyTensor::smooth_l1_loss_backward(const LazyTensor& grad_output,
                                                double beta) {
   return tensor_ops::SmoothL1LossBackward(grad_output, input, target,
                                           GetReductionMode(reduction), beta);
-}
-
-LazyTensor LazyTensor::softmax(const LazyTensor& input, lazy_tensors::int64 dim,
-                               c10::optional<at::ScalarType> dtype) {
-  if (!dtype) {
-    dtype = input.dtype_optional();
-  }
-  return input.CreateFrom(
-      ir::MakeNode<ir::ops::Softmax>(
-          input.GetIrValue(),
-          Helpers::GetCanonicalDimensionIndex(dim, input.shape().get().rank()),
-          dtype),
-      dtype);
-}
-
-LazyTensor LazyTensor::softmax_backward(const LazyTensor& grad_output,
-                                        const LazyTensor& output,
-                                        lazy_tensors::int64 dim) {
-  return grad_output.CreateFrom(ir::ops::SoftmaxBackwardOp(
-      grad_output.GetIrValue(), output.GetIrValue(), dim));
-}
-
-LazyTensor LazyTensor::ts_softmax_backward(const LazyTensor& grad_output,
-                                           const LazyTensor& output,
-                                           lazy_tensors::int64 dim,
-                                           const LazyTensor& self) {
-  return grad_output.CreateFrom(ir::ops::TSSoftmaxBackwardOp(
-      grad_output.GetIrValue(), output.GetIrValue(), dim, self.GetIrValue()));
 }
 
 LazyTensor LazyTensor::softplus(const LazyTensor& input, const at::Scalar& beta,

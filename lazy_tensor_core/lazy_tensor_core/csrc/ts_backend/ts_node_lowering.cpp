@@ -29,17 +29,14 @@
 #include "lazy_tensor_core/csrc/ops/repeat.h"
 #include "lazy_tensor_core/csrc/ops/scalar.h"
 #include "lazy_tensor_core/csrc/ops/select.h"
-#include "lazy_tensor_core/csrc/ops/softmax.h"
 #include "lazy_tensor_core/csrc/ops/squeeze.h"
 #include "lazy_tensor_core/csrc/ops/stack.h"
 #include "lazy_tensor_core/csrc/ops/sum.h"
 #include "lazy_tensor_core/csrc/ops/threshold.h"
 #include "lazy_tensor_core/csrc/ops/threshold_backward.h"
 #include "lazy_tensor_core/csrc/ops/ts_embedding_dense_backward.h"
-#include "lazy_tensor_core/csrc/ops/ts_log_softmax_backward.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_backward.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_forward.h"
-#include "lazy_tensor_core/csrc/ops/ts_softmax_backward.h"
 #include "lazy_tensor_core/csrc/ops/unselect.h"
 #include "lazy_tensor_core/csrc/ops/unsqueeze.h"
 #include "lazy_tensor_core/csrc/ops/update_slice.h"
@@ -322,10 +319,6 @@ class TSNodeLowering : public NodeLowering {
       return LowerLeakyReluBackward(ir::NodeCast<ir::ops::LeakyReluBackward>(
           node, ir::OpKind(at::aten::leaky_relu_backward)));
     }
-    if (node->op().op == at::aten::_log_softmax_backward_data) {
-      return LowerLogSoftmaxBackward(ir::NodeCast<ir::ops::TSLogSoftmaxBackward>(
-          node, ir::OpKind(at::aten::_log_softmax_backward_data)));
-    }
     if (node->op().op == at::aten::nll_loss_backward) {
       return LowerNllLossBackward(
           ir::NodeCast<ir::ops::NllLossBackward>(
@@ -343,17 +336,9 @@ class TSNodeLowering : public NodeLowering {
       return LowerRepeat(
           ir::NodeCast<ir::ops::Repeat>(node, ir::OpKind(at::aten::repeat)));
     }
-    if (node->op().op == at::aten::softmax) {
-      return LowerSoftmax(
-          ir::NodeCast<ir::ops::Softmax>(node, ir::OpKind(at::aten::softmax)));
-    }
     if (node->op().op == at::aten::squeeze) {
       return LowerSqueeze(
           ir::NodeCast<ir::ops::Squeeze>(node, ir::OpKind(at::aten::squeeze)));
-    }
-    if (node->op().op == at::aten::_softmax_backward_data) {
-      return LowerSoftmaxBackward(ir::NodeCast<ir::ops::TSSoftmaxBackward>(
-          node, ir::OpKind(at::aten::_softmax_backward_data)));
     }
     if (node->op().op == at::aten::stack) {
       return LowerStack(
@@ -890,15 +875,6 @@ class TSNodeLowering : public NodeLowering {
     return LowerBuiltin(node, arguments);
   }
 
-  TSOpVector LowerLogSoftmaxBackward(const ir::ops::TSLogSoftmaxBackward* node) {
-    std::vector<torch::jit::NamedValue> arguments;
-    arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
-    arguments.emplace_back(loctx()->GetOutputOp(node->operand(1)));
-    arguments.emplace_back(node->dim());
-    arguments.emplace_back(loctx()->GetOutputOp(node->operand(2)));
-    return LowerBuiltin(node, arguments);
-  }
-
   lazy_tensors::int64 GetReduction(ReductionMode reductionMode) {
     switch (reductionMode) {
       case ReductionMode::kMean:
@@ -995,23 +971,6 @@ class TSNodeLowering : public NodeLowering {
     return {GenerateSlice(/*base=*/base, /*dim=*/node->dim(),
                           /*start=*/node->start(), /*end=*/node->end(),
                           /*step=*/step)};
-  }
-
-  TSOpVector LowerSoftmax(const ir::ops::Softmax* node) {
-    std::vector<torch::jit::NamedValue> arguments;
-    arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
-    arguments.emplace_back(node->dim());
-    arguments.emplace_back(node->dtype());
-    return LowerBuiltin(node, arguments);
-  }
-
-  TSOpVector LowerSoftmaxBackward(const ir::ops::TSSoftmaxBackward* node) {
-    std::vector<torch::jit::NamedValue> arguments;
-    arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
-    arguments.emplace_back(loctx()->GetOutputOp(node->operand(1)));
-    arguments.emplace_back(node->dim());
-    arguments.emplace_back(loctx()->GetOutputOp(node->operand(2)));
-    return LowerBuiltin(node, arguments);
   }
 
   TSOpVector LowerSqueeze(const ir::ops::Squeeze* node) {
