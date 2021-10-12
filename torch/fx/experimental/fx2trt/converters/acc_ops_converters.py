@@ -182,9 +182,9 @@ def add_binary_elementwise_layer(network, lhs_val, rhs_val, op_type, name):
     # Check the limitation in the doc string.
     if network.has_implicit_batch_dimension:
         if is_lhs_trt_tensor and not is_rhs_trt_tensor:
-            assert len(lhs_val.shape) >= len(rhs_val.shape)
+            assert len(lhs_val.shape) >= len(rhs_val.shape), f"{lhs_val.shape} >= {rhs_val.shape}"
         elif not is_lhs_trt_tensor and is_rhs_trt_tensor:
-            assert len(rhs_val.shape) >= len(lhs_val.shape)
+            assert len(rhs_val.shape) >= len(lhs_val.shape), f"{rhs_val.shape} >= {lhs_val.shape}"
 
     lhs_val, rhs_val = broadcast(
         network, lhs_val, rhs_val, f"{name}_lhs", f"{name}_rhs"
@@ -1496,7 +1496,7 @@ def acc_ops_matmul(network, target, args, kwargs, name):
     for i in [input_val, other_val]:
         if not isinstance(i, trt.tensorrt.ITensor):
             raise RuntimeError(
-                f"matmul received input {i} that is not part " "of the TensorRT region!"
+                f"matmul received input {i} that is not part of the TensorRT region!"
             )
 
     return add_matrix_multiply_layer(network, input_val, other_val, name)
