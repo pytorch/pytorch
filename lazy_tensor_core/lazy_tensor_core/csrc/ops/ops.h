@@ -28,7 +28,7 @@ inline NodePtr ConstantOp(lazy_tensors::Literal value) {
 
 inline NodePtr GenericOp(OpKind op, lazy_tensors::Span<const Value> operands,
                          lazy_tensors::Shape shape, size_t num_outputs = 1,
-                         torch::lazy::hash_t hash_seed = (uint32_t)0x5a2d296e9) {
+                         torch::lazy::hash_t hash_seed = static_cast<uint32_t>(0x5a2d296e9)) {
   return MakeNode<Generic>(std::move(op), operands, std::move(shape),
                            num_outputs, hash_seed);
 }
@@ -36,14 +36,14 @@ inline NodePtr GenericOp(OpKind op, lazy_tensors::Span<const Value> operands,
 inline NodePtr GenericOp(OpKind op, lazy_tensors::Span<const Value> operands,
                          const std::function<lazy_tensors::Shape()>& shape_fn,
                          size_t num_outputs = 1,
-                         torch::lazy::hash_t hash_seed = (uint32_t)0x5a2d296e9) {
+                         torch::lazy::hash_t hash_seed = static_cast<uint32_t>(0x5a2d296e9)) {
   return MakeNode<Generic>(std::move(op), operands, shape_fn, num_outputs,
                            hash_seed);
 }
 
 inline NodePtr GenericOp(OpKind op, lazy_tensors::Span<const Value> operands,
                          size_t num_outputs = 1,
-                         torch::lazy::hash_t hash_seed = (uint32_t)0x5a2d296e9) {
+                         torch::lazy::hash_t hash_seed = static_cast<uint32_t>(0x5a2d296e9)) {
   return MakeNode<Generic>(std::move(op), operands, num_outputs, hash_seed);
 }
 

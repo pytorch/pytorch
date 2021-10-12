@@ -171,7 +171,7 @@ class Node {
   // for the operation. The num_outputs tells how many outputs a given operation
   // generates.
   Node(OpKind op, OpList operands, lazy_tensors::Shape shape,
-       size_t num_outputs = 1, torch::lazy::hash_t hash_seed = (uint32_t)0x5a2d296e9);
+       size_t num_outputs = 1, torch::lazy::hash_t hash_seed = static_cast<uint32_t>(0x5a2d296e9));
   Node(OpKind op, OpList operands, lazy_tensors::Shape shape,
        size_t num_outputs, torch::lazy::hash_t hash_seed,
        const std::vector<at::ScalarType>& at_dtypes, const std::vector<std::vector<int64_t>>& at_shapes);
@@ -180,11 +180,11 @@ class Node {
   // only if needed (shape cache miss).
   Node(OpKind op, OpList operands,
        const std::function<lazy_tensors::Shape()>& shape_fn,
-       size_t num_outputs = 1, torch::lazy::hash_t hash_seed = (uint32_t)0x5a2d296e9);
+       size_t num_outputs = 1, torch::lazy::hash_t hash_seed = static_cast<uint32_t>(0x5a2d296e9));
 
   // The shape is set later.
   Node(OpKind op, OpList operands, size_t num_outputs = 1,
-       torch::lazy::hash_t hash_seed = (uint32_t)0x5a2d296e9);
+       torch::lazy::hash_t hash_seed = static_cast<uint32_t>(0x5a2d296e9));
 
   void SetShapeDeferred(const std::function<lazy_tensors::Shape()>& shape_fn);
 
