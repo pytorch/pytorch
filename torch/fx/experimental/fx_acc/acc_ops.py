@@ -185,6 +185,10 @@ def add(*, input, other):
 def unsqueeze(*, input, dim):
     return torch.unsqueeze(**locals())
 
+@register_acc_op_mapping(op_and_target=("call_function", torch.tile))
+@register_acc_op
+def tile(*, input, dims):
+    return torch.tile(**locals())
 
 @register_custom_acc_mapper_fn(
     op_and_target=("call_function", torch.stack),
@@ -532,6 +536,36 @@ def quantize_per_tensor(*, input, acc_out_ty=None):
         qparams["zero_point"],
         dtype
     )
+
+
+@register_acc_op_mapping(
+    op_and_target=("call_function", torch.quantize_per_channel),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        ("scales", "scales"),
+        ("zero_points", "zero_points"),
+        ("axis", "axis"),
+        ("dtype", "dtype")
+    ],
+    kwargs_to_move_to_acc_out_ty=[
+        ("scales", "scale", move_to_qparams),
+        ("zero_points", "zero_point", move_to_qparams),
+        ("axis", "axis", move_to_qparams),
+        ("dtype", "dtype", dont_move_to_qparams),
+    ],
+)
+@register_acc_op
+def quantize_per_channel(*, input, acc_out_ty=None):
+    assert acc_out_ty is not None
+    qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
+    dtype = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "dtype")
+    return torch.quantize_per_tensor(
+        input,
+        qparams["scale"],
+        qparams["zero_point"],
+        qparams["axis"],
+        dtype)  # type: ignore[call-overload]
+
 
 @register_acc_op_mapping(op_and_target=("call_method", "dequantize"))
 @register_acc_op_mapping(op_and_target=("call_function", torch.dequantize))
@@ -1537,3 +1571,21 @@ def packed_quantized_convrelu2d_mapper(
         )
         relu_node.meta = node.meta
         return relu_node
+
+@register_acc_op_mapping(op_and_target=("call_function", torch.nn.functional.gelu))
+@register_acc_op_mapping(op_and_target=("call_method", "gelu"))
+@register_acc_op
+def gelu(*, input):
+    return torch.nn.functional.gelu(**locals())
+
+@register_acc_op_mapping(op_and_target=("call_function", torch.cumsum))
+@register_acc_op_mapping(op_and_target=("call_method", "cumsum"))
+@register_acc_op
+def cumsum(*, input, dim, dtype=None):
+    return torch.cumsum(**locals())
+
+@register_acc_op_mapping(op_and_target=("call_function", torch.chunk))
+@register_acc_op_mapping(op_and_target=("call_method", "chunk"))
+@register_acc_op
+def chunk(*, input, chunks, dim=0):
+    return torch.chunk(input, chunks, dim)
