@@ -344,7 +344,7 @@ Tensor computeTranspose(
     at::Device device) {
   auto A = c10::get<BufHandle>(inputs[0]);
   // Trivial case of 0-dim and 1-dim tensors: transpose is just a copy
-  if (A.ndim() < 1) {
+  if (A.ndim() <= 1) {
     return Compute(
         "aten_transpose",
         c10::fmap<DimArg>(outputShape),
