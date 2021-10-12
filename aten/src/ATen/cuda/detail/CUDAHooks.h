@@ -8,9 +8,6 @@
 
 namespace at { namespace cuda { namespace detail {
 
-// Callback to initialize THC Magma, which is implemented in torch_cuda_cu
-TORCH_CUDA_CPP_API extern std::function<void()> THCMagma_init;
-
 TORCH_CUDA_CPP_API bool hasPrimaryContext(int64_t device_index);
 TORCH_CUDA_CPP_API c10::optional<int64_t> getDeviceIndexWithPrimaryContext();
 
