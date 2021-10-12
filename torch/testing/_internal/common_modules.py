@@ -265,7 +265,7 @@ def module_inputs_torch_nn_NLLLoss(module_info, device, dtype, requires_grad, **
         module_inputs.append(
             ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
                         forward_input=FunctionInput(LazyMakeTensor((15, 10), device, dtype, input_generator),
-                                                    LazyMakeTensor((15), device=device, dtype=torch.long, generator=target_generator)),
+                                                    LazyMakeTensor((15), device, torch.long, generator=target_generator)),
                         desc=desc,
                         reference_fn=reference_fn)
         )
