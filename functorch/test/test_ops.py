@@ -350,7 +350,6 @@ class TestOperators(TestCase):
         xfail('nanmean'),
         xfail('block_diag'),
         xfail('nn.functional.dropout'),
-        xfail('nn.functional.max_pool2d'),
         xfail('nn.functional.nll_loss'),
     }))
     def test_vmapvjp(self, device, dtype, op):
@@ -523,7 +522,6 @@ class TestOperators(TestCase):
         xfail('nanmean'),
         xfail('vstack'),
         xfail('block_diag'),
-        xfail('nn.functional.max_pool2d'),
         xfail('nn.functional.batch_norm'),
         xfail('nn.functional.nll_loss'),
     }))
