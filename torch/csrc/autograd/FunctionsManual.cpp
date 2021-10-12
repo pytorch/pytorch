@@ -2494,24 +2494,16 @@ Tensor linalg_eig_backward(const std::vector<torch::autograd::Variable> &grads,
   }
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor> linalg_lstsq_jvp(
+Tensor linalg_lstsq_jvp(
   const Tensor& A,
   const Tensor& B,
   const Tensor& dA,
-  const Tensor& dB,
-  const Tensor& residuals,
-  const Tensor& rank,
-  const Tensor& singular_values
+  const Tensor& dB
 ) {
   auto pinvA = at::linalg_pinv(A);
   auto dpinvA = pinv_jvp(A, pinvA, dA);
   auto dX = dpinvA.matmul(B) + pinvA.matmul(dB);
-  return std::make_tuple(
-    dX,
-    at::zeros_like(residuals),
-    at::zeros_like(rank),
-    at::zeros_like(singular_values)
-  );
+  return dX;
 }
 
 std::tuple<Tensor, Tensor> linalg_lstsq_backward(

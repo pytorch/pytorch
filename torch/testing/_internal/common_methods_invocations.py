@@ -3815,11 +3815,12 @@ def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False, **kw
     from torch.testing._internal.common_utils import random_well_conditioned_matrix
     out = []
     for batch in ((), (3,), (3, 3)):
-        shape = batch + (3, 3)
-        a = random_well_conditioned_matrix(*shape, dtype=dtype, device=device)
-        a.requires_grad_(requires_grad)
-        b = make_tensor(shape, device, dtype, low=None, high=None, requires_grad=requires_grad)
-        out.append(SampleInput(a, args=(b,)))
+        for delta in (-1, +1):
+            shape = batch + (3 + delta, 3)
+            a = random_well_conditioned_matrix(*shape, dtype=dtype, device=device)
+            a.requires_grad_(requires_grad)
+            b = make_tensor(shape, device, dtype, low=None, high=None, requires_grad=requires_grad)
+            out.append(SampleInput(a, args=(b,), kwargs=dict(driver='gels')))
     return out
 
 def sample_inputs_householder_product(op_info, device, dtype, requires_grad, **kwargs):
@@ -7536,14 +7537,31 @@ op_db: List[OpInfo] = [
            decorators=[skipCUDAIfNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack]),
     OpInfo('linalg.lstsq',
            aten_name='linalg_lstsq',
-           op=torch.linalg.lstsq,
            dtypes=floating_and_complex_types(),
            supports_out=True,
            sample_inputs_func=sample_inputs_linalg_lstsq,
-           supports_autograd=True,
-           supports_forward_ad=True,
+           supports_autograd=False,
+           supports_forward_ad=False,
+           # this method is not deterministic
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
+    OpInfo('linalg.lstsq',
+           aten_name='linalg_lstsq',
+           variant_test_name='grad_oriented',
+           # gradchecks for forward AD fails with multi-Tensor outputs
+           op=lambda a, b, driver: torch.linalg.lstsq(a, b, driver=driver)[0],
+           dtypes=floating_and_complex_types(),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_linalg_lstsq,
+           supports_autograd=True,
+           supports_forward_ad=True,
+           # this method is not deterministic
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+           skips=(
+               # test does not work with passing lambda for op
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           )),
     OpInfo('linalg.matrix_power',
            aliases=('matrix_power',),
            aten_name='linalg_matrix_power',
