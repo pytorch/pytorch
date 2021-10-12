@@ -9,7 +9,6 @@ def uniform_(types, args=(), kwargs=None):
         a: the lower bound of the uniform distribution
         b: the upper bound of the uniform distribution
     """
-    from torch.distributed._sharded_tensor import ShardedTensor
     assert_not_none(kwargs, "kwargs")
     sharded_tensor = kwargs['tensor']
     assert_not_none(sharded_tensor, "sharded_tensor")
