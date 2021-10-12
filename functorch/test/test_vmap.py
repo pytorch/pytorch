@@ -3007,7 +3007,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('svd', device_type='cuda'),
         xfail('linalg.svd', device_type='cuda'),
         xfail('index_put'),
-        xfail('nn.functional.max_pool2d'),
         xfail('nn.functional.batch_norm'),
         xfail('nn.functional.nll_loss'),
     })
@@ -3105,7 +3104,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('vstack'),
         xfail('block_diag'),
         xfail('nn.functional.dropout'),
-        xfail('nn.functional.max_pool2d'),
         xfail('nn.functional.conv2d', ''),
         xfail('nn.functional.batch_norm'),
     })
