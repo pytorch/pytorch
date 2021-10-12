@@ -219,10 +219,6 @@ Operator createOperator(Node* node) {
     }
 
     case aten::linear: {
-      auto dim0 = getDimensions(node->input(0)).value_or(-1);
-      auto dim1 = getDimensions(node->input(1)).value_or(-1);
-      // REQ(dim1 == 2);
-
       return Operator(node, opkind::MatMul)
           .setInput(0, 1, 2)
           .setOutput(0)
