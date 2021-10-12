@@ -92,7 +92,6 @@ Tensor prelu_cuda(const Tensor& self, const Tensor& weight_) {
 
   int64_t weight_num = weight.numel();
   Tensor result = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto strides = input.strides();
 
   // case1: shared weight for all channels
   if (weight_num == 1) {
@@ -123,7 +122,6 @@ std::tuple<Tensor, Tensor> prelu_backward_cuda(const Tensor& grad_out_, const Te
   TORCH_CHECK(grad_out.is_contiguous());
 
   int64_t weight_num = weight.numel();
-  auto strides = input.strides();
   auto dims = input.dim();
   Tensor input_grad = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor weight_grad = at::empty_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
