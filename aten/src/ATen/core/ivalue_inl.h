@@ -608,7 +608,9 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
         std::vector<IValue>{IValue(std::forward<Args>(elements_))...});
   }
 
-  Tuple(const Tuple& rhs) = delete;
+  // Again, it would be nice to make this noncopyable, but there's a
+  // lot of extant code that copies Tuples.
+  // Tuple(const Tuple& rhs) = delete;
 
   const TupleElements& elements() const& {
     return elements_;
