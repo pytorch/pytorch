@@ -130,16 +130,16 @@ enum pytorch_qnnp_status qnnpackDeConv(
   // Setup the kernel
   const size_t output_width = compute_output_dimension(
       input_width,
-      deconvolution->input_padding_left,
+      deconvolution->input_padding_left + deconvolution->input_padding_right,
       deconvolution->adjustment_width,
       kernel_width,
       deconvolution->dilation_width,
       deconvolution->stride_width);
   const size_t output_height = compute_output_dimension(
       input_height,
-      deconvolution->input_padding_top,
+      deconvolution->input_padding_top + deconvolution->input_padding_bottom,
       deconvolution->adjustment_height,
-      kernel_width,
+      kernel_height,
       deconvolution->dilation_height,
       deconvolution->stride_height);
   const size_t kernel_size = kernel_height * kernel_width;
