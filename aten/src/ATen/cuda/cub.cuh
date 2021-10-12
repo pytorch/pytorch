@@ -17,9 +17,8 @@
 #undef CUB_NS_PREFIX
 #define CUB_NS_PREFIX namespace at_cuda_detail {
 #define CUB_NS_POSTFIX }
+#define CUB_NS_QUALIFIER ::at_cuda_detail::cub
 #include <cub/cub.cuh>
-#undef CUB_NS_POSTFIX
-#undef CUB_NS_PREFIX
 
 #endif
 
