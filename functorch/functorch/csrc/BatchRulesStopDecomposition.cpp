@@ -509,8 +509,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   STOP_DECOMPOSE(repeat_interleave.self_Tensor);
   STOP_DECOMPOSE(repeat_interleave.self_int);
   STOP_DECOMPOSE(requires_grad_);
-  STOP_DECOMPOSE(resolve_conj);
-  STOP_DECOMPOSE(resolve_neg);
   STOP_DECOMPOSE(retain_grad);
   STOP_DECOMPOSE(retains_grad);
   STOP_DECOMPOSE(rnn_relu.data);
