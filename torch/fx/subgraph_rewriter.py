@@ -131,10 +131,6 @@ def _replace_submodules(gm: GraphModule, replacement: torch.nn.Module) -> None:
 
     gm.graph.lint()
 
-def _add_suffix_to_graph(graph, suffix):
-    for node in graph.nodes:
-        node.name += suffix
-
 @compatibility(is_backward_compatible=True)
 def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable) -> List[Match]:
     """
@@ -326,15 +322,13 @@ def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable) -
         if overlaps_with_prev_match(match):
             continue
 
-        suffixed_replacement_graph = replacement_graph.__deepcopy__()
-        _add_suffix_to_graph(suffixed_replacement_graph, f"_{i}")
         # Map replacement graph nodes to their copy in `original_graph`
         val_map: Dict[Node, Node] = {}
 
         pattern_placeholders = [n for n in pattern_graph.nodes
                                 if n.op == "placeholder"]
         assert len(pattern_placeholders)
-        replacement_placeholders = [n for n in suffixed_replacement_graph.nodes
+        replacement_placeholders = [n for n in replacement_graph.nodes
                                     if n.op == "placeholder"]
         assert len(pattern_placeholders) == len(replacement_placeholders)
         placeholder_map = {r: p for r, p
@@ -367,7 +361,7 @@ def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable) -
 
         # Copy the replacement graph over
         with original_graph.inserting_before(subgraph_output):
-            copied_output = original_graph.graph_copy(suffixed_replacement_graph,
+            copied_output = original_graph.graph_copy(replacement_graph,
                                                       val_map)
 
         # Hook the output Node of the replacement subgraph in to the
@@ -381,7 +375,7 @@ def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable) -
             pattern_outputs = [n for n in pattern_graph.nodes
                                if n.op == "output"]
             assert len(pattern_outputs)
-            replacement_outputs = [n for n in suffixed_replacement_graph.nodes
+            replacement_outputs = [n for n in replacement_graph.nodes
                                    if n.op == "output"]
             assert len(replacement_outputs) == len(pattern_outputs)
             outputs_map = {p: r for r, p
