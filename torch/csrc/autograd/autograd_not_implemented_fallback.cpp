@@ -159,7 +159,7 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
     const c10::IValue& aliased_output_iv = (*stack)[stack->size() - num_returns + aliased_output_idx];
     TORCH_INTERNAL_ASSERT(aliased_input_iv.isTensor(), op_name);
     TORCH_INTERNAL_ASSERT(aliased_output_iv.isTensor() || aliased_output_iv.isTensorList() , op_name);
-    const at::Tensor& aliased_input = aliased_input_iv.toTensor(); //
+    const at::Tensor& aliased_input = aliased_input_iv.toTensor();
     if (aliased_input.has_storage()) {
       if (aliased_output_iv.isTensor()) {
         const at::Tensor& aliased_output = aliased_input_iv.toTensor();
