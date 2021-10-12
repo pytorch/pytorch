@@ -28,13 +28,6 @@ ExprHandle demoteOutput(
     const ExprHandle& e,
     const c10::optional<ScalarType> type);
 
-// TODO: Hide the impl functions
-std::pair<std::vector<ExprHandle>, bool> broadcastShapesImpl(
-    std::vector<std::vector<ExprHandle>> shapes);
-std::pair<std::vector<ExprHandle>, bool> broadcastShapesImpl(
-    const std::vector<ExprHandle>& a,
-    const std::vector<ExprHandle>& b);
-
 std::vector<ExprHandle> broadcastShapes(
     std::vector<std::vector<ExprHandle>> shapes);
 std::vector<ExprHandle> broadcastShapes(
