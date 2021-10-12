@@ -1,3 +1,4 @@
+#include <ATen/cuda/cub.cuh>
 #include <cub/block/block_reduce.cuh>
 
 #include "caffe2/core/context_gpu.h"
@@ -10,6 +11,9 @@
 #if defined(USE_ROCM)
 namespace rocprim {
 #else
+#if CUB_SUPPORTS_WRAPPED_NAMESPACE()
+namespace at_cuda_detail {
+#endif
 namespace cub {
 #endif
 
@@ -22,6 +26,9 @@ inline __host__ __device__ bool operator<(
 }
 
 } // namespace cub
+#if CUB_SUPPORTS_WRAPPED_NAMESPACE()
+}  // namespace at_cuda_detail
+#endif
 
 namespace caffe2 {
 

@@ -1,8 +1,8 @@
 #ifndef CAFFE2_UTILS_MATH_REDUCE_CUH_
 #define CAFFE2_UTILS_MATH_REDUCE_CUH_
 
+#include <ATen/cuda/cub.cuh>
 #include <cub/block/block_reduce.cuh>
-#include <cub/cub.cuh>
 
 #include "caffe2/core/common_gpu.h"
 

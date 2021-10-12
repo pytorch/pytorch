@@ -4,6 +4,7 @@
 #include <string>
 #include <unordered_map>
 
+#include <ATen/cuda/cub.cuh>
 #include <ATen/Context.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDACachingAllocator.h>

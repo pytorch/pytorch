@@ -6,8 +6,8 @@
 #include <numeric>
 #include <vector>
 
+#include <ATen/cuda/cub.cuh>
 #include <cub/block/block_reduce.cuh>
-#include <cub/cub.cuh>
 
 #include <thrust/execution_policy.h>
 #include <thrust/reduce.h>
