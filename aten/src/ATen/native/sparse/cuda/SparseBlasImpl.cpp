@@ -392,10 +392,17 @@ void addmv_out_sparse_csr(
   cusparseSpMVAlg_t alg = CUSPARSE_MV_ALG_DEFAULT;
 #endif
 
-  // There is no dispatch for kHalf and kBFloat16 types because cusparse
-  // computes garbage in this case, latest checked version of cuda is 11.3
+  // SpMV doesn't support uniform precision computation
+  // For float16/bfloat16 inputs compute_type must be CUDA_R_32F
+  // and type of alpha, beta must be float
+  auto dispatch_scalar_type = result.scalar_type();
+  if (dispatch_scalar_type == at::ScalarType::Half ||
+      dispatch_scalar_type == at::ScalarType::BFloat16) {
+    dispatch_scalar_type = at::ScalarType::Float;
+  }
+
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
-      result.scalar_type(),
+      dispatch_scalar_type,
       "addmv_out_sparse_csr_cuda_impl",
       [&] {
         auto beta_ = beta.to<scalar_t>();
