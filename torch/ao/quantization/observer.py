@@ -1,3 +1,8 @@
+"""
+This module implements observers which are used to collect statistics about
+the values observed during calibration (PTQ) or training (QAT).
+"""
+
 import re
 import warnings
 from abc import ABCMeta, abstractmethod
@@ -1342,21 +1347,57 @@ def load_observer_state_dict(mod, obs_dict):
 
 # Restrict activations to be in the range (0,127)
 default_observer = MinMaxObserver.with_args(reduce_range=True)
+"""
+Default observer for static quantization, usually used for debugging.
+"""
+
 default_placeholder_observer = PlaceholderObserver
+"""
+Default placeholder observer, usually used for quantization to torch.float16.
+"""
+
 default_debug_observer = RecordingObserver
+"""
+Default debug-only observer.
+"""
+
 default_weight_observer = MinMaxObserver.with_args(
     dtype=torch.qint8, qscheme=torch.per_tensor_symmetric
 )
+"""
+Default weight observer.
+"""
+
 default_histogram_observer = HistogramObserver.with_args(reduce_range=True)
+"""
+Default histogram observer, usually used for PTQ.
+"""
+
 default_per_channel_weight_observer = PerChannelMinMaxObserver.with_args(
     dtype=torch.qint8, qscheme=torch.per_channel_symmetric
 )
+"""
+Default per-channel weight observer, usually used on backends where per-channel
+weight quantization is supported, such as `fbgemm`.
+"""
+
 default_dynamic_quant_observer = PlaceholderObserver.with_args(
     dtype=torch.float, compute_dtype=torch.quint8
 )
+"""
+Default observer for dynamic quantization.
+"""
+
 default_float_qparams_observer = PerChannelMinMaxObserver.with_args(
     dtype=torch.quint8, qscheme=torch.per_channel_affine_float_qparams, ch_axis=0
 )
+"""
+Default observer for a floating point zero-point.
+"""
+
 default_float_qparams_observer_4bit = PerChannelMinMaxObserver.with_args(
     dtype=torch.quint4x2, qscheme=torch.per_channel_affine_float_qparams, ch_axis=0
 )
+"""
+Default observer for a floating point zero-point and 4 bit activations.
+"""

@@ -14,4 +14,5 @@
 
 /* Global state of THC. */
 struct THCState {};
+
 #endif
