@@ -5,8 +5,8 @@
 #include <c10d/ProcessGroupNCCL.hpp>
 #include "CUDATest.hpp"
 #include "TestUtils.hpp"
-#include "c10d/ProcessGroup.hpp"
 #include "c10d/Types.hpp"
+#include "c10d/ProcessGroup.hpp"
 
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
@@ -22,7 +22,10 @@ using c10d::ProcessGroup;
 
 class NCCLTestBase {
  public:
-  NCCLTestBase(const std::string& path, const std::chrono::milliseconds pgTimeout = kProcessGroupDefaultTimeout) : path_(path), pgTimeout_(pgTimeout) {}
+  NCCLTestBase(
+          const std::string& path,
+          const std::chrono::milliseconds pgTimeout = kProcessGroupDefaultTimeout
+  ) : path_(path), pgTimeout_(pgTimeout) {}
 
   NCCLTestBase(NCCLTestBase&& other) {
     path_ = std::move(other.path_);
