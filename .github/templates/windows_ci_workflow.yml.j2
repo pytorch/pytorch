@@ -20,13 +20,7 @@ name: !{{ build_environment }}
 
 on:
   pull_request:
-  {%- if ciflow_config.enabled %}
-    {%- if ciflow_config.trigger_action_only %}
-    types: [!{{ ciflow_config.trigger_action }}]
-    {%- else %}
     types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
-    {%- endif %}
-  {%- endif %}
 {%- if is_scheduled %}
   schedule:
     - cron: !{{ is_scheduled }}
@@ -59,8 +53,8 @@ env:
   CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
 {%- if cuda_version != "cpu" %}
   TORCH_CUDA_ARCH_LIST: "7.0"
-  USE_CUDA: 1
 {%- endif %}
+  USE_CUDA: !{{ 1 if cuda_version != "cpu" else 0 }}
 
 !{{ common.concurrency(build_environment) }}
 
@@ -68,9 +62,7 @@ jobs:
 !{{ common.ciflow_should_run_job(ciflow_config) }}
   build:
     runs-on: "windows.4xlarge"
-    {%- if ciflow_config.enabled %}
     needs: [!{{ ciflow_config.root_job_name }}]
-    {%- endif %}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-build
       http_proxy: "!{{ common. squid_proxy }}"
@@ -124,9 +116,7 @@ jobs:
           rm -rf ./*
 
   generate-test-matrix:
-    {%- if ciflow_config.enabled %}
     needs: [!{{ ciflow_config.root_job_name }}]
-    {%- endif %}
     runs-on: ubuntu-18.04
     env:
       TEST_RUNNER_TYPE: !{{ test_runner_type }}

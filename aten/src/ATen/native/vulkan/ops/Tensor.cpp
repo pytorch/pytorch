@@ -792,11 +792,9 @@ void vTensor::View::CMD::copy_buffer_to_image(
       VK_KERNEL(nchw_to_image),
       extents,
       adaptive_work_group_size(extents),
-      // Shader parameters
-      block,
-      // Textures
       image,
-      buffer);
+      buffer,
+      view_.context_->resource().pool.uniform(block).object);
 }
 
 void vTensor::View::CMD::copy_image_to_buffer(
@@ -852,11 +850,9 @@ void vTensor::View::CMD::copy_image_to_buffer(
       VK_KERNEL(image_to_nchw),
       view_.extents(),
       adaptive_work_group_size(view_.extents()),
-      // Shader parameters
-      block,
-      // Textures
       image,
-      buffer);
+      buffer,
+      view_.context_->resource().pool.uniform(block).object);
 }
 
 void vTensor::View::CMD::submit(const api::Resource::Fence fence) {
