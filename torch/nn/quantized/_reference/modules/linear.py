@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional, Dict, Any
 from .utils import _quantize_and_dequantize_weight
+from .utils import _quantize_weight
 from .utils import _save_weight_qparams
 from .utils import _get_weight_qparam_keys
 
@@ -72,10 +73,9 @@ class Linear(nn.Linear):
             self.weight_zero_point, self.weight_axis)
 
     def get_quantized_weight(self):
-        # TODO: refactor https://github.com/pytorch/pytorch/blob/master/torch/nn/quantized/_reference/modules/utils.py#L4
-        # and extract the get_quantized_weight part
-        print("getting quantized weight")
-        return torch._empty_affine_quantized(torch.Size(self.weight.shape), dtype=torch.qint8)
+        return _quantize_weight(
+            self.weight, self.weight_qscheme, self.weight_dtype, self.weight_scale,
+            self.weight_zero_point, self.weight_axis)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
