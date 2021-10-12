@@ -104,8 +104,15 @@
 - func: _unpack_dual(Tensor(a) dual, int level) -> (Tensor(a) primal, Tensor tangent)
   variants: function
 
-# Maybe more comments here?
-- func: _new_with_same_meta(Tensor self, int[] size, int[] stride, int storage_offset, int nelement_in_storage) -> Tensor
+# NOTE [Two New-zero Funcitons]
+# The following two functions are used internally for forward AD
+# We need two functions here because we'd like a version to use for non-batched
+# forward that can accept non-strided tensors, and another variant specifically
+# when self is batched. Note that this is possible because a batching rule does
+# not need to redispatch to the same function.
+- func: _new_zeros_with_same_meta(Tensor self, Tensor other) -> Tensor
+
+- func: _new_zeros_with_meta(Tensor self, int[] size, int[] stride, int storage_offset, int storage_numel) -> Tensor
 
 - func: rename_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
   variants: method
