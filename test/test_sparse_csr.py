@@ -406,7 +406,6 @@ class TestSparseCSR(TestCase):
     @dtypes(*torch.testing.floating_types())
     @dtypesIfCUDA(*get_all_complex_dtypes(),
                   *get_all_fp_dtypes(include_half=SM53OrLater, include_bfloat16=SM80OrLater))
-    @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})
     def test_csr_matvec(self, device, dtype):
         side = 100
         for index_dtype in [torch.int32, torch.int64]:
