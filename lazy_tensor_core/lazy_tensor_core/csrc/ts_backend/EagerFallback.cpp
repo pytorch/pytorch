@@ -138,8 +138,8 @@ void eager_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack,
   // updated data on the eager tensors back to the original inputs.
   for (int64_t i = 0; i < tensor_args_indices.size(); ++i) {
     auto tensor_idx = tensor_args_indices[i];
-    const auto& alias_info = schema_args[tensor_idx].alias_info();
-    if (alias_info.has_value() && alias_info.value().isWrite()) {
+    const auto alias_info = schema_args[tensor_idx].alias_info();
+    if (alias_info != nullptr && alias_info->isWrite()) {
       at::_copy_from_and_resize(eager_tensors[i], tensor_args[i]);
     }
   }
@@ -171,8 +171,8 @@ void eager_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack,
     if (returns[idx].isTensor()) {
       const auto& return_tens = returns[idx].toTensor();
       if (return_tens.defined()) {
-        const auto& alias_info = schema_returns[idx].alias_info();
-        if (alias_info.has_value() && alias_info.value().isWrite()) {
+        const auto alias_info = schema_returns[idx].alias_info();
+        if (alias_info != nullptr && alias_info->isWrite()) {
           // Case (1): mutable alias case. Move the input ivalue directly onto
           // the stack in place of the existing eager output tensor.
           bool found_alias = false;
@@ -181,9 +181,9 @@ void eager_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack,
           for (int64_t i = 0; i < tensor_args_indices.size(); ++i) {
             auto input_tensor_idx = tensor_args_indices[i];
             const auto& input_tensor = eager_tensors[i];
-            const auto& input_alias_info =
+            const auto input_alias_info =
                 schema_args[input_tensor_idx].alias_info();
-            if (input_tensor.defined() && alias_info == input_alias_info) {
+            if (input_tensor.defined() && input_alias_info != nullptr && *alias_info == *input_alias_info) {
               // We've found the original input tensor that aliases with the
               // current output. Wrap it in an IValue and put it directly on the
               // stack.
@@ -199,7 +199,7 @@ void eager_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack,
                       schema_returns[idx]);
         } else {
           c10::optional<c10::Device> tgt_device = compute_target_device(tensor_args, tensorlist_args);
-          if (alias_info.has_value() && !alias_info.value().isWrite()) {
+          if (alias_info != nullptr && !alias_info->isWrite()) {
             // immutable alias (view) case: Warn here, since we're copying and
             // not creating a view.
             // If this operator is needed, the backend should provide a kernel
