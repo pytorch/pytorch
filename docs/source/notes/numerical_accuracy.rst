@@ -32,9 +32,6 @@ Then ``(A@B)[0]`` (the first element of the batched result) is not guaranteed to
 identical to ``A[0]@B[0]`` (the matrix product of the first elements of the input batches)
 even though mathematically it's an identical computation.
 
-.. code:: python
-
-
 Similarly, an operation applied to a tensor slice is not guaranteed to produce results that are
 identical to the slice of the result of the same operation applied to the full tensor. E.g. let
 ``A`` be a 2-dimentional tensor. ``A.sum(-1)[0]`` is not guaranteed to be bitwise equal to
