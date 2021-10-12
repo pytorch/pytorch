@@ -7540,18 +7540,19 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            supports_out=True,
            sample_inputs_func=sample_inputs_linalg_lstsq,
-           supports_autograd=False,
-           supports_forward_ad=False,
            # this method is not deterministic
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+           skips=(
+               # we skip forward AD tests as gradcheck fails with multi-Tensor outputs
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),
+           )),
     OpInfo('linalg.lstsq',
            aten_name='linalg_lstsq',
            variant_test_name='grad_oriented',
            # gradchecks for forward AD fails with multi-Tensor outputs
            op=lambda a, b, driver: torch.linalg.lstsq(a, b, driver=driver)[0],
            dtypes=floating_and_complex_types(),
-           supports_out=False,
            sample_inputs_func=sample_inputs_linalg_lstsq,
            supports_autograd=True,
            supports_forward_ad=True,
@@ -7559,8 +7560,9 @@ op_db: List[OpInfo] = [
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            skips=(
-               # test does not work with passing lambda for op
+               # tests do not work with passing lambda for op
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
            )),
     OpInfo('linalg.matrix_power',
            aliases=('matrix_power',),
