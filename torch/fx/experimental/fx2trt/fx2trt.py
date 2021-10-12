@@ -102,8 +102,9 @@ class TRTModule(torch.nn.Module):
     ):
         engine_bytes = state_dict[prefix + "engine"]
 
-        with trt.Logger() as logger, trt.Runtime(logger) as runtime:
-            self.engine = runtime.deserialize_cuda_engine(engine_bytes)
+        logger = trt.Logger()
+        runtime = trt.Runtime(logger)
+        self.engine = runtime.deserialize_cuda_engine(engine_bytes)
 
         self.input_names = state_dict[prefix + "input_names"]
         self.output_names = state_dict[prefix + "output_names"]
@@ -111,10 +112,14 @@ class TRTModule(torch.nn.Module):
 
     def __getstate__(self):
         state = self.__dict__.copy()
+        state["engine"] = bytearray(self.engine.serialize())
         state.pop('context', None)
         return state
 
     def __setstate__(self, state):
+        logger = trt.Logger()
+        runtime = trt.Runtime(logger)
+        state["engine"] = runtime.deserialize_cuda_engine(state["engine"])
         self.__dict__.update(state)
         if self.engine:
             self.context = self.engine.create_execution_context()
@@ -397,10 +402,12 @@ class TRTInterpreter(torch.fx.Interpreter):
         max_workspace_size=1 << 25,
         fp16_mode=True,
         int8_mode=False,
-        strict_type_constraints=True,
+        force_fp32_output=False,
+        strict_type_constraints=False,
     ) -> TRTInterpreterResult:
-        # TODO hack, should check contents of args and remove fp16_mode probably
-        self.fp16_mode = fp16_mode
+        # For float outputs, we set their dtype to fp16 only if fp16_mode=True and
+        # force_fp32_output=False.
+        self.output_fp16 = not force_fp32_output and fp16_mode
 
         if int8_mode and not self.builder.platform_has_fast_int8:
             warnings.warn("Current platform doesn't support fast native int8!")
@@ -515,6 +522,6 @@ class TRTInterpreter(torch.fx.Interpreter):
             name = f"output{i}"
             output.name = name
             self.network.mark_output(output)
-            if self.fp16_mode and output.dtype == trt.float32:
+            if self.output_fp16 and output.dtype == trt.float32:
                 output.dtype = trt.float16
             self._output_names.append(name)

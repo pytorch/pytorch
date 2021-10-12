@@ -1768,14 +1768,14 @@ See :func:`torch.histogram`
 
 add_docstr_all('index_add_',
                r"""
-index_add_(dim, index, tensor, *, alpha=1) -> Tensor
+index_add_(dim, index, source, *, alpha=1) -> Tensor
 
-Accumulate the elements of :attr:`alpha` times :attr:`tensor` into the :attr:`self`
+Accumulate the elements of :attr:`alpha` times ``source`` into the :attr:`self`
 tensor by adding to the indices in the order given in :attr:`index`. For example,
 if ``dim == 0``, ``index[i] == j``, and ``alpha=-1``, then the ``i``\ th row of
-:attr:`tensor` is subtracted from the ``j``\ th row of :attr:`self`.
+``source`` is subtracted from the ``j``\ th row of :attr:`self`.
 
-The :attr:`dim`\ th dimension of :attr:`tensor` must have the same size as the
+The :attr:`dim`\ th dimension of ``source`` must have the same size as the
 length of :attr:`index` (which must be a vector), and all other dimensions must
 match :attr:`self`, or an error will be raised.
 
@@ -1784,11 +1784,12 @@ Note:
 
 Args:
     dim (int): dimension along which to index
-    index (IntTensor or LongTensor): indices of :attr:`tensor` to select from
-    tensor (Tensor): the tensor containing values to add
+    index (Tensor): indices of ``source`` to select from,
+            should have dtype either `torch.int64` or `torch.int32`
+    source (Tensor): the tensor containing values to add
 
 Keyword args:
-    alpha (Number): the scalar multiplier for :attr:`tensor`
+    alpha (Number): the scalar multiplier for ``source``
 
 Example::
 
@@ -4643,7 +4644,7 @@ See :func:`torch.pinverse`
 
 add_docstr_all('index_add',
                r"""
-index_add(dim, index, tensor2) -> Tensor
+index_add(dim, index, source) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.index_add_`.
 """)
