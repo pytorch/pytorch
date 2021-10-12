@@ -516,7 +516,6 @@ class TestSparseCSR(TestCase):
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*get_all_complex_dtypes(),
                   *get_all_fp_dtypes(include_half=SM53OrLater, include_bfloat16=SM80OrLater))
-    @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})
     def test_csr_matvec(self, device, dtype):
         side = 100
         for index_dtype in [torch.int32, torch.int64]:
@@ -611,6 +610,77 @@ class TestSparseCSR(TestCase):
             test_shape(7, 8, 9, 20, True, index_dtype, (1, 0))
             test_shape(7, 8, 9, 20, False, index_dtype, (1, 1))
             test_shape(7, 8, 9, 20, True, index_dtype, (1, 1))
+
+    @onlyCUDA
+    @dtypes(torch.float)
+    def test_addmm_errors(self, device, dtype):
+        # test that the errors are the same for dense and sparse versions
+        import re
+
+        def test1(*, is_sparse):
+            # shapes must be compatible for matrix multiplication
+            a = make_tensor((2, 3), dtype=dtype, device=device)
+            if is_sparse:
+                a_sparse = a.to_sparse_csr()
+                return torch.addmm(a, a_sparse, a)
+            else:
+                return torch.addmm(a, a, a)
+
+        def test2(*, is_sparse):
+            # mat2 must be a matrix
+            a = make_tensor((2, 3), dtype=dtype, device=device)
+            if is_sparse:
+                a_sparse = a.to_sparse_csr()
+                return torch.addmm(a, a_sparse, a.unsqueeze(0))
+            else:
+                return torch.addmm(a, a, a.unsqueeze(0))
+
+        def test3(*, is_sparse):
+            # the first input needs to be 1D or 2D
+            a = make_tensor((3, 3), dtype=dtype, device=device)
+            if is_sparse:
+                a_sparse = a.to_sparse_csr()
+                return torch.addmm(a.unsqueeze(0), a_sparse, a)
+            else:
+                return torch.addmm(a.unsqueeze(0), a, a)
+
+        for test in (test1, test2, test3):
+            try:
+                test(is_sparse=False)
+            except RuntimeError as msg:
+                with self.assertRaisesRegex(RuntimeError, re.escape(str(msg))):
+                    test(is_sparse=True)
+
+    @onlyCUDA
+    @dtypes(torch.float)
+    def test_mm_errors(self, device, dtype):
+        # test that the errors are the same for dense and sparse versions
+        import re
+
+        def test1(*, is_sparse):
+            # shapes must be compatible for matrix multiplication
+            a = make_tensor((2, 3), dtype=dtype, device=device)
+            if is_sparse:
+                a_sparse = a.to_sparse_csr()
+                return torch.mm(a_sparse, a)
+            else:
+                return torch.mm(a, a)
+
+        def test2(*, is_sparse):
+            # mat2 must be a matrix
+            a = make_tensor((2, 3), dtype=dtype, device=device)
+            if is_sparse:
+                a_sparse = a.to_sparse_csr()
+                return torch.mm(a_sparse, a.unsqueeze(0))
+            else:
+                return torch.mm(a, a.unsqueeze(0))
+
+        for test in (test1, test2):
+            try:
+                test(is_sparse=False)
+            except RuntimeError as msg:
+                with self.assertRaisesRegex(RuntimeError, re.escape(str(msg))):
+                    test(is_sparse=True)
 
     @dtypes(torch.float, torch.double)
     def test_add(self, device, dtype):
