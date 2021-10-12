@@ -79,7 +79,7 @@ struct TORCH_API StaticModuleOptions {
   // to batch allocate tensor storage for output tensors of the
   // graph, where storage is deallocated outside static runtime
   // (enable_out_variant must be true)
-  bool optimize_graph_output_memory{false};
+  bool manage_output_tensors{false};
 };
 
 /// The static runime supports two execution modes.
@@ -176,6 +176,11 @@ class TORCH_API StaticModule {
   }
 
   const StaticModuleOptions& opts() const;
+
+  const ValueGroup& valueGroup() const {
+    return value_group_;
+  }
+
   size_t num_inputs() const;
   size_t num_outputs() const;
 
@@ -337,6 +342,14 @@ class TORCH_API StaticRuntime {
   bool is_optimizable_container_type(Node* n) const {
     return static_module_.is_optimizable_container_type(n);
   }
+
+  // Deallocate managed output tensors. This should be called only when all the
+  // references to the output from Static Runtime are gone.
+  void deallocateOutputTensors();
+
+  bool checkOutputTensorMemoryLeaks();
+
+  bool isManagedOutputTensor(const IValue& ivalue);
 
  private:
   // helper method for copying input args/kwargs into inputs_
