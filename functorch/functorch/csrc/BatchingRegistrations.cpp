@@ -94,33 +94,6 @@ static bool participatesInCurrentLevel(TensorList self) {
   return false;
 }
 
-std::tuple<Tensor,Tensor> max_pool2d_with_indices_batching_rule(
-    const Tensor & self, IntArrayRef kernel_size, IntArrayRef stride,
-    IntArrayRef padding, IntArrayRef dilation, bool ceil_mode) {
-  if (!participatesInCurrentLevel(self)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-    return at::max_pool2d_with_indices(
-        self, kernel_size, stride, padding, dilation, ceil_mode);
-  }
-  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
-  TORCH_INTERNAL_ASSERT(self_physical.tensor().dim() == 5);
-
-  auto N = self_physical.tensor().size(0);
-  auto M = self_physical.tensor().size(1);
-  auto physical = self_physical.tensor().flatten(0, 1);
-
-  auto result = max_pool2d_with_indices_batching_rule(physical,
-      kernel_size, stride, padding, dilation, ceil_mode);
-
-  auto first = std::get<0>(result).unflatten(0, {N, M});
-  auto second = std::get<1>(result).unflatten(0, {N, M});
-
-  first = self_physical.getPhysicalToLogicalMap().apply(first);
-  second = self_physical.getPhysicalToLogicalMap().apply(second);
-  return std::make_tuple<Tensor, Tensor>(std::move(first), std::move(second));
-}
-
-
 bool isPhysicalScalarTensor(const Tensor& logical_tensor) {
   if (logical_tensor.dim() > 0) {
     return false;
@@ -905,9 +878,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("size.int", static_cast<int64_t (*)(const Tensor&, int64_t)>(native::size));
   // m.impl("_add_batch_dim", native::_add_batch_dim);
   // m.impl("_remove_batch_dim", native::_remove_batch_dim);
-
-  m.impl("max_pool2d", at::native::max_pool2d); // composite
-  m.impl("max_pool2d_with_indices", max_pool2d_with_indices_batching_rule);
 
   m.impl("is_complex", native::is_complex);
 //
