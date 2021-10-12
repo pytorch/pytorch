@@ -266,7 +266,6 @@ class TestFuseFx(QuantizationTestCase):
         from torch.ao.quantization.quantize_fx import fuse_fx
         # fuse_fx is a top level api and only supports eval mode
         m = fuse_fx(m)
-        print(m)
         expected_nodes = [
             ns.call_module(nn.Linear),
         ]
