@@ -35,23 +35,6 @@ class MobileModelRunner {
   }
 
   /**
-   * Fetches the contents of the file named "extra/" + extra_file_name from the
-   * .ptl archive at location file_path. The contents are returned as an
-   * std::string.
-   *
-   * An empty string is returned if the file at the location "extra/" +
-   * extra_file_name does not exist or is an empty file (within the .ptl
-   * archive).
-   *
-   * An exception is thrown if the .ptl file at location file_path does not
-   * exist.
-   *
-   */
-  static std::string get_extra_file_contents(
-      std::string const& file_path,
-      std::string const& extra_file_name);
-
-  /**
    * Returns true if the list of operators passed in has a Metal GPU operator,
    * and false otherwise.
    *
