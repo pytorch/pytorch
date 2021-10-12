@@ -456,28 +456,34 @@ Lazy Model Materialization
     This is an experimental feature and is subject to change. If you experience
     any issues, let us know by opening a GitHub issue.
 
-.. autofunction:: torch.distributed.nn.utils.describe
-.. autofunction:: torch.distributed.nn.utils.is_described
+.. autofunction:: torch.distributed.nn.utils.init_meta
+.. autofunction:: torch.distributed.nn.utils.is_meta_init
 
-describe() vs. skip_init()
-^^^^^^^^^^^^^^^^^^^^^^^^^^
+``init_meta()`` vs. ``MyModule(device="meta")``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+If you are a model author, an alternative to ``init_meta()`` is to have a
+``device`` parameter as part of your constructor that will be used to initialize
+the model state (i.e. parameters, buffers, and other auxiliary tensors). The
+tradeoff is that this approach is intrusive and requires all (sub)modules of the
+model to accept a ``device`` parameter. Moreover for existing large models
+introducing a new constructor parameter can be prohibitively expensive.
 
-Although they sound similar ``describe()`` and ``torch.nn.utils.skip_init()``
-serve different purposes. ``describe()`` is meant for lazy model materialization
-and targets model users, while ``skip_init()`` is meant for optimized module
-initialization and targets model authors.
+``init_meta`` on the other hand does not require any code changes, but can
+potentially fail to construct the model if the model initializes its state in an
+unconventional way that conflicts with the meta device.
 
-Technical differences between the two functions are:
+``init_meta()`` vs. ``skip_init()``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-- ``describe()`` returns a module where all its parameters and buffers reside on
-  the meta device, while ``skip_init()`` returns a module where some or all its
-  parameters or buffers are empty tensors allocated on a real device.
-- ``describe()`` does not require any code changes in the module, while
-  ``skip_init()`` expects the module and its submodules to take a ``device``
-  argument. This means ``skip_init()`` is intrusive, but also guaranteed to
-  work; on the other hand ``describe()`` can potentially fail to construct a
-  module if the module initializes its state in an unconventional way that
-  conflicts with the meta device.
+Although they sound similar ``init_meta()`` and ``skip_init()`` serve different
+purposes. ``init_meta()`` is meant for lazy model materialization and targets
+model users, while ``skip_init()`` is meant for optimized module initialization
+and targets model authors.
+
+Technically ``init_meta()`` returns a module where all its parameters and
+buffers reside on the meta device, while ``skip_init()`` returns a module where
+some or all its parameters or buffers are empty tensors allocated on a real
+device.
 
 Autograd-enabled communication primitives
 -----------------------------------------

@@ -16,7 +16,7 @@ from torch.utils._python_dispatch import enable_python_mode
 
 _tls = threading.local()
 
-# Used to check nested `describe()` calls.
+# Used to check nested `init_meta()` calls.
 _tls.in_call = False
 
 
@@ -78,8 +78,8 @@ class _MetaContext(Tensor):
 
         op_handler: Optional[Callable]
 
-        # Some operators such as `arange()` and `tril()` do not support the meta
-        # backend. For such operators we use special handlers.
+        # Some operators such as `tril()` do not support the meta backend. For
+        # such operators we use special handlers.
         try:
             op_handler = cls._op_handlers[func]
         except KeyError:
@@ -103,30 +103,32 @@ class _MetaContext(Tensor):
             return func(*args, **kwargs)
 
 
-def describe(module_fn: Callable[..., Module], *args, **kwargs) -> Module:
+def init_meta(module_fn: Callable[..., Module], *args, **kwargs) -> Module:
     """Constructs a module on the meta device for inspection purposes.
 
     This function is meant to be used if the size of a module is too big to fit
     on a single machine and you want to inspect it without instantiating.
 
-    Internally ``describe()`` forces all parameters, buffers, and other tensors
+    Internally ``init_meta()`` forces all parameters, buffers, and other tensors
     within the scope of the module and its sub-modules to use the meta device
-    regardless of the actual device type. The returned module can be used for
-    inspection purposes and afterwards its ``materialize()`` method can be
-    called to construct a fully-instantiated module (see the example below).
+    regardless of the actual device of the tensor, even if that device was
+    explicitly passed to the constructor of the tensor. The returned module can
+    be used for inspection purposes and afterwards its ``materialize()`` method
+    can be called to construct a fully-instantiated module (see the example
+    below).
 
-    However note that ``describe()`` uses a "best effort" algorithm and is not
+    However note that ``init_meta()`` uses a "best effort" algorithm and is not
     guaranteed to succeed if the underlying module's implementation cannot be
     mapped to the meta device. If you are the module author, you can use the
-    ``is_described()`` function described below to find out whether your module
-    is being instantiated in the scope of a ``describe()`` call and use an
+    ``is_meta_init()`` function described below to find out whether your module
+    is being instantiated in the scope of an ``init_meta()`` call and use an
     alternate logic if required:
 
     ::
 
         class MyModule(Module):
             def __init__(self):
-                if torch.distributed.nn.utils.is_described():
+                if torch.distributed.nn.utils.is_meta_init():
                     self.myparam = torch.empty([10,10], device="meta")
                 else:
                     self.myparam = load_myparam()
@@ -143,8 +145,9 @@ def describe(module_fn: Callable[..., Module], *args, **kwargs) -> Module:
         A ``torch.nn.Module`` instance on the meta device.
 
     :Example:
+        >>> import torch
         >>> import torch.distributed.nn
-        >>> m = torch.distributed.nn.utils.describe(torch.nn.Linear, 5, 1)
+        >>> m = torch.distributed.nn.utils.init_meta(torch.nn.Linear, 5, 1)
         >>> m.weight
         Parameter containing:
         tensor(..., device='meta', requires_grad=True)
@@ -153,11 +156,22 @@ def describe(module_fn: Callable[..., Module], *args, **kwargs) -> Module:
         Parameter containing:
         tensor([[-1.4677e+24,  4.5915e-41,  1.4013e-45,  0.0000e+00,
                  -1.4677e+24, 4.5915e-41]], requires_grad=True)
+        >>>
+        >>> # `init_meta()` overrides even explicitly passed device arguments.
+        >>> class MyModule(torch.nn.Module):
+        ...     def __init__(self):
+        ...         super().__init__()
+        ...         self.param = torch.ones([10, 10], device="cpu")
+        ...
+        >>> m = torch.distributed.nn.utils.init_meta(MyModule)
+        >>> m.param
+        tensors(..., device='meta', size=(10, 10))
+
 
     Note:
         The ``args`` and ``kwargs`` arguments must be treated as immutable by
-        the module since they might be used a second time if ``materialize()``
-        is called.
+        the module constructor since they might be used a second time if
+        ``materialize()`` is called.
     """
 
     def create_instance() -> Module:
@@ -178,6 +192,6 @@ def describe(module_fn: Callable[..., Module], *args, **kwargs) -> Module:
     return module
 
 
-def is_described() -> bool:
-    """Indicates whether the module is being instantiated by ``describe()``."""
+def is_meta_init() -> bool:
+    """Indicates whether the module is being instantiated by ``init_meta()``."""
     return _tls.in_call
