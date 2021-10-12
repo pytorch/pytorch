@@ -230,14 +230,16 @@ bool guardDifferentiableGraph(Node* dnode) {
           // but that should be done while creating subgraphs and would be
           // a mess.
           // XXX TODO: revisit the alternatives
-          Value* o = dni->node()->g(attr::Subgraph)->outputs().at(dni->offset());
+          Value* o =
+              dni->node()->g(attr::Subgraph)->outputs().at(dni->offset());
           if (o->node()->kind() == prim::profile) {
             dni->setType(o->node()->ty(attr::profiled_type));
           }
         }
 
         // we check if the optional is defined
-        all_inputs_seen &= (dni->type()->cast<TensorType>() != TensorType::get());
+        all_inputs_seen &=
+            (dni->type()->cast<TensorType>() != TensorType::get());
       }
     }
     fallback_flag |= !all_inputs_seen;
