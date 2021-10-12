@@ -387,6 +387,7 @@ namespace c10 {
   _(aten, hardswish_)                \
   _(aten, hardsigmoid_)              \
   _(aten, hardtanh_)                 \
+  _(aten, dequantize)                \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
   _(onnx, Concat)                    \
