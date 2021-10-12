@@ -659,12 +659,16 @@ class ShardedTensor(object):
     def size(self, dim: int = None) -> Union[torch.Size, int]:
         """
         Returns a :Union:`[torch.Size, int]` which represents the size of the tensor.
-        The dimension can be specified.
+            The dimension can be specified.
 
         Args:
-        dim (int, optional): the dimension over which the size represents.
-        Default: ``None``, it returns a subclass of tuple.
-        If specified, it returns the size of the given dimension.
+            dim (int, optional): the dimension over which the size represents.
+            If specified, it returns the size of the given dimension.
+            If not, it returns a subclass of tuple.
+            Default: ``None``
+
+        Returns:
+            A :Union:`[torch.Size, int]` represents the size of the tensor.
         """
         size = self._metadata.size
         if dim is None:
