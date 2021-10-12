@@ -149,6 +149,13 @@ def doAutodiffCheck(testname):
         return False
 
     if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
+        test_exceptions = [
+            # disabling dropout test since it's disabled for legacy autodiff
+            'test_nn_dropout',
+        ]
+
+        if testname in test_exceptions:
+            return False
         return True
 
 
@@ -1621,7 +1628,7 @@ graph(%Ra, %Rb):
                         FileCheck().check("aten::bernoulli_").run(scripted.graph_for(X, profile_and_replay=True))
                     self.assertEqual(training, 'aten::bernoulli_' in profile(scripted, X))
 
-    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, 'Testing differentiable graph')
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, 'Testing differentiable graph')
     def test_dropout_func_requires_grad(self):
         def dropout_training(input):
             return F.dropout(input, 0.5, training=True)
@@ -1642,9 +1649,12 @@ graph(%Ra, %Rb):
             for requires_grad in (True, False):
                 X = torch.randn(M, M, requires_grad=requires_grad)
                 if requires_grad:
-                    FileCheck().check("aten::bernoulli_").run(scripted_training.graph_for(X, profile_and_replay=True))
-                self.assertIn('aten::bernoulli_', profile(scripted_training, X))
-                self.assertNotIn('aten::bernoulli_', profile(scripted_eval, X))
+                    FileCheck().check("aten::rand_like").run(scripted_training.graph_for(X, profile_and_replay=True))
+                    rand_op = 'aten::rand_like'
+                else:
+                    rand_op = 'aten::bernoulli_'
+                self.assertIn(rand_op, profile(scripted_training, X))
+                self.assertNotIn(rand_op, profile(scripted_eval, X))
 
     @unittest.skipIf(not RUN_CUDA, "test_dropout_cuda require CUDA")
     def test_dropout_cuda(self):
