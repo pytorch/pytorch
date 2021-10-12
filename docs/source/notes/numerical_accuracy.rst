@@ -1,9 +1,16 @@
-.. _numerical_accuracy
+.. _numerical_accuracy:
 
 Numerical accuracy
 ==================
 
-Due to finite accuracy of floating point representation, pytorch is not guaranteed
+In modern computers, floating point numbers are represented using IEEE 754 standard.
+For more details on floating point arithmetics and IEEE 754 standard, please see
+`Floating point arithmetic <https://en.wikipedia.org/wiki/Floating-point_arithmetic>`_
+In particular, note that floating point provides limited accuracy (about 7 decimal digits
+for single precision floating point numbers, about 16 decimal digits for double precision
+floating point numbers) and that floating point addition and multiplication are not
+associative, so the order of the operations affects the results.
+Because of this, pytorch is not guaranteed
 to produce bitwise identical results for floating point computations that are
 mathematically identical. Similarly, bitwise identical results are not guaranteed across
 PyTorch releases, individual commits, or different platforms. In particular, CPU and GPU
@@ -21,9 +28,12 @@ we are not doing that, and typically perform computation for the whole batch. Th
 libraries that we are calling, and pytorch internal implementations of operations can produces
 slightly different results in this case, compared to non-batched computations. In particular,
 let ``A`` and ``B`` be 3D tensors with the dimensions suitable for batched matrix multiplication.
-Then ``A@B[0]`` (the first element of the batched result) is not guaranteed to be bitwise
+Then ``(A@B)[0]`` (the first element of the batched result) is not guaranteed to be bitwise
 identical to ``A[0]@B[0]`` (the matrix product of the first elements of the input batches)
 even though mathematically it's an identical computation.
+
+.. code:: python
+
 
 Similarly, an operation applied to a tensor slice is not guaranteed to produce results that are
 identical to the slice of the result of the same operation applied to the full tensor. E.g. let
@@ -37,6 +47,8 @@ When inputs contain large values such that intermediate results may overflow the
 used datatype, the end result may overflow too, even though it is representable in the original
 datatype. E.g.::
 
+.. code:: python
+
     import torch
     a=torch.tensor([1e20, 1e20]) #fp32 type by default
     a.norm() # produces tensor(inf)
@@ -46,11 +58,12 @@ TensorFloat-32(TF32) on Nvidia Ampere devices
 ---------------------------------------------
 
 On Ampere Nvidia GPUs, pytorch by default uses TensorFloat32 (TF32) to speed up mathematically
-intensive operations, in particular matrix multiplications and gemms. When operation is performed
+intensive operations, in particular matrix multiplications and convolutions. When operation is performed
 using TF32 tensor cores, only first 10 bits of input mantissa are read. This leads to less accurate
 results, and surprising results such as multiplying a matrix by identity matrix produces
 results that are different from the input.
 Most neural network workloads have the same convergence behavior when using tf32 as they have
-with fp32, however, if better accuracy is desired, TF32 can be turned off.
+with fp32, however, if better accuracy is desired, TF32 can be turned off with
+``torch.backends.cuda.matmul.allow_tf32 = False``
 
 For more information see :ref:`TensorFloat32<tf32_on_ampere>`
