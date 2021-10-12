@@ -45,7 +45,7 @@ Extremal values
 
 When inputs contain large values such that intermediate results may overflow the range of the
 used datatype, the end result may overflow too, even though it is representable in the original
-datatype. E.g.::
+datatype. E.g.:
 
 .. code:: python
 
