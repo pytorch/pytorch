@@ -27,10 +27,26 @@
   } while(0)
 #endif
 
-/* Global state of THC. */
-struct THCState {};
+typedef struct THCState THCState;
+struct THCState;
 
+typedef struct _THCCudaResourcesPerDevice {
+  /* Size of scratch space per each stream on this device available */
+  size_t scratchSpacePerStream;
+} THCCudaResourcesPerDevice;
+
+TORCH_CUDA_CPP_API THCState* THCState_alloc(void);
+TORCH_CUDA_CPP_API void THCState_free(THCState* state);
+
+TORCH_CUDA_CPP_API void THCudaInit(THCState* state);
 TORCH_CUDA_CPP_API void THCudaShutdown(THCState* state);
+
+/* If device `dev` can access allocations on device `devToAccess`, this will return */
+/* 1; otherwise, 0. */
+TORCH_CUDA_CPP_API int THCState_getPeerToPeerAccess(THCState* state, int dev, int devToAccess);
+
+/* For the current device and stream, returns the allocated scratch space */
+TORCH_CUDA_CPP_API size_t THCState_getCurrentDeviceScratchSpaceSize(THCState* state);
 
 #define THCAssertSameGPU(expr) if (!expr) THError("arguments are located on different GPUs")
 #define THCudaCheck(err)  __THCudaCheck(err, __FILE__, __LINE__)
