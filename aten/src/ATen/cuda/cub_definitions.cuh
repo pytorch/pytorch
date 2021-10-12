@@ -18,7 +18,7 @@
 // cub sort support for CUB_WRAPPED_NAMESPACE is added to cub 1.13.1 in:
 // https://github.com/NVIDIA/cub/pull/326
 // CUB_WRAPPED_NAMESPACE is defined globally in cmake/Dependencies.cmake
-// starting from CUDA 11.4
+// starting from CUDA 11.5
 #if CUB_VERSION >= 101400
 #define USE_GLOBAL_CUB_WRAPPED_NAMESPACE() true
 #else
