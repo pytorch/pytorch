@@ -23,6 +23,7 @@
 #undef CUB_NS_POSTFIX
 #undef CUB_NS_PREFIX
 #undef CUB_NS_QUALIFIER
+
 #endif
 
 #include <ATen/cuda/Exceptions.h>
