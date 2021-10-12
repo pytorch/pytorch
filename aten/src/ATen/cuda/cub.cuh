@@ -7,7 +7,7 @@
 
 #include <ATen/cuda/cub_definitions.cuh>
 
-#if CUB_SUPPORTS_WRAPPED_NAMESPACE()
+#if USE_GLOBAL_CUB_WRAPPED_NAMESPACE()
 
 #include <cub/cub.cuh>
 

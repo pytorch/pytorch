@@ -20,7 +20,7 @@
 // CUB_WRAPPED_NAMESPACE is defined globally in cmake/Dependencies.cmake
 // starting from CUDA 11.4
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11040
-#define CUB_SUPPORTS_WRAPPED_NAMESPACE() true
+#define USE_GLOBAL_CUB_WRAPPED_NAMESPACE() true
 #else
-#define CUB_SUPPORTS_WRAPPED_NAMESPACE() false
+#define USE_GLOBAL_CUB_WRAPPED_NAMESPACE() false
 #endif
