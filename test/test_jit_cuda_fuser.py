@@ -2743,6 +2743,26 @@ class TestCudaFuser(JitTestCase):
         assert torch.allclose(jit_grad, aten_grad)
         self.assertGraphContains(jitted.graph_for(inp, 0.693147), FUSION_GROUP, True)
 
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_inplace_removal(self):
+        def t(x: torch.Tensor):
+            o = torch.nn.functional.softmax(x, dim=0)
+            o += x
+            return o.relu_()
+
+        jitted = torch.jit.script(t)
+        inp = torch.randn(4, 2, dtype=torch.float32, device="cuda")
+
+        for i in range(3):
+            jit_o = jitted(inp)
+
+        graph = jitted.graph_for(inp)
+        self.assertGraphContains(graph, FUSION_GROUP, True)
+        self.assertGraphContains(graph, 'aten::add', True)
+        self.assertGraphContains(graph, 'aten::relu', True)
+
 class TestPassManagerCudaFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")

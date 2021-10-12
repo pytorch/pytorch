@@ -12,7 +12,8 @@
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
-#include <torch/csrc/jit/passes/remove_inplace_ops.h>
+#include <torch/csrc/jit/passes/remove_mutation.h>
+#include <torch/csrc/jit/passes/restore_mutation.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
@@ -1856,6 +1857,26 @@ void markMissingType(Block* block) {
   }
 }
 
+bool removeInplaceOperations(const std::shared_ptr<Graph>& graph) {
+  // TODO: we should probably get a list that's close to what our fuser handles
+  static std::unordered_set<Symbol> inplace_ops = []() {
+    std::unordered_set<Symbol> target_ops;
+    for (const auto& iter : activation_type_promotion_mapping) {
+      std::string name = std::string(iter.first.toQualString()) + "_";
+      target_ops.insert(Symbol::fromQualString(name));
+    }
+
+    target_ops.insert(Symbol::fromQualString("aten::add_"));
+    target_ops.insert(Symbol::fromQualString("aten::mul_"));
+    target_ops.insert(Symbol::fromQualString("aten::div_"));
+    target_ops.insert(Symbol::fromQualString("aten::sub_"));
+    return target_ops;
+  }();
+
+  return RemoveTensorMutation(
+      graph, [&](Node* node) { return inplace_ops.count(node->kind()) != 0; });
+}
+
 } // anonymous namespace
 
 void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
@@ -1876,6 +1897,11 @@ void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
 
   markMissingType(graph->block());
   GRAPH_DEBUG("After mark missing type: ", *graph);
+
+  // replace inplace operation to functional version to expose fusion
+  // opportunities
+  removeInplaceOperations(graph);
+  GRAPH_DEBUG("Remove inplace operations: ", *graph);
 
   // TODO: separate passes into different file;
   // TODO: restore decomposition after fusion, in case we are decomposing
