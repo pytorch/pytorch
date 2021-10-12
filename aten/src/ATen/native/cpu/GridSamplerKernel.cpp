@@ -760,7 +760,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
 
     std::tie(
       n, s, w, e, nw, ne, sw, se, nw_mask, ne_mask, sw_mask, se_mask,
-      i_y_n, i_x_w) = compute_interp_params(x, y);
+      i_y_n, i_x_w) = compute_interp_params<Vec, iVec, scalar_type>(x, y);
 
     auto i_nw_offset = i_y_n * iVec(inp_sH) + i_x_w * iVec(inp_sW);
     auto i_ne_offset = i_nw_offset + iVec(inp_sW);
