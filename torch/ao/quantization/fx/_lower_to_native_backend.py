@@ -9,7 +9,10 @@ from .utils import _parent_name
 def _lower_ref_linear_module(model: QuantizedGraphModule) -> QuantizedGraphModule:
     # traverse the graph and find dequantize - ref quantized linear - quantize patterns and
     # and replace it with quantized linear modules
-    pattern = (torch.quantize_per_tensor, (torch.nn.quantized._reference.Linear, "dequantize"), MatchAllNode, MatchAllNode, MatchAllNode)
+    pattern = (
+        torch.quantize_per_tensor,
+        (torch.nn.quantized._reference.Linear, "dequantize"),
+        MatchAllNode, MatchAllNode, MatchAllNode)
     modules = dict(model.named_modules())
     nodes = list(model.graph.nodes)
     # TODO: maybe orgnize this better (e.g. break down to more functions)
@@ -37,8 +40,10 @@ def _lower_ref_linear_module(model: QuantizedGraphModule) -> QuantizedGraphModul
 
             # change this pattern to use torch.nn.quantized.Linear
             ref_qlinear = modules[linear_node.target]
-            # initialize qlinear with ref_qlinear (https://github.com/pytorch/pytorch/blob/master/torch/nn/quantized/_reference/modules/linear.py)
-            qlinear = torch.nn.quantized.Linear(ref_qlinear.in_features, ref_qlinear.out_features)
+            # initialize torch.nn.quantized.Linear with torch.nn.quantized._reference.Linear
+            qlinear = torch.nn.quantized.Linear(
+                ref_qlinear.in_features,
+                ref_qlinear.out_features)
             qweight = ref_qlinear.get_quantized_weight()
             qlinear.set_weight_bias(qweight, ref_qlinear.bias)
 
