@@ -473,7 +473,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.nll_loss'),
         xfail('block_diag'),
         xfail('nn.functional.dropout'),
-        xfail('nn.functional.max_pool2d'),
         xfail('nn.functional.batch_norm'),
     })
     def test_vmapvjp_has_batch_rule(self, device, dtype, op):
