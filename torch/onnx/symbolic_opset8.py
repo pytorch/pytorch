@@ -284,4 +284,4 @@ def uniform(g, self, **kwargs):
     out = kwargs["out"] if "out" in kwargs else None
     from_ = g.op("Constant", value_t=torch.tensor(kwargs["from"], dtype=torch.float))
     to_ = g.op("Constant", value_t=torch.tensor(kwargs["to"], dtype=torch.float))
-    return g.op("Uniform", self, from_, to_, generator, upper_i=1)
+    return g.op("Uniform", self, from_, to_, kwargs["generator"], upper_i=1)
