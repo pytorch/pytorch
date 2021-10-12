@@ -448,12 +448,17 @@ Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
   if (NNCLoweringFunction custom_lowering = getCustomLoweringFor(op)) {
     return custom_lowering(argInputs, outputShape, outputType, device_);
   }
-  if (NNCLoweringFunction lowering =
-          getStandardLoweringFor(op.toQualString())) {
-    return lowering(argInputs, outputShape, outputType, device_);
+  if (v->node()->maybeSchema()) {
+    if (NNCLoweringFunction lowering =
+            getStandardLoweringFor(c10::toString(v->node()->schema()))) {
+      return lowering(argInputs, outputShape, outputType, device_);
+    }
   }
   std::string msg = std::string("Unhandled node kind (in computeValue): ") +
       op.toQualString();
+  if (v->node()->maybeSchema()) {
+    msg += std::string("\nSchema: ") + c10::toString(v->node()->schema());
+  }
   throw malformed_input(msg);
 }
 
