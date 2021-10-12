@@ -6131,7 +6131,7 @@
     CPU, CUDA: random_
     Meta: random_meta_
 
-- func: uniform_(Tensor(a!) self, float from_=0, float to_=1, *, Generator? generator=None) -> Tensor(a!)
+- func: uniform_(Tensor(a!) self, float from=0, float to=1, *, Generator? generator=None) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
