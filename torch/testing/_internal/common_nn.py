@@ -1214,7 +1214,10 @@ def fractional_max_pool2d_test(test_case, return_indices=False):
             cpp_var_map={'random_samples': random_samples},
             fullname='FractionalMaxPool2d_size')
     if return_indices:
-        del out['cpp_constructor_args']
+        # to get the return_indices behavior we have to call
+        # `forward_with_indices` in C++ and the return type switches from
+        # Tensor to tuple<Tensor, Tensor> which complicates testing considerably.
+        out['test_cpp_api_parity'] = False
         out['fullname'] = '%s_return_indices' % out['fullname']
     return out
 
@@ -1301,7 +1304,10 @@ def fractional_max_pool3d_test(test_case, return_indices=False):
             cpp_var_map={'random_samples': random_samples},
             fullname='FractionalMaxPool3d_asymsize')
     if return_indices:
-        del out['cpp_constructor_args']
+        # to get the return_indices behavior we have to call
+        # `forward_with_indices` in C++ and the return type switches from
+        # Tensor to tuple<Tensor, Tensor> which complicates testing considerably.
+        out['test_cpp_api_parity'] = False
         out['fullname'] = '%s_return_indices' % out['fullname']
     return out
 
@@ -1950,6 +1956,7 @@ new_module_tests = [
         fullname='MaxPool1d_return_indices',
         constructor=lambda: nn.MaxPool1d(4, return_indices=True),
         input_size=(2, 10, 4),
+        test_cpp_api_parity=False,
     ),
     dict(
         module_name='Conv2d',
@@ -2172,6 +2179,7 @@ new_module_tests = [
         constructor=lambda: nn.MaxPool2d((3, 3), (2, 2), (1, 1), return_indices=True),
         input_size=(1, 3, 7, 7),
         check_with_channels_last=True,
+        test_cpp_api_parity=False,
     ),
     dict(
         module_name='AvgPool1d',
@@ -2674,6 +2682,7 @@ new_module_tests = [
         fullname='MaxPool3d_return_indices',
         constructor=lambda: nn.MaxPool3d(2, 2, (1, 1, 1), return_indices=True),
         input_size=(2, 3, 5, 5, 5),
+        test_cpp_api_parity=False,
     ),
     dict(
         module_name='AvgPool3d',
