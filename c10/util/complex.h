@@ -6,6 +6,26 @@
 #include <c10/macros/Macros.h>
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11030
+#define USE_LIBCUDACXX() true
+#define USE_THRUST() false
+#define IMPL_NAMESPACE() cuda::std
+#else
+#define USE_LIBCUDACXX() false
+#define USE_THRUST() true
+#define IMPL_NAMESPACE() thrust
+#endif
+#else //defined(__CUDACC__) || defined(__HIPCC__)
+#define USE_LIBCUDACXX() false
+#define USE_THRUST() false
+#define IMPL_NAMESPACE() std
+#endif
+
+#if USE_LIBCUDACXX()
+#include <cuda/std/complex>
+#endif
+
+#if USE_THRUST()
 #include <thrust/complex.h>
 #endif
 
@@ -148,13 +168,11 @@ struct alignas(sizeof(T) * 2) complex {
   template <typename U>
   explicit constexpr complex(const std::complex<U>& other)
       : complex(other.real(), other.imag()) {}
-#if defined(__CUDACC__) || defined(__HIPCC__)
+
+#if USE_LIBCUDACXX() || USE_THRUST()
   template <typename U>
-  explicit C10_HOST_DEVICE complex(const thrust::complex<U>& other)
+  explicit C10_HOST_DEVICE complex(const IMPL_NAMESPACE()::complex<U>& other)
       : real_(other.real()), imag_(other.imag()) {}
-// NOTE can not be implemented as follow due to ROCm bug:
-//   explicit C10_HOST_DEVICE complex(const thrust::complex<U> &other):
-//   complex(other.real(), other.imag()) {}
 #endif
 
   // Use SFINAE to specialize casting constructor for c10::complex<float> and
@@ -258,9 +276,9 @@ struct alignas(sizeof(T) * 2) complex {
     return *this;
   }
 
-#if defined(__CUDACC__) || defined(__HIPCC__)
+#if USE_LIBCUDACXX() || USE_THRUST()
   template <typename U>
-  C10_HOST_DEVICE complex<T>& operator=(const thrust::complex<U>& rhs) {
+  C10_HOST_DEVICE complex<T>& operator=(const IMPL_NAMESPACE()::complex<U>& rhs) {
     real_ = rhs.real();
     imag_ = rhs.imag();
     return *this;
@@ -272,10 +290,10 @@ struct alignas(sizeof(T) * 2) complex {
     return std::complex<U>(std::complex<T>(real(), imag()));
   }
 
-#if defined(__CUDACC__) || defined(__HIPCC__)
+#if USE_LIBCUDACXX() || USE_THRUST()
   template <typename U>
-  C10_HOST_DEVICE explicit operator thrust::complex<U>() const {
-    return static_cast<thrust::complex<U>>(thrust::complex<T>(real(), imag()));
+  C10_HOST_DEVICE explicit operator IMPL_NAMESPACE()::complex<U>() const {
+    return static_cast<IMPL_NAMESPACE()::complex<U>>(IMPL_NAMESPACE()::complex<T>(real(), imag()));
   }
 #endif
 
@@ -503,23 +521,6 @@ std::basic_istream<CharT, Traits>& operator>>(
 //
 // The implementation of these functions also follow the design of C++20
 
-#if defined(__CUDACC__) || defined(__HIPCC__)
-namespace c10_internal {
-template <typename T>
-C10_HOST_DEVICE constexpr thrust::complex<T>
-cuda101bug_cast_c10_complex_to_thrust_complex(const c10::complex<T>& x) {
-#if defined(CUDA_VERSION) && (CUDA_VERSION < 10200)
-  // This is to circumvent a CUDA compilation bug. See
-  // https://github.com/pytorch/pytorch/pull/38941 . When the bug is fixed, we
-  // should do static_cast directly.
-  return thrust::complex<T>(x.real(), x.imag());
-#else
-  return static_cast<thrust::complex<T>>(x);
-#endif
-}
-} // namespace c10_internal
-#endif
-
 namespace std {
 
 template <typename T>
@@ -534,12 +535,7 @@ constexpr T imag(const c10::complex<T>& z) {
 
 template <typename T>
 C10_HOST_DEVICE T abs(const c10::complex<T>& z) {
-#if defined(__CUDACC__) || defined(__HIPCC__)
-  return thrust::abs(
-      c10_internal::cuda101bug_cast_c10_complex_to_thrust_complex(z));
-#else
-  return std::abs(static_cast<std::complex<T>>(z));
-#endif
+  return IMPL_NAMESPACE()::abs(static_cast<IMPL_NAMESPACE()::complex<T>>(z));
 }
 
 #ifdef __HIP_PLATFORM_HCC__
@@ -585,11 +581,7 @@ namespace c10 {
 
 template <typename T>
 C10_HOST_DEVICE complex<T> polar(const T& r, const T& theta = T()) {
-#if defined(__CUDACC__) || defined(__HIPCC__)
-  return static_cast<complex<T>>(thrust::polar(r, theta));
-#else
-  return static_cast<complex<T>>(std::polar(r, theta));
-#endif
+  return static_cast<complex<T>>(IMPL_NAMESPACE()::polar(r, theta));
 }
 
 } // namespace c10
