@@ -1,16 +1,13 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <THC/THCTensor.hpp>
 #include <ATen/native/ResizeCommon.h>
 
 #include <c10/cuda/CUDAGuard.h>
 
 namespace at { namespace native {
 
-// These functions are called by native::resize_ as well as (legacy) THC resize.
-// They are not in THC/THCTensor.cpp because the at namespace is easier
-// to benchmark than THC; I can't get gbenchmark to call fns from THTensor.cpp
+TORCH_CUDA_CPP_API void resize_bytes_cuda(StorageImpl* storage, size_t size_bytes);
 
 static inline void maybe_resize_storage_cuda(TensorImpl* self, uint64_t new_size) {
   // It does not make sense to try to resize a storage
@@ -21,16 +18,15 @@ static inline void maybe_resize_storage_cuda(TensorImpl* self, uint64_t new_size
   if (new_size == 0) {
     return;
   }
-  if (!THTensor_getStoragePtr(self)) {
-    TORCH_CHECK(false, "Tensor: invalid null storage");
-  }
-  uint64_t new_size_bytes = (new_size + self->storage_offset()) * self->dtype().itemsize();
-  if (new_size_bytes > self->storage().nbytes()) {
-    THCStorage_resizeBytes(
-        globalContext().getTHCState(),
-        THTensor_getStoragePtr(self),
-        new_size_bytes
-    );
+  auto new_size_bytes_i = (new_size + self->storage_offset()) * self->dtype().itemsize();
+  TORCH_CHECK(!overflows<size_t>(new_size_bytes_i), "Requested storage size (",
+              new_size_bytes_i, ") cannot be represented as a size_t");
+  const auto new_size_bytes = static_cast<size_t>(new_size_bytes_i);
+
+  const Storage &storage = self->unsafe_storage();
+  TORCH_CHECK(storage, "Tensor: invalid null storage");
+  if (new_size_bytes > storage.nbytes()) {
+    resize_bytes_cuda(storage.unsafeGetStorageImpl(), new_size_bytes);
   }
 }
 

@@ -729,9 +729,6 @@
   variants: method
   structured_delegate: baddbmm.out
 
-- func: _baddbmm_mkl_(Tensor(a!) self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
-  variants: function
-
 - func: baddbmm.out(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   structured: True
   variants: function
@@ -10553,18 +10550,26 @@
 - func: linalg_pinv(Tensor self, float rcond=1e-15, bool hermitian=False) -> Tensor
   python_module: linalg
   variants: function
+  dispatch:
+    CompositeExplicitAutograd: linalg_pinv
 
 - func: linalg_pinv.rcond_tensor(Tensor self, Tensor rcond, bool hermitian=False) -> Tensor
   python_module: linalg
   variants: function
+  dispatch:
+    CompositeExplicitAutograd: linalg_pinv
 
 - func: linalg_pinv.out(Tensor self, float rcond=1e-15, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
+  dispatch:
+    CompositeExplicitAutograd: linalg_pinv_out
 
 - func: linalg_pinv.out_rcond_tensor(Tensor self, Tensor rcond, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
+  dispatch:
+    CompositeExplicitAutograd: linalg_pinv_out
 
 - func: linalg_solve(Tensor input, Tensor other) -> Tensor
   python_module: linalg
