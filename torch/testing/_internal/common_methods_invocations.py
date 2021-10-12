@@ -3815,7 +3815,7 @@ def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False, **kw
     from torch.testing._internal.common_utils import random_well_conditioned_matrix
     out = []
     for batch in ((), (3,), (3, 3)):
-        for delta in (-1, +1):
+        for delta in (-1, 0, +1):
             shape = batch + (3 + delta, 3)
             a = random_well_conditioned_matrix(*shape, dtype=dtype, device=device)
             a.requires_grad_(requires_grad)
