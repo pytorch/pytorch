@@ -56,7 +56,7 @@ TensorFloat-32(TF32) on Nvidia Ampere devices
 
 On Ampere Nvidia GPUs, pytorch by default uses TensorFloat32 (TF32) to speed up mathematically
 intensive operations, in particular matrix multiplications and convolutions. When operation is performed
-using TF32 tensor cores, only first 10 bits of input mantissa are read. This leads to less accurate
+using TF32 tensor cores, only the first 10 bits of the input mantissa are read. This leads to less accurate
 results, and surprising results such as multiplying a matrix by identity matrix produces
 results that are different from the input.
 Most neural network workloads have the same convergence behavior when using tf32 as they have
