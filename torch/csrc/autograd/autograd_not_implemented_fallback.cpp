@@ -153,17 +153,24 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
     if (!is_aliased_output[idx_ret] && t.has_storage())
       TORCH_INTERNAL_ASSERT(t.storage().use_count() == 1);
   }, stack, stack->size() - num_returns, num_returns);
-  // There should be only a single base-view pair, make sure their storage is aliased
+  // There should be only a single base-view pair, make sure their storage is aliased.
   if (aliased_input_idx != -1 && aliased_output_idx != -1) {
     const c10::IValue& aliased_input_iv = stack_args_copy[aliased_input_idx];
     const c10::IValue& aliased_output_iv = (*stack)[stack->size() - num_returns + aliased_output_idx];
-    // We do not support views embedded inside tensorlist
     TORCH_INTERNAL_ASSERT(aliased_input_iv.isTensor(), op_name);
-    TORCH_INTERNAL_ASSERT(aliased_output_iv.isTensor(), op_name);
-    const at::Tensor& aliased_input = aliased_input_iv.toTensor();
-    const at::Tensor& aliased_output = aliased_input_iv.toTensor();
-    if(is_aliased_output[aliased_input_idx] && aliased_input.has_storage())
-      TORCH_INTERNAL_ASSERT(aliased_input.storage().is_alias_of(aliased_output.storage()), op_name);
+    TORCH_INTERNAL_ASSERT(aliased_output_iv.isTensor() || aliased_output_iv.isTensorList() , op_name);
+    const at::Tensor& aliased_input = aliased_input_iv.toTensor(); //
+    if (aliased_input.has_storage()) {
+      if (aliased_output_iv.isTensor()) {
+        const at::Tensor& aliased_output = aliased_input_iv.toTensor();
+        TORCH_INTERNAL_ASSERT(aliased_input.storage().is_alias_of(aliased_output.storage()), op_name);
+      } else {
+        const auto aliased_output_vec = aliased_output_iv.toTensorVector();
+        for (const auto& aliased_output : aliased_output_vec) {
+          TORCH_INTERNAL_ASSERT(aliased_input.storage().is_alias_of(aliased_output.storage()), op_name);
+        }
+      }
+    }
   }
   #endif
 
@@ -305,7 +312,7 @@ void autogradNotImplementedInplaceOrViewFallbackImpl(const c10::OperatorHandle& 
       // See NOTE [ View + Inplace detection ] for more details about this logic
       auto result = as_view(
         /* base=*/aliased_input,
-        /* tensor=*/aliased_output,
+        /* tensors=*/aliased_output,
         /* is_bw_differentiable=*/true,
         /* is_fw_differentiable=*/true,
         /* creation_meta=*/InferenceMode::is_enabled() ? CreationMeta::INFERENCE_MODE : (at::GradMode::is_enabled() ? CreationMeta::MULTI_OUTPUT_NODE : CreationMeta::NO_GRAD_MODE));
