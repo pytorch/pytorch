@@ -189,9 +189,13 @@ struct AliasDb::WriteRegistry {
   std::unordered_set<Node*> writesToAllWildcards_;
 };
 
-AliasDb::AliasDb(std::shared_ptr<Graph> graph, bool isFrozen)
+AliasDb::AliasDb(
+    std::shared_ptr<Graph> graph,
+    bool isFrozen,
+    bool enablePreciseTupleContainerAnalysis)
     : graph_(std::move(graph)),
       isFrozen_(isFrozen),
+      enablePreciseTupleContainerAnalysis_(enablePreciseTupleContainerAnalysis),
       memoryDAGBuilder_(std::make_unique<MemoryDAGBuilder>()),
       writeRegistry_(std::make_unique<AliasDb::WriteRegistry>()) {
   analyze(graph_);
@@ -1047,6 +1051,9 @@ bool AliasDb::functionalNonEscapingListUse(const Use& use) const {
 }
 
 bool AliasDb::functionalNonEscapingTupleUse(const Use& use) const {
+  if (!enablePreciseTupleContainerAnalysis_) {
+    return false;
+  }
   Node* n = use.user;
   size_t offset = use.offset;
   Value* container = n->inputs().at(offset);
@@ -1207,10 +1214,10 @@ bool AliasDb::mayAlias(const ValueSet& a, const ValueSet& b) const {
 }
 
 bool AliasDb::mayContainAlias(Value* a, Value* b) const {
-  const std::vector<Value*> a_vec = {a};
-  const std::vector<Value*> b_vec = {b};
-
-  return mayContainAlias(a_vec, b_vec);
+  if (!isMutableTypeInternal(a) || !isMutableTypeInternal(b)) {
+    return false;
+  }
+  return memoryDAG_->mayContainAlias(elementMap_.at(a), elementMap_.at(b));
 }
 
 std::vector<Element*> AliasDb::getElements(at::ArrayRef<Value*> vs) const {
