@@ -351,6 +351,23 @@ void fixupMissingShapeInfo(const std::shared_ptr<Graph>& graph) {
   }
 }
 
+std::shared_ptr<Graph> removeGraphOutput(
+    const std::shared_ptr<Graph>& graph,
+    size_t idx) {
+  graph->eraseOutput(idx);
+  return graph;
+}
+
+std::shared_ptr<Graph> replaceListOutputWithTuple(
+    const std::shared_ptr<Graph>& graph) {
+  auto out = graph->outputs()[0];
+  auto out_node = out->node();
+  auto tuple_node = graph->createTuple(out_node->inputs());
+  tuple_node->insertAfter(out_node);
+  out->replaceAllUsesWith(tuple_node->output());
+  return graph;
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
