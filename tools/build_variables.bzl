@@ -959,6 +959,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/CrossKernel.cpp",
     "aten/src/ATen/native/cpu/DepthwiseConvKernel.cpp",
     "aten/src/ATen/native/cpu/DistanceOpsKernel.cpp",
+    "aten/src/ATen/native/cpu/DistributionKernels.cpp",
     "aten/src/ATen/native/cpu/FillKernel.cpp",
     "aten/src/ATen/native/cpu/FunctionOfAMatrixUtilsKernel.cpp",
     "aten/src/ATen/native/cpu/GridSamplerKernel.cpp",
