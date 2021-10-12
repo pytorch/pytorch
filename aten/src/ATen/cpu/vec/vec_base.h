@@ -741,12 +741,12 @@ static inline Vectorized<T> bitwise_binary_op(const Vectorized<T> &a, const Vect
   __at_align__ intmax_t buffer[element_no];
   // We should be using memcpy (through .store) in order to respect the strict aliasing rule
   // see: https://github.com/pytorch/pytorch/issues/66119
-  std::array<intmax_t, element_no> a_arr;
-  std::array<intmax_t, element_no> b_arr;
-  a.store(&a_arr);
-  b.store(&b_arr);
   for (uint32_t i = 0U; i < element_no; ++ i) {
-    buffer[i] = op(a_arr[i], b_arr[i]);
+    intmax_t a_val;
+    intmax_t b_val;
+    std::memcpy(&a_val, &a, sizeof(intmax_t));
+    std::memcpy(&b_val, &b, sizeof(intmax_t));
+    buffer[i] = op(a_val, b_val);
   }
   return Vectorized<T>::loadu(buffer);
 }
