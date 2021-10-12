@@ -75,6 +75,10 @@ const c10::FunctionSchema& GraphFunction::getSchema() const {
 }
 
 GraphFunction::SpecializationKey GraphFunction::currentSpecialization() const {
+#ifdef C10_MOBILE
+  // disabling autodiff pass for mobile build since autocast APIs don't exist
+  return SpecializationKey::AutocastOff;
+#else
   bool cpu_enabled = at::autocast::is_cpu_enabled();
   bool gpu_enabled = at::autocast::is_enabled();
   if (cpu_enabled && gpu_enabled) {
@@ -85,6 +89,7 @@ GraphFunction::SpecializationKey GraphFunction::currentSpecialization() const {
     return gpu_enabled ? SpecializationKey::GpuAutocastOn
                        : SpecializationKey::CpuAutocastOn;
   }
+#endif
 }
 
 void preoptimizeGraph(std::shared_ptr<Graph>& graph) {
