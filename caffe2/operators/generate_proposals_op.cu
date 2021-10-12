@@ -1,10 +1,11 @@
-#include <ATen/cuda/cub.cuh>
+#include <cub/cub.cuh>
 #include "caffe2/core/context.h"
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/generate_proposals_op.h"
 #include "caffe2/operators/generate_proposals_op_util_boxes.h" // BBOX_XFORM_CLIP_DEFAULT
 #include "caffe2/operators/generate_proposals_op_util_nms.h"
 #include "caffe2/operators/generate_proposals_op_util_nms_gpu.h"
+#include "caffe2/utils/cub_namespace.cuh"
 
 #if defined(USE_ROCM)
 #include <cfloat>

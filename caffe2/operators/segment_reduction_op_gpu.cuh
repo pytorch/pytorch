@@ -1,4 +1,4 @@
-#include <ATen/cuda/cub.cuh>
+#include "caffe2/utils/cub_namespace.cuh"
 #include <cub/block/block_reduce.cuh>
 #include <cub/device/device_reduce.cuh>
 #include <cub/device/device_scan.cuh>

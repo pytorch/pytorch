@@ -15,11 +15,14 @@
 
 #undef CUB_NS_POSTFIX //undef to avoid redefinition warnings
 #undef CUB_NS_PREFIX
+#undef CUB_NS_QUALIFIER
 #define CUB_NS_PREFIX namespace at_cuda_detail {
 #define CUB_NS_POSTFIX }
 #define CUB_NS_QUALIFIER ::at_cuda_detail::cub
 #include <cub/cub.cuh>
-
+#undef CUB_NS_POSTFIX
+#undef CUB_NS_PREFIX
+#undef CUB_NS_QUALIFIER
 #endif
 
 #include <ATen/cuda/Exceptions.h>
@@ -69,9 +72,6 @@ template <> struct cub::NumericTraits<c10::BFloat16>: cub::BaseTraits<cub::FLOAT
 namespace at { namespace native {
 namespace cub = ::at_cuda_detail::cub;
 }}
-namespace caffe2 {
-namespace cub = ::at_cuda_detail::cub;
-}
 #endif
 
 namespace at {

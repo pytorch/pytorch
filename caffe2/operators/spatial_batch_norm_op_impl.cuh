@@ -5,7 +5,7 @@
 
 #include <limits>
 
-#include <ATen/cuda/cub.cuh>
+#include "caffe2/utils/cub_namespace.cuh"
 #include <cub/block/block_reduce.cuh>
 
 #include "caffe2/core/context_gpu.h"

@@ -5,8 +5,7 @@
 #include <limits>
 #include <numeric>
 #include <vector>
-
-#include <ATen/cuda/cub.cuh>
+#include "caffe2/utils/cub_namespace.cuh"
 #include <cub/block/block_reduce.cuh>
 
 #include <thrust/execution_policy.h>
