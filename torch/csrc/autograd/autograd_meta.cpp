@@ -145,13 +145,7 @@ void AutogradMeta::set_fw_grad(const at::TensorBase& new_grad_base, const at::Te
             // can be re-used.
             new_base_fw_grad = new_grad;
           } else {
-            auto sizes = base.sizes();
-            auto strides = base.strides();
-            auto storage_offset = base.storage_offset();
-            // Explicit type to appease window build
-            int64_t nelement_in_storage = base.storage().nbytes() / base.itemsize();
-            // TODO: GradcheckError: test_forward_mode_AD_block_diag_cpu_float64
-            new_base_fw_grad = at::_new_with_same_meta(new_grad, sizes, strides, storage_offset, nelement_in_storage);
+            new_base_fw_grad = at::_new_zeros_with_same_meta(new_grad, base);
 
             // Update new_grad to be a view of the base
             Tensor new_fw_grad_value;
@@ -177,12 +171,7 @@ void AutogradMeta::set_fw_grad(const at::TensorBase& new_grad_base, const at::Te
         TORCH_INTERNAL_ASSERT(!this_view_meta->has_fw_view(),
             "Expected the output of forward differentiable view operations to have the tangent have the same layout as primal")
       }
-      auto sizes = self.sizes();
-      auto strides = self.strides();
-      auto storage_offset = self.storage_offset();
-      // Explicit type to appease window build
-      int64_t nelement_in_storage = self.storage().nbytes() / self.itemsize();
-      auto res = at::_new_with_same_meta(new_grad, sizes, strides, storage_offset, nelement_in_storage);
+      auto res = at::_new_zeros_with_same_meta(new_grad, self);
       res.copy_(new_grad);
       new_grad = res;
     }

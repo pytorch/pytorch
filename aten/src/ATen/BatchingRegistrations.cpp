@@ -540,12 +540,15 @@ static void checkBasicAsStridedValidForSlice(
       "rewrite the `as_strided` call as a sequence of PyTorch view operations");
 }
 
-Tensor _new_with_same_meta_batching_rule(
+Tensor _new_zeros_with_same_meta_batching_rule(
     const Tensor& self,
-    IntArrayRef sizes,
-    IntArrayRef strides,
-    int64_t storage_offset,
-    int64_t nelement_in_storage) {
+    const Tensor& other) {
+  auto sizes = other.sizes();
+  auto strides = other.strides();
+  auto storage_offset = other.storage_offset();
+  // Explicit type to appease window build
+  int64_t storage_numel = other.storage().nbytes() / other.itemsize();
+
   auto self_physical_view = at::MultiBatchVmapTransform::logicalToPhysical(self);
   auto num_batch_dims = self_physical_view.numBatchDims();
   auto new_physical_sizes = self_physical_view.getPhysicalShape(sizes);
@@ -558,15 +561,15 @@ Tensor _new_with_same_meta_batching_rule(
   at::VmapDimVector new_physical_strides;
   new_physical_strides.reserve(num_batch_dims + strides.size());
 
-  int64_t prod = nelement_in_storage;
+  int64_t prod = storage_numel;
   for (size_t i = 0; i < num_batch_dims; ++i) {
     new_physical_strides.insert(new_physical_strides.begin(), prod);
     prod *= self_physical_strides[i];
   }
-  const int64_t new_nelement_in_storage = prod;
+  const int64_t new_storage_numel = prod;
   new_physical_strides.insert(new_physical_strides.end(), strides.begin(), strides.end());
 
-  auto result = at::_new_with_same_meta(self_physical_tensor, new_physical_sizes, new_physical_strides, storage_offset, new_nelement_in_storage);
+  auto result = at::_new_zeros_with_meta(self_physical_tensor, new_physical_sizes, new_physical_strides, storage_offset, new_storage_numel);
   return self_physical_view.getPhysicalToLogicalMap().apply(result);
 }
 
@@ -1057,7 +1060,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("_remove_batch_dim", native::_remove_batch_dim);
   m.impl("_make_dual", native::_make_dual);
   m.impl("is_same_size", native::is_same_size);
-  m.impl("_new_with_same_meta", _new_with_same_meta_batching_rule);
+  m.impl("_new_zeros_with_same_meta", _new_zeros_with_same_meta_batching_rule);
 
   m.impl("sum.dim_IntList", sum_batching_rule);
   m.impl("is_complex", native::is_complex);
