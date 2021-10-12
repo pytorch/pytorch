@@ -3,7 +3,7 @@
 #include <c10/test/util/complex_test_common.h>
 
 __global__ void test_thrust_kernel() {
-  // thrust conversion
+  // libcudacxx conversion
   {
   constexpr float num1 = float(1.23);
   constexpr float num2 = float(4.56);
@@ -16,8 +16,8 @@ __global__ void test_thrust_kernel() {
   assert(c10::complex<double>(thrust::complex<double>(num1, num2)).real() == num1);
   assert(c10::complex<double>(thrust::complex<double>(num1, num2)).imag() == num2);
   }
-  // thrust assignment
-  auto tup = assignment::one_two_thrust();
+  // thrust/libcudacxx assignment
+  auto tup = assignment::one_two_thrust_libcudacxx();
   assert(std::get<c10::complex<double>>(tup).real() == double(1));
   assert(std::get<c10::complex<double>>(tup).imag() == double(2));
   assert(std::get<c10::complex<float>>(tup).real() == float(1));

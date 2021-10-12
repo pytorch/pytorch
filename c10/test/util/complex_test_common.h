@@ -63,9 +63,9 @@ TEST(TestMemory, ReinterpretCast) {
 }
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
-TEST(TestMemory, ThrustReinterpretCast) {
+TEST(TestMemory, ThrustOrLibcudacxxReinterpretCast) {
   {
-    thrust::complex<float> z(1, 2);
+    IMPL_NAMESPACE()::complex<float> z(1, 2);
     c10::complex<float> zz = *reinterpret_cast<c10::complex<float>*>(&z);
     ASSERT_EQ(zz.real(), float(1));
     ASSERT_EQ(zz.imag(), float(2));
@@ -73,13 +73,13 @@ TEST(TestMemory, ThrustReinterpretCast) {
 
   {
     c10::complex<float> z(3, 4);
-    thrust::complex<float> zz = *reinterpret_cast<thrust::complex<float>*>(&z);
+    IMPL_NAMESPACE()::complex<float> zz = *reinterpret_cast<IMPL_NAMESPACE()::complex<float>*>(&z);
     ASSERT_EQ(zz.real(), float(3));
     ASSERT_EQ(zz.imag(), float(4));
   }
 
   {
-    thrust::complex<double> z(1, 2);
+    IMPL_NAMESPACE()::complex<double> z(1, 2);
     c10::complex<double> zz = *reinterpret_cast<c10::complex<double>*>(&z);
     ASSERT_EQ(zz.real(), double(1));
     ASSERT_EQ(zz.imag(), double(2));
@@ -87,8 +87,8 @@ TEST(TestMemory, ThrustReinterpretCast) {
 
   {
     c10::complex<double> z(3, 4);
-    thrust::complex<double> zz =
-        *reinterpret_cast<thrust::complex<double>*>(&z);
+    IMPL_NAMESPACE()::complex<double> zz =
+        *reinterpret_cast<IMPL_NAMESPACE()::complex<double>*>(&z);
     ASSERT_EQ(zz.real(), double(3));
     ASSERT_EQ(zz.imag(), double(4));
   }
@@ -180,20 +180,20 @@ MAYBE_GLOBAL void test_std_conversion() {
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
 template <typename scalar_t>
-void test_construct_from_thrust() {
+void test_construct_from_thrust_libcudacxx() {
   constexpr scalar_t num1 = scalar_t(1.23);
   constexpr scalar_t num2 = scalar_t(4.56);
   ASSERT_EQ(
-      c10::complex<scalar_t>(thrust::complex<scalar_t>(num1, num2)).real(),
+      c10::complex<scalar_t>(IMPL_NAMESPACE()::complex<scalar_t>(num1, num2)).real(),
       num1);
   ASSERT_EQ(
-      c10::complex<scalar_t>(thrust::complex<scalar_t>(num1, num2)).imag(),
+      c10::complex<scalar_t>(IMPL_NAMESPACE()::complex<scalar_t>(num1, num2)).imag(),
       num2);
 }
 
 TEST(TestConstructors, FromThrust) {
-  test_construct_from_thrust<float>();
-  test_construct_from_thrust<double>();
+  test_construct_from_thrust_libcudacxx<float>();
+  test_construct_from_thrust_libcudacxx<double>();
 }
 #endif
 
@@ -265,8 +265,8 @@ MAYBE_GLOBAL void test_assign_std() {
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
 C10_HOST_DEVICE std::tuple<c10::complex<double>, c10::complex<float>>
-one_two_thrust() {
-  thrust::complex<float> src(1, 2);
+one_two_thrust_libcudacxx() {
+  IMPL_NAMESPACE()::complex<float> src(1, 2);
   c10::complex<double> ret0;
   c10::complex<float> ret1;
   ret0 = ret1 = src;
@@ -274,7 +274,7 @@ one_two_thrust() {
 }
 
 TEST(TestAssignment, FromThrust) {
-  auto tup = one_two_thrust();
+  auto tup = one_two_thrust_libcudacxx();
   ASSERT_EQ(std::get<c10::complex<double>>(tup).real(), double(1));
   ASSERT_EQ(std::get<c10::complex<double>>(tup).imag(), double(2));
   ASSERT_EQ(std::get<c10::complex<float>>(tup).real(), float(1));

@@ -41,10 +41,10 @@ namespace c10 {
 // Reference: https://en.cppreference.com/w/cpp/numeric/complex
 //
 // [NOTE: Complex Operator Unification]
-// Operators currently use a mix of std::complex, thrust::complex, and
-// c10::complex internally. The end state is that all operators will use
-// c10::complex internally.  Until then, there may be some hacks to support all
-// variants.
+// Operators currently use a mix of std::complex, thrust::complex,
+// and cuda::std::complex, and c10::complex internally. The end
+// state is that all operators will use c10::complex internally.
+// Until then, there may be some hacks to support all variants.
 //
 //
 // [Note on Constructors]
@@ -66,7 +66,7 @@ namespace c10 {
 //   while we define converting constructor between float/double.
 // - For these converting constructors, upcasting is implicit, downcasting is
 //   explicit.
-// - We also define explicit casting from std::complex/thrust::complex
+// - We also define explicit casting from std::complex/thrust::complex/cuda::std::complex
 //   - Note that the conversion from thrust is not constexpr, because
 //     thrust does not define them as constexpr ????
 //
@@ -91,13 +91,13 @@ namespace c10 {
 //     convertible is solely dependent on whether the scalar type is convertible
 //
 // In addition to the standard assignment, we also provide assignment operators
-// with std and thrust
+// with std, cuda::std and thrust
 //
 //
 // [Casting operators]
 //
 // std::complex does not have casting operators. We define casting operators
-// casting to std::complex and thrust::complex
+// casting to std::complex, cuda::std::complex and thrust::complex
 //
 //
 // [Operator ""]
