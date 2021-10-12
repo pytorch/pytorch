@@ -59,7 +59,7 @@ static bool writeDeployInterpreter(FILE* dst) {
 
 InterpreterManager::InterpreterManager(
     size_t nInterp,
-    const std::string& pylibRoot)
+    const c10::optional<std::string>& pythonPath)
     : resources_(nInterp) {
   TORCH_DEPLOY_TRY
   for (const auto i : c10::irange(nInterp)) {
@@ -79,8 +79,8 @@ InterpreterManager::InterpreterManager(
           }
         });
 
-    if (pylibRoot.size() > 0) {
-      I.global("sys", "path").attr("append")({pylibRoot});
+    if (pythonPath) {
+      I.global("sys", "path").attr("append")({pythonPath.value()});
     }
   }
 

@@ -5,7 +5,7 @@
 #include <torch/csrc/deploy/deploy.h>
 
 DEFINE_string(
-    pylib_root,
+    python_path,
     "",
     "The root of the installed python libraries in the system");
 DEFINE_string(pyscript, "", "The path of the python script to execute");
@@ -14,12 +14,12 @@ DEFINE_string(pyscript, "", "The path of the python script to execute");
 int main(int argc, char** argv) {
   gflags::ParseCommandLineFlags(&argc, &argv, true);
 
-  if (FLAGS_pylib_root.size() > 0) {
-    LOG(INFO) << "Will add " << FLAGS_pylib_root << " to python sys.path";
+  if (FLAGS_python_path.size() > 0) {
+    LOG(INFO) << "Will add " << FLAGS_python_path << " to python sys.path";
   }
   // create multiple interpreter instances so the tool does not just cover the
   // simplest case with a single interpreter instance.
-  torch::deploy::InterpreterManager m(2, FLAGS_pylib_root);
+  torch::deploy::InterpreterManager m(2, FLAGS_python_path);
   auto I = m.acquireOne();
 
   if (FLAGS_pyscript.size() > 0) {

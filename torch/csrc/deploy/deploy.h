@@ -1,5 +1,6 @@
 #pragma once
 #include <c10/util/irange.h>
+#include <c10/util/Optional.h>
 #include <torch/csrc/api/include/torch/imethod.h>
 #include <torch/csrc/deploy/interpreter/interpreter_impl.h>
 #include <torch/csrc/jit/serialization/import.h>
@@ -110,7 +111,7 @@ struct TORCH_API LoadBalancer {
 struct TORCH_API InterpreterManager {
   explicit InterpreterManager(
       size_t nInterp = 2,
-      const std::string& pylibRoot = "");
+      const c10::optional<std::string>& pythonPath = c10::nullopt);
 
   // get a free model, guarenteed that no other user of acquireOne has the same
   // model. It _is_ possible that other users will be using the interpreter.
