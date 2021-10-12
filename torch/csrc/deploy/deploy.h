@@ -108,7 +108,9 @@ struct TORCH_API LoadBalancer {
 };
 
 struct TORCH_API InterpreterManager {
-  explicit InterpreterManager(size_t nInterp = 2);
+  explicit InterpreterManager(
+      size_t nInterp = 2,
+      const std::string& pylibRoot = "");
 
   // get a free model, guarenteed that no other user of acquireOne has the same
   // model. It _is_ possible that other users will be using the interpreter.
