@@ -185,7 +185,7 @@ struct PeepholeOptimizeNonTensorImpl {
         // losing anything by calling unshapedType here
         auto input_type = unshapedType(node->input()->type());
         auto output_type = unshapedType(node->output()->type());
-        if (input_type->isSubtypeOf(output_type)) {
+        if (input_type->isSubtypeOf(*output_type)) {
           GRAPH_UPDATE(
               "Removing ",
               getHeader(node),
