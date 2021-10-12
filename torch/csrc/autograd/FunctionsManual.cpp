@@ -2514,6 +2514,32 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> linalg_lstsq_jvp(
   );
 }
 
+std::tuple<Tensor, Tensor> linalg_lstsq_backward(
+  const Tensor& grad,
+  const Tensor& A,
+  const Tensor& B,
+  c10::optional<double> rcond,
+  c10::optional<c10::string_view> driver
+) {
+  Tensor A_grad, B_grad;
+  if (!grad.defined()) {
+    return std::make_tuple(A_grad, B_grad);
+  }
+
+  if (A.requires_grad()) {
+    auto pinvA = at::linalg_pinv(A);
+    auto pinvA_grad = grad.matmul(B.transpose(-1, -2).conj());
+    A_grad = pinv_backward(pinvA_grad, pinvA, A);
+  }
+
+  if (B.requires_grad()) {
+    B_grad = std::get<0>(at::linalg_lstsq(A.transpose(-1, -2).conj(), grad, rcond, driver));
+  }
+
+  return std::make_tuple(A_grad, B_grad);
+}
+
+
 // jvp functions for eigenvalues and eigenvectors are separate
 // because currently forward AD only works with one rule per output
 Tensor eigh_jvp_eigenvalues(
@@ -4057,31 +4083,6 @@ Tensor gather_with_keepdimed_indices(const Tensor& input, int64_t dim, const Ten
   }
 
   return out_fw_grad;
-}
-
-std::tuple<Tensor, Tensor> linalg_lstsq_backward(
-  const Tensor& grad,
-  const Tensor& A,
-  const Tensor& B,
-  c10::optional<double> rcond,
-  c10::optional<c10::string_view> driver
-) {
-  Tensor A_grad, B_grad;
-  if (!grad.defined()) {
-    return std::make_tuple(A_grad, B_grad);
-  }
-
-  if (A.requires_grad()) {
-    auto pinvA = at::linalg_pinv(A);
-    auto pinvA_grad = grad.matmul(B.transpose(-1, -2).conj());
-    A_grad = pinv_backward(pinvA_grad, pinvA, A);
-  }
-
-  if (B.requires_grad()) {
-    B_grad = std::get<0>(at::linalg_lstsq(A.transpose(-1, -2).conj(), grad, rcond, driver));
-  }
-
-  return std::make_tuple(A_grad, B_grad);
 }
 
 // Let X in \C^{m \times n}, then its pivoted LU decomposition is
