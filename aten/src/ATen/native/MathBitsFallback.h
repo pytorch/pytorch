@@ -79,8 +79,8 @@ struct MathOpFallback {
       return;
     }
 
-    // Mutable inputs with math bit set to True to be tracked separately
-    std::vector<std::pair<int, Tensor>> mutable_inputs;
+    // Mutable inputs with math bit set to True
+    std::vector<Tensor> mutable_inputs;
     for (const auto i : c10::irange(num_arguments)) {
       auto& ivalue = (*stack)[stack_start + i];
       if (!(ivalue.isTensor() || ivalue.isTensorList())) {
@@ -99,20 +99,21 @@ struct MathOpFallback {
         }
         auto tensor = std::move(ivalue).toTensor();
         TORCH_CHECK_NOT_IMPLEMENTED(!tensor.is_meta(), op_name, " fallback does not support meta tensors.");
+        auto resolved_tensor = at::clone(tensor);
         if (mut_arg) {
-          mutable_inputs.emplace_back(std::make_pair(i, tensor));
+          TORCH_CHECK(mutable_inputs.empty(), op_name, " fallback does not support operators with more than one mutable tensors with ",
+             op_name, "bit set to true.");
+          mutable_inputs.emplace_back(tensor);
         } 
-        tensor = at::clone(tensor);
-        (*stack)[stack_start + i] = std::move(tensor);
+        (*stack)[stack_start + i] = std::move(resolved_tensor);
       } else if (ivalue.isTensorList()) {
         auto tensors = std::move(ivalue).toTensorList();
-        bool not_a_mut_arg = !mut_arg;
         for(const auto j : c10::irange(tensors.size())) {
           const auto& tensor = tensors[j];
           if (!is_bit_set(tensor)) {
             continue;
           }
-          TORCH_CHECK(not_a_mut_arg, " fallback doesn't currently support mutable TensorLists with ",
+          TORCH_CHECK(!mut_arg, " fallback doesn't currently support mutable TensorLists with ",
               op_name, " inputs. Please materialize all the ", op_name, " input tensor(s) in the mutable TensorList inputs before calling ", op.schema().name());
           tensors[j] = at::clone(tensor);
         }
@@ -122,14 +123,14 @@ struct MathOpFallback {
 
     op.redispatchBoxed(dispatch_keys & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, key), stack);
 
-    for (std::pair<int, Tensor> &index_and_mutable_input : mutable_inputs) {
-      int i = index_and_mutable_input.first;
-      auto& mut_arg = index_and_mutable_input.second;
-      auto& ivalue = (*stack)[stack_start + i];
-      auto tensor = std::move(ivalue).toTensor();
-      at::native::resize_output(mut_arg, tensor.sizes());
-      mut_arg.copy_(tensor);  
-      (*stack)[stack_start + i] = std::move(mut_arg);
+    for (auto& tensor : mutable_inputs) {
+      TORCH_INTERNAL_ASSERT(mutable_inputs.size() == 1)
+      auto& ivalue = (*stack)[stack_start];
+      auto cloned_tensor = std::move(ivalue).toTensor();
+      // necessary for out= arg
+      at::native::resize_output(tensor, cloned_tensor.sizes());
+      tensor.copy_(cloned_tensor);  
+      (*stack)[stack_start] = std::move(tensor);
     }
   }
 
