@@ -11,7 +11,7 @@ from typing import List, Sequence, Tuple
 from tools.codegen.api.autograd import (Derivative, DifferentiabilityInfo,
                                         SavedAttribute, uses_retain_variables,
                                         uses_single_grad)
-from tools.codegen.api.types import (Binding, BaseCType, OptionalCType, tensorT, intT,
+from tools.codegen.api.types import (Binding, BaseCType, OptionalCType, tensorT, longT,
                                      doubleT, scalarT, stringT, boolT, intArrayRefT,
                                      tensorListT, MutRefCType, ListCType, ArrayRefCType)
 from tools.codegen.code_template import CodeTemplate
@@ -276,7 +276,7 @@ if (prop.isComplex()) {
 """
 
 MISC_GETTER_DEFS = {
-    OptionalCType(BaseCType(intT)): (GETTER_DEFINITION_OPT, GETTER_BODY_INT64_T),
+    OptionalCType(BaseCType(longT)): (GETTER_DEFINITION_OPT, GETTER_BODY_INT64_T),
     BaseCType(doubleT): (GETTER_DEFINITION, GETTER_BODY_DOUBLE),
     OptionalCType(BaseCType(doubleT)): (GETTER_DEFINITION_OPT, GETTER_BODY_DOUBLE),
     BaseCType(boolT): (GETTER_DEFINITION, GETTER_BODY_BOOL),
@@ -430,7 +430,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             saved_variables.append(f'c10::OptionalArray<double> {name};')
             getter_definitions.append(GETTER_DEFINITION_OPT_ARRAYREF.substitute(
                 op=info.op, name=name, body=GETTER_BODY_ARRAYREF_DOUBLE))
-        elif type == BaseCType(intT):
+        elif type == BaseCType(longT):
             saved_variables.append(f'{type.cpp_type()} {name} = 0;')
             getter_definitions.append(GETTER_DEFINITION.substitute(
                 op=info.op, name=name, body=GETTER_BODY_INT64_T))
