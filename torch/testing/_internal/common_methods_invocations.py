@@ -3816,8 +3816,6 @@ def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False, **kw
     out = []
     for batch in ((), (3,), (3, 3)):
         shape = batch + (3, 3)
-        # NOTE: inputs are not marked with `requires_grad` since
-        # linalg_lstsq is not differentiable
         a = random_well_conditioned_matrix(*shape, dtype=dtype, device=device)
         a.requires_grad_(requires_grad)
         b = make_tensor(shape, device, dtype, low=None, high=None, requires_grad=requires_grad)
@@ -7542,8 +7540,11 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            supports_out=True,
            sample_inputs_func=sample_inputs_linalg_lstsq,
+           check_batched_grad=False,
+           check_batched_gradgrad=False,
            supports_autograd=True,
            supports_forward_ad=True,
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
     OpInfo('linalg.matrix_power',
            aliases=('matrix_power',),

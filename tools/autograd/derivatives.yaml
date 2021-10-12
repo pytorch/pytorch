@@ -872,6 +872,10 @@
 
 - name: linalg_lstsq(Tensor self, Tensor b, float? rcond=None, *, str? driver=None) -> (Tensor solution, Tensor residuals, Tensor rank, Tensor singular_values)
   self, b: linalg_lstsq_backward(grad, self, b, rcond, driver)
+  solution: "std::get<0>(linalg_lstsq_jvp(self_p, b_p, self_t, b_t, residuals, rank, singular_values))"
+  residuals: "std::get<1>(linalg_lstsq_jvp(self_p, b_p, self_t, b_t, residuals, rank, singular_values))"
+  rank: "std::get<2>(linalg_lstsq_jvp(self_p, b_p, self_t, b_t, residuals, rank, singular_values))"
+  singular_values: "std::get<3>(linalg_lstsq_jvp(self_p, b_p, self_t, b_t, residuals, rank, singular_values))"
   output_differentiability: [True, False, False, False]
 
 - name: lt_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)

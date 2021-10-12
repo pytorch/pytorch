@@ -2494,6 +2494,26 @@ Tensor linalg_eig_backward(const std::vector<torch::autograd::Variable> &grads,
   }
 }
 
+std::tuple<Tensor, Tensor, Tensor, Tensor> linalg_lstsq_jvp(
+  const Tensor& A,
+  const Tensor& B,
+  const Tensor& dA,
+  const Tensor& dB,
+  const Tensor& residuals,
+  const Tensor& rank,
+  const Tensor& singular_values
+) {
+  auto pinvA = at::linalg_pinv(A);
+  auto dpinvA = pinv_jvp(A, pinvA, dA);
+  auto dX = dpinvA.matmul(B) + pinvA.matmul(dB);
+  return std::make_tuple(
+    dX,
+    at::zeros_like(residuals),
+    at::zeros_like(rank),
+    at::zeros_like(singular_values)
+  );
+}
+
 // jvp functions for eigenvalues and eigenvectors are separate
 // because currently forward AD only works with one rule per output
 Tensor eigh_jvp_eigenvalues(
@@ -4051,7 +4071,12 @@ std::tuple<Tensor, Tensor> linalg_lstsq_backward(
     return std::make_tuple(A_grad, B_grad);
   }
 
-  A_grad = at::zeros_like(A);
+  if (A.requires_grad()) {
+    auto pinvA = at::linalg_pinv(A);
+    auto pinvA_grad = grad.matmul(B.transpose(-1, -2).conj());
+    A_grad = pinv_backward(pinvA_grad, pinvA, A);
+  }
+
   if (B.requires_grad()) {
     B_grad = std::get<0>(at::linalg_lstsq(A.transpose(-1, -2).conj(), grad, rcond, driver));
   }
