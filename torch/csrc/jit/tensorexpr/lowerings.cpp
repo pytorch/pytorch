@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/frontend/function_schema_parser.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/lowerings.h>
 #include <torch/csrc/jit/tensorexpr/operators/operators.h>
@@ -6,18 +7,25 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-std::unordered_map<std::string, NNCLoweringFunction>& getNNCLoweringRegistry() {
-  static std::unordered_map<std::string, NNCLoweringFunction>
-      lowering_registry_;
+FunctionSchemaMap<NNCLoweringFunction>& getNNCLoweringRegistry() {
+  static FunctionSchemaMap<NNCLoweringFunction> lowering_registry_;
   return lowering_registry_;
 }
 
-NNCLoweringFunction getStandardLoweringFor(const std::string& op) {
+NNCLoweringFunction getStandardLoweringFor(const std::string& schema_str) {
   const auto& lowerings = getNNCLoweringRegistry();
-  if (lowerings.count(op)) {
-    return lowerings.at(op);
+  if (auto l = lowerings.find(parseSchema(schema_str))) {
+    return *l;
   }
   return nullptr;
+}
+
+RegisterNNCLoweringsFunction::RegisterNNCLoweringsFunction(
+    const std::vector<std::string>& schemas,
+    NNCLoweringFunction fn) {
+  for (const auto& schema_str : schemas) {
+    getNNCLoweringRegistry().insert(parseSchema(schema_str), fn);
+  }
 }
 
 namespace {
@@ -26,14 +34,14 @@ RegisterNNCLoweringsFunction aten_dropout(
     computeNoop);
 
 // TODO: convert to schema, add a test
-RegisterNNCLoweringsFunction prepacked_conv2d_clamp_run(
-    {"prepacked::conv2d_clamp_run"},
-    computePrepackedConv2dClampRun);
+// RegisterNNCLoweringsFunction prepacked_conv2d_clamp_run(
+//     {"prepacked::conv2d_clamp_run"},
+//     computePrepackedConv2dClampRun);
 
 // TODO: convert to schema, add a test
-RegisterNNCLoweringsFunction prepacked_linear_clamp_run(
-    {"prepacked::linear_clamp_run"},
-    computePrepackedLinearClampRun);
+// RegisterNNCLoweringsFunction prepacked_linear_clamp_run(
+//     {"prepacked::linear_clamp_run"},
+//     computePrepackedLinearClampRun);
 
 RegisterNNCLoweringsFunction aten_sub(
     {"aten::sub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> (Tensor)",
@@ -1270,43 +1278,44 @@ RegisterNNCLoweringsFunction aten_lgamma(
     });
 
 // TODO: convert to schema, add a test
-RegisterNNCLoweringsFunction aten_rand_like(
-    {"aten::rand_like"},
-    [](const std::vector<ArgValue>& inputs,
-       const std::vector<ExprHandle>& outputShape,
-       const c10::optional<ScalarType>& outputType,
-       at::Device device) {
-      return computeOneOperand(
-          "aten_rand_like",
-          inputs,
-          outputShape,
-          outputType,
-          [](const ExprHandle& a) {
-            return Intrinsics::make(IntrinsicsOp::kRand, a.dtype());
-          });
-    });
+// RegisterNNCLoweringsFunction aten_rand_like(
+//     {"aten::rand_like"},
+//     [](const std::vector<ArgValue>& inputs,
+//        const std::vector<ExprHandle>& outputShape,
+//        const c10::optional<ScalarType>& outputType,
+//        at::Device device) {
+//       return computeOneOperand(
+//           "aten_rand_like",
+//           inputs,
+//           outputShape,
+//           outputType,
+//           [](const ExprHandle& a) {
+//             return Intrinsics::make(IntrinsicsOp::kRand, a.dtype());
+//           });
+//     });
 
 // TODO: convert to schema, add a test
-RegisterNNCLoweringsFunction aten_slice(
-    {"aten::slice"},
-    [](const std::vector<ArgValue>& inputs,
-       const std::vector<ExprHandle>& outputShape,
-       const c10::optional<ScalarType>& outputType,
-       at::Device device) {
-      return Compute(
-          "aten_slice",
-          c10::fmap<DimArg>(outputShape),
-          [&](const std::vector<VarHandle>& axes) {
-            int64_t dim =
-                at::maybe_wrap_dim(c10::get<int64_t>(inputs[1]), axes.size());
-            ExprHandle start = constant(inputs[2]);
-            ExprHandle stride = constant(inputs[4]);
+// RegisterNNCLoweringsFunction aten_slice(
+//     {"aten::slice"},
+//     [](const std::vector<ArgValue>& inputs,
+//        const std::vector<ExprHandle>& outputShape,
+//        const c10::optional<ScalarType>& outputType,
+//        at::Device device) {
+//       return Compute(
+//           "aten_slice",
+//           c10::fmap<DimArg>(outputShape),
+//           [&](const std::vector<VarHandle>& axes) {
+//             int64_t dim =
+//                 at::maybe_wrap_dim(c10::get<int64_t>(inputs[1]),
+//                 axes.size());
+//             ExprHandle start = constant(inputs[2]);
+//             ExprHandle stride = constant(inputs[4]);
 
-            std::vector<ExprHandle> newAxes(axes.begin(), axes.end());
-            newAxes[dim] = stride * newAxes[dim] + start;
-            return tensorOrConstant(inputs[0], newAxes);
-          });
-    });
+//             std::vector<ExprHandle> newAxes(axes.begin(), axes.end());
+//             newAxes[dim] = stride * newAxes[dim] + start;
+//             return tensorOrConstant(inputs[0], newAxes);
+//           });
+//     });
 RegisterNNCLoweringsFunction aten_unsqueeze(
     {"aten::unsqueeze(Tensor(a) self, int dim) -> (Tensor(a))"},
     [](const std::vector<ArgValue>& inputs,
@@ -1389,7 +1398,7 @@ RegisterNNCLoweringsFunction aten_expand(
     computeExpand);
 
 // TODO: convert to schema, add a test
-RegisterNNCLoweringsFunction aten_flatten({"aten::flatten"}, computeReshape);
+// RegisterNNCLoweringsFunction aten_flatten({"aten::flatten"}, computeFlatten);
 RegisterNNCLoweringsFunction aten_view(
     {"aten::reshape(Tensor(a) self, int[] shape) -> (Tensor(a))",
      "aten::reshape_as(Tensor(a) self, Tensor other) -> (Tensor(a))",
