@@ -1,6 +1,7 @@
 #pragma once
 
 #if !defined(USE_ROCM)
+#include <cuda.h>
 #include <cub/version.cuh>
 #else
 #define CUB_VERSION 0
@@ -16,7 +17,9 @@
 
 // cub sort support for CUB_WRAPPED_NAMESPACE is added to cub 1.14 in:
 // https://github.com/NVIDIA/cub/pull/326
-#if CUB_VERSION >= 101400
+// CUB_WRAPPED_NAMESPACE is defined globally in cmake/Dependencies.cmake
+// starting from CUDA 11.4
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11040
 #define CUB_SUPPORTS_WRAPPED_NAMESPACE() true
 #else
 #define CUB_SUPPORTS_WRAPPED_NAMESPACE() false

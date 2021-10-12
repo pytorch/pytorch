@@ -9,7 +9,6 @@
 
 #if CUB_SUPPORTS_WRAPPED_NAMESPACE()
 
-#define CUB_WRAPPED_NAMESPACE at_cuda_detail
 #include <cub/cub.cuh>
 
 #else
@@ -71,6 +70,9 @@ template <> struct cub::NumericTraits<c10::BFloat16>: cub::BaseTraits<cub::FLOAT
 namespace at { namespace native {
 namespace cub = at_cuda_detail::cub;
 }}
+namespace caffew {
+namespace cub = at_cuda_detail::cub;
+}
 #endif
 
 namespace at {
