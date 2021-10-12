@@ -11,7 +11,7 @@
 #if defined(USE_ROCM)
 namespace rocprim {
 #else
-#if CUB_SUPPORTS_WRAPPED_NAMESPACE()
+#if USE_GLOBAL_CUB_WRAPPED_NAMESPACE()
 namespace at_cuda_detail {
 #endif
 namespace cub {
@@ -26,7 +26,7 @@ inline __host__ __device__ bool operator<(
 }
 
 } // namespace cub
-#if CUB_SUPPORTS_WRAPPED_NAMESPACE()
+#if USE_GLOBAL_CUB_WRAPPED_NAMESPACE()
 }  // namespace at_cuda_detail
 #endif
 
