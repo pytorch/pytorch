@@ -20,6 +20,7 @@
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
+#include <sstream>
 #include <stdexcept>
 
 #ifdef FBCODE_CAFFE2
@@ -58,6 +59,18 @@ bool canEnableStaticRuntime(const std::shared_ptr<torch::jit::Graph>& graph) {
     can_support = false;
   }
   return can_support;
+}
+
+std::string dumpValueSet(
+    const FastSet<const Value*>& value_set,
+    const char* set_name) {
+  std::ostringstream oss;
+  oss << set_name << ": {";
+  for (const auto* val : value_set) {
+    oss << "%" << val->debugName() << ", ";
+  }
+  oss << "}";
+  return oss.str();
 }
 
 namespace {
@@ -146,6 +159,20 @@ bool mayContainAlias(
 //  Map each value to all values that are alive at the same time.
 using LivenessMap = FastMap<const Value*, FastSet<const Value*>>;
 
+std::string dumpLivenessMap(const LivenessMap& liveness_map) {
+  std::ostringstream oss;
+  oss << "{";
+  for (const auto& p : liveness_map) {
+    oss << "{%" << p.first->debugName() << ", ";
+    for (const auto* val : p.second) {
+      oss << "%" << val->debugName() << ", ";
+    }
+    oss << "},\n";
+  }
+  oss << "}";
+  return oss.str();
+}
+
 //  The algorithm does a traversal of the execution graph
 //  while keeping track of the live values.
 LivenessMap GetLivenessMap(
@@ -189,7 +216,7 @@ LivenessMap GetLivenessMap(
     v_live_set.reserve(live_values_use_chain.size());
     for (const auto& live_v : live_values_use_chain) {
       v_live_set.insert(live_v.first);
-      liveness_map.at(live_v.first).insert(v);
+      liveness_map[live_v.first].insert(v);
     }
 
     // only add values to the live set if they
@@ -201,7 +228,7 @@ LivenessMap GetLivenessMap(
     // record the relationship between v (Value) and its uses (Node)
     for (const auto& u : v->uses()) {
       const auto* node = u.user;
-      live_values_use_chain.at(v).insert(node);
+      live_values_use_chain[v].insert(node);
       live_nodes_def_chain[node].insert(v);
     }
 
@@ -225,12 +252,13 @@ LivenessMap GetLivenessMap(
     // for all the values in the alias set,
     // we set them "alive"
     for (auto* aliased_v : refined_aliases) {
+      GRAPH_DEBUG("aliased_v: %", aliased_v->debugName());
       add_live_value_fn(aliased_v);
       for (const auto& u : aliased_v->uses()) {
         const auto* node = u.user;
-        // track deps of the aliased values is if they
+        // track deps of the aliased values as if they
         // are our own
-        live_values_use_chain.at(v).insert(node);
+        live_values_use_chain[v].insert(node);
         live_nodes_def_chain[node].insert(v);
       }
     }
@@ -239,9 +267,9 @@ LivenessMap GetLivenessMap(
   auto traverse_node_fn = [&](const Node* node,
                               std::vector<const Value*>& dead) {
     if (live_nodes_def_chain.count(node)) {
-      for (const auto* v : live_nodes_def_chain.at(node)) {
-        live_values_use_chain.at(v).erase(node);
-        if (!live_values_use_chain.at(v).size()) {
+      for (const auto* v : live_nodes_def_chain[node]) {
+        live_values_use_chain[v].erase(node);
+        if (!live_values_use_chain[v].size()) {
           dead.emplace_back(v);
         }
       }
@@ -261,9 +289,13 @@ LivenessMap GetLivenessMap(
       live_values_use_chain.erase(dead_value);
     }
   }
+  GRAPH_DEBUG("LivenessMap: ", dumpLivenessMap(liveness_map));
 
   for (const auto& v : live_values_use_chain) {
-    TORCH_CHECK(value_group.isAlwaysAlive(v.first));
+    TORCH_CHECK(
+        value_group.isAlwaysAlive(v.first),
+        v.first->debugName(),
+        "is not in the value_group.isAlwaysAlive group");
   }
 
   for (const auto* node : graph->nodes()) {
@@ -525,7 +557,6 @@ std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
   Method method = module.get_method("forward");
   auto graph = module.get_method("forward").graph();
 
-  // graph->dump();
   PrepareGraphForStaticModule(graph, opts);
 
   return std::make_pair(graph, module);
@@ -578,9 +609,12 @@ void ValueGroup::init(
       continue;
     }
     for (const auto* v : node->outputs()) {
-      if (mayContainAlias(db, {v}, output_aliases_) &&
-          !mayContainAlias(db, {v}, input_or_constant_aliases_)) {
-        output_aliases_.insert(v);
+      if (mayContainAlias(db, {v}, output_aliases_)) {
+        if (!mayContainAlias(db, {v}, input_or_constant_aliases_)) {
+          output_aliases_.insert(v);
+        } else {
+          maybe_output_aliases_.insert(v);
+        }
       }
     }
   }
@@ -705,6 +739,7 @@ StaticModule::StaticModule(
   AliasDb alias_db(
       graph_, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
   value_group_.init(graph_, alias_db);
+  GRAPH_DEBUG("ValueGroup: ", value_group_.toString());
 
   if (opts_.optimize_memory) {
     auto lm = GetLivenessMap(graph_, value_group_, alias_db);

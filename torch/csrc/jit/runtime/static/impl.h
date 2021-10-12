@@ -33,6 +33,10 @@ using FastSet = std::unordered_set<Key>;
 TORCH_API bool canEnableStaticRuntime(
     const std::shared_ptr<torch::jit::Graph>& graph);
 
+TORCH_API std::string dumpValueSet(
+    const FastSet<const Value*>& value_set,
+    const char* set_name = "");
+
 // Group values used by `graph` into three categories:
 //
 // - input_or_constant_aliases:
@@ -41,9 +45,11 @@ TORCH_API bool canEnableStaticRuntime(
 // - output_aliases:
 //     values that are either outputs or contain aliases of outputs
 //     and are not in input_or_constant_aliases.
-// Values that dont't show up in input_or_constant_aliases and output_aliases
-// are
-//     created and consumed within the graph.
+// - maybe_output_aliases_:
+//     values that maybe aliases of output but due to inaccuracy of alias_db
+//     they can't be marked as output_aliases_
+// Values that dont't show up in input_or_constant_aliases, output_aliases
+// or maybe_output_aliases_ are created and consumed within the graph.
 class ValueGroup {
  public:
   explicit ValueGroup() = default;
@@ -59,12 +65,21 @@ class ValueGroup {
   }
 
   bool isAlwaysAlive(const Value* value) const {
-    return isInputAlias(value) || isOutputAlias(value);
+    return isInputAlias(value) || isOutputAlias(value) ||
+        maybe_output_aliases_.find(value) != maybe_output_aliases_.end();
+  }
+
+  std::string toString() const {
+    return dumpValueSet(
+               input_or_constant_aliases_, "input_or_constant_aliases_") +
+        "\n" + dumpValueSet(output_aliases_, "output_aliases_") + "\n" +
+        dumpValueSet(maybe_output_aliases_, "maybe_output_aliases_");
   }
 
  private:
   FastSet<const Value*> input_or_constant_aliases_;
   FastSet<const Value*> output_aliases_;
+  FastSet<const Value*> maybe_output_aliases_;
 };
 
 struct TORCH_API StaticModuleOptions {
