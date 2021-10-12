@@ -647,7 +647,6 @@ class TestSparseCSR(TestCase):
                     self.assertRaisesRegex(RuntimeError, f"{n}x{k + 1}.*{k}x{m}", lambda: torch.addmm(M, m1, m2))
                     self.assertRaisesRegex(RuntimeError, f"{n}x{k + 1}.*{k}x{m}", lambda: torch.mm(m1, m2))
 
-    @onlyCUDA
     @dtypes(torch.float)
     def test_addmm_errors(self, device, dtype):
         # test that the errors are the same for dense and sparse versions
@@ -687,7 +686,6 @@ class TestSparseCSR(TestCase):
                 with self.assertRaisesRegex(RuntimeError, re.escape(str(msg))):
                     test(is_sparse=True)
 
-    @onlyCUDA
     @dtypes(torch.float)
     def test_mm_errors(self, device, dtype):
         # test that the errors are the same for dense and sparse versions
