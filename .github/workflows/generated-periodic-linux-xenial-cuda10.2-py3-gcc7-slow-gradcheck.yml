@@ -269,6 +269,7 @@ jobs:
       ENABLE_BACKWARDS_COMPAT_TEST: ''
       ENABLE_XLA_TEST: ''
       ENABLE_NOARCH_TEST: ''
+      ENABLE_ORT_TEST: ''
       NUM_TEST_SHARDS: 2
       MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
       NOGPU_RUNNER_TYPE: linux.2xlarge
