@@ -164,7 +164,6 @@ class CIWorkflow:
     enable_xla_test: YamlShellBool = "''"
     enable_noarch_test: YamlShellBool = "''"
     enable_force_on_cpu_test: YamlShellBool = "''"
-    enable_ort_test: YamlShellBool = "''"
 
     def __post_init__(self) -> None:
         if self.is_libtorch:
@@ -322,7 +321,6 @@ LINUX_WORKFLOWS = [
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         num_test_shards=2,
         distributed_test=False,
-        enable_ort_test=1,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_ONNX, LABEL_CIFLOW_CPU},
         ),

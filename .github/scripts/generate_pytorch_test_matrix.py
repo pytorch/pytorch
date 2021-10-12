@@ -95,8 +95,6 @@ def main() -> None:
         configs['xla'] = {'num_shards': 1, 'runner': TEST_RUNNER_TYPE}
     if os.getenv('ENABLE_NOARCH_TEST'):
         configs['noarch'] = {'num_shards': 1, 'runner': TEST_RUNNER_TYPE}
-    if os.getenv('ENABLE_ORT_TEST'):
-        configs['ort'] = {'num_shards': 2, 'runner': TEST_RUNNER_TYPE}
     if RUN_SMOKE_TESTS:
         configs['smoke_tests'] = {'num_shards': 1, 'runner': TEST_RUNNER_TYPE}
     matrix = {
