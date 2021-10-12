@@ -272,11 +272,16 @@ class Index {
   //! However if we had TV.size[0] = 16 at "compile time" then we wouldn't need
   //! the predicate. This will be caught by canOmitPredicate in the predicate
   //! lowering
+  //!
+  //! unswitch_or_vec_loop is the for loop to start the unswitch like predicate,
+  //! this is not a bool value as if we have an unswitch loop with a vectorized
+  //! loop inside, we only want to base the "unswitch" like predicate on the
+  //! vectorized loop.
   static std::pair<std::vector<RootPredicateInfo>, ReferenceTensor>
   getReferenceRootPredicates(
       const kir::TensorView* kir_consumer_tv,
       const std::vector<kir::ForLoop*>& loops,
-      bool unswitch = false);
+      kir::ForLoop* unswitch_or_vec_loop = nullptr);
 
   // Determine if we may run into over reuse of predicates or registers in the
   // compiler. If the loop can be unrolled and the index and domain are not

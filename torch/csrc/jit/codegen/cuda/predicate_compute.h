@@ -144,6 +144,8 @@ class TORCH_CUDA_CU_API UnswitchPredicate {
   std::vector<kir::Bool*> predicates_;
 
   std::vector<kir::ForLoop*> for_loops_;
+
+  kir::ForLoop* unrolled_loop_;
 };
 
 } // namespace cuda

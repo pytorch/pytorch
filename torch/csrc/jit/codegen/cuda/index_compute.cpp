@@ -680,12 +680,14 @@ void IndexCompute::handle(Merge* merge) {
         extent_map_[outer_id] = getExtent(out_id);
         index_map_[inner_id] = zero;
         extent_map_[inner_id] = zero;
+        zero_domains_.emplace(inner_id);
       } else {
         // Prop through inner
         index_map_[inner_id] = out_ind;
         extent_map_[inner_id] = getExtent(out_id);
         index_map_[outer_id] = zero;
         extent_map_[outer_id] = zero;
+        zero_domains_.emplace(outer_id);
       }
     } else if (inner_id->isBroadcast() && !outer_id->isBroadcast()) {
       // Inner is broadcast and outer isn't, prop through outer
@@ -693,12 +695,14 @@ void IndexCompute::handle(Merge* merge) {
       extent_map_[outer_id] = getExtent(out_id);
       index_map_[inner_id] = zero;
       extent_map_[inner_id] = zero;
+      zero_domains_.emplace(inner_id);
     } else {
       // Default to propagating through inner
       index_map_[inner_id] = out_ind;
       extent_map_[inner_id] = getExtent(out_id);
       index_map_[outer_id] = zero;
       extent_map_[outer_id] = zero;
+      zero_domains_.emplace(outer_id);
     }
     zero_merged_in_.emplace(inner_id);
     zero_merged_in_.emplace(outer_id);
@@ -1632,9 +1636,9 @@ std::vector<kir::Val*> Index::getNonGlobalProducerStridedIndices(
 
   index_swizzle.run();
 
-  auto index_map = index_swizzle.indexMap();
-  auto extent_map = producer_indexing.extentMap();
-
+  const auto& index_map = index_swizzle.indexMap();
+  const auto& extent_map = producer_indexing.extentMap();
+  const auto& zero_domain_map = producer_indexing.zeroDomains();
   // Indices should now be mapped onto IterDomains in producer, so just grab
   // and use them.
   auto root_dom = producer_tv->getMaybeRFactorDomain();
@@ -1721,14 +1725,13 @@ std::vector<kir::Val*> Index::getNonGlobalProducerStridedIndices(
           " id: ",
           root_dom[i]);
 
-      auto root_ind_j = index_map.at(kir_root_dom_j);
       auto root_ext_j = extent_map.find(kir_root_dom_j) == extent_map.end()
           ? kir_root_dom_j->extent()
           : extent_map.at(kir_root_dom_j);
 
       root_ext_j = getHaloExtentOfRootAxis(root_dom[j], root_ext_j);
 
-      if (!root_ind_j->isZeroInt()) {
+      if (zero_domain_map.count(kir_root_dom_j) == 0) {
         if (stride == nullptr) {
           stride = root_ext_j;
         } else {
@@ -1989,8 +1992,9 @@ std::vector<kir::Val*> Index::getNonGlobalConsumerStridedIndices(
 
   index_swizzle.run();
 
-  auto index_map = index_swizzle.indexMap();
-  auto extent_map = consumer_indexing.extentMap();
+  const auto& index_map = index_swizzle.indexMap();
+  const auto& extent_map = consumer_indexing.extentMap();
+  const auto& zero_domain_map = consumer_indexing.zeroDomains();
 
   // Indices should now be mapped onto IterDomains in consumer, so just grab
   // and use them.
@@ -2039,14 +2043,13 @@ std::vector<kir::Val*> Index::getNonGlobalConsumerStridedIndices(
           " id: ",
           root_dom[i]);
 
-      auto root_ind_j = index_map.at(kir_root_dom_j);
       auto root_ext_j = extent_map.find(kir_root_dom_j) == extent_map.end()
           ? kir_root_dom_j->extent()
           : extent_map.at(kir_root_dom_j);
 
       root_ext_j = getHaloExtentOfRootAxis(root_dom[j], root_ext_j);
 
-      if (!root_ind_j->isZeroInt()) {
+      if (zero_domain_map.count(kir_root_dom_j) == 0) {
         if (stride == nullptr) {
           stride = root_ext_j;
         } else {
@@ -2376,7 +2379,7 @@ std::pair<std::vector<Index::RootPredicateInfo>, ReferenceTensor> Index::
     getReferenceRootPredicates(
         const kir::TensorView* kir_consumer_tv,
         const std::vector<kir::ForLoop*>& loops,
-        bool unswitch) {
+        kir::ForLoop* unswitch_or_vec_loop) {
   FUSER_PERF_SCOPE("GpuLower::Lower::Index::getReferenceRootPredicates");
 
   const auto gpu_lower = GpuLower::current();
@@ -2397,18 +2400,27 @@ std::pair<std::vector<Index::RootPredicateInfo>, ReferenceTensor> Index::
 
   // If unswitch don't directly use indices from for loop, use for loop extent
   // minus 1
-  if (unswitch) {
+  if (unswitch_or_vec_loop != nullptr) {
+    // Vectorized predicates are different from unswitch. Unswitch predicates
+    // all loops within the unswitch (the outer most unswitch) are generated
+    // with loop->extent-1 as the index. With vectorized predicates, only the
+    // vectorized loop should be like this.
+
+    bool vectorized_pred =
+        unswitch_or_vec_loop->iter_domain()->parallelType() ==
+        ParallelType::Vectorize;
+
     TORCH_INTERNAL_ASSERT(
         loops.size() <= reference_domain->nDims(),
         "Invalid reference generated.");
+
     bool within_unswitch = false;
     const auto one = ir_builder.create<kir::Int>(1);
+
     for (const auto loop_i : c10::irange(loops.size())) {
       auto loop = loops[loop_i];
       auto ref_id = reference_domain->axis(loop_i);
-      if (loop->iter_domain()->parallelType() == ParallelType::Unroll ||
-          loop->iter_domain()->parallelType() == ParallelType::Unswitch ||
-          loop->iter_domain()->parallelType() == ParallelType::Vectorize) {
+      if (loop == unswitch_or_vec_loop) {
         within_unswitch = true;
       }
 
@@ -2425,6 +2437,12 @@ std::pair<std::vector<Index::RootPredicateInfo>, ReferenceTensor> Index::
         } else {
           loop_to_ind_map[loop] = ir_builder.subExpr(loop->stop(), one);
         }
+      }
+
+      // If a vectorized predicate, bail after the vectorized loop was found.
+      // Don't continue unswitching loops.
+      if (vectorized_pred && within_unswitch) {
+        break;
       }
     }
   }

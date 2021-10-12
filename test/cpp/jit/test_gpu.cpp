@@ -12971,6 +12971,80 @@ TEST(NVFuserTest, FusionVectorizeSimple_CUDA) {
       &fusion, cg_outputs, {aten_input}, {aten_output}, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, FusionSimpleVectorizeUnroll_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+  // dimensionality of the problem
+  int nDims = 3;
+
+  // Set up your input tensor views
+  TensorView* tv0 = makeContigTensor(nDims);
+  TensorView* tv1 = makeContigTensor(nDims);
+
+  // Register your inputs
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  // Do math with it, it returns a `Val*` but can be static_casted back to
+  // TensorView
+  TensorView* tv2 = add(tv1, new Double(2.0));
+  TensorView* tv3 = add(tv0, tv2);
+
+  // Register your outputs
+  fusion.addOutput(tv3);
+
+  auto tv0_cache = tv0->cache_after();
+  auto tv1_cache = tv1->cache_after();
+  auto tv3_cache = tv3->cache_before();
+
+  // Do transformations, remember, transformations are outputs to inputs
+  // This doesn't have to be in this order
+  tv3->merge(1);
+
+  // Split by n_threads
+  tv3->split(1, 2);
+  tv3->split(0, 3);
+  tv3->split(0, 1);
+
+  // [bidx, unswitch, unroll{2}, tidx, vectorize{2}]
+
+  // Parallelize TV3
+  tv3->axis(0)->parallelize(ParallelType::BIDx);
+  tv3->axis(1)->parallelize(ParallelType::Unswitch);
+  tv3->axis(2)->parallelize(ParallelType::Unroll);
+  tv3->axis(3)->parallelize(ParallelType::TIDx);
+
+  tv3->reorder({{4, 2}});
+  // [bidx, unswitch, vectorize{2}, unroll{2}, tidx]
+
+  TransformPropagator::from(tv3);
+  scheduler_utils::parallelizeAllLike(tv3, ir_utils::allTvs(&fusion));
+
+  tv0_cache->axis(2)->parallelize(ParallelType::Vectorize);
+  tv1_cache->axis(2)->parallelize(ParallelType::Vectorize);
+  tv3->axis(2)->parallelize(ParallelType::Vectorize);
+
+  // For all inputs, computeAt the output inline, temporaries should be squeezed
+  // between them
+  tv0->computeAt(tv3, -1, ComputeAtMode::MostInlined);
+  tv1->computeAt(tv3, -1, ComputeAtMode::MostInlined);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor input1 = at::randn({64, 2, 128}, options);
+  at::Tensor input2 = at::rand_like(input1);
+  at::Tensor output = at::empty_like(input1);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  fe.runFusion({input1, input2}, {output});
+
+  at::Tensor tv2_ref = input2 + 2.0;
+  at::Tensor output_ref = input1 + tv2_ref;
+
+  TORCH_CHECK(output_ref.equal(output));
+}
+
 TEST(NVFuserTest, FusionSegmentReduceSoftmax_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());

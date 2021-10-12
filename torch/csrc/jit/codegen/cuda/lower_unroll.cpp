@@ -112,7 +112,8 @@ void UnrollPass::handle(kir::Expr* expr) {
 
     // Vectorized expressions should never use inline predicates
     kir::Predicate* pred = nullptr;
-    if (std::any_of(
+    if (!unswitched_loop_ &&
+        std::any_of(
             for_loops_.begin(), for_loops_.end(), [](const kir::ForLoop* fl) {
               return fl->iter_domain()->parallelType() ==
                   ParallelType::Vectorize;
@@ -149,8 +150,7 @@ void UnrollPass::handle(kir::ForLoop* fl) {
   // Setup for loop scoping
   const bool is_unroll =
       fl->iter_domain()->parallelType() == ParallelType::Unroll ||
-      fl->iter_domain()->parallelType() == ParallelType::Unswitch ||
-      fl->iter_domain()->parallelType() == ParallelType::Vectorize;
+      fl->iter_domain()->parallelType() == ParallelType::Unswitch;
 
   // If we're not looking for an unroll loop, or didn't find one, process as
   // normal.
@@ -188,10 +188,6 @@ void UnrollPass::handle(kir::ForLoop* fl) {
   look_for_unroll_ = true;
 
   unroll_ite->thenBody().push_back(unrolled_loop_nest);
-  if (fl->iter_domain()->parallelType() == ParallelType::Vectorize) {
-    expr_replacement_map_.insert({fl, unroll_ite});
-    return;
-  }
 
   // Loop nest for inlined path
   kir::ForLoop* inlined_loop = cloneLoopNest(fl);

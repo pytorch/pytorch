@@ -425,7 +425,7 @@ void UnswitchPredicate::predicateOn(kir::Expr* tv_expr) {
   }
 
   auto ref_pred_info =
-      Index::getReferenceRootPredicates(out_tv, for_loops_, true);
+      Index::getReferenceRootPredicates(out_tv, for_loops_, unrolled_loop_);
   ReferenceTensor& reference = ref_pred_info.second;
 
   for (const auto& pred_info : ref_pred_info.first) {
@@ -497,7 +497,7 @@ void UnswitchPredicate::openIte(kir::IfThenElse* ite) {
 UnswitchPredicate::UnswitchPredicate(
     std::vector<kir::ForLoop*> outer_loops,
     kir::ForLoop* unrolled_loop)
-    : for_loops_(std::move(outer_loops)) {
+    : for_loops_(std::move(outer_loops)), unrolled_loop_(unrolled_loop) {
   openLoop(unrolled_loop);
 }
 
