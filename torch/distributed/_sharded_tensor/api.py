@@ -663,9 +663,9 @@ class ShardedTensor(object):
 
         Args:
             dim (int, optional): the dimension over which the size represents.
-            If specified, it returns the size of the given dimension.
-            If not, it returns a subclass of tuple.
-            Default: ``None``
+                If specified, it returns the size of the given dimension.
+                If not, it returns a subclass of tuple.
+                Default: ``None``
 
         Returns:
             A :Union:`[torch.Size, int]` represents the size of the tensor.
