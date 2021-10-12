@@ -1478,6 +1478,9 @@ RegisterNNCLoweringsFunction aten_add(
           : computeTwoOperand(
                 "aten_add", inputs, outputShape, outputType, add_lambda);
     });
+RegisterNNCLoweringsFunction aten_embedding(
+    {"aten::embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor"},
+    computeEmbedding);
 
 } // namespace
 

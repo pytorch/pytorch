@@ -612,6 +612,25 @@ Tensor computeCat(
       });
 }
 
+Tensor computeEmbedding(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
+  Dtype dtype = kFloat;
+  if (outputType) {
+    dtype = Dtype(*outputType);
+  }
+
+  BufHandle ResultBuf("emb", outputShape, dtype);
+  const BufHandle& w = c10::get<BufHandle>(inputs[0]);
+  const BufHandle& indices = c10::get<BufHandle>(inputs[1]);
+
+  StmtPtr s =
+      ExternalCall::make(ResultBuf, "nnc_aten_embedding", {w, indices}, {});
+  return Tensor(ResultBuf.node(), s);
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
