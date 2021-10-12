@@ -38,7 +38,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-slow-* || $TEST_CONFIG == 'slow' ]]; then
   export PYTORCH_TEST_SKIP_FAST=1
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *old-gradcheck* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *slow-gradcheck* ]]; then
   export PYTORCH_TEST_WITH_SLOW_GRADCHECK=ON
 fi
 
@@ -222,6 +222,8 @@ test_aten() {
 test_without_numpy() {
   pushd "$(dirname "${BASH_SOURCE[0]}")"
   python -c "import sys;sys.path.insert(0, 'fake_numpy');from unittest import TestCase;import torch;x=torch.randn(3,3);TestCase().assertRaises(RuntimeError, lambda: x.numpy())"
+  # Regression test for https://github.com/pytorch/pytorch/issues/66353
+  python -c "import sys;sys.path.insert(0, 'fake_numpy');import torch;print(torch.tensor([torch.tensor(0.), torch.tensor(1.)]))"
   popd
 }
 
@@ -272,7 +274,6 @@ test_libtorch() {
     # Exclude IMethodTest that relies on torch::deploy, which will instead be ran in test_deploy.
     OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$TORCH_BIN_DIR"/test_api --gtest_filter='-IMethodTest.*' --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
     "$TORCH_BIN_DIR"/test_tensorexpr --gtest_output=xml:$TEST_REPORTS_DIR/test_tensorexpr.xml
-    "$TORCH_BIN_DIR"/test_mobile_nnc --gtest_output=xml:$TEST_REPORTS_DIR/test_mobile_nnc.xml
     if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3* ]]; then
       if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* && "${BUILD_ENVIRONMENT}" != *asan* ]]; then
         # TODO: Consider to run static_runtime_test from $TORCH_BIN_DIR (may need modify build script)
@@ -283,8 +284,15 @@ test_libtorch() {
   fi
 }
 
+test_aot_compilation() {
+  echo "Testing Ahead of Time compilation"
+  if [ -f "$TORCH_BIN_DIR"/test_mobile_nnc ]; then "$TORCH_BIN_DIR"/test_mobile_nnc --gtest_output=xml:$TEST_REPORTS_DIR/test_mobile_nnc.xml; fi
+  # shellcheck source=test/mobile/nnc/test_aot_compile.sh
+  if [ -f "$TORCH_BIN_DIR"/aot_model_compiler_test ]; then source test/mobile/nnc/test_aot_compile.sh; fi
+}
+
 test_vulkan() {
-  if [[ "$BUILD_ENVIRONMENT" == *vulkan-linux* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" == *vulkan* ]]; then
     ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_TEST_DIR"
     ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_TEST_DIR"
     export VK_ICD_FILENAMES=/var/lib/jenkins/swiftshader/build/Linux/vk_swiftshader_icd.json
@@ -519,10 +527,11 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 || ("
   install_torchvision
   test_python_shard2
   test_libtorch
+  test_aot_compilation
   test_custom_script_ops
   test_custom_backend
   test_torch_function_benchmark
-elif [[ "${BUILD_ENVIRONMENT}" == *vulkan-linux* ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
   test_vulkan
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
@@ -538,6 +547,7 @@ else
   test_aten
   test_vec256
   test_libtorch
+  test_aot_compilation
   test_custom_script_ops
   test_custom_backend
   test_torch_function_benchmark

@@ -1423,6 +1423,9 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
     }
 
     if (!gradient_as_bucket_view_) {
+      RECORD_FUNCTION(
+          "torch.distributed.ddp.reducer::copy_bucket_to_grad",
+          std::vector<c10::IValue>({variable}));
       copy_bucket_to_grad(variable, replica, intra_bucket_index, global_unused);
     } else {
       const auto& bucket_view_out =
