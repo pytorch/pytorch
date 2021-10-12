@@ -125,6 +125,23 @@ class TORCH_CUDA_CU_API UnswitchPredicate {
       kir::ForLoop* unrolled_loop);
 
  private:
+  //! Predicate information for each UnswitchPredicateKey.
+  struct MergedPredicates {
+    //! Predicate information for the start and stop predicates.
+    struct Info {
+      //! Most restrictive static predicate. Nullptr if no static
+      //! predicate found.
+      kir::Bool* static_pred = nullptr;
+      //! The offset value of static_pred
+      int64_t static_offset = 0;
+      //! List of dynamic predicates.
+      std::vector<kir::Bool*> dynamic_preds;
+    };
+    UnswitchPredicateKey predicate_key;
+    Info start;
+    Info stop;
+  };
+
   UnswitchPredicate(
       std::vector<kir::ForLoop*> outer_loops,
       kir::ForLoop* unrolled_loop);
@@ -135,10 +152,25 @@ class TORCH_CUDA_CU_API UnswitchPredicate {
 
   void openIte(kir::IfThenElse*);
 
+  //! Generates the final predicates from the predicated_keys map
+  void finalize();
+
+  //! Merge predicates as much as possible. If a predicate offset is
+  //! static, only pick the most restrictive one, e.g., the one with the
+  //! minimum offset for the start predication.
+  void mergeUnswitchPredicateOffsets(
+      const std::vector<kir::Bool*>& predicates,
+      const std::vector<kir::Val*>& offsets,
+      MergedPredicates::Info& merged_predicate_info,
+      bool is_start);
+
  private:
-  // Track which root iter domains have been predicated
+  //! Track which iter domains have been predicated
   std::unordered_set<UnswitchPredicateKey, UnswitchPredicateKeyHash>
       predicated_keys_;
+
+  //! The predicates that have been recorded but not yet finalized
+  std::vector<MergedPredicates> pending_predicates_;
 
   //! The predicates that have been generated.
   std::vector<kir::Bool*> predicates_;

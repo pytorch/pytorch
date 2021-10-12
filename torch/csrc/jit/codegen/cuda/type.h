@@ -284,6 +284,8 @@ enum class LaunchConfigType {
   TIDx
 };
 
+const char* const kMagicZeroName = "nvfuser_zero";
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

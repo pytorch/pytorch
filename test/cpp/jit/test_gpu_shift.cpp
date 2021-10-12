@@ -2249,7 +2249,7 @@ TEST(NVFuserTest, FusionHdiff_CUDA) {
   }
 }
 
-TEST(NVFuserTest, FusionHdiffPartialSplit_CUDA) {
+TEST(NVFuserTest, FusionHdiffPartialSplitUnswitch_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -2325,16 +2325,31 @@ TEST(NVFuserTest, FusionHdiffPartialSplit_CUDA) {
   // Scheduling
   /////////////////////////////////
 
-  // Step 1: 2D Tiling
+  const auto all_vals = fusion.usedMathVals();
+  const std::vector<TensorView*> all_tensors(
+      {ir_utils::filterByType<TensorView>(all_vals).begin(),
+       ir_utils::filterByType<TensorView>(all_vals).end()});
+
+  // Step 1: Blocking
+  // - Thread block size: (tile_x, tile_y)
+  // - Each thread computes a vertical column of length tile_z along the Z
+  // axis.
+  // - Grid dize: (NX / block_x, NY / block_y, NZ / tile_z)
 
   const int tile_x = 32;
   const int tile_y = 8;
+  const int tile_z = 16;
 
+  out->split(0, tile_z);
   out->split(-1, tile_x, true, true);
   out->split(-3, tile_y, true, true);
-  out->reorder({{-2, -3}});
-  inp->computeAt(out, -3);
-  coeff->computeAt(out, -3);
+  // out: [NZ/tz, tz, NY/by, by, NX/bx, bx]
+  out->reorder({{1, 3}, {2, 1}, {3, 4}, {4, 2}});
+  // out: [NZ/tz, NY/by, NX/bx, tz, by, bx]
+
+  TransformPropagator::from(out);
+
+  inp->computeAt(out, 4);
 
   // Step 2: Inlining
 
@@ -2376,14 +2391,14 @@ TEST(NVFuserTest, FusionHdiffPartialSplit_CUDA) {
   out->axis(0)->parallelize(ParallelType::BIDz);
   out->axis(1)->parallelize(ParallelType::BIDy);
   out->axis(2)->parallelize(ParallelType::BIDx);
-  // Thread parallelization
-  out->axis(3)->parallelize(ParallelType::TIDy);
-  out->axis(4)->parallelize(ParallelType::TIDx);
-  // Apply the same parallelization to all other tensors
-  scheduler_utils::parallelizeAllLike(out, ir_utils::allTvs(&fusion));
+  out->axis(4)->parallelize(ParallelType::TIDy);
+  out->axis(5)->parallelize(ParallelType::TIDx);
+  // Unswitch at the tz axis
+  out->axis(3)->parallelize(ParallelType::Unswitch);
 
-  // Store intermediate stencil results on smem so that they can be
-  // accessed by threads
+  scheduler_utils::parallelizeAllLike(out, all_tensors);
+
+  // These need to be on smem
   for (auto tv : {flx0, fly0, lap}) {
     tv->setMemoryType(MemoryType::Shared);
   }
@@ -2395,7 +2410,7 @@ TEST(NVFuserTest, FusionHdiffPartialSplit_CUDA) {
   const int halo_extent = 2;
   const int numel_x = 64 + halo_extent * 2;
   const int numel_y = 64 + halo_extent * 2;
-  const int numel_z = 3;
+  const int numel_z = 32;
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor inp_at = at::randn({numel_z, numel_y, numel_x}, options);
@@ -3780,6 +3795,135 @@ TEST(NVFuserTest, FusionPartialSplit6_CUDA) {
   auto ref = (shift(t0 + 1, {1}) + 1).index(indices);
 
   testValidate(&fusion, outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionShiftUnswitch1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = shift(tv0, {-1, 0});
+  fusion.addOutput(tv1);
+
+  auto tv2 = shift(tv0, {0, 1});
+  fusion.addOutput(tv2);
+
+  auto tv3 = shift(tv0, {2, 2});
+  fusion.addOutput(tv3);
+
+  auto tv4 = shift(tv0, {-2, -2});
+  fusion.addOutput(tv4);
+
+  auto tv5 = add(tv0, new Double(1));
+  auto tv6 = shift(tv5, {0, -1});
+  fusion.addOutput(tv6);
+
+  tv1->axis(1)->parallelize(ParallelType::Unswitch);
+  tv2->axis(1)->parallelize(ParallelType::Unswitch);
+  tv3->axis(0)->parallelize(ParallelType::Unswitch);
+  tv4->axis(0)->parallelize(ParallelType::Unswitch);
+
+  tv5->axis(1)->parallelize(ParallelType::TIDx);
+  tv6->axis(1)->parallelize(ParallelType::TIDx);
+  tv5->axis(0)->parallelize(ParallelType::Unswitch);
+  tv5->setMemoryType(MemoryType::Shared);
+
+  int numel_x = 9;
+  int numel_y = 11;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({numel_x, numel_y}, options);
+  std::vector<IValue> inputs = {t0};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion(inputs);
+
+  auto t1 = shift(t0, {-1, 0});
+  TORCH_CHECK(t1.equal(outputs[0]));
+
+  auto t2 = shift(t0, {0, 1});
+  TORCH_CHECK(t2.equal(outputs[1]));
+
+  auto t3 = shift(t0, {2, 2});
+  TORCH_CHECK(t3.equal(outputs[2]));
+
+  auto t4 = shift(t0, {-2, -2});
+  TORCH_CHECK(t4.equal(outputs[3]));
+
+  auto t6 = shift(t0 + 1, {0, -1});
+  TORCH_CHECK(t6.equal(outputs[4]));
+}
+
+TEST(NVFuserTest, FusionGatherUnswitch1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1_gather_param = new Int();
+  fusion.addInput(tv1_gather_param);
+  auto tv1_gather_pad_param = new Int();
+  fusion.addInput(tv1_gather_pad_param);
+  auto tv1 = gather(
+      tv0, {tv1_gather_param}, {{tv1_gather_pad_param, tv1_gather_pad_param}});
+  fusion.addOutput(tv1);
+
+  auto tv2_gather_param = new Int();
+  fusion.addInput(tv2_gather_param);
+  auto tv2_gather_pad_param = new Int();
+  fusion.addInput(tv2_gather_pad_param);
+  auto tv2 = gather(
+      tv0, {tv2_gather_param}, {{tv2_gather_pad_param, tv2_gather_pad_param}});
+  fusion.addOutput(tv2);
+
+  // Static gather
+  auto tv3 = gather(tv0, {3}, {{1, 1}});
+  fusion.addOutput(tv3);
+
+  // Static gather
+  auto tv4 = gather(tv0, {5}, {{2, 2}});
+  fusion.addOutput(tv4);
+
+  auto tv0_cache = tv0->cache_after();
+  tv0_cache->setMemoryType(MemoryType::Shared);
+
+  tv4->split(0, 32);
+
+  tv0->computeAt(tv4, 1);
+
+  tv4->axis(0)->parallelize(ParallelType::Unswitch);
+  tv4->axis(1)->parallelize(ParallelType::TIDx);
+
+  const int numel_x = 100;
+  const int tv1_gather = 3;
+  const int tv1_gather_pad = 1;
+  const int tv2_gather = 5;
+  const int tv2_gather_pad = 2;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({numel_x}, options);
+  std::vector<IValue> inputs = {
+      t0, tv1_gather, tv1_gather_pad, tv2_gather, tv2_gather_pad};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion(inputs);
+
+  auto t1 = gather(t0, {tv1_gather}, {{tv1_gather_pad, tv1_gather_pad}});
+  TORCH_CHECK(t1.equal(outputs[0]));
+
+  auto t2 = gather(t0, {tv2_gather}, {{tv2_gather_pad, tv2_gather_pad}});
+  TORCH_CHECK(t2.equal(outputs[1]));
+
+  auto t3 = gather(t0, {3}, {{1, 1}});
+  TORCH_CHECK(t3.equal(outputs[2]));
+
+  auto t4 = gather(t0, {5}, {{2, 2}});
+  TORCH_CHECK(t4.equal(outputs[3]));
 }
 
 } // namespace jit

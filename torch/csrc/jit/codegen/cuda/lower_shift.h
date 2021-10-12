@@ -98,6 +98,22 @@ class HaloInfo {
   kir::Val* getExtent(IterDomain* id) const;
   kir::Val* getExtent(kir::IterDomain* id) const;
 
+  //! Returns all child domains of a root domain that inherits the
+  //! halo of the root domain.
+  //!
+  //! If a root domain is split, only the inner domain inherits the
+  //! halo, so the inner domain is included but not the outer domain.
+  const std::unordered_set<IterDomain*>& getChildDomains(
+      IterDomain* root_id) const;
+
+  //! Returns all root domains from which the halo of a domain
+  //! originates.
+  std::unordered_set<IterDomain*> getRootDomains(IterDomain* id) const;
+
+  //! Returns true if a domain inherits halo associated with a root
+  //! domain.
+  bool isHaloInherited(IterDomain* root_id, IterDomain* id) const;
+
   // True when the extent of id1 is guaranteed to be lesser than or
   // equal to id2. False when it *may* not.
   bool extentLessEqual(IterDomain* id1, IterDomain* id2) const;
@@ -120,6 +136,15 @@ class HaloInfo {
   //! Propagate root axis information from outputs to inputs of an
   //! expression
   void propagateRootAxisInfo(Expr* expr);
+
+  //! Adds a domain to the halo inheritance map.
+  //!
+  //! A domain, child, is added to the same set as domain parent. Both
+  //! domains must be part of TensorDomain td.
+  void insertToInheritanceMap(
+      TensorDomain* td,
+      IterDomain* parent,
+      IterDomain* child);
 
   //! Propagate root axis information from consumer to producer
   void propagateRootAxisInfo(
@@ -174,6 +199,10 @@ class HaloInfo {
   //! the extent of the resulting output axis is 5*M, but we don't
   //! create its mapping.
   std::unordered_map<IterDomain*, kir::Int*> halo_width_map_;
+
+  //! Mappings from root domains to child domains that inherit halo
+  std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>
+      inheritance_map_;
 };
 
 class ShiftPredicateInserter {
@@ -186,19 +215,8 @@ class ShiftPredicateInserter {
   static void insert(
       kir::Expr* expr,
       const std::vector<kir::ForLoop*>& loops,
-      kir::Bool* thread_pred);
-
-  //! Returns predicates for the interior and overall domains of a
-  //! tensor.
-  //!
-  //! The isShiftPredicate flag toggles between the predicate for shifted
-  //! accesses and padding.
-  static kir::Bool* getPredicate(
-      const kir::Expr* expr,
-      const std::vector<kir::ForLoop*>& loops,
-      kir::TensorView* out_tv,
       kir::Bool* thread_pred,
-      bool isShiftPredicate);
+      bool within_unswitch);
 };
 
 } // namespace cuda

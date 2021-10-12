@@ -1146,6 +1146,15 @@ size_t TensorDomain::posOf(IterDomain* id) const {
   TORCH_CHECK(false, "Provided id is not part of this domain.");
 }
 
+size_t TensorDomain::rootPosOf(IterDomain* id) const {
+  TORCH_INTERNAL_ASSERT(
+      root_domain_.size() > 0, "Tried to find an axis in a 0-dim root domain");
+  auto it = std::find(root_domain_.begin(), root_domain_.end(), id);
+  TORCH_INTERNAL_ASSERT(
+      it != root_domain_.end(), "Provided id is not part of root domain.");
+  return std::distance(root_domain_.begin(), it);
+}
+
 void TensorDomain::split(
     int axis_,
     Val* factor,

@@ -27,6 +27,38 @@ __device__ constexpr int64_t ceilDiv(int a, int64_t b) {
   return ceilDiv((int64_t)a, b);
 }
 
+__device__ constexpr int max(int a, int b) {
+  return ::max(a, b);
+}
+
+__device__ constexpr int64_t max(int64_t a, int b) {
+  return ::max(a, (int64_t)b);
+}
+
+__device__ constexpr int64_t max(int a, int64_t b) {
+  return ::max((int64_t)a, b);
+}
+
+__device__ constexpr int64_t max(int64_t a, int64_t b) {
+  return ::max(a, b);
+}
+
+__device__ constexpr int min(int a, int b) {
+  return ::min(a, b);
+}
+
+__device__ constexpr int64_t min(int64_t a, int b) {
+  return ::min(a, (int64_t)b);
+}
+
+__device__ constexpr int64_t min(int a, int64_t b) {
+  return ::min((int64_t)a, b);
+}
+
+__device__ constexpr int64_t min(int64_t a, int64_t b) {
+  return ::min(a, b);
+}
+
 __device__ constexpr int alignBufferSize(int buffer, int size) {
   return (buffer + (size - 1)) & ~(size - 1);
 }

@@ -157,7 +157,7 @@ Bool* IrBuilder::trueVal() {
 
 NamedScalar* IrBuilder::magicZeroVal() {
   if (magic_zero_ == nullptr) {
-    magic_zero_ = create<kir::NamedScalar>("nvfuser_zero", DataType::Int);
+    magic_zero_ = create<kir::NamedScalar>(kMagicZeroName, DataType::Int);
   }
   return magic_zero_;
 }

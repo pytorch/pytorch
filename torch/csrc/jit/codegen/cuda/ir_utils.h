@@ -175,6 +175,9 @@ TORCH_CUDA_CU_API std::vector<TensorView*> outputTvsOf(
 // returns all tensor views in fusion that are used between outputs and inputs.
 TORCH_CUDA_CU_API std::vector<TensorView*> allTvs(Fusion* fusion);
 
+// Returns the history of expressions applied to the domains of td
+TORCH_CUDA_CU_API std::vector<Expr*> historyOf(TensorDomain* td);
+
 // Returns the history of expressions applied to the domains of tv
 TORCH_CUDA_CU_API std::vector<Expr*> historyOf(TensorView* tv);
 

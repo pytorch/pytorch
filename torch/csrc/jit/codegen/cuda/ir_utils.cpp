@@ -384,10 +384,13 @@ std::vector<TensorView*> allTvs(Fusion* fusion) {
   return uniqueEntries({used_tvs.begin(), used_tvs.end()});
 }
 
-std::vector<Expr*> historyOf(TensorView* tv) {
+std::vector<Expr*> historyOf(TensorDomain* td) {
   return ExprSort::getExprs(
-      tv->fusion(),
-      {tv->domain()->domain().begin(), tv->domain()->domain().end()});
+      td->fusion(), {td->domain().begin(), td->domain().end()});
+}
+
+std::vector<Expr*> historyOf(TensorView* tv) {
+  return historyOf(tv->domain());
 }
 
 } // namespace ir_utils

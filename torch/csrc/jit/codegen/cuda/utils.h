@@ -30,7 +30,8 @@ enum class DebugDumpOption {
   PrintPtxasLog, //!< Print the ptxas verbose log including register usage
   BufferReuseInfo, //!< Dump the analysis details of local/shared buffer re-use
   SchedulerDebug, //! Dump scheduler heuristic parameters
-  ParallelDimensions //!< Dump known parallel dimensions
+  ParallelDimensions, //!< Dump known parallel dimensions
+  Halo //! Halo information of tensors
 };
 
 bool isDebugDumpEnabled(DebugDumpOption option);

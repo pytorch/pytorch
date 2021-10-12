@@ -145,7 +145,7 @@ class AllocationInserter : public kir::MutableIrVisitor {
         // Since there must be an inner unswitched domain,
         // alloc_for_loop should never be the inner-most loop.
         TORCH_INTERNAL_ASSERT(info.alloc_for_loop != for_loops.back());
-        info.init_place_before = for_loops.at(alloc_fl_idx_next);
+        info.alloc_place_before = for_loops.at(alloc_fl_idx_next);
       }
     }
   }
@@ -617,7 +617,7 @@ class AllocationInserter : public kir::MutableIrVisitor {
             toString(alloc.alloc_place_before));
         loop_nests_.insert(place_before_it, alloc.alloc_expr);
       } else {
-        alloc.init_for_loop->body().insert_before(
+        alloc.alloc_for_loop->body().insert_before(
             alloc.alloc_place_before, alloc.alloc_expr);
       }
     }

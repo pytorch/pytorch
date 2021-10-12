@@ -20,23 +20,6 @@ namespace cuda {
 
 namespace {
 
-// find the first (and only) TensorView output
-//
-// TODO(kir): same question as ir_utils::getTvOutput():
-//    why do we assume a single TV output?
-//
-kir::TensorView* firstTensorViewOutput(const kir::Expr* expr) {
-  TORCH_INTERNAL_ASSERT(expr != nullptr);
-  for (auto out : expr->outputs()) {
-    if (out->isA<kir::TensorView>()) {
-      return out->as<kir::TensorView>();
-    } else if (out->isA<kir::TensorIndex>()) {
-      return out->as<kir::TensorIndex>()->view();
-    }
-  }
-  TORCH_INTERNAL_ASSERT(false, "Missing kir::TensorView output");
-}
-
 bool isTensorIndexOp(kir::Expr* expr) {
   const auto& outputs = expr->outputs();
   return outputs.size() >= 1 && outputs[0]->isA<kir::TensorIndex>();
@@ -286,7 +269,7 @@ kir::Bool* PredicateCompute::getInlinePredicate(
   FUSER_PERF_SCOPE("GpuLower::Lower::getInlinePredicate");
 
   const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
+  kir::SimplifyingIrBuilder ir_builder(gpu_lower->kernel());
 
   // If outputs are registers, no need to predicate for threads
   if (isOutputLocal(expr)) {
@@ -298,19 +281,19 @@ kir::Bool* PredicateCompute::getInlinePredicate(
     return thread_pred;
   }
 
-  auto out_tv = firstTensorViewOutput(expr);
+  auto out_tv = ir_utils::getTVOutput(expr);
+  TORCH_INTERNAL_ASSERT(out_tv != nullptr, "Missing kir::TensorView output");
 
   if (gpu_lower->predicateElimination().canOmitPredicate(expr)) {
     return thread_pred;
   }
 
-  auto pred_info_vec = Index::getReferenceRootPredicates(out_tv, loops).first;
+  auto pred_info_vec =
+      Index::getReferenceRootPredicates(
+          out_tv, loops, nullptr, pred_type == PredicateType::Padding)
+          .first;
 
   std::vector<kir::Bool*> preds;
-
-  auto is_true = [](const kir::Bool* p) {
-    return p->isConst() && p->value().value();
-  };
 
   // When pred_type is ReductionWrite, filter out predicates for
   // reduction axes. For blockReduce, this is necessary when reduction
@@ -322,7 +305,7 @@ kir::Bool* PredicateCompute::getInlinePredicate(
   bool non_zero_start_found = false;
   for (const auto& pred_info : pred_info_vec) {
     if (pred_type == PredicateType::ReductionWrite) {
-      const auto& concrete_root_ids = pred_info.root_ids;
+      const auto& concrete_root_ids = pred_info.rootIds();
       bool pred_for_reduction_axis = false;
       for (auto pred_root_id : concrete_root_ids) {
         auto kir_pred_root_id =
@@ -352,12 +335,13 @@ kir::Bool* PredicateCompute::getInlinePredicate(
         continue;
       }
     }
-    // start may be nullptr. stop must be non-null
-    if (pred_info.start && !is_true(pred_info.start)) {
-      preds.push_back(pred_info.start);
+    for (auto pred : pred_info.startPredicates()) {
+      TORCH_INTERNAL_ASSERT(pred != nullptr);
+      preds.push_back(pred);
     }
-    if (!is_true(pred_info.stop)) {
-      preds.push_back(pred_info.stop);
+    for (auto pred : pred_info.stopPredicates()) {
+      TORCH_INTERNAL_ASSERT(pred != nullptr);
+      preds.push_back(pred);
     }
   }
 
@@ -375,7 +359,7 @@ kir::Bool* PredicateCompute::getInlinePredicate(
     preds.push_back(parallel_dom_pred);
   }
 
-  if (thread_pred != nullptr && !is_true(thread_pred)) {
+  if (thread_pred != nullptr) {
     preds.push_back(thread_pred);
   }
 
@@ -418,25 +402,38 @@ void UnswitchPredicate::predicateOn(kir::Expr* tv_expr) {
   const auto gpu_lower = GpuLower::current();
   kir::IrBuilder ir_builder(gpu_lower->kernel());
 
-  auto out_tv = firstTensorViewOutput(tv_expr);
-
   if (gpu_lower->predicateElimination().canOmitPredicate(tv_expr)) {
     return;
   }
 
-  auto ref_pred_info =
-      Index::getReferenceRootPredicates(out_tv, for_loops_, unrolled_loop_);
-  ReferenceTensor& reference = ref_pred_info.second;
+  auto out_tv = ir_utils::getTVOutput(tv_expr);
+  TORCH_INTERNAL_ASSERT(out_tv != nullptr, "Missing kir::TensorView output");
+
+  auto ref_pred_info = Index::getReferenceRootPredicates(
+      out_tv, for_loops_, unrolled_loop_, false);
+  const ReferenceTensor& reference = ref_pred_info.second;
+
+  // If RootPredicateInfo has a static predicate that is more
+  // restrictive than the current one, replace the current with the
+  // new one. If it has a dynamic predicate, add it to the dynamic
+  // predicate list. Since the final static predicate can't be
+  // determined until all expressions are analyzed, predicates are
+  // temporarily placed in the predicated_keys map and the final
+  // predicates are generated in the finalize function.
 
   for (const auto& pred_info : ref_pred_info.first) {
-    auto pred = pred_info.stop;
-    if (pred->isConst() && pred->value()) {
+    if (pred_info.startPredicates().empty() &&
+        pred_info.stopPredicates().empty()) {
       continue;
     }
 
-    const auto& root_ids = pred_info.root_ids;
+    const auto& root_ids = pred_info.rootIds();
 
     bool add_pred = false;
+
+    // Used to find a matching existing MergedPredicates
+    UnswitchPredicateKey first_key;
+    bool first_key_set = false;
 
     for (auto root_id : root_ids) {
       auto kir_root_id = gpu_lower->lowerValue(root_id)->as<kir::IterDomain>();
@@ -446,14 +443,76 @@ void UnswitchPredicate::predicateOn(kir::Expr* tv_expr) {
       }
 
       UnswitchPredicateKey key(root_id, reference);
+      auto inserted = predicated_keys_.insert(key).second;
+      add_pred = add_pred || inserted;
 
-      if (predicated_keys_.find(key) == predicated_keys_.end()) {
-        add_pred = true;
-        predicated_keys_.insert(key);
+      if (!first_key_set) {
+        first_key = key;
+        first_key_set = true;
       }
     }
+
+    if (!first_key_set) {
+      // No predicate generated
+      continue;
+    }
+
+    // The start and stop offsets may need to be merged to avoid
+    // redundant predicates. When these offsets are zero, nothing is
+    // done. When non-zero, find the corresponding MergedPredicates
+    // and merge both the start and stop offsets. Note that the
+    // offsets are non-zero, the predicates must be generated at a
+    // root domain, so root_ids.size() must be one. That unique root
+    // domain is used as a key to find the corresponding
+    // MergedPredicate.
+
+    // Initialize with an invalid iterator to signal no corresponding
+    // MergedPredicates is found yet.
+    auto merged_pred_it = pending_predicates_.end();
+
     if (add_pred) {
-      predicates_.push_back(pred);
+      // This is a new predicate for the root domain. Initialize a new
+      // MergedPredicates and add it to the pending list.
+      UnswitchPredicate::MergedPredicates merged_pred;
+
+      // To look up this MergedPredicates for other predicates
+      // generated for the same predicate key
+      if (root_ids.size() == 1) {
+        merged_pred.predicate_key = first_key;
+      }
+
+      pending_predicates_.push_back(merged_pred);
+
+      merged_pred_it =
+          pending_predicates_.begin() + pending_predicates_.size() - 1;
+    } else if (root_ids.size() == 1) {
+      // If not new, try to find a corresponding MergedPredicates.
+      merged_pred_it = std::find_if(
+          pending_predicates_.begin(),
+          pending_predicates_.end(),
+          [&first_key](const auto& merged_predicates) {
+            return merged_predicates.predicate_key == first_key;
+          });
+      TORCH_INTERNAL_ASSERT(
+          merged_pred_it != pending_predicates_.end(),
+          "Key not found: ",
+          first_key.toString());
+    }
+
+    // If a corresponding MergedPredicates is found, merge both the
+    // start and stop offsets.
+    if (merged_pred_it != pending_predicates_.end()) {
+      mergeUnswitchPredicateOffsets(
+          pred_info.startPredicates(),
+          pred_info.startOffsets(),
+          merged_pred_it->start,
+          true);
+
+      mergeUnswitchPredicateOffsets(
+          pred_info.stopPredicates(),
+          pred_info.stopOffsets(),
+          merged_pred_it->stop,
+          false);
     }
   }
 
@@ -494,11 +553,69 @@ void UnswitchPredicate::openIte(kir::IfThenElse* ite) {
   }
 }
 
+void UnswitchPredicate::finalize() {
+  kir::SimplifyingIrBuilder ir_builder(GpuLower::current()->kernel());
+  for (const auto& merged_pred : pending_predicates_) {
+    const auto& start_info = merged_pred.start;
+    if (start_info.static_pred) {
+      predicates_.push_back(start_info.static_pred);
+    }
+    for (auto dynamic_pred : start_info.dynamic_preds) {
+      predicates_.push_back(dynamic_pred);
+    }
+    const auto& stop_info = merged_pred.stop;
+    if (stop_info.static_pred) {
+      predicates_.push_back(stop_info.static_pred);
+    }
+    for (auto dynamic_pred : stop_info.dynamic_preds) {
+      predicates_.push_back(dynamic_pred);
+    }
+  }
+}
+
+void UnswitchPredicate::mergeUnswitchPredicateOffsets(
+    const std::vector<kir::Bool*>& predicates,
+    const std::vector<kir::Val*>& offsets,
+    MergedPredicates::Info& merged_predicate_info,
+    bool is_start) {
+  TORCH_INTERNAL_ASSERT(predicates.size() == offsets.size());
+
+  auto is_more_restrictive = [&is_start](int64_t new_val, int64_t current_val) {
+    if (is_start) {
+      return new_val < current_val;
+    } else {
+      return new_val > current_val;
+    }
+  };
+
+  for (const auto i : c10::irange(predicates.size())) {
+    auto pred = predicates.at(i);
+    auto offset = offsets.at(i);
+    auto offset_int = dynamic_cast<kir::Int*>(offset);
+    // If it's a static predicate, replace the current one if it's
+    // more restrictive. If it's dynamic, just adds it to the dynamic
+    // predicate list.
+    if (offset_int && offset_int->isConst()) {
+      auto offset_const = offset_int->value().value();
+      auto& static_pred = merged_predicate_info.static_pred;
+      auto& static_offset = merged_predicate_info.static_offset;
+      if (static_pred == nullptr ||
+          is_more_restrictive(offset_const, static_offset)) {
+        static_pred = pred;
+        static_offset = offset_const;
+      }
+    } else {
+      merged_predicate_info.dynamic_preds.push_back(pred);
+    }
+  }
+}
+
 UnswitchPredicate::UnswitchPredicate(
     std::vector<kir::ForLoop*> outer_loops,
     kir::ForLoop* unrolled_loop)
     : for_loops_(std::move(outer_loops)), unrolled_loop_(unrolled_loop) {
   openLoop(unrolled_loop);
+  finalize();
 }
 
 } // namespace cuda

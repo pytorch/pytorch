@@ -86,7 +86,8 @@ void UnrollPass::handle(kir::Expr* expr) {
     // When a predicate needs to account for ShiftOp, it is currently
     // taken care by its own function.
     if (GpuLower::current()->haloInfo().needsShiftPredicate(expr)) {
-      ShiftPredicateInserter::insert(expr, for_loops_, thread_pred);
+      ShiftPredicateInserter::insert(
+          expr, for_loops_, thread_pred, unswitched_loop_);
       return;
     }
 
@@ -207,7 +208,7 @@ void UnrollPass::handle(kir::ForLoop* fl) {
   }
 }
 
-bool UnrollPass::canOmitElseClause(kir::ForLoop* fl) const {
+bool UnrollPass::canOmitElseClause(kir::ForLoop* fl) {
   kir::ExpressionEvaluator eval;
   std::vector<kir::ForLoop*> loops({fl});
 

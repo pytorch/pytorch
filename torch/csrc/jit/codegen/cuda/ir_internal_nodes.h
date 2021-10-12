@@ -726,6 +726,9 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
 
   size_t posOf(IterDomain* id) const;
 
+  //! Returns a position of a root domain
+  size_t rootPosOf(IterDomain* id) const;
+
   // Split "axis" into 2 axes
   //! inner_split dictates if the factor section of the split should be inside
   //! the

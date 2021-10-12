@@ -178,6 +178,52 @@ class IndexSwizzle : public IndexCompute {
   std::unordered_set<IterDomain*> swizzled_ids_;
 };
 
+//! Predicate information of a root or contiguous merged domain
+class RootPredicateInfo {
+  friend class Index;
+
+ public:
+  const auto& startPredicates() const {
+    return start_predicates_;
+  }
+
+  auto& startPredicates() {
+    return start_predicates_;
+  }
+
+  const auto& startOffsets() const {
+    return start_offsets_;
+  }
+
+  const auto& stopPredicates() const {
+    return stop_predicates_;
+  }
+
+  const auto& stopOffsets() const {
+    return stop_offsets_;
+  }
+
+  const auto& rootIds() const {
+    return root_ids_;
+  }
+
+  //! Return a false RootPredicateInfo, i.e., both start and stop
+  //! predicates are false.
+  static RootPredicateInfo getFalseInfo();
+
+ private:
+  // prdicates for lower end
+  std::vector<kir::Bool*> start_predicates_;
+  // prdicates for upper end
+  std::vector<kir::Bool*> stop_predicates_;
+  // Offsets of the start predicate
+  std::vector<kir::Val*> start_offsets_;
+  // Offsets of the stop predicate
+  std::vector<kir::Val*> stop_offsets_;
+  // Track which roots have been handled by the generated predicates
+  std::unordered_set<IterDomain*> root_ids_;
+};
+
 // Simple interface for IndexCompute
 // If getComputeAtAxis and more generally TensorView const model is fixed, we
 // can make the below tensorviews const.
@@ -237,24 +283,6 @@ class Index {
       const TensorView* consumer,
       const std::vector<kir::ForLoop*>& loops);
 
-  // Consumer indices for predicates, keep all indices matching in root domain.
-  // Even those not used for physical addressing. Returns pair <root indices, if
-  // indices are mapped to rfactor dom>
-  static std::pair<std::vector<kir::Val*>, bool> getConsumerRootPredIndices(
-      const kir::TensorView* consumer,
-      const std::vector<kir::ForLoop*>& loops,
-      const std::vector<bool>& root_contiguity,
-      bool unswitch = false);
-
-  struct RootPredicateInfo {
-    // prdicate for lower end
-    kir::Bool* start = nullptr;
-    // prdicate for upper end
-    kir::Bool* stop = nullptr;
-    // Track which roots have been handled by the generated predicates
-    std::unordered_set<IterDomain*> root_ids;
-  };
-
   //! Take a consumer tensorview and loop nest and generates predicates
   //! associated with the concrete roots of the loop nest. Returns a list of
   //! predicates, and a list of concrete roots they're associated with. It is
@@ -281,7 +309,8 @@ class Index {
   getReferenceRootPredicates(
       const kir::TensorView* kir_consumer_tv,
       const std::vector<kir::ForLoop*>& loops,
-      kir::ForLoop* unswitch_or_vec_loop = nullptr);
+      kir::ForLoop* unswitch_or_vec_loop,
+      bool padding_predicate);
 
   // Determine if we may run into over reuse of predicates or registers in the
   // compiler. If the loop can be unrolled and the index and domain are not
