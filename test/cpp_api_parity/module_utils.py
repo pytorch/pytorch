@@ -65,10 +65,19 @@ void ${module_variant_name}_test_forward_backward(
 }
 """)
 
+def get_materialized_arg_dict(test_params):
+    if isinstance(test_params, TorchNNModuleInfoTestParams):
+        arg_dict = test_params.compute_materialized_arg_dict(test_params.sample)
+    elif isinstance(test_params, TorchNNModuleTestParams):
+        arg_dict = test_params.arg_dict
+    else:
+        raise TypeError("Invalid type for test_params, should be either TorchNNModuleInfoTestParams or TorchNNModuleTestParams,"
+                        " but received ", type(test_params))
+    return arg_dict
 
-def run_python_forward_backward(unit_test_class, test_params):
+
+def get_constructed_module(test_params):
     device = test_params.device
-    # Construct Module
     if isinstance(test_params, TorchNNModuleInfoTestParams):
         module_info = test_params.module_info
         sample = test_params.sample
@@ -81,12 +90,21 @@ def run_python_forward_backward(unit_test_class, test_params):
         raise TypeError("Invalid type for test_params, should be either TorchNNModuleInfoTestParams or TorchNNModuleTestParams,"
                         " but received ", type(test_params))
 
+    return module
+
+
+def run_python_forward_backward(unit_test_class, test_params):
+    device = test_params.device
+    # Construct Module
+    module = get_constructed_module(test_params)
+    arg_dict = get_materialized_arg_dict(test_params)
+
     inputs = set_python_tensors_requires_grad(move_python_tensors_to_device(
-        [arg_value for _, arg_value in test_params.arg_dict['input']], device))
+        [arg_value for _, arg_value in arg_dict['input']], device))
     inputs += move_python_tensors_to_device(
-        [arg_value for _, arg_value in test_params.arg_dict['target']], device)
+        [arg_value for _, arg_value in arg_dict['target']], device)
     inputs += move_python_tensors_to_device(
-        [arg_value for _, arg_value in test_params.arg_dict['extra_args']], device)
+        [arg_value for _, arg_value in arg_dict['extra_args']], device)
 
     # Some modules (such as `RReLU`) create random tensors in their forward pass.
     # To make sure the random tensors created are the same in Python/C++, we need
@@ -132,7 +150,8 @@ def test_forward_backward(unit_test_class, test_params, cpp_module):
     module_file_path = compute_temp_file_path(cpp_tmp_folder, module_variant_name, 'module')
     arg_dict_file_path = compute_temp_file_path(cpp_tmp_folder, module_variant_name, 'arg_dict')
     script_module.save(module_file_path)
-    serialize_arg_dict_as_script_module(test_params.arg_dict).save(arg_dict_file_path)
+    arg_dict = get_materialized_arg_dict(test_params)
+    serialize_arg_dict_as_script_module(arg_dict).save(arg_dict_file_path)
 
     cpp_test_name = '{}_test_forward_backward'.format(test_params.module_variant_name)
     cpp_test_fn = getattr(cpp_module, cpp_test_name)

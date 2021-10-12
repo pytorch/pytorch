@@ -23,6 +23,8 @@ class TestModule(TestCase):
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=False)
         for module_input in module_inputs:
+            module_input.materialize()
+
             if module_input.forward_input is None:
                 continue
 
@@ -51,6 +53,8 @@ class TestModule(TestCase):
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=False)
         for module_input in module_inputs:
+            module_input.materialize()
+
             args, kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
 
             # Check if this module creates parameters or registers buffers.
@@ -120,6 +124,8 @@ class TestModule(TestCase):
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=False)
         for module_input in module_inputs:
+            module_input.materialize()
+
             args, kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
             m = module_cls(*args, **kwargs)
 
@@ -134,6 +140,8 @@ class TestModule(TestCase):
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=False)
         for module_input in module_inputs:
+            module_input.materialize()
+
             if module_input.forward_input is None:
                 continue
 
@@ -166,6 +174,8 @@ class TestModule(TestCase):
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=True)
         for module_input in module_inputs:
+            module_input.materialize()
+
             if module_input.forward_input is None:
                 continue
 
@@ -268,6 +278,8 @@ class TestModule(TestCase):
 
 
         for module_input in module_inputs:
+            module_input.materialize()
+
             if module_input.forward_input is None:
                 continue
 
@@ -324,6 +336,8 @@ class TestModule(TestCase):
                                                        requires_grad=True)
 
         for module_input in module_inputs:
+            module_input.materialize()
+
             if module_input.forward_input is None:
                 continue
 

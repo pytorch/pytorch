@@ -102,6 +102,7 @@ TorchNNModuleInfoTestParams = namedtuple(
 
         # Temporary folder to store C++ outputs (to be compared with Python outputs later)
         'cpp_tmp_folder',
+        'compute_materialized_arg_dict',
     ]
 )
 

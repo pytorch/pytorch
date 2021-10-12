@@ -106,6 +106,32 @@ def formatted_module_name(module_cls):
     return MODULE_CLASS_NAMES[module_cls].replace('.', '_')
 
 
+def materialize(objs):
+    if isinstance(objs, (list, tuple)):
+        return type(objs)(materialize(obj) for obj in objs)
+    elif isinstance(objs, dict):
+        return {key: materialize(obj) for key, obj in objs.items()}
+    elif isinstance(objs, LazyMakeTensor):
+        return objs.materialize()
+    else:
+        return objs
+
+class LazyMakeTensor:
+    def __init__(self, shape, device, dtype, generator=make_tensor, **kwargs):
+        self.shape = shape
+        self.device = device
+        self.dtype = dtype
+        self.kwargs = kwargs
+        self.materialized = False
+        self.generator = generator
+
+    def materialize(self):
+        if not self.materialized:
+            self.tensor = self.generator(self.shape, self.device, self.dtype, **self.kwargs)
+            self.materialized = True
+        return self.tensor
+
+
 class FunctionInput(object):
     """ Contains args and kwargs to pass as input to a function. """
     __slots__ = ['args', 'kwargs']
@@ -113,6 +139,10 @@ class FunctionInput(object):
     def __init__(self, *args, **kwargs):
         self.args = args
         self.kwargs = kwargs
+
+    def materialize(self):
+        self.args = materialize(self.args)
+        self.kwargs = materialize(self.kwargs)
 
 
 class ModuleInput(object):
@@ -139,6 +169,10 @@ class ModuleInput(object):
                 return reference_fn(m, list(m.parameters()), *args, **kwargs)
 
             self.reference_fn = copy_reference_fn
+
+    def materialize(self):
+        self.constructor_input.materialize()
+        self.forward_input.materialize()
 
 
 class ModuleInfo(object):
@@ -173,7 +207,7 @@ class ModuleInfo(object):
 
 
 def module_inputs_torch_nn_Linear(module_info, device, dtype, requires_grad, **kwargs):
-    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_input = partial(LazyMakeTensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     module_inputs = [
         ModuleInput(constructor_input=FunctionInput(10, 8),
@@ -195,17 +229,20 @@ def module_inputs_torch_nn_Linear(module_info, device, dtype, requires_grad, **k
 
 
 def module_inputs_torch_nn_NLLLoss(module_info, device, dtype, requires_grad, **kwargs):
-    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-    make_weight = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
+    def weight_generator(shape, device, dtype, *args, **kwargs):
+        return make_tensor(shape, device=device, dtype=dtype, requires_grad=False).abs()
+
+    make_weight = partial(LazyMakeTensor, device=device, dtype=dtype,
+                          requires_grad=requires_grad, generator=weight_generator)
 
     cases: List[Tuple[str, dict]] = [
         ('', {}),
         ('reduction_sum', {'reduction': 'sum'}),
         ('reduction_none', {'reduction': 'none'}),
         ('ignore_index', {'ignore_index': 2}),
-        ('weights', {'weight': make_weight(10).abs()}),
-        ('weights_ignore_index', {'weight': make_weight(10).abs(), 'ignore_index': 2}),
-        ('weights_ignore_index_neg', {'weight': make_weight(10).abs(), 'ignore_index': -1})
+        ('weights', {'weight': make_weight((10))}),
+        ('weights_ignore_index', {'weight': make_weight((10)), 'ignore_index': 2}),
+        ('weights_ignore_index_neg', {'weight': make_weight((10)), 'ignore_index': -1})
     ]
 
     # TODO: Uncomment when negative weights is supported.
@@ -216,12 +253,19 @@ def module_inputs_torch_nn_NLLLoss(module_info, device, dtype, requires_grad, **
     for desc, constructor_kwargs in cases:
 
         def reference_fn(m, p, i, t, constructor_kwargs=constructor_kwargs):
-            return nllloss_reference(i, t, **constructor_kwargs)
+            kwargs = materialize(constructor_kwargs)
+            return nllloss_reference(i, t, **kwargs)
+
+        def input_generator(shape, device, dtype, **kwargs):
+            return make_tensor(shape, device=device, dtype=dtype, requires_grad=requires_grad).log_softmax(dim=1)
+
+        def target_generator(shape, device, dtype, **kwargs):
+            return torch.empty(shape, device=device).uniform_().mul(10).floor().long()
 
         module_inputs.append(
             ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
-                        forward_input=FunctionInput(make_input((15, 10)).log_softmax(dim=1),
-                                                    torch.empty(15, device=device).uniform_().mul(10).floor().long()),
+                        forward_input=FunctionInput(LazyMakeTensor((15, 10), device, dtype, input_generator),
+                                                    LazyMakeTensor((15), device=device, dtype=torch.long, generator=target_generator)),
                         desc=desc,
                         reference_fn=reference_fn)
         )
@@ -261,7 +305,7 @@ def generate_regression_criterion_inputs(make_input):
 
 
 def module_inputs_torch_nn_AvgPool1d(module_info, device, dtype, requires_grad, **kwargs):
-    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_input = partial(LazyMakeTensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     return [
         ModuleInput(constructor_input=FunctionInput(kernel_size=2),
@@ -271,7 +315,7 @@ def module_inputs_torch_nn_AvgPool1d(module_info, device, dtype, requires_grad, 
 
 
 def module_inputs_torch_nn_ELU(module_info, device, dtype, requires_grad, **kwargs):
-    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_input = partial(LazyMakeTensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     return [
         ModuleInput(constructor_input=FunctionInput(alpha=2.),
@@ -287,7 +331,7 @@ def module_inputs_torch_nn_ELU(module_info, device, dtype, requires_grad, **kwar
 
 
 def module_inputs_torch_nn_CELU(module_info, device, dtype, requires_grad, **kwargs):
-    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_input = partial(LazyMakeTensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     return [
         ModuleInput(constructor_input=FunctionInput(alpha=2.),
@@ -303,15 +347,15 @@ def module_inputs_torch_nn_CELU(module_info, device, dtype, requires_grad, **kwa
                     reference_fn=no_batch_dim_reference_fn)]
 
 def module_inputs_torch_nn_ReLU(module_info, device, dtype, requires_grad):
-    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_input = partial(LazyMakeTensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     module_inputs = [
         ModuleInput(constructor_input=FunctionInput(),
-                    forward_input=FunctionInput(make_input((2, 3, 4, 5))),
+                    forward_input=FunctionInput(make_input(shape=(2, 3, 4, 5))),
                     test_cpp_parity=True,
                     ),
         ModuleInput(constructor_input=FunctionInput(),
-                    forward_input=FunctionInput(make_input(4)),
+                    forward_input=FunctionInput(make_input(shape=(4))),
                     test_cpp_parity=True,
                     desc='no_batch_dim'),
     ]
@@ -319,8 +363,7 @@ def module_inputs_torch_nn_ReLU(module_info, device, dtype, requires_grad):
 
 
 def module_inputs_torch_nn_L1Loss(module_info, device, dtype, requires_grad, **kwargs):
-    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-
+    make_input = partial(LazyMakeTensor, device=device, dtype=dtype, requires_grad=requires_grad)
     return [
         ModuleInput(constructor_input=FunctionInput(),
                     forward_input=FunctionInput(make_input(shape=(2, 3, 4)),
@@ -336,7 +379,7 @@ def module_inputs_torch_nn_L1Loss(module_info, device, dtype, requires_grad, **k
 
 
 def module_inputs_torch_nn_Hardswish(module_info, device, dtype, requires_grad, **kwargs):
-    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_input = partial(LazyMakeTensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     return [
         ModuleInput(
@@ -349,7 +392,7 @@ def module_inputs_torch_nn_Hardswish(module_info, device, dtype, requires_grad, 
 
 
 def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, requires_grad, **kwargs):
-    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_input = partial(LazyMakeTensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     return [
         ModuleInput(
@@ -372,15 +415,25 @@ def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, r
 
 
 def module_inputs_torch_nn_Embedding(module_info, device, dtype, requires_grad, **kwargs):
-    make_empty = partial(torch.empty, device=device, dtype=torch.long, requires_grad=False)
+    def generator(shape, device, dtype, **kwargs):
+        return torch.empty(*shape, device=device, dtype=dtype).random_(4)
+
+    input = LazyMakeTensor((2, 3), device=device, dtype=torch.long, generator=generator, requires_grad=False)
+
+    def noncontig_generator(shape, device, dtype, **kwargs):
+        return torch.empty(*shape, device=device, dtype=dtype, **kwargs).random_(4).expand(7, 512)
+
+    input_noncontig = LazyMakeTensor((1, 512), device=device, dtype=torch.long,
+                                     generator=noncontig_generator, requires_grad=False)
+
     return [
         ModuleInput(
             constructor_input=FunctionInput(num_embeddings=4, embedding_dim=3),
-            forward_input=FunctionInput(make_empty(2, 3).random_(4))
+            forward_input=FunctionInput(input)
         ),
         ModuleInput(
             constructor_input=FunctionInput(num_embeddings=4, embedding_dim=3),
-            forward_input=FunctionInput(make_empty(1, 512).random_(4).expand(7, 512)),
+            forward_input=FunctionInput(input_noncontig),
             desc='discontiguous'
         ),
     ]

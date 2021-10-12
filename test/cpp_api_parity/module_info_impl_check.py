@@ -51,6 +51,7 @@ def process_test_params_for_module(module_info, sample, device):
         module_variant_name=module_variant_name,
         module_info=module_info,
         sample=sample,
+        compute_materialized_arg_dict=compute_arg_dict,
         cpp_constructor_args=getattr(sample, 'cpp_constructor_args', ''),
         arg_dict=arg_dict,
         has_parity=True,
@@ -81,8 +82,10 @@ def write_test_to_test_class(
                 unit_test_class.module_info_test_params_map[unit_test_name] = test_params
 
                 def test_fn(self):
+                    params = unit_test_class.module_info_test_params_map[self._testMethodName]
+                    params.sample.materialize()
                     test_forward_backward(
-                        unit_test_class=self, test_params=unit_test_class.module_info_test_params_map[self._testMethodName],
+                        unit_test_class=self, test_params=params,
                         cpp_module=unit_test_class.module_info_impl_check_cpp_module)
 
                 test_fn = decorate_test_fn(
