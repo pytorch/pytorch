@@ -97,6 +97,11 @@ void initTensorExprBindings(PyObject* module) {
           .def(py::self ^ py::self)
           .def(py::self << py::self)
           .def(py::self >> py::self)
+          .def(
+              "__pow__",
+              [](const ExprHandle& self, const ExprHandle& other) {
+                return pow(self, other);
+              })
           .def("sin", [](const ExprHandle& self) { return sin(self); })
           .def("cos", [](const ExprHandle& self) { return cos(self); })
           .def("tan", [](const ExprHandle& self) { return tan(self); })
@@ -114,7 +119,14 @@ void initTensorExprBindings(PyObject* module) {
               [](const ExprHandle& self) { return tensorexpr::abs(self); })
           .def("log", [](const ExprHandle& self) { return log(self); })
           .def(
+              "fast_tanh",
+              [](const ExprHandle& self) { return fast_tanh(self); })
+          .def(
+              "fast_sigmoid",
+              [](const ExprHandle& self) { return fast_sigmoid(self); })
+          .def(
               "fast_log", [](const ExprHandle& self) { return fast_log(self); })
+          .def("log_vml", [](const ExprHandle& self) { return log_vml(self); })
           .def("log2", [](const ExprHandle& self) { return log2(self); })
           .def("log10", [](const ExprHandle& self) { return log10(self); })
           .def("log1p", [](const ExprHandle& self) { return log1p(self); })
