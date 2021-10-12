@@ -560,12 +560,12 @@ struct DefaultCUDAAllocator final : public at::Allocator {
           // some models that are currently running with the thc
           // allocator fit in memory.  We will need to find some
           // way of resolving this problem.
-          cuda::CUDAStreamGuard g(
+          caffe2::cuda::CUDAStreamGuard g(
             Stream(
               Stream::DEFAULT,
               Device(kCUDA, CaffeCudaGetDevice())
             ));
-          ptr = cuda::CUDACachingAllocator::raw_alloc(nbytes);
+          ptr = caffe2::cuda::CUDACachingAllocator::raw_alloc(nbytes);
         }
         if (FLAGS_caffe2_gpu_memory_tracking) {
           g_size_map[ptr] = nbytes;
@@ -624,7 +624,7 @@ struct DefaultCUDAAllocator final : public at::Allocator {
         break;
       }
       case CudaMemoryPoolType::THC: {
-        cuda::CUDACachingAllocator::raw_delete(ptr);
+        caffe2::cuda::CUDACachingAllocator::raw_delete(ptr);
         if (FLAGS_caffe2_gpu_memory_tracking) {
           g_cuda_device_affiliation.erase(g_cuda_device_affiliation.find(ptr));
         }
