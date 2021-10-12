@@ -3083,7 +3083,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('renorm'),
         xfail('repeat_interleave'),
         xfail('resize_as_'),
-        xfail('scatter'),
         xfail('take'),
         xfail('take_along_dim'),
         xfail('tensor_split'),
