@@ -4,11 +4,15 @@
 
 #include <c10/macros/Macros.h>
 
+#if defined(__CUDACC__)
+#include <cuda.h>  // for CUDA_VERSION
+#endif
+
 #if defined(__CUDACC__) || defined(__HIPCC__)
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11030
 #define USE_LIBCUDACXX() true
 #define USE_THRUST() false
-#define IMPL_NAMESPACE() cuda::std
+#define IMPL_NAMESPACE() ::cuda::std
 #else
 #define USE_LIBCUDACXX() false
 #define USE_THRUST() true
