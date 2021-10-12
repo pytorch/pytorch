@@ -5,7 +5,7 @@ import runpy
 import threading
 from collections import namedtuple
 from enum import Enum
-from functools import wraps, partial
+from functools import wraps
 from typing import List, Any, ClassVar, Optional, Sequence, Tuple
 import unittest
 import os
@@ -745,71 +745,6 @@ class ops(_TestParametrizer):
                     # Provides an error message for debugging before rethrowing the exception
                     print("Failed to instantiate {0} for op {1}!".format(test_name, op.name))
                     raise ex
-
-# Decorator that generates two set of tests with layout=torch.strided and layout=specified_layout.
-# All keyword arguments are used only for the specified layout, so they have no effect on the original test.
-class addLayout(_TestParametrizer):
-    def __init__(self, layout: torch.layout, *,
-                 dtypes: Optional[Sequence[torch.dtype]] = None,
-                 dtypes_cpu: Optional[Sequence[torch.dtype]] = None,
-                 dtypes_cuda: Optional[Sequence[torch.dtype]] = None,
-                 only_cuda: bool = False,
-                 skip_cuda_if_no_cusparse: bool = True):
-        if not isinstance(layout, torch.layout):
-            raise RuntimeError(f"Expected to get torch.layout as layout, but got {type(layout)} instead.")
-        if layout == torch.strided:
-            raise RuntimeError("This test parametrization is not intended to be used with torch.strided layout.")
-        self.handles_dtypes = True
-        self.layout = layout
-        self.dtypes = set(dtypes) if dtypes is not None else None
-        self.dtypes_cpu = set(dtypes_cpu) if dtypes_cpu is not None else None
-        self.dtypes_cuda = set(dtypes_cuda) if dtypes_cuda is not None else None
-        self.only_cuda = only_cuda
-        self.skip_cuda_if_no_cusparse = skip_cuda_if_no_cusparse
-
-    def _parametrize_test(self, test, generic_cls, device_cls):
-        """ Parameterizes the given test function with boolean sparse_csr flag. """
-        for layout in (torch.strided, self.layout):
-            # get dtypes specified with @dtypes, @dtypesIfCPU, @dtypesIfCUDA
-            dtypes = set(device_cls._get_dtypes(test))
-
-            # replace dtypes only with non-default layout
-            non_default_layout = (layout != torch.strided)
-            if non_default_layout:
-                if self.dtypes_cpu is not None and device_cls.device_type == 'cpu':
-                    dtypes = self.dtypes_cpu
-                if self.dtypes_cuda is not None and device_cls.device_type == 'cuda':
-                    dtypes = self.dtypes_cuda
-                elif self.dtypes is not None:
-                    dtypes = self.dtypes
-
-            for dtype in dtypes:
-                # Construct the test name
-                layout_str = str(layout).replace('torch.', '')
-                dtype_suffix = _dtype_test_suffix(dtype) if non_default_layout else _dtype_test_suffix(dtype)[1:]
-                test_name = f"{layout_str if non_default_layout else ''}{dtype_suffix}"
-
-                # Construct parameter kwargs to pass to the test
-                param_kwargs = {'layout': layout}
-                _update_param_kwargs(param_kwargs, 'dtype', dtype)
-
-                active_decorators = []
-                if non_default_layout and self.skip_cuda_if_no_cusparse:
-                    active_decorators.append(skipCUDAIfNoCusparseGeneric)
-
-                if non_default_layout and self.only_cuda:
-                    active_decorators.append(onlyCUDA)
-
-                @wraps(test)
-                def test_wrapper(*args, **kwargs):
-                    return test(*args, **kwargs)
-
-                for decorator in active_decorators:
-                    test_wrapper = decorator(test_wrapper)
-
-                yield (test_wrapper, test_name, param_kwargs)
-
-addLayoutSparseCSR = partial(addLayout, torch.sparse_csr)
 
 # Decorator that skips a test if the given condition is true.
 # Notes:
