@@ -60,10 +60,10 @@ cc_library(
         "c10/util/*.hpp",
     ]),
     deps = [
-        ":cmake_macros_h",
-        ":cuda_cmake_macros_h",
         "@com_github_gflags_gflags//:gflags",
         "@com_github_glog//:glog",
+        ":cmake_macros_h",
+        ":cuda_cmake_macros_h",
     ],
 )
 
@@ -79,12 +79,16 @@ cc_library(
             "c10/cuda/*.cpp",
             "c10/cuda/impl/*.cpp",
         ]),
+        [],
     ),
     copts = ["-DCAFFE2_BUILD_MAIN_LIB"],
     deps = [
         ":c10_headers",
         "@fmt",
-    ] + if_cuda(["@cuda"]),
+    ] + if_cuda(
+        ["@cuda"],
+        [],
+    ),
     alwayslink = True,
 )
 
@@ -111,7 +115,7 @@ py_binary(
     name = "gen",
     srcs = ["tools/setup_helpers/gen.py"],
     deps = [
-        ":tools_codegen",
+        ":tools_codegen"
     ],
 )
 
@@ -208,42 +212,42 @@ py_binary(
 )
 
 libtorch_cpp_generated_sources = [
-    "torch/csrc/autograd/generated/VariableType.h",
-    "torch/csrc/autograd/generated/VariableType_0.cpp",
-    "torch/csrc/autograd/generated/VariableType_1.cpp",
-    "torch/csrc/autograd/generated/VariableType_2.cpp",
-    "torch/csrc/autograd/generated/VariableType_3.cpp",
-    "torch/csrc/autograd/generated/VariableType_4.cpp",
-    # "torch/csrc/autograd/generated/VariableTypeEverything.cpp",
-    "torch/csrc/autograd/generated/TraceType_0.cpp",
-    "torch/csrc/autograd/generated/TraceType_1.cpp",
-    "torch/csrc/autograd/generated/TraceType_2.cpp",
-    "torch/csrc/autograd/generated/TraceType_3.cpp",
-    "torch/csrc/autograd/generated/TraceType_4.cpp",
-    # "torch/csrc/autograd/generated/TraceTypeEverything.cpp",
-    "torch/csrc/autograd/generated/ADInplaceOrViewType_0.cpp",
-    "torch/csrc/autograd/generated/ADInplaceOrViewType_1.cpp",
-    # "torch/csrc/autograd/generated/ADInplaceOrViewTypeEverything.cpp",
-    "torch/csrc/autograd/generated/Functions.h",
-    "torch/csrc/autograd/generated/Functions.cpp",
-    "torch/csrc/autograd/generated/variable_factories.h",
+        "torch/csrc/autograd/generated/VariableType.h",
+        "torch/csrc/autograd/generated/VariableType_0.cpp",
+        "torch/csrc/autograd/generated/VariableType_1.cpp",
+        "torch/csrc/autograd/generated/VariableType_2.cpp",
+        "torch/csrc/autograd/generated/VariableType_3.cpp",
+        "torch/csrc/autograd/generated/VariableType_4.cpp",
+        # "torch/csrc/autograd/generated/VariableTypeEverything.cpp",
+        "torch/csrc/autograd/generated/TraceType_0.cpp",
+        "torch/csrc/autograd/generated/TraceType_1.cpp",
+        "torch/csrc/autograd/generated/TraceType_2.cpp",
+        "torch/csrc/autograd/generated/TraceType_3.cpp",
+        "torch/csrc/autograd/generated/TraceType_4.cpp",
+        # "torch/csrc/autograd/generated/TraceTypeEverything.cpp",
+        "torch/csrc/autograd/generated/ADInplaceOrViewType_0.cpp",
+        "torch/csrc/autograd/generated/ADInplaceOrViewType_1.cpp",
+        # "torch/csrc/autograd/generated/ADInplaceOrViewTypeEverything.cpp",
+        "torch/csrc/autograd/generated/Functions.h",
+        "torch/csrc/autograd/generated/Functions.cpp",
+        "torch/csrc/autograd/generated/variable_factories.h",
 ]
 
 libtorch_python_generated_sources = [
-    "torch/csrc/autograd/generated/python_functions.h",
-    "torch/csrc/autograd/generated/python_functions_0.cpp",
-    "torch/csrc/autograd/generated/python_functions_1.cpp",
-    "torch/csrc/autograd/generated/python_functions_2.cpp",
-    "torch/csrc/autograd/generated/python_functions_3.cpp",
-    "torch/csrc/autograd/generated/python_functions_4.cpp",
-    "torch/csrc/autograd/generated/python_variable_methods.cpp",
-    "torch/csrc/autograd/generated/python_torch_functions_0.cpp",
-    "torch/csrc/autograd/generated/python_torch_functions_1.cpp",
-    "torch/csrc/autograd/generated/python_torch_functions_2.cpp",
-    "torch/csrc/autograd/generated/python_nn_functions.cpp",
-    "torch/csrc/autograd/generated/python_fft_functions.cpp",
-    "torch/csrc/autograd/generated/python_linalg_functions.cpp",
-    "torch/csrc/autograd/generated/python_special_functions.cpp",
+        "torch/csrc/autograd/generated/python_functions.h",
+        "torch/csrc/autograd/generated/python_functions_0.cpp",
+        "torch/csrc/autograd/generated/python_functions_1.cpp",
+        "torch/csrc/autograd/generated/python_functions_2.cpp",
+        "torch/csrc/autograd/generated/python_functions_3.cpp",
+        "torch/csrc/autograd/generated/python_functions_4.cpp",
+        "torch/csrc/autograd/generated/python_variable_methods.cpp",
+        "torch/csrc/autograd/generated/python_torch_functions_0.cpp",
+        "torch/csrc/autograd/generated/python_torch_functions_1.cpp",
+        "torch/csrc/autograd/generated/python_torch_functions_2.cpp",
+        "torch/csrc/autograd/generated/python_nn_functions.cpp",
+        "torch/csrc/autograd/generated/python_fft_functions.cpp",
+        "torch/csrc/autograd/generated/python_linalg_functions.cpp",
+        "torch/csrc/autograd/generated/python_special_functions.cpp",
 ]
 
 genrule(
@@ -259,14 +263,14 @@ genrule(
 
 filegroup(
     name = "cpp_generated_code",
-    srcs = libtorch_cpp_generated_sources,
     data = [":all_generated_code"],
+    srcs = libtorch_cpp_generated_sources,
 )
 
 filegroup(
     name = "python_generated_code",
-    srcs = libtorch_python_generated_sources,
     data = [":all_generated_code"],
+    srcs = libtorch_python_generated_sources,
 )
 
 exports_files(
@@ -276,13 +280,11 @@ exports_files(
 # ATen
 filegroup(
     name = "aten_base_cpp",
-    srcs = glob(
-        [
-            "aten/src/ATen/*.cpp",
-            "aten/src/ATen/detail/*.cpp",
-            "aten/src/ATen/cpu/*.cpp",
-        ],
-    ),
+    srcs = glob([
+        "aten/src/ATen/*.cpp",
+        "aten/src/ATen/detail/*.cpp",
+        "aten/src/ATen/cpu/*.cpp",
+    ]),
 )
 
 filegroup(
@@ -452,17 +454,16 @@ cc_library(
         "aten/src/ATen/cuda/CUDAConfig.h",
         "torch/csrc/WindowsTorchApiMacro.h",
         "torch/csrc/jit/frontend/function_schema_parser.h",
-    ] + glob(
-        [
-            "aten/src/**/*.h",
-            "aten/src/**/*.hpp",
-            "aten/src/ATen/cuda/**/*.cuh",
-            "aten/src/ATen/native/**/*.cuh",
-            "aten/src/TH/**/*.cpp",
-            "aten/src/THC/**/*.cpp",
-            "aten/src/THC/*.cuh",
-            "aten/src/THC/generic/*.cu",
-        ],
+    ] + glob([
+        "aten/src/**/*.h",
+        "aten/src/**/*.hpp",
+        "aten/src/ATen/cuda/**/*.cuh",
+        "aten/src/ATen/native/**/*.cuh",
+        "aten/src/TH/**/*.cpp",
+        "aten/src/THC/**/*.cpp",
+        "aten/src/THC/*.cuh",
+        "aten/src/THC/generic/*.cu",
+    ],
     ) + [
         ":aten_src_ATen_config",
         ":generated_cpp",
@@ -472,9 +473,9 @@ cc_library(
         "aten/src",
     ],
     deps = [
-        ":aten_src_THC_THCGeneral",
-        ":aten_src_TH_THGeneral",
         ":c10_headers",
+        ":aten_src_TH_THGeneral",
+        ":aten_src_THC_THCGeneral",
     ],
 )
 
@@ -493,9 +494,9 @@ intern_build_aten_ops(
     copts = ATEN_COPTS,
     deps = [
         ":aten_headers",
+        "@sleef",
         "@fbgemm",
         "@mkl",
-        "@sleef",
     ],
 )
 
@@ -532,7 +533,10 @@ cc_library(
         ":generated_cpp",
     ],
     copts = ATEN_COPTS,
-    data = if_cuda([":libcaffe2_nvrtc.so"]),
+    data = if_cuda(
+        [":libcaffe2_nvrtc.so"],
+        [],
+    ),
     visibility = ["//visibility:public"],
     deps = [
         ":ATen_CPU",
@@ -1480,8 +1484,8 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":c10_headers",
-        ":caffe2_core_macros_h",
         ":caffe2_protos",
+        ":caffe2_core_macros_h",
     ],
 )
 
@@ -1711,8 +1715,8 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        ":c10",
         ":caffe2_headers",
+        ":c10",
     ],
     alwayslink = True,
 )
@@ -1730,8 +1734,8 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        ":c10",
         ":caffe2_headers",
+        ":c10",
     ],
     alwayslink = True,
 )
@@ -1752,8 +1756,8 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        ":c10",
         ":caffe2_headers",
+        ":c10",
     ],
     alwayslink = True,
 )
@@ -1766,13 +1770,10 @@ py_binary(
 
 genrule(
     name = "version_h",
-    srcs = [
-        "torch/csrc/api/include/torch/version.h.in",
-        "version.txt",
-    ],
+    srcs = ["torch/csrc/api/include/torch/version.h.in", "version.txt"],
     outs = ["torch/csrc/api/include/torch/version.h"],
     cmd = "$(location :gen_version_header) --template-path $(location torch/csrc/api/include/torch/version.h.in) --version-path $(location version.txt) --output-path $@",
-    tools = [":gen_version_header"],
+    tools = [':gen_version_header'],
 )
 
 py_binary(
@@ -1813,10 +1814,7 @@ cc_library(
             "torch/csrc/autograd/generated/variable_factories.h",
             "torch/csrc/autograd/generated/Functions.h",
         ] + torch_cuda_headers,
-    ) + [
-        ":cpp_generated_code",
-        ":version_h",
-    ],
+    ) + [":cpp_generated_code", ":version_h"],
     includes = [
         "torch/csrc",
         "torch/csrc/api/include",
@@ -1910,8 +1908,8 @@ cc_library(
     name = "torch_python",
     srcs = libtorch_python_core_sources + [":python_generated_code"],
     deps = [
-        ":shm",
         ":torch",
+        ":shm",
         "@pybind11",
     ],
 )
@@ -1920,7 +1918,7 @@ pybind_extension(
     name = "_C",
     srcs = ["torch/csrc/stub.c"],
     deps = [
-        ":torch_python",
+        ":torch_python"
     ],
 )
 
@@ -1953,16 +1951,15 @@ cpp_api_tests = glob(
 )
 
 [
-    cc_test(
-        name = paths.split_extension(paths.basename(filename))[0].replace("-", "_") + "_test",
-        size = "medium",
-        srcs = [filename],
-        deps = [
-            ":test_support",
-            "@com_google_googletest//:gtest_main",
-        ],
-    )
-    for filename in cpp_api_tests
+  cc_test(
+      name = paths.split_extension(paths.basename(filename))[0].replace("-","_") + "_test",
+      size = "medium",
+      srcs = [filename],
+      deps = [
+          ":test_support",
+          "@com_google_googletest//:gtest_main",
+      ],
+  ) for filename in cpp_api_tests
 ]
 
 test_suite(
