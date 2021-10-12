@@ -3816,10 +3816,9 @@ def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False, **kw
     out = []
     for batch in ((), (3,), (3, 3)):
         shape = batch + (3, 3)
-        # NOTE: inputs are not marked with `requires_grad` since
-        # linalg_lstsq is not differentiable
         a = random_well_conditioned_matrix(*shape, dtype=dtype, device=device)
-        b = make_tensor(shape, device, dtype, low=None, high=None)
+        a.requires_grad = requires_grad
+        b = make_tensor(shape, device, dtype, low=None, high=None, requires_grad=requires_grad)
         out.append(SampleInput(a, args=(b,)))
     return out
 
