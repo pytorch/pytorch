@@ -2990,8 +2990,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('hsplit'),
         xfail('nn.functional.pad', 'circular'),
         xfail('resize_as_'),
-        xfail('resolve_conj'),
-        xfail('resolve_neg'),
         xfail('tensor_split'),
         xfail('to_sparse'),
         xfail('vsplit'),
@@ -3032,7 +3030,6 @@ class TestVmapOperatorsOpInfo(TestCase):
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', {
-        # xfail('__getitem__'),
         xfail('cdist'),
         xfail('complex'),
         xfail('copysign'),
@@ -3087,8 +3084,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('renorm'),
         xfail('repeat_interleave'),
         xfail('resize_as_'),
-        xfail('resolve_conj'),
-        xfail('resolve_neg'),
+        xfail('scatter'),
         xfail('take'),
         xfail('take_along_dim'),
         xfail('tensor_split'),
