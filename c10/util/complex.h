@@ -281,7 +281,8 @@ struct alignas(sizeof(T) * 2) complex {
 
 #if USE_LIBCUDACXX() || USE_THRUST()
   template <typename U>
-  C10_HOST_DEVICE complex<T>& operator=(const IMPL_NAMESPACE()::complex<U>& rhs) {
+  C10_HOST_DEVICE complex<T>& operator=(
+    const IMPL_NAMESPACE()::complex<U>& rhs) {
     real_ = rhs.real();
     imag_ = rhs.imag();
     return *this;
@@ -296,7 +297,8 @@ struct alignas(sizeof(T) * 2) complex {
 #if USE_LIBCUDACXX() || USE_THRUST()
   template <typename U>
   C10_HOST_DEVICE explicit operator IMPL_NAMESPACE()::complex<U>() const {
-    return static_cast<IMPL_NAMESPACE()::complex<U>>(IMPL_NAMESPACE()::complex<T>(real(), imag()));
+    return static_cast<IMPL_NAMESPACE()::complex<U>>(
+      IMPL_NAMESPACE()::complex<T>(real(), imag()));
   }
 #endif
 

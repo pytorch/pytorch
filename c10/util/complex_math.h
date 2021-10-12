@@ -63,7 +63,8 @@ C10_HOST_DEVICE inline c10::complex<T> pow(
     const c10::complex<T>& x,
     const c10::complex<T>& y) {
   return static_cast<c10::complex<T>>(IMPL_NAMESPACE()::pow(
-      static_cast<IMPL_NAMESPACE()::complex<T>>(x), static_cast<IMPL_NAMESPACE()::complex<T>>(y)));
+      static_cast<IMPL_NAMESPACE()::complex<T>>(x),
+      static_cast<IMPL_NAMESPACE()::complex<T>>(y)));
 }
 
 template <typename T>
@@ -87,7 +88,8 @@ C10_HOST_DEVICE inline c10::complex<decltype(T() * U())> pow(
     const c10::complex<T>& x,
     const c10::complex<U>& y) {
   return static_cast<c10::complex<T>>(IMPL_NAMESPACE()::pow(
-      static_cast<IMPL_NAMESPACE()::complex<T>>(x), static_cast<IMPL_NAMESPACE()::complex<T>>(y)));
+      static_cast<IMPL_NAMESPACE()::complex<T>>(x),
+      static_cast<IMPL_NAMESPACE()::complex<T>>(y)));
 }
 
 template <typename T, typename U>
@@ -135,8 +137,8 @@ C10_HOST_DEVICE inline c10::complex<T> asin(const c10::complex<T>& x) {
 template <typename T>
 C10_HOST_DEVICE inline c10::complex<T> acos(const c10::complex<T>& x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  return static_cast<c10::complex<T>>(IMPL_NAMESPACE()::acos(
-      static_cast<IMPL_NAMESPACE()::complex<T>>(x)));
+  return static_cast<c10::complex<T>>(
+    IMPL_NAMESPACE()::acos(static_cast<IMPL_NAMESPACE()::complex<T>>(x)));
 #elif !defined(_LIBCPP_VERSION)
   return static_cast<c10::complex<T>>(
       std::acos(static_cast<std::complex<T>>(x)));
