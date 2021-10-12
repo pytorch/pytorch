@@ -1,11 +1,11 @@
 #include <cfloat>
-#include "caffe2/utils/cub_namespace.cuh"
 #include <cub/block/block_reduce.cuh>
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/softmax_op.h"
 #include "caffe2/operators/softmax_with_loss_op.h"
 #include "caffe2/operators/spatial_softmax_with_loss_op.h"
+#include "caffe2/utils/cub_namespace.cuh"
 
 namespace caffe2 {
 

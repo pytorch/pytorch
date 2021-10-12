@@ -1618,7 +1618,7 @@ if(NOT INTERN_BUILD_MOBILE)
     set(CMAKE_CXX_STANDARD 14)
   endif()
 
-  if(NOT ${CUDA_VERSION} LESS 11.6)
+  if(NOT ${CUDA_VERSION} LESS 11.5)
     string(APPEND CMAKE_CUDA_FLAGS " -DCUB_WRAPPED_NAMESPACE=at_cuda_detail")
   endif()
 

@@ -1,11 +1,11 @@
 #include <algorithm>
 
-#include "caffe2/utils/cub_namespace.cuh"
 #include <cub/block/block_reduce.cuh>
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/normalize_l1_op.h"
 #include "caffe2/operators/normalize_op.h"
+#include "caffe2/utils/cub_namespace.cuh"
 
 namespace caffe2 {
 
