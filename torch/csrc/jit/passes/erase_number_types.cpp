@@ -8,9 +8,9 @@ namespace torch {
 namespace jit {
 
 void SetNumTypeToTensorType(Value* v) {
-  if (v->type()->isSubtypeOf(NumberType::get())) {
+  if (v->type()->isSubtypeOf(*NumberType::get())) {
     v->setType(TensorType::fromNumberType(v->type()));
-  } else if (v->type()->isSubtypeOf(BoolType::get())) {
+  } else if (v->type()->isSubtypeOf(*BoolType::get())) {
     v->setType(TensorType::fromBoolType());
   }
 }
@@ -28,10 +28,10 @@ void EraseNumberTypesOnBlock(Block* block) {
       case prim::Constant: {
         // remove primitive constants, replacing with tensor equivalent
         // ONNX does not support non-tensor constants
-        if (it->output()->type()->isSubtypeOf(NumberType::get()) ||
-            it->output()->type()->isSubtypeOf(BoolType::get())) {
+        if (it->output()->type()->isSubtypeOf(*NumberType::get()) ||
+            it->output()->type()->isSubtypeOf(*BoolType::get())) {
           at::Scalar s;
-          if (it->output()->type()->isSubtypeOf(BoolType::get())) {
+          if (it->output()->type()->isSubtypeOf(*BoolType::get())) {
             s = *constant_as<bool>(it->output());
           } else {
             s = *constant_as<at::Scalar>(it->output());
