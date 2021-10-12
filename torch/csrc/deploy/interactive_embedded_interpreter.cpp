@@ -3,6 +3,7 @@
  * state of the embedding interpreter interactively.
  */
 #include <torch/csrc/deploy/deploy.h>
+#include <glog/logging.h>
 
 DEFINE_string(
     python_path,
