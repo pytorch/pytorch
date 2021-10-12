@@ -45,7 +45,7 @@ TORCH_API c10::complex<double> acos(const c10::complex<double>& in);
 
 template <typename T>
 C10_HOST_DEVICE inline c10::complex<T> sqrt(const c10::complex<T>& x) {
-#if defined(__CUDACC__) || defined(__HIPCC__)
+#if defined(__CUDA_ARCH__) || defined(__HIPCC__)
   return static_cast<c10::complex<T>>(
       IMPL_NAMESPACE()::sqrt(static_cast<IMPL_NAMESPACE()::complex<T>>(x)));
 #elif !(                        \
@@ -136,7 +136,7 @@ C10_HOST_DEVICE inline c10::complex<T> asin(const c10::complex<T>& x) {
 
 template <typename T>
 C10_HOST_DEVICE inline c10::complex<T> acos(const c10::complex<T>& x) {
-#if defined(__CUDACC__) || defined(__HIPCC__)
+#if defined(__CUDA_ARCH__) || defined(__HIPCC__)
   return static_cast<c10::complex<T>>(
       IMPL_NAMESPACE()::acos(static_cast<IMPL_NAMESPACE()::complex<T>>(x)));
 #elif !defined(_LIBCPP_VERSION)
