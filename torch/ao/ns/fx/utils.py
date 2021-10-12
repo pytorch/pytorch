@@ -11,12 +11,12 @@ from typing import Tuple, Callable, Dict, Set, List, Optional, Union
 
 from torch.fx import GraphModule
 from torch.fx.graph import Node
-from torch.quantization import (
+from torch.ao.quantization import (
     ObserverBase,
     FakeQuantizeBase,
 )
-from torch.quantization.utils import getattr_from_fqn
-from torch.quantization.quantize import is_activation_post_process
+from torch.ao.quantization.utils import getattr_from_fqn
+from torch.ao.quantization.quantize import is_activation_post_process
 
 from .ns_types import NSNodeTargetType, NSResultsType
 
