@@ -221,6 +221,16 @@ class TestFX(JitTestCase):
         x, y = torch.rand(1), torch.rand(1)
         self.assertEqual(torch.sin(x + y), gm(x, y))
 
+    def test_many_modules(self):
+        graph = torch.fx.Graph()
+        # When dict is used to select new name, this test will finish in <10 sec.
+        # When complexity is worse (N^2 due to bug) the timing will blow up and
+        # test will fail.
+        N = 300000
+        for _ in range(N):
+            _ = graph.placeholder("a")
+        self.assertEqual(graph._graph_namespace._used_names["a"], N)
+
     def test_args_kwargs(self):
         class T(torch.nn.Module):
             def forward(self, *args, **kwargs):

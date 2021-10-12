@@ -138,12 +138,22 @@ class _Namespace:
 
         candidate = base if num is None else f'{base}_{num}'
         num = num if num else 0
+        # Get the next available index if ever set.
+        num = max(num + 1, self._used_names.get(base, num + 1))
 
-        while candidate in self._used_names or self._is_illegal_name(candidate, obj):
-            num += 1
+        if candidate in self._used_names or self._is_illegal_name(candidate, obj):
+            # we can have a situation when num was parsed but such candidate
+            # already exists. This will advance to next available index ignoring
+            # parsed num.
             candidate = f'{base}_{num}'
+            num += 1
+            if candidate in self._used_names or self._is_illegal_name(candidate, obj):
+                raise RuntimeError(
+                    "System error, module with this name already exists! %s" % candidate
+                )
 
         self._used_names.setdefault(candidate)
+        self._used_names[base] = num
         if obj is None:
             self._unassociated_names.add(candidate)
         else:
