@@ -1618,6 +1618,8 @@ if(NOT INTERN_BUILD_MOBILE)
     set(CMAKE_CXX_STANDARD 14)
   endif()
 
+  # use cub in a safe manner, see:
+  # https://github.com/pytorch/pytorch/pull/55292
   if(NOT ${CUDA_VERSION} LESS 11.5)
     string(APPEND CMAKE_CUDA_FLAGS " -DCUB_WRAPPED_NAMESPACE=at_cuda_detail")
   endif()

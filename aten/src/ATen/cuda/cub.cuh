@@ -13,6 +13,8 @@
 
 #else
 
+// include cub in a safe manner, see:
+// https://github.com/pytorch/pytorch/pull/55292
 #undef CUB_NS_POSTFIX //undef to avoid redefinition warnings
 #undef CUB_NS_PREFIX
 #undef CUB_NS_QUALIFIER
