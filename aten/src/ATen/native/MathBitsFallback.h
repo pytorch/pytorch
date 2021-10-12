@@ -37,13 +37,13 @@ struct MathOpFallback {
         Note:
         1. Mutable tensorlists containing tensors whose math bit set to true are disallowed.
         2. Mutable tensors with math bit set to true are unconditionally cloned to ensure
-           correct behavior in the case when the mutable tensor shares memory with non mutable arguments. 
-           
+           correct behavior in the case when the mutable tensor shares memory with non mutable arguments.
+
            If we were to in-place resolve the math bit for mutable inputs, then the non-mutable inputs sharing partial or full memory
            with these mutable inputs would read into wrong values in the following cases:
            1. Non mutable inputs have their math bit set to false.
-           2. Math bit for mutable input(s) is resolved before the non mutable inputs (with bit set to true and sharing memory with one or more mutable arg(s)) are cloned.
-           
+           2. Math bit for mutable input(s) is resolved before the non mutable inputs (with bit set to true and sharing memory
+              with one or more mutable arg(s)) are cloned.
            At the end, the final value of the mutable arguments from the stack are copied into the original input mutable tensor inputs.
     */
     const auto& arguments = op.schema().arguments();
@@ -102,9 +102,9 @@ struct MathOpFallback {
         auto resolved_tensor = at::clone(tensor);
         if (mut_arg) {
           TORCH_CHECK(mutable_inputs.empty(), op_name, " fallback does not support operators with more than one mutable tensors with ",
-             op_name, "bit set to true.");
+            op_name, "bit set to true.");
           mutable_inputs.emplace_back(tensor);
-        } 
+        }
         (*stack)[stack_start + i] = std::move(resolved_tensor);
       } else if (ivalue.isTensorList()) {
         auto tensors = std::move(ivalue).toTensorList();
@@ -114,7 +114,8 @@ struct MathOpFallback {
             continue;
           }
           TORCH_CHECK(!mut_arg, " fallback doesn't currently support mutable TensorLists with ",
-              op_name, " inputs. Please materialize all the ", op_name, " input tensor(s) in the mutable TensorList inputs before calling ", op.schema().name());
+              op_name, " inputs. Please materialize all the ", op_name, " input tensor(s) in the mutable TensorList inputs before calling ",
+              op.schema().name());
           tensors[j] = at::clone(tensor);
         }
         (*stack)[stack_start + i] = std::move(tensors);
@@ -129,7 +130,7 @@ struct MathOpFallback {
       auto cloned_tensor = std::move(ivalue).toTensor();
       // necessary for out= arg
       at::native::resize_output(tensor, cloned_tensor.sizes());
-      tensor.copy_(cloned_tensor);  
+      tensor.copy_(cloned_tensor);
       (*stack)[stack_start] = std::move(tensor);
     }
   }
