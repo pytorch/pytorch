@@ -55,6 +55,22 @@ C10_DEFINE_bool(
 namespace torch {
 namespace jit {
 namespace tensorexpr {
+
+
+c10::optional<std::string>& LLVMTargetTriple() {
+  static c10::optional<std::string> triple = c10::nullopt;
+  return triple;
+}
+c10::optional<std::string>& LLVMTargetCPU() {
+  static c10::optional<std::string> cpu = c10::nullopt;
+  return cpu;
+}
+c10::optional<std::string>& LLVMTargetAttrs() {
+  static c10::optional<std::string> cpu = c10::nullopt;
+  return cpu;
+}
+
+
 namespace {
 
 llvm::CmpInst::Predicate llvm_comparison_predicate(
@@ -422,6 +438,18 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
     c10::optional<std::string> cpu,
     c10::optional<std::string> attrs)
     : context_(std::make_unique<llvm::LLVMContext>()), irb_(getContext()) {
+
+  if (!triple) {
+    triple = LLVMTargetTriple();
+  }
+  if (!cpu) {
+    cpu = LLVMTargetCPU();
+    if (cpu)
+      std::cerr << "Using CPU: " << *cpu << "\n";
+  }
+  if (!attrs) {
+    attrs = LLVMTargetAttrs();
+  }
   // Manually map types to LLVM types.
   ByteTy_ = llvm::Type::getInt8Ty(getContext());
   CharTy_ = llvm::Type::getInt8Ty(getContext());
