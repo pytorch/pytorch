@@ -2,7 +2,6 @@
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <ATen/native/vulkan/ops/Common.h>
-#include <ATen/native/vulkan/ops/Persistent.h>
 #include <ATen/native/vulkan/api/Utils.h>
 
 namespace at {
@@ -67,7 +66,6 @@ Conv2dMethod determine_method(
 vTensor pack_weights_dw(
     api::Context* const context,
     api::Command::Buffer& command_buffer,
-    api::Resource::Pool& pool,
     const Tensor& weight) {
   /* Source */
   const IntArrayRef src_filter = weight.sizes();
@@ -86,7 +84,6 @@ vTensor pack_weights_dw(
 
   vTensor v_weight{
       context,
-      &pool,
       {
           4,
           dst_kh_sz,
@@ -128,7 +125,6 @@ vTensor pack_weights_dw(
 vTensor pack_weights_2d(
     api::Context* const context,
     api::Command::Buffer& command_buffer,
-    api::Resource::Pool& pool,
     const Tensor& weight) {
   /* Source */
   const IntArrayRef src_filter = weight.sizes();
@@ -149,7 +145,6 @@ vTensor pack_weights_2d(
 
   vTensor v_weight{
       context,
-      &pool,
       {
           4,
           dst_kh_sz,
@@ -196,7 +191,6 @@ vTensor pack_weights_2d(
 vTensor pack_weights_2d_winograd_2_3(
     api::Context* const context,
     api::Command::Buffer& command_buffer,
-    api::Resource::Pool& pool,
     const Tensor& weight) {
   /* Source */
   const IntArrayRef src_filter = weight.sizes();
@@ -216,7 +210,6 @@ vTensor pack_weights_2d_winograd_2_3(
 
   vTensor v_weight{
       context,
-      &pool,
       {
         4,
         4*dst_oh_sz,
@@ -289,7 +282,6 @@ vTensor pack_weights_2d_winograd_2_3(
 }
 
 vTensor pack_weights(
-    api::Resource::Pool& pool,
     const Tensor& weight_arg,
     const Conv2dMethod conv_method) {
   if (weight_arg.is_vulkan()) {
@@ -305,7 +297,6 @@ vTensor pack_weights(
     return pack_weights_dw(
         context,
         command_buffer,
-        pool,
         weight);
   }
 
@@ -313,19 +304,16 @@ vTensor pack_weights(
     return pack_weights_2d_winograd_2_3(
         context,
         command_buffer,
-        pool,
         weight);
   }
 
   return pack_weights_2d(
       context,
       command_buffer,
-      pool,
       weight);
 }
 
 vTensor pack_biases(
-    api::Resource::Pool& pool,
     const c10::optional<Tensor>& bias,
     const Tensor& weight) {
   if (bias && bias->is_vulkan()) {
@@ -339,7 +327,6 @@ vTensor pack_biases(
   const int64_t packed_w = div_up(src_w, INT64_C(4));
   vTensor v_bias{
     context,
-    &pool,
     {
       4,
       1,
@@ -482,7 +469,6 @@ Tensor convolution(
     const IntArrayRef output_padding,
     const int64_t groups) {
   return Conv2dOpContext::create(
-      api::context()->resource().pool,
       weight,
       bias,
       stride,
@@ -505,7 +491,6 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
 } // namespace
 
 Conv2dOpContext::Conv2dOpContext(
-    api::Resource::Pool& pool,
     const Tensor& weight,
     const c10::optional<Tensor>& bias,
     const IntArrayRef stride,
@@ -518,8 +503,8 @@ Conv2dOpContext::Conv2dOpContext(
     const c10::optional<Scalar>& output_min,
     const c10::optional<Scalar>& output_max)
   : packed_{
-      pack_weights(pool, weight, method),
-      pack_biases(pool, bias, weight),
+      pack_weights(weight, method),
+      pack_biases(bias, weight),
       pack_filter(weight, expand_param_if_needed(dilation, "dilation", 2)),
       pack_params(expand_param_if_needed(stride, "stride", 2)),
       pack_params(expand_param_if_needed(padding, "padding", 2)),
@@ -543,7 +528,6 @@ Conv2dOpContext::Conv2dOpContext(
 }
 
 Conv2dOpContext Conv2dOpContext::create(
-    api::Resource::Pool& pool,
     const Tensor& weight,
     const c10::optional<Tensor>& bias,
     const IntArrayRef stride_arg,
@@ -585,7 +569,6 @@ Conv2dOpContext Conv2dOpContext::create(
 
   // Pass in the originals
   return Conv2dOpContext{
-    pool,
     weight,
     bias,
     stride_arg,
@@ -887,7 +870,6 @@ c10::intrusive_ptr<Conv2dOpContext> conv2d_clamp_prepack(
     const c10::optional<Scalar>& output_max) {
   return c10::make_intrusive<Conv2dOpContext>(
       Conv2dOpContext::create(
-          persistent()->pool,
           std::move(weight),
           std::move(bias),
           std::move(stride),
