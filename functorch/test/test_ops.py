@@ -350,6 +350,7 @@ class TestOperators(TestCase):
         xfail('block_diag'),
         xfail('nn.functional.dropout'),
         xfail('nn.functional.nll_loss'),
+        xfail('nn.functional.max_pool2d', device_type='cuda'),
     }))
     def test_vmapvjp(self, device, dtype, op):
         # These are too annoying to put into the list above
@@ -412,7 +413,6 @@ class TestOperators(TestCase):
         xfail('linalg.matrix_norm'),
         xfail('linalg.matrix_power'),
         xfail('linalg.norm'),
-        xfail('linalg.pinv', 'hermitian'),
         xfail('linalg.slogdet'),
         xfail('linalg.solve'),
         xfail('linalg.tensorinv'),
