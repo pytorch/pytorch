@@ -506,8 +506,8 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   emitKernel(stmt, params);
 
   jit_->addModule(std::move(module_), std::move(context_));
-  auto sym = jit_->findSymbol("wrapper");
-  kernelAddress_ = assertSuccess(sym.getAddress());
+//   auto sym = jit_->findSymbol("wrapper");
+//   kernelAddress_ = assertSuccess(sym.getAddress());
 }
 
 llvm::LLVMContext& LLVMCodeGenImpl::getContext() {

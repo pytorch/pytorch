@@ -70,10 +70,11 @@ torch._C._jit_pass_lower_all_tuples(g)
 print(g)
 
 # Now, compile it with NNC!
+torch._C._te.set_llvm_target_triple("arm-linux")
 kernel = torch._C._te.TensorExprKernel(g)
 print("SUCCESS!")
 print(kernel.get_code_text("asm"))
-# torch._C._te.set_llvm_target_triple("arm-linux")
+torch._C._te.set_llvm_target_triple("x86_64-linux")
 torch._C._te.set_llvm_target_cpu("haswell")
 kernel.recompile()
 print('===================================================================')
