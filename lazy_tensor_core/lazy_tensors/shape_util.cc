@@ -29,9 +29,7 @@ torch::lazy::hash_t ShapeHash(const lazy_tensors::Shape& shape) {
 
 
 torch::lazy::hash_t Hash(const lazy_tensors::Shape& shape) {
-  auto shape_hash = ShapeHash(shape);
-  return c10::uint128(c10::Uint128High64(shape_hash),
-                      c10::Uint128Low64(shape_hash));
+  return ShapeHash(shape);
 }
 }  // namespace lazy
 }  // namespace torch
