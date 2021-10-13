@@ -98,29 +98,6 @@ def batched_fallback(func, subclass, args, kwargs):
 # we check the mode instance for some metadata (the batch_size and the randomness
 # behavior)
 #
-# TODO: right now the torch_dispatch is passed the subclass type object,
-# but I think that's equivalent to `cls`...
-
-def get_torch_dispatch(subclass):
-    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-        ctx = temporarily_pop_mode_stack if mode_stack_size() > 0 else noop
-        with ctx() as (mode_subclass, mode):
-            assert mode_subclass is None or subclass == mode_subclass
-
-            if func == torch.ops.aten.randn and mode is not None:
-                if mode.randomness == 'error':
-                    raise RuntimeError("No randomness allowed")
-                if mode.randomness == 'same':
-                    return func(*args, **kwargs)
-                if mode.randomness == 'different':
-                    args = list(args)
-                    args[0] = [mode.batch_size] + args[0]
-                    return subclass(func(*args, **kwargs), 0)
-
-            return batched_fallback(func, subclass, args, kwargs)
-
-    return __torch_dispatch__
-
 class BatchedTensor(torch.Tensor):
     elem: torch.Tensor
     __torch_function__ = torch._C._disabled_torch_function_impl
@@ -140,15 +117,28 @@ class BatchedTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-        return get_torch_dispatch(BatchedTensor)(cls, func, types, args, kwargs)
+        ctx = temporarily_pop_mode_stack if mode_stack_size() > 0 else noop
+        with ctx() as (mode_subclass, mode):
+            if cls != mode_subclass:
+                import pdb; pdb.set_trace()
+            assert mode_subclass is None or cls == mode_subclass
 
-def gen_batchedtensor_subclass():
-    # Generate a fresh new class on the fly
-    class GeneratedBatchedTensor(BatchedTensor):
-        @classmethod
-        def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-            return get_torch_dispatch(GeneratedBatchedTensor)(cls, func, types, args, kwargs)
-    return GeneratedBatchedTensor
+            if func == torch.ops.aten.randn and mode is not None:
+                if mode.randomness == 'error':
+                    raise RuntimeError("No randomness allowed")
+                if mode.randomness == 'same':
+                    return func(*args, **kwargs)
+                if mode.randomness == 'different':
+                    args = list(args)
+                    args[0] = [mode.batch_size] + args[0]
+                    return cls(func(*args, **kwargs), 0)
+
+            return batched_fallback(func, cls, args, kwargs)
+
+def gen_subclass(cls):
+    class Generated(cls):
+        pass
+    return Generated
 
 # Part 3: VmapMode and functional vmap
 #
@@ -165,7 +155,7 @@ class VmapMode():
         self.randomness = randomness
 
     def __enter__(self):
-        subclass = gen_batchedtensor_subclass()
+        subclass = gen_subclass(BatchedTensor)
         push_mode_stack(subclass, self)
         return subclass
 
@@ -287,42 +277,6 @@ jvp_rules = {
     torch.ops.aten.exp: exp_jvp_rule,
 }
 
-def get_jvp_torch_dispatch(subclass):
-    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-        ctx = temporarily_pop_mode_stack if mode_stack_size() > 0 else noop
-        with ctx() as (mode_subclass, mode):
-            assert mode_subclass is None or subclass == mode_subclass
-
-            flat_args, _ = tree_flatten(args)
-            flat_kwargs, _ = tree_flatten(kwargs)
-            if not any([isinstance(e, subclass) for e in flat_args]) and \
-                not any([isinstance(e, subclass) for e in flat_kwargs]):
-                return func(*args)
-
-            def unpack(x):
-                if isinstance(x, subclass):
-                    return (x.primal, x.tangent)
-                if isinstance(x, torch.Tensor):
-                    return (x, None)
-                return x
-
-            unpacked_args = tree_map(unpack, args)
-            unpacked_kwargs = tree_map(unpack, kwargs)
-
-            if func not in jvp_rules:
-                raise RuntimeError(f"jvp not supported: {func.__name__}")
-
-            # NB: we only support functions that return Tensors...
-            rule = jvp_rules[func]
-            output = rule(*unpacked_args, **unpacked_kwargs)
-            result = tuple(subclass(primal, tangent) for primal, tangent in output)
-            # hack
-            if len(result) == 1:
-                return result[0]
-            return result
-
-    return __torch_dispatch__
-
 class JVPTensor(torch.Tensor):
     primal: torch.Tensor
     tangent: Optional[torch.Tensor]
@@ -342,15 +296,37 @@ class JVPTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-        return get_jvp_torch_dispatch(JVPTensor)(cls, func, types, args, kwargs)
+        ctx = temporarily_pop_mode_stack if mode_stack_size() > 0 else noop
+        with ctx() as (mode_subclass, mode):
+            assert mode_subclass is None or cls == mode_subclass
 
-def gen_jvptensor_subclass():
-    # Generate a fresh new class on the fly
-    class GeneratedJVPTensor(JVPTensor):
-        @classmethod
-        def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-            return get_jvp_torch_dispatch(GeneratedJVPTensor)(cls, func, types, args, kwargs)
-    return GeneratedJVPTensor
+            flat_args, _ = tree_flatten(args)
+            flat_kwargs, _ = tree_flatten(kwargs)
+            if not any([isinstance(e, cls) for e in flat_args]) and \
+                not any([isinstance(e, cls) for e in flat_kwargs]):
+                return func(*args)
+
+            def unpack(x):
+                if isinstance(x, cls):
+                    return (x.primal, x.tangent)
+                if isinstance(x, torch.Tensor):
+                    return (x, None)
+                return x
+
+            unpacked_args = tree_map(unpack, args)
+            unpacked_kwargs = tree_map(unpack, kwargs)
+
+            if func not in jvp_rules:
+                raise RuntimeError(f"jvp not supported: {func.__name__}")
+
+            # NB: we only support functions that return Tensors...
+            rule = jvp_rules[func]
+            output = rule(*unpacked_args, **unpacked_kwargs)
+            result = tuple(cls(primal, tangent) for primal, tangent in output)
+            # hack
+            if len(result) == 1:
+                return result[0]
+            return result
 
 # Nothing interesting here....
 class JVPMode():
@@ -358,7 +334,7 @@ class JVPMode():
         pass
 
     def __enter__(self):
-        subclass = gen_jvptensor_subclass()
+        subclass = gen_subclass(JVPTensor)
         push_mode_stack(subclass, self)
         return subclass
 
