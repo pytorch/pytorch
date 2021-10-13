@@ -701,8 +701,8 @@ struct HelperInterpCubic : public HelperInterpBase {
     HelperInterpCubic::init_indices_weights(
       scalar_type, output, output_size, ndims, reshape_dim, HelperInterpCubic::interp_size);
 
-    AT_DISPATCH_FLOATING_TYPES(
-      scalar_type, "compute_indices_weights_cubic", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND(
+      ScalarType::BFloat16, scalar_type, "compute_indices_weights_cubic", [&] {
 
         scalar_t scale = area_pixel_compute_scale<scalar_t>(input_size, output_size, align_corners, opt_scale);
 
