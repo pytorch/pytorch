@@ -583,7 +583,7 @@ class TestOperators(TestCase):
     def test_upsample_nearest_size(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: nn.functional.interpolate(x, size=16, mode="nearest"), x)
-
+        
     def test_uniform(self):
         x = torch.tensor([1.0, 2.0])
         self.assertONNX(lambda x: x.uniform_(2, to = 2), x, operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN)
