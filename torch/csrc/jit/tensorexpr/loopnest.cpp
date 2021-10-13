@@ -1606,6 +1606,9 @@ void LoopNest::splitWithTail(
     throw malformed_input("splitWithTail attempted on loop with no parent", p);
   }
 
+  // Normalize the loop to simplify start and stop bound computation
+  normalize(f);
+
   bool tail_is_needed = true;
   if (intValue(f->start()) && intValue(f->stop())) {
     auto const start_val = *intValue(f->start());
