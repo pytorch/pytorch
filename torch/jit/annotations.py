@@ -12,7 +12,7 @@ from ._state import _get_script_class
 
 from torch._C import TensorType, TupleType, FloatType, IntType, ComplexType, \
     ListType, StringType, DictType, BoolType, OptionalType, InterfaceType, AnyType, \
-    NoneType, DeviceObjType, StreamObjType, FutureType, EnumType, UnionType
+    NoneType, DeviceObjType, StreamObjType, FutureType, EnumType, UnionType, NumberType
 
 
 from textwrap import dedent
@@ -330,6 +330,9 @@ def try_ann_to_type(ann, loc):
         assert valid_type, msg.format(repr(ann), repr(contained))
         return OptionalType(valid_type)
     if is_union(ann):
+        # TODO: this is hack to recognize NumberType
+        if set(ann.__args__) == set([int, float, complex]):
+            return NumberType.get()
         inner: List = []
         # We need these extra checks because both `None` and invalid
         # values will return `None`
@@ -411,6 +414,7 @@ __all__ = [
     'TensorType',
     'TupleType',
     'FloatType',
+    'NumberType',
     'ComplexType',
     'IntType',
     'ListType',
