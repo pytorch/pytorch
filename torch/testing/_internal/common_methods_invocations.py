@@ -3815,7 +3815,7 @@ def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False, **kw
     from torch.testing._internal.common_utils import random_well_conditioned_matrix
 
     device = torch.device(device)
-    if_cuda_and_no_cusolver = (device.type == 'cuda') and (dtype is skipCUDAIfNoCusolver(dtype))
+    if_cuda_and_no_cusolver = (device.type == 'cuda') and (dtype is not skipCUDAIfNoCusolver(dtype))
 
     if device.type == 'cuda':
         drivers = ('gels',)
