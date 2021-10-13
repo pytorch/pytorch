@@ -25,7 +25,7 @@ from torch.testing._internal.common_dtype import (
 from torch.testing._internal.common_device_type import \
     (onlyCUDA, onlyOnCPUAndCUDA, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
      skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIfRocm, precisionOverride,
-     toleranceOverride, tol)
+     toleranceOverride, tol, has_cusolver)
 from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater, SM60OrLater
 from torch.testing._internal.common_utils import \
     (is_iterable_of_tensors,
@@ -3815,7 +3815,6 @@ def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False, **kw
     from torch.testing._internal.common_utils import random_well_conditioned_matrix
 
     device = torch.device(device)
-    if_cuda_and_no_cusolver = (device.type == 'cuda') and (dtype is not skipCUDAIfNoCusolver(dtype))
 
     drivers: Tuple[str, ...]
     if device.type == 'cuda':
@@ -3826,8 +3825,8 @@ def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False, **kw
     out = []
     for batch, driver in product(((), (3,), (3, 3)), drivers):
         for delta in (-1, 0, +1):
-            # If Cusolver is not available, overdetermined inputs are not generated
-            if delta > 0 and if_cuda_and_no_cusolver:
+            # If Cusolver is not available, underdetermined inputs are not generated
+            if delta < 0 and device.type == 'cuda' and not has_cusolver():
                 continue
             shape = batch + (3 + delta, 3)
             a = random_well_conditioned_matrix(*shape, dtype=dtype, device=device)
