@@ -23,8 +23,46 @@
 namespace torch_lazy_tensors {
 
 class LazyTensor {
-  class DeviceContextArena;
-  struct Data;
+ public:
+  // This is the core lazy tensor data structure where all the tensor data is
+  // held. The lazy tensor is nothing more than a shared pointer to a Data
+  // object.
+  struct Data {
+    Data(lazy_tensors::ComputationClient::DataPtr handle, const Device& device,
+         c10::optional<at::ScalarType> logical_element_type)
+        : handle(std::move(handle)),
+          logical_element_type(logical_element_type),
+          device(device),
+          unique_id(GetNextTensorId()) {}
+    Data(ir::Value ir_value, const Device& device,
+         c10::optional<at::ScalarType> logical_element_type)
+        : ir_value(std::move(ir_value)),
+          logical_element_type(logical_element_type),
+          device(device),
+          unique_id(GetNextTensorId()) {}
+    Data(std::shared_ptr<View> view, const Device& device,
+         c10::optional<at::ScalarType> logical_element_type)
+        : view(std::move(view)),
+          logical_element_type(logical_element_type),
+          device(device),
+          unique_id(GetNextTensorId()) {}
+    Data(at::Tensor tensor_data, const Device& device)
+        : logical_element_type(tensor_data.scalar_type()),
+          tensor_data(std::move(tensor_data)),
+          device(device),
+          unique_id(GetNextTensorId()) {}
+
+    ~Data();
+
+    lazy_tensors::ComputationClient::DataPtr handle;
+    ir::Value ir_value;
+    std::shared_ptr<View> view;
+    c10::optional<at::ScalarType> logical_element_type;
+    c10::optional<at::Tensor> tensor_data;
+    const Device device;
+    const lazy_tensors::int64 unique_id = 0;
+    size_t generation = 1;
+  };
 
  public:
   static LazyTensor Create(const at::Tensor& tensor, const Device& device);
@@ -35,6 +73,8 @@ class LazyTensor {
   static LazyTensor Create(
       ir::Value ir_value, const Device& device,
       c10::optional<at::ScalarType> logical_element_type = c10::nullopt);
+
+  static LazyTensor Create(std::shared_ptr<Data> data);
 
   // Creates an empty/null tensor.
   LazyTensor() = default;
@@ -130,12 +170,6 @@ class LazyTensor {
   static ir::Value GetIrValueForScalar(
       const at::Scalar& value, const lazy_tensors::Shape& shape,
       c10::optional<at::ScalarType> logical_element_type, const Device& device);
-
-  static ir::Value GetRngSeed(const Device& device);
-
-  static void SetRngSeed(const Device& device, lazy_tensors::uint64 seed);
-
-  static lazy_tensors::uint64 GetRunningSeed(const Device& device);
 
   // Dumps the backend specific text of the computation accumulated in the graph
   // which is attached the tensors.
@@ -244,46 +278,6 @@ class LazyTensor {
     std::string device;
     ComputationCache::TypePtr cached_computation;
     std::vector<lazy_tensors::ComputationClient::DataPtr> tensors_data;
-  };
-
-  // This is the core lazy tensor data structure where all the tensor data is
-  // held. The lazy tensor is nothing more than a shared pointer to a Data
-  // object.
-  struct Data {
-    Data(lazy_tensors::ComputationClient::DataPtr handle, const Device& device,
-         c10::optional<at::ScalarType> logical_element_type)
-        : handle(std::move(handle)),
-          logical_element_type(logical_element_type),
-          device(device),
-          unique_id(GetNextTensorId()) {}
-    Data(ir::Value ir_value, const Device& device,
-         c10::optional<at::ScalarType> logical_element_type)
-        : ir_value(std::move(ir_value)),
-          logical_element_type(logical_element_type),
-          device(device),
-          unique_id(GetNextTensorId()) {}
-    Data(std::shared_ptr<View> view, const Device& device,
-         c10::optional<at::ScalarType> logical_element_type)
-        : view(std::move(view)),
-          logical_element_type(logical_element_type),
-          device(device),
-          unique_id(GetNextTensorId()) {}
-    Data(at::Tensor tensor_data, const Device& device)
-        : logical_element_type(tensor_data.scalar_type()),
-          tensor_data(std::move(tensor_data)),
-          device(device),
-          unique_id(GetNextTensorId()) {}
-
-    ~Data();
-
-    lazy_tensors::ComputationClient::DataPtr handle;
-    ir::Value ir_value;
-    std::shared_ptr<View> view;
-    c10::optional<at::ScalarType> logical_element_type;
-    c10::optional<at::Tensor> tensor_data;
-    const Device device;
-    const lazy_tensors::int64 unique_id = 0;
-    size_t generation = 1;
   };
 
   LazyTensor(const at::Tensor& tensor, const Device& device);

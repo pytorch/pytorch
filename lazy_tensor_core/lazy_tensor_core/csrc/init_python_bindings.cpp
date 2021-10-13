@@ -13,6 +13,7 @@
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ir_dump_util.h"
 #include "lazy_tensor_core/csrc/ir_util.h"
+#include "lazy_tensor_core/csrc/lazy_graph_executor.h"
 #include "lazy_tensor_core/csrc/python_util.h"
 #include "lazy_tensor_core/csrc/tensor_aten_ops.h"
 #include "lazy_tensor_core/csrc/tensor_distributed.h"
@@ -251,11 +252,12 @@ void StepMarker(const std::string& device_str,
 
 void SetRngSeed(lazy_tensors::uint64 seed, const std::string& device_str) {
   Device device = GetDeviceOrCurrent(device_str);
-  LazyTensor::SetRngSeed(device, seed);
+  LazyGraphExecutor::Get()->SetRngSeed(device, seed);
 }
 
 lazy_tensors::uint64 GetRngSeed(const std::string& device_str) {
-  return LazyTensor::GetRunningSeed(GetDeviceOrCurrent(device_str));
+  return LazyGraphExecutor::Get()->GetRunningSeed(
+      GetDeviceOrCurrent(device_str));
 }
 
 std::string GetTensorsBackendGraph(const std::vector<at::Tensor>& tensors) {

@@ -10,6 +10,7 @@
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ir_util.h"
 #include "lazy_tensor_core/csrc/layout_manager.h"
+#include "lazy_tensor_core/csrc/lazy_graph_executor.h"
 #include "lazy_tensor_core/csrc/ops/adaptive_avg_pool2d.h"
 #include "lazy_tensor_core/csrc/ops/adaptive_avg_pool3d.h"
 #include "lazy_tensor_core/csrc/ops/all.h"
@@ -645,12 +646,14 @@ LazyTensor bernoulli(const LazyTensor& input, double probability) {
   return input.CreateFrom(ir::MakeNode<ir::ops::Bernoulli>(
       LazyTensor::GetIrValueForScalar(probability, input_shape,
                                       input.GetDevice()),
-      LazyTensor::GetRngSeed(input.GetDevice()), input_shape.get()));
+      LazyGraphExecutor::Get()->GetRngSeed(input.GetDevice()),
+      input_shape.get()));
 }
 
 LazyTensor bernoulli(const LazyTensor& input) {
   return input.CreateFrom(ir::MakeNode<ir::ops::Bernoulli>(
-      input.GetIrValue(), LazyTensor::GetRngSeed(input.GetDevice()),
+      input.GetIrValue(),
+      LazyGraphExecutor::Get()->GetRngSeed(input.GetDevice()),
       input.shape().get()));
 }
 
@@ -659,12 +662,14 @@ void bernoulli_(LazyTensor& input, double probability) {
   input.SetInPlaceIrValue(ir::MakeNode<ir::ops::Bernoulli>(
       LazyTensor::GetIrValueForScalar(probability, input_shape,
                                       input.GetDevice()),
-      LazyTensor::GetRngSeed(input.GetDevice()), input_shape.get()));
+      LazyGraphExecutor::Get()->GetRngSeed(input.GetDevice()),
+      input_shape.get()));
 }
 
 void bernoulli_(LazyTensor& input, const LazyTensor& probability) {
   input.SetInPlaceIrValue(ir::MakeNode<ir::ops::Bernoulli>(
-      probability.GetIrValue(), LazyTensor::GetRngSeed(input.GetDevice()),
+      probability.GetIrValue(),
+      LazyGraphExecutor::Get()->GetRngSeed(input.GetDevice()),
       input.shape().get()));
 }
 
@@ -1045,7 +1050,8 @@ void exponential_(LazyTensor& input, double lambd) {
   input.SetInPlaceIrValue(ir::MakeNode<ir::ops::Exponential>(
       LazyTensor::GetIrValueForScalar(lambd, input_shape.get().element_type(),
                                       input.GetDevice()),
-      LazyTensor::GetRngSeed(input.GetDevice()), input_shape.get()));
+      LazyGraphExecutor::Get()->GetRngSeed(input.GetDevice()),
+      input_shape.get()));
 }
 
 LazyTensor eye(lazy_tensors::int64 lines, lazy_tensors::int64 cols,
@@ -1784,27 +1790,27 @@ LazyTensor norm(const LazyTensor& input, const c10::optional<at::Scalar>& p,
 LazyTensor normal(double mean, const LazyTensor& std) {
   return std.CreateFrom(ir::MakeNode<ir::ops::Normal>(
       LazyTensor::GetIrValueForScalar(mean, std.shape(), std.GetDevice()),
-      std.GetIrValue(), LazyTensor::GetRngSeed(std.GetDevice())));
+      std.GetIrValue(), LazyGraphExecutor::Get()->GetRngSeed(std.GetDevice())));
 }
 
 LazyTensor normal(const LazyTensor& mean, double std) {
   return mean.CreateFrom(ir::MakeNode<ir::ops::Normal>(
       mean.GetIrValue(),
       LazyTensor::GetIrValueForScalar(std, mean.shape(), mean.GetDevice()),
-      LazyTensor::GetRngSeed(mean.GetDevice())));
+      LazyGraphExecutor::Get()->GetRngSeed(mean.GetDevice())));
 }
 
 LazyTensor normal(const LazyTensor& mean, const LazyTensor& std) {
   return mean.CreateFrom(ir::MakeNode<ir::ops::Normal>(
       mean.GetIrValue(), MaybeExpand(std.GetIrValue(), mean.shape()),
-      LazyTensor::GetRngSeed(mean.GetDevice())));
+      LazyGraphExecutor::Get()->GetRngSeed(mean.GetDevice())));
 }
 
 void normal_(LazyTensor& input, double mean, double std) {
   input.SetInPlaceIrValue(ir::MakeNode<ir::ops::Normal>(
       LazyTensor::GetIrValueForScalar(mean, input.shape(), input.GetDevice()),
       LazyTensor::GetIrValueForScalar(std, input.shape(), input.GetDevice()),
-      LazyTensor::GetRngSeed(input.GetDevice())));
+      LazyGraphExecutor::Get()->GetRngSeed(input.GetDevice())));
 }
 
 LazyTensor not_supported(std::string description, lazy_tensors::Shape shape,
@@ -1961,8 +1967,9 @@ LazyTensor rrelu_with_noise(const LazyTensor& input, LazyTensor& noise,
                             const at::Scalar& lower, const at::Scalar& upper,
                             bool training) {
   ir::NodePtr output_node = ir::MakeNode<ir::ops::RreluWithNoise>(
-      input.GetIrValue(), LazyTensor::GetRngSeed(input.GetDevice()), lower,
-      upper, training);
+      input.GetIrValue(),
+      LazyGraphExecutor::Get()->GetRngSeed(input.GetDevice()), lower, upper,
+      training);
   noise.SetIrValue(ir::Value(output_node, 1));
   return input.CreateFrom(ir::Value(output_node, 0));
 }
@@ -2448,7 +2455,7 @@ void uniform_(LazyTensor& input, double from, double to) {
                                       input.GetDevice()),
       LazyTensor::GetIrValueForScalar(to, input_shape.get().element_type(),
                                       input.GetDevice()),
-      LazyTensor::GetRngSeed(input.GetDevice()), input_shape));
+      LazyGraphExecutor::Get()->GetRngSeed(input.GetDevice()), input_shape));
 }
 
 LazyTensor unsqueeze(const LazyTensor& input, lazy_tensors::int64 dim) {
