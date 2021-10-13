@@ -2966,9 +2966,9 @@ def linalg_matrix_norm(g, self, ord, dim, keepdim, dtype):
         if self_dim is None:
             return _unimplemented("dim",
                                   "Input rank must be known at export time.")
-        if dim[0] < 0: 
+        if dim[0] < 0:
             dim[0] += self_dim
-        if dim[1] < 0: 
+        if dim[1] < 0:
             dim[1] += self_dim
 
         if ord_value == math.inf or ord_value == -math.inf:
