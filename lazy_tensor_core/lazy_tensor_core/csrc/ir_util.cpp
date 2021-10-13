@@ -58,42 +58,6 @@ std::vector<const Node*> Util::ComputePostOrder(
   return ComputePostOrder(nodes, &emap);
 }
 
-std::vector<Value> Util::Clone(
-    lazy_tensors::Span<const Value> values,
-    lazy_tensors::Span<const Node* const> post_order) {
-  std::unordered_map<const Node*, NodePtr> clone_map;
-  for (auto node : post_order) {
-    if (clone_map.count(node) > 0) {
-      continue;
-    }
-    std::vector<Value> inputs;
-    for (auto& output : node->operands()) {
-      auto it = clone_map.find(output.node);
-      LTC_CHECK(it != clone_map.end())
-          << "Bad post-order: " << node->ToString();
-      inputs.emplace_back(it->second, output.index);
-    }
-    clone_map[node] = node->Clone(inputs);
-  }
-
-  std::vector<Value> cloned;
-  for (auto& value : values) {
-    auto it = clone_map.find(value.node.get());
-    LTC_CHECK(it != clone_map.end()) << "Bad post-order: " << value->ToString();
-    cloned.emplace_back(it->second, value.index);
-  }
-  return cloned;
-}
-
-std::vector<Value> Util::Clone(lazy_tensors::Span<const Value> values) {
-  std::vector<const Node*> nodes;
-  for (auto& value : values) {
-    nodes.push_back(value.node.get());
-  }
-  std::vector<const Node*> post_order = ComputePostOrder(nodes);
-  return Clone(values, post_order);
-}
-
 size_t Util::GetGraphSize(lazy_tensors::Span<const Node* const> nodes) {
   std::vector<const Node*> post_order = ComputePostOrder(nodes);
   return post_order.size();
