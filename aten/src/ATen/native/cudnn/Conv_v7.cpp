@@ -919,6 +919,8 @@ void raw_cudnn_convolution_add_relu_out(
                 args.odesc.desc(),
                 output.data_ptr()),
             args,
+            "zdesc: ", zdesc,
+            "bdesc: ", bdesc,
             "cudnnConvolutionBiasActivationForward: ",
             static_cast<int>(fwdAlgPerf.algo),
             "\n");
