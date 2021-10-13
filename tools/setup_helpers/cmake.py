@@ -18,9 +18,9 @@ from .numpy_ import USE_NUMPY, NUMPY_INCLUDE_DIR
 
 def _mkdir_p(d: str) -> None:
     try:
-        os.makedirs(d)
-    except OSError:
-        pass
+        os.makedirs(d, exist_ok=True)
+    except OSError as e:
+        raise RuntimeError(f"Failed to create folder {os.path.abspath(d)}: {e.strerror}") from e
 
 
 # Ninja
