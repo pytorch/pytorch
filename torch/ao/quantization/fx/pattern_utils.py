@@ -53,7 +53,7 @@ def get_default_output_activation_post_process_map() -> Dict[Pattern, ObserverBa
 
 # Example use of register pattern function:
 # @register_fusion_pattern(torch.nn.ReLU, (torch.nn.BatchNorm2d, torch.nn.Conv2d)))
-# class ConvBNReLUFusion():
+# class ConvOrLinearBNReLUFusion():
 #     def __init__(...):
 #         ...
 #
