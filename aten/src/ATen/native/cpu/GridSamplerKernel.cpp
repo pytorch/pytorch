@@ -1195,7 +1195,8 @@ grid_sampler_2d_backward_cpu_kernel_impl(const Tensor& grad_output_,
                                          const Tensor& grid,
                                          int64_t interpolation_mode,
                                          int64_t padding_mode,
-                                         bool align_corners) {
+                                         bool align_corners,
+                                         std::array<bool,2> output_mask) {
   // grad_output should be contiguous most of time. Ensuring that it is
   // contiguous can greatly simplify this code.
   auto grad_output = grad_output_.contiguous();
