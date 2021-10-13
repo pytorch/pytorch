@@ -116,11 +116,10 @@ torch::lazy::hash_t OpKind::hash() const {
   return torch::lazy::StringHash(op.toQualString());
 }
 
-Node::Node(OpKind op, OpList operands,
-           const std::vector<at::ScalarType>& at_dtypes,
+Node::Node(OpKind op, const std::vector<at::ScalarType>& at_dtypes,
            const std::vector<std::vector<int64_t>>& at_shapes,
-           size_t num_outputs,
-           torch::lazy::hash_t node_hash, torch::lazy::hash_t dag_hash)
+           size_t num_outputs, torch::lazy::hash_t node_hash,
+           torch::lazy::hash_t dag_hash)
     : op_(std::move(op)),
       at_dtypes_(at_dtypes),
       at_shapes_(at_shapes),
@@ -130,23 +129,11 @@ Node::Node(OpKind op, OpList operands,
   LTC_CHECK_EQ(at_dtypes.size(), at_shapes.size());
   metadata_.scope = GetCurrentScope();
   metadata_.frame_info = GetFrameInfo();
-  for (auto& operand : operands) {
-    // Ideally, optional operands should be filtered by the leaf node classes,
-    // but it's just much easier to do it here.
-    // TODO(alanwaketan): Find a way to move the below logic to the leaf node
-    // classes.
-    if (!operand) {
-      continue;
-    }
-
-    AddOperand(operand.node, operand.index);
-  }
 }
 
 Node::Node(OpKind op, const std::vector<at::ScalarType>& at_dtypes,
            const std::vector<std::vector<int64_t>>& at_shapes,
-           size_t num_outputs,
-           torch::lazy::hash_t node_hash)
+           size_t num_outputs, torch::lazy::hash_t node_hash)
     : op_(std::move(op)),
       at_dtypes_(at_dtypes),
       at_shapes_(at_shapes),
@@ -159,12 +146,6 @@ Node::Node(OpKind op, const std::vector<at::ScalarType>& at_dtypes,
 }
 
 Node::~Node() {}
-
-void Node::AddOperand(NodePtr node, size_t index) {
-  LTC_CHECK_LT(index, node->num_outputs());
-  operands_.push_back(std::move(node));
-  operands_as_outputs_.push_back(Output(operands_.back().get(), index));
-}
 
 std::string Node::ToString() const {
   std::stringstream ss;

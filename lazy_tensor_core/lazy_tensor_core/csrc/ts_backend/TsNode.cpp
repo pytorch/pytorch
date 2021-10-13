@@ -51,7 +51,7 @@ torch::lazy::hash_t OperandHashes(const OpList& operands,
 TsNode::TsNode(OpKind op, OpList operands, lazy_tensors::Shape shape,
                size_t num_outputs, torch::lazy::hash_t hash_seed)
     : Node(
-          op, operands, {},
+          op, {},
           {},  // TODO(whc) BUG here, need to fill in at_ fields
           num_outputs,
           // TODO(WHC) this is inefficient (having to compute node_hash twice
@@ -61,7 +61,19 @@ TsNode::TsNode(OpKind op, OpList operands, lazy_tensors::Shape shape,
           /* dag_hash */
           OperandHashes(operands,
                         torch::lazy::HashCombine(op.hash(), hash_seed))),
-      shape_(shape) {}
+      shape_(shape) {
+  for (auto& operand : operands) {
+    // Ideally, optional operands should be filtered by the leaf node classes,
+    // but it's just much easier to do it here.
+    // TODO(alanwaketan): Find a way to move the below logic to the leaf node
+    // classes.
+    if (!operand) {
+      continue;
+    }
+
+    AddOperand(operand.node, operand.index);
+  }
+}
 
 TsNode::TsNode(OpKind op, OpList operands,
                const std::function<lazy_tensors::Shape()>& shape_fn,
@@ -82,10 +94,9 @@ void TsNode::SetShapeDeferred(
   shape_ = GetOpShape(shape_fn);
 }
 
-TsNode::TsNode(OpKind op, lazy_tensors::Shape shape,
-               size_t num_outputs, torch::lazy::hash_t hash_seed)
-    : Node(op, {}, {}, num_outputs,
-           GetOpHash(op, shape, hash_seed)),
+TsNode::TsNode(OpKind op, lazy_tensors::Shape shape, size_t num_outputs,
+               torch::lazy::hash_t hash_seed)
+    : Node(op, {}, {}, num_outputs, GetOpHash(op, shape, hash_seed)),
       shape_(shape) {}
 
 const lazy_tensors::Shape& TsNode::shape() const { return shape_; }
@@ -146,5 +157,10 @@ torch::lazy::hash_t TsNode::GetOpHash(OpKind op,
   return torch::lazy::HashCombine(h, hash_seed);
 }
 
+void TsNode::AddOperand(NodePtr node, size_t index) {
+  LTC_CHECK_LT(index, node->num_outputs());
+  operands_.push_back(std::move(node));
+  operands_as_outputs_.push_back(Output(operands_.back().get(), index));
+}
 }  // namespace ir
 }  // namespace torch_lazy_tensors

@@ -73,8 +73,23 @@ class TsNode : public Node {
                                         const lazy_tensors::Shape& shape,
                                         torch::lazy::hash_t hash_seed);
 
+  virtual const std::vector<Output>& operands() const override {
+    return operands_as_outputs_;
+  }
+  virtual const Output& operand(size_t i) const override {
+    return operands_as_outputs_.at(i);
+  }
+
  private:
+  // Adds node's index output number as operand.
+  void AddOperand(NodePtr node, size_t index = 0);
+
   lazy_tensors::Shape shape_;
+  // A node holds a real reference to its operands.
+  std::vector<NodePtr> operands_;
+  // Outputs do not hold references on the nodes, and neither do the uses, since
+  // otherwise we get into circular reference counting.
+  std::vector<Output> operands_as_outputs_;
 };
 
 }  // namespace ir
