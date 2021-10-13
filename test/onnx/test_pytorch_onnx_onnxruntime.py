@@ -22,7 +22,7 @@ from model_defs.rnn_model_with_packed_sequence import (RnnModelWithPackedSequenc
 from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion,
                                  skipIfNoLapack, disableScriptTest, skipIfONNXShapeInference,
                                  skipIfUnsupportedMaxOpsetVersion, skipForAllOpsetVersions,
-                                 run_tests)
+                                 run_tests, TestCase)
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 from typing import List, Tuple, Optional, Dict
@@ -275,7 +275,7 @@ def set_rng_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
 
-class TestONNXRuntime(unittest.TestCase):
+class TestONNXRuntime(TestCase):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
     opset_version = _export_onnx_opset_version
     keep_initializers_as_inputs = True  # For IR version 3 type export.
