@@ -69,9 +69,9 @@ bool _use_cudnn_ctc_loss(
 
 std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs_t, const Tensor& targets_t, IntArrayRef input_lengths_, IntArrayRef target_lengths_, int64_t BLANK, bool deterministic, bool zero_infinity) {
   (void)zero_infinity; // only used for backward
-  CheckedFrom c = "cudnn_ctc_loss";
-  TensorArg log_probs { log_probs_t, "log_probs", 1 };
-  TensorArg targets { targets_t, "targets", 2 };
+  const CheckedFrom c = "cudnn_ctc_loss";
+  const TensorArg log_probs { log_probs_t, "log_probs", 1 };
+  const TensorArg targets { targets_t, "targets", 2 };
   checkDim(c, log_probs, 3);
   checkScalarType(c, log_probs, kFloat);
   checkDim(c, targets, 1);
@@ -80,8 +80,8 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs_t, const Tens
   checkBackend(c, {*log_probs}, Backend::CUDA);
   checkBackend(c, {*targets}, Backend::CPU);
   const auto batch_size = log_probs->size(1);
-  TORCH_CHECK(input_lengths_.size() == batch_size, "input_lengths needs to have size to match batch_size");
-  TORCH_CHECK(target_lengths_.size() == batch_size, "target_lengths needs to have size to match batch_size");
+  TORCH_CHECK(static_cast<int64_t>(input_lengths_.size()) == batch_size, "input_lengths needs to have size to match batch_size");
+  TORCH_CHECK(static_cast<int64_t>(target_lengths_.size()) == batch_size, "target_lengths needs to have size to match batch_size");
 
   std::vector<int> input_lengths(input_lengths_.begin(), input_lengths_.end());
   std::vector<int> target_lengths(target_lengths_.begin(), target_lengths_.end());
@@ -91,9 +91,9 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs_t, const Tens
   // assert other conditions for cudnnCTCLoss: all label lengths <= 256
   // all input lengths = logprob.size(0)
 
-  auto handle = getCudnnHandle();
+  const auto handle = getCudnnHandle();
 
-  cudnnCTCLossAlgo_t algo = (deterministic ? CUDNN_CTC_LOSS_ALGO_DETERMINISTIC : CUDNN_CTC_LOSS_ALGO_NON_DETERMINISTIC);
+  const cudnnCTCLossAlgo_t algo = (deterministic ? CUDNN_CTC_LOSS_ALGO_DETERMINISTIC : CUDNN_CTC_LOSS_ALGO_NON_DETERMINISTIC);
 
   CTCLossDescriptor ctc_loss_desc;
 

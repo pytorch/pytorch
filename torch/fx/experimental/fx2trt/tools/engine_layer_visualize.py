@@ -2,7 +2,7 @@
 
 import argparse
 import re
-from typing import NamedTuple, List, Optional
+from typing import NamedTuple, List, Optional, Dict, Any, Tuple
 
 import pydot
 
@@ -66,7 +66,7 @@ class LayerInfo(NamedTuple):
             if layer_name in tactic_names:
                 kernel_name = tactic_names[layer_name]
         else:
-            input_names = input_types = None
+            input_names = input_types = None  # type:ignore[assignment]
 
         return cls(
             kernel_name,
@@ -130,10 +130,10 @@ if args.profile_file != "":
         times = f.readlines()
 
     for t in times:
-        t = t.strip("\n").split(": ")
+        t = t.strip("\n").split(": ")  # type: ignore[assignment]
         layer_times[": ".join(t[:-1])] = t[-1]
 else:
-    layer_times = None
+    layer_times = None  # type: ignore[assignment]
 
 if args.log_file != "":
     with open(args.log_file) as f:
@@ -141,8 +141,8 @@ if args.log_file != "":
 
     graphs = []
     layers = []
-    reformat_layers = {}
-    tactic_names = {}
+    reformat_layers: Dict[str, Tuple[str, str]] = {}
+    tactic_names: Dict[str, str] = {}
     layer_info_start = False
     tactic_name_start = False
 
@@ -186,7 +186,7 @@ if args.log_file != "":
         "fontcolor": "#000000",
     }
 
-    dot_graphs = []
+    dot_graphs: List[Any] = []
     i = 0
     for layers, reformat_layers in graphs:
         output_name2node = {}
