@@ -7557,7 +7557,7 @@ op_db: List[OpInfo] = [
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            skips=(
                # we skip gradient checks for this suite as they are tested in
-               # variant_test_name='grard_oriented'
+               # variant_test_name='grad_oriented'
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients'),
            )),
     OpInfo('linalg.lstsq',
