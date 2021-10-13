@@ -161,12 +161,11 @@ class Node {
   // Creates a new node with the given op name. The op is a unique identifier
   // for the operation. The num_outputs tells how many outputs a given operation
   // generates.
-  Node(OpKind op, size_t num_outputs,
-       torch::lazy::hash_t node_hash, torch::lazy::hash_t dag_hash);
+  Node(OpKind op, size_t num_outputs, torch::lazy::hash_t node_hash,
+       torch::lazy::hash_t dag_hash);
 
   // Contructor used to create leaf nodes.
-  Node(OpKind op, size_t num_outputs,
-       torch::lazy::hash_t node_hash);
+  Node(OpKind op, size_t num_outputs, torch::lazy::hash_t node_hash);
 
   virtual ~Node();
 

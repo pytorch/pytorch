@@ -118,7 +118,7 @@ class {schema.node_name} : public {self.node_base} {{
       size_t i = 0;
       {clone_impl}
   }}
-  
+
   // TODO(whc) prefer to move these shapes to TsNode, but need to find a way to populate
   // them consistently from non-codegen TsNode classes first.
   // outer vector is for multiple tensors from an operation
