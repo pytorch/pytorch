@@ -8251,6 +8251,8 @@ Example::
     tensor([-0., 0., 2., 2.])
     >>> torch.round(torch.tensor([0.1234567]), decimals=3)
     tensor([0.1230])
+    >>> torch.round(torch.tensor([1200.1234567]), decimals=-3)
+    tensor([1000.])
 """.format(**common_args))
 
 add_docstr(torch.rsqrt,
