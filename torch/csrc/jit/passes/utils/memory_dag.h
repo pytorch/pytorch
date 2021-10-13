@@ -123,6 +123,9 @@ class TORCH_API MemoryDAG {
   bool mayAliasImpl(const Element* a, const Element* b) const;
   bool mayContainAliasImpl(const Element* contained, const Element* container)
       const;
+  void collectAllContainedMemoryLocationsImpl(
+      const Element* elem,
+      MemoryLocations& cont) const;
   std::vector<std::unique_ptr<Element>> indexToElementMap_;
 };
 
@@ -166,6 +169,8 @@ struct Element {
   // A nullopt means that this cache is not yet populated. Since `MemoryDAG` is
   // immutable, this cache should never need to be invalidated.
   mutable c10::optional<MemoryLocations> cachedMemoryLocations_;
+
+  mutable c10::optional<MemoryLocations> cachedAllContainedMemoryLocations_;
 };
 
 } // namespace jit
