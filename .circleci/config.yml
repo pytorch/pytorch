@@ -1186,7 +1186,7 @@ jobs:
             set -x
 
             chmod a+x .jenkins/pytorch/macos-build.sh
-            unbuffer .jenkins/pytorch/macos-build.sh 2>&1 | ts
+            unbuffer .jenkins/pytorch/macos-build.sh 2>&1
 
       - persist_to_workspace:
           root: /Users/distiller/workspace/
@@ -1223,7 +1223,7 @@ jobs:
             set -x
 
             chmod a+x .jenkins/pytorch/macos-build.sh
-            unbuffer .jenkins/pytorch/macos-build.sh 2>&1 | ts
+            unbuffer .jenkins/pytorch/macos-build.sh 2>&1
 
       - persist_to_workspace:
           root: /Users/distiller/workspace/
@@ -1249,7 +1249,7 @@ jobs:
             export JOB_BASE_NAME=$CIRCLE_JOB
 
             chmod a+x .jenkins/pytorch/macos-test.sh
-            unbuffer .jenkins/pytorch/macos-test.sh 2>&1 | ts
+            unbuffer .jenkins/pytorch/macos-test.sh 2>&1
       - run:
           name: Report results
           no_output_timeout: "5m"
@@ -1288,7 +1288,7 @@ jobs:
             export BUILD_LITE_INTERPRETER=1
             export JOB_BASE_NAME=$CIRCLE_JOB
             chmod a+x ${HOME}/project/.jenkins/pytorch/macos-lite-interpreter-build-test.sh
-            unbuffer ${HOME}/project/.jenkins/pytorch/macos-lite-interpreter-build-test.sh 2>&1 | ts
+            unbuffer ${HOME}/project/.jenkins/pytorch/macos-lite-interpreter-build-test.sh 2>&1
       - store_test_results:
           path: test/test-reports
 
