@@ -224,6 +224,16 @@ c10::optional<IValue> toIValueProp(const Value* v) {
   }
   return c10::nullopt;
 }
+
+bool shouldIgnoreNode(const Node* n) {
+  switch(n->kind()) {
+    case aten::batch_norm:
+    case aten::instance_norm:
+      return true;
+    default:
+      return false;
+  }
+}
 } // namespace
 
 void checkAliasAnnotation(
@@ -232,6 +242,9 @@ void checkAliasAnnotation(
     const std::string& unqualifiedOpName) {
   // Find the node that corresponds to our op name
   const auto node = findNodeForOp(*graph, unqualifiedOpName);
+  if (shouldIgnoreNode(node)) {
+    return;
+  }
 
   // Build the stack to use as input to the op
   Stack stack;

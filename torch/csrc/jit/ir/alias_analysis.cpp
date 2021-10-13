@@ -609,6 +609,10 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::rpc_sync:
     case prim::rpc_remote:
       return analyzeRpcAsync(node);
+    case aten::batch_norm:
+      return analyzeBatchNormAndInstanceNorm(node, "training");
+    case aten::instance_norm:
+      return analyzeBatchNormAndInstanceNorm(node, "use_input_stats");
     case prim::GradOf:
       return analyzeGradOf(node);
     case prim::BroadcastMKLDNNTensors: {
@@ -979,6 +983,23 @@ void AliasDb::analyzeRpcAsync(Node* node) {
   // Give the future that the rpc_async emits a fresh value
   for (const auto output : node->outputs()) {
     giveFreshAlias(output);
+  }
+}
+
+void AliasDb::analyzeBatchNormAndInstanceNorm(Node* node, const std::string& trainingInputName) {
+  TORCH_INTERNAL_ASSERT(node->hasNamedInput(trainingInputName), trainingInputName + " input is expected");
+  auto value = node->namedInput(trainingInputName);
+  TORCH_INTERNAL_ASSERT(value->type() == BoolType::get(), trainingInputName + " input is expected to be a bool");
+  auto isTraining = constant_as<bool>(value);
+
+  if (!isTraining.has_value() || *isTraining) {
+    TORCH_INTERNAL_ASSERT(node->hasNamedInput("running_mean"), "running_mean input is expected");
+    auto runningMean = node->namedInput("running_mean");
+    TORCH_INTERNAL_ASSERT(node->hasNamedInput("running_var"), "running_var input is expected");
+    auto runningVar = node->namedInput("running_var");
+
+    registerWrite(runningMean, node, /*writeToContained=*/true);
+    registerWrite(runningVar, node, /*writeToContained=*/true);
   }
 }
 
