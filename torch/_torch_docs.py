@@ -8247,6 +8247,11 @@ to the closest integer.
     This function rounds to even in halfway cases
     Eg. round(2.5) will be 2.
 
+    The algorithm with decimals is modeled after the algorithm
+    of NumPy's `around`. This algorithm is fast but inexact and
+    it can easily overflow for low precision dtypes.
+    Eg. round(tensor([10000], dtype=torch.float16), decimals=3) -> `inf`
+
     See also :func:`torch.ceil`, :func:`torch.floor`, :func:`torch.trunc`.
 
 Args:
