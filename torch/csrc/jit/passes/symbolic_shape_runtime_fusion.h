@@ -11,7 +11,7 @@ namespace jit {
 // Takes in a TensorExprGraph of static shapes and generalizes the input shapes
 // to symbolic dimensions. Dimensions of value 1 will be preserved, otherwise
 // dimensions with the same value will be bucketed to the same symbolic shape.
-// E.g. Tensor(5, 3), Tensor(3, 1) -> Tensor(SS(-1), SS(-2)), Tensor(SS(-3), 1)
+// E.g. Tensor(5, 3), Tensor(3, 1) -> Tensor(SS(-1), SS(-2)), Tensor(SS(-2), 1)
 // From there, runs symbolic shape inference on the graph, and creates a
 // versionining if in the graph with prim::TensorExprDynamicGuard checking if
 // the inputs at runtime match the Generalized Symbolic Shapes that are inputs
