@@ -73,7 +73,7 @@ void insertDynamicShapesGuard(
 // Dimensions of value 1 will be preserved, otherwise
 // dimensions with the same value will be bucketed to the same
 // symbolic shape.
-// E.g. Tensor(5, 3), Tensor(3, 1) -> Tensor(SS(-1), SS(-2)), Tensor(SS(-3), 1)
+// E.g. Tensor(5, 3), Tensor(3, 1) -> Tensor(SS(-1), SS(-2)), Tensor(SS(-2), 1)
 bool TryGeneralizeInputDimensionsToSymbolicShapes(
     std::shared_ptr<Graph> tensorexpr_graph) {
   std::map<size_t, int64_t> shape_to_sym_shape;
