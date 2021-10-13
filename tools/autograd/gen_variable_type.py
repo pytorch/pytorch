@@ -142,8 +142,8 @@ c10::optional<Storage> ${tensor_name}_storage_saved =
 
 # If tensor_name == out_tensor_name, used to enforce (1), otherwise used for (2)
 ENFORCE_SAME_TENSOR_STORAGE = CodeTemplate("""\
-if (${tensor_name}_storage_saved.has_value())
-  AT_ASSERT(${tensor_name}_storage_saved.value().is_alias_of(${out_tensor_name}.storage()));
+// if (${tensor_name}_storage_saved.has_value())
+//   AT_ASSERT(${tensor_name}_storage_saved.value().is_alias_of(${out_tensor_name}.storage()));
 """)
 
 SAVE_TENSORLIST_STORAGE = CodeTemplate("""\
@@ -154,10 +154,10 @@ for (const Tensor& tensor : ${tensorlist_name})
 """)
 
 ENFORCE_SAME_TENSORLIST_STORAGE = CodeTemplate("""\
-for (size_t i=0; i<${tensorlist_name}.size(); i++) {
-  if (${tensorlist_name}_storage_saved[i].has_value())
-    AT_ASSERT(${tensorlist_name}_storage_saved[i].value().is_alias_of(${tensorlist_name}[i].storage()));
-}
+// for (size_t i=0; i<${tensorlist_name}.size(); i++) {
+//   if (${tensorlist_name}_storage_saved[i].has_value())
+//     AT_ASSERT(${tensorlist_name}_storage_saved[i].value().is_alias_of(${tensorlist_name}[i].storage()));
+// }
 """)
 
 SAVE_OPTIONALTENSORLIST_STORAGE = CodeTemplate("""\
@@ -168,11 +168,11 @@ for (const c10::optional<Tensor>& tensor : ${tensorlist_name})
 """)
 
 ENFORCE_SAME_OPTIONALTENSORLIST_STORAGE = CodeTemplate("""\
-for (size_t i=0; i<${tensorlist_name}.size(); i++) {
-  if (${tensorlist_name}_storage_saved[i].has_value())
-    AT_ASSERT(${tensorlist_name}_storage_saved[i].value().is_alias_of(
-        static_cast<c10::optional<Tensor>>(${tensorlist_name}[i])->storage()));
-}
+// for (size_t i=0; i<${tensorlist_name}.size(); i++) {
+//   if (${tensorlist_name}_storage_saved[i].has_value())
+//     AT_ASSERT(${tensorlist_name}_storage_saved[i].value().is_alias_of(
+//         static_cast<c10::optional<Tensor>>(${tensorlist_name}[i])->storage()));
+// }
 """)
 
 SAVE_TENSOR_IMPL = CodeTemplate("""\
@@ -189,7 +189,7 @@ AT_ASSERT(${tensor_name}.use_count() <= 1, "function: ${fn_name}");
 """)
 
 ENFORCE_TENSOR_STORAGE_USE_COUNT_EQUALS_ONE = CodeTemplate("""\
-if (${tensor_name}.has_storage()) AT_ASSERT(${tensor_name}.storage().use_count() == 1, "function: ${fn_name}");
+// if (${tensor_name}.has_storage()) AT_ASSERT(${tensor_name}.storage().use_count() == 1, "function: ${fn_name}");
 """)
 
 SAVE_TENSORLIST_IMPL = CodeTemplate("""\

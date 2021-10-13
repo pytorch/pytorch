@@ -1,6 +1,7 @@
 import torch
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from torch.utils._python_dispatch import enable_python_mode
+import functools
 from functools import partial
 from typing import Optional
 import contextlib
@@ -21,6 +22,8 @@ supported_ops = {
     torch.ops.aten.eye,
     torch.ops.aten.neg,
     torch.ops.aten.exp,
+    torch.ops.aten.permute,
+    torch.ops.aten.detach_,
 }
 
 # Part 1: The mode stack.
@@ -38,15 +41,21 @@ supported_ops = {
 #
 # TODO: Could we just save the metadata on the subclass type object?
 # TODO: Does dispatchkey::PythonMode need to be separte from dispatchkey::Python
+def mode_stack_size():
+    return torch._C._autograd._mode_stack_size()
 
 def pop_mode_stack():
+    assert mode_stack_size() > 0
     return torch._C._autograd._exit_python_mode()
 
 def push_mode_stack(subclass, mode):
     return torch._C._autograd._enter_python_mode(subclass, mode)
 
-def mode_stack_size():
-    return torch._C._autograd._mode_stack_size()
+def mode_stack_top():
+    assert mode_stack_size() > 0
+    result = pop_mode_stack()
+    push_mode_stack(*result)
+    return result
 
 @contextlib.contextmanager
 def temporarily_pop_mode_stack():
@@ -89,6 +98,33 @@ def batched_fallback(func, subclass, args, kwargs):
     result = torch.stack(results)
     return subclass(result, 0)
 
+def gen_subclass(cls, parent=None):
+    class Generated(cls):
+        __torch_base__ = cls
+        __torch_parent__ = parent
+        pass
+    return Generated
+
+def is_descendant(parent, descendant):
+    assert issubclass(parent, torch.Tensor)
+    assert issubclass(descendant, torch.Tensor)
+    if type(parent) == torch.Tensor:
+        return True
+    while getattr(descendant, '__torch_parent__', None) is not None:
+        if parent == descendant.__torch_parent__:
+            return True
+        descendant = descendant.__torch_parent__
+    return False
+
+def supports_torch_parent_priority(fn):
+    @functools.wraps(fn)
+    def wrapped(cls, func, types, args, kwargs):
+        other_types = [t for t in types if t != cls and issubclass(t, torch.Tensor)]
+        if len(other_types) > 0 and not all(is_descendant(t, cls) for t in other_types):
+            return NotImplemented
+        return fn(cls, func, types, args, kwargs)
+    return wrapped
+
 # Part 2: the BatchedTensor object
 # There is a base BatchedTensor object that all vmap transforms dynamically subclass.
 # It has a torch_dispatch which basically calls a "batched fallback" in lieu of
@@ -107,6 +143,7 @@ class BatchedTensor(torch.Tensor):
     @staticmethod
     def __new__(cls, elem, bdim, *args, **kwargs):
         r = torch.Tensor._make_subclass(cls, elem.to('cpu')[0], elem.requires_grad)
+        assert is_descendant(type(elem), cls)  # the thing you hold must be a __torch_parent__
         r.elem = elem
         r.bdim = bdim
         r.current_subclass = BatchedTensor
@@ -115,12 +152,14 @@ class BatchedTensor(torch.Tensor):
     def __repr__(self):
         return f"BatchedTensor({self.elem}, {self.bdim})"
 
+    def unwrap_batched(self, out_dim=0):
+        return self.elem.movedim(self.bdim, 0)
+
     @classmethod
+    @supports_torch_parent_priority
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-        ctx = temporarily_pop_mode_stack if mode_stack_size() > 0 else noop
+        ctx = temporarily_pop_mode_stack if mode_stack_size() > 0 and cls == mode_stack_top()[0] else noop
         with ctx() as (mode_subclass, mode):
-            if cls != mode_subclass:
-                import pdb; pdb.set_trace()
             assert mode_subclass is None or cls == mode_subclass
 
             if func == torch.ops.aten.randn and mode is not None:
@@ -135,11 +174,6 @@ class BatchedTensor(torch.Tensor):
 
             return batched_fallback(func, cls, args, kwargs)
 
-def gen_subclass(cls):
-    class Generated(cls):
-        pass
-    return Generated
-
 # Part 3: VmapMode and functional vmap
 #
 # VmapMode creates a new BatchedTensor subclass for use and stores some
@@ -150,12 +184,15 @@ def gen_subclass(cls):
 # The vmap API is a wrapper around VmapMode.
 
 class VmapMode():
-    def __init__(self, batch_size, randomness):
+    def __init__(self, batch_size, randomness, parent=None):
         self.batch_size = batch_size
         self.randomness = randomness
+        if parent is None:
+            parent = mode_stack_top()[0] if mode_stack_size() > 0 else torch.Tensor
+        self.parent = parent
 
     def __enter__(self):
-        subclass = gen_subclass(BatchedTensor)
+        subclass = gen_subclass(BatchedTensor, self.parent)
         push_mode_stack(subclass, self)
         return subclass
 
@@ -163,12 +200,12 @@ class VmapMode():
         pop_mode_stack()
 
 # randomness = {"error", "same", "different"}
-def vmap(f, in_dims=(0,), randomness="error"):
+def vmap(f, in_dims=(0,), randomness="error", parent=None):
     def wrapped(*args):
         batch_sizes = [arg.size(in_dim) for in_dim, arg in zip(in_dims, args) if in_dim is not None]
         batch_size = batch_sizes[0]
 
-        with VmapMode(batch_size, randomness) as GenBatchedTensor:
+        with VmapMode(batch_size, randomness, parent) as GenBatchedTensor:
             def wrap(e, in_dim):
                 assert in_dim is None or in_dim == 0
                 if in_dim is None:
@@ -287,6 +324,8 @@ class JVPTensor(torch.Tensor):
     @staticmethod
     def __new__(cls, primal, tangent, *args, **kwargs):
         r = torch.Tensor._make_subclass(cls, primal, False)
+        assert is_descendant(type(primal), cls)  # the thing you hold must be a __torch_parent__
+        assert is_descendant(type(tangent), cls)  # the thing you hold must be a __torch_parent__
         r.primal = primal
         r.tangent = tangent
         return r
@@ -295,8 +334,9 @@ class JVPTensor(torch.Tensor):
         return f"JVPTensor({self.primal}, {self.tangent})"
 
     @classmethod
+    @supports_torch_parent_priority
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-        ctx = temporarily_pop_mode_stack if mode_stack_size() > 0 else noop
+        ctx = temporarily_pop_mode_stack if mode_stack_size() > 0 and cls == mode_stack_top()[0] else noop
         with ctx() as (mode_subclass, mode):
             assert mode_subclass is None or cls == mode_subclass
 
@@ -330,11 +370,13 @@ class JVPTensor(torch.Tensor):
 
 # Nothing interesting here....
 class JVPMode():
-    def __init__(self):
-        pass
+    def __init__(self, parent=None):
+        if parent is None:
+            parent = mode_stack_top()[0] if mode_stack_size() > 0 else torch.Tensor
+        self.parent = parent
 
     def __enter__(self):
-        subclass = gen_subclass(JVPTensor)
+        subclass = gen_subclass(JVPTensor, self.parent)
         push_mode_stack(subclass, self)
         return subclass
 
@@ -342,8 +384,8 @@ class JVPMode():
         pop_mode_stack()
 
 # NB: Yes, jvp is NOT a higher-order function.
-def jvp(f, primals, tangents):
-    with JVPMode() as GenJVPTensor:
+def jvp(f, primals, tangents, parent=None):
+    with JVPMode(parent) as GenJVPTensor:
         with temporarily_pop_mode_stack():
             jvp_tensors = tuple(GenJVPTensor(primal, tangent) for primal, tangent in zip(primals, tangents))
         results = f(*jvp_tensors)
@@ -359,8 +401,12 @@ def jvp(f, primals, tangents):
     primals_out, tangents_out = zip(*results)
     return tree_unflatten(primals_out, spec), tree_unflatten(tangents_out, spec)
 
-# Part 5: Examples that show everything works
-# We test various compositions of `vmap` and `jvp`.
+# ============================================================================
+#
+#                   Part 5: Transform API tests
+#
+# ============================================================================
+
 
 # basic vmap test
 x = torch.randn(3, 2, 5, 7)
@@ -433,3 +479,108 @@ x = torch.randn(1)
 t = torch.ones(1)
 p_out, t_out = jvp(torch.exp, (x,), (t,))
 assert torch.allclose(t_out, x.exp())
+
+
+# ============================================================================
+#
+#                   Part 6: Imperative API Tests
+#
+# ============================================================================
+
+def make_batched_tensor_class(parent=None):
+    if parent is None:
+        if mode_stack_size() > 0:
+            parent = mode_stack_top()[0]
+        else:
+            parent = torch.Tensor
+    return gen_subclass(BatchedTensor, parent)
+
+def make_jvp_tensor_class(parent=None):
+    if parent is None:
+        if mode_stack_size() > 0:
+            parent = mode_stack_top()[0]
+        else:
+            parent = torch.Tensor
+    return gen_subclass(JVPTensor, parent)
+
+# Tensor subclasses are only allowed to hold instances of Tensor subclasses that
+# are its __torch_parent__ ancestors.
+BatchedTensor0 = make_batched_tensor_class()
+BatchedTensor1 = make_batched_tensor_class(parent=BatchedTensor0)
+
+a, b = torch.arange(5), torch.arange(3)
+x = BatchedTensor0(a, 0)
+y = BatchedTensor1(b, 0)
+z = x * y
+output = z.unwrap_batched().unwrap_batched()
+assert torch.allclose(output, a.unsqueeze(-1) * b)
+
+# Jacobian computation
+BatchedTensor0 = make_batched_tensor_class()
+JVPTensor1 = make_jvp_tensor_class(parent=BatchedTensor0)
+x = torch.randn(5)
+v = torch.eye(5)
+dual = JVPTensor1(x, BatchedTensor0(v, 0))
+out_dual = dual.sin()
+result = out_dual.tangent.unwrap_batched()
+assert torch.allclose(result, torch.diag(x.cos()))
+
+# ============================================================================
+#
+#              Part 7: Mixing imperative and transform APIs
+#
+# ============================================================================
+
+# After writing the following cases, my gut is telling me we might want to
+# restrict mixing of imperative and transform APIs.
+#
+# Here's what we might want to allow:
+# - passing Tensor subclasses into a transformed function. The transformed
+# function should not create and manipulate Tensor subclasses.
+# Concretely, the following should be OK:
+# >>> vmap(foo)(MaskedTensor(...))
+#
+# Here's what we might not want to allow:
+# - transforming a function that creates and manipulates Tensor subclasses.
+# Concretely, this would mean that we're not going to let someone make a
+# MaskedTensor where the value or mask is a BatchedTensor created from inside
+# vmap. If they want to do something like this, then they need to compose
+# vmap and mask transforms or compose BatchedTensor and MaskedTensor (from the
+# imperative APIs).
+#
+# This might suggest that transforms should always go first and the imperative
+# APIs should run after transforms. But where do modes fit into this?
+#
+# TODO: Is there a difference between a "mode" and a "transform"? The gut says:
+# you probably want to be able to LoggingTensorMode at different levels, so
+# "modes" are a part of the imperative API. Does that mean we want separate
+# transform and mode stacks?
+
+# Jacobian computation.
+# NB: I don't like how the `jvp` transform needs to be passed a parent arg.
+# We can get over this restriction by saying that transforms always run before
+# the imperative APIs.
+BatchedTensor0 = make_batched_tensor_class()
+x = torch.randn(5)
+v = torch.eye(5)
+primal, tangent = jvp(torch.sin, (x,), (BatchedTensor0(v, 0),), parent=BatchedTensor0)
+assert torch.allclose(tangent.unwrap_batched(), torch.diag(x.cos()))
+
+
+# Creating a JVPTensor inside of vmap!
+# Per-sample-grad example
+# NB: The problem I have with this example is that if someone returns the JVPTensor
+# instead of unwrapping it inside the function, then a BatchedTensor will escape.
+# The user didn't create that BatchedTensor (vmap did!) so they're going to be
+# confused when they see it.
+def grad_of_sin(x):
+    JVPTensor0 = make_jvp_tensor_class()
+    assert x.shape == ()
+    v = torch.tensor(1.0)
+    dual = JVPTensor0(x, v)
+    out_dual = dual.sin()
+    return out_dual.tangent
+
+x = torch.randn(5)
+grads = vmap(grad_of_sin)(x)
+assert torch.allclose(grads, x.cos())
