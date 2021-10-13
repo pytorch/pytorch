@@ -1654,5 +1654,81 @@ struct OperatorMap {
   MapType map;
 };
 
+template <typename T>
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+struct FunctionSchemaMap {
+  // Type aliasing
+  using FuncSchemaMapType = typename std::pair<FunctionSchema, T>;
+  using ValueType = std::vector<FuncSchemaMapType>;
+  using MapType = std::unordered_map<Symbol, ValueType>;
+
+  FunctionSchemaMap() = default;
+  void insert(const FunctionSchema& schema, T val) {
+    // Remove if exists before insert
+    erase(schema);
+    map[Symbol::fromQualString(schema.name())].emplace_back(
+        std::make_pair(schema, val));
+  }
+
+  void erase(const FunctionSchema& schema) {
+    auto it = map.find(Symbol::fromQualString(schema.name()));
+    if (it == map.end()) {
+      return;
+    }
+    for (auto vit = it->second.begin(); vit != it->second.end(); ++vit) {
+      if (vit->first == schema) {
+        it->second.erase(vit);
+        break;
+      }
+    }
+    if (it->second.size() == 0) {
+      map.erase(Symbol::fromQualString(schema.name()));
+    }
+  }
+
+  bool contains(const FunctionSchema& schema) const {
+    const auto it = map.find(Symbol::fromQualString(schema.name()));
+    if (it == map.end()) {
+      return false;
+    }
+    for (auto vit = it->second.begin(); vit != it->second.end(); ++vit) {
+      if (vit->first->schema() == schema) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  c10::optional<T> find(const FunctionSchema& schema) const {
+    const auto it = map.find(Symbol::fromQualString(schema.name()));
+    if (it == map.end()) {
+      return c10::nullopt;
+    }
+    for (auto vit = it->second.begin(); vit != it->second.end(); ++vit) {
+      if (vit->first == schema) {
+        return vit->second;
+      }
+    }
+    return c10::nullopt;
+  }
+
+  // TODO: return iterator
+  std::vector<FuncSchemaMapType> getAllKeysAndValues() const {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    std::vector<FuncSchemaMapType> keys_values;
+    for (auto& symbol_mapping : map) {
+      auto& vec = symbol_mapping.second;
+      for (auto& pair : vec) {
+        keys_values.push_back(pair);
+      }
+    }
+    return keys_values;
+  }
+
+ private:
+  friend struct Node;
+  MapType map;
+};
+
 } // namespace jit
 } // namespace torch
