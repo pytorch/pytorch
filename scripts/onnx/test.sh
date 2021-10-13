@@ -78,7 +78,7 @@ if [[ "$BUILD_ENVIRONMENT" == *ort_test1* ||  "${SHARD_NUMBER}" == "1" ]]; then
     "$top_dir/test/onnx/test_pytorch_onnx_shape_inference.py"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *ort_test1* || "${SHARD_NUMBER}" == "2" ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *ort_test2* || "${SHARD_NUMBER}" == "2" ]]; then
   # Update the loop for new opsets
   for i in $(seq 10 14); do
     pytest "${args[@]}" \
