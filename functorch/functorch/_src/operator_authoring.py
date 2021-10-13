@@ -316,7 +316,7 @@ class PointwiseCompiler(object):
         loopnest = _te.LoopNest(_te.Block([out]), output_bufs)
 
         if self.device == "cuda" and loops:
-            flattened = _te.LoopNest.flatten(loops)
+            flattened = loopnest.flatten(loops)
             assert flattened
             inner = _te.LoopNest.split_with_mask(flattened, 512)
             assert inner

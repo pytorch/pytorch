@@ -11,6 +11,7 @@ from torch.testing._internal.jit_utils import JitTestCase
 import unittest
 
 LLVM_ENABLED = torch._C._llvm_enabled()
+HAS_CUDA = torch.cuda.is_available()
 HAS_SYMPY = False
 try:
     import sympy
@@ -44,8 +45,8 @@ class TorchFunctionExample(object):
         return torch.zeros_like(args[0])
 
 
-class TestOperatorAuthoringCPU(JitTestCase):
-    device = "cpu"
+class TestOperatorAuthoring(JitTestCase):
+    device = None
 
     def rand(self, *args, dtype=torch.float32, **kwargs):
         return torch.randint(0, 100, args, dtype=dtype, device=self.device, **kwargs)
@@ -126,16 +127,15 @@ class TestOperatorAuthoringCPU(JitTestCase):
         torch.testing.assert_allclose(x + 3, graph(x))
 
 
-class TestOperatorAuthoringGPU(TestOperatorAuthoringCPU):
+@unittest.skipIf(not HAS_CUDA, "GPU tests require CUDA")
+class TestOperatorAuthoringGPU(TestOperatorAuthoring):
     device = "cuda"
 
 
-if not LLVM_ENABLED:
-    TestOperatorAuthoringCPU = None  # noqa: F811
+@unittest.skipIf(not LLVM_ENABLED, "CPU tests require LLVM")
+class TestOperatorAuthoringCPU(TestOperatorAuthoring):
+    device = "cpu"
 
-# TODO: TestOperatorAuthoringGPU is disabled because it fails on CUDAs.
-# if not torch.cuda.is_available():
-TestOperatorAuthoringGPU = None  # noqa: F811
 
 if __name__ == "__main__":
     run_tests()
