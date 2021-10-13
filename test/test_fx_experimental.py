@@ -1467,6 +1467,10 @@ class TestNormalizeOperators(JitTestCase):
             "expand",
             "expand_as",
             "fill_",
+            "T",   # Implemented with a lambda
+            "H",   # Implemented with a lambda
+            "mT",  # Implemented with a lambda
+            "mH",  # Implemented with a lambda
             "gradient",
             "igamma",
             "igammac",
