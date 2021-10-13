@@ -18,6 +18,7 @@ from torch.ao.quantization.quantize_fx import (
 )
 
 from torch.ao.quantization.fx.quantization_patterns import DefaultNodeQuantizeHandler
+from torch.ao.quantization.fx.common_quantization_patterns import CommonQuantizeHandler
 
 from torch.ao.quantization.fx.match_utils import (
     is_match,
@@ -4122,6 +4123,34 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
         self.checkGraphModuleNodes(m_quant, expected_node_list=node_list)
 
+    custom_qconfig = torch.ao.quantization.QConfig(
+        activation=torch.ao.quantization.observer.HistogramObserver.with_args(
+            qscheme=torch.per_tensor_symmetric, reduce_range=True, dtype=torch.qint8
+        ),
+        weight=torch.ao.quantization.default_per_channel_weight_observer
+    )
+
+    common_quant_patterns = {
+        torch.nn.ConvTranspose1d: CommonQuantizeHandler,
+        torch.nn.ConvTranspose2d: CommonQuantizeHandler,
+        torch.nn.ELU: CommonQuantizeHandler,
+        torch.nn.LeakyReLU: CommonQuantizeHandler,
+        torch.nn.Hardswish: CommonQuantizeHandler,
+        torch.nn.InstanceNorm1d: CommonQuantizeHandler,
+        torch.nn.InstanceNorm2d: CommonQuantizeHandler,
+        torch.nn.InstanceNorm3d: CommonQuantizeHandler,
+        torch.nn.LayerNorm: CommonQuantizeHandler,
+        torch.nn.SiLU: CommonQuantizeHandler,
+        torch.nn.functional.elu: CommonQuantizeHandler,
+        torch.nn.functional.hardswish: CommonQuantizeHandler,
+        torch.nn.functional.instance_norm: CommonQuantizeHandler,
+        torch.nn.functional.layer_norm: CommonQuantizeHandler,
+        torch.nn.functional.leaky_relu: CommonQuantizeHandler,
+        torch.nn.functional.silu: CommonQuantizeHandler,
+        torch.nn.functional.mish: CommonQuantizeHandler,
+        torch.sum: CommonQuantizeHandler
+    }
+
     def test_gelu_normal(self):
         module = torch.nn.GELU
         functional = torch.nn.functional.gelu
@@ -4134,6 +4163,9 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_default_node_quant_handler_ops(
             module, functional, qconfig, is_reference, node_list)
 
+        self._test_default_node_quant_handler_ops(module, functional, custom_qconfig, node_list,
+                                                  additional_patterns=common_quant_patterns)
+
     def test_softmax_normal(self):
         module = torch.nn.Softmax
         functional = torch.nn.functional.softmax
@@ -4145,6 +4177,9 @@ class TestQuantizeFxOps(QuantizationTestCase):
         ]
         self._test_default_node_quant_handler_ops(
             module, functional, qconfig, is_reference, node_list)
+
+        self._test_default_node_quant_handler_ops(module, functional, custom_qconfig, node_list,
+                                                  additional_patterns=common_quant_patterns)
 
     def test_gelu_reference(self):
         module = torch.nn.GELU
@@ -4166,6 +4201,9 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_default_node_quant_handler_ops(
             module, functional, qconfig, is_reference, node_list, additional_patterns)
 
+        self._test_default_node_quant_handler_ops(module, functional, custom_qconfig, node_list,
+                                                  additional_patterns=common_quant_patterns)
+
     def test_softmax_reference(self):
         module = torch.nn.Softmax
         functional = torch.nn.functional.softmax
@@ -4186,6 +4224,9 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_default_node_quant_handler_ops(
             module, functional, qconfig, is_reference, node_list, additional_patterns)
 
+        self._test_default_node_quant_handler_ops(module, functional, custom_qconfig, node_list,
+                                                  additional_patterns=common_quant_patterns)
+
     def test_silu_reference(self):
         module = torch.nn.SiLU
         functional = torch.nn.functional.silu
@@ -4204,6 +4245,9 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_default_node_quant_handler_ops(
             module, functional, qconfig, is_reference, node_list)
 
+        self._test_default_node_quant_handler_ops(module, functional, custom_qconfig, node_list,
+                                                  additional_patterns=common_quant_patterns)
+
     def test_mish_reference(self):
         module = torch.nn.Mish
         functional = torch.nn.functional.mish
@@ -4221,6 +4265,9 @@ class TestQuantizeFxOps(QuantizationTestCase):
         ]
         self._test_default_node_quant_handler_ops(
             module, functional, qconfig, is_reference, node_list)
+
+        self._test_default_node_quant_handler_ops(module, functional, custom_qconfig, node_list,
+                                                  additional_patterns=common_quant_patterns)
 
     def test_bmm_int_reference(self):
         """ int8 is not supported for bmm so we won't produce reference
