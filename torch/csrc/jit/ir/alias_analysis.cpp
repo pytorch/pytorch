@@ -991,6 +991,10 @@ void AliasDb::analyzeRpcAsync(Node* node) {
 void AliasDb::analyzeBatchNormAndInstanceNorm(
     Node* node,
     const std::string& trainingInputName) {
+  if (isFrozen_) {
+    return;
+  }
+
   TORCH_INTERNAL_ASSERT(
       node->hasNamedInput(trainingInputName),
       trainingInputName + " input is expected");
