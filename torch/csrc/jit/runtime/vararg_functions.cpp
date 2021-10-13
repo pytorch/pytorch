@@ -1,6 +1,8 @@
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
-#include <ATen/ATen.h>
+#include <ATen/Functions.h>
+#include <ATen/Tensor.h>
+#include <c10/util/irange.h>
 
 namespace torch {
 namespace jit {
@@ -319,17 +321,27 @@ void dictConstruct(Stack& stack, const at::DictType& type, size_t num_inputs) {
   push(stack, std::move(vals));
 }
 
-void createObject(Stack& stack, const at::ClassTypePtr& type) {
-  auto userObj = c10::ivalue::Object::create(
-      c10::StrongTypePtr(type->compilation_unit(), type),
-      type->numAttributes());
-  push(stack, std::move(userObj));
+void createObject(
+    Stack& stack,
+    const at::ClassTypePtr& type,
+    bool as_weak_ref) {
+  if (as_weak_ref) {
+    c10::WeakTypePtr weak(type->compilation_unit(), type);
+    auto userObj = c10::ivalue::Object::create(
+        c10::WeakOrStrongTypePtr(weak), type->numAttributes());
+    push(stack, std::move(userObj));
+  } else {
+    auto userObj = c10::ivalue::Object::create(
+        c10::StrongTypePtr(type->compilation_unit(), type),
+        type->numAttributes());
+    push(stack, std::move(userObj));
+  }
 }
 
 void isinstance(Stack& stack, at::ArrayRef<at::TypePtr> types) {
   at::TypePtr ty = pop(stack).type();
   for (const at::TypePtr& candidate : types) {
-    if (ty->isSubtypeOf(candidate)) {
+    if (ty->isSubtypeOf(*candidate)) {
       push(stack, true);
       return;
     }
@@ -342,7 +354,7 @@ void tupleSlice(Stack& stack, size_t begin, size_t end) {
   auto tuple = pop(stack).toTuple();
   std::vector<IValue> output_elems;
   output_elems.reserve(end - begin);
-  for (size_t i = begin; i < end; ++i) {
+  for (const auto i : c10::irange(begin, end)) {
     output_elems.emplace_back(tuple->elements()[i]);
   }
   push(stack, c10::ivalue::Tuple::create(std::move(output_elems)));
@@ -352,7 +364,7 @@ void dequantize(Stack& stack) {
   auto iv = pop(stack);
   if (iv.isTuple()) {
     auto tuple = iv.toTuple();
-    auto elems = tuple->elements();
+    const auto& elems = tuple->elements();
     std::vector<IValue> output_elems;
     output_elems.reserve(elems.size());
     for (const auto& elem : elems) {

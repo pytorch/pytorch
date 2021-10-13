@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <c10/util/Optional.h>
+#include <c10d/PrefixStore.hpp>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Store.hpp>
 #include <c10d/Types.hpp>
@@ -259,7 +260,26 @@ class TORCH_PYTHON_API DistributedC10d : public torch::CustomClassHolder {
   int64_t group_count_;
 };
 
-// Must be called to initialize Torchbind bindings for c10d.
-void initCustomClassBindings();
+// This class exists as a way to allow us to split NCCL-specific code into a
+// different file. frontend_cuda.cpp will, if USE_C10D_NCCL is defined,
+// override this NCCLProcessGroupProvider with one that will actually do
+// something.
+struct TORCH_API NCCLProcessGroupProvider {
+  virtual c10::intrusive_ptr<ProcessGroup> get(
+      c10::intrusive_ptr<PrefixStore> /*prefix_store*/,
+      int64_t /*rank*/,
+      int64_t /*world_size*/,
+      std::chrono::milliseconds /*timeout*/) const {
+    AT_ERROR(
+        "Attempting to create NCCL-based process group while NCCL is either not enabled or built");
+  }
+
+  virtual ~NCCLProcessGroupProvider() = default;
+};
+
+TORCH_API void registerNCCLProcessGroupProvider(
+    NCCLProcessGroupProvider* provider);
+
+TORCH_API void initCustomClassBindings();
 
 } // namespace c10d

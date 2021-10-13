@@ -85,7 +85,7 @@ DECLARE_DISPATCH(upsampling_bilinear2d, upsample_bilinear2d_backward_kernel);
 DECLARE_DISPATCH(upsampling_trilinear3d, upsample_trilinear3d_backward_kernel);
 DECLARE_DISPATCH(upsampling_bicubic2d, upsample_bicubic2d_kernel);
 
-static std::array<int64_t, 3> upsample_1d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
+static C10_UNUSED std::array<int64_t, 3> upsample_1d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
   TORCH_CHECK(
       output_size.size() == 1,
       "It is expected output_size equals to 1, but got size ",
@@ -113,7 +113,7 @@ static std::array<int64_t, 3> upsample_1d_common_check(IntArrayRef input_size, I
   return {nbatch, channels, output_width};
 }
 
-static std::array<int64_t, 4> upsample_2d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
+static C10_UNUSED std::array<int64_t, 4> upsample_2d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
   TORCH_CHECK(
       output_size.size() == 2,
       "It is expected output_size equals to 2, but got size ",
@@ -149,7 +149,8 @@ static std::array<int64_t, 4> upsample_2d_common_check(IntArrayRef input_size, I
   return {nbatch, channels, output_height, output_width};
 }
 
-static std::array<int64_t, 5> upsample_3d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
+static C10_UNUSED
+std::array<int64_t, 5> upsample_3d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
   TORCH_CHECK(
       output_size.size() == 3,
       "It is expected output_size equals to 3, but got size ",
@@ -250,12 +251,16 @@ static inline scalar_t area_pixel_compute_scale(
     bool align_corners,
     const c10::optional<double> scale) {
   // see Note [area_pixel_compute_scale]
-  if (output_size > 1) {
-    return align_corners
-        ? static_cast<scalar_t>(input_size - 1) / (output_size - 1)
-        : compute_scales_value<scalar_t>(scale, input_size, output_size);
-  } else {
-    return scalar_t(0);
+  if(align_corners){
+    if(output_size > 1) {
+      return static_cast<scalar_t>(input_size - 1) / (output_size - 1);
+    }
+    else {
+      return static_cast<scalar_t>(0);
+    }
+  }
+  else{
+    return compute_scales_value<scalar_t>(scale, input_size, output_size);
   }
 }
 

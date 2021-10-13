@@ -18,6 +18,7 @@
 #include <ATen/core/qualified_name.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 
 #include <functional>
 #include <memory>
@@ -110,8 +111,8 @@ struct TORCH_API Module : public Object {
     return true;
   }
 
-  IValue forward(std::vector<IValue> inputs) {
-    return get_method("forward")(std::move(inputs));
+  IValue forward(std::vector<IValue> inputs, const Kwargs& kwargs = Kwargs()) {
+    return get_method("forward")(std::move(inputs), kwargs);
   }
 
   // In script modules, buffers are Tensors attribute that are _not_ registered
@@ -460,6 +461,7 @@ struct slot_list_impl {
       size_ = size_t(0);
       // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
       for (const value_type& s : *(this)) {
+        (void)s; // Suppress unused variable warning
         ++*size_;
       }
     }
@@ -533,7 +535,7 @@ struct TORCH_API BufferPolicy {
     return std::move(v).toTensor();
   }
   static bool valid(const ClassTypePtr& typ, size_t i, const IValue& v) {
-    return typ->getAttribute(i)->isSubtypeOf(TensorType::get()) &&
+    return typ->getAttribute(i)->isSubtypeOf(*TensorType::get()) &&
         typ->is_buffer(i);
   }
   static CONSTEXPR_EXCEPT_WIN_CUDA bool all_slots = false;
@@ -566,7 +568,7 @@ struct NamedPolicy {
       name = (cursors.back().i_ == -1) ? "" : nameFragment(cursors.back());
     } else {
       std::ostringstream ss;
-      for (size_t i = 0; i < cursors.size(); ++i) {
+      for (const auto i : c10::irange(cursors.size())) {
         if (i > 0) {
           ss << ".";
         }

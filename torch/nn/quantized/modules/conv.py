@@ -12,7 +12,6 @@ import torch.nn.intrinsic.qat as nniqat
 from torch._ops import ops
 from torch.nn.common_types import _size_1_t
 from torch.nn.modules.utils import _single, _pair, _triple
-from torch.nn.quantized.modules.utils import _pair_from_first
 from torch.nn.quantized.modules.utils import _quantize_weight
 from torch.nn.utils import fuse_conv_bn_weights
 
@@ -284,10 +283,10 @@ class Conv1d(_ConvNd):
                  device=None,
                  dtype=None):
         factory_kwargs = {'device': device, 'dtype': dtype}
-        kernel_size = _pair_from_first(kernel_size)
-        stride = _pair_from_first(stride)
-        padding = _pair_from_first(padding)
-        dilation = _pair_from_first(dilation)
+        kernel_size = _single(kernel_size)
+        stride = _single(stride)
+        padding = padding if isinstance(padding, str) else _single(padding)
+        dilation = _single(dilation)
 
         # Subclasses of _ConvNd needs to call _init rather than __init__. See
         # discussion on PR #49702
@@ -334,7 +333,7 @@ class Conv1d(_ConvNd):
         r"""Creates a quantized module from a float module or qparams_dict.
 
         Args:
-            mod (Module): a float module, either produced by torch.quantization
+            mod (Module): a float module, either produced by torch.ao.quantization
               utilities or provided by the user
         """
         return _ConvNd.from_float(cls, mod)
@@ -431,7 +430,7 @@ class Conv2d(_ConvNd):
         r"""Creates a quantized module from a float module or qparams_dict.
 
         Args:
-            mod (Module): a float module, either produced by torch.quantization
+            mod (Module): a float module, either produced by torch.ao.quantization
               utilities or provided by the user
         """
         return _ConvNd.from_float(cls, mod)
@@ -529,7 +528,7 @@ class Conv3d(_ConvNd):
         r"""Creates a quantized module from a float module or qparams_dict.
 
         Args:
-            mod (Module): a float module, either produced by torch.quantization
+            mod (Module): a float module, either produced by torch.ao.quantization
               utilities or provided by the user
         """
         return _ConvNd.from_float(cls, mod)
@@ -565,7 +564,7 @@ class _ConvTransposeNd(_ConvNd):
     def from_float(cls, mod):
         r"""Creates a quantized module from a float module or qparams_dict.
         Args:
-            mod (Module): a float module, either produced by torch.quantization
+            mod (Module): a float module, either produced by torch.ao.quantization
               utilities or provided by the user
         """
         # derived classes override cls._FLOAT_MODULE attribute

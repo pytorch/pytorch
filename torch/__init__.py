@@ -15,11 +15,11 @@ import platform
 import textwrap
 import ctypes
 import warnings
-
+from .autocast_mode import autocast
 if sys.version_info < (3,):
     raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
 
-from ._utils import _import_dotted_name
+from ._utils import _import_dotted_name, classproperty
 from ._utils_internal import get_file_path, prepare_multiprocessing_environment, \
     USE_RTLD_GLOBAL_WITH_LIBTORCH, USE_GLOBAL_DEPS
 # TODO(torch_deploy) figure out how to freeze version.py in fbcode build
@@ -41,8 +41,8 @@ __all__ = [
     'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
     'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
-    'lobpcg', 'use_deterministic_algorithms', 'set_deterministic',
-    'are_deterministic_algorithms_enabled', 'is_deterministic',
+    'lobpcg', 'use_deterministic_algorithms',
+    'are_deterministic_algorithms_enabled',
     'set_warn_always', 'is_warn_always_enabled',
 ]
 
@@ -106,8 +106,7 @@ if sys.platform == 'win32':
     try:
         ctypes.CDLL('vcruntime140.dll')
         ctypes.CDLL('msvcp140.dll')
-        if cuda_version not in ('9.2', '10.0'):
-            ctypes.CDLL('vcruntime140_1.dll')
+        ctypes.CDLL('vcruntime140_1.dll')
     except OSError:
         print('''Microsoft Visual C++ Redistributable is not installed, this may lead to the DLL load failure.
                  It can be downloaded at https://aka.ms/vs/16/release/vc_redist.x64.exe''')
@@ -323,29 +322,44 @@ def set_default_tensor_type(t):
 
 
 def set_default_dtype(d):
-    r"""Sets the default floating point dtype to :attr:`d`.
-    This dtype is:
+    r"""
 
-    1. The inferred dtype for python floats in :func:`torch.tensor`.
-    2. Used to infer dtype for python complex numbers. The default complex dtype is set to
-       ``torch.complex128`` if default floating point dtype is ``torch.float64``,
-       otherwise it's set to ``torch.complex64``
+    Sets the default floating point dtype to :attr:`d`. Supports torch.float32
+    and torch.float64 as inputs. Other dtypes may be accepted without complaint
+    but are not supported and are unlikely to work as expected.
 
-    The default floating point dtype is initially ``torch.float32``.
+    When PyTorch is initialized its default floating point dtype is torch.float32,
+    and the intent of set_default_dtype(torch.float64) is to facilitate NumPy-like
+    type inference. The default floating point dtype is used to:
+
+    1. Implicitly determine the default complex dtype. When the default floating point
+       type is float32 the default complex dtype is complex64, and when the default
+       floating point type is float64 the default complex type is complex128.
+    2. Infer the dtype for tensors constructed using Python floats or complex Python
+       numbers. See examples below.
+    3. Determine the result of type promotion between bool and integer tensors and
+       Python floats and complex Python numbers.
 
     Args:
-        d (:class:`torch.dtype`): the floating point dtype to make the default
+        d (:class:`torch.dtype`): the floating point dtype to make the default.
+                                  Either torch.float32 or torch.float64.
 
     Example:
         >>> # initial default for floating point is torch.float32
+        >>> # Python floats are interpreted as float32
         >>> torch.tensor([1.2, 3]).dtype
         torch.float32
         >>> # initial default for floating point is torch.complex64
+        >>> # Complex Python numbers are interpreted as complex64
         >>> torch.tensor([1.2, 3j]).dtype
         torch.complex64
+
         >>> torch.set_default_dtype(torch.float64)
+
+        >>> # Python floats are now interpreted as float64
         >>> torch.tensor([1.2, 3]).dtype    # a new floating point tensor
         torch.float64
+        >>> # Complex Python numbers are now interpreted as complex128
         >>> torch.tensor([1.2, 3j]).dtype   # a new complex tensor
         torch.complex128
 
@@ -469,31 +483,11 @@ def use_deterministic_algorithms(mode):
     """
     _C._set_deterministic_algorithms(mode)
 
-def set_deterministic(d):
-    r"""This function is deprecated and will be removed in a future release.
-    Please use :func:`torch.use_deterministic_algorithms` instead.
-    """
-    warnings.warn((
-        "torch.set_deterministic is deprecated and will be removed in a future "
-        "release. Please use torch.use_deterministic_algorithms instead"))
-
-    use_deterministic_algorithms(d)
-
 def are_deterministic_algorithms_enabled():
     r"""Returns True if the global deterministic flag is turned on. Refer to
     :func:`torch.use_deterministic_algorithms` documentation for more details.
     """
     return _C._get_deterministic_algorithms()
-
-def is_deterministic():
-    r"""This function is deprecated and will be removed in a future release.
-    Please use :func:`torch.are_deterministic_algorithms_enabled` instead.
-    """
-    warnings.warn((
-        "torch.is_deterministic is deprecated and will be removed in a future "
-        "release. Please use torch.are_deterministic_algorithms_enabled instead"))
-    return are_deterministic_algorithms_enabled()
-
 
 def set_warn_always(b):
     r"""When this flag is False (default) then some PyTorch warnings may only
@@ -527,70 +521,104 @@ __all__.extend(['e', 'pi', 'nan', 'inf'])
 ################################################################################
 
 from ._tensor import Tensor
-from .storage import _StorageBase
+from .storage import _StorageBase, TypedStorage
 
+# NOTE: New <type>Storage classes should never be added. When adding a new
+# dtype, use torch.storage.TypedStorage directly.
 
-class DoubleStorage(_C.DoubleStorageBase, _StorageBase):
+class UntypedStorage(_C.ByteStorageBase, _StorageBase):
     pass
 
+class ByteStorage(TypedStorage):
+    @classproperty
+    def dtype(self):
+        return torch.uint8
 
-class FloatStorage(_C.FloatStorageBase, _StorageBase):
-    pass
+class DoubleStorage(TypedStorage):
+    @classproperty
+    def dtype(self):
+        return torch.double
 
+class FloatStorage(TypedStorage):
+    @classproperty
+    def dtype(self):
+        return torch.float
 
-class HalfStorage(_C.HalfStorageBase, _StorageBase):
-    pass
+class HalfStorage(TypedStorage):
+    @classproperty
+    def dtype(self):
+        return torch.half
 
+class LongStorage(TypedStorage):
+    @classproperty
+    def dtype(self):
+        return torch.long
 
-class LongStorage(_C.LongStorageBase, _StorageBase):
-    pass
+class IntStorage(TypedStorage):
+    @classproperty
+    def dtype(self):
+        return torch.int
 
+class ShortStorage(TypedStorage):
+    @classproperty
+    def dtype(self):
+        return torch.short
 
-class IntStorage(_C.IntStorageBase, _StorageBase):
-    pass
+class CharStorage(TypedStorage):
+    @classproperty
+    def dtype(self):
+        return torch.int8
 
+class BoolStorage(TypedStorage):
+    @classproperty
+    def dtype(self):
+        return torch.bool
 
-class ShortStorage(_C.ShortStorageBase, _StorageBase):
-    pass
+class BFloat16Storage(TypedStorage):
+    @classproperty
+    def dtype(self):
+        return torch.bfloat16
 
+class ComplexDoubleStorage(TypedStorage):
+    @classproperty
+    def dtype(self):
+        return torch.cdouble
 
-class CharStorage(_C.CharStorageBase, _StorageBase):
-    pass
+class ComplexFloatStorage(TypedStorage):
+    @classproperty
+    def dtype(self):
+        return torch.cfloat
 
+class QUInt8Storage(TypedStorage):
+    @classproperty
+    def dtype(self):
+        return torch.quint8
 
-class ByteStorage(_C.ByteStorageBase, _StorageBase):
-    pass
+class QInt8Storage(TypedStorage):
+    @classproperty
+    def dtype(self):
+        return torch.qint8
 
+class QInt32Storage(TypedStorage):
+    @classproperty
+    def dtype(self):
+        return torch.qint32
 
-class BoolStorage(_C.BoolStorageBase, _StorageBase):
-    pass
+class QUInt4x2Storage(TypedStorage):
+    @classproperty
+    def dtype(self):
+        return torch.quint4x2
 
-
-class BFloat16Storage(_C.BFloat16StorageBase, _StorageBase):
-    pass
-
-class ComplexDoubleStorage(_C.ComplexDoubleStorageBase, _StorageBase):
-    pass
-
-class ComplexFloatStorage(_C.ComplexFloatStorageBase, _StorageBase):
-    pass
-
-class QUInt8Storage(_C.QUInt8StorageBase, _StorageBase):
-    pass
-
-class QInt8Storage(_C.QInt8StorageBase, _StorageBase):
-    pass
-
-class QInt32Storage(_C.QInt32StorageBase, _StorageBase):
-    pass
-
-class QUInt4x2Storage(_C.QUInt4x2StorageBase, _StorageBase):
-    pass
+class QUInt2x4Storage(TypedStorage):
+    @classproperty
+    def dtype(self):
+        return torch.quint2x4
 
 _storage_classes = {
-    DoubleStorage, FloatStorage, LongStorage, IntStorage, ShortStorage,
-    CharStorage, ByteStorage, HalfStorage, BoolStorage, QUInt8Storage, QInt8Storage,
-    QInt32Storage, BFloat16Storage, ComplexFloatStorage, ComplexDoubleStorage, QUInt4x2Storage
+    UntypedStorage, DoubleStorage, FloatStorage, LongStorage, IntStorage,
+    ShortStorage, CharStorage, ByteStorage, HalfStorage, BoolStorage,
+    QUInt8Storage, QInt8Storage, QInt32Storage, BFloat16Storage,
+    ComplexFloatStorage, ComplexDoubleStorage, QUInt4x2Storage, QUInt2x4Storage,
 }
 
 # The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
@@ -629,8 +657,14 @@ if TYPE_CHECKING:
     # PR #43339 for details.
     from torch._C._VariableFunctions import *  # type: ignore[misc] # noqa: F403
 
+# Ops not to be exposed in `torch` namespace,
+# mostly helper ops.
+PRIVATE_OPS = (
+    'unique_dim',
+)
+
 for name in dir(_C._VariableFunctions):
-    if name.startswith('__'):
+    if name.startswith('__') or name in PRIVATE_OPS:
         continue
     globals()[name] = getattr(_C._VariableFunctions, name)
     __all__.append(name)
@@ -647,19 +681,7 @@ from .functional import *  # noqa: F403
 # Remove unnecessary members
 ################################################################################
 
-del DoubleStorageBase
-del FloatStorageBase
-del LongStorageBase
-del IntStorageBase
-del ShortStorageBase
-del CharStorageBase
 del ByteStorageBase
-del BoolStorageBase
-del QUInt8StorageBase
-del BFloat16StorageBase
-del ComplexDoubleStorageBase
-del ComplexFloatStorageBase
-del QUInt4x2StorageBase
 
 ################################################################################
 # Define _assert
@@ -717,7 +739,6 @@ import torch.backends.mkl
 import torch.backends.mkldnn
 import torch.backends.openmp
 import torch.backends.quantized
-from torch import quantization as quantization
 import torch.utils.data
 from torch import __config__ as __config__
 from torch import __future__ as __future__
@@ -738,6 +759,10 @@ def compiled_with_cxx11_abi():
 # Import the ops "namespace"
 from torch._ops import ops
 from torch._classes import classes
+
+# quantization depends on torch.fx
+# Import quantization
+from torch import quantization as quantization
 
 # Import the quasi random sampler
 from torch import quasirandom as quasirandom
@@ -763,6 +788,8 @@ from ._vmap_internals import vmap as vmap
 # class usage. We add these lines here to preserve backward compatibility.
 quantized_lstm = torch.ops.aten.quantized_lstm
 quantized_gru = torch.ops.aten.quantized_gru
+
+from torch.utils.dlpack import from_dlpack, to_dlpack
 
 
 def _register_device_module(device_type, module):

@@ -47,6 +47,7 @@ elseif("${ATEN_THREADING}" STREQUAL "TBB")
   if(NOT USE_TBB)
     message(FATAL_ERROR "Using TBB backend but USE_TBB is off")
   endif()
+  message(WARNING "ATEN TBB Threading is deprectated.")
   set(AT_PARALLEL_NATIVE_TBB 1)
 else()
   message(FATAL_ERROR "Unknown ATen parallel backend: ${ATEN_THREADING}")
@@ -175,7 +176,7 @@ endif()
 if(BUILD_SPLIT_CUDA)
   # Splitting the source files that'll be in torch_cuda between torch_cuda_cu and torch_cuda_cpp
   foreach(tmp ${Caffe2_GPU_SRCS})
-    if("${tmp}" MATCHES "(.*aten.*\\.cu|.*(b|B)las.*|.*((s|S)olver|Register.*CUDA|Legacy|THC|TensorShapeCUDA).*\\.cpp)" AND NOT "${tmp}" MATCHES ".*(THC((CachingHost)?Allocator|General)).*")
+    if("${tmp}" MATCHES "(.*aten.*\\.cu|.*(b|B)las.*|.*((s|S)olver|Register.*CUDA|Legacy|THC|TensorShapeCUDA|BatchLinearAlgebra|ReduceOps|Equal).*\\.cpp)" AND NOT "${tmp}" MATCHES ".*(THC((CachingHost)?Allocator|General)).*")
       # Currently, torch_cuda_cu will have all the .cu files in aten, as well as some others that depend on those files
       list(APPEND Caffe2_GPU_SRCS_CU ${tmp})
     else()
@@ -391,9 +392,15 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   endif()
 
   set(GENERATED_CXX_PYTHON
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions_0.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions_1.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions_2.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions_3.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions_4.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_variable_methods.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_torch_functions.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_torch_functions_0.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_torch_functions_1.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_torch_functions_2.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_fft_functions.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_linalg_functions.cpp"
@@ -481,10 +488,17 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     endif()
   endif()
 
+  list(APPEND LITE_PROFILER_SRCS "")
+  if(USE_LITE_INTERPRETER_PROFILER)
+    append_filelist("libtorch_edge_profiler_sources " LITE_PROFILER_SRCS)
+  endif()
+
   # Switch between the full jit interpreter and lite interpreter
   if(BUILD_LITE_INTERPRETER)
     append_filelist("libtorch_lite_cmake_sources" LIBTORCH_CMAKE_SRCS)
     list(APPEND LIBTORCH_CMAKE_SRCS ${LITE_EAGER_SYMOBLICATION_SRCS})
+    list(APPEND LIBTORCH_CMAKE_SRCS ${LITE_PROFILER_SRCS})
+    set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
   else()
     append_filelist("libtorch_cmake_sources" LIBTORCH_CMAKE_SRCS)
 
@@ -505,6 +519,22 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     endforeach()
   endif()
 
+  # Mobile backend delegate srcs
+  if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
+    set(DELEGATE_SRCS
+      ${TORCH_SRC_DIR}/csrc/jit/backends/backend_debug_info.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/backends/backend_interface.cpp
+    )
+    list(APPEND TORCH_SRCS ${DELEGATE_SRCS})
+    if(IOS AND USE_COREML_DELEGATE)
+      set(COREML_DELEGATE_SRCS
+        ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/objc/PTMCoreMLBackend.mm
+        ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/objc/PTMCoreMLExecutor.mm
+      )
+      list(APPEND TORCH_SRCS ${COREML_DELEGATE_SRCS})
+    endif()
+  endif()
+
   # Required workaround for LLVM 9 includes.
   if(NOT MSVC)
     set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp PROPERTIES COMPILE_FLAGS -Wno-noexcept-type)
@@ -518,20 +548,17 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_codegen.cpp PROPERTIES COMPILE_FLAGS -Wno-init-list-lifetime)
   endif()
 
-  # Pass path to PocketFFT
-  if(AT_POCKETFFT_ENABLED)
-    set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/mkl/SpectralOps.cpp PROPERTIES INCLUDE_DIRECTORIES "${POCKETFFT_INCLUDE_DIR}")
-  endif()
-
   if(NOT INTERN_DISABLE_MOBILE_INTERP)
     set(MOBILE_SRCS
        ${TORCH_SRC_DIR}/csrc/jit/mobile/function.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/import.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/import_data.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/interpreter.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/model_compatibility.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/module.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/observer.cpp
-       ${TORCH_SRC_DIR}/csrc/jit/mobile/interpreter.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/parse_bytecode.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/parse_operators.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/train/export_data.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/train/optim/sgd.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/train/random.cpp
@@ -771,6 +798,29 @@ if(HAVE_SOVERSION)
 endif()
 torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
 
+if(USE_PRECOMPILED_HEADERS)
+  target_precompile_headers(torch_cpu PRIVATE
+      "$<$<COMPILE_LANGUAGE:CXX>:ATen/ATen.h>")
+  # Exclude some files from using PCH
+  set_source_files_properties(
+      # Errors when ATen.h is included
+      ${Torch_BINARY_DIR}/aten/src/ATen/core/TensorMethods.cpp
+      # Builds with incompatible compiler flags
+      ${Caffe2_CPU_SRCS_AVX2}
+      ${Caffe2_CPU_SRCS_AVX512}
+      PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+endif()
+
+# Pass path to PocketFFT
+if(AT_POCKETFFT_ENABLED)
+  if(CMAKE_VERSION VERSION_LESS "3.11")
+    target_include_directories(torch_cpu PRIVATE "${POCKETFFT_INCLUDE_DIR}")
+  else()
+    set_source_files_properties(
+        "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/mkl/SpectralOps.cpp"
+        PROPERTIES INCLUDE_DIRECTORIES "${POCKETFFT_INCLUDE_DIR}")
+  endif()
+endif()
 
 if(CMAKE_COMPILER_IS_GNUCXX AND BUILD_LIBTORCH_CPU_WITH_DEBUG)
   # To enable debug fission we need to build libtorch_cpu with debug info on,
@@ -785,6 +835,15 @@ if(USE_LLVM AND LLVM_FOUND)
     support core analysis executionengine instcombine
     scalaropts transformutils ${LLVM_TARGETS_TO_BUILD} orcjit)
   target_link_libraries(torch_cpu PRIVATE ${LLVM_LINK_LIBS})
+  if(APPLE)
+    set(LINKER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/unexported_symbols.lds")
+    set_target_properties(torch_cpu PROPERTIES LINK_DEPENDS ${LINKER_SCRIPT})
+    set_target_properties(torch_cpu PROPERTIES LINK_FLAGS "-Wl,-unexported_symbols_list,${LINKER_SCRIPT}")
+  elseif(UNIX)
+    set(LINKER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/version_script.lds")
+    set_target_properties(torch_cpu PROPERTIES LINK_DEPENDS ${LINKER_SCRIPT})
+    target_link_libraries(torch_cpu PRIVATE "-Wl,--version-script=${LINKER_SCRIPT}")
+  endif()
 endif(USE_LLVM AND LLVM_FOUND)
 
 # This is required for older versions of CMake, which don't allow
@@ -827,23 +886,27 @@ if(USE_ROCM)
     target_link_libraries(torch_hip PRIVATE __caffe2_nccl)
     target_compile_definitions(torch_hip PRIVATE USE_NCCL)
   endif()
+
+  if(USE_PRECOMPILED_HEADERS)
+    target_precompile_headers(torch_hip PRIVATE
+        "$<$<COMPILE_LANGUAGE:CXX>:ATen/ATen.h>")
+  endif()
 elseif(USE_CUDA)
   set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
   if(CUDA_SEPARABLE_COMPILATION)
     # Separate compilation fails when kernels using `thrust::sort_by_key`
-    # are linked with the rest of CUDA code. Workaround by linking them separately
-    set(_generated_name "torch_cuda_w_sort_by_key_intermediate_link${CMAKE_C_OUTPUT_EXTENSION}")
-    set(torch_cuda_w_sort_by_key_link_file "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/torch_cuda.dir/${CMAKE_CFG_INTDIR}/${_generated_name}")
-    cuda_wrap_srcs(torch_cuda OBJ Caffe2_GPU_W_SORT_BY_KEY_OBJ ${Caffe2_GPU_SRCS_W_SORT_BY_KEY})
-    CUDA_LINK_SEPARABLE_COMPILATION_OBJECTS("${torch_cuda_w_sort_by_key_link_file}" torch_cpu "${_options}" "${torch_cuda_SEPARABLE_COMPILATION_OBJECTS}")
-    set( torch_cuda_SEPARABLE_COMPILATION_OBJECTS )
-    # Pass compiled sort-by-key object + device-linked fatbin as extra dependencies of torch_cuda
-    cuda_add_library(torch_cuda ${Caffe2_GPU_SRCS} ${torch_cuda_w_sort_by_key_link_file} ${Caffe2_GPU_W_SORT_BY_KEY_OBJ})
+    # are linked with the rest of CUDA code. Workaround by linking them separately.
+    add_library(torch_cuda ${Caffe2_GPU_SRCS})
+    set_property(TARGET torch_cuda PROPERTY CUDA_SEPARABLE_COMPILATION ON)
+
+    add_library(torch_cuda_w_sort_by_key OBJECT ${Caffe2_GPU_SRCS_W_SORT_BY_KEY})
+    set_property(TARGET torch_cuda_w_sort_by_key PROPERTY CUDA_SEPARABLE_COMPILATION OFF)
+    target_link_libraries(torch_cuda PRIVATE torch_cuda_w_sort_by_key)
   elseif(BUILD_SPLIT_CUDA)
-    cuda_add_library(torch_cuda_cpp ${Caffe2_GPU_SRCS_CPP} ${Caffe2_GPU_SRCS_W_SORT_BY_KEY_CPP})
-    cuda_add_library(torch_cuda_cu ${Caffe2_GPU_SRCS_CU} ${Caffe2_GPU_SRCS_W_SORT_BY_KEY_CU})
+    add_library(torch_cuda_cpp ${Caffe2_GPU_SRCS_CPP} ${Caffe2_GPU_SRCS_W_SORT_BY_KEY_CPP})
+    add_library(torch_cuda_cu ${Caffe2_GPU_SRCS_CU} ${Caffe2_GPU_SRCS_W_SORT_BY_KEY_CU})
   else()
-    cuda_add_library(torch_cuda ${Caffe2_GPU_SRCS} ${Caffe2_GPU_SRCS_W_SORT_BY_KEY})
+    add_library(torch_cuda ${Caffe2_GPU_SRCS} ${Caffe2_GPU_SRCS_W_SORT_BY_KEY})
   endif()
   set(CUDA_LINK_LIBRARIES_KEYWORD)
   if(BUILD_SPLIT_CUDA)
@@ -864,6 +927,18 @@ elseif(USE_CUDA)
     target_link_libraries(torch_cuda PRIVATE __caffe2_nccl)
     target_compile_definitions(torch_cuda PRIVATE USE_NCCL)
   endif()
+
+  if(USE_PRECOMPILED_HEADERS)
+    if(BUILD_SPLIT_CUDA)
+      target_precompile_headers(torch_cuda_cpp PRIVATE
+          "$<$<COMPILE_LANGUAGE:CXX>:ATen/ATen.h>"
+          "$<$<COMPILE_LANGUAGE:CXX>:ATen/cuda/CUDAContext.h>")
+    else()
+      target_precompile_headers(torch_cuda PRIVATE
+          "$<$<COMPILE_LANGUAGE:CXX>:ATen/ATen.h>"
+          "$<$<COMPILE_LANGUAGE:CXX>:ATen/cuda/CUDAContext.h>")
+    endif()
+  endif()
 endif()
 
 if(USE_CUDA OR USE_ROCM)
@@ -878,12 +953,15 @@ if(USE_CUDA OR USE_ROCM)
   # The list of NVFUSER runtime files
   list(APPEND NVFUSER_RUNTIME_FILES
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/block_reduction.cu
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/block_sync_atomic.cu
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/block_sync_default.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/broadcast.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/fp16_support.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/grid_reduction.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/helpers.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/random_numbers.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/tensor.cu
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/welford.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/detail/PhiloxCudaStateRaw.cuh
     ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/detail/UnpackRaw.cuh
   )
@@ -930,15 +1008,36 @@ if(NOT INTERN_BUILD_MOBILE)
   add_dependencies(torch_cpu Caffe2_PROTO)
 endif()
 
+# Build model tracer for tracing-based selective build
+if(TRACING_BASED AND NOT BUILD_LITE_INTERPRETER AND NOT INTERN_BUILD_MOBILE)
+  add_subdirectory(
+    ${TORCH_ROOT}/torch/csrc/jit/mobile/model_tracer
+    ${CMAKE_BINARY_DIR}/model_tracer
+  )
+endif()
+
 # Codegen selected_mobile_ops.h for template selective build
 if(BUILD_LITE_INTERPRETER AND SELECTED_OP_LIST)
-  add_custom_command(
-    OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
-    COMMAND
-    "${PYTHON_EXECUTABLE}" -m tools.lite_interpreter.gen_selected_mobile_ops_header
-    --yaml_file_path "${SELECTED_OP_LIST}"
-    --output_file_path "${CMAKE_BINARY_DIR}/aten/src/ATen"
-    WORKING_DIRECTORY "${TORCH_ROOT}")
+  message("running gen_selected_mobile_ops_header for:  '${SELECTED_OP_LIST}'")
+  if(${TRACING_BASED})
+    add_custom_command(
+      OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
+      COMMAND
+      "${PYTHON_EXECUTABLE}"
+      -m tools.code_analyzer.gen_oplist
+      --model_file_list_path "${SELECTED_OP_LIST}"
+      --output_dir "${CMAKE_BINARY_DIR}/aten/src/ATen"
+      WORKING_DIRECTORY "${TORCH_ROOT}")
+  else()
+    add_custom_command(
+      OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
+      COMMAND
+      "${PYTHON_EXECUTABLE}"
+      -m tools.lite_interpreter.gen_selected_mobile_ops_header
+      --yaml_file_path "${SELECTED_OP_LIST}"
+      --output_file_path "${CMAKE_BINARY_DIR}/aten/src/ATen"
+      WORKING_DIRECTORY "${TORCH_ROOT}")
+  endif()
 
   add_custom_target(
     __selected_mobile_ops_header_gen
@@ -989,31 +1088,14 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     endif()
 
 if(USE_TBB)
-  list(APPEND ATen_CPU_INCLUDE ${TBB_ROOT_DIR}/include)
-  target_link_libraries(torch_cpu PUBLIC tbb)
+  list(APPEND ATen_CPU_INCLUDE ${TBB_INCLUDE_DIR})
+  target_link_libraries(torch_cpu PUBLIC TBB::tbb)
 endif()
 
-
-if(LINUX)
-  find_library(BREAKPAD_LIB breakpad_client
-    PATHS /usr/local/lib/)
-  find_path(BREAKPAD_INCLUDE_DIR breakpad
-    PATHS /usr/local/include/)
-
-  if(BREAKPAD_LIB AND BREAKPAD_INCLUDE_DIR)
-    message(STATUS "found breakpad library")
-    target_link_libraries(torch_cpu PRIVATE ${BREAKPAD_LIB})
-    target_compile_definitions(torch_cpu PRIVATE ADD_BREAKPAD_SIGNAL_HANDLER)
-    target_include_directories(torch_cpu PRIVATE ${BREAKPAD_INCLUDE_DIR}/breakpad)
-  else()
-    if(BREAKPAD_INCLUDE_DIR)
-      message(STATUS "breakpad_client library not found")
-    elseif(BREAKPAD_LIB)
-      message(STATUS "breakpad include path not found")
-    else()
-      message(STATUS "breakpad_client library and include path not found")
-    endif()
-  endif()
+if(USE_BREAKPAD)
+  target_compile_definitions(torch_cpu PRIVATE ADD_BREAKPAD_SIGNAL_HANDLER)
+  target_include_directories(torch_cpu PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../third_party ${CMAKE_CURRENT_LIST_DIR}/../third_party/breakpad/src)
+  target_link_libraries(torch_cpu PRIVATE breakpad)
 endif()
 
   target_include_directories(torch_cpu PRIVATE ${ATen_CPU_INCLUDE})
@@ -1068,10 +1150,14 @@ endif()
         add_subdirectory(${TORCH_ROOT}/test/cpp/api ${CMAKE_BINARY_DIR}/test_api)
       endif()
 
-      add_subdirectory(
-        ${TORCH_ROOT}/test/mobile/nnc
-        ${CMAKE_BINARY_DIR}/test_mobile_nnc
-      )
+      if(USE_LLVM AND LLVM_FOUND)
+        add_subdirectory(
+          ${TORCH_ROOT}/test/mobile/nnc
+          ${CMAKE_BINARY_DIR}/test_mobile_nnc
+        )
+      endif()
+      add_subdirectory(${TORCH_ROOT}/test/cpp/lazy
+                       ${CMAKE_BINARY_DIR}/test_lazy)
     endif()
   endif()
 
@@ -1571,7 +1657,7 @@ if(BUILD_SHARED_LIBS)
     target_link_libraries(torch_global_deps torch::cudart torch::nvtoolsext)
   endif()
   if(USE_TBB)
-    target_link_libraries(torch_global_deps tbb)
+    target_link_libraries(torch_global_deps TBB::tbb)
   endif()
 
   install(TARGETS torch_global_deps DESTINATION "${TORCH_INSTALL_LIB_DIR}")
@@ -1621,6 +1707,10 @@ endif()
 
 if(BUILD_TENSOREXPR_BENCHMARK)
   add_subdirectory(${TORCH_ROOT}/benchmarks/cpp/tensorexpr ${CMAKE_BINARY_DIR}/tensorexpr_bench)
+endif()
+
+if(BUILD_NVFUSER_BENCHMARK)
+  add_subdirectory(${TORCH_ROOT}/benchmarks/cpp/nvfuser ${CMAKE_BINARY_DIR}/nvfuser_bench)
 endif()
 
 if(BUILD_CPP_BENCHMARKS)
@@ -1696,6 +1786,9 @@ if(BUILD_TEST)
     target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
     target_include_directories(${test_name} PRIVATE $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
     target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
+    if(NOT MSVC)
+      target_compile_options(${test_name} PRIVATE -Wno-unused-variable)
+    endif()
     add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
     if(INSTALL_TEST)
       install(TARGETS ${test_name} DESTINATION test)
@@ -1709,7 +1802,7 @@ if(BUILD_TEST)
   if(USE_CUDA)
     foreach(test_src ${Caffe2_GPU_TEST_SRCS})
       get_filename_component(test_name ${test_src} NAME_WE)
-      cuda_add_executable(${test_name} "${test_src}")
+      add_executable(${test_name} "${test_src}")
       target_link_libraries(${test_name} torch_library gtest_main)
       target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
       target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})

@@ -147,7 +147,11 @@ genrule(
         "aten/src/ATen/Functions.cpp",
         "aten/src/ATen/RedispatchFunctions.h",
         "aten/src/ATen/Operators.h",
-        "aten/src/ATen/Operators.cpp",
+        "aten/src/ATen/Operators_0.cpp",
+        "aten/src/ATen/Operators_1.cpp",
+        "aten/src/ATen/Operators_2.cpp",
+        "aten/src/ATen/Operators_3.cpp",
+        "aten/src/ATen/Operators_4.cpp",
         "aten/src/ATen/NativeFunctions.h",
         "aten/src/ATen/MetaFunctions.h",
         "aten/src/ATen/MetaFunctions_inl.h",
@@ -214,9 +218,15 @@ libtorch_cpp_generated_sources = [
 
 libtorch_python_generated_sources = [
         "torch/csrc/autograd/generated/python_functions.h",
-        "torch/csrc/autograd/generated/python_functions.cpp",
+        "torch/csrc/autograd/generated/python_functions_0.cpp",
+        "torch/csrc/autograd/generated/python_functions_1.cpp",
+        "torch/csrc/autograd/generated/python_functions_2.cpp",
+        "torch/csrc/autograd/generated/python_functions_3.cpp",
+        "torch/csrc/autograd/generated/python_functions_4.cpp",
         "torch/csrc/autograd/generated/python_variable_methods.cpp",
-        "torch/csrc/autograd/generated/python_torch_functions.cpp",
+        "torch/csrc/autograd/generated/python_torch_functions_0.cpp",
+        "torch/csrc/autograd/generated/python_torch_functions_1.cpp",
+        "torch/csrc/autograd/generated/python_torch_functions_2.cpp",
         "torch/csrc/autograd/generated/python_nn_functions.cpp",
         "torch/csrc/autograd/generated/python_fft_functions.cpp",
         "torch/csrc/autograd/generated/python_linalg_functions.cpp",
@@ -367,7 +377,8 @@ filegroup(
         "aten/src/ATen/native/miopen/Conv_miopen.cpp",
         "aten/src/ATen/native/miopen/RNN_miopen.cpp",
         "aten/src/ATen/native/sparse/cuda/SparseCUDATensor.cpp",
-        "aten/src/THC/THCCachingHostAllocator.cpp",
+        "aten/src/ATen/native/sparse/cuda/SparseBlas.cpp",
+        "aten/src/ATen/native/sparse/cuda/SparseBlasImpl.cpp",
         "aten/src/THC/THCGeneral.cpp",
         "aten/src/THC/THCStorageCopy.cpp",
         "aten/src/THC/THCTensor.cpp",
@@ -384,9 +395,6 @@ filegroup(
         "aten/src/THC/THCStorageCopy.cu.cc",
         "aten/src/THC/THCTensor.cu.cc",
         "aten/src/THC/THCTensorCopy.cu.cc",
-        "aten/src/THC/THCTensorMath.cu.cc",
-        "aten/src/THC/THCTensorMathMagma.cu.cc",
-        "aten/src/THC/THCTensorMathPairwise.cu.cc",
         "aten/src/THC/THCTensorMathScan.cu.cc",
         "aten/src/THC/THCTensorScatterGather.cu.cc",
         "aten/src/THC/THCTensorSort.cu.cc",
@@ -398,24 +406,6 @@ filegroup(
         "aten/src/THC/generated/THCTensorSortInt.cu.cc",
         "aten/src/THC/generated/THCTensorSortLong.cu.cc",
         "aten/src/THC/generated/THCTensorSortShort.cu.cc",
-    ],
-)
-
-filegroup(
-    name = "thcunn_srcs_cu",
-    srcs = [
-        "aten/src/THCUNN/BCECriterion.cu.cc",
-        "aten/src/THCUNN/ELU.cu.cc",
-        "aten/src/THCUNN/HardTanh.cu.cc",
-        "aten/src/THCUNN/LeakyReLU.cu.cc",
-        "aten/src/THCUNN/MultiMarginCriterion.cu.cc",
-        "aten/src/THCUNN/SoftMarginCriterion.cu.cc",
-        "aten/src/THCUNN/SoftPlus.cu.cc",
-        "aten/src/THCUNN/SoftShrink.cu.cc",
-        "aten/src/THCUNN/SpatialClassNLLCriterion.cu.cc",
-        "aten/src/THCUNN/SpatialConvolutionMM.cu.cc",
-        "aten/src/THCUNN/SpatialDepthwiseConvolution.cu.cc",
-        "aten/src/THCUNN/Tanh.cu.cc",
     ],
 )
 
@@ -465,6 +455,7 @@ filegroup(
         "aten/src/ATen/native/cuda/NaiveConvolutionTranspose2d.cu.cc",
         "aten/src/ATen/native/cuda/NaiveConvolutionTranspose3d.cu.cc",
         "aten/src/ATen/native/cuda/NaiveDilatedConvolution.cu.cc",
+        "aten/src/ATen/native/cuda/NLLLoss2d.cu.cc",
         "aten/src/ATen/native/cuda/Normalization.cu.cc",
         "aten/src/ATen/native/cuda/PointwiseOpsKernel.cu.cc",
         "aten/src/ATen/native/cuda/PowKernel.cu.cc",
@@ -567,8 +558,6 @@ cc_library(
         "aten/src/THC/**/*.cpp",
         "aten/src/THC/*.cuh",
         "aten/src/THC/generic/*.cu.cc",
-        "aten/src/THCUNN/*.cuh",
-        "aten/src/THCUNN/generic/*.cu.cc",
     ],
     exclude = [
         "aten/src/ATen/Config.h",
@@ -710,7 +699,6 @@ cu_library(
     srcs = [
         ":aten_srcs_cu",
         ":thc_srcs_cu",
-        ":thcunn_srcs_cu",
     ],
     copts = ATEN_COPTS + torch_cuda_half_options,
     visibility = ["//visibility:public"],
@@ -2073,6 +2061,23 @@ cc_test(
     tags = [
         "exclusive",
         "gpu-required",
+    ],
+    deps = [
+        ":torch",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "lazy_tests",
+    size = "small",
+    srcs = glob([
+        "test/cpp/lazy/*.cpp",
+        "test/cpp/lazy/*.h",
+    ]),
+    linkstatic = True,
+    tags = [
+        "exclusive",
     ],
     deps = [
         ":torch",

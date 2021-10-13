@@ -3,6 +3,11 @@
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
+if [[ ${BUILD_ENVIRONMENT} == *onnx* ]]; then
+  pip install click mock tabulate networkx==2.0
+  pip -q install --user "file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx"
+fi
+
 # Skip tests in environments where they are not built/applicable
 if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   echo 'Skipping tests'
@@ -143,6 +148,9 @@ if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
   done
 fi
 
+# Some Caffe2 tests fail when run using AVX512 ISA, see https://github.com/pytorch/pytorch/issues/66111
+export DNNL_MAX_CPU_ISA=AVX2
+
 pip install --user pytest-sugar
 "$PYTHON" \
   -m pytest \
@@ -170,7 +178,9 @@ if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
   # JIT C++ extensions require ninja, so put it into PATH.
   export PATH="/var/lib/jenkins/.local/bin:$PATH"
   if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
-    pip install -q --user onnxruntime==1.7.0
+    pip install -q --user flatbuffers==2.0
+    wget https://ortpypackage.blob.core.windows.net/ort-nightly/ort_nightly-1.8.0.dev202107131-cp36-cp36m-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+    pip install -q --user ort_nightly-1.8.0.dev202107131-cp36-cp36m-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
   fi
   "$ROOT_DIR/scripts/onnx/test.sh"
 fi

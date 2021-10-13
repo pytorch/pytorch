@@ -82,12 +82,25 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       }
       std::vector<IValue> values;
       values.reserve(tuple_size);
-      for (size_t i = 0; i < tuple_size; ++i) {
+      for (const auto i : c10::irange(tuple_size)) {
         values.push_back(toIValue(tuple[i], elem_types[i]));
       }
       return tuple_type->name()
           ? c10::ivalue::Tuple::createNamed(std::move(values), tuple_type)
           : c10::ivalue::Tuple::create(std::move(values));
+    }
+    case TypeKind::UnionType: {
+      auto actual_type = toTypeInferredIValue(obj);
+      auto actual_type_ptr = actual_type.type();
+      auto union_type = type->expect<UnionType>();
+      if (!actual_type_ptr->isSubtypeOf(union_type)) {
+        throw py::cast_error(c10::str(
+            "Expected a member of ",
+            union_type->annotation_str(),
+            " but instead found type ",
+            actual_type.type()->annotation_str()));
+      }
+      return actual_type;
     }
     case TypeKind::StringType:
       return ConstantString::create(py::cast<std::string>(obj));
@@ -257,7 +270,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       }
       // check if the classType conform with the interface or not
       std::stringstream why_not;
-      if (!classType->isSubtypeOfExt(interfaceType, &why_not)) {
+      if (!classType->isSubtypeOfExt(*interfaceType, &why_not)) {
         throw py::cast_error(c10::str(
             "Object of type ",
             classType->repr_str(),

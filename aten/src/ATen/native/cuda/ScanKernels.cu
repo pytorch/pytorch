@@ -5,14 +5,20 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/ReduceOps.h>
 #include <c10/util/accumulate.h>
-#include <THC/THCGeneral.h>
-#include <THC/THCNumerics.cuh>
 
 #include <ATen/cuda/cub.cuh>
 
 
 namespace at { namespace native {
+
+static c10::MaybeOwned<Tensor> contiguous_out_arg(const Tensor &tensor) {
+  if (tensor.is_contiguous()) {
+    return c10::MaybeOwned<Tensor>::borrowed(tensor);
+  }
+  return c10::MaybeOwned<Tensor>::owned(at::empty(tensor.sizes(), tensor.options()));
+}
 
 template <typename integer>
 constexpr inline integer ceil_div(integer n, integer m) {
@@ -21,7 +27,7 @@ constexpr inline integer ceil_div(integer n, integer m) {
 
 template<typename scalar_t, typename idx_t, typename BinaryOperation>
 __device__ void binary_op_update(const scalar_t lhs, scalar_t& rhs, const idx_t lhs_idx, idx_t& rhs_idx, BinaryOperation binary_op) {
-  if(!THCNumerics<scalar_t>::isnan(rhs) && (THCNumerics<scalar_t>::isnan(lhs) || !binary_op(rhs, lhs))) {
+  if(!at::_isnan(rhs) && (at::_isnan(lhs) || !binary_op(rhs, lhs))) {
     rhs = lhs;
     rhs_idx = lhs_idx;
   }
@@ -143,7 +149,7 @@ __global__ void tensor_kernel_scan_outer_dim_with_indices(scalar_t *self_, scala
       int64_t out_idx = 0;
 
       for (auto col = decltype(row_size){0}; col < row_size; ++col) {
-        if(THCNumerics<scalar_t>::isnan(*self) || (!THCNumerics<scalar_t>::isnan(out) && binary_op(*self, out))) {
+        if(at::_isnan(*self) || (!at::_isnan(out) && binary_op(*self, out))) {
           out = *self;
           out_idx = col;
         }
@@ -165,8 +171,9 @@ void check_fits_in_unsigned(int64_t val, const char* name) {
 
 
 template<typename scalar_t, class BinaryFunction>
-__host__ void scan_outer_dim_with_indices(const Tensor& self, Tensor& values, Tensor& indices,
-                                       int dim, scalar_t init, BinaryFunction binary_op) {
+__host__ void scan_outer_dim_with_indices(
+    const Tensor& self, const Tensor& values, const Tensor& indices,
+    int dim, scalar_t init, BinaryFunction binary_op) {
   int64_t row_size = self.size(dim);
   auto sizes = self.sizes();
 
@@ -192,7 +199,9 @@ __host__ void scan_outer_dim_with_indices(const Tensor& self, Tensor& values, Te
 }
 
 template <typename scalar_t, class BinaryFunction>
-__host__ void scan_innermost_dim_with_indices(const Tensor& self, Tensor& values, Tensor& indices, scalar_t init, BinaryFunction binary_op) {
+__host__ void scan_innermost_dim_with_indices(
+    const Tensor& self, const Tensor& values, const Tensor& indices,
+    scalar_t init, BinaryFunction binary_op) {
   int ndim = self.dim();
   // Treat all outer dimensions as a single dimension.
   int row_size = self.size(ndim - 1);
@@ -211,22 +220,20 @@ template<typename scalar_t, typename BinaryFunction>
 void scan_dim_with_indices(const Tensor& self, Tensor& values, Tensor& indices, //int64_t dim) {
      int64_t dim, scalar_t init, BinaryFunction binary_op) {
   int ndim = self.dim();
-  Tensor self_ = self.contiguous();
-  Tensor values_ = values.contiguous();
-  Tensor indices_ = indices.contiguous();
-  bool copy_values = !values.is_contiguous();
-  bool copy_indices = !indices.is_contiguous();
-   if (dim == ndim - 1) {
-     scan_innermost_dim_with_indices<scalar_t>(self_, values_, indices_, init, binary_op);
-   } else {
-     scan_outer_dim_with_indices<scalar_t>(self_, values_, indices_, dim, init, binary_op);
-   }
-   if (copy_values){
-     values.copy_(values_);
-   }
-   if (copy_indices){
-     indices.copy_(indices_);
-   }
+  auto self_ = self.expect_contiguous();
+  auto values_ = contiguous_out_arg(values);
+  auto indices_ = contiguous_out_arg(indices);
+  if (dim == ndim - 1) {
+    scan_innermost_dim_with_indices<scalar_t>(*self_, *values_, *indices_, init, binary_op);
+  } else {
+    scan_outer_dim_with_indices<scalar_t>(*self_, *values_, *indices_, dim, init, binary_op);
+  }
+  if (!values.is_same(*values_)) {
+    values.copy_(*values_);
+  }
+  if (!indices.is_same(*indices_)) {
+    indices.copy_(*indices_);
+  }
 }
 
 void cummax_helper_cuda(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim) {
@@ -419,8 +426,8 @@ tensor_kernel_scan_innermost_dim(
 
 
 template<typename scalar_t, class BinaryFunction>
-__host__ void scan_outer_dim(const Tensor& self, Tensor& result,
-                                       int dim, scalar_t init, BinaryFunction binary_op) {
+__host__ void scan_outer_dim(const Tensor& self, const Tensor& result,
+                             int dim, scalar_t init, BinaryFunction binary_op) {
   const int64_t row_size = self.size(dim);
   auto sizes = self.sizes();
 
@@ -445,7 +452,8 @@ __host__ void scan_outer_dim(const Tensor& self, Tensor& result,
 }
 
 template <typename scalar_t, class BinaryFunction>
-void scan_innermost_dim(const Tensor& self, Tensor& result, scalar_t init, BinaryFunction binary_op) {
+void scan_innermost_dim(const Tensor& self, const Tensor& result,
+                        scalar_t init, BinaryFunction binary_op) {
   int64_t ndim = self.dim();
   // Treat all outer dimensions as a single dimension.
   int64_t row_size = self.size(ndim - 1);
@@ -465,22 +473,21 @@ void scan_innermost_dim(const Tensor& self, Tensor& result, scalar_t init, Binar
 }
 
 template<typename scalar_t, typename BinaryFunction>
-void scan_dim(const Tensor& self, Tensor& result,
+void scan_dim(const Tensor& self, const Tensor& result,
      int64_t dim, scalar_t init, BinaryFunction binary_op) {
   int ndim = self.dim();
-  Tensor self_ = self.contiguous();
-  bool copy_result = !result.is_contiguous();
-  Tensor result_ = result.contiguous();
+  auto self_ = self.expect_contiguous();
+  auto result_ = contiguous_out_arg(result);
 
   if (self.numel() == self.size(dim)) {
-    cuda::cub::inclusive_scan(self_.data_ptr<scalar_t>(), result_.data_ptr<scalar_t>(), binary_op, self.numel());
+    cuda::cub::inclusive_scan(self_->data_ptr<scalar_t>(), result_->data_ptr<scalar_t>(), binary_op, self.numel());
   } else if (dim == ndim - 1) {
-    scan_innermost_dim<scalar_t>(self_, result_, init, binary_op);
+    scan_innermost_dim<scalar_t>(*self_, *result_, init, binary_op);
   } else {
-    scan_outer_dim<scalar_t>(self_, result_, dim, init, binary_op);
+    scan_outer_dim<scalar_t>(*self_, *result_, dim, init, binary_op);
   }
-  if (copy_result) {
-    result.copy_(result_);
+  if (!result.is_same(*result_)) {
+    result.copy_(*result_);
   }
 }
 
@@ -528,23 +535,7 @@ Tensor _logcumsumexp_cuda(const Tensor& self, int64_t dim) {
   return _logcumsumexp_out_cuda(self, dim, result);
 }
 
-Tensor& _cumsum_out_cuda(const Tensor& self, int64_t dim, Tensor& result) {
-  TensorArg output_arg{result, "output", 1};
-  TensorArg input_arg{self, "input", 2};
-  checkAllSameGPU(__func__, {output_arg, input_arg});
-  checkSameType("cumsum", output_arg, input_arg);
-
-  at::native::resize_output(result, self.sizes());
-  if (self.dim() == 0) {
-    result.fill_(self);
-    return result;
-  }
-  if (self.numel() == 0) {
-    result.zero_();
-    return result;
-  }
-  auto wrap_dim = maybe_wrap_dim(dim, self.dim());
-
+void cumsum_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       self.scalar_type(), "cumsum_cuda",
@@ -553,53 +544,26 @@ Tensor& _cumsum_out_cuda(const Tensor& self, int64_t dim, Tensor& result) {
         scan_dim<scalar_t>(
             self,
             result,
-            wrap_dim,
+            dim,
             init,
             std::plus<scalar_t>());
       });
-
-  return result;
 }
 
-Tensor _cumsum_cuda(const Tensor& self, int64_t dim) {
-  Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
-  return at::native::_cumsum_out_cuda(self, dim, result);
-}
-
-Tensor& _cumprod_out_cuda(const Tensor& self, int64_t dim, Tensor& result) {
-  TensorArg output_arg{result, "output", 1};
-  TensorArg input_arg{self, "input", 2};
-  checkAllSameGPU(__func__, {output_arg, input_arg});
-  checkSameType(__func__, output_arg, input_arg);
-
-  at::native::resize_output(result, self.sizes());
-  if (self.dim() == 0) {
-    result.fill_(self);
-    return result;
-  }
-  if (self.numel() == 0) {
-    result.zero_();
-    return result;
-  }
-  auto wrap_dim = maybe_wrap_dim(dim, self.dim());
-
+void cumprod_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
       ScalarType::Half, ScalarType::BFloat16, self.scalar_type(), "cumprod_cuda", [&]() {
         scalar_t init = 1;
         scan_dim<scalar_t>(
             self,
             result,
-            wrap_dim,
+            dim,
             init,
             std::multiplies<scalar_t>());
       });
-
-  return result;
 }
 
-Tensor _cumprod_cuda(const Tensor& self, int64_t dim) {
-  Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
-  return at::native::_cumprod_out_cuda(self, dim, result);
-}
+REGISTER_DISPATCH(cumsum_stub, &cumsum_cuda_kernel);
+REGISTER_DISPATCH(cumprod_stub, &cumprod_cuda_kernel);
 
 }} // namespace at::native

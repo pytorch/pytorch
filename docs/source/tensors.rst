@@ -223,6 +223,7 @@ Tensor class reference
     Tensor.allclose
     Tensor.amax
     Tensor.amin
+    Tensor.aminmax
     Tensor.angle
     Tensor.apply_
     Tensor.argmax
@@ -490,6 +491,7 @@ Tensor class reference
     Tensor.max
     Tensor.maximum
     Tensor.mean
+    Tensor.nanmean
     Tensor.median
     Tensor.nanmedian
     Tensor.min

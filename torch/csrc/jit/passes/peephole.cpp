@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/peephole_alias_sensitive.h>
+#include <torch/csrc/jit/passes/peephole_dict_idioms.h>
 #include <torch/csrc/jit/passes/peephole_list_idioms.h>
 #include <torch/csrc/jit/passes/peephole_non_tensor.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
@@ -32,6 +33,7 @@ struct PeepholeOptimizeImpl {
   bool run() {
     bool changed = optimizeBlock(graph_->block());
     changed |= PeepholeOptimizeListIdioms(graph_);
+    changed |= PeepholeOptimizeDictIdioms(graph_);
     changed |= PeepholeOptimizeAliasSensitive(graph_);
     changed |= PeepholeOptimizeNonTensor(graph_);
     return changed;
@@ -72,7 +74,7 @@ struct PeepholeOptimizeImpl {
           for (Use u : uses) {
             if (u.user->matches(
                     "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)") &&
-                u.user->input(1)->type()->isSubtypeOf(ListType::ofInts())) {
+                u.user->input(1)->type()->isSubtypeOf(*ListType::ofInts())) {
               GRAPH_UPDATE(
                   getHeader(node),
                   " (x._grad_sum_to_size(y)._grad_sum_to_size(z) == x._grad_sum_to_size(z)) is replaced with ",

@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/canonicalize_graph_fuser_ops.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
@@ -28,7 +29,7 @@ static c10::optional<std::vector<ChunkOutput>> getChunkOutputs(Node* chunk) {
         return c10::nullopt;
       }
       auto unpack_outputs = list_use.user->outputs();
-      for (size_t i = 0; i < unpack_outputs.size(); ++i) {
+      for (const auto i : c10::irange(unpack_outputs.size())) {
         outputs.emplace_back(unpack_outputs[i], i);
       }
     } else {
