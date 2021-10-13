@@ -398,6 +398,7 @@ def celu(input: Tensor, scale: float, zero_point: int, alpha: float = 1.) -> Ten
     r"""celu(input, scale, zero_point, alpha=1.) -> Tensor
 
     Applies the quantized CELU function element-wise.
+
     .. math::
         \text{CELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x / \alpha) - 1))
 
@@ -502,7 +503,7 @@ def hardsigmoid(input: Tensor, inplace: bool = False) -> Tensor:
     return torch._C._nn.hardsigmoid(input)
 
 def clamp(input: Tensor, min_: float, max_: float) -> Tensor:
-    r"""float(input, min_, max_) -> Tensor
+    r"""float(input, min\_, max\_) -> Tensor
 
     Applies the clamp function element-wise.
     See :class:`~torch.nn.quantized.clamp` for more details.

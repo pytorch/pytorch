@@ -143,7 +143,6 @@ inline Tensor new_qtensor(
 }
 
 Tensor PerTensorAffineQuantizer::quantize(const Tensor& rtensor) {
-// TODO: move this fix to separate PR
   TORCH_CHECK(
       rtensor.scalar_type() == kFloat,
       "Quantize only works on Float Tensor, got ", rtensor.scalar_type());
@@ -202,14 +201,9 @@ Tensor PerChannelAffineQuantizer::dequantize(const Tensor& qtensor) {
 }
 
 Tensor PerChannelAffineFloatQParamsQuantizer::quantize(const Tensor& rtensor) {
-// TODO: move this fix to separate PR
  TORCH_CHECK(
       rtensor.scalar_type() == kFloat,
-<<<<<<< HEAD
       "Quantize only works on Float Tensor, got ", rtensor.scalar_type());
-=======
-      "quantize only works on Float Tensor, got ", rtensor.scalar_type());
->>>>>>> 03b84a748d ([WIP] working POC of quantization via dynamic tracing)
  Tensor qtensor = new_qtensor(
       rtensor.sizes(),
       rtensor.options().dtype(scalar_type_),
