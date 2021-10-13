@@ -26,6 +26,7 @@ struct CudaFuserInterface {
   void (*fn_fuse_graph)(std::shared_ptr<Graph>&) = nullptr;
   bool (*fn_can_fuse_n)(const Node*) = nullptr;
   void (*fn_insert_profile_inodes)(ProfilingRecord* pr) = nullptr;
+  bool (*fn_profile_n)(const Node*) = nullptr;
 };
 
 // Get interface, this is used by registration and user facing API internally
@@ -36,6 +37,7 @@ C10_EXPORT void runFusionGroup(const Node* fusion_node, Stack& stack);
 C10_EXPORT void fuseGraph(std::shared_ptr<Graph>&);
 C10_EXPORT bool canFuseNode(const Node* node);
 C10_EXPORT void InsertProfileNodesForCUDAFuser(ProfilingRecord* pr);
+C10_EXPORT bool profileNode(const Node* node);
 
 C10_EXPORT bool complyWith(
     const at::Tensor& tensor,

@@ -53,6 +53,11 @@ void InsertProfileNodesForCUDAFuser(ProfilingRecord* pr) {
   }
 }
 
+bool profileNode(const Node* node) {
+  return getFuserInterface()->fn_profile_n != nullptr &&
+      getFuserInterface()->fn_profile_n(node);
+}
+
 //! [ Note -- type guard logic in CudaFusionGuard ]
 //!
 //! CudaFusionGuard is used to Guard input tensor to `CudaFusionGroup` so that
@@ -195,7 +200,7 @@ RegisterOperators size_eq_guard({
         // if we would ever return refined tensor, which would change aliasing
         // analysis, we should update aliasdb pass.
         [](const Node* node) -> Operation {
-          return [](Stack* stack) {
+          return [](Stack& stack) {
             at::ArrayRef<IValue> inputs = last(stack, 2);
             drop(stack, 2);
 
@@ -297,7 +302,7 @@ RegisterOperators reg_add_optional({
     Operator(
         "prim::add_optional(Tensor(a) input, Tensor? bias) -> Tensor(a)",
         [](const Node* node) -> Operation {
-          return [](Stack* stack) {
+          return [](Stack& stack) {
             IValue input, bias;
             pop(stack, input, bias);
             if (bias.isNone()) {

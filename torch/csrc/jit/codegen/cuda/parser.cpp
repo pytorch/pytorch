@@ -421,6 +421,10 @@ class IrParser {
     return fusion;
   }
 
+  static bool lookupInSymbolSet(const Node* node) {
+    return parser_symbol_set_.count(node->kind()) != 0;
+  }
+
   // return nullptr if entry does not exist
   static const RegistrationEntry* lookupInRegistry(const Node* node) {
     // we need to use maybeSchema for nodes like prim::Constant, which doesn't
@@ -507,6 +511,7 @@ class IrParser {
       ParseFuncPtr parse_fn,
       MergeQueryFuncPtr merge_query_fn = nullptr,
       OperatorTypeFuncPtr type_fn = nullptr) {
+    parser_symbol_set_.insert(c10::Symbol::fromQualString(op->schema().name()));
     jit_operator_registry_.emplace(
         std::piecewise_construct,
         std::forward_as_tuple(canonicalSchemaString(op->schema())),
@@ -2200,6 +2205,9 @@ class IrParser {
 
   // maps from JitValue::unique() to fusion Val;
   std::unordered_map<size_t, ValueHolder> value_map_;
+
+  static std::unordered_set<Symbol> parser_symbol_set_;
+
   // parsing rule registry.
   static std::unordered_map<std::string, RegistrationEntry>
       jit_operator_registry_; // NOLINT
@@ -2211,7 +2219,7 @@ class IrParser {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static bool init_registry_;
 };
-
+std::unordered_set<Symbol> IrParser::parser_symbol_set_; // NOLINT
 std::unordered_map<std::string, IrParser::RegistrationEntry>
     IrParser::jit_operator_registry_; // NOLINT
 std::unordered_map<const FunctionSchema*, const IrParser::RegistrationEntry*>
@@ -2437,6 +2445,10 @@ bool isElementWiseNode(const Node* node) {
 
 bool isNodeParsible(const Node* node) {
   return IrParser::canParseNode(node);
+}
+
+bool shouldProfileNode(const Node* node) {
+  return IrParser::lookupInSymbolSet(node);
 }
 
 bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
