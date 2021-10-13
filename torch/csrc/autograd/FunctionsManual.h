@@ -309,8 +309,9 @@ std::tuple<Tensor, Tensor> linalg_lstsq_backward(
   const Tensor& grad,
   const Tensor& A,
   const Tensor& B,
-  c10::optional<double> rcond,
-  c10::optional<c10::string_view> driver
+  const c10::optional<double> rcond,
+  const c10::optional<c10::string_view> driver,
+  const std::array<bool, 2>& grad_input_mask
 );
 
 Tensor lu_backward_base(

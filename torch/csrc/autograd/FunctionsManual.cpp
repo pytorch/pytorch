@@ -2510,21 +2510,25 @@ std::tuple<Tensor, Tensor> linalg_lstsq_backward(
   const Tensor& grad,
   const Tensor& A,
   const Tensor& B,
-  c10::optional<double> rcond,
-  c10::optional<c10::string_view> driver
+  const c10::optional<double> rcond,
+  const c10::optional<c10::string_view> driver,
+  const std::array<bool, 2>& grad_input_mask
 ) {
   Tensor A_grad, B_grad;
   if (!grad.defined()) {
     return std::make_tuple(A_grad, B_grad);
   }
 
-  if (A.requires_grad()) {
+  auto A_requires_grad = grad_input_mask[0];
+  auto B_requires_grad = grad_input_mask[1];
+
+  if (A_requires_grad) {
     auto pinvA = at::linalg_pinv(A);
     auto pinvA_grad = grad.matmul(B.transpose(-1, -2).conj());
     A_grad = pinv_backward(pinvA_grad, pinvA, A);
   }
 
-  if (B.requires_grad()) {
+  if (B_requires_grad) {
     B_grad = std::get<0>(at::linalg_lstsq(A.transpose(-1, -2).conj(), grad, rcond, driver));
   }
 
