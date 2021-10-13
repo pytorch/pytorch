@@ -2829,10 +2829,10 @@ void dequantize_tensor_arm<c10::qint8>(
     const int32x4_t vin_s32_high_high = VMOVL_HIGH_S16(vin_high_s16); // 12 ... 15
 
     // Store            (... * scale) + (-scale * zero point))         int32 -> fp32
-    vst1q_f32(out,      vfmaq_f32(minus_scale_times_zero_point_fp32x4, vcvtq_f32_s32(vin_s32_low_low), scale_fp32x4));
-    vst1q_f32(out + 4,  vfmaq_f32(minus_scale_times_zero_point_fp32x4, vcvtq_f32_s32(vin_s32_low_high), scale_fp32x4));
-    vst1q_f32(out + 8,  vfmaq_f32(minus_scale_times_zero_point_fp32x4, vcvtq_f32_s32(vin_s32_high_low), scale_fp32x4));
-    vst1q_f32(out + 12, vfmaq_f32(minus_scale_times_zero_point_fp32x4, vcvtq_f32_s32(vin_s32_high_high), scale_fp32x4));
+    vst1q_f32(out,      vmlaq_f32(minus_scale_times_zero_point_fp32x4, vcvtq_f32_s32(vin_s32_low_low), scale_fp32x4));
+    vst1q_f32(out + 4,  vmlaq_f32(minus_scale_times_zero_point_fp32x4, vcvtq_f32_s32(vin_s32_low_high), scale_fp32x4));
+    vst1q_f32(out + 8,  vmlaq_f32(minus_scale_times_zero_point_fp32x4, vcvtq_f32_s32(vin_s32_high_low), scale_fp32x4));
+    vst1q_f32(out + 12, vmlaq_f32(minus_scale_times_zero_point_fp32x4, vcvtq_f32_s32(vin_s32_high_high), scale_fp32x4));
 
     out += 16;
     in += 16;
@@ -2870,10 +2870,10 @@ void dequantize_tensor_arm<c10::quint8>(
     const uint32x4_t vin_u32_high_high = VMOVL_HIGH_U16(vin_high_u16); // 12 ... 15
 
     // Store            (... * scale) + (-scale * zero point))         uint32 -> fp32
-    vst1q_f32(out,      vfmaq_f32(minus_scale_times_zero_point_fp32x4, vcvtq_f32_u32(vin_u32_low_low), scale_fp32x4));
-    vst1q_f32(out + 4,  vfmaq_f32(minus_scale_times_zero_point_fp32x4, vcvtq_f32_u32(vin_u32_low_high), scale_fp32x4));
-    vst1q_f32(out + 8,  vfmaq_f32(minus_scale_times_zero_point_fp32x4, vcvtq_f32_u32(vin_u32_high_low), scale_fp32x4));
-    vst1q_f32(out + 12, vfmaq_f32(minus_scale_times_zero_point_fp32x4, vcvtq_f32_u32(vin_u32_high_high), scale_fp32x4));
+    vst1q_f32(out,      vmlaq_f32(minus_scale_times_zero_point_fp32x4, vcvtq_f32_u32(vin_u32_low_low), scale_fp32x4));
+    vst1q_f32(out + 4,  vmlaq_f32(minus_scale_times_zero_point_fp32x4, vcvtq_f32_u32(vin_u32_low_high), scale_fp32x4));
+    vst1q_f32(out + 8,  vmlaq_f32(minus_scale_times_zero_point_fp32x4, vcvtq_f32_u32(vin_u32_high_low), scale_fp32x4));
+    vst1q_f32(out + 12, vmlaq_f32(minus_scale_times_zero_point_fp32x4, vcvtq_f32_u32(vin_u32_high_high), scale_fp32x4));
 
     out += 16;
     in += 16;
