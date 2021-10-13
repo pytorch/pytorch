@@ -281,7 +281,8 @@ bool guardDifferentiableGraph(Node* dnode) {
     // attaching True flags to check at runtime
     if (!true_flags.empty()) {
       auto if_node = dnode->owningBlock()->owningNode();
-      TORCH_INTERNAL_ASSERT(if_node->kind() == prim::If, "guarded fusion node violation\n");
+      TORCH_INTERNAL_ASSERT(
+          if_node->kind() == prim::If, "guarded fusion node violation\n");
       true_flags.emplace_back(if_node->input());
       auto graph = if_node->owningGraph();
 
