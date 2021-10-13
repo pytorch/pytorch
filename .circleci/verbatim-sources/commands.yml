@@ -57,10 +57,14 @@ commands:
   run_brew_for_macos_build:
     steps:
       - brew_install:
+          formulae: expect
+      - brew_install:
           formulae: libomp
 
   run_brew_for_ios_build:
     steps:
+      - brew_install:
+          formulae: expect
       - brew_install:
           formulae: libtool
 
