@@ -79,8 +79,8 @@ struct MathOpFallback {
       return;
     }
 
-    // Mutable inputs with math bit set to True
-    std::vector<Tensor> mutable_inputs;
+    // Mutable inputs with math bit set to True and their clones
+    std::vector<std::pair<Tensor, Tensor>> mutable_inputs_with_their_clones;
     for (const auto i : c10::irange(num_arguments)) {
       auto& ivalue = (*stack)[stack_start + i];
       if (!(ivalue.isTensor() || ivalue.isTensorList())) {
@@ -101,9 +101,9 @@ struct MathOpFallback {
         TORCH_CHECK_NOT_IMPLEMENTED(!tensor.is_meta(), op_name, " fallback does not support meta tensors.");
         auto resolved_tensor = at::clone(tensor);
         if (mut_arg) {
-          TORCH_CHECK(mutable_inputs.empty(), op_name, " fallback does not support operators with more than one mutable tensors with ",
+          TORCH_CHECK(mutable_inputs_with_their_clones.empty(), op_name, " fallback does not support operators with more than one mutable tensors with ",
             op_name, "bit set to true.");
-          mutable_inputs.emplace_back(tensor);
+          mutable_inputs_with_their_clones.emplace_back(std::make_pair(tensor, resolved_tensor));
         }
         (*stack)[stack_start + i] = std::move(resolved_tensor);
       } else if (ivalue.isTensorList()) {
@@ -124,14 +124,21 @@ struct MathOpFallback {
 
     op.redispatchBoxed(dispatch_keys & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, key), stack);
 
-    for (auto& tensor : mutable_inputs) {
-      TORCH_INTERNAL_ASSERT(mutable_inputs.size() == 1)
+    for (std::pair<Tensor, Tensor> mut_tensors: mutable_inputs_with_their_clones) {
+      TORCH_INTERNAL_ASSERT(mutable_inputs_with_their_clones.size() == 1)
+      auto& mutable_input =  mut_tensors.first;
+      auto& cloned_mutable_input =  mut_tensors.second;
       auto& ivalue = (*stack)[stack_start];
-      auto cloned_tensor = std::move(ivalue).toTensor();
+      auto returned_output = std::move(ivalue).toTensor();
+
+      // sanity check to ensure that the tensor in stack aliases the cloned_mutable_input
+      TORCH_INTERNAL_ASSERT(cloned_mutable_input.is_alias_of(returned_output));
+
       // necessary for out= arg
-      at::native::resize_output(tensor, cloned_tensor.sizes());
-      tensor.copy_(cloned_tensor);
-      (*stack)[stack_start] = std::move(tensor);
+      at::native::resize_output(mutable_input, returned_output.sizes());
+
+      mutable_input.copy_(returned_output);
+      (*stack)[stack_start] = std::move(mutable_input);
     }
   }
 
