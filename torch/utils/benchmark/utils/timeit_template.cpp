@@ -31,6 +31,7 @@ double timeit(int n) {
     // Main loop
     auto start_time = std::chrono::high_resolution_clock::now();
     for(const auto loop_idx : c10::irange(n)) {
+        (void)loop_idx;
         // STMT_TEMPLATE_LOCATION
     }
     auto end_time = std::chrono::high_resolution_clock::now();
