@@ -97,7 +97,7 @@ nn_functional_tests = [
     ('hardshrink', (S, S, S), (0.4,), '', (True,)),
     ('tanhshrink', (S, S, S), (),),
     ('softsign', (S, S, S), (),),
-    ('softplus', (S, S, S), (),),
+    ('softplus', (S, S, S), (), '', (True,)),
     ('softmin', (S, S, S), (0,),),
     ('softmax', (S, S, S), (0,), '', (True,)),
     ('softmax', (S, S, S), (0, 3, torch.double), 'with_all_args', (True,)),
