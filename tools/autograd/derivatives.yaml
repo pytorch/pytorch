@@ -2334,3 +2334,6 @@
 - name: empty_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   self: non_differentiable
   output_differentiability: [False]
+
+- name: _test_warn_in_autograd(Tensor self) -> Tensor
+  self: warn_backwards(grad)
