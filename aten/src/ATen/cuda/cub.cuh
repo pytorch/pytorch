@@ -5,20 +5,28 @@
 #include <iterator>
 #include <limits>
 
-#include <ATen/cuda/cub_macros.cuh>
+#include <ATen/cuda/cub_definitions.cuh>
+
+#if USE_GLOBAL_CUB_WRAPPED_NAMESPACE()
+
+#include <cub/cub.cuh>
+
+#else
 
 // include cub in a safe manner, see:
 // https://github.com/pytorch/pytorch/pull/55292
 #undef CUB_NS_POSTFIX //undef to avoid redefinition warnings
 #undef CUB_NS_PREFIX
 #undef CUB_NS_QUALIFIER
-#define CUB_NS_QUALIFIER ::at::cuda::detail::cub
-#define CUB_NS_PREFIX namespace at { namespace cuda { namespace detail {
-#define CUB_NS_POSTFIX }}}
+#define CUB_NS_PREFIX namespace at_cuda_detail {
+#define CUB_NS_POSTFIX }
+#define CUB_NS_QUALIFIER ::at_cuda_detail::cub
 #include <cub/cub.cuh>
 #undef CUB_NS_POSTFIX
 #undef CUB_NS_PREFIX
 #undef CUB_NS_QUALIFIER
+
+#endif
 
 #include <ATen/cuda/Exceptions.h>
 #include <c10/cuda/CUDACachingAllocator.h>
@@ -38,16 +46,40 @@
 #define NO_ROCM(x)
 #else
 #define NO_ROCM(x) x
+#endif
 
+#if !defined(USE_ROCM) && !CUB_SUPPORTS_NV_BFLOAT16()
+
+namespace at_cuda_detail {
+// backport https://github.com/NVIDIA/cub/pull/306 for c10::BFloat16
+
+template <>
+struct cub::FpLimits<c10::BFloat16>
+{
+    static __host__ __device__ __forceinline__ c10::BFloat16 Max() {
+        unsigned short max_word = 0x7F7F;
+        return reinterpret_cast<c10::BFloat16&>(max_word);
+    }
+
+    static __host__ __device__ __forceinline__ c10::BFloat16 Lowest() {
+        unsigned short lowest_word = 0xFF7F;
+        return reinterpret_cast<c10::BFloat16&>(lowest_word);
+    }
+};
+
+template <> struct cub::NumericTraits<c10::BFloat16>: cub::BaseTraits<cub::FLOATING_POINT, true, false, unsigned short, c10::BFloat16> {};
+}
+#endif
+
+#if !defined(USE_ROCM)
 namespace at { namespace native {
-
-namespace cub = at::cuda::detail::cub;
-
+namespace cub = ::at_cuda_detail::cub;
 }}
 #endif
 
 namespace at {
 namespace cuda {
+namespace cub {
 
 namespace detail {
 
@@ -67,31 +99,9 @@ struct cuda_type<c10::BFloat16> {
   using type = __nv_bfloat16;
 };
 
-#elif !defined(USE_ROCM)
-
-// backport https://github.com/NVIDIA/cub/pull/306 for c10::BFloat16
-
-template <>
-struct cub::FpLimits<c10::BFloat16>
-{
-    static __host__ __device__ __forceinline__ c10::BFloat16 Max() {
-        unsigned short max_word = 0x7F7F;
-        return reinterpret_cast<c10::BFloat16&>(max_word);
-    }
-
-    static __host__ __device__ __forceinline__ c10::BFloat16 Lowest() {
-        unsigned short lowest_word = 0xFF7F;
-        return reinterpret_cast<c10::BFloat16&>(lowest_word);
-    }
-};
-
-template <> struct cub::NumericTraits<c10::BFloat16>: cub::BaseTraits<cub::FLOATING_POINT, true, false, unsigned short, c10::BFloat16> {};
-
 #endif
 
 }  // namespace detail
-
-namespace cub {
 
 inline int get_num_bits(uint64_t max_key) {
   int num_bits = 1;
@@ -115,11 +125,11 @@ static inline void sort_keys(
   key_t_ *keys_out_ = reinterpret_cast<key_t_*>(keys_out);
 
   if (descending) {
-    CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceRadixSort::SortKeysDescending,
+    CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceRadixSort::SortKeysDescending,
       keys_in_, keys_out_, n,
       begin_bit, end_bit, c10::cuda::getCurrentCUDAStream());
   } else {
-    CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceRadixSort::SortKeys,
+    CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceRadixSort::SortKeys,
       keys_in_, keys_out_, n,
       begin_bit, end_bit, c10::cuda::getCurrentCUDAStream());
   }
@@ -147,11 +157,11 @@ static inline void sort_pairs(
   key_t_ *keys_out_ = reinterpret_cast<key_t_*>(keys_out);
 
   if (descending) {
-    CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceRadixSort::SortPairsDescending,
+    CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceRadixSort::SortPairsDescending,
       keys_in_, keys_out_, values_in, values_out, n,
       begin_bit, end_bit, c10::cuda::getCurrentCUDAStream());
   } else {
-    CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceRadixSort::SortPairs,
+    CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceRadixSort::SortPairs,
       keys_in_, keys_out_, values_in, values_out, n,
       begin_bit, end_bit, c10::cuda::getCurrentCUDAStream());
   }
@@ -183,12 +193,12 @@ static inline void segmented_sort_pairs(
   key_t_ *keys_out_ = reinterpret_cast<key_t_*>(keys_out);
 
   if (descending) {
-    CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceSegmentedRadixSort::SortPairsDescending,
+    CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceSegmentedRadixSort::SortPairsDescending,
       keys_in_, keys_out_, values_in, values_out,
       num_elements, num_segments, begin_offsets, end_offsets,
       begin_bit, end_bit, c10::cuda::getCurrentCUDAStream());
   } else {
-    CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceSegmentedRadixSort::SortPairs,
+    CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceSegmentedRadixSort::SortPairs,
       keys_in_, keys_out_, values_in, values_out,
       num_elements, num_segments, begin_offsets, end_offsets,
       begin_bit, end_bit, c10::cuda::getCurrentCUDAStream());
@@ -240,7 +250,7 @@ inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
   // so split at int_max/2
   constexpr int max_cub_size = std::numeric_limits<int>::max() / 2 + 1; // 2**30
   int size_cub = std::min<int64_t>(num_items, max_cub_size);
-  CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceScan::InclusiveScan,
+  CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceScan::InclusiveScan,
       input,
       output,
       scan_op,
@@ -260,7 +270,7 @@ inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
         first_elem_ptr,
         scan_op);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
-    using ArgIndexInputIterator = NO_ROCM(detail)::cub::ArgIndexInputIterator<InputIteratorT>;
+    using ArgIndexInputIterator = NO_ROCM(at_cuda_detail)::cub::ArgIndexInputIterator<InputIteratorT>;
     using tuple = typename ArgIndexInputIterator::value_type;
     auto input_iter_transform = [=] __device__ (const tuple &x)->input_t  {
       if (x.key == 0) {
@@ -269,9 +279,9 @@ inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
         return x.value;
       }
     };
-    auto input_ = NO_ROCM(detail)::cub::TransformInputIterator<input_t, decltype(input_iter_transform), ArgIndexInputIterator>(
+    auto input_ = NO_ROCM(at_cuda_detail)::cub::TransformInputIterator<input_t, decltype(input_iter_transform), ArgIndexInputIterator>(
       ArgIndexInputIterator(input + i), input_iter_transform);
-    CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceScan::InclusiveScan,
+    CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceScan::InclusiveScan,
         input_,
         output + i,
         scan_op,
@@ -287,7 +297,7 @@ inline void exclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
   // so split at int_max/2
   constexpr int max_cub_size = std::numeric_limits<int>::max() / 2 + 1; // 2**30
   int size_cub = std::min<int64_t>(num_items, max_cub_size);
-  CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceScan::ExclusiveScan,
+  CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceScan::ExclusiveScan,
       input,
       output,
       scan_op,
@@ -309,7 +319,7 @@ inline void exclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
     C10_CUDA_KERNEL_LAUNCH_CHECK();
     auto input_ = impl::chained_iterator<InitValueT, InputIteratorT>{
       input + i, first_elem_ptr};
-    CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceScan::InclusiveScan,
+    CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceScan::InclusiveScan,
         input_,
         output + i,
         scan_op,
@@ -322,7 +332,7 @@ template<typename InputIteratorT , typename OutputIteratorT , typename NumSelect
 inline void unique(InputIteratorT input, OutputIteratorT output, NumSelectedIteratorT num_selected_out, int64_t num_items) {
   TORCH_CHECK(num_items <= std::numeric_limits<int>::max(),
     "cub unique does not support more than INT_MAX elements");
-  CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceSelect::Unique,
+  CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceSelect::Unique,
     input, output, num_selected_out, num_items, at::cuda::getCurrentCUDAStream());
 }
 

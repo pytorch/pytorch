@@ -2,8 +2,8 @@
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/boolean_mask_ops.h"
-
 #include <cub/cub.cuh>
+#include "caffe2/utils/cub_namespace.cuh"
 
 namespace caffe2 {
 
