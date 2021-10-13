@@ -30,7 +30,6 @@
 #include <pybind11/chrono.h>
 
 #include <c10d/comm.hpp>
-#include <c10d/frontend.hpp>
 #include <c10d/logger.hpp>
 #include <c10d/reducer.hpp>
 
@@ -233,7 +232,6 @@ void _register_builtin_comm_hook(
 
 PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
   C10_LOG_API_USAGE_ONCE("c10d.python.import");
-  ::c10d::initCustomClassBindings();
 
   auto c10d_module = THPObjectPtr(PyImport_ImportModule("torch.distributed"));
   if (!c10d_module) {
@@ -1295,6 +1293,8 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
 #endif
 
 #ifdef USE_C10D_GLOO
+  static const std::string GLOO_SOCKET_IFNAME_ENV = "GLOO_SOCKET_IFNAME";
+
   auto processGroupGloo =
       intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupGloo>(
           module, "ProcessGroupGloo", processGroup);
@@ -1345,9 +1345,9 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
             auto options = ::c10d::ProcessGroupGloo::Options::create();
 
             // Use interfaces listed in "GLOO_SOCKET_IFNAME", if set.
-            char* ifnameEnv = getenv(::c10d::GLOO_SOCKET_IFNAME_ENV.c_str());
+            char* ifnameEnv = getenv(GLOO_SOCKET_IFNAME_ENV.c_str());
             if (ifnameEnv) {
-              for (const auto& iface : ::c10d::split(',', ifnameEnv)) {
+              for (const auto& iface : split(',', ifnameEnv)) {
                 options->devices.push_back(
                     ::c10d::ProcessGroupGloo::createDeviceForInterface(iface));
               }
