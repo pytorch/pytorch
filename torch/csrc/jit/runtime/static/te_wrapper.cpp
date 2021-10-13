@@ -61,7 +61,6 @@ std::shared_ptr<TEWrapper> wrapTECompute(
     LoopNest* ln,
     std::vector<CodeGen::BufferArg> args) {
   auto cg = std::make_unique<LLVMCodeGen>(ln->root_stmt(), args);
-  cg->cleanup_memory();
   wrap->update(std::move(cg));
   return wrap;
 }

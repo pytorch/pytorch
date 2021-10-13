@@ -1,7 +1,6 @@
 #pragma once
 
 #include <assert.h>
-#include <ATen/ATen.h>
 #include <ATen/core/Array.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/DeviceUtils.cuh>
