@@ -1,3 +1,9 @@
+# Generates ADInplaceOrViewType.h/cpp
+#
+# NOTE: If any changes are being made to the ADInplaceOrView codegen please also check
+# if updates are needed in torch/csrc/autograd/autograd_not_implemented_fallback.cpp
+# The fallback is expected to mimick this codegen, so we should keep the two in sync.
+
 from tools.codegen.api import cpp
 from tools.codegen.api.autograd import (
     NativeFunctionWithDifferentiabilityInfo, gen_differentiable_outputs,
@@ -18,7 +24,6 @@ from .context import with_native_function_with_differentiability_info
 from .gen_trace_type import (
     MANUAL_AUTOGRAD, type_wrapper_name, tie_return_values, get_return_value
 )
-
 
 # See NOTE [ Autograd View Variables ] in variable.h for details.
 # If you update list VIEW_FUNCTIONS or RETURNS_VIEWS_OF_INPUT,
