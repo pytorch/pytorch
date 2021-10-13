@@ -3292,6 +3292,21 @@
 - func: numpy_T(Tensor(a) self) -> Tensor(a)
   variants: method
 
+# Exposed on Python as an attribute 'H'
+- func: matrix_H(Tensor(a) self) -> Tensor(a)
+  variants: method
+
+# Exposed on Python as an attribute 'mT'
+- func: mT(Tensor(a) self) -> Tensor(a)
+  variants: method
+
+# Exposed on Python as an attribute 'mH'
+- func: mH(Tensor(a) self) -> Tensor(a)
+  variants: method
+
+- func: adjoint(Tensor(a) self) -> Tensor(a)
+  variants: function, method
+
 - func: pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
 
 - func: pixel_unshuffle(Tensor self, int downscale_factor) -> Tensor
