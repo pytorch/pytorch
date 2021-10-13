@@ -73,7 +73,7 @@ struct RunPython {
         eg_(std::move(eg)),
         manager_(manager) {}
   void operator()(int i) {
-    auto I = obj_.acquireSession();
+    auto I = manager_.acquireOne();
     auto self = I.fromMovable(obj_);
     if (cuda) {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)

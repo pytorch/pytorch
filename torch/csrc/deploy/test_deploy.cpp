@@ -90,13 +90,13 @@ TEST(TorchpyTest, ResNet) {
 TEST(TorchpyTest, Movable) {
   torch::deploy::InterpreterManager m(1);
   torch::deploy::ReplicatedObj obj;
-  {
-    auto I = m.acquireOne();
-    auto model =
-        I.global("torch.nn", "Module")(std::vector<torch::deploy::Obj>());
-    obj = I.createMovable(model);
-  }
-  obj.acquireSession();
+  auto I = m.acquireOne();
+  auto model =
+      I.global("torch.nn", "Module")(std::vector<torch::deploy::Obj>());
+  obj = I.createMovable(model);
+
+  auto I2 = m.acquireOne();
+  __attribute__((unused)) auto obj2 = I2.fromMovable(obj);
 }
 
 TEST(TorchpyTest, MultiSerialSimpleModel) {
@@ -183,7 +183,7 @@ TEST(TorchpyTest, ErrorsReplicatingObj) {
   torch::deploy::Package p = manager.loadPackage(path("SIMPLE", simple));
   auto replicatedObj = p.loadPickle("model", "model.pkl");
   // Acquire two different interpreters
-  auto session1 = replicatedObj.acquireSession();
+  auto session1 = manager.acquireOne();
   auto session2 = manager.acquireOne();
   // Create an obj reference on interpreter 1
   auto obj = session1.fromMovable(replicatedObj);

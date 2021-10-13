@@ -175,43 +175,20 @@ struct TORCH_API ReplicatedObjImpl {
 
 struct TORCH_API ReplicatedObj {
   ReplicatedObj() : pImpl_(nullptr) {}
-  InterpreterSession acquireSession(
-      const Interpreter* onThisInterpreter = nullptr) const;
-  at::IValue operator()(at::ArrayRef<at::IValue> args) const {
-    TORCH_DEPLOY_TRY
-    auto I = acquireSession();
-    auto self = I.fromMovable(*this);
-    return self(args).toIValue();
-    TORCH_DEPLOY_SAFE_CATCH_RETHROW
-  }
+
+  // Return the InterpreterManager that owned this ReplicatedObj.
+  InterpreterManager* getManager() const;
+
+  at::IValue operator()(at::ArrayRef<at::IValue> args) const;
 
   [[nodiscard]] at::IValue callKwargs(
       std::vector<at::IValue> args,
-      std::unordered_map<std::string, c10::IValue> kwargs) const {
-    TORCH_DEPLOY_TRY
-    auto I = acquireSession();
-    auto self = I.fromMovable(*this);
-
-    return self.callKwargs(std::move(args), std::move(kwargs)).toIValue();
-    TORCH_DEPLOY_SAFE_CATCH_RETHROW
-  }
+      std::unordered_map<std::string, c10::IValue> kwargs) const;
 
   [[nodiscard]] at::IValue callKwargs(
-      std::unordered_map<std::string, c10::IValue> kwargs) const {
-    TORCH_DEPLOY_TRY
-    auto I = acquireSession();
-    auto self = I.fromMovable(*this);
-    return self.callKwargs(std::move(kwargs)).toIValue();
-    TORCH_DEPLOY_SAFE_CATCH_RETHROW
-  }
+      std::unordered_map<std::string, c10::IValue> kwargs) const;
 
-  [[nodiscard]] bool hasattr(const char* name) const {
-    TORCH_DEPLOY_TRY
-    auto I = acquireSession();
-    auto self = I.fromMovable(*this);
-    return self.hasattr(name);
-    TORCH_DEPLOY_SAFE_CATCH_RETHROW
-  }
+  [[nodiscard]] bool hasattr(const char* name) const;
 
   void unload(const Interpreter* onThisInterpreter = nullptr);
 
@@ -219,9 +196,7 @@ struct TORCH_API ReplicatedObj {
   ReplicatedObj(std::shared_ptr<ReplicatedObjImpl> pImpl)
       : pImpl_(std::move(pImpl)) {}
   std::shared_ptr<ReplicatedObjImpl> pImpl_;
-  friend struct Package;
   friend struct InterpreterSession;
-  friend struct InterpreterManager;
 };
 
 class PythonMethodWrapper : public torch::IMethod {
@@ -244,8 +219,8 @@ class PythonMethodWrapper : public torch::IMethod {
       const IValueMap& kwargs = IValueMap()) const override {
     // TODO(whc) ideally, pickle the method itself as replicatedobj, to skip
     // this lookup each time
-    auto modelSession = model_.acquireSession();
-    auto self = modelSession.fromMovable(model_);
+    auto I = model_.getManager()->acquireOne();
+    auto self = I.fromMovable(model_);
     auto method = self.attr(methodName_.c_str());
     return method.callKwargs(args, kwargs).toIValue();
   }

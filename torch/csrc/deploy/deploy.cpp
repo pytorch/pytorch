@@ -112,12 +112,45 @@ Obj InterpreterSession::fromMovable(const ReplicatedObj& obj) {
   TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
-InterpreterSession ReplicatedObj::acquireSession(
-    const Interpreter* onThisInterpreter) const {
+InterpreterManager* ReplicatedObj::getManager() const {
   TORCH_DEPLOY_TRY
-  InterpreterSession I = onThisInterpreter ? onThisInterpreter->acquireSession()
-                                           : pImpl_->manager_->acquireOne();
-  return I;
+  return pImpl_->manager_;
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
+}
+
+at::IValue ReplicatedObj::operator()(at::ArrayRef<at::IValue> args) const {
+  TORCH_DEPLOY_TRY
+  auto I = pImpl_->manager_->acquireOne();
+  auto self = I.fromMovable(*this);
+  return self(args).toIValue();
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
+}
+
+[[nodiscard]] at::IValue ReplicatedObj::callKwargs(
+    std::vector<at::IValue> args,
+    std::unordered_map<std::string, c10::IValue> kwargs) const {
+  TORCH_DEPLOY_TRY
+  auto I = pImpl_->manager_->acquireOne();
+  auto self = I.fromMovable(*this);
+
+  return self.callKwargs(std::move(args), std::move(kwargs)).toIValue();
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
+}
+
+[[nodiscard]] at::IValue ReplicatedObj::callKwargs(
+    std::unordered_map<std::string, c10::IValue> kwargs) const {
+  TORCH_DEPLOY_TRY
+  auto I = pImpl_->manager_->acquireOne();
+  auto self = I.fromMovable(*this);
+  return self.callKwargs(std::move(kwargs)).toIValue();
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
+}
+
+[[nodiscard]] bool ReplicatedObj::hasattr(const char* name) const {
+  TORCH_DEPLOY_TRY
+  auto I = pImpl_->manager_->acquireOne();
+  auto self = I.fromMovable(*this);
+  return self.hasattr(name);
   TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
@@ -304,7 +337,7 @@ void LoadBalancer::free(int where) {
 
 void PythonMethodWrapper::setArgumentNames(
     std::vector<std::string>& argumentNamesOut) const {
-  auto session = model_.acquireSession();
+  auto session = model_.getManager()->acquireOne();
   auto self = session.fromMovable(model_);
   auto method = self.attr(methodName_.c_str());
   auto iArgumentNames =
