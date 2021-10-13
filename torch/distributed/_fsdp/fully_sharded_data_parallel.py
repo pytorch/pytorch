@@ -85,6 +85,7 @@ class FullyShardedDataParallel(nn.Module):
         module: nn.Module,
         process_group: Optional[ProcessGroup] = None,
     ):
+        torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
         self.process_group = process_group or _get_default_group()
         self.rank = self.process_group.rank()
