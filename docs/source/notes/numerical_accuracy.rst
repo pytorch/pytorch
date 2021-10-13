@@ -47,9 +47,9 @@ datatype. E.g.:
 .. code:: python
 
     import torch
-    a=torch.tensor([1e20, 1e20]) #fp32 type by default
+    a=torch.tensor([1e20, 1e20]) # fp32 type by default
     a.norm() # produces tensor(inf)
-    a.double().norm() #produces tensor(1.4142e+20, dtype=torch.float64), representable in fp32
+    a.double().norm() # produces tensor(1.4142e+20, dtype=torch.float64), representable in fp32
 
 TensorFloat-32(TF32) on Nvidia Ampere devices
 ---------------------------------------------
