@@ -91,7 +91,3 @@ class StreamWrapper:
 
     def __del__(self):
         self.file_obj.close()
-        try:
-            super().__del__(self)
-        except AttributeError:
-            pass
