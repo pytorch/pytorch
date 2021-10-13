@@ -54,6 +54,10 @@ from torch.testing._internal.common_quantized import (
     to_tensor,
 )
 
+from torch.testing._internal.common_quantization import (
+    DeFusedEmbeddingBag,
+)
+
 NP_RANDOM_SEED = 19
 tolerance = 1e-6
 
@@ -1151,6 +1155,26 @@ class TestFusedObsFakeQuantModule(TestCase):
         self.assertEqual(type(inference_gm.emb1), torch.nn.quantized.EmbeddingBag)
         self.assertEqual(type(inference_gm.emb2), torch.nn.quantized.EmbeddingBag)
 
+    def test_embedding_qat_config(self):
+        model = DeFusedEmbeddingBag()
+        indices = torch.randint(0, 10, (5, 12))
+
+        model.qconfig = torch.ao.quantization.default_embedding_qat_qconfig
+
+        quant_model = torch.quantization.prepare_qat(model)
+
+        count_fake_quant = 0
+        for name, mod in quant_model.named_modules():
+            if name.endswith('weight_fake_quant'):
+                count_fake_quant += 1
+                self.assertEqual(type(mod), FakeQuantize)
+        self.assertEqual(count_fake_quant, 1)
+
+        quant_model(indices)
+        inference_gm = torch.quantization.convert(quant_model.eval().cpu())
+
+        # Ensure that Embedding is now quantized
+        self.assertEqual(type(inference_gm.emb), torch.nn.quantized.Embedding)
 
     def test_default_fused_qat_config(self):
         class Model(nn.Module):
