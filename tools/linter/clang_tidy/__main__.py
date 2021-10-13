@@ -70,6 +70,7 @@ DEFAULTS = {
         "-torch/csrc/autograd/FunctionsManual.cpp",
         "-torch/csrc/generic/*.cpp",
         "-torch/csrc/jit/codegen/cuda/runtime/*",
+        "-torch/csrc/deploy/interactive_embedded_interpreter.cpp",
         "-torch/csrc/deploy/interpreter/interpreter.cpp",
         "-torch/csrc/deploy/interpreter/interpreter.h",
         "-torch/csrc/deploy/interpreter/interpreter_impl.h",
