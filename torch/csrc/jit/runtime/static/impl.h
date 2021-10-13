@@ -3,6 +3,7 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/variant.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -78,7 +79,7 @@ struct TORCH_API StaticModuleOptions {
   // to batch allocate tensor storage for output tensors of the
   // graph, where storage is deallocated outside static runtime
   // (enable_out_variant must be true)
-  bool optimize_graph_output_memory{false};
+  bool manage_output_tensors{false};
 };
 
 /// The static runime supports two execution modes.
@@ -175,6 +176,11 @@ class TORCH_API StaticModule {
   }
 
   const StaticModuleOptions& opts() const;
+
+  const ValueGroup& valueGroup() const {
+    return value_group_;
+  }
+
   size_t num_inputs() const;
   size_t num_outputs() const;
 
@@ -337,6 +343,14 @@ class TORCH_API StaticRuntime {
     return static_module_.is_optimizable_container_type(n);
   }
 
+  // Deallocate managed output tensors. This should be called only when all the
+  // references to the output from Static Runtime are gone.
+  void deallocateOutputTensors();
+
+  bool checkOutputTensorMemoryLeaks();
+
+  bool isManagedOutputTensor(const IValue& ivalue);
+
  private:
   // helper method for copying input args/kwargs into inputs_
   void set_inputs(
@@ -403,11 +417,11 @@ class TORCH_API ProcessedNode {
   std::vector<IValue> clone_inputs() const;
 
   bool has_out_variant() const {
-    return static_cast<bool>(fn_);
+    return fn_.index() == 0;
   }
 
   bool has_native() const {
-    return static_cast<bool>(native_fn_);
+    return fn_.index() == 1;
   }
 
   bool verify_no_memory_overlap() const;
@@ -420,9 +434,9 @@ class TORCH_API ProcessedNode {
   void run_impl();
 
   Node* node_;
-  c10::optional<Operation> op_;
-  std::function<void(ProcessedNode*)> fn_;
-  std::function<void(ProcessedNode*)> native_fn_;
+  using OutVariant = std::function<void(ProcessedNode*)>;
+  using NativeFunction = std::function<void(ProcessedNode*)>;
+  c10::variant<OutVariant, NativeFunction, Operation> fn_;
   std::vector<const IValue*> inputs_; // unowned
   std::vector<IValue> outputs_;
   const char* op_name_;
