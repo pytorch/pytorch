@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #ifndef _USE_MATH_DEFINES
 #define _USE_MATH_DEFINES
 #endif
@@ -7,16 +8,14 @@
 #include <cmath>
 #include <functional>
 
-#include <ATen/ATen.h>
-#include <ATen/Config.h>
+#include <ATen/Dispatch.h>
+#include <ATen/core/TensorBase.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/Parallel.h>
 
-#if AT_MKL_ENABLED()
-#include <mkl.h>
-#endif // AT_MKL_ENABLED()
+#include <c10/core/Scalar.h>
 
 namespace at {
 namespace native {
@@ -24,7 +23,7 @@ namespace native {
 namespace {
 
 template <typename scalar_t>
-inline void _vec_log_sigmoid(Tensor& output, Tensor& buffer, const Tensor& input) {
+inline void _vec_log_sigmoid(TensorBase &output, TensorBase &buffer, const TensorBase &input) {
   using Vec = Vectorized<scalar_t>;
   scalar_t* output_data = output.data_ptr<scalar_t>();
   scalar_t* buffer_data = buffer.data_ptr<scalar_t>();
@@ -51,7 +50,8 @@ inline void _vec_log_sigmoid(Tensor& output, Tensor& buffer, const Tensor& input
   });
 }
 
-static void log_sigmoid_cpu_kernel(Tensor& output, Tensor& buffer, const Tensor& input) {
+static void log_sigmoid_cpu_kernel(
+    TensorBase &output, TensorBase &buffer, const TensorBase &input) {
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "log_sigmoid_cpu", [&] {
     _vec_log_sigmoid<scalar_t>(output, buffer, input);
   });
