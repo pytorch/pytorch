@@ -222,17 +222,22 @@ Tensor addmm_sparse_csr_dense(
     const Tensor& dense,
     const Scalar& beta,
     const Scalar& alpha) {
-  Tensor r = at::empty({0}, self.options());
+  Tensor r = at::empty({0, 0}, self.options());
   at::addmm_out(r, self, sparse, dense, beta, alpha);
   return r;
 }
 
-SparseCsrTensor& _sparse_csr_mm_out(
-    const SparseCsrTensor& sparse,
-    const Tensor& dense,
-    SparseCsrTensor& result) {
-  Tensor t = at::zeros({}, dense.options());
-  return at::addmm_out(result, t, sparse, dense, 0.0, 1.0); // redispatch!
+Tensor& _sparse_csr_mm_out(
+    const Tensor& mat1,
+    const Tensor& mat2,
+    Tensor& result) {
+  Tensor zero;
+  if (result.is_sparse_csr()) {
+    zero = at::empty({mat1.size(0), mat2.size(1)}, mat2.options());
+  } else {
+    zero = at::zeros({mat1.size(0), mat2.size(1)}, mat2.options());
+  }
+  return at::addmm_out(result, zero, mat1, mat2, 0.0, 1.0);
 }
 
 Tensor _sparse_csr_addmm(
@@ -251,7 +256,7 @@ Tensor _sparse_csr_addmm(
 Tensor add_sparse_csr(const Tensor& self, const Tensor& other, const Scalar& alpha) {
   auto commonDtype = at::result_type(self, other);
   alpha_check(commonDtype, alpha);
-  Tensor result = at::empty({0}, self.options().dtype(commonDtype));
+  Tensor result = at::empty({0, 0}, self.options().dtype(commonDtype));
   return at::add_out(result, self, other, alpha); // redispatch!
 }
 

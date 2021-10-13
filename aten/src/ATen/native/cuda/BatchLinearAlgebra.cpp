@@ -1957,7 +1957,7 @@ REGISTER_CUDA_DISPATCH(lu_stub, &apply_lu);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangular_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
-static void apply_triangular_solve_batched_magma(Tensor& A, Tensor& b, bool left, bool upper, TransposeType transpose, bool unitriangular) {
+static void apply_triangular_solve_batched_magma(const Tensor& A, const Tensor& b, bool left, bool upper, TransposeType transpose, bool unitriangular) {
 #ifndef USE_MAGMA
 AT_ERROR("triangular_solve: MAGMA library not found in "
          "compilation. Please rebuild with MAGMA.");
@@ -2022,13 +2022,13 @@ AT_ERROR("triangular_solve: MAGMA library not found in "
 #endif
 }
 
-void triangular_solve_batched_magma(Tensor& A, Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular) {
+void triangular_solve_batched_magma(const Tensor& A, const Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "triangular_solve_cuda", [&]{
     apply_triangular_solve_batched_magma<scalar_t>(A, B, left, upper, transpose, unitriangular);
   });
 }
 
-void triangular_solve_kernel(Tensor& A, Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular) {
+void triangular_solve_kernel(const Tensor& A, const Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular) {
   // For batches smaller than 8 and matrix sizes larger than 64x64 cuBLAS forloop is faster than batched version
   if (batchCount(A) <= 8 && A.size(-1) >= 64) {
     triangular_solve_cublas(A, B, left, upper, transpose, unitriangular);
