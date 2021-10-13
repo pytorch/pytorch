@@ -587,7 +587,7 @@ class TestOperators(TestCase):
     def test_uniform(self):
         x = torch.tensor([1.0, 2.0])
         self.assertONNX(lambda x: x.uniform_(2, to = 2), x, operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN)
-        
+
     def test_unsqueeze(self):
         x = torch.randn(3, 4, requires_grad=True)
         self.assertONNX(lambda x: x.unsqueeze(len(x.shape)), x)
