@@ -98,6 +98,7 @@ class TestPythonKey(TestCase):
         new_cotangent = torch.randn(())
         self.assertEqual(fx_f(new_cotangent, True, True), vjp_fn(new_cotangent))
 
+    @unittest.expectedFailure
     def test_nnc_jit(self, device):
         def f(x):
             return torch.sin(x)
@@ -107,6 +108,7 @@ class TestPythonKey(TestCase):
         inp = torch.randn(3)
         self.assertEqual(jit_f(inp), f(inp))
 
+    @unittest.expectedFailure
     def test_nnc_jit_warns_on_recompilation(self, device):
         def f(x):
             return torch.sin(x)
@@ -124,6 +126,7 @@ class TestPythonKey(TestCase):
         self.assertEqual(len(warns), 1)
         self.assertTrue("Recompiling" in str(warns[-1].message))
 
+    @unittest.expectedFailure
     def test_nnc_scalar(self, device):
         def f(x):
             return torch.sin(x)
@@ -133,6 +136,7 @@ class TestPythonKey(TestCase):
         inp = torch.randn(())
         self.assertEqual(jit_f(inp), f(inp))
 
+    @unittest.expectedFailure
     def test_nnc_pytrees(self, device):
         def f(x):
             return [torch.sin(x[0])]
@@ -149,6 +153,7 @@ class TestPythonKey(TestCase):
         inp = [torch.randn(3, 3), torch.randn(3)]
         self.assertEqual(jit_f(*inp), f(*inp))
 
+    @unittest.expectedFailure
     def test_nnc_passthrough(self, device):
         def f(x, y):
             return x + y, y
