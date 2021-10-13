@@ -739,13 +739,18 @@ template<class T, typename Op>
 static inline Vectorized<T> bitwise_binary_op(const Vectorized<T> &a, const Vectorized<T> &b, Op op) {
   static constexpr uint32_t element_no = VECTOR_WIDTH / sizeof(intmax_t);
   __at_align__ intmax_t buffer[element_no];
-  // We should be using memcpy (through .store) in order to respect the strict aliasing rule
+  static_assert(VECTOR_WIDTH % sizeof(intmax_t) == 0, "VECTOR_WIDTH not a multiple of sizeof(intmax_t)");
+  static_assert(sizeof(buffer) == sizeof(Vectorized<T>), "sizeof(buffer) must match sizeof(Vectorized<T>)");
+  // We should be using memcpy in order to respect the strict aliasing rule
   // see: https://github.com/pytorch/pytorch/issues/66119
+  // Calculate the stride to apply memcpy on `sizeof(intmax_t) / sizeof(T)` elements,
+  // e.g. for int16 inputs and intmax_t with a width of 64 bit, 4 elements will be type punned.
+  static constexpr uint32_t stride = sizeof(intmax_t) / sizeof(T);
   for (uint32_t i = 0U; i < element_no; ++ i) {
     intmax_t a_val;
     intmax_t b_val;
-    std::memcpy(&a_val, &a, sizeof(intmax_t));
-    std::memcpy(&b_val, &b, sizeof(intmax_t));
+    std::memcpy(&a_val, &a[i*stride], sizeof(intmax_t));
+    std::memcpy(&b_val, &b[i*stride], sizeof(intmax_t));
     buffer[i] = op(a_val, b_val);
   }
   return Vectorized<T>::loadu(buffer);
