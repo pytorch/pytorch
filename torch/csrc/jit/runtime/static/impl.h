@@ -391,7 +391,8 @@ class TORCH_API ProcessedNode {
         inputs_(std::make_unique<const IValue*[]>(rhs.inputs_size_)),
         outputs_(std::make_unique<IValue[]>(rhs.outputs_size_)),
         inputs_size_(rhs.inputs_size_),
-        outputs_size_(rhs.outputs_size_) {
+        outputs_size_(rhs.outputs_size_),
+        op_name_(rhs.op_name_) {
     std::copy(
         rhs.inputs_.get(), rhs.inputs_.get() + inputs_size_, inputs_.get());
     std::copy(
@@ -417,6 +418,7 @@ class TORCH_API ProcessedNode {
     }
     std::copy(
         rhs.outputs_.get(), rhs.outputs_.get() + outputs_size_, outputs_.get());
+    op_name_ = rhs.op_name_;
 
     return *this;
   }
