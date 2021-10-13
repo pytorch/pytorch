@@ -57,7 +57,10 @@ static bool writeDeployInterpreter(FILE* dst) {
   return customLoader;
 }
 
-InterpreterManager::InterpreterManager(size_t nInterp) : resources_(nInterp) {
+InterpreterManager::InterpreterManager(
+    size_t nInterp,
+    const c10::optional<std::string>& pythonPath)
+    : resources_(nInterp) {
   TORCH_DEPLOY_TRY
   for (const auto i : c10::irange(nInterp)) {
     instances_.emplace_back(this);
@@ -75,6 +78,10 @@ InterpreterManager::InterpreterManager(size_t nInterp) : resources_(nInterp) {
             return at::nullopt;
           }
         });
+
+    if (pythonPath) {
+      I.global("sys", "path").attr("append")({pythonPath.value()});
+    }
   }
 
   // Pre-registered modules.

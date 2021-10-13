@@ -628,6 +628,22 @@ class TestOptim(TestCase):
                  lambda opt: ReduceLROnPlateau(opt, threshold=1e-4)]
             )
 
+    def test_adagrad_complex(self):
+        for optimizer in [optim.Adagrad, optim_mt.Adagrad]:
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=1e-1)
+            )
+            self._test_complex_optimizer(
+                lambda param: optimizer(
+                    [param], lr=1e-1, initial_accumulator_value=0.1
+                )
+            )
+            self._test_complex_optimizer(
+                lambda param: optimizer(
+                    [param], lr=1e-1, initial_accumulator_value=0.1, weight_decay=1
+                )
+            )
+
     def test_adamax(self):
         for optimizer in [optim.Adamax, optim_mt.Adamax]:
             self._test_basic_cases(
