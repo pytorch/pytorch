@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/autograd/profiler_legacy.h>
+#include <string>
 #include <vector>
 
 #ifdef USE_KINETO
@@ -368,6 +369,47 @@ TORCH_API void prepareProfiler(
 
 TORCH_API void addMetadataJson(
     const std::string& key, const std::string& value);
+
+
+namespace python_tracer {
+
+/*
+Libtorch does not depend on Python (e.g. cannot #include <Python.h>); however
+when we call the profiler from libtorch_python we need the profiler to be able
+to ingest the data that we collect from the Python tracer. (`PyEval_SetProfile`)
+
+In order to solve this dependency issue we define a set of methods which do not
+contain any Python symbols, but can contain the information that Kineto needs
+such as times and names. The python tracer then implements these functions and
+wraps their registration in an init function which is called from
+`torch/csrc/autograd/init.cpp`. This pattern of registration for faux python
+dependencies in libtorch is common in the PyTorch codebase.
+
+CAUTION: The interleaving of Python trace information into the observed events
+is **stateful**. Calling `get_intermediate_events` and `get_final_events` will
+advance the stack replay that the python tracer uses under the hood. As a
+result, care must be taken to ensure consistent semantics.
+*/
+struct PyTraceEvent {
+  int64_t t0_;
+  int64_t t1_;
+  std::string name_;
+};
+
+using TriggerFn = void (*)();
+using TraceEventsFn = std::vector<PyTraceEvent> (*)();
+
+void registerFunctions(
+  TriggerFn start,
+  TriggerFn stop,
+  TriggerFn clear,
+  TraceEventsFn get_events
+);
+
+// Because we are interleaving events, the Python tracer should use the same
+// timer as the profiler.
+int64_t now();
+}  // namespace python_tracer
 
 } // namespace profiler
 }} // namespace torch::autograd

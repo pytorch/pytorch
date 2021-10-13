@@ -414,13 +414,15 @@ struct TORCH_API ProfilerConfig {
       bool profile_memory = false,
       bool with_stack = false,
       bool with_flops = false,
-      bool with_modules = false)
+      bool with_modules = false,
+      bool with_python_debug_profile = false)
       : state(state),
         report_input_shapes(report_input_shapes),
         profile_memory(profile_memory),
         with_stack(with_stack),
         with_flops(with_flops),
-        with_modules(with_modules) {}
+        with_modules(with_modules),
+        with_python_debug_profile(with_python_debug_profile) {}
   ~ProfilerConfig() = default;
   ProfilerState state;
   bool report_input_shapes;
@@ -428,6 +430,7 @@ struct TORCH_API ProfilerConfig {
   bool with_stack;
   bool with_flops;
   bool with_modules;
+  bool with_python_debug_profile;
 
   // Returns IValues corresponding to ProfilerConfig struct, to be used for
   // serialization.

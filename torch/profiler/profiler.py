@@ -217,6 +217,7 @@ class profile(object):
             with_stack: bool = False,
             with_flops: bool = False,
             with_modules: bool = False,
+            with_python_debug_profile: bool = False,
             # deprecated:
             use_cuda: Optional[bool] = None):
         if activities:
@@ -246,6 +247,7 @@ class profile(object):
         self.profile_memory = profile_memory
         self.with_stack = with_stack
         self.with_modules = with_modules
+        self.with_python_debug_profile = with_python_debug_profile
         self.step_num = 0
         self.current_action = self.schedule(self.step_num)
         self.profiler: Optional[prof.profile] = None
@@ -436,6 +438,7 @@ class profile(object):
             with_stack=self.with_stack,
             with_modules=self.with_modules,
             use_kineto=True,
+            with_python_debug_profile=self.with_python_debug_profile,
         )
         self.profiler._prepare_trace()
 

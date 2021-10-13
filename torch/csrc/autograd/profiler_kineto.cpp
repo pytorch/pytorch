@@ -1,3 +1,4 @@
+#include <c10/macros/Export.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/profiler_kineto.h>
 
@@ -41,6 +42,63 @@ inline int64_t getTimeUs() {
   return getTime() / 1000;
 #endif // USE_KINETO
 }
+}  // namespace
+
+namespace python_tracer {
+namespace {
+TriggerFn start_fn;
+TriggerFn stop_fn;
+TriggerFn clear_fn;
+TraceEventsFn get_events_fn;
+}  // namespace
+
+TORCH_API void registerFunctions(
+    TriggerFn start,
+    TriggerFn stop,
+    TriggerFn clear,
+    TraceEventsFn get_events) {
+  start_fn = start;
+  stop_fn = stop;
+  clear_fn = clear;
+  get_events_fn = get_events;
+}
+
+void start() {
+  TORCH_INTERNAL_ASSERT(
+    start_fn != nullptr,
+    "No registration for python_tracer::start_fn");
+  start_fn();
+}
+
+void stop() {
+  TORCH_INTERNAL_ASSERT(
+    stop_fn != nullptr,
+    "No registration for python_tracer::stop_fn");
+  stop_fn();
+}
+
+void clear() {
+  TORCH_INTERNAL_ASSERT(
+    clear_fn != nullptr,
+    "No registration for python_tracer::clear_fn");
+  clear_fn();
+}
+
+auto get_events() {
+  TORCH_INTERNAL_ASSERT(
+    get_events_fn != nullptr,
+    "No registration for python_tracer::get_final_events_fn");
+  return get_events_fn();
+}
+
+// We do not want `getTimeUs` to be directly visible, but we need a way for
+// the python tracer to use the same timing convention as the profiler.
+TORCH_API int64_t now() {
+  return getTimeUs();
+}
+}  // namespace python_tracer
+
+namespace {
 
 std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes);
 std::string stacksToStr(const std::vector<std::string>& stacks, const char* delim);
@@ -242,9 +300,35 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
     std::unordered_map<uint64_t, libkineto::GenericTraceActivity*> tidSeq2activity;
     uint64_t fwd_bwd_link_id = 1;
 
-    for (size_t idx = 0; idx < cpu_trace->activities.size(); ++idx) {
+    auto activities = std::move(cpu_trace->activities);
+
+    const auto py_events = python_tracer::get_events();
+    size_t py_index = 0;
+    auto py_device = libkineto::processId();
+    auto py_resource = libkineto::systemThreadId();
+    auto push_py_event = [&](const python_tracer::PyTraceEvent& e) {
+      libkineto::GenericTraceActivity op(
+          cpu_trace->span,
+          libkineto::ActivityType::USER_ANNOTATION,
+          e.name_
+        );
+
+        op.device = py_device;
+        op.resource = py_resource;
+        op.startTime = e.t0_;
+        op.endTime = e.t1_;
+        cpu_trace->activities.push_back(op);
+    };
+
+    for (size_t idx = 0; idx < activities.size(); ++idx) {
       auto& kineto_event = kineto_events_[idx];
-      auto& activity = cpu_trace->activities[idx];
+      auto& activity = activities[idx];
+
+      auto end_time = kineto_event.start_us_ + kineto_event.duration_us_;
+      while (py_index < py_events.size() && py_events[py_index].t1_ <= end_time) {
+        push_py_event(py_events[py_index]);
+        py_index++;
+      }
 
       if (kineto_event.hasShapes()) {
         activity.addMetadata("Input Dims", shapesToStr(kineto_event.shapes()));
@@ -270,6 +354,13 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
             std::to_string(kineto_event.sequenceNr()));
         generateForwardBackwardLink(kineto_event, fwd_bwd_link_id, activity, tidSeq2activity);
       }
+
+      cpu_trace->activities.push_back(activity);
+    }
+
+    while (py_index < py_events.size()) {
+      push_py_event(py_events[py_index]);
+      py_index++;
     }
   }
 
@@ -426,7 +517,6 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
           TORCH_INTERNAL_ASSERT(kineto_ctx_ptr != nullptr);
 
           kineto_ctx_ptr->endThreadId = at::RecordFunction::currentThreadId();
-
           if (config.state == ProfilerState::KINETO_GPU_FALLBACK) {
             try {
               cudaStubs()->record(
@@ -583,6 +673,9 @@ void enableProfiler(
   c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);
 
   if (activities.count(ActivityType::CPU) || config.state == ProfilerState::NVTX) {
+    if (config.with_python_debug_profile) {
+      python_tracer::start();
+    }
     pushProfilingCallbacks(scopes);
   }
 
@@ -606,6 +699,9 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
       "Can't disable Kineto profiler when it's not running");
 
   if (state_ptr->hasCallbackHandle()) {
+    if (config.with_python_debug_profile) {
+      python_tracer::stop();
+    }
     at::removeCallback(state_ptr->callbackHandle());
   }
 
@@ -626,6 +722,11 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
   auto trace = libkineto::api().activityProfiler().stopTrace();
   TORCH_CHECK(trace);
   state_ptr->addTraceEvents(*trace);
+#endif // USE_KINETO
+if (config.with_python_debug_profile) {
+  python_tracer::clear();
+}
+#ifdef USE_KINETO
   return std::make_unique<ProfilerResult>(
       state_ptr->start_time_,
       std::move(state_ptr->kineto_events_),

@@ -127,7 +127,8 @@ class profile(object):
             with_stack=False,
             with_modules=False,
             use_kineto=False,
-            use_cpu=True):
+            use_cpu=True,
+            with_python_debug_profile=False):
         self.enabled: bool = enabled
         if not self.enabled:
             return
@@ -141,6 +142,7 @@ class profile(object):
         self.with_stack = with_stack
         self.with_modules = with_modules
         self.use_cpu = use_cpu
+        self.with_python_debug_profile = with_python_debug_profile
         self.kineto_results: Optional[_ProfilerResult] = None
 
         if not self.use_cpu:
@@ -175,7 +177,8 @@ class profile(object):
             self.profile_memory,
             self.with_stack,
             self.with_flops,
-            self.with_modules)
+            self.with_modules,
+            self.with_python_debug_profile)
 
     def __enter__(self):
         if not self.enabled:
