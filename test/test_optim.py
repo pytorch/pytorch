@@ -565,7 +565,7 @@ class TestOptim(TestCase):
                 optimizer(None, lr=1e-2, rho=1.1)
 
     def test_adadelta_complex(self):
-        for optimizer in [optim.Adadelta]:
+        for optimizer in [optim.Adadelta, optim_mt.Adadelta]:
             self._test_complex_optimizer(
                 lambda weight: optimizer([weight])
             )

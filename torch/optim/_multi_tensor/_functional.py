@@ -118,6 +118,10 @@ def adadelta(params: List[Tensor],
     if weight_decay != 0:
         torch._foreach_add_(grads, params, alpha=weight_decay)
 
+    square_avgs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in square_avgs]
+    acc_deltas = [torch.view_as_real(x) if torch.is_complex(x) else x for x in acc_deltas]
+    grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in grads]
+
     torch._foreach_mul_(square_avgs, rho)
     torch._foreach_addcmul_(square_avgs, grads, grads, value=1 - rho)
 
@@ -129,11 +133,13 @@ def adadelta(params: List[Tensor],
     torch._foreach_div_(deltas, std)
     torch._foreach_mul_(deltas, grads)
 
-    torch._foreach_add_(params, deltas, alpha=-lr)
-
     torch._foreach_mul_(acc_deltas, rho)
     torch._foreach_addcmul_(acc_deltas, deltas, deltas, value=1 - rho)
 
+    deltas = [torch.view_as_complex(x) if torch.is_complex(params[i]) else x for i, x in enumerate(deltas)]
+    torch._foreach_add_(params, deltas, alpha=-lr)
+    square_avgs = [torch.view_as_complex(x) if torch.is_complex(params[i]) else x for i, x in enumerate(square_avgs)]
+    acc_deltas = [torch.view_as_complex(x) if torch.is_complex(params[i]) else x for i, x in enumerate(acc_deltas)]
 
 def asgd(params: List[Tensor],
          grads: List[Tensor],
