@@ -3813,14 +3813,26 @@ def sample_inputs_linalg_cholesky_inverse(op_info, device, dtype, requires_grad=
 
 def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False, **kwargs):
     from torch.testing._internal.common_utils import random_well_conditioned_matrix
+
+    device = torch.device(device)
+    if_cuda_and_no_cusolver = (device.type == 'cuda') and (dtype is skipCUDAIfNoCusolver(dtype))
+
+    if device.type == 'cuda':
+        drivers = ('gels',)
+    else:
+        drivers = ('gels', 'gelsy', 'gelss', 'gelsd')
+
     out = []
-    for batch in ((), (3,), (3, 3)):
+    for batch, driver in product(((), (3,), (3, 3)), drivers):
         for delta in (-1, 0, +1):
+            # If Cusolver is not available, overdetermined inputs are not generated
+            if delta > 0 and if_cuda_and_no_cusolver:
+                continue
             shape = batch + (3 + delta, 3)
             a = random_well_conditioned_matrix(*shape, dtype=dtype, device=device)
             a.requires_grad_(requires_grad)
             b = make_tensor(shape, device, dtype, low=None, high=None, requires_grad=requires_grad)
-            out.append(SampleInput(a, args=(b,), kwargs=dict(driver='gels')))
+            out.append(SampleInput(a, args=(b,), kwargs=dict(driver=driver)))
     return out
 
 def sample_inputs_householder_product(op_info, device, dtype, requires_grad, **kwargs):
@@ -7544,8 +7556,9 @@ op_db: List[OpInfo] = [
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            skips=(
-               # we skip forward AD tests as gradcheck fails with multi-Tensor outputs
-               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),
+               # we skip gradient checks for this suite as they are tested in
+               # variant_test_name='grard_oriented'
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients'),
            )),
     OpInfo('linalg.lstsq',
            aten_name='linalg_lstsq',
