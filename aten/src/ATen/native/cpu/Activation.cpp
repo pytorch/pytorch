@@ -33,17 +33,17 @@ inline void _vec_log_sigmoid(TensorBase &output, TensorBase &buffer, const Tenso
     int64_t d = 0;
     for (; d < size - (size % Vec::size()); d += Vec::size()) {
       Vec data_vec = Vec::loadu(input_data + begin+ d);
-      Vec max_vec = vec::maximum(data_vec.neg(), Vec(scalar_t(0)));
-      Vec buffer_vec =  max_vec.neg().exp() + (data_vec.neg() - max_vec).exp();
-      Vec output_vec = (max_vec + buffer_vec.log()).neg();
+      Vec min_vec = vec::minimum(data_vec, Vec(scalar_t(0)));
+      Vec buffer_vec = data_vec.abs().neg().exp();
+      Vec output_vec = min_vec - buffer_vec.log1p();
       buffer_vec.store(buffer_data + begin + d);
       output_vec.store(output_data + begin + d);
     }
     if (size - d > 0) {
       Vec data_vec = Vec::loadu(input_data + begin + d, size - d);
-      Vec max_vec = vec::maximum(data_vec.neg(), Vec(scalar_t(0)));
-      Vec buffer_vec =  max_vec.neg().exp() + (data_vec.neg() - max_vec).exp();
-      Vec output_vec = (max_vec + buffer_vec.log()).neg();
+      Vec min_vec = vec::minimum(data_vec, Vec(scalar_t(0)));
+      Vec buffer_vec = data_vec.abs().neg().exp();
+      Vec output_vec = min_vec - buffer_vec.log1p();
       buffer_vec.store(buffer_data + begin + d, size - d);
       output_vec.store(output_data + begin + d, size - d);
     }
@@ -66,19 +66,16 @@ static void log_sigmoid_backward_cpu_kernel(TensorIterator& iter) {
     auto one_vec = Vec(one_val);
     cpu_kernel_vec(iter,
       [=](scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
-        auto max_deriv_val = zero_val;
-        auto sign_val = -one_val;
-        if (a < zero_val) {
-          max_deriv_val = -one_val;
-          sign_val = one_val;
-        }
-        return (-max_deriv_val - sign_val * ((b - one_val) / b)) * c;
+        auto in_negative = a < scalar_t(0);
+        auto max_deriv = in_negative ? scalar_t(1) : scalar_t(0);
+        auto sign = in_negative ? scalar_t(1) : -scalar_t(1);
+        return (max_deriv - sign * (b / (scalar_t(1) + b))) * c;
       },
       [=](Vec a, Vec b, Vec c) -> Vec {
         auto mask = a < zero_vec;
-        auto max_deriv_vec = Vec::blendv(zero_vec, one_vec.neg(), mask);
+        auto max_deriv_vec = Vec::blendv(zero_vec, one_vec, mask);
         auto sign_vec = Vec::blendv(one_vec.neg(), one_vec, mask);
-        return (max_deriv_vec + sign_vec * ((b - one_vec) / b)).neg() * c;
+        return (max_deriv_vec - sign_vec * (b / (one_vec + b))) * c;
       });
   });
 }
