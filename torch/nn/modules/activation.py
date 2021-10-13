@@ -971,7 +971,7 @@ class MultiheadAttention(Module):
             self.register_parameter('v_proj_weight', None)
 
         if bias:
-            self.in_proj_bias = Parameter(torch.empty(3 * embed_dim, **factory_kwargs))
+            self.in_proj_bias = Parameter(torch.empty(embed_dim + self.kdim + self.vdim, **factory_kwargs))
         else:
             self.register_parameter('in_proj_bias', None)
         self.out_proj = NonDynamicallyQuantizableLinear(embed_dim, embed_dim, bias=bias, **factory_kwargs)
