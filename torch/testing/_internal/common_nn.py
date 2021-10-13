@@ -5900,6 +5900,9 @@ class ModuleTest(TestBase):
         if self.check_gradgrad and not self.FIXME_no_cuda_gradgrad_comparison:
             cpu_output = cpu_module(*cpu_input_tuple)
             gpu_output = gpu_module(*gpu_input_tuple)
+            if getattr(cpu_module, "return_indices", False):
+                cpu_output = cpu_output[0]
+                gpu_output = gpu_output[0]
 
             cpu_gradOutput = torch.randn_like(cpu_output, requires_grad=True)
             gpu_gradOutput = cpu_gradOutput.type_as(gpu_output).detach()
