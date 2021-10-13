@@ -3818,9 +3818,9 @@ def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False, **kw
     if_cuda_and_no_cusolver = (device.type == 'cuda') and (dtype is not skipCUDAIfNoCusolver(dtype))
 
     if device.type == 'cuda':
-        drivers = ('gels',)
+        drivers = ('gels',)  # type: ignore
     else:
-        drivers = ('gels', 'gelsy', 'gelss', 'gelsd')
+        drivers = ('gels', 'gelsy', 'gelss', 'gelsd')  # type: ignore
 
     out = []
     for batch, driver in product(((), (3,), (3, 3)), drivers):
