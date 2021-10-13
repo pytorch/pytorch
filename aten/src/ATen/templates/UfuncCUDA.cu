@@ -1,6 +1,7 @@
 #include <ATen/native/ufunc/${name}.h>
-#include <ATen/native/cuda/Loops.cuh>
 #include <ATen/Dispatch.h>
+#include <c10/core/Scalar.h>
+${cuda_headers}
 
 namespace at {
 

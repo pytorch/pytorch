@@ -1269,8 +1269,12 @@ def main() -> None:
                     'native_definitions': dest.compute_ufunc_cpu_kernel(g),
                 })
             elif dispatch_key is DispatchKey.CUDA:
+                cuda_headers = "#include <ATen/native/cuda/Loops.cuh>"
+                if options.rocm:
+                    cuda_headers = "#include <ATen/native/hip/Loops.cuh>"
                 fm.write_with_template(f'UfuncCUDA_{name}.cu', 'UfuncCUDA.cu', lambda: {
                     'name': name,
+                    'cuda_headers': cuda_headers,
                     #'meta_declaration': compute_meta_function_declaration(g),
                     #'native_declaration':
                     #    dest.compute_native_function_declaration(g, backend_indices[dispatch_key]),

@@ -4,6 +4,7 @@
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/Dispatch.h>
+#include <c10/core/Scalar.h>
 
 namespace at {
 namespace native {

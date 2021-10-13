@@ -58,7 +58,7 @@ class UfunctorSignature:
 
     def decl_apply(self) -> str:
         args_str = ', '.join(a.decl() for a in self.arguments().apply)
-        return f"{self.returns_type().cpp_type()} operator()({args_str})"
+        return f"{self.returns_type().cpp_type()} operator()({args_str}) const"
 
 
 @dataclass(frozen=True)
