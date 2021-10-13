@@ -794,7 +794,8 @@ Tensor grid_sampler_3d_cuda(const Tensor& input, const Tensor& grid,
 std::tuple<Tensor, Tensor>
 grid_sampler_2d_backward_cuda(const Tensor& grad_output, const Tensor& input,
                               const Tensor& grid, int64_t interpolation_mode,
-                              int64_t padding_mode, bool align_corners) {
+                              int64_t padding_mode, bool align_corners,
+                              std::array<bool,2> output_mask) {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("grid_sampler_2d_backward_cuda");
