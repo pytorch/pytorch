@@ -377,6 +377,7 @@ filegroup(
         "aten/src/ATen/native/miopen/Conv_miopen.cpp",
         "aten/src/ATen/native/miopen/RNN_miopen.cpp",
         "aten/src/ATen/native/sparse/cuda/SparseCUDATensor.cpp",
+        "aten/src/ATen/native/sparse/cuda/SparseBlas.cpp",
         "aten/src/ATen/native/sparse/cuda/SparseBlasImpl.cpp",
         "aten/src/THC/THCGeneral.cpp",
         "aten/src/THC/THCStorageCopy.cpp",
