@@ -454,6 +454,7 @@
   dispatch:
     CPU: addmv_out_cpu
     CUDA: addmv_out_cuda
+    SparseCsrCUDA: addmv_out_sparse_csr_cuda
 
 - func: addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function, method
@@ -2108,7 +2109,10 @@
     CPU: grid_sampler_2d_cpu
     CUDA: grid_sampler_2d_cuda
 
-- func: grid_sampler_2d_backward(Tensor grad_output, Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> (Tensor, Tensor)
+# `grid_sampler_2d_backward` takes in `output_mask` to optimize performance for
+# the case where `input` doesn't require gradient. Gradient for `grid` is always
+# computed (only `output_mask[0]` is checked by the implementations).
+- func: grid_sampler_2d_backward(Tensor grad_output, Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners, bool[2] output_mask) -> (Tensor, Tensor)
   dispatch:
     CPU: grid_sampler_2d_backward_cpu
     CUDA: grid_sampler_2d_backward_cuda
@@ -3112,8 +3116,8 @@
 - func: mv(Tensor self, Tensor vec) -> Tensor
   variants: function, method
   dispatch:
-    CPU, CUDA: mv
-    SparseCPU, SparseCUDA, SparseCsrCPU, SparseCsrCUDA: mv_sparse
+    CPU, CUDA, SparseCsrCUDA: mv
+    SparseCPU, SparseCUDA, SparseCsrCPU: mv_sparse
 
 - func: mv.out(Tensor self, Tensor vec, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -3290,6 +3294,21 @@
 # (maybe related to capital letter collation somehow...)
 - func: numpy_T(Tensor(a) self) -> Tensor(a)
   variants: method
+
+# Exposed on Python as an attribute 'H'
+- func: matrix_H(Tensor(a) self) -> Tensor(a)
+  variants: method
+
+# Exposed on Python as an attribute 'mT'
+- func: mT(Tensor(a) self) -> Tensor(a)
+  variants: method
+
+# Exposed on Python as an attribute 'mH'
+- func: mH(Tensor(a) self) -> Tensor(a)
+  variants: method
+
+- func: adjoint(Tensor(a) self) -> Tensor(a)
+  variants: function, method
 
 - func: pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
 
