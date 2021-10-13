@@ -435,6 +435,25 @@ Example::
             [ 0.7573, -3.9555, -2.8681]])
 """.format(**common_args, **tf32_notes))
 
+add_docstr(torch.adjoint,
+           r"""
+adjoint(Tensor) -> Tensor
+Returns a view of the tensor conjugated and with the last two dimensions transposed.
+
+``x.adjoint()`` is equivalent to ``x.transpose(-2, -1).conj()`` for complex tensors and
+``x.transpose(-2, -1)`` for real tensors.
+
+Example::
+    >>> x = torch.arange(4, dtype=torch.float)
+    >>> A = torch.complex(x, x).reshape(2, 2)
+    >>> A
+    tensor([[0.+0.j, 1.+1.j],
+            [2.+2.j, 3.+3.j]])
+    >>> A.adjoint()
+    tensor([[0.-0.j, 2.-2.j],
+            [1.-1.j, 3.-3.j]])
+""")
+
 add_docstr(torch.sspaddmm,
            r"""
 sspaddmm(input, mat1, mat2, *, beta=1, alpha=1, out=None) -> Tensor
