@@ -182,9 +182,9 @@ def add_binary_elementwise_layer(network, lhs_val, rhs_val, op_type, name):
     # Check the limitation in the doc string.
     if network.has_implicit_batch_dimension:
         if is_lhs_trt_tensor and not is_rhs_trt_tensor:
-            assert len(lhs_val.shape) >= len(rhs_val.shape)
+            assert len(lhs_val.shape) >= len(rhs_val.shape), f"{lhs_val.shape} >= {rhs_val.shape}"
         elif not is_lhs_trt_tensor and is_rhs_trt_tensor:
-            assert len(rhs_val.shape) >= len(lhs_val.shape)
+            assert len(rhs_val.shape) >= len(lhs_val.shape), f"{rhs_val.shape} >= {lhs_val.shape}"
 
     lhs_val, rhs_val = broadcast(
         network, lhs_val, rhs_val, f"{name}_lhs", f"{name}_rhs"
@@ -1234,7 +1234,7 @@ def acc_ops_split(network, target, args, kwargs, name):
     offset = 0
     num_splits = (input_val.shape[dim] + split_size - 1) // split_size
     if num_splits < 1:
-        raise RuntimeError(f"Invalid split: {input_val.shape[dim]} wuth split_size={split_size}")
+        raise RuntimeError(f"Invalid split: {input_val.shape[dim]} with split_size={split_size}")
 
     max_offset = input_val.shape[dim]
     # add slice layers
@@ -1496,7 +1496,7 @@ def acc_ops_matmul(network, target, args, kwargs, name):
     for i in [input_val, other_val]:
         if not isinstance(i, trt.tensorrt.ITensor):
             raise RuntimeError(
-                f"matmul received input {i} that is not part " "of the TensorRT region!"
+                f"matmul received input {i} that is not part of the TensorRT region!"
             )
 
     return add_matrix_multiply_layer(network, input_val, other_val, name)
@@ -1676,3 +1676,47 @@ def acc_ops_gelu(network, target, args, kwargs, name):
     layer = network.add_plugin_v2([input_val], plugin)
     layer.name = name
     return layer.get_output(0)
+
+@tensorrt_converter(acc_ops.chunk)
+def acc_ops_chunk(network, target, args, kwargs, name):
+    input_val = kwargs["input"]
+    chunks = kwargs["chunks"]
+    dim = kwargs["dim"]
+    input_dim_size = len(input_val.shape)
+
+    if not isinstance(input_val, trt.tensorrt.ITensor):
+        raise RuntimeError(f"chunk received input {input_val} that is not part "
+                           "of the TensorRT region!")
+
+
+    if network.has_implicit_batch_dimension:
+        input_dim_size += 1
+        dim = dim % input_dim_size
+        assert dim != 0, "Can't chunk on batch dim when it's implicit!"
+        dim -= 1
+    else:
+        dim = dim % input_dim_size
+
+    if chunks > input_val.shape[dim]:
+        print(f"Warning! Asked for {chunks} chunks along dimention "
+              f"{dim} on tensor with size {input_val.shape} chunks "
+              f"will default to {input_val.shape[dim]}")
+        chunks = input_val.shape[dim]
+
+    start = [0] * len(input_val.shape)
+    stride = [1] * len(start)
+    offset = 0
+    split_size = (input_val.shape[dim] + chunks - 1) // chunks
+
+    max_offset = input_val.shape[dim]
+    # add slice layers
+    output = []
+    for i in range(chunks):
+        shape = list(input_val.shape)
+        shape[dim] = min(split_size, max_offset - offset)
+        start[dim] = offset
+        layer = network.add_slice(input_val, start=start, shape=shape, stride=stride)
+        offset += split_size
+        layer.name = f"{name}_{i}"
+        output.append(layer.get_output(0))
+    return output
