@@ -1544,7 +1544,7 @@ jobs:
             if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then
               export USE_PYTORCH_METAL=${USE_METAL}
             fi
-            unbuffer ${PROJ_ROOT}/scripts/build_ios.sh 2>&1 | ts
+            unbuffer ${PROJ_ROOT}/scripts/build_ios.sh 2>&1
       - run:
           name: Run Build Test
           no_output_timeout: "30m"
