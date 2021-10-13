@@ -164,7 +164,7 @@ int main(int argc, char** argv) {
   m.eval();
   auto frozen_m = torch::jit::freeze_module(m.clone());
   auto graph = frozen_m.get_method("forward").graph();
-  std::vector<c10::optional<at::Tensor>> example_inputs = {at::rand({1, 4, 224, 224})};
+  std::vector<c10::optional<at::Tensor>> example_inputs = {at::rand(parseInputShapes())};
 
   torch::jit::RemoveTensorMutation(graph);
   torch::jit::EliminateDeadCode(graph->block());
