@@ -103,6 +103,16 @@ at::Tensor masked_scatter_backward(const at::Tensor & grad, const at::Tensor & m
 at::Tensor cholesky_backward(at::Tensor grad, bool upper, at::Tensor L);
 at::Tensor cholesky_jvp(const at::Tensor& input_tangent, const at::Tensor& L, bool upper);
 at::Tensor cholesky_inverse_backward(at::Tensor grad, at::Tensor L, bool upper, at::Tensor inverse);
+Tensor pinv_jvp(
+  const Tensor& A,
+  const Tensor& pinvA,
+  const Tensor& dA
+);
+Tensor pinv_backward(
+  const Tensor& grad,
+  const Tensor& pinvA,
+  const Tensor& A
+);
 at::Tensor split_with_sizes_backward(const std::vector<torch::autograd::Variable> &grads,
                                      IntArrayRef split_sizes, int64_t dim, IntArrayRef sizes, const at::TensorOptions &options);
 at::Tensor split_backward(const std::vector<torch::autograd::Variable> &grads, int64_t split_size, int64_t dim, at::IntArrayRef sizes, const at::TensorOptions &options);

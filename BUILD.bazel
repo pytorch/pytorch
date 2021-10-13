@@ -118,48 +118,63 @@ py_binary(
     ],
 )
 
+ufunc_headers = glob(["aten/src/ATen/native/ufunc/*.h"])
+ufunc_names = [paths.split_extension(paths.basename(ufunc_header))[0] for ufunc_header in ufunc_headers]
+ufunc_cpu_outputs = ["aten/src/ATen/UfuncCPU_{}.cpp".format(n) for n in ufunc_names]
+ufunc_cpu_kernel_outputs = ["aten/src/ATen/UfuncCPUKernel_{}.cpp".format(n) for n in ufunc_names]
+ufunc_cuda_outputs = ["aten/src/ATen/UfuncCUDA_{}.cu".format(n) for n in ufunc_names]
+
+gen_cpp_outputs = [
+    "aten/src/ATen/RegisterBackendSelect.cpp",
+    "aten/src/ATen/RegisterCPU.cpp",
+    "aten/src/ATen/RegisterMkldnnCPU.cpp",
+    "aten/src/ATen/RegisterQuantizedCPU.cpp",
+    "aten/src/ATen/RegisterSparseCPU.cpp",
+    "aten/src/ATen/RegisterSparseCsrCPU.cpp",
+    "aten/src/ATen/RegisterCompositeImplicitAutograd.cpp",
+    "aten/src/ATen/RegisterCompositeExplicitAutograd.cpp",
+    "aten/src/ATen/RegisterMeta.cpp",
+    "aten/src/ATen/RegisterSchema.cpp",
+    "aten/src/ATen/Functions.cpp",
+    "aten/src/ATen/Operators_0.cpp",
+    "aten/src/ATen/Operators_1.cpp",
+    "aten/src/ATen/Operators_2.cpp",
+    "aten/src/ATen/Operators_3.cpp",
+    "aten/src/ATen/Operators_4.cpp",
+    "aten/src/ATen/core/TensorMethods.cpp",
+    "aten/src/ATen/core/ATenOpList.cpp",
+]
+
+gen_h_outputs = [
+    "aten/src/ATen/CPUFunctions.h",
+    "aten/src/ATen/CPUFunctions_inl.h",
+    "aten/src/ATen/CUDAFunctions.h",
+    "aten/src/ATen/CUDAFunctions_inl.h",
+    "aten/src/ATen/CompositeExplicitAutogradFunctions.h",
+    "aten/src/ATen/CompositeExplicitAutogradFunctions_inl.h",
+    "aten/src/ATen/CompositeImplicitAutogradFunctions.h",
+    "aten/src/ATen/CompositeImplicitAutogradFunctions_inl.h",
+    "aten/src/ATen/Functions.h",
+    "aten/src/ATen/NativeFunctions.h",
+    "aten/src/ATen/MetaFunctions.h",
+    "aten/src/ATen/MetaFunctions_inl.h",
+    "aten/src/ATen/NativeMetaFunctions.h",
+    "aten/src/ATen/core/TensorBody.h",
+    "aten/src/ATen/RedispatchFunctions.h",
+    "aten/src/ATen/Operators.h",
+]
+
 genrule(
     name = "generated_cpp",
     srcs = [
         "aten/src/ATen/native/native_functions.yaml",
     ] + glob(["aten/src/ATen/templates/**"]),
-    outs = [
-        "aten/src/ATen/Declarations.yaml",
-        "aten/src/ATen/RegisterBackendSelect.cpp",
-        "aten/src/ATen/RegisterCPU.cpp",
-        "aten/src/ATen/RegisterMkldnnCPU.cpp",
-        "aten/src/ATen/RegisterQuantizedCPU.cpp",
-        "aten/src/ATen/RegisterSparseCPU.cpp",
-        "aten/src/ATen/RegisterSparseCsrCPU.cpp",
-        "aten/src/ATen/RegisterCompositeImplicitAutograd.cpp",
-        "aten/src/ATen/RegisterCompositeExplicitAutograd.cpp",
-        "aten/src/ATen/RegisterMeta.cpp",
-        "aten/src/ATen/RegisterSchema.cpp",
-        "aten/src/ATen/CPUFunctions.h",
-        "aten/src/ATen/CPUFunctions_inl.h",
-        "aten/src/ATen/CUDAFunctions.h",
-        "aten/src/ATen/CUDAFunctions_inl.h",
-        "aten/src/ATen/CompositeExplicitAutogradFunctions.h",
-        "aten/src/ATen/CompositeExplicitAutogradFunctions_inl.h",
-        "aten/src/ATen/CompositeImplicitAutogradFunctions.h",
-        "aten/src/ATen/CompositeImplicitAutogradFunctions_inl.h",
-        "aten/src/ATen/Functions.h",
-        "aten/src/ATen/Functions.cpp",
-        "aten/src/ATen/RedispatchFunctions.h",
-        "aten/src/ATen/Operators.h",
-        "aten/src/ATen/Operators_0.cpp",
-        "aten/src/ATen/Operators_1.cpp",
-        "aten/src/ATen/Operators_2.cpp",
-        "aten/src/ATen/Operators_3.cpp",
-        "aten/src/ATen/Operators_4.cpp",
-        "aten/src/ATen/NativeFunctions.h",
-        "aten/src/ATen/MetaFunctions.h",
-        "aten/src/ATen/MetaFunctions_inl.h",
-        "aten/src/ATen/NativeMetaFunctions.h",
-        "aten/src/ATen/core/TensorBody.h",
-        "aten/src/ATen/core/TensorMethods.cpp",
-        "aten/src/ATen/core/ATenOpList.cpp",
-    ],
+    outs = (
+        ["aten/src/ATen/Declarations.yaml"] +
+        # NB: cuda is unconditionally generated; you have to explicitly exclude
+        # it if you don't want to build it at use site.
+        gen_cpp_outputs + gen_h_outputs + ufunc_cpu_outputs + ufunc_cpu_kernel_outputs + ufunc_cuda_outputs
+    ),
     cmd = "$(location :gen) --source-path aten/src/ATen --install_dir `dirname $(location aten/src/ATen/Declarations.yaml)`",
     tools = [":gen"],
 )
@@ -377,11 +392,12 @@ filegroup(
         "aten/src/ATen/native/miopen/Conv_miopen.cpp",
         "aten/src/ATen/native/miopen/RNN_miopen.cpp",
         "aten/src/ATen/native/sparse/cuda/SparseCUDATensor.cpp",
+        "aten/src/ATen/native/sparse/cuda/SparseBlas.cpp",
         "aten/src/ATen/native/sparse/cuda/SparseBlasImpl.cpp",
         "aten/src/THC/THCGeneral.cpp",
         "aten/src/THC/THCStorageCopy.cpp",
         "aten/src/THC/THCTensor.cpp",
-    ],
+    ] + [":{}".format(f) for f in ufunc_cuda_outputs],
 )
 
 filegroup(
@@ -593,6 +609,7 @@ intern_build_aten_ops(
         "@sleef",
         "@fbgemm",
     ],
+    extra_impls = ufunc_cpu_kernel_outputs,
 )
 
 cc_library(
@@ -624,8 +641,7 @@ cc_library(
         ":aten_native_sparse_cpp",
         ":aten_native_xnnpack",
         ":aten_src_ATen_config",
-        ":generated_cpp",
-    ],
+    ] + [":{}".format(f) for f in gen_cpp_outputs + ufunc_cpu_outputs],
     copts = ATEN_COPTS,
     data = if_cuda(
         [":libcaffe2_nvrtc.so"],
@@ -2060,6 +2076,23 @@ cc_test(
     tags = [
         "exclusive",
         "gpu-required",
+    ],
+    deps = [
+        ":torch",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "lazy_tests",
+    size = "small",
+    srcs = glob([
+        "test/cpp/lazy/*.cpp",
+        "test/cpp/lazy/*.h",
+    ]),
+    linkstatic = True,
+    tags = [
+        "exclusive",
     ],
     deps = [
         ":torch",
