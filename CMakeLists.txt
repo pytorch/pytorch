@@ -427,6 +427,10 @@ set(OP_DEPENDENCY "" CACHE STRING
     "Path to the yaml file that contains the op dependency graph for custom build.")
 set(STATIC_DISPATCH_BACKEND "" CACHE STRING
     "Name of the backend for which static dispatch code is generated, e.g.: CPU.")
+option(
+  TRACING_BASED
+  "Master flag to build Lite Interpreter with tracing build option"
+  OFF)
 
 # This is a fix for a rare build issue on Ubuntu:
 # symbol lookup error: miniconda3/envs/pytorch-py3.7/lib/libmkl_intel_lp64.so: undefined symbol: mkl_blas_dsyrk
@@ -513,16 +517,14 @@ if(MSVC)
   endforeach(flag_var)
 
   # Try harder
-  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "/w" "-w")
+  string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler /w -w")
 endif(MSVC)
 
-list(APPEND CUDA_NVCC_FLAGS "-Xfatbin" "-compress-all")
-list(APPEND CUDA_NVCC_FLAGS_DEBUG "-Xfatbin" "-compress-all")
-list(APPEND CUDA_NVCC_FLAGS_RELWITHDEBINFO "-Xfatbin" "-compress-all")
+string(APPEND CMAKE_CUDA_FLAGS " -Xfatbin -compress-all")
 
 if(NOT MSVC)
-  list(APPEND CUDA_NVCC_FLAGS_DEBUG "-g" "-lineinfo" "--source-in-ptx")
-  list(APPEND CUDA_NVCC_FLAGS_RELWITHDEBINFO "-g" "-lineinfo" "--source-in-ptx")
+  string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -g -lineinfo --source-in-ptx")
+  string(APPEND CMAKE_CUDA_FLAGS_RELWITHDEBINFO " -g -lineinfo --source-in-ptx")
 endif(NOT MSVC)
 
 # Set INTERN_BUILD_MOBILE for all mobile builds. Components that are not
@@ -663,6 +665,16 @@ endif()
 
 include(cmake/Dependencies.cmake)
 
+if((CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 10.2) AND (CMAKE_HOST_SYSTEM_NAME MATCHES "Windows"))
+  # CUDA < 10.2 doesn't support compiling and extracting header dependencies in
+  # one call, so instead CMake calls nvcc twice with && in between.
+  # However, on windows cmd.exe has a 8191 character limit for commands which we
+  # start hitting. This moves most argments into a file to avoid going over the limit
+
+  set(CMAKE_CUDA_USE_RESPONSE_FILE_FOR_OBJECTS ON)
+  set(CMAKE_NINJA_FORCE_RESPONSE_FILE ON CACHE INTERNAL "")
+endif()
+
 if(USE_FBGEMM)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_FBGEMM")
 endif()
@@ -744,7 +756,6 @@ if(NOT MSVC)
   string(APPEND CMAKE_CXX_FLAGS " -Wno-unknown-pragmas")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-sign-compare")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-parameter")
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-variable")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-function")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-result")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-local-typedefs")
@@ -1068,6 +1079,9 @@ endif()
 
 # ---[ JNI
 if(BUILD_JNI)
+  if(NOT MSVC)
+    string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-variable")
+  endif()
   set(BUILD_LIBTORCH_WITH_JNI 1)
   set(FBJNI_SKIP_TESTS 1)
   add_subdirectory(android/pytorch_android)
