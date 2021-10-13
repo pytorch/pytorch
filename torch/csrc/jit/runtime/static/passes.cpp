@@ -517,7 +517,8 @@ void ReplaceWithCopy(
 // NB: The alias type of the fused op needs to be changed to
 // c10::AliasAnalysisKind::PURE_FUNCTION to make alias analysis work.
 void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
-  AliasDb alias_db(graph);
+  AliasDb alias_db(
+      graph, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
   const std::vector<Value*> graph_outputs(
       graph->outputs().begin(), graph->outputs().end());
   auto nodes = graph->nodes();
@@ -528,7 +529,8 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
     if (node_qual_string == "fb::sigrid_transforms" ||
         node_qual_string == "fb::sigrid_transforms_torch_bind" ||
         node_qual_string == "fb::equally_split" ||
-        node_qual_string == "fb::gather_ranges_to_dense") {
+        node_qual_string == "fb::gather_ranges_to_dense" ||
+        node_qual_string == "fb::variadic_sigrid_transforms_torch_bind") {
       const Value* value_out = node->outputs()[0];
       if (value_out->uses().size() > 1) {
         continue;

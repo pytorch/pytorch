@@ -3,7 +3,6 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/WrapDimUtils.h>
-#include <THC/THCTensorMathReduce.cuh>
 #include <c10/macros/Macros.h>
 
 #include <ATen/AccumulateType.h>
@@ -906,13 +905,13 @@ TORCH_IMPL_FUNC(log_softmax_backward_cuda_out) (
   const Tensor& grad,
   const Tensor& output,
   int64_t dim,
-  const Tensor& input,
+  ScalarType input_dtype,
   const Tensor& grad_input) {
-  bool half_to_float = grad.scalar_type() != input.scalar_type();
+  bool half_to_float = grad.scalar_type() != input_dtype;
   if (half_to_float) {
     TORCH_CHECK(
         (grad.scalar_type() == ScalarType::Float &&
-         input.scalar_type() == ScalarType::Half),
+         input_dtype == ScalarType::Half),
         "expected input and grad types to match, or input to be at::Half and grad to be at::Float");
   }
   host_softmax_backward<LogSoftMaxBackwardEpilogue,true>(grad, output, dim, half_to_float, grad_input);
@@ -930,13 +929,13 @@ TORCH_IMPL_FUNC(softmax_backward_cuda_out)
 (const Tensor& grad,
  const Tensor& output,
  int64_t dim,
- const Tensor& input,
+ ScalarType input_dtype,
  const Tensor& grad_input) {
-  bool half_to_float = grad.scalar_type() != input.scalar_type();
+  bool half_to_float = grad.scalar_type() != input_dtype;
   if (half_to_float) {
     TORCH_CHECK(
         (grad.scalar_type() == ScalarType::Float &&
-         input.scalar_type() == ScalarType::Half),
+         input_dtype == ScalarType::Half),
         "expected input and grad types to match, or input to be at::Half and grad to be at::Float");
   }
   Tensor tmp = grad * output;
