@@ -8,11 +8,11 @@ from typing import Callable, Dict, Union, List, Optional
 import torch
 import torch.fx.experimental.optimization as optimization
 from torch.fx._symbolic_trace import symbolic_trace
-from torch.fx.experimental import graph_manipulation
 from torch.fx.experimental import merge_matmul
 from torch.fx.experimental.accelerator_partitioner import Partitioner
 from torch.fx.experimental.normalize import NormalizeOperators, NormalizeArgs
-from torch.fx.experimental.param_fetch import lift_lowering_attrs_to_nodes
+from torch.fx.passes import graph_manipulation
+from torch.fx.passes.param_fetch import lift_lowering_attrs_to_nodes
 from torch.fx.experimental.partitioner_utils import (
     NodeLatency,
     get_partition_to_latency_mapping,

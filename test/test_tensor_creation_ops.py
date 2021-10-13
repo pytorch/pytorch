@@ -11,12 +11,12 @@ import random
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, do_test_empty_full, TEST_WITH_ROCM, suppress_warnings,
-    torch_to_numpy_dtype_dict, skipIfTBB, slowTest,
+    torch_to_numpy_dtype_dict, slowTest,
     TEST_SCIPY, IS_MACOS, IS_PPC, IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, deviceCountAtLeast, onlyOnCPUAndCUDA,
     onlyCPU, largeTensorTest, precisionOverride, dtypes,
-    onlyCUDA, skipCPUIf, dtypesIfCUDA, dtypesIfCPU, skipMeta)
+    onlyCUDA, skipCPUIf, dtypesIfCUDA, dtypesIfCPU, skipMeta, get_all_device_types)
 from torch.testing._internal.common_dtype import (
     get_all_dtypes, get_all_math_dtypes, get_all_int_dtypes, get_all_fp_dtypes, get_all_complex_dtypes
 )
@@ -1205,7 +1205,6 @@ class TestTensorCreation(TestCase):
         self.assertRaises(RuntimeError, lambda: torch.zeros((2, 3), device=device, dtype=torch.float32, out=d))
 
     # TODO: update to work on CUDA, too
-    @skipIfTBB("This test makes TBB sad, see https://github.com/pytorch/pytorch/issues/64571")
     @onlyCPU
     def test_trilu_indices(self, device):
         for test_args in tri_tests_args:
@@ -1409,12 +1408,12 @@ class TestTensorCreation(TestCase):
 
     def test_meshgrid_unsupported_indexing(self):
         with self.assertRaisesRegex(RuntimeError,
-                                    'only "ij" indexing is supported'):
+                                    'indexing must be one of "xy" or "ij"'):
             torch.meshgrid(torch.tensor([1, 2]), indexing='')
 
     def test_meshgrid_non_1d_tensor(self):
         with self.assertRaisesRegex(RuntimeError,
-                                    'Expected scalar or 1D tensor'):
+                                    'Expected 0D or 1D tensor'):
             torch.meshgrid(torch.tensor([[1, 2], [3, 4]]))
 
     def test_meshgrid_inconsistent_dtype(self):
@@ -1453,6 +1452,32 @@ class TestTensorCreation(TestCase):
         expected_grid_c = torch.tensor([[[1, 2],
                                          [1, 2],
                                          [1, 2]]], device=device)
+        self.assertTrue(grid_a.equal(expected_grid_a))
+        self.assertTrue(grid_b.equal(expected_grid_b))
+        self.assertTrue(grid_c.equal(expected_grid_c))
+        self.assertTrue(grid_a2.equal(expected_grid_a))
+        self.assertTrue(grid_b2.equal(expected_grid_b))
+        self.assertTrue(grid_c2.equal(expected_grid_c))
+
+    def test_meshgrid_xy_indexing(self, device):
+        a = torch.tensor(1, device=device)
+        b = torch.tensor([1, 2, 3], device=device)
+        c = torch.tensor([1, 2], device=device)
+        grid_a, grid_b, grid_c = torch.meshgrid([a, b, c], indexing='xy')
+        self.assertEqual(grid_a.shape, torch.Size([3, 1, 2]))
+        self.assertEqual(grid_b.shape, torch.Size([3, 1, 2]))
+        self.assertEqual(grid_c.shape, torch.Size([3, 1, 2]))
+        grid_a2, grid_b2, grid_c2 = torch.meshgrid(a, b, c, indexing='xy')
+        self.assertEqual(grid_a2.shape, torch.Size([3, 1, 2]))
+        self.assertEqual(grid_b2.shape, torch.Size([3, 1, 2]))
+        self.assertEqual(grid_c2.shape, torch.Size([3, 1, 2]))
+        expected_grid_a = torch.ones(3, 1, 2, dtype=torch.int64, device=device)
+        expected_grid_b = torch.tensor([[[1, 1]],
+                                        [[2, 2]],
+                                        [[3, 3]]], device=device)
+        expected_grid_c = torch.tensor([[[1, 2]],
+                                        [[1, 2]],
+                                        [[1, 2]]], device=device)
         self.assertTrue(grid_a.equal(expected_grid_a))
         self.assertTrue(grid_b.equal(expected_grid_b))
         self.assertTrue(grid_c.equal(expected_grid_c))
@@ -1523,9 +1548,14 @@ class TestTensorCreation(TestCase):
             # No indexing in PyTorch corresponds to "ij" indexing in
             # NumPy.
             ({}, {'indexing': 'ij'}),
-            # "ij" is implemented identically in both.
+
+            # No indexing in NumPy corresponds to "xy" indexing in
+            # PyTorch.
+            ({'indexing': 'xy'}, {}),
+
+            # "ij" and "xy" are implemented identically in both.
             ({'indexing': 'ij'}, {'indexing': 'ij'}),
-            # TODO Test "xy" when it is supported in PyTorch.
+            ({'indexing': 'xy'}, {'indexing': 'xy'}),
         ]
         for shapes, (torch_kwargs, numpy_kwargs) in product(cases, indexing_correspondence):
             with self.subTest(shapes=shapes, torch_kwargs=torch_kwargs, numpy_kwargs=numpy_kwargs):
@@ -2500,7 +2530,7 @@ class TestTensorCreation(TestCase):
         self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(0, float('inf')))
         self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(float('inf')))
 
-        for device in torch.testing.get_all_device_types():
+        for device in get_all_device_types():
             self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(-5, float('nan'), device=device))
             # check with step size
             self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(0, float('-inf'), -1, device=device))
@@ -3226,6 +3256,10 @@ class TestRandomTensorCreation(TestCase):
             self.assertEqual(t_transform(r[50:]).mean(), 1, atol=0.2, rtol=0)
             self.assertEqual(t_transform(r[:, :50]).std(), std_transform(4), atol=0.3, rtol=0)
             self.assertEqual(t_transform(r[:, 50:]).std(), std_transform(1), atol=0.2, rtol=0)
+
+            # test empty mean/std
+            out = torch.normal(mean=torch.empty((0, 2)), std=torch.empty((0, 1)))
+            self.assertEqual(out.size(), torch.Size([0, 2]))
 
             r.fill_(42)
             r = torch.normal(2, 3, (100, 100), dtype=dtype, device=device)

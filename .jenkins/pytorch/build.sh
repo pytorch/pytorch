@@ -12,7 +12,7 @@ COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-if [[ "$BUILD_ENVIRONMENT" == *-linux-xenial-py3-clang7-asan* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-clang7-asan* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" "$@"
 fi
 
@@ -24,7 +24,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-mobile-code-analysis* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile-code-analysis.sh" "$@"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *linux-xenial-cuda11.1* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *linux-xenial-cuda11.3* ]]; then
   # Enabling DEPLOY build (embedded torch python interpreter, experimental)
   # only on one config for now, can expand later
   export USE_DEPLOY=ON
@@ -47,11 +47,6 @@ cmake --version
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   echo "NVCC version:"
   nvcc --version
-fi
-
-if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
-  # enable build option in CMake
-  export USE_CPP_CODE_COVERAGE=ON
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
@@ -136,7 +131,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   exec ./scripts/build_android.sh "${build_args[@]}" "$@"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" != *android* && "$BUILD_ENVIRONMENT" == *vulkan-linux* ]]; then
+if [[ "$BUILD_ENVIRONMENT" != *android* && "$BUILD_ENVIRONMENT" == *vulkan* ]]; then
   export USE_VULKAN=1
   # shellcheck disable=SC1091
   source /var/lib/jenkins/vulkansdk/setup-env.sh
@@ -255,6 +250,8 @@ else
     if which sccache > /dev/null; then
       echo 'PyTorch Build Statistics'
       sccache --show-stats
+
+      sccache --show-stats | python -m tools.stats.upload_sccache_stats
     fi
 
     assert_git_not_dirty

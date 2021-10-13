@@ -2,6 +2,8 @@
 import operator
 
 import torch  # isort:skip
+from typing import Sequence, Optional, List, cast
+
 import torch.fx.experimental.fx_acc.acc_utils as acc_utils
 import torch.nn as nn
 from torch.fx.experimental.fx_acc.acc_normalizer import (
@@ -9,11 +11,12 @@ from torch.fx.experimental.fx_acc.acc_normalizer import (
     register_acc_op_mapping,
     register_custom_acc_mapper_fn,
 )
+from torch.fx.experimental.fx_acc.acc_op_properties import AccOpProperty, register_acc_op_properties
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 
-from typing import Sequence, Optional, List
-
 this_arg_is_optional = True
+move_to_qparams = True
+dont_move_to_qparams = False
 
 
 @register_acc_op_mapping(op_and_target=("call_function", nn.functional.linear))
@@ -25,12 +28,13 @@ def linear(*, input, weight, bias):
 @register_acc_op
 def quantized_linear(*, input, weight, bias, acc_out_ty=None):
     assert acc_out_ty is not None
+    qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
     return nn.quantized.functional.linear(
         input,
         weight,
         bias,
-        acc_utils.get_field_from_acc_out_ty(acc_out_ty, "q_scale"),
-        acc_utils.get_field_from_acc_out_ty(acc_out_ty, "q_zero_point"),
+        qparams["scale"],
+        qparams["zero_point"],
     )
 
 
@@ -167,6 +171,7 @@ def tensor_size_mapper(node: torch.fx.Node, _: nn.Module) -> torch.fx.Node:
         return getitem_node
 
 
+@register_acc_op_properties(AccOpProperty.pointwise)
 @register_acc_op_mapping(op_and_target=("call_function", operator.add))
 @register_acc_op_mapping(op_and_target=("call_method", "add"))
 @register_acc_op
@@ -180,6 +185,10 @@ def add(*, input, other):
 def unsqueeze(*, input, dim):
     return torch.unsqueeze(**locals())
 
+@register_acc_op_mapping(op_and_target=("call_function", torch.tile))
+@register_acc_op
+def tile(*, input, dims):
+    return torch.tile(**locals())
 
 @register_custom_acc_mapper_fn(
     op_and_target=("call_function", torch.stack),
@@ -214,6 +223,7 @@ def stack_mapper(node: torch.fx.Node, _: nn.Module) -> torch.fx.Node:
         return cat_node
 
 
+@register_acc_op_properties(AccOpProperty.pointwise)
 @register_acc_op_mapping(op_and_target=("call_function", torch.clamp))
 @register_acc_op_mapping(op_and_target=("call_method", "clamp"))
 @register_acc_op
@@ -227,13 +237,47 @@ def cat(*, tensors, dim):
     return torch.cat(**locals())
 
 
-@register_acc_op_mapping(op_and_target=("call_function", torch.transpose))
-@register_acc_op_mapping(op_and_target=("call_method", "transpose"))
-@register_acc_op
-def transpose(*, input, dim0, dim1):
-    if input.dim() < 2:
-        return input
-    return torch.transpose(**locals())
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_function", torch.transpose),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        ("dim0", "dim0"),
+        ("dim1", "dim1"),
+    ],
+)
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_method", "transpose"),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        ("dim0", "dim0"),
+        ("dim1", "dim1"),
+    ],
+)
+def transpose_mapper(node: torch.fx.Node, _: nn.Module) -> torch.fx.Node:
+    # Get the dim-permutation/shuffle
+    shape_as_list = node.meta["tensor_meta"].shape
+    ranks = len(shape_as_list)
+    shuffle = list(i for i in range(ranks))
+    dim0 = cast(int, node.kwargs["dim0"])
+    dim1 = cast(int, node.kwargs["dim1"])
+    shuffle[dim0] = dim1
+    shuffle[dim1] = dim0
+
+    # Create the new acc_ops.permute node. Update all uses of the transpose
+    # node and then delete the transpose node.
+    with node.graph.inserting_after(node):
+        permute_node = node.graph.call_function(
+            the_function=permute,
+            kwargs={
+                "input": node.kwargs.get("input"),
+                "permutation": shuffle,
+            },
+        )
+        permute_node.meta = node.meta.copy()
+        node.replace_all_uses_with(permute_node)
+
+    permute_node.graph.erase_node(node)
+    return permute_node
 
 
 @register_acc_op_mapping(op_and_target=("call_method", "contiguous"))
@@ -311,12 +355,14 @@ def addmm_mapper(node: torch.fx.Node, _: nn.Module) -> torch.fx.Node:
     ],
 )
 def t_mapper(node: torch.fx.Node, _: nn.Module):
+    ranks = len(node.meta["tensor_meta"].shape)
+    shuffle = [1, 0] if (ranks > 1) else [0]
+
     with node.graph.inserting_before(node):
         new_node = node.graph.create_node(
             "call_function",
-            transpose,
-            kwargs={"input": node.kwargs["input"], "dim0": 0, "dim1": 1},
-            name=node.name,
+            permute,
+            kwargs={"input": node.kwargs["input"], "permutation": shuffle},
         )
         new_node.meta = node.meta.copy()
         return new_node
@@ -362,8 +408,13 @@ def square_mapper(node: torch.fx.Node, _: nn.Module) -> torch.fx.Node:
 def matmul(*, input, other):
     return torch.matmul(**locals())
 
+
 @register_custom_acc_mapper_fn(
     op_and_target=("call_function", nn.functional.dropout),
+    arg_replacement_tuples=[("input", "input")],
+)
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_method", "detach"),
     arg_replacement_tuples=[("input", "input")])
 def dropout_mapper(node: torch.fx.Node, mod: nn.Module):
     """
@@ -371,6 +422,45 @@ def dropout_mapper(node: torch.fx.Node, mod: nn.Module):
     """
     return node.kwargs["input"]
 
+@register_acc_op_properties(AccOpProperty.pointwise)
+@register_acc_op_mapping(
+    op_and_target=("call_function", nn.functional.hardtanh),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        ("min_val", "left"),
+        ("max_val", "right"),
+    ],
+)
+@register_acc_op
+def hardtanh(*, input, left, right):
+    return nn.functional.hardtanh(input, min_val=left, max_val=right)
+
+@register_acc_op_properties(AccOpProperty.pointwise)
+@register_acc_op_mapping(
+    op_and_target=("call_function", nn.functional.hardsigmoid))
+@register_acc_op
+def hardsigmoid(*, input):
+    return nn.functional.hardsigmoid(input)
+
+@register_acc_op_properties(AccOpProperty.pointwise)
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_function", nn.functional.hardswish),
+    arg_replacement_tuples=[
+        ("input", "input"),
+    ],
+)
+def hardswish_mapper(node: torch.fx.Node, _: nn.Module) -> torch.fx.Node:
+    input_node = node.kwargs["input"]
+    with node.graph.inserting_before(node):
+        new_sigmoid_node = node.graph.call_function(
+            hardsigmoid, kwargs={"input": input_node}
+        )
+        new_sigmoid_node.meta = node.meta.copy()
+        new_node = node.graph.call_function(
+            mul, kwargs={"input": new_sigmoid_node, "other": input_node}
+        )
+        new_node.meta = node.meta.copy()
+        return new_node
 
 @register_acc_op_mapping(
     op_and_target=("call_function", torch.ops.quantized.add),
@@ -381,18 +471,19 @@ def dropout_mapper(node: torch.fx.Node, mod: nn.Module):
         ("zero_point", "zero_point"),
     ],
     kwargs_to_move_to_acc_out_ty=[
-        ("scale", "q_scale"),
-        ("zero_point", "q_zero_point"),
+        ("scale", "scale", move_to_qparams),
+        ("zero_point", "zero_point", move_to_qparams),
     ],
 )
 @register_acc_op
 def quantized_add(*, input, other, acc_out_ty=None):
     assert acc_out_ty is not None
+    qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
     return torch.ops.quantized.add(
         input,
         other,
-        acc_utils.get_field_from_acc_out_ty(acc_out_ty, "q_scale"),
-        acc_utils.get_field_from_acc_out_ty(acc_out_ty, "q_zero_point"),
+        qparams["scale"],
+        qparams["zero_point"],
     )
 
 
@@ -405,20 +496,20 @@ def quantized_add(*, input, other, acc_out_ty=None):
         ("zero_point", "zero_point"),
     ],
     kwargs_to_move_to_acc_out_ty=[
-        ("scale", "q_scale"),
-        ("zero_point", "q_zero_point"),
+        ("scale", "scale", move_to_qparams),
+        ("zero_point", "zero_point", move_to_qparams),
     ],
 )
 @register_acc_op
 def quantized_mul(*, input, other, acc_out_ty=None):
     assert acc_out_ty is not None
+    qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
     return torch.ops.quantized.mul(
         input,
         other,
-        acc_utils.get_field_from_acc_out_ty(acc_out_ty, "q_scale"),
-        acc_utils.get_field_from_acc_out_ty(acc_out_ty, "q_zero_point"),
+        qparams["scale"],
+        qparams["zero_point"],
     )
-
 
 @register_acc_op_mapping(
     op_and_target=("call_function", torch.quantize_per_tensor),
@@ -426,31 +517,60 @@ def quantized_mul(*, input, other, acc_out_ty=None):
         ("input", "input"),
         ("scale", "scale"),
         ("zero_point", "zero_point"),
-        ("dtype", "dtype"),
+        ("dtype", "dtype")
     ],
     kwargs_to_move_to_acc_out_ty=[
-        ("dtype", "dtype"),
-        ("scale", "q_scale"),
-        ("zero_point", "q_zero_point"),
+        ("scale", "scale", move_to_qparams),
+        ("zero_point", "zero_point", move_to_qparams),
+        ("dtype", "dtype", dont_move_to_qparams),
     ],
 )
 @register_acc_op
 def quantize_per_tensor(*, input, acc_out_ty=None):
     assert acc_out_ty is not None
+    qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
+    dtype = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "dtype")
     return torch.quantize_per_tensor(
         input,
-        acc_utils.get_field_from_acc_out_ty(acc_out_ty, "q_scale"),
-        acc_utils.get_field_from_acc_out_ty(acc_out_ty, "q_zero_point"),
-        acc_utils.get_field_from_acc_out_ty(acc_out_ty, "dtype"),
+        qparams["scale"],
+        qparams["zero_point"],
+        dtype
     )
 
 
+@register_acc_op_mapping(
+    op_and_target=("call_function", torch.quantize_per_channel),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        ("scales", "scales"),
+        ("zero_points", "zero_points"),
+        ("axis", "axis"),
+        ("dtype", "dtype")
+    ],
+    kwargs_to_move_to_acc_out_ty=[
+        ("scales", "scale", move_to_qparams),
+        ("zero_points", "zero_point", move_to_qparams),
+        ("axis", "axis", move_to_qparams),
+        ("dtype", "dtype", dont_move_to_qparams),
+    ],
+)
 @register_acc_op
-def dequantize(*, input, input_tensor_meta):
-    """`input_tensor_meta` contains extra argument of quantization
-    parameters, e.g. scale/zero_point and will be using for
-    lowring dequantize op to TensorRT
-    """
+def quantize_per_channel(*, input, acc_out_ty=None):
+    assert acc_out_ty is not None
+    qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
+    dtype = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "dtype")
+    return torch.quantize_per_tensor(
+        input,
+        qparams["scale"],
+        qparams["zero_point"],
+        qparams["axis"],
+        dtype)  # type: ignore[call-overload]
+
+
+@register_acc_op_mapping(op_and_target=("call_method", "dequantize"))
+@register_acc_op_mapping(op_and_target=("call_function", torch.dequantize))
+@register_acc_op
+def dequantize(*, input):
     return torch.dequantize(input)
 
 
@@ -460,13 +580,16 @@ def sub(*, input, other):
     return input - other
 
 
+@register_acc_op_properties(AccOpProperty.pointwise)
 @register_acc_op_mapping(op_and_target=("call_function", torch.mul))
 @register_acc_op_mapping(op_and_target=("call_function", operator.mul))
+@register_acc_op_mapping(op_and_target=("call_method", "mul"))
 @register_acc_op
 def mul(*, input, other):
     return input * other
 
 
+@register_acc_op_properties(AccOpProperty.pointwise)
 @register_acc_op_mapping(op_and_target=("call_function", operator.truediv))
 @register_acc_op
 def div(*, input, other):
@@ -479,6 +602,7 @@ def pow(*, input, exponent):
     return torch.pow(input, exponent)
 
 
+@register_acc_op_properties(AccOpProperty.pointwise)
 @register_acc_op_mapping(op_and_target=("call_function", nn.functional.relu))
 @register_acc_op_mapping(
     op_and_target=("call_function", torch.relu),
@@ -546,8 +670,6 @@ def sum(*, input, dim=None, keepdim=False, dtype=None):
         return input.sum(dtype=dtype)
 
 
-
-
 @register_custom_acc_mapper_fn(
     op_and_target=("call_method", "max"),
     arg_replacement_tuples=[
@@ -580,7 +702,9 @@ def sum(*, input, dim=None, keepdim=False, dtype=None):
         ("keepdim", "keepdim", this_arg_is_optional),
     ],
 )
-def add_maximum_minimum_mapper(node: torch.fx.Node, mod: torch.fx.GraphModule) -> torch.fx.Node:
+def add_maximum_minimum_mapper(
+    node: torch.fx.Node, mod: torch.fx.GraphModule
+) -> torch.fx.Node:
     # there are effectively three versions of torch.max / torch.min
     # full reduce: torch.max(input) -> Tensor
     # dimensional reduce: torch.max(input, dim, keepdim=False, *, out=None) -> (Tensor, LongTensor)
@@ -591,33 +715,37 @@ def add_maximum_minimum_mapper(node: torch.fx.Node, mod: torch.fx.GraphModule) -
     # to lookup the right function
     def target_map(op, target):
         if (op, target) in (("call_method", "max"), ("call_function", torch.max)):
-            return dict(full_reduce=max_full_reduce,
-                        dim_reduce=max_dim_reduce,
-                        elementwise=maximum)
+            return dict(
+                full_reduce=max_full_reduce,
+                dim_reduce=max_dim_reduce,
+                elementwise=maximum,
+            )
         elif (op, target) in (("call_method", "min"), ("call_function", torch.min)):
-            return dict(full_reduce=min_full_reduce,
-                        dim_reduce=min_dim_reduce,
-                        elementwise=minimum)
+            return dict(
+                full_reduce=min_full_reduce,
+                dim_reduce=min_dim_reduce,
+                elementwise=minimum,
+            )
 
     with node.graph.inserting_before(node):
         new_targets = target_map(node.op, node.target)
         max_kwargs = dict()
-        max_kwargs['input'] = node.kwargs['input']
-        if ("dim_or_other" not in node.kwargs) or (node.kwargs['dim_or_other'] is None):
+        max_kwargs["input"] = node.kwargs["input"]
+        if ("dim_or_other" not in node.kwargs) or (node.kwargs["dim_or_other"] is None):
             nt = new_targets["full_reduce"]
             max_node = node.graph.call_function(nt, kwargs=max_kwargs)
-        elif isinstance(node.kwargs['dim_or_other'], int):
+        elif isinstance(node.kwargs["dim_or_other"], int):
             nt = new_targets["dim_reduce"]
             dim = node.kwargs["dim_or_other"]
-            max_kwargs['dim'] = dim
-            max_kwargs['keepdim'] = node.kwargs.get('keepdim', False)
+            max_kwargs["dim"] = dim
+            max_kwargs["keepdim"] = node.kwargs.get("keepdim", False)
             max_node = node.graph.call_function(nt, kwargs=max_kwargs)
         else:
             other = node.kwargs["dim_or_other"]
             assert isinstance(other, torch.fx.Node)
             # Lowering path for when provided "other", where we do elem-wise max
             nt = new_targets["elementwise"]
-            max_kwargs['other'] = other
+            max_kwargs["other"] = other
             max_node = node.graph.call_function(nt, kwargs=max_kwargs)
         max_node.meta = node.meta.copy()
         return max_node
@@ -627,9 +755,11 @@ def add_maximum_minimum_mapper(node: torch.fx.Node, mod: torch.fx.GraphModule) -
 def max_full_reduce(*, input):
     return torch.max(**locals())
 
+
 @register_acc_op
 def max_dim_reduce(*, input, dim=None, keepdim=False):
     return torch.max(**locals())
+
 
 @register_acc_op_mapping(op_and_target=("call_function", torch.maximum))
 @register_acc_op_mapping(op_and_target=("call_method", "maximum"))
@@ -637,13 +767,16 @@ def max_dim_reduce(*, input, dim=None, keepdim=False):
 def maximum(*, input, other):
     return torch.maximum(**locals())
 
+
 @register_acc_op
 def min_full_reduce(*, input):
     return torch.min(input)
 
+
 @register_acc_op
 def min_dim_reduce(*, input, dim=None, keepdim=False):
     return torch.min(input, dim=dim, keepdim=keepdim)
+
 
 @register_acc_op_mapping(op_and_target=("call_function", torch.minimum))
 @register_acc_op_mapping(op_and_target=("call_method", "minimum"))
@@ -652,6 +785,7 @@ def minimum(*, input, other):
     return torch.minimum(**locals())
 
 
+@register_acc_op_properties(AccOpProperty.pointwise)
 @register_acc_op_mapping(op_and_target=("call_function", torch.sigmoid))
 @register_acc_op_mapping(op_and_target=("call_method", "sigmoid"))
 @register_acc_op
@@ -659,84 +793,99 @@ def sigmoid(*, input):
     return torch.sigmoid(**locals())
 
 
+@register_acc_op_properties(AccOpProperty.pointwise)
 @register_acc_op_mapping(op_and_target=("call_function", torch.sinh))
 @register_acc_op
 def sinh(*, input):
     return torch.sinh(**locals())
 
 
+@register_acc_op_properties(AccOpProperty.pointwise)
 @register_acc_op_mapping(op_and_target=("call_function", torch.cosh))
 @register_acc_op
 def cosh(*, input):
     return torch.cosh(**locals())
 
 
+@register_acc_op_properties(AccOpProperty.pointwise)
 @register_acc_op_mapping(op_and_target=("call_function", torch.tanh))
+@register_acc_op_mapping(op_and_target=("call_method", "tanh"))
 @register_acc_op
 def tanh(*, input):
     return torch.tanh(**locals())
 
 
+@register_acc_op_properties(AccOpProperty.pointwise)
 @register_acc_op_mapping(op_and_target=("call_function", torch.asin))
 @register_acc_op
 def asin(*, input):
     return torch.asin(**locals())
 
 
+@register_acc_op_properties(AccOpProperty.pointwise)
 @register_acc_op_mapping(op_and_target=("call_function", torch.acos))
 @register_acc_op
 def acos(*, input):
     return torch.acos(**locals())
 
 
+@register_acc_op_properties(AccOpProperty.pointwise)
 @register_acc_op_mapping(op_and_target=("call_function", torch.atan))
 @register_acc_op
 def atan(*, input):
     return torch.atan(**locals())
 
 
+@register_acc_op_properties(AccOpProperty.pointwise)
 @register_acc_op_mapping(op_and_target=("call_function", torch.exp))
 @register_acc_op
 def exp(*, input):
     return torch.exp(**locals())
 
 
+@register_acc_op_properties(AccOpProperty.pointwise)
 @register_acc_op_mapping(op_and_target=("call_function", torch.log))
 @register_acc_op
 def log(*, input):
     return torch.log(**locals())
 
 
+@register_acc_op_properties(AccOpProperty.pointwise)
 @register_acc_op_mapping(op_and_target=("call_function", torch.sqrt))
 @register_acc_op
 def sqrt(*, input):
     return torch.sqrt(**locals())
 
 
+@register_acc_op_properties(AccOpProperty.pointwise)
 @register_acc_op_mapping(op_and_target=("call_function", torch.reciprocal))
 @register_acc_op
 def reciprocal(*, input):
     return torch.reciprocal(**locals())
 
 
+@register_acc_op_properties(AccOpProperty.pointwise)
 @register_acc_op_mapping(op_and_target=("call_function", torch.abs))
 @register_acc_op
 def abs(*, input):
     return torch.abs(**locals())
 
 
+@register_acc_op_properties(AccOpProperty.pointwise)
 @register_acc_op_mapping(op_and_target=("call_function", torch.neg))
 @register_acc_op
 def neg(*, input):
     return torch.neg(**locals())
 
 
+@register_acc_op_properties(AccOpProperty.pointwise)
 @register_acc_op_mapping(op_and_target=("call_function", torch.floor))
 @register_acc_op
 def floor(*, input):
     return torch.floor(**locals())
 
 
+@register_acc_op_properties(AccOpProperty.pointwise)
 @register_acc_op_mapping(op_and_target=("call_function", torch.ceil))
 @register_acc_op
 def ceil(*, input):
@@ -763,6 +912,7 @@ def quantized_conv2d(
     acc_out_ty=None,
 ):
     assert acc_out_ty is not None
+    qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
     return torch.nn.quantized.functional.conv2d(
         input,
         weight,
@@ -772,8 +922,8 @@ def quantized_conv2d(
         dilation,
         groups,
         padding_mode,
-        acc_utils.get_field_from_acc_out_ty(acc_out_ty, "q_scale"),
-        acc_utils.get_field_from_acc_out_ty(acc_out_ty, "q_zero_point"),
+        qparams["scale"],
+        qparams["zero_point"],
     )
 
 
@@ -944,14 +1094,15 @@ def tuple_construct(*, tensors):
         ("zero_point", "zero_point"),
     ],
     kwargs_to_move_to_acc_out_ty=[
-        ("scale", "q_scale"),
-        ("zero_point", "q_zero_point"),
+        ("scale", "scale", move_to_qparams),
+        ("zero_point", "zero_point", move_to_qparams),
     ],
 )
 @register_acc_op
 def quantized_batch_norm2d(
     *, input, running_mean, running_var, weight, bias, eps, acc_out_ty
 ):
+    qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
     return torch.ops.quantized.batch_norm2d(
         input,
         weight,
@@ -959,8 +1110,8 @@ def quantized_batch_norm2d(
         running_mean,
         running_var,
         eps,
-        acc_utils.get_field_from_acc_out_ty(acc_out_ty, "q_scale"),
-        acc_utils.get_field_from_acc_out_ty(acc_out_ty, "q_zero_point"),
+        qparams["scale"],
+        qparams["zero_point"],
     )
 
 
@@ -1027,18 +1178,21 @@ def embedding_bag_4bit_rowwise_offsets(
     return torch.ops.quantized.embedding_bag_4bit_rowwise_offsets(**locals())
 
 
+@register_acc_op_properties(AccOpProperty.pointwise)
 @register_acc_op_mapping(op_and_target=("call_function", torch.sin))
 @register_acc_op
 def sin(*, input):
     return torch.sin(**locals())
 
 
+@register_acc_op_properties(AccOpProperty.pointwise)
 @register_acc_op_mapping(op_and_target=("call_function", torch.cos))
 @register_acc_op
 def cos(*, input):
     return torch.cos(**locals())
 
 
+@register_acc_op_properties(AccOpProperty.pointwise)
 @register_acc_op_mapping(op_and_target=("call_function", torch.tan))
 @register_acc_op
 def tan(*, input):
@@ -1092,7 +1246,9 @@ def slice_tensor(*, input, dims, starts, stops, steps):
     ],
 )
 def custom_narrow_mapper(node: torch.fx.Node, mod: nn.Module) -> torch.fx.Node:
-    assert isinstance(node.kwargs["start"], int) and isinstance(node.kwargs["length"], int)
+    assert isinstance(node.kwargs["start"], int) and isinstance(
+        node.kwargs["length"], int
+    )
     kwargs = {
         "input": node.kwargs["input"],
         "dims": (node.kwargs["dim"],),
@@ -1163,6 +1319,7 @@ def custom_tensor_reshape_mapper(node: torch.fx.Node, _: nn.Module) -> torch.fx.
         return new_node
 
 
+@register_acc_op_properties(AccOpProperty.pointwise)
 @register_acc_op
 def to_dtype(input, acc_out_ty=None):
     assert acc_out_ty is not None, "valid acc_out_ty needed"
@@ -1278,13 +1435,17 @@ def packed_quantized_linear_mapper(
                 linear_module.bias()
             )
 
+        qparams = {
+            "scale": linear_module.scale,
+            "zero_point": linear_module.zero_point
+        }
         # Create kwargs for acc_op.quantized_linear
         kwargs = {
             "input": node.kwargs["input"],
             "weight": get_weight,
             "bias": get_bias,
             "acc_out_ty": acc_utils.build_raw_tensor_meta(
-                q_scale=linear_module.scale, q_zero_point=linear_module.zero_point
+                qparams=qparams
             ),
         }
 
@@ -1327,6 +1488,11 @@ def packed_quantized_conv2d_mapper(
             get_bias = node.graph.get_attr(bias_name)
             get_bias.meta["tensor_meta"] = _extract_tensor_metadata(conv_module.bias())
 
+        qparams = {
+            "scale": conv_module.scale,
+            "zero_point": conv_module.zero_point
+        }
+
         # Create kwargs for acc_op.conv
         kwargs = {
             "input": node.kwargs["input"],
@@ -1338,7 +1504,7 @@ def packed_quantized_conv2d_mapper(
             "groups": conv_module.groups,
             "padding_mode": conv_module.padding_mode,
             "acc_out_ty": acc_utils.build_raw_tensor_meta(
-                q_scale=conv_module.scale, q_zero_point=conv_module.zero_point
+                qparams=qparams
             ),
         }
 
@@ -1360,12 +1526,15 @@ def add_relu_unfuse_mapper(
     node: torch.fx.Node, mod: torch.fx.GraphModule
 ) -> torch.fx.Node:
     with node.graph.inserting_before(node):
+        qparams = {
+            "scale": node.kwargs["scale"],
+            "zero_point": node.kwargs["zero_point"]
+        }
         add_kwargs = {
             "input": node.kwargs["input"],
             "other": node.kwargs["other"],
             "acc_out_ty": acc_utils.build_raw_tensor_meta(
-                q_scale=node.kwargs["scale"],
-                q_zero_point=node.kwargs["zero_point"],
+                qparams=qparams
             ),
         }
         add_node = node.graph.call_function(quantized_add, kwargs=add_kwargs)
@@ -1403,28 +1572,20 @@ def packed_quantized_convrelu2d_mapper(
         relu_node.meta = node.meta
         return relu_node
 
+@register_acc_op_mapping(op_and_target=("call_function", torch.nn.functional.gelu))
+@register_acc_op_mapping(op_and_target=("call_method", "gelu"))
+@register_acc_op
+def gelu(*, input):
+    return torch.nn.functional.gelu(**locals())
 
-@register_custom_acc_mapper_fn(
-    op_and_target=("call_function", torch.dequantize),
-    arg_replacement_tuples=[("input", "input")],
-)
-@register_custom_acc_mapper_fn(
-    op_and_target=("call_method", "dequantize"),
-    arg_replacement_tuples=[("input", "input")],
-)
-def custom_dequantize_mapper(node: torch.fx.Node, mod: nn.Module) -> torch.fx.Node:
-    assert isinstance(node.kwargs["input"], torch.fx.Node)
-    assert "tensor_meta" in node.kwargs["input"].meta
-    new_kwargs = {
-        "input": node.kwargs["input"],
-        "input_tensor_meta": node.kwargs["input"].meta["tensor_meta"],
-    }
-    # `input_tensor_meta` contains quantization parameters that can be used to lower
-    # acc_ops.dequantize to TensorRT ops
-    with node.graph.inserting_before(node):
-        new_node = node.graph.create_node(
-            "call_function", dequantize, kwargs=new_kwargs, name=node.name
-        )
-        assert isinstance(node, torch.fx.Node)
-        new_node.meta = node.meta
-        return new_node
+@register_acc_op_mapping(op_and_target=("call_function", torch.cumsum))
+@register_acc_op_mapping(op_and_target=("call_method", "cumsum"))
+@register_acc_op
+def cumsum(*, input, dim, dtype=None):
+    return torch.cumsum(**locals())
+
+@register_acc_op_mapping(op_and_target=("call_function", torch.chunk))
+@register_acc_op_mapping(op_and_target=("call_method", "chunk"))
+@register_acc_op
+def chunk(*, input, chunks, dim=0):
+    return torch.chunk(input, chunks, dim)
