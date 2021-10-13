@@ -268,6 +268,16 @@ unpack_quantized_prepacked_sizes_conv2d(const IValue& ivalue) {
       params->groups()));
 }
 
+torch::jit::RegisterOperators reg(
+    {torch::jit::OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("quantized::conv2d_unpack_sizes(Any W_prepack) -> ((int[], int[]?, int[], int[], int[], int))"),
+          [](Stack* stack) {
+            auto w = torch::jit::pop(stack);
+            torch::jit::push(stack, unpack_quantized_prepacked_sizes_conv2d(w));
+          },
+         c10::AliasAnalysisKind::FROM_SCHEMA)
+     });
+
 TORCH_LIBRARY_IMPL(quantized, CatchAll, m) {
   // conv_unpack is deprecated, please use conv2d_unpack for 2D conv.
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv_unpack"), TORCH_FN(QConvUnpackWeightsInt8<2>::run));
