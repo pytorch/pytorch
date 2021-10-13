@@ -3817,10 +3817,11 @@ def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False, **kw
     device = torch.device(device)
     if_cuda_and_no_cusolver = (device.type == 'cuda') and (dtype is not skipCUDAIfNoCusolver(dtype))
 
+    # MyPy detects type mismatch Tuple[str] != Tuple[str, str, str, str] at assignment, so we ignore it
     if device.type == 'cuda':
-        drivers = ('gels',)  # type: ignore
+        drivers = ('gels',)  # type: ignore[assignment]
     else:
-        drivers = ('gels', 'gelsy', 'gelss', 'gelsd')  # type: ignore
+        drivers = ('gels', 'gelsy', 'gelss', 'gelsd')  # type: ignore[assignment]
 
     out = []
     for batch, driver in product(((), (3,), (3, 3)), drivers):
