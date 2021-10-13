@@ -345,14 +345,14 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
     return inputs;
   } else if (n->kind() == prim::ListUnpack || n->kind() == prim::TupleUnpack) {
     // only propagate dequantize for Tensor
-    if (v->type()->isSubtypeOf(TensorType::get())) {
+    if (v->type()->isSubtypeOf(*TensorType::get())) {
       return {n->input(0)};
     } else {
       return {};
     }
   } else if (
       n->kind() == prim::ListConstruct &&
-      v->type()->isSubtypeOf(ListType::ofTensors())) {
+      v->type()->isSubtypeOf(*ListType::ofTensors())) {
     std::vector<Value*> inputs;
     for (auto* v : n->inputs()) {
       inputs.push_back(v);
@@ -361,7 +361,7 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
   } else if (n->kind() == prim::TupleConstruct) {
     std::vector<Value*> inputs;
     for (auto* input : n->inputs()) {
-      if (input->type()->isSubtypeOf(TensorType::get())) {
+      if (input->type()->isSubtypeOf(*TensorType::get())) {
         inputs.push_back(input);
       }
     }
@@ -560,8 +560,8 @@ bool alwaysRaisesException(Block* block) {
 // Check if a value in the graph is a Scalar value
 bool isScalar(Value* v) {
   auto iv = toIValue(v);
-  return v->type()->isSubtypeOf(NumberType::get()) ||
-      (v->type()->isSubtypeOf(TensorType::get()) && iv && iv->isTensor() &&
+  return v->type()->isSubtypeOf(*NumberType::get()) ||
+      (v->type()->isSubtypeOf(*TensorType::get()) && iv && iv->isTensor() &&
        iv->toTensor().dim() == 0);
 }
 

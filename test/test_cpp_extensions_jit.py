@@ -420,7 +420,7 @@ class TestCppExtensionJIT(common.TestCase):
         for the corresponding issue.
         """
         cuda_source = """
-        #include <THC/THCNumerics.cuh>
+        #include <THC/THCGeneral.h>
 
         template<typename T, typename U>
         __global__ void half_test_kernel(const T* input, U* output) {
