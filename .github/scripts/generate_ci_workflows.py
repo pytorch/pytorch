@@ -55,11 +55,11 @@ LABEL_CIFLOW_XLA = "ciflow/xla"
 LABEL_CIFLOW_NOARCH = "ciflow/noarch"
 LABEL_CIFLOW_VULKAN = "ciflow/vulkan"
 LABEL_CIFLOW_PREFIX = "ciflow/"
+LABEL_CIFLOW_SLOW_GRADCHECK = "ciflow/slow-gradcheck"
 
 
 @dataclass
 class CIFlowConfig:
-    enabled: bool = False
     # For use to enable workflows to run on pytorch/pytorch-canary
     run_on_canary: bool = False
     labels: Set[str] = field(default_factory=set)
@@ -78,6 +78,7 @@ class CIFlowConfig:
         self.label_conditions = ' || '.join(label_conditions)
         repo_condition = "github.repository_owner == 'pytorch'" if self.run_on_canary else "github.repository == 'pytorch/pytorch'"
         push_event = "github.event_name == 'push'"
+        scheduled_event = "github.event_name == 'schedule'"
         pr_updated_event = f"github.event_name == 'pull_request' && github.event.action != '{self.trigger_action}'"
         if LABEL_CIFLOW_DEFAULT in self.labels:
             run_with_no_labels = f"({pr_updated_event}) && " \
@@ -86,6 +87,7 @@ class CIFlowConfig:
             run_with_no_labels = "false"
         self.root_job_condition = f"${{{{ ({repo_condition}) && (\n" \
                                   f"            ({push_event}) ||\n" \
+                                  f"            ({scheduled_event}) ||\n" \
                                   f"            ({self.label_conditions}) ||\n" \
                                   f"            ({run_with_no_labels}))\n"\
                                   f"         }}}}"
@@ -95,9 +97,6 @@ class CIFlowConfig:
         self.root_job_condition = ''
 
     def __post_init__(self) -> None:
-        if not self.enabled:
-            self.reset_root_job()
-            return
         self.labels.add(LABEL_CIFLOW_ALL)
         assert all(label.startswith(LABEL_CIFLOW_PREFIX) for label in self.labels)
         self.gen_root_job_condition()
@@ -150,6 +149,7 @@ class CIWorkflow:
     only_run_smoke_tests_on_pull_request: bool = False
     num_test_shards_on_pull_request: int = -1
     distributed_test: bool = True
+    timeout_after: int = 240
 
     # The following variables will be set as environment variables,
     # so it's easier for both shell and Python scripts to consume it if false is represented as the empty string.
@@ -189,17 +189,19 @@ class CIWorkflow:
         if self.arch == 'windows':
             assert self.test_runner_type in WINDOWS_RUNNERS, err_message
 
-        if self.ciflow_config.enabled:
-            assert LABEL_CIFLOW_ALL in self.ciflow_config.labels
-            assert LABEL_CIFLOW_ALL in self.ciflow_config.label_conditions
-            if self.arch == 'linux':
-                assert LABEL_CIFLOW_LINUX in self.ciflow_config.labels
-            if self.arch == 'windows':
-                assert LABEL_CIFLOW_WIN in self.ciflow_config.labels
-            if self.test_runner_type in CUDA_RUNNERS:
-                assert LABEL_CIFLOW_CUDA in self.ciflow_config.labels
-            if self.test_runner_type in CPU_RUNNERS:
-                assert LABEL_CIFLOW_CPU in self.ciflow_config.labels
+        assert LABEL_CIFLOW_ALL in self.ciflow_config.labels
+        assert LABEL_CIFLOW_ALL in self.ciflow_config.label_conditions
+        if self.arch == 'linux':
+            assert LABEL_CIFLOW_LINUX in self.ciflow_config.labels
+        if self.arch == 'windows':
+            assert LABEL_CIFLOW_WIN in self.ciflow_config.labels
+        if self.test_runner_type in CUDA_RUNNERS:
+            assert LABEL_CIFLOW_CUDA in self.ciflow_config.labels
+        if self.test_runner_type in CPU_RUNNERS:
+            assert LABEL_CIFLOW_CPU in self.ciflow_config.labels
+        if self.is_scheduled:
+            assert LABEL_CIFLOW_DEFAULT not in self.ciflow_config.labels
+            assert LABEL_CIFLOW_SCHEDULED in self.ciflow_config.labels
 
     def generate_workflow_file(self, workflow_template: jinja2.Template) -> None:
         output_file_path = GITHUB_DIR / f"workflows/generated-{self.build_environment}.yml"
@@ -225,7 +227,6 @@ WINDOWS_WORKFLOWS = [
         test_runner_type=WINDOWS_CPU_TEST_RUNNER,
         num_test_shards=2,
         ciflow_config=CIFlowConfig(
-            enabled=True,
             run_on_canary=True,
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_CPU, LABEL_CIFLOW_WIN}
         ),
@@ -239,7 +240,6 @@ WINDOWS_WORKFLOWS = [
         only_run_smoke_tests_on_pull_request=True,
         enable_force_on_cpu_test=1,
         ciflow_config=CIFlowConfig(
-            enabled=True,
             run_on_canary=True,
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_WIN}
         ),
@@ -252,7 +252,6 @@ WINDOWS_WORKFLOWS = [
         num_test_shards=2,
         is_scheduled="45 0,4,8,12,16,20 * * *",
         ciflow_config=CIFlowConfig(
-            enabled=True,
             labels={LABEL_CIFLOW_SCHEDULED, LABEL_CIFLOW_WIN, LABEL_CIFLOW_CUDA}
         ),
     ),
@@ -270,7 +269,6 @@ LINUX_WORKFLOWS = [
         enable_backwards_compat_test=1,
         num_test_shards=2,
         ciflow_config=CIFlowConfig(
-            enabled=True,
             run_on_canary=True,
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU}
         ),
@@ -282,7 +280,6 @@ LINUX_WORKFLOWS = [
     #    docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
     #    test_runner_type=LINUX_CPU_TEST_RUNNER,
     #    ciflow_config=CIFlowConfig(
-    #        enabled=True,
     #        labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU},
     #    ),
     # ),
@@ -292,7 +289,6 @@ LINUX_WORKFLOWS = [
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         ciflow_config=CIFlowConfig(
-            enabled=True,
             labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU},
         ),
     ),
@@ -304,7 +300,6 @@ LINUX_WORKFLOWS = [
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         exclude_test=True,
         ciflow_config=CIFlowConfig(
-            enabled=True,
             labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU},
         ),
     ),
@@ -316,7 +311,6 @@ LINUX_WORKFLOWS = [
         num_test_shards=2,
         distributed_test=False,
         ciflow_config=CIFlowConfig(
-            enabled=True,
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_SANITIZERS, LABEL_CIFLOW_CPU},
         ),
     ),
@@ -328,7 +322,6 @@ LINUX_WORKFLOWS = [
         num_test_shards=2,
         distributed_test=False,
         ciflow_config=CIFlowConfig(
-            enabled=True,
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_ONNX, LABEL_CIFLOW_CPU},
         ),
     ),
@@ -339,7 +332,6 @@ LINUX_WORKFLOWS = [
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         num_test_shards=2,
         ciflow_config=CIFlowConfig(
-            enabled=True,
             run_on_canary=True,
             labels={LABEL_CIFLOW_SLOW, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA}
         ),
@@ -356,7 +348,6 @@ LINUX_WORKFLOWS = [
         enable_slow_test=1,
         num_test_shards=2,
         ciflow_config=CIFlowConfig(
-            enabled=True,
             labels=set([LABEL_CIFLOW_SLOW, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA]),
         ),
     ),
@@ -367,7 +358,6 @@ LINUX_WORKFLOWS = [
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         is_libtorch=True,
         ciflow_config=CIFlowConfig(
-            enabled=True,
             labels=set([LABEL_CIFLOW_LIBTORCH, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA]),
         ),
     ),
@@ -378,7 +368,6 @@ LINUX_WORKFLOWS = [
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         num_test_shards=2,
         ciflow_config=CIFlowConfig(
-            enabled=True,
             labels=set([LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA]),
         ),
     ),
@@ -389,7 +378,6 @@ LINUX_WORKFLOWS = [
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         is_libtorch=True,
         ciflow_config=CIFlowConfig(
-            enabled=True,
             labels=set([LABEL_CIFLOW_LIBTORCH, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA]),
         ),
     ),
@@ -401,7 +389,6 @@ LINUX_WORKFLOWS = [
         num_test_shards=2,
         is_scheduled="45 0,4,8,12,16,20 * * *",
         ciflow_config=CIFlowConfig(
-            enabled=True,
             labels={LABEL_CIFLOW_SCHEDULED, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA}
         ),
     ),
@@ -413,7 +400,6 @@ LINUX_WORKFLOWS = [
         is_libtorch=True,
         is_scheduled="45 0,4,8,12,16,20 * * *",
         ciflow_config=CIFlowConfig(
-            enabled=True,
             labels={LABEL_CIFLOW_SCHEDULED, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_LIBTORCH, LABEL_CIFLOW_CUDA},
         ),
     ),
@@ -426,7 +412,6 @@ LINUX_WORKFLOWS = [
         distributed_test=False,
         enable_noarch_test=1,
         ciflow_config=CIFlowConfig(
-            enabled=True,
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_XLA, LABEL_CIFLOW_NOARCH},
         ),
     ),
@@ -438,8 +423,21 @@ LINUX_WORKFLOWS = [
         num_test_shards=1,
         distributed_test=False,
         ciflow_config=CIFlowConfig(
-            enabled=True,
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_VULKAN},
+        ),
+    ),
+    CIWorkflow(
+        arch="linux",
+        build_environment="periodic-linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
+        test_runner_type=LINUX_CUDA_TEST_RUNNER,
+        num_test_shards=2,
+        distributed_test=False,
+        timeout_after=360,
+        # Only run this on master 4 times per day since it does take a while
+        is_scheduled="0 */4 * * *",
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_SLOW_GRADCHECK, LABEL_CIFLOW_SLOW, LABEL_CIFLOW_SCHEDULED},
         ),
     ),
 ]
@@ -452,7 +450,6 @@ BAZEL_WORKFLOWS = [
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         ciflow_config=CIFlowConfig(
-            enabled=True,
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_BAZEL, LABEL_CIFLOW_CPU, LABEL_CIFLOW_LINUX},
         ),
     ),
@@ -482,15 +479,7 @@ def main() -> None:
     for template, workflows in template_and_workflows:
         for workflow in workflows:
             workflow.generate_workflow_file(workflow_template=template)
-
-            if workflow.ciflow_config.enabled:
-                ciflow_ruleset.add_label_rule(workflow.ciflow_config.labels, workflow.build_environment)
-            else:
-                # If ciflow is disabled we can denote
-                # it as a special label LABEL_CIFLOW_DEFAULT in the ruleset, which will be later
-                # turned into an actual LABEL_CIFLOW_DEFAULT label in the workflow.
-                # During the rollout phase, it has the same effect as LABEL_CIFLOW_DEFAULT
-                ciflow_ruleset.add_label_rule({LABEL_CIFLOW_DEFAULT}, workflow.build_environment)
+            ciflow_ruleset.add_label_rule(workflow.ciflow_config.labels, workflow.build_environment)
     ciflow_ruleset.generate_json()
 
 

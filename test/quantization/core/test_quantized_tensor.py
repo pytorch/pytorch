@@ -180,35 +180,60 @@ class TestQuantizedTensor(TestCase):
                              "quantization_scheme=torch.per_tensor_affine, " +
                              "scale=1.0, zero_point=2)")
 
-    def test_qtensor_sub_byte(self):
-        num_elements = 10
+    def test_qtensor_int_repr(self):
+        # to catch edge case when num elements * bit rate < 8, make sure at lease allocate one byte to hold the int repr
+        num_elements = 1
+        device = torch.device('cpu')
         scale = 1.0
         zero_point = 2
-        for dtype in [torch.quint4x2]:
-            r = torch.ones((5, 2), dtype=torch.float)
-            qr = torch.quantize_per_tensor(r, scale, zero_point, dtype)
-            self.assertEqual(qr.q_scale(), scale)
-            self.assertEqual(qr.q_zero_point(), zero_point)
-            self.assertTrue(qr.is_quantized)
-            self.assertFalse(r.is_quantized)
-            self.assertEqual(qr.storage().size(), 5)
+        dtype = torch.quint2x4
+        r = torch.ones(num_elements, dtype=torch.float, device=device)
+        qr = torch.quantize_per_tensor(r, scale, zero_point, dtype)
+        int_repr = qr.int_repr()
+        self.assertEqual(int_repr.numel(), 1)
+        # Packed one entry looks like 00000011
+        self.assertEqual(int_repr[0], 3)
 
-            int_repr = qr.int_repr()
-            for num in int_repr[0:5]:
-                self.assertEqual(num, 51)  # Packed entries, each of value 3, i.e. 00110011
+    def test_qtensor_sub_byte_aligned_cols(self):
+        # Packed 4 entries, each of value 3, look like 00110011, 00110011 for torch.qunit4x2, or 11111111 for torch.quint2x4
+        self._test_qtensor_sub_byte(1, 4, torch.quint4x2, 2, [51, 51])
+        self._test_qtensor_sub_byte(1, 4, torch.quint2x4, 4, [255])
 
-            # Test tensor creation
-            q = torch._empty_affine_quantized([num_elements], scale=scale, zero_point=zero_point,
-                                              dtype=torch.quint4x2)
-            self.assertEqual(q.storage().size(), 5)
+    def test_qtensor_sub_byte_not_aligned_cols(self):
+        # Packed 5 entries, each of value 3, look like 00110011, 00110011, 00000011 for torch.qunit4x2,
+        # or 11111111, 00000011 for torch.quint2x4
+        self._test_qtensor_sub_byte(1, 5, torch.quint4x2, 2, [51, 51, 3])
+        self._test_qtensor_sub_byte(1, 5, torch.quint2x4, 4, [255, 3])
 
-            # Test save/load
-            with tempfile.NamedTemporaryFile() as f:
-                torch.save(qr, f)
-                f.seek(0)
-                loaded_q = torch.load(f)
-                loaded_int_repr = loaded_q.int_repr()[0:5]
-                self.assertEqual(int_repr[0:5], loaded_int_repr)
+    def _test_qtensor_sub_byte(self, rows, cols, dtype, elements_per_byte, expected_packed_vals):
+        num_elements = rows * cols
+        scale = 1.0
+        zero_point = 2
+
+        r = torch.ones((rows, cols), dtype=torch.float)
+        qr = torch.quantize_per_tensor(r, scale, zero_point, dtype)
+        self.assertEqual(qr.q_scale(), scale)
+        self.assertEqual(qr.q_zero_point(), zero_point)
+        self.assertTrue(qr.is_quantized)
+        self.assertFalse(r.is_quantized)
+        self.assertEqual(qr.storage().size(), rows * math.ceil(cols / elements_per_byte), f"with {dtype}, {elements_per_byte}")
+
+        int_repr = qr.int_repr()
+        self.assertEqual(int_repr.numel(), len(expected_packed_vals))
+        for num, expected in zip(int_repr, expected_packed_vals):
+            self.assertEqual(num, expected, f"with dtype={dtype}, elements_per_byte={elements_per_byte}, rows={rows}, cols={cols}")
+
+        # Test tensor creation
+        q = torch._empty_affine_quantized([num_elements], scale=scale, zero_point=zero_point, dtype=dtype)
+        self.assertEqual(q.storage().size(), math.ceil(num_elements / elements_per_byte), f"with {dtype}, {elements_per_byte}")
+
+        # Test save/load
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(qr, f)
+            f.seek(0)
+            loaded_q = torch.load(f)
+            loaded_int_repr = loaded_q.int_repr()
+            self.assertEqual(int_repr, loaded_int_repr)
 
     def test_qtensor_float_assignment(self):
         # Scalar Tensor
@@ -330,7 +355,7 @@ class TestQuantizedTensor(TestCase):
         r = torch.rand(3, 2, dtype=torch.float) * 4 - 2
         scale = 0.2
         zero_point = 2
-        for dtype in [torch.qint8, torch.quint8, torch.qint32, torch.quint4x2]:
+        for dtype in [torch.qint8, torch.quint8, torch.qint32, torch.quint4x2, torch.quint2x4]:
             qr = torch.quantize_per_tensor(r, scale, zero_point, dtype)
             rqr = qr.dequantize()
             self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
