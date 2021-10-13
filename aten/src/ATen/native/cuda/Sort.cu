@@ -271,14 +271,14 @@ inline void segmented_sort_pairs_by_full_sort(
   auto indices_and_segment2 = at::empty_like(indices_and_segment);
   auto i_s_ptr2 = reinterpret_cast<int2 *>(indices_and_segment2.data_ptr<int>());
 
-  at::cuda::cub::sort_pairs<scalar_t, int2>(
+  at::cuda::cub::radix_sort_pairs<scalar_t, int2>(
     self_ptr, nullptr, i_s_ptr, i_s_ptr2,
     n, descending);
 
   TORCH_INTERNAL_ASSERT(segment_bits <= 32);
 
   // sort on lower 32bits, i.e. segment index
-  at::cuda::cub::sort_keys<int64_t>(
+  at::cuda::cub::radix_sort_keys<int64_t>(
     reinterpret_cast<int64_t *>(i_s_ptr2), reinterpret_cast<int64_t *>(i_s_ptr),
     n, false, 0, segment_bits);
 
