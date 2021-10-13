@@ -610,9 +610,11 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::rpc_remote:
       return analyzeRpcAsync(node);
     case aten::batch_norm:
-      return analyzeBatchNormAndInstanceNorm(node, "training");
+      analyzeBatchNormAndInstanceNorm(node, "training");
+      break;
     case aten::instance_norm:
-      return analyzeBatchNormAndInstanceNorm(node, "use_input_stats");
+      analyzeBatchNormAndInstanceNorm(node, "use_input_stats");
+      break;
     case prim::GradOf:
       return analyzeGradOf(node);
     case prim::BroadcastMKLDNNTensors: {
