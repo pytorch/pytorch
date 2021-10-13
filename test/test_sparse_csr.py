@@ -3,7 +3,7 @@ import warnings
 import unittest
 import random
 import itertools
-from torch.testing import get_all_complex_dtypes, get_all_fp_dtypes, floating_and_complex_types, make_tensor
+from torch.testing import get_all_complex_dtypes, get_all_fp_dtypes, make_tensor
 from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, TEST_CUSPARSE_GENERIC
 from torch.testing._internal.common_utils import \
     (IS_MACOS, IS_WINDOWS, TestCase, run_tests, load_tests, coalescedonoff)
@@ -403,7 +403,7 @@ class TestSparseCSR(TestCase):
                     torch.addmm(s, csr, m2)
 
     @skipCUDAIfNoCusparseGeneric
-    @dtypes(*floating_and_complex_types())
+    @dtypes(*torch.testing.floating_types())
     @dtypesIfCUDA(*get_all_complex_dtypes(),
                   *get_all_fp_dtypes(include_half=SM53OrLater, include_bfloat16=SM80OrLater))
     def test_csr_matvec(self, device, dtype):
@@ -418,7 +418,11 @@ class TestSparseCSR(TestCase):
             self.assertEqual(res, expected)
 
             bad_vec = torch.randn(side + 10, dtype=dtype, device=device)
-            err_msg = "size mismatch, got"
+            err_msg = "mv: expected"
+            # CUDA path now uses generic meta/structured implementation
+            # TODO: move CPU path to not use `mv_sparse` function
+            if self.device_type == 'cuda':
+                err_msg = "size mismatch, got"
             with self.assertRaisesRegex(RuntimeError, err_msg):
                 csr.matmul(bad_vec)
 
