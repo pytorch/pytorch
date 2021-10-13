@@ -26,14 +26,14 @@ inline NodePtr ConstantOp(lazy_tensors::Literal value) {
   return MakeNode<Constant>(std::move(value));
 }
 
-inline NodePtr GenericOp(OpKind op, lazy_tensors::Span<const Value> operands,
+inline NodePtr GenericOp(OpKind op, OpList operands,
                          lazy_tensors::Shape shape, size_t num_outputs = 1,
                          torch::lazy::hash_t hash_seed = static_cast<uint32_t>(0x5a2d296e9)) {
   return MakeNode<Generic>(std::move(op), operands, std::move(shape),
                            num_outputs, hash_seed);
 }
 
-inline NodePtr GenericOp(OpKind op, lazy_tensors::Span<const Value> operands,
+inline NodePtr GenericOp(OpKind op, OpList operands,
                          const std::function<lazy_tensors::Shape()>& shape_fn,
                          size_t num_outputs = 1,
                          torch::lazy::hash_t hash_seed = static_cast<uint32_t>(0x5a2d296e9)) {
@@ -41,7 +41,7 @@ inline NodePtr GenericOp(OpKind op, lazy_tensors::Span<const Value> operands,
                            hash_seed);
 }
 
-inline NodePtr GenericOp(OpKind op, lazy_tensors::Span<const Value> operands,
+inline NodePtr GenericOp(OpKind op, OpList operands,
                          size_t num_outputs = 1,
                          torch::lazy::hash_t hash_seed = static_cast<uint32_t>(0x5a2d296e9)) {
   return MakeNode<Generic>(std::move(op), operands, num_outputs, hash_seed);
@@ -173,7 +173,7 @@ NodePtr Where(const Value& condition, const Value& input, const Value& other);
 NodePtr ARange(const at::Scalar& start, const at::Scalar& end,
                const at::Scalar& step, at::ScalarType scalar_type);
 
-NodePtr BroadcastTensors(lazy_tensors::Span<const Value> tensors);
+NodePtr BroadcastTensors(OpList tensors);
 
 NodePtr Norm(const Value& input, const c10::optional<at::Scalar>& p,
              c10::optional<at::ScalarType> dtype,

@@ -13,15 +13,15 @@ namespace ops {
 // IR introspection.
 class Generic : public TsNode {
  public:
-  Generic(OpKind op, lazy_tensors::Span<const Value> operands,
+  Generic(OpKind op, OpList operands,
           lazy_tensors::Shape shape, size_t num_outputs = 1,
           torch::lazy::hash_t hash_seed = static_cast<uint32_t>(0x5a2d296e9));
 
-  Generic(OpKind op, lazy_tensors::Span<const Value> operands,
+  Generic(OpKind op, OpList operands,
           const std::function<lazy_tensors::Shape()>& shape_fn,
           size_t num_outputs = 1, torch::lazy::hash_t hash_seed = static_cast<uint32_t>(0x5a2d296e9));
 
-  Generic(OpKind op, lazy_tensors::Span<const Value> operands,
+  Generic(OpKind op, OpList operands,
           size_t num_outputs = 1, torch::lazy::hash_t hash_seed = static_cast<uint32_t>(0x5a2d296e9));
 
   Generic(OpKind op, lazy_tensors::Shape shape, size_t num_outputs,

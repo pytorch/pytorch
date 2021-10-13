@@ -13,9 +13,9 @@
 #include <vector>
 
 #include "c10/core/ScalarType.h"
+#include "c10/util/ArrayRef.h"
 #include "lazy_tensor_core/csrc/python_util.h"
 #include "lazy_tensors/computation_client/types.h"
-#include "lazy_tensors/span.h"
 #include "torch/csrc/lazy/core/hash.h"
 
 namespace torch_lazy_tensors {
@@ -117,6 +117,8 @@ struct Value {
   size_t index = 0;
 };
 
+using OpList = at::ArrayRef<Value>;
+
 // The Kind of operation a Node can be associated to.
 struct OpKind {
   OpKind() = default;
@@ -144,8 +146,6 @@ inline std::ostream& operator<<(std::ostream& stream, const OpKind& op) {
   stream << op.ToString();
   return stream;
 }
-
-using OpList = lazy_tensors::Span<const Value>;
 
 void EmitShortFrameInfo(std::ostream& stream,
                         const std::vector<SourceLocation>& frames);
@@ -250,3 +250,8 @@ T* NodeCast(const Node* node, OpKind op) {
 
 }  // namespace ir
 }  // namespace torch_lazy_tensors
+
+namespace c10 {
+  // Explicit template instantiation to make ArrayRef<Value> work
+  template class at::ArrayRef<torch_lazy_tensors::ir::Value>;
+}

@@ -11,7 +11,7 @@ namespace ir {
 namespace ops {
 namespace {
 
-std::vector<Value> GetOperandList(lazy_tensors::Span<const Value> operands,
+std::vector<Value> GetOperandList(OpList operands,
                                   const Value& token) {
   std::vector<Value> operand_list(operands.begin(), operands.end());
   operand_list.push_back(token);
@@ -21,7 +21,7 @@ std::vector<Value> GetOperandList(lazy_tensors::Span<const Value> operands,
 }  // namespace
 
 AllReduce::AllReduce(AllReduceType reduce_type,
-                     lazy_tensors::Span<const Value> operands,
+                     OpList operands,
                      const Value& token, double scale,
                      std::vector<std::vector<lazy_tensors::int64>> groups)
     : TsNode(ltc_cross_replica_sum, GetOperandList(operands, token),

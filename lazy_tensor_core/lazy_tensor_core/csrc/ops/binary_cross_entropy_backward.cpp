@@ -12,11 +12,10 @@ BinaryCrossEntropyBackward::BinaryCrossEntropyBackward(
     const Value& grad_output, const Value& logits, const Value& labels,
     const c10::optional<Value>& weight, ReductionMode reduction)
     : TsNode(ir::OpKind(at::aten::binary_cross_entropy_backward),
-           lazy_tensors::util::GetValuesVector<Value>(
-               {grad_output, logits, labels}, {&weight}),
-           /*num_outputs=*/1,
-           torch::lazy::MHash(
-               lazy_tensors::util::GetEnumValue(reduction))),
+             lazy_tensors::util::GetValuesVector<Value>(
+                 {grad_output, logits, labels}, {&weight}),
+             /*num_outputs=*/1,
+             torch::lazy::MHash(lazy_tensors::util::GetEnumValue(reduction))),
       reduction_(reduction) {
   SetShapeDeferred(
       [&]() { return compiler::NodeLowering::Get()->Infer(this); });

@@ -9,7 +9,7 @@ namespace ops {
 
 class AllReduce : public TsNode {
  public:
-  AllReduce(AllReduceType reduce_type, lazy_tensors::Span<const Value> operands,
+  AllReduce(AllReduceType reduce_type, OpList operands,
             const Value& token, double scale,
             std::vector<std::vector<lazy_tensors::int64>> groups);
 

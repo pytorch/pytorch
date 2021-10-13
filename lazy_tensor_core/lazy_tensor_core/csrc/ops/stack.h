@@ -9,7 +9,7 @@ namespace ops {
 
 class Stack : public TsNode {
  public:
-  Stack(lazy_tensors::Span<const ir::Value> values, lazy_tensors::int64 dim);
+  Stack(OpList values, lazy_tensors::int64 dim);
 
   std::string ToString() const override;
 

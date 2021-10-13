@@ -257,7 +257,7 @@ NodePtr ARange(const at::Scalar& start, const at::Scalar& end,
   return MakeNode<Constant>(std::move(values));
 }
 
-NodePtr BroadcastTensors(lazy_tensors::Span<const Value> tensors) {
+NodePtr BroadcastTensors(OpList tensors) {
   NodePtr node = GenericOp(OpKind(at::aten::broadcast_tensors), tensors,
                            /*num_outputs=*/tensors.size());
   std::dynamic_pointer_cast<TsNode>(node)->SetShapeDeferred(

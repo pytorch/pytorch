@@ -7,7 +7,7 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Stack::Stack(lazy_tensors::Span<const ir::Value> values,
+Stack::Stack(OpList values,
              lazy_tensors::int64 dim)
     : TsNode(ir::OpKind(at::aten::stack), values,
            /*num_outputs=*/1, torch::lazy::MHash(dim)),

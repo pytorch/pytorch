@@ -457,7 +457,7 @@ void LazyTensor::_amp_foreach_non_finite_check_and_unscale_(
     inputs.push_back(x.GetIrValue());
   }
   ir::NodePtr node = ir::MakeNode<ir::ops::AmpForachNonFiniteCheckAndUnscale>(
-      inputs, found_inf.GetIrValue(), new_inv_scale.GetIrValue());
+      at::ArrayRef<ir::Value>(inputs), found_inf.GetIrValue(), new_inv_scale.GetIrValue());
   for (size_t i = 0; i < self.size(); ++i) {
     self[i].SetInPlaceIrValue(ir::Value(node, i));
   }
@@ -828,7 +828,7 @@ LazyTensor LazyTensor::cat(lazy_tensors::Span<const LazyTensor> tensors,
   if (values.empty()) {
     return tensors[0];
   }
-  return tensors[0].CreateFrom(ir::MakeNode<ir::ops::Cat>(values, dim));
+  return tensors[0].CreateFrom(ir::MakeNode<ir::ops::Cat>(at::ArrayRef<ir::Value>(values), dim));
 }
 
 LazyTensor LazyTensor::ceil(const LazyTensor& input) {

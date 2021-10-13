@@ -9,7 +9,7 @@ namespace ops {
 
 class Cat : public TsNode {
  public:
-  Cat(lazy_tensors::Span<const ir::Value> values, lazy_tensors::int64 dim);
+  Cat(OpList values, lazy_tensors::int64 dim);
 
   std::string ToString() const override;
 

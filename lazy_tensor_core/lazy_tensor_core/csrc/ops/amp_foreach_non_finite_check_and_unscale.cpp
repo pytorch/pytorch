@@ -23,7 +23,7 @@ lazy_tensors::Shape NodeOutputShape(const OpList& inputs,
   return lazy_tensors::ShapeUtil::MakeTupleShape(output_shapes);
 }
 
-std::vector<Value> GetOperandList(lazy_tensors::Span<const Value> operands,
+std::vector<Value> GetOperandList(OpList operands,
                                   const Value& found_inf,
                                   const Value& inv_scale) {
   std::vector<Value> operand_list(operands.begin(), operands.end());
