@@ -3,6 +3,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/OpMathType.h>
 #include <ATen/native/mkldnn/Matmul.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/IndexingUtils.h>
@@ -1240,6 +1241,48 @@ inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const T
     });
 }
 
+void baddbmm_with_gemm_(const Tensor &result, const Tensor &mat1, const Tensor &mat2, const Scalar &beta_, const Scalar &alpha_) {
+  TORCH_INTERNAL_ASSERT(result.is_contiguous());
+
+  const auto result_sizes = result.sizes();
+  const auto result_strides = result.strides();
+  const auto mat1_strides = mat1.strides();
+  const auto mat2_strides = mat2.strides();
+  const auto mat1_sizes = mat1.sizes();
+  const auto mat2_sizes = mat2.sizes();
+
+  auto is_transposed = [](const c10::IntArrayRef& strides, const c10::IntArrayRef& sizes) {
+    return strides[1] == 1 && strides[2] >= sizes[1];
+  };
+
+  // gemm expects fortran order matrices, so we swap argument order to transpose everything
+  const auto transpose_a = is_transposed(mat2_strides, mat2_sizes);
+  const auto transpose_b = is_transposed(mat1_strides, mat1_sizes);
+
+  const int64_t batch_size = mat1_sizes[0];
+  const int64_t m = result_sizes[2];
+  const int64_t n = result_sizes[1];
+  const int64_t k = mat2_sizes[1];
+
+  const int64_t lda = mat2_strides[transpose_a ? 2 : 1];
+  const int64_t ldb = mat1_strides[transpose_b ? 2 : 1];
+  const int64_t ldc = result_strides[1];
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "baddbmm_with_gemm", [&] {
+    using opmath_t = at::opmath_type<scalar_t>;
+    const auto alpha = alpha_.to<opmath_t>();
+    const auto beta = beta_.to<opmath_t>();
+    at::native::cpublas::gemm_batched_with_stride(
+        transpose_a ? TransposeType::Transpose : TransposeType::NoTranspose,
+        transpose_b ? TransposeType::Transpose : TransposeType::NoTranspose,
+        batch_size, m, n, k, alpha,
+        mat2.data_ptr<scalar_t>(), lda, mat2_strides[0],
+        mat1.data_ptr<scalar_t>(), ldb, mat1_strides[0],
+        beta,
+        result.data_ptr<scalar_t>(), ldc, result_strides[0]);
+  });
+}
+
 // This tries to apply some optimizations to bmm/baddbmm:
 // - When the operand size is small, computation are parallelized over the batch
 //   dimension using OMP and naive matrix multiplication is applied.
@@ -1319,7 +1362,7 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
             && batch_items_contiguous_or_transposed(batch1)
             && batch_items_contiguous_or_transposed(batch2)
             && self_or_result.is_contiguous()) {
-    at::native::_baddbmm_mkl_(self_or_result, batch1, batch2, beta, alpha);
+    baddbmm_with_gemm_(self_or_result, batch1, batch2, beta, alpha);
   } else { // split along batch dimension
 #ifdef C10_MOBILE
     /*
