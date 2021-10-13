@@ -43,7 +43,7 @@ Tensor& glu_backward_cuda_out(const Tensor& grad_output, const Tensor& input,
   if (iter.can_use_32bit_indexing()) {
     launch_glu_backward_kernel(iter, gI_stride, I_stride);
   } else {
-    for (auto sub_iter: iter.with_32bit_indexing()) {
+    for (const auto& sub_iter: iter.with_32bit_indexing()) {
       launch_glu_backward_kernel(sub_iter, gI_stride, I_stride);
     }
   }
@@ -153,13 +153,13 @@ std::tuple<Tensor, Tensor> prelu_backward_cuda(const Tensor& grad_out_, const Te
 }
 
 TORCH_IMPL_FUNC(gelu_out_cuda) (
-    const Tensor& self, const Tensor& result
+    const Tensor& /*self*/, const Tensor& /*result*/
   ) {
   GeluCUDAKernelImpl(*this);
 }
 
 TORCH_IMPL_FUNC(gelu_backward_out_cuda) (
-    const Tensor& grad, const Tensor& self, const Tensor& grad_input
+    const Tensor& /*grad*/, const Tensor& /*self*/, const Tensor& /*grad_input*/
   ) {
   GeluBackwardCUDAKernelImpl(*this);
 }
