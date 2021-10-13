@@ -25,14 +25,9 @@
 #define USE_GLOBAL_CUB_WRAPPED_NAMESPACE() false
 #endif
 
-// cub support for scan by key is scheduled to add to cub 1.15
-// in https://github.com/NVIDIA/cub/pull/376, which version of
-// CUDA toolkit will adopt cub 1.15 is not clear to me yet.
-// All usage of such features are currently tested manually by
-// cherry-picking that cub PR to local CUDA installation. This
-// file will be updated when I know this information.
-//                                               -- @zasdfgbnm
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 99999
+// cub support for scan by key is added to cub 1.15
+// in https://github.com/NVIDIA/cub/pull/376
+#if CUB_VERSION >= 101500
 #define CUB_SUPPORTS_SCAN_BY_KEY() 1
 #else
 #define CUB_SUPPORTS_SCAN_BY_KEY() 0

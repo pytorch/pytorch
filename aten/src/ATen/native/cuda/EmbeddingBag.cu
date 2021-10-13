@@ -15,6 +15,10 @@
 
 #include <c10/macros/Macros.h>
 
+#if CUB_SUPPORTS_SCAN_BY_KEY()
+#include <thrust/iterator/reverse_iterator.h>
+#endif
+
 namespace at {
 namespace native {
 
@@ -187,7 +191,29 @@ Tensor embedding_bag_backward_cuda_sum_avg(
     if (scale_grad_by_freq) {
       count = at::empty_like(indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 #if CUB_SUPPORTS_SCAN_BY_KEY()
-      // TODO
+      cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+      // Compute an increasing sequence per unique item in sortedIndices:
+      // sorted: 2 5 5 5 7 7 8 9 9
+      //  count: 1 1 2 3 1 2 1 1 2
+      auto sorted_data = sorted_indices.data_ptr<index_t>();
+      auto count_data = count.data_ptr<index_t>();
+      cuda::cub::inclusive_sum_by_key(
+        sorted_data,
+        detail::cub::ConstantInputIterator<index_t>(1),
+        count_data
+      );
+
+      // Take the maximum of each count per unique key in reverse:
+      // sorted: 2 5 5 5 7 7 8 9 9
+      //  count: 1 3 3 3 2 2 1 2 2
+      cuda::cub::inclusive_scan_by_key(
+        thrust::make_reverse_iterator(sorted_data + num_indices),
+        thrust::make_reverse_iterator(count_data + num_indices),
+        thrust::make_reverse_iterator(count_data + num_indices),
+        num_indices,
+        detail::cub::Max()
+      );
 #else
       embedding_dense_backward_cuda_scan<index_t>(sorted_indices, count);
 #endif
