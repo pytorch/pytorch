@@ -39,7 +39,7 @@ TEST(TorchDeployGPUTest, SimpleModel) {
   }
   std::vector<at::IValue> inputs;
   {
-    auto I = p.acquireSession();
+    auto I = m.acquireOne();
     auto pkg = I.getPackage(p);
     auto eg = pkg.attr("load_pickle")({"model", "example.pkl"}).toIValue();
     inputs = eg.toTuple()->elements();
@@ -63,7 +63,7 @@ TEST(TorchDeployGPUTest, UsesDistributed) {
   torch::deploy::InterpreterManager m(1);
   torch::deploy::Package p = m.loadPackage(model_filename);
   {
-    auto I = p.acquireSession();
+    auto I = m.acquireOne();
     auto pkg = I.getPackage(p);
     pkg.attr("import_module")({"uses_distributed"});
   }

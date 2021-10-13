@@ -199,7 +199,7 @@ struct Benchmark {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<at::IValue> eg;
     {
-      auto I = package.acquireSession();
+      auto I = manager_.acquireOne();
       auto pkg = I.getPackage(package);
 
       eg = I.global("builtins", "tuple")(

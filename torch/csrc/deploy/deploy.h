@@ -41,7 +41,6 @@ struct TORCH_API InterpreterSession {
   Obj getPackage(const Package& package);
 
  private:
-  friend struct Package;
   friend struct InterpreterManager;
   friend struct ReplicatedObjImpl;
   std::unique_ptr<InterpreterSessionImpl> impl_;
@@ -261,7 +260,6 @@ class PythonMethodWrapper : public torch::IMethod {
 struct TORCH_API Package {
   // shorthand for getting the object as a pickle resource in the package
   ReplicatedObj loadPickle(const std::string& module, const std::string& file);
-  InterpreterSession acquireSession();
 
  private:
   Package(const std::string& uri, InterpreterManager* pm);

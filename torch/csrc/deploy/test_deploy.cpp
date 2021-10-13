@@ -184,7 +184,7 @@ TEST(TorchpyTest, ErrorsReplicatingObj) {
   auto replicatedObj = p.loadPickle("model", "model.pkl");
   // Acquire two different interpreters
   auto session1 = replicatedObj.acquireSession();
-  auto session2 = p.acquireSession();
+  auto session2 = manager.acquireOne();
   // Create an obj reference on interpreter 1
   auto obj = session1.fromMovable(replicatedObj);
   // should throw an error when trying to access obj from different session
@@ -213,26 +213,6 @@ TEST(TorchpyTest, ThrowsSafely) {
   auto model = p.loadPickle("model", "model.pkl");
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   EXPECT_THROW(model(at::IValue("unexpected input")), c10::Error);
-}
-
-TEST(TorchpyTest, AcquireMultipleSessionsInTheSamePackage) {
-  torch::deploy::InterpreterManager m(1);
-
-  torch::deploy::Package p = m.loadPackage(path("SIMPLE", simple));
-  auto I = p.acquireSession();
-
-  auto I1 = p.acquireSession();
-}
-
-TEST(TorchpyTest, AcquireMultipleSessionsInDifferentPackages) {
-  torch::deploy::InterpreterManager m(1);
-
-  torch::deploy::Package p = m.loadPackage(path("SIMPLE", simple));
-  auto I = p.acquireSession();
-
-  torch::deploy::Package p1 = m.loadPackage(
-      path("RESNET", "torch/csrc/deploy/example/generated/resnet"));
-  auto I1 = p1.acquireSession();
 }
 
 TEST(TorchpyTest, TensorSharingNotAllowed) {

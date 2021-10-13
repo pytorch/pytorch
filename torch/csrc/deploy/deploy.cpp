@@ -343,19 +343,12 @@ ReplicatedObj Package::loadPickle(
     const std::string& module,
     const std::string& file) {
   TORCH_DEPLOY_TRY
-  auto I = acquireSession();
-  auto self =
-      I.impl_->createOrGetPackageImporterFromContainerFile(containerFile_);
+  auto I = manager_->acquireOne();
+  auto self = I.getPackage(*this);
   auto loaded = self.attr("load_pickle")({module, file});
   return I.createMovable(loaded, this);
   TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
-InterpreterSession Package::acquireSession() {
-  TORCH_DEPLOY_TRY
-  auto I = manager_->acquireOne();
-  return I;
-  TORCH_DEPLOY_SAFE_CATCH_RETHROW
-}
 } // namespace deploy
 } // namespace torch
