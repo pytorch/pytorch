@@ -6,6 +6,7 @@ from typing import (
     Dict,
     List,
     Optional,
+    Union
 )
 
 import threading
@@ -655,11 +656,29 @@ class ShardedTensor(object):
         """
         return self._local_shards
 
-    def size(self) -> torch.Size:
+    def size(self, dim: int = None) -> Union[torch.Size, int]:
         """
-        Returns the size of the tensor. The returned value is a subclass of tuple.
+        Returns a :Union:`[torch.Size, int]` which represents the size of the tensor.
+            The dimension can be specified.
+
+        Args:
+            dim (int, optional): the dimension over which the size represents.
+                If specified, it returns the size of the given dimension.
+                If not, it returns a subclass of tuple.
+                Default: ``None``
+
+        Returns:
+            A :Union:`[torch.Size, int]` represents the size of the tensor.
         """
-        return self._metadata.size
+        size = self._metadata.size
+        if dim is None:
+            return size
+        if dim < 0 or dim >= len(size):
+            raise ValueError(
+                f"Argument ``dim`` must be within the range of tensor dimensions [0, {len(size)})"
+            )
+        return size[dim]
+
 
     def is_pinned(self) -> bool:
         """
