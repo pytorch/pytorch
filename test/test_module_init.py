@@ -173,6 +173,9 @@ def build_constructor_arg_db():
         torch.nn.qat.Linear: ((5, 2), {
             'qconfig': torch.ao.quantization.default_qconfig,
         }),
+        torch.nn.qat.Embedding: ((10, 12), {
+            'qconfig': torch.ao.quantization.float_qparams_weight_only_qconfig,
+        }),
         torch.nn.qat.EmbeddingBag: ((10, 12), {
             'qconfig': torch.ao.quantization.float_qparams_weight_only_qconfig,
         }),

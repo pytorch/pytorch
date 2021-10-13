@@ -1,6 +1,6 @@
 import torch
 from collections import OrderedDict, defaultdict
-from typing import Union, Callable, Any, Dict, Tuple, Set
+from typing import Union, Callable, Any, Dict, Tuple, Set, Optional
 from torch.ao.quantization.qconfig import add_module_to_qconfig_obs_ctr, QConfigAny
 
 import re
@@ -238,7 +238,7 @@ def check_is_valid_qconfig_dict(qconfig_dict: Any) -> None:
     check_is_valid_config_dict(qconfig_dict, qconfig_dict_allowed_keys, "qconfig_dict")
 
 
-def check_is_valid_prepare_custom_config_dict(prepare_custom_config_dict: Dict[str, Any] = None) -> None:
+def check_is_valid_prepare_custom_config_dict(prepare_custom_config_dict: Optional[Dict[str, Any]] = None) -> None:
     r""" Checks if the given prepare_custom_config_dict has the correct keys
 
     Args:
@@ -264,7 +264,7 @@ def check_is_valid_prepare_custom_config_dict(prepare_custom_config_dict: Dict[s
                                prepare_custom_config_dict_allowed_keys, "prepare_custom_config_dict")
 
 
-def check_is_valid_convert_custom_config_dict(convert_custom_config_dict: Dict[str, Any] = None) -> None:
+def check_is_valid_convert_custom_config_dict(convert_custom_config_dict: Optional[Dict[str, Any]] = None) -> None:
     r""" Checks if the given convert_custom_config_dict has the correct keys
 
     Args:
@@ -281,7 +281,7 @@ def check_is_valid_convert_custom_config_dict(convert_custom_config_dict: Dict[s
                                convert_custom_config_dict_allowed_keys, "convert_custom_config_dict")
 
 
-def check_is_valid_fuse_custom_config_dict(fuse_custom_config_dict: Dict[str, Any] = None) -> None:
+def check_is_valid_fuse_custom_config_dict(fuse_custom_config_dict: Optional[Dict[str, Any]] = None) -> None:
     r""" Checks if the given fuse_custom_config_dict has the correct keys
 
     Args:
