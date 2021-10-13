@@ -217,7 +217,7 @@ std::shared_ptr<SugaredValue> PythonModuleValue::attr(
   return toSugaredValue(member, m, loc, /*is_constant=*/true);
 }
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
     const SourceRange& loc,
     Function& m,
@@ -1010,7 +1010,7 @@ std::shared_ptr<SugaredValue> PythonSliceClass::call(
   Graph& graph = *(caller.graph());
 
   auto ValOr = [&](Value* given, int64_t default_val) {
-    if (!given || given->type()->isSubtypeOf(NoneType::get())) {
+    if (!given || given->type()->isSubtypeOf(*NoneType::get())) {
       return graph.insertConstant(default_val, loc);
     }
     return given;
