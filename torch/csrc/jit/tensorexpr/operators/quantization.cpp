@@ -287,6 +287,8 @@ Tensor computeDequantize(
   auto qscale = qx.node()->qscale();
   auto qzero = qx.node()->qzero();
   auto qdtype = qx.node()->dtype();
+  const double qscale_f = immQScale(qx);
+  const int64_t qzero_f = immQZero(qx);
   TORCH_INTERNAL_ASSERT(
       qscale, buildErrorMessage("Missing quantized scale for dequantize"));
   TORCH_INTERNAL_ASSERT(
@@ -301,9 +303,15 @@ Tensor computeDequantize(
   std::vector<ExprHandle> indices(axes.begin(), axes.end());
   auto qx_e_promoted =
       promoteToDtype(tensorOrConstant(inputs[0], indices), dtype.scalar_type());
+  auto qscale_promoted =
+      promoteToDtype(ExprHandle(qscale), dtype.scalar_type());
+  auto qzero_promoted = promoteToDtype(ExprHandle(qzero), dtype.scalar_type());
+  //  auto qscale_promoted =
+  //      promoteToDtype(FloatImm::make(qscale_f), dtype.scalar_type());
+  //  auto qzero_promoted =
+  //      promoteToDtype(LongImm::make(qzero_f), dtype.scalar_type());
   auto y = promoteToDtype(
-      (qx_e_promoted - ExprHandle(qzero)) * ExprHandle(qscale),
-      dtype.scalar_type());
+      (qx_e_promoted - qzero_promoted) * qscale_promoted, dtype.scalar_type());
 
   BufPtr buf = alloc<Buf>(
       "dequantize", ExprHandleVectorToExprVector(outputShape), dtype);

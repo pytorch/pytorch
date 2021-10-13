@@ -11,9 +11,14 @@
 #include <torch/torch.h>
 #include <cmath>
 #include <sstream>
+#include "torch/csrc/jit/tensorexpr/eval.h"
+#include "torch/csrc/jit/tensorexpr/ir.h"
 
 namespace torch {
 namespace jit {
+
+using namespace torch::jit::tensorexpr;
+using SimpleIRExprEval = ExprEval<SimpleIREvaluator>;
 
 namespace {
 bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor> inputs) {
@@ -77,7 +82,7 @@ TEST_F(Quantization, QuantDequantUInt8) {
   const auto graph_string = R"IR(
       graph(%x.1 : Float(2, 2, strides=[2, 1], device=cpu)):
         %2 : int = prim::Constant[value=13]()
-        %3 : int = prim::Constant[value=130]()
+        %3 : int = prim::Constant[value=122]()
         %4 : float = prim::Constant[value=0.1]()
         %q.1 : QUInt8(2, 2) = aten::quantize_per_tensor(%x.1, %4, %3, %2)
         %6 : Float(2, 2) = aten::dequantize(%q.1)
@@ -85,8 +90,8 @@ TEST_F(Quantization, QuantDequantUInt8) {
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);
 
-  auto x = at::rand({2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
-  auto q = at::quantize_per_tensor(x, 0.1f, 130, at::kQUInt8);
+  auto x = 2 * at::rand({2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto q = at::quantize_per_tensor(x, 0.1f, 122, at::kQUInt8);
   auto y_expected = at::dequantize(q);
   TensorExprKernel k(graph);
   std::vector<at::Tensor> inputs = {x};
@@ -166,11 +171,11 @@ TEST_F(Quantization, QuantAddDequantUInt8) {
   const auto graph_string = R"IR(
       graph(%x1 : Float(2, 2, strides=[2, 1], device=cpu), %x2 : Float(2, 2, strides=[2, 1], device=cpu)):
         %2 : int = prim::Constant[value=13]()
-        %qz1 : int = prim::Constant[value=130]()
+        %qz1 : int = prim::Constant[value=13]()
         %qs1 : float = prim::Constant[value=0.1]()
-        %qz2 : int = prim::Constant[value=130]()
+        %qz2 : int = prim::Constant[value=13]()
         %qs2 : float = prim::Constant[value=0.1]()
-        %qza : int = prim::Constant[value=130]()
+        %qza : int = prim::Constant[value=13]()
         %qsa : float = prim::Constant[value=0.1]()
         %q1 : QUInt8(2, 2) = aten::quantize_per_tensor(%x1, %qs1, %qz1, %2)
         %q2 : QUInt8(2, 2) = aten::quantize_per_tensor(%x2, %qs2, %qz2, %2)
@@ -182,9 +187,9 @@ TEST_F(Quantization, QuantAddDequantUInt8) {
 
   auto x1 = at::rand({2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
   auto x2 = at::rand({2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
-  auto q1 = at::quantize_per_tensor(x1, 0.1f, 130, at::kQUInt8);
-  auto q2 = at::quantize_per_tensor(x2, 0.1f, 130, at::kQUInt8);
-  auto qa = quantized_add(q1, q2, 0.1f, 130);
+  auto q1 = at::quantize_per_tensor(x1, 0.1f, 13, at::kQUInt8);
+  auto q2 = at::quantize_per_tensor(x2, 0.1f, 13, at::kQUInt8);
+  auto qa = quantized_add(q1, q2, 0.1f, 13);
   auto y_expected = at::dequantize(qa);
 
   TensorExprKernel k(graph);

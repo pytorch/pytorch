@@ -1390,23 +1390,26 @@ RegisterNNCLoweringFunction aten_addmm("aten::addmm", computeAddMM);
 
 RegisterNNCLoweringFunction aten_mean("aten::mean", computeMean);
 
-#define NNC_QUANTIZATION_EXPR_QUANT_DEQUANT 0
+#define NNC_QUANTIZATION_EXPR_QUANT 0
+#define NNC_QUANTIZATION_EXPR_DEQUANT 0
 
 RegisterNNCLoweringFunction aten_quantize_per_tensor(
     "aten::quantize_per_tensor",
-#if NNC_QUANTIZATION_EXPR_QUANT_DEQUANT == 1
-    computeQuantizePerTensor);
+#if NNC_QUANTIZATION_EXPR_QUANT == 1
+    computeQuantizePerTensor
 #else
-    computeQuantizePerTensorExternalCall);
+    computeQuantizePerTensorExternalCall
 #endif
+);
 
 RegisterNNCLoweringFunction aten_dequantize(
     "aten::dequantize",
-#if NNC_QUANTIZATION_EXPR_QUANT_DEQUANT == 1
-    computeDequantize);
+#if NNC_QUANTIZATION_EXPR_DEQUANT == 1
+    computeDequantize
 #else
-    computeDequantizeExternalCall);
+    computeDequantizeExternalCall
 #endif
+);
 
 RegisterNNCLoweringFunction quantized_conv2d(
     "quantized::conv2d",

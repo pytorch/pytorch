@@ -10,6 +10,7 @@
 #include <ATen/quantized/Quantizer.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
 
@@ -203,9 +204,6 @@ void nnc_aten_quantized_add(
   const double a_qscale = ((double*)extra_args)[0];
   const int64_t a_qzero = extra_args[1];
   const c10::ScalarType a_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
-  std::cout << "XXX a_qscale:" << a_qscale << std::endl;
-  std::cout << "XXX a_qzero:" << a_qzero << std::endl;
-  std::cout << "XXX a_qdtype:" << a_qdtype << std::endl;
   at::Tensor qa = at::from_blob_quantized_per_tensor_affine(
       buf_data[1],
       tensors[1].sizes(),
@@ -213,13 +211,9 @@ void nnc_aten_quantized_add(
       a_qscale,
       a_qzero,
       at::TensorOptions(toQIntType(a_qdtype)));
-  std::cout << "XXX qa:\n" << qa << std::endl;
   const double b_qscale = ((double*)extra_args)[3];
   const int64_t b_qzero = extra_args[4];
   const c10::ScalarType b_qdtype = static_cast<c10::ScalarType>(extra_args[5]);
-  std::cout << "XXX b_qscale:" << b_qscale << std::endl;
-  std::cout << "XXX b_qzero:" << b_qzero << std::endl;
-  std::cout << "XXX b_qdtype:" << b_qdtype << std::endl;
   at::Tensor qb = at::from_blob_quantized_per_tensor_affine(
       buf_data[2],
       tensors[2].sizes(),
@@ -227,13 +221,9 @@ void nnc_aten_quantized_add(
       b_qscale,
       b_qzero,
       at::TensorOptions(toQIntType(b_qdtype)));
-  std::cout << "XXX qb:\n" << qb << std::endl;
   const double out_qscale = ((double*)extra_args)[6];
   const int64_t out_qzero = extra_args[7];
-  std::cout << "XXX out_qscale:" << out_qscale << std::endl;
-  std::cout << "XXX out_qzero:" << out_qzero << std::endl;
   auto r = quantized_add(qa, qb, out_qscale, out_qzero);
-  std::cout << "XXX r:\n" << r << std::endl;
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
@@ -297,6 +287,7 @@ void nnc_aten_quantize_per_tensor(
   std::vector<at::Tensor> tensors =
       constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor x = tensors[1];
+  GRAPH_DEBUG("nnc_aten_quantize_per_tensor:", x);
   const double qscale = ((double*)extra_args)[0];
   const int64_t qzero = extra_args[1];
   const c10::ScalarType qdtype = static_cast<c10::ScalarType>(extra_args[2]);

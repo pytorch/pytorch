@@ -975,9 +975,11 @@ void LLVMCodeGenImpl::visit(CastPtr v) {
   }
 
   bool destUnsigned = v->dtype().scalar_type() == ScalarType::Byte ||
+      v->dtype().scalar_type() == ScalarType::QUInt8 ||
       v->dtype().scalar_type() == ScalarType::Bool;
   bool srcUnsigned =
       v->src_value()->dtype().scalar_type() == ScalarType::Byte ||
+      v->src_value()->dtype().scalar_type() == ScalarType::QUInt8 ||
       v->src_value()->dtype().scalar_type() == ScalarType::Bool;
 
   // Scalar casts
