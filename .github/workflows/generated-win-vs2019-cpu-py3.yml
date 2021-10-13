@@ -31,6 +31,7 @@ env:
   AWS_DEFAULT_REGION: us-east-1
   CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
   CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+  USE_CUDA: 0
 
 concurrency:
   group: win-vs2019-cpu-py3-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
@@ -46,6 +47,7 @@ jobs:
       LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
     if: ${{ (github.repository_owner == 'pytorch') && (
             (github.event_name == 'push') ||
+            (github.event_name =='scheduled') ||
             (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/win')) ||
             ((github.event_name == 'pull_request' && github.event.action != 'unassigned') && !contains(join(github.event.pull_request.labels.*.name), 'ciflow/')))
          }}
