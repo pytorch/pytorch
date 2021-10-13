@@ -151,7 +151,8 @@ fi
 # Some Caffe2 tests fail when run using AVX512 ISA, see https://github.com/pytorch/pytorch/issues/66111
 export DNNL_MAX_CPU_ISA=AVX2
 
-if [[ "${SHARD_NUMBER}" == "1" ]]; then
+# Should still run even in the absence of SHARD_NUMBER
+if [[ "${SHARD_NUMBER:-1}" == "1" ]]; then
   pip install --user pytest-sugar
   "$PYTHON" \
     -m pytest \
