@@ -2,8 +2,8 @@ import os
 import fnmatch
 import warnings
 
-from io import BufferedIOBase
-from typing import Iterable, List, Union
+from io import IOBase
+from typing import Iterable, List, Tuple, Union
 
 
 def match_masks(name : str, masks : Union[str, List[str]]) -> bool:
@@ -54,15 +54,18 @@ def get_file_binaries_from_pathnames(pathnames: Iterable, mode: str):
                             .format(type(pathname)))
         yield (pathname, open(pathname, mode))
 
-def validate_pathname_binary_tuple(data):
+def validate_pathname_binary_tuple(data: Tuple[str, IOBase]):
     if not isinstance(data, tuple):
-        raise TypeError("pathname binary data should be tuple type, but got {}".format(type(data)))
+        raise TypeError(f"pathname binary data should be tuple type, but it is type {type(data)}")
     if len(data) != 2:
-        raise TypeError("pathname binary tuple length should be 2, but got {}".format(str(len(data))))
+        raise TypeError(f"pathname binary stream tuple length should be 2, but got {len(data)}")
     if not isinstance(data[0], str):
-        raise TypeError("pathname binary tuple should have string type pathname, but got {}".format(type(data[0])))
-    if not isinstance(data[1], BufferedIOBase):
-        raise TypeError("pathname binary tuple should have BufferedIOBase based binary type, but got {}".format(type(data[1])))
+        raise TypeError(f"pathname within the tuple should have string type pathname, but it is type {type(data[0])}")
+    if not isinstance(data[1], IOBase):
+        raise TypeError(
+            f"binary stream within the tuple should have IOBase or"
+            f"its subclasses as type, but it is type {type(data[1])}"
+        )
 
 # Warns user that the DataPipe has been moved to TorchData and will be removed from `torch`
 def deprecation_warning_torchdata(name):

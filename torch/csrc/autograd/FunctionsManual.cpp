@@ -1074,6 +1074,94 @@ Tensor cholesky_inverse_backward(Tensor grad, Tensor L, bool upper, Tensor inver
   return grad_L;
 }
 
+// The formula for forward AD is adapted from
+//
+// Golub, Gene H., and Victor Pereyra. "The Differentiation of Pseudo-Inverses and Nonlinear
+// Least Squares Problems Whose Variables Separate."
+// SIAM Journal on Numerical Analysis 10(2). (1973). 413-432. doi: 10.1137/0710036
+//
+// We present a short derivation below:
+// Let Ap := pinv(A), then Ap is the unique matrix such that
+//
+// Ap A Ap = Ap [1]
+// A Ap A = A   [2]
+//
+// By differentiating [1] we get:
+//
+// dAp = dAp A Ap + Ap dA Ap + Ap A dAp [3]
+//
+// In the rhs of [3] the products involving dAp could be expressed as products of
+// Ap^i, A^j, dA^k with i, j, k in {1, H}, where X^H = X.transpose(-1, -2).conj().
+// To prove that, note (A Ap)^H = A Ap and (Ap A)^H = Ap A, which could be shown by
+// taking the product between the SVD decompositions of A and Ap.
+// Consider the conjugate-tranposed [2]:
+// (A Ap A)^H = A^H (A Ap) = A^H. By differentiating it we get:
+// dA^H A Ap + A^H dA Ap + A^H A dAp = dA^H. By multiplying from the left by Ap^H
+// and using Ap^H A^H = (A Ap)^H = A Ap:
+// Ap^H dA^H A Ap + A Ap dA Ap + A Ap A dAp = Ap^H dA^H. By multiplying from the left
+// by Ap and by applying [1] and [2] repeatedly until impossible we get:
+// Ap Ap^H dA^H A Ap + Ap dA Ap + Ap A dAp = Ap Ap^H dA^H. By rearranging the terms:
+//
+// Ap A dAp = -Ap dA Ap + Ap Ap^H dA^H (I - A Ap) [4],
+// which is one of the summands in [3].
+//
+// Similar, by differentiating the transpose-conjugated [2] written differently, i.e.
+// (A Ap A)^H = Ap A A^H = A^H we will get an expression for dAp A Ap, which is
+//
+// dAp A Ap = -Ap dA Ap + (I - Ap A) dA^H Ap^H Ap [5].
+//
+// By plugging in [4] and [5] into [3] we get the forward AD formula for pinv:
+//
+// dAp = -Ap dA Ap + (I - Ap A) dA^H Ap^H Ap + Ap Ap^H dA^H (I - A Ap).
+Tensor pinv_jvp(
+  const Tensor& A,
+  const Tensor& pinvA,
+  const Tensor& dA
+) {
+  auto m = A.size(-2);
+  auto n = A.size(-1);
+  auto dAh = dA.transpose(-1, -2).conj();
+  auto pinvAh = pinvA.transpose(-1, -2).conj();
+  // optimization to produce matrices of the smallest dimension
+  if (m <= n) {
+    auto K = pinvAh.matmul(dAh);
+    return pinvA.matmul(K - K.transpose(-1, -2).conj() - K.matmul(A.matmul(pinvA)))
+         + (dAh - pinvA.matmul(A.matmul(dAh))).matmul(pinvAh.matmul(pinvA));
+  }
+  else {
+    auto K = pinvA.matmul(dA);
+    auto Kh = K.transpose(-1, -2).conj();
+    return (Kh - K - pinvA.matmul(A).matmul(Kh)).matmul(pinvA)
+         + (pinvA.matmul(pinvAh)).matmul(dAh - (dAh.matmul(A)).matmul(pinvA));
+  }
+}
+
+Tensor pinv_backward(
+  const Tensor& grad,
+  const Tensor& pinvA,
+  const Tensor& A
+) {
+  auto m = A.size(-2);
+  auto n = A.size(-1);
+  auto pinvAh = pinvA.transpose(-1, -2).conj();
+  auto gradh = grad.transpose(-1, -2).conj();
+  // optimization to produce matrices of the smallest dimension
+  if (m <= n) {
+    auto K = gradh.matmul(pinvA);
+    auto KpinvAh = K.matmul(pinvAh);
+    return - (pinvA.matmul(K)).transpose(-1, -2).conj()
+           + KpinvAh - (A.matmul(pinvA)).matmul(KpinvAh)
+           + (pinvAh.matmul(pinvA)).matmul(gradh - K.matmul(A));
+  }
+  else {
+    auto K = pinvA.matmul(gradh);
+    auto pinvAhK = pinvAh.matmul(K);
+    return - (K.matmul(pinvA)).transpose(-1, -2).conj()
+           + (gradh - A.matmul(K)).matmul(pinvA).matmul(pinvAh)
+           + pinvAhK - pinvAhK.matmul(pinvA).matmul(A);
+  }
+}
+
 Tensor split_with_sizes_backward(const std::vector<torch::autograd::Variable> &grads,
                                  IntArrayRef split_sizes, int64_t dim, IntArrayRef sizes, const at::TensorOptions &options) {
   dim = at::maybe_wrap_dim(dim, sizes.size());
