@@ -13,9 +13,10 @@ namespace jit {
 
 namespace {
 
-TypePtr toSingleType(const AliasTypeSet& mut_types) {
-  return mut_types.size() == 1 ? mut_types[0]
-                               : c10::UnionType::create(mut_types);
+c10::MaybeOwned<TypePtr> toSingleType(const AliasTypeSet& mut_types) {
+  return mut_types.size() == 1
+      ? c10::MaybeOwned<TypePtr>::borrowed(mut_types[0])
+      : c10::MaybeOwned<TypePtr>::owned(c10::UnionType::create(mut_types));
 }
 
 // This class determines whether a type is mutable, and, if so, it maps
@@ -93,7 +94,7 @@ class MutableTypePtrHelper {
       case TypeKind::UnionType: {
         AliasTypeSet mutable_types;
         for (const TypePtr& inner :
-             type->expect<UnionType>()->containedTypes()) {
+             type->expectRef<UnionType>().containedTypes()) {
           if (auto maybe_inner_types = mapTypeToAliasTypeSet(inner)) {
             mutable_types.insert(
                 mutable_types.end(),
@@ -115,8 +116,8 @@ class MutableTypePtrHelper {
       case TypeKind::FutureType: {
         if (auto maybe_mut_types = mapTypeToAliasTypeSet(
                 type->castRaw<FutureType>()->getElementType())) {
-          auto mut_type = toSingleType(*maybe_mut_types);
-          return {AliasTypeSet{FutureType::create(mut_type)}};
+          return {AliasTypeSet{
+              FutureType::create(*toSingleType(*maybe_mut_types))}};
         }
         return c10::nullopt;
       }
@@ -1722,13 +1723,13 @@ c10::optional<Element*> AliasDb::tryGetOrCreateWildcard(const TypePtr& type) {
     return c10::nullopt;
   }
   auto mut_type = toSingleType(*maybe_mut_types);
-  auto existing_wildcard = wildcardIndex_.find(mut_type);
+  auto existing_wildcard = wildcardIndex_.find(*mut_type);
   if (existing_wildcard != wildcardIndex_.end()) {
     return existing_wildcard->second;
   }
 
   auto wildcard_elem = memoryDAGBuilder_->makeFreshValue(nullptr);
-  wildcardIndex_.emplace(mut_type, wildcard_elem);
+  wildcardIndex_.emplace(*std::move(mut_type), wildcard_elem);
   if (maybe_mut_types->size() > 1) {
     pointUnionTypeElementToAllContainedTypes(wildcard_elem, *maybe_mut_types);
   } else {
