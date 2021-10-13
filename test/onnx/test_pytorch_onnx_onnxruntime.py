@@ -21,8 +21,7 @@ from model_defs.rnn_model_with_packed_sequence import (RnnModelWithPackedSequenc
                                                        RnnModelWithPackedSequenceWithoutState)
 from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion,
                                  skipIfNoLapack, disableScriptTest, skipIfONNXShapeInference,
-                                 skipIfUnsupportedMaxOpsetVersion, skipForAllOpsetVersions,
-                                 run_tests, TestCase)
+                                 skipIfUnsupportedMaxOpsetVersion, skipForAllOpsetVersions)
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 from typing import List, Tuple, Optional, Dict
@@ -275,7 +274,7 @@ def set_rng_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
 
-class TestONNXRuntime(TestCase):
+class TestONNXRuntime(unittest.TestCase):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
     opset_version = _export_onnx_opset_version
     keep_initializers_as_inputs = True  # For IR version 3 type export.
@@ -10090,34 +10089,34 @@ setup_rnn_tests()
 
 # opset 7 tests
 TestONNXRuntime_opset7 = type(str("TestONNXRuntime_opset7"),
-                              (TestCase,),
+                              (unittest.TestCase,),
                               dict(TestONNXRuntime.__dict__, opset_version=7))
 
 # opset 8 tests
 TestONNXRuntime_opset8 = type(str("TestONNXRuntime_opset8"),
-                              (TestCase,),
+                              (unittest.TestCase,),
                               dict(TestONNXRuntime.__dict__, opset_version=8))
 
 
 # opset 10 tests
 TestONNXRuntime_opset10 = type(str("TestONNXRuntime_opset10"),
-                               (TestCase,),
+                               (unittest.TestCase,),
                                dict(TestONNXRuntime.__dict__, opset_version=10))
 
 # opset 11 tests
 TestONNXRuntime_opset11 = type(str("TestONNXRuntime_opset11"),
-                               (TestCase,),
+                               (unittest.TestCase,),
                                dict(TestONNXRuntime.__dict__, opset_version=11))
 
 # opset 12 tests
 TestONNXRuntime_opset12 = type(str("TestONNXRuntime_opset12"),
-                               (TestCase,),
+                               (unittest.TestCase,),
                                dict(TestONNXRuntime.__dict__, opset_version=12))
 
 # opset 9 tests, with keep_initializers_as_inputs=False for
 # IR version 4 style export.
 TestONNXRuntime_opset9_IRv4 = type(str("TestONNXRuntime_opset9_IRv4"),
-                                   (TestCase,),
+                                   (unittest.TestCase,),
                                    dict(TestONNXRuntime.__dict__,
                                         keep_initializers_as_inputs=False))
 
@@ -10125,7 +10124,7 @@ TestONNXRuntime_opset9_IRv4 = type(str("TestONNXRuntime_opset9_IRv4"),
 # opset 10 tests, with keep_initializers_as_inputs=False for
 # IR version 4 style export.
 TestONNXRuntime_opset10_IRv4 = type(str("TestONNXRuntime_opset10_IRv4"),
-                                    (TestCase,),
+                                    (unittest.TestCase,),
                                     dict(TestONNXRuntime.__dict__, opset_version=10,
                                          keep_initializers_as_inputs=False))
 
@@ -10133,30 +10132,30 @@ TestONNXRuntime_opset10_IRv4 = type(str("TestONNXRuntime_opset10_IRv4"),
 # opset 11 tests, with keep_initializers_as_inputs=False for
 # IR version 4 style export.
 TestONNXRuntime_opset11_IRv4 = type(str("TestONNXRuntime_opset11_IRv4"),
-                                    (TestCase,),
+                                    (unittest.TestCase,),
                                     dict(TestONNXRuntime.__dict__, opset_version=11,
                                          keep_initializers_as_inputs=False))
 
 # opset 12 tests, with keep_initializers_as_inputs=False for
 # IR version 4 style export.
 TestONNXRuntime_opset12_IRv4 = type(str("TestONNXRuntime_opset12_IRv4"),
-                                    (TestCase,),
+                                    (unittest.TestCase,),
                                     dict(TestONNXRuntime.__dict__, opset_version=12,
                                          keep_initializers_as_inputs=False))
 
 # opset 13 tests
 TestONNXRuntime_opset13 = type(str("TestONNXRuntime_opset13"),
-                               (TestCase,),
+                               (unittest.TestCase,),
                                dict(TestONNXRuntime.__dict__, opset_version=13,
                                     keep_initializers_as_inputs=False,
                                     onnx_shape_inference=True))
 
 # opset 14 tests
 TestONNXRuntime_opset14 = type(str("TestONNXRuntime_opset14"),
-                               (TestCase,),
+                               (unittest.TestCase,),
                                dict(TestONNXRuntime.__dict__, opset_version=14,
                                     keep_initializers_as_inputs=False,
                                     onnx_shape_inference=True))
 
 if __name__ == "__main__":
-    run_tests()
+    unittest.main()
