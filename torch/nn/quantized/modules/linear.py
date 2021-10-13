@@ -255,7 +255,7 @@ class Linear(torch.nn.Module):
         r"""Create a quantized module from a float module or qparams_dict
 
         Args:
-            mod (Module): a float module, either produced by torch.quantization
+            mod (Module): a float module, either produced by torch.ao.quantization
                           utilities or provided by the user
         """
         if hasattr(mod, 'weight_fake_quant'):
