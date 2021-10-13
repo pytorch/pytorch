@@ -482,14 +482,16 @@ TEST(AliasAnalysisTest, SafeToChangeAliasingRelationship) {
   EXPECT_TRUE(aliasDb.safeToChangeAliasingRelationship(vmap["d"], vmap["c"]));
 }
 
-class BatchAndInstanceNormFixture : public ::testing::TestWithParam<std::tuple<std::string, NodeKind, bool>> {};
+class BatchAndInstanceNormFixture
+    : public ::testing::TestWithParam<std::tuple<std::string, NodeKind, bool>> {
+};
 
 TEST_P(BatchAndInstanceNormFixture, BatchAndInstanceNorm) {
   auto param = GetParam();
   auto fnName = std::get<0>(param);
   auto nodeKind = std::get<1>(param);
   auto isTraining = std::get<2>(param);
-  std::string isTrainingStr = std::to_string((int) isTraining);
+  std::string isTrainingStr = std::to_string((int)isTraining);
 
   auto graph = std::make_shared<Graph>();
 
@@ -497,15 +499,17 @@ TEST_P(BatchAndInstanceNormFixture, BatchAndInstanceNorm) {
       R"IR(
   graph(%input : Tensor, %running_mean : Tensor, %running_var : Tensor):
       %none : NoneType = prim::Constant()
-      %training : bool = prim::Constant[value=)IR" + isTrainingStr + R"IR(]()
+      %training : bool = prim::Constant[value=)IR" +
+          isTrainingStr + R"IR(]()
       %momentum : float = prim::Constant[value=1.0]()
       %eps : float = prim::Constant[value=1.0e-9]()
       %cudnn_enabled : bool = prim::Constant[value=0]()
-      %res : Tensor = )IR" + fnName + R"IR((%input, %none, %none, %running_mean, %running_var, %training, %momentum, %eps, %cudnn_enabled)
+      %res : Tensor = )IR" +
+          fnName +
+          R"IR((%input, %none, %none, %running_mean, %running_var, %training, %momentum, %eps, %cudnn_enabled)
       return (%res)
     )IR",
-    &*graph
-  );
+      &*graph);
 
   graph->lint();
   DepthFirstGraphNodeIterator it(graph);
@@ -536,11 +540,12 @@ TEST_P(BatchAndInstanceNormFixture, BatchAndInstanceNormTrainingUnknown) {
       %momentum : float = prim::Constant[value=1.0]()
       %eps : float = prim::Constant[value=1.0e-9]()
       %cudnn_enabled : bool = prim::Constant[value=0]()
-      %res : Tensor = )IR" + fnName + R"IR((%input, %none, %none, %running_mean, %running_var, %training, %momentum, %eps, %cudnn_enabled)
+      %res : Tensor = )IR" +
+          fnName +
+          R"IR((%input, %none, %none, %running_mean, %running_var, %training, %momentum, %eps, %cudnn_enabled)
       return (%res)
     )IR",
-    &*graph
-  );
+      &*graph);
 
   graph->lint();
   DepthFirstGraphNodeIterator it(graph);
@@ -562,7 +567,7 @@ TEST_P(BatchAndInstanceNormFixture, BatchNormTrainingWithNoMeanOrVar) {
   auto fnName = std::get<0>(param);
   auto nodeKind = std::get<1>(param);
   auto isTraining = std::get<2>(param);
-  std::string isTrainingStr = std::to_string((int) isTraining);
+  std::string isTrainingStr = std::to_string((int)isTraining);
 
   auto graph = std::make_shared<Graph>();
 
@@ -570,15 +575,17 @@ TEST_P(BatchAndInstanceNormFixture, BatchNormTrainingWithNoMeanOrVar) {
       R"IR(
   graph(%input : Tensor):
       %none : NoneType = prim::Constant()
-      %training : bool = prim::Constant[value=)IR" + isTrainingStr + R"IR(]()
+      %training : bool = prim::Constant[value=)IR" +
+          isTrainingStr + R"IR(]()
       %momentum : float = prim::Constant[value=1.0]()
       %eps : float = prim::Constant[value=1.0e-9]()
       %cudnn_enabled : bool = prim::Constant[value=0]()
-      %res : Tensor = )IR" + fnName + R"IR((%input, %none, %none, %none, %none, %training, %momentum, %eps, %cudnn_enabled)
+      %res : Tensor = )IR" +
+          fnName +
+          R"IR((%input, %none, %none, %none, %none, %training, %momentum, %eps, %cudnn_enabled)
       return (%res)
     )IR",
-    &*graph
-  );
+      &*graph);
 
   graph->lint();
   DepthFirstGraphNodeIterator it(graph);
@@ -596,15 +603,13 @@ TEST_P(BatchAndInstanceNormFixture, BatchNormTrainingWithNoMeanOrVar) {
 }
 
 INSTANTIATE_TEST_SUITE_P(
-  AliasAnalysisTest,
-  BatchAndInstanceNormFixture,
-  ::testing::Values(
-    std::make_tuple("aten::batch_norm", aten::batch_norm, false),
-    std::make_tuple("aten::instance_norm", aten::instance_norm, false),
-    std::make_tuple("aten::batch_norm", aten::batch_norm, true),
-    std::make_tuple("aten::instance_norm", aten::instance_norm, true)
-  )
-);
+    AliasAnalysisTest,
+    BatchAndInstanceNormFixture,
+    ::testing::Values(
+        std::make_tuple("aten::batch_norm", aten::batch_norm, false),
+        std::make_tuple("aten::instance_norm", aten::instance_norm, false),
+        std::make_tuple("aten::batch_norm", aten::batch_norm, true),
+        std::make_tuple("aten::instance_norm", aten::instance_norm, true)));
 
 TEST(WriteTrackingTest, Basic) {
   RegisterOperators reg({Operator(

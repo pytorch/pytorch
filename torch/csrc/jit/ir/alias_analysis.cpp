@@ -986,16 +986,24 @@ void AliasDb::analyzeRpcAsync(Node* node) {
   }
 }
 
-void AliasDb::analyzeBatchNormAndInstanceNorm(Node* node, const std::string& trainingInputName) {
-  TORCH_INTERNAL_ASSERT(node->hasNamedInput(trainingInputName), trainingInputName + " input is expected");
+void AliasDb::analyzeBatchNormAndInstanceNorm(
+    Node* node,
+    const std::string& trainingInputName) {
+  TORCH_INTERNAL_ASSERT(
+      node->hasNamedInput(trainingInputName),
+      trainingInputName + " input is expected");
   auto value = node->namedInput(trainingInputName);
-  TORCH_INTERNAL_ASSERT(value->type() == BoolType::get(), trainingInputName + " input is expected to be a bool");
+  TORCH_INTERNAL_ASSERT(
+      value->type() == BoolType::get(),
+      trainingInputName + " input is expected to be a bool");
   auto isTraining = constant_as<bool>(value);
 
   if (!isTraining.has_value() || *isTraining) {
-    TORCH_INTERNAL_ASSERT(node->hasNamedInput("running_mean"), "running_mean input is expected");
+    TORCH_INTERNAL_ASSERT(
+        node->hasNamedInput("running_mean"), "running_mean input is expected");
     auto runningMean = node->namedInput("running_mean");
-    TORCH_INTERNAL_ASSERT(node->hasNamedInput("running_var"), "running_var input is expected");
+    TORCH_INTERNAL_ASSERT(
+        node->hasNamedInput("running_var"), "running_var input is expected");
     auto runningVar = node->namedInput("running_var");
 
     registerWrite(runningMean, node, /*writeToContained=*/true);

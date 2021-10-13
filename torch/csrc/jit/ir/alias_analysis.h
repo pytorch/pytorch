@@ -215,7 +215,9 @@ class AliasDb {
   void analyzeFork(Node* node);
   void analyzeWait(Node* node);
   void analyzeRpcAsync(Node* node);
-  void analyzeBatchNormAndInstanceNorm(Node* node, const std::string& trainingInputName);
+  void analyzeBatchNormAndInstanceNorm(
+      Node* node,
+      const std::string& trainingInputName);
   void analyzeGradOf(Node* node);
   void analyzeSetAttr(Node* node);
   void analyzeConservative(Node* node);

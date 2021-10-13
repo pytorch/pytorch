@@ -226,7 +226,7 @@ c10::optional<IValue> toIValueProp(const Value* v) {
 }
 
 bool shouldIgnoreNode(const Node* n) {
-  switch(n->kind()) {
+  switch (n->kind()) {
     case aten::batch_norm:
     case aten::instance_norm:
       return true;
