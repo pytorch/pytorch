@@ -384,6 +384,21 @@ $6 = torch._ops.aten.add_($1, $5)''')
 
         self.assertEqual(type(MyTensor(2).new_ones(3)), MyTensor)
 
+    def test_like(self) -> None:
+        class MyTensor(torch.Tensor):
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                return MyTensor(3)
+
+        for f in ["empty", "ones", "rand", "randn", "zeros"]:
+            f_name = f + "_like"
+            self.assertEqual(type(getattr(torch, f_name)(MyTensor(2))), MyTensor)
+
+        self.assertEqual(type(torch.full_like(MyTensor(2), 1.)), MyTensor)
+        self.assertEqual(type(torch.randint_like(MyTensor(2), high=3)), MyTensor)
+
     def test_enable_python_mode_error(self) -> None:
         with self.assertRaisesRegex(ValueError, "__torch_dispatch__"):
             with enable_python_mode(torch.Tensor):
