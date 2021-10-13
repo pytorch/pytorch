@@ -282,6 +282,7 @@ class ExecutorCompileTimeEntry {
 //! Returns the vector of tensorviews that will be used to bind parallel
 //!  dimensions.
 std::vector<IterDomain*> getParallelBindingsIterDomains(
+    GpuLower& lower,
     const std::vector<TensorView*>& used_tvs);
 
 using ParallelExtentMap =

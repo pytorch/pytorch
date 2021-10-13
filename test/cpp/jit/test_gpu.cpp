@@ -17250,6 +17250,47 @@ TEST(NVFuserTest, FusionUnswitchPredicate_CUDA) {
   testValidate(&fusion, outputs, aten_inputs, {ref}, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, FusionIssue1189_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeConcreteTensor({16, 16});
+  auto tv1 = makeConcreteTensor({16, 16});
+
+  auto tv0b = broadcast(tv0, {false, false, true});
+  auto tv1b = broadcast(tv1, {false, false, true});
+
+  fusion.addInput(tv0b);
+  fusion.addInput(tv1b);
+
+  auto tv2 = add(tv0b, tv1b);
+  auto tv3 = sum(tv2, {1});
+  fusion.addOutput(tv3);
+
+  auto parallelize = [](auto tv) {
+    tv->axis(0)->parallelize(ParallelType::TIDx);
+    tv->axis(1)->parallelize(ParallelType::BIDx);
+    tv->axis(2)->parallelize(ParallelType::BIDy);
+  };
+
+  parallelize(tv0b);
+  parallelize(tv1b);
+  parallelize(tv2);
+  parallelize(tv3);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({16, 16, 1}, options);
+  at::Tensor t1 = at::randn({16, 16, 1}, options);
+  auto outputs = fe.runFusion({t0, t1});
+
+  auto ref = (t0 + t1).sum({1});
+
+  testValidate(&fusion, outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
+}
+
 TEST(NVFuserTest, FusionIssue1052_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);

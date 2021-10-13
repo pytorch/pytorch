@@ -339,17 +339,18 @@ LaunchParams FusionExecutor::computeLaunchParams(
 
   auto data_cache = compileTimeDataCache();
 
+  auto& lower = lowered_;
+
   auto& used_tvs = getUsedTVs();
   auto parallel_binding_ids_entry =
       executor_utils::caching::ExecutorCompileTimeEntry<
           executor_utils::caching::ParallelBindingIterDomains>(
-          data_cache, [&used_tvs]() {
+          data_cache, [&used_tvs, &lower]() {
             return std::make_unique<std::vector<IterDomain*>>(
-                executor_utils::getParallelBindingsIterDomains(used_tvs));
+                executor_utils::getParallelBindingsIterDomains(
+                    lower, used_tvs));
           });
   auto& parallel_binding_ids = parallel_binding_ids_entry.get();
-
-  auto& lower = lowered_;
 
   auto parallel_iter_extent_entry =
       executor_utils::caching::ExecutorCompileTimeEntry<

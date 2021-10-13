@@ -989,12 +989,25 @@ template class ExecutorCompileTimeEntry<OutputAliasIndices>;
 } // namespace caching
 
 std::vector<IterDomain*> getParallelBindingsIterDomains(
+    GpuLower& lower,
     const std::vector<TensorView*>& used_tvs) {
   std::vector<IterDomain*> parallel_ids;
   for (auto tv : used_tvs) {
     for (auto id : tv->domain()->domain()) {
-      if (id->isThread() && !id->isBroadcast()) {
-        parallel_ids.push_back(id);
+      if (id->isThread()) {
+        if (id->isBroadcast()) {
+          // Want to keep the broadcast dimensions if they are not resolved
+          // TODO: piping down the parallel dimension map here would
+          //  be helpful
+          auto& parallel_map = lower.caParallelMap();
+          if (parallel_map.getConcreteMappedID(id) == id) {
+            parallel_ids.push_back(id);
+          }
+        } else {
+          // Non broadcast ids are directly added to the binding
+          //  ids.
+          parallel_ids.push_back(id);
+        }
       }
     }
   }
