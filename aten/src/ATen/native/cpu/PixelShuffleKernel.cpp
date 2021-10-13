@@ -180,13 +180,13 @@ void pixel_shuffle_kernel_impl(
     int64_t upscale_factor) {
   switch (input.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
-      AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "pixel_shuffle", [&] {
+      AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "pixel_shuffle", [&] {
         cpu_pixel_shuffle<scalar_t>(output, input, upscale_factor);
       });
       break;
     }
     case at::MemoryFormat::ChannelsLast: {
-      AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "pixel_shuffle_channels_last", [&] {
+      AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "pixel_shuffle_channels_last", [&] {
         cpu_pixel_shuffle_channels_last<scalar_t>(output, input, upscale_factor);
       });
       break;
@@ -202,13 +202,13 @@ void pixel_shuffle_backward_kernel_impl(
     int64_t upscale_factor) {
   switch (grad_output.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
-      AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "pixel_shuffle_backward", [&] {
+      AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, grad_output.scalar_type(), "pixel_shuffle_backward", [&] {
         cpu_pixel_shuffle_backward<scalar_t>(grad_input, grad_output, upscale_factor);
       });
       break;
     }
     case at::MemoryFormat::ChannelsLast: {
-      AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "pixel_shuffle_backward_channels_last", [&] {
+      AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, grad_output.scalar_type(), "pixel_shuffle_backward_channels_last", [&] {
         cpu_pixel_shuffle_backward_channels_last<scalar_t>(grad_input, grad_output, upscale_factor);
       });
       break;
@@ -226,7 +226,7 @@ void pixel_unshuffle_kernel_impl(
     case at::MemoryFormat::Contiguous: {
       // input tensor shape of [N, C, Hr, Wr]
       // output tensor shape of [N, Crr, H, W]
-      AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "pixel_unshuffle", [&] {
+      AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "pixel_unshuffle", [&] {
         cpu_pixel_shuffle_backward<scalar_t>(output, input, downscale_factor);
       });
       break;
@@ -234,7 +234,7 @@ void pixel_unshuffle_kernel_impl(
     case at::MemoryFormat::ChannelsLast: {
       // input tensor shape of [N, Hr, Wr, C]
       // output tensor shape of [N, H, W, Crr]
-      AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "pixel_unshuffle_channels_last", [&] {
+      AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "pixel_unshuffle_channels_last", [&] {
         cpu_pixel_shuffle_backward_channels_last<scalar_t>(output, input, downscale_factor);
       });
       break;
@@ -252,7 +252,7 @@ void pixel_unshuffle_backward_kernel_impl(
     case at::MemoryFormat::Contiguous: {
       // grad_output tensor shape of [N, Crr, H, W]
       // grad_input tensor shape of [N, C, Hr, Wr]
-      AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "pixel_unshuffle_backward", [&] {
+      AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, grad_output.scalar_type(), "pixel_unshuffle_backward", [&] {
         cpu_pixel_shuffle<scalar_t>(grad_input, grad_output, downscale_factor);
       });
       break;
@@ -260,7 +260,7 @@ void pixel_unshuffle_backward_kernel_impl(
     case at::MemoryFormat::ChannelsLast: {
       // grad_output tensor shape of [N, H, W, Crr]
       // grad_input tensor shape of [N, Hr, Wr, C]
-      AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "pixel_unshuffle_backward_channels_last", [&] {
+      AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, grad_output.scalar_type(), "pixel_unshuffle_backward_channels_last", [&] {
         cpu_pixel_shuffle_channels_last<scalar_t>(grad_input, grad_output, downscale_factor);
       });
       break;
