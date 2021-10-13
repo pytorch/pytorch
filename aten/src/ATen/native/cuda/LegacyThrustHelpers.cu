@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/native/cuda/SortingCommon.cuh>
-#include <ATen/cuda/cub_macros.cuh>
+#include <ATen/cuda/cub_definitions.cuh>
 
 #include <ATen/cuda/ThrustAllocator.h>
 #include <thrust/device_ptr.h>

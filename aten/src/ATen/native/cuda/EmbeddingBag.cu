@@ -200,8 +200,9 @@ Tensor embedding_bag_backward_cuda_sum_avg(
       auto count_data = count.data_ptr<index_t>();
       cuda::cub::inclusive_sum_by_key(
         sorted_data,
-        detail::cub::ConstantInputIterator<index_t>(1),
-        count_data
+        at_cuda_detail::cub::ConstantInputIterator<index_t>(1),
+        count_data,
+        num_indices
       );
 
       // Take the maximum of each count per unique key in reverse:
@@ -211,8 +212,8 @@ Tensor embedding_bag_backward_cuda_sum_avg(
         thrust::make_reverse_iterator(sorted_data + num_indices),
         thrust::make_reverse_iterator(count_data + num_indices),
         thrust::make_reverse_iterator(count_data + num_indices),
-        num_indices,
-        detail::cub::Max()
+        at_cuda_detail::cub::Max(),
+        num_indices
       );
 #else
       embedding_dense_backward_cuda_scan<index_t>(sorted_indices, count);
