@@ -18,54 +18,51 @@ def _lower_ref_linear_module(model: QuantizedGraphModule) -> QuantizedGraphModul
     # TODO: maybe orgnize this better (e.g. break down to more functions)
     # to make this function more readable
     for n in model.graph.nodes:
-        if is_match(modules, n, pattern):
-            q_node = n
-            linear_node = q_node.args[0]
-            dq_node = linear_node.args[0]
-            if not len(dq_node.users) == 1:
-                continue
-            if not len(linear_node.users) == 1:
-                continue
-            # get output scale/zero_point/dtype from the quantize node
-            scale_node = q_node.args[1]
-            zero_point_node = q_node.args[2]
-            dtype = q_node.args[3]
+        if not is_match(modules, n, pattern, max_uses=1):
+            continue
+        q_node = n
+        linear_node = q_node.args[0]
+        dq_node = linear_node.args[0]
+        # get output scale/zero_point/dtype from the quantize node
+        scale_node = q_node.args[1]
+        zero_point_node = q_node.args[2]
+        dtype = q_node.args[3]
 
-            if scale_node.op != "get_attr" or zero_point_node.op != "get_attr":
-                continue
+        # this can be removed if we add support for "get_attr" in is_match
+        if scale_node.op != "get_attr" or zero_point_node.op != "get_attr":
+            print("Find the pattern but scale_node and zero_point node are not `get_attr`,"
+                  f"got: {scale_node.format_node} {zero_point_node.format_node()}")
+            continue
 
-            if dtype != torch.quint8:
-                print(f"Only qint8 output for quantized linear is supported, got: {dtype}")
-                continue
+        # this can be removed if we add support for constants in is_match
+        if dtype != torch.quint8:
+            print(f"Only qint8 output for quantized linear is supported, got: {dtype}")
+            continue
 
-            # change this pattern to use torch.nn.quantized.Linear
-            ref_qlinear = modules[linear_node.target]
-            # initialize torch.nn.quantized.Linear with torch.nn.quantized._reference.Linear
-            qlinear = torch.nn.quantized.Linear(
-                ref_qlinear.in_features,
-                ref_qlinear.out_features)
-            qweight = ref_qlinear.get_quantized_weight()
-            qlinear.set_weight_bias(qweight, ref_qlinear.bias)
+        # change this pattern to use torch.nn.quantized.Linear
+        ref_qlinear = modules[linear_node.target]
+        # initialize torch.nn.quantized.Linear with torch.nn.quantized._reference.Linear
+        output_scale = getattr(model, scale_node.target)
+        output_zero_point = getattr(model, zero_point_node.target)
+        # TODO: we can get the class from a map in the future and make this
+        # configurable by user
+        qlinear = torch.nn.quantized.Linear.from_reference(
+            ref_qlinear, output_scale, output_zero_point)
 
-            act_scale = getattr(model, scale_node.target)
-            act_zero_point = getattr(model, zero_point_node.target)
-            qlinear.scale = float(act_scale)
-            qlinear.zero_point = int(act_zero_point)
+        # replace ref_linear with linear
+        parent_name, module_name = _parent_name(linear_node.target)
+        setattr(modules[parent_name], module_name, qlinear)
+        # remvoe dq node:
+        dq_node_input = dq_node.args[0]
 
-            # replace ref_linear with linear
-            parent_name, module_name = _parent_name(linear_node.target)
-            setattr(modules[parent_name], module_name, qlinear)
-            # remvoe dq node:
-            dq_node_input = dq_node.args[0]
+        dq_node.replace_all_uses_with(dq_node_input)
+        model.graph.erase_node(dq_node)
 
-            dq_node.replace_all_uses_with(dq_node_input)
-            model.graph.erase_node(dq_node)
-
-            # remove q node and args:
-            q_node.replace_all_uses_with(linear_node)
-            model.graph.erase_node(q_node)
-            model.graph.erase_node(scale_node)
-            model.graph.erase_node(zero_point_node)
+        # remove q node and args:
+        q_node.replace_all_uses_with(linear_node)
+        model.graph.erase_node(q_node)
+        model.graph.erase_node(scale_node)
+        model.graph.erase_node(zero_point_node)
     model.recompile()
     return model
 

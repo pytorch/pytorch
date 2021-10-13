@@ -1,6 +1,5 @@
 #include <THC/THCGeneral.h>
 #include <THC/THCTensor.hpp>
-#include <THC/THCTensorCopy.h>
 
 #include <new>
 
@@ -16,7 +15,7 @@
 #include <THC/generic/THCTensor.cpp>
 #include <THC/THCGenerateBFloat16Type.h>
 
-#include <ATen/native/cuda/Resize.cuh>
+#include <ATen/native/cuda/Resize.h>
 
 THCTensor *THCTensor_new(THCState *state, caffe2::TypeMeta type_meta) {
   auto scalar_type = at::typeMetaToScalarType(type_meta);

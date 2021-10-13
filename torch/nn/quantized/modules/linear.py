@@ -252,10 +252,10 @@ class Linear(torch.nn.Module):
 
     @classmethod
     def from_float(cls, mod):
-        r"""Create a quantized module from a float module or qparams_dict
+        r"""Create a quantized module from an observed float module
 
         Args:
-            mod (Module): a float module, either produced by torch.quantization
+            mod (Module): a float module, either produced by torch.ao.quantization
                           utilities or provided by the user
         """
         if hasattr(mod, 'weight_fake_quant'):
@@ -287,4 +287,24 @@ class Linear(torch.nn.Module):
         qlinear.set_weight_bias(qweight, mod.bias)
         qlinear.scale = float(act_scale)
         qlinear.zero_point = int(act_zp)
+        return qlinear
+
+    @classmethod
+    def from_reference(cls, ref_qlinear, output_scale, output_zero_point):
+        r"""Create a (fbgemm/qnnpack) quantized module from a reference quantized module
+
+        Args:
+            ref_module (Module): a reference quantized  module, either produced by torch.ao.quantization
+                          utilities or provided by the user
+            output_scale (float): scale for output Tensor
+            zero_point (int(: zero point for ouput Tensor
+        """
+        qlinear = cls(
+            ref_qlinear.in_features,
+            ref_qlinear.out_features)
+        qweight = ref_qlinear.get_quantized_weight()
+        qlinear.set_weight_bias(qweight, ref_qlinear.bias)
+
+        qlinear.scale = float(output_scale)
+        qlinear.zero_point = int(output_zero_point)
         return qlinear
