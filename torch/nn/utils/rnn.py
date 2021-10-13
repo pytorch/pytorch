@@ -396,3 +396,45 @@ def pack_sequence(sequences, enforce_sorted=True):
     """
     lengths = torch.as_tensor([v.size(0) for v in sequences])
     return pack_padded_sequence(pad_sequence(sequences), lengths, enforce_sorted=enforce_sorted)
+
+
+def unpack_sequence(packed_sequences):
+    # type: (PackedSequence) -> List[Tensor]
+    r"""Unpacks PackedSequence into a list of variable length Tensors
+
+    ``packed_sequences`` should be a PackedSequence object.
+
+
+    Example:
+        >>> from torch.nn.utils.rnn import pack_sequence, unpack_sequence
+        >>> a = torch.tensor([1,2,3])
+        >>> b = torch.tensor([4,5])
+        >>> c = torch.tensor([6])
+        >>> sequences = [a, b, c]
+        [tensor([ 1,  2,  3]), tensor([ 4,  5]), tensor([ 6])]
+        >>> packed_sequences = pack_sequence([a, b, c])
+        PackedSequence(data=tensor([ 1,  4,  6,  2,  5,  3]), batch_sizes=tensor([ 3,  2,  1]))
+        >>> unpacked_sequences = unpack_sequence(packed_sequences)
+        [tensor([ 1,  2,  3]), tensor([ 4,  5]), tensor([ 6])]
+
+
+    Args:
+        packed_sequences (PackedSequence): A PackedSequence object.
+
+    Returns:
+        a :class:`List[Tensor]` object
+    """
+    
+    unpacked_sequences = []
+    
+    padded_sequences, lengths = pad_packed_sequence(packed_sequences, batch_first=True)
+    
+    max_length = padded_sequences.shape[1]
+    idx = torch.arange(max_length)
+
+    for seq, length in zip(padded_sequences, lengths):
+        mask = idx < length
+        unpacked_seq = seq[mask]
+        unpacked_sequences.append(unpacked_seq)
+        
+    return unpacked_sequences
