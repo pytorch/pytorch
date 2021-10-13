@@ -911,9 +911,9 @@ TEST(StaticRuntime, CleanUpMemory) {
   for (auto cleanup_activations : {true, false}) {
     for (auto enable_out_variant : {true, false}) {
       for (auto optimize_memory : {true, false}) {
-        for (auto optimize_graph_output_memory : {true, false}) {
-          if (optimize_graph_output_memory && !optimize_memory) {
-            // when optimize_graph_output_memory is enabled, optimize_memory
+        for (auto manage_output_tensors : {true, false}) {
+          if (manage_output_tensors && !enable_out_variant) {
+            // when manage_output_tensors is enabled, enable_out_variant
             // must be enabled too
             continue;
           }
@@ -925,14 +925,15 @@ TEST(StaticRuntime, CleanUpMemory) {
           VLOG(1) << "cleanup_activations: " << cleanup_activations
                   << ", enable_out_variant: " << enable_out_variant
                   << ", optimize_memory: " << optimize_memory
-                  << ", optimize_graph_output_memory: "
-                  << optimize_graph_output_memory;
+                  << ", manage_output_tensors: "
+                  << manage_output_tensors;
           torch::jit::StaticModuleOptions opts{
               cleanup_activations,
               enable_out_variant,
               optimize_memory,
-              optimize_graph_output_memory};
+              manage_output_tensors};
           torch::jit::StaticModule smod(mod, false, opts);
+          torch::jit::StaticRuntime runtime(smod);
 
           for (int batch_size : {1, 8, 32}) {
             for (int i = 0; i < 2; ++i) {
@@ -948,15 +949,151 @@ TEST(StaticRuntime, CleanUpMemory) {
               // run static runtime
               std::vector<at::Tensor> input_tensors(
                   {ad_emb_packed, user_emb, wide});
-              at::Tensor output_2 = smod(input_tensors)[0];
-              smod.runtime().check_for_memory_leak();
+              at::Tensor output_2 = runtime(input_tensors)[0];
+              runtime.check_for_memory_leak();
               EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
+              if (manage_output_tensors) {
+                runtime.deallocateOutputTensors();
+                runtime.checkOutputTensorMemoryLeaks();
+              }
             }
           }
         }
       }
     }
   }
+}
+
+TEST(StaticRuntime, ManageOutputTensors) {
+  const std::string test_graph = R"IR(
+    graph(%0 : Tensor):
+      # With manage_output_tensor enabled, this tensor is managed.
+      %1 : Tensor = aten::abs(%0)
+      # The output container object is never managed.
+      %2 : (Tensor) = prim::TupleConstruct(%1)
+      return (%2)
+  )IR";
+  auto a = at::randn({2, 2});
+  auto b = at::randn({2, 2, 2});
+  std::vector<at::IValue> args{a};
+  std::vector<at::IValue> args2{b};
+  testStaticRuntime(test_graph, args);
+  testStaticRuntime(test_graph, args, args2);
+}
+
+TEST(StaticRuntime, ManageOutputTensorsReturnsOutputContainingManagedOutputTensor) {
+  const std::string test_graph = R"IR(
+    graph(%0 : Tensor):
+      # With manage_output_tensor enabled, this tensor is managed.
+      %1 : Tensor = aten::abs(%0)
+      # The output container object is never managed.
+      %2 : (Tensor) = prim::TupleConstruct(%1)
+      return (%2)
+  )IR";
+  auto g = std::make_shared<torch::jit::Graph>();
+  torch::jit::parseIR(test_graph, g.get());
+  torch::jit::StaticModuleOptions opts{
+    /*cleanup_activations=*/true,
+    /*enable_out_variant=*/true,
+    /*optimize_memory=*/true,
+    /*manage_output_tensors=*/true};
+  auto a = at::randn({2, 2});
+  std::vector<at::IValue> args{a};
+  torch::jit::StaticModule smod(g, opts);
+  torch::jit::StaticRuntime runtime(smod);
+  // Profile run.
+  {
+    IValue tuple = runtime(args, {});
+    ASSERT_TRUE(tuple.isTuple());
+    ASSERT_EQ(tuple.toTuple()->elements().size(), 1);
+    // Do not manage intput value.
+    EXPECT_FALSE(runtime.isManagedOutputTensor(args[0]));
+    // Do not manage direct output value.
+    EXPECT_FALSE(runtime.isManagedOutputTensor(tuple));
+    IValue element = tuple.toTuple()->elements()[0];
+    // Tensor to be managed, but not yet from the profile run.
+    EXPECT_FALSE(runtime.isManagedOutputTensor(element));
+    tuple = IValue();
+    runtime.deallocateOutputTensors();
+    runtime.checkOutputTensorMemoryLeaks();
+  }
+  // Second run that manages output tensors.
+  {
+    IValue tuple = runtime(args, {});
+    ASSERT_TRUE(tuple.isTuple());
+    ASSERT_EQ(tuple.toTuple()->elements().size(), 1);
+    // Do not manage intput value.
+    EXPECT_FALSE(runtime.isManagedOutputTensor(args[0]));
+    // Do not manage direct output value.
+    EXPECT_FALSE(runtime.isManagedOutputTensor(tuple));
+    IValue element = tuple.toTuple()->elements()[0];
+    // Tensor to be managed, but not yet from the profile run.
+    EXPECT_TRUE(runtime.isManagedOutputTensor(element));
+    tuple = IValue();
+    runtime.deallocateOutputTensors();
+    runtime.checkOutputTensorMemoryLeaks();
+  }
+}
+
+TEST(StaticRuntime, ManageOutputTensorsWithDeallocateOutputTensors) {
+  const int embedding_size = 32;
+  const int num_features = 50;
+  torch::jit::Module mod = getDeepAndWideSciptModel();
+
+  torch::jit::StaticModuleOptions opts{
+    /*cleanup_activations=*/true,
+    /*enable_out_variant=*/true,
+    /*optimize_memory=*/true,
+    /*manage_output_tensors=*/true};
+  torch::jit::StaticModule smod(mod, false, opts);
+  torch::jit::StaticRuntime runtime(smod);
+  // Reenter the runtime with the input with the same shape/different shapes.
+  for (int batch_size : {8, 8, 24, 8}) {
+    auto ad_emb_packed =
+      torch::randn({batch_size, 1, embedding_size});
+    auto user_emb = torch::randn({batch_size, 1, embedding_size});
+    auto wide = torch::randn({batch_size, num_features});
+    std::vector<at::Tensor> input_tensors(
+        {ad_emb_packed, user_emb, wide});
+    runtime(input_tensors)[0];
+    runtime.check_for_memory_leak();
+    runtime.deallocateOutputTensors();
+    runtime.checkOutputTensorMemoryLeaks();
+  }
+}
+
+TEST(StaticRuntime, ManageOutputTensorsWithoutDeallocateOutputTensors) {
+  const int embedding_size = 32;
+  const int num_features = 50;
+  torch::jit::Module mod = getDeepAndWideSciptModel();
+
+  torch::jit::StaticModuleOptions opts{
+    /*cleanup_activations=*/true,
+    /*enable_out_variant=*/true,
+    /*optimize_memory=*/true,
+    /*manage_output_tensors=*/true};
+  torch::jit::StaticModule smod(mod, false, opts);
+  torch::jit::StaticRuntime runtime(smod);
+  int batch_size = 8;
+  auto ad_emb_packed =
+    torch::randn({batch_size, 1, embedding_size});
+  auto user_emb = torch::randn({batch_size, 1, embedding_size});
+  auto wide = torch::randn({batch_size, num_features});
+  std::vector<at::Tensor> input_tensors(
+      {ad_emb_packed, user_emb, wide});
+  // Profile run.
+  runtime(input_tensors)[0];
+  runtime.deallocateOutputTensors();
+  // Run again to allocate output Tensors without deallocating them.
+  runtime(input_tensors)[0];
+  // Memory leak checking fails.
+  EXPECT_THROW(runtime.checkOutputTensorMemoryLeaks(), std::exception);
+  // Calling the runtime without deallocation fails too.
+  EXPECT_THROW(runtime(input_tensors)[0], std::exception);
+  // After deallocation, everything works fine.
+  runtime.deallocateOutputTensors();
+  runtime.checkOutputTensorMemoryLeaks();
+  runtime(input_tensors)[0];
 }
 
 TEST(StaticRuntime, FusionPass) {
