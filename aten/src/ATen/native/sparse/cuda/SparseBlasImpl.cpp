@@ -1,8 +1,10 @@
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDADataType.h>
 #include <ATen/cuda/CUDASparse.h>
+#include <ATen/cuda/CUDASparseBlas.h>
 #include <ATen/cuda/CUDASparseDescriptors.h>
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/cuda/MiscUtils.h>
 #include <ATen/native/sparse/cuda/SparseBlasImpl.h>
 #include <ATen/native/sparse/cuda/SparseBlasLegacy.h>
 
@@ -65,9 +67,23 @@ c10::MaybeOwned<Tensor> inline prepare_dense_vector_for_cusparse(
   }
 }
 
-} // anonymous namespace
+void inline indices_to_32_bit_inplace(const Tensor& input) {
+  static_cast<SparseCsrTensorImpl*>(input.unsafeGetTensorImpl())->set_member_tensors(
+      input.crow_indices().to(kInt),
+      input.col_indices().to(kInt),
+      input.values(),
+      input.sizes());
+}
 
-void addmm_out_sparse_csr(
+void inline col_indices_and_values_resize_(const Tensor& input, int64_t nnz) {
+  static_cast<SparseCsrTensorImpl*>(input.unsafeGetTensorImpl())->set_member_tensors(
+      input.crow_indices(),
+      input.col_indices().resize_({nnz}),
+      input.values().resize_({nnz}),
+      input.sizes());
+}
+
+void spmm(
     const at::sparse_csr::SparseCsrTensor& mat1,
     const Tensor& mat2,
     const Scalar& beta,
@@ -173,7 +189,169 @@ void addmm_out_sparse_csr(
   if (!result.is_same(*result_)) {
     result.copy_(*result_);
   }
+#endif // !AT_USE_CUSPARSE_GENERIC_API()
+}
+
+void spgemm(
+    const at::sparse_csr::SparseCsrTensor& A,
+    const at::sparse_csr::SparseCsrTensor& B,
+    const Scalar& beta,
+    const Scalar& alpha,
+    const at::sparse_csr::SparseCsrTensor& C) {
+#if defined(CUDA_VERSION) && CUDA_VERSION < 11000
+  TORCH_CHECK(
+      false,
+      "Calling addmm with sparse GPU tensors requires compiling ",
+      "PyTorch with CUDA 11+. ",
+      "Please use PyTorch built with newer CUDA version.");
+#else
+  IntArrayRef A_sizes = A.sizes();
+  auto ndim = A.dim();
+  auto m = A_sizes[ndim - 2];
+
+  IntArrayRef B_sizes = B.sizes();
+  auto n = B_sizes[ndim - 1];
+
+  // Only 32-bit indices are supported
+  auto A_32 = at::native::_sparse_csr_tensor_unsafe(A.crow_indices().to(kInt), A.col_indices().to(kInt), A.values(), A.sizes(), A.scalar_type(), A.layout(), A.device());
+  auto B_32 = at::native::_sparse_csr_tensor_unsafe(B.crow_indices().to(kInt), B.col_indices().to(kInt), B.values(), B.sizes(), B.scalar_type(), B.layout(), B.device());
+
+  // Modify C tensor in-place to swap indices tensors with 32-bit variants
+  indices_to_32_bit_inplace(C);
+
+  auto descA = at::cuda::sparse::CuSparseSpMatCsrDescriptor(A_32);
+  auto descB = at::cuda::sparse::CuSparseSpMatCsrDescriptor(B_32);
+  auto descC = at::cuda::sparse::CuSparseSpMatCsrDescriptor(C);
+
+  auto spgemm_desc = at::cuda::sparse::CuSparseSpGEMMDescriptor();
+  cusparseOperation_t opA = CUSPARSE_OPERATION_NON_TRANSPOSE;
+  cusparseOperation_t opB = CUSPARSE_OPERATION_NON_TRANSPOSE;
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+      kHalf,
+      kBFloat16,
+      C.scalar_type(),
+      "addmm_out_sparse_csr_impl_cuda",
+      [&] {
+        auto beta_ = beta.to<scalar_t>();
+        auto alpha_ = alpha.to<scalar_t>();
+        auto compute_type = at::cuda::getCudaDataType<scalar_t>();
+        auto handle = at::cuda::getCurrentCUDASparseHandle();
+
+        // It's required to call workEstimation twice
+        size_t buffer_size1 = 0;
+        TORCH_CUDASPARSE_CHECK(cusparseSpGEMM_workEstimation(
+            handle,
+            opA,
+            opB,
+            &alpha_,
+            descA.descriptor(),
+            descB.descriptor(),
+            &beta_,
+            descC.descriptor(),
+            compute_type,
+            CUSPARSE_SPGEMM_DEFAULT,
+            spgemm_desc.descriptor(),
+            &buffer_size1,
+            nullptr));
+
+        auto& allocator = *c10::cuda::CUDACachingAllocator::get();
+        auto buffer1 = allocator.allocate(buffer_size1);
+
+        TORCH_CUDASPARSE_CHECK(cusparseSpGEMM_workEstimation(
+            handle,
+            opA,
+            opB,
+            &alpha_,
+            descA.descriptor(),
+            descB.descriptor(),
+            &beta_,
+            descC.descriptor(),
+            compute_type,
+            CUSPARSE_SPGEMM_DEFAULT,
+            spgemm_desc.descriptor(),
+            &buffer_size1,
+            buffer1.get()));
+
+        // It's required to call compute twice
+        size_t buffer_size2 = 0;
+        TORCH_CUDASPARSE_CHECK(cusparseSpGEMM_compute(
+            handle,
+            opA,
+            opB,
+            &alpha_,
+            descA.descriptor(),
+            descB.descriptor(),
+            &beta_,
+            descC.descriptor(),
+            compute_type,
+            CUSPARSE_SPGEMM_DEFAULT,
+            spgemm_desc.descriptor(),
+            &buffer_size2,
+            nullptr));
+
+        auto buffer2 = allocator.allocate(buffer_size2);
+
+        TORCH_CUDASPARSE_CHECK(cusparseSpGEMM_compute(
+            handle,
+            opA,
+            opB,
+            &alpha_,
+            descA.descriptor(),
+            descB.descriptor(),
+            &beta_,
+            descC.descriptor(),
+            compute_type,
+            CUSPARSE_SPGEMM_DEFAULT,
+            spgemm_desc.descriptor(),
+            &buffer_size2,
+            buffer2.get()));
+
+        // Get how many specified elements are there in C
+        int64_t C_num_rows, C_num_cols, C_nnz;
+        std::tie(C_num_rows, C_num_cols, C_nnz) = descC.get_size();
+
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(C_num_rows == m);
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(C_num_cols == n);
+
+        // Resize result using nnz information from cusolver
+        col_indices_and_values_resize_(C, C_nnz);
+
+        // Update matC with the new pointers
+        descC.set_tensor(C);
+
+        // Copy the data into C
+        TORCH_CUDASPARSE_CHECK(cusparseSpGEMM_copy(
+            handle,
+            opA,
+            opB,
+            &alpha_,
+            descA.descriptor(),
+            descB.descriptor(),
+            &beta_,
+            descC.descriptor(),
+            compute_type,
+            CUSPARSE_SPGEMM_DEFAULT,
+            spgemm_desc.descriptor()));
+      });
 #endif
+}
+
+} // anonymous namespace
+
+void addmm_out_sparse_csr(
+    const at::sparse_csr::SparseCsrTensor& mat1,
+    const Tensor& mat2,
+    const Scalar& beta,
+    const Scalar& alpha,
+    const Tensor& result) {
+  if (mat2.layout() == kStrided && result.layout() == kStrided) {
+    return spmm(mat1, mat2, beta, alpha, result);
+  } else if (mat2.is_sparse_csr() && result.is_sparse_csr()) {
+    return spgemm(mat1, mat2, beta, alpha, result);
+  } else {
+    TORCH_INTERNAL_ASSERT(false, "Received unexpected tensor layouts as input.");
+  }
 }
 
 /*
@@ -267,6 +445,323 @@ void addmv_out_sparse_csr(
     result.copy_(*result_);
   }
 #endif
+}
+
+/*
+  Solves a system of linear equations whose coefficients are represented in a sparse triangular matrix A:
+  op(A) X = B.
+
+  Args:
+  * `A` - sparse Tensor of size m × m.
+  * `B` - dense Tensor of size m × nrhs.
+  * `X` - dense Tensor of size m × nrhs.
+  * `upper` - controls whether upper or lower triangular part of A is considered in computations.
+  * `transpose` - if true then op(A) = A^T.
+  * `unitriangular` - if true then the diagonal elements of A are assumed to be one.
+*/
+void triangular_solve_out_sparse_csr(
+    const at::sparse_csr::SparseCsrTensor& A,
+    const Tensor& B,
+    const Tensor& X,
+    bool upper,
+    bool transpose,
+    bool unitriangular) {
+#if !AT_USE_CUSPARSE_GENERIC_SPSV()
+  TORCH_CHECK(
+      false,
+      "Calling triangular solve on a sparse GPU tensor requires compiling ",
+      "PyTorch with CUDA 11.3. ",
+      "Please use PyTorch built with newer CUDA version.");
+#else
+  if (B.numel() == 0 || X.numel() == 0 || A._nnz() == 0) {
+    return;
+  }
+
+  c10::MaybeOwned<Tensor> B_ = prepare_dense_matrix_for_cusparse(B);
+  c10::MaybeOwned<Tensor> X_ = prepare_dense_matrix_for_cusparse(X);
+
+  // TODO: update this to support COO sparse layout
+  auto descA = at::cuda::sparse::CuSparseSpMatCsrDescriptor(A);
+  descA.set_mat_fill_mode(upper);
+  descA.set_mat_diag_type(unitriangular);
+  cusparseOperation_t opA = transpose ? CUSPARSE_OPERATION_TRANSPOSE : CUSPARSE_OPERATION_NON_TRANSPOSE;
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      X.scalar_type(),
+      "triangular_solve_out_sparse_csr_cuda_impl",
+      [&] {
+        scalar_t alpha = 1;
+        cudaDataType compute_type = at::cuda::getCudaDataType<scalar_t>();
+        auto handle = at::cuda::getCurrentCUDASparseHandle();
+        size_t buffer_size;
+
+        if (B.size(-1) == 1) {
+          auto desc_spsv = at::cuda::sparse::CuSparseSpSVDescriptor();
+          auto descB = at::cuda::sparse::CuSparseDnVecDescriptor(*B_);
+          auto descX = at::cuda::sparse::CuSparseDnVecDescriptor(*X_);
+          TORCH_CUDASPARSE_CHECK(cusparseSpSV_bufferSize(
+              handle,
+              opA,
+              &alpha,
+              descA.descriptor(),
+              descB.descriptor(),
+              descX.descriptor(),
+              compute_type,
+              CUSPARSE_SPSV_ALG_DEFAULT,
+              desc_spsv.descriptor(),
+              &buffer_size // output
+              ));
+
+          auto& allocator = *c10::cuda::CUDACachingAllocator::get();
+          auto work_data = allocator.allocate(buffer_size);
+
+          TORCH_CUDASPARSE_CHECK(cusparseSpSV_analysis(
+              handle,
+              opA,
+              &alpha,
+              descA.descriptor(),
+              descB.descriptor(),
+              descX.descriptor(),
+              compute_type,
+              CUSPARSE_SPSV_ALG_DEFAULT,
+              desc_spsv.descriptor(),
+              work_data.get()
+          ));
+
+          TORCH_CUDASPARSE_CHECK(cusparseSpSV_solve(
+              handle,
+              opA,
+              &alpha,
+              descA.descriptor(),
+              descB.descriptor(),
+              descX.descriptor(),
+              compute_type,
+              CUSPARSE_SPSV_ALG_DEFAULT,
+              desc_spsv.descriptor()
+          ));
+        } else {
+#if !AT_USE_CUSPARSE_GENERIC_SPSM()
+          TORCH_CHECK(
+              false,
+              "Calling triangular solve on a sparse GPU tensor requires compiling ",
+              "PyTorch with CUDA 11.3.1. ",
+              "Please use PyTorch built with newer CUDA version.");
+#else
+          // TODO: support mixed memory format
+          IntArrayRef X_strides = X_->strides();
+          IntArrayRef B_strides = B_->strides();
+          auto ndim = X_->dim();
+          bool is_X_row_major = (X_strides[ndim - 1] == 1);
+          bool is_B_row_major = (B_strides[ndim - 1] == 1);
+          TORCH_INTERNAL_ASSERT(is_X_row_major && is_B_row_major);
+
+          cusparseOperation_t opB = CUSPARSE_OPERATION_NON_TRANSPOSE;
+          auto desc_spsm = at::cuda::sparse::CuSparseSpSMDescriptor();
+          auto descB = at::cuda::sparse::CuSparseDnMatDescriptor(*B_);
+          auto descX = at::cuda::sparse::CuSparseDnMatDescriptor(*X_);
+          TORCH_CUDASPARSE_CHECK(cusparseSpSM_bufferSize(
+              handle,
+              opA,
+              opB,
+              &alpha,
+              descA.descriptor(),
+              descB.descriptor(),
+              descX.descriptor(),
+              compute_type,
+              CUSPARSE_SPSM_ALG_DEFAULT,
+              desc_spsm.descriptor(),
+              &buffer_size // output
+              ));
+
+          auto& allocator = *c10::cuda::CUDACachingAllocator::get();
+          auto work_data = allocator.allocate(buffer_size);
+
+          TORCH_CUDASPARSE_CHECK(cusparseSpSM_analysis(
+              handle,
+              opA,
+              opB,
+              &alpha,
+              descA.descriptor(),
+              descB.descriptor(),
+              descX.descriptor(),
+              compute_type,
+              CUSPARSE_SPSM_ALG_DEFAULT,
+              desc_spsm.descriptor(),
+              work_data.get()
+          ));
+
+          TORCH_CUDASPARSE_CHECK(cusparseSpSM_solve(
+              handle,
+              opA,
+              opB,
+              &alpha,
+              descA.descriptor(),
+              descB.descriptor(),
+              descX.descriptor(),
+              compute_type,
+              CUSPARSE_SPSM_ALG_DEFAULT,
+              desc_spsm.descriptor()
+          ));
+#endif // !AT_USE_CUSPARSE_GENERIC_SPSM()
+        }
+      });
+  if (!X.is_same(*X_)) {
+    X.copy_(*X_);
+  }
+#endif // !AT_USE_CUSPARSE_GENERIC_SPSV()
+}
+
+/*
+  Computes C = alpha * A + beta * B
+
+  Args:
+  * `A` - [in] sparse Tensor of size m × n.
+  * `B` - [in] sparse Tensor of size m × n.
+  * `C` - [out] sparse Tensor of size m × n.
+*/
+void add_out_sparse_csr(
+    const at::sparse_csr::SparseCsrTensor& A,
+    const at::sparse_csr::SparseCsrTensor& B,
+    const Scalar& alpha,
+    const Scalar& beta,
+    const at::sparse_csr::SparseCsrTensor& C) {
+  IntArrayRef A_sizes = A.sizes();
+  auto ndim = A.dim();
+  int m = at::native::cuda_int_cast(A_sizes[ndim - 2], "m");
+  int n = at::native::cuda_int_cast(A_sizes[ndim - 1], "n");
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.sizes().equals(B.sizes()) && A.sizes().equals(C.sizes()));
+
+  // Only 32-bit indices are supported
+  auto A_32 = at::native::_sparse_csr_tensor_unsafe(
+      A.crow_indices().to(kInt),
+      A.col_indices().to(kInt),
+      A.values(),
+      A.sizes(),
+      A.scalar_type(),
+      A.layout(),
+      A.device());
+  auto B_32 = at::native::_sparse_csr_tensor_unsafe(
+      B.crow_indices().to(kInt),
+      B.col_indices().to(kInt),
+      B.values(),
+      B.sizes(),
+      B.scalar_type(),
+      B.layout(),
+      B.device());
+
+  // Modify C tensor in-place to swap indices tensors with 32-bit variants
+  indices_to_32_bit_inplace(C);
+
+  int nnzA = at::native::cuda_int_cast(A_32._nnz(), "nnzA");
+  int nnzB = at::native::cuda_int_cast(B_32._nnz(), "nnzB");
+
+  auto desc = at::cuda::sparse::CuSparseMatDescriptor();
+
+  auto A_crow_indices = A_32.crow_indices();
+  auto B_crow_indices = B_32.crow_indices();
+  auto C_crow_indices = C.crow_indices();
+  auto A_crow_indices_ptr = A_crow_indices.data_ptr<int>();
+  auto B_crow_indices_ptr = B_crow_indices.data_ptr<int>();
+  auto C_crow_indices_ptr = C_crow_indices.data_ptr<int>();
+
+  auto A_col_indices = A_32.col_indices();
+  auto B_col_indices = B_32.col_indices();
+  auto C_col_indices = C.col_indices();
+  auto A_col_indices_ptr = A_col_indices.data_ptr<int>();
+  auto B_col_indices_ptr = B_col_indices.data_ptr<int>();
+  auto C_col_indices_ptr = C_col_indices.data_ptr<int>();
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      C.scalar_type(), "add_out_sparse_csr_cuda_impl", [&] {
+        auto beta_ = beta.to<scalar_t>();
+        auto alpha_ = alpha.to<scalar_t>();
+
+        auto A_values = A_32.values();
+        auto B_values = B_32.values();
+        auto C_values = C.values();
+        auto A_values_ptr = A_values.data_ptr<scalar_t>();
+        auto B_values_ptr = B_values.data_ptr<scalar_t>();
+        auto C_values_ptr = C_values.data_ptr<scalar_t>();
+
+        auto handle = at::cuda::getCurrentCUDASparseHandle();
+        TORCH_CUDASPARSE_CHECK(cusparseSetPointerMode(handle, CUSPARSE_POINTER_MODE_HOST));
+
+        size_t buffer_size;
+        at::cuda::sparse::csrgeam2_bufferSizeExt<scalar_t>(
+            handle,
+            m,
+            n,
+            &alpha_,
+            desc.descriptor(),
+            nnzA,
+            A_values_ptr,
+            A_crow_indices_ptr,
+            A_col_indices_ptr,
+            &beta_,
+            desc.descriptor(),
+            nnzB,
+            B_values_ptr,
+            B_crow_indices_ptr,
+            B_col_indices_ptr,
+            desc.descriptor(),
+            C_values_ptr,
+            C_crow_indices_ptr,
+            C_col_indices_ptr,
+            &buffer_size // output
+        );
+
+        auto& allocator = *c10::cuda::CUDACachingAllocator::get();
+        auto work_data = allocator.allocate(buffer_size);
+
+        int nnzC = -1;
+        at::cuda::sparse::csrgeam2Nnz<scalar_t>(
+            handle,
+            m,
+            n,
+            desc.descriptor(),
+            nnzA,
+            A_crow_indices_ptr,
+            A_col_indices_ptr,
+            desc.descriptor(),
+            nnzB,
+            B_crow_indices_ptr,
+            B_col_indices_ptr,
+            desc.descriptor(),
+            C_crow_indices_ptr,
+            &nnzC,
+            work_data.get());
+
+        // Resize result using nnz information from cusparse
+        col_indices_and_values_resize_(C, nnzC);
+        C_col_indices = C.col_indices();
+        C_values = C.values();
+
+        C_col_indices_ptr = C_col_indices.data_ptr<int>();
+        C_values_ptr = C_values.data_ptr<scalar_t>();
+
+        at::cuda::sparse::csrgeam2<scalar_t>(
+            handle,
+            m,
+            n,
+            &alpha_,
+            desc.descriptor(),
+            nnzA,
+            A_values_ptr,
+            A_crow_indices_ptr,
+            A_col_indices_ptr,
+            &beta_,
+            desc.descriptor(),
+            nnzB,
+            B_values_ptr,
+            B_crow_indices_ptr,
+            B_col_indices_ptr,
+            desc.descriptor(),
+            C_values_ptr,
+            C_crow_indices_ptr,
+            C_col_indices_ptr,
+            work_data.get());
+      });
 }
 
 } // namespace cuda
