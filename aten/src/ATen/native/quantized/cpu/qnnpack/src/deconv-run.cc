@@ -9,7 +9,7 @@
 #include <memory>
 
 namespace qnnpack {
-
+namespace {
 static size_t compute_output_dimension(
     size_t input_dimension,
     size_t input_padding_dimension,
@@ -22,6 +22,7 @@ static size_t compute_output_dimension(
   return stride_dimension * (input_dimension - 1) + adjustment_dimension +
       effective_kernel_dimension - input_padding_dimension;
 }
+} // namespace
 
 struct q8conv_context {
   size_t bs;
