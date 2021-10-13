@@ -161,13 +161,11 @@ class Node {
   // Creates a new node with the given op name. The op is a unique identifier
   // for the operation. The num_outputs tells how many outputs a given operation
   // generates.
-  Node(OpKind op, const std::vector<at::ScalarType>& at_dtypes,
-       const std::vector<std::vector<int64_t>>& at_shapes, size_t num_outputs,
+  Node(OpKind op, size_t num_outputs,
        torch::lazy::hash_t node_hash, torch::lazy::hash_t dag_hash);
 
   // Contructor used to create leaf nodes.
-  Node(OpKind op, const std::vector<at::ScalarType>& at_dtypes,
-       const std::vector<std::vector<int64_t>>& at_shapes, size_t num_outputs,
+  Node(OpKind op, size_t num_outputs,
        torch::lazy::hash_t node_hash);
 
   virtual ~Node();
@@ -198,11 +196,6 @@ class Node {
 
   virtual NodePtr Clone(OpList operands) const;
 
-  const std::vector<at::ScalarType>& at_dtypes() const { return at_dtypes_; }
-  const std::vector<std::vector<int64_t>>& at_shapes() const {
-    return at_shapes_;
-  }
-
  private:
   static std::vector<SourceLocation> GetFrameInfo();
 
@@ -219,10 +212,6 @@ class Node {
   // The IR framework user can attach a user defined metadata object deriving
   // from UserMetaData.
   std::shared_ptr<UserMetaData> user_metadata_;
-  // ATEN dTypes and shapes. They are plural because operators can have tuple
-  // outputs.
-  std::vector<at::ScalarType> at_dtypes_;
-  std::vector<std::vector<int64_t>> at_shapes_;
 };
 
 // RAII data structure to be used a stack variable to enter a new IR scope. IR

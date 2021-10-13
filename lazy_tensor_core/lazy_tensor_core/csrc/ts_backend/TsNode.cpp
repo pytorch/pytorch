@@ -51,9 +51,7 @@ torch::lazy::hash_t OperandHashes(const OpList& operands,
 TsNode::TsNode(OpKind op, OpList operands, lazy_tensors::Shape shape,
                size_t num_outputs, torch::lazy::hash_t hash_seed)
     : Node(
-          op, {},
-          {},  // TODO(whc) BUG here, need to fill in at_ fields
-          num_outputs,
+          op, num_outputs,
           // TODO(WHC) this is inefficient (having to compute node_hash twice
           // since I can't call hash() yet) so probably move dag_hash
           // initialization to a separate function?
@@ -84,10 +82,7 @@ TsNode::TsNode(OpKind op, OpList operands,
 
 TsNode::TsNode(OpKind op, OpList operands, size_t num_outputs,
                torch::lazy::hash_t hash_seed)
-    : TsNode(op, operands,
-             // TODO(whc) use of legacy non-codegen IR classes breaks Node::at_*
-             // fields
-             lazy_tensors::Shape(), num_outputs, hash_seed) {}
+    : TsNode(op, operands, lazy_tensors::Shape(), num_outputs, hash_seed) {}
 
 void TsNode::SetShapeDeferred(
     const std::function<lazy_tensors::Shape()>& shape_fn) {
@@ -96,8 +91,7 @@ void TsNode::SetShapeDeferred(
 
 TsNode::TsNode(OpKind op, lazy_tensors::Shape shape, size_t num_outputs,
                torch::lazy::hash_t hash_seed)
-    : Node(op, {}, {}, num_outputs, GetOpHash(op, shape, hash_seed)),
-      shape_(shape) {}
+    : Node(op, num_outputs, GetOpHash(op, shape, hash_seed)), shape_(shape) {}
 
 const lazy_tensors::Shape& TsNode::shape() const { return shape_; }
 

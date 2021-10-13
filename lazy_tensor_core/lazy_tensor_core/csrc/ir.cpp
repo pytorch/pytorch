@@ -116,31 +116,21 @@ torch::lazy::hash_t OpKind::hash() const {
   return torch::lazy::StringHash(op.toQualString());
 }
 
-Node::Node(OpKind op, const std::vector<at::ScalarType>& at_dtypes,
-           const std::vector<std::vector<int64_t>>& at_shapes,
-           size_t num_outputs, torch::lazy::hash_t node_hash,
+Node::Node(OpKind op, size_t num_outputs, torch::lazy::hash_t node_hash,
            torch::lazy::hash_t dag_hash)
     : op_(std::move(op)),
-      at_dtypes_(at_dtypes),
-      at_shapes_(at_shapes),
       num_outputs_(num_outputs),
       node_hash_(node_hash),
       dag_hash_(dag_hash) {
-  LTC_CHECK_EQ(at_dtypes.size(), at_shapes.size());
   metadata_.scope = GetCurrentScope();
   metadata_.frame_info = GetFrameInfo();
 }
 
-Node::Node(OpKind op, const std::vector<at::ScalarType>& at_dtypes,
-           const std::vector<std::vector<int64_t>>& at_shapes,
-           size_t num_outputs, torch::lazy::hash_t node_hash)
+Node::Node(OpKind op, size_t num_outputs, torch::lazy::hash_t node_hash)
     : op_(std::move(op)),
-      at_dtypes_(at_dtypes),
-      at_shapes_(at_shapes),
       num_outputs_(num_outputs),
       node_hash_(node_hash),
       dag_hash_(node_hash) {
-  LTC_CHECK_EQ(at_dtypes.size(), at_shapes.size());
   metadata_.scope = GetCurrentScope();
   metadata_.frame_info = GetFrameInfo();
 }
