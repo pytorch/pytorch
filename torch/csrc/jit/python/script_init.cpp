@@ -29,6 +29,8 @@
 #include <torch/csrc/jit/python/python_list.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/logging.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import_source.h>
@@ -39,6 +41,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/core/function_schema.h>
+#include <ATen/core/ivalue.h>
 #include <ATen/core/qualified_name.h>
 
 #include <pybind11/functional.h>
@@ -777,6 +780,12 @@ void initJitScriptBindings(PyObject* module) {
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<c10::Capsule>(m, "Capsule");
+
+  py::class_<MobileCode>(m, "MobileCode")
+      .def(py::init<std::shared_ptr<Graph>, std::string>())
+      .def("bytecode_table", [](MobileCode& self) -> IValue {
+        return self.bytecode_table();
+      });
 
   auto object_class =
       py::class_<Object>(m, "ScriptObject")

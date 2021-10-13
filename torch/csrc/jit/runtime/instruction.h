@@ -63,6 +63,8 @@ enum OpCode : uint8_t {
 #undef DEFINE_OP
 };
 
+TORCH_API char const* toString(OpCode op);
+
 struct Instruction {
   OpCode op;
   uint8_t unused;

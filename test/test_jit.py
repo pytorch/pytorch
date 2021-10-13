@@ -13412,6 +13412,27 @@ dedent """
 
         FileCheck().check("aten::rand").check("aten::add").run(str(foo.graph))
 
+    def test_mobile_code(self):
+        @torch.jit.script
+        def foo():
+            return torch.rand(2, 3)
+
+        mobileCode = torch._C.MobileCode(foo.graph, "foo")
+        instructions = mobileCode.instructions()
+        expected_inst = [('LOADC', 1, 0),
+            ('LOADC', 2, 0),
+            ('LIST_CONSTRUCT', 0, 2),
+            ('LOADC', 0, 0),
+            ('LOADC', 0, 0),
+            ('LOADC', 0, 0),
+            ('LOADC', 0, 0),
+            ('OP', 0, 0),
+            ('RET', 0, 0)]
+        self.assertTrue(expected_inst, instructions)
+        constants = mobileCode.constant_table()
+        print(constants)
+
+
     def test_mutable_dce_list(self):
         @torch.jit.script
         def foo(a):

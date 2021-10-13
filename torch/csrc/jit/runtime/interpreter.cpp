@@ -1038,6 +1038,10 @@ size_t Code::register_size() const {
   return pImpl->register_size_;
 }
 
+IValue Code::bytecode_table() const {
+  return pImpl->bytecode_table_;
+}
+
 InterpreterState::InterpreterState(const Code& code, TaskLauncher taskLauncher)
     : pImpl(c10::make_intrusive<InterpreterStateImpl>(
           code,
