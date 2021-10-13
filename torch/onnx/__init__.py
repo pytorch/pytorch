@@ -310,6 +310,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
         export_modules_as_functions (bool or set of str, type or nn.Module, default False): Flag to enable
             exporting all ``nn.Module`` forward calls as local functions in ONNX. Or a set to indicate the
             particular modules to export as local functions in ONNX.
+
             * ``False``(default): export ``nn.Module`` forward calls as fine grained nodes.
             * ``True``: export all ``nn.Module`` forward calls as local function nodes.
             * Set of str, type or nn.Module: export ``nn.Module`` forward calls as local function nodes,
