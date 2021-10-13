@@ -195,16 +195,36 @@ static C10_UNUSED void setRequiresGradOnDiffGraph(Node* dnode) {
 
 bool guardDifferentiableGraph(Node* dnode) {
   bool fallback_flag = false;
+  std::vector<Value*> true_flags = {};
+
+  auto input_index = [dnode](Node* node, Value* val) -> Value* {
+    const auto& inputs = node->owningBlock()->inputs();
+    for (int index : c10::irange(inputs.size())) {
+      if (inputs[index] == val) {
+        return dnode->input(index);
+      }
+    }
+    return nullptr;
+  };
 
   for (const auto& n : dnode->g(attr::Subgraph)->nodes()) {
     if (n->kind() == aten::dropout) {
-      // checking for train signature being true, since autodiff assumes
-      // dropout running on training mode
       const auto train = constant_as<bool>(n->input(2));
-      if (!train.has_value() || train.value() != true) {
-        fallback_flag = true;
-        break;
+      if (train.has_value()) {
+        if (train.value() == true) {
+          // checking for train signature being true, since autodiff assumes
+          // dropout running on training mode
+          continue;
+        }
+      } else {
+        if (auto input = input_index(n, n->input(2))) {
+          // we need to guard on training flag being true!
+          true_flags.emplace_back(input);
+          continue;
+        }
       }
+      fallback_flag = true;
+      break;
     }
   }
 
@@ -257,6 +277,23 @@ bool guardDifferentiableGraph(Node* dnode) {
               t->requiresGrad().value_or(true));
         },
         prim::RequiresGradCheck);
+
+    // attaching True flags to check at runtime
+    if (!true_flags.empty()) {
+      auto if_node = dnode->owningBlock()->owningNode();
+      TORCH_INTERNAL_ASSERT(if_node->kind() == prim::If, "guarded fusion node violation\n");
+      true_flags.emplace_back(if_node->input());
+      auto graph = if_node->owningGraph();
+
+      auto bool_list_node =
+          graph->insertNode(graph->createList(BoolType::get(), true_flags));
+      bool_list_node->moveBefore(if_node);
+      Value* bool_list = bool_list_node->output();
+      Value* conjunction = graph->insert(aten::all, {bool_list});
+      conjunction->node()->moveBefore(if_node);
+      if_node->replaceInput(0, conjunction);
+    }
+
     return true;
   } else {
     // we inline the differentiable graph as a fallback

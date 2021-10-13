@@ -1629,6 +1629,24 @@ graph(%Ra, %Rb):
                     self.assertEqual(training, 'aten::bernoulli_' in profile(scripted, X))
 
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, 'Testing differentiable graph')
+    def test_dropout_func_training(self):
+        def dropout(input, training: bool):
+            return F.dropout(input, 0.5, training=training)
+
+        def profile(func, *X):
+            with torch.autograd.profiler.profile() as prof:
+                func(*X)
+            return [e.name for e in prof.function_events]
+
+        M = 10
+        scripted = torch.jit.script(dropout)
+        with disable_autodiff_subgraph_inlining():
+            for training in (True, False):
+                X = torch.randn(M, M, requires_grad=True)
+                FileCheck().check("aten::rand_like").run(scripted.graph_for(X, training, profile_and_replay=True))
+                self.assertEqual(training, "aten::rand_like" in profile(scripted, X, training))
+
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, 'Testing differentiable graph')
     def test_dropout_func_requires_grad(self):
         def dropout_training(input):
             return F.dropout(input, 0.5, training=True)
