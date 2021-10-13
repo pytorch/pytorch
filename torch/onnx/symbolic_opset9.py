@@ -2901,7 +2901,7 @@ def index(g, self, index):
 def linalg_norm(g, self, ord, dim, keepdim, dtype):
     # If dim is an int, the vector norm will be computed.
     # If dim is a 2-tuple, the matrix norm will be computed.
-    # If dim = None and ord = None, A will be flattened to 1D and 
+    # If dim = None and ord = None, A will be flattened to 1D and
     # the 2-norm of the resulting vector will be computed.
     # If dim = None and ord != None, A must be 1D or 2D.
     if dim is None:
@@ -2957,8 +2957,8 @@ def linalg_matrix_norm(g, self, ord, dim, keepdim, dtype):
         return _unimplemented("linalg.matrix_norm", "ONNX export for ord=`nuc`")
     else:
         ord_value = sym_help._parse_arg(ord, "f")
-        if ord_value == None:
-            return frobenius_norm(g, self, dim, keepdim)    
+        if ord_value is None:
+            return frobenius_norm(g, self, dim, keepdim)
         if ord_value == 2 or ord_value == -2:
             return _unimplemented("linalg.matrix_norm", "ONNX export for ord=2")
         # Wrap the dim vector to handle neagtive dim values
@@ -2966,8 +2966,10 @@ def linalg_matrix_norm(g, self, ord, dim, keepdim, dtype):
         if self_dim is None:
             return _unimplemented("dim",
                                   "Input rank must be known at export time.")
-        if dim[0] < 0: dim[0] += self_dim 
-        if dim[1] < 0: dim[1] += self_dim 
+        if dim[0] < 0: 
+            dim[0] += self_dim
+        if dim[1] < 0: 
+            dim[1] += self_dim
 
         if ord_value == math.inf or ord_value == -math.inf:
             dim[0], dim[1] = dim[1], dim[0]

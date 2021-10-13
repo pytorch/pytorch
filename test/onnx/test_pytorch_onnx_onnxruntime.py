@@ -7013,7 +7013,7 @@ class TestONNXRuntime(unittest.TestCase):
                 self.ord = ord_val
 
             def forward(self, x):
-                return torch.linalg.vector_norm(x, ord=self.ord, dim=(1,2))
+                return torch.linalg.vector_norm(x, ord=self.ord, dim=(1, 2))
 
         x = torch.randn(2, 3, 5, 5)
         self.run_test(LinalgVectorMultiDimModel(2), x)
@@ -7028,7 +7028,7 @@ class TestONNXRuntime(unittest.TestCase):
                 self.ord = ord_val
 
             def forward(self, x):
-                return torch.linalg.vector_norm(x, ord=self.ord, dim=(1,2), keepdim=True)
+                return torch.linalg.vector_norm(x, ord=self.ord, dim=(1, 2), keepdim=True)
 
         x = torch.randn(2, 3, 5, 5)
         self.run_test(LinalgVectorKeepDimModel(2), x)
