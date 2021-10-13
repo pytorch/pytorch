@@ -672,6 +672,7 @@ class TestONNXRuntime(unittest.TestCase):
         assert torch.all(out2[0].eq(out_trace2[0]))
         assert torch.all(out2[1].eq(out_trace2[1]))
 
+    @unittest.skip("Failing, see https://github.com/pytorch/pytorch/issues/66528")
     @skipIfUnsupportedMinOpsetVersion(11)
     @disableScriptTest()
     def test_keypoint_rcnn(self):
