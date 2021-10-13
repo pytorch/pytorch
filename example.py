@@ -531,35 +531,11 @@ assert torch.allclose(result, torch.diag(x.cos()))
 #
 # ============================================================================
 
-# After writing the following cases, my gut is telling me we might want to
-# restrict mixing of imperative and transform APIs.
-#
-# Here's what we might want to allow:
-# - passing Tensor subclasses into a transformed function. The transformed
-# function should not create and manipulate Tensor subclasses.
-# Concretely, the following should be OK:
-# >>> vmap(foo)(MaskedTensor(...))
-#
-# Here's what we might not want to allow:
-# - transforming a function that creates and manipulates Tensor subclasses.
-# Concretely, this would mean that we're not going to let someone make a
-# MaskedTensor where the value or mask is a BatchedTensor created from inside
-# vmap. If they want to do something like this, then they need to compose
-# vmap and mask transforms or compose BatchedTensor and MaskedTensor (from the
-# imperative APIs).
-#
-# This might suggest that transforms should always go first and the imperative
-# APIs should run after transforms. But where do modes fit into this?
-#
-# TODO: Is there a difference between a "mode" and a "transform"? The gut says:
-# you probably want to be able to LoggingTensorMode at different levels, so
-# "modes" are a part of the imperative API. Does that mean we want separate
-# transform and mode stacks?
-
 # Jacobian computation.
 # NB: I don't like how the `jvp` transform needs to be passed a parent arg.
 # We can get over this restriction by saying that transforms always run before
 # the imperative APIs.
+# TODO: can infer the parent from the least common ancestor of the parents
 BatchedTensor0 = make_batched_tensor_class()
 x = torch.randn(5)
 v = torch.eye(5)
@@ -573,6 +549,9 @@ assert torch.allclose(tangent.unwrap_batched(), torch.diag(x.cos()))
 # instead of unwrapping it inside the function, then a BatchedTensor will escape.
 # The user didn't create that BatchedTensor (vmap did!) so they're going to be
 # confused when they see it.
+# TODO: vmap could "punch through" JVP tensor in this case if we register JVPTensor
+# as a PyTree. But that doesn't solve the problem if we're creating e.g. a
+# DiagMatrixTensor that stores a 1D tensor and expects it to be 1D.
 def grad_of_sin(x):
     JVPTensor0 = make_jvp_tensor_class()
     assert x.shape == ()
