@@ -159,7 +159,7 @@ TEST(StaticRuntime, Sigmoid) {
 
 TEST(StaticRuntime, Clone) {
   auto a = at::randn({2, 3});
-  auto b = at::empty_strided({3, 2}, {1, 3});
+  auto b = at::randn({3, 2}).as_strided({3, 2}, {1, 3});
   auto c = at::randn({1, 2, 3, 4});
   auto d = at::randn({1, 0, 3, 4});
   std::vector<IValue> args_0{b, c10::MemoryFormat::Contiguous};
