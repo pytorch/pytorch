@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/ReduceOps.h>
@@ -526,7 +527,7 @@ void scalar_outer_sum(
 // Custom floating point sum for better accuracy
 template <bool ignore_nan, typename scalar_t>
 void cascade_sum(TensorIterator &iter) {
-  iter.output().fill_(scalar_t(0));
+  iter.output_base().fill_(scalar_t(0));
   iter.parallel_reduce(
     [&](char** data, const int64_t* strides, int64_t size0, int64_t size1) {
       // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
