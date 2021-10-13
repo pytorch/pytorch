@@ -21,7 +21,7 @@ from model_defs.rnn_model_with_packed_sequence import (RnnModelWithPackedSequenc
                                                        RnnModelWithPackedSequenceWithoutState)
 from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion,
                                  skipIfNoLapack, disableScriptTest, skipIfONNXShapeInference,
-                                 skipIfUnsupportedMaxOpsetVersion, skipForAllOpsetVersions
+                                 skipIfUnsupportedMaxOpsetVersion, skipForAllOpsetVersions,
                                  run_tests)
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
