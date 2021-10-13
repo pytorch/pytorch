@@ -116,7 +116,9 @@ class FullyShardedDataParallel(nn.Module):
             if not hasattr(param, "_is_sharded"):
                 params.append(param)
 
-        self._fsdp_wrapped_module: nn.Module = FlattenParamsWrapper(module, param_list=params)
+        self._fsdp_wrapped_module: nn.Module = FlattenParamsWrapper(
+            module, param_list=params
+        )
         del module  # free original module in case it helps garbage collection
         if self._fsdp_wrapped_module.flat_param is not None:
             self.params = [self._fsdp_wrapped_module.flat_param]
@@ -140,7 +142,7 @@ class FullyShardedDataParallel(nn.Module):
 
     @property
     def module(self) -> FlattenParamsWrapper:
-        """ make model.module accessible, just like DDP. """
+        """make model.module accessible, just like DDP."""
         assert isinstance(self._fsdp_wrapped_module, FlattenParamsWrapper)
         return self._fsdp_wrapped_module
 
