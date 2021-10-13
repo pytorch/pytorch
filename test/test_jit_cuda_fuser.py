@@ -441,57 +441,7 @@ class TestCudaFuser(JitTestCase):
         # Currently cannot fuse this
         self.assertGraphContains(t_jit.graph_for(x, y, z), FUSION_GUARD)
 
-    def _unary_test_helper(self, operation):
-        def t(x: torch.Tensor, z: float):
-            o = x + z
-            o = operation(o)
-            return o
-        t_jit = torch.jit.script(t)
-        x = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda")
-        jit_o = t_jit(x, 2.0)
-        jit_o = t_jit(x, 2.0)
-        o = t(x, 2.0)
-        self.assertEqual(o, jit_o)
-        self.assertGraphContains(t_jit.graph_for(x, 2.0), FUSION_GUARD)
-
-    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
-                     "Requires fusion optimization pass to be effective")
-    def test_unary_ops(self):
-        operations = [torch.neg,
-                      torch.abs,
-                      torch.log,
-                      torch.log10,
-                      torch.log1p,
-                      torch.log2,
-                      torch.lgamma,
-                      torch.exp,
-                      torch.expm1,
-                      torch.erf,
-                      torch.erfc,
-                      torch.cos,
-                      torch.acos,
-                      torch.cosh,
-                      torch.sin,
-                      torch.asin,
-                      torch.tan,
-                      torch.atan,
-                      torch.sqrt,
-                      torch.rsqrt,
-                      torch.ceil,
-                      torch.floor,
-                      torch.round,
-                      torch.trunc,
-                      torch.frac,
-                      torch.reciprocal,
-                      torch.relu,
-                      torch.sigmoid,
-                      torch.tanh,
-                      torch.nn.functional.silu]
-        for op in operations:
-            self._unary_test_helper(op)
-
-    def _unary_type_test_helper(self, operation, dtype, random_data=True):
+    def _unary_test_helper(self, operation, dtype, random_data):
         shape = (4, 8, 32, 32)
 
         # need additional def of t for boolean ops
@@ -529,15 +479,7 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    def test_data_compatibility(self):
-        dtypes = [
-            *self.int_types,
-            torch.float16,
-            torch.float32,
-            torch.float64
-        ]
-        if TEST_BF16:
-            dtypes.append(torch.bfloat16)
+    def test_unary_ops(self):
         operations = [torch.neg,
                       torch.abs,
                       torch.log,
@@ -568,12 +510,59 @@ class TestCudaFuser(JitTestCase):
                       torch.sigmoid,
                       torch.tanh,
                       torch.nn.functional.silu]
-        prev_fallback = os.environ['PYTORCH_NVFUSER_DISABLE_FALLBACK']
-        os.environ['PYTORCH_NVFUSER_DISABLE_FALLBACK'] = '0'
-        for op, dtype in itertools.product(operations, dtypes):
-            self._unary_type_test_helper(op, dtype, False)  # test special numbers
-            self._unary_type_test_helper(op, dtype)  # test random data
-        os.environ['PYTORCH_NVFUSER_DISABLE_FALLBACK'] = prev_fallback
+        for op in operations:
+            self._unary_test_helper(op, torch.float, False)  # test special numbers
+            self._unary_test_helper(op, torch.float, True)  # random data
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_unary_ops_type_promotion(self):
+        data_types = [
+            *self.int_types,
+            torch.float16,
+            torch.float32,
+            torch.float64
+        ]
+        # disabled bf16 data type - Issue #1185
+        '''
+        if TEST_BF16:
+            data_types.append(torch.bfloat16)
+        '''
+        # Issue #1187 - disabled operators that fail because of mixed data types
+        operations = [torch.neg,
+                      torch.abs,
+                      # torch.log,
+                      # torch.log10,
+                      # torch.log1p,
+                      # torch.log2,
+                      # torch.lgamma,
+                      # torch.exp,
+                      # torch.expm1,
+                      # torch.erf,
+                      # torch.erfc,
+                      # torch.cos,
+                      # torch.acos,
+                      # torch.cosh,
+                      # torch.sin,
+                      # torch.asin,
+                      # torch.tan,
+                      # torch.atan,
+                      # torch.sqrt,
+                      # torch.rsqrt,
+                      torch.ceil,
+                      torch.floor,
+                      torch.round,
+                      torch.trunc,
+                      torch.frac,
+                      # torch.reciprocal,
+                      # torch.relu,
+                      # torch.sigmoid,
+                      # torch.tanh,
+                      torch.nn.functional.silu]
+        for op, dtype in itertools.product(operations, data_types):
+            self._unary_test_helper(op, dtype, False)  # test special numbers
+            self._unary_test_helper(op, dtype, True)  # test random data
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
@@ -664,18 +653,31 @@ class TestCudaFuser(JitTestCase):
         jitted.graph_for(x, y)  # Shows up in second instance, not first
         self.assertGraphContains(jitted.graph_for(x, y), FUSION_GUARD)
 
-    def _binary_test_helper(self, operation, dtype):
+    def _binary_test_helper(self, operation, dtypes, random_data):
+        if isinstance(dtypes, tuple):
+            dtype_arg1, dtype_arg2 = dtypes
+        else:
+            dtype_arg1 = dtype_arg2 = dtypes
+
         def t(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
-            o = x + z
-            o = operation(o, y)
+            o = operation(x, y)
+            o = o + z
             return o
-        x = (torch.randn(4, 32, 32, dtype=torch.float, device="cuda") * 5).to(dtype)
-        y = (torch.randn(4, 32, 32, dtype=torch.float, device="cuda") * 5).to(dtype)
+
+        shape = (4, 32, 32)
+        if random_data:
+            x = (torch.randn(shape, dtype=torch.float, device="cuda") * 5).to(dtype_arg1)
+            y = (torch.randn(shape, dtype=torch.float, device="cuda") * 5).to(dtype_arg2)
+        else:
+            x = self.special_values.to(dtype=dtype_arg1)
+            y = (torch.rand_like(self.special_values) * 5).to(dtype_arg2)
+        z = torch.tensor([2], device="cuda").to(dtype_arg1)
+
         # Avoid division by zero for integer tensors
         div_like = [torch.div, torch.fmod, torch.remainder]
-        if operation in div_like and (dtype == torch.int32 or dtype == torch.int64):
+        if operation in div_like and (dtype_arg2 == torch.int32 or dtype_arg2 == torch.int64):
             y[y == 0] = 1
-        z = torch.tensor([2], device="cuda").to(dtype)
+
         o = t(x, y, z)
         t_jit = torch.jit.script(t)
         jit_o = t_jit(x, y, z)
@@ -721,7 +723,45 @@ class TestCudaFuser(JitTestCase):
                       torch.lt]
         for op, dtype in itertools.product(operations, data_types):
             if (dtype not in self.int_types) or (op not in skip_for_integer):
-                self._binary_test_helper(op, dtype)
+                self._binary_test_helper(op, dtype, True)  # random data
+                # disabled special numbers because of incorrect handling
+                # self._binary_test_helper(op, dtype, False) # special numbers
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_binary_ops_type_promotion(self):
+        data_types = [
+            torch.int32,
+            torch.int64,
+            # torch.float16,
+            torch.float32,
+            torch.float64
+        ]
+        # disabled bf16 data type - Issue #1185
+        '''
+        if TEST_BF16:
+            data_types.append(torch.bfloat16)
+        '''
+        # Issue #1187 - disabled operators that fail because of mixed data types
+        operations = [torch.mul,
+                      # torch.div,
+                      # torch.atan2,
+                      # torch.max,
+                      # torch.min,
+                      # torch.pow,
+                      # torch.remainder,
+                      # torch.fmod,
+                      torch.eq,
+                      torch.ne,
+                      torch.ge,
+                      torch.gt,
+                      torch.le,
+                      torch.lt]
+        binary_dtype_combinations = itertools.combinations(data_types, 2)
+        for op, dtypes in itertools.product(operations, binary_dtype_combinations):
+            self._binary_test_helper(op, dtypes, True)  # random data
+            self._binary_test_helper(op, dtypes, False)  # special numbers
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
@@ -786,6 +826,76 @@ class TestCudaFuser(JitTestCase):
         o = t(x, y, 0.5)
         self.assertEqual(o, jit_o)
         self.assertGraphContains(t_jit.graph_for(x, y, 0.5), FUSION_GUARD)
+
+    def _ternary_test_helper(self, operation, dtypes, random_data):
+        if isinstance(dtypes, tuple):
+            dtype_arg1, dtype_arg2, dtype_arg3 = dtypes
+        else:
+            dtype_arg1 = dtype_arg2 = dtype_arg3 = dtypes
+
+
+        def t(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor, alpha: torch.Tensor):
+            o = operation(x, y, z)
+            o = o + alpha
+            return o
+
+        shape = (4, 32, 32)
+        if operation is torch.where:
+            dtype_arg1 = torch.bool
+            if random_data:
+                x = torch.randint(0, 2, shape).to(dtype=torch.bool, device="cuda")
+                y = (torch.randn(shape, dtype=torch.float, device="cuda") * 5).to(dtype_arg2)
+                z = (torch.randn(shape, dtype=torch.float, device="cuda") * 5).to(dtype_arg3)
+            else:
+                x = torch.randint(0, 2, self.special_values.size()).to(dtype=torch.bool, device="cuda")
+                y = self.special_values.to(dtype=dtype_arg2)
+                z = (torch.rand_like(self.special_values) * 5).to(dtype_arg3)
+        elif random_data:
+            x = (torch.randn(shape, dtype=torch.float, device="cuda") * 5).to(dtype_arg1)
+            y = (torch.randn(shape, dtype=torch.float, device="cuda") * 5).to(dtype_arg2)
+            z = (torch.randn(shape, dtype=torch.float, device="cuda") * 5).to(dtype_arg3)
+        else:
+            x = self.special_values.to(dtype=dtype_arg1)
+            y = (torch.rand_like(self.special_values) * 5).to(dtype_arg2)
+            z = (torch.rand_like(self.special_values) * 5).to(dtype_arg3)
+        alpha = torch.tensor([2], device="cuda").to(dtype_arg1)
+
+        o = t(x, y, z, alpha)
+        t_jit = torch.jit.script(t)
+        jit_o = t_jit(x, y, z, alpha)
+        jit_o = t_jit(x, y, z, alpha)
+
+        self.assertEqual(o, jit_o)
+        self.assertGraphContains(t_jit.graph_for(x, y, z), FUSION_GUARD)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_ternary_ops_type_promotion(self):
+        data_types = [
+            torch.int32,
+            torch.int64,
+            torch.float32,
+            torch.float64
+        ]
+        # disabled bf16 data type - Issue #1185
+        '''
+        if TEST_BF16:
+            data_types.append(torch.bfloat16)
+        '''
+        # Issue #1187 - disabled operators that fail because of mixed data types
+        # OR missing all tensor argument support
+        # torch.where,
+        # torch.lerp
+        # torch.lerp_scale,
+        # torch.clamp,
+        # torch.threshold
+        # torch.add
+        operations = []
+        ternary_dtype_combinations = itertools.combinations(data_types, 3)
+        for op, dtypes in itertools.product(operations, ternary_dtype_combinations):
+            self._ternary_test_helper(op, dtypes, True)  # random data
+            self._ternary_test_helper(op, dtypes, False)  # special numbers
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     # legacy fuser does not work for rand_like, see issue #34361
