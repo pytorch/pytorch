@@ -85,7 +85,7 @@ class LazyIR:
         clone_impl_args.extend(["at_dtypes()", "at_shapes()"])
 
         clone_impl_args_str = ", ".join(clone_impl_args)
-        clone_impl = f"ir::MakeNode<ir::ops::{schema.node_name}>({clone_impl_args_str});"
+        clone_impl = f"return ir::MakeNode<ir::ops::{schema.node_name}>({clone_impl_args_str});"
 
         return [f"""\
 // TODO(alanwaketan): Public members don't need to have _ suffix.
