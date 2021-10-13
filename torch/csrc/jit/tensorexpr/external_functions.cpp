@@ -132,7 +132,7 @@ void nnc_aten_quantized_conv2d(
     int64_t* extra_args) {
   std::vector<at::Tensor> tensors =
       constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
-  const double x_qscale = extra_args[0];
+  const double x_qscale = ((double*)extra_args)[0];
   const int64_t x_qzero = extra_args[1];
   const c10::ScalarType x_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
   at::Tensor qx = at::from_blob_quantized_per_tensor_affine(
