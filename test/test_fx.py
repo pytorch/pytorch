@@ -2727,6 +2727,39 @@ class TestFX(JitTestCase):
 
         a.graph.lint()
 
+    def test_delete_unused_submodules_leaf(self):
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.relu(x)
+                return x
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.submod = SubModule()
+
+            def forward(self, x):
+                x = self.submod(x)
+                return x
+
+        model = Model()
+
+        class MyCustomTracer(torch.fx.Tracer):
+            def is_leaf_module(self, m: torch.nn.Module, module_qualified_name : str) -> bool:
+                return module_qualified_name == "submod"
+
+        inputs = torch.randn(1, 10)
+        traced_graph = MyCustomTracer().trace(model)
+        gm2 = torch.fx.GraphModule(model, traced_graph)
+        gm2.delete_all_unused_submodules()
+        torch.testing.assert_allclose(gm2(inputs), model(inputs))
+
     def test_tracing_graphmodules_as_leaf_submodules(self):
         class A(torch.nn.Module):
             def forward(self, t):
