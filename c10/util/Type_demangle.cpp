@@ -4,16 +4,6 @@
 #include <functional>
 #include <memory>
 
-#if defined(__ANDROID__) || defined(_WIN32) || defined(__EMSCRIPTEN__) || \
-    defined(__XROS__)
-#define HAS_DEMANGLE 0
-#elif defined(__APPLE__) && \
-    (TARGET_IPHONE_SIMULATOR || TARGET_OS_SIMULATOR || TARGET_OS_IPHONE)
-#define HAS_DEMANGLE 0
-#else
-#define HAS_DEMANGLE 1
-#endif
-
 #if HAS_DEMANGLE
 
 #include <cxxabi.h>
@@ -51,11 +41,4 @@ std::string demangle(const char* name) {
 
 } // namespace c10
 
-#else // HAS_DEMANGLE
-namespace c10 {
-std::string demangle(const char* name) {
-  return std::string(name);
-}
-} // namespace c10
-
-#endif // HAS_DEMANGLE
+#endif
