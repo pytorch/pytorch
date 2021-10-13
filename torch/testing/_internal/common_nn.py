@@ -5879,6 +5879,9 @@ class ModuleTest(TestBase):
         test_case._zero_grad_parameters(gpu_module)
         cpu_output = test_case._forward(cpu_module, cpu_input_tuple)
         gpu_output = test_case._forward(gpu_module, gpu_input_tuple)
+        if getattr(cpu_module, "return_indices", False):
+            cpu_output = cpu_output[0]
+            gpu_output = gpu_output[0]
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         test_case.assertEqualIgnoreType(cpu_output, gpu_output, atol=self.precision, rtol=0)
 
