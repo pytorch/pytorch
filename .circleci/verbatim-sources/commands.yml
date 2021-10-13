@@ -39,37 +39,6 @@ commands:
           no_output_timeout: "1h"
           command: .circleci/scripts/setup_ci_environment.sh
 
-  brew_update:
-    description: "Update Homebrew and install base formulae"
-    steps:
-      - run:
-          name: Update Homebrew
-          no_output_timeout: "10m"
-          command: |
-            set -ex
-
-            # Update repositories manually.
-            # Running `brew update` produces a comparison between the
-            # current checkout and the updated checkout, which takes a
-            # very long time because the existing checkout is 2y old.
-            for path in $(find /usr/local/Homebrew -type d -name .git)
-            do
-            cd $path/..
-            git fetch --depth=1 origin
-            git reset --hard origin/master
-            done
-
-            export HOMEBREW_NO_AUTO_UPDATE=1
-
-            # Install expect and moreutils so that we can call `unbuffer` and `ts`.
-            # moreutils installs a `parallel` executable by default, which conflicts
-            # with the executable from the GNU `parallel`, so we must unlink GNU
-            # `parallel` first, and relink it afterwards.
-            brew unlink parallel
-            brew install moreutils
-            brew link parallel --overwrite
-            brew install expect
-
   brew_install:
     description: "Install Homebrew formulae"
     parameters:
@@ -87,13 +56,11 @@ commands:
 
   run_brew_for_macos_build:
     steps:
-      - brew_update
       - brew_install:
           formulae: libomp
 
   run_brew_for_ios_build:
     steps:
-      - brew_update
       - brew_install:
           formulae: libtool
 

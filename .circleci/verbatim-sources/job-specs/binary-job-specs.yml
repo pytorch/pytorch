@@ -142,7 +142,6 @@
           <<: *binary_checkout
       - run:
           <<: *binary_populate_env
-      - brew_update
       - run:
           <<: *binary_install_miniconda
       - run:
@@ -168,7 +167,6 @@
         <<: *binary_checkout
     - run:
         <<: *binary_populate_env
-    - brew_update
     - run:
         <<: *binary_install_miniconda
 
@@ -212,7 +210,6 @@
         <<: *binary_checkout
     - run:
         <<: *binary_populate_env
-    - brew_update
     - run:
         <<: *binary_install_miniconda
 
