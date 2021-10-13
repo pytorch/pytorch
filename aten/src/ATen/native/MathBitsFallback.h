@@ -103,7 +103,7 @@ struct MathOpFallback {
         if (mut_arg) {
           TORCH_CHECK(mutable_inputs_with_their_clones.empty(), op_name, " fallback does not support operators with more than one mutable tensors with ",
             op_name, "bit set to true.");
-          mutable_inputs_with_their_clones.emplace_back(std::make_pair(std::move(tensor), std::move(resolved_tensor)));
+          mutable_inputs_with_their_clones.emplace_back(std::make_pair(std::move(tensor), resolved_tensor));
         }
         (*stack)[stack_start + i] = std::move(resolved_tensor);
       } else if (ivalue.isTensorList()) {

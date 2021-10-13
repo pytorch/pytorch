@@ -1789,35 +1789,35 @@ struct getTypePtr_<at::Dimname> final {
 };
 template <class T>
 struct getTypePtr_<std::vector<T>> final {
-  static decltype(auto) call() {
+  static const auto& call() {
     static auto type = ListType::create(getTypePtr_<T>::call());
     return type;
   }
 };
 template <class T>
 struct getTypePtr_<c10::ArrayRef<T>> final {
-  static decltype(auto) call() {
+  static const auto& call() {
     static auto type = ListType::create(getTypePtr_<T>::call());
     return type;
   }
 };
 template <class T>
 struct getTypePtr_<c10::List<T>> final {
-  static decltype(auto) call() {
+  static const auto& call() {
     static auto type = ListType::create(getTypePtr_<T>::call());
     return type;
   }
 };
 template <class T, size_t N>
 struct getTypePtr_<std::array<T, N>> final {
-  static decltype(auto) call() {
+  static const auto& call() {
     static auto type = ListType::create(getTypePtr_<T>::call());
     return type;
   }
 };
 template <class K, class V>
 struct getTypePtr_<std::unordered_map<K, V>> final {
-  static decltype(auto) call() {
+  static const auto& call() {
     static auto type =
         DictType::create(getTypePtr_<K>::call(), getTypePtr_<V>::call());
     return type;
@@ -1825,7 +1825,7 @@ struct getTypePtr_<std::unordered_map<K, V>> final {
 };
 template <class K, class V>
 struct getTypePtr_<c10::Dict<K, V>> final {
-  static decltype(auto) call() {
+  static const auto& call() {
     static auto type =
         DictType::create(getTypePtr_<K>::call(), getTypePtr_<V>::call());
     return type;
@@ -1833,18 +1833,21 @@ struct getTypePtr_<c10::Dict<K, V>> final {
 };
 template <class T>
 struct getTypePtr_<at::optional<T>> final {
-  static decltype(auto) call() {
+  static const auto& call() {
     static auto type = OptionalType::create(getTypePtr_<T>::call());
     return type;
   }
 };
 template <class... Contained>
 struct getTypePtr_<std::tuple<Contained...>> final {
-  static decltype(auto) call() {
-    std::vector<TypePtr> contained_types = {
-      (getTypePtr_<Contained>::call())...
-    };
-    return TupleType::create(std::move(contained_types));
+  static const auto& call() {
+    static auto type = ([]() {
+      std::vector<TypePtr> contained_types = {
+        (getTypePtr_<Contained>::call())...
+      };
+      return TupleType::create(std::move(contained_types));
+    })();
+    return type;
   }
 };
 template <>
@@ -1967,6 +1970,9 @@ struct TORCH_API ClassType : public NamedType {
       std::vector<std::string> unresolved_class_attributes = {});
 
   bool operator==(const Type& rhs) const override {
+    if (this == &rhs) {
+      return true;
+    }
     if (auto user_rhs = rhs.castRaw<ClassType>()) {
       const auto& lhs_name = name().value();
       const auto& rhs_name = user_rhs->name().value();
