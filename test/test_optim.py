@@ -246,7 +246,7 @@ class TestOptim(TestCase):
     def _test_complex_optimizer(self, optimizer_constructor):
         complex_param = torch.randn(5, 5, dtype=torch.complex64, requires_grad=True)
         complex_opt = optimizer_constructor(complex_param)
-        real_param = torch.view_as_real(complex_param).detach().requires_grad_()
+        real_param = torch.view_as_real(complex_param).detach().clone().requires_grad_()
         real_opt = optimizer_constructor(real_param)
 
         for i in range(3):
@@ -563,6 +563,18 @@ class TestOptim(TestCase):
             )
             with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
                 optimizer(None, lr=1e-2, rho=1.1)
+
+    def test_adadelta_complex(self):
+        for optimizer in [optim.Adadelta]:
+            self._test_complex_optimizer(
+                lambda weight: optimizer([weight])
+            )
+            self._test_complex_optimizer(
+                lambda weight: optimizer([weight], rho=0.95)
+            )
+            self._test_complex_optimizer(
+                lambda weight: optimizer([weight], rho=0.95, weight_decay=1)
+            )
 
     def test_nadam(self):
         for optimizer in [optim.NAdam, optim_mt.NAdam]:
