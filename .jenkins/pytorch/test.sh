@@ -497,7 +497,12 @@ test_docs_test() {
   .jenkins/pytorch/docs-test.sh
 }
 
+# lazy_tensor_staging branch specific hacks, don't merge back to master.
 test_lazy_tensor_core() {
+  ln -sf "$TORCH_LIB_DIR"/libtorch* torch/lib/
+  ln -sf "$TORCH_LIB_DIR"/libshm* torch/lib/
+  ln -sf "$TORCH_LIB_DIR"/libc10* torch/lib/
+  ln -sf "$PWD"/lazy_tensor_core/build/lib.linux-x86_64-3.6/_LAZYC.cpython-36m-x86_64-linux-gnu.so lazy_tensor_core/build/lib.linux-x86_64-3.6/libptltc.so
   lazy_tensor_core/test/cpp/build/test_ptltc
   assert_git_not_dirty
 }
@@ -519,9 +524,11 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
 elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 || ("${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1) ]]; then
+  if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-cuda11.3* ]]; then
+    test_lazy_tensor_core
+  fi
   if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-cuda11.1*-test1* ]]; then
     test_torch_deploy
-    test_lazy_tensor_core
   fi
   test_without_numpy
   install_torchvision
