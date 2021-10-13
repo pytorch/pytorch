@@ -465,7 +465,7 @@ $6 = torch._ops.aten.add_($1, $5)''')
         with self.assertRaisesRegex(RuntimeError, "is not supported for tensor subclasses."):
             x.tolist()
         with self.assertRaisesRegex(RuntimeError, "is not supported for tensor subclasses."):
-            x.numpy() 
+            x.numpy()
         with self.assertRaises(AssertionError):
             self.assertEqual(x, None)
 
