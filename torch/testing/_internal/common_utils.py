@@ -1784,8 +1784,7 @@ class TestCase(expecttest.TestCase):
         debug_msg: Optional[str] = None
 
         if x is None or y is None:
-            self.assertTrue(x is None)
-            self.assertTrue(y is None)
+            self.assertTrue(x is None and y is None)
         # Tensor x Number and Number x Tensor comparisons
         if isinstance(x, torch.Tensor) and isinstance(y, Number):
             self.assertEqual(x.item(), y, atol=atol, rtol=rtol, msg=msg,
