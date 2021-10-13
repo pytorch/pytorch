@@ -115,7 +115,6 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     if (((self.dtype() == at::kFloat && src.dtype() == at::kHalf) ||
          (self.dtype() == at::kHalf && src.dtype() == at::kFloat)) &&
         (self.device().is_cpu() && src.device().is_cpu()) &&
-        !self.is_sparse() && !src.is_sparse() &&
         ((self.is_contiguous() && src.is_contiguous()) ||
          (self.is_non_overlapping_and_dense() && self.strides() == src.strides()))) {
       if (src.dtype() == at::kFloat && self.dtype() == at::kHalf) {
@@ -155,13 +154,6 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
       return self;
     }
   #endif
-
-  if (self.is_sparse() && src.is_sparse()) {
-    return at::copy_sparse_to_sparse_(self, src, non_blocking);
-  } else if (self.is_sparse() || src.is_sparse()) {
-    AT_ERROR("copy_() between dense and sparse Tensors is not implemented! Found self type = ",
-             self.toString(), " and src type = ", src.toString());
-  }
 
   if (self.is_same(src)) {
     return self;
