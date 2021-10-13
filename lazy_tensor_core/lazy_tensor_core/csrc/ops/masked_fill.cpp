@@ -19,7 +19,7 @@ NodePtr MaskedFill::Clone(OpList operands) const {
 
 std::string MaskedFill::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", value=" << value_;
+  ss << TsNode::ToString() << ", value=" << value_;
   return ss.str();
 }
 

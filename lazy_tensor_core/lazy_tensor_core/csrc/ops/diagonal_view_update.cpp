@@ -24,7 +24,7 @@ NodePtr DiagonalViewUpdate::Clone(OpList operands) const {
 
 std::string DiagonalViewUpdate::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", offset=" << offset_ << ", dim1=" << dim1_
+  ss << TsNode::ToString() << ", offset=" << offset_ << ", dim1=" << dim1_
      << ", dim2=" << dim2_;
   return ss.str();
 }

@@ -18,7 +18,7 @@ IndexGet::IndexGet(const ir::Value& base, const ir::Value& indices,
 
 std::string IndexGet::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", start_dim=" << start_dim_;
+  ss << TsNode::ToString() << ", start_dim=" << start_dim_;
   return ss.str();
 }
 

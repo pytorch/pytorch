@@ -21,7 +21,7 @@ NodePtr Repeat::Clone(OpList operands) const {
 
 std::string Repeat::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", repeats=("
+  ss << TsNode::ToString() << ", repeats=("
      << lazy_tensors::StrJoin(repeats_, ", ") << ")";
   return ss.str();
 }

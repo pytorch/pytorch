@@ -18,7 +18,7 @@ HardtanhBackward::HardtanhBackward(const Value& grad_output, const Value& input,
 
 std::string HardtanhBackward::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", min_val=" << min_val_
+  ss << TsNode::ToString() << ", min_val=" << min_val_
      << ", max_val=" << max_val_;
   return ss.str();
 }

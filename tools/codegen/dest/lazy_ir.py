@@ -109,7 +109,7 @@ class {schema.node_name} : public {self.node_base} {{
 
   std::string ToString() const override {{
     std::stringstream ss;
-    ss << Node::ToString();
+    ss << TsNode::ToString();
     {members_to_string}
     return ss.str();
   }}

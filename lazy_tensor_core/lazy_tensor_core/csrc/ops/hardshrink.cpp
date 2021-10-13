@@ -13,7 +13,7 @@ Hardshrink::Hardshrink(const Value& input, const at::Scalar& lambda)
 
 std::string Hardshrink::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", lambda=" << lambda_;
+  ss << TsNode::ToString() << ", lambda=" << lambda_;
   return ss.str();
 }
 

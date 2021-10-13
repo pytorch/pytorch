@@ -16,7 +16,7 @@ NodePtr LogBase::Clone(OpList operands) const {
 
 std::string LogBase::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", base=" << base_;
+  ss << TsNode::ToString() << ", base=" << base_;
   return ss.str();
 }
 

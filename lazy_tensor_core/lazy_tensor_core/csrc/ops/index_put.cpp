@@ -15,7 +15,7 @@ IndexPut::IndexPut(const ir::Value& base, const ir::Value& indices,
 
 std::string IndexPut::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", start_dim=" << start_dim_
+  ss << TsNode::ToString() << ", start_dim=" << start_dim_
      << ", accumulate=" << accumulate_;
   return ss.str();
 }

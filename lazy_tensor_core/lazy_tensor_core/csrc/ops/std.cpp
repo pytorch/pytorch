@@ -28,7 +28,7 @@ NodePtr Std::Clone(OpList operands) const {
 
 std::string Std::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", dimensions=("
+  ss << TsNode::ToString() << ", dimensions=("
      << lazy_tensors::StrJoin(dimensions_, ", ")
      << "), keep_reduced_dimensions=" << keep_reduced_dimensions_
      << ", correction=" << correction_;

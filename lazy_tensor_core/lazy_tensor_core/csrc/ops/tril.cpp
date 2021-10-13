@@ -16,7 +16,7 @@ NodePtr Tril::Clone(OpList operands) const {
 
 std::string Tril::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", diagonal=" << diagonal_;
+  ss << TsNode::ToString() << ", diagonal=" << diagonal_;
   return ss.str();
 }
 

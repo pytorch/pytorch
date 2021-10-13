@@ -39,7 +39,7 @@ NodePtr NllLossBackward::Clone(OpList operands) const {
 
 std::string NllLossBackward::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString()
+  ss << TsNode::ToString()
      << ", reduction=" << lazy_tensors::util::GetEnumValue(reduction_)
      << ", ignore_index=" << ignore_index_;
   return ss.str();

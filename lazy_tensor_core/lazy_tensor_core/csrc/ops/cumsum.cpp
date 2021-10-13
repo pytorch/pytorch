@@ -26,7 +26,7 @@ NodePtr CumSum::Clone(OpList operands) const {
 
 std::string CumSum::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", dim=" << dim_;
+  ss << TsNode::ToString() << ", dim=" << dim_;
   if (dtype_) {
     ss << ", dtype=" << *dtype_;
   }

@@ -27,7 +27,7 @@ NodePtr Select::Clone(OpList operands) const {
 
 std::string Select::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", dim=" << dim_ << ", start=" << start_
+  ss << TsNode::ToString() << ", dim=" << dim_ << ", start=" << start_
      << ", end=" << end_ << ", stride=" << stride_;
   return ss.str();
 }

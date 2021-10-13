@@ -21,7 +21,7 @@ NodePtr LeakyReluBackward::Clone(OpList operands) const {
 
 std::string LeakyReluBackward::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", negative_slope=" << negative_slope_
+  ss << TsNode::ToString() << ", negative_slope=" << negative_slope_
      << ", self_is_result=" << self_is_result_;
   return ss.str();
 }

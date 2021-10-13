@@ -33,7 +33,7 @@ NodePtr AllToAll::Clone(OpList operands) const {
 
 std::string AllToAll::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", split_dimension=" << split_dimension_
+  ss << TsNode::ToString() << ", split_dimension=" << split_dimension_
      << ", concat_dimension=" << concat_dimension_
      << ", split_count=" << split_count_ << ", groups=(";
   for (size_t i = 0; i < groups_.size(); ++i) {

@@ -30,7 +30,7 @@ NodePtr TSNativeBatchNormForward::Clone(OpList operands) const {
 
 std::string TSNativeBatchNormForward::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", training=" << training_
+  ss << TsNode::ToString() << ", training=" << training_
      << ", momentum=" << momentum_ << ", eps=" << eps_;
   return ss.str();
 }

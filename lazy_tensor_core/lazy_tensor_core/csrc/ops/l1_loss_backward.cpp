@@ -25,7 +25,7 @@ NodePtr L1LossBackward::Clone(OpList operands) const {
 
 std::string L1LossBackward::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString()
+  ss << TsNode::ToString()
      << ", reduction=" << lazy_tensors::util::GetEnumValue(reduction_);
   return ss.str();
 }

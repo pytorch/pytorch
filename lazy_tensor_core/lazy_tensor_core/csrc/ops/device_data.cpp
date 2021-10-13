@@ -16,7 +16,7 @@ DeviceData::DeviceData(std::shared_ptr<lazy_tensors::client::Data> data)
 
 std::string DeviceData::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", device=" << data_->device();
+  ss << TsNode::ToString() << ", device=" << data_->device();
   return ss.str();
 }
 

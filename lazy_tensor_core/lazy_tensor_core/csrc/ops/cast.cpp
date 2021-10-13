@@ -45,7 +45,7 @@ NodePtr Cast::Clone(OpList operands) const {
 
 std::string Cast::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", type="
+  ss << TsNode::ToString() << ", type="
      << lazy_tensors::primitive_util::LowercasePrimitiveTypeName(type_);
   if (dtype_) {
     ss << ", dtype=" << *dtype_;

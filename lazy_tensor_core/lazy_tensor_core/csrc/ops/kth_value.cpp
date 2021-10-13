@@ -24,7 +24,7 @@ NodePtr KthValue::Clone(OpList operands) const {
 
 std::string KthValue::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", k=" << k_ << ", dim=" << dim_
+  ss << TsNode::ToString() << ", k=" << k_ << ", dim=" << dim_
      << ", keepdim=" << keepdim_;
   return ss.str();
 }

@@ -27,7 +27,7 @@ NodePtr MseLoss::Clone(OpList operands) const {
 
 std::string MseLoss::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString()
+  ss << TsNode::ToString()
      << ", reduction=" << lazy_tensors::util::GetEnumValue(reduction_);
   return ss.str();
 }

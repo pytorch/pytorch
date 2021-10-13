@@ -25,7 +25,7 @@ NodePtr GetDimensionsSize::Clone(OpList operands) const {
 
 std::string GetDimensionsSize::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", dimensions=("
+  ss << TsNode::ToString() << ", dimensions=("
      << lazy_tensors::StrJoin(dimensions_, ", ") << ")";
   return ss.str();
 }

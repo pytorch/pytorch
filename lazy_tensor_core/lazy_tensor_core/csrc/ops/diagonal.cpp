@@ -27,7 +27,7 @@ NodePtr Diagonal::Clone(OpList operands) const {
 
 std::string Diagonal::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", offset=" << offset_ << ", dim1=" << dim1_
+  ss << TsNode::ToString() << ", offset=" << offset_ << ", dim1=" << dim1_
      << ", dim2=" << dim2_;
   return ss.str();
 }

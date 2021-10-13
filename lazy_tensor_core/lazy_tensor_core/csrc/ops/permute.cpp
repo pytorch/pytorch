@@ -23,7 +23,7 @@ NodePtr Permute::Clone(OpList operands) const {
 
 std::string Permute::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", dims=(" << lazy_tensors::StrJoin(dims_, ", ")
+  ss << TsNode::ToString() << ", dims=(" << lazy_tensors::StrJoin(dims_, ", ")
      << ")";
   return ss.str();
 }

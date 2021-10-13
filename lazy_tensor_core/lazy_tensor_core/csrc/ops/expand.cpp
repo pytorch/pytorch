@@ -25,7 +25,7 @@ NodePtr Expand::Clone(OpList operands) const {
 
 std::string Expand::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", size=(" << lazy_tensors::StrJoin(size_, ", ")
+  ss << TsNode::ToString() << ", size=(" << lazy_tensors::StrJoin(size_, ", ")
      << "), is_scalar_expand=" << is_scalar_expand_;
   return ss.str();
 }

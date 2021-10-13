@@ -61,7 +61,7 @@ NodePtr ConvolutionOverrideable::Clone(OpList operands) const {
 
 std::string ConvolutionOverrideable::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", stride=(" << lazy_tensors::StrJoin(stride_, ", ")
+  ss << TsNode::ToString() << ", stride=(" << lazy_tensors::StrJoin(stride_, ", ")
      << "), padding=(" << lazy_tensors::StrJoin(padding_, ", ")
      << "), dilation=(" << lazy_tensors::StrJoin(dilation_, ", ")
      << "), transpose=" << transposed_ << ", output_padding=("

@@ -21,7 +21,7 @@ NodePtr Cat::Clone(OpList operands) const {
 
 std::string Cat::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", dim=" << dim_;
+  ss << TsNode::ToString() << ", dim=" << dim_;
   return ss.str();
 }
 

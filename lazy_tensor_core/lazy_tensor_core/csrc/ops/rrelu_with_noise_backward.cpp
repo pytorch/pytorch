@@ -27,7 +27,7 @@ NodePtr RreluWithNoiseBackward::Clone(OpList operands) const {
 
 std::string RreluWithNoiseBackward::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", lower=" << lower_ << ", upper=" << upper_
+  ss << TsNode::ToString() << ", lower=" << lower_ << ", upper=" << upper_
      << ", training=" << training_;
   return ss.str();
 }

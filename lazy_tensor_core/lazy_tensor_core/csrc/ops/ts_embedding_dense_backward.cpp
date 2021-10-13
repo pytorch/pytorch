@@ -30,7 +30,7 @@ NodePtr TSEmbeddingDenseBackward::Clone(OpList operands) const {
 
 std::string TSEmbeddingDenseBackward::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", num_weights=" << num_weights_
+  ss << TsNode::ToString() << ", num_weights=" << num_weights_
      << ", padding_idx=" << padding_idx_
      << ", scale_grad_by_freq=" << scale_grad_by_freq_;
   return ss.str();

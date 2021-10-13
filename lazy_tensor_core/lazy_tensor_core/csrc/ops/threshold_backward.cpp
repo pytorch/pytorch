@@ -19,7 +19,7 @@ NodePtr ThresholdBackward::Clone(OpList operands) const {
 
 std::string ThresholdBackward::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", threshold=" << threshold_;
+  ss << TsNode::ToString() << ", threshold=" << threshold_;
   return ss.str();
 }
 

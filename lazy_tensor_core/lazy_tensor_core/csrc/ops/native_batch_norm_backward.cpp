@@ -27,7 +27,7 @@ NodePtr NativeBatchNormBackward::Clone(OpList operands) const {
 
 std::string NativeBatchNormBackward::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", training=" << training_ << ", eps=" << eps_;
+  ss << TsNode::ToString() << ", training=" << training_ << ", eps=" << eps_;
   return ss.str();
 }
 

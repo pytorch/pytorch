@@ -29,7 +29,7 @@ NodePtr TriangularSolve::Clone(OpList operands) const {
 
 std::string TriangularSolve::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", left_side=" << left_side_ << ", lower=" << lower_
+  ss << TsNode::ToString() << ", left_side=" << left_side_ << ", lower=" << lower_
      << ", transpose=" << transpose_ << ", unit_diagonal=" << unit_diagonal_;
   return ss.str();
 }

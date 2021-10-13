@@ -23,7 +23,7 @@ Scalar::Scalar(const at::Scalar& value, lazy_tensors::PrimitiveType type)
 
 std::string Scalar::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", value=" << value_;
+  ss << TsNode::ToString() << ", value=" << value_;
   return ss.str();
 }
 

@@ -28,7 +28,7 @@ NodePtr ConstantPadNd::Clone(OpList operands) const {
 
 std::string ConstantPadNd::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", pad=(" << lazy_tensors::StrJoin(pad_, ", ")
+  ss << TsNode::ToString() << ", pad=(" << lazy_tensors::StrJoin(pad_, ", ")
      << ")"
      << ", value=" << value_;
   return ss.str();

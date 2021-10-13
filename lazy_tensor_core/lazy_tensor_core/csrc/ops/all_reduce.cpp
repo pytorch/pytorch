@@ -43,7 +43,7 @@ NodePtr AllReduce::Clone(OpList operands) const {
 
 std::string AllReduce::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString()
+  ss << TsNode::ToString()
      << ", reduce_type=" << lazy_tensors::util::GetEnumValue(reduce_type_)
      << ", scale=" << scale_ << ", groups=(";
   for (size_t i = 0; i < groups_.size(); ++i) {

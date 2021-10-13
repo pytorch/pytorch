@@ -29,7 +29,7 @@ NodePtr Unsqueeze::Clone(OpList operands) const {
 
 std::string Unsqueeze::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", dim=" << dim_;
+  ss << TsNode::ToString() << ", dim=" << dim_;
   return ss.str();
 }
 

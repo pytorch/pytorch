@@ -25,7 +25,7 @@ NodePtr Nms::Clone(OpList operands) const {
 
 std::string Nms::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", output_size=" << output_size_;
+  ss << TsNode::ToString() << ", output_size=" << output_size_;
   return ss.str();
 }
 

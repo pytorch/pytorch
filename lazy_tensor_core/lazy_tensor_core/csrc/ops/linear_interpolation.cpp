@@ -19,7 +19,7 @@ NodePtr LinearInterpolation::Clone(OpList operands) const {
 
 std::string LinearInterpolation::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", alpha=" << alpha_;
+  ss << TsNode::ToString() << ", alpha=" << alpha_;
   return ss.str();
 }
 

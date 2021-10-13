@@ -18,7 +18,7 @@ NodePtr Put::Clone(OpList operands) const {
 
 std::string Put::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", accumulate=" << accumulate_;
+  ss << TsNode::ToString() << ", accumulate=" << accumulate_;
   return ss.str();
 }
 

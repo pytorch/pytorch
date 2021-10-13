@@ -139,16 +139,14 @@ Node::~Node() {}
 
 std::string Node::ToString() const {
   std::stringstream ss;
-  ss << "TODO reimplement Node::ToString with aten shape in base class, for "
-        "now it's solely implemented in TsNode";
-  // ss << shape() << " " << op();
-  // if (num_outputs() > 1) {
-  //   ss << ", num_outputs=" << num_outputs();
-  // }
-  // if (!metadata_.scope.empty()) {
-  //   ss << ", scope=" << metadata_.scope;
-  // }
-  // EmitShortFrameInfo(ss, metadata_.frame_info);
+  ss << op();
+  if (num_outputs() > 1) {
+    ss << ", num_outputs=" << num_outputs();
+  }
+  if (!metadata_.scope.empty()) {
+    ss << ", scope=" << metadata_.scope;
+  }
+  EmitShortFrameInfo(ss, metadata_.frame_info);
   return ss.str();
 }
 

@@ -14,7 +14,7 @@ ShrinkBackward::ShrinkBackward(OpKind kind, const Value& grad_output,
 
 std::string ShrinkBackward::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", lambda=" << lambda_;
+  ss << TsNode::ToString() << ", lambda=" << lambda_;
   return ss.str();
 }
 

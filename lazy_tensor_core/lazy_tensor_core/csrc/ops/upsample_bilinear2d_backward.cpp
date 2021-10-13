@@ -28,7 +28,7 @@ NodePtr UpsampleBilinearBackward::Clone(OpList operands) const {
 
 std::string UpsampleBilinearBackward::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", output_size=("
+  ss << TsNode::ToString() << ", output_size=("
      << lazy_tensors::StrJoin(output_size_, ", ") << "), input_size=("
      << lazy_tensors::StrJoin(input_size_, ", ")
      << "), align_corners=" << align_corners_;

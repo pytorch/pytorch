@@ -26,7 +26,7 @@ NodePtr CumProd::Clone(OpList operands) const {
 
 std::string CumProd::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", dim=" << dim_;
+  ss << TsNode::ToString() << ", dim=" << dim_;
   if (dtype_) {
     ss << ", dtype=" << *dtype_;
   }

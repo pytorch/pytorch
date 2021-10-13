@@ -27,7 +27,7 @@ NodePtr CollectivePermute::Clone(OpList operands) const {
 
 std::string CollectivePermute::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", source_target_pairs=(";
+  ss << TsNode::ToString() << ", source_target_pairs=(";
   for (size_t i = 0; i < source_target_pairs_.size(); ++i) {
     ss << (i == 0 ? "(" : ", (");
     ss << source_target_pairs_[i].first << ", "

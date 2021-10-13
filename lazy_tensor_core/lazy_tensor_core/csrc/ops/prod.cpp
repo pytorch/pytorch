@@ -30,7 +30,7 @@ NodePtr Prod::Clone(OpList operands) const {
 
 std::string Prod::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", dimensions=("
+  ss << TsNode::ToString() << ", dimensions=("
      << lazy_tensors::StrJoin(dimensions_, ", ")
      << "), keep_reduced_dimensions=" << keep_reduced_dimensions_
      << ", dtype=" << OptionalOr<int>(dtype_, -1);

@@ -23,7 +23,7 @@ NodePtr ReflectionPad2d::Clone(OpList operands) const {
 
 std::string ReflectionPad2d::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", padding=("
+  ss << TsNode::ToString() << ", padding=("
      << lazy_tensors::StrJoin(padding_, ", ") << ")";
   return ss.str();
 }

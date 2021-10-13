@@ -16,7 +16,7 @@ NodePtr Cholesky::Clone(OpList operands) const {
 
 std::string Cholesky::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", lower=" << lower_;
+  ss << TsNode::ToString() << ", lower=" << lower_;
   return ss.str();
 }
 

@@ -27,7 +27,7 @@ NodePtr Split::Clone(OpList operands) const {
 
 std::string Split::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", split_sizes=("
+  ss << TsNode::ToString() << ", split_sizes=("
      << lazy_tensors::StrJoin(split_sizes_, ", ") << "), dim=" << dim_;
   return ss.str();
 }

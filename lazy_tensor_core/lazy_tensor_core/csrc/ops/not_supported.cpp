@@ -18,7 +18,7 @@ NodePtr NotSupported::Clone(OpList operands) const {
 
 std::string NotSupported::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", description=" << description_;
+  ss << TsNode::ToString() << ", description=" << description_;
   return ss.str();
 }
 

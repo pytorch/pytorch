@@ -24,7 +24,7 @@ NodePtr ReplicationPad::Clone(OpList operands) const {
 
 std::string ReplicationPad::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", padding=("
+  ss << TsNode::ToString() << ", padding=("
      << lazy_tensors::StrJoin(padding_, ", ") << ")";
   return ss.str();
 }

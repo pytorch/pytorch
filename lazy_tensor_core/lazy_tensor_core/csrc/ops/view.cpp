@@ -34,7 +34,7 @@ View::View(const Value& input, std::vector<lazy_tensors::int64> output_size)
 
 std::string View::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", output_size=("
+  ss << TsNode::ToString() << ", output_size=("
      << lazy_tensors::StrJoin(output_size_, ", ") << ")";
   return ss.str();
 }

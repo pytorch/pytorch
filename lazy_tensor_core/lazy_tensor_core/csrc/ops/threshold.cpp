@@ -17,7 +17,7 @@ NodePtr Threshold::Clone(OpList operands) const {
 
 std::string Threshold::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", threshold=" << threshold_
+  ss << TsNode::ToString() << ", threshold=" << threshold_
      << ", value=" << value_;
   return ss.str();
 }

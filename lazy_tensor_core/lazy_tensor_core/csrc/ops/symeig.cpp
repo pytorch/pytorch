@@ -22,7 +22,7 @@ NodePtr SymEig::Clone(OpList operands) const {
 
 std::string SymEig::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", eigenvectors=" << eigenvectors_
+  ss << TsNode::ToString() << ", eigenvectors=" << eigenvectors_
      << ", lower=" << lower_;
   return ss.str();
 }

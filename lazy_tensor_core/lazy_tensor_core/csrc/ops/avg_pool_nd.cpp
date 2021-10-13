@@ -51,7 +51,7 @@ NodePtr AvgPoolNd::Clone(OpList operands) const {
 
 std::string AvgPoolNd::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", spatial_dim_count=" << spatial_dim_count_
+  ss << TsNode::ToString() << ", spatial_dim_count=" << spatial_dim_count_
      << ", kernel_size=(" << lazy_tensors::StrJoin(kernel_size_, ", ")
      << "), stride=(" << lazy_tensors::StrJoin(stride_, ", ") << "), padding=("
      << lazy_tensors::StrJoin(padding_, ", ")

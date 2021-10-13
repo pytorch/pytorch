@@ -24,7 +24,7 @@ NodePtr UpdateSlice::Clone(OpList operands) const {
 
 std::string UpdateSlice::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", base_indices=("
+  ss << TsNode::ToString() << ", base_indices=("
      << lazy_tensors::StrJoin(base_indices_, ", ") << ")";
   return ss.str();
 }
