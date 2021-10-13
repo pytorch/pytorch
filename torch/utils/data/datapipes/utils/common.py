@@ -52,7 +52,7 @@ def get_file_binaries_from_pathnames(pathnames: Iterable, mode: str):
         if not isinstance(pathname, str):
             raise TypeError("Expected string type for pathname, but got {}"
                             .format(type(pathname)))
-        yield (pathname, open(pathname, mode))
+        yield (pathname, StreamWrapper(open(pathname, mode)))
 
 def validate_pathname_binary_tuple(data: Tuple[str, IOBase]):
     if not isinstance(data, tuple):
@@ -61,7 +61,7 @@ def validate_pathname_binary_tuple(data: Tuple[str, IOBase]):
         raise TypeError(f"pathname binary stream tuple length should be 2, but got {len(data)}")
     if not isinstance(data[0], str):
         raise TypeError(f"pathname within the tuple should have string type pathname, but it is type {type(data[0])}")
-    if not isinstance(data[1], IOBase):
+    if not isinstance(data[1], IOBase) and not isinstance(data[1], StreamWrapper):
         raise TypeError(
             f"binary stream within the tuple should have IOBase or"
             f"its subclasses as type, but it is type {type(data[1])}"
@@ -72,3 +72,26 @@ def deprecation_warning_torchdata(name):
     warnings.warn(f"{name} and its functional API are deprecated and will be removed from the package `torch`. "
                   f"Please import those features from the new package TorchData: https://github.com/pytorch/data",
                   DeprecationWarning)
+
+class StreamWrapper:
+    r""":class:`StreamWrapper`.
+
+        A wrapper class around a file object, it allows the file object to automatically close whenever
+        it is no longer needed. This instance delegates all methods except for __del__ to the file object.
+
+        Args:
+            file_obj: File object to which the instance will delegate attribute or method calls to
+    """
+
+    def __init__(self, file_obj):
+        self.file_obj = file_obj
+
+    def __getattr__(self, name):
+        return getattr(self.file_obj, name)
+
+    def __del__(self):
+        self.file_obj.close()
+        try:
+            super().__del__(self)
+        except AttributeError:
+            pass
