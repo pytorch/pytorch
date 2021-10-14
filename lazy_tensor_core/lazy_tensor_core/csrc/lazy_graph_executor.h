@@ -20,6 +20,11 @@ class LazyGraphExecutor {
 
   void MarkStep(const Device& device);
 
+  void DeviceBarrier(const Device& device);
+
+  std::vector<lazy_tensors::util::ExceptionCleanup> LockDevices(
+      const std::set<Device>& devices);
+
  private:
   LazyGraphExecutor() {}
 };
