@@ -18,8 +18,9 @@ conda activate pyllga
 
 ### 2. Build from source
 
+After cloning the repo recursively,
+
 ```bash
-git clone https://gitlab.devtools.intel.com/pinzhen1/pytorch_llga.git --recursive
 cd pytorch_llga
 python setup.py develop
 # Or if you are going to enable debug builds:
@@ -86,21 +87,21 @@ Use `export DNNL_GRAPH_CONSTANT_CACHE=1` to enable the weight cache (This is a t
 
 
 ```python
-# enable oneDNN graph fusion globally 
+# enable oneDNN graph fusion globally
 torch._C._jit_set_llga_enabled(True)
 
-# define the model 
-def MyModel(torch.nn.Module): 
+# define the model
+def MyModel(torch.nn.Module):
     ...
 
 # construct the model
 model = MyModel(…)
 with torch.no_grad():
     model.eval()
-    model = torch.jit.trace(model, torch.rand(args.batch_size, 3, 224, 224)) 
+    model = torch.jit.trace(model, torch.rand(args.batch_size, 3, 224, 224))
 
-# run the model 
+# run the model
 with torch.no_grad():
     # oneDNN graph fusion will be trigerred during runtime
-    output = model(images) 
+    output = model(images)
 ```
