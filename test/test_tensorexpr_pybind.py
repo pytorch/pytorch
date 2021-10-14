@@ -414,7 +414,6 @@ class TestExprHandlePyBind(JitTestCase):
             torch.trunc: torch._C._te.trunc,
             torch.lgamma: torch._C._te.lgamma,
             torch.frac: torch._C._te.frac,
-            # torch.isnan : torch._C._te.isnan,
         }
 
         def construct_te_fn(op, n: int, dtype=torch.float32):
