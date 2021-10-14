@@ -433,8 +433,7 @@ class TestExprHandlePyBind(JitTestCase):
         n = 10
         a = torch.rand(n)
         for torch_op, te_op in unary_operators.items():
-            torch_fn = lambda x: torch_op(x)
-            ref = torch_fn(a)
+            ref = torch_op(a)
 
             te_fn = construct_te_fn(te_op, n, torch.float32)
             res = torch.empty(n)
