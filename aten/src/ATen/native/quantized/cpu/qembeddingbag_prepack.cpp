@@ -56,6 +56,10 @@ c10::intrusive_ptr<EmbeddingPackedParamsBase> PackedEmbeddingBagWeight::prepack(
   std::vector<float> weight_scales(embedding_rows);
   std::vector<float> weight_zero_points(embedding_rows);
 
+  // The 3 tensors below are set up to point to the data buffers of
+  // the 3 vectors above. This means that writing into one of the
+  // Tensors below will result in writes to the corresponding vectors
+  // above. This is done to avoid copying the same data multiple times.
   at::Tensor weight_bias_tensor = at::from_blob(weight_bias.data(), {embedding_rows});
   at::Tensor weight_scales_tensor = at::from_blob(weight_scales.data(), {embedding_rows});
   at::Tensor weight_zero_points_tensor = at::from_blob(weight_zero_points.data(), {embedding_rows});
