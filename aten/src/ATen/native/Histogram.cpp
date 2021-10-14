@@ -29,9 +29,9 @@
  *   weight    - tensor, optional. If provided, weight should have the same shape as input excluding its last dimension.
  *               Each N-dimensional value in input contributes its associated weight towards its bin's result.
  *               If weight is not specified, each value has weight 1 by default.
- *   density   - bool, optional. If false (default), the result will contain the total weight in each bin.
- *               If true, the value of each bin is the value of a piecewise-constant probability density function (pdf)
- *               over the bins such that the (Lebesgue) integral of the pdf over the range of the bins is 1.
+ *   density   - bool, optional. If false (default), the result will contain the total count (weight) in each bin.
+ *               If True, each count (weight) is divided by the total count (total weight), then divided by the
+ *               volume of its associated bin.
  *
  * Returns:
  *   hist      - N-dimensional tensor containing the values of the histogram.

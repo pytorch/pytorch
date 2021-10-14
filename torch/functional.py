@@ -383,7 +383,10 @@ else:
         If :attr:`bins` is an int, it specifies the number of equal-width bins for all dimensions.
 
         .. note::
-            See also :func:`torch.histogram`.
+            See also :func:`torch.histogram`, which specifically computes 1D histograms.
+            While :func:`torch.histogramdd` infers the dimensionality of its bins and
+            binned values from the shape of :attr:`input`, :func:`torch.histogram`
+            accepts and flattens :attr:`input` of any shape.
 
         Args:
             {input}
