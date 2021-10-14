@@ -293,7 +293,6 @@ std::tuple<Tensor,optional<int64_t>> scatter_reduce_batch_rule(
     const Tensor& index, optional<int64_t> index_bdim,
     const Tensor& src, optional<int64_t> src_bdim,
     const c10::string_view reduce) {
-  using scatter_reduce_value_sig = Tensor (*)(const Tensor&, int64_t, const Tensor&, const Tensor&, const c10::string_view reduce);
   return scatter_batch_rule(ATEN_FN2(scatter, reduce),
                             self, self_bdim, dim, index, index_bdim, src, src_bdim, reduce);
 }
@@ -304,7 +303,6 @@ std::tuple<Tensor,optional<int64_t>> scatter_value_reduce_batch_rule(
     const Tensor& index, optional<int64_t> index_bdim,
     const Scalar& src,
     const c10::string_view reduce) {
-  using scatter_reduce_value_sig = Tensor (*)(const Tensor&, int64_t, const Tensor&, const Scalar&, const c10::string_view reduce);
   return scatter_batch_rule(ATEN_FN2(scatter, value_reduce),
                             self, self_bdim, dim, index, index_bdim, src, reduce);
 }
