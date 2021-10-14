@@ -774,6 +774,9 @@ class _TensorBase(metaclass=_TensorMeta):
     real: Tensor
     imag: Tensor
     T: Tensor
+    H: Tensor
+    mT: Tensor
+    mH: Tensor
     ndim: _int
     output_nr: _int
     _version: _int
