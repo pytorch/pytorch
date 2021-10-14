@@ -113,7 +113,7 @@ static inline hash_t Hash(const hash_t& value) {
 template <typename T>
 hash_t ContainerHash(const T& values) {
   hash_t h = c10::uint128((uint64_t)0x85ebca77c2b2ae63);
-  for (auto& value : values) {
+  for (const auto& value : values) {
     h = HashCombine(h, Hash(value));
   }
   return h;
