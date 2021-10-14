@@ -235,17 +235,15 @@ NodePtr MakeNode(Args&&... args) {
 }
 
 template <typename T>
-T* NodeCast(const Node* node, OpKind op) {
+const T* NodeCast(const Node* node, OpKind op) {
   if (op != node->op()) {
     return nullptr;
   }
-  const T* casted;
 #ifdef NDEBUG
-  casted = static_cast<const T*>(node);
+  return static_cast<const T*>(node);
 #else
-  casted = &dynamic_cast<const T&>(*node);
+  return &dynamic_cast<const T&>(*node);
 #endif
-  return const_cast<T*>(casted);
 }
 
 }  // namespace ir

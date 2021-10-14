@@ -365,7 +365,7 @@ class TSNodeLowering : public NodeLowering {
           ir::NodeCast<ir::ops::View>(node, ir::OpKind(at::aten::view)));
     }
     if (node->op() == *ir::ops::ltc_device_data) {
-      ir::ops::DeviceData* device_data_node =
+      const ir::ops::DeviceData* device_data_node =
           ir::NodeCast<ir::ops::DeviceData>(node, *ir::ops::ltc_device_data);
       return {loctx()->GetParameter(device_data_node->data())};
     }

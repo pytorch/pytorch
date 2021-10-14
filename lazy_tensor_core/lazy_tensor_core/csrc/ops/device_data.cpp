@@ -24,7 +24,7 @@ NodePtr DeviceData::Clone(OpList operands) const {
   return MakeNode<DeviceData>(data_);
 }
 
-DeviceData* DeviceData::Cast(const Node* node) {
+const DeviceData* DeviceData::Cast(const Node* node) {
   return NodeCast<DeviceData>(node, ltc_device_data);
 }
 
