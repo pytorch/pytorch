@@ -352,22 +352,6 @@ class TestFuser(JitTestCase):
             self.assertAllFused(graph, except_for={'aten::Float', 'aten::_grad_sum_to_size'})
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "no half support with profiling on")
-    def test_dropout(self):
-        def func(x):
-            x = torch.nn.functional.dropout(x)
-            return torch.nn.functional.relu(x)
-
-        a = torch.randn(4, 4, dtype=torch.float, device='cuda', requires_grad=True)
-        s = torch.jit.script(func)
-        c = s(a)
-        c = s(a)
-        warmup_backward(c.sum())
-        # skip_check to skip extra bailout nodes in between
-        graph = backward_graph(s, skip_check=True)
-        self.assertAllFused(graph, except_for={'aten::div', 'prim::Constant'})
-
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_comparison_eq_ne(self):
         def f(x, y):
             mask = (x == 0).type_as(x)
