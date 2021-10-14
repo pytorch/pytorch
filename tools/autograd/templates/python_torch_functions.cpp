@@ -75,7 +75,7 @@ namespace {
   ${py_return_types}
 
   // hold onto generated return type.
-  PyTypeObject* return_types[] = {
+  std::vector<PyTypeObject*> return_types = {
     ${py_return_types_array}
   };
 }
@@ -88,7 +88,7 @@ void gatherTorchFunctionsAndReturnTypes${shard_id}(std::vector<PyMethodDef> &tor
     torch_functions_shard + num_functions);
 
   constexpr size_t num_returns = sizeof(return_types) / sizeof(return_types[0]);
-  return_types_vec.insert(return_types_vec.end(), return_types, return_types + num_returns);
+  return_types_vec.insert(return_types_vec.end(), return_types.begin(), return_types.end());
 }
 
 // generated methods start here

@@ -1565,6 +1565,7 @@ namespace torch { namespace autograd {
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 extern PyMethodDef variable_methods[];
 extern void initTorchFunctions(PyObject *module);
+extern std::vector<PyTypeObject*> return_types_variable;
 
 void initTensorImplConversion(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
@@ -1603,6 +1604,12 @@ bool THPVariable_initModule(PyObject *module)
   PyModule_AddObject(module, "_TensorBase",   (PyObject *)&THPVariableType);
   torch::autograd::initTorchFunctions(module);
   torch::autograd::initTensorImplConversion(module);
+
+  auto return_module = PyObject_GetAttrString(module, "_return_types");
+  for (auto return_type: torch::autograd::return_types_variable) {
+    PyModule_AddType(return_module, return_type);
+  }
+
   return true;
 }
 

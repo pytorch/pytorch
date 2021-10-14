@@ -27,7 +27,7 @@ namespace {
   ${py_return_types}
 
   // hold onto generated return type.
-  PyTypeObject* return_types[] = {
+  std::vector<PyTypeObject*> return_types = {
     ${py_return_types_array}
   };
 }
@@ -107,9 +107,8 @@ void initNNFunctions(PyObject* module) {
   }
 
   auto return_module = PyObject_GetAttrString(module, "_return_types");
-  constexpr size_t num_returns = sizeof(return_types) / sizeof(return_types[0]);
-  for (int i = 0; i < num_returns; i++) {
-    PyModule_AddType(return_module, return_types[i]);
+  for (auto return_type: return_types){
+    PyModule_AddType(return_module, return_type);
   }
 }
 

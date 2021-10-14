@@ -57,6 +57,11 @@ namespace {
   ${py_return_types}
 }
 
+// hold onto generated return type.
+std::vector<PyTypeObject*> return_types_variable = {
+  ${py_return_types_array}
+};
+
 static PyObject * THPVariable__is_view(PyObject *self, PyObject* args)
 {
   HANDLE_TH_ERRORS
