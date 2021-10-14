@@ -4,6 +4,7 @@
 #include <qnnpack_func.h>
 #include <cstdlib>
 #include <cstring>
+#include <cmath>
 
 namespace qnnpack {
 // For runtime quantization packing.
