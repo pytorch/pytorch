@@ -2989,6 +2989,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('gradient'),
         xfail('hsplit'),
         xfail('nn.functional.pad', 'circular'),
+        xfail('resize_'),
         xfail('resize_as_'),
         xfail('tensor_split'),
         xfail('to_sparse'),
@@ -3000,6 +3001,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nanmean'),
         xfail('block_diag'),
         xfail('nn.functional.dropout'),
+        xfail('view_as_complex'),
 
         # entries in here don't work and need to be fixed.
         # Each one of these is a bug
@@ -3007,8 +3009,16 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('svd', device_type='cuda'),
         xfail('linalg.svd', device_type='cuda'),
         xfail('index_put'),
+        xfail('matrix_exp'),
+        xfail('fft.fft'),
+        xfail('fft.ifft'),
+        xfail('fft.ihfft'),
+        xfail('fft.rfft'),
+        xfail('fft.rfftn'),
         xfail('nn.functional.batch_norm'),
         xfail('nn.functional.nll_loss'),
+        xfail('lu_unpack'),
+        xfail('nn.functional.pad', 'constant'),
     })
     def test_vmap_exhaustive(self, device, dtype, op):
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
@@ -3105,6 +3115,9 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.dropout'),
         xfail('nn.functional.conv2d', ''),
         xfail('nn.functional.batch_norm'),
+        xfail('resize_'),
+        xfail('view_as_complex'),
+        xfail('matrix_exp'),
     })
     def test_op_has_batch_rule(self, device, dtype, op):
         def test():

@@ -271,8 +271,8 @@ std::tuple<Tensor, optional<int64_t>, Tensor, optional<int64_t>> aminmax_batchin
     dim = maybe_wrap_dim(dim.value(), logical_rank) + 1;
   } else {
     // flatten the input except for batch-dim
-    auto bsize = self.size(0);
-    self_ = self.view({bsize, -1});
+    auto bsize = self_.size(0);
+    self_ = self_.view({bsize, -1});
     dim = 1;
   }
 
