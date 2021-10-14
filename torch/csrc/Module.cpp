@@ -804,7 +804,7 @@ PyObject* initModule() {
   if (!return_types) {
     throw python_error();
   }
-  // steals a reference to linalg
+  // steals a reference to return_types
   if (PyModule_AddObject(module, "_return_types", return_types) != 0) {
     throw python_error();
   }
