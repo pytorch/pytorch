@@ -1350,7 +1350,11 @@ bool ListType::isSubtypeOfExt(const Type& rhs_, std::ostream* why_not) const {
   if (rhs_.kind() == AnyListType::Kind) {
     return true;
   }
-  return false;
+  auto rhs = rhs_->cast<ListType>();
+  if (!rhs) {
+    return false;
+  }
+  return containedTypes()[0]->isSubtypeOfExt(rhs->containedTypes()[0], why_not);
 }
 
  bool TupleType::operator==(const Type& rhs) const {
