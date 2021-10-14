@@ -162,7 +162,7 @@ def _handle_col_wise_sharding(
 
     # Compute output splits
     split_size = get_split_size(sharding_dim_size, world_size)
-    output_split_sizes = [None] * world_size
+    output_split_sizes = [int] * world_size
     for idx, placement in enumerate(weight._sharding_spec.placements):
         output_split_sizes[placement.rank()] = get_chunked_dim_size(
             sharding_dim_size, split_size, idx

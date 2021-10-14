@@ -1,4 +1,4 @@
-from typing import cast
+from typing import List, cast
 
 import itertools
 import torch
@@ -129,7 +129,7 @@ def _handle_col_wise_sharding(input, world_size, weight, local_shard_t, bias, pg
 
     # Compute output splits
     split_size = get_split_size(sharding_dim_size, world_size)
-    output_split_sizes = [None] * world_size
+    output_split_sizes = [0] * world_size
     for idx, placement in enumerate(weight._sharding_spec.placements):
         output_split_sizes[placement.rank()] = get_chunked_dim_size(
             sharding_dim_size, split_size, idx
@@ -171,7 +171,7 @@ def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
 
     if rearrange_rows:
         # Need to re-arrange rows of input_t for all2all.
-        indices = [None] * world_size
+        indices = [List[int]] * world_size
         sharded_dim_size_max = max(input_split_sizes)
         for idx, placement in enumerate(weight._sharding_spec.placements):
             offset = input_split_sizes[placement.rank()]
