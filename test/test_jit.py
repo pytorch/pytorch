@@ -11125,6 +11125,12 @@ dedent """
 
         self.checkScript(fn, (torch.randn(3, 2, dtype=torch.float), torch.ones(3, 2, dtype=torch.float)))
 
+    def test_union_to_number(self):
+        @torch.jit.script
+        def fn(x: Union[int, complex, float], y: Union[int, complex, float]):
+            return x + y
+        FileCheck().check(": Scalar):").run(fn.graph)
+
     def test_reassign_module_lhs(self):
         with self.assertRaisesRegex(RuntimeError, 'Cannot re-assign \'self\''):
             class ReassignSelfLHS(torch.jit.ScriptModule):
@@ -13418,20 +13424,12 @@ dedent """
             return torch.rand(2, 3)
 
         mobileCode = torch._C.MobileCode(foo.graph, "foo")
-        instructions = mobileCode.instructions()
-        expected_inst = [('LOADC', 1, 0),
-            ('LOADC', 2, 0),
-            ('LIST_CONSTRUCT', 0, 2),
-            ('LOADC', 0, 0),
-            ('LOADC', 0, 0),
-            ('LOADC', 0, 0),
-            ('LOADC', 0, 0),
-            ('OP', 0, 0),
-            ('RET', 0, 0)]
-        self.assertTrue(expected_inst, instructions)
-        constants = mobileCode.constant_table()
-        print(constants)
-
+        keys = set()
+        for x in mobileCode.bytecode_table():
+            keys.add(x[0])
+        # test that only fields that are supposed to show up
+        self.assertTrue(len(keys) == 5)
+        self.assertTrue(keys == {'instructions', 'operators', 'types', 'constants', 'register_size'})
 
     def test_mutable_dce_list(self):
         @torch.jit.script
