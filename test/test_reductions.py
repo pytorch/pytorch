@@ -3126,18 +3126,16 @@ class TestReductions(TestCase):
                                   # `identity` is mapped to numpy reduction `initial` argument
                                   identity=torch._masked._reduction_identity(op.name, t),
                                   **sample_input.kwargs))
+
+            # Workaround https://github.com/pytorch/pytorch/issues/66556
+            expected = np.asarray(expected)  # transform numpy scalars to numpy.ndarray instances
+
             msg = ("Failed to produce expected results! Input tensor was"
                    " {0}, torch result is {1}, and reference result is"
                    " {2}.").format(t, actual, expected) if t.numel() < 10 else None
 
-            # The elements of output tensors from masked reductions
-            # are well-defined when the associated output masks are
-            # True. So, here we implement masked equality test by
-            # replacing masked-out elements with zeros:
-            outmask = torch._masked._output_mask(t, **sample_input.kwargs)
-            actual = torch.where(outmask, actual, torch.zeros_like(actual))
-            expected = np.where(outmask.cpu().numpy(), expected, np.zeros_like(expected))
             self.assertEqual(actual, expected, msg, exact_dtype=exact_dtype)
+
 
 instantiate_device_type_tests(TestReductions, globals())
 
