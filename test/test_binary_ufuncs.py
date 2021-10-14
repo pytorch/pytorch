@@ -218,22 +218,28 @@ class TestBinaryUfuncs(TestCase):
         for idx in iter_indices(x):
             self.assertEqual(x[idx] >= y[idx], ge[idx] == 1)
 
+    @onlyCUDA
+    def test_comparison_ops_device_computation(self, device):
+        operands = (
+            torch.tensor(0),
+            torch.tensor(2, device='cuda'),
+            torch.tensor([0, 2], device='cuda')
+        )
+        # Checks that comparison operators compute the correct
+        # output device, given a combination of devices
+        # TODO: test all comparison ops after porting them to structured kernel
+        # logical_and, logical_or, and logical_xor
+        for op in [torch.lt, torch.le, torch.gt, torch.ge, torch.eq, torch.ne]:
+            for lhs in operands:
+                for rhs in operands:
+                    self.assertEqual(op(lhs, rhs), op(lhs.cpu(), rhs.cpu()))
+
     # TODO: update to work on CUDA, too
     @onlyCPU
     def test_comparison_ops_must_take_bool_output(self, device):
         for op in [torch.lt, torch.le, torch.gt, torch.ge, torch.eq, torch.ne,
                    torch.logical_and, torch.logical_or, torch.logical_xor]:
             self.assertEqual(op(torch.tensor([True]), torch.tensor([False])).dtype, torch.bool)
-
-    # TODO: update to work on CUDA, too
-    @onlyCPU
-    def test_inplace_comparison_ops_require_inputs_have_same_dtype(self, device):
-        for op in ['lt_', 'le_', 'gt_', 'ge_', 'eq_', 'ne_', 'logical_xor_', 'logical_and_', 'logical_or_']:
-            with self.assertRaisesRegex(RuntimeError, 'Expected object of scalar type'):
-                x = torch.tensor([1], dtype=torch.int)
-                y = torch.tensor([2], dtype=torch.long)
-                in_place_method = getattr(x, op)
-                in_place_method(y)
 
     # TODO: update to work on CUDA, too
     @onlyCPU
