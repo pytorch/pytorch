@@ -1,4 +1,6 @@
 #include <ATen/native/quantized/cpu/qembeddingbag_prepack.h>
+#include "ATen/Functions.h"
+#include "ATen/core/TensorBody.h"
 
 #include <c10/core/ScalarType.h>
 #include <ATen/ATen.h>
@@ -52,16 +54,21 @@ c10::intrusive_ptr<EmbeddingPackedParamsBase> PackedEmbeddingBagWeight::prepack(
   TORCH_CHECK(
       qtype == c10::kPerChannelAffineFloatQParams,
       "Expect embedding_bag weights to be quantized using kPerChannelAffineFloatQParams");
-  std::vector<float> weight_bias(embedding_rows, 0);
-  std::vector<float> weight_scales(embedding_rows, 1.0);
-  std::vector<float> weight_zero_points(embedding_rows, 0);
+  std::vector<float> weight_bias(embedding_rows);
+  std::vector<float> weight_scales(embedding_rows);
+  std::vector<float> weight_zero_points(embedding_rows);
+
+  std::cout << "Per Channel scales: " << qweight.q_per_channel_scales().sizes() << std::endl;
+
+  at::Tensor weight_bias_tensor = at::from_blob(weight_bias.data(), {embedding_rows});
+  at::Tensor weight_scales_tensor = at::from_blob(weight_scales.data(), {embedding_rows});
+  at::Tensor weight_zero_points_tensor = at::from_blob(weight_zero_points.data(), {embedding_rows});
+
+  weight_scales_tensor.copy_(qweight.q_per_channel_scales());
+  weight_zero_points_tensor.copy_(qweight.q_per_channel_zero_points());
 
   for (int64_t i = 0; i < embedding_rows; ++i) {
-    weight_scales[i] = qweight.q_per_channel_scales()[i].item<float>();
-    weight_zero_points[i] =
-        qweight.q_per_channel_zero_points()[i].item<float>();
-    weight_bias[i] = qweight.q_per_channel_zero_points()[i].item<float>() *
-        weight_scales[i] * -1;
+    weight_bias[i] = weight_zero_points[i] * weight_scales[i] * -1;
   }
 
   std::vector<int64_t> output_shape = {
