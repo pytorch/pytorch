@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/python/python_ir.h>
 
 #include <pybind11/pybind11.h>
+#include <torch/csrc/api/include/torch/python.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
@@ -17,6 +18,8 @@
 #include <iostream>
 #include <sstream>
 #include <utility>
+#include "third_party/pybind11/include/pybind11/pytypes.h"
+#include <torch/csrc/Dtype.h>
 
 namespace torch {
 namespace jit {
@@ -810,6 +813,48 @@ void initPythonIRBindings(PyObject* module_) {
             auto scalar_type =
                 t.shared_from_this()->expectRef<TensorType>().scalarType();
             return (scalar_type) ? toString(*scalar_type) : nullptr;
+          })
+      .def(
+          "dtype",
+            [](Type& t) -> py::object {
+            auto scalar_type =
+                t.shared_from_this()->expectRef<TensorType>().scalarType();
+            if (!scalar_type) {
+               return py::none();
+            }
+            THPDtype* thp_dtype = torch::getTHPDtype(*scalar_type);
+            py::object dtype = py::reinterpret_borrow<py::object>((PyObject*) thp_dtype);
+            return dtype;
+          })
+          /*
+      .def(
+          "dtype",
+            [](Type& t) -> THPDtype* {
+            auto scalar_type =
+                t.shared_from_this()->expectRef<TensorType>().scalarType();
+            if (!scalar_type) {
+              //return nullptr;
+               //return nullptr;
+               scalar_type = ScalarType::Undefined;
+            }
+            // PyObject* object = (PyObject*)torch::getTHPDtype(*scalar_type);
+            THPDtype* dtype = torch::getTHPDtype(*scalar_type);
+            //py::object dtype = py::cast(thp_dtype);
+            //auto dtype = py::cast(*scalar_type); -- Returns scalar Type opaque C object
+            // py::object dtype = py::cast((PyObject*) torch::getTHPDtype(*scalar_type)); -- Unable to convert function return value to python object
+            return dtype;
+          })
+          */
+      .def(
+          "with_dtype",
+          [](Type& t, py::object dtype) -> py::object {
+            at::ScalarType scalar_type = python::detail::py_object_to_dtype(dtype);
+
+            if (auto ptt = t.expect<TensorType>()) {
+              // auto scalar_type = dtype->scalar_type;
+              return py::cast(ptt->withScalarType(scalar_type));
+            }
+            return py::none();
           })
       .def(
           "__eq__",
