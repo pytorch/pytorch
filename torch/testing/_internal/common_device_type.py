@@ -1135,12 +1135,10 @@ def has_cusolver():
 
 # Skips a test on CUDA if cuSOLVER is not available
 def skipCUDAIfNoCusolver(fn):
-    version = _get_torch_cuda_version()
     return skipCUDAIf(not has_cusolver(), "cuSOLVER not available")(fn)
 
 # Skips a test if both cuSOLVER and MAGMA are not available
 def skipCUDAIfNoMagmaAndNoCusolver(fn):
-    version = _get_torch_cuda_version()
     if has_cusolver():
         return fn
     else:
