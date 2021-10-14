@@ -5738,8 +5738,9 @@ def sample_inputs_embedding(op_info, device, dtype, requires_grad, **kwargs):
     def make_input(shape):
         return make_tensor(shape, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    def make_long_input(shape, *, low, high):
-        return make_tensor(shape, device=device, dtype=torch.long, low=low, high=high, requires_grad=requires_grad)
+    def make_long_input(shape, *, low, high, noncontiguous=False):
+        return make_tensor(shape, device=device, dtype=torch.long, low=low, high=high,
+                           noncontiguous=noncontiguous, requires_grad=requires_grad)
 
     def generator():
         # 0-D index tensor
@@ -5750,8 +5751,14 @@ def sample_inputs_embedding(op_info, device, dtype, requires_grad, **kwargs):
         idx = make_long_input((S,), low=0, high=M)
         yield SampleInput(make_input((M, S)), args=(idx,),)
 
+        idx = make_long_input((S,), low=0, high=M, noncontiguous=True)
+        yield SampleInput(make_input((M, S)), args=(idx,),)
+
         # 2-D index tensor
         idx = make_long_input((S, S), low=0, high=M)
+        yield SampleInput(make_input((M, S)), args=(idx,),)
+
+        idx = make_long_input((S, S), low=0, high=M, noncontiguous=True)
         yield SampleInput(make_input((M, S)), args=(idx,),)
 
         if not requires_grad:
