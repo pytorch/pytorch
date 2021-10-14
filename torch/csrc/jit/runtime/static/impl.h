@@ -33,25 +33,28 @@ using FastSet = std::unordered_set<Key>;
 TORCH_API bool canEnableStaticRuntime(
     const std::shared_ptr<torch::jit::Graph>& graph);
 
+TORCH_API std::string dumpValueSet(
+    const FastSet<const Value*>& value_set,
+    const char* set_name = "");
+
 // Group values used by `graph` into three categories:
 //
-// - input_or_constant_aliases:
-//     values that are either inputs or contain aliases of inputs
-//     or constants.
 // - output_aliases:
 //     values that are either outputs or contain aliases of outputs
-//     and are not in input_or_constant_aliases.
-// Values that dont't show up in input_or_constant_aliases and output_aliases
-// are
-//     created and consumed within the graph.
+// - external_aliases:
+//     values that are inputs, constants, outputs, or their aliases.
+//     The output aliases that end up here are as a result of aliasDb failing to
+//     recognize them as outputs due to collection object (e.g., Tuple) aliasing
+//     inputs.
+// Values that dont't show up in output_aliases or external_aliases are created
+// and consumed within the graph.
 class ValueGroup {
  public:
   explicit ValueGroup() = default;
   void init(const std::shared_ptr<torch::jit::Graph>& graph, AliasDb& db);
 
-  bool isInputAlias(const Value* value) const {
-    return input_or_constant_aliases_.find(value) !=
-        input_or_constant_aliases_.end();
+  bool isExternalAlias(const Value* value) const {
+    return external_aliases_.find(value) != external_aliases_.end();
   }
 
   bool isOutputAlias(const Value* value) const {
@@ -59,12 +62,19 @@ class ValueGroup {
   }
 
   bool isAlwaysAlive(const Value* value) const {
-    return isInputAlias(value) || isOutputAlias(value);
+    return isExternalAlias(value) || isOutputAlias(value);
+  }
+
+  std::string toString() const {
+    return c10::str(
+        dumpValueSet(output_aliases_, "output_aliases_"),
+        "\n",
+        dumpValueSet(external_aliases_, "external_aliases_"));
   }
 
  private:
-  FastSet<const Value*> input_or_constant_aliases_;
   FastSet<const Value*> output_aliases_;
+  FastSet<const Value*> external_aliases_;
 };
 
 struct TORCH_API StaticModuleOptions {
