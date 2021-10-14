@@ -194,77 +194,38 @@ static C10_UNUSED void setRequiresGradOnDiffGraph(Node* dnode) {
 }
 
 bool guardDifferentiableGraph(Node* dnode) {
-  bool fallback_flag = false;
-  std::vector<Value*> true_flags = {};
-
-  auto input_index = [dnode](Node* node, Value* val) -> Value* {
-    const auto& inputs = node->owningBlock()->inputs();
-    for (int index : c10::irange(inputs.size())) {
-      if (inputs[index] == val) {
-        return dnode->input(index);
-      }
-    }
-    return nullptr;
-  };
-
-  for (const auto& n : dnode->g(attr::Subgraph)->nodes()) {
-    if (n->kind() == aten::dropout) {
-      const auto train = constant_as<bool>(n->input(2));
-      if (train.has_value()) {
-        if (train.value() == true) {
-          // checking for train signature being true, since autodiff assumes
-          // dropout running on training mode
-          continue;
-        }
-      } else {
-        if (auto input = input_index(n, n->input(2))) {
-          // we need to guard on training flag being true!
-          true_flags.emplace_back(input);
-          continue;
+  auto gi = dnode->g(attr::Subgraph)->inputs();
+  bool all_inputs_seen = true;
+  for (const auto i : c10::irange(gi.size())) {
+    auto ty = gi[i]->type()->cast<TensorType>();
+    if (ty) {
+      auto n = gi[i]->uses().at(0).user;
+      auto dni = dnode->inputs().at(i);
+      GRAPH_DEBUG("found first user of ", i, " as ", *n);
+      if (n->kind() == prim::profile) {
+        GRAPH_DEBUG(
+            "setting input ", i, " to type ", *n->ty(attr::profiled_type));
+        dni->setType(n->ty(attr::profiled_type));
+      } else if (dni->node()->kind() == prim::DifferentiableGraph) {
+        // The profiling node might have been absorbed in a preceding
+        // differentiable graph and thus not (not ideal for fusing either),
+        // see TestAutodiffSubgraphSlicing.test_does_not_create_cycles.
+        // Alternatives to this special casing could be specializing the types
+        // before autodiff or duplicating profile nodes for autodiff outputs
+        // but that should be done while creating subgraphs and would be
+        // a mess.
+        // XXX TODO: revisit the alternatives
+        Value* o = dni->node()->g(attr::Subgraph)->outputs().at(dni->offset());
+        if (o->node()->kind() == prim::profile) {
+          dni->setType(o->node()->ty(attr::profiled_type));
         }
       }
-      fallback_flag = true;
-      break;
+
+      // we check if the optional is defined
+      all_inputs_seen &= (dni->type()->cast<TensorType>() != TensorType::get());
     }
   }
-
-  if (!fallback_flag) {
-    auto gi = dnode->g(attr::Subgraph)->inputs();
-    bool all_inputs_seen = true;
-    for (const auto i : c10::irange(gi.size())) {
-      auto ty = gi[i]->type()->cast<TensorType>();
-      if (ty) {
-        auto n = gi[i]->uses().at(0).user;
-        auto dni = dnode->inputs().at(i);
-        GRAPH_DEBUG("found first user of ", i, " as ", *n);
-        if (n->kind() == prim::profile) {
-          GRAPH_DEBUG(
-              "setting input ", i, " to type ", *n->ty(attr::profiled_type));
-          dni->setType(n->ty(attr::profiled_type));
-        } else if (dni->node()->kind() == prim::DifferentiableGraph) {
-          // The profiling node might have been absorbed in a preceding
-          // differentiable graph and thus not (not ideal for fusing either),
-          // see TestAutodiffSubgraphSlicing.test_does_not_create_cycles.
-          // Alternatives to this special casing could be specializing the types
-          // before autodiff or duplicating profile nodes for autodiff outputs
-          // but that should be done while creating subgraphs and would be
-          // a mess.
-          // XXX TODO: revisit the alternatives
-          Value* o =
-              dni->node()->g(attr::Subgraph)->outputs().at(dni->offset());
-          if (o->node()->kind() == prim::profile) {
-            dni->setType(o->node()->ty(attr::profiled_type));
-          }
-        }
-
-        // we check if the optional is defined
-        all_inputs_seen &=
-            (dni->type()->cast<TensorType>() != TensorType::get());
-      }
-    }
-    fallback_flag |= !all_inputs_seen;
-  }
-  if (!fallback_flag) {
+  if (all_inputs_seen) {
     // we may have seen both true and false for requires_grad. In this case
     // we guard with true here and the other case is in the fallback. This
     // will give us trouble when we get "alternating patterns" of gradients
@@ -277,24 +238,6 @@ bool guardDifferentiableGraph(Node* dnode) {
               t->requiresGrad().value_or(true));
         },
         prim::RequiresGradCheck);
-
-    // attaching True flags to check at runtime
-    if (!true_flags.empty()) {
-      auto if_node = dnode->owningBlock()->owningNode();
-      TORCH_INTERNAL_ASSERT(
-          if_node->kind() == prim::If, "guarded fusion node violation\n");
-      true_flags.emplace_back(if_node->input());
-      auto graph = if_node->owningGraph();
-
-      auto bool_list_node =
-          graph->insertNode(graph->createList(BoolType::get(), true_flags));
-      bool_list_node->moveBefore(if_node);
-      Value* bool_list = bool_list_node->output();
-      Value* conjunction = graph->insert(aten::all, {bool_list});
-      conjunction->node()->moveBefore(if_node);
-      if_node->replaceInput(0, conjunction);
-    }
-
     return true;
   } else {
     // we inline the differentiable graph as a fallback

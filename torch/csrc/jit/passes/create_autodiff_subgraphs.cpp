@@ -8,7 +8,6 @@
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
-#include <torch/csrc/jit/runtime/graph_executor.h>
 
 namespace torch {
 namespace jit {
@@ -220,11 +219,6 @@ class SubgraphSlicer {
     // view ops as outputs of differentiable subgraphs can cause incorrect
     // differentiation for now, do not include them in the subgraph
     if (isViewOp(node)) {
-      return false;
-    }
-    // disable autodiff for legacy executor, autodiff only supports training
-    // mode, but there's no mechanism to guard this in legacy executor
-    if (!IsNewExecutorEnabled() && node->kind() == aten::dropout) {
       return false;
     }
     return isDifferentiable(node);
