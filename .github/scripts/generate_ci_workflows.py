@@ -78,6 +78,7 @@ class CIFlowConfig:
         self.label_conditions = ' || '.join(label_conditions)
         repo_condition = "github.repository_owner == 'pytorch'" if self.run_on_canary else "github.repository == 'pytorch/pytorch'"
         push_event = "github.event_name == 'push'"
+        scheduled_event = "github.event_name == 'schedule'"
         pr_updated_event = f"github.event_name == 'pull_request' && github.event.action != '{self.trigger_action}'"
         if LABEL_CIFLOW_DEFAULT in self.labels:
             run_with_no_labels = f"({pr_updated_event}) && " \
@@ -86,6 +87,7 @@ class CIFlowConfig:
             run_with_no_labels = "false"
         self.root_job_condition = f"${{{{ ({repo_condition}) && (\n" \
                                   f"            ({push_event}) ||\n" \
+                                  f"            ({scheduled_event}) ||\n" \
                                   f"            ({self.label_conditions}) ||\n" \
                                   f"            ({run_with_no_labels}))\n"\
                                   f"         }}}}"
