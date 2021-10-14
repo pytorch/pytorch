@@ -475,6 +475,15 @@ $6 = torch._ops.aten.add_($1, $5)''')
                 with enable_python_mode(LoggingTensor):
                     pass
 
+    def test_tolist_numpy_with_python_mode(self) -> None:
+        x = LoggingTensor(torch.tensor([2.0, 3.0]))
+        with self.assertRaisesRegex(RuntimeError, "is not supported for tensor subclasses."):
+            x.tolist()
+        with self.assertRaisesRegex(RuntimeError, "is not supported for tensor subclasses."):
+            x.numpy()
+        with self.assertRaises(AssertionError):
+            self.assertEqual(x, None)
+
     def test_enable_python_mode_subclass_autograd_device_check(self) -> None:
         class NonWrapperSublass(torch.Tensor):
             elem: torch.Tensor
