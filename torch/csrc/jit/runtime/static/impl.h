@@ -433,6 +433,10 @@ class TORCH_API ProcessedNode {
  private:
   void run_impl();
 
+  bool verify_outputs_dont_overlap_each_other() const;
+
+  bool verify_inputs_dont_overlap_outputs() const;
+
   Node* node_;
   using OutVariant = std::function<void(ProcessedNode*)>;
   using NativeFunction = std::function<void(ProcessedNode*)>;
