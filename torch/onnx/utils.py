@@ -104,9 +104,8 @@ def exporter_context(model, mode):
 def export(model, args, f, export_params=True, verbose=False, training=None,
            input_names=None, output_names=None, operator_export_type=None,
            opset_version=None, _retain_param_name=None, do_constant_folding=True,
-           example_outputs=None, strip_doc_string=None, dynamic_axes=None,
-           keep_initializers_as_inputs=None, custom_opsets=None,
-           enable_onnx_checker=None, use_external_data_format=None,
+           example_outputs=None, dynamic_axes=None, keep_initializers_as_inputs=None,
+           custom_opsets=None, enable_onnx_checker=None, use_external_data_format=None,
            export_modules_as_functions=False):
     if operator_export_type is None:
         if torch.onnx.PYTORCH_ONNX_CAFFE2_BUNDLE:
@@ -121,9 +120,6 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
     if _retain_param_name is not None:
         warnings.warn("'_retain_param_name' is deprecated and ignored. "
                       "It will be removed in the next PyTorch release.")
-    if strip_doc_string is not None:
-        warnings.warn("`strip_doc_string' is deprecated and ignored. Will be removed in "
-                      "next PyTorch release. It's combined with `verbose' argument now. ")
     if example_outputs is not None:
         warnings.warn("`example_outputs' is deprecated and ignored. Will be removed in "
                       "next PyTorch release.")

@@ -36,9 +36,9 @@ def _export(*args, **kwargs):
 def export(model, args, f, export_params=True, verbose=False, training=TrainingMode.EVAL,
            input_names=None, output_names=None, operator_export_type=None,
            opset_version=None, _retain_param_name=None, do_constant_folding=True,
-           example_outputs=None, strip_doc_string=None, dynamic_axes=None,
-           keep_initializers_as_inputs=None, custom_opsets=None, enable_onnx_checker=None,
-           use_external_data_format=None, export_modules_as_functions=False):
+           example_outputs=None, dynamic_axes=None, keep_initializers_as_inputs=None,
+           custom_opsets=None, enable_onnx_checker=None, use_external_data_format=None,
+           export_modules_as_functions=False):
     r"""
     Exports a model into ONNX format. If ``model`` is not a
     :class:`torch.jit.ScriptModule` nor a :class:`torch.jit.ScriptFunction`, this runs
@@ -194,7 +194,6 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             with pre-computed constant nodes.
         example_outputs (T or a tuple of T, where T is Tensor or convertible to Tensor, default None):
             Deprecated and ignored. Will be removed in next PyTorch release.
-        strip_doc_string (bool, default True): Deprecated and ignored. Will be removed in next PyTorch release.
         dynamic_axes (dict<string, dict<int, string>> or dict<string, list(int)>, default empty dict):
 
             By default the exported model will have the shapes of all input and output tensors
@@ -316,8 +315,8 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
     return utils.export(model, args, f, export_params, verbose, training,
                         input_names, output_names, operator_export_type, opset_version,
                         _retain_param_name, do_constant_folding, example_outputs,
-                        strip_doc_string, dynamic_axes, keep_initializers_as_inputs,
-                        custom_opsets, enable_onnx_checker, use_external_data_format,
+                        dynamic_axes, keep_initializers_as_inputs, custom_opsets,
+                        enable_onnx_checker, use_external_data_format,
                         export_modules_as_functions)
 
 
