@@ -154,23 +154,6 @@ ir::Value MaybeExpand(const ir::Value& input,
       /*is_scalar_expand=*/false);
 }
 
-MinMaxValues GetMinMaxValues(const LazyTensor& tensor,
-                             const c10::optional<at::Scalar>& min,
-                             const c10::optional<at::Scalar>& max) {
-  LTC_CHECK(min || max)
-      << "At least one of \'min\' or \'max\' must not be None";
-  lazy_tensors::PrimitiveType raw_element_type =
-      TensorTypeToLtcType(tensor.dtype());
-  Helpers::MinMax min_max = Helpers::MinMaxValues(raw_element_type);
-  auto shape = tensor.shape();
-  return {LazyTensor::GetIrValueForScalar(min ? *min : min_max.min,
-                                          shape.get().element_type(),
-                                          tensor.GetDevice()),
-          LazyTensor::GetIrValueForScalar(max ? *max : min_max.max,
-                                          shape.get().element_type(),
-                                          tensor.GetDevice())};
-}
-
 void CheckRank(const LazyTensor& t, lazy_tensors::int64 expected_rank,
                const std::string& tag, const std::string& arg_name,
                int arg_number) {
@@ -871,44 +854,6 @@ LazyTensor LazyTensor::cholesky(const LazyTensor& input, bool upper) {
   // Cholesky takes lower instead of upper, hence the negation.
   return input.CreateFrom(
       ir::MakeNode<ir::ops::Cholesky>(input.GetIrValue(), !upper));
-}
-
-LazyTensor LazyTensor::clamp(const LazyTensor& input,
-                             const c10::optional<at::Scalar>& min,
-                             const c10::optional<at::Scalar>& max) {
-  MinMaxValues min_max = GetMinMaxValues(input, min, max);
-  return input.CreateFrom(
-      ir::ops::Clamp(input.GetIrValue(), min_max.min, min_max.max));
-}
-
-LazyTensor LazyTensor::clamp(const LazyTensor& input,
-                             const c10::optional<at::Tensor>& min,
-                             const c10::optional<at::Tensor>& max) {
-  LTC_CHECK(min || max)
-      << "At least one of \'min\' or \'max\' must not be None";
-  ir::Value res = input.GetIrValue();
-  if (min) {
-    res = ir::ops::Max(res, bridge::GetLtcTensor(*min).GetIrValue());
-  }
-  if (max) {
-    res = ir::ops::Min(res, bridge::GetLtcTensor(*max).GetIrValue());
-  }
-  return input.CreateFrom(res);
-}
-
-void LazyTensor::clamp_out(LazyTensor& out, const LazyTensor& input,
-                           const c10::optional<at::Tensor>& min,
-                           const c10::optional<at::Tensor>& max) {
-  LTC_CHECK(min || max)
-      << "At least one of \'min\' or \'max\' must not be None";
-  ir::Value res = input.GetIrValue();
-  if (min) {
-    res = ir::ops::Max(res, bridge::GetLtcTensor(*min).GetIrValue());
-  }
-  if (max) {
-    res = ir::ops::Min(res, bridge::GetLtcTensor(*max).GetIrValue());
-  }
-  out.SetInPlaceIrValue(res);
 }
 
 LazyTensor LazyTensor::clone(const LazyTensor& input) {

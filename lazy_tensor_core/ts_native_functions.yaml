@@ -8,6 +8,7 @@ full_codegen:
   - addcdiv
   - addcmul
   - cos
+  - clamp
   - dropout
   - gelu
   - gelu_backward

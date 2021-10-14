@@ -401,16 +401,6 @@ class LazyTensor {
 
   static LazyTensor cholesky(const LazyTensor& input, bool upper);
 
-  static LazyTensor clamp(const LazyTensor& input,
-                          const c10::optional<at::Scalar>& min,
-                          const c10::optional<at::Scalar>& max);
-  static LazyTensor clamp(const LazyTensor& input,
-                          const c10::optional<at::Tensor>& min,
-                          const c10::optional<at::Tensor>& max);
-  static void clamp_out(LazyTensor& out, const LazyTensor& input,
-                        const c10::optional<at::Tensor>& min,
-                        const c10::optional<at::Tensor>& max);
-
   static LazyTensor clone(const LazyTensor& input);
 
   // Pad with the given value and size specified by the given list of low and
