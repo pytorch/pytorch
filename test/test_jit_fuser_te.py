@@ -2029,7 +2029,6 @@ works_list = [
     'reshape',
     'reshape_as',
     'round',
-    'round.decimals_0',
     'rsub',
     'rsub.rsub_tensor',
     'rsqrt',
