@@ -14,7 +14,13 @@ target_link_libraries(jitbackend_test torch)
 add_library(backend_with_compiler SHARED
         ${JIT_TEST_ROOT}/test_backend_compiler_lib.cpp
         ${JIT_TEST_ROOT}/test_backend_compiler_preprocess.cpp
+        # This is for testing edge profiler for backend use
+        ${TORCH_SRC_DIR}/csrc/jit/mobile/profiler_edge.cpp
         )
+if(USE_KINETO)
+  set_target_properties(backend_with_compiler PROPERTIES COMPILE_FLAGS
+  "-DUSE_KINETO")
+endif()
 target_link_libraries(backend_with_compiler torch)
 
 if(INSTALL_TEST)
@@ -97,6 +103,9 @@ endif(MSVC)
 
 target_link_libraries(test_jit PRIVATE ${JIT_TEST_DEPENDENCIES})
 target_include_directories(test_jit PRIVATE ${ATen_CPU_INCLUDE})
+if(NOT MSVC)
+  target_compile_options(test_jit PRIVATE -Wno-unused-variable)
+endif()
 
 if(LINUX)
   #Update to target_link_options when CMake version can be upgraded
