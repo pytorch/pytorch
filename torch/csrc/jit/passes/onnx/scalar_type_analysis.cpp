@@ -31,6 +31,8 @@ static const std::unordered_map<c10::ScalarType, int, ScalarTypeHashFunction>
         {c10::kBool, 9},
         {c10::kHalf, 10},
         {c10::kDouble, 11},
+        // TODO Add 12, 13, 14 ONNXType
+        {c10::kBFloat16, 15}
 };
 
 static int64_t ScalarTypeToONNXType(const c10::ScalarType& st) {
