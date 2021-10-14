@@ -1,6 +1,4 @@
 #include <ATen/native/quantized/cpu/qembeddingbag_prepack.h>
-#include "ATen/Functions.h"
-#include "ATen/core/TensorBody.h"
 
 #include <c10/core/ScalarType.h>
 #include <ATen/ATen.h>
