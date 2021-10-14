@@ -448,7 +448,7 @@ $6 = torch._ops.aten.add_($1, $5)''')
             with enable_python_mode(LoggingTensor):
                 with enable_python_mode(LoggingTensor):
                     pass
-    
+
     def test_tolist_numpy_with_python_mode(self) -> None:
         x = LoggingTensor(torch.tensor([2.0, 3.0]))
         with self.assertRaisesRegex(RuntimeError, "is not supported for tensor subclasses."):
@@ -457,6 +457,7 @@ $6 = torch._ops.aten.add_($1, $5)''')
             x.numpy()
         with self.assertRaises(AssertionError):
             self.assertEqual(x, None)
-            
+
+
 if __name__ == '__main__':
     run_tests()
