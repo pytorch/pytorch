@@ -891,18 +891,14 @@ def sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwar
     shape as input or a shape that is broadcastable to input shape.
     """
     inputs: List[SampleInput] = []
-
     kwargs['supports_multiple_dims'] = op_info.supports_multiple_dims
     for sample_input in sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
         for mask in _generate_masked_reduction_mask(sample_input.input.shape, device, **kwargs):
             sample_input_args, sample_input_kwargs = sample_input.args, dict(mask=mask, **sample_input.kwargs)
             inputs.append(SampleInput(sample_input.input, args=sample_input_args, kwargs=sample_input_kwargs))
-
-            if(dtype.is_floating_point and sample_input.input.ndim ==
-               2 and mask is not None and mask.shape ==
-               sample_input.input.shape):
-                # FIXME: autograd check should be disabled for the following samples
-                # generate inputs with non-finite values: nan, inf, -inf
+            if(not requires_grad and dtype.is_floating_point and
+               sample_input.input.ndim == 2 and mask is not None and
+               mask.shape == sample_input.input.shape):
                 for v in [torch.inf, -torch.inf, torch.nan]:
                     t = sample_input.input.clone()
                     t.diagonal()[:] = v
@@ -10484,20 +10480,12 @@ op_db: List[OpInfo] = [
         identity=0,
         nan_policy='propagate',
         supports_out=False,
-        # FIXME: autograd check likely needs to take into account the mask.
-        supports_autograd=False,
-        # FIXME: forward AD with _s_where not implemented
-        supports_forward_ad=False,
         promotes_int_to_int64=False,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         skips=(
-            # FIXME: sum does not support passing keepdim without passing dim
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
             # FIXME: sum reduces all dimensions when dim=[]
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
-            # FIXME: sum does not support passing None to dim
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
             # RuntimeError: undefined value tensor
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
         ),
@@ -10515,8 +10503,6 @@ op_db: List[OpInfo] = [
         '_masked.amax',
         nan_policy='propagate',
         supports_out=False,
-        # FIXME: autograd check likely needs to take into account the mask.
-        supports_autograd=False,
         dtypes=all_types_and(torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.amax),
         skips=(
