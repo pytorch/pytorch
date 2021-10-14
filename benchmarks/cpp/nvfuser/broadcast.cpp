@@ -81,10 +81,10 @@ static void NvFuserScheduler_Broadcast(
   // Sync everything up before we start
   cudaDeviceSynchronize();
   for (auto _ : benchmark_state) {
+    clearL2Cache();
     auto cg_outputs = fusion_executor_cache->runFusionWithInputs({t0, t1});
     benchmark_state.SetIterationTime(
         executor_instance->kernelTimeMs() / 1000.0);
-    clearL2Cache();
   }
   // Sync everything up before we're finished, don't want to run ahead on the
   // cpu while benchmarking.
@@ -121,97 +121,97 @@ NVFUSER_BENCHMARK_DEFINE(
     1);
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Broadcast_Outer_fp32)
-    ->RangeMultiplier(8)
+    // ->RangeMultiplier(2)
     ->Ranges({{1, 1024 * 1024}, {160, 320}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Broadcast_Outer_fp32)
-    ->RangeMultiplier(8)
+    // ->RangeMultiplier(2)
     ->Ranges({{32768, 64 * 1024 * 1024}, {2, 16}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Broadcast_Outer_fp32)
-    ->RangeMultiplier(8)
+    // ->RangeMultiplier(2)
     ->Ranges({{2, 16}, {32768, 64 * 1024 * 1024}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Broadcast_Outer_fp32)
-    ->RangeMultiplier(4)
+    // ->RangeMultiplier(2)
     ->Ranges({{128, 1024 * 16}, {128, 1024 * 16}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Broadcast_Outer_fp16)
-    ->RangeMultiplier(8)
+    // ->RangeMultiplier(2)
     ->Ranges({{1, 1024 * 1024}, {160, 320}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Broadcast_Outer_fp16)
-    ->RangeMultiplier(8)
+    // ->RangeMultiplier(2)
     ->Ranges({{32768, 64 * 1024 * 1024}, {2, 16}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Broadcast_Outer_fp16)
-    ->RangeMultiplier(8)
+    // ->RangeMultiplier(2)
     ->Ranges({{2, 16}, {32768, 64 * 1024 * 1024}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Broadcast_Outer_fp16)
-    ->RangeMultiplier(4)
+    // ->RangeMultiplier(2)
     ->Ranges({{128, 1024 * 16}, {128, 1024 * 16}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Broadcast_Inner_fp32)
-    ->RangeMultiplier(8)
+    // ->RangeMultiplier(2)
     ->Ranges({{1, 1024 * 1024}, {160, 320}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Broadcast_Inner_fp32)
-    ->RangeMultiplier(8)
+    // ->RangeMultiplier(2)
     ->Ranges({{32768, 64 * 1024 * 1024}, {2, 16}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Broadcast_Inner_fp32)
-    ->RangeMultiplier(8)
+    // ->RangeMultiplier(2)
     ->Ranges({{2, 16}, {32768, 64 * 1024 * 1024}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Broadcast_Inner_fp32)
-    ->RangeMultiplier(4)
+    // ->RangeMultiplier(2)
     ->Ranges({{128, 1024 * 16}, {128, 1024 * 16}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Broadcast_Inner_fp16)
-    ->RangeMultiplier(8)
+    // ->RangeMultiplier(2)
     ->Ranges({{1, 1024 * 1024}, {160, 320}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Broadcast_Inner_fp16)
-    ->RangeMultiplier(8)
+    // ->RangeMultiplier(2)
     ->Ranges({{32768, 64 * 1024 * 1024}, {2, 16}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Broadcast_Inner_fp16)
-    ->RangeMultiplier(8)
+    // ->RangeMultiplier(2)
     ->Ranges({{2, 16}, {32768, 64 * 1024 * 1024}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Broadcast_Inner_fp16)
-    ->RangeMultiplier(4)
+    // ->RangeMultiplier(2)
     ->Ranges({{128, 1024 * 16}, {128, 1024 * 16}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
