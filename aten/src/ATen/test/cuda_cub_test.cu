@@ -1,4 +1,5 @@
 #include <ATen/cuda/cub.cuh>
+#include <ATen/cuda/CUDAContext.h>
 #include <gtest/gtest.h>
 
 TEST(NumBits, CubTest) {
@@ -131,4 +132,29 @@ TEST(NumBits, CubTest) {
   ASSERT_EQ(get_num_bits(0b0111111111111111111111111111111111111111111111111111111111111111UL), 63);
   ASSERT_EQ(get_num_bits(0b1000000000000000000000000000000000000000000000000000000000000000UL), 64);
   ASSERT_EQ(get_num_bits(0b1111111111111111111111111111111111111111111111111111111111111111UL), 64);
+}
+
+__managed__ int64_t     keys_in[10] = { 0, 0, 2, 2, 2, 1, 3, 3, 4, 4 };
+__managed__ uint64_t  values_in[10] = { 9, 8, 7, 6, 5, 4, 3, 2, 1, 0 };
+__managed__ int64_t    keys_out[10];
+__managed__ uint64_t values_out[10];
+__managed__ int64_t num_unique_elements;
+
+TEST(UniqueByKey, CubTest) {
+  if (!at::cuda::is_available()) return;
+  at::globalContext().lazyInitCUDA();
+  cudaDeviceSynchronize();
+  at::cuda::cub::unique_by_key(keys_in, values_in, keys_out, values_out, &num_unique_elements, 10);
+  cudaDeviceSynchronize();
+  ASSERT_EQ(num_unique_elements, 5);
+  ASSERT_EQ(  keys_out[0], 0);
+  ASSERT_EQ(values_out[0], 9);
+  ASSERT_EQ(  keys_out[1], 2);
+  ASSERT_EQ(values_out[1], 7);
+  ASSERT_EQ(  keys_out[2], 1);
+  ASSERT_EQ(values_out[2], 4);
+  ASSERT_EQ(  keys_out[3], 3);
+  ASSERT_EQ(values_out[3], 3);
+  ASSERT_EQ(  keys_out[4], 4);
+  ASSERT_EQ(values_out[4], 1);
 }

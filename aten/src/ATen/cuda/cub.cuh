@@ -318,12 +318,110 @@ inline void exclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
   }
 }
 
-template<typename InputIteratorT , typename OutputIteratorT , typename NumSelectedIteratorT >
+template<typename InputIteratorT, typename OutputIteratorT, typename NumSelectedIteratorT>
 inline void unique(InputIteratorT input, OutputIteratorT output, NumSelectedIteratorT num_selected_out, int64_t num_items) {
   TORCH_CHECK(num_items <= std::numeric_limits<int>::max(),
     "cub unique does not support more than INT_MAX elements");
   CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceSelect::Unique,
     input, output, num_selected_out, num_items, at::cuda::getCurrentCUDAStream());
+}
+
+namespace {
+
+template<typename KeyT, typename ValueT>
+struct KeyValuePairWithKeyEquality {
+private:
+  std::remove_reference_t<KeyT> key_helper;
+  std::remove_reference_t<ValueT> value_helper;
+public:
+  KeyT key;
+  ValueT value;
+
+  __host__ __device__ __forceinline__ KeyValuePairWithKeyEquality()
+    :key(key_helper), value(value_helper) {}
+
+  __host__ __device__ __forceinline__ KeyValuePairWithKeyEquality(KeyT key, ValueT value)
+    :key(key), value(value) {}
+
+  __host__ __device__ __forceinline__ bool operator==(const KeyValuePairWithKeyEquality &other) const {
+    return key == other.key;
+  }
+
+  template<typename OtherKeyT, typename OtherValueT>
+  __host__ __device__ __forceinline__ KeyValuePairWithKeyEquality &operator=(const KeyValuePairWithKeyEquality<OtherKeyT, OtherValueT> &other) {
+    key = other.key;
+    value = other.value;
+  }
+
+  __host__ __device__ __forceinline__ KeyValuePairWithKeyEquality &operator=(const KeyValuePairWithKeyEquality &other) {
+    key = other.key;
+    value = other.value;
+  }
+};
+
+template<typename KeyIterT, typename ValueIterT>
+struct KeyValuePairIter {
+  using KeyT = typename std::iterator_traits<KeyIterT>::value_type;
+  using ValueT = typename std::iterator_traits<ValueIterT>::value_type;
+  using KeyRefT = typename std::iterator_traits<KeyIterT>::reference;
+  using ValueRefT = typename std::iterator_traits<ValueIterT>::reference;
+
+  using value_type = KeyValuePairWithKeyEquality<KeyT, ValueT>;
+  using reference = KeyValuePairWithKeyEquality<KeyRefT, ValueRefT>;
+  using pointer = std::nullptr_t;
+  using difference_type = std::ptrdiff_t;
+  using iterator_category = std::random_access_iterator_tag;
+
+  KeyIterT key_iter;
+  ValueIterT value_iter;
+
+  KeyValuePairIter() = default;
+
+  __host__ __device__ __forceinline__ KeyValuePairIter(KeyIterT key_iter, ValueIterT value_iter)
+    :key_iter(key_iter), value_iter(value_iter) {}
+
+  __host__ __device__ __forceinline__ reference operator*() const {
+    return reference(*key_iter, *value_iter);
+  }
+
+  __host__ __device__ __forceinline__ reference operator*() {
+    return reference(*key_iter, *value_iter);
+  }
+
+  __host__ __device__ __forceinline__ KeyValuePairIter &operator+=(difference_type n) {
+    key_iter += n;
+    value_iter += n;
+    return *this;
+  }
+
+  __host__ __device__ __forceinline__ KeyValuePairIter operator+(difference_type n) {
+    KeyValuePairIter result;
+    return (result += n);
+  }
+
+  __host__ __device__ __forceinline__ reference operator[](difference_type n) const {
+    return *(*this + n);
+  }
+
+  __host__ __device__ __forceinline__ reference operator[](difference_type n) {
+    return *(*this + n);
+  }
+};
+
+}
+
+template<typename KeysInputIteratorT, typename ValuesInputIteratorT, typename KeysOutputIteratorT, typename ValuesOutputIteratorT, typename NumSelectedIteratorT >
+inline void unique_by_key(
+  KeysInputIteratorT keys_input,
+  ValuesInputIteratorT values_input,
+  KeysOutputIteratorT keys_output,
+  ValuesOutputIteratorT values_output,
+  NumSelectedIteratorT num_selected_out,
+  int64_t num_items)
+{
+  KeyValuePairIter<KeysInputIteratorT, ValuesInputIteratorT> input(keys_input, values_input);
+  KeyValuePairIter<KeysOutputIteratorT, ValuesOutputIteratorT> output(keys_output, values_output);
+  unique(input, output, num_selected_out, num_items);
 }
 
 }}}  // namespace at::cuda::cub
