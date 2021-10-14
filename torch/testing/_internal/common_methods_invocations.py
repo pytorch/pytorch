@@ -25,7 +25,7 @@ from torch.testing._internal.common_dtype import (
 from torch.testing._internal.common_device_type import \
     (onlyCUDA, onlyOnCPUAndCUDA, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
      skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIfRocm, precisionOverride,
-     toleranceOverride, tol, has_cusolver, test_rocm)
+     toleranceOverride, tol, has_cusolver)
 from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater, SM60OrLater
 from torch.testing._internal.common_utils import \
     (is_iterable_of_tensors,
@@ -3852,11 +3852,10 @@ def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False, **kw
 
     # we generate matrices of shape (..., n + delta, n)
     deltas: Tuple[int, ...]
-    # If Cusolver is not available or if Rocm, underdetermined inputs are not generated
-    if device.type == 'cuda' and (not has_cusolver() or test_rocm()):
-        deltas = (0, +1)
-    else:
+    if device.type == 'cpu' or has_cusolver():
         deltas = (-1, 0, +1)
+    else:
+        deltas = (0, +1)
 
     out = []
     for batch, driver, delta in product(((), (3,), (3, 3)), drivers, deltas):

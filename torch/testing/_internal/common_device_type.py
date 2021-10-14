@@ -1145,9 +1145,6 @@ def skipCUDAIfNoMagmaAndNoCusolver(fn):
         # cuSolver is disabled on cuda < 10.1.243, tests depend on MAGMA
         return skipCUDAIfNoMagma(fn)
 
-def test_rocm():
-    return TEST_WITH_ROCM
-
 # Skips a test on CUDA when using ROCm.
 def skipCUDAIfRocm(fn):
     return skipCUDAIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")(fn)
