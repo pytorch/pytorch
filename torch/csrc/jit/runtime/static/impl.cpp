@@ -20,6 +20,7 @@
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
+#include <sstream>
 #include <stdexcept>
 
 #ifdef FBCODE_CAFFE2
@@ -58,6 +59,18 @@ bool canEnableStaticRuntime(const std::shared_ptr<torch::jit::Graph>& graph) {
     can_support = false;
   }
   return can_support;
+}
+
+std::string dumpValueSet(
+    const FastSet<const Value*>& value_set,
+    const char* set_name) {
+  std::ostringstream oss;
+  oss << set_name << ": {";
+  for (const auto* val : value_set) {
+    oss << "%" << val->debugName() << ", ";
+  }
+  oss << "}";
+  return oss.str();
 }
 
 namespace {
@@ -143,50 +156,28 @@ bool mayContainAlias(
   return db.mayContainAlias(as, bs);
 }
 
-// Get set of all inputs/outputs/constants (always alive) and their aliases
-FastSet<const Value*> GetAlwaysAliveValues(
-    const std::shared_ptr<torch::jit::Graph>& graph,
-    AliasDb& db) {
-  // a set of Values whose live-range exceed current inference
-  FastSet<const Value*> always_alive;
-
-  // mark inputs, constants, outputs as always_alive
-  for (const auto* input : graph->inputs()) {
-    always_alive.insert(input);
-  }
-  for (const auto* output : graph->outputs()) {
-    always_alive.insert(output);
-  }
-  for (const auto* node : graph->nodes()) {
-    if (node->kind() == prim::Constant) {
-      for (const auto* output : node->outputs()) {
-        always_alive.insert(output);
-      }
-    }
-  }
-
-  // insert aliases of always live Values
-  for (const auto* node : graph->nodes()) {
-    // constants are already in the always_alive set
-    if (node->kind() != prim::Constant) {
-      for (const auto* v : node->outputs()) {
-        if (mayContainAlias(db, {v}, always_alive)) {
-          always_alive.insert(v);
-        }
-      }
-    }
-  }
-  return always_alive;
-}
-
 //  Map each value to all values that are alive at the same time.
 using LivenessMap = FastMap<const Value*, FastSet<const Value*>>;
+
+std::string dumpLivenessMap(const LivenessMap& liveness_map) {
+  std::ostringstream oss;
+  oss << "{";
+  for (const auto& p : liveness_map) {
+    oss << "{%" << p.first->debugName() << ": {";
+    for (const auto* val : p.second) {
+      oss << "%" << val->debugName() << ", ";
+    }
+    oss << "}},\n";
+  }
+  oss << "}";
+  return oss.str();
+}
 
 //  The algorithm does a traversal of the execution graph
 //  while keeping track of the live values.
 LivenessMap GetLivenessMap(
     const std::shared_ptr<torch::jit::Graph>& graph,
-    const FastSet<const Value*>& always_alive,
+    const ValueGroup& value_group,
     AliasDb& db) {
   // map a Value to a set of Values that overlap live-ranges with the Value's
   FastMap<const Value*, FastSet<const Value*>> liveness_map;
@@ -197,6 +188,8 @@ LivenessMap GetLivenessMap(
   std::vector<const Value*> values_in_creation_order;
   FastMap<const Value*, size_t> values_to_idx_in_creation_order;
   for (const auto* node : graph->nodes()) {
+    values_to_idx_in_creation_order.reserve(
+        values_to_idx_in_creation_order.size() + node->outputs().size());
     for (const auto* v : node->outputs()) {
       values_to_idx_in_creation_order.emplace(
           v, values_in_creation_order.size());
@@ -220,22 +213,22 @@ LivenessMap GetLivenessMap(
 
     auto& v_live_set = liveness_map[v] = {};
 
+    v_live_set.reserve(live_values_use_chain.size());
     for (const auto& live_v : live_values_use_chain) {
       v_live_set.insert(live_v.first);
-      liveness_map.at(live_v.first).insert(v);
+      liveness_map[live_v.first].insert(v);
     }
 
     // only add values to the live set if they
     // have deps, otherwise they die immediately
     if (v->uses().size()) {
-      live_values_use_chain[v] = {};
-    }
-
-    // record the relationship between v (Value) and its uses (Node)
-    for (const auto& u : v->uses()) {
-      const auto* node = u.user;
-      live_values_use_chain.at(v).insert(node);
-      live_nodes_def_chain[node].insert(v);
+      live_values_use_chain[v] = FastSet<const Node*>(v->uses().size());
+      // record the relationship between v (Value) and its uses (Node)
+      for (const auto& u : v->uses()) {
+        const auto* node = u.user;
+        live_values_use_chain[v].insert(node);
+        live_nodes_def_chain[node].insert(v);
+      }
     }
 
     // FIXME(penguin): the following alias refinement seems to assume
@@ -258,24 +251,19 @@ LivenessMap GetLivenessMap(
     // for all the values in the alias set,
     // we set them "alive"
     for (auto* aliased_v : refined_aliases) {
+      GRAPH_DEBUG("aliased_v: %", aliased_v->debugName());
       add_live_value_fn(aliased_v);
-      for (const auto& u : aliased_v->uses()) {
-        const auto* node = u.user;
-        // track deps of the aliased values is if they
-        // are our own
-        live_values_use_chain.at(v).insert(node);
-        live_nodes_def_chain[node].insert(v);
-      }
     }
   };
 
-  auto traverse_node_fn = [&](const Node* node,
-                              std::vector<const Value*>& dead) {
-    if (live_nodes_def_chain.count(node)) {
-      for (const auto* v : live_nodes_def_chain.at(node)) {
-        live_values_use_chain.at(v).erase(node);
-        if (!live_values_use_chain.at(v).size()) {
-          dead.emplace_back(v);
+  auto remove_dead_values = [&](const Node* node) {
+    auto find = live_nodes_def_chain.find(node);
+    if (find != live_nodes_def_chain.end()) {
+      for (const auto* v : find->second) {
+        live_values_use_chain[v].erase(node);
+        if (!live_values_use_chain[v].size()) {
+          // v is now dead
+          live_values_use_chain.erase(v);
         }
       }
     }
@@ -283,21 +271,38 @@ LivenessMap GetLivenessMap(
 
   for (const auto* node : graph->nodes()) {
     for (const auto* v : node->outputs()) {
-      if (always_alive.count(v) == 0) {
+      if (!value_group.isAlwaysAlive(v)) {
         add_live_value_fn(v);
       }
     }
 
-    std::vector<const Value*> dead;
-    traverse_node_fn(node, dead);
-    for (const auto* dead_value : dead) {
-      live_values_use_chain.erase(dead_value);
-    }
+    remove_dead_values(node);
   }
+  GRAPH_DEBUG("LivenessMap: ", dumpLivenessMap(liveness_map));
 
   for (const auto& v : live_values_use_chain) {
-    TORCH_CHECK(always_alive.count(v.first));
+    TORCH_CHECK(
+        value_group.isAlwaysAlive(v.first),
+        v.first->debugName(),
+        "is not in the value_group.isAlwaysAlive group");
   }
+
+  auto insert_all_pairs_in_liveness_map =
+      [&](at::ArrayRef<const Value*> values) {
+        for (size_t i = 0; !values.empty() && i < values.size() - 1; ++i) {
+          auto value_it = liveness_map.find(values[i]);
+          if (value_it == liveness_map.end()) {
+            continue;
+          }
+          for (size_t j = i + 1; j < values.size(); ++j) {
+            auto value2_it = liveness_map.find(values[j]);
+            if (value2_it != liveness_map.end()) {
+              value_it->second.insert(values[j]);
+              value2_it->second.insert(values[i]);
+            }
+          }
+        }
+      };
 
   for (const auto* node : graph->nodes()) {
     auto inputs = node->inputs();
@@ -316,22 +321,7 @@ LivenessMap GetLivenessMap(
         output_it->second.insert(input);
       }
     }
-    auto insert_all_pairs_in_liveness_map =
-        [&](at::ArrayRef<const Value*> values) {
-          for (size_t i = 0; !values.empty() && i < values.size() - 1; ++i) {
-            auto value_it = liveness_map.find(values[i]);
-            if (value_it == liveness_map.end()) {
-              continue;
-            }
-            for (size_t j = i + 1; j < values.size(); ++j) {
-              auto value2_it = liveness_map.find(values[j]);
-              if (value2_it != liveness_map.end()) {
-                value_it->second.insert(values[j]);
-                value2_it->second.insert(values[i]);
-              }
-            }
-          }
-        };
+
     // All inputs should be alive at the same time.
     insert_all_pairs_in_liveness_map(inputs);
 
@@ -426,7 +416,7 @@ GetMemoryPlanningCandidates(
 // and debug.
 FastMap<const Value*, std::vector<const Value*>> GenerateSameStorageValues(
     const LivenessMap& alive_during,
-    const FastSet<const Value*>& always_alive,
+    const ValueGroup& value_group,
     const std::pair<std::vector<const Value*>, std::vector<const Value*>>&
         optimizable,
     AliasDb& db) {
@@ -470,7 +460,7 @@ FastMap<const Value*, std::vector<const Value*>> GenerateSameStorageValues(
       same_storage_values[v] = {v};
     }
     // skip always alive values (alias inputs/outputs/weights)
-    if (always_alive.count(v)) {
+    if (value_group.isAlwaysAlive(v)) {
       continue;
     }
     for (const auto& p : same_storage_values) {
@@ -487,16 +477,14 @@ FastMap<const Value*, std::vector<const Value*>> GenerateSameStorageValues(
   // to preserve determinism
   std::vector<const Value*> seen;
 
-  auto compute_liveset_fn =
-      [&always_alive, &alive_during, &same_storage_values](
-          FastSet<const Value*>& live, const Value* v) {
-        for (const auto* sv : same_storage_values.at(v)) {
-          const auto& l = alive_during.count(sv) ? alive_during.at(sv)
-                                                 : FastSet<const Value*>{};
-          live.insert(l.begin(), l.end());
-        }
-        live.insert(always_alive.begin(), always_alive.end());
-      };
+  auto compute_liveset_fn = [&alive_during, &same_storage_values](
+                                FastSet<const Value*>& live, const Value* v) {
+    for (const auto* sv : same_storage_values.at(v)) {
+      const auto& l = alive_during.count(sv) ? alive_during.at(sv)
+                                             : FastSet<const Value*>{};
+      live.insert(l.begin(), l.end());
+    }
+  };
 
   // check if same_storage_values[s] intersects with live
   auto intersect_fn = [&same_storage_values](
@@ -512,7 +500,7 @@ FastMap<const Value*, std::vector<const Value*>> GenerateSameStorageValues(
   };
 
   for (const auto* v : optimizable_values) {
-    if (always_alive.count(v)) {
+    if (value_group.isAlwaysAlive(v)) {
       continue;
     }
     // get values that are live during the lifetime of v
@@ -521,7 +509,7 @@ FastMap<const Value*, std::vector<const Value*>> GenerateSameStorageValues(
     for (const auto* s : seen) {
       // if live(same_storage_values[v]) and same_storage_values[s]
       // do not overlap, then s and v can share the same storage
-      if (!intersect_fn(live, s)) {
+      if (!intersect_fn(live, s) && !value_group.isAlwaysAlive(s)) {
         share_storage_fn(v, s);
         // since s is added to same_storage_values[v], live needs
         // to be recomputed, so bail out here
@@ -547,9 +535,9 @@ std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
     const StaticModuleOptions& opts) {
   VLOG(1) << "StaticModuleOptions: cleanup_activations "
           << opts.cleanup_activations << ", enable_out_variant "
-          << opts.enable_out_variant << ", optimize_memory"
-          << opts.optimize_memory << ", optimize_graph_output_memory"
-          << opts.optimize_graph_output_memory;
+          << opts.enable_out_variant << ", optimize_memory "
+          << opts.optimize_memory << ", manage_output_tensors "
+          << opts.manage_output_tensors;
 
   Module module = m.copy();
   if (!is_frozen) {
@@ -560,7 +548,6 @@ std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
   Method method = module.get_method("forward");
   auto graph = module.get_method("forward").graph();
 
-  // graph->dump();
   PrepareGraphForStaticModule(graph, opts);
 
   return std::make_pair(graph, module);
@@ -574,6 +561,57 @@ std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
 }
 
 } // namespace
+
+void ValueGroup::init(
+    const std::shared_ptr<torch::jit::Graph>& graph,
+    AliasDb& db) {
+  external_aliases_.clear();
+  output_aliases_.clear();
+  // Build `input_or_constant_aliases` as we look through nodes forwardly from
+  // the graph's inputs and add aliases of the inputs being created by the
+  // nodes.
+  external_aliases_.insert(graph->inputs().begin(), graph->inputs().end());
+  for (const auto* node : graph->nodes()) {
+    if (node->kind() == prim::Constant) {
+      for (const auto* output : node->outputs()) {
+        external_aliases_.insert(output);
+      }
+    }
+  }
+  for (const auto* node : graph->nodes()) {
+    if (node->kind() == prim::Constant) {
+      // Constants are already in `input_or_constant_aliases`.
+      continue;
+    }
+    for (const auto* v : node->outputs()) {
+      if (mayContainAlias(db, {v}, external_aliases_)) {
+        external_aliases_.insert(v);
+      }
+    }
+  }
+
+  // Build `output_aliases` as we look through nodes reversely so that we can
+  // start from the output values, and follow the flows backwardly from there.
+  output_aliases_.insert(graph->outputs().begin(), graph->outputs().end());
+  for (const auto* node : graph->nodes().reverse()) {
+    if (node->kind() == prim::Constant) {
+      // Constants cannot create any aliases.
+      continue;
+    }
+    for (const auto* v : node->outputs()) {
+      // Add values that can aliase input/constant values. Note some output
+      // aliases may end up in this category via collection objects (e.g.,
+      // Tuple).
+      if (mayContainAlias(db, {v}, external_aliases_)) {
+        external_aliases_.insert(v);
+        continue;
+      }
+      if (mayContainAlias(db, {v}, output_aliases_)) {
+        output_aliases_.insert(v);
+      }
+    }
+  }
+}
 
 StaticModule::StaticModule(
     std::shared_ptr<torch::jit::Graph> g,
@@ -594,10 +632,10 @@ StaticModule::StaticModule(
       graph_(std::move(graph_and_module.first)),
       module_(std::move(graph_and_module.second)) {
   // check opt flags
-  if (opts.optimize_graph_output_memory) {
+  if (opts.manage_output_tensors) {
     TORCH_CHECK(
-        opts_.enable_out_variant && opts_.optimize_memory,
-        "When optimize_graph_output_memory is true, enable_out_variant and optimize_memory must be set to true");
+        opts_.enable_out_variant,
+        "When manage_output_tensors is true, enable_out_variant must be set to true");
   }
   if (opts_.optimize_memory) {
     TORCH_CHECK(
@@ -663,17 +701,18 @@ StaticModule::StaticModule(
     if (node->kind() == prim::Constant) {
       continue;
     }
-    std::vector<const IValue*> ivalue_inputs;
+    auto ivalue_inputs =
+        std::make_unique<const IValue*[]>(node->inputs().size());
     std::vector<DefInfo> input_ssa_defs;
+    size_t idx = 0;
     for (Value* input : node->inputs()) {
-      ivalue_inputs.emplace_back(value_to_ivalue.at(input));
+      ivalue_inputs[idx++] = value_to_ivalue.at(input);
       input_ssa_defs.emplace_back(value_to_ssa_def.at(input));
     }
     node_inputs_ssa_def_map_[node_idx] = input_ssa_defs;
-    auto pnode =
-        ProcessedNode(node, std::move(ivalue_inputs), opts.enable_out_variant);
-    node_has_out_variant.emplace(node, pnode.has_out_variant());
-    nodes_.emplace_back(std::move(pnode));
+    nodes_.emplace_back(
+        node, std::move(ivalue_inputs), idx, opts.enable_out_variant);
+    node_has_out_variant.emplace(node, nodes_.back().has_out_variant());
     for (const auto i : c10::irange(node->outputs().size())) {
       value_to_ivalue[node->outputs()[i]] = nullptr;
       value_to_ssa_def[node->outputs()[i]] = std::make_pair(node_idx, i);
@@ -691,14 +730,16 @@ StaticModule::StaticModule(
   }
 
   // Prepare for memory planning
-  AliasDb alias_db(graph_);
-  external_values_ = GetAlwaysAliveValues(graph_, alias_db);
+  AliasDb alias_db(
+      graph_, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
+  value_group_.init(graph_, alias_db);
+  GRAPH_DEBUG(value_group_.toString());
 
   if (opts_.optimize_memory) {
-    auto lm = GetLivenessMap(graph_, external_values_, alias_db);
+    auto lm = GetLivenessMap(graph_, value_group_, alias_db);
     auto values = GetMemoryPlanningCandidates(graph_, node_has_out_variant);
     value_to_same_storage_values_ =
-        GenerateSameStorageValues(lm, external_values_, values, alias_db);
+        GenerateSameStorageValues(lm, value_group_, values, alias_db);
   }
 }
 
@@ -725,6 +766,7 @@ std::vector<at::Tensor> StaticModule::operator()(
     const std::vector<at::Tensor>& inps) {
   return runtime()(inps);
 }
+
 c10::IValue StaticModule::operator()(
     const std::vector<c10::IValue>& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
@@ -853,6 +895,9 @@ c10::IValue StaticRuntime::operator()(
   c10::InferenceMode mode;
 
   if (planner_) {
+    DCHECK(
+        !static_module_.opts().manage_output_tensors ||
+        checkOutputTensorMemoryLeaks());
     planner_->allocate();
   }
 
@@ -874,9 +919,9 @@ c10::IValue StaticRuntime::operator()(
       planner_ = std::make_unique<MemoryPlanner>(
           this,
           static_module_.values_share_same_storage(),
-          static_module_.external_values(),
+          static_module_.value_group(),
           static_module_.opts().enable_out_variant,
-          static_module_.opts().optimize_graph_output_memory);
+          static_module_.opts().manage_output_tensors);
     }
     planner_->deallocate();
     // clean up owning refs of input tensors
@@ -888,16 +933,18 @@ c10::IValue StaticRuntime::operator()(
     std::vector<c10::IValue> outputs;
     outputs.reserve(static_module_.num_outputs());
     for (const auto i : c10::irange(static_module_.num_outputs())) {
+      // The exact output tensor should never be managed.
+      DCHECK(!isManagedOutputTensor(*outputs_[i]));
       // use move here. Otherwise, clean up outputs_[i] explicitly
       outputs.emplace_back(std::move(*outputs_[i]));
     }
     return c10::ivalue::Tuple::create(std::move(outputs));
   }
-
 #ifndef NDEBUG
   check_for_memory_leak(false);
 #endif
-
+  // The exact output tensor should never be managed.
+  DCHECK(!isManagedOutputTensor(*outputs_[0]));
   // use move here. Otherwise, clean up outputs_[0] explicitly
   return std::move(*outputs_[0]);
 }
@@ -988,6 +1035,8 @@ void StaticRuntime::benchmark(
   if (planner_) {
     std::cout << "Total number of managed tensors: "
               << planner_->total_num_managed_tensors() << std::endl;
+    std::cout << "Total number of managed output tensors: "
+              << planner_->total_num_managed_output_tensors() << std::endl;
     std::cout << "Total number of unmanaged values: "
               << planner_->total_num_unmanaged() << std::endl;
     std::cout << "Total memory managed: " << planner_->total_managed()
@@ -1065,14 +1114,14 @@ bool display_ivalue(const IValue& iv) {
 
 void display_pnode_info(const ProcessedNode& pnode) {
   pnode.node()->print(std::cout, 0, nullptr, false);
-  const std::vector<const IValue*>& inputs = pnode.inputs();
+  const auto inputs = pnode.inputs();
   for (const auto i : c10::irange(inputs.size())) {
     std::cout << "\ti" << i << ": ";
     if (!display_ivalue(*inputs[i])) {
       std::cout << *(pnode.node()->inputs()[i]->type()) << '\n';
     }
   }
-  const std::vector<IValue>& outputs = pnode.outputs();
+  const auto outputs = pnode.outputs();
   for (const auto i : c10::irange(outputs.size())) {
     std::cout << "\to" << i << ": ";
     if (!display_ivalue(outputs[i])) {
@@ -1103,9 +1152,9 @@ void StaticRuntime::display_nodes(
       planner_ = std::make_unique<MemoryPlanner>(
           this,
           static_module_.values_share_same_storage(),
-          static_module_.external_values(),
+          static_module_.value_group(),
           static_module_.opts().enable_out_variant,
-          static_module_.opts().optimize_graph_output_memory);
+          static_module_.opts().manage_output_tensors);
     }
     planner_->deallocate();
     // clean up owning refs of input tensors
@@ -1172,9 +1221,9 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
         planner_ = std::make_unique<MemoryPlanner>(
             this,
             static_module_.values_share_same_storage(),
-            static_module_.external_values(),
+            static_module_.value_group(),
             static_module_.opts().enable_out_variant,
-            static_module_.opts().optimize_graph_output_memory);
+            static_module_.opts().manage_output_tensors);
       }
       planner_->deallocate();
       // clean up owning refs of input tensors
@@ -1243,13 +1292,18 @@ void StaticRuntime::check_for_memory_leak(bool output_returned) {
   for (const auto i : c10::irange(inputs_.size())) {
     TORCH_CHECK(inputs_[i].isNone(), "Input ", i, " was not cleaned up");
   }
-
   FastSet<const IValue*> output_ivalues(outputs_.begin(), outputs_.end());
   for (const auto n : c10::irange(nodes_.size())) {
     auto& pnode = nodes_[n];
     for (const auto i : c10::irange(pnode.outputs().size())) {
       const IValue* ival = &pnode.Output(i);
       const Value* val = pnode.node()->output(i);
+      if (planner_ && planner_->isManagedOutputTensorValue(val)) {
+        // `ival` contains a managed output tensor that the runtime doesn't
+        // reclaim at the end of an iteration, but the client does so
+        // by explicitly calling `StaticRuntime::deallocateOutputTensors`.
+        continue;
+      }
       const std::string error_msg = "Output " + c10::to_string(i) + ", %" +
           val->debugName() + " of node " + c10::to_string(n) +
           " was not cleaned up";
@@ -1279,37 +1333,87 @@ void StaticRuntime::check_for_memory_leak(bool output_returned) {
   VLOG(1) << "Finished checking for memory leak";
 }
 
+void StaticRuntime::deallocateOutputTensors() {
+  if (!static_module_.opts().manage_output_tensors) {
+    TORCH_CHECK(
+        !planner_ || planner_->numOutputBufferBytes() == 0,
+        "manage_output_tensors is disabled, but output tensor buffer is not empty.");
+    return;
+  }
+  if (planner_) {
+    planner_->deallocateOutputTensors();
+    DCHECK(checkOutputTensorMemoryLeaks());
+  }
+}
+
+bool StaticRuntime::checkOutputTensorMemoryLeaks() {
+  if (!static_module_.opts().manage_output_tensors || !planner_) {
+    return true;
+  }
+  for (const auto n : c10::irange(nodes_.size())) {
+    auto& pnode = nodes_[n];
+    for (const auto i : c10::irange(pnode.outputs().size())) {
+      const IValue* ival = &pnode.Output(i);
+      const Value* val = pnode.node()->output(i);
+      if (!planner_->isManagedOutputTensorValue(val)) {
+        continue;
+      }
+      const auto& t = ival->toTensor();
+      if (t.defined()) {
+        auto* storage_impl = t.storage().unsafeGetStorageImpl();
+        const std::string error_msg = "Output " + c10::to_string(i) + ", %" +
+            val->debugName() + " of node " + c10::to_string(n) +
+            " was not cleaned up";
+        TORCH_CHECK(storage_impl->data() == nullptr, error_msg);
+      }
+    }
+  }
+  VLOG(1) << "Finished checking for memory leak from output tensors";
+  return true;
+}
+
+bool StaticRuntime::isManagedOutputTensor(const IValue& ivalue) {
+  return planner_ && planner_->isManagedOutputTensor(ivalue);
+}
+
 ProcessedNode::ProcessedNode(
     Node* node,
-    std::vector<const IValue*>&& inputs,
+    std::unique_ptr<const IValue*[]> inputs,
+    size_t inputsSize,
     bool enable_out_variant)
     : node_(node),
       inputs_(std::move(inputs)),
+      inputs_size_(inputsSize),
       op_name_(node->kind().toQualString()) {
   // TODO leverage type information
-  outputs_.resize(node->outputs().size());
+  outputs_size_ = node->outputs().size();
+  outputs_ = std::make_unique<IValue[]>(outputs_size_);
 
-  if (enable_out_variant && (fn_ = getOutOfPlaceOperation(node))) {
-    VLOG(1) << "Switch to out variant for node: " << PrintNode(node);
-    return;
+  if (enable_out_variant) {
+    if (OutVariant fn = getOutOfPlaceOperation(node)) {
+      fn_.emplace<0>(std::move(fn));
+      VLOG(1) << "Switch to out variant for node: " << PrintNode(node);
+      return;
+    }
   }
-  if (!fn_ && (native_fn_ = getNativeOperation(node))) {
+  if (NativeFunction fn = getNativeOperation(node)) {
+    fn_.emplace<1>(std::move(fn));
     VLOG(1) << "Switch to native impl for node: " << PrintNode(node);
     return;
   }
   {
     const Operator& op = node->getOperator();
-    op_ = op.getOperation(node);
+    fn_.emplace<2>(op.getOperation(node));
     VLOG(1) << "Fallback interpreter for node: " << PrintNode(node);
   }
 }
 
 std::vector<IValue> ProcessedNode::clone_inputs() const {
   std::vector<IValue> result;
-  result.reserve(inputs_.size());
+  result.reserve(inputs_size_);
   std::transform(
-      inputs_.begin(),
-      inputs_.end(),
+      inputs().begin(),
+      inputs().end(),
       std::back_inserter(result),
       [](const IValue* ival) { return *ival; });
   return result;
@@ -1317,10 +1421,10 @@ std::vector<IValue> ProcessedNode::clone_inputs() const {
 
 void ProcessedNode::run_impl() {
   DCHECK(verify_no_memory_overlap());
-  if (fn_) {
-    fn_(this);
-  } else if (native_fn_) {
-    native_fn_(this);
+  if (fn_.index() == 0) {
+    c10::get<0>(fn_)(this);
+  } else if (fn_.index() == 1) {
+    c10::get<1>(fn_)(this);
   } else {
     std::vector<IValue> stack;
     const size_t size = node_->inputs().size();
@@ -1333,8 +1437,8 @@ void ProcessedNode::run_impl() {
       stack.emplace_back(static_cast<int>(size));
     }
 
-    DCHECK(op_);
-    op_->operator()(stack);
+    DCHECK(fn_.index() == 2);
+    c10::get<2>(fn_)(stack);
 
     DCHECK_EQ(stack.size(), node_->outputs().size());
     for (const auto i : c10::irange(node_->outputs().size())) {
@@ -1377,12 +1481,12 @@ static bool checkNoMemoryOverlap(const at::Tensor& a, const at::Tensor& b) {
 }
 
 bool ProcessedNode::verify_no_memory_overlap() const {
-  for (size_t i = 0; i < outputs_.size(); ++i) {
+  for (const auto i : c10::irange(outputs_size_)) {
     if (!outputs_[i].isTensor()) {
       continue;
     }
     const auto& out0_t = outputs_[i].toTensor();
-    for (size_t j = i + 1; j < outputs_.size(); ++j) {
+    for (const auto j : c10::irange(i + 1, outputs_size_)) {
       if (!outputs_[j].isTensor()) {
         continue;
       }
@@ -1397,12 +1501,12 @@ bool ProcessedNode::verify_no_memory_overlap() const {
   if (!schema || schema->is_mutable()) {
     return true;
   }
-  for (const IValue* in : inputs_) {
+  for (const IValue* in : inputs()) {
     if (!in->isTensor()) {
       continue;
     }
     const auto& in_t = in->toTensor();
-    for (const IValue& out : outputs_) {
+    for (const IValue& out : outputs()) {
       if (!out.isTensor()) {
         continue;
       }

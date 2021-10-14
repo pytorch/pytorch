@@ -106,35 +106,11 @@ using namespace py::literals;
 FOREACH_LIBRARY(DECLARE_LIBRARY_INIT)
 #undef DECLARE_LIBRARY_INIT
 
-extern "C" PyObject* initModule(void);
-extern "C" __attribute__((__weak__)) PyObject* PyInit_tensorrt(void);
-
-extern "C"
-    __attribute__((__weak__)) struct _frozen _PyImport_FrozenModules_tensorrt[];
-
-const char* startup = R"RAW(
+const char* start = R"PYTHON(
 import _ssl # must come before _hashlib otherwise ssl's locks will be set to a Python that might no longer exist...
 import sys
 import importlib.abc
 import linecache
-
-# We need to register a custom meta path finder because we are registering
-# `torch._C` as a builtin module.
-#
-# Normally, builtins will be found by the `BuiltinImporter` meta path finder.
-# However, `BuiltinImporter` is hard-coded to assume that all builtin modules
-# are top-level imports.  Since `torch._C` is a submodule of `torch`, the
-# BuiltinImporter skips it.
-class F:
-    def find_spec(self, fullname, path, target=None):
-        if fullname == 'torch._C':
-            # Load this module using `BuiltinImporter`, but set `path` to None
-            # in order to trick it into loading our module.
-            return sys.meta_path[1].find_spec('torch._C', path=None, target=None)
-        elif fullname == 'tensorrt.tensorrt':
-            return sys.meta_path[1].find_spec('tensorrt.tensorrt', path=None, target=None)
-        return None
-sys.meta_path.insert(0, F())
 
 class RegisterModuleImporter(importlib.abc.InspectLoader):
     def __init__(self, find_module_source):
@@ -183,20 +159,19 @@ if torch.cuda.is_available():
   torch.zeros(1).cuda() # force cuda init...
 import warnings
 warnings.simplefilter("ignore")
-)RAW";
+)PYTHON";
+
+extern "C" __attribute__((__weak__)) PyObject* PyInit_tensorrt(void);
+extern "C"
+    __attribute__((__weak__)) struct _frozen _PyImport_FrozenModules_tensorrt[];
 
 using torch::deploy::BuiltinRegistry;
 // TODO(shunting) move this to the tensorrt code
-REGISTER_TORCH_DEPLOY_BUILTIN(tensorrt, _PyImport_FrozenModules_tensorrt);
-
-int extendFrozenModules() {
-  struct _frozen* p = BuiltinRegistry::getAllFrozenModules();
-  if (p == nullptr) {
-    return -1;
-  }
-  PyImport_FrozenModules = p;
-  return 0;
-}
+REGISTER_TORCH_DEPLOY_BUILTIN(
+    tensorrt,
+    _PyImport_FrozenModules_tensorrt,
+    "tensorrt.tensorrt",
+    PyInit_tensorrt);
 
 static py::object global_impl(const char* module, const char* name) {
   return py::module::import(module).attr(name);
@@ -249,14 +224,8 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterImpl
 #define APPEND_INIT(name) PyImport_AppendInittab(#name, PyInit_##name);
     FOREACH_LIBRARY(APPEND_INIT)
 #undef APPEND_INIT
-    PyImport_AppendInittab("torch._C", initModule);
-    if (PyInit_tensorrt) {
-      PyImport_AppendInittab("tensorrt.tensorrt", PyInit_tensorrt);
-    }
 
-    BuiltinRegistry::sanityCheck();
-    int ret = extendFrozenModules();
-    TORCH_INTERNAL_ASSERT(ret == 0);
+    BuiltinRegistry::runPreInitialization();
 
     PyPreConfig preconfig;
     PyPreConfig_InitIsolatedConfig(&preconfig);
@@ -288,26 +257,10 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterImpl
     PyConfig_Clear(&config);
     TORCH_INTERNAL_ASSERT(!PyStatus_Exception(status))
 
-    int r = PyRun_SimpleString(startup);
-    TORCH_INTERNAL_ASSERT(r == 0);
+    BuiltinRegistry::runPostInitialization();
 
-    // _Py_PackageContext acts as a "hook" that CPython uses to intercept the
-    // process of assigning a module their name.  See: https://git.io/J3qPH.
-    // For a builtin module we need to emulate normal extension module loading
-    // to set a correct fully qualified name. After that we can clean up the
-    // reference created by PyImport_ImportModule().
-    if (PyInit_tensorrt) {
-      _Py_PackageContext = "tensorrt.tensorrt";
-      PyObject* pmodule = PyImport_ImportModule("tensorrt.tensorrt");
-      if (pmodule) {
-        Py_DECREF(pmodule);
-      } else {
-        PyErr_Print();
-        fprintf(
-            stderr, "Error: could not import module 'tensorrt.tensorrt'.\n");
-      }
-      _Py_PackageContext = nullptr;
-    }
+    int r = PyRun_SimpleString(start);
+    TORCH_INTERNAL_ASSERT(r == 0);
 
     // we cache these so we don't have to repeat the conversion of strings into
     // Python and hash table lookups to get to these object

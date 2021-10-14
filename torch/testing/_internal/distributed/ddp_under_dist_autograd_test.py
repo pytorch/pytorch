@@ -564,12 +564,12 @@ class DdpComparisonTest(CommonDdpComparisonTest):
         dist.destroy_process_group()
 
     @requires_gloo()
-    @dist_init
+    @dist_init(clean_shutdown=False)
     def test_ddp_comparison(self):
         self._run_test_ddp_comparision()
 
     @requires_gloo()
-    @dist_init
+    @dist_init(clean_shutdown=False)
     def test_ddp_comparison_uneven_inputs(self):
         # test with simulating uneven inputs in DDP
         self._run_test_ddp_comparision(simulate_uneven_inputs=True)

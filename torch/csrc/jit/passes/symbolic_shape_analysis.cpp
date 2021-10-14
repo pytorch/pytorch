@@ -189,7 +189,7 @@ struct SymbolicShapeAnalyzer {
               graph_->inputs().at(i)->type()->cast<OptionalType>()) {
         // None will get handled with constant substitution later
         if (!type->cast<OptionalType>() &&
-            !NoneType::get()->isSubtypeOf(type)) {
+            !NoneType::get()->isSubtypeOf(*type)) {
           graph_->inputs().at(i)->setType(opt_type->getElementType());
         }
       } else if (graph_->inputs().at(i)->type()->cast<NumberType>()) {
