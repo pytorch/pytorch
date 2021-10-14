@@ -1609,15 +1609,12 @@ class CustomModuleQuantizeHandler(QuantizeHandler):
         return quantized_graph.node_copy(node, load_arg(quantized=None))
 
 @register_quant_pattern(torch.nn.Identity)
-@register_quant_pattern(torch.chunk)
 @register_quant_pattern(torch.transpose)
 @register_quant_pattern(torch.repeat_interleave)
 @register_quant_pattern(torch.sort)
 @register_quant_pattern(torch.squeeze)
 @register_quant_pattern(torch.stack)
 @register_quant_pattern(torch.unsqueeze)
-@register_quant_pattern(operator.getitem)
-@register_quant_pattern('chunk')
 @register_quant_pattern('contiguous')
 @register_quant_pattern('detach')
 @register_quant_pattern('detach_')
@@ -1662,7 +1659,31 @@ class GeneralTensorShapeOpQuantizeHandler(QuantizeHandler):
                 load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
-        return quantized_graph.node_copy(node, load_arg(quantized=None))
+        if is_reference:
+            # when activation dtype is torch.float, the node does not require
+            # observation
+            # e.g. dynamic quantization or weight_only quantization
+            act_dtype = activation_dtype(qconfig)
+            if act_dtype == torch.float:
+                op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
+                return op_out
+            else:
+                activation_post_process = \
+                    self._maybe_get_last_node_only_observer(modules)
+                assert activation_post_process is not None
+                # TODO: remove special case for operator.getitem
+                # make sure the input is quantized to act_dtype if it's not operator.getitem
+                if node.target != operator.getitem:
+                    load_arg(quantized={0: act_dtype})(node.args)
+                args = list(load_arg(quantized=torch.float)(node.args))
+                kwargs = load_arg(quantized=torch.float)(node.kwargs)
+                op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
+                return quantize_node(
+                    op_out,
+                    activation_post_process,
+                    node, modules, quantized_graph, node_name_to_scope, is_input=False)
+        else:
+            return quantized_graph.node_copy(node, load_arg(quantized=None))
 
 class StandaloneModuleQuantizeHandler(QuantizeHandler):
     """ Converts an observed standalone module to quantized standalone module

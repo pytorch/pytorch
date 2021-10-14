@@ -1006,7 +1006,7 @@ def insert_observers_for_model(
                     is_general_tensor_shape_op = \
                         (qhandler is not None and qhandler.is_general_tensor_shape_op())
 
-                    if is_last_node_of_pattern and not is_general_tensor_shape_op:
+                    if is_last_node_of_pattern:
                         # this returns the new observer node if it was needed
                         maybe_output_obs_node = maybe_insert_output_observer_for_node(
                             node, model, modules, graph, matches,
@@ -1036,7 +1036,7 @@ def insert_observers_for_model(
                             # for general tensor value ops, we modify the graph
                             # to make all inputs and outputs use the first input's
                             # observer
-                            if is_general_tensor_value_op:
+                            if is_general_tensor_value_op or is_general_tensor_shape_op:
                                 if not maybe_make_input_output_share_observers(node, model, modules):
                                     remove_output_observer(node, model, modules)
 
