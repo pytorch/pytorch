@@ -24,7 +24,6 @@ install(FILES
           THCStorage.h
           THCStorageCopy.h
           THCTensor.h
-          THCTensorMathReduce.cuh
           THCAtomics.cuh
           THCGenerateAllTypes.h
           THCGenerateBFloat16Type.h
@@ -41,7 +40,6 @@ install(FILES
           THCGenerateComplexFloatType.h
           THCGenerateComplexTypes.h
           THCGenerateComplexDoubleType.h
-          THCNumerics.cuh
           # See Note [TH abstraction violation]
           THCTensor.hpp
           THCStorage.hpp
