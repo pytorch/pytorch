@@ -52,7 +52,7 @@ def get_file_binaries_from_pathnames(pathnames: Iterable, mode: str):
         if not isinstance(pathname, str):
             raise TypeError("Expected string type for pathname, but got {}"
                             .format(type(pathname)))
-        yield (pathname, StreamWrapper(open(pathname, mode)))
+        yield pathname, StreamWrapper(open(pathname, mode))
 
 def validate_pathname_binary_tuple(data: Tuple[str, IOBase]):
     if not isinstance(data, tuple):
@@ -74,15 +74,6 @@ def deprecation_warning_torchdata(name):
                   DeprecationWarning)
 
 class StreamWrapper:
-    r""":class:`StreamWrapper`.
-
-        A wrapper class around a file object, it allows the file object to automatically close whenever
-        it is no longer needed. This instance delegates all methods except for __del__ to the file object.
-
-        Args:
-            file_obj: File object to which the instance will delegate attribute or method calls to
-    """
-
     def __init__(self, file_obj):
         self.file_obj = file_obj
 
@@ -91,3 +82,18 @@ class StreamWrapper:
 
     def __del__(self):
         self.file_obj.close()
+
+    def __getstate__(self, *args, **kwargs):
+        return self.file_obj.__getstate__(*args, **kwargs)
+
+    def __iter__(self, *args, **kwargs):
+        return self.file_obj.__iter__(*args, **kwargs)
+
+    def __next__(self, *args, **kwargs):
+        return self.file_obj.__next__(*args, **kwargs)
+
+    def __setstate__(self, *args, **kwargs):
+        self.file_obj.__setstate__(*args, **kwargs)
+
+    def __sizeof__(self, *args, **kwargs):
+        return self.file_obj.__sizeof__(*args, **kwargs)

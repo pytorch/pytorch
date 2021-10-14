@@ -8,6 +8,7 @@ import pickle
 import tempfile
 
 import torch
+from torch.utils.data.datapipes.utils.common import StreamWrapper
 
 
 __all__ = ["basichandlers", "imagehandler", "videohandler", "audiohandler",
@@ -273,14 +274,21 @@ class Decoder:
             return
         self.handlers = list(handler) + self.handlers
 
+    @staticmethod
+    def _is_stream_handle(data):
+        if isinstance(data, StreamWrapper):
+            data = data.file_obj
+        return isinstance(data, io.BufferedIOBase) or isinstance(data, io.RawIOBase)
+
     def decode1(self, key, data):
         if not data:
             return data
 
         # if data is a stream handle, we need to read all the content before decoding
-        if isinstance(data, io.BufferedIOBase) or isinstance(data, io.RawIOBase):
+        if self._is_stream_handle(data):
             ds = data
-            data = data.read()
+            # The behavior of .read can differ between streams (e.g. HTTPResponse), hence this is used instead
+            data = b"".join(data)
             ds.close()
 
         for f in self.handlers:
