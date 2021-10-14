@@ -97,7 +97,9 @@ static void upsample_bicubic2d_backward_out_frame(
       int64_t input_y = floorf(real_y);
       scalar_t t_y = real_y - input_y;
 
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
       scalar_t x_coeffs[4];
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
       scalar_t y_coeffs[4];
 
       get_cubic_upsample_coefficients<scalar_t>(x_coeffs, t_x);

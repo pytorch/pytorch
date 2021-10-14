@@ -8,45 +8,49 @@
 
 namespace c10 {
 
-/// Traits class describing how to borrow from T.  As a synopsis, here
-/// is how we might implement borrowing from an arbitrary type T using
-/// a raw pointer to const:
-///
-/// template <typename T>
-/// struct MaybeOwnedTraits {
-///   using owned_type = T;
-///   using borrow_type = const T*;
-///
-///   static borrow_type createBorrow(const owned_type& from) {
-///     return &from;
-///   }
-///
-///   static void assignBorrow(borrow_type& lhs, borrow_type rhs) {
-///     lhs = rhs;
-///   }
-///
-///   static void destroyBorrow(borrow_type& toDestroy) {}
-///
-///   static const owned_type& referenceFromBorrow(const borrow_type& borrow) {
-///     return *borrow;
-///   }
-///
-///   static const owned_type* pointerFromBorrow(const borrow_type& borrow) {
-///     return borrow;
-///   }
-///
-///   static bool debugBorrowIsValid(const borrow_type& borrow) {
-///     return borrow != nullptr;
-///   }
-/// };
-///
-/// (This implementation is not in use because MaybeOwned is an unsafe
-/// abstraction and we don't want to encourage it widely, just for
-/// skipping reference counting in critical paths.)
-///
-/// For examples that are in use, see intrusive_ptr.h and TensorBody.h.
+/// MaybeOwnedTraits<T> describes how to borrow from T.  Here is how we
+/// can implement borrowing from an arbitrary type T using a raw
+/// pointer to const:
+template <typename T>
+struct MaybeOwnedTraitsGenericImpl {
+  using owned_type = T;
+  using borrow_type = const T*;
+
+  static borrow_type createBorrow(const owned_type& from) {
+    return &from;
+  }
+
+  static void assignBorrow(borrow_type& lhs, borrow_type rhs) {
+    lhs = rhs;
+  }
+
+  static void destroyBorrow(borrow_type& toDestroy) {}
+
+  static const owned_type& referenceFromBorrow(const borrow_type& borrow) {
+    return *borrow;
+  }
+
+  static const owned_type* pointerFromBorrow(const borrow_type& borrow) {
+    return borrow;
+  }
+
+  static bool debugBorrowIsValid(const borrow_type& borrow) {
+    return borrow != nullptr;
+  }
+};
+
+/// It is possible to eliminate the extra layer of indirection for
+/// borrows for some types that we control. For examples, see
+/// intrusive_ptr.h and TensorBody.h.
+
 template <typename T>
 struct MaybeOwnedTraits;
+
+// Explicitly enable MaybeOwned<shared_ptr<T>>, rather than allowing
+// MaybeOwned to be used for any type right away.
+template <typename T>
+struct MaybeOwnedTraits<std::shared_ptr<T>>
+    : public MaybeOwnedTraitsGenericImpl<std::shared_ptr<T>> {};
 
 /// A smart pointer around either a borrowed or owned T. When
 /// constructed with borrowed(), the caller MUST ensure that the
@@ -68,20 +72,21 @@ class MaybeOwned final {
   };
 
   /// Don't use this; use borrowed() instead.
-  explicit MaybeOwned(const owned_type& t) : isBorrowed_(true), borrow_(MaybeOwnedTraits<T>::createBorrow(t)) {}
+  explicit MaybeOwned(const owned_type& t)
+      : isBorrowed_(true), borrow_(MaybeOwnedTraits<T>::createBorrow(t)) {}
 
   /// Don't use this; use owned() instead.
-  explicit MaybeOwned(T&& t) noexcept(std::is_nothrow_move_constructible<T>::value)
-  : isBorrowed_(false), own_(std::move(t)) {}
+  explicit MaybeOwned(T&& t) noexcept(
+      std::is_nothrow_move_constructible<T>::value)
+      : isBorrowed_(false), own_(std::move(t)) {}
 
   /// Don't use this; use owned() instead.
   template <class... Args>
   explicit MaybeOwned(in_place_t, Args&&... args)
-  : isBorrowed_(false)
-  , own_(std::forward<Args>(args)...) {}
+      : isBorrowed_(false), own_(std::forward<Args>(args)...) {}
 
  public:
-  explicit MaybeOwned(): isBorrowed_(true), borrow_() {}
+  explicit MaybeOwned() : isBorrowed_(true), borrow_() {}
 
   // Copying a borrow yields another borrow of the original, as with a
   // T*. Copying an owned T yields another owned T for safety: no
@@ -120,8 +125,9 @@ class MaybeOwned final {
     return *this;
   }
 
-  MaybeOwned(MaybeOwned&& rhs) noexcept(std::is_nothrow_move_constructible<T>::value)
-  : isBorrowed_(rhs.isBorrowed_) {
+  MaybeOwned(MaybeOwned&& rhs) noexcept(
+      std::is_nothrow_move_constructible<T>::value)
+      : isBorrowed_(rhs.isBorrowed_) {
     if (C10_LIKELY(rhs.isBorrowed_)) {
       MaybeOwnedTraits<T>::assignBorrow(borrow_, rhs.borrow_);
     } else {
@@ -129,15 +135,16 @@ class MaybeOwned final {
     }
   }
 
-  MaybeOwned& operator=(MaybeOwned&& rhs) noexcept(std::is_nothrow_move_assignable<T>::value) {
+  MaybeOwned& operator=(MaybeOwned&& rhs) noexcept(
+      std::is_nothrow_move_assignable<T>::value) {
     if (this == &rhs) {
       return *this;
     }
     if (C10_UNLIKELY(!isBorrowed_)) {
       if (rhs.isBorrowed_) {
-          own_.~T();
-          MaybeOwnedTraits<T>::assignBorrow(borrow_, rhs.borrow_);
-          isBorrowed_ = true;
+        own_.~T();
+        MaybeOwnedTraits<T>::assignBorrow(borrow_, rhs.borrow_);
+        isBorrowed_ = true;
       } else {
         own_ = std::move(rhs.own_);
       }
@@ -158,7 +165,8 @@ class MaybeOwned final {
     return MaybeOwned(t);
   }
 
-  static MaybeOwned owned(T&& t) noexcept(std::is_nothrow_move_constructible<T>::value) {
+  static MaybeOwned owned(T&& t) noexcept(
+      std::is_nothrow_move_constructible<T>::value) {
     return MaybeOwned(std::move(t));
   }
 
@@ -175,22 +183,31 @@ class MaybeOwned final {
     }
   }
 
-  const T& operator*() const & {
+  // This is an implementation detail!  You should know what you're doing
+  // if you are testing this.  If you just want to guarantee ownership move
+  // this into a T
+  bool unsafeIsBorrowed() const {
+    return isBorrowed_;
+  }
+
+  const T& operator*() const& {
     if (isBorrowed_) {
-      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(MaybeOwnedTraits<T>::debugBorrowIsValid(borrow_));
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+          MaybeOwnedTraits<T>::debugBorrowIsValid(borrow_));
     }
     return C10_LIKELY(isBorrowed_)
-      ? MaybeOwnedTraits<T>::referenceFromBorrow(borrow_)
-      : own_;
+        ? MaybeOwnedTraits<T>::referenceFromBorrow(borrow_)
+        : own_;
   }
 
   const T* operator->() const {
     if (isBorrowed_) {
-      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(MaybeOwnedTraits<T>::debugBorrowIsValid(borrow_));
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+          MaybeOwnedTraits<T>::debugBorrowIsValid(borrow_));
     }
     return C10_LIKELY(isBorrowed_)
-      ? MaybeOwnedTraits<T>::pointerFromBorrow(borrow_)
-      : &own_;
+        ? MaybeOwnedTraits<T>::pointerFromBorrow(borrow_)
+        : &own_;
   }
 
   // If borrowed, copy the underlying T. If owned, move from
@@ -199,13 +216,13 @@ class MaybeOwned final {
   // T.
   T operator*() && {
     if (isBorrowed_) {
-      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(MaybeOwnedTraits<T>::debugBorrowIsValid(borrow_));
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+          MaybeOwnedTraits<T>::debugBorrowIsValid(borrow_));
       return MaybeOwnedTraits<T>::referenceFromBorrow(borrow_);
     } else {
       return std::move(own_);
     }
   }
 };
-
 
 } // namespace c10

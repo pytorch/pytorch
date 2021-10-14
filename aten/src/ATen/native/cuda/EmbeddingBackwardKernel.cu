@@ -1,16 +1,14 @@
 #include <ATen/ATen.h>
+#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/ThrustAllocator.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/native/cuda/SortingCommon.cuh>
 
 #include <ATen/AccumulateType.h>
 
-#include <THC/THCDeviceUtils.cuh>
-#include <THC/THCTensorMathReduce.cuh>
-#include <THC/THCTensorSort.cuh>
-#include <THC/THCThrustAllocator.cuh>
-#include <THC/THCAtomics.cuh>
-
+#include <thrust/device_ptr.h>
 #include <thrust/execution_policy.h>
 #include <thrust/unique.h>
 
@@ -21,8 +19,6 @@ namespace native {
 
 namespace {
 
-// The maximum block size in CUDA
-constexpr int MAX_BLOCK_SIZE = 1024;
 /* This code computes the sum of the weights in two-steps:
   1) Each GPU warp sums `NROWS_PER_THREAD` number of row given by `indeces`
   2) Each partial-sum from 1) are summed and scatter into `grad_weight`
@@ -196,7 +192,7 @@ Tensor embedding_backward_cuda_kernel(
         const Tensor &per_sample_weights) {
 
   auto stream = at::cuda::getCurrentCUDAStream();
-  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+  at::cuda::ThrustAllocator allocator;
   auto policy = thrust::cuda::par(allocator).on(stream);
   const ptrdiff_t numel = sorted_indices.numel();
 

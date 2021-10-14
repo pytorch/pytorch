@@ -191,7 +191,7 @@ class PaddedBuffer : public PaddedBufferBase {
 
 template <typename T>
 inline CodeGen::CallArg::CallArg(const PaddedBuffer<T>& buffer)
-    : ptr_(const_cast<T*>(buffer.data())) {}
+    : data_(const_cast<T*>(buffer.data())) {}
 
 template <typename T>
 std::string CompareErrorMsg(

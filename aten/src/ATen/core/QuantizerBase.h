@@ -1,5 +1,9 @@
 #pragma once
 
+#include <c10/core/ScalarType.h>
+#include <c10/core/QScheme.h>
+#include <c10/util/intrusive_ptr.h>
+
 namespace at {
 
 class Tensor;
@@ -58,12 +62,12 @@ struct TORCH_API Quantizer : public c10::intrusive_ptr_target {
   /**
    * quantize a float Tensor into a quantized Tensor.
    */
-  virtual Tensor quantize(Tensor t) = 0;
+  virtual Tensor quantize(const Tensor& t) = 0;
 
   /**
    * dequantize a quantized Tensor into a float Tensor.
    */
-  virtual Tensor dequantize(Tensor t) = 0;
+  virtual Tensor dequantize(const Tensor& t) = 0;
 
   /**
    * Compare against `other` for equality.

@@ -2,6 +2,7 @@
 
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context_gpu.h"
+#include "caffe2/utils/GpuAtomics.cuh"
 
 namespace caffe2 {
 
@@ -11,7 +12,7 @@ namespace caffe2 {
     CUDA_1D_KERNEL_LOOP(i, N) {
       int idx = indices[i / block_nitems];
       int dst_idx = block_nitems * idx + i % block_nitems;
-      atomicAdd(&dst[dst_idx], vals[i]);
+      gpu_atomic_add(&dst[dst_idx], vals[i]);
     }
   }
 

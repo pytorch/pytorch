@@ -53,6 +53,7 @@ void testSerializationInterop() {
   auto ones = torch::ones({2, 2});
   AT_ASSERT(ones.equal(elements.at(0).toTensor()));
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto twos = torch::ones({3, 5}) * 2;
   AT_ASSERT(twos.equal(elements.at(1).toTensor()));
 }

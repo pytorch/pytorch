@@ -6,7 +6,6 @@
 #include <ATen/div_rtn.h>
 
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 
 #include <ATen/native/cuda/im2col.cuh>
 #include <ATen/native/im2col_shape_check.h>
@@ -53,7 +52,7 @@ static void im2col_out_cuda_template(
 
   TensorArg input_arg{input_, "input", 1};
   TensorArg output_arg{output, "output", 2};
-  checkAllSameGPU("im2col_cuda", {input_arg, output_arg});
+  checkAllSameGPU(__func__, {input_arg, output_arg});
 
   im2col_shape_check(
       input_,
@@ -73,7 +72,7 @@ static void im2col_out_cuda_template(
 
   if (input.dim() == 3) {
     batched_input = false;
-    input.resize_({1, input.size(0), input.size(1), input.size(2)});
+    input = input.view({1, input.size(0), input.size(1), input.size(2)});
   }
 
   int64_t batch_size = input.size(0);

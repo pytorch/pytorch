@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/backends/backend.h>
+#include <torch/csrc/jit/backends/backend_debug_handler.h>
 #include <torch/csrc/jit/backends/backend_preprocess.h>
 
 namespace torch {
@@ -11,7 +12,9 @@ template <bool isAvailable>
 class TestBackend : public PyTorchBackendInterface {
  public:
   // Constructor.
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   explicit TestBackend() {}
+  // NOLINTNEXTLINE(modernize-use-override)
   virtual ~TestBackend() = default;
 
   bool is_available() override {
@@ -70,7 +73,8 @@ class TestBackend : public PyTorchBackendInterface {
 namespace {
 c10::IValue preprocess(
     const Module& mod,
-    const c10::Dict<IValue, IValue>& method_compile_spec) {
+    const c10::Dict<IValue, IValue>& method_compile_spec,
+    const BackendDebugHandleGenerator& generate_debug_handles) {
   return mod._ivalue();
 }
 

@@ -3,7 +3,8 @@
 #include <string>
 #include <functional>
 
-#include "c10/util/Registry.h"
+#include <c10/util/Registry.h>
+#include <c10/util/string_view.h>
 #include "caffe2/core/common.h"
 #include "caffe2/proto/caffe2_pb.h"
 
@@ -31,7 +32,7 @@ class BlobSerializerBase {
  public:
   virtual ~BlobSerializerBase() {}
   using SerializationAcceptor =
-     std::function<void(const std::string& blobName, const std::string& data)>;
+     std::function<void(const std::string& blobName, std::string&& data)>;
   /**
    * @brief The virtual function that returns a serialized string for the input
    * blob.
@@ -60,6 +61,20 @@ class BlobSerializerBase {
       const BlobSerializationOptions& /*options*/) {
     // Base implementation.
     Serialize(pointer, typeMeta, name, acceptor);
+  }
+
+  virtual size_t EstimateSerializedBlobSize(
+      const void* /*pointer*/,
+      TypeMeta /*typeMeta*/,
+      c10::string_view /*name*/,
+      const BlobSerializationOptions& /*options*/) {
+    // Base implementation.
+    // This returns 0 just to allow us to roll this out without needing to
+    // define an implementation for all serializer types.  Returning a size of 0
+    // for less-commonly used blob types is acceptable for now.  Eventually it
+    // would be nice to ensure that this method is implemented for all
+    // serializers and then make this method virtual.
+    return 0;
   }
 };
 

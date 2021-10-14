@@ -235,7 +235,7 @@ bool matchAtenFuncToUse(
     c10::optional<int> n) {
   Node* node = use.user;
   return node->kind() == Symbol::aten(func_name) &&
-      (!n.has_value() || n.value() == use.offset);
+      (!n.has_value() || static_cast<size_t>(n.value()) == use.offset);
 }
 
 bool matchCallFuncToUse(
@@ -245,7 +245,7 @@ bool matchCallFuncToUse(
   Node* node = use.user;
   return node->kind() == prim::CallFunction &&
       getFuncName(node->inputs()[0]) == func_name &&
-      (!n.has_value() || n.value() == use.offset);
+      (!n.has_value() || static_cast<size_t>(n.value()) == use.offset);
 }
 
 // Check any use of `v` matches the aten function call
@@ -345,14 +345,14 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
     return inputs;
   } else if (n->kind() == prim::ListUnpack || n->kind() == prim::TupleUnpack) {
     // only propagate dequantize for Tensor
-    if (v->type()->isSubtypeOf(TensorType::get())) {
+    if (v->type()->isSubtypeOf(*TensorType::get())) {
       return {n->input(0)};
     } else {
       return {};
     }
   } else if (
       n->kind() == prim::ListConstruct &&
-      v->type()->isSubtypeOf(ListType::ofTensors())) {
+      v->type()->isSubtypeOf(*ListType::ofTensors())) {
     std::vector<Value*> inputs;
     for (auto* v : n->inputs()) {
       inputs.push_back(v);
@@ -361,7 +361,7 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
   } else if (n->kind() == prim::TupleConstruct) {
     std::vector<Value*> inputs;
     for (auto* input : n->inputs()) {
-      if (input->type()->isSubtypeOf(TensorType::get())) {
+      if (input->type()->isSubtypeOf(*TensorType::get())) {
         inputs.push_back(input);
       }
     }
@@ -516,13 +516,13 @@ bool useQuantizable(const Use& use, QuantType quant_type) {
   if (quant_type == QuantType::STATIC) {
     for (const auto& func_input : _observe_inputs_aten_func) {
       if (matchAtenFuncToUse(use, func_input.func_name, c10::nullopt)) {
-        return use.offset == func_input.arg_index;
+        return use.offset == static_cast<size_t>(func_input.arg_index);
       }
     }
 
     for (const auto& func_input : _observe_inputs_call_func) {
       if (matchCallFuncToUse(use, func_input.func_name, c10::nullopt)) {
-        return use.offset == func_input.arg_index;
+        return use.offset == static_cast<size_t>(func_input.arg_index);
       }
     }
   }
@@ -560,8 +560,8 @@ bool alwaysRaisesException(Block* block) {
 // Check if a value in the graph is a Scalar value
 bool isScalar(Value* v) {
   auto iv = toIValue(v);
-  return v->type()->isSubtypeOf(NumberType::get()) ||
-      (v->type()->isSubtypeOf(TensorType::get()) && iv && iv->isTensor() &&
+  return v->type()->isSubtypeOf(*NumberType::get()) ||
+      (v->type()->isSubtypeOf(*TensorType::get()) && iv && iv->isTensor() &&
        iv->toTensor().dim() == 0);
 }
 
@@ -759,11 +759,17 @@ bool is_conv_transpose2d_module(
 bool is_batchnorm2d_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap) {
-  return is_module(
+  bool regnorm = is_module(
       match,
       vmap,
       "batchnorm",
       "__torch__.torch.nn.modules.batchnorm.BatchNorm2d");
+  bool naivenorm = is_module(
+      match,
+      vmap,
+      "batchnorm",
+      "__torch__.mobile_cv.arch.layers.batch_norm.NaiveSyncBatchNorm");
+  return (regnorm || naivenorm);
 }
 
 bool is_batchnorm3d_module(

@@ -3,6 +3,7 @@
 #include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAEvent.h>
 #include <ATen/cuda/detail/UnpackRaw.cuh>
+#include <ATen/cuda/detail/CUDAHooks.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
@@ -21,7 +22,7 @@ using CaptureStatus = c10::cuda::CaptureStatus;
 inline CaptureStatus currentStreamCaptureStatus() {
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   // don't create a context if we don't have to
-  if (at::detail::getCUDAHooks().hasPrimaryContext(c10::cuda::current_device())) {
+  if (at::cuda::detail::hasPrimaryContext(c10::cuda::current_device())) {
     return c10::cuda::currentStreamCaptureStatusMayInitCtx();
   } else {
     return CaptureStatus::None;
@@ -39,6 +40,19 @@ inline void assertNotCapturing(std::string attempt) {
               "please file an issue. "
               "Current cudaStreamCaptureStatus: ",
               status);
+}
+
+inline void errorIfCapturingCudnnBenchmark(std::string version_specific) {
+  auto status = currentStreamCaptureStatus();
+  TORCH_CHECK(status == CaptureStatus::None,
+              "Current cudaStreamCaptureStatus: ",
+              status,
+              "\nCapturing ",
+              version_specific,
+              "is prohibited. Possible causes of this error:\n"
+              "1. No warmup iterations occurred before capture.\n"
+              "2. The convolutions you're trying to capture use dynamic shapes, "
+              "in which case capturing them is generally prohibited.");
 }
 
 } // namespace cuda

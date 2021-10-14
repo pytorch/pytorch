@@ -1,6 +1,6 @@
 import copy
 import glob
-import imp
+import importlib
 import os
 import re
 import shlex
@@ -20,7 +20,7 @@ from .hipify.hipify_python import get_hip_file_path, GeneratedFileCleaner
 from typing import List, Optional, Union
 
 from setuptools.command.build_ext import build_ext
-from pkg_resources import packaging  # type: ignore
+from pkg_resources import packaging  # type: ignore[attr-defined]
 
 IS_WINDOWS = sys.platform == 'win32'
 LIB_EXT = '.pyd' if IS_WINDOWS else '.so'
@@ -36,6 +36,8 @@ TORCH_LIB_PATH = os.path.join(_TORCH_PATH, 'lib')
 
 BUILD_SPLIT_CUDA = os.getenv('BUILD_SPLIT_CUDA') or (os.path.exists(os.path.join(
     TORCH_LIB_PATH, f'{CLIB_PREFIX}torch_cuda_cu{CLIB_EXT}')) and os.path.exists(os.path.join(TORCH_LIB_PATH, f'{CLIB_PREFIX}torch_cuda_cpp{CLIB_EXT}')))
+
+SUBPROCESS_DECODE_ARGS = ('oem',) if IS_WINDOWS else ()
 
 # Taken directly from python stdlib < 3.9
 # See https://github.com/pytorch/pytorch/issues/48617
@@ -60,7 +62,7 @@ def _find_cuda_home() -> Optional[str]:
             which = 'where' if IS_WINDOWS else 'which'
             with open(os.devnull, 'w') as devnull:
                 nvcc = subprocess.check_output([which, 'nvcc'],
-                                               stderr=devnull).decode().rstrip('\r\n')
+                                               stderr=devnull).decode(*SUBPROCESS_DECODE_ARGS).rstrip('\r\n')
                 cuda_home = os.path.dirname(os.path.dirname(nvcc))
         except Exception:
             # Guess #3
@@ -90,7 +92,7 @@ def _find_rocm_home() -> Optional[str]:
                 ["which hipcc | xargs readlink -f"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
             hipcc, _ = pipe_hipcc.communicate()
             # this will be either <ROCM_HOME>/hip/bin/hipcc or <ROCM_HOME>/bin/hipcc
-            rocm_home = os.path.dirname(os.path.dirname(hipcc.decode().rstrip('\r\n')))
+            rocm_home = os.path.dirname(os.path.dirname(hipcc.decode(*SUBPROCESS_DECODE_ARGS).rstrip('\r\n')))
             if os.path.basename(rocm_home) == 'hip':
                 rocm_home = os.path.dirname(rocm_home)
         except Exception:
@@ -153,6 +155,15 @@ with compiling PyTorch from source.
 
                               !! WARNING !!
 '''
+CUDA_MISMATCH_MESSAGE = '''
+The detected CUDA version ({0}) mismatches the version that was used to compile
+PyTorch ({1}). Please make sure to use the same CUDA versions.
+'''
+CUDA_MISMATCH_WARN = "The detected CUDA version ({0}) has a minor version mismatch with the version that was used to compile PyTorch ({1}). Most likely this shouldn't be a problem."
+CUDA_NOT_FOUND_MESSAGE = '''
+CUDA was not found on the system, please set the CUDA_HOME or the CUDA_PATH
+environment variable or add NVCC to your system PATH. The extension compilation will fail.
+'''
 ROCM_HOME = _find_rocm_home()
 MIOPEN_HOME = _join_rocm_home('miopen') if ROCM_HOME else None
 IS_HIP_EXTENSION = True if ((ROCM_HOME is not None) and (torch.version.hip is not None)) else False
@@ -187,6 +198,7 @@ COMMON_NVCC_FLAGS = [
 COMMON_HIP_FLAGS = [
     '-fPIC',
     '-D__HIP_PLATFORM_HCC__=1',
+    '-DUSE_ROCM=1',
 ]
 
 COMMON_HIPCC_FLAGS = [
@@ -242,12 +254,12 @@ def check_compiler_ok_for_platform(compiler: str) -> bool:
         return True
     which = subprocess.check_output(['which', compiler], stderr=subprocess.STDOUT)
     # Use os.path.realpath to resolve any symlinks, in particular from 'c++' to e.g. 'g++'.
-    compiler_path = os.path.realpath(which.decode().strip())
+    compiler_path = os.path.realpath(which.decode(*SUBPROCESS_DECODE_ARGS).strip())
     # Check the compiler name
     if any(name in compiler_path for name in _accepted_compilers_for_platform()):
         return True
     # If ccache is used the compiler path is /usr/bin/ccache. Check by -v flag.
-    version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT).decode()
+    version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT).decode(*SUBPROCESS_DECODE_ARGS)
     if sys.platform.startswith('linux'):
         # Check for 'gcc' or 'g++'
         pattern = re.compile("^COLLECT_GCC=(.*)$", re.MULTILINE)
@@ -294,11 +306,11 @@ def check_compiler_abi_compatibility(compiler) -> bool:
         if sys.platform.startswith('linux'):
             minimum_required_version = MINIMUM_GCC_VERSION
             versionstr = subprocess.check_output([compiler, '-dumpfullversion', '-dumpversion'])
-            version = versionstr.decode().strip().split('.')
+            version = versionstr.decode(*SUBPROCESS_DECODE_ARGS).strip().split('.')
         else:
             minimum_required_version = MINIMUM_MSVC_VERSION
             compiler_info = subprocess.check_output(compiler, stderr=subprocess.STDOUT)
-            match = re.search(r'(\d+)\.(\d+)\.(\d+)', compiler_info.decode().strip())
+            match = re.search(r'(\d+)\.(\d+)\.(\d+)', compiler_info.decode(*SUBPROCESS_DECODE_ARGS).strip())
             version = (0, 0, 0) if match is None else match.groups()
     except Exception:
         _, error, _ = sys.exc_info()
@@ -350,7 +362,7 @@ class BuildExtension(build_ext, object):
         Returns a subclass with alternative constructor that extends any original keyword
         arguments to the original constructor with the given options.
         '''
-        class cls_with_options(cls):  # type: ignore
+        class cls_with_options(cls):  # type: ignore[misc, valid-type]
             def __init__(self, *args, **kwargs):
                 kwargs.update(options)
                 super().__init__(*args, **kwargs)
@@ -377,6 +389,21 @@ class BuildExtension(build_ext, object):
 
     def build_extensions(self) -> None:
         self._check_abi()
+
+        cuda_ext = False
+        extension_iter = iter(self.extensions)
+        extension = next(extension_iter, None)
+        while not cuda_ext and extension:
+            for source in extension.sources:
+                _, ext = os.path.splitext(source)
+                if ext == '.cu':
+                    cuda_ext = True
+                    break
+            extension = next(extension_iter, None)
+
+        if cuda_ext and not IS_HIP_EXTENSION:
+            self._check_cuda_version()
+
         for extension in self.extensions:
             # Ensure at least an empty list of flags for 'cxx' and 'nvcc' when
             # extra_compile_args is a dict. Otherwise, default torch flags do
@@ -739,6 +766,24 @@ class BuildExtension(build_ext, object):
                    'This may lead to multiple activations of the VC env.'
                    'Please set `DISTUTILS_USE_SDK=1` and try again.')
             raise UserWarning(msg)
+
+    def _check_cuda_version(self):
+        if CUDA_HOME:
+            nvcc = os.path.join(CUDA_HOME, 'bin', 'nvcc')
+            cuda_version_str = subprocess.check_output([nvcc, '--version']).strip().decode(*SUBPROCESS_DECODE_ARGS)
+            cuda_version = re.search(r'release (\d+[.]\d+)', cuda_version_str)
+            if cuda_version is not None:
+                cuda_str_version = cuda_version.group(1)
+                cuda_ver = packaging.version.parse(cuda_str_version)
+                torch_cuda_version = packaging.version.parse(torch.version.cuda)
+                if cuda_ver != torch_cuda_version:
+                    # major/minor attributes are only available in setuptools>=49.6.0
+                    if getattr(cuda_ver, "major", float("nan")) != getattr(torch_cuda_version, "major", float("nan")):
+                        raise RuntimeError(CUDA_MISMATCH_MESSAGE.format(cuda_str_version, torch.version.cuda))
+                    warnings.warn(CUDA_MISMATCH_WARN.format(cuda_str_version, torch.version.cuda))
+
+        else:
+            raise RuntimeError(CUDA_NOT_FOUND_MESSAGE)
 
     def _add_compile_flag(self, extension, flag):
         extension.extra_compile_args = copy.deepcopy(extension.extra_compile_args)
@@ -1601,6 +1646,13 @@ def _get_build_directory(name: str, verbose: bool) -> str:
     root_extensions_directory = os.environ.get('TORCH_EXTENSIONS_DIR')
     if root_extensions_directory is None:
         root_extensions_directory = get_default_build_root()
+        cu_str = ('cpu' if torch.version.cuda is None else
+                  f'cu{torch.version.cuda.replace(".", "")}')  # type: ignore[attr-defined]
+        python_version = f'py{sys.version_info.major}{sys.version_info.minor}'
+        build_folder = f'{python_version}_{cu_str}'
+
+        root_extensions_directory = os.path.join(
+            root_extensions_directory, build_folder)
 
     if verbose:
         print(f'Using {root_extensions_directory} as PyTorch extensions root...')
@@ -1635,13 +1687,12 @@ def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> 
     env = os.environ.copy()
     # Try to activate the vc env for the users
     if IS_WINDOWS and 'VSCMD_ARG_TGT_ARCH' not in env:
-        from distutils.util import get_platform
-        from distutils._msvccompiler import _get_vc_env
+        from setuptools import distutils
 
-        plat_name = get_platform()
+        plat_name = distutils.util.get_platform()
         plat_spec = PLAT_TO_VCVARS[plat_name]
 
-        vc_env = _get_vc_env(plat_spec)
+        vc_env = distutils._msvccompiler._get_vc_env(plat_spec)
         vc_env = {k.upper(): v for k, v in vc_env.items()}
         for k, v in env.items():
             uk = k.upper()
@@ -1678,8 +1729,8 @@ def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> 
         message = error_prefix
         # `error` is a CalledProcessError (which has an `ouput`) attribute, but
         # mypy thinks it's Optional[BaseException] and doesn't narrow
-        if hasattr(error, 'output') and error.output:  # type: ignore
-            message += f": {error.output.decode()}"  # type: ignore
+        if hasattr(error, 'output') and error.output:  # type: ignore[union-attr]
+            message += f": {error.output.decode(*SUBPROCESS_DECODE_ARGS)}"  # type: ignore[union-attr]
         raise RuntimeError(message) from e
 
 
@@ -1695,14 +1746,16 @@ def _get_exec_path(module_name, path):
 
 
 def _import_module_from_library(module_name, path, is_python_module):
-    # https://stackoverflow.com/questions/67631/how-to-import-a-module-given-the-full-path
-    file, path, description = imp.find_module(module_name, [path])
-    # Close the .so file after load.
-    with file:
-        if is_python_module:
-            return imp.load_module(module_name, file, path, description)  # type: ignore
-        else:
-            torch.ops.load_library(path)
+    filepath = os.path.join(path, f"{module_name}{LIB_EXT}")
+    if is_python_module:
+        # https://stackoverflow.com/questions/67631/how-to-import-a-module-given-the-full-path
+        spec = importlib.util.spec_from_file_location(module_name, filepath)
+        module = importlib.util.module_from_spec(spec)
+        assert isinstance(spec.loader, importlib.abc.Loader)
+        spec.loader.exec_module(module)
+        return module
+    else:
+        torch.ops.load_library(filepath)
 
 
 def _write_ninja_file_to_build_library(path,
@@ -1946,7 +1999,7 @@ def _write_ninja_file(path,
         link_rule = ['rule link']
         if IS_WINDOWS:
             cl_paths = subprocess.check_output(['where',
-                                                'cl']).decode().split('\r\n')
+                                                'cl']).decode(*SUBPROCESS_DECODE_ARGS).split('\r\n')
             if len(cl_paths) >= 1:
                 cl_path = os.path.dirname(cl_paths[0]).replace(':', '$:')
             else:

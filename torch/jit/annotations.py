@@ -6,17 +6,17 @@ import builtins
 import torch
 import warnings
 from .._jit_internal import List, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
-    is_optional, _qualified_name, Any, Future, is_future, is_ignored_fn
-from .._jit_internal import BroadcastingList1, BroadcastingList2, BroadcastingList3  # type: ignore
+    is_optional, _qualified_name, Any, Future, is_future, is_ignored_fn, Union, is_union
+from .._jit_internal import BroadcastingList1, BroadcastingList2, BroadcastingList3  # type: ignore[attr-defined]
 from ._state import _get_script_class
 
 from torch._C import TensorType, TupleType, FloatType, IntType, ComplexType, \
-    ListType, StringType, DictType, BoolType, OptionalType, InterfaceType, AnyType, NoneType, \
-    DeviceObjType, StreamObjType, FutureType, EnumType
+    ListType, StringType, DictType, BoolType, OptionalType, InterfaceType, AnyType, \
+    NoneType, DeviceObjType, StreamObjType, FutureType, EnumType, UnionType
 
 
 from textwrap import dedent
-from torch._utils_internal import get_source_lines_and_file
+from torch._sources import get_source_lines_and_file
 from typing import Type
 
 if torch.distributed.rpc.is_available():
@@ -45,7 +45,8 @@ class EvalEnv(object):
         'List': List,
         'Dict': Dict,
         'Optional': Optional,
-        'Future': Future,
+        'Union': Union,
+        'Future': Future
     }
 
     def __init__(self, rcb):
@@ -146,7 +147,7 @@ def parse_type_line(type_line, rcb, loc):
     arg_ann_str, ret_ann_str = split_type_line(type_line)
 
     try:
-        arg_ann = eval(arg_ann_str, {}, EvalEnv(rcb))  # type: ignore # noqa: P204
+        arg_ann = eval(arg_ann_str, {}, EvalEnv(rcb))  # type: ignore[arg-type] # noqa: P204
     except (NameError, SyntaxError) as e:
         raise RuntimeError("Failed to parse the argument list of a type annotation") from e
 
@@ -154,7 +155,7 @@ def parse_type_line(type_line, rcb, loc):
         arg_ann = (arg_ann,)
 
     try:
-        ret_ann = eval(ret_ann_str, {}, EvalEnv(rcb))  # type: ignore # noqa: P204
+        ret_ann = eval(ret_ann_str, {}, EvalEnv(rcb))  # type: ignore[arg-type] # noqa: P204
     except (NameError, SyntaxError) as e:
         raise RuntimeError("Failed to parse the return type of a type annotation") from e
 
@@ -172,11 +173,14 @@ def get_type_line(source):
     # `type: ignore` comments may be needed in JIT'ed functions for mypy, due
     # to the hack in torch/_VF.py.
 
-    # An ignore type line can be of following format:
-    #   1) # type: ignore
-    #   2) # type: ignore[rule-code]
+    # An ignore type comment can be of following format:
+    #   1) type: ignore
+    #   2) type: ignore[rule-code]
     # This ignore statement must be at the end of the line
-    type_pattern = re.compile("# type: ignore(\\[[a-zA-Z-]+\\])?$")
+
+    # adding an extra backslash before the space, to avoid triggering
+    # one of the checks in .github/workflows/lint.yml
+    type_pattern = re.compile("# type:\\ ignore(\\[[a-zA-Z-]+\\])?$")
     type_lines = list(filter(lambda line: not type_pattern.search(line[1]),
                              type_lines))
 
@@ -187,7 +191,7 @@ def get_type_line(source):
         if len(wrong_type_lines) > 0:
             raise RuntimeError("The annotation prefix in line " + str(wrong_type_lines[0][0])
                                + " is probably invalid.\nIt must be '# type:'"
-                               + "\nSee PEP 484 (https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code)" # noqa
+                               + "\nSee PEP 484 (https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code)"  # noqa: B950
                                + "\nfor examples")
         return None
     elif len(type_lines) == 1:
@@ -209,7 +213,7 @@ def get_type_line(source):
             "Return type line '# type: (...) -> ...' not found on multiline "
             "type annotation\nfor type lines:\n" +
             '\n'.join([line[1] for line in type_lines]) +
-            "\n(See PEP 484 https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code)")  # noqa
+            "\n(See PEP 484 https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code)")
 
     def get_parameter_type(line):
         item_type = line[line.find(type_comment) + len(type_comment):]
@@ -242,6 +246,9 @@ def split_type_line(type_line):
 def try_real_annotations(fn, loc):
     """Tries to use the Py3.5+ annotation syntax to get the type."""
     try:
+        # Note: anything annotated as `Optional[T]` will automatically
+        # be returned as `Union[T, None]` per
+        # https://github.com/python/typing/blob/master/src/typing.py#L850
         sig = inspect.signature(fn)
     except ValueError:
         return None
@@ -273,7 +280,6 @@ def get_enum_value_type(e: Type[enum.Enum], loc):
     return torch._C.unify_type_list(ir_types)
 
 def is_tensor(ann):
-
     if issubclass(ann, torch.Tensor):
         return True
 
@@ -297,6 +303,9 @@ def try_ann_to_type(ann, loc):
     if inspect.isclass(ann) and is_tensor(ann):
         return TensorType.get()
     if is_tuple(ann):
+        # Special case for the empty Tuple type annotation `Tuple[()]`
+        if len(ann.__args__) == 1 and ann.__args__[0] == ():
+            return TupleType([])
         return TupleType([try_ann_to_type(a, loc) for a in ann.__args__])
     if is_list(ann):
         elem_type = try_ann_to_type(ann.__args__[0], loc)
@@ -320,6 +329,19 @@ def try_ann_to_type(ann, loc):
         msg = "Unsupported annotation {} could not be resolved because {} could not be resolved."
         assert valid_type, msg.format(repr(ann), repr(contained))
         return OptionalType(valid_type)
+    if is_union(ann):
+        inner: List = []
+        # We need these extra checks because both `None` and invalid
+        # values will return `None`
+        # TODO: Determine if the other cases need to be fixed as well
+        for a in ann.__args__:
+            if a is None:
+                inner.append(NoneType.get())
+            maybe_type = try_ann_to_type(a, loc)
+            msg = "Unsupported annotation {} could not be resolved because {} could not be resolved."
+            assert maybe_type, msg.format(repr(ann), repr(maybe_type))
+            inner.append(maybe_type)
+        return UnionType(inner)    # type: ignore[arg-type]
     if torch.distributed.rpc.is_available() and is_rref(ann):
         return RRefType(try_ann_to_type(ann.__args__[0], loc))
     if is_future(ann):
@@ -384,6 +406,8 @@ __all__ = [
     'is_list',
     'Dict',
     'is_dict',
+    'is_optional',
+    'is_union',
     'TensorType',
     'TupleType',
     'FloatType',

@@ -31,7 +31,9 @@ using test_fn_type = std::function<variable_list(const variable_list&)>;
 struct ADTestSpec {
   ADTestSpec(
       const char* name,
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       var_meta_list input_meta,
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       test_fn_type test_fn,
       float clampMax = -1.0f)
       : name(name),

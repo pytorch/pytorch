@@ -1,10 +1,10 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/ceil_div.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/UpSample.cuh>
 
 namespace at {
@@ -165,7 +165,7 @@ static void upsample_bicubic2d_out_cuda_template(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
   TensorArg input_arg{input, "input", 1}, output_arg{output, "output", 2};
-  checkAllSameGPU("upsample_bicubic2d_out", {input_arg, output_arg});
+  checkAllSameGPU(__func__, {input_arg, output_arg});
 
   int output_height = output_size[0];
   int output_width = output_size[1];
@@ -198,7 +198,7 @@ static void upsample_bicubic2d_out_cuda_template(
             input_width, output_width, align_corners, scales_w);
 
         upsample_bicubic2d_out_frame<scalar_t, accscalar_t>
-            <<<cuda::ATenCeilDiv(num_output_elements, max_threads),
+            <<<ceil_div(num_output_elements, max_threads),
                max_threads,
                0,
                stream>>>(
@@ -222,9 +222,7 @@ static void upsample_bicubic2d_backward_out_cuda_template(
     c10::optional<double> scales_w) {
   TensorArg grad_input_arg{grad_input, "grad_input", 1},
       grad_output_arg{grad_output_, "grad_output_", 2};
-  checkAllSameGPU(
-      "upsample_bicubic2d_backward_out_cuda",
-      {grad_output_arg, grad_input_arg});
+  checkAllSameGPU(__func__, {grad_output_arg, grad_input_arg});
 
   int output_height = output_size[0];
   int output_width = output_size[1];
@@ -256,7 +254,7 @@ static void upsample_bicubic2d_backward_out_cuda_template(
             input_width, output_width, align_corners, scales_w);
 
         upsample_bicubic2d_backward_out_frame<scalar_t, accscalar_t>
-            <<<cuda::ATenCeilDiv(num_kernels, num_threads),
+            <<<ceil_div(num_kernels, num_threads),
                num_threads,
                0,
                stream>>>(

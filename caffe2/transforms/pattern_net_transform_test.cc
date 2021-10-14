@@ -360,6 +360,7 @@ TEST(PatternNetTransformTest, TestSingularArgumentMatching) {
     arg->set_name("stride_h");
     arg->set_i(4);
   }
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   op = AddOp(&netdef, "Conv", {"mid"}, {"mid"}); // Has no args, will not match
   op = AddOp(&netdef, "Conv", {"mid"}, {"out"}); // Has different names
   {

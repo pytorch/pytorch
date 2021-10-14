@@ -53,6 +53,7 @@ class DoOp final : public Operator<Context> {
               inner_blobs[blob_idx]);
       CAFFE_ENFORCE(
           outer_blobs_idx[blob_idx] >= 0 &&
+              // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
               outer_blobs_idx[blob_idx] < outer_blob_names.size(),
           "Invalid blob bindings: outer blob index (" +
               c10::to_string(outer_blobs_idx[blob_idx]) + ", inner name: " +

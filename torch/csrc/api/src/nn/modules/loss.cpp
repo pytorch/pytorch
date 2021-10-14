@@ -49,6 +49,7 @@ Tensor MSELossImpl::forward(const Tensor& input, const Tensor& target) {
 // ============================================================================
 
 BCELossImpl::BCELossImpl(const BCELossOptions& options_) : options(options_) { // NOLINT(modernize-pass-by-value)
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 
@@ -87,6 +88,7 @@ Tensor HingeEmbeddingLossImpl::forward(
 MultiMarginLossImpl::MultiMarginLossImpl(
     const MultiMarginLossOptions& options_) // NOLINT(modernize-pass-by-value)
     : options(options_) {
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 
@@ -132,6 +134,7 @@ Tensor CosineEmbeddingLossImpl::forward(
 MultiLabelSoftMarginLossImpl::MultiLabelSoftMarginLossImpl(
     const torch::nn::MultiLabelSoftMarginLossOptions& options_) // NOLINT(modernize-pass-by-value)
     : options(options_) {
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 
@@ -327,6 +330,7 @@ Tensor MarginRankingLossImpl::forward(const Tensor& input1,
 NLLLossImpl::NLLLossImpl(
     const NLLLossOptions& options_) // NOLINT(modernize-pass-by-value)
     : options(options_) {
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 
@@ -354,6 +358,7 @@ Tensor NLLLossImpl::forward(
 CrossEntropyLossImpl::CrossEntropyLossImpl(
     const CrossEntropyLossOptions& options_) // NOLINT(modernize-pass-by-value)
     : options(options_) {
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 
@@ -373,13 +378,16 @@ Tensor CrossEntropyLossImpl::forward(
     target,
     weight,
     options.ignore_index(),
-    options.reduction());
+    options.reduction(),
+    options.label_smoothing());
 }
 
 // ============================================================================
 
 BCEWithLogitsLossImpl::BCEWithLogitsLossImpl(
+  // NOLINTNEXTLINE(modernize-pass-by-value)
   const BCEWithLogitsLossOptions& options_) : options(options_) {
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 

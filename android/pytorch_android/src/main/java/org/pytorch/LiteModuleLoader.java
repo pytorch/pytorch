@@ -1,5 +1,6 @@
 package org.pytorch;
 
+import android.content.res.AssetManager;
 import java.util.Map;
 
 public class LiteModuleLoader {
@@ -27,5 +28,22 @@ public class LiteModuleLoader {
    */
   public static Module load(final String modelPath) {
     return new Module(new LiteNativePeer(modelPath, null, Device.CPU));
+  }
+
+  /**
+   * Attention: This is not recommended way of loading production modules, as prepackaged assets
+   * increase apk size etc. For production usage consider using loading from file on the disk {@link
+   * org.pytorch.Module#load(String)}.
+   *
+   * <p>This method is meant to use in tests and demos.
+   */
+  public static Module loadModuleFromAsset(
+      final AssetManager assetManager, final String assetName, final Device device) {
+    return new Module(new LiteNativePeer(assetName, assetManager, device));
+  }
+
+  public static Module loadModuleFromAsset(
+      final AssetManager assetManager, final String assetName) {
+    return new Module(new LiteNativePeer(assetName, assetManager, Device.CPU));
   }
 }

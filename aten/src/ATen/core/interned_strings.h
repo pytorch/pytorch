@@ -33,7 +33,8 @@ namespace c10 {
   _(prim, MKLDNNGroup)               \
   _(prim, MKLDNNHardSwish)           \
   _(prim, MKLDNNHardSigmoid)         \
-  _(prim, MKLDNNRelu6)               \
+  _(prim, MKLDNNHardTanh)            \
+  _(prim, MKLDNNClamp)               \
   _(prim, Drop)                      \
   _(prim, Eval)                      \
   _(prim, Expand) /* onnx */         \
@@ -41,6 +42,7 @@ namespace c10 {
   _(prim, CudaFusionGroup)           \
   _(prim, CudaFusionGuard)           \
   _(prim, FunctionalGraph)           \
+  _(prim, add_optional)              \
   _(prim, DifferentiableGraph)       \
   _(prim, TensorExprGroup)           \
   _(prim, StaticSubgraph)            \
@@ -82,6 +84,8 @@ namespace c10 {
   _(prim, StringIndex)               \
   _(prim, NumToTensor)               \
   _(prim, Uninitialized)             \
+  _(prim, VarConcat)                 \
+  _(prim, VarStack)                  \
   _(prim, With)                      \
   _(prim, Enter)                     \
   _(prim, Exit)                      \
@@ -97,6 +101,7 @@ namespace c10 {
   _(aten, is_pinned)                 \
   _(aten, Delete)                    \
   _(aten, relu_)                     \
+  _(aten, gelu_)                     \
   _(aten, relu6)                     \
   _(aten, relu6_)                    \
   _(aten, dropout_)                  \
@@ -176,6 +181,7 @@ namespace c10 {
   _(aten, arccos_)                   \
   _(aten, acosh)                     \
   _(aten, acosh_)                    \
+  _(aten, adjoint)                   \
   _(aten, arccosh)                   \
   _(aten, arccosh_)                  \
   _(aten, asin)                      \
@@ -201,11 +207,16 @@ namespace c10 {
   _(aten, det)                       \
   _(aten, linalg_det)                \
   _(aten, matrix_power)              \
+  _(aten, mT)                        \
+  _(aten, mH)                        \
   _(aten, linalg_matrix_power)       \
   _(aten, chain_matmul)              \
   _(aten, linalg_multi_dot)          \
   _(aten, linalg_norm)               \
   _(aten, linalg_vector_norm)        \
+  _(aten, linalg_matrix_norm)        \
+  _(aten, matmul)                    \
+  _(aten, linalg_matmul)             \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \
@@ -261,6 +272,9 @@ namespace c10 {
   _(aten, linalg_householder_product)\
   _(aten, transpose)                 \
   _(aten, transpose_)                \
+  _(aten, trapz)                     \
+  _(aten, trapezoid)                 \
+  _(aten, cumulative_trapezoid)      \
   _(aten, unsqueeze_)                \
   _(aten, __getitem__)               \
   _(aten, _set_item)                 \
@@ -289,6 +303,7 @@ namespace c10 {
   _(aten, fix)                       \
   _(aten, fix_)                      \
   _(aten, to_mkldnn)                 \
+  _(aten, positive)                  \
   _(aten, neg)                       \
   _(aten, neg_)                      \
   _(aten, negative)                  \
@@ -297,6 +312,9 @@ namespace c10 {
   _(aten, bin)                       \
   _(aten, pop)                       \
   _(aten, insert)                    \
+  _(aten, _cat)                      \
+  _(aten, cat)                       \
+  _(aten, concat)                    \
   _(aten, vstack)                    \
   _(aten, row_stack)                 \
   _(prim, unchecked_unwrap_optional) \
@@ -316,12 +334,20 @@ namespace c10 {
   _(aten, swapdims_)                 \
   _(aten, movedim)                   \
   _(aten, moveaxis)                  \
+  _(aten, polygamma)                 \
+  _(aten, special_polygamma)         \
   _(aten, lgamma)                    \
   _(aten, special_gammaln)           \
+  _(aten, logsumexp)                 \
+  _(aten, special_logsumexp)         \
+  _(aten, digamma)                   \
+  _(aten, special_psi)               \
+  _(aten, special_digamma)           \
   _(aten, erf)                       \
   _(aten, special_erf)               \
   _(aten, erfc)                      \
   _(aten, special_erfc)              \
+  _(aten, special_erfcx)             \
   _(aten, erfinv)                    \
   _(aten, special_erfinv)            \
   _(aten, logit)                     \
@@ -332,11 +358,39 @@ namespace c10 {
   _(aten, special_expm1)             \
   _(aten, exp2)                      \
   _(aten, special_exp2)              \
+  _(aten, log1p)                     \
+  _(aten, special_log1p)             \
+  _(aten, round)                     \
+  _(aten, special_round)             \
+  _(aten, sinc)                      \
+  _(aten, special_sinc)              \
+  _(aten, i0)                        \
+  _(aten, special_i0)                \
   _(aten, special_i0e)               \
+  _(aten, special_i1)                \
+  _(aten, special_i1e)               \
+  _(aten, xlogy)                     \
+  _(aten, special_xlogy)             \
+  _(aten, special_xlog1py)           \
+  _(aten, log_softmax)               \
+  _(aten, special_log_softmax)       \
+  _(aten, special_zeta)              \
+  _(aten, igamma)                    \
+  _(aten, igamma_)                   \
+  _(aten, special_gammainc)          \
+  _(aten, igammac)                   \
+  _(aten, igammac_)                  \
+  _(aten, special_gammaincc)         \
+  _(aten, mvlgamma)                  \
+  _(aten, special_multigammaln)      \
+  _(aten, softmax)                   \
+  _(aten, special_softmax)           \
   _(aten, has_torch_function)        \
   _(aten, hardswish)                 \
   _(aten, hardswish_)                \
   _(aten, hardsigmoid_)              \
+  _(aten, hardtanh_)                 \
+  _(aten, dequantize)                \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
   _(onnx, Concat)                    \
@@ -347,12 +401,14 @@ namespace c10 {
   _(onnx, Gather)                    \
   _(onnx, Gemm)                      \
   _(onnx, LSTM)                      \
+  _(onnx, MatMul)                    \
   _(onnx, Mul)                       \
   _(onnx, Pow)                       \
   _(onnx, RNN)                       \
   _(onnx, Shape)                     \
   _(onnx, Size)                      \
   _(onnx, Slice)                     \
+  _(onnx, Softmax)                   \
   _(onnx, Squeeze)                   \
   _(onnx, Sub)                       \
   _(onnx, Transpose)                 \
@@ -388,7 +444,9 @@ namespace c10 {
   _(onnx, ReduceL2)                  \
   _(onnx, Conv)                      \
   _(onnx, BatchNormalization)        \
+  _(onnx, ReduceMean)                \
   _(onnx, ReduceProd)                \
+  _(onnx, Relu)                      \
   _(onnx, Neg)                       \
   _(onnx, NonZero)                   \
   _(onnx, Range)                     \
@@ -431,7 +489,8 @@ namespace c10 {
   _(attr, keepdims)                  \
   _(attr, cache_id)                  \
   _(attr, new_axis)                  \
-  _(attr, warn_id)
+  _(attr, warn_id)                   \
+  _(attr, allowzero)
 
 // 'prim' symbols are synthetic operators that occur only in the IR
 // and don't have corresponding implementations in ATen.

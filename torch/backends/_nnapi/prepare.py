@@ -1,7 +1,8 @@
 from typing import Optional, List
 
 import torch
-from torch.backends._nnapi.serializer import serialize_model
+from torch.backends._nnapi.serializer import _NnapiSerializer
+
 
 class NnapiModule(torch.nn.Module):
     """Torch Module that wraps an NNAPI Compilation.
@@ -11,7 +12,8 @@ class NnapiModule(torch.nn.Module):
     of all inputs and outputs.
     """
 
-    comp: Optional[torch.classes._nnapi.Compilation]
+    # _nnapi.Compilation is defined
+    comp: Optional[torch.classes._nnapi.Compilation]  # type: ignore[name-defined]
     weights: List[torch.Tensor]
     out_templates: List[torch.Tensor]
 
@@ -35,7 +37,7 @@ class NnapiModule(torch.nn.Module):
     @torch.jit.export
     def init(self, args: List[torch.Tensor]):
         assert self.comp is None
-        self.out_templates = self.shape_compute_module.prepare(self.ser_model, args)
+        self.out_templates = self.shape_compute_module.prepare(self.ser_model, args)  # type: ignore[operator]
         self.weights = [w.contiguous() for w in self.weights]
         comp = torch.classes._nnapi.Compilation()
         comp.init(self.ser_model, self.weights)
@@ -74,32 +76,9 @@ class NnapiModule(torch.nn.Module):
                 raise Exception("Invalid mem_fmt")
         return outs
 
-
-def convert_model_to_nnapi(model, inputs):
-    model = torch.jit.freeze(model)
-
-    if isinstance(inputs, torch.Tensor):
-        inputs = [inputs]
-
-    ser_model, used_weights, inp_mem_fmts, out_mem_fmts, shape_compute_lines, retval_count = serialize_model(model, inputs)
-    ser_model_tensor = torch.tensor(ser_model, dtype=torch.int32)
-
-    # We have to create a new class here every time this function is called
-    # because module.define adds a method to the *class*, not the instance.
-    class ShapeComputeModule(torch.nn.Module):
-        """Code-gen-ed module for tensor shape computation
-
-        module.prepare will mutate ser_model according to the computed operand
-        shapes, based on the shapes of args.  Returns a list of output templates.
-        """
-        pass
-    shape_compute_module = torch.jit.script(ShapeComputeModule())
-    real_shape_compute_lines = [
-        "def prepare(self, ser_model: torch.Tensor, args: List[torch.Tensor]) -> List[torch.Tensor]:\n",
-    ] + [
-        f"    {line}\n" for line in shape_compute_lines
-    ]
-    shape_compute_module.define("".join(real_shape_compute_lines))
+def convert_model_to_nnapi(model, inputs, serializer=None):
+    (shape_compute_module, ser_model_tensor, used_weights, inp_mem_fmts, out_mem_fmts,
+     retval_count) = process_for_nnapi(model, inputs, serializer)
 
     nnapi_model = NnapiModule(
         shape_compute_module,
@@ -134,3 +113,40 @@ def convert_model_to_nnapi(model, inputs):
         f"    return {ret_expr}\n"
     )
     return wrapper_model
+
+def process_for_nnapi(model, inputs, serializer=None):
+    model = torch.jit.freeze(model)
+
+    if isinstance(inputs, torch.Tensor):
+        inputs = [inputs]
+
+    serializer = serializer or _NnapiSerializer(config=None)
+    (ser_model, used_weights, inp_mem_fmts, out_mem_fmts, shape_compute_lines,
+     retval_count) = serializer.serialize_model(model, inputs)
+    ser_model_tensor = torch.tensor(ser_model, dtype=torch.int32)
+
+    # We have to create a new class here every time this function is called
+    # because module.define adds a method to the *class*, not the instance.
+    class ShapeComputeModule(torch.nn.Module):
+        """Code-gen-ed module for tensor shape computation
+
+        module.prepare will mutate ser_model according to the computed operand
+        shapes, based on the shapes of args.  Returns a list of output templates.
+        """
+        pass
+    shape_compute_module = torch.jit.script(ShapeComputeModule())
+    real_shape_compute_lines = [
+        "def prepare(self, ser_model: torch.Tensor, args: List[torch.Tensor]) -> List[torch.Tensor]:\n",
+    ] + [
+        f"    {line}\n" for line in shape_compute_lines
+    ]
+    shape_compute_module.define("".join(real_shape_compute_lines))
+
+    return (
+        shape_compute_module,
+        ser_model_tensor,
+        used_weights,
+        inp_mem_fmts,
+        out_mem_fmts,
+        retval_count,
+    )

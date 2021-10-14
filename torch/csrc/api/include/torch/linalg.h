@@ -44,19 +44,19 @@ inline Tensor& eigvals_out(Tensor& result, const Tensor& self) {
   return torch::linalg_eigvals_out(result, self);
 }
 
-inline std::tuple<Tensor, Tensor> eigh(const Tensor& self, std::string uplo) {
+inline std::tuple<Tensor, Tensor> eigh(const Tensor& self, c10::string_view uplo) {
   return torch::linalg_eigh(self, uplo);
 }
 
-inline std::tuple<Tensor&, Tensor&> eigh_out(Tensor& eigvals, Tensor& eigvecs, const Tensor& self, std::string uplo) {
+inline std::tuple<Tensor&, Tensor&> eigh_out(Tensor& eigvals, Tensor& eigvecs, const Tensor& self, c10::string_view uplo) {
   return torch::linalg_eigh_out(eigvals, eigvecs, self, uplo);
 }
 
-inline Tensor eigvalsh(const Tensor& self, std::string uplo) {
+inline Tensor eigvalsh(const Tensor& self, c10::string_view uplo) {
   return torch::linalg_eigvalsh(self, uplo);
 }
 
-inline Tensor& eigvalsh_out(Tensor& result, const Tensor& self, std::string uplo) {
+inline Tensor& eigvalsh_out(Tensor& result, const Tensor& self, c10::string_view uplo) {
   return torch::linalg_eigvalsh_out(result, self, uplo);
 }
 
@@ -68,7 +68,7 @@ inline Tensor& householder_product_out(Tensor& result, const Tensor& input, cons
   return torch::linalg_householder_product_out(result, input, tau);
 }
 
-inline std::tuple<Tensor, Tensor, Tensor, Tensor> lstsq(const Tensor& self, const Tensor& b, c10::optional<double> cond, c10::optional<std::string> driver) {
+inline std::tuple<Tensor, Tensor, Tensor, Tensor> lstsq(const Tensor& self, const Tensor& b, c10::optional<double> cond, c10::optional<c10::string_view> driver) {
   return torch::linalg_lstsq(self, b, cond, driver);
 }
 
@@ -76,7 +76,7 @@ inline Tensor norm(const Tensor& self, const optional<Scalar>& opt_ord, optional
   return torch::linalg_norm(self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
 
-inline Tensor norm(const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+inline Tensor norm(const Tensor& self, c10::string_view ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return torch::linalg_norm(self, ord, opt_dim, keepdim, opt_dtype);
 }
 
@@ -84,16 +84,32 @@ inline Tensor& norm_out(Tensor& result, const Tensor& self, const optional<Scala
   return torch::linalg_norm_out(result, self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
 
-inline Tensor& norm_out(Tensor& result, const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+inline Tensor& norm_out(Tensor& result, const Tensor& self, c10::string_view ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return torch::linalg_norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
 }
 
-inline Tensor vector_norm(const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  return torch::linalg_vector_norm(self, opt_ord, opt_dim, keepdim, opt_dtype);
+inline Tensor vector_norm(const Tensor& self, Scalar ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  return torch::linalg_vector_norm(self, ord, opt_dim, keepdim, opt_dtype);
 }
 
-inline Tensor& vector_norm_out(Tensor& result, const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  return torch::linalg_vector_norm_out(result, self, opt_ord, opt_dim, keepdim, opt_dtype);
+inline Tensor& vector_norm_out(Tensor& result, const Tensor& self, Scalar ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  return torch::linalg_vector_norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
+}
+
+inline Tensor matrix_norm(const Tensor& self, const Scalar& ord, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
+  return torch::linalg_matrix_norm(self, ord, dim, keepdim, dtype);
+}
+
+inline Tensor& matrix_norm_out(const Tensor& self, const Scalar& ord, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype, Tensor& result) {
+  return torch::linalg_matrix_norm_out(result, self, ord, dim, keepdim, dtype);
+}
+
+inline Tensor matrix_norm(const Tensor& self, std::string ord, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
+  return torch::linalg_matrix_norm(self, ord, dim, keepdim, dtype);
+}
+
+inline Tensor& matrix_norm_out(const Tensor& self, std::string ord, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype, Tensor& result) {
+  return torch::linalg_matrix_norm_out(result, self, ord, dim, keepdim, dtype);
 }
 
 inline Tensor matrix_power(const Tensor& self, int64_t n) {
@@ -128,12 +144,36 @@ inline Tensor& pinv_out(Tensor& result, const Tensor& input, double rcond, bool 
   return torch::linalg_pinv_out(result, input, rcond, hermitian);
 }
 
+inline std::tuple<Tensor, Tensor> qr(const Tensor& input, c10::string_view mode) {
+  return torch::linalg_qr(input, mode);
+}
+
+inline std::tuple<Tensor&, Tensor&> qr_out(Tensor& Q, Tensor& R, const Tensor& input, c10::string_view mode) {
+  return torch::linalg_qr_out(Q, R, input, mode);
+}
+
 inline Tensor solve(const Tensor& input, const Tensor& other) {
   return torch::linalg_solve(input, other);
 }
 
 inline Tensor& solve_out(Tensor& result, const Tensor& input, const Tensor& other) {
   return torch::linalg_solve_out(result, input, other);
+}
+
+inline std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& input, bool full_matrices) {
+  return torch::linalg_svd(input, full_matrices);
+}
+
+inline std::tuple<Tensor&, Tensor&, Tensor&> svd_out(Tensor& U, Tensor& S, Tensor& Vh, const Tensor& input, bool full_matrices) {
+  return torch::linalg_svd_out(U, S, Vh, input, full_matrices);
+}
+
+inline Tensor svdvals(const Tensor& input) {
+  return torch::linalg_svdvals(input);
+}
+
+inline Tensor& svdvals_out(Tensor& result, const Tensor& input) {
+  return torch::linalg_svdvals_out(result, input);
 }
 
 inline Tensor tensorinv(const Tensor& self, int64_t ind) {
@@ -182,8 +222,13 @@ inline Tensor cholesky_out(Tensor& result, const Tensor& self) {
   return detail::cholesky_out(result, self);
 }
 
-/// See the documentation of torch.linalg.det
+// C10_DEPRECATED_MESSAGE("linalg_det is deprecated, use det instead.")
 inline Tensor linalg_det(const Tensor& self) {
+  return detail::det(self);
+}
+
+/// See the documentation of torch.linalg.det
+inline Tensor det(const Tensor& self) {
   return detail::det(self);
 }
 
@@ -223,22 +268,22 @@ inline Tensor& eigvals_out(Tensor& result, const Tensor& self) {
 /// Computes eigenvalues and eigenvectors
 ///
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.eigh
-inline std::tuple<Tensor, Tensor> eigh(const Tensor& self, std::string uplo) {
+inline std::tuple<Tensor, Tensor> eigh(const Tensor& self, c10::string_view uplo) {
   return detail::eigh(self, uplo);
 }
 
-inline std::tuple<Tensor&, Tensor&> eigh_out(Tensor& eigvals, Tensor& eigvecs, const Tensor& self, std::string uplo) {
+inline std::tuple<Tensor&, Tensor&> eigh_out(Tensor& eigvals, Tensor& eigvecs, const Tensor& self, c10::string_view uplo) {
   return detail::eigh_out(eigvals, eigvecs, self, uplo);
 }
 
 /// Computes eigenvalues
 ///
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.eigvalsh
-inline Tensor eigvalsh(const Tensor& self, std::string uplo) {
+inline Tensor eigvalsh(const Tensor& self, c10::string_view uplo) {
   return detail::eigvalsh(self, uplo);
 }
 
-inline Tensor& eigvalsh_out(Tensor& result, const Tensor& self, std::string uplo) {
+inline Tensor& eigvalsh_out(Tensor& result, const Tensor& self, c10::string_view uplo) {
   return detail::eigvalsh_out(result, self, uplo);
 }
 
@@ -253,33 +298,79 @@ inline Tensor& householder_product_out(Tensor& result, const Tensor& input, cons
   return detail::householder_product_out(result, input, tau);
 }
 
-inline std::tuple<Tensor, Tensor, Tensor, Tensor> lstsq(const Tensor& self, const Tensor& b, c10::optional<double> cond, c10::optional<std::string> driver) {
+inline std::tuple<Tensor, Tensor, Tensor, Tensor> lstsq(const Tensor& self, const Tensor& b, c10::optional<double> cond, c10::optional<c10::string_view> driver) {
   return detail::lstsq(self, b, cond, driver);
 }
 
+// C10_DEPRECATED_MESSAGE("linalg_norm is deprecated, use norm instead.")
 inline Tensor linalg_norm(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm(self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
 
-inline Tensor linalg_norm(const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+// C10_DEPRECATED_MESSAGE("linalg_norm is deprecated, use norm instead.")
+inline Tensor linalg_norm(const Tensor& self, c10::string_view ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm(self, ord, opt_dim, keepdim, opt_dtype);
 }
 
+// C10_DEPRECATED_MESSAGE("linalg_norm_out is deprecated, use norm_out instead.")
 inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm_out(result, self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
 
-inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+// C10_DEPRECATED_MESSAGE("linalg_norm_out is deprecated, use norm_out instead.")
+inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, c10::string_view ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
+}
+
+inline Tensor norm(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  return detail::norm(self, opt_ord, opt_dim, keepdim, opt_dtype);
+}
+
+inline Tensor norm(const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  return detail::norm(self, ord, opt_dim, keepdim, opt_dtype);
+}
+
+inline Tensor& norm_out(Tensor& result, const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  return detail::norm_out(result, self, opt_ord, opt_dim, keepdim, opt_dtype);
+}
+
+inline Tensor& norm_out(Tensor& result, const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  return detail::norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
+}
+
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.vector_norm
+inline Tensor vector_norm(const Tensor& self, Scalar ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  return detail::vector_norm(self, ord, opt_dim, keepdim, opt_dtype);
+}
+
+inline Tensor& vector_norm_out(Tensor& result, const Tensor& self, Scalar ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  return detail::vector_norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
+}
+
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.matrix_norm
+inline Tensor matrix_norm(const Tensor& self, const Scalar& ord, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
+  return detail::matrix_norm(self, ord, dim, keepdim, dtype);
+}
+
+inline Tensor& matrix_norm_out(const Tensor& self, const Scalar& ord, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype, Tensor& result) {
+  return detail::matrix_norm_out(self, ord, dim, keepdim, dtype, result);
+}
+
+inline Tensor matrix_norm(const Tensor& self, std::string ord, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
+  return detail::matrix_norm(self, ord, dim, keepdim, dtype);
+}
+
+inline Tensor& matrix_norm_out(const Tensor& self, std::string ord, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype, Tensor& result) {
+  return detail::matrix_norm_out(self, ord, dim, keepdim, dtype, result);
 }
 
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.matrix_power
 inline Tensor matrix_power(const Tensor& self, int64_t n) {
-  return torch::linalg_matrix_power(self, n);
+  return detail::matrix_power(self, n);
 }
 
 inline Tensor& matrix_power_out(const Tensor& self, int64_t n, Tensor& result) {
-  return torch::linalg_matrix_power_out(result, self, n);
+  return detail::matrix_power_out(self, n, result);
 }
 
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.matrix_rank
@@ -293,11 +384,11 @@ inline Tensor& matrix_rank_out(Tensor& result, const Tensor input, optional<doub
 
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.multi_dot
 inline Tensor multi_dot(TensorList tensors) {
-  return torch::linalg_multi_dot(tensors);
+  return detail::multi_dot(tensors);
 }
 
 inline Tensor& multi_dot_out(TensorList tensors, Tensor& result) {
-  return torch::linalg_multi_dot_out(result, tensors);
+  return detail::multi_dot_out(tensors, result);
 }
 
 /// Computes pseudo-inverse
@@ -311,6 +402,19 @@ inline Tensor& pinv_out(Tensor& result, const Tensor& input, double rcond=1e-15,
   return detail::pinv_out(result, input, rcond, hermitian);
 }
 
+/// Computes the QR decomposition
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.qr
+inline std::tuple<Tensor, Tensor> qr(const Tensor& input, c10::string_view mode="reduced") {
+  // C++17 Change the initialisation to "reduced"sv
+  //       Same for qr_out
+  return detail::qr(input, mode);
+}
+
+inline std::tuple<Tensor&, Tensor&> qr_out(Tensor& Q, Tensor& R, const Tensor& input, c10::string_view mode="reduced") {
+  return detail::qr_out(Q, R, input, mode);
+}
+
 /// Computes a tensor `x` such that `matmul(input, x) = other`.
 ///
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.solve
@@ -320,6 +424,28 @@ inline Tensor solve(const Tensor& input, const Tensor& other) {
 
 inline Tensor& solve_out(Tensor& result, const Tensor& input, const Tensor& other) {
   return detail::solve_out(result, input, other);
+}
+
+/// Computes the singular values and singular vectors
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.svd
+inline std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& input, bool full_matrices) {
+  return detail::svd(input, full_matrices);
+}
+
+inline std::tuple<Tensor&, Tensor&, Tensor&> svd_out(Tensor& U, Tensor& S, Tensor& Vh, const Tensor& input, bool full_matrices) {
+  return detail::svd_out(U, S, Vh, input, full_matrices);
+}
+
+/// Computes the singular values
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.svdvals
+inline Tensor svdvals(const Tensor& input) {
+  return detail::svdvals(input);
+}
+
+inline Tensor& svdvals_out(Tensor& result, const Tensor& input) {
+  return detail::svdvals_out(result, input);
 }
 
 /// Computes the inverse of a tensor

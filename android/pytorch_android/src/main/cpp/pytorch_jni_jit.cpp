@@ -26,42 +26,14 @@ namespace pytorch_jni {
 namespace {
 
 struct JITCallGuard {
-  // AutoGrad is disabled for mobile by default.
-  torch::autograd::AutoGradMode no_autograd_guard{false};
-  // VariableType dispatch is not included in default mobile build. We need set
-  // this guard globally to avoid dispatch error (only for dynamic dispatch).
-  // Thanks to the unification of Variable class and Tensor class it's no longer
-  // required to toggle the NonVariableTypeMode per op - so it doesn't hurt to
-  // always set NonVariableTypeMode for inference only use case.
-  torch::AutoNonVariableTypeMode non_var_guard{true};
+  // Inference only workload.
+  c10::InferenceMode guard;
   // Disable graph optimizer to ensure list of unused ops are not changed for
   // custom mobile build.
   torch::jit::GraphOptimizerEnabledGuard no_optimizer_guard{false};
 };
 
 } // namespace
-
-class MemoryReadAdapter final : public caffe2::serialize::ReadAdapterInterface {
- public:
-  explicit MemoryReadAdapter(const void* data, off_t size)
-      : data_(data), size_(size){};
-
-  size_t size() const override {
-    return size_;
-  }
-
-  size_t read(uint64_t pos, void* buf, size_t n, const char* what = "")
-      const override {
-    memcpy(buf, (int8_t*)(data_) + pos, n);
-    return n;
-  }
-
-  ~MemoryReadAdapter() {}
-
- private:
-  const void* data_;
-  off_t size_;
-};
 
 class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
  private:
@@ -149,7 +121,7 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     }
     deviceType_ = deviceJniCodeToDeviceType(device);
     module_ = torch::jit::load(
-        std::move(modelPath->toStdString()), deviceType_, extra_files);
+        std::move(modelPath->toStdString()), c10::nullopt, extra_files);
     if (has_extra) {
       static auto putMethod =
           facebook::jni::JMap<facebook::jni::JString, facebook::jni::JString>::

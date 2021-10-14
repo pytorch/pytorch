@@ -127,10 +127,12 @@ def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
 # OrderedDict(), if you pass a None you'll run afoul #12219.
 
 
+# TODO: Once we decide to break serialization FC, `storage` no longer needs to
+# be a TypedStorage
 def _rebuild_tensor(storage, storage_offset, size, stride):
     # first construct a tensor with the correct dtype/device
-    t = torch.tensor([], dtype=storage.dtype, device=storage.device)
-    return t.set_(storage, storage_offset, size, stride)
+    t = torch.tensor([], dtype=storage.dtype, device=storage._untyped().device)
+    return t.set_(storage._untyped(), storage_offset, size, stride)
 
 
 def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad, backward_hooks):
@@ -173,18 +175,23 @@ def _rebuild_sparse_tensor(layout, data):
     raise NotImplementedError("rebuilding sparse tensor for layout %s" % (layout))
 
 
-def _rebuild_xla_tensor(data, dtype, device, requires_grad):
+def _rebuild_device_tensor_from_numpy(data, dtype, device, requires_grad):
     tensor = torch.from_numpy(data).to(dtype=dtype, device=device)
     tensor.requires_grad = requires_grad
     return tensor
 
 
-def _rebuild_mlc_tensor(data, dtype, device, requires_grad):
-    tensor = torch.from_numpy(data).to(dtype=dtype, device=device)
-    tensor.requires_grad = requires_grad
-    return tensor
+# Should not be used, only here to be able to load Tensors serialized with older versions of pytorch
+_rebuild_xla_tensor = _rebuild_device_tensor_from_numpy
+_rebuild_mlc_tensor = _rebuild_device_tensor_from_numpy
 
 
+def _rebuild_meta_tensor_no_storage(dtype, size, stride, requires_grad):
+    return torch.empty_strided(size, stride, dtype=dtype, device='meta', requires_grad=requires_grad)
+
+
+# TODO: Once we decide to break serialization FC, `storage` no longer needs to
+# be a TypedStorage
 def _rebuild_qtensor(storage, storage_offset, size, stride, quantizer_params, requires_grad, backward_hooks):
     qscheme = quantizer_params[0]
     if qscheme == torch.per_tensor_affine:
@@ -259,10 +266,7 @@ def _flatten_dense_tensors(tensors):
     Returns:
         A contiguous 1D buffer containing input tensors.
     """
-    if len(tensors) == 1:
-        return tensors[0].contiguous().view(-1)
-    flat = torch.cat([t.contiguous().view(-1) for t in tensors], dim=0)
-    return flat
+    return torch._C._nn.flatten_dense_tensors(tensors)
 
 
 def _flatten_sparse_tensors(tensors):
@@ -276,8 +280,8 @@ def _flatten_sparse_tensors(tensors):
         A tuple of two contiguous 1D buffers, one containing input tensors'
         indices and the other containing the values.
     """
-    flat_indices = _flatten_dense_tensors([torch.Tensor._indices(t) for t in tensors])
-    flat_values = _flatten_dense_tensors([torch.Tensor._values(t) for t in tensors])
+    flat_indices = torch._C._nn.flatten_dense_tensors([torch.Tensor._indices(t) for t in tensors])
+    flat_values = torch._C._nn.flatten_dense_tensors([torch.Tensor._values(t) for t in tensors])
     return flat_indices, flat_values
 
 
@@ -294,13 +298,7 @@ def _unflatten_dense_tensors(flat, tensors):
         Unflattened dense tensors with sizes same as tensors and values from
         flat.
     """
-    outputs = []
-    offset = 0
-    for tensor in tensors:
-        numel = tensor.numel()
-        outputs.append(flat.narrow(0, offset, numel).view_as(tensor))
-        offset += numel
-    return tuple(outputs)
+    return torch._C._nn.unflatten_dense_tensors(flat, tensors)
 
 
 def _unflatten_sparse_tensors(flat, tensors):
@@ -319,8 +317,8 @@ def _unflatten_sparse_tensors(flat, tensors):
         flat.
     """
     flat_indices, flat_values = flat
-    indices = _unflatten_dense_tensors(flat_indices, [torch.Tensor._indices(t) for t in tensors])
-    values = _unflatten_dense_tensors(flat_values, [torch.Tensor._values(t) for t in tensors])
+    indices = torch._C._nn.unflatten_dense_tensors(flat_indices, [torch.Tensor._indices(t) for t in tensors])
+    values = torch._C._nn.unflatten_dense_tensors(flat_values, [torch.Tensor._values(t) for t in tensors])
     outputs = []
     for t, i, v in zip(tensors, indices, values):
         outputs.append(t.new(i, v, t.size()))
@@ -431,7 +429,13 @@ class ExceptionWrapper(object):
             # Some exceptions have first argument as non-str but explicitly
             # have message field
             raise self.exc_type(message=msg)
-        raise self.exc_type(msg)
+        try:
+            exception = self.exc_type(msg)
+        except TypeError:
+            # If the exception takes multiple arguments, don't try to
+            # instantiate since we don't know how to
+            raise RuntimeError(msg) from None
+        raise exception
 
 
 def _get_available_device_type():
@@ -522,3 +526,34 @@ def _handle_complex(tensor):
     """
     return torch.view_as_real(tensor) if not isinstance(tensor,
                                                         torch.nn.UninitializedParameter) and tensor.is_complex() else tensor
+
+def _element_size(dtype):
+    """
+    Returns the element size for a dtype, in bytes
+    """
+    if not isinstance(dtype, torch.dtype):
+        raise RuntimeError(f'expected torch.dtype, but got {type(dtype)}')
+
+    if dtype.is_complex:
+        return torch.finfo(dtype).bits >> 2
+    elif dtype.is_floating_point:
+        return torch.finfo(dtype).bits >> 3
+    elif dtype == torch.bool:
+        # NOTE: torch.bool is not supported in torch.iinfo()
+        return 1
+    else:
+        return torch.iinfo(dtype).bits >> 3
+
+class _ClassPropertyDescriptor:
+    def __init__(self, fget, fset=None):
+        self.fget = fget
+
+    def __get__(self, instance, owner=None):
+        if owner is None:
+            owner = type(instance)
+        return self.fget.__get__(instance, owner)()
+
+def classproperty(func):
+    if not isinstance(func, (classmethod, staticmethod)):
+        func = classmethod(func)
+    return _ClassPropertyDescriptor(func)

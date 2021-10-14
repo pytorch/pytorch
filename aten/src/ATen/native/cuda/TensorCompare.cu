@@ -1,18 +1,13 @@
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_NO_OPERATORS
+#include <ATen/NumericUtils.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
+#include <ATen/native/TensorCompare.h>
 #include <ATen/native/cuda/Loops.cuh>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <c10/core/Scalar.h>
 
 
 namespace at { namespace native {
-
-using where_fn = void (*)(TensorIterator &, ScalarType);
-DECLARE_DISPATCH(where_fn, where_kernel);
-
-using is_infinity_op_fn = void (*)(TensorIterator &);
-DECLARE_DISPATCH(is_infinity_op_fn, isposinf_stub);
-DECLARE_DISPATCH(is_infinity_op_fn, isneginf_stub);
 
 namespace {
 
@@ -34,7 +29,7 @@ void where_kernel_impl(TensorIterator &iter, ScalarType condition_type) {
   });
 }
 
-void isposinf_kernel_impl(TensorIterator &iter) {
+void isposinf_kernel_impl(TensorIteratorBase &iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(), "isposinf_cuda", [&]() {
     gpu_kernel(
       iter,
@@ -43,12 +38,94 @@ void isposinf_kernel_impl(TensorIterator &iter) {
   });
 }
 
-void isneginf_kernel_impl(TensorIterator &iter) {
+void isneginf_kernel_impl(TensorIteratorBase &iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(), "isneginf_cuda", [&]() {
     gpu_kernel(
       iter,
       [] GPU_LAMBDA (scalar_t a) -> bool { return a == -std::numeric_limits<scalar_t>::infinity(); }
     );
+  });
+}
+
+void clamp_kernel_impl(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "clamp_cuda", [&] {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t v, scalar_t lower, scalar_t upper) -> scalar_t {
+      // Propagate nan, which doesn't propagate automatically for ROCm
+      if (at::_isnan(v)) {
+        return v;
+      } else {
+        return ::min(::max(v, lower), upper);
+      }
+    });
+  });
+}
+
+void clamp_scalar_kernel_impl(TensorIteratorBase& iter, const Scalar& min, const Scalar& max) {
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "clamp_scalar_cuda", [&] {
+    const auto lower = min.to<scalar_t>();
+    const auto upper = max.to<scalar_t>();
+    gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {
+      // Propagate nan, which doesn't propagate automatically for ROCm
+      if (at::_isnan(v)) {
+        return v;
+      } else {
+        return ::min(::max(v, lower), upper);
+      }
+    });
+  });
+}
+
+void clamp_min_kernel_impl(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "clamp_min_cuda", [&] {
+    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t v, scalar_t lower) -> scalar_t {
+      // Propagate nan, which doesn't propagate automatically for ROCm
+      if (_isnan(v)) {
+        return v;
+      } else {
+        return ::max(v, lower);
+      }
+    });
+  });
+}
+
+void clamp_min_scalar_kernel_impl(TensorIterator& iter, Scalar min) {
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "clamp_min_scalar_cuda", [&] {
+    auto lower = min.to<scalar_t>();
+    gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {
+      // Propagate nan, which doesn't propagate automatically for ROCm
+      if (_isnan(v)) {
+        return v;
+      } else {
+        return ::max(v, lower);
+      }
+    });
+  });
+}
+
+void clamp_max_kernel_impl(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "clamp_max_cuda", [&] {
+    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t v, scalar_t upper) -> scalar_t {
+      // Propagate nan, which doesn't propagate automatically for ROCm
+      if (_isnan(v)) {
+        return v;
+      } else {
+        return ::min(v, upper);
+      }
+    });
+  });
+}
+
+void clamp_max_scalar_kernel_impl(TensorIterator& iter, Scalar max) {
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "clamp_max_scalar_cuda", [&] {
+    const auto upper = max.to<scalar_t>();
+    gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {
+      // Propagate nan, which doesn't propagate automatically for ROCm
+      if (_isnan(v)) {
+        return v;
+      } else {
+        return ::min(v, upper);
+      }
+    });
   });
 }
 
@@ -58,6 +135,12 @@ void isneginf_kernel_impl(TensorIterator &iter) {
 REGISTER_DISPATCH(where_kernel, &where_kernel_impl);
 REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_impl);
 REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_impl);
+REGISTER_DISPATCH(clamp_stub, &clamp_kernel_impl);
+REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel_impl);
+REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel_impl);
+REGISTER_DISPATCH(clamp_scalar_stub, &clamp_scalar_kernel_impl);
+REGISTER_DISPATCH(clamp_min_scalar_stub, &clamp_min_scalar_kernel_impl);
+REGISTER_DISPATCH(clamp_max_scalar_stub, &clamp_max_scalar_kernel_impl);
 
 template <typename scalar_t>
 __global__ void _assert_async_cuda_kernel(scalar_t* input) {
@@ -71,7 +154,8 @@ __global__ void _assert_async_cuda_kernel(c10::complex<double>* input) {
   CUDA_KERNEL_ASSERT(input[0] != c10::complex<double>(0, 0));
 }
 
-void _assert_async_cuda(const Tensor& self) {
+void _assert_async_cuda(const Tensor& self_tensor) {
+  const TensorBase &self = get_tensor_base(self_tensor);
   auto n = self.numel();
   TORCH_CHECK(n != 0, "Boolean value of Tensor with no values is ambiguous");
   TORCH_CHECK(n < 2, "Boolean value of Tensor with more than one value is ambiguous");

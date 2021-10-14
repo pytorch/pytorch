@@ -44,6 +44,7 @@ void spatial_dilated_max_pooling(
     T* oData) { // output arrays (data and max-index)
   at::parallel_for(0, iC, 0, [&](int64_t start, int64_t end) {
     for (auto p = start; p < end; ++p) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t row, col;
       const T* i_p = iData + p * iW * iH;
       for (row = 0; row < oH; ++row) {
@@ -63,6 +64,7 @@ void spatial_dilated_max_pooling(
           // local max
           auto max_val = std::numeric_limits<typename T::underlying>::lowest();
           int64_t tcntr = 0; // center point
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           int64_t x, y;
           for (y = h_start; y < h_end; y += dH) {
             for (x = w_start; x < w_end; x += dW) {

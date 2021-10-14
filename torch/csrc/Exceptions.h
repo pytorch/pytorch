@@ -126,7 +126,6 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
 
 #define END_HANDLE_TH_ERRORS END_HANDLE_TH_ERRORS_RET(nullptr)
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern PyObject *THPException_FatalError;
 
 // Throwing this exception means that the python error flags have been already
@@ -164,8 +163,7 @@ struct python_error : public std::exception {
     }
   }
 
-  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
-  virtual const char* what() const noexcept override {
+   const char* what() const noexcept override {
     return message.c_str();
   }
 
@@ -294,8 +292,7 @@ struct ValueError : public PyTorchError {
 
 // Translates to Python NotImplementedError
 struct NotImplementedError : public PyTorchError {
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  NotImplementedError() {}
+  NotImplementedError() = default;
   PyObject* python_type() override {
     return PyExc_NotImplementedError;
   }
@@ -325,15 +322,26 @@ struct WarningMeta {
 };
 
 // ATen warning handler for Python
-struct PyWarningHandler: at::WarningHandler {
-public:
-/// See NOTE [ Conversion Cpp Python Warning ] for noexcept justification
-  TORCH_API PyWarningHandler() noexcept(true);
-  TORCH_API ~PyWarningHandler() noexcept(false) override;
+struct PyWarningHandler {
+  // Move actual handler into a separate class with a noexcept
+  // destructor. Otherwise, we need to force all WarningHandler
+  // subclasses to have a noexcept(false) destructor.
+  struct InternalHandler: at::WarningHandler {
+    ~InternalHandler() override = default;
+    void process(const at::SourceLocation &source_location,
+                 const std::string &msg,
+                 const bool verbatim) override;
 
-  void process(const at::SourceLocation &source_location,
-               const std::string &msg,
-               const bool verbatim) override;
+    std::vector<WarningMeta> warning_buffer_;
+  };
+
+
+public:
+  /// See NOTE [ Conversion Cpp Python Warning ] for noexcept justification
+  TORCH_API PyWarningHandler() noexcept(true);
+  // NOLINTNEXTLINE(bugprone-exception-escape)
+  TORCH_API ~PyWarningHandler() noexcept(false);
+
 
   /** Call if an exception has been thrown
 
@@ -346,10 +354,7 @@ public:
   }
 
 private:
-  using warning_buffer_t = std::vector<WarningMeta>;
-
-  warning_buffer_t warning_buffer_;
-
+  InternalHandler internal_handler_;
   at::WarningHandler* prev_handler_;
   bool in_exception_;
 };

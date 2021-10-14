@@ -80,6 +80,7 @@ void generic_wrapper_fallback(const c10::OperatorHandle& op, torch::jit::Stack* 
   }
 }
 
+#ifndef ATEN_CPU_STATIC_DISPATCH
 TEST(BackendFallbackTest, TestBackendFallbackWithMode) {
   auto m = MAKE_TORCH_LIBRARY_IMPL(_, TESTING_ONLY_GenericMode);
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&generic_mode_fallback>());
@@ -119,5 +120,6 @@ TEST(BackendFallbackTest, TestFallthroughBackendFallback) {
   Tensor b = mul(a, a);
   ASSERT_EQ(override_call_count, 1);
 }
+#endif // ATEN_CPU_STATIC_DISPATCH
 
 }

@@ -206,6 +206,7 @@ const auto& tscores = Input(0);
           cur_scores, utils::AsEArrXt(cur_keep), &cur_out_scores);
       utils::GetSubArrayRows(
           cur_boxes, utils::AsEArrXt(cur_keep), &cur_out_boxes);
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int k = 0; k < cur_keep.size(); k++) {
         cur_out_classes[k] =
             static_cast<float>(j - !output_classes_include_bg_cls_);

@@ -1,6 +1,5 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
@@ -30,7 +29,7 @@ template <
     typename IndexType,
     int ADims,
     int VEC>
-#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(256, 4)
 #endif
 __global__ void fused_dropout_kernel_vec(
@@ -119,7 +118,7 @@ template <
     typename IndexType,
     int ADims,
     int BDims = ADims>
-#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(256, 4)
 #endif
 __global__ void fused_dropout_kernel(
@@ -175,7 +174,7 @@ __global__ void fused_dropout_kernel(
 }
 
 template<typename scalar_t, typename accscalar_t>
-void masked_scale_kernel(at::Tensor& ret, const at::Tensor src, const at::Tensor mask, accscalar_t scale){
+void masked_scale_kernel(at::Tensor& ret, const at::Tensor& src, const at::Tensor& mask, accscalar_t scale){
    auto iter = at::TensorIteratorConfig()
      .check_all_same_dtype(false)
      .add_output(ret)

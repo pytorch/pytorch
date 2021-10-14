@@ -146,6 +146,7 @@ TEST(VulkanTest, addScalar) {
   float* data = t_in.data_ptr<float>();
   auto numel = t_in.numel();
   for (int i = 0; i < numel; i++) {
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     data[i] = i;
   }
 
@@ -419,7 +420,7 @@ class Conv2d : public BaseOp {
 
 class OpsList {
  public:
-  OpsList() {}
+  OpsList() = default;
   OpsList(std::vector<std::unique_ptr<BaseOp>>& _ops) : ops(std::move(_ops)) {}
 
   auto runDual(at::Tensor& in, at::Tensor& vin) {
@@ -772,6 +773,7 @@ TEST(VulkanTest, tensor5d_transpose) {
   float* data = t_in.data_ptr<float>();
   auto numel = t_in.numel();
   for (int i = 0; i < numel; i++) {
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     data[i] = i;
   }
 
@@ -815,6 +817,7 @@ TEST(VulkanTest, slice) {
   float* data = t_in.data_ptr<float>();
   auto numel = t_in.numel();
   for (int i = 0; i < numel; i++) {
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     data[i] = i;
   }
 
@@ -839,6 +842,7 @@ TEST(VulkanTest, select) {
   float* data = t_in.data_ptr<float>();
   auto numel = t_in.numel();
   for (int i = 0; i < numel; i++) {
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     data[i] = i;
   }
 
@@ -863,6 +867,7 @@ TEST(VulkanTest, unsqueeze) {
   float* data = t_in.data_ptr<float>();
   auto numel = t_in.numel();
   for (int i = 0; i < numel; i++) {
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     data[i] = i;
   }
 

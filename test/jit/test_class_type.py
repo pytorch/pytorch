@@ -22,6 +22,40 @@ if __name__ == '__main__':
                        "instead.")
 
 class TestClassType(JitTestCase):
+    def test_reference_semantics(self):
+        """
+        Test that modifications made to a class instance in TorchScript
+        are visible in eager.
+        """
+        class Foo(object):
+            def __init__(self, a: int):
+                self.a = a
+
+            def set_a(self, value: int):
+                self.a = value
+
+            def get_a(self) -> int:
+                return self.a
+
+            @property
+            def attr(self):
+                return self.a
+
+        make_global(Foo)  # see [local resolution in python]
+
+        def test_fn(obj: Foo):
+            obj.set_a(2)
+
+        scripted_fn = torch.jit.script(test_fn)
+        obj = torch.jit.script(Foo(1))
+        self.assertEqual(obj.get_a(), 1)
+        self.assertEqual(obj.attr, 1)
+
+        scripted_fn(obj)
+
+        self.assertEqual(obj.get_a(), 2)
+        self.assertEqual(obj.attr, 2)
+
     def test_get_with_method(self):
         class FooTest(object):
             def __init__(self, x):
@@ -90,7 +124,7 @@ class TestClassType(JitTestCase):
                     self.foo = 10  # should error since int != Tensor
 
     def test_get_attr_not_initialized(self):
-        with self.assertRaisesRegexWithHighlight(RuntimeError, "Tried to access nonexistent attribute", "self.asdf"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "object has no attribute or method", "self.asdf"):
             @torch.jit.script
             class FooTest(object):
                 def __init__(self, x):
@@ -466,7 +500,7 @@ class TestClassType(JitTestCase):
             else:
                 return B.f(x.t)
 
-        with self.assertRaisesRegexWithHighlight(RuntimeError, "Tried to access nonexistent attribute or method", ""):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "object has no attribute or method", ""):
             sc = torch.jit.script(fun)
 
     @unittest.skipIf(IS_SANDCASTLE, "Importing like this doesn't work in fbcode")
@@ -700,10 +734,10 @@ class TestClassType(JitTestCase):
             def __mod__(self, other: int) -> int:
                 return self.x % other
 
-            def __ne__(self, other: int) -> bool:  # noqa T484
+            def __ne__(self, other: int) -> bool:
                 return self.x != other
 
-            def __eq__(self, other: int) -> bool:  # noqa T484
+            def __eq__(self, other: int) -> bool:
                 return self.x == other
 
             def __lt__(self, other: int) -> bool:
@@ -783,7 +817,7 @@ class TestClassType(JitTestCase):
         for func in ops:
             self.checkScript(func, ())
 
-        with self.assertRaisesRegexWithHighlight(RuntimeError, "nonexistent attribute", ""):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "object has no attribute or method", ""):
             @torch.jit.script
             def test():
                 return Foo(torch.tensor(1)) + Foo(torch.tensor(1))
@@ -1470,3 +1504,37 @@ class TestClassType(JitTestCase):
                 return x + x
 
         self.checkModule(ShouldCompile(UnscriptableClass(4)), (4,))
+
+
+    def test_unresolved_class_attributes(self):
+        class UnresolvedAttrClass(object):
+            def __init__(self):
+                pass
+
+            (attr_a, attr_b), [attr_c, attr_d] = ("", ""), ["", ""]
+            attr_e: int = 0
+
+        def fn_a():
+            u = UnresolvedAttrClass()
+            return u.attr_a
+
+        def fn_b():
+            u = UnresolvedAttrClass()
+            return u.attr_b
+
+        def fn_c():
+            u = UnresolvedAttrClass()
+            return u.attr_c
+
+        def fn_d():
+            u = UnresolvedAttrClass()
+            return u.attr_d
+
+        def fn_e():
+            u = UnresolvedAttrClass()
+            return u.attr_e
+
+        error_message_regex = "object has no attribute or method.*is defined as a class attribute"
+        for fn in (fn_a, fn_b, fn_c, fn_d, fn_e):
+            with self.assertRaisesRegex(RuntimeError, error_message_regex):
+                torch.jit.script(fn)

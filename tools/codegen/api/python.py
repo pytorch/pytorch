@@ -590,7 +590,7 @@ def argument_type_str(t: Type, *, simple_type: bool = False) -> str:
         elif t.name == BaseTy.float:
             return 'double'
         elif t.name == BaseTy.str:
-            return 'std::string'
+            return 'c10::string_view'
         elif t.name in [BaseTy.bool, BaseTy.QScheme, BaseTy.Scalar,
                         BaseTy.ScalarType, BaseTy.Generator, BaseTy.Storage,
                         BaseTy.Layout, BaseTy.Device, BaseTy.MemoryFormat,
@@ -613,7 +613,7 @@ def argument_type_str(t: Type, *, simple_type: bool = False) -> str:
         size = t.size if not simple_type else None
         if str(t.elem) == 'bool':
             assert t.size is not None
-            return f'std::array<bool,{t.size}>'
+            return f'::std::array<bool,{t.size}>'
         elif str(t.elem) == 'int':
             return f'IntArrayRef[{size}]' if size is not None else 'IntArrayRef'
         elif str(t.elem) == 'Tensor':
@@ -798,7 +798,7 @@ def argument_type_str_pyi(t: Type) -> str:
         elif t.name == BaseTy.Dimname:
             ret = 'Union[str, ellipsis, None]'
         elif t.name in [BaseTy.Tensor, BaseTy.Generator,
-                        BaseTy.Storage, BaseTy.Stream, BaseTy.str]:
+                        BaseTy.Storage, BaseTy.Stream]:
             # These python schema type names line up with their function schema names
             ret = t.name.name
 
@@ -814,7 +814,7 @@ def argument_type_str_pyi(t: Type) -> str:
             ret = 'Union[Tensor, Tuple[Tensor, ...], List[Tensor]]' if t.size is not None else \
                   'Union[Tuple[Tensor, ...], List[Tensor]]'
         elif str(t.elem) == 'float':
-            ret = 'Sequence[float]'
+            ret = 'Sequence[_float]'
         else:
             elem = argument_type_str_pyi(t.elem)
             ret = f'Sequence[{elem}]'
@@ -910,16 +910,16 @@ def dispatch_lambda_args(ps: PythonSignature, f: NativeFunction) -> Tuple[Dispat
 # to add an appropriate wrap() overload in torch/csrc/autograd/utils/wrap_outputs.h.
 SUPPORTED_RETURN_TYPES = {
     'at::Tensor',
-    'std::tuple<at::Tensor,at::Tensor>',
-    'std::tuple<at::Tensor,at::Tensor,at::Tensor>',
-    'std::tuple<at::Tensor,at::Tensor,at::Tensor,at::Tensor>',
-    'std::tuple<at::Tensor,at::Tensor,at::Tensor,at::Tensor,at::Tensor>',
-    'std::tuple<at::Tensor,at::Tensor,at::Tensor,int64_t>',
-    'std::tuple<at::Tensor,at::Tensor,double,int64_t>',
-    'std::tuple<at::Tensor,at::Tensor,at::Tensor,at::Tensor,int64_t>',
-    'std::tuple<at::Tensor,at::Tensor,double,at::Tensor,int64_t>',
-    'std::tuple<double,int64_t>',
-    'std::vector<at::Tensor>',
+    '::std::tuple<at::Tensor,at::Tensor>',
+    '::std::tuple<at::Tensor,at::Tensor,at::Tensor>',
+    '::std::tuple<at::Tensor,at::Tensor,at::Tensor,at::Tensor>',
+    '::std::tuple<at::Tensor,at::Tensor,at::Tensor,at::Tensor,at::Tensor>',
+    '::std::tuple<at::Tensor,at::Tensor,at::Tensor,int64_t>',
+    '::std::tuple<at::Tensor,at::Tensor,double,int64_t>',
+    '::std::tuple<at::Tensor,at::Tensor,at::Tensor,at::Tensor,int64_t>',
+    '::std::tuple<at::Tensor,at::Tensor,double,at::Tensor,int64_t>',
+    '::std::tuple<double,int64_t>',
+    '::std::vector<at::Tensor>',
     'at::Scalar', 'bool', 'int64_t', 'void*', 'void',
     'at::QScheme', 'double',
     'at::IntArrayRef',
@@ -1016,7 +1016,7 @@ def arg_parser_unpack_method(t: Type, has_default: bool) -> str:
         elif t.name == BaseTy.float:
             return 'toDouble'
         elif t.name == BaseTy.str:
-            return 'string'
+            return 'stringView'
 
     elif isinstance(t, OptionalType):
         if str(t.elem) == 'Tensor':
@@ -1034,6 +1034,8 @@ def arg_parser_unpack_method(t: Type, has_default: bool) -> str:
                 return 'generator'
             elif t.elem.name == BaseTy.Layout:
                 return 'layoutWithDefault' if has_default else 'layoutOptional'
+            elif t.elem.name == BaseTy.Device:
+                return 'deviceWithDefault' if has_default else 'deviceOptional'
 
         elif isinstance(t.elem, ListType):
             if str(t.elem.elem) == 'int':

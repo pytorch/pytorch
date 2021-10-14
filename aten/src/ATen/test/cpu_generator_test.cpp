@@ -22,6 +22,7 @@ TEST(CPUGeneratorImpl, TestDefaultGenerator) {
   // Check if default generator is created only once
   // address of generator should be same in all calls
   auto foo = at::detail::getDefaultCPUGenerator();
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   auto bar = at::detail::getDefaultCPUGenerator();
   ASSERT_EQ(foo, bar);
 }
@@ -33,16 +34,20 @@ TEST(CPUGeneratorImpl, TestCloning) {
   // generator states into default generators.
   auto gen1 = at::detail::createCPUGenerator();
   auto cpu_gen1 = check_generator<CPUGeneratorImpl>(gen1);
+  // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
   cpu_gen1->random(); // advance gen1 state
+  // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
   cpu_gen1->random();
   auto gen2 = at::detail::createCPUGenerator();
   gen2 = gen1.clone();
   auto cpu_gen2 = check_generator<CPUGeneratorImpl>(gen2);
+  // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
   ASSERT_EQ(cpu_gen1->random(), cpu_gen2->random());
 }
 
 void thread_func_get_engine_op(CPUGeneratorImpl* generator) {
   std::lock_guard<std::mutex> lock(generator->mutex_);
+  // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
   generator->random();
 }
 
@@ -67,9 +72,13 @@ TEST(CPUGeneratorImpl, TestMultithreadingGetEngineOperator) {
   t2.join();
   std::lock_guard<std::mutex> lock(gen2.mutex());
   auto cpu_gen2 = check_generator<CPUGeneratorImpl>(gen2);
+  // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
   cpu_gen2->random();
+  // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
   cpu_gen2->random();
+  // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
   cpu_gen2->random();
+  // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
   ASSERT_EQ(cpu_gen1->random(), cpu_gen2->random());
 }
 

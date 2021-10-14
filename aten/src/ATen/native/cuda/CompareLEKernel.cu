@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/DispatchStub.h>
@@ -17,7 +18,7 @@ struct CompareLEFunctor {
   }
 };
 
-void le_kernel_cuda(TensorIterator& iter) {
+void le_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBFloat16, kBool, iter.common_dtype(), "le_cuda", [&]() {
     gpu_kernel_with_scalars(iter, CompareLEFunctor<scalar_t>());
   });

@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 #include <torch/library.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/vec.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/quantized/Quantizer.h>
@@ -28,7 +28,6 @@ inline void check_inputs(const Tensor& qa, const Tensor& qb) {
   TORCH_CHECK(
       qa.qscheme() == qb.qscheme(),
       "Both inputs to Add must have the same quantization shceme.");
-  TORCH_CHECK(qa.numel() == qb.numel(), "Add operands must be the same size!");
   TORCH_CHECK(
       qa.scalar_type() == qb.scalar_type(),
       "Add operands should have same data type.");
@@ -77,6 +76,7 @@ Tensor _add_scalar_out(Tensor& out, const Tensor& self, const Scalar& other) {
     double s = self.q_scale();
     int64_t z = self.q_zero_point();
     double c = other.toDouble();
+    // NOLINTNEXTLINE(bugprone-signed-char-misuse)
     int64_t q_min = std::numeric_limits<underlying_t>::min();
     int64_t q_max = std::numeric_limits<underlying_t>::max();
 
@@ -157,10 +157,12 @@ Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
 
   size_t num_elems = qa_contig.numel() / qa_contig.size(0);
   auto output_min = ReLUFused
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       ? activationLimits(scale, zero_point, Activation::RELU)
             .first
       : std::numeric_limits<uint8_t>::min();
   auto output_max = ReLUFused
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       ? activationLimits(scale, zero_point, Activation::RELU)
             .second
       : std::numeric_limits<uint8_t>::max();
@@ -171,6 +173,7 @@ Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
       b_zero_point /* b zero_point */,
       b_scale /* b scale */,
       static_cast<uint8_t>(zero_point) /* sum zero_point */,
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       scale /* sum scale */,
       output_min /* output min */,
       output_max /* output max */,

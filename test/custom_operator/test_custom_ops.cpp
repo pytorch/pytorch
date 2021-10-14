@@ -30,7 +30,7 @@ Result get_operator_from_registry_and_execute(const char* op_name, Args&&... arg
 
   torch::jit::Stack stack;
   torch::jit::push(stack, std::forward<Args>(args)...);
-  op->getOperation()(&stack);
+  op->getOperation()(stack);
 
   TORCH_INTERNAL_ASSERT(1 == stack.size());
   return torch::jit::pop(stack).to<Result>();
@@ -81,7 +81,7 @@ void get_autograd_operator_from_registry_and_execute() {
 }
 
 void get_autograd_operator_from_registry_and_execute_in_nograd_mode() {
-  at::AutoNonVariableTypeMode _var_guard(true);
+  at::AutoDispatchBelowAutograd guard;
 
   torch::Tensor x = torch::randn({5,5}, torch::requires_grad());
   torch::Tensor y = torch::randn({5,5}, torch::requires_grad());

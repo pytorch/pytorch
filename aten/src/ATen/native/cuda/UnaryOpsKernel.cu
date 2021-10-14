@@ -1,19 +1,18 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/UnaryOps.h>
 
 #include <limits>
 
 #include <ATen/AccumulateType.h>
-#include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/Math.h>
-#include <ATen/native/TensorFactories.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/Math.cuh>
 #include <ATen/NumericUtils.h>
 #include <c10/cuda/CUDAMathCompat.h>
-#include <ATen/NumericUtils.h>
+#include <c10/core/Scalar.h>
 #include <c10/util/complex.h>
 
 namespace at {
@@ -42,11 +41,14 @@ void exp_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 void expm1_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "expm1_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return ::expm1(a);
-    });
-  });
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::BFloat16, ScalarType::Half,
+      iter.common_dtype(), "expm1_cuda",
+      [&]() {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+          return ::expm1(a);
+        });
+      });
 }
 
 // We manually overload rsqrt because std::rsqrt does not work with complex types.
@@ -63,12 +65,15 @@ __host__ __device__ static inline c10::complex<T> rsqrt_wrapper(c10::complex<T> 
 }
 
 void rsqrt_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.common_dtype(), "rsqrt_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      // In CUDA, ::rsqrt is overloaded for float and at::Half here is implicitly cast to float.
-      return rsqrt_wrapper(a);
-    });
-  });
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+      ScalarType::BFloat16, ScalarType::Half,
+      iter.common_dtype(), "rsqrt_cuda",
+      [&]() {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+          // In CUDA, ::rsqrt is overloaded for float and at::Half here is implicitly cast to float.
+          return rsqrt_wrapper(a);
+        });
+      });
 }
 
 void sqrt_kernel_cuda(TensorIteratorBase& iter) {
@@ -127,7 +132,7 @@ void nan_to_num_kernel_cuda(
     c10::optional<double> nan,
     c10::optional<double> pos_inf,
     c10::optional<double> neg_inf) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "nan_to_num_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "nan_to_num_cuda", [&]() {
     scalar_t nan_replacement = static_cast<scalar_t>(nan.value_or(0.));
     scalar_t pos_inf_replacement = pos_inf.has_value()
         ? static_cast<scalar_t>(pos_inf.value())
@@ -149,7 +154,7 @@ void nan_to_num_kernel_cuda(
 }
 
 void frexp_kernel_cuda(TensorIteratorBase& iter) {
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
   // Reference: https://rocmdocs.amd.com/en/latest/ROCm_API_References/HIP-MATH.html
   //            https://github.com/ROCm-Developer-Tools/HIP/issues/2169
   // ROCm does not support frexp function yet
@@ -174,9 +179,6 @@ REGISTER_DISPATCH(exp_stub, &exp_kernel_cuda);
 REGISTER_DISPATCH(expm1_stub, &expm1_kernel_cuda);
 REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel_cuda);
 REGISTER_DISPATCH(sqrt_stub, &sqrt_kernel_cuda);
-REGISTER_DISPATCH(clamp_stub, &clamp_kernel_cuda);
-REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel_cuda);
-REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel_cuda);
 REGISTER_DISPATCH(nan_to_num_stub, &nan_to_num_kernel_cuda);
 REGISTER_DISPATCH(frexp_stub, &frexp_kernel_cuda);
 

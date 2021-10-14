@@ -30,9 +30,14 @@ TORCH_META_FUNC(fractional_max_pool2d) (
   int64_t poolSizeW = pool_size[1];
 
   int64_t ndims = input.ndimension();
-  TORCH_CHECK(input.numel() > 0 && (ndims == 3 || ndims == 4),
-    "non-empty 3D or 4D (batch mode) tensor expected for input, but got: ",
-    ndims);
+  TORCH_CHECK(ndims == 3 || ndims == 4,
+              "fractional_max_pool2d(): Expected 3D or 4D tensor, but got: ", input.sizes());
+  for (int64_t i = 1; i < ndims; ++i) {
+    TORCH_CHECK(input.size(i) > 0,
+                "fractional_max_pool2d(): Expected input to have non-zero size for non-batch dimensions, but got",
+                input.sizes(), " with dimension ", i, " being empty.");
+  }
+
 
   if (ndims == 4) {
     numBatch = input.size(0);
@@ -112,6 +117,7 @@ static void fractional_max_pool2d_out_single_batch_frame(
           randomSamplesForPlane[1], inputH, outputH, poolSizeH);
 
       /* loop over output */
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int h, w;
 
       scalar_t* inputForPlane = input + plane * inputW * inputH;
@@ -253,6 +259,7 @@ static void fractional_max_pool2d_backward_out_single_batch_frame(
       scalar_t* gradOutputForPlane = gradOutput + plane * outputW * outputH;
       int64_t* indicesForPlane = indices + plane * outputW * outputH;
 
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int h, w;
       for (h = 0; h < outputH; ++h) {
         for (w = 0; w < outputW; ++w) {

@@ -92,6 +92,7 @@ struct conv_param_t {
       assert("Failed to initialize QNNPACK conv_param_t struct.");
     }
 
+    // NOLINTNEXTLINE(clang-analyzer-core.DivideZero)
     if (input_channels % groups != 0 || output_channels % groups != 0) {
       pytorch_qnnp_log_error(
           "failed to create %s: input and output channels must be divisible by"
@@ -238,7 +239,14 @@ struct conv_param_t {
   /**
    * @brief Computes the output dimensions given a 2D input.
    */
-  std::array<size_t, 2> compute_output_dims(std::array<size_t, 2> input_dims) const {
+  static std::array<size_t, 2> compute_output_dims(
+      std::array<size_t, 2> input_dims,
+      std::array<size_t, 4> padding,
+      std::array<size_t, 2> adjustment_dims,
+      std::array<size_t, 2> kernel_dims,
+      std::array<size_t, 2> dilation,
+      std::array<size_t, 2> stride_dims,
+      bool transpose) {
     std::array<size_t, 2> output_dims;
     output_dims[0] = compute_output_dimension(input_dims[0],  // width
                                               padding[1] + padding[3],

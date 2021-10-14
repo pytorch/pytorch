@@ -195,6 +195,7 @@ static Tensor _mkldnn_pooling(
   if (stride.empty()) stride = kernel_size;
   auto stride_vec = expand_param_if_needed(stride, "stride", dims);
   auto padding_vec = expand_param_if_needed(padding, "padding", dims);
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   auto padding_vec_l = padding_vec;
   auto padding_vec_r = padding_vec;
   auto dilation_vec = expand_param_if_needed(dilation, "dilation", dims);
@@ -285,6 +286,7 @@ static Tensor _mkldnn_pooling_backward(
   auto kernel_size_vec = expand_param_if_needed(kernel_size, "kernel_size", dims);
   auto stride_vec = expand_param_if_needed(stride, "stride", dims);
   auto padding_vec = expand_param_if_needed(padding, "padding", dims);
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   auto padding_vec_l = padding_vec;
   auto padding_vec_r = padding_vec;
   auto dilation_vec = expand_param_if_needed(dilation, "dilation", dims);

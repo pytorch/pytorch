@@ -30,6 +30,9 @@ static void upsample_bilinear2d_out_frame(
   auto* odata = static_cast<scalar_t*>(output.data_ptr());
 
   channels = channels * nbatch;
+  if (channels == 0 || output_height == 0 || output_width == 0) {
+    return;
+  }
   auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(idata);
   auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(odata);
 
@@ -48,6 +51,7 @@ static void upsample_bilinear2d_out_frame(
 
   const auto rwidth =
       area_pixel_compute_scale<float>(input_width, output_width, align_corners, scales_w);
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   float output_scale = output.q_scale() / input.q_scale();
 
   for (int64_t h2 = 0; h2 < output_height; ++h2) {

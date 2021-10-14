@@ -82,7 +82,7 @@ template <typename T>
   "https://pytorch.org/tutorials/advanced/torch_script_custom_classes.html")]]
 Tensor create(std::unique_ptr<T> ptr, TensorOptions options) {
   // None of this should trace, so turn off Tracer dispatching
-  at::AutoNonVariableTypeMode guard;  // TODO: remove
+  at::AutoDispatchBelowADInplaceOrView guard;  // TODO: remove
   at::tracer::impl::NoTracerDispatchMode tracer_guard;
 
   // We store this instance away in a Tensor and register a deleter function

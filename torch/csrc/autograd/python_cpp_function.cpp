@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
 
 #include <torch/csrc/python_headers.h>
@@ -108,7 +109,7 @@ PyObject* THPCppFunction_next_functions(THPCppFunction* self, PyObject* hook)
   const auto num_next = self->cdata->num_outputs();
   THPObjectPtr py_functions(PyTuple_New(num_next));
   if (!py_functions) return nullptr;
-  for (size_t i = 0; i < num_next; ++i) {
+  for (const auto i : c10::irange(num_next)) {
     auto& c_tuple = self->cdata->next_edge(i);
     THPObjectPtr tuple(PyTuple_New(2));
     if (!tuple) return nullptr;
@@ -159,11 +160,13 @@ PyObject* THPCppFunction_name(PyObject* self, PyObject *noargs) {
   return THPUtils_packString(fn.name());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static struct PyMethodDef default_methods[] = {
   THP_FUNCTION_DEFAULT_METHODS,
   {nullptr}
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static struct PyGetSetDef default_properties[] = {
   THP_FUNCTION_DEFAULT_PROPERTIES,
   {nullptr}
@@ -218,6 +221,7 @@ PyObject* functionToPyObject(const std::shared_ptr<Node>& cdata)
   } else {
     auto& fn = *cdata;
     auto it = cpp_function_types.find(std::type_index(typeid(fn)));
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyTypeObject* type;
     if (it == cpp_function_types.end()) {
       type = &default_type.type;

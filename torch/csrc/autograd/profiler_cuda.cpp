@@ -1,5 +1,6 @@
 #include <torch/csrc/autograd/profiler.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/irange.h>
 #include <nvToolsExt.h>
 
 #include <sstream>
@@ -33,30 +34,39 @@ static inline void cudaCheck(cudaError_t result, const char * file, int line) {
 
 struct CUDAMethods : public CUDAStubs {
   void record(int* device, CUDAEventStub* event, int64_t* cpu_ns) const override {
-    TORCH_CUDA_CHECK(cudaGetDevice(device));
+    if (device) {
+      TORCH_CUDA_CHECK(cudaGetDevice(device));
+    }
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     CUevent_st* cuda_event_ptr;
     TORCH_CUDA_CHECK(cudaEventCreate(&cuda_event_ptr));
     *event = std::shared_ptr<CUevent_st>(cuda_event_ptr, [](CUevent_st* ptr) {
       TORCH_CUDA_CHECK(cudaEventDestroy(ptr));
     });
     auto stream = at::cuda::getCurrentCUDAStream();
-    *cpu_ns = getTime();
+    if (cpu_ns) {
+      *cpu_ns = getTime();
+    }
     TORCH_CUDA_CHECK(cudaEventRecord(cuda_event_ptr, stream));
   }
 
   float elapsed(const CUDAEventStub* event, const CUDAEventStub* event2) const override{
     TORCH_CUDA_CHECK(cudaEventSynchronize(event->get()));
     TORCH_CUDA_CHECK(cudaEventSynchronize(event2->get()));
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     float ms;
     TORCH_CUDA_CHECK(cudaEventElapsedTime(&ms, event->get(), event2->get()));
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions)
     return ms*1000.0;
   }
 
   void nvtxMarkA(const char* name) const override {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     ::nvtxMark(name);
   }
 
   void nvtxRangePushA(const char* name) const override {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     ::nvtxRangePushA(name);
   }
 
@@ -66,8 +76,9 @@ struct CUDAMethods : public CUDAStubs {
 
   void onEachDevice(std::function<void(int)> op) const override {
     at::cuda::OptionalCUDAGuard device_guard;
+    // NOLINTNEXTLINE(bugprone-signed-char-misuse)
     int count = at::cuda::device_count();
-    for(int i = 0; i < count; i++) {
+    for(const auto i : c10::irange(count)) {
       device_guard.set_index(i);
       op(i);
     }

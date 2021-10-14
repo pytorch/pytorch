@@ -1,4 +1,5 @@
 from tools.codegen.model import (Argument, FunctionSchema, NativeFunction,
+                                 BackendIndex,
                                  SelfArgument, TensorOptionsArguments, BaseTy)
 from dataclasses import dataclass
 from typing import Optional, Union, Sequence, TypeVar, List, Set, Dict
@@ -29,20 +30,35 @@ class BaseCppType:
 
 # The set of all non-templated, valid, fully-qualified names of C++ types that are used in the codegen.
 # Templated types get their own dataclass, mainly to make namespace parsing easier.
-intT = BaseCppType('', 'int64_t')
+byteT = BaseCppType('', 'uint8_t')
+charT = BaseCppType('', 'int8_t')
+shortT = BaseCppType('', 'int16_t')
+# It would be more symmetric for this to be called intT, but it easy to mix
+# this up with JIT int (which is int64_t in C++), so we intentionally don't
+# define intT to make it obvious when you've stuffed it up
+int32T = BaseCppType('', 'int32_t')
+longT = BaseCppType('', 'int64_t')
+halfT = BaseCppType('at', 'Half')
 doubleT = BaseCppType('', 'double')
+floatT = BaseCppType('', 'float')
+complexHalfT = BaseCppType('c10', 'complex<c10::Half>')  # stuffing template param here is an abuse
+complexFloatT = BaseCppType('c10', 'complex<float>')
+complexDoubleT = BaseCppType('c10', 'complex<double>')
 boolT = BaseCppType('', 'bool')
+bfloat16T = BaseCppType('at', 'BFloat16')
 voidT = BaseCppType('', 'void')
-stringT = BaseCppType('std', 'string')
+stringT = BaseCppType('c10', 'string_view')
 generatorT = BaseCppType('at', 'Generator')
 scalarTypeT = BaseCppType('at', 'ScalarType')
 tensorT = BaseCppType('at', 'Tensor')
+optionalTensorRefT = BaseCppType('at', 'OptionalTensorRef')
 tensorListT = BaseCppType('at', 'TensorList')
 dimnameT = BaseCppType('at', 'Dimname')
 dimnameListT = BaseCppType('at', 'DimnameList')
 layoutT = BaseCppType('at', 'Layout')
 deviceT = BaseCppType('at', 'Device')
 scalarT = BaseCppType('at', 'Scalar')
+optionalScalarRefT = BaseCppType('at', 'OptionalScalarRef')
 memoryFormatT = BaseCppType('at', 'MemoryFormat')
 qschemeT = BaseCppType('at', 'QScheme')
 storageT = BaseCppType('at', 'Storage')
@@ -53,7 +69,7 @@ typeAndSizeT = BaseCppType('torch::autograd::generated', 'TypeAndSize')
 tensorGeometryT = BaseCppType('at', 'TensorGeometry')
 
 BaseTypeToCppMapping: Dict[BaseTy, BaseCppType] = {
-    BaseTy.int: intT,
+    BaseTy.int: longT,
     BaseTy.float: doubleT,
     BaseTy.bool: boolT,
     BaseTy.str: stringT,
@@ -165,10 +181,10 @@ class VectorCType:
 
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         # Do not pass `strip_ref` recursively.
-        return f'std::vector<{self.elem.cpp_type()}>'
+        return f'::std::vector<{self.elem.cpp_type()}>'
 
     def cpp_type_registration_declarations(self) -> str:
-        return f'std::vector<{self.elem.cpp_type_registration_declarations()}>'
+        return f'::std::vector<{self.elem.cpp_type_registration_declarations()}>'
 
     def remove_const_ref(self) -> 'CType':
         return VectorCType(self.elem.remove_const_ref())
@@ -180,10 +196,10 @@ class ArrayCType:
 
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         # Do not pass `strip_ref` recursively.
-        return f'std::array<{self.elem.cpp_type()},{self.size}>'
+        return f'::std::array<{self.elem.cpp_type()},{self.size}>'
 
     def cpp_type_registration_declarations(self) -> str:
-        return f'std::array<{self.elem.cpp_type_registration_declarations()},{self.size}>'
+        return f'::std::array<{self.elem.cpp_type_registration_declarations()},{self.size}>'
 
     def remove_const_ref(self) -> 'CType':
         return ArrayCType(self.elem.remove_const_ref(), self.size)
@@ -194,10 +210,10 @@ class TupleCType:
 
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         # Do not pass `strip_ref` recursively.
-        return f'std::tuple<{",".join([e.cpp_type() for e in self.elems])}>'
+        return f'::std::tuple<{",".join([e.cpp_type() for e in self.elems])}>'
 
     def cpp_type_registration_declarations(self) -> str:
-        return f'std::tuple<{",".join([e.cpp_type_registration_declarations() for e in self.elems])}>'
+        return f'::std::tuple<{",".join([e.cpp_type_registration_declarations() for e in self.elems])}>'
 
     def remove_const_ref(self) -> 'CType':
         return TupleCType([e.remove_const_ref() for e in self.elems])
@@ -266,11 +282,16 @@ class Binding:
             argument=self.argument,
         )
 
-    def decl(self) -> str:
+    def decl(self, *, func_ptr_cast: bool = False) -> str:
         mb_default = ""
         if self.default is not None:
             mb_default = f"={self.default}"
-        return f"{self.type} {self.name}{mb_default}"
+
+        # casting only needs to know the type
+        if func_ptr_cast:
+            return f"{self.type}"
+        else:
+            return f"{self.type} {self.name}{mb_default}"
 
     # For BC reasons, we don't want to introduce at:: namespaces to RegistrationDeclarations.yaml
     # TODO: Kill this when we eventually remove it!
@@ -332,25 +353,36 @@ class CppSignature:
         return n
 
     # Render the C++ declaration for this signature
-    def decl(self, *, prefix: str = "", is_redispatching_fn: bool = False) -> str:
+    def decl(self, *, name: Optional[str] = None, prefix: str = "", is_redispatching_fn: bool = False) -> str:
         returns_type = cpp.returns_type(self.func.returns).cpp_type()
         cpp_args = [a.decl() for a in self.arguments()]
         if is_redispatching_fn:
             cpp_args = ['c10::DispatchKeySet dispatchKeySet'] + cpp_args
         cpp_args_str = ', '.join(cpp_args)
-        name = prefix + self.name()
+        if name is None:
+            name = prefix + self.name()
         return f"{returns_type} {name}({cpp_args_str})"
 
     # Render the C++ definition for this signature, not including
     # the body (with curly braces)
-    def defn(self, *, prefix: str = "", is_redispatching_fn: bool = False) -> str:
+    def defn(self, *, name: Optional[str] = None, prefix: str = "", is_redispatching_fn: bool = False) -> str:
         returns_type = cpp.returns_type(self.func.returns).cpp_type()
         cpp_args = [a.defn() for a in self.arguments()]
         if is_redispatching_fn:
             cpp_args = ['c10::DispatchKeySet dispatchKeySet'] + cpp_args
         cpp_args_str = ', '.join(cpp_args)
-        name = prefix + self.name()
+        if name is None:
+            name = prefix + self.name()
         return f"{returns_type} {name}({cpp_args_str})"
+
+    def ptr_type(self) -> str:
+        args_types_str = ', '.join(a.type for a in self.arguments())
+        return f'{cpp.returns_type(self.func.returns).cpp_type()} (*)({args_types_str})'
+
+    # Return the C++ function type, e.g., something like int(bool)
+    def type(self) -> str:
+        args_types_str = ', '.join(a.type for a in self.arguments())
+        return f'{cpp.returns_type(self.func.returns).cpp_type()} ({args_types_str})'
 
 
 # Represents group of all CppSignatures associated with a
@@ -401,14 +433,28 @@ class DispatcherSignature:
     # The schema this signature is derived from
     func: FunctionSchema
 
+    # Allows you to prepend an arbitrary prefix to the signature name.
+    # This is useful for parts of the codegen that generate wrappers around kernels,
+    # and need to avoid naming collisions.
+    prefix: str = ""
+
     def arguments(self) -> List[Binding]:
         return dispatcher.arguments(self.func)
 
     def name(self) -> str:
-        return dispatcher.name(self.func)
+        return self.prefix + dispatcher.name(self.func)
 
-    def defn(self, name: Optional[str] = None) -> str:
-        args_str = ', '.join(a.defn() for a in self.arguments())
+    def decl(self, name: Optional[str] = None) -> str:
+        args_str = ', '.join(a.decl() for a in self.arguments())
+        if name is None:
+            name = self.name()
+        return f"{self.returns_type().cpp_type()} {name}({args_str})"
+
+    def defn(self, name: Optional[str] = None, *, is_redispatching_fn: bool = False) -> str:
+        args = [a.defn() for a in self.arguments()]
+        if is_redispatching_fn:
+            args = ['c10::DispatchKeySet dispatchKeySet'] + args
+        args_str = ', '.join(args)
         if name is None:
             name = self.name()
         return f"{self.returns_type().cpp_type()} {name}({args_str})"
@@ -419,14 +465,18 @@ class DispatcherSignature:
     def returns_type(self) -> CType:
         return dispatcher.returns_type(self.func.returns)
 
+    def ptr_type(self) -> str:
+        dispatcher_args_types_str = ', '.join(a.type for a in self.arguments())
+        return f'{self.returns_type().cpp_type()} (*)({dispatcher_args_types_str})'
+
     # Return the C++ function type, e.g., something like int(bool)
     def type(self) -> str:
         dispatcher_args_types_str = ', '.join(a.type for a in self.arguments())
         return f'{self.returns_type().cpp_type()} ({dispatcher_args_types_str})'
 
     @staticmethod
-    def from_schema(func: FunctionSchema) -> 'DispatcherSignature':
-        return DispatcherSignature(func)
+    def from_schema(func: FunctionSchema, *, prefix: str = '') -> 'DispatcherSignature':
+        return DispatcherSignature(func, prefix)
 
 @dataclass(frozen=True)
 class NativeSignature:
@@ -437,6 +487,12 @@ class NativeSignature:
 
     def name(self) -> str:
         return self.prefix + native.name(self.func)
+
+    def decl(self, name: Optional[str] = None) -> str:
+        args_str = ', '.join(a.decl() for a in self.arguments())
+        if name is None:
+            name = self.name()
+        return f"{native.returns_type(self.func.returns).cpp_type()} {name}({args_str})"
 
     def defn(self, name: Optional[str] = None) -> str:
         args_str = ', '.join(a.defn() for a in self.arguments())
@@ -457,6 +513,25 @@ class NativeSignature:
 
     def dispatcher_exprs(self) -> List[Expr]:
         return translate.translate(self.arguments(), dispatcher.arguments(self.func), method=False)
+
+
+# Helper functions
+
+def kernel_signature(
+        f: NativeFunction, backend_index: BackendIndex, *, prefix: str = '') -> Union['NativeSignature', 'DispatcherSignature']:
+    # Note [External Backends Follow Dispatcher API]
+    # Kernel signatures for in-tree backends follow the "native" API,
+    # while kernels for out-of-tree backends follow the dispatcher API.
+    # See the comments in `native.py` for details, but historically there have been
+    # some small differences in schema convention between them and the Dispatcher API.
+    # Any differences that require translating between the two will results in a runtime cost,
+    # so we'd like to keep the differences as small as possible.
+    # With external backends, we'd like to enforce that they write their kernels with schemas
+    # that match the Dispatcher API directly, if they can.
+    if backend_index.external:
+        return DispatcherSignature.from_schema(f.func, prefix=prefix)
+    else:
+        return NativeSignature(f.func, prefix)
 
 # Functions only, no types
 from tools.codegen.api import cpp, dispatcher, native, translate

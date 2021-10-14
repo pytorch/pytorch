@@ -113,6 +113,7 @@ class TORCH_API Tracer {
 
 class TORCH_API TracerGuard {
  public:
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.UninitializedObject)
   TracerGuard() {}
 
   void init(Tracer* tracer);

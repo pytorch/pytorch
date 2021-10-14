@@ -122,7 +122,7 @@ class TestBuiltins(JitTestCase):
 
         py_out = del_list_multiple_operands([0, 1, 2])
         jit_out = torch.jit.script(del_list_multiple_operands)([0, 1, 2])
-        self.assertEquals(py_out, jit_out)
+        self.assertEqual(py_out, jit_out)
 
         def del_dict_multiple_operands(x: Dict[str, int]) -> Dict[str, int]:
             del x['hi'], x['there']
@@ -130,7 +130,7 @@ class TestBuiltins(JitTestCase):
 
         py_out = del_dict_multiple_operands({"hi": 5, "there": 6})
         jit_out = torch.jit.script(del_dict_multiple_operands)({"hi": 5, "there": 6})
-        self.assertEquals(py_out, jit_out)
+        self.assertEqual(py_out, jit_out)
 
 
 class TestTensorBuiltins(JitTestCase):
@@ -235,7 +235,7 @@ class TestTensorBuiltins(JitTestCase):
         def func():
             c = 1
             return c.add(1)
-        with self.assertRaisesRegex(RuntimeError, 'nonexistent attribute or method'):
+        with self.assertRaisesRegex(RuntimeError, 'object has no attribute or method'):
             torch.jit.script(func)
 
     # testing implicit conversion of tensors to scalars to match function arguments

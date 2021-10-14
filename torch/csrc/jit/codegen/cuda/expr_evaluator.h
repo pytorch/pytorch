@@ -3,7 +3,6 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
-#include <torch/csrc/jit/codegen/cuda/lower2device.h>
 
 #include <c10/util/Optional.h>
 
@@ -14,66 +13,34 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-class TORCH_CUDA_CU_API StatefulExpressionEvaluator : private OptOutDispatch {
+//! Calculate Fusion IR expressions
+class TORCH_CUDA_CU_API ExpressionEvaluator : private OptOutDispatch {
  public:
-  explicit StatefulExpressionEvaluator(Fusion* fusion) : fusion_(fusion) {}
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  explicit ExpressionEvaluator(Fusion* fusion) : fusion_(fusion) {}
 
+  //! Returns the associated fusion object
   Fusion* fusion() const {
     return fusion_;
   }
 
-  void safeBind(
-      Val* value,
-      Int::ScalarType concrete_value,
-      GpuLower* lower = nullptr);
+  //! Bind a concrete value to an IR variable
+  void bind(Val* value, Int::ScalarType concrete_value);
 
-  // Returns value if found in mapping, otherwise returns c10::nullopt
-  c10::optional<Int::ScalarType> getValue(Val* value);
+  //! Try to evaluate a Fusion IR value
+  c10::optional<Int::ScalarType> evaluate(Val* value);
 
-  // Checks if value is already infered, returns infered value if so, otherwise
-  // runs traversal on value. Warning: should not be called in traversal.
-  c10::optional<Int::ScalarType> inferValue(Val* value);
-
-  // Debugging helper, prints all the currently set values
+  //! Debugging helper, prints all the currently known values
   void print() const;
 
  private:
-  using OptOutDispatch::handle;
+  c10::optional<Int::ScalarType> getValue(Val* value);
 
-  void handle(Expr* expr) override {
-    switch (expr->getExprType().value()) {
-      case ExprType::UnaryOp:
-        handle(expr->as<UnaryOp>());
-        break;
-      case ExprType::BinaryOp:
-        handle(expr->as<BinaryOp>());
-        break;
-      case ExprType::KirUnaryOp:
-        handle(expr->as<kir::UnaryOp>());
-        break;
-      case ExprType::KirBinaryOp:
-        handle(expr->as<kir::BinaryOp>());
-        break;
-      default:
-        TORCH_INTERNAL_ASSERT(
-            false,
-            "Cannot handle Expr type: ",
-            expr->getExprType().value(),
-            " in stateful expression evaluator.");
-    }
-  }
-
-  void handle(UnaryOp*) override;
-  void handle(BinaryOp*) override;
-
-  // TODO(kir): remove this
-  void handle(kir::UnaryOp*) override;
-  void handle(kir::BinaryOp*) override;
-
-  c10::optional<Int::ScalarType> maybeHandle(Val*);
+  void handle(UnaryOp*) final;
+  void handle(BinaryOp*) final;
 
  private:
-  std::unordered_map<const Val*, Int::ScalarType> bindings_;
+  std::unordered_map<const Val*, Int::ScalarType> known_values_;
   Fusion* fusion_ = nullptr;
 };
 

@@ -58,6 +58,17 @@ struct SchemaParser {
             idx++, /*is_return=*/false, /*kwarg_only=*/kwarg_only));
       }
     });
+
+    // check if all arguments are not-default for vararg schemas
+    if (is_vararg) {
+      for (const auto& arg : arguments) {
+        if (arg.default_value().has_value()) {
+          throw ErrorReport(L.cur())
+              << "schemas with vararg (...) can't have default value args";
+        }
+      }
+    }
+
     idx = 0;
     L.expect(TK_ARROW);
     if (L.nextIf(TK_DOTS)) {
@@ -79,6 +90,7 @@ struct SchemaParser {
       returns.push_back(
           parseArgument(0, /*is_return=*/true, /*kwarg_only=*/false));
     }
+
     return make_right<OperatorName, FunctionSchema>(
         std::move(name.name),
         std::move(name.overload_name),
@@ -110,6 +122,13 @@ struct SchemaParser {
     return results;
   }
 
+  either<OperatorName, FunctionSchema> parseExactlyOneDeclaration() {
+    auto result = parseDeclaration();
+    L.nextIf(TK_NEWLINE);
+    L.expect(TK_EOF);
+    return result;
+  }
+
   Argument parseArgument(size_t idx, bool is_return, bool kwarg_only) {
     auto p = type_parser.parseType();
     auto type = std::move(p.first);
@@ -120,7 +139,7 @@ struct SchemaParser {
     std::string name;
     if (L.nextIf('[')) {
       // note: an array with a size hint can only occur at the Argument level
-      type = ListType::create(type);
+      type = ListType::create(std::move(type));
       N = c10::stoll(L.expect(TK_NUMBER).text());
       L.expect(']');
       auto container = type_parser.parseAliasAnnotation();
@@ -129,7 +148,7 @@ struct SchemaParser {
       }
       alias_info = std::move(container);
       if (L.nextIf('?')) {
-        type = OptionalType::create(type);
+        type = OptionalType::create(std::move(type));
       }
     }
     if (is_return) {
@@ -307,7 +326,7 @@ struct SchemaParser {
 
 C10_EXPORT either<OperatorName, FunctionSchema> parseSchemaOrName(
     const std::string& schemaOrName) {
-  return SchemaParser(schemaOrName).parseDeclarations().at(0);
+  return SchemaParser(schemaOrName).parseExactlyOneDeclaration();
 }
 
 C10_EXPORT FunctionSchema parseSchema(const std::string& schema) {
@@ -315,7 +334,7 @@ C10_EXPORT FunctionSchema parseSchema(const std::string& schema) {
   TORCH_CHECK(
       parsed.is_right(),
       "Tried to parse a function schema but only the operator name was given");
-  return parsed.right();
+  return std::move(parsed.right());
 }
 
 C10_EXPORT OperatorName parseName(const std::string& name) {
@@ -323,7 +342,7 @@ C10_EXPORT OperatorName parseName(const std::string& name) {
   TORCH_CHECK(
       parsed.is_left(),
       "Tried to parse an operator name but function schema was given");
-  return parsed.left();
+  return std::move(parsed.left());
 }
 
 } // namespace jit

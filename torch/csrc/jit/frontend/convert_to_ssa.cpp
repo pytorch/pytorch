@@ -93,10 +93,8 @@ struct ControlFlowLoadStores {
     for (const auto& x : mutated_variables) {
       auto true_type = true_vars->findInAnyFrame(x);
       auto false_type = false_vars->findInAnyFrame(x);
-      auto unified = unifyTypes(true_type, false_type);
-      if (!unified) {
-        continue;
-      }
+      auto unified =
+          unifyTypes(true_type, false_type, /*default_to_union=*/true);
 
       addBlockOutput(true_block, true_type, x);
       addBlockOutput(false_block, false_type, x);
@@ -261,6 +259,7 @@ struct LoopContinuations {
   void addLoopCarriedOutputs(Node* n) {
     auto g = n->owningGraph();
     WithInsertPoint insert(n);
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     auto continuation = curr_loop_->blocks().at(0)->return_node();
     for (auto out : continuation->inputs()) {
       auto load_node = out->node();
@@ -294,6 +293,7 @@ struct LoopContinuations {
           auto loop_continuation =
               graph_->create(prim::LoopContinuation, 0)->insertAfter(n);
           auto header_block = loop_continuation->addBlock();
+          // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
           auto pre_header = curr_loop_->blocks().at(1);
           header_block->cloneFrom(pre_header, [](Value* v) { return v; });
           InlineBlockBeforeNode(n, header_block);

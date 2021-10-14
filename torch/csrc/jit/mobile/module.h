@@ -1,5 +1,6 @@
 #pragma once
 #include <ATen/core/jit_type.h>
+#include <torch/csrc/jit/mobile/debug_info.h>
 #include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/mobile/method.h>
 
@@ -52,16 +53,10 @@ class CompilationUnit {
 class TORCH_API Module {
  public:
   Module(
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       c10::intrusive_ptr<c10::ivalue::Object> object,
       std::shared_ptr<CompilationUnit> cu)
-      : object_(object),
-        metadata_(std::unordered_map<std::string, std::string>()),
-        cu_(std::move(cu)) {}
-  Module(
-      c10::intrusive_ptr<c10::ivalue::Object> object,
-      std::unordered_map<std::string, std::string> metadata,
-      std::shared_ptr<CompilationUnit> cu)
-      : object_(object), metadata_(std::move(metadata)), cu_(std::move(cu)) {}
+      : object_(object), cu_(std::move(cu)) {}
   Module() = default;
   Method get_method(const std::string& method_name) const;
   template <typename... Types>
@@ -83,7 +78,9 @@ class TORCH_API Module {
   }
   const std::vector<at::Tensor> parameters() const;
   const std::map<std::string, at::Tensor> named_parameters() const;
-  std::string get_forward_method_debug_info(size_t pc) const;
+  std::string get_forward_method_debug_info(int64_t debug_handle) const;
+  std::string getModuleHierarchy(const int64_t debug_handle) const;
+  std::string getCallStack(const int64_t debug_handle) const;
   /// Enables "training" mode.
   void train(bool on = true);
   /// Calls train(false) to enable "eval" mode.
@@ -92,8 +89,12 @@ class TORCH_API Module {
   }
   /// True if the module is in training mode.
   bool is_training() const;
-  const std::unordered_map<std::string, std::string> metadata() const {
+  const std::unordered_map<std::string, std::string> getMetadata() const {
     return metadata_;
+  }
+  void setMetadata(
+      const std::unordered_map<std::string, std::string>& metadata) {
+    metadata_ = metadata;
   }
   const std::vector<Method> get_methods() const;
 
@@ -107,10 +108,27 @@ class TORCH_API Module {
     return or_else;
   }
 
+  void setDebugTable(MobileDebugTable&& debug_table) {
+    debug_table_ = std::move(debug_table);
+  }
+  const MobileDebugTable& getDebugTable() const {
+    return debug_table_;
+  }
+
+  void setHasDebugHandles(bool has_debug_handles) {
+    has_debug_handles_ = has_debug_handles;
+  }
+
+  bool hasDebugHandles() const {
+    return has_debug_handles_;
+  }
+
  private:
   c10::intrusive_ptr<c10::ivalue::Object> object_;
   std::unordered_map<std::string, std::string> metadata_;
   std::shared_ptr<CompilationUnit> cu_;
+  MobileDebugTable debug_table_;
+  bool has_debug_handles_;
 };
 } // namespace mobile
 } // namespace jit
