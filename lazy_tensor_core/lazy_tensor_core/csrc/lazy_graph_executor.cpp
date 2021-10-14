@@ -10,6 +10,115 @@
 namespace torch_lazy_tensors {
 namespace {
 
+// Locking:
+// We perform two kinds of operations of tensors, synchronous and asynchronous.
+// The ApplyPendingGraph() are synchronous, as we need the device data result
+// immediately. Before the synchronous operations can start, they need to wait
+// that the pending asynchronous operations have completed.
+// Synchronous operations do not hold device locks, since they are strictly
+// sequential, dictated by the PyTorch execution order.
+// The SyncTensorsGraph() is asynchronous, and returns immediately after having
+// scheduled the asynchronous operation. While executing, the asynchronous
+// operations will hold locks on all the participating devices (in most common
+// cases there will be only one device).
+// Since asynchronous operations capture device locks, only one asynchronous
+// operation can execute at the same time, on a given device. Tensor operations
+// which send data to device do not need to hold any device locks while doing
+// so. Only operations which _use_ device data (computations, and transfer from
+// server) need to wait for asynchronous operations to complete (barrier).
+
+class DeviceLocker {
+ public:
+  explicit DeviceLocker(Device device) : device_(std::move(device)) {}
+
+  const Device& device() const { return device_; }
+
+  void Lock() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    cv_.wait(lock, [this] { return !locked_; });
+    CheckResetException();
+    locked_ = true;
+  }
+
+  void Unlock(std::exception_ptr exptr) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    locked_ = false;
+    exptr_ = std::move(exptr);
+    cv_.notify_all();
+  }
+
+  void Barrier() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    cv_.wait(lock, [this] { return !locked_; });
+    cv_.notify_all();
+    CheckResetException();
+  }
+
+ private:
+  void CheckResetException() {
+    std::exception_ptr exptr = std::move(exptr_);
+    exptr_ = nullptr;
+    if (exptr != nullptr) {
+      std::rethrow_exception(exptr);
+    }
+  }
+
+  Device device_;
+  std::mutex mutex_;
+  std::condition_variable cv_;
+  bool locked_ = false;
+  std::exception_ptr exptr_;
+};
+
+class DeviceLockerArena {
+ public:
+  static DeviceLockerArena* Get() {
+    static DeviceLockerArena* arena = new DeviceLockerArena();
+    return arena;
+  }
+
+  std::shared_ptr<DeviceLocker> GetLocker(const Device& device) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = lockers_.find(device);
+    if (it == lockers_.end()) {
+      it = lockers_.emplace(device, std::make_shared<DeviceLocker>(device))
+               .first;
+    }
+    return it->second;
+  }
+
+  void DeviceBarrier(const Device& device) {
+    auto locker = DeviceLockerArena::Get()->GetLocker(device);
+    locker->Barrier();
+  }
+
+  // Use a set to impose an order on the device locking sequence (ABBA
+  // prevention).
+  std::vector<lazy_tensors::util::ExceptionCleanup> LockDevices(
+      const std::set<Device>& devices) {
+    std::vector<lazy_tensors::util::ExceptionCleanup> unlocker;
+    unlocker.reserve(devices.size());
+    for (auto& device : devices) {
+      unlocker.emplace_back(LockDevice(device));
+    }
+    return unlocker;
+  }
+
+ private:
+  lazy_tensors::util::ExceptionCleanup LockDevice(const Device& device) {
+    auto locker = DeviceLockerArena::Get()->GetLocker(device);
+    locker->Lock();
+    return lazy_tensors::util::ExceptionCleanup(
+        [locker = std::move(locker)](
+            lazy_tensors::util::ExceptionCleanup::StatusType status) {
+          locker->Unlock(std::move(status));
+        });
+  }
+
+  std::mutex mutex_;
+  std::map<Device, std::shared_ptr<DeviceLocker>> lockers_;
+};
+
 // The DeviceContextArena holds per device live information and statistics,
 // among which the lazy tensors which are currently alive in the system. This is
 // used to create computation "barriers" in order to flush pending operations
@@ -134,9 +243,11 @@ class DeviceContextArena {
     return it->second;
   }
 
-  ir::Value IrValueFromScalar(const at::Scalar& value, at::ScalarType scalar_type,
+  ir::Value IrValueFromScalar(const at::Scalar& value,
+                              at::ScalarType scalar_type,
                               const Device& device) {
-    at::Tensor tensor = at::scalar_tensor(value, at::TensorOptions(scalar_type));
+    at::Tensor tensor =
+        at::scalar_tensor(value, at::TensorOptions(scalar_type));
     lazy_tensors::ComputationClient::DataPtr device_data =
         TensorToDataHandle(tensor, device);
     return ir::MakeNode<ir::ops::DeviceData>(std::move(device_data));
@@ -180,6 +291,15 @@ std::vector<LazyTensor> LazyGraphExecutor::GetLiveTensors(
 
 void LazyGraphExecutor::MarkStep(const Device& device) {
   DeviceContextArena::Get()->MarkStep(device);
+}
+
+void LazyGraphExecutor::DeviceBarrier(const Device& device) {
+  DeviceLockerArena::Get()->DeviceBarrier(device);
+}
+
+std::vector<lazy_tensors::util::ExceptionCleanup>
+LazyGraphExecutor::LockDevices(const std::set<Device>& devices) {
+  return DeviceLockerArena::Get()->LockDevices(devices);
 }
 
 }  // namespace torch_lazy_tensors
