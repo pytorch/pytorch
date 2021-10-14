@@ -11,7 +11,7 @@
 #include <functorch/csrc/BatchedFallback.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/util/SmallBuffer.h>
-
+#include <ATen/InferSize.h>
 
 namespace at { namespace functorch {
 
@@ -134,10 +134,21 @@ std::tuple<Tensor,optional<int64_t>> _unsafe_view_batch_rule(
     const Tensor& self,
     optional<int64_t> self_bdim,
     IntArrayRef size) {
+  auto self_ = moveBatchDimToFront(self, self_bdim);
   VmapDimVector view_size(size);
-  view_size.insert(view_size.begin() + *self_bdim, self.size(*self_bdim));
+  view_size.insert(view_size.begin(), self_.size(0));
 
-  return std::make_tuple(at::_unsafe_view(self, view_size), self_bdim);
+  // See if the view is valid. If it's not, then we copy.
+  // It's OK to copy, because _unsafe_view(x) guarantees that x isn't used
+  // anymore.
+  const at::DimVector inferred_size = at::infer_size_dv(view_size, self_.numel());
+  const auto stride = at::detail::computeStride(self_.sizes(),
+                                                self_.strides(),
+                                                inferred_size);
+  if (!stride.has_value()) {
+    self_ = self_.contiguous();
+  }
+  return std::make_tuple(at::_unsafe_view(self_, view_size), 0);
 }
 
 Tensor trace_decomp(const Tensor& self) {
@@ -276,11 +287,11 @@ std::tuple<Tensor, optional<int64_t>> _reshape_alias_batch_rule(const Tensor& se
   (void) strides;
   TORCH_INTERNAL_ASSERT(bdim.has_value());
 
+  auto self_ = moveBatchDimToFront(self, bdim);
   c10::SmallBuffer<int64_t, 5> new_shape(shape.size() + 1);
-  new_shape[*bdim] = self.size(*bdim);
-  std::copy(shape.begin(), shape.begin() + *bdim, new_shape.begin());
-  std::copy(shape.begin() + *bdim, shape.end(), new_shape.begin() + *bdim + 1);
-  return std::make_tuple(at::reshape(self, new_shape), bdim);
+  new_shape[0] = self_.size(0);
+  std::copy(shape.begin(), shape.end(), new_shape.begin() + 1);
+  return std::make_tuple(at::reshape(self_, new_shape), 0);
 }
 
 std::tuple<Tensor, optional<int64_t>> roll_batch_rule(const Tensor& self, optional<int64_t> bdim, IntArrayRef shifts, IntArrayRef dims) {

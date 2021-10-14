@@ -37,32 +37,39 @@ def loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values):
 
 def get_exhaustive_batched_inputs(arg_values, kwarg_values, batch_size=3):
     def add_batch_dim(arg, bdim, batch_size=3):
+        assert bdim == 0 or bdim == -1
         if isinstance(arg, torch.Tensor):
-            shape = [1] * len(arg.shape)
-            shape.insert(bdim, batch_size)
-            return (arg.repeat(shape), bdim)
+            if bdim == 0:
+                shape = [1] * len(arg.shape)
+                shape.insert(bdim, batch_size)
+                return (arg.repeat(shape), bdim)
+            if bdim == -1:
+                arg = arg.unsqueeze(-1).expand(*arg.shape, batch_size).contiguous()
+                return (arg, bdim)
+            assert False
         else:
             return (arg, None)
 
-    batch_choices = []
-    def add_batch_choices(a):
-        if isinstance(a, torch.Tensor):
-            batched_val = add_batch_dim(a, 0, batch_size)
-            batch_choices.append((batched_val, (a, None)))
-        else:
-            batch_choices.append(((a, None),))
+    for bdim in [0, -1]:
+        batch_choices = []
+        def add_batch_choices(a):
+            if isinstance(a, torch.Tensor):
+                batched_val = add_batch_dim(a, bdim, batch_size)
+                batch_choices.append((batched_val, (a, None)))
+            else:
+                batch_choices.append(((a, None),))
 
-    flat_args, arg_spec = pytree.tree_flatten(tuple(arg_values))
-    for arg in flat_args:
-        add_batch_choices(arg)
+        flat_args, arg_spec = pytree.tree_flatten(tuple(arg_values))
+        for arg in flat_args:
+            add_batch_choices(arg)
 
-    for batched_values in itertools.product(*batch_choices):
-        batched_args, in_dims = zip(*batched_values)
+        for batched_values in itertools.product(*batch_choices):
+            batched_args, in_dims = zip(*batched_values)
 
-        if all([i is None for i in in_dims]):
-            continue
+            if all([i is None for i in in_dims]):
+                continue
 
-        yield pytree.tree_unflatten(batched_args, arg_spec), pytree.tree_unflatten(in_dims, arg_spec), kwarg_values
+            yield pytree.tree_unflatten(batched_args, arg_spec), pytree.tree_unflatten(in_dims, arg_spec), kwarg_values
 
 
 def get_fallback_and_vmap_exhaustive(op, arg_values, kwarg_values, compute_loop_out=True):
