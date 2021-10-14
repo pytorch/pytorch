@@ -3257,6 +3257,10 @@ class TestRandomTensorCreation(TestCase):
             self.assertEqual(t_transform(r[:, :50]).std(), std_transform(4), atol=0.3, rtol=0)
             self.assertEqual(t_transform(r[:, 50:]).std(), std_transform(1), atol=0.2, rtol=0)
 
+            # test empty mean/std
+            out = torch.normal(mean=torch.empty((0, 2)), std=torch.empty((0, 1)))
+            self.assertEqual(out.size(), torch.Size([0, 2]))
+
             r.fill_(42)
             r = torch.normal(2, 3, (100, 100), dtype=dtype, device=device)
             self.assertEqual(r.dtype, dtype)
