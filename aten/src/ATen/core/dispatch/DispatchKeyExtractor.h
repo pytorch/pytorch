@@ -67,7 +67,7 @@ namespace detail {
     }
     // Tensor?[] translates to this case.
     void operator()(const c10::List<c10::optional<at::Tensor>>& xs) {
-      for (const c10::optional<at::Tensor>& x : xs) {
+      for (c10::optional<at::Tensor> x : xs) {
         if (x.has_value()) {
           ts = ts | x.value().key_set();
         }
