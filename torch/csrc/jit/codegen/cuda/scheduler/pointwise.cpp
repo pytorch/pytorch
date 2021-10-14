@@ -67,32 +67,23 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
   if (TensorDomain::noReductions(
           TensorDomain::noBroadcasts(largest_out->domain()->domain()))
           .size() == 0) {
-    // Create empty entries for vectorizable inputs outputs
-    //  and mapping count
     auto vectorizable_inputs_outputs_entry = HeuristicSummaryEntry<
         HeuristicCompileTime::VectorizableInputsAndOutputs>(data_cache, []() {
       return std::make_unique<std::vector<TensorView*>>();
     });
+    vectorizable_inputs_outputs_entry.get();
 
-    auto mapping_count_entry =
-        HeuristicSummaryEntry<HeuristicCompileTime::MappedInputsOutputs>(
-            data_cache,
-            []() { return std::make_unique<std::vector<int64_t>>(); });
-    return PointwiseParams();
-  }
+    auto broadcast_byte_multiples_entry =
+        HeuristicSummaryEntry<HeuristicCompileTime::BroadcastMultiples>(
+            data_cache, []() {
+              return std::make_unique<
+                  std::vector<scheduler_utils::BroadcastMultiple>>();
+            });
+    broadcast_byte_multiples_entry.get();
 
-  auto ref_root = largest_out->getMaybeRFactorDomain();
-
-  std::vector<int64_t> elem_counts(ref_root.size(), 1);
-  int64_t n_elems = 1;
-  for (const auto ref_i : c10::irange(ref_root.size())) {
-    auto inferred_val =
-        runtime_info.expressionEvaluator().evaluate(ref_root[ref_i]->extent());
-    TORCH_INTERNAL_ASSERT(
-        inferred_val.has_value(),
-        "Error inferring size for pointwise scheduler.");
-    elem_counts[ref_i] = inferred_val.value();
-    n_elems *= inferred_val.value();
+    PointwiseParams params;
+    params.tag = "Pointwise heuristics";
+    return params;
   }
 
   const int64_t device_multiprocessor_count =
@@ -118,6 +109,19 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
       // Reduce unrolling if we have many inputs, start reduction at 4 inputs
       std::max(
           (scheduler_utils::lastPow2((int64_t)n_tensors) >> 2), (int64_t)1));
+
+  auto ref_root = largest_out->getMaybeRFactorDomain();
+  std::vector<int64_t> elem_counts(ref_root.size(), 1);
+  int64_t n_elems = 1;
+  for (size_t ref_i = 0; ref_i < ref_root.size(); ref_i++) {
+    auto inferred_val =
+        runtime_info.expressionEvaluator().evaluate(ref_root[ref_i]->extent());
+    TORCH_INTERNAL_ASSERT(
+        inferred_val.has_value(),
+        "Error inferring size for pointwise scheduler.");
+    elem_counts[ref_i] = inferred_val.value();
+    n_elems *= inferred_val.value();
+  }
 
   // Don't unroll at the cost of getting a full wave on the GPU
   if (n_elems < device_multiprocessor_count * kThreadX &&
@@ -145,7 +149,8 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
       HeuristicSummaryEntry<HeuristicCompileTime::VectorizableInputsAndOutputs>(
           data_cache, [&largest_out]() {
             return std::make_unique<std::vector<TensorView*>>(
-                scheduler_utils::getVectorizableInputsOutputs(largest_out));
+                scheduler_utils::getInputsOutputsWithInnerDim(
+                    largest_out, true));
           });
 
   auto& vectorizable_inputs_outputs = vectorizable_inputs_outputs_entry.get();
@@ -204,24 +209,30 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
   // break point with gdimx and use gdimy for the left side of the break point.
   int64_t gdimy = 1;
 
-  auto mapping_count_entry =
-      HeuristicSummaryEntry<HeuristicCompileTime::MappedInputsOutputs>(
-          data_cache, [&largest_out]() {
-            return std::make_unique<std::vector<int64_t>>(
-                scheduler_utils::mappedInputsOutputs(largest_out));
-          });
+  auto broadcast_byte_multiples_entry = HeuristicSummaryEntry<
+      HeuristicCompileTime::BroadcastMultiples>(data_cache, [&largest_out]() {
+    return std::make_unique<std::vector<scheduler_utils::BroadcastMultiple>>(
+        scheduler_utils::getBroadcastMultiples(largest_out));
+  });
 
-  auto& mapping_count = mapping_count_entry.get();
+  auto& broadcast_byte_multiples = broadcast_byte_multiples_entry.get();
+
+  TORCH_INTERNAL_ASSERT(broadcast_byte_multiples.size() == ref_root.size());
+
+  int64_t dtype_sum = 0;
+  for (auto inp : ir_utils::filterByType<TensorView>(fusion->inputs())) {
+    dtype_sum += dataTypeSize(inp->getDataType().value());
+  }
+  for (auto out : ir_utils::filterByType<TensorView>(fusion->outputs())) {
+    dtype_sum += dataTypeSize(out->getDataType().value());
+  }
 
   {
     // How much would this transfer cost if it was done as a 1-D schedule
     int64_t transfer_size_1d = 1;
 
-    auto max_dims =
-        std::max_element(mapping_count.begin(), mapping_count.end());
-
     for (const auto i : c10::irange(ref_root.size())) {
-      transfer_size_1d = transfer_size_1d * elem_counts[i] * (*max_dims);
+      transfer_size_1d = transfer_size_1d * elem_counts[i] * dtype_sum;
     }
 
     // If there isn't very much parallelism available, just use 1D scheduler
@@ -245,23 +256,22 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
           continue;
         }
 
-        auto left_max_dims = std::max_element(
-            mapping_count.begin(), mapping_count.begin() + break_point_i);
-
-        auto right_max_dims = std::max_element(
-            mapping_count.begin() + break_point_i, mapping_count.end());
+        auto lhs_byte_multiple =
+            broadcast_byte_multiples[break_point_i].lhs_multiple;
+        auto rhs_byte_multiple =
+            broadcast_byte_multiples[break_point_i].rhs_multiple;
 
         // Estimate transfer cost with this break point
         int64_t cur_transfer_size = 1;
 
         for (const auto left_i : c10::irange(break_point_i)) {
           cur_transfer_size =
-              cur_transfer_size * elem_counts[left_i] * (*left_max_dims);
+              cur_transfer_size * elem_counts[left_i] * lhs_byte_multiple;
         }
 
         for (const auto right_i : c10::irange(break_point_i, ref_root.size())) {
           cur_transfer_size =
-              cur_transfer_size * elem_counts[right_i] * (*right_max_dims);
+              cur_transfer_size * elem_counts[right_i] * rhs_byte_multiple;
         }
 
         //  Continue if this break point doesn't save at least 10% of 1D
@@ -319,11 +329,16 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
   if (isDebugDumpEnabled(DebugDumpOption::SchedulerDebug)) {
     std::cerr << "\n===== Pointwise Stats ========\n"
               << "num_elems: " << n_elems << "\n"
-              << "mapping_count: " << mapping_count << "\n"
               << "elem_counts: " << elem_counts << "\n"
               << "n_tensor_inputs: " << n_tensors << "\n"
               << "max_input_dtype_size: " << max_input_dtype_size << "\n"
               << "vectorize_factor: " << vectorize_factor << std::endl;
+    std::cerr << "broadcast_byte_multiples: ";
+    for (auto multiple : broadcast_byte_multiples) {
+      std::cerr << "(" << multiple.lhs_multiple << ", " << multiple.rhs_multiple
+                << "), ";
+    }
+    std::cerr << std::endl;
     std::cerr << params.toString() << std::endl;
   }
 
@@ -456,7 +471,7 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
     }
     // Need to check before caching.
     bool vectorize = params.vectorize &&
-        scheduler_utils::shouldVectorize(inp, vectorizable_dims);
+        scheduler_utils::hasInnerDim(inp, vectorizable_dims, true);
     cached_inputs.emplace_back(inp->cache_after());
     if (vectorize) {
       vectorized_tensor.emplace(cached_inputs.back());
@@ -470,7 +485,7 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
     }
     // Need to check before caching.
     bool vectorize = params.vectorize &&
-        scheduler_utils::shouldVectorize(out, vectorizable_dims);
+        scheduler_utils::hasInnerDim(out, vectorizable_dims, true);
     cached_outputs.emplace_back(std::make_pair(out, out->cache_before()));
     if (vectorize) {
       vectorized_tensor.emplace(out);

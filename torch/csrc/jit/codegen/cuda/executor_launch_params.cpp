@@ -117,13 +117,13 @@ void LaunchParams::print() const {
 
 std::string LaunchParams::toString() const {
   std::stringstream ss;
-  ss << "Launch Parameters \n"
-     << "BlockDim.x = " << bdimx() << "\n"
-     << "BlockDim.y = " << bdimy() << "\n"
-     << "BlockDim.z = " << bdimz() << "\n"
-     << "GridDim.x = " << gdimx() << "\n"
-     << "GridDim.y = " << gdimy() << "\n"
-     << "GridDim.z = " << gdimz() << "\n"
+  ss << "Launch Parameters: "
+     << "BlockDim.x = " << (bdimx_ == UNINITIALIZED_VAL ? -1 : bdimx_) << ", "
+     << "BlockDim.y = " << (bdimy_ == UNINITIALIZED_VAL ? -1 : bdimy_) << ", "
+     << "BlockDim.z = " << (bdimz_ == UNINITIALIZED_VAL ? -1 : bdimz_) << ", "
+     << "GridDim.x = " << (gdimx_ == UNINITIALIZED_VAL ? -1 : gdimx_) << ", "
+     << "GridDim.y = " << (gdimy_ == UNINITIALIZED_VAL ? -1 : gdimy_) << ", "
+     << "GridDim.z = " << (gdimz_ == UNINITIALIZED_VAL ? -1 : gdimz_) << ", "
      << "Smem Size = " << smem() << "\n";
   return ss.str();
 }

@@ -13,7 +13,12 @@ class SchedulerRuntimeInfo;
 
 namespace scheduler_utils {
 
-constexpr int64_t register_file_size = 256 * 1024;
+// Assume any only half of the register file is available to spend on buffers,
+// this is because when we allocate a buffer in register is has to be accesed
+// with a compile time coonstant index. Unfortunately nvcc seems to be using
+// many registers for indexing. This is a bad estimation of extra register use,
+// but it's hard to get a better one.
+constexpr int64_t register_file_size = 256 * 1024 / 2;
 constexpr int64_t x_grid_limit = ((int64_t)1 << (int64_t)31) - (int64_t)1;
 constexpr int64_t y_grid_limit = 65535;
 
@@ -69,18 +74,24 @@ struct PersistentBufferInfo {
 PersistentBufferInfo persistentBuffers(Fusion* fusion);
 
 struct TvProperties {
-  // How many elements in tensor view are there to reduce
-  int64_t reduction_numel = 1;
-  // How many reductions do we need to perform, i.e. how many iter dimension
+  // How many elements in tensor view are there to reduce.
+  int64_t total_reduction_numel = 1;
+
+  // How many reductions do we need to perform, i.e. how many iter dimension.
   // elements are there
-  int64_t iteration_numel = 1;
-  // Do we reduce the fastest dimension, if no reduction mark true
+  int64_t total_iteration_numel = 1;
+
+  // Is the inner most dimension a reduction, if no reductions mark true.
   bool fastest_dim_reduction = true;
-  // What's the iter numel to the left of the reduction (if there is one)
-  int64_t iter_outside_red = 1;
-  // What's the iter numel to the right of the reduction (if this is or isn't
-  // one)
-  int64_t iter_inside_red = 1;
+
+  // How many elements in the inner most dimension merging surrounding domains
+  // that match in type. This is used for 3D schedulers in
+  // reduction/normalization.
+  int64_t inner_most_dimension_numel = 1;
+
+  // Merging neighboring iteration domains, and reduction domains, what's the
+  // resulting dimensionality of the problem.
+  int64_t dimensionality = 1;
 };
 
 // Fill TvProperties structure about tv
@@ -116,22 +127,15 @@ std::unordered_set<IterDomain*> getTrivialReductionMap(Fusion* fusion);
 // [IterationDomain, ReductionDomain, TrivialReductionDim0,
 // TrivialReductionDim1, ...] Returns if <iteration dimensions, reduction
 // dimensions>
-std::pair<bool, bool> canonicalDimReduction(Fusion* fusion, TensorView* tv);
+std::pair<bool, bool> canonicalDimReduction(
+    Fusion* fusion,
+    TensorView* tv,
+    bool schedule_3D = false);
 
 // Return a list of tensor views that are outputs of reduction operations. If
 // multiple outputs of an expression are found, only include one in the list
 // (WelfordOp)
 std::vector<TensorView*> getReductionTvs(Fusion* fusion);
-
-// Consistent parallelization based on provided reduction parameters. Provided
-// tensor is expected to be reduced by canonicalDimReduction before sending
-// here. reduction_tv should be provided as the tensorview to reduce.
-// RFactor of reduction_tv will be returned if applicable otherwise reduction_tv
-// is returned
-TensorView* scheduleReductionTV(
-    const ReductionParams& rparams,
-    TensorView* reduction_tv,
-    bool has_iter_axis);
 
 // Reset inputs and outputs to global memory, everything else to local.
 void clearMemorySpace(Fusion* fusion);
@@ -145,16 +149,6 @@ std::vector<TensorView*> cacheInputs(Fusion* fusion, bool unroll);
 std::vector<std::pair<TensorView*, TensorView*>> cacheAndForkOutputs(
     Fusion* fusion,
     bool unroll);
-
-// Inlining function intended for single or multi reduction fusions.
-void multiReductionInliner(
-    Fusion* fusion,
-    const ReductionParams& rparams,
-    TensorView* reduction_tv,
-    TensorView* reference_tv,
-    std::vector<TensorView*> reduction_tvs,
-    std::vector<TensorView*> cached_inputs,
-    std::vector<std::pair<TensorView*, TensorView*>> cached_outputs);
 
 // Uses a lot of logic from TransformPropagator in the implementation
 class FindAllMappedDims {
@@ -175,21 +169,39 @@ class FindAllMappedDims {
 // Checks if tensor view has an iteration domain in vector dims in its inner
 // most root position (excluding broadcast and reduction), and checks if it is a
 // contiguous dimension
-bool shouldVectorize(
+bool hasInnerDim(
     TensorView* tv,
-    std::unordered_set<IterDomain*> vector_dims);
+    std::unordered_set<IterDomain*> vector_dims,
+    bool should_vectorize);
 
 // Returns all inputs and outputs that share the inner most dimension of the
 // provided reference. If reference is an input it ignores reduction axes, will
-// ignore all broadcast axes.
-std::vector<TensorView*> getVectorizableInputsOutputs(TensorView* reference_tv);
+// ignore all broadcast axes. If can_vectorize, will check contiguity for
+// vectorization, otherwise it just checks it has that inner dim.
+std::vector<TensorView*> getInputsOutputsWithInnerDim(
+    TensorView* reference_tv,
+    bool can_vectorize);
+
+// Structure to hold byte multiples for break points. I.e. if we have the
+// tensors:
+// T0[I0, I1] float
+// T1[I0, I1] bool
+// T2[I0]     half
+// T3    [I1] double
+// and a break point of 1 the multiples would be:
+// lhs_multiple = 4 + 1 + 2 = 7
+// rhs_multiple = 4 + 1 + 8 = 13
+struct BroadcastMultiple {
+  int64_t rhs_multiple = 0;
+  int64_t lhs_multiple = 0;
+};
 
 // Returns a vector of counts, size = reference_tv->getRootDomain().size(), each
 // entry [i] is the number of inputs/outputs that have a non-broadcast dimension
 // mapped to the corresponding dimension in reference_tv. Count includes
 // reference_tv if reference_tv is an input or output. Count is multiplied by
 // data type size.
-std::vector<int64_t> mappedInputsOutputs(TensorView* reference_tv);
+std::vector<BroadcastMultiple> getBroadcastMultiples(TensorView* reference_tv);
 
 } // namespace scheduler_utils
 } // namespace cuda

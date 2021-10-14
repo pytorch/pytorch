@@ -1459,6 +1459,10 @@ bool NamedScalar::sameAs(const Statement* other) const {
 }
 
 NamedScalar* NamedScalar::getParallelDim(ParallelType p_type) {
+  TORCH_INTERNAL_ASSERT(
+      isParallelTypeThread(p_type),
+      "Cannot get parallel dim of non thread type, received: ",
+      p_type);
   std::string parallel_dim = stringifyThreadSize(p_type);
   return new NamedScalar(parallel_dim, DataType::Int);
 }

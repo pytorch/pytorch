@@ -758,21 +758,31 @@ void SegmentedFusion::finalize() {
       // Mark the groups for update later
       affected_group_set.insert(edge->from);
       affected_group_set.insert(edge->to);
+
+      // Need a valid expression list to continue. Update from and to group.
+      // TODO : this could have been a general operation that
+      //  the group supports. Could consider moving this into
+      //  segmentedGroup in a follow up.
+      {
+        // Update from group and reset its expressions
+        auto input_group_vec = getAllInputs(edge->from);
+        std::unordered_set<Val*> input_group_set(
+            input_group_vec.begin(), input_group_vec.end());
+        auto expr_set = DependencyCheck::getAllExprsBetween(
+            input_group_set, getAllOutputs(edge->from));
+        edge->from->exprs_ =
+            std::vector<Expr*>(expr_set.begin(), expr_set.end());
+      }
+      {
+        // Update to group and reset its expressions
+        auto input_group_vec = getAllInputs(edge->to);
+        std::unordered_set<Val*> input_group_set(
+            input_group_vec.begin(), input_group_vec.end());
+        auto expr_set = DependencyCheck::getAllExprsBetween(
+            input_group_set, getAllOutputs(edge->to));
+        edge->to->exprs_ = std::vector<Expr*>(expr_set.begin(), expr_set.end());
+      }
     }
-  }
-
-  // Reset expression lists of all affected groups
-  // TODO : this could have been a general operation that
-  //  the group supports. Could consider moving this into
-  //  segmentedGroup in a follow up.
-  for (auto group : affected_group_set) {
-    auto input_group_vec = getAllInputs(group);
-    std::unordered_set<Val*> input_group_set(
-        input_group_vec.begin(), input_group_vec.end());
-
-    auto expr_set = DependencyCheck::getAllExprsBetween(
-        input_group_set, getAllOutputs(group));
-    group->exprs_ = std::vector<Expr*>(expr_set.begin(), expr_set.end());
   }
 }
 
@@ -1785,7 +1795,7 @@ TranslateApplicableWelford::TranslateApplicableWelford(
 
   for (auto translated_group : translated_groups) {
     // Update heuristics and expr list of translated groups
-    translated_group->heuristic_ = ScheduleHeuristic::Normalization;
+    translated_group->heuristic_ = ScheduleHeuristic::Persistent;
     updateGroupExprs(translated_group);
   }
 }
@@ -1794,12 +1804,12 @@ bool TranslateApplicableWelford::isValidPersistentFusion(
     Fusion* translated_fusion,
     SchedulerRuntimeInfo& runtime_info) {
   if (!SchedulerEntry::canSchedule(
-          ScheduleHeuristic::Normalization, translated_fusion, runtime_info)) {
+          ScheduleHeuristic::Persistent, translated_fusion, runtime_info)) {
     return false;
   }
 
   auto scheduler = SchedulerEntry::makeEntry(
-      ScheduleHeuristic::Normalization, translated_fusion, runtime_info);
+      ScheduleHeuristic::Persistent, translated_fusion, runtime_info);
 
   return scheduler->reductionParams().persistent_kernel;
 }
@@ -3065,18 +3075,18 @@ class ForceHalfAnnotation : public IterVisitor {
     ForceHalfAnnotation annotation;
     std::vector<Val*> fp16_outputs;
     auto& cast_to_type = annotation.cast_to_type_;
+    auto other_half_type =
+        cast_to_type == DataType::Half ? DataType::BFloat16 : DataType::Half;
     std::copy_if(
         fusion->outputs().begin(),
         fusion->outputs().end(),
         std::back_inserter(fp16_outputs),
-        [&cast_to_type](auto* val) {
+        [&cast_to_type, &other_half_type](auto* val) {
           auto dtype = val->getDataType().value();
-          if (cast_to_type && dtype != DataType::Float) {
+          if (cast_to_type) {
             TORCH_INTERNAL_ASSERT(
-                cast_to_type == dtype,
-                "We do not want a mix of BFloat16 and Float16 in the same graph");
-          } else if (dtype != DataType::Float) {
-            cast_to_type = dtype;
+                other_half_type != dtype,
+                "Mix of BFloat16 and Float16 in the same graph is not supported.");
           }
           return val->template isA<TensorView>() &&
               val->getDataType().has_value() &&
@@ -3108,10 +3118,10 @@ class ForceHalfAnnotation : public IterVisitor {
 void SegmentedFusion::annotateFP16IntermediateTensors() {
   force_fp16_tv_set_ =
       ForceHalfAnnotation::getFP16AnnotatedSet(complete_fusion_.get());
-  for (auto o : complete_fusion_->outputs()) {
-    auto o_tv = dynamic_cast<TensorView*>(o);
-    if (o_tv) {
-      auto dtype = o_tv->getDataType().value();
+  for (auto out_tv :
+       ir_utils::filterByType<TensorView>(complete_fusion_->outputs())) {
+    if (out_tv) {
+      auto dtype = out_tv->getDataType().value();
       if (dtype == DataType::Half || dtype == DataType::BFloat16) {
         force_half_precision_type_ = dtype;
       }

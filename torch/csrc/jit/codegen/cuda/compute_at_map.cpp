@@ -153,7 +153,12 @@ void ComputeAtMap::mapIds(IterDomain* id0, IterDomain* id1) {
       if (id0->isParallelized() && id1->isParallelized()) {
         // Both are parallelized, make sure they're the same, set entry for
         // parallel map
-        TORCH_INTERNAL_ASSERT(id0->getParallelType() == id1->getParallelType());
+        TORCH_INTERNAL_ASSERT(
+            id0->getParallelType() == id1->getParallelType(),
+            "Parallel type of ",
+            id0,
+            " should match ",
+            id1);
         parallel_type_map_[new_set] = id0->getParallelType();
       } else if (id0->isParallelized() || id1->isParallelized()) {
         // Only one is parallelized, set entry for parallel map

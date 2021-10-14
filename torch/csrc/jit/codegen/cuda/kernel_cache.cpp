@@ -301,7 +301,7 @@ FusionKernelRuntime::FusionKernelRuntime(
       bool translated = SegmentCandidateFinder::TranslateWelfordInFusion(
           fusion_copy.get(), inputs);
       if (translated) {
-        complete_fusion_heuristic = ScheduleHeuristic::Normalization;
+        complete_fusion_heuristic = ScheduleHeuristic::Persistent;
       }
     }
     // Take ownership of the transformed fusion

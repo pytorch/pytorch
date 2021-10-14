@@ -338,7 +338,7 @@ ThreadPredicateMap::PredicateInfo ThreadPredicateMap::getPredicateInfo(
     const TensorView* tv) const {
   auto pred_info = thread_predicates_.at(tv);
   // Do not predicate a paralell type if it is a parallel bcast domain
-  if (auto bop = dynamic_cast<BroadcastOp*>(tv->definition())) {
+  if (dynamic_cast<BroadcastOp*>(tv->definition())) {
     auto parallel_bcast = getParallelBroadcastDomains(tv);
     pred_info.limited_types ^= parallel_bcast;
   }

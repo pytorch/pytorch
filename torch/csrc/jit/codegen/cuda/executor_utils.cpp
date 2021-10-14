@@ -535,7 +535,7 @@ ExpressionEvaluator bindFusionInputs(
 
   TORCH_INTERNAL_ASSERT(
       fusion->inputs().size() == aten_inputs.size(),
-      "Something went wrong configuring launch. Inputs no longer match.");
+      "Something went wrong configuring launch. Inputs do not match.");
 
   ExpressionEvaluator evaluator(fusion);
   auto inputs = fusion->inputs();
@@ -548,13 +548,13 @@ ExpressionEvaluator bindFusionInputs(
 
       TORCH_INTERNAL_ASSERT(
           aten_inputs[i].isTensor(),
-          "Something went wrong configuring launch. Inputs no longer match.");
+          "Something went wrong configuring launch. Inputs do not match.");
 
       auto aten_tensor = aten_inputs[i].toTensor();
       auto root_dom = TensorDomain::noReductions(cg_tensor->getRootDomain());
       TORCH_INTERNAL_ASSERT(
           aten_tensor.ndimension() == (int64_t)root_dom.size(),
-          "Something went wrong configuring launch. Inputs no longer match.");
+          "Something went wrong configuring launch. Inputs do not match.");
 
       for (const auto dim : c10::irange(root_dom.size())) {
         const auto extent = root_dom[dim]->extent();

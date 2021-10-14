@@ -8221,10 +8221,10 @@ TEST(NVFuserTest, FusionMagicSchedulerSoftmax_CUDA) {
   auto aten_output =
       at::_softmax(aten_input.to(at::kDouble), kReductionAxis, false);
 
-  auto reduction_params = getNormalizationHeuristics(&fusion, {aten_input});
+  auto reduction_params = getPersistentHeuristics(&fusion, {aten_input});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
 
-  scheduleNormalization(&fusion, reduction_params.value());
+  schedulePersistentKernel(&fusion, reduction_params.value());
 
   auto lparams = reduction_params.value().lparams;
 
@@ -8276,10 +8276,10 @@ TEST(NVFuserTest, TestMaskSoftmax_CUDA) {
   auto aten_output = at::_softmax(aten_out1, kReductionAxis, false);
 
   auto reduction_params =
-      getNormalizationHeuristics(&fusion, {aten_input, aten_mask});
+      getPersistentHeuristics(&fusion, {aten_input, aten_mask});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
 
-  scheduleNormalization(&fusion, reduction_params.value());
+  schedulePersistentKernel(&fusion, reduction_params.value());
 
   auto lparams = reduction_params.value().lparams;
 
@@ -8415,10 +8415,10 @@ TEST(NVFuserTest, FusionMagicSchedulerLayerNormalization_CUDA) {
 
   // Check reduction axis is same for all reductions
   // Generate Launch Parameters
-  auto reduction_params = getNormalizationHeuristics(&fusion, {aten_input});
+  auto reduction_params = getPersistentHeuristics(&fusion, {aten_input});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
 
-  scheduleNormalization(&fusion, reduction_params.value());
+  schedulePersistentKernel(&fusion, reduction_params.value());
   auto lparams = reduction_params.value().lparams;
 
   torch::jit::fuser::cuda::FusionExecutor fe;
@@ -9157,29 +9157,27 @@ TEST(NVFuserTest, FusionSmemDynamicTiledGemm_CUDA) {
 
   // Make a 3D tile, mix of symbolic and constant, do in reverse order because
   // dims are inserted
+  // [M, K, N]
   tv5->split(2, n_smem_tile);
   tv5->split(1, symbolic_block_k_tile_dim);
   tv5->split(1, symbolic_split_k_tile_dim);
   tv5->split(0, symbolic_m_tile_dim);
+  // [Mo, Mi, Koo, Koi, Ki, No, Ni]
 
   // Reorder so all outer tiles are in the leftmost 3 positions
   tv5->reorder({{1, 5}, {5, 1}});
+  // [Mo, No, Koo, Koi, Ki, Mi, Ni]
 
   // Factor out the outer reduction IterDomain, then run the inter-cta
   // reduction, and intra-cta reduction
   auto tv6 = tv5->rFactor({2});
+  // [Mo, No, rKoo, rKoi, rKi, Mi, Ni]
+  // [Mo, No,       rKoi, rKi, Mi, Ni]
 
   // Scope computations
   tv6->computeAt(tv5, 2);
-
-  // RFactor moves reduction axes around, reorder to match ordering of tv5
-  tv6->reorder({
-      {2, -2},
-      {3, -1},
-      {4, 2},
-      {5, 3},
-      {6, 4},
-  });
+  // [Mo, No, rKoo,  Koi,  Ki, Mi, Ni]
+  // [Mo, No,       rKoi, rKi, Mi, Ni]
 
   // Setup compute at schedule
   tv0->computeAt(tv6, 3);
@@ -10916,11 +10914,11 @@ TEST(NVFuserTest, FusionSmemIndexing_CUDA) {
   // [Mo, No, rKoo, Koi{i1},  Ki{i2}, Mi{i0}, Ni{32}]
   // [Mo, No, Ki{i2}, Mi{i0}, Ni{32}, rKoo, Koi{i1}]
   tv6->reorder({
-      {2, -2},
-      {3, -1},
-      {4, 2},
-      {5, 3},
-      {6, 4},
+      {5, -2},
+      {6, -1},
+      {2, 2},
+      {3, 3},
+      {4, 4},
   });
 
   // Setup compute at schedule
@@ -11082,37 +11080,22 @@ TEST(NVFuserTest, FusionIssue367_CUDA) {
 
   // Make a 3D tile, mix of symbolic and constant, do in reverse order because
   // dims are inserted
+  // [M, K, N]
   tv5->split(2, n_smem_tile);
   tv5->split(1, symbolic_block_k_tile_dim);
   tv5->split(1, symbolic_split_k_tile_dim);
   tv5->split(0, symbolic_m_tile_dim);
-
-  // tv5[M/m_tile, m_tile, r{K/split_k/block_k}, r{split_k}, r{block_k}, N/32,
-  // 32]
+  // [Mo, Mi, Koo, Koi, Ki, No, Ni]
   tv5->reorder({{1, 5}, {5, 1}});
-  // tv5[M/m_tile, N/32, r{K/split_k/block_k}, r{split_k}, r{block_k},  m_tile,
-  // 32]
+  // [Mo, No, Koo, Koi, Ki, Mi, Ni]
 
   auto tv6 = tv5->rFactor({2});
   auto tv7 = tv5->rFactor({2});
+  // [Mo, No, rKoo,  Koi,  Ki, Mi, Ni]
+  // [Mo, No,       rKoi, rKi, Mi, Ni]
 
   // Scope computations
   tv6->computeAt(tv5, 2);
-
-  tv6->reorder({
-      {2, -2},
-      {3, -1},
-      {4, 2},
-      {5, 3},
-      {6, 4},
-  });
-
-  tv7->reorder({
-      {2, -2},
-      {3, -1},
-      {-2, 2},
-      {-1, 3},
-  });
 
   tv0->computeAt(tv6, 3);
   tv1->computeAt(tv6, 3);
@@ -15288,9 +15271,9 @@ TEST(NVFuserTest, FusionZeroSizeTensorNormalization_CUDA) {
   at::Tensor cg_output2 = at::empty({2, 4}, options);
   at::Tensor cg_output3 = at::empty({0}, options);
 
-  auto reduction_params = getNormalizationHeuristics(&fusion, {input0, input1});
+  auto reduction_params = getPersistentHeuristics(&fusion, {input0, input1});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
-  scheduleNormalization(&fusion, reduction_params.value());
+  schedulePersistentKernel(&fusion, reduction_params.value());
 
   auto lparams = reduction_params.value().lparams;
   FusionExecutor fe;
@@ -15416,7 +15399,7 @@ TEST(NVFuserTest, FusionTranslate1Welford_CUDA) {
   TORCH_CHECK(runtime1->singleKernelFusion()->unordered_exprs().size() > 2);
   TORCH_CHECK(
       runtime1->schedulerHeuristics()->singleKernelHeuristics()->heuristc() ==
-      ScheduleHeuristic::Normalization);
+      ScheduleHeuristic::Persistent);
 
   // Run an un-translated welford
   auto runtime2 = run_test(65536);
@@ -15465,7 +15448,7 @@ TEST(NVFuserTest, FusionTranslate2Welford_CUDA) {
   TORCH_CHECK(runtime1->singleKernelFusion()->unordered_exprs().size() > 4);
   TORCH_CHECK(
       runtime1->schedulerHeuristics()->singleKernelHeuristics()->heuristc() ==
-      ScheduleHeuristic::Normalization);
+      ScheduleHeuristic::Persistent);
 
   // Run an un-translated welford
   auto runtime2 = run_test(65536);

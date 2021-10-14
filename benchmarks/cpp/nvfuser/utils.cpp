@@ -8,34 +8,44 @@ using namespace torch::jit::fuser::cuda;
 
 std::string toString(ReductionParams rparams) {
   std::stringstream ss;
-  if (rparams.fastest_dim) {
-    ss << "/Fastest dim";
-  } else {
-    ss << "/Slow dim";
-  }
-  if (rparams.cross_grid) {
-    ss << "/cross grid";
-  }
-  if (rparams.cross_block) {
-    ss << "/cross block";
-  }
-  if (rparams.multiple_reds_per_blk) {
-    ss << "/multiple reductions per block ";
-  }
-  if (rparams.loop_unroll > 1) {
-    ss << (rparams.vectorize ? "/Vectorize " : "/Unroll ")
-       << (rparams.reduction_unroll ? "reduction dim " : "iter dim ")
-       << rparams.loop_unroll;
-  }
-  if (rparams.batches_per_block > 1) {
-    ss << "/batches per block " << rparams.batches_per_block << " ";
-  }
-  if (rparams.persistent_kernel) {
-    ss << "/persistent";
+  ss << (rparams.fastest_dim ? "Red On Fastest Dim // " : "Red On Slow Dim // ")
+     << (rparams.persistent_kernel ? "Persistent Kernel // " : "");
+  if (rparams.batches_per_block > 1 || rparams.persistent_kernel) {
+    ss << "Batches per block: " << rparams.batches_per_block << "// ";
   }
 
-  if (rparams.split_grid_dim) {
-    ss << "/split grid dim";
+  if (rparams.schedule_3D) {
+    ss << "3D Schedule // "
+       << "Outer Reduction: "
+       << (rparams.cross_block_outer_reduce ? "cross block / " : "")
+       << (rparams.cross_grid_outer_reduce ? "cross grid / " : "")
+       << (rparams.split_grid_dim_outer_reduction ? "split grid dim / " : "");
+  }
+
+  ss << " // Iteration Domain: "
+     << (rparams.multiple_reds_per_blk ? "multiple reductions per block / "
+                                       : "")
+     << (rparams.split_grid_dim_iter_dom ? "split grid dimension / " : "")
+     << (rparams.vectorize_iter_dom ? "vectorize / " : "")
+     << (rparams.unroll_iter_dom && !rparams.vectorize_iter_dom ? "unroll / "
+                                                                : "");
+  if (rparams.unroll_iter_dom || rparams.vectorize_iter_dom) {
+    ss << "factor " << rparams.unroll_factor_iter_dom;
+  }
+
+  ss << " // Inner Reduction Domain: "
+     << (rparams.cross_block_inner_reduce ? "cross block reduction / " : "")
+     << (rparams.cross_grid_inner_reduce ? "cross grid reduction / " : "")
+     << (rparams.cross_grid_inner_reduce &&
+                 rparams.split_grid_dim_inner_reduction
+             ? "split grid dimension / "
+             : "")
+     << (rparams.vectorize_inner_reduction ? "vectorize / " : "")
+     << (rparams.unroll_inner_reduction && !rparams.vectorize_inner_reduction
+             ? "unroll / "
+             : "");
+  if (rparams.unroll_inner_reduction || rparams.vectorize_inner_reduction) {
+    ss << "factor " << rparams.unroll_factor_inner_reduction;
   }
   return ss.str();
 }
@@ -117,10 +127,10 @@ void runBenchmarkIterations(
     // Sync everything up before we start
     cudaDeviceSynchronize();
     for (auto _ : benchmark_state) {
+      clearL2Cache();
       auto cg_outputs = fusion_executor_cache->runFusionWithInputs(aten_inputs);
       benchmark_state.SetIterationTime(
           executor_instance->kernelTimeMs() / 1000.0);
-      clearL2Cache();
     }
     // Sync everything up before we're finished, don't want to run ahead on the
     // cpu while benchmarking.
@@ -135,10 +145,10 @@ void runBenchmarkIterations(
     cudaDeviceSynchronize();
     CudaKernelTimer timer;
     for (auto _ : benchmark_state) {
+      clearL2Cache();
       timer.restart();
       auto cg_outputs = fusion_executor_cache->runFusionWithInputs(aten_inputs);
       benchmark_state.SetIterationTime(timer.elapsed() / 1000.0);
-      clearL2Cache();
     }
     // Sync everything up before we're finished, don't want to run ahead on the
     // cpu while benchmarking.

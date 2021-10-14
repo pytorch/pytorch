@@ -90,9 +90,9 @@ static void NvFuserScheduler_Softmax_WarpReduceReference(
   // Schedule through magic scheduler:
   auto runtime_info = SchedulerRuntimeInfo(fusion, aten_inputs, true);
   TORCH_INTERNAL_ASSERT(SchedulerEntry::canSchedule(
-      ScheduleHeuristic::Normalization, fusion, runtime_info));
+      ScheduleHeuristic::Persistent, fusion, runtime_info));
   auto scheduler = SchedulerEntry::makeEntry(
-      ScheduleHeuristic::Normalization, fusion, runtime_info);
+      ScheduleHeuristic::Persistent, fusion, runtime_info);
   scheduler->schedule(fusion);
 
   FusionExecutor fe;
@@ -137,9 +137,9 @@ static void NvFuserScheduler_Softmax_WarpReduce(
   // Schedule through magic scheduler:
   auto runtime_info = SchedulerRuntimeInfo(fusion, aten_inputs, true);
   TORCH_INTERNAL_ASSERT(SchedulerEntry::canSchedule(
-      ScheduleHeuristic::Normalization, fusion, runtime_info));
+      ScheduleHeuristic::Persistent, fusion, runtime_info));
   auto scheduler = SchedulerEntry::makeEntry(
-      ScheduleHeuristic::Normalization, fusion, runtime_info);
+      ScheduleHeuristic::Persistent, fusion, runtime_info);
   scheduler->schedule(fusion);
 
   // Modify the schedule to use warp reduction

@@ -131,9 +131,9 @@ static void MagicScheduler_DivMaxSoftDropFwd(
   std::vector<c10::IValue> at_inputs = {t0, t1};
   std::vector<at::Tensor> cg_outputs;
 
-  auto norm_params = getNormalizationHeuristics(&fusion, at_inputs);
+  auto norm_params = getPersistentHeuristics(&fusion, at_inputs);
   TORCH_CHECK(norm_params.has_value(), "Norm scheduler can't be used!");
-  scheduleNormalization(&fusion, norm_params.value());
+  schedulePersistentKernel(&fusion, norm_params.value());
 
   FusionExecutor fe;
   fe.compileFusion(&fusion);
@@ -191,9 +191,9 @@ static void MagicScheduler_DivMaxSoftDropBwd(
   std::vector<c10::IValue> at_inputs = {t0, t1, t2, t3};
   std::vector<at::Tensor> cg_outputs;
 
-  auto norm_params = getNormalizationHeuristics(&fusion, at_inputs);
+  auto norm_params = getPersistentHeuristics(&fusion, at_inputs);
   TORCH_CHECK(norm_params.has_value(), "Norm scheduler can't be used!");
-  scheduleNormalization(&fusion, norm_params.value());
+  schedulePersistentKernel(&fusion, norm_params.value());
 
   FusionExecutor fe;
   fe.compileFusion(&fusion);
@@ -305,9 +305,9 @@ static void MagicScheduler_BiasDropoutAddLayernormFwd(
   std::vector<c10::IValue> at_inputs = {t0, t1, t2, t3, t4};
   std::vector<at::Tensor> cg_outputs;
 
-  auto norm_params = getNormalizationHeuristics(&fusion, at_inputs);
+  auto norm_params = getPersistentHeuristics(&fusion, at_inputs);
   TORCH_CHECK(norm_params.has_value(), "Norm scheduler can't be used!");
-  scheduleNormalization(&fusion, norm_params.value());
+  schedulePersistentKernel(&fusion, norm_params.value());
 
   FusionExecutor fe;
   fe.compileFusion(&fusion);
@@ -420,9 +420,9 @@ static void MagicScheduler_BiasDropoutAddLayernormBwd1(
   std::vector<c10::IValue> at_inputs = {t0, t1, t2, t3};
   std::vector<at::Tensor> cg_outputs;
 
-  auto norm_params = getNormalizationHeuristics(&fusion, at_inputs);
+  auto norm_params = getPersistentHeuristics(&fusion, at_inputs);
   TORCH_CHECK(norm_params.has_value(), "Norm scheduler can't be used!");
-  scheduleNormalization(&fusion, norm_params.value());
+  schedulePersistentKernel(&fusion, norm_params.value());
 
   FusionExecutor fe;
   fe.compileFusion(&fusion);
@@ -531,9 +531,9 @@ static void MagicScheduler_BiasDropoutAddLayernormBwd2(
   std::vector<c10::IValue> at_inputs = {t4, t5, t1, t8};
   std::vector<at::Tensor> cg_outputs;
 
-  auto norm_params = getNormalizationHeuristics(&fusion, at_inputs);
+  auto norm_params = getPersistentHeuristics(&fusion, at_inputs);
   TORCH_CHECK(norm_params.has_value(), "Norm scheduler can't be used!");
-  scheduleNormalization(&fusion, norm_params.value());
+  schedulePersistentKernel(&fusion, norm_params.value());
 
   FusionExecutor fe;
   fe.compileFusion(&fusion);
@@ -622,9 +622,9 @@ static void MagicScheduler_BiasDropoutAddLayernormBwd3(
   std::vector<c10::IValue> at_inputs = {t0, t21};
   std::vector<at::Tensor> cg_outputs;
 
-  auto norm_params = getNormalizationHeuristics(&fusion, at_inputs);
+  auto norm_params = getPersistentHeuristics(&fusion, at_inputs);
   TORCH_CHECK(norm_params.has_value(), "Norm scheduler can't be used!");
-  scheduleNormalization(&fusion, norm_params.value());
+  schedulePersistentKernel(&fusion, norm_params.value());
 
   FusionExecutor fe;
   fe.compileFusion(&fusion);

@@ -25,11 +25,11 @@ namespace HeuristicCompileTime {
 //! Enum for all possible types of cached entries of compile-time info.
 enum class CompileTimeEntryType {
   VECTORIZABLE_INPUTS_AND_OUTPUTS,
+  UNROLLABLE_INPUTS_AND_OUTPUTS,
   REDUCTION_TVS,
   PERSISTENT_BUFFER_INFO,
-  REDUCTION_TOPOLOGY_INFO,
   SCOPE_PERSISTENT_FACTOR_INFO,
-  MAPPED_INPUTS_OUTPUTS
+  BROADCAST_BYTE_MULTIPLES
 };
 
 //! Entry type definition class for `VECTORIZABLE_INPUTS_AND_OUTPUTS`,
@@ -39,6 +39,15 @@ class VectorizableInputsAndOutputs {
   using DataType = std::vector<TensorView*>;
   static const CompileTimeEntryType EntryType =
       CompileTimeEntryType::VECTORIZABLE_INPUTS_AND_OUTPUTS;
+};
+
+//! Entry type definition class for `UNROLLABLE_INPUTS_AND_OUTPUTS`,
+//!  stores the unrollable TensorViews on a fusion's inputs and outputs.
+class UnrollableInputsAndOutputs {
+ public:
+  using DataType = std::vector<TensorView*>;
+  static const CompileTimeEntryType EntryType =
+      CompileTimeEntryType::UNROLLABLE_INPUTS_AND_OUTPUTS;
 };
 
 //! Entry type definition class for `REDUCTION_TVS`,
@@ -59,21 +68,6 @@ class PersistentBufferInfo {
       CompileTimeEntryType::PERSISTENT_BUFFER_INFO;
 };
 
-//! Auxiliary data type for `REDUCTION_TOPOLOGY_INFO` entry type.
-struct ReductionTopologyCheck {
-  bool supported_post_reduction_fusion = false;
-  bool has_post_reduction_bcast = false;
-};
-
-//! Entry type definition class for `REDUCTION_TOPOLOGY_INFO`,
-//!  stores results of reduction related topology checks.
-class ReductionTopologyInfo {
- public:
-  using DataType = ReductionTopologyCheck;
-  static const CompileTimeEntryType EntryType =
-      CompileTimeEntryType::REDUCTION_TOPOLOGY_INFO;
-};
-
 //! Auxiliary data types for `SCOPE_PERSISTENT_FACTOR_INFO` entry type.
 using ValToFactorMap = std::unordered_map<Val*, int>;
 using ValToFactorMapPtr = std::unique_ptr<ValToFactorMap>;
@@ -89,15 +83,16 @@ class ScopePersistentFactorInfo {
       CompileTimeEntryType::SCOPE_PERSISTENT_FACTOR_INFO;
 };
 
-//! Entry type definition class for `MAPPED_INPUTS_OUTPUTS`,
-//!  stores number of inputs/outputs non-broadcast iterdomain
-//!  that are mapped to a reference tv defined by schedulers
-//!  at compile time.
-class MappedInputsOutputs {
+//! Entry type definition class for `BROADCAST_BYTE_MULTIPLES`,
+//!  stores "byte multiples" information. This information can be used to figure
+//!  out if using a 2D scheduler how many bytes have to be transferred with
+//!  varying split locations. See BroadcastMultiple definition for more
+//!  information.
+class BroadcastMultiples {
  public:
-  using DataType = std::vector<int64_t>;
+  using DataType = std::vector<scheduler_utils::BroadcastMultiple>;
   static const CompileTimeEntryType EntryType =
-      CompileTimeEntryType::MAPPED_INPUTS_OUTPUTS;
+      CompileTimeEntryType::BROADCAST_BYTE_MULTIPLES;
 };
 
 //! Base abstract class for unified storage in `HeuristicSummary`,

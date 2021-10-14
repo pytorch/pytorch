@@ -295,9 +295,13 @@ TensorView* rfactorHelper(
 
   WelfordResult rtvs = reduction_tv->rFactor(axes, w_avg, w_var, w_n);
 
-  // TODO: this can be more generic, using avg because
-  //      WelfordOp::out() returns the avg
-  return rtvs.avg;
+  if (reduction_tv == w_n) {
+    return rtvs.n;
+  } else if (reduction_tv == w_var) {
+    return rtvs.var_sum;
+  } else {
+    return rtvs.avg;
+  }
 }
 
 namespace {

@@ -55,7 +55,7 @@ class ReplayRFactor : public ReplayTransformations {
     IterDomain* ido = new IterDomain(
         new Int(0),
         s->innerSplit() ? remainder->as<Int>() : s->factor(),
-        mapped->getParallelType(),
+        ParallelType::Serial,
         rfactor_outer ? IterType::Reduction : IterType::Iteration,
         true); // broadcast
 
@@ -63,7 +63,7 @@ class ReplayRFactor : public ReplayTransformations {
     IterDomain* idi = new IterDomain(
         new Int(0),
         s->innerSplit() ? s->factor() : remainder->as<Int>(),
-        mapped->getParallelType(),
+        ParallelType::Serial,
         rfactor_inner ? IterType::Reduction : IterType::Iteration,
         true);
 
@@ -118,7 +118,7 @@ class ReplayRFactor : public ReplayTransformations {
     IterDomain* merged_id = new IterDomain(
         new Int(0),
         merged_id_size->as<Int>(),
-        id_outer_mapped->getParallelType(),
+        ParallelType::Serial,
         rfactor_output ? IterType::Reduction : IterType::Iteration,
         true);
 
@@ -270,12 +270,15 @@ TensorDomain* TransformRFactor::runReplay(
 
   std::vector<IterDomain*> new_domain(orig_td->nDims(), nullptr);
   {
-    size_t i = 0;
-    for (auto id : orig_td->domain()) {
+    for (auto i : c10::irange(orig_td->nDims())) {
+      auto orig_id = orig_td->axis(i);
+      auto replayed_id_it = replayed.find(orig_id);
       TORCH_INTERNAL_ASSERT(
-          replayed.find(id) != replayed.end(),
+          replayed_id_it != replayed.end(),
           "Error during rfactor replay, missing an axis.");
-      new_domain[i++] = replayed[id];
+      auto replayed_id = replayed_id_it->second;
+      replayed_id->parallelize(orig_id->getParallelType());
+      new_domain[i++] = replayed_id;
     }
   }
 
@@ -375,12 +378,15 @@ TensorDomain* TransformRFactor::runReplay2(
 
   {
     // Construct the new domain, and append rfactor axes to the new root domain
-    size_t i = 0;
-    for (auto id : orig_td->domain()) {
-      if (replayed.find(id) != replayed.end()) {
-        new_domain.push_back(replayed[id]);
+    for (auto i : c10::irange(orig_td->nDims())) {
+      auto orig_id = orig_td->axis(i);
+      auto replayed_id_it = replayed.find(orig_id);
+      if (replayed_id_it != replayed.end()) {
+        auto replayed_id = replayed_id_it->second;
+        new_domain.push_back(replayed_id);
+        replayed_id->parallelize(orig_id->getParallelType());
       } else if (axes_set.find(i) == axes_set.end()) {
-        IterDomain* new_id = id->clone();
+        IterDomain* new_id = orig_id->clone();
         new_domain.push_back(new_id);
         new_root.push_back(new_id);
       }

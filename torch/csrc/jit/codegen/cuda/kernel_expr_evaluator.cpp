@@ -19,7 +19,10 @@ void ExpressionEvaluator::bind(
   TORCH_CHECK(!value->isConst(), "Tried to bind to a constant value");
   TORCH_CHECK(
       value->definition() == nullptr,
-      "Tried to bind to a value that is computed in the kernel IR");
+      "Tried to bind to a value that is computed in the kernel IR: ",
+      toString(value),
+      " with ",
+      concrete_value);
   known_values_[value] = concrete_value;
 }
 

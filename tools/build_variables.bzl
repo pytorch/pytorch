@@ -572,6 +572,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/scheduler/pointwise.cpp",
     "torch/csrc/jit/codegen/cuda/scheduler/normalization.cpp",
     "torch/csrc/jit/codegen/cuda/scheduler/reduction.cpp",
+    "torch/csrc/jit/codegen/cuda/scheduler/reduction_utils.cpp",
     "torch/csrc/jit/codegen/cuda/scheduler/registry.cpp",
     "torch/csrc/jit/codegen/cuda/scheduler/utils.cpp",
     "torch/csrc/jit/codegen/cuda/type_inference.cpp",
