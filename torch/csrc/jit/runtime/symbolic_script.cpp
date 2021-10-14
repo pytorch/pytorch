@@ -612,7 +612,7 @@ const std::vector<std::string> functions = {
             size = len(tensors)
             split_sizes = [0] * size
             for i in range(size):
-                if tensors[i].numel() > 0:
+                if tensors[i].size() != [0]:
                     split_sizes[i] = tensors[i].size()[dim]
 
             def backward(grad_output):
@@ -1156,40 +1156,16 @@ const std::vector<std::string> functions = {
                 return grad_input, None, grad_weight, grad_bias, None, None
             return output, backward
 
-        def AD_fused_dropout_backward(grad,
-                                      mask,
-                                      p1m: float):
-            p1r = 1. / p1m
-            grad_input = grad * (mask.type_as(grad) * p1r)
-            return grad_input
-
         def dropout(input,
                     p: float,
                     train: bool):
-            use_cuda = input.is_cuda
-            # lowering is specialized for cuda because cuda fuser can efficiently fuse those operations
-            # for cpu backend, where fusions are disabled, a different lowering that is more efficient
-            # in the absence of fusion is used
             p1m = 1. - p
-            if train:
-                if use_cuda:
-                    mask = torch.rand_like(input, memory_format=1) < p1m
-                    res = mask.type_as(input) * input * (1./p1m)
-                else:
-                    mask = torch.empty_like(input, memory_format=1)
-                    mask.bernoulli_(p1m)
-                    res = mask * input / p1m
-            else:
-                p1m = 1.
-                res = input
-                mask = torch.empty_like(input, memory_format=1)
+            p1r = 1. / p1m
+            mask = torch.rand_like(input, memory_format=1) < p1m
+            res = mask.type_as(input) * input * p1r
 
             def backward(grad_output):
-                use_cuda = grad_output.is_cuda
-                if use_cuda:
-                    grad_input = AD_fused_dropout_backward(grad_output, mask, p1m)
-                else:
-                    grad_input = grad_output * mask / p1m
+                grad_input = grad_output * (mask.type_as(grad_output) * p1r)
                 return grad_input, None, None
             return res, backward
 
@@ -1208,7 +1184,7 @@ const std::vector<std::string> functions = {
         def log_softmax(self, dim: int, dtype: Optional[int]):
             result = torch.log_softmax(self, dim, dtype)
             def backward(grad_output):
-                grad_self = torch._log_softmax_backward_data(grad_output, result, dim, self)
+                grad_self = torch._log_softmax_backward_data(grad_output, result, dim, self.dtype)
                 return grad_self, None, None
 
             return result, backward
@@ -1222,7 +1198,7 @@ const std::vector<std::string> functions = {
         def softmax(self, dim: int, dtype: Optional[int]):
             result = torch.softmax(self, dim, dtype)
             def backward(grad_output):
-                grad_self = torch._softmax_backward_data(grad_output, result, dim, self)
+                grad_self = torch._softmax_backward_data(grad_output, result, dim, self.dtype)
                 return grad_self, None, None
 
             return result, backward
@@ -1367,6 +1343,15 @@ const std::vector<std::string> functions = {
                 mask = (self >= threshold).type_as(self)
                 return grad_output * mask, None, None
             return torch.threshold(self, threshold, value), backward
+
+        def softplus(self,
+                      beta: number,
+                      threshold: number):
+            result = torch.softplus(self, beta, threshold)
+            def backward(grad_output):
+                z = torch.exp(result * beta)
+                return torch.where((result * beta) > threshold, grad_output, grad_output * (z - 1.) / z), None, None
+            return result, backward
 
         def fmod(self,
                  other: number):

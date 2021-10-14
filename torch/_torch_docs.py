@@ -435,6 +435,25 @@ Example::
             [ 0.7573, -3.9555, -2.8681]])
 """.format(**common_args, **tf32_notes))
 
+add_docstr(torch.adjoint,
+           r"""
+adjoint(Tensor) -> Tensor
+Returns a view of the tensor conjugated and with the last two dimensions transposed.
+
+``x.adjoint()`` is equivalent to ``x.transpose(-2, -1).conj()`` for complex tensors and
+``x.transpose(-2, -1)`` for real tensors.
+
+Example::
+    >>> x = torch.arange(4, dtype=torch.float)
+    >>> A = torch.complex(x, x).reshape(2, 2)
+    >>> A
+    tensor([[0.+0.j, 1.+1.j],
+            [2.+2.j, 3.+3.j]])
+    >>> A.adjoint()
+    tensor([[0.-0.j, 2.-2.j],
+            [1.-1.j, 3.-3.j]])
+""")
+
 add_docstr(torch.sspaddmm,
            r"""
 sspaddmm(input, mat1, mat2, *, beta=1, alpha=1, out=None) -> Tensor
@@ -644,9 +663,6 @@ add_docstr(torch.any,
            r"""
 any(input) -> Tensor
 
-Args:
-    {input}
-
 Tests if any element in :attr:`input` evaluates to `True`.
 
 .. note:: This function matches the behaviour of NumPy in returning
@@ -730,16 +746,13 @@ Create a view of an existing `torch.Tensor` :attr:`input` with specified
 :attr:`size`, :attr:`stride` and :attr:`storage_offset`.
 
 .. warning::
-    More than one element of a created tensor may refer to a single memory
-    location. As a result, in-place operations (especially ones that are
-    vectorized) may result in incorrect behavior. If you need to write to
-    the tensors, please clone them first.
-
-    Many PyTorch functions, which return a view of a tensor, are internally
-    implemented with this function. Those functions, like
-    :meth:`torch.Tensor.expand`, are easier to read and are therefore more
-    advisable to use.
-
+    Prefer using other view functions, like :meth:`torch.Tensor.expand`,
+    to setting a view's strides manually with `as_strided`, as this
+    function's behavior depends on the implementation of a tensor's storage.
+    The constructed view of the storage must only refer to elements within
+    the storage or a runtime error will be thrown, and if the view is
+    "overlapped" (with multiple indices referring to the same element in
+    memory) its behavior is undefined.
 
 Args:
     {input}
@@ -10291,16 +10304,11 @@ add_docstr(torch.empty_strided,
            r"""
 empty_strided(size, stride, *, dtype=None, layout=None, device=None, requires_grad=False, pin_memory=False) -> Tensor
 
-Returns a tensor filled with uninitialized data. The shape and strides of the tensor is
-defined by the variable argument :attr:`size` and :attr:`stride` respectively.
-``torch.empty_strided(size, stride)`` is equivalent to
-``torch.empty(size).as_strided(size, stride)``.
+Creates a tensor with the specified :attr:`size` and :attr:`stride` and filled with undefined data.
 
 .. warning::
-    More than one element of the created tensor may refer to a single memory
-    location. As a result, in-place operations (especially ones that are
-    vectorized) may result in incorrect behavior. If you need to write to
-    the tensors, please clone them first.
+    If the constructed tensor is "overlapped" (with multiple indices referring to the same element
+    in memory) its behavior is undefined.
 
 Args:
     size (tuple of ints): the shape of the output tensor

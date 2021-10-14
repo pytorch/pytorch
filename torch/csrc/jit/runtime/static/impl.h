@@ -3,6 +3,7 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/variant.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -32,6 +33,50 @@ using FastSet = std::unordered_set<Key>;
 TORCH_API bool canEnableStaticRuntime(
     const std::shared_ptr<torch::jit::Graph>& graph);
 
+TORCH_API std::string dumpValueSet(
+    const FastSet<const Value*>& value_set,
+    const char* set_name = "");
+
+// Group values used by `graph` into three categories:
+//
+// - output_aliases:
+//     values that are either outputs or contain aliases of outputs
+// - external_aliases:
+//     values that are inputs, constants, outputs, or their aliases.
+//     The output aliases that end up here are as a result of aliasDb failing to
+//     recognize them as outputs due to collection object (e.g., Tuple) aliasing
+//     inputs.
+// Values that dont't show up in output_aliases or external_aliases are created
+// and consumed within the graph.
+class ValueGroup {
+ public:
+  explicit ValueGroup() = default;
+  void init(const std::shared_ptr<torch::jit::Graph>& graph, AliasDb& db);
+
+  bool isExternalAlias(const Value* value) const {
+    return external_aliases_.find(value) != external_aliases_.end();
+  }
+
+  bool isOutputAlias(const Value* value) const {
+    return output_aliases_.find(value) != output_aliases_.end();
+  }
+
+  bool isAlwaysAlive(const Value* value) const {
+    return isExternalAlias(value) || isOutputAlias(value);
+  }
+
+  std::string toString() const {
+    return c10::str(
+        dumpValueSet(output_aliases_, "output_aliases_"),
+        "\n",
+        dumpValueSet(external_aliases_, "external_aliases_"));
+  }
+
+ private:
+  FastSet<const Value*> output_aliases_;
+  FastSet<const Value*> external_aliases_;
+};
+
 struct TORCH_API StaticModuleOptions {
   // to batch allocate (deallocate) tensor storage for all non-escaping
   // temporary tensors
@@ -44,7 +89,7 @@ struct TORCH_API StaticModuleOptions {
   // to batch allocate tensor storage for output tensors of the
   // graph, where storage is deallocated outside static runtime
   // (enable_out_variant must be true)
-  bool optimize_graph_output_memory{false};
+  bool manage_output_tensors{false};
 };
 
 /// The static runime supports two execution modes.
@@ -113,7 +158,7 @@ class TORCH_API StaticModule {
 
  private:
   explicit StaticModule(
-      std::pair<std::shared_ptr<torch::jit::Graph>, std::shared_ptr<Module>>
+      std::pair<std::shared_ptr<torch::jit::Graph>, c10::optional<Module>>
           graph_and_module,
       const StaticModuleOptions& opts);
 
@@ -141,6 +186,11 @@ class TORCH_API StaticModule {
   }
 
   const StaticModuleOptions& opts() const;
+
+  const ValueGroup& valueGroup() const {
+    return value_group_;
+  }
+
   size_t num_inputs() const;
   size_t num_outputs() const;
 
@@ -160,7 +210,7 @@ class TORCH_API StaticModule {
     return nodes_;
   }
 
-  bool is_optimizable_container_type(Node* n) const {
+  bool is_optimizable_container_type(const Node* n) const {
     auto it = node_is_optimizable_container_type_.find(n);
     return it != node_is_optimizable_container_type_.end();
   }
@@ -174,8 +224,8 @@ class TORCH_API StaticModule {
     return value_to_same_storage_values_;
   }
 
-  const FastSet<const Value*>& external_values() const {
-    return external_values_;
+  const ValueGroup& value_group() const {
+    return value_group_;
   }
 
   bool first_input_is_self() const {
@@ -188,7 +238,7 @@ class TORCH_API StaticModule {
   StaticModuleOptions opts_;
   bool first_input_is_self_{false};
   std::shared_ptr<torch::jit::Graph> graph_;
-  std::shared_ptr<torch::jit::Module> module_;
+  c10::optional<torch::jit::Module> module_;
   c10::optional<c10::FunctionSchema> schema_;
   std::unique_ptr<StaticRuntime> cached_runtime_;
 
@@ -202,20 +252,23 @@ class TORCH_API StaticModule {
   // map a node idx (in graph order) to a vector of ssa_defs for node inputs
   FastMap<int, std::vector<DefInfo>> node_inputs_ssa_def_map_;
 
-  // Bookkeeping for MemoryPlanner in StaticRuntime
-  // values whose live-time exceeds that of running one inference (e.g., input,
-  // output, prim::Constants, and their aliases)
-  FastSet<const Value*> external_values_;
+  ValueGroup value_group_;
+
   // map a value to the set of values that may share the same storage with it
   FastMap<const Value*, std::vector<const Value*>>
       value_to_same_storage_values_;
 
-  FastSet<Node*> node_is_optimizable_container_type_;
+  FastSet<const Node*> node_is_optimizable_container_type_;
 };
 
 class TORCH_API StaticRuntime {
  public:
   explicit StaticRuntime(const StaticModule& sm);
+  StaticRuntime(StaticRuntime&&) = delete;
+  StaticRuntime& operator=(StaticRuntime&&) = delete;
+  ~StaticRuntime();
+
+  C10_DISABLE_COPY_AND_ASSIGN(StaticRuntime);
 
   std::vector<at::Tensor> operator()(const std::vector<at::Tensor>& inps);
 
@@ -300,6 +353,14 @@ class TORCH_API StaticRuntime {
     return static_module_.is_optimizable_container_type(n);
   }
 
+  // Deallocate managed output tensors. This should be called only when all the
+  // references to the output from Static Runtime are gone.
+  void deallocateOutputTensors();
+
+  bool checkOutputTensorMemoryLeaks();
+
+  bool isManagedOutputTensor(const IValue& ivalue);
+
  private:
   // helper method for copying input args/kwargs into inputs_
   void set_inputs(
@@ -323,80 +384,6 @@ class TORCH_API StaticRuntime {
   std::vector<ProcessedNode> nodes_;
 };
 
-/// There are three types of ops in a processed graph in Static Runtime:
-///   1. op with _out variant
-///   2. view producing op
-///   3. tensor producing op (could be replaced with type 1 by adding the _out
-///      variant to Static Runtime)
-/// In Static Runtime, type 2 ops are replaced with their corespoinding copy
-/// versions when enable_out_variant is enabled and become type 1 ops.The memory
-/// planner only manages tensors that are outputs of type 1 ops. For type 3, the
-/// output tensors are allocated inside the operator and can't be directly
-/// managed by memory planner.
-///
-/// Memory planner tries to minimize the number of memory allocations by
-/// tracking the output tensors of ops with _out variants with unique DataPtr
-/// (part of StorageImpl). It tries to do this in several steps:
-///   1. record the max memory usage for each Tensor with unique DataPtr at the
-///      end of each iteration
-///   2. in the next iteration, allocate the buffer for the max total usage and
-///      compute the offset of each allocation with regard to the single memory
-///      buffer, optionally reusing memory. In the first iteration, we rely on
-///      the default allocator for memory allocation.
-///   3. free the buffer at the end of each iteration
-/// Steps 1 and 3 are handled by `deallocate()`, and step 2 by `allocate()`.
-/// Only models with simple output types are supported, i.e. None, Tensor or
-/// List/Tuple/Dict of Tensors. Complex output types such as List of Lists are
-/// not supported.
-
-class MemoryPlanner {
- public:
-  explicit MemoryPlanner(
-      StaticRuntime* runtime,
-      const FastMap<const Value*, std::vector<const Value*>>&,
-      const FastSet<const Value*>& external_values,
-      bool enable_out_variant,
-      bool manage_graph_output_memory);
-  // disable copying and moving
-  MemoryPlanner(const MemoryPlanner&) = delete;
-  MemoryPlanner& operator=(const MemoryPlanner&) = delete;
-  MemoryPlanner(MemoryPlanner&&) = delete;
-  MemoryPlanner& operator=(MemoryPlanner&&) = delete;
-
-  void allocate();
-  void deallocate();
-
-  size_t total_managed() const {
-    return managed_bytes_;
-  }
-  size_t total_reused_tensors() const {
-    return reused_tensors_;
-  }
-
- private:
-  // ivalues created in one run but not managed by MemoryPlanner
-  std::vector<IValue*> unmanaged_ivalues_;
-
-  // each pair contains the size (in bytes) of data to be allocated
-  // and a vector of Tensors that should be backed by that same data.
-  // Thus, if memonger is disabled, all vectors are of size 1.
-  std::vector<std::pair<size_t, std::vector<at::Tensor*>>> managed_tensors_;
-  at::DataPtr buffer_; // allocated each time we call Run()
-  size_t managed_bytes_{0};
-  size_t reused_tensors_{0};
-
-  // since output tensors are alive after one inference, their storage
-  // is managed differently (e.g., deallocation happens at client side)
-  // std::vector<std::pair<size_t, std::vector<at::Tensor*>>>
-  //     managed_output_storage_;
-  // size_t managed_output_bytes_{0};
-  // size_t reused_output_tensors_{0};
-  // at::DataPtr output_buffer_; // allocated each time we call Run()
-
-  static size_t compute_aligned_tensor_size(size_t nbytes);
-  static at::DataPtr allocate_buffer(size_t size);
-};
-
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_API ProcessedNode {
  public:
@@ -404,8 +391,53 @@ class TORCH_API ProcessedNode {
   ProcessedNode() = default;
   ProcessedNode(
       Node* n,
-      std::vector<const IValue*>&& inputs,
+      std::unique_ptr<const IValue*[]> inputs,
+      size_t inputsSize,
       bool enable_out_variant);
+
+  ProcessedNode(const ProcessedNode& rhs)
+      : node_(rhs.node_),
+        fn_(rhs.fn_),
+        inputs_(std::make_unique<const IValue*[]>(rhs.inputs_size_)),
+        outputs_(std::make_unique<IValue[]>(rhs.outputs_size_)),
+        inputs_size_(rhs.inputs_size_),
+        outputs_size_(rhs.outputs_size_),
+        op_name_(rhs.op_name_) {
+    std::copy(
+        rhs.inputs_.get(), rhs.inputs_.get() + inputs_size_, inputs_.get());
+    std::copy(
+        rhs.outputs_.get(), rhs.outputs_.get() + outputs_size_, outputs_.get());
+  }
+
+  ProcessedNode& operator=(const ProcessedNode& rhs) {
+    if (this == &rhs) {
+      return *this;
+    }
+    node_ = rhs.node_;
+    fn_ = rhs.fn_;
+    if (!inputs_ || inputs_size_ != rhs.inputs_size_) {
+      inputs_ = std::make_unique<const IValue*[]>(rhs.inputs_size_);
+      inputs_size_ = rhs.inputs_size_;
+    }
+    std::copy(
+        rhs.inputs_.get(), rhs.inputs_.get() + inputs_size_, inputs_.get());
+
+    if (!outputs_ || outputs_size_ != rhs.outputs_size_) {
+      outputs_ = std::make_unique<IValue[]>(rhs.outputs_size_);
+      outputs_size_ = rhs.outputs_size_;
+    }
+    std::copy(
+        rhs.outputs_.get(), rhs.outputs_.get() + outputs_size_, outputs_.get());
+    op_name_ = rhs.op_name_;
+
+    return *this;
+  }
+
+  // These should be noexcept, but some Android build is failing
+  // saying the noexcept specification doesn't match the calculated
+  // one. Maybe c10::variant is throwing it off?
+  ProcessedNode(ProcessedNode&&) = default;
+  ProcessedNode& operator=(ProcessedNode&&) = default;
 
   void run();
 
@@ -415,13 +447,13 @@ class TORCH_API ProcessedNode {
 
   // Input is readonly
   const IValue& Input(size_t i) const {
-    DCHECK(i < inputs_.size());
+    DCHECK(i < inputs_size_);
     return *inputs_[i];
   }
 
   // Output is readwrite
   IValue& Output(size_t i) {
-    DCHECK(i < outputs_.size());
+    DCHECK(i < outputs_size_);
     return outputs_[i];
   }
 
@@ -429,31 +461,42 @@ class TORCH_API ProcessedNode {
     inputs_[index] = ival;
   }
 
-  const std::vector<IValue>& outputs() const {
-    return outputs_;
+  C10_NODISCARD c10::ArrayRef<const IValue> outputs() const {
+    return c10::ArrayRef<const IValue>(outputs_.get(), outputs_size_);
   }
 
-  const std::vector<const IValue*>& inputs() const {
-    return inputs_;
+  C10_NODISCARD c10::ArrayRef<const IValue*> inputs() const {
+    return c10::ArrayRef<const IValue*>(inputs_.get(), inputs_size_);
   }
+
+  std::vector<IValue> clone_inputs() const;
 
   bool has_out_variant() const {
-    return static_cast<bool>(fn_);
+    return fn_.index() == 0;
   }
 
   bool has_native() const {
-    return static_cast<bool>(native_fn_);
+    return fn_.index() == 1;
   }
 
   bool verify_no_memory_overlap() const;
 
+  const char* get_op_name() const {
+    return op_name_;
+  }
+
  private:
+  void run_impl();
+
   Node* node_;
-  c10::optional<Operation> op_;
-  std::function<void(ProcessedNode*)> fn_;
-  std::function<void(ProcessedNode*)> native_fn_;
-  std::vector<const IValue*> inputs_; // unowned
-  std::vector<IValue> outputs_;
+  using OutVariant = std::function<void(ProcessedNode*)>;
+  using NativeFunction = std::function<void(ProcessedNode*)>;
+  c10::variant<OutVariant, NativeFunction, Operation> fn_;
+  std::unique_ptr<const IValue*[]> inputs_; // unowned
+  std::unique_ptr<IValue[]> outputs_;
+  size_t inputs_size_;
+  size_t outputs_size_;
+  const char* op_name_;
 };
 
 } // namespace jit

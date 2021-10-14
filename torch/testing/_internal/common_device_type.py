@@ -14,8 +14,11 @@ from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, DeterministicGuard, TEST_SKIP_NOARCH, \
     _TestParametrizer, dtype_name, TEST_WITH_MIOPEN_SUGGEST_NHWC
-from torch.testing._internal.common_cuda import _get_torch_cuda_version
+from torch.testing._internal.common_cuda import _get_torch_cuda_version, TEST_CUSPARSE_GENERIC
 from torch.testing._internal.common_dtype import get_all_dtypes
+
+# The implementation should be moved here as soon as the deprecation period is over.
+from torch.testing._legacy import get_all_device_types  # noqa: F401
 
 try:
     import psutil  # type: ignore[import]
@@ -1036,6 +1039,18 @@ def onlyCUDA(fn):
     return onlyOn('cuda')(fn)
 
 
+def disablecuDNN(fn):
+
+    @wraps(fn)
+    def disable_cudnn(self, *args, **kwargs):
+        if self.device_type == 'cuda' and self.has_cudnn():
+            with torch.backends.cudnn.flags(enabled=False):
+                return fn(self, *args, **kwargs)
+        return fn(self, *args, **kwargs)
+
+    return disable_cudnn
+
+
 def expectedFailureCUDA(fn):
     return expectedFailure('cuda')(fn)
 
@@ -1196,6 +1211,9 @@ def skipCUDAIfCudnnVersionLessThan(version=0):
         return wrap_fn
     return dec_fn
 
+# Skips a test on CUDA if cuSparse generic API is not available
+def skipCUDAIfNoCusparseGeneric(fn):
+    return skipCUDAIf(not TEST_CUSPARSE_GENERIC, "cuSparse Generic API not available")(fn)
 
 def skipCUDAIfNoCudnn(fn):
     return skipCUDAIfCudnnVersionLessThan(0)(fn)

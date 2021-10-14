@@ -180,14 +180,16 @@ struct SymbolicShapeAnalyzer {
       std::shared_ptr<Graph> shape_compute_graph,
       const AliasDb& db)
       : graph_(shape_compute_graph->copy()), node_(n) {
-    for (size_t i = 0; i < node_->inputs().size(); i++) {
+    // NB: shape compute graphs may have less inputs than their node
+    // counterparts to allow e.g. sharing one single unary definition
+    for (size_t i = 0; i < graph_->inputs().size(); i++) {
       auto type = node_->input(i)->type();
 
       if (auto opt_type =
               graph_->inputs().at(i)->type()->cast<OptionalType>()) {
         // None will get handled with constant substitution later
         if (!type->cast<OptionalType>() &&
-            !NoneType::get()->isSubtypeOf(type)) {
+            !NoneType::get()->isSubtypeOf(*type)) {
           graph_->inputs().at(i)->setType(opt_type->getElementType());
         }
       } else if (graph_->inputs().at(i)->type()->cast<NumberType>()) {

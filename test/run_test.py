@@ -78,7 +78,6 @@ def discover_tests(
         rc += extra_tests
     return sorted(rc)
 
-
 TESTS = discover_tests(
     blocklisted_patterns=[
         'ao',
@@ -134,6 +133,8 @@ TESTS = discover_tests(
         "distributed/elastic/multiprocessing/api_test",
     ]
 )
+
+FSDP_TEST = [test for test in TESTS if test.startswith("distributed/fsdp")]
 
 # Tests need to be run with pytest.
 USE_PYTEST_LIST = [
@@ -197,7 +198,8 @@ WINDOWS_BLOCKLIST = [
     "distributed/elastic/agent/server/test/api_test",
     "distributed/elastic/multiprocessing/api_test",
     "distributed/_sharded_tensor/test_sharded_tensor",
-]
+    "distributed/_sharded_tensor/ops/test_linear",
+] + FSDP_TEST
 
 ROCM_BLOCKLIST = [
     "distributed/nn/jit/test_instantiator",
@@ -205,12 +207,13 @@ ROCM_BLOCKLIST = [
     "distributed/rpc/test_tensorpipe_agent",
     "distributed/rpc/cuda/test_tensorpipe_agent",
     "distributed/_sharded_tensor/test_sharded_tensor",
+    "distributed/_sharded_tensor/ops/test_linear",
     "test_determination",
     "test_multiprocessing",
     "test_jit_legacy",
     "test_type_hints",
     "test_openmp",
-]
+] + FSDP_TEST
 
 RUN_PARALLEL_BLOCKLIST = [
     "test_cpp_extensions_jit",
@@ -223,7 +226,7 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_show_pickle",
     "test_tensorexpr",
     "test_cuda_primary_ctx",
-] + [test for test in TESTS if test.startswith("distributed/")]
+] + FSDP_TEST
 
 WINDOWS_COVERAGE_BLOCKLIST = []
 
@@ -339,7 +342,8 @@ DISTRIBUTED_TESTS = [
     "distributed/elastic/multiprocessing/api_test",
     "distributed/_sharding_spec/test_sharding_spec",
     "distributed/_sharded_tensor/test_sharded_tensor",
-]
+    "distributed/_sharded_tensor/ops/test_linear",
+] + [test for test in TESTS if test.startswith("distributed/fsdp")]
 
 # Dictionary matching test modules (in TESTS) to lists of test cases (within that test_module) that would be run when
 # options.run_specified_test_cases is enabled.

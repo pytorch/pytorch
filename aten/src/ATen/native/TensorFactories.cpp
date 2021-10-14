@@ -507,10 +507,10 @@ Tensor new_full(
     c10::optional<Device> device,
     c10::optional<bool> pin_memory
     ) {
-  // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
-  return at::full(size, fill_value, self.options().merge_in(options));
+  Tensor r = self.new_empty(size, TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory));
+  r.fill_(fill_value);
+  return r;
 }
 
 namespace {
@@ -608,11 +608,9 @@ Tensor new_ones(
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options =
-      TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
-          pin_memory);
-
-  return at::ones(size, self.options().merge_in(options));
+  Tensor r = self.new_empty(size, TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory));
+  r.fill_(1.);
+  return r;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ scalar_tensor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1099,10 +1097,9 @@ Tensor new_zeros(
     c10::optional<Device> device,
     c10::optional<bool> pin_memory
     ) {
-  // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
-
-  return at::zeros(size, self.options().merge_in(options));
+  Tensor r = self.new_empty(size, TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory));
+  r.zero_();
+  return r;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ bartlett_window ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

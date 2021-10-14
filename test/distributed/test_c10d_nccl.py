@@ -293,6 +293,20 @@ class ProcessGroupNCCLTest(TestCase):
                 tensors[i],
             )
 
+        # Avg (only available for NCCL 2.10+)
+        if torch.cuda.nccl.version() >= (2, 10, 0):
+            tensors = [torch.tensor([i + 1.]).cuda(i) for i in range(self.num_gpus)]
+
+            allreduce(tensors, c10d.ReduceOp.AVG)
+
+            for i in range(self.num_gpus):
+                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+                ndev = float(self.num_gpus)
+                self.assertEqualIgnoreType(
+                    torch.tensor([ndev * (ndev + 1.) / (2. * ndev)]),
+                    tensors[i],
+                )
+
         # Product
         tensors = []
         for i in range(self.num_gpus):
@@ -2003,7 +2017,7 @@ class DistributedDataParallelTest(
     # A list of tests for ddp with activation checkpointing
     # when gradient_as_bucket_view=True, False.
     # Most of the tests are referred to
-    # https://github.com/facebookresearch/fairscale/blob/master/tests/nn/pipe/test_checkpoint_ddp.py
+    # https://github.com/facebookresearch/fairscale/blob/main/tests/nn/pipe/test_checkpoint_ddp.py
     class CheckpointOnceModule(nn.Module):
         def __init__(self):
             super().__init__()
@@ -2214,6 +2228,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     @skip_if_rocm
+    @sandcastle_skip("Test does not pass when run locally")
     def test_nccl_errors_nonblocking(self):
         # Note: we unset and restore NCCL_ASYNC_ERROR_HANDLING for this test
         # since test_c10d_common runs with async error handling by default, but this

@@ -560,6 +560,11 @@ static inline void checkLinalgCompatibleDtype(const std::string& fn_name, Scalar
       out_name, " with dtype ", out_type);
 }
 
+static inline void checkNotComplexTolerance(const Tensor& tol, const c10::string_view f_name, const c10::string_view tol_name) {
+  TORCH_CHECK(!at::isComplexType(tol.scalar_type()),
+              f_name, ": ", tol_name, " tensor of complex type is not supported. Got ", tol.scalar_type());
+}
+
 /*
   Two types of 'other' tensors are supported when solving
   a system of linear equations matmul(input, x) = other:
@@ -576,9 +581,24 @@ static inline bool linalg_solve_is_vector_rhs(const Tensor& input, const Tensor&
   return vector_case;
 }
 
-static inline void checkNotComplexTolerance(const Tensor& tol, const c10::string_view f_name, const c10::string_view tol_name) {
-  TORCH_CHECK(!at::isComplexType(tol.scalar_type()),
-              f_name, ": ", tol_name, " tensor of complex type is not supported. Got ", tol.scalar_type());
+static inline bool is_blas_compatible_column_major_order(const Tensor& input) {
+  IntArrayRef input_strides = input.strides();
+  IntArrayRef input_sizes = input.sizes();
+  auto ndim = input.dim();
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2);
+  auto leading_dimension = input_strides[ndim - 1];
+  auto rows = input_sizes[ndim - 2];
+  return (input_strides[ndim - 2] == 1) && (leading_dimension >= std::max<int64_t>(1, rows));
+}
+
+static inline bool is_blas_compatible_row_major_order(const Tensor& input) {
+  IntArrayRef input_strides = input.strides();
+  IntArrayRef input_sizes = input.sizes();
+  auto ndim = input.dim();
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2);
+  auto leading_dimension = input_strides[ndim - 2];
+  auto cols = input_sizes[ndim - 1];
+  return (input_strides[ndim - 1] == 1) && (leading_dimension >= std::max<int64_t>(1, cols));
 }
 
 }}  // namespace at::native

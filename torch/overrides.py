@@ -25,6 +25,7 @@ import __future__
 import collections
 import functools
 import types
+import warnings
 from typing import Dict, Set, List, Any, Callable, Iterable, Type
 
 import torch
@@ -232,6 +233,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor.to_sparse_csr,
         Tensor._reduce_ex_internal,
         Tensor._fix_weakref,
+        Tensor._make_wrapper_subclass,
         Tensor._python_dispatch.__get__,
         Tensor._conj,
         Tensor._conj_physical,
@@ -298,6 +300,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.adaptive_avg_pool1d: lambda input, output_size: -1,
         torch.adaptive_max_pool1d: lambda inputs, output_size: -1,
         torch.acos: lambda input, out=None: -1,
+        torch.adjoint: lambda input: -1,
         torch.arccos: lambda input, out=None: -1,
         torch.acosh: lambda input, out=None: -1,
         torch.arccosh: lambda input, out=None: -1,
@@ -475,6 +478,10 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.fft.irfft: lambda input, n=None, dim=-1, norm=None: -1,
         torch.fft.hfft: lambda input, n=None, dim=-1, norm=None: -1,
         torch.fft.ihfft: lambda input, n=None, dim=-1, norm=None: -1,
+        torch.fft.hfft2: lambda input, s=None, dim=(-2, -1), norm=None: -1,
+        torch.fft.ihfft2: lambda input, s=None, dim=(-2, -1), norm=None: -1,
+        torch.fft.hfftn: lambda input, s=None, dim=-1, norm=None: -1,
+        torch.fft.ihfftn: lambda input, s=None, dim=-1, norm=None: -1,
         torch.fft.fftn: lambda input, s=None, dim=None, norm=None: -1,
         torch.fft.ifftn: lambda input, s=None, dim=None, norm=None: -1,
         torch.fft.rfftn: lambda input, s=None, dim=None, norm=None: -1,
@@ -937,6 +944,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.special.log_softmax: lambda input, dim, dtype=None: -1,
         torch.special.round: lambda input: -1,
         torch.special.sinc: lambda input: -1,
+        torch.special.softmax: lambda input, dim, dtype=None: -1,
         torch.special.multigammaln: lambda input, p: -1,
         torch.special.ndtri: lambda input: -1,
         torch.special.ndtr: lambda input: -1,
@@ -1020,6 +1028,9 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.__setitem__: lambda self, k, v: -1,
         Tensor.__setstate__: lambda self, d: -1,
         Tensor.T.__get__: lambda self: -1,
+        Tensor.H.__get__: lambda self: -1,
+        Tensor.mT.__get__: lambda self: -1,
+        Tensor.mH.__get__: lambda self: -1,
         Tensor._backward_hooks.__get__: lambda self: -1,
         Tensor._base.__get__: lambda self: -1,
         Tensor._cdata.__get__: lambda self: -1,
@@ -1065,6 +1076,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.col_indices: lambda self: -1,
         Tensor._update_names: lambda self, names, inplace: -1,
         Tensor._values: lambda self: -1,
+        Tensor.adjoint: lambda self: -1,
         Tensor.align_as: lambda self, other: -1,
         Tensor.align_to: lambda self, order, ellipsis_idx: -1,
         Tensor.apply_: lambda self, callable: -1,
@@ -1146,6 +1158,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.sparse_resize_and_clear_: lambda self, size1, size2, dense_dim: -1,
         Tensor.sspaddmm: lambda self, mat1, mat2, beta=1, alpha=1, out=None: -1,
         Tensor.storage: lambda self: -1,
+        Tensor._storage: lambda self: -1,
         Tensor.storage_offset: lambda self: -1,
         Tensor.storage_type: lambda self: -1,
         Tensor.sum_to_size: lambda self, size: -1,
@@ -1341,9 +1354,17 @@ def handle_torch_function(
 
     # Call overrides
     for overloaded_arg in overloaded_args:
+        # This call needs to become a classmethod call in the future.
+        # See https://github.com/pytorch/pytorch/issues/63767
+        torch_func_method = overloaded_arg.__torch_function__
+        if hasattr(torch_func_method, "__self__") and torch_func_method.__self__ is overloaded_arg:
+            warnings.warn("Defining your `__torch_function__ as a plain method is deprecated and "
+                          "will be an error in PyTorch 1.11, please define it as a classmethod.",
+                          DeprecationWarning)
+
         # Use `public_api` instead of `implementation` so __torch_function__
         # implementations can do equality/identity comparisons.
-        result = overloaded_arg.__torch_function__(public_api, types, args, kwargs)
+        result = torch_func_method(public_api, types, args, kwargs)
 
         if result is not NotImplemented:
             return result
@@ -1529,7 +1550,8 @@ def is_tensor_like(inp):
     But, they can be made Tensor-like by implementing __torch_function__.
 
     >>> class TensorLike:
-    ...     def __torch_function__(self, func, types, args, kwargs):
+    ...     @classmethod
+    ...     def __torch_function__(cls, func, types, args, kwargs):
     ...         return -1
     >>> is_tensor_like(TensorLike())
     True
