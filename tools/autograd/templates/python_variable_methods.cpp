@@ -58,6 +58,8 @@ namespace {
 }
 
 // hold onto generated return type.
+// note: this is not in anonymous namespace as
+// the file `python_variable` references this with `extern` keyword.
 std::vector<PyTypeObject*> return_types_variable = {
   ${py_return_types_array}
 };
