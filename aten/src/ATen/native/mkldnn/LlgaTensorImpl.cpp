@@ -1,6 +1,8 @@
+#include <ATen/Config.h>
+
+#if AT_MKLDNN_ENABLED()
 #include <ATen/native/mkldnn/LlgaTensorImpl.h>
 #include <c10/core/CPUAllocator.h>
-
 namespace at {
 
 LlgaTensorImpl::LlgaTensorImpl(
@@ -122,3 +124,5 @@ at::ScalarType LlgaTensorDesc::aten_scalar_type() const {
 }
 
 } // namespace at
+
+#endif // AT_MKLDNN_ENABLED()
