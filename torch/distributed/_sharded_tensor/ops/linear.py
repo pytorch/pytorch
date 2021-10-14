@@ -1,3 +1,6 @@
+from typing import cast
+
+import itertools
 import torch
 import torch.distributed as dist
 from torch.distributed._sharding_spec import ChunkShardingSpec
@@ -5,7 +8,6 @@ from torch.distributed._sharding_spec._internals import (
     get_split_size,
     get_chunked_dim_size,
 )
-from typing import List, cast
 
 
 def sharded_linear(types, args, kwargs, pg):
@@ -42,7 +44,7 @@ def sharded_linear(types, args, kwargs, pg):
     3. Now the local matmul results are aggregated and shared to all the
        corresponding ranks using a reduce_scatter operation ensuring each rank
        aggregates its own result. This is essentially a sum operation across
-       all the (16 x 17) local computations we did for each rank.
+       all the (13 x 17) local computations we did for each rank.
     4. Finally, we add the bias term locally to the final computation.
 
     COLWISE SHARDING
@@ -80,17 +82,18 @@ def sharded_linear(types, args, kwargs, pg):
     if not isinstance(weight, ShardedTensor):
         raise TypeError("weight needs to be ShardedTensor")
     if len(input.size()) < 2:
-        raise ValueError('Input needs to have at least 2 dims')
+        raise ValueError("Input needs to have at least 2 dims")
     weight_size = cast(torch.Size, weight.size())
     if len(weight_size) != 2:
-        raise ValueError('Weight needs to have exactly 2 dims')
+        raise ValueError("Weight needs to have exactly 2 dims")
     if len(bias.size()) != 1:
-        raise ValueError('Bias needs to have exactly 1 dim')
+        raise ValueError("Bias needs to have exactly 1 dim")
 
     if input.size()[-1] != weight_size[1]:
         raise ValueError(
-            f'Input dim: {input.size()[1]} does not match '
-            f'appropriate weight dim: {weight_size[1]}')
+            f"Input dim: {input.size()[1]} does not match "
+            f"appropriate weight dim: {weight_size[1]}"
+        )
     if not isinstance(weight._sharding_spec, ChunkShardingSpec):
         raise ValueError("Only ChunkShardingSpec supported for ShardedTensor ops!")
     if len(weight.local_shards()) != 1:
@@ -126,17 +129,18 @@ def _handle_col_wise_sharding(input, world_size, weight, local_shard_t, bias, pg
 
     # Compute output splits
     split_size = get_split_size(sharding_dim_size, world_size)
-    output_split_sizes = [
-        get_chunked_dim_size(sharding_dim_size, split_size, placement.rank())
-        for placement in weight._sharding_spec.placements
-    ]
+    output_split_sizes = [None] * world_size
+    for idx, placement in enumerate(weight._sharding_spec.placements):
+        output_split_sizes[placement.rank()] = get_chunked_dim_size(
+            sharding_dim_size, split_size, idx
+        )
 
     # distribute the outputs using all2all.
     dist.all_to_all_single(output, combined_results, output_split_sizes=output_split_sizes, group=pg)
 
     # Check if we need to rearrange rows appropriately for output.
-    rearrange_rows = any([idx != placement.rank() for idx, placement in enumerate(weight._sharding_spec.placements)])
-    if rearrange_rows:
+    rearrange_columns = any([idx != placement.rank() for idx, placement in enumerate(weight._sharding_spec.placements)])
+    if rearrange_columns:
         indices = []
         for placement in weight._sharding_spec.placements:
             dim_size = output_split_sizes[placement.rank()]
@@ -147,6 +151,7 @@ def _handle_col_wise_sharding(input, world_size, weight, local_shard_t, bias, pg
 
     # add bias and return result.
     return output.t() + bias
+
 
 def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard_t, bias, pg):
     # alltoall to gather all the appropriate inputs.
@@ -166,11 +171,13 @@ def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
 
     if rearrange_rows:
         # Need to re-arrange rows of input_t for all2all.
-        indices: List[int] = []
-        for placement in weight._sharding_spec.placements:
-            sharded_dim_size = get_chunked_dim_size(input_t_size[0], split_size, placement.rank())
-            input_idx = placement.rank() * split_size
-            indices += range(input_idx, input_idx + sharded_dim_size)
+        indices = [None] * world_size
+        sharded_dim_size_max = max(input_split_sizes)
+        for idx, placement in enumerate(weight._sharding_spec.placements):
+            offset = input_split_sizes[placement.rank()]
+            input_idx = idx * sharded_dim_size_max
+            indices[placement.rank()] = range(input_idx, input_idx + offset)
+        indices = list(itertools.chain(*indices))
 
         input_t = input_t.index_select(0, torch.tensor(indices, device=input_t.device))
 
