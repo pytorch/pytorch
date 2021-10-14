@@ -223,7 +223,9 @@ void MemoryPlanner::allocateManagedTensors() {
     reused_tensors_--;
 
     offset += tensor_size;
+#ifndef NDEBUG
     group_idx++;
+#endif
   }
   DCHECK_EQ(offset, managed_bytes_);
 }
