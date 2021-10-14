@@ -175,7 +175,11 @@ if(INTERN_BUILD_ATEN_OPS)
   if(SELECTED_OP_LIST)
     # With static dispatch we can omit the OP_DEPENDENCY flag. It will not calculate the transitive closure
     # of used ops. It only needs to register used root ops.
-    if(NOT STATIC_DISPATCH_BACKEND AND NOT OP_DEPENDENCY)
+    if(TRACING_BASED)
+      message(STATUS "Running tracing-based selective build given operator list: ${SELECTED_OP_LIST}")
+      list(APPEND CUSTOM_BUILD_FLAGS
+        --op_selection_yaml_path ${SELECTED_OP_LIST})
+    elseif(NOT STATIC_DISPATCH_BACKEND AND NOT OP_DEPENDENCY)
       message(WARNING
         "For custom build with dynamic dispatch you have to provide the dependency graph of PyTorch operators.\n"
         "Switching to STATIC_DISPATCH_BACKEND=CPU. If you run into problems with static dispatch and still want"
