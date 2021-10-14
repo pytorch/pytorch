@@ -7,6 +7,8 @@ full_codegen:
   - _softmax_backward_data
   - addcdiv
   - addcmul
+  - bitwise_and.Scalar
+  - bitwise_and.Tensor
   - cos
   - clamp
   - dropout

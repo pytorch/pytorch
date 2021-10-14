@@ -34,11 +34,15 @@ class LazyTsLowering:
         schema = LazyIrSchema(func)
 
         if self.target == LazyTsLowering.TsLoweringTarget.DISPATCH:
+            maybe_dynamic_cast = ""
+            if func.name.overload_name:
+                maybe_dynamic_cast = f" && dynamic_cast<const ir::ops::{schema.node_name}*>(node)"
+
             return [f"""\
-case at::aten::{schema.aten_name}:
-    return Lower{schema.node_name}(function,
-                loctx,
-                ir::NodeCast<ir::ops::{schema.node_name}>(node, ir::OpKind(at::aten::{schema.aten_name})));
+if (node->op().op == at::aten::{schema.aten_name}{maybe_dynamic_cast}) {{
+  return Lower{schema.node_name}(function, loctx,
+      ir::NodeCast<ir::ops::{schema.node_name}>(node, ir::OpKind(at::aten::{schema.aten_name})));
+}}
 """, ]
 
         elif self.target == LazyTsLowering.TsLoweringTarget.LOWERING:

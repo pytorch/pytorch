@@ -82,8 +82,8 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
     backend_indices = parsed_backend_yaml.backend_indices
     full_codegen = parse_full_codegen_ops(source_yaml, grouped_native_functions)
 
-    def concatMapCodegen(func: Callable[[NativeFunction], Sequence[str]],
-                         xs: Iterable[Union[NativeFunctionsGroup, NativeFunction]]) -> Iterator[str]:
+    def concat_map_codegen(func: Callable[[NativeFunction], Sequence[str]],
+                           xs: Iterable[Union[NativeFunctionsGroup, NativeFunction]]) -> Iterator[str]:
         for x in xs:
             f = x.functional if isinstance(x, NativeFunctionsGroup) else x
             if f.func.name in full_codegen:
@@ -128,7 +128,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
             'native_functions_include': '',
             'backend_namespace': 'torch_lazy_tensors',  # this is wrong
             'native_function_definitions':
-            list(concatMapCodegen(
+            list(concat_map_codegen(
                 lambda f: dest.gen_lazy_nativefunc_definition(
                     f,
                     backend_indices[backend_dispatch_key],
@@ -151,7 +151,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
             ]],
             'DispatchKey': backend_dispatch_key,
             'dispatch_namespace': backend_dispatch_key.lower(),
-            'func_declarations': list(concatMapCodegen(
+            'func_declarations': list(concat_map_codegen(
                 lambda f: dest.gen_lazy_shape_dtype_decl(f, backend_indices[backend_dispatch_key]),
                 grouped_native_functions
             )),
@@ -174,7 +174,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
             'namespaced_headers': '',
             'DispatchKey': backend_dispatch_key,
             'dispatch_namespace': backend_dispatch_key.lower(),
-            'ir_declarations': list(concatMapCodegen(
+            'ir_declarations': list(concat_map_codegen(
                 dest.LazyIR(backend_indices[backend_dispatch_key]),
                 grouped_native_functions
             )),
@@ -194,13 +194,13 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                     f"{output_dir}/{backend_key}LazyIr.h",
                 ]],
                 'backend_namespace': backend_dispatch_key.lower(),  # TODO this is not designed yet
-                'lowering_dispatches': list(concatMapCodegen(
+                'lowering_dispatches': list(concat_map_codegen(
                     dest.LazyTsLowering(
                         backend_indices[backend_dispatch_key],
                         dest.LazyTsLowering.TsLoweringTarget.DISPATCH),
                     grouped_native_functions,
                 )),
-                'lowering_definitions': list(concatMapCodegen(
+                'lowering_definitions': list(concat_map_codegen(
                     dest.LazyTsLowering(
                         backend_indices[backend_dispatch_key],
                         dest.LazyTsLowering.TsLoweringTarget.LOWERING),

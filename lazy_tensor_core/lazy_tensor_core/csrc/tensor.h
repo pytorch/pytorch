@@ -365,12 +365,6 @@ class LazyTensor {
   static void logical_and_out(LazyTensor& out, const LazyTensor& input,
                               const LazyTensor& other);
 
-  static LazyTensor bitwise_and(const LazyTensor& input,
-                                const at::Scalar& other);
-
-  static LazyTensor bitwise_and(const LazyTensor& input,
-                                const LazyTensor& other);
-
   static void bitwise_not_out(LazyTensor& out, const LazyTensor& input);
 
   static void bitwise_or_out(LazyTensor& out, const LazyTensor& input,

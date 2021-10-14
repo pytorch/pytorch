@@ -117,12 +117,19 @@ class LazyIrSchema:
 
     @property
     def node_name(self) -> str:
-        op_name = str(self.name).lower()
-        return ''.join(word.capitalize() or '' for word in op_name.split('_'))
+        """
+        Return camel-case version of op in node.
+
+        Note: This function also appends any `overload_name` in the operation.
+        For example, if the op is `bitwise_and.Tensor`, the returned name
+        will be `BitwiseAndTensor`.
+        """
+        op_name = f"{self.name.name}_{self.name.overload_name}".lower()
+        return "".join(word.capitalize() or "" for word in op_name.split("_"))
 
     @property
     def aten_name(self) -> str:
-        return f"{self.name}"
+        return f"{self.name.name}"
 
     def filtered_types(self, positional: bool = True, keyword: bool = True,
                        values: bool = True, scalars: bool = True) -> List[NamedCType]:

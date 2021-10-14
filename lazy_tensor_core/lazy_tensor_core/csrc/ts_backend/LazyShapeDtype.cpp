@@ -89,6 +89,14 @@ std::vector<c10::ScalarType> compute_dtype_mv(const at::Tensor& self, const at::
   return {self.scalar_type()};
 }
 
+std::vector<std::vector<int64_t>> compute_shape_bitwise_and(const at::Tensor& self, const at::Scalar& other) {
+  return {self.sizes().vec()};
+}
+
+std::vector<c10::ScalarType> compute_dtype_bitwise_and(const at::Tensor& self, const at::Scalar& other) {
+  return {self.scalar_type()};
+}
+
 } // namespace ops
 } // namespace ir
 } // namespace torch_lazy_tensors
