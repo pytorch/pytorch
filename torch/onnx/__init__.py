@@ -23,6 +23,10 @@ class ExportTypes:
     DIRECTORY = 4
 
 
+class CheckerError(Exception):
+    pass
+
+
 def _export(*args, **kwargs):
     from torch.onnx import utils
     result = utils._export(*args, **kwargs)
@@ -309,7 +313,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             This argument is ignored unless ``operator_export_type=OperatorExportTypes.ONNX``.
 
     Raises:
-      ONNXCheckerError: If the ONNX checker detects an invalid ONNX graph. Will still export the
+      CheckerError: If the ONNX checker detects an invalid ONNX graph. Will still export the
         model to the file ``f`` even if this is raised.
     """
 
