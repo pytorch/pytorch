@@ -95,7 +95,7 @@ from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, dis
     RUN_CUDA
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, nn_functional_tests, get_script_args, \
     EXCLUDE_SCRIPT, additional_module_tests, EXCLUDE_SCRIPT_MODULES, \
-    get_nn_module_name_from_kwargs, script_method_template
+    get_nn_module_name_from_kwargs, get_nn_mod_test_name, script_method_template
 
 from torch.testing._internal.common_nn import module_tests, new_module_tests, criterion_tests
 from torch.testing._internal.common_methods_invocations import (
@@ -149,13 +149,6 @@ def doAutodiffCheck(testname):
         return False
 
     if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
-        test_exceptions = [
-            # disabling dropout test since it's disabled for legacy autodiff
-            'test_nn_dropout',
-        ]
-
-        if testname in test_exceptions:
-            return False
         return True
 
 
@@ -1695,25 +1688,7 @@ graph(%Ra, %Rb):
                         FileCheck().check("aten::bernoulli_").run(scripted.graph_for(X, profile_and_replay=True))
                     self.assertEqual(training, 'aten::bernoulli_' in profile(scripted, X))
 
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, 'Testing differentiable graph')
-    def test_dropout_func_training(self):
-        def dropout(input, training: bool):
-            return F.dropout(input, 0.5, training=training)
-
-        def profile(func, *X):
-            with torch.autograd.profiler.profile() as prof:
-                func(*X)
-            return [e.name for e in prof.function_events]
-
-        M = 10
-        scripted = torch.jit.script(dropout)
-        with disable_autodiff_subgraph_inlining():
-            for training in (True, False):
-                X = torch.randn(M, M, requires_grad=True)
-                FileCheck().check("aten::rand_like").run(scripted.graph_for(X, training, profile_and_replay=True))
-                self.assertEqual(training, "aten::rand_like" in profile(scripted, X, training))
-
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, 'Testing differentiable graph')
+    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, 'Testing differentiable graph')
     def test_dropout_func_requires_grad(self):
         def dropout_training(input):
             return F.dropout(input, 0.5, training=True)
@@ -1734,12 +1709,9 @@ graph(%Ra, %Rb):
             for requires_grad in (True, False):
                 X = torch.randn(M, M, requires_grad=requires_grad)
                 if requires_grad:
-                    FileCheck().check("aten::rand_like").run(scripted_training.graph_for(X, profile_and_replay=True))
-                    rand_op = 'aten::rand_like'
-                else:
-                    rand_op = 'aten::bernoulli_'
-                self.assertIn(rand_op, profile(scripted_training, X))
-                self.assertNotIn(rand_op, profile(scripted_eval, X))
+                    FileCheck().check("aten::bernoulli_").run(scripted_training.graph_for(X, profile_and_replay=True))
+                self.assertIn('aten::bernoulli_', profile(scripted_training, X))
+                self.assertNotIn('aten::bernoulli_', profile(scripted_eval, X))
 
     @unittest.skipIf(not RUN_CUDA, "test_dropout_cuda require CUDA")
     def test_dropout_cuda(self):
@@ -16222,18 +16194,13 @@ def add_nn_functional_test(name, self_size, args, variant_name='', check_ad=(), 
 
 
 def add_nn_module_test(*args, **kwargs):
-    name = get_nn_module_name_from_kwargs(**kwargs)
-
     no_grad = False if 'no_grad' not in kwargs else kwargs['no_grad']
 
     if 'desc' in kwargs and 'eval' in kwargs['desc']:
         # eval() is not supported, so skip these tests
         return
 
-    test_name = name
-    if 'desc' in kwargs:
-        test_name = "{}_{}".format(test_name, kwargs['desc'])
-    test_name = 'test_nn_{}'.format(test_name)
+    test_name = get_nn_mod_test_name(**kwargs)
 
     @suppress_warnings
     def do_test(self):
@@ -16242,10 +16209,12 @@ def add_nn_module_test(*args, **kwargs):
         if not kwargs.get('check_jit', True):
             raise unittest.SkipTest('module test skipped on JIT')
 
+        module_name = get_nn_module_name_from_kwargs(**kwargs)
+
         if 'constructor' in kwargs:
             nn_module = kwargs['constructor']
         else:
-            nn_module = getattr(torch.nn, name)
+            nn_module = getattr(torch.nn, module_name)
 
         if "FunctionalModule" in str(nn_module):
             return
@@ -16255,11 +16224,8 @@ def add_nn_module_test(*args, **kwargs):
         else:
             constructor_args = kwargs.get('constructor_args', ())
 
-        module_name = get_nn_module_name_from_kwargs(**kwargs)
-
-        # Construct a script module that passes arguments through
-        # to self.submodule
         def create_script_module(*args, **kwargs):
+            """Construct a script module that passes arguments through to self.submodule"""
             formals, tensors, actuals = get_script_args(args)
 
             method_args = ', '.join(['self'] + actuals)
