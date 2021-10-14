@@ -230,6 +230,7 @@ def amax(input: Tensor,
         else:
             identity = input.new_full([], _reduction_identity('amax', input))
             mask_input = torch.where(mask, input, identity)
-        return torch.amax(mask_input, dim, bool(keepdim)).to(dtype=dtype)
+        dim_ = _canonical_dim(dim, input.ndim)
+        return torch.amax(mask_input, dim_, bool(keepdim)).to(dtype=dtype)
     else:
         raise ValueError(f'masked amax expects strided tensor (got {input.layout} tensor)')
