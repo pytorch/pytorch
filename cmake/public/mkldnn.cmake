@@ -26,4 +26,4 @@ set_property(
   ${MKLDNN_INCLUDE_DIR})
 set_property(
   TARGET caffe2::dnnl_graph_static PROPERTY INTERFACE_LINK_LIBRARIES
-  MKLDNN_LIBRARIES)
+  ${MKLDNN_LIBRARIES})
