@@ -180,7 +180,7 @@ computes vjps given some `cotangents` Tensors.
 >>> from functorch import jacrev
 >>> x = torch.randn(5)
 >>> jacobian = jacrev(torch.sin)(x)
->>> expected = torch.diag(x)
+>>> expected = torch.diag(torch.cos(x))
 >>> assert torch.allclose(jacobian, expected)
 ```
 Use `jacrev` to compute the jacobian. This can be composed with vmap to produce
