@@ -2,6 +2,7 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/jit_type.h>
 #include <c10/core/ScalarType.h>
+#include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -10,9 +11,6 @@
 #include <torch/types.h>
 #include <memory>
 #include <stdexcept>
-#include "c10/core/Scalar.h"
-#include <c10/util/ArrayRef.h>
-#include <jit/runtime/operator.h>
 
 namespace torch {
 namespace jit {
@@ -21,12 +19,14 @@ namespace {
 
 using ArgumentCreator = std::function<c10::optional<Stack>(Node*)>;
 
-std::unique_ptr<Stack> MTensorArgumentCreator(Node* n)  {
+std::unique_ptr<Stack> MTensorArgumentCreator(Node* n) {
   auto stack = std::make_unique<std::vector<IValue>>();
   for (Value* inp : n->inputs()) {
     if (auto tp = inp->type()->cast<TensorType>()) {
-      // TODO: Need to implement Rank based Tensor argument creation
-      at::IntArrayRef tensor_size = {1, 1};
+      // Zero-dim tensors have special type promotion behavoir, hence the need
+      // for rank.
+      auto rank = tp->symbolic_sizes().rank(); // Validity checked earlier
+      auto tensor_size = std::vector<int64_t>(rank.value(), 1);
       stack->emplace_back(at::empty(
           tensor_size, at::TensorOptions(at::kMeta).dtype(*tp->scalarType())));
       continue;
@@ -40,9 +40,7 @@ std::unique_ptr<Stack> MTensorArgumentCreator(Node* n)  {
       // For now just not support bool until we know it is safe.
       throw std::runtime_error("Unsupported input type for Tensor argument");
       stack->emplace_back(false);
-    }else {
-      // maybe do: Actually return nullptr and escape out
-
+    } else {
       // Arrays of values are specifically not handled due
       // to the fact that naive default vaules would likely be
       // incorrect anyways.
@@ -52,43 +50,17 @@ std::unique_ptr<Stack> MTensorArgumentCreator(Node* n)  {
   return stack;
 };
 
-/*
-bool TryRegisterArgumentCreatorFor(
-    const char* schema,
-    ArgumentCreator creator) {
-  static std::mutex mut;
-  std::lock_guard<std::mutex> lock(mut);
-  auto op = getOperatorForLiteral(schema);
-  if (!op) {
-    return false;
-  }
-
-  auto& map = getArgumentCreatorMap();
-  if (map.contains(*op)) {
-    return false;
-  }
-  getArgumentCreatorMap().insert(op, creator);
-  return true;
-}
-
-void RegisterArgumentCreatorFor(const char* schema, ArgumentCreator creator) {
-  if (!TryRegisterArgumentCreatorFor(schema, creator)) {
-    throw std::runtime_error(
-        std::string("Couldn't register ArgumentCreator for ") + schema);
-  }
-}
-*/
-
-bool MTensorValidNodeArg(Value* value){
-  if (!value->type()->cast<TensorType>()){
+bool MTensorValidNodeArg(Value* value) {
+  auto tensor_type = value->type()->cast<TensorType>();
+  if (!tensor_type) {
     return true;
   }
-  if (!value->type()->expect<TensorType>()->scalarType().has_value()){
+  if (!tensor_type->scalarType().has_value()) {
     GRAPH_DEBUG("Argument missing Dtype");
     return false;
   }
-  // TODO: Check that Tensor args have dimmensions specified.
-  return true;
+  auto rank = tensor_type->symbolic_sizes().rank();
+  return rank.has_value();
 }
 
 static bool canBeInferredWithMetaTensor(Node* n) {
@@ -118,9 +90,9 @@ c10::optional<Tensor> inferWithMetaTensor(Node* n) {
   if (!canBeInferredWithMetaTensor(n)) {
     return c10::nullopt;
   }
-  auto stack = MTensorArgumentCreator(n);
   Operation op = n->getOperation();
   try {
+    auto stack = MTensorArgumentCreator(n);
     GRAPH_DEBUG("Running op for ", getHeader(n));
     op(*stack);
     GRAPH_DEBUG("op run successfully", getHeader(n));
@@ -133,19 +105,6 @@ c10::optional<Tensor> inferWithMetaTensor(Node* n) {
   return c10::nullopt;
 }
 
-/*
-  void setDtype(Value* value, const IValue& ival) override {
-    auto scalarType = ival.toTensor().scalar_type();
-    _setDtype(value, scalarType);
-  }
-
-  void setDtype(Value* dst, const Value* src) override {
-    auto scalarType = *src->type()->expect<TensorType>()->scalarType();
-    _setDtype(dst, scalarType);
-  }
-  */
-
-
 bool setDtype(Value* value, ScalarType scalarType) {
   // returns if anything was changed
   auto tensor_type = value->type()->cast<TensorType>();
@@ -155,14 +114,17 @@ bool setDtype(Value* value, ScalarType scalarType) {
     return true;
   }
   if (tensor_type->scalarType().value() != scalarType) {
+    // Have to overwrite the dtype if it has been set to a diffferent value
+    // in a previous run of dtype analysis (eg in testing with cached graphs)
+
+    // Due to SSA, there shouldn't be a reason why this overwrite is not valid.
     value->setType(tensor_type->withScalarType(scalarType));
     return true;
   }
   return false;
 }
 
-bool tryApplyDtypeMetaTensor(Node* n)
-{
+bool tryApplyDtypeMetaTensor(Node* n) {
   // returns if anything was changed
   auto return_tensor = inferWithMetaTensor(n);
   if (!return_tensor) {
@@ -172,80 +134,20 @@ bool tryApplyDtypeMetaTensor(Node* n)
   return setDtype(n->output(), return_tensor->scalar_type());
 }
 
- class TensorPropertyInferrer {
+class TensorPropertyInferrer {
  public:
   TensorPropertyInferrer();
   bool virtual hasProperty(Value* v) = 0;
   void virtual setDtype(Value* v, const IValue& ival) = 0;
   void virtual setDtype(Value* dst, const Value* src) = 0;
-
-/*
-  bool supportsNodeWithMeta(Node* n) {
-    const Operator* opt_op = n->maybeOperator();
-    GRAPH_DEBUG("Checking ", getHeader(n));
-    if (!opt_op) {
-      GRAPH_DEBUG("Not a valid operator");
-      return false;
-    }
-    return true;
-  }
-  */
-/*
-  bool virtual processValueWithCopy(Value* src, Value* dst) {
-    if (!hasProperty(src)) {
-      return false;
-    }
-
-    setDtype(dst, src);
-    return true;
-  }
-*/
-/*
-  bool virtual processNodeWithMeta(Node* n) {
-    bool args_have_dtypes =
-        std::all_of(n->inputs().begin(), n->inputs().end(), [this](Value* v) {
-          return this->hasProperty(v);
-        });
-    if (!args_have_dtypes) {
-      return false;
-    }
-
-    try {
-      Stack stack = mTensorArgumentCreator(n);
-      auto op = n->getOperation();
-      op(&stack);
-      const auto num_inputs = n->outputs().size();
-      for (auto i : c10::irange(num_inputs)) {
-        setDtype(n->output(i), peek(stack, i, num_inputs));
-      }
-      return true;
-    } catch (...) {
-      GRAPH_DEBUG("caught exception!");
-      return false;
-    };
-  }
-  */
 };
 
-
-/*
-using dtype_func_t = std::function<c10::optional<ScalarType>(Node*)>;
-static std::vector<std::pair<OperatorSet, dtype_func_t>>
-    dtype_transfer_functions;
-    */
-
-// TensorPropertyPropagationPass is an analysis pass that walks through a graph
-// in topological order and forward propagate TensorProperties from graph inputs
-// (expressed in input_descriptors) to all output tensor nodes in the graph.
-// The inferred TensorProperties of an output tensor will be checked against
-// the original TensorProperties of the tensor node:
-//  - if inferred property is incongruent with the original property, an error
-//  is issued
-//  - otherwise if the inferred property is more precise, original property of
-//  the output tensor will be updated
-struct DTypePropagationPass {
-  DTypePropagationPass(
-      std::shared_ptr<Graph> graph)
+// DtypePropagationPass is an analysis pass that walks through a graph in
+// topological order and forward propagate Dtypes (ScalarTypes) from graph
+// inputs (expressed in input_descriptors) to all output tensor nodes in the
+// graph.
+struct DtypePropagationPass {
+  DtypePropagationPass(std::shared_ptr<Graph> graph)
       : graph_(std::move(graph)) {}
 
   // returns true if at least one node has its scalar type set on a tensor node
@@ -254,22 +156,6 @@ struct DTypePropagationPass {
   }
 
  private:
- /*
-  static c10::optional<at::ScalarType> getScalarType(const Value* value) {
-    c10::optional<at::ScalarType> stype;
-    const auto& type = value->type();
-    if (type->kind() == TypeKind::TensorType) {
-      stype = type->castRaw<TensorType>()->scalarType();
-    } else {
-      stype = tryScalarTypeFromJitType(type);
-    }
-    if (stype.has_value()) {
-      GRAPH_DEBUG("getScalarType = ", stype.value());
-    }
-    return stype;
-  }
-  */
-
   bool processBlocks(at::ArrayRef<Block*> blocks) {
     bool changed = false;
     for (auto block : blocks) {
@@ -340,11 +226,11 @@ struct DTypePropagationPass {
   }
 
   bool mergeTensorProperties(
-      const at::ArrayRef<Value*>& oneList,
-      const at::ArrayRef<Value*>& anotherList) {
+      const at::ArrayRef<Value*>& list1,
+      const at::ArrayRef<Value*>& list2) {
     // This is currently a placeholder for MobileNet
     // After Month1: implement the merge function
-    TORCH_INTERNAL_ASSERT(oneList.size() == 0, "Not implemented yet");
+    TORCH_INTERNAL_ASSERT(list1.size() == 0, "Not implemented yet");
     return false;
     /*
     TORCH_INTERNAL_ASSERT(oneList.size() == anotherList.size());
@@ -375,7 +261,7 @@ struct DTypePropagationPass {
     const std::vector<Argument>& return_args = schema->returns();
     bool has_tensor_output = false;
     for (const auto& arg : return_args) {
-       if (arg.type()->castRaw<TensorType>()) {
+      if (arg.type()->castRaw<TensorType>()) {
         has_tensor_output = true;
         break;
       }
@@ -430,9 +316,7 @@ struct DTypePropagationPass {
   */
 
   std::shared_ptr<Graph> graph_;
-  // lazily initialized if using aliasing_types, otherwise not initialized
-  //std::unique_ptr<AliasDb> aliasDb_ = nullptr;
-  // std::shared_ptr<TensorPropertyInferrer> node_type_inferrer_ = nullptr;
+  // std::unique_ptr<AliasDb> aliasDb_ = nullptr;
 };
 
 } // anonymous namespace
@@ -440,7 +324,7 @@ struct DTypePropagationPass {
 // This analysis propagates input dtypes (if any) throughout the
 // graph.
 bool DtypePropagation(std::shared_ptr<Graph>& graph) {
-  DTypePropagationPass tp = DTypePropagationPass(graph);
+  DtypePropagationPass tp = DtypePropagationPass(graph);
   bool changed = tp.run();
   if (changed) {
     GRAPH_DUMP("After TensorPropertyPropagation pass:", graph);
