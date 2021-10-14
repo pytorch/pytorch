@@ -1996,6 +1996,7 @@ works_list = [
     'fmod.autodiffed',
     'ge',
     'gt',
+    'isnan',
     'le',
     'lerp',
     'lgamma',
