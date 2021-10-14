@@ -542,7 +542,7 @@ const std::string shape_compute_functions =
 
         def quantized_prepacked_conv2d(input: List[int], conv2dOpContext: Any):
           assert isinstance(conv2dOpContext, __torch__.torch.classes.quantized.Conv2dPackedParamsBase)
-          (weight, bias, stride, padding, dilation, groups) = ops.quantized.conv2d_unpack_sizes(conv2dOpContext)
+          (weight, bias, stride, padding, dilation, groups) = unchecked_cast(Tuple[List[int], Optional[List[int]], List[int], List[int], List[int], int], ops.quantized.conv2d_unpack_sizes(conv2dOpContext))
           return conv2d(input, weight, bias, stride, padding, dilation, groups)
 
     )"

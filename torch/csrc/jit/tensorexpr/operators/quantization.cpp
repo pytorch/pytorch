@@ -299,10 +299,6 @@ Tensor computeDequantize(
   auto qscale_promoted =
       promoteToDtype(ExprHandle(qscale), dtype.scalar_type());
   auto qzero_promoted = promoteToDtype(ExprHandle(qzero), dtype.scalar_type());
-  //  auto qscale_promoted =
-  //      promoteToDtype(FloatImm::make(qscale_f), dtype.scalar_type());
-  //  auto qzero_promoted =
-  //      promoteToDtype(LongImm::make(qzero_f), dtype.scalar_type());
   auto y = promoteToDtype(
       (qx_e_promoted - qzero_promoted) * qscale_promoted, dtype.scalar_type());
 
