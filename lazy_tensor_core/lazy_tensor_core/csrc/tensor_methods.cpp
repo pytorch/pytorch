@@ -2104,10 +2104,6 @@ LazyTensor LazyTensor::rrelu_with_noise_backward(const LazyTensor& grad_output,
       upper, training));
 }
 
-LazyTensor LazyTensor::rsqrt(const LazyTensor& input) {
-  return input.CreateFrom(ir::ops::Rsqrt(input.GetIrValue()));
-}
-
 LazyTensor LazyTensor::rsub(
     const LazyTensor& input, const LazyTensor& other, const at::Scalar& alpha,
     c10::optional<at::ScalarType> logical_element_type) {
@@ -2202,10 +2198,6 @@ LazyTensor LazyTensor::select(const LazyTensor& input, lazy_tensors::int64 dim,
 
 void LazyTensor::silu_out(LazyTensor& input, LazyTensor& out) {
   out.SetInPlaceIrValue(ir::ops::SiLU(input.GetIrValue()));
-}
-
-LazyTensor LazyTensor::sigmoid(const LazyTensor& input) {
-  return input.CreateFrom(ir::ops::Sigmoid(input.GetIrValue()));
 }
 
 LazyTensor LazyTensor::sigmoid_backward(const LazyTensor& grad_output,

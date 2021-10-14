@@ -17,6 +17,8 @@ full_codegen:
   - mv
   - native_layer_norm
   - native_layer_norm_backward
+  - rsqrt
+  - sigmoid
   - topk
 supported:
   - add.Tensor
