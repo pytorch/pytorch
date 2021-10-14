@@ -775,7 +775,8 @@ Tensor grid_sampler_3d_cpu(const Tensor& input, const Tensor& grid,
 // No shape checking needed here. See # NOTE [ grid_sampler Native Functions ].
 std::tuple<Tensor, Tensor>
 grid_sampler_2d_backward_cpu(const Tensor& grad_output, const Tensor& input, const Tensor& grid,
-                             int64_t interpolation_mode, int64_t padding_mode, bool align_corners) {
+                             int64_t interpolation_mode, int64_t padding_mode, bool align_corners,
+                             std::array<bool,2> output_mask) {
 
   // AVX gather instructions use signed 32-bit offsets to gather float values.
   // Check for possible overflow and fallback to scalar implementation
@@ -801,7 +802,7 @@ grid_sampler_2d_backward_cpu(const Tensor& grad_output, const Tensor& input, con
   }
 
   return grid_sampler_2d_backward_cpu_kernel(
-    kCPU, grad_output, input, grid, interpolation_mode, padding_mode, align_corners);
+    kCPU, grad_output, input, grid, interpolation_mode, padding_mode, align_corners, output_mask);
 }
 
 DEFINE_DISPATCH(grid_sampler_2d_backward_cpu_kernel);
