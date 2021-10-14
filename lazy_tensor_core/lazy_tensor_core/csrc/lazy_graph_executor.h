@@ -25,6 +25,13 @@ class LazyGraphExecutor {
   std::vector<lazy_tensors::util::ExceptionCleanup> LockDevices(
       const std::set<Device>& devices);
 
+  lazy_tensors::ComputationClient::DataPtr GetDeviceData(
+      const at::Tensor& tensor, const Device& device);
+
+  lazy_tensors::ComputationClient::DataPtr GetDeviceData(
+      const at::Scalar& value, at::ScalarType scalar_type,
+      const Device& device);
+
  private:
   LazyGraphExecutor() {}
 };

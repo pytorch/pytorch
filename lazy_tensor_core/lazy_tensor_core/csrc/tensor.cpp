@@ -49,77 +49,6 @@ struct TlsData {
 
 thread_local TlsData g_tls_data;
 
-class DataCacheArena {
- public:
-  struct TensorHasher {
-    size_t operator()(const at::Tensor& tensor) const {
-      return torch::lazy::HashReduce(torch::lazy::HashCombine(
-          lazy_tensors::util::GetEnumValue(tensor.scalar_type()),
-          TensorHash(tensor)));
-    };
-  };
-  struct TensorComparer {
-    bool operator()(const at::Tensor& tensor1,
-                    const at::Tensor& tensor2) const {
-      return TensorCompare(tensor1, tensor2);
-    }
-  };
-
-  using DataCache =
-      lazy_tensors::util::Cache<at::Tensor, lazy_tensors::client::Data,
-                                TensorHasher, TensorComparer>;
-
-  explicit DataCacheArena(size_t max_cache_size)
-      : max_cache_size_(max_cache_size) {}
-
-  DataCache* Get(const Device& device) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    auto it = device_caches_.find(device);
-    if (it == device_caches_.end()) {
-      std::unique_ptr<DataCache> cache(new DataCache(max_cache_size_));
-      it = device_caches_.emplace(device, std::move(cache)).first;
-    }
-    return it->second.get();
-  }
-
- private:
-  size_t max_cache_size_ = 0;
-  std::mutex mutex_;
-  std::map<Device, std::unique_ptr<DataCache>> device_caches_;
-};
-
-DataCacheArena::DataCache* GetDataCache(const Device& device) {
-  static const size_t kMaxCacheSize =
-      lazy_tensors::sys_util::GetEnvInt("DEVDATA_CACHE_SIZE", 128);
-  static DataCacheArena* arena = new DataCacheArena(kMaxCacheSize);
-  return arena->Get(device);
-}
-
-
-lazy_tensors::ComputationClient::DataPtr GetDeviceData(const at::Tensor& tensor,
-                                                       const Device& device) {
-  DataCacheArena::DataCache* cache = GetDataCache(device);
-  lazy_tensors::ComputationClient::DataPtr device_data = cache->Get(tensor);
-  if (device_data == nullptr) {
-    at::Tensor tensor_copy = CopyTensor(tensor);
-    device_data = TensorToDataHandle(tensor_copy, device);
-    cache->Add(std::move(tensor_copy), device_data);
-    LTC_COUNTER("DeviceDataCacheMiss", 1);
-  }
-  return device_data;
-}
-
-lazy_tensors::ComputationClient::DataPtr GetDeviceData(
-    const at::Scalar& value, at::ScalarType scalar_type, const Device& device) {
-  // Workaround since at::scalar_tensor doesn't support bfloat16 yet.
-  at::Tensor t = at::scalar_tensor(
-      value, at::TensorOptions(scalar_type == at::ScalarType::BFloat16
-                                   ? at::ScalarType::Float
-                                   : scalar_type));
-  if (scalar_type == at::ScalarType::BFloat16) t = t.to(scalar_type);
-  return GetDeviceData(t, device);
-}
-
 // Routing values to device data maximizes the changes for compilation cache
 // hits, but it can prevent the compiler to perform optimizations. So tensor
 // values which are within a given set, are routed to constant scalars if this
@@ -476,7 +405,7 @@ ir::Value LazyTensor::GetIrValueForTensor(const at::Tensor& tensor,
           std::move(value),
           MakeLtcPrimitiveType(tensor.scalar_type(), &device));
     }
-    data = GetDeviceData(tensor.cpu(), device);
+    data = LazyGraphExecutor::Get()->GetDeviceData(tensor.cpu(), device);
     read_only = true;
   } else {
     LTC_TIMED("IrValueTensorToDataHandle");
@@ -489,7 +418,8 @@ ir::Value LazyTensor::GetDeviceDataIrValue(const at::Scalar& value,
                                            lazy_tensors::PrimitiveType type,
                                            const Device& device) {
   lazy_tensors::ComputationClient::DataPtr data =
-      GetDeviceData(value, TensorTypeFromLtcType(type), device);
+      LazyGraphExecutor::Get()->GetDeviceData(
+          value, TensorTypeFromLtcType(type), device);
   data->SetInfo(
       std::make_shared<DeviceDataInfo>(/*tensor_id=*/-1, /*read_only=*/true));
   return ir::MakeNode<ir::ops::DeviceData>(std::move(data));
