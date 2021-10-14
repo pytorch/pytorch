@@ -22,15 +22,15 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-class Value {
+class InterpValue {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  Value() : dtype_(kInt) {
+  InterpValue() : dtype_(kInt) {
     Intvalues.push_back(0);
   }
 
   template <typename T>
-  Value(Dtype dtype, T v) : dtype_(dtype) {
+  InterpValue(Dtype dtype, T v) : dtype_(dtype) {
 #define TYPE_CASE(Type, Name)  \
   if (dtype == k##Name) {      \
     Name##values.push_back(v); \
@@ -41,24 +41,24 @@ class Value {
     throw unsupported_dtype();
   }
 
-#define VALUE_CTOR(Type, Name)      \
-  Value(Type v) : dtype_(k##Name) { \
-    Name##values.push_back(v);      \
+#define VALUE_CTOR(Type, Name)            \
+  InterpValue(Type v) : dtype_(k##Name) { \
+    Name##values.push_back(v);            \
   }
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_CTOR);
 #undef VALUE_CTOR
 
-  Value(c10::quint8 v) : dtype_(kQUInt8) {
+  InterpValue(c10::quint8 v) : dtype_(kQUInt8) {
     QUInt8values.emplace_back(v.val_);
   }
 
-  Value(c10::qint8 v) : dtype_(kQInt8) {
+  InterpValue(c10::qint8 v) : dtype_(kQInt8) {
     QInt8values.emplace_back(v.val_);
   }
 
-#define VALUE_VEC_CTOR(Type, Name)  \
-  Value(const std::vector<Type>& v) \
+#define VALUE_VEC_CTOR(Type, Name)        \
+  InterpValue(const std::vector<Type>& v) \
       : dtype_(Dtype(k##Name, v.size())), Name##values(v) {}
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_VEC_CTOR);
@@ -90,7 +90,8 @@ class Value {
 };
 
 template <>
-inline Value::Value<c10::quint8>(Dtype dtype, c10::quint8 v) : dtype_(dtype) {
+inline InterpValue::InterpValue<c10::quint8>(Dtype dtype, c10::quint8 v)
+    : dtype_(dtype) {
   if (dtype == kQUInt8) {
     QUInt8values.push_back(v);
     return;
@@ -99,7 +100,8 @@ inline Value::Value<c10::quint8>(Dtype dtype, c10::quint8 v) : dtype_(dtype) {
 }
 
 template <>
-inline Value::Value<c10::qint8>(Dtype dtype, c10::qint8 v) : dtype_(dtype) {
+inline InterpValue::InterpValue<c10::qint8>(Dtype dtype, c10::qint8 v)
+    : dtype_(dtype) {
   if (dtype == kQInt8) {
     QInt8values.push_back(v);
     return;
@@ -107,26 +109,26 @@ inline Value::Value<c10::qint8>(Dtype dtype, c10::qint8 v) : dtype_(dtype) {
   throw unsupported_dtype();
 }
 
-#define VALUE_AS_DISPATCH(Type, Name)   \
-  template <>                           \
-  inline Type Value::as<Type>() const { \
-    if (dtype_ != k##Name) {            \
-      throw unsupported_dtype();        \
-    }                                   \
-    return Name##values[0];             \
+#define VALUE_AS_DISPATCH(Type, Name)         \
+  template <>                                 \
+  inline Type InterpValue::as<Type>() const { \
+    if (dtype_ != k##Name) {                  \
+      throw unsupported_dtype();              \
+    }                                         \
+    return Name##values[0];                   \
   }
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_AS_DISPATCH);
 VALUE_AS_DISPATCH(c10::quint8, QUInt8);
 VALUE_AS_DISPATCH(c10::qint8, QInt8);
 #undef VALUE_AS_DISPATCH
 
-#define VALUE_AS_VEC_DISPATCH(Type, Name)                       \
-  template <>                                                   \
-  inline const std::vector<Type>& Value::as_vec<Type>() const { \
-    if (dtype_.scalar_type() != ScalarType::Name) {             \
-      throw unsupported_dtype();                                \
-    }                                                           \
-    return Name##values;                                        \
+#define VALUE_AS_VEC_DISPATCH(Type, Name)                             \
+  template <>                                                         \
+  inline const std::vector<Type>& InterpValue::as_vec<Type>() const { \
+    if (dtype_.scalar_type() != ScalarType::Name) {                   \
+      throw unsupported_dtype();                                      \
+    }                                                                 \
+    return Name##values;                                              \
   }
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_AS_VEC_DISPATCH);
 VALUE_AS_VEC_DISPATCH(c10::quint8, QUInt8);
@@ -178,7 +180,7 @@ class TORCH_API SimpleIREvaluator : public CodeGen {
   }
 
   void bindVar(VarPtr v, ExprPtr e);
-  Value value() const;
+  InterpValue value() const;
 
  private:
   void bindArg(const BufferArg& buf, void* data);
@@ -249,7 +251,7 @@ class ExprEval {
     std::vector<Type> ret_val_arg(1);                   \
     call_args_extended.push_back(CallArg(ret_val_arg)); \
     codegen_->call(call_args_extended);                 \
-    ret_value_ = Value(ret_val_arg[0]);                 \
+    ret_value_ = InterpValue(ret_val_arg[0]);           \
   } break;
       // NOLINTNEXTLINE(modernize-use-emplace)
       AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TYPE_CASE);
@@ -261,7 +263,7 @@ class ExprEval {
         std::vector<unsigned char> ret_val_arg(1);
         call_args_extended.emplace_back(ret_val_arg.data());
         codegen_->call(call_args_extended);
-        ret_value_ = Value((bool)ret_val_arg[0]);
+        ret_value_ = InterpValue((bool)ret_val_arg[0]);
       } break;
       default:
         throw unsupported_dtype();
@@ -277,7 +279,7 @@ class ExprEval {
     std::vector<Type> ret_val_arg(1);            \
     args_extended.push_back(ret_val_arg.data()); \
     codegen_->call_raw(args_extended);           \
-    ret_value_ = Value(ret_val_arg[0]);          \
+    ret_value_ = InterpValue(ret_val_arg[0]);    \
   } break;
       AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TYPE_CASE);
       TYPE_CASE(c10::quint8, QUInt8);
@@ -288,7 +290,7 @@ class ExprEval {
         std::vector<unsigned char> ret_val_arg(1);
         args_extended.push_back(ret_val_arg.data());
         codegen_->call_raw(args_extended);
-        ret_value_ = Value((bool)ret_val_arg[0]);
+        ret_value_ = InterpValue((bool)ret_val_arg[0]);
       } break;
       default:
         throw unsupported_dtype();
@@ -314,7 +316,7 @@ class ExprEval {
  private:
   Dtype dtype_;
   std::unique_ptr<CodeGenType> codegen_;
-  Value ret_value_;
+  InterpValue ret_value_;
 };
 
 // Evaluates the given expression and returns an int64_t value if the result of
