@@ -56,8 +56,6 @@ c10::intrusive_ptr<EmbeddingPackedParamsBase> PackedEmbeddingBagWeight::prepack(
   std::vector<float> weight_scales(embedding_rows);
   std::vector<float> weight_zero_points(embedding_rows);
 
-  std::cout << "Per Channel scales: " << qweight.q_per_channel_scales().sizes() << std::endl;
-
   at::Tensor weight_bias_tensor = at::from_blob(weight_bias.data(), {embedding_rows});
   at::Tensor weight_scales_tensor = at::from_blob(weight_scales.data(), {embedding_rows});
   at::Tensor weight_zero_points_tensor = at::from_blob(weight_zero_points.data(), {embedding_rows});
