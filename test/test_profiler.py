@@ -146,7 +146,7 @@ class TestProfiler(TestCase):
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_kineto(self):
-        use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
+        use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities() and not IS_WINDOWS
         with _profile(use_cuda=use_cuda, use_kineto=True):
             self.payload(use_cuda=use_cuda)
 
