@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "lazy_tensor_core/csrc/device.h"
+#include "lazy_tensor_core/csrc/lazy_graph_executor.h"
 #include "lazy_tensor_core/csrc/tensor_impl.h"
 #include "lazy_tensor_core/csrc/torch_util.h"
 #include "lazy_tensors/computation_client/computation_client.h"
@@ -126,7 +127,8 @@ std::vector<at::Tensor> LtcCreateTensorList(const at::TensorList& tensors) {
       }
     }
   }
-  auto defined_aten_ltc_tensors = LazyTensor::GetTensors(&ltc_tensors);
+  auto defined_aten_ltc_tensors =
+      LazyGraphExecutor::Get()->GetTensors(&ltc_tensors);
   // Insert undefined tensors into the result, back into the original undefined
   // positions.
   for (size_t i = 0, defined_pos = 0; i < tensors.size(); ++i) {

@@ -62,7 +62,7 @@ void PrepareToExit() {
   lazy_tensors::ComputationClient* client =
       lazy_tensors::ComputationClient::GetIfInitialized();
   if (client != nullptr) {
-    LazyTensor::WaitDeviceOps({});
+    LazyGraphExecutor::Get()->WaitDeviceOps({});
     client->PrepareToExit();
   }
 }
@@ -219,21 +219,22 @@ void SyncTensors(const std::vector<at::Tensor>& tensors,
                  const std::vector<std::string>& devices, bool wait,
                  bool sync_ltc_data) {
   std::vector<LazyTensor> xtensors = GetLtcTensors(tensors, /*want_all=*/false);
-  LazyTensor::SyncTensorsGraph(&xtensors, devices, wait, sync_ltc_data);
+  LazyGraphExecutor::Get()->SyncTensorsGraph(&xtensors, devices, wait,
+                                             sync_ltc_data);
 }
 
 void SyncLiveTensors(const std::string& device_str,
                      const std::vector<std::string>& devices, bool wait) {
   auto opt_device = GetOptionalDevice(device_str);
-  LazyTensor::SyncLiveTensorsGraph(opt_device ? &opt_device.value() : nullptr,
-                                   devices, wait);
+  LazyGraphExecutor::Get()->SyncLiveTensorsGraph(
+      opt_device ? &opt_device.value() : nullptr, devices, wait);
 }
 
 void StepMarker(const std::string& device_str,
                 const std::vector<std::string>& devices, bool wait) {
   Device device = GetDeviceOrCurrent(device_str);
-  LazyTensor::SyncLiveTensorsGraph(&device, devices, wait);
-  LazyTensor::MarkStep(device);
+  LazyGraphExecutor::Get()->SyncLiveTensorsGraph(&device, devices, wait);
+  LazyGraphExecutor::Get()->MarkStep(device);
   bool debug_mode = lazy_tensors::sys_util::GetEnvBool("PT_LTC_DEBUG", false);
   if (TF_PREDICT_FALSE(debug_mode)) {
     std::string report = lazy_tensors::metrics::CreatePerformanceReport();
@@ -268,8 +269,8 @@ std::string GetTensorsBackendGraph(const std::vector<at::Tensor>& tensors) {
 std::string GetLiveTensorsReport(size_t nodes_threshold,
                                  const std::string& device_str) {
   auto opt_device = GetOptionalDevice(device_str);
-  auto tensors =
-      LazyTensor::GetLiveTensors(opt_device ? &opt_device.value() : nullptr);
+  auto tensors = LazyGraphExecutor::Get()->GetLiveTensors(
+      opt_device ? &opt_device.value() : nullptr);
   std::stringstream ss;
   for (auto& tensor : tensors) {
     ir::Value ir_value = tensor.CurrentIrValue();
@@ -606,7 +607,7 @@ void InitLtcModuleBindings(py::module m) {
   m.def("_ltc_wait_device_ops",
         [](const std::vector<std::string>& devices) {
           NoGilSection nogil;
-          LazyTensor::WaitDeviceOps(devices);
+          LazyGraphExecutor::Get()->WaitDeviceOps(devices);
         },
         py::arg("devices"));
   m.def("_ltc_counter_names",
