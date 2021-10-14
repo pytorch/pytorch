@@ -2,6 +2,7 @@ import math
 import operator
 from typing import Any, Tuple, Sequence, Union, List, Optional
 
+
 import numpy as np
 import tensorrt as trt
 import torch
@@ -12,6 +13,7 @@ from torch.fx.experimental.fx2trt.fx2trt import (
     torch_dtype_from_trt,
     get_dynamic_dims,
 )
+from torch.fx.immutable_collections import immutable_list
 
 ShapeType = Union[Sequence[int], trt.Dims]
 
@@ -1762,8 +1764,9 @@ def acc_ops_dequantize(network, target, args, kwargs, name):
         q_scale = qparams["scale"]
         q_zero_point = qparams["zero_point"]
         q_axis = qparams["axis"]
-        scale_shape = q_scale.shape
-        if not torch.equal(q_zero_point, torch.zeros(q_zero_point.shape, dtype=q_zero_point.dtype)):
+        assert isinstance(q_scale, immutable_list), "expected q_scale to be immutable_list got {}".format(type(q_scale))
+        scale_shape = (len(q_scale),)
+        if any(x != 0 for x in q_zero_point):
             raise RuntimeError(f"Only support zero_point == 0, get {q_zero_point}")
     else:
         raise RuntimeError("Unsupported qscheme in dequantize: {qscheme}")
