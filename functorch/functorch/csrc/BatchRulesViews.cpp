@@ -429,6 +429,23 @@ std::tuple<Tensor, optional<int64_t>> expand_batch_rule(
   return std::make_tuple(self_.view(view_shape).expand(size_, implicit), 0);
 }
 
+std::tuple<Tensor, optional<int64_t>> unfold_batch_rule(
+    const Tensor &self, optional<int64_t> self_bdim, int64_t dim, int64_t size, int64_t step)
+{
+  TORCH_INTERNAL_ASSERT(self_bdim.has_value());
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  auto logical_rank = rankWithoutBatchDim(self, self_bdim);
+  dim = maybe_wrap_dim(dim, logical_rank) + 1;
+  if (logical_rank==0) {
+    self_ = self_.unsqueeze(-1);
+  }
+  auto result = self_.unfold(dim, size, step);
+  if (logical_rank==0) {
+    result = result.squeeze(-1);
+  }
+  return std::make_tuple(result, 0);
+}
+
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("diag", diag_batch_rule);
   VMAP_SUPPORT("chunk", chunk_batching_rule);
@@ -453,6 +470,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("slice_backward", slice_backward_batch_rule);
   VMAP_SUPPORT("view", view_batching_rule);
   VMAP_SUPPORT("expand", expand_batch_rule);
+  VMAP_SUPPORT("unfold", unfold_batch_rule);
 }
 
 }}

@@ -3005,7 +3005,6 @@ class TestVmapOperatorsOpInfo(TestCase):
 
         # entries in here don't work and need to be fixed.
         # Each one of these is a bug
-        xfail('unfold'),
         xfail('svd', device_type='cuda'),
         xfail('linalg.svd', device_type='cuda'),
         xfail('index_put'),
@@ -3097,7 +3096,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('take_along_dim'),
         xfail('tensor_split'),
         xfail('to_sparse'),
-        xfail('unfold'),
         xfail('vdot'),
         xfail('vsplit'),
         xfail('__getitem__'),
