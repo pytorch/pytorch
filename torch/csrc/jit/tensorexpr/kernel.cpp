@@ -356,7 +356,7 @@ ArgValue TensorExprKernel::toArg(const torch::jit::Value* v) const {
         default:
           std::stringstream ss;
           ss << "Unsupported tensor dtype:" << dtype
-             << " for conversion constant 0-dim Tensor to scalar" << std::endl;
+             << " for converting constant 0-dim Tensor to scalar" << std::endl;
           throw unsupported_dtype(ss.str());
       }
     } else {

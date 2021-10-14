@@ -14,7 +14,7 @@ TORCH_API int64_t immQZero(const BufHandle& qx);
 
 TORCH_API int64_t immQDType(const BufHandle& qx);
 
-TORCH_API double isQuantized(const BufHandle& qx);
+TORCH_API bool isQuantized(const BufHandle& qx);
 
 TORCH_API Tensor computeQuantizePerTensor(
     const std::vector<ArgValue>& inputs,

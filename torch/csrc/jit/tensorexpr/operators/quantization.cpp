@@ -17,13 +17,6 @@ std::vector<int64_t> _pair_int(ArgValue v) {
 }
 } // namespace
 
-ExprHandle quantizePerTensorQParamFromArg(ArgValue arg) {
-  if (auto b = c10::get_if<BufHandle>(&arg)) {
-    return b->load({LongImm::make(0l)});
-  }
-  return constant(arg);
-}
-
 double immQScale(const BufHandle& qx) {
   return to<DoubleImm>(IRSimplifier::simplify(qx.node()->qscale()))->value();
 }
@@ -36,7 +29,7 @@ int64_t immQDType(const BufHandle& qx) {
   return (int64_t)qx.dtype().scalar_type();
 }
 
-double isQuantized(const BufHandle& qx) {
+bool isQuantized(const BufHandle& qx) {
   return qx.node()->qscale() && qx.node()->qzero();
 }
 
@@ -53,13 +46,13 @@ BufHandle makeQBufHandle(
 }
 
 BufHandle makeQBufHandle(
-    const std::string& name_hint,
+    const std::string& name,
     const std::vector<ExprHandle>& dims,
     Dtype dtype,
     const double qscale,
     const int64_t qzero) {
   return makeQBufHandle(
-      name_hint,
+      name,
       dims,
       dtype,
       DoubleImm::make(qscale).node(),
@@ -80,8 +73,8 @@ Tensor computeQuantizePerTensor(
   auto axes = VarVectorToVarHandleVector(vars);
   std::vector<ExprHandle> indices(axes.begin(), axes.end());
 
-  ExprHandle qscale = quantizePerTensorQParamFromArg(inputs[1]);
-  ExprHandle qzero = quantizePerTensorQParamFromArg(inputs[2]);
+  ExprHandle qscale = constant(inputs[1]);
+  ExprHandle qzero = constant(inputs[2]);
   const auto dtype = [](auto qdtype) {
     if (static_cast<int64_t>(ScalarType::QInt8) == qdtype) {
       return Dtype(ScalarType::Char);
