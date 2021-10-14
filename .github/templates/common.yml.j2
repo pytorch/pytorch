@@ -168,8 +168,7 @@ concurrency:
           python3 tools/render_junit.py test/
 {%- endmacro -%}
 
-{%- macro ciflow_should_run_job(ciflow_config) -%}
-{%- if ciflow_config.enabled %}
+{%- macro ciflow_should_run_job(ciflow_config) %}
   !{{ ciflow_config.root_job_name }}:
     runs-on: ubuntu-18.04
     env:
@@ -182,7 +181,6 @@ concurrency:
         run: echo running !{{ ciflow_config.root_job_name }}
       - name: print labels
         run: echo "${LABELS}"
-{%- endif %}
 {%- endmacro -%}
 
 {%- macro calculate_docker_image() -%}
