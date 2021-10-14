@@ -3834,17 +3834,21 @@ def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False, **kw
     else:
         drivers = ('gels', 'gelsy', 'gelss', 'gelsd')
 
+    # we generate matrices of shape (..., n + delta, n)
+    deltas: Tuple[int, int, ...]
+    # If Cusolver is not available, underdetermined inputs are not generated
+    if device.type == 'cuda' and not has_cusolver():
+        deltas = (0, +1)
+    else:
+        deltas = (-1, 0, +1)
+
     out = []
-    for batch, driver in product(((), (3,), (3, 3)), drivers):
-        for delta in (-1, 0, +1):
-            # If Cusolver is not available, underdetermined inputs are not generated
-            if delta < 0 and device.type == 'cuda' and not has_cusolver():
-                continue
-            shape = batch + (3 + delta, 3)
-            a = random_well_conditioned_matrix(*shape, dtype=dtype, device=device)
-            a.requires_grad_(requires_grad)
-            b = make_tensor(shape, device, dtype, low=None, high=None, requires_grad=requires_grad)
-            out.append(SampleInput(a, args=(b,), kwargs=dict(driver=driver)))
+    for batch, driver, delta in product(((), (3,), (3, 3)), drivers, deltas):
+        shape = batch + (3 + delta, 3)
+        a = random_well_conditioned_matrix(*shape, dtype=dtype, device=device)
+        a.requires_grad_(requires_grad)
+        b = make_tensor(shape, device, dtype, low=None, high=None, requires_grad=requires_grad)
+        out.append(SampleInput(a, args=(b,), kwargs=dict(driver=driver)))
     return out
 
 def sample_inputs_householder_product(op_info, device, dtype, requires_grad, **kwargs):
