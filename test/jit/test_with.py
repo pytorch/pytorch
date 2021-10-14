@@ -413,15 +413,15 @@ class TestWith(JitTestCase):
         # checkScript and checkScriptRaisesRegex cannot be used because the string frontend will
         # not compile class types (of which Context, the context manager being used for this test
         # is one).
-        with self.assertRaisesRegexWithHighlight(Exception, r"raised exception", "raise Exception(\""):
+        with self.assertRaisesRegexWithHighlight(Exception, r"raised exception", "raise Exception(\"raised exception"):
             test_exception(torch.randn(2), c)
         self.assertEqual(c.count, 1)
 
-        with self.assertRaisesRegexWithHighlight(Exception, r"raised exception", "raise Exception(\""):
+        with self.assertRaisesRegexWithHighlight(Exception, r"raised exception", "raise Exception(\"raised exception"):
             test_exception_nested(torch.randn(2), c)
         self.assertEqual(c.count, 1)
 
-        with self.assertRaisesRegexWithHighlight(Exception, r"raised exception", "raise Exception(\""):
+        with self.assertRaisesRegexWithHighlight(Exception, r"raised exception", "raise Exception(\"raised exception"):
             test_exception_fn_call(torch.randn(2), c)
         self.assertEqual(c.count, 1)
 
