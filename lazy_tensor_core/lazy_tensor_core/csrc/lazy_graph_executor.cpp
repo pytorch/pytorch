@@ -119,6 +119,78 @@ class DeviceLockerArena {
   std::map<Device, std::shared_ptr<DeviceLocker>> lockers_;
 };
 
+class DataCacheArena {
+ public:
+  static DataCacheArena* Get() {
+    static const size_t kMaxCacheSize =
+        lazy_tensors::sys_util::GetEnvInt("DEVDATA_CACHE_SIZE", 128);
+    static DataCacheArena* arena = new DataCacheArena(kMaxCacheSize);
+    return arena;
+  }
+
+  explicit DataCacheArena(size_t max_cache_size)
+      : max_cache_size_(max_cache_size) {}
+
+  lazy_tensors::ComputationClient::DataPtr GetDeviceData(
+      const at::Tensor& tensor, const Device& device) {
+    DataCacheArena::DataCache* cache = Get()->GetDataCache(device);
+    ;
+    lazy_tensors::ComputationClient::DataPtr device_data = cache->Get(tensor);
+    if (device_data == nullptr) {
+      at::Tensor tensor_copy = CopyTensor(tensor);
+      device_data = TensorToDataHandle(tensor_copy, device);
+      cache->Add(std::move(tensor_copy), device_data);
+      LTC_COUNTER("DeviceDataCacheMiss", 1);
+    }
+    return device_data;
+  }
+
+  lazy_tensors::ComputationClient::DataPtr GetDeviceData(
+      const at::Scalar& value, at::ScalarType scalar_type,
+      const Device& device) {
+    // Workaround since at::scalar_tensor doesn't support bfloat16 yet.
+    at::Tensor t = at::scalar_tensor(
+        value, at::TensorOptions(scalar_type == at::ScalarType::BFloat16
+                                     ? at::ScalarType::Float
+                                     : scalar_type));
+    if (scalar_type == at::ScalarType::BFloat16) t = t.to(scalar_type);
+    return GetDeviceData(t, device);
+  }
+
+ private:
+  struct TensorHasher {
+    size_t operator()(const at::Tensor& tensor) const {
+      return torch::lazy::HashReduce(torch::lazy::HashCombine(
+          lazy_tensors::util::GetEnumValue(tensor.scalar_type()),
+          TensorHash(tensor)));
+    };
+  };
+  struct TensorComparer {
+    bool operator()(const at::Tensor& tensor1,
+                    const at::Tensor& tensor2) const {
+      return TensorCompare(tensor1, tensor2);
+    }
+  };
+
+  using DataCache =
+      lazy_tensors::util::Cache<at::Tensor, lazy_tensors::client::Data,
+                                TensorHasher, TensorComparer>;
+
+  DataCache* GetDataCache(const Device& device) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = device_caches_.find(device);
+    if (it == device_caches_.end()) {
+      std::unique_ptr<DataCache> cache(new DataCache(max_cache_size_));
+      it = device_caches_.emplace(device, std::move(cache)).first;
+    }
+    return it->second.get();
+  }
+
+  size_t max_cache_size_ = 0;
+  std::mutex mutex_;
+  std::map<Device, std::unique_ptr<DataCache>> device_caches_;
+};
+
 // The DeviceContextArena holds per device live information and statistics,
 // among which the lazy tensors which are currently alive in the system. This is
 // used to create computation "barriers" in order to flush pending operations
@@ -300,6 +372,16 @@ void LazyGraphExecutor::DeviceBarrier(const Device& device) {
 std::vector<lazy_tensors::util::ExceptionCleanup>
 LazyGraphExecutor::LockDevices(const std::set<Device>& devices) {
   return DeviceLockerArena::Get()->LockDevices(devices);
+}
+
+lazy_tensors::ComputationClient::DataPtr LazyGraphExecutor::GetDeviceData(
+    const at::Tensor& tensor, const Device& device) {
+  return DataCacheArena::Get()->GetDeviceData(tensor, device);
+}
+
+lazy_tensors::ComputationClient::DataPtr LazyGraphExecutor::GetDeviceData(
+    const at::Scalar& value, at::ScalarType scalar_type, const Device& device) {
+  return DataCacheArena::Get()->GetDeviceData(value, scalar_type, device);
 }
 
 }  // namespace torch_lazy_tensors
