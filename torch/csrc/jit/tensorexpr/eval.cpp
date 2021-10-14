@@ -579,7 +579,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     }
 
     for (auto i = start; i < stop; i++) {
-      eval_context_[var_node] = Value(Dtype(ScalarType::Long), i);
+      eval_context_[var_node] = Value(dtype, i);
       if (v->body()) {
         v->body()->accept(this);
       }

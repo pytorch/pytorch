@@ -19,21 +19,6 @@ namespace jit {
 
 using namespace torch::jit::tensorexpr;
 using SimpleIRExprEval = ExprEval<SimpleIREvaluator>;
-
-namespace {
-bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor> inputs) {
-  double maxValue = 0.0;
-  for (auto& tensor : inputs) {
-    maxValue = fmax(tensor.abs().max().item<float>(), maxValue);
-  }
-  return diff.abs().max().item<float>() < 2e-6 * maxValue;
-}
-
-bool almostEqual(const at::Tensor& a, const at::Tensor& b) {
-  return checkRtol(a - b, {a, b});
-}
-} // namespace
-
 using namespace torch::indexing;
 using namespace torch::jit::tensorexpr;
 
@@ -46,7 +31,6 @@ class Quantization : public ::testing::Test {
 };
 
 TEST_F(Quantization, QuantDequantInt8) {
-#ifdef TORCH_ENABLE_LLVM
   const auto graph_string = R"IR(
       graph(%x.1 : Float(2, 2, strides=[2, 1], device=cpu)):
         %2 : int = prim::Constant[value=12]()
@@ -68,17 +52,15 @@ TEST_F(Quantization, QuantDequantInt8) {
   std::vector<IValue> stack = fmap<IValue>(inputs);
   k.run(stack);
   auto y = stack[0].toTensor();
-  bool check = almostEqual(y_expected, y);
+  bool check = at::allclose(y_expected, y);
   if (!check) {
     std::cout << "y_expected:\n" << y_expected << std::endl;
     std::cout << "y:\n" << y << std::endl;
   }
   CHECK_EQ(check, 1);
-#endif
 }
 
 TEST_F(Quantization, QuantDequantUInt8) {
-#ifdef TORCH_ENABLE_LLVM
   const auto graph_string = R"IR(
       graph(%x.1 : Float(2, 2, strides=[2, 1], device=cpu)):
         %2 : int = prim::Constant[value=13]()
@@ -100,13 +82,12 @@ TEST_F(Quantization, QuantDequantUInt8) {
   std::vector<IValue> stack = fmap<IValue>(inputs);
   k.run(stack);
   auto y = stack[0].toTensor();
-  bool check = almostEqual(y_expected, y);
+  bool check = at::allclose(y_expected, y);
   if (!check) {
     std::cout << "y_expected:\n" << y_expected << std::endl;
     std::cout << "y:\n" << y << std::endl;
   }
   CHECK_EQ(check, 1);
-#endif
 }
 
 at::Tensor quantized_add(
@@ -122,7 +103,6 @@ at::Tensor quantized_add(
 }
 
 TEST_F(Quantization, QuantAddDequantInt8) {
-#ifdef TORCH_ENABLE_LLVM
   const auto graph_string = R"IR(
       graph(%x1 : Float(2, 2, strides=[2, 1], device=cpu), %x2 : Float(2, 2, strides=[2, 1], device=cpu)):
         %2 : int = prim::Constant[value=12]()
@@ -153,7 +133,7 @@ TEST_F(Quantization, QuantAddDequantInt8) {
   std::vector<IValue> stack = fmap<IValue>(inputs);
   k.run(stack);
   auto y = stack[0].toTensor();
-  bool check = almostEqual(y_expected, y);
+  bool check = at::allclose(y_expected, y);
   if (!check) {
     std::cout << "x1:\n" << x1 << std::endl;
     std::cout << "q1:\n" << q1 << std::endl;
@@ -163,11 +143,9 @@ TEST_F(Quantization, QuantAddDequantInt8) {
     std::cout << "y:\n" << y << std::endl;
   }
   CHECK_EQ(check, 1);
-#endif
 }
 
 TEST_F(Quantization, QuantAddDequantUInt8) {
-#ifdef TORCH_ENABLE_LLVM
   const auto graph_string = R"IR(
       graph(%x1 : Float(2, 2, strides=[2, 1], device=cpu), %x2 : Float(2, 2, strides=[2, 1], device=cpu)):
         %2 : int = prim::Constant[value=13]()
@@ -199,7 +177,7 @@ TEST_F(Quantization, QuantAddDequantUInt8) {
   std::vector<IValue> stack = fmap<IValue>(inputs);
   k.run(stack);
   auto y = stack[0].toTensor();
-  bool check = almostEqual(y_expected, y);
+  bool check = at::allclose(y_expected, y);
   if (!check) {
     std::cout << "x1:\n" << x1 << std::endl;
     std::cout << "q1:\n" << q1 << std::endl;
@@ -209,7 +187,6 @@ TEST_F(Quantization, QuantAddDequantUInt8) {
     std::cout << "y:\n" << y << std::endl;
   }
   CHECK_EQ(check, 1);
-#endif
 }
 
 c10::intrusive_ptr<ConvPackedParamsBase<2>> quantized_conv2d_prepack(

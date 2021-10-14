@@ -1492,7 +1492,6 @@ RegisterNNCLoweringsFunction aten_quantize_per_tensor(
 #endif
 );
 
-// aten::dequantize.self(Tensor self) -> (Tensor)
 RegisterNNCLoweringsFunction aten_dequantize(
     {"aten::dequantize.self(Tensor self) -> (Tensor)"},
 #if NNC_QUANTIZATION_EXPR_DEQUANT == 1
