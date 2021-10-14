@@ -20,6 +20,7 @@
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
+#include <sstream>
 #include <stdexcept>
 
 #ifdef FBCODE_CAFFE2
@@ -58,6 +59,18 @@ bool canEnableStaticRuntime(const std::shared_ptr<torch::jit::Graph>& graph) {
     can_support = false;
   }
   return can_support;
+}
+
+std::string dumpValueSet(
+    const FastSet<const Value*>& value_set,
+    const char* set_name) {
+  std::ostringstream oss;
+  oss << set_name << ": {";
+  for (const auto* val : value_set) {
+    oss << "%" << val->debugName() << ", ";
+  }
+  oss << "}";
+  return oss.str();
 }
 
 namespace {
@@ -525,7 +538,6 @@ std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
   Method method = module.get_method("forward");
   auto graph = module.get_method("forward").graph();
 
-  // graph->dump();
   PrepareGraphForStaticModule(graph, opts);
 
   return std::make_pair(graph, module);
@@ -543,17 +555,16 @@ std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
 void ValueGroup::init(
     const std::shared_ptr<torch::jit::Graph>& graph,
     AliasDb& db) {
-  input_or_constant_aliases_.clear();
+  external_aliases_.clear();
   output_aliases_.clear();
   // Build `input_or_constant_aliases` as we look through nodes forwardly from
   // the graph's inputs and add aliases of the inputs being created by the
   // nodes.
-  input_or_constant_aliases_.insert(
-      graph->inputs().begin(), graph->inputs().end());
+  external_aliases_.insert(graph->inputs().begin(), graph->inputs().end());
   for (const auto* node : graph->nodes()) {
     if (node->kind() == prim::Constant) {
       for (const auto* output : node->outputs()) {
-        input_or_constant_aliases_.insert(output);
+        external_aliases_.insert(output);
       }
     }
   }
@@ -563,8 +574,8 @@ void ValueGroup::init(
       continue;
     }
     for (const auto* v : node->outputs()) {
-      if (mayContainAlias(db, {v}, input_or_constant_aliases_)) {
-        input_or_constant_aliases_.insert(v);
+      if (mayContainAlias(db, {v}, external_aliases_)) {
+        external_aliases_.insert(v);
       }
     }
   }
@@ -578,8 +589,14 @@ void ValueGroup::init(
       continue;
     }
     for (const auto* v : node->outputs()) {
-      if (mayContainAlias(db, {v}, output_aliases_) &&
-          !mayContainAlias(db, {v}, input_or_constant_aliases_)) {
+      // Add values that can aliase input/constant values. Note some output
+      // aliases may end up in this category via collection objects (e.g.,
+      // Tuple).
+      if (mayContainAlias(db, {v}, external_aliases_)) {
+        external_aliases_.insert(v);
+        continue;
+      }
+      if (mayContainAlias(db, {v}, output_aliases_)) {
         output_aliases_.insert(v);
       }
     }
@@ -706,6 +723,7 @@ StaticModule::StaticModule(
   AliasDb alias_db(
       graph_, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
   value_group_.init(graph_, alias_db);
+  GRAPH_DEBUG("ValueGroup", value_group_.toString());
 
   if (opts_.optimize_memory) {
     auto lm = GetLivenessMap(graph_, value_group_, alias_db);
