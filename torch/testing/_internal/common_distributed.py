@@ -443,7 +443,7 @@ class MultiProcessTestCase(TestCase):
         self.file_name = tempfile.NamedTemporaryFile(delete=False).name
         # pid to pipe consisting of error message from process.
         self.pid_to_pipe = {}  # type: ignore[var-annotated]
-        self.shared_data = {}
+        self.shared_data = {}  # type: ignore[var-annotated]
         self.mp_manager = multiprocessing.Manager()
 
     def tearDown(self) -> None:
