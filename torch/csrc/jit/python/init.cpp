@@ -1,3 +1,4 @@
+#include <torch/csrc/utils/byte_order.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 
@@ -1188,7 +1189,18 @@ void initJITBindings(PyObject* module) {
                     std::move(storage),
                     at::DispatchKeySet(),
                     at::CPU(scalar_type).typeMeta());
-            return at::Tensor(std::move(ptr));
+
+            at::Tensor res(std::move(ptr));
+
+            // byte swap when loading model from a big-endian platform
+            if (torch::utils::THP_nativeByteOrder() == torch::utils::THP_BIG_ENDIAN) {
+              for (int64_t i = 0; i < numel; ++ i) {
+                std::reverse(static_cast<int8_t*>(res.data_ptr()) + i * elementSize(scalar_type),
+                             static_cast<int8_t*>(res.data_ptr()) + (i + 1) * elementSize(scalar_type));
+              }
+            }
+
+            return res;
           })
       .def("get_all_records", [](PyTorchStreamReader& self) {
         return self.getAllRecords();

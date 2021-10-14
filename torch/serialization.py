@@ -522,7 +522,10 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
                 storage_type_str = obj.pickle_storage_type()
                 storage_type = getattr(torch, storage_type_str)
                 storage_numel = obj.size()
-
+                if sys.byteorder == 'big':
+                    storage = storage.clone()
+                    for i in range(storage_numel):
+                        storage[i] = storage[i].to_bytes(obj.element_size(), byteorder='little')
             else:
                 storage = obj
                 storage_type = normalize_storage_type(type(obj))
