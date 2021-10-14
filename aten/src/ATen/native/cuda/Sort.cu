@@ -460,6 +460,7 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
 
   int64_t numel_or_intmax = std::min(numel, static_cast<int64_t>(std::numeric_limits<int>::max()));
   int64_t nbatch = (numel_or_intmax / nsort) * nsort;
+  TORCH_CHECK(nbatch > 0, "Cannot sort dimension of length ", nsort);
 
 #if defined(USE_ROCM)
   constexpr bool is_rocm = true;
