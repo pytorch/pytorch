@@ -465,8 +465,6 @@ def create_namedtuple(
         name = cpp.name(overload.function.func)  # use @with_native_function?
         tn_key = gen_namedtuple_typename_key(overload.function)
         typename = typenames.get(tn_key)
-        # if typename is None and array_call:
-        #     typedefs.append(f"get_{name}_namedtuple(),")
 
         if typename is None:
             typename = f'{name}NamedTuple{"" if not typedefs else len(typedefs)}'
