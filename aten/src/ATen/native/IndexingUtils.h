@@ -1,13 +1,10 @@
 #pragma once
 #include <ATen/ExpandUtils.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/core/List.h>
 
-#include <limits>
-
 namespace at { namespace native {
-
-TORCH_API bool canUse32BitIndexMath(const at::Tensor &t, int64_t max_elem=std::numeric_limits<int32_t>::max());
 
 [[noreturn]]
 static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, int64_t maskIdx) {
