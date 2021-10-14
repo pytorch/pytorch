@@ -177,7 +177,7 @@ histogram_out_cpu(const Tensor& self, int64_t bin_ct, c10::optional<c10::ArrayRe
         Tensor& hist, Tensor& bin_edges) {
     histogram_prepare_out(self, bin_ct, hist, bin_edges);
     auto outer_bin_edges = select_outer_bin_edges(self, range);
-    linspace_cpu_out(outer_bin_edges.first, outer_bin_edges.second, bin_ct + 1, bin_edges);
+    linspace_out(outer_bin_edges.first, outer_bin_edges.second, bin_ct + 1, bin_edges);
     histogram_check_inputs(self, bin_edges, weight);
 
     histogram_linear_stub(self.device().type(), self, weight, density, hist, bin_edges, true);
@@ -198,7 +198,7 @@ Tensor& histogram_histc_cpu_out(const Tensor& self, int64_t bin_ct,
     Tensor bin_edges = at::empty({0}, self.options());
     histogram_prepare_out(self, bin_ct, hist, bin_edges);
     auto outer_bin_edges = histc_select_outer_bin_edges(self, min, max);
-    linspace_cpu_out(outer_bin_edges.first, outer_bin_edges.second, bin_ct + 1, bin_edges);
+    linspace_out(outer_bin_edges.first, outer_bin_edges.second, bin_ct + 1, bin_edges);
     histogram_check_inputs(self, bin_edges, {});
 
     histogram_linear_stub(self.device().type(), self,
