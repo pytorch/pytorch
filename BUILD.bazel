@@ -165,7 +165,7 @@ genrule(
 )
 
 # this hack is due to https://github.com/bazelbuild/bazel/issues/281
-# since `outs` cannot be configured with if_cuda, we rerun the same command and declare cuda related files separatedly here.
+# since `outs` cannot be configured with if_cuda, we rerun the same command and declare cuda related files separately here.
 genrule(
     name = "generated_cuda_cpp",
     srcs = aten_generation_srcs,
@@ -606,10 +606,10 @@ torch_cuda_half_options = [
 
 cu_library(
     name = "aten_cuda",
-    srcs = if_cuda([
+    srcs = [
         ":aten_cu_srcs",
         ":thc_cu_srcs",
-    ]),
+    ],
     copts = ATEN_COPTS + torch_cuda_half_options,
     visibility = ["//visibility:public"],
     deps = [
@@ -1660,7 +1660,7 @@ cc_library(
 
 cu_library(
     name = "caffe2_cuda",
-    srcs = if_cuda([":caffe2_cu_srcs"]),
+    srcs = [":caffe2_cu_srcs"],
     copts = CAFFE2_COPTS + torch_cuda_half_options,
     visibility = ["//visibility:public"],
     deps = [
@@ -1845,7 +1845,7 @@ TORCH_COPTS = COMMON_COPTS + [
 
 cu_library(
     name = "torch_distributed_cuda",
-    srcs = if_cuda(["torch/csrc/distributed/c10d/quantization/quantization_gpu.cu"]),
+    srcs = ["torch/csrc/distributed/c10d/quantization/quantization_gpu.cu"],
     deps = [":torch_headers"],
 )
 
