@@ -1607,7 +1607,7 @@ bool THPVariable_initModule(PyObject *module)
 
   auto return_module = PyObject_GetAttrString(module, "_return_types");
   for (auto return_type: torch::autograd::return_types_variable) {
-    PyModule_AddType(return_module, return_type);
+    PyModule_AddObject(return_module, return_type->tp_name, (PyObject*)return_type);
   }
 
   return true;

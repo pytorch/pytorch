@@ -824,8 +824,8 @@ void initTorchFunctions(PyObject *module) {
   }
 
   auto return_module = PyObject_GetAttrString(module, "_return_types");
-  for (int i = 0; i < return_types.size(); i++) {
-    PyModule_AddType(return_module, return_types[i]);
+  for (auto return_type : return_types) {
+    PyModule_AddObject(return_module, return_type->tp_name, (PyObject*)return_type);
   }
 }
 
