@@ -1,4 +1,8 @@
+#ifdef _WIN32
+#include <c10/util/win32-headers.h>
+#else
 #include <pthread.h>
+#endif
 
 #include "rw_mutex.hpp"
 #include "utils.hpp"
