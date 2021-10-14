@@ -2,7 +2,6 @@
 
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
-#include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/str_join.h"
 
 namespace torch_lazy_tensors {
@@ -33,7 +32,7 @@ AvgPoolNd::AvgPoolNd(const Value& input, lazy_tensors::int64 spatial_dim_count,
                      bool count_include_pad)
     : Node(ir::OpKind(AvgPoolNdSymbol(spatial_dim_count)), {input},
            /*num_outputs=*/1,
-           lazy_tensors::util::MHash(spatial_dim_count, kernel_size, stride,
+           torch::lazy::MHash(spatial_dim_count, kernel_size, stride,
                                      padding, ceil_mode, count_include_pad)),
       spatial_dim_count_(spatial_dim_count),
       kernel_size_(std::move(kernel_size)),

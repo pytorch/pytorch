@@ -4,7 +4,6 @@
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ops/scalar.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
-#include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/str_join.h"
 
 namespace torch_lazy_tensors {
@@ -16,7 +15,7 @@ ConstantPadNd::ConstantPadNd(const Value& input,
                              const at::Scalar& value)
     : Node(ir::OpKind(at::aten::constant_pad_nd), {input},
            /*num_outputs=*/1,
-           lazy_tensors::util::MHash(pad, ScalarHash(value))),
+           torch::lazy::MHash(pad, ScalarHash(value))),
       pad_(std::move(pad)),
       value_(value) {
   SetShapeDeferred(

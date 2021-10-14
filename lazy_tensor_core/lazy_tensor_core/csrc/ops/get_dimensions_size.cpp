@@ -16,7 +16,7 @@ GetDimensionsSize::GetDimensionsSize(
     : Node(ltc_get_dimensions_size, {input},
            lazy_tensors::ShapeUtil::MakeShape(
                GetShapeDimensionType(/*device=*/nullptr), {}),
-           /*num_outputs=*/1, lazy_tensors::util::MHash(dimensions)),
+           /*num_outputs=*/1, torch::lazy::MHash(dimensions)),
       dimensions_(std::move(dimensions)) {}
 
 NodePtr GetDimensionsSize::Clone(OpList operands) const {

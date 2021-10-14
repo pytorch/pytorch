@@ -1,6 +1,5 @@
 #include "lazy_tensor_core/csrc/ops/leaky_relu_backward.h"
 
-#include "lazy_tensors/computation_client/util.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -11,7 +10,7 @@ LeakyReluBackward::LeakyReluBackward(const Value& grad_output,
                                      bool self_is_result)
     : Node(ir::OpKind(at::aten::leaky_relu_backward), {grad_output, input},
            input.shape(),
-           /*num_outputs=*/1, lazy_tensors::util::MHash(negative_slope)),
+           /*num_outputs=*/1, torch::lazy::MHash(negative_slope)),
       negative_slope_(negative_slope),
       self_is_result_(self_is_result) {}
 

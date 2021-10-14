@@ -4,7 +4,6 @@
 #include "lazy_tensor_core/csrc/reduction.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensor_core/csrc/torch_util.h"
-#include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/str_join.h"
 
 namespace torch_lazy_tensors {
@@ -15,7 +14,7 @@ All::All(const Value& input, std::vector<lazy_tensors::int64> dimensions,
          bool keep_reduced_dimensions)
     : Node(ir::OpKind(at::aten::all), {input},
            /*num_outputs=*/1,
-           lazy_tensors::util::MHash(dimensions, keep_reduced_dimensions)),
+           torch::lazy::MHash(dimensions, keep_reduced_dimensions)),
       dimensions_(std::move(dimensions)),
       keep_reduced_dimensions_(keep_reduced_dimensions) {
   SetShapeDeferred(

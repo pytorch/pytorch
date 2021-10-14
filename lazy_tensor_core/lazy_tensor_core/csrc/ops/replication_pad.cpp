@@ -12,7 +12,7 @@ namespace ops {
 ReplicationPad::ReplicationPad(const Value& input,
                                std::vector<lazy_tensors::int64> padding)
     : Node(ltc_replication_pad, {input},
-           /*num_outputs=*/1, lazy_tensors::util::MHash(padding)),
+           /*num_outputs=*/1, torch::lazy::MHash(padding)),
       padding_(std::move(padding)) {
   SetShapeDeferred(
       [&]() { return compiler::NodeLowering::Get()->Infer(this); });

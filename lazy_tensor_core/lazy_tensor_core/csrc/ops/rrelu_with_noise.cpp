@@ -15,7 +15,7 @@ RreluWithNoise::RreluWithNoise(const Value& input, const Value& seed,
            lazy_tensors::ShapeUtil::MakeTupleShape(
                {input.shape(), input.shape()}),
            /*num_outputs=*/2,
-           lazy_tensors::util::MHash(ScalarHash(lower), ScalarHash(upper),
+           torch::lazy::MHash(ScalarHash(lower), ScalarHash(upper),
                                      training)),
       lower_(std::move(lower)),
       upper_(std::move(upper)),

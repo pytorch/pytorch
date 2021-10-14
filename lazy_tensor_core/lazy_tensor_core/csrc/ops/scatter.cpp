@@ -1,6 +1,5 @@
 #include "lazy_tensor_core/csrc/ops/scatter.h"
 
-#include "lazy_tensors/computation_client/util.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -9,7 +8,7 @@ namespace ops {
 Scatter::Scatter(const Value& input, const Value& index, const Value& src,
                  lazy_tensors::int64 dim)
     : Node(ir::OpKind(at::aten::scatter), {input, index, src}, input.shape(),
-           /*num_outputs=*/1, lazy_tensors::util::MHash(dim)),
+           /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim) {}
 
 NodePtr Scatter::Clone(OpList operands) const {

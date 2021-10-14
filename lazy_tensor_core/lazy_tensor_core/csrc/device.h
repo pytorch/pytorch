@@ -4,6 +4,7 @@
 #include <string>
 
 #include "lazy_tensors/computation_client/util.h"
+#include "torch/csrc/lazy/core/hash.h"
 
 namespace torch_lazy_tensors {
 
@@ -36,7 +37,7 @@ struct Device {
   }
 
   size_t hash() const {
-    return lazy_tensors::util::StdHashCombine(
+    return torch::lazy::StdHashCombine(
         lazy_tensors::util::GetEnumValue(hw_type), ordinal + 1);
   }
 

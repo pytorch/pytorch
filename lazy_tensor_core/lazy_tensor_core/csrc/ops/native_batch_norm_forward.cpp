@@ -2,7 +2,6 @@
 
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
-#include "lazy_tensors/computation_client/util.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -16,7 +15,7 @@ NativeBatchNormForward::NativeBatchNormForward(const Value& input,
                                                bool training, double eps)
     : Node(ir::OpKind(at::aten::native_batch_norm),
            {input, weight, bias, running_mean, running_var},
-           /*num_outputs=*/4, lazy_tensors::util::MHash(training, eps)),
+           /*num_outputs=*/4, torch::lazy::MHash(training, eps)),
       training_(training),
       eps_(eps) {
   SetShapeDeferred(

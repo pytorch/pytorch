@@ -15,7 +15,7 @@ NllLossForward::NllLossForward(const Value& logits, const Value& labels,
            lazy_tensors::util::GetValuesVector<Value>({logits, labels},
                                                       {&weight}),
            /*num_outputs=*/2,
-           lazy_tensors::util::MHash(
+           torch::lazy::MHash(
                lazy_tensors::util::GetEnumValue(reduction), ignore_index)),
       reduction_(reduction),
       ignore_index_(ignore_index) {

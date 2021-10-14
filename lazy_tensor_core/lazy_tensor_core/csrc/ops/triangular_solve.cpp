@@ -12,7 +12,7 @@ TriangularSolve::TriangularSolve(const Value& rhs, const Value& lhs,
                                  bool unit_diagonal)
     : Node(ir::OpKind(at::aten::triangular_solve), {rhs, lhs},
            /*num_outputs=*/2,
-           lazy_tensors::util::MHash(left_side, lower, transpose,
+           torch::lazy::MHash(left_side, lower, transpose,
                                      unit_diagonal)),
       left_side_(left_side),
       lower_(lower),

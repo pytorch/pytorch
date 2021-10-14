@@ -2,7 +2,6 @@
 
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
-#include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/shape_util.h"
 #include "lazy_tensors/str_join.h"
 
@@ -17,7 +16,7 @@ AllToAll::AllToAll(const Value& input, const Value& token,
                    std::vector<std::vector<lazy_tensors::int64>> groups)
     : Node(ltc_all_to_all, {input, token},
            /*num_outputs=*/2,
-           lazy_tensors::util::MHash(split_dimension, concat_dimension,
+           torch::lazy::MHash(split_dimension, concat_dimension,
                                      split_count, groups)),
       split_dimension_(split_dimension),
       concat_dimension_(concat_dimension),

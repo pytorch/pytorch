@@ -308,7 +308,7 @@ NodePtr Identity(lazy_tensors::int64 lines, lazy_tensors::int64 cols,
   return GenericOp(
       OpKind(at::aten::eye),
       lazy_tensors::ShapeUtil::MakeShape(element_type, {lines, cols}),
-      /*num_outputs=*/1, lazy_tensors::util::MHash(lines, cols));
+      /*num_outputs=*/1, torch::lazy::MHash(lines, cols));
 }
 
 NodePtr Elu(const Value& input, const at::Scalar& alpha,

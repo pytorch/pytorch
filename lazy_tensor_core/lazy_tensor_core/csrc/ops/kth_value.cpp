@@ -10,7 +10,7 @@ namespace ops {
 KthValue::KthValue(const Value& input, lazy_tensors::int64 k,
                    lazy_tensors::int64 dim, bool keepdim)
     : Node(ir::OpKind(at::aten::kthvalue), {input},
-           /*num_outputs=*/2, lazy_tensors::util::MHash(k, dim, keepdim)),
+           /*num_outputs=*/2, torch::lazy::MHash(k, dim, keepdim)),
       k_(k),
       dim_(dim),
       keepdim_(keepdim) {

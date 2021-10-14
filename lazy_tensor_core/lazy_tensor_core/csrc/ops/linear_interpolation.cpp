@@ -10,7 +10,7 @@ namespace ops {
 LinearInterpolation::LinearInterpolation(const Value& value,
                                          const Value& new_value, double alpha)
     : Node(ltc_moving_average, {value, new_value}, value.shape(),
-           /*num_outputs=*/1, lazy_tensors::util::MHash(alpha)),
+           /*num_outputs=*/1, torch::lazy::MHash(alpha)),
       alpha_(alpha) {}
 
 NodePtr LinearInterpolation::Clone(OpList operands) const {

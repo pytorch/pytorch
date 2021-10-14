@@ -14,7 +14,7 @@ Unselect::Unselect(const Value& target, const Value& source,
                    lazy_tensors::int64 end, lazy_tensors::int64 stride)
     : Node(ltc_unselect, {target, source}, target.shape(),
            /*num_outputs=*/1,
-           lazy_tensors::util::MHash(dim, start, end, stride)),
+           torch::lazy::MHash(dim, start, end, stride)),
       dim_(dim),
       start_(start),
       end_(end),

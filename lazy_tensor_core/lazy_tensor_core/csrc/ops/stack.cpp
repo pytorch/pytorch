@@ -10,7 +10,7 @@ namespace ops {
 Stack::Stack(lazy_tensors::Span<const ir::Value> values,
              lazy_tensors::int64 dim)
     : Node(ir::OpKind(at::aten::stack), values,
-           /*num_outputs=*/1, lazy_tensors::util::MHash(dim)),
+           /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim) {
   SetShapeDeferred(
       [&]() { return compiler::NodeLowering::Get()->Infer(this); });

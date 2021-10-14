@@ -1186,7 +1186,7 @@ class LazyTensor {
 
     SyncTensorsConfig config;
     std::vector<size_t> indices;
-    lazy_tensors::hash_t hash;
+    torch::lazy::hash_t hash;
     std::vector<lazy_tensors::util::ExceptionCleanup> unlocker;
     Device device;
   };
@@ -1215,8 +1215,8 @@ class LazyTensor {
   };
 
   using ComputationCache =
-      lazy_tensors::util::Cache<lazy_tensors::hash_t, CachedComputation,
-                                lazy_tensors::util::HashReducer>;
+      lazy_tensors::util::Cache<torch::lazy::hash_t, CachedComputation,
+                                torch::lazy::HashReducer>;
 
   struct Async {
     Async(SyncTensorCollection* coll,
@@ -1408,7 +1408,7 @@ private:
                                     lazy_tensors::Span<const size_t> indices);
 
   static ComputationCache::TypePtr LookupCachedCompile(
-      const std::vector<LazyTensor>& tensors, const lazy_tensors::hash_t& hash);
+      const std::vector<LazyTensor>& tensors, const torch::lazy::hash_t& hash);
 
   static std::shared_ptr<Async> TryRunCachedSync(
       std::vector<LazyTensor>* tensors, SyncTensorCollection* coll,

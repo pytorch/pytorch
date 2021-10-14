@@ -14,7 +14,7 @@ UpsampleBilinear::UpsampleBilinear(const Value& input,
                                    bool align_corners)
     : Node(ir::OpKind(at::aten::upsample_bilinear2d), {input},
            /*num_outputs=*/1,
-           lazy_tensors::util::MHash(output_size, align_corners)),
+           torch::lazy::MHash(output_size, align_corners)),
       output_size_(std::move(output_size)),
       align_corners_(align_corners) {
   SetShapeDeferred(

@@ -4,7 +4,6 @@
 #include <sstream>
 
 #include "lazy_tensors/computation_client/debug_macros.h"
-#include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/shape_util.h"
 
 namespace torch_lazy_tensors {
@@ -32,9 +31,9 @@ NodePtr Scalar::Clone(OpList operands) const {
   return MakeNode<Scalar>(value_, shape());
 }
 
-lazy_tensors::hash_t ScalarHash(const at::Scalar& s) {
-  return s.isFloatingPoint() ? lazy_tensors::util::Hash(s.toDouble())
-                             : lazy_tensors::util::Hash(s.toLong());
+torch::lazy::hash_t ScalarHash(const at::Scalar& s) {
+  return s.isFloatingPoint() ? torch::lazy::Hash(s.toDouble())
+                             : torch::lazy::Hash(s.toLong());
 }
 
 std::ostream& operator<<(std::ostream& ostrm, at::Scalar s) {

@@ -13,7 +13,7 @@ CumSum::CumSum(const Value& input, lazy_tensors::int64 dim,
                c10::optional<at::ScalarType> dtype)
     : Node(ir::OpKind(at::aten::cumsum), {input},
            /*num_outputs=*/1,
-           lazy_tensors::util::MHash(dim, OptionalOr<int>(dtype, -1))),
+           torch::lazy::MHash(dim, OptionalOr<int>(dtype, -1))),
       dim_(dim),
       dtype_(dtype) {
   SetShapeDeferred(

@@ -2,7 +2,6 @@
 
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
-#include "lazy_tensors/computation_client/util.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -13,7 +12,7 @@ NativeBatchNormBackward::NativeBatchNormBackward(
     const Value& save_mean, const Value& save_invstd, bool training, double eps)
     : Node(ir::OpKind(at::aten::native_batch_norm_backward),
            {grad_out, input, weight, save_mean, save_invstd},
-           /*num_outputs=*/3, lazy_tensors::util::MHash(training, eps)),
+           /*num_outputs=*/3, torch::lazy::MHash(training, eps)),
       training_(training),
       eps_(eps) {
   SetShapeDeferred(

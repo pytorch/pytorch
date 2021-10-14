@@ -9,11 +9,11 @@
 #include "lazy_tensor_core/csrc/ops/device_data.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
-#include "lazy_tensors/computation_client/ltc_util.h"
+#include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/computation_client/metrics.h"
 #include "lazy_tensors/computation_client/sys_util.h"
-#include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/str_cat.h"
+#include "torch/csrc/lazy/core/hash.h"
 
 namespace torch_lazy_tensors {
 namespace {
@@ -40,20 +40,20 @@ const lazy_tensors::Shape& GetParameterShape(
                                       input_shape, operand.index);
 }
 
-lazy_tensors::hash_t ComputeNodeKey(
+torch::lazy::hash_t ComputeNodeKey(
     const ir::Node* node,
     lazy_tensors::Span<const lazy_tensors::Shape* const> input_shapes,
-    const lazy_tensors::hash_t& seed) {
-  lazy_tensors::hash_t key = seed;
+    const torch::lazy::hash_t& seed) {
+  torch::lazy::hash_t key = seed;
   const auto& operands = node->operands();
   for (size_t i = 0; i < operands.size(); ++i) {
-    key = lazy_tensors::util::HashCombine(
-        key, lazy_tensors::util::ShapeHash(
+    key = torch::lazy::HashCombine(
+        key, torch::lazy::Hash(
                  GetParameterShape(operands[i], *input_shapes[i])));
   }
-  key = lazy_tensors::util::HashCombine(
-      key, lazy_tensors::util::ShapeHash(node->shape()));
-  return lazy_tensors::util::HashCombine(key, node->node_hash());
+  key = torch::lazy::HashCombine(
+      key, torch::lazy::Hash(node->shape()));
+  return torch::lazy::HashCombine(key, node->node_hash());
 }
 
 std::shared_ptr<lazy_tensors::GenericComputation> BuildNodeComputation(
@@ -70,9 +70,9 @@ std::shared_ptr<lazy_tensors::GenericComputation> BuildNodeComputation(
   return ConsumeValue(loctx->Build());
 }
 
-lazy_tensors::hash_t GetNodesKeySeed(
+torch::lazy::hash_t GetNodesKeySeed(
     const std::string& device, lazy_tensors::Span<const std::string> devices) {
-  return lazy_tensors::util::MHash(device, devices);
+  return torch::lazy::MHash(device, torch::lazy::Hash(devices));
 }
 
 }  // namespace
@@ -103,15 +103,15 @@ OpByOpExecutor::BuildOps(lazy_tensors::Span<const ir::Value> roots,
   auto compilation_devices =
       lazy_tensors::ComputationClient::Get()->GetCompilationDevices(device,
                                                                     devices);
-  lazy_tensors::hash_t nodes_key_seed =
+  torch::lazy::hash_t nodes_key_seed =
       GetNodesKeySeed(device, compilation_devices);
   Device exec_device(device);
-  std::vector<lazy_tensors::hash_t> cache_keys;
-  std::unordered_map<lazy_tensors::hash_t, std::vector<size_t>,
-                     lazy_tensors::util::HashReducer>
+  std::vector<torch::lazy::hash_t> cache_keys;
+  std::unordered_map<torch::lazy::hash_t, std::vector<size_t>,
+                     torch::lazy::HashReducer>
       compile_indices;
-  std::unordered_map<lazy_tensors::hash_t, size_t,
-                     lazy_tensors::util::HashReducer>
+  std::unordered_map<torch::lazy::hash_t, size_t,
+                     torch::lazy::HashReducer>
       cache_keys_instance;
   std::list<lazy_tensors::Shape> compile_shapes;
   std::vector<bool> device_data_ops(post_order.size());
@@ -139,7 +139,7 @@ OpByOpExecutor::BuildOps(lazy_tensors::Span<const ir::Value> roots,
         op_input_shapes.push_back(&ops_shapes[op_index]);
       }
 
-      lazy_tensors::hash_t cache_key =
+      torch::lazy::hash_t cache_key =
           ComputeNodeKey(node, op_input_shapes, nodes_key_seed);
       cxop.computation = compile_cache_.Get(cache_key);
       if (cxop.computation == nullptr) {

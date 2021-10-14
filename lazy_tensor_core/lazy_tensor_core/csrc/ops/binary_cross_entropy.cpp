@@ -15,7 +15,7 @@ BinaryCrossEntropy::BinaryCrossEntropy(const Value& logits, const Value& labels,
            lazy_tensors::util::GetValuesVector<Value>({logits, labels},
                                                       {&weight}),
            /*num_outputs=*/1,
-           lazy_tensors::util::MHash(
+           torch::lazy::MHash(
                lazy_tensors::util::GetEnumValue(reduction))),
       reduction_(reduction) {
   SetShapeDeferred(

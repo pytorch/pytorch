@@ -2,7 +2,6 @@
 
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
-#include "lazy_tensors/computation_client/util.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -14,7 +13,7 @@ TSEmbeddingDenseBackward::TSEmbeddingDenseBackward(
     bool scale_grad_by_freq)
     : Node(ir::OpKind(at::aten::embedding_dense_backward),
            {grad_output, indices}, /*num_outputs=*/1,
-           lazy_tensors::util::MHash(num_weights, padding_idx,
+           torch::lazy::MHash(num_weights, padding_idx,
                                      scale_grad_by_freq)),
       num_weights_(num_weights),
       padding_idx_(padding_idx),

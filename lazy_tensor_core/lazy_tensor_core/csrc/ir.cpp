@@ -14,8 +14,8 @@ namespace ir {
 namespace {
 
 using ShapeCache =
-    lazy_tensors::util::Cache<lazy_tensors::hash_t, lazy_tensors::Shape,
-                              lazy_tensors::util::HashReducer>;
+    lazy_tensors::util::Cache<torch::lazy::hash_t, lazy_tensors::Shape,
+                              torch::lazy::HashReducer>;
 
 struct ScopeEntry {
   std::string name;
@@ -101,7 +101,7 @@ std::string Use::ToString() const {
 }
 
 size_t Output::Hasher::operator()(const Output& output) const {
-  return lazy_tensors::util::StdHashCombine(
+  return torch::lazy::StdHashCombine(
       reinterpret_cast<std::ptrdiff_t>(output.node), output.index);
 }
 
@@ -109,8 +109,8 @@ const lazy_tensors::Shape& Output::shape() const { return node->shape(index); }
 
 const lazy_tensors::Shape& Output::node_shape() const { return node->shape(); }
 
-lazy_tensors::hash_t Output::hash() const {
-  return lazy_tensors::util::HashCombine(node->hash(), index);
+torch::lazy::hash_t Output::hash() const {
+  return torch::lazy::HashCombine(node->hash(), index);
 }
 
 std::string Output::ToString() const {
@@ -123,24 +123,24 @@ const lazy_tensors::Shape& Value::shape() const { return node->shape(index); }
 
 const lazy_tensors::Shape& Value::node_shape() const { return node->shape(); }
 
-lazy_tensors::hash_t Value::hash() const {
-  return lazy_tensors::util::HashCombine(node->hash(), index);
+torch::lazy::hash_t Value::hash() const {
+  return torch::lazy::HashCombine(node->hash(), index);
 }
 
 OpKind OpKind::Get(const std::string& name) {
   return OpKind(c10::Symbol::fromQualString(name));
 }
 
-lazy_tensors::hash_t OpKind::hash() const {
-  return lazy_tensors::util::StringHash(op.toQualString());
+torch::lazy::hash_t OpKind::hash() const {
+  return torch::lazy::StringHash(op.toQualString());
 }
 
 Node::Node(OpKind op, OpList operands, lazy_tensors::Shape shape,
-           size_t num_outputs, lazy_tensors::hash_t hash_seed)
+           size_t num_outputs, torch::lazy::hash_t hash_seed)
     : op_(std::move(op)),
       num_outputs_(num_outputs),
       shape_(std::move(shape)),
-      node_hash_(lazy_tensors::util::HashCombine(op_.hash(), hash_seed)),
+      node_hash_(torch::lazy::HashCombine(op_.hash(), hash_seed)),
       hash_(node_hash_) {
   metadata_.scope = GetCurrentScope();
   metadata_.frame_info = GetFrameInfo();
@@ -152,12 +152,12 @@ Node::Node(OpKind op, OpList operands, lazy_tensors::Shape shape,
     }
 
     AddOperand(operand.node, operand.index);
-    hash_ = lazy_tensors::util::HashCombine(hash_, operand.hash());
+    hash_ = torch::lazy::HashCombine(hash_, operand.hash());
   }
 }
 
 Node::Node(OpKind op, OpList operands, lazy_tensors::Shape shape,
-           size_t num_outputs, lazy_tensors::hash_t hash_seed,
+           size_t num_outputs, torch::lazy::hash_t hash_seed,
            const std::vector<at::ScalarType>& at_dtypes, const std::vector<std::vector<int64_t>>& at_shapes)
     : Node(std::move(op), operands, shape, num_outputs, hash_seed) {
   LTC_CHECK_EQ(at_dtypes.size(), at_shapes.size());
@@ -167,7 +167,7 @@ Node::Node(OpKind op, OpList operands, lazy_tensors::Shape shape,
 
 Node::Node(OpKind op, OpList operands,
            const std::function<lazy_tensors::Shape()>& shape_fn,
-           size_t num_outputs, lazy_tensors::hash_t hash_seed)
+           size_t num_outputs, torch::lazy::hash_t hash_seed)
     : Node(std::move(op), operands, lazy_tensors::Shape(), num_outputs,
            hash_seed) {
   // Forward the constructor to the one above (with empty shape), so we have the
@@ -176,7 +176,7 @@ Node::Node(OpKind op, OpList operands,
 }
 
 Node::Node(OpKind op, OpList operands, size_t num_outputs,
-           lazy_tensors::hash_t hash_seed)
+           torch::lazy::hash_t hash_seed)
     : Node(std::move(op), operands, lazy_tensors::Shape(), num_outputs,
            hash_seed) {}
 
@@ -186,7 +186,7 @@ void Node::SetShapeDeferred(
 }
 
 Node::Node(OpKind op, lazy_tensors::Shape shape, size_t num_outputs,
-           lazy_tensors::hash_t hash_seed)
+           torch::lazy::hash_t hash_seed)
     : op_(std::move(op)),
       num_outputs_(num_outputs),
       shape_(std::move(shape)),
@@ -252,17 +252,17 @@ NodePtr Node::Clone(OpList operands) const {
   LTC_ERROR() << "Cloning not implemented for node: " << *this;
 }
 
-lazy_tensors::hash_t Node::GetOpHash(OpKind op,
+torch::lazy::hash_t Node::GetOpHash(OpKind op,
                                      const lazy_tensors::Shape& shape,
-                                     lazy_tensors::hash_t hash_seed) {
+                                     torch::lazy::hash_t hash_seed) {
   if (lazy_tensors::Shape::IsDynamicMode()) {
-    lazy_tensors::hash_t h = lazy_tensors::util::HashCombine(
-        op.hash(), lazy_tensors::util::Hash(shape.rank()));
-    return lazy_tensors::util::HashCombine(h, hash_seed);
+    torch::lazy::hash_t h = torch::lazy::HashCombine(
+        op.hash(), torch::lazy::Hash(shape.rank()));
+    return torch::lazy::HashCombine(h, hash_seed);
   }
-  lazy_tensors::hash_t h = lazy_tensors::util::HashCombine(
-      op.hash(), lazy_tensors::util::Hash(shape.ToString()));
-  return lazy_tensors::util::HashCombine(h, hash_seed);
+  torch::lazy::hash_t h = torch::lazy::HashCombine(
+      op.hash(), torch::lazy::Hash(shape.ToString()));
+  return torch::lazy::HashCombine(h, hash_seed);
 }
 
 lazy_tensors::Shape Node::GetOpShape(

@@ -2,7 +2,6 @@
 
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
-#include "lazy_tensors/computation_client/util.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -11,7 +10,7 @@ namespace ops {
 AdaptiveAvgPool3d::AdaptiveAvgPool3d(
     const Value& input, std::vector<lazy_tensors::int64> output_size)
     : Node(ir::OpKind(at::aten::adaptive_avg_pool3d), {input},
-           /*num_outputs=*/1, lazy_tensors::util::MHash(output_size)),
+           /*num_outputs=*/1, torch::lazy::MHash(output_size)),
       output_size_(std::move(output_size)) {
   SetShapeDeferred(
       [&]() { return compiler::NodeLowering::Get()->Infer(this); });

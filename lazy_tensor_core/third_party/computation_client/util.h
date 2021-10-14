@@ -5,44 +5,39 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <cstring>
 #include <exception>
 #include <functional>
 #include <memory>
 #include <numeric>
-#include <set>
-#include <string>
 #include <type_traits>
 #include <vector>
 
 #include "lazy_tensors/computation_client/types.h"
-#include "lazy_tensors/span.h"
 #include "lazy_tensors/status.h"
-#include "c10/core/ScalarType.h"
-#include "c10/core/Scalar.h"
+#include "lazy_tensors/span.h"
+#include "torch/csrc/lazy/core/hash.h"
+
+namespace torch {
+namespace lazy {
+// Adapters that provide torch::lazy Hash functions for xla types
+
+template <typename T>
+torch::lazy::hash_t Hash(lazy_tensors::Span<const T> values) {
+  return torch::lazy::ContainerHash(values);
+}
+
+// When specializing Hash(T) also specialize MHash(T, ...) since
+// torch::lazy::MHash template won't be aware of the Hash(T) here
+template <typename T, typename... Targs>
+hash_t MHash(lazy_tensors::Span<const T> value, Targs... Fargs) {
+  return HashCombine(Hash(value), MHash(Fargs...));
+}
+
+}  // namespace lazy
+}  // namespace torch
 
 namespace lazy_tensors {
 namespace util {
-
-hash_t HashBlock(const void* data, size_t n, const hash_t& seed);
-
-hash_t DataHash(const void* data, size_t size);
-
-size_t StdDataHash(const void* data, size_t size);
-
-size_t StdHashCombine(uintmax_t a, uintmax_t b);
-
-hash_t HashCombine(const hash_t& a, const hash_t& b);
-
-size_t HashReduce(const hash_t& a);
-
-std::string HexHash(const hash_t& a);
-
-struct HashReducer {
-  size_t operator()(const lazy_tensors::hash_t& value) const {
-    return HashReduce(value);
-  }
-};
 
 template <typename T>
 class Cleanup {
@@ -239,92 +234,6 @@ template <typename T, typename S>
 T Multiply(const S& input) {
   return std::accumulate(input.begin(), input.end(), T(1),
                          std::multiplies<T>());
-}
-
-static inline hash_t StringHash(const char* data) {
-  return DataHash(data, std::strlen(data));
-}
-
-template <typename T, typename std::enable_if<
-                          std::is_arithmetic<T>::value>::type* = nullptr>
-hash_t Hash(const T& value) {
-  return DataHash(&value, sizeof(value));
-}
-
-static inline hash_t Hash(const c10::ScalarType& value) {
-  return DataHash(&value, sizeof(value));
-}
-
-static inline hash_t Hash(const c10::Scalar& value) {
-  return DataHash(&value, sizeof(value));
-}
-
-static inline hash_t Hash(const std::string& value) {
-  return DataHash(value.data(), value.size());
-}
-
-// Forward declare to allow hashes of vectors of vectors to work.
-template <typename T>
-hash_t ContainerHash(const T& values);
-
-template <typename T>
-hash_t Hash(lazy_tensors::Span<const T> values) {
-  return ContainerHash(values);
-}
-
-template <typename T>
-hash_t Hash(const std::vector<T>& values) {
-  return ContainerHash(values);
-}
-
-template <typename T>
-hash_t Hash(const std::set<T>& values) {
-  return ContainerHash(values);
-}
-
-template <typename T, typename S>
-hash_t Hash(const std::pair<T, S>& values) {
-  return HashCombine(Hash(values.first), Hash(values.second));
-}
-
-// Implement any Hash wrappers necessary to cover the types
-// used in native_functions
-hash_t Hash(const c10::ScalarType& value);
-
-// Taken from glibc's implementation of hashing optionals,
-// we want to include a contribution to the hash to distinguish
-// cases where one or another option was null, but we hope it doesn't
-// collide with an actually scalar value.
-static const int64_t kNullOpt = -3333;
-
-template <typename T>
-hash_t Hash(const c10::optional<T>& value) {
-  if(value.has_value()){
-    return Hash(value.value());
-  } else {
-    return Hash(kNullOpt);
-  }
-}
-
-static inline hash_t Hash(const hash_t& value) { return value; }
-
-template <typename T>
-hash_t ContainerHash(const T& values) {
-  hash_t h = 0x85ebca77c2b2ae63;
-  for (const auto& value : values) {
-    h = HashCombine(h, Hash(value));
-  }
-  return h;
-}
-
-template <typename T = void>
-hash_t MHash() {
-  return 0x165667b19e3779f9;
-}
-
-template <typename T, typename... Targs>
-hash_t MHash(T value, Targs... Fargs) {
-  return HashCombine(Hash(value), MHash(Fargs...));
 }
 
 }  // namespace util

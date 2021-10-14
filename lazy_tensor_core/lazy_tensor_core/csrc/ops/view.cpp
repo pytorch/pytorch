@@ -2,7 +2,6 @@
 
 #include "lazy_tensor_core/csrc/data_ops.h"
 #include "lazy_tensor_core/csrc/helpers.h"
-#include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/shape_util.h"
 #include "lazy_tensors/str_join.h"
 
@@ -30,7 +29,7 @@ lazy_tensors::Shape NodeOutputShape(
 View::View(const Value& input, std::vector<lazy_tensors::int64> output_size)
     : Node(ir::OpKind(at::aten::view), {input},
            NodeOutputShape(input, output_size),
-           /*num_outputs=*/1, lazy_tensors::util::MHash(output_size)),
+           /*num_outputs=*/1, torch::lazy::MHash(output_size)),
       output_size_(std::move(output_size)) {}
 
 std::string View::ToString() const {

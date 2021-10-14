@@ -2,7 +2,6 @@
 
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
-#include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/str_join.h"
 
 namespace torch_lazy_tensors {
@@ -13,7 +12,7 @@ ReplicationPadBackward::ReplicationPadBackward(
     const Value& grad_output, const Value& input,
     std::vector<lazy_tensors::int64> padding)
     : Node(ltc_replication_pad_backward, {grad_output, input},
-           /*num_outputs=*/1, lazy_tensors::util::MHash(padding)),
+           /*num_outputs=*/1, torch::lazy::MHash(padding)),
       padding_(std::move(padding)) {
   SetShapeDeferred(
       [&]() { return compiler::NodeLowering::Get()->Infer(this); });

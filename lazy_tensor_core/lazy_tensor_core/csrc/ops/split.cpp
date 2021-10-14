@@ -14,7 +14,7 @@ Split::Split(const Value& input, std::vector<lazy_tensors::int64> split_sizes,
              lazy_tensors::int64 dim)
     : Node(ir::OpKind(at::aten::split), {input},
            ComputeSplitCount(input.shape().dimensions(dim), split_sizes),
-           lazy_tensors::util::MHash(split_sizes, dim)),
+           torch::lazy::MHash(split_sizes, dim)),
       split_sizes_(std::move(split_sizes)),
       dim_(dim) {
   SetShapeDeferred(

@@ -2,7 +2,6 @@
 
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
-#include "lazy_tensors/computation_client/util.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -16,7 +15,7 @@ Select::Select(const Value& input, lazy_tensors::int64 dim,
              return MakeSelectShape(input.shape(), dim, start, end, stride);
            },
            /*num_outputs=*/1,
-           lazy_tensors::util::MHash(dim, start, end, stride)),
+           torch::lazy::MHash(dim, start, end, stride)),
       dim_(dim),
       start_(start),
       end_(end),

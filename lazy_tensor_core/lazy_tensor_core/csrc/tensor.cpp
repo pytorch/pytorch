@@ -28,7 +28,6 @@
 #include "lazy_tensor_core/csrc/ts_backend/ts_computation_client.h"
 #include "lazy_tensors/computation_client/cache.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
-#include "lazy_tensors/computation_client/ltc_util.h"
 #include "lazy_tensors/computation_client/metrics.h"
 #include "lazy_tensors/computation_client/sys_util.h"
 #include "lazy_tensors/computation_client/thread_pool.h"
@@ -162,7 +161,7 @@ class DataCacheArena {
  public:
   struct TensorHasher {
     size_t operator()(const at::Tensor& tensor) const {
-      return lazy_tensors::util::HashReduce(lazy_tensors::util::HashCombine(
+      return torch::lazy::HashReduce(torch::lazy::HashCombine(
           lazy_tensors::util::GetEnumValue(tensor.scalar_type()),
           TensorHash(tensor)));
     };
@@ -1157,7 +1156,7 @@ LazyTensor::SyncTensorCollection LazyTensor::CollectSyncTensors(
   std::unordered_set<lazy_tensors::int64> tensor_ids;
   // The force_ltc_data controls aliasing compilation, so effectively the same
   // graph with on/off force_ltc_data should not match, hash wise.
-  coll.hash = lazy_tensors::util::MHash(config.force_ltc_data);
+  coll.hash = torch::lazy::MHash(config.force_ltc_data);
   coll.config = config;
   coll.device = *unique_device;
   coll.indices.reserve(tensors.size());
@@ -1177,7 +1176,7 @@ LazyTensor::SyncTensorCollection LazyTensor::CollectSyncTensors(
         if (ShouldSyncIrValue(ir_value)) {
           // Add only tensors which need to be synced.
           coll.hash =
-              lazy_tensors::util::HashCombine(coll.hash, ir_value.hash());
+              torch::lazy::HashCombine(coll.hash, ir_value.hash());
           coll.indices.push_back(i);
         }
       } else if (config.force_ltc_data) {
@@ -1193,7 +1192,7 @@ LazyTensor::SyncTensorCollection LazyTensor::CollectSyncTensors(
   }
   // Mix the hash with the resource domain hashes as compile handles are only
   // valid within a domain (usually a single host).
-  coll.hash = lazy_tensors::util::MHash(
+  coll.hash = torch::lazy::MHash(
       coll.hash, lazy_tensors::ComputationClient::Get()->GetResourceDomain(
                      coll.device.ToString()));
   if (!at_tensors.empty()) {
@@ -1208,13 +1207,13 @@ LazyTensor::SyncTensorCollection LazyTensor::CollectSyncTensors(
       tensors[at_tensor_index[i]].data()->handle = std::move(handles[i]);
     }
   }
-  LTC_VLOG(4) << "Tensors graph hash " << lazy_tensors::util::HexHash(coll.hash)
+  LTC_VLOG(4) << "Tensors graph hash " << torch::lazy::HashToString(coll.hash)
               << " on device " << coll.device;
   return coll;
 }
 
 LazyTensor::ComputationCache::TypePtr LazyTensor::LookupCachedCompile(
-    const std::vector<LazyTensor>& tensors, const lazy_tensors::hash_t& hash) {
+    const std::vector<LazyTensor>& tensors, const torch::lazy::hash_t& hash) {
   ComputationCache::TypePtr cached_computation =
       GetComputationCache()->Get(hash);
   if (cached_computation == nullptr) {
@@ -1335,13 +1334,13 @@ std::shared_ptr<LazyTensor::Async> LazyTensor::ScheduleSyncTensorsGraph(
     lazy_tensors::ComputationClient::ExecuteComputationOptions options;
     try {
       LTC_VLOG(3) << "Executing IR graph hash "
-                  << lazy_tensors::util::HexHash(hash) << " on device "
+                  << torch::lazy::HashToString(hash) << " on device "
                   << async->device << " ...";
       auto results = lazy_tensors::ComputationClient::Get()->ExecuteComputation(
           *async->cached_computation->computation, async->parameters_data,
           async->device, options);
       LTC_VLOG(3) << "Executing IR graph hash "
-                  << lazy_tensors::util::HexHash(hash) << " on device "
+                  << torch::lazy::HashToString(hash) << " on device "
                   << async->device << " done!";
 
       for (size_t i = 0; i < results.size(); ++i) {
@@ -1473,13 +1472,13 @@ LazyTensor::OpByOpAsync LazyTensor::SyncTensorsGraphOpByOp(
   auto syncfn = [async]() -> int {
     try {
       LTC_VLOG(3) << "Executing (OpByOp) IR graph hash "
-                  << lazy_tensors::util::HexHash(async->coll.hash)
+                  << torch::lazy::HashToString(async->coll.hash)
                   << " on device " << async->coll.device << " ...";
       std::vector<lazy_tensors::ComputationClient::DataPtr> results =
           OpByOpExecutor::Get()->Execute(
               async->roots, async->coll.device.ToString(), async->devices);
       LTC_VLOG(3) << "Executing (OpByOp) IR graph hash "
-                  << lazy_tensors::util::HexHash(async->coll.hash)
+                  << torch::lazy::HashToString(async->coll.hash)
                   << " on device " << async->coll.device << " done!";
 
       for (size_t i = 0; i < results.size(); ++i) {
@@ -1593,13 +1592,13 @@ LazyTensor::CompilationResult LazyTensor::Compile(
        &shape});
 
   LTC_VLOG(3) << "Compiling IR graph hash "
-              << lazy_tensors::util::HexHash(coll.hash) << " on device "
+              << torch::lazy::HashToString(coll.hash) << " on device "
               << coll.device << " ...";
   std::vector<std::shared_ptr<lazy_tensors::ComputationClient::Computation>>
       computations =
           lazy_tensors::ComputationClient::Get()->Compile(std::move(instances));
   LTC_VLOG(3) << "Compiling IR graph hash "
-              << lazy_tensors::util::HexHash(coll.hash) << " on device "
+              << torch::lazy::HashToString(coll.hash) << " on device "
               << coll.device << " done!";
   LTC_CHECK_EQ(program_shape.parameters_size(),
                po_data->parameters_data.size());
@@ -1622,10 +1621,10 @@ std::shared_ptr<LazyTensor::Async> LazyTensor::SyncTensorsGraphInternal(
                                   &coll.indices);
 
   PostOrderData po_data = RunPostOrder(*tensors, coll.indices);
-  coll.hash = lazy_tensors::util::HashCombine(
-      coll.hash, lazy_tensors::util::Hash(po_data.parameter_sequence));
+  coll.hash = torch::lazy::HashCombine(
+      coll.hash, torch::lazy::Hash(po_data.parameter_sequence));
   LTC_VLOG(4) << "Parameter sequence graph hash "
-              << lazy_tensors::util::HexHash(coll.hash);
+              << torch::lazy::HashToString(coll.hash);
   std::shared_ptr<Async> async = TryRunCachedSync(tensors, &coll, &po_data);
   if (async != nullptr) {
     return async;

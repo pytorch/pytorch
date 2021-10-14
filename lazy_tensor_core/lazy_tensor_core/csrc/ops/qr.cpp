@@ -9,7 +9,7 @@ namespace ops {
 
 QR::QR(const Value& input, bool some)
     : Node(ir::OpKind(at::aten::qr), {input},
-           /*num_outputs=*/2, lazy_tensors::util::MHash(some)),
+           /*num_outputs=*/2, torch::lazy::MHash(some)),
       some_(some) {
   SetShapeDeferred(
       [&]() { return compiler::NodeLowering::Get()->Infer(this); });

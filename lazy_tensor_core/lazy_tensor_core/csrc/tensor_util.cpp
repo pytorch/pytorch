@@ -821,36 +821,36 @@ std::vector<at::Tensor> DataHandlesToTensors(
   return tensors;
 }
 
-lazy_tensors::hash_t TensorHash(const at::Tensor& tensor) {
+torch::lazy::hash_t TensorHash(const at::Tensor& tensor) {
   at::Tensor ctensor = tensor.contiguous();
   int64_t size = ctensor.numel() * ctensor.element_size();
   switch (ctensor.scalar_type()) {
     case at::ScalarType::Bool:
-      return lazy_tensors::util::DataHash(ctensor.data_ptr<bool>(), size);
+      return torch::lazy::DataHash(ctensor.data_ptr<bool>(), size);
     case at::ScalarType::Byte:
-      return lazy_tensors::util::DataHash(ctensor.data_ptr<uint8_t>(), size);
+      return torch::lazy::DataHash(ctensor.data_ptr<uint8_t>(), size);
     case at::ScalarType::Char:
-      return lazy_tensors::util::DataHash(ctensor.data_ptr<int8_t>(), size);
+      return torch::lazy::DataHash(ctensor.data_ptr<int8_t>(), size);
     case at::ScalarType::Short:
-      return lazy_tensors::util::DataHash(ctensor.data_ptr<int16_t>(), size);
+      return torch::lazy::DataHash(ctensor.data_ptr<int16_t>(), size);
     case at::ScalarType::Int:
-      return lazy_tensors::util::DataHash(ctensor.data_ptr<int32_t>(), size);
+      return torch::lazy::DataHash(ctensor.data_ptr<int32_t>(), size);
     case at::ScalarType::Long:
-      return lazy_tensors::util::DataHash(ctensor.data_ptr<int64_t>(), size);
+      return torch::lazy::DataHash(ctensor.data_ptr<int64_t>(), size);
     case at::ScalarType::Float:
-      return lazy_tensors::util::DataHash(ctensor.data_ptr<float>(), size);
+      return torch::lazy::DataHash(ctensor.data_ptr<float>(), size);
     case at::ScalarType::Double:
-      return lazy_tensors::util::DataHash(ctensor.data_ptr<double>(), size);
+      return torch::lazy::DataHash(ctensor.data_ptr<double>(), size);
     case at::ScalarType::BFloat16:
-      return lazy_tensors::util::DataHash(ctensor.data_ptr<at::BFloat16>(),
+      return torch::lazy::DataHash(ctensor.data_ptr<at::BFloat16>(),
                                           size);
     case at::ScalarType::Half:
-      return lazy_tensors::util::DataHash(ctensor.data_ptr<at::Half>(), size);
+      return torch::lazy::DataHash(ctensor.data_ptr<at::Half>(), size);
     case at::ScalarType::ComplexFloat:
-      return lazy_tensors::util::DataHash(
+      return torch::lazy::DataHash(
           ctensor.data_ptr<c10::complex<float>>(), size);
     case at::ScalarType::ComplexDouble:
-      return lazy_tensors::util::DataHash(
+      return torch::lazy::DataHash(
           ctensor.data_ptr<c10::complex<double>>(), size);
     default:
       LTC_ERROR() << "Unsupported scalar type: " << ctensor.scalar_type();

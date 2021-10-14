@@ -4,7 +4,6 @@
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensor_core/csrc/torch_util.h"
-#include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/shape_util.h"
 
 namespace torch_lazy_tensors {
@@ -21,7 +20,7 @@ AsStridedViewUpdate::AsStridedViewUpdate(
                  target.shape().element_type(), size);
            },
            /*num_outputs=*/1,
-           lazy_tensors::util::MHash(size, stride, storage_offset)),
+           torch::lazy::MHash(size, stride, storage_offset)),
       size_(std::move(size)),
       stride_(std::move(stride)),
       storage_offset_(storage_offset) {}

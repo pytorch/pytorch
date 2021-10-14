@@ -56,7 +56,7 @@ std::string DebugUtil::GetTensorsGraphInfo(
     const std::vector<size_t>* indices, GraphFormat format) {
   std::vector<const ir::Node*> root_nodes;
   std::vector<ir::Value> root_values;
-  std::vector<lazy_tensors::hash_t> root_hashes;
+  std::vector<torch::lazy::hash_t> root_hashes;
   lazy_tensors::util::Unique<Device> unique_device;
   if (indices != nullptr) {
     for (auto index : *indices) {
@@ -92,7 +92,7 @@ std::string DebugUtil::GetTensorsGraphInfo(
     if (i > 0) {
       ss << ", ";
     }
-    ss << lazy_tensors::util::HexHash(root_hashes[i]);
+    ss << torch::lazy::HashToString(root_hashes[i]);
   }
   ss << ")\n";
 
