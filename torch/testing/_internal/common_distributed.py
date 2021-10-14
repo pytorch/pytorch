@@ -443,6 +443,8 @@ class MultiProcessTestCase(TestCase):
         self.file_name = tempfile.NamedTemporaryFile(delete=False).name
         # pid to pipe consisting of error message from process.
         self.pid_to_pipe = {}  # type: ignore[var-annotated]
+        self.shared_data = {}
+        self.mp_manager = multiprocessing.Manager()
 
     def tearDown(self) -> None:
         super().tearDown()
@@ -453,6 +455,7 @@ class MultiProcessTestCase(TestCase):
         # it alive until the end of the entire suite. We must thus reset the
         # processes to prevent an effective file descriptor leak.
         self.processes = []
+        self.shared_data = {}
 
     def _current_test_name(self) -> str:
         # self.id() == e.g. '__main__.TestDistributed.TestAdditive.test_get_rank'
@@ -465,7 +468,7 @@ class MultiProcessTestCase(TestCase):
             process = proc(
                 target=self.__class__._run,
                 name="process " + str(rank),
-                args=(rank, self._current_test_name(), self.file_name, child_conn),
+                args=(rank, self._current_test_name(), self.file_name, child_conn, self.shared_data),
             )
             process.start()
             logger.info(f"Started process {rank} with pid {process.pid}")
@@ -511,7 +514,7 @@ class MultiProcessTestCase(TestCase):
                 return
 
     @classmethod
-    def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe) -> None:
+    def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe, shared_data: dict) -> None:
         self = cls(test_name)
 
         # Start event listener thread.
@@ -525,6 +528,8 @@ class MultiProcessTestCase(TestCase):
 
         self.rank = rank
         self.file_name = file_name
+        for key, value in shared_data.items():
+            setattr(self, key, value)
         self.run_test(test_name, parent_pipe, signal_send_pipe, event_listener_thread)
 
     def run_test(
