@@ -159,7 +159,7 @@ TEST(StaticRuntime, Sigmoid) {
 
 TEST(StaticRuntime, Clone) {
   auto a = at::randn({2, 3});
-  auto b = at::empty_strided({3, 2}, {1, 3});
+  auto b = at::randn({3, 2}).as_strided({3, 2}, {1, 3});
   auto c = at::randn({1, 2, 3, 4});
   auto d = at::randn({1, 0, 3, 4});
   std::vector<IValue> args_0{b, c10::MemoryFormat::Contiguous};
@@ -1136,8 +1136,9 @@ TEST(
   Node* sigmoid_node = getNodeWithKind(smodule, "aten::sigmoid");
   const at::IValue a = torch::randn({2, 3});
   at::IValue b = torch::randn({3, 1});
-  std::vector<const IValue*> ivalue_inputs{&a};
-  ProcessedNode pnode(sigmoid_node, std::move(ivalue_inputs), true);
+  std::unique_ptr<const IValue*[]> ivalue_inputs = std::make_unique<const IValue*[]>(1);
+  ivalue_inputs[0] = &a;
+  ProcessedNode pnode(sigmoid_node, std::move(ivalue_inputs), 1, true);
 
   pnode.Output(0) = b;
   EXPECT_TRUE(pnode.verify_no_memory_overlap());
@@ -1156,8 +1157,9 @@ TEST(
   Node* sigmoid_node = getNodeWithKind(smodule, "aten::sigmoid");
   const at::IValue a = torch::randn({2, 3});
   at::IValue b = torch::randn({3, 1});
-  std::vector<const IValue*> ivalue_inputs{&a};
-  ProcessedNode pnode(sigmoid_node, std::move(ivalue_inputs), true);
+  std::unique_ptr<const IValue*[]> ivalue_inputs = std::make_unique<const IValue*[]>(1);
+  ivalue_inputs[0] = &a;
+  ProcessedNode pnode(sigmoid_node, std::move(ivalue_inputs), 1, true);
 
   pnode.Output(0) = b;
   EXPECT_TRUE(pnode.verify_no_memory_overlap());
@@ -1179,16 +1181,18 @@ TEST(ProcessedNode, VerifyNoMemoryOverlapWithOverlappingOutputs) {
   {
     auto a = at::randn({2, 3});
     IValue ivalue(a);
-    std::vector<const IValue*> inputs{&ivalue};
-    ProcessedNode list_unpack_pnode(list_unpack_node, std::move(inputs), /*enable_out_variant=*/true);
+    std::unique_ptr<const IValue*[]> inputs = std::make_unique<const IValue*[]>(1);
+    inputs[0] = &ivalue;
+    ProcessedNode list_unpack_pnode(list_unpack_node, std::move(inputs), 1, /*enable_out_variant=*/true);
     ASSERT_EQ(list_unpack_pnode.outputs().size(), 2);
     EXPECT_TRUE(list_unpack_pnode.verify_no_memory_overlap());
   }
   {
     auto a = at::randn({2, 3});
     IValue ivalue(a);
-    std::vector<const IValue*> inputs{&ivalue};
-    ProcessedNode list_unpack_pnode(list_unpack_node, std::move(inputs), /*enable_out_variant=*/true);
+    std::unique_ptr<const IValue*[]> inputs = std::make_unique<const IValue*[]>(1);
+    inputs[0] = &ivalue;
+    ProcessedNode list_unpack_pnode(list_unpack_node, std::move(inputs), 1, /*enable_out_variant=*/true);
     auto b = at::randn({2, 3});
     list_unpack_pnode.Output(0) = b;
     list_unpack_pnode.Output(1) = b;
