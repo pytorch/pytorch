@@ -25,8 +25,8 @@ int64_t immQZero(const BufHandle& qx) {
   return to<LongImm>(IRSimplifier::simplify(qx.node()->qzero()))->value();
 }
 
-int64_t immQDType(const BufHandle& qx) {
-  return (int64_t)qx.dtype().scalar_type();
+ScalarType immQDType(const BufHandle& qx) {
+  return qx.dtype().scalar_type();
 }
 
 bool isQuantized(const BufHandle& qx) {
@@ -65,13 +65,12 @@ Tensor computeQuantizePerTensor(
     const c10::optional<ScalarType>& outputType,
     at::Device device) {
   std::vector<VarPtr> vars;
+  std::vector<ExprHandle> indices;
   for (const auto& os : outputShape) {
-    vars.push_back(alloc<Var>(
-        "",
-        os.node()->dtype().scalar_type() == ScalarType::Long ? kLong : kInt));
+    auto var = alloc<Var>("", os.node()->dtype());
+    vars.push_back(var);
+    indices.push_back(VarHandle(var));
   }
-  auto axes = VarVectorToVarHandleVector(vars);
-  std::vector<ExprHandle> indices(axes.begin(), axes.end());
 
   ExprHandle qscale = constant(inputs[1]);
   ExprHandle qzero = constant(inputs[2]);
@@ -138,7 +137,7 @@ Tensor computeDequantizeExternalCall(
   const BufHandle& qx = c10::get<BufHandle>(inputs[0]);
   const double qscale = immQScale(qx);
   const int64_t qzero = immQZero(qx);
-  const int64_t qdtype = immQDType(qx);
+  const int64_t qdtype = (int64_t)immQDType(qx);
 
   BufHandle ResultBuf("quantize", outputShape, dtype);
   StmtPtr s = ExternalCall::make(
@@ -184,7 +183,7 @@ Tensor computeQuantizedConv2dPrepack(
        groups,
        immQScale(qw),
        immQZero(qw),
-       immQDType(qw)});
+       (int64_t)immQDType(qw)});
   return Tensor(ResultBuf.node(), s);
 }
 
@@ -208,7 +207,11 @@ Tensor computeQuantizedConv2d(
       ResultBuf,
       "nnc_quantized_conv2d",
       {qx, prepacked},
-      {immQScale(qx), immQZero(qx), immQDType(qx), out_qscale, out_qzero});
+      {immQScale(qx),
+       immQZero(qx),
+       (int64_t)immQDType(qx),
+       out_qscale,
+       out_qzero});
   return Tensor(ResultBuf.node(), s);
 }
 
@@ -232,7 +235,11 @@ Tensor computeQuantizedConv2dRelu(
       ResultBuf,
       "nnc_quantized_conv2d_relu",
       {qx, prepacked},
-      {immQScale(qx), immQZero(qx), immQDType(qx), out_qscale, out_qzero});
+      {immQScale(qx),
+       immQZero(qx),
+       (int64_t)immQDType(qx),
+       out_qscale,
+       out_qzero});
   return Tensor(ResultBuf.node(), s);
 }
 
@@ -258,10 +265,10 @@ Tensor computeQuantizedAdd(
       {qa, qb},
       {immQScale(qa),
        immQZero(qa),
-       immQDType(qa),
+       (int64_t)immQDType(qa),
        immQScale(qb),
        immQZero(qb),
-       immQDType(qb),
+       (int64_t)immQDType(qb),
        out_qscale,
        out_qzero});
   return Tensor(ResultBuf.node(), s);
@@ -287,13 +294,12 @@ Tensor computeDequantize(
   TORCH_INTERNAL_ASSERT(
       qzero, buildErrorMessage("Missing quantized zero point for dequantize"));
   std::vector<VarPtr> vars;
+  std::vector<ExprHandle> indices;
   for (const auto& os : outputShape) {
-    vars.push_back(alloc<Var>(
-        "",
-        os.node()->dtype().scalar_type() == ScalarType::Long ? kLong : kInt));
+    auto var = alloc<Var>("", os.node()->dtype());
+    vars.push_back(var);
+    indices.push_back(VarHandle(var));
   }
-  auto axes = VarVectorToVarHandleVector(vars);
-  std::vector<ExprHandle> indices(axes.begin(), axes.end());
   auto qx_e_promoted =
       promoteToDtype(tensorOrConstant(inputs[0], indices), dtype.scalar_type());
   auto qscale_promoted =
@@ -338,7 +344,7 @@ Tensor computeUpsampleNearest2d(
   if (isQuantized(x)) {
     qx_qscale = immQScale(x);
     qx_qzero = immQZero(x);
-    qx_qdtype = immQDType(x);
+    qx_qdtype = (int64_t)immQDType(x);
 
     ResultBuf.node()->set_qscale(DoubleImm::make(qx_qscale).node());
     ResultBuf.node()->set_qzero(DoubleImm::make(qx_qzero).node());

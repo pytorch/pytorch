@@ -286,6 +286,7 @@ class TORCH_API Buf : public ExprNode<Buf> {
   VarPtr base_handle_;
   std::vector<ExprPtr> dims_;
   ExprPtr initializer_;
+  // qscale_ and qzero_ are used only for quantized dtypes Bufs: kQUInt8, kQInt8
   ExprPtr qscale_;
   ExprPtr qzero_;
 };
