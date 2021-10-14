@@ -173,13 +173,13 @@ class FlattenParamsWrapper(nn.Module):
         """Return a generator of views that map to the original parameters."""
         data = external_data if external_data is not None else self.flat_param
         # Data should not be sharded when getting param views
-        if data.numel() != sum(self._param_numels):
+        if data.numel() != sum(self._param_numels):  # type: ignore[union-attr]
             raise ValueError(
-                f"Incorrect numel of supplied data: got {data.numel()} but expected {sum(self._param_numels)}"
+                f"Incorrect numel of supplied data: got {data.numel()} but expected {sum(self._param_numels)}"  # type: ignore[union-attr]
             )
         return (
             t.view(s)
-            for (t, s) in zip(data.split(self._param_numels), self._param_shapes)
+            for (t, s) in zip(data.split(self._param_numels), self._param_shapes)  # type: ignore[union-attr]
         )
 
     def metadata(self) -> Tuple[List[str], List[torch.Size], List[int]]:
