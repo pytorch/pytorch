@@ -64,7 +64,6 @@ class LazyTensor {
     size_t generation = 1;
   };
 
- public:
   static LazyTensor Create(const at::Tensor& tensor, const Device& device);
   static LazyTensor Create(
       lazy_tensors::ComputationClient::DataPtr handle,
@@ -75,6 +74,19 @@ class LazyTensor {
       c10::optional<at::ScalarType> logical_element_type = c10::nullopt);
 
   static LazyTensor Create(std::shared_ptr<Data> data);
+
+  // TODO(whc) just a hack for now to get codegen to compile... need to refactor
+  // Create a new lazy tensor with the same metadata of the input tensor (with
+  // possible overrides), and the new IR value.
+  LazyTensor CreateFrom(ir::Value ir_value) const;
+  LazyTensor CreateFrom(ir::Value ir_value, const Device& device) const;
+  LazyTensor CreateFrom(ir::Value ir_value,
+                        at::ScalarType logical_element_type) const;
+  LazyTensor CreateFrom(
+      ir::Value ir_value,
+      c10::optional<at::ScalarType> logical_element_type_opt) const;
+  LazyTensor CreateFrom(ir::Value ir_value, const Device& device,
+                        at::ScalarType logical_element_type) const;
 
   // Creates an empty/null tensor.
   LazyTensor() = default;
@@ -125,6 +137,8 @@ class LazyTensor {
   lazy_tensors::ComputationClient::DataPtr CurrentDataHandle() const;
 
   void SetDataHandle(lazy_tensors::ComputationClient::DataPtr handle);
+  void SetDataHandle(lazy_tensors::ComputationClient::DataPtr handle,
+                     bool sync);
 
   // Retrieves the current IR Node, or nullptr in case no active IR Node is
   // available.
@@ -176,40 +190,6 @@ class LazyTensor {
   static std::string DumpBackendComputation(
       const std::vector<LazyTensor>& tensors);
 
-  // Retrieves the set of lazy tensors which are currently live in the system,
-  // for the given device. If device is nullptr, the live tensors for all
-  // devices will be returned. Returned tensors are sorted by device as primary
-  // key, and by unique ID as secondary key.
-  static std::vector<LazyTensor> GetLiveTensors(const Device* device);
-
-  // Applies all the pending IR operations queued over the input tensors. All
-  // the tensors must be on the same device. If wait is true, the sync operation
-  // will be run synchronously. The devices argument, if not empty, tells the
-  // devices which should be partecipating into the replicated computation.
-  static void SyncTensorsGraph(std::vector<LazyTensor>* tensors,
-                               lazy_tensors::Span<const std::string> devices,
-                               bool wait, bool sync_ltc_data);
-
-  // Makes sure that any outstanding IR operation accumulated over live tensors,
-  // gets turned into device data. If wait is true, the sync operation will be
-  // run synchronously. The devices argument, if not empty, tells the devices
-  // which should be partecipating into the replicated computation.
-  static void SyncLiveTensorsGraph(
-      const Device* device, lazy_tensors::Span<const std::string> devices,
-      bool wait);
-
-  // Marks an execution step, which allows the tensor framework to understand
-  // the computation boundaries.
-  static void MarkStep(const Device& device);
-
-  // Waits for all the outstanding operations on all the supplied devices.
-  // If devices is empty, the wait will happen for all local devices.
-  static void WaitDeviceOps(lazy_tensors::Span<const std::string> devices);
-
-  // Retrieves the PyTorch CPU tensors behind the lazy tensors IR operations.
-  // All the tensors must be on the same device.
-  static std::vector<at::Tensor> GetTensors(std::vector<LazyTensor>* tensors);
-
   // Operation which creates lazy tensors out of PyTorch CPU tensors by batching
   // the requests to the computation servers.
   static std::vector<LazyTensor> CreateTensors(
@@ -217,69 +197,6 @@ class LazyTensor {
       const std::vector<std::string>& devices);
 
  private:
-  struct SyncTensorsConfig {
-    // Whether we want to force data on the target tensors (hence trimming
-    // the IR graph above them).
-    bool force_ltc_data = true;
-    // Whether when setting the data, the other properties of the tensor
-    // state should be reset.
-    bool sync_ltc_data = true;
-  };
-
-  struct SyncTensorCollection {
-    SyncTensorCollection() : hash(0) {}
-
-    SyncTensorsConfig config;
-    std::vector<size_t> indices;
-    torch::lazy::hash_t hash;
-    std::vector<lazy_tensors::util::ExceptionCleanup> unlocker;
-    Device device;
-  };
-
-  struct PostOrderData {
-    std::vector<const ir::Node*> post_order;
-    ir::Util::EmissionMap emission_map;
-    std::vector<lazy_tensors::ComputationClient::DataPtr> parameters_data;
-    std::vector<size_t> parameter_sequence;
-  };
-
-  struct CompilationResult {
-    Device device;
-    size_t emitted_nodes = 0;
-    std::shared_ptr<lazy_tensors::ComputationClient::Computation> computation;
-    std::vector<lazy_tensors::ComputationClient::DataPtr> parameters_data;
-  };
-
-  struct CachedComputation {
-    CachedComputation(
-        std::shared_ptr<lazy_tensors::ComputationClient::Computation>
-            computation)
-        : computation(std::move(computation)) {}
-
-    std::shared_ptr<lazy_tensors::ComputationClient::Computation> computation;
-  };
-
-  using ComputationCache =
-      lazy_tensors::util::Cache<torch::lazy::hash_t, CachedComputation,
-                                torch::lazy::HashReducer>;
-
-  struct Async {
-    Async(SyncTensorCollection* coll,
-          std::vector<lazy_tensors::ComputationClient::DataPtr> parameters_data,
-          std::vector<lazy_tensors::ComputationClient::DataPtr> tensors_data,
-          ComputationCache::TypePtr cached_computation);
-
-    void Wait();
-
-    lazy_tensors::util::MultiWait mwait;
-    std::vector<size_t> indices;
-    std::vector<lazy_tensors::util::ExceptionCleanup> unlocker;
-    std::vector<lazy_tensors::ComputationClient::DataPtr> parameters_data;
-    std::string device;
-    ComputationCache::TypePtr cached_computation;
-    std::vector<lazy_tensors::ComputationClient::DataPtr> tensors_data;
-  };
-
   LazyTensor(const at::Tensor& tensor, const Device& device);
   LazyTensor(lazy_tensors::ComputationClient::DataPtr handle,
              c10::optional<at::ScalarType> logical_element_type = c10::nullopt);
@@ -294,9 +211,6 @@ class LazyTensor {
       c10::optional<at::ScalarType> logical_element_type = c10::nullopt);
 
   std::shared_ptr<Data> data_ptr() const { return data_; }
-
-  void SetDataHandle(lazy_tensors::ComputationClient::DataPtr handle,
-                     bool sync);
 
   void AssignIrValue(ir::Value ir_value) const;
 
@@ -316,21 +230,6 @@ class LazyTensor {
       ir::Value ir_value, const Device& device,
       c10::optional<at::ScalarType> logical_element_type) const;
 
-public:
-// TODO(whc) just a hack for now to get codegen to compile... need to refactor
-  // Create a new lazy tensor with the same metadata of the input tensor (with
-  // possible overrides), and the new IR value.
-  LazyTensor CreateFrom(ir::Value ir_value) const;
-  LazyTensor CreateFrom(ir::Value ir_value, const Device& device) const;
-  LazyTensor CreateFrom(ir::Value ir_value,
-                        at::ScalarType logical_element_type) const;
-  LazyTensor CreateFrom(
-      ir::Value ir_value,
-      c10::optional<at::ScalarType> logical_element_type_opt) const;
-  LazyTensor CreateFrom(ir::Value ir_value, const Device& device,
-                        at::ScalarType logical_element_type) const;
-
-private:
   // We build a graph accumulating operations, but at a given point we
   // need to force a rendering, otherwise the graph can grow without control.
   // Think:
@@ -341,85 +240,6 @@ private:
   ir::Value GetIrValueForTensor(const at::Tensor& tensor,
                                 const Device& device) const;
 
-  static ComputationCache* GetComputationCache();
-
-  static SyncTensorCollection CollectSyncTensors(
-      const std::vector<LazyTensor>& tensors, const SyncTensorsConfig& config);
-
-  // Implementation of the GetTensors() API using the op-by-op executor.
-  static std::vector<at::Tensor> GetTensorsOpByOp(
-      std::vector<LazyTensor>* tensors);
-
-  static std::vector<at::Tensor> GetTensorsFused(
-      std::vector<LazyTensor>* tensors);
-
-  // Runs an asynchronous syn operation using the op-by-op executor.
-  using OpByOpAsync = lazy_tensors::util::AsyncTask<int>;
-  static OpByOpAsync SyncTensorsGraphOpByOp(
-      std::vector<LazyTensor>* tensors,
-      lazy_tensors::Span<const std::string> devices,
-      const SyncTensorsConfig& config);
-
-  // Gathers the device data for all the input tensors, after an
-  // asynchronous operation.
-  static std::vector<lazy_tensors::ComputationClient::DataPtr>
-  GatherTensorsData(
-      const std::vector<LazyTensor>& tensors,
-      lazy_tensors::Span<const size_t> indices,
-      lazy_tensors::Span<const lazy_tensors::ComputationClient::DataPtr>
-          tensors_data);
-
-  static std::vector<ir::Value> CollectRoots(
-      const std::vector<LazyTensor>& tensors,
-      lazy_tensors::Span<const size_t> indices);
-
-  static std::vector<lazy_tensors::ComputationClient::DataPtr> FetchTensorData(
-      std::vector<LazyTensor>* tensors, const SyncTensorsConfig& config,
-      lazy_tensors::Span<const size_t> indices);
-
-  static std::vector<at::Tensor> FetchTensors(
-      std::vector<LazyTensor>* tensors,
-      lazy_tensors::Span<const lazy_tensors::ComputationClient::DataPtr>
-          tensors_data,
-      const std::vector<size_t>* indices);
-
-  // Schedules the execution of a sync tensors operation in background. The
-  // asynchronous operation will hold the device locks by capturing the ones
-  // present within the coll structure.
-  static std::shared_ptr<LazyTensor::Async> ScheduleSyncTensorsGraph(
-      SyncTensorCollection* coll,
-      std::vector<lazy_tensors::ComputationClient::DataPtr> parameters_data,
-      std::vector<lazy_tensors::ComputationClient::DataPtr> tensors_data,
-      ComputationCache::TypePtr cached_computation);
-
-  static std::shared_ptr<Async> ScheduleSyncTensorsGraph(
-      std::vector<LazyTensor>* tensors, SyncTensorCollection* coll,
-      std::vector<lazy_tensors::ComputationClient::DataPtr> parameters_data,
-      std::string device, ComputationCache::TypePtr cached_computation);
-
-  static PostOrderData RunPostOrder(const std::vector<LazyTensor>& tensors,
-                                    lazy_tensors::Span<const size_t> indices);
-
-  static ComputationCache::TypePtr LookupCachedCompile(
-      const std::vector<LazyTensor>& tensors, const torch::lazy::hash_t& hash);
-
-  static std::shared_ptr<Async> TryRunCachedSync(
-      std::vector<LazyTensor>* tensors, SyncTensorCollection* coll,
-      PostOrderData* po_data);
-
-  static void BuildInputOutputAliases(const std::vector<LazyTensor>& tensors,
-                                      lazy_tensors::Span<const size_t> indices,
-                                      ir::LoweringContext* lowering_ctx);
-
-  static CompilationResult Compile(
-      const std::vector<LazyTensor>& tensors,
-      lazy_tensors::Span<const std::string> devices,
-      const SyncTensorCollection& coll, PostOrderData* po_data);
-
-  static std::shared_ptr<Async> SyncTensorsGraphInternal(
-      std::vector<LazyTensor>* tensors,
-      lazy_tensors::Span<const std::string> devices,
-      const SyncTensorsConfig& config);
 
   static lazy_tensors::int64 GetNextTensorId();
 
