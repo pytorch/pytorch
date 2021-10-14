@@ -954,6 +954,10 @@ class TestSparseCSR(TestCase):
 
             self.assertEqual(csr_sparse.to_dense(), dense)
 
+            self.assertEqual(csr_sparse.to_sparse_coo().shape, coo_sparse.shape)
+            if dtype not in (torch.bool, torch.bfloat16, torch.float16):
+                self.assertEqual(csr_sparse.to_sparse_coo(), coo_sparse)
+
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA
 instantiate_device_type_tests(TestSparseCSR, globals())

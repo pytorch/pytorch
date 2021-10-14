@@ -27,6 +27,16 @@ TORCH_META_FUNC(_convert_indices_from_coo_to_csr) (
   set_output(size + 1, options);
 }
 
+TORCH_META_FUNC(_convert_indices_from_csr_to_coo) (
+  const Tensor& crow_indices, const Tensor& col_indices, const int64_t size, const bool out_int32
+) {
+  TORCH_CHECK(crow_indices.dim() <= 1, "crow_indices is supposed to be a vector");
+  TORCH_CHECK(col_indices.dim() <= 1, "col_indices is supposed to be a vector");
+  ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
+  c10::TensorOptions options = TensorOptions().device(crow_indices.options().device()).dtype(scalar_type);
+  set_output(0, {2, size}, {}, options, {});
+}
+
 } // namespace meta
 
 namespace {
@@ -58,6 +68,29 @@ void convert_indices_from_coo_to_csr_cpu(const Tensor& result, const Tensor& inp
 
   for (int64_t i = data_in[numel - 1] + 1; i < size + 1; i++)
     data_out[i] = static_cast<output_t>(numel);
+}
+
+template <typename input_t, typename output_t>
+void convert_indices_from_csr_to_coo_cpu(const Tensor& result, const Tensor& crow_indices, const Tensor& col_indices, const int64_t size) {
+  int64_t nrows = crow_indices.numel() - 1;
+  const input_t* col_indices_data_in = col_indices.data_ptr<input_t>();
+  const input_t* crow_indices_data_in = crow_indices.data_ptr<input_t>();
+  output_t* data_out = result.data_ptr<output_t>();
+
+  if (nrows == 0) {
+    result.zero_();
+    return;
+  }
+
+  at::parallel_for(0, nrows, GRAIN_SIZE, [&](int64_t start, int64_t end) {
+    for (int64_t i = start; i < end; i++) {
+      for (int64_t j = crow_indices_data_in[i]; j < crow_indices_data_in[i + 1]; j++) {
+        data_out[j] = i;
+        data_out[j + size] = col_indices_data_in[j];
+      }
+    }
+  });
+
 }
 
 } // end anonymous namespace
@@ -402,6 +435,20 @@ TORCH_IMPL_FUNC(_convert_indices_from_coo_to_csr_structured_cpu) (
   } else {
     AT_DISPATCH_INTEGRAL_TYPES(input.scalar_type(), "convert_indices_from_coo_to_csr_cpu", [&] {
       convert_indices_from_coo_to_csr_cpu<scalar_t, int64_t>(result, input, size);
+    });
+  }
+}
+
+TORCH_IMPL_FUNC(_convert_indices_from_csr_to_coo_structured_cpu) (
+  const Tensor& crow_indices, const Tensor& col_indices, const int64_t size, const bool out_int32, const Tensor& result
+) {
+  if (out_int32) {
+    AT_DISPATCH_INTEGRAL_TYPES(crow_indices.scalar_type(), "convert_indices_from_csr_to_coo_cpu", [&] {
+      convert_indices_from_csr_to_coo_cpu<scalar_t, int>(result, crow_indices, col_indices, size);
+    });
+  } else {
+    AT_DISPATCH_INTEGRAL_TYPES(crow_indices.scalar_type(), "convert_indices_from_csr_to_coo_cpu", [&] {
+      convert_indices_from_csr_to_coo_cpu<scalar_t, int64_t>(result, crow_indices, col_indices, size);
     });
   }
 }

@@ -1011,6 +1011,32 @@ class Tensor(torch._C._TensorBase):
         # See Note [rename_ / rename API]
         return update_names(self, names, rename_map, inplace=False)
 
+    def to_sparse_coo(self):
+        """ Convert a tensor to coordinate format. Only works with 2D tensors.
+
+       Examples::
+
+            >>> dense = torch.randn(5, 5)
+            >>> sparse = dense.to_sparse_coo()
+            >>> sparse._nnz()
+            25
+
+       """
+        fill_value = 0
+        if self.is_sparse and not self.is_sparse_csr:
+            return self
+        if self.is_sparse_csr:
+            indices = torch._convert_indices_from_csr_to_coo(self.crow_indices(), self.col_indices(),
+                                                             self.values().shape[0])
+            device = self.values().device
+            return torch.sparse_coo_tensor(indices,
+                                           self.values(),
+                                           size=self.shape,
+                                           dtype=self.dtype,
+                                           device=device)
+        else:
+            return self.to_sparse()
+
     def to_sparse_csr(self):
         """ Convert a tensor to compressed row storage format. Only works with 2D tensors.
 
