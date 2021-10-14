@@ -135,7 +135,7 @@ Node::Node(OpKind op, size_t num_outputs, torch::lazy::hash_t node_hash)
   metadata_.frame_info = GetFrameInfo();
 }
 
-Node::~Node() {}
+Node::~Node() = default;
 
 std::string Node::ToString() const {
   std::stringstream ss;
