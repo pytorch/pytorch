@@ -2079,6 +2079,18 @@ def sample_inputs_transpose_swapdims(self, device, dtype, requires_grad, **kwarg
 
     return list(generator())
 
+def sample_inputs_adjoint(self, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    shapes = ((1, 2, 3), (), (M, M), (S, S, S), (S, M, S), (M, S, M, S))
+    return list(SampleInput(make_arg(shape)) for shape in shapes)
+
+def sample_inputs_T(self, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    shapes = ((), (M, M))
+    return list(SampleInput(make_arg(shape)) for shape in shapes)
+
 
 def sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad=False, **kwargs):
     """
@@ -2461,6 +2473,22 @@ def sample_inputs_histogram(op_info, device, dtype, requires_grad):
         bins_tensor = make_arg((bin_ct + 1,))
         sample_inputs.append(SampleInput(input_tensor, args=(bins_tensor,),
                                          kwargs=dict(weight=weight_tensor, density=density)))
+
+    return sample_inputs
+
+def sample_inputs_bucketize(op_info, device, dtype, requires_grad):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    sizes = ((), (S,), (S, S), (S, S, S), (S, 1, S), (S, 0, S))
+
+    sample_inputs = []
+
+    for size, out_int32, right in product(sizes, [False, True], [False, True]):
+        input_tensor = make_arg(size)
+        boundaries = make_arg((S,)).msort()
+
+        sample_inputs.append(SampleInput(input_tensor, args=(boundaries, ),
+                                         kwargs=dict(out_int32=out_int32, right=right)))
 
     return sample_inputs
 
@@ -3816,10 +3844,9 @@ def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False, **kw
     out = []
     for batch in ((), (3,), (3, 3)):
         shape = batch + (3, 3)
-        # NOTE: inputs are not marked with `requires_grad` since
-        # linalg_lstsq is not differentiable
         a = random_well_conditioned_matrix(*shape, dtype=dtype, device=device)
-        b = make_tensor(shape, device, dtype, low=None, high=None)
+        a.requires_grad = requires_grad
+        b = make_tensor(shape, device, dtype, low=None, high=None, requires_grad=requires_grad)
         out.append(SampleInput(a, args=(b,)))
     return out
 
@@ -6051,9 +6078,10 @@ def reference_sigmoid(x):
 
 
 def reference_logsigmoid(x):
-    max_ = np.maximum(x.dtype.type(0), -x)
-    z = np.exp(-max_) + np.exp(-x - max_)
-    return -(max_ + np.log(z))
+    return np.where(
+        x < 0,
+        x - np.log1p(np.exp(x)),
+        -np.log1p(np.exp(-x)))
 
 
 def reference_lgamma(x):
@@ -8325,18 +8353,6 @@ op_db: List[OpInfo] = [
         assert_autodiffed=False,
         supports_gradgrad=True,
         supports_out=False,
-        # autodiff_nonfusible_nodes=["aten::log_sigmoid"],
-        decorators=[
-            DecorateInfo(
-                precisionOverride({torch.float16: 1e-2}),
-                'TestUnaryUfuncs', 'test_reference_numerics_normal'),
-            DecorateInfo(
-                precisionOverride({torch.float16: 1e-2}),
-                'TestUnaryUfuncs', 'test_reference_numerics_hard'),
-            DecorateInfo(
-                precisionOverride({torch.float16: 1e-2}),
-                'TestUnaryUfuncs', 'test_reference_numerics_extremal'),
-        ],
     ),
     OpInfo('nextafter',
            dtypes=floating_types_and(torch.bfloat16),
@@ -9562,6 +9578,15 @@ op_db: List[OpInfo] = [
                #                                          ~~~~~~ <--- HERE
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            )),
+    OpInfo('bucketize',
+           dtypes=all_types_and(torch.bfloat16),
+           dtypesIfCUDA=all_types(),
+           sample_inputs_func=sample_inputs_bucketize,
+           supports_autograd=False,
+           skips=(
+               # JIT tests don't work with Tensor keyword arguments
+               DecorateInfo(unittest.skip("Expected failure!"), 'TestJit', 'test_variant_consistency_jit'),
+           )),
     OpInfo('cat',
            ref=lambda input_seq, dim=0, **kwargs: np.concatenate(input_seq, axis=dim, **kwargs),
            aliases=('concat',),
@@ -9791,6 +9816,43 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_transpose_swapdims),
+    OpInfo('T',
+           op=lambda x: x.T,
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+           supports_out=False,
+           supports_forward_ad=True,
+           skips=(  # Lambda doesn't work in JIT test
+               DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit"),),
+           sample_inputs_func=sample_inputs_T),
+    OpInfo('H',
+           op=lambda x: x.H,
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+           supports_out=False,
+           supports_forward_ad=True,
+           skips=(  # Lambda doesn't work in JIT test
+               DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit"),),
+           sample_inputs_func=sample_inputs_T),
+    OpInfo('mT',
+           op=lambda x: x.mT,
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+           supports_out=False,
+           supports_forward_ad=True,
+           skips=(  # Lambda doesn't work in JIT test
+               DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit"),),
+           sample_inputs_func=sample_inputs_adjoint),
+    OpInfo('mH',
+           op=lambda x: x.mH,
+           aliases=('adjoint',),
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+           supports_out=False,
+           supports_forward_ad=True,
+           skips=(  # Lambda doesn't work in JIT test
+               DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit"),),
+           sample_inputs_func=sample_inputs_adjoint),
     OpInfo('tril',
            dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            dtypes=all_types_and_complex_and(torch.bool, torch.half),

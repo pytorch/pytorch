@@ -425,6 +425,7 @@ header_template_rule(
     substitutions = {
         "@AT_CUDNN_ENABLED@": "1",
         "@AT_ROCM_ENABLED@": "0",
+        "@AT_MAGMA_ENABLED@": "0",
         "@NVCC_FLAGS_EXTRA@": "",
     },
 )
@@ -435,16 +436,6 @@ header_template_rule(
     out = "aten/src/TH/THGeneral.h",
     include = "aten/src",
     substitutions = {
-    },
-)
-
-header_template_rule(
-    name = "aten_src_THC_THCGeneral",
-    src = "aten/src/THC/THCGeneral.h.in",
-    out = "aten/src/THC/THCGeneral.h",
-    include = "aten/src",
-    substitutions = {
-        "#cmakedefine USE_MAGMA": "",
     },
 )
 
@@ -475,7 +466,6 @@ cc_library(
     deps = [
         ":c10_headers",
         ":aten_src_TH_THGeneral",
-        ":aten_src_THC_THCGeneral",
     ],
 )
 

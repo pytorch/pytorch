@@ -2247,6 +2247,43 @@ Tensor numpy_T(const Tensor &self) {
   return self.permute(transpose_dims);
 }
 
+Tensor matrix_H(const Tensor &self) {
+  const auto ndim = self.dim();
+  TORCH_CHECK(ndim == 2 || ndim == 0,
+      "tensor.H is only supported on matrices (2-D tensors). Got ", ndim, "-D tensor.",
+      ndim > 2 ? " For batches of matrices, consider using tensor.mH" : "");
+  if (self.is_complex()) {
+    return ndim == 0 ? self.conj() : self.transpose(-2, -1).conj();
+  } else {
+    return ndim == 0 ? self : self.transpose(-2, -1);
+  }
+}
+
+namespace {
+Tensor _adjoint(const Tensor &self, const bool transpose, const char* const name) {
+  const auto ndim = self.dim();
+  TORCH_CHECK(ndim != 1,
+      "tensor.", name, " is only supported on matrices or batches of matrices. Got 1-D tensor.");
+  if (transpose || !self.is_complex()) {
+    return ndim == 0 ? self : self.transpose(-2, -1);
+  } else {
+    return ndim == 0 ? self.conj() : self.transpose(-2, -1).conj();
+  }
+}
+} // anonymous namespace
+
+Tensor mT(const Tensor &self) {
+  return _adjoint(self, /*transpose=*/true, "mT");
+}
+
+Tensor mH(const Tensor &self) {
+  return _adjoint(self, /*transpose=*/false, "mH");
+}
+
+Tensor adjoint(const Tensor &self) {
+  return _adjoint(self, /*transpose=*/false, "adjoint()");
+}
+
 Tensor view(const Tensor& self,
             IntArrayRef size) {
 
