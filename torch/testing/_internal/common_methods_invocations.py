@@ -3851,7 +3851,7 @@ def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False, **kw
         drivers = ('gels', 'gelsy', 'gelss', 'gelsd')
 
     # we generate matrices of shape (..., n + delta, n)
-    deltas: Tuple[int, int, ...]
+    deltas: Tuple[int, ...]
     # If Cusolver is not available, underdetermined inputs are not generated
     if device.type == 'cuda' and not has_cusolver():
         deltas = (0, +1)
