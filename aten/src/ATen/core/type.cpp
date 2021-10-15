@@ -299,7 +299,7 @@ c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2, bool
 
   // Handle non-container types which do not subtype each other and unify
   if (t1->kind() == TensorType::Kind && t2->kind() == TensorType::Kind) {
-    return t1->expectRef<TensorType>().merge(*t2->expect<TensorType>());
+    return t1->expectRef<TensorType>().merge(t2->expectRef<TensorType>());
   }
 
   if (t1->isSubtypeOf(*NoneType::get()) && !t2->isSubtypeOf(*NoneType::get())) {
@@ -316,32 +316,32 @@ c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2, bool
   // unify(Optional[t1], t2) => Optional[unify(t1, t2)]
   if (auto opt_t1 = t1->cast<OptionalType>()) {
     if (auto elem = unifyTypes(opt_t1->getElementType(), t2)) {
-      return OptionalType::create(*elem);
+      return OptionalType::create(*std::move(elem));
     }
   } else if (auto opt_t2 = t2->cast<OptionalType>()) {
     if (auto elem = unifyTypes(opt_t2->getElementType(), t1)) {
-      return OptionalType::create(*elem);
+      return OptionalType::create(*std::move(elem));
     }
   }
 
-  if (t1->cast<TupleType>() && t2->cast<TupleType>()) {
-    auto tuple1 = t1->cast<TupleType>();
-    auto tuple2 = t2->cast<TupleType>();
+  if (t1->castRaw<TupleType>() && t2->castRaw<TupleType>()) {
+    auto tuple1 = t1->castRaw<TupleType>();
+    auto tuple2 = t2->castRaw<TupleType>();
     if (tuple1->elements().size() != tuple2->elements().size()) {
       return c10::nullopt;
     }
     std::vector<TypePtr> elements;
     for (size_t i = 0; i < tuple1->elements().size(); i++) {
       if (auto elem = unifyTypes(tuple1->elements().at(i), tuple2->elements().at(i), default_to_union)) {
-        elements.push_back(*elem);
+        elements.push_back(*std::move(elem));
       } else {
         return c10::nullopt;
       }
     }
-    return static_cast<TypePtr>(TupleType::create(elements));
+    return static_cast<TypePtr>(TupleType::create(std::move(elements)));
   }
 
-  if (t1->cast<FutureType>() && t2->cast<FutureType>()) {
+  if (t1->castRaw<FutureType>() && t2->castRaw<FutureType>()) {
     if (auto elem = unifyTypes(
             t1->castRaw<FutureType>()->getElementType(),
             t2->castRaw<FutureType>()->getElementType())) {
@@ -372,7 +372,7 @@ c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2, bool
 }
 
 c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2, bool default_to_union, TypePtr type_hint) {
-  auto unified = unifyTypesImpl(t1, t2, default_to_union, type_hint);
+  auto unified = unifyTypesImpl(t1, t2, default_to_union, std::move(type_hint));
 
   if (default_to_union && !unified) {
     return UnionType::create({t1, t2});
