@@ -243,6 +243,21 @@ class TestOptim(TestCase):
             scheduler_constructors
         )
 
+    def _test_complex_optimizer(self, optimizer_constructor):
+        complex_param = torch.randn(5, 5, dtype=torch.complex64, requires_grad=True)
+        complex_opt = optimizer_constructor(complex_param)
+        real_param = torch.view_as_real(complex_param).detach().requires_grad_()
+        real_opt = optimizer_constructor(real_param)
+
+        for i in range(3):
+            complex_param.grad = torch.randn_like(complex_param)
+            real_param.grad = torch.view_as_real(complex_param.grad)
+
+            complex_opt.step()
+            real_opt.step()
+
+            self.assertEqual(torch.view_as_real(complex_param), real_param)
+
     def _build_params_dict(self, weight, bias, **kwargs):
         return [{'params': [weight]}, dict(params=[bias], **kwargs)]
 
@@ -316,6 +331,24 @@ class TestOptim(TestCase):
             self._test_rosenbrock_sparse(
                 lambda params: optimizer(params, lr=0.005),
                 [lambda opt: StepLR(opt, gamma=0.99999, step_size=300)]
+            )
+
+    def test_sgd_complex(self):
+        for optimizer in [optim.SGD, optim_mt.SGD]:
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.001)
+            )
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.001, momentum=1)
+            )
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.001, momentum=1, weight_decay=1)
+            )
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.001, nesterov=True, momentum=1, weight_decay=1)
+            )
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.001, momentum=1, dampening=0.5, weight_decay=1)
             )
 
     def test_multi_tensor_optimizers(self):
@@ -593,6 +626,22 @@ class TestOptim(TestCase):
                 lambda params: optimizer(params, lr=0.1),
                 [lambda opt: StepLR(opt, gamma=1 - 1e-5, step_size=500),
                  lambda opt: ReduceLROnPlateau(opt, threshold=1e-4)]
+            )
+
+    def test_adagrad_complex(self):
+        for optimizer in [optim.Adagrad, optim_mt.Adagrad]:
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=1e-1)
+            )
+            self._test_complex_optimizer(
+                lambda param: optimizer(
+                    [param], lr=1e-1, initial_accumulator_value=0.1
+                )
+            )
+            self._test_complex_optimizer(
+                lambda param: optimizer(
+                    [param], lr=1e-1, initial_accumulator_value=0.1, weight_decay=1
+                )
             )
 
     def test_adamax(self):

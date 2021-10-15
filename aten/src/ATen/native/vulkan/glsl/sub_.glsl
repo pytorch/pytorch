@@ -7,8 +7,7 @@ layout(std430) buffer;
 
 layout(set = 0, binding = 0, rgba16f) uniform PRECISION restrict image3D   uOutput;
 layout(set = 0, binding = 1)          uniform PRECISION          sampler3D uInput0;
-
-layout(push_constant) uniform PRECISION restrict Block {
+layout(set = 0, binding = 2)          uniform PRECISION restrict Block {
   ivec4 size;
   ivec3 isize;
   float alpha;

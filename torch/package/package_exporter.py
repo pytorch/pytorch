@@ -18,12 +18,12 @@ from typing import (
     Sequence,
     Set,
     Union,
-    cast
+    cast,
 )
-from torch.types import Storage
 
 import torch
 from torch.serialization import location_tag, normalize_storage_type
+from torch.types import Storage
 from torch.utils.hooks import RemovableHandle
 
 from ._digraph import DiGraph
@@ -799,7 +799,6 @@ class PackageExporter:
                 storage_type = getattr(torch, storage_type_str)
                 dtype = obj.dtype
                 storage_numel = obj.size()
-
 
             else:
                 storage = obj

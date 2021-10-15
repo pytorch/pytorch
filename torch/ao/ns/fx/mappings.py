@@ -194,6 +194,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         set([
             nn.EmbeddingBag,
             nnq.EmbeddingBag,
+            nnqat.EmbeddingBag,
         ]),
         # GroupNorm
         set([
@@ -494,6 +495,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nn.Conv3d,
         nnqat.Conv2d,
         nnqat.Conv3d,
+        nnqat.EmbeddingBag,
         nn.LSTM,
         # note: nnqd.Linear is an instance of nnq.Linear, so this
         # check has to happen before the int8 module check
@@ -553,6 +555,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nnq.Hardswish,
         nnq.LeakyReLU,
         nnq.ReLU6,
+        nnq.EmbeddingBag,
         nniq.BNReLU2d,
         nniq.BNReLU3d,
         nniq.ConvReLU1d,
