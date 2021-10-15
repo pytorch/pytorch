@@ -217,6 +217,7 @@ class TestMisc(JitTestCase):
         def use_module_interface(mod_list: List[OneTwoModule], x: torch.Tensor):
             return mod_list[0].forward(x) + mod_list[1].forward(x)
 
+        torch._C._enable_mobile_interface_call_export()
         scripted_M_mod = torch.jit.script(M())
         self.assertTrue(set(['aten::mul.Scalar', 'aten::mul.Tensor', 'aten::reciprocal']).issubset(
             set(torch.jit.export_opnames(scripted_M_mod))))
