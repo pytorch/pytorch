@@ -13,6 +13,7 @@ import tools.codegen.dest as dest
 from .gen_backend_stubs import (parse_backend_yaml, error_on_missing_kernels,
                                 gen_dispatchkey_nativefunc_headers,
                                 gen_dispatcher_registrations)
+import tools.codegen.local as local
 
 # Parses the external backend's yaml, and adds a new BackendIndex for the backend's dispatch key.
 # Returns a Tuple of (backend_key, autograd_key, cpp_namespace, updated BackendIndex mapping, full_codegen)
@@ -89,12 +90,20 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
     full_codegen = parse_full_codegen_ops(source_yaml, grouped_native_functions)
 
     def concat_map_codegen(func: Callable[[NativeFunction], Sequence[str]],
-                           xs: Iterable[Union[NativeFunctionsGroup, NativeFunction]]) -> Iterator[str]:
+                           xs: Iterable[Union[NativeFunctionsGroup, NativeFunction]],
+                           *, needsInplace:bool = False) -> Iterator[str]:
         for x in xs:
             f = x.functional if isinstance(x, NativeFunctionsGroup) else x
             if f.func.name in full_codegen:
                 for r in func(f):
                     yield r
+
+            if needsInplace:
+                inplace = x.inplace if isinstance(x, NativeFunctionsGroup) else None
+                if inplace and inplace.func.name in full_codegen:
+                    with local.parametrize(use_const_ref_for_mutable_tensors=inplace.use_const_ref_for_mutable_tensors):
+                        for r in func(inplace):
+                            yield r
 
     selector = SelectiveBuilder.get_nop_selector()
 
@@ -140,7 +149,8 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                     backend_indices[backend_dispatch_key],
                     class_method_name=f'{backend_dispatch_key}NativeFunctions',
                     node_base=node_base),
-                grouped_native_functions
+                grouped_native_functions,
+                needsInplace = True,
             )),
         })
 

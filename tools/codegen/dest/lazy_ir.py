@@ -169,9 +169,11 @@ def gen_lazy_nativefunc_definition(func: NativeFunction, backend_index: BackendI
             meta_out = """auto out_shape = CreateComputationShapeFromMetaTensors(out_meta);
     auto out_dtype = CreateDTypeFromMetaTensors(out_meta);"""
 
-        meta_args = ", ".join([f"{t.name}.to(c10::kMeta)" for t in value_types] +
+        meta_init = ";\n    ".join([f"auto meta_{t.name} = {t.name}.to(c10::kMeta)" for t in value_types])
+        meta_args = ", ".join([f"meta_{t.name}" for t in value_types] +
                               [f"{t.name}" for t in scalar_types])
-        meta_str = f"""auto out_meta = at::meta::{schema.aten_name}({meta_args});
+        meta_str = f"""{meta_init};
+    auto out_meta = at::meta::{schema.aten_name}({meta_args});
     {meta_out}"""
     else:
         meta_args = ", ".join([f"{t.name}" for t in all_types])
@@ -183,21 +185,17 @@ def gen_lazy_nativefunc_definition(func: NativeFunction, backend_index: BackendI
 
     assert len(value_types) > 0, f"Only supporting tensor ops so far, none found in {sig}"
     first_tensor = value_types[0]
-    bridge_str = f"""auto result = bridge::AtenFromLtcTensor(l_{first_tensor.name}.CreateFrom(node,
-        // TODO (@wconstab): experiment on dtype
-        // try always overriding output dtype to match the one ATen says our op should produce.
-        // this diverges from most of the handwritten methods, which often do not override and
-        // rely on other behavior in the lowering or copy process to make this correct.
-        // (1) evaluate design goal: to always pick the IR's dtype in one place (here)
-        // (2) rationalize this with Google's design, it may be a problem
-        // (3) evaluate perf impact: make sure we're not actually doing casts becuase of this override
-        out_dtype.front()));"""
+    bridge_str = f"""auto result = bridge::AtenFromLtcTensor(l_{first_tensor.name}.CreateFrom(node, out_dtype.front()));"""
     if returns_length > 1:
         bridge_str = f"""std::vector<LazyTensor> lazy_tensors;
     for (int i = 0; i < {returns_length}; i++) {{
         lazy_tensors.push_back(l_{first_tensor.name}.CreateFrom(ir::Value(node, i), out_dtype[i]));
     }}
     auto result = bridge::TupleAtenFromLtcTensors<{returns_length}>(lazy_tensors);"""
+    # TODO(alanwaketan): What if the operator has both the tuple output and inplace variant.
+    if schema.name.name.inplace:
+        bridge_str = f"""l_{first_tensor.name}.SetInPlaceIrValue(node);
+    auto& result = {first_tensor.name};"""
 
     return [f"""\
 // TODO(alanwaketan): Quite a lot inefficient copy-by-value there. Let's optimize it.

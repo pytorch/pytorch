@@ -6,6 +6,7 @@ full_codegen:
   - _softmax
   - _softmax_backward_data
   - addcdiv
+  - addcdiv_
   - addcmul
   - bitwise_and.Scalar
   - bitwise_and.Tensor
@@ -24,7 +25,6 @@ full_codegen:
   - topk
 supported:
   - add.Tensor
-  - addcdiv_
   - as_strided
   - as_strided_
   - bernoulli
