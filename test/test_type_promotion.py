@@ -117,7 +117,7 @@ class TestTypePromotion(TestCase):
         self.assertEqual((a * 5).dtype, torch.complex64)
         # not a "wrapped number"
         other = torch.tensor(5.5, dtype=torch.double, device=device)
-        self.assertEqual((a + other).dtype, torch.complex64)
+        self.assertEqual((a + other).dtype, torch.complex128)
 
     @float_double_default_dtype
     def test_complex_scalar_mult_tensor_promotion(self, device):
@@ -158,9 +158,8 @@ class TestTypePromotion(TestCase):
 
         self.assertEqual((u + 5.5).dtype, torch.get_default_dtype())
         self.assertEqual((u + other).dtype, torch.double)
-        # adding a 0-dim tensor to a float doesn't promote to double unless first
-        # type was integral.
-        self.assertEqual((a + other).dtype, torch.float32)
+
+        self.assertEqual((a + other).dtype, torch.float64)
 
     @float_double_default_dtype
     def test_half(self, device):
@@ -397,10 +396,10 @@ class TestTypePromotion(TestCase):
         _test_spot(torch.tensor(1, dtype=torch.int, device=device), 1, torch.int)
         _test_spot(torch.tensor(1, device=device), 1., torch.get_default_dtype())
         _test_spot(torch.tensor(1, dtype=torch.long, device=device),
-                   torch.tensor([1, 1], dtype=torch.int, device=device), torch.int)
+                   torch.tensor([1, 1], dtype=torch.int, device=device), torch.long)
         _test_spot(torch.tensor([1., 1.], dtype=torch.float, device=device), 1., torch.float)
         _test_spot(torch.tensor([1., 1.], dtype=torch.complex64, device=device),
-                   torch.tensor(1., dtype=torch.complex128, device=device), torch.complex64)
+                   torch.tensor(1., dtype=torch.complex128, device=device), torch.complex128)
         _test_spot(torch.tensor([1., 1.], dtype=torch.complex128, device=device),
                    torch.tensor(1., dtype=torch.complex64, device=device), torch.complex128)
         _test_spot(torch.tensor([1, 1], dtype=torch.bool, device=device), 1., torch.get_default_dtype())

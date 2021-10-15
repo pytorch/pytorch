@@ -103,12 +103,10 @@ ResultTypeState update_result_type_state(const Tensor& tensor, const ResultTypeS
       current = typeMetaToScalarType(at::get_default_dtype());
     }
   }
-  if ( tensor.dim() > 0 ) {
-    new_state.dimResult = promote_skip_undefined(in_state.dimResult, current);
-  } else if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
+  if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
     new_state.wrappedResult = promote_skip_undefined(in_state.wrappedResult, current);
   } else {
-    new_state.zeroResult = promote_skip_undefined(in_state.zeroResult, current);
+    new_state.dimResult = promote_skip_undefined(in_state.dimResult, current);
   }
   return new_state;
 }
@@ -126,7 +124,7 @@ ResultTypeState update_result_type_state(const Scalar& scalar, const ResultTypeS
 }
 
 ScalarType result_type(const ResultTypeState& in_state) {
-  return combine_categories(in_state.dimResult, combine_categories(in_state.zeroResult, in_state.wrappedResult));
+  return combine_categories(in_state.dimResult, in_state.wrappedResult);
 }
 
 ScalarType result_type(TensorList tensors) {
