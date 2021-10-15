@@ -833,7 +833,7 @@ struct TORCH_API DictType : public Type {
       case TypeKind::StringType:
       case TypeKind::TensorType:
       case TypeKind::DeviceObjType:
-        return DictTypePtr(new DictType(key, value));
+        return DictTypePtr(new DictType(std::move(key), std::move(value)));
       default:
         AT_ERROR(
             "Cannot create dict for key type '",
@@ -855,14 +855,14 @@ struct TORCH_API DictType : public Type {
     if (contained_types.size() != 2) {
       throw std::runtime_error("Expected 2 contained types");
     }
-    return create(contained_types.at(0), contained_types.at(1));
+    return create(std::move(contained_types.at(0)), std::move(contained_types.at(1)));
   }
 
-  TypePtr getKeyType() const {
+  const TypePtr& getKeyType() const {
     return types.at(0);
   }
 
-  TypePtr getValueType() const {
+  const TypePtr& getValueType() const {
     return types.at(1);
   }
 
@@ -875,7 +875,7 @@ struct TORCH_API DictType : public Type {
   }
 
   bool operator==(const Type& rhs) const override {
-    if (auto dict_rhs = rhs.cast<DictType>()) {
+    if (auto* dict_rhs = rhs.castRaw<DictType>()) {
       return *getKeyType() == *(dict_rhs->getKeyType()) &&
           *getValueType() == *(dict_rhs->getValueType());
     }
@@ -885,9 +885,12 @@ struct TORCH_API DictType : public Type {
  private:
   DictType(TypePtr key, TypePtr value)
       : Type(TypeKind::DictType),
-        types({key, value}),
         has_free_variables(
-            key->hasFreeVariables() || value->hasFreeVariables()) {}
+            key->hasFreeVariables() || value->hasFreeVariables()) {
+    types.reserve(2);
+    types.push_back(std::move(key));
+    types.push_back(std::move(value));
+  }
 
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     std::stringstream ss;
