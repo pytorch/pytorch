@@ -46,6 +46,7 @@ LABEL_CIFLOW_CUDA = "ciflow/cuda"
 LABEL_CIFLOW_DEFAULT = "ciflow/default"
 LABEL_CIFLOW_LIBTORCH = "ciflow/libtorch"
 LABEL_CIFLOW_LINUX = "ciflow/linux"
+LABEL_CIFLOW_MOBILE = "ciflow/mobile"
 LABEL_CIFLOW_SANITIZERS = "ciflow/sanitizers"
 LABEL_CIFLOW_ONNX = "ciflow/onnx"
 LABEL_CIFLOW_SCHEDULED = "ciflow/scheduled"
@@ -301,6 +302,16 @@ LINUX_WORKFLOWS = [
         exclude_test=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU},
+        ),
+    ),
+    CIWorkflow(
+        arch="linux",
+        build_environment="linux-xenial-py3-clang5-mobile",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch-linux-xenial-py3-clang5-asan",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        exclude_test=True,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_MOBILE, LABEL_CIFLOW_DEFAULT},
         ),
     ),
     CIWorkflow(
