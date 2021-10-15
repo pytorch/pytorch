@@ -88,16 +88,6 @@ using caffe2::serialize::ReadAdapterInterface;
 
 OpCode parseOpCode(const char* str);
 
-std::string operator_str(
-    const std::string& name,
-    const std::string& overloadname) {
-  std::string result = name;
-  if (!overloadname.empty()) {
-    result += "." + overloadname;
-  }
-  return result;
-}
-
 TypePtr resolveTypeNameMobile(
     const c10::QualifiedName& qn,
     std::shared_ptr<CompilationUnit> compilation_unit) {
