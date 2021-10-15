@@ -939,7 +939,7 @@ void sortUnion(std::vector<TypePtr>* types) {
 }
 
 void standardizeVectorForUnion(std::vector<TypePtr>& reference, std::vector<TypePtr>* to_fill) {
-  for (auto type : reference) {
+  for (const auto& type : reference) {
     flattenUnion(type, to_fill);
   }
   filterDuplicateSubtypes(to_fill);
