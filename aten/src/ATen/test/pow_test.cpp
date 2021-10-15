@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <ATen/native/Pow.h>
-#include <c10/util/irange.h>
 
 #include <torch/types.h>
 #include <torch/utils.h>
@@ -204,7 +203,7 @@ void tensor_pow_tensor(const Vals vals, c10::ScalarType vals_dtype, Pows pows, c
   std::cout.precision(dbl::max_digits10);
 
   const auto vals_tensor = torch::tensor(vals, vals_dtype);
-  for (const auto shift : c10::irange(pows.size())) {
+  for (size_t shift = 0; shift < pows.size(); shift++) {
     const auto pows_tensor = torch::tensor(pows, pows_dtype);
 
     const auto actual_pow = vals_tensor.pow(pows_tensor);

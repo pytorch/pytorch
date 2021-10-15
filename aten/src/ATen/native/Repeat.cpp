@@ -1,7 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/Repeat.h>
-#include <c10/util/irange.h>
 
 template <typename index_t>
 static void compute_cpu(
@@ -14,12 +13,12 @@ static void compute_cpu(
       (result_size == cumsum_ptr[size - 1]),
       "allocated size does not match required size");
   at::parallel_for(0, size, 1, [&](int64_t i_begin, int64_t i_end) {
-    for (const auto i : c10::irange(i_begin, i_end)) {
+    for (int64_t i = i_begin; i < i_end; i++) {
       int64_t end = cumsum_ptr[i];
       index_t size = repeat_ptr[i];
       TORCH_CHECK((size >= 0), "repeats can not be negative");
       int64_t start = end - size;
-      for (const auto j : c10::irange(start, end)) {
+      for (int64_t j = start; j < end; j++) {
         result_ptr[j] = i;
       }
     }

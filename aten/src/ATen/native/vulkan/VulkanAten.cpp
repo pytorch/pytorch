@@ -9,7 +9,6 @@
 #include <ATen/native/vulkan/VulkanOpaqueTensorImpl.h>
 #include <ATen/native/vulkan/VulkanOps.h>
 #include <ATen/vulkan/Context.h>
-#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -266,13 +265,13 @@ Tensor cat(const TensorList tensors, int64_t dim) {
   int64_t cat_dim_size = 0;
 
   std::vector<VulkanTensor> vTensors{};
-  for (const auto i : c10::irange(tensors.size())) {
+  for (int i = 0; i < tensors.size(); ++i) {
     const auto& t = tensors[i];
     TORCH_INTERNAL_ASSERT(
         t.dim() == 4, "Vulkan cat expects 4 dimensional inputs");
     TORCH_INTERNAL_ASSERT(t.is_vulkan(), "Vulkan cat expects Vulkan inputs");
 
-    for (const auto d : c10::irange(4)) {
+    for (int d = 0; d < 4; ++d) {
       if (d == dim) {
         continue;
       }

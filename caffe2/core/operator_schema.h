@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "c10/util/Registry.h"
-#include <c10/util/irange.h>
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/types.h"
@@ -520,7 +519,7 @@ inline uint64_t nElemFromDim(const TensorShape& X, int dim = 0) {
   CAFFE_ENFORCE_GE(dim, 0, "Invalid maximum index specified");
 
   uint64_t nElem = 1;
-  for (const auto i : c10::irange(dim, X.dims_size())) {
+  for (int i = dim; i < X.dims_size(); ++i) {
     nElem *= X.dims(i);
   }
   return nElem;
@@ -532,7 +531,7 @@ inline uint64_t nElemBetweenDim(const TensorShape& X, int start, int stop) {
   CAFFE_ENFORCE_LE(stop, X.dims_size(), "Invalid maximum index specified");
 
   uint64_t nElem = 1;
-  for (const auto i : c10::irange(start, stop)) {
+  for (int i = start; i < stop; ++i) {
     nElem *= X.dims(i);
   }
   return nElem;
@@ -561,7 +560,7 @@ OpSchema::Cost PointwiseCostInference(
   const TensorShape X = inputs[0];
   uint64_t nElemX = nElemFromDim(X);
   uint64_t nElemRead = 0;
-  for (const auto i : c10::irange(inputs.size())) {
+  for (size_t i = 0; i < inputs.size(); ++i) {
     nElemRead += nElemFromDim(inputs[i]);
   }
 

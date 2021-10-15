@@ -54,10 +54,10 @@ class Int8ResizeNearestOp final : public Operator<CPUContext> {
     const uint8_t* Xdata = X.t.data<uint8_t>();
     uint8_t* Ydata = Y->t.mutable_data<uint8_t>();
 
-    for (const auto n : c10::irange(N)) {
-      for (const auto y : c10::irange(OH)) {
+    for (int n = 0; n < N; ++n) {
+      for (int y = 0; y < OH; ++y) {
         const int in_y = std::min((int)(y / height_scale_), (IH - 1));
-        for (const auto x : c10::irange(OW)) {
+        for (int x = 0; x < OW; ++x) {
           const int in_x = std::min((int)(x / width_scale_), (IW - 1));
           std::memcpy(
               &Ydata[C * x + C * OW * y + C * OW * OH * n],

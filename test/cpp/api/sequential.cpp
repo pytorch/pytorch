@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <c10/util/irange.h>
 #include <torch/torch.h>
 
 #include <algorithm>
@@ -173,7 +172,7 @@ TEST_F(SequentialTest, AccessWithAt) {
   ASSERT_EQ(sequential->size(), 3);
 
   // returns the correct module for a given index
-  for (const auto i : c10::irange(modules.size())) {
+  for (size_t i = 0; i < modules.size(); ++i) {
     ASSERT_EQ(&sequential->at<M>(i), modules[i].get());
   }
 
@@ -202,7 +201,7 @@ TEST_F(SequentialTest, AccessWithPtr) {
   ASSERT_EQ(sequential->size(), 3);
 
   // returns the correct module for a given index
-  for (const auto i : c10::irange(modules.size())) {
+  for (size_t i = 0; i < modules.size(); ++i) {
     ASSERT_EQ(sequential->ptr(i).get(), modules[i].get());
     ASSERT_EQ(sequential[i].get(), modules[i].get());
     ASSERT_EQ(sequential->ptr<M>(i).get(), modules[i].get());

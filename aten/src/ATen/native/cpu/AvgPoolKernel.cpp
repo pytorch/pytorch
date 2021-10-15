@@ -5,7 +5,6 @@
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/cpu/utils.h>
-#include <c10/util/irange.h>
 
 namespace at { namespace native {
 
@@ -42,7 +41,7 @@ void cpu_avg_pool(
     int64_t ow = 0;
     data_index_init(begin, c, channels, oh, output_height, ow, output_width);
 
-    for (const auto i : c10::irange(begin, end)) {
+    for (int64_t i = begin; i < end; i++) {
       output_data[i] = static_cast<scalar_t>(0);
 
       // local pointers
@@ -78,8 +77,8 @@ void cpu_avg_pool(
         }
       }
 
-      for (const auto ih : c10::irange(ih0, ih1)) {
-        for (const auto iw : c10::irange(iw0, iw1)) {
+      for (int64_t ih = ih0; ih < ih1; ih++) {
+        for (int64_t iw = iw0; iw < iw1; iw++) {
           sum += input_ptr[ih * input_width + iw];
         }
       }
@@ -130,7 +129,7 @@ void cpu_avg_pool_channels_last(
 
     int64_t size = channels;
     int64_t len = size - (size % Vec::size());
-    for (const auto i : c10::irange(begin, end)) {
+    for (int64_t i = begin; i < end; i++) {
       // compute the mean of the input image...
       int64_t ih0 = oh * dH - padH;
       int64_t iw0 = ow * dW - padW;
@@ -172,8 +171,8 @@ void cpu_avg_pool_channels_last(
       }
 
       // Pass II: compute local sum
-      for (const auto ih : c10::irange(ih0, ih1)) {
-        for (const auto iw : c10::irange(iw0, iw1)) {
+      for (int64_t ih = ih0; ih < ih1; ih++) {
+        for (int64_t iw = iw0; iw < iw1; iw++) {
           scalar_t* in = input_data + n * input_height * input_width * channels +
               ih * input_width * channels + iw * channels;
 
@@ -233,12 +232,12 @@ void cpu_avg_pool_backward(
 
   // parallel on dim of N, C
   at::parallel_for(0, channels, 0, [&](int64_t begin, int64_t end) {
-    for (const auto c : c10::irange(begin, end)) {
+    for (int64_t c = begin; c < end; c++) {
       scalar_t* grad_input_ptr = grad_input_data + c * input_height * input_width;
       scalar_t* grad_output_ptr = grad_output_data + c * output_height * output_width;
 
-      for (const auto oh : c10::irange(output_height)) {
-        for (const auto ow : c10::irange(output_width)) {
+      for (int64_t oh = 0; oh < output_height; oh++) {
+        for (int64_t ow = 0; ow < output_width; ow++) {
           int64_t ih0 = oh * dH - padH;
           int64_t iw0 = ow * dW - padW;
           int64_t ih1 = std::min(ih0 + kH, input_height + padH);
@@ -261,8 +260,8 @@ void cpu_avg_pool_backward(
           }
 
           scalar_t grad_delta = grad_output_ptr[oh * output_width + ow] / divide_factor;
-          for (const auto ih : c10::irange(ih0, ih1)) {
-            for (const auto iw : c10::irange(iw0, iw1)) {
+          for (int64_t ih = ih0; ih < ih1; ih++) {
+            for (int64_t iw = iw0; iw < iw1; iw++) {
               grad_input_ptr[ih * input_width + iw] += grad_delta;
             }
           }
@@ -302,12 +301,12 @@ void cpu_avg_pool_backward_channels_last(
   using Vec = vec::Vectorized<scalar_t>;
   // parallel on dim N
   at::parallel_for(0, nbatch, 0, [&](int64_t begin, int64_t end) {
-    for (const auto n : c10::irange(begin, end)) {
+    for (int64_t n = begin; n < end; n++) {
       scalar_t* grad_input_ptr = grad_input_data + n * input_height * input_width * channels;
       scalar_t* grad_output_ptr = grad_output_data + n * output_height * output_width * channels;
 
-      for (const auto oh : c10::irange(output_height)) {
-        for (const auto ow : c10::irange(output_width)) {
+      for (int64_t oh = 0; oh < output_height; oh++) {
+        for (int64_t ow = 0; ow < output_width; ow++) {
           int64_t ih0 = oh * dH - padH;
           int64_t iw0 = ow * dW - padW;
           int64_t ih1 = std::min(ih0 + kH, input_height + padH);
@@ -332,8 +331,8 @@ void cpu_avg_pool_backward_channels_last(
           scalar_t* gout = grad_output_ptr + oh * output_width * channels + ow * channels;
           int64_t size = channels;
           int64_t len = size - (size % Vec::size());
-          for (const auto ih : c10::irange(ih0, ih1)) {
-            for (const auto iw : c10::irange(iw0, iw1)) {
+          for (int64_t ih = ih0; ih < ih1; ih++) {
+            for (int64_t iw = iw0; iw < iw1; iw++) {
               scalar_t* gin = grad_input_ptr + ih * input_width * channels + iw * channels;
 
               int64_t d = 0;

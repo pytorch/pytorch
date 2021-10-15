@@ -1,7 +1,6 @@
 #pragma once
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/env.h>
-#include <c10/util/irange.h>
 
 namespace at { namespace native {
 
@@ -36,7 +35,7 @@ static inline std::vector<int64_t> conv_output_size(
   std::vector<int64_t> output_size(dim);
   output_size[0] = input_size[input_batch_size_dim];
   output_size[1] = weight_size[weight_output_channels_dim];
-  for (const auto d : c10::irange(2, dim)) {
+  for (size_t d = 2; d < dim; ++d) {
     auto dilation_ = has_dilation ? dilation[d - 2] : 1;
     auto kernel = dilation_ * (weight_size[d] - 1) + 1;
     output_size[d] = (input_size[d] + (2 * padding[d - 2]) - kernel) / stride[d - 2] + 1;
@@ -54,7 +53,7 @@ static inline std::vector<int64_t> conv_input_size(
   std::vector<int64_t> input_size(dim);
   input_size[0] = output_size[output_batch_size_dim];
   input_size[1] = weight_size[weight_input_channels_dim] * groups;
-  for (const auto d : c10::irange(2, dim)) {
+  for (size_t d = 2; d < dim; ++d) {
     int kernel = dilation[d - 2] * (weight_size[d] - 1) + 1;
     input_size[d] = (output_size[d] - 1) * stride[d - 2] - (2 * padding[d - 2]) +
                      kernel + output_padding[d - 2];
@@ -70,7 +69,7 @@ static inline std::vector<int64_t> conv_weight_size(
   std::vector<int64_t> weight_size(dim);
   weight_size[0] = output_size[1];
   weight_size[1] = input_size[1] / groups;
-  for (const auto d : c10::irange(2, dim)) {
+  for (size_t d = 2; d < dim; ++d) {
     int kernel = input_size[d] - (output_size[d] - 1) * stride[d - 2]
                + 2 * padding[d - 2] - output_padding[d - 2];
     weight_size[d] = (kernel - 1) / dilation[d - 2] + 1;

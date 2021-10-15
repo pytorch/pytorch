@@ -1,5 +1,4 @@
 #include <ATen/core/Formatting.h>
-#include <c10/util/irange.h>
 
 #include <cmath>
 #include <cstdint>
@@ -45,7 +44,7 @@ static std::tuple<double, int64_t> __printFormat(std::ostream& stream, const Ten
   }
   bool intMode = true;
   auto self_p = self.data_ptr<double>();
-  for (const auto i : c10::irange(size)) {
+  for(int64_t i = 0; i < size; i++) {
     auto z = self_p[i];
     if(std::isfinite(z)) {
       if(z != std::ceil(z)) {
@@ -71,7 +70,7 @@ static std::tuple<double, int64_t> __printFormat(std::ostream& stream, const Ten
   } else {
     expMin = fabs(self_p[offset]);
     expMax = fabs(self_p[offset]);
-    for (const auto i : c10::irange(offset, size)) {
+    for(int64_t i = offset; i < size; i++) {
       double z = fabs(self_p[i]);
       if(std::isfinite(z)) {
         if(z < expMin) {
@@ -131,8 +130,7 @@ static std::tuple<double, int64_t> __printFormat(std::ostream& stream, const Ten
 
 static void __printIndent(std::ostream &stream, int64_t indent)
 {
-  for (const auto i : c10::irange(indent)) {
-    (void)i; //Suppress unused variable warning
+  for(int64_t i = 0; i < indent; i++) {
     stream << " ";
   }
 }
@@ -170,7 +168,7 @@ static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t line
       printScale(stream,scale);
       __printIndent(stream, indent);
     }
-    for (const auto l : c10::irange(self.size(0))) {
+    for(int64_t l = 0; l < self.size(0); l++) {
       Tensor row = self.select(0,l);
       double *row_ptr = row.data_ptr<double>();
       for(int64_t c = firstColumn; c < lastColumn+1; c++) {
@@ -200,7 +198,8 @@ void __printTensor(std::ostream& stream, Tensor& self, int64_t linesize)
   bool start = true;
   bool finished = false;
   counter[0] = -1;
-  for (const auto i : c10::irange(1, counter.size()))counter[i] = 0;
+  for(size_t i = 1; i < counter.size(); i++)
+    counter[i] = 0;
   while(true) {
     for(int64_t i = 0; self.ndimension()-2; i++) {
       counter[i] = counter[i] + 1;
@@ -270,7 +269,7 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
           printScale(stream, scale);
         }
         double* tensor_p = tensor.data_ptr<double>();
-        for (const auto i : c10::irange(tensor.size(0))) {
+        for (int64_t i = 0; i < tensor.size(0); i++) {
           stream << std::setw(sz) << tensor_p[i]/scale << std::endl;
         }
       }
@@ -285,7 +284,7 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
         __printTensor(stream, tensor, linesize);
       }
       stream << "[ " << tensor_.toString() << "{" << tensor.size(0);
-      for (const auto i : c10::irange(1, tensor.ndimension())) {
+      for(int64_t i = 1; i < tensor.ndimension(); i++) {
         stream << "," << tensor.size(i);
       }
       stream << "}";

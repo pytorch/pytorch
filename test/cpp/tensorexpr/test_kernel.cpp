@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <c10/util/irange.h>
 #include <test/cpp/tensorexpr/test_base.h>
 #include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -417,13 +416,13 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
     // Check sizes
     CHECK_EQ(o.sizes().size(), ref.sizes().size());
     size_t num_el = 1;
-    for (const auto idx : c10::irange(ref.sizes().size())) {
+    for (size_t idx = 0; idx < ref.sizes().size(); idx++) {
       CHECK_EQ(o.sizes()[idx], ref.sizes()[idx]);
       num_el *= ref.sizes()[idx];
     }
 
     // Check the contents
-    for (const auto i : c10::irange(num_el)) {
+    for (size_t i = 0; i < num_el; i++) {
       CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
     }
   }
@@ -470,13 +469,13 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
     // Check sizes
     CHECK_EQ(o.sizes().size(), ref.sizes().size());
     size_t num_el = 1;
-    for (const auto idx : c10::irange(ref.sizes().size())) {
+    for (size_t idx = 0; idx < ref.sizes().size(); idx++) {
       CHECK_EQ(o.sizes()[idx], ref.sizes()[idx]);
       num_el *= ref.sizes()[idx];
     }
 
     // Check the contents
-    for (const auto i : c10::irange(num_el)) {
+    for (size_t i = 0; i < num_el; i++) {
       CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
     }
   }
@@ -570,13 +569,13 @@ TEST_F(Kernel, CatInputTypesPromotion) {
     CHECK_EQ(o.sizes().size(), ref.sizes().size());
     CHECK_EQ(o.dtype(), ref.dtype());
     size_t num_el = 1;
-    for (const auto idx : c10::irange(ref.sizes().size())) {
+    for (size_t idx = 0; idx < ref.sizes().size(); idx++) {
       CHECK_EQ(o.sizes()[idx], ref.sizes()[idx]);
       num_el *= ref.sizes()[idx];
     }
 
     // Check the contents
-    for (const auto i : c10::irange(num_el)) {
+    for (size_t i = 0; i < num_el; i++) {
       CHECK_EQ(((double*)o.data_ptr())[i], ((double*)ref.data_ptr())[i]);
     }
   }
@@ -659,13 +658,13 @@ TEST_F(Kernel, CatWoConditionals) {
   CHECK_EQ(o.sizes().size(), ref.sizes().size());
   CHECK_EQ(o.dtype(), ref.dtype());
   size_t num_el = 1;
-  for (const auto idx : c10::irange(ref.sizes().size())) {
+  for (size_t idx = 0; idx < ref.sizes().size(); idx++) {
     CHECK_EQ(o.sizes()[idx], ref.sizes()[idx]);
     num_el *= ref.sizes()[idx];
   }
 
   // Check the contents
-  for (const auto i : c10::irange(num_el)) {
+  for (size_t i = 0; i < num_el; i++) {
     CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
   }
   getCatWoConditionals() = false;
@@ -724,13 +723,13 @@ TEST_F(Kernel, OptimizeConditionals) {
   CHECK_EQ(o.sizes().size(), ref.sizes().size());
   CHECK_EQ(o.dtype(), ref.dtype());
   size_t num_el = 1;
-  for (const auto idx : c10::irange(ref.sizes().size())) {
+  for (size_t idx = 0; idx < ref.sizes().size(); idx++) {
     CHECK_EQ(o.sizes()[idx], ref.sizes()[idx]);
     num_el *= ref.sizes()[idx];
   }
 
   // Check the contents
-  for (const auto i : c10::irange(num_el)) {
+  for (size_t i = 0; i < num_el; i++) {
     CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
   }
   getOptConditionals() = old_opt_conditionals;
@@ -905,7 +904,7 @@ TEST_F(Kernel, SumMultipleAxes) {
 
   // Only iterate over positive values of axes to keep the running time
   // reasonable, since the number of pairs is quadratic.
-  for (const auto dim1 : c10::irange(a.dim())) {
+  for (int dim1 = 0; dim1 < a.dim(); ++dim1) {
     for (int dim2 = dim1 + 1; dim2 < a.dim(); ++dim2) {
       for (bool keepdim : {false, true}) {
         TemplateEnv env;
@@ -978,7 +977,7 @@ TEST_F(Kernel, Softmax2D) {
         # CHECK-NEXT: aten_softmax)IR";
 
   for (auto log_softmax : {false, true}) {
-    for (const auto softmax_dim : c10::irange(a.dim())) {
+    for (int softmax_dim = 0; softmax_dim < a.dim(); ++softmax_dim) {
       auto softmax_dim_size = a.sizes()[softmax_dim];
       auto other_dim = (softmax_dim + 1) % a.dim();
       auto ref =
@@ -1047,10 +1046,10 @@ TEST_F(Kernel, Softmax3D) {
         # CHECK-NEXT: aten_softmax)IR";
 
   for (auto log_softmax : {false, true}) {
-    for (const auto softmax_dim : c10::irange(a.dim())) {
+    for (int softmax_dim = 0; softmax_dim < a.dim(); ++softmax_dim) {
       auto softmax_dim_size = a.sizes()[softmax_dim];
       std::vector<int> other_dims;
-      for (const auto i : c10::irange(a.dim())) {
+      for (int i = 0; i < a.dim(); ++i) {
         if (i != softmax_dim) {
           other_dims.push_back(i);
         }
@@ -1128,10 +1127,10 @@ TEST_F(Kernel, Softmax4D) {
         # CHECK-NEXT: aten_softmax)IR";
 
   for (auto log_softmax : {false, true}) {
-    for (const auto softmax_dim : c10::irange(a.dim())) {
+    for (int softmax_dim = 0; softmax_dim < a.dim(); ++softmax_dim) {
       auto softmax_dim_size = a.sizes()[softmax_dim];
       std::vector<int> other_dims;
-      for (const auto i : c10::irange(a.dim())) {
+      for (int i = 0; i < a.dim(); ++i) {
         if (i != softmax_dim) {
           other_dims.push_back(i);
         }

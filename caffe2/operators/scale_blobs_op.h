@@ -20,7 +20,7 @@ class ScaleBlobsOp final : public Operator<Context> {
   bool DoRunWithType() {
     int batchSize = InputSize();
 
-    for (const auto i : c10::irange(batchSize)) {
+    for (int i = 0; i < batchSize; ++i) {
       const auto& X = Input(i);
       auto* Y = Output(i, X.sizes(), at::dtype<T>());
       math::Scale<float, T, Context>(
@@ -34,7 +34,7 @@ class ScaleBlobsOp final : public Operator<Context> {
   }
 
   bool RunOnDevice() override {
-    for (const auto i : c10::irange(InputSize())) {
+    for (int i = 0; i < InputSize(); ++i) {
       auto& input = this->template Input<Tensor>(i, CPU);
       auto* output = this->template Output<Tensor>(i, CPU);
       output->ResizeLike(input);

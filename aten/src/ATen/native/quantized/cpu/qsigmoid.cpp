@@ -7,7 +7,6 @@
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
-#include <c10/util/irange.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 #include <algorithm>
@@ -27,7 +26,7 @@ Tensor qnnpack_sigmoid(
 
   Tensor input_contig = input.contiguous(input.suggest_memory_format());
   size_t num_elems = 1;
-  for (const auto i : c10::irange(1, input_contig.ndimension())) {
+  for (int i = 1; i < input_contig.ndimension(); ++i) {
     num_elems *= input_contig.size(i);
   }
 

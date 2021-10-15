@@ -4,7 +4,6 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
-#include <c10/util/irange.h>
 #include <c10/util/order_preserving_flat_hash_map.h>
 #include <gtest/gtest.h>
 
@@ -16,7 +15,7 @@ using dict_int_int =
     ska_ordered::order_preserving_flat_hash_map<int64_t, int64_t>;
 
 dict_int_int test_dict(dict_int_int& dict) {
-  for (const auto i : c10::irange(100)) {
+  for (int64_t i = 0; i < 100; ++i) {
     dict[i] = i + 1;
   }
 
@@ -34,18 +33,18 @@ dict_int_int test_dict(dict_int_int& dict) {
 
   // erase via iterators
   auto begin = dict.begin();
-  for (const auto i : c10::irange(20))
+  for (size_t i = 0; i < 20; ++i)
     begin++;
 
   auto end = begin;
-  for (const auto i : c10::irange(20)) {
+  for (size_t i = 0; i < 20; ++i) {
     erase_set.insert(end->first);
     end++;
   }
   dict.erase(begin, end);
 
   std::vector<size_t> order;
-  for (const auto i : c10::irange(100)) {
+  for (size_t i = 0; i < 100; ++i) {
     if (!erase_set.count(i)) {
       order.push_back(i);
     }
@@ -114,7 +113,7 @@ TEST(OrderedPreservingDictTest, DictCollisions) {
 
   for (auto init_dict_size : {27, 34, 41}) {
     bad_hash_dict dict;
-    for (const auto i : c10::irange(init_dict_size)) {
+    for (int64_t i = 0; i < init_dict_size; ++i) {
       dict[i] = i + 1;
     }
 
@@ -132,18 +131,18 @@ TEST(OrderedPreservingDictTest, DictCollisions) {
 
     // erase a few entries via iterator
     auto begin = dict.begin();
-    for (const auto i : c10::irange(10)) {
+    for (size_t i = 0; i < 10; ++i) {
       begin++;
     }
     auto end = begin;
-    for (const auto i : c10::irange(7)) {
+    for (size_t i = 0; i < 7; ++i) {
       erase_set.insert(end->first);
       end++;
     }
     dict.erase(begin, end);
 
     std::vector<int64_t> order;
-    for (const auto i : c10::irange(init_dict_size)) {
+    for (int64_t i = 0; i < init_dict_size; ++i) {
       if (!erase_set.count(i)) {
         order.push_back(i);
       }
@@ -168,7 +167,7 @@ TEST(OrderedPreservingDictTest, test_range_insert) {
   // check values
   const int nb_values = 1000;
   std::vector<std::pair<int, int>> values;
-  for (const auto i : c10::irange(nb_values)) {
+  for (int i = 0; i < nb_values; i++) {
     // NOLINTNEXTLINE(modernize-use-emplace,performance-inefficient-vector-operation)
     values.push_back(std::make_pair(i, i + 1));
   }
@@ -191,7 +190,7 @@ TEST(OrderedPreservingDictTest, test_range_erase_all) {
   // insert x values, delete all
   const std::size_t nb_values = 1000;
   dict_int_int map;
-  for (const auto i : c10::irange(nb_values)) {
+  for (size_t i = 0; i < nb_values; ++i) {
     map[i] = i + 1;
   }
   auto it = map.erase(map.begin(), map.end());
@@ -207,7 +206,7 @@ TEST(OrderedPreservingDictTest, test_range_erase) {
 
   const std::size_t nb_values = 1000;
   HMap map;
-  for (const auto i : c10::irange(nb_values)) {
+  for (size_t i = 0; i < nb_values; ++i) {
     map[c10::guts::to_string(i)] = i;
     auto begin = map.begin();
     for (size_t j = 0; j <= i; ++j, begin++) {
@@ -306,7 +305,7 @@ TEST(OrderedPreservingDictTest, test_copy_constructor_and_operator) {
 
   const std::size_t nb_values = 100;
   HMap map;
-  for (const auto i : c10::irange(nb_values)) {
+  for (size_t i = 0; i < nb_values; ++i) {
     map[c10::guts::to_string(i)] = c10::guts::to_string(i);
   }
 

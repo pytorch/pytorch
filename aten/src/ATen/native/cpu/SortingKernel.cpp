@@ -7,7 +7,6 @@
 #include <ATen/native/CompositeRandomAccessor.h>
 #include <ATen/native/Sorting.h>
 #include <ATen/native/SortingUtils.h>
-#include <c10/util/irange.h>
 
 namespace at { namespace native {
 
@@ -56,8 +55,7 @@ void _dim_apply(
         auto* values_data_bytes = data[0];
         auto* indices_data_bytes = data[1];
 
-        for (const auto i : c10::irange(n)) {
-          (void)i; //Suppress unused variable warning
+        for (int64_t i = 0; i < n; ++i) {
           f(
             reinterpret_cast<scalar_t*>(values_data_bytes),
             values_dim_stride,

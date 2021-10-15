@@ -17,7 +17,6 @@
 
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
 #include <c10/core/GeneratorImpl.h>
-#include <c10/util/irange.h>
 #include <ATen/core/DistributionsHelper.h>
 #include <ATen/core/MT19937RNGEngine.h>
 #else
@@ -156,7 +155,7 @@ class TORCH_API CPUContext final : public BaseContext {
           static_cast<const void*>(src),
           static_cast<void*>(dst));
     } else {
-      for (const auto i : c10::irange(n)) {
+      for (size_t i = 0; i < n; ++i) {
         dst[i] = src[i];
       }
     }

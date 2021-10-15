@@ -38,7 +38,6 @@
 #include <iostream>
 #include <string>
 
-#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
@@ -147,8 +146,8 @@ int main(int argc, char* argv[]) {
     std::cout << "Nested for loops: " << std::endl << *loop_i_a << std::endl;
     // Prints:
     // Nested for loops:
-    // for (const auto i : c10::irange(64)) {
-    //   for (const auto j : c10::irange(32)) {
+    // for (int i = 0; i < 64; i++) {
+    //   for (int j = 0; j < 32; j++) {
     //     A[i, j] = i + j;
     //   }
     // }
@@ -167,13 +166,13 @@ int main(int argc, char* argv[]) {
     // Prints:
     // Compound Block statement:
     // {
-    //   for (const auto i : c10::irange(64)) {
-    //     for (const auto j : c10::irange(32)) {
+    //   for (int i = 0; i < 64; i++) {
+    //     for (int j = 0; j < 32; j++) {
     //       A[i, j] = i + j;
     //     }
     //   }
-    //   for (const auto i : c10::irange(64)) {
-    //     for (const auto j : c10::irange(32)) {
+    //   for (int i = 0; i < 64; i++) {
+    //     for (int j = 0; j < 32; j++) {
     //       B[i, j] = A[i, j];
     //     }
     //   }
@@ -194,8 +193,8 @@ int main(int argc, char* argv[]) {
               << *C.stmt() << std::endl;
     // Prints:
     // Stmt produced by 'Compute' API:
-    // for (const auto i : c10::irange(64)) {
-    //   for (const auto j : c10::irange(32)) {
+    // for (int i = 0; i < 64; i++) {
+    //   for (int j = 0; j < 32; j++) {
     //     C[i, j] = i * j;
     //   }
     // }
@@ -240,13 +239,13 @@ int main(int argc, char* argv[]) {
     // Prints:
     // Stmt produced by 'Compute' API:
     // {
-    //   for (const auto i : c10::irange(64)) {
-    //     for (const auto j : c10::irange(32)) {
+    //   for (int i = 0; i < 64; i++) {
+    //     for (int j = 0; j < 32; j++) {
     //       C[i, j] = i * (j + 1);
     //     }
     //   }
-    //   for (const auto i_1 : c10::irange(64)) {
-    //     for (const auto j_1 : c10::irange(32)) {
+    //   for (int i_1 = 0; i_1 < 64; i_1++) {
+    //     for (int j_1 = 0; j_1 < 32; j_1++) {
     //       D[i_1, j_1] = (C[i_1, j_1]) - i_1;
     //     }
     //   }
@@ -266,13 +265,13 @@ int main(int argc, char* argv[]) {
     // Prints:
     // LoopNest root stmt:
     // {
-    //   for (const auto i : c10::irange(64)) {
-    //     for (const auto j : c10::irange(32)) {
+    //   for (int i = 0; i < 64; i++) {
+    //     for (int j = 0; j < 32; j++) {
     //       C[i, j] = i * (j + 1);
     //     }
     //   }
-    //   for (const auto i_1 : c10::irange(64)) {
-    //     for (const auto j_1 : c10::irange(32)) {
+    //   for (int i_1 = 0; i_1 < 64; i_1++) {
+    //     for (int j_1 = 0; j_1 < 32; j_1++) {
     //       D[i_1, j_1] = (C[i_1, j_1]) - i_1;
     //     }
     //   }
@@ -285,8 +284,8 @@ int main(int argc, char* argv[]) {
     // Prints:
     // Stmt after inlining:
     // {
-    //   for (const auto i : c10::irange(64)) {
-    //     for (const auto j : c10::irange(32)) {
+    //   for (int i = 0; i < 64; i++) {
+    //     for (int j = 0; j < 32; j++) {
     //       D[i, j] = i * (j + 1) - i;
     //     }
     //   }
@@ -299,8 +298,8 @@ int main(int argc, char* argv[]) {
     // Prints:
     // Stmt after simplification:
     // {
-    //   for (const auto i : c10::irange(64)) {
-    //     for (const auto j : c10::irange(32)) {
+    //   for (int i = 0; i < 64; i++) {
+    //     for (int j = 0; j < 32; j++) {
     //       D[i, j] = i * j;
     //     }
     //   }
@@ -320,15 +319,15 @@ int main(int argc, char* argv[]) {
     // Prints:
     // Stmt after splitWithTail:
     // {
-    //   for (const auto i_outer : c10::irange(4)) {
-    //     for (const auto i_inner : c10::irange(13)) {
-    //       for (const auto j : c10::irange(32)) {
+    //   for (int i_outer = 0; i_outer < 4; i_outer++) {
+    //     for (int i_inner = 0; i_inner < 13; i_inner++) {
+    //       for (int j = 0; j < 32; j++) {
     //         D[i_inner + 13 * i_outer, j] = i_inner * j + 13 * (i_outer * j);
     //       }
     //     }
     //   }
-    //   for (const auto i_tail : c10::irange(12)) {
-    //     for (const auto j : c10::irange(32)) {
+    //   for (int i_tail = 0; i_tail < 12; i_tail++) {
+    //     for (int j = 0; j < 32; j++) {
     //       D[i_tail + 52, j] = i_tail * j + 52 * j;
     //     }
     //   }
@@ -366,8 +365,8 @@ int main(int argc, char* argv[]) {
     std::cout << *loopnest.root_stmt() << std::endl;
     // Prints:
     // {
-    //   for (const auto i : c10::irange(64)) {
-    //     for (const auto j : c10::irange(32)) {
+    //   for (int i = 0; i < 64; i++) {
+    //     for (int j = 0; j < 32; j++) {
     //       X[i, j] = (A[i, j]) + (B[i, j]);
     //     }
     //   }
@@ -470,8 +469,8 @@ int main(int argc, char* argv[]) {
     // Prints:
     // TE Stmt constructed from TorchScript:
     // {
-    //   for (const auto v : c10::irange(5)) {
-    //     for (const auto _tail_tail : c10::irange(3)) {
+    //   for (int v = 0; v < 5; v++) {
+    //     for (int _tail_tail = 0; _tail_tail < 3; _tail_tail++) {
     //       aten_add[_tail_tail + 3 * v] = (tA[_tail_tail + 3 * v]) *
     //       ((tA[_tail_tail + 3 * v]) * (tB[_tail_tail + 3 * v])) +
     //       (tB[_tail_tail + 3 * v]);

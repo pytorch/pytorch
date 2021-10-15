@@ -1,7 +1,6 @@
 #pragma once
 
 #include <c10/util/Optional.h>
-#include <c10/util/irange.h>
 #include <ATen/core/TensorBody.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Functions.h>
@@ -336,7 +335,7 @@ static inline Tensor scalarToTensor(const Scalar& v, const TensorOptions& option
 // strip away unit dimensions from the left of 'src'
 static inline IntArrayRef slicePrefix1sSize(const IntArrayRef& sizes) {
   size_t first_non1_src = sizes.size();
-  for (const auto i : c10::irange(sizes.size())) {
+  for (size_t i = 0; i < sizes.size(); ++i) {
     if (sizes[i] != 1) {
       first_non1_src = i;
       break;
@@ -440,7 +439,7 @@ static inline Tensor applySlicing(
     "too many indices for tensor of dimension ", (int)self_sizes.size());
 
   Tensor result = self;
-  for (const auto i : c10::irange(indices.size())) {
+  for (size_t i = 0; i < indices.size(); i++) {
     auto& obj = indices[i];
     result = handleDimInMultiDimIndexing(
       /*prev_dim_result=*/result,

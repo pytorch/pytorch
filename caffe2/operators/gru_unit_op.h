@@ -29,10 +29,10 @@ void GRUUnit(
     bool drop_states,
     T* H,
     Context* /*context*/) {
-  for (const auto n : c10::irange(N)) {
+  for (int n = 0; n < N; ++n) {
     const bool valid = seqLengths == nullptr || t < seqLengths[n];
 
-    for (const auto d : c10::irange(D)) {
+    for (int d = 0; d < D; ++d) {
       if (!valid) {
         if (drop_states) {
           H[d] = 0;
@@ -68,10 +68,10 @@ void GRUUnitGradient(
     T* H_prev_diff,
     T* X_diff,
     Context* /*context*/) {
-  for (const auto n : c10::irange(N)) {
+  for (int n = 0; n < N; ++n) {
     const bool valid = seqLengths == nullptr || t < seqLengths[n];
 
-    for (const auto d : c10::irange(D)) {
+    for (int d = 0; d < D; ++d) {
       T* h_prev_diff = H_prev_diff + d;
       T* reset_diff = X_diff + 0 * D + d;
       T* update_diff = X_diff + 1 * D + d;

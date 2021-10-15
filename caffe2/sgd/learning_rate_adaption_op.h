@@ -21,7 +21,7 @@ void lr_update(
   float x = 0;
   float y = 0, z = 0;
   const float kEps = 1e-12f;
-  for (const auto i : c10::irange(n)) {
+  for (auto i = 0; i < n; i++) {
     x += grad[i] * effgrad[i];
     if (normalized_lr_adaption) {
       y += grad[i] * grad[i];

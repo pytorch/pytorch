@@ -1,4 +1,3 @@
-#include <c10/util/irange.h>
 #include <torch/script.h>
 #include <torch/cuda.h>
 
@@ -45,7 +44,7 @@ void get_operator_from_registry_and_execute() {
   const auto manual = custom_op(torch::ones(5), 2.0, 3);
 
   TORCH_INTERNAL_ASSERT(output.size() == 3);
-  for (const auto i : c10::irange(output.size())) {
+  for (size_t i = 0; i < output.size(); ++i) {
     TORCH_INTERNAL_ASSERT(output[i].allclose(torch::ones(5) * 2));
     TORCH_INTERNAL_ASSERT(output[i].allclose(manual[i]));
   }

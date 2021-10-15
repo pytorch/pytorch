@@ -46,10 +46,10 @@ class Int8ConcatOp final : public Operator<CPUContext> {
     if (this->template GetSingleArgument<string>("order", "") == "NHWC") {
       CHECK_EQ(Y_dims.size(), 4);
     }
-    for (const auto i : c10::irange(1, InputSize())) {
+    for (auto i = 1; i < InputSize(); ++i) {
       const auto& Xi = Inputs()[i]->template Get<Int8TensorCPU>();
       CHECK_EQ(Xi.t.dim(), Y_dims.size());
-      for (const auto j : c10::irange(Y_dims.size())) {
+      for (auto j = 0; j < Y_dims.size(); ++j) {
         if (j != axis_) {
           CHECK_EQ(Xi.t.size(j), Y_dims[j]);
         }
@@ -61,7 +61,7 @@ class Int8ConcatOp final : public Operator<CPUContext> {
     int after = X0.t.size_from_dim(axis_ + 1);
     const auto C_total = Y_dims[axis_];
     size_t C_offset = 0;
-    for (const auto i : c10::irange(InputSize())) {
+    for (auto i = 0; i < InputSize(); ++i) {
       const auto& Xi = Inputs()[i]->template Get<Int8TensorCPU>();
       // Copy the NxHxWxC input slice to NxHxWx[C_offset:C_offset + C].
       const auto Ci = Xi.t.size(axis_);

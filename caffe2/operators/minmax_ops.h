@@ -39,7 +39,7 @@ class MaxOp final : public Operator<Context> {
         Y->sizes());
     const T* X1_data = X1.template data<T>();
     math::Max<T, Context>(N, X0_data, X1_data, Y_data, &context_);
-    for (const auto i : c10::irange(2, InputSize())) {
+    for (int i = 2; i < InputSize(); ++i) {
       const auto& Xi = Input(i);
       CAFFE_ENFORCE_EQ(
           Xi.sizes(),
@@ -87,7 +87,7 @@ class MinOp final : public Operator<Context> {
         Y->sizes());
     const T* X1_data = X1.template data<T>();
     math::Min<T, Context>(N, X0_data, X1_data, Y_data, &context_);
-    for (const auto i : c10::irange(2, InputSize())) {
+    for (int i = 2; i < InputSize(); ++i) {
       const auto& Xi = Input(i);
       CAFFE_ENFORCE_EQ(
           Xi.sizes(),

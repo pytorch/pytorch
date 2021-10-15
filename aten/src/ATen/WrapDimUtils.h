@@ -2,7 +2,6 @@
 
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/core/TensorImpl.h>
-#include <c10/util/irange.h>
 #include <ATen/core/Tensor.h>
 
 namespace at {
@@ -41,7 +40,7 @@ static inline void maybe_wrap_dims_n(int64_t* dims, int64_t ndims, int64_t dim_p
   }
   int64_t min = -dim_post_expr;
   int64_t max = dim_post_expr - 1;
-  for (const auto i : c10::irange(ndims)) {
+  for (int64_t i = 0; i < ndims; ++i) {
     auto &dim = dims[i];
     if (dim < min || dim > max) {
       TORCH_CHECK_INDEX(false,
@@ -86,7 +85,7 @@ static inline int64_t legacy_cat_wrap_dim(int64_t dim, TensorList tensors) {
 
 // wrap negative dims in a vector
 static inline void wrap_all_dims(std::vector<int64_t>& dims_to_wrap, int64_t tensor_total_dims) {
-  for (const auto i : c10::irange(dims_to_wrap.size())) {
+  for (size_t i = 0; i < dims_to_wrap.size(); i++) {
     dims_to_wrap[i] = maybe_wrap_dim(dims_to_wrap[i], tensor_total_dims);
   }
 }

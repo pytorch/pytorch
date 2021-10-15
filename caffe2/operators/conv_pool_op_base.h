@@ -139,7 +139,7 @@ class ConvPoolOpBase : public Operator<Context> {
     }
 
     if (global_pooling_) {
-      for (const auto dim : c10::irange(kernel_.size())) {
+      for (size_t dim = 0; dim < kernel_.size(); ++dim) {
         CAFFE_ENFORCE(
             pads_[2 * dim] == 0 && pads_[2 * dim + 1] == 0 &&
                 dilation_[dim] == 1 && stride_[dim] == 1,
@@ -152,7 +152,7 @@ class ConvPoolOpBase : public Operator<Context> {
     // need to clean this up.
     if (operator_def.name().find("Conv") == 0 ||
         operator_def.name().find("Pool") != std::string::npos) {
-      for (const auto dim : c10::irange(kernel_.size())) {
+      for (size_t dim = 0; dim < kernel_.size(); ++dim) {
         CAFFE_ENFORCE_GE(pads_[dim], 0);
         CAFFE_ENFORCE_GE(pads_[kernel_.size() + dim], 0);
         CAFFE_ENFORCE(
@@ -162,7 +162,7 @@ class ConvPoolOpBase : public Operator<Context> {
       }
     }
 
-    for (const auto dim : c10::irange(kernel_.size())) {
+    for (size_t dim = 0; dim < kernel_.size(); ++dim) {
       CAFFE_ENFORCE_GE(kernel_[dim], 0);
       CAFFE_ENFORCE_GE(dilation_[dim], 0);
       CAFFE_ENFORCE_GE(stride_[dim], 0);
@@ -281,7 +281,7 @@ class ConvPoolOpBase : public Operator<Context> {
       std::copy_n(input_dims.cbegin() + offset, ndim, kernel->begin());
       std::fill_n(output_dims->begin() + offset, ndim, 1LL);
     } else {
-      for (const auto i : c10::irange(ndim)) {
+      for (int i = 0; i < ndim; ++i) {
         ComputeSizeAndPad(
             input_dims[i + offset],
             stride[i],
@@ -320,7 +320,7 @@ class ConvPoolOpBase : public Operator<Context> {
       std::copy_n(input_dims.cbegin() + offset, ndim, kernel->begin());
       std::fill_n(output_dims->begin() + offset, ndim, 1LL);
     } else {
-      for (const auto i : c10::irange(ndim)) {
+      for (int i = 0; i < ndim; ++i) {
         ComputeSizeAndPad64(
             input_dims[i + offset],
             stride[i],
@@ -342,7 +342,7 @@ class ConvPoolOpBase : public Operator<Context> {
     } else if (legacy_pad_ != LegacyPadding::NOTSET) {
       int output_unused;
       // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      for (const auto dim : c10::irange(dims.size())) {
+      for (int dim = 0; dim < dims.size(); ++dim) {
         ComputeSizeAndPad(
             dims[dim],
             stride_[dim],
@@ -381,7 +381,7 @@ class ConvPoolOpBase : public Operator<Context> {
       reset_tensor_device_ = true;
     } else {
       const int* tensor_data = tensor->template data<int>();
-      for (const auto d_i : c10::irange(data.size())) {
+      for (int d_i = 0; d_i < data.size(); ++d_i) {
         if (tensor_data[d_i] != data[d_i]) {
           reset_tensor_device_ = true;
           break;
@@ -411,7 +411,7 @@ class ConvPoolOpBase : public Operator<Context> {
 
   bool RunOnDevice() override {
     if (!global_pooling_) {
-      for (const auto dim : c10::irange(kernel_.size())) {
+      for (size_t dim = 0; dim < kernel_.size(); ++dim) {
         CAFFE_ENFORCE_GT(kernel_[dim], 0);
       }
     }

@@ -74,12 +74,11 @@ class BisectPercentileOp final : public Operator<Context> {
     int feature_length = 0;
     int cur_index = 0;
 
-    for (const auto i : c10::irange(num_features)) {
+    for (int i = 0; i < num_features; ++i) {
       cur_index = i;
       feature_start_index = index[i];
       feature_length = pct_lens_[i];
-      for (const auto j : c10::irange(batch_size)) {
-        (void)j; // Suppress unused variable warning
+      for (int j = 0; j < batch_size; ++j) {
         pct_output[cur_index] = compute_percentile(
             pct_raw_.begin() + feature_start_index,
             pct_mapping_.begin() + feature_start_index,

@@ -2,7 +2,6 @@
 #include <ATen/Parallel.h>
 #include <ATen/native/quantized/cpu/embedding_packed_params.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
-#include <c10/util/irange.h>
 #include <torch/library.h>
 
 torch::class_<EmbeddingPackedParamsBase> register_embedding_params();
@@ -68,7 +67,7 @@ at::Tensor PackedEmbeddingBagWeight::unpack() {
     // For sub-byte tensors this will copy the packed bytes over since the
     // sub_byte qtensors are expected to store data in packed format.
     at::parallel_for(0, input_rows, 1, [&](int32_t start_idx, int32_t end_idx) {
-      for (const auto row : c10::irange(start_idx, end_idx)) {
+      for (int64_t row = start_idx; row < end_idx; ++row) {
         const std::uint8_t* input_row = input + row * input_columns;
         uint8_t* output_row =
             output_data + row * output_columns / num_elem_per_byte;
@@ -127,7 +126,7 @@ Tensor qembeddingbag_byte_unpack(const Tensor& packed_weight) {
 #ifdef USE_FBGEMM
     at::parallel_for(
       0, input_rows, 1, [&](int32_t start_idx, int32_t end_idx) {
-        for (const auto row : c10::irange(start_idx, end_idx)) {
+        for (int64_t row = start_idx; row < end_idx; ++row) {
           fbgemm::Fused8BitRowwiseQuantizedSBFloatToFloatOrHalf<float>(
             input_data + row * input_columns,
             1,
@@ -174,7 +173,7 @@ Tensor _qembeddingbag_nbit_unpack_helper(
 #ifdef USE_FBGEMM
     at::parallel_for(
       0, input_rows, 1, [&](int32_t start_idx, int32_t end_idx) {
-        for (const auto row : c10::irange(start_idx, end_idx)) {
+        for (int64_t row = start_idx; row < end_idx; ++row) {
           fbgemm::FusedNBitRowwiseQuantizedSBHalfToFloatOrHalf<float>(BIT_RATE,
             input_data + row * input_columns,
             1,
@@ -193,7 +192,7 @@ Tensor _qembeddingbag_nbit_unpack_helper(
     float scale = input_row_scale_zp[0];
     float zero_point = input_row_scale_zp[1];
 
-    for (const auto col : c10::irange(output_columns)) {
+    for (int col = 0; col < output_columns; ++col) {
       std::uint8_t quantized = input_row[col / NUM_ELEM_PER_BYTE];
       quantized >>= (col % NUM_ELEM_PER_BYTE) * BIT_RATE;
       quantized &= (1 << BIT_RATE) - 1;

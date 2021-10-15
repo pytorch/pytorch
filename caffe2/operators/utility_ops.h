@@ -8,7 +8,6 @@
 #include "caffe2/core/common_omp.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/export_caffe2_op_to_c10.h"
-#include <c10/util/irange.h>
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/types.h"
@@ -65,7 +64,7 @@ class IsNanOp final : public Operator<Context> {
     const auto* X_data = X.template data<T>();
     uint8_t* Y_data = Y->template mutable_data<uint8_t>();
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (const auto i : c10::irange(X.numel())) {
+    for (size_t i = 0; i < X.numel(); i++) {
       Y_data[i] = (uint8_t)(std::isnan(X_data[i]));
     }
     return true;
@@ -300,7 +299,7 @@ class SumOp : public Operator<Context> {
     auto* output = Output(0, input0.sizes(), at::dtype<T>());
     T* output_data = output->template mutable_data<T>();
     // Dimension checking
-    for (const auto i : c10::irange(1, InputSize())) {
+    for (int i = 1; i < InputSize(); ++i) {
       if (output->sizes() != Input(i).sizes()) {
         CAFFE_THROW(
             "Check failed: output->sizes() == Input(i).sizes().",
@@ -321,7 +320,7 @@ class SumOp : public Operator<Context> {
         output_data,
         &context_);
     // Add remaining.
-    for (const auto i : c10::irange(2, InputSize())) {
+    for (int i = 2; i < InputSize(); ++i) {
       math::Add(
           output->numel(),
           output_data,
@@ -578,7 +577,7 @@ class ScatterWeightedSumOp : public Operator<Context> {
     float w0 = *weight0.template data<float>();
     // It's most likely a constant so exact comparison is fine
     if (w0 != 1.0) {
-      for (const auto i : c10::irange(K)) {
+      for (int i = 0; i < K; ++i) {
         Index idx = idxs[i];
         CAFFE_ENFORCE(
             0 <= idx && idx < N,
@@ -601,7 +600,7 @@ class ScatterWeightedSumOp : public Operator<Context> {
       CAFFE_ENFORCE_EQ(weight.numel(), 1);
       const T* x_data = X.template data<T>();
       float w = *weight.template data<float>();
-      for (const auto i : c10::irange(K)) {
+      for (int i = 0; i < K; ++i) {
         Index idx = idxs[i];
         // double-checking the indices, but it's fine as it's DCHECK only
         DCHECK(0 <= idx && idx < N)
@@ -747,7 +746,7 @@ class ScatterAssignOp : public Operator<Context> {
       int64_t N,
       int64_t K,
       int64_t block_size) {
-    for (const auto i : c10::irange(K)) {
+    for (int i = 0; i < K; ++i) {
       Index idx = idxs[i];
       // double-checking the indices, but it's fine as it's DCHECK only
       DCHECK(0 <= idx && idx < N)
@@ -839,9 +838,11 @@ class ScatterOp : public Operator<CPUContext> {
     // dst should have the same rank as idxs and src, but the dimension of dim
     // axis can be different. That is why in the above equation, there is the
     // difference of J_src and J_dst.
-    for (const auto outer_batch : c10::irange(outer_dims_product)) {
-      for (const auto i : c10::irange(N)) {
-        for (const auto inner_batch : c10::irange(idxs_block_size)) {
+    for (int64_t outer_batch = 0; outer_batch < outer_dims_product;
+         ++outer_batch) {
+      for (int64_t i = 0; i < N; ++i) {
+        for (int64_t inner_batch = 0; inner_batch < idxs_block_size;
+             ++inner_batch) {
           auto idxs_elem_idx =
               outer_batch * idxs_batch_size + i * idxs_block_size + inner_batch;
           auto src_elem_idx =
@@ -866,7 +867,7 @@ class ScatterOp : public Operator<CPUContext> {
       const IndexType* indices,
       int64_t n,
       IndexType indexing_axis_dim) {
-    for (const auto i : c10::irange(n)) {
+    for (auto i = 0; i < n; ++i) {
       auto idx = indices[i];
       CAFFE_ENFORCE(
           0 <= idx && idx < indexing_axis_dim,
@@ -899,7 +900,7 @@ class LengthsToSegmentIdsOp : public Operator<Context> {
     output->Resize(total_length);
     auto* output_data = output->template mutable_data<int32_t>();
 
-    for (const auto i : c10::irange(input.numel())) {
+    for (int i = 0; i < input.numel(); ++i) {
       auto len = input_data[i];
       std::fill(output_data, output_data + len, i);
       output_data += len;
@@ -926,7 +927,7 @@ class LengthsToRangesOp : public Operator<Context> {
     auto* output_data = output->template mutable_data<int32_t>();
 
     int32_t offset = 0;
-    for (const auto i : c10::irange(size)) {
+    for (int i = 0; i < size; ++i) {
       auto len = input_data[i];
       output_data[i * 2] = offset;
       output_data[i * 2 + 1] = len;
@@ -960,7 +961,7 @@ class LengthsToOffsetsOp : public Operator<Context> {
     auto* output_data = output->template mutable_data<int32_t>();
 
     int32_t offset = 0;
-    for (const auto i : c10::irange(size)) {
+    for (int i = 0; i < size; ++i) {
       auto len = input_data[i];
       output_data[i] = offset;
       offset += len;
@@ -1017,7 +1018,7 @@ class SegmentIdsToLengthsOp : public Operator<Context> {
     }
     std::fill(output_data, output_data + num_segments, 0);
     Index prev = 0; // Assume that segment_id >= 0.
-    for (const auto i : c10::irange(input_size)) {
+    for (int64_t i = 0; i < input_size; i++) {
       CAFFE_ENFORCE(
           prev <= input_data[i],
           "Segment ids must be sorted: ",
@@ -1068,7 +1069,7 @@ class SegmentIdsToRangesOp : public Operator<Context> {
     }
     std::fill(output_data, output_data + num_segments * 2, 0);
     Index prev = input_data[0];
-    for (const auto i : c10::irange(input_size)) {
+    for (int64_t i = 0; i < input_size; i++) {
       CAFFE_ENFORCE(
           prev <= input_data[i],
           "Segment ids must be sorted: ",
@@ -1108,7 +1109,7 @@ class LengthsToWeightsOp : public Operator<Context> {
     auto* output = Output(0);
 
     int64_t output_size = 0;
-    for (const auto i : c10::irange(input_size)) {
+    for (auto i = 0; i < input_size; i++) {
       CAFFE_ENFORCE_GE(input_data[i], 0, "unexpected negative length value");
       output_size += input_data[i];
     }
@@ -1131,7 +1132,7 @@ class LengthsToWeightsOp : public Operator<Context> {
     output->Resize(output_size);
     auto* output_data = output->template mutable_data<float>();
     int64_t cnt = 0;
-    for (const auto i : c10::irange(input_size)) {
+    for (auto i = 0; i < input_size; i++) {
       auto len = input_data[i];
       if (len == 0) {
         continue;
@@ -1158,7 +1159,7 @@ class HasElementsOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     bool res = false;
-    for (const auto i : c10::irange(InputSize())) {
+    for (auto i = 0; i < InputSize(); ++i) {
       const auto& input = Input(i);
       res = res || input.numel() > 0;
     }
@@ -1207,7 +1208,7 @@ class LengthsToShapeOp : public Operator<Context> {
     auto size = input.numel();
     auto first = input_data[0];
 
-    for (const auto i : c10::irange(1, size)) {
+    for (int i = 1; i < size; i++) {
       CAFFE_ENFORCE(
           input_data[i] == first, "All elements of input must be same ");
     }
@@ -1254,7 +1255,7 @@ class GatherRangesOp : public Operator<Context> {
     size_t start = 0;
     size_t blockSize = ranges.size_from_dim(1);
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (const auto i : c10::irange(batchSize)) {
+    for (size_t i = 0; i < batchSize; ++i) {
       auto end = start + blockSize;
       outputLengthsPtr[i] = accumulate(rangesData, start, end);
       start = end;
@@ -1328,7 +1329,7 @@ class LengthsGatherOp : public Operator<Context> {
 
     int64_t total_length = 0;
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (const auto i : c10::irange(indices.numel())) {
+    for (size_t i = 0; i < indices.numel(); ++i) {
       auto idx = indices_data[i];
       CAFFE_ENFORCE_LT(idx, lengths.numel());
       total_length += lengths_data[idx];
@@ -1340,7 +1341,7 @@ class LengthsGatherOp : public Operator<Context> {
     offsets_.clear();
     int64_t running_offset = 0;
     offsets_.reserve(lengths.numel());
-    for (const auto i : c10::irange(lengths.numel())) {
+    for (size_t i = 0; i < lengths.numel(); ++i) {
       offsets_.push_back(running_offset);
       running_offset += lengths_data[i];
     }
@@ -1354,7 +1355,7 @@ class LengthsGatherOp : public Operator<Context> {
     auto block_bytesize = block_size * items.itemsize();
     auto out = static_cast<char*>(output->raw_mutable_data(items.dtype()));
 
-    for (const auto i : c10::irange(indices.numel())) {
+    for (size_t i = 0; i < indices.numel(); ++i) {
       auto idx = indices_data[i];
       auto length = lengths_data[idx];
       context_.CopyItemsSameDevice(
@@ -1405,7 +1406,7 @@ class AccumulateHistogramOp : public Operator<Context> {
     math::Set<int64_t, Context>(
         num_output_buckets_, 0, cur_hist_data, &context_);
 
-    for (const auto i : c10::irange(N)) {
+    for (int i = 0; i < N; i++) {
       int bucket_index = -1;
       if (X_data[i] < lower_bound_) {
         bucket_index = 0;
@@ -1418,7 +1419,7 @@ class AccumulateHistogramOp : public Operator<Context> {
       accumulate_hist_[bucket_index] += 1;
     }
 
-    for (const auto i : c10::irange(num_output_buckets_)) {
+    for (int i = 0; i < num_output_buckets_; i++) {
       acc_hist_data[i] = accumulate_hist_[i];
     }
 
@@ -1463,7 +1464,7 @@ class RangeOp : public Operator<Context> {
     T start = 0;
     T step = 1;
 
-    for (const auto i : c10::irange(InputSize())) {
+    for (int i = 0; i < InputSize(); ++i) {
       CAFFE_ENFORCE_EQ(
           Input(i).numel(), 1, "All inputs must be scalar/1D tensor.");
     }

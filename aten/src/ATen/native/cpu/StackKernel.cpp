@@ -6,7 +6,6 @@
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/cpu/StackKernel.h>
-#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -38,8 +37,8 @@ void stack_serial_kernel_impl(Tensor& result, TensorList tensors, int64_t dim) {
 
   using Vec = vec::Vectorized<scalar_t>;
   scalar_t* result_ptr = result_data;
-  for (const auto i : c10::irange(outer)) {
-    for (const auto j : c10::irange(ninputs)) {
+  for (int64_t i = 0; i < outer; ++i) {
+    for (int64_t j = 0; j < ninputs; j++) {
       int64_t local_inner = inputs[j].inner_size;
       scalar_t* input_ptr = (scalar_t*)(inputs[j].data_ptr) + i * local_inner;
 
@@ -47,7 +46,7 @@ void stack_serial_kernel_impl(Tensor& result, TensorList tensors, int64_t dim) {
 #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
 #pragma unroll
 #endif
-        for (const auto k : c10::irange(local_inner)) {
+        for (int64_t k = 0; k < local_inner; k++) {
           result_ptr[k] = input_ptr[k];
         }
       } else {

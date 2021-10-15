@@ -43,7 +43,7 @@ class ArgOp final : public Operator<Context> {
     Y_dims.reserve(ndim);
     int prev_size = 1;
     int next_size = 1;
-    for (const auto i : c10::irange(axis_)) {
+    for (int i = 0; i < axis_; ++i) {
       Y_dims.push_back(X_dims[i]);
       prev_size *= X_dims[i];
     }

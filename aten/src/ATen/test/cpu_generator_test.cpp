@@ -4,7 +4,6 @@
 #include <ATen/Utils.h>
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/core/PhiloxRNGEngine.h>
-#include <c10/util/irange.h>
 #include <thread>
 #include <limits>
 #include <random>
@@ -161,7 +160,7 @@ TEST(CPUGeneratorImpl, TestPhiloxEngineOffset1) {
   // So if you want to skip 8 values, offset would
   // be 2, since 2*4=8.
   at::Philox4_32_10 engine2(123, 1, 2);
-  for (const auto i : c10::irange(8)) {
+  for(int i = 0; i < 8; i++){
     // Note: instead of using the engine() call 8 times
     // we could have achieved the same functionality by
     // calling the incr() function twice.
@@ -222,14 +221,14 @@ TEST(CPUGeneratorImpl, TestMT19937EngineReproducibility) {
   // test with zero seed
   at::mt19937 engine1(0);
   std::mt19937 engine2(0);
-  for (const auto i : c10::irange(10000)) {
+  for(int i = 0; i < 10000; i++) {
     ASSERT_EQ(engine1(), engine2());
   }
 
   // test with large seed
   engine1 = at::mt19937(2147483647);
   engine2 = std::mt19937(2147483647);
-  for (const auto i : c10::irange(10000)) {
+  for(int i = 0; i < 10000; i++) {
     ASSERT_EQ(engine1(), engine2());
   }
 
@@ -238,7 +237,7 @@ TEST(CPUGeneratorImpl, TestMT19937EngineReproducibility) {
   auto seed = rd();
   engine1 = at::mt19937(seed);
   engine2 = std::mt19937(seed);
-  for (const auto i : c10::irange(10000)) {
+  for(int i = 0; i < 10000; i++) {
     ASSERT_EQ(engine1(), engine2());
   }
 

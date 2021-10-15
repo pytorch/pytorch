@@ -2,7 +2,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/native/LossMulti.h>
-#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -19,7 +18,7 @@ inline scalar_t multi_margin_inner_sum_cpu(
     const int64_t target_idx) {
   const scalar_t input_target = input_data[target_idx];
   scalar_t sum = 0;
-  for (const auto d : c10::irange(dim)) {
+  for (int64_t d = 0; d < dim; d++) {
     if (d == target_idx) {
       continue;
     }
@@ -64,7 +63,7 @@ static inline void multi_margin_loss_cpu_kernel(
   // cannot be handled by TensorAccessor)
   if (reduction == Reduction::None && output.dim() > 0) {
     auto output_acc = output.accessor<scalar_t, 1>();
-    for (const auto t : c10::irange(nframe)) {
+    for (int64_t t = 0; t < nframe; t++) {
       const auto idx = target_index_checked(target_data, t, dim);
       auto sum = multi_margin_inner_sum_cpu(
           input_data, weight_data, p, margin, dim, idx);
@@ -74,7 +73,7 @@ static inline void multi_margin_loss_cpu_kernel(
   } else {
     accscalar_t sum = 0;
     auto output_acc = output.data_ptr<scalar_t>();
-    for (const auto t : c10::irange(nframe)) {
+    for (int64_t t = 0; t < nframe; t++) {
       const auto idx = target_index_checked(target_data, t, dim);
       sum += multi_margin_inner_sum_cpu(
           input_data, weight_data, p, margin, dim, idx);
@@ -150,11 +149,11 @@ static void multi_margin_loss_backward_cpu_kernel(
     int64_t dim,
     int64_t reduction) {
   scalar_t* grad_input_row_data = grad_input_data;
-  for (const auto t : c10::irange(nframe)) {
+  for (int64_t t = 0; t < nframe; t++) {
     int64_t target_idx = target_index_checked(target_data, t, dim);
     scalar_t input_target = input_data[target_idx];
     scalar_t grad_input_target = 0;
-    for (const auto d : c10::irange(dim)) {
+    for (int64_t d = 0; d < dim; d++) {
       scalar_t z = margin - input_target + input_data[d];
       if (d == target_idx) {
         continue;
@@ -187,8 +186,8 @@ static void multi_margin_loss_backward_cpu_kernel(
     }
   } else {
     auto grad_output_acc = grad_output.accessor<scalar_t, 1>();
-    for (const auto t : c10::irange(nframe)) {
-      for (const auto d : c10::irange(dim)) {
+    for (int64_t t = 0; t < nframe; t++) {
+      for (int64_t d = 0; d < dim; d++) {
         grad_input_data[t * dim + d] *= grad_output_acc[t];
       }
     }
