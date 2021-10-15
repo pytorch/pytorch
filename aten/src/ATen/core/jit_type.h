@@ -808,7 +808,7 @@ struct TORCH_API ListType
   static ListTypePtr ofStrings();
 
  private:
-  ListType(TypePtr elem) : SingleElementType(elem) {}
+  ListType(TypePtr elem) : SingleElementType(std::move(elem)) {}
 
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     std::stringstream ss;
