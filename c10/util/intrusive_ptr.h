@@ -116,14 +116,15 @@ class C10_API intrusive_ptr_target {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         // Second and third conditions are there to accommodate
         // unsafe_adapt_non_heap_allocated: since we are doing our own
-        // deallocation in that case, it is correct to have performed
-        // either 1 decref (some user code tried to decref and thus
-        // free the object, but it didn't happen right away) or 0
-        // decrefs (no user code tried to free the object, and now
-        // it's getting destroyed through whatever mechanism the
-        // caller of unsafe_adapt_non_heap_allocated wanted to use).
-        refcount_.load() == 0 || refcount_.load() == INT_MAX - 1 ||
-            refcount_.load() == INT_MAX,
+        // deallocation in that case, it is correct for each
+        // expected_decref to have happened (some user code tried to
+        // decref and thus free the object, but it didn't happen right
+        // away) or not (no user code tried to free the object, and
+        // now it's getting destroyed through whatever mechanism the
+        // caller of unsafe_adapt_non_heap_allocated wanted to
+        // use). We choose our reference count such that the count
+        // will not dip below INT_MAX regardless.
+        refcount_.load() == 0 || refcount_.load() >= INT_MAX,
         "Tried to destruct an intrusive_ptr_target that still has intrusive_ptr to it; refcount was ",
         refcount_.load());
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
