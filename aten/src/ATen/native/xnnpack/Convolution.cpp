@@ -7,6 +7,7 @@
 #include <ATen/native/utils/Factory.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <ATen/native/xnnpack/Convolution.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -150,11 +151,11 @@ const Tensor reorder_weights_for_transpose_conv(const Tensor& weight_nhwc,
   float* in_ptr = weight_nhwc.data_ptr<float>();
 
   int out_index = 0;
-  for (int g = 0; g < num_groups; g++) {
-    for (int o = 0; o < output_channels_per_group; o++) {
-      for (int w = 0; w < kernel_width; w++) {
-        for (int h = 0; h < kernel_height; h++) {
-          for (int i = 0; i < input_channels_per_group; i++) {
+  for (const auto g : c10::irange(num_groups)) {
+    for (const auto o : c10::irange(output_channels_per_group)) {
+      for (const auto w : c10::irange(kernel_width)) {
+        for (const auto h : c10::irange(kernel_height)) {
+          for (const auto i : c10::irange(input_channels_per_group)) {
             int in_index = (g*g_offset) + (i*i_offset) + (h*h_offset) + (w*w_offset) + (o*o_offset);
             out_ptr[out_index] = in_ptr[in_index];
             out_index++;
@@ -210,7 +211,7 @@ ContextConv2D create(
 
   if (transposed) {
     const Tensor weight_reordered = reorder_weights_for_transpose_conv(weight_nhwc, groups);
-    for (int i = 0; i < 4; i++) {
+    for (const auto i : c10::irange(4)) {
       weight_sizes[i] = weight_reordered.size(i);
     }
     create_status = xnn_create_deconvolution2d_nhwc_f32(
@@ -238,7 +239,7 @@ ContextConv2D create(
       0u,                                                             // flags
       &convolution_op);                                               // operator
   } else {
-    for (int i = 0; i < 4; i++) {
+    for (const auto i : c10::irange(4)) {
       weight_sizes[i] = weight_nhwc.size(i);
     }
     create_status = xnn_create_convolution2d_nhwc_f32(

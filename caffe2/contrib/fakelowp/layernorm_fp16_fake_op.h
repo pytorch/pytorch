@@ -129,7 +129,7 @@ class LayerNormFakeFp16Op final : public Operator<CPUContext> {
           FLAGS_caffe2_fbgemm_fake_fp16_clamp,
           false /*USE_ACC_FP16*/);
 
-      for (int i = 0; i < M; ++i) {
+      for (const auto i : c10::irange(M)) {
         // fma_fp16(A, B, Out) -> Out = A * B + Out
         std::vector<float> out(N);
         std::memcpy(out.data(), bias_data.data(), sizeof(float) * N);
@@ -169,7 +169,7 @@ class LayerNormFakeFp16Op final : public Operator<CPUContext> {
       const int32_t qmin = std::numeric_limits<uint8_t>::min();
       const int32_t qmax = std::numeric_limits<uint8_t>::max();
 
-      for (int i = 0; i < Nout; i++) {
+      for (const auto i : c10::irange(Nout)) {
         float halfRes = offsetv[i];
         halfRes = round(halfRes);
         if (std::isinf(halfRes)) {

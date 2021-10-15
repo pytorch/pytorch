@@ -51,7 +51,7 @@ bool TensorProtosDBInput<Context>::Prefetch() {
     TensorProtos protos;
     CAFFE_ENFORCE(protos.ParseFromString(value_));
     CAFFE_ENFORCE(protos.protos_size() == OutputSize());
-    for (int i = 0; i < protos.protos_size(); ++i) {
+    for (const auto i : c10::irange(protos.protos_size())) {
       if (protos.protos(i).has_device_detail()) {
         protos.mutable_protos(i)->clear_device_detail();
       }
@@ -62,14 +62,14 @@ bool TensorProtosDBInput<Context>::Prefetch() {
       //     CPU));
     }
   } else {
-    for (int item_id = 0; item_id < batch_size_; ++item_id) {
+    for (const auto item_id : c10::irange(batch_size_)) {
       reader.Read(&key_, &value_);
       TensorProtos protos;
       CAFFE_ENFORCE(protos.ParseFromString(value_));
       CAFFE_ENFORCE(protos.protos_size() == OutputSize());
       // Note: shape_inferred_ is ignored, we'll always get dimensions from
       // proto
-      for (int i = 0; i < protos.protos_size(); ++i) {
+      for (const auto i : c10::irange(protos.protos_size())) {
         vector<int64_t> dims(
             protos.protos(i).dims().begin(), protos.protos(i).dims().end());
         dims.insert(dims.begin(), batch_size_);
@@ -94,7 +94,7 @@ bool TensorProtosDBInput<Context>::Prefetch() {
 
 template <class Context>
 bool TensorProtosDBInput<Context>::CopyPrefetched() {
-  for (int i = 0; i < OutputSize(); ++i) {
+  for (const auto i : c10::irange(OutputSize())) {
     OperatorBase::template Output<Tensor>(i, Context::GetDeviceType())
         ->CopyFrom(
             prefetched_blobs_[i].template Get<TensorCPU>(), /* async */ true);

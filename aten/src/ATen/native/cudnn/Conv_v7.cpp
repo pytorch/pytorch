@@ -20,6 +20,7 @@
 #include <ATen/native/utils/ParamsHash.h>
 
 #include <ATen/TensorUtils.h>
+#include <c10/util/irange.h>
 
 #include <functional>
 #include <iterator>
@@ -204,7 +205,7 @@ size_t getMaxWorkspaceSize(
   THCudaCheck(cudaGetDevice(&device));
   c10::cuda::CUDACachingAllocator::cacheInfo(device, &tmp_bytes, &max_block_size);
 
-  for (int i = 0; i < n_algo; i++) {
+  for (const auto i : c10::irange(n_algo)) {
     cudnnStatus_t err;
     size_t sz;
     err = getWorkspaceSize(args, algo[i], &sz);
@@ -229,7 +230,7 @@ std::vector<perf_t> getValidAlgorithms(perf_t *perfResults, const ConvolutionArg
 
   std::vector<perf_t> result;
   result.reserve(n_algo);
-  for (int i = 0; i < n_algo; i++) {
+  for (const auto i : c10::irange(n_algo)) {
     perf_t perf = perfResults[i];
 
     // TODO: Shouldn't all returned results be successful?
@@ -579,7 +580,7 @@ static inline void split_batch_dim_to_32bit_out(
   int64_t split_size = std::max<int64_t>(max_worksize / max_inner_size, 1L);
   int64_t num_splits = (n + split_size - 1) / split_size;
   if (split_size * max_inner_size < int_max) {
-    for (int64_t i = 0; i < num_splits; i++) {
+    for (const auto i : c10::irange(num_splits)) {
       int64_t start = split_size * i;
       int64_t split_size_ = std::min<int64_t>(split_size, n - start);
       Tensor input_ = input.narrow(0, start, split_size_);
@@ -805,7 +806,7 @@ void raw_cudnn_convolution_backward_weight_out(
   int64_t split_size = std::max<int64_t>(1024 * 1024 * 512 / max_inner_size, 1L);
   int64_t num_splits = (n + split_size - 1) / split_size;
   if (split_size * max_inner_size < int_max) {
-    for (int64_t i = 0; i < num_splits; i++) {
+    for (const auto i : c10::irange(num_splits)) {
       int64_t start = split_size * i;
       int64_t split_size_ = std::min<int64_t>(split_size, n - start);
       Tensor input_ = input.narrow(0, start, split_size_);
