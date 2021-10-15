@@ -126,7 +126,7 @@ struct TORCH_API UnionType : public Type {
   }
 
   TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
-    return create(contained_types);
+    return create(std::move(contained_types));
   }
 
   bool canHoldType(TypePtr type) const;
