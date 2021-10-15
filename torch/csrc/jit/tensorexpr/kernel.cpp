@@ -4,6 +4,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorGeometry.h>
+#include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/util/irange.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -342,6 +343,8 @@ ArgValue TensorExprKernel::toArg(const torch::jit::Value* v) const {
       return ArgNone();
     } else if (val.isIntList()) {
       return val.toIntVector();
+    } else if (val.isDoubleList()) {
+      return val.toDoubleVector();
     } else {
       throw unsupported_dtype(val.type()->str());
     }
@@ -401,6 +404,34 @@ c10::optional<ScalarType> findDtypeForValue(const torch::jit::Value* v) {
   return c10::nullopt;
 }
 
+bool constZeroDimTensorAsScalarArg(
+    const Value* v,
+    std::vector<ArgValue>& args) {
+  if (v->node()->kind() != prim::Constant || !v->type()->cast<TensorType>()) {
+    return false;
+  }
+
+  const auto t = toIValue(v)->toTensor();
+  if (t.sizes().size() != 0) {
+    return false;
+  }
+
+  c10::ScalarType dtype = c10::typeMetaToScalarType(t.dtype());
+  switch (dtype) {
+    case ScalarType::Float:
+      args.emplace_back(t.item().toFloat());
+      return true;
+    case ScalarType::Long:
+      args.emplace_back(t.item().toLong());
+      return true;
+    default:
+      std::stringstream ss;
+      ss << "Unsupported tensor dtype:" << dtype
+         << " for converting constant 0-dim Tensor to scalar" << std::endl;
+      throw unsupported_dtype(ss.str());
+  }
+}
+
 Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
   auto inputs = v->node()->inputs();
   auto op = v->node()->kind();
@@ -421,6 +452,15 @@ Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
     argInputs.emplace_back(n->i(attr::chunks));
   } else if (op == aten::to) {
     argInputs.emplace_back(toArg(inputs[0]));
+  } else if (op == aten::quantize_per_tensor) {
+    argInputs.emplace_back(toArg(inputs[0]));
+    if (!constZeroDimTensorAsScalarArg(inputs[1], argInputs)) {
+      argInputs.emplace_back(toArg(inputs[1]));
+    }
+    if (!constZeroDimTensorAsScalarArg(inputs[2], argInputs)) {
+      argInputs.emplace_back(toArg(inputs[2]));
+    }
+    argInputs.emplace_back(toArg(inputs[3]));
   } else if (op == aten::conv2d) {
     for (auto inp : inputs) {
       argInputs.emplace_back(toArg(inp));
@@ -1021,19 +1061,18 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
     return;
   }
   auto const_tensor = toIValue(v)->toTensor();
-
+  auto scalar_type = c10::typeMetaToScalarType(const_tensor.options().dtype());
   const auto& tt = v->type()->expect<TensorType>();
-  auto sizes = *tt->sizes().concrete_sizes();
+  auto sizes = const_tensor.sizes();
   std::vector<ExprHandle> te_sizes;
   te_sizes.reserve(sizes.size());
   for (auto s : sizes) {
     te_sizes.push_back(s);
   }
-
   BufPtr buf = alloc<Buf>(
       "const_" + sanitizeName(v->debugName()),
       ExprHandleVectorToExprVector(te_sizes),
-      ToDtype(static_cast<ScalarType>(*tt->scalarType())));
+      ToDtype(scalar_type));
 
   if (!const_tensor.is_contiguous()) {
     const_tensor = const_tensor.clone().contiguous();

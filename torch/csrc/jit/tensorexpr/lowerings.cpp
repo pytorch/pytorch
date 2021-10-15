@@ -32,6 +32,9 @@ namespace {
 RegisterNNCLoweringsFunction aten_dropout(
     {"aten::dropout(Tensor input, float p, bool train) -> (Tensor)"},
     computeNoop);
+RegisterNNCLoweringsFunction aten_contiguous(
+    {"aten::contiguous(Tensor(a) self, *, MemoryFormat memory_format=contiguous_format) -> (Tensor(a))"},
+    computeNoop);
 
 // TODO: convert to schema, add a test
 // RegisterNNCLoweringsFunction prepacked_conv2d_clamp_run(
@@ -1475,6 +1478,44 @@ RegisterNNCLoweringsFunction aten_add(
           : computeTwoOperand(
                 "aten_add", inputs, outputShape, outputType, add_lambda);
     });
+
+#define NNC_QUANTIZATION_EXPR_QUANT 0
+#define NNC_QUANTIZATION_EXPR_DEQUANT 0
+
+RegisterNNCLoweringsFunction aten_quantize_per_tensor(
+    {"aten::quantize_per_tensor(Tensor self, float scale, int zero_point, int dtype) -> (Tensor)",
+     "aten::quantize_per_tensor.tensors(Tensor[] tensors, Tensor scales, Tensor zero_points, int dtype) -> (Tensor[])"},
+#if NNC_QUANTIZATION_EXPR_QUANT == 1
+    computeQuantizePerTensor
+#else
+    computeQuantizePerTensorExternalCall
+#endif
+);
+
+RegisterNNCLoweringsFunction aten_dequantize(
+    {"aten::dequantize.self(Tensor self) -> (Tensor)"},
+#if NNC_QUANTIZATION_EXPR_DEQUANT == 1
+    computeDequantize
+#else
+    computeDequantizeExternalCall
+#endif
+);
+
+RegisterNNCLoweringsFunction quantized_conv2d(
+    {"_quantized::conv2d(Tensor qx, __torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weight, float output_scale, int output_zero_point) -> (Tensor)"},
+    computeQuantizedConv2d);
+
+RegisterNNCLoweringsFunction quantized_conv2d_relu(
+    {"quantized::conv2d_relu.new(Tensor qx, __torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weight, float output_scale, int output_zero_point) -> (Tensor)"},
+    computeQuantizedConv2dRelu);
+
+RegisterNNCLoweringsFunction quantized_add(
+    {"quantized::add(Tensor qa, Tensor qb, float scale, int zero_point) -> (Tensor qc)"},
+    computeQuantizedAdd);
+
+RegisterNNCLoweringsFunction aten_upsample_nearest2d(
+    {"aten::upsample_nearest2d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> (Tensor)"},
+    computeUpsampleNearest2d);
 
 } // namespace
 

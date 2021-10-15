@@ -5,12 +5,19 @@
 #include <torch/csrc/jit/backends/backend_detail.h>
 #include <torch/csrc/jit/backends/backend_preprocess.h>
 #include <torch/csrc/jit/mobile/nnc/aot_compiler.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
+#include <torch/csrc/jit/passes/peephole.h>
+#include <torch/csrc/jit/passes/remove_mutation.h>
+#include <torch/csrc/jit/passes/shape_analysis.h>
+#include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import.h>
+#include <torch/csrc/jit/tensorexpr/graph_opt.h>
+#include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/script.h>
-
 
 C10_DEFINE_string(model, "", "The torch script model to optimize.");
 C10_DEFINE_string(model_name, "", "The name of the model.");
@@ -112,7 +119,8 @@ c10::IValue preprocess(
   auto sizes = getInputSizesForMethod(method_compile_spec, method_name);
 
   std::string llvm_asm_code;
-  auto compiled = torch::jit::mobile::nnc::aotCompile(method_name, graph, sizes);
+  auto compiled =
+      torch::jit::mobile::nnc::aotCompile(method_name, graph, sizes);
   writeOutputLlvmAssembly(compiled.second);
 
   auto func = std::move(compiled.first);
@@ -156,7 +164,24 @@ int main(int argc, char** argv) {
   m.eval();
   auto frozen_m = torch::jit::freeze_module(m.clone());
   auto graph = frozen_m.get_method("forward").graph();
+  auto input_shapes = parseInputShapes();
+  std::vector<c10::optional<at::Tensor>> example_inputs;
+  for (const auto& input_shape : input_shapes) {
+    example_inputs.push_back(at::rand(input_shape));
+  }
+
+  torch::jit::RemoveTensorMutation(graph);
+  torch::jit::EliminateDeadCode(graph->block());
+  graph = torch::jit::tensorexpr::removeUnusedSelfArgument(graph);
+
+  torch::jit::tensorexpr::annotateInputShapes(graph, example_inputs);
   torch::jit::OptimizeFrozenGraph(graph, true);
+  torch::jit::PropagateShapesOnGraph(graph);
+  torch::jit::PeepholeOptimize(graph, false);
+  torch::jit::ConstantPropagation(graph);
+  torch::jit::PropagateShapesOnGraph(graph);
+  torch::jit::PeepholeOptimize(graph, false);
+  torch::jit::ConstantPropagation(graph);
 
   auto compile_spec = createCompileSpec();
   auto any_dict_ty =

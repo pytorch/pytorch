@@ -495,6 +495,14 @@ llvm::Type* LLVMCodeGenImpl::dtypeToLLVM(Dtype dtype) {
 
     AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
+    case ScalarType::QInt8:
+      return CharTy_;
+      break;
+
+    case ScalarType::QUInt8:
+      return ByteTy_;
+      break;
+
     default:
       throw unsupported_dtype();
   }
@@ -976,9 +984,11 @@ void LLVMCodeGenImpl::visit(CastPtr v) {
   }
 
   bool destUnsigned = v->dtype().scalar_type() == ScalarType::Byte ||
+      v->dtype().scalar_type() == ScalarType::QUInt8 ||
       v->dtype().scalar_type() == ScalarType::Bool;
   bool srcUnsigned =
       v->src_value()->dtype().scalar_type() == ScalarType::Byte ||
+      v->src_value()->dtype().scalar_type() == ScalarType::QUInt8 ||
       v->src_value()->dtype().scalar_type() == ScalarType::Bool;
 
   // Scalar casts

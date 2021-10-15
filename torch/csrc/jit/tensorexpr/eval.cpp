@@ -462,7 +462,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     std::vector<DstType> dst_values(src_values.size());
     for (int i = 0; i < src_dtype.lanes(); ++i) {
       // NOLINTNEXTLINE(bugprone-signed-char-misuse)
-      dst_values[i] = static_cast<DstType>(src_values[i]);
+      dst_values[i] = static_cast<DstType>(underlyingValue(src_values[i]));
     }
     return dst_values;
   }
@@ -479,6 +479,18 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     break;
       AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, DST_TYPE_CASE);
 #undef DST_TYPE_CASE
+#define DST_TYPE_CASE_QUANT(Type, Name, CppType)                           \
+  case ScalarType::Name: {                                                 \
+    std::vector<CppType> vec = castValues<SrcType, CppType>(dst_dtype, v); \
+    std::vector<Type> qvec;                                                \
+    for (CppType u : vec) {                                                \
+      qvec.emplace_back(u);                                                \
+    }                                                                      \
+    this->value_ = InterpValue(qvec);                                      \
+  } break;
+      DST_TYPE_CASE_QUANT(c10::quint8, QUInt8, uint8_t)
+      DST_TYPE_CASE_QUANT(c10::qint8, QInt8, int8_t)
+#undef DST_TYPE_CASE_QUANT
       default:
         throw unsupported_dtype();
     }
@@ -500,6 +512,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     doCastFromSrc<Type>(src_dtype, dst_dtype, value_); \
     break;
         AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, SRC_TYPE_CASE);
+        SRC_TYPE_CASE(c10::quint8, QUInt8);
+        SRC_TYPE_CASE(c10::qint8, QInt8);
 #undef SRC_TYPE_CASE
         default:
           throw unsupported_dtype();
@@ -683,14 +697,16 @@ class SimpleIREvaluatorImpl : public IRVisitor {
           ", idx=",                                  \
           index[i],                                  \
           ", val=",                                  \
-          (int)val[i]);                              \
+          (int)underlyingValue(val[i]));             \
     }                                                \
     value_ = InterpValue(val);                       \
   } break;
       AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
+      TYPE_CASE(c10::quint8, QUInt8);
+      TYPE_CASE(c10::qint8, QInt8);
 #undef TYPE_CASE
       default:
-        throw unsupported_dtype();
+        throw unsupported_dtype("scalar type:" + std::to_string(v_sdtype));
     }
   }
 
@@ -725,11 +741,13 @@ class SimpleIREvaluatorImpl : public IRVisitor {
           ", idx=",                                             \
           index[i],                                             \
           ", val=",                                             \
-          (int)value[i]);                                       \
+          (int)underlyingValue(value[i]));                      \
       ptr##Name[index[i]] = value[i];                           \
     }                                                           \
   } break;
       AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
+      TYPE_CASE(c10::quint8, QUInt8);
+      TYPE_CASE(c10::qint8, QInt8);
 #undef TYPE_CASE
       default:
         throw unsupported_dtype();
@@ -773,6 +791,12 @@ class SimpleIREvaluatorImpl : public IRVisitor {
         val = value().as<int64_t>();
       } else if (value().dtype() == kInt) {
         val = value().intValue();
+      } else if (value().dtype() == kDouble) {
+        auto x = value().as<double>();
+        val = reinterpret_cast<int64_t*>(&x)[0];
+      } else if (value().dtype() == kFloat) {
+        auto x = value().as<float>();
+        val = reinterpret_cast<int64_t*>(&x)[0];
       } else {
         throw malformed_input(
             "extra_args in ExternalCalls must have int64 dtype", v);
