@@ -1230,7 +1230,8 @@ RegisterNNCLoweringsFunction aten_threshold(
 RegisterNNCLoweringsFunction aten_where(
     {"aten::where.ScalarOther(Tensor condition, Tensor self, Scalar other) -> (Tensor)",
      "aten::where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> (Tensor)",
-     "aten::where.self(Tensor condition, Tensor self, Tensor other) -> (Tensor)"},
+     "aten::where.self(Tensor condition, Tensor self, Tensor other) -> (Tensor)",
+     "aten::where.Scalar(Tensor condition, Scalar self, Scalar other) -> Tensor"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
