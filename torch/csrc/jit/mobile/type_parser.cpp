@@ -140,7 +140,7 @@ TypePtr TypeParser::parse() {
     contained_types_.insert(token);
     return parseNonSimple(token);
   } else if (token == "__torch__") {
-    expect(".");
+    expectChar('.');
     if (cur() == "torch") {
       // torch bind class starts with __torch__.torch.classes
       return parseTorchbindClassType();
@@ -188,7 +188,6 @@ TypePtr TypeParser::parseNamedTuple(const std::string& qualified_name) {
     TypePtr field_type = parse();
     field_names.emplace_back(field_name);
     field_types.emplace_back(field_type);
-    std::cout << cur() << std::endl;
     expect("]");
     if (cur() == ",") {
       next();
@@ -247,12 +246,11 @@ TypePtr TypeParser::parseCustomType() {
 }
 
 TypePtr TypeParser::parseTorchbindClassType() {
-  static constexpr std::array<const char*, 5> expected_atoms = {
-      ".", "torch", ".", "classes", "."};
+  static constexpr std::array<const char*, 4> expected_atoms = {
+      "torch", ".", "classes", "."};
   for (const auto& atom : expected_atoms) {
     expect(atom);
   }
-
   std::string ns = next();
   expectChar('.');
   std::string classname = next();
