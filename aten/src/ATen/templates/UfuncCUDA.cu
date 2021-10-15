@@ -13,5 +13,6 @@ ${meta_declaration}
 }
 
 namespace native {
+${native_declaration}
 ${native_definitions}
 }} // namespace at::native

@@ -1275,12 +1275,9 @@ def main() -> None:
                 fm.write_with_template(f'UfuncCUDA_{name}.cu', 'UfuncCUDA.cu', lambda: {
                     'name': name,
                     'cuda_headers': cuda_headers,
-                    #'meta_declaration': compute_meta_function_declaration(g),
-                    #'native_declaration':
-                    #    dest.compute_native_function_declaration(g, backend_indices[dispatch_key]),
-                    # TODO: fix so that NativeFunctions.h isn't indirectly
-                    # included
-                    'meta_declaration': '',
+                    'meta_declaration': compute_meta_function_declaration(g),
+                    'native_declaration':
+                        dest.compute_native_function_declaration(g, backend_indices[dispatch_key]),
                     'native_definitions': dest.compute_ufunc_cuda(g),
                 })
             else:
