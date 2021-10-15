@@ -1683,7 +1683,9 @@ def unravel_index(
         (tensor([3, 6, 6]), tensor([4, 5, 1]))
     """
     if not isinstance(shape, Tensor):
-        assert isinstance(shape, (tuple, list)), f"Shape should be either a tuple or a list if not tensor, but found: {type(shape)}."
+        if not isinstance(indices, (tuple, list)):
+            raise TypeError("Shape should be either a tuple or a list if not tensor,"
+                            f" but found: {type(shape)}.")
         for dim in shape:
             if not isinstance(dim, int):
                 raise TypeError("Expected shape to have only integral elements.")
@@ -1698,8 +1700,8 @@ def unravel_index(
 
     if not isinstance(indices, Tensor):
         if not isinstance(indices, (tuple, list)):
-            raise TypeError(f"Indices should be either a tuple or a list if not tensor,"
-                             " but found: {type(indices)}.")
+            raise TypeError("Indices should be either a tuple or a list if not tensor,"
+                            f" but found: {type(indices)}.")
         for index in indices:
             if not isinstance(index, int):
                 raise TypeError("Expected indices to have only integral elements.")
