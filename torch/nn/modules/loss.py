@@ -441,7 +441,7 @@ class KLDivLoss(_Loss):
     Shape:
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
         - Target: :math:`(*)`, same shape as the input.
-        - Output: scalar by default. If :attr:``reduction`` is ``'none'``, then :math:`(*)`,
+        - Output: scalar by default. If :attr:`reduction` is ``'none'``, then :math:`(*)`,
           same shape as the input.
 
     """

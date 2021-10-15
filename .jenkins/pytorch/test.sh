@@ -222,6 +222,8 @@ test_aten() {
 test_without_numpy() {
   pushd "$(dirname "${BASH_SOURCE[0]}")"
   python -c "import sys;sys.path.insert(0, 'fake_numpy');from unittest import TestCase;import torch;x=torch.randn(3,3);TestCase().assertRaises(RuntimeError, lambda: x.numpy())"
+  # Regression test for https://github.com/pytorch/pytorch/issues/66353
+  python -c "import sys;sys.path.insert(0, 'fake_numpy');import torch;print(torch.tensor([torch.tensor(0.), torch.tensor(1.)]))"
   popd
 }
 
@@ -533,7 +535,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
   test_vulkan
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
-elif [[ "${BUILD_ENVIRONMENT}" == *distributed* ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *distributed* || "${JOB_BASE_NAME}" == *distributed* ]]; then
   test_distributed
   test_rpc
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
