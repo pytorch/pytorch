@@ -86,7 +86,7 @@ void sort_pairs_wrapper(
 }
 
 template <typename T>
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(1024, SEGREDUCE_MINBLOCKS)
 #endif
 __global__ void gradient_mean_kernel(
@@ -104,7 +104,7 @@ __global__ void gradient_mean_kernel(
 }
 
 template <typename SIndex, typename TParam, typename T, bool ExactBlock = false>
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(1024, SEGREDUCE_MINBLOCKS)
 #endif
 __global__ void sparse_adagrad_fused_length_sum_gradient_kernel(
@@ -171,7 +171,7 @@ __global__ void sparse_adagrad_fused_length_sum_gradient_kernel(
 }
 
 template <typename SIndex, typename TParam, typename T, int NumThreads>
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(1024, SEGREDUCE_MINBLOCKS)
 #endif
 __global__ void sparse_adagrad_fused_length_weighted_sum_gradient_kernel(
@@ -252,7 +252,7 @@ __global__ void sparse_adagrad_fused_length_weighted_sum_gradient_kernel(
 
 // Construct a reverse map of offset_of_idx -> segment_id.
 template <typename SIndex>
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(1024, SEGREDUCE_MINBLOCKS)
 #endif
 __global__ void linear_index_weight_offsets_dedup_kernel(
@@ -279,7 +279,7 @@ template <
     typename T,
     bool ExactBlock = false,
     roundOption roundOpt = NEAREST>
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(1024, SEGREDUCE_MINBLOCKS)
 #endif
 __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_dedup_kernel(
@@ -343,7 +343,7 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_dedup_kernel(
             sorted_linear_ind_data[sorted_linear_indice_id + num_dup + threadIdx.x] ==
             index;
       }
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
       int32_t num_dup_incr = __popc(__ballot_sync(0xFFFFFFFF, segment_continue));
 #else
       int32_t num_dup_incr = __popc(__ballot(segment_continue));
@@ -438,7 +438,7 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_dedup_kernel(
 }
 
 template <typename SIndex, typename TParam, typename T, int NumThreads>
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(1024, SEGREDUCE_MINBLOCKS)
 #endif
 __global__

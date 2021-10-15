@@ -12,7 +12,7 @@ namespace at { namespace native {
 
 namespace {
 
-void _fill_indices(const Tensor& indices, int64_t dim) {
+void _fill_indices(Tensor& indices, int64_t dim) {
   auto dim_size = indices.size(dim);
   auto idx_dim = at::arange(0, dim_size, indices.options().dtype(at::kLong));
   auto idx_dim_sizes = std::vector<int64_t>(indices.dim(), 1);
@@ -25,11 +25,17 @@ void _fill_indices(const Tensor& indices, int64_t dim) {
 
 template <typename func_t>
 void _dim_apply(
-    const Tensor& values,
-    const Tensor& indices,
+    Tensor& values,
+    Tensor& indices,
     int64_t dim,
     const std::string& method_name,
     const func_t& f) {
+  dim = maybe_wrap_dim(dim, values.dim());
+  TORCH_CHECK(
+    dim >= 0 && dim < values.dim(),
+    method_name, "(): invalid dimension parameter ", dim
+  );
+
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
     .resize_outputs(false)
@@ -87,13 +93,11 @@ struct KeyValueCompDesc {
 };
 
 static void sort_kernel(
-    const Tensor& self,
+    Tensor& values,
+    Tensor& indices,
     int64_t dim,
     bool descending,
-    bool stable,
-    const Tensor& values,
-    const Tensor& indices) {
-  values.copy_(self);
+    bool stable) {
   dim = maybe_wrap_dim(dim, values.dim());
   _fill_indices(indices, dim);
   _dim_apply(

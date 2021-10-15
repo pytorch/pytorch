@@ -181,6 +181,7 @@ namespace c10 {
   _(aten, arccos_)                   \
   _(aten, acosh)                     \
   _(aten, acosh_)                    \
+  _(aten, adjoint)                   \
   _(aten, arccosh)                   \
   _(aten, arccosh_)                  \
   _(aten, asin)                      \
@@ -206,6 +207,8 @@ namespace c10 {
   _(aten, det)                       \
   _(aten, linalg_det)                \
   _(aten, matrix_power)              \
+  _(aten, mT)                        \
+  _(aten, mH)                        \
   _(aten, linalg_matrix_power)       \
   _(aten, chain_matmul)              \
   _(aten, linalg_multi_dot)          \
@@ -380,11 +383,14 @@ namespace c10 {
   _(aten, special_gammaincc)         \
   _(aten, mvlgamma)                  \
   _(aten, special_multigammaln)      \
+  _(aten, softmax)                   \
+  _(aten, special_softmax)           \
   _(aten, has_torch_function)        \
   _(aten, hardswish)                 \
   _(aten, hardswish_)                \
   _(aten, hardsigmoid_)              \
   _(aten, hardtanh_)                 \
+  _(aten, dequantize)                \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
   _(onnx, Concat)                    \

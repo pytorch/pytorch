@@ -1,13 +1,12 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/ThrustAllocator.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/cuda/SortingCommon.cuh>
 
 #include <ATen/AccumulateType.h>
-
-#include <THC/THCThrustAllocator.cuh>
 
 #include <thrust/device_ptr.h>
 #include <thrust/execution_policy.h>
@@ -193,7 +192,7 @@ Tensor embedding_backward_cuda_kernel(
         const Tensor &per_sample_weights) {
 
   auto stream = at::cuda::getCurrentCUDAStream();
-  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+  at::cuda::ThrustAllocator allocator;
   auto policy = thrust::cuda::par(allocator).on(stream);
   const ptrdiff_t numel = sorted_indices.numel();
 

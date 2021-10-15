@@ -2,6 +2,7 @@
 
 #include <torch/csrc/jit/codegen/cuda/codegen.h>
 #include <torch/csrc/jit/codegen/cuda/executor_kernel_arg.h>
+#include <torch/csrc/jit/codegen/cuda/executor_utils.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
@@ -59,7 +60,7 @@ typedef unsigned long long int uint64_t;
 std::string FusionExecutor::getStructuredCode(const std::string& kernel) {
   // generating cuda code;
   std::string code = "";
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 #if ROCM_VERSION < 40200
   code += std::string("#include <hip/hip_runtime.h>\n") +
       std::string("#include <hip/hip_fp16.h>\n");
@@ -523,6 +524,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
   FusionGuard fg(&fusion_);
   c10::DeviceGuard dg(options_.device);
   auto stream = at::cuda::getCurrentCUDAStream();
+  executor_utils::initializeCudaContext();
 
   LaunchParams launch_params;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)

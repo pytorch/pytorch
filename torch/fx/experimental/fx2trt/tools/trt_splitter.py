@@ -9,25 +9,28 @@ from torch.fx.experimental.fx2trt.fx2trt import (
     TRTInterpreter,
     CONVERTERS,
 )
-from torch.fx.passes.operator_support import OperatorSupport
+import torch.fx.passes.operator_support as ops
 from torch.fx.passes.tools_common import Tensors
 
 
-class TRTOperatorSupport(OperatorSupport):
-    def __init__(self):
-        self._support_dict = {}
-        for k in CONVERTERS.keys():
-            name = self.get_op_name(k)
-            self._support_dict[name] = None
+def create_trt_operator_support() -> ops.OperatorSupportBase:
+    """Creates an `OperatorSupportBase` instance used for TRT splitting purpose.
+    """
+    # Create an `OperatorSupport` that declares a node supported if it
+    # finds a registered TRT converter.
+    supported_if_converter_registered = ops.OperatorSupport(
+        support_dict={
+            get_acc_ops_name(k): None
+            for k in CONVERTERS.keys()
+        }
+    )
 
-    def get_op_name(self, k):
-        if isinstance(k, str):
-            return k
-        elif k.__module__ and "acc_ops" in k.__module__:
-            return f"acc_ops.{k.__name__}"
-        else:
-            module = k.__module__
-            return f"{module if module else ''}.{k.__name__}".replace('_', '')
+    return ops.chain(
+        # 1. Node is not supported if it has args with int64 dtype:
+        ops.OpSupports.decline_if_input_dtype(torch.int64),
+        # 2. Node is supported if it has TRT converter:
+        supported_if_converter_registered,
+    )
 
 
 class TRTSplitter(splitter_base._SplitterBase):
@@ -35,11 +38,11 @@ class TRTSplitter(splitter_base._SplitterBase):
         self,
         module: torch.fx.GraphModule,
         sample_input: Tuple[torch.Tensor],
-        operator_support: OperatorSupport = None,
+        operator_support: ops.OperatorSupportBase = None,
         settings: splitter_base._SplitterSettingBase = None,
     ):
         if not operator_support:
-            operator_support = TRTOperatorSupport()
+            operator_support = create_trt_operator_support()
         if not settings:
             settings = splitter_base._SplitterSettingBase()
         super().__init__(module, sample_input, operator_support, settings)
@@ -79,3 +82,13 @@ class TRTSplitter(splitter_base._SplitterBase):
                 reports += f"{node.format_node()}\n"
 
         return reports
+
+
+def get_acc_ops_name(k):
+    if isinstance(k, str):
+        return k
+    elif k.__module__ and "acc_ops" in k.__module__:
+        return f"acc_ops.{k.__name__}"
+    else:
+        module = k.__module__
+        return f"{module if module else ''}.{k.__name__}".replace('_', '')

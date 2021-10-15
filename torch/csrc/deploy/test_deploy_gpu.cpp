@@ -30,15 +30,15 @@ TEST(TorchDeployGPUTest, SimpleModel) {
 
   // Test
   torch::deploy::InterpreterManager m(1);
-  torch::deploy::Package p = m.load_package(model_filename);
-  auto model = p.load_pickle("model", "model.pkl");
+  torch::deploy::Package p = m.loadPackage(model_filename);
+  auto model = p.loadPickle("model", "model.pkl");
   {
-    auto M = model.acquire_session();
+    auto M = model.acquireSession();
     M.self.attr("to")({"cuda"});
   }
   std::vector<at::IValue> inputs;
   {
-    auto I = p.acquire_session();
+    auto I = p.acquireSession();
     auto eg = I.self.attr("load_pickle")({"model", "example.pkl"}).toIValue();
     inputs = eg.toTuple()->elements();
     inputs[0] = inputs[0].toTensor().to("cuda");
@@ -59,9 +59,9 @@ TEST(TorchDeployGPUTest, UsesDistributed) {
       "USES_DISTRIBUTED",
       "torch/csrc/deploy/example/generated/uses_distributed");
   torch::deploy::InterpreterManager m(1);
-  torch::deploy::Package p = m.load_package(model_filename);
+  torch::deploy::Package p = m.loadPackage(model_filename);
   {
-    auto I = p.acquire_session();
+    auto I = p.acquireSession();
     I.self.attr("import_module")({"uses_distributed"});
   }
 }
@@ -73,10 +73,10 @@ TEST(TorchDeployGPUTest, TensorRT) {
   auto packagePath = path(
       "MAKE_TRT_MODULE", "torch/csrc/deploy/example/generated/make_trt_module");
   torch::deploy::InterpreterManager m(1);
-  torch::deploy::Package p = m.load_package(packagePath);
-  auto makeModel = p.load_pickle("make_trt_module", "model.pkl");
+  torch::deploy::Package p = m.loadPackage(packagePath);
+  auto makeModel = p.loadPickle("make_trt_module", "model.pkl");
   {
-    auto I = makeModel.acquire_session();
+    auto I = makeModel.acquireSession();
     auto model = I.self(at::ArrayRef<at::IValue>{});
     auto input = at::ones({1, 2, 3}).cuda();
     auto output = input * 2;

@@ -147,6 +147,7 @@ core_trainer_sources = [
     "torch/csrc/autograd/record_function_ops.cpp",
     "torch/csrc/autograd/saved_variable.cpp",
     "torch/csrc/autograd/variable.cpp",
+    "torch/csrc/autograd/utils/warnings.cpp",
     "torch/csrc/jit/frontend/name_mangler.cpp",
     "torch/csrc/jit/ir/type_hashing.cpp",
     "torch/csrc/jit/serialization/pickler.cpp",
@@ -241,8 +242,10 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/passes/remove_mutation.cpp",
     "torch/csrc/jit/passes/prepack_folding.cpp",
     "torch/csrc/jit/passes/fold_conv_bn.cpp",
+    "torch/csrc/jit/passes/frozen_concat_linear.cpp",
     "torch/csrc/jit/passes/frozen_conv_add_relu_fusion.cpp",
     "torch/csrc/jit/passes/frozen_conv_folding.cpp",
+    "torch/csrc/jit/passes/frozen_linear_transpose.cpp",
     "torch/csrc/jit/passes/frozen_ops_to_mkldnn.cpp",
     "torch/csrc/jit/passes/frozen_graph_optimizations.cpp",
     "torch/csrc/jit/passes/remove_expands.cpp",
@@ -311,13 +314,15 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/tensorexpr/llvm_codegen.cpp",
     "torch/csrc/jit/tensorexpr/llvm_jit.cpp",
     "torch/csrc/jit/tensorexpr/loopnest.cpp",
+    "torch/csrc/jit/tensorexpr/lowerings.cpp",
     "torch/csrc/jit/tensorexpr/mem_dependency_checker.cpp",
     "torch/csrc/jit/tensorexpr/operators/conv2d.cpp",
     "torch/csrc/jit/tensorexpr/operators/matmul.cpp",
+    "torch/csrc/jit/tensorexpr/operators/misc.cpp",
     "torch/csrc/jit/tensorexpr/operators/norm.cpp",
+    "torch/csrc/jit/tensorexpr/operators/pointwise.cpp",
     "torch/csrc/jit/tensorexpr/operators/reduction.cpp",
     "torch/csrc/jit/tensorexpr/operators/softmax.cpp",
-    "torch/csrc/jit/tensorexpr/operators/unary.cpp",
     "torch/csrc/jit/tensorexpr/reduction.cpp",
     "torch/csrc/jit/tensorexpr/registerizer.cpp",
     "torch/csrc/jit/tensorexpr/tensor.cpp",
@@ -346,7 +351,17 @@ core_sources_full = core_sources_full_mobile + [
     "torch/csrc/jit/tensorexpr/external_functions_codegen.cpp",
 ]
 
-libtorch_core_sources = sorted(core_sources_common + core_sources_full + core_trainer_sources + libtorch_profiler_sources)
+lazy_tensor_core_sources = [
+    "torch/csrc/lazy/core/hash.cpp",
+]
+
+libtorch_core_sources = sorted(
+    core_sources_common +
+    core_sources_full +
+    core_trainer_sources +
+    libtorch_profiler_sources +
+    lazy_tensor_core_sources,
+)
 
 # These files are the only ones that are supported on Windows.
 libtorch_distributed_base_sources = [
@@ -429,6 +444,15 @@ jit_sources_full = [
 ]
 
 libtorch_core_jit_sources = sorted(jit_sources_full)
+
+torch_mobile_tracer_sources = [
+    "torch/csrc/jit/mobile/model_tracer/tracer.cpp",
+    "torch/csrc/jit/mobile/model_tracer/TensorUtils.cpp",
+    "torch/csrc/jit/mobile/model_tracer/TracerRunner.cpp",
+    "torch/csrc/jit/mobile/model_tracer/MobileModelRunner.cpp",
+    "torch/csrc/jit/mobile/model_tracer/OperatorCallTracer.cpp",
+    "torch/csrc/jit/mobile/model_tracer/KernelDTypeTracer.cpp",
+]
 
 torch_mobile_core = [
     # backend_debug_info.cpp provides
@@ -937,6 +961,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/CrossKernel.cpp",
     "aten/src/ATen/native/cpu/DepthwiseConvKernel.cpp",
     "aten/src/ATen/native/cpu/DistanceOpsKernel.cpp",
+    "aten/src/ATen/native/cpu/DistributionKernels.cpp",
     "aten/src/ATen/native/cpu/FillKernel.cpp",
     "aten/src/ATen/native/cpu/FunctionOfAMatrixUtilsKernel.cpp",
     "aten/src/ATen/native/cpu/GridSamplerKernel.cpp",

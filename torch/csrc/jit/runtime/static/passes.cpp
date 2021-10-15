@@ -91,7 +91,7 @@ void ConcatAddMulReplaceNaNClip(std::shared_ptr<torch::jit::Graph>& graph) {
         return (%res))IR";
   std::string fused_pattern = R"IR(
     graph(%a, %b, %c, %d, %e, %f, %g, %h, %i, %j):
-        %res = fb::concat_add_mul_replacenan_clip(%c, %e, %a, %i, %j)
+        %res = fb::concat_add_mul_replacenan_clip(%c, %e, %a, %i, %j, %b)
         return (%res))IR";
 
   SubgraphRewriter fuse;
@@ -319,17 +319,24 @@ void FuseInferenceOpsForSparseNN(std::shared_ptr<torch::jit::Graph>& graph) {
 }
 
 TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
-  m.def("static_runtime::permute_copy(Tensor self, int[] dims) -> Tensor");
-  m.def(
-      "static_runtime::reshape_copy(Tensor(a) self, int[] shape) -> Tensor(a)");
-  m.def(
-      "static_runtime::flatten_copy.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)");
-  m.def(
-      "static_runtime::to_copy.prim_dtype(Tensor self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor");
-  m.def(
-      "static_runtime::to_copy.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor");
-  m.def(
-      "static_runtime::to_copy.other(Tensor self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor");
+  m.def(torch::schema(
+      "static_runtime::permute_copy(Tensor self, int[] dims) -> Tensor",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def(torch::schema(
+      "static_runtime::reshape_copy(Tensor self, int[] shape) -> Tensor",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def(torch::schema(
+      "static_runtime::flatten_copy.using_ints(Tensor self, int start_dim=0, int end_dim=-1) -> Tensor",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def(torch::schema(
+      "static_runtime::to_copy.prim_dtype(Tensor self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def(torch::schema(
+      "static_runtime::to_copy.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def(torch::schema(
+      "static_runtime::to_copy.other(Tensor self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
   m.def(torch::schema(
       "static_runtime::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> (Tensor, Tensor, Tensor)",
       c10::AliasAnalysisKind::PURE_FUNCTION));
@@ -517,14 +524,21 @@ void ReplaceWithCopy(
 // NB: The alias type of the fused op needs to be changed to
 // c10::AliasAnalysisKind::PURE_FUNCTION to make alias analysis work.
 void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
+  AliasDb alias_db(
+      graph, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
+  const std::vector<Value*> graph_outputs(
+      graph->outputs().begin(), graph->outputs().end());
   auto nodes = graph->nodes();
   std::vector<Node*> equally_splits_to_remove;
   for (auto it = nodes.begin(); it != nodes.end(); ++it) {
     Node* node = *it;
-    const char* node_qual_string = node->kind().toQualString();
-    if (strcmp(node_qual_string, "fb::sigrid_transforms") == 0 ||
-        strcmp(node_qual_string, "fb::sigrid_transforms_torch_bind") == 0 ||
-        strcmp(node_qual_string, "fb::equally_split") == 0) {
+    const std::string node_qual_string = node->kind().toQualString();
+    if (node_qual_string == "fb::sigrid_transforms" ||
+        node_qual_string == "fb::sigrid_transforms_torch_bind" ||
+        node_qual_string == "fb::equally_split" ||
+        node_qual_string == "fb::gather_ranges_to_dense" ||
+        node_qual_string == "fb::gather_ranges_to_dense_v2" ||
+        node_qual_string == "fb::variadic_sigrid_transforms_torch_bind") {
       const Value* value_out = node->outputs()[0];
       if (value_out->uses().size() > 1) {
         continue;
@@ -540,6 +554,17 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
         continue;
       }
 
+      if (node_qual_string != "fb::equally_split") {
+        // If any output of the ListUnpack node is unmanaged, disable fusion
+        // since the fused op assumes all outputs are either managed or not.
+        // "fb::equally_split" is excluded here since it does doublecheck
+        // individual outputs without having this assumption.
+        const std::vector<Value*> list_unpack_outputs_vec(
+            list_unpack_outputs.begin(), list_unpack_outputs.end());
+        if (alias_db.mayContainAlias(list_unpack_outputs_vec, graph_outputs)) {
+          continue;
+        }
+      }
       // handle outputs
       for (Value* out : list_unpack_outputs) {
         Value* new_out = node->addOutput();
@@ -553,7 +578,7 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
 
       node->eraseOutput(0);
 
-      if (strcmp(node_qual_string, "fb::equally_split") == 0 &&
+      if (node_qual_string == "fb::equally_split" &&
           node->outputs().size() == 1) {
         // This captures a case of `y = fb::equally_split(x, 1, _)` where y
         // becomes just an alias of x.
