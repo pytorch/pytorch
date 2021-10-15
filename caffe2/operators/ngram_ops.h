@@ -35,9 +35,9 @@ class NGramFromCategoricalOp : public Operator<Context> {
     }
     int base = 1;
     int idx = 0;
-    for (int k = 0; k < col_num_; k++) {
+    for (const auto k : c10::irange(col_num_)) {
       int l = categorical_limits_[k];
-      for (int m = 0; m < l; m++) {
+      for (const auto m : c10::irange(l)) {
         int v = vals_[idx++];
         ngram_maps_[k][v] = m * base;
       }
@@ -56,8 +56,8 @@ class NGramFromCategoricalOp : public Operator<Context> {
     math::Set<T, Context>(output->numel(), 0, output_data, &context_);
 
     CAFFE_ENFORCE_GT(D, max_col_id_);
-    for (int i = 0; i < N; i++) {
-      for (int k = 0; k < col_num_; k++) {
+    for (const auto i : c10::irange(N)) {
+      for (const auto k : c10::irange(col_num_)) {
         int j = col_ids_[k];
         int v = round(floats_data[i * D + j]);
         // for out-of-vocabulary values, we always treat them the same as the

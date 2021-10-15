@@ -17,7 +17,7 @@ struct ParamsHash {
   size_t operator()(const Params& params) const {
     auto ptr = reinterpret_cast<const uint8_t*>(&params);
     uint32_t value = 0x811C9DC5;
-    for (int i = 0; i < (int)sizeof(Params); ++i) {
+    for (const auto i : c10::irange((int)sizeof(Params))) {
       value ^= ptr[i];
       value *= 0x01000193;
     }

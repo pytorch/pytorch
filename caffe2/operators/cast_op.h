@@ -41,7 +41,7 @@ class CastOp : public Operator<Context> {
     const auto* data = input.template data<SrcType>();
     auto* out = output->template mutable_data<DstType>();
     auto N = input.size();
-    for (int64_t i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       out[i] = static_cast<DstType>(data[i]);
     }
     return true;
