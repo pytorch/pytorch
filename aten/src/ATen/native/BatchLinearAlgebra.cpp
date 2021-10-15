@@ -1215,6 +1215,7 @@ static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, std::vector<i
   auto b_mat_stride = matrixStride(b);
   auto batch_size = batchCount(A);
   auto n = A.size(-2);
+  auto ldab = std::max<int64_t>(1, n);
   auto nrhs = b.size(-1);
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -1222,7 +1223,7 @@ static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, std::vector<i
   for (const auto i : c10::irange(batch_size)) {
     scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
     scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
-    lapackCholeskySolve<scalar_t>(uplo, n, nrhs, A_working_ptr, n, b_working_ptr, n, &info);
+    lapackCholeskySolve<scalar_t>(uplo, n, nrhs, A_working_ptr, ldab, b_working_ptr, ldab, &info);
     infos[i] = info;
     if (info != 0) {
       return;
