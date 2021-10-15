@@ -8,6 +8,7 @@ from ._lowrank import svd_lowrank, pca_lowrank
 from .overrides import (
     has_torch_function, has_torch_function_unary, has_torch_function_variadic,
     handle_torch_function)
+from torch.testing._internal.common_dtype import integral_types
 from ._jit_internal import boolean_dispatch, List
 from ._jit_internal import _overload as overload
 
@@ -1681,7 +1682,6 @@ def unravel_index(
         >>> torch.unravel_index(indices, shape, as_tuple=True)
         (tensor([3, 6, 6]), tensor([4, 5, 1]))
     """
-    _integral_types = [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]
     if not isinstance(shape, Tensor):
         assert isinstance(shape, (tuple, list)), f"Shape should be either a tuple or a list if not tensor, but found: {type(shape)}."
         for dim in shape:
@@ -1691,7 +1691,7 @@ def unravel_index(
                 raise ValueError("Negative dimension in shape is not allowed.")
         shape = torch.tensor(shape, dtype=torch.int64)
     else:
-        if shape.dtype not in _integral_types:
+        if shape.dtype not in integral_types():
             raise TypeError(f"Unsupported dtype for shape {shape.dtype}, only integral types allowed.")
         if torch.any(shape < 0):
             raise ValueError("Negative dimension in shape is not allowed.")
@@ -1707,7 +1707,7 @@ def unravel_index(
                 raise ValueError("Negative indices are not allowed.")
         indices = torch.tensor(indices, dtype=torch.int64)
     else:
-        if indices.dtype not in _integral_types:
+        if indices.dtype not in integral_types():
             raise TypeError(f"Unsupported dtype for indices {indices.dtype}, only integral types allowed.")
         if torch.any(indices < 0):
             raise ValueError("Negative indices are not allowed.")
