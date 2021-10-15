@@ -616,7 +616,7 @@ std::vector<Tensor> tensor_split(const Tensor& self, const Tensor& tensor_indice
     auto stride = tensor_indices_or_sections.stride(0);
     auto numel = tensor_indices_or_sections.numel();
     std::vector<int64_t> indices(numel);
-    for (size_t offset = 0; offset < numel; offset++) {
+    for (const auto offset : c10::irange(numel)) {
       // indices tensor could be non-contiguous
       indices[offset] = *(indices_data + offset * stride);
     }
@@ -2239,12 +2239,56 @@ std::vector<Tensor> meshgrid(TensorList tensors,
 // Numpy-style `a.T`: returns the tensor
 // with dims reversed
 Tensor numpy_T(const Tensor &self) {
-  int64_t n = self.dim();
+  const auto n = self.dim();
+  if (n != 2 && n != 0) {
+    TORCH_WARN_ONCE(
+        "The use of `x.T` on tensors of dimension other than 2 to reverse their shape is deprecated ",
+        "and it will throw an error in a future release. Consider `x.mT` to transpose batches of matrices",
+        "or `x.permute(*torch.arange(x.ndim - 1, -1, -1))` to reverse the dimensions of a tensor."
+    );
+  }
   DimVector transpose_dims;
   for (int64_t i = n - 1; i >= 0; --i) {
     transpose_dims.push_back(i);
   }
   return self.permute(transpose_dims);
+}
+
+Tensor matrix_H(const Tensor &self) {
+  const auto ndim = self.dim();
+  TORCH_CHECK(ndim == 2 || ndim == 0,
+      "tensor.H is only supported on matrices (2-D tensors). Got ", ndim, "-D tensor.",
+      ndim > 2 ? " For batches of matrices, consider using tensor.mH" : "");
+  if (self.is_complex()) {
+    return ndim == 0 ? self.conj() : self.transpose(-2, -1).conj();
+  } else {
+    return ndim == 0 ? self : self.transpose(-2, -1);
+  }
+}
+
+namespace {
+Tensor _adjoint(const Tensor &self, const bool transpose, const char* const name) {
+  const auto ndim = self.dim();
+  TORCH_CHECK(ndim != 1,
+      "tensor.", name, " is only supported on matrices or batches of matrices. Got 1-D tensor.");
+  if (transpose || !self.is_complex()) {
+    return ndim == 0 ? self : self.transpose(-2, -1);
+  } else {
+    return ndim == 0 ? self.conj() : self.transpose(-2, -1).conj();
+  }
+}
+} // anonymous namespace
+
+Tensor mT(const Tensor &self) {
+  return _adjoint(self, /*transpose=*/true, "mT");
+}
+
+Tensor mH(const Tensor &self) {
+  return _adjoint(self, /*transpose=*/false, "mH");
+}
+
+Tensor adjoint(const Tensor &self) {
+  return _adjoint(self, /*transpose=*/false, "adjoint()");
 }
 
 Tensor view(const Tensor& self,
