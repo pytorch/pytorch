@@ -2004,7 +2004,7 @@ struct TORCH_API ClassType : public NamedType {
 
   const std::vector<torch::jit::Function*>& methods() const;
 
-  const TypePtr& findAttribute(const std::string& name) const {
+  TypePtr findAttribute(const std::string& name) const {
     size_t pos = 0;
     for (const auto& attr : attributes_) {
       if (name == attr.getName()) {
@@ -2020,14 +2020,14 @@ struct TORCH_API ClassType : public NamedType {
   }
 
   const TypePtr& getAttribute(const std::string& name) const {
-    const auto& type = findAttribute(name);
+    auto slot = findAttributeSlot(name);
     TORCH_CHECK(
-        type,
+        slot,
         repr_str(),
         " does not have an attribute with name '",
         name,
         "'");
-    return type;
+    return attributes_[*slot].getType();
   }
 
   size_t numAttributes() const {
@@ -2052,7 +2052,7 @@ struct TORCH_API ClassType : public NamedType {
   c10::optional<size_t> findAttributeSlot(const std::string& name) const {
     size_t slot = 0;
     for (const auto& attr : attributes_) {
-      if (name.compare(attr.getName()) == 0) {
+      if (name == attr.getName()) {
         return slot;
       }
       slot++;
@@ -2087,7 +2087,7 @@ struct TORCH_API ClassType : public NamedType {
 
   size_t addAttribute(
       const std::string& name,
-      const TypePtr& type,
+      TypePtr type,
       bool is_parameter = false,
       bool is_buffer = false);
 
@@ -2115,7 +2115,7 @@ struct TORCH_API ClassType : public NamedType {
       bool is_buffer = false) {
     auto slot_idx = findAttributeSlot(name);
     if (!slot_idx) {
-      return addAttribute(name, ty, is_parameter, is_buffer);
+      return addAttribute(name, std::move(ty), is_parameter, is_buffer);
     }
 
     TORCH_CHECK(
@@ -2123,7 +2123,7 @@ struct TORCH_API ClassType : public NamedType {
         "Parameter field mismatch for the field '",
         name,
         "'");
-    TypePtr atype = getAttribute(*slot_idx);
+    const TypePtr& atype = getAttribute(*slot_idx);
     TORCH_CHECK(
       ty->isSubtypeOf(*atype),
       ty->repr_str(),
@@ -2220,7 +2220,7 @@ struct TORCH_API ClassType : public NamedType {
     AT_ASSERT(numAttributes() == contained_types.size());
     for(size_t i = 0; i < attributes_.size(); ++i) {
       AT_ASSERT(attributes_[i].getType()->isSubtypeOf(*contained_types[i]));
-      ptr->addAttribute(attributes_[i].getName(), contained_types[i]);
+      ptr->addAttribute(attributes_[i].getName(), std::move(contained_types[i]));
     }
     // Copy methods over
     for (const auto& method : methods()) {

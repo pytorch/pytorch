@@ -2231,7 +2231,7 @@ void ClassType::addAttribute(ClassAttribute classAttribute) {
 
 size_t ClassType::addAttribute(
     const std::string& name,
-    const TypePtr& type,
+    TypePtr type,
     bool is_parameter,
     bool is_buffer) {
   if (is_parameter && is_buffer){
@@ -2251,16 +2251,13 @@ size_t ClassType::addAttribute(
     kind = AttributeKind::BUFFER;
   }
 
-  ClassAttribute ClassAttribute(kind, type, name);
-
-  addAttribute(ClassAttribute);
 
   if (is_parameter || is_buffer) {
     TORCH_INTERNAL_ASSERT(is_module(), "adding a parameter or buffer to a non module");
     TORCH_CHECK(
         (type->kind() == TensorType::Kind) ||
             (type->kind() == OptionalType::Kind &&
-            type->expect<OptionalType>()->getElementType()->kind() ==
+            type->expectRef<OptionalType>().getElementType()->kind() ==
                 TensorType::Kind) ||
             (type->kind() == UnionType::Kind &&
             TensorType::get()->isSubtypeOf(type->expectRef<UnionType>())) ||
@@ -2268,6 +2265,8 @@ size_t ClassType::addAttribute(
         "Expecting parameter or buffer to have either None, Tensor or Optional[Tensor] type, but got: ",
         toString(type));
   }
+
+  addAttribute(ClassAttribute(kind, std::move(type), name));
 
   return slot;
 }
