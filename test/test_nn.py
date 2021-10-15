@@ -10533,6 +10533,8 @@ class TestNN(NNTestCase):
                     input = torch.randn(1, 1, 2, requires_grad=True)
                     if not recompute_scale_factor:
                         gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), (input,))
+                    else:
+                        gradcheck(lambda x: F.interpolate(x, scale_factor=scale_factor, **kwargs), (input,))
 
     def test_upsamplingLinear1d_spatial_invariance(self):
         m = nn.Upsample(scale_factor=3, mode='linear', align_corners=False)

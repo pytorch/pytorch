@@ -38,7 +38,7 @@ class Upsample(Module):
             output `size`. The computed output `size` will be used to infer new scales for
             the interpolation. Note that when `scale_factor` is floating-point, it may differ
             from the recomputed `scale_factor` due to rounding and precision issues.
-            If `recomputed_scale_factor` is ``False``, then `size` or `scale_factor` will
+            If `recompute_scale_factor` is ``False``, then `size` or `scale_factor` will
             be used directly for interpolation.
 
     Shape:
@@ -126,7 +126,7 @@ class Upsample(Module):
                   [ 1.2000,  1.3600,  1.5200,  1.2800,  0.6400,  0.0000],
                   [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000]]]])
     """
-    __constants__ = ['size', 'scale_factor', 'mode', 'align_corners', 'name']
+    __constants__ = ['size', 'scale_factor', 'mode', 'align_corners', 'name', 'recompute_scale_factor']
     name: str
     size: Optional[_size_any_t]
     scale_factor: Optional[_ratio_any_t]
