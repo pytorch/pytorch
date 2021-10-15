@@ -88,7 +88,10 @@ except ImportError:
     pass
 
 # Backward Compatibility. Tests serialization and BC for quantized modules.
-from quantization.bc.test_backward_compatibility import TestSerialization  # noqa: F401
+try:
+    from quantization.bc.test_backward_compatibility import TestSerialization  # noqa: F401
+except ImportError:
+    pass
 
 # JIT Graph Mode Quantization
 from quantization.jit.test_quantize_jit import TestQuantizeJit  # noqa: F401
