@@ -105,6 +105,7 @@ void preoptimizeGraph(std::shared_ptr<Graph>& graph) {
   // to clean up constant Ifs & other easy wins
   ConstantPropagationImmutableTypes(graph);
 
+#ifndef C10_MOBILE
   // Inject casts for automatic mixed precision
   //
   // TODO: Ideally, this pass could run earlier, before inlining
@@ -114,6 +115,7 @@ void preoptimizeGraph(std::shared_ptr<Graph>& graph) {
   //  2. AMP transformations would benefit from followup passes's cleanup
   //
   Autocast(graph);
+#endif
 
   ConstantPooling(graph);
 }
