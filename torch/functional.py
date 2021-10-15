@@ -1659,19 +1659,17 @@ def unravel_index(
 ) -> Union[Tuple[Tensor, ...], List[Tensor], Tensor]:
     r"""Converts flat indices into unraveled coordinates for the given target shape.
 
-    This is a PyTorch implementation of NumPy's `unravel_index` (TODO: add link).
-
     Args::
-        indices: A tensor containing flattened indices to be unraveled, should be integral type.
-        shape: The shape used for unravelling the `indices`.
+        indices: A sequence (`tuple`, `list` or a `Tensor`) containing flattened indices to be unraveled, should be integral type.
+        shape: The shape (can be a `tuple`, `list` or a `Tensor`) used for unravelling the `indices`.
 
     Keyword Args::
         as_tuple: A boolean value, which if `True` will return the unraveled `indices` as tuple,
-                  else a `Tensor` will be returned.
+                  else a `Tensor` will be returned. Default: `False`
 
     Returns::
         unraveled coordinates from the given `indices`, and `shape`. See description of `as_tuple` for
-        returning tuples.
+        returning a tuple.
 
     Example::
         >>> indices = torch.tensor([22, 41, 37])
