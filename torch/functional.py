@@ -1737,7 +1737,5 @@ def unravel_index(
         coords.append(indices % dim)
         indices = torch.div(indices, dim, rounding_mode='trunc')
 
-    if len(coords) != 0:
-        coords_t = torch.stack(coords[::-1], dim=-1)
-
-    return tuple(coords_t.T) if as_tuple else coords
+    coords_t = torch.stack(coords[::-1], dim=-1)
+    return tuple(coords_t.T) if as_tuple else coords_t
