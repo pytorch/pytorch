@@ -241,8 +241,9 @@ void nnc_aten_upsample_nearest2d(
   const double x_qscale = ((double*)extra_args)[0];
   const int64_t x_qzero = extra_args[1];
   const int64_t x_qdtype = extra_args[2];
-  if (x_qdtype != -1) {
-    at::Tensor qx = at::from_blob_quantized_per_tensor_affine(
+  const auto is_quantized = x_qdtype != -1;
+  if (is_quantized) {
+    x = at::from_blob_quantized_per_tensor_affine(
         buf_data[1],
         tensors[1].sizes(),
         [](void*) {},

@@ -189,5 +189,44 @@ TEST_F(Quantization, QuantAddDequantUInt8) {
   CHECK_EQ(check, 1);
 }
 
+TEST_F(Quantization, QuantUpsampleNearst2dDequantUInt8) {
+  const auto graph_string = R"IR(
+      graph(%x : Float(1, 1, 2, 2, strides=[2, 2, 2, 1], device=cpu)):
+        %2 : int = prim::Constant[value=13]()
+        %3 : NoneType = prim::Constant()
+        %4 : float[] = prim::Constant[value=[2., 2.]]()
+        %qz : int = prim::Constant[value=13]()
+        %qs : float = prim::Constant[value=0.1]()
+        %q : QUInt8(1, 1, 2, 2) = aten::quantize_per_tensor(%x, %qs, %qz, %2)
+        %qu : QUInt8(1, 1, 4, 4) = aten::upsample_nearest2d(%q, %3, %4)
+        %6 : Float(1, 1, 4, 4) = aten::dequantize(%qu)
+        return (%6))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  auto x = at::rand({1, 1, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto q = at::quantize_per_tensor(x, 0.1f, 13, at::kQUInt8);
+  auto qu =
+      at::upsample_nearest2d(q, c10::nullopt, at::ArrayRef<double>({2.f, 2.f}));
+  auto y_expected = at::dequantize(qu);
+
+  TensorExprKernel k(graph);
+  std::vector<at::Tensor> inputs = {x};
+  StmtPtr s = k.getCodeGenStmt();
+
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  auto y = stack[0].toTensor();
+  bool check = at::allclose(y_expected, y);
+  if (!check) {
+    std::cout << "x:\n" << x << std::endl;
+    std::cout << "q:\n" << q << std::endl;
+    std::cout << "qu:\n" << qu << std::endl;
+    std::cout << "y_expected:\n" << y_expected << std::endl;
+    std::cout << "y:\n" << y << std::endl;
+  }
+  CHECK_EQ(check, 1);
+}
+
 } // namespace jit
 } // namespace torch
