@@ -297,8 +297,8 @@ class TestList(JitTestCase):
         self.checkScript(fn, ())
 
     def test_dict_keyword_with_mismatched_annotations(self):
-        err_msg = r"is annotated with type Dict\[int, str\] but is " \
-                  r"being assigned to a value of type Dict\[str, int\]"
+        err_msg = r"Dict type annotation `Dict\[int, str\]` did not " \
+                  "match the type of an actual key type `str`"
         with self.assertRaisesRegex(RuntimeError, err_msg):
             @torch.jit.script
             def fn():
@@ -1440,6 +1440,60 @@ class TestDict(JitTestCase):
         self.assertEqual(torch.jit.script(fn)(inputs()), python_out)
         with self.assertRaisesRegexWithHighlight(RuntimeError, "KeyError", "x['hi']"):
             self.checkScript(fn, [{}])
+
+    def test_dict_variance(self):
+        """
+        `Dict[T1, _]` is not a subtype of `Dict[T2, _]`, even if `T1` is
+        a subtype of `T2`; similarly `Dict[_, T1]` would not be a
+        subtype of `Dict[_, T2]`.
+
+        However, if we have a temporary dict object (that is, a dict
+        comprehension or a dict literal) on the rhs of an assignment
+        statement, we want to ignore the inferred type of the rhs if we
+        can prove that: 1) both the lhs and the rhs are dicts with the
+        same key types (TorchScript has a restricted set of allowed key
+        types, so we don't need to worry about subtyping relationships
+        here), and 2) the value type of the dict is a subtype of the
+        value type of the rhs dict.
+        """
+        def test_dictliteral_is_typed_from_annotation():
+            x: Dict[str, Optional[int]] = {"foo": None, "bar": None, "baz": None}
+            return x
+
+        self.checkScript(test_dictliteral_is_typed_from_annotation, ())
+
+        def test_dictcomprehension_is_typed_from_annotation():
+            metasyntactics = ["foo", "bar", "baz"]
+            x: Dict[str, Optional[int]] = {word: None for word in metasyntactics}
+            return x
+
+        self.checkScript(test_dictcomprehension_is_typed_from_annotation, ())
+
+        def test_dicts_with_different_value_types_are_invariant(self):
+            x: Dict[str, int] = {"foo": 1, "bar": 2, "baz": 3}
+            y: Dict[str, Optional[int]] = x
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, "Variable 'y' is "
+                                    "annotated with type "
+                                    r"Dict\[str, Optional\[int\]\] but "
+                                    "is being assigned to a value of "
+                                    r"type Dict\[str, int\]"):
+            torch.jit.script(test_dicts_with_different_value_types_are_invariant)
+
+        def test_dicts_with_different_value_types_are_invariant_recursive(self):
+            x: Dict[str, int] = {"foo": 1, "bar": 2, "baz": 3}
+            y: Dict[str, Dict[str, int]] = {"foo": x, "bar": x, "baz": x}
+            z: Dict[str, Dict[str, Optional[int]]] = y
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, "Variable 'z' is "
+                                    "annotated with type "
+                                    r"Dict\[str, Dict\[str, Optional"
+                                    r"\[int\]\]\] but is being assigned"
+                                    r" to a value of type Dict\[str, "
+                                    r"Dict\[str, int\]\]"):
+            torch.jit.script(test_dicts_with_different_value_types_are_invariant_recursive)
 
     def test_keys(self):
         @torch.jit.script
