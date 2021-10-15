@@ -41,9 +41,9 @@ class TestLoadBCPackages(PackageTestCase):
         importer3 = PackageImporter(f"{packaging_directory}/test_fx_module.pt")
         loaded3 = importer3.load_pickle("fx_module", "fx_module.pkl")
 
-        # delete files in directory for next time
-        for f in os.listdir(packaging_directory):
-            os.remove(os.path.join(packaging_directory, f))
+        # # delete files in directory for next time
+        # for f in os.listdir(packaging_directory):
+        #     os.remove(os.path.join(packaging_directory, f))
 
 if __name__ == "__main__":
     run_tests()
