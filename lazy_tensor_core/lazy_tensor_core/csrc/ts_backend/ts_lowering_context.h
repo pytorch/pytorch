@@ -1,7 +1,6 @@
 #pragma once
 
 #include <torch/jit.h>
-
 #include "lazy_tensor_core/csrc/lowering_context.h"
 #include "lazy_tensors/span.h"
 #include "torch/csrc/jit/runtime/graph_executor.h"

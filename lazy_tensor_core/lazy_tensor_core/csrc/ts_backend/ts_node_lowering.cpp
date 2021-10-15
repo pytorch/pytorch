@@ -42,7 +42,6 @@
 #include "lazy_tensor_core/csrc/ops/update_slice.h"
 #include "lazy_tensor_core/csrc/ops/view.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
-#include "lazy_tensor_core/csrc/ts_backend/LazyLazyIr.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_computation_client.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_lowering_context.h"
 #include "lazy_tensors/permutation_util.h"
@@ -50,29 +49,27 @@
 namespace torch_lazy_tensors {
 namespace compiler {
 
-// Forward decl of method that is codegenned and has no header
-TSOpVector LowerToTSCodegen(std::shared_ptr<torch::jit::GraphFunction> function,
-                            ts_backend::TSLoweringContext* loctx,
-                            const ir::Node* node);
-
-class TSNodeLowering : public NodeLowering {
+class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterface {
  public:
   TSNodeLowering(const std::string& name, ts_backend::TSLoweringContext* loctx)
-      : NodeLowering(loctx),
+      : TSNodeLoweringInterface(loctx),
         function_(loctx ? std::make_shared<torch::jit::GraphFunction>(
                               name, loctx->graph(), nullptr)
                         : nullptr) {}
 
   bool Lower(const ir::Node* node) override {
-    TSOpVector ops = LowerToTS(node);
-    if (ops.empty()) {
-      return false;
+    if (auto* tsnode = dynamic_cast<const torch_lazy_tensors::ir::TsNode*>(node)) {
+      TSOpVector ops = tsnode->Lower(*this, function_, loctx());
+      if (ops.empty()) {
+        return false;
+      }
+      LTC_CHECK_EQ(node->num_outputs(), ops.size());
+      for (size_t i = 0; i < ops.size(); ++i) {
+        loctx()->AssignOutputOp(ir::Output(node, i), ops[i]);
+      }
+      return true;
     }
-    LTC_CHECK_EQ(node->num_outputs(), ops.size());
-    for (size_t i = 0; i < ops.size(); ++i) {
-      loctx()->AssignOutputOp(ir::Output(node, i), ops[i]);
-    }
-    return true;
+    throw std::runtime_error("Expected TsNode but could not dynamic cast");
   }
 
   lazy_tensors::Shape Infer(const ir::Node* node) override {
@@ -198,30 +195,16 @@ class TSNodeLowering : public NodeLowering {
       case at::aten::ne: {
         return InferComparison(node);
       }
-      case at::aten::mean: {
-        auto mean = ir::NodeCast<ir::ops::Mean>(
-            node, ir::OpKind(at::aten::mean));
-        const ir::Output& argument = node->operand(0);
-        const lazy_tensors::Shape& argument_shape = GetShapeFromTsOutput(argument);
-        lazy_tensors::PrimitiveType element_type =
-        mean->dtype_ ? torch_lazy_tensors::TensorTypeToLtcType(*mean->dtype_)
-                     : argument_shape.element_type();
-        return lazy_tensors::Shape(element_type, argument_shape.dimensions());
-      }
       default:
         LTC_LOG(FATAL) << *node << "Not implemented yet.";
     }
   }
 
 
-  TSOpVector LowerToTS(const ir::Node* node) {
-    // Desirable to have a way to do some ops via codegen and others by hand,
-    // at least for now
-    auto codegen_lowering = LowerToTSCodegen(function_, loctx(), node);
-    if (codegen_lowering.size() > 0){
-      return codegen_lowering;
-    }
-
+  // TODO(whc) this is for legacy/non-codegen Ops, and after moving most ops
+  // to codegen we should delete this and put all the lowering logic into Node
+  // classes
+  TSOpVector LowerNonCodegenOps(const ir::Node* node) {
     if (node->op().op == at::aten::as_strided) {
       return LowerAsStrided(ir::NodeCast<ir::ops::AsStrided>(
           node, ir::OpKind(at::aten::as_strided)));
@@ -603,7 +586,7 @@ class TSNodeLowering : public NodeLowering {
 
   TSOpVector LowerBuiltin(
       c10::Symbol sym, const std::vector<torch::jit::NamedValue>& arguments,
-      const std::vector<torch::jit::NamedValue>& kwarguments = {}) {
+      const std::vector<torch::jit::NamedValue>& kwarguments = {}) override {
     auto builtin =
         std::make_shared<torch::jit::BuiltinFunction>(sym, at::nullopt);
     auto magic_method = std::make_shared<torch::jit::MagicMethod>("", builtin);
@@ -1112,8 +1095,8 @@ class TSNodeLowering : public NodeLowering {
   std::shared_ptr<torch::jit::GraphFunction> function_;
 };
 
-NodeLowering* GetTSNodeLowering() {
-  static TSNodeLowering* ts_node_lowering =
+TSNodeLoweringInterface* GetTSNodeLowering() {
+  static TSNodeLoweringInterface* ts_node_lowering =
       new TSNodeLowering("ltc-ts", nullptr);
   return ts_node_lowering;
 }

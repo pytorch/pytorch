@@ -7,6 +7,7 @@ from tools.codegen.api.types import (BaseCType, OptionalCType, NamedCType,
                                      VectorCType, kernel_signature)
 import tools.codegen.api.dispatcher as dispatcher
 from tools.codegen.api.lazy import LazyIrSchema, isValueType
+from tools.codegen.dest.lazy_ts_lowering import ts_lowering_body
 
 
 def node_ctor_inputs(func: LazyIrSchema) -> str:
@@ -98,6 +99,12 @@ class {schema.node_name} : public {self.node_base} {{
     ss << TsNode::ToString();
     {members_to_string}
     return ss.str();
+  }}
+
+  TSOpVector Lower(TSNodeLoweringInterface& tsLoweringInterface,
+                   std::shared_ptr<torch::jit::GraphFunction> function,
+                   ts_backend::TSLoweringContext* loctx) const override {{
+    {ts_lowering_body(f)}
   }}
 
   // TODO(whc) prefer to move these shapes to TsNode, but need to find a way to populate

@@ -175,6 +175,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                 "lazy_tensor_core/csrc/ir.h",
                 "lazy_tensors/types.h",
                 "lazy_tensor_core/csrc/compiler/node_lowering.h",
+                "lazy_tensor_core/csrc/ts_backend/ts_lowering_context.h",
                 "torch/csrc/lazy/core/hash.h",
                 node_base_hdr if node_base_hdr is not None else None
             ] if path is not None],
@@ -187,34 +188,6 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                 grouped_native_functions
             )),
         })
-
-        if gen_ts_lowerings:
-            # Generate TorchScript Lowerings for the IR nodes
-            fm.write_with_template('LazyTsLowering.cpp', 'LazyTsLowering.cpp', lambda: {
-                'ts_lowering_sysinc': [f'#include <{path}>' for path in [
-                    "vector",
-                ]],
-                'ts_lowering_inc': [f'#include "{path}"' for path in [
-                    "lazy_tensor_core/csrc/ir.h",
-                    "torch/csrc/jit/ir/named_value.h",
-                    "torch/csrc/jit/frontend/sugared_value.h",
-                    "lazy_tensor_core/csrc/ts_backend/ts_lowering_context.h",
-                    f"{output_dir}/{backend_key}LazyIr.h",
-                ]],
-                'backend_namespace': backend_dispatch_key.lower(),  # TODO this is not designed yet
-                'lowering_dispatches': list(concat_map_codegen(
-                    dest.LazyTsLowering(
-                        backend_indices[backend_dispatch_key],
-                        dest.LazyTsLowering.TsLoweringTarget.DISPATCH),
-                    grouped_native_functions,
-                )),
-                'lowering_definitions': list(concat_map_codegen(
-                    dest.LazyTsLowering(
-                        backend_indices[backend_dispatch_key],
-                        dest.LazyTsLowering.TsLoweringTarget.LOWERING),
-                    grouped_native_functions
-                )),
-            })
 
 
 if __name__ == '__main__':
