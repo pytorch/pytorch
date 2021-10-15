@@ -10870,8 +10870,6 @@ op_db: List[OpInfo] = [
         '_masked.amin',
         nan_policy='propagate',
         supports_out=False,
-        # FIXME: autograd check likely needs to take into account the mask.
-        supports_autograd=False,
         dtypes=all_types_and(torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.amin),
         skips=(
