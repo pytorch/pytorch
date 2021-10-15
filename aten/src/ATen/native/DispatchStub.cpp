@@ -30,9 +30,11 @@ static CPUCapability compute_cpu_capability() {
       }
     }
 #endif
+#ifdef HAVE_AVX2_CPU_DEFINITION
     if (strcmp(envar, "avx2") == 0) {
       return CPUCapability::AVX2;
     }
+#endif
 #endif
     if (strcmp(envar, "default") == 0) {
       return CPUCapability::DEFAULT;
