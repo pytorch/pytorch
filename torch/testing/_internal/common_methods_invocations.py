@@ -3854,8 +3854,10 @@ def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False, **kw
     deltas: Tuple[int, ...]
     if device.type == 'cpu' or has_cusolver():
         deltas = (-1, 0, +1)
+    # only square systems if Cusolver is not available
+    # becase we solve a lstsq problem with a transposed matrix in the backward
     else:
-        deltas = (0, +1)
+        deltas = (0,)
 
     out = []
     for batch, driver, delta in product(((), (3,), (3, 3)), drivers, deltas):
