@@ -5,8 +5,6 @@
 #include <map>
 #include <unordered_set>
 
-
-#include <c10/util/irange.h>
 #include <c10/util/string_view.h>
 #include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/context.h"
@@ -131,13 +129,13 @@ class LoadOp final : public Operator<Context> {
     int total_loaded_blobs = 0;
     std::unordered_map<string, load_save_op_util::BlobState> blob_states;
     if (InputSize() > 0) {
-      for (const auto i : c10::irange(InputSize())) {
+      for (int i = 0; i < InputSize(); ++i) {
         const db::DBReader& reader = this->template Input<db::DBReader>(i);
         extract(i, reader.cursor(), &blob_states, &total_loaded_blobs);
       }
     } else {
       // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      for (const auto i : c10::irange(db_names_.size())) {
+      for (int i = 0; i < db_names_.size(); ++i) {
         string full_db_name = absolute_path_
             ? db_names_[i]
             : (ws_->RootFolder() + "/" + db_names_[i]);

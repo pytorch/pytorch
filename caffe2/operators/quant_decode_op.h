@@ -1,8 +1,6 @@
 #ifndef QUANT_DECODE_OP_H_
 #define QUANT_DECODE_OP_H_
 
-
-#include <c10/util/irange.h>
 #include <c10/util/typeid.h>
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
@@ -36,7 +34,7 @@ void Decode(
     }
 
     int sz = output->numel();
-    for (const auto i : c10::irange(sz)) {
+    for (int i = 0; i < sz; i++) {
       DCHECK_LE(*code_ptr, cb_size);
       *out_ptr++ = cb_ptr[*code_ptr++];
     }
@@ -118,7 +116,7 @@ class QuantDecodeOp final : public Operator<CPUContext> {
     const auto& codebook = Input(0);
     CAFFE_ENFORCE(codebook.template IsType<float>(), codebook.dtype().name());
 
-    for (const auto i : c10::irange(OutputSize())) {
+    for (int i = 0; i < OutputSize(); i++) {
       auto& ci = Input(i + 1);
       auto* co = Output(i);
 
@@ -159,7 +157,7 @@ class QuantDecodeGradientOp final : public Operator<CPUContext> {
     auto* gradient_ptr = gradient->template mutable_data<float>();
     std::fill(gradient_ptr, gradient_ptr + gradient->numel(), 0);
 
-    for (const auto i : c10::irange(num_code_tensors)) {
+    for (int i = 0; i < num_code_tensors; i++) {
       auto& codes_i = Input(i + 1);
       auto& output_gradient_i = Input(i + num_code_tensors + 1);
       DecodeGeneral(codebook, codes_i, &output_gradient_i, gradient, false);

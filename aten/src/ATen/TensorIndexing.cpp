@@ -1,7 +1,6 @@
 #include <ATen/TensorIndexing.h>
 
 #include <c10/util/Exception.h>
-#include <c10/util/irange.h>
 
 namespace at {
 namespace indexing {
@@ -32,7 +31,7 @@ std::ostream& operator<<(std::ostream& stream, const TensorIndex& tensor_index) 
 
 std::ostream& operator<<(std::ostream& stream, const std::vector<TensorIndex>& tensor_indices) {
   stream << "(";
-  for (const auto i : c10::irange(tensor_indices.size())) {
+  for (size_t i = 0; i < tensor_indices.size(); i++) {
     stream << tensor_indices[i];
     if (i < tensor_indices.size() - 1) stream << ", ";
   }

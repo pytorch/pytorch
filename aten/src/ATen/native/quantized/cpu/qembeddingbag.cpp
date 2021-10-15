@@ -9,7 +9,6 @@
 #endif
 
 #include <ATen/Parallel.h>
-#include <c10/util/irange.h>
 
 torch::class_<EmbeddingPackedParamsBase> register_embedding_params();
 
@@ -45,7 +44,7 @@ at::Tensor& embedding_lookup_fallback_impl(
   std::vector<OffsetType> lengths_data;
 
   int64_t lower = accessor[0];
-  for (const auto i : c10::irange(1, offsets.numel())) {
+  for (int64_t i = 1; i < offsets.numel(); ++i) {
     lengths_data.push_back(accessor[i] - lower);
     lower = accessor[i];
   }
@@ -59,7 +58,7 @@ at::Tensor& embedding_lookup_fallback_impl(
   if (per_sample_weights_.has_value()) {
     per_sample_weights_data = per_sample_weights_.value().data_ptr<float>();
   }
-  for (const auto m : c10::irange(output_size)) {
+  for (int m = 0; m < output_size; ++m) {
     memset(output_data, 0, block_size * sizeof(float));
     TORCH_CHECK(
         current + lengths_data[m] <= index_size,
@@ -127,7 +126,7 @@ at::Tensor& embedding_lookup_fallback_impl(
         bias = weight_val * bias_val;
       }
 
-      for (const auto j : c10::irange(block_size)) {
+      for (int j = 0; j < block_size; ++j) {
         uint8_t quantized =
             weight_data[idx * weight_size + j / NUM_ELEM_PER_BYTE];
         quantized >>= (j % NUM_ELEM_PER_BYTE) * BIT_RATE;

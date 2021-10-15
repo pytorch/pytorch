@@ -5,7 +5,6 @@
 #include <gtest/gtest.h>
 
 #include <c10/macros/Macros.h>
-#include <c10/util/irange.h>
 #include "test/cpp/tensorexpr/padded_buffer.h"
 #include "test/cpp/tensorexpr/test_base.h"
 #include "torch/csrc/jit/tensorexpr/ir_printer.h"
@@ -29,14 +28,14 @@ TEST(ATen, _cast_Float) {
   PaddedBuffer<int> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     a_v(i) = i;
   }
 
   SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     ASSERT_EQ(a_v(i), i);
     ASSERT_EQ(b_v(i), static_cast<float>(i));
   }
@@ -56,14 +55,14 @@ TEST(ATen, negInt) {
   PaddedBuffer<int> a_v(kTotalSize);
   PaddedBuffer<int> b_v(kTotalSize);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     a_v(i) = i;
   }
 
   SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     ASSERT_EQ(a_v(i), i);
     ASSERT_EQ(b_v(i), -static_cast<float>(i));
   }
@@ -83,14 +82,14 @@ TEST(ATen, negFloat) {
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     a_v(i) = i;
   }
 
   SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     ASSERT_EQ(a_v(i), i);
     ASSERT_EQ(b_v(i), -i);
   }
@@ -115,7 +114,7 @@ TEST(ATen, addInt) {
   PaddedBuffer<int> c_v(kTotalSize);
   PaddedBuffer<int> d_v(kTotalSize);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     a_v(i) = i;
     b_v(i) = 2 * i + 1;
     c_v(i) = 3 * i + 2;
@@ -124,7 +123,7 @@ TEST(ATen, addInt) {
   SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf, d_buf});
   ir_eval(a_v, b_v, c_v, d_v);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     ASSERT_EQ(a_v(i), i);
     ASSERT_EQ(b_v(i), 2 * i + 1);
     ASSERT_EQ(c_v(i), 3 * i + 2);
@@ -151,7 +150,7 @@ TEST(ATen, addFloat) {
   PaddedBuffer<float> c_v(kTotalSize);
   PaddedBuffer<float> d_v(kTotalSize);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     a_v(i) = i;
     b_v(i) = 2 * i + 1;
     c_v(i) = 3 * i + 2;
@@ -160,7 +159,7 @@ TEST(ATen, addFloat) {
   SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf, d_buf});
   ir_eval(a_v, b_v, c_v, d_v);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     ASSERT_EQ(a_v(i), i);
     ASSERT_EQ(b_v(i), 2 * i + 1);
     ASSERT_EQ(c_v(i), 3 * i + 2);
@@ -187,7 +186,7 @@ TEST(ATen, subInt) {
   PaddedBuffer<int> c_v(kTotalSize);
   PaddedBuffer<int> d_v(kTotalSize);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     a_v(i) = i;
     b_v(i) = 2 * i + 1;
     c_v(i) = 3 * i + 2;
@@ -196,7 +195,7 @@ TEST(ATen, subInt) {
   SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf, d_buf});
   ir_eval(a_v, b_v, c_v, d_v);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     ASSERT_EQ(a_v(i), i);
     ASSERT_EQ(b_v(i), 2 * i + 1);
     ASSERT_EQ(c_v(i), 3 * i + 2);
@@ -223,7 +222,7 @@ TEST(ATen, subFloat) {
   PaddedBuffer<float> c_v(kTotalSize);
   PaddedBuffer<float> d_v(kTotalSize);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     a_v(i) = i;
     b_v(i) = 2 * i + 1;
     c_v(i) = 3 * i + 2;
@@ -232,7 +231,7 @@ TEST(ATen, subFloat) {
   SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf, d_buf});
   ir_eval(a_v, b_v, c_v, d_v);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     ASSERT_EQ(a_v(i), i);
     ASSERT_EQ(b_v(i), 2 * i + 1);
     ASSERT_EQ(c_v(i), 3 * i + 2);
@@ -259,7 +258,7 @@ TEST(ATen, lerp) {
   PaddedBuffer<float> c_v(kTotalSize);
   PaddedBuffer<float> d_v(kTotalSize);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     a_v(i) = i;
     b_v(i) = 2 * i + 1;
     c_v(i) = 3 * i + 2;
@@ -268,7 +267,7 @@ TEST(ATen, lerp) {
   SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf, d_buf});
   ir_eval(a_v, b_v, c_v, d_v);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     ASSERT_EQ(a_v(i), i);
     ASSERT_EQ(b_v(i), 2 * i + 1);
     ASSERT_EQ(c_v(i), 3 * i + 2);
@@ -298,7 +297,7 @@ TEST(ATen, addcmulInt) {
   PaddedBuffer<int> d_v(kTotalSize);
   PaddedBuffer<int> e_v(kTotalSize);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     a_v(i) = i;
     b_v(i) = 2 * i + 1;
     c_v(i) = 3 * i + 2;
@@ -308,7 +307,7 @@ TEST(ATen, addcmulInt) {
   SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf, d_buf, e_buf});
   ir_eval(a_v, b_v, c_v, d_v, e_v);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     ASSERT_EQ(a_v(i), i);
     ASSERT_EQ(b_v(i), 2 * i + 1);
     ASSERT_EQ(c_v(i), 3 * i + 2);
@@ -339,7 +338,7 @@ TEST(ATen, addcmulFloat) {
   PaddedBuffer<float> d_v(kTotalSize);
   PaddedBuffer<float> e_v(kTotalSize);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     a_v(i) = i;
     b_v(i) = 2 * i + 1;
     c_v(i) = 3 * i + 2;
@@ -349,7 +348,7 @@ TEST(ATen, addcmulFloat) {
   SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf, d_buf, e_buf});
   ir_eval(a_v, b_v, c_v, d_v, e_v);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     ASSERT_EQ(a_v(i), i);
     ASSERT_EQ(b_v(i), 2 * i + 1);
     ASSERT_EQ(c_v(i), 3 * i + 2);
@@ -374,7 +373,7 @@ TEST(ATen, mulInt) {
   PaddedBuffer<int> b_v(kTotalSize);
   PaddedBuffer<int> c_v(kTotalSize);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     a_v(i) = i;
     b_v(i) = 2 * i + 1;
   }
@@ -382,7 +381,7 @@ TEST(ATen, mulInt) {
   SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf});
   ir_eval(a_v, b_v, c_v);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     ASSERT_EQ(a_v(i), i);
     ASSERT_EQ(b_v(i), 2 * i + 1);
     ASSERT_EQ(c_v(i), a_v(i) * b_v(i));
@@ -405,7 +404,7 @@ TEST(ATen, mulFloat) {
   PaddedBuffer<float> b_v(kTotalSize);
   PaddedBuffer<float> c_v(kTotalSize);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     a_v(i) = i;
     b_v(i) = 2 * i + 1;
   }
@@ -413,7 +412,7 @@ TEST(ATen, mulFloat) {
   SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf});
   ir_eval(a_v, b_v, c_v);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     ASSERT_EQ(a_v(i), i);
     ASSERT_EQ(b_v(i), 2 * i + 1);
     ASSERT_EQ(c_v(i), a_v(i) * b_v(i));
@@ -436,7 +435,7 @@ TEST(ATen, divInt) {
   PaddedBuffer<int> b_v(kTotalSize);
   PaddedBuffer<int> c_v(kTotalSize);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     a_v(i) = 2 * i + 1;
     b_v(i) = i + 1;
   }
@@ -444,7 +443,7 @@ TEST(ATen, divInt) {
   SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf});
   ir_eval(a_v, b_v, c_v);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     ASSERT_EQ(a_v(i), 2 * i + 1);
     ASSERT_EQ(b_v(i), i + 1);
     ASSERT_EQ(c_v(i), a_v(i) / b_v(i));
@@ -467,7 +466,7 @@ TEST(ATen, divFloat) {
   PaddedBuffer<float> b_v(kTotalSize);
   PaddedBuffer<float> c_v(kTotalSize);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     a_v(i) = 2 * i + 1;
     b_v(i) = i + 1;
   }
@@ -475,7 +474,7 @@ TEST(ATen, divFloat) {
   SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf});
   ir_eval(a_v, b_v, c_v);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     ASSERT_EQ(a_v(i), 2 * i + 1);
     ASSERT_EQ(b_v(i), i + 1);
     ASSERT_EQ(c_v(i), a_v(i) / b_v(i));
@@ -498,7 +497,7 @@ TEST(ATen, maxInt) {
   PaddedBuffer<int> b_v(kTotalSize);
   PaddedBuffer<int> c_v(kTotalSize);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     a_v(i) = i;
     b_v(i) = 2 * i + 1;
   }
@@ -506,7 +505,7 @@ TEST(ATen, maxInt) {
   SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf});
   ir_eval(a_v, b_v, c_v);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     ASSERT_EQ(a_v(i), i);
     ASSERT_EQ(b_v(i), 2 * i + 1);
     ASSERT_EQ(c_v(i), std::max(a_v(i), b_v(i)));
@@ -529,7 +528,7 @@ TEST(ATen, maxFloat) {
   PaddedBuffer<float> b_v(kTotalSize);
   PaddedBuffer<float> c_v(kTotalSize);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     a_v(i) = i;
     b_v(i) = 2 * i + 1;
   }
@@ -537,7 +536,7 @@ TEST(ATen, maxFloat) {
   SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf});
   ir_eval(a_v, b_v, c_v);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     ASSERT_EQ(a_v(i), i);
     ASSERT_EQ(b_v(i), 2 * i + 1);
     ASSERT_EQ(c_v(i), std::fmax(a_v(i), b_v(i)));
@@ -560,7 +559,7 @@ TEST(ATen, minInt) {
   PaddedBuffer<int> b_v(kTotalSize);
   PaddedBuffer<int> c_v(kTotalSize);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     a_v(i) = i;
     b_v(i) = 2 * i + 1;
   }
@@ -568,7 +567,7 @@ TEST(ATen, minInt) {
   SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf});
   ir_eval(a_v, b_v, c_v);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     ASSERT_EQ(a_v(i), i);
     ASSERT_EQ(b_v(i), 2 * i + 1);
     ASSERT_EQ(c_v(i), std::min(a_v(i), b_v(i)));
@@ -591,7 +590,7 @@ TEST(ATen, minFloat) {
   PaddedBuffer<float> b_v(kTotalSize);
   PaddedBuffer<float> c_v(kTotalSize);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     a_v(i) = i;
     b_v(i) = 2 * i + 1;
   }
@@ -599,7 +598,7 @@ TEST(ATen, minFloat) {
   SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf});
   ir_eval(a_v, b_v, c_v);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     ASSERT_EQ(a_v(i), i);
     ASSERT_EQ(b_v(i), 2 * i + 1);
     ASSERT_EQ(c_v(i), std::fmin(a_v(i), b_v(i)));
@@ -619,14 +618,14 @@ void __ubsan_ignore_float_divide_by_zero__ testATenreciprocal() {
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     a_v(i) = i;
   }
 
   SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     ASSERT_EQ(a_v(i), i);
     ASSERT_EQ(b_v(i), 1.0f / i);
   }
@@ -645,14 +644,14 @@ TEST(ATen, reluInt) {
   PaddedBuffer<int> a_v(kTotalSize);
   PaddedBuffer<int> b_v(kTotalSize);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     a_v(i) = i - 64;
   }
 
   SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     ASSERT_EQ(a_v(i), i - 64);
     ASSERT_EQ(b_v(i), std::max(a_v(i), 0));
   }
@@ -673,14 +672,14 @@ TEST(ATen, reluFloat) {
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     a_v(i) = i - 64;
   }
 
   SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     ASSERT_EQ(a_v(i), i - 64);
     ASSERT_EQ(b_v(i), std::fmax(a_v(i), 0));
   }
@@ -699,14 +698,14 @@ TEST(ATen, logFloat) {
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     a_v(i) = i + 10;
   }
 
   SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     ASSERT_EQ(a_v(i), i + 10);
     ASSERT_EQ(b_v(i), std::log(a_v(i)));
   }
@@ -725,14 +724,14 @@ TEST(ATen, fastLogFloat) {
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     a_v(i) = at::randn({1}).item().to<float>();
   }
 
   SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     auto test = b_v(i);
     auto ref = std::log(a_v(i));
     if (std::isnan(ref)) {
@@ -756,14 +755,14 @@ TEST(ATen, fastTanhFloat) {
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     a_v(i) = at::randn({1}).item().to<float>();
   }
 
   SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     auto test = b_v(i);
     auto ref = std::tanh(a_v(i));
     if (std::isnan(ref)) {
@@ -787,14 +786,14 @@ TEST(ATen, fastSigmoidFloat) {
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     a_v(i) = at::randn({1}).item().to<float>();
   }
 
   SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     auto test = b_v(i);
     at::Tensor t = at::ones({1}) * a_v(i);
     float ref = at::sigmoid(t).item().to<float>();
@@ -819,14 +818,14 @@ TEST(ATen, log10Float) {
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     a_v(i) = i + 10;
   }
 
   SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     ASSERT_EQ(a_v(i), i + 10);
     ASSERT_EQ(b_v(i), std::log10(a_v(i)));
   }
@@ -845,14 +844,14 @@ TEST(ATen, log2Float) {
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     a_v(i) = i + 10;
   }
 
   SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     ASSERT_EQ(a_v(i), i + 10);
     ASSERT_EQ(b_v(i), std::log2(a_v(i)));
   }
@@ -871,7 +870,7 @@ TEST(ATen, expFloat) {
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     a_v(i) = i / 10.0f;
   }
@@ -879,7 +878,7 @@ TEST(ATen, expFloat) {
   SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     ASSERT_EQ(a_v(i), i / 10.0f);
     ASSERT_EQ(b_v(i), std::exp(a_v(i)));
   }
@@ -898,7 +897,7 @@ TEST(ATen, erfFloat) {
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     a_v(i) = i / 10.0f;
   }
@@ -906,7 +905,7 @@ TEST(ATen, erfFloat) {
   SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     ASSERT_EQ(a_v(i), i / 10.0f);
     ASSERT_EQ(b_v(i), std::erf(a_v(i)));
   }
@@ -925,7 +924,7 @@ TEST(ATen, cosFloat) {
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     a_v(i) = i / 10.0f;
   }
@@ -933,7 +932,7 @@ TEST(ATen, cosFloat) {
   SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     ASSERT_EQ(a_v(i), i / 10.0f);
     ASSERT_EQ(b_v(i), std::cos(a_v(i)));
   }

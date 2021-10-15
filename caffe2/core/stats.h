@@ -73,7 +73,7 @@ TORCH_API ExportedStatMap toMap(const ExportedStatList& stats);
  * int main() {
  *   MyCaffeClass a("first");
  *   MyCaffeClass b("second");
- *   for (const auto i : c10::irange(10)) {
+ *   for (int i = 0; i < 10; ++i) {
  *     a.run(10);
  *     b.run(5);
  *   }

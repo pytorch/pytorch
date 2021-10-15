@@ -1,7 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/AdaptivePooling.h>
-#include <c10/util/irange.h>
 
 
 namespace at {
@@ -11,7 +10,7 @@ TORCH_META_FUNC(adaptive_max_pool2d) (const Tensor& input, IntArrayRef output_si
   TORCH_CHECK(ndim == 3 || ndim == 4,
               "adaptive_max_pool2d(): Expected 3D or 4D tensor, but got: ",
               input.sizes());
-  for (const auto i : c10::irange(1, ndim)) {
+  for (int64_t i = 1; i < ndim; i++) {
     TORCH_CHECK(input.size(i) > 0,
         "adaptive_max_pool2d(): Expected input to have non-zero size for non-batch dimensions, "
         "but input has sizes ", input.sizes(), " with dimension ", i,
@@ -52,7 +51,7 @@ TORCH_META_FUNC(adaptive_max_pool2d_backward)
   int64_t ndim = grad_output.ndimension();
   TORCH_CHECK(ndim == 3 || ndim == 4,
     "adaptive_max_pooling2d_backward(): Expected 3D or 4D grad_output, but got: ", grad_output.sizes());
-  for (const auto i : c10::irange(1, ndim)) {
+  for (int64_t i = 1; i < ndim; i++) {
     TORCH_CHECK(grad_output.size(i) > 0,
       "adaptive_max_pooling2d_backward(): Expected grad_output to have non-zero size for non-batch dimensions, "
       "but grad_output has sizes ", grad_output.sizes(), " with dimension ", i,

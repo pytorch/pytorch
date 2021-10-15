@@ -30,7 +30,7 @@ class NHWC2NCHWOp final : public Operator<Context> {
     Y_dims[0] = N;
     Y_dims[1] = C;
     int HxW = 1;
-    for (const auto i : c10::irange(2, ndim)) {
+    for (int i = 2; i < ndim; ++i) {
       Y_dims[i] = X.dim32(i - 1);
       HxW *= Y_dims[i];
     }

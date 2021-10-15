@@ -51,7 +51,7 @@ class WhereOp final : public Operator<Context> {
 
     if (enable_broadcast_) {
       size_t block_size = left.size_from_dim(1);
-      for (const auto i : c10::irange(select.numel())) {
+      for (int i = 0; i < select.numel(); i++) {
         size_t offset = i * block_size;
         if (select_data[i]) {
           context_.CopyItemsSameDevice(
@@ -68,7 +68,7 @@ class WhereOp final : public Operator<Context> {
         }
       }
     } else {
-      for (const auto i : c10::irange(select.numel())) {
+      for (int i = 0; i < select.numel(); ++i) {
         output_data[i] = select_data[i] ? left_data[i] : right_data[i];
       }
     }
@@ -159,7 +159,7 @@ class IsMemberOfOp final : public Operator<Context> {
 
     const T* input_data = input.template data<T>();
     bool* output_data = output->template mutable_data<bool>();
-    for (const auto i : c10::irange(input.numel())) {
+    for (int i = 0; i < input.numel(); ++i) {
       output_data[i] = values.find(input_data[i]) != values.end();
     }
     return true;

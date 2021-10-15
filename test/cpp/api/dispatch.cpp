@@ -2,7 +2,6 @@
 
 #include <torch/torch.h>
 #include <ATen/native/Pow.h>
-#include <c10/util/irange.h>
 #include <torch/types.h>
 #include <torch/utils.h>
 #include <test/cpp/api/support.h>
@@ -25,7 +24,7 @@ TEST_F(DispatchTest, TestAVX2) {
   setenv("ATEN_CPU_CAPABILITY", "avx2", 1);
 #endif
   const auto actual_pow_avx2 = vals_tensor.pow(pows_tensor);
-  for (const auto i : c10::irange(4)) {
+  for (int i = 0; i < 4; i++) {
     ASSERT_EQ(result[i], actual_pow_avx2[i].item<int>());
   }
 }
@@ -41,7 +40,7 @@ TEST_F(DispatchTest, TestAVX512) {
   setenv("ATEN_CPU_CAPABILITY", "avx512", 1);
 #endif
   const auto actual_pow_avx512 = vals_tensor.pow(pows_tensor);
-  for (const auto i : c10::irange(4)) {
+  for (int i = 0; i < 4; i++) {
     ASSERT_EQ(result[i], actual_pow_avx512[i].item<int>());
   }
 }
@@ -57,7 +56,7 @@ TEST_F(DispatchTest, TestDefault) {
   setenv("ATEN_CPU_CAPABILITY", "default", 1);
 #endif
   const auto actual_pow_default = vals_tensor.pow(pows_tensor);
-  for (const auto i : c10::irange(4)) {
+  for (int i = 0; i < 4; i++) {
     ASSERT_EQ(result[i], actual_pow_default[i].item<int>());
   }
 }

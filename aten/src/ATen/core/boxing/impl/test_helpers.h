@@ -7,7 +7,6 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/ivalue.h>
 #include <c10/core/CPUAllocator.h>
-#include <c10/util/irange.h>
 
 template<class... Inputs>
 inline std::vector<c10::IValue> makeStack(Inputs&&... inputs) {
@@ -88,7 +87,7 @@ inline void expectThrows(Functor&& functor, const char* expectMessageContains) {
 template<class T, size_t N>
 void expectListEquals(c10::ArrayRef<T> expected, std::array<T, N> actual) {
   EXPECT_EQ(expected.size(), actual.size());
-  for (const auto i : c10::irange(expected.size())) {
+  for (size_t i = 0; i < expected.size(); ++i) {
     EXPECT_EQ(expected[i], actual[i]);
   }
 }
@@ -96,7 +95,7 @@ void expectListEquals(c10::ArrayRef<T> expected, std::array<T, N> actual) {
 template<class T>
 void expectListEquals(c10::ArrayRef<T> expected, c10::ArrayRef<T> actual) {
   EXPECT_EQ(expected.size(), actual.size());
-  for (const auto i : c10::irange(expected.size())) {
+  for (size_t i = 0; i < expected.size(); ++i) {
     EXPECT_EQ(expected[i], actual[i]);
   }
 }
@@ -104,7 +103,7 @@ void expectListEquals(c10::ArrayRef<T> expected, c10::ArrayRef<T> actual) {
 template<class T>
 void expectListEquals(c10::ArrayRef<T> expected, c10::List<T> actual) {
   EXPECT_EQ(expected.size(), actual.size());
-  for (const auto i : c10::irange(expected.size())) {
+  for (size_t i = 0; i < expected.size(); ++i) {
     EXPECT_EQ(expected[i], actual.get(i));
   }
 }
@@ -112,7 +111,7 @@ void expectListEquals(c10::ArrayRef<T> expected, c10::List<T> actual) {
 template<class T>
 void expectListEquals(c10::ArrayRef<T> expected, std::vector<T> actual) {
   EXPECT_EQ(expected.size(), actual.size());
-  for (const auto i : c10::irange(expected.size())) {
+  for (size_t i = 0; i < expected.size(); ++i) {
     EXPECT_EQ(expected[i], actual[i]);
   }
 }

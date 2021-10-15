@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
-#include <c10/util/irange.h>
 
 #include <iostream>
 using namespace std;
@@ -103,7 +102,7 @@ void trace() {
   auto foo_a = foo.accessor<float, 2>();
   float trace = 0;
 
-  for (const auto i : c10::irange(foo_a.size(0))) {
+  for (int i = 0; i < foo_a.size(0); i++) {
     trace += foo_a[i][i];
   }
 
@@ -238,8 +237,8 @@ TEST_F(atest, atest) {
   // foo = foo[3];
   auto foo_v = foo.accessor<uint8_t, 2>();
 
-  for (const auto i : c10::irange(foo_v.size(0))) {
-    for (const auto j : c10::irange(foo_v.size(1))) {
+  for (int i = 0; i < foo_v.size(0); i++) {
+    for (int j = 0; j < foo_v.size(1); j++) {
       foo_v[i][j]++;
     }
   }

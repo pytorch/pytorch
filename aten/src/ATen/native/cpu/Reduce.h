@@ -4,7 +4,6 @@
 #include <ATen/Parallel.h>
 #include <c10/util/TypeList.h>
 #include <c10/core/Scalar.h>
-#include <c10/util/irange.h>
 
 #include <sstream>
 
@@ -39,10 +38,10 @@ static inline void vectorized_reduction(char** data, int64_t n, int64_t stride,
   VEC_LOOP_HEADER(func_t, data)
   const char* in1_ptr = data[1];
   Vec acc[4];
-  for (const auto j : c10::irange(4)) {
+  for  (int j = 0; j < 4; j++) {
     acc[j] = Vec::loadu(in1_ptr + j * Vec::size() * sizeof(scalar_t));
   }
-  for (const auto i : c10::irange(1, n)) {
+  for (int64_t i = 1; i < n; i++) {
     const char* ptr = in1_ptr + stride * i;
     acc[0] = vop(acc[0], Vec::loadu(ptr + (0 * Vec::size() * sizeof(scalar_t))));
     acc[1] = vop(acc[1], Vec::loadu(ptr + (1 * Vec::size() * sizeof(scalar_t))));
@@ -59,7 +58,7 @@ static inline void vectorized_reduction(char** data, int64_t n, int64_t stride,
     auto dst = (scalar_t*)out_ptr;
     *dst = op(*dst, buffer[0]);
   } else {
-    for (const auto j : c10::irange(4)) {
+    for (int j = 0; j < 4; j++) {
       auto dst = out_ptr + j * Vec::size() * sizeof(scalar_t);
       acc[j] = vop(acc[j], Vec::loadu(dst));
       acc[j].store(dst);
@@ -69,8 +68,7 @@ static inline void vectorized_reduction(char** data, int64_t n, int64_t stride,
 
 template <typename F>
 static inline void UNARY_OUTER_LOOP(char* data[2], const int64_t strides[2], int64_t n, F f) {
-  for (const auto j : c10::irange(n)) {
-    (void)j; //Suppress unused variable warning
+  for (int j = 0; j < n; j++) {
     f();
     data[0] += strides[0];
     data[1] += strides[1];
@@ -217,7 +215,7 @@ void binary_kernel_reduce(TensorIteratorBase& iter, ops_t ops, init_t init) {
         AT_ASSERT(ntensors - num_outputs == 1);
         char *in = data[ntensors - 1];
         int64_t stride = strides[ntensors - 1];
-        for (const auto i : c10::irange(size)) {
+        for (int64_t i = 0; i < size; ++i) {
           acc = ops.reduce(acc, *(data_t*)in, begin + i);
           in += stride;
         }
@@ -243,7 +241,7 @@ void binary_kernel_reduce(TensorIteratorBase& iter, ops_t ops, init_t init) {
           acc = reduction_body(acc, begin, end);
         }
       );
-      for (const auto i : c10::irange(max_threads)) {
+      for (int i = 0; i < max_threads; ++i) {
         total_acc = ops.combine(total_acc, buffer[i]);
       }
     }

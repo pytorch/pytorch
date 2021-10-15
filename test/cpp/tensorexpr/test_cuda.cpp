@@ -19,7 +19,6 @@
 
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/Half.h>
-#include <c10/util/irange.h>
 
 namespace torch {
 namespace jit {
@@ -57,7 +56,7 @@ static void testCudaTestVectorAdd01_impl() {
   PaddedBuffer<ctype> c_v(N);
   PaddedBuffer<ctype> c_ref(N);
 
-  for (const auto i : c10::irange(N)) {
+  for (int i = 0; i < N; i++) {
     a_v(i) = ctype(i);
     b_v(i) = ctype(i * 3 + 7);
     c_ref(i) = a_v(i) + b_v(i);
@@ -120,7 +119,7 @@ TEST(Cuda, Sigmoid_CUDA) {
   PaddedBuffer<float> c_v(N);
   PaddedBuffer<float> c_ref(N);
 
-  for (const auto i : c10::irange(N)) {
+  for (int i = 0; i < N; i++) {
     a_v(i) = float(i);
     c_ref(i) = sigmoid(sigmoid(a_v(i)));
   }
@@ -183,7 +182,7 @@ static void testCudaTestVectorAdd02_impl(int N, int block_size) {
   PaddedBuffer<float> c_v(N);
   PaddedBuffer<float> c_ref(N);
 
-  for (const auto i : c10::irange(N)) {
+  for (int i = 0; i < N; i++) {
     a_v(i) = i;
     b_v(i) = i * 3 + 7;
     c_ref(i) = a_v(i) + b_v(i);
@@ -357,7 +356,7 @@ TEST(Cuda, TestRand01_CUDA) {
   float sum1 = 0;
   float sum2 = 0;
   float sum3 = 0;
-  for (const auto i : c10::irange(N)) {
+  for (int i = 0; i < N; i++) {
     float v = c_v.data()[i];
     sum1 += v;
     sum2 += v * v;
@@ -432,10 +431,10 @@ TEST(Cuda, OneBlockOneThreadGlobalReduce1_CUDA) {
   BufHandle output_buf("output", {1}, kFloat);
 
   // The test adds the following code for trivial reduction:
-  // for (const auto bidx : c10::irange(1)) { // blockIdx.x
-  //   for (const auto tidx : c10::irange(1)) { // threadIdx.x
+  // for (int bidx = 0; bidx < 1; bidx++) { // blockIdx.x
+  //   for (int tidx = 0; tidx < 1; tidx++) { // threadIdx.x
   //     output[0] = 0.f;
-  //     for (const auto i1 : c10::irange(1024)) {
+  //     for (int i1 = 0; i1 < 1024; i1++) {
   //       output[0] = output[0] + data[i1];
   //     }
   //   }
@@ -466,7 +465,7 @@ TEST(Cuda, OneBlockOneThreadGlobalReduce1_CUDA) {
   PaddedBuffer<float> output_ref(1, "output_ref");
 
   output_ref(0) = 0;
-  for (const auto i : c10::irange(N)) {
+  for (int i = 0; i < N; i++) {
     data_v(i) = i;
     output_ref(0) += data_v(i);
   }
@@ -545,7 +544,7 @@ TEST(Cuda, OneBlockMultiThreadGlobalReduce1_CUDA) {
   PaddedBuffer<float> b_ref(1, "b_ref");
 
   b_ref(0) = 0;
-  for (const auto i : c10::irange(N)) {
+  for (int i = 0; i < N; i++) {
     a_v(i) = i;
     b_ref(0) += a_v(i);
   }
@@ -635,11 +634,11 @@ TEST(Cuda, NoThreadIdxWrite_1_CUDA) {
   PaddedBuffer<float> b_ref(N, "b_ref");
 
   a_ref(0) = 0;
-  for (const auto i : c10::irange(2)) {
+  for (int i = 0; i < 2; i++) {
     a_ref(0) += i;
   }
   a_ref(1) = a_ref(0) + 1;
-  for (const auto i : c10::irange(N)) {
+  for (int i = 0; i < N; i++) {
     b_ref(i) = i;
   }
 
@@ -773,8 +772,8 @@ TEST(Cuda, SharedMemReduce_1_CUDA) {
   PaddedBuffer<float> b_ref(1, "b_ref");
 
   b_ref(0) = 0;
-  for (const auto i : c10::irange(M)) {
-    for (const auto j : c10::irange(N)) {
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < N; j++) {
       int v = i + j;
       a_v(0, i, j) = v;
       b_ref(0) += v;
@@ -883,8 +882,8 @@ TEST(Cuda, LocalMemReduce_1_CUDA) {
   PaddedBuffer<float> b_ref(1, "b_ref");
 
   b_ref(0) = 0;
-  for (const auto i : c10::irange(M)) {
-    for (const auto j : c10::irange(N)) {
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < N; j++) {
       int v = i + j;
       a_v(0, i, j) = v;
       b_ref(0) += v;
@@ -1084,7 +1083,7 @@ TEST(Cuda, PrioritizeDependents_CUDA) {
   VarHandle j("j", kInt);
 
   /*
-   * for (const auto i : c10::irange(12)) {
+   * for (int i = 0; i < 12; ++i) {
    *   c[i] = (i < 10 ? a[i] + b[i] : b[i]);
    * }
    */
@@ -1103,13 +1102,13 @@ TEST(Cuda, PrioritizeDependents_CUDA) {
   PaddedBuffer<float> c_v(12, "c_v");
   PaddedBuffer<float> c_ref(12, "c_ref");
 
-  for (const auto i : c10::irange(10)) {
+  for (int i = 0; i < 10; ++i) {
     a_v(i) = i * 100;
     b_v(i) = i;
     c_v(i) = 0;
   }
 
-  for (const auto i : c10::irange(10, 12)) {
+  for (int i = 10; i < 12; ++i) {
     b_v(i) = i;
     c_v(i) = 0;
   }
@@ -1132,7 +1131,7 @@ TEST(Cuda, PrioritizeDependents_CUDA) {
   cudaMemcpy(c_v.data(), c_dev, 12 * sizeof(float), cudaMemcpyDeviceToHost);
   cudaDeviceSynchronize();
 
-  for (const auto i : c10::irange(12)) {
+  for (int i = 0; i < 12; ++i) {
     if (i < 10) {
       c_ref(i) = i + i * 100;
     } else {
@@ -1194,12 +1193,12 @@ TEST(Cuda, MaskBlockDim_CUDA) {
   PaddedBuffer<float> c_ref(A_SIZE);
   PaddedBuffer<float> d_ref(B_SIZE);
 
-  for (const auto i : c10::irange(A_SIZE)) {
+  for (int i = 0; i < A_SIZE; i++) {
     a_v(i) = (float)i;
     c_ref(i) = (float)(i + 10);
   }
 
-  for (const auto i : c10::irange(B_SIZE)) {
+  for (int i = 0; i < B_SIZE; i++) {
     b_v(i) = (float)(B_SIZE - i);
     d_ref(i) = a_v(i) + b_v(i);
   }
@@ -1286,12 +1285,12 @@ TEST(Cuda, MaskThreadDim_CUDA) {
   PaddedBuffer<float> c_ref(A_SIZE);
   PaddedBuffer<float> d_ref(B_SIZE);
 
-  for (const auto i : c10::irange(A_SIZE)) {
+  for (int i = 0; i < A_SIZE; i++) {
     a_v(i) = (float)i;
     c_ref(i) = (float)(i + 10);
   }
 
-  for (const auto i : c10::irange(B_SIZE)) {
+  for (int i = 0; i < B_SIZE; i++) {
     b_v(i) = (float)(B_SIZE - i);
     d_ref(i) = a_v(i / 2) + b_v(i);
   }
@@ -1379,12 +1378,12 @@ TEST(Cuda, MaskMultiBlockDim_CUDA) {
   PaddedBuffer<float> c_ref(A_SIZE);
   PaddedBuffer<float> d_ref(B_SIZE);
 
-  for (const auto i : c10::irange(A_SIZE)) {
+  for (int i = 0; i < A_SIZE; i++) {
     a_v(i) = (float)i;
     c_ref(i) = (float)(i + 10);
   }
 
-  for (const auto i : c10::irange(B_SIZE)) {
+  for (int i = 0; i < B_SIZE; i++) {
     b_v(i) = (float)(B_SIZE - i);
     d_ref(i) = a_v(i) + b_v(i);
   }
@@ -1472,12 +1471,12 @@ TEST(Cuda, MaskBlockAndThreadDim_CUDA) {
   PaddedBuffer<float> c_ref(A_SIZE);
   PaddedBuffer<float> d_ref(B_SIZE);
 
-  for (const auto i : c10::irange(A_SIZE)) {
+  for (int i = 0; i < A_SIZE; i++) {
     a_v(i) = (float)i;
     c_ref(i) = (float)(i + 10);
   }
 
-  for (const auto i : c10::irange(B_SIZE)) {
+  for (int i = 0; i < B_SIZE; i++) {
     b_v(i) = (float)(B_SIZE - i);
     d_ref(i) = a_v(i) + b_v(i);
   }
@@ -1573,15 +1572,15 @@ TEST(Cuda, MaskMultiDim_CUDA) {
   PaddedBuffer<float> c_ref(OUTER_SIZE, A_SIZE);
   PaddedBuffer<float> d_ref(OUTER_SIZE, B_SIZE);
 
-  for (const auto o : c10::irange(OUTER_SIZE)) {
-    for (const auto i : c10::irange(A_SIZE)) {
+  for (int o = 0; o < OUTER_SIZE; ++o) {
+    for (int i = 0; i < A_SIZE; i++) {
       a_v(o, i) = (float)i;
       c_ref(o, i) = (float)(i * 2);
     }
   }
 
-  for (const auto o : c10::irange(OUTER_SIZE)) {
-    for (const auto i : c10::irange(B_SIZE)) {
+  for (int o = 0; o < OUTER_SIZE; ++o) {
+    for (int i = 0; i < B_SIZE; i++) {
       b_v(o, i) = (float)(B_SIZE - i);
       d_ref(o, i) = c_ref(o, i * 2) + b_v(o, i);
     }
@@ -1707,15 +1706,15 @@ TEST(Cuda, MaskMultiDimSymbolic_CUDA) {
   PaddedBuffer<float> c_ref(OUTER_EXTENT, A_EXTENT);
   PaddedBuffer<float> d_ref(OUTER_EXTENT, B_EXTENT);
 
-  for (const auto o : c10::irange(OUTER_EXTENT)) {
-    for (const auto i : c10::irange(A_EXTENT)) {
+  for (int o = 0; o < OUTER_EXTENT; ++o) {
+    for (int i = 0; i < A_EXTENT; i++) {
       a_v(o, i) = (float)i;
       c_ref(o, i) = (float)(i * 2);
     }
   }
 
-  for (const auto o : c10::irange(OUTER_EXTENT)) {
-    for (const auto i : c10::irange(B_EXTENT)) {
+  for (int o = 0; o < OUTER_EXTENT; ++o) {
+    for (int i = 0; i < B_EXTENT; i++) {
       b_v(o, i) = (float)(B_EXTENT - i);
       d_ref(o, i) = c_ref(o, i * 2) + b_v(o, i);
     }
@@ -1848,12 +1847,12 @@ TEST(Cuda, MaskCompoundInnerLoop_CUDA) {
   PaddedBuffer<float> c_ref(OUTER_SIZE, A_SIZE);
   PaddedBuffer<float> d_ref(OUTER_SIZE, B_SIZE);
 
-  for (const auto o : c10::irange(OUTER_SIZE)) {
-    for (const auto i : c10::irange(A_SIZE)) {
+  for (int o = 0; o < OUTER_SIZE; ++o) {
+    for (int i = 0; i < A_SIZE; i++) {
       a_v(o, i) = (float)i;
       c_ref(o, i) = (float)(i * 2);
     }
-    for (const auto i : c10::irange(B_SIZE)) {
+    for (int i = 0; i < B_SIZE; i++) {
       b_v(o, i) = (float)(B_SIZE - i);
       d_ref(o, i) = c_ref(o, i * 2) + b_v(o, i);
     }
@@ -1986,12 +1985,12 @@ TEST(Cuda, MaskInnerLoopOneBlock_CUDA) {
   PaddedBuffer<float> c_ref(OUTER_SIZE, A_SIZE);
   PaddedBuffer<float> d_ref(OUTER_SIZE, B_SIZE);
 
-  for (const auto o : c10::irange(OUTER_SIZE)) {
-    for (const auto i : c10::irange(A_SIZE)) {
+  for (int o = 0; o < OUTER_SIZE; ++o) {
+    for (int i = 0; i < A_SIZE; i++) {
       a_v(o, i) = (float)i;
       c_ref(o, i) = (float)(i * 2);
     }
-    for (const auto i : c10::irange(B_SIZE)) {
+    for (int i = 0; i < B_SIZE; i++) {
       b_v(o, i) = (float)(B_SIZE - i);
       d_ref(o, i) = c_ref(o, i * 2) + b_v(o, i);
     }
@@ -2113,15 +2112,15 @@ TEST(Cuda, MaskMultiDimMultiAxis_CUDA) {
   PaddedBuffer<float> c_ref(OUTER_SIZE, A_SIZE);
   PaddedBuffer<float> d_ref(OUTER_SIZE, B_SIZE);
 
-  for (const auto o : c10::irange(OUTER_SIZE)) {
-    for (const auto i : c10::irange(A_SIZE)) {
+  for (int o = 0; o < OUTER_SIZE; ++o) {
+    for (int i = 0; i < A_SIZE; i++) {
       a_v(o, i) = (float)i;
       c_ref(o, i) = (float)(i * 2);
     }
   }
 
-  for (const auto o : c10::irange(OUTER_SIZE)) {
-    for (const auto i : c10::irange(B_SIZE)) {
+  for (int o = 0; o < OUTER_SIZE; ++o) {
+    for (int i = 0; i < B_SIZE; i++) {
       b_v(o, i) = (float)(B_SIZE - i);
       d_ref(o, i) = c_ref(o, i * 2) + b_v(o, i);
     }
@@ -2244,15 +2243,15 @@ TEST(Cuda, MaskMultiDimMultiLevel_CUDA) {
   PaddedBuffer<float> c_ref(OUTER_A_SIZE, A_SIZE);
   PaddedBuffer<float> d_ref(OUTER_B_SIZE, B_SIZE);
 
-  for (const auto o : c10::irange(OUTER_A_SIZE)) {
-    for (const auto i : c10::irange(A_SIZE)) {
+  for (int o = 0; o < OUTER_A_SIZE; ++o) {
+    for (int i = 0; i < A_SIZE; i++) {
       a_v(o, i) = (float)i;
       c_ref(o, i) = (float)(i * 2);
     }
   }
 
-  for (const auto o : c10::irange(OUTER_B_SIZE)) {
-    for (const auto i : c10::irange(B_SIZE)) {
+  for (int o = 0; o < OUTER_B_SIZE; ++o) {
+    for (int i = 0; i < B_SIZE; i++) {
       b_v(o, i) = (float)(B_SIZE - i);
       d_ref(o, i) = c_ref(o, i * 2) + b_v(o, i);
     }

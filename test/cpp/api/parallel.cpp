@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <c10/util/irange.h>
 #include <torch/csrc/autograd/functions/comm.h>
 #include <torch/nn/module.h>
 #include <torch/nn/modules/conv.h>
@@ -87,7 +86,7 @@ TEST_F(ParallelTest, Replicate_MultiCUDA) {
   }
   replicas[0]->to(torch::kCPU);
   ASSERT_EQ(replica1_parameters.size(), original_parameters.size());
-  for (const auto i : c10::irange(original_parameters.size())) {
+  for (size_t i = 0; i < original_parameters.size(); ++i) {
     ASSERT_TRUE(replica1_parameters[i].allclose(original_parameters[i]));
     ASSERT_TRUE(
         replica1_parameters[i].data_ptr<float>() !=
@@ -100,7 +99,7 @@ TEST_F(ParallelTest, Replicate_MultiCUDA) {
   }
   replicas[1]->to(torch::kCPU);
   ASSERT_EQ(replica2_parameters.size(), original_parameters.size());
-  for (const auto i : c10::irange(original_parameters.size())) {
+  for (size_t i = 0; i < original_parameters.size(); ++i) {
     ASSERT_TRUE(replica2_parameters[i].allclose(original_parameters[i]));
     ASSERT_TRUE(
         replica2_parameters[i].data_ptr<float>() !=
@@ -223,7 +222,7 @@ TEST_F(ParallelTest, DataParallelUsesAllAvailableCUDADevices_CUDA) {
   auto output = parallel::data_parallel(m, input);
 
   ASSERT_EQ(output.numel(), device_count);
-  for (const auto i : c10::irange(device_count)) {
+  for (size_t i = 0; i < device_count; ++i) {
     ASSERT_EQ(output[i].item<int32_t>(), i);
   }
 }
@@ -259,7 +258,7 @@ TEST_F(ParallelTest, DataParallelNumericalEquivalence_MultiCUDA) {
     auto model_dp = std::dynamic_pointer_cast<M>(model->clone());
 
     // run 3 training iterations
-    for (const auto i : c10::irange(3)) {
+    for (int i = 0; i < 3; ++i) {
       input += i;
       input_dp += i;
 

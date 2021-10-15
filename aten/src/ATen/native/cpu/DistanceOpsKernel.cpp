@@ -7,7 +7,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vml.h>
-#include <c10/util/irange.h>
 
 namespace at { namespace native { namespace {
 
@@ -228,7 +227,7 @@ struct Dist {
         const scalar_t * self_j = t2_start + size2 * l + j;
 
         scalar_t agg = 0;
-        for (const auto x : c10::irange(m)) {
+        for (int x = 0; x < m; x++) {
           scalar_t a = *(self_i + x);
           scalar_t b = *(self_j + x);
           agg = F::red(agg, F::map(std::abs(a-b), p));
@@ -393,8 +392,7 @@ struct Dist {
     const scalar_t * t1_end = t1 + l1_size;
     const scalar_t * t2_end = t2 + l2_size;
 
-    for (const auto l : c10::irange(d)) {
-      (void)l; //Suppress unused variable warning
+    for (int64_t l = 0; l < d; l++) {
       for (; t1 != t1_end; t1 += m, res += m) {
         const Vec vec_t1 = Vec::loadu(t1, count);
         Vec res_vec = Vec::loadu(res, count);

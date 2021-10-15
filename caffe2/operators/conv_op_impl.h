@@ -93,8 +93,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     col_buffer->Resize(buffer_shape);
     T* col_buffer_data = col_buffer->template mutable_data<T>();
     // Im2Col, followed by gemm.
-    for (const auto image_id : c10::irange(N)) {
-      (void)image_id; // Suppress unused variable warning
+    for (int image_id = 0; image_id < N; ++image_id) {
       if (kernel_.size() == 2) {
         math::Im2Col<T, Context, StorageOrder::NCHW>(
             C,
@@ -278,8 +277,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
     col_buffer->Resize(buffer_shape);
     T* col_buffer_data = col_buffer->template mutable_data<T>();
     // Im2Col, followed by gemm.
-    for (const auto image_id : c10::irange(N)) {
-      (void)image_id; // Suppress unused variable warning
+    for (int image_id = 0; image_id < N; ++image_id) {
       if (kernel_.size() <= 2) {
         math::Im2Col<T, Context, StorageOrder::NHWC>(
             C,
@@ -316,7 +314,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
             group_);
       }
       // Weight term
-      for (const auto group_id : c10::irange(group_)) {
+      for (int group_id = 0; group_id < group_; ++group_id) {
         // col_buffer_data in G (H W) (R S C/G) layout
         // filter_data in G K/G (R S C/G) layout
         math::GemmEx<T, Context>(
@@ -400,8 +398,8 @@ bool ConvOp<T, Context>::Run1x1ConvOnDeviceWithOrderNCHW(
     std::vector<const T*> X_ptr(N * G);
     std::vector<const T*> W_ptr(N * G);
     std::vector<T*> Y_ptr(N * G);
-    for (const auto i : c10::irange(N)) {
-      for (const auto j : c10::irange(G)) {
+    for (int i = 0; i < N; ++i) {
+      for (int j = 0; j < G; ++j) {
         const int index = i * G + j;
         X_ptr[index] = X + index * X_stride;
         W_ptr[index] = filter + j * W_stride;
@@ -456,7 +454,7 @@ bool ConvOp<T, Context>::Run1x1ConvOnDeviceWithOrderNHWC(
     T* Y) {
   const int G = group_;
   const int kernel_dim = C / G;
-  for (const auto group_id : c10::irange(group_)) {
+  for (int group_id = 0; group_id < group_; ++group_id) {
     math::GemmEx<T, Context>(
         CblasNoTrans,
         CblasTrans,
@@ -513,7 +511,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
 
   int kernel_dims_size = 1;
   // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (const auto i : c10::irange(kernel_.size())) {
+  for (int i = 0; i < kernel_.size(); ++i) {
     CAFFE_ENFORCE_EQ(filter.dim32(i + 2), kernel_[i]);
     kernel_dims_size *= kernel_[i];
   }
@@ -590,9 +588,8 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const int input_offset = C / group_ * input_image_size;
   const int output_offset = dY.numel() / dY.dim32(0) / group_;
   const int filter_offset = filter.numel() / group_;
-  for (const auto image_id : c10::irange(N)) {
-    (void)image_id; // Suppress unused variable warning
-    for (const auto group_id : c10::irange(group_)) {
+  for (int image_id = 0; image_id < N; ++image_id) {
+    for (int group_id = 0; group_id < group_; ++group_id) {
       // When we compute the gradient with respect to the filters, we need to do
       // im2col to allow gemm-type computation.
       if (kernel_.size() == 2) {
@@ -665,9 +662,8 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
         no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD, X.sizes(), at::dtype<T>());
     T* dXdata = dX->template mutable_data<T>();
     dYdata = dY.template data<T>();
-    for (const auto image_id : c10::irange(N)) {
-      (void)image_id; // Suppress unused variable warning
-      for (const auto group_id : c10::irange(group_)) {
+    for (int image_id = 0; image_id < N; ++image_id) {
+      for (int group_id = 0; group_id < group_; ++group_id) {
         // Compute gradient into col_buffer.
         math::Gemm<T, Context>(
             CblasTrans,
@@ -743,7 +739,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   CAFFE_ENFORCE_EQ(C, filter.dim32(filter.dim() - 1) * group_);
 
   int kernel_dims_size = 1;
-  for (const auto i : c10::irange(kernel_.size())) {
+  for (size_t i = 0; i < kernel_.size(); ++i) {
     CAFFE_ENFORCE_EQ(filter.dim32(i + 1), kernel_[i]);
     kernel_dims_size *= kernel_[i];
   }
@@ -816,7 +812,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   // image.
   const size_t input_offset = C * input_image_size;
   const size_t output_offset = dY.numel() / dY.dim32(0);
-  for (const auto image_id : c10::irange(N)) {
+  for (int image_id = 0; image_id < N; ++image_id) {
     // When we compute the gradient with respect to the filters, we need to do
     // im2col to allow gemm-type computation.
     if (kernel_.size() <= 2) {
@@ -855,7 +851,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
           group_);
     }
     // Gradient with respect to filter.
-    for (const auto group_id : c10::irange(group_)) {
+    for (int group_id = 0; group_id < group_; ++group_id) {
       math::GemmEx<T, Context>(
           CblasTrans,
           CblasNoTrans,
@@ -894,9 +890,9 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
     auto* dX = Output(
         no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD, X.sizes(), at::dtype<T>());
     T* dXdata = dX->template mutable_data<T>();
-    for (const auto image_id : c10::irange(N)) {
+    for (int image_id = 0; image_id < N; ++image_id) {
       // Compute gradient into col_buffer.
-      for (const auto group_id : c10::irange(group_)) {
+      for (int group_id = 0; group_id < group_; ++group_id) {
         math::GemmEx<T, Context>(
             CblasNoTrans,
             CblasNoTrans,

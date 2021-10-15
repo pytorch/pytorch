@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <c10/util/irange.h>
 #include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
@@ -41,7 +40,7 @@ TEST_F(NNUtilsTest, ClipGradNorm) {
   auto compare_scaling =
       [&](const std::vector<torch::Tensor>& grads) -> torch::Tensor {
     std::vector<torch::Tensor> p_scale;
-    for (const auto i : c10::irange(grads.size())) {
+    for (int i = 0; i < grads.size(); i++) {
       auto param = l->parameters()[i];
       auto grad = grads[i];
       p_scale.push_back(param.grad().data().div(grad).view(-1));
@@ -62,7 +61,7 @@ TEST_F(NNUtilsTest, ClipGradNorm) {
       std::numeric_limits<float>::infinity(),
   };
   for (auto norm_type : norm_types) {
-    for (const auto i : c10::irange(grads.size())) {
+    for (int i = 0; i < grads.size(); i++) {
       l->parameters()[i].mutable_grad() =
           grads[i].clone().view_as(l->parameters()[i].data());
     }
@@ -81,7 +80,7 @@ TEST_F(NNUtilsTest, ClipGradNorm) {
       torch::ones(10).div(500),
   };
   for (auto norm_type : norm_types) {
-    for (const auto i : c10::irange(grads.size())) {
+    for (int i = 0; i < grads.size(); i++) {
       l->parameters()[i].grad().data().copy_(grads[i]);
     }
     auto norm_before = compute_norm(norm_type);
@@ -228,7 +227,7 @@ TEST_F(NNUtilsTest, ClipGradNormErrorIfNonfinite) {
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
       EXPECT_THROW(utils::clip_grad_norm_(parameters, 1., norm_type, true), std::exception) << msg;
       // Grads should not change if error is thrown
-      for (const auto p_idx : c10::irange(parameters.size())) {
+      for (int64_t p_idx = 0; p_idx < parameters.size(); p_idx++) {
         ASSERT_TRUE(torch::allclose(parameters[p_idx].grad(), grads_before[p_idx], 1.0, 0.0, /*equal_nan*/ true)) << msg;
       }
     } else {
@@ -286,7 +285,7 @@ TEST_F(NNUtilsTest, ClipGradValue) {
   std::vector<std::vector<torch::Tensor>> grad_lists = {
       {grad_w, grad_b}, {grad_w, torch::Tensor()}};
   for (auto grad_list : grad_lists) {
-    for (const auto i : c10::irange(grad_list.size())) {
+    for (int i = 0; i < grad_list.size(); i++) {
       auto p = l->parameters()[i];
       auto g = grad_list[i];
       p.mutable_grad() = g.defined() ? g.clone().view_as(p.data()) : g;
@@ -336,7 +335,7 @@ TEST_F(NNUtilsTest, ConvertParameters) {
   };
 
   utils::vector_to_parameters(vector, zero_parameters);
-  for (const auto i : c10::irange(zero_parameters.size())) {
+  for (int i = 0; i < zero_parameters.size(); ++i) {
     ASSERT_TRUE(zero_parameters[i].allclose(parameters[i]));
   }
 
@@ -369,7 +368,7 @@ int64_t PackedSequenceTest_max_length = 6;
 std::vector<torch::Tensor> PackedSequenceTest_ordered_sequence(torch::ScalarType tensor_type) {
   std::vector<torch::Tensor> seqs;
   seqs.reserve(PackedSequenceTest_batch_size);
-  for (const auto i : c10::irange(PackedSequenceTest_batch_size)) {
+  for (int64_t i = 0; i < PackedSequenceTest_batch_size; i++) {
     seqs.emplace_back(torch::empty({
       torch::randint(1, PackedSequenceTest_max_length, {1}).item<int64_t>()
     }, tensor_type));
@@ -391,7 +390,7 @@ std::tuple<torch::Tensor, torch::Tensor> PackedSequenceTest_padded_sequence(torc
   // Create Tensor of random padded sequences
   auto ordered = PackedSequenceTest_ordered_sequence(tensor_type);
   auto lengths = torch::empty({(int64_t)ordered.size()}, torch::kInt64);
-  for (const auto i : c10::irange(ordered.size())) {
+  for (int64_t i = 0; i < ordered.size(); i++) {
     lengths[i] = ordered[i].size(0);
   }
   auto padded_tensor = rnn_utils::pad_sequence(ordered);
@@ -620,9 +619,9 @@ TEST_F(NNUtilsTest, PackPaddedSequence) {
     }
     auto padded = torch::cat(tensors_to_be_cat, 1);
     std::vector<torch::Tensor> expected_data_vec;
-    for (const auto n : c10::irange(batch_sizes.size(0))) {
+    for (int64_t n = 0; n < batch_sizes.size(0); n++) {
       int64_t batch_size = batch_sizes[n].item<int64_t>();
-      for (const auto i : c10::irange(batch_size)) {
+      for (int64_t i = 0; i < batch_size; i++) {
         expected_data_vec.emplace_back(torch::arange(1., 6) + (i + 1) * 100 + 5 * n);
       }
     }
@@ -632,7 +631,7 @@ TEST_F(NNUtilsTest, PackPaddedSequence) {
     if (should_shuffle) {
       // Shuffle the padded sequence to create an unsorted sequence
       std::vector<int64_t> permutation;
-      for (const auto i : c10::irange(sorted_lengths.size())) {
+      for (int64_t i = 0; i < sorted_lengths.size(); i++) {
         permutation.emplace_back(i);
       }
       std::shuffle(
@@ -703,7 +702,7 @@ TEST_F(NNUtilsTest, PackPaddedSequence) {
       if (batch_first) {
         grad_output.transpose_(0, 1);
       }
-      for (const auto i : c10::irange(lengths.size(0))) {
+      for (int64_t i = 0; i < lengths.size(0); i++) {
         int64_t l = lengths[i].item<int64_t>();
         ASSERT_TRUE(torch::allclose(
           padded.grad().narrow(0, 0, l).select(1, i),

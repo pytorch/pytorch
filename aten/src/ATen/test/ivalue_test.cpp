@@ -3,7 +3,6 @@
 #include <gtest/gtest.h>
 #include <torch/torch.h>
 #include <c10/util/intrusive_ptr.h>
-#include <c10/util/irange.h>
 #include <ATen/core/Dict.h>
 
 // Snippets for checking assembly.
@@ -641,7 +640,7 @@ TEST(IValueTest, IdentityComparisonAndHashing) {
   auto moreSampleIValues = makeMoreSampleIValues();
 
   ASSERT_EQ(sampleIValues.size(), moreSampleIValues.size());
-  for (const auto ii : c10::irange(sampleIValues.size())) {
+  for (int ii = 0; ii < sampleIValues.size(); ++ii) {
     if (sampleIValues[ii].isComplexDouble() ||
         sampleIValues[ii].isBlob() ||
         sampleIValues[ii].isList() ||

@@ -9,7 +9,6 @@
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
-#include <c10/util/irange.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 #include <algorithm>
@@ -44,7 +43,7 @@ void spatial_dilated_max_pooling(
     int64_t dW, // dilation
     T* oData) { // output arrays (data and max-index)
   at::parallel_for(0, iC, 0, [&](int64_t start, int64_t end) {
-    for (const auto p : c10::irange(start, end)) {
+    for (auto p = start; p < end; ++p) {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t row, col;
       const T* i_p = iData + p * iW * iH;
@@ -196,7 +195,7 @@ Tensor q_maxpool_2d(
           oData);
     } else {
       at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-        for (const auto p : c10::irange(start, end)) {
+        for (auto p = start; p < end; ++p) {
           auto* iData = qxd + p * iC * iW * iH;
           auto* oData = qyd + p * oC * oW * oH;
           spatial_dilated_max_pooling<Q>(

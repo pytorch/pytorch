@@ -9,7 +9,6 @@
 #include <c10/util/SmallBuffer.h>
 
 #include <c10/core/TensorOptions.h>
-#include <c10/util/irange.h>
 
 namespace at {
 namespace meta {
@@ -156,7 +155,7 @@ static void nll_loss_out_frame(
     auto output_acc = output.accessor<scalar_t, 1>();
 
     at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
-      for (const auto i : c10::irange(start, end)) {
+      for (auto i = start; i < end; i++) {
         const auto cur_target = target_acc[i];
 
         if (cur_target == ignore_index) {
@@ -216,7 +215,7 @@ static void nll_loss_out_frame(
   scalar_t weight_partial_sums[cascade_sum_num_levels] = {0};
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   scalar_t loss_partial_sums[cascade_sum_num_levels] = {0};
-  for (const auto b : c10::irange(batch_size)) {
+  for (int64_t b = 0; b < batch_size; b++) {
     const int64_t cur_target = target_data[b];
     if (cur_target == ignore_index) {
       ++num_ignored;
@@ -331,7 +330,7 @@ static void nll_loss_backward_out_frame(
     auto grad_input_acc = grad_input.accessor<scalar_t, 2>();
     auto grad_output_acc = grad_output.accessor<scalar_t, 1>();
     at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
-      for (const auto i : c10::irange(start, end)) {
+      for (auto i = start; i < end; i++) {
         auto cur_target = target_acc[i];
         if (cur_target == ignore_index) {
           continue;

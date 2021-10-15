@@ -83,7 +83,7 @@ class IDEEPContext final : public BaseContext {
           static_cast<const void*>(src),
           static_cast<void*>(dst));
     } else {
-      for (const auto i : c10::irange(n)) {
+      for (size_t i = 0; i < n; ++i) {
         dst[i] = src[i];
       }
     }

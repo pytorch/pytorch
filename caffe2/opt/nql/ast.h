@@ -1,5 +1,4 @@
 #pragma once
-#include "c10/util/irange.h"
 #include <iostream>
 #include <string>
 #include <vector>
@@ -21,7 +20,8 @@ struct ASTExpr {
     return starInputsFlag;
   }
   void dump(int level = 0) const {
-    for (const auto i : c10::irange(level))std::cout << "  ";
+    for (int i = 0; i < level; i++)
+      std::cout << "  ";
     if (!isCall())
       std::cout << "Var: " << name << std::endl;
     else {
@@ -41,7 +41,8 @@ struct ASTStmt {
     delete rhs;
   }
   void dump(int level = 0) const {
-    for (const auto i : c10::irange(level))std::cout << "  ";
+    for (int i = 0; i < level; i++)
+      std::cout << "  ";
     std::cout << "LHS:" << std::endl;
     for (auto s : lhs) {
       for (int i = 0; i < level + 1; i++)

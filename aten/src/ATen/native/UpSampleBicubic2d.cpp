@@ -1,7 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/UpSample.h>
-#include <c10/util/irange.h>
 
 namespace at {
 namespace meta {
@@ -34,7 +33,7 @@ TORCH_META_FUNC(upsample_bicubic2d_backward) (
       grad_output.dim() == 4,
       "Expected grad_output to be a tensor of dimension 4 but got: dimension ", grad_output.dim());
 
-  for (const auto i : c10::irange(4)) {
+  for (int i = 0; i < 4; ++i) {
     TORCH_CHECK(
         grad_output.size(i) == full_output_size[i],
         "Expected grad_output to have the same shape as output;",
@@ -66,12 +65,11 @@ static void upsample_bicubic2d_backward_out_frame(
 
   // Special case: input/output same size, just copy
   if (input_height == output_height && input_width == output_width) {
-    for (const auto output_y : c10::irange(output_height)) {
-      for (const auto output_x : c10::irange(output_width)) {
+    for (int64_t output_y = 0; output_y < output_height; output_y++) {
+      for (int64_t output_x = 0; output_x < output_width; output_x++) {
         scalar_t* in = &idata[output_y * input_width + output_x];
         scalar_t* out = &odata[output_y * output_width + output_x];
-        for (const auto c : c10::irange(channels)) {
-          (void)c; //Suppress unused variable warning
+        for (int64_t c = 0; c < channels; ++c) {
           in[0] = out[0];
           in += input_width * input_height;
           out += output_width * output_height;
@@ -86,8 +84,8 @@ static void upsample_bicubic2d_backward_out_frame(
   const scalar_t width_scale = area_pixel_compute_scale<scalar_t>(
       input_width, output_width, align_corners, scales_w);
 
-  for (const auto output_y : c10::irange(output_height)) {
-    for (const auto output_x : c10::irange(output_width)) {
+  for (int64_t output_y = 0; output_y < output_height; output_y++) {
+    for (int64_t output_x = 0; output_x < output_width; output_x++) {
       scalar_t* in = idata;
       scalar_t* out = odata;
 
@@ -107,12 +105,11 @@ static void upsample_bicubic2d_backward_out_frame(
       get_cubic_upsample_coefficients<scalar_t>(x_coeffs, t_x);
       get_cubic_upsample_coefficients<scalar_t>(y_coeffs, t_y);
 
-      for (const auto c : c10::irange(channels)) {
-        (void)c; //Suppress unused variable warning
+      for (int64_t c = 0; c < channels; c++) {
         scalar_t out_value = out[output_y * output_width + output_x];
 
-        for (const auto i : c10::irange(4)) {
-          for (const auto j : c10::irange(4)) {
+        for (int64_t i = 0; i < 4; i++) {
+          for (int64_t j = 0; j < 4; j++) {
             upsample_increment_value_bounded<scalar_t>(
                 in,
                 input_width,

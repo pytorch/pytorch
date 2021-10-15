@@ -8,7 +8,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vml.h>
-#include <c10/util/irange.h>
 namespace at { namespace native { namespace {
 
 template<typename scalar_t>
@@ -29,7 +28,7 @@ static void apply_cross(Tensor& result, const Tensor& a, const Tensor& b, const 
     int64_t a_start = 0;
     int64_t b_start = 0;
     int64_t r_start = 0;
-    for (const auto i : c10::irange(a.dim())) {
+    for (int64_t i = 0; i < a.dim(); i++) {
       if (i == dim) continue;
       position_in_dims[i] = index_in_curr_dim % a.size(i);
       a_start += (index_in_curr_dim % a.size(i)) * a.stride(i);
@@ -44,7 +43,7 @@ static void apply_cross(Tensor& result, const Tensor& a, const Tensor& b, const 
       r_ptr[r_start+2*r_stride] = a_ptr[a_start+0*a_stride]*b_ptr[b_start+1*b_stride] - a_ptr[a_start+1*a_stride]*b_ptr[b_start+0*b_stride];
       s++;
 
-      for (const auto i : c10::irange(a.dim())) {
+      for (int i = 0; i < a.dim(); i++) {
         if (i == dim) {
           continue;
         }

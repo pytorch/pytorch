@@ -11,7 +11,6 @@
 #include <ATen/Parallel.h>
 #include <ATen/NumericUtils.h>
 #include <c10/util/Optional.h>
-#include <c10/util/irange.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
@@ -74,8 +73,7 @@ static inline void compare_base_kernel(const Tensor& result1, const Tensor& resu
     auto* result1_data_bytes = data[0];
     auto* result2_data_bytes = data[1];
     const auto* self_data_bytes = data[2];
-    for (const auto i : c10::irange(n)) {
-      (void)i; //Suppress unused variable warning
+    for (int64_t i = 0; i < n; ++i) {
       f((scalar_t*)result1_data_bytes,
         (scalar_t_2*)result2_data_bytes,
         (scalar_t*)self_data_bytes,
@@ -106,7 +104,7 @@ static void min_kernel_impl(
         value_t (*zabs_)(scalar_t) = zabs<scalar_t, value_t>;
         scalar_t min_number = self_data[0];
         int64_t index = 0;
-        for (const auto i : c10::irange(self_dim_size)) {
+        for (int64_t i = 0; i < self_dim_size; ++i) {
           scalar_t value = self_data[i * self_dim_stride];
           if (!(zabs_(value) >= zabs_(min_number))) {
             min_number = value;
@@ -139,7 +137,7 @@ static void max_kernel_impl(
         value_t (*zabs_)(scalar_t) = zabs<scalar_t, value_t>;
         scalar_t max_number = self_data[0];
         int64_t index = 0;
-        for (const auto i : c10::irange(self_dim_size)) {
+        for (int64_t i = 0; i < self_dim_size; ++i) {
           scalar_t value = self_data[i * self_dim_stride];
           if (!(zabs_(value) <= zabs_(max_number))) {
             max_number = value;
@@ -175,7 +173,7 @@ static void aminmax_kernel(
       const scalar_t* self_data, auto self_dim_stride) {
         scalar_t min_number = self_data[0];
         scalar_t max_number = self_data[0];
-        for (const auto i : c10::irange(self_dim_size)) {
+        for (int64_t i = 0; i < self_dim_size; ++i) {
           scalar_t value = self_data[i * self_dim_stride];
           // note: comparison is written this way to handle NaN correctly
           if (!(value >= min_number)) {
@@ -244,8 +242,7 @@ static void mode_kernel_impl(
 
           std::vector<std::pair<scalar_t, int64_t>> elements(self_dim_size);
 
-          for (const auto k : c10::irange(n)) {
-            (void)k; //Suppress unused variable warning
+          for (int64_t k = 0; k < n; ++k) {
             scalar_t* values_data = (scalar_t*)values_data_bytes;
             int64_t* indices_data = (int64_t*)indices_data_bytes;
             const scalar_t* self_data = (scalar_t*)self_data_bytes;
@@ -255,7 +252,7 @@ static void mode_kernel_impl(
             int64_t temp_freq = 0;
             int64_t max_freq = 0;
 
-            for (const auto i : c10::irange(self_dim_size)) {
+            for (int64_t i = 0; i < self_dim_size; i++) {
               elements[i] = std::make_pair(self_data[i * self_dim_stride], i);
             }
 
@@ -270,7 +267,7 @@ static void mode_kernel_impl(
                   return i.first < j.first;
                 });
 
-            for (const auto i : c10::irange(self_dim_size)) {
+            for (int64_t i = 0; i < self_dim_size; i++) {
               temp_freq++;
               if ((i == self_dim_size - 1) ||
                   (elements[i].first != elements[i + 1].first)) {
@@ -318,7 +315,7 @@ static void isin_default_kernel_cpu(
   AT_DISPATCH_ALL_TYPES(iter.dtype(1), "isin_default_cpu", [&]() {
     cpu_kernel(iter, [&](scalar_t element_val) -> bool {
       const auto* test_element_data = reinterpret_cast<scalar_t*>(test_elements_flat.data_ptr());
-      for (const auto j : c10::irange(test_elements_flat.numel())) {
+      for (auto j = 0; j < test_elements_flat.numel(); ++j) {
         if (element_val == test_element_data[j]) {
           return !invert;
         }

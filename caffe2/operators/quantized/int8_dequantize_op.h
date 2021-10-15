@@ -18,7 +18,7 @@ void Int8Dequantize(
     const int64_t N,
     const float X_scale,
     const int32_t X_offset) {
-  for (const auto i : c10::irange(N)) {
+  for (auto i = 0; i < N; ++i) {
     out[i] = (static_cast<int32_t>(in[i]) - X_offset) * X_scale;
   }
 }

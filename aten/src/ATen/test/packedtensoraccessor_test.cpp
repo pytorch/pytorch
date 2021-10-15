@@ -1,7 +1,6 @@
 #include <ATen/Operators.h>
 #include <ATen/test/test_assert.h>
 #include <c10/util/Exception.h>
-#include <c10/util/irange.h>
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
@@ -35,7 +34,7 @@ TEST(PackedtensoraccessorTest, TransposeTest) {
   t = rand({size}, CPU(kFloat));
   auto original_1d = t.packed_accessor64<float, 1, DefaultPtrTraits>();
   auto transposed_1d = original_1d.transpose(0, 0);
-  for (const auto i : c10::irange(size)) {
+  for (int i = 0; i < size; i++){
     ASSERT_EQ(original_1d[i], transposed_1d[i]);
   }
 

@@ -95,7 +95,7 @@ class ExpandGradientOp final : public Operator<Context> {
     auto* dX = Output(0, X.sizes(), at::dtype<T>());
     std::vector<int> axes;
     const int offset = ndim - X.dim();
-    for (const auto i : c10::irange(ndim)) {
+    for (int i = 0; i < ndim; i++) {
       if (i < offset || dX_dims[i - offset] == 1) {
         axes.push_back(i);
       }

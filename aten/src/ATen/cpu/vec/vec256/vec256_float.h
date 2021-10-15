@@ -5,7 +5,6 @@
 
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
-#include <c10/util/irange.h>
 #if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 #include <sleef.h>
 #endif
@@ -81,7 +80,7 @@ public:
     // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
     // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
     // instructions while a loop would be compiled to one instruction.
-    for (const auto i : c10::irange(size())) {
+    for (auto i = 0; i < size(); ++i) {
       tmp_values[i] = 0.0;
     }
     std::memcpy(
@@ -110,7 +109,7 @@ public:
   Vectorized<float> map(float (*const f)(float)) const {
     __at_align__ float tmp[size()];
     store(tmp);
-    for (const auto i : c10::irange(size())) {
+    for (int64_t i = 0; i < size(); i++) {
       tmp[i] = f(tmp[i]);
     }
     return loadu(tmp);
@@ -218,7 +217,7 @@ public:
     __at_align__ float tmp_x[size()];
     store(tmp);
     x.store(tmp_x);
-    for (const auto i : c10::irange(size())) {
+    for (int64_t i = 0; i < size(); i++) {
       tmp[i] = calc_igamma(tmp[i], tmp_x[i]);
     }
     return loadu(tmp);
@@ -228,7 +227,7 @@ public:
     __at_align__ float tmp_x[size()];
     store(tmp);
     x.store(tmp_x);
-    for (const auto i : c10::irange(size())) {
+    for (int64_t i = 0; i < size(); i++) {
       tmp[i] = calc_igammac(tmp[i], tmp_x[i]);
     }
     return loadu(tmp);

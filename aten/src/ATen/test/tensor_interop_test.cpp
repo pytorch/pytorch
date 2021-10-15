@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
-#include <c10/util/irange.h>
 #include <caffe2/core/init.h>
 #include <caffe2/core/operator.h>
 
@@ -9,13 +8,13 @@ TEST(Caffe2ToPytorch, SimpleLegacy) {
   caffe2::Tensor c2_tensor(caffe2::CPU);
   c2_tensor.Resize(4, 4);
   auto data = c2_tensor.mutable_data<int64_t>();
-  for (const auto i : c10::irange(16)) {
+  for (int64_t i = 0; i < 16; i++) {
     data[i] = i;
   }
   at::Tensor at_tensor(c2_tensor);
 
   auto it = at_tensor.data_ptr<int64_t>();
-  for (const auto i : c10::irange(16)) {
+  for (int64_t i = 0; i < 16; i++) {
     ASSERT_EQ(it[i], i);
   }
 }
@@ -23,13 +22,13 @@ TEST(Caffe2ToPytorch, SimpleLegacy) {
 TEST(Caffe2ToPytorch, Simple) {
   caffe2::Tensor c2_tensor = caffe2::empty({4, 4}, at::kLong);
   auto data = c2_tensor.mutable_data<int64_t>();
-  for (const auto i : c10::irange(16)) {
+  for (int64_t i = 0; i < 16; i++) {
     data[i] = i;
   }
   at::Tensor at_tensor(c2_tensor);
 
   auto it = at_tensor.data_ptr<int64_t>();
-  for (const auto i : c10::irange(16)) {
+  for (int64_t i = 0; i < 16; i++) {
     ASSERT_EQ(it[i], i);
   }
 }
@@ -38,7 +37,7 @@ TEST(Caffe2ToPytorch, ExternalData) {
   caffe2::Tensor c2_tensor = caffe2::empty({4, 4}, at::kLong);
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers)
   int64_t buf[16];
-  for (const auto i : c10::irange(16)) {
+  for (int64_t i = 0; i < 16; i++) {
     buf[i] = i;
   }
   c2_tensor.ShareExternalPointer(buf, 16 * sizeof(int64_t));
@@ -49,7 +48,7 @@ TEST(Caffe2ToPytorch, ExternalData) {
   at_tensor.permute({1, 0});
   at_tensor.permute({1, 0});
   auto it = at_tensor.data_ptr<int64_t>();
-  for (const auto i : c10::irange(16)) {
+  for (int64_t i = 0; i < 16; i++) {
     ASSERT_EQ(it[i], i);
   }
   ASSERT_FALSE(at_tensor.storage().resizable());
@@ -61,7 +60,7 @@ TEST(Caffe2ToPytorch, Op) {
   caffe2::Tensor c2_tensor(caffe2::CPU);
   c2_tensor.Resize(3, 3);
   auto data = c2_tensor.mutable_data<int64_t>();
-  for (const auto i : c10::irange(9)) {
+  for (int64_t i = 0; i < 9; i++) {
     data[i] = i;
   }
   at::Tensor at_tensor(c2_tensor);
@@ -108,7 +107,7 @@ TEST(Caffe2ToPytorch, PartiallyInitialized) {
 TEST(Caffe2ToPytorch, MutualResizes) {
   caffe2::Tensor c2_tensor = caffe2::empty({5, 5}, at::kFloat);
   auto data = c2_tensor.mutable_data<float>();
-  for (const auto i : c10::irange(25)) {
+  for (int64_t i = 0; i < 25; i++) {
     data[i] = 0;
   }
 
@@ -172,7 +171,7 @@ TEST(PytorchToCaffe2, Op) {
   auto result = XBlobGetMutableTensor(workspace.CreateBlob("d"), {5, 5}, at::kCPU);
 
   auto it = result.data<float>();
-  for (const auto i : c10::irange(25)) {
+  for (int64_t i = 0; i < 25; i++) {
     ASSERT_EQ(it[i], 3.0);
   }
   at::Tensor at_result(result);
@@ -203,7 +202,7 @@ TEST(PytorchToCaffe2, SharedStorageRead) {
 
   auto result = XBlobGetMutableTensor(workspace.CreateBlob("c"), {5, 5}, at::kCPU);
   auto it = result.data<float>();
-  for (const auto i : c10::irange(25)) {
+  for (int64_t i = 0; i < 25; i++) {
     ASSERT_EQ(it[i], 2.0);
   }
   at::Tensor at_result(result);
@@ -260,7 +259,7 @@ TEST(PytorchToCaffe2, Strided) {
   ASSERT_ANY_THROW(caffe2::Tensor c2_tensor(at_tensor));
   // but calling contiguous is fine
   caffe2::Tensor c2_tensor(at_tensor.contiguous());
-  for (const auto i : c10::irange(25)) {
+  for (int64_t i = 0; i < 25; i++) {
     ASSERT_EQ(c2_tensor.data<float>()[i], 1.0);
   }
 }

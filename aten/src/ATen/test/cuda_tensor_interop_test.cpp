@@ -2,7 +2,6 @@
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <c10/util/irange.h>
 #include <caffe2/core/init.h>
 #include <caffe2/core/operator.h>
 #include <caffe2/core/context_gpu.h>
@@ -35,7 +34,7 @@ TEST(CUDACaffe2ToPytorch, SimpleLegacy) {
 
   auto at_cpu = at_tensor.cpu();
   auto it = at_cpu.data_ptr<int64_t>();
-  for (const auto i : c10::irange(16)) {
+  for (int64_t i = 0; i < 16; i++) {
     ASSERT_EQ(it[i], 777);
   }
 }
@@ -54,7 +53,7 @@ TEST(CUDACaffe2ToPytorch, Simple) {
 
   auto at_cpu = at_tensor.cpu();
   auto it = at_cpu.data_ptr<int64_t>();
-  for (const auto i : c10::irange(16)) {
+  for (int64_t i = 0; i < 16; i++) {
     ASSERT_EQ(it[i], 777);
   }
 }
@@ -110,7 +109,7 @@ TEST(CUDAPytorchToCaffe2, Op) {
   ASSERT_EQ(result.GetDeviceType(), caffe2::CUDA);
 
   auto data = result.data<float>();
-  for (const auto i : c10::irange(25)) {
+  for (int64_t i = 0; i < 25; i++) {
     ASSERT_EQ(cuda_get(data + i), 3.0);
   }
   at::Tensor at_result(result);

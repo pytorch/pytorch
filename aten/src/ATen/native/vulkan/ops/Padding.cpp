@@ -1,5 +1,4 @@
 #include <ATen/native/vulkan/ops/Common.h>
-#include <c10/util/irange.h>
 #include <torch/library.h>
 
 namespace at {
@@ -36,7 +35,7 @@ Tensor reflection_pad2d(const Tensor& self_arg, IntArrayRef padding) {
   const vTensor& v_self = convert(self);
 
   c10::SmallVector<int64_t, 4> output_size(input_dim);
-  for (const auto d : c10::irange(input_dim)) {
+  for (size_t d = 0; d < input_dim; ++d) {
     if (d == input_dim - 1) {
       output_size[d] = input_size[d] + pad_right + pad_left;
     } else if (d == input_dim - 2) {

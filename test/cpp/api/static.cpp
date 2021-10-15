@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <c10/util/irange.h>
 #include <torch/detail/static.h>
 #include <torch/csrc/utils/variadic.h>
 #include <torch/torch.h>
@@ -96,7 +95,7 @@ TEST(TestStatic, Apply) {
   std::vector<int> v;
   torch::apply([&v](int x) { v.push_back(x); }, 1, 2, 3, 4, 5);
   ASSERT_EQ(v.size(), 5);
-  for (const auto i : c10::irange(v.size())) {
+  for (size_t i = 0; i < v.size(); ++i) {
     ASSERT_EQ(v.at(i), i + 1);
   }
 }

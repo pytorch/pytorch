@@ -40,7 +40,7 @@ class RowWiseCounterOp final : public Operator<CPUContext> {
       return true;
     }
 
-    for (const auto i : c10::irange(n)) {
+    for (auto i = 0; i < n; ++i) {
       const std::size_t idx = indices[i];
       CAFFE_ENFORCE_GE(
           Input(COUNTER).numel(),
