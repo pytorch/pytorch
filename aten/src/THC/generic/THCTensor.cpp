@@ -7,18 +7,6 @@
 
 /**** creation methods ****/
 
-/* Empty init */
-THCTensor *THCTensor_(new)(THCState *state)
-{
-  return c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
-             c10::intrusive_ptr<at::StorageImpl>::reclaim(
-                 THCStorage_(new)(state)),
-             at::DispatchKey::CUDA,
-             caffe2::TypeMeta::Make<scalar_t>())
-      .release();
-}
-
-
 THCTensor *THCTensor_(newWithStorage1d)(THCState *state, THCStorage *storage, ptrdiff_t storageOffset,
                                int64_t size0, int64_t stride0)
 {
