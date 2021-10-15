@@ -465,3 +465,13 @@ __host__ __device__
 #endif
 
 #endif // C10_MACROS_MACROS_H_
+
+#if defined(__ANDROID__) || defined(_WIN32) || defined(__EMSCRIPTEN__) || \
+    defined(__XROS__)
+#define HAS_DEMANGLE 0
+#elif defined(__APPLE__) && \
+    (TARGET_IPHONE_SIMULATOR || TARGET_OS_SIMULATOR || TARGET_OS_IPHONE)
+#define HAS_DEMANGLE 0
+#else
+#define HAS_DEMANGLE 1
+#endif

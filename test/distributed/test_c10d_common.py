@@ -4,6 +4,7 @@ import sys
 import tempfile
 import threading
 import time
+import unittest
 from datetime import timedelta
 from itertools import product
 from sys import platform
@@ -690,6 +691,137 @@ class CommTest(AbstractCommTest, MultiProcessTestCase):
             os.environ["TORCH_DISTRIBUTED_DEBUG"] = str(mode)
             with self.assertRaisesRegex(RuntimeError, "to be one of"):
                 dist._get_debug_mode()
+
+
+class DummyWork(dist._Work):
+    def wait(self, timeout=5.0):
+        if torch.cuda.is_available():
+            torch.cuda.current_stream().synchronize()
+        return True
+
+
+class DummyProcessGroup(dist.ProcessGroup):
+    def getBackendName(self):
+        return "Dummy"
+
+    def allgather(self, output_tensor_lists, input_tensor_list, opts=None):
+        for output_tensor_list, input_tensor in zip(output_tensor_lists, input_tensor_list):
+            for output_tensor in output_tensor_list:
+                output_tensor.copy_(input_tensor)
+
+        return DummyWork()
+
+    def allreduce(self, tensor_list, opts=None):
+        for tensor in tensor_list:
+            tensor.add_(2)
+
+        return DummyWork()
+
+    def broadcast(self, tensor_list, opts=None):
+        for tensor in tensor_list:
+            tensor.add_(1)
+
+        return DummyWork()
+
+    def reduce_scatter(self, output_tensor_list, input_tensor_lists, opts=None):
+        for output_tensor, input_tensor_list in zip(output_tensor_list, input_tensor_lists):
+            output_tensor.copy_(input_tensor_list[self.rank()])
+
+        return DummyWork()
+
+    def send(self, tensor_list, dst, tag=0):
+        for tensor in tensor_list:
+            tensor.add_(1)
+
+        return DummyWork()
+
+    def recv(self, tensor_list, src, tag=0):
+        for tensor in tensor_list:
+            tensor.add_(2)
+
+        return DummyWork()
+
+
+class PythonProcessGroupTest(MultiProcessTestCase):
+    def setUp(self):
+        super(PythonProcessGroupTest, self).setUp()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super(PythonProcessGroupTest, self).tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    def test_get_backend_name(self):
+        dpg = DummyProcessGroup(0, 1)
+        self.assertEqual("Dummy", dpg.name())
+
+    @staticmethod
+    def create_dummy(store, rank, size, timeout):
+        return DummyProcessGroup(rank, size)
+
+    @unittest.skipIf(
+        common.IS_MACOS,
+        "Python c10d extension is not yet supported on MacOS"
+    )
+    def test_collectives(self):
+        dist.Backend.register_backend("dummy", PythonProcessGroupTest.create_dummy)
+
+        os.environ['MASTER_ADDR'] = 'localhost'
+        os.environ['MASTER_PORT'] = '6789'
+        dist.init_process_group("dummy", rank=self.rank, world_size=self.world_size)
+
+        # test all_gather
+        input_tensor = torch.ones(2, 2) * 7
+        output_tensor_list = [torch.zeros(2, 2) for _ in range(self.world_size)]
+        dist.all_gather(output_tensor_list, input_tensor)
+
+        for tensor in output_tensor_list:
+            self.assertEqual(tensor, input_tensor)
+
+        # test all_reduce
+        input_tensor = torch.ones(2, 2) * 7
+        dist.all_reduce(input_tensor)
+        self.assertEqual(input_tensor, torch.ones(2, 2) * 7 + 2)
+
+        # test broadcast
+        input_tensor = torch.zeros(2, 2)
+        dist.broadcast(input_tensor, 0, async_op=True).wait()
+        self.assertEqual(torch.ones(2, 2), input_tensor)
+
+        # test reduce_scatter
+        output_tensor = torch.zeros(2, 2)
+        input_tensor_list = [torch.ones(2, 2) for _ in range(self.world_size)]
+        dist.reduce_scatter(output_tensor, input_tensor_list)
+        self.assertEqual(output_tensor, torch.zeros(2, 2) + 1)
+
+        dist.destroy_process_group()
+
+    @unittest.skipIf(
+        common.IS_MACOS,
+        "Python c10d extension is not yet supported on MacOS"
+    )
+    def test_send_recv(self):
+        dist.Backend.register_backend("dummy", PythonProcessGroupTest.create_dummy)
+
+        os.environ['MASTER_ADDR'] = 'localhost'
+        os.environ['MASTER_PORT'] = '6789'
+        dist.init_process_group("dummy", rank=self.rank, world_size=self.world_size)
+
+        # test send
+        input_tensor = torch.zeros(2, 2)
+        dist.send(input_tensor, (self.rank + 1) % self.world_size)
+        self.assertEqual(input_tensor, torch.zeros(2, 2) + 1)
+
+        # test recv
+        input_tensor = torch.zeros(2, 2)
+        dist.recv(input_tensor, (self.rank + 1) % self.world_size)
+        self.assertEqual(input_tensor, torch.zeros(2, 2) + 2)
+
+        # intentionally not calling into `destroy_process_group` as not all
+        # user applications would explicitly that.
 
 
 if __name__ == "__main__":
