@@ -190,7 +190,7 @@ struct TORCH_API OptionalType : public UnionType {
   TypePtr createWithContained(
       std::vector<TypePtr> contained_types) const override {
     AT_ASSERT(contained_types.size() == 1);
-    return create(contained_types[0]);
+    return create(std::move(contained_types[0]));
   }
 
   bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override;
