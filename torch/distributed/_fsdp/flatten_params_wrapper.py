@@ -23,6 +23,9 @@ from torch import Tensor
 class FlattenParamsWrapper(nn.Module):
     """
     A wrapper for transparently flattening a Module's parameters.
+    The original implementation [1] reparameterizes a PyTorch module
+    that is called ReparamModule. The ReparamModule has only a flattened
+    parameter representing all parameters of the wrapped module.
     Compared to the original implementation [1], this version:
     - removes tracing
     - supports shared parameters
@@ -33,8 +36,9 @@ class FlattenParamsWrapper(nn.Module):
             The module to wrap.
         param_list (List[nn.Parameter]):
             Only flatten parameters appearing in the given list.
-            Note, if a single param is in one of the list, it still get flattened and the
-            original param is removed and replaced with the flatten one.
+            Note, if only a single param is in the list, it still gets
+            flattened and the original param is removed and replaced
+            with the flatten one.
     """
 
     def __init__(self, module: nn.Module, param_list: List[nn.Parameter]):
@@ -84,21 +88,21 @@ class FlattenParamsWrapper(nn.Module):
         contains the need-to-be-flatten parameters.
         This also fills param_infos and shared_param_infos.
         """
-        param_infos = []
+        self._param_infos = []
         shared_param_memo: Dict[nn.Parameter, Tuple[str, nn.Module, str]] = {}
-        shared_param_infos = []
+        self._shared_param_infos = []
         params = []
         for module_name, m in self.named_modules():
             for n, p in m.named_parameters(recurse=False):
                 if p is not None and (m, n) in self.param_set:
                     if p in shared_param_memo:
                         mname, shared_m, shared_n = shared_param_memo[p]
-                        shared_param_infos.append(
+                        self._shared_param_infos.append(
                             (module_name, mname, m, n, shared_m, shared_n)
                         )
                     else:
                         shared_param_memo[p] = (module_name, m, n)
-                        param_infos.append((module_name, m, n))
+                        self._param_infos.append((module_name, m, n))
                         params.append(p)
         del shared_param_memo
 
@@ -109,9 +113,6 @@ class FlattenParamsWrapper(nn.Module):
             len(set(p.requires_grad for p in params)) == 1
         ), "expects all parameters to have same requires_grad"
         assert len(params) == len(set(params)), "params list should not have dups"
-
-        self._param_infos = param_infos
-        self._shared_param_infos = shared_param_infos
 
         self._param_numels = [p.numel() for p in params]
         self._param_shapes = [p.size() for p in params]
@@ -126,7 +127,9 @@ class FlattenParamsWrapper(nn.Module):
         attributes with views to the flat param.
         """
         # register the flatten one
-        assert self.flat_param is not None
+        assert self.flat_param is not None, (
+            "Can not flatten params when flat_param is None"
+        )
         self.register_parameter("flat_param", self.flat_param)
 
         # deregister the names as parameters
@@ -142,8 +145,10 @@ class FlattenParamsWrapper(nn.Module):
         """Unlike ``_unflatten_params``, this function unflatten into views and keep
         self.flat_param unchanged.
         """
-        assert self.flat_param is not None
-        ps = self.get_param_views()
+        assert self.flat_param is not None, (
+            "Can not unflatten params as views when flat_param is None."
+        )
+        ps = self._get_param_views()
         for (_, m, n), p in zip(self._param_infos, ps):
             setattr(m, n, p)  # This will set as plain attr
 
@@ -154,8 +159,10 @@ class FlattenParamsWrapper(nn.Module):
         """Undo flattening and create separate parameters from the already flattened
         self.flat_param.
         """
-        assert self.flat_param is not None
-        ps = self.get_param_views()
+        assert self.flat_param is not None, (
+            "Can not unflatten params when flat_param is None."
+        )
+        ps = self._get_param_views()
         for (_, m, n), p in zip(self._param_infos, ps):
             if hasattr(m, n):
                 delattr(m, n)
@@ -167,7 +174,7 @@ class FlattenParamsWrapper(nn.Module):
 
         del self.flat_param
 
-    def get_param_views(
+    def _get_param_views(
         self, external_data: Optional[Tensor] = None
     ) -> Iterator[Tensor]:
         """Return a generator of views that map to the original parameters."""
@@ -175,7 +182,8 @@ class FlattenParamsWrapper(nn.Module):
         # Data should not be sharded when getting param views
         if data.numel() != sum(self._param_numels):  # type: ignore[union-attr]
             raise ValueError(
-                f"Incorrect numel of supplied data: got {data.numel()} but expected {sum(self._param_numels)}"  # type: ignore[union-attr]
+                f"Incorrect numel of supplied data: \
+                got {data.numel()} but expected {sum(self._param_numels)}"  # type: ignore[union-attr]
             )
         return (
             t.view(s)
