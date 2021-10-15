@@ -60,6 +60,7 @@ bool _nnpack_available() {
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/Parallel.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -238,7 +239,7 @@ Tensor _nnpack_spatial_convolution(
       const size_t input_size_per_batch = input_channels * input_size.width * input_size.height;
       const size_t output_size_per_batch = output_channels * output_size.width * output_size.height;
 
-      for (size_t batch = 0u; batch < batch_size; ++batch) {
+      for (const auto batch : c10::irange(0u, batch_size)) {
         const nnp_status status = nnp_convolution_inference(
             algorithm,
             nnp_convolution_transform_strategy_compute,

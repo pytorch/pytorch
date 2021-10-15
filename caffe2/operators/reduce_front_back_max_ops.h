@@ -35,7 +35,7 @@ class MaxReduceDimsOp final : public Operator<Context> {
     int start_index = FIRSTDIMS ? num_reduce_dims_ : 0;
     int end_index = FIRSTDIMS ? X.dim() : X.dim() - num_reduce_dims_;
 
-    for (int i = start_index; i < end_index; ++i) {
+    for (const auto i : c10::irange(start_index, end_index)) {
       output_shape.push_back(X.sizes()[i]);
     }
     auto* Y = Output(0, output_shape, at::dtype<float>());
