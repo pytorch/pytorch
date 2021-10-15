@@ -591,7 +591,11 @@ struct TORCH_API TensorType : public Type {
   std::string str() const override;
 
   std::string repr_str() const override {
-    return str() + (isInferredType() ? " (inferred)" : "");
+    if (isInferredType()) {
+      return str() + " (inferred)";
+    } else {
+      return str();
+    }
   }
 
   c10::optional<size_t> numel() const {
