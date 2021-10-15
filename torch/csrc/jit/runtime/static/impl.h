@@ -67,9 +67,9 @@ class ValueGroup {
 
   std::string toString() const {
     return c10::str(
-        dumpValueSet(output_aliases_, "output_aliases_"),
+        dumpValueSet(output_aliases_, "ValueGroup::output_aliases_"),
         "\n",
-        dumpValueSet(external_aliases_, "external_aliases_"));
+        dumpValueSet(external_aliases_, "ValueGroup::external_aliases_"));
   }
 
  private:
