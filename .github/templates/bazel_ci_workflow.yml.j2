@@ -8,9 +8,7 @@ name: !{{ build_environment }}
 
 on:
   pull_request:
-  {%- if ciflow_config.enabled %}
     types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
-  {%- endif %}
 
 {% block build +%}
   # building and testing in a single job since bazel runs only small subset of tests

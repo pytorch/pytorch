@@ -4409,7 +4409,7 @@ class TestQuantizedConv(TestCase):
            use_bias=st.booleans(),
            use_relu=st.booleans(),
            use_channelwise=st.booleans(),
-           qengine=st.sampled_from(("fbgemm",)))
+           qengine=st.sampled_from(("qnnpack", "fbgemm")))
     def test_qconv3d(
         self,
         batch_size,

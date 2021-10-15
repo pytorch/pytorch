@@ -118,8 +118,8 @@ class Fp16FCAccOp final : public Operator<Context> {
         if (!W_fbgemm->packed()) {
           float* W_fp16_trans = new float[W_size];
           fbgemm::Float16ToFloat_avx2(W_fbgemm->pmat(), W_fp16_trans, W_size);
-          for (int i = 0; i < N; i++) {
-            for (int j = 0; j < K; j++) {
+          for (const auto i : c10::irange(N)) {
+            for (const auto j : c10::irange(K)) {
               W_fp16_[j * N + i] = W_fp16_trans[i * K + j];
             }
           }
@@ -136,8 +136,8 @@ class Fp16FCAccOp final : public Operator<Context> {
         const auto& W = Input(1);
         W_data = W.template data<T_W>();
         // Transpose W
-        for (int i = 0; i < N; i++) {
-          for (int j = 0; j < K; j++) {
+        for (const auto i : c10::irange(N)) {
+          for (const auto j : c10::irange(K)) {
             W_fp16_[j * N + i] = W_data[i * K + j];
           }
         }
@@ -352,7 +352,7 @@ class Fp16FCAccOp final : public Operator<Context> {
 #ifdef LOG_LEVEL_FOR_FBFCPACKEDACC16_ACCURACY_LOG
   float compute_L2_norm(float* A, int size) {
     float square_sum = 0.0;
-    for (int i = 0; i < size; i++) {
+    for (const auto i : c10::irange(size)) {
       square_sum += A[i] * A[i];
     }
     return std::sqrt(square_sum);
@@ -360,7 +360,7 @@ class Fp16FCAccOp final : public Operator<Context> {
 
   float compute_relative_error(float* A, float* A_ref, int size) {
     float error = 0.0;
-    for (int i = 0; i < size; i++) {
+    for (const auto i : c10::irange(size)) {
       error += (A[i] - A_ref[i]) * (A[i] - A_ref[i]);
     }
     error = std::sqrt(error);
