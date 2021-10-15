@@ -1651,17 +1651,12 @@ lu.__doc__ = _lu_impl.__doc__
 def align_tensors(*tensors):
     raise RuntimeError('`align_tensors` not yet implemented.')
 
-# TODOs:
-# TODO: This function needs better documentation, examples, and something similar to:
-#       torch.nonzero's doc: https://pytorch.org/docs/stable/generated/torch.nonzero.html
-# TODO: Add tests in test/test_torch.py
-# TODO: More checks? Verify with nonzero
 def unravel_index(
-    indices: torch.Tensor,
-    shape: Tuple[int, ...],
+    indices: Union[Tensor, Tuple[int, ...]],
+    shape: Union[Tensor, Tuple[int, ...]],
     *,
     as_tuple: bool = False
-) -> torch.Tensor:
+) -> Union[Tuple[Tensor, ...], List[Tensor], Tensor]:
     r"""Converts flat indices into unraveled coordinates for the given target shape.
 
     This is a PyTorch implementation of NumPy's `unravel_index` (TODO: add link).
@@ -1690,7 +1685,7 @@ def unravel_index(
     """
     _integral_types = [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]
     if not isinstance(shape, Tensor):
-        assert isinstance(shape, (tuple,  list)), f"Shape should be either a tuple or a list if not tensor, but found: {type(shape)}."
+        assert isinstance(shape, (tuple, list)), f"Shape should be either a tuple or a list if not tensor, but found: {type(shape)}."
         for dim in shape:
             if not isinstance(dim, int):
                 raise TypeError("Expected shape to have only integral elements.")
@@ -1705,7 +1700,8 @@ def unravel_index(
 
     if not isinstance(indices, Tensor):
         if not isinstance(indices, (tuple, list)):
-            raise TypeError(f"Indices should be either a tuple or a list if not tensor, but found: {type(indices)}.")
+            raise TypeError(f"Indices should be either a tuple or a list if not tensor,"
+                             " but found: {type(indices)}.")
         for index in indices:
             if not isinstance(index, int):
                 raise TypeError("Expected indices to have only integral elements.")
@@ -1724,12 +1720,15 @@ def unravel_index(
     if shape.numel() == 0:
         raise ValueError(f"Empty shape tensor passed, expected shape tensor of minimum size {indices.shape}.")
 
-    assert torch.max(indices) < torch.prod(shape), f"Given indices {indices} should be representible for the given shape {shape}."
-    assert torch.unique(indices).numel() <= torch.prod(shape), f"Number of unique indices passed exceed the number of elements for given shape."
+    if torch.max(indices) >= torch.prod(shape):
+        raise ValueError(f"Given indices {indices} should be representible for the given shape {shape}.")
+    if torch.unique(indices).numel() > torch.prod(shape):
+        raise ValueError("Number of unique indices passed exceed the number of elements for given shape.")
 
     # For zero-dim shape, return 0 by default
     if shape.dim() == 0:
-        return tuple(0) if as_tuple else 0
+        _zero = torch.tensor(0, dtype=torch.int64, device=indices.device)
+        return tuple(_zero) if as_tuple else _zero
 
     # List to store unraveled indices, to be converted to a tuple/tensor depending on
     # to_tuple kw-only arg
@@ -1739,6 +1738,6 @@ def unravel_index(
         indices = torch.div(indices, dim, rounding_mode='trunc')
 
     if len(coords) != 0:
-        coords = torch.stack(coords[::-1], dim=-1)
+        coords_t = torch.stack(coords[::-1], dim=-1)
 
-    return tuple(coords.T) if as_tuple else coords
+    return tuple(coords_t.T) if as_tuple else coords

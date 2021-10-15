@@ -1052,8 +1052,8 @@ class AbstractTestCases:
             self.assertRaises(ValueError, lambda: torch.unravel_index(torch.tensor([-1, -2]), torch.tensor([-1, -2])))
 
             # Expected error when number of unique indices > prod(shape)
-            self.assertRaises(AssertionError, lambda: torch.unravel_index([1, 2, 3], (1, 2)))
-            self.assertRaises(AssertionError, lambda: torch.unravel_index(torch.tensor([1, 2, 3]), torch.tensor([1, 2])))
+            self.assertRaises(ValueError, lambda: torch.unravel_index([1, 2, 3], (1, 2)))
+            self.assertRaises(ValueError, lambda: torch.unravel_index(torch.tensor([1, 2, 3]), torch.tensor([1, 2])))
 
             # Expected error when non-integral type tensors/values are passed
             self.assertRaises(TypeError, lambda: torch.unravel_index([1.2, 2.3], torch.tensor([2, 3])))
@@ -1061,8 +1061,8 @@ class AbstractTestCases:
             self.assertRaises(TypeError, lambda: torch.unravel_index(torch.tensor([1, 2]), [2.3, 3.4]))
 
             # Expected error when any index is out of bound for given shape
-            self.assertRaises(AssertionError, lambda: torch.unravel_index(torch.tensor([3, 4]), torch.tensor([1, 2])))
-            self.assertRaises(AssertionError, lambda: torch.unravel_index([3, 4], [1, 2]))
+            self.assertRaises(ValueError, lambda: torch.unravel_index(torch.tensor([3, 4]), torch.tensor([1, 2])))
+            self.assertRaises(ValueError, lambda: torch.unravel_index([3, 4], [1, 2]))
 
             # Expected error when shape is empty but indices is not
             self.assertRaises(ValueError, lambda: torch.unravel_index(torch.tensor([1, 2]), torch.tensor([], dtype=torch.int64)))

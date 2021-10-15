@@ -5051,7 +5051,7 @@ def sample_inputs_unfold(op_info, device, dtype, requires_grad, **kwargs):
 def sample_inputs_unravel_index(op_info, device, dtype, requires_grad, **kwargs):
     create_tensor = partial(torch.tensor, dtype=dtype, device=device, requires_grad=False)
 
-    cases = (
+    cases = (  # type: ignore[assignment]
         ((S, S), (25,)),
         ((1, 2, 3), (2, 6)),
         ((0), (1,)),
