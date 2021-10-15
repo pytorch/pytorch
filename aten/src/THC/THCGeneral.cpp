@@ -8,6 +8,7 @@
 #include <ATen/cuda/CUDAContext.h>
 
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/util/irange.h>
 #include <stdlib.h>
 #include <stdint.h>
 
@@ -57,16 +58,15 @@ void THCudaInit(THCState* state)
   // Currently the max number of gpus in P2P group is 8, so if there are more
   // we enable P2P in groups of 8
   state->p2pAccessEnabled = (int**) calloc(numDevices, sizeof(int*));
-  for (int i = 0; i < numDevices; ++i) {
+  for (const auto i : c10::irange(numDevices)) {
     state->p2pAccessEnabled[i] = (int*) calloc(numDevices, sizeof(int));
-    for (int j = 0; j < numDevices; ++j)
-      if (i == j)
+    for (const auto j : c10::irange(numDevices))if (i == j)
         state->p2pAccessEnabled[i][j] = 1;
       else
         state->p2pAccessEnabled[i][j] = -1;
   }
 
-  for (int i = 0; i < numDevices; ++i) {
+  for (const auto i : c10::irange(numDevices)) {
     THCCudaResourcesPerDevice* res = THCState_getDeviceResourcePtr(state, i);
     THCudaCheck(cudaSetDevice(i));
 
@@ -96,7 +96,7 @@ void THCudaShutdown(THCState* state)
   THCudaCheck(cudaGetDeviceCount(&deviceCount));
 
   /* cleanup p2p access state */
-  for (int dev = 0; dev < deviceCount; ++dev) {
+  for (const auto dev : c10::irange(deviceCount)) {
     free(state->p2pAccessEnabled[dev]);
   }
   free(state->p2pAccessEnabled);

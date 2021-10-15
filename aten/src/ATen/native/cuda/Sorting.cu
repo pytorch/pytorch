@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/ceil_div.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/NumericUtils.h>
 #include <ATen/native/SortingUtils.h>
 #include <c10/macros/Macros.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -72,9 +73,7 @@ __global__ void gatherKthValue(
     scalar_t v = inRange ? doLdg(&inputSliceStart[i * inputWithinSliceStride])
                          : static_cast<scalar_t>(0);
     bool isKValue = inRange &&
-        ((v == kValue) ||
-         (THCNumerics<scalar_t>::isnan(v) &&
-          THCNumerics<scalar_t>::isnan(kValue)));
+        ((v == kValue) || (at::_isnan(v) && at::_isnan(kValue)));
     if (isKValue) {
       kValueIndex = i;
       foundKValue = true;
@@ -122,7 +121,7 @@ __global__ void gatherMedian(
   index_t nan_count = 0;
   for (index_t i = threadIdx.x; i < inputSliceSize; i += blockDim.x) {
     scalar_t val = doLdg(&inputSliceStart[i * inputWithinSliceStride]);
-    nan_count += THCNumerics<scalar_t>::isnan(val) ? 1 : 0;
+    nan_count += at::_isnan(val) ? 1 : 0;
   }
 
   // Counts number of nan values
@@ -161,9 +160,7 @@ __global__ void gatherMedian(
   // Find the index of the median value in the slice
   for (index_t i = threadIdx.x; i < inputSliceSize; i += blockDim.x) {
     scalar_t val = doLdg(&inputSliceStart[i * inputWithinSliceStride]);
-    if (val == median ||
-        (THCNumerics<scalar_t>::isnan(val) &&
-         THCNumerics<scalar_t>::isnan(median))) {
+    if (val == median || (at::_isnan(val) && at::_isnan(median))) {
       indicesSliceStart[0] = i;
       break;
     }

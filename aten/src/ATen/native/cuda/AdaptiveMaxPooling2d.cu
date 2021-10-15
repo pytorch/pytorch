@@ -1,12 +1,12 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/NumericLimits.cuh>
 #include <ATen/NativeFunctions.h>
+#include <ATen/NumericUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <c10/util/Exception.h>
-#include <THC/THCGeneral.h>
-#include <THC/THCNumerics.cuh>
 
 #include <algorithm>
 #include <cfloat>
@@ -81,7 +81,7 @@ __global__ void adaptivemaxpool(T *input, T *output, int64_t *indices,
       for(ih = 0; ih < kH; ih++) {
         for(iw = 0; iw < kW; iw++) {
           T val = ptr_input[iw*istrideW];
-          if ((val > max) || THCNumerics<T>::isnan(val)) {
+          if ((val > max) || at::_isnan(val)) {
             max = val;
             argmax = (ih+istartH)*isizeW + iw+istartW;
           }

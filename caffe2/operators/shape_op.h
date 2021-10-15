@@ -34,7 +34,7 @@ class ShapeOp : public Operator<Context> {
     auto* output = Output(0, {numAxes}, at::dtype<int64_t>());
     auto src = reinterpret_cast<const char*>(data.sizes().data());
     auto out = reinterpret_cast<char*>(output->template mutable_data<int64_t>());
-    for (int i = 0; i < numAxes; i++) {
+    for (const auto i : c10::irange(numAxes)) {
       auto axis = axes_[i];
       CAFFE_ENFORCE_LT(axis, numDims, "Axis out of range");
       CAFFE_ENFORCE_GE(axis, 0, "Each axis should be non-negative");

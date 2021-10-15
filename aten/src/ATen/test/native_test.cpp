@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 
 using namespace at;
 
@@ -16,7 +17,7 @@ using namespace at;
 
 void requireEqualTensorList(TensorList t1, TensorList t2) {
   ASSERT_EQ(t1.size(), t2.size());
-  for (size_t i = 0; i < t1.size(); ++i) {
+  for (const auto i : c10::irange(t1.size())) {
     ASSERT_EQUAL(t1[i], t2[i]);
   }
 }
@@ -74,7 +75,7 @@ void TestStack(TensorOptions T, Tensor& t) {
     auto z = rand({2, 3, 4});
 
     auto inputs = {x, y, z};
-    for (int64_t dim = 0; dim < 4; ++dim) {
+    for (const auto dim : c10::irange(4)) {
       _test_stack(inputs, dim, at::stack);
     }
   }
@@ -85,7 +86,7 @@ void TestStack(TensorOptions T, Tensor& t) {
     auto z = rand({2, 3, 4});
 
     auto inputs = {x, y, z};
-    for (int64_t dim = 0; dim < 4; ++dim) {
+    for (const auto dim : c10::irange(4)) {
       _test_stack(inputs, dim, at::native::_stack);
     }
   }
@@ -96,7 +97,7 @@ void TestStack(TensorOptions T, Tensor& t) {
     auto z = rand({2, 3, 4});
 
     auto inputs = {x, y, z};
-    for (int64_t dim = 0; dim < 4; ++dim) {
+    for (const auto dim : c10::irange(4)) {
       _test_stack(inputs, dim, at::native::_stack_cpu);
     }
   }
