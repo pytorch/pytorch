@@ -6,7 +6,10 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 #include <ATen/autocast_mode.h>
+#include <ATen/cpp_custom_type_hack.h>
+#include <ATen/record_function.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/function.h>
@@ -14,6 +17,7 @@
 #include <torch/csrc/autograd/python_saved_variable_hooks.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/autograd/utils/python_arg_parsing.h>
+#include <torch/csrc/autograd/python_mode.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <c10/core/ScalarType.h>
 
@@ -249,6 +253,35 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
 #endif
   });
 
+  // NOTICE: These record functions are not torch operators and may not show up
+  // in TorchScript tracing, FX transforms, or operator serialization. For these
+  // use cases, please use `torch.profiler.record_function`.
+  // Creates a new profiling scope using RecordFunction and invokes its starting
+  // callbacks.
+  m.def("_record_function_with_args_enter", [](const std::string& name, py::args args) {
+    auto rec = std::make_unique<at::RecordFunction>(at::RecordScope::USER_SCOPE);
+    if (rec->isActive()) {
+      if (rec->needsInputs()) {
+        auto iv_inputs = std::vector<c10::IValue>();
+        for (const auto& arg : args) {
+            iv_inputs.push_back(torch::jit::toTypeInferredIValue(arg));
+        }
+        rec->before(name, iv_inputs);
+      } else {
+        rec->before(name);
+      }
+    }
+    return at::cpp_custom_type_hack::create(std::move(rec), at::TensorOptions());
+  });
+
+  // Ends the profiling scope created with record_function_with_param_enter.
+  m.def("_record_function_with_args_exit", [](const at::Tensor& handle) {
+    // We don't actually need to do anything with handle just need to persist the
+    // lifetime until now.
+    auto& rec = at::cpp_custom_type_hack::cast<at::RecordFunction>(handle);
+    rec.end();
+  });
+
   m.def("_supported_activities", []() {
     std::set<ActivityType> activities {ActivityType::CPU};
 #if defined(USE_KINETO) && !defined(LIBKINETO_NOCUPTI)
@@ -389,14 +422,18 @@ static const char* scalarTypeName(const at::ScalarType type) {
 static PyObject * get_autocast_gpu_dtype(PyObject* _unused, PyObject *arg){
   HANDLE_TH_ERRORS
   at::ScalarType current_dtype = at::autocast::get_autocast_gpu_dtype();
-  return THPDtype_New(current_dtype, scalarTypeName(current_dtype));
+  auto dtype = (PyObject*)torch::getTHPDtype(current_dtype);
+  Py_INCREF(dtype);
+  return dtype;
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject * get_autocast_cpu_dtype(PyObject* _unused, PyObject *arg){
   HANDLE_TH_ERRORS
   at::ScalarType current_dtype = at::autocast::get_autocast_cpu_dtype();
-  return THPDtype_New(current_dtype, scalarTypeName(current_dtype));
+  auto dtype = (PyObject*)torch::getTHPDtype(current_dtype);
+  Py_INCREF(dtype);
+  return dtype;
   END_HANDLE_TH_ERRORS
 }
 
@@ -416,6 +453,26 @@ static PyObject * autocast_increment_nesting(PyObject* _unused, PyObject *arg) {
 static PyObject * autocast_decrement_nesting(PyObject* _unused, PyObject *arg) {
   HANDLE_TH_ERRORS
   return THPUtils_packInt64(at::autocast::decrement_nesting());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * is_autocast_cache_enabled(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  if (at::autocast::is_autocast_cache_enabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * set_autocast_cache_enabled(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  if (!PyBool_Check(arg)) {
+    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
+  }
+  at::autocast::set_autocast_cache_enabled(arg == Py_True);
+  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
@@ -494,6 +551,20 @@ static PyObject * python_exit_dual_level(PyObject* _unused, PyObject* args, PyOb
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * enter_python_mode(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  PythonMode::enter(arg);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * exit_python_mode(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  PythonMode::exit();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 // autograd methods on torch._C
 static PyMethodDef methods[] = { // NOLINT
   {"_set_grad_enabled", set_grad_enabled, METH_O, nullptr},
@@ -510,10 +581,14 @@ static PyMethodDef methods[] = { // NOLINT
   {"get_autocast_gpu_dtype", get_autocast_gpu_dtype, METH_NOARGS, nullptr},
   {"autocast_increment_nesting", autocast_increment_nesting, METH_NOARGS, nullptr},
   {"autocast_decrement_nesting", autocast_decrement_nesting, METH_NOARGS, nullptr},
+  {"is_autocast_cache_enabled", is_autocast_cache_enabled, METH_NOARGS, nullptr},
+  {"set_autocast_cache_enabled", set_autocast_cache_enabled, METH_O, nullptr},
   {"set_anomaly_enabled", set_anomaly_mode_enabled, METH_O, nullptr},
   {"is_anomaly_enabled", is_anomaly_mode_enabled, METH_NOARGS, nullptr},
   {"_enter_dual_level", python_enter_dual_level, METH_NOARGS, nullptr},
   {"_exit_dual_level", castPyCFunctionWithKeywords(python_exit_dual_level), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"_enter_python_mode", enter_python_mode, METH_O, nullptr},
+  {"_exit_python_mode", exit_python_mode, METH_NOARGS, nullptr},
   {nullptr, nullptr, 0, nullptr}
 };
 

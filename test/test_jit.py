@@ -61,6 +61,10 @@ from jit.test_convert_activation import TestFunctionalToInplaceActivation, TestI
 from jit.test_parametrization import TestParametrization  # noqa: F401
 from jit.test_attr import TestGetDefaultAttr  # noqa: F401
 from jit.test_aten_pow import TestAtenPow  # noqa: F401
+from jit.test_optimize_for_mobile_preserve_debug_info import TestOptimizeForMobilePreserveDebugInfo  # noqa: F401
+from jit.test_union import TestUnion  # noqa: F401
+from jit.test_models import MnistNet
+from jit.test_batch_mm import TestBatchMM  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -69,8 +73,7 @@ from torch._six import PY37
 from torch.autograd import Variable
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3, Any  # noqa: F401
 from torch.nn.utils.rnn import PackedSequence
-from torch.testing import FileCheck
-from torch.testing._internal.common_utils import make_tensor
+from torch.testing import FileCheck, make_tensor
 import torch.autograd.profiler
 import torch.cuda
 import torch.jit
@@ -92,7 +95,7 @@ from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, dis
     RUN_CUDA
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, nn_functional_tests, get_script_args, \
     EXCLUDE_SCRIPT, additional_module_tests, EXCLUDE_SCRIPT_MODULES, \
-    get_nn_module_name_from_kwargs, script_method_template
+    get_nn_module_name_from_kwargs, get_nn_mod_test_name, script_method_template
 
 from torch.testing._internal.common_nn import module_tests, new_module_tests, criterion_tests
 from torch.testing._internal.common_methods_invocations import (
@@ -392,11 +395,6 @@ class TestJit(JitTestCase):
         self.assertFalse(m2.p0.is_cuda)
         self.assertFalse(m2.b0.is_cuda)
 
-    def test_model_save_error(self):
-        with TemporaryFileName() as fname:
-            with self.assertRaisesRegex(pickle.PickleError, "not supported"):
-                torch.save(FooToPickle(), fname)
-
     @unittest.skipIf(not RUN_CUDA, "restore device requires CUDA")
     def test_restore_device_cuda(self):
         class MyModule(torch.jit.ScriptModule):
@@ -695,6 +693,10 @@ class TestJit(JitTestCase):
                 x.is_mkldnn,
                 x.is_quantized,
                 x.requires_grad,
+                x.T,
+                x.mT,
+                x.H,
+                x.mH
                 # x.layout TODO: layout long -> instance conversion
             )
 
@@ -711,6 +713,69 @@ class TestJit(JitTestCase):
         y = torch.rand(3, 4)
 
         self.assertTrue(check(x, y))
+
+    def test_matrix_transpose(self):
+        @torch.jit.script
+        def check(x):
+            return torch.equal(x.mT, x.transpose(-2, -1))
+
+        x = torch.rand(3, 4)
+        self.assertTrue(check(x))
+
+    def test_transpose(self):
+        @torch.jit.script
+        def check(x):
+            return torch.equal(x.T, x.t())
+
+        x = torch.rand(3, 4)
+        self.assertTrue(check(x))
+
+    def test_matrix_conj_transpose(self):
+        @torch.jit.script
+        def check(x):
+            return torch.equal(x.mH, x.transpose(-2, -1).conj())
+
+        x = torch.rand(3, 4)
+        self.assertTrue(check(x))
+
+        x = make_tensor((3, 4), device="cpu", dtype=torch.complex64)
+        self.assertTrue(check(x))
+
+    def test_conj_transpose(self):
+        @torch.jit.script
+        def check(x):
+            return torch.equal(x.H, x.t().conj())
+
+        x = torch.rand(3, 4)
+        self.assertTrue(check(x))
+
+        x = make_tensor((3, 4), device="cpu", dtype=torch.complex64)
+        self.assertTrue(check(x))
+
+    def test_T_mT_H_mH(self):
+        def T(x):
+            return x.mT
+
+        def mT(x):
+            return x.mT
+
+        def H(x):
+            return x.H
+
+        def mH(x):
+            return x.mH
+
+        x = torch.rand(3, 4)
+        y = make_tensor((3, 4), device="cpu", dtype=torch.complex64)
+
+        self.checkScript(T, (x, ))
+        self.checkScript(mT, (x, ))
+        self.checkScript(H, (x, ))
+        self.checkScript(mH, (x, ))
+        self.checkScript(T, (y, ))
+        self.checkScript(mT, (y, ))
+        self.checkScript(H, (y, ))
+        self.checkScript(mH, (y, ))
 
     def test_nn_conv(self):
         class Mod(nn.Module):
@@ -2522,32 +2587,6 @@ graph(%Ra, %Rb):
 
         t = Test()
         self.assertEqual(t(torch.ones(1)), torch.ones(1) + 4)
-
-    def test_union_to_optional(self):
-        def test1(u: Union[int, None]) -> int:
-            if u is not None:
-                return u
-            else:
-                return 0
-        scripted = torch.jit.script(test1)
-        self.assertEqual(scripted(10), test1(10))
-
-        def test2(u: Union[None, int]) -> int:
-            if u is not None:
-                return u
-            else:
-                return 0
-        scripted = torch.jit.script(test2)
-        self.assertEqual(scripted(40), test2(40))
-
-        def test3(u: Union[float, int]) -> int:
-            if u is not None:
-                return u
-            else:
-                return 0
-        expected_result = "General Union types are not currently supported"
-        with self.assertRaisesRegex(RuntimeError, expected_result):
-            torch.jit.script(test3)
 
     def test_mutable_default_values(self):
         with self.assertRaisesRegex(Exception, "Mutable default parameters"):
@@ -5173,19 +5212,20 @@ a")
                 return torch.cat((x, x), y)
 
             with disable_autodiff_subgraph_inlining():
-                x = torch.rand([2, 2]).requires_grad_()
-                y = torch.tensor(1)
+                for sizes in ((2, 2), (0, 2)):
+                    x = torch.rand(sizes).requires_grad_()
+                    y = torch.tensor(1)
 
-                output = func2(x, y, profile_and_replay=True)
-                output_ref = torch.cat((x, x), y)
-                self.assertEqual(output, output_ref)
+                    output = func2(x, y, profile_and_replay=True)
+                    output_ref = torch.cat((x, x), y)
+                    self.assertEqual(output, output_ref)
 
-                if GRAPH_EXECUTOR != ProfilingMode.SIMPLE:
-                    self.assertAutodiffNode(func2.graph_for(x, y), True, ['aten::cat'], [])
+                    if GRAPH_EXECUTOR != ProfilingMode.SIMPLE:
+                        self.assertAutodiffNode(func2.graph_for(x, y), True, ['aten::cat'], [])
 
-                    grad = torch.autograd.grad(output.sum(), x)
-                    grad_ref = torch.autograd.grad(output_ref.sum(), x)
-                    self.assertEqual(grad, grad_ref)
+                        grad = torch.autograd.grad(output.sum(), x)
+                        grad_ref = torch.autograd.grad(output_ref.sum(), x)
+                        self.assertEqual(grad, grad_ref)
 
     def test_cat_lifts(self):
         @torch.jit.script
@@ -5943,7 +5983,6 @@ a")
                 return 2
         self.assertEqual(test_bool_arith_not(torch.zeros(3)), 1)
         self.assertTrue(str(test_bool_arith_not.graph).count('if') == 0)
-
 
     def test_conditional_casting(self):
         def test_bool_cast_tensor(x):
@@ -8906,6 +8945,7 @@ dedent """
         torch.testing.assert_close(imported(x), x + torch.neg(torch.ones(3, 4, dtype=torch.float)))
 
     @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
+    @unittest.skipIf(True, "Skipping while landing PR stack")
     def test_torch_functional(self):
         def stft(input, n_fft):
             # type: (Tensor, int) -> Tensor
@@ -9815,8 +9855,9 @@ dedent """
             bar()
 
     def test_if_different_type(self):
-        with self.assertRaisesRegex(RuntimeError, "Type mismatch: c0 is set to type int "
-                                    "in the true branch and type float in the false branch:"):
+        with self.assertRaisesRegex(RuntimeError, "c0 is set to type "
+                                    "int in the true branch and type "
+                                    "float in the false branch"):
             @torch.jit.script
             def diff_type_used():
                 if 1 == 2:
@@ -9825,7 +9866,7 @@ dedent """
                     c0 = 1.0
                 return c0
 
-        with self.assertRaisesRegex(RuntimeError, "Variable 'c0' previously has type float"):
+        with self.assertRaisesRegex(RuntimeError, "Variable 'c0' previously had type float"):
             @torch.jit.script
             def diff_existing_type(x):
                 c0 = 1.0
@@ -10608,7 +10649,7 @@ dedent """
         with self.assertRaisesRegex(RuntimeError, r'Expected a value of'
                                     r' type \'List\[int\]\' for argument'
                                     r' \'size\' but instead found type '
-                                    r'\'List\[Any\]\''):
+                                    r'\'List\[Union\[List\[int\], int\]\]'):
             @torch.jit.script
             def f6(a):
                 a.expand(size=[3, [4]])
@@ -11555,7 +11596,8 @@ dedent """
             out = torch.jit.annotate(int, [x for x in [1, 2, 3]])  # noqa: C416
             return out
 
-        with self.assertRaisesRegex(Exception, "Expected list type annotation"):
+        with self.assertRaisesRegex(Exception, "Expected an annotation"
+                                    " of type List"):
             torch.jit.script(bad_type_annotation)
 
     def test_list_comprehension_variable_write(self):
@@ -12678,7 +12720,7 @@ dedent """
         for pair in self.type_input_return_pairs():
             cu = torch.jit.CompilationUnit(self.format_code(code, pair))
             test_str.append(str(cu.foo.schema))
-        self.assertExpected("\n".join(test_str))
+        self.assertExpected("\n".join(test_str) + "\n")
 
     #  String frontend , Python 3-style type annotations , Script method
     def test_annot_string_py3_method(self):
@@ -12697,7 +12739,7 @@ dedent """
             tm = TestModule()
             tm.define(self.format_code(code, pair))
             test_str.append(str(tm.foo.schema))
-        self.assertExpectedStripMangled("\n".join(test_str))
+        self.assertExpectedStripMangled("\n".join(test_str) + "\n")
 
     #  String frontend , MyPy-style type comments , Script function
     def test_annot_string_mypy_fn(self):
@@ -12710,7 +12752,7 @@ dedent """
         for pair in self.type_input_return_pairs():
             cu = torch.jit.CompilationUnit(self.format_code(code, pair))
             test_str.append(str(cu.foo.schema))
-        self.assertExpectedStripMangled("\n".join(test_str))
+        self.assertExpectedStripMangled("\n".join(test_str) + "\n")
 
     #  String frontend , MyPy-style type comments , Script method
     def test_annot_string_mypy_method(self):
@@ -12731,7 +12773,7 @@ dedent """
             tm = TestModule()
             tm.define(self.format_code(code, pair))
             test_str.append(str(tm.foo.schema))
-        self.assertExpectedStripMangled("\n".join(test_str))
+        self.assertExpectedStripMangled("\n".join(test_str) + "\n")
 
     #  Python AST Frontend , Python 3-style type annotations , Script function
     def test_annot_ast_py3_fn(self):
@@ -12748,7 +12790,7 @@ dedent """
         for pair in self.type_input_return_pairs():
             fn = jit_utils._get_py3_code(self.format_code(code, pair), 'foo')
             test_str.append(str(fn.schema))
-        self.assertExpectedStripMangled("\n".join(test_str))
+        self.assertExpectedStripMangled("\n".join(test_str) + "\n")
 
     def test_multiline_annot_ast_py3_fn(self):
         code = dedent('''
@@ -12823,7 +12865,7 @@ dedent """
         for pair in self.type_input_return_pairs():
             fn = jit_utils._get_py3_code(self.format_code(code, pair), 'instance')
             test_str.append(str(fn.foo.schema))
-        self.assertExpectedStripMangled("\n".join(test_str))
+        self.assertExpectedStripMangled("\n".join(test_str) + "\n")
 
     #  Python AST Frontend , MyPy-style type comments , Script function
     def test_annot_ast_mypy_fn(self):
@@ -12839,7 +12881,7 @@ dedent """
         for pair in self.type_input_return_pairs():
             fn = jit_utils._get_py3_code(self.format_code(code, pair), 'foo')
             test_str.append(str(fn.schema))
-        self.assertExpected("\n".join(test_str))
+        self.assertExpected("\n".join(test_str) + "\n")
 
     #  Python AST Frontend , MyPy-style type comments , Script method
     def test_annot_ast_mypy_method(self):
@@ -12857,7 +12899,7 @@ dedent """
         for pair in self.type_input_return_pairs():
             fn = jit_utils._get_py3_code(self.format_code(code, pair), 'instance')
             test_str.append(str(fn.foo.schema))
-        self.assertExpectedStripMangled("\n".join(test_str))
+        self.assertExpectedStripMangled("\n".join(test_str) + "\n")
 
     # Tests that "# type: ignore[*]" is supported in type lines and is
     # properly ignored.
@@ -13527,8 +13569,8 @@ dedent """
         self.checkScript(fn, ("y"))
 
         def index_str_to_tensor(s):
-            # type: (str) -> int
-            return torch.tensor(ord(s))
+            # type: (str) -> Tensor
+            return torch.tensor(ord(s))  # noqa: T484
 
         s = u'\u00a3'.encode('utf8')[:1]
         self.checkScript(index_str_to_tensor, (s,))
@@ -14955,7 +14997,7 @@ dedent """
                                                                   attn_mask=mask)[0]
         # print("rel. error: ")
         # print(jit_out / py_out - 1)
-        self.assertTrue(torch.allclose(jit_out, py_out, atol=5e-4, rtol=1e-4))
+        self.assertEqual(jit_out, py_out, atol=5e-4, rtol=1e-4)
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
     def test_scriptmodule_multi_head_attn_cuda(self):
@@ -14991,7 +15033,7 @@ dedent """
                                                                   None, None, None, 0.0,
                                                                   model.mod.out_proj.weight,
                                                                   model.mod.out_proj.bias)[0]
-        self.assertTrue(torch.allclose(jit_out, py_out, atol=5e-4, rtol=1e-4))
+        self.assertEqual(jit_out, py_out, atol=5e-4, rtol=1e-4)
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
     def test_scriptmodule_transformer_cuda(self):
@@ -15030,7 +15072,7 @@ dedent """
 
         # print(jit_out/py_out-1)
         # print(torch.allclose(jit_out, py_out, atol=5e-4, rtol=1e-4))
-        self.assertTrue(torch.allclose(jit_out, py_out, atol=5e-4, rtol=1e-4))
+        self.assertEqual(jit_out, py_out, atol=5e-4, rtol=1e-4)
 
     def test_list_python_op(self):
         def python_list_op(lst):
@@ -16012,6 +16054,49 @@ class TestJitGeneratedModule(JitTestCase):
 class TestJitGeneratedFunctional(JitTestCase):
     pass
 
+class TestJitAutocast(JitTestCase):
+    def setUp(self):
+        super(TestJitAutocast, self).setUp()
+        self.models = [MnistNet()]
+        self.inputs = [torch.randn(5, 1, 28, 28, device='cpu')]
+
+    def tearDown(self):
+        super(TestJitAutocast, self).tearDown()
+
+    def test_generate_autocast_jit_trace_model(self):
+        def test_generate_autocast_jit_trace_model(model, x):
+            model.eval()
+            with torch.cpu.amp.autocast(cache_enabled=False), torch.no_grad():
+                traced_model = torch.jit.trace(model, x)
+        for i in range(self.models.__len__()):
+            test_generate_autocast_jit_trace_model(self.models[i], self.inputs[i])
+
+    def test_nchw_autocast_jit_trace_model(self):
+        def test_nchw_autocast_jit_trace_model(model, x):
+            model.eval()
+            with torch.cpu.amp.autocast(cache_enabled=False), torch.no_grad():
+                traced_model = torch.jit.trace(model, x)
+            with torch.cpu.amp.autocast(), torch.no_grad():
+                y = traced_model(x.clone())
+                y2 = model(x.clone())
+            torch.testing.assert_allclose(y.double(), y2.double(), rtol=1e-03, atol=1e-03)
+        for i in range(self.models.__len__()):
+            test_nchw_autocast_jit_trace_model(self.models[i], self.inputs[i])
+
+    def test_nhwc_autocast_jit_trace_model(self):
+        def test_nhwc_autocast_jit_trace_model(model, x):
+            model.eval()
+            with torch.cpu.amp.autocast(cache_enabled=False), torch.no_grad():
+                traced_model = torch.jit.trace(model, x.to(memory_format=torch.channels_last))
+            with torch.cpu.amp.autocast(), torch.no_grad():
+                y = traced_model(x.clone().to(memory_format=torch.channels_last))
+                y2 = model(x.clone().to(memory_format=torch.channels_last))
+            torch.testing.assert_allclose(y.double(), y2.double(), rtol=1e-03, atol=1e-03)
+        for i in range(self.models.__len__()):
+            if self.inputs[i].size().__len__() == 5:
+                # NHWC 3D case not support yet
+                continue
+            test_nhwc_autocast_jit_trace_model(self.models[i], self.inputs[i])
 
 # UBSAN per-function exclusions don't seem to work with OpenMP pragmas,
 # and we have to disable the failing tests here instead.
@@ -16109,18 +16194,13 @@ def add_nn_functional_test(name, self_size, args, variant_name='', check_ad=(), 
 
 
 def add_nn_module_test(*args, **kwargs):
-    name = get_nn_module_name_from_kwargs(**kwargs)
-
     no_grad = False if 'no_grad' not in kwargs else kwargs['no_grad']
 
     if 'desc' in kwargs and 'eval' in kwargs['desc']:
         # eval() is not supported, so skip these tests
         return
 
-    test_name = name
-    if 'desc' in kwargs:
-        test_name = "{}_{}".format(test_name, kwargs['desc'])
-    test_name = 'test_nn_{}'.format(test_name)
+    test_name = get_nn_mod_test_name(**kwargs)
 
     @suppress_warnings
     def do_test(self):
@@ -16129,10 +16209,12 @@ def add_nn_module_test(*args, **kwargs):
         if not kwargs.get('check_jit', True):
             raise unittest.SkipTest('module test skipped on JIT')
 
+        module_name = get_nn_module_name_from_kwargs(**kwargs)
+
         if 'constructor' in kwargs:
             nn_module = kwargs['constructor']
         else:
-            nn_module = getattr(torch.nn, name)
+            nn_module = getattr(torch.nn, module_name)
 
         if "FunctionalModule" in str(nn_module):
             return
@@ -16142,11 +16224,8 @@ def add_nn_module_test(*args, **kwargs):
         else:
             constructor_args = kwargs.get('constructor_args', ())
 
-        module_name = get_nn_module_name_from_kwargs(**kwargs)
-
-        # Construct a script module that passes arguments through
-        # to self.submodule
         def create_script_module(*args, **kwargs):
+            """Construct a script module that passes arguments through to self.submodule"""
             formals, tensors, actuals = get_script_args(args)
 
             method_args = ', '.join(['self'] + actuals)

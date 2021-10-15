@@ -407,7 +407,12 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
       }
 
       if (task.fn_ && !local_graph_task->has_error_.load()) {
-        AutoGradMode grad_mode(local_graph_task->grad_mode_);
+        // Set the ThreadLocalState before calling the function.
+        // NB: The ThreadLocalStateGuard doesn't set the grad_mode because GraphTask
+        // always saves ThreadLocalState without grad_mode.
+        at::ThreadLocalStateGuard tls_guard(local_graph_task->thread_locals_);
+        c10::Warning::WarningHandlerGuard warnings_guard(&local_graph_task->warning_handler_);
+
         try {
           // The guard sets the thread_local current_graph_task on construction
           // and restores it on exit. The current_graph_task variable helps
@@ -415,7 +420,18 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
           // callbacks.
           GraphTaskGuard guard(local_graph_task);
           NodeGuard ndguard(task.fn_);
-          evaluate_function(local_graph_task, task.fn_.get(), task.inputs_, local_graph_task->cpu_ready_queue_);
+          {
+            RECORD_FUNCTION(
+                c10::str(
+                    "autograd::engine::evaluate_function: ",
+                    task.fn_.get()->name()),
+                std::vector<c10::IValue>());
+            evaluate_function(
+                local_graph_task,
+                task.fn_.get(),
+                task.inputs_,
+                local_graph_task->cpu_ready_queue_);
+          }
         } catch (std::exception& e) {
           thread_on_exception(local_graph_task, task.fn_, e);
         }
@@ -619,12 +635,6 @@ static variable_list call_post_hooks(Node& fn, variable_list outputs, const vari
   return outputs;
 }
 
-static bool is_compatible_type(const at::TensorOptions& expected, const at::TensorOptions& actual) {
-  // Types are compatible if they exactly match or if the gradient is a sparse
-  // version of the expected type.
-  return expected.type_equal(actual) || (actual.is_sparse() && expected.device().type() == actual.device().type());
-}
-
 void set_device(int device) {
   // NB: We MUST NOT construct the guard for device CPU,
   // as in some settings we compile with cuda, but
@@ -686,22 +696,37 @@ void validate_outputs(
     if (c10::typeMetaToScalarType(metadata.options().dtype()) != grad.scalar_type()) {
       grad = grad.to(c10::typeMetaToScalarType(metadata.options().dtype()));
     }
-    if (grad.device() != metadata.device() &&
-        grad.dim() == 0) {
-      grad = grad.to(metadata.device());
-    }
-    if (!is_compatible_type(metadata.options(), grad.options())) {
+    if (grad.dtype() != metadata.dtype()) {
        std::stringstream ss;
-       ss << "invalid gradient at index " << i << " - expected type ";
-       ss << metadata.options() << " but got " << grad.options();
+       ss << "invalid gradient at index " << i << " - expected dtype ";
+       ss << metadata.dtype() << " but got " << grad.dtype();
        AT_ERROR(format_error(ss.str()));
     }
-    auto grad_device = grad.device();
-    if (grad_device != metadata.device()) {
-      std::stringstream ss;
-      ss << "invalid gradient at index " << i << " - expected device ";
-      ss << metadata.device() << " but got " << grad_device;
-      AT_ERROR(format_error(ss.str()));
+    if (grad.layout() != metadata.layout()) {
+       // TODO: Currently we only support (*, Sparse) combination for (tensor.layout(), tensor.grad.layout())
+       // In future, there will be an oppportunity to support more combinations of layouts if they are composable
+       // (example., operations like addition etc., are well defined between tensors of different layouts.),
+       // as well as all parts of autograd like AccumulateGrad correctly handle this.
+       if (!grad.is_sparse()) {
+        std::stringstream ss;
+        ss << "invalid gradient at index " << i << " - expected layout ";
+        ss << metadata.layout() << " but got " << grad.layout();
+        AT_ERROR(format_error(ss.str()));
+       }
+    }
+
+    if (grad.device() != metadata.device()) {
+      // quick hack for: https://github.com/pytorch/pytorch/issues/65016 but should be eventually removed
+      if (!(metadata.is_tensor_subclass() || grad.unsafeGetTensorImpl()->is_python_dispatch())) {
+        if (grad.dim() == 0) {
+          grad = grad.to(metadata.device());
+        } else {
+          std::stringstream ss;
+          ss << "invalid gradient at index " << i << " - expected device ";
+          ss << metadata.device() << " but got " << grad.device();
+          AT_ERROR(format_error(ss.str()));
+        }
+      }
     }
     // We should not build graph for Tensors that are not differentiable
     TORCH_INTERNAL_ASSERT(isDifferentiableType(grad.scalar_type()));
@@ -764,11 +789,6 @@ void Engine::evaluate_function(
     Node* func,
     InputBuffer& inputs,
     const std::shared_ptr<ReadyQueue>& cpu_ready_queue) {
-  // Set the ThreadLocalState before calling the function.
-  // NB: The ThreadLocalStateGuard doesn't set the grad_mode because GraphTask
-  // always saves ThreadLocalState without grad_mode.
-  at::ThreadLocalStateGuard tls_guard(graph_task->thread_locals_);
-
   // The InputBuffer::adds that supplied incoming grads took pains to
   // ensure they're safe to consume in the context of the present
   // func's stream (if applicable). So we guard onto that stream
@@ -1020,6 +1040,7 @@ auto Engine::execute(const edge_list& roots,
   // in dist_engine.cpp).
   auto& fut = graph_task->future_result_;
   fut->wait();
+  graph_task->warning_handler_.replay_warnings();
   return fut->value().toTensorVector();
 }
 
@@ -1242,7 +1263,7 @@ void GraphTask::stash_current_streams() {
   caller_current_streams_.resize(num_gpus);
   if (num_gpus > 0) {
     for (c10::DeviceIndex idx = 0; idx < num_gpus;  idx++) {
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
       // If the build targets ROCM, stash streams for all visible devices unconditionally, to work around
       // https://github.com/pytorch/pytorch/issues/59750.
       // TODO: Remove ROCM-specific behavior when https://github.com/pytorch/pytorch/issues/59750 is fixed.

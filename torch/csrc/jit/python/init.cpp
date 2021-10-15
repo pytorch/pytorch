@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/batch_mm.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/canonicalize_graph_fuser_ops.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
@@ -23,9 +24,11 @@
 #include <torch/csrc/jit/passes/erase_number_types.h>
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
+#include <torch/csrc/jit/passes/frozen_concat_linear.h>
 #include <torch/csrc/jit/passes/frozen_conv_add_relu_fusion.h>
 #include <torch/csrc/jit/passes/frozen_conv_folding.h>
 #include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
+#include <torch/csrc/jit/passes/frozen_linear_transpose.h>
 #include <torch/csrc/jit/passes/frozen_ops_to_mkldnn.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/fuse_relu.h>
@@ -138,7 +141,7 @@ bool loadPythonClasses() {
 }
 } // anonymous namespace
 
-#if !defined(__HIP_PLATFORM_HCC__)
+#if !defined(USE_ROCM)
 TORCH_API void runJITCPPTests();
 #endif
 
@@ -203,9 +206,8 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_onnx_eval_peephole",
           [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, IValue>& paramsDict,
-             bool isAllowedToAdjustGraphInputs) {
-            EvalPeepholeONNX(graph, paramsDict, isAllowedToAdjustGraphInputs);
+             std::map<std::string, IValue>& paramsDict) {
+            EvalPeepholeONNX(graph, paramsDict);
             return paramsDict;
           },
           pybind11::return_value_policy::move)
@@ -351,11 +353,13 @@ void initJITBindings(PyObject* module) {
           py::arg("preservedAttrs") = std::vector<std::string>(),
           py::arg("freezeInterfaces") = true,
           py::arg("preserveParameters") = false)
+      .def("_jit_pass_concat_frozen_linear", &FrozenConcatLinear)
       .def("_jit_pass_fold_frozen_conv_bn", &FoldFrozenConvBatchnorm)
       .def("_jit_pass_fold_frozen_conv_add_or_sub", &FoldFrozenConvAddOrSub)
       .def("_jit_pass_fold_frozen_conv_mul_or_div", &FoldFrozenConvMulOrDiv)
       .def("_jit_pass_convert_frozen_ops_to_mkldnn", &ConvertFrozenOpsToMKLDNN)
       .def("_jit_pass_fuse_frozen_conv_add_relu", &FuseFrozenConvAddRelu)
+      .def("_jit_pass_transpose_frozen_linear", &FrozenLinearTranspose)
       .def("_jit_pass_optimize_frozen_graph", &OptimizeFrozenGraph)
       .def("_jit_pass_fuse_linear", &FuseLinear)
       .def(
@@ -526,6 +530,11 @@ void initJITBindings(PyObject* module) {
           py::arg("graph"))
       .def("_jit_pass_erase_shape_information", EraseShapeInformation)
       .def(
+          "_jit_object_is_non_holding",
+          [](Node& n) {
+            return toIValue(n.output())->toObject()->is_weak_compilation_ref();
+          })
+      .def(
           "_jit_erase_non_input_shape_information",
           [](std::shared_ptr<Graph>& g) {
             std::vector<TypePtr> input_types;
@@ -548,7 +557,7 @@ void initJITBindings(PyObject* module) {
           [](const std::shared_ptr<Graph>& graph) {
             CreateAutodiffSubgraphs(graph);
           })
-#if defined(BUILDING_TESTS) && !defined(__HIP_PLATFORM_HCC__)
+#if defined(BUILDING_TESTS) && !defined(USE_ROCM)
       .def(
           "_jit_run_cpp_tests",
           []() {
@@ -590,6 +599,8 @@ void initJITBindings(PyObject* module) {
       .def("_jit_override_can_fuse_on_gpu", &overrideCanFuseOnGPU)
       .def("_jit_can_fuse_on_cpu", &canFuseOnCPU)
       .def("_jit_can_fuse_on_gpu", &canFuseOnGPU)
+      .def("_jit_can_fuse_on_cpu_legacy", &canFuseOnCPULegacy)
+      .def("_jit_override_can_fuse_on_cpu_legacy", &overrideCanFuseOnCPULegacy)
       .def(
           "_jit_differentiate",
           [](Graph& g) {
@@ -666,6 +677,18 @@ void initJITBindings(PyObject* module) {
             ::torch::jit::set_jit_logging_levels(loggingOption);
           })
       .def(
+          "_jit_set_logging_stream",
+          [](std::string stream_name) -> void {
+            if (stream_name == "stdout") {
+              ::torch::jit::set_jit_logging_output_stream(std::cout);
+            } else if (stream_name == "stderr") {
+              ::torch::jit::set_jit_logging_output_stream(std::cerr);
+            } else {
+              std::cerr << "ERROR: only `stdout` and `stderr`"
+                        << "are supported as output options" << std::endl;
+            }
+          })
+      .def(
           "_jit_try_infer_type",
           [](py::object obj) -> InferredType {
             return tryToInferType(std::move(obj));
@@ -712,8 +735,6 @@ void initJITBindings(PyObject* module) {
       .def("_jit_texpr_set_fallback_allowed", &tensorexpr::setFallbackAllowed)
       .def("_jit_set_texpr_reductions_enabled", &setTexprReductionsEnabled)
       .def("_jit_texpr_reductions_enabled", &texprReductionsEnabled)
-      .def("_jit_set_texpr_parallel_cpu_enabled", &setTexprParallelCPUEnabled)
-      .def("_jit_texpr_parallel_cpu_enabled", &texprParallelCPUEnabled)
       .def(
           "_jit_set_te_generate_block_code",
           [](bool gen_block_code) {
@@ -894,6 +915,7 @@ void initJITBindings(PyObject* module) {
             }
             return retval;
           })
+      .def("_jit_pass_batch_mm", BatchMM)
       .def("_jit_decay_packed_param_input_types", [](Graph& g) {
         for (Value* i : g.inputs()) {
           if (i->type() ==
@@ -940,7 +962,13 @@ void initJITBindings(PyObject* module) {
           [](Code& c) {
             std::vector<GraphExecutorState> states;
             for (auto& e : c.diff_graph_op_executors()) {
-              states.emplace_back(e->getDebugState());
+              if (e->isOptimized()) {
+                states.emplace_back(e->getDebugState());
+              } else {
+                // we leave an empty entry for node that doesn't have an
+                // optimized plan
+                states.emplace_back();
+              }
             }
             return states;
           })
@@ -1281,11 +1309,15 @@ void initJITBindings(PyObject* module) {
           [](const FunctionSchema& self, const FunctionSchema& other) {
             return self == other;
           })
-      .def("__str__", [](FunctionSchema& self) {
-        std::stringstream ss;
-        ss << self;
-        return ss.str();
-      });
+      .def(
+          "__str__",
+          [](FunctionSchema& self) {
+            std::stringstream ss;
+            ss << self;
+            return ss.str();
+          })
+      .def_property_readonly(
+          "is_mutable", [](FunctionSchema& self) { return self.is_mutable(); });
   py::class_<Argument>(m, "Argument")
       .def_property_readonly("name", [](Argument& self) { return self.name(); })
       .def_property_readonly("type", [](Argument& self) { return self.type(); })

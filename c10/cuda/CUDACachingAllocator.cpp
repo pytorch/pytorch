@@ -308,6 +308,8 @@ cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
   } else {
     // It's ok to capture cudaMallocs, as long as we never cudaFree those
     // addresses before replay.
+    // Capturing cudaMalloc behaves nicely: it gives the graph new VA,
+    // but is ignored (won't leakily allocate new memory) in replays.
     at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
     return cudaMalloc(p, size);
   }

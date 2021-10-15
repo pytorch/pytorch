@@ -224,7 +224,9 @@ libtorch_python_generated_sources = [
         "torch/csrc/autograd/generated/python_functions_3.cpp",
         "torch/csrc/autograd/generated/python_functions_4.cpp",
         "torch/csrc/autograd/generated/python_variable_methods.cpp",
-        "torch/csrc/autograd/generated/python_torch_functions.cpp",
+        "torch/csrc/autograd/generated/python_torch_functions_0.cpp",
+        "torch/csrc/autograd/generated/python_torch_functions_1.cpp",
+        "torch/csrc/autograd/generated/python_torch_functions_2.cpp",
         "torch/csrc/autograd/generated/python_nn_functions.cpp",
         "torch/csrc/autograd/generated/python_fft_functions.cpp",
         "torch/csrc/autograd/generated/python_linalg_functions.cpp",
@@ -375,7 +377,8 @@ filegroup(
         "aten/src/ATen/native/miopen/Conv_miopen.cpp",
         "aten/src/ATen/native/miopen/RNN_miopen.cpp",
         "aten/src/ATen/native/sparse/cuda/SparseCUDATensor.cpp",
-        "aten/src/THC/THCCachingHostAllocator.cpp",
+        "aten/src/ATen/native/sparse/cuda/SparseBlas.cpp",
+        "aten/src/ATen/native/sparse/cuda/SparseBlasImpl.cpp",
         "aten/src/THC/THCGeneral.cpp",
         "aten/src/THC/THCStorageCopy.cpp",
         "aten/src/THC/THCTensor.cpp",
@@ -392,9 +395,6 @@ filegroup(
         "aten/src/THC/THCStorageCopy.cu.cc",
         "aten/src/THC/THCTensor.cu.cc",
         "aten/src/THC/THCTensorCopy.cu.cc",
-        "aten/src/THC/THCTensorMath.cu.cc",
-        "aten/src/THC/THCTensorMathMagma.cu.cc",
-        "aten/src/THC/THCTensorMathPairwise.cu.cc",
         "aten/src/THC/THCTensorMathScan.cu.cc",
         "aten/src/THC/THCTensorScatterGather.cu.cc",
         "aten/src/THC/THCTensorSort.cu.cc",
@@ -406,21 +406,6 @@ filegroup(
         "aten/src/THC/generated/THCTensorSortInt.cu.cc",
         "aten/src/THC/generated/THCTensorSortLong.cu.cc",
         "aten/src/THC/generated/THCTensorSortShort.cu.cc",
-    ],
-)
-
-filegroup(
-    name = "thcunn_srcs_cu",
-    srcs = [
-        "aten/src/THCUNN/BCECriterion.cu.cc",
-        "aten/src/THCUNN/ELU.cu.cc",
-        "aten/src/THCUNN/HardTanh.cu.cc",
-        "aten/src/THCUNN/LeakyReLU.cu.cc",
-        "aten/src/THCUNN/MultiMarginCriterion.cu.cc",
-        "aten/src/THCUNN/SoftMarginCriterion.cu.cc",
-        "aten/src/THCUNN/SoftPlus.cu.cc",
-        "aten/src/THCUNN/SoftShrink.cu.cc",
-        "aten/src/THCUNN/Tanh.cu.cc",
     ],
 )
 
@@ -540,6 +525,7 @@ header_template_rule(
     substitutions = {
         "@AT_CUDNN_ENABLED@": "1",
         "@AT_ROCM_ENABLED@": "0",
+        "@AT_MAGMA_ENABLED@": "0",
         "@NVCC_FLAGS_EXTRA@": "",
     },
 )
@@ -549,15 +535,6 @@ header_template_rule(
     src = "aten/src/TH/THGeneral.h.in",
     out = "aten/src/TH/THGeneral.h",
     substitutions = {
-    },
-)
-
-header_template_rule(
-    name = "aten_src_THC_THCGeneral",
-    src = "aten/src/THC/THCGeneral.h.in",
-    out = "aten/src/THC/THCGeneral.h",
-    substitutions = {
-        "#cmakedefine USE_MAGMA": "",
     },
 )
 
@@ -573,8 +550,6 @@ cc_library(
         "aten/src/THC/**/*.cpp",
         "aten/src/THC/*.cuh",
         "aten/src/THC/generic/*.cu.cc",
-        "aten/src/THCUNN/*.cuh",
-        "aten/src/THCUNN/generic/*.cu.cc",
     ],
     exclude = [
         "aten/src/ATen/Config.h",
@@ -589,7 +564,6 @@ cc_library(
     deps = [
         ":c10_headers",
         ":aten_src_TH_THGeneral",
-        ":aten_src_THC_THCGeneral",
     ],
 )
 
@@ -716,7 +690,6 @@ cu_library(
     srcs = [
         ":aten_srcs_cu",
         ":thc_srcs_cu",
-        ":thcunn_srcs_cu",
     ],
     copts = ATEN_COPTS + torch_cuda_half_options,
     visibility = ["//visibility:public"],
@@ -2079,6 +2052,23 @@ cc_test(
     tags = [
         "exclusive",
         "gpu-required",
+    ],
+    deps = [
+        ":torch",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "lazy_tests",
+    size = "small",
+    srcs = glob([
+        "test/cpp/lazy/*.cpp",
+        "test/cpp/lazy/*.h",
+    ]),
+    linkstatic = True,
+    tags = [
+        "exclusive",
     ],
     deps = [
         ":torch",
