@@ -415,7 +415,10 @@ struct Vectorized<c10::qint8> : public Vectorizedqi {
     // This is needed because the compiler emits awful code for the default
     // constructor for moving the enum
     // NOLINTNEXTLINE(clang-diagnostic-deprecated-copy)
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wdeprecated-copy"
     Vectorized(const Vectorized<c10::qint8>& other) : Vectorizedqi(other.vals) { }
+    #pragma clang diagnostic pop
 
     void store(void* ptr, int count = size()) const {
         if (count != size()) {
@@ -575,7 +578,10 @@ struct Vectorized<c10::quint8> : public Vectorizedqi {
     }
 
     // NOLINTNEXTLINE(clang-diagnostic-deprecated-copy)
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wdeprecated-copy"
     Vectorized(const Vectorized<c10::quint8>& other) : Vectorizedqi(other.vals) { }
+    #pragma clang diagnostic pop
 
     void store(void* ptr, int count = size()) const {
         if (count != size()) {
