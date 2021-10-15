@@ -435,6 +435,25 @@ Example::
             [ 0.7573, -3.9555, -2.8681]])
 """.format(**common_args, **tf32_notes))
 
+add_docstr(torch.adjoint,
+           r"""
+adjoint(Tensor) -> Tensor
+Returns a view of the tensor conjugated and with the last two dimensions transposed.
+
+``x.adjoint()`` is equivalent to ``x.transpose(-2, -1).conj()`` for complex tensors and
+``x.transpose(-2, -1)`` for real tensors.
+
+Example::
+    >>> x = torch.arange(4, dtype=torch.float)
+    >>> A = torch.complex(x, x).reshape(2, 2)
+    >>> A
+    tensor([[0.+0.j, 1.+1.j],
+            [2.+2.j, 3.+3.j]])
+    >>> A.adjoint()
+    tensor([[0.-0.j, 2.-2.j],
+            [1.-1.j, 3.-3.j]])
+""")
+
 add_docstr(torch.sspaddmm,
            r"""
 sspaddmm(input, mat1, mat2, *, beta=1, alpha=1, out=None) -> Tensor
@@ -9575,8 +9594,9 @@ If :attr:`dim` is not given, the last dimension of the `input` is chosen.
 
 If :attr:`largest` is ``False`` then the `k` smallest elements are returned.
 
-A namedtuple of `(values, indices)` is returned, where the `indices` are the indices
-of the elements in the original `input` tensor.
+A namedtuple of `(values, indices)` is returned with the `values` and
+`indices` of the largest `k` elements of each row of the `input` tensor in the
+given dimension `dim`.
 
 The boolean option :attr:`sorted` if ``True``, will make sure that the returned
 `k` elements are themselves sorted
