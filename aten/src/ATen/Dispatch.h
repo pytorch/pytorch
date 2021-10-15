@@ -76,11 +76,11 @@ TORCH_API void record_kernel_function_dtype(std::string name);
 // Workaround for C10_UNUSED because CUDA 10.1 and below fails to handle unused
 // attribute in the type aliasing context. Keep name long and verbose to avoid
 // macro collisions.
-#if defined(__CUDACC__) && CUDA_VERSION <= 10100
+#if defined(__CUDACC__) && defined(CUDA_VERSION) && CUDA_VERSION <= 10100
 #define C10_UNUSED_DISPATCH_CUDA_WORKAROUND
 #else
 #define C10_UNUSED_DISPATCH_CUDA_WORKAROUND C10_UNUSED
-#endif // defined(__CUDACC__) && CUDA_VERSION <= 10100
+#endif // defined(__CUDACC__) && defined(CUDA_VERSION) && CUDA_VERSION <= 10100
 
 #if defined __cpp_if_constexpr
 #define AT_QINT_PRIVATE_CASE_TYPE(                                           \
@@ -528,6 +528,8 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
           NAME, at::kQInt32, at::qint32, int, CHAR_BIT * sizeof(int), INT_MIN, INT_MAX, __VA_ARGS__) \
       AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                                      \
           NAME, at::kQUInt4x2, at::quint4x2, uint8_t, 4, 0, 15, __VA_ARGS__)                   \
+      AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                                      \
+          NAME, at::kQUInt2x4, at::quint2x4, uint8_t, 2, 0, 3, __VA_ARGS__)                   \
       default:                                                                                 \
         AT_ERROR(#NAME, " not implemented for '", toString(TYPE), "'");                        \
     }                                                                                          \
