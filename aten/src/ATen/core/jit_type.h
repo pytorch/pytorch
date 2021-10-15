@@ -2004,7 +2004,7 @@ struct TORCH_API ClassType : public NamedType {
 
   const std::vector<torch::jit::Function*>& methods() const;
 
-  TypePtr findAttribute(const std::string& name) const {
+  const TypePtr& findAttribute(const std::string& name) const {
     size_t pos = 0;
     for (const auto& attr : attributes_) {
       if (name == attr.getName()) {
@@ -2019,8 +2019,8 @@ struct TORCH_API ClassType : public NamedType {
     return attributes_[pos].getType();
   }
 
-  TypePtr getAttribute(const std::string& name) const {
-    auto type = findAttribute(name);
+  const TypePtr& getAttribute(const std::string& name) const {
+    const auto& type = findAttribute(name);
     TORCH_CHECK(
         type,
         repr_str(),
@@ -2034,7 +2034,7 @@ struct TORCH_API ClassType : public NamedType {
     return attributes_.size();
   }
 
-  TypePtr getAttribute(size_t slot) const {
+  const TypePtr& getAttribute(size_t slot) const {
     AT_ASSERT(slot < attributes_.size());
     return attributes_.at(slot).getType();
   }
