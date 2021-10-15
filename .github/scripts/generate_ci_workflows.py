@@ -198,7 +198,7 @@ class CIWorkflow:
             assert LABEL_CIFLOW_WIN in self.ciflow_config.labels
         if self.test_runner_type in CUDA_RUNNERS:
             assert LABEL_CIFLOW_CUDA in self.ciflow_config.labels
-        if self.test_runner_type in CPU_RUNNERS:
+        if self.test_runner_type in CPU_RUNNERS and not self.exclude_test:
             assert LABEL_CIFLOW_CPU in self.ciflow_config.labels
         if self.is_scheduled:
             assert LABEL_CIFLOW_DEFAULT not in self.ciflow_config.labels
@@ -311,7 +311,37 @@ LINUX_WORKFLOWS = [
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         exclude_test=True,
         ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_MOBILE, LABEL_CIFLOW_DEFAULT},
+            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_MOBILE, LABEL_CIFLOW_DEFAULT},
+        ),
+    ),
+    CIWorkflow(
+        arch="linux",
+        build_environment="linux-xenial-py3-clang5-mobile-custom-build-dynamic",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        exclude_test=True,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_MOBILE, LABEL_CIFLOW_DEFAULT},
+        ),
+    ),
+    CIWorkflow(
+        arch="linux",
+        build_environment="linux-xenial-py3-clang5-mobile-custom-build-static",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        exclude_test=True,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_MOBILE, LABEL_CIFLOW_DEFAULT},
+        ),
+    ),
+    CIWorkflow(
+        arch="linux",
+        build_environment="linux-xenial-py3-clang5-mobile-code-analysis",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        exclude_test=True,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_MOBILE},
         ),
     ),
     CIWorkflow(
