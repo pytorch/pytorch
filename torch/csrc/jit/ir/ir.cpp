@@ -752,14 +752,24 @@ void Block::destroy() {
   graph_->freeBlock(this);
 }
 
-std::shared_ptr<Graph> Graph::copy() {
-  auto new_g = std::make_shared<Graph>();
+void Graph::cloneFrom(Graph& src) {
   auto env = [](Value* v) -> Value* {
     AT_ERROR(
         "Graph::copy() encountered a use of a value " + v->debugName() +
         " not in scope. Run lint!");
   };
-  new_g->block()->cloneFrom(this->block(), env);
+  block()->cloneFrom(src.block(), env);
+}
+
+std::shared_ptr<Graph> Graph::copy() {
+  auto new_g = std::make_shared<Graph>();
+  new_g->cloneFrom(*this);
+  return new_g;
+}
+
+std::unique_ptr<Graph> Graph::copyUnique() {
+  auto new_g = std::make_unique<Graph>();
+  new_g->cloneFrom(*this);
   return new_g;
 }
 
@@ -1018,7 +1028,7 @@ bool Node::matches(const FunctionSchema& schema) const {
     // we will not succeed at matching T. However None <: Optional[T] so this
     // check can still succeed.
 
-    if (!actuals[i]->type()->isSubtypeOf(formal)) {
+    if (!actuals[i]->type()->isSubtypeOf(*formal)) {
       return false;
     }
   }
@@ -1790,7 +1800,7 @@ Node* Graph::createList(
   auto n = create(prim::ListConstruct, values);
   for (const auto& v : values) {
     TORCH_CHECK(
-        v->type()->isSubtypeOf(contained_type),
+        v->type()->isSubtypeOf(*contained_type),
         "Expected a list element that subtypes '",
         contained_type->repr_str(),
         "' but got an element of type '",
@@ -1820,8 +1830,8 @@ Node* Graph::createDict(
   AT_ASSERT(keys.size() == values.size());
   auto n = create(prim::DictConstruct, 1);
   for (const auto i : c10::irange(keys.size())) {
-    AT_ASSERT(keys[i]->type()->isSubtypeOf(key_type));
-    AT_ASSERT(values[i]->type()->isSubtypeOf(value_type));
+    AT_ASSERT(keys[i]->type()->isSubtypeOf(*key_type));
+    AT_ASSERT(values[i]->type()->isSubtypeOf(*value_type));
 
     n->addInput(keys[i]);
     n->addInput(values[i]);

@@ -559,10 +559,10 @@ def quantize_per_channel(*, input, acc_out_ty=None):
     assert acc_out_ty is not None
     qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
     dtype = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "dtype")
-    return torch.quantize_per_tensor(
+    return torch.quantize_per_channel(
         input,
-        qparams["scale"],
-        qparams["zero_point"],
+        torch.tensor(qparams["scale"]),
+        torch.tensor(qparams["zero_point"]),
         qparams["axis"],
         dtype)  # type: ignore[call-overload]
 
@@ -1583,3 +1583,9 @@ def gelu(*, input):
 @register_acc_op
 def cumsum(*, input, dim, dtype=None):
     return torch.cumsum(**locals())
+
+@register_acc_op_mapping(op_and_target=("call_function", torch.chunk))
+@register_acc_op_mapping(op_and_target=("call_method", "chunk"))
+@register_acc_op
+def chunk(*, input, chunks, dim=0):
+    return torch.chunk(input, chunks, dim)
