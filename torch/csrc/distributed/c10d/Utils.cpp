@@ -35,7 +35,7 @@ std::string parse_env(const char* env_var_name) {
 
 DistributedDebugLevel parseDistDebugLevel() {
   std::string debugLevel = parse_env(kDistDebugEnvVar);
-  const char* levelStr;
+  const char* levelStr{nullptr};
   if (debugLevel.compare("N/A") == 0) {
     levelStr = kDistDebugOffLogLevel;
   } else {
