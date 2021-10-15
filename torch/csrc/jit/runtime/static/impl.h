@@ -473,11 +473,11 @@ class TORCH_API ProcessedNode {
   std::vector<IValue> clone_inputs() const;
 
   bool has_out_variant() const {
-    return fn_.index() == 0;
+    return function_kind_ == FunctionKind::kOutVariant;
   }
 
   bool has_native() const {
-    return fn_.index() == 1;
+    return function_kind_ == FunctionKind::kNativeFunction;
   }
 
   bool verify_no_memory_overlap() const;
@@ -487,12 +487,14 @@ class TORCH_API ProcessedNode {
   }
 
  private:
-  void run_impl();
-
   Node* node_;
-  using OutVariant = std::function<void(ProcessedNode*)>;
-  using NativeFunction = std::function<void(ProcessedNode*)>;
-  c10::variant<OutVariant, NativeFunction, Operation> fn_;
+  enum class FunctionKind {
+    kOutVariant,
+    kNativeFunction,
+    kInterpreterFallback,
+  };
+  FunctionKind function_kind_;
+  std::function<void(ProcessedNode*)> fn_;
   std::unique_ptr<const IValue*[]> inputs_; // unowned
   std::unique_ptr<IValue[]> outputs_;
   size_t inputs_size_;
