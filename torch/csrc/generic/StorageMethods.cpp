@@ -13,11 +13,11 @@
 #define LSEEK lseek
 #endif
 
-static PyObject * THPStorage_(size)(PyObject *_self, PyObject *noargs)
+static PyObject * THPStorage_(nbytes)(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   auto self = (THPStorage*)_self;
-  return THPUtils_packUInt64(self->cdata->nbytes() / sizeof(scalar_t));
+  return THPUtils_packUInt64(self->cdata->nbytes());
   END_HANDLE_TH_ERRORS
 }
 
@@ -102,38 +102,45 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
   PyObject *obj = nullptr;
   const char* byte_order_str = nullptr;
   Py_ssize_t count = -1, offset = 0;
+  PyObject* dtype_obj = nullptr;
+  c10::ScalarType scalar_type = at::kByte;
   Py_buffer buffer = {};
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,clang-diagnostic-writable-strings)
-  static char *kwlist[] = {"buffer", "byte_order", "count", "offset", nullptr};
+  static char *kwlist[] = {"buffer", "byte_order", "count", "offset", "dtype", nullptr};
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   const char* argtypes;
-#if defined(TH_REAL_IS_BYTE) || defined(TH_REAL_IS_CHAR)
-  argtypes = "O|snn";
-#else
-  argtypes = "Os|nn";
-#endif
+  argtypes = "O|snnO";
 
   if (!PyArg_ParseTupleAndKeywords(args, keywds, argtypes, kwlist,
-        &obj, &byte_order_str, &count, &offset)) {
+        &obj, &byte_order_str, &count, &offset, &dtype_obj)) {
     return nullptr;
   }
+  TORCH_CHECK(dtype_obj != nullptr, "argument 'dtype' cannot be None");
+  TORCH_CHECK(THPDtype_Check(dtype_obj), "argument 'dtype' must be of type torch.dtype");
+  auto dtype = reinterpret_cast<THPDtype*>(dtype_obj);
+  scalar_type = dtype->scalar_type;
 
-#if !(defined(TH_REAL_IS_BYTE) || defined(TH_REAL_IS_CHAR))
+  TORCH_CHECK(
+    (scalar_type == at::kByte) || (scalar_type == at::kChar) || (byte_order_str != nullptr),
+    "function missing required argument 'byte_order' (pos 2)");
+  size_t element_size = c10::elementSize(scalar_type);
+
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   torch::utils::THPByteOrder byte_order;
-  if (strcmp(byte_order_str, "native") == 0) {
-    byte_order = torch::utils::THP_nativeByteOrder();
-  } else if (strcmp(byte_order_str, "big") == 0) {
-    byte_order = torch::utils::THP_BIG_ENDIAN;
-  } else if (strcmp(byte_order_str, "little") == 0) {
-    byte_order = torch::utils::THP_LITTLE_ENDIAN;
-  } else {
-    PyErr_Format(PyExc_ValueError,
-      "invalid byte_order '%s' (expected 'big', 'little', or 'native')",
-      byte_order_str);
-    return nullptr;
+  if (scalar_type != at::kByte && scalar_type != at::kChar) {
+    if (strcmp(byte_order_str, "native") == 0) {
+      byte_order = torch::utils::THP_nativeByteOrder();
+    } else if (strcmp(byte_order_str, "big") == 0) {
+      byte_order = torch::utils::THP_BIG_ENDIAN;
+    } else if (strcmp(byte_order_str, "little") == 0) {
+      byte_order = torch::utils::THP_LITTLE_ENDIAN;
+    } else {
+      PyErr_Format(PyExc_ValueError,
+        "invalid byte_order '%s' (expected 'big', 'little', or 'native')",
+        byte_order_str);
+      return nullptr;
+    }
   }
-#endif
 
   if (PyObject_GetBuffer(obj, &buffer, PyBUF_SIMPLE) < 0)
     return nullptr;
@@ -146,18 +153,23 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
     return nullptr;
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  size_t size_bytes;
   if (count < 0) {
-    if ((buffer.len - offset) % sizeof(scalar_t) != 0) {
+    if ((buffer.len - offset) % element_size != 0) {
       PyErr_SetString(PyExc_ValueError, fmt::format(
          "buffer size ({}) must be a multiple of element size ({})",
-         buffer.len, sizeof(scalar_t)));
+         buffer.len, element_size));
       PyBuffer_Release(&buffer);
       return nullptr;
     }
-    count = (buffer.len - offset) / sizeof(scalar_t);
+    size_bytes = buffer.len - offset;
+    count = size_bytes / element_size;
+  } else {
+    size_bytes = count * element_size;
   }
 
-  if (offset + (count * (Py_ssize_t)sizeof(scalar_t)) > buffer.len) {
+  if (offset + (count * (Py_ssize_t)element_size) > buffer.len) {
     PyErr_SetString(PyExc_ValueError, fmt::format(
         "buffer has only {} elements after offset {}, but specified a size of {}",
         buffer.len - offset, offset, count));
@@ -166,47 +178,56 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
   }
 
   uint8_t* src = (uint8_t*) buffer.buf;
-  THWStorage* storage = THWStorage_(newWithSize)(count);
+  THWStorage* storage = THWStorage_(newWithSize)(size_bytes);
 
-#if defined(TH_REAL_IS_BYTE) || defined(TH_REAL_IS_CHAR)
-  memcpy(THWStorage_(data)(storage), src + offset, count);
-#elif defined(TH_REAL_IS_BOOL)
-  // Because of ASAN checks, that are failing in the THStorage.cpp whenever
-  // we are trying to get a value which is not 0 or 1, we have to manually
-  // convert original values to boolean ones.
-  torch::utils::THP_decodeBoolBuffer(
-      THWStorage_(data)(storage), src + offset, byte_order, count);
-#elif defined(TH_REAL_IS_SHORT)
-  torch::utils::THP_decodeInt16Buffer(
-      THWStorage_(data)(storage), src + offset, byte_order, count);
-#elif defined(TH_REAL_IS_INT)
-  torch::utils::THP_decodeInt32Buffer(
-      THWStorage_(data)(storage), src + offset, byte_order, count);
-#elif defined(TH_REAL_IS_LONG)
-  // TODO: remove the cast
-  torch::utils::THP_decodeInt64Buffer(
-      (int64_t*)THWStorage_(data)(storage), src + offset, byte_order, count);
-#elif defined(TH_REAL_IS_HALF)
-  torch::utils::THP_decodeHalfBuffer(
-      THWStorage_(data)(storage), src + offset, byte_order, count);
-#elif defined(TH_REAL_IS_BFLOAT16)
-  torch::utils::THP_decodeBFloat16Buffer(
-      THWStorage_(data)(storage), src + offset, byte_order, count);
-#elif defined(TH_REAL_IS_FLOAT)
-  torch::utils::THP_decodeFloatBuffer(
-      THWStorage_(data)(storage), src + offset, byte_order, count);
-#elif defined(TH_REAL_IS_DOUBLE)
-  torch::utils::THP_decodeDoubleBuffer(
-      THWStorage_(data)(storage), src + offset, byte_order, count);
-#elif defined(TH_REAL_IS_COMPLEXFLOAT)
-  torch::utils::THP_decodeComplexFloatBuffer(
-      THWStorage_(data)(storage), src + offset, byte_order, count);
-#elif defined(TH_REAL_IS_COMPLEXDOUBLE)
-  torch::utils::THP_decodeComplexDoubleBuffer(
-      THWStorage_(data)(storage), src + offset, byte_order, count);
-#else
-#error "Unknown type"
-#endif
+  if (scalar_type == at::kByte || scalar_type == at::kChar) {
+    memcpy(THWStorage_(data)(storage), src + offset, count);
+  } else if (scalar_type == at::kBool) {
+    // Because of ASAN checks, that are failing in the THStorage.cpp whenever
+    // we are trying to get a value which is not 0 or 1, we have to manually
+    // convert original values to boolean ones.
+    torch::utils::THP_decodeBoolBuffer(
+        reinterpret_cast<bool*>(THWStorage_(data)(storage)),
+        src + offset, byte_order, count);
+  } else if (scalar_type == at::kShort) {
+    torch::utils::THP_decodeInt16Buffer(
+        reinterpret_cast<int16_t*>(THWStorage_(data)(storage)),
+        src + offset, byte_order, count);
+  } else if (scalar_type == at::kInt) {
+    torch::utils::THP_decodeInt32Buffer(
+        reinterpret_cast<int32_t*>(THWStorage_(data)(storage)),
+        src + offset, byte_order, count);
+  } else if (scalar_type == at::kLong) {
+    torch::utils::THP_decodeInt64Buffer(
+        reinterpret_cast<int64_t*>(THWStorage_(data)(storage)),
+        src + offset, byte_order, count);
+  } else if (scalar_type == at::kHalf) {
+    torch::utils::THP_decodeHalfBuffer(
+        reinterpret_cast<c10::Half*>(THWStorage_(data)(storage)),
+        src + offset, byte_order, count);
+  } else if (scalar_type == at::kBFloat16) {
+    torch::utils::THP_decodeBFloat16Buffer(
+        reinterpret_cast<c10::BFloat16*>(THWStorage_(data)(storage)),
+        src + offset, byte_order, count);
+  } else if (scalar_type == at::kFloat) {
+    torch::utils::THP_decodeFloatBuffer(
+        reinterpret_cast<float*>(THWStorage_(data)(storage)),
+        src + offset, byte_order, count);
+  } else if (scalar_type == at::kDouble) {
+    torch::utils::THP_decodeDoubleBuffer(
+        reinterpret_cast<double*>(THWStorage_(data)(storage)),
+        src + offset, byte_order, count);
+  } else if (scalar_type == at::kComplexFloat) {
+    torch::utils::THP_decodeComplexFloatBuffer(
+        reinterpret_cast<c10::complex<float>*>(THWStorage_(data)(storage)),
+        src + offset, byte_order, count);
+  } else if (scalar_type == at::kComplexDouble) {
+    torch::utils::THP_decodeComplexDoubleBuffer(
+        reinterpret_cast<c10::complex<double>*>(THWStorage_(data)(storage)),
+        src + offset, byte_order, count);
+  } else {
+    TORCH_CHECK(false, "Unknown type: ", scalar_type);
+  }
 
   PyBuffer_Release(&buffer);
   return (PyObject*)THPStorage_(New)(storage);
@@ -219,17 +240,17 @@ static PyObject * THPStorage_(fromFile)(PyObject *_unused, PyObject *args, PyObj
   HANDLE_TH_ERRORS
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   const char *filename;
-  Py_ssize_t size = 0;
+  Py_ssize_t nbytes = 0;
   int shared = 0;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,clang-diagnostic-writable-strings)
-  static char *kwlist[] = {"filename", "shared", "size", nullptr};
+  static char *kwlist[] = {"filename", "shared", "nbytes", nullptr};
   if (!PyArg_ParseTupleAndKeywords(args, keywds, "s|in", kwlist,
-              &filename, &shared, &size)) {
+              &filename, &shared, &nbytes)) {
     return nullptr;
   }
   if (shared)
     shared = at::ALLOCATOR_MAPPED_SHARED;
-  THWStorage *storage = THWStorage_(newWithMapping)(LIBRARY_STATE filename, size, shared);
+  THWStorage *storage = THWStorage_(newWithMapping)(LIBRARY_STATE filename, nbytes, shared);
   return (PyObject*)THPStorage_(New)(storage);
   END_HANDLE_TH_ERRORS
 }
@@ -241,27 +262,40 @@ PyObject * THPStorage_(writeFile)(PyObject *_self, PyObject *args)
   PyObject *file = PyTuple_GetItem(args, 0);
   bool is_real_file = PyTuple_GetItem(args, 1) == Py_True;
   bool save_size = PyTuple_GetItem(args, 2) == Py_True;
+  PyObject *element_size_obj = PyTuple_GET_ITEM(args, 3);
+
+  THPUtils_assert(element_size_obj != Py_None,
+                  "_write_file: need to specify element size");
+  uint64_t element_size = THPUtils_unpackUInt64(element_size_obj);
 
   if (!is_real_file) {
-    THPStorage_(writeFileRaw<PyObject*>)(self->cdata, file, save_size);
+    THPStorage_(writeFileRaw<PyObject*>)(self->cdata, file, save_size, element_size);
     Py_RETURN_NONE;
   }
 
   int fd = PyObject_AsFileDescriptor(file);
   THPUtils_assert(fd != -1, "_write_file couldn't retrieve a file descriptor "
       "from given object");
-  THPStorage_(writeFileRaw)(self->cdata, fd, save_size);
+  THPStorage_(writeFileRaw)(self->cdata, fd, save_size, element_size);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THPStorage_(newWithFile)(PyObject *_unused, PyObject *file)
+PyObject * THPStorage_(newWithFile)(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
-  int fd = PyObject_AsFileDescriptor(file);
+  TORCH_CHECK(PyTuple_Size(args) == 2,
+      "_new_with_file takes exactly two arguments");
+  PyObject *fd_obj = PyTuple_GetItem(args, 0);
+  int fd = PyObject_AsFileDescriptor(PyTuple_GetItem(args, 0));
   THPUtils_assert(fd != -1, "_new_with_file couldn't retrieve a file "
       "descriptor from given object");
-  THWStorage *storage = THPStorage_(readFileRaw<int>)(fd, nullptr);
+  PyObject *element_size_obj = PyTuple_GET_ITEM(args, 1);
+  THPUtils_assert(element_size_obj != Py_None,
+                  "_new_with_file: need to specify element size");
+  uint64_t element_size = THPUtils_unpackUInt64(element_size_obj);
+
+  THWStorage *storage = THPStorage_(readFileRaw<int>)(fd, nullptr, element_size);
   if (storage == nullptr)
     return nullptr;
   PyObject *result = THPStorage_(New)(storage);
@@ -277,12 +311,18 @@ static PyObject *THPStorage_(setFromFile)(PyObject *_self, PyObject *args)
   PyObject *offset = PyTuple_GET_ITEM(args, 1);
   bool is_real_file = PyTuple_GET_ITEM(args, 2) == Py_True;
 
+  PyObject *element_size_obj = PyTuple_GET_ITEM(args, 3);
+
+  THPUtils_assert(element_size_obj != Py_None,
+                  "_set_from_file: need to specify element size");
+  uint64_t element_size = THPUtils_unpackUInt64(element_size_obj);
+
   if (!is_real_file) {
     // offset can be implemented with a call to the Python object's seek()
     // but it is currently unnecessary to support this.
     THPUtils_assert(offset == Py_None,
                     "_set_from_file: offset is NYI for filelike objects");
-    THWStorage *storage = THPStorage_(readFileRaw<PyObject*>)(file, self->cdata);
+    THWStorage *storage = THPStorage_(readFileRaw<PyObject*>)(file, self->cdata, element_size);
     if (storage == nullptr) {
       return nullptr;
     }
@@ -298,7 +338,7 @@ static PyObject *THPStorage_(setFromFile)(PyObject *_self, PyObject *args)
   }
   THPUtils_assert(fd != -1, "_set_from_file couldn't retrieve a file "
       "descriptor from given object");
-  THWStorage *storage = THPStorage_(readFileRaw<int>)(fd, self->cdata);
+  THWStorage *storage = THPStorage_(readFileRaw<int>)(fd, self->cdata, element_size);
   if (storage == nullptr)
     return nullptr;
   Py_INCREF(self);
@@ -352,11 +392,11 @@ static PyMethodDef THPStorage_(methods)[] = {
   {"fill_", THPStorage_(fill_), METH_O, nullptr},
   {"new", THPStorage_(new), METH_NOARGS, nullptr},
   {"resize_", THPStorage_(resize_), METH_O, nullptr},
-  {"size", THPStorage_(size), METH_NOARGS, nullptr},
+  {"nbytes", THPStorage_(nbytes), METH_NOARGS, nullptr},
   {"data_ptr", THPStorage_(dataPtr), METH_NOARGS, nullptr},
   {"is_pinned", THPStorage_(isPinned), METH_NOARGS, nullptr},
   {"_write_file", THPStorage_(writeFile), METH_VARARGS, nullptr},
-  {"_new_with_file", THPStorage_(newWithFile), METH_O | METH_STATIC, nullptr},
+  {"_new_with_file", THPStorage_(newWithFile), METH_VARARGS | METH_STATIC, nullptr},
   {"_set_from_file", THPStorage_(setFromFile), METH_VARARGS, nullptr},
 #if !defined(THC_GENERIC_FILE)
   {"from_buffer", castPyCFunctionWithKeywords(THPStorage_(fromBuffer)),
