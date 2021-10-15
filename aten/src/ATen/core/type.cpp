@@ -852,13 +852,13 @@ bool NoneType::isSubtypeOfExt(const Type& rhs, std::ostream *why_not) const {
 // an Optional. This populates `types` with all the types found during
 // flattening. At the end of `flattenUnion`, `types` may have
 // duplicates, but it will not have nested Optionals/Unions
-void flattenUnion(TypePtr& type, std::vector<TypePtr>* to_fill) {
-  if (auto union_type = type->cast<UnionType>()) {
-    for (auto inner : union_type->containedTypes()) {
+static void flattenUnion(const TypePtr& type, std::vector<TypePtr>* to_fill) {
+  if (auto* union_type = type->castRaw<UnionType>()) {
+    for (const auto& inner : union_type->containedTypes()) {
       flattenUnion(inner, to_fill);
     }
-  } else if (auto opt_type = type->cast<OptionalType>()) {
-    auto inner = opt_type->getElementType();
+  } else if (auto* opt_type = type->castRaw<OptionalType>()) {
+    const auto& inner = opt_type->getElementType();
     flattenUnion(inner, to_fill);
     to_fill->emplace_back(NoneType::get());
   } else if (type->kind() == NumberType::Kind) {
@@ -883,7 +883,7 @@ void filterDuplicateSubtypes(std::vector<TypePtr>* types) {
   if (types->empty()) {
     return;
   }
-  auto get_supertype = [](const TypePtr t1, const TypePtr t2) -> c10::optional<TypePtr> {
+  auto get_supertype = [](const TypePtr& t1, const TypePtr& t2) -> c10::optional<TypePtr> {
     // We don't want nested Optionals. Also, prematurely unifying to
     // `Optional` could prevent us from coalescing other types
     if ((t1->isSubtypeOf(*NoneType::get()) && !t2->isSubtypeOf(*NoneType::get()))
@@ -930,7 +930,7 @@ void sortUnion(std::vector<TypePtr>* types) {
   // is guaranteed to be stable since we've already coalesced any
   // possible types
   std::sort(types->begin(), types->end(),
-          [](const TypePtr a, const TypePtr b) -> bool {
+          [](const TypePtr& a, const TypePtr& b) -> bool {
             if (a->kind() != b->kind()) {
               return a->kind() < b->kind();
             }
