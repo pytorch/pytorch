@@ -2608,7 +2608,7 @@ If :attr:`dim` is not given, it defaults to the first dimension found with the
 size 3. Note that this might be unexpected.
 
 .. seealso::
-        :func:`torch.linalg.cross` which has a -1 as the default dimension.
+        :func:`torch.linalg.cross` which requires specifying dim (defaulting to -1).
 
 .. warning:: This function may change in a future PyTorch release to match
         the default behaviour in :func:`torch.linalg.cross`. We recommend using

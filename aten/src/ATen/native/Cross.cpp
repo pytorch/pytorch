@@ -11,6 +11,10 @@ namespace at { namespace native {
 DEFINE_DISPATCH(cross_stub);
 
 int64_t _default_cross_dim(const c10::optional<int64_t> &dimension, IntArrayRef sizes) {
+  // If dimension is not given, it defaults to the first dimension found with the size 3.
+  // Note that this behaviour might be unexpected.
+  // _default_cross_dim is called internally inside the cross implementation to calculate
+  // the dim and finally cross delegates to the linalg_cross implementation with this dim
   if(dimension.has_value()) {
     return *dimension;
   }
