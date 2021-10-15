@@ -15,12 +15,9 @@ from .utils import (
 
 from .quantization_patterns import (
     QuantizeHandler,
-    default_op_supported_dtypes
 )
 
 from ..qconfig import QConfigAny
-
-import warnings
 
 from typing import Any, Callable, Dict, Tuple
 
@@ -50,18 +47,12 @@ class CommonQuantizeHandler(QuantizeHandler):
             return NotImplemented
         assert node.op in ['call_module', 'call_function'], 'Only call_module and ' + \
             'call_function are handled in DefaultNode'
+        assert is_reference
         if convert_custom_config_dict is None:
             convert_custom_config_dict = {}
         additional_static_quant_mapping = convert_custom_config_dict.get("static", {})
 
         dtypes = get_qconfig_dtypes(qconfig)
-        if not is_reference and dtypes not in default_op_supported_dtypes[self.op]:
-            warnings.warn(
-                "dtype combination: {} is not "
-                "supported by {} "
-                "supported dtype combinations are: {}".format(dtypes, self.op, default_op_supported_dtypes[self.op]))
-            return quantized_graph.node_copy(node, load_arg(quantized=torch.float))
-        assert is_reference
         # We can produce reference for a dtypes including
         # (torch.quint8, torch.qint8, torch.qint32, torch.float16)
         act_dtype = activation_dtype(qconfig)

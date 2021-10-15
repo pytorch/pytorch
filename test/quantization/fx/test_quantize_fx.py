@@ -3107,7 +3107,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         super().setUp()
         self.custom_qconfig = torch.ao.quantization.QConfig(
             activation=torch.ao.quantization.observer.HistogramObserver.with_args(
-                qscheme=torch.per_tensor_symmetric, reduce_range=True, dtype=torch.qint8
+                qscheme=torch.per_tensor_symmetric, dtype=torch.qint8
             ),
             weight=torch.ao.quantization.default_per_channel_weight_observer
         )
@@ -4154,7 +4154,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
         m_prep(data)
         m_quant = torch.ao.quantization.quantize_fx.convert_fx(m_prep, is_reference=is_reference)
         m_quant(data)
-
         self.checkGraphModuleNodes(m_quant, expected_node_list=node_list)
 
     def test_gelu_normal(self):
@@ -4201,10 +4200,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_default_node_quant_handler_ops(
             module, functional, qconfig, is_reference, node_list, additional_patterns)
 
-        node_list = [
-            ns.call_module(module),
-            ns.call_function(functional)
-        ]
         self._test_default_node_quant_handler_ops(module, functional, self.custom_qconfig, is_reference, node_list,
                                                   additional_quant_pattern_dict=self.common_quant_patterns)
 
@@ -4228,10 +4223,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_default_node_quant_handler_ops(
             module, functional, qconfig, is_reference, node_list, additional_patterns)
 
-        node_list = [
-            ns.call_module(module),
-            ns.call_function(functional)
-        ]
         self._test_default_node_quant_handler_ops(module, functional, self.custom_qconfig, is_reference, node_list,
                                                   additional_quant_pattern_dict=self.common_quant_patterns)
 
