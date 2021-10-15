@@ -306,7 +306,7 @@ LINUX_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="linux",
-        build_environment="linux-xenial-py3-clang5-mobile",
+        build_environment="linux-xenial-py3-clang5-mobile-build",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch-linux-xenial-py3-clang5-asan",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         exclude_test=True,
