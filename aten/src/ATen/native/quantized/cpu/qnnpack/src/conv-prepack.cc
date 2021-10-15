@@ -13,8 +13,10 @@ PrePackConvWeights::PrePackConvWeights(
   enum pytorch_qnnp_ukernel_type ukernel_type = convolution->ukernel_type;
   const uint32_t kernel_width = convolution->kernel_width;
   const uint32_t kernel_height = convolution->kernel_height;
+  // deconvolution leaves this 0 for now, remove when deconvolution supports 3d
+  const uint32_t kernel_depth =
+      convolution->kernel_depth ? convolution->kernel_depth : 1;
   const uint32_t groups = convolution->groups;
-  output_channels_ = convolution->group_output_channels * groups;
 
   if (convolution->transpose &&
       ukernel_type != pytorch_qnnp_ukernel_type_conv) {
@@ -22,7 +24,7 @@ PrePackConvWeights::PrePackConvWeights(
     assert("QNNPACK Runtime Error.");
   }
 
-  const size_t kernel_size = kernel_height * kernel_width;
+  const size_t kernel_size = kernel_height * kernel_width * kernel_depth;
   switch (ukernel_type) {
     case pytorch_qnnp_ukernel_type_dwconv: {
       const uint32_t cr = pytorch_qnnp_params.q8dw9.cr;

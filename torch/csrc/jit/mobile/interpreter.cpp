@@ -34,7 +34,7 @@ void createObject(Stack& stack, const at::ClassTypePtr& type) {
 void isinstance(Stack& stack, at::ArrayRef<at::TypePtr> types) {
   at::TypePtr ty = pop(stack).type();
   for (const at::TypePtr& candidate : types) {
-    if (ty->isSubtypeOf(candidate)) {
+    if (ty->isSubtypeOf(*candidate)) {
       push(stack, true);
       return;
     }
@@ -62,8 +62,10 @@ void InterpreterState::leaveFrame() {
 
 void InterpreterState::saveExceptionDebugHandle() {
   const auto& frame = frames_.back();
-  exception_debug_handle_ =
-      frame.getCode().instructions_with_handles_.at(frame.getPC()).debug_handle;
+  if (frame.getPC() >= frame.getCode().debug_handles_.size()) {
+    return;
+  }
+  exception_debug_handle_ = frame.getCode().debug_handles_[frame.getPC()];
 }
 
 bool InterpreterState::run(Stack& stack) {
@@ -72,12 +74,11 @@ bool InterpreterState::run(Stack& stack) {
       auto& frame = frames_.back();
       const auto& code = frame.getCode();
       const auto pc = frame.getPC();
-      auto inst_with_handle = code.instructions_with_handles_.at(pc);
-      Instruction inst = inst_with_handle.instruction;
-      DebugHandle debug_handle = inst_with_handle.debug_handle;
+      auto inst = code.instructions_.at(pc);
       // If no valid debug handle found then just log pc.
       // This is possible when we did not save debug handles
-      debug_handle = debug_handle == -1 ? pc : debug_handle;
+      DebugHandle debug_handle =
+          pc >= code.debug_handles_.size() ? pc : code.debug_handles_.at(pc);
 
       // std::cout << "RUNNING " << pc << " "
       //           << code_->instructions_with_handles_[pc].instruction;
