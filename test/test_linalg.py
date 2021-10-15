@@ -5066,7 +5066,7 @@ class TestLinalg(TestCase):
         self.assertRaises(RuntimeError, lambda: torch.mv(m, s))
         self.assertRaises(RuntimeError, lambda: torch.addmv(v, m, s))
 
-    @dtypes(torch.float)
+    @dtypes(torch.float32, torch.complex64)
     def test_cross(self, device, dtype):
         x = torch.rand(100, 3, 100, dtype=dtype, device=device)
         y = torch.rand(100, 3, 100, dtype=dtype, device=device)
@@ -5075,7 +5075,7 @@ class TestLinalg(TestCase):
         torch.cross(x, y, out=res2)
         self.assertEqual(res1, res2)
 
-    @dtypes(torch.float)
+    @dtypes(torch.float32, torch.complex64)
     def test_linalg_cross(self, device, dtype):
         x = torch.rand(100, 3, 100, dtype=dtype, device=device)
         y = torch.rand(100, 3, 100, dtype=dtype, device=device)
@@ -5134,7 +5134,7 @@ class TestLinalg(TestCase):
         # numpy reference compared to torch result
         self.assertEqual(res.cpu().numpy(), np_expected_ref)
 
-    @dtypes(torch.float)
+    @dtypes(torch.float32, torch.complex64)
     def test_cross_with_and_without_dim(self, device, dtype):
         x = torch.rand(100, 3, dtype=dtype, device=device)
         y = torch.rand(100, 3, dtype=dtype, device=device)
@@ -5144,7 +5144,7 @@ class TestLinalg(TestCase):
         self.assertEqual(res1, res2)
         self.assertEqual(res1, res3)
 
-    @dtypes(torch.float)
+    @dtypes(torch.float32, torch.complex64)
     def test_linalg_cross_with_and_without_dim(self, device, dtype):
         x = torch.rand(100, 3, dtype=dtype, device=device)
         y = torch.rand(100, 3, dtype=dtype, device=device)
