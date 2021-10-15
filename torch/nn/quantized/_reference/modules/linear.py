@@ -64,7 +64,7 @@ class Linear(nn.Linear):
         simulate the numerics for the quantized weight in a quantized
         model
         """
-        # supress mypy warning
+        # suppress mypy warning
         assert isinstance(self.weight_scale, torch.Tensor)
         assert isinstance(self.weight_zero_point, torch.Tensor)
         assert isinstance(self.weight_axis, torch.Tensor)
@@ -73,7 +73,7 @@ class Linear(nn.Linear):
             self.weight_zero_point, self.weight_axis)
 
     def get_quantized_weight(self):
-        # supress mypy warning
+        # suppress mypy warning
         assert isinstance(self.weight_scale, torch.Tensor)
         assert isinstance(self.weight_zero_point, torch.Tensor)
         assert isinstance(self.weight_axis, torch.Tensor)
