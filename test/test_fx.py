@@ -3190,6 +3190,10 @@ class TestOperatorSignatures(JitTestCase):
                            'igammac',
                            'linalg.multi_dot',
                            'lu',
+                           'T',   # Implemented with a lambda
+                           'H',   # Implemented with a lambda
+                           'mT',  # Implemented with a lambda
+                           'mH',  # Implemented with a lambda
                            'norm',
                            'polygamma',
                            'special.polygamma',
@@ -3206,6 +3210,21 @@ class TestOperatorSignatures(JitTestCase):
                            'vstack',
                            'where',
                            'zero_',
+                           'bfloat16',
+                           'bool',
+                           'byte',
+                           'char',
+                           'double',
+                           'float',
+                           'half',
+                           'int',
+                           'long',
+                           'short',
+                           'empty_like',
+                           'ones_like',
+                           'randn_like',
+                           'zeros_like',
+                           'full_like',
                            '__getitem__',
                            '__radd__',
                            '__rsub__',
