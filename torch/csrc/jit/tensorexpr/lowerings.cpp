@@ -712,7 +712,8 @@ RegisterNNCLoweringsFunction aten_type_as(
 
 RegisterNNCLoweringsFunction aten_pow(
     {"aten::pow.Tensor_Scalar(Tensor self, Scalar exponent) -> (Tensor)",
-     "aten::pow.Tensor_Tensor(Tensor self, Tensor exponent) -> (Tensor)"},
+     "aten::pow.Tensor_Tensor(Tensor self, Tensor exponent) -> (Tensor)",
+     "aten::pow.Scalar(Scalar self, Tensor exponent) -> Tensor"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
