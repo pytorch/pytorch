@@ -87,10 +87,23 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
   // This additional information should only contain details that are not obvious
   // from the annotation_str() that describes the type. For instance it is clear that `int <: str` is false
   // but not clear why `Foo <: InterfaceBar` might be false.
-  virtual bool isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const;
+  virtual bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const;
   virtual bool is_module() const;
-  bool isSubtypeOf(const TypePtr& rhs) const {
+  bool isSubtypeOf(const Type& rhs) const {
     return isSubtypeOfExt(rhs, nullptr);
+  }
+  // Compatibility shims to accommodate existing code that passes shared_ptrs around.
+  // Ideally, we would just delete this, but it should be harmless.
+  template <typename T>
+  typename std::enable_if<std::is_base_of<Type, T>::value, bool>::type
+  isSubtypeOf(const std::shared_ptr<T>& rhs) const {
+    return isSubtypeOf(*rhs);
+  }
+
+  template <typename T>
+  typename std::enable_if<std::is_base_of<Type, T>::value, bool>::type
+  isSubtypeOfExt(const std::shared_ptr<T>& rhs, std::ostream* why_not) const {
+    return isSubtypeOfExt(*rhs, why_not);
   }
 
   // How this type will appear in FunctionSchema declarations
