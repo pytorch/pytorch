@@ -74,51 +74,6 @@ class TestTyping(JitTestCase):
         self.checkScript(test_dict_tensor_key, (dict_a, inp1))
         self.checkScript(test_dict_tensor_key, (dict_a, inp2))
 
-    def test_list_type_refinement_defaults_to_Any_list_creation(self):
-        def fn(x):
-            tup1 = ("foo", torch.tensor(2))
-            tup2 = ("bar", {"23": torch.tensor(3)})
-            tup3 = ("baz", x)
-            l = list((tup1, tup2))  # noqa: C410
-            l.append(tup3)
-            tup4 = l[0]
-            if torch.jit.isinstance(tup4, Tuple[str, torch.Tensor]):
-                t = tup4[1]
-                if isinstance(t, torch.Tensor):
-                    l[0] = (tup4[0], torch.add(t, t))
-            return l
-
-        self.checkScript(fn, (torch.arange(5),))
-
-        graph = torch.jit.script(fn).graph
-
-        # Check that we're making a `List[Tuple[str, Any]]`
-        FileCheck().check("(str, Union[Tensor, Dict(str, Tensor)])"
-                          "[] = prim::ListConstruct()").run(graph)
-
-    def test_list_type_refinement_defaults_to_Any_list_comprehension(self):
-        def fn(x):
-            tup1 = ("foo", torch.tensor(2))
-            tup2 = ("bar", {"23": torch.tensor(3)})
-            tup3 = ("baz", x)
-            l_ = [tup1, tup2]
-            l = [t for t in l_]    # noqa: C416
-            l.append(tup3)
-            tup4 = l[0]
-            if torch.jit.isinstance(tup4, Tuple[str, torch.Tensor]):
-                t = tup4[1]
-                if isinstance(t, torch.Tensor):
-                    l[0] = (tup4[0], torch.add(t, t))
-            return l
-
-        self.checkScript(fn, (torch.arange(5),))
-
-        graph = torch.jit.script(fn).graph
-
-        # Check that we're making a `List[Tuple[str, Any]]`
-        FileCheck().check("(str, Union[Tensor, Dict(str, Tensor)])"
-                          "[] = prim::ListConstruct()").run(graph)
-
     def test_list_type_refinement_annotation_element_mismatch(self):
         def fn():
             l: List[int] = [1, 2, "foo", 3]

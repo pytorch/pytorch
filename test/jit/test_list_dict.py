@@ -126,6 +126,59 @@ class TestList(JitTestCase):
         with self.assertRaisesRegexWithHighlight(RuntimeError, "previously had type", "x"):
             self.checkScript(reassign_nested, (), optimize=False)
 
+    def test_list_variance(self):
+        """
+        `List[T1]` is not a subtype of `List[T2]`, even if `T1` is a
+        subtype of `T2`. However, if we have a temporary list object
+        (that is, a list comprehension or a list literal) on the rhs of
+        an assignment statement, we want to ignore the inferred type of
+        the rhs if we can prove that: 1) both the lhs and the rhs are
+        lists, and 2) the inner type of the lhs list is a subtype of the
+        inner type of the rhs list.
+
+        # This should pass
+        x: List[Optional[int]] = [None, None, None]
+
+        # This should fail
+        y: List[None] = [None, None, None]
+        x: List[Optional[int]] = y
+        """
+        def test_listliteral_is_typed_from_annotation():
+            x: List[Optional[int]] = [None, None, None]
+            return x
+
+        self.checkScript(test_listliteral_is_typed_from_annotation, ())
+
+        def test_listcomprehension_is_typed_from_annotation():
+            x: List[Optional[int]] = [None for _ in range(3)]
+            return x
+
+        self.checkScript(test_listcomprehension_is_typed_from_annotation, ())
+
+        def test_lists_with_different_internal_types_are_invariant(self):
+            x: List[int] = [1, 2, 3]
+            y: List[Optional[int]] = x
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, "Variable 'y' is "
+                                    "annotated with type "
+                                    r"List\[Optional\[int\]\] but is "
+                                    "being assigned to a value of type "
+                                    r"List\[int\]"):
+            torch.jit.script(test_lists_with_different_internal_types_are_invariant)
+
+        def test_lists_with_different_internal_types_are_invariant_recursive(self):
+            x: List[List[int]] = [[1, 2], [3]]
+            y: List[List[Optional[int]]] = x
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, "Variable 'y' is "
+                                    "annotated with type "
+                                    r"List\[List\[Optional\[int\]\]\] "
+                                    "but is being assigned to a value "
+                                    r"of type List\[List\[int\]\]"):
+            torch.jit.script(test_lists_with_different_internal_types_are_invariant_recursive)
+
     def test_del(self):
         def inputs():
             return [1, 2, 3, 4]
