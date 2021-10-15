@@ -41,10 +41,9 @@ class Adagrad(Optimizer):
             for p in group['params']:
                 state = self.state[p]
                 state['step'] = 0
-                if torch.is_complex(p):
-                    state['sum'] = torch.full_like(p, complex(initial_accumulator_value, initial_accumulator_value), memory_format=torch.preserve_format)
-                else:
-                    state['sum'] = torch.full_like(p, initial_accumulator_value, memory_format=torch.preserve_format)
+                init_value = complex(initial_accumulator_value, initial_accumulator_value) if torch.is_complex(p) \
+                    else initial_accumulator_value
+                state['sum'] = torch.full_like(p, init_value, memory_format=torch.preserve_format)
 
     def share_memory(self):
         for group in self.param_groups:
