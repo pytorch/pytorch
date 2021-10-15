@@ -199,7 +199,7 @@ bool guardDifferentiableGraph(Node* dnode) {
 
   auto input_index = [dnode](Node* node, Value* val) -> Value* {
     const auto& inputs = node->owningBlock()->inputs();
-    for (int index : c10::irange(inputs.size())) {
+    for (const auto index : c10::irange(inputs.size())) {
       if (inputs[index] == val) {
         return dnode->input(index);
       }
