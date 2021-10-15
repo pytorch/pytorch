@@ -384,16 +384,18 @@ such as times and names. The python tracer then implements these functions and
 wraps their registration in an init function which is called from
 `torch/csrc/autograd/init.cpp`. This pattern of registration for faux python
 dependencies in libtorch is common in the PyTorch codebase.
-
-CAUTION: The interleaving of Python trace information into the observed events
-is **stateful**. Calling `get_intermediate_events` and `get_final_events` will
-advance the stack replay that the python tracer uses under the hood. As a
-result, care must be taken to ensure consistent semantics.
 */
+enum class CallType {
+    kPyCall = 0,
+    kPyModuleCall,
+    kCCall
+};
+
 struct PyTraceEvent {
   int64_t t0_;
   int64_t t1_;
   std::string name_;
+  CallType call_type_;
 };
 
 using TriggerFn = void (*)();
