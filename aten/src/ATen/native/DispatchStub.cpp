@@ -20,8 +20,8 @@ static CPUCapability compute_cpu_capability() {
     // If PyTorch wasn't built with AVX512 support, setting ATEN_CPU_CAPABILITY
     // as AVX512 shouldn't result in the CPU capability being set as AVX512.
     if (strcmp(envar, "avx512") == 0) {
-    // If an Intel KNL user sets ATEN_CPU_CAPABILITY as AVX512, it shouldn't be
-    // set as KNL doesn't support all AVX512 instruction sets.
+      // If an Intel KNL user sets ATEN_CPU_CAPABILITY as AVX512, it shouldn't
+      // be set as KNL doesn't support all AVX512 instruction sets.
       if (cpuinfo_initialize()) {
         if (cpuinfo_has_x86_avx512vl() && cpuinfo_has_x86_avx512bw() &&  \
             cpuinfo_has_x86_avx512dq() && cpuinfo_has_x86_fma3()) {
