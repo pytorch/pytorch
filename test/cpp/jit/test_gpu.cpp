@@ -17951,6 +17951,47 @@ TEST(NVFuserTest, FusionNonContigOutputs_CUDA) {
   testValidate(&fusion, {at_output}, {at_input}, {at_ref}, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, FusionTestWarpSoftMax_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Setup softmax fusion
+  auto input = makeContigTensor(2);
+  fusion.addInput(input);
+  auto output = softmax(input, 1);
+  fusion.addOutput(output);
+
+  // Setup runtime input
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor aten_input = at::randn({8, 16 * 197}, options);
+  std::vector<c10::IValue> aten_inputs({aten_input});
+
+  // Schedule through magic scheduler
+  auto runtime_info = SchedulerRuntimeInfo(&fusion, aten_inputs, true);
+  TORCH_CHECK(SchedulerEntry::canSchedule(
+      ScheduleHeuristic::Persistent, &fusion, runtime_info));
+  auto scheduler = SchedulerEntry::makeEntry(
+      ScheduleHeuristic::Persistent, &fusion, runtime_info);
+  scheduler->schedule(&fusion);
+
+  // Modify the schedule to use warp reduction
+  auto used_vals = fusion.usedMathVals();
+  for (auto tv : ir_utils::filterByType<TensorView>(used_vals)) {
+    for (IterDomain* id : tv->domain()->domain()) {
+      if (id->getParallelType() == ParallelType::TIDx) {
+        id->padToMultipleOfWarp();
+      }
+    }
+  }
+
+  // Test result
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion(aten_inputs);
+  auto ref_output = at::_softmax(aten_input, 1, false);
+  testValidate(&fusion, outputs, aten_inputs, {ref_output}, __LINE__, __FILE__);
+}
+
 TEST(NVFuserTest, FusionIssue1133_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);

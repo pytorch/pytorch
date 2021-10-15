@@ -144,7 +144,7 @@ static void Softmax_WarpReduce(benchmark::State& benchmark_state) {
   for (auto tv : ir_utils::filterByType<TensorView>(used_vals)) {
     for (IterDomain* id : tv->domain()->domain()) {
       if (id->getParallelType() == ParallelType::TIDx) {
-        id->padToMultipleOfWarp(32);
+        id->padToMultipleOfWarp();
       }
     }
   }
@@ -169,18 +169,17 @@ static void Softmax_WarpReduce(benchmark::State& benchmark_state) {
       (2 * aten_input.numel() * int64_t(dataTypeSize(dtype))));
 }
 
-// TODO: Fix benchmarks.
-// BENCHMARK(Softmax_WarpReduce)
-//     ->RangeMultiplier(2)
-//     ->Ranges({{8, 8}, {16 * 197, 16 * 197}})
-//     ->Unit(benchmark::kMicrosecond)
-//     ->UseManualTime();
+BENCHMARK(Softmax_WarpReduce)
+    ->RangeMultiplier(2)
+    ->Ranges({{8, 8}, {16 * 197, 16 * 197}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
 
-// BENCHMARK(Softmax_WarpReduceReference)
-//     ->RangeMultiplier(2)
-//     ->Ranges({{8, 8}, {16 * 197, 16 * 197}})
-//     ->Unit(benchmark::kMicrosecond)
-//     ->UseManualTime();
+BENCHMARK(Softmax_WarpReduceReference)
+    ->RangeMultiplier(2)
+    ->Ranges({{8, 8}, {16 * 197, 16 * 197}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
 
 //------------------------------------------------------------------------------
 
