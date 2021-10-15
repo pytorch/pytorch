@@ -1,4 +1,4 @@
-from typing import List, cast
+from typing import Iterable, cast
 
 import itertools
 import torch
@@ -171,13 +171,13 @@ def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
 
     if rearrange_rows:
         # Need to re-arrange rows of input_t for all2all.
-        indices = [List[int]] * world_size
+        indices = [Iterable[int]] * world_size
         sharded_dim_size_max = max(input_split_sizes)
         for idx, placement in enumerate(weight._sharding_spec.placements):
             offset = input_split_sizes[placement.rank()]
             input_idx = idx * sharded_dim_size_max
             indices[placement.rank()] = list(range(input_idx, input_idx + offset))
-        indices = list(itertools.chain.from_iterable(indices))
+        indices = list(itertools.chain(i for i in indices))
 
         input_t = input_t.index_select(0, torch.tensor(indices, device=input_t.device))
 
