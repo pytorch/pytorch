@@ -3,6 +3,7 @@
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/export_caffe2_op_to_c10.h"
+#include <c10/util/irange.h>
 #include "caffe2/core/operator.h"
 
 
@@ -16,7 +17,7 @@ class UnsafeCoalesceOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     size_t coalesced_size = 0;
-    for (int i = 0; i < InputSize(); ++i) {
+    for (const auto i : c10::irange(InputSize())) {
       // For now only float type is supported
       CAFFE_ENFORCE(
           Input(i).dtype().template Match<float>(),
@@ -24,14 +25,14 @@ class UnsafeCoalesceOp final : public Operator<Context> {
           i);
     }
 
-    for (int i = 0; i < InputSize(); ++i) {
+    for (const auto i : c10::irange(InputSize())) {
       coalesced_size += Input(i).numel();
     }
     auto* coalesced = Output(OutputSize() - 1, coalesced_size, at::dtype<float>());
     auto coalesced_data = coalesced->template mutable_data<float>();
 
     size_t coalesced_offset = 0;
-    for (auto i = 0; i < InputSize(); ++i) {
+    for (const auto i : c10::irange(InputSize())) {
       const auto num_elems = Input(i).numel();
       auto input_sizes = Input(i).sizes().vec();
       // Don't do anything if both tensors are already pointing on the same data

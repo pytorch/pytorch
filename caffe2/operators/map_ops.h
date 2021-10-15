@@ -130,7 +130,7 @@ class KeyValueToMapOp final : public Operator<Context> {
 
     auto* map_data = this->template Output<MapType>(MAP);
 
-    for (int i = 0; i < key_input.numel(); ++i) {
+    for (const auto i : c10::irange(key_input.numel())) {
       map_data->emplace(key_data[i], value_data[i]);
     }
 
@@ -257,7 +257,7 @@ class MapDeserializer : public BlobDeserializerBase {
     auto* value_data = value_tensor.data<VALUE_T>();
 
     auto* map_ptr = blob->template GetMutable<MapType>();
-    for (int i = 0; i < key_tensor.numel(); ++i) {
+    for (const auto i : c10::irange(key_tensor.numel())) {
       map_ptr->emplace(key_data[i], value_data[i]);
     }
   }

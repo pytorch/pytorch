@@ -54,7 +54,7 @@ class GatherDNNLowPOp final : public GatherOp<CPUContext> {
     const Index* idxs = indices.template data<Index>();
     auto out = static_cast<char*>(output->raw_mutable_data(data.dtype()));
 
-    for (int i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       auto idx = idxs[i];
       CAFFE_ENFORCE(
           0 <= idx && idx < data.size(0),

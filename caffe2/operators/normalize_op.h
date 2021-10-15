@@ -48,7 +48,7 @@ class NormalizeOp final : public Operator<Context> {
     using ConstStridedVec =
         Eigen::Map<const Eigen::Matrix<T, 1, Eigen::Dynamic>, 0, InnerStride>;
 
-    for (int i = 0; i < n; ++i) {
+    for (const auto i : c10::irange(n)) {
       auto base = (i / sf) * sf * m + (i % sf);
       ConstStridedVec xVec(xData + base, 1, m, InnerStride(sf));
       auto norm = xVec.template lpNorm<2>();
