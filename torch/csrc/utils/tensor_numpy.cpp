@@ -130,6 +130,8 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
       "Can't call numpy() on Tensor that has negative bit set. "
       "Use tensor.resolve_neg().numpy() instead.");
 
+  TORCH_CHECK(!tensor.unsafeGetTensorImpl()->is_python_dispatch(), ".numpy() is not supported for tensor subclasses.");
+
   auto dtype = aten_to_numpy_dtype(tensor.scalar_type());
   auto sizes = to_numpy_shape(tensor.sizes());
   auto strides = to_numpy_shape(tensor.strides());
