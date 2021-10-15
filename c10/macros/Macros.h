@@ -295,13 +295,13 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #define C10_DEVICE
 #endif
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 #define C10_HIP_HOST_DEVICE __host__ __device__
 #else
 #define C10_HIP_HOST_DEVICE
 #endif
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 #define C10_WARP_SIZE warpSize // = 64 or 32 (Defined in hip_runtime.h)
 #else
 #define C10_WARP_SIZE 32
@@ -314,8 +314,8 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 // CUDA_KERNEL_ASSERT checks the assertion
 // even when NDEBUG is defined. This is useful for important assertions in CUDA
 // code that would otherwise be suppressed when building Release.
-#if defined(__ANDROID__) || defined(__APPLE__) || \
-    (defined(__HIP_PLATFORM_HCC__) && ROCM_VERSION < 40100)
+#if defined(__ANDROID__) || defined(__APPLE__) || defined(__XROS__) || \
+    (defined(USE_ROCM) && ROCM_VERSION < 40100)
 // Those platforms do not support assert()
 #define CUDA_KERNEL_ASSERT(cond)
 #elif defined(_MSC_VER)
@@ -465,3 +465,13 @@ __host__ __device__
 #endif
 
 #endif // C10_MACROS_MACROS_H_
+
+#if defined(__ANDROID__) || defined(_WIN32) || defined(__EMSCRIPTEN__) || \
+    defined(__XROS__)
+#define HAS_DEMANGLE 0
+#elif defined(__APPLE__) && \
+    (TARGET_IPHONE_SIMULATOR || TARGET_OS_SIMULATOR || TARGET_OS_IPHONE)
+#define HAS_DEMANGLE 0
+#else
+#define HAS_DEMANGLE 1
+#endif

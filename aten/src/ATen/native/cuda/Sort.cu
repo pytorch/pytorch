@@ -415,7 +415,7 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
   int64_t numel_or_intmax = std::min(numel, static_cast<int64_t>(std::numeric_limits<int>::max()));
   int64_t nbatch = (numel_or_intmax / nsort) * nsort;
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
   constexpr bool is_rocm = true;
 #else
   constexpr bool is_rocm = false;

@@ -112,10 +112,10 @@ c10::IValue preprocess(
   auto sizes = getInputSizesForMethod(method_compile_spec, method_name);
 
   std::string llvm_asm_code;
-  auto func =
-      torch::jit::mobile::nnc::aotCompile(method_name, graph, sizes, &llvm_asm_code);
-  writeOutputLlvmAssembly(llvm_asm_code);
+  auto compiled = torch::jit::mobile::nnc::aotCompile(method_name, graph, sizes);
+  writeOutputLlvmAssembly(compiled.second);
 
+  auto func = std::move(compiled.first);
   func->set_nnc_kernel_id(getNncKernelId(method_name));
 
   torch::jit::mobile::nnc::CompilationUnit cu;

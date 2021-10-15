@@ -163,8 +163,8 @@ def _floor_divide(g, self, other):
         # Division is negative if: self < 0 != other < 0
         zero = g.op("Constant", value_t=torch.tensor(0, dtype=torch.int64))
         negative = g.op("Xor",
-                        g.op("Less", self, zero),
-                        g.op("Less", other, zero))
+                        sym_help._lt_helper(g, self, zero),
+                        sym_help._lt_helper(g, other, zero))
 
         # For negative numbers with self % other != 0, subtract 1 to round down instead of up
         mod = g.op("Sub", self, g.op("Mul", div, other))
@@ -172,8 +172,8 @@ def _floor_divide(g, self, other):
                           g.op("Not", g.op("Equal", mod, zero)))
 
         one = g.op("Constant", value_t=torch.tensor(1, dtype=torch.int64))
-        fixup = g.op("Sub", div, one)
-        return g.op("Where", fixup_mask, fixup, div)
+        fixup = g.op("Mul", fixup_mask, one)
+        return g.op("Sub", div, fixup)
 
 
 def floor_divide(g, self, other):
@@ -189,24 +189,13 @@ def floordiv(g, self, other):
 # If only one input is a floating type, the other input is cast to its type
 # If neither input is a floating type, both inputs are cast to the default scalar type
 def true_divide(g, self, other):
-    # Case 1: both values are floating
-    # Performs div as usual
-    if sym_help._is_fp(self) and sym_help._is_fp(other):
+    # Case 1: either values are floating
+    # Performs div as usual.
+    # Implicit casting will be handled in scalar type analysis pass.
+    if sym_help._is_fp(self) or sym_help._is_fp(other):
         return g.op("Div", self, other)
 
-    # Case 2: self is floating, other is not
-    # Casts other to self's dtype
-    if sym_help._is_fp(self):
-        other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx[self.type().scalarType()])
-        return g.op("Div", self, other)
-
-    # Case 3: other is floating, self is not
-    # Casts self to other's dtype
-    if sym_help._is_fp(other):
-        self = g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx[other.type().scalarType()])
-        return g.op("Div", self, other)
-
-    # Case 4: neither is floating
+    # Case 2: neither is floating
     # Casts both inputs to the default scalar type
     scalar_type = torch.get_default_dtype()
     onnx_scalar_type = sym_help.cast_pytorch_to_onnx["Float"]
@@ -1094,10 +1083,11 @@ def __interpolate(g, input, size, scale_factor, mode , align_corners, recompute_
                                                              mode , align_corners)
     return g.op("Upsample", input, scales, mode_s=mode)
 
-@parse_args("v")
+
 def bitwise_not(g, inp):
     if inp.type().scalarType() != "Bool":
-        return _unimplemented("bitwise_not", "non-bool tensor")
+        raise NotImplementedError("ONNX export does NOT support exporting bitwise Not " +
+                                  "for non-boolean input values")
     return g.op("Not", inp)
 
 
@@ -1126,6 +1116,9 @@ def wrap_logical_op_with_negation(func):
 
 
 def __not_(g, self):
+    if self.type().scalarType() != "Bool":
+        raise NotImplementedError("ONNX export does NOT support exporting bitwise Not " +
+                                  "for non-boolean input values")
     return g.op("Not", self)
 
 
@@ -1172,14 +1165,31 @@ def le(g, input, other):
     return gt_impl(g, input, other)
 
 
-@wrap_logical_op_with_cast_to_and_from("Bool")
 def __and_(g, input, other):
-    return g.op("And", input, other)
+    if input.type().scalarType() == "Bool" and \
+            other.type().scalarType() == "Bool":
+        return g.op("And", input, other)
+    else:
+        raise NotImplementedError("ONNX export does NOT support exporting bitwise AND " +
+                                  "for non-boolean input values")
 
 
-@wrap_logical_op_with_cast_to_and_from("Bool")
 def __or_(g, input, other):
-    return g.op("Or", input, other)
+    if input.type().scalarType() == "Bool" and \
+            other.type().scalarType() == "Bool":
+        return g.op("Or", input, other)
+    else:
+        raise NotImplementedError("ONNX export does NOT support exporting bitwise OR " +
+                                  "for non-boolean input values")
+
+
+def __xor_(g, input, other):
+    if input.type().scalarType() == "Bool" and \
+            other.type().scalarType() == "Bool":
+        return g.op("Xor", input, other)
+    else:
+        raise NotImplementedError("ONNX export does NOT support exporting bitwise XOR " +
+                                  "for non-boolean input values")
 
 
 @wrap_logical_op_with_cast_to_and_from("Bool")
@@ -1388,27 +1398,45 @@ def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
 
 @parse_args("v", "v", "v", "v", "v", "i", "f", "f", "i")
 def instance_norm(g, input, weight, bias, running_mean, running_var, use_input_stats, momentum, eps, cudnn_enabled):
+    sym_help.check_training_mode(use_input_stats, "instance_norm")
+    channel_size = sym_help._get_tensor_dim_size(input, 1)
+    if weight is None or sym_help._is_none(weight):
+        if channel_size is None:
+            raise RuntimeError("Unsupported: ONNX export of instance_norm for unknown "
+                               "channel size.")
+        weight_value = torch.tensor([1.] * channel_size).type(
+            "torch." + input.type().scalarType() + "Tensor")
+        weight = g.op("Constant", value_t=weight_value)
+    if bias is None or sym_help._is_none(bias):
+        if channel_size is None:
+            raise RuntimeError("Unsupported: ONNX export of instance_norm for unknown "
+                               "channel size.")
+        bias_value = torch.tensor([0.] * channel_size).type(
+            "torch." + input.type().scalarType() + "Tensor")
+        bias = g.op("Constant", value_t=bias_value)
     if running_mean is None or sym_help._is_none(running_mean) or running_var is None or sym_help._is_none(running_var):
-        channel_size = sym_help._get_tensor_dim_size(input, 1)
-        if weight is None or sym_help._is_none(weight):
-            if channel_size is None:
-                raise RuntimeError("Unsupported: ONNX export of instance_norm for unknown "
-                                   "channel size.")
-            weight_value = torch.tensor([1.] * channel_size).type(
-                "torch." + input.type().scalarType() + "Tensor")
-            weight = g.op("Constant", value_t=weight_value)
-        if bias is None or sym_help._is_none(bias):
-            if channel_size is None:
-                raise RuntimeError("Unsupported: ONNX export of instance_norm for unknown "
-                                   "channel size.")
-            bias_value = torch.tensor([0.] * channel_size).type(
-                "torch." + input.type().scalarType() + "Tensor")
-            bias = g.op("Constant", value_t=bias_value)
         return g.op("InstanceNormalization", input, weight, bias, epsilon_f=eps)
     else:
-        # Now if track_running_stats is set to True it would get the same result with batchnorm. The PyTorch internal
-        # implementation of instance_norm may have a problem with running_mean and running_var repeat, will open a github issue.
-        return batch_norm(g, input, weight, bias, running_mean, running_var, use_input_stats, momentum, eps, cudnn_enabled)
+        input_size = sym_help._get_tensor_sizes(input)
+        # If input shape is [N, C, H, W], reshape to [1, N * C, H, W] and call batch_norm.
+        # For more information instance_norm():
+        # https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/Normalization.cpp#L542
+        input_size_reshape = input_size.copy()
+        n = input_size[0]
+        if n is None:
+            raise RuntimeError("Unsupported: ONNX export of instance_norm training for unknown "
+                               "batch size.")
+        c = input_size[1]
+        input_size_reshape[0] = 1
+        input_size_reshape[1] = n * c
+        weight_ = repeat(g, weight, g.op("Constant", value_t=torch.tensor([n], dtype=torch.int64)))
+        bias_ = repeat(g, bias, g.op("Constant", value_t=torch.tensor([n], dtype=torch.int64)))
+        running_mean_ = repeat(g, running_mean, g.op("Constant", value_t=torch.tensor([n], dtype=torch.int64)))
+        running_var_ = repeat(g, running_var, g.op("Constant", value_t=torch.tensor([n], dtype=torch.int64)))
+        input_reshaped = g.op('Reshape', input, g.op('Constant', value_t=torch.LongTensor(input_size_reshape)))
+        out = batch_norm(g, input_reshaped, weight_, bias_, running_mean_, running_var_, use_input_stats,
+                         momentum, eps, cudnn_enabled)
+        return view(g, out, g.op("Constant", value_t=torch.tensor(input_size)))
 
 
 @parse_args("v", "i", "i", "i")
@@ -1765,6 +1793,9 @@ def zeros(g, sizes, dtype, layout, device, pin_memory=False):
     # NOTE: no way to set device, layout and pin_memory in ONNX, so we ignore it
     if dtype is None:
         dtype = 6  # float
+    sizes_ = sym_help._maybe_get_const(sizes, 'is')
+    if isinstance(sizes_, list) and len(sizes_) == 0:
+        sizes = g.op("Constant", value_t=torch.tensor([]).to(torch.int64))
     return g.op("ConstantOfShape", sizes,
                 value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
@@ -1790,6 +1821,9 @@ def new_zeros(g, self, sizes, dtype, layout, device, pin_memory=False):
 def ones(g, sizes, dtype, layout, device, pin_memory=False):
     if dtype is None:
         dtype = 6  # float
+    sizes_ = sym_help._maybe_get_const(sizes, 'is')
+    if isinstance(sizes_, list) and len(sizes_) == 0:
+        sizes = g.op("Constant", value_t=torch.tensor([]).to(torch.int64))
     return g.op("ConstantOfShape", sizes,
                 value_t=torch.tensor([1], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
@@ -1818,6 +1852,9 @@ def full(g, sizes, value, dtype, layout, device, pin_memory=False):
     else:
         dtype = sym_help._get_const(dtype, "i", "dtype")
         dtype = 6 if dtype is None else dtype
+        sizes_ = sym_help._maybe_get_const(sizes, 'is')
+        if isinstance(sizes_, list) and len(sizes_) == 0:
+            sizes = g.op("Constant", value_t=torch.tensor([]).to(torch.int64))
         return g.op("ConstantOfShape", sizes,
                     value_t=torch.tensor([const_value], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
@@ -2584,13 +2621,17 @@ def is_floating_point(g, self):
     return g.op("Constant", value_t=torch.BoolTensor([0]))
 
 
-def __isnot_(g, self, other):
+def __is_(g, self, other):
     if sym_help._is_none(other):
         if sym_help._is_none(self):
-            return g.op("Constant", value_t=torch.BoolTensor([0]))
-        return g.op("Constant", value_t=torch.BoolTensor([1]))
-    return ne(g, self, other)
+            return g.op("Constant", value_t=torch.BoolTensor([1]))
+        return g.op("Constant", value_t=torch.BoolTensor([0]))
+    return eq(g, self, other)
 
+
+@wrap_logical_op_with_negation
+def __isnot_(g, self, other):
+    return __is_(g, self, other)
 
 # exists to refine the type of the Value
 # if x is an optional Tensor, unchecked_cast will cast
@@ -2925,9 +2966,7 @@ def meshgrid(g, tensor_list, indexing: Optional[str] = None):
 
 
 def remainder(g, input, other):
-    div = g.op("Div", input, other)
-    if sym_help._is_fp(input) or sym_help._is_fp(other):
-        div = g.op("Floor", div)
+    div = _floor_divide(g, input, other)
     quo = g.op("Mul", div, other)
     return g.op("Sub", input, quo)
 

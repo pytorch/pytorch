@@ -2194,8 +2194,8 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
             def forward(self, x, y):
                 return x & y
 
-        x = torch.randint(0, 1, (3, 5))
-        y = torch.randint(0, 1, (3, 5))
+        x = torch.randint(0, 1, (3, 5), dtype=torch.bool)
+        y = torch.randint(0, 1, (3, 5), dtype=torch.bool)
         self.run_model_test(AndModel(), train=False, input=(x, y), batch_size=BATCH_SIZE)
 
     def test_or(self):
@@ -2203,8 +2203,8 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
             def forward(self, x, y):
                 return x | y
 
-        x = torch.randint(0, 1, (3, 5))
-        y = torch.randint(0, 1, (3, 5))
+        x = torch.randint(0, 1, (3, 5), dtype=torch.bool)
+        y = torch.randint(0, 1, (3, 5), dtype=torch.bool)
         self.run_model_test(OrModel(), train=False, input=(x, y), batch_size=BATCH_SIZE)
 
     def test_dropout(self):
