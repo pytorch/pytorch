@@ -54,7 +54,7 @@ class ConcatAddMulReplaceNaNClipOp final : public Operator<Context> {
     }
     int before = 1, after = 1;
     vector<int64_t> output_dims(concat_input_0.sizes().vec());
-    for (int i = 0; i < concat_input_0.dim(); ++i) {
+    for (const auto i : c10::irange(concat_input_0.dim())) {
       if (i == canonical_axis) {
         continue;
       }
@@ -65,7 +65,7 @@ class ConcatAddMulReplaceNaNClipOp final : public Operator<Context> {
         after *= dim;
       }
       // check the input dims are compatible.
-      for (int j = concat_input_start; j < InputSize(); ++j) {
+      for (const auto j : c10::irange(concat_input_start, InputSize())) {
         int dim_j = Input(j).dim32(i);
         CAFFE_ENFORCE(
             dim == dim_j,
@@ -93,7 +93,7 @@ class ConcatAddMulReplaceNaNClipOp final : public Operator<Context> {
         "Cannot handle fused concat with dim > 2, please update your fusion logic");
 
     int output_channels = 0;
-    for (int i = concat_input_start; i < InputSize(); ++i) {
+    for (const auto i : c10::irange(concat_input_start, InputSize())) {
       axis_data[i - concat_input_start] = Input(i).dim32(canonical_axis);
       output_channels += Input(i).dim32(canonical_axis);
     }
@@ -101,7 +101,7 @@ class ConcatAddMulReplaceNaNClipOp final : public Operator<Context> {
     auto* output = Output(0, output_dims, at::dtype<float>());
 
     size_t output_offset = 0;
-    for (int i = concat_input_start; i < InputSize(); ++i) {
+    for (const auto i : c10::irange(concat_input_start, InputSize())) {
       auto& input = Input(i);
       auto axis_dim = input.dim32(canonical_axis);
       math::CopyMatrix<Context>(
@@ -127,7 +127,7 @@ class ConcatAddMulReplaceNaNClipOp final : public Operator<Context> {
     const auto _zeros = _mm256_set1_ps(0.f);
 
     output_offset = 0;
-    for (auto outer = 0; outer < before; ++outer) {
+    for (const auto outer : c10::irange(before)) {
       auto axis_dim = output->dim32(canonical_axis);
       size_t inner_size = axis_dim * after;
       auto inner = 0;
@@ -148,7 +148,7 @@ class ConcatAddMulReplaceNaNClipOp final : public Operator<Context> {
         _mm256_storeu_ps(&output_data[output_offset + inner], out_val);
       }
 
-      for (auto inner_omp = inner; inner_omp < inner_size; ++inner_omp) {
+      for (const auto inner_omp : c10::irange(inner, inner_size)) {
         float elem = output_data[output_offset + inner_omp];
         float add_elem = add_input_data[inner_omp];
         float mul_elem = mul_input_data[inner_omp];

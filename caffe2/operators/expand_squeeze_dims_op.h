@@ -91,7 +91,7 @@ class SqueezeOp : public Operator<Context> {
       const std::vector<int>& dims) {
     size_t j = 0;
     std::vector<int> newDims;
-    for (size_t i = 0; i < inputDims.size(); ++i) {
+    for (const auto i : c10::irange(inputDims.size())) {
       // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       if (j < dims.size() && dims[j] == i) {
         CAFFE_ENFORCE_EQ(
