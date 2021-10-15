@@ -17,14 +17,14 @@ inline bool DictKeyEqualTo::operator()(const IValue& lhs, const IValue& rhs) con
 }
 
 template<class T> decltype(auto) getTypePtr();
-std::string toString(TypePtr typePtr);
+std::string toString(const Type& type);
 
 namespace impl {
 
 template<class Key, class Value>
 Dict<Key, Value> toTypedDict(GenericDict dict) {
-  TORCH_INTERNAL_ASSERT(*getTypePtr<Key>() == *dict.impl_->elementTypes.keyType, "Tried to cast a Dict<", toString(dict.impl_->elementTypes.keyType), ", ", toString(dict.impl_->elementTypes.valueType) ,"> to a Dict<", toString(getTypePtr<Key>()), ", ", toString(getTypePtr<Value>()), ">. Key types mismatch.");
-  TORCH_INTERNAL_ASSERT(*getTypePtr<Value>() == *dict.impl_->elementTypes.valueType, "Tried to cast a Dict<", toString(dict.impl_->elementTypes.keyType), ", ", toString(dict.impl_->elementTypes.valueType) ,"> to a Dict<", toString(getTypePtr<Key>()), ", ", toString(getTypePtr<Value>()), ">. Value types mismatch.");
+  TORCH_INTERNAL_ASSERT(*getTypePtr<Key>() == *dict.impl_->elementTypes.keyType, "Tried to cast a Dict<", toString(*dict.impl_->elementTypes.keyType), ", ", toString(*dict.impl_->elementTypes.valueType) ,"> to a Dict<", toString(*getTypePtr<Key>()), ", ", toString(*getTypePtr<Value>()), ">. Key types mismatch.");
+  TORCH_INTERNAL_ASSERT(*getTypePtr<Value>() == *dict.impl_->elementTypes.valueType, "Tried to cast a Dict<", toString(*dict.impl_->elementTypes.keyType), ", ", toString(*dict.impl_->elementTypes.valueType) ,"> to a Dict<", toString(*getTypePtr<Key>()), ", ", toString(*getTypePtr<Value>()), ">. Value types mismatch.");
 
   return Dict<Key, Value>(std::move(dict.impl_));
 }
