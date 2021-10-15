@@ -5,7 +5,6 @@
 #include <ATen/native/quantized/cpu/packed_params.h>
 #include <ATen/native/quantized/cpu/embedding_packed_params.h>
 #include <c10/core/QScheme.h>
-#include <c10/util/irange.h>
 
 #ifdef USE_FBGEMM
 #include <fbgemm/Fbgemm.h>
@@ -241,7 +240,7 @@ inline void convert_uint8_int8(
     int len,
     const uint8_t* src_uint8,
     int8_t* dst_int8) {
-  for (const auto i : c10::irange(len)) {
+  for (int i = 0; i < len; ++i) {
     dst_int8[i] = static_cast<int8_t>(static_cast<int32_t>(src_uint8[i]) - 128);
   }
 }
@@ -251,7 +250,7 @@ inline void convert_int8_uint8(
     int len,
     const int8_t* src_int8,
     uint8_t* dst_uint8) {
-  for (const auto i : c10::irange(len)) {
+  for (int i = 0; i < len; ++i) {
     dst_uint8[i] =
         static_cast<uint8_t>(static_cast<int32_t>(src_int8[i]) + 128);
   }

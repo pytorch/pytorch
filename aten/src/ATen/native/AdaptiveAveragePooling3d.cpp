@@ -1,7 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
-#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -34,19 +33,19 @@ static void adaptive_avg_pool3d_out_frame(
     int64_t istrideH,
     int64_t istrideW) {
   at::parallel_for(0, sizeD, 1, [&](int64_t start, int64_t end) {
-    for (const auto d : c10::irange(start, end)) {
+    for (int64_t d = start; d < end; d++) {
       /* loop over output */
-      for (const auto ot : c10::irange(osizeT)) {
+      for (int64_t ot = 0; ot < osizeT; ot++) {
         int istartT = start_index(ot, osizeT, isizeT);
         int iendT = end_index(ot, osizeT, isizeT);
         int kT = iendT - istartT;
 
-        for (const auto oh : c10::irange(osizeH)) {
+        for (int64_t oh = 0; oh < osizeH; oh++) {
           int istartH = start_index(oh, osizeH, isizeH);
           int iendH = end_index(oh, osizeH, isizeH);
           int kH = iendH - istartH;
 
-          for (const auto ow : c10::irange(osizeW)) {
+          for (int64_t ow = 0; ow < osizeW; ow++) {
             int istartW = start_index(ow, osizeW, isizeW);
             int iendW = end_index(ow, osizeW, isizeW);
             int kW = iendW - istartW;
@@ -59,9 +58,9 @@ static void adaptive_avg_pool3d_out_frame(
 
             /* compute local average: */
             scalar_t sum = 0;
-            for (const auto it : c10::irange(kT)) {
-              for (const auto ih : c10::irange(kH)) {
-                for (const auto iw : c10::irange(kW)) {
+            for (int it = 0; it < kT; it++) {
+              for (int ih = 0; ih < kH; ih++) {
+                for (int iw = 0; iw < kW; iw++) {
                   scalar_t val =
                       *(ip + it * istrideT + ih * istrideH + iw * istrideW);
                   sum += val;
@@ -84,7 +83,7 @@ void adaptive_avg_pool3d_out_cpu_template(
     IntArrayRef output_size) {
   TORCH_CHECK(output_size.size() == 3, "adaptive_avg_pool3d: output_size must be 3");
 
-  for (const auto i : c10::irange(1, input.ndimension())) {
+  for (int64_t i = 1; i < input.ndimension(); i++) {
     TORCH_CHECK(
         input.size(i) > 0,
         "adaptive_avg_pool3d(): Expected input to have non-zero size for non-batch dimensions, "
@@ -149,7 +148,7 @@ void adaptive_avg_pool3d_out_cpu_template(
           auto input_data = input.data_ptr<scalar_t>();
           auto output_data = output.data_ptr<scalar_t>();
           at::parallel_for(0, n, 1, [&](int64_t start, int64_t end) {
-            for (const auto b : c10::irange(start, end)) {
+            for (int64_t b = start; b < end; ++b) {
               adaptive_avg_pool3d_out_frame<scalar_t>(
                   input_data + b * input.stride(0),
                   output_data + b * sizeD * osizeT * osizeH * osizeW,
@@ -182,22 +181,22 @@ static void adaptive_avg_pool3d_backward_out_frame(
     int64_t osizeH,
     int64_t osizeW) {
   at::parallel_for(0, sizeD, 1, [&](int64_t start, int64_t end) {
-    for (const auto d : c10::irange(start, end)) {
+    for (int64_t d = start; d < end; d++) {
       scalar_t* gradInput_p_d = gradInput_p + d * isizeT * isizeW * isizeH;
       scalar_t* gradOutput_p_d = gradOutput_p + d * osizeT * osizeW * osizeH;
 
       /* calculate average */
-      for (const auto ot : c10::irange(osizeT)) {
+      for (int64_t ot = 0; ot < osizeT; ot++) {
         int istartT = start_index(ot, osizeT, isizeT);
         int iendT = end_index(ot, osizeT, isizeT);
         int kT = iendT - istartT;
 
-        for (const auto oh : c10::irange(osizeH)) {
+        for (int64_t oh = 0; oh < osizeH; oh++) {
           int istartH = start_index(oh, osizeH, isizeH);
           int iendH = end_index(oh, osizeH, isizeH);
           int kH = iendH - istartH;
 
-          for (const auto ow : c10::irange(osizeW)) {
+          for (int64_t ow = 0; ow < osizeW; ow++) {
             int istartW = start_index(ow, osizeW, isizeW);
             int iendW = end_index(ow, osizeW, isizeW);
             int kW = iendW - istartW;
@@ -206,9 +205,9 @@ static void adaptive_avg_pool3d_backward_out_frame(
                 gradOutput_p_d[ot * osizeH * osizeW + oh * osizeW + ow] / kT /
                 kH / kW;
 
-            for (const auto it : c10::irange(istartT, iendT)) {
-              for (const auto ih : c10::irange(istartH, iendH)) {
-                for (const auto iw : c10::irange(istartW, iendW)) {
+            for (int it = istartT; it < iendT; it++) {
+              for (int ih = istartH; ih < iendH; ih++) {
+                for (int iw = istartW; iw < iendW; iw++) {
                   /* update gradient */
                   gradInput_p_d[it * isizeH * isizeW + ih * isizeW + iw] +=
                       grad_delta;
@@ -266,7 +265,7 @@ Tensor& adaptive_avg_pool3d_backward_out_cpu_template(
           scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
           scalar_t* gradOutput_data = gradOutput.data_ptr<scalar_t>();
           at::parallel_for(0, n, 1, [&](int64_t start, int64_t end) {
-            for (const auto b : c10::irange(start, end)) {
+            for (int64_t b = start; b < end; b++) {
               adaptive_avg_pool3d_backward_out_frame<scalar_t>(
                   gradInput_data + b * sizeD * isizeT * isizeH * isizeW,
                   gradOutput_data + b * sizeD * osizeT * osizeH * osizeW,

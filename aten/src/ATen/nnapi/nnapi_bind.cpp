@@ -4,7 +4,6 @@
 #include <ATen/nnapi/nnapi_bind.h>
 #include <ATen/nnapi/nnapi_wrapper.h>
 #include <ATen/nnapi/nnapi_model_loader.h>
-#include <c10/util/irange.h>
 
 namespace torch {
 namespace nnapi {
@@ -104,7 +103,7 @@ void NnapiCompilation::run(
   TORCH_CHECK((int32_t)inputs.size() == num_inputs_);
   TORCH_CHECK((int32_t)outputs.size() == num_outputs_);
 
-  for (const auto i : c10::irange(inputs.size())) {
+  for (size_t i = 0; i < inputs.size(); i++) {
     auto& t = inputs[i];
     // TODO: Check contiguous and dtype.
     ANeuralNetworksOperandType op_type;
@@ -118,7 +117,7 @@ void NnapiCompilation::run(
         t.nbytes());
   }
 
-  for (const auto i : c10::irange(outputs.size())) {
+  for (size_t i = 0; i < outputs.size(); i++) {
     auto& t = outputs[i];
     // TODO: Check contiguous and dtype.
     check_nnapi->Execution_setOutput(
@@ -132,7 +131,7 @@ void NnapiCompilation::run(
   check_nnapi->Execution_compute(execution);
 
   // TODO: Maybe skip this for fixed-size outputs?
-  for (const auto i : c10::irange(outputs.size())) {
+  for (size_t i = 0; i < outputs.size(); i++) {
     auto& t = outputs[i];
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     uint32_t rank;

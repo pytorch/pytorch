@@ -1,7 +1,6 @@
 #pragma once
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/cpu/vec/functional.h>
-#include <c10/util/irange.h>
 #include <gtest/gtest.h>
 #include <chrono>
 #include <exception>
@@ -870,7 +869,8 @@ public:
         act.store(actArr);
         if (bitwise)
         {
-            for (const auto i : c10::irange(sizeX)) {
+            for (int i = 0; i < sizeX; i++)
+            {
                 BVT b_exp = bit_cast<BVT>(expArr[i]);
                 BVT b_act = bit_cast<BVT>(actArr[i]);
                 EXPECT_EQ(b_exp, b_act) << getDetail(i / unitStorageCount);
@@ -880,7 +880,8 @@ public:
         }
         else if (checkWithTolerance)
         {
-            for (const auto i : c10::irange(sizeX)) {
+            for (int i = 0; i < sizeX; i++)
+            {
                 EXPECT_EQ(nearlyEqual<UVT>(expArr[i], actArr[i], absErr), true) << expArr[i] << "!=" << actArr[i] << "\n" << getDetail(i / unitStorageCount);
                 if (::testing::Test::HasFailure())
                     return true;
@@ -888,7 +889,8 @@ public:
         }
         else
         {
-            for (const auto i : c10::irange(sizeX)) {
+            for (int i = 0; i < sizeX; i++)
+            {
                 if (std::is_same<UVT, float>::value)
                 {
                     if (!check_both_nan(expArr[i], actArr[i])) {
@@ -950,9 +952,8 @@ void test_unary(
         UVT start = dmn_argc > 0 ? dmn.ArgsDomain[0].start : default_start;
         UVT end = dmn_argc > 0 ? dmn.ArgsDomain[0].end : default_end;
         ValueGen<VT> generator(start, end, seed.add(changeSeedBy));
-        for (const auto trial : c10::irange(trialCount)) {
-            (void)trial; // Suppress unused variable warning
-            for (const auto k : c10::irange(el_count)) {
+        for (int trial = 0; trial < trialCount; trial++) {
+            for (int k = 0; k < el_count; k++) {
                 vals[k] = generator.get();
                 call_filter(filter, vals[k]);
                 //map operator
@@ -1010,9 +1011,8 @@ void test_binary(
         UVT end1 = dmn_argc > 1 ? dmn.ArgsDomain[1].end : default_end;
         ValueGen<VT> generator0(start0, end0, seed.add(changeSeedBy));
         ValueGen<VT> generator1(start1, end1, seed.add(changeSeedBy + 1));
-        for (const auto trial : c10::irange(trialCount)) {
-            (void)trial; // Suppress unused variable warning
-            for (const auto k : c10::irange(el_count)) {
+        for (int trial = 0; trial < trialCount; trial++) {
+            for (int k = 0; k < el_count; k++) {
                 vals0[k] = generator0.get();
                 vals1[k] = generator1.get();
                 call_filter(filter, vals0[k], vals1[k]);
@@ -1076,9 +1076,8 @@ void test_ternary(
         ValueGen<VT> generator1(start1, end1, seed.add(changeSeedBy + 1));
         ValueGen<VT> generator2(start2, end2, seed.add(changeSeedBy + 2));
 
-        for (const auto trial : c10::irange(trialCount)) {
-            (void)trial; // Suppress unused variable warning
-            for (const auto k : c10::irange(el_count)) {
+        for (int trial = 0; trial < trialCount; trial++) {
+            for (int k = 0; k < el_count; k++) {
                 vals0[k] = generator0.get();
                 vals1[k] = generator1.get();
                 vals2[k] = generator2.get();

@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <c10/util/Bitset.h>
-#include <c10/util/irange.h>
 
 using c10::utils::bitset;
 
@@ -38,7 +37,7 @@ TEST(BitsetTest, givenEmptyBitset_whenSettingBit_thenIsSet) {
 TEST(BitsetTest, givenEmptyBitset_whenSettingBit_thenOthersStayUnset) {
   bitset b;
   b.set(6);
-  for (const auto i : c10::irange(6)) {
+  for (size_t i = 0; i < 6; ++i) {
     EXPECT_FALSE(b.get(i));
   }
   for (size_t i = 7; i < bitset::NUM_BITS(); ++i) {
@@ -57,10 +56,10 @@ TEST(BitsetTest, givenNonemptyBitset_whenSettingBit_thenOthersStayAtOldValue) {
   bitset b;
   b.set(6);
   b.set(30);
-  for (const auto i : c10::irange(6)) {
+  for (size_t i = 0; i < 6; ++i) {
     EXPECT_FALSE(b.get(i));
   }
-  for (const auto i : c10::irange(7, 30)) {
+  for (size_t i = 7; i < 30; ++i) {
     EXPECT_FALSE(b.get(i));
   }
   for (size_t i = 31; i < bitset::NUM_BITS(); ++i) {
@@ -83,7 +82,7 @@ TEST(
   b.set(6);
   b.set(30);
   b.unset(6);
-  for (const auto i : c10::irange(30)) {
+  for (size_t i = 0; i < 30; ++i) {
     EXPECT_FALSE(b.get(i));
   }
   EXPECT_TRUE(b.get(30));
@@ -101,7 +100,7 @@ struct IndexCallbackMock final {
 
   void expect_was_called_for_indices(std::vector<size_t> expected_indices) {
     EXPECT_EQ(expected_indices.size(), called_for_indices.size());
-    for (const auto i : c10::irange(expected_indices.size())) {
+    for (size_t i = 0; i < expected_indices.size(); ++i) {
       EXPECT_EQ(expected_indices[i], called_for_indices[i]);
     }
   }

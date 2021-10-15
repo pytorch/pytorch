@@ -1,7 +1,6 @@
 #pragma once
 
 #include <c10/core/ScalarType.h>
-#include <c10/util/irange.h>
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorUtils.h>
@@ -170,8 +169,7 @@ void batch_iterator_with_broadcasting(const Tensor& a, const Tensor& b, const fu
     auto* b_batch_idx_ptr = data[0];
     auto* a_batch_idx_ptr = data[1];
 
-    for (const auto elem : c10::irange(nelems)) {
-      (void)elem; //Suppress unused variable warning
+    for (int64_t elem = 0; elem < nelems; ++elem) {
       auto b_curr_linear_batch_idx = *reinterpret_cast<int64_t*>(b_batch_idx_ptr);
       auto a_curr_linear_batch_idx = *reinterpret_cast<int64_t*>(a_batch_idx_ptr);
 
@@ -334,7 +332,7 @@ static inline Tensor _move_to_end(const Tensor& self, IntArrayRef axes) {
   const int64_t ndim = self.ndimension();
   std::vector<int64_t> perm;
 
-  for (const auto i : c10::irange(ndim)) {
+  for (int64_t i = 0; i < ndim; i++) {
     auto it = std::find(a.begin(), a.end(), i);
     if (it == a.end()) {
        perm.push_back(i);
@@ -478,7 +476,7 @@ static inline std::vector<int64_t> create_dim_backshift_permutation(int64_t dim0
     "duplicate or invalid dimensions");
   std::vector<int64_t> permutation(ndim);
   int64_t cur_permuted_dim = 0;
-  for (const auto dim_ind : c10::irange(ndim)) {
+  for (int64_t dim_ind = 0; dim_ind < ndim; dim_ind++) {
     if ((dim_ind != dim0) && (dim_ind != dim1)) {
       permutation[cur_permuted_dim++] = dim_ind;
     }
@@ -495,7 +493,7 @@ static inline std::vector<int64_t> create_dim_backshift_permutation(int64_t dim0
 static inline std::vector<int64_t> create_reverse_permutation(std::vector<int64_t> permutation) {
   int64_t ndim = permutation.size();
   std::vector<int64_t> reverse_permutation(ndim);
-  for (const auto dim_ind : c10::irange(ndim)) {
+  for (int64_t dim_ind = 0; dim_ind < ndim; dim_ind++) {
     reverse_permutation[permutation[dim_ind]] = dim_ind;
   }
   return reverse_permutation;

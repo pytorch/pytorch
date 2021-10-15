@@ -10,7 +10,6 @@
 #include <ATen/native/cpu/utils.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
-#include <c10/util/irange.h>
 
 namespace at { namespace native {
 namespace {
@@ -43,7 +42,7 @@ void batch_norm_cpu_collect_linear_and_constant_terms(
   ///   the constant term beta(c) = bias(c) - mean(c) * inv_var(c) * weight(c)
   /// Note that this is only a good idea if (input_size >> c), in degenerate
   /// cases where image_size == 1 && batch_size == 1, it is slow.
-  for (const auto c : c10::irange(n_channel)) {
+  for (int64_t c = 0; c < n_channel; c++) {
     scalar_t mean, invstd;
     if (train) {
       mean = save_mean_a[c];
@@ -91,7 +90,7 @@ void batch_norm_cpu_contiguous_impl(Tensor& output, const Tensor& input,
       int64_t c = 0;
       data_index_init(begin, n, n_batch, c, n_channel);
 
-      for (const auto i : c10::irange(begin, end)) {
+      for (int64_t i = begin; i < end; i++) {
         const Vec alpha_vec(alpha_data[c]);
         const Vec beta_vec(beta_data[c]);
         int64_t offset = i * image_size;
@@ -114,7 +113,7 @@ void batch_norm_cpu_contiguous_impl(Tensor& output, const Tensor& input,
     // image_size == 1
     const int64_t loop_size = n_channel - (n_channel % Vec::size());
     at::parallel_for(0, n_batch, 1, [&](int64_t begin, int64_t end) {
-      for (const auto n : c10::irange(begin, end)) {
+      for (int64_t n = begin; n < end; n++) {
         int64_t offset = n * n_channel;
         int64_t d = 0;
         for (; d < loop_size; d += Vec::size()) {
@@ -162,7 +161,7 @@ void batch_norm_cpu_channels_last_impl(Tensor& output, const Tensor& input,
   // output(n, c, h, w) = input(n, c, h, w) * alpha(c) + beta(c)
   const int64_t loop_size = n_channel - (n_channel % Vec::size());
   at::parallel_for(0, n_batch * image_size, 1, [&](int64_t begin, int64_t end) {
-    for (const auto i : c10::irange(begin, end)) {
+    for (int64_t i = begin; i < end; i++) {
       int64_t offset = i * n_channel;
       int64_t d = 0;
       // vectorize on channel dimension, for normal batch_norm input size,
@@ -201,11 +200,11 @@ void batch_norm_cpu_collect_stats_contiguous_impl(
 
   // parallel dim reduce on 'channel'
   at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
-    for (const auto c : c10::irange(begin, end)) {
+    for (int64_t c = begin; c < end; c++) {
       // compute mean per input
       accscalar_t sum = 0;
-      for (const auto n : c10::irange(n_batch)) {
-        for (const auto i : c10::irange(image_size)) {
+      for (int64_t n = 0; n < n_batch; n++) {
+        for (int64_t i = 0; i < image_size; i++) {
           auto offset = n * n_channel * image_size + c * image_size + i;
           sum += input_data[offset];
         }
@@ -215,8 +214,8 @@ void batch_norm_cpu_collect_stats_contiguous_impl(
 
       // compute variance per input
       accscalar_t _var_sum = 0;
-      for (const auto n : c10::irange(n_batch)) {
-        for (const auto i : c10::irange(image_size)) {
+      for (int64_t n = 0; n < n_batch; n++) {
+        for (int64_t i = 0; i < image_size; i++) {
           auto offset = n * n_channel * image_size + c * image_size + i;
           auto x = input_data[offset];
           _var_sum += (x - mean) * (x - mean);
@@ -260,7 +259,7 @@ void batch_norm_cpu_collect_stats_channels_last_impl(
     TORCH_CHECK(tid < num_threads,
                 "expect thread id smaller than ", num_threads, ", got thread id ", tid);
     scalar_t* buffer_ptr = buffer_data + tid * n_channel;
-    for (const auto i : c10::irange(begin, end)) {
+    for (int64_t i = begin; i < end; i++) {
       const scalar_t* x_ptr = input_data + i * n_channel;
       vec::map2<scalar_t>(
           [](Vec x, Vec y) { return x + y; },
@@ -272,9 +271,9 @@ void batch_norm_cpu_collect_stats_channels_last_impl(
   });
 
   at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
-    for (const auto c : c10::irange(begin, end)) {
+    for (int64_t c = begin; c < end; c++) {
       accscalar_t sum = 0;
-      for (const auto t : c10::irange(num_threads)) {
+      for (int64_t t = 0; t < num_threads; t++) {
         sum += buffer_data[t * n_channel + c];
       }
       scalar_t mean = sum / N;
@@ -288,7 +287,7 @@ void batch_norm_cpu_collect_stats_channels_last_impl(
     int tid = at::get_thread_num();
     TORCH_CHECK(tid < num_threads, "expect thread id smaller than ", num_threads, ", got thread id ", tid);
     scalar_t* buffer_ptr = buffer_data + tid * n_channel;
-    for (const auto i : c10::irange(begin, end)) {
+    for (int64_t i = begin; i < end; i++) {
       const scalar_t* x_ptr = input_data + i * n_channel;
       vec::map3<scalar_t>(
           [](Vec x, Vec y, Vec mean) { return y + (x - mean) * (x - mean); },
@@ -301,9 +300,9 @@ void batch_norm_cpu_collect_stats_channels_last_impl(
   });
 
   at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
-    for (const auto c : c10::irange(begin, end)) {
+    for (int64_t c = begin; c < end; c++) {
       accscalar_t _var_sum = 0;
-      for (const auto t : c10::irange(num_threads)) {
+      for (int64_t t = 0; t < num_threads; t++) {
         _var_sum += buffer_data[t * n_channel + c];
       }
       var_sum_data[c] = _var_sum;
@@ -342,7 +341,7 @@ void batch_norm_cpu_backward_contiguous_impl(Tensor& grad_input, Tensor& grad_we
 
   // parallel dim reduce on 'channel'
   at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
-    for (const auto c : c10::irange(begin, end)) {
+    for (int64_t c = begin; c < end; c++) {
       scalar_t w = weight.defined() ? weight_a[c] : 1;
 
       scalar_t mean, invstd;
@@ -360,7 +359,7 @@ void batch_norm_cpu_backward_contiguous_impl(Tensor& grad_input, Tensor& grad_we
       //
       accscalar_t sum = 0;
       accscalar_t dotp = 0;
-      for (const auto n : c10::irange(n_batch)) {
+      for (int64_t n = 0; n < n_batch; n++) {
         const scalar_t* x_ptr = input_data + n * n_channel * image_size + c * image_size;
         const scalar_t* dy_ptr = grad_output_data + n * n_channel * image_size + c * image_size;
 
@@ -382,13 +381,13 @@ void batch_norm_cpu_backward_contiguous_impl(Tensor& grad_input, Tensor& grad_we
           scalar_t k = (scalar_t) dotp * invstd * invstd / N;
           scalar_t grad_mean = sum / N;
 
-          for (const auto n : c10::irange(n_batch)) {
+          for (int64_t n = 0; n < n_batch; n++) {
             const scalar_t* x_ptr = input_data + n * n_channel * image_size + c * image_size;
             scalar_t* dx_ptr = grad_input_data + n * n_channel * image_size + c * image_size;
             const scalar_t* dy_ptr = grad_output_data + n * n_channel * image_size + c * image_size;
 
             // Scalar math:
-            // for (const auto j : c10::irange(image_size)) {
+            // for (int64_t j = 0; j < image_size; ++j) {
             //   scalar_t dx = (x_ptr[j] - mean) * k;
             //   dx_ptr[j] = (dy_ptr[j] - grad_mean - dx) * invstd * w;
             // }
@@ -403,12 +402,12 @@ void batch_norm_cpu_backward_contiguous_impl(Tensor& grad_input, Tensor& grad_we
                 image_size);
           }
         } else { // evaluation mode
-          for (const auto n : c10::irange(n_batch)) {
+          for (int64_t n = 0; n < n_batch; n++) {
             scalar_t* dx_ptr = grad_input_data + n * n_channel * image_size + c * image_size;
             const scalar_t* dy_ptr = grad_output_data + n * n_channel * image_size + c * image_size;
 
             // Scalar math:
-            // for (const auto j : c10::irange(image_size)) {
+            // for (int64_t j = 0; j < image_size; ++j) {
             //   dx_ptr[j] = dy_ptr[j] * invstd * w;
             // }
             vec::map<scalar_t>(
@@ -468,7 +467,7 @@ void batch_norm_cpu_backward_channels_last_impl(Tensor& grad_input, Tensor& grad
 
     invstd.resize_({n_channel});
     invstd_ptr = invstd.data_ptr<scalar_t>();
-    for (const auto c : c10::irange(n_channel)) {
+    for (int64_t c = 0; c < n_channel; c++) {
       invstd_ptr[c] = 1 / std::sqrt(running_var_data[c] + eps);
     }
   }
@@ -492,7 +491,7 @@ void batch_norm_cpu_backward_channels_last_impl(Tensor& grad_input, Tensor& grad
     TORCH_CHECK(tid < num_threads, "expect thread id smaller than ", num_threads, ", got thread id ", tid);
     scalar_t* sum_ptr = sum_data + tid * n_channel;
     scalar_t* dotp_ptr = dotp_data + tid * n_channel;
-    for (const auto i : c10::irange(begin, end)) {
+    for (int64_t i = begin; i < end; i++) {
       const scalar_t* x_ptr = input_data + i * n_channel;
       const scalar_t* dy_ptr = grad_output_data + i * n_channel;
 
@@ -515,17 +514,17 @@ void batch_norm_cpu_backward_channels_last_impl(Tensor& grad_input, Tensor& grad
   });
 
   at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
-    for (const auto c : c10::irange(begin, end)) {
+    for (int64_t c = begin; c < end; c++) {
       // store the final result of sum and dotp in the 1st lane of immediate buffer,
       // so that we won't need to allocate anther buffer to store the temp values.
       accscalar_t _sum = 0;
-      for (const auto t : c10::irange(num_threads)) {
+      for (int64_t t = 0; t < num_threads; t++) {
         _sum += sum_data[t * n_channel + c];
       }
       sum_data[/* 0 * n_channel + */c] = _sum;
 
       accscalar_t _dotp = 0;
-      for (const auto t : c10::irange(num_threads)) {
+      for (int64_t t = 0; t < num_threads; t++) {
         _dotp += dotp_data[t * n_channel + c];
       }
       dotp_data[/* 0 * n_channel + */c] = _dotp;
@@ -536,7 +535,7 @@ void batch_norm_cpu_backward_channels_last_impl(Tensor& grad_input, Tensor& grad
   const int64_t loop_size = n_channel - (n_channel % Vec::size());
   if (grad_input.defined()) {
     at::parallel_for(0, N, 1, [&](int64_t begin, int64_t end) {
-      for (const auto i : c10::irange(begin, end)) {
+      for (int64_t i = begin; i < end; i++) {
         scalar_t* dx_ptr = grad_input_data + i * n_channel;
         const scalar_t* x_ptr = input_data + i * n_channel;
         const scalar_t* dy_ptr = grad_output_data + i * n_channel;

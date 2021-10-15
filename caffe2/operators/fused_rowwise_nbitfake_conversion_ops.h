@@ -118,7 +118,7 @@ class FloatToFusedNBitFakeRowwiseQuantizedOp final
       output_row_scale_bias[1] = minimum_element;
 
       // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      for (const auto col : c10::irange(input_columns)) {
+      for (size_t col = 0; col < input_columns; ++col) {
         output_row[col] = std::max(
             0,
             std::min<int>(

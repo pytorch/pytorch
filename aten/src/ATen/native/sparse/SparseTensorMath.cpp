@@ -700,9 +700,9 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTen
   // accessors rely on nnz test
   if (nDim > nDimI) {
     auto indices_accessor = indices.accessor<int64_t, 2>();
-    for (const auto k : c10::irange(sparse._nnz())) {
+    for (int64_t k = 0; k < sparse._nnz(); k++) {
       Tensor dstBuffer = resultBuffer;
-      for (const auto d : c10::irange(sparse.sparse_dim())) {
+      for (int64_t d = 0; d < sparse.sparse_dim(); d++) {
         dstBuffer = dstBuffer.select(0, indices_accessor[d][k]);
       }
       Tensor srcBuffer = valuesBuffer.select(0, k);
@@ -1069,7 +1069,7 @@ SparseTensor& hspmm_out_sparse_cpu(const SparseTensor& sparse_, const Tensor& de
   auto indices_accessor = indices.accessor<int64_t, 2>();
 
   int64_t i = -1, prevIdx = -1;
-  for (const auto j : c10::irange(nnz)) {
+  for (int64_t j = 0; j < nnz; j++) {
     int64_t currIdx = valueIndices_accessor[j];
     if (currIdx != prevIdx) {
       indices_accessor[0][++i] = currIdx;
@@ -1185,10 +1185,10 @@ SparseTensor& _sspaddmm_out_cpu(
         scalar_t* newv_ptr = newv.data_ptr<scalar_t>();
         scalar_t cast_alpha = alpha.to<scalar_t>();
 
-        for (const auto h : c10::irange(dim_i)) {
+        for (int64_t h = 0; h < dim_i; h++) {
           int64_t i_start = csr_accessor[h];
           int64_t i_end = csr_accessor[h+1];
-          for (const auto i : c10::irange(i_start, i_end)) {
+          for (int64_t i = i_start; i < i_end; i++) {
             scalar_t val = values_accessor[i];
             int64_t col = indices_accessor[1][i];
             if (col >= 0 && col < dim_j) {
@@ -1202,7 +1202,7 @@ SparseTensor& _sspaddmm_out_cpu(
           }
           // Fill up the indices with the right values
           if (i_start != i_end) {
-            for (const auto i : c10::irange(dim_k)) {
+            for (int64_t i = 0; i < dim_k; i++) {
               newi_accessor[0][p+i] = h;
               newi_accessor[1][p+i] = i;
             }
@@ -1277,7 +1277,7 @@ Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum) {
 
   auto dims_to_keep_v = std::vector<int64_t>();
   auto dense_dims_to_sum_v = std::vector<int64_t>();
-  for (const auto d : c10::irange(input_dim)) {
+  for (int64_t d = 0; d < input_dim; d++) {
     if (dims_to_sum_b[d]) {
       if (d >= sparse_dim) dense_dims_to_sum_v.emplace_back(d + 1 - sparse_dim);
     }

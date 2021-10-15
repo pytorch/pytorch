@@ -1706,7 +1706,7 @@ void concrete_dispatch_fn(
   }
 
   // Find overloaded tensors
-  for (const auto idx : c10::irange(arguments.size())) {
+  for (int64_t idx = 0; idx < arguments.size(); idx++) {
     const auto& ivalue = arguments[idx];
     if (ivalue.isTensor()) {
       const auto& tensor = ivalue.toTensor();
@@ -1728,12 +1728,12 @@ void concrete_dispatch_fn(
   }
 
   // Populate positional arguments
-  for (const auto idx : c10::irange(positional_default_start)) {
+  for (int64_t idx = 0; idx < positional_default_start; idx++) {
     PyTuple_SET_ITEM(args.ptr(), idx, torch::jit::toPyObject(std::move(arguments[idx])).release().ptr());
   }
 
   // Populate keyword arguments
-  for (const auto idx : c10::irange(kwarg_only_start, arguments.size())) {
+  for (int64_t idx = kwarg_only_start; idx < arguments.size(); idx++) {
     // But don't populate default keyword arguments
     if (is_default(idx)) continue;
     const auto& arg = schema.arguments()[idx];

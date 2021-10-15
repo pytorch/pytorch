@@ -3,7 +3,6 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
-#include <c10/util/irange.h>
 #include <string>
 
 namespace c10 {
@@ -70,7 +69,7 @@ struct QualifiedName {
       // Can't be a prefix if it's bigger
       return false;
     }
-    for (const auto i : c10::irange(thisAtoms.size())) {
+    for (size_t i = 0; i < thisAtoms.size(); i++) {
       if (thisAtoms[i] != otherAtoms[i]) {
         return false;
       }
@@ -117,7 +116,7 @@ struct QualifiedName {
       reserve += e.size() + 1;
     }
     out.reserve(reserve);
-    for (const auto i : c10::irange(v.size())) {
+    for (size_t i = 0; i < v.size(); ++i) {
       if (i != 0) {
         out.push_back(delimiter);
       }

@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <c10/util/irange.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 #include <torch/torch.h>
 
@@ -28,7 +27,7 @@ TEST(WireSerialize, Base) {
       EXPECT_TRUE(
           memcmp(deser.first.data(), payload.data(), payload.size()) == 0);
     }
-    for (const auto i : c10::irange(tensors.size())) {
+    for (size_t i = 0; i < tensors.size(); ++i) {
       EXPECT_TRUE(torch::equal(tensors[i], deser.second[i]));
     }
   };

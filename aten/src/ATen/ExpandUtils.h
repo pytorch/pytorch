@@ -4,7 +4,6 @@
 #include <ATen/Tensor.h>
 #include <c10/util/Exception.h>
 #include <c10/util/MaybeOwned.h>
-#include <c10/util/irange.h>
 
 #include <functional>
 #include <sstream>
@@ -267,7 +266,7 @@ inline std::vector<Tensor> expand_outplace(TensorList to_expand) {
   // expands a list of Tensors; ignores undefined (null) tensors
   bool first = true;
   DimVector sizes;
-  for (const auto i : c10::irange(to_expand.size())) {
+  for (size_t i = 0; i < to_expand.size(); ++i) {
     if (!to_expand[i].defined()) {
       continue;
     } else if (first) {
@@ -279,7 +278,7 @@ inline std::vector<Tensor> expand_outplace(TensorList to_expand) {
   }
 
   std::vector<Tensor> result(to_expand.size());
-  for (const auto i : c10::irange(to_expand.size())) {
+  for (size_t i = 0; i < to_expand.size(); ++i) {
     if (!to_expand[i].defined()) {
       continue;
     } else if (to_expand[i].sizes().equals(sizes)) {
@@ -300,7 +299,7 @@ static inline Tensor sum_to(Tensor tensor, const IntArrayRef shape) {
   c10::SmallVector<int64_t, 8> reduce_dims;
   const at::IntArrayRef sizes = tensor.sizes();
   const int64_t leading_dims = sizes.size() - shape.size();
-  for (const auto i : c10::irange(leading_dims)) {
+  for (int64_t i = 0; i < leading_dims; ++i) {
     reduce_dims.push_back(i);
   }
   for (int64_t i = leading_dims; i < static_cast<int64_t>(sizes.size()); ++i) {
@@ -321,7 +320,7 @@ static inline bool is_expandable_to(IntArrayRef shape, IntArrayRef desired) {
   if (ndim > target_dim) {
     return false;
   }
-  for (const auto i : c10::irange(ndim)) {
+  for (size_t i = 0; i < ndim; i++) {
     int64_t size = shape[ndim - i - 1];
     int64_t target = desired[target_dim - i - 1];
     if (size != target && size != 1) {

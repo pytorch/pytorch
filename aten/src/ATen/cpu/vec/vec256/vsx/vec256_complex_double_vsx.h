@@ -3,7 +3,6 @@
 #include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
 #include <c10/util/complex.h>
-#include <c10/util/irange.h>
 
 namespace at {
 namespace vec {
@@ -168,7 +167,7 @@ class Vectorized<ComplexDbl> {
   Vectorized<ComplexDbl> map(ComplexDbl (*const f)(ComplexDbl)) const {
     __at_align__ ComplexDbl tmp[size()];
     store(tmp);
-    for (const auto i : c10::irange(size())) {
+    for (int i = 0; i < size(); i++) {
       tmp[i] = f(tmp[i]);
     }
     return loadu(tmp);
@@ -177,7 +176,7 @@ class Vectorized<ComplexDbl> {
   Vectorized<ComplexDbl> map(ComplexDbl (*const f)(const ComplexDbl&)) const {
     __at_align__ ComplexDbl tmp[size()];
     store(tmp);
-    for (const auto i : c10::irange(size())) {
+    for (int i = 0; i < size(); i++) {
       tmp[i] = f(tmp[i]);
     }
     return loadu(tmp);
@@ -455,7 +454,7 @@ class Vectorized<ComplexDbl> {
     __at_align__ ComplexDbl y_tmp[size()];
     store(x_tmp);
     exp.store(y_tmp);
-    for (const auto i : c10::irange(size())) {
+    for (int i = 0; i < size(); i++) {
       x_tmp[i] = std::pow(x_tmp[i], y_tmp[i]);
     }
     return loadu(x_tmp);

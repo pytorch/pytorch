@@ -3,7 +3,6 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/DispatchStub.h>
-#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -23,7 +22,7 @@ Tensor int_repr_quantized_cpu(const Tensor& self) {
           self.options().dtype(UNDERLYING_TYPE),
           self.suggest_memory_format());
       const underlying_t* qdata = reinterpret_cast<underlying_t*>(self.data_ptr<scalar_t>());
-      for (const auto i : c10::irange(dst.numel())) {
+      for (int64_t i = 0; i < dst.numel(); ++i) {
         dst[i] = static_cast<underlying_t>(qdata[i]);
       }
     } else {

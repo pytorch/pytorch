@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <c10/util/irange.h>
 #include <torch/torch.h>
 
 #include <algorithm>
@@ -79,11 +78,11 @@ TEST_F(ParameterListTest, AccessWithAt) {
   ASSERT_EQ(list->size(), 4);
 
   // returns the correct module for a given index
-  for (const auto i : c10::irange(params.size())) {
+  for (size_t i = 0; i < params.size(); ++i) {
     ASSERT_TRUE(torch::all(torch::eq(list->at(i), params[i])).item<bool>());
   }
 
-  for (const auto i : c10::irange(params.size())) {
+  for (size_t i = 0; i < params.size(); ++i) {
     ASSERT_TRUE(torch::all(torch::eq(list[i], params[i])).item<bool>());
   }
 

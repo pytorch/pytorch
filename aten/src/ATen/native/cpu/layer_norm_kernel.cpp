@@ -9,7 +9,6 @@
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/cpu/moments_utils.h>
-#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -41,7 +40,7 @@ void LayerNormKernelImplInternal(
   const bool gamma_null = gamma_data == nullptr;
   const bool beta_null = beta_data == nullptr;
   at::parallel_for(0, M, 1, [&](int64_t start, int64_t end) {
-    for (const auto i : c10::irange(start, end)) {
+    for (int64_t i = start; i < end; ++i) {
       const T* X_ptr = X_data + i * N;
       T* Y_ptr = Y_data + i * N;
       T mean_val;
@@ -51,7 +50,7 @@ void LayerNormKernelImplInternal(
       const T_ACC scale = rstd_val;
       const T_ACC bias = -rstd_val * mean_val;
       if (gamma_null || beta_null) {
-        for (const auto j : c10::irange(N)) {
+        for (int64_t j = 0; j < N; ++j) {
           const T gamma_v = gamma_null ? T(1) : gamma_data[j];
           const T beta_v = beta_null ? T(0) : beta_data[j];
           Y_ptr[j] = (X_ptr[j] * scale + bias) * gamma_v + beta_v;
@@ -154,14 +153,14 @@ void LayerNormBackwardKernelImplInternal(
     T* dgamma_buffer_ptr = dgamma_null ? nullptr : buffer_data + tid * N;
     T* dbeta_buffer_ptr =
         dbeta_null ? nullptr : buffer_data + num_threads * N + tid * N;
-    for (const auto i : c10::irange(start, end)) {
+    for (int64_t i = start; i < end; ++i) {
       const T* dY_ptr = dY_data + i * N;
       const T* X_ptr = X_data + i * N;
       if (!dgamma_null) {
         const T_ACC a = rstd_data[i];
         const T_ACC b = -a * mean_data[i];
         // Scalar math:
-        // for (const auto j : c10::irange(N)) {
+        // for (int64_t j = 0; j < N; ++j) {
         //   dgamma_data[j] += dY_ptr[j] * (a * X_ptr[j] + b);
         // }
         vec::map3<T>(
@@ -176,7 +175,7 @@ void LayerNormBackwardKernelImplInternal(
       }
       if (!dbeta_null) {
         // Scalar math:
-        // for (const auto j : c10::irange(N)) {
+        // for (int64_t j = 0; j < N; ++j) {
         //   dbeta_data[j] += dY_ptr[j];
         // }
         vec::map2<T>(
@@ -191,7 +190,7 @@ void LayerNormBackwardKernelImplInternal(
         T_ACC ds = T_ACC(0);
         T_ACC db = T_ACC(0);
         // Scalar math:
-        // for (const auto j : c10::irange(N)) {
+        // for (int64_t j = 0; j < N; ++j) {
         //   const T gamma_v = gamma_null ? T(1) : gamma_data[j];
         //   ds += dY_ptr[j] * X_ptr[j] * gamma_v;
         //   db += dY_ptr[j] * gamma_v;
@@ -224,7 +223,7 @@ void LayerNormBackwardKernelImplInternal(
         const T_ACC b = (db * mean_data[i] - ds) * a * a * a * scale;
         const T_ACC c = -b * mean_data[i] - db * a * scale;
         // Scalar math:
-        // for (const auto j : c10::irange(N)) {
+        // for (int64_t j = 0; j < N; ++j) {
         //   const T gamma_v = gamma_null ? T(1) : gamma_data[j];
         //   dX_ptr[j] = a * dY_ptr[j] * gamma_v + b * X_ptr[j] + c;
         // }
@@ -255,10 +254,10 @@ void LayerNormBackwardKernelImplInternal(
   // Second path of dgamma/dbeta
   if (buffer_data != nullptr) {
     parallel_for(0, N, 1, [&](int64_t start, int64_t end) {
-      for (const auto j : c10::irange(start, end)) {
+      for (int64_t j = start; j < end; ++j) {
         T_ACC dgamma_v = T_ACC(0);
         T_ACC dbeta_v = T_ACC(0);
-        for (const auto i : c10::irange(num_threads)) {
+        for (int64_t i = 0; i < num_threads; ++i) {
           dgamma_v += buffer_data[i * N + j];
           dbeta_v += buffer_data[num_threads * N + i * N + j];
         }

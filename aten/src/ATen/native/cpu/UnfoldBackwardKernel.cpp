@@ -2,7 +2,6 @@
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/UnfoldBackward.h>
 #include <ATen/native/cpu/Loops.h>
-#include <c10/util/irange.h>
 
 #if (defined(_WIN32) || defined(_WIN64))
 #define RESTRICT __restrict
@@ -78,8 +77,7 @@ void _unfold_backward_internal_kernel(
     if (is_step_ge_size) {
       auto* RESTRICT idx_last_dim_ptr = data[3];
 
-      for (const auto elem : c10::irange(nelems)) {
-        (void)elem; //Suppress unused variable warning
+      for (int64_t elem = 0; elem < nelems; ++elem) {
         auto* RESTRICT grad_out_data = reinterpret_cast<scalar_t*>(grad_out_ptr);
         auto* RESTRICT grad_in_data = reinterpret_cast<scalar_t*>(grad_in_ptr);
 
@@ -96,8 +94,7 @@ void _unfold_backward_internal_kernel(
       }
     }
     else {
-      for (const auto elem : c10::irange(nelems)) {
-        (void)elem; //Suppress unused variable warning
+      for (int64_t elem = 0; elem < nelems; ++elem) {
         auto* RESTRICT grad_out_data = reinterpret_cast<scalar_t*>(grad_out_ptr);
         auto* RESTRICT grad_in_data = reinterpret_cast<scalar_t*>(grad_in_ptr);
 

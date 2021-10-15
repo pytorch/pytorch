@@ -2,7 +2,6 @@
 #include <cmath>
 #include <cstdint>
 #include <string.h>
-#include "c10/util/irange.h"
 #include "caffe2/utils/conversions.h"
 
 #if (ENABLE_VECTORIZATION > 0) && !defined(_DEBUG) && !defined(DEBUG)
@@ -54,7 +53,7 @@ inline void LstmUnitImpl(
     T* H,
     const float forget_bias) {
   const T forgetBias = convert::To<float, T>(forget_bias);
-  for (const auto n : c10::irange(N)) {
+  for (int n = 0; n < N; ++n) {
     const bool valid = seqLengths == nullptr || t < seqLengths[n];
     if (!valid) {
       if (drop_states) {
@@ -68,7 +67,7 @@ inline void LstmUnitImpl(
       const T* X_D = &X[D];
       const T* X_2D = &X[2 * D];
       const T* X_3D = &X[3 * D];
-      VECTOR_LOOP for (const auto d : c10::irange(D)) {
+      VECTOR_LOOP for (int d = 0; d < D; ++d) {
         const T i = sigmoid(X[d]);
         const T f = sigmoid(X_D[d] + forgetBias);
         const T o = sigmoid(X_2D[d]);
@@ -106,7 +105,7 @@ inline void LstmUnitGradientImpl(
     T* X_diff,
     const float forget_bias) {
   const T localForgetBias = convert::To<float, T>(forget_bias);
-  for (const auto n : c10::irange(N)) {
+  for (int n = 0; n < N; ++n) {
     const bool valid = seqLengths == nullptr || t < seqLengths[n];
 
     if (!valid) {
@@ -119,7 +118,7 @@ inline void LstmUnitGradientImpl(
       }
       memset(X_diff, 0, 4 * sizeof(T) * D);
     } else {
-      VECTOR_LOOP for (const auto d : c10::irange(D)) {
+      VECTOR_LOOP for (int d = 0; d < D; ++d) {
         T* c_prev_diff = C_prev_diff + d;
         T* h_prev_diff = H_prev_diff + d;
         T* i_diff = X_diff + d;

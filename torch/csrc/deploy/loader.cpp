@@ -54,7 +54,6 @@
 #include <sys/user.h>
 
 #include <c10/util/Optional.h>
-#include <c10/util/irange.h>
 
 #include <fmt/format.h>
 #include <torch/csrc/deploy/loader.h>
@@ -153,7 +152,7 @@ size_t phdr_table_get_load_size(
   Elf64_Addr max_vaddr = 0;
 
   bool found_pt_load = false;
-  for (const auto i : c10::irange(phdr_count)) {
+  for (size_t i = 0; i < phdr_count; ++i) {
     const Elf64_Phdr* phdr = &phdr_table[i];
 
     if (phdr->p_type != PT_LOAD) {
@@ -384,7 +383,7 @@ std::pair<const char*, std::vector<const char*>> load_needed_from_elf_file(
   auto program_headers = (Elf64_Phdr*)(data + header_->e_phoff);
   auto n_program_headers = header_->e_phnum;
   const Elf64_Dyn* dynamic = nullptr;
-  for (const auto i : c10::irange(n_program_headers)) {
+  for (size_t i = 0; i < n_program_headers; ++i) {
     const Elf64_Phdr* phdr = &program_headers[i];
     if (phdr->p_type == PT_DYNAMIC) {
       dynamic = reinterpret_cast<const Elf64_Dyn*>(data + phdr->p_offset);
@@ -406,7 +405,7 @@ std::pair<const char*, std::vector<const char*>> load_needed_from_elf_file(
   const char* segment_string_table =
       data + segment_headers[header_->e_shstrndx].sh_offset;
 
-  for (const auto i : c10::irange(n_segments)) {
+  for (size_t i = 0; i < n_segments; ++i) {
     const Elf64_Shdr* shdr = &segment_headers[i];
     if (shdr->sh_type == SHT_STRTAB &&
         strcmp(".dynstr", segment_string_table + shdr->sh_name) == 0) {
@@ -642,7 +641,7 @@ struct AlreadyLoadedSymTable {
       const Elf64_Phdr* program_headers,
       size_t n_program_headers) {
     Elf64_Dyn* dynamic = nullptr;
-    for (const auto i : c10::irange(n_program_headers)) {
+    for (size_t i = 0; i < n_program_headers; ++i) {
       const Elf64_Phdr* phdr = &program_headers[i];
 
       // Segment addresses in memory.
@@ -872,7 +871,7 @@ struct __attribute__((visibility("hidden"))) CustomLibraryImpl
 
   void load_segments() {
     // from bionic
-    for (const auto i : c10::irange(n_program_headers_)) {
+    for (size_t i = 0; i < n_program_headers_; ++i) {
       const Elf64_Phdr* phdr = &program_headers_[i];
 
       // Segment addresses in memory.
@@ -1142,17 +1141,17 @@ struct __attribute__((visibility("hidden"))) CustomLibraryImpl
   }
 
   void relocate() {
-    for (const auto i : c10::irange(dyninfo_.n_rela_)) {
+    for (size_t i = 0; i < dyninfo_.n_rela_; ++i) {
       relocate_one(dyninfo_.rela_[i]);
     }
-    for (const auto i : c10::irange(dyninfo_.n_plt_rela_)) {
+    for (size_t i = 0; i < dyninfo_.n_plt_rela_; ++i) {
       relocate_one(dyninfo_.plt_rela_[i]);
     }
   }
 
   void initialize() {
     call_function(dyninfo_.init_func_);
-    for (const auto i : c10::irange(dyninfo_.n_init_array_)) {
+    for (size_t i = 0; i < dyninfo_.n_init_array_; ++i) {
       call_function(dyninfo_.init_array_[i]);
     }
     initialized_ = true;

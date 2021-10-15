@@ -2,7 +2,6 @@
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/torch.h>
 #include <c10/core/InferenceMode.h>
-#include <c10/util/irange.h>
 
 using namespace torch::jit;
 
@@ -23,7 +22,7 @@ static void FusedOverhead(benchmark::State& state) {
   auto z = torch::ones({1});
 
   // Warmup.
-  for (const auto i : c10::irange(8)) {
+  for (int i = 0; i < 8; i++) {
     m.run_method("two_adds", x, y, z);
   }
 
@@ -44,7 +43,7 @@ static void UnfusedOverhead(benchmark::State& state) {
   auto z = torch::ones({1});
 
   // Warmup.
-  for (const auto i : c10::irange(8)) {
+  for (int i = 0; i < 8; i++) {
     m.run_method("two_adds", x, y, z);
   }
 

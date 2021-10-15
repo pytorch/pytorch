@@ -4,7 +4,6 @@
 
 #include <iostream>
 #include <string>
-#include <c10/util/irange.h>
 #include <torch/script.h>
 
 using namespace std;
@@ -41,7 +40,7 @@ int main(int argc, const char* argv[]) {
   }();
 
   std::cout << std::setprecision(3) << std::fixed;
-  for (const auto i : c10::irange(5)) {
+  for (int i = 0; i < 5; i++) {
     std::cout << output.data_ptr<float>()[i] << std::endl;
   }
   return 0;

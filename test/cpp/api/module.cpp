@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <c10/util/irange.h>
 #include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
@@ -700,7 +699,7 @@ TEST_F(ModuleTest, ModulesReturnsExpectedSubmodulesForFlatModel) {
   std::vector<std::shared_ptr<torch::nn::Module>> expected = {
       model.ptr(), model[0], model[1], model[2]};
   ASSERT_EQ(modules.size(), expected.size());
-  for (const auto i : c10::irange(expected.size())) {
+  for (size_t i = 0; i < expected.size(); ++i) {
     // Assert pointer equality.
     ASSERT_EQ(modules[i].get(), expected[i].get());
   }
@@ -713,7 +712,7 @@ TEST_F(ModuleTest, ModulesExcludesSelfWhenIncludeSelfSetToFalse) {
   std::vector<std::shared_ptr<torch::nn::Module>> expected = {
       model[0], model[1], model[2]};
   ASSERT_EQ(modules.size(), expected.size());
-  for (const auto i : c10::irange(expected.size())) {
+  for (size_t i = 0; i < expected.size(); ++i) {
     // Assert pointer equality.
     ASSERT_EQ(modules[i].get(), expected[i].get());
   }
@@ -726,7 +725,7 @@ TEST_F(ModuleTest, NamedModulesReturnsExpectedNamedSubmodulesForFlatModel) {
   std::vector<std::shared_ptr<torch::nn::Module>> expected = {
       model.ptr(), model[0], model[1], model[2]};
   ASSERT_EQ(modules.size(), expected.size());
-  for (const auto i : c10::irange(expected.size())) {
+  for (size_t i = 0; i < expected.size(); ++i) {
     // Assert pointer equality.
     ASSERT_EQ(modules[i].key(), i ? std::to_string(i - 1) : std::string());
     ASSERT_EQ(modules[i].value().get(), expected[i].get());
@@ -741,7 +740,7 @@ TEST_F(ModuleTest, NamedModulesExcludesSelfWhenIncludeSelfSetToFalse) {
   std::vector<std::shared_ptr<torch::nn::Module>> expected = {
       model[0], model[1], model[2]};
   ASSERT_EQ(modules.size(), expected.size());
-  for (const auto i : c10::irange(expected.size())) {
+  for (size_t i = 0; i < expected.size(); ++i) {
     // Assert pointer equality.
     ASSERT_EQ(modules[i].key(), std::to_string(i));
     ASSERT_EQ(modules[i].value().get(), expected[i].get());
@@ -754,7 +753,7 @@ TEST_F(ModuleTest, ChildrenReturnsExpectedSubmodulesForFlatModel) {
   std::vector<std::shared_ptr<torch::nn::Module>> expected = {
       model[0], model[1], model[2]};
   ASSERT_EQ(modules.size(), expected.size());
-  for (const auto i : c10::irange(expected.size())) {
+  for (size_t i = 0; i < expected.size(); ++i) {
     // Assert pointer equality.
     ASSERT_EQ(modules[i].get(), expected[i].get());
   }
@@ -770,7 +769,7 @@ TEST_F(ModuleTest, NamedChildrenReturnsExpectedNamedSubmodulesForFlatModel) {
   std::vector<std::shared_ptr<torch::nn::Module>> expected = {
       model[0], model[1], model[2]};
   ASSERT_EQ(modules.size(), expected.size());
-  for (const auto i : c10::irange(expected.size())) {
+  for (size_t i = 0; i < expected.size(); ++i) {
     // Assert pointer equality.
     ASSERT_EQ(modules[i].key(), std::to_string(i));
     ASSERT_EQ(modules[i].value().get(), expected[i].get());
@@ -818,7 +817,7 @@ TEST_F(ModuleTest, NamedBuffersReturnsExpectedTensorsForFlatModel) {
 struct TestContainer : torch::nn::Module {
   TestContainer(int64_t number, std::vector<TestContainer> modules = {})
       : tensor(torch::tensor(number)) {
-    for (const auto i : c10::irange(modules.size())) {
+    for (size_t i = 0; i < modules.size(); ++i) {
       register_module(
           std::to_string(i),
           std::make_shared<TestContainer>(std::move(modules[i])));
@@ -862,7 +861,7 @@ TEST_F(ModuleTest, ModulesReturnsExpectedSubmodulesForDeepModel) {
   std::vector<std::shared_ptr<torch::nn::Module>> modules = model->modules();
 
   ASSERT_EQ(modules.size(), 10);
-  for (const auto i : c10::irange(modules.size())) {
+  for (size_t i = 0; i < modules.size(); ++i) {
     ASSERT_EQ(get_test_container_item(modules[i]), i);
   }
 }
@@ -875,7 +874,7 @@ TEST_F(ModuleTest, NamedModulesReturnsExpectedNamedSubmodulesForDeepModel) {
 
   ASSERT_EQ(modules.size(), expected.size());
 
-  for (const auto i : c10::irange(expected.size())) {
+  for (size_t i = 0; i < expected.size(); ++i) {
     ASSERT_EQ(modules[i].key(), expected[i].first);
     ASSERT_EQ(get_test_container_item(modules[i].value()), expected[i].second);
   }

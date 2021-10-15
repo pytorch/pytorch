@@ -9,7 +9,6 @@
 #include <ATen/native/UpSample.h>
 #include <ATen/native/cpu/GridSamplerKernel.h>
 #include <c10/util/Exception.h>
-#include <c10/util/irange.h>
 
 namespace at { namespace native {
 
@@ -52,12 +51,12 @@ namespace {
     scalar_t *grid_ptr = grid.data_ptr<scalar_t>();
     // loop over each output pixel
     at::parallel_for(0, N, 0, [&](int64_t start, int64_t end) {
-      for (const auto n : c10::irange(start, end)) {
+      for (int64_t n = start; n < end; ++n) {
         scalar_t *grid_ptr_N = grid_ptr + n * grid_sN;
         scalar_t *inp_ptr_N = inp_ptr + n * inp_sN;
-        for (const auto d : c10::irange(out_D)) {
-          for (const auto h : c10::irange(out_H)) {
-            for (const auto w : c10::irange(out_W)) {
+        for (int64_t d = 0; d < out_D; ++d) {
+          for (int64_t h = 0; h < out_H; ++h) {
+            for (int64_t w = 0; w < out_W; ++w) {
               // get the corresponding input x, y, z co-ordinates from grid
               scalar_t *grid_ptr_NDHW = grid_ptr_N + d * grid_sD + h * grid_sH + w * grid_sW;
               scalar_t ix = *grid_ptr_NDHW;
@@ -223,12 +222,12 @@ namespace {
     scalar_t *gGrid_ptr = grad_grid.data_ptr<scalar_t>();
     // loop over each output pixel
     at::parallel_for(0, N, 0, [&](int64_t start, int64_t end) {
-      for (const auto n : c10::irange(start, end)) {
+      for (int64_t n = start; n < end; ++n) {
         scalar_t *grid_ptr_N = grid_ptr + n * grid_sN;
         scalar_t *inp_ptr_N = inp_ptr + n * inp_sN;
         scalar_t *gGrid_ptr_NDHW = gGrid_ptr + n * gGrid_sN;
-        for (const auto d : c10::irange(out_D)) {
-          for (const auto h : c10::irange(out_H)) {
+        for (int64_t d = 0; d < out_D; ++d) {
+          for (int64_t h = 0; h < out_H; ++h) {
             for (int64_t w = 0; w < out_W; ++w, gGrid_ptr_NDHW += gGrid_sW /* grad_grid is contiguous */ ) {
               // get the corresponding input x, y, z co-ordinates from grid
               scalar_t *grid_ptr_NDHW = grid_ptr_N + d * grid_sD + h * grid_sH + w * grid_sW;
@@ -417,11 +416,11 @@ Tensor _grid_sampler_2d_cpu_fallback(const Tensor& input, const Tensor& grid,
   scalar_t *grid_ptr = grid.data_ptr<scalar_t>();
   // loop over each output pixel
   at::parallel_for(0, N, 0, [&](int64_t start, int64_t end) {
-    for (const auto n : c10::irange(start, end)) {
+    for (int64_t n = start; n < end; ++n) {
       scalar_t *grid_ptr_N = grid_ptr + n * grid_sN;
       scalar_t *inp_ptr_N = inp_ptr + n * inp_sN;
-      for (const auto h : c10::irange(out_H)) {
-        for (const auto w : c10::irange(out_W)) {
+      for (int64_t h = 0; h < out_H; ++h) {
+        for (int64_t w = 0; w < out_W; ++w) {
           // get the corresponding input x, y, z co-ordinates from grid
           scalar_t *grid_ptr_NHW = grid_ptr_N + h * grid_sH + w * grid_sW;
           scalar_t x = *grid_ptr_NHW;
@@ -506,7 +505,7 @@ Tensor _grid_sampler_2d_cpu_fallback(const Tensor& input, const Tensor& grid,
               scalar_t coefficients[4];
 
               // Interpolate 4 values in the x directon
-              for (const auto i : c10::irange(4)) {
+              for (int64_t i = 0; i < 4; ++i) {
                 coefficients[i] = cubic_interp1d<scalar_t>(
                   get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw - 1, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
                   get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw + 0, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
@@ -579,11 +578,11 @@ _grid_sampler_2d_cpu_fallback_backward(const Tensor& grad_output,
   scalar_t *gGrid_ptr = grad_grid.data_ptr<scalar_t>();
   // loop over each output pixel
   at::parallel_for(0, N, 0, [&](int64_t start, int64_t end) {
-    for (const auto n : c10::irange(start, end)) {
+    for (int64_t n = start; n < end; ++n) {
       scalar_t *grid_ptr_N = grid_ptr + n * grid_sN;
       scalar_t *inp_ptr_N = inp_ptr + n * inp_sN;
       scalar_t *gGrid_ptr_NHW = gGrid_ptr + n * gGrid_sN;
-      for (const auto h : c10::irange(out_H)) {
+      for (int64_t h = 0; h < out_H; ++h) {
         for (int64_t w = 0; w < out_W; ++w, gGrid_ptr_NHW += gGrid_sW /* grad_grid is contiguous */ ) {
           // get the corresponding input x, y co-ordinates from grid
           scalar_t *grid_ptr_NHW = grid_ptr_N + h * grid_sH + w * grid_sW;
@@ -704,8 +703,8 @@ _grid_sampler_2d_cpu_fallback_backward(const Tensor& grad_output,
             for (int64_t c = 0; c < C; ++c, gOut_ptr_NCHW += gOut_sC, gInp_ptr_NC += gInp_sC, inp_ptr_NC+= inp_sC) {
               scalar_t gOut = *gOut_ptr_NCHW;
 
-              for (const auto i : c10::irange(4)) {
-                for (const auto j : c10::irange(4)) {
+              for (int64_t i = 0; i < 4; ++i) {
+                for (int64_t j = 0; j < 4; ++j) {
 
                   // set input gradient
                   add_value_bounded<scalar_t>(gInp_ptr_NC, ix_nw - 1 + i, iy_nw - 1 + j,
@@ -858,7 +857,7 @@ Tensor grid_sampler(const Tensor& input, const Tensor& grid,
     !(input.dim() == 5 && static_cast<GridSamplerInterpolation>(interpolation_mode) == GridSamplerInterpolation::Bicubic),
     "grid_sampler(): bicubic interpolation only supports 4D input"
   );
-  for (const auto i : c10::irange(2, input.dim())) {
+  for (int64_t i = 2; i < input.dim(); i++) {
     TORCH_CHECK(input.size(i) > 0,
       "grid_sampler(): expected input to have non-empty spatial dimensions, "
       "but input has sizes ", input.sizes(), " with dimension ", i, " being "

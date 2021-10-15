@@ -2,7 +2,6 @@
 
 #include <ATen/Parallel.h>
 #include <ATen/TensorUtils.h>
-#include <c10/util/irange.h>
 #include <limits>
 #include <utility>
 #include <cstring>
@@ -131,7 +130,7 @@ inline Tensor sort_strides(Tensor& tensor_) {
   IntArrayRef strides = tensor_.strides();
   std::vector<int64_t> indices;
   indices.reserve(tensor_.ndimension());
-  for (const auto i : c10::irange(tensor_.ndimension())) {
+  for (int64_t i = 0; i < tensor_.ndimension(); i++) {
     indices.push_back(i);
   }
   std::sort(indices.begin(), indices.end(), [&strides](int64_t i1, int64_t i2) {
@@ -197,7 +196,7 @@ inline bool _all_equal_numel(at::ArrayRef<Tensor> tensors) {
   if (tensors.size() == 0)
     return true;
   int64_t all_numel = tensors[0].numel();
-  for (const auto i : c10::irange(1, tensors.size())) {
+  for (size_t i = 1; i < tensors.size(); i++) {
     if (tensors[i].numel() != all_numel)
       return false;
   }

@@ -1,7 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
-#include <c10/util/irange.h>
 
 namespace at {
 
@@ -227,8 +226,8 @@ static void reflection_pad1d_out_frame(
   at::parallel_for(0, nplane, 0, [&](int64_t start, int64_t end) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t ip_x;
-    for (const auto k : c10::irange(start, end)) {
-      for (const auto j : c10::irange(output_w)) {
+    for (auto k = start; k < end; k++) {
+      for (int64_t j = 0; j < output_w; j++) {
         if (j < pad_l) {
           ip_x = pad_l * 2 - j;
         } else if (j >= pad_l && j < input_w + pad_l) {
@@ -253,7 +252,7 @@ inline void reflection_pad1d_out_loop(
     int64_t input_w, int64_t output_w,
     int64_t pad_l) {
   at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-    for (const auto p : c10::irange(start, end)) {
+    for (auto p = start; p < end; p++) {
       reflection_pad1d_out_frame<scalar_t>(
         input_p + p * nplane * input_w,
         output_p + p * nplane * output_w,
@@ -353,8 +352,8 @@ static void reflection_pad1d_backward_out_frame(
   at::parallel_for(0, nplane, 0, [&](int64_t start, int64_t end) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t ip_x;
-    for (const auto k : c10::irange(start, end)) {
-      for (const auto j : c10::irange(output_w)) {
+    for (auto k = start; k < end; k++) {
+      for (int64_t j = 0; j < output_w; j++) {
         if (j < pad_l) {
           ip_x = pad_l * 2 - j;
         } else if (j >= pad_l && j < input_w + pad_l) {
@@ -379,7 +378,7 @@ inline void reflection_pad1d_backward_out_loop(
     int64_t input_w, int64_t output_w,
     int64_t pad_l) {
   at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-    for (const auto p : c10::irange(start, end)) {
+    for (auto p = start; p < end; p++) {
       reflection_pad1d_backward_out_frame<scalar_t>(
         grad_input + p * nplane * input_w,
         grad_output + p * nplane * output_w,
@@ -405,9 +404,9 @@ static void reflection_pad2d_out_frame(
   at::parallel_for(0, nplane, 0, [&](int64_t start, int64_t end) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t ip_x, ip_y;
-    for (const auto k : c10::irange(start, end)) {
-      for (const auto i : c10::irange(output_h)) {
-        for (const auto j : c10::irange(output_w)) {
+    for (auto k = start; k < end; k++) {
+      for (int64_t i = 0; i < output_h; i++) {
+        for (int64_t j = 0; j < output_w; j++) {
           if (j < pad_l) {
             ip_x = pad_l * 2 - j;
           } else if (j >= pad_l && j < input_w + pad_l) {
@@ -443,7 +442,7 @@ inline void reflection_pad2d_out_loop(
     int64_t output_w, int64_t output_h,
     int64_t pad_l, int64_t pad_t) {
   at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-    for (const auto p : c10::irange(start, end)) {
+    for (auto p = start; p < end; p++) {
       reflection_pad2d_out_frame(
         input_p + p * nplane * input_w * input_h,
         output_p + p * nplane * output_w * output_h,
@@ -561,9 +560,9 @@ static void reflection_pad2d_backward_out_frame(
   at::parallel_for(0, nplane, 0, [&](int64_t start, int64_t end) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t ip_x, ip_y;
-    for (const auto k : c10::irange(start, end)) {
-      for (const auto i : c10::irange(output_h)) {
-        for (const auto j : c10::irange(output_w)) {
+    for (auto k = start; k < end; k++) {
+      for (int64_t i = 0; i < output_h; i++) {
+        for (int64_t j = 0; j < output_w; j++) {
           if (j < pad_l) {
             ip_x = pad_l * 2 - j;
           } else if (j >= pad_l && j < input_w + pad_l) {
@@ -601,7 +600,7 @@ inline void reflection_pad2d_backward_out_loop(
     int64_t output_w, int64_t output_h,
     int64_t pad_l, int64_t pad_t) {
   at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-    for (const auto p : c10::irange(start, end)) {
+    for (auto p = start; p < end; p++) {
       reflection_pad2d_backward_out_frame(
         grad_input + p * nplane * input_h * input_w,
         grad_output + p * nplane * output_h * output_w,
@@ -691,10 +690,10 @@ inline void parallel_reflection_pad3d(
   at::parallel_for(0, nplane, 0, [&](int64_t start, int64_t end) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t ip_x, ip_y, ip_z;
-    for (const auto k : c10::irange(start, end)) {
-      for (const auto op_z : c10::irange(output_d)) {
-        for (const auto op_y : c10::irange(output_h)) {
-          for (const auto op_x : c10::irange(output_w)) {
+    for (int64_t k = start; k < end; k++) {
+      for (int64_t op_z = 0; op_z < output_d; op_z++) {
+        for (int64_t op_y = 0; op_y < output_h; op_y++) {
+          for (int64_t op_x = 0; op_x < output_w; op_x++) {
             if (op_x < pad_left) {
               ip_x = pad_left * 2 - op_x;
             } else if (op_x >= pad_left && op_x < input_w + pad_left) {
@@ -773,7 +772,7 @@ static void reflection_pad3d_out_loop(
     int64_t pad_left, int64_t pad_top, int64_t pad_front)
 {
   at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-    for (const auto p : c10::irange(start, end)) {
+    for (int64_t p = start; p < end; p++) {
       reflection_pad3d_out_frame(
           input_p + p * nplane * input_w * input_h * input_d,
           output_p + p * nplane * output_w * output_h * output_d,
@@ -834,7 +833,7 @@ static void reflection_pad3d_backward_out_loop(
     int64_t pad_left, int64_t pad_top, int64_t pad_front
 ) {
   at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-    for (const auto p : c10::irange(start, end)) {
+    for (int64_t p = start; p < end; p++) {
       reflection_pad3d_backward_out_frame<scalar_t>(
           grad_input + p * nplane * input_w * input_h * input_d,
           grad_output + p * nplane * output_w * output_h * output_d,

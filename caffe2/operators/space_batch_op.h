@@ -29,14 +29,14 @@ void spaceToBatch(
   const int input_height = input.dim32(2);
   const int input_width = input.dim32(3);
 
-  for (const auto out_b : c10::irange(output_batch)) {
+  for (int out_b = 0; out_b < output_batch; ++out_b) {
     const int in_b = out_b % input_batch;
     const int offset_w = (out_b / input_batch) % block_size;
     const int offset_h = (out_b / input_batch) / block_size;
-    for (const auto d : c10::irange(input_depth)) {
-      for (const auto out_h : c10::irange(output_height)) {
+    for (int d = 0; d < input_depth; ++d) {
+      for (int out_h = 0; out_h < output_height; ++out_h) {
         const int in_h = out_h * block_size + offset_h - pad_t;
-        for (const auto out_w : c10::irange(output_width)) {
+        for (int out_w = 0; out_w < output_width; ++out_w) {
           const int in_w = out_w * block_size + offset_w - pad_l;
           const auto output_offset =
               ((out_b * output_depth + d) * output_height + out_h) *
@@ -80,14 +80,14 @@ void batchToSpace(
   const int input_width = input.dim32(3);
 
   CAFFE_ENFORCE(input_depth == output_depth);
-  for (const auto in_b : c10::irange(input_batch)) {
+  for (int in_b = 0; in_b < input_batch; ++in_b) {
     const int out_b = in_b % output_batch;
     const int offset_w = (in_b / output_batch) % block_size;
     const int offset_h = (in_b / output_batch) / block_size;
-    for (const auto d : c10::irange(input_depth)) {
-      for (const auto in_h : c10::irange(input_height)) {
+    for (int d = 0; d < input_depth; ++d) {
+      for (int in_h = 0; in_h < input_height; ++in_h) {
         const int out_h = in_h * block_size + offset_h - pad_t;
-        for (const auto in_w : c10::irange(input_width)) {
+        for (int in_w = 0; in_w < input_width; ++in_w) {
           const int out_w = in_w * block_size + offset_w - pad_l;
           if (out_h >= 0 && out_w >= 0 && out_h < output_height &&
               out_w < output_width) {

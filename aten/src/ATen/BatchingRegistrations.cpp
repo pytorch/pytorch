@@ -3,7 +3,6 @@
 #include <ATen/BatchedFallback.h>
 #include <ATen/native/ResizeCommon.h>
 #include <ATen/ATen.h>
-#include <c10/util/irange.h>
 
 namespace at {
 
@@ -330,7 +329,7 @@ Tensor permute_batching_rule(const Tensor& self, IntArrayRef dims) {
 
   VmapDimVector all_dims_physical;
   all_dims_physical.reserve(self_physical.tensor().dim());
-  for (const auto bdim : c10::irange(self_physical.numBatchDims())) {
+  for (int64_t bdim = 0; bdim < self_physical.numBatchDims(); bdim++) {
     all_dims_physical.push_back(bdim);
   }
   all_dims_physical.insert(

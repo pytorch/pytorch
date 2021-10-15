@@ -1421,7 +1421,7 @@ static inline std::vector<Tensor> get_stack_inputs(TensorList tensors, int64_t d
   std::vector<Tensor> inputs(tensors.size());
   at::IntArrayRef entry_shape = tensors[0].sizes();
   inputs[0] = tensors[0].unsqueeze(dim);
-  for (const auto i : c10::irange(1, tensors.size())) {
+  for (size_t i = 1; i < tensors.size(); ++i) {
     TORCH_CHECK(tensors[i].sizes() == entry_shape,
       "stack expects each tensor to be equal size, but got ", entry_shape,
       " at entry 0 and ", tensors[i].sizes(), " at entry ", i);
@@ -1449,7 +1449,7 @@ bool inline can_use_native_serial_stack(Tensor& result, TensorList tensors, int6
   if (result.dtype() != firstTensor.dtype()) return false;
 
   // Inputs cannot alias the output tensor
-  for (const auto i : c10::irange(tensors.size())) {
+  for (size_t i = 0; i < tensors.size(); i++) {
     auto lap = at::get_overlap_status(result, tensors[i]);
     TORCH_CHECK(lap != at::MemOverlapStatus::PARTIAL &&
         lap != at::MemOverlapStatus::FULL, 0,
@@ -1471,7 +1471,7 @@ bool inline can_use_native_serial_stack(Tensor& result, TensorList tensors, int6
 
   // check remainder of inputs
   auto const &first_tensor_shape = firstTensor.sizes();
-  for (const auto i : c10::irange(1, tensors.size())) {
+  for (size_t i = 1; i < tensors.size(); i++) {
     auto const &tensor = tensors[i];
     TORCH_CHECK(tensors[i].sizes() == firstTensor.sizes(),
       "stack expects each tensor to be equal size, but got ", first_tensor_shape,

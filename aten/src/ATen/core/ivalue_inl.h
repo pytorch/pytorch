@@ -22,7 +22,6 @@
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
 #include <c10/util/hash.h>
-#include <c10/util/irange.h>
 
 namespace torch {
 namespace jit {
@@ -1115,7 +1114,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     }
     std::ostringstream oss;
     oss << devices[0];
-    for (const auto idx : c10::irange(1, devices.size())) {
+    for (size_t idx = 1; idx < devices.size(); idx++) {
       if (idx == devices.size() - 1) {
         oss << " and ";
       } else {
@@ -1132,7 +1131,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       return c10::kCPU;
     }
     c10::DeviceType deviceType = devices[0].type();
-    for (const auto idx : c10::irange(1, devices.size())) {
+    for (size_t idx = 1; idx < devices.size(); idx++) {
       TORCH_CHECK_VALUE(
           devices[idx].type() == deviceType,
           "Expected all devices to be of the same type, but got a mismatch between ",
@@ -1152,7 +1151,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       [](const c10::Device& a, const c10::Device& b) { return a.index() < b.index(); });
     // Deduplicate by compacting.
     size_t targetIdx = 0;
-    for (const auto sourceIdx : c10::irange(devices.size())) {
+    for (size_t sourceIdx = 0; sourceIdx < devices.size(); sourceIdx++) {
       TORCH_CHECK_VALUE(
           devices[sourceIdx].has_index(),
           "Expected devices to have indices, got ", devices[sourceIdx]);

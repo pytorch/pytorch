@@ -32,7 +32,7 @@ class EnforceFiniteOp final : public Operator<Context> {
     const T* input_data = input.template data<T>();
     auto size = input.numel();
 
-    for (const auto i : c10::irange(size)) {
+    for (auto i = 0; i < size; i++) {
       auto isfinite = std::isfinite(input_data[i]);
       if (!isfinite) {
         LogBlobFiniteness();

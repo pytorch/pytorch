@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <c10/util/irange.h>
 #include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
@@ -123,7 +122,7 @@ bool test_mnist(
   torch::Device device(with_cuda ? torch::kCUDA : torch::kCPU);
   model->to(device);
 
-  for (const auto epoch : c10::irange(number_of_epochs)) {
+  for (size_t epoch = 0; epoch < number_of_epochs; epoch++) {
     // NOLINTNEXTLINE(performance-for-range-copy)
     for (torch::data::Example<> batch : *data_loader) {
       auto data = batch.data.to(device), targets = batch.target.to(device);
@@ -197,7 +196,7 @@ TEST_F(IntegrationTest, CartPole) {
 
     std::vector<torch::Tensor> policy_loss;
     std::vector<torch::Tensor> value_loss;
-    for (const auto i : c10::irange(0U, saved_log_probs.size())) {
+    for (auto i = 0U; i < saved_log_probs.size(); i++) {
       auto advantage = r_t[i] - saved_values[i].item<float>();
       policy_loss.push_back(-advantage * saved_log_probs[i]);
       value_loss.push_back(

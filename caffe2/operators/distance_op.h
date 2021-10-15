@@ -37,7 +37,7 @@ class SquaredL2DistanceGradientOp final : public Operator<Context> {
     int N = X.dim() > 0 ? X.dim32(0) : 1;
     int D = N > 0 ? X.numel() / N : 0;
     CAFFE_ENFORCE(X.dim() == Y.dim());
-    for (const auto i : c10::irange(X.dim())) {
+    for (int i = 0; i < X.dim(); ++i) {
       CAFFE_ENFORCE(X.dim32(i) == Y.dim32(i));
     }
     CAFFE_ENFORCE(dDistance.dim() == 1);
@@ -50,7 +50,7 @@ class SquaredL2DistanceGradientOp final : public Operator<Context> {
         Y.template data<T>(),
         dX->template mutable_data<T>(),
         &context_);
-    for (const auto i : c10::irange(N)) {
+    for (int i = 0; i < N; ++i) {
       math::Scale<T, T, Context>(
           D,
           dDistance.template data<T>() + i,
@@ -227,7 +227,7 @@ class DotProductWithPaddingGradientOp final : public Operator<Context> {
     const auto* dDot_data = dDot.template data<T>();
     auto* dX_data = dX->template mutable_data<T>();
     auto* dY_data = dY->template mutable_data<T>();
-    for (const auto i : c10::irange(N)) { // TODO: multithreading
+    for (int i = 0; i < N; ++i) { // TODO: multithreading
       auto offsetX = i * DX;
       auto offsetY = i * DY;
       if (replicate_) {

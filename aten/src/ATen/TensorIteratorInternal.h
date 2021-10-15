@@ -1,7 +1,6 @@
 #pragma once
 #include <ATen/native/TensorIterator.h>
 #include <c10/util/SmallBuffer.h>
-#include <c10/util/irange.h>
 
 namespace at {
 
@@ -25,9 +24,9 @@ inline void get_data_ptrs(
   const int64_t ntensors = base.size();
   const int64_t ndim = counter.size();
   std::copy(base.begin(), base.end(), ptrs);
-  for (const auto dim : c10::irange(ndim)) {
+  for (int64_t dim = 0; dim < ndim; ++dim) {
     int64_t value = counter[dim];
-    for (const auto arg : c10::irange(ntensors)) {
+    for (int64_t arg = 0; arg < ntensors; ++arg) {
       ptrs[arg] += value * strides[dim * ntensors + arg];
     }
   }

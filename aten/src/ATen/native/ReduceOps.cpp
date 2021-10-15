@@ -627,7 +627,7 @@ void cummax_cummin_helper(const T1* self_data, T1* values_data, T2* indices_data
       Operation op;
       T1 out = self_data[0];
       int idx = 0;
-      for (const auto i : c10::irange(self_dim_size)) {
+      for(int i = 0; i < self_dim_size; i++) {
         T1 curr_elem = self_data[i*self_stride];
         if(isnan_(curr_elem) || (!isnan_(out) && op(curr_elem, out))) {
             out = self_data[i*self_stride];
@@ -738,7 +738,7 @@ static inline void diff_check_compatible_shape(const Tensor& self, const c10::op
         other.value().dim() == self.dim(),
         "diff expects prepend or append to be the same dimension as input");
 
-    for (const auto i : c10::irange(other.value().dim())) {
+    for (int i = 0; i < other.value().dim(); i++) {
       TORCH_CHECK(
           other.value().size(i) == self.size(i) || i == wrapped_dim,
           "diff expects the shape of tensor to prepend or append to match that of"
@@ -1065,7 +1065,7 @@ Tensor trace_cpu(const Tensor& self) {
     t_stride_1 = self.stride(1);
 
     t_diag_size = std::min(self.size(0), self.size(1));
-    for (const auto i : c10::irange(t_diag_size)) {
+    for (int64_t i = 0; i < t_diag_size; i++) {
       sum += t_data[i * (t_stride_0 + t_stride_1)];
     }
 
@@ -1489,9 +1489,9 @@ static double std_var_all_cpu(const Tensor& self, int64_t correction, bool take_
         const int64_t outer_stride = strides[1];
 
         double local_sum = 0.0;
-        for (const auto i : c10::irange(size1)) {
+        for (int64_t i = 0; i < size1; ++i) {
           const char* row_ptr = data[0] + outer_stride * i;
-          for (const auto j : c10::irange(size0)) {
+          for (int64_t j = 0; j < size0; ++j) {
             const auto ptr = reinterpret_cast<const scalar_t*>(row_ptr + inner_stride * j);
             auto dx = (static_cast<double>(*ptr) - local_mean);
             local_sum += dx * dx;
@@ -1919,8 +1919,7 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
       }
       char* self_data = data[0];
       char* other_data = data[1];
-      for (const auto i : c10::irange(dim_size)) {
-        (void)i; //Suppress unused variable warning
+      for (int64_t i = 0; i < dim_size; ++i) {
         if (*((scalar_t*)self_data) != *((scalar_t*)other_data)) {
           result = false;
           return;

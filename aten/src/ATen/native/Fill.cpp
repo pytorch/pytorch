@@ -6,7 +6,6 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/Utils.h>
 #include <c10/util/accumulate.h>
-#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -64,7 +63,7 @@ Tensor& fill_diagonal_(Tensor& self, const Scalar& fill_value, bool wrap) {
 
   if (nDims > 2) {
     int64_t dim1 = height;
-    for (const auto i : c10::irange(1, nDims)) {
+    for (int64_t i = 1; i < nDims; i++) {
       if (self.size(i) != dim1) {
         AT_ERROR("all dimensions of input must be of equal length");
       }
@@ -77,7 +76,7 @@ Tensor& fill_diagonal_(Tensor& self, const Scalar& fill_value, bool wrap) {
   int64_t size = std::min(height, width);
 
   int64_t stride = 0;
-  for (const auto i : c10::irange(nDims)) {
+  for (int64_t i = 0; i < nDims; i++) {
     stride += self.stride(i);
   }
   strides.push_back(stride);

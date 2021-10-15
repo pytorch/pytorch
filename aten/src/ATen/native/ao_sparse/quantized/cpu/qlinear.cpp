@@ -5,7 +5,6 @@
 
 #include <ATen/native/ao_sparse/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/ao_sparse/quantized/cpu/packed_params.h>
-#include <c10/util/irange.h>
 
 namespace ao {
 namespace sparse {
@@ -65,7 +64,7 @@ at::Tensor PackedLinearWeight::apply_impl(
     // Process the per channel quantization.
     output_multiplier_float.resize(out_channels, 0.0);
     act_times_w_scale.resize(out_channels, 1.0f);
-    for (const auto i : c10::irange(out_channels)) {
+    for (int i = 0; i < out_channels; ++i) {
       act_times_w_scale[i] = (input_scale_float * w_scale[i]);
       output_multiplier_float[i] =
           act_times_w_scale[i] / static_cast<float>(output_scale);
@@ -127,7 +126,7 @@ at::Tensor PackedLinearWeight::apply_impl(
 
   int num_tasks = at::get_num_threads();
   at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
-    for (const auto task_id : c10::irange(begin, end)) {
+    for (int task_id = begin; task_id < end; ++task_id) {
       fbgemm::trRequantizationParams_t reqParams = {
           input_zero_point_int32,
           w_zp.data(),
