@@ -536,7 +536,7 @@ class LengthsRangeFillOp : public Operator<Context> {
     auto* output_data = output->template mutable_data<int32_t>();
 
     int32_t offset = 0;
-    for (int i = 0; i < input.numel(); ++i) {
+    for (const auto i : c10::irange(input.numel())) {
       auto len = input_data[i];
       auto start = output_data + offset;
       std::iota(

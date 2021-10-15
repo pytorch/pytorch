@@ -1,6 +1,7 @@
 #ifndef NOM_TRANFORMATIONS_SUBGRAPH_MATCHER_H
 #define NOM_TRANFORMATIONS_SUBGRAPH_MATCHER_H
 
+#include "c10/util/irange.h"
 #include "caffe2/core/common.h"
 #include "nomnigraph/Graph/Graph.h"
 
@@ -240,8 +241,7 @@ class MatchGraph : public Graph<MatchPredicate<GraphType>> {
     // criteria in the given order.
 
     int currentEdgeIdx = 0;
-    for (int criteriaIdx = 0; criteriaIdx < numChildrenCriteria;
-         criteriaIdx++) {
+    for (const auto criteriaIdx : c10::irange(numChildrenCriteria)) {
       auto childrenCriteriaRef = invertGraphTraversal
           ? criteriaEdges[criteriaIdx]->tail()
           : criteriaEdges[criteriaIdx]->head();

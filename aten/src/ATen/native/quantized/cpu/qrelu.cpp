@@ -6,6 +6,7 @@
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
+#include <c10/util/irange.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <torch/library.h>
 
@@ -31,7 +32,7 @@ Tensor qnnpack_relu(Tensor input) {
   initQNNPACK();
 
   size_t num_elems = 1;
-  for (int i = 1; i < input_contig.ndimension(); ++i) {
+  for (const auto i : c10::irange(1, input_contig.ndimension())) {
     num_elems *= input_contig.size(i);
   }
 
