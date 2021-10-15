@@ -1151,10 +1151,11 @@ class TestFusedObsFakeQuantModule(TestCase):
             quant_model(indices)
             inference_gm = torch.quantization.convert(quant_model.eval().cpu())
 
-            # Ensure that EmbeddingBags are now quantized
+            # Ensure that EmbeddingBags are now quantized with the appropriate bitwidth.
             self.assertEqual(type(inference_gm.emb1), torch.nn.quantized.EmbeddingBag)
             self.assertEqual(type(inference_gm.emb2), torch.nn.quantized.EmbeddingBag)
-
+            self.assertEqual(inference_gm.emb1.dtype, qconfig.weight().dtype)
+            self.assertEqual(inference_gm.emb2.dtype, qconfig.weight().dtype)
 
     def test_default_fused_qat_config(self):
         class Model(nn.Module):
