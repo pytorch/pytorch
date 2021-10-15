@@ -3978,13 +3978,29 @@ def sample_inputs_linalg_slogdet(op_info, device, dtype, requires_grad=False):
     return samples
 
 
+def sample_inputs_linalg_pinv(op_info, device, dtype, requires_grad=False, **kwargs):
+    """
+    This function generates input for torch.linalg.pinv with hermitian=True keyword argument.
+    """
+    out = sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad, **kwargs)
+    real_dtype = out[0].input.real.dtype if dtype.is_complex else dtype
+    for o in out:
+        # requires_grad path for rcond tensor is not implemented
+        for rcond in (None, 1.0, torch.tensor(1.0, dtype=real_dtype, device=device)):
+            o.kwargs = {"rcond": rcond}
+    return out
+
+
 def sample_inputs_linalg_pinv_hermitian(op_info, device, dtype, requires_grad=False, **kwargs):
     """
     This function generates input for torch.linalg.pinv with hermitian=True keyword argument.
     """
     out = sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad, **kwargs)
+    real_dtype = out[0].input.real.dtype if dtype.is_complex else dtype
     for o in out:
-        o.kwargs = {"hermitian": True}
+        # requires_grad path for rcond tensor is not implemented
+        for rcond in (None, 1.0, torch.tensor(1.0, dtype=real_dtype, device=device)):
+            o.kwargs = {"rcond": rcond, "hermitian": True}
     return out
 
 def sample_inputs_linalg_solve(op_info, device, dtype, requires_grad=False, vector_rhs_allowed=True, **kwargs):
@@ -9192,8 +9208,12 @@ op_db: List[OpInfo] = [
            check_batched_grad=False,
            check_batched_gradgrad=False,
            supports_forward_ad=True,
-           sample_inputs_func=sample_inputs_linalg_invertible,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack]),
+           sample_inputs_func=sample_inputs_linalg_pinv,
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
+           skips=(
+               # errors with "leaked XXXX bytes CUDA memory on device 0"
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', device_type='cuda'),
+           )),
     OpInfo('linalg.pinv',
            aten_name='linalg_pinv',
            variant_test_name='singular',
@@ -9226,8 +9246,10 @@ op_db: List[OpInfo] = [
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
                # Gradcheck hangs for this function
-               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),),
-           ),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),
+               # errors with "leaked XXXX bytes CUDA memory on device 0"
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', device_type='cuda'),
+           )),
     OpInfo('eig',
            op=torch.eig,
            dtypes=floating_and_complex_types(),
