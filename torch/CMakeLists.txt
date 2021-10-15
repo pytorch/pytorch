@@ -244,6 +244,9 @@ endif()
 #          affect both torch_python and DEPLOY interpreter.
 if(USE_DEPLOY)
   add_library(torch_python_obj OBJECT ${TORCH_PYTHON_SRCS})
+  if(NOT MSVC)
+    target_compile_options(torch_python_obj PRIVATE -Wno-unused-variable)
+  endif()
   if(USE_DISTRIBUTED)
     # Set c10d-related compile definitions. For a "normal" build of
     # libtorch_python, these are set on libtorch as PUBLIC so they are
