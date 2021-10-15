@@ -244,7 +244,13 @@ class TORCH_API TensorBase {
     // Setting channels_last_strides_exact_match to true forces function to
     // check 0,1 - sized dimension strides.
     if (!is_mkldnn() && !is_sparse()) {
-      if (impl_->is_strides_like_channels_last()) {
+      if (impl_->is_strides_like_channels_last_1d()) {
+        if (!channels_last_strides_exact_match ||
+            get_channels_last_strides_1d(sizes()) == strides()) {
+          return at::MemoryFormat::ChannelsLast1d;
+        }
+      }
+      else if (impl_->is_strides_like_channels_last()) {
         if (!channels_last_strides_exact_match ||
             get_channels_last_strides_2d(sizes()) == strides()) {
           return at::MemoryFormat::ChannelsLast;

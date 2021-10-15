@@ -28,6 +28,7 @@ namespace c10 {
 enum class MemoryFormat : int8_t {
   Contiguous,
   Preserve,
+  ChannelsLast1d,
   ChannelsLast,
   ChannelsLast3d
 };
@@ -49,6 +50,8 @@ inline std::ostream& operator<<(
       return stream << "Preserve";
     case MemoryFormat::Contiguous:
       return stream << "Contiguous";
+    case MemoryFormat::ChannelsLast1d:
+      return stream << "ChannelsLast1d";
     case MemoryFormat::ChannelsLast:
       return stream << "ChannelsLast";
     case MemoryFormat::ChannelsLast3d:
@@ -60,6 +63,24 @@ inline std::ostream& operator<<(
 
 // Note: Hardcoded the channel last stride indices here to get better
 // performance
+inline std::vector<int64_t> get_channels_last_strides_1d(IntArrayRef sizes) {
+  std::vector<int64_t> strides(sizes.size());
+  switch (sizes.size()) {
+    case 3:
+      strides[1] = 1;
+      strides[2] = sizes[1];
+      strides[0] = strides[2] * sizes[2];
+      return strides;
+    case 2:
+      strides[0] = 1;
+      strides[1] = sizes[0];
+      return strides;
+    default:
+      TORCH_INTERNAL_ASSERT(
+          false, "ChannelsLast1d doesn't support size ", sizes.size());
+  }
+}
+
 inline std::vector<int64_t> get_channels_last_strides_2d(IntArrayRef sizes) {
   std::vector<int64_t> strides(sizes.size());
   switch (sizes.size()) {
@@ -113,6 +134,38 @@ inline std::vector<int64_t> get_channels_last_strides_3d(IntArrayRef sizes) {
 // input
 // 3. All helper functions have similar comments, only 1st helper function is
 // commented here.
+inline bool is_channels_last_strides_1d_s3(const IntArrayRef sizes, const IntArrayRef strides) {
+  int64_t min = 0;
+  // special case for trivial C dimension. default to NCL
+  if (strides[1]==0) {
+    return false;
+  }
+  // loop strides indices
+  for (auto& d : {1, 2, 0}) {
+    if (sizes[d] == 0) {
+      return false;
+    }
+    if (strides[d] < min) {
+      return false;
+    }
+    // Fallback to NCL as default layout for ambiguous cases
+    // This is the flaw of implicit memory_format from strides.
+    // N11 tensor with identical strides for size 1 dimension;
+    // Two cases could lead us here:
+    // a. N11 contiguous Tensor ([N,1,1]@[1,1,1])
+    // b. N1L contiguous Tensor sliced on the L-dimension. ([N,1,1]@[L,L,L])
+    if (d==0 && min==strides[1]) {
+      return false;
+    }
+
+    min = strides[d];
+    if (sizes[d] > 1) {
+      min *= sizes[d];
+    }
+  }
+  return true;
+}
+
 inline bool is_channels_last_strides_2d_s4(
     const IntArrayRef sizes,
     const IntArrayRef strides) {
@@ -228,6 +281,20 @@ inline bool is_channels_last_strides_3d_s5(
 // This is a general problem for all the is_channels_last_strides_xd
 // implementation. Please check the helper functions
 // (is_channels_last_strides_*d_s*) for more details.
+
+inline bool is_channels_last_strides_1d(
+    const IntArrayRef sizes,
+    const IntArrayRef strides) {
+  switch (sizes.size()) {
+    case 3:
+      return is_channels_last_strides_1d_s3(sizes, strides);
+    case 2:
+      // TODO dim == 2 case will be enabled once it is fully tested
+      return false;
+    default:
+      return false;
+  }
+}
 
 inline bool is_channels_last_strides_2d(
     const IntArrayRef sizes,

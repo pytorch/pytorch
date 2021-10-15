@@ -80,6 +80,9 @@ Tensor TensorMaker::make_tensor() {
    static std::int64_t zeros[5] = {0, 0, 0, 0, 0};
    if (opts_.has_memory_format()) {
      MemoryFormat format = *opts_.memory_format_opt();
+     if (format == MemoryFormat::ChannelsLast1d) {
+       return IntArrayRef(zeros, 3);
+     }
      if (format == MemoryFormat::ChannelsLast) {
        return IntArrayRef(zeros, 4);
      }

@@ -1821,8 +1821,10 @@ class TestSparse(TestCase):
         test_shape([2, 3, 4], [0, 4, 5, 6], [9, 12])
 
         sparse_tensor, _, _ = self._gen_sparse(len([2, 3]), 9, [2, 3] + [5, 6], dtype, device, coalesced)
-        data = (sparse_tensor, sparse_tensor, sparse_tensor, sparse_tensor.unsqueeze(0))
-        mem_formats = [torch.channels_last, torch.contiguous_format, torch.preserve_format, torch.channels_last_3d]
+        data = (sparse_tensor, sparse_tensor, sparse_tensor,
+                sparse_tensor.to_dense().reshape([2 * 3, 5, 6]).to_sparse(), sparse_tensor.unsqueeze(0))
+        mem_formats = [torch.channels_last, torch.contiguous_format, torch.preserve_format,
+                       torch.channels_last_1d, torch.channels_last_3d]
         for x, mem_format in zip(data, mem_formats):
 
             with self.assertRaisesRegex(RuntimeError, "memory format option is only supported by strided tensors"):
@@ -1858,8 +1860,10 @@ class TestSparse(TestCase):
         self.assertEqual(result.dense_dim(), sparse_tensor.dense_dim())
 
         sparse_tensor, _, _ = self._gen_sparse(len([2, 3]), 9, [2, 3] + [5, 6], dtype, device, coalesced)
-        data = (sparse_tensor, sparse_tensor, sparse_tensor, sparse_tensor.unsqueeze(0))
-        mem_formats = [torch.channels_last, torch.contiguous_format, torch.preserve_format, torch.channels_last_3d]
+        data = (sparse_tensor, sparse_tensor, sparse_tensor,
+                sparse_tensor.to_dense().reshape([2 * 3, 5, 6]).to_sparse(), sparse_tensor.unsqueeze(0))
+        mem_formats = [torch.channels_last, torch.contiguous_format, torch.preserve_format,
+                       torch.channels_last_1d, torch.channels_last_3d]
         for x, mem_format in zip(data, mem_formats):
 
             with self.assertRaisesRegex(RuntimeError, "memory format option is only supported by strided tensors"):

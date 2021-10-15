@@ -266,6 +266,32 @@ bool TensorImpl::compute_contiguous() const {
   return is_contiguous;
 }
 
+bool TensorImpl::compute_channels_last_contiguous_1d() const {
+  // Please don't combine these code, constant array is used here to let
+  // compiler fully unroll the loop to get better performance
+  switch (sizes_and_strides_.size()) {
+    case 3: {
+        int64_t expected = 1;
+        for (auto& d : {1, 2, 0}) {
+          const auto size_d = sizes_and_strides_.size_at_unchecked(d);
+          if (size_d != 1) {
+            if (sizes_and_strides_.stride_at_unchecked(d) != expected) {
+              return false;
+            }
+            expected *= size_d;
+          }
+        }
+        return true;
+    }
+    // NOLINTNEXTLINE(bugprone-branch-clone)
+    case 2:
+      // TODO dim == 2 case will be enabled once it is fully tested
+      return false;
+    default:
+      return false;
+  }
+}
+
 bool TensorImpl::compute_channels_last_contiguous_2d() const {
   // Please don't combine these code, constant array is used here to let
   // compiler fully unroll the loop to get better performance
@@ -316,6 +342,11 @@ bool TensorImpl::compute_channels_last_contiguous_3d() const {
     default:
       return false;
   }
+}
+
+bool TensorImpl::compute_strides_like_channels_last_1d() const {
+  return is_channels_last_strides_1d(
+      TensorImpl::sizes(), TensorImpl::strides());
 }
 
 bool TensorImpl::compute_strides_like_channels_last_2d() const {
@@ -566,10 +597,13 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
   dest_impl->key_set_ = src_impl->key_set_.remove(DispatchKey::Python);
   dest_impl->is_contiguous_ = src_impl->is_contiguous_;
   dest_impl->has_contiguity_ = src_impl->has_contiguity_;
+  dest_impl->is_channels_last_1d_contiguous_ =
+      src_impl->is_channels_last_1d_contiguous_;
   dest_impl->is_channels_last_contiguous_ =
       src_impl->is_channels_last_contiguous_;
   dest_impl->is_channels_last_3d_contiguous_ =
       src_impl->is_channels_last_3d_contiguous_;
+  dest_impl->is_channels_last_1d_ = src_impl->is_channels_last_1d_;
   dest_impl->is_channels_last_ = src_impl->is_channels_last_;
   dest_impl->is_channels_last_3d_ = src_impl->is_channels_last_3d_;
   dest_impl->is_non_overlapping_and_dense_ =

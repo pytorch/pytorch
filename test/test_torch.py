@@ -2484,6 +2484,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 self.assertTrue(y.is_contiguous(memory_format=memory_format))
                 self.assertEqual(y, x)
 
+            test_helper(torch.randn(4, 3, 8), torch.channels_last_1d)
             test_helper(torch.randn(4, 3, 8, 8), torch.channels_last)
             test_helper(torch.randn(4, 3, 8, 8, 8), torch.channels_last_3d)
 
@@ -2493,6 +2494,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 alias.fill_(7)
                 self.assertEqual(x, alias)
 
+            test_helper(torch.randn(4, 8, 3).permute(0, 2, 1), torch.channels_last_1d)
             test_helper(torch.randn(4, 8, 8, 3).permute(0, 3, 1, 2), torch.channels_last)
             test_helper(torch.randn(4, 8, 8, 8, 3).permute(0, 4, 1, 2, 3), torch.channels_last_3d)
 
@@ -2503,6 +2505,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 x = torch.empty(dim2, memory_format=memory_format)
                 self.assertTrue(x.is_contiguous(memory_format=memory_format))
 
+            test_helper((3), (3, 3, 3), torch.channels_last_1d)
             test_helper((3, 3), (3, 3, 3, 3), torch.channels_last)
             test_helper((3, 3, 3), (3, 3, 3, 3, 3), torch.channels_last_3d)
 
@@ -6925,6 +6928,11 @@ else:
         _test_serialization(BytesIOContext)
 
     def test_memory_format_preserved_after_permute(self, device):
+        x = torch.randn(4, 3, 8, device=device)
+        nwc = x.contiguous(memory_format=torch.channels_last_1d)
+        y = nwc.permute(0, 2, 1).permute(0, 2, 1)
+        self.assertTrue(y.is_contiguous(memory_format=torch.channels_last_1d))
+
         x = torch.randn(4, 3, 8, 8, device=device)
         nhwc = x.contiguous(memory_format=torch.channels_last)
         y = nhwc.permute(0, 1, 3, 2).permute(0, 1, 3, 2)
@@ -7005,6 +7013,7 @@ else:
             with self.assertRaises(RuntimeError):
                 z = torch.empty_like(sparse, memory_format=torch.preserve_format)
 
+        test_helper(torch.randn(4, 3, 8, device=device), torch.channels_last_1d)
         test_helper(torch.randn(4, 3, 8, 8, device=device), torch.channels_last)
         test_helper(torch.randn(4, 3, 8, 8, 8, device=device), torch.channels_last_3d)
 
@@ -7014,6 +7023,8 @@ else:
         self.assertEqual(x.size(), x_rep.size())
         self.assertEqual(x.stride(), x_rep.stride())
         self.assertEqual(x.is_contiguous(), x_rep.is_contiguous())
+        self.assertEqual(
+            x.is_contiguous(memory_format=torch.channels_last_1d), x_rep.is_contiguous(memory_format=torch.channels_last_1d))
         self.assertEqual(x.is_contiguous(memory_format=torch.channels_last), x_rep.is_contiguous(memory_format=torch.channels_last))
         self.assertEqual(
             x.is_contiguous(memory_format=torch.channels_last_3d), x_rep.is_contiguous(memory_format=torch.channels_last_3d))
@@ -7171,6 +7182,11 @@ else:
                     result.is_contiguous(memory_format=torch.contiguous_format),
                     "result of the '{}' is not in '{}' format".format(inspect.getsource(fn).strip(), torch.contiguous_format))
 
+        _test_helper(
+            torch.randn((4, 3, 8), device=device).contiguous(memory_format=torch.channels_last_1d),
+            abs(torch.randn((4, 3, 8), device=device)) + 1,
+            torch.randn((1, 3, 1), device=device).contiguous(memory_format=torch.channels_last_1d),
+            torch.channels_last_1d)
         _test_helper(
             torch.randn((4, 3, 8, 8), device=device).contiguous(memory_format=torch.channels_last),
             abs(torch.randn((4, 3, 8, 8), device=device)) + 1,
@@ -7505,12 +7521,16 @@ else:
     def _test_memory_format_transformations(self, device, input_generator_fn, transformation_fn,
                                             memory_format, compare_data=True, default_is_preserve=False):
 
-        assert(memory_format == torch.channels_last or memory_format == torch.channels_last_3d)
+        assert(memory_format == torch.channels_last_1d or 
+               memory_format == torch.channels_last or
+               memory_format == torch.channels_last_3d)
 
         # xc is a channels last tensor
         xc = input_generator_fn(device)
         # xc is not memory dense, but looks like channels last
-        if memory_format == torch.channels_last:
+        if memory_format == torch.channels_last_1d:
+            xc = xc[..., ::2]
+        elif memory_format == torch.channels_last:
             xc = xc[..., ::2, ::2]
         else:
             xc = xc[..., ::2, ::2, ::2]
@@ -7559,6 +7579,7 @@ else:
             return tensor.to(dtype=torch.float64, **kwargs)
 
         formats_shapes = (
+            (torch.channels_last_1d, (4, 3, 8)),
             (torch.channels_last, (4, 3, 8, 8)),
             (torch.channels_last_3d, (4, 3, 8, 8, 8)))
 
@@ -7576,6 +7597,7 @@ else:
             return tensor.to(torch.float64, **kwargs)
 
         formats_shapes = (
+            (torch.channels_last_1d, (4, 3, 8)),
             (torch.channels_last, (4, 3, 8, 8)),
             (torch.channels_last_3d, (4, 3, 8, 8, 8)))
 
@@ -7593,6 +7615,7 @@ else:
             return tensor.clone(**kwargs)
 
         formats_shapes = (
+            (torch.channels_last_1d, (4, 3, 8)),
             (torch.channels_last, (4, 3, 8, 8)),
             (torch.channels_last_3d, (4, 3, 8, 8, 8)))
 
@@ -7617,6 +7640,7 @@ else:
             lambda t, **kwargs: torch.empty_like(t, **kwargs)]
 
         formats_shapes = (
+            (torch.channels_last_1d, (4, 3, 8)),
             (torch.channels_last, (4, 3, 8, 8)),
             (torch.channels_last_3d, (4, 3, 8, 8, 8)))
 
@@ -7644,6 +7668,7 @@ else:
             shortcuts += ['bfloat16']
 
         formats_shapes = (
+            (torch.channels_last_1d, (4, 3, 8)),
             (torch.channels_last, (4, 3, 8, 8)),
             (torch.channels_last_3d, (4, 3, 8, 8, 8)))
 
@@ -7671,6 +7696,7 @@ else:
             return tensor.cuda(**kwargs)
 
         formats_shapes = (
+            (torch.channels_last_1d, (4, 3, 8)),
             (torch.channels_last, (4, 3, 8, 8)),
             (torch.channels_last_3d, (4, 3, 8, 8, 8)))
 
