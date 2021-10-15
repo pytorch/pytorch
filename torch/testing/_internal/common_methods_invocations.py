@@ -6078,9 +6078,10 @@ def reference_sigmoid(x):
 
 
 def reference_logsigmoid(x):
-    max_ = np.maximum(x.dtype.type(0), -x)
-    z = np.exp(-max_) + np.exp(-x - max_)
-    return -(max_ + np.log(z))
+    return np.where(
+        x < 0,
+        x - np.log1p(np.exp(x)),
+        -np.log1p(np.exp(-x)))
 
 
 def reference_lgamma(x):
@@ -8352,18 +8353,6 @@ op_db: List[OpInfo] = [
         assert_autodiffed=False,
         supports_gradgrad=True,
         supports_out=False,
-        # autodiff_nonfusible_nodes=["aten::log_sigmoid"],
-        decorators=[
-            DecorateInfo(
-                precisionOverride({torch.float16: 1e-2}),
-                'TestUnaryUfuncs', 'test_reference_numerics_normal'),
-            DecorateInfo(
-                precisionOverride({torch.float16: 1e-2}),
-                'TestUnaryUfuncs', 'test_reference_numerics_hard'),
-            DecorateInfo(
-                precisionOverride({torch.float16: 1e-2}),
-                'TestUnaryUfuncs', 'test_reference_numerics_extremal'),
-        ],
     ),
     OpInfo('nextafter',
            dtypes=floating_types_and(torch.bfloat16),

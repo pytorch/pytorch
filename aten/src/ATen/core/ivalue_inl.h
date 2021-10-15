@@ -579,7 +579,7 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
   static c10::intrusive_ptr<Tuple> createNamed(
       std::initializer_list<IValue> elements_,
       std::shared_ptr<TupleType> type_) {
-    return create(std::vector<IValue>(elements_));
+    return createNamed(std::vector<IValue>(elements_), std::move(type_));
   }
 
   // MSVC apparently can't disambiguate the other two overloads of
