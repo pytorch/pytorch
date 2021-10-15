@@ -179,7 +179,11 @@ template <typename scalar_t, typename accscalar_t, typename index_t>
 __global__ void renorm_kernel(
     scalar_t* weights, index_t* indices, accscalar_t max_norm,
     accscalar_t norm_type, int64_t dim,
-    int64_t weights_stride0, int64_t weights_stride1) {
+    int64_t weights_stride0, int64_t weights_stride1,
+    int64_t *num_unique_indices) {
+  if (blockIdx.x >= *num_unique_indices) {
+    return;
+  }
 
   // Some casting hacks since dynamic shared memory and templates don't work together:
   extern __shared__ unsigned char smem[];
@@ -315,7 +319,8 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
     static_assert(num_threads % C10_WARP_SIZE == 0 &&
                   num_threads <= cuda_utils::kCUDABlockReduceMaxThreads,
                   "BlockReduceSum requires all warps be active");
-    dim3 grid = num_unique_indices.item<int64_t>();
+    int64_t *num_unique_indices_ptr = num_unique_indices.data_ptr<int64_t>();
+    dim3 grid = unique_indices.numel();
     dim3 block = num_threads;
     int dim = self.stride(0);
 
@@ -326,7 +331,8 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
         unique_indices.data_ptr<index_t>(),
         static_cast<accscalar_t>(max_norm),
         static_cast<accscalar_t>(norm_type),
-        dim, self.stride(0), self.stride(1));
+        dim, self.stride(0), self.stride(1),
+        num_unique_indices_ptr);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
   });
