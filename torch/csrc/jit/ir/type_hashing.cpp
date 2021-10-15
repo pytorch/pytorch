@@ -10,25 +10,25 @@ namespace torch {
 namespace jit {
 
 namespace {
-size_t hashType(const c10::ConstTypePtr& type) {
-  if (auto named_type = type->cast<ClassType>()) {
+size_t hashType(const Type& type) {
+  if (auto named_type = type.castRaw<ClassType>()) {
     return get_hash(named_type->name().value());
   }
-  auto hashes = fmap(type->containedTypes(), [](const TypePtr& elem) {
-    HashType hash;
-    return hash(elem);
-  });
-  auto typekind_hash = type->kind();
-  return get_hash(typekind_hash, hashes);
+  size_t hash = 0;
+  for (const auto& containedType : type.containedTypes()) {
+    hash = at::hash_combine(hash, hashType(*containedType));
+  }
+  at::hash_combine(hash, get_hash(type.kind()));
+  return hash;
 }
 } // namespace
 
 size_t HashType::operator()(const TypePtr& type) const {
-  return hashType(type);
+  return hashType(*type);
 }
 
 size_t HashType::operator()(const c10::ConstTypePtr& type) const {
-  return hashType(type);
+  return hashType(*type);
 }
 
 bool EqualType::operator()(const TypePtr& a, const TypePtr& b) const {

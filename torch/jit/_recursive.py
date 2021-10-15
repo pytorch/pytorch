@@ -131,7 +131,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         concrete_type_builder.set_module_list()
 
     class_annotations = getattr(nn_module, '__annotations__', {})
-    if isinstance(nn_module, (torch.ao.quantization.QuantWrapper)):  # type: ignore[attr-defined]
+    if isinstance(nn_module, (torch.ao.quantization.QuantWrapper)):
         class_annotations = {}
 
     # Get user-annotated ignored attributes.
