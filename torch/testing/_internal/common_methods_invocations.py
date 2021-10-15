@@ -865,7 +865,7 @@ def sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
 
 def _generate_masked_reduction_mask(input_shape, device, **kwargs):
     yield None
-    yield make_tensor(input_shape, device, torch.bool, requires_grad=True)
+    yield make_tensor(input_shape, device, torch.bool, requires_grad=False)
     if len(input_shape) > 3:
         # broadcast last mask dimension:
         yield make_tensor(input_shape[:-1] + (1,), device, torch.bool, requires_grad=False)
@@ -6307,6 +6307,22 @@ def gradcheck_wrapper_triangular_input(op, *args, upper=False, idx=0, **kwargs):
     return op(*modified_args, upper)
 
 
+def gradcheck_wrapper_masked_operation(op, input, *args, **kwargs):
+    """Gradcheck wrapper for masked operations.
+
+    When mask is specified, replaces masked-out elements with zeros.
+
+    Use for operations that produce non-finite masked-out elements,
+    for instance, for minimum and maximum reductions.
+    """
+    output = op(input, *args, **kwargs)
+    mask = kwargs.get('mask')
+    if mask is not None:
+        output_mask = torch._masked._output_mask(op, input, *args, **kwargs)
+        output = torch.where(output_mask, output, output.new_zeros([]))
+    return output
+
+
 def reference_reduction_numpy(f, supports_keepdims=True):
     """Wraps a NumPy reduction operator.
 
@@ -8454,7 +8470,6 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=True,
            dtypesIfCPU=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-           supports_scripting=False,  # TODO: fix aliasing test
            sample_inputs_func=sample_inputs_max_pool2d),
     OpInfo('nn.functional.linear',
            aten_name='linear',
@@ -10886,7 +10901,8 @@ op_db: List[OpInfo] = [
             # RuntimeError: Unknown builtin op: aten::iinfo
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
         ),
-        sample_inputs_func=sample_inputs_masked_reduction
+        sample_inputs_func=sample_inputs_masked_reduction,
+        gradcheck_wrapper=gradcheck_wrapper_masked_operation
     ),
     ReductionOpInfo(
         '_masked.amin',
@@ -10901,7 +10917,8 @@ op_db: List[OpInfo] = [
             # RuntimeError: Unknown builtin op: aten::iinfo
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
         ),
-        sample_inputs_func=sample_inputs_masked_reduction
+        sample_inputs_func=sample_inputs_masked_reduction,
+        gradcheck_wrapper=gradcheck_wrapper_masked_operation
     ),
     OpInfo(
         "nn.functional.nll_loss",
