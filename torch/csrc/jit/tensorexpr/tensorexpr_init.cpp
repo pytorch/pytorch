@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include <torch/csrc/jit/tensorexpr/lowerings.h>
 #include <torch/csrc/jit/tensorexpr/reduction.h>
 
 namespace torch {
@@ -48,7 +49,7 @@ ArgValue convertPyToArgValue(py::handle inp) {
 }
 
 Dtype parsePythonDtype(py::handle obj) {
-  if (py::isinstance(obj, py::module_::import("torch").attr("dtype"))) {
+  if (THPDtype_Check(obj.ptr())) {
     return Dtype(reinterpret_cast<THPDtype*>(obj.ptr())->scalar_type);
   } else {
     throw std::runtime_error("expected a torch.dtype instance");
@@ -96,6 +97,11 @@ void initTensorExprBindings(PyObject* module) {
           .def(py::self ^ py::self)
           .def(py::self << py::self)
           .def(py::self >> py::self)
+          .def(
+              "__pow__",
+              [](const ExprHandle& self, const ExprHandle& other) {
+                return pow(self, other);
+              })
           .def("sin", [](const ExprHandle& self) { return sin(self); })
           .def("cos", [](const ExprHandle& self) { return cos(self); })
           .def("tan", [](const ExprHandle& self) { return tan(self); })
@@ -113,7 +119,14 @@ void initTensorExprBindings(PyObject* module) {
               [](const ExprHandle& self) { return tensorexpr::abs(self); })
           .def("log", [](const ExprHandle& self) { return log(self); })
           .def(
+              "fast_tanh",
+              [](const ExprHandle& self) { return fast_tanh(self); })
+          .def(
+              "fast_sigmoid",
+              [](const ExprHandle& self) { return fast_sigmoid(self); })
+          .def(
               "fast_log", [](const ExprHandle& self) { return fast_log(self); })
+          .def("log_vml", [](const ExprHandle& self) { return log_vml(self); })
           .def("log2", [](const ExprHandle& self) { return log2(self); })
           .def("log10", [](const ExprHandle& self) { return log10(self); })
           .def("log1p", [](const ExprHandle& self) { return log1p(self); })
@@ -209,9 +222,13 @@ void initTensorExprBindings(PyObject* module) {
       .def(
           "store",
           [](BufHandle& self,
-             const std::vector<ExprHandle>& args,
-             const ExprHandle& val) { return Store::make(self, args, val); });
-
+             const std::vector<ExprHandle>& i,
+             const ExprHandle& v) { return Store::make(self, i, v); })
+      .def(
+          "store",
+          [](BufHandle& self, const ExprHandle& i, const ExprHandle& v) {
+            return Store::make(self, {i}, v);
+          });
   py::class_<Tensor>(te, "Tensor")
       .def(
           py::init([](BufHandle& b, StmtPtr s) { return Tensor(b.node(), s); }))
@@ -657,8 +674,14 @@ void initTensorExprBindings(PyObject* module) {
         for (auto inp : inputs) {
           argInputs.push_back(convertPyToArgValue(inp));
         }
-        return computeOperandValue(
-            op, argInputs, outputShape, outputType.scalar_type());
+        if (NNCLoweringFunction lowering =
+                getStandardLoweringFor(op.toQualString())) {
+          return lowering(
+              argInputs, outputShape, outputType.scalar_type(), at::kCPU);
+        }
+        std::string msg = std::string("Unhandled node kind (in te.lower): ") +
+            op.toQualString();
+        throw malformed_input(msg);
       });
 
   py::class_<ArgValue>(te, "ArgValue")
