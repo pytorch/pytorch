@@ -157,10 +157,12 @@ class FSDPTest(MultiProcessTestCase):
         return "{}{file_name}".format(FILE_SCHEMA, file_name=self.file_name)
 
     @classmethod
-    def _run(cls, rank, test_name, file_name, pipe):
+    def _run(cls, rank, test_name, file_name, pipe, shared_data):
         self = cls(test_name)
         self.rank = rank
         self.file_name = file_name
+        for key, value in shared_data.items():
+            setattr(self, key, value)
 
         print(f"dist init r={self.rank}, world={self.world_size}")
 
