@@ -14,9 +14,9 @@ class TestQuantizedOps(unittest.TestCase):
     def generic_test(self, model, sample_inputs, input_names=None, decimal=3, relaxed_check=False):
         torch.backends.quantized.engine = "qnnpack"
         pt_inputs = tuple(torch.from_numpy(x) for x in sample_inputs)
-        model.qconfig = torch.quantization.get_default_qconfig("qnnpack")
-        q_model = torch.quantization.prepare(model, inplace=False)
-        q_model = torch.quantization.convert(q_model, inplace=False)
+        model.qconfig = torch.ao.quantization.get_default_qconfig("qnnpack")
+        q_model = torch.ao.quantization.prepare(model, inplace=False)
+        q_model = torch.ao.quantization.convert(q_model, inplace=False)
 
         traced_model = torch.jit.trace(q_model, pt_inputs)
         buf = io.BytesIO()
@@ -52,9 +52,9 @@ class TestQuantizedOps(unittest.TestCase):
         class QModule(torch.nn.Module):
             def __init__(self, op):
                 super(QModule, self).__init__()
-                self.quant1 = torch.quantization.QuantStub()
+                self.quant1 = torch.ao.quantization.QuantStub()
                 self.op = op
-                self.dequant = torch.quantization.DeQuantStub()
+                self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x):
                 res = self.op(self.quant1(x))
@@ -68,9 +68,9 @@ class TestQuantizedOps(unittest.TestCase):
         class QAddModule(torch.nn.Module):
             def __init__(self):
                 super(QAddModule, self).__init__()
-                self.quant1 = torch.quantization.QuantStub()
-                self.quant2 = torch.quantization.QuantStub()
-                self.dequant = torch.quantization.DeQuantStub()
+                self.quant1 = torch.ao.quantization.QuantStub()
+                self.quant2 = torch.ao.quantization.QuantStub()
+                self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x, y):
                 res = torch.ops.quantized.add(self.quant1(x), self.quant2(y), 1.0, 0)
@@ -102,19 +102,19 @@ class TestQuantizedOps(unittest.TestCase):
         class LinearModel(torch.nn.Module):
             def __init__(self):
                 super(LinearModel, self).__init__()
-                self.qconfig = torch.quantization.default_qconfig
-                self.fc1 = torch.quantization.QuantWrapper(torch.nn.Linear(5, 10).to(dtype=torch.float))
+                self.qconfig = torch.ao.quantization.default_qconfig
+                self.fc1 = torch.ao.quantization.QuantWrapper(torch.nn.Linear(5, 10).to(dtype=torch.float))
 
             def forward(self, x):
                 x = self.fc1(x)
                 return x
 
         torch.backends.quantized.engine = "qnnpack"
-        qconfig = torch.quantization.default_qconfig
+        qconfig = torch.ao.quantization.default_qconfig
         model = LinearModel()
         model.qconfig = qconfig
-        model = torch.quantization.prepare(model)
-        model = torch.quantization.convert(model)
+        model = torch.ao.quantization.prepare(model)
+        model = torch.ao.quantization.convert(model)
 
         x_numpy = np.random.rand(1, 2, 5).astype(np.float32)
         x = torch.from_numpy(x_numpy).to(dtype=torch.float)
@@ -135,18 +135,18 @@ class TestQuantizedOps(unittest.TestCase):
         class ConvModel(torch.nn.Module):
             def __init__(self):
                 super(ConvModel, self).__init__()
-                self.qconfig = torch.quantization.default_qconfig
-                self.fc1 = torch.quantization.QuantWrapper(torch.nn.Conv2d(3, 5, 2, bias=True).to(dtype=torch.float))
+                self.qconfig = torch.ao.quantization.default_qconfig
+                self.fc1 = torch.ao.quantization.QuantWrapper(torch.nn.Conv2d(3, 5, 2, bias=True).to(dtype=torch.float))
 
             def forward(self, x):
                 x = self.fc1(x)
                 return x
         torch.backends.quantized.engine = "qnnpack"
-        qconfig = torch.quantization.default_qconfig
+        qconfig = torch.ao.quantization.default_qconfig
         model = ConvModel()
         model.qconfig = qconfig
-        model = torch.quantization.prepare(model)
-        model = torch.quantization.convert(model)
+        model = torch.ao.quantization.prepare(model)
+        model = torch.ao.quantization.convert(model)
 
         x_numpy = np.random.rand(1, 3, 6, 6).astype(np.float32)
         x = torch.from_numpy(x_numpy).to(dtype=torch.float)
@@ -168,8 +168,8 @@ class TestQuantizedOps(unittest.TestCase):
         class QUpsampleModule(torch.nn.Module):
             def __init__(self):
                 super(QUpsampleModule, self).__init__()
-                self.quant1 = torch.quantization.QuantStub()
-                self.dequant = torch.quantization.DeQuantStub()
+                self.quant1 = torch.ao.quantization.QuantStub()
+                self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x):
                 res = torch.nn.quantized.functional.interpolate(self.quant1(x), size=[6, 8], mode="nearest")
@@ -182,8 +182,8 @@ class TestQuantizedOps(unittest.TestCase):
         class QAvgPool2dModule(torch.nn.Module):
             def __init__(self):
                 super(QAvgPool2dModule, self).__init__()
-                self.quant1 = torch.quantization.QuantStub()
-                self.dequant = torch.quantization.DeQuantStub()
+                self.quant1 = torch.ao.quantization.QuantStub()
+                self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x):
                 res = torch.nn.functional.avg_pool2d(self.quant1(x), kernel_size=2, stride=1, padding=0)
@@ -196,8 +196,8 @@ class TestQuantizedOps(unittest.TestCase):
         class QReshapeModule(torch.nn.Module):
             def __init__(self):
                 super(QReshapeModule, self).__init__()
-                self.quant1 = torch.quantization.QuantStub()
-                self.dequant = torch.quantization.DeQuantStub()
+                self.quant1 = torch.ao.quantization.QuantStub()
+                self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x):
                 res = self.quant1(x).reshape((1, 2, 1, 12))
@@ -210,8 +210,8 @@ class TestQuantizedOps(unittest.TestCase):
         class QSliceModule(torch.nn.Module):
             def __init__(self):
                 super(QSliceModule, self).__init__()
-                self.quant1 = torch.quantization.QuantStub()
-                self.dequant = torch.quantization.DeQuantStub()
+                self.quant1 = torch.ao.quantization.QuantStub()
+                self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x):
                 qx = self.quant1(x)
@@ -225,8 +225,8 @@ class TestQuantizedOps(unittest.TestCase):
         class QConcatModule(torch.nn.Module):
             def __init__(self):
                 super(QConcatModule, self).__init__()
-                self.quant1 = torch.quantization.QuantStub()
-                self.dequant = torch.quantization.DeQuantStub()
+                self.quant1 = torch.ao.quantization.QuantStub()
+                self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x, y):
                 res = torch.ops.quantized.cat([self.quant1(x), self.quant1(y)], dim=1, scale=1.0, zero_point=0)
@@ -240,8 +240,8 @@ class TestQuantizedOps(unittest.TestCase):
         class QMaxPool2dModule(torch.nn.Module):
             def __init__(self):
                 super(QMaxPool2dModule, self).__init__()
-                self.quant1 = torch.quantization.QuantStub()
-                self.dequant = torch.quantization.DeQuantStub()
+                self.quant1 = torch.ao.quantization.QuantStub()
+                self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x):
                 res = torch.nn.functional.max_pool2d(self.quant1(x), kernel_size=2, stride=1, padding=0)
@@ -257,8 +257,8 @@ class TestQuantizedOps(unittest.TestCase):
         class SimpleModel(torch.nn.Module):
             def __init__(self):
                 super(SimpleModel, self).__init__()
-                self.quant = torch.quantization.QuantStub()
-                self.dequant = torch.quantization.DeQuantStub()
+                self.quant = torch.ao.quantization.QuantStub()
+                self.dequant = torch.ao.quantization.DeQuantStub()
                 self.func_add = nnq.FloatFunctional()
                 self.conv1 = nn.Conv2d(3, 2, 5, bias=None).to(dtype=torch.float)
                 self.act1 = nn.Sigmoid()
@@ -301,8 +301,8 @@ class TestQuantizedOps(unittest.TestCase):
                 head = [nn.Linear(300, 10), nn.ReLU(inplace=False)]
                 self.classifier = nn.Sequential(*head)
                 self.seq = nn.Sequential()
-                self.quant = torch.quantization.QuantStub()
-                self.dequant = torch.quantization.DeQuantStub()
+                self.quant = torch.ao.quantization.QuantStub()
+                self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x):
                 x = self.quant(x)
@@ -316,10 +316,10 @@ class TestQuantizedOps(unittest.TestCase):
                 return x
 
         model = ModelWithClassifierHead().eval()
-        torch.quantization.fuse_modules(model, [["conv1", "relu1"] ,
-                                                ["features.0.0", "features.0.1", "features.0.2"],
-                                                ["features.1.0", "features.1.1", "features.1.2"],
-                                                ["features.2.0", "features.2.1", "features.2.2"]], inplace=True)
+        torch.ao.quantization.fuse_modules(model, [["conv1", "relu1"] ,
+                                           ["features.0.0", "features.0.1", "features.0.2"],
+                                           ["features.1.0", "features.1.1", "features.1.2"],
+                                           ["features.2.0", "features.2.1", "features.2.2"]], inplace=True)
 
 
         x = np.random.rand(1, 3, 10, 10).astype("float32")

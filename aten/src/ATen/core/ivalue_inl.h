@@ -278,13 +278,22 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
     return elements_;
   }
 
-  std::vector<IValue>& elements() & {
-    return elements_;
-  }
-
-  std::vector<IValue>&& elements() && {
+  std::vector<IValue> elements() && {
     return std::move(elements_);
   }
+
+  void setElements(std::vector<IValue>&& elements) {
+    elements_ = std::move(elements);
+  }
+
+  void unsafeSetElement(size_t idx, const IValue& element) {
+    elements_[idx] = element;
+  }
+
+  void unsafeSetElement(size_t idx, IValue&& element) {
+    elements_[idx] = std::move(element);
+  }
+
   std::shared_ptr<TupleType> type() const;
 
   static size_t hash(const Tuple& t) {
@@ -1306,7 +1315,7 @@ template <
             guts::negation<std::is_constructible<IValue, Args>>...>::value,
         std::nullptr_t> = nullptr>
 std::tuple<Args...> generic_to(IValue ivalue, _fake_type<std::tuple<Args...>>) {
-  auto vals = ivalue.toTuple()->elements();
+  const auto& vals = ivalue.toTuple()->elements();
   TORCH_CHECK(vals.size() == sizeof...(Args));
   return detail::generic_to_tuple_impl<std::tuple<Args...>>(vals, Indices{});
 }

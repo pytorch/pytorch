@@ -19,7 +19,6 @@ class CastOp : public Operator<Context> {
       : Operator<Context>(operator_def, ws) {
     const ArgumentHelper helper(operator_def);
     TensorProto_DataType to = cast::GetCastDataType(helper, "to");
-    TensorProto_DataType from = cast::GetCastDataType(helper, "from_type");
 
     SetBody(to);
   }

@@ -309,7 +309,7 @@ IndexCompute getReferenceIndexing(
 
   // I thought this might be necesasry, but turns out it's not. I think it's
   // because of the root ordering above, however leaving it in case we find
-  // out it is necessary in some cases. At the time of commiting, cuda-memcheck
+  // out it is necessary in some cases. At the time of committing, cuda-memcheck
   // passed without this.
   //
   // std::unordered_map<kir::IterDomain*,

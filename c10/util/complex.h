@@ -541,7 +541,7 @@ C10_HOST_DEVICE T abs(const c10::complex<T>& z) {
 #endif
 }
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 #define ROCm_Bug(x)
 #else
 #define ROCm_Bug(x) x

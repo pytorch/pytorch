@@ -3,10 +3,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.quantized as nnq
-from torch.quantization import default_qconfig
-from torch.quantization.observer import MinMaxObserver, PerChannelMinMaxObserver
-from torch.quantization.quantize_fx import prepare_fx, convert_fx
-from torch.quantization.fx._equalize import (
+from torch.ao.quantization import default_qconfig
+from torch.ao.quantization.observer import MinMaxObserver, PerChannelMinMaxObserver
+from torch.ao.quantization.quantize_fx import prepare_fx, convert_fx
+from torch.ao.quantization.fx._equalize import (
     _InputEqualizationObserver,
     _WeightEqualizationObserver,
     calculate_equalization_scale,

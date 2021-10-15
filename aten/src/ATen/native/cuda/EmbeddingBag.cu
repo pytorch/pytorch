@@ -1,13 +1,12 @@
 #include <ATen/ATen.h>
+#include <ATen/ceil_div.h>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/TensorUtils.h>
 #include <ATen/NativeFunctions.h>
 
 #include <ATen/AccumulateType.h>
-
-#include <THC/THCDeviceUtils.cuh>
-#include <THC/THCTensorMathReduce.cuh>
 
 #include <ATen/cuda/cub.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
@@ -52,7 +51,7 @@ __global__ void EmbeddingBag_updateOutputKernel_max(
 
   // the strategy here is that each bag x feature is handled by a single thread
 
-  int64_t chunksPerBag = THCCeilDiv(featureSize, (int64_t)blockDim.x);
+  int64_t chunksPerBag = ceil_div(featureSize, (int64_t)blockDim.x);
   int64_t numChunks = numBags * chunksPerBag;
   int64_t chunkOffset = blockIdx.x * blockDim.y + threadIdx.y;
   int64_t chunkStride = gridDim.x * blockDim.y;
@@ -103,7 +102,7 @@ __global__ void EmbeddingBag_updateOutputKernel_sum_mean(
   // the strategy here is that each bag x feature is handled by a single thread
 
   using accscalar_t = acc_type<scalar_t, true>;
-  int64_t chunksPerBag = THCCeilDiv(featureSize, (int64_t)blockDim.x);
+  int64_t chunksPerBag = ceil_div(featureSize, (int64_t)blockDim.x);
   int64_t numChunks = numBags * chunksPerBag;
   int64_t chunkOffset = blockIdx.x * blockDim.y + threadIdx.y;
   int64_t chunkStride = gridDim.x * blockDim.y;
@@ -201,7 +200,7 @@ __global__ void EmbeddingBag_accGradParametersKernel_max(
 
   using accscalar_t = acc_type<scalar_t, true>;
 
-  int64_t chunksPerBag = THCCeilDiv(stride, (int64_t)blockDim.x);
+  int64_t chunksPerBag = ceil_div(stride, (int64_t)blockDim.x);
   int64_t numChunks = numBags * chunksPerBag;
   int64_t chunkOffset = blockIdx.x * blockDim.y + threadIdx.y;
   int64_t chunkStride = gridDim.x * blockDim.y;
@@ -238,7 +237,7 @@ Tensor embedding_bag_backward_cuda_max(const Tensor &grad,
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
   dim3 block = dim3(64, 4);
 #else
   dim3 block = dim3(32, 8);
@@ -336,7 +335,7 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
     max_indices = at::empty({0}, indices.options());
   }
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
   dim3 block = dim3(64, 4);
 #else
   dim3 block = dim3(32, 8);

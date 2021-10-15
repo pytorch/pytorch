@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/ceil_div.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/DispatchStub.h>
@@ -14,8 +15,8 @@ Tensor int_repr_quantized_cpu(const Tensor& self) {
   Tensor dst;
   // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(self.scalar_type(), "int_repr", [&]() {
-    if (bit_width == 4) {
-      int64_t out_size = std::ceil(self.numel() * 0.5);
+    if (bit_width == 4 || bit_width == 2) {
+      int64_t out_size = at::ceil_div(self.numel() * bit_width, (int64_t)8);
       dst = at::empty(
           {out_size},
           self.options().dtype(UNDERLYING_TYPE),

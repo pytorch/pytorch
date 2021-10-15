@@ -48,21 +48,8 @@ inline ScalarType get_dtype_from_self(
 } // namespace native
 
 namespace meta {
-void resize_reduction(
-    impl::MetaBase& meta,
-    const Tensor& self,
-    IntArrayRef dims,
-    bool keepdim,
-    ScalarType out_dtype) {
-  DimVector dims_(dims);
-  maybe_wrap_dims(dims_, self.dim());
-  auto shape = get_reduction_shape(self, dims_, keepdim);
-  meta.set_output(shape, self.options().dtype(out_dtype));
-  namedinference::propagate_names_for_reduction(
-      meta.maybe_get_output(), self, dims_, keepdim);
-}
 
-ScalarType infer_dtype_from_optional(
+static ScalarType infer_dtype_from_optional(
     const Tensor& self,
     IntArrayRef dim,
     bool keepdim,
@@ -79,11 +66,11 @@ ScalarType infer_dtype_from_optional(
   }
 }
 
-IntArrayRef optional_to_arrayref(const c10::optional<int64_t>& opt) {
+static IntArrayRef optional_to_arrayref(const c10::optional<int64_t>& opt) {
   return opt.has_value() ? opt.value() : IntArrayRef{};
 }
 
-ScalarType get_result_or_bytebool_dtype(const Tensor& self, const Tensor& result) {
+static ScalarType get_result_or_bytebool_dtype(const Tensor& self, const Tensor& result) {
   // Refer [all, any : uint8 compatibility]
   if (result.defined()) {
     return result.scalar_type();
@@ -179,12 +166,6 @@ void meta_func_cum_ops(
 
   if (result.defined()) {
     out_dtype = dtype.value_or(result.scalar_type());
-    // This check is still here because the inplace version of structured kernels
-    // does not do any checks on 'set_output'.
-    TORCH_CHECK(
-        out_dtype == result.scalar_type(),
-        name, "(): provided dtype must match dtype of result tensor. Got: ",
-        toString(out_dtype), ". Expected: ", toString(result.scalar_type()));
   } else {
     auto is_integral = at::isIntegralType(self.scalar_type(), /*includeBool=*/true);
     out_dtype = dtype.value_or(is_integral ? ScalarType::Long : self.scalar_type());

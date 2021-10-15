@@ -33,7 +33,7 @@ std::vector<int64_t> getConstSizes(const BufPtr b) {
   return r;
 }
 
-void getCompiledFunction(
+void compileFunction(
     std::shared_ptr<tensorexpr::TensorExprKernel> kernel,
     Function* func) {
   std::vector<at::Tensor> parameters;
@@ -66,11 +66,10 @@ void getCompiledFunction(
   func->set_output_specs(out_spec);
 }
 
-std::unique_ptr<Function> aotCompile(
+std::pair<std::unique_ptr<Function>, const std::string> aotCompile(
     const std::string& method_name,
     std::shared_ptr<Graph>& g,
-    const std::vector<int64_t>& sizes,
-    std::string* compiled_assembly) {
+    const std::vector<int64_t>& sizes) {
   auto g2 = g->copy();
   GRAPH_DEBUG("Input sizes ", sizes);
 
@@ -90,7 +89,7 @@ std::unique_ptr<Function> aotCompile(
 
   std::shared_ptr<tensorexpr::TensorExprKernel> kernel =
       std::make_shared<tensorexpr::TensorExprKernel>(g);
-  *compiled_assembly = kernel->getCodeText();
+  const std::string compiled_assembly = kernel->getCodeText();
 
   g = g2;
 
@@ -102,8 +101,8 @@ std::unique_ptr<Function> aotCompile(
   input.dtype_ = c10::ScalarType::Float;
   func->set_input_specs({input});
 
-  getCompiledFunction(kernel, func.get());
-  return func;
+  compileFunction(kernel, func.get());
+  return std::make_pair(std::move(func), compiled_assembly);
 }
 
 } // namespace nnc
