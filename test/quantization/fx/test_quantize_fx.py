@@ -4154,6 +4154,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         m_prep(data)
         m_quant = torch.ao.quantization.quantize_fx.convert_fx(m_prep, is_reference=is_reference)
         m_quant(data)
+
         self.checkGraphModuleNodes(m_quant, expected_node_list=node_list)
 
     def test_gelu_normal(self):

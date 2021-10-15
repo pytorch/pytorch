@@ -95,6 +95,13 @@ graph():
 interp = TRTInterpreter(split_mod._run_on_acc_0, InputTensorSpec.from_tensors(inputs))
 engine, input_names, output_names = interp.run()
 trt_mod = TRTModule(engine, input_names, output_names)
+split_mod._run_on_acc_0 = trt_mod
 
 cuda_inputs = [input.cuda() for input in inputs]
-trt_mod(*cuda_inputs)
+split_mod.cuda()
+lowered_model_output = split_mod(*cuda_inputs)
+
+# we make sure the results match
+model.cuda()
+regular_model_output = model(*cuda_inputs)
+torch.testing.assert_close(lowered_model_output, regular_model_output.to(torch.float16), atol=3e-3, rtol=1e-2)
