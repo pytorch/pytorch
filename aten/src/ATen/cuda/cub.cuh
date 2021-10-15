@@ -294,10 +294,10 @@ inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
         at::cuda::getCurrentCUDAStream());
 #else
     CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceScan::ExclusiveScan,
-        input + i,
+        input + i + 1,
         output + i,
         scan_op,
-        cub::FutureValue<input_t>(first_elem_ptr),
+        ::at_cuda_detail::cub::FutureValue<input_t>(first_elem_ptr),
         size_cub,
         at::cuda::getCurrentCUDAStream());
 #endif
@@ -341,7 +341,7 @@ inline void exclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
         input + i,
         output + i,
         scan_op,
-        cub::FutureValue<input_t>(first_elem_ptr),
+        ::at_cuda_detail::cub::FutureValue<InitValueT>(first_elem_ptr),
         size_cub,
         at::cuda::getCurrentCUDAStream());
 #endif
