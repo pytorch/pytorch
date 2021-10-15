@@ -530,11 +530,6 @@ def _model_to_graph(model, args, verbose=False,
         torch._C._jit_pass_onnx_assign_output_shape(graph, output_tensors, out_desc, _onnx_shape_inference)
 
     _set_input_and_output_names(graph, input_names, output_names)
-
-    # make sure that the param dict and the graph match each other
-    flatten_args, _ = torch._C._jit_flatten(args)
-    assert len(params) + len(flatten_args) == sum(1 for _ in graph.inputs())
-
     params_dict = _get_named_param_dict(graph, params)
 
     if training is None or training == TrainingMode.EVAL:
@@ -799,9 +794,24 @@ def _set_input_and_output_names(graph, input_names, output_names):
             raise RuntimeError(
                 "number of %s names provided (%d) exceeded number of %ss (%d)"
                 % (descriptor, len(name_list), descriptor, len(node_list)))
-        for name, node in zip(name_list, node_list):
+
+        # Mark if the output node DebugName is set before.
+        output_node_set = set()
+        for i, (name, node) in enumerate(zip(name_list, node_list)):
+            # Duplicated output node, insert onnx::Identity to avoid setting the same DebugName after setDebugName().
+            if descriptor == "output":
+                if node in output_node_set:
+                    identity_node = graph.create("onnx::Identity")
+                    identity_node.insertAfter(node.node())
+                    identity_node.addInput(node)
+                    identity_node.output().setType(node.type())
+                    graph.return_node().replaceInput(i, identity_node.output())
+                    node = identity_node.output()
+                output_node_set.add(node)
+
             if node.debugName() != name:
                 node.setDebugName(name)
+
     set_names(list(graph.inputs()), input_names, "input")
     set_names(list(graph.outputs()), output_names, "output")
 
@@ -1132,14 +1142,15 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
                         torch._C._jit_pass_onnx_node_shape_type_inference(new_node, _params_dict, opset_version)
                     return new_op_outputs
             else:
-                symbolic_name = "prim_" + op_name
-                domain = ""
-                symbolic_fn = _find_symbolic_in_registry(domain, symbolic_name, opset_version,
+                symbolic_fn = _find_symbolic_in_registry("prim", op_name, opset_version,
                                                          operator_export_type)
                 if symbolic_fn is None:
                     return None
                 attrs = {k: n[k] for k in n.attributeNames()}
-                if op_name == 'PythonOp':
+                # TODO: https://msdata.visualstudio.com/Vienna/_workitems/edit/1408006
+                # PythonOp symbolic need access thde node to resolve the name conflict,
+                # this is inconsistent with regular op symbolic.
+                if op_name == "PythonOp":
                     inputs = (n, *inputs)
                 return symbolic_fn(g, *inputs, **attrs)
 
@@ -1240,8 +1251,9 @@ def get_ns_op_name_from_custom_op(symbolic_name):
                            alphanumerical characters"
                            .format(symbolic_name))
     ns, op_name = symbolic_name.split("::")
-    unaccepted_domain_names = ["onnx", "aten", "prim"]
-    if ns in unaccepted_domain_names:
+    # TODO: Allow users to register custom symbolic in aten domain.
+    # https://msdata.visualstudio.com/Vienna/_workitems/edit/1407799
+    if ns in ("onnx", "aten"):
         raise RuntimeError("Failed to register operator {}. The domain {} is already a used domain."
                            .format(symbolic_name, ns))
     return ns, op_name
