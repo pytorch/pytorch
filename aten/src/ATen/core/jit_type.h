@@ -243,7 +243,7 @@ struct TORCH_API Stride {
   Stride() {}
   Stride(
       const c10::optional<size_t>& stride_index,
-      const c10::optional<bool>& contiguous,
+      c10::optional<bool> contiguous,
       const c10::optional<size_t>& stride)
       : stride_index_(stride_index), contiguous_(contiguous), stride_(stride) {}
 
