@@ -4296,6 +4296,11 @@ Tensor _lu_with_info_jvp(
   }
 }
 
+Tensor warn_backwards(const Tensor &grad_output) {
+  TORCH_WARN("Warn from backward");
+  return grad_output;
+}
+
 } // namespace details
 } // namespace generated
 } // namespace autograd
