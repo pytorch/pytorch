@@ -5066,7 +5066,6 @@ class TestLinalg(TestCase):
         self.assertRaises(RuntimeError, lambda: torch.mv(m, s))
         self.assertRaises(RuntimeError, lambda: torch.addmv(v, m, s))
 
-    @onlyCPU
     @dtypes(torch.float)
     def test_cross(self, device, dtype):
         x = torch.rand(100, 3, 100, dtype=dtype, device=device)
@@ -5076,7 +5075,6 @@ class TestLinalg(TestCase):
         torch.cross(x, y, out=res2)
         self.assertEqual(res1, res2)
 
-    @onlyCPU
     @dtypes(torch.float)
     def test_linalg_cross(self, device, dtype):
         x = torch.rand(100, 3, 100, dtype=dtype, device=device)
@@ -5094,7 +5092,48 @@ class TestLinalg(TestCase):
         torch.linalg.cross(x, y, dim=1, out=res2)
         self.assertEqual(res1, res2)
 
-    @onlyCPU
+        # non contiguous case 1
+        x = torch.rand((4, 4, 4, 3), dtype=dtype,
+                       device=device).contiguous(memory_format=torch.channels_last)  # non-contiguous
+        y = torch.rand((4, 4, 4, 3), dtype=dtype,
+                       device=device).contiguous(memory_format=torch.channels_last)  # non-contiguous
+        np_expected_ref = np.cross(x.cpu().numpy(), y.cpu().numpy(), axis=-1)
+        res = torch.linalg.cross(x, y, dim=-1)
+        # numpy reference compared to torch result
+        self.assertEqual(res.cpu().numpy(), np_expected_ref)
+
+        # non contiguous case 2
+        x = torch.rand(1, 3, 2, dtype=dtype, device=device)  # contiguous
+        y = torch.rand(1, 3, 4, dtype=dtype, device=device).permute(2, 1, 0)  # non-contiguous
+        np_expected_ref = np.cross(x.cpu().numpy(), y.cpu().numpy(), axis=1)
+        res = torch.linalg.cross(x, y, dim=1)
+        # numpy reference compared to torch result
+        self.assertEqual(res.cpu().numpy(), np_expected_ref)
+
+        # non contiguous case 3
+        x = torch.rand(2, 3, 1, dtype=dtype, device=device).permute(2, 1, 0)  # non-contiguous
+        y = torch.rand(1, 3, 4, dtype=dtype, device=device).permute(2, 1, 0)  # non-contiguous
+        np_expected_ref = np.cross(x.cpu().numpy(), y.cpu().numpy(), axis=1)
+        res = torch.linalg.cross(x, y, dim=1)
+        # numpy reference compared to torch result
+        self.assertEqual(res.cpu().numpy(), np_expected_ref)
+
+        # non contiguous case 4
+        x = torch.randn(12, 3, device=device, dtype=dtype)[::2, :]  # non-contiguous
+        y = torch.randn(18, 3, device=device, dtype=dtype)[::3, :]  # non-contiguous
+        np_expected_ref = np.cross(x.cpu().numpy(), y.cpu().numpy(), axis=1)
+        res = torch.linalg.cross(x, y, dim=1)
+        # numpy reference compared to torch result
+        self.assertEqual(res.cpu().numpy(), np_expected_ref)
+
+        # non contiguous case 5
+        x = torch.randn(1, device=device, dtype=dtype)  # contiguous
+        y = torch.randn(6, device=device, dtype=dtype)[::2]  # non-contiguous
+        np_expected_ref = np.cross(x.expand(3).cpu().numpy(), y.cpu().numpy())
+        res = torch.linalg.cross(x, y)
+        # numpy reference compared to torch result
+        self.assertEqual(res.cpu().numpy(), np_expected_ref)
+
     @dtypes(torch.float)
     def test_cross_with_and_without_dim(self, device, dtype):
         x = torch.rand(100, 3, dtype=dtype, device=device)
@@ -5105,7 +5144,6 @@ class TestLinalg(TestCase):
         self.assertEqual(res1, res2)
         self.assertEqual(res1, res3)
 
-    @onlyCPU
     @dtypes(torch.float)
     def test_linalg_cross_with_and_without_dim(self, device, dtype):
         x = torch.rand(100, 3, dtype=dtype, device=device)
