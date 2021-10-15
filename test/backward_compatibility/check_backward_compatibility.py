@@ -57,6 +57,7 @@ ALLOW_LIST = [
     ("aten::fused_moving_avg_obs_fake_quant", datetime.date(2021, 10, 21)),
     ("aten::_fused_moving_avg_obs_fq_helper", datetime.date(2021, 10, 21)),
     ("aten::_baddbmm_mkl_", datetime.date(2021, 10, 31)),
+    ("aten::grid_sampler_2d_backward", datetime.date(2021, 10, 21)),
 ]
 
 ALLOW_LIST_COMPILED = [
