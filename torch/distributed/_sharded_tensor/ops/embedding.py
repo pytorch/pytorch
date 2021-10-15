@@ -1,3 +1,5 @@
+from typing import cast
+
 import torch
 import torch.distributed as dist
 from torch.distributed._sharding_spec import ChunkShardingSpec
@@ -60,19 +62,20 @@ def sharded_embedding(types, args, kwargs, pg):
         raise TypeError("input need to be torch.Tensor")
     if not isinstance(weight, ShardedTensor):
         raise TypeError("weight needs to be ShardedTensor")
-    if len(weight.size()) != 2:
+    weight_size = cast(torch.Size, weight.size())
+    if len(weight_size) != 2:
         raise ValueError("Weight needs to have exactly 2 dims")
     if int(torch.min(input).item()) < 0:
         raise ValueError(
             "Index out of range in Input %d %d",
             int(torch.min(input).item()),
-            weight.size()[1],
+            weight_size[1],
         )
-    if int(torch.max(input).item()) >= weight.size()[0]:
+    if int(torch.max(input).item()) >= weight_size[0]:
         raise ValueError(
             "Index out of range in Input %d %d",
             int(torch.max(input).item()),
-            weight.size()[1],
+            weight_size[1],
         )
 
     if not isinstance(weight._sharding_spec, ChunkShardingSpec):
@@ -113,7 +116,7 @@ def _handle_col_wise_sharding(input, world_size, weight, local_shard, pg):
 
     # Compute output splits
     split_size = get_split_size(sharding_dim_size, world_size)
-    output_split_sizes = [int] * world_size
+    output_split_sizes = [0] * world_size
     for idx, placement in enumerate(weight._sharding_spec.placements):
         output_split_sizes[placement.rank()] = get_chunked_dim_size(
             sharding_dim_size, split_size, idx

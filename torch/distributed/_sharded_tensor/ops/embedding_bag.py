@@ -1,3 +1,5 @@
+from typing import cast
+
 import torch
 import torch.distributed as dist
 from torch.distributed._sharding_spec import ChunkShardingSpec
@@ -70,19 +72,20 @@ def sharded_embedding_bag(types, args, kwargs, pg):
         raise TypeError("weight needs to be ShardedTensor")
     if len(input.size()) > 2:
         raise ValueError("Input more than 2 dims not supported")
-    if len(weight.size()) != 2:
+    weight_size = cast(torch.Size, weight.size())
+    if len(weight_size) != 2:
         raise ValueError("Weight needs to have exactly 2 dims")
     if int(torch.min(input).item()) < 0:
         raise ValueError(
             "Index out of range in Input %d %d",
             int(torch.min(input).item()),
-            weight.size()[1],
+            weight_size[1],
         )
-    if int(torch.max(input).item()) >= weight.size()[0]:
+    if int(torch.max(input).item()) >= weight_size[0]:
         raise ValueError(
             "Index out of range in Input %d %d",
             int(torch.max(input).item()),
-            weight.size()[1],
+            weight_size[1],
         )
     if offsets is not None and len(input.size()) != 1:
         raise ValueError("Input dimension needs to be exactly 1 dim")
@@ -130,13 +133,13 @@ def _handle_col_wise_sharding(
     # allgather the inputs first.
     gathered_inputs = [torch.zeros_like(input) for _ in range(world_size)]
     dist.all_gather(gathered_inputs, input, group=pg)
-    gathered_per_sample_weights = [None] * world_size
+    gathered_per_sample_weights = None
     if per_sample_weights is not None:
         gathered_per_sample_weights = [
             torch.zeros_like(per_sample_weights) for _ in range(world_size)
         ]
         dist.all_gather(gathered_per_sample_weights, per_sample_weights, group=pg)
-    gathered_offsets = [None] * world_size
+    gathered_offsets = None
     if offsets is not None:
         gathered_offsets = [torch.zeros_like(offsets) for _ in range(world_size)]
         dist.all_gather(gathered_offsets, offsets, group=pg)
@@ -148,9 +151,11 @@ def _handle_col_wise_sharding(
             torch.nn.functional.embedding_bag(
                 inp,
                 local_shard,
-                offsets=gathered_offsets[i],
+                offsets=gathered_offsets[i] if gathered_offsets is not None else None,
                 mode=mode,
-                per_sample_weights=gathered_per_sample_weights[i],
+                per_sample_weights=gathered_per_sample_weights[i]
+                if gathered_per_sample_weights is not None
+                else None,
             ).t()
         )
 
@@ -162,7 +167,7 @@ def _handle_col_wise_sharding(
 
     # Compute output splits
     split_size = get_split_size(sharding_dim_size, world_size)
-    output_split_sizes = [int] * world_size
+    output_split_sizes = [0] * world_size
     for idx, placement in enumerate(weight._sharding_spec.placements):
         output_split_sizes[placement.rank()] = get_chunked_dim_size(
             sharding_dim_size, split_size, idx
