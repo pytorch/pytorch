@@ -276,16 +276,15 @@ class Decoder:
 
     @staticmethod
     def _is_stream_handle(data):
-        if isinstance(data, StreamWrapper):
-            data = data.file_obj
-        return isinstance(data, io.BufferedIOBase) or isinstance(data, io.RawIOBase)
+        obj_to_check = data.file_obj if isinstance(data, StreamWrapper) else data
+        return isinstance(obj_to_check, io.BufferedIOBase) or isinstance(obj_to_check, io.RawIOBase)
 
     def decode1(self, key, data):
         if not data:
             return data
 
         # if data is a stream handle, we need to read all the content before decoding
-        if self._is_stream_handle(data):
+        if Decoder._is_stream_handle(data):
             ds = data
             # The behavior of .read can differ between streams (e.g. HTTPResponse), hence this is used instead
             data = b"".join(data)

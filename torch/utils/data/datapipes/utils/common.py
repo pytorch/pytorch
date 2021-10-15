@@ -83,17 +83,17 @@ class StreamWrapper:
     def __del__(self):
         self.file_obj.close()
 
-    def __getstate__(self, *args, **kwargs):
-        return self.file_obj.__getstate__(*args, **kwargs)
+    def __getstate__(self):
+        return self.file_obj.__getstate__()
 
-    def __iter__(self, *args, **kwargs):
-        return self.file_obj.__iter__(*args, **kwargs)
+    def __iter__(self):
+        return self.file_obj.__iter__()
 
-    def __next__(self, *args, **kwargs):
-        return self.file_obj.__next__(*args, **kwargs)
+    def __next__(self):
+        return self.file_obj.__next__()
 
-    def __setstate__(self, *args, **kwargs):
-        self.file_obj.__setstate__(*args, **kwargs)
+    def __setstate__(self, state):
+        self.file_obj.__setstate__(state)
 
     def __sizeof__(self, *args, **kwargs):
         return self.file_obj.__sizeof__(*args, **kwargs)
