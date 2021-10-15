@@ -322,16 +322,26 @@ struct WarningMeta {
 };
 
 // ATen warning handler for Python
-struct PyWarningHandler: at::WarningHandler {
+struct PyWarningHandler {
+  // Move actual handler into a separate class with a noexcept
+  // destructor. Otherwise, we need to force all WarningHandler
+  // subclasses to have a noexcept(false) destructor.
+  struct InternalHandler: at::WarningHandler {
+    ~InternalHandler() override = default;
+    void process(const at::SourceLocation &source_location,
+                 const std::string &msg,
+                 const bool verbatim) override;
+
+    std::vector<WarningMeta> warning_buffer_;
+  };
+
+
 public:
-/// See NOTE [ Conversion Cpp Python Warning ] for noexcept justification
+  /// See NOTE [ Conversion Cpp Python Warning ] for noexcept justification
   TORCH_API PyWarningHandler() noexcept(true);
   // NOLINTNEXTLINE(bugprone-exception-escape)
-  TORCH_API ~PyWarningHandler() noexcept(false) override;
+  TORCH_API ~PyWarningHandler() noexcept(false);
 
-  void process(const at::SourceLocation &source_location,
-               const std::string &msg,
-               const bool verbatim) override;
 
   /** Call if an exception has been thrown
 
@@ -344,10 +354,7 @@ public:
   }
 
 private:
-  using warning_buffer_t = std::vector<WarningMeta>;
-
-  warning_buffer_t warning_buffer_;
-
+  InternalHandler internal_handler_;
   at::WarningHandler* prev_handler_;
   bool in_exception_;
 };
