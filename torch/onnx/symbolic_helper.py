@@ -318,17 +318,19 @@ def _is_fp(value):
     if value:
         if isinstance(value, torch.Tensor):
             type = value.dtype
-            return (type == "torch.float32") or (type == "torch.float64") or (type == "torch.float16") or (type == "torch.bfloat16")
+            fp_set = (torch.float16, torch.float32, torch.float64, torch.bfloat16)
+            return type in fp_set
         else:
             type = value.type().scalarType()
             if type is None:
                 warnings.warn("Type cannot be inferred, which might cause exported graph to produce incorrect results.")
-            return (type == "Float") or (type == "Double") or (type == "Half")
+            return (type == "Float") or (type == "Double") or (type == "Half") or (type == "BFloat16")
     return False
 
 def _dtype_is_fp(type_value):
     if type_value:
-        return (type_value == torch.float16) or (type_value == torch.float32) or (type_value == torch.float64) or (type == "torch.bfloat16")
+        fp_set = (torch.float16, torch.float32, torch.float64, torch.bfloat16)
+        return type_value in fp_set
     return False
 
 def _generate_wrapped_number(g, scalar):
@@ -940,22 +942,22 @@ def _cast_func_template(to_i, g, input, non_blocking):
 
 
 scalar_type_to_onnx = [
-    cast_pytorch_to_onnx["Byte"],          # 0
-    cast_pytorch_to_onnx["Char"],          # 1
-    cast_pytorch_to_onnx["Short"],         # 2
-    cast_pytorch_to_onnx["Int"],           # 3
-    cast_pytorch_to_onnx["Long"],          # 4
-    cast_pytorch_to_onnx["Half"],          # 5
-    cast_pytorch_to_onnx["Float"],         # 6
-    cast_pytorch_to_onnx["Double"],        # 7
-    cast_pytorch_to_onnx["Undefined"],     # 8
-    cast_pytorch_to_onnx["ComplexFloat"],  # 9
-    cast_pytorch_to_onnx["ComplexDouble"], # 10
-    cast_pytorch_to_onnx["Bool"],          # 11
-    cast_pytorch_to_onnx["Bool"],          # 12 TODO
-    cast_pytorch_to_onnx["Bool"],          # 13 TODO
-    cast_pytorch_to_onnx["Bool"],          # 14 TODO
-    cast_pytorch_to_onnx["BFloat16"],      # 15
+    cast_pytorch_to_onnx["Byte"],           # 0
+    cast_pytorch_to_onnx["Char"],           # 1
+    cast_pytorch_to_onnx["Short"],          # 2
+    cast_pytorch_to_onnx["Int"],            # 3
+    cast_pytorch_to_onnx["Long"],           # 4
+    cast_pytorch_to_onnx["Half"],           # 5
+    cast_pytorch_to_onnx["Float"],          # 6
+    cast_pytorch_to_onnx["Double"],         # 7
+    cast_pytorch_to_onnx["Undefined"],      # 8
+    cast_pytorch_to_onnx["ComplexFloat"],   # 9
+    cast_pytorch_to_onnx["ComplexDouble"],  # 10
+    cast_pytorch_to_onnx["Bool"],           # 11
+    cast_pytorch_to_onnx["Bool"],           # 12 TODO
+    cast_pytorch_to_onnx["Bool"],           # 13 TODO
+    cast_pytorch_to_onnx["Bool"],           # 14 TODO
+    cast_pytorch_to_onnx["BFloat16"],       # 15
 ]
 
 # Global set to store the list of quantized operators in the network.

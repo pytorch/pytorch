@@ -6480,7 +6480,7 @@ class TestONNXRuntime(unittest.TestCase):
 
     def test_linear_bfloat16(self):
         input = torch.randn(128, 20, dtype=torch.bfloat16)
-        model = torch.nn.Linear(20, 30).bfloat16() 
+        model = torch.nn.Linear(20, 30).bfloat16()
         self.run_test(model, input)
 
     @skipIfUnsupportedMinOpsetVersion(9)
