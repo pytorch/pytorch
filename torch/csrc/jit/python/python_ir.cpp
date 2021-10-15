@@ -998,7 +998,7 @@ void initPythonIRBindings(PyObject* module_) {
       });
 
   py::class_<torch::jit::ShapeComputeGraphMapping>(
-      m, "ShapeComputeGraphMapping")
+      m, "_ShapeComputeGraphMapping")
       .def(
           "partial_eval_shape_graph",
           [](ShapeComputeGraphMapping& g) {
