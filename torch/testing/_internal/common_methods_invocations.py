@@ -10858,10 +10858,6 @@ op_db: List[OpInfo] = [
         identity=1,
         nan_policy='propagate',
         supports_out=False,
-        # FIXME: autograd check likely needs to take into account the mask.
-        supports_autograd=False,
-        # FIXME: forward AD with _s_where not implemented
-        supports_forward_ad=False,
         promotes_int_to_int64=True,
         # FIXME: "prod_cpu" not implemented for 'BFloat16'
         # FIXME: "prod_cpu" not implemented for 'Half'
@@ -10896,8 +10892,6 @@ op_db: List[OpInfo] = [
         '_masked.amin',
         nan_policy='propagate',
         supports_out=False,
-        # FIXME: autograd check likely needs to take into account the mask.
-        supports_autograd=False,
         dtypes=all_types_and(torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.amin),
         skips=(
