@@ -13,23 +13,18 @@ namespace mobile {
 using Stack = std::vector<c10::IValue>;
 using DebugHandle = int64_t;
 class Function;
-struct InstructionWithDebugHandle {
-  InstructionWithDebugHandle(Instruction inst, DebugHandle handle)
-      : instruction(inst), debug_handle(handle) {}
-  Instruction instruction;
-  DebugHandle debug_handle;
-};
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct Code {
   // TODO: Combine instructions and debug handles vector
   // into std::vector<<std::pair<Instruction, DebugHandle>>
-  std::vector<InstructionWithDebugHandle> instructions_with_handles_;
+  std::vector<Instruction> instructions_;
+  std::vector<DebugHandle> debug_handles_;
   std::vector<c10::OperatorName> op_names_;
   std::vector<std::function<void(Stack&)>> operators_;
   std::vector<c10::IValue> constants_;
   std::vector<c10::TypePtr> types_;
-  std::vector<Function*> functions_;
+  std::vector<mobile::Function*> functions_;
   size_t register_size_; // Aggregated output size.
 };
 
@@ -40,7 +35,7 @@ struct InterpreterState {
  private:
   void enterFrame(const Code&);
   void leaveFrame();
-  void saveExceptionDebugHandle();
+  void saveExceptionDebugHandles();
 
   c10::IValue& reg(size_t reg);
   std::vector<c10::IValue> registers_;
@@ -54,7 +49,7 @@ struct InterpreterState {
 // Note that this is set only when exception occurs.
 // since this is a thread local variable and setting it for
 // every instruction will add overhead of thread local variable access.
-DebugHandle getInterpretersExceptionDebugHandle();
+const std::vector<DebugHandle>& getInterpretersExceptionDebugHandles();
 } // namespace mobile
 } // namespace jit
 } // namespace torch

@@ -23,7 +23,7 @@ InterpreterState::InterpreterState(const Code& code) {
 }
 
 namespace {
-static thread_local DebugHandle exception_debug_handle_{-1};
+static thread_local std::vector<DebugHandle> exception_debug_handles_;
 void createObject(Stack& stack, const at::ClassTypePtr& type) {
   auto userObj = c10::ivalue::Object::create(
       c10::StrongTypePtr(type->compilation_unit(), type),
@@ -34,7 +34,7 @@ void createObject(Stack& stack, const at::ClassTypePtr& type) {
 void isinstance(Stack& stack, at::ArrayRef<at::TypePtr> types) {
   at::TypePtr ty = pop(stack).type();
   for (const at::TypePtr& candidate : types) {
-    if (ty->isSubtypeOf(candidate)) {
+    if (ty->isSubtypeOf(*candidate)) {
       push(stack, true);
       return;
     }
@@ -45,8 +45,8 @@ void isinstance(Stack& stack, at::ArrayRef<at::TypePtr> types) {
 
 using namespace at;
 
-int64_t getInterpretersExceptionDebugHandle() {
-  return exception_debug_handle_;
+const std::vector<DebugHandle>& getInterpretersExceptionDebugHandles() {
+  return exception_debug_handles_;
 }
 
 void InterpreterState::enterFrame(const Code& code) {
@@ -60,10 +60,17 @@ void InterpreterState::leaveFrame() {
   frames_.pop_back();
 }
 
-void InterpreterState::saveExceptionDebugHandle() {
-  const auto& frame = frames_.back();
-  exception_debug_handle_ =
-      frame.getCode().instructions_with_handles_.at(frame.getPC()).debug_handle;
+void InterpreterState::saveExceptionDebugHandles() {
+  std::vector<DebugHandle> exception_debug_handles;
+  for (auto frame = frames_.crbegin(); frame != frames_.crend(); frame++) {
+    size_t pc = frame->getPC() - (frame != frames_.crbegin() ? 1 : 0);
+    if (pc >= frame->getCode().debug_handles_.size()) {
+      exception_debug_handles.push_back(-1);
+      continue;
+    }
+    exception_debug_handles.push_back(frame->getCode().debug_handles_[pc]);
+  }
+  exception_debug_handles_ = std::move(exception_debug_handles);
 }
 
 bool InterpreterState::run(Stack& stack) {
@@ -72,12 +79,11 @@ bool InterpreterState::run(Stack& stack) {
       auto& frame = frames_.back();
       const auto& code = frame.getCode();
       const auto pc = frame.getPC();
-      auto inst_with_handle = code.instructions_with_handles_.at(pc);
-      Instruction inst = inst_with_handle.instruction;
-      DebugHandle debug_handle = inst_with_handle.debug_handle;
+      auto inst = code.instructions_.at(pc);
       // If no valid debug handle found then just log pc.
       // This is possible when we did not save debug handles
-      debug_handle = debug_handle == -1 ? pc : debug_handle;
+      DebugHandle debug_handle =
+          pc >= code.debug_handles_.size() ? pc : code.debug_handles_.at(pc);
 
       // std::cout << "RUNNING " << pc << " "
       //           << code_->instructions_with_handles_[pc].instruction;
@@ -279,15 +285,15 @@ bool InterpreterState::run(Stack& stack) {
       }
       // This exception must be caught first as it derived from c10::Error
     } catch (c10::BackendRuntimeException& e) {
-      saveExceptionDebugHandle();
+      saveExceptionDebugHandles();
       TORCH_RETHROW(e);
     } catch (c10::Error& error) {
       // Reason for catching and rethrowing the error is so that we can
       // set the exception pc that is queried later
-      saveExceptionDebugHandle();
+      saveExceptionDebugHandles();
       TORCH_RETHROW(error);
     } catch (...) {
-      saveExceptionDebugHandle();
+      saveExceptionDebugHandles();
       throw;
     }
     //  for (auto val : stack) {

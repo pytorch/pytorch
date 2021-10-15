@@ -12,39 +12,37 @@
 namespace torch {
 namespace jit {
 
-struct ExportedBytecode {
-  ExportedBytecode(
-      std::shared_ptr<MobileCode> c,
-      const c10::FunctionSchema& s,
-      bool t)
-      : code(std::move(c)), schema(s), toplevel(t) {}
-  std::shared_ptr<MobileCode> code;
-  const c10::FunctionSchema& schema;
+struct ExportedFunction {
+  ExportedFunction(const Function& f, std::unique_ptr<Graph> g, bool t)
+      : function(f), optimizedGraph(std::move(g)), toplevel(t) {}
+  const Function& function;
+  std::unique_ptr<Graph> optimizedGraph;
   bool toplevel;
 };
 
 class TORCH_API BytecodeExportSet {
  public:
-  using Map = std::unordered_map<c10::QualifiedName, ExportedBytecode>;
-  void add(const c10::QualifiedName& qn, ExportedBytecode);
+  void add(const c10::QualifiedName& qn, ExportedFunction);
   void update(const c10::QualifiedName& qn, bool toplevel);
   bool contains(const c10::QualifiedName& qn) const;
-  void exportIValues(
-      std::vector<c10::IValue>&,
-      std::vector<c10::IValue>&,
-      BackendDebugInfoRecorder&,
-      TypeNameUniquer&) const;
-  void exportIValues(
-      std::vector<c10::IValue>&,
-      BackendDebugInfoRecorder&,
-      TypeNameUniquer&) const;
+
+  template <typename F>
+  void visit(F&& f) {
+    for (auto& item : items_) {
+      if (item.second.toplevel) {
+        f(item.first, item.second);
+      }
+    }
+    for (auto& item : items_) {
+      if (!item.second.toplevel) {
+        f(item.first, item.second);
+      }
+    }
+  }
 
  private:
-  Map items_;
+  std::unordered_map<c10::QualifiedName, ExportedFunction> items_;
 };
-
-IValue to_tuple(std::vector<IValue> ivalues);
-IValue Table(const std::vector<std::pair<std::string, IValue>>& entries);
 
 } // namespace jit
 } // namespace torch

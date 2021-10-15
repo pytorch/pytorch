@@ -27,7 +27,8 @@ class TORCH_API Function : public torch::jit::Function {
   const c10::QualifiedName& qualname() const override;
   void call(Stack&, c10::function_ref<void(const mobile::Code&)>) override;
 
-  void append_instruction(OpCode op, int X, int N, int64_t dbg_handle = -1);
+  void append_instruction(OpCode op, int X, int N, int64_t dbg_handle);
+  void append_instruction(OpCode op, int X, int N);
   bool append_operator(
       const std::string& name,
       const std::string& overload_name,
@@ -36,6 +37,7 @@ class TORCH_API Function : public torch::jit::Function {
                                 are removed */
   void append_constant(const c10::IValue& constant);
   void append_type(const c10::TypePtr& type);
+  void append_function(mobile::Function& func);
 
   void set_register_size(size_t size);
 
@@ -49,7 +51,7 @@ class TORCH_API Function : public torch::jit::Function {
   // Returns the debug handle corresponding to where the execution
   // is halted due to exception.
   // If no corresponding debug handle is found then -1 is returned.
-  int64_t getExceptionDebugHandle() const;
+  const std::vector<int64_t>& getExceptionDebugHandles() const;
 
  private:
   c10::QualifiedName name_;

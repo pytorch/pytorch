@@ -204,7 +204,7 @@ void Method::run(Stack& stack) const {
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
     if (error_message.empty()) {
       error_message = owner_->getDebugTable().getSourceDebugString(
-          function_->getExceptionDebugHandle(), getTopModuleTypeName(*owner_));
+          function_->getExceptionDebugHandles(), getTopModuleTypeName(*owner_));
     }
 #endif
 
@@ -226,7 +226,9 @@ void Method::run(Stack& stack) const {
     // This exception must be caught first as it derived from c10::Error
   } catch (c10::BackendRuntimeException& e) {
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
-    e.pushDebugHandle(function_->getExceptionDebugHandle());
+    for (auto handle : function_->getExceptionDebugHandles()) {
+      e.pushDebugHandle(handle);
+    }
     // symbolicate all handles
     auto debug_string = owner_->getDebugTable().getSourceDebugString(
         e.getDebugHandles(), getTopModuleTypeName(*owner_));
@@ -237,7 +239,7 @@ void Method::run(Stack& stack) const {
   } catch (c10::Error& error) {
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
     auto debug_string = owner_->getDebugTable().getSourceDebugString(
-        function_->getExceptionDebugHandle(), getTopModuleTypeName(*owner_));
+        function_->getExceptionDebugHandles(), getTopModuleTypeName(*owner_));
     error.add_context(debug_string);
 #endif
     error_message = error.what();

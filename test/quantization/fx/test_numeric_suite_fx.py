@@ -1516,6 +1516,10 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 nn.GRU,
                 nn.LSTMCell,
                 nn.RNNCell,
+                # TODO(future PR): look into whether shadowing embeddings
+                # makes sense
+                nn.Embedding,
+                nn.EmbeddingBag,
             )
             if fp32_type1 in types_to_skip:
                 continue
