@@ -2265,13 +2265,6 @@ class TestBinaryUfuncs(TestCase):
         getattr(torch, op)(a, b, out=c)
         self.assertEqual(expected_res.bool(), c)
 
-        # in-place
-        # TODO: remove when different dtypes as operands are supported
-        if dtypes[0] != dtypes[1]:
-            with self.assertRaises(RuntimeError):
-                getattr(a, op + '_')(b)
-            return
-
         getattr(a, op + '_')(b)
         self.assertEqual(expected_res, a)
 
