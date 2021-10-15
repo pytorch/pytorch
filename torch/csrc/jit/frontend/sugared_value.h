@@ -517,12 +517,12 @@ struct TORCH_API CastValue : public BuiltinFunction {
       auto zero = m.graph()->insertConstant(0);
 
       auto v = args[0].value(*m.graph());
-      if (v->type()->isSubtypeOf(type_)) {
+      if (v->type()->isSubtypeOf(*type_)) {
         return std::make_shared<SimpleValue>(v);
       } else if (
           *type_ == *BoolType::get() &&
-          (v->type()->isSubtypeOf(AnyListType::get()) ||
-           v->type()->isSubtypeOf(StringType::get()) ||
+          (v->type()->isSubtypeOf(*AnyListType::get()) ||
+           v->type()->isSubtypeOf(*StringType::get()) ||
            v->type()->cast<DictType>())) {
         auto len = len_op->call(loc, m, {v}, {}, 1);
         return gt_op->call(loc, m, {len->asValue(loc, m), zero}, {}, 1);
@@ -766,7 +766,7 @@ struct TORCH_API ExceptionValue : public SugaredValue {
     auto exception_message = insertConstant(*m.graph(), message_ + ": ", loc);
     for (auto& input : args) {
       auto input_str = input.value(*m.graph());
-      if (!input_str->type()->isSubtypeOf(StringType::get())) {
+      if (!input_str->type()->isSubtypeOf(*StringType::get())) {
         input_str =
             emitBuiltinCall(loc, *m.graph(), aten::str, {input_str}, {});
       }
