@@ -1660,43 +1660,79 @@ def unravel_index(
     indices: torch.Tensor,
     shape: Tuple[int, ...],
     *,
-    as_tuple: bool=False
+    as_tuple: bool = False
 ) -> torch.Tensor:
     r"""Converts flat indices into unraveled coordinates for the given target shape.
 
     This is a PyTorch implementation of NumPy's `unravel_index` (TODO: add link).
 
-    Args:
-        indices: A tensor containing flattened indices to be unraveled, can be of `dtype` `torch.int64`
-                 or `torch.int32`.
+    Args::
+        indices: A tensor containing flattened indices to be unraveled, should be integral type.
         shape: The shape used for unravelling the `indices`.
 
-    Keyword Args:
+    Keyword Args::
         as_tuple: A boolean value, which if `True` will return the unraveled `indices` as tuple,
                   else a `Tensor` will be returned.
 
-    Returns:
+    Returns::
         unraveled coordinates from the given `indices`, and `shape`. See description of `as_tuple` for
         returning tuples.
-    """
-    if (not isinstance(shape, Tensor)):
-        assert isinstance(shape, (tuple,  list)), f"Shape should be either a tuple or a list, but found: {type(shape)}"
-        assert all(isinstance(item, int) for item in shape), "Expected shape to have only integral elements"
-        try:
-            shape = torch.tensor(shape, dtype=torch.int64, device=indices.device)
-        except:
-            raise ValueError("Incorrect dtype passed for shape: {shape}, should be convertible"
-                             " to PyTorch's tensor class.")
-    else:
-        assert shape.dtype in [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64], "Unsupported dtype, only integral types allowed."
 
-    # In case shape is a 0-dim tensor, return indices as it is?
-    if shape.dim() == 0:
+    Example::
+        >>> indices = torch.tensor([22, 41, 37])
+        >>> shape = (7, 6)
+        >>> torch.unravel_index(indices, shape)
+        tensor([[3, 4],
+                [6, 5],
+                [6, 1]])
+        >>> torch.unravel_index(indices, shape, as_tuple=True)
+        (tensor([3, 6, 6]), tensor([4, 5, 1]))
+    """
+    _integral_types = [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]
+    if not isinstance(shape, Tensor):
+        assert isinstance(shape, (tuple,  list)), f"Shape should be either a tuple or a list if not tensor, but found: {type(shape)}."
+        for dim in shape:
+            if not isinstance(dim, int):
+                raise TypeError("Expected shape to have only integral elements.")
+            if dim < 0:
+                raise ValueError("Negative dimension in shape is not allowed.")
+        shape = torch.tensor(shape, dtype=torch.int64)
+    else:
+        if shape.dtype not in _integral_types:
+            raise TypeError(f"Unsupported dtype for shape {shape.dtype}, only integral types allowed.")
+        if torch.any(shape < 0):
+            raise ValueError("Negative dimension in shape is not allowed.")
+
+    if not isinstance(indices, Tensor):
+        if not isinstance(indices, (tuple, list)):
+            raise TypeError(f"Indices should be either a tuple or a list if not tensor, but found: {type(indices)}.")
+        for index in indices:
+            if not isinstance(index, int):
+                raise TypeError("Expected indices to have only integral elements.")
+            if index < 0:
+                raise ValueError("Negative indices are not allowed.")
+        indices = torch.tensor(indices, dtype=torch.int64)
+    else:
+        if indices.dtype not in _integral_types:
+            raise TypeError(f"Unsupported dtype for indices {indices.dtype}, only integral types allowed.")
+        if torch.any(indices < 0):
+            raise ValueError("Negative indices are not allowed.")
+
+    # In case no indices passed, short-circuit to return itself
+    if indices.numel() == 0:
         return tuple(indices) if as_tuple else indices
+    if shape.numel() == 0:
+        raise ValueError(f"Empty shape tensor passed, expected shape tensor of minimum size {indices.shape}.")
+
+    assert torch.max(indices) < torch.prod(shape), f"Given indices {indices} should be representible for the given shape {shape}."
+    assert torch.unique(indices).numel() <= torch.prod(shape), f"Number of unique indices passed exceed the number of elements for given shape."
+
+    # For zero-dim shape, return 0 by default
+    if shape.dim() == 0:
+        return tuple(0) if as_tuple else 0
 
     # List to store unraveled indices, to be converted to a tuple/tensor depending on
     # to_tuple kw-only arg
-    assert torch.max(indices) < torch.prod(shape), f"Given indices {indices} should be representible for the given shape {shape}"
     coords = list()
     for dim in reversed(shape):
         coords.append(indices % dim)
@@ -1704,4 +1740,5 @@ def unravel_index(
 
     if len(coords) != 0:
         coords = torch.stack(coords[::-1], dim=-1)
+
     return tuple(coords.T) if as_tuple else coords

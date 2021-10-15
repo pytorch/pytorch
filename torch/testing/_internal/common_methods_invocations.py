@@ -5054,11 +5054,10 @@ def sample_inputs_unravel_index(op_info, device, dtype, requires_grad, **kwargs)
     cases = (
         ((S, S), (25,)),
         ((1, 2, 3), (2, 6)),
-        # ((0), ()),
+        ((0), (1,)),
         ((45, 47), (1, 10, 10)),
     )
 
-    sample_inputs = []
     def generator():
         for indices, shape in cases:
             yield SampleInput(create_tensor(indices), args=(shape,))
