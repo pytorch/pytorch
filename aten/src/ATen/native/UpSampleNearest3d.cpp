@@ -1,7 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/UpSample.h>
-#include <c10/util/irange.h>
 
 namespace at {
 namespace meta {
@@ -38,7 +37,7 @@ TORCH_META_FUNC(upsample_nearest3d_backward) (
       grad_output.dim() == 5,
       "Expected grad_output to be a tensor of dimension 5 but got: dimension ", grad_output.dim());
 
-  for (const auto i : c10::irange(5)) {
+  for (int i = 0; i < 5; ++i) {
     TORCH_CHECK(
         grad_output.size(i) == full_output_size[i],
         "Expected grad_output to have the same shape as output;",

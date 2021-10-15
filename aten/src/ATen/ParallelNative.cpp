@@ -6,7 +6,6 @@
 
 #ifndef C10_MOBILE
 #include <c10/core/thread_pool.h>
-#include <c10/util/irange.h>
 #else
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #endif // C10_MOBILE
@@ -88,7 +87,7 @@ TaskThreadPoolBase& _get_intraop_pool() {
 // `fn` will be called with params: (thread_pool_task_id, task_id).
 void _run_with_pool(const std::function<void(int, size_t)>& fn, size_t range) {
 #ifndef C10_MOBILE
-  for (const auto i : c10::irange(1, range)) {
+  for (size_t i = 1; i < range; ++i) {
     _get_intraop_pool().run([fn, i]() { fn((int)i, i); });
   }
   // Run the first task on the current thread directly.

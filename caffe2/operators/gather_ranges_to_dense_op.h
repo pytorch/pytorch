@@ -6,7 +6,6 @@
 #include "caffe2/core/common_omp.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/export_caffe2_op_to_c10.h"
-#include <c10/util/irange.h>
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/types.h"
@@ -43,8 +42,7 @@ class GatherRangesToDenseOp final : public Operator<Context> {
     CAFFE_ENFORCE_GT(
         minObservation_, 0, "The number of observations is at least 1");
     // Initialize the empty and mismatch counter.
-    for (const auto i : c10::irange(OutputSize())) {
-      (void)i; // Suppress unused variable warning
+    for (int i = 0; i < OutputSize(); ++i) {
       emptyRanges_.push_back(0);
       mismatchedRanges_.push_back(0);
       mismatchedLengths_.push_back(set<int>());
@@ -107,7 +105,7 @@ class GatherRangesToDenseOp final : public Operator<Context> {
     auto batchSize = ranges.size(0);
     vector<int64_t> outputDims{batchSize, 0};
     vector<char*> outputRawData;
-    for (const auto i : c10::irange(OutputSize())) {
+    for (int i = 0; i < OutputSize(); ++i) {
       auto* output = Output(i);
       outputDims[1] = lengths_[i];
       output->Resize(outputDims);
@@ -116,8 +114,8 @@ class GatherRangesToDenseOp final : public Operator<Context> {
       outputRawData.push_back(ptr);
     }
 
-    for (const auto i : c10::irange(batchSize)) {
-      for (const auto j : c10::irange(OutputSize())) {
+    for (int i = 0; i < batchSize; ++i) {
+      for (int j = 0; j < OutputSize(); ++j) {
         auto rangeStart = rangesData[rangesDataOffset++];
         auto rangeLength = rangesData[rangesDataOffset++];
 
@@ -145,7 +143,7 @@ class GatherRangesToDenseOp final : public Operator<Context> {
           auto& key = Input(KEY);
           auto* key_data = key.template data<int64_t>();
           vector<std::pair<int64_t, const char*>> buffer;
-          for (const auto b_i : c10::irange(rangeLength)) {
+          for (int b_i = 0; b_i < rangeLength; ++b_i) {
             int64_t one_key_item = key_data[rangeStart + b_i];
             auto* one_data_item = rawData + (rangeStart + b_i) * itemsize;
             buffer.emplace_back(one_key_item, one_data_item);
@@ -157,7 +155,7 @@ class GatherRangesToDenseOp final : public Operator<Context> {
                  const std::pair<int64_t, const char*>& right) {
                 return left.first < right.first;
               });
-          for (const auto b_i : c10::irange(rangeLength)) {
+          for (int b_i = 0; b_i < rangeLength; ++b_i) {
             // Since this CPU only, directly copy to the destination.
             std::memcpy(
                 outputRawData[j] + (i * lengths_[j] + b_i) * itemsize,
@@ -172,7 +170,7 @@ class GatherRangesToDenseOp final : public Operator<Context> {
 
     // Check whether the empty and mismatch ratio exceeded the threshold.
     totalRanges_ += batchSize;
-    for (const auto j : c10::irange(OutputSize())) {
+    for (int j = 0; j < OutputSize(); ++j) {
       // Only check when the ratio is not set to allow all mismatches.
       if (maxMismatchedRatio_ < 1.0) {
         CAFFE_ENFORCE_GE(

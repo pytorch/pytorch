@@ -6,7 +6,6 @@
 
 #include <ATen/Parallel.h>
 #include <ATen/native/TriangularOpsUtils.h>
-#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -24,7 +23,7 @@ static void apply_triu_tril_single(
 
   if (upper) {
     at::parallel_for(0, n, 0, [&](int64_t start, int64_t end) {
-      for (const auto i : c10::irange(start, end)) {
+      for (auto i = start; i < end; i++) {
         for (int64_t j = 0; j < std::min(m, i + k); j++) {
           result[i * res_row_stride + j * res_col_stride] = 0;
         }
@@ -37,7 +36,7 @@ static void apply_triu_tril_single(
     });
   } else {
     at::parallel_for(0, n, 0, [&](int64_t start, int64_t end) {
-      for (const auto i : c10::irange(start, end)) {
+      for (auto i = start; i < end; i++) {
         for (int64_t j = std::max(zero, i + k + 1); j < m; j++) {
           result[i * res_row_stride + j * res_col_stride] = 0;
         }
@@ -75,7 +74,7 @@ void apply_triu_tril(Tensor& result, const Tensor& self, bool inplace, int64_t k
   }
 
   at::parallel_for(0, batchsize, 0, [&](int64_t start, int64_t end) {
-    for (const auto b : c10::irange(start, end)) {
+    for (auto b = start; b < end; b++) {
       scalar_t* self_batch = &self_data[b * self_stride];
       scalar_t* result_batch = &result_data[b * result_stride];
       apply_triu_tril_single<scalar_t, upper>(

@@ -3,7 +3,6 @@
 #include <string>
 #include <ATen/ATen.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/irange.h>
 #include <caffe2/core/context.h>
 #include <caffe2/core/operator.h>
 #include <caffe2/utils/math.h>
@@ -131,7 +130,7 @@ private:
   void assignListStartingAt(
       size_t offset,
       const std::vector<at::Tensor>& tensors) {
-    for (const auto i : c10::irange(tensors.size())) {
+    for (size_t i = 0; i < tensors.size(); i++) {
       assignTo(Output(offset + i), tensors[i]);
     }
   }
@@ -177,7 +176,7 @@ private:
     std::stringstream descriptor;
     descriptor << op;
     std::vector<std::string> attrs;
-    for (const auto i : c10::irange(operator_def.arg_size())) {
+    for(size_t i = 0; i < operator_def.arg_size(); i++) {
       auto & attr = operator_def.arg(i);
       if(attr.name() == "operator" || attr.name() == "type" )
         continue;
@@ -224,7 +223,7 @@ private:
     std::vector<int64_t> ints =
         OperatorBase::GetRepeatedArgument<int64_t>(name, {});
     std::array<bool, N> result;
-    for (const auto i : c10::irange(N)) {
+    for (size_t i = 0; i < N; ++i) {
       result[i] = ints.at(i);
     }
     return result;

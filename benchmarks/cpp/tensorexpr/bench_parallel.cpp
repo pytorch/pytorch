@@ -1,5 +1,4 @@
 #include <benchmark/benchmark.h>
-#include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
@@ -55,7 +54,7 @@ BENCHMARK_DEFINE_F(ParallelAdd, Simple)(benchmark::State& state) {
   float* c_ptr = C.data_ptr<float>();
   std::vector<void*> args({c_ptr, a_ptr, b_ptr});
   cg.value<int>(args);
-  for (const auto i : c10::irange(M)) {
+  for (int i = 0; i < M; i++) {
     float diff = fabs(a_ptr[i] + b_ptr[i] - c_ptr[i]);
     TORCH_CHECK(diff < 1e-5);
   }

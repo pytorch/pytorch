@@ -2,7 +2,6 @@
 #include <c10/core/DeviceType.h>
 #include <c10/mobile/CPUCachingAllocator.h>
 #include <c10/mobile/CPUProfilingAllocator.h>
-#include <c10/util/irange.h>
 
 // TODO: rename flags to C10
 C10_DEFINE_bool(
@@ -31,7 +30,7 @@ void memset_junk(void* data, size_t num) {
   int32_t int64_count = num / sizeof(kJunkPattern64);
   int32_t remaining_bytes = num % sizeof(kJunkPattern64);
   int64_t* data_i64 = reinterpret_cast<int64_t*>(data);
-  for (const auto i : c10::irange(int64_count)) {
+  for (int i = 0; i < int64_count; i++) {
     data_i64[i] = kJunkPattern64;
   }
   if (remaining_bytes > 0) {

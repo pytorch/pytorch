@@ -3,7 +3,6 @@
 #include <ATen/Parallel.h>
 #include <torch/library.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
-#include <c10/util/irange.h>
 
 #include <algorithm>
 #include <vector>
@@ -31,7 +30,7 @@ void compute_fused_params(
   //     = (input(n, c, h, w) - mean(c)) / sqrt(var(c) + eps) * weight(c)
   //         + bias(c)
   // We factor out inv_sigma(c) = 1 / sqrt(var(c) + eps).
-  for (const auto c : c10::irange(channels)) {
+  for (int64_t c = 0; c < channels; c++) {
     // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     float inv_sigma = 1.0 / std::sqrt(var_data[c] + static_cast<float>(eps));
     float weight_v = weight_data ? weight_data[c] : 1;

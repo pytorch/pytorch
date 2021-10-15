@@ -1,7 +1,6 @@
 #include <ATen/native/cpu/DepthwiseConvKernel.h>
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
-#include <c10/util/irange.h>
 
 #ifdef __ARM_NEON__
 #include <arm_neon.h>
@@ -153,7 +152,7 @@ void convolution_depthwise3x3_winograd_impl(
       &input_tile.val[2],                                     \
       &input_tile.val[3]);                                    \
                                                               \
-  for (const auto row : c10::irange(4)) {                         \
+  for (int64_t row = 0; row < 4; ++row) {                         \
     input_tile.val[row] =                                     \
         vmulq_f32(input_tile.val[row], kernel_tile.val[row]); \
   }                                                           \
@@ -187,22 +186,22 @@ void convolution_depthwise3x3_winograd_impl(
                   2 * otw + 1 < args.out_cols
               )) {
         float32x4x4_t input_tile;
-        for (const auto row : c10::irange(4)) {
+        for (int64_t row = 0; row < 4; ++row) {
           input_tile.val[row] =
               vld1q_f32(input + (ih + row) * args.in_cols + iw);
         }
 
         TILE;
 
-        for (const auto row : c10::irange(2)) {
+        for (size_t row = 0; row < 2; ++row) {
           vst1_f32(
               output + (oth * 2 + row) * args.out_cols + otw * 2,
               vget_low_f32(input_tile.val[row]));
         }
       } else {
         float block[4][4];
-        for (const auto row : c10::irange(4)) {
-          for (const auto col : c10::irange(4)) {
+        for (int64_t row = 0; row < 4; ++row) {
+          for (int64_t col = 0; col < 4; ++col) {
             if (ih + row >= 0 && iw + col >= 0 && ih + row < args.in_rows &&
                 iw + col < args.in_cols) {
               block[row][col] = input[(ih + row) * args.in_cols + iw + col];
@@ -213,18 +212,18 @@ void convolution_depthwise3x3_winograd_impl(
         }
 
         float32x4x4_t input_tile;
-        for (const auto row : c10::irange(4)) {
+        for (int64_t row = 0; row < 4; ++row) {
           input_tile.val[row] = vld1q_f32(&block[row][0]);
         }
 
         TILE;
 
         float oblock[2][2];
-        for (const auto row : c10::irange(2)) {
+        for (int64_t row = 0; row < 2; ++row) {
           vst1_f32(&oblock[row][0], vget_low_f32(input_tile.val[row]));
         }
-        for (const auto row : c10::irange(2)) {
-          for (const auto col : c10::irange(2)) {
+        for (int64_t row = 0; row < 2; ++row) {
+          for (int64_t col = 0; col < 2; ++col) {
             if (2 * oth + row < args.out_rows &&
                 2 * otw + col < args.out_cols) {
               output[(2 * oth + row) * args.out_cols + 2 * otw + col] =
@@ -286,7 +285,7 @@ Tensor _convolution_depthwise3x3_winograd(
                       at::zeros({kernel_sizes[0]}, input.options());
 
   at::parallel_for(0, args.batch * args.out_channels, 0, [&](int64_t start, int64_t end) {
-    for (const auto k : c10::irange(start, end)) {
+    for (int64_t k = start; k < end; ++k) {
       const int64_t g = k % args.out_channels;
       const int64_t i = k / (args.out_channels / groups);
       convolution_depthwise3x3_winograd_impl(

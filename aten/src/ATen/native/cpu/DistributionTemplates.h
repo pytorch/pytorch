@@ -10,7 +10,6 @@
 
 #ifdef CPU_CAPABILITY_AVX2
 #include <ATen/native/cpu/avx_mathfun.h>
-#include <c10/util/irange.h>
 #endif
 
 
@@ -109,7 +108,7 @@ void normal_fill_AVX2(Tensor& self, const float mean, const float std, RNG gener
   float *data = self.data_ptr<float>();
   auto size = self.numel();
   std::lock_guard<std::mutex> lock(generator->mutex_);
-  for (const auto i : c10::irange(size)) {
+  for (int64_t i = 0; i < size; ++i) {
     at::uniform_real_distribution<float> uniform(0, 1);
     data[i] = uniform(generator);
   }
@@ -126,7 +125,7 @@ void normal_fill_AVX2(Tensor& self, const float mean, const float std, RNG gener
   if (size % 16 != 0) {
     // Recompute the last 16 values.
     data = data + size - 16;
-    for (const auto i : c10::irange(16)) {
+    for (int64_t i = 0; i < 16; ++i) {
       at::uniform_real_distribution<float> uniform(0, 1);
       data[i] = uniform(generator);
     }
@@ -137,7 +136,7 @@ void normal_fill_AVX2(Tensor& self, const float mean, const float std, RNG gener
 
 template <typename scalar_t>
 static void normal_fill_16(scalar_t *data, const scalar_t mean, const scalar_t std) {
-  for (const auto j : c10::irange(8)) {
+  for (int j = 0; j < 8; ++j) {
     const scalar_t u1 = 1 - data[j]; // [0, 1) -> (0, 1] for log.
     const scalar_t u2 = data[j + 8];
     const scalar_t radius = std::sqrt(-2 * std::log(u1));
@@ -152,7 +151,7 @@ void normal_fill(Tensor& self, const scalar_t mean, const scalar_t std, RNG gene
   scalar_t *data = self.data_ptr<scalar_t>();
   auto size = self.numel();
   std::lock_guard<std::mutex> lock(generator->mutex_);
-  for (const auto i : c10::irange(size)) {
+  for (int64_t i = 0; i < size; ++i) {
     at::uniform_real_distribution<scalar_t> uniform(0, 1);
     data[i] = uniform(generator);
   }
@@ -163,7 +162,7 @@ void normal_fill(Tensor& self, const scalar_t mean, const scalar_t std, RNG gene
   if (size % 16 != 0) {
     // Recompute the last 16 values.
     data = data + size - 16;
-    for (const auto i : c10::irange(16)) {
+    for (int64_t i = 0; i < 16; ++i) {
       at::uniform_real_distribution<scalar_t> uniform(0, 1);
       data[i] = uniform(generator);
     }

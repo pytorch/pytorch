@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <c10/util/irange.h>
 #include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
@@ -1128,7 +1127,7 @@ TEST_F(FunctionalTest, GumbelSoftmax) {
   int dims[] = {1, -1};
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers)
   int expected[] = {5*3, 5*4};
-  for (const auto i : c10::irange(2)) {
+  for(auto i=0; i<2; i++) {
     auto logits = torch::randn({5, 4, 3});
     int expected_count = expected[i];
     auto y_draw = F::gumbel_softmax(logits, F::GumbelSoftmaxFuncOptions().hard(true).dim(dims[i]));
@@ -1150,7 +1149,7 @@ TEST_F(FunctionalTest, GumbelSoftmax) {
 
     auto counts = torch::zeros_like(logits);
     torch::Tensor y_draw;
-    for (const auto i : c10::irange(num_draws)) {
+    for (auto i=0; i<num_draws; i++) {
         y_draw = F::gumbel_softmax(logits, F::GumbelSoftmaxFuncOptions().hard(true));
         counts += y_draw;
     }
@@ -1176,7 +1175,7 @@ TEST_F(FunctionalTest, Softmax) {
   auto output = F::softmax(input, /*dim=*/1);
   auto sum = torch::sum(torch::exp(input), 1);
 
-  for (const auto i : c10::irange(2)) {
+  for (int i = 0; i < 2; i++) {
     auto expected = torch::exp(input[i]) / sum[i];
     ASSERT_TRUE(torch::allclose(output[i], expected));
   }
@@ -1188,7 +1187,7 @@ TEST_F(FunctionalTest, Softmin) {
   auto output = F::softmin(input, /*dim=*/1);
   auto sum = torch::sum(torch::exp(-input), 1);
 
-  for (const auto i : c10::irange(2)) {
+  for (int i = 0; i < 2; i++) {
     auto expected = torch::exp(-input[i]) / sum[i];
     ASSERT_TRUE(torch::allclose(output[i], expected));
   }
@@ -1200,7 +1199,7 @@ TEST_F(FunctionalTest, LogSoftmax) {
   auto output = F::log_softmax(input, /*dim=*/1);
   auto sum = torch::sum(torch::exp(input), 1);
 
-  for (const auto i : c10::irange(2)) {
+  for (int i = 0; i < 2; i++) {
     auto expected = torch::log(torch::exp(input[i]) / sum[i]);
     ASSERT_TRUE(torch::allclose(output[i], expected));
   }

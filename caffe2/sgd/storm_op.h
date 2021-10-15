@@ -19,7 +19,7 @@ void storm_update(
     const float beta,
     Context* /*context*/) {
   float gradSqSumTmp = 0.0;
-  for (const auto i : c10::irange(N)) {
+  for (auto i = 0; i < N; ++i) {
     const float gi = gradIn[i];
     gradSqSumTmp += gi * gi;
   }
@@ -27,7 +27,7 @@ void storm_update(
 
   const float nlr = lr[0] * std::pow(beta + gradSqSumOut[0], -1.0 / 3.0);
   const float alpha = momentum * nlr * nlr;
-  for (const auto i : c10::irange(N)) {
+  for (auto i = 0; i < N; ++i) {
     const float gi = gradIn[i];
     const float mi = momentIn[i];
     float new_mi = momentOut[i] = gi + (1.0 - alpha) * (mi - gi);
@@ -120,7 +120,7 @@ class SparseStormOp final : public Operator<Context> {
     }
 
     float gradSqSumTmp = 0.0;
-    for (const auto i : c10::irange(Input(GRAD).numel())) {
+    for (auto i = 0; i < Input(GRAD).numel(); ++i) {
       const float gi = gradIn[i];
       gradSqSumTmp += gi * gi;
     }
@@ -130,7 +130,7 @@ class SparseStormOp final : public Operator<Context> {
     const float alpha = momentum_ * nlr * nlr;
     const auto block_size = Input(GRAD).numel() / n;
 
-    for (const auto i : c10::irange(n)) {
+    for (auto i = 0; i < n; ++i) {
       auto idx = indices[i];
       if (block_size == 1) {
         const float gi = gradIn[i];
@@ -162,7 +162,7 @@ class SparseStormOp final : public Operator<Context> {
             i);
 #endif
 
-        for (const auto j : c10::irange(block_size)) {
+        for (auto j = 0; j < block_size; ++j) {
           const float gi = gradIn[offsetI + j];
           const float mi = momentIn[offsetIdx + j];
           float new_mi = momentOut[offsetIdx + j] =

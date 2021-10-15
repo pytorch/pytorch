@@ -1,4 +1,3 @@
-#include <c10/util/irange.h>
 #include <torch/script.h>
 
 #include "op.h"
@@ -12,7 +11,7 @@ torch::List<torch::Tensor> custom_op(
     int64_t repeat) {
   torch::List<torch::Tensor> output;
   output.reserve(repeat);
-  for (const auto i : c10::irange(repeat)) {
+  for (int64_t i = 0; i < repeat; ++i) {
     output.push_back(tensor * scalar);
   }
   return output;

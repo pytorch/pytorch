@@ -100,7 +100,7 @@ Tensor refine_names(const Tensor& self, DimnameList names) {
       self_names.size(), " and ", names.size(), " respectively).");
   check_names_valid_for(self, names);
 
-  for (const auto idx : c10::irange(self_names.size())) {
+  for (size_t idx = 0; idx < self_names.size(); idx++) {
     const auto& self_name = self_names[idx];
     const auto& out_name = names[idx];
     if (self_name == out_name || self_name.isWildcard()) {
@@ -221,7 +221,7 @@ Tensor align_to(const Tensor& tensor, DimnameList order, int64_t ellipsis_idx) {
   };
 
   // Fill in the non-ellipsis dimensions
-  for (const auto order_idx : c10::irange(0U, order.size())) {
+  for (auto order_idx = 0U; order_idx < order.size(); ++order_idx) {
     auto out_idx = order_idx;
     if (order_idx >= ellipsis_idx) {
       out_idx = order_idx + num_ellipsis_names;

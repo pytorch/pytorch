@@ -23,7 +23,7 @@ class AssertOp final : public Operator<Context> {
     cmp_tensor_.CopyFrom(Input(0));
     auto* cmp_data = cmp_tensor_.template data<T>();
 
-    for (const auto i : c10::irange(cmp_tensor_.numel())) {
+    for (int64_t i = 0; i < cmp_tensor_.numel(); ++i) {
       CAFFE_ENFORCE((bool)cmp_data[i], [&]() {
         std::stringstream ss;
         ss << "Assert failed for element " << i

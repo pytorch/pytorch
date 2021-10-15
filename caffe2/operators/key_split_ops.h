@@ -26,21 +26,21 @@ class KeySplitOp : public Operator<Context> {
     const T* keys_data = keys.template data<T>();
     std::vector<int> counts(categorical_limit_);
     std::vector<int*> eids(categorical_limit_);
-    for (const auto k : c10::irange(categorical_limit_)) {
+    for (int k = 0; k < categorical_limit_; k++) {
       counts[k] = 0;
     }
-    for (const auto i : c10::irange(N)) {
+    for (int i = 0; i < N; i++) {
       int k = keys_data[i];
       CAFFE_ENFORCE_GT(categorical_limit_, k);
       CAFFE_ENFORCE_GE(k, 0);
       counts[k]++;
     }
-    for (const auto k : c10::irange(categorical_limit_)) {
+    for (int k = 0; k < categorical_limit_; k++) {
       auto* eid = Output(k, {counts[k]}, at::dtype<int>());
       eids[k] = eid->template mutable_data<int>();
       counts[k] = 0;
     }
-    for (const auto i : c10::irange(N)) {
+    for (int i = 0; i < N; i++) {
       int k = keys_data[i];
       eids[k][counts[k]++] = i;
     }

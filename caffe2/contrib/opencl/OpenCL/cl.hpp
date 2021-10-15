@@ -1241,7 +1241,7 @@ inline cl_int getInfoHelper(Func f, cl_uint name, size_t<N>* param, long)
         return err;
     }
 
-    for (const auto i : c10::irange(N)) {
+    for(int i = 0; i < N; ++i) {
         (*param)[i] = value[i];
     }
 

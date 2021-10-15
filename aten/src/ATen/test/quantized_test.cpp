@@ -11,7 +11,6 @@
 // For quantize_val
 #include <ATen/native/quantized/affine_quantizer.h>
 #include <c10/core/ScalarType.h>
-#include <c10/util/irange.h>
 #include <ATen/quantized/Quantizer.h>
 
 using namespace at;
@@ -31,14 +30,14 @@ TEST(TestQTensor, QuantDequantAPIs) {
   // int_repr
   Tensor int_repr = qr.int_repr();
   auto* int_repr_data = int_repr.data_ptr<uint8_t>();
-  for (const auto i : c10::irange(num_elements)) {
+  for (auto i = 0; i < num_elements; ++i) {
     ASSERT_EQ(int_repr_data[i], 3);
   }
 
   // Check for correct quantization
   auto r_data = r.data_ptr<float>();
   auto qr_data = qr.data_ptr<quint8>();
-  for (const auto i : c10::irange(num_elements)) {
+  for (auto i = 0; i < num_elements; ++i) {
     ASSERT_EQ(
         native::quantize_val<quint8>(scale, zero_point, r_data[i]).val_,
         qr_data[i].val_);
@@ -47,10 +46,10 @@ TEST(TestQTensor, QuantDequantAPIs) {
   // Check for correct dequantization
   Tensor rqr = qr.dequantize();
   auto rqr_data = rqr.data_ptr<float>();
-  for (const auto i : c10::irange(num_elements)) {
+  for (auto i = 0; i < num_elements; ++i) {
     ASSERT_EQ(r_data[i], rqr_data[i]);
   }
-  for (const auto i : c10::irange(num_elements)) {
+  for (auto i = 0; i < num_elements; ++i) {
     ASSERT_EQ(
         r_data[i],
         native::dequantize_val(qr.q_scale(), qr.q_zero_point(), qr_data[i]));
@@ -61,7 +60,7 @@ TEST(TestQTensor, QuantDequantAPIs) {
   int64_t new_zero_point = 1;
   Tensor reqr = at::quantize_per_tensor(r, new_scale, new_zero_point, kQInt8);
   auto reqr_data = reqr.data_ptr<qint8>();
-  for (const auto i : c10::irange(num_elements)) {
+  for (auto i = 0; i < num_elements; ++i) {
     reqr_data[i].val_ =
         native::requantize_val<quint8, qint8>(
             scale, zero_point, new_scale, new_zero_point, qr_data[i])
@@ -86,7 +85,7 @@ TEST(TestQTensor, RoundingMode) {
   Tensor qx = at::quantize_per_tensor(x, /*scale=*/1.0, zero_point, kQUInt8);
 
   auto qx_data = qx.data_ptr<quint8>();
-  for (const auto idx : c10::irange(x_values.size())) {
+  for (size_t idx = 0; idx < x_values.size(); ++idx) {
     ASSERT_EQ(qx_expect[idx], qx_data[idx].val_)
         << "Tie breaking during rounding element " << idx << " failed!";
   }
@@ -109,14 +108,14 @@ TEST(TestQTensor, EmptyQuantized) {
       {numel}, at::device(at::kCPU).dtype(kQUInt8), scale, zero_point);
   // Assigning to QTensor
   auto* q_data = q.data_ptr<quint8>();
-  for (const auto i : c10::irange(numel)) {
+  for (int i = 0; i < numel; ++i) {
     q_data[i].val_ = val;
   }
 
   // dequantize
   auto r = q.dequantize();
   auto* r_data = r.data_ptr<float>();
-  for (const auto i : c10::irange(numel)) {
+  for (int i = 0; i < numel; ++i) {
     ASSERT_EQ(r_data[i], (val - zero_point) * scale);
   }
 }
@@ -135,14 +134,14 @@ TEST(TestQTensor, EmptyPerchannelQuantized) {
       at::device(at::kCPU).dtype(kQUInt8));
   // Assigning to QTensor
   auto* q_data = q.data_ptr<quint8>();
-  for (const auto i : c10::irange(numel)) {
+  for (int i = 0; i < numel; ++i) {
     q_data[i].val_ = val;
   }
 
   // dequantize
   auto r = q.dequantize();
   auto* r_data = r.data_ptr<float>();
-  for (const auto i : c10::irange(numel)) {
+  for (int i = 0; i < numel; ++i) {
     ASSERT_EQ(
         r_data[i],
         (val - zero_points[i].item().to<int>()) * scales[i].item().to<float>());
@@ -223,7 +222,7 @@ TEST(TestQTensor, FromBlobQuantizedPerTensor) {
   custom_vec->reserve(numel);
 
   uint8_t* custom_data = custom_vec->data();
-  for (const auto i : c10::irange(numel)) {
+  for (auto i = 0; i < numel; ++i) {
     custom_data[i] = i;
   }
   bool customDataDeleted{false};
@@ -237,7 +236,7 @@ TEST(TestQTensor, FromBlobQuantizedPerTensor) {
   Tensor qtensor = at::from_blob_quantized_per_tensor_affine(custom_data, shape, deleter, scale, zero_point, options);
 
   uint8_t* q_data = (uint8_t*)qtensor.data_ptr<quint8>();
-  for (const auto i : c10::irange(numel)) {
+  for (auto i = 0; i < numel; ++i) {
     ASSERT_EQ((int)custom_data[i], (int)q_data[i]);
   }
   ASSERT_EQ((float)qtensor.q_scale(), (float)scale);
@@ -259,7 +258,7 @@ TEST(TestQTensor, FromBlobQuantizedPerChannel) {
   custom_vec->reserve(numel);
 
   uint8_t* custom_data = custom_vec->data();
-  for (const auto i : c10::irange(numel)) {
+  for (auto i = 0; i < numel; ++i) {
     custom_data[i] = i;
   }
   bool customDataDeleted{false};
@@ -272,7 +271,7 @@ TEST(TestQTensor, FromBlobQuantizedPerChannel) {
   {
   Tensor qtensor = at::from_blob_quantized_per_channel_affine(custom_data, shape, deleter, scales, zero_points, ch_axis, options);
   uint8_t* q_data = (uint8_t*)qtensor.data_ptr<quint8>();
-  for (const auto i : c10::irange(numel)) {
+  for (auto i = 0; i < numel; ++i) {
     ASSERT_EQ((int)custom_data[i], (int)q_data[i]);
   }
   ASSERT_TRUE(at::allclose(qtensor.q_per_channel_scales(), scales));

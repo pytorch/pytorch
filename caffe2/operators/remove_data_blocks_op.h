@@ -40,7 +40,7 @@ class RemoveDataBlocksOp final : public Operator<Context> {
     const auto* ind_ptr = indices.template data<T>();
 
     std::vector<T> ind_vec;
-    for (const auto i : c10::irange(indices_size)) {
+    for (int64_t i = 0; i < indices_size; i++) {
       ind_vec.push_back(ind_ptr[i]);
     }
     std::sort(ind_vec.begin(), ind_vec.end());
@@ -60,7 +60,7 @@ class RemoveDataBlocksOp final : public Operator<Context> {
 
     ind_vec.insert(ind_vec.begin(), -1);
     int64_t ind_vec_size = ind_vec.size();
-    for (const auto i : c10::irange(ind_vec_size)) {
+    for (auto i = 0; i < ind_vec_size; i++) {
       int64_t interval_start = ind_vec[i] + 1;
       int64_t interval_end =
           (i == ind_vec_size - 1) ? outer_size : ind_vec[i + 1];

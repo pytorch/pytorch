@@ -155,7 +155,7 @@ private:
     data_.seed_ = seed;
     data_.seeded_ = true;
     data_.state_[0] = seed & 0xffffffff;
-    for (const auto j : c10::irange(1, MERSENNE_STATE_N)) {
+    for(int j = 1; j < MERSENNE_STATE_N; j++) {
       data_.state_[j] = (1812433253 * (data_.state_[j-1] ^ (data_.state_[j-1] >> 30)) + j);
     }
     data_.left_ = 1;

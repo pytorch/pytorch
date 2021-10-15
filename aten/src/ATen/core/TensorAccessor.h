@@ -3,7 +3,6 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Deprecated.h>
 #include <c10/util/Exception.h>
-#include <c10/util/irange.h>
 #include <stdint.h>
 #include <cstddef>
 
@@ -135,7 +134,7 @@ public:
       const source_index_t* sizes_,
       const source_index_t* strides_)
       : data_(data_) {
-    for (const auto i : c10::irange(N)) {
+    for (int i = 0; i < N; i++) {
       this->sizes_[i] = sizes_[i];
       this->strides_[i] = strides_[i];
     }

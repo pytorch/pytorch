@@ -2,7 +2,6 @@
 
 #include <test/cpp/tensorexpr/test_base.h>
 
-#include <c10/util/irange.h>
 #include <test/cpp/tensorexpr/padded_buffer.h>
 #include <test/cpp/tensorexpr/test_utils.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
@@ -164,7 +163,7 @@ TEST(Expr, VectorAdd01) {
 
   /*
   Build the following:
-    for (const auto index : c10::irange(kVectorCount)) {
+    for (int index = 0; index < kVectorCount; index++) {
       store(c_buf, ramp(index * 8, 1, 8),
             load(a_buf, ramp(index * 8, 1, 8) +
             load(b_buf, ramp(index * 8, 1, 8))))
@@ -188,7 +187,7 @@ TEST(Expr, VectorAdd01) {
   PaddedBuffer<float> b_v(kTotalSize);
   PaddedBuffer<float> c_v(kTotalSize);
   PaddedBuffer<float> c_ref(kTotalSize);
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; i++) {
     a_v(i) = i * i;
     b_v(i) = i * i * 4;
     c_ref(i) = a_v(i) + b_v(i);
@@ -569,7 +568,7 @@ void testCond01() {
   SimpleIREvaluator(for_stmt, {a_buf})(a_v);
 
   PaddedBuffer<float> a_ref(N);
-  for (const auto i : c10::irange(N)) {
+  for (int i = 0; i < N; i++) {
     if (i % 2 == 0) {
       a_ref(i) = i * 2;
     } else {

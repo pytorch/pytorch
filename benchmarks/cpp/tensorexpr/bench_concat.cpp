@@ -1,5 +1,4 @@
 #include <benchmark/benchmark.h>
-#include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
@@ -16,14 +15,14 @@ class ConcatBench : public benchmark::Fixture {
     input_sizes_ = std::move(input_sizes);
     concat_dim_ = concat_dim;
     inputs_.resize(input_sizes_.size());
-    for (const auto i : c10::irange(input_sizes_.size())) {
+    for (size_t i = 0; i < input_sizes_.size(); ++i) {
       inputs_[i] = torch::ones({input_sizes_[i][0], input_sizes_[i][1]});
     }
     output_size_.resize(input_sizes_.front().size());
-    for (const auto i : c10::irange(output_size_.size())) {
+    for (size_t i = 0; i < output_size_.size(); ++i) {
       if (i == static_cast<size_t>(concat_dim_)) {
         output_size_[i] = 0;
-        for (const auto j : c10::irange(input_sizes_.size())) {
+        for (size_t j = 0; j < input_sizes_.size(); ++j) {
           output_size_[i] += input_sizes_[j][i];
         }
       } else {
@@ -66,7 +65,7 @@ class ConcatBench : public benchmark::Fixture {
         [&](const VarHandle& m, const VarHandle& n) {
           int d = 0;
           std::vector<int> cumulative_concat_dim_sizes(num_inputs);
-          for (const auto i : c10::irange(num_inputs)) {
+          for (size_t i = 0; i < num_inputs; ++i) {
             cumulative_concat_dim_sizes[i] = d;
             d += input_sizes_[i][concat_dim_];
           }
@@ -122,7 +121,7 @@ class ConcatBench : public benchmark::Fixture {
           {input_sizes_[i][0], input_sizes_[i][1]},
           kFloat));
       std::vector<VarPtr> for_vars(num_inputs);
-      for (const auto d : c10::irange(num_dims)) {
+      for (size_t d = 0; d < num_dims; ++d) {
         for_vars[d] =
             alloc<Var>("i" + std::to_string(i) + "_" + std::to_string(d), kInt);
       }

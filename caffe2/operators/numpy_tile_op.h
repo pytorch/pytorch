@@ -33,7 +33,7 @@ class NumpyTileOp : public Operator<Context> {
         " number of elements as `inputs` has dimensions.");
     const int64_t* repeats_data = repeats.template data<int64_t>();
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (const auto i : c10::irange(repeats.numel())) {
+    for (size_t i = 0; i < repeats.numel(); ++i) {
       CAFFE_ENFORCE_GE(repeats_data[i], 0);
     }
 
@@ -45,7 +45,7 @@ class NumpyTileOp : public Operator<Context> {
     Tensor *src = &buffer, *dst = output;
     src->CopyFrom(input);
     vector<int64_t> output_dims(input.sizes().vec());
-    for (const auto i : c10::irange(repeats.numel())) {
+    for (size_t i = 0; i < repeats.numel(); ++i) {
       if (repeats_data[i] == 1) {
         continue;
       }
@@ -100,10 +100,8 @@ class NumpyTileOp : public Operator<Context> {
       int64_t num_tiles,
       const char* input_data,
       char* output_data) {
-    for (const auto i : c10::irange(outer_dim)) {
-      (void)i; // Suppress unused variable warning
-      for (const auto t : c10::irange(num_tiles)) {
-        (void)t; // Suppress unused variable warning
+    for (auto i = 0; i < outer_dim; ++i) {
+      for (auto t = 0; t < num_tiles; ++t) {
         context_.CopyItemsSameDevice(meta, inner_dim, input_data, output_data);
         output_data += inner_dim * item_size;
       }

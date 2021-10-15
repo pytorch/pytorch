@@ -312,7 +312,8 @@ class ReduceScatterBaseNCCLTest : public NCCLTest {
       : NCCLTest(path, worldSize) {
         output_tensor_ = at::empty({1}, at::kCUDA);
         input_tensor_ = at::empty({worldSize}, at::kCUDA);
-        for (const auto i : c10::irange(worldSize)) {
+        for(int i = 0; i < worldSize; i++)
+        {
           input_tensor_[i] = i;
         }
       }

@@ -2,7 +2,6 @@
 #include <ATen/native/UpSample.h>
 #include <ATen/native/quantized/affine_quantizer.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
-#include <c10/util/irange.h>
 
 #include <algorithm>
 #include <cmath>
@@ -58,7 +57,7 @@ static void upsample_bilinear2d_out_frame(
   const int64_t input_q_zero_point = input.q_zero_point();
   const int64_t output_q_zero_point = output.q_zero_point();
 
-  for (const auto h2 : c10::irange(output_height)) {
+  for (int64_t h2 = 0; h2 < output_height; ++h2) {
     const auto h1r = area_pixel_compute_source_index<float>(
         rheight, h2, align_corners, /*cubic=*/false);
 
@@ -68,7 +67,7 @@ static void upsample_bilinear2d_out_frame(
     const float h1lambda = h1r - h1;
     const float h0lambda = static_cast<float>(1.) - h1lambda;
 
-    for (const auto w2 : c10::irange(output_width)) {
+    for (int64_t w2 = 0; w2 < output_width; ++w2) {
       const auto w1r = area_pixel_compute_source_index<float>(
           rwidth, w2, align_corners, /*cubic=*/false);
 
@@ -80,8 +79,7 @@ static void upsample_bilinear2d_out_frame(
       const typename scalar_t::underlying* pos1 = i_p + h1 * input_width + w1;
       typename scalar_t::underlying* pos2 = o_p + h2 * output_width + w2;
 
-      for (const auto c : c10::irange(channels)) {
-        (void)c; //Suppress unused variable warning
+      for (int64_t c = 0; c < channels; ++c) {
         float result = h0lambda * (w0lambda * pos1[0] + w1lambda * pos1[w1p]) +
             h1lambda *
                 (w0lambda * pos1[h1p * input_width] +

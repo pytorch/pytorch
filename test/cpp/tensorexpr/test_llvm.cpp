@@ -3,7 +3,6 @@
 
 #include <test/cpp/tensorexpr/test_base.h>
 
-#include <c10/util/irange.h>
 #include <test/cpp/tensorexpr/padded_buffer.h>
 #include <test/cpp/tensorexpr/test_utils.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
@@ -243,14 +242,14 @@ TEST(LLVM, fastLogFloat) {
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     a_v(i) = at::randn({1}).item().to<float>();
   }
 
   LLVMCodeGen ir_eval(stmt, {a_buf, b_buf});
   ir_eval.call({a_v, b_v});
 
-  for (const auto i : c10::irange(kTotalSize)) {
+  for (int i = 0; i < kTotalSize; ++i) {
     auto test = b_v(i);
     auto ref = std::log(a_v(i));
     if (std::isnan(ref)) {
@@ -517,7 +516,7 @@ TEST(LLVM, VecLoadStoreTest) {
     LLVMCodeGen cg(store, {a, b});                                           \
     std::vector<void*> args({a_buffer.data(), b_buffer.data()});             \
     ASSERT_EQ(cg.value<int>(args), 0);                                       \
-    for (const auto i : c10::irange(Lanes)) {                                \
+    for (int i = 0; i < Lanes; i++) {                                        \
       ASSERT_FLOAT_EQ(a_buffer[i], val);                                     \
     }                                                                        \
   } // namespace jit
@@ -555,7 +554,7 @@ FLOAT_INTRINSICS_TEST(lgamma, 8)
     LLVMCodeGen cg(store, {a, b});                                           \
     std::vector<void*> args({a_buffer.data(), b_buffer.data()});             \
     ASSERT_EQ(cg.value<int>(args), 0);                                       \
-    for (const auto i : c10::irange(Lanes)) {                                \
+    for (int i = 0; i < Lanes; i++) {                                        \
       ASSERT_FLOAT_EQ(a_buffer[i], val);                                     \
     }                                                                        \
   } // namespace jit
@@ -620,7 +619,7 @@ TEST(LLVM, VectorizeBitCast) {
 
   std::vector<int> a_vec(128);
   std::vector<float> c_vec(128);
-  for (const auto i : c10::irange(128)) {
+  for (auto i = 0; i < 128; ++i) {
     a_vec[i] = raw_bitcast<int>(1337.f);
   }
   std::vector<void*> args({a_vec.data(), c_vec.data()});
@@ -986,7 +985,7 @@ TEST(LLVM, CompareSelectIntEQ) {
   ASSERT_EQ(c_buffer.size(), N);
 
   assertAllEqual(a_buffer, 1);
-  for (const auto i : c10::irange(N)) {
+  for (int i = 0; i < N; i++) {
     ASSERT_EQ(c_ref[i], c_buffer[i]);
   }
 }
@@ -1059,7 +1058,7 @@ TEST(LLVM, CompareSelectByteGT) {
   ASSERT_EQ(c_buffer.size(), N);
 
   assertAllEqual(b_buffer, uint8_t(0));
-  for (const auto i : c10::irange(N)) {
+  for (int i = 0; i < N; i++) {
     ASSERT_EQ(c_ref[i], c_buffer[i]);
   }
 }
@@ -1094,7 +1093,7 @@ TEST(LLVM, CompareSelectByteGE) {
   ASSERT_EQ(c_buffer.size(), N);
 
   assertAllEqual(b_buffer, uint8_t(0));
-  for (const auto i : c10::irange(N)) {
+  for (int i = 0; i < N; i++) {
     ASSERT_EQ(c_ref[i], c_buffer[i]);
   }
 }
@@ -1134,7 +1133,7 @@ TEST(LLVM, CompareSelectByteLT) {
   ASSERT_EQ(c_buffer.size(), N);
 
   assertAllEqual(b_buffer, uint8_t(128));
-  for (const auto i : c10::irange(N)) {
+  for (int i = 0; i < N; i++) {
     ASSERT_EQ(c_ref[i], c_buffer[i]);
   }
 }
@@ -1169,7 +1168,7 @@ TEST(LLVM, CompareSelectByteLE) {
   ASSERT_EQ(c_buffer.size(), N);
 
   assertAllEqual(b_buffer, uint8_t(128));
-  for (const auto i : c10::irange(N)) {
+  for (int i = 0; i < N; i++) {
     ASSERT_EQ(c_ref[i], c_buffer[i]);
   }
 }
@@ -1199,7 +1198,7 @@ TEST(LLVM, SimpleMath01) {
   int value = cg.value<int>(args);
   ASSERT_EQ(value, 0);
   PaddedBuffer<float> f_ref(N, "f_ref");
-  for (const auto i : c10::irange(N)) {
+  for (int i = 0; i < N; i++) {
     f_ref(i) = i * i + 1;
   }
   ExpectAllNear(f_v, f_ref, 1e-5);
@@ -1252,8 +1251,8 @@ TEST(LLVM, BroadcastAdd) {
   std::vector<void*> args({av.data(), bv.data(), cv.data()});
   ASSERT_EQ(cg.value<int>(args), 0);
 
-  for (const auto i : c10::irange(M)) {
-    for (const auto j : c10::irange(N)) {
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < N; j++) {
       ASSERT_EQ(cv[i * N + j], av[i * N + j] + bv[j]);
     }
   }
@@ -1422,8 +1421,8 @@ TEST(LLVM, SimpleReduction) {
   PaddedBuffer<float> b_ref(1, "b_ref");
 
   b_ref(0) = 0;
-  for (const auto i : c10::irange(M)) {
-    for (const auto j : c10::irange(N)) {
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < N; j++) {
       int v = i + j;
       a_v(0, i, j) = v;
       b_ref(0) += v;
@@ -1470,8 +1469,8 @@ TEST(LLVM, RFactorReduction) {
   PaddedBuffer<float> b_ref(1, "b_ref");
 
   b_ref(0) = 0;
-  for (const auto i : c10::irange(M)) {
-    for (const auto j : c10::irange(N)) {
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < N; j++) {
       int v = i + j;
       a_v(0, i, j) = v;
       b_ref(0) += v;
@@ -1517,8 +1516,8 @@ TEST(LLVM, RFactorVectorizedReduction) {
   PaddedBuffer<float> b_ref(1, "b_ref");
 
   b_ref(0) = 0;
-  for (const auto i : c10::irange(M)) {
-    for (const auto j : c10::irange(N)) {
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < N; j++) {
       int v = i + j;
       a_v(0, i, j) = v;
       b_ref(0) += v;
@@ -1559,8 +1558,8 @@ static void testSimpleParallel() {
   int value = cg.value<int>(args);
   ASSERT_EQ(value, 0);
   PaddedBuffer<float> f_ref(M, N, "f_ref");
-  for (const auto m : c10::irange(M)) {
-    for (const auto n : c10::irange(N)) {
+  for (int m = 0; m < M; m++) {
+    for (int n = 0; n < N; n++) {
       f_ref(m, n) = m + n;
     }
   }
@@ -1585,7 +1584,7 @@ TEST(LLVM, CompositeParallel) {
   int test_count = 1 << loop_count;
   // Compute a composite operation, and try all loop-axis combination to be
   // parallel or sequential.
-  for (const auto test_cfg : c10::irange(test_count)) {
+  for (int test_cfg = 0; test_cfg < test_count; test_cfg++) {
     int M = 5;
     int N = 7;
     Tensor t1 =
@@ -1625,7 +1624,7 @@ TEST(LLVM, CompositeParallel) {
       loop_list.push_back(loops[1]);
     }
     ASSERT_EQ(loop_list.size(), loop_count);
-    for (const auto i : c10::irange(loop_count)) {
+    for (int i = 0; i < loop_count; i++) {
       if (test_cfg & (1 << i)) {
         loop_list[i]->set_parallel();
       }
@@ -1639,8 +1638,8 @@ TEST(LLVM, CompositeParallel) {
     int value = cg.value<int>(args);
     ASSERT_EQ(value, 0);
     PaddedBuffer<float> t4_ref(M, N, "t4_ref");
-    for (const auto m : c10::irange(M)) {
-      for (const auto n : c10::irange(N)) {
+    for (int m = 0; m < M; m++) {
+      for (int n = 0; n < N; n++) {
         t4_ref(m, n) = (m + 1) * (n + 2) + m + n;
       }
     }
@@ -1716,10 +1715,10 @@ TEST(LLVM, VectorizedGEMM) {
   PaddedBuffer<float> c_v(M, N, "c_v");
   PaddedBuffer<float> c_ref(M, N, "c_ref");
 
-  for (const auto m : c10::irange(M)) {
-    for (const auto n : c10::irange(N)) {
+  for (int m = 0; m < M; m++) {
+    for (int n = 0; n < N; n++) {
       c_ref(m, n) = 0.f;
-      for (const auto k : c10::irange(K)) {
+      for (int k = 0; k < K; k++) {
         c_ref(m, n) += a_v(m, k) * b_v(k, n);
       }
     }
@@ -1755,8 +1754,8 @@ TEST(LLVM, CallRaw) {
   LLVMCodeGen cg(s, {a, b, BufHandle(c.buf()), N});
   cg.call_raw(args);
 
-  for (const auto i : c10::irange(M)) {
-    for (const auto j : c10::irange(N_value)) {
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < N_value; j++) {
       ASSERT_EQ(cv[i * N_value + j], av[i * N_value + j] + bv[j]);
     }
   }
@@ -1764,8 +1763,8 @@ TEST(LLVM, CallRaw) {
   SimpleIREvaluator eval(s, {a, b, BufHandle(c.buf()), N});
   eval.call_raw(args);
 
-  for (const auto i : c10::irange(M)) {
-    for (const auto j : c10::irange(N_value)) {
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < N_value; j++) {
       ASSERT_EQ(cv[i * N_value + j], av[i * N_value + j] + bv[j]);
     }
   }

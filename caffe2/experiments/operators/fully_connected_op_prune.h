@@ -32,7 +32,7 @@ namespace caffe2 {
       const std::vector<int64_t>& shape(Shape<N> vs) {
         static thread_local std::vector<int64_t> cache;
         cache.resize(vs.size());
-        for (const auto i : c10::irange(vs.size())) {
+        for (auto i = 0; i < vs.size(); ++i) {
           cache[i] = vs[i];
         }
         return cache;
@@ -70,8 +70,8 @@ namespace caffe2 {
       void MaskMatrix<float, CPUContext>(
           const float* mask, float* mat, int M, int N) {
         int offset = 0;
-        for (const auto i : c10::irange(M)) {
-          for (const auto j : c10::irange(N)) {
+        for (int i = 0; i < M; ++i) {
+          for (int j = 0; j < N; ++j) {
             mat[offset] = mask[offset]? mat[offset] : 0;
             offset++;
           }
@@ -86,7 +86,7 @@ namespace caffe2 {
           int /*N*/,
           int seq_len,
           float target) {
-        for (const auto i : c10::irange(seq_len)) {
+        for (int i = 0; i < seq_len; ++i) {
           // assume that the mask_seq is smaller than size
           // Although it seems that random access gets bad performance,
           // we make sure that seq is in order;
@@ -107,8 +107,8 @@ namespace caffe2 {
           float* mask_seq, int M, int N) {
         int seq_len = 0;
         int offset = 0;
-        for (const auto i : c10::irange(M)) {
-          for (const auto j : c10::irange(N)) {
+        for (int i = 0 ; i < M; ++i) {
+          for (int j = 0; j < N; ++j) {
             if (mat[offset] != 0 &&
                 (mat[offset] < thres && mat[offset] > -thres)) {
               mask_seq[seq_len++] = static_cast<float>(offset);

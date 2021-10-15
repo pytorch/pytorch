@@ -3,7 +3,6 @@
 #include <c10/util/accumulate.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
-#include <c10/util/irange.h>
 
 #include <ATen/native/vulkan/Vulkan.h>
 #include <ATen/native/vulkan/VulkanCommon.h>
@@ -630,17 +629,17 @@ VBuffer kernelNCHW_OCHW_repack_O4C4HWi4o4(
     memset(basePtr, 0, size);
     const float* src = weights;
     int ridx = 0;
-    for (const auto oc : c10::irange(OC)) {
+    for (int oc = 0; oc < OC; ++oc) {
       int oc_4 = oc / 4;
       int oc_4_i = oc % 4;
       float* dst_oc = basePtr + oc_4 * oc_4SizeNumel;
-      for (const auto ic : c10::irange(C)) {
+      for (int ic = 0; ic < C; ++ic) {
         int ic_4 = ic / 4;
         int ic_4_i = ic % 4;
         float* dst_ic = dst_oc + ic_4 * KW * KH * 16;
-        for (const auto ky : c10::irange(KH)) {
+        for (int ky = 0; ky < KH; ++ky) {
           float* dst_ky = dst_ic + ky * KW * 16;
-          for (const auto kx : c10::irange(KW)) {
+          for (int kx = 0; kx < KW; ++kx) {
             float* dst_kx = dst_ky + kx * 16;
             dst_kx[4 * ic_4_i + oc_4_i] = src[ridx++];
           }

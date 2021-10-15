@@ -5,7 +5,6 @@
 
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
-#include <c10/util/irange.h>
 // Sleef offers vectorized versions of some transcedentals
 // such as sin, cos, tan etc..
 // However for now opting for STL, since we are not building
@@ -222,7 +221,7 @@ public:
     }
     else {
       __at_align__ float tmp_values[size()];
-      for (const auto i : c10::irange(size())) {
+      for (auto i = 0; i < size(); ++i) {
         tmp_values[i] = 0.0;
       }
       std::memcpy(
@@ -288,7 +287,7 @@ public:
     __at_align__ float tmp[size()];
     __at_align__ float res[size()];
     store(tmp);
-    for (const auto i : c10::irange(size())) {
+    for (int i = 0; i < size(); i++) {
       if (_isnan(tmp[i])) {
         std::memset(static_cast<void*>(&res[i]), 0xFF, sizeof(float));
       } else {
@@ -300,7 +299,7 @@ public:
   Vectorized<float> map(float (*const f)(float)) const {
     __at_align__ float tmp[size()];
     store(tmp);
-    for (const auto i : c10::irange(size())) {
+    for (int64_t i = 0; i < size(); i++) {
       tmp[i] = f(tmp[i]);
     }
     return loadu(tmp);
@@ -337,7 +336,7 @@ public:
     __at_align__ float tmp_exp[size()];
     store(tmp);
     exp.store(tmp_exp);
-    for (const auto i : c10::irange(size())) {
+    for (int64_t i = 0; i < size(); i++) {
       tmp[i] = std::atan2(tmp[i], tmp_exp[i]);
     }
     return loadu(tmp);
@@ -372,7 +371,7 @@ public:
     __at_align__ float tmp_q[size()];
     store(tmp);
     q.store(tmp_q);
-    for (const auto i : c10::irange(size())) {
+    for (int64_t i = 0; i < size(); i++) {
       tmp[i] = std::fmod(tmp[i], tmp_q[i]);
     }
     return loadu(tmp);
@@ -382,7 +381,7 @@ public:
     __at_align__ float tmp_b[size()];
     store(tmp);
     b.store(tmp_b);
-    for (const auto i : c10::irange(size())) {
+    for (int64_t i = 0; i < size(); i++) {
       tmp[i] = std::hypot(tmp[i], tmp_b[i]);
     }
     return loadu(tmp);
@@ -398,7 +397,7 @@ public:
     __at_align__ float tmp_x[size()];
     store(tmp);
     x.store(tmp_x);
-    for (const auto i : c10::irange(size())) {
+    for (int64_t i = 0; i < size(); i++) {
       tmp[i] = calc_igamma(tmp[i], tmp_x[i]);
     }
     return loadu(tmp);
@@ -408,7 +407,7 @@ public:
     __at_align__ float tmp_x[size()];
     store(tmp);
     x.store(tmp_x);
-    for (const auto i : c10::irange(size())) {
+    for (int64_t i = 0; i < size(); i++) {
       tmp[i] = calc_igammac(tmp[i], tmp_x[i]);
     }
     return loadu(tmp);
@@ -430,7 +429,7 @@ public:
     __at_align__ float tmp_b[size()];
     store(tmp);
     b.store(tmp_b);
-    for (const auto i : c10::irange(size())) {
+    for (int64_t i = 0; i < size(); i++) {
       tmp[i] = std::nextafter(tmp[i], tmp_b[i]);
     }
     return loadu(tmp);
@@ -495,7 +494,7 @@ public:
     __at_align__ float tmp_exp[size()];
     store(tmp);
     exp.store(tmp_exp);
-    for (const auto i : c10::irange(size())) {
+    for (int64_t i = 0; i < size(); i++) {
       tmp[i] = std::pow(tmp[i], tmp_exp[i]);
     }
     return loadu(tmp);

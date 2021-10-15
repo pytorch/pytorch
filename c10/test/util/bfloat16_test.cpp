@@ -1,7 +1,6 @@
 // clang-format off
 #include <c10/util/BFloat16.h>
 #include <c10/util/BFloat16-math.h>
-#include <c10/util/irange.h>
 // clang-format on
 #include <gtest/gtest.h>
 
@@ -25,7 +24,7 @@ float float_from_bytes(uint32_t sign, uint32_t exponent, uint32_t fraction) {
 TEST(BFloat16Conversion, FloatToBFloat16AndBack) {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
   float in[100];
-  for (const auto i : c10::irange(100)) {
+  for (int i = 0; i < 100; ++i) {
     // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers)
     in[i] = i + 1.25;
   }
@@ -35,7 +34,7 @@ TEST(BFloat16Conversion, FloatToBFloat16AndBack) {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
   float out[100];
 
-  for (const auto i : c10::irange(100)) {
+  for (int i = 0; i < 100; ++i) {
     bfloats[i].x = c10::detail::bits_from_f32(in[i]);
     out[i] = c10::detail::f32_from_bits(bfloats[i].x);
 
@@ -48,7 +47,7 @@ TEST(BFloat16Conversion, FloatToBFloat16AndBack) {
 TEST(BFloat16Conversion, FloatToBFloat16RNEAndBack) {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
   float in[100];
-  for (const auto i : c10::irange(100)) {
+  for (int i = 0; i < 100; ++i) {
     // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers)
     in[i] = i + 1.25;
   }
@@ -58,7 +57,7 @@ TEST(BFloat16Conversion, FloatToBFloat16RNEAndBack) {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
   float out[100];
 
-  for (const auto i : c10::irange(100)) {
+  for (int i = 0; i < 100; ++i) {
     bfloats[i].x = c10::detail::round_to_nearest_even(in[i]);
     out[i] = c10::detail::f32_from_bits(bfloats[i].x);
 

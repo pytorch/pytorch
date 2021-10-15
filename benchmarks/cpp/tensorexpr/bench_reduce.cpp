@@ -1,5 +1,4 @@
 #include <benchmark/benchmark.h>
-#include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
@@ -73,7 +72,7 @@ static void reduce1d_naive(at::Tensor& A, at::Tensor& B) {
   int size = A.numel();
   TORCH_CHECK(B.numel() == 1);
   *pB = 0.;
-  for (const auto i : c10::irange(size)) {
+  for (int i = 0; i < size; i++) {
     *pB += pA[i];
   }
 }
@@ -96,18 +95,18 @@ static void reduce1d_native_rfactor(at::Tensor& A, at::Tensor& B) {
   TORCH_CHECK(size % kChunkSize == 0);
   *pB = 0.;
   float temp[kChunkSize];
-  for (const auto j : c10::irange(kChunkSize)) {
+  for (int j = 0; j < kChunkSize; j++) {
     temp[j] = 0;
   }
 
   int chunk_count = size / kChunkSize;
-  for (const auto i : c10::irange(chunk_count)) {
-    for (const auto j : c10::irange(kChunkSize)) {
+  for (int i = 0; i < chunk_count; i++) {
+    for (int j = 0; j < kChunkSize; j++) {
       temp[j] += pA[i * kChunkSize + j];
     }
   }
 
-  for (const auto j : c10::irange(kChunkSize)) {
+  for (int j = 0; j < kChunkSize; j++) {
     *pB += temp[j];
   }
 }
@@ -158,7 +157,7 @@ static void reduce1d_native_vector(at::Tensor& A, at::Tensor& B) {
   temp = _mm256_setzero_ps();
 
   int tile_count = size / kChunkSize;
-  for (const auto i : c10::irange(tile_count)) {
+  for (int i = 0; i < tile_count; i++) {
     __m256 data = _mm256_load_ps(pA + i * kChunkSize);
     temp = _mm256_add_ps(temp, data);
   }
@@ -185,14 +184,14 @@ static void reduce1d_native_tiled(at::Tensor& A, at::Tensor& B) {
   TORCH_CHECK(B.numel() == 1, "Invalid size: ", B.numel(), " != 1");
   TORCH_CHECK(size % kChunkSize == 0, "Invalid size: ", size, " % ", kChunkSize , " ! = 0");
   __m256 t[kTileSize];
-  for (const auto j : c10::irange(kTileSize)) {
+  for (int j = 0; j < kTileSize; j++) {
     t[j] = _mm256_setzero_ps();
   }
 
   int tile_count = size / kChunkSize / kTileSize;
-  for (const auto i : c10::irange(tile_count)) {
+  for (int i = 0; i < tile_count; i++) {
     #pragma unroll
-    for (const auto j : c10::irange(kTileSize)) {
+    for (int j = 0; j < kTileSize; j++) {
       float *p = pA + (i * kTileSize + j) * kChunkSize;
       __m256 data = _mm256_loadu_ps(p);
       t[j] = _mm256_add_ps(t[j], data);
@@ -200,7 +199,7 @@ static void reduce1d_native_tiled(at::Tensor& A, at::Tensor& B) {
   }
 
   float result = sum_f32x8(t[0]);
-  for (const auto j : c10::irange(1, kTileSize)) {
+  for (int j = 1; j < kTileSize; j++) {
     result += sum_f32x8(t[j]);
   }
   *pB = result;
@@ -532,15 +531,15 @@ BENCHMARK_DEFINE_F(Reduce2DRow, Hand)(benchmark::State& state) {
     for (int m_outer = 0; m_outer < M; m_outer += Mb) {
       float bregs[Mb][Nb] = {0.0f};
       for (int n_outer = 0; n_outer < N; n_outer += Nb) {
-        for (const auto m_inner : c10::irange(Mb)) {
-          for (const auto n_inner : c10::irange(Nb)) {
+        for (int m_inner = 0; m_inner < Mb; m_inner++) {
+          for (int n_inner = 0; n_inner < Nb; n_inner++) {
             bregs[m_inner][n_inner] += a[(m_outer + m_inner) * N + n_outer + n_inner];
           }
         }
       }
-      for (const auto m_inner : c10::irange(Mb)) {
+      for (int m_inner = 0; m_inner < Mb; m_inner++) {
         b[m_outer + m_inner] = 0.f;
-        for (const auto n_inner : c10::irange(Nb)) {
+        for (int n_inner = 0; n_inner < Nb; n_inner++) {
           b[m_outer + m_inner] += bregs[m_inner][n_inner];
         }
       }

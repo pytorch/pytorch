@@ -67,7 +67,7 @@ class FunHashOp : public Operator<Context> {
 
     int64_t n_segments = num_segments_;
     if (num_segments_ == -1) {
-      for (const auto i : c10::irange(num_nz_ent)) {
+      for (int64_t i = 0; i < num_nz_ent; ++i) {
         if (seg_data[i] > n_segments) {
           n_segments = seg_data[i];
         }
@@ -86,14 +86,14 @@ class FunHashOp : public Operator<Context> {
     const auto* val_data = val.template data<T>();
     const auto* key_data = key.template data<int64_t>();
 
-    for (const auto j : c10::irange(num_nz_ent)) {
+    for (int64_t j = 0; j < num_nz_ent; ++j) {
       int64_t cur_seg = seg_data[j];
       int64_t cur_key = key_data[j];
       T cur_val = val_data[j];
       int64_t output_stride = cur_seg * num_outputs_;
-      for (const auto i : c10::irange(num_outputs_)) {
+      for (int64_t i = 0; i < num_outputs_; ++i) {
         T sum = 0;
-        for (const auto k : c10::irange(num_alpha)) {
+        for (int64_t k = 0; k < num_alpha; ++k) {
           uint64_t hash;
           // The hash function takes as input four integers:
           // 1. feature index
@@ -186,14 +186,14 @@ class FunHashGradientOp : public Operator<Context> {
 
     memset(grad_weight_data, 0, sizeof(T) * num_weight);
 
-    for (const auto j : c10::irange(num_nz_ent)) {
+    for (int64_t j = 0; j < num_nz_ent; ++j) {
       int64_t cur_seg = seg_data[j];
       int64_t cur_key = key_data[j];
       T cur_val = val_data[j];
       int64_t grad_out_stride = cur_seg * num_outputs_;
-      for (const auto i : c10::irange(num_outputs_)) {
+      for (int64_t i = 0; i < num_outputs_; ++i) {
         T grad_out_scale = grad_out_data[grad_out_stride + i] * cur_val;
-        for (const auto k : c10::irange(num_alpha)) {
+        for (int64_t k = 0; k < num_alpha; ++k) {
           uint64_t hash;
           hash_data[0] = cur_key;
           hash_data[1] = i;
