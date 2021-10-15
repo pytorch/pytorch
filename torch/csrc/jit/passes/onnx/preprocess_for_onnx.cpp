@@ -144,7 +144,7 @@ static void ReplaceAddWithConcat(Block* b) {
         continue;
       }
 
-      TypePtr elem =
+      const auto& elem =
           it->input(0)->type()->castRaw<ListType>()->getElementType();
       if (elem->cast<IntType>()) {
         Node* concat_node = b->owningGraph()->create(onnx::Concat, 1);
@@ -152,8 +152,7 @@ static void ReplaceAddWithConcat(Block* b) {
         concat_node->insertBefore(*it);
         concat_node->addInput(it->input(0));
         concat_node->addInput(it->input(1));
-        concat_node->outputs()[0]->setType(
-            TensorType::fromNumberType(std::move(elem)));
+        concat_node->outputs()[0]->setType(TensorType::fromNumberType(*elem));
         it->replaceAllUsesWith(concat_node);
         it->removeAllInputs();
         it.destroyCurrent();
