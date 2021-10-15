@@ -1997,7 +1997,7 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
         t if not t.is_complex() else torch.view_as_real(t) for t in tensor_list
     ]
     tensor = tensor if not tensor.is_complex() else torch.view_as_real(tensor)
-
+    group = _get_default_group()
     if group is None:
         default_pg = _get_default_group()
         work = default_pg.allgather([tensor_list], [tensor])
