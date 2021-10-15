@@ -3,12 +3,14 @@
 #include <torch/csrc/jit/passes/inliner.h>
 
 #include <torch/csrc/jit/frontend/error_report.h>
-#include <torch/csrc/jit/passes/autocast.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/peephole.h>
 
+#ifndef C10_MOBILE
 #include <ATen/autocast_mode.h>
+#include <torch/csrc/jit/passes/autocast.h>
+#endif
 
 namespace torch {
 namespace jit {
