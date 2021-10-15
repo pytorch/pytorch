@@ -372,8 +372,11 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         mod = torch.jit.freeze(mod.eval())
         inp = list(mod.graph.inputs())[1]
         inp.setType(inp.type().with_sizes([None, None, None, None]))
-        shape_compute_graph = torch._C._jit_pass_propagate_shapes_on_graph_and_build_compute(mod.graph, next(mod.graph.nodes()), mod.graph.findNode("prim::TupleConstruct"))
-        import pdb; pdb.set_trace()
+        shape_compute_graph = torch._C._jit_pass_propagate_shapes_on_graph_and_build_compute(
+            mod.graph,
+            next(mod.graph.nodes()),
+            mod.graph.findNode("prim::TupleConstruct")
+        )
         max_pool_node = mod.graph.findNode("aten::max_pool2d_with_indices")
         outs = list(max_pool_node.outputs())
         self.assertEqual(outs[0].type().symbolic_sizes(), outs[1].type().symbolic_sizes())

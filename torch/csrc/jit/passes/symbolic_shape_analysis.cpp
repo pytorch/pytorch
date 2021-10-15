@@ -205,10 +205,14 @@ struct SymbolicShapeNodeAnalyzer {
       std::shared_ptr<Graph> shape_compute_graph,
       const AliasDb& db)
       : shape_compute_graph_(shape_compute_graph->copy()), node_(n) {
+    // NB: shape compute graphs may have less inputs than their node
+    // counterparts to allow e.g. sharing one single unary definition
+    // so iterate on # of shape inputs
+    size_t shape_graph_initial_inputs = shape_compute_graph_->inputs().size();
     // We make lists of Tensor inputs variadic, which results in
     // offset between a node index and its corresponding graph index
     size_t graph_index_offset = 0;
-    for (size_t node_index = 0; node_index < node_->inputs().size();
+    for (size_t node_index = 0; node_index < shape_graph_initial_inputs;
          node_index++) {
       auto type = node_->input(node_index)->type();
       size_t graph_index = graph_index_offset + node_index;
@@ -219,7 +223,7 @@ struct SymbolicShapeNodeAnalyzer {
                               ->cast<OptionalType>()) {
         // None will get handled with constant substitution later
         if (!type->cast<OptionalType>() &&
-            !NoneType::get()->isSubtypeOf(type)) {
+            !NoneType::get()->isSubtypeOf(*type)) {
           shape_compute_graph_->inputs()
               .at(graph_index)
               ->setType(opt_type->getElementType());
@@ -620,7 +624,7 @@ struct SymbolicShapeGraphAnalyzer {
     std::unordered_map<Node*, std::shared_ptr<Graph>> partial_evaluated_graphs =
         propagateShapesAndGatherPartialEvalShapeGraphs(db);
 
-    auto large_shape_compute_graph = std::make_shared<Graph>();
+    auto stitched_shape_compute_graph = std::make_shared<Graph>();
     // We want to build up a computational graph which computes all shapes
     // we dont know statically - that is, all symbolic shapes within
     // the region [beg, end). it must be executable before beg.
@@ -652,7 +656,7 @@ struct SymbolicShapeGraphAnalyzer {
       }
       auto partial_eval_graph = partial_evaluated_graphs[curr];
       joinPartialEvaluatedShapeGraphToLargeShapeGraph(
-          curr, partial_eval_graph, large_shape_compute_graph);
+          curr, partial_eval_graph, stitched_shape_compute_graph);
     }
 
     size_t MAX_ITER = 8;
@@ -660,7 +664,7 @@ struct SymbolicShapeGraphAnalyzer {
     size_t i = 0;
     while (i < MAX_ITER && made_change) {
       i++;
-      made_change = shapeGraphCleanupPasses(large_shape_compute_graph);
+      made_change = shapeGraphCleanupPasses(stitched_shape_compute_graph);
     }
 
     // for any output that is duplicated, the symbolic shape must be equal
@@ -669,8 +673,9 @@ struct SymbolicShapeGraphAnalyzer {
     std::unordered_map<Value*, int64_t> graph_output_to_symbolic_shape_dim;
     std::vector<size_t> erase_indices;
 
-    for (size_t i = 0; i < large_shape_compute_graph->outputs().size(); ++i) {
-      Value* output = large_shape_compute_graph->outputs().at(i);
+    for (size_t i = 0; i < stitched_shape_compute_graph->outputs().size();
+         ++i) {
+      Value* output = stitched_shape_compute_graph->outputs().at(i);
       // this Value is already contained, so the symbolic shape for i must be
       // equal to the symbolic shape at the existing index
       if (graph_output_to_symbolic_shape_dim.count(output)) {
@@ -684,13 +689,13 @@ struct SymbolicShapeGraphAnalyzer {
       }
     }
     for (int64_t i = erase_indices.size() - 1; i >= 0; i--) {
-      large_shape_compute_graph->eraseOutput(erase_indices[i]);
+      stitched_shape_compute_graph->eraseOutput(erase_indices[i]);
     }
-    for (size_t i = 0; i < large_shape_compute_graph->inputs().size();) {
-      if (!large_shape_compute_graph->inputs().at(i)->hasUses()) {
+    for (size_t i = 0; i < stitched_shape_compute_graph->inputs().size();) {
+      if (!stitched_shape_compute_graph->inputs().at(i)->hasUses()) {
         enclosing_graph_value_to_shape_graph_input_.erase(
-            large_shape_compute_graph->inputs().at(i));
-        large_shape_compute_graph->eraseInput(i);
+            stitched_shape_compute_graph->inputs().at(i));
+        stitched_shape_compute_graph->eraseInput(i);
       } else {
         ++i;
       }
@@ -698,7 +703,7 @@ struct SymbolicShapeGraphAnalyzer {
 
     updateGraphWithSymbolicShapeEqualities(discovered_sym_shape_equalities);
     return ShapeComputeGraphMapping(
-        large_shape_compute_graph,
+        stitched_shape_compute_graph,
         enclosing_graph_value_to_shape_graph_input_,
         graph_output_to_symbolic_shape_dim);
   }
@@ -735,7 +740,7 @@ struct SymbolicShapeGraphAnalyzer {
   void joinPartialEvaluatedShapeGraphToLargeShapeGraph(
       Node* curr,
       std::shared_ptr<Graph> partial_eval_graph,
-      std::shared_ptr<Graph> large_shape_compute_graph) {
+      std::shared_ptr<Graph> stitched_shape_compute_graph) {
     // we are building up the large shape compute graph by iteratively
     // combining partially evaluated individual node shape graphs.
 
@@ -754,7 +759,9 @@ struct SymbolicShapeGraphAnalyzer {
     // dimensions
 
     std::vector<Value*> inputs;
-    for (size_t i = 0; i < curr->inputs().size(); ++i) {
+    // NB: node can have more inputs than the shape graph
+    // so iterate on the # of shape graph inputs
+    for (size_t i = 0; i < partial_eval_graph->inputs().size(); ++i) {
       auto node_input = curr->input(i);
       auto existing_graph_mapping =
           enclosing_graph_value_to_shape_graph_input_.find(curr->input(i));
@@ -763,7 +770,7 @@ struct SymbolicShapeGraphAnalyzer {
         inputs.push_back(existing_graph_mapping->second);
       } else {
         Value* shape_graph_input =
-            large_shape_compute_graph->addInput()->copyMetadata(
+            stitched_shape_compute_graph->addInput()->copyMetadata(
                 partial_eval_graph->inputs().at(i));
         enclosing_graph_value_to_shape_graph_input_[node_input] =
             shape_graph_input;
@@ -771,10 +778,10 @@ struct SymbolicShapeGraphAnalyzer {
       }
     }
 
-    WithInsertPoint guard(large_shape_compute_graph->block());
+    WithInsertPoint guard(stitched_shape_compute_graph->block());
     std::unordered_map<Value*, Value*> value_map;
     insertGraph(
-        *large_shape_compute_graph, *partial_eval_graph, inputs, value_map);
+        *stitched_shape_compute_graph, *partial_eval_graph, inputs, value_map);
 
     for (size_t i = 0; i < curr->outputs().size(); ++i) {
       Value* new_list_output = value_map[partial_eval_graph->outputs().at(i)];
@@ -797,13 +804,13 @@ struct SymbolicShapeGraphAnalyzer {
         if (symbolic_shape_value_to_graph_output_.count(symbolic_shape)) {
           continue;
         }
-        large_shape_compute_graph->registerOutput(
+        stitched_shape_compute_graph->registerOutput(
             new_list_output->node()->input(i));
         output_index_to_symbolic_shape_
-            [large_shape_compute_graph->outputs().size() - 1] = symbolic_shape;
+            [stitched_shape_compute_graph->outputs().size() - 1] = symbolic_shape;
         symbolic_shape_value_to_graph_output_[symbolic_shape] =
-            large_shape_compute_graph->outputs().at(
-                large_shape_compute_graph->outputs().size() - 1);
+            stitched_shape_compute_graph->outputs().at(
+                stitched_shape_compute_graph->outputs().size() - 1);
       }
     }
   }
