@@ -11,7 +11,7 @@ import random
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, do_test_empty_full, TEST_WITH_ROCM, suppress_warnings,
-    torch_to_numpy_dtype_dict, skipIfTBB, slowTest,
+    torch_to_numpy_dtype_dict, slowTest,
     TEST_SCIPY, IS_MACOS, IS_PPC, IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, deviceCountAtLeast, onlyOnCPUAndCUDA,
@@ -1205,7 +1205,6 @@ class TestTensorCreation(TestCase):
         self.assertRaises(RuntimeError, lambda: torch.zeros((2, 3), device=device, dtype=torch.float32, out=d))
 
     # TODO: update to work on CUDA, too
-    @skipIfTBB("This test makes TBB sad, see https://github.com/pytorch/pytorch/issues/64571")
     @onlyCPU
     def test_trilu_indices(self, device):
         for test_args in tri_tests_args:
@@ -3257,6 +3256,10 @@ class TestRandomTensorCreation(TestCase):
             self.assertEqual(t_transform(r[50:]).mean(), 1, atol=0.2, rtol=0)
             self.assertEqual(t_transform(r[:, :50]).std(), std_transform(4), atol=0.3, rtol=0)
             self.assertEqual(t_transform(r[:, 50:]).std(), std_transform(1), atol=0.2, rtol=0)
+
+            # test empty mean/std
+            out = torch.normal(mean=torch.empty((0, 2)), std=torch.empty((0, 1)))
+            self.assertEqual(out.size(), torch.Size([0, 2]))
 
             r.fill_(42)
             r = torch.normal(2, 3, (100, 100), dtype=dtype, device=device)
