@@ -176,8 +176,8 @@ def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
         for idx, placement in enumerate(weight._sharding_spec.placements):
             offset = input_split_sizes[placement.rank()]
             input_idx = idx * sharded_dim_size_max
-            indices[placement.rank()] = range(input_idx, input_idx + offset)
-        indices = list(itertools.chain(*indices))
+            indices[placement.rank()] = list(range(input_idx, input_idx + offset))
+        indices = list(itertools.chain.from_iterable(indices))
 
         input_t = input_t.index_select(0, torch.tensor(indices, device=input_t.device))
 
