@@ -95,7 +95,7 @@ class ExprNode : public Base {
 class TORCH_API ExprHandle {
  public:
   ExprHandle() = default;
-  explicit ExprHandle(ExprPtr node) : base_expr_node_(node) {}
+  explicit ExprHandle(ExprPtr node) : base_expr_node_(std::move(node)) {}
 
   ExprPtr node() {
     return base_expr_node_;
@@ -231,9 +231,9 @@ class TORCH_API Buf : public ExprNode<Buf> {
       : ExprNodeBase(dtype, kPrimitive),
         base_handle_(var),
         dims_(std::move(dims)),
-        initializer_(initializer),
-        qscale_(qscale),
-        qzero_(qzero) {
+        initializer_(std::move(initializer)),
+        qscale_(std::move(qscale)),
+        qzero_(std::move(qzero)) {
     TORCH_CHECK(var);
   }
 
@@ -274,7 +274,7 @@ class TORCH_API Buf : public ExprNode<Buf> {
   }
 
   bool hasConstantDims() const {
-    for (auto d : dims_) {
+    for (const auto& d : dims_) {
       if (!d->isConstant()) {
         return false;
       }
