@@ -4,9 +4,11 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import sys
 import threading
+import types
 from contextlib import contextmanager
-from typing import Callable, Dict, Iterator, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 import torch
 from torch import Tensor
@@ -17,7 +19,7 @@ from torch.utils._python_dispatch import enable_python_mode
 _tls = threading.local()
 
 # Used to check nested `init_meta()` calls.
-_tls.in_call = False
+_tls.is_meta_init = False
 
 
 @contextmanager
@@ -79,7 +81,7 @@ class _MetaContext(Tensor):
         op_handler: Optional[Callable]
 
         # Some operators such as `tril()` do not support the meta backend. For
-        # such operators we use special handlers.
+        # such cases we use special handlers.
         try:
             op_handler = cls._op_handlers[func]
         except KeyError:
@@ -103,6 +105,64 @@ class _MetaContext(Tensor):
             return func(*args, **kwargs)
 
 
+def _get_frame_args(frame) -> Tuple[List[Any], Dict[str, Any]]:
+    """Extracts positional and keyword arguments from a call frame."""
+    code = frame.f_code
+
+    # The `co_posonlyargcount` attribute is introduced in CPython 3.8; since we
+    # still support v3.6 we can't use it here.
+    num_pos_args = code.co_argcount - code.co_kwonlyargcount
+
+    args = []
+
+    for arg_name in code.co_varnames[1:num_pos_args]:
+        args.append(frame.f_locals[arg_name])
+
+    kwargs = {}
+
+    for arg_name in code.co_varnames[num_pos_args:code.co_argcount]:
+        kwargs[arg_name] = frame.f_locals[arg_name]
+
+    return args, kwargs
+
+
+def _trace_nn_modules(frame, event: str, arg: Any) -> None:
+    """Traces `torch.nn.Module` instances and injects `materialize()`."""
+    if event == "call" and frame.f_code.co_name == "__init__":
+        # Although it is a very strong convention to use the name 'self' for the
+        # instance parameter, let's be pedantic here.
+        self_param_name = frame.f_code.co_varnames[0]
+
+        # The arguments of the function are technically its local variables.
+        self = frame.f_locals[self_param_name]
+
+        # If the instance is of type `torch.nn.Module`, capture its constructor
+        # arguments and inject a `materialize()` method.
+        if isinstance(self, Module):
+            # Since every type in the MRO list of the instance will have its own
+            # constructor, we have to make sure that we set `materialize()` only
+            # in the first call of the chain. We use `materialize()` itself as a
+            # marker for that.
+            if not hasattr(self, "materialize"):
+                args, kwargs = _get_frame_args(frame)
+
+                def materialize(self, *, in_place: bool = False):
+                    """Materializes the module.
+
+                    Args:
+                        in_place:
+                            Indicates whether to materialize the instance itself
+                            rather than creating a new instance.
+                    """
+                    if in_place:
+                        self.__init__(*args, **kwargs)
+                        return self
+
+                    return type(self)(*args, **kwargs)
+
+                self.materialize = types.MethodType(materialize, self)  # type: ignore[assignment]
+
+
 def init_meta(module_fn: Callable[..., Module], *args, **kwargs) -> Module:
     """Constructs a module on the meta device for inspection purposes.
 
@@ -112,10 +172,16 @@ def init_meta(module_fn: Callable[..., Module], *args, **kwargs) -> Module:
     Internally ``init_meta()`` forces all parameters, buffers, and other tensors
     within the scope of the module and its sub-modules to use the meta device
     regardless of the actual device of the tensor, even if that device was
-    explicitly passed to the constructor of the tensor. The returned module can
-    be used for inspection purposes and afterwards its ``materialize()`` method
-    can be called to construct a fully-instantiated module (see the example
-    below).
+    explicitly passed to the constructor of the tensor. In addition it injects a
+    ``materialize()`` method to every ``torch.nn.Module`` constructed in the
+    scope of the call.
+
+    The returned module and its submodules can be used for inspection purposes
+    and afterwards their ``materialize()`` methods can be called to construct a
+    fully-instantiated module (see the example below). Moreover calling
+    ``materialize()`` for a parent module also materializes its submodules. If
+    you like to materialize a module in place, you can pass ``in_place=True`` to
+    ``materialize()``.
 
     However note that ``init_meta()`` uses a "best effort" algorithm and is not
     guaranteed to succeed if the underlying module's implementation cannot be
@@ -169,29 +235,31 @@ def init_meta(module_fn: Callable[..., Module], *args, **kwargs) -> Module:
 
 
     Note:
-        The ``args`` and ``kwargs`` arguments must be treated as immutable by
-        the module constructor since they might be used a second time if
-        ``materialize()`` is called.
+        The module constructor arguments must be treated as immutable since they
+        might be used a second time if ``materialize()`` is called.
     """
 
-    def create_instance() -> Module:
-        return module_fn(*args, **kwargs)
-
-    if _tls.in_call:
-        module = create_instance()
+    if _tls.is_meta_init:
+        module = module_fn(*args, **kwargs)
     else:
-        _tls.in_call = True
-        try:
-            with enable_python_mode(_MetaContext):
-                module = create_instance()
-        finally:
-            _tls.in_call = False
+        _tls.is_meta_init = True
 
-    module.materialize = create_instance  # type: ignore[assignment]
+        # We use CPython tracing to inject `materialize()` to modules.
+        sys.settrace(_trace_nn_modules)
+
+        try:
+            # MetaContext forces all tensors to use the meta device regardless
+            # of their actual device.
+            with enable_python_mode(_MetaContext):
+                module = module_fn(*args, **kwargs)
+        finally:
+            sys.settrace(None)
+
+            _tls.is_meta_init = False
 
     return module
 
 
 def is_meta_init() -> bool:
     """Indicates whether the module is being instantiated by ``init_meta()``."""
-    return _tls.in_call
+    return _tls.is_meta_init
