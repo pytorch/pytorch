@@ -793,7 +793,7 @@ struct TORCH_API ListType
   }
   TypePtr createWithContained(
       std::vector<TypePtr> contained_types) const override {
-    return create(contained_types.at(0));
+    return create(std::move(contained_types.at(0)));
   }
 
   bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override;
