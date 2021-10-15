@@ -1996,6 +1996,7 @@ works_list = [
     'fmod.autodiffed',
     'ge',
     'gt',
+    'isnan',
     'le',
     'lerp',
     'lgamma',
@@ -2027,6 +2028,7 @@ works_list = [
     'remainder',
     'remainder.autodiffed',
     'reshape',
+    'reshape_as',
     'round',
     'rsub',
     'rsub.rsub_tensor',
@@ -2038,6 +2040,7 @@ works_list = [
     'sqrt',
     'sub',
     'sum',
+    't',
     'tan',
     'tanh',
     'transpose',
@@ -2045,7 +2048,17 @@ works_list = [
     'trunc',
     'unsqueeze',
     'view',
+    'view_as',
     'where',
+    'bool',
+    'byte',
+    'char',
+    'double',
+    'float',
+    'half',
+    'int',
+    'long',
+    'short',
 ]
 
 known_failures = [
@@ -2056,12 +2069,7 @@ known_failures = [
 
 # If your OpInfo test causes this test to fail, add it here
 skip_ops = [
-    # Causing SIGSEGV
-    # Reference: https://github.com/pytorch/pytorch/pull/59442/checks?check_run_id=2746156896
-    't',
     'conj'
-    'view',
-    'reshape',
 ]
 
 def get_name(op):
@@ -2072,8 +2080,6 @@ def get_name(op):
 
 class TestNNCOpInfo(TestCase):
     def te_compile(self, device, dtype, op):
-        # If adding new OpInfo tests cause this test to fail, add it into here
-        skip_ops = ['view', 'reshape']
         if op.name in skip_ops:
             return
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
