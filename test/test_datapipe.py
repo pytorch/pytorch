@@ -112,7 +112,8 @@ def create_temp_dir_and_files():
 # Then, reset the DataPipe and return a tuple of two lists
 # 1. A list of elements yielded before the reset
 # 2. A list of all elements of the DataPipe after the reset
-def reset_after_n_next_calls(datapipe: IterDataPipe[T_co], n: int) -> Tuple[List[T_co], List[T_co]]:
+def reset_after_n_next_calls(datapipe: Union[IterDataPipe[T_co], MapDataPipe[T_co]],
+                             n: int) -> Tuple[List[T_co], List[T_co]]:
     it = iter(datapipe)
     res_before_reset = []
     for _ in range(n):
@@ -644,19 +645,6 @@ class IDP_NoLen(IterDataPipe):
             yield i
 
 
-class MDP(MapDataPipe):
-    def __init__(self, input_dp):
-        super().__init__()
-        self.input_dp = input_dp
-        self.length = len(input_dp)
-
-    def __getitem__(self, index):
-        return self.input_dp[index]
-
-    def __len__(self) -> int:
-        return self.length
-
-
 def _fake_fn(data, *args, **kwargs):
     return data
 
@@ -696,6 +684,37 @@ class TestFunctionalIterDataPipe(TestCase):
                 self.assertRegex(str(wa[0].message), r"^Lambda function is not supported for pickle")
                 with self.assertRaises(AttributeError):
                     p = pickle.dumps(datapipe)
+
+    def test_iterable_wrapper_datapipe(self):
+
+        input_ls = list(range(10))
+        input_dp = dp.iter.IterableWrapper(input_ls)
+
+        # Functional Test: values are unchanged and in the same order
+        self.assertEqual(input_ls, list(input_dp))
+
+        # Functional Test: deep copy by default when an iterator is initialized (first element is read)
+        it = iter(input_dp)
+        self.assertEqual(0, next(it))  # The deep copy only happens when the first element is read
+        input_ls.append(50)
+        self.assertEqual(list(range(1, 10)), list(it))
+
+        # Functional Test: shallow copy
+        input_ls2 = [1, 2, 3]
+        input_dp_shallow = dp.iter.IterableWrapper(input_ls2, deepcopy=False)
+        input_ls2.append(10)
+        self.assertEqual([1, 2, 3, 10], list(input_dp_shallow))
+
+        # Reset Test: reset the DataPipe
+        input_ls = list(range(10))
+        input_dp = dp.iter.IterableWrapper(input_ls)
+        n_elements_before_reset = 5
+        res_before_reset, res_after_reset = reset_after_n_next_calls(input_dp, n_elements_before_reset)
+        self.assertEqual(input_ls[:n_elements_before_reset], res_before_reset)
+        self.assertEqual(input_ls, res_after_reset)
+
+        # __len__ Test: inherits length from sequence
+        self.assertEqual(len(input_ls), len(input_dp))
 
     def test_concat_datapipe(self):
         input_dp1 = dp.iter.IterableWrapper(range(10))
@@ -840,6 +859,40 @@ class TestFunctionalIterDataPipe(TestCase):
         self.assertEqual(len(input_dp), len(dp1))
         self.assertEqual(len(input_dp), len(dp2))
         self.assertEqual(len(input_dp), len(dp3))
+
+    def test_mux_datapipe(self):
+
+        # Functional Test: Elements are yielded one at a time from each DataPipe, until they are all exhausted
+        input_dp1 = dp.iter.IterableWrapper(range(4))
+        input_dp2 = dp.iter.IterableWrapper(range(4, 8))
+        input_dp3 = dp.iter.IterableWrapper(range(8, 12))
+        output_dp = input_dp1.mux(input_dp2, input_dp3)
+        expected_output = [0, 4, 8, 1, 5, 9, 2, 6, 10, 3, 7, 11]
+        self.assertEqual(len(expected_output), len(output_dp))
+        self.assertEqual(expected_output, list(output_dp))
+
+        # Functional Test: Uneven input Data Pipes
+        input_dp1 = dp.iter.IterableWrapper([1, 2, 3, 4])
+        input_dp2 = dp.iter.IterableWrapper([10])
+        input_dp3 = dp.iter.IterableWrapper([100, 200, 300])
+        output_dp = input_dp1.mux(input_dp2, input_dp3)
+        expected_output = [1, 10, 100, 2, 200, 3, 300, 4]
+        self.assertEqual(len(expected_output), len(output_dp))
+        self.assertEqual(expected_output, list(output_dp))
+
+        # Functional Test: Empty Data Pipe
+        input_dp1 = dp.iter.IterableWrapper([0, 1, 2, 3])
+        input_dp2 = dp.iter.IterableWrapper([])
+        output_dp = input_dp1.mux(input_dp2)
+        self.assertEqual(len(input_dp1), len(output_dp))
+        self.assertEqual(list(input_dp1), list(output_dp))
+
+        # __len__ Test: raises TypeError when __len__ is called and an input doesn't have __len__
+        input_dp1 = dp.iter.IterableWrapper(range(10))
+        input_dp_no_len = IDP_NoLen(range(10))
+        output_dp = input_dp1.mux(input_dp_no_len)
+        with self.assertRaises(TypeError):
+            len(output_dp)
 
     def test_demux_datapipe(self):
         input_dp = dp.iter.IterableWrapper(range(10))
@@ -1443,8 +1496,8 @@ class TestFunctionalMapDataPipe(TestCase):
         picklable_datapipes: List[
             Tuple[Type[MapDataPipe], MapDataPipe, Tuple, Dict[str, Any]]
         ] = [
-            (dp.map.Mapper, MDP(arr), (), {}),
-            (dp.map.Mapper, MDP(arr), (_fake_fn, (0,), {'test': True}), {}),
+            (dp.map.Mapper, dp.map.SequenceWrapper(arr), (), {}),
+            (dp.map.Mapper, dp.map.SequenceWrapper(arr), (_fake_fn, (0,), {'test': True}), {}),
         ]
         for dpipe, input_dp, dp_args, dp_kwargs in picklable_datapipes:
             p = pickle.dumps(dpipe(input_dp, *dp_args, **dp_kwargs))  # type: ignore[call-arg]
@@ -1452,7 +1505,7 @@ class TestFunctionalMapDataPipe(TestCase):
         unpicklable_datapipes: List[
             Tuple[Type[MapDataPipe], MapDataPipe, Tuple, Dict[str, Any]]
         ] = [
-            (dp.map.Mapper, MDP(arr), (lambda x: x,), {}),
+            (dp.map.Mapper, dp.map.SequenceWrapper(arr), (lambda x: x,), {}),
         ]
         for dpipe, input_dp, dp_args, dp_kwargs in unpicklable_datapipes:
             with warnings.catch_warnings(record=True) as wa:
@@ -1464,9 +1517,36 @@ class TestFunctionalMapDataPipe(TestCase):
                 with self.assertRaises(AttributeError):
                     p = pickle.dumps(datapipe)
 
+    def test_sequence_wrapper_datapipe(self):
+        seq = list(range(10))
+        input_dp = dp.map.SequenceWrapper(seq)
+
+        # Functional Test: all elements are equal in the same order
+        self.assertEqual(seq, list(input_dp))
+
+        # Functional Test: confirm deepcopy works by default
+        seq.append(11)
+        self.assertEqual(list(range(10)), list(input_dp))  # input_dp shouldn't have 11
+
+        # Functional Test: non-deepcopy version is working
+        seq2 = [1, 2, 3]
+        input_dp_non_deep = dp.map.SequenceWrapper(seq2, deepcopy=False)
+        seq2.append(4)
+        self.assertEqual(list(seq2), list(input_dp_non_deep))  # should have 4
+
+        # Reset Test: reset the DataPipe
+        seq = list(range(10))
+        n_elements_before_reset = 5
+        res_before_reset, res_after_reset = reset_after_n_next_calls(input_dp, n_elements_before_reset)
+        self.assertEqual(list(range(5)), res_before_reset)
+        self.assertEqual(seq, res_after_reset)
+
+        # __len__ Test: inherits length from sequence
+        self.assertEqual(len(seq), len(input_dp))
+
     def test_concat_datapipe(self):
-        input_dp1 = MDP(range(10))
-        input_dp2 = MDP(range(5))
+        input_dp1 = dp.map.SequenceWrapper(range(10))
+        input_dp2 = dp.map.SequenceWrapper(range(5))
 
         with self.assertRaisesRegex(ValueError, r"Expected at least one DataPipe"):
             dp.map.Concater()
@@ -1482,7 +1562,7 @@ class TestFunctionalMapDataPipe(TestCase):
 
     def test_map_datapipe(self):
         arr = range(10)
-        input_dp = MDP(arr)
+        input_dp = dp.map.SequenceWrapper(arr)
 
         def fn(item, dtype=torch.float, *, sum=False):
             data = torch.tensor(item, dtype=dtype)
@@ -1510,40 +1590,6 @@ class TestFunctionalMapDataPipe(TestCase):
             self.assertEqual(
                 map_dp[index], torch.tensor(input_dp[index], dtype=torch.int).sum()
             )
-
-    def test_mux_datapipe(self):
-
-        # Test Case: Elements are yielded one at a time from each DataPipe, until they are all exhausted
-        input_dp1 = dp.iter.IterableWrapper(range(4))
-        input_dp2 = dp.iter.IterableWrapper(range(4, 8))
-        input_dp3 = dp.iter.IterableWrapper(range(8, 12))
-        output_dp = input_dp1.mux(input_dp2, input_dp3)
-        expected_output = [0, 4, 8, 1, 5, 9, 2, 6, 10, 3, 7, 11]
-        self.assertEqual(len(expected_output), len(output_dp))
-        self.assertEqual(expected_output, list(output_dp))
-
-        # Test Case: Uneven input Data Pipes
-        input_dp1 = dp.iter.IterableWrapper([1, 2, 3, 4])
-        input_dp2 = dp.iter.IterableWrapper([10])
-        input_dp3 = dp.iter.IterableWrapper([100, 200, 300])
-        output_dp = input_dp1.mux(input_dp2, input_dp3)
-        expected_output = [1, 10, 100, 2, 200, 3, 300, 4]
-        self.assertEqual(len(expected_output), len(output_dp))
-        self.assertEqual(expected_output, list(output_dp))
-
-        # Test Case: Empty Data Pipe
-        input_dp1 = dp.iter.IterableWrapper([0, 1, 2, 3])
-        input_dp2 = dp.iter.IterableWrapper([])
-        output_dp = input_dp1.mux(input_dp2)
-        self.assertEqual(len(input_dp1), len(output_dp))
-        self.assertEqual(list(input_dp1), list(output_dp))
-
-        # Test Case: raises TypeError when __len__ is called and an input doesn't have __len__
-        input_dp1 = dp.iter.IterableWrapper(range(10))
-        input_dp_no_len = IDP_NoLen(range(10))
-        output_dp = input_dp1.mux(input_dp_no_len)
-        with self.assertRaises(TypeError):
-            len(output_dp)
 
 # Metaclass conflict for Python 3.6
 # Multiple inheritance with NamedTuple is not supported for Python 3.9

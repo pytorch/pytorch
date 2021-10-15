@@ -11,8 +11,7 @@ layout(set = 0, binding = 2) uniform PRECISION                    sampler3D uKer
 layout(set = 0, binding = 3) buffer  PRECISION restrict readonly  Bias {
   vec4 data[];
 } uBias;
-
-layout(push_constant) uniform PRECISION restrict Block {
+layout(set = 0, binding = 4) uniform PRECISION restrict           Block {
   ivec4 size;
   vec2 clamp;
 } uBlock;

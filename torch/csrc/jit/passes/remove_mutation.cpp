@@ -88,7 +88,8 @@ bool removableSetItem(Node* n) {
   if (index < 0) {
     index += li_node->inputs().size();
   }
-  return index < static_cast<int64_t>(li_node->inputs().size());
+  auto li_len = static_cast<int64_t>(li_node->inputs().size());
+  return index < li_len && index >= 0;
 }
 
 bool MutationRemover::listMutationFollowingListConstruct(Node* n) {
