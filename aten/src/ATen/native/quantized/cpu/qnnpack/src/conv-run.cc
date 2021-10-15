@@ -4,6 +4,7 @@
 #include <qnnpack_func.h>
 #include <cstring>
 #include <memory>
+#include <numeric>
 
 namespace qnnpack {
 
@@ -279,6 +280,7 @@ enum pytorch_qnnp_status qnnpackConv(
     const pytorch_qnnp_operator_t convolution,
     void* packed_weights,
     const size_t batch_size,
+    const size_t input_depth,
     const size_t input_height,
     const size_t input_width,
     const uint8_t input_zero_point,
@@ -296,15 +298,16 @@ enum pytorch_qnnp_status qnnpackConv(
       convolution->group_output_channels * groups;
   const size_t kernel_width = convolution->kernel_width;
   const size_t kernel_height = convolution->kernel_height;
-  const size_t kernel_size = kernel_height * kernel_width;
+  const size_t kernel_depth = convolution->kernel_depth;
+  const size_t kernel_size = kernel_height * kernel_width * kernel_depth;
 
   if (batch_size == 0) {
     // If no batches, return
     return pytorch_qnnp_status_success;
   }
 
-  union pytorch_qnnp_q31_requantization_params requantization_params;
-  union pytorch_qnnp_conv_quantization_params conv_quantization_params;
+  union pytorch_qnnp_q31_requantization_params requantization_params {};
+  union pytorch_qnnp_conv_quantization_params conv_quantization_params {};
   if (convolution->ukernel_type == pytorch_qnnp_ukernel_type_xzp_gemm) {
     requantization_params = pytorch_qnnp_compute_requantization_params(
         // Note. XZP kernels are not changed for per channel quant.
@@ -326,14 +329,15 @@ enum pytorch_qnnp_status qnnpackConv(
   // We need to check if the corresponding values on this
   // invocation is same as cached values.
   // If so we can skip setup step.
-  if (convolution->input != input ||
-      convolution->batch_size != batch_size ||
+  if (convolution->input != input || convolution->batch_size != batch_size ||
+      convolution->input_depth != input_depth ||
       convolution->input_height != input_height ||
       convolution->input_width != input_width ||
       convolution->input_pixel_stride != input_pixel_stride) {
-    pytorch_qnnp_status status = pytorch_qnnp_setup_convolution2d_nhwc_q8(
+    pytorch_qnnp_status status = pytorch_qnnp_setup_convolution_ndhwc_q8(
         convolution,
         batch_size,
+        input_depth,
         input_height,
         input_width,
         input,
@@ -348,7 +352,8 @@ enum pytorch_qnnp_status qnnpackConv(
     }
   }
 
-  const size_t output_size = convolution->output_height * convolution->output_width;
+  const size_t output_size = convolution->output_height *
+      convolution->output_width * convolution->output_depth;
 
   switch (convolution->ukernel_type) {
     case pytorch_qnnp_ukernel_type_dwconv: {
@@ -442,14 +447,14 @@ enum pytorch_qnnp_status qnnpackConv(
       const size_t n_stride = (group_output_channels + (nr - 1)) & -nr;
 
       /* compute input row sum */
-      const size_t input_size = input_height * input_width;
+      const size_t input_size = input_depth * input_height * input_width;
       int32_t* a_sum = (int32_t*)realloc(
           convolution->a_sum,
-          sizeof(int32_t) * batch_size * groups * input_height * input_width);
+          sizeof(int32_t) * batch_size * groups * input_size);
       if (a_sum == nullptr) {
         pytorch_qnnp_log_error(
             "failed to allocate %zu bytes for row sum data",
-            sizeof(int32_t) * batch_size * groups * input_height * input_width);
+            sizeof(int32_t) * batch_size * groups * input_size);
         return pytorch_qnnp_status_out_of_memory;
       }
       convolution->a_sum = a_sum;

@@ -490,7 +490,7 @@ def is_get_tensor_info_node(node: Node) -> bool:
 def maybe_get_next_module(
     node: Node,
     modules: Dict[str, nn.Module],
-    target_module_type: Type[nn.Module] = None,
+    target_module_type: Optional[Type[nn.Module]] = None,
     target_functional_type: Any = None,
 ) -> Optional[Node]:
     """ Gets the next module that matches what is needed in
