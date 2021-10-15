@@ -1,13 +1,14 @@
 #include <THC/THCGeneral.h>
 #include <ATen/cuda/detail/CUDAHooks.h>
+#include <ATen/cuda/CUDAConfig.h>
 
-#ifdef USE_MAGMA
+#if AT_MAGMA_ENABLED()
 #include <magma_v2.h>
 #endif
 
 namespace {
 void _THCMagma_init() {
-#ifdef USE_MAGMA
+#if AT_MAGMA_ENABLED()
   magma_init();
 #endif
 }
