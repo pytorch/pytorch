@@ -348,6 +348,13 @@ public:
   }
 
   template<typename OtherKeyT, typename OtherValueT>
+  __host__ __device__ __forceinline__ KeyValuePairWithKeyEquality(const KeyValuePairWithKeyEquality<OtherKeyT, OtherValueT> &other)
+    :key(other.key), value(other.value) {}
+
+  __host__ __device__ __forceinline__ KeyValuePairWithKeyEquality(const KeyValuePairWithKeyEquality &other)
+    :key(other.key), value(other.value) {}
+
+  template<typename OtherKeyT, typename OtherValueT>
   __host__ __device__ __forceinline__ KeyValuePairWithKeyEquality &operator=(const KeyValuePairWithKeyEquality<OtherKeyT, OtherValueT> &other) {
     key = other.key;
     value = other.value;
