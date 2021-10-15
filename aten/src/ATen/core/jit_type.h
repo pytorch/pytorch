@@ -129,7 +129,7 @@ struct TORCH_API UnionType : public Type {
     return create(contained_types);
   }
 
-  bool canHoldType(TypePtr type) const;
+  bool canHoldType(const Type& type) const;
 
   bool hasFreeVariables() const override {
     return has_free_variables_;

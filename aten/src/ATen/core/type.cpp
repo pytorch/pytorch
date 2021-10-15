@@ -1057,12 +1057,12 @@ bool UnionType::operator==(const Type& rhs) const {
     if (optional_rhs->getElementType() == NumberType::get()) {
       return this->containedTypes().size() == 4
              && this->can_hold_none_
-             && this->canHoldType(NumberType::get());
+             && this->canHoldType(*NumberType::get());
     }
     auto optional_lhs = this->toOptional();
     return optional_lhs && *optional_rhs == *((optional_lhs.value())->expect<OptionalType>());
   } else if (rhs.kind() == NumberType::Kind) {
-    return this->containedTypes().size() == 3 && canHoldType(NumberType::get());
+    return this->containedTypes().size() == 3 && canHoldType(*NumberType::get());
   } else {
     return false;
   }
@@ -1106,7 +1106,7 @@ bool UnionType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
 std::string UnionType::unionStr(TypePrinter printer, bool is_annotation_str) const {
   std::stringstream ss;
 
-  bool can_hold_numbertype = this->canHoldType(NumberType::get());
+  bool can_hold_numbertype = this->canHoldType(*NumberType::get());
 
   std::vector<TypePtr> number_types{IntType::get(), FloatType::get(), ComplexType::get()};
 
@@ -1156,21 +1156,21 @@ std::string UnionType::annotation_str_impl(TypePrinter printer) const {
   return this->unionStr(printer, /*is_annotation_str=*/true);
 }
 
-bool UnionType::canHoldType(TypePtr type) const {
-  if (type == NumberType::get()) {
-    return canHoldType(IntType::get())
-           && canHoldType(FloatType::get())
-           && canHoldType(ComplexType::get());
+bool UnionType::canHoldType(const Type& type) const {
+  if (&type == NumberType::get().get()) {
+    return canHoldType(*IntType::get())
+           && canHoldType(*FloatType::get())
+           && canHoldType(*ComplexType::get());
   } else {
     return std::any_of(this->containedTypes().begin(), this->containedTypes().end(),
                     [&](const TypePtr& inner) {
-                      return type->isSubtypeOf(*inner);
+                      return type.isSubtypeOf(*inner);
                     });
   }
 }
 
 c10::optional<TypePtr> UnionType::toOptional() const {
-  if (!canHoldType(NoneType::get())) {
+  if (!canHoldType(*NoneType::get())) {
       return c10::nullopt;
   }
 
@@ -1219,7 +1219,7 @@ OptionalType::OptionalType(TypePtr contained)
   bool is_numbertype = false;
   if (auto as_union = contained->cast<UnionType>()) {
     is_numbertype = as_union->containedTypes().size() == 3 &&
-                    as_union->canHoldType(NumberType::get());
+                    as_union->canHoldType(*NumberType::get());
   }
   if (UnionType::containedTypes().size() == 2) {
     contained_ = UnionType::containedTypes()[0]->kind()!= NoneType::Kind
@@ -1255,12 +1255,12 @@ bool OptionalType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const 
   if (auto optional_rhs = rhs.castRaw<OptionalType>()) {
     return getElementType()->isSubtypeOfExt(*optional_rhs->getElementType(), why_not);
   } else if (auto union_rhs = rhs.castRaw<UnionType>()) {
-    if (!union_rhs->canHoldType(NoneType::get())) {
+    if (!union_rhs->canHoldType(*NoneType::get())) {
       if (why_not) {
         *why_not << rhs.repr_str() << " cannot hold None";
       }
       return false;
-    } else if (!union_rhs->canHoldType(this->getElementType())) {
+    } else if (!union_rhs->canHoldType(*this->getElementType())) {
       if (why_not) {
         *why_not << rhs.repr_str() << " cannot hold " << this->getElementType();
       }
@@ -1276,7 +1276,7 @@ bool OptionalType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const 
 
 bool NumberType::operator==(const Type& rhs) const {
   if (auto union_type = rhs.cast<UnionType>()) {
-    return union_type->containedTypes().size() == 3 && union_type->canHoldType(NumberType::get());
+    return union_type->containedTypes().size() == 3 && union_type->canHoldType(*NumberType::get());
   } else {
     return rhs.kind() == this->kind();
   }
@@ -1284,7 +1284,7 @@ bool NumberType::operator==(const Type& rhs) const {
 
 bool NumberType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
   if (auto union_type = rhs.cast<UnionType>()) {
-    return union_type->canHoldType(NumberType::get());
+    return union_type->canHoldType(*NumberType::get());
   } else {
     return Type::isSubtypeOfExt(rhs, why_not);
   }
