@@ -67,21 +67,20 @@ c10::Dict<c10::IValue, c10::IValue> createCompileSpec() {
   c10::Dict<c10::IValue, c10::IValue> method_spec(
       c10::StringType::get(), c10::AnyType::get());
   auto input_shapes = parseInputShapes();
-  TORCH_CHECK(
-      input_shapes.size() == 1,
-      "Wrong # of input shapes: ",
-      input_shapes.size());
-  method_spec.insert("sizes", input_shapes[0]); // TODO: support multiple inputs
+  method_spec.insert("sizes", input_shapes);
   compile_spec.insert(FLAGS_method_name, method_spec);
   return compile_spec;
 }
 
-std::vector<int64_t> getInputSizesForMethod(
+std::vector<std::vector<int64_t>> getInputSizes (
     const c10::Dict<c10::IValue, c10::IValue>& method_compile_spec) {
-  return method_compile_spec.at(FLAGS_method_name)
-      .toGenericDict()
-      .at("sizes")
-      .toIntVector();
+  auto input_shapes = method_compile_spec.at(FLAGS_method_name).toGenericDict().at("sizes").toList();
+  std::vector<std::vector<int64_t>> inputSizes;
+  for (const auto& input_shape : input_shapes) {
+    auto sizes = ((c10::IValue) input_shape).toIntVector();
+    inputSizes.emplace_back(sizes);
+  }
+  return inputSizes;
 }
 
 std::string getNncKernelId() {
@@ -117,7 +116,7 @@ c10::IValue preprocess(
 
   auto method = mod.get_method(FLAGS_method_name);
   auto graph = method.function().graph()->copy();
-  auto sizes = getInputSizesForMethod(method_compile_spec);
+  auto sizes = getInputSizes(method_compile_spec);
 
   std::string llvm_asm_code;
   auto compiled = torch::jit::mobile::nnc::aotCompile(FLAGS_method_name, graph, sizes);
