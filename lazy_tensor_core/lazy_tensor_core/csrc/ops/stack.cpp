@@ -7,9 +7,9 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Stack::Stack(lazy_tensors::Span<const ir::Value> values,
+Stack::Stack(OpList values,
              lazy_tensors::int64 dim)
-    : Node(ir::OpKind(at::aten::stack), values,
+    : TsNode(ir::OpKind(at::aten::stack), values,
            /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim) {
   SetShapeDeferred(
@@ -22,7 +22,7 @@ NodePtr Stack::Clone(OpList operands) const {
 
 std::string Stack::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", dim=" << dim_;
+  ss << TsNode::ToString() << ", dim=" << dim_;
   return ss.str();
 }
 

@@ -29,7 +29,7 @@ AvgPoolNdBackward::AvgPoolNdBackward(
     std::vector<lazy_tensors::int64> stride,
     std::vector<lazy_tensors::int64> padding, bool ceil_mode,
     bool count_include_pad)
-    : Node(OpKind(AvgNdBackwardSymbol(spatial_dim_count)), {grad_output, input},
+    : TsNode(OpKind(AvgNdBackwardSymbol(spatial_dim_count)), {grad_output, input},
            /*num_outputs=*/1,
            torch::lazy::MHash(spatial_dim_count, kernel_size, stride,
                                      padding, ceil_mode, count_include_pad)),
@@ -51,7 +51,7 @@ NodePtr AvgPoolNdBackward::Clone(OpList operands) const {
 
 std::string AvgPoolNdBackward::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", spatial_dim_count=" << spatial_dim_count_
+  ss << TsNode::ToString() << ", spatial_dim_count=" << spatial_dim_count_
      << ", kernel_size=(" << lazy_tensors::StrJoin(kernel_size_, ", ")
      << "), stride=(" << lazy_tensors::StrJoin(stride_, ", ") << "), padding=("
      << lazy_tensors::StrJoin(padding_, ", ")

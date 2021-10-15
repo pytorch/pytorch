@@ -12,7 +12,7 @@ namespace {
 lazy_tensors::Shape NodeOutputShape(const Value& growth_tracker,
                                     const Value& current_scale) {
   return lazy_tensors::ShapeUtil::MakeTupleShape(
-      {growth_tracker.shape(), current_scale.shape()});
+      {GetShapeFromTsValue(growth_tracker), GetShapeFromTsValue(current_scale)});
 }
 
 }  // namespace
@@ -22,7 +22,7 @@ AmpUpdateScale::AmpUpdateScale(const Value& current_scale,
                                const Value& found_inf,
                                double scale_growth_factor,
                                double scale_backoff_factor, int growth_interval)
-    : Node(ir::OpKind(at::aten::_amp_update_scale_),
+    : TsNode(ir::OpKind(at::aten::_amp_update_scale_),
            {current_scale, growth_tracker, found_inf},
            NodeOutputShape(growth_tracker, current_scale),
            /*num_outputs=*/2),

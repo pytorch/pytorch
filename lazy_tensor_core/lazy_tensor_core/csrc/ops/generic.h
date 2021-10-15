@@ -1,6 +1,6 @@
 #pragma once
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -11,17 +11,17 @@ namespace ops {
 // not be using this class (and have the metadata captured by the LowerFn), but
 // they should instead create a dedicated IR node. Doing the former would limit
 // IR introspection.
-class Generic : public Node {
+class Generic : public TsNode {
  public:
-  Generic(OpKind op, lazy_tensors::Span<const Value> operands,
+  Generic(OpKind op, OpList operands,
           lazy_tensors::Shape shape, size_t num_outputs = 1,
           torch::lazy::hash_t hash_seed = static_cast<uint32_t>(0x5a2d296e9));
 
-  Generic(OpKind op, lazy_tensors::Span<const Value> operands,
+  Generic(OpKind op, OpList operands,
           const std::function<lazy_tensors::Shape()>& shape_fn,
           size_t num_outputs = 1, torch::lazy::hash_t hash_seed = static_cast<uint32_t>(0x5a2d296e9));
 
-  Generic(OpKind op, lazy_tensors::Span<const Value> operands,
+  Generic(OpKind op, OpList operands,
           size_t num_outputs = 1, torch::lazy::hash_t hash_seed = static_cast<uint32_t>(0x5a2d296e9));
 
   Generic(OpKind op, lazy_tensors::Shape shape, size_t num_outputs,

@@ -12,8 +12,8 @@ namespace ops {
 
 Split::Split(const Value& input, std::vector<lazy_tensors::int64> split_sizes,
              lazy_tensors::int64 dim)
-    : Node(ir::OpKind(at::aten::split), {input},
-           ComputeSplitCount(input.shape().dimensions(dim), split_sizes),
+    : TsNode(ir::OpKind(at::aten::split), {input},
+           ComputeSplitCount(GetShapeFromTsValue(input).dimensions(dim), split_sizes),
            torch::lazy::MHash(split_sizes, dim)),
       split_sizes_(std::move(split_sizes)),
       dim_(dim) {
@@ -27,7 +27,7 @@ NodePtr Split::Clone(OpList operands) const {
 
 std::string Split::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", split_sizes=("
+  ss << TsNode::ToString() << ", split_sizes=("
      << lazy_tensors::StrJoin(split_sizes_, ", ") << "), dim=" << dim_;
   return ss.str();
 }

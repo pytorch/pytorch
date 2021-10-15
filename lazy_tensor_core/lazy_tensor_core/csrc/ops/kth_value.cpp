@@ -9,7 +9,7 @@ namespace ops {
 
 KthValue::KthValue(const Value& input, lazy_tensors::int64 k,
                    lazy_tensors::int64 dim, bool keepdim)
-    : Node(ir::OpKind(at::aten::kthvalue), {input},
+    : TsNode(ir::OpKind(at::aten::kthvalue), {input},
            /*num_outputs=*/2, torch::lazy::MHash(k, dim, keepdim)),
       k_(k),
       dim_(dim),
@@ -24,7 +24,7 @@ NodePtr KthValue::Clone(OpList operands) const {
 
 std::string KthValue::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", k=" << k_ << ", dim=" << dim_
+  ss << TsNode::ToString() << ", k=" << k_ << ", dim=" << dim_
      << ", keepdim=" << keepdim_;
   return ss.str();
 }

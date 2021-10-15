@@ -14,7 +14,7 @@ namespace ops {
 
 Var::Var(const Value& input, std::vector<lazy_tensors::int64> dimensions,
          lazy_tensors::int64 correction, bool keep_reduced_dimensions)
-    : Node(ir::OpKind(at::aten::var), {input},
+    : TsNode(ir::OpKind(at::aten::var), {input},
            /*num_outputs=*/1,
            torch::lazy::MHash(dimensions, correction,
                                      keep_reduced_dimensions)),
@@ -32,7 +32,7 @@ NodePtr Var::Clone(OpList operands) const {
 
 std::string Var::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", dimensions=("
+  ss << TsNode::ToString() << ", dimensions=("
      << lazy_tensors::StrJoin(dimensions_, ", ")
      << "), correction=" << correction_
      << ", keep_reduced_dimensions=" << keep_reduced_dimensions_;

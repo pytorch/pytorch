@@ -8,7 +8,7 @@ namespace ir {
 namespace ops {
 
 Squeeze::Squeeze(const Value& input, int dim)
-    : Node(ir::OpKind(at::aten::squeeze), {input},
+    : TsNode(ir::OpKind(at::aten::squeeze), {input},
            /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim) {
   SetShapeDeferred(
@@ -21,7 +21,7 @@ NodePtr Squeeze::Clone(OpList operands) const {
 
 std::string Squeeze::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", dim=" << dim_;
+  ss << TsNode::ToString() << ", dim=" << dim_;
   return ss.str();
 }
 

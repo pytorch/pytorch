@@ -8,8 +8,8 @@ namespace ops {
 LeakyReluBackward::LeakyReluBackward(const Value& grad_output,
                                      const Value& input, double negative_slope,
                                      bool self_is_result)
-    : Node(ir::OpKind(at::aten::leaky_relu_backward), {grad_output, input},
-           input.shape(),
+    : TsNode(ir::OpKind(at::aten::leaky_relu_backward), {grad_output, input},
+           GetShapeFromTsValue(input),
            /*num_outputs=*/1, torch::lazy::MHash(negative_slope)),
       negative_slope_(negative_slope),
       self_is_result_(self_is_result) {}
@@ -21,7 +21,7 @@ NodePtr LeakyReluBackward::Clone(OpList operands) const {
 
 std::string LeakyReluBackward::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", negative_slope=" << negative_slope_
+  ss << TsNode::ToString() << ", negative_slope=" << negative_slope_
      << ", self_is_result=" << self_is_result_;
   return ss.str();
 }

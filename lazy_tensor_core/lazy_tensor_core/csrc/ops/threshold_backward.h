@@ -1,12 +1,12 @@
 #pragma once
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class ThresholdBackward : public Node {
+class ThresholdBackward : public TsNode {
  public:
   ThresholdBackward(const Value& grad_output, const Value& input,
                     float threshold);

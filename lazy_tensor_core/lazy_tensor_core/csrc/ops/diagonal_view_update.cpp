@@ -11,7 +11,7 @@ DiagonalViewUpdate::DiagonalViewUpdate(const Value& target, const Value& input,
                                        lazy_tensors::int64 offset,
                                        lazy_tensors::int64 dim1,
                                        lazy_tensors::int64 dim2)
-    : Node(ltc_diagonal_view_update, {target, input}, target.shape(),
+    : TsNode(ltc_diagonal_view_update, {target, input}, GetShapeFromTsValue(target),
            /*num_outputs=*/1, torch::lazy::MHash(offset, dim1, dim2)),
       offset_(offset),
       dim1_(dim1),
@@ -24,7 +24,7 @@ NodePtr DiagonalViewUpdate::Clone(OpList operands) const {
 
 std::string DiagonalViewUpdate::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", offset=" << offset_ << ", dim1=" << dim1_
+  ss << TsNode::ToString() << ", offset=" << offset_ << ", dim1=" << dim1_
      << ", dim2=" << dim2_;
   return ss.str();
 }

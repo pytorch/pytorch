@@ -10,7 +10,7 @@ namespace ops {
 
 ReflectionPad2d::ReflectionPad2d(const Value& input,
                                  std::vector<lazy_tensors::int64> padding)
-    : Node(OpKind(at::aten::reflection_pad2d), {input},
+    : TsNode(OpKind(at::aten::reflection_pad2d), {input},
            /*num_outputs=*/1, torch::lazy::MHash(padding)),
       padding_(std::move(padding)) {
   SetShapeDeferred(
@@ -23,7 +23,7 @@ NodePtr ReflectionPad2d::Clone(OpList operands) const {
 
 std::string ReflectionPad2d::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", padding=("
+  ss << TsNode::ToString() << ", padding=("
      << lazy_tensors::StrJoin(padding_, ", ") << ")";
   return ss.str();
 }

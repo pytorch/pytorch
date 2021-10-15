@@ -1,12 +1,12 @@
 #pragma once
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class MaxPoolNdBackward : public Node {
+class MaxPoolNdBackward : public TsNode {
  public:
   MaxPoolNdBackward(const Value& grad_output, const Value& input,
                     lazy_tensors::int64 spatial_dim_count,

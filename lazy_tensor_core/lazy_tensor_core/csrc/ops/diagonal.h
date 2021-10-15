@@ -1,12 +1,12 @@
 #pragma once
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class Diagonal : public Node {
+class Diagonal : public TsNode {
  public:
   Diagonal(const Value& input, lazy_tensors::int64 offset,
            lazy_tensors::int64 dim1, lazy_tensors::int64 dim2);

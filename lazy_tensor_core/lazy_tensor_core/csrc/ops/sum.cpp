@@ -12,7 +12,7 @@ namespace ops {
 
 Sum::Sum(const Value& input, std::vector<lazy_tensors::int64> dimensions,
          bool keep_reduced_dimensions, c10::optional<at::ScalarType> dtype)
-    : Node(ir::OpKind(at::aten::sum), {input},
+    : TsNode(ir::OpKind(at::aten::sum), {input},
            /*num_outputs=*/1,
            torch::lazy::MHash(dimensions, keep_reduced_dimensions,
                                      OptionalOr<int>(dtype, -1))),
@@ -30,7 +30,7 @@ NodePtr Sum::Clone(OpList operands) const {
 
 std::string Sum::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", dimensions=("
+  ss << TsNode::ToString() << ", dimensions=("
      << lazy_tensors::StrJoin(dimensions_, ", ")
      << "), keep_reduced_dimensions=" << keep_reduced_dimensions_
      << ", dtype=" << OptionalOr<int>(dtype_, -1);

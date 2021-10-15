@@ -11,13 +11,13 @@ namespace {
 
 lazy_tensors::Shape NodeOutputShape(
     const Value& input, lazy_tensors::Span<const lazy_tensors::int64> size) {
-  return lazy_tensors::ShapeUtil::MakeShape(input.shape().element_type(), size);
+  return lazy_tensors::ShapeUtil::MakeShape(GetShapeFromTsValue(input).element_type(), size);
 }
 
 }  // namespace
 
 Resize::Resize(const Value& input, std::vector<lazy_tensors::int64> size)
-    : Node(ir::OpKind(at::aten::resize), {input},
+    : TsNode(ir::OpKind(at::aten::resize), {input},
            [&]() { return NodeOutputShape(input, size); },
            /*num_outputs=*/1, torch::lazy::MHash(size)),
       size_(std::move(size)) {}
@@ -28,7 +28,7 @@ NodePtr Resize::Clone(OpList operands) const {
 
 std::string Resize::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", size=(" << lazy_tensors::StrJoin(size_, ", ")
+  ss << TsNode::ToString() << ", size=(" << lazy_tensors::StrJoin(size_, ", ")
      << ")";
   return ss.str();
 }

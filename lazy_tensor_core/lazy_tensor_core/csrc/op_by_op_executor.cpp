@@ -52,7 +52,7 @@ torch::lazy::hash_t ComputeNodeKey(
                  GetParameterShape(operands[i], *input_shapes[i])));
   }
   key = torch::lazy::HashCombine(
-      key, torch::lazy::Hash(node->shape()));
+      key, torch::lazy::Hash(GetShapeFromTsNode(*node)));
   return torch::lazy::HashCombine(key, node->node_hash());
 }
 

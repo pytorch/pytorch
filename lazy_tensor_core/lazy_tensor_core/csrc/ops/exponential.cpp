@@ -7,7 +7,7 @@ namespace ops {
 
 Exponential::Exponential(const Value& lambda, const Value& seed,
                          lazy_tensors::Shape shape)
-    : Node(ir::OpKind(at::aten::exponential), {lambda, seed},
+    : TsNode(ir::OpKind(at::aten::exponential), {lambda, seed},
            std::move(shape)) {}
 
 NodePtr Exponential::Clone(OpList operands) const {

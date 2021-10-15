@@ -12,9 +12,9 @@ namespace ops {
 
 Diagonal::Diagonal(const Value& input, lazy_tensors::int64 offset,
                    lazy_tensors::int64 dim1, lazy_tensors::int64 dim2)
-    : Node(ir::OpKind(at::aten::diagonal), {input},
+    : TsNode(ir::OpKind(at::aten::diagonal), {input},
            [&]() {
-             return MakeDiagonalShape(input.shape(), offset, dim1, dim2);
+             return MakeDiagonalShape(GetShapeFromTsValue(input), offset, dim1, dim2);
            },
            /*num_outputs=*/1, torch::lazy::MHash(offset, dim1, dim2)),
       offset_(offset),
@@ -27,7 +27,7 @@ NodePtr Diagonal::Clone(OpList operands) const {
 
 std::string Diagonal::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", offset=" << offset_ << ", dim1=" << dim1_
+  ss << TsNode::ToString() << ", offset=" << offset_ << ", dim1=" << dim1_
      << ", dim2=" << dim2_;
   return ss.str();
 }

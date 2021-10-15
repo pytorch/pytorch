@@ -10,9 +10,9 @@ namespace ops {
 Select::Select(const Value& input, lazy_tensors::int64 dim,
                lazy_tensors::int64 start, lazy_tensors::int64 end,
                lazy_tensors::int64 stride)
-    : Node(ltc_select, {input},
+    : TsNode(ltc_select, {input},
            [&]() {
-             return MakeSelectShape(input.shape(), dim, start, end, stride);
+             return MakeSelectShape(GetShapeFromTsValue(input), dim, start, end, stride);
            },
            /*num_outputs=*/1,
            torch::lazy::MHash(dim, start, end, stride)),
@@ -27,7 +27,7 @@ NodePtr Select::Clone(OpList operands) const {
 
 std::string Select::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", dim=" << dim_ << ", start=" << start_
+  ss << TsNode::ToString() << ", dim=" << dim_ << ", start=" << start_
      << ", end=" << end_ << ", stride=" << stride_;
   return ss.str();
 }

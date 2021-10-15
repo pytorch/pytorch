@@ -1,12 +1,12 @@
 #pragma once
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class AvgPoolNdBackward : public Node {
+class AvgPoolNdBackward : public TsNode {
  public:
   AvgPoolNdBackward(const Value& grad_output, const Value& input,
                     lazy_tensors::int64 spatial_dim_count,

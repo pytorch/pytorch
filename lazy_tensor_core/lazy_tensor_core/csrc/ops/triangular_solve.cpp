@@ -10,7 +10,7 @@ namespace ops {
 TriangularSolve::TriangularSolve(const Value& rhs, const Value& lhs,
                                  bool left_side, bool lower, bool transpose,
                                  bool unit_diagonal)
-    : Node(ir::OpKind(at::aten::triangular_solve), {rhs, lhs},
+    : TsNode(ir::OpKind(at::aten::triangular_solve), {rhs, lhs},
            /*num_outputs=*/2,
            torch::lazy::MHash(left_side, lower, transpose,
                                      unit_diagonal)),
@@ -29,7 +29,7 @@ NodePtr TriangularSolve::Clone(OpList operands) const {
 
 std::string TriangularSolve::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", left_side=" << left_side_ << ", lower=" << lower_
+  ss << TsNode::ToString() << ", left_side=" << left_side_ << ", lower=" << lower_
      << ", transpose=" << transpose_ << ", unit_diagonal=" << unit_diagonal_;
   return ss.str();
 }

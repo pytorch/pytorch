@@ -8,7 +8,7 @@ namespace ir {
 namespace ops {
 
 SymEig::SymEig(const Value& input, bool eigenvectors, bool lower)
-    : Node(ir::OpKind(at::aten::symeig), {input},
+    : TsNode(ir::OpKind(at::aten::symeig), {input},
            /*num_outputs=*/2, torch::lazy::MHash(eigenvectors, lower)),
       eigenvectors_(eigenvectors),
       lower_(lower) {
@@ -22,7 +22,7 @@ NodePtr SymEig::Clone(OpList operands) const {
 
 std::string SymEig::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", eigenvectors=" << eigenvectors_
+  ss << TsNode::ToString() << ", eigenvectors=" << eigenvectors_
      << ", lower=" << lower_;
   return ss.str();
 }

@@ -1,12 +1,12 @@
 #pragma once
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class AmpUpdateScale : public Node {
+class AmpUpdateScale : public TsNode {
  public:
   AmpUpdateScale(const Value& current_scale, const Value& growth_tracker,
                  const Value& found_inf, double scale_growth_factor,

@@ -7,13 +7,13 @@ namespace ir {
 namespace ops {
 
 Softshrink::Softshrink(const Value& input, const at::Scalar& lambda)
-    : Node(OpKind(at::aten::softshrink), {input}, input.shape(),
+    : TsNode(OpKind(at::aten::softshrink), {input}, GetShapeFromTsValue(input),
            /*num_outputs=*/1, ScalarHash(lambda)),
       lambda_(std::move(lambda)) {}
 
 std::string Softshrink::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", lambda=" << lambda_;
+  ss << TsNode::ToString() << ", lambda=" << lambda_;
   return ss.str();
 }
 

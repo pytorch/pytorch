@@ -25,7 +25,7 @@
 
 #include <ATen/core/Tensor.h>
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 #include "lazy_tensor_core/csrc/tensor.h"
 
 namespace torch_lazy_tensors {

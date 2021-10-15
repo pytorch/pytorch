@@ -3,14 +3,14 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/Optional.h>
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 #include "lazy_tensors/span.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class Sum : public Node {
+class Sum : public TsNode {
  public:
   Sum(const Value& input, std::vector<lazy_tensors::int64> dimensions,
       bool keep_reduced_dimensions, c10::optional<at::ScalarType> dtype);

@@ -1,12 +1,12 @@
 #pragma once
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class TopK : public Node {
+class TopK : public TsNode {
  public:
   TopK(const Value& input, lazy_tensors::int64 k, lazy_tensors::int64 dim,
        bool largest, bool sorted);

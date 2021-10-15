@@ -10,7 +10,7 @@ namespace ops {
 VarMean::VarMean(const Value& input,
                  std::vector<lazy_tensors::int64> dimensions,
                  lazy_tensors::int64 correction, bool keep_reduced_dimensions)
-    : Node(ir::OpKind(at::aten::var_mean), {input},
+    : TsNode(ir::OpKind(at::aten::var_mean), {input},
            /*num_outputs=*/2,
            torch::lazy::MHash(dimensions, correction,
                                      keep_reduced_dimensions)),
@@ -28,7 +28,7 @@ NodePtr VarMean::Clone(OpList operands) const {
 
 std::string VarMean::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", dimensions=("
+  ss << TsNode::ToString() << ", dimensions=("
      << lazy_tensors::StrJoin(dimensions_, ", ")
      << "), keep_reduced_dimensions=" << keep_reduced_dimensions_
      << ", correction=" << correction_;

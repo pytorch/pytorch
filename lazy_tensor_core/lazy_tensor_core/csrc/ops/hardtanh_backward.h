@@ -2,13 +2,13 @@
 
 #include <c10/core/Scalar.h>
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class HardtanhBackward : public Node {
+class HardtanhBackward : public TsNode {
  public:
   HardtanhBackward(const Value& grad_output, const Value& input,
                    const at::Scalar& min_val, const at::Scalar& max_val);

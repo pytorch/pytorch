@@ -14,7 +14,7 @@ ConvolutionBackwardOverrideable::ConvolutionBackwardOverrideable(
     std::vector<lazy_tensors::int64> padding,
     std::vector<lazy_tensors::int64> dilation, bool transposed,
     std::vector<lazy_tensors::int64> output_padding, lazy_tensors::int64 groups)
-    : Node(ir::OpKind(at::aten::convolution_backward_overrideable),
+    : TsNode(ir::OpKind(at::aten::convolution_backward_overrideable),
            {grad_output, input, weight},
            /*num_outputs=*/3,
            torch::lazy::MHash(stride, padding, dilation, transposed,
@@ -50,7 +50,7 @@ NodePtr ConvolutionBackwardOverrideable::Clone(OpList operands) const {
 
 std::string ConvolutionBackwardOverrideable::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", stride=(" << lazy_tensors::StrJoin(stride_, ", ")
+  ss << TsNode::ToString() << ", stride=(" << lazy_tensors::StrJoin(stride_, ", ")
      << "), padding=(" << lazy_tensors::StrJoin(padding_, ", ")
      << "), dilation=(" << lazy_tensors::StrJoin(dilation_, ", ")
      << "), transpose=" << transposed_ << ", output_padding=("

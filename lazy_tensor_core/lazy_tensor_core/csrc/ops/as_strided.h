@@ -2,14 +2,14 @@
 
 #include <vector>
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 #include "lazy_tensors/types.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class AsStrided : public Node {
+class AsStrided : public TsNode {
  public:
   AsStrided(const Value& input, std::vector<lazy_tensors::int64> size,
             std::vector<lazy_tensors::int64> stride,

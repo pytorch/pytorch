@@ -1,12 +1,12 @@
 #pragma once
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class AmpForachNonFiniteCheckAndUnscale : public Node {
+class AmpForachNonFiniteCheckAndUnscale : public TsNode {
  public:
   // found_inf is set if infinite gradients are found during unscale. More
   // details here:

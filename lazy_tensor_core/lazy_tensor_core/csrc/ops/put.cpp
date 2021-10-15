@@ -7,7 +7,7 @@ namespace ops {
 
 Put::Put(const Value& input, const Value& index, const Value& source,
          bool accumulate)
-    : Node(ir::OpKind(at::aten::put), {input, index, source}, input.shape(),
+    : TsNode(ir::OpKind(at::aten::put), {input, index, source}, GetShapeFromTsValue(input),
            /*num_outputs=*/1, torch::lazy::MHash(accumulate)),
       accumulate_(accumulate) {}
 
@@ -18,7 +18,7 @@ NodePtr Put::Clone(OpList operands) const {
 
 std::string Put::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", accumulate=" << accumulate_;
+  ss << TsNode::ToString() << ", accumulate=" << accumulate_;
   return ss.str();
 }
 

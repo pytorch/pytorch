@@ -12,7 +12,7 @@ namespace ops {
 
 Any::Any(const Value& input, std::vector<lazy_tensors::int64> dimensions,
          bool keep_reduced_dimensions)
-    : Node(ir::OpKind(at::aten::any), {input},
+    : TsNode(ir::OpKind(at::aten::any), {input},
            /*num_outputs=*/1,
            torch::lazy::MHash(dimensions, keep_reduced_dimensions)),
       dimensions_(std::move(dimensions)),
@@ -27,7 +27,7 @@ NodePtr Any::Clone(OpList operands) const {
 
 std::string Any::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", dimensions=("
+  ss << TsNode::ToString() << ", dimensions=("
      << lazy_tensors::StrJoin(dimensions_, ", ")
      << "), keep_reduced_dimensions=" << keep_reduced_dimensions_;
   return ss.str();

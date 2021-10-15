@@ -1,12 +1,12 @@
 #pragma once
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class SymEig : public Node {
+class SymEig : public TsNode {
  public:
   SymEig(const Value& input, bool eigenvectors, bool lower);
 

@@ -11,7 +11,7 @@ namespace ops {
 ReflectionPad2dBackward::ReflectionPad2dBackward(
     const Value& grad_output, const Value& input,
     std::vector<lazy_tensors::int64> padding)
-    : Node(OpKind(at::aten::reflection_pad2d_backward), {grad_output, input},
+    : TsNode(OpKind(at::aten::reflection_pad2d_backward), {grad_output, input},
            /*num_outputs=*/1, torch::lazy::MHash(padding)),
       padding_(std::move(padding)) {
   SetShapeDeferred(
@@ -25,7 +25,7 @@ NodePtr ReflectionPad2dBackward::Clone(OpList operands) const {
 
 std::string ReflectionPad2dBackward::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", padding=("
+  ss << TsNode::ToString() << ", padding=("
      << lazy_tensors::StrJoin(padding_, ", ") << ")";
   return ss.str();
 }

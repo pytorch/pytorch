@@ -6,7 +6,7 @@ namespace ir {
 namespace ops {
 
 LogBase::LogBase(const Value& input, ir::OpKind kind, double base)
-    : Node(kind, {input}, input.shape(),
+    : TsNode(kind, {input}, GetShapeFromTsValue(input),
            /*num_outputs=*/1, torch::lazy::MHash(base)),
       base_(base) {}
 
@@ -16,7 +16,7 @@ NodePtr LogBase::Clone(OpList operands) const {
 
 std::string LogBase::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", base=" << base_;
+  ss << TsNode::ToString() << ", base=" << base_;
   return ss.str();
 }
 

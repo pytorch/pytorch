@@ -14,7 +14,7 @@ AllToAll::AllToAll(const Value& input, const Value& token,
                    lazy_tensors::int64 concat_dimension,
                    lazy_tensors::int64 split_count,
                    std::vector<std::vector<lazy_tensors::int64>> groups)
-    : Node(ltc_all_to_all, {input, token},
+    : TsNode(ltc_all_to_all, {input, token},
            /*num_outputs=*/2,
            torch::lazy::MHash(split_dimension, concat_dimension,
                                      split_count, groups)),
@@ -33,7 +33,7 @@ NodePtr AllToAll::Clone(OpList operands) const {
 
 std::string AllToAll::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", split_dimension=" << split_dimension_
+  ss << TsNode::ToString() << ", split_dimension=" << split_dimension_
      << ", concat_dimension=" << concat_dimension_
      << ", split_count=" << split_count_ << ", groups=(";
   for (size_t i = 0; i < groups_.size(); ++i) {

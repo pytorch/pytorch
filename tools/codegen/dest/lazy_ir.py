@@ -38,6 +38,7 @@ def node_ctor_inputs(func: LazyIrSchema) -> str:
 @dataclass(frozen=True)
 class LazyIR:
     backend_index: BackendIndex
+    node_base: str
 
     @method_with_native_function
     def __call__(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
@@ -82,23 +83,24 @@ class LazyIR:
                 clone_impl_args.append("operands.at(i++)")
                 continue
             clone_impl_args.append(f"{value.name}_")
-        clone_impl_args.extend(["at_dtypes()", "at_shapes()"])
+        clone_impl_args.extend(["at_dtypes_", "at_shapes_"])
 
         clone_impl_args_str = ", ".join(clone_impl_args)
         clone_impl = f"ir::MakeNode<ir::ops::{schema.node_name}>({clone_impl_args_str});"
 
         return [f"""\
 // TODO(alanwaketan): Public members don't need to have _ suffix.
-class {schema.node_name} : public Node {{
+class {schema.node_name} : public {self.node_base} {{
  public:
   {schema.node_name}({node_ctor_args}, const std::vector<at::ScalarType>& out_dtypes,
       const std::vector<std::vector<int64_t>>& out_shapes)
-      : Node(ir::OpKind(at::aten::{func.name.name}),
+      : {self.node_base}(ir::OpKind(at::aten::{func.name.name}),
               {{{base_ctor_value_args}}},
               convertShape(out_dtypes, out_shapes),
-              /*num_outputs=*/{len(func.returns)},
-              torch::lazy::MHash({scalar_hashes}),
-              out_dtypes, out_shapes){comma_if_scalar_initializers}
+              /* num_outputs */ {len(func.returns)},
+              torch::lazy::MHash({scalar_hashes})),
+        at_dtypes_(out_dtypes),
+        at_shapes_(out_shapes){comma_if_scalar_initializers}
         {scalar_initializers}
 
   {{
@@ -107,7 +109,7 @@ class {schema.node_name} : public Node {{
 
   std::string ToString() const override {{
     std::stringstream ss;
-    ss << Node::ToString();
+    ss << TsNode::ToString();
     {members_to_string}
     return ss.str();
   }}
@@ -117,8 +119,14 @@ class {schema.node_name} : public Node {{
       {clone_impl}
   }}
 
+  // TODO(whc) prefer to move these shapes to TsNode, but need to find a way to populate
+  // them consistently from non-codegen TsNode classes first.
+  // outer vector is for multiple tensors from an operation
+  std::vector<at::ScalarType> at_dtypes_;
+  std::vector<std::vector<int64_t>> at_shapes_;
   {scalar_decls}
   {has_optional_decls}
+
 }};
 
 """, ]
@@ -141,7 +149,7 @@ def lazy_tensor_decls(value_types: List[NamedCType]) -> str:
 
 
 def gen_lazy_nativefunc_definition(func: NativeFunction, backend_index: BackendIndex,
-                                   class_method_name: str) -> List[str]:
+                                   class_method_name: str, node_base: str) -> List[str]:
     sig = kernel_signature(func, backend_index)
 
     # Lazy IR stuff

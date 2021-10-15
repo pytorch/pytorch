@@ -8,13 +8,13 @@ namespace ops {
 
 ShrinkBackward::ShrinkBackward(OpKind kind, const Value& grad_output,
                                const Value& input, const at::Scalar& lambda)
-    : Node(kind, {grad_output, input}, input.shape(), /*num_outputs=*/1,
+    : TsNode(kind, {grad_output, input}, GetShapeFromTsValue(input), /*num_outputs=*/1,
            ScalarHash(lambda)),
       lambda_(std::move(lambda)) {}
 
 std::string ShrinkBackward::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", lambda=" << lambda_;
+  ss << TsNode::ToString() << ", lambda=" << lambda_;
   return ss.str();
 }
 

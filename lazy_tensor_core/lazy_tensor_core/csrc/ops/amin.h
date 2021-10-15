@@ -1,12 +1,12 @@
 #pragma once
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class Amin : public Node {
+class Amin : public TsNode {
  public:
   Amin(const Value& input, std::vector<lazy_tensors::int64> dimensions,
        bool keepdim);

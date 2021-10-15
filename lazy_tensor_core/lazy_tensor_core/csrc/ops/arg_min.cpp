@@ -8,7 +8,7 @@ namespace ir {
 namespace ops {
 
 ArgMin::ArgMin(const Value& input, lazy_tensors::int64 dim, bool keepdim)
-    : Node(ir::OpKind(at::aten::argmin), {input},
+    : TsNode(ir::OpKind(at::aten::argmin), {input},
            /*num_outputs=*/1, torch::lazy::MHash(dim, keepdim)),
       dim_(dim),
       keepdim_(keepdim) {
@@ -22,7 +22,7 @@ NodePtr ArgMin::Clone(OpList operands) const {
 
 std::string ArgMin::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", dim=" << dim_ << ", keepdim=" << keepdim_;
+  ss << TsNode::ToString() << ", dim=" << dim_ << ", keepdim=" << keepdim_;
   return ss.str();
 }
 

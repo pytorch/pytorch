@@ -1,12 +1,12 @@
 #pragma once
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class TriangularSolve : public Node {
+class TriangularSolve : public TsNode {
  public:
   TriangularSolve(const Value& rhs, const Value& lhs, bool left_side,
                   bool lower, bool transpose, bool unit_diagonal);

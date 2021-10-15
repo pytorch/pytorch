@@ -13,12 +13,12 @@ NllLoss2dBackward::NllLoss2dBackward(const Value& grad_output,
                                      const c10::optional<Value>& weight,
                                      const c10::optional<Value>& total_weight,
                                      ReductionMode reduction, int ignore_index)
-    : Node(ir::OpKind(at::aten::nll_loss2d_backward),
-           lazy_tensors::util::GetValuesVector<Value>(
-               {grad_output, logits, labels}, {&weight, &total_weight}),
-           /*num_outputs=*/1,
-           torch::lazy::MHash(
-               lazy_tensors::util::GetEnumValue(reduction), ignore_index)),
+    : TsNode(ir::OpKind(at::aten::nll_loss2d_backward),
+             lazy_tensors::util::GetValuesVector<Value>(
+                 {grad_output, logits, labels}, {&weight, &total_weight}),
+             /*num_outputs=*/1,
+             torch::lazy::MHash(lazy_tensors::util::GetEnumValue(reduction),
+                                ignore_index)),
       reduction_(reduction),
       ignore_index_(ignore_index) {
   SetShapeDeferred(
@@ -39,7 +39,7 @@ NodePtr NllLoss2dBackward::Clone(OpList operands) const {
 
 std::string NllLoss2dBackward::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString()
+  ss << TsNode::ToString()
      << ", reduction=" << lazy_tensors::util::GetEnumValue(reduction_)
      << ", ignore_index=" << ignore_index_;
   return ss.str();

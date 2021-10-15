@@ -10,7 +10,7 @@ namespace ops {
 IndexAlongDim::IndexAlongDim(OpKind op, const ir::Value& buffer,
                              const ir::Value& index, const ir::Value& value,
                              lazy_tensors::int64 dim)
-    : Node(op, {buffer, index, value},
+    : TsNode(op, {buffer, index, value},
            /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim) {
   SetShapeDeferred(
@@ -19,7 +19,7 @@ IndexAlongDim::IndexAlongDim(OpKind op, const ir::Value& buffer,
 
 std::string IndexAlongDim::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", dim=" << dim_;
+  ss << TsNode::ToString() << ", dim=" << dim_;
   return ss.str();
 }
 

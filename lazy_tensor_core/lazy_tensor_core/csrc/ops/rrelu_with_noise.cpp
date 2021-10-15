@@ -11,9 +11,9 @@ namespace ops {
 RreluWithNoise::RreluWithNoise(const Value& input, const Value& seed,
                                const at::Scalar& lower, const at::Scalar& upper,
                                bool training)
-    : Node(ir::OpKind(at::aten::rrelu_with_noise), {input, seed},
+    : TsNode(ir::OpKind(at::aten::rrelu_with_noise), {input, seed},
            lazy_tensors::ShapeUtil::MakeTupleShape(
-               {input.shape(), input.shape()}),
+               {GetShapeFromTsValue(input), GetShapeFromTsValue(input)}),
            /*num_outputs=*/2,
            torch::lazy::MHash(ScalarHash(lower), ScalarHash(upper),
                                      training)),
@@ -28,7 +28,7 @@ NodePtr RreluWithNoise::Clone(OpList operands) const {
 
 std::string RreluWithNoise::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", lower=" << lower_ << ", upper=" << upper_
+  ss << TsNode::ToString() << ", lower=" << lower_ << ", upper=" << upper_
      << ", training=" << training_;
   return ss.str();
 }

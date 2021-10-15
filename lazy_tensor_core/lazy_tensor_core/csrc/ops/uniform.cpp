@@ -9,7 +9,7 @@ namespace ops {
 
 Uniform::Uniform(const Value& from, const Value& to, const Value& seed,
                  const lazy_tensors::Shape& rng_shape)
-    : Node(ir::OpKind(at::aten::uniform), {from, to, seed}, rng_shape,
+    : TsNode(ir::OpKind(at::aten::uniform), {from, to, seed}, rng_shape,
            /*num_outputs=*/1, torch::lazy::Hash(rng_shape)) {}
 
 NodePtr Uniform::Clone(OpList operands) const {

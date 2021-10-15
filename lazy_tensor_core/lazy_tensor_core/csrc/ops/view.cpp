@@ -13,7 +13,7 @@ namespace {
 lazy_tensors::Shape NodeOutputShape(
     const Value& input,
     lazy_tensors::Span<const lazy_tensors::int64> output_sizes) {
-  const lazy_tensors::Shape& input_shape = input.shape();
+  const lazy_tensors::Shape& input_shape = GetShapeFromTsValue(input);
   auto info = Helpers::GetDynamicReshapeInfo(input_shape, output_sizes);
   if (info) {
     return std::move(info->output_shape);
@@ -27,14 +27,14 @@ lazy_tensors::Shape NodeOutputShape(
 }  // namespace
 
 View::View(const Value& input, std::vector<lazy_tensors::int64> output_size)
-    : Node(ir::OpKind(at::aten::view), {input},
+    : TsNode(ir::OpKind(at::aten::view), {input},
            NodeOutputShape(input, output_size),
            /*num_outputs=*/1, torch::lazy::MHash(output_size)),
       output_size_(std::move(output_size)) {}
 
 std::string View::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", output_size=("
+  ss << TsNode::ToString() << ", output_size=("
      << lazy_tensors::StrJoin(output_size_, ", ") << ")";
   return ss.str();
 }

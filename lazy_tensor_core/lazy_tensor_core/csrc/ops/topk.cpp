@@ -9,7 +9,7 @@ namespace ops {
 
 TopK::TopK(const Value& input, lazy_tensors::int64 k, lazy_tensors::int64 dim,
            bool largest, bool sorted)
-    : Node(ir::OpKind(at::aten::topk), {input},
+    : TsNode(ir::OpKind(at::aten::topk), {input},
            /*num_outputs=*/2,
            torch::lazy::MHash(k, dim, largest, sorted)),
       k_(k),
@@ -26,7 +26,7 @@ NodePtr TopK::Clone(OpList operands) const {
 
 std::string TopK::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", k=" << k_ << ", dim=" << dim_
+  ss << TsNode::ToString() << ", k=" << k_ << ", dim=" << dim_
      << ", largest=" << largest_ << ", sorted=" << sorted_;
   return ss.str();
 }

@@ -10,7 +10,7 @@ namespace ops {
 
 Expand::Expand(const Value& input, std::vector<lazy_tensors::int64> size,
                bool is_scalar_expand)
-    : Node(ir::OpKind(at::aten::expand), {input},
+    : TsNode(ir::OpKind(at::aten::expand), {input},
            /*num_outputs=*/1,
            torch::lazy::MHash(size, is_scalar_expand)),
       size_(std::move(size)),
@@ -25,7 +25,7 @@ NodePtr Expand::Clone(OpList operands) const {
 
 std::string Expand::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", size=(" << lazy_tensors::StrJoin(size_, ", ")
+  ss << TsNode::ToString() << ", size=(" << lazy_tensors::StrJoin(size_, ", ")
      << "), is_scalar_expand=" << is_scalar_expand_;
   return ss.str();
 }

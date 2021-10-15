@@ -1,12 +1,12 @@
 #pragma once
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class Exponential : public Node {
+class Exponential : public TsNode {
  public:
   Exponential(const Value& lambda, const Value& seed,
               lazy_tensors::Shape shape);

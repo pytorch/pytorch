@@ -8,7 +8,7 @@ namespace ir {
 namespace ops {
 
 NotSupported::NotSupported(std::string description, lazy_tensors::Shape shape)
-    : Node(ltc_not_supported, std::move(shape), /*num_outputs=*/1,
+    : TsNode(ltc_not_supported, std::move(shape), /*num_outputs=*/1,
            torch::lazy::MHash(description)),
       description_(std::move(description)) {}
 
@@ -18,7 +18,7 @@ NodePtr NotSupported::Clone(OpList operands) const {
 
 std::string NotSupported::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", description=" << description_;
+  ss << TsNode::ToString() << ", description=" << description_;
   return ss.str();
 }
 

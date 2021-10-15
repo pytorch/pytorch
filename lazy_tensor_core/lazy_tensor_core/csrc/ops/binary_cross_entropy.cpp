@@ -11,12 +11,11 @@ namespace ops {
 BinaryCrossEntropy::BinaryCrossEntropy(const Value& logits, const Value& labels,
                                        const c10::optional<Value>& weight,
                                        ReductionMode reduction)
-    : Node(ir::OpKind(at::aten::binary_cross_entropy),
-           lazy_tensors::util::GetValuesVector<Value>({logits, labels},
-                                                      {&weight}),
-           /*num_outputs=*/1,
-           torch::lazy::MHash(
-               lazy_tensors::util::GetEnumValue(reduction))),
+    : TsNode(ir::OpKind(at::aten::binary_cross_entropy),
+             lazy_tensors::util::GetValuesVector<Value>({logits, labels},
+                                                        {&weight}),
+             /*num_outputs=*/1,
+             torch::lazy::MHash(lazy_tensors::util::GetEnumValue(reduction))),
       reduction_(reduction) {
   SetShapeDeferred(
       [&]() { return compiler::NodeLowering::Get()->Infer(this); });
@@ -33,7 +32,7 @@ NodePtr BinaryCrossEntropy::Clone(OpList operands) const {
 
 std::string BinaryCrossEntropy::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString()
+  ss << TsNode::ToString()
      << ", reduction=" << lazy_tensors::util::GetEnumValue(reduction_);
   return ss.str();
 }

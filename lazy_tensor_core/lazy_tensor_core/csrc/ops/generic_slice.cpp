@@ -12,7 +12,7 @@ GenericSlice::GenericSlice(
     const Value& input,
     lazy_tensors::Span<const lazy_tensors::int64> base_indices,
     lazy_tensors::Span<const lazy_tensors::int64> sizes)
-    : Node(ltc_generic_slice, {input},
+    : TsNode(ltc_generic_slice, {input},
            /*num_outputs=*/1, torch::lazy::MHash(base_indices, sizes)),
       base_indices_(base_indices.begin(), base_indices.end()),
       sizes_(sizes.begin(), sizes.end()) {
@@ -26,7 +26,7 @@ NodePtr GenericSlice::Clone(OpList operands) const {
 
 std::string GenericSlice::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", base_indices=("
+  ss << TsNode::ToString() << ", base_indices=("
      << lazy_tensors::StrJoin(base_indices_, ", ") << "), sizes=("
      << lazy_tensors::StrJoin(sizes_, ", ") << ")";
   return ss.str();

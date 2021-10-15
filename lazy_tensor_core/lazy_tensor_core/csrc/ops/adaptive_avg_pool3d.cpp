@@ -9,7 +9,7 @@ namespace ops {
 
 AdaptiveAvgPool3d::AdaptiveAvgPool3d(
     const Value& input, std::vector<lazy_tensors::int64> output_size)
-    : Node(ir::OpKind(at::aten::adaptive_avg_pool3d), {input},
+    : TsNode(ir::OpKind(at::aten::adaptive_avg_pool3d), {input},
            /*num_outputs=*/1, torch::lazy::MHash(output_size)),
       output_size_(std::move(output_size)) {
   SetShapeDeferred(
@@ -22,7 +22,7 @@ NodePtr AdaptiveAvgPool3d::Clone(OpList operands) const {
 
 std::string AdaptiveAvgPool3d::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", output_size=("
+  ss << TsNode::ToString() << ", output_size=("
      << lazy_tensors::StrJoin(output_size_, ", ") << ")";
   return ss.str();
 }

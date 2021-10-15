@@ -10,7 +10,7 @@ namespace ops {
 namespace {
 
 lazy_tensors::Shape NodeOutputShape(const Value& input, int dim) {
-  const lazy_tensors::Shape& shape = input.shape();
+  const lazy_tensors::Shape& shape = GetShapeFromTsValue(input);
   auto dimensions = BuildUnsqueezeDimensions(shape.dimensions(), dim);
   return lazy_tensors::ShapeUtil::MakeShape(shape.element_type(), dimensions);
 }
@@ -18,7 +18,7 @@ lazy_tensors::Shape NodeOutputShape(const Value& input, int dim) {
 }  // namespace
 
 Unsqueeze::Unsqueeze(const Value& input, int dim)
-    : Node(ir::OpKind(at::aten::unsqueeze), {input},
+    : TsNode(ir::OpKind(at::aten::unsqueeze), {input},
            [&]() { return NodeOutputShape(input, dim); },
            /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim) {}
@@ -29,7 +29,7 @@ NodePtr Unsqueeze::Clone(OpList operands) const {
 
 std::string Unsqueeze::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", dim=" << dim_;
+  ss << TsNode::ToString() << ", dim=" << dim_;
   return ss.str();
 }
 

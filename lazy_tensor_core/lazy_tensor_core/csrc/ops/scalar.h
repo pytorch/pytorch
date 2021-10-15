@@ -4,7 +4,7 @@
 
 #include <iostream>
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 #include "lazy_tensors/computation_client/types.h"
 
 namespace torch_lazy_tensors {
@@ -15,7 +15,7 @@ namespace ops {
 // Even though a Constant could have been used, for simple scalars broadcasted
 // to big shapes, the Constant leads to big literals expanded within the
 // computation graph.
-class Scalar : public Node {
+class Scalar : public TsNode {
  public:
   Scalar(const at::Scalar& value, lazy_tensors::Shape shape);
   Scalar(const at::Scalar& value, lazy_tensors::PrimitiveType type);

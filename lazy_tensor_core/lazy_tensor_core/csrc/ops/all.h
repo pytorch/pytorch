@@ -2,14 +2,14 @@
 
 #include <vector>
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 #include "lazy_tensors/types.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class All : public Node {
+class All : public TsNode {
  public:
   All(const Value& input, std::vector<lazy_tensors::int64> dimensions,
       bool keep_reduced_dimensions);

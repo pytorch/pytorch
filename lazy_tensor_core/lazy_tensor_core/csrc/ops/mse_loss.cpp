@@ -12,7 +12,7 @@ namespace ops {
 
 MseLoss::MseLoss(const Value& input, const Value& target,
                  ReductionMode reduction)
-    : Node(ir::OpKind(at::aten::mse_loss), {input, target},
+    : TsNode(ir::OpKind(at::aten::mse_loss), {input, target},
            /*num_outputs=*/1,
            torch::lazy::MHash(
                lazy_tensors::util::GetEnumValue(reduction))),
@@ -27,7 +27,7 @@ NodePtr MseLoss::Clone(OpList operands) const {
 
 std::string MseLoss::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString()
+  ss << TsNode::ToString()
      << ", reduction=" << lazy_tensors::util::GetEnumValue(reduction_);
   return ss.str();
 }

@@ -9,7 +9,7 @@ namespace ops {
 
 LinearInterpolation::LinearInterpolation(const Value& value,
                                          const Value& new_value, double alpha)
-    : Node(ltc_moving_average, {value, new_value}, value.shape(),
+    : TsNode(ltc_moving_average, {value, new_value}, GetShapeFromTsValue(value),
            /*num_outputs=*/1, torch::lazy::MHash(alpha)),
       alpha_(alpha) {}
 
@@ -19,7 +19,7 @@ NodePtr LinearInterpolation::Clone(OpList operands) const {
 
 std::string LinearInterpolation::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", alpha=" << alpha_;
+  ss << TsNode::ToString() << ", alpha=" << alpha_;
   return ss.str();
 }
 

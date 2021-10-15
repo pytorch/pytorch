@@ -1,12 +1,12 @@
 #pragma once
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class Gather : public Node {
+class Gather : public TsNode {
  public:
   Gather(const Value& input, lazy_tensors::int64 dim, const Value& index);
 

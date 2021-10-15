@@ -6,7 +6,7 @@ namespace ir {
 namespace ops {
 
 Threshold::Threshold(const Value& input, float threshold, float value)
-    : Node(ir::OpKind(at::aten::threshold), {input}, input.shape(),
+    : TsNode(ir::OpKind(at::aten::threshold), {input}, GetShapeFromTsValue(input),
            /*num_outputs=*/1, torch::lazy::MHash(threshold, value)),
       threshold_(threshold),
       value_(value) {}
@@ -17,7 +17,7 @@ NodePtr Threshold::Clone(OpList operands) const {
 
 std::string Threshold::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", threshold=" << threshold_
+  ss << TsNode::ToString() << ", threshold=" << threshold_
      << ", value=" << value_;
   return ss.str();
 }

@@ -2,13 +2,13 @@
 
 #include <c10/core/Scalar.h>
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class MaskedFill : public Node {
+class MaskedFill : public TsNode {
  public:
   MaskedFill(const Value& input, const Value& mask, const at::Scalar& value);
 

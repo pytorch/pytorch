@@ -9,7 +9,7 @@ namespace ops {
 
 MaskedFill::MaskedFill(const Value& input, const Value& mask,
                        const at::Scalar& value)
-    : Node(OpKind(at::aten::masked_fill), {input, mask}, input.shape(),
+    : TsNode(OpKind(at::aten::masked_fill), {input, mask}, GetShapeFromTsValue(input),
            /*num_outputs=*/1, ScalarHash(value)),
       value_(std::move(value)) {}
 
@@ -19,7 +19,7 @@ NodePtr MaskedFill::Clone(OpList operands) const {
 
 std::string MaskedFill::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", value=" << value_;
+  ss << TsNode::ToString() << ", value=" << value_;
   return ss.str();
 }
 

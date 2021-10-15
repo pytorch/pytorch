@@ -2,7 +2,7 @@
 
 #include <vector>
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 #include "lazy_tensors/primitive_types.h"
 #include "lazy_tensors/span.h"
 
@@ -10,7 +10,7 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class AdaptiveAvgPool3d : public Node {
+class AdaptiveAvgPool3d : public TsNode {
  public:
   AdaptiveAvgPool3d(const Value& input,
                     std::vector<lazy_tensors::int64> output_size);

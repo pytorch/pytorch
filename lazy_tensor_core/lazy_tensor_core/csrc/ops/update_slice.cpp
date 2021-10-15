@@ -11,7 +11,7 @@ namespace ops {
 UpdateSlice::UpdateSlice(
     const Value& input, const Value& source,
     lazy_tensors::Span<const lazy_tensors::int64> base_indices)
-    : Node(ltc_update_slice, {input, source},
+    : TsNode(ltc_update_slice, {input, source},
            /*num_outputs=*/1, torch::lazy::MHash(base_indices)),
       base_indices_(base_indices.begin(), base_indices.end()) {
   SetShapeDeferred(
@@ -24,7 +24,7 @@ NodePtr UpdateSlice::Clone(OpList operands) const {
 
 std::string UpdateSlice::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", base_indices=("
+  ss << TsNode::ToString() << ", base_indices=("
      << lazy_tensors::StrJoin(base_indices_, ", ") << ")";
   return ss.str();
 }

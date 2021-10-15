@@ -1,12 +1,12 @@
 #pragma once
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class IndexAlongDim : public Node {
+class IndexAlongDim : public TsNode {
  public:
   IndexAlongDim(OpKind op, const ir::Value& buffer, const ir::Value& index,
                 const ir::Value& value, lazy_tensors::int64 dim);

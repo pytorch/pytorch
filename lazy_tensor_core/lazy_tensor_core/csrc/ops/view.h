@@ -2,13 +2,13 @@
 
 #include <vector>
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class View : public Node {
+class View : public TsNode {
  public:
   View(const Value& input, std::vector<lazy_tensors::int64> output_size);
 

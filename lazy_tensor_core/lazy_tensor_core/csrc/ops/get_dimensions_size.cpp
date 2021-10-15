@@ -13,7 +13,7 @@ namespace ops {
 
 GetDimensionsSize::GetDimensionsSize(
     const Value& input, std::vector<lazy_tensors::int64> dimensions)
-    : Node(ltc_get_dimensions_size, {input},
+    : TsNode(ltc_get_dimensions_size, {input},
            lazy_tensors::ShapeUtil::MakeShape(
                GetShapeDimensionType(/*device=*/nullptr), {}),
            /*num_outputs=*/1, torch::lazy::MHash(dimensions)),
@@ -25,7 +25,7 @@ NodePtr GetDimensionsSize::Clone(OpList operands) const {
 
 std::string GetDimensionsSize::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", dimensions=("
+  ss << TsNode::ToString() << ", dimensions=("
      << lazy_tensors::StrJoin(dimensions_, ", ") << ")";
   return ss.str();
 }

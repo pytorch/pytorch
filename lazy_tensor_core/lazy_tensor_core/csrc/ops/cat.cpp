@@ -7,8 +7,8 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Cat::Cat(lazy_tensors::Span<const ir::Value> values, lazy_tensors::int64 dim)
-    : Node(ir::OpKind(at::aten::cat), values,
+Cat::Cat(OpList values, lazy_tensors::int64 dim)
+    : TsNode(ir::OpKind(at::aten::cat), values,
            /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim) {
   SetShapeDeferred(
@@ -21,7 +21,7 @@ NodePtr Cat::Clone(OpList operands) const {
 
 std::string Cat::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", dim=" << dim_;
+  ss << TsNode::ToString() << ", dim=" << dim_;
   return ss.str();
 }
 

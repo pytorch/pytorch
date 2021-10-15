@@ -2,13 +2,13 @@
 
 #include <vector>
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class ReflectionPad2dBackward : public Node {
+class ReflectionPad2dBackward : public TsNode {
  public:
   ReflectionPad2dBackward(const Value& gard_output, const Value& input,
                           std::vector<lazy_tensors::int64> padding);

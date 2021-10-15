@@ -7,8 +7,8 @@ namespace ops {
 
 ScatterAdd::ScatterAdd(const Value& input, const Value& index, const Value& src,
                        lazy_tensors::int64 dim)
-    : Node(ir::OpKind(at::aten::scatter_add), {input, index, src},
-           input.shape(),
+    : TsNode(ir::OpKind(at::aten::scatter_add), {input, index, src},
+           GetShapeFromTsValue(input),
            /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim) {}
 
@@ -19,7 +19,7 @@ NodePtr ScatterAdd::Clone(OpList operands) const {
 
 std::string ScatterAdd::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", dim=" << dim_;
+  ss << TsNode::ToString() << ", dim=" << dim_;
   return ss.str();
 }
 

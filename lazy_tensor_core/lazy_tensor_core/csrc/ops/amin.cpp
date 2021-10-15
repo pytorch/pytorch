@@ -8,7 +8,7 @@ namespace ops {
 
 Amin::Amin(const Value& input, std::vector<lazy_tensors::int64> dimensions,
            bool keepdim)
-    : Node(ir::OpKind(at::aten::amin), {input},
+    : TsNode(ir::OpKind(at::aten::amin), {input},
            /*num_outputs=*/1, torch::lazy::MHash(dimensions, keepdim)),
       dimensions_(std::move(dimensions)),
       keepdim_(keepdim) {
@@ -22,7 +22,7 @@ NodePtr Amin::Clone(OpList operands) const {
 
 std::string Amin::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString()
+  ss << TsNode::ToString()
      << ", dimensions=" << lazy_tensors::StrJoin(dimensions_, ", ")
      << ", keepdim=" << keepdim_;
   return ss.str();

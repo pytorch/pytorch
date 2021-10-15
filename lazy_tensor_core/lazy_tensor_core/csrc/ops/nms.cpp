@@ -11,7 +11,7 @@ namespace ops {
 
 Nms::Nms(const Value& boxes, const Value& scores, const Value& score_threshold,
          const Value& iou_threshold, lazy_tensors::int64 output_size)
-    : Node(ltc_nms, {boxes, scores, score_threshold, iou_threshold},
+    : TsNode(ltc_nms, {boxes, scores, score_threshold, iou_threshold},
            /*num_outputs=*/2, torch::lazy::MHash(output_size)),
       output_size_(output_size) {
   SetShapeDeferred(
@@ -25,7 +25,7 @@ NodePtr Nms::Clone(OpList operands) const {
 
 std::string Nms::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", output_size=" << output_size_;
+  ss << TsNode::ToString() << ", output_size=" << output_size_;
   return ss.str();
 }
 

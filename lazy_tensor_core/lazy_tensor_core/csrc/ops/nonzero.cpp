@@ -10,7 +10,7 @@ namespace ops {
 namespace {
 
 lazy_tensors::Shape NodeOutputShape(const Value& input) {
-  const lazy_tensors::Shape& input_shape = input.shape();
+  const lazy_tensors::Shape& input_shape = GetShapeFromTsValue(input);
   lazy_tensors::int64 index_elements =
       lazy_tensors::ShapeUtil::ElementsIn(input_shape);
   lazy_tensors::PrimitiveType size_type =
@@ -25,7 +25,7 @@ lazy_tensors::Shape NodeOutputShape(const Value& input) {
 }  // namespace
 
 NonZero::NonZero(const Value& input)
-    : Node(ir::OpKind(at::aten::nonzero), {input}, NodeOutputShape(input),
+    : TsNode(ir::OpKind(at::aten::nonzero), {input}, NodeOutputShape(input),
            /*num_outputs=*/2) {}
 
 NodePtr NonZero::Clone(OpList operands) const {

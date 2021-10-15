@@ -11,7 +11,7 @@ TSEmbeddingDenseBackward::TSEmbeddingDenseBackward(
     const Value& grad_output, const Value& indices,
     lazy_tensors::int64 num_weights, lazy_tensors::int64 padding_idx,
     bool scale_grad_by_freq)
-    : Node(ir::OpKind(at::aten::embedding_dense_backward),
+    : TsNode(ir::OpKind(at::aten::embedding_dense_backward),
            {grad_output, indices}, /*num_outputs=*/1,
            torch::lazy::MHash(num_weights, padding_idx,
                                      scale_grad_by_freq)),
@@ -30,7 +30,7 @@ NodePtr TSEmbeddingDenseBackward::Clone(OpList operands) const {
 
 std::string TSEmbeddingDenseBackward::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", num_weights=" << num_weights_
+  ss << TsNode::ToString() << ", num_weights=" << num_weights_
      << ", padding_idx=" << padding_idx_
      << ", scale_grad_by_freq=" << scale_grad_by_freq_;
   return ss.str();

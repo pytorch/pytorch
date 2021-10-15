@@ -11,12 +11,12 @@ namespace ops {
 NllLoss2d::NllLoss2d(const Value& logits, const Value& labels,
                      const c10::optional<Value>& weight,
                      ReductionMode reduction, int ignore_index)
-    : Node(ir::OpKind(at::aten::nll_loss2d),
-           lazy_tensors::util::GetValuesVector<Value>({logits, labels},
-                                                      {&weight}),
-           /*num_outputs=*/1,
-           torch::lazy::MHash(
-               lazy_tensors::util::GetEnumValue(reduction), ignore_index)),
+    : TsNode(ir::OpKind(at::aten::nll_loss2d),
+             lazy_tensors::util::GetValuesVector<Value>({logits, labels},
+                                                        {&weight}),
+             /*num_outputs=*/1,
+             torch::lazy::MHash(lazy_tensors::util::GetEnumValue(reduction),
+                                ignore_index)),
       reduction_(reduction),
       ignore_index_(ignore_index) {
   SetShapeDeferred(
@@ -34,7 +34,7 @@ NodePtr NllLoss2d::Clone(OpList operands) const {
 
 std::string NllLoss2d::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString()
+  ss << TsNode::ToString()
      << ", reduction=" << lazy_tensors::util::GetEnumValue(reduction_)
      << ", ignore_index=" << ignore_index_;
   return ss.str();

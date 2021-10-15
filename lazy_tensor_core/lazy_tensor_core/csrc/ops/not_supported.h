@@ -2,13 +2,13 @@
 
 #include <string>
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class NotSupported : public Node {
+class NotSupported : public TsNode {
  public:
   NotSupported(std::string description, lazy_tensors::Shape shape);
 

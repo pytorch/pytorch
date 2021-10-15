@@ -11,7 +11,7 @@ namespace ops {
 
 ReplicationPad::ReplicationPad(const Value& input,
                                std::vector<lazy_tensors::int64> padding)
-    : Node(ltc_replication_pad, {input},
+    : TsNode(ltc_replication_pad, {input},
            /*num_outputs=*/1, torch::lazy::MHash(padding)),
       padding_(std::move(padding)) {
   SetShapeDeferred(
@@ -24,7 +24,7 @@ NodePtr ReplicationPad::Clone(OpList operands) const {
 
 std::string ReplicationPad::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", padding=("
+  ss << TsNode::ToString() << ", padding=("
      << lazy_tensors::StrJoin(padding_, ", ") << ")";
   return ss.str();
 }

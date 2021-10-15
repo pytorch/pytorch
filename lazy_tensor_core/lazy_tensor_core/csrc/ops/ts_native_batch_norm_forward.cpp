@@ -11,7 +11,7 @@ TSNativeBatchNormForward::TSNativeBatchNormForward(
     const Value& input, const Value& weight, const Value& bias,
     const Value& running_mean, const Value& running_var, bool training,
     double momentum, double eps)
-    : Node(ir::OpKind(at::aten::native_batch_norm),
+    : TsNode(ir::OpKind(at::aten::native_batch_norm),
            {input, weight, bias, running_mean, running_var},
            /*num_outputs=*/3,
            torch::lazy::MHash(training, momentum, eps)),
@@ -30,7 +30,7 @@ NodePtr TSNativeBatchNormForward::Clone(OpList operands) const {
 
 std::string TSNativeBatchNormForward::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", training=" << training_
+  ss << TsNode::ToString() << ", training=" << training_
      << ", momentum=" << momentum_ << ", eps=" << eps_;
   return ss.str();
 }

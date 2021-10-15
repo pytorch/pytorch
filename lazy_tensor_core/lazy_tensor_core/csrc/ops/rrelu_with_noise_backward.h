@@ -2,13 +2,13 @@
 
 #include <c10/core/Scalar.h>
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class RreluWithNoiseBackward : public Node {
+class RreluWithNoiseBackward : public TsNode {
  public:
   RreluWithNoiseBackward(const Value& grad_output, const Value& input,
                          const Value& noise, const at::Scalar& lower,

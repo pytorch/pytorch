@@ -11,7 +11,7 @@ namespace ir {
 namespace ops {
 namespace {
 
-std::vector<Value> GetOperandList(lazy_tensors::Span<const Value> operands,
+std::vector<Value> GetOperandList(OpList operands,
                                   const Value& token) {
   std::vector<Value> operand_list(operands.begin(), operands.end());
   operand_list.push_back(token);
@@ -21,10 +21,10 @@ std::vector<Value> GetOperandList(lazy_tensors::Span<const Value> operands,
 }  // namespace
 
 AllReduce::AllReduce(AllReduceType reduce_type,
-                     lazy_tensors::Span<const Value> operands,
+                     OpList operands,
                      const Value& token, double scale,
                      std::vector<std::vector<lazy_tensors::int64>> groups)
-    : Node(ltc_cross_replica_sum, GetOperandList(operands, token),
+    : TsNode(ltc_cross_replica_sum, GetOperandList(operands, token),
            /*num_outputs=*/operands.size() + 1,
            torch::lazy::MHash(
                lazy_tensors::util::GetEnumValue(reduce_type), scale, groups)),
@@ -43,7 +43,7 @@ NodePtr AllReduce::Clone(OpList operands) const {
 
 std::string AllReduce::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString()
+  ss << TsNode::ToString()
      << ", reduce_type=" << lazy_tensors::util::GetEnumValue(reduce_type_)
      << ", scale=" << scale_ << ", groups=(";
   for (size_t i = 0; i < groups_.size(); ++i) {

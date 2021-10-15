@@ -1,12 +1,12 @@
 #pragma once
 
-#include "lazy_tensor_core/csrc/ir.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class TSEmbeddingDenseBackward : public Node {
+class TSEmbeddingDenseBackward : public TsNode {
  public:
   TSEmbeddingDenseBackward(const Value& grad_output, const Value& indices,
                            lazy_tensors::int64 num_weights,

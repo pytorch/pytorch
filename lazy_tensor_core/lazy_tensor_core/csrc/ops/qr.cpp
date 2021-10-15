@@ -8,7 +8,7 @@ namespace ir {
 namespace ops {
 
 QR::QR(const Value& input, bool some)
-    : Node(ir::OpKind(at::aten::qr), {input},
+    : TsNode(ir::OpKind(at::aten::qr), {input},
            /*num_outputs=*/2, torch::lazy::MHash(some)),
       some_(some) {
   SetShapeDeferred(
@@ -21,7 +21,7 @@ NodePtr QR::Clone(OpList operands) const {
 
 std::string QR::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", some=" << some_;
+  ss << TsNode::ToString() << ", some=" << some_;
   return ss.str();
 }
 
