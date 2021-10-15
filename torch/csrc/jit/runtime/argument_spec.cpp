@@ -29,10 +29,10 @@ void ArgumentSpecCreator::scan(
   if (depth >= ARG_SPEC_DEPTH_LIMIT) {
     instructions_.emplace_back(SKIP);
   }
-  if (typ->isSubtypeOf(TensorType::get())) {
+  if (typ->isSubtypeOf(*TensorType::get())) {
     num_tensors_++;
     instructions_.emplace_back(SPECIALIZE_TENSOR);
-  } else if (typ->isSubtypeOf(OptionalType::ofTensor())) {
+  } else if (typ->isSubtypeOf(*OptionalType::ofTensor())) {
     num_tensors_++;
     num_optionals_++;
     instructions_.emplace_back(SPECIALIZE_OPTIONAL_TENSOR);
