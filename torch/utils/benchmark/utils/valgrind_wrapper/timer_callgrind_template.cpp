@@ -44,14 +44,17 @@ int main(int argc, char* argv[]) {
 
     // Warmup
     for(const auto i : c10::irange(number_warmup)) {
+        (void)i;
         // STMT_TEMPLATE_LOCATION
     }
 
     // Main loop
     for(const auto repeat : c10::irange(repeats)) {
+        (void)repeat;
         CALLGRIND_TOGGLE_COLLECT;
 
         for(const auto i : c10::irange(number)) {
+        (void)i;
         // STMT_TEMPLATE_LOCATION
         }
 

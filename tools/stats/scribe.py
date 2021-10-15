@@ -104,6 +104,8 @@ def schema_from_sample(data: Dict[str, Any]) -> Dict[str, str]:
             schema[key] = "string"
         elif isinstance(value, int):
             schema[key] = "int"
+        elif isinstance(value, float):
+            schema[key] = "float"
         else:
             raise RuntimeError(f"Unsupported value type: {key}: {value}")
     return schema
