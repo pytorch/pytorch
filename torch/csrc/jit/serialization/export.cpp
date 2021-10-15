@@ -17,6 +17,7 @@
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
 #include <torch/csrc/jit/serialization/onnx.h>
 #include <torch/csrc/onnx/onnx.h>
+#include <atomic>
 
 #include <onnx/checker.h>
 #include <onnx/onnx_pb.h>
@@ -69,13 +70,13 @@ void validateBlock(
   throw std::runtime_error(                        \
       std::string("ONNX export failed: ") + name + \
       "\n\nGraph we tried to export:\n" + b->owningGraph()->toString());
+    // Special error messages for certain types of operators
     if (node->kind() == prim::PythonOp) {
       auto py_node = static_cast<PythonOp*>(node);
       FAIL_EXPORT(
           "Couldn't export Python operator " + py_node->name() +
           "\n\nDefined at:\n" + getNodeStackTraceString(node))
     } else {
-      // Special error messages for certain types of operators
       if (node->kind() == aten::expand) {
         if (operator_export_type ==
             onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK) {
@@ -530,9 +531,7 @@ void EncoderBase::EncodeBlock(
       p_n->set_domain(domain);
     }
     if (operator_export_type_ == onnx_torch::OperatorExportTypes::ONNX) {
-      AT_ASSERT(
-          !node->kind().is_aten() && !node->kind().is_prim() &&
-          !node->kind().is_attr());
+      AT_ASSERT(!node->kind().is_aten() && !node->kind().is_attr());
     }
     p_n->set_op_type(node->kind().toUnqualString());
     if (add_node_names) {
@@ -934,7 +933,18 @@ void GraphEncoder::EncodeTensor(
   }
 }
 
+auto& mobileInterfaceCallExport() {
+  static std::atomic<bool> flag{false};
+  return flag;
+}
 } // namespace
+
+TORCH_API void enableMobileInterfaceCallExport() {
+  mobileInterfaceCallExport().store(true, std::memory_order_relaxed);
+}
+bool getMobileInterfaceCallExport() {
+  return mobileInterfaceCallExport().load(std::memory_order_relaxed);
+}
 
 std::string pretty_print_onnx(
     const std::shared_ptr<Graph>& graph,

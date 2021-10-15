@@ -201,7 +201,7 @@ void recursive_store(char* data, IntArrayRef sizes, IntArrayRef strides, int64_t
   PyObject** items = PySequence_Fast_ITEMS(seq.get());
   for(const auto i : c10::irange(n)) {
 #ifdef USE_NUMPY
-    if (PyArray_Check(items[i])) {
+    if (is_numpy_available() && PyArray_Check(items[i])) {
       TORCH_WARN_ONCE(
         "Creating a tensor from a list of numpy.ndarrays is extremely slow. "
         "Please consider converting the list to a single numpy.ndarray with "
