@@ -1930,14 +1930,14 @@ struct TORCH_API ClassAttribute {
   TypePtr attributeType,
   std::string attributeName) :
     kind_(kind),
-    attributeType_(attributeType),
+    attributeType_(std::move(attributeType)),
     attributeName_(std::move(attributeName)) {}
 
   AttributeKind getKind() const {
     return kind_;
   }
 
-  TypePtr getType() const {
+  const TypePtr& getType() const {
     return attributeType_;
   }
 
