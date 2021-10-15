@@ -17,7 +17,7 @@ import numbers
 import warnings
 from torch._six import string_classes
 from torch.jit import _unique_state_dict
-from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes, TrainingMode
+from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes, TrainingMode, CheckerError
 from torch._C import ListType, OptionalType, _propagate_and_assign_input_shapes, _check_onnx_proto
 from typing import List, Tuple, Union
 
@@ -25,9 +25,6 @@ from typing import List, Tuple, Union
 # the flag to tell the user whether it's in the middle of ONNX export or not
 __IN_ONNX_EXPORT = False
 
-
-class ONNXCheckerError(Exception):
-    pass
 
 def is_in_onnx_export():
     global __IN_ONNX_EXPORT
@@ -89,7 +86,7 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
     if enable_onnx_checker is not None:
         warnings.warn("'enable_onnx_checker' is deprecated and ignored. It will be removed in "
                       "the next PyTorch release. To proceed despite ONNX checker failures, "
-                      "catch torch.onnx.ONNXCheckerError.")
+                      "catch torch.onnx.CheckerError.")
     if _retain_param_name is not None:
         warnings.warn("'_retain_param_name' is deprecated and ignored. "
                       "It will be removed in the next PyTorch release.")
@@ -779,7 +776,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                 try:
                     _check_onnx_proto(proto)
                 except RuntimeError as e:
-                    raise ONNXCheckerError(e)
+                    raise CheckerError(e)
     finally:
         assert __IN_ONNX_EXPORT
         __IN_ONNX_EXPORT = False
