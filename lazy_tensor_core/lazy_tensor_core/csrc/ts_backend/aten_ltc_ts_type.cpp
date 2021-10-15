@@ -89,6 +89,7 @@ at::Tensor& LazyNativeFunctions::addcdiv_(at::Tensor& self,
                                          const at::Tensor& tensor1,
                                          const at::Tensor& tensor2,
                                          const at::Scalar& value) {
+  hahaha
   LTC_FN_COUNTER("lazy::");
   LazyTensor self_tensor = bridge::GetLtcTensor(self);
   LazyTensor::addcdiv_(self_tensor, value, bridge::GetLtcTensor(tensor1),
