@@ -82,6 +82,7 @@ def register_backend(
     BackendType.__doc__ = _backend_type_doc
     return BackendType[backend_name]
 
+# TODO: Remove after 1.10 release
 # Create a placeholder for PROCESS_GROUP BackendType
 # which is deprecated. The backend type can be accessed, but
 # will throw an error when the user tries to use it in init_rpc
@@ -300,7 +301,6 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
         name,
         rank,
         world_size,
-        group,
         rpc_backend_options,
         reverse_device_maps,
         devices,

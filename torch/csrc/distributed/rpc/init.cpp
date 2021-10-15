@@ -562,7 +562,6 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                  std::string selfName,
                  worker_id_t selfId,
                  int worldSize,
-                 c10::intrusive_ptr<::c10d::ProcessGroup> processGroup,
                  TensorPipeRpcBackendOptions opts,
                  std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
                  std::vector<c10::Device> devices) {
@@ -572,7 +571,6 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                         std::move(selfName),
                         selfId,
                         worldSize,
-                        std::move(processGroup),
                         std::move(opts),
                         std::move(reverseDeviceMaps),
                         std::move(devices),
@@ -583,7 +581,6 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           py::arg("name"),
           py::arg("rank"),
           py::arg("world_size"),
-          py::arg("process_group"),
           py::arg("rpc_backend_options"),
           py::arg("reverse_device_maps"),
           py::arg("devices"))
