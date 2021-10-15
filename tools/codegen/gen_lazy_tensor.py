@@ -91,7 +91,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
 
     def concat_map_codegen(func: Callable[[NativeFunction], Sequence[str]],
                            xs: Iterable[Union[NativeFunctionsGroup, NativeFunction]],
-                           *, needsInplace:bool = False) -> Iterator[str]:
+                           *, needsInplace: bool = False) -> Iterator[str]:
         for x in xs:
             f = x.functional if isinstance(x, NativeFunctionsGroup) else x
             if f.func.name in full_codegen:
@@ -150,7 +150,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                     class_method_name=f'{backend_dispatch_key}NativeFunctions',
                     node_base=node_base),
                 grouped_native_functions,
-                needsInplace = True,
+                needsInplace=True,
             )),
         })
 
