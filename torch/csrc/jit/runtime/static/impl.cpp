@@ -768,7 +768,7 @@ std::vector<at::Tensor> StaticModule::operator()(
 }
 
 c10::IValue StaticModule::operator()(
-    const std::vector<c10::IValue>& args,
+    c10::ArrayRef<c10::IValue> args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
   return runtime()(args, kwargs);
 }
@@ -849,7 +849,7 @@ std::vector<at::Tensor> StaticRuntime::operator()(
 }
 
 void StaticRuntime::set_inputs(
-    const std::vector<c10::IValue>& args,
+    c10::ArrayRef<c10::IValue> args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
   if (!kwargs.empty()) {
     // This is not ideal
@@ -886,7 +886,7 @@ void StaticRuntime::set_inputs(
 }
 
 c10::IValue StaticRuntime::operator()(
-    const std::vector<c10::IValue>& args,
+    c10::ArrayRef<c10::IValue> args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
   // We assume inference workloads, so we do not need
   // autograd. Enabling this is a significant win on dispatcher
@@ -967,7 +967,7 @@ std::string generate_latency_json(const std::string& label, double millis) {
 } // namespace
 
 void StaticRuntime::benchmark(
-    const std::vector<c10::IValue>& args,
+    c10::ArrayRef<c10::IValue> args,
     const std::unordered_map<std::string, c10::IValue>& kwargs,
     const int warmup_runs,
     const int main_runs,
@@ -1060,7 +1060,7 @@ void StaticRuntime::benchmark(
 }
 
 float StaticRuntime::benchmark_model(
-    const std::vector<c10::IValue>& args,
+    c10::ArrayRef<c10::IValue> args,
     const std::unordered_map<std::string, c10::IValue>& kwargs,
     const int warmup_runs,
     const int main_runs) {
@@ -1131,7 +1131,7 @@ void display_pnode_info(const ProcessedNode& pnode) {
 }
 
 void StaticRuntime::display_nodes(
-    const std::vector<c10::IValue>& args,
+    c10::ArrayRef<c10::IValue> args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
   c10::InferenceMode mode;
   if (planner_) {
@@ -1163,7 +1163,7 @@ void StaticRuntime::display_nodes(
 }
 
 StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
-    const std::vector<c10::IValue>& args,
+    c10::ArrayRef<c10::IValue> args,
     const std::unordered_map<std::string, c10::IValue>& kwargs,
     const int warmup_runs,
     const int main_runs) {
