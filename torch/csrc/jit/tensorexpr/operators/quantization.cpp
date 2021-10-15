@@ -347,7 +347,7 @@ Tensor computeUpsampleNearest2d(
     qx_qdtype = (int64_t)immQDType(x);
 
     ResultBuf.node()->set_qscale(DoubleImm::make(qx_qscale).node());
-    ResultBuf.node()->set_qzero(DoubleImm::make(qx_qzero).node());
+    ResultBuf.node()->set_qzero(LongImm::make(qx_qzero).node());
   }
 
   StmtPtr s = ExternalCall::make(
