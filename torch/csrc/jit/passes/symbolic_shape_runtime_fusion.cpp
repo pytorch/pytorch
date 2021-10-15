@@ -127,8 +127,6 @@ bool GenerateGuard(Node* tensorexpr_graph_node) {
   return true;
 }
 
-const auto& symbolic_shape_inputsAttr = Symbol::attr("symbolic_shape_inputs");
-
 // TODO: share more logic with tensorexpr_fuser ?
 void insertDynamicShapesGuard(
     const ShapeComputeGraphMapping& shape_mapping,
@@ -218,7 +216,7 @@ void insertDynamicShapesGuard(
     ss << "SS_" << -pair.first;
     subgraph->addInput(ss.str())->setType(IntType::get());
   }
-  guarded_node->is_(symbolic_shape_inputsAttr, symbolic_shape_inputs);
+  guarded_node->is_(attr::symbolic_shape_inputs, symbolic_shape_inputs);
 }
 
 // On each invocation of this guard, we need to check all of the static
@@ -352,7 +350,7 @@ RegisterOperators reg_guard({
               flattened_dim_offset += num_dims;
             }
 
-            push(stack, IValue(true));
+            push(stack, true);
             return;
           };
         },

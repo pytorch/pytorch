@@ -14,6 +14,7 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/cuda.h>
 #include <unordered_map>
+#include "torch/csrc/jit/testing/file_check.h"
 
 namespace torch {
 namespace jit {
@@ -75,6 +76,15 @@ TEST(ShapeAnalysisTest, DynamicShapesFusion) {
 
   auto success = GenerateGuard(output->node());
   TORCH_INTERNAL_ASSERT(success);
+  testing::FileCheck()
+      .check("TensorExprDynamicGuard")
+      ->check_next("prim::If")
+      ->check("aten::add")
+      ->check("TensorExprGroup")
+      ->check_same("symbolic_shape_inputs")
+      ->check("block1")
+      ->check("FallbackGraph")
+      ->run(*g);
 
   // clang-format off
   /* Graph Should Look Something like: (note: strides not yet handled)
