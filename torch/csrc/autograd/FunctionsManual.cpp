@@ -2522,14 +2522,21 @@ std::tuple<Tensor, Tensor> linalg_lstsq_backward(
   auto A_requires_grad = grad_input_mask[0];
   auto B_requires_grad = grad_input_mask[1];
 
+  Tensor pinvA;
   if (A_requires_grad) {
-    auto pinvA = at::linalg_pinv(A);
+    pinvA = at::linalg_pinv(A);
     auto pinvA_grad = grad.matmul(B.transpose(-1, -2).conj());
     A_grad = pinv_backward(pinvA_grad, pinvA, A);
   }
 
   if (B_requires_grad) {
-    B_grad = std::get<0>(at::linalg_lstsq(A.transpose(-1, -2).conj(), grad, rcond, driver));
+    if (!pinvA.defined()) {
+      pinvA = at::linalg_pinv(A);
+    }
+    // Equivalent to
+    // B_grad = std::get<0>(at::linalg_lstsq(A.transpose(-1, -2).conj(), grad, rcond, driver));
+    // but we avoid this approach as `gelsy` is non-deterministic
+    B_grad = pinvA.transpose(-1, -2).conj().matmul(grad);
   }
 
   return std::make_tuple(A_grad, B_grad);

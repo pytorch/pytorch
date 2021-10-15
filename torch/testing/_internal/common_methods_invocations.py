@@ -7653,8 +7653,6 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            supports_out=True,
            sample_inputs_func=sample_inputs_linalg_lstsq,
-           # this method is not deterministic
-           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            skips=(
                # we skip gradient checks for this suite as they are tested in
@@ -7670,8 +7668,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_linalg_lstsq,
            supports_autograd=True,
            supports_forward_ad=True,
-           # this method is not deterministic
-           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            skips=(
                # tests do not work with passing lambda for op
