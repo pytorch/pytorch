@@ -366,7 +366,7 @@ jobs:
         run: |
           cd "${GITHUB_WORKSPACE}"
           python3 -m tools.linter.clang_tidy.generate_build_files
-      - name: Run clang-tidy
+      - name: Run PR clang-tidy
         if: ${{ github.event_name == 'pull_request' }}
         run: |
           cd "${GITHUB_WORKSPACE}"
@@ -379,8 +379,7 @@ jobs:
 
       # Run clang-tidy on a smaller subset of the codebase on master until we
       # make the repository clang-tidy clean
-      - name: Run clang-tidy
-        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+      - name: Run master clang-tidy
         run: |
           cd "${GITHUB_WORKSPACE}"
 
@@ -392,7 +391,7 @@ jobs:
               torch/csrc/deploy \
               torch/csrc/tensor \
             --clang-tidy-exe "$(which clang-tidy)" \
-            --disable-progress-bar 2>&1 | tee "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
+            --disable-progress-bar 2>&1 | tee -a "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
 
       - name: Annotate output
         if: ${{ github.event_name == 'pull_request' }}

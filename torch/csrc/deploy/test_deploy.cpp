@@ -62,7 +62,7 @@ TEST(TorchpyTest, InitTwice) {
 
 TEST(TorchpyTest, DifferentInterps) {
   torch::deploy::InterpreterManager m(2);
-  m.reigsterModuleSource("check_none", "check = id(None)\n");
+  m.registerModuleSource("check_none", "check = id(None)\n");
   int64_t id0 = 0, id1 = 0;
   {
     auto I = m.allInstances()[0].acquireSession();
@@ -107,8 +107,8 @@ TEST(TorchpyTest, MultiSerialSimpleModel) {
   size_t ninterp = 3;
   std::vector<at::Tensor> outputs;
 
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   for (const auto i : c10::irange(ninterp)) {
+    (void)i;
     outputs.push_back(model({input.alias()}).toTensor());
   }
 
@@ -151,11 +151,12 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
   std::vector<at::Tensor> outputs;
 
   std::vector<std::future<at::Tensor>> futures;
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   for (const auto i : c10::irange(nthreads)) {
+    (void)i;
     futures.push_back(std::async(std::launch::async, [&model]() {
       auto input = torch::ones({10, 20});
-      for (const auto i : c10::irange(100)) {
+      for (const auto j : c10::irange(100)) {
+        (void)j;
         model({input.alias()}).toTensor();
       }
       auto result = model({input.alias()}).toTensor();
@@ -172,6 +173,28 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
   // Compare all to reference
   for (const auto i : c10::irange(nthreads)) {
     ASSERT_TRUE(ref_output.equal(outputs[i]));
+  }
+}
+
+TEST(TorchpyTest, ErrorsReplicatingObj) {
+  torch::deploy::InterpreterManager manager(4);
+  torch::deploy::Package p = manager.loadPackage(path("SIMPLE", simple));
+  auto replicatedObj = p.loadPickle("model", "model.pkl");
+  // Acquire two different interpreters
+  auto session1 = replicatedObj.acquireSession();
+  auto session2 = p.acquireSession();
+  // Create an obj reference on interpreter 1
+  auto obj = session1.fromMovable(replicatedObj);
+  // should throw an error when trying to access obj from different session
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW(session2.createMovable(obj), c10::Error);
+  try {
+    session2.createMovable(obj);
+  } catch (c10::Error& error) {
+    EXPECT_TRUE(
+        error.msg().find(
+            "Cannot create movable from an object that lives in different session") !=
+        std::string::npos);
   }
 }
 
@@ -230,8 +253,8 @@ TEST(TorchpyTest, TaggingRace) {
   constexpr int64_t trials = 4;
   constexpr int64_t nthreads = 16;
   torch::deploy::InterpreterManager m(nthreads);
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   for (const auto n : c10::irange(trials)) {
+    (void)n;
     at::Tensor t = torch::empty(2);
     std::atomic<int64_t> success(0);
     std::atomic<int64_t> failed(0);
@@ -266,7 +289,7 @@ TEST(TorchpyTest, DisarmHook) {
 
 TEST(TorchpyTest, RegisterModule) {
   torch::deploy::InterpreterManager m(2);
-  m.reigsterModuleSource("foomodule", "def add1(x): return x + 1\n");
+  m.registerModuleSource("foomodule", "def add1(x): return x + 1\n");
   for (const auto& interp : m.allInstances()) {
     auto I = interp.acquireSession();
     AT_ASSERT(3 == I.global("foomodule", "add1")({2}).toIValue().toInt());
@@ -283,6 +306,7 @@ TEST(TorchpyTest, FxModule) {
   std::vector<at::Tensor> outputs;
   auto input = torch::ones({5, 10});
   for (const auto i : c10::irange(nthreads)) {
+    (void)i;
     outputs.push_back(model({input.alias()}).toTensor());
   }
 
@@ -381,7 +405,7 @@ TEST(TorchpyTest, UsesDistributed) {
 
 TEST(TorchpyTest, Autograd) {
   torch::deploy::InterpreterManager m(2);
-  m.reigsterModuleSource("autograd_test", R"PYTHON(
+  m.registerModuleSource("autograd_test", R"PYTHON(
 import torch
 
 x = torch.ones(5)  # input tensor

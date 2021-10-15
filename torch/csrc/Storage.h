@@ -37,6 +37,8 @@
     PyObject_IsInstance(obj, THPComplexFloatStorageClass)
 #define THPQUInt4x2Storage_Check(obj) \
     PyObject_IsInstance(obj, THPQUInt8StorageClass)
+#define THPQUInt2x4Storage_Check(obj) \
+    PyObject_IsInstance(obj, THPQUInt8StorageClass)
 
 #define THPDoubleStorage_CData(obj)         (obj)->cdata
 #define THPFloatStorage_CData(obj)          (obj)->cdata
@@ -54,6 +56,7 @@
 #define THPComplexDoubleStorage_CData(obj)  (obj)->cdata
 #define THPComplexFloatStorage_CData(obj)   (obj)->cdata
 #define THPQUInt4x2Storage_CData(obj)       (obj)->cdata
+#define THPQUInt2x4Storage_CData(obj)       (obj)->cdata
 
 #define THPStorageType TH_CONCAT_3(THP,Real,StorageType)
 #define THPStorageBaseStr TH_CONCAT_STRING_2(Real,StorageBase)

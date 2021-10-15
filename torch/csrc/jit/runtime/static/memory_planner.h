@@ -36,9 +36,9 @@ class MemoryPlanner {
   explicit MemoryPlanner(
       StaticRuntime* runtime,
       const FastMap<const Value*, std::vector<const Value*>>&,
-      const FastSet<const Value*>& external_values,
+      const ValueGroup& value_group,
       bool enable_out_variant,
-      bool manage_graph_output_memory);
+      bool manage_output_tensors);
   // disable copying and moving
   MemoryPlanner(const MemoryPlanner&) = delete;
   MemoryPlanner& operator=(const MemoryPlanner&) = delete;
@@ -47,9 +47,14 @@ class MemoryPlanner {
 
   void allocate();
   void deallocate();
+  void deallocateOutputTensors();
 
   size_t total_num_managed_tensors() const {
     return num_managed_tensors_;
+  }
+
+  size_t total_num_managed_output_tensors() const {
+    return managed_output_tensors_.size();
   }
 
   size_t total_num_unmanaged() const {
@@ -64,35 +69,68 @@ class MemoryPlanner {
     return reused_tensors_;
   }
 
+  size_t numOutputBufferBytes() const {
+    return output_buffer_bytes_;
+  }
+
+  bool isManagedOutputTensorValue(const Value* value) const {
+    return managed_output_tensor_values_.find(value) !=
+        managed_output_tensor_values_.end();
+  }
+
+  // Check if `ivalue` is contained as a managed tensor. Only used in DCHECK().
+  bool isManagedOutputTensor(const IValue& ivalue) const {
+    if (!output_buffer_ || // output buffer got already deallocated.
+        output_buffer_bytes_ == 0 || // memory planning is not yet initialized.
+        !ivalue.isTensor() // a non-tensor is never managed
+    ) {
+      return false;
+    }
+    const auto& tensor = ivalue.toTensor();
+    if (!tensor.has_storage() || !tensor.storage().data_ptr()) {
+      return false;
+    }
+    // TODO: Improve this once D31357486 is landed.
+    uint8_t* tensor_ptr =
+        static_cast<uint8_t*>(tensor.storage().data_ptr().get());
+    uint8_t* buffer_start = static_cast<uint8_t*>(output_buffer_.get());
+    uint8_t* buffer_end = buffer_start + output_buffer_bytes_;
+    return buffer_start <= tensor_ptr && tensor_ptr < buffer_end;
+  }
+
  private:
   // ivalues created in one run but not managed by MemoryPlanner
   std::vector<IValue*> unmanaged_ivalues_;
 
   // each pair contains the size (in bytes) of data to be allocated
-  // and a vector of Tensors that should be backed by that same data.
-  // Thus, if memonger is disabled, all vectors are of size 1.
-  std::vector<std::pair<size_t, std::vector<at::Tensor*>>> managed_tensors_;
+  // and a vector of Tensors' storages that should be backed by that
+  // same data.  Thus, if memonger is disabled, all vectors are of
+  // size 1.
 
-  // Invariant: either managed_tensor_storages_ is empty, or its
-  // length is equal to that of managed_tensors_ and each element is
-  // the result of calling storage() on the corresponding managed
-  // tensor() as of the last deallocate() call.
-  // We cache the storage pointers directly so that we don't have to
-  // take an extra cache miss per Tensor reading them from the
-  // TensorImpl object.
-  std::vector<const at::Storage*> managed_tensor_storages_;
+  // We cache the storage pointers directly rather than caching Tensor
+  // objects so that we don't have to do an extra load from memory
+  // (which will likely miss in CPU data cache) per Tensor reading
+  // the Storage pointerfrom the TensorImpl object.
+  std::vector<std::pair<size_t, std::vector<const at::Storage*>>>
+      managed_tensor_storages_;
+  // We don't have any guarantee that the model doesn't change the
+  // Storage for managed tensors out from under us during execution,
+  // so we have to grab the Storages each time we deallocate.
+  std::vector<std::pair<size_t, std::vector<at::Tensor*>>> managed_tensors_;
   at::DataPtr buffer_; // allocated each time we call Run()
   size_t num_managed_tensors_{0};
   size_t managed_bytes_{0};
   size_t reused_tensors_{0};
 
-  // since output tensors are alive after one inference, their storage
-  // is managed differently (e.g., deallocation happens at client side)
-  // std::vector<std::pair<size_t, std::vector<at::Tensor*>>>
-  //     managed_output_storage_;
-  // size_t managed_output_bytes_{0};
-  // size_t reused_output_tensors_{0};
-  // at::DataPtr output_buffer_; // allocated each time we call Run()
+  // Since output tensors are alive after one inference, their storage
+  // is managed differently (e.g., deallocation happens on the client side).
+  FastSet<const Value*> managed_output_tensor_values_{};
+  std::vector<std::pair<size_t, at::Tensor*>> managed_output_tensors_{};
+  at::DataPtr output_buffer_;
+  size_t output_buffer_bytes_{0};
+
+  void allocateManagedTensors();
+  void allocateOutputTensors();
 
   static size_t compute_aligned_tensor_size(size_t nbytes);
   static at::DataPtr allocate_buffer(size_t size);
