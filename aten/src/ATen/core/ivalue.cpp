@@ -1,3 +1,4 @@
+#include <ATen/NativeFunctions.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/Dict.h>
 #include <ATen/core/Formatting.h>
@@ -272,7 +273,7 @@ bool operator==(const IValue& lhs, const IValue& rhs) {
   // `bool()` is called on the return value of `__eq__` if the return value is
   // not a boolean. Mimic that behavior here.
   TORCH_INTERNAL_ASSERT(eq.isTensor());
-  return eq.toTensor().is_nonzero();
+  return at::native::is_nonzero(eq.toTensor());
 }
 
 bool IValue::ptrEqual(const IValue& lhs, const IValue& rhs) {
