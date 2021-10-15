@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/DLConvertor.h>
 #include <ATen/Parallel.h>
+#include <ATen/ParallelFuture.h>
 
 #include <iostream>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
