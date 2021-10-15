@@ -91,12 +91,16 @@ Tensor arithmetic_scalar(
           shader_descriptor,
           v_output.extents(),
           adaptive_work_group_size(v_output.extents()),
-          // Shader parameters
-          block,
-          // Textures
+          // Write-only access bypasses synchronization but inserts appropriate
+          // barriers if necessary.
           v_output.image(
               command_buffer, vTensor::Stage::Compute, vTensor::Access::Write),
-          v_self.image(command_buffer, vTensor::Stage::Compute));
+          // Read-only access is implied on const tensors and triggers an async
+          // synchronization if necessary.
+          v_self.image(command_buffer, vTensor::Stage::Compute),
+          // Object lifetime is managed by the resource pool.
+          // It is OK not to keep track of the handle.
+          context->resource().pool.uniform(block).object);
     } else {
       TORCH_CHECK(false, "Not implemented!");
     }
@@ -143,13 +147,15 @@ Tensor& arithmetic_scalar_(
           shader_descriptor,
           v_self.extents(),
           adaptive_work_group_size(v_self.extents()),
-          // Shader parameters
-          block,
-          // Textures
+          // Read-Write access triggers an async synchronization if necessory
+          // and inserts appropriate barriers if hazards are detected.
           v_self.image(
               command_buffer,
               vTensor::Stage::Compute,
-              vTensor::Access::Read | vTensor::Access::Write));
+              vTensor::Access::Read | vTensor::Access::Write),
+          // Object lifetime is managed by the resource pool.
+          // It is OK not to keep track of the handle.
+          context->resource().pool.uniform(block).object);
     } else {
       TORCH_CHECK(false, "Not implemented!");
     }
@@ -211,13 +217,19 @@ Tensor arithmetic_tensor(
           shader_descriptor,
           v_output.extents(),
           adaptive_work_group_size(v_output.extents()),
-          // Shader parameters
-          block,
-          // Textures
+          // Write-only access bypasses synchronization but inserts appropriate
+          // barriers if necessary.
           v_output.image(
               command_buffer, vTensor::Stage::Compute, vTensor::Access::Write),
+          // Read-only access is implied on const tensors and triggers an async
+          // synchronization if necessary.
           v_self.image(command_buffer, vTensor::Stage::Compute),
-          v_other.image(command_buffer, vTensor::Stage::Compute));
+          // Read-only access is implied on const tensors and triggers an async
+          // synchronization if necessary.
+          v_other.image(command_buffer, vTensor::Stage::Compute),
+          // Object lifetime is managed by the resource pool.
+          // It is OK not to keep track of the handle.
+          context->resource().pool.uniform(block).object);
     } else {
       TORCH_CHECK(false, "Not implemented!");
     }
@@ -272,16 +284,18 @@ Tensor& arithmetic_tensor_(
           shader_descriptor,
           v_self.extents(),
           adaptive_work_group_size(v_self.extents()),
-          // Shader parameters
-          block,
-          // Textures
+          // Read-Write access triggers an async synchronization if necessory
+          // and inserts appropriate barriers if hazards are detected.
           v_self.image(
               command_buffer,
               vTensor::Stage::Compute,
               vTensor::Access::Read | vTensor::Access::Write),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
-          v_other.image(command_buffer, vTensor::Stage::Compute));
+          v_other.image(command_buffer, vTensor::Stage::Compute),
+          // Object lifetime is managed by the resource pool.
+          // It is OK not to keep track of the handle.
+          context->resource().pool.uniform(block).object);
     } else {
       TORCH_CHECK(false, "Not implemented!");
     }

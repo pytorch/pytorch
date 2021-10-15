@@ -206,6 +206,9 @@ The following environment variables are made available to you in your script:
 
 12. ``TORCHELASTIC_RUN_ID`` - Equal to the rendezvous ``run_id`` (e.g. unique job id).
 
+13. ``PYTHON_EXEC`` - System executable override. If provided, the python user script will
+    use the value of ``PYTHON_EXEC`` as executable. The `sys.executable` is used by default.
+
 **Deployment:**
 
 1. (Not needed for the C10d backend) Start the rendezvous backend server and get the endpoint (to be
@@ -306,6 +309,27 @@ utility
 
       if should_checkpoint:
         save_checkpoint(checkpoint_path)
+
+9. (Recommended) On worker errors, this tool will summarize the details of the error
+   (e.g. time, rank, host, pid, traceback, etc). On each node, the first error (by timestamp)
+   is heuristically reported as the "Root Cause" error. To get tracebacks as part of this
+   error summary print out, you must decorate your main entrypoint function in your
+   training script as shown in the example below. If not decorated, then the summary
+   will not include the traceback of the exception and will only contain the exitcode.
+   For details on torchelastic error handling see: https://pytorch.org/docs/stable/elastic/errors.html
+
+::
+
+  from torch.distributed.elastic.multiprocessing.errors import record
+
+  @record
+  def main():
+      # do train
+      pass
+
+  if __name__ == "__main__":
+      main()
+
 """
 import logging
 import os
@@ -599,7 +623,7 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
     if "OMP_NUM_THREADS" not in os.environ and nproc_per_node > 1:
         omp_num_threads = 1
         log.warning(
-            f"*****************************************\n"
+            f"\n*****************************************\n"
             f"Setting OMP_NUM_THREADS environment variable for each process to be "
             f"{omp_num_threads} in default, to avoid your system being overloaded, "
             f"please further tune the variable for optimal performance in "
@@ -642,7 +666,7 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
         cmd_args.append(args.training_script)
     else:
         if with_python:
-            cmd = sys.executable
+            cmd = os.getenv("PYTHON_EXEC", sys.executable)
             cmd_args.append("-u")
             if args.module:
                 cmd_args.append("-m")
