@@ -255,7 +255,7 @@ class TestOptim(TestCase):
                 v = torch.randn(4, dtype=torch.complex64)
                 complex_param.grad = torch.sparse_coo_tensor(list(zip(*i)), v, complex_param.shape)
 
-                i = [[0, 3, 0], [0, 3, 1],[1, 1, 0],[1, 1, 1],[2, 2, 0],[2, 2, 1],[4, 0, 0],[4, 0, 1]]
+                i = [[0, 3, 0], [0, 3, 1], [1, 1, 0], [1, 1, 1], [2, 2, 0], [2, 2, 1], [4, 0, 0], [4, 0, 1]]
                 v = [v[0].real, v[0].imag, v[1].real, v[1].imag, v[2].real, v[2].imag, v[3].real, v[3].imag]
                 real_param.grad = torch.sparse_coo_tensor(list(zip(*i)), v, real_param.shape)
             else:
