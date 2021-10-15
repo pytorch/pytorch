@@ -2,8 +2,8 @@
  * The tool provides a shell to the embedded interpreter. Useful to inspect the
  * state of the embedding interpreter interactively.
  */
-#include <torch/csrc/deploy/deploy.h>
 #include <glog/logging.h>
+#include <torch/csrc/deploy/deploy.h>
 
 DEFINE_string(
     python_path,
