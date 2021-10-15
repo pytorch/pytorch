@@ -41,7 +41,7 @@ from torch.testing._internal.common_quantization import (
     skipIfNoFBGEMM,
     EmbeddingBagModule,
     EmbeddingModule,
-    EmbeddingWithLinear,
+    EmbeddingWithStaticLinear,
     LinearReluLinearModel,
 )
 
@@ -514,25 +514,16 @@ class TestPostTrainingStatic(QuantizationTestCase):
         self.assertEqual(type(model.emb), torch.nn.quantized.Embedding)
         self.checkScriptable(model, [[indices]], check_save_load=True)
 
-        model = EmbeddingWithLinear().eval()
+        idx = torch.LongTensor([1, 2, 4, 5, 4, 3, 2, 9])
+        offsets = torch.LongTensor([0, 4])
+        x = torch.randn(2, 4)
+        model = EmbeddingWithStaticLinear().eval()
         prepare(model, inplace=True)
         convert(model, inplace=True)
         self.assertTrue('QuantizedEmbedding' in str(model))
         self.assertTrue('QuantizedLinear' in str(model))
         self.checkQuantizedLinear(model.fc)
-
-    @skipIfNoFBGEMM
-    def test_embedding_linear_dynamic(self):
-        qconfig_dict = {'fc' : default_dynamic_qconfig}
-        model = EmbeddingWithLinear()
-        quantize_dynamic(model, qconfig_dict, inplace=True)
-
-        model.emb.qconfig = float_qparams_weight_only_qconfig
-        prepare(model, inplace=True)
-        convert(model, inplace=True)
-        self.assertTrue('QuantizedEmbedding' in str(model))
-        self.assertTrue('DynamicQuantizedLinear' in str(model))
-
+        model(idx, offsets, x)
 
     @skipIfNoFBGEMM
     def test_dequant_stub(self):
@@ -1148,6 +1139,32 @@ class TestPostTrainingDynamic(QuantizationTestCase):
             test_only_eval_fn(model, self.calib_data)
             convert_dynamic(model)
             checkHooksIsPresent(model)
+
+    @skipIfNoFBGEMM
+    def test_embedding_ops_dynamic(self):
+        class EmbeddingBagWithLinear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = torch.nn.EmbeddingBag(num_embeddings=10, embedding_dim=12,
+                                                 include_last_offset=True, scale_grad_by_freq=False, mode='sum')
+                self.fc = torch.nn.Linear(5, 5)
+
+            def forward(self, indices, offsets, linear_in):
+                return self.emb(indices, offsets), self.fc(linear_in)
+        model = EmbeddingBagWithLinear().eval()
+
+        qconfig_dict = {
+            torch.nn.EmbeddingBag : float_qparams_weight_only_qconfig,
+            torch.nn.Linear: default_dynamic_qconfig
+        }
+        indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
+        offsets = torch.tensor([0, 19, 20, 28, 28, 32])
+        q_model = quantize_dynamic(model, qconfig_dict)
+
+        q_model(indices, offsets, torch.randn(5, 5))
+        self.assertTrue('QuantizedEmbedding' in str(q_model))
+        self.assertTrue('DynamicQuantizedLinear' in str(q_model))
+
 
 class TestEagerModeActivationOps(QuantizationTestCase):
     def _test_activation_op_impl(

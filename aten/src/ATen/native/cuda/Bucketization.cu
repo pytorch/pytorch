@@ -4,6 +4,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/BucketizationUtils.h>
 #include <THC/THC.h>
+#include <ATen/native/Resize.h>
 
 namespace at {
 namespace native {
@@ -106,9 +107,7 @@ void dispatch(Tensor& result, const Tensor& input, const Tensor& boundaries, boo
 
 Tensor& searchsorted_out_cuda(const Tensor& sorted_sequence, const Tensor& self, bool out_int32, bool right, Tensor& result) {
   searchsorted_pre_check(sorted_sequence, self, result, out_int32);
-  if (result.numel() == 0) {
-    result.resize_(self.sizes());
-  }
+  at::native::resize_output(result, self.sizes());
   if (self.numel() == 0) {
     return result;
   }
