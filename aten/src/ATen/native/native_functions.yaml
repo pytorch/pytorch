@@ -10575,10 +10575,14 @@
 - func: linalg_pinv.atol_rtol_tensor(Tensor self, *, Tensor? atol=None, Tensor? rtol=None, bool hermitian=False) -> Tensor
   python_module: linalg
   variants: function
+  dispatch:
+    CompositeExplicitAutograd: linalg_pinv
 
 - func: linalg_pinv.atol_rtol_tensor_out(Tensor self, *, Tensor? atol=None, Tensor? rtol=None, bool hermitian=False, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
+  dispatch:
+    CompositeExplicitAutograd: linalg_pinv_out
 
 - func: linalg_pinv.atol_rtol_float(Tensor self, *, float? atol=None, float? rtol=None, bool hermitian=False) -> Tensor
   cpp_no_default_args: ['atol', 'rtol']
@@ -10593,26 +10597,18 @@
 - func: linalg_pinv(Tensor self, float rcond, bool hermitian=False) -> Tensor
   python_module: linalg
   variants: function
-  dispatch:
-    CompositeExplicitAutograd: linalg_pinv
 
 - func: linalg_pinv.rcond_tensor(Tensor self, Tensor rcond, bool hermitian=False) -> Tensor
   python_module: linalg
   variants: function
-  dispatch:
-    CompositeExplicitAutograd: linalg_pinv
 
 - func: linalg_pinv.out(Tensor self, float rcond, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
-  dispatch:
-    CompositeExplicitAutograd: linalg_pinv_out
 
 - func: linalg_pinv.out_rcond_tensor(Tensor self, Tensor rcond, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
-  dispatch:
-    CompositeExplicitAutograd: linalg_pinv_out
 
 - func: linalg_solve(Tensor input, Tensor other) -> Tensor
   python_module: linalg
