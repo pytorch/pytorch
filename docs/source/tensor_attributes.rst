@@ -55,11 +55,8 @@ by finding the minimum dtype that satisfies the following rules:
 * If the type of a scalar operand is of a higher category than tensor operands
   (where complex > floating > integral > boolean), we promote to a type with sufficient size to hold
   all scalar operands of that category.
-* If a zero-dimension tensor operand has a higher category than dimensioned operands,
-  we promote to a type with sufficient size and category to hold all zero-dim tensor operands of
-  that category.
-* If there are no higher-category zero-dim operands, we promote to a type with sufficient size
-  and category to hold all dimensioned operands.
+* If there are no higher-category scalar operands, we promote to a type with sufficient size
+  and category to hold all tensor operands.
 
 A floating point scalar operand has dtype `torch.get_default_dtype()` and an integral
 non-boolean scalar operand has dtype `torch.int64`. Unlike numpy, we do not inspect
@@ -77,9 +74,8 @@ Promotion Examples::
     >>> uint_tensor = torch.ones(1, dtype=torch.uint8)
     >>> double_tensor = torch.ones(1, dtype=torch.double)
     >>> bool_tensor = torch.ones(1, dtype=torch.bool)
-    # zero-dim tensors
+    # zero-dim tensor
     >>> long_zerodim = torch.tensor(1, dtype=torch.long)
-    >>> int_zerodim = torch.tensor(1, dtype=torch.int)
 
     >>> torch.add(5, 5).dtype
     torch.int64
@@ -87,7 +83,7 @@ Promotion Examples::
     >>> (int_tensor + 5).dtype
     torch.int32
     >>> (int_tensor + long_zerodim).dtype
-    torch.int32
+    torch.int64
     >>> (long_tensor + int_tensor).dtype
     torch.int64
     >>> (bool_tensor + long_tensor).dtype
