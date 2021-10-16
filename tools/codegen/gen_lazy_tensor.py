@@ -94,7 +94,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                            *, codegenInplaceVariant: bool = False) -> Iterator[str]:
         """
         We code-gen for the functional variant, which is all we need for IR classes/lowerings, but we only code-gen
-        additional entries for the inplace variant for the native function impl.
+        additional entries for the inplace variant for the native function and shape inference impl.
         """
         for x in xs:
             f = x.functional if isinstance(x, NativeFunctionsGroup) else x
@@ -174,7 +174,8 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
             'dispatch_namespace': backend_dispatch_key.lower(),
             'func_declarations': list(concat_map_codegen(
                 lambda f: dest.gen_lazy_shape_dtype_decl(f, backend_indices[backend_dispatch_key]),
-                grouped_native_functions
+                grouped_native_functions,
+                codegenInplaceVariant=True,
             )),
         })
 

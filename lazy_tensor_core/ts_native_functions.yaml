@@ -10,6 +10,8 @@ full_codegen:
   - addcmul
   - bitwise_and.Scalar
   - bitwise_and.Tensor
+  - bitwise_and_.Scalar
+  - bitwise_and_.Tensor
   - cos
   - clamp
   - dropout
