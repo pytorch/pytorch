@@ -1683,7 +1683,7 @@ def unravel_index(
         (tensor([3, 6, 6]), tensor([4, 5, 1]))
     """
     if not isinstance(shape, Tensor):
-        if not isinstance(indices, (tuple, list)):
+        if not isinstance(shape, (tuple, list)):
             raise TypeError("Shape should be either a tuple or a list if not tensor,"
                             f" but found: {type(shape)}.")
         for dim in shape:
@@ -1737,5 +1737,7 @@ def unravel_index(
         coords.append(indices % dim)
         indices = torch.div(indices, dim, rounding_mode='trunc')
 
-    coords_t = torch.stack(coords[::-1], dim=-1)
-    return tuple(coords_t.T) if as_tuple else coords_t
+    if as_tuple:
+        return tuple(reversed(coords))
+    else:
+        return torch.stack(coords[::-1], dim=-1)

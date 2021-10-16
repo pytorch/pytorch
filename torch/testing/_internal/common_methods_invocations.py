@@ -5303,6 +5303,7 @@ def sample_inputs_unravel_index(op_info, device, dtype, requires_grad, **kwargs)
         ((1, 2, 3), (2, 6)),
         ((0), (1,)),
         ((45, 47), (1, 10, 10)),
+        (((1, 2, 3), (4, 5, 6)), (1, 10)),
     )
 
     def generator():
