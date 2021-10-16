@@ -315,6 +315,8 @@ class TestShardParameter(ShardedTensorTestBase):
         local_shards = fc.weight.local_shards()
         self.assertEqual(1, len(local_shards))
         self.assertEqual(torch.Size([3, 12]), local_shards[0].tensor.size())
+        self.assertEqual(3, local_shards[0].tensor.size(0))
+        self.assertEqual(12, local_shards[0].tensor.size(1))
         self.assertEqual(
             torch.narrow(weight_og, 0, 3 * self.rank, 3), local_shards[0].tensor
         )
@@ -1031,6 +1033,21 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         # Test with tuple
         st = sharded_tensor.empty(spec, (10, 20), init_rrefs=True)
         self.assertEqual(torch.Size([10, 20]), st.size())
+
+        # Test with row size
+        sharded_tensor = _sharded_tensor.empty(spec, (10, 20), init_rrefs=True)
+        self.assertEqual(sharded_tensor.size(0), 10)
+
+        # Test with col size
+        sharded_tensor = _sharded_tensor.empty(spec, (10, 20), init_rrefs=True)
+        self.assertEqual(sharded_tensor.size(1), 20)
+
+        # Test with invalid input
+        sharded_tensor = _sharded_tensor.empty(spec, (10, 20), init_rrefs=True)
+        with self.assertRaisesRegex(ValueError, 'must be within the range of tensor dimensions \\[0, 2\\)'):
+            sharded_tensor.size(-1)
+        with self.assertRaisesRegex(ValueError, 'must be within the range of tensor dimensions \\[0, 2\\)'):
+            sharded_tensor.size(2)
 
         with self.assertRaises(TypeError):
             st = sharded_tensor.empty(spec, "foo")

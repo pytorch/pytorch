@@ -411,6 +411,7 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
         // NB: The ThreadLocalStateGuard doesn't set the grad_mode because GraphTask
         // always saves ThreadLocalState without grad_mode.
         at::ThreadLocalStateGuard tls_guard(local_graph_task->thread_locals_);
+        c10::Warning::WarningHandlerGuard warnings_guard(&local_graph_task->warning_handler_);
 
         try {
           // The guard sets the thread_local current_graph_task on construction
@@ -1039,6 +1040,7 @@ auto Engine::execute(const edge_list& roots,
   // in dist_engine.cpp).
   auto& fut = graph_task->future_result_;
   fut->wait();
+  graph_task->warning_handler_.replay_warnings();
   return fut->value().toTensorVector();
 }
 

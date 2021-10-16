@@ -197,6 +197,7 @@ WINDOWS_BLOCKLIST = [
     "distributed/pipeline/sync/test_worker",
     "distributed/elastic/agent/server/test/api_test",
     "distributed/elastic/multiprocessing/api_test",
+    "distributed/_shard/sharding_spec/test_sharding_spec",
     "distributed/_shard/sharded_tensor/test_sharded_tensor",
     "distributed/_shard/sharded_tensor/ops/test_linear",
 ] + FSDP_TEST
@@ -206,6 +207,7 @@ ROCM_BLOCKLIST = [
     "distributed/rpc/test_faulty_agent",
     "distributed/rpc/test_tensorpipe_agent",
     "distributed/rpc/cuda/test_tensorpipe_agent",
+    "distributed/_shard/sharding_spec/test_sharding_spec",
     "distributed/_shard/sharded_tensor/test_sharded_tensor",
     "distributed/_shard/sharded_tensor/ops/test_linear",
     "test_determination",

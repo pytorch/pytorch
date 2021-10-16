@@ -137,7 +137,6 @@ class TORCH_API TensorExprKernel {
 
   std::vector<DimArg> dimsFromSizes(const std::vector<ExprHandle>& sizes);
   std::vector<ExprHandle> sizesForValue(const torch::jit::Value* v);
-  std::vector<ExprHandle> inferSizesForValue(const torch::jit::Value* v);
   std::vector<ExprHandle> sizesFromVaryingShape(
       const c10::VaryingShape<int64_t>& shape);
 
