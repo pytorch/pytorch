@@ -23,6 +23,9 @@
 #include <c10/util/irange.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 
+//here
+#include <torch/csrc/utils/numpy_stub.h>
+
 #include <vector>
 #include <tuple>
 
@@ -348,6 +351,13 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
 // indexing is needed, it calls C++ `at::indexing::dispatch_index_put_`.
 int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   HANDLE_TH_ERRORS
+
+    //code addition starts here! <-----------------
+   auto array = (PyArrayObject*)self;
+   if(!PyArray_ISWRITEABLE(array)){
+     throw TypeError("This tensor is in read only memory, and you cannot write to read only memory.");
+   }
+
   if (py_value == nullptr) {
     throw TypeError("Tensor does not support deleting items");
   }
