@@ -18,15 +18,17 @@ from typing import (
     Sequence,
     Set,
     Union,
+    cast,
 )
 
 import torch
 from torch.serialization import location_tag, normalize_storage_type
+from torch.types import Storage
 from torch.utils.hooks import RemovableHandle
 
 from ._digraph import DiGraph
 from ._importlib import _normalize_path
-from ._mangling import is_mangled
+from ._mangling import demangle, is_mangled
 from ._package_pickler import create_pickler
 from ._stdlib import is_stdlib_module
 from .find_file_dependencies import find_files_source_depends_on
@@ -53,6 +55,10 @@ class _ModuleProviderAction(Enum):
     # we may encounter a `_mock` module from the original package. If we do,
     # just ignore it and write a `_mock` module once.
     REPACKAGED_MOCK_MODULE = 5
+    # Special case: PackageImporter adds a fake module
+    # (`torch_package_importer`) that allows packaged code to access it. Don't
+    # re-export this.
+    SKIP = 6
 
 
 class PackagingErrorReason(Enum):
@@ -387,8 +393,8 @@ class PackageExporter:
             if not is_mangled(module_name):
                 raise
             msg = (
-                f"Module not found: '{module_name}'. Modules imported "
-                "from a torch.package cannot be re-exported directly."
+                f"Module not found: '{module_name}'. Make sure the PackageImporter that "
+                "created this module is present in `self.importer`"
             )
             raise ModuleNotFoundError(msg) from None
 
@@ -420,6 +426,17 @@ class PackageExporter:
             module_name in self.dependency_graph
             and self.dependency_graph.nodes[module_name].get("provided") is True
         ):
+            return
+
+        # Special case: PackageImporter provides a special module called
+        # `torch_package_importer` that allows packaged modules to reference
+        # their PackageImporter. We don't want to re-export this.
+        if module_name == "torch_package_importer":
+            self.dependency_graph.add_node(
+                module_name,
+                action=_ModuleProviderAction.SKIP,
+                provided=True,
+            )
             return
 
         if module_name == "_mock":
@@ -474,10 +491,6 @@ class PackageExporter:
                 "save_module() expects a string input, did you perhaps mean to pass `__name__`?"
             )
 
-        self.dependency_graph.add_node(
-            module_name,
-            provided=True,
-        )
         self._intern_module(module_name, dependencies)
 
     def _intern_module(
@@ -489,6 +502,13 @@ class PackageExporter:
         along with any metadata needed to write it out to the zipfile at serialization time.
         """
         module_obj = self._import_module(module_name)
+        # Subtle: if the import above succeeded, either:
+        #   1. The module name is not mangled, and this was just a regular import, or
+        #   2. The module name is mangled, but one of the importers was able to
+        #      recognize the mangling and import it.
+        # Either way, it is now safe to demangle this name so that we don't
+        # serialize the mangled version to the package.
+        module_name = demangle(module_name)
 
         # Find dependencies of this module and require them as well.
         is_package = hasattr(module_obj, "__path__")
@@ -511,6 +531,7 @@ class PackageExporter:
                 is_package=is_package,
                 error=packaging_error,
                 error_context=error_context,
+                provided=True,
             )
             return
 
@@ -769,21 +790,36 @@ class PackageExporter:
         )
 
     def _persistent_id(self, obj):
-        if torch.is_storage(obj):
-            storage_type = normalize_storage_type(type(obj))
-            location = location_tag(obj)
+        if torch.is_storage(obj) or isinstance(obj, torch.storage.TypedStorage):
+            if isinstance(obj, torch.storage.TypedStorage):
+                # TODO: Once we decide to break serialization FC, we can
+                # remove this case
+                storage = obj._storage
+                storage_type_str = obj.pickle_storage_type()
+                storage_type = getattr(torch, storage_type_str)
+                dtype = obj.dtype
+                storage_numel = obj.size()
+
+            else:
+                storage = obj
+                storage_type = normalize_storage_type(type(storage))
+                dtype = torch.uint8
+                storage_numel = storage.nbytes()
+
+            storage = cast(Storage, storage)
+            location = location_tag(storage)
 
             # serialize storage if not already written
-            storage_present = self.storage_context.has_storage(obj)
-            storage_id = self.storage_context.get_or_add_storage(obj)
+            storage_present = self.storage_context.has_storage(storage)
+            storage_id = self.storage_context.get_or_add_storage(storage)
             if not storage_present:
-                if obj.device.type != "cpu":
-                    obj = obj.cpu()
-                num_bytes = obj.size() * obj.element_size()
+                if storage.device.type != "cpu":
+                    storage = storage.cpu()
+                num_bytes = storage.nbytes()
                 self.zip_file.write_record(
-                    f".data/{storage_id}.storage", obj.data_ptr(), num_bytes
+                    f".data/{storage_id}.storage", storage.data_ptr(), num_bytes
                 )
-            return ("storage", storage_type, storage_id, location, obj.size())
+            return ("storage", storage_type, storage_id, location, storage_numel)
 
         if hasattr(obj, "__reduce_package__"):
             if _gate_torchscript_serialization and isinstance(
@@ -861,7 +897,6 @@ class PackageExporter:
         self._validate_dependency_graph()
 
         extern_modules = []
-        _mock_written = False
         for module_name, attrs in self.dependency_graph.nodes.items():
             action = attrs["action"]
 
@@ -901,7 +936,8 @@ class PackageExporter:
 
             elif action == _ModuleProviderAction.REPACKAGED_MOCK_MODULE:
                 self._write_mock_file()
-
+            elif action == _ModuleProviderAction.SKIP:
+                continue
             else:
                 raise AssertionError(
                     f"Invalid action: {module_name}, {action}. Please report a bug to PyTorch."
@@ -946,14 +982,7 @@ class PackageExporter:
         Returns:
             A string representation of dependencies in package.
         """
-        edges = "\n".join(f'"{f}" -> "{t}";' for f, t in self.dependency_graph.edges)
-        return f"""\
-digraph G {{
-rankdir = LR;
-node [shape=box];
-{edges}
-}}
-"""
+        return self.dependency_graph.to_dot()
 
     def _nodes_with_action_type(
         self, action: Optional[_ModuleProviderAction]
@@ -1012,6 +1041,16 @@ node [shape=box];
             return list(self.dependency_graph._pred[module_name].keys())
         else:
             return []
+
+    def all_paths(self, src: str, dst: str) -> str:
+        """Return a dot representation of the subgraph
+           that has all paths from src to dst.
+
+        Returns:
+            A dot representation containing all paths from src to dst.
+            (https://graphviz.org/doc/info/lang.html)
+        """
+        return self.dependency_graph.all_paths(src, dst)
 
 
 # even though these are in the standard library, we do not allow them to be

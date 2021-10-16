@@ -312,7 +312,7 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
     # this, it's easy to hit timeout in rpc.shutdown() if there is no other RPC
     # on that process before rpc.shutdown(), as the agent initialization can
     # take longer than 5s.
-    api._all_gather(None, timeout=rpc_constants.DEFAULT_RPC_TIMEOUT_SEC)
+    api._all_gather(None, timeout=rpc_backend_options.rpc_timeout)
     # Need a barrier here to make sure no peers leave before the rank0 finishes
     # _all_gather
     group.barrier().wait()

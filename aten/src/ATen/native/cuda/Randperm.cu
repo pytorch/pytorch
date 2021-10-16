@@ -1,5 +1,4 @@
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/cuda/cub.cuh>

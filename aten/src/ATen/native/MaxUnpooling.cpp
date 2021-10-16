@@ -25,7 +25,11 @@ Tensor& max_unpooling2d_forward_out_cpu(
       self_.sizes() == indices_.sizes(),
       "Shape of indices should match shape of input");
 
-  TORCH_CHECK(self_.numel() > 0, "Input must be non-empty");
+  for (int64_t i = 1; i < self_.ndimension(); ++i) {
+    TORCH_CHECK(self_.size(i) > 0, "max_unpooling2d_forward_out_cpu(): ",
+                "Expected input to have non-zero size for non-batch dimensions, but got ",
+                self_.sizes(), " with dimension ", i , " being empty.");
+  }
 
   auto memory_format = self_.suggest_memory_format();
   auto self = self_.contiguous(memory_format);
@@ -41,7 +45,10 @@ Tensor& max_unpooling2d_forward_out_cpu(
   }
   output.zero_();
 
-  max_unpool2d_kernel(kCPU, output, self, indices);
+  if (output.numel() != 0) {
+    max_unpool2d_kernel(kCPU, output, self, indices);
+  }
+
   return output;
 };
 
@@ -60,7 +67,8 @@ static void max_unpooling3d_shape_check(
     const Tensor& indices,
     IntArrayRef output_size,
     IntArrayRef stride,
-    IntArrayRef padding) {
+    IntArrayRef padding,
+    const char *fn_name) {
   int64_t oT = output_size[0];
   int64_t oH = output_size[1];
   int64_t oW = output_size[2];
@@ -84,7 +92,11 @@ static void max_unpooling3d_shape_check(
       input.sizes() == indices.sizes(),
       "Shape of indices should match shape of input");
 
-  TORCH_CHECK(input.numel() > 0, "Input must be non-empty");
+  for (int64_t i = 1; i < input.ndimension(); ++i) {
+    TORCH_CHECK(input.size(i) > 0, fn_name,
+                ": Expected input to have non-zero size for non-batch dimensions, but got ",
+                input.sizes(), " with dimension ", i , " being empty.");
+  }
 
   TORCH_CHECK(
       stride[0] > 0 && stride[1] > 0 && stride[2] > 0,
@@ -144,7 +156,7 @@ Tensor& max_unpooling3d_forward_out_cpu(const Tensor& self_,
   auto indices = indices_.contiguous();
 
   max_unpooling3d_shape_check(
-      self_, Tensor(), indices_, output_size, stride, padding);
+    self_, Tensor(), indices_, output_size, stride, padding, "max_unpooling3d_forward_out_cpu()");
 
   if (self_.ndimension() == 5) {
     output.resize_({self.size(0), self.size(1), oT, oH, oW});
@@ -152,8 +164,10 @@ Tensor& max_unpooling3d_forward_out_cpu(const Tensor& self_,
     output.resize_({self.size(0), oT, oH, oW});
   }
   output.zero_();
+  if (output.numel() != 0) {
+    max_unpool3d_kernel(kCPU, output, self, indices);
+  }
 
-  max_unpool3d_kernel(kCPU, output, self, indices);
   return output;
 }
 
@@ -207,7 +221,10 @@ Tensor& max_unpooling2d_backward_out_cpu(const Tensor& grad_output_,
         grad_output.size(dimw));
   }
 
-  max_unpool2d_backward_kernel(kCPU, grad_input, grad_output, indices);
+  if (grad_input.numel() != 0) {
+    max_unpool2d_backward_kernel(kCPU, grad_input, grad_output, indices);
+  }
+
   return grad_input;
 }
 
@@ -240,7 +257,7 @@ Tensor& max_unpooling3d_backward_out_cpu(
   int64_t dimw = ndim == 4 ? 3 : 4;
 
   max_unpooling3d_shape_check(
-      self, grad_output_, indices_, output_size, stride, padding);
+   self, grad_output_, indices_, output_size, stride, padding, "max_unpooling3d_backward_out_cpu()");
 
   /* get contiguous gradOutput */
   auto grad_output = grad_output_.contiguous();
@@ -266,7 +283,10 @@ Tensor& max_unpooling3d_backward_out_cpu(
         grad_output.size(dimw));
   }
 
-  max_unpool3d_backward_kernel(kCPU, grad_input, grad_output, indices);
+  if (grad_input.numel() != 0) {
+    max_unpool3d_backward_kernel(kCPU, grad_input, grad_output, indices);
+  }
+
   return grad_input;
 }
 

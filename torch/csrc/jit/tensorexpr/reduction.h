@@ -26,9 +26,6 @@ class TORCH_API Reducer {
   Reducer(ExprHandle init, ReduceInteraction& interaction)
       : init_(init.node()), interaction_(interaction) {}
 
-  Reducer(ExprHandle init, ReduceInteraction& interaction, Placeholder& buf)
-      : init_(init.node()), interaction_(interaction) {}
-
   template <typename RI>
   Reducer(ExprHandle init, RI interaction) : init_(init.node()) {
     interaction_ = interaction;
@@ -171,7 +168,7 @@ inline ExprHandle maximumVal(ScalarType type) {
 #define MAX_BY_TYPE_CASE(Type, Name) \
   case ScalarType::Name:             \
     return ExprHandle(std::numeric_limits<Type>::max());
-    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, MAX_BY_TYPE_CASE)
+    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, MAX_BY_TYPE_CASE)
 #undef MAX_BY_TYPE_CASE
     default:
       throw unsupported_dtype();
@@ -184,7 +181,7 @@ inline ExprHandle minimumVal(ScalarType type) {
 #define MAX_BY_TYPE_CASE(Type, Name) \
   case ScalarType::Name:             \
     return ExprHandle(std::numeric_limits<Type>::min());
-    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, MAX_BY_TYPE_CASE)
+    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, MAX_BY_TYPE_CASE)
 #undef MAX_BY_TYPE_CASE
     default:
       throw unsupported_dtype();

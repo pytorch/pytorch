@@ -48,21 +48,8 @@ inline ScalarType get_dtype_from_self(
 } // namespace native
 
 namespace meta {
-void resize_reduction(
-    impl::MetaBase& meta,
-    const Tensor& self,
-    IntArrayRef dims,
-    bool keepdim,
-    ScalarType out_dtype) {
-  DimVector dims_(dims);
-  maybe_wrap_dims(dims_, self.dim());
-  auto shape = get_reduction_shape(self, dims_, keepdim);
-  meta.set_output(shape, self.options().dtype(out_dtype));
-  namedinference::propagate_names_for_reduction(
-      meta.maybe_get_output(), self, dims_, keepdim);
-}
 
-ScalarType infer_dtype_from_optional(
+static ScalarType infer_dtype_from_optional(
     const Tensor& self,
     IntArrayRef dim,
     bool keepdim,
@@ -79,11 +66,11 @@ ScalarType infer_dtype_from_optional(
   }
 }
 
-IntArrayRef optional_to_arrayref(const c10::optional<int64_t>& opt) {
+static IntArrayRef optional_to_arrayref(const c10::optional<int64_t>& opt) {
   return opt.has_value() ? opt.value() : IntArrayRef{};
 }
 
-ScalarType get_result_or_bytebool_dtype(const Tensor& self, const Tensor& result) {
+static ScalarType get_result_or_bytebool_dtype(const Tensor& self, const Tensor& result) {
   // Refer [all, any : uint8 compatibility]
   if (result.defined()) {
     return result.scalar_type();
@@ -92,13 +79,7 @@ ScalarType get_result_or_bytebool_dtype(const Tensor& self, const Tensor& result
   }
 }
 
-void check_all_any(const char* name, const Tensor& self, const Tensor& result) {
-  // Refer [all, any : uint8 compatibility]
-  TORCH_CHECK(
-      self.layout() == Layout::Strided,
-      name, " only supports strided layout, got: ",
-      self.layout());
-
+void check_result_is_bytebool(const char* name, const Tensor& self, const Tensor& result) {
   if (result.defined()) {
     // Refer [all, any : uint8 compatibility]
     TORCH_CHECK(
@@ -109,16 +90,40 @@ void check_all_any(const char* name, const Tensor& self, const Tensor& result) {
   }
 }
 
-TORCH_META_FUNC2(all, dim)(const Tensor& self, int64_t dim, bool keepdim) {
-  check_all_any("all", self, maybe_get_output());
-  auto out_dtype = get_result_or_bytebool_dtype(self, maybe_get_output());
-  resize_reduction(*this, self, dim, keepdim, out_dtype);
+// Note [all, any : uint8 compatibility]:
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// For NumPy comptability, `all` and `any` return
+// Tensor of dtype `bool`. However for compatibility reason,
+// for `uint8`, they return Tensor of same dtype `uint8`.
+// Reference: https://github.com/pytorch/pytorch/pull/47878#issuecomment-747108561
+static void allany_meta(
+    impl::MetaBase& meta,
+    const char* name,
+    const Tensor& self,
+    IntArrayRef dims,
+    bool keepdim) {
+  const auto& result = meta.maybe_get_output();
+  check_result_is_bytebool(name, self, result);
+  auto out_dtype = get_result_or_bytebool_dtype(self, result);
+  resize_reduction(meta, self, dims, keepdim, out_dtype);
 }
 
-TORCH_META_FUNC2(any, dim)(const Tensor& self, int64_t dim, bool keepdim) {
-  check_all_any("any", self, maybe_get_output());
-  auto out_dtype = get_result_or_bytebool_dtype(self, maybe_get_output());
-  resize_reduction(*this, self, dim, keepdim, out_dtype);
+TORCH_PRECOMPUTE_META_FUNC2(all, dim)(const Tensor& self, int64_t dim, bool keepdim) {
+  allany_meta(*this, "all", self, dim, keepdim);
+  return TORCH_PRECOMPUTE_STRUCT2(all, dim)().set_dim(maybe_wrap_dim(dim, self.dim()));
+}
+
+TORCH_META_FUNC(all)(const Tensor& self) {
+  allany_meta(*this, "all", self, {}, false);
+}
+
+TORCH_PRECOMPUTE_META_FUNC2(any, dim)(const Tensor& self, int64_t dim, bool keepdim) {
+  allany_meta(*this, "any", self, dim, keepdim);
+  return TORCH_PRECOMPUTE_STRUCT2(any, dim)().set_dim(maybe_wrap_dim(dim, self.dim()));
+}
+
+TORCH_META_FUNC(any)(const Tensor& self) {
+  allany_meta(*this, "any", self, {}, false);
 }
 
 void check_argmax_argmin(
@@ -161,12 +166,6 @@ void meta_func_cum_ops(
 
   if (result.defined()) {
     out_dtype = dtype.value_or(result.scalar_type());
-    // This check is still here because the inplace version of structured kernels
-    // does not do any checks on 'set_output'.
-    TORCH_CHECK(
-        out_dtype == result.scalar_type(),
-        name, "(): provided dtype must match dtype of result tensor. Got: ",
-        toString(out_dtype), ". Expected: ", toString(result.scalar_type()));
   } else {
     auto is_integral = at::isIntegralType(self.scalar_type(), /*includeBool=*/true);
     out_dtype = dtype.value_or(is_integral ? ScalarType::Long : self.scalar_type());
@@ -640,7 +639,7 @@ void cummax_cummin_helper(const T1* self_data, T1* values_data, T2* indices_data
 }
 
 void cummax_helper_cpu(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim) {
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool,
+  AT_DISPATCH_ALL_TYPES_AND2(kBool, kBFloat16,
     self.scalar_type(), "cummax_cpu",
     [&] {
       at::native::tensor_dim_apply3<scalar_t, int64_t>(self, values, indices, dim, cummax_cummin_helper<scalar_t, int64_t, std::greater_equal<scalar_t>>);
@@ -675,7 +674,7 @@ std::tuple<Tensor, Tensor> cummax(const Tensor& self, int64_t dim) {
 }
 
 void cummin_helper_cpu(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim) {
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool,
+  AT_DISPATCH_ALL_TYPES_AND2(kBool, kBFloat16,
     self.scalar_type(), "cummin_cpu",
     [&] {
       at::native::tensor_dim_apply3<scalar_t, int64_t>(self, values, indices, dim, cummax_cummin_helper<scalar_t, int64_t, std::less_equal<scalar_t>>);
@@ -1154,7 +1153,7 @@ TORCH_IMPL_FUNC(mean_out)
   }
 }
 
-Tensor mean_cpu_gpu(const Tensor &self, optional<ScalarType> dtype) {
+Tensor mean(const Tensor &self, optional<ScalarType> dtype) {
   return at::mean(self, IntArrayRef{}, false, dtype);
 }
 
@@ -1165,6 +1164,36 @@ Tensor mean(const Tensor& self, DimnameList dim, bool keepdim, optional<ScalarTy
 Tensor& mean_out(const Tensor& self, DimnameList dim,
                  bool keepdim, c10::optional<ScalarType> opt_dtype, Tensor& result) {
   return at::mean_out(result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
+}
+
+// TODO(@heitorschueroff) implement custom kernels for nanmean
+Tensor& nanmean_out(
+    const Tensor& self,
+    IntArrayRef dim,
+    bool keepdim,
+    c10::optional<ScalarType> opt_dtype,
+    Tensor& result) {
+  TORCH_CHECK(
+      self.is_floating_point(),
+      "nanmean(): expected input to have floating point dtype but got ",
+      self.scalar_type());
+  const auto factor = at::native::isnan(self).logical_not_().sum(dim, keepdim);
+  at::native::nansum_out(self, dim, keepdim, opt_dtype, result).div_(factor);
+  return result;
+}
+
+Tensor nanmean(
+    const Tensor& self,
+    IntArrayRef dim,
+    bool keepdim,
+    optional<ScalarType> opt_dtype) {
+  TORCH_CHECK(
+      self.is_floating_point(),
+      "nanmean(): expected input to have floating point dtype but got ",
+      self.scalar_type());
+  const auto factor =
+      at::native::isnan(self.detach()).logical_not_().sum(dim, keepdim);
+  return at::nansum(self, dim, keepdim, opt_dtype).div_(factor);
 }
 
 static Tensor squeeze_multiple(const Tensor& self, IntArrayRef dims) {
@@ -1291,22 +1320,6 @@ Tensor norm(const Tensor& self, const Scalar& p) {
   return at::norm(self, p, IntArrayRef{}, false);
 }
 
-// Note [all, any : uint8 compatibility]:
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// For NumPy comptability, `all` and `any` return
-// Tensor of dtype `bool`. However for compatibility reason,
-// for `uint8`, they return Tensor of same dtype `uint8`.
-// Reference: https://github.com/pytorch/pytorch/pull/47878#issuecomment-747108561
-inline const Tensor & _all(const Tensor & result, TensorIterator & iter) {
-  if (iter.numel() == 0) {
-    result.fill_(1);
-  } else {
-    and_stub(iter.device_type(), iter);
-  }
-
-  return result;
-}
-
 inline TensorIterator get_allany_iter(
     const Tensor& self,
     const Tensor& result,
@@ -1323,60 +1336,39 @@ inline TensorIterator get_allany_iter(
       self, result, dims, keepdim, result.scalar_type());
 }
 
-Tensor all(const Tensor& self) {
-  Tensor result;
-
-  meta::check_all_any("all", self, result);
-  auto out_dtype = meta::get_result_or_bytebool_dtype(self, result);
-  auto shape = meta::get_reduction_shape(self, {}, false);
-
-  result = at::empty(shape, self.options().dtype(out_dtype));
-  auto iter = get_allany_iter(self, result, {}, false);
-
-  return _all(result, iter);
+template <int identity, typename Stub>
+inline void allany_impl(
+    const Tensor& self,
+    const Tensor& result,
+    IntArrayRef dims,
+    bool keepdim,
+    Stub& stub) {
+  if (self.numel() == 0) {
+    result.fill_(identity);
+  } else if (self.numel() == 1) {
+    result.fill_(self.item().toBool());
+  } else {
+    auto iter = get_allany_iter(self, result, dims, keepdim);
+    stub(iter.device_type(), iter);
+  }
 }
 
 TORCH_IMPL_FUNC(all_out)
 (const Tensor& self, int64_t dim, bool keepdim, const Tensor& result) {
-  dim = maybe_wrap_dim(dim, self.dim());
-  auto iter = get_allany_iter(self, result, dim, keepdim);
-  auto mut_result = const_cast<Tensor&>(result);
-  if (!_dimreduce_return_trivial(mut_result, self, 1, dim, keepdim)) {
-    _all(mut_result, iter);
-  }
+  allany_impl<1>(self, result, dim, keepdim, and_stub);
 }
 
-inline const Tensor & _any(const Tensor & result, TensorIterator & iter) {
-  if (iter.numel() == 0) {
-    result.fill_(0);
-  } else {
-    or_stub(iter.device_type(), iter);
-  }
-
-  return result;
-}
-
-Tensor any(const Tensor& self) {
-  Tensor result;
-
-  meta::check_all_any("any", self, result);
-  auto out_dtype = meta::get_result_or_bytebool_dtype(self, result);
-  auto shape = meta::get_reduction_shape(self, {}, false);
-
-  result = at::empty(shape, self.options().dtype(out_dtype));
-  auto iter = get_allany_iter(self, result, {}, false);
-
-  return _any(result, iter);
+TORCH_IMPL_FUNC(all_all_out)(const Tensor& self, const Tensor& result) {
+  allany_impl<1>(self, result, {}, false, and_stub);
 }
 
 TORCH_IMPL_FUNC(any_out)
 (const Tensor& self, int64_t dim, bool keepdim, const Tensor& result) {
-  dim = maybe_wrap_dim(dim, self.dim());
-  auto iter = get_allany_iter(self, result, dim, keepdim);
-  auto mut_result = const_cast<Tensor&>(result);
-  if (!_dimreduce_return_trivial(mut_result, self, 0, dim, keepdim)) {
-    _any(mut_result, iter);
-  }
+  allany_impl<0>(self, result, dim, keepdim, or_stub);
+}
+
+TORCH_IMPL_FUNC(any_all_out)(const Tensor& self, const Tensor& result) {
+  allany_impl<0>(self, result, {}, false, or_stub);
 }
 
 Tensor &amin_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& result) {

@@ -67,7 +67,7 @@ void PythonEngine::thread_init(int device, const std::shared_ptr<ReadyQueue>& re
   // Create a PyThreadState, but release the GIL. This lets pybind11::gil_scoped_acquire calls
   // inside thread_main acquire the GIL without having to create a new
   // PyThreadState each time.
-#ifdef IS_PYTHON_3_9_PLUS
+#if defined(IS_PYTHON_3_9_PLUS) || defined(USE_DEPLOY)
   auto gil = std::make_unique<pybind11::gil_scoped_acquire>();
 #else
   pybind11::gil_scoped_acquire gil;
@@ -80,11 +80,12 @@ void PythonEngine::thread_init(int device, const std::shared_ptr<ReadyQueue>& re
     decrement_non_reentrant_thread_count();
   }
 
-#ifdef IS_PYTHON_3_9_PLUS
+#if defined(IS_PYTHON_3_9_PLUS) || defined(USE_DEPLOY)
   // Do not call PyEval_RestoreThread, PyThreadState_[Clear|DeleteCurrent] if runtime is finalizing
   if (!Py_IsInitialized()) {
     no_gil.disarm();
     // TODO: call disarm rather than leak gil_scoped_acquired once PyThreadState_Clear can safely be called from finalize
+    // NOTE: deploy.cpp calls `PyInterpreterState_Delete` to destruct PyThreadState, so avoid use-after-free here.
     gil.release();
   }
 #endif

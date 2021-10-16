@@ -34,7 +34,7 @@ class TORCH_API IRPrinter : public IRVisitor {
   void visit(RshiftPtr v) override;
   void visit(CompareSelectPtr v) override;
 #define IMM_PRINT_VISIT(Type, Name) void visit(Name##ImmPtr v) override;
-  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_PRINT_VISIT);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_PRINT_VISIT);
 #undef IMM_PRINT_VISIT
   void visit(CastPtr v) override;
   void visit(BitCastPtr v) override;

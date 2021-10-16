@@ -188,9 +188,6 @@ class Vectorized<double> {
   }
   const double& operator[](int idx) const = delete;
   double& operator[](int idx) = delete;
-  void dump() const {
-      std::cout << _vec0[0] << "," << _vec0[1] << "," << _vec1[0] << "," << _vec1[1] << std::endl;
-  }
   Vectorized<double> map(double (*const f)(double)) const {
     Vectorized<double> ret;
     for (int i = 0; i < size()/2; i++) {

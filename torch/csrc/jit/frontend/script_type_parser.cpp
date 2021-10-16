@@ -42,7 +42,7 @@ TypePtr ScriptTypeParser::subscriptToType(
     }
     std::vector<TypePtr> subscript_expr_types;
     for (auto expr : subscript.subscript_exprs()) {
-      subscript_expr_types.push_back(parseTypeFromExprImpl(expr));
+      subscript_expr_types.emplace_back(parseTypeFromExprImpl(expr));
     }
     return TupleType::create(subscript_expr_types);
   } else if (typeName == "List" || typeName == "list") {
@@ -65,6 +65,13 @@ TypePtr ScriptTypeParser::subscriptToType(
         parseTypeFromExprImpl(*subscript.subscript_exprs().begin());
     return OptionalType::create(elem_type);
 
+  } else if (typeName == "Union") {
+    std::vector<TypePtr> subscript_expr_types;
+    subscript_expr_types.reserve(subscript.subscript_exprs().size());
+    for (auto expr : subscript.subscript_exprs()) {
+      subscript_expr_types.emplace_back(parseTypeFromExprImpl(expr));
+    }
+    return UnionType::create(subscript_expr_types);
   } else if (typeName == "Future" || typeName == "torch.jit.Future") {
     if (subscript.subscript_exprs().size() != 1) {
       throw ErrorReport(subscript)
@@ -83,30 +90,6 @@ TypePtr ScriptTypeParser::subscriptToType(
     auto elem_type =
         parseTypeFromExprImpl(*subscript.subscript_exprs().begin());
     return RRefType::create(elem_type);
-  } else if (typeName == "Union") {
-    // In Python 3.9+, Union[NoneType, T] or Union[T, NoneType] are
-    // treated as Optional[T]. Adding the same support for Union in Torchscript.
-    const char* const err =
-        "General Union types are not currently supported."
-        " Only Union[T, NoneType] (i.e. Optional[T]) is "
-        "supported.";
-    if (subscript.subscript_exprs().size() != 2) {
-      throw ErrorReport(subscript) << (err);
-    }
-    auto first_type = parseTypeFromExprImpl(subscript.subscript_exprs()[0]);
-    auto second_type = parseTypeFromExprImpl(subscript.subscript_exprs()[1]);
-
-    bool first_none = first_type == NoneType::get();
-    bool second_none = second_type == NoneType::get();
-
-    if (first_none && !second_none) {
-      return OptionalType::create(second_type);
-    } else if (!first_none && second_none) {
-      return OptionalType::create(first_type);
-    } else {
-      throw ErrorReport(subscript.range()) << err;
-    }
-
   } else if (typeName == "Dict" || typeName == "dict") {
     if (subscript.subscript_exprs().size() != 2) {
       throw ErrorReport(subscript)

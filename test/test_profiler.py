@@ -13,6 +13,7 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, TEST_WITH_ASAN, TEST_WITH_ROCM, IS_WINDOWS,
     TemporaryFileName, TemporaryDirectoryName)
+from torch.autograd import (_record_function_with_args_enter, _record_function_with_args_exit)
 from torch.autograd.profiler import profile as _profile
 from torch.profiler import (
     kineto_available, profile, record_function, supported_activities,
@@ -56,6 +57,29 @@ class TestProfilerCUDA(TestCase):
             max_diff = max(max_diff, last_rss[idx] - last_rss[idx - 1])
         self.assertTrue(not (is_increasing and max_diff > 100 * 1024),
                         msg='memory usage is increasing, {}'.format(str(last_rss)))
+
+class TestRecordFunction(TestCase):
+    def _record_function_with_param(self):
+        u = torch.randn(3, 4, 5, requires_grad=True)
+        with _profile(with_stack=True, use_kineto=kineto_available(), record_shapes=True) as prof:
+            with record_function("## TEST 1 ##", "1, 2, 3"):
+                rf_handle = _record_function_with_args_enter("## TEST 2 ##", 1, False, 2.5, [u, u], "hello", u)
+                _record_function_with_args_exit(rf_handle)
+        return prof
+
+    def test_record_function(self):
+        prof_result = self._record_function_with_param()
+        found_test_1 = False
+        found_test_2 = False
+        for e in prof_result.function_events:
+            if "## TEST 1 ##" == e.name:
+                found_test_1 = True
+                self.assertTrue(e.input_shapes == [[]])
+            elif "## TEST 2 ##" == e.name:
+                found_test_2 = True
+                self.assertTrue(e.input_shapes == [[], [], [], [], [], [3, 4, 5]])
+        self.assertTrue(found_test_1)
+        self.assertTrue(found_test_2)
 
 class TestProfiler(TestCase):
     def test_source(self):
@@ -708,6 +732,43 @@ class TestProfiler(TestCase):
         self._test_profiler_tracing(False)
         if kineto_available():
             self._test_profiler_tracing(True)
+
+    def test_profiler_fwd_bwd_link(self):
+        with _profile(use_kineto=True) as prof:
+            t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
+            z = torch.add(t1, t2)
+            y = torch.ones(1)
+            loss = torch.nn.functional.binary_cross_entropy_with_logits(z, y)
+            loss.backward()
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with io.open(fname, 'r') as f:
+                j = json.load(f)
+                events = j["traceEvents"]
+                ts_to_name = {}
+                flow_s_to_ts = {}
+                flow_f_to_ts = {}
+                for e in events:
+                    if e["ph"] == "X":
+                        ts_to_name[e["ts"]] = e["name"]
+                    if "cat" in e and "name" in e and e["cat"] == "forward_backward" and e["name"] == "fwd_bwd":
+                        if e["ph"] == "s":
+                            flow_s_to_ts[e["id"]] = e["ts"]
+                        elif e["ph"] == "f":
+                            flow_f_to_ts[e["id"]] = e["ts"]
+                self.assertTrue(len(flow_s_to_ts) == 2)
+                self.assertTrue(len(flow_f_to_ts) == 2)
+                self.assertTrue(1 in flow_s_to_ts.keys())
+                self.assertTrue(1 in flow_f_to_ts.keys())
+                self.assertTrue(2 in flow_s_to_ts.keys())
+                self.assertTrue(2 in flow_f_to_ts.keys())
+                s_ts_1 = flow_s_to_ts[1]
+                f_ts_1 = flow_f_to_ts[1]
+                s_ts_2 = flow_s_to_ts[2]
+                f_ts_2 = flow_f_to_ts[2]
+                self.assertTrue(all([ts in ts_to_name.keys() for ts in [s_ts_1, f_ts_1, s_ts_2, f_ts_2]]))
+                self.assertTrue(ts_to_name[s_ts_1] == "aten::binary_cross_entropy_with_logits")
+                self.assertTrue(ts_to_name[s_ts_2] == "aten::add")
 
 if __name__ == '__main__':
     run_tests()

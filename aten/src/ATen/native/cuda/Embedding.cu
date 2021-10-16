@@ -1,24 +1,22 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/util/Exception.h>
 #include <c10/macros/Macros.h>
-
-#include <THC/THCDeviceUtils.cuh>
-#include <THC/THCTensorMathReduce.cuh>
-#include <THC/THCReduceApplyUtils.cuh>
 
 #include <ATen/cuda/cub.cuh>
 
 #include <ATen/native/cuda/EmbeddingBackwardKernel.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
+#include <ATen/native/cuda/block_reduce.cuh>
 
 namespace at { namespace native {
 
 namespace {
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 static const int BLOCKDIMY = 16;
 #else
 static const int BLOCKDIMY = 32;
@@ -85,7 +83,7 @@ __global__ void embedding_backward_feature_kernel
           (dst_row == indices_batch[chunk_start - batch_start + threadIdx.x]);
         if(threadIdx.x >= n_this_chunk)
           match_found_this_thread = 0;
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
         unsigned long long int matchmask = WARP_BALLOT(match_found_this_thread);
         int first_remaining_peer = __ffsll(matchmask) - 1;
 #else
@@ -98,7 +96,7 @@ __global__ void embedding_backward_feature_kernel
           matchmask ^= (1 << first_remaining_peer);
           while(matchmask)
           {
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
             first_remaining_peer = __ffsll(matchmask) - 1;
 #else
             first_remaining_peer = __ffs(matchmask) - 1;
@@ -181,7 +179,11 @@ template <typename scalar_t, typename accscalar_t, typename index_t>
 __global__ void renorm_kernel(
     scalar_t* weights, index_t* indices, accscalar_t max_norm,
     accscalar_t norm_type, int64_t dim,
-    int64_t weights_stride0, int64_t weights_stride1) {
+    int64_t weights_stride0, int64_t weights_stride1,
+    int64_t *num_unique_indices) {
+  if (blockIdx.x >= *num_unique_indices) {
+    return;
+  }
 
   // Some casting hacks since dynamic shared memory and templates don't work together:
   extern __shared__ unsigned char smem[];
@@ -202,8 +204,7 @@ __global__ void renorm_kernel(
     }
   }
 
-  using Op = ReduceAdd<accscalar_t>;
-  v = reduceBlock<accscalar_t>(sdata, blockDim.x, v, Op(), 0);
+  v = cuda_utils::BlockReduceSum(v, sdata);
 
   if (tid == 0) {
     sdata[0] = std::pow(v, static_cast<accscalar_t>(1.0 / norm_type));
@@ -242,7 +243,7 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
     auto indices_contig = indices.contiguous();
     auto grad_weight = at::zeros({num_weights, grad_.size(-1)}, grad_.options());
     int64_t stride = grad_weight.stride(0);
-    dim3 grid(THCCeilDiv(stride, (int64_t)C10_WARP_SIZE));
+    dim3 grid(ceil_div(stride, (int64_t)C10_WARP_SIZE));
     dim3 block(C10_WARP_SIZE, BLOCKDIMY);
 
     AT_DISPATCH_FLOATING_TYPES_AND2(
@@ -314,18 +315,24 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
       num_indices
     );
 
-    dim3 grid = num_unique_indices.item<int64_t>();
-    dim3 block = 128;
+    constexpr int num_threads = 128;
+    static_assert(num_threads % C10_WARP_SIZE == 0 &&
+                  num_threads <= cuda_utils::kCUDABlockReduceMaxThreads,
+                  "BlockReduceSum requires all warps be active");
+    int64_t *num_unique_indices_ptr = num_unique_indices.data_ptr<int64_t>();
+    dim3 grid = unique_indices.numel();
+    dim3 block = num_threads;
     int dim = self.stride(0);
 
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "embedding_backward", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "embedding_renorm_cuda_", [&] {
       using accscalar_t = acc_type<scalar_t, true>;
-      renorm_kernel<<<grid, block, 128 * sizeof(accscalar_t), stream>>>(
+      renorm_kernel<<<grid, block, (block.x / C10_WARP_SIZE) * sizeof(accscalar_t), stream>>>(
         self.data_ptr<scalar_t>(),
         unique_indices.data_ptr<index_t>(),
         static_cast<accscalar_t>(max_norm),
         static_cast<accscalar_t>(norm_type),
-        dim, self.stride(0), self.stride(1));
+        dim, self.stride(0), self.stride(1),
+        num_unique_indices_ptr);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
   });

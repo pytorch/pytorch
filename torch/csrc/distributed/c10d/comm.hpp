@@ -18,12 +18,14 @@ class TORCH_API GradBucket {
  public:
   explicit GradBucket(
       size_t index,
+      size_t bucket_count,
       const at::Tensor& tensor,
       const std::vector<size_t>& offsets,
       const std::vector<size_t>& lengths,
       const std::vector<c10::IntArrayRef>& sizes_vec,
       const std::vector<at::Tensor>& parameters)
       : index_(index),
+        bucket_count_(bucket_count),
         buffer_(tensor),
         offsets_(offsets),
         lengths_(lengths),
@@ -63,11 +65,12 @@ class TORCH_API GradBucket {
 
   // Returns whther this bucket is the last bucket to allreduce in an iteration.
   bool isLast() const {
-    return index_ == 0;
+    return index_ == bucket_count_ - 1;
   }
 
  private:
   size_t index_;
+  size_t bucket_count_;
   at::Tensor buffer_;
 
   // Per-variable info in buffer_.
