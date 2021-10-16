@@ -91,14 +91,18 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
 
     def concat_map_codegen(func: Callable[[NativeFunction], Sequence[str]],
                            xs: Iterable[Union[NativeFunctionsGroup, NativeFunction]],
-                           *, needsInplace: bool = False) -> Iterator[str]:
+                           *, codegenInplaceVariant: bool = False) -> Iterator[str]:
+        """
+        We code-gen for the functional variant, which is all we need for IR classes/lowerings, but we only code-gen
+        additional entries for the inplace variant for the native function impl.
+        """
         for x in xs:
             f = x.functional if isinstance(x, NativeFunctionsGroup) else x
             if f.func.name in full_codegen:
                 for r in func(f):
                     yield r
 
-            if needsInplace:
+            if codegenInplaceVariant:
                 inplace = x.inplace if isinstance(x, NativeFunctionsGroup) else None
                 if inplace and inplace.func.name in full_codegen:
                     with local.parametrize(use_const_ref_for_mutable_tensors=inplace.use_const_ref_for_mutable_tensors):
@@ -150,7 +154,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                     class_method_name=f'{backend_dispatch_key}NativeFunctions',
                     node_base=node_base),
                 grouped_native_functions,
-                needsInplace=True,
+                codegenInplaceVariant=True,
             )),
         })
 
