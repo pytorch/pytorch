@@ -1696,7 +1696,40 @@ graph(%Ra, %Rb):
                     self.assertEqual(training, 'aten::bernoulli_' in profile(scripted, X))
 
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, 'Testing differentiable graph')
-    def test_dropout_func_training(self):
+    def test_dropout_module(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.dropout = torch.nn.Dropout()
+
+            def forward(self, input: Tensor):
+                return self.dropout(input)
+
+        def profile(func, *X):
+            with torch.autograd.profiler.profile() as prof:
+                func(*X)
+            return [e.name for e in prof.function_events]
+
+        M = 10
+        dropout = MyModule()
+        scripted = torch.jit.script(dropout)
+        with disable_autodiff_subgraph_inlining():
+            for requires_grad in (True, False):
+                for training in (True, False):
+                    if training:
+                        scripted.train()
+                    else:
+                        scripted.eval()
+                    X = torch.randn(M, M, requires_grad=requires_grad)
+                    FileCheck().check("aten::rand_like").run(scripted.graph_for(X, profile_and_replay=True))
+                    if training:
+                        self.assertIn("aten::rand_like" if requires_grad else "aten::bernoulli_", profile(scripted, X))
+                    else:
+                        self.assertNotIn("aten::rand_like" , profile(scripted, X))
+                        self.assertNotIn("aten::bernoulli_" , profile(scripted, X))
+
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, 'Testing differentiable graph')
+    def test_dropout_func_dynamic_training(self):
         def dropout(input, training: bool):
             return F.dropout(input, 0.5, training=training)
 
