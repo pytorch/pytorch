@@ -22,6 +22,7 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 TEST_CAFFE2 = True
 try:
+    import caffe2.python.caffe2_pybind11_state as _caffe2_pybind11_state
     from caffe2.python import brew, cnn, core, workspace
     from caffe2.python.model_helper import ModelHelper
 except ImportError:
