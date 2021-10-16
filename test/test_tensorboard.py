@@ -575,7 +575,7 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
 
         class InnerNNSquential(torch.nn.Module):
             def __init__(self, dim1, dim2):
-                super(InnerNNSquential, self).__init__()
+                super().__init__()
                 self.inner_nn_squential = torch.nn.Sequential(
                     torch.nn.Linear(dim1, dim2),
                     torch.nn.Linear(dim2, dim1),
@@ -587,7 +587,7 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
 
         class OuterNNSquential(torch.nn.Module):
             def __init__(self, dim1=3, dim2=4, depth=2):
-                super(OuterNNSquential, self).__init__()
+                super().__init__()
                 layers = []
                 for _ in range(depth):
                     layers.append(InnerNNSquential(dim1, dim2))
