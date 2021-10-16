@@ -5853,7 +5853,7 @@ else:
         for idx, source in args:
             orig = make_arg((1,))
             out = orig.put(idx, source, accumulate=True)
-            self.assertEqual(out, orig + source.sum(), rtol=rtol, atol=atol)
+            self.assertEqual(out, orig + source.sum(dtype=dtype), rtol=rtol, atol=atol)
 
     def test_take_empty(self, device):
         for input_shape in [(0,), (0, 1, 2, 0), (1, 2, 3)]:
