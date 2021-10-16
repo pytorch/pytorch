@@ -305,6 +305,7 @@ if not torch._C._autograd_init():
 from torch._C._autograd import (DeviceType, ProfilerActivity, ProfilerState, ProfilerConfig, ProfilerEvent,
                                 _enable_profiler_legacy, _disable_profiler_legacy, _profiler_enabled,
                                 _enable_record_function, _set_empty_test_observer, kineto_available,
+                                _record_function_with_args_enter, _record_function_with_args_exit,
                                 _supported_activities, _add_metadata_json, SavedTensor,
                                 _register_saved_tensors_default_hooks, _reset_saved_tensors_default_hooks)
 
