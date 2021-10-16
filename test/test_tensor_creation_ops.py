@@ -21,7 +21,6 @@ from torch.testing._internal.common_dtype import (
     get_all_dtypes, get_all_math_dtypes, get_all_int_dtypes, get_all_fp_dtypes, get_all_complex_dtypes
 )
 
-from torch.testing import get_all_dtypes
 from torch.utils.dlpack import to_dlpack
 
 # TODO: refactor tri_tests_args, _compare_trilu_indices, run_additional_tri_tests
