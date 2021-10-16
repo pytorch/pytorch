@@ -220,7 +220,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
   get_bazel
 
   # first build the whole torch for CPU-only
-  tools/bazel build --verbose_failures --config=no-tty :torch
+  tools/bazel build --verbose_failures --sandbox_debug --config=no-tty :torch
   # then build selected set of targets with GPU-support.
   # TODO: eventually this should converge to building the whole :torch with GPU-support
   tools/bazel build --config=no-tty --config=gpu :c10
