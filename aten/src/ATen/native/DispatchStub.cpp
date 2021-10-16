@@ -54,9 +54,11 @@ static CPUCapability compute_cpu_capability() {
       return CPUCapability::AVX512;
     }
 #endif
+#ifdef HAVE_AVX2_CPU_DEFINITION
     if (cpuinfo_has_x86_avx2() && cpuinfo_has_x86_fma3()) {
       return CPUCapability::AVX2;
     }
+#endif
   }
 #endif
 #ifdef HAVE_VSX_CPU_DEFINITION
