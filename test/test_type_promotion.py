@@ -136,6 +136,21 @@ class TestTypePromotion(TestCase):
         self.assertEqual(c.dtype, torch.int)
 
     @float_double_default_dtype
+    def test_non_wrapped_zero_dim(self, device):
+        scalars = [False, 1, .5, 2 + 3j]
+        dtypes = [torch.bool, torch.int32, torch.int64, torch.float32, torch.float64, torch.complex64, torch.complex128]
+
+        zero_dim_tensors = [torch.tensor(0, dtype=dtype) for dtype in dtypes]
+        dimensioned_tensors = [torch.tensor([0], dtype=dtype) for dtype in dtypes]
+
+        for elt in scalars + zero_dim_tensors + dimensioned_tensors:
+            for i in range(0, len(dtypes)):
+                zero_res = zero_dim_tensors[i] + elt
+                dim_res = dimensioned_tensors[i] + elt
+
+                self.assertTrue(zero_res.dtype == dim_res.dtype)
+
+    @float_double_default_dtype
     def test_int_to_float(self, device):
         a = torch.ones([4, 4, 4], dtype=torch.int32, device=device)
         b = torch.ones([4, 4, 4], dtype=torch.float, device=device)
