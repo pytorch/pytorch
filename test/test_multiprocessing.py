@@ -269,7 +269,11 @@ class TestMultiprocessing(TestCase):
             t1 = q.get()
             t2 = q.get()
             self.assertTrue(t1.eq(1).all())
-            self.assertTrue(id(t1.storage()) == id(t2.storage()))
+            s1 = t1.storage()
+            s2 = t2.storage()
+            self.assertEqual(type(s1), type(s2))
+            self.assertEqual(s1.data_ptr(), s1.data_ptr())
+            self.assertEqual(s1, s2)
             # We need to delete this tensors to allow producer (child process)
             # collect them properly
             del t1, t2

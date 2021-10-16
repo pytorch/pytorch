@@ -1109,6 +1109,27 @@ TEST(Simplify, SimplifyDiv) {
   }
 }
 
+TEST(Simplify, SimplifyDivWithLoopContext0) {
+  // Stmt to simplify:
+  // for (int i = 0; i < 100; i++) {
+  //  A[i] = i / 100;
+  //}
+  VarHandle i("i", kInt);
+  BufHandle a_buf("A", {100}, kInt);
+  auto for_stmt = For::make(i, 0, 100, Store::make(a_buf, {i}, (i / 100)));
+
+  const StmtPtr simplified = IRSimplifier::simplify(for_stmt);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT:   A[i] = 0;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
 TEST(Simplify, SimplifyDivWithLoopContext1) {
   // Stmt to simplify:
   // for (int i = 0; i < 6; i++) {
@@ -3833,7 +3854,7 @@ TEST(Simplify, SimplifyMultilevelFor) {
 
 TEST(Simplify, SimplifyForCleansUp) {
   {
-    Placeholder a("a", kFloat, {1, 12, 1});
+    BufHandle a("a", {1, 12, 1}, kFloat);
     VarHandle x("x", kInt);
     Tensor b = Compute(
         // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
@@ -4811,7 +4832,7 @@ TEST(Simplify, DISABLED_CompareSelectCondAlwaysInLoopBounds) {
   //     b[n] = 1.f;
   //   }
   constexpr int N = 8;
-  Placeholder b("b", kFloat, {N});
+  BufHandle b("b", {N}, kFloat);
   VarHandle n("n", kInt);
   StmtPtr s = For::make(
       n, 1, N, b.store({n}, CompareSelect::make(n, 1, 0.f, 1.0f, kLT)));
@@ -4835,7 +4856,7 @@ TEST(Simplify, DISABLED_IfThenCondAlwaysInLoopBounds) {
   //     b[n] = 1.f;
   //   }
   constexpr int N = 8;
-  Placeholder b("b", kFloat, {N});
+  BufHandle b("b", {N}, kFloat);
   VarHandle n("n", kInt);
   StmtPtr s =
       For::make(n, 1, N, b.store({n}, IfThenElse::make(n < 1, 0.f, 1.0f)));
@@ -4863,7 +4884,7 @@ TEST(Simplify, DISABLED_MultiClauseCondAlwaysInLoopBounds) {
   //     for (int j = 1; j < 7; j++) {
   //       b[i, j] = 1.f;
   constexpr int N = 8;
-  Placeholder b("b", kFloat, {N, N});
+  BufHandle b("b", {N, N}, kFloat);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
   auto csel = CompareSelect::make(i, 1, kLT);
@@ -4899,8 +4920,8 @@ TEST(Simplify, DISABLED_SimplifyLoopBounds) {
   //       b[i, j] = (b[i, j]) + 1.f;
   constexpr int N = 8;
   constexpr int K = 3;
-  Placeholder a("a", kFloat, {N, N});
-  Placeholder b("b", kFloat, {N, N});
+  BufHandle a("a", {N, N}, kFloat);
+  BufHandle b("b", {N, N}, kFloat);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
   auto csel = CompareSelect::make(i, 1, kLT);

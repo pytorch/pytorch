@@ -24,13 +24,13 @@ using take_fn = void(*)(TensorIterator & iter, const Tensor& input);
 using masked_select_fn = void(*)(TensorIterator &, int64_t orig_stride);
 using masked_scatter_fn = void(*)(TensorIterator &, const Tensor &);
 
-using gather_fn = void (*)(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index);
-using scatter_fn = void(*)(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src);
-using scatter_fill_fn = void(*)(Tensor& self, int64_t dim, const Tensor& index, const Scalar& src);
-using scatter_add_fn = void(*)(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src);
-using scatter_reduce_fn = void(*)(Tensor& self, const int64_t dim, const Tensor& index,
+using gather_fn = void (*)(const Tensor & result, const Tensor & self, int64_t dim, const Tensor & index);
+using scatter_fn = void(*)(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src);
+using scatter_fill_fn = void(*)(const Tensor& self, int64_t dim, const Tensor& index, const Scalar& src);
+using scatter_add_fn = void(*)(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src);
+using scatter_reduce_fn = void(*)(const Tensor& self, const int64_t dim, const Tensor& index,
                                   const Tensor& src, const SCATTER_GATHER_OP& reduce);
-using scatter_scalar_reduce_fn = void(*)(Tensor& self, const int64_t dim, const Tensor& index,
+using scatter_scalar_reduce_fn = void(*)(const Tensor& self, const int64_t dim, const Tensor& index,
                                          const Scalar& value, const SCATTER_GATHER_OP& reduce);
 
 DECLARE_DISPATCH(index_fn, index_stub);

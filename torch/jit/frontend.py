@@ -452,6 +452,7 @@ def get_default_args(fn):
         return {}
 
     signature = inspect.signature(fn)
+
     return {
         k: v.default
         for k, v in signature.parameters.items()
@@ -938,7 +939,7 @@ class ExprBuilder(Builder):
     @staticmethod
     def build_Str(ctx, expr):
         value = str(expr.s)
-        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1)
+        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(value) + 1)
         return StringLiteral(r, value)
 
     @staticmethod

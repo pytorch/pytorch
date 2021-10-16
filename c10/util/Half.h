@@ -372,7 +372,7 @@ struct alignas(2) Half {
   }
 
   // HIP wants __host__ __device__ tag, CUDA does not
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
   C10_HOST_DEVICE Half() = default;
 #else
   Half() = default;

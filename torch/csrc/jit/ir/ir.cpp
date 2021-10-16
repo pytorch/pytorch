@@ -511,7 +511,7 @@ void Graph::lint() const {
   // - Params and return do NOT occur in nodes
   // - next_unique_ is greater than all uniques in graph
   // - uniques in all_nodes are unique
-  // - every use will occur later in the topsort
+  // - every use will occur later in the toposort
 
   struct LintScope {
     LintScope() = default;
@@ -787,7 +787,9 @@ bool Value::mustBeNone() const {
 }
 bool Value::mustNotBeNone() const {
   return node_->kind() != prim::AutogradAdd && type() != NoneType::get() &&
-      !type()->cast<OptionalType>();
+      !type()->cast<OptionalType>() &&
+      !(type()->cast<UnionType>() &&
+        type()->expect<UnionType>()->canHoldType(NoneType::get()));
 }
 
 std::string Value::debugNameBase() const {
@@ -999,7 +1001,7 @@ bool Node::matches(const FunctionSchema& schema) const {
     // we will not succeed at matching T. However None <: Optional[T] so this
     // check can still succeed.
 
-    if (!actuals[i]->type()->isSubtypeOf(formal)) {
+    if (!actuals[i]->type()->isSubtypeOf(*formal)) {
       return false;
     }
   }
@@ -1160,7 +1162,7 @@ bool Node::hasSideEffects() const {
     case prim::rpc_sync: // It represents RPC message sent.
     case prim::rpc_remote: // It represents RPC message sent.
     case aten::wait: // It can represent RPC message received.
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
     case cuda::set_stream:
     case cuda::_set_device:
     case cuda::_current_device:
@@ -1765,20 +1767,23 @@ Node* Graph::createEnumValue(Value* e) {
   return n;
 }
 
-Node* Graph::createList(const TypePtr& elem_type, at::ArrayRef<Value*> values) {
+Node* Graph::createList(
+    const TypePtr& contained_type,
+    at::ArrayRef<Value*> values) {
   auto n = create(prim::ListConstruct, values);
   for (const auto& v : values) {
     TORCH_CHECK(
-        v->type()->isSubtypeOf(elem_type),
+        v->type()->isSubtypeOf(*contained_type),
         "Expected a list element that subtypes '",
-        elem_type->repr_str(),
+        contained_type->repr_str(),
         "' but got an element of type '",
         v->type()->repr_str(),
         "'");
   }
-  n->output()->setType(ListType::create(elem_type));
+  n->output()->setType(ListType::create(contained_type));
   return n;
 }
+
 Node* Graph::createListUnpack(Value* v, size_t size) {
   ListTypePtr list_type = v->type()->expect<ListType>();
   TypePtr elem_type = list_type->getElementType();
@@ -1798,8 +1803,8 @@ Node* Graph::createDict(
   AT_ASSERT(keys.size() == values.size());
   auto n = create(prim::DictConstruct, 1);
   for (const auto i : c10::irange(keys.size())) {
-    AT_ASSERT(keys[i]->type()->isSubtypeOf(key_type));
-    AT_ASSERT(values[i]->type()->isSubtypeOf(value_type));
+    AT_ASSERT(keys[i]->type()->isSubtypeOf(*key_type));
+    AT_ASSERT(values[i]->type()->isSubtypeOf(*value_type));
 
     n->addInput(keys[i]);
     n->addInput(values[i]);

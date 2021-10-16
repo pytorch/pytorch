@@ -8,12 +8,7 @@ export CUDA_VERSION="${DESIRED_CUDA/cu/}"
 export USE_SCCACHE=1
 export SCCACHE_BUCKET=ossci-compiler-cache-windows
 export NIGHTLIES_PYTORCH_ROOT="$PYTORCH_ROOT"
-
-if [[ "$CUDA_VERSION" == "92" || "$CUDA_VERSION" == "100" ]]; then
-  export VC_YEAR=2017
-else
-  export VC_YEAR=2019
-fi
+export VC_YEAR=2019
 
 if [[ "${DESIRED_CUDA}" == "cu111" || "${DESIRED_CUDA}" == "cu113" ]]; then
     export BUILD_SPLIT_CUDA="ON"
