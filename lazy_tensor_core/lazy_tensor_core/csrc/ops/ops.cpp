@@ -57,7 +57,6 @@ PTLTC_UNARY_OP(Erfinv, at::aten::erfinv);
 PTLTC_UNARY_OP(Sqrt, at::aten::sqrt);
 PTLTC_UNARY_OP(Rsqrt, at::aten::rsqrt);
 PTLTC_UNARY_OP(Ceil, at::aten::ceil);
-PTLTC_UNARY_OP(Floor, at::aten::floor);
 PTLTC_UNARY_OP(Round, at::aten::round);
 PTLTC_UNARY_OP(Not, at::aten::bitwise_not);
 PTLTC_UNARY_OP(IsNan, at::aten::isnan);
@@ -67,10 +66,6 @@ PTLTC_BINARY_OP(Max, at::aten::max);
 PTLTC_BINARY_OP(Pow, at::aten::pow);
 PTLTC_BINARY_OP(Fmod, at::aten::fmod);
 PTLTC_BINARY_OP(Atan2, at::aten::atan2);
-
-NodePtr Trunc(const torch::lazy::Value& input) { return Floor(Abs(input)) * SignOp(input); }
-
-NodePtr FracOp(const torch::lazy::Value& input) { return input - Trunc(input); }
 
 NodePtr ReciprocalOp(const torch::lazy::Value& input) {
   return GenericOp(OpKind(at::aten::reciprocal), {input}, ir::GetShapeFromTsValue(input));

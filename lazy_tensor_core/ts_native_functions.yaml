@@ -16,6 +16,8 @@ full_codegen:
   - div.Tensor
   - div.Tensor_mode
   - embedding_dense_backward
+  - floor
+  - frac
   - gelu
   - gelu_backward
   - kl_div_backward
@@ -35,6 +37,7 @@ full_codegen:
   - sum.dim_IntList
   - topk
   - trace
+  - trunc
   - add.Tensor
 supported:
   - as_strided

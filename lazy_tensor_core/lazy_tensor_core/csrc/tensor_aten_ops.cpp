@@ -945,10 +945,6 @@ LazyTensor flip(const LazyTensor& input,
       torch::lazy::MakeNode<ir::ops::Flip>(input.GetIrValue(), dimensions));
 }
 
-LazyTensor floor(const LazyTensor& input) {
-  return input.CreateFrom(ir::ops::Floor(input.GetIrValue()));
-}
-
 LazyTensor fmod(const LazyTensor& input, const LazyTensor& other,
                 c10::optional<at::ScalarType> logical_element_type) {
   return input.CreateFrom(ir::ops::Fmod(input.GetIrValue(), other.GetIrValue()),
@@ -961,10 +957,6 @@ LazyTensor fmod(const LazyTensor& input, const at::Scalar& other,
       other, input.shape(), logical_element_type, input.GetDevice());
   return input.CreateFrom(ir::ops::Fmod(input.GetIrValue(), constant),
                           logical_element_type);
-}
-
-LazyTensor frac(const LazyTensor& input) {
-  return input.CreateFrom(ir::ops::FracOp(input.GetIrValue()));
 }
 
 LazyTensor full(lazy_tensors::Span<const lazy_tensors::int64> size,
@@ -2208,10 +2200,6 @@ LazyTensor triu(const LazyTensor& input, lazy_tensors::int64 diagonal) {
 
 void triu_(LazyTensor& input, lazy_tensors::int64 diagonal) {
   input.SetIrValue(torch::lazy::MakeNode<ir::ops::Triu>(input.GetIrValue(), diagonal));
-}
-
-LazyTensor trunc(const LazyTensor& input) {
-  return input.CreateFrom(ir::ops::Trunc(input.GetIrValue()));
 }
 
 std::vector<LazyTensor> unbind(const LazyTensor& input,

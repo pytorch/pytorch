@@ -282,16 +282,12 @@ void fill_(LazyTensor& input, const at::Scalar& value);
 LazyTensor flip(const LazyTensor& input,
                 lazy_tensors::Span<const lazy_tensors::int64> dims);
 
-LazyTensor floor(const LazyTensor& input);
-
 LazyTensor fmod(
     const LazyTensor& input, const LazyTensor& other,
     c10::optional<at::ScalarType> logical_element_type = c10::nullopt);
 LazyTensor fmod(
     const LazyTensor& input, const at::Scalar& other,
     c10::optional<at::ScalarType> logical_element_type = c10::nullopt);
-
-LazyTensor frac(const LazyTensor& input);
 
 LazyTensor full(lazy_tensors::Span<const lazy_tensors::int64> size,
                 const at::Scalar& fill_value, const Device& device,
@@ -804,8 +800,6 @@ LazyTensor triu(const LazyTensor& input, lazy_tensors::int64 diagonal);
 
 // In-place version of the method above.
 void triu_(LazyTensor& input, lazy_tensors::int64 diagonal);
-
-LazyTensor trunc(const LazyTensor& input);
 
 LazyTensor ts_softmax_backward(const LazyTensor& grad_output,
                                const LazyTensor& output,
