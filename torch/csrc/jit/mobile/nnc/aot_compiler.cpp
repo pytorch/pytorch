@@ -112,7 +112,8 @@ std::pair<std::unique_ptr<Function>, const std::string> aotCompile(
   GRAPH_DUMP("graph after shape propagation ", g);
 
   std::shared_ptr<tensorexpr::TensorExprKernel> kernel =
-      std::make_shared<tensorexpr::TensorExprKernel>(TensorExprKernel(g, {}, false, kernel_func_name));
+    std::make_shared<tensorexpr::TensorExprKernel>(
+      TensorExprKernel(g, {}, false, kernel_func_name));
 
   const std::string compiled_assembly = kernel->getCodeText();
 

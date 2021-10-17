@@ -115,9 +115,9 @@ c10::IValue preprocess(
   auto method = mod.get_method(FLAGS_method_name);
   auto graph = method.function().graph()->copy();
   auto sizes = getInputSizes(method_compile_spec);
-  auto kernel_func_name = getNncKernelFuncName(method_name);
+  auto kernel_func_name = getNncKernelFuncName(FLAGS_method_name);
 
-  auto compiled = torch::jit::mobile::nnc::aotCompile(method_name, graph, sizes, kernel_func_name);
+  auto compiled = torch::jit::mobile::nnc::aotCompile(FLAGS_method_name, graph, sizes, kernel_func_name);
   writeOutputLlvmAssembly(compiled.second);
 
   auto func = std::move(compiled.first);
