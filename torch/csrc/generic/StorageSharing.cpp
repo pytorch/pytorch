@@ -246,7 +246,7 @@ static PyObject * THPStorage_(shareCuda)(PyObject *_self, PyObject *noargs)
 
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     cudaIpcMemHandle_t handle;
-    C10_CUDA_CHECK(cudaIpcGetMemHandle(&handle, base_ptr));
+    THCudaCheck(cudaIpcGetMemHandle(&handle, base_ptr));
 
     _handle = PyBytes_FromStringAndSize((char *)&handle, CUDA_IPC_HANDLE_SIZE);
     _offset_bytes = PyLong_FromSsize_t((Py_ssize_t)offset_bytes);
@@ -265,7 +265,7 @@ static PyObject * THPStorage_(shareCuda)(PyObject *_self, PyObject *noargs)
 
 #if !defined(USE_ROCM)
     if (sent_data->event_sync_required_) {
-      C10_CUDA_CHECK(cudaIpcGetEventHandle(&ipc_event_handle, sent_data->event_));
+      THCudaCheck(cudaIpcGetEventHandle(&ipc_event_handle, sent_data->event_));
     }
 #else
     // ipc_event_handle unused in storage receiver, we can leave it uninitialized.

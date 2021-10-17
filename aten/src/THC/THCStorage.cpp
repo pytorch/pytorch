@@ -4,7 +4,6 @@
 #include <TH/THHalf.h>
 
 #include <new>
-#include <c10/cuda/CUDACachingAllocator.h>
 
 #include <THC/generic/THCStorage.cpp>
 #include <THC/THCGenerateAllTypes.h>

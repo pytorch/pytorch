@@ -11,6 +11,8 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/MemoryAccess.cuh>
 
+#include <THC/THCGeneral.h>
+
 namespace at{
 namespace native{
 
