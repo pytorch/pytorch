@@ -33,9 +33,18 @@ std::vector<int64_t> getConstSizes(const BufPtr b) {
   return r;
 }
 
-void compileFunction(
+std::unique_ptr<Function> compileMethod(
     std::shared_ptr<tensorexpr::TensorExprKernel> kernel,
-    Function* func) {
+    const std::string& method_name,
+    const std::vector<int64_t>& sizes) {
+  auto func = std::make_unique<Function>();
+  func->set_name(method_name);
+
+  InputSpec input;
+  input.sizes_ = sizes;
+  input.dtype_ = c10::ScalarType::Float;
+  func->set_input_specs({input});
+
   std::vector<at::Tensor> parameters;
 
   auto const_descriptors = kernel->getConstantDescriptors();
@@ -64,14 +73,16 @@ void compileFunction(
     out_spec.push_back(output);
   }
   func->set_output_specs(out_spec);
+
+  return func;
 }
 
 std::pair<std::unique_ptr<Function>, const std::string> aotCompile(
     const std::string& method_name,
     std::shared_ptr<Graph>& g,
     const std::vector<int64_t>& sizes) {
-  auto g2 = g->copy();
   GRAPH_DEBUG("Input sizes ", sizes);
+  GRAPH_DEBUG("Method name ", method_name);
 
   RemoveTensorMutation(g);
   EliminateDeadCode(g->block());
@@ -91,17 +102,7 @@ std::pair<std::unique_ptr<Function>, const std::string> aotCompile(
       std::make_shared<tensorexpr::TensorExprKernel>(g);
   const std::string compiled_assembly = kernel->getCodeText();
 
-  g = g2;
-
-  auto func = std::make_unique<Function>();
-  func->set_name(method_name);
-
-  InputSpec input;
-  input.sizes_ = sizes;
-  input.dtype_ = c10::ScalarType::Float;
-  func->set_input_specs({input});
-
-  compileFunction(kernel, func.get());
+  auto func = compileMethod(kernel, method_name, sizes);
   return std::make_pair(std::move(func), compiled_assembly);
 }
 
