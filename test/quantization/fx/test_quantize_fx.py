@@ -3087,16 +3087,15 @@ class TestQuantizeFx(QuantizationTestCase):
         name_list = []
         for name, mod in prepared.named_modules():
             if isinstance(mod, torch.ao.quantization.observer.MinMaxObserver):
-                assert "mods" in name
                 name_list.append(name)
-        expected_name_list = ['mods1_0_input_activation_post_process_0',
-                              'mods1_0_w_activation_post_process_0',
-                              'mods1_0_output_activation_post_process_0',
-                              'mods1_1_w_activation_post_process_0',
-                              'mods1_1_output_activation_post_process_0',
-                              'mods2_w_activation_post_process_0',
-                              'mods2_output_activation_post_process_0',
-                              'mods3_output_activation_post_process_0']
+        expected_name_list = ['input_activation_post_process_0',
+                              'w_activation_post_process_0',
+                              'output_activation_post_process_0',
+                              'w_activation_post_process_1',
+                              'output_activation_post_process_1',
+                              'w_activation_post_process_2',
+                              'output_activation_post_process_3',
+                              'output_activation_post_process_6']
         assert name_list == expected_name_list
 
 
