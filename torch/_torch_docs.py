@@ -961,6 +961,101 @@ arctanh(input, *, out=None) -> Tensor
 Alias for :func:`torch.atanh`.
 """)
 
+add_docstr(torch.asarray,
+           r"""
+asarray(obj, *, dtype=None, device=None, copy=None, requires_grad=False) -> Tensor
+
+Converts :attr:`obj` into a tensor, sharing data and preserving autograd history
+if possible.
+
+:attr:`obj` can be one of:
+
+1. a tensor
+2. a NumPy array
+3. a DLPack capsule
+4. a Python object that implements the buffer protocol
+5. a Python sequence
+
+For each of the mentioned options, in order, this functions will assume :attr:`obj`
+is of that type and try, first, sharing memory. Only then, it will make a copy (if
+necessary).
+
+The dtype of the result tensor is inferred from the input object, except when
+object is (4): an object that implements the buffer protocol (see :func:`torch.frombuffer`).
+In that case, the buffer is interpreted as an array of bytes, which are grouped
+according to the size of the given :attr:`dtype` or the global default
+(see :func:`torch.set_default_tensor_type`) if `None` is given.
+
+For example: NumPy arrays also implement the buffer protocol. However, since NumPy
+arrays have higher priority than objects implementing the buffer protocol, this function
+will handle them as NumPy arrays. In other words, it will infer its dtype as if using
+``torch.from_numpy`` (instead of ``torch.frombuffer``).
+
+.. seealso::
+    :func:`torch.as_tensor` tries to avoid copies for tensors and NumPy arrays.
+    :func:`torch.tensor` always copies the data from the input object.
+    :func:`torch.from_numpy` creates a tensor that shares its memory with a NumPy array.
+    :func:`torch.frombuffer` creates a tensor that shares its memory with an object
+    that implements the buffer protocol.
+    :func:`torch.utils.dlpack.from_dlpack` creates a tensor that shares its memory
+    with the object represented in the dlpack.
+
+Args:
+    obj (object): a Python object that satisfies, at least, one of the five options
+           mentioned above.
+
+Keyword args:
+    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+           Default: if ``None``, it will be inferred from :attr:`obj`.
+    copy (bool, optional): flags whether the object memory should be copied or not.
+           If ``None``, then the result tensor shares memory with the Python object
+           whenever possible. If ``True``, then the object memory is copied. If ``False``,
+           then the object memory is shared. If the object memory cannot be shared
+           and this flag is ``False``, then an error is thrown.
+    device (:class:`torch.device`, optional): the device of the constructed tensor.
+           If `None`, then the device of :attr:`obj` is used. Else, it either copies
+           the data, if :attr:`obj` lives in a different device, or it shares the
+           memory, if :attr:`obj` lives in the same device.
+    requires_grad (bool, optional): If autograd should record operations on the
+           returned tensor. However, if this flag is ``False`` and the input object
+           is a non-leaf :class:`Tensor`, this function will call :func:`torch.Tensor.detach`.
+
+Example::
+
+    >>> a = torch.tensor([1, 2, 3])
+    >>> # Shares memory with tensor 'a'
+    >>> b = torch.asarray(a)
+    >>> a.data_ptr() == b.data_ptr()
+    True
+    >>> # Forces memory copy
+    >>> c = torch.asarray(a, copy=True)
+    >>> a.data_ptr() == c.data_ptr()
+    False
+
+    >>> a = torch.tensor([1, 2, 3], requires_grad=True).float()
+    >>> b = a + 2
+    >>> b
+    tensor([1., 2., 3.], grad_fn=<AddBackward0>)
+    >>> # Shares memory with tensor 'b', with no grad
+    >>> c = torch.asarray(b)
+    >>> c
+    tensor([1., 2., 3.])
+    >>> # Shares memory with tensor 'b', retaining autograd history
+    >>> d = torch.asarray(b, requires_grad=True)
+    >>> d
+    tensor([1., 2., 3.], grad_fn=<AddBackward0>)
+
+    >>> array = numpy.array([1, 2, 3])
+    >>> # Shares memory with array 'array'
+    >>> t1 = torch.asarray(array)
+    >>> array.__array_interface__['data'][0] == t1.data_ptr()
+    True
+    >>> # Copies memory due to dtype mismatch
+    >>> t2 = torch.asarray(array, dtype=torch.float32)
+    >>> array.__array_interface__['data'][0] == t1.data_ptr()
+    False
+""")
+
 add_docstr(torch.baddbmm,
            r"""
 baddbmm(input, batch1, batch2, *, beta=1, alpha=1, out=None) -> Tensor
