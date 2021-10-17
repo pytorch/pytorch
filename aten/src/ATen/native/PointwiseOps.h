@@ -1,12 +1,16 @@
 // Ternary and higher-order pointwise operations
 #pragma once
 
-#include <ATen/ATen.h>
 #include <ATen/native/DispatchStub.h>
+
+namespace c10 {
+class Scalar;
+}
 
 namespace at {
 
 struct TensorIterator;
+struct TensorIteratorBase;
 
 namespace native {
 

@@ -51,21 +51,20 @@ Tensor& copy_quantized_cpu_(Tensor& self, const Tensor& src, bool non_blocking) 
   run_checks_and_set_quantizer_(self, src);
   c10::impl::ExcludeDispatchKeyGuard guard_(DispatchKey::QuantizedCPU);
   c10::impl::IncludeDispatchKeyGuard inc_guard_(DispatchKey::CPU);
-  return self.copy_(src, non_blocking); // redispatch!
 }
 
 Tensor& copy_quantized_cuda_(Tensor& self, const Tensor& src, bool non_blocking) {
   run_checks_and_set_quantizer_(self, src);
   c10::impl::ExcludeDispatchKeyGuard guard_(DispatchKey::QuantizedCUDA);
   c10::impl::IncludeDispatchKeyGuard inc_guard_(DispatchKey::CUDA);
-  return self.copy_(src, non_blocking); // redispatch!
+  return at::native::copy_(self, src, non_blocking);
 }
 
 Tensor& copy_quantized_xpu_(Tensor& self, const Tensor& src, bool non_blocking) {
   run_checks_and_set_quantizer_(self, src);
   c10::impl::ExcludeDispatchKeyGuard guard_(DispatchKey::QuantizedXPU);
   c10::impl::IncludeDispatchKeyGuard inc_guard_(DispatchKey::XPU);
-  return self.copy_(src, non_blocking); // redispatch!
+  return at::native::copy_(self, src, non_blocking);
 }
 } // namespace native
 } // namespace at

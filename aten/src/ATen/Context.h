@@ -1,12 +1,10 @@
 #pragma once
 
 #include <ATen/core/ATenGeneral.h>
-#include <ATen/Tensor.h>
-#include <ATen/Utils.h>
-#include <ATen/core/ATenGeneral.h>
 #include <ATen/core/Generator.h>
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/detail/HIPHooksInterface.h>
 #include <ATen/detail/ORTHooksInterface.h>
@@ -150,7 +148,8 @@ class TORCH_API Context {
   //    }
 
   bool deterministicAlgorithms() const;
-  void setDeterministicAlgorithms(bool);
+  bool deterministicAlgorithmsWarnOnly() const;
+  void setDeterministicAlgorithms(bool, bool);
 
   // Note [Writing Nondeterministic Operations]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -235,6 +234,7 @@ class TORCH_API Context {
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
   bool _deterministic_algorithms = false;
+  bool _deterministic_algorithms_warn_only = false;
   bool benchmark_cudnn = false;
   bool allow_tf32_cudnn = true;
   bool allow_tf32_cublas = true;
