@@ -281,7 +281,7 @@ __device__ scalar_t findPattern(
     __syncthreads();
 
     // Check to see if a thread found the value
-    if (THCNumerics<scalar_t>::ne(found, static_cast<scalar_t>(0))) {
+    if (found != static_cast<scalar_t>(0)) {
       // all threads return this value
       return val;
     }

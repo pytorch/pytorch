@@ -544,9 +544,10 @@ class ConvolutionOperatorTester {
         case Mode::Static: {
           ASSERT_EQ(
               pytorch_qnnp_status_success,
-              pytorch_qnnp_setup_convolution2d_nhwc_q8(
+              pytorch_qnnp_setup_convolution_ndhwc_q8(
                   convolution,
                   batchSize(),
+                  1, /* inputDepth */
                   inputHeight(),
                   inputWidth(),
                   inputPtr,
@@ -579,6 +580,7 @@ class ConvolutionOperatorTester {
                   convolution,
                   packW->getPackedWeights(),
                   batchSize(),
+                  1,
                   inputHeight(),
                   inputWidth(),
                   inputZeroPoint,
