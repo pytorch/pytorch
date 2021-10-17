@@ -457,6 +457,10 @@ script::Module optimizeForMobile(
   auto cloned_module = m.clone();
   cloned_module.eval();
 
+  if (!optimization_blocklist.count(MobileOptimizerType::CONV_1D_TO_2D)) {
+    transformConv1dToConv2d(cloned_module);
+  }
+
   if (!optimization_blocklist.count(MobileOptimizerType::CONV_BN_FUSION)) {
     cloned_module = FoldConvBatchNorm(cloned_module);
   }
