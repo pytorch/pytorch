@@ -14,9 +14,9 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/cuda/CuFFTPlanCache.h>
 #include <c10/util/Exception.h>
-#include <c10/cuda/CUDACachingAllocator.h>
 
-#include <THC/THCGeneral.h>  // For THCState
+#include <THC/THC.h>
+#include <THC/THCGeneral.hpp>
 
 #if AT_CUDNN_ENABLED()
 #include <ATen/cudnn/cudnn-wrapper.h>

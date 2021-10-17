@@ -7,6 +7,7 @@
 #include <ATen/NativeFunctions.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/Exception.h>
+#include <THC/THCGeneral.h>
 
 #include <algorithm>
 #include <cmath>
