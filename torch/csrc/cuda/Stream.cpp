@@ -16,7 +16,9 @@ static PyObject * THCPStream_pynew(
   PyTypeObject *type, PyObject *args, PyObject *kwargs) {
   HANDLE_TH_ERRORS
 
-  const auto current_device = c10::cuda::current_device();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  int current_device;
+  THCudaCheck(cudaGetDevice(&current_device));
 
   int priority = 0;
   uint64_t cdata = 0;
