@@ -348,17 +348,17 @@ static void _wrap_outputs(const std::shared_ptr<PyNode>& cdata, THPFunction *sel
     auto num_inputs = self->is_variable_input.size();
     THPObjectPtr pyInputs(PyTuple_New(num_inputs));
     if (!pyInputs) throw_python_error();
-    auto var_input_idx = 0;
     for (const auto i : c10::irange(num_inputs)) {
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      PyObject* input;
+      PyObject* input = nullptr;
       if (self->is_variable_input[i]) {
         if (grad_inputs[i].defined() || !self->materialize_grads) {
           input = THPVariable_Wrap(grad_inputs[i]);
         } else {
           input = THPVariable_Wrap(at::zeros_like(inputs[i]));
         }
-        if (!input) throw_python_error();
+        if (!input) {
+          throw_python_error();
+        }
       } else {
         Py_INCREF(Py_None);
         input = Py_None;
@@ -378,7 +378,7 @@ static void _wrap_outputs(const std::shared_ptr<PyNode>& cdata, THPFunction *sel
     const int num_outputs = PyTuple_GET_SIZE(r.get());
     variable_list results;
     results.reserve(num_outputs);
-    for (int i = 0; i != num_outputs; ++i) {
+    for(const auto i : c10::irange(num_outputs)) {
       PyObject* output = PyTuple_GET_ITEM(r.get(), i);
       if (output == Py_None) {
         results.emplace_back();
