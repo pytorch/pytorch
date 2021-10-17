@@ -33,20 +33,27 @@ std::vector<int64_t> getConstSizes(const BufPtr b) {
   return r;
 }
 
+std::vector<mobile::nnc::InputSpec> toInputSpecs(
+    const std::vector<std::vector<int64_t>>& inputSizes) {
+  std::vector<mobile::nnc::InputSpec> specs;
+  for (const auto& sizes : inputSizes) {
+    mobile::nnc::InputSpec spec;
+    spec.sizes_ = sizes;
+    spec.dtype_ = c10::ScalarType::Float;
+    specs.emplace_back(std::move(spec));
+  }
+  return specs;
+}
+
 std::unique_ptr<Function> compileMethod(
     std::shared_ptr<tensorexpr::TensorExprKernel> kernel,
     const std::string& method_name,
-    const std::vector<int64_t>& sizes) {
+    const std::vector<std::vector<int64_t>>& sizes) {
   auto func = std::make_unique<Function>();
   func->set_name(method_name);
-
-  InputSpec input;
-  input.sizes_ = sizes;
-  input.dtype_ = c10::ScalarType::Float;
-  func->set_input_specs({input});
+  func->set_input_specs(toInputSpecs(sizes));
 
   std::vector<at::Tensor> parameters;
-
   auto const_descriptors = kernel->getConstantDescriptors();
   for (const auto& cd : const_descriptors) {
     auto sizes = getConstSizes(cd.buf);
@@ -80,7 +87,7 @@ std::unique_ptr<Function> compileMethod(
 std::pair<std::unique_ptr<Function>, const std::string> aotCompile(
     const std::string& method_name,
     std::shared_ptr<Graph>& g,
-    const std::vector<int64_t>& sizes) {
+    const std::vector<std::vector<int64_t>>& sizes) {
   GRAPH_DEBUG("Input sizes ", sizes);
   GRAPH_DEBUG("Method name ", method_name);
 
@@ -89,7 +96,12 @@ std::pair<std::unique_ptr<Function>, const std::string> aotCompile(
   g = tensorexpr::removeUnusedSelfArgument(g);
   GRAPH_DUMP("graph before shape propagation ", g);
 
-  std::vector<c10::optional<at::Tensor>> example_inputs = {at::rand(sizes)};
+  std::vector<c10::optional<at::Tensor>> example_inputs;
+  for (const auto& size : sizes) {
+    auto example_input = at::rand(size);
+    example_inputs.emplace_back(example_input);
+  }
+
   tensorexpr::annotateInputShapes(g, example_inputs);
 
   PropagateShapesOnGraph(g);
