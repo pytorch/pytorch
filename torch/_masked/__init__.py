@@ -31,7 +31,7 @@ def _apply_docstring_templates(func):
 {function_name}(input, dim, *, keepdim=False, dtype=None, mask=None) -> Tensor''',
         reduction_descr='''\
 Returns {operation name} of all the elements in the of :attr:`input`
-tensor along the given dimension :attr:`dim` while the :attr:`input`
+tensor along the given dimension(s) :attr:`dim` while the :attr:`input`
 elements are masked out according to the boolean tensor
 :attr:`mask`.''',
         reduction_args='''\
@@ -192,25 +192,26 @@ def _output_mask(op, input: Tensor, *args, **kwargs) -> Tensor:
     """
     if callable(op):
         is_reduction = op.__name__ in {'sum', 'prod', 'amax', 'amin'}
-        if op.__module__ == 'torch._masked':
-            if is_reduction:
-                mask = kwargs.get('mask')
-                if mask is None:
-                    outmask = input.new_ones(input.shape, dtype=torch.bool)
-                elif mask.ndim < input.ndim:
-                    outmask = torch.broadcast_to(mask.clone(), input.shape).to(dtype=torch.bool)
-                elif mask.ndim > input.ndim:
-                    raise IndexError("_output_mask expected broadcastable mask (got mask dimensionality higher than of the input)")
-                else:
-                    outmask = mask.to(dtype=torch.bool)
-                keepdim = kwargs.get('keepdim', False)
-                dim_ = _canonical_dim(kwargs.get('dim'), input.ndim)
-                # Workaround https://github.com/pytorch/pytorch/issues/56586
-                for d in reversed(dim_):
-                    outmask = outmask.any(dim=d, keepdim=bool(keepdim))
-                return outmask
-        raise ValueError(f'_output_mask expected masked operation (got callable {op.__module__}.{op.__name__})')
-    raise ValueError(f'_output_mask expected masked operation (got {type(op).__name__} object)')
+        if is_reduction:
+            mask = kwargs.get('mask')
+            if mask is None:
+                outmask = input.new_ones(input.shape, dtype=torch.bool)
+            elif mask.ndim < input.ndim:
+                outmask = torch.broadcast_to(mask.clone(), input.shape).to(dtype=torch.bool)
+            elif mask.ndim > input.ndim:
+                raise IndexError("_output_mask expected broadcastable mask (got mask dimensionality higher than of the input)")
+            else:
+                outmask = mask.to(dtype=torch.bool)
+            keepdim = kwargs.get('keepdim', False)
+            dim_ = _canonical_dim(kwargs.get('dim'), input.ndim)
+            # Workaround https://github.com/pytorch/pytorch/issues/56586
+            for d in reversed(dim_):
+                outmask = outmask.any(dim=d, keepdim=bool(keepdim))
+            return outmask
+        else:
+            raise ValueError(f'_output_mask expected masked operation (got callable {op.__module__}.{op.__name__})')
+    else:
+        raise ValueError(f'_output_mask expected masked operation (got {type(op).__name__} object)')
 
 
 @_apply_docstring_templates
