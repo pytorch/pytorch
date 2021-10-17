@@ -154,7 +154,7 @@ class QuantizeHandler(ABC):
         """
         return qconfig.activation
 
-    def is_output_quantized(self, qconfig, is_reference):
+    def is_output_quantized(self, qconfig):
         """ Returns true if the output node of convert is quantized
         when is_reference is False, we would return float node when a certain dtype
         combination is not supported (since fbgemm/qnnpack only support certain dtype
@@ -380,7 +380,7 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
         # for x + y where x and y are scalars, we do not observe anything
         return self.num_tensor_args > 0
 
-    def is_output_quantized(self, qconfig, is_reference):
+    def is_output_quantized(self, qconfig):
         dtypes = get_qconfig_dtypes(qconfig)
         return self.binary_op in binary_op_supported_dtypes and \
             dtypes in binary_op_supported_dtypes[self.binary_op]
@@ -1025,18 +1025,15 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
 
                     # get other arguments
                     kwargs = {**load_arg(quantized=torch.float)(self.linear_node.kwargs)}
-                    # pack weight
-                    bias = None
                     # all args after bias, including bias
                     other_args = load_arg(quantized=torch.float)(self.linear_node.args[2:])
+                    # bias might be either positional, or a keyword argument
                     if len(self.linear_node.args) > 2:
                         bias = load_arg(quantized=torch.float)(self.linear_node.args[2])
                         other_args = other_args[1:]  # remove the bias argument
                     else:
-                        assert 'bias' in kwargs, \
-                            'expect bias provided as a keyword argument when it is not a positional argument'
-                        bias = kwargs['bias']
-                        kwargs.pop('bias')
+                        bias = kwargs.pop('bias', None)
+
                     prepack_args = (linear_weight, bias)
                     prepack_op = get_linear_prepack_op_for_dtype(weight_dtype)
                     packed_weight = quantized_graph.create_node(
@@ -1314,12 +1311,10 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
         elif node.op == "call_module":
             self.op = type(modules[str(node.target)])
 
-    def is_output_quantized(self, qconfig, is_reference):
+    def is_output_quantized(self, qconfig):
         dtypes = get_qconfig_dtypes(qconfig)
-        if not is_reference:
-            return self.op in default_op_supported_dtypes and \
-                dtypes in default_op_supported_dtypes[self.op]
-        return True
+        return self.op in default_op_supported_dtypes and \
+            dtypes in default_op_supported_dtypes[self.op]
 
     def convert(self,
                 node: Node,
@@ -1720,7 +1715,7 @@ class ConvReLUQuantizeHandlerNew(QuantizeHandler):
     ) -> bool:
         return False
 
-    def is_output_quantized(self, qconfig, is_reference):
+    def is_output_quantized(self, qconfig):
         return False
 
     def convert(self,
@@ -1874,7 +1869,7 @@ class LinearReLUQuantizeHandlerNew(QuantizeHandler):
     ) -> bool:
         return False
 
-    def is_output_quantized(self, qconfig, is_reference):
+    def is_output_quantized(self, qconfig):
         return False
 
     def convert(self,
