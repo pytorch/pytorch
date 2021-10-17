@@ -240,7 +240,7 @@ template<template<typename> class normal_kernel, typename RNG>
 Tensor& normal_out_impl(Tensor& output, const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
   TORCH_CHECK(!std.is_complex(), "normal expects standard deviation to be non-complex");
   TORCH_CHECK(
-    std.min().ge(0).item<bool>(),
+    std.numel() == 0 || std.min().ge(0).item<bool>(),
     "normal expects all elements of std >= 0.0");
   bool is_deprecated_th_impl = resize_output_for_normal(output, mean, std);
   normal_impl_<normal_kernel, RNG>(output, 0, 1, gen);

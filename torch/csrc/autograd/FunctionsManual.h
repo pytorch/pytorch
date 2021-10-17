@@ -103,6 +103,16 @@ at::Tensor masked_scatter_backward(const at::Tensor & grad, const at::Tensor & m
 at::Tensor cholesky_backward(at::Tensor grad, bool upper, at::Tensor L);
 at::Tensor cholesky_jvp(const at::Tensor& input_tangent, const at::Tensor& L, bool upper);
 at::Tensor cholesky_inverse_backward(at::Tensor grad, at::Tensor L, bool upper, at::Tensor inverse);
+Tensor pinv_jvp(
+  const Tensor& A,
+  const Tensor& pinvA,
+  const Tensor& dA
+);
+Tensor pinv_backward(
+  const Tensor& grad,
+  const Tensor& pinvA,
+  const Tensor& A
+);
 at::Tensor split_with_sizes_backward(const std::vector<torch::autograd::Variable> &grads,
                                      IntArrayRef split_sizes, int64_t dim, IntArrayRef sizes, const at::TensorOptions &options);
 at::Tensor split_backward(const std::vector<torch::autograd::Variable> &grads, int64_t split_size, int64_t dim, at::IntArrayRef sizes, const at::TensorOptions &options);
@@ -250,7 +260,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     IntArrayRef normalized_shape,
     std::array<bool,3> output_mask);
 
-std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, const Tensor& input, const Tensor& tau);
+std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, const Tensor& result, const Tensor& input, const Tensor& tau);
 std::tuple<Tensor, Tensor> polar_backward(
     const Tensor& grad,
     const Tensor& result);
@@ -312,6 +322,7 @@ Tensor cat_jvp(at::TensorList tensors, int64_t dim);
 Tensor cumprod_jvp(Tensor self_t, Tensor self_p, Tensor result, int dim);
 Tensor gather_with_keepdimed_indices(const Tensor& input, int64_t dim, const Tensor& indices, bool keepdim);
 Tensor evenly_read_jvp(const Tensor& fw_grad, const Tensor & input, const Tensor & value);
+Tensor warn_backwards(const Tensor &grad_output);
 
 } // namespace details
 } // namespace generated

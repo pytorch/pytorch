@@ -21,6 +21,7 @@ C10_DEFINE_string(
     "For input float TensorCPUs, specify the dimension using comma "
     "separated numbers. If multiple inputs needed, use semicolon "
     "to separate the dimension of different tensors.");
+C10_DEFINE_string(method_name, "forward", "The name of the method.");
 C10_DEFINE_string(
     output_llvm,
     "",
@@ -66,28 +67,26 @@ c10::Dict<c10::IValue, c10::IValue> createCompileSpec() {
   c10::Dict<c10::IValue, c10::IValue> method_spec(
       c10::StringType::get(), c10::AnyType::get());
   auto input_shapes = parseInputShapes();
-  TORCH_CHECK(
-      input_shapes.size() == 1,
-      "Wrong # of input shapes: ",
-      input_shapes.size());
-  method_spec.insert("sizes", input_shapes[0]); // TODO: support multiple inputs
-  compile_spec.insert("forward", method_spec);
+  method_spec.insert("sizes", input_shapes);
+  compile_spec.insert(FLAGS_method_name, method_spec);
   return compile_spec;
 }
 
-std::vector<int64_t> getInputSizesForMethod(
-    const c10::Dict<c10::IValue, c10::IValue>& method_compile_spec,
-    const std::string& method_name) {
-  return method_compile_spec.at(method_name)
-      .toGenericDict()
-      .at("sizes")
-      .toIntVector();
+std::vector<std::vector<int64_t>> getInputSizes (
+    const c10::Dict<c10::IValue, c10::IValue>& method_compile_spec) {
+  auto input_shapes = method_compile_spec.at(FLAGS_method_name).toGenericDict().at("sizes").toList();
+  std::vector<std::vector<int64_t>> inputSizes;
+  for (const auto& input_shape : input_shapes) {
+    auto sizes = ((c10::IValue) input_shape).toIntVector();
+    inputSizes.emplace_back(sizes);
+  }
+  return inputSizes;
 }
 
-std::string getNncKernelId(const std::string& method_name) {
+std::string getNncKernelId() {
   // TODO: calculate the version_token.
   const std::string version_token = "VERTOKEN";
-  return FLAGS_model_name + ":" + FLAGS_model_version + ":" + method_name +
+  return FLAGS_model_name + ":" + FLAGS_model_version + ":" + FLAGS_method_name +
       ":" + version_token;
 }
 
@@ -100,23 +99,31 @@ void writeOutputLlvmAssembly(const std::string& asm_code) {
 
   std::ofstream output(output_llvm_file_name);
   output << asm_code;
+  std::cout << "The compiled llvm assembly code was saved to " << output_llvm_file_name
+            << std::endl;
 }
 
 c10::IValue preprocess(
     const torch::jit::Module& mod,
     const c10::Dict<c10::IValue, c10::IValue>& method_compile_spec,
     const torch::jit::BackendDebugHandleGenerator& generate_debug_handles) {
-  const std::string& method_name = "forward";
-  auto method = mod.get_method(method_name);
+
+  std::string output_llvm_file_name = FLAGS_output_llvm;
+  if (output_llvm_file_name.empty()) {
+    output_llvm_file_name =
+        FLAGS_model.substr(0, FLAGS_model.find('.')) + ".compiled.ll";
+  }
+
+  auto method = mod.get_method(FLAGS_method_name);
   auto graph = method.function().graph()->copy();
-  auto sizes = getInputSizesForMethod(method_compile_spec, method_name);
+  auto sizes = getInputSizes(method_compile_spec);
 
   std::string llvm_asm_code;
-  auto compiled = torch::jit::mobile::nnc::aotCompile(method_name, graph, sizes);
+  auto compiled = torch::jit::mobile::nnc::aotCompile(FLAGS_method_name, graph, sizes);
   writeOutputLlvmAssembly(compiled.second);
 
   auto func = std::move(compiled.first);
-  func->set_nnc_kernel_id(getNncKernelId(method_name));
+  func->set_nnc_kernel_id(getNncKernelId());
 
   torch::jit::mobile::nnc::CompilationUnit cu;
   cu.register_function(std::move(func));
@@ -135,6 +142,7 @@ int main(int argc, char** argv) {
       " --model_name=<model name>"
       " --model_version=<model version>"
       " --input_dims='1,3,224,224'"
+      " [--method_name=<mehhod name>]"
       " [--output_llvm=<llvm assembly output file path>]"
       " [--output_model=<output model file path>]");
 
@@ -155,7 +163,7 @@ int main(int argc, char** argv) {
   auto m = torch::jit::load(FLAGS_model);
   m.eval();
   auto frozen_m = torch::jit::freeze_module(m.clone());
-  auto graph = frozen_m.get_method("forward").graph();
+  auto graph = frozen_m.get_method(FLAGS_method_name).graph();
   torch::jit::OptimizeFrozenGraph(graph, true);
 
   auto compile_spec = createCompileSpec();
