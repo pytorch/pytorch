@@ -189,7 +189,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             defined in torch/onnx/symbolic_helper.py.
         _retain_param_name (bool, default True): [Deprecated and ignored. Will be removed in next PyTorch
             release]
-        do_constant_folding (bool, default False): Apply the constant-folding optimization.
+        do_constant_folding (bool, default True): Apply the constant-folding optimization.
             Constant-folding will replace some of the ops that have all constant inputs
             with pre-computed constant nodes.
         example_outputs (T or a tuple of T, where T is Tensor or convertible to Tensor, default None):
