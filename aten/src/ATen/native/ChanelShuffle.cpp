@@ -14,6 +14,18 @@
 namespace at {
 namespace native {
 
+
+Tensor channel_shuffle_cpu(const Tensor& self, int64_t groups) {
+  auto memory_format = self.suggest_memory_format();
+  auto output = at::empty({0}, self.options());
+  output.resize_(self.sizes(), memory_format);
+  auto input = self.contiguous(memory_format);
+  channel_shuffle_kernel(kCPU, output, input, groups);
+  return namedinference::propagate_names_if_nonempty(
+      output,
+      self.names());
+}
+
 Tensor channel_shuffle(const Tensor& self, int64_t groups) {
   TORCH_CHECK(self.dim() > 2,
               "channel_shuffle expects input with > 2 dims, but got input with sizes ",
@@ -34,19 +46,15 @@ Tensor channel_shuffle(const Tensor& self, int64_t groups) {
   }
 #endif
 
-  // custom path for CPU on both Contiuous and ChannelsLast memory format
-  if (self.device().type() == c10::DeviceType::CPU &&
-      (self.scalar_type() == kFloat || self.scalar_type() == kDouble)) {
-    auto memory_format = self.suggest_memory_format();
-    auto output = at::empty({0}, self.options());
-    output.resize_(self.sizes(), memory_format);
-    auto input = self.contiguous(memory_format);
-    channel_shuffle_kernel(kCPU, output, input, groups);
-    return namedinference::propagate_names_if_nonempty(
-        output,
-        self.names());
-  }
+  auto output = at::native_channel_shuffle(self, groups);
+  return namedinference::propagate_names_if_nonempty(
+      output,
+      self.names());
+}
 
+Tensor math_channel_shuffle(const Tensor& self, int64_t groups) {
+  int64_t b = self.size(0);
+  int64_t c = self.size(1);
   int64_t oc = c / groups;
 
   auto input_reshaped = self.view({b, groups, oc, -1});
