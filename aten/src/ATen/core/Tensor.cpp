@@ -15,6 +15,18 @@ TensorBase TensorBase::__dispatch_contiguous(c10::MemoryFormat memory_format) co
   return at::_ops::contiguous::call(*self, memory_format);
 }
 
+const TensorBase& TensorBase::fill_(const c10::Scalar &fill_value) const {
+  Tensor self(*this);
+  at::_ops::fill__Scalar::call(self, fill_value);
+  return *this;
+}
+
+const TensorBase& TensorBase::zero_() const {
+  Tensor self(*this);
+  at::_ops::zero_::call(self);
+  return *this;
+}
+
 void TensorBase::enforce_invariants() {
   if (impl_.get() == nullptr) {
     throw std::runtime_error("TensorImpl with nullptr is not supported");
