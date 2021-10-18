@@ -3610,104 +3610,169 @@ bool any_variable_defined(const variable_list& variables) {
   return false;
 }
 
-std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, const Tensor& input, const Tensor& tau) {
-  if (!grad.defined()) {
+// Derivations for the householder_product.backward method.
+//
+// Given a sequence of vectors v_1, ..., v_n and a sequence of scalars tau_1, ..., tau_k,
+// the torch.linalg.householder_product computes the firt n columns of the following product:
+// Q = (I - tau_1 v_1 v_1^H) ... (I - tau_k v_k v_k^H).
+// Let
+//     H_i(sigma) := I - sigma v_i v_i^H, so Q = (H_1(sigma_1) ... H_k(sigma_k)[:, :k];
+//     H_i_minus = H_1(tau_1) ... H_{i - 1}(tau_{i - 1}), with H_1_minus := I;
+//     H_i_plus = H_{i + 1}(tau_{i + 1}) ... H_k(tau_k) with H_k_plus := I;
+//
+// Forward AD:
+// dQ = sum_{i = 1}^k H_i_minus (-dtau_i v_i v_i^H - tau_i dv_i v_i^H - tau_i v_i dv_i^H) H_i_plus.
+//
+// Backward AD:
+// Tr(Q_grad^H dQ) = sum_{i = 1}^k Tr(H_i_plus Q_grad^H H_i_minus (-dtau_i v_i v_i^H - tau_i dv_i v_i^H - tau_i v_i dv_i^H)).
+// Let K_i := H_i_plus Q_grad^H H_i_minus, then the gradients are
+// v_i_grad = (-tau_i v_i^H K_i)^H - tau_i K_i v_i,
+// tau_i_grad = Tr(-v_i^H K_i v_i).conj().
+// NOTE: the algorithms ignores that only n columns of Q are observed, so there is no need in
+// recomputing Q to full completion.
+//
+// Note that K_{i + 1} = H_{i + 1}^{-1} K_i H_i, so we can compute v_i_grad, tau_i_grad one by one
+// by just efficiently updating K_i if that is possible. Multiplying with H_i from the right could be
+// done with matrix-vector products, but what about the inverse H_{i + 1}^{-1} and does it even exist?
+// Luckily, under some assumptions, H_{i + 1}^{-1} exists and admits a representation as H_i(sigma_i) for some
+// sigma_i, so the left update is also could be done with matrix-vector and not matrix-matrix products.
+//
+// Let H(tau) := I - tau v v^H.
+// H(tau) has eigenvalues 1 with multiplicity (m - 1) with eigenvectors orthogonal to v,
+// and an eigenvalue (1 - tau ||v||^2) with the corresponding eigenvector v / ||v||.
+// If (1 - tau ||v||^2) != 0, H(tau) is invertible.
+// If (1 - tau ||v||^2) != 0, then with sigma defined as
+// sigma := tau / (||v||^2 tau - 1) we get that
+// H(tau) H(sigma) = H(sigma) H(tau) = I, so H(sigma) is the inverse of H(tau).
+//
+// WARNING: the algorithm below assumes that H_i(tau_i) are all invertible, so
+// it expects that (1 - tau_i ||v_i||^2) != 0 for all i.
+// We would like to point out that if there is H_i(tau_i) which is not invertible,
+// the householder_product is still differentiable! We will not be able to compute K_i
+// efficiently in such cases, however, as evaluating of each K_i will amount to calls
+// to ORGQR to be able to compute H_i_plus.
+std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, const Tensor& result, const Tensor& input_, const Tensor& tau) {
+  if (!grad.defined() || !input_.numel() || !tau.numel()) {
     return std::tuple<Tensor, Tensor>(Tensor(), Tensor());
   }
 
-  // LAPACK's orgqr operation computes a product of Householder matrices.
-  // Each Householder matrix is stored using Householder vectors (columns of 'input') and its scaling factors (scalars of 'tau')
-  // An explicit Householder matrix in code is like this: H_i = eye(input.shape[-1]) - tau[i] * outer(input[:, i], input[:, i])
-  // See "Representation of Orthogonal or Unitary Matrices": https://www.netlib.org/lapack/lug/node128.html
+  auto input_grad = at::zeros_like(input_);
+  auto tau_grad = at::zeros_like(tau);
 
-  // In Python code the orgqr operation can be implemented as following:
-  // result = torch.eye(input.shape[-2])
-  // for j in range(tau.shape[-1]):
-  //     v = A[:, j]
-  //     tauj = tau[j]
-  //     v1, v2 = v, v
-  //     result1, result2 = result, result
-  //     v3 = torch.outer(v1, v2)
-  //     v4 = tau[j] * v3
-  //     v5 = result1 @ v4
-  //     result = result2 - v5
+  auto m = input_.size(-2);
+  auto k = tau.size(-1);
 
-  // Differentiating the Python implementation line-by-line gives (sequence of assignments on the right inside the for loop should be applied in reverse order):
-  // result = torch.eye(input.shape[-2])       |  d_input = torch.zeros_like(input)
-  // for j in range(tau.shape[-1]):            |  for j in reversed(range(tau.shape[-1])):
-  //     v = input[:, j]                       |      d_input[:, j] += d_v
-  //     tauj = tau[j]                         |      d_tau[j] += d_tauj.sum(-1).sum(-1)
-  //     v1, v2 = v, v                         |      d_v = d_v1 + d_v2
-  //     result1, result2 = result, result     |      d_result = d_result1 + d_result2
-  //     v3 = torch.outer(v1, v2)              |      d_v1, d_v2 = d_v3 @ v2, v1 @ d_v3
-  //     v4 = tauj * v3                        |      d_tauj, d_v3 = d_v4 * v3, dv4 * tauj
-  //     v5 = result1 @ v4                     |      d_result1, d_v4 = d_v5 @ v4.T, result1.T @ d_v5
-  //     result = result2 - v5                 |      d_result2, d_v5 = d_result, -d_result
+  // forward operates only over the lower triangular part with the assumption
+  // that the diagonal of input is filled with 1s.
+  auto input = input_.tril(-1);
+  input.diagonal(0, -2, -1).fill_(1.0);
 
-  // in order to support rectangular input we need to expand 'input' and 'd_result' to square matrices
-  auto square_shape = input.sizes().vec();
-  square_shape.back() = input.size(-2);
+  // compute sigma such that
+  // H(sigma_i) == H(tau_i)^{-1}.
+  // If the input to householder_product comes from GEQRF,
+  // we will never encounter ||v_i||^2 tau_i == 1, so H(tau_i) will always be invertible.
+  // This follows from the documentation https://www.netlib.org/lapack/lug/node128.html,
+  // and tau always satisfying the condition |tau|^2 ||v||^2 == 2 * Re(tau).
+  auto input_first_k_cols = input.narrow(-1, 0, k);
+  auto input_first_k_cols_norm_squared = (
+    input_first_k_cols * input_first_k_cols.conj()
+  ).sum(-2);
+  auto sigma = tau / (tau * input_first_k_cols_norm_squared - 1.0);
 
-  auto input_ = at::zeros(square_shape, input.options());
+  auto K = result.matmul(grad.conj().transpose(-1, -2));
 
-  using at::indexing::Slice;
-  using at::indexing::None;
-  input_.index_put_({"...", Slice(), Slice(None, input.size(-1))}, input); // input_[..., :, :input.shape[-1]] = input
+  // The algorithm updates K by multiplying it from the left/right with Householder reflectors.
+  // If only single backward is run, we modify K in-place and exploit triangularity of the input.
+  // With higher order derivatives we cannot rewrite the storage of K, hence we use much less efficient
+  // out-of-place methods.
+  //
+  // if only first-order derivative is expected, we can modify K in-place for better performance
+  bool modify_K_in_place = !at::GradMode::is_enabled();
 
-  // make sure that all elements of Householder vectors including 0's and 1's are stored explicitly
-  // LAPACK assumes implicitly that the diagonal is filled with ones and the upper triangle is zero
-  input_.tril_(-1);
-  input_.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(1);
+  // TODO: replace this function with calls to LARFB
+  auto apply_householder_reflector = [m, modify_K_in_place](
+      int64_t k, const Tensor& v_full, const Tensor& t, Tensor& K, bool left = true) -> Tensor {
+    // v_full is a vector of dimension (..., m, 1), t is a scalar of dimension (..., 1)
 
-  auto d_input = at::zeros_like(input);
-  auto d_tau = at::zeros_like(tau);
+    // TODO: matrix-vector products in the code below are dispatched to matrix-matrix products.
+    // We either need to extend matmul to support batched matrix-vector products, or
+    // implement a batched variant of mv.
+    // We could enable mv for inputs which are not batched, but it is not done to eliminate
+    // the code duplication.
 
-  auto d_result = at::zeros(square_shape, grad.options());
-  d_result.index_put_({"...", Slice(), Slice(None, input.size(-1))}, grad); // d_result[..., :, :input.shape[-1]] = grad
+    // returns (I - t v v^H) K
+    if (left) {
+      if (modify_K_in_place) {
+        auto v = v_full.narrow(-2, k, m - k);
+        auto u = v.transpose(-1, -2).conj().matmul(K.narrow(-2, k, m - k));
+        K.narrow(-2, k, m - k).sub_((t.unsqueeze(-1) * v) * u);
+        return K;
+      }
+      else {
+        return K - (t.unsqueeze(-1) * v_full) * v_full.transpose(-1, -2).conj().matmul(K);
+      }
+    }
+    // returns K (I - t v v^H)
+    else {
+      if (modify_K_in_place) {
+        auto v = v_full.narrow(-2, k, m - k);
+        auto u = K.narrow(-1, k, m - k).matmul(t.unsqueeze(-1) * v);
+        K.narrow(-1, k, m - k).sub_(u * v.conj().transpose(-1, -2));
+        return K;
+      }
+      else {
+        return K - K.matmul(t.unsqueeze(-1) * v_full) * v_full.transpose(-1, -2).conj();
+      }
+    }
+  };
 
-  auto start_j = tau.size(-1) - 1;
-  for (int64_t j = start_j; j >= 0; j--) {
-    const auto v = input_.index({"...", Slice(), j});
-    const auto& v1 = v;
-    const auto& v2 = v;
+  // This method exploites that at k-th iteration vector v_k has only elements v_k[k:] which are non-zero.
+  auto update_grad = [&m](int64_t k, const Tensor& v_full, const Tensor& t, const Tensor& K) -> std::tuple<Tensor, Tensor> {
+    // v_full is a vector of dimension (..., m, 1), t is a scalar of dimension (..., 1)
+    auto v = v_full.narrow(-2, k, m - k);
+    auto vHK = v.transpose(-1, -2).conj().matmul(K.narrow(-2, k, m - k));
+    auto Kv = K.narrow(-1, k, m - k).matmul(v);
+    auto t_unsqueezed = t.unsqueeze(-1);
+    auto v_grad = (-t_unsqueezed * vHK).conj().squeeze(-2) - (t_unsqueezed * Kv).squeeze(-1);
+    auto tau_grad = -(vHK.narrow(-1, k, m - k).matmul(v)).conj();
+    return std::make_tuple(v_grad, tau_grad.squeeze(-1));
+  };
 
-    // we need to recompute input[j] * at::outer(v, v)
-    auto tau_unsqueezed = tau.index({"...", j}).unsqueeze(-1);  // tau[..., j][:, None]
-    auto tau_unsqueezed2 = tau_unsqueezed.unsqueeze(-1);  // tau[..., j][:, None, None]
-    auto v3 = v1.unsqueeze(-1) * v2.conj().unsqueeze(-2);  // batch outer product, at::outer doesn't work for batched input
-    auto v4 = tau_unsqueezed2 * v3;
+  // K <- H_0^{-1} @ K
+  K = apply_householder_reflector(
+    0, input.narrow(-1, 0, 1), sigma.narrow(-1, 0, 1),
+    K, /*left=*/true
+  );
+  for (int64_t i = 0; i < k; ++i) {
+    // NOTE: narrow will unsqueeze(-1)
+    auto v_i = input.narrow(-1, i, 1);
+    auto t_i = tau.narrow(-1, i, 1);
 
-    // we don't have an access to the intermediate results of the product of Householder matrices
-    // so we need to recompute orgqr(input, tau[..., :j])
-    auto result_prev = at::orgqr(input_, tau.index({"...", Slice(None, j)}));
+    Tensor v_i_grad, tau_i_grad;
+    std::tie(v_i_grad, tau_i_grad) = update_grad(i, v_i, t_i, K);
+    input_grad.select(-1, i).copy_(v_i_grad.squeeze(-1));
+    tau_grad.select(-1, i).copy_(tau_i_grad.squeeze(-1));
 
-    // now the actual derivative computation
-    auto d_result2 = d_result, d_v5 = -d_result;
-
-    auto d_result1 = at::matmul(d_v5, v4.conj().transpose(-2, -1));
-    // TODO: at::ormqr could be used here for matrix multiplication of Householder matrices with a matrix
-    // d_v4 = ormqr(input, tau[..., :j], d_v5, left=True, transpose=True)
-    // it would be more efficient, but then gradgradcheck wouldn't pass because derivative computation for ormqr is not implemented yet
-    auto d_v4 = at::matmul(result_prev.conj().transpose(-2, -1), d_v5);
-
-    auto d_tauj = d_v4 * v3.conj();
-    auto d_v3 = d_v4 * tau_unsqueezed2.conj();
-
-    auto d_v1 = at::matmul(d_v3, v2.unsqueeze(-1));
-    auto d_v2 = at::matmul(v1.conj().unsqueeze(-2), d_v3);
-
-    d_result = d_result1 + d_result2;
-    auto d_v = d_v1.squeeze(-1) + d_v2.conj().squeeze(-2);
-
-    d_input.index({"...", Slice(), j}).add_(d_v);
-    d_tau.index({"...", j}).add_(d_tauj.sum(-1).sum(-1));
+    // K <- H_{i + 1}^{-1} @ K @ H_i
+    if (i < k - 1) {
+      auto v_i_next = input.narrow(-1, i + 1, 1);
+      auto s_i_next = sigma.narrow(-1, i + 1, 1);
+      K = apply_householder_reflector(
+        i + 1, v_i_next, s_i_next,
+        K, /*left=*/true
+      );
+      K = apply_householder_reflector(
+        i, v_i, t_i,
+        K, /*left=*/false
+      );
+    }
   }
 
-  // orgqr assumes implicitly that the diagonal is filled with ones and the upper triangle is zero
-  // but we didn't take this into account in the above code
-  d_input = d_input.tril(-1);
+  // forward operates only over the lower-triangular part of the input
+  // excluding the main diagonal, hence the gradient is also lower-triangular.
+  input_grad.tril_(-1);
 
-  return std::tuple<Tensor, Tensor>(d_input, d_tau);
+  return std::make_tuple(input_grad, tau_grad);
 }
 
 std::tuple<Tensor, Tensor> polar_backward(
