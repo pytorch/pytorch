@@ -1265,6 +1265,9 @@ class TestTEFuser(JitTestCase):
             torch.round,
             torch.trunc,
             torch.frac,
+            # TODO: uncomment when we support Scalar-Tensor torch.pow in the fuser
+            # lambda x: torch.pow(0.5, x),
+            # lambda x: torch.pow(2, x),
             # TODO: broken on ROCm?
             # F.hardshrink,
             F.leaky_relu,
@@ -1436,6 +1439,36 @@ class TestTEFuser(JitTestCase):
                 # If eager mode doesn't support a dtype/op/device combo,
                 # neither does the fuser.  Catch everything to avoid needing to
                 # guess what errors might be thrown by eager.
+                continue
+            try:
+                t = torch.jit.trace(fn, (x))
+                self.assertEqual(ref, t(x))
+                self.assertAllFused(t.graph_for(x))
+            except Exception as e:
+                raise RuntimeError(
+                    " ".join(["Failed:", str(dtype), op.__name__, device])
+                )
+
+    def test_binary_intonly_tensor_scalar_ops(self):
+        def apply_with_scalar(fn, scalar):
+            return lambda x: fn(x, scalar)
+
+        binary_ops = [
+            operator.__lshift__,
+            operator.__rshift__,
+        ]
+        devices = self.devices
+        scalars = [3, 0,
+                   # -1 # TODO: This currently produces wrong results!
+                   ]
+        for dtype, op, device, scalar in product(self.dtypes, binary_ops, devices, scalars):
+            if dtype in [torch.float16, torch.bfloat16, torch.float32, torch.float64]:
+                continue
+            try:
+                x = self.data_for(dtype, device)
+                fn = apply_with_scalar(op, scalar)
+                ref = fn(x)
+            except Exception:
                 continue
             try:
                 t = torch.jit.trace(fn, (x))
@@ -1621,6 +1654,8 @@ class TestTEFuser(JitTestCase):
             torch.where,
             lambda cond, x, y: torch.where(cond, x, 3.1415),
             lambda cond, x, y: torch.where(cond, 42, y),
+            lambda cond, x, y: torch.where(cond, 42.0, 3.1415),
+            lambda cond, x, y: torch.where(cond, 42, 3),
         ]
         devices = self.devices
         for dtype, op, device in product(self.dtypes, ops, devices):

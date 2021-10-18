@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/lowerings.h>
 #include <torch/csrc/jit/tensorexpr/operators/operators.h>
@@ -13,6 +14,7 @@ FunctionSchemaMap<NNCLoweringFunction>& getNNCLoweringRegistry() {
 }
 
 NNCLoweringFunction getStandardLoweringFor(const std::string& schema_str) {
+  GRAPH_DEBUG("Lowering ", schema_str);
   const auto& lowerings = getNNCLoweringRegistry();
   if (auto l = lowerings.find(parseSchema(schema_str))) {
     return *l;
