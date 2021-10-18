@@ -333,38 +333,6 @@ at::Tensor LazyNativeFunctions::_copy_from_and_resize(const at::Tensor& self,
   return dst;
 }
 
-at::Tensor LazyNativeFunctions::div(const at::Tensor& self,
-                                    const at::Tensor& other) {
-  return torch_lazy_tensors::LazyNativeFunctions::div(
-      self, other, /*rounding_mode=*/c10::nullopt);
-}
-
-at::Tensor LazyNativeFunctions::div(
-    const at::Tensor& self, const at::Tensor& other,
-    c10::optional<c10::string_view> rounding_mode) {
-  LTC_FN_COUNTER("lazy::");
-  at::ScalarType dtype = at::result_type(self, other);
-  auto operands = GetBinaryOperands(self, other);
-  return bridge::AtenFromLtcTensor(tensor_aten_ops::div(
-      operands.first, operands.second, rounding_mode, dtype));
-}
-
-at::Tensor LazyNativeFunctions::div(const at::Tensor& self,
-                                    const at::Scalar& other) {
-  LTC_FN_COUNTER("lazy::");
-  return bridge::AtenFromLtcTensor(
-      tensor_aten_ops::div(bridge::GetLtcTensor(self), other));
-}
-
-at::Tensor LazyNativeFunctions::embedding_dense_backward(
-    const at::Tensor& grad_output, const at::Tensor& indices,
-    int64_t num_weights, int64_t padding_idx, bool scale_grad_by_freq) {
-  LTC_FN_COUNTER("lazy::");
-  return bridge::AtenFromLtcTensor(tensor_aten_ops::ts_embedding_dense_backward(
-      bridge::GetLtcTensor(grad_output), bridge::GetLtcTensor(indices),
-      num_weights, padding_idx, scale_grad_by_freq));
-}
-
 at::Tensor LazyNativeFunctions::empty(
     at::IntArrayRef size, c10::optional<at::ScalarType> dtype,
     c10::optional<at::Layout> layout, c10::optional<at::Device> device,

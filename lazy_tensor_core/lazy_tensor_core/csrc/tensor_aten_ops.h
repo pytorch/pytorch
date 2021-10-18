@@ -236,12 +236,6 @@ LazyTensor diag(const LazyTensor& input, lazy_tensors::int64 offset);
 LazyTensor diagonal(const LazyTensor& input, lazy_tensors::int64 offset,
                     lazy_tensors::int64 dim1, lazy_tensors::int64 dim2);
 
-LazyTensor div(
-    const LazyTensor& input, const LazyTensor& other,
-    const c10::optional<c10::string_view>& rounding_mode = c10::nullopt,
-    c10::optional<at::ScalarType> logical_element_type = c10::nullopt);
-LazyTensor div(const LazyTensor& input, const at::Scalar& other);
-
 // A generalized contraction between tensors of arbitrary dimension defined by
 // the given equation and applied to the input tensors.
 LazyTensor einsum(const std::string& equation,
@@ -254,18 +248,6 @@ void elu_(LazyTensor& input, const at::Scalar& alpha, const at::Scalar& scale,
 LazyTensor elu_backward(const LazyTensor& grad_output, const at::Scalar& alpha,
                         const at::Scalar& scale, const at::Scalar& input_scale,
                         const LazyTensor& output);
-
-LazyTensor embedding_dense_backward(const LazyTensor& grad_output,
-                                    const LazyTensor& indices,
-                                    lazy_tensors::int64 num_weights,
-                                    lazy_tensors::int64 padding_idx,
-                                    bool scale_grad_by_freq);
-
-LazyTensor ts_embedding_dense_backward(const LazyTensor& grad_output,
-                                       const LazyTensor& indices,
-                                       lazy_tensors::int64 num_weights,
-                                       lazy_tensors::int64 padding_idx,
-                                       bool scale_grad_by_freq);
 
 LazyTensor eq(const LazyTensor& input, const at::Scalar& other);
 
@@ -390,10 +372,6 @@ LazyTensor index_select(const LazyTensor& input, lazy_tensors::int64 dim,
 LazyTensor inverse(const LazyTensor& input);
 
 LazyTensor isnan(const LazyTensor& input);
-
-LazyTensor kl_div_backward(const LazyTensor& grad_output,
-                           const LazyTensor& input, const LazyTensor& target,
-                           lazy_tensors::int64 reduction, bool log_target);
 
 std::tuple<LazyTensor, LazyTensor> kthvalue(const LazyTensor& input,
                                             lazy_tensors::int64 k,

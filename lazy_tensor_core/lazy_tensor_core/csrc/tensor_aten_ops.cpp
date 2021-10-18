@@ -110,7 +110,6 @@
 #include "lazy_tensor_core/csrc/ops/triangular_solve.h"
 #include "lazy_tensor_core/csrc/ops/tril.h"
 #include "lazy_tensor_core/csrc/ops/triu.h"
-#include "lazy_tensor_core/csrc/ops/ts_embedding_dense_backward.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_backward.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_forward.h"
 #include "lazy_tensor_core/csrc/ops/uniform.h"
@@ -847,69 +846,6 @@ LazyTensor diagonal(const LazyTensor& input, lazy_tensors::int64 offset,
   return input.CreateViewTensor(std::move(view_info));
 }
 
-LazyTensor div(const LazyTensor& input, const LazyTensor& other,
-               const c10::optional<c10::string_view>& rounding_mode,
-               c10::optional<at::ScalarType> logical_element_type) {
-  at::ScalarType scalar_type =
-      at::typeMetaToScalarType(c10::get_default_dtype());
-  lazy_tensors::PrimitiveType input_type = input.shape().get().element_type();
-  lazy_tensors::PrimitiveType other_type = other.shape().get().element_type();
-  bool input_is_float =
-      lazy_tensors::primitive_util::IsFloatingPointType(input_type);
-  bool other_is_float =
-      lazy_tensors::primitive_util::IsFloatingPointType(other_type);
-  if (input_is_float && !other_is_float) {
-    scalar_type = TensorTypeFromLtcType(input_type);
-  } else if (!input_is_float && other_is_float) {
-    scalar_type = TensorTypeFromLtcType(other_type);
-  }
-  // We need to cast both input and other to float to perform true divide, floor
-  // divide and trunc divide.
-  torch::lazy::Value input_value = GetFloatingIrValue(input, scalar_type);
-  torch::lazy::Value other_value = GetFloatingIrValue(other, scalar_type);
-  torch::lazy::Value res = input_value / other_value;
-
-  if (rounding_mode.has_value()) {
-    if (*rounding_mode == "trunc") {
-      res = ir::ops::Trunc(res);
-    } else if (*rounding_mode == "floor") {
-      res = ir::ops::Floor(res);
-    } else {
-      LTC_CHECK(false)
-          << "rounding_mode must be one of None, 'trunc', or 'floor'";
-    }
-  }
-
-  // Promote the result to the logical_element_type if one of the
-  // input and the other is float. If that is not the case logical_element_type
-  // will be non-floating-point type, we should only promote the result to that
-  // when rounding_mode is not nullopt.
-  if (input_is_float || other_is_float || rounding_mode.has_value()) {
-    if (logical_element_type.has_value()) {
-      lazy_tensors::PrimitiveType res_intended_type =
-          MakeLtcPrimitiveType(*logical_element_type, &input.GetDevice());
-      if (ir::GetShapeFromTsValue(res).element_type() != res_intended_type) {
-        res = torch::lazy::MakeNode<ir::ops::Cast>(res, res_intended_type);
-      }
-    }
-    return input.CreateFrom(res, logical_element_type);
-  } else {
-    // We don't need to typecheck the res IR here since we cast both input and
-    // output to the scalar_type. Res type must also be scalar_type here.
-    return input.CreateFrom(res, scalar_type);
-  }
-}
-
-LazyTensor div(const LazyTensor& input, const at::Scalar& other) {
-  at::ScalarType scalar_type =
-      at::typeMetaToScalarType(c10::get_default_dtype());
-  torch::lazy::Value input_value = GetFloatingIrValue(input, scalar_type);
-  torch::lazy::Value other_value = LazyTensor::GetIrValueForScalar(
-      other, ir::GetShapeFromTsValue(input_value).element_type(),
-      input.GetDevice());
-  return input.CreateFrom(input_value / other_value, scalar_type);
-}
-
 LazyTensor eq(const LazyTensor& input, const at::Scalar& other) {
   return DispatchComparisonOp(at::aten::eq, input, other);
 }
@@ -936,25 +872,6 @@ LazyTensor elu_backward(const LazyTensor& grad_output, const at::Scalar& alpha,
   return grad_output.CreateFrom(ir::ops::EluBackward(grad_output.GetIrValue(),
                                                      output.GetIrValue(), alpha,
                                                      scale, input_scale));
-}
-
-LazyTensor embedding_dense_backward(const LazyTensor& grad_output,
-                                    const LazyTensor& indices,
-                                    lazy_tensors::int64 num_weights,
-                                    lazy_tensors::int64 padding_idx,
-                                    bool scale_grad_by_freq) {
-  return tensor_ops::EmbeddingDenseBackward(grad_output, indices, num_weights,
-                                            padding_idx, scale_grad_by_freq);
-}
-
-LazyTensor ts_embedding_dense_backward(const LazyTensor& grad_output,
-                                       const LazyTensor& indices,
-                                       lazy_tensors::int64 num_weights,
-                                       lazy_tensors::int64 padding_idx,
-                                       bool scale_grad_by_freq) {
-  return grad_output.CreateFrom(torch::lazy::MakeNode<ir::ops::TSEmbeddingDenseBackward>(
-      grad_output.GetIrValue(), indices.GetIrValue(), num_weights, padding_idx,
-      scale_grad_by_freq));
 }
 
 LazyTensor erf(const LazyTensor& input) {
@@ -1199,13 +1116,6 @@ LazyTensor inverse(const LazyTensor& input) {
 LazyTensor isnan(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::IsNan(input.GetIrValue()),
                           at::ScalarType::Bool);
-}
-
-LazyTensor kl_div_backward(const LazyTensor& grad_output,
-                           const LazyTensor& input, const LazyTensor& target,
-                           lazy_tensors::int64 reduction, bool log_target) {
-  return tensor_ops::KlDivBackward(grad_output, input, target,
-                                   GetReductionMode(reduction), log_target);
 }
 
 std::tuple<LazyTensor, LazyTensor> kthvalue(const LazyTensor& input,

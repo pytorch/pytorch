@@ -22,6 +22,8 @@ void ToString(std::string name, T val, std::ostream& ss){
 }
 void ToString(std::string name, const c10::Scalar& val, std::ostream& ss);
 
+void ToString(std::string name, const c10::string_view& val, std::ostream& ss);
+
 template <typename T>
 void ToString(std::string name, std::vector<T> val, std::ostream& ss){
   ss << std::string(", ") << name << std::string("=(") << c10::Join(", ", val) << std::string(")");
