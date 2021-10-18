@@ -6488,7 +6488,8 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, b)
         self.run_test(model, c)
 
-    @skipIfUnsupportedMinOpsetVersion(9)
+    # ONNX supported bfloat16 for opsets >= 13
+    @skipIfUnsupportedMinOpsetVersion(13)
     def test_type_as_bfloat16(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
@@ -6500,6 +6501,8 @@ class TestONNXRuntime(unittest.TestCase):
             x = torch.tensor(3, dtype=type)
             self.run_test(model, x)
 
+    # ONNX supported bfloat16 for opsets >= 13
+    @skipIfUnsupportedMinOpsetVersion(13)
     def test_linear_bfloat16(self):
         input = torch.randn(128, 20, dtype=torch.bfloat16)
         model = torch.nn.Linear(20, 30).bfloat16()
