@@ -404,7 +404,7 @@ void _amp_foreach_non_finite_check_and_unscale_(std::vector<LazyTensor> self,
     inputs.push_back(x.GetIrValue());
   }
   ir::NodePtr node = ir::MakeNode<ir::ops::AmpForachNonFiniteCheckAndUnscale>(
-      at::ArrayRef<ir::Value>(inputs), found_inf.GetIrValue(), new_inv_scale.GetIrValue());
+      inputs, found_inf.GetIrValue(), new_inv_scale.GetIrValue());
   for (size_t i = 0; i < self.size(); ++i) {
     self[i].SetInPlaceIrValue(ir::Value(node, i));
   }
@@ -775,7 +775,7 @@ LazyTensor cat(lazy_tensors::Span<const LazyTensor> tensors,
   if (values.empty()) {
     return tensors[0];
   }
-  return tensors[0].CreateFrom(ir::MakeNode<ir::ops::Cat>(at::ArrayRef<ir::Value>(values), dim));
+  return tensors[0].CreateFrom(ir::MakeNode<ir::ops::Cat>(values, dim));
 }
 
 LazyTensor ceil(const LazyTensor& input) {
@@ -965,7 +965,8 @@ LazyTensor div(const LazyTensor& input, const at::Scalar& other) {
       at::typeMetaToScalarType(c10::get_default_dtype());
   ir::Value input_value = GetFloatingIrValue(input, scalar_type);
   ir::Value other_value = LazyTensor::GetIrValueForScalar(
-      other, GetShapeFromTsValue(input_value).element_type(), input.GetDevice());
+      other, GetShapeFromTsValue(input_value).element_type(),
+      input.GetDevice());
   return input.CreateFrom(input_value / other_value, scalar_type);
 }
 
@@ -1984,9 +1985,9 @@ LazyTensor rrelu_with_noise_backward(const LazyTensor& grad_output,
       upper, training));
 }
 
-LazyTensor rsub(
-    const LazyTensor& input, const LazyTensor& other, const at::Scalar& alpha,
-    c10::optional<at::ScalarType> logical_element_type) {
+LazyTensor rsub(const LazyTensor& input, const LazyTensor& other,
+                const at::Scalar& alpha,
+                c10::optional<at::ScalarType> logical_element_type) {
   ir::Value alpha_ir = LazyTensor::GetIrValueForScalar(
       alpha, other.shape(), logical_element_type, other.GetDevice());
   return input.CreateFrom(other.GetIrValue() - alpha_ir * input.GetIrValue(),
@@ -2079,7 +2080,7 @@ void silu_out(LazyTensor& input, LazyTensor& out) {
 }
 
 LazyTensor sigmoid_backward(const LazyTensor& grad_output,
-                                        const LazyTensor& output) {
+                            const LazyTensor& output) {
   return grad_output.CreateFrom(
       ir::ops::SigmoidBackward(grad_output.GetIrValue(), output.GetIrValue()));
 }
