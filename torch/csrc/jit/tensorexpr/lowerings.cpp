@@ -1488,6 +1488,7 @@ RegisterNNCLoweringsFunction aten_add(
 
 RegisterNNCLoweringsFunction aten_quantize_per_tensor(
     {"aten::quantize_per_tensor(Tensor self, float scale, int zero_point, int dtype) -> (Tensor)",
+     "aten::quantize_per_tensor.tensor_qparams(Tensor self, Tensor scale, Tensor zero_point, int dtype) -> (Tensor)",
      "aten::quantize_per_tensor.tensors(Tensor[] tensors, Tensor scales, Tensor zero_points, int dtype) -> (Tensor[])"},
 #if NNC_QUANTIZATION_EXPR_QUANT == 1
     computeQuantizePerTensor
@@ -1506,7 +1507,7 @@ RegisterNNCLoweringsFunction aten_dequantize(
 );
 
 RegisterNNCLoweringsFunction quantized_conv2d(
-    {"_quantized::conv2d(Tensor qx, __torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weight, float output_scale, int output_zero_point) -> (Tensor)"},
+    {"quantized::conv2d.new(Tensor qx, __torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weight, float output_scale, int output_zero_point) -> (Tensor)"},
     computeQuantizedConv2d);
 
 RegisterNNCLoweringsFunction quantized_conv2d_relu(
