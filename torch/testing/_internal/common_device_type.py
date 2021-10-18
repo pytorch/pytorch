@@ -1057,57 +1057,75 @@ def expectedFailureCUDA(fn):
 def expectedFailureMeta(fn):
     return expectedFailure('meta')(fn)
 
+# This decorator checks that the decorated function produces a nondeterministic
+# alert for the expected device types
 class expectedAlertNondeterministic:
-    def __init__(self, caller_name, device_type=None, fn_has_device_arg=True):
-        self.device_type = device_type
+    # Args:
+    #
+    #   caller_name (str): Name of the operation that produces the
+    #       nondeterministic alert. This name is expected to appear
+    #       in the error/warning message.
+    #
+    #   device_types (list[str], optional): If provided, the alert is
+    #       expected to only be triggered for the specified devices, and
+    #       no others. If None, then the alert is expected to be triggered
+    #       for all devices. Default: None
+    #
+    # Keyword args:
+    #
+    #   test_warning (bool, optional): If True, tests warnings in addition
+    #       to errors. If False, only errors are tested. Default: True
+    #
+    # TODO: `test_warning=False` is only needed as a workaround for issue
+    #       https://github.com/pytorch/pytorch/issues/50209. Once CUDA
+    #       backward function warnings behave properly, we can remove this
+    #       argument and always test for warnings.
+    #
+    def __init__(self, caller_name, device_types=None, *, test_warning=True):
+        if device_types is not None:
+            assert isinstance(device_types, list)
+            for device_type in device_types:
+                assert isinstance(device_type, str)
+        self.device_types = device_types
         self.error_message = caller_name + ' does not have a deterministic implementation, but you set'
-        self.fn_has_device_arg = fn_has_device_arg
+        self.test_warning = test_warning
 
     def __call__(self, fn):
         @wraps(fn)
         def efail_fn(slf, device, *args, **kwargs):
+            should_alert = self.device_types is None or slf.device_type in self.device_types
+
+            # Check that errors are thrown correctly
             with DeterministicGuard(True):
-                # If a nondeterministic error is expected for this case,
-                # check that it is raised
-                if self.device_type is None or self.device_type == slf.device_type:
+                if should_alert:
+                    with slf.assertRaisesRegex(
+                            RuntimeError,
+                            self.error_message,
+                            msg='expected a non-deterministic error, but it was not raised'):
+                        fn(slf, device, *args, **kwargs)
+
+                else:
+                    # If a nondeterministic error is not expected, make sure
+                    # that it is not raised
                     try:
-                        if self.fn_has_device_arg:
-                            fn(slf, device, *args, **kwargs)
-                        else:
-                            fn(slf, *args, **kwargs)
-                    except RuntimeError as e:
-                        if self.error_message not in str(e):
-                            slf.fail(
-                                'expected non-deterministic error message to start with "'
-                                + self.error_message
-                                + '" but got this instead: "' + str(e) + '"')
-                        return
-                    else:
-                        slf.fail('expected a non-deterministic error, but it was not raised')
-
-                # If a nondeterministic error is not expected for this case,
-                # make sure that it is not raised
-                try:
-                    if self.fn_has_device_arg:
                         return fn(slf, device, *args, **kwargs)
-                    else:
-                        return fn(slf, *args, **kwargs)
-                except RuntimeError as e:
-                    if 'does not have a deterministic implementation' in str(e):
-                        slf.fail(
-                            'did not expect non-deterministic error message, '
-                            + 'but got this: "' + str(e) + '"')
-                    # Reraise exceptions unrelated to nondeterminism
-                    raise
+                    except RuntimeError as e:
+                        if 'does not have a deterministic implementation' in str(e):
+                            slf.fail(
+                                'did not expect non-deterministic error message, '
+                                + 'but got one anyway: "' + str(e) + '"')
+                        # Reraise exceptions unrelated to nondeterminism
+                        raise
 
-        @wraps(fn)
-        def efail_fn_no_device(slf, *args, **kwargs):
-            return efail_fn(slf, None, *args, **kwargs)
+            # Check that warnings are thrown correctly
+            if self.test_warning and should_alert:
+                with DeterministicGuard(True, warn_only=True):
+                    with slf.assertWarnsRegex(
+                            UserWarning,
+                            self.error_message):
+                        fn(slf, device, *args, **kwargs)
 
-        if self.fn_has_device_arg:
-            return efail_fn
-        else:
-            return efail_fn_no_device
+        return efail_fn
 
 # Skips a test on CPU if LAPACK is not available.
 def skipCPUIfNoLapack(fn):
