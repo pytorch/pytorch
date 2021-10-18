@@ -3299,7 +3299,6 @@ class TestLinalg(TestCase):
         for torch_inverse in [torch.inverse, torch.linalg.inv]:
             test_inverse_many_batches_helper(torch_inverse, 5, 256)
             test_inverse_many_batches_helper(torch_inverse, 3, 512)
-            test_inverse_many_batches_helper(torch_inverse, 64, 64)
 
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
