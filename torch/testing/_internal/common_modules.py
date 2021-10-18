@@ -193,8 +193,8 @@ class ModuleInput(object):
         self.forward_input.materialize()
 
     def clear(self):
-        self.args = clear(self.args)
-        self.kwargs = clear(self.kwargs)
+        self.constructor_input.clear()
+        self.forward_input.clear()
 
     def __enter__(self):
         self.materialize()
