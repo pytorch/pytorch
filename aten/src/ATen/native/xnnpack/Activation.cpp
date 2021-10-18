@@ -51,7 +51,25 @@ bool use_hardswish(const Tensor& input) {
       !input.requires_grad() && true;
 }
 
-void hardswish_out(Tensor& input, Tensor& result) {
+Tensor hardswish(const Tensor& input) {
+  Tensor padded_input = mobile::allocate_padded_contiguous_if_needed(
+      input, input.suggest_memory_format());
+
+  Tensor output = mobile::empty_with_tail_padding(
+      padded_input.sizes(),
+      padded_input.options().dtype(),
+      input.suggest_memory_format(),
+      padded_input.names());
+
+  hardswish_impl(padded_input, output);
+  return output.contiguous(input.suggest_memory_format());
+}
+
+Tensor& hardswish_(Tensor& input) {
+  return hardswish_out(input, input);
+}
+
+Tensor& hardswish_out(Tensor& input, Tensor& result) {
   Tensor padded_input = mobile::allocate_padded_contiguous_if_needed(
       input, input.suggest_memory_format());
 
@@ -67,6 +85,7 @@ void hardswish_out(Tensor& input, Tensor& result) {
     hardswish_impl(padded_input, output);
     result.copy_(output);
   }
+  return result;
 }
 } // namespace xnnpack
 } // namespace native
