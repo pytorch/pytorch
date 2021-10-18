@@ -193,6 +193,11 @@ void parallelizeAllLike(
   ca_loop_map.build(FusionGuard::getCurFusion());
   for (auto id : reference_tv->domain()->domain()) {
     ca_loop_map.getConcreteMappedID(id)->parallelize(id->getParallelType());
+    if (id->hasPaddingToMultipleOfWarp()) {
+      TORCH_INTERNAL_ASSERT(id->getMaybeSizeAfterPadding().has_value());
+      ca_loop_map.getConcreteMappedID(id)->padToMultipleOfWarp(
+          id->getMaybeSizeAfterPadding().value());
+    }
   }
 
   for (auto tv : all_tvs) {

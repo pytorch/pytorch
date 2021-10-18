@@ -217,10 +217,8 @@ void IrPrinter::handle(const UnaryOp* uop) {
         os_ << "f";
       }
     }
-    if (op_type == UnaryOpType::RandLike) {
-      os_ << "(";
-      handle(uop->in());
-    }
+    os_ << "(";
+    handle(uop->in());
     os_ << ")";
   }
 

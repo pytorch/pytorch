@@ -517,6 +517,8 @@ constexpr unsigned int supported_switch_pair(DataType t1, DataType t2) {
 static const char* supported_casts2string(
     const std::pair<DataType, DataType>& t) {
   switch (supported_switch_pair(std::get<0>(t), std::get<1>(t))) {
+    case supported_switch_pair(DataType::Int, DataType::Float):
+    case supported_switch_pair(DataType::Int32, DataType::Float):
     case supported_switch_pair(DataType::Double, DataType::Float):
       return "(float)";
     case supported_switch_pair(DataType::Double, DataType::Int):
