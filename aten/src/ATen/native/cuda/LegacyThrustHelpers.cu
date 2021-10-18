@@ -73,4 +73,28 @@ void embedding_dense_backward_cuda_scan<int>(Tensor &sorted_indices, Tensor &cou
 template
 void embedding_dense_backward_cuda_scan<int64_t>(Tensor &sorted_indices, Tensor &count);
 
+template<typename index_t>
+int64_t embedding_backward_cuda_kernel_unique_by_key(const Tensor &sorted_indices, Tensor &segment_offsets) {
+  auto stream = at::cuda::getCurrentCUDAStream();
+  at::cuda::ThrustAllocator allocator;
+  auto policy = thrust::cuda::par(allocator).on(stream);
+  const ptrdiff_t numel = sorted_indices.numel();
+  auto sorted_indices_dev = thrust::device_ptr<index_t>(sorted_indices.data_ptr<index_t>());
+  auto dummy = at::empty_like(sorted_indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto dummy_dev = thrust::device_ptr<index_t>(dummy.data_ptr<index_t>());
+  auto ends = thrust::unique_by_key_copy(
+          policy,
+          sorted_indices_dev,
+          sorted_indices_dev + numel,
+          thrust::make_counting_iterator(0),
+          dummy_dev,
+          thrust::device_ptr<index_t>(segment_offsets.data_ptr<index_t>()));
+  return thrust::get<0>(ends) - dummy_dev;
+}
+
+template
+int64_t embedding_backward_cuda_kernel_unique_by_key<int>(const Tensor &sorted_indices, Tensor &segment_offsets);
+template
+int64_t embedding_backward_cuda_kernel_unique_by_key<int64_t>(const Tensor &sorted_indices, Tensor &segment_offsets);
+
 }}

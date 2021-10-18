@@ -317,7 +317,7 @@ def init_from_local_shards(
 
 
     Examples:
-      Suppose we want construct a sharded tensor on two rank, global size = (10, 5),
+      Suppose we want construct a sharded tensor on two ranks, global size = (10, 5),
       each shard have a (5, 5) local tensor, we can do it like below:
 
       on rank 0:

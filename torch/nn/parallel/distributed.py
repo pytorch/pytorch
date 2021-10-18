@@ -150,7 +150,13 @@ class _DDPSink(Function):
         ctx.set_materialize_grads(False)
         ctx.reducer = reducer
         ctx.state_dict = state_dict
-        return inputs
+        ret = tuple(
+            inp.clone()
+            if isinstance(inp, torch.Tensor)
+            else inp
+            for inp in inputs
+        )
+        return ret
 
     @staticmethod
     def backward(ctx, *grad_outputs):
