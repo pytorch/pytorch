@@ -10904,7 +10904,7 @@ op_db: List[OpInfo] = [
         decorators=[
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1e-02)}),
                          'TestReductions', 'test_reference_masked'),
-            DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-04, rtol=1e-04)}),
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1e-03)}),
                          'TestReductions', 'test_ref_duplicate_values'),
         ],
         sample_inputs_func=sample_inputs_masked_reduction
