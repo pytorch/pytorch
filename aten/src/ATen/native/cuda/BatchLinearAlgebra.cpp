@@ -1681,11 +1681,11 @@ void cholesky_helper_magma(const Tensor& input, bool upper, const Tensor& info) 
     // reads off bounds it will still be valid user memory.
     result = at::empty(input.numel() + 1, input.options());
     result.resize_as_(input).transpose_(-2, -1);
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.transpose(-2, -1).is_contiguous());
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.mT().is_contiguous());
 
     // batched MAGMA doesn't support upper=true
     // we transpose and conjugate the input as a workaround
-    result.copy_(upper ? input.conj().transpose(-2, -1) : input);
+    result.copy_(upper ? input.mH() : input);
   }
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
@@ -1697,7 +1697,7 @@ void cholesky_helper_magma(const Tensor& input, bool upper, const Tensor& info) 
     // if upper=true we need to tranpose and conjugate the result tensor
     // because the cholesky decomposition is stored in the lower triangular part
     if (upper) {
-      input.copy_(result.conj().transpose(-2, -1));
+      input.copy_(result.mH());
     } else {
       input.copy_(result);
     }
@@ -2988,7 +2988,7 @@ void linalg_lstsq_gels(const Tensor& A, const Tensor& B, const Tensor& /*infos*/
     auto A_expand_batch = expand_batch_portion;
     A_expand_batch.insert(A_expand_batch.end(), {A.size(-2), A.size(-1)});
     Tensor A_expanded = A.expand({A_expand_batch});
-    bool is_fortran_contiguous = A_expanded.transpose(-2, -1).is_contiguous();
+    bool is_fortran_contiguous = A_expanded.mT().is_contiguous();
     Tensor A_broadcasted = is_fortran_contiguous ? A_expanded : cloneBatchedColumnMajor(A_expanded);
     auto tau_expand_batch = expand_batch_portion;
     tau_expand_batch.push_back(tau.size(-1));
@@ -3006,7 +3006,7 @@ void linalg_lstsq_gels(const Tensor& A, const Tensor& B, const Tensor& /*infos*/
         /*transpose=*/TransposeType::NoTranspose,
         /*unitriangular=*/false);
   } else { // underdetermined case
-    Tensor Ah = cloneBatchedColumnMajor(A.conj().transpose(-2, -1));
+    Tensor Ah = cloneBatchedColumnMajor(A.mH());
 
     // Step 1: compute QR factorization of conjugate transpose of A using geqrf
     geqrf_kernel(Ah, tau);
@@ -3016,7 +3016,7 @@ void linalg_lstsq_gels(const Tensor& A, const Tensor& B, const Tensor& /*infos*/
     auto A_expand_batch = expand_batch_portion;
     A_expand_batch.insert(A_expand_batch.end(), {Ah.size(-2), Ah.size(-1)});
     Tensor Ah_expanded = Ah.expand({A_expand_batch});
-    bool is_fortran_contiguous = Ah_expanded.transpose(-2, -1).is_contiguous();
+    bool is_fortran_contiguous = Ah_expanded.mT().is_contiguous();
     Tensor Ah_broadcasted = is_fortran_contiguous ? Ah_expanded : cloneBatchedColumnMajor(Ah_expanded);
 
     // Step 2: R^H Z = B
