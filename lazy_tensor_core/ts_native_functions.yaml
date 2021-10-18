@@ -24,7 +24,6 @@ full_codegen:
   - topk
 supported:
   - add.Tensor
-  - addcdiv_
   - as_strided
   - as_strided_
   - bernoulli

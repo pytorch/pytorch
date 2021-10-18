@@ -454,14 +454,6 @@ LazyTensor add(const LazyTensor& input, const at::Scalar& other,
                           logical_element_type);
 }
 
-void addcdiv_(LazyTensor& input, const at::Scalar& value,
-              const LazyTensor& tensor1, const LazyTensor& tensor2) {
-  ir::Value constant = LazyTensor::GetIrValueForScalar(
-      value, tensor1.shape().get().element_type(), input.GetDevice());
-  ir::Value div = tensor1.GetIrValue() / tensor2.GetIrValue();
-  input.SetInPlaceIrValue(input.GetIrValue() + div * constant);
-}
-
 LazyTensor addmm(const LazyTensor& input, const LazyTensor& weight,
                  const LazyTensor& bias) {
   return input.CreateFrom(ir::ops::AddMatMulOp(
