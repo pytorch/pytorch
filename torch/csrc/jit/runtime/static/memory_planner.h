@@ -127,7 +127,8 @@ class MemoryPlanner {
   // data cache) first reading the Storage (i.e., StorageImpl pointer)
   // from the TensorImpl object and then second dereferencing it and
   // 2) our memory access pattern during allocate() has high locality.
-  std::vector<std::pair<size_t, at::StorageImpl>> managed_tensor_storage_impls_{};
+  std::vector<std::pair<size_t, at::StorageImpl>>
+      managed_tensor_storage_impls_{};
   // We don't have any guarantee that the model doesn't change the
   // Storage for managed tensors out from under us during execution,
   // so we have to check the StorageImpls each time we deallocate.
