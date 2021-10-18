@@ -8359,6 +8359,7 @@
   structured: True
   dispatch:
     CPU: _convert_indices_from_csr_to_coo_structured_cpu
+    CUDA: _convert_indices_from_csr_to_coo_structured_cuda
 
 ## NN wrappers
 

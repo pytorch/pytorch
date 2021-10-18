@@ -1022,18 +1022,19 @@ class Tensor(torch._C._TensorBase):
             25
 
        """
-        fill_value = 0
         if self.is_sparse and not self.is_sparse_csr:
             return self
         if self.is_sparse_csr:
-            indices = torch._convert_indices_from_csr_to_coo(self.crow_indices(), self.col_indices(),
-                                                             self.values().shape[0])
-            device = self.values().device
+            crow_indices = self.crow_indices()
+            col_indices = self.col_indices()
+            indices = torch._convert_indices_from_csr_to_coo(crow_indices, col_indices,
+                                                             col_indices.shape[0],
+                                                             out_int32=crow_indices.dtype == torch.int32)
             return torch.sparse_coo_tensor(indices,
                                            self.values(),
                                            size=self.shape,
                                            dtype=self.dtype,
-                                           device=device)
+                                           device=self.device)
         else:
             return self.to_sparse()
 

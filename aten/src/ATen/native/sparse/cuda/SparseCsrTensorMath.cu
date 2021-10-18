@@ -25,6 +25,7 @@
 
 #include <thrust/device_ptr.h>
 #include <thrust/execution_policy.h>
+#include <thrust/fill.h>
 #include <thrust/for_each.h>
 #include <thrust/sequence.h>
 
@@ -64,6 +65,37 @@ void convert_indices_from_coo_to_csr_cuda(const Tensor& result, const Tensor& in
   int64_t BLOCKS = (numel + THREADS) / THREADS;
   at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
   convert_indices_from_coo_to_csr_cuda_kernel<<<BLOCKS, THREADS, 0, stream>>>(data_out, data_in, size, numel);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+template <typename input_t, typename output_t>
+__global__ void convert_indices_from_csr_to_coo_cuda_kernel(output_t* data_out, const input_t* data_in, const int64_t numel) {
+  int64_t tid = blockDim.x * blockIdx.x + threadIdx.x;
+
+  if (tid < numel - 2) {
+    thrust::fill(&data_out[data_in[tid]], &data_out[data_in[tid + 1]], static_cast<output_t>(tid));
+  }
+}
+
+template <typename input_t, typename output_t>
+void convert_indices_from_csr_to_coo_cuda(const Tensor& result, const Tensor& crow_indices, const Tensor& col_indices, const int64_t size) {
+  int64_t numel = crow_indices.numel();
+  const input_t* col_indices_data_in = col_indices.data_ptr<input_t>();
+  const input_t* crow_indices_data_in = crow_indices.data_ptr<input_t>();
+  output_t* data_out = result.data_ptr<output_t>();
+
+  if (numel == 0) {
+    result.zero_();
+    return;
+  }
+
+  std::copy(col_indices_data_in, col_indices_data_in + size, &data_out[size]);
+
+  // Run numel threads...
+  int64_t THREADS = at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
+  int64_t BLOCKS = (numel + THREADS) / THREADS;
+  at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
+  convert_indices_from_csr_to_coo_cuda_kernel<<<BLOCKS, THREADS, 0, stream>>>(data_out, crow_indices_data_in, numel);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
@@ -212,6 +244,20 @@ TORCH_IMPL_FUNC(_convert_indices_from_coo_to_csr_structured_cuda) (
   } else {
     AT_DISPATCH_INTEGRAL_TYPES(input.scalar_type(), "convert_indices_from_coo_to_csr_cuda", [&] {
       convert_indices_from_coo_to_csr_cuda<scalar_t, int64_t>(result, input, size);
+    });
+  }
+}
+
+TORCH_IMPL_FUNC(_convert_indices_from_csr_to_coo_structured_cuda) (
+  const Tensor& crow_indices, const Tensor& col_indices, const int64_t size, const bool out_int32, const Tensor& result
+) {
+  if (out_int32) {
+    AT_DISPATCH_INTEGRAL_TYPES(crow_indices.scalar_type(), "convert_indices_from_csr_to_coo_cuda", [&] {
+      convert_indices_from_csr_to_coo_cuda<scalar_t, int>(result, crow_indices, col_indices, size);
+    });
+  } else {
+    AT_DISPATCH_INTEGRAL_TYPES(crow_indices.scalar_type(), "convert_indices_from_csr_to_coo_cuda", [&] {
+      convert_indices_from_csr_to_coo_cuda<scalar_t, int64_t>(result, crow_indices, col_indices, size);
     });
   }
 }

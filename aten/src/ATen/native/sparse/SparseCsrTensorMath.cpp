@@ -72,22 +72,20 @@ void convert_indices_from_coo_to_csr_cpu(const Tensor& result, const Tensor& inp
 
 template <typename input_t, typename output_t>
 void convert_indices_from_csr_to_coo_cpu(const Tensor& result, const Tensor& crow_indices, const Tensor& col_indices, const int64_t size) {
-  int64_t nrows = crow_indices.numel() - 1;
+  int64_t numel = crow_indices.numel();
   const input_t* col_indices_data_in = col_indices.data_ptr<input_t>();
   const input_t* crow_indices_data_in = crow_indices.data_ptr<input_t>();
   output_t* data_out = result.data_ptr<output_t>();
 
-  if (nrows == 0) {
+  if (numel == 0) {
     result.zero_();
     return;
   }
 
-  at::parallel_for(0, nrows, GRAIN_SIZE, [&](int64_t start, int64_t end) {
+  std::copy(col_indices_data_in, col_indices_data_in + size, &data_out[size]);
+  at::parallel_for(0, numel - 1, GRAIN_SIZE, [&](int64_t start, int64_t end) {
     for (int64_t i = start; i < end; i++) {
-      for (int64_t j = crow_indices_data_in[i]; j < crow_indices_data_in[i + 1]; j++) {
-        data_out[j] = i;
-        data_out[j + size] = col_indices_data_in[j];
-      }
+      std::fill(&data_out[crow_indices_data_in[i]], &data_out[crow_indices_data_in[i + 1]], static_cast<output_t>(i));
     }
   });
 
