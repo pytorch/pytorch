@@ -32,18 +32,12 @@ TORCH_CUDA_CU_API scalar_t
 TORCH_CUDA_CU_API THCStorage* THCStorage_(new)(THCState* state);
 TORCH_CUDA_CU_API THCStorage* THCStorage_(
     newWithSize)(THCState* state, ptrdiff_t size);
-TORCH_CUDA_CU_API THCStorage* THCStorage_(
-    newWithSize1)(THCState* state, scalar_t);
 TORCH_CUDA_CU_API THCStorage* THCStorage_(newWithMapping)(
     THCState* state,
     const char* filename,
     ptrdiff_t size,
     int shared);
 
-TORCH_CUDA_CU_API THCStorage* THCStorage_(newWithAllocator)(
-    THCState* state,
-    ptrdiff_t size,
-    at::Allocator* allocator);
 TORCH_CUDA_CU_API THCStorage* THCStorage_(newWithDataAndAllocator)(
     THCState* state,
     at::DataPtr&& data,
