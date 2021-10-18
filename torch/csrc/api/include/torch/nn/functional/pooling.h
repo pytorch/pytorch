@@ -776,7 +776,7 @@ inline std::tuple<Tensor, Tensor> fractional_max_pool2d_with_indices(
 
   Tensor _random_samples_ = _random_samples;
   if (!_random_samples_.defined()) {
-    auto n_batch = 1 ? input.dim() == 3 : input.size(0);
+    auto n_batch = input.dim() == 3;
     _random_samples_ = torch::rand({n_batch, input.size(-1), 2}, torch::TensorOptions().dtype(input.dtype()).device(input.device()));
   }
   return torch::fractional_max_pool2d(input, kernel_size, *output_size_, _random_samples_);

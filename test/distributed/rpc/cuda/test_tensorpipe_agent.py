@@ -15,7 +15,6 @@ from torch.testing._internal.distributed.rpc.tensorpipe_rpc_agent_test_fixture i
 from torch.testing._internal.distributed.rpc_utils import (
     GENERIC_CUDA_TESTS,
     TENSORPIPE_CUDA_TESTS,
-    MultiProcess,
     generate_tests,
 )
 
@@ -25,7 +24,6 @@ globals().update(
         "TensorPipe",
         TensorPipeRpcAgentTestFixture,
         GENERIC_CUDA_TESTS + TENSORPIPE_CUDA_TESTS,
-        MultiProcess.SPAWN,
         __name__,
     )
 )

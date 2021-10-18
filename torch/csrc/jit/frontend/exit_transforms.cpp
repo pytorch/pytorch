@@ -150,8 +150,10 @@ struct ExitTransformer {
     registerBlockOutputs(if_view.thenBlock(), true_outs);
     registerBlockOutputs(if_view.elseBlock(), false_outs);
     for (const auto i : c10::irange(true_outs.size())) {
-      auto out_type =
-          unifyTypes(true_outs.at(i)->type(), false_outs.at(i)->type());
+      auto out_type = unifyTypes(
+          true_outs.at(i)->type(),
+          false_outs.at(i)->type(),
+          /*default_to_union=*/true);
       n->addOutput()->setType(*out_type);
     }
   }

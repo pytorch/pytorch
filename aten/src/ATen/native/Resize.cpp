@@ -8,7 +8,7 @@ namespace at { namespace native {
 
 // Returns true if resize is necessary
 bool resize_output_check(const Tensor& output, IntArrayRef shape) {
-  // Tests for resizing of tensors with one more elements
+  // Tests for resizing of tensors with one or more elements
   if (output.sizes().equals(shape)) {
     return false;
   }

@@ -27,17 +27,6 @@ struct PyNode : public Node {
 
   variable_list apply(variable_list&& inputs) override;
 
-  // Throw a python_error with the PyErr state persisted, so that we
-  // don't lose the error state if the GIL is released when we don't
-  // have a PyThreadState created beforehand, this is made so that
-  // even for pure C++ thread without a pre-created PyThreadState could
-  // also capture the correct error message.
-  // TODO: This is a temporary approach to allow C++ thread to correctly
-  // capture Python Error in autograd, remove this when c10 thread pool
-  // allow to do one time initialization.
-  // see discussion in https://github.com/pytorch/pytorch/pull/34845
-  // Follow up issue: https://github.com/pytorch/pytorch/issues/35006
-  void throw_python_error();
   void release_variables() override;
   std::string name() const override;
   bool is_traceable() override;

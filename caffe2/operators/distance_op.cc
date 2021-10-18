@@ -1,4 +1,5 @@
 #include "caffe2/operators/distance_op.h"
+#include "caffe2/core/types.h"
 #include "caffe2/utils/eigen_utils.h"
 #ifdef CAFFE2_USE_MKLDNN
 #include <caffe2/ideep/operators/operator_fallback_ideep.h>
@@ -7,7 +8,7 @@
 
 namespace caffe2 {
 
-template<>
+template <>
 bool SquaredL2DistanceOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& Y = Input(1);
@@ -257,7 +258,9 @@ OpSchema::Cost CostInferenceForDotProduct(
   CAFFE_ENFORCE_EQ(out[0].dims().size(), 1);
 
   struct OpSchema::Cost c = PointwiseCostInference<2>(def, in);
-  c.bytes_written = out[0].dims(0) * sizeof(out[0].data_type());
+  auto const& out_0_element_size_byte =
+      DataTypeToTypeMeta(out[0].data_type()).itemsize();
+  c.bytes_written = out[0].dims(0) * out_0_element_size_byte;
   c.params_bytes = 0;
   return c;
 }
@@ -379,10 +382,12 @@ bool DotProductWithPaddingOp<float, CPUContext>::RunOnDevice() {
 }
 
 // L2
-REGISTER_CPU_OPERATOR(SquaredL2Distance,
-                      SquaredL2DistanceOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(SquaredL2DistanceGradient,
-                      SquaredL2DistanceGradientOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    SquaredL2Distance,
+    SquaredL2DistanceOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    SquaredL2DistanceGradient,
+    SquaredL2DistanceGradientOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(SquaredL2Distance)
     .NumInputs(2)
@@ -402,7 +407,8 @@ class GetSquaredL2DistanceGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
-        "SquaredL2DistanceGradient", "",
+        "SquaredL2DistanceGradient",
+        "",
         vector<string>{I(0), I(1), GO(0)},
         vector<string>{GI(0), GI(1)});
   }
@@ -762,9 +768,9 @@ class GetDotProductWithPaddingGradient : public GradientMakerBase {
       replicate = GetArgument(Def(), "replicate").i();
     }
 
-    const auto dot_arg =
-        vector<Argument>{MakeArgument<float>("pad_value", pad_value),
-                         MakeArgument<bool>("replicate", replicate)};
+    const auto dot_arg = vector<Argument>{
+        MakeArgument<float>("pad_value", pad_value),
+        MakeArgument<bool>("replicate", replicate)};
 
     return SingleGradientDef(
         "DotProductWithPaddingGradient",
@@ -775,4 +781,4 @@ class GetDotProductWithPaddingGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(DotProductWithPadding, GetDotProductWithPaddingGradient);
-}  // namespace caffe2
+} // namespace caffe2

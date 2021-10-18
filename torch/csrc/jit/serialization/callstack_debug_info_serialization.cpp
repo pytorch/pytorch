@@ -47,15 +47,11 @@ c10::IValue InlinedCallStackSerializer::serialize(
   } else {
     elements.emplace_back(c10::IValue());
   }
-  if (cs_ptr->function()) {
-    elements.emplace_back(cs_ptr->function()->name());
+  auto fn_name = cs_ptr->function_name();
+  if (!fn_name.empty()) {
+    elements.emplace_back(fn_name);
   } else {
-    auto fn_name = cs_ptr->function_name();
-    if (!fn_name.empty()) {
-      elements.emplace_back(fn_name);
-    } else {
-      elements.emplace_back("FunctionName_UNKNOWN");
-    }
+    elements.emplace_back("FunctionName_UNKNOWN");
   }
   c10::IValue serialized_cs = c10::ivalue::Tuple::create(elements);
   serialized_inlined_callstack_[cs_ptr] = serialized_cs;
@@ -141,7 +137,7 @@ InlinedCallStackPtr InlinedCallStackDeserializer::deserialize(
     return it->second;
   }
 
-  auto tup_elems = tup->elements();
+  const auto& tup_elems = tup->elements();
   TORCH_INTERNAL_ASSERT(tup_elems.size() == 4);
   // {IValue(module_instance_info), source_range_tag, IValue(InlinedCallStack),
   // function name}
@@ -190,7 +186,7 @@ c10::optional<ModuleInstanceInfo> InlinedCallStackDeserializer::
   if (it != cached_module_instance_info_.end()) {
     return it->second;
   }
-  auto tup_elems = iv.toTuple()->elements();
+  const auto& tup_elems = iv.toTuple()->elements();
   TORCH_CHECK(tup_elems.size() == 2);
   std::string type_name = tup_elems[0].toString()->string();
   std::string instance_name = tup_elems[1].toString()->string();
@@ -225,9 +221,9 @@ ska::flat_hash_map<int64_t, DebugInfoTuple> CallStackDebugInfoUnpickler::
         const std::shared_ptr<CompilationUnit>& cu) {
   auto ival = jit::unpickle(reinterpret_cast<const char*>(data.get()), size);
   ska::flat_hash_map<int64_t, DebugInfoTuple> callstack_ptrs;
-  auto& ivalues = ival.toTuple()->elements();
+  auto ivalues = std::move(*std::move(ival).toTuple()).elements();
   for (auto& val : ivalues) {
-    const auto tup_elems = val.toTuple()->elements();
+    const auto& tup_elems = val.toTuple()->elements();
     TORCH_CHECK(
         tup_elems.size() == 4,
         "Pickled map must have four elements: "

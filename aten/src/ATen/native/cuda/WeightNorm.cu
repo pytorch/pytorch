@@ -4,8 +4,7 @@
 #include <c10/util/Exception.h>
 
 #include <ATen/cuda/CUDAContext.h>
-#include <THC/THCDeviceUtils.cuh>
-#include <THC/THCTensorMathReduce.cuh>
+#include <ATen/cuda/DeviceUtils.cuh>
 
 namespace at {
 namespace native {
@@ -29,6 +28,13 @@ namespace {
 // blocks across the slow dimension up to the hardware-max block size of 1024.
 #define TILE_H 64
 
+template <typename T>
+struct ReduceAdd {
+  inline __device__ T operator()(const T a, const T b) const {
+    return (a + b);
+  }
+};
+
 template<typename T, typename ReduceOp>
 __device__ __forceinline__ void reduce_block_into_lanes
   (T *x,
@@ -45,7 +51,7 @@ __device__ __forceinline__ void reduce_block_into_lanes
     __syncthreads();
   }
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
   #pragma unroll
 #endif
   for(int i = (blockSize >> 1); i >= 64; i >>= 1)
@@ -64,7 +70,7 @@ __device__ __forceinline__ void reduce_block_into_lanes
       final = val;
     // __SYNCWARP();
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
     #pragma unroll
 #endif
     for(int i = 16; i >= lanes; i >>= 1)
@@ -106,7 +112,7 @@ __global__ void weight_norm_fwd_first_dim_kernel
   accscalar_t thread_sum = 0.f;
   for(int i = tid; i < rowSize; i += stride )
   {
-    accscalar_t val_f = scalar_cast<accscalar_t>(v[i+rowStart]);
+    accscalar_t val_f = static_cast<accscalar_t>(v[i+rowStart]);
     thread_sum += val_f*val_f; // AccumOp, could do Kahan here
   }
 
@@ -119,15 +125,15 @@ __global__ void weight_norm_fwd_first_dim_kernel
     norms[row] = result;
 
   // Broadcast load, could use shared memory instead.
-  accscalar_t g_this_row = scalar_cast<accscalar_t>(g[row]);
+  accscalar_t g_this_row = static_cast<accscalar_t>(g[row]);
 
   accscalar_t rnorm = 1.f/result; // for consistency with backward kernel
 
   // Write data to output
   for(int i = tid; i < rowSize; i += stride )
   {
-    accscalar_t val_f = scalar_cast<accscalar_t>(v[i+rowStart]);
-    w[i+rowStart] = scalar_cast<scalar_t>(g_this_row*val_f*rnorm);
+    accscalar_t val_f = static_cast<accscalar_t>(v[i+rowStart]);
+    w[i+rowStart] = static_cast<scalar_t>(g_this_row*val_f*rnorm);
   }
 }
 
@@ -158,7 +164,7 @@ __global__ void weight_norm_fwd_last_dim_kernel
   if(fast_dim_location < fast_dim_size)
     while(slower_dims_location < slower_dims_size)
     {
-      accscalar_t val_f = scalar_cast<accscalar_t>(v[currentIdx]);
+      accscalar_t val_f = static_cast<accscalar_t>(v[currentIdx]);
       thread_sum += val_f*val_f; // AccumOp, could do Kahan here
       currentIdx += blockDim.y*fast_dim_size;
       slower_dims_location += blockDim.y;
@@ -177,7 +183,7 @@ __global__ void weight_norm_fwd_last_dim_kernel
 
   __syncthreads();
 
-  accscalar_t g_this_col = scalar_cast<accscalar_t>(g[fast_dim_location]);
+  accscalar_t g_this_col = static_cast<accscalar_t>(g[fast_dim_location]);
   accscalar_t rnorm = rnorms_this_block[threadIdx.x];
 
   slower_dims_location = threadIdx.y;
@@ -185,8 +191,8 @@ __global__ void weight_norm_fwd_last_dim_kernel
   if(fast_dim_location < fast_dim_size)
     while(slower_dims_location < slower_dims_size)
     {
-      accscalar_t val_f = scalar_cast<accscalar_t>(v[currentIdx]);
-      w[currentIdx] = scalar_cast<scalar_t>(g_this_col*val_f*rnorm);
+      accscalar_t val_f = static_cast<accscalar_t>(v[currentIdx]);
+      w[currentIdx] = static_cast<scalar_t>(g_this_col*val_f*rnorm);
       currentIdx += blockDim.y*fast_dim_size;
       slower_dims_location += blockDim.y;
     }
@@ -221,8 +227,8 @@ __global__ void weight_norm_bwd_first_dim_kernel
   accscalar_t thread_sum = 0.f;
   for(int i = tid; i < rowSize; i += stride )
   {
-    accscalar_t grad_wi = scalar_cast<accscalar_t>(grad_w[i+rowStart]);
-    accscalar_t saved_vi = scalar_cast<accscalar_t>(saved_v[i+rowStart]);
+    accscalar_t grad_wi = static_cast<accscalar_t>(grad_w[i+rowStart]);
+    accscalar_t saved_vi = static_cast<accscalar_t>(saved_v[i+rowStart]);
     thread_sum += grad_wi*saved_vi; // AccumOp, could do Kahan here
   }
 
@@ -237,19 +243,19 @@ __global__ void weight_norm_bwd_first_dim_kernel
 
   // Write g gradients.
   if(tid == 0)
-    grad_g[row] = scalar_cast<scalar_t>(result*rnorm);
+    grad_g[row] = static_cast<scalar_t>(result*rnorm);
 
   // Broadcast load, could use shared memory instead.
-  accscalar_t g_this_row = scalar_cast<accscalar_t>(saved_g[row]);
+  accscalar_t g_this_row = static_cast<accscalar_t>(saved_g[row]);
 
   // Write v gradients.  We are reusing values that were loaded earlier, so there
   // is an optimization opportunity here (store values persistently).
   for(int j = tid; j < rowSize; j += stride )
   {
-    accscalar_t grad_wj = scalar_cast<accscalar_t>(grad_w[j+rowStart]);
-    accscalar_t saved_vj = scalar_cast<accscalar_t>(saved_v[j+rowStart]);
+    accscalar_t grad_wj = static_cast<accscalar_t>(grad_w[j+rowStart]);
+    accscalar_t saved_vj = static_cast<accscalar_t>(saved_v[j+rowStart]);
     accscalar_t grad_vj = g_this_row*(rnorm*grad_wj - rnorm3*saved_vj*result);
-    grad_v[j+rowStart] = scalar_cast<scalar_t>(grad_vj);
+    grad_v[j+rowStart] = static_cast<scalar_t>(grad_vj);
   }
 }
 
@@ -278,8 +284,8 @@ __global__ void weight_norm_bwd_last_dim_kernel
   if(fast_dim_location < fast_dim_size)
     while(slower_dims_location < slower_dims_size)
     {
-      accscalar_t grad_wi = scalar_cast<accscalar_t>(grad_w[currentIdx]);
-      accscalar_t saved_vi = scalar_cast<accscalar_t>(saved_v[currentIdx]);
+      accscalar_t grad_wi = static_cast<accscalar_t>(grad_w[currentIdx]);
+      accscalar_t saved_vi = static_cast<accscalar_t>(saved_v[currentIdx]);
       thread_sum += grad_wi*saved_vi; // AccumOp, could do Kahan here
       currentIdx += blockDim.y*fast_dim_size;
       slower_dims_location += blockDim.y;
@@ -294,10 +300,10 @@ __global__ void weight_norm_bwd_last_dim_kernel
 
   // Write g gradients.
   if(threadIdx.y == 0)
-    grad_g[fast_dim_location] = scalar_cast<scalar_t>(result*rnorm);
+    grad_g[fast_dim_location] = static_cast<scalar_t>(result*rnorm);
 
   // Entire block pulls these values, could use shared memory instead.
-  accscalar_t g_this_col = scalar_cast<accscalar_t>(saved_g[fast_dim_location]);
+  accscalar_t g_this_col = static_cast<accscalar_t>(saved_g[fast_dim_location]);
 
   // Write v gradients.
   slower_dims_location = threadIdx.y;
@@ -305,10 +311,10 @@ __global__ void weight_norm_bwd_last_dim_kernel
   if(fast_dim_location < fast_dim_size)
     while(slower_dims_location < slower_dims_size)
     {
-      accscalar_t grad_wj = scalar_cast<accscalar_t>(grad_w[currentIdx]);
-      accscalar_t saved_vj = scalar_cast<accscalar_t>(saved_v[currentIdx]);
+      accscalar_t grad_wj = static_cast<accscalar_t>(grad_w[currentIdx]);
+      accscalar_t saved_vj = static_cast<accscalar_t>(saved_v[currentIdx]);
       accscalar_t grad_vj = g_this_col*(rnorm*grad_wj - rnorm3*saved_vj*result);
-      grad_v[currentIdx] = scalar_cast<scalar_t>(grad_vj);
+      grad_v[currentIdx] = static_cast<scalar_t>(grad_vj);
       currentIdx += blockDim.y*fast_dim_size;
       slower_dims_location += blockDim.y;
     }

@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 import re
-from typing import Optional, Sequence, List, Tuple, Match
+from typing import Optional, Sequence, Set, List, Tuple, Match
 
 from tools.codegen.api import cpp
 from tools.codegen.api.types import Binding, NamedCType
@@ -43,6 +43,9 @@ class Derivative:
 
     # Saved outputs that are referenced by the formula.
     saved_outputs: Tuple[SavedAttribute, ...]
+
+    # Gradients that are referenced by name in the formula.
+    named_gradients: Set[str]
 
 # Represents a forward formula that calculates forward derivatives
 # for one tensor.
@@ -114,6 +117,14 @@ class DifferentiabilityInfo:
 
     # The union of 'saved_outputs' of all 'derivatives'.
     all_saved_outputs: Sequence[SavedAttribute]
+
+    # All named gradients that are available for use, in the same
+    # order as in the grads vector.
+    available_named_gradients: Sequence[str]
+
+    # The named gradients that are used in any of the derivatives.
+    # Invariant: all(name in available_named_gradients for name in used_named_gradients)
+    used_named_gradients: Set[str]
 
     # The function's input arguments for which it calculates derivatives.
     # It's the union of 'var_names' of all 'derivatives', sorted by the
@@ -360,6 +371,9 @@ def gen_differentiable_outputs(fn: NativeFunctionWithDifferentiabilityInfo) -> L
         for name, ret in zip(cpp.return_names(f), f.func.returns)]
     output_differentiability = info.output_differentiability if info else None
     if output_differentiability is not None:
+        if len(output_differentiability) != len(outputs):
+            raise RuntimeError(f"The length of output_differentiability ({len(output_differentiability)}), "
+                               f"does not match the number of outputs ({len(outputs)}).")
         differentiable_outputs: List[DifferentiableOutput] = []
         if False in output_differentiability and f.func.kind() == SchemaKind.inplace:
             raise RuntimeError("output_differentiability=False for inplace operation (version_counter won't get updated)")

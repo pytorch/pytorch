@@ -48,13 +48,13 @@ class TestLiteScriptModule(TestCase):
         mobile_module = _load_for_lite_interpreter(buffer)
 
         mobile_module_result = mobile_module(input)
-        torch.testing.assert_allclose(script_module_result, mobile_module_result)
+        torch.testing.assert_close(script_module_result, mobile_module_result)
 
         mobile_module_forward_result = mobile_module.forward(input)
-        torch.testing.assert_allclose(script_module_result, mobile_module_forward_result)
+        torch.testing.assert_close(script_module_result, mobile_module_forward_result)
 
         mobile_module_run_method_result = mobile_module.run_method("forward", input)
-        torch.testing.assert_allclose(script_module_result, mobile_module_run_method_result)
+        torch.testing.assert_close(script_module_result, mobile_module_run_method_result)
 
     def test_save_mobile_module_with_debug_info_with_trace(self):
         class A(torch.nn.Module):
@@ -117,13 +117,13 @@ class TestLiteScriptModule(TestCase):
         mobile_module = _load_for_lite_interpreter(buffer)
 
         mobile_module_result = mobile_module(input)
-        torch.testing.assert_allclose(script_module_result, mobile_module_result)
+        torch.testing.assert_close(script_module_result, mobile_module_result)
 
         mobile_module_forward_result = mobile_module.forward(input)
-        torch.testing.assert_allclose(script_module_result, mobile_module_forward_result)
+        torch.testing.assert_close(script_module_result, mobile_module_forward_result)
 
         mobile_module_run_method_result = mobile_module.run_method("forward", input)
-        torch.testing.assert_allclose(script_module_result, mobile_module_run_method_result)
+        torch.testing.assert_close(script_module_result, mobile_module_run_method_result)
 
     def test_find_and_run_method(self):
         class MyTestModule(torch.nn.Module):
@@ -154,7 +154,7 @@ class TestLiteScriptModule(TestCase):
 
         bundled_inputs = mobile_module.run_method("get_all_bundled_inputs")
         mobile_module_result = mobile_module.forward(*bundled_inputs[0])
-        torch.testing.assert_allclose(script_module_result, mobile_module_result)
+        torch.testing.assert_close(script_module_result, mobile_module_result)
 
     def test_method_calls_with_optional_arg(self):
         class A(torch.nn.Module):
@@ -183,7 +183,7 @@ class TestLiteScriptModule(TestCase):
         input = torch.tensor([5])
         script_module_forward_result = script_module.forward(input)
         mobile_module_forward_result = mobile_module.forward(input)
-        torch.testing.assert_allclose(
+        torch.testing.assert_close(
             script_module_forward_result,
             mobile_module_forward_result
         )
@@ -198,7 +198,7 @@ class TestLiteScriptModule(TestCase):
 
         # now both match again
         mobile_module_forward_result = mobile_module.forward(input, 2)
-        torch.testing.assert_allclose(
+        torch.testing.assert_close(
             script_module_forward_result,
             mobile_module_forward_result
         )
@@ -475,10 +475,10 @@ class TestLiteScriptQuantizedModule(QuantizationLiteTestCase):
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
-                self.quant = torch.quantization.QuantStub()
+                self.quant = torch.ao.quantization.QuantStub()
                 self.conv = torch.nn.Conv2d(1, 1, 1)
                 self.relu = torch.nn.ReLU()
-                self.dequant = torch.quantization.DeQuantStub()
+                self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x):
                 x = self.quant(x)
@@ -490,12 +490,12 @@ class TestLiteScriptQuantizedModule(QuantizationLiteTestCase):
         model_fp32 = M()
 
         model_fp32.eval()
-        model_fp32.qconfig = torch.quantization.get_default_qconfig('qnnpack')
-        model_fp32_fused = torch.quantization.fuse_modules(model_fp32, [['conv', 'relu']])
-        model_fp32_prepared = torch.quantization.prepare(model_fp32_fused)
+        model_fp32.qconfig = torch.ao.quantization.get_default_qconfig('qnnpack')
+        model_fp32_fused = torch.ao.quantization.fuse_modules(model_fp32, [['conv', 'relu']])
+        model_fp32_prepared = torch.ao.quantization.prepare(model_fp32_fused)
         input_fp32 = torch.randn(4, 1, 4, 4)
         model_fp32_prepared(input_fp32)
-        model_int8 = torch.quantization.convert(model_fp32_prepared)
+        model_int8 = torch.ao.quantization.convert(model_fp32_prepared)
 
         input = torch.randn(4, 1, 4, 4)
         self._compare_script_and_mobile(model=model_int8, input=input)
