@@ -8,12 +8,9 @@
 #include <c10/util/Exception.h>
 
 #include <ATen/native/cpu/ChannelShuffleKernel.h>
-#include <algorithm>
-#include <vector>
 
 namespace at {
 namespace native {
-
 
 Tensor channel_shuffle_cpu(const Tensor& self, int64_t groups) {
   auto memory_format = self.suggest_memory_format();
