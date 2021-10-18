@@ -1814,9 +1814,8 @@ Node* Graph::createDict(
 }
 
 Node* Graph::createNumToTensor(Value* value) {
-  auto typ = value->type();
   Node* result = create(prim::NumToTensor, {value});
-  result->output()->setType(TensorType::fromNumberType(std::move(typ)));
+  result->output()->setType(TensorType::fromNumberType(*value->type()));
   return result;
 }
 
