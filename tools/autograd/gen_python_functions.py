@@ -462,7 +462,7 @@ static PyTypeObject {typename} = *get_namedtuple("{name}");""")
 
 def generate_return_type_defintion_and_map_entry(
     overloads: Sequence[PythonSignatureNativeFunctionPair],
-) -> str:
+) -> Tuple[str, str]:
     """
     Generate block of named tuple type def inits, and add typeref snippets
     to declarations that use them
