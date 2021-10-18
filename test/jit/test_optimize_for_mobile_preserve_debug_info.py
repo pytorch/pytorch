@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 import torch
 import torch._C
 import torch.backends.xnnpack
