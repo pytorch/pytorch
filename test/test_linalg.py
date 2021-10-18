@@ -835,6 +835,7 @@ class TestLinalg(TestCase):
             result = op(a, b)
             self.assertEqual(result.dtype, torch.result_type(a, b))
 
+    # don't use @dtypes decorator to avoid generating ~1700 tests per device
     def test_addr_type_promotion(self, device):
         for dtypes0, dtypes1, dtypes2 in product(get_all_dtypes(), repeat=3):
             a = make_tensor((5,), device=device, dtype=dtypes0, low=-2, high=2)
