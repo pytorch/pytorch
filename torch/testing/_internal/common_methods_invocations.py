@@ -6323,7 +6323,7 @@ def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):
     They require a modified function because the finite-difference algorithm
     for calculating derivatives does not preserve the Hermitian property of the input.
     """
-    return op(input + input.conj().transpose(-2, -1), *args, **kwargs)
+    return op(input + input.mH, *args, **kwargs)
 
 
 def gradcheck_wrapper_triangular_input(op, *args, upper=False, idx=0, **kwargs):
@@ -9432,7 +9432,7 @@ op_db: List[OpInfo] = [
            # pinv is Frechet-differentiable in a rank-preserving neighborhood,
            # so we feed inputs that are the products of two full-rank factors,
            # to avoid any rank changes caused by the perturbations in the gradcheck
-           op=lambda a, b: torch.linalg.pinv(a @ b.transpose(-1, -2)),
+           op=lambda a, b: torch.linalg.pinv(a @ b.mT),
            dtypes=floating_and_complex_types(),
            supports_out=False,
            check_batched_grad=False,
