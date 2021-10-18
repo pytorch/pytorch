@@ -407,15 +407,17 @@ c10::optional<TypePtr> unifyTypeList(
   return ret_type;
 }
 
+// NOTE: This function actually does need to take const TypePtr&
+// because it sometimes calls unifyTypes, which needs const TypePtr&.
 MatchTypeReturn matchTypeVariables(
-    TypePtr formal,
-    TypePtr actual,
+    const TypePtr& formal,
+    const TypePtr& actual,
     TypeEnv& type_env) {
   if (!formal->hasFreeVariables()) {
     return MatchTypeReturn::Success();
   }
 
-  if (auto vt = formal->cast<VarType>()) {
+  if (auto vt = formal->castRaw<VarType>()) {
     auto it = type_env.find(vt->name());
     if (it == type_env.end()) {
       type_env[vt->name()] = actual;
@@ -431,8 +433,8 @@ MatchTypeReturn matchTypeVariables(
        << it->second->repr_str() << " is matched to type "
        << actual->repr_str();
     return ss.str();
-  } else if (auto lt_formal = formal->cast<ListType>()) {
-    if (auto lt_actual = actual->cast<ListType>()) {
+  } else if (auto lt_formal = formal->castRaw<ListType>()) {
+    if (auto lt_actual = actual->castRaw<ListType>()) {
       const auto innerMatch = matchTypeVariables(
           lt_formal->getElementType(), lt_actual->getElementType(), type_env);
       if (!innerMatch.success()) {
@@ -441,7 +443,7 @@ MatchTypeReturn matchTypeVariables(
         return innerMatch;
       }
       return MatchTypeReturn::Success();
-    } else if (auto tup_type = actual->cast<TupleType>()) {
+    } else if (auto tup_type = actual->castRaw<TupleType>()) {
       std::stringstream ss;
       auto maybe_tuple_unified = unifyTypeList(tup_type->elements(), ss);
       if (maybe_tuple_unified) {
@@ -454,8 +456,8 @@ MatchTypeReturn matchTypeVariables(
     ss << "Cannot match " << lt_formal->repr_str() << " to "
        << actual->repr_str();
     return ss.str();
-  } else if (auto tp_formal = formal->cast<TupleType>()) {
-    if (auto tp_actual = actual->cast<TupleType>()) {
+  } else if (auto tp_formal = formal->castRaw<TupleType>()) {
+    if (auto tp_actual = actual->castRaw<TupleType>()) {
       if (tp_formal->elements().size() != tp_actual->elements().size()) {
         return MatchTypeReturn("Cannot match tuples of mismatched size");
       }
@@ -473,8 +475,8 @@ MatchTypeReturn matchTypeVariables(
       ss << "Cannot match a tuple to " << actual->repr_str();
       return MatchTypeReturn(ss.str());
     }
-  } else if (auto lt_formal = formal->cast<FutureType>()) {
-    if (auto lt_actual = actual->cast<FutureType>()) {
+  } else if (auto lt_formal = formal->castRaw<FutureType>()) {
+    if (auto lt_actual = actual->castRaw<FutureType>()) {
       const auto innerMatch = matchTypeVariables(
           lt_formal->getElementType(), lt_actual->getElementType(), type_env);
       if (!innerMatch.success()) {
@@ -487,8 +489,8 @@ MatchTypeReturn matchTypeVariables(
       ss << "Cannot match a future to " << actual->repr_str();
       return ss.str();
     }
-  } else if (auto lt_formal = formal->cast<RRefType>()) {
-    if (auto lt_actual = actual->cast<RRefType>()) {
+  } else if (auto lt_formal = formal->castRaw<RRefType>()) {
+    if (auto lt_actual = actual->castRaw<RRefType>()) {
       const auto innerMatch = matchTypeVariables(
           lt_formal->getElementType(), lt_actual->getElementType(), type_env);
       if (!innerMatch.success()) {
@@ -501,8 +503,8 @@ MatchTypeReturn matchTypeVariables(
       ss << "Cannot match a rref to " << actual->repr_str();
       return ss.str();
     }
-  } else if (auto opt_formal = formal->cast<OptionalType>()) {
-    if (auto opt_actual = actual->cast<OptionalType>()) {
+  } else if (auto opt_formal = formal->castRaw<OptionalType>()) {
+    if (auto opt_actual = actual->castRaw<OptionalType>()) {
       const auto optionedMatch = matchTypeVariables(
           opt_formal->getElementType(), opt_actual->getElementType(), type_env);
       if (!optionedMatch.success()) {
@@ -521,8 +523,8 @@ MatchTypeReturn matchTypeVariables(
     // matches Optional[T] later error checking on tryEvalTypeVariables will
     // report the problem if we never match variables in type T
     return MatchTypeReturn::Success();
-  } else if (auto dict_formal = formal->cast<DictType>()) {
-    if (auto dict_actual = actual->cast<DictType>()) {
+  } else if (auto dict_formal = formal->castRaw<DictType>()) {
+    if (auto dict_actual = actual->castRaw<DictType>()) {
       auto key_match = matchTypeVariables(
           dict_formal->getKeyType(), dict_actual->getKeyType(), type_env);
       if (!key_match.success()) {
