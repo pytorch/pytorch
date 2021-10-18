@@ -92,7 +92,6 @@ TypePtr SchemaTypeParser::parseBaseType() {
 // Tensor(a! -> a|b) // Tensor is in set a, written to,
 //                      and after the write is in set a AND b.
 c10::optional<AliasInfo> SchemaTypeParser::parseAliasAnnotation() {
-  std::set<Symbol> sets;
   AliasInfo alias_info;
   if (L.nextIf('(')) {
     // optional 'alias set annotation'

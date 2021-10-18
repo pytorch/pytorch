@@ -36,6 +36,7 @@ from torch.testing._internal import common_distributed, common_utils
 from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_DEV_DBG_ASAN,
+    sandcastle_skip_if,
 )
 
 from torch.testing._internal.common_utils import IS_WINDOWS
@@ -507,6 +508,10 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         # Load the optimizer state dict, check that no exception is raised
         optimizer.load_state_dict(optimizer_state_dict)
 
+    @sandcastle_skip_if(
+        IS_WINDOWS,
+        "Test is flaky on windows: https://github.com/pytorch/pytorch/issues/66059"
+    )
     def test_multiple_groups(self):
         """ Check that the ZeroRedundancyOptimizer handles working with multiple process groups"""
         self.dist_init(self.rank, self.world_size, dist.Backend.GLOO)
