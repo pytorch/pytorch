@@ -2141,7 +2141,7 @@ bool InterfaceType::isSubTypeImpl(
 
 bool InterfaceType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
   // to improve performance this check can be cached
-  if (auto iface = rhs.cast<InterfaceType>()) {
+  if (auto iface = rhs.castRaw<InterfaceType>()) {
     return isSubTypeImpl(*this, *iface, why_not);
   }
   return Type::isSubtypeOfExt(rhs, why_not);
