@@ -533,7 +533,7 @@
 
 - func: arange.start_out(Scalar start, Scalar end, Scalar step=1, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: arange_cpu_out
+    CPU, Meta: arange_out
     CUDA: arange_cuda_out
 
 # This function is a temporary hack to allow tracing of arange like constructs with dynamic
@@ -2482,7 +2482,7 @@
 
 - func: linspace.out(Scalar start, Scalar end, int? steps=None, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: linspace_cpu_out
+    CPU, Meta: linspace_out
     CUDA: linspace_cuda_out
 
 - func: log(Tensor self) -> Tensor
@@ -2641,7 +2641,7 @@
 
 - func: logspace.out(Scalar start, Scalar end, int? steps=None, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: logspace_cpu_out
+    CPU, Meta: logspace_out
     CUDA: logspace_cuda_out
 
 # log_softmax allows positional dtype, unlike most operators, because kwonly is BC-breaking when loading jit models.
@@ -3450,7 +3450,7 @@
 
 - func: range.out(Scalar start, Scalar end, Scalar step=1, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: range_cpu_out
+    CPU, Meta: range_out
     CUDA: range_cuda_out
 
 - func: ravel(Tensor(a) self) -> Tensor(a)
@@ -10703,6 +10703,12 @@
 - func: _test_ambiguous_defaults.b(Tensor dummy, int a=2, str b="2") -> Tensor
   cpp_no_default_args: ['a', 'b']
   python_module: nn
+
+# Note: this function is only for testing.
+- func: _test_warn_in_autograd(Tensor self) -> Tensor
+  python_module: nn
+  dispatch:
+    CompositeExplicitAutograd: _test_warn_in_autograd
 
 - func: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, int axis=0, bool unsafe=False, Scalar? initial=None) -> Tensor
   variants: function

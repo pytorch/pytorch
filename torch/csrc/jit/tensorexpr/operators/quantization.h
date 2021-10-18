@@ -12,7 +12,7 @@ TORCH_API double immQScale(const BufHandle& qx);
 
 TORCH_API int64_t immQZero(const BufHandle& qx);
 
-TORCH_API int64_t immQDType(const BufHandle& qx);
+TORCH_API ScalarType immQDType(const BufHandle& qx);
 
 TORCH_API bool isQuantized(const BufHandle& qx);
 

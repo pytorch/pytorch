@@ -154,7 +154,8 @@ RegisterNNCLoweringsFunction aten___xor__(
     });
 
 RegisterNNCLoweringsFunction aten___lshift__(
-    {"aten::__lshift__.Tensor(Tensor self, Tensor other) -> (Tensor)"},
+    {"aten::__lshift__.Scalar(Tensor self, Scalar other) -> (Tensor)",
+     "aten::__lshift__.Tensor(Tensor self, Tensor other) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -170,7 +171,8 @@ RegisterNNCLoweringsFunction aten___lshift__(
     });
 
 RegisterNNCLoweringsFunction aten___rshift__(
-    {"aten::__rshift__.Tensor(Tensor self, Tensor other) -> (Tensor)"},
+    {"aten::__rshift__.Scalar(Tensor self, Scalar other) -> (Tensor)",
+     "aten::__rshift__.Tensor(Tensor self, Tensor other) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -713,7 +715,8 @@ RegisterNNCLoweringsFunction aten_type_as(
 
 RegisterNNCLoweringsFunction aten_pow(
     {"aten::pow.Tensor_Scalar(Tensor self, Scalar exponent) -> (Tensor)",
-     "aten::pow.Tensor_Tensor(Tensor self, Tensor exponent) -> (Tensor)"},
+     "aten::pow.Tensor_Tensor(Tensor self, Tensor exponent) -> (Tensor)",
+     "aten::pow.Scalar(Scalar self, Tensor exponent) -> Tensor"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -1231,7 +1234,8 @@ RegisterNNCLoweringsFunction aten_threshold(
 RegisterNNCLoweringsFunction aten_where(
     {"aten::where.ScalarOther(Tensor condition, Tensor self, Scalar other) -> (Tensor)",
      "aten::where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> (Tensor)",
-     "aten::where.self(Tensor condition, Tensor self, Tensor other) -> (Tensor)"},
+     "aten::where.self(Tensor condition, Tensor self, Tensor other) -> (Tensor)",
+     "aten::where.Scalar(Tensor condition, Scalar self, Scalar other) -> Tensor"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -1484,6 +1488,7 @@ RegisterNNCLoweringsFunction aten_add(
 
 RegisterNNCLoweringsFunction aten_quantize_per_tensor(
     {"aten::quantize_per_tensor(Tensor self, float scale, int zero_point, int dtype) -> (Tensor)",
+     "aten::quantize_per_tensor.tensor_qparams(Tensor self, Tensor scale, Tensor zero_point, int dtype) -> (Tensor)",
      "aten::quantize_per_tensor.tensors(Tensor[] tensors, Tensor scales, Tensor zero_points, int dtype) -> (Tensor[])"},
 #if NNC_QUANTIZATION_EXPR_QUANT == 1
     computeQuantizePerTensor
@@ -1492,7 +1497,6 @@ RegisterNNCLoweringsFunction aten_quantize_per_tensor(
 #endif
 );
 
-// aten::dequantize.self(Tensor self) -> (Tensor)
 RegisterNNCLoweringsFunction aten_dequantize(
     {"aten::dequantize.self(Tensor self) -> (Tensor)"},
 #if NNC_QUANTIZATION_EXPR_DEQUANT == 1
@@ -1503,7 +1507,7 @@ RegisterNNCLoweringsFunction aten_dequantize(
 );
 
 RegisterNNCLoweringsFunction quantized_conv2d(
-    {"_quantized::conv2d(Tensor qx, __torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weight, float output_scale, int output_zero_point) -> (Tensor)"},
+    {"quantized::conv2d.new(Tensor qx, __torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weight, float output_scale, int output_zero_point) -> (Tensor)"},
     computeQuantizedConv2d);
 
 RegisterNNCLoweringsFunction quantized_conv2d_relu(
