@@ -987,10 +987,11 @@ void AliasDb::analyzeRpcAsync(Node* node) {
 }
 
 namespace {
-c10::optional<bool> getConstantBooleanInput(Node* node, const std::string& inputName) {
+c10::optional<bool> getConstantBooleanInput(
+    Node* node,
+    const std::string& inputName) {
   TORCH_INTERNAL_ASSERT(
-      node->hasNamedInput(inputName),
-      inputName + " input is expected");
+      node->hasNamedInput(inputName), inputName + " input is expected");
   auto value = node->namedInput(inputName);
   TORCH_INTERNAL_ASSERT(
       value->type() == BoolType::get(),
