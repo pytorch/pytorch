@@ -20,9 +20,7 @@ name: !{{ build_environment }}
 
 on:
   pull_request:
-  {%- if ciflow_config.enabled %}
     types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
-  {%- endif %}
 {%- if is_scheduled %}
   schedule:
     - cron: !{{ is_scheduled }}
@@ -64,9 +62,7 @@ jobs:
 !{{ common.ciflow_should_run_job(ciflow_config) }}
   build:
     runs-on: "windows.4xlarge"
-    {%- if ciflow_config.enabled %}
     needs: [!{{ ciflow_config.root_job_name }}]
-    {%- endif %}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-build
       http_proxy: "!{{ common. squid_proxy }}"
@@ -120,9 +116,7 @@ jobs:
           rm -rf ./*
 
   generate-test-matrix:
-    {%- if ciflow_config.enabled %}
     needs: [!{{ ciflow_config.root_job_name }}]
-    {%- endif %}
     runs-on: ubuntu-18.04
     env:
       TEST_RUNNER_TYPE: !{{ test_runner_type }}
