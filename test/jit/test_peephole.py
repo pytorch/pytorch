@@ -533,7 +533,7 @@ class TestPeephole(JitTestCase):
 
     def test_peephole_add_zero(self):
         @torch.jit.script
-        def foo (x: int):
+        def foo(x: int):
             return x + 0, 0 + x
 
         self.run_pass("peephole", foo.graph)
