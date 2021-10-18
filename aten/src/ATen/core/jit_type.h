@@ -1127,12 +1127,12 @@ struct TORCH_API EnumType : public NamedType {
     return str();
   }
 
-  TypePtr getValueType() const {
+  const TypePtr& getValueType() const {
     return value_type_;
   }
 
   bool operator==(const Type& rhs) const override {
-    if (auto enum_rhs = rhs.cast<EnumType>()) {
+    if (auto* enum_rhs = rhs.castRaw<EnumType>()) {
       return name().value() == enum_rhs->name().value() &&
           *getValueType() == *(enum_rhs->getValueType()) &&
           this->compilation_unit() == enum_rhs->compilation_unit();
