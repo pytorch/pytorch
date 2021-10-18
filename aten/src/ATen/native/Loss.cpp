@@ -343,14 +343,14 @@ Tensor& l1_loss_out(const Tensor& input, const Tensor& target, int64_t reduction
   if (reduce) {
     at::native::resize_output(result, {});
   } else if (is_complex) {
-    at::native::resize_output(result, iter.shape());
+    at::native::resize_output(result, output_iter->sizes());
   }
 
   if (is_complex) {
     if (reduction == Reduction::Mean) {
-      result.copy_(at::real(output_iter->mean()));
+      result.copy_(at::real(*output_iter).mean());
     } else if (reduction == Reduction::Sum) {
-      result.copy_(at::real(output_iter->sum()));
+      result.copy_(at::real(*output_iter).sum());
     } else {
       result.copy_(at::real(*output_iter));
     }

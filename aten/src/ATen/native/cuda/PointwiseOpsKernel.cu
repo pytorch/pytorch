@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/AccumulateType.h>
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
@@ -5,7 +6,7 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/PointwiseOps.h>
-#include <THC/THCNumerics.cuh>
+#include <c10/core/Scalar.h>
 
 namespace at { namespace native {
 

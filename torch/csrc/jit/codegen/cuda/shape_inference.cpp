@@ -44,7 +44,7 @@ class NaiveTypePropagator {
     switch (node->kind()) {
       // Constant:
       case prim::Constant: {
-        if (node->output()->type()->isSubtypeOf(TensorType::get())) {
+        if (node->output()->type()->isSubtypeOf(*TensorType::get())) {
           node->output()->inferTypeFrom(node->t(attr::value));
         }
         break;
