@@ -676,7 +676,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         # Model export in inference mode will remove dropout node,
         # thus the dropout module no longer exist in graph.
         f = io.BytesIO()
-        torch.onnx.export(M(3), (x, y, z), f, opset_version=self.opset_version, verbose=True,
+        torch.onnx.export(M(3), (x, y, z), f, opset_version=self.opset_version,
                           export_modules_as_functions={torch.nn.CELU, torch.nn.Dropout, torch.nn.LayerNorm})
 
         onnx_model = onnx.load(io.BytesIO(f.getvalue()))
