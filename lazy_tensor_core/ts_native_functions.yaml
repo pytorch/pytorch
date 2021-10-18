@@ -14,6 +14,7 @@ full_codegen:
   - dropout
   - gelu
   - gelu_backward
+  - log2
   - mean
   - mm
   - mv
