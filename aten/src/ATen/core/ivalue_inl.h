@@ -287,7 +287,7 @@ struct TORCH_API TupleElements {
   : inlineSize_(0), elementsVector_(std::move(elements)) {}
 
   explicit TupleElements(c10::ArrayRef<IValue> elements)
-  : inlineSize_(elements.size() <= 3? elements.size() : 0) {
+  : inlineSize_(elements.size() <= 3 ? elements.size() : 0) {
     switch (inlineSize_) {
       case 3:
         new (&elementsInline_[2]) IValue(elements[2]);
@@ -630,10 +630,25 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
     return c10::make_intrusive<Tuple>(std::move(e1), std::move(e2), std::move(e3));
   }
 
+ private:
+  // Workaround inability to use `>` operator in template argument list.
+  template <typename... Args>
+  static constexpr bool hasMoreThanThreeArgs() {
+    return sizeof...(Args) > 3;
+  }
+
+ public:
   template <typename... Args>
   static c10::intrusive_ptr<Tuple> create(Args&&... elements_) {
-    return create(
-        {IValue(std::forward<Args>(elements_))...});
+    switch (sizeof...(Args)) {
+      case 1:
+      case 2:
+      case 3:
+        return create(IValue(std::forward<Args>(elements_))...);
+      default:
+        return create(
+            std::vector{IValue(std::forward<Args>(elements_))...});
+    }
   }
 
   // Again, it would be nice to make this noncopyable, but there's a
