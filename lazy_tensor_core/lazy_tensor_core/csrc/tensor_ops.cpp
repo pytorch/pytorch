@@ -196,27 +196,6 @@ LazyTensor SmoothL1LossBackward(const LazyTensor& grad_output,
   }
 }
 
-LazyTensor Softplus(const LazyTensor& input, const at::Scalar& beta,
-                    const at::Scalar& threshold) {
-  return tensor_aten_ops::where(
-      tensor_aten_ops::gt(tensor_aten_ops::mul(input, beta), threshold), input,
-      tensor_aten_ops::div(tensor_aten_ops::log1p(tensor_aten_ops::exp(
-                               tensor_aten_ops::mul(input, beta))),
-                           beta));
-}
-
-LazyTensor SoftplusBackward(const LazyTensor& grad_output,
-                            const LazyTensor& input, const at::Scalar& beta,
-                            const at::Scalar& threshold,
-                            const LazyTensor& output) {
-  LazyTensor scaled_input = tensor_aten_ops::mul(input, beta);
-  LazyTensor z = tensor_aten_ops::exp(tensor_aten_ops::mul(output, beta));
-  return tensor_aten_ops::where(
-      tensor_aten_ops::gt(scaled_input, threshold), grad_output,
-      tensor_aten_ops::mul(
-          grad_output, tensor_aten_ops::div(tensor_aten_ops::sub(z, 1, 1), z)));
-}
-
 LazyTensor Select(const LazyTensor& input, lazy_tensors::int64 dim,
                   lazy_tensors::int64 index) {
   auto shape = input.shape();

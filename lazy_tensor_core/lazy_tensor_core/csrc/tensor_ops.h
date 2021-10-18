@@ -28,14 +28,6 @@ LazyTensor SmoothL1LossBackward(const LazyTensor& grad_output,
                                 const LazyTensor& target,
                                 ReductionMode reduction, double beta);
 
-LazyTensor Softplus(const LazyTensor& input, const at::Scalar& beta,
-                    const at::Scalar& threshold);
-
-LazyTensor SoftplusBackward(const LazyTensor& grad_output,
-                            const LazyTensor& input, const at::Scalar& beta,
-                            const at::Scalar& threshold,
-                            const LazyTensor& output);
-
 LazyTensor Select(const LazyTensor& input, lazy_tensors::int64 dim,
                   lazy_tensors::int64 index);
 
