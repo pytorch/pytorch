@@ -202,7 +202,6 @@ def _canonical_dim(dim: DimOrDims, ndim: int) -> Tuple[int, ...]:
 
 def _input_mask(input: Tensor, *args, **kwargs) -> Tensor:
     """Return canonical input mask.
-
     Canonical input mask is a boolean tensor with the same shape as
     input and with (broadcasted) content of mask, if specified.
     """
