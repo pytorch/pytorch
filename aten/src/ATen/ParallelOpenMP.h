@@ -33,6 +33,7 @@ inline void invoke_parallel(int64_t begin, int64_t end, int64_t grain_size, cons
     int64_t begin_tid = begin + tid * chunk_size;
     if (begin_tid < end) {
       try {
+        InParallelGuard p_guard;
         internal::ThreadIdGuard tid_guard(tid);
         f(begin_tid, std::min(end, chunk_size + begin_tid));
       } catch (...) {

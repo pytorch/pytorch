@@ -43,16 +43,16 @@ TEST(TestParallel, TestParallel) {
   ASSERT_TRUE(a.sum(0).equal(as));
 }
 
-TEST(TestParallel, NestedParallel) {
-  Tensor a = ones({1024, 1024});
-  auto expected = a.sum();
-  // check that calling sum() from within a parallel block computes the same result
-  at::parallel_for(0, 10, 1, [&](int64_t begin, int64_t end) {
-    if (begin == 0) {
-      ASSERT_TRUE(a.sum().equal(expected));
-    }
-  });
-}
+// TEST(TestParallel, NestedParallel) {
+//   Tensor a = ones({1024, 1024});
+//   auto expected = a.sum();
+//   // check that calling sum() from within a parallel block computes the same result
+//   at::parallel_for(0, 10, 1, [&](int64_t begin, int64_t end) {
+//     if (begin == 0) {
+//       ASSERT_TRUE(a.sum().equal(expected));
+//     }
+//   });
+// }
 
 #ifdef TH_BLAS_MKL
 TEST(TestParallel, LocalMKLThreadNumber) {
