@@ -1,6 +1,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/BucketizationUtils.h>
+#include <ATen/native/Resize.h>
 
 /* Implement a TF like searchsorted and a bucketize function running on cpu
  *
@@ -74,12 +75,12 @@ void searchsorted_cpu_contiguous(Tensor& result, const Tensor& input, const Tens
 
 void dispatch(Tensor& result, const Tensor& input, const Tensor& boundaries, bool out_int32, bool right) {
   if (!out_int32) {
-    AT_DISPATCH_ALL_TYPES(input.scalar_type(), "searchsorted_out_cpu", [&] {
+    AT_DISPATCH_ALL_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "searchsorted_out_cpu", [&] {
       searchsorted_cpu_contiguous<scalar_t, int64_t>(result, input, boundaries, right);
     });
   }
   else {
-    AT_DISPATCH_ALL_TYPES(input.scalar_type(), "searchsorted_out_cpu", [&] {
+    AT_DISPATCH_ALL_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "searchsorted_out_cpu", [&] {
       searchsorted_cpu_contiguous<scalar_t, int>(result, input, boundaries, right);
     });
   }
@@ -89,9 +90,8 @@ void dispatch(Tensor& result, const Tensor& input, const Tensor& boundaries, boo
 
 Tensor& searchsorted_out_cpu(const Tensor& sorted_sequence, const Tensor& self, bool out_int32, bool right, Tensor& result) {
   searchsorted_pre_check(sorted_sequence, self, result, out_int32);
-  if (result.numel() == 0) {
-    result.resize_(self.sizes());
-  }
+  at::native::resize_output(result, self.sizes());
+
   if (self.numel() == 0) {
     return result;
   }

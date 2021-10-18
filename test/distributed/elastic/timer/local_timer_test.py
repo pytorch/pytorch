@@ -13,19 +13,28 @@ import torch.distributed.elastic.timer as timer
 from torch.distributed.elastic.timer.api import TimerRequest
 from torch.distributed.elastic.timer.local_timer import MultiprocessingRequestQueue
 from torch.testing._internal.common_utils import (
-    TEST_WITH_TSAN,
     run_tests,
     IS_WINDOWS,
     IS_MACOS,
-    sandcastle_skip_if,
+    TEST_WITH_DEV_DBG_ASAN,
 )
 
 
 # timer is not supported on windows or macos
-if not (IS_WINDOWS or IS_MACOS):
+if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
+    # func2 should time out
+    def func2(n, mp_queue):
+        if mp_queue is not None:
+            timer.configure(timer.LocalTimerClient(mp_queue))
+        if n > 0:
+            with timer.expires(after=0.1):
+                func2(n - 1, None)
+                time.sleep(0.2)
+
     class LocalTimerTest(unittest.TestCase):
         def setUp(self):
-            self.mp_queue = mp.Queue()
+            self.ctx = mp.get_context('spawn')
+            self.mp_queue = self.ctx.Queue()
             self.max_interval = 0.01
             self.server = timer.LocalTimerServer(self.mp_queue, self.max_interval)
             self.server.start()
@@ -62,7 +71,6 @@ if not (IS_WINDOWS or IS_MACOS):
             with timer.expires(after=0.5):
                 time.sleep(0.1)
 
-        @sandcastle_skip_if(TEST_WITH_TSAN, "test is tsan incompatible")
         def test_get_timer_recursive(self):
             """
             If a function acquires a countdown timer with default scope,
@@ -82,14 +90,7 @@ if not (IS_WINDOWS or IS_MACOS):
 
             func(4)
 
-            # func2 should time out
-            def func2(n):
-                if n > 0:
-                    with timer.expires(after=0.1):
-                        func2(n - 1)
-                        time.sleep(0.2)
-
-            p = mp.Process(target=func2, args=(2,))
+            p = self.ctx.Process(target=func2, args=(2, self.mp_queue))
             p.start()
             p.join()
             self.assertEqual(-signal.SIGKILL, p.exitcode)
@@ -102,7 +103,6 @@ if not (IS_WINDOWS or IS_MACOS):
             with timer.expires(after=timeout):
                 time.sleep(duration)
 
-        @sandcastle_skip_if(TEST_WITH_TSAN, "test is tsan incompatible")
         def test_timer(self):
             timeout = 0.1
             duration = 1
@@ -124,7 +124,7 @@ if not (IS_WINDOWS or IS_MACOS):
 
 
 # timer is not supported on windows or macos
-if not (IS_WINDOWS or IS_MACOS):
+if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
     class MultiprocessingRequestQueueTest(unittest.TestCase):
         def test_get(self):
             mp_queue = mp.Queue()
@@ -183,7 +183,7 @@ if not (IS_WINDOWS or IS_MACOS):
 
 
 # timer is not supported on windows or macos
-if not (IS_WINDOWS or IS_MACOS):
+if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
     class LocalTimerServerTest(unittest.TestCase):
         def setUp(self):
             self.mp_queue = mp.Queue()
@@ -193,7 +193,6 @@ if not (IS_WINDOWS or IS_MACOS):
         def tearDown(self):
             self.server.stop()
 
-        @sandcastle_skip_if(TEST_WITH_TSAN, "test is tsan incompatible")
         def test_watchdog_call_count(self):
             """
             checks that the watchdog function ran wait/interval +- 1 times
@@ -226,7 +225,6 @@ if not (IS_WINDOWS or IS_MACOS):
         def _release_timer(self, pid, scope):
             return TimerRequest(worker_id=pid, scope_id=scope, expiration_time=-1)
 
-        @sandcastle_skip_if(TEST_WITH_TSAN, "test is tsan incompatible")
         @mock.patch("os.kill")
         def test_expired_timers(self, mock_os_kill):
             """

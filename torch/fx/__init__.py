@@ -1,6 +1,4 @@
 r'''
-**This feature is under a Beta release and its API may change.**
-
 FX is a toolkit for developers to use to transform ``nn.Module``
 instances. FX consists of three main components: a **symbolic tracer,**
 an **intermediate representation**, and **Python code generation**. A
@@ -28,12 +26,13 @@ demonstration of these components in action:
     # High-level intermediate representation (IR) - Graph representation
     print(symbolic_traced.graph)
     """
-    graph(x):
-        %param : [#users=1] = self.param
-        %add_1 : [#users=1] = call_function[target=<built-in function add>](args = (%x, %param), kwargs = {})
-        %linear_1 : [#users=1] = call_module[target=linear](args = (%add_1,), kwargs = {})
-        %clamp_1 : [#users=1] = call_method[target=clamp](args = (%linear_1,), kwargs = {min: 0.0, max: 1.0})
-        return clamp_1
+    graph():
+        %x : [#users=1] = placeholder[target=x]
+        %param : [#users=1] = get_attr[target=param]
+        %add : [#users=1] = call_function[target=operator.add](args = (%x, %param), kwargs = {})
+        %linear : [#users=1] = call_module[target=linear](args = (%add,), kwargs = {})
+        %clamp : [#users=1] = call_method[target=clamp](args = (%linear,), kwargs = {min: 0.0, max: 1.0})
+        return clamp
     """
 
     # Code generation - valid Python code
@@ -41,10 +40,10 @@ demonstration of these components in action:
     """
     def forward(self, x):
         param = self.param
-        add_1 = x + param;  x = param = None
-        linear_1 = self.linear(add_1);  add_1 = None
-        clamp_1 = linear_1.clamp(min = 0.0, max = 1.0);  linear_1 = None
-        return clamp_1
+        add = x + param;  x = param = None
+        linear = self.linear(add);  add = None
+        clamp = linear.clamp(min = 0.0, max = 1.0);  linear = None
+        return clamp
     """
 
 The **symbolic tracer** performs "symbolic execution" of the Python

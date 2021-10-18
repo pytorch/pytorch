@@ -14,9 +14,9 @@ template <typename scalar_t>
 void cpu_avg_pool(
     const Tensor& output_,
     const Tensor& input_,
-    int kW, int kH,
-    int dW, int dH,
-    int padW, int padH,
+    int64_t kW, int64_t kH,
+    int64_t dW, int64_t dH,
+    int64_t padW, int64_t padH,
     bool count_include_pad,
     c10::optional<int64_t> divisor_override) {
   auto input = input_.contiguous();
@@ -98,9 +98,9 @@ template <typename scalar_t>
 void cpu_avg_pool_channels_last(
     const Tensor& output_,
     const Tensor& input_,
-    int kW, int kH,
-    int dW, int dH,
-    int padW, int padH,
+    int64_t kW, int64_t kH,
+    int64_t dW, int64_t dH,
+    int64_t padW, int64_t padH,
     bool count_include_pad,
     c10::optional<int64_t> divisor_override) {
   TORCH_CHECK(input_.ndimension() == 4,
@@ -359,9 +359,9 @@ void cpu_avg_pool_backward_channels_last(
 void avg_pool2d_kernel_impl(
     const Tensor& output,
     const Tensor& input,
-    int kW, int kH,
-    int dW, int dH,
-    int padW, int padH,
+    int64_t kW, int64_t kH,
+    int64_t dW, int64_t dH,
+    int64_t padW, int64_t padH,
     bool count_include_pad,
     c10::optional<int64_t> divisor_override) {
   switch (input.suggest_memory_format()) {

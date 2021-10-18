@@ -2,6 +2,7 @@
 #include <c10/core/ScalarType.h>
 #include <torch/csrc/autograd/VariableTypeUtils.h>
 #include <torch/csrc/autograd/FunctionsManual.h>
+#include <torch/csrc/autograd/functions/utils.h>
 #include <torch/csrc/utils/memory.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <ATen/TracerMode.h>
@@ -100,7 +101,7 @@ Tensor _fw_primal(c10::DispatchKeySet ks, const Tensor & self, int64_t level) {
   if (grad_fn) {
       set_history(flatten_tensor_args( result ), grad_fn);
   }
-  if (generated::details::isFwGradDefined(self)) {
+  if (isFwGradDefined(self)) {
     // Modified from original codegen
     // We explicitly want to ignore the forward grad at the given level
     TORCH_CHECK(level == 0, "Invalid level given to _fw_primal");
@@ -131,7 +132,7 @@ Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool n
   rebase_history(self , std::move(grad_fn));
 
   if (isDifferentiableType(self.scalar_type()) &&
-      (generated::details::isFwGradDefined(self) || generated::details::isFwGradDefined(src))) {
+      (isFwGradDefined(self) || isFwGradDefined(src))) {
     auto self_fw_grad = generated::details::toNonOptFwGrad(self);
     auto src_fw_grad = generated::details::toNonOptFwGrad(src);
     Tensor new_fw_grad;

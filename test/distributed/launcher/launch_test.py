@@ -15,7 +15,6 @@ import torch.distributed.launch as launch
 from torch.distributed.elastic.utils import get_socket_with_port
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
-    TEST_WITH_TSAN,
     sandcastle_skip_if,
 )
 
@@ -36,7 +35,7 @@ class LaunchTest(unittest.TestCase):
         shutil.rmtree(self.test_dir)
 
     @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan and dev/dbg asan"
+        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
     )
     def test_launch_without_env(self):
         nnodes = 1
@@ -49,7 +48,7 @@ class LaunchTest(unittest.TestCase):
             f"--nnodes={nnodes}",
             f"--nproc_per_node={nproc_per_node}",
             "--monitor_interval=1",
-            "--start_method=fork",
+            "--start_method=spawn",
             "--master_addr=localhost",
             f"--master_port={master_port}",
             "--node_rank=0",
@@ -58,7 +57,7 @@ class LaunchTest(unittest.TestCase):
         launch.main(args)
 
     @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan and dev/dbg asan"
+        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
     )
     def test_launch_with_env(self):
         nnodes = 1
@@ -71,7 +70,7 @@ class LaunchTest(unittest.TestCase):
             f"--nnodes={nnodes}",
             f"--nproc_per_node={nproc_per_node}",
             "--monitor_interval=1",
-            "--start_method=fork",
+            "--start_method=spawn",
             "--master_addr=localhost",
             f"--master_port={master_port}",
             "--node_rank=0",

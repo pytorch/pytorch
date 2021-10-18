@@ -175,6 +175,15 @@ TEST(InterpreterTest, IgnorableArgsInSchema) {
   ASSERT_TRUE(op_to_specified_args_non_const["aten::conv2d"] == 6);
 }
 
+TEST(InterpreterTest, IgnorableArgsInSchemaWithOut) {
+  auto graph = build_mobile_export_with_out();
+  MobileCode function(graph, "");
+  auto op_to_specified_args = function.op_to_num_specified_args();
+  ASSERT_TRUE(op_to_specified_args.size() == 1);
+  // this should be 3 when the add_out flag is set to True
+  ASSERT_TRUE(op_to_specified_args["aten::add.out"] == 3);
+}
+
 TEST(InterpreterTest, runAsyncBasicTest) {
   /*
   TODO: there are some problem with C++ parsing script program involving

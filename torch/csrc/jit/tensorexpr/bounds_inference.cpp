@@ -29,7 +29,7 @@ BoundsInfo mergeTensorAccesses(
     }
 
     auto vtbIt = varToBuf.find(access->var());
-    TORCH_INTERNAL_ASSERT(vtbIt != varToBuf.end());
+    TORCH_INTERNAL_ASSERT(vtbIt != varToBuf.end(), buildErrorMessage());
     BufPtr buf = vtbIt->second;
     std::vector<TensorAccessBoundsInfo>& infos = ret[buf];
 
@@ -38,8 +38,10 @@ BoundsInfo mergeTensorAccesses(
     for (auto& TABI : infos) {
       TensorAccessKind kind = access->isWrite() ? kStore : kLoad;
       if (!distinctAccessKinds || kind == TABI.kind) {
-        TORCH_INTERNAL_ASSERT(TABI.start.size() == access->bounds().size());
-        TORCH_INTERNAL_ASSERT(TABI.stop.size() == access->bounds().size());
+        TORCH_INTERNAL_ASSERT(
+            TABI.start.size() == access->bounds().size(), buildErrorMessage());
+        TORCH_INTERNAL_ASSERT(
+            TABI.stop.size() == access->bounds().size(), buildErrorMessage());
         for (size_t i = 0; i < TABI.start.size(); ++i) {
           TABI.start[i] = IRSimplifier::simplify(
               alloc<Min>(TABI.start[i], access->bounds()[i].start, true));
@@ -185,7 +187,7 @@ std::vector<ExprPtr> getBoundExtents(
   std::vector<ExprPtr> extents;
   for (size_t i = 0; i < starts.size(); ++i) {
     ExprPtr dim = IRSimplifier::simplify(
-        alloc<Add>(alloc<Sub>(stops[i], starts[i]), alloc<IntImm>(1)));
+        alloc<Add>(alloc<Sub>(stops[i], starts[i]), immLike(stops[i], 1)));
 
     extents.push_back(dim);
   }
@@ -275,7 +277,8 @@ HazardKind getPotentialHazards(
 }
 
 IndexBounds getIndexBounds(const TensorAccessBoundsInfo& tabi) {
-  TORCH_INTERNAL_ASSERT(tabi.start.size() == tabi.stop.size());
+  TORCH_INTERNAL_ASSERT(
+      tabi.start.size() == tabi.stop.size(), buildErrorMessage());
   IndexBounds ret(tabi.start.size());
   if (tabi.start.empty()) {
     return ret;

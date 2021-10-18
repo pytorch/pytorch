@@ -77,6 +77,7 @@ Matrix Products
     :toctree: generated
     :nosignatures:
 
+    matmul
     multi_dot
     householder_product
 

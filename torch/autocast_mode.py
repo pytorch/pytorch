@@ -80,7 +80,7 @@ class autocast(object):
         c_float32 = torch.rand((8, 8), device="cpu")
         d_float32 = torch.rand((8, 8), device="cpu")
 
-        with autocast(fast_dtype=torch.bfloat16, device_type="cpu"):
+        with autocast(dtype=torch.bfloat16, device_type="cpu"):
             # torch.mm is on autocast's list of ops that should run in bfloat16.
             # Inputs are float32, but the op runs in bfloat16 and produces bfloat16 output.
             # No manual casts are required.
@@ -124,8 +124,9 @@ class autocast(object):
 
     Args:
         device_type(string, required):  Whether to use 'cuda' or 'cpu' device
-        enabled(bool, optional, default=True)":  Whether autocasting should be enabled in the region.
-        fast_dtype(torch_dtype, optional):  Whether to use torch.float16 or torch.bfloat16
+        enabled(bool, optional, default=True):  Whether autocasting should be enabled in the region.
+        dtype(torch_dtype, optional):  Whether to use torch.float16 or torch.bfloat16.
+        cache_enabled(bool, optional, default=True):  Whether the weight cache inside autocast should be enabled.
     """
     def __init__(self, device_type, enabled=True, **kwargs):
         self.device = device_type
@@ -135,13 +136,16 @@ class autocast(object):
             self.fast_dtype = torch.get_autocast_cpu_dtype()
         else:
             raise RuntimeError('User specified autocast device_type must be \'cuda\' or \'cpu\'')
+        self._cache_enabled = torch.is_autocast_cache_enabled()
         if torch.cuda.amp.common.amp_definitely_not_available() and self.device == 'cuda':
             warnings.warn('User provided device_type of \'cuda\', but CUDA is not available. Disabling')
             enabled = False
         for key, value in kwargs.items():
-            if key == 'fast_dtype':
+            if key == 'dtype':
                 self.fast_dtype = value
-            if not (key == 'fast_dtype'):
+            if key == 'cache_enabled':
+                self._cache_enabled = value
+            if not ((key == 'dtype') or (key == 'cache_enabled')):
                 raise RuntimeError('Unrecognized optional argument supplied to autocast context manager: ' + str(key))
 
         if self.device == 'cpu':
@@ -152,11 +156,12 @@ class autocast(object):
                 warnings.warn(error_message)
                 enabled = False
         if self.device == 'cuda':
-            if self.fast_dtype == torch.bfloat16 and torch.cuda.get_device_properties(torch.cuda.current_device()).major < 8:
-                raise RuntimeError('Current CUDA Device does not support bfloat16. Switching fast_dtype to float16.')
+            if self.fast_dtype == torch.bfloat16 and not torch.cuda.is_bf16_supported():
+                raise RuntimeError('Current CUDA Device does not support bfloat16. Please switch dtype to float16.')
         self._enabled = enabled
 
     def __enter__(self):
+        self.prev_cache_enabled = torch.is_autocast_cache_enabled()
         if self.device == 'cpu':
             self.prev = torch.is_autocast_cpu_enabled()
             self.prev_fastdtype = torch.get_autocast_cpu_dtype()
@@ -169,6 +174,7 @@ class autocast(object):
             torch.set_autocast_gpu_dtype(self.fast_dtype)
             torch.set_autocast_enabled(self._enabled)
             torch.autocast_increment_nesting()
+        torch.set_autocast_cache_enabled(self._cache_enabled)
 
     def __exit__(self, *args):
         # Drop the cache when we exit to a nesting level that's outside any instance of autocast.
@@ -182,6 +188,7 @@ class autocast(object):
                 torch.clear_autocast_cache()
             torch.set_autocast_enabled(self.prev)
             torch.set_autocast_gpu_dtype(self.prev_fastdtype)
+        torch.set_autocast_cache_enabled(self.prev_cache_enabled)
         return False
 
     def __call__(self, func):

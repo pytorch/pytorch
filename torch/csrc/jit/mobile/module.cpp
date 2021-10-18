@@ -145,8 +145,7 @@ std::string Module::getCallStack(const int64_t debug_handle) const {
 // We really need to change this part, so in the next step for profiling support
 // for delegates, the first thing will be to rewrite how profiling is done
 // for lite interpreter.
-std::string Module::get_forward_method_debug_info(size_t pc) const {
-  auto debug_handle = find_method("forward")->get_debug_handle(pc);
+std::string Module::get_forward_method_debug_info(int64_t debug_handle) const {
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
   return getDebugTable().getModuleHierarchyInfo(
       debug_handle, getTopModuleTypeName(*this));
@@ -187,8 +186,7 @@ void Method::run(Stack& stack) const {
       owner_->getMetadata();
 
   if (observer) {
-    observer->onEnterRunMethod(
-        copied_metadata, instance_key, function_->name());
+    observer->onEnterRunMethod(instance_key);
   }
 
   auto debug_info = std::make_shared<MobileDebugInfo>();
@@ -211,6 +209,8 @@ void Method::run(Stack& stack) const {
 #endif
 
     observer->onFailRunMethod(
+        copied_metadata,
+        function_->name(),
         instance_key,
         error_message.empty() ? "Unknown exception" : error_message.c_str());
   });
@@ -219,7 +219,8 @@ void Method::run(Stack& stack) const {
     stack.insert(stack.begin(), owner_->_ivalue()); // self
     function_->run(stack);
     if (observer) {
-      observer->onExitRunMethod(instance_key);
+      observer->onExitRunMethod(
+          copied_metadata, function_->name(), instance_key);
     }
     failure_guard.release();
     // This exception must be caught first as it derived from c10::Error
