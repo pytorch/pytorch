@@ -2650,7 +2650,7 @@ class TestQuantizeFx(QuantizationTestCase):
         self.checkGraphModeFxOp(
             m1, data, QuantType.QAT,
             prepare_expected_node_occurrence={
-                ns.call_module(torch.ao.quantization.FusedMovingAvgObsFakeQuantize): 1,
+                ns.call_module(torch.ao.quantization.FusedMovingAvgObsFakeQuantize): 2,
             },
             expected_node_occurrence={
                 ns.call_function(torch.quantize_per_tensor): 1,
@@ -3255,13 +3255,14 @@ class TestQuantizeFxOps(QuantizationTestCase):
             quant_type_to_prepare_expected_node_occurrence = {
                 QuantType.DYNAMIC: {},
                 # There should be 3 observers: after input, weight and activation.
+                # one more observer for torch.nn.Identity when there is no relu
                 QuantType.STATIC: {
-                    ns.call_module(torch.ao.quantization.HistogramObserver): 2,
+                    ns.call_module(torch.ao.quantization.HistogramObserver): 2 if has_relu else 3,
                     ns.call_module(torch.ao.quantization.PerChannelMinMaxObserver): 1,
                 },
                 # There should be 3 observers: after input, weight and activation.
                 QuantType.QAT: {
-                    ns.call_module(torch.ao.quantization.FusedMovingAvgObsFakeQuantize): 3,
+                    ns.call_module(torch.ao.quantization.FusedMovingAvgObsFakeQuantize): 3 if has_relu else 4,
                 },
             }
             model = FuncLinear(use_bias, has_relu, f_relu)
@@ -3376,7 +3377,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             # when has_relu is False
             prepare_node_occurrence = {
                 # activation, weight, bias and output
-                ns.call_module(torch.ao.quantization.PlaceholderObserver): 3 + int(use_bias),
+                ns.call_module(torch.ao.quantization.PlaceholderObserver): 3 + int(use_bias) + int(not has_relu),
             }
             # We have extra to and dequantize when is_reference is True
             # and has_relu is False since when has_relu is False, we
@@ -3388,15 +3389,15 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 # is unfused
                 linear_fun: 1,
                 # activation, weight, bias and output
-                ns.call_method("to"): 3 + int(use_bias),
-                ns.call_method("dequantize"): 3 + int(use_bias)
+                ns.call_method("to"): 3 + int(use_bias) + int(not has_relu and is_reference),
+                ns.call_method("dequantize"): 3 + int(use_bias) + int(not has_relu and is_reference)
             }
             self.checkGraphModeFxOp(
                 model, data, QuantType.DYNAMIC, linear_fun,
                 is_reference=is_reference,
                 custom_qconfig_dict={"": float16_static_qconfig},
                 prepare_expected_node_occurrence=prepare_node_occurrence,
-                expected_node_occurrence=convert_node_occurrence)
+                expected_node_occurrence=convert_node_occurrence, print_debug_info=True)
 
     @skipIfNoFBGEMM
     def test_conv_module(self):
@@ -3497,12 +3498,12 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 QuantType.DYNAMIC: {},
                 # There should be 3 observers: after input, weight and activation.
                 QuantType.STATIC: {
-                    ns.call_module(torch.ao.quantization.HistogramObserver): 2,
+                    ns.call_module(torch.ao.quantization.HistogramObserver): 2 if has_relu else 3,
                     ns.call_module(torch.ao.quantization.PerChannelMinMaxObserver): 1,
                 },
                 # There should be 3 observers: after input, weight and activation.
                 QuantType.QAT: {
-                    ns.call_module(torch.ao.quantization.FusedMovingAvgObsFakeQuantize): 3,
+                    ns.call_module(torch.ao.quantization.FusedMovingAvgObsFakeQuantize): 3 if has_relu else 4,
                 },
             }
             data_dims = [2, 3] + [4] * dim
@@ -4342,7 +4343,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
         m_prep = torch.ao.quantization.quantize_fx.prepare_fx(m, qconfig_dict)
         m_prep(data_x, data_y)
         m_quant = torch.ao.quantization.quantize_fx.convert_fx(m_prep, is_reference=is_reference)
-        print(m_quant)
         m_quant(data_x, data_y)
 
         self.checkGraphModuleNodes(m_quant, expected_node_list=node_list)
@@ -4500,6 +4500,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 x, y = xs
                 x = x.transpose(1, 2)
                 x = x.contiguous()
+                # chunk is not supported since observer only supports
+                # observing single Tensor currently
                 x, y = torch.chunk(x, 2)
                 x = F.dropout(x)
                 x = self.dropout(x)
@@ -4545,8 +4547,10 @@ class TestQuantizeFxOps(QuantizationTestCase):
         # one quantize_per_tensor for input
         # check exact counts of quantize and dequantize
         count_check = {
-            ns.call_function(torch.quantize_per_tensor) : 1,
-            ns.call_method('dequantize') : 1
+            # input of conv and two outputs of getitem
+            ns.call_function(torch.quantize_per_tensor) : 3,
+            # output of the model and two outputs of getitem
+            ns.call_method('dequantize') : 3
         }
         order_check = [
             ns.call_function(torch.quantize_per_tensor),
@@ -5051,8 +5055,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
         expected_occurrence = {
             # input and weight of first and second linear, output of first and second linear
             ns.call_module(torch.ao.quantization.MinMaxObserver): 6,
-            # we don't insert placeholder observer for output of reshape
-            ns.call_module(torch.ao.quantization.PlaceholderObserver): 1
+            # we insert placeholder observer for both input and output of reshape
+            ns.call_module(torch.ao.quantization.PlaceholderObserver): 2
         }
         self.checkGraphModuleNodes(
             m,
