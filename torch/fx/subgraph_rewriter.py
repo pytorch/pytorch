@@ -304,7 +304,7 @@ def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable) -
     # The set of all nodes in `original_graph` that we've seen thus far
     # as part of a pattern match
     replaced_nodes: Set[Node] = set()
-    # As we progressively replace node, we need to keep track on how the match results need to change also
+    # As we progressively replace nodes, we'll need to keep track of how the match results should change
     match_changed_node: Dict[Node, Node] = dict()
 
     # Return True if one of the nodes in the current match has already
@@ -317,7 +317,7 @@ def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable) -
                 return True
         return False
 
-    for i, match in enumerate(matches):
+    for match in matches:
         # Skip overlapping matches
         if overlaps_with_prev_match(match):
             continue
@@ -327,7 +327,7 @@ def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable) -
 
         pattern_placeholders = [n for n in pattern_graph.nodes
                                 if n.op == "placeholder"]
-        assert len(pattern_placeholders)
+        assert len(pattern_placeholders) > 0
         replacement_placeholders = [n for n in replacement_graph.nodes
                                     if n.op == "placeholder"]
         assert len(pattern_placeholders) == len(replacement_placeholders)
@@ -385,12 +385,12 @@ def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable) -
                 if gn.op == "placeholder":
                     continue
 
-                # We search for the node corresponding to the output of the pattern.
+                # Search for the node corresponding to the output of the pattern
                 if pn.op != "output":
                     continue
                 assert subgraph_output == gn
 
-                # We update all anchor inputs to the new nodes
+                # Update all anchor inputs to the new nodes
                 rn = outputs_map[pn]
                 for pn_input, rn_input in zip(pn.all_input_nodes, rn.all_input_nodes):
                     gn_input = match.nodes_map[pn_input]
