@@ -6489,6 +6489,23 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, c)
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    def test_type_as_bfloat16(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                y = torch.tensor([1.0], dtype=torch.bfloat16)
+                return x.type_as(y)
+
+        model = MyModule()
+        for type in [torch.bool, torch.float, torch.double, torch.float16, torch.int, torch.long]:
+            x = torch.tensor(3, dtype=type)
+            self.run_test(model, x)
+
+    def test_linear_bfloat16(self):
+        input = torch.randn(128, 20, dtype=torch.bfloat16)
+        model = torch.nn.Linear(20, 30).bfloat16()
+        self.run_test(model, input)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_ones_bool(self):
         class MyModule(torch.nn.Module):
             def forward(self, input):
