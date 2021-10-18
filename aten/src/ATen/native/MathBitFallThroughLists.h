@@ -50,7 +50,8 @@ namespace at {
   m.impl("vsplit.array", torch::CppFunction::makeFallthrough()); \
   m.impl("conj", torch::CppFunction::makeFallthrough()); \
   m.impl("_conj", torch::CppFunction::makeFallthrough()); \
-  m.impl("_unsafe_view", torch::CppFunction::makeFallthrough());
+  m.impl("_unsafe_view", torch::CppFunction::makeFallthrough()); \
+  m.impl("resize_", torch::CppFunction::makeFallthrough());
 
 #define TENSOR_UTILITIES_AND_CONSTRUCTORS(m) \
   m.impl("empty_like", torch::CppFunction::makeFallthrough()); \
