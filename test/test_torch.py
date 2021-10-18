@@ -7521,7 +7521,7 @@ else:
     def _test_memory_format_transformations(self, device, input_generator_fn, transformation_fn,
                                             memory_format, compare_data=True, default_is_preserve=False):
 
-        assert(memory_format == torch.channels_last_1d or 
+        assert(memory_format == torch.channels_last_1d or
                memory_format == torch.channels_last or
                memory_format == torch.channels_last_3d)
 
