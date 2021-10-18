@@ -178,15 +178,19 @@ TORCH_PRECOMPUTE_META_FUNC(index_add)
   dim = maybe_wrap_dim(dim, self.dim());
   auto numel = index.numel();
 
-  TORCH_CHECK_INDEX(index.dim() <= 1, "index_add_(): Index is supposed to be a vector");
+  TORCH_CHECK_INDEX(index.dim() <= 1, "index_add_(): Index is supposed to be a vector, but got dim: ",
+                    index.dim(), " with type: ", index.scalar_type(), " and size: ", index.sizes());
   TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int,
-              "index_add_(): Expected dtype int32/int64 for index");
+              "index_add_(): Expected dtype int32/int64 for index but got: ", index.scalar_type());
   TORCH_CHECK(self.scalar_type() == source.scalar_type(),
-              "index_add_(): self and source must have the same scalar type");
+              "index_add_(): self (", self.scalar_type(), ") and source (", source.scalar_type(),
+              ") must have the same scalar type");
   TORCH_CHECK(dim == 0 || dim < source.dim(),
-              "index_add_(): Indexing dim ", dim, " is out of bounds of tensor");
+              "index_add_(): Indexing dim ", dim, " is out of bounds of the source tensor with dim ",
+              source.dim());
   TORCH_CHECK(numel == (source.dim() == 0 ? 1 : source.size(dim)),
-              "index_add_(): Number of indices should be equal to source.size(dim)");
+              "index_add_(): Number of indices (", numel, ") should be equal to source.size(dim): (",
+              source.size(dim), ")");
 
   auto& result = maybe_get_output(0);
   bool is_defined = result.defined();
