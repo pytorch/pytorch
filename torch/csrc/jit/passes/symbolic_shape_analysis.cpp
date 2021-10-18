@@ -814,7 +814,11 @@ struct SymbolicShapeGraphAnalyzer {
     }
     WithInsertPoint guard(stitched_shape_compute_graph->block());
     std::unordered_map<Value*, Value*> value_map;
-    insertGraph(*stitched_shape_compute_graph, *partial_eval_graph, partial_eval_inputs, value_map);
+    insertGraph(
+        *stitched_shape_compute_graph,
+        *partial_eval_graph,
+        partial_eval_inputs,
+        value_map);
 
     for (size_t i = 0; i < curr->outputs().size(); ++i) {
       Value* new_list_output = value_map[partial_eval_graph->outputs().at(i)];
@@ -841,7 +845,8 @@ struct SymbolicShapeGraphAnalyzer {
         stitched_shape_compute_graph->registerOutput(
             new_list_output->node()->input(i));
         output_index_to_symbolic_shape_
-            [stitched_shape_compute_graph->outputs().size() - 1] = symbolic_shape;
+            [stitched_shape_compute_graph->outputs().size() - 1] =
+                symbolic_shape;
         symbolic_shape_value_to_graph_output_[symbolic_shape] =
             stitched_shape_compute_graph->outputs().at(
                 stitched_shape_compute_graph->outputs().size() - 1);

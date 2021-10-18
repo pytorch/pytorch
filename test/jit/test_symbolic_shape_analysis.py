@@ -393,12 +393,11 @@ class TestSymbolicShapeAnalysis(JitTestCase):
     def test_stitching_concat(self):
         @torch.jit.script
         def foo(a, b, x, y):
-            return  (a / b)  + torch.cat([x, y])
+            return (a / b) + torch.cat([x, y])
 
         g = foo.graph
         for inp in foo.graph.inputs():
             inp.setType(inp.type().with_sizes([None, None]))
-
 
         shape_compute_graph = torch._C._jit_pass_propagate_shapes_on_graph_and_build_compute(foo.graph)
         nodes = [g.findNode("aten::div")] + [g.findNode("aten::add")] + [g.findNode("aten::cat")]

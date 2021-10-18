@@ -275,8 +275,8 @@ RegisterOperators reg_guard({
                   sym_dim_flat_index[value] = (-1) - sym_dim_flat_index.size();
                   sym_dim_index = sym_dim_flat_index[value];
                 }
-                // TODO: potential optimization - if there is only one Symbolic
-                // Symbol in in input types we dont need to test anything
+                // TODO: potential optimization - if there is a Symbolic
+                // Sym with only one use we dont need to test anything
                 flattened_input_dims.push_back(sym_dim_index);
               }
             }
