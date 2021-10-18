@@ -374,7 +374,7 @@ def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable) -
         if subgraph_output.op != "output":
             pattern_outputs = [n for n in pattern_graph.nodes
                                if n.op == "output"]
-            assert len(pattern_outputs)
+            assert len(pattern_outputs) > 0
             replacement_outputs = [n for n in replacement_graph.nodes
                                    if n.op == "output"]
             assert len(replacement_outputs) == len(pattern_outputs)
