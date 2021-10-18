@@ -45,7 +45,7 @@ DECLARE_DISPATCH(hardtanh_backward_fn, hardtanh_backward_stub);
 DECLARE_DISPATCH(structured_activation_fn, hardsigmoid_stub);
 DECLARE_DISPATCH(structured_activation_backward_fn, hardsigmoid_backward_stub);
 DECLARE_DISPATCH(structured_activation_fn, hardswish_stub);
-DECLARE_DISPATCH(structured_activation_backward_fn, hardswish_backward_stub);
+DECLARE_DISPATCH(activation_backward_fn, hardswish_backward_stub);
 DECLARE_DISPATCH(shrink_fn, hardshrink_stub);
 DECLARE_DISPATCH(softshrink_fn, softshrink_stub);
 DECLARE_DISPATCH(shrink_backward_fn, shrink_backward_stub);
