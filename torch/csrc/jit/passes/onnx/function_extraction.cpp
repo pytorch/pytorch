@@ -1,3 +1,4 @@
+
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/function_extraction.h>
 
@@ -120,18 +121,18 @@ FunctionExtractor::FunctionContext::FunctionContext(
     scope_ctx_map& scope_ctxs)
     : scope_key_(std::move(key)) {
   GRAPH_UPDATE(
-      "Process function family for scope ",
+      "Process function context for scope ",
       scope_key_->name().toDisplayString());
   TORCH_INTERNAL_ASSERT(scopes.size() > 0);
   const auto& ref_ctx = scope_ctxs[scope_key_];
-  // NOTE: Family scopes must have same number and order of nodes.
+  // NOTE: Function scopes must have same number and order of nodes.
   GRAPH_DEBUG(
-      "Initialized family context for scope ",
+      "Initialized Function context for scope ",
       scope_key_->name().toDisplayString());
 
   for (const auto& scope : scopes) {
     GRAPH_DEBUG(
-        "Process scope family with scope ", scope->name().toDisplayString());
+        "Process Function context for scope ", scope->name().toDisplayString());
     TORCH_INTERNAL_ASSERT(scope_ctxs.find(scope) != scope_ctxs.end());
     scope_ctxs_[scope] = scope_ctxs[scope];
     if (scope_key_ == scope) {
@@ -188,7 +189,8 @@ FunctionExtractor::FunctionContext::FunctionContext(
   }
 
   GRAPH_DEBUG(
-      "Process scope family complete. ", scope_key_->name().toDisplayString());
+      "Process function context complete. ",
+      scope_key_->name().toDisplayString());
   DebugPrint();
 }
 
@@ -429,9 +431,7 @@ c10::optional<ScopePtr> FunctionExtractor::InferScope(Node* n) {
         IsValidScope);
 
     if (scopes.size() > 0) {
-      // find common ancestor.
       auto common_ancestor = FindCommonAncestor(scopes);
-
       if (common_ancestor.has_value() &&
           IsValidScope(common_ancestor.value())) {
         return common_ancestor.value();
@@ -452,7 +452,11 @@ std::shared_ptr<Graph> FunctionExtractor::ConstructFuncGraph(
   auto g = std::make_shared<Graph>();
   GRAPH_DEBUG("Constructing graph for ", scope->namesFromRoot());
 
-  // TODO: update input name of function to common name?
+  // TODO: Update input names of function to match those in Module source code
+  // signature.
+  //       This requires mapping between function node inputs and Module inputs.
+  //       Due to the lack of such mapping, currently debugName is used as input
+  //       names.
   ctx.PopulateInputsOutputs(param_names_);
   for (auto* v : ctx.inputs_) {
     env[v] = g->addInput()->copyMetadata(v);
@@ -553,13 +557,14 @@ Node* FunctionExtractor::CreateFunctionNode(
     const std::string& func_name) {
   const auto& func_scope = func_ctx.scope_key_;
   const auto& func_scope_ctx = func_ctx.scope_ctxs_[func_scope];
-  const auto func_nk = Symbol::fromQualString(domain_name + "::" + func_name);
   GRAPH_DEBUG(
       "Create and insert local function for scope: ",
       func_scope->namesFromRoot());
   scope_ctx.PopulateInputsOutputs(param_names_);
   auto last_n = *scope_ctx.nlist_.rbegin();
-  auto func_n = graph->create(func_nk, scope_ctx.outputs_.size());
+  auto func_n = graph->create(
+      Symbol::fromQualString(domain_name + "::" + func_name),
+      scope_ctx.outputs_.size());
   func_n->copyMetadata(last_n);
   for (auto* v : scope_ctx.inputs_) {
     func_n->addInput(v);
@@ -570,7 +575,6 @@ Node* FunctionExtractor::CreateFunctionNode(
   }
 
   // set constants and attributes of different values as function attributes.
-
   for (const auto& it : func_ctx.constant_map_) {
     TORCH_INTERNAL_ASSERT(it.first->kind() == c10::onnx::Constant);
     TORCH_INTERNAL_ASSERT(it.first->outputs().size() == 1);
@@ -635,7 +639,6 @@ Node* FunctionExtractor::CreateFunctionNode(
   }
 
   func_n->insertAfter(last_n);
-
   return func_n;
 }
 
@@ -689,7 +692,7 @@ void FunctionExtractor::ConvertScopeToFunction(
         scope_ctx.nlist_.begin(), scope_ctx.nlist_.end());
 
     auto last_n = *scope_ctx.nlist_.rbegin();
-    // replace local function node in parent scopes.
+    // replace function body nodes in parent scopes with local function node.
     for (auto& it : scope_ctxs) {
       const auto& parent_scope = it.first;
       auto& parent_ctx = *it.second;
@@ -742,10 +745,13 @@ void FunctionExtractor::ConvertScopeToFunction(
 
 bool FunctionExtractor::ScopeContext::IsIdenticalFuncion(
     const ScopeContext& other_ctx) const {
-  // TODO: need to differentiate same function under different inputs.
-  //       when constants are passed inplace of inputs, this leads to different
-  //       input count and node count. Likewise, due to different uses, output
-  //       count can be different as well.
+  // Differentiate same function under different inputs.
+  // When constants are passed in place of inputs, it leads to different
+  // input count and node count. Likewise, due to different uses, output
+  // count can be different as well.
+  // For now export them as different functions.
+  // Covered by `test_local_function_overloads` in
+  // `test/onnx/test_utility_funs.py`.
   if (&other_ctx == this) {
     return true;
   }
@@ -1082,6 +1088,20 @@ std::pair<ValAttrNameMap, NodeAttrNameMap> FunctionExtractor::run() {
 
 } // namespace
 
+// FunctionExtractor runs in the following steps. Updates are made inplace to
+// the graph argument.
+//    1. Partition nodes into groups based on their scope information.
+//    Each scope represents an individual nn.Module call. A ScopeContext object
+//    is created for each group.
+//    2. Compare and find groups with the same subgraph pattern from step 1.
+//    3. Scopes are nested. Starting from the deepest scope, extract the
+//    subgraph pattern, and define as local function node. Replace subgraph
+//    pattern with a single node of the new local function node type. A
+//    FunctionContext object is created for each function.
+//    4. Construct ValAttrNameMap tracking mapping from IR Value inside function
+//    subgraph, to function attribute name. And NodeAttrNameMap tracking mapping
+//    from attribute name of IR Node inside function subgraph, to function
+//    attribute name.
 std::pair<ValAttrNameMap, NodeAttrNameMap> ONNXFunctionExtraction(
     std::shared_ptr<Graph>& graph,
     const std::unordered_set<std::string>& module_names,

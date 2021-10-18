@@ -7,9 +7,10 @@ namespace jit {
 
 // This api will be used by serialization/export.cpp to extract function
 // information. It should do conversion on graph to
-//    1. Extract and preserve functions definition.
-//    2. Replace nodes within functions with a single node reflecting that
-//    function type.
+//    1. Extract subgraph pattern of functions and define as local function
+//    node.
+//    2. Replace subgraph pattern of functions with a single node reflecting
+//    that local function node type.
 // Function attribute map information is also returned, as Torch IR cannot
 // represent these info inside Graph object.
 // export.cpp will serialize the ONNX model with function_proto with
