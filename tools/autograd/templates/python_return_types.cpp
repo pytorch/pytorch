@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <map>
+#include <string>
 
 #include "torch/csrc/autograd/python_return_types.h"
 #include "torch/csrc/utils/structseq.h"
@@ -14,12 +15,12 @@ ${py_return_types}
 namespace torch {
 namespace autograd {
 
-static std::map<const char*, PyTypeObject*> return_types_map = {
+static std::map<std::string, PyTypeObject*> return_types_map = {
     ${py_return_types_map}
 };
 
-PyTypeObject* get_namedtuple(const char* name) {
-  return return_types_map.at(name);
+PyTypeObject* get_namedtuple(std::string name) {
+  return return_types_map[name];
 }
 
 void initReturnTypes(PyObject* module) {
@@ -33,7 +34,7 @@ void initReturnTypes(PyObject* module) {
   for (const auto& return_type : return_types_map) {
     if (PyModule_AddObject(
             return_types_module,
-            return_type.first,
+            return_type.first.c_str(),
             (PyObject*)return_type.second) != 0) {
       throw python_error();
     }
