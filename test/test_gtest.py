@@ -25,7 +25,7 @@ if IS_IN_CI:
         TEST_BINARY_DIR = REPO_ROOT / "build"
     elif IS_MACOS:
         # maybe have to set DYLD_LIBRARY_PATH to .parent / "lib"
-        env["DYLB_LIBRARY_PATH"] = str(Path(torch.__file__).resolve().parent / "lib")
+        env["DYLD_LIBRARY_PATH"] = str(Path(torch.__file__).resolve().parent / "lib")
         TEST_BINARY_DIR = Path(torch.__file__).resolve().parent / "bin"
         # TEST_BINARY_DIR = REPO_ROOT.parent / "cpp-build" / "bin"
 BUILD_ENVIRONMENT = os.getenv("BUILD_ENVIRONMENT", "")

@@ -557,7 +557,7 @@ struct TORCH_API TensorType : public Type {
       at::Device device,
       at::IntArrayRef sizes);
 
-  static TypePtr fromNumberType(TypePtr typ);
+  static TypePtr fromNumberType(const Type& typ);
   static TypePtr fromBoolType();
 
   c10::optional<size_t> dim() const {
@@ -833,7 +833,7 @@ struct TORCH_API DictType : public Type {
       case TypeKind::StringType:
       case TypeKind::TensorType:
       case TypeKind::DeviceObjType:
-        return DictTypePtr(new DictType(key, value));
+        return DictTypePtr(new DictType(std::move(key), std::move(value)));
       default:
         AT_ERROR(
             "Cannot create dict for key type '",
@@ -855,14 +855,14 @@ struct TORCH_API DictType : public Type {
     if (contained_types.size() != 2) {
       throw std::runtime_error("Expected 2 contained types");
     }
-    return create(contained_types.at(0), contained_types.at(1));
+    return create(std::move(contained_types.at(0)), std::move(contained_types.at(1)));
   }
 
-  TypePtr getKeyType() const {
+  const TypePtr& getKeyType() const {
     return types.at(0);
   }
 
-  TypePtr getValueType() const {
+  const TypePtr& getValueType() const {
     return types.at(1);
   }
 
@@ -875,7 +875,7 @@ struct TORCH_API DictType : public Type {
   }
 
   bool operator==(const Type& rhs) const override {
-    if (auto dict_rhs = rhs.cast<DictType>()) {
+    if (auto* dict_rhs = rhs.castRaw<DictType>()) {
       return *getKeyType() == *(dict_rhs->getKeyType()) &&
           *getValueType() == *(dict_rhs->getValueType());
     }
@@ -885,9 +885,12 @@ struct TORCH_API DictType : public Type {
  private:
   DictType(TypePtr key, TypePtr value)
       : Type(TypeKind::DictType),
-        types({key, value}),
         has_free_variables(
-            key->hasFreeVariables() || value->hasFreeVariables()) {}
+            key->hasFreeVariables() || value->hasFreeVariables()) {
+    types.reserve(2);
+    types.push_back(std::move(key));
+    types.push_back(std::move(value));
+  }
 
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     std::stringstream ss;
@@ -919,7 +922,7 @@ struct TORCH_API FutureType
   }
   TypePtr createWithContained(
       std::vector<TypePtr> contained_types) const override {
-    return create(contained_types.at(0));
+    return create(std::move(contained_types.at(0)));
   }
 
   bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override {
@@ -933,7 +936,7 @@ struct TORCH_API FutureType
   }
 
  private:
-  FutureType(TypePtr elem) : SingleElementType(elem) {}
+  FutureType(TypePtr elem) : SingleElementType(std::move(elem)) {}
 
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     std::stringstream ss;
@@ -961,11 +964,11 @@ struct TORCH_API RRefType
   }
   TypePtr createWithContained(
       std::vector<TypePtr> contained_types) const override {
-    return create(contained_types.at(0));
+    return create(std::move(contained_types.at(0)));
   }
 
  private:
-  RRefType(TypePtr elem) : SingleElementType(elem) {}
+  RRefType(TypePtr elem) : SingleElementType(std::move(elem)) {}
 
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     std::stringstream ss;
@@ -1124,12 +1127,12 @@ struct TORCH_API EnumType : public NamedType {
     return str();
   }
 
-  TypePtr getValueType() const {
+  const TypePtr& getValueType() const {
     return value_type_;
   }
 
   bool operator==(const Type& rhs) const override {
-    if (auto enum_rhs = rhs.cast<EnumType>()) {
+    if (auto* enum_rhs = rhs.castRaw<EnumType>()) {
       return name().value() == enum_rhs->name().value() &&
           *getValueType() == *(enum_rhs->getValueType()) &&
           this->compilation_unit() == enum_rhs->compilation_unit();
@@ -1603,17 +1606,17 @@ inline TypePtr unshapedType(const TypePtr& type) {
   return type->withContained(fmap(type->containedTypes(), unshapedType));
 }
 
-inline TypePtr TensorType::fromNumberType(TypePtr typ) {
-  if (typ->isSubtypeOf(*IntType::get())) {
+inline TypePtr TensorType::fromNumberType(const Type& typ) {
+  if (typ.isSubtypeOf(*IntType::get())) {
     return TensorType::createContiguous(at::kLong, at::kCPU, {});
-  } else if (typ->isSubtypeOf(*FloatType::get())) {
+  } else if (typ.isSubtypeOf(*FloatType::get())) {
     return TensorType::createContiguous(at::kDouble, at::kCPU, {});
-  } else if (typ->isSubtypeOf(*BoolType::get())) {
+  } else if (typ.isSubtypeOf(*BoolType::get())) {
     return TensorType::createContiguous(at::kBool, at::kCPU, {});
-  } else if (typ->kind() == NumberType::Kind) {
+  } else if (typ.kind() == NumberType::Kind) {
     return TensorType::create(c10::nullopt, at::kCPU, {}, c10::nullopt);
   }
-  TORCH_CHECK(false, "Unknown number type: ", typ->str());
+  TORCH_CHECK(false, "Unknown number type: ", typ.str());
 }
 inline TypePtr TensorType::fromBoolType() {
   return TensorType::createContiguous(at::kBool, at::kCPU, {});
@@ -1905,12 +1908,12 @@ struct MatchTypeReturn {
 // in the formal to still not be defined. In particular, None matches Optional[T]
 // but does not define the value of T.
 TORCH_API MatchTypeReturn
-matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env);
+matchTypeVariables(const TypePtr& formal, const TypePtr& actual, TypeEnv& type_env);
 
 // replace type variables appearing in `type` with the values in
 // `type_env`. Returns nullptr if a variable used in `type`
 // does not appear in `type_env`
-TORCH_API TypePtr tryEvalTypeVariables(TypePtr type, TypeEnv& type_env);
+TORCH_API TypePtr tryEvalTypeVariables(const TypePtr& type, TypeEnv& type_env);
 
 TORCH_API bool elementTypeCanBeInferredFromMembers(const TypePtr& elem_type);
 
@@ -2370,7 +2373,7 @@ struct TORCH_API InterfaceType : public NamedType {
       QualifiedName qualifiedName, bool is_module=false);
 
   bool operator==(const Type& rhs) const override {
-    if (auto user_rhs = rhs.cast<InterfaceType>()) {
+    if (auto user_rhs = rhs.castRaw<InterfaceType>()) {
       return isSubTypeImpl(*this, *user_rhs, nullptr) &&
           isSubTypeImpl(*user_rhs, *this, nullptr);
     }

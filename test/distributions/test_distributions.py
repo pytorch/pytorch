@@ -2032,9 +2032,9 @@ class TestDistributions(TestCase):
 
             def gradcheck_func(samples, mu, sigma, prec, scale_tril):
                 if sigma is not None:
-                    sigma = 0.5 * (sigma + sigma.transpose(-1, -2))  # Ensure symmetry of covariance
+                    sigma = 0.5 * (sigma + sigma.mT)  # Ensure symmetry of covariance
                 if prec is not None:
-                    prec = 0.5 * (prec + prec.transpose(-1, -2))  # Ensure symmetry of precision
+                    prec = 0.5 * (prec + prec.mT)  # Ensure symmetry of precision
                 if scale_tril is not None:
                     scale_tril = scale_tril.tril()
                 return MultivariateNormal(mu, sigma, prec, scale_tril).log_prob(samples)
