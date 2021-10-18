@@ -19,24 +19,6 @@ lazy_tensors::Shape GetShapeFromTsNode(const ir::Node& value);
 void TsNodeSetShapeDeferred(
     NodePtr node, const std::function<lazy_tensors::Shape()>& shape_fn);
 
-static lazy_tensors::Shape convertShape(
-    const std::vector<at::ScalarType>& dtypes,
-    const std::vector<std::vector<int64_t>>& shapes) {
-  LTC_CHECK_EQ(dtypes.size(), shapes.size());
-  if (dtypes.size() == 1) {
-    return lazy_tensors::Shape(dtypes[0], shapes[0]);
-  }
-
-  std::vector<lazy_tensors::Shape> shape;
-  for (int i = 0; i < dtypes.size(); i++) {
-    shape.emplace_back(dtypes[i], shapes[i]);
-  }
-
-  // Since we are going to remove lazy_tensors::Shape very soon, this
-  // copy-by-value is not worth fixing.
-  return lazy_tensors::Shape(shape);
-}
-
 class TsNode : public Node {
  public:
   TsNode(OpKind op, OpList operands, lazy_tensors::Shape shape,
