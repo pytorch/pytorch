@@ -16,7 +16,7 @@ import warnings
 import math
 from typing import Callable, Type
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
-    skipCUDAIfNoMagma, onlyOnCPUAndCUDA, onlyCPU
+    skipCUDAIfNoMagma, onlyCPU
 import types
 from functools import partial, wraps
 
