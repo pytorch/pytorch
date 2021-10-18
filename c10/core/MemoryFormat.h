@@ -134,10 +134,12 @@ inline std::vector<int64_t> get_channels_last_strides_3d(IntArrayRef sizes) {
 // input
 // 3. All helper functions have similar comments, only 1st helper function is
 // commented here.
-inline bool is_channels_last_strides_1d_s3(const IntArrayRef sizes, const IntArrayRef strides) {
+inline bool is_channels_last_strides_1d_s3(
+    const IntArrayRef sizes,
+    const IntArrayRef strides) {
   int64_t min = 0;
   // special case for trivial C dimension. default to NCL
-  if (strides[1]==0) {
+  if (strides[1] == 0) {
     return false;
   }
   // loop strides indices
@@ -154,7 +156,7 @@ inline bool is_channels_last_strides_1d_s3(const IntArrayRef sizes, const IntArr
     // Two cases could lead us here:
     // a. N11 contiguous Tensor ([N,1,1]@[1,1,1])
     // b. N1L contiguous Tensor sliced on the L-dimension. ([N,1,1]@[L,L,L])
-    if (d==0 && min==strides[1]) {
+    if (d == 0 && min == strides[1]) {
       return false;
     }
 

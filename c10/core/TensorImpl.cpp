@@ -271,17 +271,17 @@ bool TensorImpl::compute_channels_last_contiguous_1d() const {
   // compiler fully unroll the loop to get better performance
   switch (sizes_and_strides_.size()) {
     case 3: {
-        int64_t expected = 1;
-        for (auto& d : {1, 2, 0}) {
-          const auto size_d = sizes_and_strides_.size_at_unchecked(d);
-          if (size_d != 1) {
-            if (sizes_and_strides_.stride_at_unchecked(d) != expected) {
-              return false;
-            }
-            expected *= size_d;
+      int64_t expected = 1;
+      for (auto& d : {1, 2, 0}) {
+        const auto size_d = sizes_and_strides_.size_at_unchecked(d);
+        if (size_d != 1) {
+          if (sizes_and_strides_.stride_at_unchecked(d) != expected) {
+            return false;
           }
+          expected *= size_d;
         }
-        return true;
+      }
+      return true;
     }
     // NOLINTNEXTLINE(bugprone-branch-clone)
     case 2:
