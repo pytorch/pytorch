@@ -919,6 +919,8 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 # TODO: include the configuration in backend_config_dict
                 # we can have a map from module to reference module
                 # and allow user to register new ones
+                if hasattr(float_linear, 'sparse_params'):
+                    warnings.warn("Reference module for sparse Linear is not implemented, using quantized Linear")
                 qlinear_cls = get_static_quant_module_class(
                     type(float_linear), is_reference=is_reference)
                 ref_linear = qlinear_cls.from_float(float_linear, weight_qparams)
@@ -953,15 +955,23 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 # 2. select corresponding quantized linear class for the float linear class
                 if activation_int8_quantized:
                     additional_static_quant_mapping = convert_custom_config_dict.get("static", {})
-                    qlinear = get_static_quant_module_class(
-                        type(self.linear), additional_static_quant_mapping)
+                    if hasattr(self.linear, 'sparse_params'):
+                        mapping_fn = get_static_sparse_quant_module_class
+                    else:
+                        mapping_fn = get_static_quant_module_class
+                    qlinear = mapping_fn(type(self.linear),
+                                         additional_static_quant_mapping)
                 else:
                     assert dtypes in [
                         (torch.float32, torch.qint8, torch.quint8),
                         (torch.float32, torch.float16, None),
                     ], f"dtype {dtypes} not supported yet"
                     additional_dynamic_quant_mapping = convert_custom_config_dict.get("dynamic", {})
-                    qlinear = get_dynamic_quant_module_class(type(self.linear), additional_dynamic_quant_mapping)
+                    if hasattr(self.linear, 'sparse_params'):
+                        mapping_fn = get_dynamic_sparse_quant_module_class
+                    else:
+                        mapping_fn = get_dynamic_quant_module_class
+                    qlinear = mapping_fn(type(self.linear), additional_dynamic_quant_mapping)
 
                 quantized = qlinear.from_float(self.linear)
                 parent_name, name = _parent_name(self.linear_node.target)
