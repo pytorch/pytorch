@@ -740,6 +740,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                     return x + y
                 else:
                     return x + y, x + z
+
         class M(torch.nn.Module):
             def __init__(self, num_layers):
                 super().__init__()
