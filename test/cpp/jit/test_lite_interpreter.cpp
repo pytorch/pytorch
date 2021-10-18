@@ -1381,8 +1381,6 @@ TEST(RunTimeTest, RuntimeCall) {
   //         y = a + call(x)
   //         return y
 
-  // 1. Prepare for the bytecode. In reality it can be from a customized
-  // deserializer.
   std::vector<IValue> instructionsCall{
       to_tuple({"STORE", 1, 0}),
       to_tuple({"LOAD", 1, 0}),
@@ -1404,34 +1402,56 @@ TEST(RunTimeTest, RuntimeCall) {
       to_tuple({"OP", 0, 0}),
       to_tuple({"RET", 0, 0}),
   };
-  std::vector<IValue> operators{
+  std::vector<IValue> operatorsFoo{
       to_tuple({"aten::add", "Tensor", 3}),
   };
-  std::vector<IValue> constants{
+  std::vector<IValue> constantsFoo{
+      1,
+  };
+  std::vector<IValue> operatorsCall{
+      to_tuple({"aten::add", "Tensor", 3}),
+  };
+  std::vector<IValue> constantsCall{
       1,
   };
   int64_t model_version = caffe2::serialize::kProducedBytecodeVersion;
-  // 2. Parse the function oo
-  auto foo = std::unique_ptr<mobile::Function>(
-      new mobile::Function(c10::QualifiedName("foo")));
-  std::vector<IValue> debug_handles_m_tuple;
-  parseInstructions("foo", instructionsFoo, debug_handles_m_tuple, foo.get());
-  parseOperators(operators, model_version, 1, foo.get());
-  parseConstants(constants, foo.get());
+
+  auto foo = std::make_unique<mobile::Function>(c10::QualifiedName("foo"));
+  c10::ivalue::TupleElements debug_handles_m_tuple;
+  parseInstructions(
+      "foo",
+      std::move(*c10::ivalue::Tuple::create(instructionsFoo)).elements(),
+      debug_handles_m_tuple,
+      foo.get());
+  parseOperators(
+      std::move(*c10::ivalue::Tuple::create(operatorsFoo)).elements(),
+      model_version,
+      1,
+      foo.get());
+  parseConstants(
+      std::move(*c10::ivalue::Tuple::create(constantsFoo)).elements(),
+      foo.get());
   const size_t rsize = 5;
   parseRegisterSize(rsize, foo.get());
 
-  auto call = std::unique_ptr<mobile::Function>(
-      new mobile::Function(c10::QualifiedName("call")));
+  auto call = std::make_unique<mobile::Function>(c10::QualifiedName("call"));
   parseInstructions(
-      "call", instructionsCall, debug_handles_m_tuple, call.get());
-  parseOperators(operators, model_version, 1, call.get());
-  parseConstants(constants, call.get());
+      "call",
+      std::move(*c10::ivalue::Tuple::create(instructionsCall)).elements(),
+      debug_handles_m_tuple,
+      call.get());
+  parseOperators(
+      std::move(*c10::ivalue::Tuple::create(operatorsCall)).elements(),
+      model_version,
+      1,
+      call.get());
+  parseConstants(
+      std::move(*c10::ivalue::Tuple::create(constantsCall)).elements(),
+      call.get());
   parseRegisterSize(rsize, call.get());
 
   foo->append_function(*call);
 
-  // 3. Prepare for inputs and run the function
   std::vector<IValue> inputs{at::tensor(1)};
   foo->run(inputs);
   auto output = inputs[0];
