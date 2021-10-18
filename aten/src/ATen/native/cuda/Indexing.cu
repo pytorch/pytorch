@@ -210,7 +210,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
     TORCH_CHECK_INDEX(false, "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   }
   auto value_ = value.contiguous();
-  Tensor linearIndex, expandedValue, src;
+  Tensor linearIndex, src;
   int64_t nElemBefore, strideBefore, sliceSize;
   std::vector<int64_t> inversePerm;
   std::tie(linearIndex, src, nElemBefore, strideBefore, sliceSize, inversePerm) = makeLinearIndex(self, indices, !unsafe);
@@ -246,7 +246,10 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
         num_indices, false, 0, nbits);
       }
 
-      TORCH_INTERNAL_ASSERT(linearIndex.numel()*sliceSize*nElemBefore == value.numel(), "number of flattened indices did not match number of elements in the value tensor", linearIndex.numel()*sliceSize*nElemBefore, value.numel());
+      TORCH_INTERNAL_ASSERT(
+          linearIndex.numel()*sliceSize*nElemBefore == value_.numel(),
+          "number of flattened indices did not match number of elements in the value tensor: ",
+          linearIndex.numel()*sliceSize*nElemBefore, " vs ", value_.numel());
       const int UNROLL = 4;
       const int indices_per_block = 4;
       dim3 grid(ceil_div(num_indices, (int64_t) indices_per_block),
