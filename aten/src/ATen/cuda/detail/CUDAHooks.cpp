@@ -72,8 +72,9 @@ std::unique_ptr<THCState, void (*)(THCState*)> CUDAHooks::initCUDA() const {
   at::cuda::detail::init_p2p_access_cache(num_devices);
 
 #if AT_MAGMA_ENABLED()
-  TORCH_INTERNAL_ASSERT(detail::magma_init_fn, "Cannot initilaize magma, init routine not set");
-  detail::magma_init_fn();
+  //TORCH_INTERNAL_ASSERT(detail::magma_init_fn, "Cannot initilaize magma, init routine not set");
+  //detail::magma_init_fn();
+  magma_init();
 #endif
 
   return thc_state;
