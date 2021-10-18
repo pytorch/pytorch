@@ -24,7 +24,6 @@ template <typename scalar_t>
 static void avg_pool2d_out_frame(
     const Tensor& input,
     Tensor& output,
-    int64_t b,
     int64_t nInputPlane,
     int64_t inputWidth,
     int64_t inputHeight,
@@ -38,20 +37,20 @@ static void avg_pool2d_out_frame(
     int padH,
     bool count_include_pad,
     c10::optional<int64_t> divisor_override) {
+  Tensor input_contig = input.contiguous();
+  auto input_data = input_contig.data_ptr<scalar_t>();
+  auto output_data = output.data_ptr<scalar_t>();
+  const auto scale_factor = input.q_scale() / output.q_scale();
+  const auto input_zero_point = input.q_zero_point();
+  const auto output_zero_point = output.q_zero_point();
+
   at::parallel_for(0, nInputPlane, 0, [&](int64_t start, int64_t end) {
     for (auto k = start; k < end; k++) {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t xx, yy;
       /* For all output pixels... */
-      Tensor input_contig = input.contiguous();
-      auto input_data = input_contig.data_ptr<scalar_t>();
-      auto output_data = output.data_ptr<scalar_t>();
-      scalar_t* ptr_output = output_data +
-          b * nInputPlane * outputWidth * outputHeight +
-          k * outputWidth * outputHeight;
-      const scalar_t* ptr_input = input_data +
-          b * nInputPlane * inputWidth * inputHeight +
-          k * inputWidth * inputHeight;
+      scalar_t* ptr_output = output_data + k * outputWidth * outputHeight;
+      const scalar_t* ptr_input = input_data + k * inputWidth * inputHeight;
       auto minimum =
           std::numeric_limits<typename scalar_t::underlying>::lowest();
       auto maximum = std::numeric_limits<typename scalar_t::underlying>::max();
@@ -92,17 +91,17 @@ static void avg_pool2d_out_frame(
               sum_int += (ptr_input + ky * inputWidth + kx)->val_;
           }
           // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-          float multiplier = input.q_scale() / output.q_scale() / divide_factor;
+          float multiplier = scale_factor / divide_factor;
 
           // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-          sum_int -= size * input.q_zero_point();
+          sum_int -= size * input_zero_point;
           // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
           float sum = sum_int * 1.0;
           /* Update output by requantizing the result */
           ptr_output->val_ =
               static_cast<typename scalar_t::underlying>(std::min<int32_t>(
                   std::max<int32_t>(
-                      std::nearbyint(sum * multiplier + output.q_zero_point()),
+                      std::nearbyint(sum * multiplier + output_zero_point),
                       minimum),
                   maximum));
           ptr_output++;
@@ -203,94 +202,45 @@ Tensor q_avg_pool2d(
         input.q_zero_point(),
         c10::nullopt);
     // fast path for channel last: qavg_pool_2d_nhwc_stub
-    if (output_shape.size() == 3) {
-      qavg_pool2d_nhwc_stub(
-          input.device().type(),
-          input,
-          output,
-          0,
-          nInputPlane,
-          inputWidth,
-          inputHeight,
-          outputWidth,
-          outputHeight,
-          kW,
-          kH,
-          dW,
-          dH,
-          padW,
-          padH,
-          count_include_pad,
-          divisor_override);
-    } else {
-      at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-        for (auto b = start; b < end; b++) {
-          qavg_pool2d_nhwc_stub(
-              input.device().type(),
-              input,
-              output,
-              b,
-              nInputPlane,
-              inputWidth,
-              inputHeight,
-              outputWidth,
-              outputHeight,
-              kW,
-              kH,
-              dW,
-              dH,
-              padW,
-              padH,
-              count_include_pad,
-              divisor_override);
-        }
-      });
-    }
+    qavg_pool2d_nhwc_stub(
+        input.device().type(),
+        input,
+        output,
+        nbatch,
+        nInputPlane,
+        inputWidth,
+        inputHeight,
+        outputWidth,
+        outputHeight,
+        kW,
+        kH,
+        dW,
+        dH,
+        padW,
+        padH,
+        count_include_pad,
+        divisor_override);
     return output;
   } else {
     auto output = at::_empty_affine_quantized(
         output_shape, input.options(), input.q_scale(), input.q_zero_point());
-    if (output_shape.size() == 3) {
-      avg_pool2d_out_frame<scalar_t>(
-          input,
-          output,
-          0,
-          nInputPlane,
-          inputWidth,
-          inputHeight,
-          outputWidth,
-          outputHeight,
-          kW,
-          kH,
-          dW,
-          dH,
-          padW,
-          padH,
-          count_include_pad,
-          divisor_override);
-    } else {
-      at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-        for (auto b = start; b < end; b++) {
-          avg_pool2d_out_frame<scalar_t>(
-              input,
-              output,
-              b,
-              nInputPlane,
-              inputWidth,
-              inputHeight,
-              outputWidth,
-              outputHeight,
-              kW,
-              kH,
-              dW,
-              dH,
-              padW,
-              padH,
-              count_include_pad,
-              divisor_override);
-        }
-      });
-    }
+    avg_pool2d_out_frame<scalar_t>(
+        input,
+        output,
+        // Contract batch and channels into one dimension
+        nbatch * nInputPlane,
+        inputWidth,
+        inputHeight,
+        outputWidth,
+        outputHeight,
+        kW,
+        kH,
+        dW,
+        dH,
+        padW,
+        padH,
+        count_include_pad,
+        divisor_override);
     return output;
   }
 }
