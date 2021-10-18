@@ -513,25 +513,27 @@ const unsigned int _WORD_SHIFT = 16;
 constexpr unsigned int supported_switch_pair(DataType t1, DataType t2) {
   return ((unsigned int)t1 << _WORD_SHIFT) + (unsigned int)t2;
 }
+
 static const char* supported_casts2string(
     const std::pair<DataType, DataType>& t) {
   switch (supported_switch_pair(std::get<0>(t), std::get<1>(t))) {
     case supported_switch_pair(DataType::Double, DataType::Float):
       return "(float)";
+    case supported_switch_pair(DataType::Double, DataType::Int):
+    case supported_switch_pair(DataType::Float, DataType::Int):
+      return "(int64_t)";
+    case supported_switch_pair(DataType::Double, DataType::Int32):
+    case supported_switch_pair(DataType::Float, DataType::Int32):
+      return "(int32_t)";
+    case supported_switch_pair(DataType::Int, DataType::Double):
     case supported_switch_pair(DataType::Float, DataType::Double):
       return "(double)";
-    case supported_switch_pair(DataType::Int32, DataType::Float):
-      return "(float)";
-    case supported_switch_pair(DataType::Int, DataType::Float):
-      return "(double)";
-    case supported_switch_pair(DataType::Int32, DataType::Int):
-      return "(int64_t)";
     case supported_switch_pair(DataType::Float, DataType::Half):
       return "__float2half";
-    case supported_switch_pair(DataType::Half, DataType::Float):
-      return "__half2float";
     case supported_switch_pair(DataType::Float, DataType::BFloat16):
       return "__float2bfloat";
+    case supported_switch_pair(DataType::Half, DataType::Float):
+      return "__half2float";
     case supported_switch_pair(DataType::BFloat16, DataType::Float):
       return "__bfloat2float";
     case supported_switch_pair(DataType::Bool, DataType::Float):

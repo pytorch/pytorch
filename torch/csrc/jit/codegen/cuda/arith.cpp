@@ -972,31 +972,30 @@ Val* threshold(Val* in, Val* thresh, Val* value) {
   const auto in_type = in->getDataType().value();
   const auto thresh_type = thresh->getDataType().value();
   const auto value_type = value->getDataType().value();
-  if (isFloatingPointType(in_type)) {
-    TORCH_CHECK(
-        isFloatingPointType(thresh_type) && isFloatingPointType(value_type),
-        "All input DataType values should match the input type ",
-        in_type,
-        " vs ",
-        thresh_type,
-        " and ",
-        value_type);
-  } else if (isIntegralType(in_type)) {
-    TORCH_CHECK(
-        isIntegralType(thresh_type) && isIntegralType(value_type),
-        "All input DataType values should match the input ",
-        in_type,
-        " vs ",
-        thresh_type,
-        " and ",
-        value_type);
-  }
+
   TORCH_CHECK(
       (thresh->getValType().value() == ValType::Scalar ||
        thresh->getValType().value() == ValType::NamedScalar) &&
           (value->getValType().value() == ValType::Scalar ||
            value->getValType().value() == ValType::NamedScalar),
       "For Threshold operation: Thresh and Value values should be Scalars.");
+
+  if (isFloatingPointType(in_type)) {
+    if (!isFloatingPointType(thresh_type)) {
+      thresh = castOp(DataType::Double, thresh);
+    }
+    if (!isFloatingPointType(value_type)) {
+      value = castOp(DataType::Double, value);
+    }
+
+  } else if (isIntegralType(in_type)) {
+    if (!isIntegralType(thresh_type)) {
+      thresh = castOp(DataType::Int, thresh);
+    }
+    if (!isIntegralType(value_type)) {
+      value = castOp(DataType::Int, value);
+    }
+  }
 
   Val* out = newValLike(in, in_type);
 
@@ -1012,31 +1011,30 @@ Val* clamp(Val* in, Val* min_val, Val* max_val) {
   const auto in_type = in->getDataType().value();
   const auto min_type = min_val->getDataType().value();
   const auto max_type = max_val->getDataType().value();
-  if (isFloatingPointType(in_type)) {
-    TORCH_CHECK(
-        isFloatingPointType(min_type) && isFloatingPointType(max_type),
-        "All input DataType values should match the input type ",
-        in_type,
-        " vs ",
-        min_type,
-        " and ",
-        max_type);
-  } else if (isIntegralType(in_type)) {
-    TORCH_CHECK(
-        isIntegralType(min_type) && isIntegralType(max_type),
-        "All input DataType values should match the input ",
-        in_type,
-        " vs ",
-        min_type,
-        " and ",
-        max_type);
-  }
+
   TORCH_CHECK(
       (min_val->getValType().value() == ValType::Scalar ||
        min_val->getValType().value() == ValType::NamedScalar) &&
           (max_val->getValType().value() == ValType::Scalar ||
            max_val->getValType().value() == ValType::NamedScalar),
       "For Threshold operation: Thresh and Value values should be Scalars.");
+
+  if (isFloatingPointType(in_type)) {
+    if (!isFloatingPointType(min_type)) {
+      min_val = castOp(DataType::Double, min_val);
+    }
+    if (!isFloatingPointType(max_type)) {
+      max_val = castOp(DataType::Double, max_val);
+    }
+
+  } else if (isIntegralType(in_type)) {
+    if (!isIntegralType(min_type)) {
+      min_val = castOp(DataType::Int, min_val);
+    }
+    if (!isIntegralType(max_type)) {
+      max_val = castOp(DataType::Int, max_val);
+    }
+  }
 
   Val* out = newValLike(in, in_type);
 

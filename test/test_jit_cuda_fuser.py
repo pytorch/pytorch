@@ -824,6 +824,58 @@ class TestCudaFuser(JitTestCase):
         self.assertEqual(o, jit_o)
         self.assertGraphContains(t_jit.graph_for(x, y, 0.5), FUSION_GUARD)
 
+    def _ternary_integer_test_helper(self, dtype_arg1):
+        shape = (4, 8, 32, 32)
+        magnitude = 100
+        if (dtype_arg1 in self.int_types):
+            x = torch.randint(-magnitude, magnitude, shape, dtype=dtype_arg1, device="cuda")
+        else:
+            x = torch.randn(shape, dtype=dtype_arg1, device="cuda") * magnitude
+        arg2 = int(0)
+        arg3 = int(magnitude * 0.1)
+
+        def clamp0(x: torch.Tensor, f: int):
+            o = 2. * torch.clamp(x, min=f)
+            return o
+        clamp0_jit = torch.jit.script(clamp0)
+        self._run_helper(clamp0_jit, clamp0, x, arg2)
+
+        def clamp1(x: torch.Tensor, f: int, ff: int):
+            o = 2. * torch.clamp(x, min=f, max=ff)
+            return o
+        clamp1_jit = torch.jit.script(clamp1)
+        self._run_helper(clamp1_jit, clamp1, x, arg2, arg3)
+
+        def clamp2(x: torch.Tensor, f: float, ff: int):
+            o = 2. * torch.clamp(x, min=f, max=ff)
+            return o
+        clamp2_jit = torch.jit.script(clamp2)
+        self._run_helper(clamp2_jit, clamp2, x, float(arg2), arg3)
+
+        def clamp3(x: torch.Tensor, f: int, ff: float):
+            o = 2. * torch.clamp(x, min=f, max=ff)
+            return o
+        clamp3_jit = torch.jit.script(clamp3)
+        self._run_helper(clamp3_jit, clamp3, x, arg2, float(arg3))
+
+        def threshold(x: torch.Tensor, th: int, val: int):
+            o = 2. * torch.threshold(x, th, val)
+            return o
+        threshold_jit = torch.jit.script(threshold)
+        self._run_helper(threshold_jit, threshold, x, arg2, arg3)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_ternary_ops_integer_compatibility(self):
+        data_types = [
+            torch.float16,
+            torch.float32,
+            torch.float64
+        ]
+        for dtype in data_types:
+            self._ternary_integer_test_helper(dtype)
+
     def _ternary_test_helper(self, operation, dtypes, random_data):
         if isinstance(dtypes, tuple):
             dtype_arg1, dtype_arg2, dtype_arg3 = dtypes
