@@ -610,11 +610,9 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::rpc_remote:
       return analyzeRpcAsync(node);
     case aten::batch_norm:
-      analyzeBatchNormAndInstanceNorm(node, "training");
-      break;
+      return analyzeBatchNorm(node);
     case aten::instance_norm:
-      analyzeBatchNormAndInstanceNorm(node, "use_input_stats");
-      break;
+      return analyzeInstanceNorm(node);
     case prim::GradOf:
       return analyzeGradOf(node);
     case prim::BroadcastMKLDNNTensors: {
@@ -988,21 +986,32 @@ void AliasDb::analyzeRpcAsync(Node* node) {
   }
 }
 
-void AliasDb::analyzeBatchNormAndInstanceNorm(
-    Node* node,
-    const std::string& trainingInputName) {
+namespace {
+c10::optional<bool> getConstantBooleanInput(Node* node, const std::string& inputName) {
+  TORCH_INTERNAL_ASSERT(
+      node->hasNamedInput(inputName),
+      inputName + " input is expected");
+  auto value = node->namedInput(inputName);
+  TORCH_INTERNAL_ASSERT(
+      value->type() == BoolType::get(),
+      inputName + "training input is expected to be a bool");
+  return  constant_as<bool>(value);
+}
+} // namespace
+
+// custom behavior for batch_norm because (a!)? annotations currently
+// aren't supported, and because behavior differs depending on the value of
+// training
+void AliasDb::analyzeBatchNorm(Node* node) {
+  for (Value* output : node->outputs()) {
+    giveFreshAlias(output);
+  }
+
   if (isFrozen_) {
     return;
   }
 
-  TORCH_INTERNAL_ASSERT(
-      node->hasNamedInput(trainingInputName),
-      trainingInputName + " input is expected");
-  auto value = node->namedInput(trainingInputName);
-  TORCH_INTERNAL_ASSERT(
-      value->type() == BoolType::get(),
-      trainingInputName + " input is expected to be a bool");
-  auto isTraining = constant_as<bool>(value);
+  auto isTraining = getConstantBooleanInput(node, "training");
 
   if (!isTraining.has_value() || *isTraining) {
     TORCH_INTERNAL_ASSERT(
@@ -1012,8 +1021,31 @@ void AliasDb::analyzeBatchNormAndInstanceNorm(
         node->hasNamedInput("running_var"), "running_var input is expected");
     auto runningVar = node->namedInput("running_var");
 
-    registerWrite(runningMean, node, /*writeToContained=*/true);
-    registerWrite(runningVar, node, /*writeToContained=*/true);
+    registerWrite(runningMean, node);
+    registerWrite(runningVar, node);
+  }
+}
+
+// custom behavior for instance_norm, because (a!)? annotations currently
+// aren't supported, and because behavior differs depending on the value of
+// use_input_stats
+void AliasDb::analyzeInstanceNorm(Node* node) {
+  for (Value* output : node->outputs()) {
+    giveFreshAlias(output);
+  }
+
+  auto useInputStats = getConstantBooleanInput(node, "use_input_stats");
+
+  if (!useInputStats.has_value() || *useInputStats) {
+    TORCH_INTERNAL_ASSERT(
+        node->hasNamedInput("running_mean"), "running_mean input is expected");
+    auto runningMean = node->namedInput("running_mean");
+    TORCH_INTERNAL_ASSERT(
+        node->hasNamedInput("running_var"), "running_var input is expected");
+    auto runningVar = node->namedInput("running_var");
+
+    registerWrite(runningMean, node);
+    registerWrite(runningVar, node);
   }
 }
 
