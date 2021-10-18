@@ -1,4 +1,3 @@
-
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/function_extraction.h>
 
@@ -127,12 +126,12 @@ FunctionExtractor::FunctionContext::FunctionContext(
   const auto& ref_ctx = scope_ctxs[scope_key_];
   // NOTE: Function scopes must have same number and order of nodes.
   GRAPH_DEBUG(
-      "Initialized Function context for scope ",
+      "Initialized function context for scope ",
       scope_key_->name().toDisplayString());
 
   for (const auto& scope : scopes) {
     GRAPH_DEBUG(
-        "Process Function context for scope ", scope->name().toDisplayString());
+        "Process function context for scope ", scope->name().toDisplayString());
     TORCH_INTERNAL_ASSERT(scope_ctxs.find(scope) != scope_ctxs.end());
     scope_ctxs_[scope] = scope_ctxs[scope];
     if (scope_key_ == scope) {
@@ -454,9 +453,9 @@ std::shared_ptr<Graph> FunctionExtractor::ConstructFuncGraph(
 
   // TODO: Update input names of function to match those in Module source code
   // signature.
-  //       This requires mapping between function node inputs and Module inputs.
-  //       Due to the lack of such mapping, currently debugName is used as input
-  //       names.
+  // This requires mapping between function node inputs and Module inputs.
+  // Due to the lack of such mapping, currently debugName is used as input
+  // names.
   ctx.PopulateInputsOutputs(param_names_);
   for (auto* v : ctx.inputs_) {
     env[v] = g->addInput()->copyMetadata(v);

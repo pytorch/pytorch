@@ -760,9 +760,9 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         funcs = onnx_model.functions
         self.assertEqual(len(funcs), 3)
         func_names = [f.name for f in funcs]
-        self.assertTrue("NWithOverloads" in func_names)
-        self.assertTrue("NWithOverloads.1" in func_names)
-        self.assertTrue("NWithOverloads.2" in func_names)
+        self.assertIn("NWithOverloads", func_names)
+        self.assertIn("NWithOverloads.1", func_names)
+        self.assertIn("NWithOverloads.2", func_names)
 
     def test_aten_fallthrough(self):
         # Test aten export of op with no symbolic
