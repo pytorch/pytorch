@@ -386,4 +386,3 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         func = torch._C._create_function_from_graph("partial_eval_graph", g)
         output_shape = func(tensor.size())
         self.assertEqual(list(output_shape), list(mod(tensor)[0].size()))
-
