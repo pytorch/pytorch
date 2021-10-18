@@ -371,24 +371,20 @@ C10_API constexpr int getDispatchTableIndexForDispatchKey(DispatchKey dk) {
       return 0;
     case DispatchKey::CPU:
       return 1;
-    case DispatchKey::Vulkan:
-      return 2;
-    case DispatchKey::Metal:
-      return 3;
     case DispatchKey::QuantizedCPU:
-      return 4;
+      return 2;
     case DispatchKey::SparseCPU:
-      return 5;
+      return 3;
     case DispatchKey::BackendSelect:
-      return 6;
+      return 4;
     case DispatchKey::ADInplaceOrView:
-      return 7;
+      return 5;
     case DispatchKey::AutogradOther:
-      return 8;
+      return 6;
     case DispatchKey::AutogradCPU:
-      return 9;
+      return 7;
     case DispatchKey::NumDispatchKeys: // Sentinel, end of runtime keys.
-      return 10;
+      return 8;
     default:
       return -1;
   }
