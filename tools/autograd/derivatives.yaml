@@ -1109,7 +1109,7 @@
   std: at::zeros(std.sizes(), grad.options())
 
 - name: linalg_householder_product(Tensor input, Tensor tau) -> Tensor
-  input, tau: householder_product_backward(grad, input, tau)
+  input, tau: householder_product_backward(grad, result, input, tau)
 
 - name: ormqr(Tensor self, Tensor input2, Tensor input3, bool left=True, bool transpose=False) -> Tensor
   self: not_implemented("ormqr")
@@ -2334,3 +2334,6 @@
 - name: empty_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   self: non_differentiable
   output_differentiability: [False]
+
+- name: _test_warn_in_autograd(Tensor self) -> Tensor
+  self: warn_backwards(grad)

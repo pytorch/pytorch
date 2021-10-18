@@ -8520,6 +8520,13 @@ class TestTorch(AbstractTestCases._TestTorchMixin):
         finally:
             torch.set_num_threads(num_threads)
 
+    def test_conj_neg_tolist(self):
+        x = torch.randn(2, dtype=torch.cfloat)
+        y1 = x.conj()
+        y1_expect = x.conj_physical()
+        y2 = y1.imag
+        self.assertEqual(y1, y1_expect.tolist())
+        self.assertEqual(y2, y1_expect.imag.tolist())
 
 # TODO: these empy classes are temporarily instantiated for XLA compatibility
 #   once XLA updates their test suite it should be removed

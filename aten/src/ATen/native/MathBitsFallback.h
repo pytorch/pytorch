@@ -125,7 +125,7 @@ struct MathOpFallback {
     op.redispatchBoxed(dispatch_keys & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, key), stack);
 
     TORCH_INTERNAL_ASSERT(mutable_inputs_with_their_clones.size() <= 1);
-    
+
     for (std::pair<Tensor, Tensor> mut_tensors: mutable_inputs_with_their_clones) {
       auto& mutable_input =  mut_tensors.first;
       auto& cloned_mutable_input =  mut_tensors.second;
