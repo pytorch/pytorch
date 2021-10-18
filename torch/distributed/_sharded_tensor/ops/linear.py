@@ -1,6 +1,7 @@
+from functools import reduce
+from operator import concat
 from typing import List, cast
 
-import itertools
 import torch
 import torch.distributed as dist
 from torch.distributed._sharding_spec import ChunkShardingSpec
@@ -177,7 +178,7 @@ def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
             split_size = input_split_sizes[placement.rank()]
             offset_start_idx = idx * sharded_dim_size_max
             indices[placement.rank()] = list(range(offset_start_idx, offset_start_idx + split_size))
-        indices = list(itertools.chain(*indices))
+        indices = reduce(concat, indices)
 
         input_t = input_t.index_select(0, torch.tensor(indices, device=input_t.device))
 
