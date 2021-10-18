@@ -557,7 +557,7 @@ struct TORCH_API TensorType : public Type {
       at::Device device,
       at::IntArrayRef sizes);
 
-  static TypePtr fromNumberType(TypePtr typ);
+  static TypePtr fromNumberType(const Type& typ);
   static TypePtr fromBoolType();
 
   c10::optional<size_t> dim() const {
@@ -1606,17 +1606,17 @@ inline TypePtr unshapedType(const TypePtr& type) {
   return type->withContained(fmap(type->containedTypes(), unshapedType));
 }
 
-inline TypePtr TensorType::fromNumberType(TypePtr typ) {
-  if (typ->isSubtypeOf(*IntType::get())) {
+inline TypePtr TensorType::fromNumberType(const Type& typ) {
+  if (typ.isSubtypeOf(*IntType::get())) {
     return TensorType::createContiguous(at::kLong, at::kCPU, {});
-  } else if (typ->isSubtypeOf(*FloatType::get())) {
+  } else if (typ.isSubtypeOf(*FloatType::get())) {
     return TensorType::createContiguous(at::kDouble, at::kCPU, {});
-  } else if (typ->isSubtypeOf(*BoolType::get())) {
+  } else if (typ.isSubtypeOf(*BoolType::get())) {
     return TensorType::createContiguous(at::kBool, at::kCPU, {});
-  } else if (typ->kind() == NumberType::Kind) {
+  } else if (typ.kind() == NumberType::Kind) {
     return TensorType::create(c10::nullopt, at::kCPU, {}, c10::nullopt);
   }
-  TORCH_CHECK(false, "Unknown number type: ", typ->str());
+  TORCH_CHECK(false, "Unknown number type: ", typ.str());
 }
 inline TypePtr TensorType::fromBoolType() {
   return TensorType::createContiguous(at::kBool, at::kCPU, {});
