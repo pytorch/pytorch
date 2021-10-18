@@ -2378,6 +2378,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
                     raise e
             time.sleep(1)
 
+    @skip_if_rocm
     @with_nccl_blocking_wait
     @requires_nccl()
     @skip_if_lt_x_gpu(3)
