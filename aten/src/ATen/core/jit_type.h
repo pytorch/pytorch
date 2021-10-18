@@ -112,6 +112,10 @@ struct TORCH_API UnionType : public Type {
 
   bool operator==(const Type& rhs) const override;
 
+  bool isUnionType() const {
+    return true;
+  }
+
   at::ArrayRef<TypePtr> containedTypes() const override {
     return types_;
   }
@@ -190,6 +194,10 @@ struct TORCH_API OptionalType : public UnionType {
   }
 
   bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override;
+
+  bool isUnionType() const {
+    return true;
+  }
 
   // common cast Optional[Tensor] for undefined tensor type
   static OptionalTypePtr ofTensor();
@@ -1970,6 +1978,9 @@ struct TORCH_API ClassType : public NamedType {
       std::vector<std::string> unresolved_class_attributes = {});
 
   bool operator==(const Type& rhs) const override {
+    if (this == &rhs) {
+      return true;
+    }
     if (auto user_rhs = rhs.castRaw<ClassType>()) {
       const auto& lhs_name = name().value();
       const auto& rhs_name = user_rhs->name().value();
