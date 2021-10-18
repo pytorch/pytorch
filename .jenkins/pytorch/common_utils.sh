@@ -71,7 +71,7 @@ function file_diff_from_base() {
 
 function get_bazel() {
   # download bazel version
-  wget https://github.com/bazelbuild/bazel/releases/download/4.2.1/bazel-4.2.1-linux-x86_64 -O tools/bazel
+  wget https://ossci-linux.s3.amazonaws.com/bazel-4.2.1-linux-x86_64 -O tools/bazel
   # verify content
   echo '1a4f3a3ce292307bceeb44f459883859c793436d564b95319aacb8af1f20557c tools/bazel' | sha256sum --quiet -c
 
