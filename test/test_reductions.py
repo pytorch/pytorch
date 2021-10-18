@@ -253,7 +253,7 @@ class TestReductions(TestCase):
         result: torch.Tensor = op(t, *args, **kwargs)
         is_integral = dtype in integral_types_and(torch.bool)
         if op.promotes_int_to_float and is_integral:
-            self.assertTrue(torch.is_floating_point(result.dtype))
+            self.assertTrue(torch.is_floating_point(result))
         elif op.promotes_int_to_int64 and is_integral:
             self.assertEqual(result.dtype, torch.int64)
         elif op.result_dtype is not None:
