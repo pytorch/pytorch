@@ -2024,6 +2024,57 @@ def sample_inputs_logsumexp(self, device, dtype, requires_grad):
 
     return tuple(samples)
 
+def sample_inputs_like_fns(self, device, dtype, requires_grad, **kwargs):
+    inputs = [
+        ((), {}),
+        ((S, S), {}),
+        ((0, S, 0), {}),
+        ((S,), {'dtype': dtype, 'device': device}),
+        # Hard-code some dtypes/devices. We want to test cases where the
+        # (dtype, device) is different from the input's (dtype, device)
+        ((S,), {'dtype': torch.double}),
+        ((S,), {'device': 'cpu'}),
+        ((S,), {'dtype': torch.double, 'device': 'cpu'}),
+    ]
+    if torch.cuda.is_available():
+        inputs.append(((S,), {'device': 'cuda'}))
+
+    samples = []
+    for shape, kwargs in inputs:
+        t = make_tensor(shape, device, dtype,
+                        low=None, high=None,
+                        requires_grad=requires_grad)
+        samples.append(SampleInput(t, kwargs=kwargs))
+
+    return tuple(samples)
+
+def sample_inputs_full_like(self, device, dtype, requires_grad, **kwargs):
+    def get_val(dtype):
+        return make_tensor([], 'cpu', dtype).item()
+
+    inputs = [
+        ((), get_val(dtype), {}),
+        ((S, S), get_val(dtype), {}),
+        ((0, S, 0), get_val(dtype), {}),
+        ((S,), get_val(dtype), {'dtype': dtype, 'device': device}),
+        # Hard-code some dtypes/devices. We want to test cases where the
+        # (dtype, device) is different from the input's (dtype, device)
+        ((S,), get_val(torch.double), {'dtype': torch.double}),
+        ((S,), get_val(dtype), {'device': 'cpu'}),
+        ((S,), get_val(torch.double), {'dtype': torch.double, 'device': 'cpu'}),
+    ]
+    if torch.cuda.is_available():
+        inputs.append(((S,), get_val(dtype), {'device': 'cuda'}))
+
+    samples = []
+    for shape, fill_value, kwargs in inputs:
+        t = make_tensor(shape, device, dtype,
+                        low=None, high=None,
+                        requires_grad=requires_grad)
+        samples.append(SampleInput(t, args=(fill_value,), kwargs=kwargs))
+
+    return tuple(samples)
+
 def sample_inputs_logcumsumexp(self, device, dtype, requires_grad):
     inputs = (
         ((S, S, S), 0),
@@ -2473,6 +2524,22 @@ def sample_inputs_histogram(op_info, device, dtype, requires_grad):
         bins_tensor = make_arg((bin_ct + 1,))
         sample_inputs.append(SampleInput(input_tensor, args=(bins_tensor,),
                                          kwargs=dict(weight=weight_tensor, density=density)))
+
+    return sample_inputs
+
+def sample_inputs_bucketize(op_info, device, dtype, requires_grad):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    sizes = ((), (S,), (S, S), (S, S, S), (S, 1, S), (S, 0, S))
+
+    sample_inputs = []
+
+    for size, out_int32, right in product(sizes, [False, True], [False, True]):
+        input_tensor = make_arg(size)
+        boundaries = make_arg((S,)).msort()
+
+        sample_inputs.append(SampleInput(input_tensor, args=(boundaries, ),
+                                         kwargs=dict(out_int32=out_int32, right=right)))
 
     return sample_inputs
 
@@ -3960,6 +4027,19 @@ def sample_inputs_linalg_slogdet(op_info, device, dtype, requires_grad=False):
         sample.output_process_fn_grad = out_fn
 
     return samples
+
+
+def sample_inputs_linalg_pinv(op_info, device, dtype, requires_grad=False, **kwargs):
+    """
+    This function generates input for torch.linalg.pinv with hermitian=True keyword argument.
+    """
+    out = sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad, **kwargs)
+    real_dtype = out[0].input.real.dtype if dtype.is_complex else dtype
+    for o in out:
+        # requires_grad path for rcond tensor is not implemented
+        for rcond in (None, 1.0, torch.tensor(1.0, dtype=real_dtype, device=device)):
+            o.kwargs = {"rcond": rcond}
+    return out
 
 
 def sample_inputs_linalg_pinv_hermitian(op_info, device, dtype, requires_grad=False, **kwargs):
@@ -5619,6 +5699,22 @@ def sample_inputs_expand(op_info, device, dtype, requires_grad, **kwargs):
 
     return list(generator())
 
+def sample_inputs_conversion(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    shapes = ((),
+              (2, 3))
+    memory_format_options = [None, torch.preserve_format, torch.contiguous_format]
+
+    def generator():
+        for shape, memory_format in itertools.product(shapes, memory_format_options):
+            yield SampleInput(make_arg(shape),
+                              kwargs={'memory_format': memory_format} if memory_format else {})
+        # Channels last case: input must be 4d
+        yield SampleInput(make_arg((2, 3, 2, 3)),
+                          kwargs={'memory_format': torch.channels_last})
+
+    return list(generator())
 
 def sample_inputs_expand_as(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device)
@@ -6062,9 +6158,10 @@ def reference_sigmoid(x):
 
 
 def reference_logsigmoid(x):
-    max_ = np.maximum(x.dtype.type(0), -x)
-    z = np.exp(-max_) + np.exp(-x - max_)
-    return -(max_ + np.log(z))
+    return np.where(
+        x < 0,
+        x - np.log1p(np.exp(x)),
+        -np.log1p(np.exp(-x)))
 
 
 def reference_lgamma(x):
@@ -7069,14 +7166,14 @@ op_db: List[OpInfo] = [
            sample_inputs_func=partial(sample_inputs_fmod_remainder, autodiffed=True)),
     OpInfo('remainder',
            ref=np.remainder,
-           dtypesIfCPU=all_types_and(torch.float16),
+           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_fmod_remainder),
     OpInfo('remainder',
            ref=np.remainder,
            variant_test_name='autodiffed',
-           dtypesIfCPU=all_types_and(torch.float16, torch.bool),
+           dtypesIfCPU=all_types_and(torch.float16, torch.bool, torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.float16, torch.bool, torch.bfloat16),
            supports_forward_ad=True,
            assert_autodiffed=True,
@@ -7676,6 +7773,7 @@ op_db: List[OpInfo] = [
                    )),
     OpInfo('logaddexp',
            dtypes=floating_types(),
+           dtypesIfCPU=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.bfloat16),
            dtypesIfROCM=floating_types_and(torch.bfloat16),
            supports_forward_ad=True,
@@ -7684,6 +7782,7 @@ op_db: List[OpInfo] = [
                         args=(make_tensor((S, S), device, dtype, requires_grad=requires_grad),)),)),
     OpInfo('logaddexp2',
            dtypes=floating_types(),
+           dtypesIfCPU=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.bfloat16),
            dtypesIfROCM=floating_types_and(torch.bfloat16),
            supports_forward_ad=True,
@@ -8310,7 +8409,6 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=True,
            dtypesIfCPU=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-           supports_scripting=False,  # TODO: fix aliasing test
            sample_inputs_func=sample_inputs_max_pool2d),
     OpInfo('nn.functional.linear',
            aten_name='linear',
@@ -8336,18 +8434,6 @@ op_db: List[OpInfo] = [
         assert_autodiffed=False,
         supports_gradgrad=True,
         supports_out=False,
-        # autodiff_nonfusible_nodes=["aten::log_sigmoid"],
-        decorators=[
-            DecorateInfo(
-                precisionOverride({torch.float16: 1e-2}),
-                'TestUnaryUfuncs', 'test_reference_numerics_normal'),
-            DecorateInfo(
-                precisionOverride({torch.float16: 1e-2}),
-                'TestUnaryUfuncs', 'test_reference_numerics_hard'),
-            DecorateInfo(
-                precisionOverride({torch.float16: 1e-2}),
-                'TestUnaryUfuncs', 'test_reference_numerics_extremal'),
-        ],
     ),
     OpInfo('nextafter',
            dtypes=floating_types_and(torch.bfloat16),
@@ -8829,7 +8915,7 @@ op_db: List[OpInfo] = [
     OpInfo('__rmod__',
            op=torch.Tensor.__rmod__,
            dtypes=all_types_and(torch.bfloat16, torch.half),
-           dtypesIfCPU=floating_types_and(torch.half,),
+           dtypesIfCPU=floating_types_and(torch.bfloat16, torch.half,),
            dtypesIfCUDA=all_types_and(torch.bfloat16, torch.half, torch.bool),
            sample_inputs_func=sample_inputs_rbinops,
            supports_out=False,
@@ -9159,6 +9245,39 @@ op_db: List[OpInfo] = [
                    safe_casts_outputs=True,
                    supports_forward_ad=True,
                    supports_complex_to_float=True),
+    UnaryUfuncInfo('isfinite',
+                   ref=np.isfinite,
+                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+                   supports_out=False,
+                   supports_autograd=False,
+                   skips=(
+                       # Reference: https://github.com/pytorch/pytorch/issues/66402
+                       DecorateInfo(unittest.expectedFailure, "TestUnaryUfuncs", "test_reference_numerics_hard",
+                                    device_type='cpu', dtypes=(torch.complex64,), active_if=not (IS_MACOS or IS_WINDOWS)),
+                   )),
+    UnaryUfuncInfo('isinf',
+                   ref=np.isinf,
+                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+                   supports_out=False,
+                   supports_autograd=False),
+    UnaryUfuncInfo('isposinf',
+                   ref=np.isposinf,
+                   dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
+                   supports_autograd=False),
+    UnaryUfuncInfo('isneginf',
+                   ref=np.isneginf,
+                   dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
+                   supports_autograd=False),
+    UnaryUfuncInfo('isreal',
+                   ref=np.isreal,
+                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+                   supports_out=False,
+                   supports_autograd=False),
+    UnaryUfuncInfo('isnan',
+                   ref=np.isnan,
+                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+                   supports_out=False,
+                   supports_autograd=False),
     OpInfo('linalg.solve',
            aten_name='linalg_solve',
            op=torch.linalg.solve,
@@ -9187,8 +9306,12 @@ op_db: List[OpInfo] = [
            check_batched_grad=False,
            check_batched_gradgrad=False,
            supports_forward_ad=True,
-           sample_inputs_func=sample_inputs_linalg_invertible,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack]),
+           sample_inputs_func=sample_inputs_linalg_pinv,
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
+           skips=(
+               # errors with "leaked XXXX bytes CUDA memory on device 0"
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', device_type='cuda'),
+           )),
     OpInfo('linalg.pinv',
            aten_name='linalg_pinv',
            variant_test_name='singular',
@@ -9530,6 +9653,150 @@ op_db: List[OpInfo] = [
     OpInfo('scatter',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_scatter,),
+    OpInfo('bfloat16',
+           op=lambda x, *args, **kwargs: x.bfloat16(*args, **kwargs),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_conversion,
+           # The autograd test runner cannot handle functions that change dtype
+           supports_autograd=False,
+           skips=(
+               # RuntimeError: attribute lookup is not defined on builtin
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           )),
+    OpInfo('bool',
+           op=lambda x, *args, **kwargs: x.bool(*args, **kwargs),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_conversion,
+           supports_autograd=False,
+           skips=(
+               # RuntimeError: attribute lookup is not defined on builtin
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           )),
+    OpInfo('byte',
+           op=lambda x, *args, **kwargs: x.byte(*args, **kwargs),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_conversion,
+           # The autograd test runner cannot handle functions that change dtype
+           supports_autograd=False,
+           skips=(
+               # RuntimeError: attribute lookup is not defined on builtin
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           )),
+    OpInfo('char',
+           op=lambda x, *args, **kwargs: x.char(*args, **kwargs),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_conversion,
+           # The autograd test runner cannot handle functions that change dtype
+           supports_autograd=False,
+           skips=(
+               # RuntimeError: attribute lookup is not defined on builtin
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           )),
+    OpInfo('double',
+           op=lambda x, *args, **kwargs: x.double(*args, **kwargs),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_conversion,
+           supports_forward_ad=True,
+           skips=(
+               # RuntimeError: attribute lookup is not defined on builtin
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           )),
+    OpInfo('float',
+           op=lambda x, *args, **kwargs: x.float(*args, **kwargs),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_conversion,
+           # The autograd test runner cannot handle functions that change dtype
+           supports_autograd=False,
+           skips=(
+               # RuntimeError: attribute lookup is not defined on builtin
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           )),
+    OpInfo('half',
+           op=lambda x, *args, **kwargs: x.half(*args, **kwargs),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_conversion,
+           # The autograd test runner cannot handle functions that change dtype
+           supports_autograd=False,
+           skips=(
+               # RuntimeError: attribute lookup is not defined on builtin
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           )),
+    OpInfo('int',
+           op=lambda x, *args, **kwargs: x.int(*args, **kwargs),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_conversion,
+           supports_autograd=False,
+           skips=(
+               # RuntimeError: attribute lookup is not defined on builtin
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           )),
+    OpInfo('long',
+           op=lambda x, *args, **kwargs: x.long(*args, **kwargs),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_conversion,
+           supports_autograd=False,
+           skips=(
+               # RuntimeError: attribute lookup is not defined on builtin
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           )),
+    OpInfo('short',
+           op=lambda x, *args, **kwargs: x.short(*args, **kwargs),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_conversion,
+           supports_autograd=False,
+           skips=(
+               # RuntimeError: attribute lookup is not defined on builtin
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           )),
+    OpInfo('empty_like',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_like_fns,
+           supports_autograd=False,
+           skips=(
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
+           )),
+    OpInfo('zeros_like',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_like_fns,
+           supports_autograd=False),
+    OpInfo('ones_like',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_like_fns,
+           supports_autograd=False),
+    OpInfo('randn_like',
+           dtypes=floating_types_and(torch.half, torch.bfloat16, torch.complex64, torch.complex128),
+           op=lambda inp, *args, **kwargs:
+               wrapper_set_seed(torch.randn_like, inp, *args, **kwargs),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_like_fns,
+           supports_autograd=False,
+           skips=(
+               # AssertionError: JIT Test does not execute any logic
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           )),
+    OpInfo('full_like',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_full_like,
+           supports_autograd=False),
     OpInfo('scatter_add',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_scatter_add,
@@ -9572,6 +9839,15 @@ op_db: List[OpInfo] = [
                #     return torch.histogram(i0, 1, weight=tensor(-0.5735, dtype=torch.float32), density=False)
                #                                          ~~~~~~ <--- HERE
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           )),
+    OpInfo('bucketize',
+           dtypes=all_types_and(torch.bfloat16),
+           dtypesIfCUDA=all_types(),
+           sample_inputs_func=sample_inputs_bucketize,
+           supports_autograd=False,
+           skips=(
+               # JIT tests don't work with Tensor keyword arguments
+               DecorateInfo(unittest.skip("Expected failure!"), 'TestJit', 'test_variant_consistency_jit'),
            )),
     OpInfo('cat',
            ref=lambda input_seq, dim=0, **kwargs: np.concatenate(input_seq, axis=dim, **kwargs),
@@ -9783,8 +10059,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_zeta),
     OpInfo('logsumexp',
            aliases=('special.logsumexp',),
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.half),
+           dtypes=all_types_and(torch.bool, torch.bfloat16),
+           dtypesIfCUDA=all_types_and(torch.bool, torch.bfloat16, torch.half),
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_logsumexp),
     OpInfo('trace',
