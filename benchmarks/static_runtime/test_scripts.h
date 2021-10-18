@@ -270,36 +270,32 @@ const auto pow_script_sca_ten = R"JIT(
       return torch.pow(input, exponent).clone()
 )JIT";
 
-// to.dtype
-const auto to_script_0 = R"JIT(
+const auto to_script_dtype = R"JIT(
   def forward(self, input: Tensor, dtype: int, non_blocking: bool, copy: bool, memory_format: int):
       a = input + input
       return torch.to(a, dtype, non_blocking, copy, memory_format).clone()
 )JIT";
 
-// to.dtype, strided
-const auto to_script_1 = R"JIT(
+const auto to_script_dtype_strided = R"JIT(
   def forward(self, input: Tensor, dtype: int, non_blocking: bool, copy: bool, memory_format: int):
       b = input.permute(0, 2, 3, 1)
       return torch.to(b, dtype, non_blocking, copy, memory_format).clone()
 )JIT";
 
-// to.prim_dtype
-const auto to_script_2 = R"JIT(
-  def forward(self, input:Tensor, dtype: int, non_blocking: bool, copy: bool):
+const auto to_script_prim_dtype = R"JIT(
+  def forward(self, input:Tensor, dtype: Optional[int], non_blocking: bool, copy: bool):
       a = input + input
       return torch.to(a, dtype, non_blocking, copy).clone()
 )JIT";
 
-// to.other
-const auto to_script_3 = R"JIT(
+const auto to_script_other = R"JIT(
   def forward(self, input:Tensor, other: Tensor, non_blocking: bool, copy: bool, memory_format: int):
       a = input + input
       return torch.to(a, other, non_blocking, copy, memory_format).clone()
 )JIT";
 
 // if input is float tensor, b could be alias of a
-const auto to_script_4 = R"JIT(
+const auto to_script_alias = R"JIT(
   def forward(self, input:Tensor):
       a = input + input
       b = a.float()
