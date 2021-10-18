@@ -14,7 +14,7 @@ from .fx.qconfig_utils import (
     check_is_valid_fuse_custom_config_dict,
     check_is_valid_prepare_custom_config_dict,
     check_is_valid_qconfig_dict)
-from torch.nn.intrinsic import _FusedModule
+from torch.ao.nn.quantization.intrinsic import _FusedModule
 from typing import Dict, Any, List, Callable, Tuple, Optional, Set
 
 def _check_is_graph_module(model: torch.nn.Module) -> None:
@@ -121,7 +121,10 @@ class QuantizationTracer(Tracer):
         self.node_name_to_scope : Dict[str, Tuple[str, type]] = {}
 
     def is_leaf_module(self, m: torch.nn.Module, module_qualified_name : str) -> bool:
-        return (m.__module__.startswith("torch.nn") and
+        # TODO(future PR): also update the default FX tracer for torch.ao.nn
+        is_nn_module = m.__module__.startswith("torch.nn") or \
+            m.__module__.startswith("torch.ao.nn")
+        return (is_nn_module and
                 not isinstance(m, torch.nn.Sequential)) or \
             module_qualified_name in self.skipped_module_names or \
             type(m) in self.skipped_module_classes or \
@@ -375,7 +378,7 @@ def prepare_fx(
 
             # Additioanl module mapping for qat
             "additional_qat_module_mapping": {
-               torch.nn.intrinsic.ConvBn2d: torch.nn.qat.ConvBn2d
+               torch.ao.nn.quantization.intrinsic.ConvBn2d: torch.nn.qat.ConvBn2d
             },
 
             # Additional fusion patterns

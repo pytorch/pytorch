@@ -1,6 +1,6 @@
 import torch
 import torch.nn.quantized as nnq
-import torch.nn.intrinsic as nni
+import torch.ao.nn.quantization.intrinsic as nni
 from torch.nn.quantized.modules.utils import _quantize_weight
 
 class Linear(nnq.Linear):
@@ -81,7 +81,7 @@ class Linear(nnq.Linear):
                           utilities or provided by the user
         """
         float_modules = [torch.nn.Linear, torch.nn.modules.linear.NonDynamicallyQuantizableLinear,
-                         torch.nn.intrinsic.modules.fused.LinearReLU]
+                         torch.ao.nn.quantization.intrinsic.modules.fused.LinearReLU]
 
         assert type(mod) in float_modules, \
             'nn.quantized.dynamic.Linear.from_float only works for one of' + \

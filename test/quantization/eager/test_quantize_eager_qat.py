@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.backends.mkldnn
 from torch.nn import Conv2d, BatchNorm2d, ReLU, init
-from torch.nn.intrinsic.qat import ConvBn2d, ConvBnReLU2d
+from torch.ao.nn.quantization.intrinsic.qat import ConvBn2d, ConvBnReLU2d
 from torch.nn.modules.utils import _pair
 import torch.nn.quantized as nnq
 from torch.ao.quantization import (
@@ -500,7 +500,7 @@ class _ReferenceConvBnNd(torch.nn.Conv2d, torch.nn.modules.conv._ConvNd):
         return qat_convbn
 
 class _ReferenceConvBn2d(_ReferenceConvBnNd, nn.Conv2d):
-    _FLOAT_MODULE = torch.nn.intrinsic.ConvBn2d
+    _FLOAT_MODULE = torch.ao.nn.quantization.intrinsic.ConvBn2d
 
     def __init__(self,
                  # ConvNd args
@@ -601,9 +601,9 @@ class TestConvBNQATModule(TestCase):
         ).to(dtype=torch.double)
         qat_op.apply(torch.ao.quantization.disable_fake_quant)
         if freeze_bn:
-            qat_op.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
+            qat_op.apply(torch.ao.nn.quantization.intrinsic.qat.freeze_bn_stats)
         else:
-            qat_op.apply(torch.nn.intrinsic.qat.update_bn_stats)
+            qat_op.apply(torch.ao.nn.quantization.intrinsic.qat.update_bn_stats)
 
         # align inputs and internal parameters
         input = torch.randn(batch_size, input_channels, height, width, dtype=torch.double, requires_grad=True)
@@ -772,7 +772,7 @@ class TestConvBNQATModule(TestCase):
             input_clone = input.clone().detach().requires_grad_()
 
             if i > 2:
-                qat_op.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
+                qat_op.apply(torch.ao.nn.quantization.intrinsic.qat.freeze_bn_stats)
                 qat_ref_op.freeze_bn_stats()
 
             if i > 3:

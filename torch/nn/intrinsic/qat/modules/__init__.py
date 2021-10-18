@@ -1,5 +1,5 @@
-from .linear_relu import LinearReLU
-from .conv_fused import (
+from torch.ao.nn.quantization.intrinsic.qat.modules.linear_relu import LinearReLU
+from torch.ao.nn.quantization.intrinsic.qat.modules.conv_fused import (
     ConvBn1d,
     ConvBn2d,
     ConvBn3d,

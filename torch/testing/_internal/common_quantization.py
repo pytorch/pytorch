@@ -5,10 +5,10 @@ checking quantization api and properties of resulting modules.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.nn.intrinsic.quantized.dynamic as nniqd
+import torch.ao.nn.quantization.intrinsic.quantized.dynamic as nniqd
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
-from torch.nn.intrinsic import _FusedModule
+from torch.ao.nn.quantization.intrinsic import _FusedModule
 import torch.distributed as dist
 
 from torch.testing._internal.common_utils import TestCase

@@ -253,7 +253,7 @@ class AccTracerTest(unittest.TestCase):
         class TestModule(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.conv = nn.intrinsic.quantized.ConvReLU2d(3, 3, 1)
+                self.conv = ao.nn.quantization.intrinsic.quantized.ConvReLU2d(3, 3, 1)
 
             def forward(self, a: torch.Tensor) -> torch.Tensor:
                 return self.conv(a)

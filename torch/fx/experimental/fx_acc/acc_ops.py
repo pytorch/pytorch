@@ -1548,7 +1548,7 @@ def add_relu_unfuse_mapper(
 
 
 @register_custom_acc_mapper_fn(
-    op_and_target=("call_module", nn.intrinsic.quantized.ConvReLU2d),
+    op_and_target=("call_module", ao.nn.quantization.intrinsic.quantized.ConvReLU2d),
     arg_replacement_tuples=[
         ("input", "input"),
     ],

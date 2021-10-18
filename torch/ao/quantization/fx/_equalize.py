@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.nn.intrinsic as nni
+import torch.ao.nn.quantization.intrinsic as nni
 from torch.fx import GraphModule
 from torch.fx.graph import Node
 

@@ -2,7 +2,7 @@ from collections.abc import Iterable
 import torch
 
 import torch.nn as nn
-import torch.nn.intrinsic as nni
+import torch.ao.nn.quantization.intrinsic as nni
 from torch.nn.quantized.modules.utils import _quantize_weight, hide_packed_params_repr
 from typing import Optional
 

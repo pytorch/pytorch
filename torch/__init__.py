@@ -728,11 +728,11 @@ from torch.autograd import (
 from torch import fft as fft
 from torch import futures as futures
 from torch import nn as nn
-import torch.nn.intrinsic
-import torch.nn.quantizable
-import torch.nn.quantized
 # AO depends on nn, as well as quantized stuff -- so should be after those.
 from torch import ao as ao
+import torch.ao.nn.quantization.intrinsic
+import torch.nn.quantizable
+import torch.nn.quantized
 from torch import optim as optim
 import torch.optim._multi_tensor
 from torch import multiprocessing as multiprocessing

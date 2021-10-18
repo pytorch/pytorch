@@ -1,16 +1,16 @@
-from .fused import _FusedModule
-from .fused import ConvBn1d
-from .fused import ConvBn2d
-from .fused import ConvBn3d
-from .fused import ConvBnReLU1d
-from .fused import ConvBnReLU2d
-from .fused import ConvBnReLU3d
-from .fused import ConvReLU1d
-from .fused import ConvReLU2d
-from .fused import ConvReLU3d
-from .fused import LinearReLU
-from .fused import BNReLU2d
-from .fused import BNReLU3d
+from torch.ao.quantized.intrinsic.modules.fused import _FusedModule
+from torch.ao.quantized.intrinsic.modules.fused import ConvBn1d
+from torch.ao.quantized.intrinsic.modules.fused import ConvBn2d
+from torch.ao.quantized.intrinsic.modules.fused import ConvBn3d
+from torch.ao.quantized.intrinsic.modules.fused import ConvBnReLU1d
+from torch.ao.quantized.intrinsic.modules.fused import ConvBnReLU2d
+from torch.ao.quantized.intrinsic.modules.fused import ConvBnReLU3d
+from torch.ao.quantized.intrinsic.modules.fused import ConvReLU1d
+from torch.ao.quantized.intrinsic.modules.fused import ConvReLU2d
+from torch.ao.quantized.intrinsic.modules.fused import ConvReLU3d
+from torch.ao.quantized.intrinsic.modules.fused import LinearReLU
+from torch.ao.quantized.intrinsic.modules.fused import BNReLU2d
+from torch.ao.quantized.intrinsic.modules.fused import BNReLU3d
 
 
 __all__ = [

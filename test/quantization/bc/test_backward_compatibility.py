@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
-import torch.nn.intrinsic.quantized as nniq
+import torch.ao.nn.quantization.intrinsic.quantized as nniq
 from torch.fx import GraphModule
 
 # Testing utils
