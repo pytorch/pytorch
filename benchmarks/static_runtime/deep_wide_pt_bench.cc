@@ -90,13 +90,14 @@ static void BM_deep_wide_static(benchmark::State& state) {
   }
 }
 
-torch::jit::StaticRuntime getStaticRuntime() {
+std::shared_ptr<torch::jit::StaticModule> getStaticModule() {
   static auto smod = std::make_shared<torch::jit::StaticModule>(getDeepAndWideSciptModel());
-  return torch::jit::StaticRuntime(*smod);
+  return smod;
 }
 
 static void BM_deep_wide_static_threaded(benchmark::State& state) {
-   auto sr = getStaticRuntime();
+  auto sm = getStaticModule();
+  torch::jit::StaticRuntime sr(*sm);
 
   const int batch_size = 1; // state.range(0);
   auto ad_emb_packed = torch::randn({batch_size, 1, embedding_size});
@@ -142,6 +143,22 @@ static void BM_leaky_relu(benchmark::State& state) {
 
 BENCHMARK(BM_leaky_relu)->RangeMultiplier(8)->Ranges({{1, 20}});
 BENCHMARK(BM_leaky_relu_const)->RangeMultiplier(8)->Ranges({{1, 20}});
+
+static void BM_signed_log1p(benchmark::State& state) {
+  auto mod = getSignedLog1pModel();
+  torch::jit::StaticModule smod(mod);
+
+  const int num_elements = state.range(0);
+  auto data = torch::randn({num_elements});
+  std::vector<at::Tensor> inputs({data});
+
+  smod(inputs);
+  for (auto _ : state) {
+    smod(inputs);
+  }
+}
+
+BENCHMARK(BM_signed_log1p)->RangeMultiplier(8)->Ranges({{16, 65536}});
 
 static void BM_long_static_memory_optimization(benchmark::State& state) {
   auto mod = getLongScriptModel();

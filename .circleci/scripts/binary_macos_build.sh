@@ -14,6 +14,10 @@ chmod +x "$build_script"
 # Build
 cat >"$build_script" <<EOL
 export PATH="$workdir/miniconda/bin:$PATH"
+if [[ "$CIRCLE_BRANCH" == "nightly" ]]; then
+  export USE_PYTORCH_METAL_EXPORT=1
+  export USE_COREML_DELEGATE=1
+fi
 if [[ "$PACKAGE_TYPE" == conda ]]; then
   "$workdir/builder/conda/build_pytorch.sh"
 else

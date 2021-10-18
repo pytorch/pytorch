@@ -144,7 +144,6 @@ TORCH_API void* maybe_data_ptr(const TensorArg& tensor);
 // on whether a subgeometry is contiguous.
 TORCH_API bool geometry_is_contiguous(IntArrayRef sizes, IntArrayRef strides);
 
-// Correspond to THCUNN_check_dim_size/THNN_check_dim_size
 TORCH_API void check_dim_size(
     const Tensor& tensor,
     int64_t dim,

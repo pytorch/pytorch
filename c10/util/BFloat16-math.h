@@ -57,6 +57,12 @@ inline c10::BFloat16 sin(c10::BFloat16 a) {
 inline c10::BFloat16 tan(c10::BFloat16 a) {
   return std::tan(float(a));
 }
+inline c10::BFloat16 sinh(c10::BFloat16 a) {
+  return std::sinh(float(a));
+}
+inline c10::BFloat16 cosh(c10::BFloat16 a) {
+  return std::cosh(float(a));
+}
 inline c10::BFloat16 tanh(c10::BFloat16 a) {
   return std::tanh(float(a));
 }

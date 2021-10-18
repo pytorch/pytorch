@@ -8,29 +8,11 @@ import torch
 from torch import nn
 from torch.nn.utils import parametrize
 
-from .utils import FakeSparsity
+from .utils import FakeSparsity, module_to_fqn, fqn_to_module
 
 SUPPORTED_MODULES = {
     nn.Linear
 }
-
-def _module_to_fqn(model, layer, prefix=''):
-    for name, child in model.named_children():
-        new_name = prefix + '.' + name
-        if child is layer:
-            return new_name
-        child_path = _module_to_fqn(child, layer, prefix=new_name)
-        if child_path is not None:
-            return child_path
-    return None
-
-def _fqn_to_module(model, path):
-    path = path.split('.')
-    for name in path:
-        model = getattr(model, name, None)
-        if model is None:
-            return None
-    return model
 
 
 class BaseSparsifier(abc.ABC):
@@ -92,28 +74,6 @@ class BaseSparsifier(abc.ABC):
         format_string += ')'
         return format_string
 
-    def _pack_state(self):
-        state: Dict[str, Dict] = defaultdict(dict)
-        for g in self.module_groups:
-            parametrization = g['module'].parametrizations['weight']
-            # original_weight = parametrization.original
-            key = g['fqn']
-            mask = None
-            # Find the mask in the FakeSparsity.
-            found = False
-            for p in parametrization:
-                if isinstance(p, FakeSparsity):
-                    parametrization = p
-                    found = True
-                    break
-            if found:
-                mask = parametrization.mask
-            state[key]['mask'] = mask
-            # Get all the tensors inside the module_group
-            state[key].update(
-                {key: value for key, value in self.state[key].items()})
-        return state
-
     def state_dict(self):
         r"""Returns the state of the optimizer as a :class:`dict`.
 
@@ -121,6 +81,8 @@ class BaseSparsifier(abc.ABC):
         * state - current state of the sparsification.
         * module_groups - a list containing all sparsity configuration groups
             with the key 'fqn' specifying the layer path within a model
+
+        TODO: Need a clean way of loading the state of the "preapred" module
         """
         module_groups = [
             dict(filter(lambda key_value: key_value[0] != 'module', mg.items()))
@@ -128,7 +90,7 @@ class BaseSparsifier(abc.ABC):
         ]
 
         return {
-            'state': self._pack_state(),
+            'state': self.state,
             'module_groups': module_groups,
         }
 
@@ -136,7 +98,7 @@ class BaseSparsifier(abc.ABC):
         module_groups = copy.deepcopy(state_dict['module_groups'])
         states = state_dict['state']
         for fqn, s in states.items():
-            layer = _fqn_to_module(self.model, fqn)
+            layer = fqn_to_module(self.model, fqn)
             if strict and layer is None:
                 raise RuntimeError(f'Error loading {fqn} into the model')
 
@@ -180,16 +142,34 @@ class BaseSparsifier(abc.ABC):
                     else:
                         stack.append(child)
 
+        # TODO: Remove the configuration by reference ('module')
         for module_config in self.config:
             if isinstance(module_config, nn.Module):
                 module_config = {'module': module_config}
             local_args = copy.deepcopy(self.defaults)
             local_args.update(module_config)
-            module = local_args['module']
-            module_fqn = _module_to_fqn(model, module)
+            # Make sure there is at least one way of handling the model
+            module = local_args.get('module', None)
+            module_fqn = local_args.get('fqn', None)
+            if module is None and module_fqn is None:
+                # No module given for this group
+                raise ValueError('Either `module` or `fqn` must be specified!')
+            elif module is None:
+                # FQN is given
+                module = fqn_to_module(model, module_fqn)
+            elif module_fqn is None:
+                # Module is given
+                module_fqn = module_to_fqn(model, module)
+            else:
+                # Both Module and FQN are given
+                module_from_fqn = fqn_to_module(model, module_fqn)
+                assert module is module_from_fqn, \
+                    'Given both `module` and `fqn`, it is expected them to ' \
+                    'refer to the same thing!'
             if module_fqn and module_fqn[0] == '.':
                 module_fqn = module_fqn[1:]
             local_args['fqn'] = module_fqn
+            local_args['module'] = module
             self.module_groups.append(local_args)
 
         self._prepare()
@@ -201,6 +181,7 @@ class BaseSparsifier(abc.ABC):
             module = config['module']
             param = config.get('parametrization', FakeSparsity)
             mask = config.get('mask', torch.ones(module.weight.shape))
+            self.state[config['fqn']]['mask'] = mask
             parametrize.register_parametrization(module, 'weight', param(mask))
 
     def squash_mask(self, *args, **kwargs):

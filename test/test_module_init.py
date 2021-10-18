@@ -7,7 +7,6 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 from torch.testing._internal.common_utils import TestCase, run_tests
 
-
 # Returns a database of args & kwargs that can be used to construct each module.
 # Each entry is in class -> (args, kwargs) format.
 # Example: torch.nn.Linear -> ([10, 5], {})
@@ -166,13 +165,16 @@ def build_constructor_arg_db():
         torch.nn.UpsamplingNearest2d: ((), {}),
         torch.nn.ZeroPad2d: ((0,), {}),
         torch.nn.qat.Conv2d: ((3, 3, 3), {
-            'qconfig': torch.quantization.default_qconfig,
+            'qconfig': torch.ao.quantization.default_qconfig,
         }),
         torch.nn.qat.Conv3d: ((3, 3, 3), {
-            'qconfig': torch.quantization.default_qconfig,
+            'qconfig': torch.ao.quantization.default_qconfig,
         }),
         torch.nn.qat.Linear: ((5, 2), {
-            'qconfig': torch.quantization.default_qconfig,
+            'qconfig': torch.ao.quantization.default_qconfig,
+        }),
+        torch.nn.qat.EmbeddingBag: ((10, 12), {
+            'qconfig': torch.ao.quantization.float_qparams_weight_only_qconfig,
         }),
         torch.nn.quantizable.LSTM: ((5, 6), {}),
         torch.nn.quantizable.LSTMCell: ((5, 6), {}),

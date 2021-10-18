@@ -11,7 +11,7 @@ from test_c10d_spawn import _torch_dist_nn_available
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
 from torch.testing._internal.common_distributed import requires_gloo, \
     create_device, MultiProcessTestCase, skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import TestCase, run_tests, sandcastle_skip_if, TEST_WITH_TSAN, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import TestCase, run_tests, sandcastle_skip_if, TEST_WITH_DEV_DBG_ASAN
 
 # Fails on Python-3.9, see https://github.com/pytorch/pytorch/issues/51619
 if sys.version_info < (3, 9):
@@ -76,102 +76,100 @@ if sys.version_info < (3, 9):
                 self.world_size)
 
 
-# TSAN is not fork-safe since we're forking in a multi-threaded environment
-if not TEST_WITH_TSAN:
-    class DistributedDataParallelSingleProcessTest(TestCase):
-        def setUp(self):
-            self.rank = 0
-            self.world_size = 1
-            self.file = tempfile.NamedTemporaryFile(delete=False)  # noqa: P201
+class DistributedDataParallelSingleProcessTest(TestCase):
+    def setUp(self):
+        self.rank = 0
+        self.world_size = 1
+        self.file = tempfile.NamedTemporaryFile(delete=False)  # noqa: P201
 
-        def tearDown(self):
-            try:
-                os.remove(self.file.name)
-            except OSError:
-                pass
+    def tearDown(self):
+        try:
+            os.remove(self.file.name)
+        except OSError:
+            pass
 
-        def _test_base(self, net, inp, check_allclose=True):
-            store = c10d.FileStore(self.file.name, self.world_size)
-            process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
-            if inp[0].is_cuda:
-                device_ids = [torch.cuda.current_device()]
-            else:
-                device_ids = None
+    def _test_base(self, net, inp, check_allclose=True):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+        if inp[0].is_cuda:
+            device_ids = [torch.cuda.current_device()]
+        else:
+            device_ids = None
 
-            ddp = nn.parallel.DistributedDataParallel(
-                copy.deepcopy(net),
-                device_ids=device_ids,
-                process_group=process_group
-            )
+        ddp = nn.parallel.DistributedDataParallel(
+            copy.deepcopy(net),
+            device_ids=device_ids,
+            process_group=process_group
+        )
 
-            net_opt = torch.optim.Adam(net.parameters(), lr=0.001)
-            ddp_opt = torch.optim.Adam(ddp.parameters(), lr=0.001)
+        net_opt = torch.optim.Adam(net.parameters(), lr=0.001)
+        ddp_opt = torch.optim.Adam(ddp.parameters(), lr=0.001)
 
+        for i, j in zip(ddp.parameters(), net.parameters()):
+            self.assertTrue(i.allclose(j))
+
+        for _ in range(10):
+            net_out = net(*inp)
+            ddp_out = ddp(*inp)
+
+            net_out.sum().backward()
+            ddp_out.sum().backward()
+
+            net_opt.step()
+            ddp_opt.step()
+
+        if check_allclose:
             for i, j in zip(ddp.parameters(), net.parameters()):
                 self.assertTrue(i.allclose(j))
 
-            for _ in range(10):
-                net_out = net(*inp)
-                ddp_out = ddp(*inp)
+    @requires_gloo()
+    def test_cpu(self):
+        self._test_base(nn.Linear(2, 2), [torch.randn(30, 2)])
 
-                net_out.sum().backward()
-                ddp_out.sum().backward()
+    @requires_gloo()
+    @sandcastle_skip_if(not TEST_CUDA, "At least 1 CUDA GPUS needed")
+    def test_cuda(self):
+        self._test_base(nn.Linear(2, 2).to(0), [torch.randn(30, 2).to(0)])
 
-                net_opt.step()
-                ddp_opt.step()
+    @requires_gloo()
+    @sandcastle_skip_if(not TEST_CUDA, "At least 1 CUDA GPUS needed")
+    def test_rnn(self):
+        # This test is inspired by the bug reported in
+        # https://github.com/pytorch/pytorch/issues/36268
+        BATCH_SIZE = 12  # Divisible by 2, 3, 4
+        INPUT_DIM = 256
+        OUTPUT_DIM = 256
+        HIDDEN_DIM = 256
+        N_LAYERS = 3
+        SEQ_LEN = 100
 
-            if check_allclose:
-                for i, j in zip(ddp.parameters(), net.parameters()):
-                    self.assertTrue(i.allclose(j))
+        class Net(nn.Module):
+            def __init__(self, input_dim, hidden_dim, output_dim, hidden_layers):
+                super(Net, self).__init__()
+                self.input_dim = input_dim
+                self.hidden_dim = hidden_dim
+                self.output_dim = output_dim
+                self.hidden_layers = hidden_layers
 
-        @requires_gloo()
-        def test_cpu(self):
-            self._test_base(nn.Linear(2, 2), [torch.randn(30, 2)])
+                self.lstm = nn.LSTM(input_dim, hidden_dim, hidden_layers, batch_first=True)
+                self.h2o = nn.Linear(hidden_dim, output_dim)
 
-        @requires_gloo()
-        @sandcastle_skip_if(not TEST_CUDA, "At least 1 CUDA GPUS needed")
-        def test_cuda(self):
-            self._test_base(nn.Linear(2, 2).to(0), [torch.randn(30, 2).to(0)])
+            def forward(self, x, y):
+                self.lstm.flatten_parameters()
+                h_t, _ = self.lstm(x)
+                output = self.h2o(h_t)
+                loss = nn.functional.mse_loss(output, y)
+                return loss
 
-        @requires_gloo()
-        @sandcastle_skip_if(not TEST_CUDA, "At least 1 CUDA GPUS needed")
-        def test_rnn(self):
-            # This test is inspired by the bug reported in
-            # https://github.com/pytorch/pytorch/issues/36268
-            BATCH_SIZE = 12  # Divisible by 2, 3, 4
-            INPUT_DIM = 256
-            OUTPUT_DIM = 256
-            HIDDEN_DIM = 256
-            N_LAYERS = 3
-            SEQ_LEN = 100
+        net = Net(INPUT_DIM, HIDDEN_DIM, OUTPUT_DIM, N_LAYERS).to(0)
+        inp = [
+            torch.randn((BATCH_SIZE, SEQ_LEN, INPUT_DIM)).to(0),
+            torch.rand((BATCH_SIZE, SEQ_LEN, OUTPUT_DIM)).to(0)
+        ]
 
-            class Net(nn.Module):
-                def __init__(self, input_dim, hidden_dim, output_dim, hidden_layers):
-                    super(Net, self).__init__()
-                    self.input_dim = input_dim
-                    self.hidden_dim = hidden_dim
-                    self.output_dim = output_dim
-                    self.hidden_layers = hidden_layers
-
-                    self.lstm = nn.LSTM(input_dim, hidden_dim, hidden_layers, batch_first=True)
-                    self.h2o = nn.Linear(hidden_dim, output_dim)
-
-                def forward(self, x, y):
-                    self.lstm.flatten_parameters()
-                    h_t, _ = self.lstm(x)
-                    output = self.h2o(h_t)
-                    loss = nn.functional.mse_loss(output, y)
-                    return loss
-
-            net = Net(INPUT_DIM, HIDDEN_DIM, OUTPUT_DIM, N_LAYERS).to(0)
-            inp = [
-                torch.randn((BATCH_SIZE, SEQ_LEN, INPUT_DIM)).to(0),
-                torch.rand((BATCH_SIZE, SEQ_LEN, OUTPUT_DIM)).to(0)
-            ]
-
-            # Not checking result allclose as the parameter inconsistency exist
-            # prior to this change. See #37079
-            self._test_base(net, inp, check_allclose=False)
+        # Not checking result allclose as the parameter inconsistency exist
+        # prior to this change. See #37079
+        self._test_base(net, inp, check_allclose=False)
 
 
 # Skip dev-asan as torch + multiprocessing spawn have known issues

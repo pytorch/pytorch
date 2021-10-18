@@ -74,6 +74,7 @@ std::pair<tensor_list, tensor_list> runGradient(
 
 std::shared_ptr<Graph> build_lstm();
 std::shared_ptr<Graph> build_mobile_export_analysis_graph();
+std::shared_ptr<Graph> build_mobile_export_with_out();
 std::shared_ptr<Graph> build_mobile_export_analysis_graph_with_vararg();
 std::shared_ptr<Graph> build_mobile_export_analysis_graph_nested();
 std::shared_ptr<Graph> build_mobile_export_analysis_graph_non_const();
@@ -88,6 +89,13 @@ bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor> inputs);
 bool almostEqual(const at::Tensor& a, const at::Tensor& b);
 
 bool exactlyEqual(const at::Tensor& a, const at::Tensor& b);
+bool exactlyEqual(
+    const std::vector<at::Tensor>& a,
+    const std::vector<at::Tensor>& b);
+
+std::vector<at::Tensor> runGraph(
+    std::shared_ptr<Graph> graph,
+    const std::vector<at::Tensor>& inputs);
 
 std::pair<at::Tensor, at::Tensor> lstm(
     at::Tensor input,
