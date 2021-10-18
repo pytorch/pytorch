@@ -144,7 +144,6 @@ class Vectorized<ComplexFlt> {
     // convert std::complex<V> index mask to V index mask: xy -> xxyy
     auto mask_complex = Vectorized<ComplexFlt>(
         vec_mergeh(mask._vec0, mask._vec0), vec_mergeh(mask._vec1, mask._vec1));
-    // mask_complex.dump();
     return {
         vec_sel(a._vec0, b._vec0, mask_complex._vec0),
         vec_sel(a._vec1, b._vec1, mask_complex._vec1),
@@ -407,13 +406,6 @@ class Vectorized<ComplexFlt> {
 
   Vectorized<ComplexFlt> elwise_sqrt() const {
     return {vec_sqrt(_vec0), vec_sqrt(_vec1)};
-  }
-
-  void dump() const {
-    std::cout << _vec0[0] << "," << _vec0[1] << "," << _vec0[2] << ","
-              << _vec0[3] << ",";
-    std::cout << _vec1[0] << "," << _vec1[1] << "," << _vec1[2] << ","
-              << _vec1[3] << std::endl;
   }
 
   Vectorized<ComplexFlt> sqrt() const {

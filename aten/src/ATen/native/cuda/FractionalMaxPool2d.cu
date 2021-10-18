@@ -2,13 +2,14 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/NumericLimits.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/NumericUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <c10/util/Exception.h>
-#include <THC/THCNumerics.cuh>
 
 #include <algorithm>
 #include <cfloat>
@@ -68,7 +69,7 @@ __global__ void fractional_max_pool2d_out_cuda_frame(
         for (int w = poolW; w < poolW + poolSizeW; ++w) {
           scalar_t val = input[batch][plane][h][w];
           // for consistency with THNN, favor the first max
-          if (val > maxVal || THCNumerics<scalar_t>::isnan(val)) {
+          if (val > maxVal || at::_isnan(val)) {
             maxIndex = h * input.size(3) + w;
             maxVal = val;
           }
@@ -78,7 +79,7 @@ __global__ void fractional_max_pool2d_out_cuda_frame(
           int w = i + poolW;
           scalar_t val = input[batch][plane][h][w];
           // for consistency with THNN, favor the first max
-          if (val > maxVal || THCNumerics<scalar_t>::isnan(val)) {
+          if (val > maxVal || at::_isnan(val)) {
             maxIndex = h * input.size(3) + w;
             maxVal = val;
           }

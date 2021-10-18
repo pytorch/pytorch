@@ -218,7 +218,7 @@ class GradientHelper {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Value* input_list;
       if (grad_values.size() == 1 &&
-          grad_values[0]->type()->isSubtypeOf(ListType::ofTensors())) {
+          grad_values[0]->type()->isSubtypeOf(*ListType::ofTensors())) {
         input_list = grad_values[0];
       } else {
         input_list =

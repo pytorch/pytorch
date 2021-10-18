@@ -584,9 +584,6 @@ class AdagradOptimizer(Optimizer):
         counter_halflife=-1,
         **kwargs
     ):
-        for k, v in locals().items():
-            logger.info("AdagradOptimizer: input arguments: {}: {}".format(k, v))
-
         super(AdagradOptimizer, self).__init__()
         self.alpha = alpha
         self.epsilon = epsilon
