@@ -1,13 +1,10 @@
 r""" Functional interface for MKLDNN backend (quantized)."""
 r""" Aligned with torch/nn/quantized/functional.py """
-from typing import List, Optional
-import warnings
-
+from typing import Optional
 import torch
 from torch import Tensor
 from torch.nn.modules.utils import _pair, _triple
 from torch.nn.quantized.modules.utils import _pair_from_first
-from torch.jit.annotations import BroadcastingList2
 
 # Conv
 def conv1d_mkldnn(input, weight, bias,
@@ -58,10 +55,10 @@ def conv1d_relu_mkldnn(input, weight, bias,
     return torch.ops.quantized.conv1d_relu_mkldnn(input, packed_params, scale, zero_point)
 
 def conv2d_mkldnn(input, weight, bias,
-           stride=1, padding=0, dilation=1, groups=1,
-           padding_mode='zeros',
-           scale=1.0, zero_point=0,
-           dtype=torch.quint8):
+                  stride=1, padding=0, dilation=1, groups=1,
+                  padding_mode='zeros',
+                  scale=1.0, zero_point=0,
+                  dtype=torch.quint8):
     r"""
     Applies a 2D convolution over a quantized 2D input composed of several input
     planes.
@@ -94,10 +91,10 @@ def conv2d_mkldnn(input, weight, bias,
     return torch.ops.quantized.conv2d_mkldnn(input, packed_params, scale, zero_point)
 
 def conv2d_relu_mkldnn(input, weight, bias,
-           stride=1, padding=0, dilation=1, groups=1,
-           padding_mode='zeros',
-           scale=1.0, zero_point=0,
-           dtype=torch.quint8):
+                       stride=1, padding=0, dilation=1, groups=1,
+                       padding_mode='zeros',
+                       scale=1.0, zero_point=0,
+                       dtype=torch.quint8):
     stride = _pair(stride)
     padding = _pair(padding)
     dilation = _pair(dilation)
@@ -106,8 +103,11 @@ def conv2d_relu_mkldnn(input, weight, bias,
         weight, bias, stride, padding, dilation, groups)
     return torch.ops.quantized.conv2d_relu_mkldnn(input, packed_params, scale, zero_point)
 
-def conv3d_mkldnn(input, weight, bias, stride=1, padding=0, dilation=1, groups=1,
-           padding_mode='zeros', scale=1.0, zero_point=0, dtype=torch.quint8):
+def conv3d_mkldnn(input, weight, bias,
+                  stride=1, padding=0, dilation=1, groups=1,
+                  padding_mode='zeros',
+                  scale=1.0, zero_point=0,
+                  dtype=torch.quint8):
     r"""
     Applies a 3D convolution over a quantized 3D input composed of several input
     planes.
@@ -143,8 +143,11 @@ def conv3d_mkldnn(input, weight, bias, stride=1, padding=0, dilation=1, groups=1
         weight, bias, stride, padding, dilation, groups)
     return torch.ops.quantized.conv3d_mkldnn(input, packed_params, scale, zero_point)
 
-def conv3d_relu_mkldnn(input, weight, bias, stride=1, padding=0, dilation=1, groups=1,
-           padding_mode='zeros', scale=1.0, zero_point=0, dtype=torch.quint8):
+def conv3d_relu_mkldnn(input, weight, bias,
+                       stride=1, padding=0, dilation=1, groups=1,
+                       padding_mode='zeros',
+                       scale=1.0, zero_point=0,
+                       dtype=torch.quint8):
     stride = _triple(stride)
     padding = _triple(padding)
     dilation = _triple(dilation)

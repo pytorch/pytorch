@@ -2,7 +2,6 @@ from torch.quantization import qconfig
 import torch
 from torch import nn
 from enum import Enum
-from torch.backends.mkldnn.quantization import lowering
 
 class QuantizedOperatorType(Enum):
     NEED_OBSERVER_FOR_BOTH_INPUTS_AND_OUTPUTS = 0
@@ -19,7 +18,6 @@ mkldnn_backend_config_dict = {
     }
 }
 
-#define a function to return the backend config dict
+# define a function to return the backend config dict
 def get_mkldnn_backend_config_dict():
     return mkldnn_backend_config_dict
-

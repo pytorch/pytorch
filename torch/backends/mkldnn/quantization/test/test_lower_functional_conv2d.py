@@ -1,5 +1,4 @@
 import torch
-from torch import nn
 import torch.nn.functional as F
 from torch.quantization.quantize_fx import prepare_fx, convert_fx
 from torch.backends.mkldnn.quantization.lowering import lower_to_mkldnn_backend
@@ -7,13 +6,13 @@ from torch.backends.mkldnn.quantization.lowering import lower_to_mkldnn_backend
 class M(torch.nn.Module):
     def forward(self, x, w, b):
         y = F.conv2d(x, w, b)
-        return y;
+        return y
 
 class M_ReLU(torch.nn.Module):
     def forward(self, x, w, b):
         y = F.conv2d(x, w, b)
         y = F.relu(y)
-        return y;
+        return y
 
 # conv2d
 m = M().eval()
