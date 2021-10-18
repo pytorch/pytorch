@@ -36,9 +36,8 @@ from torchvision.models.detection.faster_rcnn import FastRCNNPredictor, TwoMLPHe
 from collections import OrderedDict
 
 from torch.nn.utils.rnn import PackedSequence
-from torch.onnx import register_custom_op_symbolic, unregister_custom_op_symbolic
+from torch.onnx import CheckerError, register_custom_op_symbolic, unregister_custom_op_symbolic
 from torch.onnx.symbolic_helper import _unimplemented
-from torch.onnx.utils import ONNXCheckerError
 
 
 def flatten_tuples(elem):
@@ -1469,7 +1468,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, x)
 
     @skipIfUnsupportedMinOpsetVersion(8)
-    @disableScriptTest()  # Functional module not scriptable
     def test_maxpool_with_indices(self):
         model = torch.nn.MaxPool1d(2, stride=1, return_indices=True)
         x = torch.randn(20, 16, 50)
@@ -9966,7 +9964,7 @@ class TestONNXRuntime(unittest.TestCase):
         f = io.BytesIO()
 
         try:
-            with self.assertRaises(ONNXCheckerError) as cm:
+            with self.assertRaises(CheckerError) as cm:
                 torch.onnx.export(test_model, (x, y), f)
         finally:
             unregister_custom_op_symbolic("::add", 1)
