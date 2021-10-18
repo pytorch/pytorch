@@ -8,16 +8,7 @@
 #include "torch/csrc/Exceptions.h"
 
 namespace {
-  PyTypeObject get_namedtuple_helper(const char* name, PyStructSequence_Field fields[], size_t len) {
-      PyTypeObject NamedTuple;
-      PyStructSequence_Desc desc = { name, nullptr, fields, len };
-      PyStructSequence_InitType(&NamedTuple, &desc);
-      NamedTuple.tp_repr = (reprfunc)torch::utils::returned_structseq_repr;  
-      return NamedTuple;
-  }
-
   ${py_return_types}
-
 }
 
 namespace torch {
