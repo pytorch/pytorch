@@ -58,10 +58,7 @@ c10::IValue readArchive(
 }
 
 std::vector<IValue> get_bytecode_ivalues(PyTorchStreamReader& reader) {
-  std::vector<IValue> bytecode_values;
-  bytecode_values =
-      std::move(*readArchive("bytecode", reader).toTuple()).elements();
-  return bytecode_values;
+  return std::move(*readArchive("bytecode", reader).toTuple()).elements().vec();
 }
 
 /********************** Bytecode **********************/
@@ -229,10 +226,10 @@ std::unordered_set<std::string> _get_mobile_model_contained_types(
   // the hash to record which types are parsed.
   std::unordered_set<std::string> parsed_type_names_records;
   for (const auto i : c10::irange(1, bytecode_ivalues.size())) {
-    auto method_tuple = bytecode_ivalues.at(i).toTuple()->elements();
+    const auto& method_tuple = bytecode_ivalues.at(i).toTuple()->elements();
     auto type_table_tuple =
         method_tuple.at(1).toTuple()->elements()[BYTECODE_INDEX_TYPE];
-    auto type_table =
+    const auto& type_table =
         type_table_tuple.toTuple()->elements()[1].toTuple()->elements();
     // type_table is a list of IValue, and each IValue is a string,
     // for example: "Dict[int, Tuple[Tensor, Tensor, Tensor]]"
