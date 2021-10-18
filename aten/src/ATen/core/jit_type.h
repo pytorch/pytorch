@@ -964,11 +964,11 @@ struct TORCH_API RRefType
   }
   TypePtr createWithContained(
       std::vector<TypePtr> contained_types) const override {
-    return create(contained_types.at(0));
+    return create(std::move(contained_types.at(0)));
   }
 
  private:
-  RRefType(TypePtr elem) : SingleElementType(elem) {}
+  RRefType(TypePtr elem) : SingleElementType(std::move(elem)) {}
 
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     std::stringstream ss;
