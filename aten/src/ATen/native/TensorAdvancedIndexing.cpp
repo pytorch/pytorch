@@ -186,7 +186,7 @@ TORCH_PRECOMPUTE_META_FUNC(index_add)
   TORCH_CHECK(dim == 0 || dim < source.dim(),
               "index_add_(): Indexing dim ", dim, " is out of bounds of tensor");
   TORCH_CHECK(numel == (source.dim() == 0 ? 1 : source.size(dim)),
-              "index_add_(): Number of indices should be equal to self.size(dim)");
+              "index_add_(): Number of indices should be equal to source.size(dim)");
 
   auto& result = maybe_get_output(0);
   bool is_defined = result.defined();
@@ -816,13 +816,12 @@ Tensor & index_select_out_cpu_dim1_(
 
 TORCH_IMPL_FUNC(index_add_cpu_out)
 (const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha, const Tensor& result) {
-  auto result_ = const_cast<Tensor&>(result);
-  if (!result_.is_same(self)) result_.copy_(self);
+  if (!result.is_same(self)) result.copy_(self);
   auto numel = index.numel();
 
   auto index_contig = index.contiguous();
 
-  if (result_.dim() > 1) {
+  if (result.dim() > 1) {
     // Equivalent to:
     //   for (auto i = 0; i < numel; i++) {
     //     auto selfSlice = self.select(dim, index_data[i]);
@@ -833,19 +832,19 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
     if (numel == 0) {
       return;
     }
-    auto selfSlice = result_.select(dim, 0);
+    auto resultSlice = result.select(dim, 0);
     auto sourceSlice = source.select(dim, 0);
-    auto self_stride_bytes = result_.stride(dim) * elementSize(result_.scalar_type());
+    auto result_stride_bytes = result.stride(dim) * elementSize(result.scalar_type());
     auto source_stride_bytes = source.stride(dim) * elementSize(source.scalar_type());
-    auto self_dim_size = result_.size(dim);
-    auto iter = TensorIterator::borrowing_binary_op(selfSlice, selfSlice, sourceSlice);
+    auto result_dim_size = result.size(dim);
+    auto iter = TensorIterator::borrowing_binary_op(resultSlice, resultSlice, sourceSlice);
 
     AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "index_add_cpu_", [&] () {
       auto index_data = index_contig.data_ptr<index_t>();
       for (auto i = 0; i < numel; i++) {
           auto self_i = index_data[i];
-          TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_dim_size), "index out of range in self");
-          auto self_data = static_cast<char*>(selfSlice.data_ptr()) + self_i * self_stride_bytes;
+          TORCH_CHECK_INDEX((self_i >= 0) && (self_i < result_dim_size), "index out of range in self");
+          auto self_data = static_cast<char*>(resultSlice.data_ptr()) + self_i * result_stride_bytes;
           auto source_data = static_cast<char*>(sourceSlice.data_ptr()) + i * source_stride_bytes;
           iter.unsafe_replace_operand(0, self_data);
           iter.unsafe_replace_operand(1, self_data);
@@ -860,20 +859,20 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
     // explicitly capture all required variables to work around windows build
     // TODO: fix this when windows can correctly capture variables in nested lambda
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
-      result_.scalar_type(), "index_add_", [&result_, &source, &dim, &index_contig, &numel, &alpha] {
+      result.scalar_type(), "index_add_", [&result, &source, &dim, &index_contig, &numel, &alpha] {
       auto alpha_value = alpha.to<scalar_t>();
-      auto self_stride = result_.dim() == 0 ? 1 : result_.stride(dim);
+      auto result_stride = result.dim() == 0 ? 1 : result.stride(dim);
       auto source_stride = source.dim() == 0 ? 1 : source.stride(dim);
       // TODO: Maybe TensorAccessor can be used here?
-      auto* self_ptr = result_.data_ptr<scalar_t>();
+      auto* result_ptr = result.data_ptr<scalar_t>();
       auto* source_ptr = source.data_ptr<scalar_t>();
       AT_DISPATCH_INDEX_TYPES(index_contig.scalar_type(), "index_add_cpu_",
-        [&index_contig, &numel, &result_, &self_ptr, &self_stride, &source_ptr, &source_stride, &alpha_value] {
+        [&index_contig, &numel, &result, &result_ptr, &result_stride, &source_ptr, &source_stride, &alpha_value] {
         auto index_data = index_contig.data_ptr<index_t>();
         for (auto i = 0; i < numel; i++) {
             auto self_i = index_data[i];
-            TORCH_CHECK_INDEX((self_i >= 0) && (self_i < result_.numel()), "index out of range in self");
-            scalar_t *self_ip = self_ptr + self_i * self_stride;
+            TORCH_CHECK_INDEX((self_i >= 0) && (self_i < result.numel()), "index out of range in self");
+            scalar_t *self_ip = result_ptr + self_i * result_stride;
             *self_ip += *(source_ptr + i * source_stride) * alpha_value;
         }
       });

@@ -454,8 +454,7 @@ bool indexShouldBeMajor(cuda::detail::TensorInfo<scalar_t, unsigned int> &info,
   return false;
 }
 
-void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha, const Tensor& result_) {
-  auto result = const_cast<Tensor&>(result_);
+void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha, const Tensor& result) {
   if (!result.is_same(self)) result.copy_(self);
 
   // Scalars are treated as 1-d tensor
