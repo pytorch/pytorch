@@ -31,8 +31,12 @@ void initReturnTypes(PyObject* module) {
   }
 
   for (const auto& return_type : return_types_map) {
-    PyModule_AddObject(
-        return_types_module, return_type.first, (PyObject*)return_type.second);
+    if (PyModule_AddObject(
+            return_types_module,
+            return_type.first,
+            (PyObject*)return_type.second) != 0) {
+      throw python_error();
+    }
   }
 
   // steals a reference to return_types
