@@ -1022,6 +1022,9 @@ c10::optional<bool> getConstantBooleanInput(
 // aren't supported, and because behavior differs depending on the value of
 // training
 void AliasDb::analyzeBatchNorm(Node* node) {
+  // we invoking freezing for inference, so we assume training will be folded to
+  // a constant false to avoid needing to invoke freezing multiple times in
+  // order to make batch norm weights constant
   for (Value* output : node->outputs()) {
     giveFreshAlias(output);
   }
