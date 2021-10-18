@@ -48,7 +48,11 @@ namespace detail {
 const at::cuda::NVRTC& nvrtc();
 int64_t current_device();
 
-std::function<void(void)> magma_init_fn;
+static void (*magma_init_fn)() = nullptr;
+
+void set_magma_init_fn(void (*fn)()) {
+  magma_init_fn = fn;
+}
 
 // NB: deleter is dynamic, because we need it to live in a separate
 // compilation unit (alt is to have another method in hooks, but
@@ -72,8 +76,8 @@ std::unique_ptr<THCState, void (*)(THCState*)> CUDAHooks::initCUDA() const {
   at::cuda::detail::init_p2p_access_cache(num_devices);
 
 #if AT_MAGMA_ENABLED()
-  TORCH_INTERNAL_ASSERT(detail::magma_init_fn, "Cannot initilaize magma, init routine not set");
-  detail::magma_init_fn();
+  TORCH_INTERNAL_ASSERT(magma_init_fn != nullptr, "Cannot initilaize magma, init routine not set");
+  magma_init_fn();
 #endif
 
   return thc_state;
