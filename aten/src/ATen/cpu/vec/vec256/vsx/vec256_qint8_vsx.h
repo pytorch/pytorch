@@ -361,15 +361,6 @@ struct Vectorized<c10::qint8> {
     return {vec0, vec1};
   }
 
-  void dump() const {
-    value_type vals[size()];
-    store((void*)vals);
-    for (int i = 0; i < size(); ++i) {
-      std::cout << (int)(vals[i]) << " ";
-    }
-    std::cout << std::endl;
-  }
-
   DEFINE_MEMBER_OP(operator==, c10::qint8, vec_cmpeq)
   DEFINE_MEMBER_OP(operator!=, c10::qint8, vec_cmpne)
   DEFINE_MEMBER_OP(operator<, c10::qint8, vec_cmplt)

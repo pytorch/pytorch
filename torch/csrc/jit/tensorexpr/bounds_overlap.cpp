@@ -130,8 +130,8 @@ std::vector<Bound> subtractBound(Bound a, Bound b, OverlapKind overlap) {
     auto vars = VarFinder::find(lowDiff);
     if (vars.size() == 1) {
       lowDiff = IRSimplifier::simplify(alloc<Sub>(
-          SubstituteInClone(b.start, {{*vars.begin(), alloc<IntImm>(1)}}),
-          SubstituteInClone(a.start, {{*vars.begin(), alloc<IntImm>(1)}})));
+          SubstituteInClone(b.start, {{*vars.begin(), immLike(b.start, 1)}}),
+          SubstituteInClone(a.start, {{*vars.begin(), immLike(a.start, 1)}})));
     }
   }
 
@@ -139,8 +139,8 @@ std::vector<Bound> subtractBound(Bound a, Bound b, OverlapKind overlap) {
     auto vars = VarFinder::find(highDiff);
     if (vars.size() == 1) {
       highDiff = IRSimplifier::simplify(alloc<Sub>(
-          SubstituteInClone(b.end, {{*vars.begin(), alloc<IntImm>(1)}}),
-          SubstituteInClone(a.end, {{*vars.begin(), alloc<IntImm>(1)}})));
+          SubstituteInClone(b.end, {{*vars.begin(), immLike(b.end, 1)}}),
+          SubstituteInClone(a.end, {{*vars.begin(), immLike(a.end, 1)}})));
     }
   }
 
@@ -157,12 +157,13 @@ std::vector<Bound> subtractBound(Bound a, Bound b, OverlapKind overlap) {
 
   if (hasHead) {
     res.emplace_back(
-        a.start, IRSimplifier::simplify(alloc<Sub>(b.start, alloc<IntImm>(1))));
+        a.start,
+        IRSimplifier::simplify(alloc<Sub>(b.start, immLike(b.start, 1))));
   }
 
   if (hasTail) {
     ExprPtr tailStart =
-        IRSimplifier::simplify(alloc<Add>(b.end, alloc<IntImm>(1)));
+        IRSimplifier::simplify(alloc<Add>(b.end, immLike(b.end, 1)));
     res.emplace_back(tailStart, a.end);
   }
 
@@ -193,7 +194,7 @@ std::vector<IndexBounds> subtractIndicesBounds(
     return {};
   }
   // All accesses to a buf must have the same dimensionality.
-  TORCH_INTERNAL_ASSERT(A.size() == B.size());
+  TORCH_INTERNAL_ASSERT(A.size() == B.size(), buildErrorMessage());
 
   // Each dimension can be sliced into multiple bound segments.
   std::vector<IndexBounds> boundSlices;
@@ -207,7 +208,8 @@ std::vector<IndexBounds> subtractIndicesBounds(
     for (auto slice : slices) {
       IndexBounds newRegion;
       newRegion.reserve(A.size());
-      TORCH_INTERNAL_ASSERT(remainingOuterBounds.size() == i);
+      TORCH_INTERNAL_ASSERT(
+          remainingOuterBounds.size() == i, buildErrorMessage());
 
       for (size_t j = 0; j < i; ++j) {
         newRegion.push_back(remainingOuterBounds[j]);
@@ -223,7 +225,7 @@ std::vector<IndexBounds> subtractIndicesBounds(
         remaining = A[i];
       } else {
         auto remainingSlices = subtractBound(remaining, slice);
-        TORCH_INTERNAL_ASSERT(remainingSlices.size() == 1);
+        TORCH_INTERNAL_ASSERT(remainingSlices.size() == 1, buildErrorMessage());
         remaining = remainingSlices[0];
       }
     }

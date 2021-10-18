@@ -1,26 +1,14 @@
 #include <THC/THCGeneral.h>
-#include <THC/THCTensorMath.h>
-#include <THC/THCTensorCopy.h>
-#include <THC/THCTensorMathMagma.h>
-#include <THC/THCTensor.hpp>
-#include <THC/THCStorage.hpp>
-#include <algorithm>
-#include <ATen/native/cuda/MiscUtils.h>
 #include <ATen/cuda/detail/CUDAHooks.h>
+#include <ATen/cuda/CUDAConfig.h>
 
-#ifdef USE_MAGMA
+#if AT_MAGMA_ENABLED()
 #include <magma_v2.h>
 #endif
 
-#ifndef DIVUP
-#define DIVUP(x, y) (((x) + (y) - 1) / (y))
-#endif
-
-#define NoMagma(name) "No CUDA implementation of '" #name "'. Install MAGMA and rebuild cutorch (http://icl.cs.utk.edu/magma/)"
-
 namespace {
 void _THCMagma_init() {
-#ifdef USE_MAGMA
+#if AT_MAGMA_ENABLED()
   magma_init();
 #endif
 }
@@ -31,6 +19,3 @@ struct Initializer {
   };
 } initializer;
 } // anonymous namespace
-
-#include <THC/generic/THCTensorMathMagma.cpp>
-#include <THC/THCGenerateAllTypes.h>

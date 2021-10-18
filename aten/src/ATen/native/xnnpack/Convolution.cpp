@@ -425,6 +425,21 @@ Tensor conv2d_clamp_run(
   return op_context->run(input);
 }
 
+// Op is registered to have Any argument as we plan to reuse it for prepacked conv2d of other backends
+std::tuple<IntArrayRef, c10::optional<IntArrayRef>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t>
+unpack_prepacked_sizes_conv2d(const IValue& ivalue) {
+  auto op_context = ivalue.toCustomClass<xnnpack::Conv2dOpContext>();
+  const auto tuple = op_context->unpack();
+  const auto& bias = std::get<1>(tuple);
+  return std::make_tuple(
+      std::get<0>(tuple).sizes(),
+      (bias && bias->defined()) ? c10::optional<IntArrayRef>(bias->sizes()) : c10::nullopt,
+      std::get<2>(tuple),
+      std::get<3>(tuple),
+      std::get<4>(tuple),
+      std::get<5>(tuple));
+}
+
 Tensor conv2d_transpose_clamp_run(
     const Tensor& input,
     const c10::intrusive_ptr<xnnpack::TransposeConv2dOpContext>& op_context) {

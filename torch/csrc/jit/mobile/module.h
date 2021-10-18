@@ -78,7 +78,7 @@ class TORCH_API Module {
   }
   const std::vector<at::Tensor> parameters() const;
   const std::map<std::string, at::Tensor> named_parameters() const;
-  std::string get_forward_method_debug_info(size_t pc) const;
+  std::string get_forward_method_debug_info(int64_t debug_handle) const;
   std::string getModuleHierarchy(const int64_t debug_handle) const;
   std::string getCallStack(const int64_t debug_handle) const;
   /// Enables "training" mode.
@@ -115,11 +115,20 @@ class TORCH_API Module {
     return debug_table_;
   }
 
+  void setHasDebugHandles(bool has_debug_handles) {
+    has_debug_handles_ = has_debug_handles;
+  }
+
+  bool hasDebugHandles() const {
+    return has_debug_handles_;
+  }
+
  private:
   c10::intrusive_ptr<c10::ivalue::Object> object_;
   std::unordered_map<std::string, std::string> metadata_;
   std::shared_ptr<CompilationUnit> cu_;
   MobileDebugTable debug_table_;
+  bool has_debug_handles_;
 };
 } // namespace mobile
 } // namespace jit

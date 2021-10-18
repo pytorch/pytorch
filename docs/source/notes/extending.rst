@@ -282,9 +282,9 @@ This is how a ``Linear`` module can be implemented::
                 self.register_parameter('bias', None)
 
             # Not a very smart way to initialize weights
-            self.weight.data.uniform_(-0.1, 0.1)
+            nn.init.uniform_(self.weight, -0.1, 0.1)
             if self.bias is not None:
-                self.bias.data.uniform_(-0.1, 0.1)
+                nn.init.uniform_(self.bias, -0.1, 0.1)
 
         def forward(self, input):
             # See the autograd section for explanation of what happens here.
@@ -380,7 +380,8 @@ this time adding a ``__torch_function__`` implementation::
       def tensor(self):
           return self._value * torch.eye(self._N)
 
-      def __torch_function__(self, func, types, args=(), kwargs=None):
+      @classmethod
+      def __torch_function__(cls, func, types, args=(), kwargs=None):
           if kwargs is None:
               kwargs = {}
           if func not in HANDLED_FUNCTIONS or not all(
@@ -500,7 +501,8 @@ handled but to instead pass a :class:`Tensor` to the original :mod:`torch`
 function when no override is available. For example, if we change our
 implementation of ``__torch_function__`` for ``ScalarTensor`` to the one below::
 
-  def __torch_function__(self, func, types, args=(), kwargs=None):
+  @classmethod
+  def __torch_function__(cls, func, types, args=(), kwargs=None):
       if kwargs is None:
           kwargs = {}
       if func not in HANDLED_FUNCTIONS or not all(
@@ -604,12 +606,15 @@ implementation more permissive about what operations are allowed::
       def __repr__(self):
           return "Metadata:\n{}\n\ndata:\n{}".format(self._metadata, self._t)
 
-      def __torch_function__(self, func, types, args=(), kwargs=None):
+      @classmethod
+      def __torch_function__(cls, func, types, args=(), kwargs=None):
           if kwargs is None:
               kwargs = {}
           args = [a._t if hasattr(a, '_t') else a for a in args]
+          metadatas = tuple(a._metadata if hasattr(a, '_metadata') for a in args)
+          assert len(metadatas) > 0
           ret = func(*args, **kwargs)
-          return MetadataTensor(ret, metadata=self._metadata)
+          return MetadataTensor(ret, metadata=metadatas[0])
 
 This simple implementation won't necessarily work with every function in the
 :mod:`torch` API but it is good enough to capture most common operations::

@@ -14,7 +14,7 @@ inline Tensor fold(const Tensor& input,
                    ExpandingArray<2> dilation,
                    ExpandingArray<2> padding,
                    ExpandingArray<2> stride) {
-  if (input.dim() == 3) {
+  if (input.dim() == 3 || input.dim() == 2) {
     return torch::col2im(
         input,
         output_size,
@@ -25,7 +25,7 @@ inline Tensor fold(const Tensor& input,
   } else {
     TORCH_CHECK(
         false,
-        "Input Error: Only 3D input Tensors are supported "
+        "Input Error: Only unbatched (2D) or batched (3D) input Tensors are supported "
         "(got ", input.dim(), "D)");
   }
 }

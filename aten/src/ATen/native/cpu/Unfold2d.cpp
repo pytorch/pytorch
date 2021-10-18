@@ -118,8 +118,9 @@ static void unfolded2d_acc(
 /* note: due to write issues, this one cannot be parallelized as well as
  * unfolded2d_copy */
 void unfolded2d_acc_kernel(
-    Tensor& finput,
-    Tensor& input,
+    ScalarType dtype,
+    void *finput_data,
+    void *input_data,
     int64_t kH,
     int64_t kW,
     int64_t dH,
@@ -136,13 +137,10 @@ void unfolded2d_acc_kernel(
   // output_width*dW does not overflow a int64_t
 
   AT_DISPATCH_FLOATING_TYPES_AND(
-      at::ScalarType::BFloat16, input.scalar_type(), "unfolded2d_acc", [&] {
-        scalar_t* finput_data = finput.data_ptr<scalar_t>();
-        scalar_t* input_data = input.data_ptr<scalar_t>();
-
+      at::ScalarType::BFloat16, dtype, "unfolded2d_acc", [&] {
         unfolded2d_acc(
-            finput_data,
-            input_data,
+            static_cast<scalar_t*>(finput_data),
+            static_cast<scalar_t*>(input_data),
             kH,
             kW,
             dH,
@@ -265,8 +263,9 @@ static void unfolded2d_copy(
 }
 
 void unfolded2d_copy_kernel(
-    Tensor& finput,
-    Tensor& input,
+    ScalarType dtype,
+    void *finput_data,
+    void *input_data,
     int64_t kH,
     int64_t kW,
     int64_t dH,
@@ -285,13 +284,10 @@ void unfolded2d_copy_kernel(
   // output_width*dW does not overflow a int64_t
 
   AT_DISPATCH_ALL_TYPES_AND(
-      at::ScalarType::BFloat16, input.scalar_type(), "unfolded2d_copy", [&] {
-        scalar_t* input_data = input.data_ptr<scalar_t>();
-        scalar_t* finput_data = finput.data_ptr<scalar_t>();
-
+      at::ScalarType::BFloat16, dtype, "unfolded2d_copy", [&] {
         unfolded2d_copy(
-            input_data,
-            finput_data,
+            static_cast<scalar_t*>(input_data),
+            static_cast<scalar_t*>(finput_data),
             kH,
             kW,
             dH,

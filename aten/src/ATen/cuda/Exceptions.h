@@ -89,7 +89,7 @@ const char* cusolverGetErrorMessage(cusolverStatus_t status);
 // This is here instead of in c10 because NVRTC is loaded dynamically via a stub
 // in ATen, and we need to use its nvrtcGetErrorString.
 // See NOTE [ USE OF NVRTC AND DRIVER API ].
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 
 #define AT_CUDA_DRIVER_CHECK(EXPR)                                                                               \
   do {                                                                                                           \
