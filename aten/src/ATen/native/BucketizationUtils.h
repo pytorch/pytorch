@@ -9,11 +9,14 @@ namespace native {
 inline void searchsorted_maybe_trim_input_tensors(
   Tensor& trimmed_input,
   Tensor& trimmed_boundaries,
+  Tensor& trimmed_sorter,
   const Tensor& raw_input,
-  const Tensor& raw_boundaries) {
+  const Tensor& raw_boundaries,
+  const Tensor& raw_sorter) {
 
   bool in_is_contiguous = raw_input.is_contiguous();
   bool bd_is_contiguous = raw_boundaries.is_contiguous();
+  bool sort_is_contiguous = raw_sorter.is_contiguous();
 
   if (!in_is_contiguous) {
     TORCH_WARN_ONCE("input value tensor is non-contiguous, this will lower the performance due to extra data copy "
@@ -24,6 +27,11 @@ inline void searchsorted_maybe_trim_input_tensors(
     TORCH_WARN_ONCE("input value tensor is non-contiguous, this will lower the performance due to extra data copy "
       "when converting non-contiguous tensor to contiguous, please use contiguous input value tensor if possible");
     trimmed_boundaries = raw_boundaries.contiguous();
+  }
+  if (!sort_is_contiguous) {
+    TORCH_WARN_ONCE("input value tensor is non-contiguous, this will lower the performance due to extra data copy "
+      "when converting non-contiguous tensor to contiguous, please use contiguous input value tensor if possible");
+    trimmed_sorter = raw_sorter.contiguous();
   }
   if (raw_input.dtype() != raw_boundaries.dtype()) {
     at::native::ResultTypeState state = {};
@@ -63,9 +71,22 @@ inline Tensor searchsorted_scalar_tensor(const Scalar& scalar, const c10::Device
   return tensor;
 }
 
-inline void searchsorted_pre_check(const Tensor& boundaries, const Tensor& input, const Tensor& output, bool out_int32) {
+inline void searchsorted_pre_check(const Tensor& boundaries, const Tensor& input, const Tensor& output, bool out_int32, c10::string_view side, const Tensor& sorter) {
+  TORCH_CHECK(side == "left" || side == "right", "side can only be 'left' or 'right' but got ", side);
+
   TORCH_CHECK(boundaries.device() == input.device(), "boundaries and input value tensors should have same device type, ",
     "but we got boundaries tensor device type ", boundaries.device(), " and input value tensor device type ", input.device());
+ 
+  if (sorter.defined()) {
+    TORCH_CHECK(sorter.device() == input.device(), "sorter and input value tensors should have same device type, ",
+    "but we got sorter tensor device type ", sorter.device(), " and input value tensor device type ", input.device());
+
+    TORCH_CHECK(sorter.sizes() == input.sizes(), "input and sorter must have the same size, but we got input value tensor ",
+    input.sizes(), "and we got sorter tensor ", sorter.sizes());
+
+    TORCH_CHECK(sorter.scalar_type() == ScalarType::Long, "sorter must be a LongTensor but got that it holds ", 
+    sorter.scalar_type());
+  }
 
   TORCH_CHECK(input.dim() > 0 || (input.dim() == 0 && input.numel() == 1 && boundaries.dim() == 1),
     "input value can be a scalar only when boundaries tensor dimension is 1, but we got boundaries tensor ",

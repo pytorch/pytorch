@@ -11673,7 +11673,7 @@ Args:
 
 add_docstr(torch.searchsorted,
            r"""
-searchsorted(sorted_sequence, values, *, out_int32=False, right=False, out=None) -> Tensor
+searchsorted(sorted_sequence, values, *, out_int32=False, side='left', out=None) -> Tensor
 
 Find the indices from the *innermost* dimension of :attr:`sorted_sequence` such that, if the
 corresponding values in :attr:`values` were inserted before the indices, the order of the
@@ -11704,20 +11704,24 @@ satisfies the following rules:
 
 Args:
     sorted_sequence (Tensor): N-D or 1-D tensor, containing monotonically increasing sequence on the *innermost*
-                              dimension.
+                              dimension unless :attr:`sorter` is provided, in which case the sequence does not
+                              need to be sorted
     values (Tensor or Scalar): N-D tensor or a Scalar containing the search value(s).
 
 Keyword args:
     out_int32 (bool, optional): indicate the output data type. torch.int32 if True, torch.int64 otherwise.
                                 Default value is False, i.e. default output data type is torch.int64.
-    right (bool, optional): if False, return the first suitable location that is found. If True, return the
+    side (str, optional): if 'left', return the first suitable location that is found. If 'right', return the
                             last such index. If no suitable index found, return 0 for non-numerical value
                             (eg. nan, inf) or the size of *innermost* dimension within :attr:`sorted_sequence`
-                            (one pass the last index of the *innermost* dimension). In other words, if False,
+                            (one pass the last index of the *innermost* dimension). In other words, if 'left',
                             gets the lower bound index for each value in :attr:`values` on the corresponding
-                            *innermost* dimension of the :attr:`sorted_sequence`. If True, gets the upper
-                            bound index instead. Default value is False.
+                            *innermost* dimension of the :attr:`sorted_sequence`. If 'right', gets the upper
+                            bound index instead. Default value is 'left'.
     out (Tensor, optional): the output tensor, must be the same size as :attr:`values` if provided.
+    out (LongTensor, optional): if provided, a tensor matching the shape of the unsorted :attr:`sorted_sequence` 
+                            containing a sequence of indices that sort it in the ascending order on the 
+                            innermost dimension
 
 .. note:: If your use case is always 1-D sorted sequence, :func:`torch.bucketize` is preferred,
           because it has fewer dimension checks resulting in slightly better performance.
@@ -11736,7 +11740,7 @@ Example::
     >>> torch.searchsorted(sorted_sequence, values)
     tensor([[1, 3, 4],
             [1, 2, 4]])
-    >>> torch.searchsorted(sorted_sequence, values, right=True)
+    >>> torch.searchsorted(sorted_sequence, values, side='right')
     tensor([[2, 3, 5],
             [1, 3, 4]])
 
