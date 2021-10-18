@@ -8,7 +8,6 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dtype_analysis.h>
 #include <torch/library.h>
-#include <torch/types.h>
 #include <memory>
 #include <stdexcept>
 
@@ -17,7 +16,8 @@ namespace jit {
 
 namespace {
 
-using ArgumentCreator = std::function<c10::optional<Stack>(Node*)>;
+using Tensor = at::Tensor;
+using ScalarType = at::ScalarType;
 
 std::unique_ptr<Stack> MTensorArgumentCreator(Node* n) {
   auto stack = std::make_unique<std::vector<IValue>>();
@@ -50,7 +50,7 @@ std::unique_ptr<Stack> MTensorArgumentCreator(Node* n) {
   return stack;
 };
 
-bool MTensorValidNodeArg(Value* value) {
+bool MTensorNodeArgValid(Value* value) {
   auto tensor_type = value->type()->cast<TensorType>();
   if (!tensor_type) {
     return true;
@@ -67,10 +67,10 @@ static bool canBeInferredWithMetaTensor(Node* n) {
   // Not a guarantee that the metatensor will not error out
   // Do not have a allowlist for now and let things error out in execution.
   // Has Tensor output is checked in another place
-  bool args_have_dtypes =
-      std::all_of(n->inputs().begin(), n->inputs().end(), MTensorValidNodeArg);
+  bool args_valid =
+      std::all_of(n->inputs().begin(), n->inputs().end(), MTensorNodeArgValid);
 
-  if (!args_have_dtypes) {
+  if (!args_valid) {
     return false;
   }
   if (n->outputs().size() != 1) {
