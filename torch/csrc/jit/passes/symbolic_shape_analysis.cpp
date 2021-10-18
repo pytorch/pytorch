@@ -807,7 +807,8 @@ struct SymbolicShapeGraphAnalyzer {
         stitched_shape_compute_graph->registerOutput(
             new_list_output->node()->input(i));
         output_index_to_symbolic_shape_
-            [stitched_shape_compute_graph->outputs().size() - 1] = symbolic_shape;
+            [stitched_shape_compute_graph->outputs().size() - 1] =
+                symbolic_shape;
         symbolic_shape_value_to_graph_output_[symbolic_shape] =
             stitched_shape_compute_graph->outputs().at(
                 stitched_shape_compute_graph->outputs().size() - 1);
