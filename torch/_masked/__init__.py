@@ -48,11 +48,11 @@ included in {operation name} computation, otherwise the element is
 ignored.
 
 When all elements of :attr:`input` along the given dimension
-:attr:`dim` are ignored, the corresponding element of the output
-tensor will have undefined value: it may or may not correspond to the
-identity value of {operation name} operation; the choice may
-correspond to the value that leads to the most efficient storage of
-:attr:`output` tensor.
+:attr:`dim` are ignored (fully masked-out), the corresponding element
+of the output tensor will have undefined value: it may or may not
+correspond to the identity value of {operation name} operation; the
+choice may correspond to the value that leads to the most efficient
+storage of :attr:`output` tensor.
 
 The shapes of the :attr:`mask` tensor and the :attr:`input` tensor
 don't need to match, but they must be :ref:`broadcastable
@@ -143,12 +143,17 @@ and int32 dtypes, the identity values are ``{identity_float32}``, ``{identity_ui
 
 def _reduction_identity(op_name: str, input: Tensor):
     """Return identity value as scalar tensor of a reduction operation on
-    given input.
+    given input, or None, if the identity value cannot be uniquely
+    defined for the given input.
 
     The identity value of the operation is defined as the initial
     value to reduction operation that has a property ``op(op_identity,
     value) == value`` for any value in the domain of the operation.
+    Or put it another way, including or exlucing the identity value in
+    a list of operands will not change the reduction result.
+
     See https://github.com/pytorch/rfcs/pull/27 for more information.
+
     """
     dtype: DType = input.dtype
     device = input.device
@@ -187,23 +192,32 @@ def _canonical_dim(dim: DimOrDims, ndim: int) -> Tuple[int, ...]:
     return tuple(sorted(dims))
 
 
-def _output_mask(op, input: Tensor, *args, **kwargs) -> Tensor:
+def _input_mask(input: Tensor, *args, **kwargs) -> Tensor:
+    """Return canonical input mask.
+    Canonical input mask is a boolean tensor with the same shape as
+    input and with (broadcasted) content of mask, if specified.
+    """
+    mask = kwargs.get('mask')
+    if mask is None:
+        inmask = input.new_ones(input.shape, dtype=torch.bool)
+    elif mask.ndim < input.ndim:
+        inmask = torch.broadcast_to(mask.clone(), input.shape).to(dtype=torch.bool)
+    elif mask.ndim > input.ndim:
+        raise IndexError("_input_mask expected broadcastable mask (got mask dimensionality higher than of the input)")
+    else:
+        inmask = mask.to(dtype=torch.bool)
+    return inmask
+
+
+def _output_mask(op, input: Tensor, dim: DimOrDims = None, *args, **kwargs) -> Tensor:
     """Return output mask of masked operation applied to given arguments.
     """
     if callable(op):
-        is_reduction = op.__name__ in {'sum', 'prod', 'amax', 'amin'}
+        is_reduction = op.__name__ in {'sum', 'prod', 'amax', 'amin', 'mean'}
         if is_reduction:
-            mask = kwargs.get('mask')
-            if mask is None:
-                outmask = input.new_ones(input.shape, dtype=torch.bool)
-            elif mask.ndim < input.ndim:
-                outmask = torch.broadcast_to(mask.clone(), input.shape).to(dtype=torch.bool)
-            elif mask.ndim > input.ndim:
-                raise IndexError("_output_mask expected broadcastable mask (got mask dimensionality higher than of the input)")
-            else:
-                outmask = mask.to(dtype=torch.bool)
+            outmask = _input_mask(input, *args, **kwargs)
             keepdim = kwargs.get('keepdim', False)
-            dim_ = _canonical_dim(kwargs.get('dim'), input.ndim)
+            dim_ = _canonical_dim(dim, input.ndim)
             # Workaround https://github.com/pytorch/pytorch/issues/56586
             for d in reversed(dim_):
                 outmask = outmask.any(dim=d, keepdim=bool(keepdim))
