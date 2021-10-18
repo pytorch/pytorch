@@ -223,6 +223,8 @@ jobs:
         # Time out the test phase after !{{ timeout_after }} minutes
         timeout-minutes: !{{ timeout_after }}
         run: |
+          set -x
+
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
           elif [[ $BUILD_ENVIRONMENT == *onnx* ]]; then
