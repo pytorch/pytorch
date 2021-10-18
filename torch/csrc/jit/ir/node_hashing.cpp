@@ -23,6 +23,10 @@ bool tensorEqual(const at::Tensor& lhs, const at::Tensor& rhs) {
   if (lhs.is_mkldnn() || rhs.is_mkldnn()) {
     return false;
   }
+  // If device is not equal, lhs.equal(rhs) would throw an error.
+  if (lhs.device() != rhs.device()) {
+    return false;
+  }
   return lhs.options().type_equal(rhs.options()) && lhs.equal(rhs);
 }
 
@@ -209,18 +213,18 @@ size_t HashNode::operator()(const Node* k) const {
   size_t constant_hash = 0;
   if (k->kind() == prim::Constant) {
     TypePtr type = k->output()->type();
-    if (type->isSubtypeOf(NumberType::get()) &&
+    if (type->isSubtypeOf(*NumberType::get()) &&
         k->kindOf(attr::value) == AttributeKind::i) {
       constant_hash = std::hash<int64_t>{}(k->i(attr::value));
     } else if (
-        type->isSubtypeOf(NumberType::get()) &&
+        type->isSubtypeOf(*NumberType::get()) &&
         k->kindOf(attr::value) == AttributeKind::f) {
       constant_hash = std::hash<double>{}(k->f(attr::value));
     } else if (
-        type->isSubtypeOf(NumberType::get()) &&
+        type->isSubtypeOf(*NumberType::get()) &&
         k->kindOf(attr::value) == AttributeKind::c) {
       constant_hash = c10::hash<c10::complex<double>>{}(k->c(attr::value));
-    } else if (type->isSubtypeOf(BoolType::get())) {
+    } else if (type->isSubtypeOf(*BoolType::get())) {
       constant_hash = std::hash<bool>{}(k->i(attr::value));
     }
   }
