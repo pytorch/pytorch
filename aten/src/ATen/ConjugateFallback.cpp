@@ -2,20 +2,11 @@
 #include <ATen/native/MathBitFallThroughLists.h>
 
 namespace at {
-
+namespace native {
 struct ConjFallback : MathOpFallback {
   ConjFallback() : MathOpFallback(DispatchKey::Conjugate, "conjugate") {}
   bool is_bit_set(const Tensor& tensor) override {
     return tensor.is_conj();
-  }
-  void _set_bit(const Tensor& tensor, bool value) override {
-    return tensor._set_conj(value);
-  }
-  Tensor resolve_bit(const Tensor& tensor) override {
-    return at::resolve_conj(tensor);
-  }
-  Tensor& math_op_(Tensor& tensor) override {
-    return at::conj_physical_(tensor);
   }
 };
 
@@ -60,4 +51,5 @@ TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
   TENSOR_UTILITIES_AND_CONSTRUCTORS(m)
 }
 
+}
 } // namespace at
