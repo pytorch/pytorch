@@ -16,8 +16,18 @@
 #if AT_MAGMA_ENABLED()
 #include <magma_types.h>
 #include <magma_v2.h>
+#include <ATen/cuda/detail/CUDAHooks.h>
 
 const bool use_magma_ = true;
+
+namespace {
+struct MagmaInitializer {
+  MagmaInitializer() {
+    ::at::cuda::detail::set_magma_init_fn([]{ magma_init(); });
+  };
+} initializer;
+}  // namespace (anonymous)
+
 #else
 const bool use_magma_ = false;
 
