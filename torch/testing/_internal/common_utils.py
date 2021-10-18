@@ -58,6 +58,8 @@ from torch import Tensor
 import torch.backends.cudnn
 import torch.backends.mkl
 from enum import Enum
+from statistics import mean
+import functools
 
 torch.backends.disable_global_flags()
 
@@ -2926,3 +2928,34 @@ def set_single_threaded_if_parallel_tbb(fn):
         finally:
             torch.set_num_threads(num_threads)
     return wrap_fn
+
+
+@functools.lru_cache()
+def get_cycles_per_ms() -> float:
+    """Measure and return approximate number of cycles per millisecond for torch.cuda._sleep
+    """
+
+    def measure() -> float:
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        start.record()
+        torch.cuda._sleep(1000000)
+        end.record()
+        end.synchronize()
+        cycles_per_ms = 1000000 / start.elapsed_time(end)
+        return cycles_per_ms
+
+    # Get 10 values and remove the 2 max and 2 min and return the avg.
+    # This is to avoid system disturbance that skew the results, e.g.
+    # the very first cuda call likely does a bunch of init, which takes
+    # much longer than subsequent calls.
+    #
+    # Tested on both Tesla V100, Quadro GP100, Titan RTX, RTX 3090 GPUs
+    # and seems to return stable values. Therefore, we enable caching
+    # using lru_cache decorator above.
+    num = 10
+    vals = []
+    for _ in range(num):
+        vals.append(measure())
+    vals = sorted(vals)
+    return mean(vals[2 : num - 2])
