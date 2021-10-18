@@ -2373,7 +2373,7 @@ struct TORCH_API InterfaceType : public NamedType {
       QualifiedName qualifiedName, bool is_module=false);
 
   bool operator==(const Type& rhs) const override {
-    if (auto user_rhs = rhs.cast<InterfaceType>()) {
+    if (auto user_rhs = rhs.castRaw<InterfaceType>()) {
       return isSubTypeImpl(*this, *user_rhs, nullptr) &&
           isSubTypeImpl(*user_rhs, *this, nullptr);
     }
