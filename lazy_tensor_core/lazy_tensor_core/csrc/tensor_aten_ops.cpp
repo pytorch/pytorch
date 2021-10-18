@@ -434,26 +434,6 @@ LazyTensor acosh(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Acosh(input.GetIrValue()));
 }
 
-LazyTensor add(const LazyTensor& input, const LazyTensor& other,
-               const at::Scalar& alpha,
-               c10::optional<at::ScalarType> logical_element_type) {
-  ir::Value constant = LazyTensor::GetIrValueForScalar(
-      alpha, other.shape(), logical_element_type, input.GetDevice());
-  return input.CreateFrom(input.GetIrValue() + other.GetIrValue() * constant,
-                          logical_element_type);
-}
-
-LazyTensor add(const LazyTensor& input, const at::Scalar& other,
-               const at::Scalar& alpha,
-               c10::optional<at::ScalarType> logical_element_type) {
-  ir::Value other_constant = LazyTensor::GetIrValueForScalar(
-      other, input.shape(), logical_element_type, input.GetDevice());
-  ir::Value alpha_constant = LazyTensor::GetIrValueForScalar(
-      alpha, input.shape(), logical_element_type, input.GetDevice());
-  return input.CreateFrom(input.GetIrValue() + other_constant * alpha_constant,
-                          logical_element_type);
-}
-
 LazyTensor addmm(const LazyTensor& input, const LazyTensor& weight,
                  const LazyTensor& bias) {
   return input.CreateFrom(ir::ops::AddMatMulOp(

@@ -98,13 +98,14 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
         """
         for x in xs:
             f = x.functional if isinstance(x, NativeFunctionsGroup) else x
-            if f.func.name in full_codegen:
-                for r in func(f):
-                    yield r
+            if f.func.name in full_codegen and not f.func.name.name.inplace:
+                with local.parametrize(use_const_ref_for_mutable_tensors=f.use_const_ref_for_mutable_tensors):
+                    for r in func(f):
+                        yield r
 
             if codegenInplaceVariant:
-                inplace = x.inplace if isinstance(x, NativeFunctionsGroup) else None
-                if inplace and inplace.func.name in full_codegen:
+                inplace = x.inplace if isinstance(x, NativeFunctionsGroup) else x
+                if inplace and inplace.func.name in full_codegen and inplace.func.name.name.inplace:
                     with local.parametrize(use_const_ref_for_mutable_tensors=inplace.use_const_ref_for_mutable_tensors):
                         for r in func(inplace):
                             yield r
