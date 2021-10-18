@@ -1721,9 +1721,7 @@ def unravel_index(
         raise ValueError(f"Empty shape tensor passed, expected shape tensor of minimum size {indices.shape}.")
 
     if torch.max(indices) >= torch.prod(shape):
-        raise ValueError(f"Given indices {indices} should be representible for the given shape {shape}.")
-    if torch.unique(indices).numel() > torch.prod(shape):
-        raise ValueError("Number of unique indices passed exceed the number of elements for given shape.")
+        raise ValueError("Given indices should be representible for the given shape.")
 
     # For zero-dim shape, return 0 by default
     if shape.dim() == 0:

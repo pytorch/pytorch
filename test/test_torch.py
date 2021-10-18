@@ -1055,10 +1055,6 @@ class AbstractTestCases:
             self.assertRaises(ValueError, lambda: torch.unravel_index([-1, -2], (1, 2)))
             self.assertRaises(ValueError, lambda: torch.unravel_index(torch.tensor([-1, -2]), torch.tensor([-1, -2])))
 
-            # Expected error when number of unique indices > prod(shape)
-            self.assertRaises(ValueError, lambda: torch.unravel_index([1, 2, 3], (1, 2)))
-            self.assertRaises(ValueError, lambda: torch.unravel_index(torch.tensor([1, 2, 3]), torch.tensor([1, 2])))
-
             # Expected error when non-integral type tensors/values are passed
             self.assertRaises(TypeError, lambda: torch.unravel_index([1.2, 2.3], torch.tensor([2, 3])))
             self.assertRaises(TypeError, lambda: torch.unravel_index(torch.tensor([1, 2]), torch.tensor([2.3, 3.4])))
