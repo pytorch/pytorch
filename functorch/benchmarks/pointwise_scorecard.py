@@ -1,3 +1,4 @@
+import sys
 import time
 import torch
 import inspect
@@ -38,6 +39,12 @@ def medium_transpose():
     return (rand(32, 12, 64, 64).transpose(-1, -2),
             rand(32, 12, 64, 64).transpose(-1, -2))
 
+def medium2():
+    return (rand(32, 3, 224, 224), rand(32, 3, 224, 224))
+
+def medium3d():
+    return (rand(16, 32, 64), rand(16, 32, 64))
+
 def medium_channels_last():
     return (rand(32, 3, 224, 224).to(memory_format=torch.channels_last),
             rand(32, 3, 224, 224).to(memory_format=torch.channels_last))
@@ -55,6 +62,10 @@ def large():
 def large_transpose():
     return (rand(8192, 8192).transpose(0, 1),
             rand(8192, 8192).transpose(0, 1))
+
+def large_channels_last():
+    return (rand(32, 32, 256, 256).to(memory_format=torch.channels_last),
+            rand(32, 32, 256, 256).to(memory_format=torch.channels_last))
 
 def pathological_broadcast():
     return (rand(1, 32, 32, 2), rand(1024, 1, 1, 2))
@@ -89,14 +100,14 @@ def log(a):
 def exp(a):
     return a.exp()
 
-def pow(a):
+def square(a):
     return a ** 2
 
 def fma(a, b):
     return a * b + b
 
 def hardswish(a):
-    return a * (a + 3).clamp(0, 6) / 6
+    return a * (a + 3.0).clamp(0.0, 6.0) / 6.0
 
 def native_hardswish(a):
     return torch._C._nn.hardswish(a)
@@ -107,59 +118,9 @@ def softplus(a):
 def mish(a):
     return a * ((a * 1.0).exp().log1p() / 1.0).tanh()
 
-shapes = [
-    scalar,
-    small,
-    small_2d,
-    small_broadcast,
-    medium,
-    medium_sliced,
-    medium_transpose,
-    medium_channels_last,
-    medium_broadcast,
-    medium_broadcast_channels_last,
-    large,
-    large_transpose,
-    pathological_broadcast,
-]
-
-operators = [
-    add,
-    sub,
-    mul,
-    div,
-    relu,
-    sigmoid,
-    tanh,
-    log,
-    exp,
-    pow,
-    fma,
-    hardswish,
-    native_hardswish,
-]
-#shapes = [large_transpose]
-#operators = [add]
-#shapes = [scalar]
-#operators = [add]
-nope = set()
-for shape, operator in itertools.product(shapes, operators):
-    nargs = len(inspect.signature(operator).parameters)
-    args = shape()[:nargs]
-    #print(f"{operator.__name__} {shape.__name__}")
-
-    try:
-        if shape == medium_transpose:
-            raise RuntimeError("pointwise_operator hangs on medium_transpose")
-        pw_op = pointwise_operator(operator)
-        torch.testing.assert_allclose(operator(*args), pw_op(*args))
-    except Exception:
-        print(f"pointwise_operator failed on {operator.__name__}, {shape.__name__}")
-        nope.add((operator, shape))
-
-    ts_op = torch.jit.script(operator)
-    torch.testing.assert_allclose(operator(*args), ts_op(*args))
-
+# ------------------------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------------------------
 def time_cpu(fn, args, iters):
     s = time.perf_counter()
     for _ in range(iters):
@@ -190,11 +151,65 @@ def benchmark(fn, args):
 def micros(s):
     return f"{s * 1e6:.1f}"
 
+shapes = [
+    scalar,
+    small,
+    small_2d,
+    small_broadcast,
+    medium,
+    medium2,
+    medium3d,
+    medium_sliced,
+    medium_transpose,
+    medium_channels_last,
+    medium_broadcast,
+    medium_broadcast_channels_last,
+    large,
+    large_transpose,
+    large_channels_last,
+    pathological_broadcast,
+]
+
+operators = [
+    add,
+    sub,
+    mul,
+    div,
+    relu,
+    sigmoid,
+    tanh,
+    log,
+    exp,
+    square,
+    fma,
+    hardswish,
+    native_hardswish,
+]
+
+nope = set()
+for shape, operator in itertools.product(shapes, operators):
+    nargs = len(inspect.signature(operator).parameters)
+    args = shape()[:nargs]
+
+    try:
+        if shape == medium_transpose:
+            raise RuntimeError("pointwise_operator hangs on medium_transpose")
+        pw_op = pointwise_operator(operator)
+        torch.testing.assert_allclose(operator(*args), pw_op(*args))
+    except Exception:
+        print(f"pointwise_operator failed on {operator.__name__}, {shape.__name__}")
+        nope.add((operator, shape))
+
+    ts_op = torch.jit.script(operator)
+    torch.testing.assert_allclose(operator(*args), ts_op(*args))
+
+
+print("fuser,device,operator,shape,time")
 results = []
 for shape, operator in itertools.product(shapes, operators):
     nargs = len(inspect.signature(operator).parameters)
     args = shape()[:nargs]
-    
+
     result = benchmark(operator, args)
     print(",".join(["eager", args[0].device.type, operator.__name__, shape.__name__, micros(result)]))
     try:
@@ -206,18 +221,9 @@ for shape, operator in itertools.product(shapes, operators):
         result = benchmark(pw_op, args)
         print(",".join(["pointwise", args[0].device.type, operator.__name__, shape.__name__, micros(result)]))
     except Exception:
-        #print(f"pointwise_operator failed on {operator.__name__}, {shape.__name__}")
-        #nope.add((operator, shape))
         print(",".join(["pointwise", args[0].device.type, operator.__name__, shape.__name__, micros(float("nan"))]))
 
     ts_op = torch.jit.script(operator)
     result = benchmark(ts_op, args)
     print(",".join(["fuser", args[0].device.type, operator.__name__, shape.__name__, micros(result)]))
-
-# cpu
-# parallel cpu
-# cuda
-
-# casts
-
-# inplace?
+    sys.stdout.flush()
