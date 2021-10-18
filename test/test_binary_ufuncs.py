@@ -2352,9 +2352,14 @@ class TestBinaryUfuncs(TestCase):
             our_func = torch.logaddexp
 
         def _test_helper(a, b):
-            ref = ref_func(a.cpu().numpy(), b.cpu().numpy())
-            v = our_func(a, b)
-            self.assertEqual(ref, v)
+            if dtype == torch.bfloat16:
+                ref = ref_func(a.cpu().float().numpy(), b.cpu().float().numpy())
+                v = our_func(a, b)
+                self.assertEqual(ref, v.float(), atol=0.01, rtol=0.01)
+            else:
+                ref = ref_func(a.cpu().numpy(), b.cpu().numpy())
+                v = our_func(a, b)
+                self.assertEqual(ref, v)
 
         # simple test
         a = torch.randn(64, 2, dtype=dtype, device=device) - 0.5
@@ -2372,11 +2377,11 @@ class TestBinaryUfuncs(TestCase):
         b = torch.tensor([float('inf'), float('-inf'), float('-inf'), float("nan")], dtype=dtype, device=device)
         _test_helper(a, b)
 
-    @dtypes(torch.float32, torch.float64)
+    @dtypes(torch.float32, torch.float64, torch.bfloat16)
     def test_logaddexp(self, device, dtype):
         self._test_logaddexp(device, dtype, base2=False)
 
-    @dtypes(torch.float32, torch.float64)
+    @dtypes(torch.float32, torch.float64, torch.bfloat16)
     def test_logaddexp2(self, device, dtype):
         self._test_logaddexp(device, dtype, base2=True)
 
