@@ -170,21 +170,33 @@ bool SplitOp<Context>::RunOnDevice() {
   if (add_axis_) {
     output_dims.erase(output_dims.begin() + canonical_axis);
   }
+
+  const auto *const input_ptr = static_cast<const char*>(input.raw_data());
+
   size_t input_offset = 0;
   for (int i = 0; i < OutputSize(); ++i) {
-    auto* output = Output(i);
-    auto axis_dim = add_axis_ ? 1 : axis_data[i];
+    auto *const output = Output(i);
+    const auto axis_dim = add_axis_ ? 1 : axis_data[i];
     if (!add_axis_) {
       output_dims[canonical_axis] = axis_data[i];
     }
     output->Resize(output_dims);
+
+    // We need `output_ptr` before the early exit since
+    // `raw_mutable_data` sets the output's data type
+    auto *const output_ptr = output->raw_mutable_data(input.dtype());
+
+    if (input_ptr == nullptr || output_ptr == nullptr) {
+      continue;
+    }
+
     math::CopyMatrix<Context>(
         input.itemsize(),
         before,
         axis_dim * after,
-        static_cast<const char*>(input.raw_data()) + input_offset,
+        input_ptr + input_offset,
         input.dim32(canonical_axis) * after,
-        output->raw_mutable_data(input.dtype()),
+        output_ptr,
         axis_dim * after,
         &context_,
         input.dtype().copy());
