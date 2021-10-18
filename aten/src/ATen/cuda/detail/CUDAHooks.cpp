@@ -21,7 +21,7 @@
 #include <ATen/cudnn/cudnn-wrapper.h>
 #endif
 
-#ifdef USE_MAGMA
+#if AT_MAGMA_ENABLED()
 #include <magma_v2.h>
 #endif
 
@@ -118,7 +118,7 @@ bool CUDAHooks::hasCUDA() const {
 }
 
 bool CUDAHooks::hasMAGMA() const {
-#ifdef USE_MAGMA
+#if AT_MAGMA_ENABLED()
   return true;
 #else
   return false;
@@ -337,7 +337,7 @@ std::string CUDAHooks::showConfig() const {
   oss << "  - MIOpen " << MIOPEN_VERSION_MAJOR << "." << MIOPEN_VERSION_MINOR << "." << MIOPEN_VERSION_PATCH << "\n";
 #endif
 
-#ifdef USE_MAGMA
+#if AT_MAGMA_ENABLED()
   oss << "  - Magma " << MAGMA_VERSION_MAJOR << "." << MAGMA_VERSION_MINOR << "." << MAGMA_VERSION_MICRO << "\n";
 #endif
 
