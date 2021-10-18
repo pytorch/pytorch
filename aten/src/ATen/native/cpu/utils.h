@@ -68,8 +68,8 @@ template <>
 inline void transpose<float>(int64_t M, int64_t N, const float* src, int64_t ld_src, float* dst, int64_t ld_dst) {
   TORCH_CHECK(fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
   fbgemm::transpose_simd<float>(M, N, src, ld_src, dst, ld_dst);
-#endif
 }
+#endif
 
 } // namespace utils
 
