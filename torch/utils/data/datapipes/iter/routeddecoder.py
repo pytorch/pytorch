@@ -6,7 +6,8 @@ from torch.utils.data.datapipes.utils.decoder import (
     Decoder,
     basichandlers as decoder_basichandlers,
     imagehandler as decoder_imagehandler,
-    extension_extract_fn)
+    extension_extract_fn
+)
 
 
 @functional_datapipe('decode')
@@ -15,7 +16,8 @@ class RoutedDecoderIterDataPipe(IterDataPipe[Tuple[str, Any]]):
 
     Iterable datapipe to decode binary streams from input DataPipe, yield pathname
     and decoded data in a tuple.
-    args:
+
+    Args:
         datapipe: Iterable datapipe that provides pathname and binary stream in tuples
         handlers: Optional user defined decoder handlers. If None, basic and image decoder
             handlers will be set as default. If multiple handles are provided, the priority

@@ -25,9 +25,9 @@ MPI supports CUDA only if the implementation used to build PyTorch supports it.
 +----------------+-----+-----+-----+-----+-----+-----+
 | Device         | CPU | GPU | CPU | GPU | CPU | GPU |
 +================+=====+=====+=====+=====+=====+=====+
-| send           | ✓   | ✘   | ✓   | ?   | ✘   | ✘   |
+| send           | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
-| recv           | ✓   | ✘   | ✓   | ?   | ✘   | ✘   |
+| recv           | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
 | broadcast      | ✓   | ✓   | ✓   | ?   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
@@ -179,6 +179,8 @@ joined.
 .. autofunction:: is_mpi_available
 
 .. autofunction:: is_nccl_available
+
+.. autofunction:: is_torchelastic_launched
 
 --------------------------------------------------------------------------------
 

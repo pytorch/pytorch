@@ -94,6 +94,16 @@ class LinearPackedParams(torch.nn.Module):
         self.set_weight_bias(state[0], state[1])
         self.training = state[2]
 
+    def __deepcopy__(self, memo):
+        new_instance = type(self).__new__(type(self))
+        torch.nn.Module.__init__(new_instance)
+        state = self.__getstate__()
+        new_instance.__setstate__(state)
+        return new_instance
+
+    def __copy__(self):
+        return self.__deepcopy__({})
+
     def __repr__(self):
         return self._weight_bias().__repr__()
 
@@ -245,7 +255,7 @@ class Linear(torch.nn.Module):
         r"""Create a quantized module from a float module or qparams_dict
 
         Args:
-            mod (Module): a float module, either produced by torch.quantization
+            mod (Module): a float module, either produced by torch.ao.quantization
                           utilities or provided by the user
         """
         if hasattr(mod, 'weight_fake_quant'):

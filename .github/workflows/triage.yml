@@ -6,6 +6,7 @@ on:
 
 jobs:
   welcome:
+    if: ${{ github.repository == 'pytorch/pytorch' }}
     runs-on: ubuntu-18.04
     strategy:
       fail-fast: false

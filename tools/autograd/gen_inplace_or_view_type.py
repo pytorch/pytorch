@@ -1,10 +1,16 @@
+# Generates ADInplaceOrViewType.h/cpp
+#
+# NOTE: If any changes are being made to the ADInplaceOrView codegen please also check
+# if updates are needed in torch/csrc/autograd/autograd_not_implemented_fallback.cpp
+# The fallback is expected to mimick this codegen, so we should keep the two in sync.
+
 from tools.codegen.api import cpp
 from tools.codegen.api.autograd import (
     NativeFunctionWithDifferentiabilityInfo, gen_differentiable_outputs,
     dispatch_strategy,
 )
 from tools.codegen.api.types import (Binding, DispatcherSignature, CppSignatureGroup, CType,
-                                     BaseCType, OptionalCType, intT, boolT, intArrayRefT)
+                                     BaseCType, OptionalCType, longT, boolT, intArrayRefT)
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.context import with_native_function
 from tools.codegen.model import (
@@ -19,7 +25,6 @@ from .gen_trace_type import (
     MANUAL_AUTOGRAD, type_wrapper_name, tie_return_values, get_return_value
 )
 
-
 # See NOTE [ Autograd View Variables ] in variable.h for details.
 # If you update list VIEW_FUNCTIONS or RETURNS_VIEWS_OF_INPUT,
 # you **MUST** also update the public list of view ops accordingly in
@@ -28,7 +33,12 @@ from .gen_trace_type import (
 #
 # A map: function name => name of the argument that all outputs are view of
 
-VIEW_FUNCTIONS_WITH_METADATA_CHANGE = ['view_as_complex', 'view_as_real', '_conj', '_neg_view']
+VIEW_FUNCTIONS_WITH_METADATA_CHANGE = [
+    'view_as_complex',
+    'view_as_real',
+    '_conj',
+    '_neg_view'
+]
 
 VIEW_FUNCTIONS = {
     'numpy_T': 'self',
@@ -53,6 +63,8 @@ VIEW_FUNCTIONS = {
     '_values': 'self',
     'indices': 'self',
     'values': 'self',
+    'crow_indices': 'self',
+    'col_indices': 'self',
     # sparse_coo ctor output should really be views of both indices and values,
     # but we only supports making as view of a single variable, and indices is
     # discrete anyways.
@@ -122,6 +134,10 @@ WRAPPER_REGISTRATION = CodeTemplate("""\
 m.impl("${unqual_operator_name_with_overload}",
        TORCH_FN(${class_type}::${type_wrapper_name})
 );
+""")
+
+AUTOGRAD_NOT_IMPLEMENTED_REGISTRATION = CodeTemplate("""\
+m.impl("${unqual_operator_name_with_overload}", torch::autograd::autogradNotImplementedFallback());
 """)
 
 INPLACE_REDISPATCH = CodeTemplate("""\
@@ -238,8 +254,8 @@ def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str
     replay_view_func = ''
     updated_unpacked_args: List[str] = []
     known_view_arg_simple_types: List[CType] = [
-        BaseCType(intT),
-        OptionalCType(BaseCType(intT)),
+        BaseCType(longT),
+        OptionalCType(BaseCType(longT)),
         BaseCType(boolT),
         BaseCType(intArrayRefT)]
     for unpacked_binding in unpacked_bindings:
@@ -260,7 +276,7 @@ def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str
             arg_vec = arg + '_vec'
             replay_view_func += ARRAYREF_TO_VEC.substitute(arg=arg, vec=arg_vec)
             updated_unpacked_args.append(arg_vec)
-        elif arg_type == OptionalCType(BaseCType(intT)):
+        elif arg_type == OptionalCType(BaseCType(longT)):
             # Materialize int64_t? to int64_t
             arg_value = arg + '_val'
             replay_view_func += OPTIONAL_TO_VAL.substitute(arg=arg, val=arg_value, default='0')

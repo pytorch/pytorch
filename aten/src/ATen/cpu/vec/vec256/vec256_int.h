@@ -6,6 +6,7 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/macros/Macros.h>
+#include <iostream>
 
 namespace at {
 namespace vec {
@@ -236,12 +237,6 @@ public:
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
       std::memcpy(ptr, tmp_values, count * sizeof(int32_t));
     }
-  }
-  void dump() const {
-      for (size_t i = 0; i < size(); ++i) {
-          std::cout << (int)((value_type*)&values)[i] << " ";
-      }
-      std::cout << std::endl;
   }
   const int32_t& operator[](int idx) const  = delete;
   int32_t& operator[](int idx)  = delete;

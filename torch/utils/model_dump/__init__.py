@@ -367,6 +367,13 @@ def burn_in_info(skeleton, info):
         "BURNED_IN_MODEL_INFO = " + json.dumps(info, sort_keys=True).replace("/", "\\/"))
 
 
+def get_info_and_burn_skeleton(path_or_bytesio, **kwargs):
+    model_info = get_model_info(path_or_bytesio, **kwargs)
+    skeleton = get_inline_skeleton()
+    page = burn_in_info(skeleton, model_info)
+    return page
+
+
 def main(argv, *, stdout=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--style", choices=["json", "html"])
