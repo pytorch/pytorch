@@ -270,6 +270,8 @@ void listUnpack(Stack& stack, size_t num_outputs) {
 
 void tupleConstruct(Stack& stack, size_t num_inputs) {
   switch (num_inputs) {
+    case 0:
+      break;
     case 1:
       stack.back() = c10::ivalue::Tuple::create(std::move(stack.back()));
       break;
