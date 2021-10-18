@@ -50,14 +50,6 @@ namespace torch_lazy_tensors{
 namespace ir {
 namespace ops {
 
-std::vector<std::vector<int64_t>> compute_shape_dropout(const at::Tensor& input, double p, bool train) {
-  return {input.sizes().vec()};
-}
-
-std::vector<c10::ScalarType> compute_dtype_dropout(const at::Tensor& input, double p, bool train) {
-  return {input.scalar_type()};
-}
-
 std::vector<std::vector<int64_t>> compute_shape_native_layer_norm(const at::Tensor & input,
     at::IntArrayRef normalized_shape, const c10::optional<at::Tensor> & weight, const c10::optional<at::Tensor> & bias,
     double eps) {
