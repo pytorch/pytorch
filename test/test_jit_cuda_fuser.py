@@ -524,11 +524,8 @@ class TestCudaFuser(JitTestCase):
             torch.float32,
             torch.float64
         ]
-        # disabled bf16 data type - Issue #1185
-        '''
         if TEST_BF16:
             data_types.append(torch.bfloat16)
-        '''
         # Issue #1187 - disabled operators that fail because of mixed data types
         operations = [torch.neg,
                       torch.abs,
@@ -731,6 +728,7 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
     def test_binary_ops_type_promotion(self):
+        # disabled bf16 / fp16 data types because of accuracy tolerance
         data_types = [
             torch.int32,
             torch.int64,
@@ -738,7 +736,6 @@ class TestCudaFuser(JitTestCase):
             torch.float32,
             torch.float64
         ]
-        # disabled bf16 data type - Issue #1185
         '''
         if TEST_BF16:
             data_types.append(torch.bfloat16)
@@ -872,17 +869,16 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
     def test_ternary_ops_type_promotion(self):
+        # TODO: update accuracy tolerance for bf16 / fp16 data types
         data_types = [
             torch.int32,
             torch.int64,
+            torch.float16,
             torch.float32,
             torch.float64
         ]
-        # disabled bf16 data type - Issue #1185
-        '''
         if TEST_BF16:
             data_types.append(torch.bfloat16)
-        '''
         # Issue #1187 - disabled operators that fail because of mixed data types
         # OR missing all tensor argument support
         # torch.where,

@@ -27,7 +27,7 @@ __device__ __bfloat __float2bfloat(const float f) {
 
 __device__ float __bfloat2float(const __bfloat h) {
   float val;
-  asm("{  cvt.rn.f32.bf16 %0, %1;}\n"
+  asm("{  mov.b32 %0, {0,%1};}\n"
       : "=f"(val)
       : "h"(__NVFUSER_BFLOAT_TO_CUS(h)));
   return val;
