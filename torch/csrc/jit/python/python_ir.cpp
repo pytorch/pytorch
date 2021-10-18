@@ -19,7 +19,6 @@
 #include <iostream>
 #include <sstream>
 #include <utility>
-#include "third_party/pybind11/include/pybind11/pytypes.h"
 
 namespace torch {
 namespace jit {
@@ -827,27 +826,6 @@ void initPythonIRBindings(PyObject* module_) {
                 py::reinterpret_borrow<py::object>((PyObject*)thp_dtype);
             return dtype;
           })
-      /*
-  .def(
-      "dtype",
-        [](Type& t) -> THPDtype* {
-        auto scalar_type =
-            t.shared_from_this()->expectRef<TensorType>().scalarType();
-        if (!scalar_type) {
-          //return nullptr;
-           //return nullptr;
-           scalar_type = ScalarType::Undefined;
-        }
-        // PyObject* object = (PyObject*)torch::getTHPDtype(*scalar_type);
-        THPDtype* dtype = torch::getTHPDtype(*scalar_type);
-        //py::object dtype = py::cast(thp_dtype);
-        //auto dtype = py::cast(*scalar_type); -- Returns scalar Type opaque C
-  object
-        // py::object dtype = py::cast((PyObject*)
-  torch::getTHPDtype(*scalar_type)); -- Unable to convert function return value
-  to python object return dtype;
-      })
-      */
       .def(
           "with_dtype",
           [](Type& t, py::object dtype) -> py::object {
