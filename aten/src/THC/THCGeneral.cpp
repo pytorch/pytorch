@@ -1,6 +1,5 @@
 #include <THC/THCGeneral.h>
 #include <TH/TH.h>
-#include <THC/THCAllocator.h>
 #include <THC/THCGeneral.hpp>
 
 #include <c10/cuda/CUDAFunctions.h>
@@ -284,4 +283,3 @@ void __THCusparseCheck(cusparseStatus_t status, const char *file, const int line
 #undef MIN_GLOBAL_SCRATCH_SPACE_PER_DEVICE
 
 #include <THC/THCStorage.cpp>
-#include <THC/THCAllocator.cpp>
