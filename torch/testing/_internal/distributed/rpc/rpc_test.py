@@ -30,7 +30,12 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     captured_output,
 )
-from torch.testing._internal.common_utils import IS_MACOS, load_tests, sandcastle_skip_if
+from torch.testing._internal.common_utils import (
+    IS_MACOS,
+    load_tests,
+    sandcastle_skip_if,
+    get_cycles_per_ms,
+)
 from torch.testing._internal.dist_utils import (
     dist_init,
     get_function_event,
@@ -582,22 +587,6 @@ class TensorWrapper:
         with self.lock:
             self.event.record()
             return self.tensor.sum()
-
-# Copied from test/test_cuda.py.
-_cycles_per_ms = None
-
-def get_cycles_per_ms():
-    """Approximate number of cycles per millisecond for torch.cuda._sleep"""
-    global _cycles_per_ms
-    if _cycles_per_ms is None:
-        start = torch.cuda.Event(enable_timing=True)
-        end = torch.cuda.Event(enable_timing=True)
-        start.record()
-        torch.cuda._sleep(1000000)
-        end.record()
-        end.synchronize()
-        _cycles_per_ms = 1000000 / start.elapsed_time(end)
-    return _cycles_per_ms
 
 
 class AsyncExecutionClass:
