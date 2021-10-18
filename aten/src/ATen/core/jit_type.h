@@ -1635,7 +1635,7 @@ inline at::ScalarType scalarTypeFromJitType(const Type& type) {
   TORCH_CHECK(
       result,
       "Add new condition, expected Float, Complex, Int, or Bool but got",
-      type->str());
+      type.str());
   return *result;
 }
 
