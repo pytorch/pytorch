@@ -44,7 +44,7 @@ static inline Tensor cloneBatchedColumnMajor(const Tensor& src) {
   // this will be efficient (no reordering of the data will occur)
   // because the first transpose will make the tensor contiguous,
   // and cloning a contiguous tensor is fast.
-  auto result = src.transpose(-2, -1).clone(at::MemoryFormat::Contiguous);
+  auto result = src.mT().clone(at::MemoryFormat::Contiguous);
   result.transpose_(-2, -1);
   return result;
 }
@@ -558,6 +558,11 @@ static inline void checkLinalgCompatibleDtype(const std::string& fn_name, Scalar
       fn_name,
       ": Expected ", out_name, " to be safely castable from ", result_type, " dtype, but got ",
       out_name, " with dtype ", out_type);
+}
+
+static inline void checkNotComplexTolerance(const Tensor& tol, const c10::string_view f_name, const c10::string_view tol_name) {
+  TORCH_CHECK(!at::isComplexType(tol.scalar_type()),
+              f_name, ": ", tol_name, " tensor of complex type is not supported. Got ", tol.scalar_type());
 }
 
 /*
