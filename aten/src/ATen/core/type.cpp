@@ -10,6 +10,10 @@
 
 namespace c10 {
 
+static_assert(
+    std::is_same<decltype(getTypePtr<std::tuple<int64_t, int64_t>>()), const TupleTypePtr&>::value,
+    "getTypePtr<std::tuple<int64_t, int64_t>> not returning const ref!");
+
 namespace {
 inline bool is_contiguous_strides(
     const IntArrayRef sizes,

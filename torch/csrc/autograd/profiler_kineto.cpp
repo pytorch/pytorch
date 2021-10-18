@@ -1,4 +1,5 @@
 #include <c10/util/irange.h>
+#include <limits>
 #include <torch/csrc/autograd/profiler_kineto.h>
 
 #include <torch/csrc/jit/frontend/tracer.h>
@@ -66,13 +67,13 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
   ~KinetoThreadLocalState() override = default;
 
   void reportClientActivity(
-      const at::RecordFunction& fn,
+      const std::string& evt_name,
+      const bool is_async,
       const KinetoObserverContext* ctx) {
     if (!ctx) {
       return;
     }
-    std::string evt_name(fn.name().str());
-    auto end_time = getTimeUs();
+    auto end_time = ctx->endUS;
 #ifdef USE_KINETO
     libkineto::GenericTraceActivity op(
         cpu_trace->span,
@@ -105,7 +106,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
           .sequenceNr(ctx->sequenceNr)
           .fwdThreadId(ctx->fwdThreadId)
           .scope(ctx->recFunScope)
-          .setAsync(fn.isAsync())
+          .setAsync(is_async)
           .debugHandle(ctx->debug_handle);
       if (ctx->shapes && !ctx->shapes->empty()) {
         kineto_events_.back().shapes(*ctx->shapes);
@@ -120,7 +121,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
         kineto_events_.back().moduleHierarchy(*ctx->module_hierarchy);
       }
       if (ctx->extraArgs && !ctx->extraArgs->empty()) {
-        kineto_events_.back().flops(computeFlops(std::string(fn.name().str()), *ctx->extraArgs));
+        kineto_events_.back().flops(computeFlops(std::string(evt_name), *ctx->extraArgs));
       }
       kineto_events_.back().cuda_event_start_ = ctx->cuda_event_start_;
       kineto_events_.back().cuda_event_end_ = ctx->cuda_event_end_;
@@ -257,6 +258,9 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
       }
       if (kineto_event.hasTypes()) {
         activity.addMetadata("Input type", dtypesToStr(kineto_event.dtypes()));
+      }
+      if (!kineto_event.backend().empty()) {
+        activity.addMetadata("Backend", "\"" + kineto_event.backend() + "\"");
       }
 
       // add information about an associated forward op, if a sequence number
@@ -436,7 +440,8 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
             }
           }
 
-          state_ptr->reportClientActivity(fn, kineto_ctx_ptr);
+          kineto_ctx_ptr->endUS = getTimeUs();
+          state_ptr->reportClientActivity(fn.name().str(), fn.isAsync(), kineto_ctx_ptr);
 #ifdef USE_KINETO
           libkineto::api().activityProfiler().popCorrelationId();
 #endif // USE_KINETO
@@ -504,6 +509,40 @@ std::string stacksToStr(const std::vector<std::string>& stacks, const char* deli
 }
 
 } // namespace
+
+void reportBackendEventToActiveKinetoProfiler(
+    const int64_t start_time_us,
+    const int64_t end_time_us,
+    const int64_t debug_handle,
+    const at::RecordScope scope,
+    const std::string& event_name,
+    const std::string& backend_name) {
+  auto state_ptr = getProfilerTLSState();
+  if (!state_ptr) {
+    return;
+  }
+  auto ctx_ptr = std::make_unique<KinetoObserverContext>();
+  ctx_ptr->correlationId = std::numeric_limits<uint64_t>::max();
+  ctx_ptr->startThreadId = at::RecordFunction::currentThreadId();
+  ctx_ptr->debug_handle = debug_handle;
+
+  /* no support for input shapes now?
+  if (config.report_input_shapes) {
+    ctx_ptr->shapes = inputSizes(fn);
+    ctx_ptr->dtypes = inputTypes(fn);
+  }
+  */
+
+  ctx_ptr->sequenceNr = -1;
+  ctx_ptr->fwdThreadId = ctx_ptr->startThreadId;
+  ctx_ptr->recFunScope = (uint8_t)scope;
+
+  ctx_ptr->startUs = start_time_us;
+  ctx_ptr->endUS = end_time_us;
+  ctx_ptr->endThreadId = at::RecordFunction::currentThreadId();
+  state_ptr->reportClientActivity(event_name, false, ctx_ptr.get());
+  state_ptr->kineto_events_.back().backend(backend_name);
+}
 
 void prepareProfiler(
     const ProfilerConfig& config,
