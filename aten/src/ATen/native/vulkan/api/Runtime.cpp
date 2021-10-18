@@ -111,7 +111,7 @@ VkInstance create_instance(const Runtime::Type type) {
     VK_API_VERSION_1_0,
   };
 
-  const VkInstanceCreateInfo instance_create_info{
+const VkInstanceCreateInfo instance_create_info{
     VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
     nullptr,
     0u,
