@@ -768,7 +768,7 @@ std::vector<at::Tensor> StaticModule::operator()(
 }
 
 c10::IValue StaticModule::operator()(
-    const std::vector<c10::IValue>& args,
+    c10::ArrayRef<c10::IValue> args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
   return runtime()(args, kwargs);
 }
@@ -849,7 +849,7 @@ std::vector<at::Tensor> StaticRuntime::operator()(
 }
 
 void StaticRuntime::set_inputs(
-    const std::vector<c10::IValue>& args,
+    c10::ArrayRef<c10::IValue> args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
   if (!kwargs.empty()) {
     // This is not ideal
@@ -886,7 +886,7 @@ void StaticRuntime::set_inputs(
 }
 
 c10::IValue StaticRuntime::operator()(
-    const std::vector<c10::IValue>& args,
+    c10::ArrayRef<c10::IValue> args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
   // We assume inference workloads, so we do not need
   // autograd. Enabling this is a significant win on dispatcher
@@ -967,7 +967,7 @@ std::string generate_latency_json(const std::string& label, double millis) {
 } // namespace
 
 void StaticRuntime::benchmark(
-    const std::vector<c10::IValue>& args,
+    c10::ArrayRef<c10::IValue> args,
     const std::unordered_map<std::string, c10::IValue>& kwargs,
     const int warmup_runs,
     const int main_runs,
@@ -1060,7 +1060,7 @@ void StaticRuntime::benchmark(
 }
 
 float StaticRuntime::benchmark_model(
-    const std::vector<c10::IValue>& args,
+    c10::ArrayRef<c10::IValue> args,
     const std::unordered_map<std::string, c10::IValue>& kwargs,
     const int warmup_runs,
     const int main_runs) {
@@ -1131,7 +1131,7 @@ void display_pnode_info(const ProcessedNode& pnode) {
 }
 
 void StaticRuntime::display_nodes(
-    const std::vector<c10::IValue>& args,
+    c10::ArrayRef<c10::IValue> args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
   c10::InferenceMode mode;
   if (planner_) {
@@ -1163,7 +1163,7 @@ void StaticRuntime::display_nodes(
 }
 
 StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
-    const std::vector<c10::IValue>& args,
+    c10::ArrayRef<c10::IValue> args,
     const std::unordered_map<std::string, c10::IValue>& kwargs,
     const int warmup_runs,
     const int main_runs) {
@@ -1394,20 +1394,40 @@ ProcessedNode::ProcessedNode(
   outputs_ = std::make_unique<IValue[]>(outputs_size_);
 
   if (enable_out_variant) {
-    if (OutVariant fn = getOutOfPlaceOperation(node)) {
-      fn_.emplace<0>(std::move(fn));
+    if ((fn_ = getOutOfPlaceOperation(node))) {
+      function_kind_ = FunctionKind::kOutVariant;
       VLOG(1) << "Switch to out variant for node: " << PrintNode(node);
       return;
     }
   }
-  if (NativeFunction fn = getNativeOperation(node)) {
-    fn_.emplace<1>(std::move(fn));
+  if ((fn_ = getNativeOperation(node))) {
+    function_kind_ = FunctionKind::kNativeFunction;
     VLOG(1) << "Switch to native impl for node: " << PrintNode(node);
     return;
   }
   {
     const Operator& op = node->getOperator();
-    fn_.emplace<2>(op.getOperation(node));
+    fn_ = [node_op = op.getOperation(node)](ProcessedNode* pnode) mutable {
+      std::vector<IValue> stack;
+      Node* node = pnode->node_;
+      const size_t size = node->inputs().size();
+      stack.reserve(size + (hasVarArgs(node) ? 1 : 0));
+      for (const auto i : c10::irange(size)) {
+        stack.emplace_back(pnode->Input(i));
+      }
+      // Need to store the number of inputs in stack for variadic ops.
+      if (hasVarArgs(node)) {
+        stack.emplace_back(static_cast<int>(size));
+      }
+
+      node_op(stack);
+
+      DCHECK_EQ(stack.size(), node->outputs().size());
+      for (const auto i : c10::irange(node->outputs().size())) {
+        pnode->Output(i) = std::move(stack[i]);
+      }
+    };
+    function_kind_ = FunctionKind::kInterpreterFallback;
     VLOG(1) << "Fallback interpreter for node: " << PrintNode(node);
   }
 }
@@ -1423,36 +1443,9 @@ std::vector<IValue> ProcessedNode::clone_inputs() const {
   return result;
 }
 
-void ProcessedNode::run_impl() {
+void ProcessedNode::run() {
   DCHECK(verify_outputs_dont_overlap_each_other());
   DCHECK(verify_inputs_dont_overlap_outputs());
-  if (fn_.index() == 0) {
-    c10::get<0>(fn_)(this);
-  } else if (fn_.index() == 1) {
-    c10::get<1>(fn_)(this);
-  } else {
-    std::vector<IValue> stack;
-    const size_t size = node_->inputs().size();
-    stack.reserve(size + 1);
-    for (const auto i : c10::irange(size)) {
-      stack.emplace_back(Input(i));
-    }
-    // Need to store the number of inputs in stack for variadic ops.
-    if (hasVarArgs(node_)) {
-      stack.emplace_back(static_cast<int>(size));
-    }
-
-    DCHECK(fn_.index() == 2);
-    c10::get<2>(fn_)(stack);
-
-    DCHECK_EQ(stack.size(), node_->outputs().size());
-    for (const auto i : c10::irange(node_->outputs().size())) {
-      Output(i) = std::move(stack[i]);
-    }
-  }
-}
-
-void ProcessedNode::run() {
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   bool pre_sampled = false;
   if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
@@ -1464,12 +1457,12 @@ void ProcessedNode::run() {
         guard.before(get_op_name());
       }
     }
-    run_impl();
+    fn_(this);
   } else {
-    run_impl();
+    fn_(this);
   }
 #else
-  run_impl();
+  fn_(this);
 #endif
 }
 

@@ -119,7 +119,7 @@ class MemoryPlanner {
 
   // each pair contains the size (in bytes) of data to be allocated
   // and a vector of Tensors' storages that should be backed by that
-  // same data.  Thus, if memonger is disabled, all vectors are of
+  // same data. Thus, if memonger is disabled, all vectors are of
   // size 1.
 
   // We allocate StorageImpls ourselves so that 1) we don't have to do
@@ -127,7 +127,7 @@ class MemoryPlanner {
   // data cache) first reading the Storage (i.e., StorageImpl pointer)
   // from the TensorImpl object and then second dereferencing it and
   // 2) our memory access pattern during allocate() has high locality.
-  std::vector<std::pair<size_t, at::StorageImpl>> managed_tensor_storage_impls_;
+  std::vector<std::pair<size_t, at::StorageImpl>> managed_tensor_storage_impls_{};
   // We don't have any guarantee that the model doesn't change the
   // Storage for managed tensors out from under us during execution,
   // so we have to check the StorageImpls each time we deallocate.

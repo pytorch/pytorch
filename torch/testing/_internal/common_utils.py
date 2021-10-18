@@ -803,15 +803,21 @@ def skipIfNotMiopenSuggestNHWC(fn):
 # Context manager for setting deterministic flag and automatically
 # resetting it to its original value
 class DeterministicGuard:
-    def __init__(self, deterministic):
+    def __init__(self, deterministic, *, warn_only=False):
         self.deterministic = deterministic
+        self.warn_only = warn_only
 
     def __enter__(self):
         self.deterministic_restore = torch.are_deterministic_algorithms_enabled()
-        torch.use_deterministic_algorithms(self.deterministic)
+        self.warn_only_restore = torch.is_deterministic_algorithms_warn_only_enabled()
+        torch.use_deterministic_algorithms(
+            self.deterministic,
+            warn_only=self.warn_only)
 
     def __exit__(self, exception_type, exception_value, traceback):
-        torch.use_deterministic_algorithms(self.deterministic_restore)
+        torch.use_deterministic_algorithms(
+            self.deterministic_restore,
+            warn_only=self.warn_only_restore)
 
 # Context manager for setting cuda sync debug mode and reset it
 # to original value
@@ -860,7 +866,9 @@ class CudaSyncGuard:
 def wrapDeterministicFlagAPITest(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        with DeterministicGuard(torch.are_deterministic_algorithms_enabled()):
+        with DeterministicGuard(
+                torch.are_deterministic_algorithms_enabled(),
+                warn_only=torch.is_deterministic_algorithms_warn_only_enabled()):
             class CuBLASConfigGuard:
                 cublas_var_name = 'CUBLAS_WORKSPACE_CONFIG'
 

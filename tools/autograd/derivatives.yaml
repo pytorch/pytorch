@@ -750,7 +750,7 @@
   self: -at::matmul(inverse.conj().transpose(-2, -1), at::matmul(grad, inverse.conj().transpose(-2, -1)))
   inverse: -at::matmul(at::matmul(inverse, self_t), inverse)
 
-- name: linalg_pinv(Tensor self, float rcond=1e-15, bool hermitian=False) -> Tensor
+- name: linalg_pinv.atol_rtol_tensor(Tensor self, *, Tensor? atol=None, Tensor? rtol=None, bool hermitian=False) -> Tensor
   self: pinv_backward(grad, result, self)
   result: pinv_jvp(self_p, result, self_t)
 
@@ -1109,7 +1109,7 @@
   std: at::zeros(std.sizes(), grad.options())
 
 - name: linalg_householder_product(Tensor input, Tensor tau) -> Tensor
-  input, tau: householder_product_backward(grad, input, tau)
+  input, tau: householder_product_backward(grad, result, input, tau)
 
 - name: ormqr(Tensor self, Tensor input2, Tensor input3, bool left=True, bool transpose=False) -> Tensor
   self: not_implemented("ormqr")
