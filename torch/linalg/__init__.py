@@ -718,6 +718,10 @@ the output has the same batch dimensions.
         of a product of Householder matrices with another matrix.
         However, that function is not supported by autograd.
 
+.. warning::
+    Gradient computations are only well-defined if :math:`tau_i ||v_i||^2 \neq 1`.
+    If this condition is not met, no error will be thrown, but the gradient produced may contain `NaN`.
+
 Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
     tau (Tensor): tensor of shape `(*, k)` where `*` is zero or more batch dimensions.

@@ -467,11 +467,19 @@ class TestReductions(TestCase):
         expected = logsumexp(a.cpu().numpy(), 1)
         self.assertEqual(expected.shape, actual.shape)
         self.assertEqual(expected, actual)
+
         # check that out is actually inplace
         b = torch.zeros(5, 2, device=device)
         c = b[:, 0]
         torch.logsumexp(a, 1, out=c)
         self.assertEqual(expected, b[:, 0])
+
+        # check integral inputs is promoted to floating point
+        e = torch.randint(-100, 100, [5, 4], device=device)
+        actual = e.logsumexp(1).to(torch.float64)
+        expected = logsumexp(e.cpu().numpy(), 1)
+        self.assertEqual(expected.shape, actual.shape)
+        self.assertEqual(expected, actual)
 
     @onlyCPU
     def test_sum_parallel(self, device):
@@ -3120,7 +3128,8 @@ class TestReductions(TestCase):
         for sample_input in samples:
             t = sample_input.input
             actual = op(t, *sample_input.args, **sample_input.kwargs)
-            exact_dtype = not (t.dtype is torch.bfloat16)
+            exact_dtype = not (t.dtype is torch.bfloat16
+                               or (op.promotes_int_to_float and not torch.is_floating_point(t)))
             expected = op.ref(to_numpy(t), *sample_input.args,
                               **dict(
                                   # `identity` is mapped to numpy reduction `initial` argument
