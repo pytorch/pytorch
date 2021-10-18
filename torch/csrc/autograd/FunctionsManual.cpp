@@ -2494,6 +2494,55 @@ Tensor linalg_eig_backward(const std::vector<torch::autograd::Variable> &grads,
   }
 }
 
+Tensor linalg_lstsq_jvp(
+  const Tensor& A,
+  const Tensor& B,
+  const Tensor& dA,
+  const Tensor& dB
+) {
+  auto pinvA = at::linalg_pinv(A);
+  auto dpinvA = pinv_jvp(A, pinvA, dA);
+  auto dX = dpinvA.matmul(B) + pinvA.matmul(dB);
+  return dX;
+}
+
+std::tuple<Tensor, Tensor> linalg_lstsq_backward(
+  const Tensor& grad,
+  const Tensor& A,
+  const Tensor& B,
+  const c10::optional<double> rcond,
+  const c10::optional<c10::string_view> driver,
+  const std::array<bool, 2>& grad_input_mask
+) {
+  Tensor A_grad, B_grad;
+  if (!grad.defined()) {
+    return std::make_tuple(A_grad, B_grad);
+  }
+
+  auto A_requires_grad = grad_input_mask[0];
+  auto B_requires_grad = grad_input_mask[1];
+
+  Tensor pinvA;
+  if (A_requires_grad) {
+    pinvA = at::linalg_pinv(A);
+    auto pinvA_grad = grad.matmul(B.transpose(-1, -2).conj());
+    A_grad = pinv_backward(pinvA_grad, pinvA, A);
+  }
+
+  if (B_requires_grad) {
+    if (!pinvA.defined()) {
+      pinvA = at::linalg_pinv(A);
+    }
+    // Equivalent to
+    // B_grad = std::get<0>(at::linalg_lstsq(A.transpose(-1, -2).conj(), grad, rcond, driver));
+    // but we avoid this approach as `gelsy` is non-deterministic
+    B_grad = pinvA.transpose(-1, -2).conj().matmul(grad);
+  }
+
+  return std::make_tuple(A_grad, B_grad);
+}
+
+
 // jvp functions for eigenvalues and eigenvectors are separate
 // because currently forward AD only works with one rule per output
 Tensor eigh_jvp_eigenvalues(
