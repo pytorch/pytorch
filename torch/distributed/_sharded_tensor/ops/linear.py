@@ -1,5 +1,3 @@
-from functools import reduce
-from operator import concat
 from typing import List, cast
 
 import torch
@@ -173,12 +171,15 @@ def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
     if rearrange_rows:
         # Need to re-arrange rows of input_t for all2all.
         indices: List[List[int]] = [[0]] * world_size
+        # When we do the chuck split, we always ensure the first N - 1 chunks get max out
+        # and then the Nth chuck gets the rest. So input_split_sizes like [3, 3, 3, 4]
+        # are not possible. The expected split size will be [4, 4, 4, 1].
         sharded_dim_size_max = max(input_split_sizes)
         for idx, placement in enumerate(weight._sharding_spec.placements):
             split_size = input_split_sizes[placement.rank()]
             offset_start_idx = idx * sharded_dim_size_max
             indices[placement.rank()] = list(range(offset_start_idx, offset_start_idx + split_size))
-        indices = reduce(concat, indices)
+        indices = list(idx for indice in indices for idx in indice)
 
         input_t = input_t.index_select(0, torch.tensor(indices, device=input_t.device))
 
