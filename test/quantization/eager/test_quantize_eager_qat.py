@@ -121,9 +121,9 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                 model = convert(model)
 
                 def checkQuantized(model):
-                    # make sure EmbeddingBag is now a QuantizedEmbeddingBag
+                    # Make sure EmbeddingBag is now a quantized EmbeddingBag.
                     self.assertTrue(type(model.emb), nn.quantized.EmbeddingBag)
-                    # Linear should not have been quantized
+                    # Also test that Linear has been quantized.
                     self.assertTrue(type(model.linear), nnq.Linear)
 
                     test_only_eval_fn(model, eval_output)

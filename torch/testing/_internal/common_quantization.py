@@ -1666,6 +1666,7 @@ class ManualConvLinearQATModel(torch.nn.Module):
         x = self.fc1(x)
         x = self.fc2(x)
         return self.dequant(x)
+
 class ManualEmbeddingBagLinear(nn.Module):
     def __init__(self):
         super(ManualEmbeddingBagLinear, self).__init__()
@@ -1682,6 +1683,7 @@ class ManualEmbeddingBagLinear(nn.Module):
         x = self.quant(x)
         x = self.linear(x)
         return self.dequant(x)
+
 class SubModelForFusion(nn.Module):
     def __init__(self):
         super().__init__()
