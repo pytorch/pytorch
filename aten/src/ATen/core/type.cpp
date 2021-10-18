@@ -547,12 +547,12 @@ MatchTypeReturn matchTypeVariables(
 }
 
 // change return types like List[List[t]] into List[List[int]]
-TORCH_API TypePtr tryEvalTypeVariables(TypePtr type, std::unordered_map<std::string, TypePtr>& type_env) {
+TORCH_API TypePtr tryEvalTypeVariables(const TypePtr& type, std::unordered_map<std::string, TypePtr>& type_env) {
   if (!type->hasFreeVariables()) {
     return type;
   }
 
-  if (auto vt = type->cast<VarType>()) {
+  if (auto vt = type->castRaw<VarType>()) {
     auto it = type_env.find(vt->name());
     if (it == type_env.end()) {
       return nullptr;
@@ -566,7 +566,7 @@ TORCH_API TypePtr tryEvalTypeVariables(TypePtr type, std::unordered_map<std::str
       if (!r) {
         return nullptr;
       }
-      new_contained.push_back(r);
+      new_contained.push_back(std::move(r));
     }
     return type->withContained(std::move(new_contained));
   }

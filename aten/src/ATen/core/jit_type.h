@@ -1913,7 +1913,7 @@ matchTypeVariables(const TypePtr& formal, const TypePtr& actual, TypeEnv& type_e
 // replace type variables appearing in `type` with the values in
 // `type_env`. Returns nullptr if a variable used in `type`
 // does not appear in `type_env`
-TORCH_API TypePtr tryEvalTypeVariables(TypePtr type, TypeEnv& type_env);
+TORCH_API TypePtr tryEvalTypeVariables(const TypePtr& type, TypeEnv& type_env);
 
 TORCH_API bool elementTypeCanBeInferredFromMembers(const TypePtr& elem_type);
 
