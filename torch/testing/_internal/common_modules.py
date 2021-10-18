@@ -116,6 +116,16 @@ def materialize(objs):
     else:
         return objs
 
+def clear(objs):
+    if isinstance(objs, (list, tuple)):
+        return type(objs)(clear(obj) for obj in objs)
+    elif isinstance(objs, dict):
+        return {key: clear(obj) for key, obj in objs.items()}
+    elif isinstance(objs, LazyMakeTensor):
+        return objs.clear()
+    else:
+        return objs
+
 class LazyMakeTensor:
     def __init__(self, shape, device, dtype, generator=make_tensor, **kwargs):
         self.shape = shape
@@ -131,6 +141,10 @@ class LazyMakeTensor:
             self.materialized = True
         return self.tensor
 
+    def clear(self):
+        self.tensor = None
+        self.materialized = False
+
 
 class FunctionInput(object):
     """ Contains args and kwargs to pass as input to a function. """
@@ -143,6 +157,10 @@ class FunctionInput(object):
     def materialize(self):
         self.args = materialize(self.args)
         self.kwargs = materialize(self.kwargs)
+
+    def clear(self):
+        self.args = clear(self.args)
+        self.kwargs = clear(self.kwargs)
 
 
 class ModuleInput(object):
@@ -173,6 +191,12 @@ class ModuleInput(object):
     def materialize(self):
         self.constructor_input.materialize()
         self.forward_input.materialize()
+
+    def __enter__(self):
+        self.materialize()
+
+    def __exit__(self, type, value, traceback):
+        self.clear()
 
 
 class ModuleInfo(object):

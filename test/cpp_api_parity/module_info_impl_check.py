@@ -83,10 +83,10 @@ def write_test_to_test_class(
 
                 def test_fn(self):
                     params = unit_test_class.module_info_test_params_map[self._testMethodName]
-                    params.sample.materialize()
-                    test_forward_backward(
-                        unit_test_class=self, test_params=params,
-                        cpp_module=unit_test_class.module_info_impl_check_cpp_module)
+                    with params.sample:
+                        test_forward_backward(
+                            unit_test_class=self, test_params=params,
+                            cpp_module=unit_test_class.module_info_impl_check_cpp_module)
 
                 test_fn = decorate_test_fn(
                     test_fn=test_fn,
