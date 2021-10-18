@@ -250,6 +250,34 @@ class TestFuseFx(QuantizationTestCase):
             expected_node_list=expected_nodes,
             expected_node_occurrence=expected_occurrence)
 
+    def test_fuse_linear_bn_eval(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(1, 1)
+                self.bn1d = nn.BatchNorm1d(1)
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.bn1d(x)
+                return x
+
+        # test eval mode
+        m = M().eval()
+        from torch.ao.quantization.quantize_fx import fuse_fx
+        # fuse_fx is a top level api and only supports eval mode
+        m = fuse_fx(m)
+        expected_nodes = [
+            ns.call_module(nn.Linear),
+        ]
+        expected_occurrence = {
+            ns.call_module(nn.BatchNorm1d): 0,
+        }
+        self.checkGraphModuleNodes(
+            m,
+            expected_node_list=expected_nodes,
+            expected_node_occurrence=expected_occurrence)
+
     def test_fuse_module_relu(self):
         class M(torch.nn.Module):
             def __init__(self):
