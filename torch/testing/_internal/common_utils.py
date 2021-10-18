@@ -2312,7 +2312,7 @@ def random_symmetric_matrix(l, *batches, **kwargs):
     dtype = kwargs.get('dtype', torch.double)
     device = kwargs.get('device', 'cpu')
     A = torch.randn(*(batches + (l, l)), dtype=dtype, device=device)
-    A = (A + A.transpose(-2, -1)).div_(2)
+    A = (A + A.mT).div_(2)
     return A
 
 # Creates a symmetric matrix or batch of symmetric matrices
@@ -2320,33 +2320,39 @@ def random_symmetric_matrix(l, *batches, **kwargs):
 def make_symmetric_matrices(*shape, device, dtype):
     assert shape[-1] == shape[-2]
     t = make_tensor(shape, device=device, dtype=dtype)
-    t = t + t.transpose(-2, -1).div_(2)
+    t = (t + t.mT).div_(2)
     return t
 
 def random_hermitian_matrix(l, *batches, **kwargs):
     dtype = kwargs.get('dtype', torch.double)
     device = kwargs.get('device', 'cpu')
     A = torch.randn(*(batches + (l, l)), dtype=dtype, device=device)
-    A = (A + A.transpose(-2, -1).conj()).div_(2)
+    A = (A + A.mH).div_(2)
     return A
 
 
 def random_symmetric_psd_matrix(l, *batches, **kwargs):
+    """
+    Returns a batch of random symmetric positive-semi-definite matrices.
+    The shape of the result is batch_dims + (matrix_size, matrix_size)
+    The following example creates a tensor of size 2 x 4 x 3 x 3
+    >>> matrices = random_symmetric_psd_matrix(3, 2, 4, dtype=dtype, device=device)
+    """
     dtype = kwargs.get('dtype', torch.double)
     device = kwargs.get('device', 'cpu')
     A = torch.randn(*(batches + (l, l)), dtype=dtype, device=device)
-    return torch.matmul(A, A.transpose(-2, -1))
+    return A @ A.mT
 
 
 def random_hermitian_psd_matrix(matrix_size, *batch_dims, dtype=torch.double, device='cpu'):
     """
-    Returns a batch of random Hermitian semi-positive-definite matrices.
+    Returns a batch of random Hermitian positive-semi-definite matrices.
     The shape of the result is batch_dims + (matrix_size, matrix_size)
     The following example creates a tensor of size 2 x 4 x 3 x 3
     >>> matrices = random_hermitian_psd_matrix(3, 2, 4, dtype=dtype, device=device)
     """
     A = torch.randn(*(batch_dims + (matrix_size, matrix_size)), dtype=dtype, device=device)
-    return torch.matmul(A, A.conj().transpose(-2, -1))
+    return A @ A.mH
 
 
 # TODO: remove this (prefer make_symmetric_pd_matrices below)
@@ -2355,7 +2361,7 @@ def random_symmetric_pd_matrix(matrix_size, *batch_dims, **kwargs):
     device = kwargs.get('device', 'cpu')
     A = torch.randn(*(batch_dims + (matrix_size, matrix_size)),
                     dtype=dtype, device=device)
-    return torch.matmul(A, A.transpose(-2, -1)) \
+    return torch.matmul(A, A.mT) \
         + torch.eye(matrix_size, dtype=dtype, device=device) * 1e-5
 
 
@@ -2364,9 +2370,8 @@ def random_symmetric_pd_matrix(matrix_size, *batch_dims, **kwargs):
 def make_symmetric_pd_matrices(*shape, device, dtype):
     assert shape[-1] == shape[-2]
     t = make_tensor(shape, device=device, dtype=dtype)
-    t = torch.matmul(t, t.transpose(-2, -1))
     i = torch.eye(shape[-1], device=device, dtype=dtype) * 1e-5
-    return t + i
+    return t @ t.mT + i
 
 def random_hermitian_pd_matrix(matrix_size, *batch_dims, dtype, device):
     """
@@ -2377,8 +2382,7 @@ def random_hermitian_pd_matrix(matrix_size, *batch_dims, dtype, device):
     """
     A = torch.randn(*(batch_dims + (matrix_size, matrix_size)),
                     dtype=dtype, device=device)
-    return torch.matmul(A, A.transpose(-2, -1).conj()) \
-        + torch.eye(matrix_size, dtype=dtype, device=device)
+    return A @ A.mH + torch.eye(matrix_size, dtype=dtype, device=device)
 
 
 # TODO: remove this (prefer make_fullrank_matrices_with_distinct_singular_values below)
