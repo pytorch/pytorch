@@ -209,8 +209,6 @@ def create_python_bindings(
     py_methods: List[str] = []
     py_method_defs: List[str] = []
     py_forwards: List[str] = []
-    py_return_types: List[str] = []
-    py_return_types_array: List[str] = []
 
     grouped = group_filter_overloads(pairs, pred)
 
