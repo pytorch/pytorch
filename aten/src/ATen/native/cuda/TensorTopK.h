@@ -1,0 +1,13 @@
+#include <cstdint>
+
+namespace at {
+class TensorBase;
+}
+
+namespace at {
+namespace native {
+void launch_gather_topk_kernel(
+    const TensorBase& self,
+    int64_t k, int64_t dim, bool largest, bool sorted,
+    const TensorBase& values, const TensorBase& indices);
+}}
