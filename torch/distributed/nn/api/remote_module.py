@@ -288,11 +288,13 @@ class _RemoteModule(nn.Module):
         """
         return self.module_rref
 
+    @torch.jit.export
     def __getstate__(self):
         raise RuntimeError(
             "Cannot pickle RemoteModule in python pickler. RemoteModule can only be pickled when using RPC"
         )
 
+    @torch.jit.export
     def __setstate__(self, state):
         raise RuntimeError(
             "Cannot unpickle RemoteModule in python pickler. RemoteModule can only be unpickled when using RPC"

@@ -193,7 +193,7 @@ def preprocess(
         show_progress: bool = True,
         hip_clang_launch: bool = False,
         is_pytorch_extension: bool = False,
-        clean_ctx: GeneratedFileCleaner = None) -> HipifyFinalResult:
+        clean_ctx: Optional[GeneratedFileCleaner] = None) -> HipifyFinalResult:
     """
     Call preprocessor on selected files.
 
@@ -750,7 +750,6 @@ def preprocessor(
                 or f.startswith("ATen/native/quantized/cuda")
                 or f.startswith("ATen/native/sparse/cuda")
                 or f.startswith("THC/")
-                or f.startswith("THCUNN/")
                 or (f.startswith("THC") and not f.startswith("THCP"))
             ):
                 return templ.format(get_hip_file_path(m.group(1), is_pytorch_extension))
@@ -941,7 +940,7 @@ def hipify(
     show_progress: bool = True,
     hip_clang_launch: bool = False,
     is_pytorch_extension: bool = False,
-    clean_ctx: GeneratedFileCleaner = None
+    clean_ctx: Optional[GeneratedFileCleaner] = None
 ) -> HipifyFinalResult:
     if project_directory == "":
         project_directory = os.getcwd()

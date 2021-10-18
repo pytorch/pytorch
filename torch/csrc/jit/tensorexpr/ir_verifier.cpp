@@ -9,8 +9,19 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-template <typename Op>
-void verifyBitwiseOp(const BitwiseOpNode<Op>* v, IRVerifier* verifier) {
+namespace detail {
+template <typename T>
+void deducer(BinaryOpNode<T>);
+
+bool deducer(...);
+} // namespace detail
+
+template <
+    typename D,
+    typename std::enable_if<std::is_same<
+        decltype(detail::deducer(std::declval<D>())),
+        void>::value>::type* = nullptr>
+void verifyBitwiseOp(NodePtr<D> v, IRVerifier* verifier) {
   if (!v->lhs()->dtype().is_integral()) {
     throw unsupported_dtype();
   }
@@ -108,7 +119,19 @@ void IRVerifier::visit(IfThenElsePtr v) {
 }
 
 void IRVerifier::visit(IntrinsicsPtr v) {
+  if (v->op_type() == kIsNan) {
+    if (v->dtype().scalar_type() != c10::kInt) {
+      throw malformed_ir("bad dtype in intrinsic arg");
+    }
+    IRVisitor::visit(v);
+    return;
+  }
   // TODO: add a check for OpArgCount and op_type
+  for (auto const& param : v->params()) {
+    if (param->dtype() != v->dtype()) {
+      throw malformed_ir("bad dtype in intrinsic arg");
+    }
+  }
   IRVisitor::visit(v);
 }
 

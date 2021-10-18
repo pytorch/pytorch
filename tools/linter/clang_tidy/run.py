@@ -421,7 +421,7 @@ def find_changed_lines(diff: str) -> Dict[str, List[Tuple[int, int]]]:
                 i += 1
             ranges[-1][1] = added_line_nos[-1]
 
-            files[file.path].append(*ranges)
+            files[file.path] += ranges
 
     return dict(files)
 

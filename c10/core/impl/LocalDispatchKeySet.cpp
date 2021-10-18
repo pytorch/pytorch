@@ -16,11 +16,11 @@ namespace impl {
 // logic is encapsulated in struct PODLocalDispatchKeySet.
 thread_local PODLocalDispatchKeySet raw_local_dispatch_key_set;
 
-#if defined(_MSC_VER) || defined(C10_ANDROID)
+#if defined(_MSC_VER) || defined(C10_ANDROID) || defined(C10_IPHONE)
 LocalDispatchKeySet tls_local_dispatch_key_set() {
   return raw_local_dispatch_key_set;
 }
-#endif // defined(_MSC_VER) || defined(C10_ANDROID)
+#endif // defined(_MSC_VER) || defined(C10_ANDROID) || defined(C10_IPHONE)
 
 void _force_tls_local_dispatch_key_set(LocalDispatchKeySet key_set) {
   raw_local_dispatch_key_set.set_included(key_set.included_);

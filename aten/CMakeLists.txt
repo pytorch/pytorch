@@ -69,31 +69,18 @@ if(USE_CUDA AND USE_ROCM)
   message(FATAL_ERROR "Both CUDA and ROCm are enabled and found. PyTorch can only be built with either of them. Please turn one off by using either USE_CUDA=OFF or USE_ROCM=OFF.")
 endif()
 
-if(MSVC)
-  # we want to respect the standard, and we are bored of those **** .
-  add_definitions(-D_CRT_SECURE_NO_DEPRECATE=1)
-  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "/wd4819" "-Xcompiler" "/wd4503" "-Xcompiler" "/wd4190" "-Xcompiler" "/wd4244" "-Xcompiler" "/wd4251" "-Xcompiler" "/wd4275" "-Xcompiler" "/wd4522")
-endif(MSVC)
-
 if(USE_ROCM)
   # TODO: AT_HIP_ENABLED (change this once we represent HIP as HIP in
   # ATen proper)
   set(AT_CUDA_ENABLED 1)
   add_subdirectory(src/THH)
-  add_subdirectory(src/THHUNN)
   message("ROCm is enabled.")
 elseif(USE_CUDA)
   set(AT_CUDA_ENABLED 1)
   add_subdirectory(src/THC)
-  add_subdirectory(src/THCUNN)
 else()
   message("disabling CUDA because USE_CUDA is set false")
   set(AT_CUDA_ENABLED 0)
-endif()
-if(NOT USE_CUDA)
-  # we still parse THCUNN even if cuda is disabled to make sure to
-  # install it
-  install(FILES src/THCUNN/generic/THCUNN.h DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/THCUNN/generic")
 endif()
 
 if(NOT USE_NNPACK)

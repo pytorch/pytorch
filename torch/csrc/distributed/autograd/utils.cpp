@@ -53,7 +53,7 @@ ContextPtr addRecvRpcBackward(
     const AutogradMetadata& autogradMetadata,
     std::vector<torch::Tensor>& tensors,
     rpc::worker_id_t fromWorkerId,
-    const std::unordered_map<c10::Device, c10::Device>& deviceMap) {
+    const rpc::DeviceMap& deviceMap) {
   // Initialize autograd context if necessary.
   auto& autogradContainer = DistAutogradContainer::getInstance();
   auto autogradContext =
@@ -105,7 +105,7 @@ c10::intrusive_ptr<Message> getMessageWithAutograd(
     c10::intrusive_ptr<torch::distributed::rpc::Message> wrappedRpcMsg,
     MessageType msgType,
     bool forceGradRecording,
-    const std::unordered_map<c10::Device, c10::Device>& deviceMap) {
+    const rpc::DeviceMap& deviceMap) {
   auto& autogradContainer = DistAutogradContainer::getInstance();
 
   // If there is no valid context and no tensor requires grads, send original

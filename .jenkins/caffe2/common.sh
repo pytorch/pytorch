@@ -18,7 +18,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
     if which sccache > /dev/null; then
         # Save sccache logs to file
         sccache --stop-server || true
-        rm ~/sccache_error.log || true
+        rm -f ~/sccache_error.log || true
         SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=0 sccache --start-server
 
         # Report sccache stats for easier debugging

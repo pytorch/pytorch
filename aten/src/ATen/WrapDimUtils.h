@@ -7,6 +7,9 @@
 namespace at {
 
 static inline int64_t maybe_wrap_dim(int64_t dim, int64_t dim_post_expr, bool wrap_scalar=true) {
+  // if dim_post_expr is 0 and wrap_scalar is true, then dim must be in the range [-1, 0].
+  // This is a special case for scalar tensors and manifests in e.g. torch.sum(scalar_tensor, 0)
+  // Otherwise, dim should be in the range [-dim_post_expr, dim_post_expr-1].
   return c10::maybe_wrap_dim(dim, dim_post_expr, wrap_scalar);
 }
 

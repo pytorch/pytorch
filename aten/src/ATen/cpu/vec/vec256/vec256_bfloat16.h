@@ -9,6 +9,9 @@
 #include <sleef.h>
 #endif
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wignored-qualifiers"
+
 namespace at {
 namespace vec {
 // See Note [Acceptable use of anonymous namespace in header]
@@ -775,3 +778,5 @@ C10_UNUSED void load_fp32_from_bf16(const c10::BFloat16 *data, Vectorized<float>
 #endif
 
 }}}
+
+#pragma GCC diagnostic pop
