@@ -1523,6 +1523,9 @@ class TestNormalizeOperators(JitTestCase):
         if op.name in op_skip:
             return
 
+        if op.name.startswith('_masked.'):
+            return
+
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
         fx_fail = {"cat", "stack", "hstack", "vstack", "dstack", "linalg.multi_dot"}
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
