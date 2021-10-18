@@ -1224,6 +1224,9 @@ static Tensor& logsumexp_out_impl(Tensor& result, const Tensor& self, IntArrayRe
 }
 
 Tensor& logsumexp_out(const Tensor& self, IntArrayRef dims, bool keepdim, Tensor& result) {
+  TORCH_CHECK(at::isFloatingType(result.scalar_type()),
+              "logsumexp(): Expected floating point type for result tensor, but got: ",
+              result.scalar_type());
   {
     NoNamesGuard guard;
     logsumexp_out_impl(result, self, dims, keepdim);
@@ -1233,9 +1236,17 @@ Tensor& logsumexp_out(const Tensor& self, IntArrayRef dims, bool keepdim, Tensor
 }
 
 Tensor logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
-  Tensor result = at::empty({0}, self.options());
-  return at::native::logsumexp_out(self, dims, keepdim, result);
+  Tensor result;
+  auto default_dtype = at::typeMetaToScalarType(c10::get_default_dtype());
+  if (at::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
+    result = at::empty({0}, self.options().dtype(default_dtype));
+    return at::native::logsumexp_out(self.to(default_dtype), dims, keepdim, result);
+  } else {
+    result = at::empty({0}, self.options());
+    return at::native::logsumexp_out(self, dims, keepdim, result);
+  }
 }
+
 Tensor logsumexp(const Tensor& self, DimnameList dims, bool keepdim) {
   return at::logsumexp(self, dimnames_to_positions(self, dims), keepdim);
 }
