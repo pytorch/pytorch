@@ -3,6 +3,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/OpMathType.h>
 #include <ATen/native/mkldnn/Matmul.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/IndexingUtils.h>
@@ -239,18 +240,72 @@ std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
   return at::linalg_slogdet(self);
 }
 
-Tensor linalg_pinv(const Tensor& input, const Tensor& rcond, bool hermitian) {
+namespace {
+
+// This function extracts the optional Tensors for atol and rtol
+// Default value for atol is zero
+// Default value for rtol is eps*max(rows, cols)
+// If atol is specified and rtol is not specified then default value for rtol is zero
+// It is used for matrix_rank and pinv
+std::tuple<Tensor, Tensor> get_atol_rtol(
+    const Tensor& input,
+    const optional<Tensor>& atol_opt,
+    const optional<Tensor>& rtol_opt,
+    const c10::string_view function_name) {
+  auto options = input.options().dtype(ScalarType::Double);
+  auto atol = atol_opt.has_value() ? atol_opt.value() : at::zeros({}, options);
+  checkNotComplexTolerance(atol, function_name, "atol");
+  Tensor rtol;
+  if (rtol_opt.has_value()) {
+    rtol = rtol_opt.value();
+    checkNotComplexTolerance(rtol, function_name, "rtol");
+  } else {
+    ScalarType real_dtype = toValueType(input.scalar_type());
+    auto default_rtol = at::full({}, _get_epsilon(real_dtype) * std::max(input.size(-1), input.size(-2)), options);
+    rtol = atol_opt.has_value()
+           ? at::where(atol_opt.value() > 0, at::zeros({}, options), default_rtol)
+           : default_rtol;
+  }
+  return std::make_tuple(atol, rtol);
+}
+
+std::tuple<Tensor, Tensor> get_atol_rtol(
+    const Tensor& input,
+    optional<double> atol_opt,
+    optional<double> rtol_opt) {
+  double atol = atol_opt.has_value() ? atol_opt.value() : 0.0;
+  double rtol;
+  if (rtol_opt.has_value()) {
+    rtol = rtol_opt.value();
+  } else {
+    ScalarType real_dtype = toValueType(input.scalar_type());
+    auto default_rtol = _get_epsilon(real_dtype) * std::max(input.size(-1), input.size(-2));
+    rtol = (atol_opt.has_value() && atol_opt.value() > 0.0)
+           ? 0.0
+           : default_rtol;
+  }
+  auto options = input.options().dtype(ScalarType::Double);
+  auto atol_tensor = at::full({}, atol, options);
+  auto rtol_tensor = at::full({}, rtol, options);
+  return std::make_tuple(atol_tensor, rtol_tensor);
+}
+
+} // anonymous namespace
+
+Tensor linalg_pinv(
+    const Tensor& input,
+    const optional<Tensor>& atol_opt,
+    const optional<Tensor>& rtol_opt,
+    bool hermitian) {
   NoTF32Guard disable_tf32;
   ScalarType t = input.scalar_type();
   TORCH_CHECK((t == ScalarType::Double || t == ScalarType::Float || t == ScalarType::ComplexFloat || t == ScalarType::ComplexDouble)
               && input.dim() >= 2,
               "linalg_pinv(", t, "{", input.sizes(), "}): expected a tensor with 2 or more dimensions "
               "of float, double, cfloat or cdouble types");
-  TORCH_CHECK(rcond.device() == input.device(),
-              "Expected rcond and input to be on the same device, but found rcond on ",
-              rcond.device(), " and input on ", input.device(), " instead.");
-  TORCH_CHECK(!at::isComplexType(rcond.scalar_type()),
-              "linalg_pinv: rcond tensor of complex type is not supported.");
+
+  Tensor atol, rtol;
+  std::tie(atol, rtol) = get_atol_rtol(input, atol_opt, rtol_opt, "torch.linalg.pinv");
 
   if (input.numel() == 0) {
     // The implementation below uses operations that do not work for zero numel tensors
@@ -268,7 +323,8 @@ Tensor linalg_pinv(const Tensor& input, const Tensor& rcond, bool hermitian) {
     // using linalg_svd breaks pytorch/xla, see https://github.com/pytorch/xla/issues/2755
     std::tie(U, S, V) = input.svd();
     Tensor max_val = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);  // singular values are sorted in descending order
-    Tensor S_pseudoinv = at::where(S > (rcond.unsqueeze(-1) * max_val), S.reciprocal(), at::zeros({}, S.options())).to(input.dtype());
+    Tensor tol = at::max(atol.unsqueeze(-1), rtol.unsqueeze(-1) * max_val);
+    Tensor S_pseudoinv = at::where(S > tol, S.reciprocal(), at::zeros({}, S.options())).to(input.dtype());
     // computes V @ diag(S_pseudoinv) @ U.conj().T
     return at::matmul(V * S_pseudoinv.unsqueeze(-2), U.conj().transpose(-2, -1));
   } else {
@@ -278,18 +334,60 @@ Tensor linalg_pinv(const Tensor& input, const Tensor& rcond, bool hermitian) {
     Tensor S_abs = S.abs();
     // eigenvalues are sorted in ascending order starting with negative values, we need a maximum value of abs(eigenvalues)
     Tensor max_val = S_abs.amax(/*dim=*/-1, /*keepdim=*/true);
-    Tensor S_pseudoinv = at::where(S_abs > (rcond.unsqueeze(-1) * max_val), S.reciprocal(), at::zeros({}, S.options())).to(input.dtype());
+    Tensor tol = at::max(atol.unsqueeze(-1), rtol.unsqueeze(-1) * max_val);
+    Tensor S_pseudoinv = at::where(S_abs > tol, S.reciprocal(), at::zeros({}, S.options())).to(input.dtype());
     // computes U @ diag(S_pseudoinv) @ U.conj().T
     return at::matmul(U * S_pseudoinv.unsqueeze(-2), U.conj().transpose(-2, -1));
   }
 }
 
+Tensor linalg_pinv(const Tensor& input, optional<double> atol, optional<double> rtol, bool hermitian) {
+  Tensor atol_tensor, rtol_tensor;
+  std::tie(atol_tensor, rtol_tensor) = get_atol_rtol(input, atol, rtol);
+  return at::linalg_pinv(input, atol_tensor, rtol_tensor, hermitian);
+}
+
+Tensor linalg_pinv(const Tensor& input, const Tensor& rcond, bool hermitian) {
+  // For NumPy compatibility the rcond argument is used as relative tolerance
+  checkNotComplexTolerance(rcond, "torch.linalg.pinv", "rcond");
+  auto options = input.options().dtype(ScalarType::Double);
+  return at::linalg_pinv(input, at::zeros({}, options), rcond, hermitian);
+}
+
 Tensor linalg_pinv(const Tensor& input, double rcond, bool hermitian) {
-  Tensor rcond_tensor = at::full({}, rcond, input.options().dtype(ScalarType::Double));
-  return at::linalg_pinv(input, rcond_tensor, hermitian);
+  // For NumPy compatibility the rcond argument is used as relative tolerance
+  return at::linalg_pinv(input, 0.0, rcond, hermitian);
 }
 
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
+Tensor& linalg_pinv_out(
+    const Tensor& input,
+    const optional<Tensor>& atol,
+    const optional<Tensor>& rtol,
+    bool hermitian,
+    Tensor& result) {
+  checkSameDevice("linalg_pinv", result, input);
+  checkLinalgCompatibleDtype("linalg_pinv", result, input);
+  Tensor result_tmp = at::linalg_pinv(input, atol, rtol, hermitian);
+  at::native::resize_output(result, result_tmp.sizes());
+  result.copy_(result_tmp);
+  return result;
+}
+
+Tensor& linalg_pinv_out(
+    const Tensor& input,
+    optional<double> atol,
+    optional<double> rtol,
+    bool hermitian,
+    Tensor& result) {
+  checkSameDevice("linalg_pinv", result, input);
+  checkLinalgCompatibleDtype("linalg_pinv", result, input);
+  Tensor result_tmp = at::linalg_pinv(input, atol, rtol, hermitian);
+  at::native::resize_output(result, result_tmp.sizes());
+  result.copy_(result_tmp);
+  return result;
+}
+
 Tensor& linalg_pinv_out(const Tensor& input, const Tensor& rcond, bool hermitian, Tensor& result) {
   checkSameDevice("linalg_pinv", result, input);
   checkLinalgCompatibleDtype("linalg_pinv", result, input);
@@ -412,8 +510,15 @@ Tensor matrix_power(const Tensor& self, int64_t n) {
 // Computes the rank of 'input' and saves the result in-place in 'result'
 // 'hermitian' controls whether SVD or eigendecomposition is used for computing the singular values
 // 'atol' and 'rtol' are the absolute and relative tolerances, respectively.
-// TODO: this function can be made public, see: https://github.com/pytorch/pytorch/issues/54151
-static Tensor& linalg_matrix_rank_out_helper(const Tensor& input, const Tensor& atol, const Tensor& rtol, bool hermitian, Tensor& result) {
+Tensor& linalg_matrix_rank_out(
+    const Tensor& input,
+    const optional<Tensor>& atol_opt,
+    const optional<Tensor>& rtol_opt,
+    bool hermitian,
+    Tensor& result) {
+  Tensor atol, rtol;
+  std::tie(atol, rtol) = get_atol_rtol(input, atol_opt, rtol_opt, "torch.linalg.matrix_rank");
+
   checkSameDevice("torch.linalg.matrix_rank", result, input);
   checkSameDevice("torch.linalg.matrix_rank", atol, input, "atol");
   checkSameDevice("torch.linalg.matrix_rank", rtol, input, "rtol");
@@ -423,10 +528,8 @@ static Tensor& linalg_matrix_rank_out_helper(const Tensor& input, const Tensor& 
   // Matrices or batch of matrices are allowed
   TORCH_CHECK(input.dim() >= 2, "torch.linalg.matrix_rank: Expected as input a matrix or a batch of matrices, but got a tensor of size: ", input.sizes());
 
-  TORCH_CHECK(!at::isComplexType(atol.scalar_type()),
-              "torch.linalg.matrix_rank: atol tensor of complex type is not supported.");
-  TORCH_CHECK(!at::isComplexType(rtol.scalar_type()),
-              "torch.linalg.matrix_rank: rtol tensor of complex type is not supported.");
+  checkNotComplexTolerance(atol, "torch.linalg.matrix_rank", "atol");
+  checkNotComplexTolerance(rtol, "torch.linalg.matrix_rank", "rtol");
 
   // matrix_rank assigns a scalar value for each matrix in the batch so
   // result's shape is equal to input.shape[0:input.ndim-2]
@@ -455,9 +558,28 @@ static Tensor& linalg_matrix_rank_out_helper(const Tensor& input, const Tensor& 
     max_S = S.amax(/*dim=*/-1, /*keepdim=*/true);
   }
 
-  Tensor tol = at::max(atol.unsqueeze(-1), rtol * max_S);
+  Tensor tol = at::max(atol.unsqueeze(-1), rtol.unsqueeze(-1) * max_S);
 
   result = at::sum_out(result, S > tol, /*dim=*/-1);
+  return result;
+}
+
+Tensor& linalg_matrix_rank_out(const Tensor& input, optional<double> atol, optional<double> rtol, bool hermitian, Tensor& result) {
+  Tensor atol_tensor, rtol_tensor;
+  std::tie(atol_tensor, rtol_tensor) = get_atol_rtol(input, atol, rtol);
+  result = linalg_matrix_rank_out(input, atol_tensor, rtol_tensor, hermitian, result);
+  return result;
+}
+
+Tensor linalg_matrix_rank(const Tensor& input, const optional<Tensor>& atol, const optional<Tensor>& rtol, bool hermitian) {
+  Tensor result = at::empty({0}, input.options().dtype(ScalarType::Long));
+  result = at::linalg_matrix_rank_outf(input, atol, rtol, hermitian, result);
+  return result;
+}
+
+Tensor linalg_matrix_rank(const Tensor& input, optional<double> atol, optional<double> rtol, bool hermitian) {
+  Tensor result = at::empty({0}, input.options().dtype(ScalarType::Long));
+  result = at::linalg_matrix_rank_outf(input, atol, rtol, hermitian, result);
   return result;
 }
 
@@ -465,29 +587,14 @@ Tensor& linalg_matrix_rank_out(const Tensor& input, const Tensor& tol, bool herm
   // For NumPy compatibility tol is not scaled with max(singular_value) if the value for tol is provided
   // It is assumed that the provided value is the absolute tolerance
   Tensor rtol = at::zeros({}, tol.options());
-  result = linalg_matrix_rank_out_helper(input, tol, rtol, hermitian, result);
+  result = at::linalg_matrix_rank_outf(input, tol, rtol, hermitian, result);
   return result;
 }
 
-Tensor& linalg_matrix_rank_out(const Tensor& input, optional<double> tol, bool hermitian, Tensor& result) {
-  double tol_value;
-  Tensor atol, rtol;
-  if (tol.has_value()) {
-    tol_value = tol.value();
-    // For NumPy compatibility tol is not scaled with max(singular_value) if the value for tol is provided
-    // It is assumed that the provided value is the absolute tolerance
-    atol = at::full({}, tol_value, input.options().dtype(ScalarType::Double));
-    rtol = at::zeros({}, input.options().dtype(ScalarType::Double));
-  } else {
-    ScalarType real_dtype = toValueType(input.scalar_type());
-    // This is NumPy compatible default value
-    tol_value = _get_epsilon(real_dtype) * std::max(input.size(-1), input.size(-2));
-    // It is assumed that the default tolerance is the relative tolerance
-    atol = at::zeros({}, input.options().dtype(ScalarType::Double));
-    rtol = at::full({}, tol_value, input.options().dtype(ScalarType::Double));
-  }
-
-  result = linalg_matrix_rank_out_helper(input, atol, rtol, hermitian, result);
+Tensor& linalg_matrix_rank_out(const Tensor& input, double tol, bool hermitian, Tensor& result) {
+  // For NumPy compatibility tol is not scaled with max(singular_value) if the value for tol is provided
+  // It is assumed that the provided value is the absolute tolerance
+  result = at::linalg_matrix_rank_outf(input, tol, 0.0, hermitian, result);
   return result;
 }
 
@@ -497,7 +604,7 @@ Tensor linalg_matrix_rank(const Tensor& input, const Tensor& tol, bool hermitian
   return result;
 }
 
-Tensor linalg_matrix_rank(const Tensor& input, optional<double> tol, bool hermitian) {
+Tensor linalg_matrix_rank(const Tensor& input, double tol, bool hermitian) {
   Tensor result = at::empty({0}, input.options().dtype(ScalarType::Long));
   result = at::linalg_matrix_rank_outf(input, tol, hermitian, result);
   return result;
@@ -509,7 +616,7 @@ Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
     "and will be removed in a future PyTorch release. The parameter 'symmetric' was ",
     "renamed in torch.linalg.matrix_rank to 'hermitian'."
   );
-  return at::linalg_matrix_rank(self, optional<double>(tol), symmetric);
+  return at::linalg_matrix_rank(self, tol, symmetric);
 }
 
 Tensor matrix_rank(const Tensor& self, bool symmetric) {
@@ -518,7 +625,7 @@ Tensor matrix_rank(const Tensor& self, bool symmetric) {
     "and will be removed in a future PyTorch release. The parameter 'symmetric' was ",
     "renamed in torch.linalg.matrix_rank to 'hermitian'."
   );
-  return at::linalg_matrix_rank(self, c10::nullopt, symmetric);
+  return at::linalg_matrix_rank(self, 0.0, c10::nullopt, symmetric);
 }
 
 // multi_dot helper functions
@@ -1240,6 +1347,48 @@ inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const T
     });
 }
 
+void baddbmm_with_gemm_(const Tensor &result, const Tensor &mat1, const Tensor &mat2, const Scalar &beta_, const Scalar &alpha_) {
+  TORCH_INTERNAL_ASSERT(result.is_contiguous());
+
+  const auto result_sizes = result.sizes();
+  const auto result_strides = result.strides();
+  const auto mat1_strides = mat1.strides();
+  const auto mat2_strides = mat2.strides();
+  const auto mat1_sizes = mat1.sizes();
+  const auto mat2_sizes = mat2.sizes();
+
+  auto is_transposed = [](const c10::IntArrayRef& strides, const c10::IntArrayRef& sizes) {
+    return strides[1] == 1 && strides[2] >= sizes[1];
+  };
+
+  // gemm expects fortran order matrices, so we swap argument order to transpose everything
+  const auto transpose_a = is_transposed(mat2_strides, mat2_sizes);
+  const auto transpose_b = is_transposed(mat1_strides, mat1_sizes);
+
+  const int64_t batch_size = mat1_sizes[0];
+  const int64_t m = result_sizes[2];
+  const int64_t n = result_sizes[1];
+  const int64_t k = mat2_sizes[1];
+
+  const int64_t lda = mat2_strides[transpose_a ? 2 : 1];
+  const int64_t ldb = mat1_strides[transpose_b ? 2 : 1];
+  const int64_t ldc = result_strides[1];
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "baddbmm_with_gemm", [&] {
+    using opmath_t = at::opmath_type<scalar_t>;
+    const auto alpha = alpha_.to<opmath_t>();
+    const auto beta = beta_.to<opmath_t>();
+    at::native::cpublas::gemm_batched_with_stride(
+        transpose_a ? TransposeType::Transpose : TransposeType::NoTranspose,
+        transpose_b ? TransposeType::Transpose : TransposeType::NoTranspose,
+        batch_size, m, n, k, alpha,
+        mat2.data_ptr<scalar_t>(), lda, mat2_strides[0],
+        mat1.data_ptr<scalar_t>(), ldb, mat1_strides[0],
+        beta,
+        result.data_ptr<scalar_t>(), ldc, result_strides[0]);
+  });
+}
+
 // This tries to apply some optimizations to bmm/baddbmm:
 // - When the operand size is small, computation are parallelized over the batch
 //   dimension using OMP and naive matrix multiplication is applied.
@@ -1319,7 +1468,7 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
             && batch_items_contiguous_or_transposed(batch1)
             && batch_items_contiguous_or_transposed(batch2)
             && self_or_result.is_contiguous()) {
-    at::native::_baddbmm_mkl_(self_or_result, batch1, batch2, beta, alpha);
+    baddbmm_with_gemm_(self_or_result, batch1, batch2, beta, alpha);
   } else { // split along batch dimension
 #ifdef C10_MOBILE
     /*

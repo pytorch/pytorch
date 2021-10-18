@@ -4,6 +4,7 @@
 #include <ATen/CUDAGeneratorImpl.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/codegen/cuda/executor_utils.h>
 #include <torch/csrc/jit/codegen/fuser/cuda/resource_strings.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
@@ -1104,6 +1105,7 @@ void CudaCodeGen::call_with_numel(void** args, int64_t numel) {
   }
 
   auto stream = at::cuda::getCurrentCUDAStream();
+  fuser::cuda::executor_utils::initializeCudaContext();
   AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernel(
       function_,
       gpu_block_extents,
@@ -1213,6 +1215,7 @@ void CudaCodeGen::call_raw(const std::vector<void*>& raw_args) {
   }
   // Launch the kernels
   auto stream = at::cuda::getCurrentCUDAStream();
+  fuser::cuda::executor_utils::initializeCudaContext();
   AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernel(
       function_,
       gpu_block_extents_v[0],
@@ -1262,21 +1265,12 @@ at::Tensor CudaCodeGen::empty_strided(
 void CudaCodeGen::CompileToNVRTC(
     const std::string& code,
     const std::string& func_name) {
-  CUcontext pctx = nullptr;
-  AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxGetCurrent(&pctx));
+  fuser::cuda::executor_utils::initializeCudaContext();
   // Note: hacked at::DeviceGuard since at::DeviceGuard was failing to work
   // properly in some scenarios
   auto prior_device = at::cuda::current_device();
   if (prior_device != this->device().index()) {
     at::cuda::set_device(this->device().index());
-  }
-  // cudaSetDevice does not have to really change the underlying device if it
-  // doesn't have to, so calling cudaFree to force that change
-  if (!pctx) {
-    std::unique_lock<std::mutex> cudaFreeMutexLock(
-        *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
-    cudaFree(nullptr);
-    AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxGetCurrent(&pctx));
   }
   // Acquires device and NVRTC properties (for compile arch and occupancy
   // calculations)
