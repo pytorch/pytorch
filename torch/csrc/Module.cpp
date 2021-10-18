@@ -37,6 +37,7 @@
 #include <torch/csrc/autograd/python_fft_functions.h>
 #include <torch/csrc/autograd/python_linalg_functions.h>
 #include <torch/csrc/autograd/python_special_functions.h>
+#include <torch/csrc/autograd/python_return_types.h>
 #include <torch/csrc/autograd/python_legacy_variable.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/multiprocessing/init.h>
@@ -797,18 +798,7 @@ PyObject* initModule() {
      methods.data()
   };
   ASSERT_TRUE(module = PyModule_Create(&torchmodule));
-
-  static struct PyModuleDef def = {
-      PyModuleDef_HEAD_INIT, "torch._C._return_types", NULL, -1, {}};
-  PyObject* return_types = PyModule_Create(&def);
-  if (!return_types) {
-    throw python_error();
-  }
-  // steals a reference to return_types
-  if (PyModule_AddObject(module, "_return_types", return_types) != 0) {
-    throw python_error();
-  }
-
+  torch::autograd::initReturnTypes(module);
   ASSERT_TRUE(THPGenerator_init(module));
   ASSERT_TRUE(THPException_init(module));
   THPSize_init(module);

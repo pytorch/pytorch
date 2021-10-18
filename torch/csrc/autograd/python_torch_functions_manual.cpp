@@ -719,18 +719,18 @@ static PyObject * THPVariable_numel(PyObject* self_, PyObject* args, PyObject* k
 }
 
 // Sharded function definitions
-void gatherTorchFunctionsAndReturnTypes_0(std::vector<PyMethodDef> &torch_functions, std::vector<PyTypeObject*> &return_types_vec);
-void gatherTorchFunctionsAndReturnTypes_1(std::vector<PyMethodDef> &torch_functions, std::vector<PyTypeObject*> &return_types_vec);
-void gatherTorchFunctionsAndReturnTypes_2(std::vector<PyMethodDef> &torch_functions, std::vector<PyTypeObject*> &return_types_vec);
+void gatherTorchFunctionsAndReturnTypes_0(std::vector<PyMethodDef> &torch_functions);
+void gatherTorchFunctionsAndReturnTypes_1(std::vector<PyMethodDef> &torch_functions);
+void gatherTorchFunctionsAndReturnTypes_2(std::vector<PyMethodDef> &torch_functions);
 
-void gatherTorchFunctionsAndReturnTypes(std::vector<PyMethodDef> &torch_functions, std::vector<PyTypeObject*> &return_types_vec) {
+void gatherTorchFunctionsAndReturnTypes(std::vector<PyMethodDef> &torch_functions) {
   constexpr size_t num_functions = sizeof(torch_functions_manual) / sizeof(torch_functions_manual[0]);
   torch_functions.assign(torch_functions_manual,
                          torch_functions_manual + num_functions);
   // NOTE: Must be synced with num_shards in tools/autograd/gen_python_functions.py
-  gatherTorchFunctionsAndReturnTypes_0(torch_functions, return_types_vec);
-  gatherTorchFunctionsAndReturnTypes_1(torch_functions, return_types_vec);
-  gatherTorchFunctionsAndReturnTypes_2(torch_functions, return_types_vec);
+  gatherTorchFunctionsAndReturnTypes_0(torch_functions);
+  gatherTorchFunctionsAndReturnTypes_1(torch_functions);
+  gatherTorchFunctionsAndReturnTypes_2(torch_functions);
 
   static std::array<std::pair<const char *, const char *>, 4> aliases{{
     // Canonical function, alias name
@@ -801,8 +801,7 @@ static PyTypeObject THPVariableFunctions = {
 
 void initTorchFunctions(PyObject *module) {
   static std::vector<PyMethodDef> torch_functions;
-  static std::vector<PyTypeObject*> return_types;
-  gatherTorchFunctionsAndReturnTypes(torch_functions, return_types);
+  gatherTorchFunctionsAndReturnTypes(torch_functions);
   THPVariableFunctions.tp_methods = torch_functions.data();
 
   if (PyType_Ready(&THPVariableFunctions) < 0) {
@@ -821,11 +820,6 @@ void initTorchFunctions(PyObject *module) {
   // PyModule_AddObject steals a reference
   if (PyModule_AddObject(module, "_VariableFunctions", THPVariableFunctionsModule) < 0) {
     throw python_error();
-  }
-
-  auto return_module = PyObject_GetAttrString(module, "_return_types");
-  for (auto return_type : return_types) {
-    PyModule_AddObject(return_module, return_type->tp_name, (PyObject*)return_type);
   }
 }
 

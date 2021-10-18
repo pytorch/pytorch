@@ -4,6 +4,7 @@
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/autograd/python_nn_functions.h"
+#include "torch/csrc/autograd/python_return_types.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/autograd/utils/python_arg_parsing.h"
@@ -21,16 +22,6 @@ using at::ArrayRef;
 using namespace torch::autograd::utils;
 
 namespace torch { namespace autograd {
-
-// generated return_types start here
-namespace {
-  ${py_return_types}
-
-  // hold onto generated return type.
-  std::vector<PyTypeObject*> return_types = {
-    ${py_return_types_array}
-  };
-}
 
 static PyObject* THPNNVariableFunctionsModule = NULL;
 
@@ -104,11 +95,6 @@ void initNNFunctions(PyObject* module) {
   // steals a reference to nn
   if (PyModule_AddObject(module, "_nn", nn) != 0) {
     throw python_error();
-  }
-
-  auto return_module = PyObject_GetAttrString(module, "_return_types");
-  for (auto return_type: return_types){
-    PyModule_AddObject(return_module, return_type->tp_name, (PyObject*)return_type);
   }
 }
 

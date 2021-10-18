@@ -33,6 +33,7 @@
 #include "torch/csrc/utils/tensor_numpy.h"
 #include "torch/csrc/utils/tensor_types.h"
 #include "torch/csrc/utils/structseq.h"
+#include "torch/csrc/autograd/python_return_types.h"
 
 #include <ATen/ATen.h>
 #include "c10/util/Optional.h"
@@ -51,18 +52,6 @@ using c10::Stream;
 using namespace torch::autograd::utils;
 
 namespace torch { namespace autograd {
-
-// generated return_types start here
-namespace {
-  ${py_return_types}
-}
-
-// hold onto generated return type.
-// note: this is not in anonymous namespace as
-// the file `python_variable` references this with `extern` keyword.
-std::vector<PyTypeObject*> return_types_variable = {
-  ${py_return_types_array}
-};
 
 static PyObject * THPVariable__is_view(PyObject *self, PyObject* args)
 {
