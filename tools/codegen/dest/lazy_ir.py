@@ -74,20 +74,6 @@ class LazyIR:
         has_optional_defs = "\n    ".join([f"has_{value} = !!{value};" for value in optional_values])
         members_to_string = "\n    ".join([f'lazy_tensors::ToString("{t.name}", {t.name}_, ss);' for t in scalar_types])
 
-        clone_impl_args = []
-        for value in all_types:
-            if isValueType(value.type):
-                if isinstance(value.type, OptionalCType):
-                    clone_impl_args.append(f"(has_{value.name} ? c10::make_optional(operands.at(i++)) : c10::nullopt)")
-                    continue
-                clone_impl_args.append("operands.at(i++)")
-                continue
-            clone_impl_args.append(f"{value.name}_")
-        clone_impl_args.extend(["at_dtypes_", "at_shapes_"])
-
-        clone_impl_args_str = ", ".join(clone_impl_args)
-        clone_impl = f"ir::MakeNode<ir::ops::{schema.node_name}>({clone_impl_args_str});"
-
         return [f"""\
 // TODO(alanwaketan): Public members don't need to have _ suffix.
 class {schema.node_name} : public {self.node_base} {{
@@ -112,11 +98,6 @@ class {schema.node_name} : public {self.node_base} {{
     ss << TsNode::ToString();
     {members_to_string}
     return ss.str();
-  }}
-
-  NodePtr Clone(OpList operands) const override {{
-      size_t i = 0;
-      {clone_impl}
   }}
 
   // TODO(whc) prefer to move these shapes to TsNode, but need to find a way to populate

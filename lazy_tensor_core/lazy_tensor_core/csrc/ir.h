@@ -193,8 +193,6 @@ class Node {
 
   virtual std::string ToString() const;
 
-  virtual NodePtr Clone(OpList operands) const;
-
  private:
   static std::vector<SourceLocation> GetFrameInfo();
 

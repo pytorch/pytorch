@@ -81,6 +81,12 @@ class TsNode : public Node {
     return operands_as_outputs_.at(i);
   }
 
+  // TODO(whc) We'll delete Clone since it's not used.  But it needs to be
+  // removed from all the legacy ops, so I'm moving it from Node to TsNode
+  // for now, and we'll delete it later once we've moved more ops to codegen
+  virtual NodePtr Clone(OpList operands) const {
+    LTC_ERROR() << "Cloning not implemented for TsNode";
+  }
  private:
   // Adds node's index output number as operand.
   void AddOperand(NodePtr node, size_t index = 0);

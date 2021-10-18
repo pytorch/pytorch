@@ -150,10 +150,6 @@ std::string Node::ToString() const {
   return ss.str();
 }
 
-NodePtr Node::Clone(OpList operands) const {
-  LTC_ERROR() << "Cloning not implemented for node: " << *this;
-}
-
 std::vector<SourceLocation> Node::GetFrameInfo() {
   // At the time of writing, retrieving Python frames costs from 1us up to 20us.
   // This per IR Node. Since it is not unreasonable to have a many hundreds of
