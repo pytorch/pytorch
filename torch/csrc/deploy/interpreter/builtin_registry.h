@@ -22,6 +22,8 @@
  * BuiltinRegisterer object. The constructor of BuiltinRegisterer does the real
  * registration work.
  */
+#include <gtest/gtest.h>
+#include <cstdarg>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -43,10 +45,12 @@ namespace deploy {
 struct BuiltinRegistryItem {
   explicit BuiltinRegistryItem(
       const char* _name,
-      const struct _frozen* _frozenModules);
+      const struct _frozen* _frozenModules,
+      std::vector<std::pair<const char*, void*>>&& _builtinModules);
   const char* name;
   const struct _frozen* frozenModules;
   int numModules;
+  std::vector<std::pair<const char*, void*>> builtinModules;
 };
 
 /*
@@ -59,25 +63,31 @@ struct BuiltinRegistryItem {
  */
 class BuiltinRegistry {
  public:
-  static BuiltinRegistry* get();
-  // for unittest
-  static void clear() {
-    get()->items_.clear();
-  }
+  static void runPreInitialization();
+  static void runPostInitialization();
+
+ private:
+  static struct _frozen* getAllFrozenModules();
+  // call this after all the registration is done.
+  static void sanityCheck();
+  static void appendCPythonInittab();
+  static std::string getBuiltinModulesCSV();
+
   static void registerBuiltin(std::unique_ptr<BuiltinRegistryItem> item);
   static const std::vector<std::unique_ptr<BuiltinRegistryItem>>& items() {
     return get()->items_;
   }
-  static BuiltinRegistryItem* getItem(const std::string& name);
   static int totalNumModules();
-  static struct _frozen* getAllFrozenModules();
-  // call this after all the registration is done.
-  static void sanityCheck();
+  static BuiltinRegistry* get();
+  static BuiltinRegistryItem* getItem(const std::string& name);
+  static std::vector<std::pair<const char*, void*>> getAllBuiltinModules();
 
- private:
   explicit BuiltinRegistry() = default;
   std::unordered_map<std::string, int> name2idx_;
   std::vector<std::unique_ptr<BuiltinRegistryItem>> items_;
+
+  friend class BuiltinRegisterer;
+  FRIEND_TEST(BuiltinRegistryTest, SimpleTest);
 };
 
 /*
@@ -98,24 +108,7 @@ class BuiltinRegisterer {
  public:
   explicit BuiltinRegisterer(
       const char* name,
-      const struct _frozen* frozenModules) {
-    if (allowLibrary && !allowLibrary(name)) {
-      fprintf(
-          stderr,
-          "Skip %s since it's rejected by the allowLibrary method\n",
-          name);
-      return;
-    }
-    // note: don't call glog api in this method since this method is usually
-    // called before glog get setup
-    fprintf(
-        stderr,
-        "Registering torch::deploy builtin module %s (idx %lu)\n",
-        name,
-        BuiltinRegistry::items().size());
-    BuiltinRegistry::registerBuiltin(
-        std::make_unique<BuiltinRegistryItem>(name, frozenModules));
-  }
+      const struct _frozen* frozenModules...);
 };
 
 } // namespace deploy
@@ -125,6 +118,13 @@ class BuiltinRegisterer {
 #define CONCAT(s1, s2) CONCAT_IMPL(s1, s2)
 #define ANONYMOUS_VARIABLE(str) CONCAT(str, __LINE__)
 
-#define REGISTER_TORCH_DEPLOY_BUILTIN(libname, frozenModules) \
-  static torch::deploy::BuiltinRegisterer ANONYMOUS_VARIABLE( \
-      BuiltinRegisterer)(#libname, frozenModules)
+/* there can be a variable list of builtin modules following frozen_modules
+ * A typical usage of this macro is:
+ *
+ *  REGISTER_TORCH_DEPLOY_BUILTIN(library_name_without_quote,
+ * frozen_modules_list, builtin_module_name_1, builtin_module_init_function_1,
+ * ..., builtin_module_name_N, builtin_module_init_function_N)
+ */
+#define REGISTER_TORCH_DEPLOY_BUILTIN(libname, frozenModules...) \
+  static torch::deploy::BuiltinRegisterer ANONYMOUS_VARIABLE(    \
+      BuiltinRegisterer)(#libname, frozenModules, nullptr)

@@ -1,5 +1,6 @@
 #include <Python.h>
 #include <c10/util/Exception.h>
+#include <fmt/format.h>
 #include <torch/csrc/deploy/interpreter/builtin_registry.h>
 
 namespace torch {
@@ -12,14 +13,22 @@ static const size_t NUM_FROZEN_PY_STDLIB_MODULES = 680;
 
 extern "C" struct _frozen _PyImport_FrozenModules[];
 extern "C" struct _frozen _PyImport_FrozenModules_torch[];
+extern "C" PyObject* initModule(void);
 REGISTER_TORCH_DEPLOY_BUILTIN(cpython_internal, PyImport_FrozenModules);
 REGISTER_TORCH_DEPLOY_BUILTIN(frozenpython, _PyImport_FrozenModules);
-REGISTER_TORCH_DEPLOY_BUILTIN(frozentorch, _PyImport_FrozenModules_torch);
+REGISTER_TORCH_DEPLOY_BUILTIN(
+    frozentorch,
+    _PyImport_FrozenModules_torch,
+    "torch._C",
+    initModule);
 
 BuiltinRegistryItem::BuiltinRegistryItem(
     const char* _name,
-    const struct _frozen* _frozenModules)
-    : name(_name), frozenModules(_frozenModules) {
+    const struct _frozen* _frozenModules,
+    std::vector<std::pair<const char*, void*>>&& _builtinModules)
+    : name(_name),
+      frozenModules(_frozenModules),
+      builtinModules(std::move(_builtinModules)) {
   numModules = 0;
   if (frozenModules) {
     while (frozenModules[numModules].name != nullptr) {
@@ -37,6 +46,47 @@ BuiltinRegistryItem::BuiltinRegistryItem(
 BuiltinRegistry* BuiltinRegistry::get() {
   static BuiltinRegistry _registry;
   return &_registry;
+}
+
+void BuiltinRegistry::runPreInitialization() {
+  TORCH_INTERNAL_ASSERT(!Py_IsInitialized());
+  sanityCheck();
+
+  PyImport_FrozenModules = BuiltinRegistry::getAllFrozenModules();
+  TORCH_INTERNAL_ASSERT(PyImport_FrozenModules != nullptr);
+
+  appendCPythonInittab();
+}
+
+const char* metaPathSetupTemplate = R"PYTHON(
+import sys
+# We need to register a custom meta path finder because we are registering
+# `torch._C` as a builtin module.
+#
+# Normally, builtins will be found by the `BuiltinImporter` meta path finder.
+# However, `BuiltinImporter` is hard-coded to assume that all builtin modules
+# are top-level imports.  Since `torch._C` is a submodule of `torch`, the
+# BuiltinImporter skips it.
+class F:
+    def find_spec(self, fullname, path, target=None):
+        if fullname in [<<<DEPLOY_BUILTIN_MODULES_CSV>>>]:
+            # Load this module using `BuiltinImporter`, but set `path` to None
+            # in order to trick it into loading our module.
+            return sys.meta_path[1].find_spec(fullname, path=None, target=None)
+        return None
+sys.meta_path.insert(0, F())
+)PYTHON";
+
+void BuiltinRegistry::runPostInitialization() {
+  TORCH_INTERNAL_ASSERT(Py_IsInitialized());
+  std::string metaPathSetupScript(metaPathSetupTemplate);
+  std::string replaceKey = "<<<DEPLOY_BUILTIN_MODULES_CSV>>>";
+  auto itr = metaPathSetupScript.find(replaceKey);
+  if (itr != std::string::npos) {
+    metaPathSetupScript.replace(itr, replaceKey.size(), getBuiltinModulesCSV());
+  }
+  int r = PyRun_SimpleString(metaPathSetupScript.c_str());
+  TORCH_INTERNAL_ASSERT(r == 0);
 }
 
 void BuiltinRegistry::registerBuiltin(
@@ -113,6 +163,85 @@ void BuiltinRegistry::sanityCheck() {
           frozenpython->numModules + frozentorch->numModules >
               NUM_FROZEN_PY_STDLIB_MODULES + 1,
       "Missing frozen python stdlib or torch modules");
+}
+
+std::vector<std::pair<const char*, void*>> BuiltinRegistry::
+    getAllBuiltinModules() {
+  std::vector<std::pair<const char*, void*>> allBuiltinModules;
+  for (const auto& itemptr : items()) {
+    allBuiltinModules.insert(
+        allBuiltinModules.end(),
+        itemptr->builtinModules.begin(),
+        itemptr->builtinModules.end());
+  }
+  return allBuiltinModules;
+}
+
+void BuiltinRegistry::appendCPythonInittab() {
+  for (const auto& pair : get()->getAllBuiltinModules()) {
+    PyImport_AppendInittab(
+        pair.first, reinterpret_cast<PyObject* (*)()>(pair.second));
+  }
+}
+
+std::string BuiltinRegistry::getBuiltinModulesCSV() {
+  std::string modulesCSV;
+  for (const auto& pair : get()->getAllBuiltinModules()) {
+    if (!modulesCSV.empty()) {
+      modulesCSV += ", ";
+    }
+    modulesCSV += fmt::format("'{}'", pair.first);
+  }
+  return modulesCSV;
+}
+
+BuiltinRegisterer::BuiltinRegisterer(
+    const char* name,
+    const struct _frozen* frozenModules...) {
+  if (allowLibrary && !allowLibrary(name)) {
+    fprintf(
+        stderr,
+        "Skip %s since it's rejected by the allowLibrary method\n",
+        name);
+    return;
+  }
+  // gather builtin modules for this lib
+  va_list args;
+  va_start(args, frozenModules);
+  const char* moduleName = nullptr;
+  void* initFn = nullptr;
+  std::vector<std::pair<const char*, void*>> builtinModules;
+  while (true) {
+    moduleName = va_arg(args, const char*);
+    // encounter end of sequence
+    if (moduleName == nullptr) {
+      break;
+    }
+    initFn = va_arg(args, void*);
+    // skip null init function. This can happen if we create weak reference
+    // to init functions defined in another library. Depending on if we
+    // link with that library, the init function pointer will be the real
+    // implementation or nullptr. tensorrt is a good example. If this is
+    // a CPU build, we will not link with the tensorrt library, so the init
+    // function will be nullptr; on the other hand if this is a GPU build,
+    // we link with the tensorrt library, so the init function will not be
+    // nullptr.
+    if (initFn == nullptr) {
+      continue;
+    }
+    builtinModules.emplace_back(moduleName, initFn);
+  }
+
+  // note: don't call glog api in this method since this method is usually
+  // called before glog get setup
+  fprintf(
+      stderr,
+      "Registering torch::deploy builtin library %s (idx %lu) with %lu builtin modules\n",
+      name,
+      BuiltinRegistry::items().size(),
+      builtinModules.size());
+  BuiltinRegistry::registerBuiltin(std::make_unique<BuiltinRegistryItem>(
+      name, frozenModules, std::move(builtinModules)));
 }
 
 } // namespace deploy
