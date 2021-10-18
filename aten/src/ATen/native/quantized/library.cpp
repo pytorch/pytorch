@@ -4,6 +4,7 @@
 #include <ATen/native/quantized/cpu/packed_params.h>
 #include <ATen/native/quantized/cpu/embedding_packed_params.h>
 #include <torch/custom_class.h>
+#include <ATen/native/mkldnn/quantization/Library.h>
 
 torch::class_<LinearPackedParamsBase> register_linear_params();
 
@@ -178,6 +179,8 @@ TORCH_LIBRARY(quantized, m) {
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::relu6(Tensor qx, bool inplace=False) -> Tensor"));
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::leaky_relu(Tensor qx, Scalar negative_slope, bool inplace, float output_scale, int output_zero_point) -> Tensor"));
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::sigmoid(Tensor qx, float output_scale, int output_zero_point) -> Tensor"));
+  
+  MKLDNN_LIBRARY_init_quantized(m);
 }
 
 // According to #33294: The "_" prefix registration will be
