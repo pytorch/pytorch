@@ -21,6 +21,8 @@ from torch.testing._internal.common_dtype import (
     get_all_dtypes, get_all_math_dtypes, get_all_int_dtypes, get_all_fp_dtypes, get_all_complex_dtypes
 )
 
+from torch.utils.dlpack import to_dlpack
+
 # TODO: refactor tri_tests_args, _compare_trilu_indices, run_additional_tri_tests
 from torch.testing._internal.common_methods_invocations import (
     tri_tests_args, _compare_trilu_indices, run_additional_tri_tests)
@@ -3257,6 +3259,10 @@ class TestRandomTensorCreation(TestCase):
             self.assertEqual(t_transform(r[:, :50]).std(), std_transform(4), atol=0.3, rtol=0)
             self.assertEqual(t_transform(r[:, 50:]).std(), std_transform(1), atol=0.2, rtol=0)
 
+            # test empty mean/std
+            out = torch.normal(mean=torch.empty((0, 2)), std=torch.empty((0, 1)))
+            self.assertEqual(out.size(), torch.Size([0, 2]))
+
             r.fill_(42)
             r = torch.normal(2, 3, (100, 100), dtype=dtype, device=device)
             self.assertEqual(r.dtype, dtype)
@@ -3608,9 +3614,416 @@ class TestLikeTensorCreation(TestCase):
         self.assertEqual(torch.full_like(like, 1., dtype=torch.complex64).dtype,
                          torch.complex64)
 
+# Tests for the `frombuffer` function (only work on CPU):
+#   Constructs tensors from Python objects that implement the buffer protocol,
+#   without copying data.
+SIZE = 5
+SHAPE = (SIZE,)
+
+def may_require_grad(dtype):
+    return dtype.is_floating_point or dtype.is_complex
+
+def get_dtype_size(dtype):
+    return int(torch.empty((), dtype=dtype).element_size())
+
+class TestBufferProtocol(TestCase):
+    def _run_test(self, shape, dtype, count=-1, first=0, offset=None, **kwargs):
+        numpy_dtype = torch_to_numpy_dtype_dict[dtype]
+
+        if offset is None:
+            offset = first * get_dtype_size(dtype)
+
+        numpy_original = make_tensor(shape, torch.device("cpu"), dtype).numpy()
+        original = memoryview(numpy_original)
+        # First call PyTorch's version in case of errors.
+        # If this call exits successfully, the NumPy version must also do so.
+        torch_frombuffer = torch.frombuffer(original, dtype=dtype, count=count, offset=offset, **kwargs)
+        numpy_frombuffer = np.frombuffer(original, dtype=numpy_dtype, count=count, offset=offset)
+
+        self.assertEqual(numpy_frombuffer, torch_frombuffer)
+        self.assertEqual(numpy_frombuffer.__array_interface__["data"][0], torch_frombuffer.data_ptr())
+        return (numpy_original, torch_frombuffer)
+
+    @dtypes(*torch_to_numpy_dtype_dict.keys())
+    def test_same_type(self, device, dtype):
+        self._run_test((), dtype)
+        self._run_test((4,), dtype)
+        self._run_test((10, 10), dtype)
+
+    @dtypes(*torch_to_numpy_dtype_dict.keys())
+    def test_requires_grad(self, device, dtype):
+        def _run_test_and_check_grad(requires_grad, *args, **kwargs):
+            kwargs["requires_grad"] = requires_grad
+            _, tensor = self._run_test(*args, **kwargs)
+            self.assertTrue(tensor.requires_grad == requires_grad)
+
+        requires_grad = may_require_grad(dtype)
+        _run_test_and_check_grad(requires_grad, (), dtype)
+        _run_test_and_check_grad(requires_grad, (4,), dtype)
+        _run_test_and_check_grad(requires_grad, (10, 10), dtype)
+        _run_test_and_check_grad(False, (), dtype)
+        _run_test_and_check_grad(False, (4,), dtype)
+        _run_test_and_check_grad(False, (10, 10), dtype)
+
+    @dtypes(*torch_to_numpy_dtype_dict.keys())
+    def test_with_offset(self, device, dtype):
+        # Offset should be valid whenever there is, at least,
+        # one remaining element
+        for i in range(SIZE):
+            self._run_test(SHAPE, dtype, first=i)
+
+    @dtypes(*torch_to_numpy_dtype_dict.keys())
+    def test_with_count(self, device, dtype):
+        # Count should be valid for any valid in the interval
+        # [-1, len(input)], except for 0
+        for i in range(-1, SIZE + 1):
+            if i != 0:
+                self._run_test(SHAPE, dtype, count=i)
+
+    @dtypes(*torch_to_numpy_dtype_dict.keys())
+    def test_with_count_and_offset(self, device, dtype):
+        # Explicit default count [-1, 1, 2, ..., len]
+        for i in range(-1, SIZE + 1):
+            if i != 0:
+                self._run_test(SHAPE, dtype, count=i)
+        # Explicit default offset [0, 1, ..., len - 1]
+        for i in range(SIZE):
+            self._run_test(SHAPE, dtype, first=i)
+        # All possible combinations of count and dtype aligned
+        # offset for 'input'
+        # count:[1, 2, ..., len - 1] x first:[0, 1, ..., len - count]
+        for i in range(1, SIZE):
+            for j in range(SIZE - i + 1):
+                self._run_test(SHAPE, dtype, count=i, first=j)
+
+    @dtypes(*torch_to_numpy_dtype_dict.keys())
+    def test_invalid_positional_args(self, device, dtype):
+        bytes = get_dtype_size(dtype)
+        in_bytes = SIZE * bytes
+        # Empty array
+        with self.assertRaisesRegex(ValueError,
+                                    r"both buffer length \(0\) and count"):
+            empty = np.array([])
+            torch.frombuffer(empty, dtype=dtype)
+        # Count equals 0
+        with self.assertRaisesRegex(ValueError,
+                                    r"both buffer length .* and count \(0\)"):
+            self._run_test(SHAPE, dtype, count=0)
+        # Offset negative and bigger than total length
+        with self.assertRaisesRegex(ValueError,
+                                    rf"offset \(-{bytes} bytes\) must be"):
+            self._run_test(SHAPE, dtype, first=-1)
+        with self.assertRaisesRegex(ValueError,
+                                    rf"offset \({in_bytes} bytes\) must be .* "
+                                    rf"buffer length \({in_bytes} bytes\)"):
+            self._run_test(SHAPE, dtype, first=SIZE)
+        # Non-multiple offset with all elements
+        if bytes > 1:
+            offset = bytes - 1
+            with self.assertRaisesRegex(ValueError,
+                                        rf"buffer length \({in_bytes - offset} bytes\) after "
+                                        rf"offset \({offset} bytes\) must be"):
+                self._run_test(SHAPE, dtype, offset=bytes - 1)
+        # Count too big for each good first element
+        for first in range(SIZE):
+            count = SIZE - first + 1
+            with self.assertRaisesRegex(ValueError,
+                                        rf"requested buffer length \({count} \* {bytes} bytes\) "
+                                        rf"after offset \({first * bytes} bytes\) must .*"
+                                        rf"buffer length \({in_bytes} bytes\)"):
+                self._run_test(SHAPE, dtype, count=count, first=first)
+
+    @dtypes(*torch_to_numpy_dtype_dict.keys())
+    def test_shared_buffer(self, device, dtype):
+        x = make_tensor((1,), device, dtype)
+        # Modify the whole tensor
+        arr, tensor = self._run_test(SHAPE, dtype)
+        tensor[:] = x
+        self.assertEqual(arr, tensor)
+        self.assertTrue((tensor == x).all().item())
+
+        # Modify the whole tensor from all valid offsets, given
+        # a count value
+        for count in range(-1, SIZE + 1):
+            if count == 0:
+                continue
+
+            actual_count = count if count > 0 else SIZE
+            for first in range(SIZE - actual_count):
+                last = first + actual_count
+                arr, tensor = self._run_test(SHAPE, dtype, first=first, count=count)
+                tensor[:] = x
+                self.assertEqual(arr[first:last], tensor)
+                self.assertTrue((tensor == x).all().item())
+
+                # Modify the first value in the array
+                arr[first] = x.item() - 1
+                self.assertEqual(arr[first:last], tensor)
+
+    @dtypes(*torch_to_numpy_dtype_dict.keys())
+    def test_not_a_buffer(self, device, dtype):
+        with self.assertRaisesRegex(ValueError,
+                                    r"object does not implement Python buffer protocol."):
+            torch.frombuffer([1, 2, 3, 4], dtype=dtype)
+
+    @dtypes(*torch_to_numpy_dtype_dict.keys())
+    def test_non_writable_buffer(self, device, dtype):
+        numpy_arr = make_tensor((1,), device, dtype).numpy()
+        byte_arr = numpy_arr.tobytes()
+        with self.assertWarnsOnceRegex(UserWarning,
+                                       r"The given buffer is not writable."):
+            torch.frombuffer(byte_arr, dtype=dtype)
+
+    def test_byte_to_int(self):
+        byte_array = np.array([-1, 0, 0, 0, -1, 0, 0, 0], dtype=np.byte)
+        tensor = torch.frombuffer(byte_array, dtype=torch.int32)
+        self.assertEqual(tensor.numel(), 2)
+        # Assuming little endian machine
+        self.assertSequenceEqual(tensor, [255, 255])
+
+# Tests for the `asarray` function:
+#   Constructs tensors from a Python object that has one of the following
+#   characteristics:
+#       1. is a Tensor
+#       2. is a DLPack capsule
+#       3. implements the Python Buffer protocol
+#       4. is an arbitrary list
+#   The implementation itself is based on the Python Array API:
+#   https://data-apis.org/array-api/latest/API_specification/creation_functions.html
+def get_another_device(device):
+    return "cuda" if torch.device(device).type == "cpu" else "cpu"
+
+def identity(tensor):
+    return tensor
+def to_numpy(tensor):
+    return tensor.numpy()
+def to_memview(tensor):
+    return memoryview(to_numpy(tensor))
+
+class TestAsArray(TestCase):
+    def _check(self, original, cvt=lambda t: t, is_alias=True, same_dtype=True, same_device=True, **kwargs):
+        """Check the output of 'asarray', given its input and assertion informations.
+
+        Besides calling 'asarray' itself, this function does 4 different checks:
+            1. Whether the result is aliased or not, depending on 'is_alias'
+            2. Whether the result has the expected dtype and elements
+            3. Whether the result lives in the expected device
+            4. Whether the result has its 'requires_grad' set or not
+        """
+        result = torch.asarray(cvt(original), **kwargs)
+        self.assertTrue(isinstance(result, torch.Tensor))
+
+        # 1. The storage pointers should be equal only if 'is_alias' is set
+        if is_alias:
+            self.assertEqual(result.data_ptr(), original.data_ptr())
+        else:
+            self.assertNotEqual(result.data_ptr(), original.data_ptr())
+
+        # 2. Comparison of the elements only takes place if the original
+        # sequence and the resulting tensor have the same data type
+        if same_dtype:
+            self.assertEqual(original, result)
+        else:
+            dtype = kwargs.get("dtype", torch.get_default_dtype())
+            self.assertEqual(original.shape, result.shape)
+            self.assertEqual(dtype, result.dtype)
+
+        # 3. Given the specified target device, we first check whether
+        # its type is the same, and then if its index is the same (if it
+        # is not None)
+        if same_device:
+            device = original.device
+        else:
+            device = torch.device(kwargs.get("device", "cpu"))
+
+        # Compare the target device type, and its index
+        self.assertEqual(device.type, result.device.type)
+        if device.index is not None:
+            self.assertEqual(device.index, result.device.index)
+
+        # 4. By default, 'requires_grad' is unset
+        self.assertEqual(result.requires_grad, kwargs.get("requires_grad", False))
+
+    def _test_alias_with_cvt(self, cvt, device, dtype, shape=(5, 5), only_with_dtype=False):
+        original = make_tensor(shape, device, dtype)
+
+        def check(**kwargs):
+            self._check(original, cvt=cvt, **kwargs)
+
+        if not only_with_dtype:
+            check(copy=False)
+            check(device=device)
+            check(device=device, copy=False)
+
+        check(dtype=dtype)
+        check(dtype=dtype, copy=False)
+        check(requires_grad=False, dtype=dtype)
+        check(requires_grad=may_require_grad(dtype), dtype=dtype)
+        check(device=device, dtype=dtype)
+        check(device=device, dtype=dtype, copy=False)
+
+    # Skipping 'meta' devices, since there's no point in comparing their
+    # data pointer (which is basically the point here), since they all
+    # return 0.
+    @skipMeta
+    @dtypes(*get_all_dtypes())
+    def test_alias_from_tensor(self, device, dtype):
+        self._test_alias_with_cvt(identity, device, dtype)
+
+    @onlyCPU
+    @dtypes(*torch_to_numpy_dtype_dict.keys())
+    def test_alias_from_numpy(self, device, dtype):
+        self._test_alias_with_cvt(to_numpy, device, dtype)
+
+    # Skipping 'meta', since 'to_dlpack' does not work for them.
+    @skipMeta
+    @dtypes(*get_all_dtypes(include_bool=False))
+    def test_alias_from_dlpack(self, device, dtype):
+        self._test_alias_with_cvt(to_dlpack, device, dtype)
+
+    @onlyCPU
+    @dtypes(*torch_to_numpy_dtype_dict.keys())
+    def test_alias_from_buffer(self, device, dtype):
+        self._test_alias_with_cvt(to_memview, device, dtype, shape=(5,), only_with_dtype=True)
+
+    def _test_copy_with_cvt(self, cvt, device, dtype, shape=(5, 5), only_with_dtype=False):
+        original = make_tensor(shape, device, dtype)
+
+        def check(**kwargs):
+            self._check(original, cvt=cvt, is_alias=False, **kwargs)
+
+        if not only_with_dtype:
+            check(copy=True)
+            check(device=device, copy=True)
+
+        check(requires_grad=False, dtype=dtype, copy=True)
+        check(requires_grad=may_require_grad(dtype), dtype=dtype, copy=True)
+        check(dtype=dtype, copy=True)
+        check(device=device, dtype=dtype, copy=True)
+
+        # Copy is forced because of different device
+        if torch.cuda.is_available():
+            other = get_another_device(device)
+            check(same_device=False, device=other, dtype=dtype)
+            check(same_device=False, device=other, dtype=dtype, copy=True)
+
+        # Copy is forced because of different dtype
+        if not only_with_dtype:
+            for other in get_all_dtypes():
+                if dtype != other:
+                    check(same_dtype=False, dtype=other)
+                    check(same_dtype=False, dtype=other, copy=True)
+
+    @skipMeta
+    @dtypes(*get_all_dtypes())
+    def test_copy_tensor(self, device, dtype):
+        self._test_copy_with_cvt(identity, device, dtype)
+
+    @onlyCPU
+    @dtypes(*torch_to_numpy_dtype_dict.keys())
+    def test_copy_from_numpy(self, device, dtype):
+        self._test_copy_with_cvt(to_numpy, device, dtype)
+
+    @skipMeta
+    @dtypes(*get_all_dtypes(include_bool=False))
+    def test_copy_from_dlpack(self, device, dtype):
+        self._test_copy_with_cvt(to_dlpack, device, dtype)
+
+    @onlyCPU
+    @dtypes(*torch_to_numpy_dtype_dict.keys())
+    def test_copy_from_buffer(self, device, dtype):
+        self._test_copy_with_cvt(to_memview, device, dtype, shape=(5,), only_with_dtype=True)
+
+    def _test_copy_mult_devices(self, devices, dtype, cvt):
+        cuda1 = devices[0]
+        cuda2 = devices[1]
+        original = make_tensor((5, 5), cuda1, dtype)
+
+        def check(**kwargs):
+            self._check(original, cvt, is_alias=False, same_device=False, device=cuda2, **kwargs)
+
+        check()
+        check(copy=True)
+        check(dtype=dtype, copy=True)
+
+    @onlyCUDA
+    @deviceCountAtLeast(2)
+    @dtypes(*get_all_dtypes(include_bool=False))
+    def test_copy_from_tensor_mult_devices(self, devices, dtype):
+        self._test_copy_mult_devices(devices, dtype, identity)
+
+    @onlyCUDA
+    @deviceCountAtLeast(2)
+    @dtypes(*get_all_dtypes(include_bool=False))
+    def test_copy_from_dlpack_mult_devices(self, devices, dtype):
+        self._test_copy_mult_devices(devices, dtype, to_dlpack)
+
+    @dtypes(*get_all_dtypes())
+    def test_copy_list(self, device, dtype):
+        original = make_tensor((5, 5), torch.device("cpu"), dtype)
+
+        def check(**kwargs):
+            self._check(original, torch.Tensor.tolist, is_alias=False, **kwargs)
+
+        same_device = torch.device("cpu") == device
+        check(same_device=same_device, device=device, dtype=dtype)
+        check(same_device=same_device, device=device, dtype=dtype, requires_grad=False)
+        check(same_device=same_device, device=device, dtype=dtype, requires_grad=may_require_grad(dtype))
+        check(same_device=same_device, device=device, dtype=dtype, copy=True)
+
+    @dtypes(torch.float32)
+    def test_unsupported_alias(self, device, dtype):
+        original = make_tensor((5, 5), device, dtype)
+
+        if torch.cuda.is_available():
+            other_device = get_another_device(device)
+            with self.assertRaisesRegex(ValueError,
+                                        f"from device '{device}' to '{other_device}'"):
+                torch.asarray(original, device=other_device, copy=False)
+
+        with self.assertRaisesRegex(ValueError,
+                                    "with dtype '.*' into dtype '.*'"):
+            torch.asarray(original, dtype=torch.float64, copy=False)
+
+        with self.assertRaisesRegex(ValueError,
+                                    "can't alias arbitrary sequence"):
+            torch.asarray(original.tolist(), copy=False)
+
+    @onlyCUDA
+    @deviceCountAtLeast(2)
+    @dtypes(torch.float32)
+    def test_unsupported_alias_mult_devices(self, devices, dtype):
+        dev1, dev2 = devices[:2]
+        original = make_tensor((5, 5), dev1, dtype)
+        with self.assertRaisesRegex(ValueError,
+                                    f"from device '{dev1}' to '{dev2}'"):
+            torch.asarray(original, device=dev2, copy=False)
+
+    @dtypes(torch.float32, torch.complex64)
+    def test_retain_autograd_history(self, device, dtype):
+        original = make_tensor((5, 5), device, dtype, requires_grad=True)
+        # 'cloned' has 'grad_fn=<CloneBackwards>'
+        cloned = original.clone()
+
+        def check(**kwargs):
+            a = torch.asarray(cloned, **kwargs)
+            requires_grad = kwargs.get("requires_grad", False)
+            self.assertEqual(a.requires_grad, requires_grad)
+            # Autograd history shouldn't be retained when requires_grad is False
+            self.assertEqual(a.grad_fn is None, not requires_grad)
+
+        check()
+        check(requires_grad=True)
+        check(copy=True)
+        check(requires_grad=True, copy=True)
+        check(requires_grad=False)
+        check(requires_grad=False, copy=True)
+
 instantiate_device_type_tests(TestTensorCreation, globals())
 instantiate_device_type_tests(TestRandomTensorCreation, globals())
 instantiate_device_type_tests(TestLikeTensorCreation, globals())
+instantiate_device_type_tests(TestBufferProtocol, globals(), only_for="cpu")
+instantiate_device_type_tests(TestAsArray, globals())
 
 if __name__ == '__main__':
     run_tests()
