@@ -344,7 +344,7 @@ Tensor computeTranspose(
     at::Device device) {
   auto A = c10::get<BufHandle>(inputs[0]);
   // Trivial case of 0-dim and 1-dim tensors: transpose is just a copy
-  if (A.ndim() < 1) {
+  if (A.ndim() <= 1) {
     return Compute(
         "aten_transpose",
         c10::fmap<DimArg>(outputShape),
@@ -382,12 +382,11 @@ Tensor computeExpand(
       });
 }
 
-static Tensor computeReshapeHelper(
+Tensor computeReshape(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType,
-    at::Device device,
-    const IntList& view_dims) {
+    at::Device device) {
   auto A = c10::get<BufHandle>(inputs[0]);
   if (A.ndim() == 0) {
     return Compute(
@@ -403,7 +402,7 @@ static Tensor computeReshapeHelper(
       c10::fmap<DimArg>(outputShape),
       [&](const std::vector<VarHandle>& axes) {
         std::vector<VarHandle> new_axes;
-        assert(view_dims.size() == axes.size());
+        assert(outputShape.size() == axes.size());
         /*
         Example for the index transformation. Assume we have a tensor A and
         its view B:
@@ -419,11 +418,9 @@ static Tensor computeReshapeHelper(
                     idx = i5 + i4*2 + i3*2 + i2*18 + i1*18
                     B[i1,i2,i3,i4,i5] = A[idx/(3*2), (idx/3)%2, idx%3]
         */
-        // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-        ExprHandle cur_stride = 1;
         std::vector<ExprPtr> dims, indices;
-        for (size_t idx = 0; idx < view_dims.size(); idx++) {
-          dims.push_back(alloc<LongImm>(view_dims[idx]));
+        for (size_t idx = 0; idx < outputShape.size(); idx++) {
+          dims.push_back(outputShape[idx].node());
           indices.push_back(axes[idx].node());
         }
         ExprHandle flat_idx = ExprHandle(flatten_index(dims, indices));
@@ -446,29 +443,6 @@ static Tensor computeReshapeHelper(
         // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
         return A.load(orig_buf_indexes);
       });
-}
-
-Tensor computeFlatten(
-    const std::vector<ArgValue>& inputs,
-    const std::vector<ExprHandle>& outputShape,
-    const c10::optional<ScalarType>& outputType,
-    at::Device device) {
-  std::vector<int64_t> view_dims;
-  for (const auto dim : c10::irange(outputShape.size())) {
-    view_dims.push_back(outputShape[dim].AsNode<LongImm>()->value());
-  }
-  return computeReshapeHelper(
-      inputs, outputShape, outputType, device, view_dims);
-}
-
-Tensor computeReshape(
-    const std::vector<ArgValue>& inputs,
-    const std::vector<ExprHandle>& outputShape,
-    const c10::optional<ScalarType>& outputType,
-    at::Device device) {
-  const auto& view_dims = c10::get<IntList>(inputs[1]);
-  return computeReshapeHelper(
-      inputs, outputShape, outputType, device, view_dims);
 }
 
 static std::pair<ScalarType, std::vector<BufHandle>> processCatList(

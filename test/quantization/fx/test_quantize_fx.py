@@ -18,6 +18,7 @@ from torch.ao.quantization.quantize_fx import (
 )
 
 from torch.ao.quantization.fx.quantization_patterns import DefaultNodeQuantizeHandler
+from torch.ao.quantization.fx.common_quantization_patterns import CommonQuantizeHandler
 
 from torch.ao.quantization.fx.match_utils import (
     is_match,
@@ -3102,6 +3103,40 @@ class TestQuantizeFx(QuantizationTestCase):
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
+    def setUp(self):
+        super().setUp()
+        self.custom_qconfig = torch.ao.quantization.QConfig(
+            activation=torch.ao.quantization.observer.HistogramObserver.with_args(
+                qscheme=torch.per_tensor_symmetric, dtype=torch.qint8
+            ),
+            weight=torch.ao.quantization.default_per_channel_weight_observer
+        )
+        self.common_quant_patterns = {
+            torch.nn.ConvTranspose1d: CommonQuantizeHandler,
+            torch.nn.ConvTranspose2d: CommonQuantizeHandler,
+            torch.nn.ELU: CommonQuantizeHandler,
+            torch.nn.LeakyReLU: CommonQuantizeHandler,
+            torch.nn.Hardswish: CommonQuantizeHandler,
+            torch.nn.InstanceNorm1d: CommonQuantizeHandler,
+            torch.nn.InstanceNorm2d: CommonQuantizeHandler,
+            torch.nn.InstanceNorm3d: CommonQuantizeHandler,
+            torch.nn.LayerNorm: CommonQuantizeHandler,
+            torch.nn.SiLU: CommonQuantizeHandler,
+            torch.nn.Mish: CommonQuantizeHandler,
+            torch.nn.GELU: CommonQuantizeHandler,
+            torch.nn.Softmax: CommonQuantizeHandler,
+            torch.nn.functional.elu: CommonQuantizeHandler,
+            torch.nn.functional.hardswish: CommonQuantizeHandler,
+            torch.nn.functional.instance_norm: CommonQuantizeHandler,
+            torch.nn.functional.layer_norm: CommonQuantizeHandler,
+            torch.nn.functional.leaky_relu: CommonQuantizeHandler,
+            torch.nn.functional.silu: CommonQuantizeHandler,
+            torch.nn.functional.mish: CommonQuantizeHandler,
+            torch.nn.functional.gelu: CommonQuantizeHandler,
+            torch.nn.functional.softmax: CommonQuantizeHandler,
+            torch.sum: CommonQuantizeHandler
+        }
+
     """Unit tests for individual ops
     """
     @skipIfNoFBGEMM
@@ -4166,6 +4201,9 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_default_node_quant_handler_ops(
             module, functional, qconfig, is_reference, node_list, additional_patterns)
 
+        self._test_default_node_quant_handler_ops(module, functional, self.custom_qconfig, is_reference, node_list,
+                                                  additional_quant_pattern_dict=self.common_quant_patterns)
+
     def test_softmax_reference(self):
         module = torch.nn.Softmax
         functional = torch.nn.functional.softmax
@@ -4186,6 +4224,9 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_default_node_quant_handler_ops(
             module, functional, qconfig, is_reference, node_list, additional_patterns)
 
+        self._test_default_node_quant_handler_ops(module, functional, self.custom_qconfig, is_reference, node_list,
+                                                  additional_quant_pattern_dict=self.common_quant_patterns)
+
     def test_silu_reference(self):
         module = torch.nn.SiLU
         functional = torch.nn.functional.silu
@@ -4204,6 +4245,19 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_default_node_quant_handler_ops(
             module, functional, qconfig, is_reference, node_list)
 
+        node_list = [
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_method("dequantize"),
+            ns.call_module(module),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_method("dequantize"),
+            ns.call_function(functional),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_method("dequantize")
+        ]
+        self._test_default_node_quant_handler_ops(module, functional, self.custom_qconfig, is_reference, node_list,
+                                                  additional_quant_pattern_dict=self.common_quant_patterns)
+
     def test_mish_reference(self):
         module = torch.nn.Mish
         functional = torch.nn.functional.mish
@@ -4221,6 +4275,19 @@ class TestQuantizeFxOps(QuantizationTestCase):
         ]
         self._test_default_node_quant_handler_ops(
             module, functional, qconfig, is_reference, node_list)
+
+        node_list = [
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_method("dequantize"),
+            ns.call_module(module),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_method("dequantize"),
+            ns.call_function(functional),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_method("dequantize")
+        ]
+        self._test_default_node_quant_handler_ops(module, functional, self.custom_qconfig, is_reference, node_list,
+                                                  additional_quant_pattern_dict=self.common_quant_patterns)
 
     def test_bmm_int_reference(self):
         """ int8 is not supported for bmm so we won't produce reference
@@ -5507,80 +5574,6 @@ class TestQuantizeFxModels(QuantizationTestCase):
             out_ref = converted(inp)
 
             torch.testing.assert_allclose(out, out_ref)
-
-    def test_disable_output_fake_quant(self):
-
-        class Linear(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.w = torch.ones(5, 5)
-                self.b = torch.zeros(5)
-
-
-            def forward(self, x):
-                return torch.nn.functional.linear(x, self.w, self.b)
-
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.mods1 = torch.nn.Sequential(
-                    Linear(),
-                    Linear()
-                )
-                self.mods2 = Linear()
-                self.mods3 = Linear()
-
-            def forward(self, x):
-                x = self.mods1(x)
-                x = torch.add(x, 4)
-                x = self.mods2(x)
-                y = torch.add(x, 2)
-                z = torch.mul(x, 5)
-                a = self.mods3(y)
-                return a, z
-        devices = ["cpu", "cuda"] if torch.cuda.is_available() else ["cpu"]
-
-        for device in devices:
-            model = M().train()
-            qconfig = torch.quantization.get_default_qat_qconfig("fbgemm")
-            qconfig_dict = {
-                "": None,
-                "object_type": [
-                    (torch.nn.functional.linear, qconfig),
-                    (torch.nn.functional.relu, qconfig),
-                ],
-            }
-            prepared = torch.quantization.quantize_fx.prepare_qat_fx(model, qconfig_dict)
-            prepared.to(device)
-            modules = dict(prepared.named_modules())
-
-            def check_all_users_not_linear(node):
-                for user, _ in node.users.items():
-                    if user.op == 'call_function' and user.target == torch.nn.functional.linear:
-                        return False
-                return True
-
-
-            for node in prepared.graph.nodes:
-                if node.op == 'call_module' and torch.ao.quantization.is_activation_post_process(modules[str(node.target)]):
-                    # get the users
-                    if check_all_users_not_linear(node):
-                        mod = modules[str(node.target)]
-                        mod.output_fake_quant = False
-            for i in range(10):
-                prepared(torch.rand(5, 5, device=device))
-
-            disabled_output_fake_quants = ["mods3_output_activation_post_process_0",
-                                           "mods2_output_activation_post_process_0",
-                                           "mods1_1_output_activation_post_process_0"]
-
-            for name, mod in prepared.named_modules():
-                if isinstance(mod, FusedMovingAvgObsFakeQuantize):
-                    if name in disabled_output_fake_quants:
-                        self.assertEqual(mod.output_fake_quant, False)
-                    else:
-                        self.assertEqual(mod.output_fake_quant, True)
-
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
                        "\tpython test/test_quantization.py TESTNAME\n\n"

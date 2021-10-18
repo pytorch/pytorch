@@ -528,6 +528,8 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
           NAME, at::kQInt32, at::qint32, int, CHAR_BIT * sizeof(int), INT_MIN, INT_MAX, __VA_ARGS__) \
       AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                                      \
           NAME, at::kQUInt4x2, at::quint4x2, uint8_t, 4, 0, 15, __VA_ARGS__)                   \
+      AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                                      \
+          NAME, at::kQUInt2x4, at::quint2x4, uint8_t, 2, 0, 3, __VA_ARGS__)                   \
       default:                                                                                 \
         AT_ERROR(#NAME, " not implemented for '", toString(TYPE), "'");                        \
     }                                                                                          \
