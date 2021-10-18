@@ -14,7 +14,13 @@ target_link_libraries(jitbackend_test torch)
 add_library(backend_with_compiler SHARED
         ${JIT_TEST_ROOT}/test_backend_compiler_lib.cpp
         ${JIT_TEST_ROOT}/test_backend_compiler_preprocess.cpp
+        # This is for testing edge profiler for backend use
+        ${TORCH_SRC_DIR}/csrc/jit/mobile/profiler_edge.cpp
         )
+if(USE_KINETO)
+  set_target_properties(backend_with_compiler PROPERTIES COMPILE_FLAGS
+  "-DUSE_KINETO")
+endif()
 target_link_libraries(backend_with_compiler torch)
 
 if(INSTALL_TEST)
