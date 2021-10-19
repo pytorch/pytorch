@@ -1,4 +1,5 @@
 from .linear_relu import LinearReLU
+from .linear_fused import LinearBn1d
 from .conv_fused import (
     ConvBn1d,
     ConvBn2d,
@@ -22,6 +23,7 @@ __all__ = [
     "ConvBnReLU1d",
     "ConvBnReLU2d",
     "ConvBnReLU3d",
+    "LinearBn1d",
     "update_bn_stats",
     "freeze_bn_stats",
 ]

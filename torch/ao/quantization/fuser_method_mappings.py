@@ -100,7 +100,13 @@ def fuse_linear_bn(linear, bn):
         "Linear and BN both must be in the same mode (train or eval)."
 
     if linear.training:
-        raise Exception("Fusing Linear+BatchNorm not yet supported in training.")
+        # raise Exception("Fusing Linear+BatchNorm not yet supported in training.")
+        assert bn.num_features == linear.out_features,\
+            "Output features of Linear must match num_features of BatchNorm1d"
+        assert bn.affine, "Only support fusing BatchNorm1d with affine set to True"
+        assert bn.track_running_stats,\
+            "Only support fusing BatchNorm1d with tracking_running_stats set to True"
+        return nni.LinearBn1d(linear, bn)
     else:
         return nn.utils.fusion.fuse_linear_bn_eval(linear, bn)
 

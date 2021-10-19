@@ -329,6 +329,19 @@ class TestFusion(QuantizationTestCase):
         self.assertEqual(type(model.bn), nn.Identity)
         self.assertEqual(golden, model(inp2))
 
+    def test_fusion_linear_bn_train(self):
+        model = ModelForLinearBNFusion().train()
+        inp1 = torch.randn(8, 20)
+        inp2 = torch.randn(8, 20)
+
+        #Get some interesting values into the running mean and variance.
+        model(inp1)
+        golden = model(inp2)
+
+        model = fuse_modules(model, [["fc", "bn"]])
+        self.assertEqual(type(model.bn), nn.Identity)
+        self.assertEqual(golden, model(inp2))
+
     def test_forward_hooks_preserved(self):
         r"""Test case that checks whether forward pre hooks of the first module and
         post forward hooks of the last module in modules list passed to fusion function preserved.

@@ -96,6 +96,7 @@ DEFAULT_QAT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nni.ConvReLU2d: nniqat.ConvReLU2d,
     nni.ConvReLU3d: nniqat.ConvReLU3d,
     nni.LinearReLU: nniqat.LinearReLU,
+    nni.LinearBn1d: nniqat.LinearBn1d,
 }
 
 # Default map for swapping dynamic modules

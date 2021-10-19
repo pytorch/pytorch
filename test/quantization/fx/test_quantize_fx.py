@@ -186,6 +186,8 @@ class TestFuseFx(QuantizationTestCase):
                 self.bn2d2 = nn.BatchNorm2d(1)
                 self.bn3d2 = nn.BatchNorm3d(1)
                 self.relu = nn.ReLU()
+                self.linear = nn.Linear(1, 1)
+                self.bn1d_2 = nn.BatchNorm1d(1)
 
             def forward(self, x):
                 x = self.conv1d(x)
@@ -203,6 +205,8 @@ class TestFuseFx(QuantizationTestCase):
                 x = self.conv3d2(x)
                 x = self.bn3d2(x)
                 x = self.relu(x)
+                x = self.linear(x)
+                x = self.bn1d_2(x)
                 return x
 
         # test train mode
@@ -243,7 +247,8 @@ class TestFuseFx(QuantizationTestCase):
         ]
         # ConvBnRelu1d is not fused
         expected_occurrence = {
-            ns.call_module(nn.ReLU): 0
+            ns.call_module(nn.ReLU): 0,
+            ns.call_module(nn.BatchNorm1d): 0,
         }
         self.checkGraphModuleNodes(
             m,

@@ -11,6 +11,7 @@ from .fused import ConvReLU3d
 from .fused import LinearReLU
 from .fused import BNReLU2d
 from .fused import BNReLU3d
+from .fused import LinearBn1d
 
 
 __all__ = [
@@ -27,4 +28,5 @@ __all__ = [
     'LinearReLU',
     'BNReLU2d',
     'BNReLU3d',
+    'LinearBn1d',
 ]
