@@ -1228,7 +1228,7 @@ class TestSparse(TestCase):
         # Create coalesced sparse tensor with non-contiguous indices
         weight = torch.randn(hidden_size, input_size, dtype=dtype, device=device).to_sparse()
         self.assertTrue(weight.is_coalesced())
-        non_contig_indices = weight.indices().transpose(-1, -2).contiguous().transpose(-1, -2)
+        non_contig_indices = weight.indices().mT.contiguous().mT
         weight = torch.sparse_coo_tensor(
             indices=non_contig_indices, values=weight.values(), size=weight.shape)
         weight._coalesced_(True)
