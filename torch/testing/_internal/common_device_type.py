@@ -793,10 +793,10 @@ class skipMetaIf(skipIf):
         super().__init__(dep, reason, device_type='meta')
 
 # Skips a test on XLA (unconditionally).
-class skipXLA(skipIf):
+class skipXLAIf(skipIf):
 
-    def __init__(self):
-        super().__init__(True, "Marked for skipping on XLA", device_type='xla')
+    def __init__(self, dep, reason):
+        super().__init__(dep, reason, device_type='xla')
 
 
 def _has_sufficient_memory(device, size):
@@ -1248,3 +1248,6 @@ def skipCUDAIfNoCudnn(fn):
 
 def skipMeta(fn):
     return skipMetaIf(True, "test doesn't work with meta tensors")(fn)
+
+def skipXLA(fn):
+    return skipCPUIf(True, "Marked as skipped for XLA")(fn)
