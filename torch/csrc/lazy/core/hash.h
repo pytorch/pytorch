@@ -18,7 +18,20 @@ namespace torch {
 namespace lazy {
 
 using size_t = std::size_t;
-using hash_t = c10::uint128;
+
+class TORCH_API hash_t : public c10::uint128 {
+ public:
+  // Swich from typedef hash_t = uint128 to provide explicit casters
+  hash_t(int8_t val) : uint128(static_cast<uint32_t>(val)) {}
+  hash_t(int16_t val) : uint128(static_cast<uint32_t>(val)) {}
+  hash_t(int32_t val) : uint128(static_cast<uint32_t>(val)) {}
+  hash_t(int64_t val) : uint128(static_cast<uint64_t>(val)) {}
+  hash_t(uint32_t val) : uint128(val) {}
+  hash_t(uint64_t val) : uint128(val) {}
+  hash_t(uint128 val) : uint128(val) {}
+  hash_t(uint64_t top, uint64_t bottom) : uint128(top, bottom) {}
+  hash_t() : uint128() {}
+};
 
 // Std* functions use 64-bit hash
 size_t TORCH_API StdDataHash(const void* data, size_t size);
@@ -79,7 +92,7 @@ static const int64_t kNullOpt = -3333;
 // between <nullopt, non-nullopt> and <non-nullopt, nullopt> cases
 template <typename T>
 hash_t Hash(const c10::optional<T>& value) {
-  if(value.has_value()){
+  if (value.has_value()) {
     return Hash(value.value());
   } else {
     return Hash(kNullOpt);
@@ -112,7 +125,7 @@ static inline hash_t Hash(const hash_t& value) {
 
 template <typename T>
 hash_t ContainerHash(const T& values) {
-  hash_t h = c10::uint128((uint64_t)0x85ebca77c2b2ae63);
+  hash_t h(static_cast<uint64_t>(0x85ebca77c2b2ae63));
   for (const auto& value : values) {
     h = HashCombine(h, Hash(value));
   }
@@ -122,7 +135,7 @@ hash_t ContainerHash(const T& values) {
 // Varargs hashing
 template <typename T = void>
 hash_t MHash() {
-  return c10::uint128((uint64_t)0x165667b19e3779f9);
+  return hash_t(static_cast<uint64_t>(0x165667b19e3779f9));
 }
 
 template <typename T, typename... Targs>
