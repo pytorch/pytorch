@@ -52,6 +52,22 @@ int64_t getPhysicalDim(const Tensor& tensor, bool has_batch_dim, int64_t logical
   return wrapped_dim;
 }
 
+VmapDimVector getPhysicalDims(const Tensor& tensor, bool has_batch_dim, IntArrayRef logical_dims) {
+  // NB: assumes the batch dim is at the front of the tensor
+  optional<int64_t> bdim = has_batch_dim ? optional<int64_t>(0) : nullopt;
+  auto rank = rankWithoutBatchDim(tensor, bdim);
+  VmapDimVector result;
+  result.reserve(logical_dims.size());
+  for (auto d : logical_dims){
+    if (has_batch_dim) {
+      result.push_back(maybe_wrap_dim(d, rank)+1);
+    } else {
+      result.push_back(maybe_wrap_dim(d, rank));
+    } 
+  }
+  return result;
+}
+
 Tensor maybePadToLogicalRank(const Tensor& tensor, optional<int64_t> has_bdim, int64_t logical_rank) {
   if (!has_bdim) {
     return tensor;
