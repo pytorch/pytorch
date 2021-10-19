@@ -270,7 +270,7 @@ Value* TracingState::getOutput(const IValue& iv, size_t i) {
                 [&](const IValue& ival) { return getOutput(ival, i); })))
         ->output();
   } else if (iv.isTuple()) {
-    auto tuple = iv.toTuple()->elements();
+    const auto& tuple = iv.toTuple()->elements();
     auto tuple_node = graph->createTuple(
         fmap(tuple, [&](const IValue& ival) { return getOutput(ival, i); }));
     graph->insertNode(tuple_node);
@@ -347,7 +347,7 @@ static IValue addInput(
     auto elem_values = unpack_node->outputs();
     auto elem_types = tuple_type->elements();
     auto tuple = input.toTuple();
-    auto elems = tuple->elements();
+    const auto& elems = tuple->elements();
     size_t num_elems = elems.size();
     AT_ASSERT(
         elem_values.size() == num_elems && elem_types.size() == num_elems);
