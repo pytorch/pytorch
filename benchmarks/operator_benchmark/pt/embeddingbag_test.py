@@ -35,7 +35,7 @@ class EmbeddingBenchmark(op_bench.TorchBenchmarkBase):
             embedding_dim=embedding_dim).to(device=device)
         numpy.random.seed((1 << 32) - 1)
         input = torch.tensor(numpy.random.randint(0, num_embeddings, input_size), device=device).long()
-        self.inputs = { "input": input }
+        self.inputs = {"input": input}
         self.set_module_name('embedding')
 
     def forward(self, input, offset):

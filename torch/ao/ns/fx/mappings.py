@@ -557,6 +557,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nnq.Hardswish,
         nnq.LeakyReLU,
         nnq.ReLU6,
+        nnq.Embedding,
         nnq.EmbeddingBag,
         nniq.BNReLU2d,
         nniq.BNReLU3d,

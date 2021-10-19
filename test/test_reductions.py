@@ -467,11 +467,19 @@ class TestReductions(TestCase):
         expected = logsumexp(a.cpu().numpy(), 1)
         self.assertEqual(expected.shape, actual.shape)
         self.assertEqual(expected, actual)
+
         # check that out is actually inplace
         b = torch.zeros(5, 2, device=device)
         c = b[:, 0]
         torch.logsumexp(a, 1, out=c)
         self.assertEqual(expected, b[:, 0])
+
+        # check integral inputs is promoted to floating point
+        e = torch.randint(-100, 100, [5, 4], device=device)
+        actual = e.logsumexp(1).to(torch.float64)
+        expected = logsumexp(e.cpu().numpy(), 1)
+        self.assertEqual(expected.shape, actual.shape)
+        self.assertEqual(expected, actual)
 
     @onlyCPU
     def test_sum_parallel(self, device):
