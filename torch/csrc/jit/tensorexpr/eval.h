@@ -89,26 +89,6 @@ class InterpValue {
   void* ptr;
 };
 
-template <>
-inline InterpValue::InterpValue<c10::quint8>(Dtype dtype, c10::quint8 v)
-    : dtype_(dtype) {
-  if (dtype == kQUInt8) {
-    QUInt8values.push_back(v);
-    return;
-  }
-  throw unsupported_dtype();
-}
-
-template <>
-inline InterpValue::InterpValue<c10::qint8>(Dtype dtype, c10::qint8 v)
-    : dtype_(dtype) {
-  if (dtype == kQInt8) {
-    QInt8values.push_back(v);
-    return;
-  }
-  throw unsupported_dtype();
-}
-
 #define VALUE_AS_DISPATCH(Type, Name)         \
   template <>                                 \
   inline Type InterpValue::as<Type>() const { \
