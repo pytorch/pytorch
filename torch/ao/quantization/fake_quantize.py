@@ -1,3 +1,8 @@
+"""
+This module implements modules which are used to perform fake quantization
+during QAT.
+"""
+
 import torch
 from torch.nn import Module
 from torch.ao.quantization.observer import (
@@ -70,11 +75,11 @@ class FakeQuantizeBase(ABC, Module):
 
 class FakeQuantize(FakeQuantizeBase):
     r""" Simulate the quantize and dequantize operations in training time.
-    The output of this module is given by
+    The output of this module is given by::
 
-    x_out = (clamp(round(x/scale + zero_point), quant_min, quant_max)-zero_point)*scale
-
-
+        x_out = (
+          clamp(round(x/scale + zero_point), quant_min, quant_max) - zero_point
+        ) * scale
 
     * :attr:`scale` defines the scale factor used for quantization.
 
@@ -84,26 +89,27 @@ class FakeQuantize(FakeQuantizeBase):
 
     * :attr:`quant_max` specifies the maximum allowable quantized value.
 
-    * :attr:`fake_quant_enable` controls the application of fake quantization on tensors, note that
+    * :attr:`fake_quant_enabled` controls the application of fake quantization on tensors, note that
       statistics can still be updated.
 
-    * :attr:`observer_enable` controls statistics collection on tensors
+    * :attr:`observer_enabled` controls statistics collection on tensors
 
     * :attr:`dtype` specifies the quantized dtype that is being emulated with fake-quantization,
-                    allowable values are torch.qint8 and torch.quint8. The values of quant_min and
-                    quant_max should be chosen to be consistent with the dtype
-
+        allowable values are torch.qint8 and torch.quint8. The values of quant_min and
+        quant_max should be chosen to be consistent with the dtype
 
     Args:
+
         observer (module): Module for observing statistics on input tensors and calculating scale
-                           and zero-point.
+          and zero-point.
         quant_min (int): The minimum allowable quantized value.
         quant_max (int): The maximum allowable quantized value.
         observer_kwargs (optional): Arguments for the observer module
 
     Attributes:
+
         observer (Module): User provided module that collects statistics on the input tensor and
-                           provides a method to calculate scale and zero-point.
+          provides a method to calculate scale and zero-point.
 
     """
 
@@ -208,7 +214,9 @@ class FixedQParamsFakeQuantize(FakeQuantizeBase):
     """ Simulate quantize and dequantize with fixed quantization
     parameters in training time. Only per tensor quantization
     is supported.
+
     Args:
+
         `scale` (float): fixed scale for the fake quantize module
         `zero_point` (int): fixed zero point for the fake quantize module
         `dtype`, `qscheme`, `quant_min`, `quant_max`
@@ -328,8 +336,15 @@ class FusedMovingAvgObsFakeQuantize(FakeQuantize):
 
 default_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMaxObserver, quant_min=0, quant_max=255,
                                             dtype=torch.quint8, qscheme=torch.per_tensor_affine, reduce_range=True)
+"""
+Default fake_quant for activations.
+"""
+
 default_weight_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMaxObserver, quant_min=-128, quant_max=127,
                                                    dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, reduce_range=False)
+"""
+Default fake_quant for weights.
+"""
 
 # TODO(future PR): remove these defaults and enforce activation functions
 # to explicitly specify their output range
@@ -345,11 +360,26 @@ default_per_channel_weight_fake_quant = FakeQuantize.with_args(observer=MovingAv
                                                                qscheme=torch.per_channel_symmetric,
                                                                reduce_range=False,
                                                                ch_axis=0)
+"""
+Default fake_quant for per-channel weights.
+"""
 
 default_embedding_fake_quant = FakeQuantize.with_args(observer=PerChannelMinMaxObserver,
                                                       qscheme=torch.per_channel_affine_float_qparams,
+                                                      dtype=torch.quint8,
+                                                      quant_min=0,
+                                                      quant_max=255,
                                                       ch_axis=0,
                                                       memoryless=True)
+"""
+Default fake_quant for embeddings.
+"""
+
+default_embedding_fake_quant_4bit = FakeQuantize.with_args(observer=PerChannelMinMaxObserver,
+                                                           qscheme=torch.per_channel_affine_float_qparams,
+                                                           ch_axis=0,
+                                                           dtype=torch.quint4x2,
+                                                           memoryless=True)
 
 default_histogram_fake_quant = FakeQuantize.with_args(observer=HistogramObserver,
                                                       quant_min=0,
@@ -357,11 +387,18 @@ default_histogram_fake_quant = FakeQuantize.with_args(observer=HistogramObserver
                                                       dtype=torch.quint8,
                                                       qscheme=torch.per_tensor_affine,
                                                       reduce_range=True)
+"""
+Fake_quant for activations using a histogram..
+"""
+
 
 default_fused_act_fake_quant = FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
                                                                        quant_min=0,
                                                                        quant_max=255,
                                                                        dtype=torch.quint8,)
+"""
+Fused version of `default_fake_quant`, with improved performance.
+"""
 
 
 default_fused_wt_fake_quant = FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
@@ -369,12 +406,18 @@ default_fused_wt_fake_quant = FusedMovingAvgObsFakeQuantize.with_args(observer=M
                                                                       quant_max=127,
                                                                       dtype=torch.qint8,
                                                                       qscheme=torch.per_tensor_symmetric)
+"""
+Fused version of `default_weight_fake_quant`, with improved performance.
+"""
 
 default_fused_per_channel_wt_fake_quant = FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAveragePerChannelMinMaxObserver,
                                                                                   quant_min=-128,
                                                                                   quant_max=127,
                                                                                   dtype=torch.qint8,
                                                                                   qscheme=torch.per_channel_symmetric)
+"""
+Fused version of `default_per_channel_weight_fake_quant`, with improved performance.
+"""
 
 def _is_fake_quant_script_module(mod):
     ''' Returns true if given mod is an instance of FakeQuantize script module.
@@ -388,17 +431,45 @@ def _is_fake_quant_script_module(mod):
     return False
 
 def disable_fake_quant(mod):
+    """
+    Disable fake quantization for this module, if applicable. Example usage::
+
+      # model is any PyTorch model
+      model.apply(torch.ao.quantization.disable_fake_quant)
+
+    """
     if isinstance(mod, FakeQuantizeBase) or _is_fake_quant_script_module(mod):
         mod.disable_fake_quant()
 
 def enable_fake_quant(mod):
+    """
+    Enable fake quantization for this module, if applicable. Example usage::
+
+      # model is any PyTorch model
+      model.apply(torch.ao.quantization.enable_fake_quant)
+
+    """
     if isinstance(mod, FakeQuantizeBase) or _is_fake_quant_script_module(mod):
         mod.enable_fake_quant()
 
 def disable_observer(mod):
+    """
+    Disable observation for this module, if applicable. Example usage::
+
+      # model is any PyTorch model
+      model.apply(torch.ao.quantization.disable_observer)
+
+    """
     if isinstance(mod, FakeQuantizeBase) or _is_fake_quant_script_module(mod):
         mod.disable_observer()
 
 def enable_observer(mod):
+    """
+    Enable observation for this module, if applicable. Example usage::
+
+      # model is any PyTorch model
+      model.apply(torch.ao.quantization.enable_observer)
+
+    """
     if isinstance(mod, FakeQuantizeBase) or _is_fake_quant_script_module(mod):
         mod.enable_observer()

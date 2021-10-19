@@ -366,6 +366,16 @@ class TestViewOps(TestCase):
             self.assertTrue(v_imag.is_neg())
 
     @onlyOnCPUAndCUDA
+    def test_conj_view_with_shared_memory(self, device) -> None:
+        a = _make_tensor((4, 5,), torch.cfloat, device)
+        b = a.conj()
+        c = a.conj()
+
+        self.assertEqual(torch.add(a, b), a.add_(b))
+        self.assertEqual(torch.add(b, c), torch.add(b, c, out=a))
+        self.assertEqual(torch.add(b, c), b.add_(c))
+
+    @onlyOnCPUAndCUDA
     @dtypes(*product(get_all_complex_dtypes(), get_all_dtypes()))
     @suppress_warnings
     def test_set_real_imag(self, device, dtypes):
@@ -499,12 +509,13 @@ class TestViewOps(TestCase):
         self.assertEqual(t[1, 0], v[0, 1])
 
     def test_T_view(self, device):
-        t = torch.ones((5, 5), device=device)
-        v = t.T
-        self.assertTrue(self.is_view_of(t, v))
+        for op in ("T", "H", "mT", "mH"):
+            t = torch.ones((5, 5), device=device)
+            v = getattr(t, op)
+            self.assertTrue(self.is_view_of(t, v))
 
-        v[0, 1] = 0
-        self.assertEqual(t[1, 0], v[0, 1])
+            v[0, 1] = 0
+            self.assertEqual(t[1, 0], v[0, 1])
 
     def test_unfold_view(self, device):
         t = torch.ones(10, device=device)
@@ -1103,6 +1114,33 @@ class TestOldViewOps(TestCase):
         self.assertEqual(b, b.T)
         scalar = torch.tensor(5, device=device)
         self.assertEqual(scalar, scalar.T)
+
+    @dtypes(*(torch.testing.get_all_dtypes()))
+    def test_transposes(self, device, dtype):
+        for op in ("T", "H", "mT", "mH", "adjoint"):
+            shapes = ((), (2, 3), (2, 3, 4)) if op[0] == "m" or op == "adjoint" else ((), (2, 3),)
+            for shape in shapes:
+                a = make_tensor(shape, device=device, dtype=dtype)
+                t1 = getattr(a, op)
+                if op == "adjoint":
+                    t1 = t1()
+                t2 = a
+                if a.ndim != 0:
+                    t2 = t2.transpose(-2, -1)
+                if op[-1] == "H" or op == "adjoint":
+                    t2 = t2.conj()
+                self.assertEqual(t2, t1)
+
+    @dtypes(*(torch.testing.get_all_dtypes()))
+    def test_transposes_errors(self, device, dtype):
+        for op in ("H", "mT", "mH", "adjoint"):
+            shapes = ((2,), (2, 3, 4)) if op == "H" else ((2,),)
+            for shape in shapes:
+                a = make_tensor(shape, device=device, dtype=dtype)
+                with self.assertRaisesRegex(RuntimeError, "only supported on matrices"):
+                    t1 = getattr(a, op)
+                    if op == "adjoint":
+                        t1 = t1()
 
     def test_python_types(self, device):
         a1 = torch.randn((1, 2), device=device, dtype=torch.float64)
