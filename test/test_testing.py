@@ -17,7 +17,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
      get_device_type_test_bases, instantiate_device_type_tests, onlyCUDA, onlyOnCPUAndCUDA,
-     deviceCountAtLeast, ops)
+     deviceCountAtLeast, ops, skipXLA)
 from torch.testing._internal.common_methods_invocations import op_db
 import torch.testing._internal.opinfo_helper as opinfo_helper
 from torch.testing._internal.common_dtype import get_all_dtypes
@@ -602,6 +602,13 @@ if __name__ == '__main__':
 
             self.assertTrue(set(dtypes) == set(dynamic_dtypes))
             self.assertTrue(set(dtypes) == set(dynamic_dispatch.dispatch_fn()))
+
+    @skipXLA
+    def test_skip_xla(self, device):
+        if self.device_type == 'xla':
+            # Should not reach here!
+            self.assertTrue(False)
+
 
 instantiate_device_type_tests(TestTesting, globals())
 

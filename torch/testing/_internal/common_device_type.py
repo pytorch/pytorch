@@ -792,6 +792,13 @@ class skipMetaIf(skipIf):
     def __init__(self, dep, reason):
         super().__init__(dep, reason, device_type='meta')
 
+# Skips a test on XLA (unconditionally).
+class skipXLA(skipIf):
+
+    def __init__(self):
+        super().__init__(True, "Marked for skipping on XLA", device_type='xla')
+
+
 def _has_sufficient_memory(device, size):
     if torch.device(device).type == 'cuda':
         if not torch.cuda.is_available():
