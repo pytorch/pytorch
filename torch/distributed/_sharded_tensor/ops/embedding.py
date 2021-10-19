@@ -173,8 +173,8 @@ def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard, pg):
         end_row_idx = start_row_idx + sharded_dim_size
         start_idx = torch.searchsorted(input_sorted, start_row_idx).item()
         end_idx = torch.searchsorted(input_sorted, end_row_idx).item()
-        input_split_sizes[placement.rank()] = end_idx - start_idx
-        input_split_start_indices[placement.rank()] = start_idx
+        input_split_sizes[placement.rank()] = int(end_idx - start_idx)
+        input_split_start_indices[placement.rank()] = int(start_idx)
         if placement.rank() != idx:
             rearrange_rows = True
 
