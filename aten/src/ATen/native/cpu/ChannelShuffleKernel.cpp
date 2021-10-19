@@ -25,7 +25,7 @@ void cpu_channel_shuffle(
   // treat input tensor as shape of [n, g, oc, ...]
   // output tensor as shape of [n, oc, g, ...]
   //
-  // parallel on dimension of n, oc, g
+  // 3d, 4d, 5d: parallel on dimension of n, c
   using Vec = vec::Vectorized<scalar_t>;
   int64_t inner_size = image_size - (image_size % Vec::size());
   at::parallel_for (0, nbatch * /* oc*g */channels, 0, [&](int64_t begin, int64_t end) {
@@ -67,7 +67,8 @@ void cpu_channel_shuffle_cl(
   int64_t channels_per_group = channels / groups;
   int64_t image_size = input.numel() / nbatch / channels;
 
-  // parallel on dimension of n, h, w
+  // 4d: parallel on dimension of n, h, w
+  // 5d: parallel on dimension of n, d, h, w
   at::parallel_for(0, nbatch * image_size, 0, [&](int64_t begin, int64_t end) {
     for (int64_t i = begin; i < end; i++) {
       scalar_t* output_ptr = output_data + i * channels;
@@ -91,7 +92,8 @@ void channel_shuffle_kernel_impl(
       });
       break;
     }
-    case at::MemoryFormat::ChannelsLast: {
+    case at::MemoryFormat::ChannelsLast:
+    case at::MemoryFormat::ChannelsLast3d: {
       AT_DISPATCH_ALL_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "channel_shuffle_cl", [&] {
         cpu_channel_shuffle_cl<scalar_t>(output, input, groups);
       });
