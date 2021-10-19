@@ -674,10 +674,12 @@ def acc_ops_layer_norm(network, target, args, kwargs, name):
         network, scale_layer, beta_tensor.get_output(0), trt.ElementWiseOperation.SUM, name
     )
 
+
 @tensorrt_converter(acc_ops.softmax)
 def acc_ops_softmax(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     dim = kwargs["dim"]
+    input_ranks = len(input_val.shape) + (1 if network.has_implicit_batch_dimension else 0)
 
     if not isinstance(input_val, trt.tensorrt.ITensor):
         raise RuntimeError(
@@ -700,14 +702,16 @@ def acc_ops_softmax(network, target, args, kwargs, name):
             else len(input_val.shape) + 1
         )
 
+    dim = dim % input_ranks
     if network.has_implicit_batch_dimension:
         assert dim != 0, "Can't apply softmax on batch dimension when it's implicit."
-        dim = (dim % (len(input_val.shape) + 1)) - 1
+        dim -= 1
 
     layer = network.add_softmax(input_val)
     layer.axes = 1 << dim
     layer.name = name
     return layer.get_output(0)
+
 
 @tensorrt_converter(acc_ops.tile)
 def acc_ops_tile(network, target, args, kwargs, name):
