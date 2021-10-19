@@ -16,8 +16,6 @@ const std::unordered_map<Symbol, bool> activation_type_promotion_mapping = {
     {aten::tanh, true},
     {aten::celu, false},
     {aten::elu, false},
-    {aten::gelu, false},
-    {aten::glu, false},
     {aten::hardshrink, false},
     {aten::hardsigmoid, false},
     {aten::hardswish, false},
