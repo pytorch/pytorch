@@ -38,6 +38,10 @@ install_ubuntu() {
       # gpg-agent is not available by default on 18.04
       apt-get install -y --no-install-recommends gpg-agent
     fi
+    if [[ $UBUNTU_VERSION == 20.04 ]]; then
+      # gpg-agent is not available by default on 20.04
+      apt-get install -y --no-install-recommends gpg-agent
+    fi
     apt-get install -y kmod
     apt-get install -y wget
 
