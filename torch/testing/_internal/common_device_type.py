@@ -792,7 +792,7 @@ class skipMetaIf(skipIf):
     def __init__(self, dep, reason):
         super().__init__(dep, reason, device_type='meta')
 
-# Skips a test on XLA (unconditionally).
+# Skips a test on XLA if the condition is true.
 class skipXLAIf(skipIf):
 
     def __init__(self, dep, reason):
