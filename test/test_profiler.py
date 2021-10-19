@@ -620,7 +620,10 @@ class TestProfiler(TestCase):
             def wrapper(*args, **kwargs):
                 time.sleep(time_to_sleep)
                 func(*args, **kwargs)
-            return wrapper
+            if IS_WINDOWS:
+                return wrapper
+            else:
+                return func
 
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
         with _profile(use_cuda=use_cuda, use_kineto=True):
