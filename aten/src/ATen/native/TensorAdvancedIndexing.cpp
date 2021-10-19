@@ -193,7 +193,7 @@ TORCH_PRECOMPUTE_META_FUNC(index_add)
               source.size(dim), ")");
   // All other dimensions other than indexing dim for `source` tensor should match `self`
   for (int dim_index = 0; dim_index < source.ndimension(); dim_index++) {
-    if (dim_index == dim) continue;
+    if (dim_index == dim || source.size(dim_index) == 1) continue;
     TORCH_CHECK(source.size(dim_index) == self.size(dim_index),
                 "index_add_(): At dimension index ", dim_index, ", the size of source tensor (",
                 source.size(dim_index), ") does not match the size of self tensor (", self.size(dim_index),
