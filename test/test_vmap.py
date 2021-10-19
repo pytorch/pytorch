@@ -1640,7 +1640,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
 
         vmap(bar)(torch.randn(B0, 0, 3))
         vmap(bar, in_dims=1)(torch.randn(0, B0, 3))
-        vmap(bar)(torch.randn(B0, 0, 3).transpose(-1, -2))
+        vmap(bar)(torch.randn(B0, 0, 3).mT)
 
         # is_contiguous with other memory formats
         def baz(x, memory_format):

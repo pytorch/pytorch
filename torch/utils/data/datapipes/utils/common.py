@@ -52,7 +52,7 @@ def get_file_binaries_from_pathnames(pathnames: Iterable, mode: str):
         if not isinstance(pathname, str):
             raise TypeError("Expected string type for pathname, but got {}"
                             .format(type(pathname)))
-        yield (pathname, open(pathname, mode))
+        yield pathname, StreamWrapper(open(pathname, mode))
 
 def validate_pathname_binary_tuple(data: Tuple[str, IOBase]):
     if not isinstance(data, tuple):
@@ -61,7 +61,7 @@ def validate_pathname_binary_tuple(data: Tuple[str, IOBase]):
         raise TypeError(f"pathname binary stream tuple length should be 2, but got {len(data)}")
     if not isinstance(data[0], str):
         raise TypeError(f"pathname within the tuple should have string type pathname, but it is type {type(data[0])}")
-    if not isinstance(data[1], IOBase):
+    if not isinstance(data[1], IOBase) and not isinstance(data[1], StreamWrapper):
         raise TypeError(
             f"binary stream within the tuple should have IOBase or"
             f"its subclasses as type, but it is type {type(data[1])}"
@@ -72,3 +72,28 @@ def deprecation_warning_torchdata(name):
     warnings.warn(f"{name} and its functional API are deprecated and will be removed from the package `torch`. "
                   f"Please import those features from the new package TorchData: https://github.com/pytorch/data",
                   DeprecationWarning)
+
+class StreamWrapper:
+    def __init__(self, file_obj):
+        self.file_obj = file_obj
+
+    def __getattr__(self, name):
+        return getattr(self.file_obj, name)
+
+    def __del__(self):
+        self.file_obj.close()
+
+    def __getstate__(self):
+        return self.file_obj.__getstate__()
+
+    def __iter__(self):
+        return self.file_obj.__iter__()
+
+    def __next__(self):
+        return self.file_obj.__next__()
+
+    def __setstate__(self, state):
+        self.file_obj.__setstate__(state)
+
+    def __sizeof__(self, *args, **kwargs):
+        return self.file_obj.__sizeof__(*args, **kwargs)
