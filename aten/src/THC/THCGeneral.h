@@ -21,8 +21,8 @@
   } while(0)
 #endif
 
-typedef struct THCState THCState;
-struct THCState;
+/* Global state of THC. */
+struct THCState {};
 
 typedef struct _THCCudaResourcesPerDevice {
   /* Size of scratch space per each stream on this device available */
