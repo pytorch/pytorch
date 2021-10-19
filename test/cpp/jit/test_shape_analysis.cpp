@@ -13,7 +13,7 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/cuda.h>
 #include <unordered_map>
-#include "torch/csrc/jit/testing/file_check.h"
+#include <torch/csrc/jit/testing/file_check.h>
 
 namespace torch {
 namespace jit {
