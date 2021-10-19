@@ -3099,6 +3099,42 @@ class TestQuantizeFx(QuantizationTestCase):
                               'output_activation_post_process_6']
         assert name_list == expected_name_list
 
+    def test_convert_qconfig_dict(self):
+        class Linear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.ones(5, 5)
+                self.b = torch.zeros(5)
+
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.w, self.b)
+
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mods1 = torch.nn.Sequential(
+                    Linear()
+                )
+                #self.mods2 = Linear()
+                self.mods3 = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                x = self.mods1(x)
+                x = torch.add(x, 4)
+                #x = self.mods2(x)
+                #y = torch.add(x, 2)
+                #z = torch.mul(x, 5)
+                x = self.mods3(x)
+                return x
+
+        model = M().eval()
+
+        prepared = prepare_fx(model, {"": default_qconfig})
+        convert_qconfig_dict = {"module_name": [("mods3", None)]}
+
+        converted = convert_fx(prepared, qconfig_dict=convert_qconfig_dict)
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):

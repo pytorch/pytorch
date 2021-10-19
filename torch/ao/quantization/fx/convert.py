@@ -1,5 +1,6 @@
 from typing import Any, Dict, Tuple, List, Callable, Optional, Union
 from collections import defaultdict
+import copy
 import torch
 from torch.fx import (
     GraphModule,
@@ -23,6 +24,11 @@ from .graph_module import (
 )
 from .quantization_patterns import (
     QuantizeHandler,
+)
+from .qconfig_utils import (
+    convert_dict_to_ordered_dict,
+    generate_qconfig_map,
+    get_flattened_qconfig_dict,
 )
 from ._equalize import update_obs_for_equalization, convert_eq_obs
 from .utils import (
@@ -131,6 +137,24 @@ def fold_weight(
     quantized = QuantizedGraphModule(quantized_root, folded_graph, quantized_root.preserved_attr_names)
     return quantized
 
+def remove_quant_dequant_pairs(quantized: QuantizedGraphModule) -> QuantizedGraphModule:
+    quantized_root = quantized
+    for node in quantized.graph.nodes:
+        if node.op == "call_function" and node.target == torch.quantize_per_tensor:
+            users = list(node.users)
+            user = users[0] if users else None
+            if len(users) == 1 and user.op == "call_method" and user.target == "dequantize":
+                user.replace_all_uses_with(node.args[0])
+                quantized.graph.erase_node(user)
+                orig_args = list(node.args)
+                quantized.graph.erase_node(node)
+                for arg in orig_args:
+                    if isinstance(arg, Node) and len(list(arg.users)) == 0:
+                        quantized.graph.erase_node(arg)
+
+    quantized = QuantizedGraphModule(quantized_root, quantized.graph, quantized_root.preserved_attr_names)
+    return quantized
+
 def restore_state(
         observed: GraphModule
 ) -> Tuple[Dict[Pattern, QuantizeHandler], Dict[str, Tuple[str, type]], Dict[str, Any]]:
@@ -145,7 +169,8 @@ def restore_state(
 def convert(model: GraphModule, is_reference: bool = False,
             convert_custom_config_dict: Dict[str, Any] = None,
             is_standalone_module: bool = False,
-            _remove_qconfig_flag: bool = True) -> QuantizedGraphModule:
+            _remove_qconfig_flag: bool = True,
+            qconfig_dict: Dict[str, Any] = None) -> QuantizedGraphModule:
     """ standalone_module means it a submodule that is not inlined in
     parent module, and will be quantized separately as one unit.
 
@@ -178,12 +203,19 @@ def convert(model: GraphModule, is_reference: bool = False,
     # the same activation_post_process module instance but different names
     modules = dict(model.named_modules(remove_duplicate=False))
 
+    modules_copy = copy.deepcopy(modules)
+    convert_qconfig_map = qconfig_map
+    if qconfig_dict:
+        # TODO: check to make sure the qconfig_dict only has None values specified.
+        convert_dict_to_ordered_dict(qconfig_dict)
+        convert_qconfig_map = generate_qconfig_map(model, modules_copy, model.graph, qconfig_dict, node_name_to_scope, qconfig_map)
+
     custom_module_classes = get_custom_module_class_keys(
         convert_custom_config_dict,
         "observed_to_quantized_custom_module_class")
     matches = find_matches(
         model.graph, modules, patterns,
-        qconfig_map,
+        convert_qconfig_map,
         custom_module_classes=custom_module_classes)
 
     if model._equalization_qconfig_map is not None:
@@ -456,7 +488,7 @@ def convert(model: GraphModule, is_reference: bool = False,
                     assert len(out_quant_idxs) <= 1, "Currently standalone only support one output"
                     quantized = 0 in out_quant_idxs
 
-                qconfig = qconfig_map[node.name]
+                qconfig = convert_qconfig_map[node.name]
                 # Note: load_arg can be overwritten in the convert method when used to
                 # create Node in graph
                 result = obj.convert(
@@ -538,4 +570,5 @@ def convert(model: GraphModule, is_reference: bool = False,
     if not is_reference:
         model = fold_weight(model, node_name_to_scope)
         model = lower_to_fbgemm(model)
+        model = remove_quant_dequant_pairs(model)
     return model
