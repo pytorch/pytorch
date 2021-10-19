@@ -1264,7 +1264,7 @@ static void addbmm_impl_(
   }
 
   auto adjusted_beta(beta);
-  for (int64_t batch = 0; batch < num_batches; ++batch) {
+  for (const auto batch : c10::irange(num_batches)) {
     result.addmm_(batch1[batch], batch2[batch], adjusted_beta, alpha);
     adjusted_beta = 1; // accumulate output once
   }
@@ -1321,23 +1321,23 @@ inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const T
 
   int64_t grain_size = std::min(internal::GRAIN_SIZE / (is * js * ks), (int64_t)1);
   parallel_for(0, bs, grain_size, [&](int64_t b_begin, int64_t b_end) {
-      for (int64_t b = b_begin; b < b_end; b++) {
+      for (const auto b : c10::irange(b_begin, b_end)) {
         auto r1 = r0[b];
         auto s1 = s0[b];
         auto m1 = m0[b];
-        for (int64_t i = 0; i < is; i++) {
+        for (const auto i : c10::irange(is)) {
           auto r2 = r1[i];
           auto s2 = s1[i];
-          for (int64_t j = 0; j < js; j++) {
+          for (const auto j : c10::irange(js)) {
             scalar_t &r = r2[j];
             if (is_bmm) {
               r = 0;
-              for (int64_t k = 0; k < ks; k++) {
+              for (const auto k : c10::irange(ks)) {
                 r += s2[k] * m1[k][j];
               }
             } else {
               r *= beta;
-              for (int64_t k = 0; k < ks; k++) {
+              for (const auto k : c10::irange(ks)) {
                 r += alpha * s2[k] * m1[k][j];
               }
             }
@@ -2100,10 +2100,11 @@ void compute_T18_scale_square(
   auto mexp_scaled = at::native::compute_T18<scalar_t>(a_scaled);
   auto s_cpu = (s.device().type() == at::kCPU)
     ? s : s.to(at::kCPU);
-  for (int64_t i = 0; i < mexp_scaled.size(0); ++i) {
+  for (const auto i : c10::irange(mexp_scaled.size(0))) {
     auto s_val = s_cpu.select(0, i).template item<int64_t>();
     auto mexp = mexp_scaled.select(0, i);
-    for (int64_t p = 0; p < s_val; ++p) {
+    for (const auto p : c10::irange(s_val)) {
+      (void)p; //Suppress unused variable warning
       mexp = at::matmul(mexp, mexp);
     }
     mexp_out.select(0, i).copy_(mexp);
@@ -2371,7 +2372,7 @@ Tensor& nuclear_norm_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tens
 // (e.g. [0, 1, 2, ..., ndim-1])
 static std::vector<int64_t> make_dim_list(int64_t ndim) {
   std::vector<int64_t> dim_list(ndim);
-  for (int64_t ind = 0; ind < ndim; ind++) {
+  for (const auto ind : c10::irange(ndim)) {
     dim_list[ind] = ind;
   }
   return dim_list;
@@ -2924,7 +2925,7 @@ struct KronImpl final {
       a_reshape = c10::SmallVector<int64_t, 10>(2 * maxdim);
       b_reshape = c10::SmallVector<int64_t, 10>(2 * maxdim);
       result_reshape = c10::SmallVector<int64_t, 10>(maxdim);
-      for (int64_t i = 0; i < maxdim; i++) {
+      for (const auto i : c10::irange(maxdim)) {
         a_reshape[2 * i] = (i >= pad_self ? self.sizes()[i - pad_self] : 1);
         a_reshape[2 * i + 1] = 1;
         b_reshape[2 * i] = 1;
@@ -2939,7 +2940,7 @@ struct KronImpl final {
       TORCH_INTERNAL_ASSERT(result.defined(), "Cannot call kron_out with an undefined result tensor as the out argument. Please allocate a Tensor before calling kron_out with it.");
 
       c10::SmallVector<int64_t, 10> mul_shape(2 * maxdim);
-      for (int64_t i = 0; i < maxdim; i++) {
+      for (const auto i : c10::irange(maxdim)) {
         mul_shape[2 * i] = a_reshape[2 * i];
         mul_shape[2 * i + 1] = b_reshape[2 * i + 1];
       }
