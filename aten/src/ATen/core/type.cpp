@@ -299,7 +299,7 @@ c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2, bool
 
   // Handle non-container types which do not subtype each other and unify
   if (t1->kind() == TensorType::Kind && t2->kind() == TensorType::Kind) {
-    return t1->expectRef<TensorType>().merge(*t2->expect<TensorType>());
+    return t1->expectRef<TensorType>().merge(t2->expectRef<TensorType>());
   }
 
   if (t1->isSubtypeOf(*NoneType::get()) && !t2->isSubtypeOf(*NoneType::get())) {
@@ -316,32 +316,32 @@ c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2, bool
   // unify(Optional[t1], t2) => Optional[unify(t1, t2)]
   if (auto opt_t1 = t1->cast<OptionalType>()) {
     if (auto elem = unifyTypes(opt_t1->getElementType(), t2)) {
-      return OptionalType::create(*elem);
+      return OptionalType::create(*std::move(elem));
     }
   } else if (auto opt_t2 = t2->cast<OptionalType>()) {
     if (auto elem = unifyTypes(opt_t2->getElementType(), t1)) {
-      return OptionalType::create(*elem);
+      return OptionalType::create(*std::move(elem));
     }
   }
 
-  if (t1->cast<TupleType>() && t2->cast<TupleType>()) {
-    auto tuple1 = t1->cast<TupleType>();
-    auto tuple2 = t2->cast<TupleType>();
+  if (t1->castRaw<TupleType>() && t2->castRaw<TupleType>()) {
+    auto tuple1 = t1->castRaw<TupleType>();
+    auto tuple2 = t2->castRaw<TupleType>();
     if (tuple1->elements().size() != tuple2->elements().size()) {
       return c10::nullopt;
     }
     std::vector<TypePtr> elements;
     for (size_t i = 0; i < tuple1->elements().size(); i++) {
       if (auto elem = unifyTypes(tuple1->elements().at(i), tuple2->elements().at(i), default_to_union)) {
-        elements.push_back(*elem);
+        elements.push_back(*std::move(elem));
       } else {
         return c10::nullopt;
       }
     }
-    return static_cast<TypePtr>(TupleType::create(elements));
+    return static_cast<TypePtr>(TupleType::create(std::move(elements)));
   }
 
-  if (t1->cast<FutureType>() && t2->cast<FutureType>()) {
+  if (t1->castRaw<FutureType>() && t2->castRaw<FutureType>()) {
     if (auto elem = unifyTypes(
             t1->castRaw<FutureType>()->getElementType(),
             t2->castRaw<FutureType>()->getElementType())) {
@@ -372,7 +372,7 @@ c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2, bool
 }
 
 c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2, bool default_to_union, TypePtr type_hint) {
-  auto unified = unifyTypesImpl(t1, t2, default_to_union, type_hint);
+  auto unified = unifyTypesImpl(t1, t2, default_to_union, std::move(type_hint));
 
   if (default_to_union && !unified) {
     return UnionType::create({t1, t2});
@@ -407,15 +407,17 @@ c10::optional<TypePtr> unifyTypeList(
   return ret_type;
 }
 
+// NOTE: This function actually does need to take const TypePtr&
+// because it sometimes calls unifyTypes, which needs const TypePtr&.
 MatchTypeReturn matchTypeVariables(
-    TypePtr formal,
-    TypePtr actual,
+    const TypePtr& formal,
+    const TypePtr& actual,
     TypeEnv& type_env) {
   if (!formal->hasFreeVariables()) {
     return MatchTypeReturn::Success();
   }
 
-  if (auto vt = formal->cast<VarType>()) {
+  if (auto vt = formal->castRaw<VarType>()) {
     auto it = type_env.find(vt->name());
     if (it == type_env.end()) {
       type_env[vt->name()] = actual;
@@ -431,8 +433,8 @@ MatchTypeReturn matchTypeVariables(
        << it->second->repr_str() << " is matched to type "
        << actual->repr_str();
     return ss.str();
-  } else if (auto lt_formal = formal->cast<ListType>()) {
-    if (auto lt_actual = actual->cast<ListType>()) {
+  } else if (auto lt_formal = formal->castRaw<ListType>()) {
+    if (auto lt_actual = actual->castRaw<ListType>()) {
       const auto innerMatch = matchTypeVariables(
           lt_formal->getElementType(), lt_actual->getElementType(), type_env);
       if (!innerMatch.success()) {
@@ -441,7 +443,7 @@ MatchTypeReturn matchTypeVariables(
         return innerMatch;
       }
       return MatchTypeReturn::Success();
-    } else if (auto tup_type = actual->cast<TupleType>()) {
+    } else if (auto tup_type = actual->castRaw<TupleType>()) {
       std::stringstream ss;
       auto maybe_tuple_unified = unifyTypeList(tup_type->elements(), ss);
       if (maybe_tuple_unified) {
@@ -454,8 +456,8 @@ MatchTypeReturn matchTypeVariables(
     ss << "Cannot match " << lt_formal->repr_str() << " to "
        << actual->repr_str();
     return ss.str();
-  } else if (auto tp_formal = formal->cast<TupleType>()) {
-    if (auto tp_actual = actual->cast<TupleType>()) {
+  } else if (auto tp_formal = formal->castRaw<TupleType>()) {
+    if (auto tp_actual = actual->castRaw<TupleType>()) {
       if (tp_formal->elements().size() != tp_actual->elements().size()) {
         return MatchTypeReturn("Cannot match tuples of mismatched size");
       }
@@ -473,8 +475,8 @@ MatchTypeReturn matchTypeVariables(
       ss << "Cannot match a tuple to " << actual->repr_str();
       return MatchTypeReturn(ss.str());
     }
-  } else if (auto lt_formal = formal->cast<FutureType>()) {
-    if (auto lt_actual = actual->cast<FutureType>()) {
+  } else if (auto lt_formal = formal->castRaw<FutureType>()) {
+    if (auto lt_actual = actual->castRaw<FutureType>()) {
       const auto innerMatch = matchTypeVariables(
           lt_formal->getElementType(), lt_actual->getElementType(), type_env);
       if (!innerMatch.success()) {
@@ -487,8 +489,8 @@ MatchTypeReturn matchTypeVariables(
       ss << "Cannot match a future to " << actual->repr_str();
       return ss.str();
     }
-  } else if (auto lt_formal = formal->cast<RRefType>()) {
-    if (auto lt_actual = actual->cast<RRefType>()) {
+  } else if (auto lt_formal = formal->castRaw<RRefType>()) {
+    if (auto lt_actual = actual->castRaw<RRefType>()) {
       const auto innerMatch = matchTypeVariables(
           lt_formal->getElementType(), lt_actual->getElementType(), type_env);
       if (!innerMatch.success()) {
@@ -501,8 +503,8 @@ MatchTypeReturn matchTypeVariables(
       ss << "Cannot match a rref to " << actual->repr_str();
       return ss.str();
     }
-  } else if (auto opt_formal = formal->cast<OptionalType>()) {
-    if (auto opt_actual = actual->cast<OptionalType>()) {
+  } else if (auto opt_formal = formal->castRaw<OptionalType>()) {
+    if (auto opt_actual = actual->castRaw<OptionalType>()) {
       const auto optionedMatch = matchTypeVariables(
           opt_formal->getElementType(), opt_actual->getElementType(), type_env);
       if (!optionedMatch.success()) {
@@ -521,8 +523,8 @@ MatchTypeReturn matchTypeVariables(
     // matches Optional[T] later error checking on tryEvalTypeVariables will
     // report the problem if we never match variables in type T
     return MatchTypeReturn::Success();
-  } else if (auto dict_formal = formal->cast<DictType>()) {
-    if (auto dict_actual = actual->cast<DictType>()) {
+  } else if (auto dict_formal = formal->castRaw<DictType>()) {
+    if (auto dict_actual = actual->castRaw<DictType>()) {
       auto key_match = matchTypeVariables(
           dict_formal->getKeyType(), dict_actual->getKeyType(), type_env);
       if (!key_match.success()) {
@@ -545,12 +547,12 @@ MatchTypeReturn matchTypeVariables(
 }
 
 // change return types like List[List[t]] into List[List[int]]
-TORCH_API TypePtr tryEvalTypeVariables(TypePtr type, std::unordered_map<std::string, TypePtr>& type_env) {
+TORCH_API TypePtr tryEvalTypeVariables(const TypePtr& type, std::unordered_map<std::string, TypePtr>& type_env) {
   if (!type->hasFreeVariables()) {
     return type;
   }
 
-  if (auto vt = type->cast<VarType>()) {
+  if (auto vt = type->castRaw<VarType>()) {
     auto it = type_env.find(vt->name());
     if (it == type_env.end()) {
       return nullptr;
@@ -564,7 +566,7 @@ TORCH_API TypePtr tryEvalTypeVariables(TypePtr type, std::unordered_map<std::str
       if (!r) {
         return nullptr;
       }
-      new_contained.push_back(r);
+      new_contained.push_back(std::move(r));
     }
     return type->withContained(std::move(new_contained));
   }
@@ -1057,12 +1059,12 @@ bool UnionType::operator==(const Type& rhs) const {
     if (optional_rhs->getElementType() == NumberType::get()) {
       return this->containedTypes().size() == 4
              && this->can_hold_none_
-             && this->canHoldType(NumberType::get());
+             && this->canHoldType(*NumberType::get());
     }
     auto optional_lhs = this->toOptional();
     return optional_lhs && *optional_rhs == *((optional_lhs.value())->expect<OptionalType>());
   } else if (rhs.kind() == NumberType::Kind) {
-    return this->containedTypes().size() == 3 && canHoldType(NumberType::get());
+    return this->containedTypes().size() == 3 && canHoldType(*NumberType::get());
   } else {
     return false;
   }
@@ -1106,7 +1108,7 @@ bool UnionType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
 std::string UnionType::unionStr(TypePrinter printer, bool is_annotation_str) const {
   std::stringstream ss;
 
-  bool can_hold_numbertype = this->canHoldType(NumberType::get());
+  bool can_hold_numbertype = this->canHoldType(*NumberType::get());
 
   std::vector<TypePtr> number_types{IntType::get(), FloatType::get(), ComplexType::get()};
 
@@ -1156,21 +1158,21 @@ std::string UnionType::annotation_str_impl(TypePrinter printer) const {
   return this->unionStr(printer, /*is_annotation_str=*/true);
 }
 
-bool UnionType::canHoldType(TypePtr type) const {
-  if (type == NumberType::get()) {
-    return canHoldType(IntType::get())
-           && canHoldType(FloatType::get())
-           && canHoldType(ComplexType::get());
+bool UnionType::canHoldType(const Type& type) const {
+  if (&type == NumberType::get().get()) {
+    return canHoldType(*IntType::get())
+           && canHoldType(*FloatType::get())
+           && canHoldType(*ComplexType::get());
   } else {
     return std::any_of(this->containedTypes().begin(), this->containedTypes().end(),
                     [&](const TypePtr& inner) {
-                      return type->isSubtypeOf(*inner);
+                      return type.isSubtypeOf(*inner);
                     });
   }
 }
 
 c10::optional<TypePtr> UnionType::toOptional() const {
-  if (!canHoldType(NoneType::get())) {
+  if (!canHoldType(*NoneType::get())) {
       return c10::nullopt;
   }
 
@@ -1219,7 +1221,7 @@ OptionalType::OptionalType(TypePtr contained)
   bool is_numbertype = false;
   if (auto as_union = contained->cast<UnionType>()) {
     is_numbertype = as_union->containedTypes().size() == 3 &&
-                    as_union->canHoldType(NumberType::get());
+                    as_union->canHoldType(*NumberType::get());
   }
   if (UnionType::containedTypes().size() == 2) {
     contained_ = UnionType::containedTypes()[0]->kind()!= NoneType::Kind
@@ -1255,12 +1257,12 @@ bool OptionalType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const 
   if (auto optional_rhs = rhs.castRaw<OptionalType>()) {
     return getElementType()->isSubtypeOfExt(*optional_rhs->getElementType(), why_not);
   } else if (auto union_rhs = rhs.castRaw<UnionType>()) {
-    if (!union_rhs->canHoldType(NoneType::get())) {
+    if (!union_rhs->canHoldType(*NoneType::get())) {
       if (why_not) {
         *why_not << rhs.repr_str() << " cannot hold None";
       }
       return false;
-    } else if (!union_rhs->canHoldType(this->getElementType())) {
+    } else if (!union_rhs->canHoldType(*this->getElementType())) {
       if (why_not) {
         *why_not << rhs.repr_str() << " cannot hold " << this->getElementType();
       }
@@ -1276,7 +1278,7 @@ bool OptionalType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const 
 
 bool NumberType::operator==(const Type& rhs) const {
   if (auto union_type = rhs.cast<UnionType>()) {
-    return union_type->containedTypes().size() == 3 && union_type->canHoldType(NumberType::get());
+    return union_type->containedTypes().size() == 3 && union_type->canHoldType(*NumberType::get());
   } else {
     return rhs.kind() == this->kind();
   }
@@ -1284,7 +1286,7 @@ bool NumberType::operator==(const Type& rhs) const {
 
 bool NumberType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
   if (auto union_type = rhs.cast<UnionType>()) {
-    return union_type->canHoldType(NumberType::get());
+    return union_type->canHoldType(*NumberType::get());
   } else {
     return Type::isSubtypeOfExt(rhs, why_not);
   }
@@ -2139,7 +2141,7 @@ bool InterfaceType::isSubTypeImpl(
 
 bool InterfaceType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
   // to improve performance this check can be cached
-  if (auto iface = rhs.cast<InterfaceType>()) {
+  if (auto iface = rhs.castRaw<InterfaceType>()) {
     return isSubTypeImpl(*this, *iface, why_not);
   }
   return Type::isSubtypeOfExt(rhs, why_not);
