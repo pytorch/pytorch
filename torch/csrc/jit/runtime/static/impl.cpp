@@ -1444,8 +1444,6 @@ std::vector<IValue> ProcessedNode::clone_inputs() const {
 }
 
 void ProcessedNode::run() {
-  DCHECK(verify_outputs_dont_overlap_each_other());
-  DCHECK(verify_inputs_dont_overlap_outputs());
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   bool pre_sampled = false;
   if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
