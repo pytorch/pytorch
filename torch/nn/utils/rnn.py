@@ -412,7 +412,7 @@ def unpack_sequence(packed_sequences):
         >>> c = torch.tensor([6])
         >>> sequences = [a, b, c]
         [tensor([ 1,  2,  3]), tensor([ 4,  5]), tensor([ 6])]
-        >>> packed_sequences = pack_sequence([a, b, c])
+        >>> packed_sequences = pack_sequence(sequences)
         PackedSequence(data=tensor([ 1,  4,  6,  2,  5,  3]), batch_sizes=tensor([ 3,  2,  1]))
         >>> unpacked_sequences = unpack_sequence(packed_sequences)
         [tensor([ 1,  2,  3]), tensor([ 4,  5]), tensor([ 6])]
