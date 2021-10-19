@@ -10,6 +10,7 @@
 #include <ATen/native/cpu/AtomicAddFloat.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/cpu/vec/vec.h>
+#include <c10/util/irange.h>
 
 namespace at { namespace native {
 namespace {
@@ -36,7 +37,7 @@ struct Indexer {
 
   int64_t get(int64_t idx) {
     int64_t offset = 0;
-    for (int j = 0; j < num_indexers; j++) {
+    for (const auto j : c10::irange(num_indexers)) {
       int64_t value = *(int64_t*)&indexers[j][idx * indexer_strides[j]];
       int64_t size = original_sizes[j];
       TORCH_CHECK_INDEX(value >= -size && value < size,
@@ -52,7 +53,7 @@ struct Indexer {
 
 static bool is_constant_index(int ntensor, const int64_t* strides) {
   AT_ASSERT(ntensor >= 3);
-  for (int arg = 2; arg < ntensor; arg++) {
+  for (const auto arg : c10::irange(2, ntensor)) {
     if (strides[arg] != 0) {
       return false;
     }
@@ -77,16 +78,16 @@ void cpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
       // specialization for when every element uses the same index
       int64_t offset = indexer.get(0);
       if (strides[0] == sizeof(scalar_t) && strides[1] == sizeof(scalar_t)) {
-        for (int64_t i = 0; i < n; i++) {
+        for (const auto i : c10::irange(n)) {
           f(dst + strides[0] * i, src + strides[1] * i, offset);
         }
       } else {
-        for (int64_t i = 0; i < n; i++) {
+        for (const auto i : c10::irange(n)) {
           f(dst + strides[0] * i, src + strides[1] * i, offset);
         }
       }
     } else {
-      for (int64_t i = 0; i < n; i++) {
+      for (const auto i : c10::irange(n)) {
         int64_t offset = indexer.get(i);
         f(dst + strides[0] * i, src + strides[1] * i, offset);
       }
@@ -153,7 +154,8 @@ void cpu_take_put_kernel(
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {
     auto* iterated_data_bytes = data[0];
     auto* index_data_bytes = data[1];
-    for (int64_t elem = 0; elem < n; ++elem) {
+    for (const auto elem : c10::irange(n)) {
+      (void)elem; //Suppress unused variable warning
       auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
       auto& iterated = *reinterpret_cast<scalar_t*>(iterated_data_bytes);
 
@@ -270,7 +272,8 @@ void index_fill_kernel(
     auto handle_nonzero_idx_stride = [&](char** data, const int64_t* strides, int64_t n) {
       auto* self_data_bytes = data[0];
       auto* index_data_bytes = data[1];
-      for (int64_t elem = 0; elem < n; ++elem) {
+      for (const auto elem : c10::irange(n)) {
+        (void)elem; //Suppress unused variable warning
         auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
         auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
         TORCH_CHECK_INDEX(idx >= -self_dim_size && idx < self_dim_size,
@@ -296,7 +299,8 @@ void index_fill_kernel(
       if (idx < 0) {
         idx += self_dim_size;
       }
-      for (int64_t elem = 0; elem < n; ++elem) {
+      for (const auto elem : c10::irange(n)) {
+        (void)elem; //Suppress unused variable warning
         auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
 
         self_data[idx * self_dim_stride] = fill_val;
@@ -329,7 +333,8 @@ void index_copy_kernel(
       auto* self_data_bytes = data[0];
       auto* index_data_bytes = data[1];
       auto* source_data_bytes = data[2];
-      for (int64_t elem = 0; elem < n; ++elem) {
+      for (const auto elem : c10::irange(n)) {
+        (void)elem; //Suppress unused variable warning
         auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
         auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
         auto* source_data = reinterpret_cast<scalar_t*>(source_data_bytes);
@@ -352,7 +357,8 @@ void index_copy_kernel(
       TORCH_CHECK_INDEX(idx >= 0 && idx < self_dim_size,
             "index_copy_(): index ", idx, " is out of bounds for dimension ",
             dim, " with size ", self_dim_size);
-      for (int64_t elem = 0; elem < n; ++elem) {
+      for (const auto elem : c10::irange(n)) {
+        (void)elem; //Suppress unused variable warning
         auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
         auto* source_data = reinterpret_cast<scalar_t*>(source_data_bytes);
 
@@ -387,7 +393,7 @@ void cpu_masked_fill_kernel(TensorIterator& iter, scalar_t value) {
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {
     char* dst = data[0];
     char* mask = data[1];
-    for (int64_t i = 0; i < n; i++) {
+    for (const auto i : c10::irange(n)) {
       mask_t mask_value = *(mask_t*)(mask + strides[1] * i);
       if (!is_mask_bool) {
         TORCH_CHECK(mask_value == 0 || mask_value == 1, "Mask tensor can take 0 and 1 values only");
@@ -425,7 +431,7 @@ void cpu_masked_scatter_kernel(TensorIterator& iter, const Tensor& source) {
     const int64_t dst_stride = strides[0];
     char* mask = data[1];
     const int64_t mask_stride = strides[1];
-    for (int64_t i = 0; i < n; i++) {
+    for (const auto i : c10::irange(n)) {
       mask_t mask_value = *(mask_t*)(mask + mask_stride * i);
       if (!is_mask_bool) {
         TORCH_CHECK(mask_value <= static_cast<mask_t>(1), "Mask tensor can take 0 and 1 values only");
@@ -466,7 +472,7 @@ void cpu_masked_select_serial_kernel(TensorIterator& iter, const func_t& f) {
     char* dst = data[0];
     char* src = data[1];
     char* mask = data[2];
-    for (int64_t i = 0; i < n; i++) {
+    for (const auto i : c10::irange(n)) {
       mask_t mask_value = *(mask_t*)(mask + strides[2] * i);
       if (!is_mask_bool) {
         TORCH_CHECK(mask_value == 0 || mask_value == 1, "Mask tensor can take 0 and 1 values only");
@@ -505,7 +511,7 @@ void cpu_masked_select_kernel(TensorIterator& iter, const func_t& f) {
     char* src = data[1];
     char* mask = data[2];
     char* mask_prefix_sum = data[3];
-    for (int64_t i = 0; i < n; i++) {
+    for (const auto i : c10::irange(n)) {
       mask_t mask_value = *(mask_t*)(mask + strides[2] * i);
       if (!is_mask_bool) {
         TORCH_CHECK(mask_value == 0 || mask_value == 1, "Mask tensor can take 0 and 1 values only");
