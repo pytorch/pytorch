@@ -170,7 +170,11 @@ public:
   [[noreturn]] void reportError(DispatchKey dispatchKey) const;
 
   const KernelFunction& lookup(DispatchKey k) const {
-    const auto& kernel = dispatchTable_[static_cast<uint8_t>(k)];
+    const auto idx = getDispatchTableIndexForDispatchKey(k);
+    if (C10_UNLIKELY(idx == -1)) {
+      reportError(k);
+    }
+    const auto& kernel = dispatchTable_[idx];
     // A valid kernel *always* has a boxed kernel and *may* have an
     // unboxed kernel. However, we typically do unboxed calls in at::
     // APIs, where the kernel 1) will very likely be valid and 2)
@@ -187,12 +191,23 @@ public:
 
   std::string listAllDispatchKeys() const;
 
+  // Returns true if kernel_ has entry for any key in ks.
+  //
+  // Invariant: There are no alias keys in the passed-in dispatch key set.
+  // Note [No Alias Keys in DispatchKeySet]
+  // Alias keys should be checked using `hasKernelForDispatchKey`
+  // Alias keys shouldn't go inside of a DispatchKeySet, since they can technically
+  // have a value > 63 (causing overflow).
+  bool hasKernelForAnyDispatchKey(DispatchKeySet ks) const;
+  // Returns true if kernel_ has entry for a particular key.
+  bool hasKernelForDispatchKey(DispatchKey k) const;
+
 private:
 
   OperatorName name_;
   c10::optional<AnnotatedSchema> schema_;
 
-  std::array<KernelFunction, static_cast<uint8_t>(DispatchKey::NumDispatchKeys)> dispatchTable_;
+  std::array<KernelFunction, c10::getDispatchTableIndexForDispatchKey(DispatchKey::NumDispatchKeys)> dispatchTable_;
   DispatchKeyExtractor dispatchKeyExtractor_;
 
   // kernels_ stores all registered kernels for the corresponding dispatch key
@@ -266,17 +281,6 @@ private:
   void updateDispatchTable_(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key);
   // Like above, but for ALL entries in the dispatch table.
   void updateDispatchTableFull_(const c10::Dispatcher& dispatcher);
-
-  // Returns true if kernel_ has entry for any key in ks.
-  //
-  // Invariant: There are no alias keys in the passed-in dispatch key set.
-  // Note [No Alias Keys in DispatchKeySet]
-  // Alias keys should be checked using `hasKernelForDispatchKey`
-  // Alias keys shouldn't go inside of a DispatchKeySet, since they can technically
-  // have a value > 63 (causing overflow).
-  bool hasKernelForAnyDispatchKey(DispatchKeySet ks) const;
-  // Returns true if kernel_ has entry for a particular key.
-  bool hasKernelForDispatchKey(DispatchKey k) const;
   // Retrieves a pointer to AnnotatedKernel at kernels_.at(dispatch_key).front().
   const AnnotatedKernel* getKernelForDispatchKey(DispatchKey dispatch_key) const;
 };

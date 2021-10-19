@@ -6,7 +6,8 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/core/Array.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/core/Tensor.h>
+#include <ATen/NamedTensorUtils.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>

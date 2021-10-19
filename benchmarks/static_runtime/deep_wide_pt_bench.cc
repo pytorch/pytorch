@@ -144,6 +144,22 @@ static void BM_leaky_relu(benchmark::State& state) {
 BENCHMARK(BM_leaky_relu)->RangeMultiplier(8)->Ranges({{1, 20}});
 BENCHMARK(BM_leaky_relu_const)->RangeMultiplier(8)->Ranges({{1, 20}});
 
+static void BM_signed_log1p(benchmark::State& state) {
+  auto mod = getSignedLog1pModel();
+  torch::jit::StaticModule smod(mod);
+
+  const int num_elements = state.range(0);
+  auto data = torch::randn({num_elements});
+  std::vector<at::Tensor> inputs({data});
+
+  smod(inputs);
+  for (auto _ : state) {
+    smod(inputs);
+  }
+}
+
+BENCHMARK(BM_signed_log1p)->RangeMultiplier(8)->Ranges({{16, 65536}});
+
 static void BM_long_static_memory_optimization(benchmark::State& state) {
   auto mod = getLongScriptModel();
   torch::jit::StaticModuleOptions opts;

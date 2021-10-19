@@ -772,6 +772,15 @@ class TestAssertClose(TestCase):
                 with self.assertRaisesRegex(AssertionError, "layout"):
                     fn()
 
+    def test_mismatching_layout_no_check(self):
+        strided = torch.randn((2, 2))
+        sparse_coo = strided.to_sparse()
+        sparse_csr = strided.to_sparse_csr()
+
+        for actual, expected in itertools.combinations((strided, sparse_coo, sparse_csr), 2):
+            for fn in assert_close_with_inputs(actual, expected):
+                fn(check_layout=False)
+
     def test_mismatching_dtype(self):
         actual = torch.empty((), dtype=torch.float)
         expected = actual.clone().to(torch.int)

@@ -313,14 +313,14 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
         }
 
         if tensor_meta.is_quantized:
-            node_rep["qscheme"] = str(tensor_meta.qscheme)
+            node_rep["qscheme"] = str(tensor_meta.qparams["qscheme"])
 
-            if tensor_meta.qscheme in {
+            if tensor_meta.qparams["qscheme"] in {
                 torch.per_tensor_affine,
                 torch.per_tensor_symmetric,
             }:
-                node_rep["q_scale"] = tensor_meta.q_scale
-                node_rep["q_zero_point"] = tensor_meta.q_zero_point
+                node_rep["q_scale"] = tensor_meta.qparams["scale"]
+                node_rep["q_zero_point"] = tensor_meta.qparams["zero_point"]
 
         # Add all extra lowering_info that was provided in node.meta.
         lowering_info = node.meta.get("lowering_info")

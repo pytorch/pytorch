@@ -49,6 +49,20 @@ DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
   }
 }
 
+bool runtimeDispatchKeySetHas(DispatchKey t, DispatchKey k) {
+  TORCH_INTERNAL_ASSERT(t != DispatchKey::Undefined);
+  switch (t) {
+    case DispatchKey::Autograd:
+      return autograd_dispatch_keyset.has(k);
+    case DispatchKey::CompositeImplicitAutograd:
+      return math_dispatch_keyset.has(k);
+    case DispatchKey::CompositeExplicitAutograd:
+      return backend_dispatch_keyset.has(k);
+    default:
+      return t == k;
+  }
+}
+
 // for a given autograd key, return the (guaranteed nonempty) set of associated
 // backend keys. for a non-autograd key, return the empty keyset.
 DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t) {
@@ -100,7 +114,7 @@ DispatchKeySet getAutogradRelatedKeySetFromBackend(DispatchKey t) {
 }
 
 bool isIncludedInAlias(DispatchKey k, DispatchKey alias) {
-  return k != DispatchKey::Undefined && getRuntimeDispatchKeySet(alias).has(k);
+  return k != DispatchKey::Undefined && runtimeDispatchKeySetHas(alias, k);
 }
 
 std::string toString(DispatchKeySet ts) {
