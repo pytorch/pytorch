@@ -39,7 +39,7 @@ class ProcessGroupNCCLJitTest(JitTestCase):
 
     def _create_nccl_pg(self, name_prefix):
         tcp_store = create_tcp_store(jit_class=True)
-        opts = torch.classes.dist_c10d.ProcessGroupNCCLOptions(0, True)
+        opts = torch.classes.dist_c10d.ProcessGroupNCCLOptions(10000, True)
 
         name = unique_process_group_name(name_prefix)
 
@@ -49,7 +49,7 @@ class ProcessGroupNCCLJitTest(JitTestCase):
         tcp_store = create_tcp_store(jit_class=True)
 
         return torch.classes.dist_c10d.frontend().new_process_group_helper(
-            self.world_size, self.rank, [], "nccl", tcp_store, name, 0)
+            self.world_size, self.rank, [], "nccl", tcp_store, name, 10000)
 
     @requires_nccl()
     @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
@@ -172,7 +172,7 @@ class C10dFrontendJitTest(JitTestCase):
         pg_name = unique_process_group_name("singleton_test_process_group")
 
         ProcessGroupNCCL1 = frontend1.new_process_group_helper(
-            self.world_size, self.rank, [], "nccl", tcp_store, pg_name, 0)
+            self.world_size, self.rank, [], "nccl", tcp_store, pg_name, 10000)
 
         ProcessGroupNCCL2 = frontend2.get_process_group_by_name(pg_name)
         self.assertEqual(frontend2.get_name_of_process_group(ProcessGroupNCCL2), pg_name)
@@ -189,7 +189,7 @@ class C10dProcessGroupSerialization(JitTestCase):
 
                 name = unique_process_group_name("module_member_process_group")
                 self.pg = torch.classes.dist_c10d.frontend().new_process_group_helper(
-                    1, 0, [], "nccl", tcp_store, name, 0)
+                    1, 0, [], "nccl", tcp_store, name, 10000)
 
             def forward(self, input: torch.Tensor):
                 if self.pg is None:
