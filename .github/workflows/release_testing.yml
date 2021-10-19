@@ -33,7 +33,7 @@ jobs:
           path: benchmark
       - name: Create Conda env
         run: |
-          conda create -y -n reltest python=3.8
+          conda create -y -n reltest python=3.7
       - name: Install PyTorch and setup environment
         run: |
           . activate reltest
