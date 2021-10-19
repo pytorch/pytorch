@@ -19,8 +19,8 @@ def _handle_col_wise_sharding_common(
         result = op_func(inp, local_shard)
         results.append(torch.transpose(result, 0, col_dim))
 
-    # Distribute results to each rank with col rearragement.
-    output = _result_distribut_with_col_rearrange(
+    # Distribute results to each rank with col rearrangement.
+    output = _result_distribute_with_col_rearrange(
         results, input, sharding_dim_size, world_size, weight, pg
     )
 
@@ -28,7 +28,7 @@ def _handle_col_wise_sharding_common(
     return torch.transpose(output, 0, col_dim)
 
 
-def _result_distribut_with_col_rearrange(
+def _result_distribute_with_col_rearrange(
     results, input, sharding_dim_size, world_size, weight, pg
 ):
     # Process results and outputs for all2all.

@@ -27,7 +27,7 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-class TestShardedTensorOpsEmbedding(ShardedTensorTestBase):
+class TestShardedEmbedding(ShardedTensorTestBase):
     def _run_sharded_embedding(self, spec, input_size, num_embeddings, embedding_dim):
         # Use same seed.
         torch.manual_seed(0)

@@ -163,8 +163,8 @@ def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard, pg):
     # Decide which rank the input goes to by check the sharding range.
     input_split_sizes: List[int] = [0] * world_size
     input_split_start_indices: List[int] = [0] * world_size
-    # When we do the chuck split, we always ensure the first N - 1 chunks get max out
-    # and then the Nth chuck gets the rest. So input_split_sizes like [3, 3, 3, 4]
+    # When we do the chunk split, we always ensure the first N - 1 chunks get max out
+    # and then the Nth chunk gets the rest. So input_split_sizes like [3, 3, 3, 4]
     # are not possible. The expected split size will be [4, 4, 4, 1].
     sharded_dim_size_max = get_chunked_dim_size(weight.size(0), split_size, 0)
     for idx, placement in enumerate(weight._sharding_spec.placements):
@@ -180,7 +180,7 @@ def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard, pg):
 
     rearrange_indices_1d_second_order = None
     if rearrange_rows:
-        # Need to re-arrange rows of input_t for all2all.
+        # Need to re-arrange the 1D tensor to be sent via all2all.
         indices: List[List[int]] = [[0]] * world_size
         for placement in weight._sharding_spec.placements:
             split_length = input_split_sizes[placement.rank()]
@@ -195,18 +195,22 @@ def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard, pg):
         )
         rearrange_indices_1d_second_order = torch.argsort(torch.Tensor(indices_flatten))
 
-    # allgather the input split size first. Each rank has different size.
-    input_split_sizes_tensor = torch.Tensor(input_split_sizes).cuda(rank)
-    gathered_all_input_sizes = [
-        torch.zeros_like(input_split_sizes_tensor) for _ in range(world_size)
-    ]
-    dist.all_gather(gathered_all_input_sizes, input_split_sizes_tensor, group=pg)
+    # allgather the input split size to be sent from each rank to the current rank.
+    # We then get the output split size
+    input_split_sizes_tensor = (
+        torch.Tensor(input_split_sizes).type("torch.IntTensor").cuda(rank)
+    )
+    output_split_sizes_tensor = torch.empty(
+        world_size, dtype=torch.int32, device=input.device
+    )
+    dist.all_to_all_single(
+        output_split_sizes_tensor,
+        input_split_sizes_tensor,
+        group=pg,
+    )
+    output_split_sizes = output_split_sizes_tensor.tolist()
 
-    # Get the output split size sent to the current rank from each rank.
-    output_split_sizes = []
-    for gathered_all_output_size in gathered_all_input_sizes:
-        output_split_sizes.append(int(gathered_all_output_size[rank].item()))
-
+    # Input size for each rank will have different sizes.
     gathered_input = torch.empty(
         sum(output_split_sizes), dtype=torch.int64, device=input.device
     )
@@ -240,7 +244,7 @@ def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard, pg):
         group=pg,
     )
 
-    # Rearragne the results to its original shape.
+    # Rearrange the results to its original shape.
     if rearrange_indices_1d_second_order is not None:
         gathered_output = gathered_output[rearrange_indices_1d_second_order]
     gathered_output = gathered_output[rearrange_indices_1d]
