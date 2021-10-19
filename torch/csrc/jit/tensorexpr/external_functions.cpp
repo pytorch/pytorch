@@ -14,8 +14,6 @@
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
 
-#include <iostream>
-
 namespace torch {
 namespace jit {
 namespace tensorexpr {
