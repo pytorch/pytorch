@@ -657,6 +657,8 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   STOP_DECOMPOSE(linalg_inv);
   STOP_DECOMPOSE(linalg_matrix_power);
   STOP_DECOMPOSE(linalg_matrix_rank);
+  STOP_DECOMPOSE(linalg_matrix_rank.atol_rtol_tensor);
+  STOP_DECOMPOSE(linalg_matrix_rank.atol_rtol_float);
   STOP_DECOMPOSE(logical_and);
   STOP_DECOMPOSE(masked_select_backward);
   STOP_DECOMPOSE(matrix_exp_backward);
