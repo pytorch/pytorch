@@ -120,7 +120,7 @@ Tensor computeQuantizePerTensorExternalCall(
   auto ResultBuf =
       makeQBufHandle("quantize_per_tensor", outputShape, dtype, qscale, qzero);
   StmtPtr s = ExternalCall::make(
-      ResultBuf, "nnc_quantize_per_tensor", {x}, {qscale, qzero, qdtype});
+      ResultBuf, "nnc_aten_quantize_per_tensor", {x}, {qscale, qzero, qdtype});
   return Tensor(ResultBuf.node(), s);
 }
 
@@ -141,7 +141,7 @@ Tensor computeDequantizeExternalCall(
 
   BufHandle ResultBuf("quantize", outputShape, dtype);
   StmtPtr s = ExternalCall::make(
-      ResultBuf, "nnc_dequantize", {qx}, {qscale, qzero, qdtype});
+      ResultBuf, "nnc_aten_dequantize", {qx}, {qscale, qzero, qdtype});
   return Tensor(ResultBuf.node(), s);
 }
 
@@ -172,7 +172,7 @@ Tensor computeQuantizedConv2dPrepack(
           "quantized_conv2d_prepack: Expects quantized weights, qzero is missing"));
   StmtPtr s = ExternalCall::make(
       ResultBuf,
-      "nnc_quantized_conv2d_prepack",
+      "nnc_aten_quantized_conv2d_prepack",
       {qw, b},
       {strides[0],
        strides[1],
@@ -205,7 +205,7 @@ Tensor computeQuantizedConv2d(
       "quantized_conv2d", outputShape, dtype, out_qscale, out_qzero);
   StmtPtr s = ExternalCall::make(
       ResultBuf,
-      "nnc_quantized_conv2d",
+      "nnc_aten_quantized_conv2d",
       {qx, prepacked},
       {immQScale(qx),
        immQZero(qx),
@@ -233,7 +233,7 @@ Tensor computeQuantizedConv2dRelu(
       "quantized_conv2d_relu", outputShape, dtype, out_qscale, out_qzero);
   StmtPtr s = ExternalCall::make(
       ResultBuf,
-      "nnc_quantized_conv2d_relu",
+      "nnc_aten_quantized_conv2d_relu",
       {qx, prepacked},
       {immQScale(qx),
        immQZero(qx),
@@ -261,7 +261,7 @@ Tensor computeQuantizedAdd(
       "quantized_add", outputShape, dtype, out_qscale, out_qzero);
   StmtPtr s = ExternalCall::make(
       ResultBuf,
-      "nnc_quantized_add",
+      "nnc_aten_quantized_add",
       {qa, qb},
       {immQScale(qa),
        immQZero(qa),
@@ -352,7 +352,7 @@ Tensor computeUpsampleNearest2d(
 
   StmtPtr s = ExternalCall::make(
       ResultBuf,
-      "nnc_upsample_nearest2d",
+      "nnc_aten_upsample_nearest2d",
       {x},
       {qx_qscale,
        qx_qzero,
