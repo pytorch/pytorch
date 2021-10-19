@@ -21,11 +21,12 @@ std::ostream& operator<<(std::ostream& output, const Logger& logger) {
   auto& ddp_logging_data = (*logger.ddp_logging_data_);
 
   std::string loggerInfo = fmt::format(
-      "[Rank {} / {}] Training {} unused_parameter_size={} \n "
+      "[Rank {} / {}] [iteration {}] Training {} unused_parameter_size={} \n "
       "Avg forward compute time: {} \n Avg backward compute time: {} \n"
       "Avg backward comm. time: {} \n Avg backward comm/comp overlap time: {}",
       ddp_logging_data.ints_map["rank"],
       ddp_logging_data.ints_map["world_size"],
+      ddp_logging_data.ints_map["iteration"],
       ddp_logging_data.strs_map["module_name"],
       ddp_logging_data.ints_map["unused_parameter_size"],
       ddp_logging_data.ints_map["avg_forward_compute_time"],
@@ -88,13 +89,13 @@ void Logger::set_env_variables() {
 void Logger::set_parameter_stats() {
   // The number of parameter tensors
   ddp_logging_data_->ints_map["num_parameter_tensors"] =
-      reducer_->replicas_[0].size();
+      reducer_->params_.size();
   // Total parameters size (Bytes)
   ddp_logging_data_->ints_map["total_parameter_size_bytes"] = 0;
   // Parameters' data types, there may be multiple data
   // types for mixed precision training.
   std::set<std::string> unique_dtypes;
-  for (auto t : reducer_->replicas_[0]) {
+  for (const auto& t : reducer_->params_) {
     ddp_logging_data_->ints_map["total_parameter_size_bytes"] +=
         t.numel() * t.element_size();
     unique_dtypes.insert(std::string(t.dtype().name()));
@@ -262,7 +263,7 @@ void Logger::set_runtime_stats_and_log() {
   // unused_parameters_ is calculated in forward call of
   // each iteration.
   for (const auto& unused_index : reducer_->unused_parameters_) {
-    const auto& v = reducer_->replicas_[0][unused_index];
+    const auto& v = reducer_->params_[unused_index];
     ddp_logging_data_->ints_map["unused_parameter_size"] +=
         v.numel() * v.element_size();
   }
@@ -299,7 +300,7 @@ void Logger::set_runtime_stats_and_log() {
   reset_performance_stats();
 
   // Cuda time stats are only collected for single device modules.
-  if (reducer_->replicas_[0][0].is_cuda() && reducer_->is_multi_device_module_) {
+  if (reducer_->params_[0].is_cuda() && reducer_->is_multi_device_module_) {
     TORCH_WARN_ONCE(
       "Cuda time stats are not collected for multi-device modules."
     );

@@ -61,7 +61,7 @@ const inline char* getNcclErrorDetailStr(ncclResult_t error, c10::optional<std::
     defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && \
     (defined(NCCL_MINOR) && ((NCCL_MINOR > 9) || \
     ((NCCL_MINOR == 9) && defined(NCCL_PATCH) && (NCCL_PATCH >= 7))))) || \
-    (defined(__HIP_PLATFORM_HCC__) && (TORCH_HIP_VERSION >= 301))
+    (defined(USE_ROCM) && (TORCH_HIP_VERSION >= 301))
 #define ENABLE_NCCL_BF16_DATATYPE
 #endif
 

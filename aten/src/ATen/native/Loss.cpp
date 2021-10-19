@@ -79,6 +79,18 @@ Tensor hinge_embedding_loss(const Tensor& self, const Tensor& target, double mar
 
 Tensor triplet_margin_loss(const Tensor& anchor, const Tensor& positive, const Tensor& negative, double margin,
                            double p, double eps, bool swap, int64_t reduction) {
+  auto a_dim = anchor.dim();
+  auto p_dim = positive.dim();
+  auto n_dim = negative.dim();
+  TORCH_CHECK(
+      a_dim == p_dim && p_dim == n_dim,
+      "All inputs should have same dimension but got ",
+      a_dim,
+      "D, ",
+      p_dim,
+      "D and ",
+      n_dim,
+      "D inputs.")
   auto dist_pos = at::pairwise_distance(anchor, positive, p, eps);
   auto dist_neg = at::pairwise_distance(anchor, negative, p, eps);
   if (swap) {

@@ -44,7 +44,7 @@ static inline Tensor cloneBatchedColumnMajor(const Tensor& src) {
   // this will be efficient (no reordering of the data will occur)
   // because the first transpose will make the tensor contiguous,
   // and cloning a contiguous tensor is fast.
-  auto result = src.transpose(-2, -1).clone(at::MemoryFormat::Contiguous);
+  auto result = src.mT().clone(at::MemoryFormat::Contiguous);
   result.transpose_(-2, -1);
   return result;
 }
@@ -560,6 +560,11 @@ static inline void checkLinalgCompatibleDtype(const std::string& fn_name, Scalar
       out_name, " with dtype ", out_type);
 }
 
+static inline void checkNotComplexTolerance(const Tensor& tol, const c10::string_view f_name, const c10::string_view tol_name) {
+  TORCH_CHECK(!at::isComplexType(tol.scalar_type()),
+              f_name, ": ", tol_name, " tensor of complex type is not supported. Got ", tol.scalar_type());
+}
+
 /*
   Two types of 'other' tensors are supported when solving
   a system of linear equations matmul(input, x) = other:
@@ -574,6 +579,26 @@ static inline bool linalg_solve_is_vector_rhs(const Tensor& input, const Tensor&
   auto expected_batched_rhs_shape = IntArrayRef(input.sizes().data(), input.dim() - 1); // input.shape[:-1]
   bool vector_case = other.dim() == 1 || (input.dim() - 1 == other.dim() && other.sizes().equals(expected_batched_rhs_shape));
   return vector_case;
+}
+
+static inline bool is_blas_compatible_column_major_order(const Tensor& input) {
+  IntArrayRef input_strides = input.strides();
+  IntArrayRef input_sizes = input.sizes();
+  auto ndim = input.dim();
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2);
+  auto leading_dimension = input_strides[ndim - 1];
+  auto rows = input_sizes[ndim - 2];
+  return (input_strides[ndim - 2] == 1) && (leading_dimension >= std::max<int64_t>(1, rows));
+}
+
+static inline bool is_blas_compatible_row_major_order(const Tensor& input) {
+  IntArrayRef input_strides = input.strides();
+  IntArrayRef input_sizes = input.sizes();
+  auto ndim = input.dim();
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2);
+  auto leading_dimension = input_strides[ndim - 2];
+  auto cols = input_sizes[ndim - 1];
+  return (input_strides[ndim - 1] == 1) && (leading_dimension >= std::max<int64_t>(1, cols));
 }
 
 }}  // namespace at::native

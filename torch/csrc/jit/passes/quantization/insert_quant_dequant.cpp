@@ -227,7 +227,8 @@ c10::optional<std::string> findObserverName(Value* v) {
 bool isPlaceholderObserver(Value* observer) {
   if (getModuleName(observer).has_value()) {
     auto name = getModuleName(observer).value();
-    if (name == "__torch__.torch.quantization.observer.PlaceholderObserver") {
+    // if PlaceholderObserver is (anywhere) in name
+    if (name.find("PlaceholderObserver") != std::string::npos) {
       return true;
     }
   }
@@ -1023,7 +1024,7 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
   // TODO: refactor findObserverName to take Node* as input
   Value* v = n->output();
   TORCH_INTERNAL_ASSERT(
-      v->type()->isSubtypeOf(TensorType::get()),
+      v->type()->isSubtypeOf(*TensorType::get()),
       "Expected output of observer node to be Tensor");
   auto observer_name = findObserverName(v);
   TORCH_INTERNAL_ASSERT(
@@ -1351,7 +1352,7 @@ void InsertQuantDeQuantHelper::runWeightObserver(
     blocks_to_visit.pop();
     for (auto n : b->nodes()) {
       for (Value* v : n->outputs()) {
-        if (!v->type()->isSubtypeOf(TensorType::get())) {
+        if (!v->type()->isSubtypeOf(*TensorType::get())) {
           continue;
         }
         auto observer_name = findObserverName(v);
@@ -1415,7 +1416,7 @@ void InsertQuantDeQuantHelper::run(
   std::vector<Value*> input_values;
   for (const auto idx : c10::irange(1, method.num_inputs())) {
     auto& v = graph->inputs()[idx];
-    if (v->type()->isSubtypeOf(TensorType::get())) {
+    if (v->type()->isSubtypeOf(*TensorType::get())) {
       input_values.push_back(v);
     }
   }
@@ -1428,7 +1429,7 @@ void InsertQuantDeQuantHelper::run(
     for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end;) {
       Node* n = *it++;
       for (Value* v : n->outputs()) {
-        if (!v->type()->isSubtypeOf(TensorType::get())) {
+        if (!v->type()->isSubtypeOf(*TensorType::get())) {
           continue;
         }
         collectObserverNodesAndValueToQuantize(module, v);

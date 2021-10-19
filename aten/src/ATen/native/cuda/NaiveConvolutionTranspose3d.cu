@@ -6,7 +6,6 @@
 
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 
 #include <ATen/native/cuda/vol2col.cuh>
 

@@ -7,8 +7,6 @@ If you are adding a new entry/functionality, please, add it to the
 here.
 """
 
-import torch
-
 from torch.ao.quantization.quantize import _convert
 from torch.ao.quantization.quantize import _observer_forward_hook
 from torch.ao.quantization.quantize import _propagate_qconfig_helper

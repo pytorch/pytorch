@@ -6,14 +6,13 @@ import torch
 import random
 import math
 import cmath
-from typing import List, Optional, Tuple, Union
+from typing import Optional, Tuple, Union
 import operator
 
 FileCheck = torch._C.FileCheck
 
 __all__ = [
     "FileCheck",
-    "get_all_device_types",
     "make_non_contiguous",
 ]
 
@@ -192,7 +191,3 @@ def make_non_contiguous(tensor: torch.Tensor) -> torch.Tensor:
 
     # Use .data here to hide the view relation between input and other temporary Tensors
     return input.data
-
-
-def get_all_device_types() -> List[str]:
-    return ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']

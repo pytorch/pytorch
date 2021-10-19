@@ -128,3 +128,18 @@ torch::jit::Module getLongScriptModel() {
   module.define(long_model);
   return module;
 }
+
+const std::string signed_log1p_model = R"JIT(
+  def forward(self, a):
+      b = torch.abs(a)
+      c = torch.log1p(b)
+      d = torch.sign(a)
+      e = d * c
+      return e
+)JIT";
+
+torch::jit::Module getSignedLog1pModel() {
+  torch::jit::Module module("signed_log1p");
+  module.define(signed_log1p_model);
+  return module;
+}
