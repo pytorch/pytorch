@@ -789,7 +789,7 @@ bool Value::mustNotBeNone() const {
   return node_->kind() != prim::AutogradAdd && type() != NoneType::get() &&
       !type()->cast<OptionalType>() &&
       !(type()->cast<UnionType>() &&
-        type()->expect<UnionType>()->canHoldType(NoneType::get()));
+        type()->expect<UnionType>()->canHoldType(*NoneType::get()));
 }
 
 std::string Value::debugNameBase() const {
@@ -1814,9 +1814,8 @@ Node* Graph::createDict(
 }
 
 Node* Graph::createNumToTensor(Value* value) {
-  auto typ = value->type();
   Node* result = create(prim::NumToTensor, {value});
-  result->output()->setType(TensorType::fromNumberType(std::move(typ)));
+  result->output()->setType(TensorType::fromNumberType(*value->type()));
   return result;
 }
 
