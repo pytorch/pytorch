@@ -9,7 +9,7 @@ namespace jit {
 
 void SetNumTypeToTensorType(Value* v) {
   if (v->type()->isSubtypeOf(*NumberType::get())) {
-    v->setType(TensorType::fromNumberType(v->type()));
+    v->setType(TensorType::fromNumberType(*v->type()));
   } else if (v->type()->isSubtypeOf(*BoolType::get())) {
     v->setType(TensorType::fromBoolType());
   }
