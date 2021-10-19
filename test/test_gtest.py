@@ -19,13 +19,16 @@ TEST_BINARY_DIR = REPO_ROOT / "build" / "bin"
 
 env = os.environ.copy()
 
+if IS_MACOS:
+    env["DYLD_LIBRARY_PATH"] = str(Path(torch.__file__).resolve().parent / "lib")
+
 if IS_IN_CI:
     if IS_WINDOWS:
+        # Windows test binaries are located in many places so this might not be
+        # getting them all
         # TEST_BINARY_DIR = REPO_ROOT / "torch" / "bin"
         TEST_BINARY_DIR = REPO_ROOT / "build"
     elif IS_MACOS:
-        # maybe have to set DYLD_LIBRARY_PATH to .parent / "lib"
-        env["DYLD_LIBRARY_PATH"] = str(Path(torch.__file__).resolve().parent / "lib")
         TEST_BINARY_DIR = Path(torch.__file__).resolve().parent / "bin"
         # TEST_BINARY_DIR = REPO_ROOT.parent / "cpp-build" / "bin"
 BUILD_ENVIRONMENT = os.getenv("BUILD_ENVIRONMENT", "")
@@ -115,8 +118,15 @@ if __name__ == "__main__":
     for binary in TEST_BINARY_DIR.glob("*test*"):
         # If the test already has a properly formatted name, don't prepend a
         # redundant 'test_'
+        if IS_WINDOWS and binary.suffix != ".exe":
+            continue
+
         if binary.name.startswith("test_"):
-            test_name = binary.name
+            if IS_WINDOWS:
+                # Get rid of the ".exe"
+                test_name = binary.stem
+            else:
+                test_name = binary.name
         else:
             test_name = f"test_{binary.name}"
 
@@ -127,9 +137,7 @@ if __name__ == "__main__":
             getattr(GTest, test_name, None), binary, test_name
         )
         setattr(
-            GTest,
-            test_name,
-            maybe_existing_case,
+            GTest, test_name, maybe_existing_case,
         )
 
     # Don't 'save_xml' since gtest does that for us and we don't want to
