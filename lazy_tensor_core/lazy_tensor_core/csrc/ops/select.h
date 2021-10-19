@@ -8,7 +8,7 @@ namespace ops {
 
 class Select : public TsNode {
  public:
-  Select(const Value& input, lazy_tensors::int64 dim, lazy_tensors::int64 start,
+  Select(const torch::lazy::Value& input, lazy_tensors::int64 dim, lazy_tensors::int64 start,
          lazy_tensors::int64 end, lazy_tensors::int64 stride);
 
   NodePtr Clone(OpList operands) const override;

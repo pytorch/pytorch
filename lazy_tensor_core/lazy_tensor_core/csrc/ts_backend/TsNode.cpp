@@ -4,22 +4,24 @@
 #include "lazy_tensors/computation_client/sys_util.h"
 namespace torch_lazy_tensors {
 namespace ir {
+using torch::lazy::Output;
+using torch::lazy::OpKind;
 
-lazy_tensors::Shape GetShapeFromTsOutput(const ir::Output& output) {
+lazy_tensors::Shape GetShapeFromTsOutput(const torch::lazy::Output& output) {
   if (auto* tsnode = dynamic_cast<const TsNode*>(output.node)) {
     return tsnode->shape(output.index);
   }
   throw std::runtime_error("Expected TsNode but could not dynamic cast");
 }
 
-lazy_tensors::Shape GetShapeFromTsValue(const ir::Value& value) {
+lazy_tensors::Shape GetShapeFromTsValue(const torch::lazy::Value& value) {
   if (auto* tsnode = dynamic_cast<const TsNode*>(value.node.get())) {
     return tsnode->shape(value.index);
   }
   throw std::runtime_error("Expected TsNode but could not dynamic cast");
 }
 
-lazy_tensors::Shape GetShapeFromTsNode(const ir::Node& node) {
+lazy_tensors::Shape GetShapeFromTsNode(const torch::lazy::Node& node) {
   if (auto* tsnode = dynamic_cast<const TsNode*>(&node)) {
     return tsnode->shape();
   }

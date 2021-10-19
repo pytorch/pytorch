@@ -11,7 +11,7 @@ namespace ops {
 
 class Std : public TsNode {
  public:
-  Std(const Value& input, std::vector<lazy_tensors::int64> dimensions,
+  Std(const torch::lazy::Value& input, std::vector<lazy_tensors::int64> dimensions,
       bool keep_reduced_dimensions, lazy_tensors::int64 correction);
 
   std::string ToString() const override;

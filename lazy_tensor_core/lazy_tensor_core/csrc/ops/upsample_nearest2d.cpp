@@ -9,9 +9,9 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-UpsampleNearest::UpsampleNearest(const Value& input,
+UpsampleNearest::UpsampleNearest(const torch::lazy::Value& input,
                                  std::vector<lazy_tensors::int64> output_size)
-    : TsNode(ir::OpKind(at::aten::upsample_nearest2d), {input},
+    : TsNode(torch::lazy::OpKind(at::aten::upsample_nearest2d), {input},
            /*num_outputs=*/1, torch::lazy::MHash(output_size)),
       output_size_(std::move(output_size)) {
   SetShapeDeferred(
@@ -19,7 +19,7 @@ UpsampleNearest::UpsampleNearest(const Value& input,
 }
 
 NodePtr UpsampleNearest::Clone(OpList operands) const {
-  return MakeNode<UpsampleNearest>(operands.at(0), output_size_);
+  return torch::lazy::MakeNode<UpsampleNearest>(operands.at(0), output_size_);
 }
 
 std::string UpsampleNearest::ToString() const {

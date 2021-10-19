@@ -10,10 +10,10 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Logsumexp::Logsumexp(const Value& input,
+Logsumexp::Logsumexp(const torch::lazy::Value& input,
                      std::vector<lazy_tensors::int64> dimensions,
                      bool keep_reduced_dimensions)
-    : TsNode(ir::OpKind(at::aten::logsumexp), {input},
+    : TsNode(torch::lazy::OpKind(at::aten::logsumexp), {input},
            /*num_outputs=*/1,
            torch::lazy::MHash(dimensions, keep_reduced_dimensions)),
       dimensions_(std::move(dimensions)),
@@ -23,7 +23,7 @@ Logsumexp::Logsumexp(const Value& input,
 }
 
 NodePtr Logsumexp::Clone(OpList operands) const {
-  return MakeNode<Logsumexp>(operands.at(0), dimensions_,
+  return torch::lazy::MakeNode<Logsumexp>(operands.at(0), dimensions_,
                              keep_reduced_dimensions_);
 }
 

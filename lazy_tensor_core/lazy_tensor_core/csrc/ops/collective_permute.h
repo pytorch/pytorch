@@ -10,7 +10,7 @@ namespace ops {
 class CollectivePermute : public TsNode {
  public:
   CollectivePermute(
-      const Value& input, const Value& token,
+      const torch::lazy::Value& input, const torch::lazy::Value& token,
       std::vector<std::pair<lazy_tensors::int64, lazy_tensors::int64>>
           source_target_pairs);
 

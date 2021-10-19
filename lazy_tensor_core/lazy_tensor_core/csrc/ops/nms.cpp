@@ -9,8 +9,8 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Nms::Nms(const Value& boxes, const Value& scores, const Value& score_threshold,
-         const Value& iou_threshold, lazy_tensors::int64 output_size)
+Nms::Nms(const torch::lazy::Value& boxes, const torch::lazy::Value& scores, const torch::lazy::Value& score_threshold,
+         const torch::lazy::Value& iou_threshold, lazy_tensors::int64 output_size)
     : TsNode(ltc_nms, {boxes, scores, score_threshold, iou_threshold},
            /*num_outputs=*/2, torch::lazy::MHash(output_size)),
       output_size_(output_size) {
@@ -19,7 +19,7 @@ Nms::Nms(const Value& boxes, const Value& scores, const Value& score_threshold,
 }
 
 NodePtr Nms::Clone(OpList operands) const {
-  return MakeNode<Nms>(operands.at(0), operands.at(1), operands.at(2),
+  return torch::lazy::MakeNode<Nms>(operands.at(0), operands.at(1), operands.at(2),
                        operands.at(3), output_size_);
 }
 

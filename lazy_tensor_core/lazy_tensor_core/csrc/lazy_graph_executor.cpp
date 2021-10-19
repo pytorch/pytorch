@@ -14,6 +14,8 @@
 
 namespace torch_lazy_tensors {
 namespace {
+
+using namespace torch_lazy_tensors::ir;
 struct TlsData {
   void Reset() { trim_counter = 0; }
 
@@ -213,7 +215,7 @@ class DeviceContextArena {
     std::map<lazy_tensors::int64, std::weak_ptr<LazyTensor::Data>> tensors_data;
     lazy_tensors::uint64 seed = 101;
     lazy_tensors::uint64 running_seed = 101;
-    ir::Value seed_ir_value;
+    torch::lazy::Value seed_ir_value;
   };
 
  public:
@@ -251,7 +253,7 @@ class DeviceContextArena {
     return tensors;
   }
 
-  ir::Value GetRngSeed(const Device& device) {
+  torch::lazy::Value GetRngSeed(const Device& device) {
     static const at::ScalarType kSeedType = at::ScalarType::Long;
     static const lazy_tensors::uint64 kSeedMul = 214013;
     static const lazy_tensors::uint64 kSeedAdd = 2531011;
@@ -266,9 +268,9 @@ class DeviceContextArena {
     devctx->running_seed = kSeedAdd + kSeedMul * devctx->running_seed;
     // Compose new seeds from the root seed, to avoid creating too many
     // computation parameters which might overflow the device capacity.
-    ir::Value k = ir::ops::ScalarOp(MakeIntScalar(kSeedMul),
+    torch::lazy::Value k = ir::ops::ScalarOp(MakeIntScalar(kSeedMul),
                                     MakeLtcPrimitiveType(kSeedType, &device));
-    ir::Value b = ir::ops::ScalarOp(MakeIntScalar(kSeedAdd),
+    torch::lazy::Value b = ir::ops::ScalarOp(MakeIntScalar(kSeedAdd),
                                     MakeLtcPrimitiveType(kSeedType, &device));
     devctx->seed_ir_value = b + k * devctx->seed_ir_value;
     return devctx->seed_ir_value;
@@ -285,7 +287,7 @@ class DeviceContextArena {
     std::lock_guard<std::mutex> lock(devctx->lock);
     devctx->seed = seed;
     devctx->running_seed = devctx->seed;
-    devctx->seed_ir_value = ir::Value();
+    devctx->seed_ir_value = torch::lazy::Value();
   }
 
   void MarkStep(const Device& device) {
@@ -293,7 +295,7 @@ class DeviceContextArena {
     std::lock_guard<std::mutex> lock(devctx->lock);
     devctx->seed = 1012031 + devctx->seed * 7012063;
     devctx->running_seed = devctx->seed;
-    devctx->seed_ir_value = ir::Value();
+    devctx->seed_ir_value = torch::lazy::Value();
   }
 
  private:
@@ -327,21 +329,21 @@ class DeviceContextArena {
     return it->second;
   }
 
-  ir::Value IrValueFromScalar(const at::Scalar& value,
+  torch::lazy::Value IrValueFromScalar(const at::Scalar& value,
                               at::ScalarType scalar_type,
                               const Device& device) {
     at::Tensor tensor =
         at::scalar_tensor(value, at::TensorOptions(scalar_type));
     lazy_tensors::ComputationClient::DataPtr device_data =
         TensorToDataHandle(tensor, device);
-    return ir::MakeNode<ir::ops::DeviceData>(std::move(device_data));
+    return torch::lazy::MakeNode<ir::ops::DeviceData>(std::move(device_data));
   }
 
   std::mutex lock_;
   std::map<Device, DeviceContext*> device_contexts_;
 };
 
-bool ShouldSyncIrValue(const ir::Value& ir_value) {
+bool ShouldSyncIrValue(const torch::lazy::Value& ir_value) {
   return ir_value->op() != ir::ops::ltc_not_supported;
 }
 
@@ -371,7 +373,7 @@ void LazyGraphExecutor::UnregisterTensor(LazyTensor::Data* data) {
   DeviceContextArena::Get()->UnregisterTensor(data);
 }
 
-ir::Value LazyGraphExecutor::GetRngSeed(const Device& device) {
+torch::lazy::Value LazyGraphExecutor::GetRngSeed(const Device& device) {
   return DeviceContextArena::Get()->GetRngSeed(device);
 }
 
@@ -543,7 +545,7 @@ LazyGraphExecutor::SyncTensorCollection LazyGraphExecutor::CollectSyncTensors(
   for (size_t i = 0; i < tensors.size(); ++i) {
     if (tensor_ids.insert(tensors[i].GetUniqueId()).second &&
         tensors[i].CurrentDataHandle() == nullptr) {
-      ir::Value ir_value = tensors[i].CurrentIrValue();
+      torch::lazy::Value ir_value = tensors[i].CurrentIrValue();
       if (ir_value) {
         if (ShouldSyncIrValue(ir_value)) {
           // Add only tensors which need to be synced.
@@ -583,10 +585,10 @@ LazyGraphExecutor::SyncTensorCollection LazyGraphExecutor::CollectSyncTensors(
   return coll;
 }
 
-std::vector<ir::Value> LazyGraphExecutor::CollectRoots(
+std::vector<torch::lazy::Value> LazyGraphExecutor::CollectRoots(
     const std::vector<LazyTensor>& tensors,
     lazy_tensors::Span<const size_t> indices) {
-  std::vector<ir::Value> roots;
+  std::vector<torch::lazy::Value> roots;
   roots.reserve(indices.size());
   for (auto index : indices) {
     roots.push_back(tensors.at(index).CurrentIrValue());
@@ -629,10 +631,10 @@ LazyGraphExecutor::FetchTensorData(std::vector<LazyTensor>* tensors,
 LazyGraphExecutor::PostOrderData LazyGraphExecutor::RunPostOrder(
     const std::vector<LazyTensor>& tensors,
     lazy_tensors::Span<const size_t> indices) {
-  std::vector<const ir::Node*> roots;
+  std::vector<const torch::lazy::Node*> roots;
   roots.reserve(indices.size());
   for (auto index : indices) {
-    ir::Value ir_value = tensors.at(index).CurrentIrValue();
+    torch::lazy::Value ir_value = tensors.at(index).CurrentIrValue();
     roots.push_back(ir_value.node.get());
   }
   PostOrderData po_data;
@@ -683,7 +685,7 @@ LazyGraphExecutor::CompilationResult LazyGraphExecutor::Compile(
       "SyncTensorsGraph", coll.device, po_data->post_order,
       std::move(po_data->emission_map));
   for (auto index : coll.indices) {
-    ir::Value ir_value = tensors[index].CurrentIrValue();
+    torch::lazy::Value ir_value = tensors[index].CurrentIrValue();
     lowering_ctx->AddResult(ir_value);
   }
   if (enable_aliasing && coll.config.sync_ltc_data) {
@@ -811,7 +813,7 @@ LazyGraphExecutor::OpByOpAsync LazyGraphExecutor::SyncTensorsGraphOpByOp(
     explicit Async(
         SyncTensorCollection coll,
         std::vector<lazy_tensors::ComputationClient::DataPtr> tensors_data,
-        std::vector<ir::Value> roots,
+        std::vector<torch::lazy::Value> roots,
         lazy_tensors::Span<const std::string> devices)
         : coll(std::move(coll)),
           tensors_data(std::move(tensors_data)),
@@ -820,7 +822,7 @@ LazyGraphExecutor::OpByOpAsync LazyGraphExecutor::SyncTensorsGraphOpByOp(
 
     SyncTensorCollection coll;
     std::vector<lazy_tensors::ComputationClient::DataPtr> tensors_data;
-    std::vector<ir::Value> roots;
+    std::vector<torch::lazy::Value> roots;
     std::vector<std::string> devices;
   };
 
@@ -828,7 +830,7 @@ LazyGraphExecutor::OpByOpAsync LazyGraphExecutor::SyncTensorsGraphOpByOp(
   DebugUtil::SaveTensorsGraphInfo("SyncTensorsGraphOpByOp", *tensors,
                                   &coll.indices);
 
-  std::vector<ir::Value> roots = CollectRoots(*tensors, coll.indices);
+  std::vector<torch::lazy::Value> roots = CollectRoots(*tensors, coll.indices);
   auto tensors_data = FetchTensorData(tensors, coll.config, coll.indices);
   auto async = std::make_shared<Async>(std::move(coll), std::move(tensors_data),
                                        std::move(roots), devices);
@@ -973,7 +975,7 @@ std::vector<at::Tensor> LazyGraphExecutor::GetTensorsOpByOp(
     DebugUtil::SaveTensorsGraphInfo("GetTensorsOpByOp", *tensors,
                                     &coll.indices);
 
-    std::vector<ir::Value> roots = CollectRoots(*tensors, coll.indices);
+    std::vector<torch::lazy::Value> roots = CollectRoots(*tensors, coll.indices);
     async_tensors_data =
         OpByOpExecutor::Get()->Execute(roots, coll.device.ToString(), {});
   }

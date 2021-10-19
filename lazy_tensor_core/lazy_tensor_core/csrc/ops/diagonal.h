@@ -8,7 +8,7 @@ namespace ops {
 
 class Diagonal : public TsNode {
  public:
-  Diagonal(const Value& input, lazy_tensors::int64 offset,
+  Diagonal(const torch::lazy::Value& input, lazy_tensors::int64 offset,
            lazy_tensors::int64 dim1, lazy_tensors::int64 dim2);
 
   NodePtr Clone(OpList operands) const override;

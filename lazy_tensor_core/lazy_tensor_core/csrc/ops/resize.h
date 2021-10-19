@@ -8,7 +8,7 @@ namespace ops {
 
 class Resize : public TsNode {
  public:
-  Resize(const Value& input, std::vector<lazy_tensors::int64> size);
+  Resize(const torch::lazy::Value& input, std::vector<lazy_tensors::int64> size);
 
   NodePtr Clone(OpList operands) const override;
 

@@ -8,8 +8,8 @@ namespace ops {
 
 class AmpUpdateScale : public TsNode {
  public:
-  AmpUpdateScale(const Value& current_scale, const Value& growth_tracker,
-                 const Value& found_inf, double scale_growth_factor,
+  AmpUpdateScale(const torch::lazy::Value& current_scale, const torch::lazy::Value& growth_tracker,
+                 const torch::lazy::Value& found_inf, double scale_growth_factor,
                  double scale_backoff_factor, int growth_interval);
 
   NodePtr Clone(OpList operands) const override;

@@ -11,9 +11,9 @@ namespace ops {
 
 class NllLoss2dBackward : public TsNode {
  public:
-  NllLoss2dBackward(const Value& grad_output, const Value& logits,
-                    const Value& labels, const c10::optional<Value>& weight,
-                    const c10::optional<Value>& total_weight,
+  NllLoss2dBackward(const torch::lazy::Value& grad_output, const torch::lazy::Value& logits,
+                    const torch::lazy::Value& labels, const c10::optional<torch::lazy::Value>& weight,
+                    const c10::optional<torch::lazy::Value>& total_weight,
                     ReductionMode reduction, int ignore_index);
 
   std::string ToString() const override;

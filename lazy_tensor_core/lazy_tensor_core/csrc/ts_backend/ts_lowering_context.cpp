@@ -14,7 +14,7 @@ TSLoweringContext::TSLoweringContext(const std::string& name, Device device)
 
 TSLoweringContext::TSLoweringContext(
     const std::string& name, Device device,
-    lazy_tensors::Span<const ir::Node* const> post_order,
+    lazy_tensors::Span<const torch::lazy::Node* const> post_order,
     ir::Util::EmissionMap emit_status)
     : ir::LoweringContext(name, device, post_order, emit_status),
       graph_(std::make_shared<torch::jit::Graph>()) {
@@ -29,7 +29,7 @@ lazy_tensors::Shape TSLoweringContext::GetResultShape(size_t index) const {
   LTC_LOG(FATAL) << "Not implemented yet.";
 }
 
-size_t TSLoweringContext::AddResult(const ir::Output& output) {
+size_t TSLoweringContext::AddResult(const torch::lazy::Output& output) {
   return AddResult(GetOutputOp(output));
 }
 
@@ -42,7 +42,7 @@ TSLoweringContext::Build() {
       new GenericComputationTS(graph_));
 }
 
-torch::jit::Value* TSLoweringContext::GetOutputOp(const ir::Output& output) {
+torch::jit::Value* TSLoweringContext::GetOutputOp(const torch::lazy::Output& output) {
   auto it = emitted_outputs_.find(output);
   if (it == emitted_outputs_.end()) {
     auto post_order = ir::Util::ComputePostOrder(output.node, &emit_status_);
@@ -59,7 +59,7 @@ torch::jit::Value* TSLoweringContext::GetOutputOp(const ir::Output& output) {
   return it->second;
 }
 
-void TSLoweringContext::AssignOutputOp(const ir::Output& output,
+void TSLoweringContext::AssignOutputOp(const torch::lazy::Output& output,
                                        torch::jit::Value* op) {
   emitted_outputs_[output] = std::move(op);
 }

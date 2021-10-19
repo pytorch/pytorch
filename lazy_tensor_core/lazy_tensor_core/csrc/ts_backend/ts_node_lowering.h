@@ -13,11 +13,11 @@ class TSNodeLoweringInterface : public NodeLowering {
 
   virtual ~TSNodeLoweringInterface() = default;
 
-  virtual bool Lower(const ir::Node* node) = 0;
+  virtual bool Lower(const torch::lazy::Node* node) = 0;
 
   // TODO(whc) the whole point of this interface class is to let TsNode access
   // LowerNonCodegenOps. maybe there is a simpler way...
-  virtual TSOpVector LowerNonCodegenOps(const ir::Node* node) = 0;
+  virtual TSOpVector LowerNonCodegenOps(const torch::lazy::Node* node) = 0;
   // ... and LowerBuiltin
   virtual TSOpVector LowerBuiltin(
       c10::Symbol sym, const std::vector<torch::jit::NamedValue>& arguments,
@@ -25,7 +25,7 @@ class TSNodeLoweringInterface : public NodeLowering {
 
   static std::unique_ptr<NodeLowering> Create(ir::LoweringContext* loctx);
 
-  virtual lazy_tensors::Shape Infer(const ir::Node* node) = 0;
+  virtual lazy_tensors::Shape Infer(const torch::lazy::Node* node) = 0;
 
   static NodeLowering* Get();
 };

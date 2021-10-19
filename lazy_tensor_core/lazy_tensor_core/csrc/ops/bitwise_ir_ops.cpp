@@ -9,18 +9,18 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Value BitwiseOp(const OpKind& kind, const Value& node1, const Value& node2) {
+torch::lazy::Value BitwiseOp(const OpKind& kind, const torch::lazy::Value& node1, const torch::lazy::Value& node2) {
   NodePtr node = GenericOp(kind, {node1, node2});
-  TsNodeSetShapeDeferred(
+  ir::TsNodeSetShapeDeferred(
       node, [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
   return node;
 }
 
-Value BitwiseOr(const Value& node1, const Value& node2) {
+torch::lazy::Value BitwiseOr(const torch::lazy::Value& node1, const torch::lazy::Value& node2) {
   return BitwiseOp(OpKind(at::aten::__or__), node1, node2);
 }
 
-Value BitwiseXor(const Value& node1, const Value& node2) {
+torch::lazy::Value BitwiseXor(const torch::lazy::Value& node1, const torch::lazy::Value& node2) {
   return BitwiseOp(OpKind(at::aten::__xor__), node1, node2);
 }
 

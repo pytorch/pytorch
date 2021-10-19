@@ -16,7 +16,7 @@ LoweringContext::LoweringContext(const std::string& name, Device device)
 
 LoweringContext::LoweringContext(
     const std::string& name, Device device,
-    lazy_tensors::Span<const Node* const> post_order,
+    lazy_tensors::Span<const torch::lazy::Node* const> post_order,
     Util::EmissionMap emit_status)
     : device_(std::move(device)), emit_status_(std::move(emit_status)) {}
 
@@ -25,11 +25,11 @@ LoweringContext::GetParametersData() const {
   return parameters_;
 }
 
-void LoweringContext::LowerNodeToResult(const Node* node) {
+void LoweringContext::LowerNodeToResult(const torch::lazy::Node* node) {
   LTC_LOG(FATAL) << "Not implemented.";
 }
 
-void LoweringContext::AddParameter(const Output& output, size_t index,
+void LoweringContext::AddParameter(const torch::lazy::Output& output, size_t index,
                                    const lazy_tensors::Shape& shape,
                                    const std::string& name) {
   LTC_LOG(FATAL) << "Not implemented.";

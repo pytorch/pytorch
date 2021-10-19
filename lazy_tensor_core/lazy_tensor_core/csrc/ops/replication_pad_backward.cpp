@@ -9,7 +9,7 @@ namespace ir {
 namespace ops {
 
 ReplicationPadBackward::ReplicationPadBackward(
-    const Value& grad_output, const Value& input,
+    const torch::lazy::Value& grad_output, const torch::lazy::Value& input,
     std::vector<lazy_tensors::int64> padding)
     : TsNode(ltc_replication_pad_backward, {grad_output, input},
            /*num_outputs=*/1, torch::lazy::MHash(padding)),
@@ -19,7 +19,7 @@ ReplicationPadBackward::ReplicationPadBackward(
 }
 
 NodePtr ReplicationPadBackward::Clone(OpList operands) const {
-  return MakeNode<ReplicationPadBackward>(operands.at(0), operands.at(1),
+  return torch::lazy::MakeNode<ReplicationPadBackward>(operands.at(0), operands.at(1),
                                           padding_);
 }
 

@@ -7,8 +7,8 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-QR::QR(const Value& input, bool some)
-    : TsNode(ir::OpKind(at::aten::qr), {input},
+QR::QR(const torch::lazy::Value& input, bool some)
+    : TsNode(torch::lazy::OpKind(at::aten::qr), {input},
            /*num_outputs=*/2, torch::lazy::MHash(some)),
       some_(some) {
   SetShapeDeferred(
@@ -16,7 +16,7 @@ QR::QR(const Value& input, bool some)
 }
 
 NodePtr QR::Clone(OpList operands) const {
-  return MakeNode<QR>(operands.at(0), some_);
+  return torch::lazy::MakeNode<QR>(operands.at(0), some_);
 }
 
 std::string QR::ToString() const {

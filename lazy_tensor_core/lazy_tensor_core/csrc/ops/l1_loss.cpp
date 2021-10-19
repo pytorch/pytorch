@@ -8,8 +8,8 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-L1Loss::L1Loss(const Value& input, const Value& target, ReductionMode reduction)
-    : TsNode(ir::OpKind(at::aten::l1_loss), {input, target},
+L1Loss::L1Loss(const torch::lazy::Value& input, const torch::lazy::Value& target, ReductionMode reduction)
+    : TsNode(torch::lazy::OpKind(at::aten::l1_loss), {input, target},
            /*num_outputs=*/1,
            torch::lazy::MHash(
                lazy_tensors::util::GetEnumValue(reduction))),
@@ -19,7 +19,7 @@ L1Loss::L1Loss(const Value& input, const Value& target, ReductionMode reduction)
 }
 
 NodePtr L1Loss::Clone(OpList operands) const {
-  return MakeNode<L1Loss>(operands.at(0), operands.at(1), reduction_);
+  return torch::lazy::MakeNode<L1Loss>(operands.at(0), operands.at(1), reduction_);
 }
 
 std::string L1Loss::ToString() const {

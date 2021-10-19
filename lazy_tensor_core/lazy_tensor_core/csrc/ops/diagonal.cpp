@@ -10,11 +10,11 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Diagonal::Diagonal(const Value& input, lazy_tensors::int64 offset,
+Diagonal::Diagonal(const torch::lazy::Value& input, lazy_tensors::int64 offset,
                    lazy_tensors::int64 dim1, lazy_tensors::int64 dim2)
-    : TsNode(ir::OpKind(at::aten::diagonal), {input},
+    : TsNode(torch::lazy::OpKind(at::aten::diagonal), {input},
            [&]() {
-             return MakeDiagonalShape(GetShapeFromTsValue(input), offset, dim1, dim2);
+             return MakeDiagonalShape(ir::GetShapeFromTsValue(input), offset, dim1, dim2);
            },
            /*num_outputs=*/1, torch::lazy::MHash(offset, dim1, dim2)),
       offset_(offset),
@@ -22,7 +22,7 @@ Diagonal::Diagonal(const Value& input, lazy_tensors::int64 offset,
       dim2_(dim2) {}
 
 NodePtr Diagonal::Clone(OpList operands) const {
-  return MakeNode<Diagonal>(operands.at(0), offset_, dim1_, dim2_);
+  return torch::lazy::MakeNode<Diagonal>(operands.at(0), offset_, dim1_, dim2_);
 }
 
 std::string Diagonal::ToString() const {

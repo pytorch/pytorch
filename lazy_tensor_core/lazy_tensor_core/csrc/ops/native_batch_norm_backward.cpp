@@ -8,9 +8,9 @@ namespace ir {
 namespace ops {
 
 NativeBatchNormBackward::NativeBatchNormBackward(
-    const Value& grad_out, const Value& input, const Value& weight,
-    const Value& save_mean, const Value& save_invstd, bool training, double eps)
-    : TsNode(ir::OpKind(at::aten::native_batch_norm_backward),
+    const torch::lazy::Value& grad_out, const torch::lazy::Value& input, const torch::lazy::Value& weight,
+    const torch::lazy::Value& save_mean, const torch::lazy::Value& save_invstd, bool training, double eps)
+    : TsNode(torch::lazy::OpKind(at::aten::native_batch_norm_backward),
            {grad_out, input, weight, save_mean, save_invstd},
            /*num_outputs=*/3, torch::lazy::MHash(training, eps)),
       training_(training),
@@ -20,7 +20,7 @@ NativeBatchNormBackward::NativeBatchNormBackward(
 }
 
 NodePtr NativeBatchNormBackward::Clone(OpList operands) const {
-  return MakeNode<NativeBatchNormBackward>(operands.at(0), operands.at(1),
+  return torch::lazy::MakeNode<NativeBatchNormBackward>(operands.at(0), operands.at(1),
                                            operands.at(2), operands.at(3),
                                            operands.at(4), training_, eps_);
 }

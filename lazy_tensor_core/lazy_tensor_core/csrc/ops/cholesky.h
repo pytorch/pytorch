@@ -8,7 +8,7 @@ namespace ops {
 
 class Cholesky : public TsNode {
  public:
-  Cholesky(const Value& input, bool lower);
+  Cholesky(const torch::lazy::Value& input, bool lower);
 
   std::string ToString() const override;
 

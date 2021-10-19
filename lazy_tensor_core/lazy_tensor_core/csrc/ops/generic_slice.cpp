@@ -9,7 +9,7 @@ namespace ir {
 namespace ops {
 
 GenericSlice::GenericSlice(
-    const Value& input,
+    const torch::lazy::Value& input,
     lazy_tensors::Span<const lazy_tensors::int64> base_indices,
     lazy_tensors::Span<const lazy_tensors::int64> sizes)
     : TsNode(ltc_generic_slice, {input},
@@ -21,7 +21,7 @@ GenericSlice::GenericSlice(
 }
 
 NodePtr GenericSlice::Clone(OpList operands) const {
-  return MakeNode<GenericSlice>(operands.at(0), base_indices_, sizes_);
+  return torch::lazy::MakeNode<GenericSlice>(operands.at(0), base_indices_, sizes_);
 }
 
 std::string GenericSlice::ToString() const {

@@ -9,10 +9,10 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Unselect::Unselect(const Value& target, const Value& source,
+Unselect::Unselect(const torch::lazy::Value& target, const torch::lazy::Value& source,
                    lazy_tensors::int64 dim, lazy_tensors::int64 start,
                    lazy_tensors::int64 end, lazy_tensors::int64 stride)
-    : TsNode(ltc_unselect, {target, source}, GetShapeFromTsValue(target),
+    : TsNode(ltc_unselect, {target, source}, ir::GetShapeFromTsValue(target),
            /*num_outputs=*/1,
            torch::lazy::MHash(dim, start, end, stride)),
       dim_(dim),
@@ -21,7 +21,7 @@ Unselect::Unselect(const Value& target, const Value& source,
       stride_(stride) {}
 
 NodePtr Unselect::Clone(OpList operands) const {
-  return MakeNode<Unselect>(operands.at(0), operands.at(1), dim_, start_, end_,
+  return torch::lazy::MakeNode<Unselect>(operands.at(0), operands.at(1), dim_, start_, end_,
                             stride_);
 }
 

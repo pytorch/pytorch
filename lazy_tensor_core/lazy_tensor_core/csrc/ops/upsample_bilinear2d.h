@@ -10,7 +10,7 @@ namespace ops {
 
 class UpsampleBilinear : public TsNode {
  public:
-  UpsampleBilinear(const Value& input,
+  UpsampleBilinear(const torch::lazy::Value& input,
                    std::vector<lazy_tensors::int64> output_size,
                    bool align_corners);
 

@@ -23,7 +23,7 @@ std::string Constant::ToString() const {
 }
 
 NodePtr Constant::Clone(OpList operands) const {
-  return MakeNode<Constant>(value_.Clone());
+  return torch::lazy::MakeNode<Constant>(value_.Clone());
 }
 
 }  // namespace ops

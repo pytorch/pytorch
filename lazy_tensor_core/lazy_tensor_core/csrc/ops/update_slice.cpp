@@ -9,7 +9,7 @@ namespace ir {
 namespace ops {
 
 UpdateSlice::UpdateSlice(
-    const Value& input, const Value& source,
+    const torch::lazy::Value& input, const torch::lazy::Value& source,
     lazy_tensors::Span<const lazy_tensors::int64> base_indices)
     : TsNode(ltc_update_slice, {input, source},
            /*num_outputs=*/1, torch::lazy::MHash(base_indices)),
@@ -19,7 +19,7 @@ UpdateSlice::UpdateSlice(
 }
 
 NodePtr UpdateSlice::Clone(OpList operands) const {
-  return MakeNode<UpdateSlice>(operands.at(0), operands.at(1), base_indices_);
+  return torch::lazy::MakeNode<UpdateSlice>(operands.at(0), operands.at(1), base_indices_);
 }
 
 std::string UpdateSlice::ToString() const {

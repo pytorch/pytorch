@@ -10,7 +10,7 @@ namespace ops {
 
 class MaskedFill : public TsNode {
  public:
-  MaskedFill(const Value& input, const Value& mask, const at::Scalar& value);
+  MaskedFill(const torch::lazy::Value& input, const torch::lazy::Value& mask, const at::Scalar& value);
 
   std::string ToString() const override;
 

@@ -5,14 +5,14 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Put::Put(const Value& input, const Value& index, const Value& source,
+Put::Put(const torch::lazy::Value& input, const torch::lazy::Value& index, const torch::lazy::Value& source,
          bool accumulate)
-    : TsNode(ir::OpKind(at::aten::put), {input, index, source}, GetShapeFromTsValue(input),
+    : TsNode(torch::lazy::OpKind(at::aten::put), {input, index, source}, ir::GetShapeFromTsValue(input),
            /*num_outputs=*/1, torch::lazy::MHash(accumulate)),
       accumulate_(accumulate) {}
 
 NodePtr Put::Clone(OpList operands) const {
-  return MakeNode<Put>(operands.at(0), operands.at(1), operands.at(2),
+  return torch::lazy::MakeNode<Put>(operands.at(0), operands.at(1), operands.at(2),
                        accumulate_);
 }
 

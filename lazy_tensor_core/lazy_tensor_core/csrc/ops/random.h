@@ -8,7 +8,7 @@ namespace ops {
 
 class Random : public TsNode {
  public:
-  Random(const Value& input);
+  Random(const torch::lazy::Value& input);
 
   NodePtr Clone(OpList operands) const override;
 };

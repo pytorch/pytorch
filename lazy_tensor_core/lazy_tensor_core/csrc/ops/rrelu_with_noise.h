@@ -11,7 +11,7 @@ namespace ops {
 
 class RreluWithNoise : public TsNode {
  public:
-  RreluWithNoise(const Value& input, const Value& seed, const at::Scalar& lower,
+  RreluWithNoise(const torch::lazy::Value& input, const torch::lazy::Value& seed, const at::Scalar& lower,
                  const at::Scalar& upper, bool training);
 
   std::string ToString() const override;

@@ -8,7 +8,7 @@ namespace ops {
 
 class Uniform : public TsNode {
  public:
-  Uniform(const Value& from, const Value& to, const Value& seed,
+  Uniform(const torch::lazy::Value& from, const torch::lazy::Value& to, const torch::lazy::Value& seed,
           const lazy_tensors::Shape& rng_shape);
 
   NodePtr Clone(OpList operands) const override;

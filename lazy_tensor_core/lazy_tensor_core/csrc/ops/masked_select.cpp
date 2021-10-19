@@ -9,8 +9,8 @@ namespace ir {
 namespace ops {
 namespace {
 
-lazy_tensors::Shape NodeOutputShape(const Value& input) {
-  const lazy_tensors::Shape& input_shape = GetShapeFromTsValue(input);
+lazy_tensors::Shape NodeOutputShape(const torch::lazy::Value& input) {
+  const lazy_tensors::Shape& input_shape = ir::GetShapeFromTsValue(input);
   lazy_tensors::int64 input_elements =
       lazy_tensors::ShapeUtil::ElementsIn(input_shape);
   lazy_tensors::PrimitiveType size_type =
@@ -24,13 +24,13 @@ lazy_tensors::Shape NodeOutputShape(const Value& input) {
 
 }  // namespace
 
-MaskedSelect::MaskedSelect(const Value& input, const Value& mask)
-    : TsNode(ir::OpKind(at::aten::masked_select), {input, mask},
+MaskedSelect::MaskedSelect(const torch::lazy::Value& input, const torch::lazy::Value& mask)
+    : TsNode(torch::lazy::OpKind(at::aten::masked_select), {input, mask},
            NodeOutputShape(input),
            /*num_outputs=*/2) {}
 
 NodePtr MaskedSelect::Clone(OpList operands) const {
-  return MakeNode<MaskedSelect>(operands.at(0), operands.at(1));
+  return torch::lazy::MakeNode<MaskedSelect>(operands.at(0), operands.at(1));
 }
 
 }  // namespace ops

@@ -8,7 +8,7 @@ namespace ops {
 
 class QR : public TsNode {
  public:
-  QR(const Value& input, bool some);
+  QR(const torch::lazy::Value& input, bool some);
 
   std::string ToString() const override;
 

@@ -8,8 +8,8 @@ namespace ir {
 namespace ops {
 
 AdaptiveAvgPool2d::AdaptiveAvgPool2d(
-    const Value& input, std::vector<lazy_tensors::int64> output_size)
-    : TsNode(ir::OpKind(at::aten::adaptive_avg_pool2d), {input},
+    const torch::lazy::Value& input, std::vector<lazy_tensors::int64> output_size)
+    : TsNode(torch::lazy::OpKind(at::aten::adaptive_avg_pool2d), {input},
            /*num_outputs=*/1, torch::lazy::MHash(output_size)),
       output_size_(std::move(output_size)) {
   SetShapeDeferred(
@@ -17,7 +17,7 @@ AdaptiveAvgPool2d::AdaptiveAvgPool2d(
 }
 
 NodePtr AdaptiveAvgPool2d::Clone(OpList operands) const {
-  return MakeNode<AdaptiveAvgPool2d>(operands.at(0), output_size_);
+  return torch::lazy::MakeNode<AdaptiveAvgPool2d>(operands.at(0), output_size_);
 }
 
 std::string AdaptiveAvgPool2d::ToString() const {

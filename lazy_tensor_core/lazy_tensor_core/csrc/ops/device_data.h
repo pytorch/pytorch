@@ -19,7 +19,7 @@ class DeviceData : public TsNode {
     return data_;
   }
 
-  static const DeviceData* Cast(const Node* node);
+  static const DeviceData* Cast(const torch::lazy::Node* node);
 
  private:
   std::shared_ptr<lazy_tensors::client::Data> data_;

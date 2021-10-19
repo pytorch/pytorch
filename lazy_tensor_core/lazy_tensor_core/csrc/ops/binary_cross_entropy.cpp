@@ -8,11 +8,11 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-BinaryCrossEntropy::BinaryCrossEntropy(const Value& logits, const Value& labels,
-                                       const c10::optional<Value>& weight,
+BinaryCrossEntropy::BinaryCrossEntropy(const torch::lazy::Value& logits, const torch::lazy::Value& labels,
+                                       const c10::optional<torch::lazy::Value>& weight,
                                        ReductionMode reduction)
-    : TsNode(ir::OpKind(at::aten::binary_cross_entropy),
-             lazy_tensors::util::GetValuesVector<Value>({logits, labels},
+    : TsNode(torch::lazy::OpKind(at::aten::binary_cross_entropy),
+             lazy_tensors::util::GetValuesVector<torch::lazy::Value>({logits, labels},
                                                         {&weight}),
              /*num_outputs=*/1,
              torch::lazy::MHash(lazy_tensors::util::GetEnumValue(reduction))),
@@ -22,11 +22,11 @@ BinaryCrossEntropy::BinaryCrossEntropy(const Value& logits, const Value& labels,
 }
 
 NodePtr BinaryCrossEntropy::Clone(OpList operands) const {
-  c10::optional<Value> weight;
+  c10::optional<torch::lazy::Value> weight;
   if (operands.size() > 2) {
     weight = operands.at(2);
   }
-  return MakeNode<BinaryCrossEntropy>(operands.at(0), operands.at(1), weight,
+  return torch::lazy::MakeNode<BinaryCrossEntropy>(operands.at(0), operands.at(1), weight,
                                       reduction_);
 }
 

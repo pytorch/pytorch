@@ -10,7 +10,7 @@ namespace ops {
 
 class ReflectionPad2dBackward : public TsNode {
  public:
-  ReflectionPad2dBackward(const Value& gard_output, const Value& input,
+  ReflectionPad2dBackward(const torch::lazy::Value& gard_output, const torch::lazy::Value& input,
                           std::vector<lazy_tensors::int64> padding);
 
   NodePtr Clone(OpList operands) const override;

@@ -7,14 +7,14 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-MaskedFill::MaskedFill(const Value& input, const Value& mask,
+MaskedFill::MaskedFill(const torch::lazy::Value& input, const torch::lazy::Value& mask,
                        const at::Scalar& value)
-    : TsNode(OpKind(at::aten::masked_fill), {input, mask}, GetShapeFromTsValue(input),
+    : TsNode(OpKind(at::aten::masked_fill), {input, mask}, ir::GetShapeFromTsValue(input),
            /*num_outputs=*/1, ScalarHash(value)),
       value_(std::move(value)) {}
 
 NodePtr MaskedFill::Clone(OpList operands) const {
-  return MakeNode<MaskedFill>(operands.at(0), operands.at(1), value_);
+  return torch::lazy::MakeNode<MaskedFill>(operands.at(0), operands.at(1), value_);
 }
 
 std::string MaskedFill::ToString() const {

@@ -11,7 +11,7 @@ namespace ops {
 
 class CumSum : public TsNode {
  public:
-  CumSum(const Value& input, lazy_tensors::int64 dim,
+  CumSum(const torch::lazy::Value& input, lazy_tensors::int64 dim,
          c10::optional<at::ScalarType> dtype);
 
   std::string ToString() const override;

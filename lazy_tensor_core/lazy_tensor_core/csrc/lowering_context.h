@@ -23,14 +23,14 @@ class LoweringContext {
  public:
   LoweringContext(const std::string& name, Device device);
   LoweringContext(const std::string& name, Device device,
-                  lazy_tensors::Span<const Node* const> post_order,
+                  lazy_tensors::Span<const torch::lazy::Node* const> post_order,
                   Util::EmissionMap emit_status);
 
   virtual ~LoweringContext() = default;
 
   static std::unique_ptr<LoweringContext> Create(
       const std::string& name, Device device,
-      lazy_tensors::Span<const Node* const> post_order,
+      lazy_tensors::Span<const torch::lazy::Node* const> post_order,
       Util::EmissionMap emit_status);
 
   static std::unique_ptr<LoweringContext> Create(const std::string& name,
@@ -48,7 +48,7 @@ class LoweringContext {
 
   // Adds the given output as a component of the result tuple and returns its
   // assigned position within the tuple.
-  virtual size_t AddResult(const Output& output) = 0;
+  virtual size_t AddResult(const torch::lazy::Output& output) = 0;
 
   // Build the computation capturing all the operations created with the
   // embedded builder (returned by the builder() API).
@@ -58,12 +58,12 @@ class LoweringContext {
 
   // Lowers the given node as the result of the computation. Only used for the
   // operator-by-operator execution, mostly for debugging purposes.
-  virtual void LowerNodeToResult(const Node* node);
+  virtual void LowerNodeToResult(const torch::lazy::Node* node);
 
   // Associates the given output with the input parameter of the given index and
   // shape. Only used for the operator-by-operator execution, mostly for
   // debugging purposes.
-  virtual void AddParameter(const Output& output, size_t index,
+  virtual void AddParameter(const torch::lazy::Output& output, size_t index,
                             const lazy_tensors::Shape& shape,
                             const std::string& name);
 

@@ -24,7 +24,7 @@ namespace ir {
 
 std::unique_ptr<LoweringContext> LoweringContext::Create(
     const std::string& name, Device device,
-    lazy_tensors::Span<const Node* const> post_order,
+    lazy_tensors::Span<const torch::lazy::Node* const> post_order,
     Util::EmissionMap emit_status) {
   return torch_lazy_tensors::compiler::getBackendRegistrar()
       ->CreateLoweringContext(name, device, post_order, emit_status);

@@ -8,7 +8,7 @@ namespace ops {
 
 class MaxUnpoolNd : public TsNode {
  public:
-  MaxUnpoolNd(const Value& input, const Value& indices,
+  MaxUnpoolNd(const torch::lazy::Value& input, const torch::lazy::Value& indices,
               std::vector<lazy_tensors::int64> output_size);
 
   NodePtr Clone(OpList operands) const override;

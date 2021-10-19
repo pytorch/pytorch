@@ -24,11 +24,11 @@ c10::Symbol MaxPoolNdSymbol(lazy_tensors::int64 spatial_dim_count) {
 
 }  // namespace
 
-MaxPoolNd::MaxPoolNd(const Value& input, lazy_tensors::int64 spatial_dim_count,
+MaxPoolNd::MaxPoolNd(const torch::lazy::Value& input, lazy_tensors::int64 spatial_dim_count,
                      std::vector<lazy_tensors::int64> kernel_size,
                      std::vector<lazy_tensors::int64> stride,
                      std::vector<lazy_tensors::int64> padding, bool ceil_mode)
-    : TsNode(ir::OpKind(MaxPoolNdSymbol(spatial_dim_count)), {input},
+    : TsNode(torch::lazy::OpKind(MaxPoolNdSymbol(spatial_dim_count)), {input},
            /*num_outputs=*/2,
            torch::lazy::MHash(spatial_dim_count, kernel_size, stride,
                                      padding, ceil_mode)),
@@ -42,7 +42,7 @@ MaxPoolNd::MaxPoolNd(const Value& input, lazy_tensors::int64 spatial_dim_count,
 }
 
 NodePtr MaxPoolNd::Clone(OpList operands) const {
-  return MakeNode<MaxPoolNd>(operands.at(0), spatial_dim_count_, kernel_size_,
+  return torch::lazy::MakeNode<MaxPoolNd>(operands.at(0), spatial_dim_count_, kernel_size_,
                              stride_, padding_, ceil_mode_);
 }
 

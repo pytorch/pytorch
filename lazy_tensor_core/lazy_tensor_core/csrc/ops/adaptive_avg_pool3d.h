@@ -12,7 +12,7 @@ namespace ops {
 
 class AdaptiveAvgPool3d : public TsNode {
  public:
-  AdaptiveAvgPool3d(const Value& input,
+  AdaptiveAvgPool3d(const torch::lazy::Value& input,
                     std::vector<lazy_tensors::int64> output_size);
 
   NodePtr Clone(OpList operands) const override;

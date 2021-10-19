@@ -7,8 +7,8 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Repeat::Repeat(const Value& input, std::vector<lazy_tensors::int64> repeats)
-    : TsNode(ir::OpKind(at::aten::repeat), {input},
+Repeat::Repeat(const torch::lazy::Value& input, std::vector<lazy_tensors::int64> repeats)
+    : TsNode(torch::lazy::OpKind(at::aten::repeat), {input},
            /*num_outputs=*/1, torch::lazy::MHash(repeats)),
       repeats_(std::move(repeats)) {
   SetShapeDeferred(
@@ -16,7 +16,7 @@ Repeat::Repeat(const Value& input, std::vector<lazy_tensors::int64> repeats)
 }
 
 NodePtr Repeat::Clone(OpList operands) const {
-  return MakeNode<Repeat>(operands.at(0), repeats_);
+  return torch::lazy::MakeNode<Repeat>(operands.at(0), repeats_);
 }
 
 std::string Repeat::ToString() const {

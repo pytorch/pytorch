@@ -11,7 +11,7 @@ namespace ops {
 
 class CumProd : public TsNode {
  public:
-  CumProd(const Value& input, lazy_tensors::int64 dim,
+  CumProd(const torch::lazy::Value& input, lazy_tensors::int64 dim,
           c10::optional<at::ScalarType> dtype);
 
   std::string ToString() const override;

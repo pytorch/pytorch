@@ -11,7 +11,7 @@ namespace ops {
 
 class Any : public TsNode {
  public:
-  Any(const Value& input, std::vector<lazy_tensors::int64> dimensions,
+  Any(const torch::lazy::Value& input, std::vector<lazy_tensors::int64> dimensions,
       bool keep_reduced_dimensions);
 
   std::string ToString() const override;

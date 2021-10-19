@@ -8,8 +8,8 @@ namespace ops {
 
 class Nms : public TsNode {
  public:
-  Nms(const Value& boxes, const Value& scores, const Value& score_threshold,
-      const Value& iou_threshold, lazy_tensors::int64 output_size);
+  Nms(const torch::lazy::Value& boxes, const torch::lazy::Value& scores, const torch::lazy::Value& score_threshold,
+      const torch::lazy::Value& iou_threshold, lazy_tensors::int64 output_size);
 
   NodePtr Clone(OpList operands) const override;
 

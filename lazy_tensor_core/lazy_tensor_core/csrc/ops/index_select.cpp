@@ -7,9 +7,9 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-IndexSelect::IndexSelect(const Value& input, lazy_tensors::int64 dim,
-                         const Value& index)
-    : TsNode(ir::OpKind(at::aten::index_select), {input, index},
+IndexSelect::IndexSelect(const torch::lazy::Value& input, lazy_tensors::int64 dim,
+                         const torch::lazy::Value& index)
+    : TsNode(torch::lazy::OpKind(at::aten::index_select), {input, index},
            /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim) {
   SetShapeDeferred(
@@ -17,7 +17,7 @@ IndexSelect::IndexSelect(const Value& input, lazy_tensors::int64 dim,
 }
 
 NodePtr IndexSelect::Clone(OpList operands) const {
-  return MakeNode<IndexSelect>(operands.at(0), dim_, operands.at(1));
+  return torch::lazy::MakeNode<IndexSelect>(operands.at(0), dim_, operands.at(1));
 }
 
 std::string IndexSelect::ToString() const {

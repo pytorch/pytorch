@@ -45,7 +45,6 @@ set(TORCH_LTC_TEST_SOURCES
   main.cpp
   metrics_snapshot.cpp
   test_async_task.cpp
-  test_ir.cpp
   test_mayberef.cpp
   test_ltc_util_cache.cpp
   test_aten_ltc_ts_tensor.cpp

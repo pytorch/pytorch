@@ -8,7 +8,7 @@ namespace ir {
 namespace ops {
 
 Cat::Cat(OpList values, lazy_tensors::int64 dim)
-    : TsNode(ir::OpKind(at::aten::cat), values,
+    : TsNode(torch::lazy::OpKind(at::aten::cat), values,
            /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim) {
   SetShapeDeferred(
@@ -16,7 +16,7 @@ Cat::Cat(OpList values, lazy_tensors::int64 dim)
 }
 
 NodePtr Cat::Clone(OpList operands) const {
-  return MakeNode<Cat>(operands, dim_);
+  return torch::lazy::MakeNode<Cat>(operands, dim_);
 }
 
 std::string Cat::ToString() const {

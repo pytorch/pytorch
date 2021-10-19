@@ -5,15 +5,15 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-ThresholdBackward::ThresholdBackward(const Value& grad_output,
-                                     const Value& input, float threshold)
-    : TsNode(ir::OpKind(at::aten::threshold_backward), {grad_output, input},
-           GetShapeFromTsValue(input), /*num_outputs=*/1,
+ThresholdBackward::ThresholdBackward(const torch::lazy::Value& grad_output,
+                                     const torch::lazy::Value& input, float threshold)
+    : TsNode(torch::lazy::OpKind(at::aten::threshold_backward), {grad_output, input},
+           ir::GetShapeFromTsValue(input), /*num_outputs=*/1,
            torch::lazy::MHash(threshold)),
       threshold_(threshold) {}
 
 NodePtr ThresholdBackward::Clone(OpList operands) const {
-  return MakeNode<ThresholdBackward>(operands.at(0), operands.at(1),
+  return torch::lazy::MakeNode<ThresholdBackward>(operands.at(0), operands.at(1),
                                      threshold_);
 }
 

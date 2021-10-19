@@ -10,9 +10,9 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Any::Any(const Value& input, std::vector<lazy_tensors::int64> dimensions,
+Any::Any(const torch::lazy::Value& input, std::vector<lazy_tensors::int64> dimensions,
          bool keep_reduced_dimensions)
-    : TsNode(ir::OpKind(at::aten::any), {input},
+    : TsNode(torch::lazy::OpKind(at::aten::any), {input},
            /*num_outputs=*/1,
            torch::lazy::MHash(dimensions, keep_reduced_dimensions)),
       dimensions_(std::move(dimensions)),
@@ -22,7 +22,7 @@ Any::Any(const Value& input, std::vector<lazy_tensors::int64> dimensions,
 }
 
 NodePtr Any::Clone(OpList operands) const {
-  return MakeNode<Any>(operands.at(0), dimensions_, keep_reduced_dimensions_);
+  return torch::lazy::MakeNode<Any>(operands.at(0), dimensions_, keep_reduced_dimensions_);
 }
 
 std::string Any::ToString() const {

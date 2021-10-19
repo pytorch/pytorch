@@ -8,7 +8,7 @@ namespace ops {
 
 class Amax : public TsNode {
  public:
-  Amax(const Value& input, std::vector<lazy_tensors::int64> dimensions,
+  Amax(const torch::lazy::Value& input, std::vector<lazy_tensors::int64> dimensions,
        bool keepdim);
 
   std::string ToString() const override;

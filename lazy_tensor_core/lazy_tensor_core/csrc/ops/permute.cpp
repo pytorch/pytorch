@@ -9,8 +9,8 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Permute::Permute(const Value& input, std::vector<lazy_tensors::int64> dims)
-    : TsNode(ir::OpKind(at::aten::permute), {input},
+Permute::Permute(const torch::lazy::Value& input, std::vector<lazy_tensors::int64> dims)
+    : TsNode(torch::lazy::OpKind(at::aten::permute), {input},
            /*num_outputs=*/1, torch::lazy::MHash(dims)),
       dims_(std::move(dims)) {
   SetShapeDeferred(
@@ -18,7 +18,7 @@ Permute::Permute(const Value& input, std::vector<lazy_tensors::int64> dims)
 }
 
 NodePtr Permute::Clone(OpList operands) const {
-  return MakeNode<Permute>(operands.at(0), dims_);
+  return torch::lazy::MakeNode<Permute>(operands.at(0), dims_);
 }
 
 std::string Permute::ToString() const {

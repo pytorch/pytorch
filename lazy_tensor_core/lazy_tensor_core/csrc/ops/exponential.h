@@ -8,7 +8,7 @@ namespace ops {
 
 class Exponential : public TsNode {
  public:
-  Exponential(const Value& lambda, const Value& seed,
+  Exponential(const torch::lazy::Value& lambda, const torch::lazy::Value& seed,
               lazy_tensors::Shape shape);
 
   NodePtr Clone(OpList operands) const override;

@@ -7,12 +7,12 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Select::Select(const Value& input, lazy_tensors::int64 dim,
+Select::Select(const torch::lazy::Value& input, lazy_tensors::int64 dim,
                lazy_tensors::int64 start, lazy_tensors::int64 end,
                lazy_tensors::int64 stride)
     : TsNode(ltc_select, {input},
            [&]() {
-             return MakeSelectShape(GetShapeFromTsValue(input), dim, start, end, stride);
+             return MakeSelectShape(ir::GetShapeFromTsValue(input), dim, start, end, stride);
            },
            /*num_outputs=*/1,
            torch::lazy::MHash(dim, start, end, stride)),
@@ -22,7 +22,7 @@ Select::Select(const Value& input, lazy_tensors::int64 dim,
       stride_(stride) {}
 
 NodePtr Select::Clone(OpList operands) const {
-  return MakeNode<Select>(operands.at(0), dim_, start_, end_, stride_);
+  return torch::lazy::MakeNode<Select>(operands.at(0), dim_, start_, end_, stride_);
 }
 
 std::string Select::ToString() const {

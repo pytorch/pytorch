@@ -7,8 +7,8 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-ArgMin::ArgMin(const Value& input, lazy_tensors::int64 dim, bool keepdim)
-    : TsNode(ir::OpKind(at::aten::argmin), {input},
+ArgMin::ArgMin(const torch::lazy::Value& input, lazy_tensors::int64 dim, bool keepdim)
+    : TsNode(torch::lazy::OpKind(at::aten::argmin), {input},
            /*num_outputs=*/1, torch::lazy::MHash(dim, keepdim)),
       dim_(dim),
       keepdim_(keepdim) {
@@ -17,7 +17,7 @@ ArgMin::ArgMin(const Value& input, lazy_tensors::int64 dim, bool keepdim)
 }
 
 NodePtr ArgMin::Clone(OpList operands) const {
-  return MakeNode<ArgMin>(operands.at(0), dim_, keepdim_);
+  return torch::lazy::MakeNode<ArgMin>(operands.at(0), dim_, keepdim_);
 }
 
 std::string ArgMin::ToString() const {

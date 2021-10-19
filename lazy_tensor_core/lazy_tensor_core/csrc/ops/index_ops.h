@@ -50,7 +50,7 @@ CanonicalIndexInfo GetCanonicalIndexInfo(
     const c10::List<c10::optional<at::Tensor>>& orig_indices);
 
 // Expands a rank <= 1 tensor to rank 1, if necessary.
-ir::Value EnsureRank1(const ir::Value& index);
+torch::lazy::Value EnsureRank1(const torch::lazy::Value& index);
 
 // Implements indexing by tensors of long according to the top-level
 // description.
@@ -58,21 +58,21 @@ LazyTensor IndexByTensors(const LazyTensor& base,
                           lazy_tensors::Span<const LazyTensor> indices,
                           lazy_tensors::int64 start_dim);
 
-ir::Value IndexPutByTensors(
+torch::lazy::Value IndexPutByTensors(
     const LazyTensor& base, lazy_tensors::Span<const LazyTensor> indices,
     lazy_tensors::int64 start_dim, const LazyTensor& updates, bool accumulate,
     lazy_tensors::Span<const lazy_tensors::int64> result_permutation);
 
-ir::NodePtr IndexFill(const LazyTensor& base, lazy_tensors::int64 dim,
+NodePtr IndexFill(const LazyTensor& base, lazy_tensors::int64 dim,
                       const LazyTensor& index, const at::Scalar& value);
 
-ir::NodePtr IndexFill(const LazyTensor& base, lazy_tensors::int64 dim,
+NodePtr IndexFill(const LazyTensor& base, lazy_tensors::int64 dim,
                       const LazyTensor& index, const LazyTensor& value);
 
-ir::Value IndexAdd(const LazyTensor& base, lazy_tensors::int64 dim,
+torch::lazy::Value IndexAdd(const LazyTensor& base, lazy_tensors::int64 dim,
                    const LazyTensor& index, const LazyTensor& source);
 
-ir::Value IndexCopy(const LazyTensor& base, lazy_tensors::int64 dim,
+torch::lazy::Value IndexCopy(const LazyTensor& base, lazy_tensors::int64 dim,
                     const LazyTensor& index, const LazyTensor& source);
 
 }  // namespace torch_lazy_tensors

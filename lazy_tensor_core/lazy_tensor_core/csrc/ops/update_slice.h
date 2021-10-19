@@ -9,7 +9,7 @@ namespace ops {
 
 class UpdateSlice : public TsNode {
  public:
-  UpdateSlice(const Value& input, const Value& source,
+  UpdateSlice(const torch::lazy::Value& input, const torch::lazy::Value& source,
               lazy_tensors::Span<const lazy_tensors::int64> base_indices);
 
   NodePtr Clone(OpList operands) const override;

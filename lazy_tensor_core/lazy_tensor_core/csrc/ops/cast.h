@@ -11,8 +11,8 @@ namespace ops {
 
 class Cast : public TsNode {
  public:
-  Cast(const Value& input, lazy_tensors::PrimitiveType type);
-  Cast(const Value& input, at::ScalarType dtype,
+  Cast(const torch::lazy::Value& input, lazy_tensors::PrimitiveType type);
+  Cast(const torch::lazy::Value& input, at::ScalarType dtype,
        c10::optional<at::ScalarType> stype = c10::nullopt);
 
   std::string ToString() const override;

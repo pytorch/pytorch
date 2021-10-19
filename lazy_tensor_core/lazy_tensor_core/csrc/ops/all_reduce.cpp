@@ -11,9 +11,9 @@ namespace ir {
 namespace ops {
 namespace {
 
-std::vector<Value> GetOperandList(OpList operands,
-                                  const Value& token) {
-  std::vector<Value> operand_list(operands.begin(), operands.end());
+std::vector<torch::lazy::Value> GetOperandList(OpList operands,
+                                  const torch::lazy::Value& token) {
+  std::vector<torch::lazy::Value> operand_list(operands.begin(), operands.end());
   operand_list.push_back(token);
   return operand_list;
 }
@@ -22,7 +22,7 @@ std::vector<Value> GetOperandList(OpList operands,
 
 AllReduce::AllReduce(AllReduceType reduce_type,
                      OpList operands,
-                     const Value& token, double scale,
+                     const torch::lazy::Value& token, double scale,
                      std::vector<std::vector<lazy_tensors::int64>> groups)
     : TsNode(ltc_cross_replica_sum, GetOperandList(operands, token),
            /*num_outputs=*/operands.size() + 1,
@@ -36,8 +36,8 @@ AllReduce::AllReduce(AllReduceType reduce_type,
 }
 
 NodePtr AllReduce::Clone(OpList operands) const {
-  std::vector<Value> operand_list(operands.begin(), operands.end() - 1);
-  return MakeNode<AllReduce>(reduce_type_, operand_list, operands.back(),
+  std::vector<torch::lazy::Value> operand_list(operands.begin(), operands.end() - 1);
+  return torch::lazy::MakeNode<AllReduce>(reduce_type_, operand_list, operands.back(),
                              scale_, groups_);
 }
 

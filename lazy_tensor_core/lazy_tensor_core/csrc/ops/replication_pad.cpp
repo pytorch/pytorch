@@ -9,7 +9,7 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-ReplicationPad::ReplicationPad(const Value& input,
+ReplicationPad::ReplicationPad(const torch::lazy::Value& input,
                                std::vector<lazy_tensors::int64> padding)
     : TsNode(ltc_replication_pad, {input},
            /*num_outputs=*/1, torch::lazy::MHash(padding)),
@@ -19,7 +19,7 @@ ReplicationPad::ReplicationPad(const Value& input,
 }
 
 NodePtr ReplicationPad::Clone(OpList operands) const {
-  return MakeNode<ReplicationPad>(operands.at(0), padding_);
+  return torch::lazy::MakeNode<ReplicationPad>(operands.at(0), padding_);
 }
 
 std::string ReplicationPad::ToString() const {

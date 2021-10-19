@@ -7,10 +7,10 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-TriangularSolve::TriangularSolve(const Value& rhs, const Value& lhs,
+TriangularSolve::TriangularSolve(const torch::lazy::Value& rhs, const torch::lazy::Value& lhs,
                                  bool left_side, bool lower, bool transpose,
                                  bool unit_diagonal)
-    : TsNode(ir::OpKind(at::aten::triangular_solve), {rhs, lhs},
+    : TsNode(torch::lazy::OpKind(at::aten::triangular_solve), {rhs, lhs},
            /*num_outputs=*/2,
            torch::lazy::MHash(left_side, lower, transpose,
                                      unit_diagonal)),
@@ -23,7 +23,7 @@ TriangularSolve::TriangularSolve(const Value& rhs, const Value& lhs,
 }
 
 NodePtr TriangularSolve::Clone(OpList operands) const {
-  return MakeNode<TriangularSolve>(operands.at(0), operands.at(1), left_side_,
+  return torch::lazy::MakeNode<TriangularSolve>(operands.at(0), operands.at(1), left_side_,
                                    lower_, transpose_, unit_diagonal_);
 }
 

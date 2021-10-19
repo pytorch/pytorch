@@ -8,7 +8,7 @@ namespace ops {
 
 class MaxPoolNdBackward : public TsNode {
  public:
-  MaxPoolNdBackward(const Value& grad_output, const Value& input,
+  MaxPoolNdBackward(const torch::lazy::Value& grad_output, const torch::lazy::Value& input,
                     lazy_tensors::int64 spatial_dim_count,
                     std::vector<lazy_tensors::int64> kernel_size,
                     std::vector<lazy_tensors::int64> stride,

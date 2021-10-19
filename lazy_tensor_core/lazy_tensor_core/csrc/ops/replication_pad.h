@@ -9,7 +9,7 @@ namespace ops {
 
 class ReplicationPad : public TsNode {
  public:
-  ReplicationPad(const Value& input, std::vector<lazy_tensors::int64> padding);
+  ReplicationPad(const torch::lazy::Value& input, std::vector<lazy_tensors::int64> padding);
 
   NodePtr Clone(OpList operands) const override;
 

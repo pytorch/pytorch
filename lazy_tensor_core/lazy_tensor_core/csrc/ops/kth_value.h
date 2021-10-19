@@ -8,7 +8,7 @@ namespace ops {
 
 class KthValue : public TsNode {
  public:
-  KthValue(const Value& input, lazy_tensors::int64 k, lazy_tensors::int64 dim,
+  KthValue(const torch::lazy::Value& input, lazy_tensors::int64 k, lazy_tensors::int64 dim,
            bool keepdim);
 
   std::string ToString() const override;

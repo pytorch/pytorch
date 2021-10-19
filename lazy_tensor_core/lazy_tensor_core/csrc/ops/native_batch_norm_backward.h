@@ -9,9 +9,9 @@ namespace ops {
 // Node for the backward batch norm operator.
 class NativeBatchNormBackward : public TsNode {
  public:
-  NativeBatchNormBackward(const Value& grad_out, const Value& input,
-                          const Value& weight, const Value& save_mean,
-                          const Value& save_invstd, bool training, double eps);
+  NativeBatchNormBackward(const torch::lazy::Value& grad_out, const torch::lazy::Value& input,
+                          const torch::lazy::Value& weight, const torch::lazy::Value& save_mean,
+                          const torch::lazy::Value& save_invstd, bool training, double eps);
 
   NodePtr Clone(OpList operands) const override;
 

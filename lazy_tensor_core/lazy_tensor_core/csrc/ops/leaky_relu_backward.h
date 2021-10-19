@@ -10,7 +10,7 @@ namespace ops {
 
 class LeakyReluBackward : public TsNode {
  public:
-  LeakyReluBackward(const Value& grad_output, const Value& input,
+  LeakyReluBackward(const torch::lazy::Value& grad_output, const torch::lazy::Value& input,
                     double negative_slope, bool self_is_result = false);
 
   NodePtr Clone(OpList operands) const override;

@@ -15,21 +15,21 @@ namespace ir {
 namespace ops {
 
 inline NodePtr ScalarOp(const at::Scalar& value, lazy_tensors::Shape shape) {
-  return MakeNode<Scalar>(value, std::move(shape));
+  return torch::lazy::MakeNode<Scalar>(value, std::move(shape));
 }
 inline NodePtr ScalarOp(const at::Scalar& value,
                         lazy_tensors::PrimitiveType type) {
-  return MakeNode<Scalar>(value, type);
+  return torch::lazy::MakeNode<Scalar>(value, type);
 }
 
 inline NodePtr ConstantOp(lazy_tensors::Literal value) {
-  return MakeNode<Constant>(std::move(value));
+  return torch::lazy::MakeNode<Constant>(std::move(value));
 }
 
 inline NodePtr GenericOp(OpKind op, OpList operands,
                          lazy_tensors::Shape shape, size_t num_outputs = 1,
                          torch::lazy::hash_t hash_seed = static_cast<uint32_t>(0x5a2d296e9)) {
-  return MakeNode<Generic>(std::move(op), operands, std::move(shape),
+  return torch::lazy::MakeNode<Generic>(std::move(op), operands, std::move(shape),
                            num_outputs, hash_seed);
 }
 
@@ -37,186 +37,186 @@ inline NodePtr GenericOp(OpKind op, OpList operands,
                          const std::function<lazy_tensors::Shape()>& shape_fn,
                          size_t num_outputs = 1,
                          torch::lazy::hash_t hash_seed = static_cast<uint32_t>(0x5a2d296e9)) {
-  return MakeNode<Generic>(std::move(op), operands, shape_fn, num_outputs,
+  return torch::lazy::MakeNode<Generic>(std::move(op), operands, shape_fn, num_outputs,
                            hash_seed);
 }
 
 inline NodePtr GenericOp(OpKind op, OpList operands,
                          size_t num_outputs = 1,
                          torch::lazy::hash_t hash_seed = static_cast<uint32_t>(0x5a2d296e9)) {
-  return MakeNode<Generic>(std::move(op), operands, num_outputs, hash_seed);
+  return torch::lazy::MakeNode<Generic>(std::move(op), operands, num_outputs, hash_seed);
 }
 
 inline NodePtr GenericOp(OpKind op, lazy_tensors::Shape shape,
                          size_t num_outputs, torch::lazy::hash_t hash_seed) {
-  return MakeNode<Generic>(std::move(op), std::move(shape), num_outputs,
+  return torch::lazy::MakeNode<Generic>(std::move(op), std::move(shape), num_outputs,
                            hash_seed);
 }
 
-NodePtr Acos(const Value& input);
+NodePtr Acos(const torch::lazy::Value& input);
 
-NodePtr Acosh(const Value& input);
+NodePtr Acosh(const torch::lazy::Value& input);
 
-NodePtr Cos(const Value& input);
+NodePtr Cos(const torch::lazy::Value& input);
 
-NodePtr Cosh(const Value& input);
+NodePtr Cosh(const torch::lazy::Value& input);
 
-NodePtr Asin(const Value& input);
+NodePtr Asin(const torch::lazy::Value& input);
 
-NodePtr Asinh(const Value& input);
+NodePtr Asinh(const torch::lazy::Value& input);
 
-NodePtr Sin(const Value& input);
+NodePtr Sin(const torch::lazy::Value& input);
 
-NodePtr Sinh(const Value& input);
+NodePtr Sinh(const torch::lazy::Value& input);
 
-NodePtr Atan(const Value& input);
+NodePtr Atan(const torch::lazy::Value& input);
 
-NodePtr Atanh(const Value& input);
+NodePtr Atanh(const torch::lazy::Value& input);
 
-NodePtr Atan2(const Value& input, const Value& other);
+NodePtr Atan2(const torch::lazy::Value& input, const torch::lazy::Value& other);
 
-NodePtr Tan(const Value& input);
+NodePtr Tan(const torch::lazy::Value& input);
 
-NodePtr Tanh(const Value& input);
+NodePtr Tanh(const torch::lazy::Value& input);
 
-NodePtr Neg(const Value& input);
+NodePtr Neg(const torch::lazy::Value& input);
 
-NodePtr SignOp(const Value& input);
+NodePtr SignOp(const torch::lazy::Value& input);
 
-NodePtr Abs(const Value& input);
+NodePtr Abs(const torch::lazy::Value& input);
 
-NodePtr ReluOp(const Value& input);
+NodePtr ReluOp(const torch::lazy::Value& input);
 
-NodePtr Min(const Value& input, const Value& other);
+NodePtr Min(const torch::lazy::Value& input, const torch::lazy::Value& other);
 
-NodePtr Max(const Value& input, const Value& other);
+NodePtr Max(const torch::lazy::Value& input, const torch::lazy::Value& other);
 
-NodePtr Exp(const Value& input);
+NodePtr Exp(const torch::lazy::Value& input);
 
-NodePtr Expm1(const Value& input);
+NodePtr Expm1(const torch::lazy::Value& input);
 
-NodePtr Erf(const Value& input);
+NodePtr Erf(const torch::lazy::Value& input);
 
-NodePtr Erfc(const Value& input);
+NodePtr Erfc(const torch::lazy::Value& input);
 
-NodePtr Erfinv(const Value& input);
+NodePtr Erfinv(const torch::lazy::Value& input);
 
-NodePtr Log(const Value& input);
+NodePtr Log(const torch::lazy::Value& input);
 
-NodePtr Log1p(const Value& input);
+NodePtr Log1p(const torch::lazy::Value& input);
 
-NodePtr Sqrt(const Value& input);
+NodePtr Sqrt(const torch::lazy::Value& input);
 
-NodePtr Rsqrt(const Value& input);
+NodePtr Rsqrt(const torch::lazy::Value& input);
 
-NodePtr ReciprocalOp(const Value& input);
+NodePtr ReciprocalOp(const torch::lazy::Value& input);
 
-NodePtr Pow(const Value& input, const Value& exponent);
+NodePtr Pow(const torch::lazy::Value& input, const torch::lazy::Value& exponent);
 
-NodePtr Fmod(const Value& dividend, const Value& divisor);
+NodePtr Fmod(const torch::lazy::Value& dividend, const torch::lazy::Value& divisor);
 
-NodePtr Not(const Value& input);
+NodePtr Not(const torch::lazy::Value& input);
 
-NodePtr HardSigmoid(const Value& input);
+NodePtr HardSigmoid(const torch::lazy::Value& input);
 
-NodePtr HardSigmoidBackward(const Value& grad_output, const Value& input);
+NodePtr HardSigmoidBackward(const torch::lazy::Value& grad_output, const torch::lazy::Value& input);
 
-std::tuple<NodePtr, NodePtr> LogSigmoid(const Value& input);
+std::tuple<NodePtr, NodePtr> LogSigmoid(const torch::lazy::Value& input);
 
-NodePtr LogSigmoidBackward(const Value& grad_output, const Value& input,
-                           const Value& buffer);
+NodePtr LogSigmoidBackward(const torch::lazy::Value& grad_output, const torch::lazy::Value& input,
+                           const torch::lazy::Value& buffer);
 
-NodePtr Sigmoid(const Value& input);
+NodePtr Sigmoid(const torch::lazy::Value& input);
 
-NodePtr SiLU(const Value& input);
+NodePtr SiLU(const torch::lazy::Value& input);
 
-NodePtr SigmoidBackward(const Value& grad_output, const Value& output);
+NodePtr SigmoidBackward(const torch::lazy::Value& grad_output, const torch::lazy::Value& output);
 
-NodePtr LogSoftmaxBackwardOp(const Value& grad_output, const Value& output,
+NodePtr LogSoftmaxBackwardOp(const torch::lazy::Value& grad_output, const torch::lazy::Value& output,
                              lazy_tensors::int64 dim);
 
-NodePtr TSLogSoftmaxBackwardOp(const Value& grad_output, const Value& output,
-                               lazy_tensors::int64 dim, const Value& self);
+NodePtr TSLogSoftmaxBackwardOp(const torch::lazy::Value& grad_output, const torch::lazy::Value& output,
+                               lazy_tensors::int64 dim, const torch::lazy::Value& self);
 
-NodePtr SoftmaxBackwardOp(const Value& grad_output, const Value& output,
+NodePtr SoftmaxBackwardOp(const torch::lazy::Value& grad_output, const torch::lazy::Value& output,
                           lazy_tensors::int64 dim);
 
-NodePtr TSSoftmaxBackwardOp(const Value& grad_output, const Value& output,
-                            lazy_tensors::int64 dim, const Value& self);
+NodePtr TSSoftmaxBackwardOp(const torch::lazy::Value& grad_output, const torch::lazy::Value& output,
+                            lazy_tensors::int64 dim, const torch::lazy::Value& self);
 
-NodePtr Clamp(const Value& input, const Value& min, const Value& max);
+NodePtr Clamp(const torch::lazy::Value& input, const torch::lazy::Value& min, const torch::lazy::Value& max);
 
-NodePtr Ceil(const Value& input);
+NodePtr Ceil(const torch::lazy::Value& input);
 
-NodePtr Floor(const Value& input);
+NodePtr Floor(const torch::lazy::Value& input);
 
-NodePtr Round(const Value& input);
+NodePtr Round(const torch::lazy::Value& input);
 
-NodePtr Trunc(const Value& input);
+NodePtr Trunc(const torch::lazy::Value& input);
 
-NodePtr FracOp(const Value& input);
+NodePtr FracOp(const torch::lazy::Value& input);
 
-NodePtr Ger(const Value& input, const Value& other);
+NodePtr Ger(const torch::lazy::Value& input, const torch::lazy::Value& other);
 
-NodePtr AddMatMulOp(const Value& input, const Value& weight, const Value& bias);
+NodePtr AddMatMulOp(const torch::lazy::Value& input, const torch::lazy::Value& weight, const torch::lazy::Value& bias);
 
-NodePtr MatMul(const Value& lhs, const Value& rhs);
+NodePtr MatMul(const torch::lazy::Value& lhs, const torch::lazy::Value& rhs);
 
-NodePtr AdaptiveAvgPool2dBackward(const Value& grad_output, const Value& input);
+NodePtr AdaptiveAvgPool2dBackward(const torch::lazy::Value& grad_output, const torch::lazy::Value& input);
 
-NodePtr AdaptiveAvgPool3dBackward(const Value& grad_output, const Value& input);
+NodePtr AdaptiveAvgPool3dBackward(const torch::lazy::Value& grad_output, const torch::lazy::Value& input);
 
-NodePtr ComparisonOp(c10::Symbol kind, const Value& input, const Value& other);
+NodePtr ComparisonOp(c10::Symbol kind, const torch::lazy::Value& input, const torch::lazy::Value& other);
 
-NodePtr Where(const Value& condition, const Value& input, const Value& other);
+NodePtr Where(const torch::lazy::Value& condition, const torch::lazy::Value& input, const torch::lazy::Value& other);
 
 NodePtr ARange(const at::Scalar& start, const at::Scalar& end,
                const at::Scalar& step, at::ScalarType scalar_type);
 
 NodePtr BroadcastTensors(OpList tensors);
 
-NodePtr Norm(const Value& input, const c10::optional<at::Scalar>& p,
+NodePtr Norm(const torch::lazy::Value& input, const c10::optional<at::Scalar>& p,
              c10::optional<at::ScalarType> dtype,
              lazy_tensors::Span<const lazy_tensors::int64> dims, bool keepdim);
 
 NodePtr Identity(lazy_tensors::int64 lines, lazy_tensors::int64 cols,
                  lazy_tensors::PrimitiveType element_type);
 
-NodePtr Elu(const Value& input, const at::Scalar& alpha,
+NodePtr Elu(const torch::lazy::Value& input, const at::Scalar& alpha,
             const at::Scalar& scale, const at::Scalar& input_scale);
 
-NodePtr EluBackward(const Value& grad_output, const Value& output,
+NodePtr EluBackward(const torch::lazy::Value& grad_output, const torch::lazy::Value& output,
                     const at::Scalar& alpha, const at::Scalar& scale,
                     const at::Scalar& input_scale);
 
-NodePtr Lshift(const Value& input, const at::Scalar& other);
+NodePtr Lshift(const torch::lazy::Value& input, const at::Scalar& other);
 
-NodePtr Lshift(const Value& input, const Value& other);
+NodePtr Lshift(const torch::lazy::Value& input, const torch::lazy::Value& other);
 
-NodePtr Rshift(const Value& input, const at::Scalar& other);
+NodePtr Rshift(const torch::lazy::Value& input, const at::Scalar& other);
 
-NodePtr Rshift(const Value& input, const Value& other);
+NodePtr Rshift(const torch::lazy::Value& input, const torch::lazy::Value& other);
 
-NodePtr Remainder(const Value& input, const Value& divisor);
+NodePtr Remainder(const torch::lazy::Value& input, const torch::lazy::Value& divisor);
 
-NodePtr MaxUnary(const Value& input);
+NodePtr MaxUnary(const torch::lazy::Value& input);
 
-NodePtr MinUnary(const Value& input);
+NodePtr MinUnary(const torch::lazy::Value& input);
 
-NodePtr Take(const Value& input, const Value& index);
+NodePtr Take(const torch::lazy::Value& input, const torch::lazy::Value& index);
 
-NodePtr LogDet(const Value& input);
+NodePtr LogDet(const torch::lazy::Value& input);
 
-NodePtr Inverse(const Value& input);
+NodePtr Inverse(const torch::lazy::Value& input);
 
-NodePtr IsNan(const Value& input);
+NodePtr IsNan(const torch::lazy::Value& input);
 
-NodePtr BaddBmm(const Value& lhs, const Value& rhs, const Value& bias,
-                const Value& product_multiplier, const Value& bias_multiplier);
+NodePtr BaddBmm(const torch::lazy::Value& lhs, const torch::lazy::Value& rhs, const torch::lazy::Value& bias,
+                const torch::lazy::Value& product_multiplier, const torch::lazy::Value& bias_multiplier);
 
-NodePtr Lerp(const Value& start, const Value& end, const Value& weight);
+NodePtr Lerp(const torch::lazy::Value& start, const torch::lazy::Value& end, const torch::lazy::Value& weight);
 
-NodePtr LogicalAnd(const Value& input, const Value& other);
+NodePtr LogicalAnd(const torch::lazy::Value& input, const torch::lazy::Value& other);
 
 }  // namespace ops
 }  // namespace ir

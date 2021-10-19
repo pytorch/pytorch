@@ -9,9 +9,9 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-CumSum::CumSum(const Value& input, lazy_tensors::int64 dim,
+CumSum::CumSum(const torch::lazy::Value& input, lazy_tensors::int64 dim,
                c10::optional<at::ScalarType> dtype)
-    : TsNode(ir::OpKind(at::aten::cumsum), {input},
+    : TsNode(torch::lazy::OpKind(at::aten::cumsum), {input},
            /*num_outputs=*/1,
            torch::lazy::MHash(dim, OptionalOr<int>(dtype, -1))),
       dim_(dim),
@@ -21,7 +21,7 @@ CumSum::CumSum(const Value& input, lazy_tensors::int64 dim,
 }
 
 NodePtr CumSum::Clone(OpList operands) const {
-  return MakeNode<CumSum>(operands.at(0), dim_, dtype_);
+  return torch::lazy::MakeNode<CumSum>(operands.at(0), dim_, dtype_);
 }
 
 std::string CumSum::ToString() const {

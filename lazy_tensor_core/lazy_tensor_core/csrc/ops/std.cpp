@@ -8,9 +8,9 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Std::Std(const Value& input, std::vector<lazy_tensors::int64> dimensions,
+Std::Std(const torch::lazy::Value& input, std::vector<lazy_tensors::int64> dimensions,
          bool keep_reduced_dimensions, lazy_tensors::int64 correction)
-    : TsNode(ir::OpKind(at::aten::std), {input},
+    : TsNode(torch::lazy::OpKind(at::aten::std), {input},
            /*num_outputs=*/1,
            torch::lazy::MHash(dimensions, keep_reduced_dimensions,
                                      correction)),
@@ -22,7 +22,7 @@ Std::Std(const Value& input, std::vector<lazy_tensors::int64> dimensions,
 }
 
 NodePtr Std::Clone(OpList operands) const {
-  return MakeNode<Std>(operands.at(0), dimensions_, keep_reduced_dimensions_,
+  return torch::lazy::MakeNode<Std>(operands.at(0), dimensions_, keep_reduced_dimensions_,
                        correction_);
 }
 

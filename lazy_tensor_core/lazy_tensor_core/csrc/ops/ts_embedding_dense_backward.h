@@ -8,7 +8,7 @@ namespace ops {
 
 class TSEmbeddingDenseBackward : public TsNode {
  public:
-  TSEmbeddingDenseBackward(const Value& grad_output, const Value& indices,
+  TSEmbeddingDenseBackward(const torch::lazy::Value& grad_output, const torch::lazy::Value& indices,
                            lazy_tensors::int64 num_weights,
                            lazy_tensors::int64 padding_idx,
                            bool scale_grad_by_freq);

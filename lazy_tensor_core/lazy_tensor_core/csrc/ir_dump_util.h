@@ -11,19 +11,19 @@ namespace ir {
 
 class DumpUtil {
  public:
-  static std::string ToDot(lazy_tensors::Span<const Node* const> nodes);
+  static std::string ToDot(lazy_tensors::Span<const torch::lazy::Node* const> nodes);
 
   static std::string PostOrderToDot(
-      lazy_tensors::Span<const Node* const> post_order,
-      lazy_tensors::Span<const Node* const> roots);
+      lazy_tensors::Span<const torch::lazy::Node* const> post_order,
+      lazy_tensors::Span<const torch::lazy::Node* const> roots);
 
-  static std::string ToText(lazy_tensors::Span<const Node* const> nodes);
+  static std::string ToText(lazy_tensors::Span<const torch::lazy::Node* const> nodes);
 
   static std::string PostOrderToText(
-      lazy_tensors::Span<const Node* const> post_order,
-      lazy_tensors::Span<const Node* const> roots);
+      lazy_tensors::Span<const torch::lazy::Node* const> post_order,
+      lazy_tensors::Span<const torch::lazy::Node* const> roots);
 
-  static std::string ToBackend(lazy_tensors::Span<const Value> values,
+  static std::string ToBackend(lazy_tensors::Span<const torch::lazy::Value> values,
                                const Device& device);
 };
 

@@ -8,7 +8,7 @@ namespace ops {
 
 class Amin : public TsNode {
  public:
-  Amin(const Value& input, std::vector<lazy_tensors::int64> dimensions,
+  Amin(const torch::lazy::Value& input, std::vector<lazy_tensors::int64> dimensions,
        bool keepdim);
 
   std::string ToString() const override;

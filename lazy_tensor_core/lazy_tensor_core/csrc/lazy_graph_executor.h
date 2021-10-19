@@ -20,7 +20,7 @@ class LazyGraphExecutor {
   void UnregisterTensor(LazyTensor::Data* data);
 
   // Seed for random generator
-  ir::Value GetRngSeed(const Device& device);
+  torch::lazy::Value GetRngSeed(const Device& device);
   lazy_tensors::uint64 GetRunningSeed(const Device& device);
   void SetRngSeed(const Device& device, lazy_tensors::uint64 seed);
 
@@ -90,7 +90,7 @@ class LazyGraphExecutor {
   };
 
   struct PostOrderData {
-    std::vector<const ir::Node*> post_order;
+    std::vector<const torch::lazy::Node*> post_order;
     ir::Util::EmissionMap emission_map;
     std::vector<lazy_tensors::ComputationClient::DataPtr> parameters_data;
     std::vector<size_t> parameter_sequence;
@@ -136,7 +136,7 @@ class LazyGraphExecutor {
   SyncTensorCollection CollectSyncTensors(
       const std::vector<LazyTensor>& tensors, const SyncTensorsConfig& config);
 
-  std::vector<ir::Value> CollectRoots(const std::vector<LazyTensor>& tensors,
+  std::vector<torch::lazy::Value> CollectRoots(const std::vector<LazyTensor>& tensors,
                                       lazy_tensors::Span<const size_t> indices);
 
   std::vector<lazy_tensors::ComputationClient::DataPtr> FetchTensorData(

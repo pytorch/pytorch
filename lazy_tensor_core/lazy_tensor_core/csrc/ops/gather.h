@@ -8,7 +8,7 @@ namespace ops {
 
 class Gather : public TsNode {
  public:
-  Gather(const Value& input, lazy_tensors::int64 dim, const Value& index);
+  Gather(const torch::lazy::Value& input, lazy_tensors::int64 dim, const torch::lazy::Value& index);
 
   std::string ToString() const override;
 

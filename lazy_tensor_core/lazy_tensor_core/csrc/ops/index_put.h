@@ -8,8 +8,8 @@ namespace ops {
 
 class IndexPut : public TsNode {
  public:
-  IndexPut(const ir::Value& base, const ir::Value& indices,
-           lazy_tensors::int64 start_dim, const ir::Value& values,
+  IndexPut(const torch::lazy::Value& base, const torch::lazy::Value& indices,
+           lazy_tensors::int64 start_dim, const torch::lazy::Value& values,
            bool accumulate);
 
   std::string ToString() const override;

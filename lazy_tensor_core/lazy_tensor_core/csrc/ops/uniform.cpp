@@ -7,13 +7,13 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Uniform::Uniform(const Value& from, const Value& to, const Value& seed,
+Uniform::Uniform(const torch::lazy::Value& from, const torch::lazy::Value& to, const torch::lazy::Value& seed,
                  const lazy_tensors::Shape& rng_shape)
-    : TsNode(ir::OpKind(at::aten::uniform), {from, to, seed}, rng_shape,
+    : TsNode(torch::lazy::OpKind(at::aten::uniform), {from, to, seed}, rng_shape,
            /*num_outputs=*/1, torch::lazy::Hash(rng_shape)) {}
 
 NodePtr Uniform::Clone(OpList operands) const {
-  return MakeNode<Uniform>(operands.at(0), operands.at(1), operands.at(2),
+  return torch::lazy::MakeNode<Uniform>(operands.at(0), operands.at(1), operands.at(2),
                            shape());
 }
 

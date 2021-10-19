@@ -8,11 +8,11 @@ namespace ir {
 namespace ops {
 
 TSNativeBatchNormBackward::TSNativeBatchNormBackward(
-    const Value& grad_out, const Value& input, const Value& weight,
-    const Value& running_mean, const Value& running_var, const Value& save_mean,
-    const Value& save_invstd, bool training, double eps,
+    const torch::lazy::Value& grad_out, const torch::lazy::Value& input, const torch::lazy::Value& weight,
+    const torch::lazy::Value& running_mean, const torch::lazy::Value& running_var, const torch::lazy::Value& save_mean,
+    const torch::lazy::Value& save_invstd, bool training, double eps,
     std::array<bool, 3> output_mask)
-    : TsNode(ir::OpKind(at::aten::native_batch_norm_backward),
+    : TsNode(torch::lazy::OpKind(at::aten::native_batch_norm_backward),
            {grad_out, input, weight, running_mean, running_var, save_mean,
             save_invstd},
            /*num_outputs=*/3,
@@ -26,10 +26,10 @@ TSNativeBatchNormBackward::TSNativeBatchNormBackward(
 }
 
 TSNativeBatchNormBackward::TSNativeBatchNormBackward(
-    const Value& grad_out, const Value& input, const Value& weight,
-    const Value& save_mean, const Value& save_invstd, bool training, double eps,
+    const torch::lazy::Value& grad_out, const torch::lazy::Value& input, const torch::lazy::Value& weight,
+    const torch::lazy::Value& save_mean, const torch::lazy::Value& save_invstd, bool training, double eps,
     std::array<bool, 3> output_mask)
-    : TsNode(ir::OpKind(at::aten::native_batch_norm_backward),
+    : TsNode(torch::lazy::OpKind(at::aten::native_batch_norm_backward),
            {grad_out, input, weight, save_mean, save_invstd},
            /*num_outputs=*/3,
            torch::lazy::MHash(training, eps, output_mask[0],
@@ -43,12 +43,12 @@ TSNativeBatchNormBackward::TSNativeBatchNormBackward(
 
 NodePtr TSNativeBatchNormBackward::Clone(OpList operands) const {
   if (operands.size() == 5) {
-    return MakeNode<TSNativeBatchNormBackward>(
+    return torch::lazy::MakeNode<TSNativeBatchNormBackward>(
         operands.at(0), operands.at(1), operands.at(2), operands.at(3),
         operands.at(4), training_, eps_, output_mask_);
   }
   LTC_CHECK_EQ(operands.size(), 7);
-  return MakeNode<TSNativeBatchNormBackward>(
+  return torch::lazy::MakeNode<TSNativeBatchNormBackward>(
       operands.at(0), operands.at(1), operands.at(2), operands.at(3),
       operands.at(4), operands.at(5), operands.at(6), training_, eps_,
       output_mask_);

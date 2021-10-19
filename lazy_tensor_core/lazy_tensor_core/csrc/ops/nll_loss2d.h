@@ -11,8 +11,8 @@ namespace ops {
 
 class NllLoss2d : public TsNode {
  public:
-  NllLoss2d(const Value& logits, const Value& labels,
-            const c10::optional<Value>& weight, ReductionMode reduction,
+  NllLoss2d(const torch::lazy::Value& logits, const torch::lazy::Value& labels,
+            const c10::optional<torch::lazy::Value>& weight, ReductionMode reduction,
             int ignore_index);
 
   std::string ToString() const override;

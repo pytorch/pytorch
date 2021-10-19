@@ -7,9 +7,9 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-L1LossBackward::L1LossBackward(const Value& grad_output, const Value& input,
-                               const Value& target, ReductionMode reduction)
-    : TsNode(ir::OpKind(at::aten::l1_loss_backward), {grad_output, input, target},
+L1LossBackward::L1LossBackward(const torch::lazy::Value& grad_output, const torch::lazy::Value& input,
+                               const torch::lazy::Value& target, ReductionMode reduction)
+    : TsNode(torch::lazy::OpKind(at::aten::l1_loss_backward), {grad_output, input, target},
            /*num_outputs=*/1,
            torch::lazy::MHash(
                lazy_tensors::util::GetEnumValue(reduction))),
@@ -19,7 +19,7 @@ L1LossBackward::L1LossBackward(const Value& grad_output, const Value& input,
 }
 
 NodePtr L1LossBackward::Clone(OpList operands) const {
-  return MakeNode<L1LossBackward>(operands.at(0), operands.at(1),
+  return torch::lazy::MakeNode<L1LossBackward>(operands.at(0), operands.at(1),
                                   operands.at(2), reduction_);
 }
 

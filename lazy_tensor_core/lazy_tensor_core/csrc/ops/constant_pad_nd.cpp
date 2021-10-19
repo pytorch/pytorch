@@ -10,10 +10,10 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-ConstantPadNd::ConstantPadNd(const Value& input,
+ConstantPadNd::ConstantPadNd(const torch::lazy::Value& input,
                              std::vector<lazy_tensors::int64> pad,
                              const at::Scalar& value)
-    : TsNode(ir::OpKind(at::aten::constant_pad_nd), {input},
+    : TsNode(torch::lazy::OpKind(at::aten::constant_pad_nd), {input},
            /*num_outputs=*/1,
            torch::lazy::MHash(pad, ScalarHash(value))),
       pad_(std::move(pad)),
@@ -23,7 +23,7 @@ ConstantPadNd::ConstantPadNd(const Value& input,
 }
 
 NodePtr ConstantPadNd::Clone(OpList operands) const {
-  return MakeNode<ConstantPadNd>(operands.at(0), pad_, value_);
+  return torch::lazy::MakeNode<ConstantPadNd>(operands.at(0), pad_, value_);
 }
 
 std::string ConstantPadNd::ToString() const {

@@ -5,13 +5,13 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-LogBase::LogBase(const Value& input, ir::OpKind kind, double base)
-    : TsNode(kind, {input}, GetShapeFromTsValue(input),
+LogBase::LogBase(const torch::lazy::Value& input, torch::lazy::OpKind kind, double base)
+    : TsNode(kind, {input}, ir::GetShapeFromTsValue(input),
            /*num_outputs=*/1, torch::lazy::MHash(base)),
       base_(base) {}
 
 NodePtr LogBase::Clone(OpList operands) const {
-  return MakeNode<LogBase>(operands.at(0), op(), base_);
+  return torch::lazy::MakeNode<LogBase>(operands.at(0), op(), base_);
 }
 
 std::string LogBase::ToString() const {

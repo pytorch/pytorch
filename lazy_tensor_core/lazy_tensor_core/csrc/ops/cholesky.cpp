@@ -5,13 +5,13 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Cholesky::Cholesky(const Value& input, bool lower)
-    : TsNode(ir::OpKind(at::aten::cholesky), {input}, GetShapeFromTsValue(input),
+Cholesky::Cholesky(const torch::lazy::Value& input, bool lower)
+    : TsNode(torch::lazy::OpKind(at::aten::cholesky), {input}, ir::GetShapeFromTsValue(input),
            /*num_outputs=*/1, torch::lazy::MHash(lower)),
       lower_(lower) {}
 
 NodePtr Cholesky::Clone(OpList operands) const {
-  return MakeNode<Cholesky>(operands.at(0), lower_);
+  return torch::lazy::MakeNode<Cholesky>(operands.at(0), lower_);
 }
 
 std::string Cholesky::ToString() const {

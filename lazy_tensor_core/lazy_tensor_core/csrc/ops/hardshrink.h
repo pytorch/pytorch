@@ -10,7 +10,7 @@ namespace ops {
 
 class Hardshrink : public TsNode {
  public:
-  Hardshrink(const Value& input, const at::Scalar& lambda);
+  Hardshrink(const torch::lazy::Value& input, const at::Scalar& lambda);
 
   std::string ToString() const override;
 

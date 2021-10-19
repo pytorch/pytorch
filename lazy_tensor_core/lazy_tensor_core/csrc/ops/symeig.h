@@ -8,7 +8,7 @@ namespace ops {
 
 class SymEig : public TsNode {
  public:
-  SymEig(const Value& input, bool eigenvectors, bool lower);
+  SymEig(const torch::lazy::Value& input, bool eigenvectors, bool lower);
 
   std::string ToString() const override;
 

@@ -9,9 +9,9 @@ namespace ir {
 namespace ops {
 
 UpsampleBilinearBackward::UpsampleBilinearBackward(
-    const Value& input, std::vector<lazy_tensors::int64> output_size,
+    const torch::lazy::Value& input, std::vector<lazy_tensors::int64> output_size,
     std::vector<lazy_tensors::int64> input_size, bool align_corners)
-    : TsNode(ir::OpKind(at::aten::upsample_bilinear2d_backward), {input},
+    : TsNode(torch::lazy::OpKind(at::aten::upsample_bilinear2d_backward), {input},
            /*num_outputs=*/1,
            torch::lazy::MHash(output_size, input_size, align_corners)),
       output_size_(std::move(output_size)),
@@ -22,7 +22,7 @@ UpsampleBilinearBackward::UpsampleBilinearBackward(
 }
 
 NodePtr UpsampleBilinearBackward::Clone(OpList operands) const {
-  return MakeNode<UpsampleBilinearBackward>(operands.at(0), output_size_,
+  return torch::lazy::MakeNode<UpsampleBilinearBackward>(operands.at(0), output_size_,
                                             input_size_, align_corners_);
 }
 

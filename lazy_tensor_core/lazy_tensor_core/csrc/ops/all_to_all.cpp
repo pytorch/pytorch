@@ -9,7 +9,7 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-AllToAll::AllToAll(const Value& input, const Value& token,
+AllToAll::AllToAll(const torch::lazy::Value& input, const torch::lazy::Value& token,
                    lazy_tensors::int64 split_dimension,
                    lazy_tensors::int64 concat_dimension,
                    lazy_tensors::int64 split_count,
@@ -27,7 +27,7 @@ AllToAll::AllToAll(const Value& input, const Value& token,
 }
 
 NodePtr AllToAll::Clone(OpList operands) const {
-  return MakeNode<AllToAll>(operands.at(0), operands.at(1), split_dimension_,
+  return torch::lazy::MakeNode<AllToAll>(operands.at(0), operands.at(1), split_dimension_,
                             concat_dimension_, split_count_, groups_);
 }
 

@@ -6,9 +6,9 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Amax::Amax(const Value& input, std::vector<lazy_tensors::int64> dimensions,
+Amax::Amax(const torch::lazy::Value& input, std::vector<lazy_tensors::int64> dimensions,
            bool keepdim)
-    : TsNode(ir::OpKind(at::aten::amax), {input},
+    : TsNode(torch::lazy::OpKind(at::aten::amax), {input},
            /*num_outputs=*/1, torch::lazy::MHash(dimensions, keepdim)),
       dimensions_(std::move(dimensions)),
       keepdim_(keepdim) {
@@ -17,7 +17,7 @@ Amax::Amax(const Value& input, std::vector<lazy_tensors::int64> dimensions,
 }
 
 NodePtr Amax::Clone(OpList operands) const {
-  return MakeNode<Amax>(operands.at(0), dimensions_, keepdim_);
+  return torch::lazy::MakeNode<Amax>(operands.at(0), dimensions_, keepdim_);
 }
 
 std::string Amax::ToString() const {

@@ -9,9 +9,9 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-MseLossBackward::MseLossBackward(const Value& grad_output, const Value& input,
-                                 const Value& target, ReductionMode reduction)
-    : TsNode(ir::OpKind(at::aten::mse_loss_backward),
+MseLossBackward::MseLossBackward(const torch::lazy::Value& grad_output, const torch::lazy::Value& input,
+                                 const torch::lazy::Value& target, ReductionMode reduction)
+    : TsNode(torch::lazy::OpKind(at::aten::mse_loss_backward),
            {grad_output, input, target},
            /*num_outputs=*/1,
            torch::lazy::MHash(
@@ -22,7 +22,7 @@ MseLossBackward::MseLossBackward(const Value& grad_output, const Value& input,
 }
 
 NodePtr MseLossBackward::Clone(OpList operands) const {
-  return MakeNode<MseLossBackward>(operands.at(0), operands.at(1),
+  return torch::lazy::MakeNode<MseLossBackward>(operands.at(0), operands.at(1),
                                    operands.at(2), reduction_);
 }
 

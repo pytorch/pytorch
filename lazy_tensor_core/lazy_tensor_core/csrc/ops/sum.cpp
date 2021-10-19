@@ -10,9 +10,9 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Sum::Sum(const Value& input, std::vector<lazy_tensors::int64> dimensions,
+Sum::Sum(const torch::lazy::Value& input, std::vector<lazy_tensors::int64> dimensions,
          bool keep_reduced_dimensions, c10::optional<at::ScalarType> dtype)
-    : TsNode(ir::OpKind(at::aten::sum), {input},
+    : TsNode(torch::lazy::OpKind(at::aten::sum), {input},
            /*num_outputs=*/1,
            torch::lazy::MHash(dimensions, keep_reduced_dimensions,
                                      OptionalOr<int>(dtype, -1))),
@@ -24,7 +24,7 @@ Sum::Sum(const Value& input, std::vector<lazy_tensors::int64> dimensions,
 }
 
 NodePtr Sum::Clone(OpList operands) const {
-  return MakeNode<Sum>(operands.at(0), dimensions_, keep_reduced_dimensions_,
+  return torch::lazy::MakeNode<Sum>(operands.at(0), dimensions_, keep_reduced_dimensions_,
                        dtype_);
 }
 

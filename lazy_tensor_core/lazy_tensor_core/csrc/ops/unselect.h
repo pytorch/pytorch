@@ -8,7 +8,7 @@ namespace ops {
 
 class Unselect : public TsNode {
  public:
-  Unselect(const Value& target, const Value& source, lazy_tensors::int64 dim,
+  Unselect(const torch::lazy::Value& target, const torch::lazy::Value& source, lazy_tensors::int64 dim,
            lazy_tensors::int64 start, lazy_tensors::int64 end,
            lazy_tensors::int64 stride);
 

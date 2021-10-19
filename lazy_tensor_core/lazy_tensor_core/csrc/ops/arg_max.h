@@ -8,7 +8,7 @@ namespace ops {
 
 class ArgMax : public TsNode {
  public:
-  ArgMax(const Value& input, lazy_tensors::int64 dim, bool keepdim);
+  ArgMax(const torch::lazy::Value& input, lazy_tensors::int64 dim, bool keepdim);
 
   std::string ToString() const override;
 

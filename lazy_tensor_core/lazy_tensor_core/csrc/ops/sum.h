@@ -12,7 +12,7 @@ namespace ops {
 
 class Sum : public TsNode {
  public:
-  Sum(const Value& input, std::vector<lazy_tensors::int64> dimensions,
+  Sum(const torch::lazy::Value& input, std::vector<lazy_tensors::int64> dimensions,
       bool keep_reduced_dimensions, c10::optional<at::ScalarType> dtype);
 
   std::string ToString() const override;

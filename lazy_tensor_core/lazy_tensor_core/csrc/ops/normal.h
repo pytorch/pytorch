@@ -8,7 +8,7 @@ namespace ops {
 
 class Normal : public TsNode {
  public:
-  Normal(const Value& mean, const Value& std, const Value& seed);
+  Normal(const torch::lazy::Value& mean, const torch::lazy::Value& std, const torch::lazy::Value& seed);
 
   NodePtr Clone(OpList operands) const override;
 };

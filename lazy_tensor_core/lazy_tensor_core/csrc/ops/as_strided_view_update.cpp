@@ -11,13 +11,13 @@ namespace ir {
 namespace ops {
 
 AsStridedViewUpdate::AsStridedViewUpdate(
-    const Value& target, const Value& input,
+    const torch::lazy::Value& target, const torch::lazy::Value& input,
     std::vector<lazy_tensors::int64> size,
     std::vector<lazy_tensors::int64> stride, lazy_tensors::int64 storage_offset)
     : TsNode(ltc_as_strided_view_update, {target, input},
            [&]() {
              return lazy_tensors::ShapeUtil::MakeShape(
-                 GetShapeFromTsValue(target).element_type(), size);
+                 ir::GetShapeFromTsValue(target).element_type(), size);
            },
            /*num_outputs=*/1,
            torch::lazy::MHash(size, stride, storage_offset)),
@@ -34,7 +34,7 @@ std::string AsStridedViewUpdate::ToString() const {
 }
 
 NodePtr AsStridedViewUpdate::Clone(OpList operands) const {
-  return MakeNode<AsStridedViewUpdate>(operands.at(0), operands.at(1), size_,
+  return torch::lazy::MakeNode<AsStridedViewUpdate>(operands.at(0), operands.at(1), size_,
                                        stride_, storage_offset_);
 }
 

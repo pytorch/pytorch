@@ -8,7 +8,7 @@ namespace ops {
 
 class AvgPoolNdBackward : public TsNode {
  public:
-  AvgPoolNdBackward(const Value& grad_output, const Value& input,
+  AvgPoolNdBackward(const torch::lazy::Value& grad_output, const torch::lazy::Value& input,
                     lazy_tensors::int64 spatial_dim_count,
                     std::vector<lazy_tensors::int64> kernel_size,
                     std::vector<lazy_tensors::int64> stride,

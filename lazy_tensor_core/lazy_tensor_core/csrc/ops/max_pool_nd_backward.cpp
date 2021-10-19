@@ -23,12 +23,12 @@ c10::Symbol MaxPoolNdBackwardSymbol(lazy_tensors::int64 spatial_dim_count) {
 }  // namespace
 
 MaxPoolNdBackward::MaxPoolNdBackward(
-    const Value& grad_output, const Value& input,
+    const torch::lazy::Value& grad_output, const torch::lazy::Value& input,
     lazy_tensors::int64 spatial_dim_count,
     std::vector<lazy_tensors::int64> kernel_size,
     std::vector<lazy_tensors::int64> stride,
     std::vector<lazy_tensors::int64> padding, bool ceil_mode)
-    : TsNode(ir::OpKind(MaxPoolNdBackwardSymbol(spatial_dim_count)),
+    : TsNode(torch::lazy::OpKind(MaxPoolNdBackwardSymbol(spatial_dim_count)),
            {grad_output, input},
            /*num_outputs=*/1,
            torch::lazy::MHash(spatial_dim_count, kernel_size, stride,
@@ -43,7 +43,7 @@ MaxPoolNdBackward::MaxPoolNdBackward(
 }
 
 NodePtr MaxPoolNdBackward::Clone(OpList operands) const {
-  return MakeNode<MaxPoolNdBackward>(operands.at(0), operands.at(1),
+  return torch::lazy::MakeNode<MaxPoolNdBackward>(operands.at(0), operands.at(1),
                                      spatial_dim_count_, kernel_size_, stride_,
                                      padding_, ceil_mode_);
 }

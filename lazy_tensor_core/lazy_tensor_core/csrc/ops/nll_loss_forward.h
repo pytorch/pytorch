@@ -11,8 +11,8 @@ namespace ops {
 
 class NllLossForward : public TsNode {
  public:
-  NllLossForward(const Value& logits, const Value& labels,
-          const c10::optional<Value>& weight, ReductionMode reduction,
+  NllLossForward(const torch::lazy::Value& logits, const torch::lazy::Value& labels,
+          const c10::optional<torch::lazy::Value>& weight, ReductionMode reduction,
           int ignore_index);
 
   std::string ToString() const override;

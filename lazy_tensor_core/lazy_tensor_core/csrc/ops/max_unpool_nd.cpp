@@ -22,9 +22,9 @@ c10::Symbol MaxUnpoolNdSymbol(lazy_tensors::int64 spatial_dim_count) {
 
 }  // namespace
 
-MaxUnpoolNd::MaxUnpoolNd(const Value& input, const Value& indices,
+MaxUnpoolNd::MaxUnpoolNd(const torch::lazy::Value& input, const torch::lazy::Value& indices,
                          std::vector<lazy_tensors::int64> output_size)
-    : TsNode(ir::OpKind(MaxUnpoolNdSymbol(output_size.size())), {input, indices},
+    : TsNode(torch::lazy::OpKind(MaxUnpoolNdSymbol(output_size.size())), {input, indices},
            /*num_outputs=*/1, torch::lazy::MHash(output_size)),
       output_size_(std::move(output_size)) {
   SetShapeDeferred(
@@ -32,7 +32,7 @@ MaxUnpoolNd::MaxUnpoolNd(const Value& input, const Value& indices,
 }
 
 NodePtr MaxUnpoolNd::Clone(OpList operands) const {
-  return MakeNode<MaxUnpoolNd>(operands.at(0), operands.at(1), output_size_);
+  return torch::lazy::MakeNode<MaxUnpoolNd>(operands.at(0), operands.at(1), output_size_);
 }
 
 std::string MaxUnpoolNd::ToString() const {

@@ -20,7 +20,7 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace {
 
-using NodeIdMap = std::unordered_map<const Node*, size_t>;
+using NodeIdMap = std::unordered_map<const torch::lazy::Node*, size_t>;
 
 struct AttrTag {
   std::string name;
@@ -82,7 +82,7 @@ c10::optional<AttrTag> ParseAttrTag(const std::string& node_string,
   return tag;
 }
 
-NodeIdMap GenerateIdMap(lazy_tensors::Span<const Node* const> post_order) {
+NodeIdMap GenerateIdMap(lazy_tensors::Span<const torch::lazy::Node* const> post_order) {
   NodeIdMap id_map;
   for (auto node : post_order) {
     LTC_CHECK(id_map.emplace(node, id_map.size()).second) << node->ToString();
@@ -90,9 +90,9 @@ NodeIdMap GenerateIdMap(lazy_tensors::Span<const Node* const> post_order) {
   return id_map;
 }
 
-std::unordered_map<const Node*, size_t> GetRootsIds(
-    lazy_tensors::Span<const Node* const> roots) {
-  std::unordered_map<const Node*, size_t> roots_ids;
+std::unordered_map<const torch::lazy::Node*, size_t> GetRootsIds(
+    lazy_tensors::Span<const torch::lazy::Node* const> roots) {
+  std::unordered_map<const torch::lazy::Node*, size_t> roots_ids;
   for (size_t i = 0; i < roots.size(); ++i) {
     roots_ids[roots[i]] = i;
   }
@@ -100,8 +100,8 @@ std::unordered_map<const Node*, size_t> GetRootsIds(
 }
 
 c10::optional<size_t> GetRootNodeId(
-    const Node* node,
-    const std::unordered_map<const Node*, size_t>& roots_ids) {
+    const torch::lazy::Node* node,
+    const std::unordered_map<const torch::lazy::Node*, size_t>& roots_ids) {
   auto it = roots_ids.find(node);
   if (it == roots_ids.end()) {
     return c10::nullopt;
@@ -109,7 +109,7 @@ c10::optional<size_t> GetRootNodeId(
   return it->second;
 }
 
-std::vector<AttrTag> GetNodeTags(const Node* node) {
+std::vector<AttrTag> GetNodeTags(const torch::lazy::Node* node) {
   std::string node_string = node->ToString();
   std::string op_string = node->op().ToString();
   std::string::size_type pos = node_string.find(op_string);
@@ -129,8 +129,8 @@ std::vector<AttrTag> GetNodeTags(const Node* node) {
 }
 
 std::string GenerateDotNodeLabel(
-    const Node* node,
-    const std::unordered_map<const Node*, size_t>& roots_ids) {
+    const torch::lazy::Node* node,
+    const std::unordered_map<const torch::lazy::Node*, size_t>& roots_ids) {
   static const size_t kMaxValueSize = 64;
   std::stringstream ss;
   ss << node->op() << "\\n";
@@ -155,14 +155,14 @@ std::string GenerateDotNodeLabel(
 }
 
 std::string GenerateDotNodeSpec(
-    const Node* node,
-    const std::unordered_map<const Node*, size_t>& roots_ids) {
+    const torch::lazy::Node* node,
+    const std::unordered_map<const torch::lazy::Node*, size_t>& roots_ids) {
   std::stringstream ss;
   ss << "label=\"" << GenerateDotNodeLabel(node, roots_ids) << "\"";
   return ss.str();
 }
 
-std::string GenerateTextNodeSpec(const Node* node, const NodeIdMap& id_map) {
+std::string GenerateTextNodeSpec(const torch::lazy::Node* node, const NodeIdMap& id_map) {
   std::stringstream ss;
   if(auto tsnode = dynamic_cast<const TsNode*>(node)){
     ss << tsnode->shape() << " ";
@@ -190,15 +190,15 @@ std::string GenerateTextNodeSpec(const Node* node, const NodeIdMap& id_map) {
 
 }  // namespace
 
-std::string DumpUtil::ToDot(lazy_tensors::Span<const Node* const> nodes) {
+std::string DumpUtil::ToDot(lazy_tensors::Span<const torch::lazy::Node* const> nodes) {
   auto post_order = Util::ComputePostOrder(nodes);
   return PostOrderToDot(post_order, nodes);
 }
 
 std::string DumpUtil::PostOrderToDot(
-    lazy_tensors::Span<const Node* const> post_order,
-    lazy_tensors::Span<const Node* const> roots) {
-  std::unordered_map<const Node*, size_t> roots_ids = GetRootsIds(roots);
+    lazy_tensors::Span<const torch::lazy::Node* const> post_order,
+    lazy_tensors::Span<const torch::lazy::Node* const> roots) {
+  std::unordered_map<const torch::lazy::Node*, size_t> roots_ids = GetRootsIds(roots);
   NodeIdMap id_map = GenerateIdMap(post_order);
   std::stringstream ss;
   ss << "digraph G {\n";
@@ -207,10 +207,10 @@ std::string DumpUtil::PostOrderToDot(
        << GenerateDotNodeSpec(node, roots_ids) << "]\n";
   }
   for (auto it = post_order.rbegin(); it != post_order.rend(); ++it) {
-    const Node* node = *it;
+    const torch::lazy::Node* node = *it;
     size_t id = id_map.at(node);
     for (size_t i = 0; i < node->operands().size(); ++i) {
-      const ir::Output& output = node->operand(i);
+      const torch::lazy::Output& output = node->operand(i);
       ss << "  node" << id_map.at(output.node) << " -> node" << id;
       if (node->operands().size() > 1) {
         ss << " [label=\"i=" << i;
@@ -230,15 +230,15 @@ std::string DumpUtil::PostOrderToDot(
   return ss.str();
 }
 
-std::string DumpUtil::ToText(lazy_tensors::Span<const Node* const> nodes) {
+std::string DumpUtil::ToText(lazy_tensors::Span<const torch::lazy::Node* const> nodes) {
   auto post_order = Util::ComputePostOrder(nodes);
   return PostOrderToText(post_order, nodes);
 }
 
 std::string DumpUtil::PostOrderToText(
-    lazy_tensors::Span<const Node* const> post_order,
-    lazy_tensors::Span<const Node* const> roots) {
-  std::unordered_map<const Node*, size_t> roots_ids = GetRootsIds(roots);
+    lazy_tensors::Span<const torch::lazy::Node* const> post_order,
+    lazy_tensors::Span<const torch::lazy::Node* const> roots) {
+  std::unordered_map<const torch::lazy::Node*, size_t> roots_ids = GetRootsIds(roots);
   NodeIdMap id_map = GenerateIdMap(post_order);
   std::stringstream ss;
   ss << "IR {\n";
@@ -255,7 +255,7 @@ std::string DumpUtil::PostOrderToText(
   return ss.str();
 }
 
-std::string DumpUtil::ToBackend(lazy_tensors::Span<const Value> values,
+std::string DumpUtil::ToBackend(lazy_tensors::Span<const torch::lazy::Value> values,
                                 const Device& device) {
   auto lowering_ctx = ir::LoweringContext::Create("IrToBackend", device);
   for (auto& ir_value : values) {

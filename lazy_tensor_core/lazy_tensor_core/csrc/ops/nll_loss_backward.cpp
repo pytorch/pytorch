@@ -8,13 +8,13 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-NllLossBackward::NllLossBackward(const Value& grad_output, const Value& logits,
-                                 const Value& labels,
-                                 const c10::optional<Value>& weight,
-                                 const c10::optional<Value>& total_weight,
+NllLossBackward::NllLossBackward(const torch::lazy::Value& grad_output, const torch::lazy::Value& logits,
+                                 const torch::lazy::Value& labels,
+                                 const c10::optional<torch::lazy::Value>& weight,
+                                 const c10::optional<torch::lazy::Value>& total_weight,
                                  ReductionMode reduction, int ignore_index)
-    : TsNode(ir::OpKind(at::aten::nll_loss_backward),
-             lazy_tensors::util::GetValuesVector<Value>(
+    : TsNode(torch::lazy::OpKind(at::aten::nll_loss_backward),
+             lazy_tensors::util::GetValuesVector<torch::lazy::Value>(
                  {grad_output, logits, labels}, {&weight, &total_weight}),
              /*num_outputs=*/1,
              torch::lazy::MHash(lazy_tensors::util::GetEnumValue(reduction),
@@ -26,13 +26,13 @@ NllLossBackward::NllLossBackward(const Value& grad_output, const Value& logits,
 }
 
 NodePtr NllLossBackward::Clone(OpList operands) const {
-  c10::optional<Value> weight;
-  c10::optional<Value> total_weight;
+  c10::optional<torch::lazy::Value> weight;
+  c10::optional<torch::lazy::Value> total_weight;
   if (operands.size() > 3) {
     weight = operands.at(3);
     total_weight = operands.at(4);
   }
-  return MakeNode<NllLossBackward>(operands.at(0), operands.at(1),
+  return torch::lazy::MakeNode<NllLossBackward>(operands.at(0), operands.at(1),
                                    operands.at(2), weight, total_weight,
                                    reduction_, ignore_index_);
 }

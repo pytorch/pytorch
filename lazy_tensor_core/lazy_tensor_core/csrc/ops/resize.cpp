@@ -10,20 +10,20 @@ namespace ops {
 namespace {
 
 lazy_tensors::Shape NodeOutputShape(
-    const Value& input, lazy_tensors::Span<const lazy_tensors::int64> size) {
-  return lazy_tensors::ShapeUtil::MakeShape(GetShapeFromTsValue(input).element_type(), size);
+    const torch::lazy::Value& input, lazy_tensors::Span<const lazy_tensors::int64> size) {
+  return lazy_tensors::ShapeUtil::MakeShape(ir::GetShapeFromTsValue(input).element_type(), size);
 }
 
 }  // namespace
 
-Resize::Resize(const Value& input, std::vector<lazy_tensors::int64> size)
-    : TsNode(ir::OpKind(at::aten::resize), {input},
+Resize::Resize(const torch::lazy::Value& input, std::vector<lazy_tensors::int64> size)
+    : TsNode(torch::lazy::OpKind(at::aten::resize), {input},
            [&]() { return NodeOutputShape(input, size); },
            /*num_outputs=*/1, torch::lazy::MHash(size)),
       size_(std::move(size)) {}
 
 NodePtr Resize::Clone(OpList operands) const {
-  return MakeNode<Resize>(operands.at(0), size_);
+  return torch::lazy::MakeNode<Resize>(operands.at(0), size_);
 }
 
 std::string Resize::ToString() const {

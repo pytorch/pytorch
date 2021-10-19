@@ -8,7 +8,7 @@ namespace ops {
 
 class ScatterAdd : public TsNode {
  public:
-  ScatterAdd(const Value& input, const Value& index, const Value& src,
+  ScatterAdd(const torch::lazy::Value& input, const torch::lazy::Value& index, const torch::lazy::Value& src,
              lazy_tensors::int64 dim);
 
   std::string ToString() const override;

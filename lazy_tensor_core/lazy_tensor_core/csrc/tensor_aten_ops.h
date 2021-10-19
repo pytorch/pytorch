@@ -449,7 +449,7 @@ LazyTensor lerp(const LazyTensor& input, const LazyTensor& end,
 
 LazyTensor log(const LazyTensor& input);
 
-LazyTensor log_base(const LazyTensor& input, ir::OpKind op, double base);
+LazyTensor log_base(const LazyTensor& input, torch::lazy::OpKind op, double base);
 
 LazyTensor log_sigmoid(const LazyTensor& input);
 std::tuple<LazyTensor, LazyTensor> log_sigmoid_forward(const LazyTensor& input);

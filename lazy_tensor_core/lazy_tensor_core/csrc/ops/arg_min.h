@@ -8,7 +8,7 @@ namespace ops {
 
 class ArgMin : public TsNode {
  public:
-  ArgMin(const Value& input, lazy_tensors::int64 dim, bool keepdim);
+  ArgMin(const torch::lazy::Value& input, lazy_tensors::int64 dim, bool keepdim);
 
   std::string ToString() const override;
 

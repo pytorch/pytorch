@@ -9,12 +9,12 @@ namespace ops {
 // aten::random builtin symbol cannot be recognized as a builtin function
 // since random only has in-place versions. Therefore we force the symbol to
 // be "aten::random_" here.
-Random::Random(const Value& input)
-    : TsNode(ir::OpKind(c10::Symbol::fromQualString("aten::random_")),
-        {input}, GetShapeFromTsValue(input)) {}
+Random::Random(const torch::lazy::Value& input)
+    : TsNode(torch::lazy::OpKind(c10::Symbol::fromQualString("aten::random_")),
+        {input}, ir::GetShapeFromTsValue(input)) {}
 
 NodePtr Random::Clone(OpList operands) const {
-  return MakeNode<Random>(operands.at(0));
+  return torch::lazy::MakeNode<Random>(operands.at(0));
 }
 
 }  // namespace ops

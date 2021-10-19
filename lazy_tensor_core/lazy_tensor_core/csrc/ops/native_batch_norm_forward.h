@@ -8,9 +8,9 @@ namespace ops {
 
 class NativeBatchNormForward : public TsNode {
  public:
-  NativeBatchNormForward(const Value& input, const Value& weight,
-                         const Value& bias, const Value& running_mean,
-                         const Value& running_var, bool training, double eps);
+  NativeBatchNormForward(const torch::lazy::Value& input, const torch::lazy::Value& weight,
+                         const torch::lazy::Value& bias, const torch::lazy::Value& running_mean,
+                         const torch::lazy::Value& running_var, bool training, double eps);
 
   NodePtr Clone(OpList operands) const override;
 

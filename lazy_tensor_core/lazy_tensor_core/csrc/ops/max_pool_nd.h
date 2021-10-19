@@ -8,7 +8,7 @@ namespace ops {
 
 class MaxPoolNd : public TsNode {
  public:
-  MaxPoolNd(const Value& input, lazy_tensors::int64 spatial_dim_count,
+  MaxPoolNd(const torch::lazy::Value& input, lazy_tensors::int64 spatial_dim_count,
             std::vector<lazy_tensors::int64> kernel_size,
             std::vector<lazy_tensors::int64> stride,
             std::vector<lazy_tensors::int64> padding, bool ceil_mode);

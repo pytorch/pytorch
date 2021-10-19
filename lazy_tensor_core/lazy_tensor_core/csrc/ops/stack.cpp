@@ -9,7 +9,7 @@ namespace ops {
 
 Stack::Stack(OpList values,
              lazy_tensors::int64 dim)
-    : TsNode(ir::OpKind(at::aten::stack), values,
+    : TsNode(torch::lazy::OpKind(at::aten::stack), values,
            /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim) {
   SetShapeDeferred(
@@ -17,7 +17,7 @@ Stack::Stack(OpList values,
 }
 
 NodePtr Stack::Clone(OpList operands) const {
-  return MakeNode<Stack>(operands, dim_);
+  return torch::lazy::MakeNode<Stack>(operands, dim_);
 }
 
 std::string Stack::ToString() const {

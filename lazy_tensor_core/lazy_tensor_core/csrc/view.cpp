@@ -25,35 +25,35 @@
 namespace torch_lazy_tensors {
 namespace {
 
-ir::Value ApplyViewInfo(ir::Value ir_value, const ViewInfo& view_info) {
+torch::lazy::Value ApplyViewInfo(torch::lazy::Value ir_value, const ViewInfo& view_info) {
   switch (view_info.view_type) {
     case ViewInfo::Type::kSelect:
-      return ir::MakeNode<ir::ops::Select>(
+      return torch::lazy::MakeNode<ir::ops::Select>(
           ir_value, view_info.select->dim, view_info.select->start,
           view_info.select->end, view_info.select->stride);
     case ViewInfo::Type::kNarrow:
-      return ir::MakeNode<ir::ops::GenericSlice>(ir_value, view_info.indices,
+      return torch::lazy::MakeNode<ir::ops::GenericSlice>(ir_value, view_info.indices,
                                                  view_info.shape.dimensions());
     case ViewInfo::Type::kNoOp:
       return ir_value;
     case ViewInfo::Type::kPermute:
-      return ir::MakeNode<ir::ops::Permute>(ir_value, view_info.permutation);
+      return torch::lazy::MakeNode<ir::ops::Permute>(ir_value, view_info.permutation);
     case ViewInfo::Type::kReshape:
-      return ir::MakeNode<ir::ops::View>(
+      return torch::lazy::MakeNode<ir::ops::View>(
           ir_value, lazy_tensors::util::ToVector<lazy_tensors::int64>(
                         view_info.shape.dimensions()));
     case ViewInfo::Type::kResize:
-      return ir::MakeNode<ir::ops::Resize>(
+      return torch::lazy::MakeNode<ir::ops::Resize>(
           ir_value, lazy_tensors::util::ToVector<lazy_tensors::int64>(
                         view_info.shape.dimensions()));
     case ViewInfo::Type::kAsStrided:
-      return ir::MakeNode<ir::ops::AsStrided>(
+      return torch::lazy::MakeNode<ir::ops::AsStrided>(
           ir_value,
           lazy_tensors::util::ToVector<lazy_tensors::int64>(
               view_info.shape.dimensions()),
           view_info.as_strided->stride, view_info.as_strided->offset);
     case ViewInfo::Type::kDiagonal:
-      return ir::MakeNode<ir::ops::Diagonal>(
+      return torch::lazy::MakeNode<ir::ops::Diagonal>(
           ir_value, view_info.diagonal->offset, view_info.diagonal->dim1,
           view_info.diagonal->dim2);
     default:
@@ -62,55 +62,55 @@ ir::Value ApplyViewInfo(ir::Value ir_value, const ViewInfo& view_info) {
   }
 }
 
-ir::Value ApplyUpdate(ir::Value ir_value,
+torch::lazy::Value ApplyUpdate(torch::lazy::Value ir_value,
                       const Alias::UpdateData& update_data) {
   // We first bring the source IR value forward, by reshaping and slicing.
-  std::vector<ir::Value> tmp_values({ir_value});
+  std::vector<torch::lazy::Value> tmp_values({ir_value});
   for (size_t i = 0; i < update_data.view_infos.size(); ++i) {
     const ViewInfo& view_info = update_data.view_infos[i];
     tmp_values.push_back(ApplyViewInfo(tmp_values.back(), view_info));
   }
   // We then move backward given the source update value, by reshaping and
   // slice-updating.
-  ir::Value result = update_data.ir_value;
+  torch::lazy::Value result = update_data.ir_value;
   for (size_t i = update_data.view_infos.size(); i > 0; --i) {
     const ViewInfo& view_info = update_data.view_infos[i - 1];
     switch (view_info.view_type) {
       case ViewInfo::Type::kSelect:
-        result = ir::MakeNode<ir::ops::Unselect>(
+        result = torch::lazy::MakeNode<ir::ops::Unselect>(
             tmp_values[i - 1], result, view_info.select->dim,
             view_info.select->start, view_info.select->end,
             view_info.select->stride);
         break;
       case ViewInfo::Type::kNarrow:
-        result = ir::MakeNode<ir::ops::UpdateSlice>(tmp_values[i - 1], result,
+        result = torch::lazy::MakeNode<ir::ops::UpdateSlice>(tmp_values[i - 1], result,
                                                     view_info.indices);
         break;
       case ViewInfo::Type::kNoOp:
         break;
       case ViewInfo::Type::kPermute:
-        result = ir::MakeNode<ir::ops::Permute>(
+        result = torch::lazy::MakeNode<ir::ops::Permute>(
             result, lazy_tensors::InversePermutation(view_info.permutation));
         break;
       case ViewInfo::Type::kReshape:
-        result = ir::MakeNode<ir::ops::View>(
+        result = torch::lazy::MakeNode<ir::ops::View>(
             result, lazy_tensors::util::ToVector<lazy_tensors::int64>(
                         view_info.source_shape.dimensions()));
         break;
       case ViewInfo::Type::kResize:
-        result = ir::MakeNode<ir::ops::Resize>(
+        result = torch::lazy::MakeNode<ir::ops::Resize>(
             result, lazy_tensors::util::ToVector<lazy_tensors::int64>(
                         view_info.source_shape.dimensions()));
         break;
       case ViewInfo::Type::kAsStrided:
-        result = ir::MakeNode<ir::ops::AsStridedViewUpdate>(
+        result = torch::lazy::MakeNode<ir::ops::AsStridedViewUpdate>(
             tmp_values[i - 1], result,
             lazy_tensors::util::ToVector<lazy_tensors::int64>(
                 view_info.source_shape.dimensions()),
             view_info.as_strided->stride, view_info.as_strided->offset);
         break;
       case ViewInfo::Type::kDiagonal:
-        result = ir::MakeNode<ir::ops::DiagonalViewUpdate>(
+        result = torch::lazy::MakeNode<ir::ops::DiagonalViewUpdate>(
             tmp_values[i - 1], result, view_info.diagonal->offset,
             view_info.diagonal->dim1, view_info.diagonal->dim2);
         break;
@@ -169,7 +169,7 @@ ViewInfo::ViewInfo(Type view_type, const lazy_tensors::Shape& source_shape,
   LTC_CHECK(view_type == Type::kDiagonal);
 }
 
-void Alias::Update(ir::Value ir_value, std::vector<ViewInfo> view_infos) {
+void Alias::Update(torch::lazy::Value ir_value, std::vector<ViewInfo> view_infos) {
   if (!updates_.empty() && updates_.back().view_infos == view_infos) {
     updates_.back().ir_value = std::move(ir_value);
   } else {
@@ -178,7 +178,7 @@ void Alias::Update(ir::Value ir_value, std::vector<ViewInfo> view_infos) {
   ++generation_;
 }
 
-ir::Value Alias::SyncUpdateOperations() {
+torch::lazy::Value Alias::SyncUpdateOperations() {
   for (auto& update_data : updates_) {
     ir_value_ = ApplyUpdate(ir_value_, update_data);
   }
@@ -198,7 +198,7 @@ View::View(lazy_tensors::Shape shape, std::shared_ptr<Alias> alias,
       shape_(std::move(shape)),
       alias_(std::move(alias)) {}
 
-void View::Update(ir::Value ir_value) {
+void View::Update(torch::lazy::Value ir_value) {
   alias_->Update(std::move(ir_value), view_infos_);
 }
 
@@ -214,7 +214,7 @@ View::IrNode View::GetViewIrNode() {
   if (IsUpToDate()) {
     return {ir_value_, false};
   }
-  ir::Value update = alias_->SyncUpdateOperations();
+  torch::lazy::Value update = alias_->SyncUpdateOperations();
   for (auto& view_info : view_infos_) {
     update = ApplyViewInfo(update, view_info);
   }

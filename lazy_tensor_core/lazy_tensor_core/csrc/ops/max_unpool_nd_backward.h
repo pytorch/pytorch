@@ -8,8 +8,8 @@ namespace ops {
 
 class MaxUnpoolNdBackward : public TsNode {
  public:
-  MaxUnpoolNdBackward(const Value& grad_output, const Value& input,
-                      const Value& indices,
+  MaxUnpoolNdBackward(const torch::lazy::Value& grad_output, const torch::lazy::Value& input,
+                      const torch::lazy::Value& indices,
                       std::vector<lazy_tensors::int64> output_size);
 
   NodePtr Clone(OpList operands) const override;

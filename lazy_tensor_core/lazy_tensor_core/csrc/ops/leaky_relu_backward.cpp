@@ -5,17 +5,17 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-LeakyReluBackward::LeakyReluBackward(const Value& grad_output,
-                                     const Value& input, double negative_slope,
+LeakyReluBackward::LeakyReluBackward(const torch::lazy::Value& grad_output,
+                                     const torch::lazy::Value& input, double negative_slope,
                                      bool self_is_result)
-    : TsNode(ir::OpKind(at::aten::leaky_relu_backward), {grad_output, input},
-           GetShapeFromTsValue(input),
+    : TsNode(torch::lazy::OpKind(at::aten::leaky_relu_backward), {grad_output, input},
+           ir::GetShapeFromTsValue(input),
            /*num_outputs=*/1, torch::lazy::MHash(negative_slope)),
       negative_slope_(negative_slope),
       self_is_result_(self_is_result) {}
 
 NodePtr LeakyReluBackward::Clone(OpList operands) const {
-  return MakeNode<LeakyReluBackward>(operands.at(0), operands.at(1),
+  return torch::lazy::MakeNode<LeakyReluBackward>(operands.at(0), operands.at(1),
                                      negative_slope_, self_is_result_);
 }
 

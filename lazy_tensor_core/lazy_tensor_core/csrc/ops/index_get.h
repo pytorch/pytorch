@@ -8,7 +8,7 @@ namespace ops {
 
 class IndexGet : public TsNode {
  public:
-  IndexGet(const ir::Value& base, const ir::Value& indices,
+  IndexGet(const torch::lazy::Value& base, const torch::lazy::Value& indices,
            lazy_tensors::int64 start_dim);
 
   std::string ToString() const override;

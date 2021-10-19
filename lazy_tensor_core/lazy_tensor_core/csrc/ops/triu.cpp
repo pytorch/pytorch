@@ -5,13 +5,13 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Triu::Triu(const Value& input, lazy_tensors::int64 diagonal)
-    : TsNode(ir::OpKind(at::aten::triu), {input}, GetShapeFromTsValue(input),
+Triu::Triu(const torch::lazy::Value& input, lazy_tensors::int64 diagonal)
+    : TsNode(torch::lazy::OpKind(at::aten::triu), {input}, ir::GetShapeFromTsValue(input),
            /*num_outputs=*/1, torch::lazy::MHash(diagonal)),
       diagonal_(diagonal) {}
 
 NodePtr Triu::Clone(OpList operands) const {
-  return MakeNode<Triu>(operands.at(0), diagonal_);
+  return torch::lazy::MakeNode<Triu>(operands.at(0), diagonal_);
 }
 
 std::string Triu::ToString() const {

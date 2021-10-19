@@ -21,11 +21,11 @@ std::string DeviceData::ToString() const {
 }
 
 NodePtr DeviceData::Clone(OpList operands) const {
-  return MakeNode<DeviceData>(data_);
+  return torch::lazy::MakeNode<DeviceData>(data_);
 }
 
-const DeviceData* DeviceData::Cast(const Node* node) {
-  return NodeCast<DeviceData>(node, ltc_device_data);
+const DeviceData* DeviceData::Cast(const torch::lazy::Node* node) {
+  return torch::lazy::NodeCast<DeviceData>(node, ltc_device_data);
 }
 
 }  // namespace ops

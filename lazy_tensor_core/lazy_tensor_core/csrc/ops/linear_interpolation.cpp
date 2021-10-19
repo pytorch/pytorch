@@ -7,14 +7,14 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-LinearInterpolation::LinearInterpolation(const Value& value,
-                                         const Value& new_value, double alpha)
-    : TsNode(ltc_moving_average, {value, new_value}, GetShapeFromTsValue(value),
+LinearInterpolation::LinearInterpolation(const torch::lazy::Value& value,
+                                         const torch::lazy::Value& new_value, double alpha)
+    : TsNode(ltc_moving_average, {value, new_value}, ir::GetShapeFromTsValue(value),
            /*num_outputs=*/1, torch::lazy::MHash(alpha)),
       alpha_(alpha) {}
 
 NodePtr LinearInterpolation::Clone(OpList operands) const {
-  return MakeNode<LinearInterpolation>(operands.at(0), operands.at(1), alpha_);
+  return torch::lazy::MakeNode<LinearInterpolation>(operands.at(0), operands.at(1), alpha_);
 }
 
 std::string LinearInterpolation::ToString() const {

@@ -10,8 +10,8 @@ namespace ops {
 
 class RreluWithNoiseBackward : public TsNode {
  public:
-  RreluWithNoiseBackward(const Value& grad_output, const Value& input,
-                         const Value& noise, const at::Scalar& lower,
+  RreluWithNoiseBackward(const torch::lazy::Value& grad_output, const torch::lazy::Value& input,
+                         const torch::lazy::Value& noise, const at::Scalar& lower,
                          const at::Scalar& upper, bool training);
 
   std::string ToString() const override;

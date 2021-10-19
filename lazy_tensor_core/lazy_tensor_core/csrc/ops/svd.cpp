@@ -7,8 +7,8 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-SVD::SVD(const Value& input, bool some, bool compute_uv)
-    : TsNode(ir::OpKind(at::aten::svd), {input},
+SVD::SVD(const torch::lazy::Value& input, bool some, bool compute_uv)
+    : TsNode(torch::lazy::OpKind(at::aten::svd), {input},
            /*num_outputs=*/3, torch::lazy::MHash(some, compute_uv)),
       some_(some),
       compute_uv_(compute_uv) {
@@ -17,7 +17,7 @@ SVD::SVD(const Value& input, bool some, bool compute_uv)
 }
 
 NodePtr SVD::Clone(OpList operands) const {
-  return MakeNode<SVD>(operands.at(0), some_, compute_uv_);
+  return torch::lazy::MakeNode<SVD>(operands.at(0), some_, compute_uv_);
 }
 
 std::string SVD::ToString() const {

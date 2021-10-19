@@ -8,7 +8,7 @@ namespace ops {
 
 class MinInDim : public TsNode {
  public:
-  MinInDim(const Value& input, lazy_tensors::int64 dim, bool keepdim);
+  MinInDim(const torch::lazy::Value& input, lazy_tensors::int64 dim, bool keepdim);
 
   std::string ToString() const override;
 

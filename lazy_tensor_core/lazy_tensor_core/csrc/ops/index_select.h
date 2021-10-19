@@ -8,7 +8,7 @@ namespace ops {
 
 class IndexSelect : public TsNode {
  public:
-  IndexSelect(const Value& input, lazy_tensors::int64 dim, const Value& index);
+  IndexSelect(const torch::lazy::Value& input, lazy_tensors::int64 dim, const torch::lazy::Value& index);
 
   std::string ToString() const override;
 

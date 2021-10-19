@@ -10,7 +10,7 @@ namespace ops {
 
 class ConstantPadNd : public TsNode {
  public:
-  ConstantPadNd(const Value& input, std::vector<lazy_tensors::int64> pad,
+  ConstantPadNd(const torch::lazy::Value& input, std::vector<lazy_tensors::int64> pad,
                 const at::Scalar& value);
 
   std::string ToString() const override;

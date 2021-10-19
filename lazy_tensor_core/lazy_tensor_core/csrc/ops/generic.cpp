@@ -27,7 +27,7 @@ Generic::Generic(OpKind op, lazy_tensors::Shape shape, size_t num_outputs,
       hash_seed_(hash_seed) {}
 
 NodePtr Generic::Clone(OpList operands) const {
-  return MakeNode<Generic>(op(), operands, shape(), num_outputs(), hash_seed_);
+  return torch::lazy::MakeNode<Generic>(op(), operands, shape(), num_outputs(), hash_seed_);
 }
 
 }  // namespace ops

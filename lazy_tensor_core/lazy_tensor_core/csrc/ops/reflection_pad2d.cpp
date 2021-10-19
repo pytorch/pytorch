@@ -8,7 +8,7 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-ReflectionPad2d::ReflectionPad2d(const Value& input,
+ReflectionPad2d::ReflectionPad2d(const torch::lazy::Value& input,
                                  std::vector<lazy_tensors::int64> padding)
     : TsNode(OpKind(at::aten::reflection_pad2d), {input},
            /*num_outputs=*/1, torch::lazy::MHash(padding)),
@@ -18,7 +18,7 @@ ReflectionPad2d::ReflectionPad2d(const Value& input,
 }
 
 NodePtr ReflectionPad2d::Clone(OpList operands) const {
-  return MakeNode<ReflectionPad2d>(operands.at(0), padding_);
+  return torch::lazy::MakeNode<ReflectionPad2d>(operands.at(0), padding_);
 }
 
 std::string ReflectionPad2d::ToString() const {

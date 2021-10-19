@@ -7,8 +7,8 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-IndexAlongDim::IndexAlongDim(OpKind op, const ir::Value& buffer,
-                             const ir::Value& index, const ir::Value& value,
+IndexAlongDim::IndexAlongDim(OpKind op, const torch::lazy::Value& buffer,
+                             const torch::lazy::Value& index, const torch::lazy::Value& value,
                              lazy_tensors::int64 dim)
     : TsNode(op, {buffer, index, value},
            /*num_outputs=*/1, torch::lazy::MHash(dim)),
@@ -24,7 +24,7 @@ std::string IndexAlongDim::ToString() const {
 }
 
 NodePtr IndexAlongDim::Clone(OpList operands) const {
-  return MakeNode<IndexAlongDim>(op(), operands.at(0), operands.at(1),
+  return torch::lazy::MakeNode<IndexAlongDim>(op(), operands.at(0), operands.at(1),
                                  operands.at(2), dim_);
 }
 

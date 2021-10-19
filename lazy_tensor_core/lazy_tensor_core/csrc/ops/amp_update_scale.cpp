@@ -9,20 +9,20 @@ namespace ir {
 namespace ops {
 namespace {
 
-lazy_tensors::Shape NodeOutputShape(const Value& growth_tracker,
-                                    const Value& current_scale) {
+lazy_tensors::Shape NodeOutputShape(const torch::lazy::Value& growth_tracker,
+                                    const torch::lazy::Value& current_scale) {
   return lazy_tensors::ShapeUtil::MakeTupleShape(
-      {GetShapeFromTsValue(growth_tracker), GetShapeFromTsValue(current_scale)});
+      {ir::GetShapeFromTsValue(growth_tracker), GetShapeFromTsValue(current_scale)});
 }
 
 }  // namespace
 
-AmpUpdateScale::AmpUpdateScale(const Value& current_scale,
-                               const Value& growth_tracker,
-                               const Value& found_inf,
+AmpUpdateScale::AmpUpdateScale(const torch::lazy::Value& current_scale,
+                               const torch::lazy::Value& growth_tracker,
+                               const torch::lazy::Value& found_inf,
                                double scale_growth_factor,
                                double scale_backoff_factor, int growth_interval)
-    : TsNode(ir::OpKind(at::aten::_amp_update_scale_),
+    : TsNode(torch::lazy::OpKind(at::aten::_amp_update_scale_),
            {current_scale, growth_tracker, found_inf},
            NodeOutputShape(growth_tracker, current_scale),
            /*num_outputs=*/2),
@@ -31,7 +31,7 @@ AmpUpdateScale::AmpUpdateScale(const Value& current_scale,
       growth_interval_(growth_interval) {}
 
 NodePtr AmpUpdateScale::Clone(OpList operands) const {
-  return MakeNode<AmpUpdateScale>(operands[0], operands[1], operands[2],
+  return torch::lazy::MakeNode<AmpUpdateScale>(operands[0], operands[1], operands[2],
                                   scale_growth_factor_, scale_backoff_factor_,
                                   growth_interval_);
 }

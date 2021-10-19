@@ -8,12 +8,12 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-RreluWithNoise::RreluWithNoise(const Value& input, const Value& seed,
+RreluWithNoise::RreluWithNoise(const torch::lazy::Value& input, const torch::lazy::Value& seed,
                                const at::Scalar& lower, const at::Scalar& upper,
                                bool training)
-    : TsNode(ir::OpKind(at::aten::rrelu_with_noise), {input, seed},
+    : TsNode(torch::lazy::OpKind(at::aten::rrelu_with_noise), {input, seed},
            lazy_tensors::ShapeUtil::MakeTupleShape(
-               {GetShapeFromTsValue(input), GetShapeFromTsValue(input)}),
+               {ir::GetShapeFromTsValue(input), GetShapeFromTsValue(input)}),
            /*num_outputs=*/2,
            torch::lazy::MHash(ScalarHash(lower), ScalarHash(upper),
                                      training)),
@@ -22,7 +22,7 @@ RreluWithNoise::RreluWithNoise(const Value& input, const Value& seed,
       training_(training) {}
 
 NodePtr RreluWithNoise::Clone(OpList operands) const {
-  return MakeNode<RreluWithNoise>(operands.at(0), operands.at(1), lower_,
+  return torch::lazy::MakeNode<RreluWithNoise>(operands.at(0), operands.at(1), lower_,
                                   upper_, training_);
 }
 

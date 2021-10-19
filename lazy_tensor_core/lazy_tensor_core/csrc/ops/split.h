@@ -11,7 +11,7 @@ namespace ops {
 // Split the tensor into chunks along a given dimension.
 class Split : public TsNode {
  public:
-  Split(const Value& input, std::vector<lazy_tensors::int64> split_sizes,
+  Split(const torch::lazy::Value& input, std::vector<lazy_tensors::int64> split_sizes,
         lazy_tensors::int64 dim);
 
   NodePtr Clone(OpList operands) const override;

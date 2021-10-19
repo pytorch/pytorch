@@ -10,7 +10,7 @@ namespace ir {
 namespace ops {
 
 CollectivePermute::CollectivePermute(
-    const Value& input, const Value& token,
+    const torch::lazy::Value& input, const torch::lazy::Value& token,
     std::vector<std::pair<lazy_tensors::int64, lazy_tensors::int64>>
         source_target_pairs)
     : TsNode(ltc_collective_permute, {input, token},
@@ -21,7 +21,7 @@ CollectivePermute::CollectivePermute(
 }
 
 NodePtr CollectivePermute::Clone(OpList operands) const {
-  return MakeNode<CollectivePermute>(operands.at(0), operands.at(1),
+  return torch::lazy::MakeNode<CollectivePermute>(operands.at(0), operands.at(1),
                                      source_target_pairs_);
 }
 

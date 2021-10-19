@@ -11,7 +11,7 @@ namespace ops {
 class ConvolutionBackwardOverrideable : public TsNode {
  public:
   ConvolutionBackwardOverrideable(
-      const Value& grad_output, const Value& input, const Value& weight,
+      const torch::lazy::Value& grad_output, const torch::lazy::Value& input, const torch::lazy::Value& weight,
       std::vector<lazy_tensors::int64> stride,
       std::vector<lazy_tensors::int64> padding,
       std::vector<lazy_tensors::int64> dilation, bool transposed,
@@ -19,7 +19,7 @@ class ConvolutionBackwardOverrideable : public TsNode {
       lazy_tensors::int64 groups);
 
   ConvolutionBackwardOverrideable(
-      const Value& grad_output, const Value& input, const Value& weight,
+      const torch::lazy::Value& grad_output, const torch::lazy::Value& input, const torch::lazy::Value& weight,
       std::vector<lazy_tensors::int64> stride,
       std::vector<lazy_tensors::int64> padding,
       std::vector<lazy_tensors::int64> dilation, bool transposed,

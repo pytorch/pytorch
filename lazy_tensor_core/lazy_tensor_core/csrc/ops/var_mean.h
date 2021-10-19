@@ -11,7 +11,7 @@ namespace ops {
 
 class VarMean : public TsNode {
  public:
-  VarMean(const Value& input, std::vector<lazy_tensors::int64> dimensions,
+  VarMean(const torch::lazy::Value& input, std::vector<lazy_tensors::int64> dimensions,
           lazy_tensors::int64 correction, bool keep_reduced_dimensions);
 
   std::string ToString() const override;

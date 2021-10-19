@@ -12,7 +12,7 @@ namespace ops {
 
 class Logsumexp : public TsNode {
  public:
-  Logsumexp(const Value& input, std::vector<lazy_tensors::int64> dimensions,
+  Logsumexp(const torch::lazy::Value& input, std::vector<lazy_tensors::int64> dimensions,
             bool keep_reduced_dimensions);
 
   std::string ToString() const override;

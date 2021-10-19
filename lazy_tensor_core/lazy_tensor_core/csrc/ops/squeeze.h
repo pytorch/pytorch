@@ -9,7 +9,7 @@ namespace ops {
 class Squeeze : public TsNode {
  public:
   // Squeeze out the specified dimension index, -1 for all trivial dimensions.
-  Squeeze(const Value& input, int dim);
+  Squeeze(const torch::lazy::Value& input, int dim);
 
   NodePtr Clone(OpList operands) const override;
 

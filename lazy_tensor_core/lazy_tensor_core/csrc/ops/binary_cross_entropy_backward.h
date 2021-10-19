@@ -11,9 +11,9 @@ namespace ops {
 
 class BinaryCrossEntropyBackward : public TsNode {
  public:
-  BinaryCrossEntropyBackward(const Value& grad_output, const Value& logits,
-                             const Value& labels,
-                             const c10::optional<Value>& weight,
+  BinaryCrossEntropyBackward(const torch::lazy::Value& grad_output, const torch::lazy::Value& logits,
+                             const torch::lazy::Value& labels,
+                             const c10::optional<torch::lazy::Value>& weight,
                              ReductionMode reduction);
 
   std::string ToString() const override;

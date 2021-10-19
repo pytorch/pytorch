@@ -10,7 +10,7 @@ namespace ops {
 
 class UpsampleNearestBackward : public TsNode {
  public:
-  UpsampleNearestBackward(const Value& input,
+  UpsampleNearestBackward(const torch::lazy::Value& input,
                           std::vector<lazy_tensors::int64> output_size,
                           std::vector<lazy_tensors::int64> input_size);
 

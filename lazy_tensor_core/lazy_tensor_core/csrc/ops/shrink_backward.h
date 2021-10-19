@@ -10,7 +10,7 @@ namespace ops {
 
 class ShrinkBackward : public TsNode {
  public:
-  ShrinkBackward(OpKind kind, const Value& grad_output, const Value& input,
+  ShrinkBackward(OpKind kind, const torch::lazy::Value& grad_output, const torch::lazy::Value& input,
                  const at::Scalar& lambda);
 
   std::string ToString() const override;

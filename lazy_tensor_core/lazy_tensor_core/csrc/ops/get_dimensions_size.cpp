@@ -12,7 +12,7 @@ namespace ir {
 namespace ops {
 
 GetDimensionsSize::GetDimensionsSize(
-    const Value& input, std::vector<lazy_tensors::int64> dimensions)
+    const torch::lazy::Value& input, std::vector<lazy_tensors::int64> dimensions)
     : TsNode(ltc_get_dimensions_size, {input},
            lazy_tensors::ShapeUtil::MakeShape(
                GetShapeDimensionType(/*device=*/nullptr), {}),
@@ -20,7 +20,7 @@ GetDimensionsSize::GetDimensionsSize(
       dimensions_(std::move(dimensions)) {}
 
 NodePtr GetDimensionsSize::Clone(OpList operands) const {
-  return MakeNode<GetDimensionsSize>(operands.at(0), dimensions_);
+  return torch::lazy::MakeNode<GetDimensionsSize>(operands.at(0), dimensions_);
 }
 
 std::string GetDimensionsSize::ToString() const {

@@ -6,8 +6,8 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Softshrink::Softshrink(const Value& input, const at::Scalar& lambda)
-    : TsNode(OpKind(at::aten::softshrink), {input}, GetShapeFromTsValue(input),
+Softshrink::Softshrink(const torch::lazy::Value& input, const at::Scalar& lambda)
+    : TsNode(OpKind(at::aten::softshrink), {input}, ir::GetShapeFromTsValue(input),
            /*num_outputs=*/1, ScalarHash(lambda)),
       lambda_(std::move(lambda)) {}
 
@@ -18,7 +18,7 @@ std::string Softshrink::ToString() const {
 }
 
 NodePtr Softshrink::Clone(OpList operands) const {
-  return MakeNode<Softshrink>(operands.at(0), lambda_);
+  return torch::lazy::MakeNode<Softshrink>(operands.at(0), lambda_);
 }
 
 }  // namespace ops

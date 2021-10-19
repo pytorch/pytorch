@@ -7,10 +7,10 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-VarMean::VarMean(const Value& input,
+VarMean::VarMean(const torch::lazy::Value& input,
                  std::vector<lazy_tensors::int64> dimensions,
                  lazy_tensors::int64 correction, bool keep_reduced_dimensions)
-    : TsNode(ir::OpKind(at::aten::var_mean), {input},
+    : TsNode(torch::lazy::OpKind(at::aten::var_mean), {input},
            /*num_outputs=*/2,
            torch::lazy::MHash(dimensions, correction,
                                      keep_reduced_dimensions)),
@@ -22,7 +22,7 @@ VarMean::VarMean(const Value& input,
 }
 
 NodePtr VarMean::Clone(OpList operands) const {
-  return MakeNode<VarMean>(operands.at(0), dimensions_, correction_,
+  return torch::lazy::MakeNode<VarMean>(operands.at(0), dimensions_, correction_,
                            keep_reduced_dimensions_);
 }
 

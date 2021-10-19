@@ -81,7 +81,7 @@ class {schema.node_name} : public {self.node_base} {{
  public:
   {schema.node_name}({node_ctor_args}, const std::vector<at::ScalarType>& out_dtypes,
       const std::vector<std::vector<int64_t>>& out_shapes)
-      : {self.node_base}(ir::OpKind(at::aten::{func.name.name}),
+      : {self.node_base}(torch::lazy::OpKind(at::aten::{func.name.name}),
               {{{base_ctor_value_args}}},
               convertShape(out_dtypes, out_shapes),
               /* num_outputs */ {len(func.returns)},
@@ -176,7 +176,7 @@ def gen_lazy_nativefunc_definition(func: NativeFunction, backend_index: BackendI
     auto out_shape = torch_lazy_tensors::ir::ops::compute_shape_{schema.aten_name}({meta_args});
     auto out_dtype = torch_lazy_tensors::ir::ops::compute_dtype_{schema.aten_name}({meta_args});"""
 
-    node_str = f"""auto node = ir::MakeNode<ir::ops::{schema.node_name}>({node_ctor_input_str}, out_dtype, out_shape);"""
+    node_str = f"""auto node = torch::lazy::MakeNode<ir::ops::{schema.node_name}>({node_ctor_input_str}, out_dtype, out_shape);"""
 
     assert len(value_types) > 0, f"Only supporting tensor ops so far, none found in {sig}"
     first_tensor = value_types[0]
@@ -185,7 +185,7 @@ def gen_lazy_nativefunc_definition(func: NativeFunction, backend_index: BackendI
     if returns_length > 1:
         bridge_str = f"""std::vector<LazyTensor> lazy_tensors;
     for (int i = 0; i < {returns_length}; i++) {{
-        lazy_tensors.push_back(lazy_{first_tensor.name}.CreateFrom(ir::Value(node, i), out_dtype[i]));
+        lazy_tensors.push_back(lazy_{first_tensor.name}.CreateFrom(torch::lazy::Value(node, i), out_dtype[i]));
     }}
     auto result = bridge::TupleAtenFromLtcTensors<{returns_length}>(lazy_tensors);"""
 

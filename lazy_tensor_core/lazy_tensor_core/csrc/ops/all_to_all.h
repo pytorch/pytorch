@@ -9,7 +9,7 @@ namespace ops {
 
 class AllToAll : public TsNode {
  public:
-  AllToAll(const Value& input, const Value& token,
+  AllToAll(const torch::lazy::Value& input, const torch::lazy::Value& token,
            lazy_tensors::int64 split_dimension,
            lazy_tensors::int64 concat_dimension,
            lazy_tensors::int64 split_count,

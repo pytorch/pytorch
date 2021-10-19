@@ -11,8 +11,8 @@ namespace ops {
 // IR node for 2D & 3D convolutions with or without bias.
 class ConvolutionOverrideable : public TsNode {
  public:
-  ConvolutionOverrideable(const Value& input, const Value& weight,
-                          const Value& bias,
+  ConvolutionOverrideable(const torch::lazy::Value& input, const torch::lazy::Value& weight,
+                          const torch::lazy::Value& bias,
                           std::vector<lazy_tensors::int64> stride,
                           std::vector<lazy_tensors::int64> padding,
                           std::vector<lazy_tensors::int64> dilation,
@@ -20,7 +20,7 @@ class ConvolutionOverrideable : public TsNode {
                           std::vector<lazy_tensors::int64> output_padding,
                           lazy_tensors::int64 groups);
 
-  ConvolutionOverrideable(const Value& input, const Value& weight,
+  ConvolutionOverrideable(const torch::lazy::Value& input, const torch::lazy::Value& weight,
                           std::vector<lazy_tensors::int64> stride,
                           std::vector<lazy_tensors::int64> padding,
                           std::vector<lazy_tensors::int64> dilation,

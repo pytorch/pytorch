@@ -22,6 +22,7 @@
 
 namespace torch_lazy_tensors {
 namespace {
+using namespace torch_lazy_tensors::ir;
 
 void CheckIndexTensorTypes(
     const c10::List<c10::optional<at::Tensor>>& indices) {
@@ -150,32 +151,32 @@ std::vector<LazyTensor> WrapIndicesOnce(
   return canonical_indices;
 }
 
-ir::NodePtr IndexFillOp(const ir::Value& buffer, lazy_tensors::int64 dim,
-                        const ir::Value& index, const ir::Value& value) {
-  ir::Value index_rank1 = EnsureRank1(index);
-  ir::NodePtr node = ir::MakeNode<ir::ops::IndexAlongDim>(
-      ir::OpKind(at::aten::index_fill), buffer, index_rank1, value, dim);
-  TsNodeSetShapeDeferred(
+NodePtr IndexFillOp(const torch::lazy::Value& buffer, lazy_tensors::int64 dim,
+                        const torch::lazy::Value& index, const torch::lazy::Value& value) {
+  torch::lazy::Value index_rank1 = EnsureRank1(index);
+  NodePtr node = torch::lazy::MakeNode<ir::ops::IndexAlongDim>(
+      torch::lazy::OpKind(at::aten::index_fill), buffer, index_rank1, value, dim);
+  ir::TsNodeSetShapeDeferred(
       node, [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
   return node;
 }
 
-ir::NodePtr IndexAddOp(const ir::Value& buffer, lazy_tensors::int64 dim,
-                       const ir::Value& index, const ir::Value& source) {
-  ir::Value index_rank1 = EnsureRank1(index);
-  ir::NodePtr node = ir::MakeNode<ir::ops::IndexAlongDim>(
-      ir::OpKind(at::aten::index_add), buffer, index_rank1, source, dim);
-  TsNodeSetShapeDeferred(
+NodePtr IndexAddOp(const torch::lazy::Value& buffer, lazy_tensors::int64 dim,
+                       const torch::lazy::Value& index, const torch::lazy::Value& source) {
+  torch::lazy::Value index_rank1 = EnsureRank1(index);
+  NodePtr node = torch::lazy::MakeNode<ir::ops::IndexAlongDim>(
+      torch::lazy::OpKind(at::aten::index_add), buffer, index_rank1, source, dim);
+  ir::TsNodeSetShapeDeferred(
       node, [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
   return node;
 }
 
-ir::NodePtr IndexCopyOp(const ir::Value& buffer, lazy_tensors::int64 dim,
-                        const ir::Value& index, const ir::Value& source) {
-  ir::Value index_rank1 = EnsureRank1(index);
-  ir::NodePtr node = ir::MakeNode<ir::ops::IndexAlongDim>(
-      ir::OpKind(at::aten::index_copy), buffer, index_rank1, source, dim);
-  TsNodeSetShapeDeferred(
+NodePtr IndexCopyOp(const torch::lazy::Value& buffer, lazy_tensors::int64 dim,
+                        const torch::lazy::Value& index, const torch::lazy::Value& source) {
+  torch::lazy::Value index_rank1 = EnsureRank1(index);
+  NodePtr node = torch::lazy::MakeNode<ir::ops::IndexAlongDim>(
+      torch::lazy::OpKind(at::aten::index_copy), buffer, index_rank1, source, dim);
+  ir::TsNodeSetShapeDeferred(
       node, [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
   return node;
 }
@@ -202,10 +203,10 @@ CanonicalIndexInfo GetCanonicalIndexInfo(
   return canonical_index_info;
 }
 
-ir::Value EnsureRank1(const ir::Value& index) {
-  LTC_CHECK_LE(GetShapeFromTsValue(index).rank(), 1);
-  return GetShapeFromTsValue(index).rank() == 0
-             ? ir::MakeNode<ir::ops::Expand>(
+torch::lazy::Value EnsureRank1(const torch::lazy::Value& index) {
+  LTC_CHECK_LE(ir::GetShapeFromTsValue(index).rank(), 1);
+  return ir::GetShapeFromTsValue(index).rank() == 0
+             ? torch::lazy::MakeNode<ir::ops::Expand>(
                    index, std::vector<lazy_tensors::int64>{1},
                    /*is_scalar_expand=*/false)
              : index;
@@ -225,12 +226,12 @@ LazyTensor IndexByTensors(const LazyTensor& base,
   LazyTensor indices_nd =
       tensor_aten_ops::stack(canonical_indices, indices_rank);
   return LazyTensor::Create(
-      ir::MakeNode<ir::ops::IndexGet>(base.GetIrValue(),
+      torch::lazy::MakeNode<ir::ops::IndexGet>(base.GetIrValue(),
                                       indices_nd.GetIrValue(), start_dim),
       base.GetDevice(), base.dtype());
 }
 
-ir::Value IndexPutByTensors(
+torch::lazy::Value IndexPutByTensors(
     const LazyTensor& base, lazy_tensors::Span<const LazyTensor> indices,
     lazy_tensors::int64 start_dim, const LazyTensor& values, bool accumulate,
     lazy_tensors::Span<const lazy_tensors::int64> result_permutation) {
@@ -244,14 +245,14 @@ ir::Value IndexPutByTensors(
   // single scatter.
   LazyTensor indices_nd =
       tensor_aten_ops::stack(canonical_indices, indices_rank);
-  return ir::MakeNode<ir::ops::Permute>(
-      ir::MakeNode<ir::ops::IndexPut>(base.GetIrValue(),
+  return torch::lazy::MakeNode<ir::ops::Permute>(
+      torch::lazy::MakeNode<ir::ops::IndexPut>(base.GetIrValue(),
                                       indices_nd.GetIrValue(), start_dim,
                                       values.GetIrValue(), accumulate),
       lazy_tensors::util::ToVector<lazy_tensors::int64>(result_permutation));
 }
 
-ir::NodePtr IndexFill(const LazyTensor& base, lazy_tensors::int64 dim,
+NodePtr IndexFill(const LazyTensor& base, lazy_tensors::int64 dim,
                       const LazyTensor& index, const at::Scalar& value) {
   LTC_CHECK_EQ(index.dtype(), at::ScalarType::Long)
       << "Fill index is expected to be of scalar type Long, but it is "
@@ -264,7 +265,7 @@ ir::NodePtr IndexFill(const LazyTensor& base, lazy_tensors::int64 dim,
                                       base.GetDevice()));
 }
 
-ir::NodePtr IndexFill(const LazyTensor& base, lazy_tensors::int64 dim,
+NodePtr IndexFill(const LazyTensor& base, lazy_tensors::int64 dim,
                       const LazyTensor& index, const LazyTensor& value) {
   LTC_CHECK_EQ(index.dtype(), at::ScalarType::Long)
       << "Fill index is expected to be of scalar type Long, but it is "
@@ -277,7 +278,7 @@ ir::NodePtr IndexFill(const LazyTensor& base, lazy_tensors::int64 dim,
                      value.GetIrValue());
 }
 
-ir::Value IndexAdd(const LazyTensor& base, lazy_tensors::int64 dim,
+torch::lazy::Value IndexAdd(const LazyTensor& base, lazy_tensors::int64 dim,
                    const LazyTensor& index, const LazyTensor& source) {
   LTC_CHECK(index.dtype() == at::ScalarType::Long ||
             index.dtype() == at::ScalarType::Int)
@@ -290,7 +291,7 @@ ir::Value IndexAdd(const LazyTensor& base, lazy_tensors::int64 dim,
                     source.GetIrValue());
 }
 
-ir::Value IndexCopy(const LazyTensor& base, lazy_tensors::int64 dim,
+torch::lazy::Value IndexCopy(const LazyTensor& base, lazy_tensors::int64 dim,
                     const LazyTensor& index, const LazyTensor& source) {
   LTC_CHECK_EQ(index.dtype(), at::ScalarType::Long)
       << "Copy index is expected to be of scalar type Long, but it is "

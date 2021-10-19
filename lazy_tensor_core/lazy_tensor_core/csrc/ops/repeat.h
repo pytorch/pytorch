@@ -9,7 +9,7 @@ namespace ops {
 
 class Repeat : public TsNode {
  public:
-  Repeat(const Value& input, std::vector<lazy_tensors::int64> repeats);
+  Repeat(const torch::lazy::Value& input, std::vector<lazy_tensors::int64> repeats);
 
   NodePtr Clone(OpList operands) const override;
 

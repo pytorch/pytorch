@@ -30,7 +30,7 @@ c10::optional<size_t> GetOutputIndex(bool is_device_data, size_t index) {
 }
 
 const lazy_tensors::Shape& GetParameterShape(
-    const ir::Output& operand, const lazy_tensors::Shape& input_shape) {
+    const torch::lazy::Output& operand, const lazy_tensors::Shape& input_shape) {
   // See comment in GetOutputIndex() about device data WRT computation outpout
   // shape handling.
   const ir::ops::DeviceData* device_data =
@@ -41,7 +41,7 @@ const lazy_tensors::Shape& GetParameterShape(
 }
 
 torch::lazy::hash_t ComputeNodeKey(
-    const ir::Node* node,
+    const torch::lazy::Node* node,
     lazy_tensors::Span<const lazy_tensors::Shape* const> input_shapes,
     const torch::lazy::hash_t& seed) {
   torch::lazy::hash_t key = seed;
@@ -52,12 +52,12 @@ torch::lazy::hash_t ComputeNodeKey(
                  GetParameterShape(operands[i], *input_shapes[i])));
   }
   key = torch::lazy::HashCombine(
-      key, torch::lazy::Hash(GetShapeFromTsNode(*node)));
+      key, torch::lazy::Hash(ir::GetShapeFromTsNode(*node)));
   return torch::lazy::HashCombine(key, node->node_hash());
 }
 
 std::shared_ptr<lazy_tensors::GenericComputation> BuildNodeComputation(
-    const ir::Node* node,
+    const torch::lazy::Node* node,
     lazy_tensors::Span<const lazy_tensors::Shape* const> input_shapes,
     const Device& device) {
   auto loctx = ir::LoweringContext::Create("BuildNodeComputation", device);
@@ -81,20 +81,20 @@ OpByOpExecutor::OpByOpExecutor(size_t compile_cache_size)
     : compile_cache_(compile_cache_size) {}
 
 std::vector<lazy_tensors::ComputationClient::ExecuteChainedOp>
-OpByOpExecutor::BuildOps(lazy_tensors::Span<const ir::Value> roots,
+OpByOpExecutor::BuildOps(lazy_tensors::Span<const torch::lazy::Value> roots,
                          const std::string& device,
                          lazy_tensors::Span<const std::string> devices) {
-  std::vector<const ir::Node*> root_nodes;
+  std::vector<const torch::lazy::Node*> root_nodes;
   root_nodes.reserve(roots.size());
   for (auto& root : roots) {
     root_nodes.push_back(root.node.get());
   }
-  std::vector<const ir::Node*> post_order =
+  std::vector<const torch::lazy::Node*> post_order =
       ir::Util::ComputePostOrder(root_nodes);
   LTC_VALUE_METRIC("OpByOpGraphSize", post_order.size());
   LTC_VLOG(5) << "TensorsGraphSize=" << post_order.size();
 
-  std::unordered_map<const ir::Node*, size_t> node_to_index;
+  std::unordered_map<const torch::lazy::Node*, size_t> node_to_index;
   node_to_index.reserve(post_order.size());
   for (size_t i = 0; i < post_order.size(); ++i) {
     node_to_index[post_order[i]] = i;
@@ -121,7 +121,7 @@ OpByOpExecutor::BuildOps(lazy_tensors::Span<const ir::Value> roots,
   std::vector<lazy_tensors::ComputationClient::ExecuteChainedOp>
       chained_exec_ops(post_order.size());
   for (size_t i = 0; i < post_order.size(); ++i) {
-    const ir::Node* node = post_order[i];
+    const torch::lazy::Node* node = post_order[i];
     lazy_tensors::ComputationClient::ExecuteChainedOp& cxop =
         chained_exec_ops[i];
     const ir::ops::DeviceData* device_data = ir::ops::DeviceData::Cast(node);
@@ -199,7 +199,7 @@ OpByOpExecutor::BuildOps(lazy_tensors::Span<const ir::Value> roots,
 }
 
 std::vector<lazy_tensors::ComputationClient::DataPtr> OpByOpExecutor::Execute(
-    lazy_tensors::Span<const ir::Value> roots, const std::string& device,
+    lazy_tensors::Span<const torch::lazy::Value> roots, const std::string& device,
     lazy_tensors::Span<const std::string> devices) {
   auto chained_exec_ops = BuildOps(roots, device, devices);
   return lazy_tensors::ComputationClient::Get()->ExecuteChained(
@@ -207,9 +207,9 @@ std::vector<lazy_tensors::ComputationClient::DataPtr> OpByOpExecutor::Execute(
 }
 
 OpByOpExecutor::AsyncTask OpByOpExecutor::ExecuteAsync(
-    lazy_tensors::Span<const ir::Value> roots, const std::string& device,
+    lazy_tensors::Span<const torch::lazy::Value> roots, const std::string& device,
     lazy_tensors::Span<const std::string> devices) {
-  std::vector<ir::Value> roots_vector(roots.begin(), roots.end());
+  std::vector<torch::lazy::Value> roots_vector(roots.begin(), roots.end());
   std::vector<std::string> devices_vector(devices.begin(), devices.end());
   auto taskfn = [this, roots = std::move(roots_vector),
                  devices = std::move(devices_vector), device]() -> AsyncResult {

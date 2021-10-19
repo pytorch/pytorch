@@ -8,11 +8,11 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-NllLoss2d::NllLoss2d(const Value& logits, const Value& labels,
-                     const c10::optional<Value>& weight,
+NllLoss2d::NllLoss2d(const torch::lazy::Value& logits, const torch::lazy::Value& labels,
+                     const c10::optional<torch::lazy::Value>& weight,
                      ReductionMode reduction, int ignore_index)
-    : TsNode(ir::OpKind(at::aten::nll_loss2d),
-             lazy_tensors::util::GetValuesVector<Value>({logits, labels},
+    : TsNode(torch::lazy::OpKind(at::aten::nll_loss2d),
+             lazy_tensors::util::GetValuesVector<torch::lazy::Value>({logits, labels},
                                                         {&weight}),
              /*num_outputs=*/1,
              torch::lazy::MHash(lazy_tensors::util::GetEnumValue(reduction),
@@ -24,11 +24,11 @@ NllLoss2d::NllLoss2d(const Value& logits, const Value& labels,
 }
 
 NodePtr NllLoss2d::Clone(OpList operands) const {
-  c10::optional<Value> weight;
+  c10::optional<torch::lazy::Value> weight;
   if (operands.size() > 2) {
     weight = operands.at(2);
   }
-  return MakeNode<NllLoss2d>(operands.at(0), operands.at(1), weight, reduction_,
+  return torch::lazy::MakeNode<NllLoss2d>(operands.at(0), operands.at(1), weight, reduction_,
                              ignore_index_);
 }
 

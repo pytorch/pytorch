@@ -9,10 +9,10 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-UpsampleBilinear::UpsampleBilinear(const Value& input,
+UpsampleBilinear::UpsampleBilinear(const torch::lazy::Value& input,
                                    std::vector<lazy_tensors::int64> output_size,
                                    bool align_corners)
-    : TsNode(ir::OpKind(at::aten::upsample_bilinear2d), {input},
+    : TsNode(torch::lazy::OpKind(at::aten::upsample_bilinear2d), {input},
            /*num_outputs=*/1,
            torch::lazy::MHash(output_size, align_corners)),
       output_size_(std::move(output_size)),
@@ -22,7 +22,7 @@ UpsampleBilinear::UpsampleBilinear(const Value& input,
 }
 
 NodePtr UpsampleBilinear::Clone(OpList operands) const {
-  return MakeNode<UpsampleBilinear>(operands.at(0), output_size_,
+  return torch::lazy::MakeNode<UpsampleBilinear>(operands.at(0), output_size_,
                                     align_corners_);
 }
 

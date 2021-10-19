@@ -10,7 +10,7 @@ namespace ops {
 
 class Expand : public TsNode {
  public:
-  Expand(const Value& input, std::vector<lazy_tensors::int64> size,
+  Expand(const torch::lazy::Value& input, std::vector<lazy_tensors::int64> size,
          bool is_scalar_expand);
 
   std::string ToString() const override;

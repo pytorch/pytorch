@@ -8,7 +8,7 @@ namespace ops {
 
 class ThresholdBackward : public TsNode {
  public:
-  ThresholdBackward(const Value& grad_output, const Value& input,
+  ThresholdBackward(const torch::lazy::Value& grad_output, const torch::lazy::Value& input,
                     float threshold);
 
   NodePtr Clone(OpList operands) const override;

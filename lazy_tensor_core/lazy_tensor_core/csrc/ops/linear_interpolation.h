@@ -8,7 +8,7 @@ namespace ops {
 
 class LinearInterpolation : public TsNode {
  public:
-  LinearInterpolation(const Value& value, const Value& new_value, double alpha);
+  LinearInterpolation(const torch::lazy::Value& value, const torch::lazy::Value& new_value, double alpha);
 
   std::string ToString() const override;
 

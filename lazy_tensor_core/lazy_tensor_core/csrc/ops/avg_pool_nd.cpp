@@ -25,12 +25,12 @@ c10::Symbol AvgPoolNdSymbol(lazy_tensors::int64 spatial_dim_count) {
 
 }  // namespace
 
-AvgPoolNd::AvgPoolNd(const Value& input, lazy_tensors::int64 spatial_dim_count,
+AvgPoolNd::AvgPoolNd(const torch::lazy::Value& input, lazy_tensors::int64 spatial_dim_count,
                      std::vector<lazy_tensors::int64> kernel_size,
                      std::vector<lazy_tensors::int64> stride,
                      std::vector<lazy_tensors::int64> padding, bool ceil_mode,
                      bool count_include_pad)
-    : TsNode(ir::OpKind(AvgPoolNdSymbol(spatial_dim_count)), {input},
+    : TsNode(torch::lazy::OpKind(AvgPoolNdSymbol(spatial_dim_count)), {input},
            /*num_outputs=*/1,
            torch::lazy::MHash(spatial_dim_count, kernel_size, stride,
                                      padding, ceil_mode, count_include_pad)),
@@ -45,7 +45,7 @@ AvgPoolNd::AvgPoolNd(const Value& input, lazy_tensors::int64 spatial_dim_count,
 }
 
 NodePtr AvgPoolNd::Clone(OpList operands) const {
-  return MakeNode<AvgPoolNd>(operands.at(0), spatial_dim_count_, kernel_size_,
+  return torch::lazy::MakeNode<AvgPoolNd>(operands.at(0), spatial_dim_count_, kernel_size_,
                              stride_, padding_, ceil_mode_, count_include_pad_);
 }
 

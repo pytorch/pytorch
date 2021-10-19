@@ -12,13 +12,13 @@ class NodeLowering {
 
   virtual ~NodeLowering() = default;
 
-  virtual bool Lower(const ir::Node* node) = 0;
+  virtual bool Lower(const torch::lazy::Node* node) = 0;
 
   static std::unique_ptr<NodeLowering> Create(ir::LoweringContext* loctx);
 
   // TODO(asuhan): this method shouldn't be needed, the core can provide all
   // inference.
-  virtual lazy_tensors::Shape Infer(const ir::Node* node) = 0;
+  virtual lazy_tensors::Shape Infer(const torch::lazy::Node* node) = 0;
 
   static NodeLowering* Get();
 

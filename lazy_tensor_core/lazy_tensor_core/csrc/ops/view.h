@@ -10,7 +10,7 @@ namespace ops {
 
 class View : public TsNode {
  public:
-  View(const Value& input, std::vector<lazy_tensors::int64> output_size);
+  View(const torch::lazy::Value& input, std::vector<lazy_tensors::int64> output_size);
 
   std::string ToString() const override;
 

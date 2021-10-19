@@ -9,12 +9,12 @@ namespace ir {
 namespace ops {
 
 ConvolutionBackwardOverrideable::ConvolutionBackwardOverrideable(
-    const Value& grad_output, const Value& input, const Value& weight,
+    const torch::lazy::Value& grad_output, const torch::lazy::Value& input, const torch::lazy::Value& weight,
     std::vector<lazy_tensors::int64> stride,
     std::vector<lazy_tensors::int64> padding,
     std::vector<lazy_tensors::int64> dilation, bool transposed,
     std::vector<lazy_tensors::int64> output_padding, lazy_tensors::int64 groups)
-    : TsNode(ir::OpKind(at::aten::convolution_backward_overrideable),
+    : TsNode(torch::lazy::OpKind(at::aten::convolution_backward_overrideable),
            {grad_output, input, weight},
            /*num_outputs=*/3,
            torch::lazy::MHash(stride, padding, dilation, transposed,
@@ -30,7 +30,7 @@ ConvolutionBackwardOverrideable::ConvolutionBackwardOverrideable(
 }
 
 ConvolutionBackwardOverrideable::ConvolutionBackwardOverrideable(
-    const Value& grad_output, const Value& input, const Value& weight,
+    const torch::lazy::Value& grad_output, const torch::lazy::Value& input, const torch::lazy::Value& weight,
     std::vector<lazy_tensors::int64> stride,
     std::vector<lazy_tensors::int64> padding,
     std::vector<lazy_tensors::int64> dilation, bool transposed,
@@ -43,7 +43,7 @@ ConvolutionBackwardOverrideable::ConvolutionBackwardOverrideable(
 }
 
 NodePtr ConvolutionBackwardOverrideable::Clone(OpList operands) const {
-  return MakeNode<ConvolutionBackwardOverrideable>(
+  return torch::lazy::MakeNode<ConvolutionBackwardOverrideable>(
       operands.at(0), operands.at(1), operands.at(2), stride_, padding_,
       dilation_, transposed_, output_padding_, groups_);
 }

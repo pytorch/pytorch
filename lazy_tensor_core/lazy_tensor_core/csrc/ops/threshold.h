@@ -9,7 +9,7 @@ namespace ops {
 // IR node for the threshold operation.
 class Threshold : public TsNode {
  public:
-  Threshold(const Value& input, float threshold, float value);
+  Threshold(const torch::lazy::Value& input, float threshold, float value);
 
   NodePtr Clone(OpList operands) const override;
 

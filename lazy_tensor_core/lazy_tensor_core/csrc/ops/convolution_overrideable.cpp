@@ -9,12 +9,12 @@ namespace ir {
 namespace ops {
 
 ConvolutionOverrideable::ConvolutionOverrideable(
-    const Value& input, const Value& weight, const Value& bias,
+    const torch::lazy::Value& input, const torch::lazy::Value& weight, const torch::lazy::Value& bias,
     std::vector<lazy_tensors::int64> stride,
     std::vector<lazy_tensors::int64> padding,
     std::vector<lazy_tensors::int64> dilation, bool transposed,
     std::vector<lazy_tensors::int64> output_padding, lazy_tensors::int64 groups)
-    : TsNode(ir::OpKind(at::aten::convolution_overrideable),
+    : TsNode(torch::lazy::OpKind(at::aten::convolution_overrideable),
            {input, weight, bias},
            /*num_outputs=*/1,
            torch::lazy::MHash(stride, padding, dilation, transposed,
@@ -30,12 +30,12 @@ ConvolutionOverrideable::ConvolutionOverrideable(
 }
 
 ConvolutionOverrideable::ConvolutionOverrideable(
-    const Value& input, const Value& weight,
+    const torch::lazy::Value& input, const torch::lazy::Value& weight,
     std::vector<lazy_tensors::int64> stride,
     std::vector<lazy_tensors::int64> padding,
     std::vector<lazy_tensors::int64> dilation, bool transposed,
     std::vector<lazy_tensors::int64> output_padding, lazy_tensors::int64 groups)
-    : TsNode(ir::OpKind(at::aten::convolution_overrideable), {input, weight},
+    : TsNode(torch::lazy::OpKind(at::aten::convolution_overrideable), {input, weight},
            /*num_outputs=*/1,
            torch::lazy::MHash(stride, padding, dilation, transposed,
                                      output_padding, groups)),
@@ -51,10 +51,10 @@ ConvolutionOverrideable::ConvolutionOverrideable(
 
 NodePtr ConvolutionOverrideable::Clone(OpList operands) const {
   return operands.size() == 3
-             ? MakeNode<ConvolutionOverrideable>(
+             ? torch::lazy::MakeNode<ConvolutionOverrideable>(
                    operands.at(0), operands.at(1), operands.at(2), stride_,
                    padding_, dilation_, transposed_, output_padding_, groups_)
-             : MakeNode<ConvolutionOverrideable>(
+             : torch::lazy::MakeNode<ConvolutionOverrideable>(
                    operands.at(0), operands.at(1), stride_, padding_, dilation_,
                    transposed_, output_padding_, groups_);
 }

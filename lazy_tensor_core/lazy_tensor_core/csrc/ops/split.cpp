@@ -10,10 +10,10 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Split::Split(const Value& input, std::vector<lazy_tensors::int64> split_sizes,
+Split::Split(const torch::lazy::Value& input, std::vector<lazy_tensors::int64> split_sizes,
              lazy_tensors::int64 dim)
-    : TsNode(ir::OpKind(at::aten::split), {input},
-           ComputeSplitCount(GetShapeFromTsValue(input).dimensions(dim), split_sizes),
+    : TsNode(torch::lazy::OpKind(at::aten::split), {input},
+           ComputeSplitCount(ir::GetShapeFromTsValue(input).dimensions(dim), split_sizes),
            torch::lazy::MHash(split_sizes, dim)),
       split_sizes_(std::move(split_sizes)),
       dim_(dim) {
@@ -22,7 +22,7 @@ Split::Split(const Value& input, std::vector<lazy_tensors::int64> split_sizes,
 }
 
 NodePtr Split::Clone(OpList operands) const {
-  return MakeNode<Split>(operands.at(0), split_sizes_, dim_);
+  return torch::lazy::MakeNode<Split>(operands.at(0), split_sizes_, dim_);
 }
 
 std::string Split::ToString() const {

@@ -8,7 +8,7 @@ namespace ops {
 
 class TriangularSolve : public TsNode {
  public:
-  TriangularSolve(const Value& rhs, const Value& lhs, bool left_side,
+  TriangularSolve(const torch::lazy::Value& rhs, const torch::lazy::Value& lhs, bool left_side,
                   bool lower, bool transpose, bool unit_diagonal);
 
   std::string ToString() const override;

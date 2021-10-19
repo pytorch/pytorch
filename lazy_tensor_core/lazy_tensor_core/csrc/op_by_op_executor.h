@@ -25,14 +25,14 @@ class OpByOpExecutor {
   static OpByOpExecutor* Get();
 
   std::vector<lazy_tensors::ComputationClient::ExecuteChainedOp> BuildOps(
-      lazy_tensors::Span<const ir::Value> roots, const std::string& device,
+      lazy_tensors::Span<const torch::lazy::Value> roots, const std::string& device,
       lazy_tensors::Span<const std::string> devices);
 
   std::vector<lazy_tensors::ComputationClient::DataPtr> Execute(
-      lazy_tensors::Span<const ir::Value> roots, const std::string& device,
+      lazy_tensors::Span<const torch::lazy::Value> roots, const std::string& device,
       lazy_tensors::Span<const std::string> devices);
 
-  AsyncTask ExecuteAsync(lazy_tensors::Span<const ir::Value> roots,
+  AsyncTask ExecuteAsync(lazy_tensors::Span<const torch::lazy::Value> roots,
                          const std::string& device,
                          lazy_tensors::Span<const std::string> devices);
 

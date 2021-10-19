@@ -23,7 +23,7 @@ c10::Symbol AvgNdBackwardSymbol(lazy_tensors::int64 spatial_dim_count) {
 }  // namespace
 
 AvgPoolNdBackward::AvgPoolNdBackward(
-    const Value& grad_output, const Value& input,
+    const torch::lazy::Value& grad_output, const torch::lazy::Value& input,
     lazy_tensors::int64 spatial_dim_count,
     std::vector<lazy_tensors::int64> kernel_size,
     std::vector<lazy_tensors::int64> stride,
@@ -44,7 +44,7 @@ AvgPoolNdBackward::AvgPoolNdBackward(
 }
 
 NodePtr AvgPoolNdBackward::Clone(OpList operands) const {
-  return MakeNode<AvgPoolNdBackward>(operands.at(0), operands.at(1),
+  return torch::lazy::MakeNode<AvgPoolNdBackward>(operands.at(0), operands.at(1),
                                      spatial_dim_count_, kernel_size_, stride_,
                                      padding_, ceil_mode_, count_include_pad_);
 }

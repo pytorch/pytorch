@@ -35,7 +35,7 @@ namespace ops {
 // to differentiate between HASH(nullopt, something) and HASH(something, nullopt),
 // and using kNullValue in the hash function in the order of arguments
 // serves this purpose.
-static const ir::Value kNullValue = ir::Value();
+static const torch::lazy::Value kNullValue = torch::lazy::Value();
 
 ${ir_declarations}
 

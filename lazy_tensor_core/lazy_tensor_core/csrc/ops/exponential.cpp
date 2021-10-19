@@ -5,13 +5,13 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Exponential::Exponential(const Value& lambda, const Value& seed,
+Exponential::Exponential(const torch::lazy::Value& lambda, const torch::lazy::Value& seed,
                          lazy_tensors::Shape shape)
-    : TsNode(ir::OpKind(at::aten::exponential), {lambda, seed},
+    : TsNode(torch::lazy::OpKind(at::aten::exponential), {lambda, seed},
            std::move(shape)) {}
 
 NodePtr Exponential::Clone(OpList operands) const {
-  return MakeNode<Exponential>(operands.at(0), operands.at(1), shape());
+  return torch::lazy::MakeNode<Exponential>(operands.at(0), operands.at(1), shape());
 }
 
 }  // namespace ops

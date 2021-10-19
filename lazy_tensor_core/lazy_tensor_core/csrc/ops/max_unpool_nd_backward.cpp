@@ -23,9 +23,9 @@ c10::Symbol MaxUnpoolNdBackwardSymbol(lazy_tensors::int64 spatial_dim_count) {
 }  // namespace
 
 MaxUnpoolNdBackward::MaxUnpoolNdBackward(
-    const Value& grad_output, const Value& input, const Value& indices,
+    const torch::lazy::Value& grad_output, const torch::lazy::Value& input, const torch::lazy::Value& indices,
     std::vector<lazy_tensors::int64> output_size)
-    : TsNode(ir::OpKind(MaxUnpoolNdBackwardSymbol(output_size.size())),
+    : TsNode(torch::lazy::OpKind(MaxUnpoolNdBackwardSymbol(output_size.size())),
            {grad_output, input, indices},
            /*num_outputs=*/1, torch::lazy::MHash(output_size)),
       output_size_(std::move(output_size)) {
@@ -34,7 +34,7 @@ MaxUnpoolNdBackward::MaxUnpoolNdBackward(
 }
 
 NodePtr MaxUnpoolNdBackward::Clone(OpList operands) const {
-  return MakeNode<MaxUnpoolNdBackward>(operands.at(0), operands.at(1),
+  return torch::lazy::MakeNode<MaxUnpoolNdBackward>(operands.at(0), operands.at(1),
                                        operands.at(2), output_size_);
 }
 

@@ -46,12 +46,12 @@ class TSLoweringContext : public ir::LoweringContext {
   TSLoweringContext(const std::string& name, Device device);
 
   TSLoweringContext(const std::string& name, Device device,
-                    lazy_tensors::Span<const ir::Node* const> post_order,
+                    lazy_tensors::Span<const torch::lazy::Node* const> post_order,
                     ir::Util::EmissionMap emit_status);
 
   lazy_tensors::Shape GetResultShape(size_t index) const override;
 
-  size_t AddResult(const ir::Output& output) override;
+  size_t AddResult(const torch::lazy::Output& output) override;
 
   lazy_tensors::StatusOr<std::shared_ptr<lazy_tensors::GenericComputation>>
   Build() override;
@@ -59,12 +59,12 @@ class TSLoweringContext : public ir::LoweringContext {
   // Retrieves the lowered operation for a output. If the requested output is
   // not available yet, the graph behind the output's Node is lowered, and the
   // corresponding TS operation returned.
-  torch::jit::Value* GetOutputOp(const ir::Output& output);
+  torch::jit::Value* GetOutputOp(const torch::lazy::Output& output);
 
   // Assigns the given TS operation to the specified output. As outputs are
   // lowered in a post-order fashion, later nodes should always find their
   // operands among the emitted outputs.
-  void AssignOutputOp(const ir::Output& output, torch::jit::Value* op);
+  void AssignOutputOp(const torch::lazy::Output& output, torch::jit::Value* op);
 
   // If a parameter associated with data has already been declared, it will be
   // returned. Otherwise a new one will be created, associated with the tensor
@@ -86,7 +86,7 @@ class TSLoweringContext : public ir::LoweringContext {
   std::unordered_map<lazy_tensors::client::Data::OpaqueHandle, Parameter>
       parameters_map_;
   std::vector<torch::jit::Value*> root_tuple_;
-  ir::OutputMap<torch::jit::Value*> emitted_outputs_;
+  torch::lazy::OutputMap<torch::jit::Value*> emitted_outputs_;
   std::unique_ptr<NodeLowering> lowering_;
 };
 

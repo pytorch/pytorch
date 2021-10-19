@@ -11,22 +11,22 @@ namespace ir {
 namespace ops {
 namespace {
 
-lazy_tensors::Shape NodeOutputShape(const Value& input,
+lazy_tensors::Shape NodeOutputShape(const torch::lazy::Value& input,
                                     lazy_tensors::PrimitiveType type) {
-  lazy_tensors::Shape shape = GetShapeFromTsValue(input);
+  lazy_tensors::Shape shape = ir::GetShapeFromTsValue(input);
   shape.set_element_type(type);
   return shape;
 }
 
 }  // namespace
 
-Cast::Cast(const Value& input, lazy_tensors::PrimitiveType type)
+Cast::Cast(const torch::lazy::Value& input, lazy_tensors::PrimitiveType type)
     : TsNode(ltc_cast, {input}, NodeOutputShape(input, type),
            /*num_outputs=*/1,
            torch::lazy::MHash(static_cast<int>(type))),
       type_(type) {}
 
-Cast::Cast(const Value& input, at::ScalarType dtype,
+Cast::Cast(const torch::lazy::Value& input, at::ScalarType dtype,
            c10::optional<at::ScalarType> stype)
     : TsNode(ltc_cast, {input},
            NodeOutputShape(input,
@@ -39,8 +39,8 @@ Cast::Cast(const Value& input, at::ScalarType dtype,
       stype_(stype) {}
 
 NodePtr Cast::Clone(OpList operands) const {
-  return dtype_ ? MakeNode<Cast>(operands.at(0), *dtype_, stype_)
-                : MakeNode<Cast>(operands.at(0), type_);
+  return dtype_ ? torch::lazy::MakeNode<Cast>(operands.at(0), *dtype_, stype_)
+                : torch::lazy::MakeNode<Cast>(operands.at(0), type_);
 }
 
 std::string Cast::ToString() const {

@@ -8,7 +8,7 @@ namespace ops {
 
 class MaxInDim : public TsNode {
  public:
-  MaxInDim(const Value& input, lazy_tensors::int64 dim, bool keepdim);
+  MaxInDim(const torch::lazy::Value& input, lazy_tensors::int64 dim, bool keepdim);
 
   std::string ToString() const override;
 

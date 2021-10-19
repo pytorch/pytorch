@@ -8,7 +8,7 @@ namespace ops {
 
 class SoftmaxBackward : public TsNode {
  public:
-  SoftmaxBackward(const Value& grad_output, const Value& output,
+  SoftmaxBackward(const torch::lazy::Value& grad_output, const torch::lazy::Value& output,
                   lazy_tensors::int64 dim);
 
   NodePtr Clone(OpList operands) const override;

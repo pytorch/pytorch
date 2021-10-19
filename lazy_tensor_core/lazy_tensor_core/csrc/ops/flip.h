@@ -9,7 +9,7 @@ namespace ops {
 
 class Flip : public TsNode {
  public:
-  Flip(const Value& input, std::vector<lazy_tensors::int64> dims);
+  Flip(const torch::lazy::Value& input, std::vector<lazy_tensors::int64> dims);
 
   NodePtr Clone(OpList operands) const override;
 

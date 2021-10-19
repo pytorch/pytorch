@@ -13,7 +13,7 @@ NotSupported::NotSupported(std::string description, lazy_tensors::Shape shape)
       description_(std::move(description)) {}
 
 NodePtr NotSupported::Clone(OpList operands) const {
-  return MakeNode<NotSupported>(description_, shape());
+  return torch::lazy::MakeNode<NotSupported>(description_, shape());
 }
 
 std::string NotSupported::ToString() const {

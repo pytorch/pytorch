@@ -9,7 +9,7 @@ namespace ops {
 
 class GenericSlice : public TsNode {
  public:
-  GenericSlice(const Value& input,
+  GenericSlice(const torch::lazy::Value& input,
                lazy_tensors::Span<const lazy_tensors::int64> base_indices,
                lazy_tensors::Span<const lazy_tensors::int64> sizes);
 

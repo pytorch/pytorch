@@ -5,13 +5,13 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Bernoulli::Bernoulli(const Value& probability, const Value& seed,
+Bernoulli::Bernoulli(const torch::lazy::Value& probability, const torch::lazy::Value& seed,
                      lazy_tensors::Shape shape)
-    : TsNode(ir::OpKind(at::aten::bernoulli), {probability, seed},
+    : TsNode(torch::lazy::OpKind(at::aten::bernoulli), {probability, seed},
            std::move(shape)) {}
 
 NodePtr Bernoulli::Clone(OpList operands) const {
-  return MakeNode<Bernoulli>(operands.at(0), operands.at(1), shape());
+  return torch::lazy::MakeNode<Bernoulli>(operands.at(0), operands.at(1), shape());
 }
 
 }  // namespace ops

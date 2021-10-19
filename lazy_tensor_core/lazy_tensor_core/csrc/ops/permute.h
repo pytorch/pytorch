@@ -9,7 +9,7 @@ namespace ops {
 
 class Permute : public TsNode {
  public:
-  Permute(const Value& input, std::vector<lazy_tensors::int64> dims);
+  Permute(const torch::lazy::Value& input, std::vector<lazy_tensors::int64> dims);
 
   NodePtr Clone(OpList operands) const override;
 

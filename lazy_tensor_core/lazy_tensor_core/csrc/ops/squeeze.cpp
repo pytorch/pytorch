@@ -7,8 +7,8 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Squeeze::Squeeze(const Value& input, int dim)
-    : TsNode(ir::OpKind(at::aten::squeeze), {input},
+Squeeze::Squeeze(const torch::lazy::Value& input, int dim)
+    : TsNode(torch::lazy::OpKind(at::aten::squeeze), {input},
            /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim) {
   SetShapeDeferred(
@@ -16,7 +16,7 @@ Squeeze::Squeeze(const Value& input, int dim)
 }
 
 NodePtr Squeeze::Clone(OpList operands) const {
-  return MakeNode<Squeeze>(operands.at(0), dim_);
+  return torch::lazy::MakeNode<Squeeze>(operands.at(0), dim_);
 }
 
 std::string Squeeze::ToString() const {

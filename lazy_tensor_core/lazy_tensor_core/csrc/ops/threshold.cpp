@@ -5,14 +5,14 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Threshold::Threshold(const Value& input, float threshold, float value)
-    : TsNode(ir::OpKind(at::aten::threshold), {input}, GetShapeFromTsValue(input),
+Threshold::Threshold(const torch::lazy::Value& input, float threshold, float value)
+    : TsNode(torch::lazy::OpKind(at::aten::threshold), {input}, ir::GetShapeFromTsValue(input),
            /*num_outputs=*/1, torch::lazy::MHash(threshold, value)),
       threshold_(threshold),
       value_(value) {}
 
 NodePtr Threshold::Clone(OpList operands) const {
-  return MakeNode<Threshold>(operands.at(0), threshold_, value_);
+  return torch::lazy::MakeNode<Threshold>(operands.at(0), threshold_, value_);
 }
 
 std::string Threshold::ToString() const {

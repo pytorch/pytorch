@@ -5,11 +5,11 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Normal::Normal(const Value& mean, const Value& std, const Value& seed)
-    : TsNode(ir::OpKind(at::aten::normal), {mean, std, seed}, GetShapeFromTsValue(mean)) {}
+Normal::Normal(const torch::lazy::Value& mean, const torch::lazy::Value& std, const torch::lazy::Value& seed)
+    : TsNode(torch::lazy::OpKind(at::aten::normal), {mean, std, seed}, ir::GetShapeFromTsValue(mean)) {}
 
 NodePtr Normal::Clone(OpList operands) const {
-  return MakeNode<Normal>(operands.at(0), operands.at(1), operands.at(2));
+  return torch::lazy::MakeNode<Normal>(operands.at(0), operands.at(1), operands.at(2));
 }
 
 }  // namespace ops

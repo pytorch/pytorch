@@ -8,10 +8,10 @@ namespace ir {
 namespace ops {
 
 TSNativeBatchNormForward::TSNativeBatchNormForward(
-    const Value& input, const Value& weight, const Value& bias,
-    const Value& running_mean, const Value& running_var, bool training,
+    const torch::lazy::Value& input, const torch::lazy::Value& weight, const torch::lazy::Value& bias,
+    const torch::lazy::Value& running_mean, const torch::lazy::Value& running_var, bool training,
     double momentum, double eps)
-    : TsNode(ir::OpKind(at::aten::native_batch_norm),
+    : TsNode(torch::lazy::OpKind(at::aten::native_batch_norm),
            {input, weight, bias, running_mean, running_var},
            /*num_outputs=*/3,
            torch::lazy::MHash(training, momentum, eps)),
@@ -23,7 +23,7 @@ TSNativeBatchNormForward::TSNativeBatchNormForward(
 }
 
 NodePtr TSNativeBatchNormForward::Clone(OpList operands) const {
-  return MakeNode<TSNativeBatchNormForward>(
+  return torch::lazy::MakeNode<TSNativeBatchNormForward>(
       operands.at(0), operands.at(1), operands.at(2), operands.at(3),
       operands.at(4), training_, momentum_, eps_);
 }

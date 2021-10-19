@@ -10,9 +10,9 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Prod::Prod(const Value& input, std::vector<lazy_tensors::int64> dimensions,
+Prod::Prod(const torch::lazy::Value& input, std::vector<lazy_tensors::int64> dimensions,
            bool keep_reduced_dimensions, c10::optional<at::ScalarType> dtype)
-    : TsNode(ir::OpKind(at::aten::prod), {input},
+    : TsNode(torch::lazy::OpKind(at::aten::prod), {input},
            /*num_outputs=*/1,
            torch::lazy::MHash(dimensions, keep_reduced_dimensions,
                                      OptionalOr<int>(dtype, -1))),
@@ -24,7 +24,7 @@ Prod::Prod(const Value& input, std::vector<lazy_tensors::int64> dimensions,
 }
 
 NodePtr Prod::Clone(OpList operands) const {
-  return MakeNode<Prod>(operands.at(0), dimensions_, keep_reduced_dimensions_,
+  return torch::lazy::MakeNode<Prod>(operands.at(0), dimensions_, keep_reduced_dimensions_,
                         dtype_);
 }
 

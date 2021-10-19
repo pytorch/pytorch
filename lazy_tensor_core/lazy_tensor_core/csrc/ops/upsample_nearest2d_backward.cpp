@@ -9,9 +9,9 @@ namespace ir {
 namespace ops {
 
 UpsampleNearestBackward::UpsampleNearestBackward(
-    const Value& input, std::vector<lazy_tensors::int64> output_size,
+    const torch::lazy::Value& input, std::vector<lazy_tensors::int64> output_size,
     std::vector<lazy_tensors::int64> input_size)
-    : TsNode(ir::OpKind(at::aten::upsample_nearest2d_backward), {input},
+    : TsNode(torch::lazy::OpKind(at::aten::upsample_nearest2d_backward), {input},
            /*num_outputs=*/1,
            torch::lazy::MHash(output_size, input_size)),
       output_size_(std::move(output_size)),
@@ -21,7 +21,7 @@ UpsampleNearestBackward::UpsampleNearestBackward(
 }
 
 NodePtr UpsampleNearestBackward::Clone(OpList operands) const {
-  return MakeNode<UpsampleNearestBackward>(operands.at(0), output_size_,
+  return torch::lazy::MakeNode<UpsampleNearestBackward>(operands.at(0), output_size_,
                                            input_size_);
 }
 

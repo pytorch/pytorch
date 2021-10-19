@@ -10,7 +10,7 @@ namespace ops {
 
 class L1Loss : public TsNode {
  public:
-  L1Loss(const Value& input, const Value& target, ReductionMode reduction);
+  L1Loss(const torch::lazy::Value& input, const torch::lazy::Value& target, ReductionMode reduction);
 
   std::string ToString() const override;
 

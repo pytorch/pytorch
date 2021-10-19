@@ -138,7 +138,7 @@ LazyTensor SmoothL1Loss(const LazyTensor& input, const LazyTensor& target,
       // so not a priority to fix until then.
       throw std::runtime_error("TODO(whc) SmoothL1Loss is not implemented by lazy TS backend");
       return elementwise_loss.CreateFrom(
-          ir::MakeNode<ir::ops::Mean>(
+          torch::lazy::MakeNode<ir::ops::Mean>(
               elementwise_loss.GetIrValue(), broadcasted_input.dtype(),
               std::vector<c10::ScalarType>{broadcasted_input.dtype()}, std::vector<std::vector<int64_t>>{{1}}),
           broadcasted_input.dtype());
@@ -156,7 +156,7 @@ LazyTensor SmoothL1LossBackward(const LazyTensor& grad_output,
                                 const LazyTensor& input,
                                 const LazyTensor& target,
                                 ReductionMode reduction, double beta) {
-  torch_lazy_tensors::ir::ScopePusher ir_scope(
+  torch::lazy::ScopePusher ir_scope(
       at::aten::smooth_l1_loss_backward.toQualString());
   auto broadcasted_inputs = tensor_aten_ops::broadcast_tensors({input, target});
   LTC_CHECK_EQ(broadcasted_inputs.size(), 2);

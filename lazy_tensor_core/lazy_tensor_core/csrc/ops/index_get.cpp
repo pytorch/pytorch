@@ -7,7 +7,7 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-IndexGet::IndexGet(const ir::Value& base, const ir::Value& indices,
+IndexGet::IndexGet(const torch::lazy::Value& base, const torch::lazy::Value& indices,
                    lazy_tensors::int64 start_dim)
     : TsNode(OpKind(at::aten::index), {base, indices},
            /*num_outputs=*/1, torch::lazy::MHash(start_dim)),
@@ -23,7 +23,7 @@ std::string IndexGet::ToString() const {
 }
 
 NodePtr IndexGet::Clone(OpList operands) const {
-  return MakeNode<IndexGet>(operands.at(0), operands.at(1), start_dim_);
+  return torch::lazy::MakeNode<IndexGet>(operands.at(0), operands.at(1), start_dim_);
 }
 
 }  // namespace ops

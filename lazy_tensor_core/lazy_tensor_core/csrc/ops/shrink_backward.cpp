@@ -6,9 +6,9 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-ShrinkBackward::ShrinkBackward(OpKind kind, const Value& grad_output,
-                               const Value& input, const at::Scalar& lambda)
-    : TsNode(kind, {grad_output, input}, GetShapeFromTsValue(input), /*num_outputs=*/1,
+ShrinkBackward::ShrinkBackward(OpKind kind, const torch::lazy::Value& grad_output,
+                               const torch::lazy::Value& input, const at::Scalar& lambda)
+    : TsNode(kind, {grad_output, input}, ir::GetShapeFromTsValue(input), /*num_outputs=*/1,
            ScalarHash(lambda)),
       lambda_(std::move(lambda)) {}
 
@@ -19,7 +19,7 @@ std::string ShrinkBackward::ToString() const {
 }
 
 NodePtr ShrinkBackward::Clone(OpList operands) const {
-  return MakeNode<ShrinkBackward>(op(), operands.at(0), operands.at(1),
+  return torch::lazy::MakeNode<ShrinkBackward>(op(), operands.at(0), operands.at(1),
                                   lambda_);
 }
 

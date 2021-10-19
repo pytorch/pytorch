@@ -11,7 +11,7 @@ namespace ops {
 
 class AsStridedViewUpdate : public TsNode {
  public:
-  AsStridedViewUpdate(const Value& target, const Value& input,
+  AsStridedViewUpdate(const torch::lazy::Value& target, const torch::lazy::Value& input,
                       std::vector<lazy_tensors::int64> size,
                       std::vector<lazy_tensors::int64> stride,
                       lazy_tensors::int64 storage_offset);

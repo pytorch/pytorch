@@ -8,7 +8,7 @@ namespace ops {
 
 class AvgPoolNd : public TsNode {
  public:
-  AvgPoolNd(const Value& input, lazy_tensors::int64 spatial_dim_count,
+  AvgPoolNd(const torch::lazy::Value& input, lazy_tensors::int64 spatial_dim_count,
             std::vector<lazy_tensors::int64> kernel_size,
             std::vector<lazy_tensors::int64> stride,
             std::vector<lazy_tensors::int64> padding, bool ceil_mode,

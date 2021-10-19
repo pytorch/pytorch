@@ -7,8 +7,8 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Gather::Gather(const Value& input, lazy_tensors::int64 dim, const Value& index)
-    : TsNode(ir::OpKind(at::aten::gather), {input, index},
+Gather::Gather(const torch::lazy::Value& input, lazy_tensors::int64 dim, const torch::lazy::Value& index)
+    : TsNode(torch::lazy::OpKind(at::aten::gather), {input, index},
            /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim) {
   SetShapeDeferred(
@@ -16,7 +16,7 @@ Gather::Gather(const Value& input, lazy_tensors::int64 dim, const Value& index)
 }
 
 NodePtr Gather::Clone(OpList operands) const {
-  return MakeNode<Gather>(operands.at(0), dim_, operands.at(1));
+  return torch::lazy::MakeNode<Gather>(operands.at(0), dim_, operands.at(1));
 }
 
 std::string Gather::ToString() const {

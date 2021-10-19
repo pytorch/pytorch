@@ -8,10 +8,10 @@ namespace ir {
 namespace ops {
 
 TSEmbeddingDenseBackward::TSEmbeddingDenseBackward(
-    const Value& grad_output, const Value& indices,
+    const torch::lazy::Value& grad_output, const torch::lazy::Value& indices,
     lazy_tensors::int64 num_weights, lazy_tensors::int64 padding_idx,
     bool scale_grad_by_freq)
-    : TsNode(ir::OpKind(at::aten::embedding_dense_backward),
+    : TsNode(torch::lazy::OpKind(at::aten::embedding_dense_backward),
            {grad_output, indices}, /*num_outputs=*/1,
            torch::lazy::MHash(num_weights, padding_idx,
                                      scale_grad_by_freq)),
@@ -23,7 +23,7 @@ TSEmbeddingDenseBackward::TSEmbeddingDenseBackward(
 }
 
 NodePtr TSEmbeddingDenseBackward::Clone(OpList operands) const {
-  return MakeNode<TSEmbeddingDenseBackward>(operands.at(0), operands.at(1),
+  return torch::lazy::MakeNode<TSEmbeddingDenseBackward>(operands.at(0), operands.at(1),
                                             num_weights_, padding_idx_,
                                             scale_grad_by_freq_);
 }

@@ -7,8 +7,8 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-SymEig::SymEig(const Value& input, bool eigenvectors, bool lower)
-    : TsNode(ir::OpKind(at::aten::symeig), {input},
+SymEig::SymEig(const torch::lazy::Value& input, bool eigenvectors, bool lower)
+    : TsNode(torch::lazy::OpKind(at::aten::symeig), {input},
            /*num_outputs=*/2, torch::lazy::MHash(eigenvectors, lower)),
       eigenvectors_(eigenvectors),
       lower_(lower) {
@@ -17,7 +17,7 @@ SymEig::SymEig(const Value& input, bool eigenvectors, bool lower)
 }
 
 NodePtr SymEig::Clone(OpList operands) const {
-  return MakeNode<SymEig>(operands.at(0), eigenvectors_, lower_);
+  return torch::lazy::MakeNode<SymEig>(operands.at(0), eigenvectors_, lower_);
 }
 
 std::string SymEig::ToString() const {

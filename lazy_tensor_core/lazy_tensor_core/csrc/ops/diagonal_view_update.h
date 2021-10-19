@@ -8,7 +8,7 @@ namespace ops {
 
 class DiagonalViewUpdate : public TsNode {
  public:
-  DiagonalViewUpdate(const Value& target, const Value& input,
+  DiagonalViewUpdate(const torch::lazy::Value& target, const torch::lazy::Value& input,
                      lazy_tensors::int64 offset, lazy_tensors::int64 dim1,
                      lazy_tensors::int64 dim2);
 

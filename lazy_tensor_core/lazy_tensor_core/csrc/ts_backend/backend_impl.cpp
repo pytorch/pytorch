@@ -18,7 +18,7 @@ class TSBackendImpl : public BackendImplInterface {
 
   std::unique_ptr<ir::LoweringContext> CreateLoweringContext(
       const std::string& name, Device device,
-      lazy_tensors::Span<const ir::Node* const> post_order,
+      lazy_tensors::Span<const torch::lazy::Node* const> post_order,
       ir::Util::EmissionMap emit_status) const override {
     return std::make_unique<ts_backend::TSLoweringContext>(
         name, device, post_order, emit_status);

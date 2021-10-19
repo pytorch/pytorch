@@ -7,18 +7,18 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-DiagonalViewUpdate::DiagonalViewUpdate(const Value& target, const Value& input,
+DiagonalViewUpdate::DiagonalViewUpdate(const torch::lazy::Value& target, const torch::lazy::Value& input,
                                        lazy_tensors::int64 offset,
                                        lazy_tensors::int64 dim1,
                                        lazy_tensors::int64 dim2)
-    : TsNode(ltc_diagonal_view_update, {target, input}, GetShapeFromTsValue(target),
+    : TsNode(ltc_diagonal_view_update, {target, input}, ir::GetShapeFromTsValue(target),
            /*num_outputs=*/1, torch::lazy::MHash(offset, dim1, dim2)),
       offset_(offset),
       dim1_(dim1),
       dim2_(dim2) {}
 
 NodePtr DiagonalViewUpdate::Clone(OpList operands) const {
-  return MakeNode<DiagonalViewUpdate>(operands.at(0), operands.at(1), offset_,
+  return torch::lazy::MakeNode<DiagonalViewUpdate>(operands.at(0), operands.at(1), offset_,
                                       dim1_, dim2_);
 }
 

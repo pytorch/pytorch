@@ -12,13 +12,13 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-AsStrided::AsStrided(const Value& input, std::vector<lazy_tensors::int64> size,
+AsStrided::AsStrided(const torch::lazy::Value& input, std::vector<lazy_tensors::int64> size,
                      std::vector<lazy_tensors::int64> stride,
                      lazy_tensors::int64 storage_offset)
-    : TsNode(ir::OpKind(at::aten::as_strided), {input},
+    : TsNode(torch::lazy::OpKind(at::aten::as_strided), {input},
            [&]() {
              return lazy_tensors::ShapeUtil::MakeShape(
-                 GetShapeFromTsValue(input).element_type(), size);
+                 ir::GetShapeFromTsValue(input).element_type(), size);
            },
            /*num_outputs=*/1,
            torch::lazy::MHash(size, stride, storage_offset)),
@@ -35,7 +35,7 @@ std::string AsStrided::ToString() const {
 }
 
 NodePtr AsStrided::Clone(OpList operands) const {
-  return MakeNode<AsStrided>(operands.at(0), size_, stride_, storage_offset_);
+  return torch::lazy::MakeNode<AsStrided>(operands.at(0), size_, stride_, storage_offset_);
 }
 
 bool AsStrided::StrideIsSupported(

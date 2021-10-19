@@ -8,7 +8,7 @@ namespace ops {
 
 class TopK : public TsNode {
  public:
-  TopK(const Value& input, lazy_tensors::int64 k, lazy_tensors::int64 dim,
+  TopK(const torch::lazy::Value& input, lazy_tensors::int64 k, lazy_tensors::int64 dim,
        bool largest, bool sorted);
 
   std::string ToString() const override;

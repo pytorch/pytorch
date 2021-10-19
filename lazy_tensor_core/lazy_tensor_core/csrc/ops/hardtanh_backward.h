@@ -10,7 +10,7 @@ namespace ops {
 
 class HardtanhBackward : public TsNode {
  public:
-  HardtanhBackward(const Value& grad_output, const Value& input,
+  HardtanhBackward(const torch::lazy::Value& grad_output, const torch::lazy::Value& input,
                    const at::Scalar& min_val, const at::Scalar& max_val);
 
   std::string ToString() const override;

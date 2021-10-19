@@ -5,10 +5,10 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-IndexPut::IndexPut(const ir::Value& base, const ir::Value& indices,
-                   lazy_tensors::int64 start_dim, const ir::Value& values,
+IndexPut::IndexPut(const torch::lazy::Value& base, const torch::lazy::Value& indices,
+                   lazy_tensors::int64 start_dim, const torch::lazy::Value& values,
                    bool accumulate)
-    : TsNode(OpKind(at::aten::index_put), {base, indices, values}, GetShapeFromTsValue(base),
+    : TsNode(OpKind(at::aten::index_put), {base, indices, values}, ir::GetShapeFromTsValue(base),
            /*num_outputs=*/1, torch::lazy::MHash(start_dim, accumulate)),
       start_dim_(start_dim),
       accumulate_(accumulate) {}
@@ -21,7 +21,7 @@ std::string IndexPut::ToString() const {
 }
 
 NodePtr IndexPut::Clone(OpList operands) const {
-  return MakeNode<IndexPut>(operands.at(0), operands.at(1), start_dim_,
+  return torch::lazy::MakeNode<IndexPut>(operands.at(0), operands.at(1), start_dim_,
                             operands.at(2), accumulate_);
 }
 

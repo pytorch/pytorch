@@ -54,14 +54,14 @@ DebugUtil::GraphFormat DebugUtil::GetDefaultGraphFormat() {
 std::string DebugUtil::GetTensorsGraphInfo(
     lazy_tensors::Span<const LazyTensor> tensors,
     const std::vector<size_t>* indices, GraphFormat format) {
-  std::vector<const ir::Node*> root_nodes;
-  std::vector<ir::Value> root_values;
+  std::vector<const torch::lazy::Node*> root_nodes;
+  std::vector<torch::lazy::Value> root_values;
   std::vector<torch::lazy::hash_t> root_hashes;
   lazy_tensors::util::Unique<Device> unique_device;
   if (indices != nullptr) {
     for (auto index : *indices) {
       const LazyTensor& tensor = tensors[index];
-      ir::Value ir_value = tensor.CurrentIrValue();
+      torch::lazy::Value ir_value = tensor.CurrentIrValue();
       if (ir_value) {
         root_nodes.push_back(ir_value.node.get());
         root_hashes.push_back(ir_value.hash());
@@ -71,7 +71,7 @@ std::string DebugUtil::GetTensorsGraphInfo(
     }
   } else {
     for (auto& tensor : tensors) {
-      ir::Value ir_value = tensor.CurrentIrValue();
+      torch::lazy::Value ir_value = tensor.CurrentIrValue();
       if (ir_value) {
         root_nodes.push_back(ir_value.node.get());
         root_hashes.push_back(ir_value.hash());

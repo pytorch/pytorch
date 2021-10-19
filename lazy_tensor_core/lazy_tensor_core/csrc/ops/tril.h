@@ -10,7 +10,7 @@ namespace ops {
 // matrices input.
 class Tril : public TsNode {
  public:
-  Tril(const Value& input, lazy_tensors::int64 diagonal);
+  Tril(const torch::lazy::Value& input, lazy_tensors::int64 diagonal);
 
   NodePtr Clone(OpList operands) const override;
 

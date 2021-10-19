@@ -8,7 +8,7 @@ namespace ops {
 
 class LogBase : public TsNode {
  public:
-  LogBase(const Value& input, ir::OpKind kind, double base);
+  LogBase(const torch::lazy::Value& input, torch::lazy::OpKind kind, double base);
 
   NodePtr Clone(OpList operands) const override;
 

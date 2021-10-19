@@ -8,7 +8,7 @@ namespace ops {
 
 class Put : public TsNode {
  public:
-  Put(const Value& input, const Value& index, const Value& source,
+  Put(const torch::lazy::Value& input, const torch::lazy::Value& index, const torch::lazy::Value& source,
       bool accumulate);
 
   std::string ToString() const override;

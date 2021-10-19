@@ -7,8 +7,8 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-MaxInDim::MaxInDim(const Value& input, lazy_tensors::int64 dim, bool keepdim)
-    : TsNode(ir::OpKind(at::aten::max), {input},
+MaxInDim::MaxInDim(const torch::lazy::Value& input, lazy_tensors::int64 dim, bool keepdim)
+    : TsNode(torch::lazy::OpKind(at::aten::max), {input},
            /*num_outputs=*/2, torch::lazy::MHash(dim, keepdim)),
       dim_(dim),
       keepdim_(keepdim) {
@@ -17,7 +17,7 @@ MaxInDim::MaxInDim(const Value& input, lazy_tensors::int64 dim, bool keepdim)
 }
 
 NodePtr MaxInDim::Clone(OpList operands) const {
-  return MakeNode<MaxInDim>(operands.at(0), dim_, keepdim_);
+  return torch::lazy::MakeNode<MaxInDim>(operands.at(0), dim_, keepdim_);
 }
 
 std::string MaxInDim::ToString() const {

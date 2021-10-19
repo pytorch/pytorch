@@ -10,9 +10,9 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-MseLoss::MseLoss(const Value& input, const Value& target,
+MseLoss::MseLoss(const torch::lazy::Value& input, const torch::lazy::Value& target,
                  ReductionMode reduction)
-    : TsNode(ir::OpKind(at::aten::mse_loss), {input, target},
+    : TsNode(torch::lazy::OpKind(at::aten::mse_loss), {input, target},
            /*num_outputs=*/1,
            torch::lazy::MHash(
                lazy_tensors::util::GetEnumValue(reduction))),
@@ -22,7 +22,7 @@ MseLoss::MseLoss(const Value& input, const Value& target,
 }
 
 NodePtr MseLoss::Clone(OpList operands) const {
-  return MakeNode<MseLoss>(operands.at(0), operands.at(1), reduction_);
+  return torch::lazy::MakeNode<MseLoss>(operands.at(0), operands.at(1), reduction_);
 }
 
 std::string MseLoss::ToString() const {

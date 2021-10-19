@@ -8,7 +8,7 @@ from tools.codegen.api.types import (BaseCppType, BaseCType, OptionalCType,
                                      VectorCType, boolT, longT, doubleT, ListCType,
                                      scalarT, scalarTypeT, ArrayRefCType, ArrayCType, TupleCType)
 
-valueT = BaseCppType('ir', 'Value')
+valueT = BaseCppType('torch::lazy', 'Value')
 
 
 def process_ir_type(typ: Type) -> Union[BaseCType, VectorCType, OptionalCType, ListCType]:
