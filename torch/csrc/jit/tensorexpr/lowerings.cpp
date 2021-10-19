@@ -151,7 +151,8 @@ RegisterNNCLoweringsFunction aten___xor__(
     });
 
 RegisterNNCLoweringsFunction aten___lshift__(
-    {"aten::__lshift__.Tensor(Tensor self, Tensor other) -> (Tensor)"},
+    {"aten::__lshift__.Scalar(Tensor self, Scalar other) -> (Tensor)",
+     "aten::__lshift__.Tensor(Tensor self, Tensor other) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -167,7 +168,8 @@ RegisterNNCLoweringsFunction aten___lshift__(
     });
 
 RegisterNNCLoweringsFunction aten___rshift__(
-    {"aten::__rshift__.Tensor(Tensor self, Tensor other) -> (Tensor)"},
+    {"aten::__rshift__.Scalar(Tensor self, Scalar other) -> (Tensor)",
+     "aten::__rshift__.Tensor(Tensor self, Tensor other) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -710,7 +712,8 @@ RegisterNNCLoweringsFunction aten_type_as(
 
 RegisterNNCLoweringsFunction aten_pow(
     {"aten::pow.Tensor_Scalar(Tensor self, Scalar exponent) -> (Tensor)",
-     "aten::pow.Tensor_Tensor(Tensor self, Tensor exponent) -> (Tensor)"},
+     "aten::pow.Tensor_Tensor(Tensor self, Tensor exponent) -> (Tensor)",
+     "aten::pow.Scalar(Scalar self, Tensor exponent) -> Tensor"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -1228,7 +1231,8 @@ RegisterNNCLoweringsFunction aten_threshold(
 RegisterNNCLoweringsFunction aten_where(
     {"aten::where.ScalarOther(Tensor condition, Tensor self, Scalar other) -> (Tensor)",
      "aten::where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> (Tensor)",
-     "aten::where.self(Tensor condition, Tensor self, Tensor other) -> (Tensor)"},
+     "aten::where.self(Tensor condition, Tensor self, Tensor other) -> (Tensor)",
+     "aten::where.Scalar(Tensor condition, Scalar self, Scalar other) -> Tensor"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
