@@ -1103,6 +1103,87 @@ class TestMkldnn(TestCase):
         model = torchvision.models.resnet.resnext50_32x4d(pretrained=False)
         self._test_imagenet_model(model)
 
+    def test_lower_functional_conv2d(self):
+        from torch.quantization.quantize_fx import prepare_fx, convert_fx
+        from torch.backends.mkldnn.quantization.lowering import lower_to_mkldnn_backend
+
+        class M(torch.nn.Module):
+            def forward(self, x, w, b):
+                y = F.conv2d(x, w, b)
+                return y
+
+        class M_ReLU(torch.nn.Module):
+            def forward(self, x, w, b):
+                y = F.conv2d(x, w, b)
+                y = F.relu(y)
+                return y
+
+        valid = True
+        # conv2d
+        m = M().eval()
+        qconfig_dict = {"": torch.quantization.default_qconfig}
+        m = prepare_fx(m, qconfig_dict)
+        m = convert_fx(m, is_reference=True)
+        m = lower_to_mkldnn_backend(m)
+        nodes = list(n.name for n in m.graph.nodes)
+        if ('conv2d_prepack_mkldnn' not in nodes) or\
+           ('conv2d_mkldnn' not in nodes) or\
+           ('conv2d' in nodes):
+            valid = False
+
+        # conv2d_relu
+        m = M_ReLU().eval()
+        qconfig_dict = {"": torch.quantization.default_qconfig}
+        m = prepare_fx(m, qconfig_dict)
+        m = convert_fx(m, is_reference=True)
+        m = lower_to_mkldnn_backend(m)
+        nodes = list(n.name for n in m.graph.nodes)
+        if ('conv2d_prepack_mkldnn' not in nodes) or\
+           ('conv2d_relu_mkldnn' not in nodes) or\
+           ('conv2d' in nodes):
+            valid = False
+        self.assertEqual(valid, True)
+
+    def test_lower_functional_linear(self):
+        from torch.quantization.quantize_fx import prepare_fx, convert_fx
+        from torch.backends.mkldnn.quantization.lowering import lower_to_mkldnn_backend
+
+        class M(torch.nn.Module):
+            def forward(self, x, w, b):
+                y = F.linear(x, w, b)
+                return y
+
+        class M_ReLU(torch.nn.Module):
+            def forward(self, x, w, b):
+                y = F.linear(x, w, b)
+                y = F.relu(y)
+                return y
+
+        valid = True
+        # linear
+        m = M().eval()
+        qconfig_dict = {"": torch.quantization.default_qconfig}
+        m = prepare_fx(m, qconfig_dict)
+        m = convert_fx(m, is_reference=True)
+        m = lower_to_mkldnn_backend(m)
+        nodes = list(n.name for n in m.graph.nodes)
+        if ('linear_prepack_mkldnn' not in nodes) or\
+           ('linear_mkldnn' not in nodes) or\
+           ('linear' in nodes):
+            valid = False
+
+        # linear_relu
+        m = M_ReLU().eval()
+        qconfig_dict = {"": torch.quantization.default_qconfig}
+        m = prepare_fx(m, qconfig_dict)
+        m = convert_fx(m, is_reference=True)
+        m = lower_to_mkldnn_backend(m)
+        nodes = list(n.name for n in m.graph.nodes)
+        if ('linear_prepack_mkldnn' not in nodes) or\
+           ('linear_relu_mkldnn' not in nodes) or\
+           ('linear' in nodes):
+            valid = False
+        self.assertEqual(valid, True)
 
 if __name__ == '__main__':
     run_tests()
