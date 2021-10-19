@@ -616,6 +616,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.linalg.matrix_rank: lambda input, tol=None, hermitian=False: -1,
         torch.linalg.multi_dot: lambda tensors, out=None: -1,
         torch.matrix_exp: lambda input: -1,
+        torch.linalg.matrix_exp: lambda input: -1,
         torch.max: lambda input, out=None: -1,
         torch.maximum: lambda input, other, out=None: -1,
         torch.fmax: lambda input, other, out=None: -1,
