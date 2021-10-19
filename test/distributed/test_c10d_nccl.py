@@ -2378,7 +2378,6 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
                     raise e
             time.sleep(1)
 
-    @skip_if_rocm
     @with_nccl_blocking_wait
     @requires_nccl()
     @skip_if_lt_x_gpu(3)
@@ -2398,7 +2397,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
                 process_group.allreduce(torch.rand(10).cuda(self.rank)).wait(timeout=timedelta(seconds=1))
         else:
             # Sleep to ensure timeout.
-            time.sleep(10)
+            time.sleep(15)
 
             self._wait_for_comm_abort(process_group)
 
