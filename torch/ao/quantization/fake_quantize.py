@@ -366,11 +366,20 @@ Default fake_quant for per-channel weights.
 
 default_embedding_fake_quant = FakeQuantize.with_args(observer=PerChannelMinMaxObserver,
                                                       qscheme=torch.per_channel_affine_float_qparams,
+                                                      dtype=torch.quint8,
+                                                      quant_min=0,
+                                                      quant_max=255,
                                                       ch_axis=0,
                                                       memoryless=True)
 """
 Default fake_quant for embeddings.
 """
+
+default_embedding_fake_quant_4bit = FakeQuantize.with_args(observer=PerChannelMinMaxObserver,
+                                                           qscheme=torch.per_channel_affine_float_qparams,
+                                                           ch_axis=0,
+                                                           dtype=torch.quint4x2,
+                                                           memoryless=True)
 
 default_histogram_fake_quant = FakeQuantize.with_args(observer=HistogramObserver,
                                                       quant_min=0,
