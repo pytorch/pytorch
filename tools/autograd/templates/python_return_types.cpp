@@ -31,11 +31,11 @@ void initReturnTypes(PyObject* module) {
     throw python_error();
   }
 
-  for (const auto& return_type : return_types_map) {
+  for (const auto& return_type_pair : return_types_map) {
     if (PyModule_AddObject(
             return_types_module,
-            return_type.first.c_str(),
-            (PyObject*)return_type.second) != 0) {
+            return_type_pair.first.c_str(),
+            (PyObject*)return_type_pair.second) != 0) {
       throw python_error();
     }
   }
