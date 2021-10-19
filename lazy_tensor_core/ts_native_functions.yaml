@@ -16,13 +16,18 @@ full_codegen:
   - clamp
   - div.Tensor
   - div.Tensor_mode
+  - elu
+  - elu_backward
   - embedding_dense_backward
+  - exp
   - floor
   - frac
   - gelu
   - gelu_backward
   - kl_div_backward
   - log2
+  - log_sigmoid_backward
+  - log_sigmoid_forward
   - mean
   - mean.dim
   - mm

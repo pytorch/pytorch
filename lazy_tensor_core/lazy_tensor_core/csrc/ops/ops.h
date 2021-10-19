@@ -119,11 +119,6 @@ NodePtr HardSigmoid(const torch::lazy::Value& input);
 
 NodePtr HardSigmoidBackward(const torch::lazy::Value& grad_output, const torch::lazy::Value& input);
 
-std::tuple<NodePtr, NodePtr> LogSigmoid(const torch::lazy::Value& input);
-
-NodePtr LogSigmoidBackward(const torch::lazy::Value& grad_output, const torch::lazy::Value& input,
-                           const torch::lazy::Value& buffer);
-
 NodePtr Sigmoid(const torch::lazy::Value& input);
 
 NodePtr SiLU(const torch::lazy::Value& input);
@@ -162,13 +157,6 @@ NodePtr BroadcastTensors(OpList tensors);
 
 NodePtr Identity(int64_t lines, int64_t cols,
                  c10::ScalarType element_type);
-
-NodePtr Elu(const torch::lazy::Value& input, const at::Scalar& alpha,
-            const at::Scalar& scale, const at::Scalar& input_scale);
-
-NodePtr EluBackward(const torch::lazy::Value& grad_output, const torch::lazy::Value& output,
-                    const at::Scalar& alpha, const at::Scalar& scale,
-                    const at::Scalar& input_scale);
 
 NodePtr Lshift(const torch::lazy::Value& input, const at::Scalar& other);
 

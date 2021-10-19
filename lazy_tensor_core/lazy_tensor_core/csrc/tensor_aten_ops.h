@@ -239,14 +239,6 @@ LazyTensor diagonal(const LazyTensor& input, int64_t offset,
 LazyTensor einsum(const std::string& equation,
                   c10::ArrayRef<LazyTensor> tensors);
 
-LazyTensor elu(const LazyTensor& input, const at::Scalar& alpha,
-               const at::Scalar& scale, const at::Scalar& input_scale);
-void elu_(LazyTensor& input, const at::Scalar& alpha, const at::Scalar& scale,
-          const at::Scalar& input_scale);
-LazyTensor elu_backward(const LazyTensor& grad_output, const at::Scalar& alpha,
-                        const at::Scalar& scale, const at::Scalar& input_scale,
-                        const LazyTensor& output);
-
 LazyTensor eq(const LazyTensor& input, const at::Scalar& other);
 
 LazyTensor eq(const LazyTensor& input, const LazyTensor& other);
@@ -256,8 +248,6 @@ LazyTensor erf(const LazyTensor& input);
 LazyTensor erfc(const LazyTensor& input);
 
 LazyTensor erfinv(const LazyTensor& input);
-
-LazyTensor exp(const LazyTensor& input);
 
 LazyTensor expand(const LazyTensor& input,
                   std::vector<int64_t> size);
@@ -408,12 +398,6 @@ LazyTensor lerp(const LazyTensor& input, const LazyTensor& end,
 LazyTensor log(const LazyTensor& input);
 
 LazyTensor log_base(const LazyTensor& input, torch::lazy::OpKind op, double base);
-
-LazyTensor log_sigmoid(const LazyTensor& input);
-std::tuple<LazyTensor, LazyTensor> log_sigmoid_forward(const LazyTensor& input);
-LazyTensor log_sigmoid_backward(const LazyTensor& grad_output,
-                                const LazyTensor& input,
-                                const LazyTensor& buffer);
 
 LazyTensor log_softmax_backward(const LazyTensor& grad_output,
                                 const LazyTensor& output,
