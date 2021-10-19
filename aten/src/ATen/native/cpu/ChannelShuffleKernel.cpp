@@ -100,7 +100,7 @@ void channel_shuffle_kernel_impl(
       break;
     }
     default:
-      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, ChannelsLast3d, Contiguous");
   }
 }
 
