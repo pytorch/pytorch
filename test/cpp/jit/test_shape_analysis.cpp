@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <ATen/core/interned_strings.h>
-#include <Functions.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <test/cpp/jit/test_utils.h>
