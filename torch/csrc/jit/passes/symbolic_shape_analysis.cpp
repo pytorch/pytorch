@@ -635,20 +635,24 @@ struct SymbolicShapeGraphAnalyzer {
       if (curr->kind() == prim::Constant) {
         continue;
       }
-      if (curr->outputs().size() != 1) {
-        GRAPH_DEBUG("Multi output node ", getHeader(curr));
+      if (!partial_evaluated_graphs.count(curr)) {
+        GRAPH_DEBUG("No graph ", getHeader(curr));
         return c10::nullopt;
       }
-      auto tt = curr->output()->type()->cast<TensorType>();
-      if (!tt || !partial_evaluated_graphs.count(curr)) {
-        GRAPH_DEBUG("Non tensor node or no graph ", getHeader(curr));
-        return c10::nullopt;
-      }
-      auto symbolic_sizes = tt->symbolic_sizes();
-      // TODO: dont require # of dimensions of tensors set ?
-      if (!symbolic_sizes.rank()) {
-        GRAPH_DEBUG("No rank on output ", getHeader(curr));
-        return c10::nullopt;
+
+      auto outputs = curr->outputs();
+      for (Value* v : outputs) {
+        auto tt = v->type()->cast<TensorType>();
+        if (!tt) {
+          GRAPH_DEBUG("Non tensor node", getHeader(curr));
+          return c10::nullopt;
+        }
+        auto symbolic_sizes = tt->symbolic_sizes();
+        // TODO: dont require # of dimensions of tensors set ?
+        if (!symbolic_sizes.rank()) {
+          GRAPH_DEBUG("No rank on output ", getHeader(curr));
+          return c10::nullopt;
+        }
       }
       auto partial_eval_graph = partial_evaluated_graphs[curr];
       joinPartialEvaluatedShapeGraphToLargeShapeGraph(
@@ -708,26 +712,27 @@ struct SymbolicShapeGraphAnalyzer {
       std::unordered_map<int64_t, int64_t>& sym_shape_equalities) {
     for (auto it = beg_->iterator(); it != end_->iterator(); it++) {
       auto curr = *it;
-      if (curr->outputs().size() != 1) {
-        continue;
-      }
-      auto tt = curr->output()->type()->cast<TensorType>();
-      if (!tt || !tt->symbolic_sizes().rank()) {
-        continue;
-      }
-      bool changed = false;
-      std::vector<at::ShapeSymbol> shape_vec = *tt->symbolic_sizes().sizes();
-      auto new_sizes = c10::fmap(shape_vec, [&](const at::ShapeSymbol& shape) {
-        auto value = shape.value();
-        if (sym_shape_equalities.count(value)) {
-          changed = true;
-          return sym_shape_equalities[value];
+      for (size_t i = 0; i < curr->outputs().size(); ++i) {
+        auto output = curr->output(i);
+        auto tt = output->type()->cast<TensorType>();
+        if (!tt || !tt->symbolic_sizes().rank()) {
+          continue;
         }
-        return value;
-      });
-      if (changed) {
-        curr->output()->setType(
-            tt->withSymbolicShapes(c10::SymbolicShape(new_sizes)));
+        bool changed = false;
+        std::vector<at::ShapeSymbol> shape_vec = *tt->symbolic_sizes().sizes();
+        auto new_sizes =
+            c10::fmap(shape_vec, [&](const at::ShapeSymbol& shape) {
+              auto value = shape.value();
+              if (sym_shape_equalities.count(value)) {
+                changed = true;
+                return sym_shape_equalities[value];
+              }
+              return value;
+            });
+        if (changed) {
+          output->setType(
+              tt->withSymbolicShapes(c10::SymbolicShape(new_sizes)));
+        }
       }
     }
   }
@@ -778,34 +783,36 @@ struct SymbolicShapeGraphAnalyzer {
     insertGraph(
         *stitched_shape_compute_graph, *partial_eval_graph, inputs, value_map);
 
-    TORCH_INTERNAL_ASSERT(partial_eval_graph->outputs().size() == 1);
-    Value* new_list_output = value_map[partial_eval_graph->outputs().at(0)];
-    enclosing_graph_value_to_shape_graph_input_[curr->output()] =
-        new_list_output;
+    for (size_t i = 0; i < curr->outputs().size(); ++i) {
+      Value* new_list_output = value_map[partial_eval_graph->outputs().at(i)];
+      enclosing_graph_value_to_shape_graph_input_[curr->output(i)] =
+          new_list_output;
 
-    TORCH_INTERNAL_ASSERT(
-        new_list_output->node()->kind() == prim::ListConstruct);
-    TORCH_INTERNAL_ASSERT(!new_list_output->node()->hasUses());
+      TORCH_INTERNAL_ASSERT(
+          new_list_output->node()->kind() == prim::ListConstruct);
+      TORCH_INTERNAL_ASSERT(!new_list_output->node()->hasUses());
 
-    auto symbolic_sizes =
-        curr->output()->type()->expect<TensorType>()->symbolic_sizes();
-    TORCH_INTERNAL_ASSERT(symbolic_sizes.rank());
+      auto symbolic_sizes =
+          curr->output(i)->type()->expect<TensorType>()->symbolic_sizes();
+      TORCH_INTERNAL_ASSERT(symbolic_sizes.rank());
 
-    for (size_t i = 0; i < *symbolic_sizes.rank(); i++) {
-      if (symbolic_sizes[i].is_static()) {
-        continue;
+      for (size_t i = 0; i < *symbolic_sizes.rank(); i++) {
+        if (symbolic_sizes[i].is_static()) {
+          continue;
+        }
+        int64_t symbolic_shape = symbolic_sizes[i].value();
+        if (symbolic_shape_value_to_graph_output_.count(symbolic_shape)) {
+          continue;
+        }
+        stitched_shape_compute_graph->registerOutput(
+            new_list_output->node()->input(i));
+        output_index_to_symbolic_shape_
+            [stitched_shape_compute_graph->outputs().size() - 1] =
+                symbolic_shape;
+        symbolic_shape_value_to_graph_output_[symbolic_shape] =
+            stitched_shape_compute_graph->outputs().at(
+                stitched_shape_compute_graph->outputs().size() - 1);
       }
-      int64_t symbolic_shape = symbolic_sizes[i].value();
-      if (symbolic_shape_value_to_graph_output_.count(symbolic_shape)) {
-        continue;
-      }
-      stitched_shape_compute_graph->registerOutput(
-          new_list_output->node()->input(i));
-      output_index_to_symbolic_shape_
-          [stitched_shape_compute_graph->outputs().size() - 1] = symbolic_shape;
-      symbolic_shape_value_to_graph_output_[symbolic_shape] =
-          stitched_shape_compute_graph->outputs().at(
-              stitched_shape_compute_graph->outputs().size() - 1);
     }
   }
 
