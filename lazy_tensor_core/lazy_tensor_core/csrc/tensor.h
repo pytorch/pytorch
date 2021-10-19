@@ -1,23 +1,8 @@
 #pragma once
 
-#include <iostream>
-#include <memory>
-#include <string>
-#include <unordered_map>
-
-#include "lazy_tensor_core/csrc/cross_replica_reduces.h"
 #include "lazy_tensor_core/csrc/device.h"
-#include "lazy_tensor_core/csrc/ir_util.h"
-#include "lazy_tensor_core/csrc/lowering_context.h"
 #include "lazy_tensor_core/csrc/view.h"
-#include "lazy_tensors/computation_client/async_task.h"
-#include "lazy_tensors/computation_client/cache.h"
 #include "lazy_tensors/computation_client/computation_client.h"
-#include "lazy_tensors/computation_client/multi_wait.h"
-#include "lazy_tensors/computation_client/util.h"
-#include "lazy_tensors/status.h"
-#include "lazy_tensors/types.h"
-#include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/lazy/core/ir.h"
 
 namespace torch_lazy_tensors {
@@ -80,8 +65,6 @@ class LazyTensor {
   // possible overrides), and the new IR value.
   LazyTensor CreateFrom(torch::lazy::Value ir_value) const;
   LazyTensor CreateFrom(torch::lazy::Value ir_value, const Device& device) const;
-  LazyTensor CreateFrom(torch::lazy::Value ir_value,
-                        at::ScalarType logical_element_type) const;
   LazyTensor CreateFrom(
       torch::lazy::Value ir_value,
       c10::optional<at::ScalarType> logical_element_type_opt) const;
@@ -165,35 +148,6 @@ class LazyTensor {
 
   // Applies the queue of operations in preparation for using the data.
   void ApplyPendingGraph();
-
-  static torch::lazy::Value GetDeviceDataIrValue(const at::Scalar& value,
-                                        lazy_tensors::PrimitiveType type,
-                                        const Device& device);
-  static torch::lazy::Value GetIrValueForScalar(const at::Scalar& value,
-                                       lazy_tensors::PrimitiveType type,
-                                       const Device& device);
-  static torch::lazy::Value GetIrValueForScalar(const at::Scalar& value,
-                                       const Device& device);
-  static torch::lazy::Value GetIrValueForScalar(
-      const at::Scalar& value, lazy_tensors::PrimitiveType type,
-      c10::ArrayRef<lazy_tensors::int64> dimensions, const Device& device);
-  static torch::lazy::Value GetIrValueForScalar(const at::Scalar& value,
-                                       const lazy_tensors::Shape& shape,
-                                       const Device& device);
-  static torch::lazy::Value GetIrValueForScalar(
-      const at::Scalar& value, const lazy_tensors::Shape& shape,
-      c10::optional<at::ScalarType> logical_element_type, const Device& device);
-
-  // Dumps the backend specific text of the computation accumulated in the graph
-  // which is attached the tensors.
-  static std::string DumpBackendComputation(
-      const std::vector<LazyTensor>& tensors);
-
-  // Operation which creates lazy tensors out of PyTorch CPU tensors by batching
-  // the requests to the computation servers.
-  static std::vector<LazyTensor> CreateTensors(
-      const std::vector<at::Tensor>& tensors,
-      const std::vector<std::string>& devices);
 
  private:
   LazyTensor(const at::Tensor& tensor, const Device& device);

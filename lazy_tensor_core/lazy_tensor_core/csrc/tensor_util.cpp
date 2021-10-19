@@ -1059,4 +1059,14 @@ lazy_tensors::PrimitiveType GetShapeDimensionType(const Device* device) {
              : lazy_tensors::PrimitiveType::S32;
 }
 
+bool IsSpecialScalar(const at::Scalar& value) {
+  static bool no_scalars =
+      lazy_tensors::sys_util::GetEnvBool("NO_SPECIAL_SCALARS", false);
+  if (!no_scalars && (value.isIntegral() || value.isFloatingPoint())) {
+    double scalar_value = value.toDouble();
+    return scalar_value == 0.0 || std::fabs(scalar_value) == 1.0;
+  }
+  return false;
+}
+
 }  // namespace torch_lazy_tensors

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "lazy_tensor_core/csrc/cross_replica_reduces.h"
 #include "lazy_tensor_core/csrc/tensor.h"
 
 namespace torch_lazy_tensors {
