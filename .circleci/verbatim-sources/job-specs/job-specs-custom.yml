@@ -467,16 +467,17 @@
             # install fastlane
             sudo gem install bundler && bundle install
             # install certificates
-            echo ${IOS_CERT_KEY} >> cert.txt
+            echo ${IOS_CERT_KEY_2022} >> cert.txt
             base64 --decode cert.txt -o Certificates.p12
             rm cert.txt
-            bundle exec fastlane install_cert
+            bundle exec fastlane install_root_cert
+            bundle exec fastlane install_dev_cert
             # install the provisioning profile
-            PROFILE=PyTorch_CI_2021.mobileprovision
+            PROFILE=PyTorch_CI_2022.mobileprovision
             PROVISIONING_PROFILES=~/Library/MobileDevice/Provisioning\ Profiles
             mkdir -pv "${PROVISIONING_PROFILES}"
             cd "${PROVISIONING_PROFILES}"
-            echo ${IOS_SIGN_KEY} >> cert.txt
+            echo ${IOS_SIGN_KEY_2022} >> cert.txt
             base64 --decode cert.txt -o ${PROFILE}
             rm cert.txt
       - run:
@@ -517,6 +518,7 @@
             echo "IOS_PLATFORM: ${IOS_PLATFORM}"
             echo "USE_PYTORCH_METAL": "${USE_METAL}"
             echo "BUILD_LITE_INTERPRETER": "${BUILD_LITE_INTERPRETER}"
+            echo "USE_COREML_DELEGATE": "${USE_COREML_DELEGATE}"
 
             #check the custom build flag
             echo "SELECTED_OP_LIST: ${SELECTED_OP_LIST}"
@@ -525,6 +527,7 @@
             fi
             export IOS_ARCH=${IOS_ARCH}
             export IOS_PLATFORM=${IOS_PLATFORM}
+            export USE_COREML_DELEGATE=${USE_COREML_DELEGATE}
             if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then
               export USE_PYTORCH_METAL=${USE_METAL}
             fi
@@ -535,7 +538,7 @@
           command: |
             set -e
             PROJ_ROOT=/Users/distiller/project
-            PROFILE=PyTorch_CI_2021
+            PROFILE=PyTorch_CI_2022
             # run the ruby build script
             if ! [ -x "$(command -v xcodebuild)" ]; then
               echo 'Error: xcodebuild is not installed.'
@@ -564,20 +567,32 @@
             PROJ_ROOT=/Users/distiller/project
             source ~/anaconda/bin/activate
             # use the pytorch nightly build to generate models
-            conda install pytorch torchvision -c pytorch-nightly --yes
+            pip3 install --pre torch torchvision torchaudio -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
             # generate models for differnet backends
             cd ${PROJ_ROOT}/ios/TestApp/benchmark
             mkdir -p ../models
-            python trace_model.py
+            if [ ${USE_COREML_DELEGATE} == 1 ]; then
+              pip install coremltools==5.0b5
+              pip install six
+              python coreml_backend.py
+            else
+              python trace_model.py
+            fi
             if [ ${BUILD_LITE_INTERPRETER} == 1 ]; then
+              echo "Setting up the TestApp for LiteInterpreter"
               ruby setup.rb --lite 1
             else
+              echo "Setting up the TestApp for Full JIT"
               ruby setup.rb
             fi
             cd ${PROJ_ROOT}/ios/TestApp
             instruments -s -devices
             if [ ${BUILD_LITE_INTERPRETER} == 1 ]; then
-              fastlane scan --only_testing TestAppTests/TestAppTests/testLiteInterpreter
+              if [ ${USE_COREML_DELEGATE} == 1 ]; then
+                fastlane scan --only_testing TestAppTests/TestAppTests/testCoreML
+              else
+                fastlane scan --only_testing TestAppTests/TestAppTests/testLiteInterpreter
+              fi
             else
               fastlane scan --only_testing TestAppTests/TestAppTests/testFullJIT
             fi

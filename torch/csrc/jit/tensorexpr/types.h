@@ -20,6 +20,16 @@ TORCH_API std::ostream& operator<<(std::ostream& stream, const Dtype& dtype);
 
 using ScalarType = c10::ScalarType;
 
+enum ElementType {
+  kAllTypes = 0,
+  kIntegralTypes = 1 << 0,
+  kFloatingPointTypes = 1 << 1,
+  kBoolType = 1 << 2,
+  kComplexTypes = 1 << 3,
+  kQintTypes = 1 << 4,
+  kNonComplexOrQintTypes = kIntegralTypes | kBoolType | kFloatingPointTypes,
+};
+
 // Data types for scalar and vector elements.
 class TORCH_API Dtype {
  public:

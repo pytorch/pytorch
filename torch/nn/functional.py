@@ -606,11 +606,37 @@ def max_pool1d_with_indices(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
-    r"""Applies a 1D max pooling over an input signal composed of several input
+    r"""
+    max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
+
+    Applies a 1D max pooling over an input signal composed of several input
     planes.
 
+    .. note::
+        The order of :attr:`ceil_mode` and :attr:`return_indices` is different from
+        what seen in :class:`~torch.nn.MaxPool1d`, and will change in a future release.
+
     See :class:`~torch.nn.MaxPool1d` for details.
+
+    Args:
+        input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iW)`, minibatch dim optional.
+        kernel_size: the size of the window. Can be a single number or a
+            tuple `(kW,)`
+        stride: the stride of the window. Can be a single number or a tuple
+            `(sW,)`. Default: :attr:`kernel_size`
+        padding: Implicit negative infinity padding to be added on both sides, must be >= 0 and <= kernel_size / 2.
+        dilation: The stride between elements within a sliding window, must be > 0.
+        ceil_mode: If ``True``, will use `ceil` instead of `floor` to compute the output shape. This
+                   ensures that every element in the input tensor is covered by a sliding window.
+        return_indices: If ``True``, will return the argmax along with the max values.
+                        Useful for :class:`torch.nn.functional.max_unpool1d` later
     """
+    # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
+    # and https://github.com/pytorch/pytorch/issues/62545 for context
+    if ceil_mode != return_indices:
+        warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
+                      "to match the args list in nn.MaxPool1d in a future release.")
+
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool1d_with_indices,
@@ -636,6 +662,12 @@ def _max_pool1d(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tensor:
+    # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
+    # and https://github.com/pytorch/pytorch/issues/62545 for context
+    if ceil_mode != return_indices:
+        warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
+                      "to match the args list in nn.MaxPool1d in a future release.")
+
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool1d,
@@ -672,11 +704,37 @@ def max_pool2d_with_indices(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
-    r"""Applies a 2D max pooling over an input signal composed of several input
+    r"""
+    max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
+
+    Applies a 2D max pooling over an input signal composed of several input
     planes.
 
+    .. note::
+        The order of :attr:`ceil_mode` and :attr:`return_indices` is different from
+        what seen in :class:`~torch.nn.MaxPool2d`, and will change in a future release.
+
     See :class:`~torch.nn.MaxPool2d` for details.
+
+    Args:
+        input: input tensor :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`, minibatch dim optional.
+        kernel_size: size of the pooling region. Can be a single number or a
+            tuple `(kH, kW)`
+        stride: stride of the pooling operation. Can be a single number or a
+            tuple `(sH, sW)`. Default: :attr:`kernel_size`
+        padding: Implicit negative infinity padding to be added on both sides, must be >= 0 and <= kernel_size / 2.
+        dilation: The stride between elements within a sliding window, must be > 0.
+        ceil_mode: If ``True``, will use `ceil` instead of `floor` to compute the output shape. This
+                   ensures that every element in the input tensor is covered by a sliding window.
+        return_indices: If ``True``, will return the argmax along with the max values.
+                        Useful for :class:`torch.nn.functional.max_unpool2d` later
     """
+    # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
+    # and https://github.com/pytorch/pytorch/issues/62545 for context
+    if ceil_mode != return_indices:
+        warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
+                      "to match the args list in nn.MaxPool2d in a future release.")
+
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool2d_with_indices,
@@ -702,6 +760,12 @@ def _max_pool2d(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tensor:
+    # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
+    # and https://github.com/pytorch/pytorch/issues/62545 for context
+    if ceil_mode != return_indices:
+        warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
+                      "to match the args list in nn.MaxPool2d in a future release.")
+
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool2d,
@@ -738,11 +802,37 @@ def max_pool3d_with_indices(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
-    r"""Applies a 3D max pooling over an input signal composed of several input
+    r"""
+    max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
+
+    Applies a 3D max pooling over an input signal composed of several input
     planes.
 
+    .. note::
+        The order of :attr:`ceil_mode` and :attr:`return_indices` is different from
+        what seen in :class:`~torch.nn.MaxPool3d`, and will change in a future release.
+
     See :class:`~torch.nn.MaxPool3d` for details.
+
+    Args:
+        input: input tensor :math:`(\text{minibatch} , \text{in\_channels} , iD, iH , iW)`, minibatch dim optional.
+        kernel_size: size of the pooling region. Can be a single number or a
+                     tuple `(kT, kH, kW)`
+        stride: stride of the pooling operation. Can be a single number or a
+                tuple `(sT, sH, sW)`. Default: :attr:`kernel_size`
+        padding: Implicit negative infinity padding to be added on both sides, must be >= 0 and <= kernel_size / 2.
+        dilation: The stride between elements within a sliding window, must be > 0.
+        ceil_mode: If ``True``, will use `ceil` instead of `floor` to compute the output shape. This
+                   ensures that every element in the input tensor is covered by a sliding window.
+        return_indices: If ``True``, will return the argmax along with the max values.
+                        Useful for :class:`torch.nn.functional.max_unpool3d` later
     """
+    # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
+    # and https://github.com/pytorch/pytorch/issues/62545 for context
+    if ceil_mode != return_indices:
+        warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
+                      "to match the args list in nn.MaxPool3d in a future release.")
+
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool3d_with_indices,
@@ -768,6 +858,12 @@ def _max_pool3d(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tensor:
+    # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
+    # and https://github.com/pytorch/pytorch/issues/62545 for context
+    if ceil_mode != return_indices:
+        warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
+                      "to match the args list in nn.MaxPool3d in a future release.")
+
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool3d,
@@ -3262,7 +3358,9 @@ def multilabel_soft_margin_loss(
     if weight is not None:
         loss = loss * weight
 
-    loss = loss.sum(dim=1) / input.size(1)  # only return N loss values
+    class_dim = input.dim() - 1
+    C = input.size(class_dim)
+    loss = loss.sum(dim=class_dim) / C  # only return N loss values
 
     if reduction == "none":
         ret = loss
@@ -4256,7 +4354,10 @@ cosine_similarity = _add_docstr(
     r"""
 cosine_similarity(x1, x2, dim=1, eps=1e-8) -> Tensor
 
-Returns cosine similarity between x1 and x2, computed along dim.
+Returns cosine similarity between ``x1`` and ``x2``, computed along dim. ``x1`` and ``x2`` must be broadcastable
+to a common shape. ``dim`` refers to the dimension in this common shape. Dimension ``dim`` of the output is
+squeezed (see :func:`torch.squeeze`), resulting in the
+output tensor having 1 fewer dimension.
 
 .. math ::
     \text{similarity} = \dfrac{x_1 \cdot x_2}{\max(\Vert x_1 \Vert _2 \cdot \Vert x_2 \Vert _2, \epsilon)}
@@ -4265,15 +4366,10 @@ Supports :ref:`type promotion <type-promotion-doc>`.
 
 Args:
     x1 (Tensor): First input.
-    x2 (Tensor): Second input (with the same number of dimensions as x1, matching x1 size at dimension `dim`,
-        and broadcastable with x1 at other dimensions).
-    dim (int, optional): Dimension of vectors. Default: 1
+    x2 (Tensor): Second input.
+    dim (int, optional): Dimension along which cosine similarity is computed. Default: 1
     eps (float, optional): Small value to avoid division by zero.
         Default: 1e-8
-
-Shape:
-    - Input: :math:`(\ast_1, D, \ast_2)` where D is at position `dim`.
-    - Output: :math:`(\ast_1, \ast_2)`
 
 Example::
 
@@ -4506,8 +4602,7 @@ def fold(
     tensor.
 
     .. warning::
-        Currently, only 3-D output tensors (unfolded batched image-like tensors) are
-        supported.
+        Currently, only unbatched (3D) or batched (4D) image-like output tensors are supported.
 
     See :class:`torch.nn.Fold` for details
     """
@@ -4515,7 +4610,7 @@ def fold(
         return handle_torch_function(
             fold, (input,), input, output_size, kernel_size, dilation=dilation, padding=padding, stride=stride
         )
-    if input.dim() == 3:
+    if input.dim() == 3 or input.dim() == 2:
         msg = "{} must be int or 2-tuple for 3D input"
         assert_int_or_pair(output_size, "output_size", msg)
         assert_int_or_pair(kernel_size, "kernel_size", msg)
@@ -4527,7 +4622,8 @@ def fold(
             input, _pair(output_size), _pair(kernel_size), _pair(dilation), _pair(padding), _pair(stride)
         )
     else:
-        raise NotImplementedError("Input Error: Only 3D input Tensors are supported (got {}D)".format(input.dim()))
+        raise NotImplementedError("Input Error: Only unbatched (2D) or batched (3D) input Tensors"
+                                  f"are supported (got {input.dim()}D)")
 
 
 def _pad_circular(input: Tensor, padding: List[int]) -> Tensor:

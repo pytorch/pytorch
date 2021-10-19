@@ -33,8 +33,15 @@ Node* MutationRemover::createSpecialMappedOp(Node* n) {
   Node* new_node;
   if (n->matches(
           "aten::fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)")) {
-    new_node =
-        graph_->insert(aten::full_like, {inputs.at(0), inputs.at(1)})->node();
+    auto dtype = graph_->insert(prim::dtype, {inputs.at(0)});
+    new_node = graph_
+                   ->insert(
+                       aten::full_like,
+                       {inputs.at(0), inputs.at(1)},
+                       {NamedValue("dtype", dtype)})
+                   ->node();
+    new_node->copyMetadata(n);
+    new_node->output()->setType(n->output()->type());
   } else if (n->matches("aten::zero_(Tensor(a!) self) -> Tensor(a!)")) {
     new_node = graph_->insert(aten::zeros_like, {n->inputs().at(0)})->node();
   } else if (

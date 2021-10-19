@@ -39,6 +39,7 @@
 #define THQInt8Storage THStorage
 #define THQInt32Storage THStorage
 #define THQUInt4x2Storage THStorage
+#define THQUInt2x4Storage THStorage
 #define THComplexFloatStorage THStorage
 #define THComplexDoubleStorage THStorage
 

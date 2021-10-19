@@ -302,17 +302,17 @@ std::string getNvtxStr(
     const std::vector<std::vector<int64_t>>& shapes) {
   if (sequence_nr >= -1 || shapes.size() > 0) {
     std::stringstream s;
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
     s << name.str();
 #endif
     if (sequence_nr >= 0) {
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
       s << ", seq = " << sequence_nr;
 #else
       s << name.str() << ", seq = " << sequence_nr;
 #endif
     } else if (sequence_nr == -1) {
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
       s << name.str();
 #endif
     }

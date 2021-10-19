@@ -11,7 +11,7 @@ class ShardMetadata(object):
     offsets, lengths and device placement.
 
     Args:
-        shard_offsets(List[int]): Offsets in the orignal tensor indicating
+        shard_offsets(List[int]): Offsets in the original tensor indicating
             the start offsets for this shard. Should have the same rank as
             the original tensor.
         shard_lengths(List[int]): Lengths indicating the length of each
@@ -40,8 +40,8 @@ class ShardMetadata(object):
         for i in range(len(self.shard_offsets)):
             if self.shard_offsets[i] < 0:
                 raise ValueError('shard_offsets should be >=0')
-            if self.shard_lengths[i] <= 0:
-                raise ValueError('shard_lengths should be > 0')
+            if self.shard_lengths[i] < 0:
+                raise ValueError('shard_lengths should be >= 0')
 
 
 
