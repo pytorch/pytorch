@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/runtime/static/memory_planner.h>
 
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 
 namespace torch {
@@ -135,6 +136,8 @@ MemoryPlanner::MemoryPlanner(
   for (IValue* output : runtime->outputs()) {
     unmanaged_ivalues.erase(output);
   }
+
+  GRAPH_DEBUG("managed_tensor_values: ", dumpValueSet(managed_tensor_values));
 
   // copy to unmanaged_ivalues_
   unmanaged_ivalues_.reserve(unmanaged_ivalues.size());
