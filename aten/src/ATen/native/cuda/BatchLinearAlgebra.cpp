@@ -1812,7 +1812,7 @@ static void apply_lu_looped_magma(const Tensor& input, const Tensor& pivots, con
   TORCH_CHECK(
       false,
       "Calling torch.lu on a CUDA tensor requires compiling ",
-      "PyTorch with MAGMA. lease rebuild with MAGMA.");
+      "PyTorch with MAGMA. Please rebuild with MAGMA.");
 #else
   // magmaLu and magmaLuNoPiv require infos and pivots tensor to be on CPU
   // the data is later copied back to the appropriate output tensor
@@ -1873,7 +1873,7 @@ static void apply_lu_batched_magma(const Tensor& input, const Tensor& pivots, co
   TORCH_CHECK(
       false,
       "Calling torch.lu on a CUDA tensor requires compiling ",
-      "PyTorch with MAGMA. lease rebuild with MAGMA.");
+      "PyTorch with MAGMA. Please rebuild with MAGMA.");
 #else
   auto input_data = input.data_ptr<scalar_t>();
   auto infos_data = infos.data_ptr<magma_int_t>();
@@ -2759,7 +2759,7 @@ static void apply_lu_solve_looped_magma(const Tensor& b, const Tensor& lu, const
   TORCH_CHECK(
       false,
       "Calling torch.lu_solve on a CUDA tensor requires compiling ",
-      "PyTorch with MAGMA. lease rebuild with MAGMA.");
+      "PyTorch with MAGMA. Please rebuild with MAGMA.");
 #else
   auto trans = to_magma(transpose);
   auto b_data = b.data_ptr<scalar_t>();
@@ -2813,7 +2813,7 @@ static void apply_lu_solve_batched_magma(const Tensor& b, const Tensor& lu, cons
   TORCH_CHECK(
       false,
       "Calling torch.lu_solve on a CUDA tensor requires compiling ",
-      "PyTorch with MAGMA. lease rebuild with MAGMA.");
+      "PyTorch with MAGMA. Please rebuild with MAGMA.");
 #else
   auto trans = to_magma(transpose);
   auto b_data = b.data_ptr<scalar_t>();
