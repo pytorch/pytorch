@@ -429,3 +429,19 @@ result = torch.Tensor([1,2,3])
   }
   EXPECT_TRUE(w_grad0.equal(w_grad1));
 }
+
+// OSS build does not have bultin numpy support yet. Use this flag to guard the
+// test case.
+#if HAS_NUMPY
+TEST(TorchpyTest, TestNumpy) {
+  torch::deploy::InterpreterManager m(2);
+  auto noArgs = at::ArrayRef<torch::deploy::Obj>();
+  auto I = m.acquireOne();
+  auto mat35 = I.global("numpy", "random").attr("rand")({3, 5});
+  auto mat58 = I.global("numpy", "random").attr("rand")({5, 8});
+  auto mat38 = I.global("numpy", "matmul")({mat35, mat58});
+  EXPECT_EQ(2, mat38.attr("shape").attr("__len__")(noArgs).toIValue().toInt());
+  EXPECT_EQ(3, mat38.attr("shape").attr("__getitem__")({0}).toIValue().toInt());
+  EXPECT_EQ(8, mat38.attr("shape").attr("__getitem__")({1}).toIValue().toInt());
+}
+#endif

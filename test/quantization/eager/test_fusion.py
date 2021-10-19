@@ -1,3 +1,5 @@
+import copy
+
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
@@ -271,18 +273,32 @@ class TestFusion(QuantizationTestCase):
     def test_fusion_conv_with_bias(self):
         for qengine in supported_qengines:
             with override_quantized_engine(qengine):
-                model = ModelForFusionWithBias().train()
-                # output with no fusion.
-                out_ref = model(self.img_data_2d[0][0])
+                model_orig = ModelForFusionWithBias().train()
 
-                model.qconfig = QConfig(activation=torch.nn.Identity,
-                                        weight=torch.nn.Identity)
-                model = fuse_modules(model, [["conv1", "bn1", "relu1"],
-                                             ["conv2", "bn2"]])
+                # reference model
+                model_ref = copy.deepcopy(model_orig)
+                # output with no fusion.
+                out_ref = model_ref(self.img_data_2d[0][0])
+
+                # fused model
+                model_orig.qconfig = QConfig(activation=torch.nn.Identity,
+                                             weight=torch.nn.Identity)
+                model = fuse_modules(model_orig, [["conv1", "bn1", "relu1"],
+                                                  ["conv2", "bn2"]])
                 prep_model = prepare_qat(model, inplace=False)
                 # output with fusion but no observers.
                 out_fused = prep_model(self.img_data_2d[0][0])
+
                 self.assertEqual(out_ref, out_fused)
+
+                def checkBN(bn_ref, bn):
+                    self.assertEqual(bn_ref.weight, bn.weight)
+                    self.assertEqual(bn_ref.bias, bn.bias)
+                    self.assertEqual(bn_ref.running_mean, bn.running_mean)
+                    self.assertEqual(bn_ref.running_var, bn.running_var)
+
+                checkBN(model_ref.bn1, prep_model.conv1.bn)
+                checkBN(model_ref.bn2, prep_model.conv2.bn)
 
                 model.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
                 prepare_qat(model, inplace=True)
