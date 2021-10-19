@@ -1306,75 +1306,6 @@ class TestUnaryUfuncs(TestCase):
         for num in abs_zeros:
             self.assertGreater(math.copysign(1.0, num), 0.0)
 
-    @dtypes(*get_all_fp_dtypes())
-    def test_isfinite_isinf_isnan(self, device, dtype):
-        vals = (-float('inf'), float('inf'), float('nan'), -1, 0, 1)
-
-        self.compare_with_numpy(torch.isfinite, np.isfinite, vals, device, dtype)
-        self.compare_with_numpy(torch.isinf, np.isinf, vals, device, dtype)
-        self.compare_with_numpy(torch.isnan, np.isnan, vals, device, dtype)
-
-    @dtypes(torch.int8, torch.int16, torch.int32, torch.int64)
-    def test_isfinite_isinf_isnan_int(self, device, dtype):
-        vals = (-1, 0, 1)
-
-        self.compare_with_numpy(torch.isfinite, np.isfinite, vals, device, dtype)
-        self.compare_with_numpy(torch.isinf, np.isinf, vals, device, dtype)
-        self.compare_with_numpy(torch.isnan, np.isnan, vals, device, dtype)
-
-    @dtypes(*(get_all_fp_dtypes()))
-    def test_isposinf_isneginf_float(self, device, dtype):
-        ops = ((torch.isposinf, np.isposinf), (torch.isneginf, np.isneginf))
-        vals = (-float('inf'), float('inf'), float('nan'), -1, 0, 1)
-
-        for torch_op, numpy_op in ops:
-            if torch_op == torch.isposinf:
-                target_vals = (0, 1, 0, 0, 0, 0)
-            else:
-                target_vals = (1, 0, 0, 0, 0, 0)
-
-            t = torch.tensor(vals, device=device, dtype=dtype)
-            # Manual check here as numpy does not support bfloat16
-            if dtype == torch.bfloat16:
-                self.assertEqual(torch_op(t),
-                                 torch.tensor(target_vals, device=device, dtype=torch.bool))
-            else:
-                self.compare_with_numpy(torch_op, numpy_op, vals, device, dtype)
-
-            # test the boolean tensor as the `out=` parameter
-            out = torch.empty_like(t, dtype=torch.bool)
-            t_target = torch.tensor(target_vals, device=device, dtype=torch.bool)
-            torch_op(t, out=out)
-            self.assertEqual(out, t_target)
-
-    @dtypes(*(get_all_int_dtypes() + [torch.bool]))
-    def test_isposinf_isneginf_int_and_bool(self, device, dtype):
-        ops = ((torch.isposinf, np.isposinf), (torch.isneginf, np.isneginf))
-        vals = (-1, 0, 1)
-
-        for torch_op, numpy_op in ops:
-            self.compare_with_numpy(torch_op, numpy_op, vals, device, dtype)
-
-            # test the boolean tensor as the `out=` parameter
-            t = torch.tensor(vals, device=device, dtype=dtype)
-            out = torch.empty_like(t, dtype=torch.bool)
-            t_target = torch.zeros_like(t, dtype=torch.bool)
-            torch_op(t, out=out)
-            self.assertEqual(out, t_target)
-
-    @dtypes(torch.complex64, torch.complex128)
-    def test_isposinf_isneginf_complex(self, device, dtype):
-        torch_ops = (torch.isposinf, torch.isneginf)
-        vals = (complex(0, float('inf')), complex(1, -float('inf')))
-        t = torch.tensor(vals, device=device, dtype=dtype)
-        out = torch.empty_like(t)
-
-        for torch_op in torch_ops:
-            with self.assertRaisesRegex(RuntimeError, 'does not support complex inputs'):
-                torch_op(t)
-            with self.assertRaisesRegex(RuntimeError, 'does not support complex inputs'):
-                torch_op(t, out=out)
-
     @dtypes(*(get_all_dtypes(include_bool=False)))
     def test_isposinf_isneginf_non_boolean_output(self, device, dtype):
         # test non-boolean tensors as the `out=` parameters
@@ -1385,58 +1316,6 @@ class TestUnaryUfuncs(TestCase):
             out = torch.empty_like(t, dtype=dtype)
             with self.assertRaisesRegex(RuntimeError, 'does not support non-boolean outputs'):
                 torch_op(t, out=out)
-
-    @dtypes(torch.complex64, torch.complex128)
-    def test_isfinite_isinf_isnan_complex(self, device, dtype):
-        vals = (
-            complex(-float('inf'), float('inf')),
-            complex(-float('inf'), 0),
-            complex(0, float('inf')),
-            complex(float('inf'), float('nan')),
-            complex(float('nan'), 0),
-            complex(-1, 0),
-            complex(0, 1)
-        )
-
-        self.compare_with_numpy(torch.isfinite, np.isfinite, vals, device, dtype)
-        self.compare_with_numpy(torch.isinf, np.isinf, vals, device, dtype)
-        self.compare_with_numpy(torch.isnan, np.isnan, vals, device, dtype)
-
-    @dtypes(torch.complex64, torch.complex128)
-    def test_isreal_complex(self, device, dtype):
-        vals = (1, 1 + 1j, 2 + 0j, 3j, 2 - 1j, 2 - 0j)
-        self.compare_with_numpy(torch.isreal, np.isreal, vals, device, dtype)
-
-    @dtypes(*get_all_dtypes())
-    def test_isreal_noncomplex(self, device, dtype):
-        vals = (1, 2, 3)
-        # Manual check here since numpy doesn't support bfloat16
-        result = torch.isreal(torch.tensor(vals, dtype=dtype))
-        expected = torch.ones(result.size(), dtype=torch.bool, device=device)
-        self.assertEqual(result, expected)
-
-    @dtypes(torch.complex64)
-    def test_isreal_nan_inf(self, device, dtype):
-        vals = (
-            complex(-float('inf'), float('inf')),
-            complex(-float('inf'), 0),
-            complex(0, float('inf')),
-            complex(float('inf'), float('nan')),
-            complex(float('nan'), 0),
-            complex(-1, 0),
-            complex(0, 1)
-        )
-        self.compare_with_numpy(torch.isreal, np.isreal, vals, device, dtype)
-
-    @onlyCPU
-    def test_isfinite_type(self, device):
-        with self.assertRaises(TypeError):
-            torch.isfinite(1)  # Parameter must be a tensor
-
-    @onlyCPU
-    def test_isinf_type(self, device):
-        with self.assertRaises(TypeError):
-            torch.isinf(1)  # Parameter must be a tensor
 
     def test_nonzero_empty(self, device):
         def assert_tuple_empty(tup, dim):
