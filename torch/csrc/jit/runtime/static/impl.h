@@ -3,6 +3,7 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/ArrayRef.h>
 #include <c10/util/variant.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -33,25 +34,28 @@ using FastSet = std::unordered_set<Key>;
 TORCH_API bool canEnableStaticRuntime(
     const std::shared_ptr<torch::jit::Graph>& graph);
 
+TORCH_API std::string dumpValueSet(
+    const FastSet<const Value*>& value_set,
+    const char* set_name = "");
+
 // Group values used by `graph` into three categories:
 //
-// - input_or_constant_aliases:
-//     values that are either inputs or contain aliases of inputs
-//     or constants.
 // - output_aliases:
 //     values that are either outputs or contain aliases of outputs
-//     and are not in input_or_constant_aliases.
-// Values that dont't show up in input_or_constant_aliases and output_aliases
-// are
-//     created and consumed within the graph.
+// - external_aliases:
+//     values that are inputs, constants, outputs, or their aliases.
+//     The output aliases that end up here are as a result of aliasDb failing to
+//     recognize them as outputs due to collection object (e.g., Tuple) aliasing
+//     inputs.
+// Values that dont't show up in output_aliases or external_aliases are created
+// and consumed within the graph.
 class ValueGroup {
  public:
   explicit ValueGroup() = default;
   void init(const std::shared_ptr<torch::jit::Graph>& graph, AliasDb& db);
 
-  bool isInputAlias(const Value* value) const {
-    return input_or_constant_aliases_.find(value) !=
-        input_or_constant_aliases_.end();
+  bool isExternalAlias(const Value* value) const {
+    return external_aliases_.find(value) != external_aliases_.end();
   }
 
   bool isOutputAlias(const Value* value) const {
@@ -59,12 +63,19 @@ class ValueGroup {
   }
 
   bool isAlwaysAlive(const Value* value) const {
-    return isInputAlias(value) || isOutputAlias(value);
+    return isExternalAlias(value) || isOutputAlias(value);
+  }
+
+  std::string toString() const {
+    return c10::str(
+        dumpValueSet(output_aliases_, "ValueGroup::output_aliases_"),
+        "\n",
+        dumpValueSet(external_aliases_, "ValueGroup::external_aliases_"));
   }
 
  private:
-  FastSet<const Value*> input_or_constant_aliases_;
   FastSet<const Value*> output_aliases_;
+  FastSet<const Value*> external_aliases_;
 };
 
 struct TORCH_API StaticModuleOptions {
@@ -164,7 +175,7 @@ class TORCH_API StaticModule {
   // This interface only works if StaticModule was initialized
   // with a TorchScript module, otherwise use the above interface
   c10::IValue operator()(
-      const std::vector<c10::IValue>& args,
+      c10::ArrayRef<c10::IValue> args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
   const Graph& graph() const {
@@ -265,15 +276,15 @@ class TORCH_API StaticRuntime {
   // This interface only works if StaticModule was initialized
   // with a TorchScript module, otherwise use the above interface
   c10::IValue operator()(
-      const std::vector<c10::IValue>& args,
+      c10::ArrayRef<c10::IValue> args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
   void display_nodes(
-      const std::vector<c10::IValue>& args,
+      c10::ArrayRef<c10::IValue> args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
   void benchmark(
-      const std::vector<c10::IValue>& args,
+      c10::ArrayRef<c10::IValue> args,
       const std::unordered_map<std::string, c10::IValue>& kwargs,
       const int warmup_runs,
       const int main_runs,
@@ -281,7 +292,7 @@ class TORCH_API StaticRuntime {
       bool generate_ai_pep_output = false);
 
   float benchmark_model(
-      const std::vector<c10::IValue>& args,
+      c10::ArrayRef<c10::IValue> args,
       const std::unordered_map<std::string, c10::IValue>& kwargs,
       const int warmup_runs,
       const int main_runs);
@@ -304,7 +315,7 @@ class TORCH_API StaticRuntime {
   };
 
   IndividualMetrics benchmark_individual_ops(
-      const std::vector<c10::IValue>& args,
+      c10::ArrayRef<c10::IValue> args,
       const std::unordered_map<std::string, c10::IValue>& kwargs,
       const int warmup_runs,
       const int main_runs);
@@ -354,7 +365,7 @@ class TORCH_API StaticRuntime {
  private:
   // helper method for copying input args/kwargs into inputs_
   void set_inputs(
-      const std::vector<c10::IValue>& args,
+      c10::ArrayRef<c10::IValue> args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
   // clean up owning refs of input IValues
@@ -381,8 +392,53 @@ class TORCH_API ProcessedNode {
   ProcessedNode() = default;
   ProcessedNode(
       Node* n,
-      std::vector<const IValue*>&& inputs,
+      std::unique_ptr<const IValue*[]> inputs,
+      size_t inputsSize,
       bool enable_out_variant);
+
+  ProcessedNode(const ProcessedNode& rhs)
+      : node_(rhs.node_),
+        fn_(rhs.fn_),
+        inputs_(std::make_unique<const IValue*[]>(rhs.inputs_size_)),
+        outputs_(std::make_unique<IValue[]>(rhs.outputs_size_)),
+        inputs_size_(rhs.inputs_size_),
+        outputs_size_(rhs.outputs_size_),
+        op_name_(rhs.op_name_) {
+    std::copy(
+        rhs.inputs_.get(), rhs.inputs_.get() + inputs_size_, inputs_.get());
+    std::copy(
+        rhs.outputs_.get(), rhs.outputs_.get() + outputs_size_, outputs_.get());
+  }
+
+  ProcessedNode& operator=(const ProcessedNode& rhs) {
+    if (this == &rhs) {
+      return *this;
+    }
+    node_ = rhs.node_;
+    fn_ = rhs.fn_;
+    if (!inputs_ || inputs_size_ != rhs.inputs_size_) {
+      inputs_ = std::make_unique<const IValue*[]>(rhs.inputs_size_);
+      inputs_size_ = rhs.inputs_size_;
+    }
+    std::copy(
+        rhs.inputs_.get(), rhs.inputs_.get() + inputs_size_, inputs_.get());
+
+    if (!outputs_ || outputs_size_ != rhs.outputs_size_) {
+      outputs_ = std::make_unique<IValue[]>(rhs.outputs_size_);
+      outputs_size_ = rhs.outputs_size_;
+    }
+    std::copy(
+        rhs.outputs_.get(), rhs.outputs_.get() + outputs_size_, outputs_.get());
+    op_name_ = rhs.op_name_;
+
+    return *this;
+  }
+
+  // These should be noexcept, but some Android build is failing
+  // saying the noexcept specification doesn't match the calculated
+  // one. Maybe c10::variant is throwing it off?
+  ProcessedNode(ProcessedNode&&) = default;
+  ProcessedNode& operator=(ProcessedNode&&) = default;
 
   void run();
 
@@ -392,13 +448,13 @@ class TORCH_API ProcessedNode {
 
   // Input is readonly
   const IValue& Input(size_t i) const {
-    DCHECK(i < inputs_.size());
+    DCHECK(i < inputs_size_);
     return *inputs_[i];
   }
 
   // Output is readwrite
   IValue& Output(size_t i) {
-    DCHECK(i < outputs_.size());
+    DCHECK(i < outputs_size_);
     return outputs_[i];
   }
 
@@ -406,22 +462,22 @@ class TORCH_API ProcessedNode {
     inputs_[index] = ival;
   }
 
-  const std::vector<IValue>& outputs() const {
-    return outputs_;
+  C10_NODISCARD c10::ArrayRef<const IValue> outputs() const {
+    return c10::ArrayRef<const IValue>(outputs_.get(), outputs_size_);
   }
 
-  const std::vector<const IValue*>& inputs() const {
-    return inputs_;
+  C10_NODISCARD c10::ArrayRef<const IValue*> inputs() const {
+    return c10::ArrayRef<const IValue*>(inputs_.get(), inputs_size_);
   }
 
   std::vector<IValue> clone_inputs() const;
 
   bool has_out_variant() const {
-    return fn_.index() == 0;
+    return function_kind_ == FunctionKind::kOutVariant;
   }
 
   bool has_native() const {
-    return fn_.index() == 1;
+    return function_kind_ == FunctionKind::kNativeFunction;
   }
 
   bool verify_no_memory_overlap() const;
@@ -431,14 +487,18 @@ class TORCH_API ProcessedNode {
   }
 
  private:
-  void run_impl();
-
   Node* node_;
-  using OutVariant = std::function<void(ProcessedNode*)>;
-  using NativeFunction = std::function<void(ProcessedNode*)>;
-  c10::variant<OutVariant, NativeFunction, Operation> fn_;
-  std::vector<const IValue*> inputs_; // unowned
-  std::vector<IValue> outputs_;
+  enum class FunctionKind {
+    kOutVariant,
+    kNativeFunction,
+    kInterpreterFallback,
+  };
+  FunctionKind function_kind_;
+  std::function<void(ProcessedNode*)> fn_;
+  std::unique_ptr<const IValue*[]> inputs_; // unowned
+  std::unique_ptr<IValue[]> outputs_;
+  size_t inputs_size_;
+  size_t outputs_size_;
   const char* op_name_;
 };
 

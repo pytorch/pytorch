@@ -426,7 +426,7 @@ class TestLinalg(TestCase):
         def run_test(shape, batch, contiguous):
             A = random_hermitian_pd_matrix(shape, *batch, dtype=dtype, device=device)
             if A.numel() > 0 and not contiguous:
-                A = A.transpose(-2, -1)
+                A = A.mT
                 self.assertFalse(A.is_contiguous())
             expected_L = np.linalg.cholesky(A.cpu().numpy())
             actual_L = torch.linalg.cholesky(A)
@@ -459,7 +459,7 @@ class TestLinalg(TestCase):
         self.assertEqual(expected, out)
 
         # check the upper= variant
-        expected = torch.linalg.cholesky(A).transpose(-2, -1).conj()
+        expected = torch.linalg.cholesky(A).mH
         actual = torch.linalg.cholesky(A, upper=True)
         self.assertEqual(expected, actual)
 
@@ -532,10 +532,10 @@ class TestLinalg(TestCase):
         # Check that the gradient is Hermitian (or symmetric)
         def run_test(shape):
             root = torch.rand(*shape, dtype=dtype, device=device)
-            root = torch.matmul(root, root.transpose(-1, -2).conj())
+            root = torch.matmul(root, root.mH)
             root.requires_grad_()
             chol = torch.linalg.cholesky(root).sum().backward()
-            self.assertEqual(root.grad, root.grad.transpose(-1, -2).conj())
+            self.assertEqual(root.grad, root.grad.mH)
 
         shapes = ((3, 3), (1, 1, 3, 3))
         for shape in shapes:
@@ -554,12 +554,12 @@ class TestLinalg(TestCase):
             chol_fact = torch.cholesky(A, upper=upper)
             if upper:
                 # Correctness check
-                self.assertEqual(A, chol_fact.transpose(-2, -1).matmul(chol_fact))
+                self.assertEqual(A, chol_fact.mT.matmul(chol_fact))
                 # Upper triangular check
                 self.assertEqual(chol_fact, chol_fact.triu())
             else:
                 # Correctness check
-                self.assertEqual(A, chol_fact.matmul(chol_fact.transpose(-2, -1)))
+                self.assertEqual(A, chol_fact.matmul(chol_fact.mT))
                 # Lower triangular check
                 self.assertEqual(chol_fact, chol_fact.tril())
 
@@ -635,7 +635,7 @@ class TestLinalg(TestCase):
 
         U = torch.cholesky(A_triu, upper=True)
 
-        reconstruct_A = U.conj().transpose(-2, -1) @ U
+        reconstruct_A = U.mH @ U
         self.assertEqual(A, reconstruct_A)
 
     @skipCUDAIfNoMagmaAndNoCusolver
@@ -713,7 +713,7 @@ class TestLinalg(TestCase):
     @dtypes(torch.float64, torch.complex128)
     def test_old_cholesky_autograd(self, device, dtype):
         def func(root, upper):
-            x = 0.5 * (root + root.transpose(-1, -2).conj())
+            x = 0.5 * (root + root.mH)
             return torch.cholesky(x, upper)
 
         def run_test(upper, dims):
@@ -724,10 +724,10 @@ class TestLinalg(TestCase):
             gradgradcheck(func, [root, upper])
 
             root = torch.rand(*dims, dtype=dtype, device=device)
-            root = torch.matmul(root, root.transpose(-1, -2).conj())
+            root = torch.matmul(root, root.mH)
             root.requires_grad_()
             chol = root.cholesky().sum().backward()
-            self.assertEqual(root.grad, root.grad.transpose(-1, -2).conj())  # Check the gradient is hermitian
+            self.assertEqual(root.grad, root.grad.mH)  # Check the gradient is hermitian
 
         for upper, dims in itertools.product([True, False], [(3, 3), (4, 3, 2, 2)]):
             run_test(upper, dims)
@@ -835,19 +835,18 @@ class TestLinalg(TestCase):
             result = op(a, b)
             self.assertEqual(result.dtype, torch.result_type(a, b))
 
-    @dtypes(*itertools.product(get_all_dtypes(),
-                               get_all_dtypes(),
-                               get_all_dtypes()))
-    def test_addr_type_promotion(self, device, dtypes):
-        a = make_tensor((5,), device=device, dtype=dtypes[0], low=-2, high=2)
-        b = make_tensor((5,), device=device, dtype=dtypes[1], low=-2, high=2)
-        m = make_tensor((5, 5), device=device, dtype=dtypes[2], low=-2, high=2)
+    # don't use @dtypes decorator to avoid generating ~1700 tests per device
+    def test_addr_type_promotion(self, device):
+        for dtypes0, dtypes1, dtypes2 in product(get_all_dtypes(), repeat=3):
+            a = make_tensor((5,), device=device, dtype=dtypes0, low=-2, high=2)
+            b = make_tensor((5,), device=device, dtype=dtypes1, low=-2, high=2)
+            m = make_tensor((5, 5), device=device, dtype=dtypes2, low=-2, high=2)
 
-        desired_dtype = torch.promote_types(torch.promote_types(dtypes[0], dtypes[1]),
-                                            dtypes[2])
-        for op in (torch.addr, torch.Tensor.addr):
-            result = op(m, a, b)
-            self.assertEqual(result.dtype, desired_dtype)
+            desired_dtype = torch.promote_types(torch.promote_types(dtypes0, dtypes1),
+                                                dtypes2)
+            for op in (torch.addr, torch.Tensor.addr):
+                result = op(m, a, b)
+                self.assertEqual(result.dtype, desired_dtype)
 
     # Tests migrated from test_torch.py
     # 1) test the shape of the result tensor when there is empty input tensor
@@ -1027,7 +1026,7 @@ class TestLinalg(TestCase):
         def run_test_permuted(shape, batch, uplo):
             # check for permuted / transposed inputs
             matrix = random_hermitian_matrix(shape, *batch, dtype=dtype, device=device)
-            matrix = matrix.transpose(-2, -1)
+            matrix = matrix.mT
             run_test(matrix, uplo)
 
         def run_test_skipped_elements(shape, batch, uplo):
@@ -1050,10 +1049,10 @@ class TestLinalg(TestCase):
         from torch.testing._internal.common_utils import random_hermitian_matrix
 
         def run_test(dims, uplo):
-            x = random_hermitian_matrix(dims[-1], *dims[:-2]).requires_grad_()
+            x = random_hermitian_matrix(dims[-1], *dims[:-2], device=device, dtype=dtype).requires_grad_()
             w, v = torch.linalg.eigh(x)
             (w.sum() + abs(v).sum()).backward()
-            self.assertEqual(x.grad, x.grad.conj().transpose(-1, -2))  # Check the gradient is Hermitian
+            self.assertEqual(x.grad, x.grad.mH)  # Check the gradient is Hermitian
 
         for dims, uplo in itertools.product([(3, 3), (1, 1, 3, 3)], ["L", "U"]):
             run_test(dims, uplo)
@@ -1138,7 +1137,7 @@ class TestLinalg(TestCase):
         def run_test_permuted(shape, batch, uplo):
             # check for permuted / transposed inputs
             matrix = random_hermitian_matrix(shape, *batch, dtype=dtype, device=device)
-            matrix = matrix.transpose(-2, -1)
+            matrix = matrix.mT
             run_test(matrix, uplo)
 
         def run_test_skipped_elements(shape, batch, uplo):
@@ -1180,8 +1179,8 @@ class TestLinalg(TestCase):
 
         def run_test_transposed(a_shape, b_shape):
             # check for transposed case
-            a = torch.rand(a_shape, dtype=dtype, device=device).transpose(-2, -1)
-            b = torch.rand(b_shape, dtype=dtype, device=device).transpose(-2, -1)
+            a = torch.rand(a_shape, dtype=dtype, device=device).mT
+            b = torch.rand(b_shape, dtype=dtype, device=device).mT
             self.assertFalse(a.is_contiguous())
             self.assertFalse(b.is_contiguous())
 
@@ -1190,7 +1189,7 @@ class TestLinalg(TestCase):
             self.assertEqual(result, expected)
 
             # check the out= variant
-            out = torch.empty(result.transpose(-2, -1).shape, dtype=dtype, device=device).transpose(-2, -1)
+            out = torch.empty(result.mT.shape, dtype=dtype, device=device).mT
             self.assertFalse(out.is_contiguous())
             ans = torch.kron(a, b, out=out)
             self.assertEqual(ans, out)
@@ -1335,6 +1334,9 @@ class TestLinalg(TestCase):
         for keepdim in [True, False]:
             for input_size, ord_settings in test_cases:
                 for ord in ord_settings:
+                    if self.device_type == 'cpu' and not torch._C.has_lapack and ord in [2, -2, 'nuc']:
+                        continue
+
                     dtypes = [torch.float, torch.double, torch.cfloat, torch.cdouble]
                     for from_dtype, to_dtype in itertools.product(dtypes, dtypes):
                         if from_dtype.is_complex and not to_dtype.is_complex:
@@ -1569,6 +1571,8 @@ class TestLinalg(TestCase):
             for input_size, ord_settings, dim in test_cases:
                 input = torch.randn(*input_size, dtype=dtype, device=device)
                 for ord in ord_settings:
+                    if self.device_type == 'cpu' and not torch._C.has_lapack and ord in [2, -2, 'nuc']:
+                        continue
                     run_test_case(input, ord, dim, keepdim)
 
 
@@ -2573,6 +2577,7 @@ class TestLinalg(TestCase):
                     self.assertEqual(a_norm_fro, a_norm_2)
 
     @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
     def test_nuclear_norm_axes_small_brute_force_old(self, device):
         def check_single_nuclear_norm(x, axes):
             if self.device_type != 'cpu' and randrange(100) < 95:
@@ -2601,7 +2606,7 @@ class TestLinalg(TestCase):
                     check_single_nuclear_norm(x, axes)
 
                     # 2d, inner dimensions Fortran
-                    x = torch.randn(m, n, device=device).transpose(-1, -2)
+                    x = torch.randn(m, n, device=device).mT
                     check_single_nuclear_norm(x, axes)
 
                     # 2d, inner dimensions non-contiguous
@@ -2619,7 +2624,7 @@ class TestLinalg(TestCase):
                         check_single_nuclear_norm(x, axes)
 
                         # 3d, inner dimensions Fortran
-                        x = torch.randn(o, m, n, device=device).transpose(-1, -2)
+                        x = torch.randn(o, m, n, device=device).mT
                         check_single_nuclear_norm(x, axes)
 
                         # 3d, inner dimensions non-contiguous
@@ -2637,7 +2642,7 @@ class TestLinalg(TestCase):
                             check_single_nuclear_norm(x, axes)
 
                             # 4d, inner dimensions Fortran
-                            x = torch.randn(r, o, n, m, device=device).transpose(-1, -2)
+                            x = torch.randn(r, o, n, m, device=device).mT
                             check_single_nuclear_norm(x, axes)
 
                             # 4d, inner dimensions non-contiguous
@@ -2674,12 +2679,12 @@ class TestLinalg(TestCase):
 
             if compute_uv:
                 if some:
-                    x_recon = torch.matmul(outu, torch.matmul(outs.diag_embed(), outv.transpose(-2, -1)))
+                    x_recon = torch.matmul(outu, torch.matmul(outs.diag_embed(), outv.mT))
                     self.assertEqual(x, x_recon, atol=1e-8, rtol=0, msg='Incorrect reconstruction using U @ diag(S) @ V.T')
                 else:
                     narrow_u = outu[..., :min(*dims[-2:])]
                     narrow_v = outv[..., :min(*dims[-2:])]
-                    x_recon = torch.matmul(narrow_u, torch.matmul(outs.diag_embed(), narrow_v.transpose(-2, -1)))
+                    x_recon = torch.matmul(narrow_u, torch.matmul(outs.diag_embed(), narrow_v.mT))
                     self.assertEqual(x, x_recon, atol=1e-8, rtol=0, msg='Incorrect reconstruction using U @ diag(S) @ V.T')
             else:
                 _, singvals, _ = torch.svd(x, compute_uv=True)
@@ -2702,12 +2707,12 @@ class TestLinalg(TestCase):
                 resu, ress, resv = torch.svd(x, some=some, compute_uv=compute_uv)
                 if compute_uv:
                     if some:
-                        x_recon = torch.matmul(resu, torch.matmul(ress.diag_embed(), resv.transpose(-2, -1)))
+                        x_recon = torch.matmul(resu, torch.matmul(ress.diag_embed(), resv.mT))
                         self.assertEqual(x, x_recon, atol=1e-8, rtol=0, msg='Incorrect reconstruction using U @ diag(S) @ V.T')
                     else:
                         narrow_u = resu[..., :min(*dims[-2:])]
                         narrow_v = resv[..., :min(*dims[-2:])]
-                        x_recon = torch.matmul(narrow_u, torch.matmul(ress.diag_embed(), narrow_v.transpose(-2, -1)))
+                        x_recon = torch.matmul(narrow_u, torch.matmul(ress.diag_embed(), narrow_v.mT))
                         self.assertEqual(x, x_recon, atol=1e-8, rtol=0, msg='Incorrect reconstruction using U @ diag(S) @ V.T')
                 else:
                     _, singvals, _ = torch.svd(x, compute_uv=True)
@@ -2734,6 +2739,7 @@ class TestLinalg(TestCase):
             self.assertEqual(s_expect, s_actual, msg="Singular values don't match")
 
     @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_svd_lowrank(self, device, dtype):
@@ -2758,7 +2764,7 @@ class TestLinalg(TestCase):
 
             # check if u, s, v is a SVD
             u, s, v = u[..., :q], s[..., :q], v[..., :q]
-            A = u.matmul(s.diag_embed()).matmul(v.transpose(-2, -1))
+            A = u.matmul(s.diag_embed()).matmul(v.mT)
             self.assertEqual(A, a, rtol=1e-7, atol=2e-7)
 
             # check if svd_lowrank produces same singular values as torch.svd
@@ -2775,8 +2781,8 @@ class TestLinalg(TestCase):
                 # subspaces, respectively
                 u, s, v = u[..., :actual_rank], s[..., :actual_rank], v[..., :actual_rank]
                 U, S, V = U[..., :actual_rank], S[..., :actual_rank], V[..., :actual_rank]
-                self.assertEqual(u.transpose(-2, -1).matmul(U).det().abs(), torch.ones(batches, device=device, dtype=dtype))
-                self.assertEqual(v.transpose(-2, -1).matmul(V).det().abs(), torch.ones(batches, device=device, dtype=dtype))
+                self.assertEqual(u.mT.matmul(U).det().abs(), torch.ones(batches, device=device, dtype=dtype))
+                self.assertEqual(v.mT.matmul(V).det().abs(), torch.ones(batches, device=device, dtype=dtype))
 
         all_batches = [(), (1,), (3,), (2, 3)]
         for actual_rank, size, all_batches in [
@@ -2817,6 +2823,10 @@ class TestLinalg(TestCase):
         self.assertEqual(t, t2)
 
     def _test_svd_helper(self, shape, some, col_maj, device, dtype):
+        # test implementation below uses cpu unconditionally
+        if not torch._C.has_lapack:
+            reason = "PyTorch compiled without Lapack"
+            raise unittest.SkipTest(reason)
         # To have accurate tests and less false positives on different CPUs and GPUs,
         # we use double or complex double accuracy for CPU reference.
         cpu_dtype = torch.complex128 if dtype.is_complex else torch.float64
@@ -3096,7 +3106,7 @@ class TestLinalg(TestCase):
             b = torch.randn(*b_dims, dtype=dtype, device='cpu')
             x_exp = torch.tensor(solve(A.numpy(), b.numpy()), dtype=dtype, device=device)
             A, b = A.to(dtype=dtype, device=device), b.to(dtype=dtype, device=device)
-            L = torch.cholesky(A, upper)
+            L = torch.linalg.cholesky(A, upper=upper)
             x = torch.cholesky_solve(b, L, upper=upper)
             self.assertEqual(x, x_exp)
             # https://github.com/pytorch/pytorch/issues/42695
@@ -3187,8 +3197,8 @@ class TestLinalg(TestCase):
             # check the out= variant
             # prepare the expected out tensor
             matrix_inverse_out = torch.empty(*batches, n, n, dtype=dtype, device=device)
-            matrix_inverse_out_t = matrix_inverse_out.transpose(-2, -1).clone(memory_format=torch.contiguous_format)
-            matrix_inverse_out = matrix_inverse_out_t.transpose(-2, -1)
+            matrix_inverse_out_t = matrix_inverse_out.mT.clone(memory_format=torch.contiguous_format)
+            matrix_inverse_out = matrix_inverse_out_t.mT
             ans = torch_inverse(matrix, out=matrix_inverse_out)
             self.assertEqual(matrix_inverse_out, ans, atol=0, rtol=0)
             self.assertEqual(matrix_inverse_out, matrix_inverse, atol=0, rtol=0)
@@ -3220,15 +3230,15 @@ class TestLinalg(TestCase):
                 [[], [0], [2], [2, 1]],
                 [0, 5]
             ):
-                matrices = random_fullrank_matrix_distinct_singular_value(n, *batches, dtype=dtype).to(device)
+                matrices = random_fullrank_matrix_distinct_singular_value(n, *batches, dtype=dtype, device=device)
                 run_test(torch_inverse, matrices, batches, n)
 
                 # test non-contiguous input
-                run_test(torch_inverse, matrices.transpose(-2, -1), batches, n)
+                run_test(torch_inverse, matrices.mT, batches, n)
                 if n > 0:
                     run_test(
                         torch_inverse,
-                        random_fullrank_matrix_distinct_singular_value(n * 2, *batches, dtype=dtype).to(device)
+                        random_fullrank_matrix_distinct_singular_value(n * 2, *batches, dtype=dtype, device=device)
                         .view(-1, n * 2, n * 2)[:, ::2, ::2].view(*batches, n, n),
                         batches, n
                     )
@@ -3278,7 +3288,7 @@ class TestLinalg(TestCase):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
         def test_inverse_many_batches_helper(torch_inverse, b, n):
-            matrices = random_fullrank_matrix_distinct_singular_value(b, n, n, dtype=dtype).to(device)
+            matrices = random_fullrank_matrix_distinct_singular_value(b, n, n, dtype=dtype, device=device)
             matrices_inverse = torch_inverse(matrices)
 
             # Compare against NumPy output
@@ -3288,7 +3298,6 @@ class TestLinalg(TestCase):
         for torch_inverse in [torch.inverse, torch.linalg.inv]:
             test_inverse_many_batches_helper(torch_inverse, 5, 256)
             test_inverse_many_batches_helper(torch_inverse, 3, 512)
-            test_inverse_many_batches_helper(torch_inverse, 64, 64)
 
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
@@ -3361,6 +3370,8 @@ class TestLinalg(TestCase):
                 rconds.append(torch.rand(A.shape[-3], device=device))
             for rcond in rconds:
                 actual = torch.linalg.pinv(A, rcond=rcond, hermitian=hermitian)
+                torch_rtol = torch.linalg.pinv(A, rtol=rcond, hermitian=hermitian)
+                self.assertEqual(actual, torch_rtol)
                 numpy_rcond = rcond if isinstance(rcond, float) else rcond.cpu().numpy()
                 expected = np.linalg.pinv(A.cpu().numpy(), rcond=numpy_rcond, hermitian=hermitian)
                 self.assertEqual(actual, expected, atol=self.precision, rtol=1e-5)
@@ -3416,13 +3427,23 @@ class TestLinalg(TestCase):
             # device of rcond and input should match
             wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
             rcond = torch.full((), 1e-2, device=wrong_device)
-            with self.assertRaisesRegex(RuntimeError, "Expected rcond and input to be on the same device"):
+            with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                 torch.linalg.pinv(a, rcond=rcond)
 
         # rcond can't be complex
         rcond = torch.full((), 1j, device=device)
         with self.assertRaisesRegex(RuntimeError, "rcond tensor of complex type is not supported"):
             torch.linalg.pinv(a, rcond=rcond)
+
+        # atol can't be complex
+        atol = torch.full((), 1j, device=device)
+        with self.assertRaisesRegex(RuntimeError, "atol tensor of complex type is not supported"):
+            torch.linalg.pinv(a, atol=atol)
+
+        # rtol can't be complex
+        rtol = torch.full((), 1j, device=device)
+        with self.assertRaisesRegex(RuntimeError, "rtol tensor of complex type is not supported"):
+            torch.linalg.pinv(a, rtol=rtol)
 
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
@@ -3475,9 +3496,9 @@ class TestLinalg(TestCase):
         with warnings.catch_warnings(record=True) as w:
             a = torch.eye(2, dtype=dtype, device=device)
             out = torch.empty(3, 3, dtype=dtype, device=device)
-            out = out.transpose(-2, -1).clone(memory_format=torch.contiguous_format)
-            out = out.transpose(-2, -1)
-            self.assertTrue(out.transpose(-2, -1).is_contiguous())
+            out = out.mT.clone(memory_format=torch.contiguous_format)
+            out = out.mT
+            self.assertTrue(out.mT.is_contiguous())
             # Trigger warning
             torch.linalg.inv(a, out=out)
             # Check warning occurs
@@ -3488,7 +3509,7 @@ class TestLinalg(TestCase):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
         b = torch.randn(*b_dims, dtype=dtype, device=device)
-        A = random_fullrank_matrix_distinct_singular_value(*A_dims, dtype=dtype).to(device)
+        A = random_fullrank_matrix_distinct_singular_value(*A_dims, dtype=dtype, device=device)
         return b, A
 
     @skipCUDAIfNoMagma
@@ -3544,7 +3565,7 @@ class TestLinalg(TestCase):
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3})
     def test_solve_batched_non_contiguous(self, device, dtype):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
-        A = random_fullrank_matrix_distinct_singular_value(2, 2, dtype=dtype).to(device).permute(1, 0, 2)
+        A = random_fullrank_matrix_distinct_singular_value(2, 2, dtype=dtype, device=device).permute(1, 0, 2)
         b = torch.randn(2, 2, 2, dtype=dtype, device=device).permute(2, 1, 0)
         self.assertFalse(A.is_contiguous())
         self.assertFalse(b.is_contiguous())
@@ -3651,7 +3672,7 @@ class TestLinalg(TestCase):
     def test_old_solve_batched_non_contiguous(self, device, dtype):
         from numpy.linalg import solve
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
-        A = random_fullrank_matrix_distinct_singular_value(2, 2, dtype=dtype).to(device).permute(1, 0, 2)
+        A = random_fullrank_matrix_distinct_singular_value(2, 2, dtype=dtype, device=device).permute(1, 0, 2)
         b = torch.randn(2, 2, 2, dtype=dtype, device=device).permute(2, 1, 0)
         x, _ = torch.solve(b, A)
         x_exp = solve(A.cpu().numpy(), b.cpu().numpy())
@@ -4073,12 +4094,12 @@ class TestLinalg(TestCase):
             a = torch.randn(*batch, shape0, shape1, dtype=dtype, device=device)
             rank_a = matrix_rank(a)
 
-            self.assertEqual(rank_a, matrix_rank(a.conj().transpose(-2, -1)))
-            aaH = torch.matmul(a, a.conj().transpose(-2, -1))
+            self.assertEqual(rank_a, matrix_rank(a.mH))
+            aaH = torch.matmul(a, a.mH)
             rank_aaH = matrix_rank(aaH)
             rank_aaH_hermitian = matrix_rank(aaH, hermitian=True)
             self.assertEqual(rank_aaH, rank_aaH_hermitian)
-            aHa = torch.matmul(a.conj().transpose(-2, -1), a)
+            aHa = torch.matmul(a.mH, a)
             self.assertEqual(matrix_rank(aHa), matrix_rank(aHa, hermitian=True))
 
             # check against NumPy
@@ -4109,9 +4130,9 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    def test_matrix_rank_tol(self, device, dtype):
+    def test_matrix_rank_atol(self, device, dtype):
 
-        def run_test_tol(shape0, shape1, batch):
+        def run_test_atol(shape0, shape1, batch):
             a = make_tensor((*batch, shape0, shape1), dtype=dtype, device=device)
             # Check against NumPy output
             # Test float tol, and specific value for each matrix
@@ -4123,7 +4144,9 @@ class TestLinalg(TestCase):
             if a.ndim > 2:
                 tolerances.append(make_tensor(a.shape[-3], dtype=torch.float32, device=device, low=0))
             for tol in tolerances:
-                actual = torch.linalg.matrix_rank(a, tol=tol)
+                actual = torch.linalg.matrix_rank(a, atol=tol)
+                actual_tol = torch.linalg.matrix_rank(a, tol=tol)
+                self.assertEqual(actual, actual_tol)
                 numpy_tol = tol if isinstance(tol, float) else tol.cpu().numpy()
                 expected = np.linalg.matrix_rank(a.cpu().numpy(), tol=numpy_tol)
                 self.assertEqual(actual, expected)
@@ -4131,7 +4154,32 @@ class TestLinalg(TestCase):
         shapes = (3, 13)
         batches = ((), (0, ), (4, ), (3, 5, ))
         for (shape0, shape1), batch in zip(itertools.product(shapes, reversed(shapes)), batches):
-            run_test_tol(shape0, shape1, batch)
+            run_test_atol(shape0, shape1, batch)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float64)
+    def test_matrix_rank_atol_rtol(self, device, dtype):
+        from torch.testing._internal.common_utils import make_fullrank_matrices_with_distinct_singular_values
+
+        # creates a matrix with singular values arange(1/(n+1), 1, 1/(n+1)) and rank=n
+        n = 9
+        a = make_fullrank_matrices_with_distinct_singular_values(n, n, dtype=dtype, device=device)
+
+        # test float and tensor variants
+        for tol_value in [0.51, torch.tensor(0.51, device=device)]:
+            # using rtol (relative tolerance) takes into account the largest singular value (0.9 in this case)
+            result = torch.linalg.matrix_rank(a, rtol=tol_value)
+            self.assertEqual(result, 5)  # there are 5 singular values above 0.9*0.51=0.459
+
+            # atol is used directly to compare with singular values
+            result = torch.linalg.matrix_rank(a, atol=tol_value)
+            self.assertEqual(result, 4)  # there are 4 singular values above 0.51
+
+            # when both are specified the maximum tolerance is used
+            result = torch.linalg.matrix_rank(a, atol=tol_value, rtol=tol_value)
+            self.assertEqual(result, 4)  # there are 4 singular values above max(0.51, 0.9*0.51)
+
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -4145,14 +4193,14 @@ class TestLinalg(TestCase):
             rank_a = matrix_rank(a)
             expected = torch.zeros(batch, dtype=torch.int64, device=device)
 
-            self.assertEqual(rank_a, matrix_rank(a.conj().transpose(-2, -1)))
+            self.assertEqual(rank_a, matrix_rank(a.mH))
 
-            aaH = torch.matmul(a, a.conj().transpose(-2, -1))
+            aaH = torch.matmul(a, a.mH)
             rank_aaH = matrix_rank(aaH)
             rank_aaH_hermitian = matrix_rank(aaH, hermitian=True)
             self.assertEqual(rank_aaH, rank_aaH_hermitian)
 
-            aHa = torch.matmul(a.conj().transpose(-2, -1), a)
+            aHa = torch.matmul(a.mH, a)
             self.assertEqual(matrix_rank(aHa), matrix_rank(aHa, hermitian=True))
 
             self.assertEqual(rank_a, expected)
@@ -4785,7 +4833,7 @@ class TestLinalg(TestCase):
         b = torch.randn(*b_dims, dtype=dtype, device=device)
         A = torch.randn(*A_dims, dtype=dtype, device=device)
         # create positive definite matrix
-        A = torch.matmul(A, A.transpose(-2, -1))
+        A = torch.matmul(A, A.mT)
         A_triangular = triangle_function(A)
         if unitriangular:
             A_triangular.diagonal(dim1=-2, dim2=-1).fill_(1.)
@@ -4829,7 +4877,7 @@ class TestLinalg(TestCase):
                                            transpose=transpose)[0]  # Actual output
             self.assertEqual(x_act, x_exp)  # Equality check
             if transpose:
-                A = A.transpose(-2, -1)
+                A = A.mT
 
             Ax = np.matmul(A.cpu(), x_act.cpu())
             self.assertEqual(b, Ax)
@@ -4873,7 +4921,7 @@ class TestLinalg(TestCase):
             x, _ = torch.triangular_solve(b, A,
                                           upper=upper, transpose=transpose, unitriangular=unitriangular)
             if transpose:
-                A = A.transpose(-2, -1)
+                A = A.mT
 
             Ax = torch.matmul(A, x)
 
@@ -4886,7 +4934,7 @@ class TestLinalg(TestCase):
             x, _ = torch.triangular_solve(b, A, upper=upper, transpose=transpose,
                                           unitriangular=unitriangular)
             if transpose:
-                A = A.transpose(-2, -1)
+                A = A.mT
 
             self.assertEqual(torch.matmul(A, x), b)
 
@@ -4996,7 +5044,7 @@ class TestLinalg(TestCase):
 
                     # 1d, 3d, inner dimensions Fortran
                     x = torch.arange(m, device=device)
-                    y = torch.arange(o * p * m, device=device).reshape(o, p, m).transpose(-1, -2)
+                    y = torch.arange(o * p * m, device=device).reshape(o, p, m).mT
                     self.check_single_matmul(x, y, (o, n, p))
 
                     # 1d, 3d, inner dimensions non-contiguous
@@ -5012,7 +5060,7 @@ class TestLinalg(TestCase):
 
                         # 1d, 4d, inner dimensions Fortran
                         x = torch.arange(m)
-                        y = torch.arange(r * o * p * m, device=device).reshape(r, o, p, m).transpose(-1, -2)
+                        y = torch.arange(r * o * p * m, device=device).reshape(r, o, p, m).mT
                         self.check_single_matmul(x, y, (r, o, n, p))
 
                         # 1d, 4d, inner dimensions non-contiguous
@@ -5034,8 +5082,8 @@ class TestLinalg(TestCase):
                         self.check_single_matmul(x, y, (o, n, p))
 
                         # 2d, 3d, inner dimensions Fortran
-                        x = torch.arange(m * n, device=device).reshape(m, n).transpose(-1, -2)
-                        y = torch.arange(o * p * m, device=device).reshape(o, p, m).transpose(-1, -2)
+                        x = torch.arange(m * n, device=device).reshape(m, n).mT
+                        y = torch.arange(o * p * m, device=device).reshape(o, p, m).mT
                         self.check_single_matmul(x, y, (o, n, p))
 
                         # 2d, 3d, inner dimensions non-contiguous
@@ -5050,8 +5098,8 @@ class TestLinalg(TestCase):
                             self.check_single_matmul(x, y, (r, o, n, p))
 
                             # 2d, 4d, inner dimensions Fortran
-                            x = torch.arange(m * n, device=device).reshape(m, n).transpose(-1, -2)
-                            y = torch.arange(r * o * p * m, device=device).reshape(r, o, p, m).transpose(-1, -2)
+                            x = torch.arange(m * n, device=device).reshape(m, n).mT
+                            y = torch.arange(r * o * p * m, device=device).reshape(r, o, p, m).mT
                             self.check_single_matmul(x, y, (r, o, n, p))
 
                             # 2d, 4d, inner dimensions non-contiguous
@@ -5149,7 +5197,7 @@ class TestLinalg(TestCase):
             A = make_tensor((*batch, m, n), dtype=dtype, device=device)
             reflectors, tau = torch.geqrf(A)
             if not fortran_contiguous:
-                self.assertTrue(reflectors.transpose(-2, -1).is_contiguous())
+                self.assertTrue(reflectors.mT.is_contiguous())
                 reflectors = reflectors.contiguous()
 
             # Q is of size m x m
@@ -5165,11 +5213,11 @@ class TestLinalg(TestCase):
             actual = torch.ormqr(reflectors, tau, C_left, left=False, transpose=False)
             self.assertEqual(expected, actual)
 
-            expected = Q.transpose(-2, -1).conj() @ C_right
+            expected = Q.mH @ C_right
             actual = torch.ormqr(reflectors, tau, C_right, left=True, transpose=True)
             self.assertEqual(expected, actual)
 
-            expected = C_left @ Q.transpose(-2, -1).conj()
+            expected = C_left @ Q.mH
             actual = torch.ormqr(reflectors, tau, C_left, left=False, transpose=True)
             self.assertEqual(expected, actual)
 
@@ -5495,7 +5543,7 @@ class TestLinalg(TestCase):
                 else:
                     rows, columns = matrix_size
                 if a is None:
-                    a = random_matrix(rows, columns, *batches, **dict(singular=singular, dtype=dtype)).to(device)
+                    a = random_matrix(rows, columns, *batches, **dict(singular=singular, dtype=dtype, device=device))
                 a_LU_info, pivots_info, info_ = a.lu(pivot=pivot, get_infos=True)
                 self.assertEqual(a_LU_info.size(), torch.Size(batches + (rows, columns)))
                 self.assertEqual(pivots_info.size(), torch.Size(batches + (min(rows, columns),)))
@@ -5601,7 +5649,7 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, "torch.int32 dtype"):
             torch.lu_unpack(lu_data, lu_pivots.long())
         with self.assertRaisesRegex(RuntimeError, "contiguous tensor"):
-            torch.lu_unpack(lu_data, lu_pivots.transpose(-1, -2))
+            torch.lu_unpack(lu_data, lu_pivots.mT)
 
         # check that onces flags are unset, Nones are returned
         p, l, u = torch.lu_unpack(lu_data, lu_pivots, unpack_data=False)
@@ -6193,13 +6241,13 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         Ab = torch.randn(2, 3, 6, dtype=torch.cfloat, device=device)
         Bb = torch.randn(2, 3, 3, dtype=torch.cfloat, device=device)
         Bb_ = torch.randn(1, 3, 3, dtype=torch.cfloat, device=device).expand(2, 3, 3)
-        out_b = torch.empty(2, 3, 3, device=device, dtype=torch.complex64).transpose(-1, -2)
+        out_b = torch.empty(2, 3, 3, device=device, dtype=torch.complex64).mT
 
         Ab_conj = _slice(Ab, torch.conj)
         Ab_conj_physical = _slice(Ab, torch.conj_physical)
 
         def t_b(tensor):
-            return tensor.transpose(-1, -2)
+            return tensor.mT
 
         self.assertEqual(torch.bmm(Ab_conj, Bb, out=out_b), torch.bmm(Ab_conj_physical, Bb, out=out_b))
         self.assertEqual(torch.bmm(t_b(Ab_conj), Bb, out=out_b), torch.bmm(t_b(Ab_conj_physical), Bb, out=out_b))
@@ -6587,7 +6635,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.complex64)
-    def test_matrix_exp_utils(self, device, dtype):
+    def test_linalg_matrix_exp_utils(self, device, dtype):
         # test linear combination
         def run_test(coeff_shape, data_shape):
             coeffs = torch.rand(*coeff_shape, device=device, dtype=torch.float)
@@ -6623,30 +6671,31 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
-    def test_matrix_exp_boundary_cases(self, device, dtype):
+    def test_linalg_matrix_exp_boundary_cases(self, device, dtype):
+        expm = torch.linalg.matrix_exp
 
-        with self.assertRaisesRegex(RuntimeError, "expected a tensor of floating or complex types"):
-            torch.randn(3, 3).type(torch.int).matrix_exp()
+        with self.assertRaisesRegex(RuntimeError, "Expected a floating point or complex tensor"):
+            expm(torch.randn(3, 3).type(torch.int))
 
-        with self.assertRaisesRegex(RuntimeError, "with dim at least 2"):
-            torch.randn(3).matrix_exp()
+        with self.assertRaisesRegex(RuntimeError, "must have at least 2 dimensions"):
+            expm(torch.randn(3))
 
-        with self.assertRaisesRegex(RuntimeError, "expected a tensor of squared matrices"):
-            torch.randn(3, 2, 1).matrix_exp()
+        with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
+            expm(torch.randn(3, 2, 1))
 
         # check 1x1 matrices
         x = torch.randn(3, 3, 1, 1)
-        mexp = x.matrix_exp()
-        self.assertEqual(mexp, x.exp())
+        self.assertEqual(expm(x), x.exp())
 
     @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    def test_matrix_exp_analytic(self, device, dtype):
+    def test_linalg_matrix_exp_analytic(self, device, dtype):
+        expm = torch.linalg.matrix_exp
         # check zero matrix
         x = torch.zeros(20, 20, dtype=dtype, device=device)
-        self.assertTrue((x.matrix_exp() == torch.eye(20, 20, dtype=dtype, device=device)).all().item())
+        self.assertTrue((expm(x) == torch.eye(20, 20, dtype=dtype, device=device)).all().item())
 
         def normalize_to_1_operator_norm(sample, desired_norm):
             sample_norm, _ = sample.abs().sum(-2).max(-1)
@@ -6695,7 +6744,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             x_norm, _ = x.abs().sum(-2).max(-1)
 
             # test simple analytic whatever norm generated
-            mexp = x.matrix_exp()
+            mexp = expm(x)
             mexp_analytic = np.matmul(
                 q_,
                 np.matmul(
@@ -6715,7 +6764,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             for sample_norm in sample_norms:
                 x_normalized = normalize_to_1_operator_norm(x, sample_norm)
 
-                mexp = x_normalized.matrix_exp()
+                mexp = expm(x_normalized)
                 mexp_analytic = np.matmul(
                     q_,
                     np.matmul(
@@ -6752,7 +6801,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double)
-    def test_matrix_exp_batch(self, device, dtype):
+    def test_linalg_matrix_exp_batch(self, device, dtype):
 
         def run_test(*n):
             tensors_batch = torch.zeros(n, dtype=dtype, device=device)
@@ -6766,8 +6815,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             for i in range(num_matrices):
                 tensors_batch[i, ...] = tensors_list[i]
 
-            tensors_exp_map = (x.matrix_exp() for x in tensors_list)
-            tensors_exp_batch = tensors_batch.matrix_exp()
+            tensors_exp_map = (torch.linalg.matrix_exp(x) for x in tensors_list)
+            tensors_exp_batch = torch.linalg.matrix_exp(tensors_batch)
 
             for i, tensor_exp in enumerate(tensors_exp_map):
                 self.assertEqual(tensors_exp_batch[i, ...], tensor_exp)
@@ -6787,7 +6836,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    def test_matrix_exp_compare_with_taylor(self, device, dtype):
+    def test_linalg_matrix_exp_compare_with_taylor(self, device, dtype):
 
         def normalize_to_1_operator_norm(sample, desired_norm):
             sample_norm, _ = sample.abs().sum(-2).max(-1)
@@ -6860,7 +6909,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 x = gen_good_cond_number_matrices(*n)
                 x = normalize_to_1_operator_norm(x, sample_norm)
 
-                mexp = x.matrix_exp()
+                mexp = torch.linalg.matrix_exp(x)
                 mexp_taylor = scale_square(x, deg)
 
                 self.assertEqual(mexp, mexp_taylor, atol=1e-2, rtol=0.0)
@@ -7216,11 +7265,11 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         def run_test(shape, batch, upper, contiguous):
             A = random_hermitian_pd_matrix(shape, *batch, dtype=dtype, device=device)
             if A.numel() > 0 and not contiguous:
-                A = A.transpose(-2, -1)
+                A = A.mT
                 self.assertFalse(A.is_contiguous())
             L = torch.linalg.cholesky(A)
             expected_inverse = torch.inverse(A)
-            L = L.conj().transpose(-2, -1) if upper else L
+            L = L.mH if upper else L
             actual_inverse = torch.cholesky_inverse(L, upper)
             self.assertEqual(actual_inverse, expected_inverse)
 
@@ -7241,8 +7290,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
         # This test checks the first code path
         out = torch.empty_like(A)
-        out_t = out.transpose(-2, -1).clone(memory_format=torch.contiguous_format)
-        out = out_t.transpose(-2, -1)
+        out_t = out.mT.clone(memory_format=torch.contiguous_format)
+        out = out_t.mT
         ans = torch.cholesky_inverse(L, out=out)
         self.assertEqual(ans, out)
         expected = torch.inverse(A)
@@ -7443,14 +7492,13 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_lu_solve_batched_non_contiguous(self, device, dtype):
-        from numpy.linalg import solve
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
-        A = random_fullrank_matrix_distinct_singular_value(2, 2, dtype=dtype, device='cpu')
-        b = torch.randn(2, 2, 2, dtype=dtype, device='cpu')
-        x_exp = torch.as_tensor(solve(A.permute(0, 2, 1).numpy(), b.permute(2, 1, 0).numpy())).to(device)
-        A = A.to(device).permute(0, 2, 1)
-        b = b.to(device).permute(2, 1, 0)
+        A = random_fullrank_matrix_distinct_singular_value(2, 2, dtype=dtype, device=device)
+        b = torch.randn(2, 2, 2, dtype=dtype, device=device)
+        x_exp = np.linalg.solve(A.cpu().permute(0, 2, 1).numpy(), b.cpu().permute(2, 1, 0).numpy())
+        A = A.permute(0, 2, 1)
+        b = b.permute(2, 1, 0)
         assert not A.is_contiguous() and not b.is_contiguous(), "contiguous inputs"
         LU_data, LU_pivots = torch.lu(A)
         x = torch.lu_solve(b, LU_data, LU_pivots)
@@ -7460,7 +7508,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
         b = torch.randn(*b_dims, dtype=dtype, device=device)
-        A = random_fullrank_matrix_distinct_singular_value(*A_dims, dtype=dtype).to(device)
+        A = random_fullrank_matrix_distinct_singular_value(*A_dims, dtype=dtype, device=device)
         LU_data, LU_pivots, info = torch.lu(A, get_infos=True, pivot=pivot)
         self.assertEqual(info, torch.zeros_like(info))
         return b, A, LU_data, LU_pivots
@@ -7530,16 +7578,14 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_lu_solve_batched_broadcasting(self, device, dtype):
-        from numpy.linalg import solve
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
         def run_test(A_dims, b_dims, pivot=True):
             A_matrix_size = A_dims[-1]
             A_batch_dims = A_dims[:-2]
-            A = random_fullrank_matrix_distinct_singular_value(A_matrix_size, *A_batch_dims, dtype=dtype)
-            b = torch.randn(*b_dims, dtype=dtype)
-            x_exp = torch.as_tensor(solve(A.numpy(), b.numpy())).to(dtype=dtype, device=device)
-            A, b = A.to(device), b.to(device)
+            A = random_fullrank_matrix_distinct_singular_value(A_matrix_size, *A_batch_dims, dtype=dtype, device=device)
+            b = make_tensor(b_dims, dtype=dtype, device=device)
+            x_exp = np.linalg.solve(A.cpu(), b.cpu())
             LU_data, LU_pivots = torch.lu(A, pivot=pivot)
             x = torch.lu_solve(b, LU_data, LU_pivots)
             self.assertEqual(x, x_exp)
@@ -7711,7 +7757,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             self.assertEqual(v.shape[-1], guess_rank)
             self.assertEqual(v.shape[-2], columns)
 
-            A1 = u.matmul(s.diag_embed()).matmul(v.transpose(-2, -1))
+            A1 = u.matmul(s.diag_embed()).matmul(v.mT)
             ones_m1 = torch.ones(batches + (rows, 1), dtype=a.dtype, device=device)
             c = a.sum(axis=-2) / rows
             c = c.reshape(batches + (1, columns))
