@@ -243,8 +243,8 @@ def create_python_return_type_bindings(
     for name in sorted(grouped.keys(), key=lambda x: str(x)):
         overloads = grouped[name]
         defintions, map_entries = generate_return_type_defintion_and_map_entry(overloads)
-        py_return_types_definition.append(defintions)
-        py_return_types_map.append(map_entries)
+        py_return_types_definition.append("" if not defintions else "\n".join(defintions))
+        py_return_types_map.append("" if not map_entries else "\n".join(map_entries))
 
     fm.write_with_template(filename, filename, lambda: {
         'generated_comment': '@' + f'generated from {fm.template_dir}/{filename}',
@@ -462,7 +462,7 @@ static PyTypeObject {typename} = *get_namedtuple("{name}");""")
 
 def generate_return_type_defintion_and_map_entry(
     overloads: Sequence[PythonSignatureNativeFunctionPair],
-) -> Tuple[str, str]:
+) -> Tuple[List[str], List[str]]:
     """
     Generate block of named tuple type def inits, and add typeref snippets
     to declarations that use them
@@ -508,7 +508,7 @@ PyTypeObject* get_{name}_namedtuple() {{
 """)
             map_entries.append(f'{{"{name}", get_{name}_namedtuple()}}, ')
 
-    return "\n".join(definitions), '\n'.join(map_entries)
+    return definitions, map_entries
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
