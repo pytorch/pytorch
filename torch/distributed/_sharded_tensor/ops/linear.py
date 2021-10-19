@@ -5,7 +5,7 @@ from torch.distributed._sharding_spec._internals import (
     get_split_size,
     get_chunked_dim_size,
 )
-from typing import List
+from typing import List, cast
 
 
 def sharded_linear(types, args, kwargs, pg):
@@ -81,15 +81,16 @@ def sharded_linear(types, args, kwargs, pg):
         raise TypeError("weight needs to be ShardedTensor")
     if len(input.size()) < 2:
         raise ValueError('Input needs to have at least 2 dims')
-    if len(weight.size()) != 2:
+    weight_size = cast(torch.Size, weight.size())
+    if len(weight_size) != 2:
         raise ValueError('Weight needs to have exactly 2 dims')
     if len(bias.size()) != 1:
         raise ValueError('Bias needs to have exactly 1 dim')
 
-    if input.size()[-1] != weight.size()[1]:
+    if input.size()[-1] != weight_size[1]:
         raise ValueError(
             f'Input dim: {input.size()[1]} does not match '
-            f'appropriate weight dim: {weight.size()[1]}')
+            f'appropriate weight dim: {weight_size[1]}')
     if not isinstance(weight._sharding_spec, ChunkShardingSpec):
         raise ValueError("Only ChunkShardingSpec supported for ShardedTensor ops!")
     if len(weight.local_shards()) != 1:
