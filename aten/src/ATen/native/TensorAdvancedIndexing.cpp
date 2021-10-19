@@ -530,23 +530,16 @@ Tensor & _index_put_impl_(Tensor & self, const torch::List<c10::optional<Tensor>
       at::assert_no_overlap(self, *index);
     }
   }
-  auto info = make_info(self, indices);
-  TORCH_CHECK(is_expandable_to(value_.sizes(), info.src.sizes()), "shape mismatch: value tensor of shape ", value_.sizes(),
-              " cannot be broadcast to indexing result of shape ", info.src.sizes());
 
   if (self.device().type() == DeviceType::CUDA && (accumulate || globalContext().deterministicAlgorithms())) {
       TORCH_CHECK(value_.device() == self.device(), "expected device ", self.device(), " but got device ",
       value_.device(), " for value tensor");
 
-      if (!value_.sizes().equals(info.src.sizes())) {
-        auto expanded_size = infer_size_dimvector(value_.sizes(), info.src.sizes());
-        value_ = value_.expand(expanded_size);
-      }
-
       index_put_with_sort_stub(self.device().type(), self, indices, value_, accumulate, unsafe);
       return self;
   }
 
+  auto info = make_info(self, indices);
   auto iter = make_index_put_iterator(info, value_);
   index_put_stub(iter.device_type(), iter, info.indexed_sizes, info.indexed_strides, accumulate);
   return self;
