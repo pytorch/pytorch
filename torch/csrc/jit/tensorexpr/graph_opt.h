@@ -68,6 +68,8 @@ TORCH_API std::shared_ptr<Graph> removeGraphOutput(
     size_t idx);
 TORCH_API std::shared_ptr<Graph> replaceListOutputWithTuple(
     const std::shared_ptr<Graph>& graph);
+TORCH_API std::shared_ptr<Graph> trimGraph(
+    const std::shared_ptr<Graph>& graph);
 
 // Inspect the graph and report whether it can be converted to TE IR.
 // TODO: add error reporting for graphs that can't be converted.

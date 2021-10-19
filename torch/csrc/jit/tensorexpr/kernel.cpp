@@ -145,6 +145,17 @@ c10::optional<at::Device> pickDeviceType(const std::shared_ptr<Graph>& graph) {
       }
     }
   }
+  for (auto const& input : graph->inputs()) {
+    if (auto tt = input->type()->cast<TensorType>()) {
+      if (auto inputDevice = tt->device()) {
+        TORCH_INTERNAL_ASSERT(
+            !device || *device == *inputDevice,
+            buildErrorMessage(
+                "Different devices specified for inputs to the fuser."));
+        device = inputDevice;
+      }
+    }
+  }
   TORCH_INTERNAL_ASSERT(
       device,
       buildErrorMessage("Could not find device in fuser graph inputs."));
@@ -823,6 +834,8 @@ static std::vector<ExprHandle> toExprHandles(const std::vector<T>& sizes) {
 
 Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
   auto const& t = input->type();
+  auto const& outputs = input->owningGraph()->outputs();
+  std::unordered_set<const Value*> outputs_set(outputs.begin(), outputs.end());
   Tensor result(nullptr, nullptr);
   switch (t->kind()) {
     case TypeKind::TensorType: {
@@ -832,7 +845,7 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
             input->debugName() + "' are unknown";
         throw malformed_input(msg);
       }
-      if (isContiguous(input)) {
+      if (isContiguous(input) && !outputs_set.count(input)) {
         BufHandle inBuffer(
             "t" + input_name_map_[input],
             toExprHandles(*tt->sizes().concrete_sizes()),

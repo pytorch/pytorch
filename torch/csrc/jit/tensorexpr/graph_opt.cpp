@@ -1,8 +1,11 @@
 #include <torch/csrc/jit/tensorexpr/graph_opt.h>
 
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/jit_opt_limit.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
+
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
 
 namespace torch {
 namespace jit {
@@ -365,6 +368,46 @@ std::shared_ptr<Graph> replaceListOutputWithTuple(
   auto tuple_node = graph->createTuple(out_node->inputs());
   tuple_node->insertAfter(out_node);
   out->replaceAllUsesWith(tuple_node->output());
+  return graph;
+}
+
+bool tryTrimmingGraph(
+    const std::shared_ptr<Graph>& graph) {
+  Node* ret = graph->return_node();
+  std::unordered_set<Value*> graph_inputs(graph->inputs().begin(), graph->inputs().end());
+  std::unordered_set<Value*> outputs(graph->outputs().begin(), graph->outputs().end());
+  bool changed = false;
+  for (int idx = 0; idx < ret->inputs().size(); idx++) {
+    auto v = ret->inputs()[idx];
+    if (graph_inputs.count(v))
+      continue;
+
+    graph->eraseOutput(idx);
+    for (auto v_ins : v->node()->inputs()) {
+      if (outputs.count(v_ins))
+        continue;
+      if (v_ins->node()->kind() == prim::Constant)
+        continue;
+
+      graph->registerOutput(v_ins);
+    }
+    changed = true;
+    break;
+  }
+  return changed;
+}
+
+std::shared_ptr<Graph> trimGraph(
+    const std::shared_ptr<Graph>& graph) {
+  bool changed = true;
+  int max_iters = 1000;
+  int iter = 0;
+  while(changed && iter++ < max_iters) {
+    if (!JIT_OPT_ALLOWED)
+      break;
+    changed = tryTrimmingGraph(graph);
+    EliminateDeadCode(graph->block());
+  }
   return graph;
 }
 
