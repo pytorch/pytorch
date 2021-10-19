@@ -20,7 +20,6 @@ enum Conv2dMethod {
 class Conv2dOpContext final : public torch::jit::CustomClassHolder {
  public:
   static Conv2dOpContext create(
-      api::Resource::Pool& pool,
       const Tensor& weight,
       const c10::optional<Tensor>& bias,
       IntArrayRef stride,
@@ -47,7 +46,6 @@ class Conv2dOpContext final : public torch::jit::CustomClassHolder {
 
  private:
   Conv2dOpContext(
-      api::Resource::Pool& pool,
       const Tensor& weight,
       const c10::optional<Tensor>& bias,
       IntArrayRef stride,
