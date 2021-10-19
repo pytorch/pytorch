@@ -6742,6 +6742,29 @@ class TestNN(NNTestCase):
             padded = rnn_utils.pad_sequence(sequences)
             self.assertEqual(padded, expected.transpose(0, 1))
 
+    def test_pad_sequence(self):
+        # single dimensional
+        a = torch.tensor([1, 2, 3])
+        b = torch.tensor([4, 5])
+        c = torch.tensor([6])
+        sequences = [a, b, c]
+
+        # batch_first = true
+        padded = rnn_utils.pad_sequence(sequences, True)
+        lengths = torch.as_tensor([v.size(0) for v in sequences])
+        unpadded = rnn_utils.unpad_sequence(sequences, lengths, True)
+        self.assertEqual(unpadded[0], a)
+        self.assertEqual(unpadded[1], b)
+        self.assertEqual(unpadded[2], c)
+
+        # batch_first = false
+        padded = rnn_utils.pad_sequence(sequences)
+        lengths = torch.as_tensor([v.size(0) for v in sequences])
+        unpadded = rnn_utils.unpad_sequence(sequences, lengths)
+        self.assertEqual(unpadded[0], a)
+        self.assertEqual(unpadded[1], b)
+        self.assertEqual(unpadded[2], c)
+
     def test_pack_sequence(self):
         def _compatibility_test(sequences, lengths, batch_first, enforce_sorted=False):
             padded = rnn_utils.pad_sequence(sequences, batch_first)
