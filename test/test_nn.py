@@ -6756,6 +6756,7 @@ class TestNN(NNTestCase):
         self.assertEqual(unpadded[0], a)
         self.assertEqual(unpadded[1], b)
         self.assertEqual(unpadded[2], c)
+        self.assertTrue(all([torch.allclose(a, b) for a, b in zip(sequences, unpadded)]))
 
         # batch_first = false
         padded = rnn_utils.pad_sequence(sequences)
@@ -6764,6 +6765,7 @@ class TestNN(NNTestCase):
         self.assertEqual(unpadded[0], a)
         self.assertEqual(unpadded[1], b)
         self.assertEqual(unpadded[2], c)
+        self.assertTrue(all([torch.allclose(a, b) for a, b in zip(sequences, unpadded)]))
 
     def test_pack_sequence(self):
         def _compatibility_test(sequences, lengths, batch_first, enforce_sorted=False):
