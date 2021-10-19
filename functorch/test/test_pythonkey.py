@@ -23,7 +23,8 @@ from functools import partial, wraps
 import functorch
 from functorch import (
     grad, vjp, vmap, jacrev, grad_and_value,
-    make_functional_deprecated_v1, make_functional_with_buffers_deprecated_v1, make_fx, nnc_jit, compiled_function, compiled_module
+    make_functional_deprecated_v1, make_functional_with_buffers_deprecated_v1, make_fx, nnc_jit, compiled_function, compiled_module,
+    partition_with_recompute_fwd_in_bwd
 )
 
 from torch.testing._internal.common_device_type import ops, onlyCPU
@@ -364,6 +365,28 @@ class TestEagerFusionOpInfo(TestCase):
             orig_grad = get_grads(args)
             self.assertEqual(orig_grad, compiled_grad)
 
+
+class TestPartitioning(TestCase):
+    def test_recompute_partitioning(self):
+        def fn(a, b):
+            return torch.sin(torch.sin(a)) + b
+
+        # Reference calculation
+        ref_a = torch.rand(10, 10, requires_grad=True)
+        ref_b = torch.rand(10, 10, requires_grad=True)
+        ref = fn(ref_a, ref_b)
+        ref.sum().backward()
+
+        # Compiled function calculation
+        res_a = ref_a.clone().detach().requires_grad_(True)
+        res_b = ref_b.clone().detach().requires_grad_(True)
+        compile_fn = lambda x, _ : x
+        compiled_fn = compiled_function(fn, compile_fn, compile_fn, partition_with_recompute_fwd_in_bwd)
+        res = compiled_fn(res_a, res_b)
+        res.sum().backward()
+        assert torch.allclose(ref, res, atol=1e-3, rtol=1e-3)
+        assert torch.allclose(ref_a.grad, res_a.grad, atol=1e-3, rtol=1e-3)
+        assert torch.allclose(ref_b.grad, res_b.grad, atol=1e-3, rtol=1e-3)
 
 
 only_for = ("cpu")
