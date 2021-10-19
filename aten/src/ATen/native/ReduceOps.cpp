@@ -627,7 +627,7 @@ void cummax_cummin_helper(const T1* self_data, T1* values_data, T2* indices_data
       Operation op;
       T1 out = self_data[0];
       int idx = 0;
-      for(int i = 0; i < self_dim_size; i++) {
+      for (const auto i : c10::irange(self_dim_size)) {
         T1 curr_elem = self_data[i*self_stride];
         if(isnan_(curr_elem) || (!isnan_(out) && op(curr_elem, out))) {
             out = self_data[i*self_stride];
@@ -738,7 +738,7 @@ static inline void diff_check_compatible_shape(const Tensor& self, const c10::op
         other.value().dim() == self.dim(),
         "diff expects prepend or append to be the same dimension as input");
 
-    for (int i = 0; i < other.value().dim(); i++) {
+    for (const auto i : c10::irange(other.value().dim())) {
       TORCH_CHECK(
           other.value().size(i) == self.size(i) || i == wrapped_dim,
           "diff expects the shape of tensor to prepend or append to match that of"
@@ -1065,7 +1065,7 @@ Tensor trace_cpu(const Tensor& self) {
     t_stride_1 = self.stride(1);
 
     t_diag_size = std::min(self.size(0), self.size(1));
-    for (int64_t i = 0; i < t_diag_size; i++) {
+    for (const auto i : c10::irange(t_diag_size)) {
       sum += t_data[i * (t_stride_0 + t_stride_1)];
     }
 
@@ -1224,6 +1224,9 @@ static Tensor& logsumexp_out_impl(Tensor& result, const Tensor& self, IntArrayRe
 }
 
 Tensor& logsumexp_out(const Tensor& self, IntArrayRef dims, bool keepdim, Tensor& result) {
+  TORCH_CHECK(at::isFloatingType(result.scalar_type()),
+              "logsumexp(): Expected floating point type for result tensor, but got: ",
+              result.scalar_type());
   {
     NoNamesGuard guard;
     logsumexp_out_impl(result, self, dims, keepdim);
@@ -1233,9 +1236,17 @@ Tensor& logsumexp_out(const Tensor& self, IntArrayRef dims, bool keepdim, Tensor
 }
 
 Tensor logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
-  Tensor result = at::empty({0}, self.options());
-  return at::native::logsumexp_out(self, dims, keepdim, result);
+  Tensor result;
+  auto default_dtype = at::typeMetaToScalarType(c10::get_default_dtype());
+  if (at::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
+    result = at::empty({0}, self.options().dtype(default_dtype));
+    return at::native::logsumexp_out(self.to(default_dtype), dims, keepdim, result);
+  } else {
+    result = at::empty({0}, self.options());
+    return at::native::logsumexp_out(self, dims, keepdim, result);
+  }
 }
+
 Tensor logsumexp(const Tensor& self, DimnameList dims, bool keepdim) {
   return at::logsumexp(self, dimnames_to_positions(self, dims), keepdim);
 }
@@ -1478,9 +1489,9 @@ static double std_var_all_cpu(const Tensor& self, int64_t correction, bool take_
         const int64_t outer_stride = strides[1];
 
         double local_sum = 0.0;
-        for (int64_t i = 0; i < size1; ++i) {
+        for (const auto i : c10::irange(size1)) {
           const char* row_ptr = data[0] + outer_stride * i;
-          for (int64_t j = 0; j < size0; ++j) {
+          for (const auto j : c10::irange(size0)) {
             const auto ptr = reinterpret_cast<const scalar_t*>(row_ptr + inner_stride * j);
             auto dx = (static_cast<double>(*ptr) - local_mean);
             local_sum += dx * dx;
@@ -1908,7 +1919,8 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
       }
       char* self_data = data[0];
       char* other_data = data[1];
-      for (int64_t i = 0; i < dim_size; ++i) {
+      for (const auto i : c10::irange(dim_size)) {
+        (void)i; //Suppress unused variable warning
         if (*((scalar_t*)self_data) != *((scalar_t*)other_data)) {
           result = false;
           return;

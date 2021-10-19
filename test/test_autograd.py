@@ -2784,7 +2784,7 @@ class TestAutograd(TestCase):
         # TODO: review if this can be ported to OpInfos or moved to test_linalg.py
         def run_symeig_test(k, sizes, largest=True):
             A = torch.rand(*sizes).double()
-            A = A.matmul(A.transpose(-1, -2)) / 10
+            A = (A @ A.mT) / 10
             A.requires_grad_(True)
 
             gradcheck(lambda A: func(k, A, largest), A, check_batched_grad=False)
@@ -2800,7 +2800,7 @@ class TestAutograd(TestCase):
             A = A.detach().requires_grad_(True)
             D, U = func(k, A, largest)
             (D.sum() + U.sum()).backward()
-            self.assertEqual(A.grad, A.grad.transpose(-1, -2))
+            self.assertEqual(A.grad, A.grad.mT)
 
         # the tests below take about 1-2 minutes to finish,
         # but we want to be extra sure that the backward is correct.
