@@ -9827,7 +9827,9 @@ class TestNN(NNTestCase):
 
     @skipIfRocm
     def test_grid_sample(self):
-        def test(N, C, H, W, mode, padding_mode, align_corners):
+        # Backward pass of native C++ and CUDA kernels branch depending on whether input requires gradient,
+        # so we test both cases.
+        def test(N, C, H, W, mode, padding_mode, align_corners, input_requires_grad):
             def test_shape(N, C, IH, IW, H, W, mode, padding_mode, align_corners):
                 for grid_dim_contig_order in [(0, 1, 2, 3), (0, 3, 1, 2), (3, 0, 1, 2), (0, 2, 1, 3)]:
                     # grid_dim_contig_order specifies the dimension order that can
@@ -9852,7 +9854,7 @@ class TestNN(NNTestCase):
                         assert grid.permute(grid_dim_contig_order).is_contiguous()
                         return grid
 
-                    input_cpu = torch.randn(C, N, IH, IW).transpose(0, 1).requires_grad_()
+                    input_cpu = torch.randn(C, N, IH, IW).transpose(0, 1).requires_grad_(input_requires_grad)
                     grid_cpu = get_grid().requires_grad_()
                     out_cpu = F.grid_sample(input_cpu, grid_cpu, mode=mode, padding_mode=padding_mode,
                                             align_corners=align_corners)
@@ -9880,27 +9882,29 @@ class TestNN(NNTestCase):
                     self.assertEqual(out_fallback, out_cpu.float(), atol=1e-5, rtol=5e-5)
 
                     out_fallback.backward(gradients.float())
-                    self.assertEqual(input_fallback.grad, input_cpu.grad.float(), atol=1e-4, rtol=5e-5)
+                    if input_requires_grad:
+                        self.assertEqual(input_fallback.grad, input_cpu.grad.float(), atol=1e-4, rtol=5e-5)
                     self.assertEqual(grid_fallback.grad, grid_cpu.grad.float(), atol=1e-4, rtol=5e-5)
 
                     if TEST_CUDA:
-                        input_cuda = input_cpu.detach().transpose(0, 1).cuda().transpose(0, 1).requires_grad_()
+                        input_cuda = input_cpu.detach().transpose(0, 1).cuda().transpose(0, 1).requires_grad_(input_requires_grad)
                         grid_cuda = get_grid('cuda', grid_cpu.detach()).requires_grad_()
                         out_cuda = F.grid_sample(input_cuda, grid_cuda, mode=mode, padding_mode=padding_mode,
                                                  align_corners=align_corners)
                         self.assertEqual(out_cpu, out_cuda)
 
                         out_cuda.backward(gradients.cuda())
-                        self.assertEqual(input_cpu.grad, input_cuda.grad)
+                        if input_requires_grad:
+                            self.assertEqual(input_cpu.grad, input_cuda.grad)
                         self.assertEqual(grid_cpu.grad, grid_cuda.grad, atol=5e-5, rtol=0)
 
                         # check that zero-dimensional input strides don't error out
                         base_input = torch.randn(N, C, 1, IW)
-                        input_cpu = base_input.expand_as(input_cuda).requires_grad_()
+                        input_cpu = base_input.expand_as(input_cuda).requires_grad_(input_requires_grad)
                         out_cpu = F.grid_sample(input_cpu, grid_cpu, mode=mode, padding_mode=padding_mode,
                                                 align_corners=align_corners)
 
-                        input_cuda = base_input.cuda().expand_as(input_cuda).requires_grad_()
+                        input_cuda = base_input.cuda().expand_as(input_cuda).requires_grad_(input_requires_grad)
                         out_cuda = F.grid_sample(input_cuda, grid_cuda, mode=mode, padding_mode=padding_mode,
                                                  align_corners=align_corners)
                         self.assertEqual(out_cpu, out_cuda)
@@ -10075,7 +10079,7 @@ class TestNN(NNTestCase):
                     self.assertEqual(output, groundtruth.float(), atol=1e-5, rtol=0)
 
                     # explicit check for gradient edge cases
-                    input = torch.arange(0., 5).expand((1, 1, 5, 5)).requires_grad_()
+                    input = torch.arange(0., 5).expand((1, 1, 5, 5))
                     grid = torch.tensor(
                         [[[1.0, 1.0], [1.0, -1.0], [0.8, 0.8], [0.8, -0.8]],
                          [[-1.0, -1.0], [-1.0, 1.0], [-0.8, -0.8], [-0.8, 0.8]]]).view(1, 2, 4, 2).requires_grad_()
@@ -10146,14 +10150,16 @@ class TestNN(NNTestCase):
                             raise AssertionError("missing gradient groundtruth test for padding mode '{}'".format(padding_mode))
                     else:
                         raise AssertionError("missing gradient groundtruth test for interpolation mode '{}'".format(mode))
-                    F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode,
-                                  align_corners=align_corners).sum().backward()
-                    self.assertEqual(grid.grad, groundtruth, atol=1e-5, rtol=0,
-                                     msg="gradient groundtruth comparison failed for mode={}, "
-                                     "padding_mode={}".format(mode, padding_mode))
+                    for input_requires_grad in [False, True]:
+                        input = input.requires_grad_(input_requires_grad)
+                        F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode,
+                                      align_corners=align_corners).sum().backward()
+                        self.assertEqual(grid.grad, groundtruth, atol=1e-5, rtol=0,
+                                         msg="gradient groundtruth comparison failed for mode={}, "
+                                         "padding_mode={}, input_requires_grad={}".format(mode, padding_mode, input_requires_grad))
+                        grid.grad.zero_()
 
                     # See NOTE [ grid_sample CPU fallback ]
-                    grid.grad.zero_()
                     torch._grid_sampler_2d_cpu_fallback(
                         input.float(), grid.float(),
                         F.GRID_SAMPLE_INTERPOLATION_MODES[mode],
@@ -10172,11 +10178,17 @@ class TestNN(NNTestCase):
                         lambda inp, grid: F.grid_sample(inp, grid, mode=mode, padding_mode=padding_mode,
                                                         align_corners=align_corners),
                         (input, grid)))
+                    input = input.requires_grad_(False)
+                    self.assertTrue(gradcheck(
+                        lambda grid: F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode,
+                                                   align_corners=align_corners),
+                        (grid,)))
 
-                    test(N, C, H, W, mode, padding_mode, align_corners=align_corners)
-                    if TEST_CUDNN:
-                        with cudnn.flags(enabled=False):
-                            test(N, C, H, W, mode, padding_mode, align_corners=align_corners)
+                    for input_requires_grad in [False, True]:
+                        test(N, C, H, W, mode, padding_mode, align_corners, input_requires_grad)
+                        if TEST_CUDNN:
+                            with cudnn.flags(enabled=False):
+                                test(N, C, H, W, mode, padding_mode, align_corners, input_requires_grad)
 
     def test_grid_sample_3d(self):
         def test(N, C, D, H, W, mode, padding_mode, align_corners):
