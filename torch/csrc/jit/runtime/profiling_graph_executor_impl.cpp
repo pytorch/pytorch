@@ -27,6 +27,7 @@
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
+#include <torch/csrc/jit/passes/restore_mutation.h>
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
@@ -660,6 +661,7 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
   // if a profiling graph hasn't been created yet
   if (!pr_) {
     auto copy = graph->copy();
+    InplaceToFunctionalActivation(copy);
     runProfilingInsensitiveOptimizations(copy);
     pr_ = ProfilingRecord::instrumentGraph(copy);
     // `InsertProfileNodesForSpecializeAutogradZero` profiles a definition vs a
@@ -688,6 +690,7 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
   auto copy = pr_->graph()->copy();
   ProfilingRecord::removeProfileCounter(copy->block());
   runProfilingOptimizations(copy);
+  FunctionalToInplaceActivation(copy);
   // replaces a fallback graph inserted by
   // specialize_autogradzero if one exists
   replaceFallbackGraphWithFallbackFunction(copy->block());

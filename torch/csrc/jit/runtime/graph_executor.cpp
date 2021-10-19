@@ -26,6 +26,7 @@
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
+#include <torch/csrc/jit/passes/restore_mutation.h>
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
@@ -916,7 +917,11 @@ void runOptimization(
     bool const_prop_user_classes) {
   // Basic graph preprocessing to eliminate noise.
   GRAPH_DEBUG(
-      "Before EliminateDeadCode (beginning of runOptimization)\n", *graph);
+      "Before InplaceToFunctionalActivation (beginning of runOptimization)\n", *graph);
+
+  InplaceToFunctionalActivation(graph);
+  GRAPH_DEBUG("After InplaceToFunctionalActivation, before EliminateDeadCode", *graph);
+
   EliminateDeadCode(graph);
   GRAPH_DEBUG(
       "After EliminateDeadCode, before EliminateCommonSubexpression\n", *graph);
@@ -962,6 +967,9 @@ void runOptimization(
   EliminateCommonSubexpression(graph);
   GRAPH_DEBUG(
       "After EliminateCommonSubexpression, before CheckInplace\n", *graph);
+
+  FunctionalToInplaceActivation(graph);
+  GRAPH_DEBUG("After FunctionalToInplaceActivation, before CheckInplace", *graph);
 
   CheckInplace(graph);
   GRAPH_DEBUG("After CheckInplace (end of runOptimization)", *graph);
