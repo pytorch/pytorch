@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
-import functools
 import sys
+from unittest import mock
 
 import torch
 import torch.distributed as dist
@@ -11,33 +11,19 @@ from torch.distributed._fsdp.fully_sharded_data_parallel import TrainingState_
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     TEST_SKIPS,
-    skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
-    run_tests,
-    TEST_WITH_DEV_DBG_ASAN,
+    get_cycles_per_ms,
 )
 
-
-if not dist.is_available():
-    print("Distributed not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
-
-if TEST_WITH_DEV_DBG_ASAN:
-    print(
-        "Skip dev-asan as torch + multiprocessing spawn have known issues",
-        file=sys.stderr,
-    )
-    sys.exit(0)
-
 # get full params of a model recursively
-def _get_full_params(model, recurse=True):
+def get_full_params(model, recurse=True):
     if recurse:
         # get all params for any nested FSDP instances.
         for module in model.modules():
             if isinstance(module, FullyShardedDataParallel):
-                _get_full_params(module, recurse=False)
+                get_full_params(module, recurse=False)
     else:
         torch.cuda.synchronize()
         model._rebuild_full_params()
@@ -148,6 +134,126 @@ class NestedWrappedModule(nn.Module):
         loss.backward()
 
 
+class ModuleWithDelay(nn.Module):
+    def __init__(self, module, delay_after_loss_ms=0, delay_before_reduction_ms=0):
+        super().__init__()
+        self.delay_after_loss_ms = delay_after_loss_ms
+        self.delay_before_reduction_ms = delay_before_reduction_ms
+        self.module = module
+
+    def get_input(self, device):
+        return self.module.get_input(device)
+
+    def forward(self, x):
+        return self.module(x)
+
+    def get_loss(self, input, output):
+        loss = self.module.get_loss(input, output)
+        if self.delay_after_loss_ms > 0:
+            torch.cuda._sleep(int(self.delay_after_loss_ms * get_cycles_per_ms()))
+        return loss
+
+    def run_backward(self, loss):
+        orig_reduce_scatter = torch.distributed._reduce_scatter_base
+
+        def _delayed_reduce_scatter(*args, **kwargs):
+            if self.delay_before_reduction_ms > 0:
+                torch.cuda._sleep(
+                    int(self.delay_before_reduction_ms * get_cycles_per_ms())
+                )
+            return orig_reduce_scatter(*args, **kwargs)
+
+        with mock.patch(
+            "torch.distributed._reduce_scatter_base", _delayed_reduce_scatter
+        ):
+            self.module.run_backward(loss)
+
+
+class NestedWrappedModuleWithDelay(ModuleWithDelay):
+    def __init__(self, group, wrap_fsdp, **kwargs):
+        super().__init__(NestedWrappedModule(group, wrap_fsdp), **kwargs)
+
+
+class DummyDDP(nn.Module):
+    def __init__(self, module):
+        super().__init__()
+        self.module = module
+
+    def forward(self, *args, **kwargs):
+        return self.module(*args, **kwargs)
+
+
+class MixtureOfExperts(NestedWrappedModule):
+    def __init__(self, group, wrap_fsdp, delay_before_free_ms=0):
+        super().__init__(group, wrap_fsdp)
+        self.group = group
+        self.delay_before_free_ms = delay_before_free_ms
+        self.wrap_fsdp = wrap_fsdp
+
+        # "expert" params are different on each rank
+        torch.manual_seed(42 + group.rank())
+        d_expert = 23
+        d_shared = 12
+        d_input = 8
+        expert = nn.Linear(d_expert, d_shared)
+
+        self.num_expert_params = sum([p.numel() for p in expert.parameters()])
+        for p in expert.parameters():
+            p.expert = True
+
+        # everything else is shared
+        torch.manual_seed(0)
+
+        shared = nn.Linear(d_shared, d_expert)
+
+        if wrap_fsdp:
+            # we create a process group of size 1 for the expert params
+            expert_group = torch.distributed.new_group(
+                [group.rank()]
+            )  # world size 1 means no shard
+            expert = FullyShardedDataParallel(expert, expert_group)
+
+            shared = FullyShardedDataParallel(shared, group)
+
+        self.module = nn.Sequential(
+            nn.Linear(d_input, d_shared), shared, expert, nn.Linear(d_shared, d_input)
+        )
+
+    def forward(self, x):
+        if self.delay_before_free_ms > 0:
+            expert = self.module[2]
+            if isinstance(expert, FullyShardedDataParallel):
+                orig_free_full_params = self.module[2]._free_full_params
+
+                def _free_full_params_with_delay(*args):
+                    torch.cuda._sleep(
+                        int(self.delay_before_free_ms * get_cycles_per_ms())
+                    )
+                    return orig_free_full_params(*args)
+
+                assert hasattr(
+                    expert, "_free_full_params"
+                ), "expert FSDP module should has _free_full_params attribute."
+                with mock.patch.object(
+                    expert, "_free_full_params", _free_full_params_with_delay
+                ):
+                    return self.module(x)
+
+        return self.module(x)
+
+    def run_backward(self, loss):
+        loss.backward()
+
+        # manually reduce gradients if not wrapped in FullyShardedDataParallel
+        if not self.wrap_fsdp:
+            with torch.no_grad():
+                for p in self.parameters():
+                    if hasattr(p, "expert"):
+                        continue  # these params don't need grad reduction
+                    p.grad.div_(self.world_size)
+                    torch.distributed.all_reduce(p.grad, group=self.group)
+
+
 class FSDPTest(MultiProcessTestCase):
     def setUp(self):
         super(FSDPTest, self).setUp()
@@ -223,15 +329,18 @@ class FSDPTest(MultiProcessTestCase):
         return loss.detach()
 
     def _test_identical_outputs(
-        self, model_init_fn, num_steps=2, use_cuda=True, lr=0.01
+        self, model_init_fn, ref_ddp_fn=None, num_steps=2, use_cuda=True, lr=0.01
     ):
         group = dist.distributed_c10d._get_default_group()
         rank = group.rank()
         # Establish reference behavior with PyTorch DDP (+ optionally autocast).
         model = model_init_fn(group=group, wrap_fsdp=False).cuda()
-        model = nn.parallel.DistributedDataParallel(
-            model, device_ids=[rank], output_device=rank
-        )
+        if ref_ddp_fn is None:
+            model = nn.parallel.DistributedDataParallel(
+                model, device_ids=[rank], output_device=rank
+            )
+        else:
+            model = ref_ddp_fn(model)
         ref_loss = self._train_for_several_steps(
             model, num_steps, autocast=False, lr=lr
         )
@@ -249,7 +358,7 @@ class FSDPTest(MultiProcessTestCase):
         shard_loss = self._train_for_several_steps(
             model, num_steps, autocast=False, lr=lr
         )
-        _get_full_params(model)
+        get_full_params(model)
         shard_full_params = list(model.parameters())
 
         torch.testing.assert_allclose(ref_loss, shard_loss)
@@ -260,26 +369,15 @@ class FSDPTest(MultiProcessTestCase):
             msg="FullyShardedDataParallel didn't match PyTorch DDP",
         )
 
-
-class TestParityWithDDP(FSDPTest):
-    """
-    Compare losses and parameter values after several updates when using
-    PyTorch DDP vs. FullyShardedDataParallel.
-    """
-
-    @skip_if_lt_x_gpu(2)
-    def test_nested_wrapped_model(self):
-        self._test_identical_outputs(NestedWrappedModule)
-
-    @skip_if_lt_x_gpu(2)
-    def test_nested_all_wrapped_model(self):
-        model_fn = functools.partial(NestedWrappedModule, wrap_everything=True)
-        self._test_identical_outputs(model_fn)
-
-    @skip_if_lt_x_gpu(2)
-    def test_transformer_parameterized(self):
-        self._test_identical_outputs(TransformerWithSharedParams)
-
-
-if __name__ == "__main__":
-    run_tests()
+    def _get_wrapped_model(
+        self, group, cuda_first=False, **model_kwargs
+    ) -> FullyShardedDataParallel:
+        if cuda_first:
+            model = FullyShardedDataParallel(
+                TransformerWithSharedParams(group, **model_kwargs).cuda(), group
+            )
+        else:
+            model = FullyShardedDataParallel(
+                TransformerWithSharedParams(group, **model_kwargs), group
+            ).cuda()
+        return model
