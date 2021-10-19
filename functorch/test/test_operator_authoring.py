@@ -126,6 +126,119 @@ class TestOperatorAuthoring(JitTestCase):
         x = torch.randn(8, device=self.device)
         torch.testing.assert_allclose(x + 3, graph(x))
 
+    def test_unary_ops(self):
+        unary_operators = [
+            torch.sin,
+            torch.cos,
+            torch.tan,
+            torch.asin,
+            torch.acos,
+            torch.atan,
+            torch.sinh,
+            torch.cosh,
+            torch.tanh,
+            torch.sigmoid,
+            torch.exp,
+            torch.expm1,
+            torch.abs,
+            torch.log,
+            torch.log2,
+            torch.log10,
+            torch.log1p,
+            torch.erf,
+            torch.erfc,
+            torch.sqrt,
+            torch.rsqrt,
+            torch.ceil,
+            torch.floor,
+            torch.round,
+            torch.trunc,
+            torch.lgamma,
+            torch.ops.aten.sin,
+            torch.ops.aten.cos,
+            torch.ops.aten.tan,
+            torch.ops.aten.asin,
+            torch.ops.aten.acos,
+            torch.ops.aten.atan,
+            torch.ops.aten.sinh,
+            torch.ops.aten.cosh,
+            torch.ops.aten.tanh,
+            torch.ops.aten.sigmoid,
+            torch.ops.aten.exp,
+            torch.ops.aten.expm1,
+            torch.ops.aten.abs,
+            torch.ops.aten.log,
+            torch.ops.aten.log2,
+            torch.ops.aten.log10,
+            torch.ops.aten.log1p,
+            torch.ops.aten.erf,
+            torch.ops.aten.erfc,
+            torch.ops.aten.sqrt,
+            torch.ops.aten.rsqrt,
+            torch.ops.aten.ceil,
+            torch.ops.aten.floor,
+            torch.ops.aten.round,
+            torch.ops.aten.trunc,
+            torch.ops.aten.lgamma,
+            # TODO - Failure in generating loop nests here for the following ops
+            # torch.frac,
+            # torch.isnan,
+        ]
+
+        for unary_op in unary_operators:
+            fn = lambda x: unary_op(x)
+            pointwise_fn = pointwise_operator(fn)
+            a = torch.rand(2, 3)
+            ref = fn(a)
+            res = pointwise_fn(a)
+            assert torch.allclose(ref, res, atol=1e-3, rtol=1e-3)
+
+    def test_binary_ops(self):
+        binary_operators = [
+            torch.add,
+            torch.sub,
+            torch.subtract,
+            torch.mul,
+            torch.multiply,
+            torch.divide,
+            torch.div,
+            torch.fmod,
+            torch.pow,
+            torch.atan2,
+            # torch.remainder, #TODO - Fails allclose check
+            torch.ops.aten.add,
+            torch.ops.aten.sub,
+            torch.ops.aten.subtract,
+            torch.ops.aten.mul,
+            torch.ops.aten.multiply,
+            torch.ops.aten.divide,
+            torch.ops.aten.div,
+            torch.ops.aten.fmod,
+            torch.ops.aten.pow,
+            torch.ops.aten.atan2,
+        ]
+        for binary_op in binary_operators:
+            fn = lambda x, y: binary_op(x, y)
+            pointwise_fn = pointwise_operator(fn)
+            a = torch.rand(2, 3)
+            b = torch.rand(2, 3)
+            ref = fn(a, b)
+            res = pointwise_fn(a, b)
+            assert torch.allclose(ref, res, atol=1e-3, rtol=1e-3)
+
+    def test_bias_gelu(self):
+        def bias_gelu(bias, y):
+            x = bias + y
+            return x * 0.5 * (1.0 + torch.tanh(0.79788456 * x * (1 + 0.044715 * x * x)))
+
+        bias = torch.rand(1, 768)
+        y = torch.rand(64, 768)
+        ref = bias_gelu(bias, y)
+
+        pointwise_fn = pointwise_operator(bias_gelu)
+        res = pointwise_fn(bias, y)
+        assert torch.allclose(ref, res, atol=1e-3, rtol=1e-3)
+
 
 @unittest.skipIf(not HAS_CUDA, "GPU tests require CUDA")
 class TestOperatorAuthoringGPU(TestOperatorAuthoring):
