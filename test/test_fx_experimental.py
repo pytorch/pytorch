@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: fx"]
+
 import math
 import numbers
 import operator
@@ -1057,10 +1059,11 @@ class {test_classname}(torch.nn.Module):
         for node in traced_modules_annotated.graph.nodes:
             if node.type is None:
                 check = (node.op, node.target)
-                self.assertTrue(
-                    check
-                    in {
+                self.assertIn(
+                    check,
+                    {
                         ("placeholder", "x"),
+                        ("call_module", "maxpool"),
                         ("call_function", operator.add),
                         ("call_function", torch.flatten),
                         ("output", "output"),
@@ -1096,7 +1099,7 @@ class {test_classname}(torch.nn.Module):
                     ("call_function", torch.flatten),
                     ("output", "output"),
                 }
-                self.assertTrue(check in excluded_nodes)
+                self.assertIn(check, excluded_nodes)
 
         # Smoke test torchscript compilation since now we're emitting type annotations
         torch.jit.script(traced_functionals_annotated)
@@ -1490,6 +1493,21 @@ class TestNormalizeOperators(JitTestCase):
             "unfold",
             "where",
             "zero_",
+            'bfloat16',
+            'bool',
+            'byte',
+            'char',
+            'double',
+            'float',
+            'half',
+            'int',
+            'long',
+            'short',
+            'empty_like',
+            'ones_like',
+            'randn_like',
+            'zeros_like',
+            'full_like',
             "__getitem__",
             "__radd__",
             "__rsub__",
@@ -1505,6 +1523,9 @@ class TestNormalizeOperators(JitTestCase):
 
         # Unsupported input types
         if op.name in op_skip:
+            return
+
+        if op.name.startswith('_masked.'):
             return
 
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
