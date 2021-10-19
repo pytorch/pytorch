@@ -10,6 +10,7 @@
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensor_core/csrc/torch_util.h"
 #include "lazy_tensors/computation_client/unique.h"
+#include "torch/csrc/lazy/core/ir_metadata.h"
 
 namespace torch_lazy_tensors {
 namespace {
@@ -437,7 +438,7 @@ void LazyGraphExecutor::SyncTensorsGraph(
 void LazyGraphExecutor::MarkStep(const Device& device) {
   LTC_COUNTER("MarkStep", 1);
   DeviceContextArena::Get()->MarkStep(device);
-  ir::ScopePusher::ResetScopes();
+  torch::lazy::ScopePusher::ResetScopes();
   g_tls_data.Reset();
 }
 

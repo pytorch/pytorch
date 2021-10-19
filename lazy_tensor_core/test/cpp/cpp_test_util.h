@@ -10,9 +10,9 @@
 
 #include "lazy_tensor_core/csrc/debug_util.h"
 #include "lazy_tensor_core/csrc/device.h"
-#include "lazy_tensor_core/csrc/ir.h"
 #include "lazy_tensor_core/csrc/tensor.h"
 #include "lazy_tensors/span.h"
+#include "torch/csrc/lazy/core/ir.h"
 
 #define XLA_CPP_TEST_ENABLED(name)                          \
   do {                                                      \

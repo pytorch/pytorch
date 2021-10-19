@@ -3,8 +3,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include "lazy_tensor_core/csrc/ir.h"
 #include "lazy_tensors/span.h"
+#include "torch/csrc/lazy/core/ir.h"
 
 namespace torch_lazy_tensors {
 namespace ir {

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "lazy_tensor_core/csrc/ir.h"
 #include "lazy_tensor_core/csrc/lowering_context.h"
+#include "torch/csrc/lazy/core/ir.h"
 
 namespace torch_lazy_tensors {
 namespace compiler {

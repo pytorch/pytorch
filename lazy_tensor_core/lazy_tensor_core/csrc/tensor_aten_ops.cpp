@@ -132,6 +132,7 @@
 #include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/literal_util.h"
 #include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/lazy/core/ir_metadata.h"
 
 namespace torch_lazy_tensors {
 namespace tensor_aten_ops {
@@ -1391,7 +1392,7 @@ LazyTensor lt(const LazyTensor& input, const LazyTensor& other) {
 
 void masked_fill_(LazyTensor& input, const LazyTensor& mask,
                   const at::Scalar& value) {
-  ir::ScopePusher ir_scope(at::aten::masked_fill.toQualString());
+  torch::lazy::ScopePusher ir_scope(at::aten::masked_fill.toQualString());
   input.SetIrValue(ir::MakeNode<ir::ops::MaskedFill>(
       input.GetIrValue(), MaybeExpand(mask.GetIrValue(), input.shape()),
       value));
@@ -1399,7 +1400,7 @@ void masked_fill_(LazyTensor& input, const LazyTensor& mask,
 
 void masked_scatter_(LazyTensor& input, const LazyTensor& mask,
                      const LazyTensor& source) {
-  ir::ScopePusher ir_scope(at::aten::masked_scatter.toQualString());
+  torch::lazy::ScopePusher ir_scope(at::aten::masked_scatter.toQualString());
   input.SetIrValue(ir::MakeNode<ir::ops::MaskedScatter>(
       input.GetIrValue(), MaybeExpand(mask.GetIrValue(), input.shape()),
       source.GetIrValue()));

@@ -7,7 +7,6 @@
 
 #include "lazy_tensor_core/csrc/cross_replica_reduces.h"
 #include "lazy_tensor_core/csrc/device.h"
-#include "lazy_tensor_core/csrc/ir.h"
 #include "lazy_tensor_core/csrc/ir_util.h"
 #include "lazy_tensor_core/csrc/lowering_context.h"
 #include "lazy_tensor_core/csrc/view.h"
@@ -19,6 +18,7 @@
 #include "lazy_tensors/status.h"
 #include "lazy_tensors/types.h"
 #include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/lazy/core/ir.h"
 
 namespace torch_lazy_tensors {
 

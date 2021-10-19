@@ -7,13 +7,13 @@
 #include <vector>
 
 #include "lazy_tensor_core/csrc/device.h"
-#include "lazy_tensor_core/csrc/ir.h"
 #include "lazy_tensor_core/csrc/ir_util.h"
 #include "lazy_tensors/computation_client/computation_client.h"
 #include "lazy_tensors/core/platform/macros.h"
 #include "lazy_tensors/shape_util.h"
 #include "lazy_tensors/span.h"
 #include "lazy_tensors/types.h"
+#include "torch/csrc/lazy/core/ir.h"
 
 namespace torch_lazy_tensors {
 namespace ir {

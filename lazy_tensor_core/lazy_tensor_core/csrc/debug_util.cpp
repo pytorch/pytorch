@@ -6,7 +6,6 @@
 #include <unordered_set>
 
 #include "lazy_tensor_core/csrc/device.h"
-#include "lazy_tensor_core/csrc/ir.h"
 #include "lazy_tensor_core/csrc/ir_dump_util.h"
 #include "lazy_tensor_core/csrc/ir_util.h"
 #include "lazy_tensor_core/csrc/python_util.h"
@@ -14,6 +13,7 @@
 #include "lazy_tensors/computation_client/sys_util.h"
 #include "lazy_tensors/computation_client/unique.h"
 #include "lazy_tensors/str_split.h"
+#include "torch/csrc/lazy/core/ir.h"
 
 namespace torch_lazy_tensors {
 namespace {

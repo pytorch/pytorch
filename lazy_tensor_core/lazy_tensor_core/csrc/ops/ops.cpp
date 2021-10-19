@@ -14,10 +14,12 @@
 #include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/shape_util.h"
+#include "torch/csrc/lazy/core/ir_metadata.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
+using torch::lazy::ScopePusher;
 
 #define PTLTC_UNARY_OP(name, sym)                          \
   NodePtr name(const Value& input) {                       \

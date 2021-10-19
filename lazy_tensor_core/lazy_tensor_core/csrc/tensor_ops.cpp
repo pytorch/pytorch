@@ -2,16 +2,18 @@
 
 #include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
 #include "lazy_tensor_core/csrc/helpers.h"
-#include "lazy_tensor_core/csrc/ir.h"
 #include "lazy_tensor_core/csrc/tensor_aten_ops.h"
 #include "lazy_tensor_core/csrc/tensor_distributed.h"
 #include "lazy_tensor_core/csrc/ts_backend/LazyLazyIr.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/util.h"
+#include "torch/csrc/lazy/core/ir.h"
+#include "torch/csrc/lazy/core/ir_metadata.h"
 
 namespace torch_lazy_tensors {
 namespace tensor_ops {
 namespace {
+using torch::lazy::ScopePusher;
 
 // Returns the sub-tensor at the given index in the given dimension. Its rank
 // is one less than the input, in other words the singleton dimension is
@@ -104,7 +106,7 @@ LazyTensor MakeMatrixWithDiagonal(const LazyTensor& input,
 
 LazyTensor SmoothL1Loss(const LazyTensor& input, const LazyTensor& target,
                         ReductionMode reduction, double beta) {
-  torch_lazy_tensors::ir::ScopePusher ir_scope(
+  ScopePusher ir_scope(
       at::aten::smooth_l1_loss.toQualString());
   auto broadcasted_inputs = tensor_aten_ops::broadcast_tensors({input, target});
   LTC_CHECK_EQ(broadcasted_inputs.size(), 2);

@@ -5,9 +5,9 @@
 #include <memory>
 #include <vector>
 
-#include "lazy_tensor_core/csrc/ir.h"
 #include "lazy_tensors/shape.h"
 #include "lazy_tensors/types.h"
+#include "torch/csrc/lazy/core/ir.h"
 
 namespace torch_lazy_tensors {
 
