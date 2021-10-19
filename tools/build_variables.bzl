@@ -194,7 +194,6 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/mobile/nnc/context.cpp",
     "torch/csrc/jit/mobile/nnc/registry.cpp",
     "torch/csrc/jit/passes/annotate_warns.cpp",
-    "torch/csrc/jit/passes/autocast.cpp",
     "torch/csrc/jit/passes/bailout_graph.cpp",
     "torch/csrc/jit/passes/batch_mm.cpp",
     "torch/csrc/jit/passes/canonicalize.cpp",
@@ -442,6 +441,7 @@ jit_sources_full = [
     "torch/csrc/jit/runtime/register_special_ops.cpp",
     "torch/csrc/jit/passes/remove_inplace_ops.cpp",
     "torch/csrc/jit/passes/utils/check_alias_annotation.cpp",
+    "torch/csrc/jit/passes/autocast.cpp",
 ]
 
 libtorch_core_jit_sources = sorted(jit_sources_full)
