@@ -138,7 +138,7 @@ void spmm(
 #endif
 
   auto descB = at::cuda::sparse::CuSparseDnMatDescriptor(
-      transpose_B ? mat2_->transpose(-2, -1) : *mat2_);
+      transpose_B ? mat2_->mT() : *mat2_);
   auto descC = at::cuda::sparse::CuSparseDnMatDescriptor(*result_);
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
