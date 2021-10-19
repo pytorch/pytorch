@@ -21,6 +21,7 @@ from torch.distributed import ProcessGroup
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.nn.parameter import Parameter
 
+from .flatten_params_wrapper import FlattenParamsWrapper
 from .utils import (
     _apply_to_tensors,
 )
@@ -86,7 +87,6 @@ class FullyShardedDataParallel(nn.Module):
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
-        self.module = module
         self.process_group = process_group or _get_default_group()
         self.rank = self.process_group.rank()
         self.world_size = self.process_group.size()
@@ -115,7 +115,15 @@ class FullyShardedDataParallel(nn.Module):
         for param_name, param in module.named_parameters():
             if not hasattr(param, "_is_sharded"):
                 params.append(param)
-        self.params = params
+
+        self._fsdp_wrapped_module: nn.Module = FlattenParamsWrapper(
+            module, param_list=params
+        )
+        del module  # free original module in case it helps garbage collection
+        if self._fsdp_wrapped_module.flat_param is not None:
+            self.params = [self._fsdp_wrapped_module.flat_param]
+        else:
+            self.params = []
 
         # Shard module parameters in place
         self._shard_parameters()
@@ -131,6 +139,12 @@ class FullyShardedDataParallel(nn.Module):
 
         # Flag to guard against preparing gradients multiple times per backward pass.
         self._pre_backward_hook_has_run = False
+
+    @property
+    def module(self) -> FlattenParamsWrapper:
+        """make model.module accessible, just like DDP."""
+        assert isinstance(self._fsdp_wrapped_module, FlattenParamsWrapper)
+        return self._fsdp_wrapped_module
 
     # setting two factors 'self.gradient_predivide_factor'
     # and 'self.gradient_postdivide_factor' to avoid underflow and overflow
