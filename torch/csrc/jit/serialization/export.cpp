@@ -405,7 +405,7 @@ GraphEncoder::GraphEncoder(
       val_attr_to_name_(val_attr_to_name),
       node_attr_to_name_(node_attr_to_name) {
   model_proto_.set_producer_name("pytorch");
-  // we pin IR version to version 6 (12/11/2019) instead of using
+  // we pin IR version to version 8 instead of using
   // onnx::IR_VERSION. with this change, the test_operators.py will be more
   // stable. only bump it when it's necessary
   model_proto_.set_ir_version(onnx_torch::IR_VERSION);
