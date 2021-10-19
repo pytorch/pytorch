@@ -116,13 +116,13 @@ void nnc_aten_conv1d(
   if (args_num > 0) {
     // Check that if the extra arguments are provided, then the bias tensor is
     // also present
-    TORCH_INTERNAL_ASSERT(args_num == 7 && bufs_num == 4);
+    TORCH_INTERNAL_ASSERT(args_num == 4 && bufs_num == 4);
     const at::Tensor& b = tensors[3];
 
     int64_t stride = extra_args[0];
-    int64_t padding = extra_args[2];
-    int64_t dilation = extra_args[4];
-    int64_t groups = extra_args[6];
+    int64_t padding = extra_args[1];
+    int64_t dilation = extra_args[2];
+    int64_t groups = extra_args[3];
 
     try {
       r = at::conv1d(x, w, b, {stride}, {padding}, {dilation}, groups);
@@ -199,9 +199,9 @@ void nnc_aten_max_red(
   at::Tensor& r = tensors[0];
   const at::Tensor& x = tensors[1];
   int64_t max_dim = extra_args[0];
-  int64_t keep_dim = extra_args[1];
+  bool keep_dim = extra_args[1];
   try {
-    r =  std::get<1>(at::max(x, max_dim, keep_dim));
+    r =  std::get<0>(at::max(x, max_dim, keep_dim));
   } catch (...) {
   }
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());

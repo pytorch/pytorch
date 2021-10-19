@@ -146,7 +146,7 @@ Tensor computeMax(
   return Tensor(
       ResultBuf.node(),
       ExternalCall::make(
-          ResultBuf, "nnc_aten_max", {InputBuf}, {max_dim, (int64_t)keep_dim}));
+          ResultBuf, "nnc_aten_max_red", {InputBuf}, {max_dim, (int64_t)keep_dim}));
 }
 
 Tensor computeAdaptiveAvgPool2d(

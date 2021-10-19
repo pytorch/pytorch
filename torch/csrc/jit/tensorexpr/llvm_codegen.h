@@ -134,6 +134,7 @@ struct TORCH_API LLVMCodeGenBuilder {
 TORCH_API c10::optional<std::string>& LLVMTargetTriple();
 TORCH_API c10::optional<std::string>& LLVMTargetCPU();
 TORCH_API c10::optional<std::string>& LLVMTargetAttrs();
+TORCH_API bool& LLVMAOTWorkflow();
 
 } // namespace tensorexpr
 } // namespace jit

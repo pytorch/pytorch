@@ -900,6 +900,9 @@ void initTensorExprBindings(PyObject* module) {
   te.def("set_llvm_target_attrs", [](const c10::optional<std::string>& val) {
     tensorexpr::LLVMTargetAttrs() = val;
   });
+  te.def("set_llvm_aot_workflow", [](bool val) {
+    tensorexpr::LLVMAOTWorkflow() = val;
+  });
 }
 } // namespace jit
 } // namespace torch

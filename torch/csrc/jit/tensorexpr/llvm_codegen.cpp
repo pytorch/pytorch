@@ -66,10 +66,13 @@ c10::optional<std::string>& LLVMTargetCPU() {
   return cpu;
 }
 c10::optional<std::string>& LLVMTargetAttrs() {
-  static c10::optional<std::string> cpu = c10::nullopt;
-  return cpu;
+  static c10::optional<std::string> attrs = c10::nullopt;
+  return attrs;
 }
-
+bool& LLVMAOTWorkflow() {
+  static bool aot_workflow = false;
+  return aot_workflow;
+}
 
 namespace {
 
@@ -506,8 +509,10 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   emitKernel(stmt, params);
 
   jit_->addModule(std::move(module_), std::move(context_));
-//   auto sym = jit_->findSymbol("wrapper");
-//   kernelAddress_ = assertSuccess(sym.getAddress());
+  if (!LLVMAOTWorkflow()) {
+    auto sym = jit_->findSymbol("wrapper");
+    kernelAddress_ = assertSuccess(sym.getAddress());
+  }
 }
 
 llvm::LLVMContext& LLVMCodeGenImpl::getContext() {
