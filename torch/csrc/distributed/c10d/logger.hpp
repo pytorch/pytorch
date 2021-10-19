@@ -83,6 +83,9 @@ class TORCH_API Logger {
     ddp_logging_data_->ints_map["has_error"] = 1;
     auto err = c10::str(ddp_error, args...);
     ddp_logging_data_->strs_map["error"] = err;
+    // Report the iteration we are erroring at so user knows how many examples
+    // successfully processed before this error was hit.
+    ddp_logging_data_->ints_map["iteration"] = reducer_->num_iterations_;
     at::LogPyTorchDDPUsage(*ddp_logging_data_);
   }
 
@@ -91,6 +94,8 @@ class TORCH_API Logger {
   // optimization.
   void log_if_graph_static(bool is_static) {
     ddp_logging_data_->ints_map["can_set_static_graph"] = is_static;
+    // It is useful to report the iteration that training finished at.
+    ddp_logging_data_->ints_map["iteration"] = reducer_->num_iterations_;
     at::LogPyTorchDDPUsage(*ddp_logging_data_);
   }
 

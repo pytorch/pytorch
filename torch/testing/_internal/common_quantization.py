@@ -343,9 +343,6 @@ class QuantizationTestCase(TestCase):
         self.embed_linear_data_train = [[torch.randint(0, 10, (12, 12), dtype=torch.long),
                                          torch.randn((12, 1), dtype=torch.float)]
                                         for _ in range(2)]
-        self.embed_data_train = [[torch.randint(0, 10, (12, 12), dtype=torch.long),
-                                  torch.randn((12, 12), dtype=torch.float)]
-                                 for _ in range(2)]
         self.embed_data = [[torch.randint(0, 10, (12, 1))]]
 
         # Quant types that produce statically quantized ops
@@ -795,7 +792,8 @@ class QuantizationTestCase(TestCase):
                 prepare_expected_node=None,
                 prepare_expected_node_occurrence=None,
                 prepare_expected_node_list=None,
-                prepare_custom_config_dict=None):
+                prepare_custom_config_dict=None,
+                backend_config_dict=None):
             """ Quantizes model with graph mode quantization on fx and check if the
                 quantized model contains the quantized_node
 
@@ -859,7 +857,8 @@ class QuantizationTestCase(TestCase):
                 qconfig_dict = custom_qconfig_dict
             prepared = prepare(
                 model, qconfig_dict,
-                prepare_custom_config_dict=prepare_custom_config_dict)
+                prepare_custom_config_dict=prepare_custom_config_dict,
+                backend_config_dict=backend_config_dict)
             if not quant_type == QuantType.DYNAMIC:
                 prepared(*inputs)
 
@@ -1691,9 +1690,10 @@ class ManualEmbeddingBagLinear(nn.Module):
         x = self.linear(x)
         return self.dequant(x)
 
-class DeFusedEmbeddingBag(nn.Module):
-    r"""A module to simulate QAT embedding bag, using separate embedding
-    and bagging op, similar to described in EmbeddingBag documentation.
+class DeFusedEmbeddingBagLinear(nn.Module):
+    r"""A module to simulate QAT embedding bag with a linear layer,
+    this module uses a separate embedding and bagging op, similar
+    to that which is described in the EmbeddingBag documentation.
 
     https://pytorch.org/docs/stable/generated/torch.nn.EmbeddingBag.html
     """
@@ -1702,9 +1702,16 @@ class DeFusedEmbeddingBag(nn.Module):
         self.emb = nn.Embedding(num_embeddings=10, embedding_dim=12)
         self.emb.qconfig = default_embedding_qat_qconfig
         self.bagging_op = torch.sum
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
+        self.linear = nn.Linear(12, 1).to(dtype=torch.float)
+        self.qconfig = get_default_qat_qconfig("qnnpack")
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
-        return self.bagging_op(self.emb(input), dim=1)
+        x = self.bagging_op(self.emb(input), dim=1)
+        x = self.quant(x)
+        x = self.linear(x)
+        return self.dequant(x)
 
 class SubModelForFusion(nn.Module):
     def __init__(self):
