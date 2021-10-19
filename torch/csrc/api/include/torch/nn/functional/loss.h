@@ -739,11 +739,6 @@ inline Tensor margin_ranking_loss(const Tensor& input1,
                                   const Tensor& target,
                                   double margin,
                                   MarginRankingLossFuncOptions::reduction_t reduction) {
-  TORCH_CHECK(
-    input1.dim() == input2.dim() && input1.dim() == target.dim(),
-    "margin_ranking_loss : All input tensors should have same dimension but got sizes: "
-    "input1: ", input1.sizes(), ", input2: ", input2.sizes(),
-    ", target: ", target.sizes());
   return torch::margin_ranking_loss(input1, input2, target, margin,
     enumtype::reduction_get_enum(reduction));
 }
