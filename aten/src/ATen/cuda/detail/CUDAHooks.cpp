@@ -8,6 +8,7 @@
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/CUDADevice.h>
 #include <ATen/cuda/Exceptions.h>
+#include <ATen/cuda/PeerToPeerAccess.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <ATen/detail/CUDAHooksInterface.h>
@@ -21,7 +22,7 @@
 #include <ATen/cudnn/cudnn-wrapper.h>
 #endif
 
-#ifdef USE_MAGMA
+#if AT_MAGMA_ENABLED()
 #include <magma_v2.h>
 #endif
 
@@ -47,27 +48,39 @@ namespace detail {
 const at::cuda::NVRTC& nvrtc();
 int64_t current_device();
 
-std::function<void(void)> THCMagma_init;
+static void (*magma_init_fn)() = nullptr;
+
+void set_magma_init_fn(void (*fn)()) {
+  magma_init_fn = fn;
+}
 
 // NB: deleter is dynamic, because we need it to live in a separate
 // compilation unit (alt is to have another method in hooks, but
 // let's not if we don't need to!)
 std::unique_ptr<THCState, void (*)(THCState*)> CUDAHooks::initCUDA() const {
   C10_LOG_API_USAGE_ONCE("aten.init.cuda");
-  THCState* thc_state = THCState_alloc();
+  // NOTE: THCState is now an empty struct but this pointer is passed
+  // to every THC function. So we can't remove it before the rest of THC.
+  auto thc_state = std::unique_ptr<THCState, void (*)(THCState*)>(
+      new THCState(),
+      [](THCState* p) {
+        delete p;
+      });
 
   // Force the update to enable unit testing. This code get executed before unit tests
   // have a chance to enable vitals.
   at::vitals::VitalsAPI.setVital("CUDA", "used", "true", /* force = */ true);
 
-  THCudaInit(thc_state);
-  if (THCMagma_init)
-    THCMagma_init();
-  return std::unique_ptr<THCState, void (*)(THCState*)>(
-      thc_state, [](THCState* p) {
-        if (p)
-          THCState_free(p);
-      });
+  const auto num_devices = c10::cuda::device_count_ensure_non_zero();
+  c10::cuda::CUDACachingAllocator::init(num_devices);
+  at::cuda::detail::init_p2p_access_cache(num_devices);
+
+#if AT_MAGMA_ENABLED()
+  TORCH_INTERNAL_ASSERT(magma_init_fn != nullptr, "Cannot initilaize magma, init routine not set");
+  magma_init_fn();
+#endif
+
+  return thc_state;
 }
 
 const Generator& CUDAHooks::getDefaultCUDAGenerator(DeviceIndex device_index) const {
@@ -118,7 +131,7 @@ bool CUDAHooks::hasCUDA() const {
 }
 
 bool CUDAHooks::hasMAGMA() const {
-#ifdef USE_MAGMA
+#if AT_MAGMA_ENABLED()
   return true;
 #else
   return false;
@@ -337,7 +350,7 @@ std::string CUDAHooks::showConfig() const {
   oss << "  - MIOpen " << MIOPEN_VERSION_MAJOR << "." << MIOPEN_VERSION_MINOR << "." << MIOPEN_VERSION_PATCH << "\n";
 #endif
 
-#ifdef USE_MAGMA
+#if AT_MAGMA_ENABLED()
   oss << "  - Magma " << MAGMA_VERSION_MAJOR << "." << MAGMA_VERSION_MINOR << "." << MAGMA_VERSION_MICRO << "\n";
 #endif
 

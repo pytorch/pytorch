@@ -454,6 +454,7 @@
   dispatch:
     CPU: addmv_out_cpu
     CUDA: addmv_out_cuda
+    SparseCsrCUDA: addmv_out_sparse_csr_cuda
 
 - func: addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function, method
@@ -1777,6 +1778,8 @@
     MkldnnCPU: empty_mkldnn
     SparseCPU, SparseCUDA: empty_sparse
 
+# We do not make new_empty a composite that calls into new_empty_strided, as the strided version
+# is significantly more difficult to implement by different backends
 - func: new_empty(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
   dispatch:
@@ -1784,6 +1787,8 @@
 
 - func: new_empty_strided(Tensor self, int[] size, int[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
+  dispatch:
+    CompositeExplicitAutograd: new_empty_strided
 
 - func: new_full(Tensor self, int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
@@ -1831,6 +1836,8 @@
 - func: empty_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   device_check: NoCheck
   device_guard: False
+  dispatch:
+    CompositeExplicitAutograd: empty_like
 
 - func: empty_strided(int[] size, int[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
@@ -2108,7 +2115,10 @@
     CPU: grid_sampler_2d_cpu
     CUDA: grid_sampler_2d_cuda
 
-- func: grid_sampler_2d_backward(Tensor grad_output, Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> (Tensor, Tensor)
+# `grid_sampler_2d_backward` takes in `output_mask` to optimize performance for
+# the case where `input` doesn't require gradient. Gradient for `grid` is always
+# computed (only `output_mask[0]` is checked by the implementations).
+- func: grid_sampler_2d_backward(Tensor grad_output, Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners, bool[2] output_mask) -> (Tensor, Tensor)
   dispatch:
     CPU: grid_sampler_2d_backward_cpu
     CUDA: grid_sampler_2d_backward_cuda
@@ -2719,10 +2729,9 @@
 # Alias to linalg.matrix_power
 - func: matrix_power.out(Tensor self, int n, *, Tensor(a!) out) -> Tensor(a!)
 
+# Alias to linalg.matrix_exp
 - func: matrix_exp(Tensor self) -> Tensor
   variants: function, method
-  dispatch:
-    CPU, CUDA: matrix_exp
 
 - func: matrix_exp_backward(Tensor self, Tensor grad) -> Tensor
 
@@ -3112,8 +3121,8 @@
 - func: mv(Tensor self, Tensor vec) -> Tensor
   variants: function, method
   dispatch:
-    CPU, CUDA: mv
-    SparseCPU, SparseCUDA, SparseCsrCPU, SparseCsrCUDA: mv_sparse
+    CPU, CUDA, SparseCsrCUDA: mv
+    SparseCPU, SparseCUDA, SparseCsrCPU: mv_sparse
 
 - func: mv.out(Tensor self, Tensor vec, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -3290,6 +3299,21 @@
 # (maybe related to capital letter collation somehow...)
 - func: numpy_T(Tensor(a) self) -> Tensor(a)
   variants: method
+
+# Exposed on Python as an attribute 'H'
+- func: matrix_H(Tensor(a) self) -> Tensor(a)
+  variants: method
+
+# Exposed on Python as an attribute 'mT'
+- func: mT(Tensor(a) self) -> Tensor(a)
+  variants: method
+
+# Exposed on Python as an attribute 'mH'
+- func: mH(Tensor(a) self) -> Tensor(a)
+  variants: method
+
+- func: adjoint(Tensor(a) self) -> Tensor(a)
+  variants: function, method
 
 - func: pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
 
@@ -10376,6 +10400,12 @@
 - func: linalg_matmul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
 
+- func: linalg_matrix_exp(Tensor self) -> Tensor
+  python_module: linalg
+  variants: function
+  dispatch:
+    CPU, CUDA: linalg_matrix_exp
+
 - func: linalg_slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
   python_module: linalg
   variants: function
@@ -10547,29 +10577,43 @@
   python_module: linalg
   variants: function
 
-- func: linalg_pinv(Tensor self, float rcond=1e-15, bool hermitian=False) -> Tensor
+- func: linalg_pinv.atol_rtol_tensor(Tensor self, *, Tensor? atol=None, Tensor? rtol=None, bool hermitian=False) -> Tensor
   python_module: linalg
   variants: function
   dispatch:
     CompositeExplicitAutograd: linalg_pinv
+
+- func: linalg_pinv.atol_rtol_tensor_out(Tensor self, *, Tensor? atol=None, Tensor? rtol=None, bool hermitian=False, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: linalg_pinv_out
+
+- func: linalg_pinv.atol_rtol_float(Tensor self, *, float? atol=None, float? rtol=None, bool hermitian=False) -> Tensor
+  cpp_no_default_args: ['atol', 'rtol']
+  python_module: linalg
+  variants: function
+
+- func: linalg_pinv.atol_rtol_float_out(Tensor self, *, float? atol=None, float? rtol=None, bool hermitian=False, Tensor(a!) out) -> Tensor(a!)
+  cpp_no_default_args: ['atol', 'rtol']
+  python_module: linalg
+  variants: function
+
+- func: linalg_pinv(Tensor self, float rcond, bool hermitian=False) -> Tensor
+  python_module: linalg
+  variants: function
 
 - func: linalg_pinv.rcond_tensor(Tensor self, Tensor rcond, bool hermitian=False) -> Tensor
   python_module: linalg
   variants: function
-  dispatch:
-    CompositeExplicitAutograd: linalg_pinv
 
-- func: linalg_pinv.out(Tensor self, float rcond=1e-15, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: linalg_pinv.out(Tensor self, float rcond, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
-  dispatch:
-    CompositeExplicitAutograd: linalg_pinv_out
 
 - func: linalg_pinv.out_rcond_tensor(Tensor self, Tensor rcond, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
-  dispatch:
-    CompositeExplicitAutograd: linalg_pinv_out
 
 - func: linalg_solve(Tensor input, Tensor other) -> Tensor
   python_module: linalg
@@ -10622,11 +10666,29 @@
 - func: linalg_matrix_power.out(Tensor self, int n, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
 
-- func: linalg_matrix_rank(Tensor self, float? tol=None, bool hermitian=False) -> Tensor
+- func: linalg_matrix_rank.atol_rtol_tensor(Tensor input, *, Tensor? atol=None, Tensor? rtol=None, bool hermitian=False) -> Tensor
   python_module: linalg
   variants: function
 
-- func: linalg_matrix_rank.out(Tensor self, float? tol=None, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: linalg_matrix_rank.atol_rtol_tensor_out(Tensor input, *, Tensor? atol=None, Tensor? rtol=None, bool hermitian=False, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  variants: function
+
+- func: linalg_matrix_rank.atol_rtol_float(Tensor self, *, float? atol=None, float? rtol=None, bool hermitian=False) -> Tensor
+  cpp_no_default_args: ['atol', 'rtol']
+  python_module: linalg
+  variants: function
+
+- func: linalg_matrix_rank.atol_rtol_float_out(Tensor self, *, float? atol=None, float? rtol=None, bool hermitian=False, Tensor(a!) out) -> Tensor(a!)
+  cpp_no_default_args: ['atol', 'rtol']
+  python_module: linalg
+  variants: function
+
+- func: linalg_matrix_rank(Tensor self, float tol, bool hermitian=False) -> Tensor
+  python_module: linalg
+  variants: function
+
+- func: linalg_matrix_rank.out(Tensor self, float tol, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
 
@@ -10678,6 +10740,12 @@
 - func: _test_ambiguous_defaults.b(Tensor dummy, int a=2, str b="2") -> Tensor
   cpp_no_default_args: ['a', 'b']
   python_module: nn
+
+# Note: this function is only for testing.
+- func: _test_warn_in_autograd(Tensor self) -> Tensor
+  python_module: nn
+  dispatch:
+    CompositeExplicitAutograd: _test_warn_in_autograd
 
 - func: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, int axis=0, bool unsafe=False, Scalar? initial=None) -> Tensor
   variants: function

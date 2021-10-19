@@ -1197,15 +1197,12 @@ class DistributedTest:
             self._barrier()
             rank = dist.get_rank()
             if rank == 0:
-                rank_to_GPU = self._init_multigpu_helper()
-                device_id = rank_to_GPU[rank][0]
                 with self.assertRaisesRegex(
                     RuntimeError, "Tensors must be CUDA and dense"
                 ):
                     send_tensor = _build_tensor(rank + 1)
                     send_op = dist.P2POp(dist.isend, send_tensor, 1)
-                    req = dist.batch_isend_irecv([send_op])
-                    req.wait()
+                    dist.batch_isend_irecv([send_op])
 
         # NCCL Batch SEND RECV Op Error
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
@@ -1219,8 +1216,7 @@ class DistributedTest:
                 with self.assertRaisesRegex(RuntimeError, "^Invalid ``op``"):
                     send_tensor = _build_tensor(rank + 1, device_id=device_id)
                     send_op = dist.P2POp(dist.broadcast, send_tensor, 1)
-                    req = dist.batch_isend_irecv([send_op])
-                    req.wait()
+                    dist.batch_isend_irecv([send_op])
 
         # NCCL Batch SEND RECV p2p_op_list Error
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
@@ -1229,12 +1225,8 @@ class DistributedTest:
             self._barrier()
             rank = dist.get_rank()
             if rank == 0:
-                rank_to_GPU = self._init_multigpu_helper()
-                device_id = rank_to_GPU[rank][0]
                 with self.assertRaisesRegex(RuntimeError, "^Invalid ``p2p_op_list``"):
-                    send_tensor = _build_tensor(rank + 1)
-                    req = dist.batch_isend_irecv([1, 2])
-                    req.wait()
+                    dist.batch_isend_irecv([1, 2])
 
         # NCCL Batch SEND RECV Mixed Backend Error
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
@@ -1253,8 +1245,7 @@ class DistributedTest:
                     send_tensor = _build_tensor(rank + 1)
                     send_op_gloo = dist.P2POp(dist.isend, send_tensor, 1, group_gloo)
                     send_op_nccl = dist.P2POp(dist.isend, send_tensor, 1, group_nccl)
-                    req = dist.batch_isend_irecv([send_op_gloo, send_op_nccl])
-                    req.wait()
+                    dist.batch_isend_irecv([send_op_gloo, send_op_nccl])
 
         # NCCL SEND RECV
         @skip_if_no_gpu
@@ -7306,7 +7297,7 @@ class DistributedTest:
                 # Other ranks should not pass barrier since rank 0 failed.
                 err_regex = (
                     f"Rank {self.rank} successfully reached monitoredBarrier,"
-                    f" but received errors while waiting to be unblocked by rank"
+                    f" but received errors while waiting for send/recv from rank"
                     f" {src_rank}"
                 )
                 with self.assertRaisesRegex(RuntimeError, err_regex):
@@ -7343,7 +7334,9 @@ class DistributedTest:
             # tests expected behavior when nonzero rank hangs.
             nccl_pg = dist.new_group(
                 ranks=list(i for i in range(int(self.world_size))),
-                timeout=timedelta(seconds=2),
+                # provide sufficient timeout so communicators
+                # can be initialized in ctor.
+                timeout=timedelta(seconds=15),
                 backend=dist.Backend.NCCL,
             )
             gloo_pg = dist.new_group(
@@ -7354,7 +7347,7 @@ class DistributedTest:
             # Let all ranks call allreduce first to set up communicators etc.
             # Directly simulating error here will run into store issue described
             # in https://github.com/pytorch/pytorch/issues/54524.
-            nccl_pg.allreduce(tensors).wait()
+            nccl_pg.allreduce(tensors).wait(timedelta(seconds=5))
             # All ranks besides 0 call into allreduce. This is to simulate a
             # desync across the world, where some ranks call into
             # monitored_barrier() and others are stuck in collective comm. In
@@ -7387,6 +7380,8 @@ class DistributedTest:
                     gloo_pg.monitored_barrier(
                         monitored_barrier_timeout_seconds, wait_all_ranks=wait_all_ranks
                     )
+
+            self._barrier(timeout=30)
 
         @with_nccl_blocking_wait
         @require_backend({"gloo", "nccl"})
@@ -7444,7 +7439,7 @@ class DistributedTest:
             elif self.rank == 1:
                 err_regex = (
                     f"Rank {self.rank} successfully reached monitoredBarrier,"
-                    f" but received errors while waiting to be unblocked by rank"
+                    f" but received errors while waiting for send/recv from rank"
                     f" {src_rank}"
                 )
                 with self.assertRaisesRegex(RuntimeError, err_regex):
@@ -8267,6 +8262,32 @@ class DistributedTest:
                 rank_0_buf = bufs[0]
                 for buf in bufs[1:]:
                     self.assertEqual(rank_0_buf, buf)
+
+        @skip_if_lt_x_gpu(2)
+        @sandcastle_skip_if(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        def test_sync_bn_logged(self):
+            model = BN_NET
+            rank = self.rank
+            # single gpu training setup
+            model_gpu = model.cuda(rank)
+            no_sync_bn = torch.nn.parallel.DistributedDataParallel(
+                copy.deepcopy(model_gpu),
+                device_ids=[self.rank],
+            )
+            ddp_logging_data = no_sync_bn._get_ddp_logging_data()
+            sync_bn_logged = ddp_logging_data.get("has_sync_bn", True)
+            self.assertFalse(sync_bn_logged)
+            model_DDP = nn.SyncBatchNorm.convert_sync_batchnorm(model_gpu)
+            model_DDP = torch.nn.parallel.DistributedDataParallel(
+                model_DDP,
+                device_ids=[self.rank],
+            )
+            ddp_logging_data = model_DDP._get_ddp_logging_data()
+            sync_bn_logged = ddp_logging_data.get("has_sync_bn", False)
+            self.assertTrue(sync_bn_logged)
 
         @skip_if_lt_x_gpu(2)
         @sandcastle_skip_if(
