@@ -177,6 +177,9 @@ Tensor class reference
      use ``tensor.new_*`` creation ops.
 
 .. autoattribute:: Tensor.T
+.. autoattribute:: Tensor.H
+.. autoattribute:: Tensor.mT
+.. autoattribute:: Tensor.mH
 
 .. autosummary::
     :toctree: generated
@@ -220,6 +223,7 @@ Tensor class reference
     Tensor.addmv_
     Tensor.addr
     Tensor.addr_
+    Tensor.adjoint
     Tensor.allclose
     Tensor.amax
     Tensor.amin
