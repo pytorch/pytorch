@@ -252,7 +252,7 @@ ShapeAndDims canonicalize_fft_shape_and_dim_args(
 
     // Translate shape of -1 to the default length
     ret.shape.resize(transform_ndim);
-    for (int64_t i = 0; i < transform_ndim; ++i) {
+    for (const auto i : c10::irange(transform_ndim)) {
       const auto n = (*shape)[i];
       ret.shape[i] = n == -1 ? input_sizes[ret.dim[i]] : n;
     }
