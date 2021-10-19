@@ -472,7 +472,9 @@ inline Tensor multilabel_soft_margin_loss(
     loss = loss * weight;
   }
 
-  loss = loss.sum(1) / input.size(1); // only return N loss values
+  auto class_dim = input.dim() - 1;
+  auto C = input.size(class_dim);
+  loss = loss.sum(class_dim) / C; // only return N loss values
 
   Tensor ret;
 

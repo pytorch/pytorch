@@ -2,6 +2,7 @@
 
 #include <c10/util/StringUtil.h>
 #include <c10/util/string_view.h>
+#include <c10/util/irange.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
