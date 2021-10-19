@@ -2130,19 +2130,6 @@ LazyTensor smooth_l1_loss_backward(const LazyTensor& grad_output,
                                           GetReductionMode(reduction), beta);
 }
 
-LazyTensor softplus(const LazyTensor& input, const at::Scalar& beta,
-                    const at::Scalar& threshold) {
-  return tensor_ops::Softplus(input, beta, threshold);
-}
-
-LazyTensor softplus_backward(const LazyTensor& grad_output,
-                             const LazyTensor& input, const at::Scalar& beta,
-                             const at::Scalar& threshold,
-                             const LazyTensor& output) {
-  return tensor_ops::SoftplusBackward(grad_output, input, beta, threshold,
-                                      output);
-}
-
 LazyTensor softshrink(const LazyTensor& input, const at::Scalar& lambda) {
   return input.CreateFrom(
       ir::MakeNode<ir::ops::Softshrink>(input.GetIrValue(), lambda));

@@ -770,13 +770,6 @@ LazyTensor softmax(const LazyTensor& input, lazy_tensors::int64 dim,
 LazyTensor softmax_backward(const LazyTensor& grad_output,
                             const LazyTensor& output, lazy_tensors::int64 dim);
 
-LazyTensor softplus(const LazyTensor& input, const at::Scalar& beta,
-                    const at::Scalar& threshold);
-LazyTensor softplus_backward(const LazyTensor& grad_output,
-                             const LazyTensor& input, const at::Scalar& beta,
-                             const at::Scalar& threshold,
-                             const LazyTensor& output);
-
 LazyTensor softshrink(const LazyTensor& input, const at::Scalar& lambda);
 LazyTensor softshrink_backward(const LazyTensor& grad_out,
                                const LazyTensor& input,

@@ -22,6 +22,8 @@ full_codegen:
   - native_layer_norm_backward
   - rsqrt
   - sigmoid
+  - softplus
+  - softplus_backward
   - topk
 supported:
   - add.Tensor
