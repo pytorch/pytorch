@@ -46,12 +46,14 @@ jobs:
           # echo "RESULT_DIR=${HOME}/release-testing/${{ github.event.inputs.pytorch_version }}" >> $GITHUB_ENV
           sudo nvidia-smi -ac ${GPU_FREQUENCY}
           echo "Result dir: ${RESULT_DIR} "
+          # Check pytorch is installed
+          python -c "import torch"
       - name: Check machine tuned
         run: |
           echo "Make sure the machine is tuned."
           . activate reltest
           pushd benchmark
-          pip install -U py-cpuinfo psutil distro
+          pip install py-cpuinfo psutil distro
           sudo $HOME/anaconda3/envs/reltest/bin/python3 torchbenchmark/util/machine_config.py
           popd
       - name: Run Benchmarks
