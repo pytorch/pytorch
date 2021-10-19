@@ -2,7 +2,6 @@
 
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
-from torch.distributed.rpc import constants as rpc_constants
 
 def _faulty_tensorpipe_construct_rpc_backend_options_handler(
     rpc_timeout,
