@@ -2171,7 +2171,7 @@ matrices.
 
     .. code:: python
 
-        U = torch.linalg.cholesky(A).transpose(-2, -1).conj()
+        U = torch.linalg.cholesky(A).mH
 
     This transform will produce equivalent results for all valid (symmetric positive definite) inputs.
 
@@ -2187,7 +2187,7 @@ Keyword args:
 Example::
 
     >>> a = torch.randn(3, 3)
-    >>> a = torch.mm(a, a.t()) # make symmetric positive-definite
+    >>> a = a @ a.mT + 1e-3 # make symmetric positive-definite
     >>> l = torch.cholesky(a)
     >>> a
     tensor([[ 2.4112, -0.7486,  1.4551],
@@ -2197,15 +2197,15 @@ Example::
     tensor([[ 1.5528,  0.0000,  0.0000],
             [-0.4821,  1.0592,  0.0000],
             [ 0.9371,  0.5487,  0.7023]])
-    >>> torch.mm(l, l.t())
+    >>> l @ l.mT
     tensor([[ 2.4112, -0.7486,  1.4551],
             [-0.7486,  1.3544,  0.1294],
             [ 1.4551,  0.1294,  1.6724]])
     >>> a = torch.randn(3, 2, 2)
-    >>> a = torch.matmul(a, a.transpose(-1, -2)) + 1e-03 # make symmetric positive-definite
+    >>> a = a @ a.mT + 1e-03 # make symmetric positive-definite
     >>> l = torch.cholesky(a)
-    >>> z = torch.matmul(l, l.transpose(-1, -2))
-    >>> torch.max(torch.abs(z - a)) # Max non-zero
+    >>> z = l @ l.mT
+    >>> torch.dist(z, a)
     tensor(2.3842e-07)
 """)
 
@@ -4232,8 +4232,8 @@ Supports real-valued and complex-valued inputs.
 
     Irrespective of the original strides, the returned matrices
     `solution` and `LU` will be transposed, i.e. with strides like
-    `B.contiguous().transpose(-1, -2).stride()` and
-    `A.contiguous().transpose(-1, -2).stride()` respectively.
+    `B.contiguous().mT.stride()` and
+    `A.contiguous().mT.stride()` respectively.
 
 Args:
     input (Tensor): input matrix :math:`B` of size :math:`(*, m, k)` , where :math:`*`
@@ -7751,7 +7751,7 @@ Example::
     >>> q, r = torch.qr(a, some=False)
     >>> torch.allclose(torch.matmul(q, r), a)
     True
-    >>> torch.allclose(torch.matmul(q.transpose(-2, -1), q), torch.eye(5))
+    >>> torch.allclose(torch.matmul(q.mT, q), torch.eye(5))
     True
 """)
 
@@ -9174,7 +9174,7 @@ always be real-valued, even if :attr:`input` is complex.
     .. code:: python
 
         U, S, Vh = torch.linalg.svd(A, full_matrices=not some)
-        V = Vh.transpose(-2, -1).conj()
+        V = Vh.mH
 
     ``_, S, _ = torch.svd(A, some=some, compute_uv=False)`` should be replaced with
 
@@ -9263,7 +9263,7 @@ Example::
     tensor(8.6531e-07)
     >>> a_big = torch.randn(7, 5, 3)
     >>> u, s, v = torch.svd(a_big)
-    >>> torch.dist(a_big, torch.matmul(torch.matmul(u, torch.diag_embed(s)), v.transpose(-2, -1)))
+    >>> torch.dist(a_big, torch.matmul(torch.matmul(u, torch.diag_embed(s)), v.mT))
     tensor(2.6503e-06)
 
 .. _the resulting vectors will span the same subspace:
@@ -9316,7 +9316,7 @@ If :attr:`upper` is ``False``, then lower triangular portion is used.
           then the eigenvalues of each matrix in the batch is returned in ascending order.
 
 .. note:: Irrespective of the original strides, the returned matrix `V` will
-          be transposed, i.e. with strides `V.contiguous().transpose(-1, -2).stride()`.
+          be transposed, i.e. with strides `V.contiguous().mT.stride()`.
 
 .. warning:: Extra care needs to be taken when backward through outputs. Such
              operation is only stable when all eigenvalues are distinct and becomes
@@ -9360,9 +9360,9 @@ Examples::
             [-0.4850,  0.2695, -0.5773, -0.5840,  0.1337],
             [ 0.6415, -0.0447, -0.6381, -0.0193, -0.4230]])
     >>> a_big = torch.randn(5, 2, 2)
-    >>> a_big = a_big + a_big.transpose(-2, -1)  # To make a_big symmetric
+    >>> a_big = a_big + a_big.mT  # To make a_big symmetric
     >>> e, v = a_big.symeig(eigenvectors=True)
-    >>> torch.allclose(torch.matmul(v, torch.matmul(e.diag_embed(), v.transpose(-2, -1))), a_big)
+    >>> torch.allclose(torch.matmul(v, torch.matmul(e.diag_embed(), v.mT)), a_big)
     True
 """)
 
