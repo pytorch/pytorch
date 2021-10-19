@@ -377,6 +377,7 @@ filegroup(
         "aten/src/ATen/native/miopen/Conv_miopen.cpp",
         "aten/src/ATen/native/miopen/RNN_miopen.cpp",
         "aten/src/ATen/native/sparse/cuda/SparseCUDATensor.cpp",
+        "aten/src/ATen/native/sparse/cuda/SparseBlas.cpp",
         "aten/src/ATen/native/sparse/cuda/SparseBlasImpl.cpp",
         "aten/src/THC/THCGeneral.cpp",
         "aten/src/THC/THCStorageCopy.cpp",
@@ -524,6 +525,7 @@ header_template_rule(
     substitutions = {
         "@AT_CUDNN_ENABLED@": "1",
         "@AT_ROCM_ENABLED@": "0",
+        "@AT_MAGMA_ENABLED@": "0",
         "@NVCC_FLAGS_EXTRA@": "",
     },
 )
@@ -533,15 +535,6 @@ header_template_rule(
     src = "aten/src/TH/THGeneral.h.in",
     out = "aten/src/TH/THGeneral.h",
     substitutions = {
-    },
-)
-
-header_template_rule(
-    name = "aten_src_THC_THCGeneral",
-    src = "aten/src/THC/THCGeneral.h.in",
-    out = "aten/src/THC/THCGeneral.h",
-    substitutions = {
-        "#cmakedefine USE_MAGMA": "",
     },
 )
 
@@ -571,7 +564,6 @@ cc_library(
     deps = [
         ":c10_headers",
         ":aten_src_TH_THGeneral",
-        ":aten_src_THC_THCGeneral",
     ],
 )
 
