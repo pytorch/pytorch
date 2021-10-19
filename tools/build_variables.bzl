@@ -352,7 +352,10 @@ core_sources_full = core_sources_full_mobile + [
 ]
 
 lazy_tensor_core_sources = [
+    "torch/csrc/lazy/core/config.cpp",
     "torch/csrc/lazy/core/hash.cpp",
+    "torch/csrc/lazy/core/ir.cpp",
+    "torch/csrc/lazy/core/ir_metadata.cpp",
 ]
 
 libtorch_core_sources = sorted(
