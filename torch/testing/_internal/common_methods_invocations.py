@@ -5905,6 +5905,7 @@ def sample_inputs_embedding(op_info, device, dtype, requires_grad, **kwargs):
 
         if not requires_grad:
             # Following inputs return different gradient from the numerical gradient.
+            # This is expected and relevant tests are present in `test_nn.py`.
 
             # The gradient vector at `padding_idx` is not updated.
             idx = make_long_input((2, 2), low=0, high=S)
