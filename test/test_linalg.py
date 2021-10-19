@@ -835,19 +835,18 @@ class TestLinalg(TestCase):
             result = op(a, b)
             self.assertEqual(result.dtype, torch.result_type(a, b))
 
-    @dtypes(*itertools.product(get_all_dtypes(),
-                               get_all_dtypes(),
-                               get_all_dtypes()))
-    def test_addr_type_promotion(self, device, dtypes):
-        a = make_tensor((5,), device=device, dtype=dtypes[0], low=-2, high=2)
-        b = make_tensor((5,), device=device, dtype=dtypes[1], low=-2, high=2)
-        m = make_tensor((5, 5), device=device, dtype=dtypes[2], low=-2, high=2)
+    # don't use @dtypes decorator to avoid generating ~1700 tests per device
+    def test_addr_type_promotion(self, device):
+        for dtypes0, dtypes1, dtypes2 in product(get_all_dtypes(), repeat=3):
+            a = make_tensor((5,), device=device, dtype=dtypes0, low=-2, high=2)
+            b = make_tensor((5,), device=device, dtype=dtypes1, low=-2, high=2)
+            m = make_tensor((5, 5), device=device, dtype=dtypes2, low=-2, high=2)
 
-        desired_dtype = torch.promote_types(torch.promote_types(dtypes[0], dtypes[1]),
-                                            dtypes[2])
-        for op in (torch.addr, torch.Tensor.addr):
-            result = op(m, a, b)
-            self.assertEqual(result.dtype, desired_dtype)
+            desired_dtype = torch.promote_types(torch.promote_types(dtypes0, dtypes1),
+                                                dtypes2)
+            for op in (torch.addr, torch.Tensor.addr):
+                result = op(m, a, b)
+                self.assertEqual(result.dtype, desired_dtype)
 
     # Tests migrated from test_torch.py
     # 1) test the shape of the result tensor when there is empty input tensor
