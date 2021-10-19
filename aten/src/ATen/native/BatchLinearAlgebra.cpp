@@ -212,24 +212,25 @@ TORCH_META_FUNC(triangular_solve)(const Tensor& self, const Tensor& A, bool uppe
   TORCH_CHECK(A.dim() >= 2,
            "torch.triangular_solve: Expected A to have at least 2 dimensions, but it has ", A.dim(), " dimensions instead");
 
-  Tensor self_broadcasted, A_broadcasted;
-  std::tie(self_broadcasted, A_broadcasted) = at::native::_linalg_broadcast_batch_dims(self, A, "triangular_solve");
+  at::native::linearSolveCheckInputs(self, A, "triangular_solve");
 
-  auto ndim = self_broadcasted.dim();
-  IntArrayRef solution_sizes = self_broadcasted.sizes();
-  auto nrows = solution_sizes[ndim - 2];
+  std::vector<int64_t> self_broadcast_size, A_broadcast_size;
+  std::tie(self_broadcast_size, A_broadcast_size) = at::native::_linalg_broadcast_batch_dims(self, A);
+
+  auto ndim = self_broadcast_size.size();
+  auto nrows = A.size(-2);
 
   // make column major strides for BLAS
-  auto solution_strides = at::detail::defaultStrides(solution_sizes);
+  auto solution_strides = at::detail::defaultStrides(self_broadcast_size);
   solution_strides[ndim - 2] = 1;
   solution_strides[ndim - 1] = nrows;
-  set_output(0, solution_sizes, solution_strides, self.options(), {});
+  set_output(0, self_broadcast_size, solution_strides, self.options(), {});
 
   // make column major strides for BLAS
-  auto clone_A_strides = at::detail::defaultStrides(A_broadcasted.sizes());
+  auto clone_A_strides = at::detail::defaultStrides(A_broadcast_size);
   clone_A_strides[ndim - 2] = 1;
   clone_A_strides[ndim - 1] = nrows;
-  set_output(1, A_broadcasted.sizes(), clone_A_strides, A.options(), {});
+  set_output(1, A_broadcast_size, clone_A_strides, A.options(), {});
 }
 
 } // namespace meta
@@ -1673,22 +1674,22 @@ static void triangular_solve_out_impl(
 }
 
 TORCH_IMPL_FUNC(triangular_solve_out)(const Tensor& self, const Tensor& A, bool upper, bool transpose, bool unitriangular, const Tensor& result, const Tensor& clone_A) {
-  Tensor self_broadcasted, A_broadcasted;
-  std::tie(self_broadcasted, A_broadcasted) = _linalg_broadcast_batch_dims(self, A, "triangular_solve");
+  Tensor self_broadcast, A_broadcast;
+  std::tie(self_broadcast, A_broadcast) = _linalg_broadcast_batch_dims(self, A, "triangular_solve");
 
   bool copy_needed = !result.transpose(-2, -1).is_contiguous();
   copy_needed |= !clone_A.transpose(-2, -1).is_contiguous();
 
   if (copy_needed) {
     Tensor result_tmp = at::empty({0}, self.options());
-    Tensor clone_A_tmp = at::empty({0}, self.options());
+    Tensor clone_A_tmp = at::empty({0}, A.options());
 
-    triangular_solve_out_impl(result_tmp, clone_A_tmp, A_broadcasted, self_broadcasted, upper, transpose, unitriangular);
+    triangular_solve_out_impl(result_tmp, clone_A_tmp, A_broadcast, self_broadcast, upper, transpose, unitriangular);
 
     result.copy_(result_tmp);
     clone_A.copy_(clone_A_tmp);
   } else {
-    triangular_solve_out_impl(result, clone_A, A_broadcasted, self_broadcasted, upper, transpose, unitriangular);
+    triangular_solve_out_impl(result, clone_A, A_broadcast, self_broadcast, upper, transpose, unitriangular);
   }
 }
 

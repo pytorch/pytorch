@@ -9,13 +9,21 @@ from torch.testing._internal.common_utils import \
     (IS_MACOS, IS_WINDOWS, TestCase, run_tests, load_tests, coalescedonoff)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoCusparseGeneric,
-     precisionOverride, skipMeta)
+     precisionOverride, skipMeta, skipCUDAIf)
+from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_dtype import floating_types, get_all_dtypes
 from test_linalg import _test_addmm_addmv
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
+
+
+def _check_cusparse_spgemm_available():
+    # cusparseSpGEMM was added in 11.0
+    version = _get_torch_cuda_version()
+    min_supported_version = (11, 0)
+    return version >= min_supported_version
 
 
 class TestSparseCSRSampler(TestCase):
@@ -622,6 +630,10 @@ class TestSparseCSR(TestCase):
     @dtypesIfCUDA(*torch.testing.get_all_complex_dtypes(),
                   *torch.testing.get_all_fp_dtypes(include_bfloat16=SM80OrLater,
                                                    include_half=SM53OrLater))
+    @skipCUDAIf(
+        not _check_cusparse_spgemm_available(),
+        "cuSparse Generic API SpGEMM is not available"
+    )
     def test_addmm_all_sparse_csr(self, device, dtype):
         M = torch.randn(10, 25, device=device).to(dtype)
         m1 = torch.randn(10, 50, device=device).to(dtype)
@@ -656,6 +668,10 @@ class TestSparseCSR(TestCase):
     @dtypesIfCUDA(*torch.testing.get_all_complex_dtypes(),
                   *torch.testing.get_all_fp_dtypes(include_bfloat16=SM80OrLater,
                                                    include_half=SM53OrLater))
+    @skipCUDAIf(
+        not _check_cusparse_spgemm_available(),
+        "cuSparse Generic API SpGEMM is not available"
+    )
     def test_addmm_sizes_all_sparse_csr(self, device, dtype):
         for m in [0, 1, 25]:
             for n in [0, 1, 10]:
@@ -772,7 +788,7 @@ class TestSparseCSR(TestCase):
         _test_spadd_shape(10, [1, 100])
 
     @onlyCUDA
-    @dtypes(*floating_and_complex_types())
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_sparse_add(self, device, dtype):
         def run_test(m, n, index_dtype):
             alpha = random.random()
@@ -794,7 +810,7 @@ class TestSparseCSR(TestCase):
                 run_test(m, n, index_dtype)
 
     @onlyCUDA
-    @dtypes(*floating_and_complex_types())
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_sparse_add_errors(self, device, dtype):
         def run_test(index_type):
             a = self.genSparseCSRTensor((2, 2), 3, dtype=dtype, device=device, index_dtype=index_dtype)
