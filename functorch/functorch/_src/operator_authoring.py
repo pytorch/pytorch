@@ -3,6 +3,7 @@ import functools
 import inspect
 import itertools
 from typing import Callable, List, Union, Tuple, Optional
+import operator
 
 import torch
 from torch import fx
@@ -12,6 +13,51 @@ from functorch._C import CompileCache, CompileResult
 FOLD_ALIASES = True
 _SHAPE_TYPES = {"one", "other"}
 _STRIDE_TYPES = {"zero", "one", "contiguous", "transposed_contiguous", "as_arg"}
+_identity = lambda x: x
+_TORCH_TO_EXPR_MAP = {
+    "sin": _te.sin,
+    "cos": _te.cos,
+    "tan": _te.tan,
+    "asin": _te.asin,
+    "acos": _te.acos,
+    "atan": _te.atan,
+    "sinh": _te.sinh,
+    "cosh": _te.cosh,
+    "tanh": _te.tanh,
+    "sigmoid": _te.sigmoid,
+    "exp": _te.exp,
+    "expm1": _te.expm1,
+    "abs": _te.abs,
+    "log": _te.log,
+    "log2": _te.log2,
+    "log10": _te.log10,
+    "log1p": _te.log1p,
+    "erf": _te.erf,
+    "erfc": _te.erfc,
+    "sqrt": _te.sqrt,
+    "rsqrt": _te.rsqrt,
+    "ceil": _te.ceil,
+    "floor": _te.floor,
+    "round": _te.round,
+    "trunc": _te.trunc,
+    "frac": _te.frac,
+    "lgamma": _te.lgamma,
+    "isnan": _te.isnan,
+    "add": operator.add,
+    "sub": operator.sub,
+    "subtract": operator.sub,
+    "mul": operator.mul,
+    "multiply": operator.mul,
+    "divide": operator.truediv,
+    "div": operator.truediv,
+    "remainder": _te.remainder,
+    "fmod": _te.fmod,
+    "pow": _te.pow,
+    "atan2": _te.atan2,
+    "detach": _identity,
+    "neg": lambda x: _create_constant(0.0, torch.float32) - x,
+}
+
 _int = _te.ExprHandle.int
 
 
@@ -40,8 +86,8 @@ def _combine_dtype(a: torch.dtype, b: torch.dtype):
     ).dtype
 
 
-def _fx_replace_constants(fn: Callable, dtype: torch.dtype):
-    """Convert the constants in the user function to TensorExpr constants"""
+def _fx_to_expr(fn: Callable, dtype: torch.dtype):
+    """Convert the fx graph to equivalent Tensor Expr"""
 
     def apply(arg):
         if isinstance(arg, (int, float)):
@@ -52,6 +98,27 @@ def _fx_replace_constants(fn: Callable, dtype: torch.dtype):
     for node in list(gm.graph.nodes):
         with gm.graph.inserting_before(node):
             node.args = tuple(apply(a) for a in node.args)
+            if node.op == "call_function":
+                if node.target.__name__ not in _TORCH_TO_EXPR_MAP:
+                    raise NotImplementedError(
+                        "Missing mapping from op ",
+                        node.target.__name__,
+                        " to Tensor Expr",
+                    )
+
+                    # Get the parser function to parse the torch op to tensor expr handle
+
+                def _parser(*args, op_name):
+                    return _TORCH_TO_EXPR_MAP[op_name](*args)
+
+                new_node = gm.graph.create_node(
+                    "call_function",
+                    _parser,
+                    node.args,
+                    {"op_name": node.target.__name__},
+                )
+                node.replace_all_uses_with(new_node)
+                gm.graph.erase_node(node)
     gm.recompile()
     return gm
 
@@ -298,7 +365,7 @@ class PointwiseCompiler(object):
             _te.Cast.make(self.dtype, buf.load(self.indexing(stride)))
             for buf, stride in zip(input_bufs, input_strides)
         ]
-        val = _fx_replace_constants(self.pointwise_fn, self.dtype)(*inputs)
+        val = _fx_to_expr(self.pointwise_fn, self.dtype)(*inputs)
         out = _te.Block(
             [
                 buf.store(self.indexing(stride), val)
