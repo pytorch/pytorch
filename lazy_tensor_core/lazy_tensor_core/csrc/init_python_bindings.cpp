@@ -263,7 +263,7 @@ lazy_tensors::uint64 GetRngSeed(const std::string& device_str) {
 
 std::string GetTensorsBackendGraph(const std::vector<at::Tensor>& tensors) {
   std::vector<LazyTensor> xtensors = GetLtcTensors(tensors, /*want_all=*/false);
-  return LazyTensor::DumpBackendComputation(xtensors);
+  return LazyGraphExecutor::Get()->DumpBackendComputation(xtensors);
 }
 
 std::string GetLiveTensorsReport(size_t nodes_threshold,
@@ -327,7 +327,7 @@ std::shared_ptr<torch::lazy::Value> CreateToken(const std::string& device_str) {
   // device data (hence coming in as computation parameter) as otherwise the
   // backend compiler passes might remove it, vanishing its sequencing effects.
   Device device = GetDeviceOrCurrent(device_str);
-  torch::lazy::Value ir_value = LazyTensor::GetDeviceDataIrValue(
+  torch::lazy::Value ir_value = LazyGraphExecutor::Get()->GetDeviceDataIrValue(
       0.0, lazy_tensors::PrimitiveType::F32, device);
   return std::make_shared<torch::lazy::Value>(std::move(ir_value));
 }
@@ -372,7 +372,7 @@ py::object LtcNms(const at::Tensor& boxes, const at::Tensor& scores,
   at::Tensor num_valid;
   {
     NoGilSection nogil;
-    auto nms_result = tensor_aten_ops::nms(
+    auto nms_result = lazy_tensor_aten_ops::nms(
         bridge::GetLtcTensor(boxes), bridge::GetLtcTensor(scores),
         bridge::GetLtcTensor(score_threshold),
         bridge::GetLtcTensor(iou_threshold), output_size);

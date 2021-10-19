@@ -1,9 +1,11 @@
 #include "lazy_tensor_core/csrc/lazy_graph_executor.h"
 
 #include "lazy_tensor_core/csrc/debug_util.h"
+#include "lazy_tensor_core/csrc/ir_dump_util.h"
 #include "lazy_tensor_core/csrc/op_by_op_executor.h"
 #include "lazy_tensor_core/csrc/ops/arithmetic_ir_ops.h"
 #include "lazy_tensor_core/csrc/ops/device_data.h"
+#include "lazy_tensor_core/csrc/ops/expand.h"
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
 #include "lazy_tensor_core/csrc/ops/ops.h"
 #include "lazy_tensor_core/csrc/ops/scalar.h"
@@ -471,6 +473,74 @@ std::vector<at::Tensor> LazyGraphExecutor::GetTensors(
 }
 
 size_t LazyGraphExecutor::IncTrimCounter() { return ++g_tls_data.trim_counter; }
+
+std::string LazyGraphExecutor::DumpBackendComputation(
+    const std::vector<LazyTensor>& tensors) {
+  std::vector<torch::lazy::Value> ir_values;
+  for (auto& tensor : tensors) {
+    torch::lazy::Value ir_value = tensor.CurrentIrValue();
+    if (ir_value) {
+      ir_values.push_back(std::move(ir_value));
+    }
+  }
+  return !ir_values.empty()
+             ? ir::DumpUtil::ToBackend(ir_values, GetCurrentDevice())
+             : std::string();
+}
+
+torch::lazy::Value LazyGraphExecutor::GetDeviceDataIrValue(
+    const at::Scalar& value, lazy_tensors::PrimitiveType type,
+    const Device& device) {
+  lazy_tensors::ComputationClient::DataPtr data =
+      GetDeviceData(value, TensorTypeFromLtcType(type), device);
+  data->SetInfo(std::make_shared<DeviceDataInfo>(
+      /*tensor_id=*/-1, /*read_only=*/true));
+  return torch::lazy::MakeNode<ir::ops::DeviceData>(std::move(data));
+}
+
+torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
+    const at::Scalar& value, lazy_tensors::PrimitiveType type,
+    const Device& device) {
+  if (IsSpecialScalar(value)) {
+    return ir::ops::ScalarOp(std::move(value), type);
+  }
+  return GetDeviceDataIrValue(value, type, device);
+}
+
+torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
+    const at::Scalar& value, const Device& device) {
+  return GetIrValueForScalar(
+      value, MakeLtcPrimitiveType(GetScalarType(value), &device), device);
+}
+
+torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
+    const at::Scalar& value, lazy_tensors::PrimitiveType type,
+    c10::ArrayRef<lazy_tensors::int64> dimensions, const Device& device) {
+  torch::lazy::Value ir_value = GetIrValueForScalar(value, type, device);
+  if (!dimensions.empty()) {
+    ir_value = torch::lazy::MakeNode<ir::ops::Expand>(
+        ir_value, lazy_tensors::util::ToVector<lazy_tensors::int64>(dimensions),
+        /*is_scalar_expand=*/true);
+  }
+  return ir_value;
+}
+
+torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
+    const at::Scalar& value, const lazy_tensors::Shape& shape,
+    const Device& device) {
+  return GetIrValueForScalar(value, shape.element_type(), shape.dimensions(),
+                             device);
+}
+
+torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
+    const at::Scalar& value, const lazy_tensors::Shape& shape,
+    c10::optional<at::ScalarType> logical_element_type, const Device& device) {
+  lazy_tensors::PrimitiveType type =
+      logical_element_type
+          ? MakeLtcPrimitiveType(*logical_element_type, &device)
+          : shape.element_type();
+  return GetIrValueForScalar(value, type, shape.dimensions(), device);
+}
 
 LazyGraphExecutor::Async::Async(
     SyncTensorCollection* coll,

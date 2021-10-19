@@ -1,6 +1,12 @@
 #pragma once
 
+#include "lazy_tensor_core/csrc/ir_util.h"
+#include "lazy_tensor_core/csrc/lowering_context.h"
 #include "lazy_tensor_core/csrc/tensor.h"
+#include "lazy_tensors/computation_client/async_task.h"
+#include "lazy_tensors/computation_client/cache.h"
+#include "lazy_tensors/computation_client/multi_wait.h"
+#include "lazy_tensors/computation_client/util.h"
 
 namespace torch_lazy_tensors {
 
@@ -67,6 +73,28 @@ class LazyGraphExecutor {
   std::vector<at::Tensor> GetTensors(std::vector<LazyTensor>* tensors);
 
   size_t IncTrimCounter();
+
+  // Dumps the backend specific text of the computation accumulated in the graph
+  // which is attached the tensors.
+  std::string DumpBackendComputation(const std::vector<LazyTensor>& tensors);
+
+  torch::lazy::Value GetDeviceDataIrValue(const at::Scalar& value,
+                                          lazy_tensors::PrimitiveType type,
+                                          const Device& device);
+  torch::lazy::Value GetIrValueForScalar(const at::Scalar& value,
+                                         lazy_tensors::PrimitiveType type,
+                                         const Device& device);
+  torch::lazy::Value GetIrValueForScalar(const at::Scalar& value,
+                                         const Device& device);
+  torch::lazy::Value GetIrValueForScalar(
+      const at::Scalar& value, lazy_tensors::PrimitiveType type,
+      c10::ArrayRef<lazy_tensors::int64> dimensions, const Device& device);
+  torch::lazy::Value GetIrValueForScalar(const at::Scalar& value,
+                                         const lazy_tensors::Shape& shape,
+                                         const Device& device);
+  torch::lazy::Value GetIrValueForScalar(
+      const at::Scalar& value, const lazy_tensors::Shape& shape,
+      c10::optional<at::ScalarType> logical_element_type, const Device& device);
 
  private:
   struct SyncTensorsConfig {

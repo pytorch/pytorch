@@ -3,7 +3,7 @@
 #include "lazy_tensor_core/csrc/tensor.h"
 
 namespace torch_lazy_tensors {
-namespace tensor_aten_ops {
+namespace lazy_tensor_aten_ops {
 
 // TODO: Remove methods from here as we support codegen for more ops
 //////////////////////////////////////////////////////////////////////////////
@@ -846,5 +846,5 @@ void zero_(LazyTensor& input);
 LazyTensor where(const LazyTensor& condition, const LazyTensor& input,
                  const LazyTensor& other);
 
-}  // namespace tensor_aten_ops
+}  // namespace lazy_tensor_aten_ops
 }  // namespace torch_lazy_tensors

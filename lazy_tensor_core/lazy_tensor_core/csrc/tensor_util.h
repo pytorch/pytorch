@@ -104,4 +104,10 @@ std::vector<at::ScalarType> CreateDTypeFromMetaTensors(const std::tuple<TupleTyp
   return dtypes;
 }
 
+// Routing values to device data maximizes the changes for compilation cache
+// hits, but it can prevent the compiler to perform optimizations. So tensor
+// values which are within a given set, are routed to constant scalars if this
+// API returns true.
+bool IsSpecialScalar(const at::Scalar& value);
+
 }  // namespace torch_lazy_tensors

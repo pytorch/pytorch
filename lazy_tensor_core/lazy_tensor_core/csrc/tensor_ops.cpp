@@ -20,8 +20,8 @@ using torch::lazy::ScopePusher;
 // squeezed out.
 LazyTensor IndexAcrossDims(const LazyTensor& input, lazy_tensors::int64 dim,
                            lazy_tensors::int64 index) {
-  return tensor_aten_ops::squeeze(
-      tensor_aten_ops::slice(input, dim, index, index + 1, 1), dim);
+  return lazy_tensor_aten_ops::squeeze(
+      lazy_tensor_aten_ops::slice(input, dim, index, index + 1, 1), dim);
 }
 
 }  // namespace
@@ -55,36 +55,39 @@ LazyTensor Cross(const LazyTensor& input, const LazyTensor& other,
   LazyTensor v3 = IndexAcrossDims(other, canonical_dim, 2);
   // Compute the term for each axis.
   at::Scalar one(1);
-  LazyTensor s1 = tensor_aten_ops::sub(tensor_aten_ops::mul(u2, v3),
-                                       tensor_aten_ops::mul(u3, v2), one);
-  LazyTensor s2 = tensor_aten_ops::sub(tensor_aten_ops::mul(u3, v1),
-                                       tensor_aten_ops::mul(u1, v3), one);
-  LazyTensor s3 = tensor_aten_ops::sub(tensor_aten_ops::mul(u1, v2),
-                                       tensor_aten_ops::mul(u2, v1), one);
+  LazyTensor s1 =
+      lazy_tensor_aten_ops::sub(lazy_tensor_aten_ops::mul(u2, v3),
+                                lazy_tensor_aten_ops::mul(u3, v2), one);
+  LazyTensor s2 =
+      lazy_tensor_aten_ops::sub(lazy_tensor_aten_ops::mul(u3, v1),
+                                lazy_tensor_aten_ops::mul(u1, v3), one);
+  LazyTensor s3 =
+      lazy_tensor_aten_ops::sub(lazy_tensor_aten_ops::mul(u1, v2),
+                                lazy_tensor_aten_ops::mul(u2, v1), one);
   // Stack the terms into one result tensor.
-  return tensor_aten_ops::stack({s1, s2, s3}, canonical_dim);
+  return lazy_tensor_aten_ops::stack({s1, s2, s3}, canonical_dim);
 }
 
 LazyTensor MakeMatrixWithDiagonal(const LazyTensor& input,
                                   lazy_tensors::int64 diagonal) {
   lazy_tensors::int64 size = input.shape().get().dimensions(0);
   LazyTensor identity =
-      tensor_aten_ops::eye(size, size, input.GetDevice(), input.dtype());
+      lazy_tensor_aten_ops::eye(size, size, input.GetDevice(), input.dtype());
   auto padding =
       diagonal >= 0
           ? std::vector<lazy_tensors::int64>{diagonal, 0, 0, diagonal}
           : std::vector<lazy_tensors::int64>{0, -diagonal, -diagonal, 0};
-  return tensor_aten_ops::constant_pad_nd(tensor_aten_ops::mul(identity, input),
-                                          padding, 0);
+  return lazy_tensor_aten_ops::constant_pad_nd(
+      lazy_tensor_aten_ops::mul(identity, input), padding, 0);
 }
 
 LazyTensor Select(const LazyTensor& input, lazy_tensors::int64 dim,
                   lazy_tensors::int64 index) {
   auto shape = input.shape();
   dim = Helpers::GetCanonicalDimensionIndex(dim, shape.get().rank());
-  LazyTensor result = tensor_aten_ops::narrow(input, dim, index, 1);
+  LazyTensor result = lazy_tensor_aten_ops::narrow(input, dim, index, 1);
   auto new_dims = Helpers::DropDimensions(shape.get().dimensions(), {dim});
-  return tensor_aten_ops::view(result, new_dims);
+  return lazy_tensor_aten_ops::view(result, new_dims);
 }
 
 }  // namespace tensor_ops

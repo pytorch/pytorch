@@ -6,6 +6,7 @@
 #include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensor_core/csrc/helpers.h"
+#include "lazy_tensor_core/csrc/lazy_graph_executor.h"
 #include "lazy_tensor_core/csrc/ops/arithmetic_ir_ops.h"
 #include "lazy_tensor_core/csrc/ops/expand.h"
 #include "lazy_tensor_core/csrc/ops/index_along_dim.h"
@@ -14,8 +15,8 @@
 #include "lazy_tensor_core/csrc/ops/ops.h"
 #include "lazy_tensor_core/csrc/ops/permute.h"
 #include "lazy_tensor_core/csrc/ops/scalar.h"
-#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 #include "lazy_tensor_core/csrc/tensor_aten_ops.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/permutation_util.h"
@@ -140,13 +141,13 @@ std::vector<LazyTensor> WrapIndicesOnce(const LazyTensor& base,
     int64_t dim_size = base_shape_ref.get().dimensions(dim_idx + start_dim);
     LazyTensor wrapped_dim_index = LazyTensor::Create(
         dim_index.GetIrValue() +
-            LazyTensor::GetIrValueForScalar(dim_size, dim_index.shape(),
-                                            base.GetDevice()),
+            LazyGraphExecutor::Get()->GetIrValueForScalar(
+                dim_size, dim_index.shape(), base.GetDevice()),
         base.GetDevice());
     LazyTensor wrap_cond =
-        tensor_aten_ops::lt(indices[dim_idx], at::Scalar(int64_t(0)));
+        lazy_tensor_aten_ops::lt(indices[dim_idx], at::Scalar(int64_t(0)));
     canonical_indices.push_back(
-        tensor_aten_ops::where(wrap_cond, wrapped_dim_index, dim_index));
+        lazy_tensor_aten_ops::where(wrap_cond, wrapped_dim_index, dim_index));
   }
   return canonical_indices;
 }
@@ -224,7 +225,7 @@ LazyTensor IndexByTensors(const LazyTensor& base,
   // Stack the indices to allow the whole multi-indexing to be dispatched with a
   // single gather.
   LazyTensor indices_nd =
-      tensor_aten_ops::stack(canonical_indices, indices_rank);
+      lazy_tensor_aten_ops::stack(canonical_indices, indices_rank);
   return LazyTensor::Create(
       torch::lazy::MakeNode<ir::ops::IndexGet>(base.GetIrValue(),
                                       indices_nd.GetIrValue(), start_dim),
@@ -244,7 +245,7 @@ torch::lazy::Value IndexPutByTensors(
   // Stack the indices to allow the whole multi-indexing to be dispatched with a
   // single scatter.
   LazyTensor indices_nd =
-      tensor_aten_ops::stack(canonical_indices, indices_rank);
+      lazy_tensor_aten_ops::stack(canonical_indices, indices_rank);
   return torch::lazy::MakeNode<ir::ops::Permute>(
       torch::lazy::MakeNode<ir::ops::IndexPut>(base.GetIrValue(),
                                       indices_nd.GetIrValue(), start_dim,
@@ -261,8 +262,8 @@ NodePtr IndexFill(const LazyTensor& base, lazy_tensors::int64 dim,
       << "Fill index is supposed to be a vector";
   return IndexFillOp(
       base.GetIrValue(), dim, index.GetIrValue(),
-      LazyTensor::GetIrValueForScalar(value, base.shape().get().element_type(),
-                                      base.GetDevice()));
+      LazyGraphExecutor::Get()->GetIrValueForScalar(
+          value, base.shape().get().element_type(), base.GetDevice()));
 }
 
 NodePtr IndexFill(const LazyTensor& base, lazy_tensors::int64 dim,
