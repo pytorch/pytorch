@@ -47,6 +47,7 @@
 //                   ...)
 //
 // where & and * represent the C-style address-of and indirection operations.
+
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/IndexingUtils.h>
 
@@ -530,11 +531,9 @@ Tensor & _index_put_impl_(Tensor & self, const torch::List<c10::optional<Tensor>
       at::assert_no_overlap(self, *index);
     }
   }
-
   if (self.device().type() == DeviceType::CUDA && (accumulate || globalContext().deterministicAlgorithms())) {
       TORCH_CHECK(value_.device() == self.device(), "expected device ", self.device(), " but got device ",
       value_.device(), " for value tensor");
-
       index_put_with_sort_stub(self.device().type(), self, indices, value_, accumulate, unsafe);
       return self;
   }
