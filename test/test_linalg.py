@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Owner(s): ["module: linear algebra"]
+
 import torch
 import numpy as np
 
