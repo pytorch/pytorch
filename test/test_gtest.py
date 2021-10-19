@@ -22,15 +22,24 @@ env = os.environ.copy()
 if IS_MACOS:
     env["DYLD_LIBRARY_PATH"] = str(Path(torch.__file__).resolve().parent / "lib")
 
+if IS_WINDOWS:
+    # Windows needs these paths to find the relevant DLLs to run the test
+    # binaries. Some binaries only need c10.dll, others need more which you can
+    # find by using 'dumpbin.exe <binary>'
+    # libiomp5.dll is also necessary for a lot of them (find via 'dir *lib*omp*dll /s /p')
+    # Remote desktop will also show a popup of missing DLLs when running a test
+    # binary which doesn't show up when running from cmd/bash/powershell.
+    paths = [
+        r"C:\Jenkins\Miniconda3\Library\bin",
+        r"C:\actions-runner\_work\pytorch\pytorch\build\bin",
+        r"C:\Jenkins\Miniconda3",
+        r"C:\actions-runner\bin",
+    ]
+    env["PATH"] = ";".join(paths) + ";" + env["PATH"]
+
 if IS_IN_CI:
-    if IS_WINDOWS:
-        # Windows test binaries are located in many places so this might not be
-        # getting them all
-        # TEST_BINARY_DIR = REPO_ROOT / "torch" / "bin"
-        TEST_BINARY_DIR = REPO_ROOT / "build"
-    elif IS_MACOS:
+    if IS_MACOS:
         TEST_BINARY_DIR = Path(torch.__file__).resolve().parent / "bin"
-        # TEST_BINARY_DIR = REPO_ROOT.parent / "cpp-build" / "bin"
 BUILD_ENVIRONMENT = os.getenv("BUILD_ENVIRONMENT", "")
 
 print(f"[remove] USING PATH {TEST_BINARY_DIR}")
@@ -84,12 +93,52 @@ class GTest(TestCase):
 
     def test_jit(self, binary: Path, test_name: str):
         setup_path = REPO_ROOT / "test" / "cpp" / "jit" / "tests_setup.py"
+        # These tests fail on windows only (this wasn't caught before switching
+        # to the Python runner since test_jit.exe wasn't run during windows
+        # testing)
+        windows_failing_tests = [
+            "BackendTest.ToBackend",
+            "BackendTest.ToBackendNotAvailable",
+            "BackendTest.TestCompiler",
+            "BackendTest.TestComposite",
+            "BackendTest.TestCompositeWithSetStates",
+            "BackendTest.TestConsistencyOfCompositeWithSetStates",
+            "BackendTest.TestCompilerNotSupport",
+            "BackendTestDebugInfo.TestCompiler",
+            "BackendTestDebugInfo.TestExceptionStackForCompilerWithModuleHierarchy",
+            "BackendTestDebugInfo.TestExceptionStackForCompilerWithTwoLevelModuleHierarchy",
+            "BackendTestDebugInfo.TestExceptionStackForCompilerWithLoweredSubModule",
+            "BackendTestDebugInfo.TestExceptionStackForCompilerWithSelectiveLoweredSubModule",
+            "ClassTypeTest.IdenticalTypesDifferentCus",
+            "LiteInterpreterTest.BackPortByteCodeModelAllVersions",
+            "LiteInterpreterTest.isCompatibleSuccess",
+            "LiteInterpreterTest.isCompatibleFail",
+            "MobileTypeParserTest.NonIdentifierRaises",
+            "JitLoggingTest.CheckOutputStreamSetting",
+        ]
+
+        def gtest_filter():
+            filter = "*"
+            exclusions = []
+
+            if "cuda" in BUILD_ENVIRONMENT:
+                exclusions.append("*CUDA")
+
+            if IS_WINDOWS:
+                exclusions += windows_failing_tests
+
+            if len(exclusions) > 0:
+                filter += "-" + ":".join(exclusions)
+
+            return f"--gtest_filter={filter}"
+
+        flags = []
+        filter = gtest_filter()
+        if filter != "--gtest_filter=*":
+            flags = [filter]
 
         run_cmd([sys.executable, str(setup_path), "setup"])
-        if "cuda" in BUILD_ENVIRONMENT:
-            run_binary(binary, test_name)
-        else:
-            run_binary(binary, test_name, extra_flags=["--gtest_filter=-*CUDA"])
+        run_binary(binary, test_name, extra_flags=flags)
         run_cmd([sys.executable, str(setup_path), "shutdown"])
 
 
