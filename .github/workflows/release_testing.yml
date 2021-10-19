@@ -41,7 +41,7 @@ jobs:
           conda install -y -c pytorch-test pytorch=1.10.0 \
                                            torchvision torchtext torchaudio cudatoolkit=10.2
           echo "RESULT_DIR=${HOME}/release-testing/1.10.0" >> $GITHUB_ENV
-          # conda install -y -c pytorch-test pytorch=${{ github.event.inputs.pytorch_version }} \
+          # conda install -y -c pytorch pytorch=${{ github.event.inputs.pytorch_version }} \
           #                                  torchvision torchtext torchaudio cudatoolkit=10.2
           # echo "RESULT_DIR=${HOME}/release-testing/${{ github.event.inputs.pytorch_version }}" >> $GITHUB_ENV
           sudo nvidia-smi -ac ${GPU_FREQUENCY}
@@ -54,55 +54,34 @@ jobs:
           pip install -U py-cpuinfo psutil distro
           sudo $HOME/anaconda3/envs/reltest/bin/python3 torchbenchmark/util/machine_config.py
           popd
-      - name: Run MNist
+      - name: Run Benchmarks
         run: |
           . activate reltest
-          . switch-cuda.sh 10.2
           mkdir -p ${RESULT_DIR}/mnist
           pushd examples/mnist
           export LOG_FILE=${RESULT_DIR}/mnist/result.log
           export MEM_FILE=${RESULT_DIR}/mnist/result_mem.log
           taskset -c $CORE_LIST bash ../../pytorch/.github/scripts/monitor_proc.sh python main.py --epochs 1
-      - name: Run MNist HogWild
-        run: |
-          . activate reltest
-          . switch-cuda.sh 10.2
           mkdir -p ${RESULT_DIR}/mnist_hogwild
           pushd examples/mnist_hogwild
           export LOG_FILE=${RESULT_DIR}/mnist_hogwild/result.log
           export MEM_FILE=${RESULT_DIR}/mnist_hogwild/result_mem.log
           taskset -c $CORE_LIST bash ../../pytorch/.github/scripts/monitor_proc.sh python main.py --epochs 10
-      - name: Run CPU WLM LSTM
-        run: |
-          . activate reltest
-          . switch-cuda.sh 10.2
           mkdir -p ${RESULT_DIR}/wlm_cpu_lstm
           pushd examples/word_language_model
           export LOG_FILE=${RESULT_DIR}/wlm_cpu_lstm/result.log
           export MEM_FILE=${RESULT_DIR}/wlm_cpu_lstm/result_mem.log
           taskset -c $CORE_LIST bash ../../pytorch/.github/scripts/monitor_proc.sh python main.py --epochs 10 --model LSTM
-      - name: Run GPU WLM LSTM
-        run: |
-          . activate reltest
-          . switch-cuda.sh 10.2
           mkdir -p ${RESULT_DIR}/wlm_gpu_lstm
           pushd examples/word_language_model
           export LOG_FILE=${RESULT_DIR}/wlm_gpu_lstm/result.log
           export MEM_FILE=${RESULT_DIR}/wlm_gpu_lstm/result_mem.log
           taskset -c $CORE_LIST bash ../../pytorch/.github/scripts/monitor_proc.sh python main.py --epochs 10 --model LSTM --cuda
-      - name: Run CPU WLM Transformer
-        run: |
-          . activate reltest
-          . switch-cuda.sh 10.2
           mkdir -p ${RESULT_DIR}/wlm_cpu_trans
           pushd examples/word_language_model
           export LOG_FILE=${RESULT_DIR}/wlm_cpu_trans/result.log
           export MEM_FILE=${RESULT_DIR}/wlm_cpu_trans/result_mem.log
           taskset -c $CORE_LIST bash ../../pytorch/.github/scripts/monitor_proc.sh python main.py --epochs 10 --model Transformer
-      - name: Run GPU WLM Transformer
-        run: |
-          . activate reltest
-          . switch-cuda.sh 10.2
           mkdir -p ${RESULT_DIR}/wlm_gpu_trans
           pushd examples/word_language_model
           export LOG_FILE=${RESULT_DIR}/wlm_gpu_trans/result.log
