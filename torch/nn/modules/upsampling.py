@@ -31,7 +31,8 @@ class Upsample(Module):
         align_corners (bool, optional): if ``True``, the corner pixels of the input
             and output tensors are aligned, and thus preserving the values at
             those pixels. This only has effect when :attr:`mode` is
-            ``'linear'``, ``'bilinear'``, or ``'trilinear'``. Default: ``False``
+            ``'linear'``, ``'bilinear'``, ``'bicubic'``, or ``'trilinear'``.
+            Default: ``False``
         recompute_scale_factor (bool, optional): recompute the scale_factor for use in the
             interpolation calculation. If `recompute_scale_factor` is ``True``, then
             `scale_factor` must be passed in and `scale_factor` is used to compute the

@@ -4574,11 +4574,11 @@ class TestNN(NNTestCase):
         def assert_is_orthogonal(X):
             n, k = X.size(-2), X.size(-1)
             if n < k:
-                X = X.transpose(-2, -1)
+                X = X.mT
                 n, k = k, n
             Id = torch.eye(k, dtype=X.dtype, device=X.device).expand(*(X.size()[:-2]), k, k)
             eps = 10 * n * torch.finfo(X.dtype).eps
-            torch.testing.assert_allclose(X.transpose(-2, -1).conj() @ X, Id, atol=eps, rtol=0.)
+            torch.testing.assert_allclose(X.mH @ X, Id, atol=eps, rtol=0.)
 
 
         def assert_weight_allclose_Q(weight, W):
@@ -4586,11 +4586,11 @@ class TestNN(NNTestCase):
             # (or of its transpose if the matrix is wide)
             wide_matrix = W.size(-2) < W.size(-1)
             if wide_matrix:
-                W = W.transpose(-2, -1)
+                W = W.mT
             Q, R = torch.linalg.qr(W)
             Q *= R.diagonal(dim1=-2, dim2=-1).sgn().unsqueeze(-2)
             if wide_matrix:
-                Q = Q.transpose(-2, -1)
+                Q = Q.mT
             torch.testing.assert_allclose(Q, weight, atol=1e-5, rtol=0.)
 
 
@@ -4644,10 +4644,10 @@ class TestNN(NNTestCase):
                 # Intializing with a given orthogonal matrix works
                 X = torch.randn_like(m.weight)
                 if wide_matrix:
-                    X = X.transpose(-2, -1)
+                    X = X.mT
                 w_new = torch.linalg.qr(X).Q
                 if wide_matrix:
-                    w_new = w_new.transpose(-2, -1)
+                    w_new = w_new.mT
                 if can_initialize:
                     m.weight = w_new
                     torch.testing.assert_allclose(w_new, m.weight, atol=1e-5, rtol=0.)

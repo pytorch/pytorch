@@ -1,5 +1,5 @@
-#include <torch/csrc/jit/frontend/tree_views.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
+#include <torch/csrc/jit/frontend/tree_views.h>
 
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
@@ -188,7 +188,7 @@ NoneStatus canBeNone(Value* v) {
   }
   if (v->type()->kind() == OptionalType::Kind ||
       (v->type()->kind() == UnionType::Kind &&
-       v->type()->expect<UnionType>()->canHoldType(NoneType::get()))) {
+       v->type()->expect<UnionType>()->canHoldType(*NoneType::get()))) {
     return MAYBE;
   }
   return NEVER;
@@ -3354,7 +3354,7 @@ struct to_ir {
         // has the type Optional[T]
         if ((type->kind() == OptionalType::Kind ||
              (type->kind() == UnionType::Kind &&
-              type->expect<UnionType>()->canHoldType(NoneType::get()))) &&
+              type->expect<UnionType>()->canHoldType(*NoneType::get()))) &&
             expr->type()->isSubtypeOf(*NoneType::get())) {
           Node* none = graph->createNone();
           none->output()->setType(type);
