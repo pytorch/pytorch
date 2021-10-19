@@ -1,13 +1,13 @@
 #pragma once
 #include <ATen/ATen.h>
 #include <ATen/ceil_div.h>
+#include <ATen/NumericUtils.h>
 #include <ATen/native/SortingUtils.h>
 #include <assert.h>
 #include <c10/macros/Macros.h>
 #include <stdlib.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
-#include <THC/THCNumerics.cuh>
 
 namespace at {
 namespace native {
@@ -49,18 +49,14 @@ static bool getGridFromTiles(int64_t gridTiles, dim3& grid) {
 template <typename scalar_t, bool handleNaN = false>
 struct GTOp {
   __device__ bool operator()(const scalar_t& lhs, const scalar_t& rhs) const {
-    return (handleNaN && THCNumerics<scalar_t>::isnan(lhs) &&
-            !THCNumerics<scalar_t>::isnan(rhs)) ||
-        THCNumerics<scalar_t>::gt(lhs, rhs);
+    return (handleNaN && at::_isnan(lhs) && !at::_isnan(rhs)) || (lhs > rhs);
   }
 };
 
 template <typename scalar_t, bool handleNaN = false>
 struct LTOp {
   __device__ bool operator()(const scalar_t& lhs, const scalar_t& rhs) const {
-    return (handleNaN && THCNumerics<scalar_t>::isnan(rhs) &&
-            !THCNumerics<scalar_t>::isnan(lhs)) ||
-        THCNumerics<scalar_t>::lt(lhs, rhs);
+    return (handleNaN && at::_isnan(rhs) && !at::_isnan(lhs)) || (lhs < rhs);
   }
 };
 
