@@ -350,7 +350,7 @@ def pad_sequence(sequences, batch_first=False, padding_value=0.0):
     Args:
         sequences (list[Tensor]): list of variable length sequences.
         batch_first (bool, optional): output will be in ``B x T x *`` if True, or in
-            ``T x B x *`` otherwise
+            ``T x B x *`` otherwise. Default: False.
         padding_value (float, optional): value for padded elements. Default: 0.
 
     Returns:
