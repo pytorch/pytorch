@@ -20,7 +20,7 @@ from torch.ao.quantization import (
 from torch.testing._internal.common_utils import TestCase
 
 from torch.testing._internal.common_quantization import (
-    DeFusedEmbeddingBag,
+    DeFusedEmbeddingBagLinear,
     QuantizationTestCase,
     QuantStubModel,
     ManualLinearQATModel,
@@ -106,21 +106,23 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                 model = quantize_qat(model, test_only_train_fn, [self.img_data_2d_train])
                 checkQuantized(model)
 
-    def test_defused_embedding_bag(self):
+    def test_defused_embedding_bag_linear(self):
         for qengine in supported_qengines:
             with override_quantized_engine(qengine):
-                model = DeFusedEmbeddingBag().train()
+                model = DeFusedEmbeddingBagLinear().train()
                 model = prepare_qat(model)
                 self.checkObservers(model)
 
-                test_only_train_fn(model, self.embed_data_train)
+                test_only_train_fn(model, self.embed_linear_data_train)
                 # make activation_post_process is not inserted for Embedding
                 self.assertFalse(hasattr(model, "activation_post_process"))
                 model = convert(model)
 
                 def checkQuantized(model):
                     # make sure Embedding is now a QuantizedEmbedding
-                    self.assertTrue(type(model.emb), nn.quantized.EmbeddingBag)
+                    self.assertEqual(type(model.emb), nn.quantized.Embedding)
+                    # make sure Linear is now a QuantizedLinear
+                    self.assertEqual(type(model.linear), nn.quantized.Linear)
 
                     test_only_eval_fn(model, self.embed_data)
                     self.checkScriptable(model, self.embed_data)
@@ -128,8 +130,8 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
 
                 checkQuantized(model)
 
-                model = DeFusedEmbeddingBag()
-                model = quantize_qat(model, test_only_train_fn, [self.embed_data_train])
+                model = DeFusedEmbeddingBagLinear()
+                model = quantize_qat(model, test_only_train_fn, [self.embed_linear_data_train])
                 checkQuantized(model)
 
 

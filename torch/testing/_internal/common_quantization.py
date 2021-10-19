@@ -1693,9 +1693,10 @@ class ManualEmbeddingBagLinear(nn.Module):
         x = self.linear(x)
         return self.dequant(x)
 
-class DeFusedEmbeddingBag(nn.Module):
-    r"""A module to simulate QAT embedding bag, using separate embedding
-    and bagging op, similar to described in EmbeddingBag documentation.
+class DeFusedEmbeddingBagLinear(nn.Module):
+    r"""A module to simulate QAT embedding bag with a linear layer,
+    this module uses a separate embedding and bagging op, similar
+    to that which is described in the EmbeddingBag documentation.
 
     https://pytorch.org/docs/stable/generated/torch.nn.EmbeddingBag.html
     """
@@ -1704,9 +1705,16 @@ class DeFusedEmbeddingBag(nn.Module):
         self.emb = nn.Embedding(num_embeddings=10, embedding_dim=12)
         self.emb.qconfig = default_embedding_qat_qconfig
         self.bagging_op = torch.sum
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
+        self.linear = nn.Linear(12, 1).to(dtype=torch.float)
+        self.qconfig = get_default_qat_qconfig("qnnpack")
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
-        return self.bagging_op(self.emb(input), dim=1)
+        x = self.bagging_op(self.emb(input), dim=1)
+        x = self.quant(x)
+        x = self.linear(x)
+        return self.dequant(x)
 
 class SubModelForFusion(nn.Module):
     def __init__(self):
