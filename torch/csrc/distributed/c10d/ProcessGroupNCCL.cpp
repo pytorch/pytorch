@@ -12,15 +12,18 @@
 #include <THC/THC.h>
 
 #include <ATen/cuda/CUDAContext.h>
+#include <c10d/ParamCommsUtils.hpp>
+#include <c10d/Utils.hpp>
+#include <c10/core/DeviceType.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
-#include <c10d/ParamCommsUtils.hpp>
+
 #include <torch/csrc/cuda/nccl.h>
 
-#include <c10d/Utils.hpp>
 
 namespace c10d {
 
@@ -157,6 +160,14 @@ std::vector<at::Device> getDeviceList(const std::vector<at::Tensor>& tensors) {
     res.push_back(tensor.device());
   }
   return res;
+}
+
+// Return CUDA device with ordinal given by input rank.
+at::Device getDeviceForRank(int rank) {
+  TORCH_CHECK(rank >= 0, "Invalid rank ", rank);
+  auto numGPUs = at::cuda::getNumGPUs();
+  int16_t deviceIdx = static_cast<int16_t>(rank % numGPUs);
+  return at::Device(at::DeviceType::CUDA, deviceIdx);
 }
 
 // [Sync Streams] Helper that lets the input ncclStreams to wait for the current
@@ -502,6 +513,13 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     asyncErrorHandling_ = false;
   }
 
+  // Perform health check by initializing dummy communicators and destroying
+  // them. This will help indicate any NCCL-related issues prior to the first
+  // collective.
+  // Run it in a separate thread and wait on CV to handle timeouts, since
+  // majority of getNCCLComm failures are hangs.
+  runHealthCheck();
+
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   ncclCommWatchdogThread_ =
       std::thread(&ProcessGroupNCCL::ncclCommWatchdog, this);
@@ -525,6 +543,64 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << "\nUSE_HIGH_PRIORITY_STREAM: "
             << options_->is_high_priority_stream
             << "\nNCCL_DEBUG: " << ncclDebugLevel;
+}
+
+void ProcessGroupNCCL::runHealthCheck() {
+  // Run health check in a separate thread and wait on CV to handle timeouts,
+  // since majority of getNCCLComm failures are hangs.
+
+  struct HealthCheckData {
+    std::mutex healthCheckMutex;
+    std::condition_variable healthCheckCv;
+    bool healthCheckSuccess = false;
+    std::exception_ptr healthCheckException;
+  };
+
+  HealthCheckData healthCheckData;
+  auto t = std::thread([&healthCheckData, this]() {
+    try {
+      std::vector<at::Device> rankDevice = {getDeviceForRank(rank_)};
+      const auto key = getKeyFromDevices(rankDevice);
+      // OpType does not matter, only need to set to not go through send/recv
+      // path.
+      getNCCLComm(key, rankDevice, OpType::ALLREDUCE);
+      // Now destroy the communicators and remove them from cache so we don't
+      // use destroyed communicators.
+      destroyNCCLComms(key);
+      // Notify main thread the health check is complete.
+      {
+        std::lock_guard<std::mutex> lk(healthCheckData.healthCheckMutex);
+        healthCheckData.healthCheckSuccess = true;
+      }
+      healthCheckData.healthCheckCv.notify_one();
+    } catch (const std::exception& e) {
+      // Populate exception ptr.
+      healthCheckData.healthCheckException = std::current_exception();
+      // Unblock waiting main thread which will report exception.
+      healthCheckData.healthCheckCv.notify_one();
+    } // Unknown exceptions will just cause the program to terminate.
+  });
+  // We don't need to join the thread, just need to verify health check via the
+  // CV. Hence we detach the thread here.
+  t.detach(); // NOLINT
+  LOG(INFO) << "[Rank " << rank_ << "]"
+            << " will wait up to " << options_->timeout.count()
+            << " msec for NCCL health check to complete.";
+  std::unique_lock<std::mutex> lock(healthCheckData.healthCheckMutex);
+  healthCheckData.healthCheckCv.wait_for(
+      lock, options_->timeout, [&healthCheckData]() {
+        return healthCheckData.healthCheckSuccess;
+      });
+
+  if (healthCheckData.healthCheckException) {
+    std::rethrow_exception(healthCheckData.healthCheckException);
+  }
+  // If there is no exception, the likely culprit is a timeout/hang which is how
+  // most communicator init issues manifest themselves.
+  TORCH_CHECK(
+      healthCheckData.healthCheckSuccess,
+      "ProcessGroupNCCL: Health check failure: Failed to initialize NCCL communicator on rank ",
+      rank_);
 }
 
 void ProcessGroupNCCL::setSequenceNumberForGroup() {
@@ -872,6 +948,30 @@ void ProcessGroupNCCL::broadcastUniqueNCCLID(
     TORCH_CHECK(vec.size() == NCCL_UNIQUE_ID_BYTES);
     std::memcpy(ncclID, vec.data(), vec.size());
   }
+}
+
+
+void ProcessGroupNCCL::destroyNCCLComms(const std::string& devNCCLCommMapKey) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (devNCCLCommMap_.find(devNCCLCommMapKey) == devNCCLCommMap_.end()) {
+    TORCH_INTERNAL_ASSERT(
+        false,
+        "Expected to find key ",
+        devNCCLCommMapKey,
+        " in NCCL communicator map.");
+  }
+  std::vector<std::shared_ptr<NCCLComm>>& ncclComms =
+      devNCCLCommMap_[devNCCLCommMapKey];
+  // Loop through communicators and call ncclCommAbort.
+  for (const auto& comm : ncclComms) {
+    // ncclCommDestroy(comm->getNcclComm()) results in segfault when PG is being
+    // destroyed, so using ncclCommAbort here.
+    comm->ncclCommAbort();
+  }
+  // Remove communicators from the cache.
+  devNCCLCommMap_.erase(devNCCLCommMapKey);
+  // Clear used device indices.
+  usedDeviceIdxs_.clear();
 }
 
 std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
@@ -1697,7 +1797,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier(
         "This can potentially cause a hang if this rank to GPU mapping is incorrect.",
         "Specify device_ids in barrier() to force use of a particular device."
     );
-    devices.emplace_back(at::DeviceType::CUDA, deviceIdx);
+    devices.emplace_back(getDeviceForRank(rank_));
   } else {
     for (auto usedDeviceIdx : usedDeviceIdxs_) {
       devices.emplace_back(at::DeviceType::CUDA, usedDeviceIdx);
