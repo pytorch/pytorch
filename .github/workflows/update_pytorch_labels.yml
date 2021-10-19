@@ -1,0 +1,23 @@
+name: Update PyTorch Labels in S3
+
+on:
+  label:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  update-labels-in-S3:
+    runs-on: ubuntu-18.04
+    if: ${{ github.repository == 'pytorch/pytorch' }}
+    steps:
+      - name: Update PyTorch labels list in S3
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_UPDATE_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_UPDATE_SECRET_ACCESS_KEY }}
+        run: |
+          python3 -m pip install boto3==1.16.34
+          .github/scripts/export_pytorch_labels.py
+
+
+
+
