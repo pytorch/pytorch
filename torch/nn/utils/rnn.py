@@ -422,7 +422,7 @@ def unpack_sequence(packed_sequences):
         packed_sequences (PackedSequence): A PackedSequence object.
 
     Returns:
-        a :class:`List[Tensor]` object
+        a list of :class:`Tensor` objects
     """
     
     unpacked_sequences = []
