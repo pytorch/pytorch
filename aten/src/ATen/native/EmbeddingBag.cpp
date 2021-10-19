@@ -107,7 +107,7 @@ index_select_add(const Tensor &select_indices,
   auto output_stride0 = output.strides()[0];
   auto output_stride1 = output.strides()[1];
 
-  for (int64_t i = 0; i < numel; i++) {
+  for (const auto i : c10::irange(numel)) {
     // We can skip indices equal to padding_idx so they are not included in
     // the reduction
     if (select_indices_data[i] != padding_idx) {
@@ -247,7 +247,7 @@ index_select_add(const Tensor &select_indices,
     auto output_stride0 = output.strides()[0];
     auto output_stride1 = output.strides()[1];
     auto numel = add_indices.numel();
-    for (int64_t i = 0; i < numel; i++) {
+    for (const auto i : c10::irange(numel)) {
       // We can skip indices equal to padding_idx so they are not included in
       // the reduction
       if (select_indices_data[i] != padding_idx) {
@@ -302,14 +302,14 @@ index_select_scale_add(const Tensor &select_indices,
   auto* scale_data = scale.data_ptr<data_t>();
   auto scale_stride = scale.strides()[0];
 
-  for (int64_t i = 0; i < numel; i++) {
+  for (const auto i : c10::irange(numel)) {
     // We can skip indices equal to padding_idx so they are not included in
     // the reduction
     if (select_indices_data[i] != padding_idx) {
       auto* src_base = src_data + src_stride0 * select_indices_data[i];
       auto* output_base = output_data + output_stride0 * add_indices_data[i];
       auto scale = scale_data[i * scale_stride];
-      for (int64_t j = 0; j < ddim; j++) {
+      for (const auto j : c10::irange(ddim)) {
         output_base[j * output_stride1] += src_base[j * src_stride1] * scale;
       }
     } else if (bag_size.defined()) {
@@ -419,14 +419,14 @@ index_select_scale_add(const Tensor &select_indices,
     auto numel = add_indices.numel();
 
 
-    for (int64_t i = 0; i < numel; i++) {
+    for (const auto i : c10::irange(numel)) {
       // We can skip indices equal to padding_idx so they are not included in
       // the reduction
       if (select_indices_data[i] != padding_idx) {
         auto* src_base = src_data + src_stride0 * select_indices_data[i];
         auto* output_base = output_data + output_stride0 * add_indices_data[i];
         auto scale = scale_data[i * scale_stride];
-        for (int64_t j = 0; j < ddim; j++) {
+        for (const auto j : c10::irange(ddim)) {
           output_base[j * output_stride1] += src_base[j * src_stride1] * scale;
         }
       } else if (bag_size.defined()) {
