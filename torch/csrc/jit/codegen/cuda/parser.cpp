@@ -422,6 +422,8 @@ class IrParser {
   }
 
   static bool lookupInSymbolSet(const Node* node) {
+    initRegistry();
+
     return parser_symbol_set_.count(node->kind()) != 0;
   }
 
