@@ -363,6 +363,25 @@ def pad_sequence(sequences, batch_first=False, padding_value=0.0):
     return torch._C._nn.pad_sequence(sequences, batch_first, padding_value)
 
 
+def unpad_sequence(padded_sequences, lengths, batch_first=False):
+    """TODO"""
+
+    unpadded_sequences = []
+
+    if not batch_first:
+        padded_sequences.transpose_(0, 1)
+
+    max_length = padded_sequences.shape[1]
+    idx = torch.arange(max_length)
+
+    for seq, length in zip(padded_sequences, lengths):
+        mask = idx < length
+        unpacked_seq = seq[mask]
+        unpadded_sequences.append(unpacked_seq)
+    
+    return unpadded_sequences
+
+
 def pack_sequence(sequences, enforce_sorted=True):
     # type: (List[Tensor], bool) -> PackedSequence
     r"""Packs a list of variable length Tensors
