@@ -5,7 +5,9 @@ import operator
 
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import make_tensor
+from torch.testing._internal.common_methods_invocations import sample_inputs_cat_concat
 from torch import nn
+
 
 from textwrap import dedent
 
@@ -256,6 +258,31 @@ class TestSymbolicShapeAnalysis(JitTestCase):
                 fn = torch.jit.trace(foo, (inp.detach(),), check_trace=False)
 
                 self.checkShapeAnalysis(out_size, fn.graph, assert_propagation=True, constant_prop=False)
+
+    def test_shape_concat(self):
+        # TODO: unify with opinfo tests, traces of lists dont preserve sizes in IR
+        sample_inputs = sample_inputs_cat_concat(None, "cpu", torch.float, False)
+
+        class CatMod(nn.Module):
+            __constants__ = ['dim']
+
+            def __init__(self, dim=0):
+                super(CatMod, self).__init__()
+                self.dim = dim
+
+            def forward(self, x, y):
+                return torch.cat([x, y], dim=self.dim)
+
+        for inp in sample_inputs:
+            mod = torch.jit.script(CatMod(**inp.kwargs).eval())
+
+            args = inp.input
+            self.assertTrue(len(args) == 2)
+            out_size = mod(*args).size()
+            inps = list(mod.graph.inputs())
+            inps[1].setType(inps[1].type().with_sizes(args[0].size()))
+            inps[2].setType(inps[2].type().with_sizes(args[1].size()))
+            self.checkShapeAnalysis(out_size, mod.graph, assert_propagation=True)
 
     def test_partial_eval_graph_conv(self):
         mm = torch.jit.freeze(torch.jit.script(nn.Conv2d(16, 33, 3, stride=2).eval()))
