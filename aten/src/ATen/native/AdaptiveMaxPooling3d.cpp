@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
+#include <c10/util/irange.h>
 #include <tuple>
 
 
@@ -11,7 +12,7 @@ TORCH_META_FUNC(adaptive_max_pool3d) (const Tensor& input, IntArrayRef output_si
   TORCH_CHECK(
     ndim == 4 || ndim == 5,
     "adaptive_max_pool3d(): Expected 4D or 5D tensor, but got: ", input.sizes());
-  for (int64_t i = 1; i < ndim; i++) {
+  for (const auto i : c10::irange(1, ndim)) {
     TORCH_CHECK(
         input.size(i) > 0,
         "adaptive_max_pool3d(): Expected input to have non-zero size for non-batch dimensions, "
@@ -96,8 +97,7 @@ static void adaptive_max_pool3d_single_out_frame(
           int64_t istrideW)
 {
   at::parallel_for(0, sizeD, 0, [&](int64_t start, int64_t end) {
-    for (auto d = start; d < end; d++)
-    {
+    for (const auto d : c10::irange(start, end)) {
       /* loop over output */
       int64_t ot, oh, ow;
       for(ot = 0; ot < osizeT; ot++)
@@ -176,8 +176,7 @@ static void adaptive_max_pool3d_out_frame(
           int64_t istrideW)
 {
   at::parallel_for(0, sizeB, 0, [&](int64_t start, int64_t end) {
-    for (auto b = start; b < end; b++)
-    {
+    for (const auto b : c10::irange(start, end)) {
       adaptive_max_pool3d_single_out_frame<scalar_t>(input_data+b*istrideB, output_data+b*sizeD*osizeT*osizeH*osizeW,
                                                      indices_data+b*sizeD*osizeT*osizeH*osizeW,
                                                      sizeD,
@@ -203,8 +202,7 @@ static void adaptive_max_pool3d_backward_single_out_frame(
           int64_t osizeW)
 {
   at::parallel_for(0, sizeD, 0, [&](int64_t start, int64_t end) {
-    for (auto d = start; d < end; d++)
-    {
+    for (const auto d : c10::irange(start, end)) {
       scalar_t *gradInput_p_d = gradInput_p + d*isizeT*isizeH*isizeW;
       scalar_t *gradOutput_p_d = gradOutput_p + d*osizeT*osizeH*osizeW;
       int64_t *ind_p_d = ind_p + d*osizeT*osizeH*osizeW;
@@ -244,8 +242,7 @@ static void adaptive_max_pool3d_backward_out_frame(
           int64_t osizeW)
 {
   at::parallel_for(0, sizeB, 0, [&](int64_t start, int64_t end) {
-    for (auto b = start; b < end; b++)
-    {
+    for (const auto b : c10::irange(start, end)) {
       adaptive_max_pool3d_backward_single_out_frame<scalar_t>(gradInput_data+b*sizeD*isizeT*isizeH*isizeW, gradOutput_data+b*sizeD*osizeT*osizeH*osizeW,
                                                               indices_data+b*sizeD*osizeT*osizeH*osizeW,
                                                               sizeD,
