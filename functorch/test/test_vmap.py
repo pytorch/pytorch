@@ -3066,6 +3066,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('linalg.matrix_power'),
         xfail('linalg.matrix_rank'),
         xfail('linalg.matrix_rank', 'hermitian'),
+        xfail('linalg.pinv'),
+        xfail('linalg.pinv', 'hermitian'),
         xfail('linalg.norm'),
         xfail('linalg.solve'),
         xfail('linalg.svdvals'),

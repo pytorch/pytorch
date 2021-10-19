@@ -193,6 +193,7 @@ class TestPythonKeyOperatorsOpInfo(TestCase):
     xfail('linalg.matrix_power'),
     xfail('linalg.inv'),
     xfail('linalg.cholesky'),
+    xfail('nn.functional.dropout'),
     xfail('linalg.eigvals'),
     xfail('nn.functional.pad', 'circular'),
     })
@@ -293,22 +294,21 @@ class TestEagerFusionOpInfo(TestCase):
         xfail('matmul'),
         xfail('nn.functional.gelu'),
         xfail('nn.functional.linear'),
+        xfail('nn.functional.dropout'),
         xfail('polar'),
         xfail('special.zeta', 'grad'),
         xfail('to_sparse'),
         xfail('addcdiv'),
-        xfail('atanh'),
-        xfail('addcdiv'),
-        xfail('atanh'),
+        xfail('angle'),
         xfail('cholesky'),
         xfail('cumulative_trapezoid'),
         xfail('diag_embed'),
         xfail('linalg.householder_product'),
         xfail('logit'),
         xfail('matrix_exp'),
+        xfail('sgn'),
         xfail('trapezoid'),
         xfail('trapz'),
-        xfail('block_diag'),
     })
     def test_eager_compilation_exhaustive(self, device, dtype, op):
 
