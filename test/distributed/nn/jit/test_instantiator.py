@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Owner(s): ["oncall: distributed"]
+
 import pathlib
 import sys
 import unittest
