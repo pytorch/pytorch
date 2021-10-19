@@ -1,5 +1,6 @@
 #include <ATen/miopen/Descriptors.h>
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 
 #include <iostream>
 
@@ -39,11 +40,11 @@ void TensorDescriptor::set(miopenDataType_t datatype, IntArrayRef t_sizes, IntAr
 #undef STR
   int size[MIOPEN_DIM_MAX];
   int stride[MIOPEN_DIM_MAX];
-  for (size_t i = 0; i < dim; ++i) {
+  for (const auto i : c10::irange(dim)) {
     size[i] = static_cast<int>(t_sizes[i]);
     stride[i] = static_cast<int>(t_strides[i]);
   }
-  for (size_t i = dim; i < pad; ++i) {
+  for (const auto i : c10::irange(dim, pad)) {
     size[i] = 1;
     stride[i] = 1;
   }
@@ -103,10 +104,10 @@ void FilterDescriptor::set(const at::Tensor &t, const at::MemoryFormat memory_fo
 
   int size[MIOPEN_DIM_MAX];
   int stride[MIOPEN_DIM_MAX];
-  for (int i = 0; i < dim; ++i) {
+  for (const auto i : c10::irange(dim)) {
     size[i] = (int) t.size(i);
   }
-  for (int i = dim; i < pad; ++i) {
+  for (const auto i : c10::irange(dim, pad)) {
     size[i] = (int) 1;
   }
 
