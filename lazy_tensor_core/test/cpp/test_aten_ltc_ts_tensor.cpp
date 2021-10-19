@@ -3089,12 +3089,27 @@ TEST_F(AtenLtcTsTensorTest, TestHannWindow) {
 }
 
 TEST_F(AtenLtcTsTensorTest, TestLogSigmoid) {
-  torch::Tensor a = torch::rand({2, 2}, torch::TensorOptions(torch::kFloat));
+  torch::Tensor a = torch::empty({2, 2}, torch::TensorOptions(torch::kFloat));
+  a.uniform_(-1.0, 1.0);
   torch::Tensor b = torch::log_sigmoid(a);
   ForEachDevice([&](const torch::Device& device) {
     torch::Tensor xla_a = CopyToDevice(a, device);
     torch::Tensor xla_b = torch::log_sigmoid(xla_a);
     AllClose(b, xla_b, /*rtol=*/1e-3, /*atol=*/1e-5);
+  });
+}
+
+TEST_F(AtenLtcTsTensorTest, TestLogSigmoidForward) {
+  torch::Tensor a = torch::empty({2, 2}, torch::TensorOptions(torch::kFloat));
+  a.uniform_(-1.0, 1.0);
+  auto tuple = torch::log_sigmoid_forward(a);
+  ForEachDevice([&](const torch::Device& device) {
+    torch::Tensor xla_a = CopyToDevice(a, device);
+    auto xla_tuple = torch::log_sigmoid_forward(xla_a);
+    AllClose(std::get<0>(tuple), std::get<0>(xla_tuple),
+             /*rtol=*/1e-3, /*atol=*/1e-5);
+    AllClose(std::get<1>(tuple), std::get<1>(xla_tuple),
+             /*rtol=*/1e-3, /*atol=*/1e-5);
   });
 }
 

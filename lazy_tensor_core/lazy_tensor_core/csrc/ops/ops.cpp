@@ -47,7 +47,6 @@ PTLTC_UNARY_OP(Atanh, at::aten::atanh);
 PTLTC_UNARY_OP(Tan, at::aten::tan);
 PTLTC_UNARY_OP(Tanh, at::aten::tanh);
 PTLTC_UNARY_OP(Neg, at::aten::neg);
-PTLTC_UNARY_OP(Exp, at::aten::exp);
 PTLTC_UNARY_OP(Expm1, at::aten::expm1);
 PTLTC_UNARY_OP(Log, at::aten::log);
 PTLTC_UNARY_OP(Log1p, at::aten::log1p);
@@ -93,28 +92,6 @@ NodePtr HardSigmoid(const torch::lazy::Value& input) {
 NodePtr HardSigmoidBackward(const torch::lazy::Value& grad_output, const torch::lazy::Value& input) {
   return GenericOp(OpKind(at::aten::hardsigmoid_backward), {grad_output, input},
                    ir::GetShapeFromTsValue(input));
-}
-
-std::tuple<NodePtr, NodePtr> LogSigmoid(const torch::lazy::Value& input) {
-  ScopePusher ir_scope(at::aten::log_sigmoid.toQualString());
-  // Use log-sum-exp trick to avoid overflow.
-  NodePtr neg_input = Neg(input);
-  NodePtr max_elem = Max(ScalarOp(0, ir::GetShapeFromTsValue(input)), neg_input);
-  NodePtr buffer = Exp(Neg(max_elem)) + Exp(neg_input - max_elem);
-  NodePtr output = Neg(max_elem + Log(buffer));
-  return std::make_tuple(output, buffer);
-}
-
-NodePtr LogSigmoidBackward(const torch::lazy::Value& grad_output, const torch::lazy::Value& input,
-                           const torch::lazy::Value& buffer) {
-  ScopePusher ir_scope(at::aten::log_sigmoid_backward.toQualString());
-  NodePtr zero = ScalarOp(0, ir::GetShapeFromTsValue(input));
-  NodePtr one = ScalarOp(1, ir::GetShapeFromTsValue(input));
-  NodePtr minus_one = ScalarOp(-1, ir::GetShapeFromTsValue(input));
-  NodePtr max_deriv =
-      Where(ComparisonOp(at::aten::lt, input, zero), minus_one, zero);
-  NodePtr sign = Where(ComparisonOp(at::aten::lt, input, zero), one, minus_one);
-  return grad_output * (Neg(max_deriv) - sign * (buffer - one) / buffer);
 }
 
 NodePtr SiLU(const torch::lazy::Value& input) {
@@ -253,33 +230,6 @@ NodePtr Identity(lazy_tensors::int64 lines, lazy_tensors::int64 cols,
       OpKind(at::aten::eye),
       lazy_tensors::ShapeUtil::MakeShape(element_type, {lines, cols}),
       /*num_outputs=*/1, torch::lazy::MHash(lines, cols));
-}
-
-NodePtr Elu(const torch::lazy::Value& input, const at::Scalar& alpha,
-            const at::Scalar& scale, const at::Scalar& input_scale) {
-  ScopePusher ir_scope(at::aten::elu.toQualString());
-  const lazy_tensors::Shape& shape = ir::GetShapeFromTsValue(input);
-  NodePtr scaled_input = input * ScalarOp(input_scale, shape);
-  NodePtr zero = ScalarOp(0, shape);
-  NodePtr one = ScalarOp(1, shape);
-  NodePtr alpha_scalar = ScalarOp(alpha, shape);
-  return Where(ComparisonOp(at::aten::le, input, zero),
-               alpha_scalar * (Exp(scaled_input) - one), input) *
-         ScalarOp(scale, shape);
-}
-
-NodePtr EluBackward(const torch::lazy::Value& grad_output, const torch::lazy::Value& output,
-                    const at::Scalar& alpha, const at::Scalar& scale,
-                    const at::Scalar& input_scale) {
-  ScopePusher ir_scope(at::aten::elu_backward.toQualString());
-  const lazy_tensors::Shape& shape = ir::GetShapeFromTsValue(grad_output);
-  NodePtr negative_output_branch =
-      ScalarOp(input_scale, shape) *
-      (output + ScalarOp(alpha, shape) * ScalarOp(scale, shape));
-  NodePtr positive_output_branch = ScalarOp(scale, shape);
-  return grad_output *
-         Where(ComparisonOp(at::aten::gt, output, ScalarOp(0, shape)),
-               positive_output_branch, negative_output_branch);
 }
 
 NodePtr Lshift(const torch::lazy::Value& input, const at::Scalar& other) {

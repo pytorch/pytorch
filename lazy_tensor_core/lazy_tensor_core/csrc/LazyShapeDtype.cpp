@@ -204,6 +204,26 @@ std::vector<c10::ScalarType> compute_dtype_smooth_l1_loss_backward(
   return {self.scalar_type(), target.scalar_type()};
 }
 
+std::vector<std::vector<int64_t>> compute_shape_log_sigmoid_forward(const at::Tensor& self) {
+  // Based on definition of aten/src/ATen/native/Activation.cpp::log_sigmoid_forward_out_cpu.
+  return {self.sizes().vec(), self.sizes().vec()};
+}
+
+std::vector<c10::ScalarType> compute_dtype_log_sigmoid_forward(const at::Tensor& self) {
+  // Based on definition of aten/src/ATen/native/Activation.cpp::log_sigmoid_forward_out_cpu.
+  return {self.scalar_type(), self.scalar_type()};
+}
+
+std::vector<std::vector<int64_t>> compute_shape_log_sigmoid_backward(const at::Tensor& grad_output, const at::Tensor& self, const at::Tensor& buffer) {
+  // Based on definition of aten/src/ATen/native/Activation.cpp::log_sigmoid_backward_cpu*.
+  return {grad_output.sizes().vec()};
+}
+
+std::vector<c10::ScalarType> compute_dtype_log_sigmoid_backward(const at::Tensor& grad_output, const at::Tensor& self, const at::Tensor& buffer) {
+  // Based on definition of aten/src/ATen/native/Activation.cpp::log_sigmoid_backward_cpu*.
+  return {grad_output.scalar_type()};
+}
+
 } // namespace ops
 } // namespace ir
 } // namespace torch_lazy_tensors

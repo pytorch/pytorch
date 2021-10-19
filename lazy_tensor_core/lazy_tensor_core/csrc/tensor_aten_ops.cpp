@@ -854,26 +854,6 @@ LazyTensor eq(const LazyTensor& input, const LazyTensor& other) {
   return DispatchComparisonOp(at::aten::eq, input, other);
 }
 
-LazyTensor elu(const LazyTensor& input, const at::Scalar& alpha,
-               const at::Scalar& scale, const at::Scalar& input_scale) {
-  return input.CreateFrom(
-      ir::ops::Elu(input.GetIrValue(), alpha, scale, input_scale));
-}
-
-void elu_(LazyTensor& input, const at::Scalar& alpha, const at::Scalar& scale,
-          const at::Scalar& input_scale) {
-  input.SetInPlaceIrValue(
-      ir::ops::Elu(input.GetIrValue(), alpha, scale, input_scale));
-}
-
-LazyTensor elu_backward(const LazyTensor& grad_output, const at::Scalar& alpha,
-                        const at::Scalar& scale, const at::Scalar& input_scale,
-                        const LazyTensor& output) {
-  return grad_output.CreateFrom(ir::ops::EluBackward(grad_output.GetIrValue(),
-                                                     output.GetIrValue(), alpha,
-                                                     scale, input_scale));
-}
-
 LazyTensor erf(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Erf(input.GetIrValue()));
 }
@@ -884,10 +864,6 @@ LazyTensor erfc(const LazyTensor& input) {
 
 LazyTensor erfinv(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Erfinv(input.GetIrValue()));
-}
-
-LazyTensor exp(const LazyTensor& input) {
-  return input.CreateFrom(ir::ops::Exp(input.GetIrValue()));
 }
 
 LazyTensor expand(const LazyTensor& input,
@@ -1209,24 +1185,6 @@ LazyTensor log(const LazyTensor& input) {
 LazyTensor log_base(const LazyTensor& input, torch::lazy::OpKind op, double base) {
   return input.CreateFrom(
       torch::lazy::MakeNode<ir::ops::LogBase>(input.GetIrValue(), op, base));
-}
-
-LazyTensor log_sigmoid(const LazyTensor& input) {
-  return input.CreateFrom(std::get<0>(ir::ops::LogSigmoid(input.GetIrValue())));
-}
-
-std::tuple<LazyTensor, LazyTensor> log_sigmoid_forward(
-    const LazyTensor& input) {
-  auto output_and_buffer = ir::ops::LogSigmoid(input.GetIrValue());
-  return std::make_tuple(input.CreateFrom(std::get<0>(output_and_buffer)),
-                         input.CreateFrom(std::get<1>(output_and_buffer)));
-}
-
-LazyTensor log_sigmoid_backward(const LazyTensor& grad_output,
-                                const LazyTensor& input,
-                                const LazyTensor& buffer) {
-  return grad_output.CreateFrom(ir::ops::LogSigmoidBackward(
-      grad_output.GetIrValue(), input.GetIrValue(), buffer.GetIrValue()));
 }
 
 LazyTensor log1p(const LazyTensor& input) {
