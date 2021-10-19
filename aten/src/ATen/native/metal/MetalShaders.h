@@ -516,7 +516,7 @@ kernel void reshape(texture2d_array<half, access::read> in_arr[[texture(0), func
     const ushort n2 = gid.z / slices2; //image index
     const ushort s2 = gid.z - n2 * slices2; // slice offest
     half4 value;
-    for (int idx = 0; idx < 4; ++idx){
+    for (const auto idx : c10::irange(4)) {
         // we compute the "linear index" of the output element,
         // and convert it to the equivalent "linear index" of the input element.
         ushort offset = 4 * s2 + idx;
@@ -590,7 +590,7 @@ kernel void transpose(texture2d_array<half, access::read>in_arr[[texture(0),func
     half4 value;
     ushort4 threadIndexBufferLower{1, 1, 1, 1};
     ushort4 threadIndexBufferUpper{1, 1, 1 ,1};
-    for (int idx = 0; idx < 4; ++idx){
+    for (const auto idx : c10::irange(4)) {
         ushort offset = 4 * s2 + idx;
         size_t linear_idx2 = n2 * C2 * H2 * W2 + offset * H2 * W2 + gid.y * W2 + gid.x;
         if(linear_idx2 >= numel) {
@@ -810,8 +810,8 @@ kernel void roi_align(texture2d_array<half, access::sample> ina[[texture(0), fun
 
     constexpr sampler s2(coord::pixel, address::clamp_to_edge, filter::linear);
 
-    for (int iy = 0; iy < roi_bin_grid_h; iy++) {
-        for (int ix = 0; ix < roi_bin_grid_w; ix++) {
+    for (const auto iy : c10::irange(roi_bin_grid_h)) {
+        for (const auto ix : c10::irange(roi_bin_grid_w)) {
             // Shift the pixel by 0.5. This is critical to achieve high accuracy.
             const half y =
             roi_start_h + ph * bin_size_h + (iy+0.5) * bin_size_h / static_cast<half>(roi_bin_grid_h);

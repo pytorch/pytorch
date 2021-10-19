@@ -12,12 +12,6 @@
 
 #include <cusparse.h>
 
-#cmakedefine USE_MAGMA
-/* Needed for hipMAGMA to correctly identify implementation */
-#if defined(USE_MAGMA) && defined(USE_ROCM)
-#define HAVE_HIP 1
-#endif
-
 #ifndef THAssert
 #define THAssert(exp)                                                   \
   do {                                                                  \
@@ -27,8 +21,8 @@
   } while(0)
 #endif
 
-typedef struct THCState THCState;
-struct THCState;
+/* Global state of THC. */
+struct THCState {};
 
 typedef struct _THCCudaResourcesPerDevice {
   /* Size of scratch space per each stream on this device available */

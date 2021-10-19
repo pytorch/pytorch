@@ -11,10 +11,6 @@
 #include <ATen/ATen.h>
 
 
-TORCH_CUDA_CU_API THCTensor* THCTensor_new(
-    THCState* state,
-    caffe2::TypeMeta type_meta);
-
 TORCH_CUDA_CU_API void THCTensor_resizeNd(
     THCState* state,
     THCTensor* tensor,

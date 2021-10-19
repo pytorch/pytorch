@@ -674,12 +674,19 @@ class DistributedDataParallel(Module, Joinable):
         # logger and reducer.
         self.reducer.set_logger(self.logger)
 
+        has_sync_bn = False
+        for submodule in self.module.modules():
+            if isinstance(submodule, torch.nn.SyncBatchNorm):
+                has_sync_bn = True
+                break
+
         # Set logging data that can be got during construction time.
         self.logger.set_construction_data_and_log(
             self.module.__class__.__name__,
             [] if self.device_ids is None else self.device_ids,
             -1 if self.output_device is None else self.output_device,
             self.broadcast_buffers,
+            has_sync_bn
         )
 
         # passing a handle to torch.nn.SyncBatchNorm layer
