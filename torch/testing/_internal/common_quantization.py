@@ -343,9 +343,6 @@ class QuantizationTestCase(TestCase):
         self.embed_linear_data_train = [[torch.randint(0, 10, (12, 12), dtype=torch.long),
                                          torch.randn((12, 1), dtype=torch.float)]
                                         for _ in range(2)]
-        self.embed_data_train = [[torch.randint(0, 10, (12, 12), dtype=torch.long),
-                                  torch.randn((12, 12), dtype=torch.float)]
-                                 for _ in range(2)]
         self.embed_data = [[torch.randint(0, 10, (12, 1))]]
 
         # Quant types that produce statically quantized ops
