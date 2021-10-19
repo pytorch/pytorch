@@ -473,17 +473,7 @@ def unpack_sequence(packed_sequences):
     Returns:
         a list of :class:`Tensor` objects
     """
-    
-    unpacked_sequences = []
-    
-    padded_sequences, lengths = pad_packed_sequence(packed_sequences, batch_first=True)
-    
-    max_length = padded_sequences.shape[1]
-    idx = torch.arange(max_length)
 
-    for seq, length in zip(padded_sequences, lengths):
-        mask = idx < length
-        unpacked_seq = seq[mask]
-        unpacked_sequences.append(unpacked_seq)
-        
+    padded_sequences, lengths = pad_packed_sequence(packed_sequences, batch_first=True)
+    unpacked_sequences = unpad_sequence(padded_sequences, lengths, batch_first=True)
     return unpacked_sequences
