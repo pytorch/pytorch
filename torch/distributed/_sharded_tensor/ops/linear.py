@@ -171,8 +171,8 @@ def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
     if rearrange_rows:
         # Need to re-arrange rows of input_t for all2all.
         indices: List[List[int]] = [[0]] * world_size
-        # When we do the chuck split, we always ensure the first N - 1 chunks get max out
-        # and then the Nth chuck gets the rest. So input_split_sizes like [3, 3, 3, 4]
+        # When we do the chunk split, we always ensure the first N - 1 chunks get max out
+        # and then the Nth chunk gets the rest. So input_split_sizes like [3, 3, 3, 4]
         # are not possible. The expected split size will be [4, 4, 4, 1].
         sharded_dim_size_max = max(input_split_sizes)
         for idx, placement in enumerate(weight._sharding_spec.placements):
