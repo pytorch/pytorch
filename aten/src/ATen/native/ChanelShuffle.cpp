@@ -20,7 +20,7 @@ Tensor channel_shuffle_cpu(const Tensor& self, int64_t groups) {
   channel_shuffle_kernel(kCPU, output, input, groups);
   return namedinference::propagate_names_if_nonempty(
       output,
-      self.names());
+      self.has_names() ? self.names() : at::ArrayRef<Dimname>{});
 }
 
 Tensor channel_shuffle(const Tensor& self, int64_t groups) {
@@ -46,7 +46,7 @@ Tensor channel_shuffle(const Tensor& self, int64_t groups) {
   auto output = at::native_channel_shuffle(self, groups);
   return namedinference::propagate_names_if_nonempty(
       output,
-      self.names());
+      self.has_names() ? self.names() : at::ArrayRef<Dimname>{});
 }
 
 Tensor math_channel_shuffle(const Tensor& self, int64_t groups) {
