@@ -2013,6 +2013,7 @@ works_list = [
     'fmod.autodiffed',
     'ge',
     'gt',
+    'isnan',
     'le',
     'lerp',
     'lgamma',
@@ -2066,6 +2067,15 @@ works_list = [
     'view',
     'view_as',
     'where',
+    'bool',
+    'byte',
+    'char',
+    'double',
+    'float',
+    'half',
+    'int',
+    'long',
+    'short',
 ]
 
 known_failures = [
