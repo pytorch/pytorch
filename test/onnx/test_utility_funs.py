@@ -1,3 +1,5 @@
+# Owner(s): ["module: onnx"]
+
 from test_pytorch_common import TestCase, run_tests
 
 import torch
