@@ -2112,7 +2112,7 @@
 
 - func: grid_sampler_2d(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> Tensor
   dispatch:
-    CPU: grid_sampler_2d_cpu
+    CPU, QuantizedCPU: grid_sampler_2d_cpu
     CUDA: grid_sampler_2d_cuda
 
 # `grid_sampler_2d_backward` takes in `output_mask` to optimize performance for
