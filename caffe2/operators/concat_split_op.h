@@ -6,6 +6,7 @@
 #include "caffe2/core/types.h"
 #include "caffe2/utils/math.h"
 #include "caffe2/utils/string_utils.h"
+#include <c10/util/accumulate.h>
 
 namespace caffe2 {
 
@@ -277,13 +278,13 @@ bool SplitByLengthsOp<Context>::RunOnDevice() {
 
 template <class Context>
 bool ConcatOp<Context>::RunOnDevice() {
-  auto* output = Output(0);
+  auto *const output = Output(0);
 
   // We can override default options(Context::GetDeviceType())
   // by explicitly passing in device type we want
-  Tensor* split = Output(
+  Tensor *const split = Output(
       1, at::IntArrayRef({InputSize()}), at::dtype<int>().device(CPU));
-  int* axis_data = split->template mutable_data<int>();
+  int *const axis_data = split->template mutable_data<int>();
   auto& input_zero = Input(0);
   int adj_size = input_zero.dim() + (add_axis_ ? 1 : 0);
   int canonical_axis = canonical_axis_index_(axis_, adj_size);
@@ -347,7 +348,13 @@ bool ConcatOp<Context>::RunOnDevice() {
   } else {
     output_dims[canonical_axis] = output_channels;
   }
+
   output->Resize(output_dims);
+  auto *const output_ptr = static_cast<char*>(output->raw_mutable_data(input_zero.dtype()));
+  if(output_ptr == nullptr){
+    return true;
+  }
+
   size_t output_offset = 0;
   for (int i = 0; i < InputSize(); ++i) {
     auto& input = Input(i);
@@ -358,8 +365,7 @@ bool ConcatOp<Context>::RunOnDevice() {
         axis_dim * after,
         input.raw_data(),
         axis_dim * after,
-        static_cast<char*>(output->raw_mutable_data(input_zero.dtype())) +
-            output_offset,
+        output_ptr + output_offset,
         output_channels * after,
         &context_,
         input_zero.dtype().copy());

@@ -142,8 +142,8 @@ struct AutogradZeroSpecializer {
           state_[input] = State::Unknown;
         }
       } else if (
-          tp->isSubtypeOf(TensorType::get()) ||
-          tp->isSubtypeOf(ListType::ofTensors())) {
+          tp->isSubtypeOf(*TensorType::get()) ||
+          tp->isSubtypeOf(*ListType::ofTensors())) {
         state_[input] = State::Nonzero;
       } else {
         state_[input] = State::Unknown;

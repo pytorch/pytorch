@@ -143,7 +143,7 @@ struct TORCH_API InterpreterManager {
   // execute python code, or for small amounts of application logic that are
   // best written in Python. For larger amounts of code, prefer creating and
   // loading them as packages.
-  void reigsterModuleSource(std::string name, std::string src) {
+  void registerModuleSource(std::string name, std::string src) {
     registeredModuleSource_[std::move(name)] = std::move(src);
   }
 

@@ -529,7 +529,8 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
     if (node_qual_string == "fb::sigrid_transforms" ||
         node_qual_string == "fb::sigrid_transforms_torch_bind" ||
         node_qual_string == "fb::equally_split" ||
-        node_qual_string == "fb::gather_ranges_to_dense") {
+        node_qual_string == "fb::gather_ranges_to_dense" ||
+        node_qual_string == "fb::variadic_sigrid_transforms_torch_bind") {
       const Value* value_out = node->outputs()[0];
       if (value_out->uses().size() > 1) {
         continue;

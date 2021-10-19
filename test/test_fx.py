@@ -716,6 +716,34 @@ class TestFX(JitTestCase):
         traced2.graph.lint()
         traced2(torch.rand(4, 4))
 
+    def test_tensor_attribute_coalseced(self):
+
+        def count_attrs(fx_module):
+            targets = set()
+            for node in traced.graph.nodes:
+                if node.op == 'get_attr':
+                    targets.add(node.target)
+            return len(targets)
+
+        val = torch.tensor(5)
+
+        def f(x):
+            return x + val + val
+        traced = symbolic_trace(f)
+        traced.graph.lint()
+        self.assertEqual(count_attrs(traced), 1)
+
+        val2 = torch.tensor(5)
+
+        def f(x):
+            val = torch.tensor(5)
+            return x + val + val2
+
+        traced = symbolic_trace(f)
+        traced.graph.lint()
+        self.assertEqual(count_attrs(traced), 2)
+
+
     def test_symbolic_trace_sequential(self):
         class Simple(torch.nn.Module):
             def forward(self, x):

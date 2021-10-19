@@ -115,7 +115,7 @@ struct CudaGraphFuser {
 
   value_list tensorInputs(Node* node) {
     return filter(node->inputs(), [](Value* v) {
-      return v->type()->isSubtypeOf(TensorType::get());
+      return v->type()->isSubtypeOf(*TensorType::get());
     });
   }
 
@@ -211,7 +211,7 @@ struct CudaGraphFuser {
     size_t tensor_insert_idx = 0;
     for (auto input : group->inputs()) {
       inputs_map[input] = subgraph.inputs()[i++];
-      if (input->type()->isSubtypeOf(TensorType::get()))
+      if (input->type()->isSubtypeOf(*TensorType::get()))
         tensor_insert_idx = i;
     }
     // add n's inputs to the fusion group's input list if we don't already have
@@ -223,7 +223,7 @@ struct CudaGraphFuser {
       if (inputs_map.count(input) == 0) {
         // TODO: we are following the convention for no good reason;
         //       we don't need tensor to come before any other inputs.
-        if (input->type()->isSubtypeOf(TensorType::get())) {
+        if (input->type()->isSubtypeOf(*TensorType::get())) {
           auto in_group = subgraph.insertInput(tensor_insert_idx);
           in_group->setType(input->type());
           inputs_map[input] = in_group;
@@ -231,7 +231,7 @@ struct CudaGraphFuser {
           tensor_insert_idx++;
         } else if (
             // TODO: extend the supporting inputs here.
-            (input->type()->isSubtypeOf(FloatType::get()) &&
+            (input->type()->isSubtypeOf(*FloatType::get()) &&
              input->node()->kind() != prim::Constant)) {
           auto in_group = subgraph.addInput();
           in_group->setType(input->type());
@@ -596,7 +596,7 @@ struct CudaGraphFuser {
       // XXX: we only work with pointwise ops in here, so we know it is valid to
       // push the concat only through tensor arguments (and all other args can
       // be safely ignored).
-      if (!input->type()->isSubtypeOf(TensorType::get()))
+      if (!input->type()->isSubtypeOf(*TensorType::get()))
         continue;
 
       // if 'input' is already an input to the bchunk, reuse it.
@@ -689,7 +689,7 @@ struct CudaGraphFuser {
       chunked_op->output()->setType(chunk_sel->type());
       auto chunked_inputs_it = chunked_inputs.begin();
       for (Value* original_input : original_inputs) {
-        if (original_input->type()->isSubtypeOf(TensorType::get())) {
+        if (original_input->type()->isSubtypeOf(*TensorType::get())) {
           AT_ASSERT(chunked_inputs_it != chunked_inputs.end());
           chunked_op->addInput(
               // NOLINTNEXTLINE(clang-analyzer-core.DivideZero)
@@ -721,7 +721,7 @@ struct CudaGraphFuser {
     if (!size_calc_uses.empty()) {
       auto tensor_inputs = filter(
           producer_for_chunk_node->inputs(),
-          [](Value* v) { return v->type()->isSubtypeOf(TensorType::get()); });
+          [](Value* v) { return v->type()->isSubtypeOf(*TensorType::get()); });
       auto tensor_sizes = fmap(tensor_inputs, [](Value* v) {
         return v->owningGraph()->insert(aten::size, {v});
       });
@@ -824,7 +824,7 @@ struct CudaGraphFuser {
     auto sinputs = subgraph->inputs();
     AT_ASSERT(inputs.size() == sinputs.size());
     for (const auto i : c10::irange(inputs.size())) {
-      if (inputs[i]->type()->isSubtypeOf(TensorType::get())) {
+      if (inputs[i]->type()->isSubtypeOf(*TensorType::get())) {
         shape_of[sinputs[i]] = graph->insert(aten::size, {inputs[i]});
       }
     }
@@ -963,7 +963,7 @@ struct CudaGraphFuser {
         continue;
       }
       auto tensor_inputs = filter(n->inputs(), [](Value* v) {
-        return v->type()->isSubtypeOf(TensorType::get());
+        return v->type()->isSubtypeOf(*TensorType::get());
       });
       auto shapes = fmap(tensor_inputs, [&](Value* v) {
         TORCH_INTERNAL_ASSERT(

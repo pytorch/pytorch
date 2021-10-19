@@ -616,7 +616,7 @@ std::vector<Tensor> tensor_split(const Tensor& self, const Tensor& tensor_indice
     auto stride = tensor_indices_or_sections.stride(0);
     auto numel = tensor_indices_or_sections.numel();
     std::vector<int64_t> indices(numel);
-    for (size_t offset = 0; offset < numel; offset++) {
+    for (const auto offset : c10::irange(numel)) {
       // indices tensor could be non-contiguous
       indices[offset] = *(indices_data + offset * stride);
     }

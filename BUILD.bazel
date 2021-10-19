@@ -2067,6 +2067,23 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "lazy_tests",
+    size = "small",
+    srcs = glob([
+        "test/cpp/lazy/*.cpp",
+        "test/cpp/lazy/*.h",
+    ]),
+    linkstatic = True,
+    tags = [
+        "exclusive",
+    ],
+    deps = [
+        ":torch",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
 # all tests
 test_suite(
     name = "all_tests",
