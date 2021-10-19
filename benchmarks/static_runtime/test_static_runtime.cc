@@ -1005,12 +1005,12 @@ TEST(StaticRuntime, ManageOutputTensorsReturnsOutputContainingManagedOutputTenso
   {
     IValue tuple = runtime(args, {});
     ASSERT_TRUE(tuple.isTuple());
-    ASSERT_EQ(tuple.toTuple()->elements().size(), 1);
+    ASSERT_EQ(tuple.toTupleRef().elements().size(), 1);
     // Do not manage intput value.
     EXPECT_FALSE(runtime.isManagedOutputTensor(args[0]));
     // Do not manage direct output value.
     EXPECT_FALSE(runtime.isManagedOutputTensor(tuple));
-    IValue element = tuple.toTuple()->elements()[0];
+    IValue element = tuple.toTupleRef().elements()[0];
     // Tensor to be managed, but not yet from the profile run.
     EXPECT_FALSE(runtime.isManagedOutputTensor(element));
     tuple = IValue();
@@ -1021,12 +1021,12 @@ TEST(StaticRuntime, ManageOutputTensorsReturnsOutputContainingManagedOutputTenso
   {
     IValue tuple = runtime(args, {});
     ASSERT_TRUE(tuple.isTuple());
-    ASSERT_EQ(tuple.toTuple()->elements().size(), 1);
+    ASSERT_EQ(tuple.toTupleRef().elements().size(), 1);
     // Do not manage intput value.
     EXPECT_FALSE(runtime.isManagedOutputTensor(args[0]));
     // Do not manage direct output value.
     EXPECT_FALSE(runtime.isManagedOutputTensor(tuple));
-    IValue element = tuple.toTuple()->elements()[0];
+    IValue element = tuple.toTupleRef().elements()[0];
     // Tensor to be managed, but not yet from the profile run.
     EXPECT_TRUE(runtime.isManagedOutputTensor(element));
     tuple = IValue();

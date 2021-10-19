@@ -29,7 +29,7 @@ std::vector<std::vector<at::IValue>> MobileModelRunner::
         "but got a ",
         input.tagKind(),
         " instead");
-    ret.push_back(input.toTuple()->elements());
+    ret.push_back(input.toTupleRef().elements());
   }
 
   return ret;
