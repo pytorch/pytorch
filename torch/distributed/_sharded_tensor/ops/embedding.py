@@ -1,7 +1,11 @@
-from typing import cast
+import itertools
+from typing import List, cast
 
 import torch
 import torch.distributed as dist
+from torch.distributed._sharded_tensor.ops._common import (
+    _handle_col_wise_sharding_common,
+)
 from torch.distributed._sharding_spec import ChunkShardingSpec
 from torch.distributed._sharding_spec._internals import (
     get_split_size,
@@ -18,15 +22,47 @@ def sharded_embedding(types, args, kwargs, pg):
     2. Supports only ``ChunkShardingSpec``.
     3. Supports only a single local shard per rank.
     4. Supports only simple look-up and including specs like padding_idx, max_norm, etc.
-    5. Supports only column-wise sharding for now.
 
     Based on the dimension that the weight is sharded on, there are two
     algorithms:
 
     ROWWISE SHARDING
     ================
-    For row-wise sharding the weight is sharded on dimension 0, but this has
-    not been supported now and is in the process of implementation.
+    For row-wise sharding the weight is sharded on dimension 0.
+
+    The overall algorithm can be best explained with an example. Let's assume
+    the dims for input are (4 x 6) and W are (10 x 17) and W is sharded across
+    4 GPUs creating 3 shard of (3 x 17) and 1 shard of (1 x 17).
+    The algorithm is as follows:
+
+    1. First the input is flattened to 1D and gets sorted so that we can distribute
+       them to the corresponding rank. For example if the given input is
+       tensor([[6, 5, 2, 9, 6, 3],
+               [3, 1, 2, 4, 7, 6],
+               [4, 0, 4, 9, 8, 9],
+               [8, 6, 6, 4, 6, 1]])
+       Then we have the 1D array like:
+       tensor([6, 5, 2, 9, 6, 3, 3, 1, 2, 4, 7, 6, 4, 0, 4, 9, 8, 9, 8, 6, 6, 4, 6, 1])
+       And sort it:
+       tensor([0, 1, 1, 2, 2, 3, 3, 4, 4, 4, 4, 5, 6, 6, 6, 6, 6, 6, 7, 8, 8, 9, 9, 9])
+       We also record the indices so that we can recover back.
+    2. Next we perform the split by search the index of the chunking
+       boundary. So the above array will be split into 4 parts:
+       tensor([[0, 1, 1, 2, 2], [3, 3, 4, 4, 4, 4, 5],
+              [6, 6, 6, 6, 6, 6, 7, 8, 8], [9, 9, 9])
+       Rearragement may be needed if the rank order is different from
+       its index in the placement.
+    3. Next, we communicate the length of each part to each rank via all2all
+       so that each rank now knows what input it will get from all other ranks.
+    5. Before we send out the array to other ranks, we need to do the modular operation
+       so that each rank do use that for embedding look-up.
+       The above tensor will look like the below after performing the moduler of 3:
+       tensor([[0, 1, 1, 2, 2], [0, 0, 1, 1, 1, 1, 2],
+              [0, 0, 0, 0, 0, 0, 1, 2, 2], [0, 0, 0])
+    4. Now, each rank receives a matrix (size may vary) and do the look-up. We then use
+       all2all to send the result back to each rank.
+    5. We use the recorded indices to recover the sorted positions and reshape the
+       matrix to (4 x 6 x 17), which is what we need.
 
     COLWISE SHARDING
     ================
@@ -90,6 +126,10 @@ def sharded_embedding(types, args, kwargs, pg):
 
     if sharding_dim == 1:
         return _handle_col_wise_sharding(input, world_size, weight, local_shard, pg)
+    elif sharding_dim == 0:
+        return _handle_row_wise_sharding(
+            input, world_size, weight, rank, local_shard, pg
+        )
     else:
         raise RuntimeError(
             f"nn.Embedding weight sharded on dim {sharding_dim} not supported!"
@@ -97,56 +137,114 @@ def sharded_embedding(types, args, kwargs, pg):
 
 
 def _handle_col_wise_sharding(input, world_size, weight, local_shard, pg):
-    # allgather the inputs first.
-    gathered_inputs = [torch.zeros_like(input) for _ in range(world_size)]
-    dist.all_gather(gathered_inputs, input, group=pg)
+    return _handle_col_wise_sharding_common(
+        torch.nn.functional.embedding,
+        weight.size(1),
+        len(input.size()),
+        input,
+        world_size,
+        weight,
+        local_shard,
+        pg,
+    )
 
-    # run the embedding look-up for all the inputs.
-    results = []
-    for i, inp in enumerate(gathered_inputs):
-        result = torch.nn.functional.embedding(inp, local_shard)
-        results.append(torch.transpose(result, 0, len(input.size())))
 
-    # Process inputs and outputs for all2all.
-    sharding_dim_size = weight.size()[1]
-    dims = list(results[0].size())
-    dims[0] = sharding_dim_size
-    output = torch.empty(*dims, device=input.device)
-    combined_results = torch.cat(results)
+def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard, pg):
+    # flatten the ids across all input and sort
+    input_size = input.size()
+    input_1d = torch.reshape(input, (-1,)).contiguous()
+    input_sorted, indices_1d = torch.sort(input_1d)
+    rearrange_indices_1d = torch.argsort(indices_1d)
+    input_sorted.contiguous()
 
-    # Compute output splits
-    split_size = get_split_size(sharding_dim_size, world_size)
-    output_split_sizes = [0] * world_size
+    # Compute expected size
+    split_size = get_split_size(weight.size(0), world_size)
+    rearrange_rows = False
+
+    # Decide which rank the input goes to by check the sharding range.
+    input_split_sizes: List[int] = [0] * world_size
+    input_split_start_indices: List[int] = [0] * world_size
+    # When we do the chuck split, we always ensure the first N - 1 chunks get max out
+    # and then the Nth chuck gets the rest. So input_split_sizes like [3, 3, 3, 4]
+    # are not possible. The expected split size will be [4, 4, 4, 1].
+    sharded_dim_size_max = get_chunked_dim_size(weight.size(0), split_size, 0)
     for idx, placement in enumerate(weight._sharding_spec.placements):
-        output_split_sizes[placement.rank()] = get_chunked_dim_size(
-            sharding_dim_size, split_size, idx
-        )
+        sharded_dim_size = get_chunked_dim_size(weight.size(0), split_size, idx)
+        start_row_idx = idx * sharded_dim_size_max
+        end_row_idx = start_row_idx + sharded_dim_size
+        start_idx = torch.searchsorted(input_sorted, start_row_idx).item()
+        end_idx = torch.searchsorted(input_sorted, end_row_idx).item()
+        input_split_sizes[placement.rank()] = end_idx - start_idx
+        input_split_start_indices[placement.rank()] = start_idx
+        if placement.rank() != idx:
+            rearrange_rows = True
 
-    # distribute the outputs using all2all.
-    dist.all_to_all_single(
-        output, combined_results, output_split_sizes=output_split_sizes, group=pg
-    )
-
-    # Check if we need to rearrange rows appropriately for output.
-    rearrange_columns = any(
-        [
-            idx != placement.rank()
-            for idx, placement in enumerate(weight._sharding_spec.placements)
-        ]
-    )
-    if rearrange_columns:
-        indices = []
+    rearrange_indices_1d_second_order = None
+    if rearrange_rows:
+        # Need to re-arrange rows of input_t for all2all.
+        indices: List[List[int]] = [[0]] * world_size
         for placement in weight._sharding_spec.placements:
-            dim_size = output_split_sizes[placement.rank()]
-            start = sum(
-                [
-                    split_size if i < placement.rank() else 0
-                    for i, split_size in enumerate(output_split_sizes)
-                ]
+            split_length = input_split_sizes[placement.rank()]
+            offset_idx = input_split_start_indices[placement.rank()]
+            indices[placement.rank()] = list(
+                range(offset_idx, offset_idx + split_length)
             )
-            indices += list(range(start, start + dim_size))
+        indices_flatten = list(idx for indice in indices for idx in indice)
 
-        output = output.index_select(0, torch.tensor(indices, device=output.device))
+        input_sorted = input_sorted.index_select(
+            0, torch.tensor(indices_flatten, device=input.device)
+        )
+        rearrange_indices_1d_second_order = torch.argsort(torch.Tensor(indices_flatten))
 
-    # transpose the output and return result.
-    return torch.transpose(output, 0, len(input.size()))
+    # allgather the input split size first. Each rank has different size.
+    input_split_sizes_tensor = torch.Tensor(input_split_sizes).cuda(rank)
+    gathered_all_input_sizes = [
+        torch.zeros_like(input_split_sizes_tensor) for _ in range(world_size)
+    ]
+    dist.all_gather(gathered_all_input_sizes, input_split_sizes_tensor, group=pg)
+
+    # Get the output split size sent to the current rank from each rank.
+    output_split_sizes = []
+    for gathered_all_output_size in gathered_all_input_sizes:
+        output_split_sizes.append(int(gathered_all_output_size[rank].item()))
+
+    gathered_input = torch.empty(
+        sum(output_split_sizes), dtype=torch.int64, device=input.device
+    )
+
+    # Perform the modular operation of the input
+    input_sorted = torch.remainder(input_sorted, sharded_dim_size_max)
+
+    # Perform alltoall
+    dist.all_to_all_single(
+        gathered_input,
+        input_sorted,
+        input_split_sizes=input_split_sizes,
+        output_split_sizes=output_split_sizes,
+        group=pg,
+    )
+
+    # Perform local embedding look up.
+    gathered_input_embeddings = torch.nn.functional.embedding(
+        gathered_input, local_shard
+    )
+
+    # Gather all lookup result appropriately by performing alltoall again
+    gathered_output = torch.empty(
+        input_sorted.size(0), weight.size(1), device=input.device
+    )
+    dist.all_to_all_single(
+        gathered_output,
+        gathered_input_embeddings,
+        input_split_sizes=output_split_sizes,
+        output_split_sizes=input_split_sizes,
+        group=pg,
+    )
+
+    # Rearragne the results to its original shape.
+    if rearrange_indices_1d_second_order is not None:
+        gathered_output = gathered_output[rearrange_indices_1d_second_order]
+    gathered_output = gathered_output[rearrange_indices_1d]
+
+    # Return the appropriate local result.
+    return torch.reshape(gathered_output, (*input_size, weight.size(1)))

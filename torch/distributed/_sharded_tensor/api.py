@@ -27,7 +27,7 @@ from torch.distributed._sharding_spec._internals import (
     get_chunked_dim_size,
 )
 from torch.types import Number
-from .ops import sharded_embedding, sharded_embedding_bag, sharded_linear
+from .ops import sharded_embedding, sharded_linear
 
 # Tracking for sharded tensor objects.
 _sharded_tensor_lock = threading.Lock()
@@ -638,8 +638,6 @@ class ShardedTensor(object):
             return sharded_linear(types, args, kwargs, self._process_group)
         if func == torch.nn.functional.embedding:
             return sharded_embedding(types, args, kwargs, self._process_group)
-        if func == torch.nn.functional.embedding_bag:
-            return sharded_embedding_bag(types, args, kwargs, self._process_group)
 
         raise RuntimeError(
             f"torch function '{func.__name__}', with args: {args} and "
