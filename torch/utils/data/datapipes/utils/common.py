@@ -86,6 +86,9 @@ class StreamWrapper:
     def __getstate__(self):
         return self.file_obj.__getstate__()
 
+    def __repr__(self):
+        return "StreamWrapper<" + repr(self.file_obj) + ">"
+
     def __iter__(self):
         return self.file_obj.__iter__()
 
