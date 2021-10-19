@@ -1,9 +1,11 @@
 #pragma once
 
+#include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Generator.h>
 #include <ATen/Tensor.h>
 #include <ATen/MemoryOverlap.h>
+#include <ATen/NamedTensorUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <c10/util/Optional.h>
 #include <limits>

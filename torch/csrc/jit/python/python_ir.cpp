@@ -263,7 +263,7 @@ void initPythonIRBindings(PyObject* module_) {
             std::shared_ptr<::ONNX_NAMESPACE::ModelProto> model_proto;
             RawDataExportMap export_map;
             SymbolDimMap symbol_map;
-            bool val_use_external_data_format;
+            bool val_use_external_data_format = false;
             std::tie(
                 model_proto,
                 export_map,

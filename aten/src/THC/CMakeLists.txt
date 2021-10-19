@@ -26,7 +26,6 @@ install(FILES
           THCTensor.h
           THCTensorMathReduce.cuh
           THCAtomics.cuh
-          THCAllocator.h
           THCGenerateAllTypes.h
           THCGenerateBFloat16Type.h
           THCGenerateBoolType.h

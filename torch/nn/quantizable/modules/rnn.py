@@ -212,7 +212,7 @@ class _LSTMLayer(torch.nn.Module):
     def from_float(cls, other, layer_idx=0, qconfig=None, **kwargs):
         r"""
         There is no FP equivalent of this class. This function is here just to
-        mimic the behavior of the `prepare` within the `torch.quantization`
+        mimic the behavior of the `prepare` within the `torch.ao.quantization`
         flow.
         """
         assert hasattr(other, 'qconfig') or (qconfig is not None)
@@ -375,10 +375,10 @@ class LSTM(torch.nn.Module):
             observed.layers[idx] = _LSTMLayer.from_float(other, idx, qconfig,
                                                          batch_first=False)
         observed.eval()
-        observed = torch.quantization.prepare(observed, inplace=True)
+        observed = torch.ao.quantization.prepare(observed, inplace=True)
         return observed
 
     @classmethod
     def from_observed(cls, other):
-        return torch.quantization.convert(other, inplace=False,
-                                          remove_qconfig=True)
+        return torch.ao.quantization.convert(other, inplace=False,
+                                             remove_qconfig=True)

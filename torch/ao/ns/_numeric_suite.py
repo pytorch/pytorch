@@ -2,10 +2,10 @@ import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
-from torch.quantization import prepare
+from torch.ao.quantization import prepare
 from typing import Dict, List, Optional, Any, Union, Callable, Set
 
-from torch.quantization.quantization_mappings import (
+from torch.ao.quantization.quantization_mappings import (
     get_default_compare_output_module_list,
 )
 
@@ -433,7 +433,7 @@ def prepare_model_outputs(
     if allow_list is None:
         allow_list = get_default_compare_output_module_list()
 
-    qconfig_debug = torch.quantization.QConfig(activation=logger_cls, weight=None)
+    qconfig_debug = torch.ao.quantization.QConfig(activation=logger_cls, weight=None)
     float_module.qconfig = qconfig_debug  # type: ignore[assignment]
     prepare(float_module, inplace=True, allow_list=allow_list)
     q_module.qconfig = qconfig_debug  # type: ignore[assignment]

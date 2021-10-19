@@ -4,7 +4,7 @@ from tools.codegen.api.autograd import (
     dispatch_strategy,
 )
 from tools.codegen.api.types import (Binding, DispatcherSignature, CppSignatureGroup, CType,
-                                     BaseCType, OptionalCType, intT, boolT, intArrayRefT)
+                                     BaseCType, OptionalCType, longT, boolT, intArrayRefT)
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.context import with_native_function
 from tools.codegen.model import (
@@ -244,8 +244,8 @@ def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str
     replay_view_func = ''
     updated_unpacked_args: List[str] = []
     known_view_arg_simple_types: List[CType] = [
-        BaseCType(intT),
-        OptionalCType(BaseCType(intT)),
+        BaseCType(longT),
+        OptionalCType(BaseCType(longT)),
         BaseCType(boolT),
         BaseCType(intArrayRefT)]
     for unpacked_binding in unpacked_bindings:
@@ -266,7 +266,7 @@ def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str
             arg_vec = arg + '_vec'
             replay_view_func += ARRAYREF_TO_VEC.substitute(arg=arg, vec=arg_vec)
             updated_unpacked_args.append(arg_vec)
-        elif arg_type == OptionalCType(BaseCType(intT)):
+        elif arg_type == OptionalCType(BaseCType(longT)):
             # Materialize int64_t? to int64_t
             arg_value = arg + '_val'
             replay_view_func += OPTIONAL_TO_VAL.substitute(arg=arg, val=arg_value, default='0')

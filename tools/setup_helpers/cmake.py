@@ -243,7 +243,7 @@ class CMake:
             var: var for var in
             ('BLAS',
              'BUILDING_WITH_TORCH_LIBS',
-             'CUDA_HOST_COMPILER',
+             'CUDA_HOST_COMILER',
              'CUDA_NVCC_EXECUTABLE',
              'CUDA_SEPARABLE_COMPILATION',
              'CUDNN_LIBRARY',
@@ -267,6 +267,15 @@ class CMake:
              'OPENSSL_ROOT_DIR')
         })
 
+        # Aliases which are lower priority than their canonical option
+        low_priority_aliases = {
+            'CUDA_HOST_COMPILER': 'CMAKE_CUDA_HOST_COMPILER',
+            'CUDAHOSTCXX': 'CUDA_HOST_COMPILER',
+            'CMAKE_CUDA_HOST_COMPILER': 'CUDA_HOST_COMPILER',
+            'CMAKE_CUDA_COMPILER': 'CUDA_NVCC_EXECUTABLE',
+            'CUDACXX': 'CUDA_NVCC_EXECUTABLE'
+        }
+
         for var, val in my_env.items():
             # We currently pass over all environment variables that start with "BUILD_", "USE_", and "CMAKE_". This is
             # because we currently have no reliable way to get the list of all build options we have specified in
@@ -278,6 +287,11 @@ class CMake:
                 build_options[true_var] = val
             elif var.startswith(('BUILD_', 'USE_', 'CMAKE_')) or var.endswith(('EXITCODE', 'EXITCODE__TRYRUN_OUTPUT')):
                 build_options[var] = val
+
+            if var in low_priority_aliases:
+                key = low_priority_aliases[var]
+                if key not in build_options:
+                    build_options[key] = val
 
         # The default value cannot be easily obtained in CMakeLists.txt. We set it here.
         py_lib_path = sysconfig.get_path('purelib')

@@ -6473,18 +6473,22 @@ class DistributedTest:
                     self.net2 = nn.Linear(10, 5)
 
                 def forward(self, x):
-                    return self.net2(x)
+                    return self.net2(x).sum()
 
             torch.cuda.set_device(self.rank)
             model = ToyModel().to(torch.cuda.current_device())
-            ddp_model = torch.nn.parallel.DistributedDataParallel(
-                model, device_ids=[self.rank], find_unused_parameters=True
-            )
-            inp = torch.randn(20, 10, device=self.rank)
-            for i in range(6):
-                out = ddp_model(inp)
-                loss = out.sum()
-                loss.backward()
+            for static in [True, False]:
+                ddp_model = torch.nn.parallel.DistributedDataParallel(
+                    copy.deepcopy(model), device_ids=[self.rank], find_unused_parameters=True
+                )
+                if static:
+                    ddp_model._set_static_graph()
+                inp = torch.randn(20, 10, device=self.rank)
+                for i in range(6):
+                    loss = ddp_model(inp)
+                    # To test https://github.com/pytorch/pytorch/issues/61982
+                    loss /= 10
+                    loss.backward()
 
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})

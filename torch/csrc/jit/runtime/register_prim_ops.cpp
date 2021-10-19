@@ -1164,16 +1164,6 @@ void dictKeys(Stack& stack) {
   push(stack, keys);
 }
 
-void dictIndex(Stack& stack) {
-  auto key = pop(stack);
-  auto dict = pop(stack).toGenericDict();
-  auto value = dict.find(key);
-  if (value == dict.end()) {
-    AT_ERROR("KeyError: ", key);
-  }
-  push(stack, value->value());
-}
-
 template <bool has_default>
 void dictGet(Stack& stack) {
   IValue default_value;
