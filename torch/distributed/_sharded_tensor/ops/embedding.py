@@ -1,4 +1,3 @@
-import itertools
 from typing import List, cast
 
 import torch
