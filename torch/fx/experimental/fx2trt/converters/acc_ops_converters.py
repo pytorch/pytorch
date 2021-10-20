@@ -1147,9 +1147,14 @@ def acc_ops_unsqueeze(network, target, args, kwargs, name):
                            "of the TensorRT region!")
 
     dim = kwargs["dim"]
+    input_shape = input_val.shape
+    input_shape_size = len(input_val.shape)
+    if dim < 0:
+        dim = dim % (input_shape_size + 1)
     if network.has_implicit_batch_dimension:
         assert dim != 0
-        dim -= 1
+        if kwargs["dim"] > 0:
+            dim -= 1
 
     assert len(get_dynamic_dims(input_val.shape)) <= 1, "Currently we don't support unsqueeze with more than one dynamic dims."
     layer = network.add_shuffle(input_val)
