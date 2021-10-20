@@ -617,8 +617,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           case INST(ISINSTANCE): {
             INST_GUARD;
             at::ArrayRef<TypePtr> types(
-                &(frame.function->type_table_[inst.X]),
-                &(frame.function->type_table_[inst.X + inst.N]));
+                &frame.function->type_table_[inst.X],
+                &frame.function->type_table_[inst.X] + inst.N);
             isinstance(stack, types);
           }
             INST_NEXT;
@@ -901,10 +901,13 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
   void run(Stack& stack) {
+    // By the time the continuation completes the frame will be gone, so this
+    // must be done before calling runImpl().
+    TORCH_INTERNAL_ASSERT(!frames.empty());
+    const auto num_outputs = frames.front().function->n_outputs;
     if (runImpl(stack)) {
       future_->wait();
 
-      auto num_outputs = frames.front().function->n_outputs;
       if (num_outputs == 1) {
         push(stack, future_->value());
       } else {
