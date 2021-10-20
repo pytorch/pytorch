@@ -3,6 +3,8 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
+
+#include <c10/util/irange.h>
 #include <c10/util/quint8.h>
 #include <array>
 

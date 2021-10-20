@@ -36,6 +36,8 @@ ALLOW_LIST = [
     # Internal, profiler-specific ops
     ("profiler::_call_end_callbacks_on_jit_fut*", datetime.date(9999, 1, 1)),
     ("profiler::_record_function_enter", datetime.date(9999, 1, 1)),
+    ("aten::linalg_matrix_rank", datetime.date(2021, 10, 30)),
+    ("aten::linalg_pinv", datetime.date(2021, 10, 30)),
     ("aten::_cholesky_helper", datetime.date(9999, 1, 1)),
     ("aten::_lstsq_helper", datetime.date(9999, 1, 1)),
     ("aten::_syevd_helper", datetime.date(9999, 1, 1)),
@@ -57,6 +59,7 @@ ALLOW_LIST = [
     ("aten::fused_moving_avg_obs_fake_quant", datetime.date(2021, 10, 21)),
     ("aten::_fused_moving_avg_obs_fq_helper", datetime.date(2021, 10, 21)),
     ("aten::_baddbmm_mkl_", datetime.date(2021, 10, 31)),
+    ("aten::grid_sampler_2d_backward", datetime.date(2021, 10, 21)),
 ]
 
 ALLOW_LIST_COMPILED = [
