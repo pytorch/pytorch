@@ -15,6 +15,7 @@ from torch.ao.quantization.quantize_fx import (
     prepare_fx,
     convert_fx,
     prepare_qat_fx,
+    _convert_fx_new,
 )
 
 from torch.ao.quantization.fx.quantization_patterns import DefaultNodeQuantizeHandler
@@ -3230,7 +3231,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         for f_relu, quant_type in itertools.product([True, False], [QuantType.STATIC, QuantType.QAT]):
             for model, quantized_node in [
                     (ModuleLinear(has_relu=True, f_relu=f_relu), ns.call_module(nniq.LinearReLU))]:
-                self.checkGraphModeFxOp(model, data, quant_type, quantized_node)
+                self.checkGraphModeFxOp(model, data, quant_type, quantized_node, print_debug_info=True)
 
     @skipIfNoFBGEMM
     def test_functional_linear(self):
@@ -5184,6 +5185,24 @@ class TestQuantizeFxOps(QuantizationTestCase):
         m = convert_fx(m)
         m(data)
         # make sure everything runs
+
+class TestQuantizeFxOpsNew(QuantizationTestCase):
+    def test_ops(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = x + 3
+                x = self.relu(x)
+                x = x + 6
+                return x
+
+        m = M().eval()
+        m = prepare_fx(m, {"": default_qconfig})
+        m = _convert_fx_new(m, is_reference=True)
+        print(m)
 
 class TestQuantizeFxModels(QuantizationTestCase):
     @skipIfNoFBGEMM
