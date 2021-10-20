@@ -1567,17 +1567,17 @@ std::tuple<Tensor&, Tensor&, Tensor&> linalg_lu_factor_ex_out(const Tensor& A,
   TORCH_CHECK(A.dim() >= 2,
               "expected tensor with 2 or more dimensions, got size: ", A.sizes(), " instead");
   auto req_size = A.sizes().vec();
+  const auto m = req_size.cend()[-2];
+  const auto n = req_size.cend()[-1];
+
   // TODO reimplementation of resize_output with format F-contiguous
   // We should make this a standalone function
   if (resize_output_check(LU, req_size)) {
     // Transpose size
     std::iter_swap(req_size.end() - 1, req_size.end() - 2);
     LU.resize_(req_size, MemoryFormat::Contiguous);
-    std::iter_swap(req_size.end() - 1, req_size.end() - 2);
-    LU.transpose_(-2, -1);  // make 'LU' have Fortran contiguous memory layLU
+    LU.transpose_(-2, -1);  // make 'LU' have Fortran contiguous memory
   }
-  const auto m = req_size.cend()[-2];
-  const auto n = req_size.cend()[-1];
   req_size.pop_back();
   req_size.back() = std::min(m, n);
   at::native::resize_output(pivots, req_size);
@@ -1596,7 +1596,6 @@ std::tuple<Tensor&, Tensor&, Tensor&> linalg_lu_factor_ex_out(const Tensor& A,
 
   const auto info_contig = info.is_contiguous();
   const auto info_ = borrow_else_clone(info_contig, info, info, /*C-contig*/true);
-
 
   lu_factor_stub(A.device().type(), *LU_, *pivots_, *info_, pivot);
 
@@ -1632,7 +1631,7 @@ std::tuple<Tensor, Tensor, Tensor> linalg_lu_factor_ex(const Tensor& A, bool piv
 std::tuple<Tensor&, Tensor&> linalg_lu_factor_out(const Tensor& A, bool pivot, Tensor & LU, Tensor & pivots) {
   auto info = at::empty({0}, A.options().dtype(kInt));
   // We pass check_errors as we want to use lu_factor rather than lu_factor_ex in the errors
-  at::native::linalg_lu_factor_ex_out(A, pivot, /*chech_errors=*/false, LU, pivots, info);
+  at::linalg_lu_factor_ex_out(LU, pivots, info, A, pivot, /*chech_errors=*/false);
   if (A.dim() > 2) {
     batchCheckErrors(info, "torch.linalg.lu_factor");
   } else {
