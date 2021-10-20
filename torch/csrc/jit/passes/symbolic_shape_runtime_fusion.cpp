@@ -292,9 +292,9 @@ RegisterOperators reg_guard({
             at::ArrayRef<IValue> inputs = last(stack, num_inputs);
             drop(stack, num_inputs);
 
-            std::cout << "\nNum inputs: " <<  num_inputs;
-            std::cout << "\n flattened_input_dims: " <<  flattened_input_dims;
-            std::cout << "\n num_symbolic_dims: " <<  flattened_input_dims;
+            std::cout << "\nNum inputs: " << num_inputs;
+            std::cout << "\n flattened_input_dims: " << flattened_input_dims;
+            std::cout << "\n num_symbolic_dims: " << flattened_input_dims;
 
             // each invocation we need to reset what value of each symbolic
             // symbol is.
@@ -304,8 +304,8 @@ RegisterOperators reg_guard({
             // TODO - smallvector here ?
 
             // TODO - faster initialization
-            // std::vector<int64_t> flattened_symbolic_dims(num_symbolic_dims, -1);
-            // did not work on certain platforms
+            // std::vector<int64_t> flattened_symbolic_dims(num_symbolic_dims,
+            // -1); did not work on certain platforms
             std::vector<int64_t> flattened_symbolic_dims;
             flattened_symbolic_dims.reserve(num_symbolic_dims);
             for (size_t i = 0; i < num_symbolic_dims; ++i) {
@@ -313,7 +313,8 @@ RegisterOperators reg_guard({
             }
             size_t flattened_dim_offset = 0;
             for (const auto i : c10::irange(num_inputs)) {
-              std::cout << "\n Flattened dims loop: " << flattened_symbolic_dims;
+              std::cout << "\n Flattened dims loop: "
+                        << flattened_symbolic_dims;
 
               at::Tensor tensor = inputs[i].toTensor();
               if (C10_UNLIKELY(
@@ -346,8 +347,9 @@ RegisterOperators reg_guard({
                 return;
               }
               for (const auto dim_index : c10::irange(num_dims)) {
-                std::cout << "\n Flattened dims loop 2 : " << flattened_symbolic_dims;
-
+                std::cout << "\n Flattened dims loop 2 : "
+                          << flattened_symbolic_dims;
+                std::cout << "index : " << dim_index + flattened_dim_offset << "\n";
                 const int64_t dim_value =
                     flattened_input_dims[dim_index + flattened_dim_offset];
                 const int64_t tensor_dim = sizes[dim_index];
