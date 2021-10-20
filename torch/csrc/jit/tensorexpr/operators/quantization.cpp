@@ -174,11 +174,17 @@ Tensor computeQuantizedConv2dPrepack(
       ResultBuf,
       "nnc_aten_quantized_conv2d_prepack",
       {qw, b},
+      // NOLINTNEXTLINE
       {strides[0],
+       // NOLINTNEXTLINE
        strides[1],
+       // NOLINTNEXTLINE
        padding[0],
+       // NOLINTNEXTLINE
        padding[1],
+       // NOLINTNEXTLINE
        dilation[0],
+       // NOLINTNEXTLINE
        dilation[1],
        groups,
        immQScale(qw),
