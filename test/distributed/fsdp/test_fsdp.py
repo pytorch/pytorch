@@ -31,6 +31,19 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
+def _get_model_device_set(model):
+    return {p.device for p in model.parameters()}
+
+@torch.no_grad()
+def _params_to_dev(model, dev):
+    for p in model.parameters():
+        p.data = p.detach().to(dev)
+
+@torch.no_grad()
+def _grads_to_dev(model, dev):
+    for p in model.parameters():
+        p.grad.data = p.grad.detach().to(dev)
+
 # get full params of a model recursively
 def _get_full_params(model, recurse=True):
     if recurse:
@@ -53,6 +66,7 @@ class TransformerWithSharedParams(nn.Module):
         self.rank = group.rank()
         self.world_size = group.size()
         torch.manual_seed(0)  # keep everything deterministic
+        torch.cuda.manual_seed(0)
         assert (
             d_vocab >= 12
         ), "dim of vocab should be larger than 12, as we use torch.arange(12) as input"
@@ -78,6 +92,7 @@ class TransformerWithSharedParams(nn.Module):
 
     def get_input(self, device):
         torch.manual_seed(1 + self.rank)  # keep everything deterministic
+        torch.cuda.manual_seed(1 + self.rank)
         src = torch.arange(12, device=device).view(6, self.bs)  # T x B
         tgt = torch.arange(self.bs * 4, device=device).view(4, self.bs)  # T x B
         return (src, tgt)
@@ -112,6 +127,7 @@ class NestedWrappedModule(nn.Module):
             return layer
 
         torch.manual_seed(0)  # keep everything deterministic
+        torch.cuda.manual_seed(0)
 
         if wrap_everything:
             self.module = nn.Sequential(
@@ -135,6 +151,7 @@ class NestedWrappedModule(nn.Module):
 
     def get_input(self, device):
         torch.manual_seed(1 + self.rank)  # keep everything deterministic
+        torch.cuda.manual_seed(1 + self.rank)
         return (torch.rand(4, 8, device=device),)
 
     def forward(self, x):
@@ -204,10 +221,14 @@ class FSDPTest(MultiProcessTestCase):
         model_device = next(model.parameters()).device
         # use SGD with momentum instead of Adam, since Adam is scale invariant
         # and this makes it bad for tests
+        # enable cudnn determinism with torch.backends.cudnn.flags(
+        #    enabled=True, deterministic=True, benchmark=False
+        # ): does not work either
         optim = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9)
         for _ in range(num_steps):
             optim.zero_grad()
-            with torch.cuda.amp.autocast(enabled=autocast):
+            import contextlib
+            with contextlib.nullcontext():
                 # Inputs always cuda regardless of cpu offloading, or model.device
                 input = model.module.get_input(torch.device("cuda"))
                 output = model(*input)
@@ -217,6 +238,15 @@ class FSDPTest(MultiProcessTestCase):
             ), "loss data type should be float32, as the original \
                  parameter data type is float32."
             model.module.run_backward(loss)
+            import copy
+            old_params = copy.deepcopy(list(model.parameters()))
+            _params_to_dev(model, "cpu")
+            _params_to_dev(model, torch.cuda.current_device())
+            cur_params = list(model.parameters())
+            self.assertEqual(old_params, cur_params) # passes
+            # with torch.no_grad():
+            #     for p in model.parameters():
+            #         p.data.add_(p.grad * -lr)
             optim.step()
         if isinstance(model, FullyShardedDataParallel):
             model._assert_state(TrainingState_.IDLE)
