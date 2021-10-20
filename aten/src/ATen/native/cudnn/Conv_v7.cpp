@@ -201,8 +201,7 @@ size_t getMaxWorkspaceSize(
   size_t max_block_size = 0;
   size_t tmp_bytes = 0;  // Only used for filling pointer parameters that aren't used later
 
-  int device;
-  THCudaCheck(cudaGetDevice(&device));
+  const auto device = c10::cuda::current_device();
   c10::cuda::CUDACachingAllocator::cacheInfo(device, &tmp_bytes, &max_block_size);
 
   for (const auto i : c10::irange(n_algo)) {
