@@ -25,7 +25,8 @@ from torch.testing._internal.common_methods_invocations import tri_tests_args, t
     _compare_trilu_indices, _compare_large_trilu_indices
 from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run_tests, \
     NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_REMOTE_GPU, IS_SANDCASTLE, IS_WINDOWS, \
-    slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, TEST_WITH_ROCM, TEST_NUMPY
+    slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, TEST_WITH_ROCM, TEST_NUMPY, \
+    get_cycles_per_ms
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -79,20 +80,6 @@ def make_sparse_tensor(t, n, *sizes):
     return t(i, v, torch.Size(sizes))
 
 _cycles_per_ms = None
-
-
-def get_cycles_per_ms():
-    """Approximate number of cycles per millisecond for torch.cuda._sleep"""
-    global _cycles_per_ms
-    if _cycles_per_ms is None:
-        start = torch.cuda.Event(enable_timing=True)
-        end = torch.cuda.Event(enable_timing=True)
-        start.record()
-        torch.cuda._sleep(1000000)
-        end.record()
-        end.synchronize()
-        _cycles_per_ms = 1000000 / start.elapsed_time(end)
-    return _cycles_per_ms
 
 
 class TestCuda(TestCase):

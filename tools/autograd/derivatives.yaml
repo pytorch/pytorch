@@ -645,7 +645,7 @@
   output_differentiability: [False]
 
 - name: grid_sampler_2d(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> Tensor
-  input, grid: "grad.defined() ? grid_sampler_2d_backward(grad, input, grid, interpolation_mode, padding_mode, align_corners) : std::tuple<Tensor, Tensor>()"
+  input, grid: "grad.defined() ? grid_sampler_2d_backward(grad, input, grid, interpolation_mode, padding_mode, align_corners, grad_input_mask) : std::tuple<Tensor, Tensor>()"
 
 - name: grid_sampler_3d(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> Tensor
   input, grid: "grad.defined() ? grid_sampler_3d_backward(grad, input, grid, interpolation_mode, padding_mode, align_corners) : std::tuple<Tensor, Tensor>()"
@@ -744,13 +744,13 @@
   result: auto_linear
 
 - name: inverse(Tensor self) -> Tensor
-  self: -at::matmul(result.conj().transpose(-2, -1), at::matmul(grad, result.conj().transpose(-2, -1)))
+  self: -at::matmul(result.mH(), at::matmul(grad, result.mH()))
 
 - name: linalg_inv_ex(Tensor self, *, bool check_errors=False) -> (Tensor inverse, Tensor info)
-  self: -at::matmul(inverse.conj().transpose(-2, -1), at::matmul(grad, inverse.conj().transpose(-2, -1)))
+  self: -at::matmul(inverse.mH(), at::matmul(grad, inverse.mH()))
   inverse: -at::matmul(at::matmul(inverse, self_t), inverse)
 
-- name: linalg_pinv(Tensor self, float rcond=1e-15, bool hermitian=False) -> Tensor
+- name: linalg_pinv.atol_rtol_tensor(Tensor self, *, Tensor? atol=None, Tensor? rtol=None, bool hermitian=False) -> Tensor
   self: pinv_backward(grad, result, self)
   result: pinv_jvp(self_p, result, self_t)
 
@@ -871,8 +871,9 @@
   A: not_implemented("lstsq")
 
 - name: linalg_lstsq(Tensor self, Tensor b, float? rcond=None, *, str? driver=None) -> (Tensor solution, Tensor residuals, Tensor rank, Tensor singular_values)
-  self: not_implemented("linalg_lstsq")
-  b: not_implemented("linalg_lstsq")
+  self, b: linalg_lstsq_backward(grad, self, b, rcond, driver, grad_input_mask)
+  solution: linalg_lstsq_jvp(self_p, b_p, self_t, b_t)
+  output_differentiability: [True, False, False, False]
 
 - name: lt_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   self: zeros_like(self)
@@ -915,7 +916,7 @@
   mask: non_differentiable
   result: auto_linear
 
-- name: matrix_exp(Tensor self) -> Tensor
+- name: linalg_matrix_exp(Tensor self) -> Tensor
   self: matrix_exp_backward(self, grad)
 
 - name: max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
@@ -1086,7 +1087,7 @@
 
 - name: _cdist_forward(Tensor x1, Tensor x2, float p, int? compute_mode) -> Tensor
   x1: _cdist_backward(grad.contiguous(), x1, x2, p, result)
-  x2: _cdist_backward(grad.transpose(-1, -2).contiguous(), x2, x1, p, result.transpose(-1, -2).contiguous())
+  x2: _cdist_backward(grad.mT().contiguous(), x2, x1, p, result.mT().contiguous())
 
 - name: _cdist_backward(Tensor grad, Tensor x1, Tensor x2, float p, Tensor cdist) -> Tensor
   grad: not_implemented("_cdist_backward")
@@ -1108,7 +1109,7 @@
   std: at::zeros(std.sizes(), grad.options())
 
 - name: linalg_householder_product(Tensor input, Tensor tau) -> Tensor
-  input, tau: householder_product_backward(grad, input, tau)
+  input, tau: householder_product_backward(grad, result, input, tau)
 
 - name: ormqr(Tensor self, Tensor input2, Tensor input3, bool left=True, bool transpose=False) -> Tensor
   self: not_implemented("ormqr")
@@ -2319,5 +2320,20 @@
 - name: _pin_memory(Tensor self, Device? device=None) -> Tensor
   self: grad
 
+# Empty factory functions have explicit non-differentiability so that they propagate the class
+# when used with a Tensor subclass together with __torch_dispatch__.
+# All the other factory functions are composite and call into one of these.
 - name: new_empty(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  self: non_differentiable
   output_differentiability: [False]
+
+- name: new_empty_strided(Tensor self, int[] size, int[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  self: non_differentiable
+  output_differentiability: [False]
+
+- name: empty_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  self: non_differentiable
+  output_differentiability: [False]
+
+- name: _test_warn_in_autograd(Tensor self) -> Tensor
+  self: warn_backwards(grad)
