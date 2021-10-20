@@ -302,28 +302,6 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         for o, oe in zip(output, output_eager[0:1] + output_eager[2:]):
             self.assertEqual(o, oe)
 
-    def checkSymShapeCompute(self, shape_compute_graph, nodes, node_output_sizes, shape_inputs):
-        g = shape_compute_graph.partial_eval_shape_graph()
-        self.assertTrue(len(list(g.inputs())) == len(shape_inputs))
-        output_sym_map = shape_compute_graph.graph_output_to_symbolic_shape_dim()
-        # map from sym shape -> index
-        sym_shape_to_index = {}
-        for index, output in enumerate(g.outputs()):
-            sym_shape_to_index[output_sym_map[output]] = index
-
-        g.makeMultiOutputIntoTuple()
-        func = torch._C._create_function_from_graph("partial_eval_graph", g)
-        sym_outputs = func(*shape_inputs)
-
-        for node, output_shape in zip(nodes, node_output_sizes):
-            output_type_sizes = node.output().type().symbolic_sizes()
-            for i, sym_shape in enumerate(output_type_sizes):
-                if sym_shape >= 0:
-                    self.assertEqual(sym_shape, output_shape[i])
-                else:
-                    sym_shape_index = sym_shape_to_index[sym_shape]
-                    self.assertEqual(sym_outputs[sym_shape_index], output_shape[i])
-
     def test_partial_eval_stitching(self):
         conv1 = torch.nn.Conv2d(3, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
         max_pool = torch.nn.MaxPool2d(kernel_size=3, stride=2, padding=1, dilation=1, ceil_mode=False)
@@ -332,13 +310,32 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         mod = torch.jit.freeze(torch.jit.script(nn.Sequential(conv1, max_pool, conv2).eval()))
 
         conv1_output = conv1(torch.rand(1, 3, 224, 224))
-        max_pool_output = max_pool(conv1_output)
-        conv2_output = conv2(max_pool_output)
+        max_pool_ouput = max_pool(conv1_output)
+        conv2_output = conv2(max_pool_ouput)
 
         shape_compute_graph = torch._C._jit_pass_propagate_shapes_on_graph_and_build_compute(mod.graph)
+        g = shape_compute_graph.partial_eval_shape_graph()
+        self.assertTrue(len(list(g.inputs())) == 1)
+        output_sym_map = shape_compute_graph.graph_output_to_symbolic_shape_dim()
+        # map from sym shape -> index
+        sym_shape_to_index = {}
+        for index, output in enumerate(g.outputs()):
+            sym_shape_to_index[output_sym_map[output]] = index
+
+        g.makeMultiOutputIntoTuple()
+        func = torch._C._create_function_from_graph("partial_eval_graph", g)
+        sym_outputs = func([1, 3, 224, 224])
         nodes = [mod.graph.findNode("aten::max_pool2d")] + list(mod.graph.findAllNodes("aten::conv2d"))
-        output_shapes = [max_pool_output.size(), conv1_output.size(), conv2_output.size()]
-        self.checkSymShapeCompute(shape_compute_graph, nodes, output_shapes, ([1, 3, 224, 224],))
+        output_shapes = [max_pool_ouput, conv1_output, conv2_output]
+
+        for node, output_shape in zip(nodes, output_shapes):
+            output_type_sizes = node.output().type().symbolic_sizes()
+            for i, sym_shape in enumerate(output_type_sizes):
+                if sym_shape >= 0:
+                    self.assertEqual(sym_shape, output_shape.size(i))
+                else:
+                    sym_shape_index = sym_shape_to_index[sym_shape]
+                    self.assertEqual(sym_outputs[sym_shape_index], output_shape.size(i))
 
     def test_refinement_through_graph_stitching(self):
         class TwoConvs(torch.nn.Module):
@@ -389,20 +386,3 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         func = torch._C._create_function_from_graph("partial_eval_graph", g)
         output_shape = func(tensor.size())
         self.assertEqual(list(output_shape), list(mod(tensor)[0].size()))
-
-    def test_stitching_concat(self):
-        @torch.jit.script
-        def foo(a, b, x, y):
-            return (a / b) + torch.cat([x, y])
-
-        g = foo.graph
-        for inp in foo.graph.inputs():
-            inp.setType(inp.type().with_sizes([None, None]))
-
-        shape_compute_graph = torch._C._jit_pass_propagate_shapes_on_graph_and_build_compute(foo.graph)
-        nodes = [g.findNode("aten::div")] + [g.findNode("aten::add")] + [g.findNode("aten::cat")]
-
-        inps = [1, 10], [20, 10], [15, 1], [5, 1]
-        output_shapes = [[20, 10], [20, 10], [20, 1]]
-
-        self.checkSymShapeCompute(shape_compute_graph, nodes, output_shapes, inps)
