@@ -74,6 +74,7 @@ Tensor computeQuantizePerTensor(
 
   ExprHandle qscale = constant(inputs[1]);
   ExprHandle qzero = constant(inputs[2]);
+
   const auto dtype = [](auto qdtype) {
     if (static_cast<int64_t>(ScalarType::QInt8) == qdtype) {
       return Dtype(ScalarType::Char);
@@ -107,16 +108,19 @@ Tensor computeQuantizePerTensorExternalCall(
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType,
     at::Device) {
-  Dtype dtype = kFloat;
-  if (outputType) {
-    dtype = Dtype(*outputType);
-  }
-
   const BufHandle& x = c10::get<BufHandle>(inputs[0]);
   const auto qscale = c10::get<double>(inputs[1]);
   const auto qzero = c10::get<int64_t>(inputs[2]);
   const auto qdtype = c10::get<int64_t>(inputs[3]);
 
+  const auto dtype = [](auto qdtype) {
+    if (static_cast<int64_t>(ScalarType::QInt8) == qdtype) {
+      return Dtype(ScalarType::Char);
+    } else if (static_cast<int64_t>(ScalarType::QUInt8) == qdtype) {
+      return Dtype(ScalarType::Byte);
+    }
+    throw malformed_input("Unsupported quantized dtype");
+  }(qdtype);
   auto ResultBuf =
       makeQBufHandle("quantize_per_tensor", outputShape, dtype, qscale, qzero);
   StmtPtr s = ExternalCall::make(
@@ -197,18 +201,19 @@ Tensor computeQuantizedConv2d(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType,
-    at::Device) {
-  Dtype dtype = kFloat;
-  if (outputType) {
-    dtype = Dtype(*outputType);
-  }
-
+    at::Device device) {
   const BufHandle& qx = c10::get<BufHandle>(inputs[0]);
   const BufHandle& prepacked = c10::get<BufHandle>(inputs[1]);
   const auto out_qscale = c10::get<double>(inputs[2]);
   const auto out_qzero = c10::get<int64_t>(inputs[3]);
+  // Change to dtype based on outputType when dtype propagation implemented
+  const auto out_qdtype = immQDType(qx);
   auto ResultBuf = makeQBufHandle(
-      "quantized_conv2d", outputShape, dtype, out_qscale, out_qzero);
+      "quantized_conv2d",
+      outputShape,
+      Dtype(out_qdtype),
+      out_qscale,
+      out_qzero);
   StmtPtr s = ExternalCall::make(
       ResultBuf,
       "nnc_aten_quantized_conv2d",
@@ -225,18 +230,19 @@ Tensor computeQuantizedConv2dRelu(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType,
-    at::Device) {
-  Dtype dtype = kFloat;
-  if (outputType) {
-    dtype = Dtype(*outputType);
-  }
-
+    at::Device device) {
   const BufHandle& qx = c10::get<BufHandle>(inputs[0]);
   const BufHandle& prepacked = c10::get<BufHandle>(inputs[1]);
   const auto out_qscale = c10::get<double>(inputs[2]);
   const auto out_qzero = c10::get<int64_t>(inputs[3]);
+  // Change to dtype based on outputType when dtype propagation implemented
+  const auto out_qdtype = immQDType(qx);
   auto ResultBuf = makeQBufHandle(
-      "quantized_conv2d_relu", outputShape, dtype, out_qscale, out_qzero);
+      "quantized_conv2d_relu",
+      outputShape,
+      Dtype(out_qdtype),
+      out_qscale,
+      out_qzero);
   StmtPtr s = ExternalCall::make(
       ResultBuf,
       "nnc_aten_quantized_conv2d_relu",
@@ -253,18 +259,15 @@ Tensor computeQuantizedAdd(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType,
-    at::Device) {
-  Dtype dtype = kFloat;
-  if (outputType) {
-    dtype = Dtype(*outputType);
-  }
-
+    at::Device device) {
   const BufHandle& qa = c10::get<BufHandle>(inputs[0]);
   const BufHandle& qb = c10::get<BufHandle>(inputs[1]);
   const auto out_qscale = c10::get<double>(inputs[2]);
   const auto out_qzero = c10::get<int64_t>(inputs[3]);
+  // Change to dtype based on outputType when dtype propagation implemented
+  const auto out_qdtype = immQDType(qa);
   auto ResultBuf = makeQBufHandle(
-      "quantized_add", outputShape, dtype, out_qscale, out_qzero);
+      "quantized_add", outputShape, Dtype(out_qdtype), out_qscale, out_qzero);
   StmtPtr s = ExternalCall::make(
       ResultBuf,
       "nnc_aten_quantized_add",
@@ -339,8 +342,6 @@ Tensor computeUpsampleNearest2d(
     scale_factor_w = (*scale_factors)[1];
   }
   const BufHandle& x = c10::get<BufHandle>(inputs[0]);
-
-  BufHandle ResultBuf("upsample_nearest2d", outputShape, dtype);
   double qx_qscale = -1.f;
   int64_t qx_qzero = -1l;
   int64_t qx_qdtype = -1l;
@@ -348,10 +349,19 @@ Tensor computeUpsampleNearest2d(
     qx_qscale = immQScale(x);
     qx_qzero = immQZero(x);
     qx_qdtype = (int64_t)immQDType(x);
-
-    ResultBuf.node()->set_qscale(DoubleImm::make(qx_qscale).node());
-    ResultBuf.node()->set_qzero(LongImm::make(qx_qzero).node());
   }
+
+  BufHandle ResultBuf = [&]() {
+    if (isQuantized(x)) {
+      return makeQBufHandle(
+          "upsample_nearest2d",
+          outputShape,
+          Dtype(immQDType(x)),
+          qx_qscale,
+          qx_qzero);
+    }
+    return BufHandle("upsample_nearest2d", outputShape, dtype);
+  }();
 
   StmtPtr s = ExternalCall::make(
       ResultBuf,
