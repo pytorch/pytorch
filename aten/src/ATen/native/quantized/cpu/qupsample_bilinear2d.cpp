@@ -54,6 +54,9 @@ static void upsample_bilinear2d_out_frame(
   // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   float output_scale = output.q_scale() / input.q_scale();
 
+  const int64_t input_q_zero_point = input.q_zero_point();
+  const int64_t output_q_zero_point = output.q_zero_point();
+
   for (int64_t h2 = 0; h2 < output_height; ++h2) {
     const auto h1r = area_pixel_compute_source_index<float>(
         rheight, h2, align_corners, /*cubic=*/false);
@@ -80,10 +83,10 @@ static void upsample_bilinear2d_out_frame(
         float result = h0lambda * (w0lambda * pos1[0] + w1lambda * pos1[w1p]) +
             h1lambda *
                 (w0lambda * pos1[h1p * input_width] +
-                 w1lambda * pos1[h1p * input_width + w1p]) - input.q_zero_point();
+                 w1lambda * pos1[h1p * input_width + w1p]) - input_q_zero_point;
         // requantization
         pos2[0] = at::native::quantize_val<scalar_t>(
-                      output_scale, output.q_zero_point(), result)
+                      output_scale, output_q_zero_point, result)
                       .val_;
         pos1 += input_width * input_height;
         pos2 += output_width * output_height;

@@ -319,17 +319,24 @@ void FuseInferenceOpsForSparseNN(std::shared_ptr<torch::jit::Graph>& graph) {
 }
 
 TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
-  m.def("static_runtime::permute_copy(Tensor self, int[] dims) -> Tensor");
-  m.def(
-      "static_runtime::reshape_copy(Tensor(a) self, int[] shape) -> Tensor(a)");
-  m.def(
-      "static_runtime::flatten_copy.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)");
-  m.def(
-      "static_runtime::to_copy.prim_dtype(Tensor self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor");
-  m.def(
-      "static_runtime::to_copy.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor");
-  m.def(
-      "static_runtime::to_copy.other(Tensor self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor");
+  m.def(torch::schema(
+      "static_runtime::permute_copy(Tensor self, int[] dims) -> Tensor",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def(torch::schema(
+      "static_runtime::reshape_copy(Tensor self, int[] shape) -> Tensor",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def(torch::schema(
+      "static_runtime::flatten_copy.using_ints(Tensor self, int start_dim=0, int end_dim=-1) -> Tensor",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def(torch::schema(
+      "static_runtime::to_copy.prim_dtype(Tensor self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def(torch::schema(
+      "static_runtime::to_copy.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def(torch::schema(
+      "static_runtime::to_copy.other(Tensor self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
   m.def(torch::schema(
       "static_runtime::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> (Tensor, Tensor, Tensor)",
       c10::AliasAnalysisKind::PURE_FUNCTION));
@@ -530,6 +537,7 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
         node_qual_string == "fb::sigrid_transforms_torch_bind" ||
         node_qual_string == "fb::equally_split" ||
         node_qual_string == "fb::gather_ranges_to_dense" ||
+        node_qual_string == "fb::gather_ranges_to_dense_v2" ||
         node_qual_string == "fb::variadic_sigrid_transforms_torch_bind") {
       const Value* value_out = node->outputs()[0];
       if (value_out->uses().size() > 1) {
