@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: fx"]
+
 import builtins
 import contextlib
 import copy
@@ -3257,7 +3259,7 @@ class TestOperatorSignatures(JitTestCase):
                     raise RuntimeError(f'Did not match any schemas for op {op.name}!')
 
         except Exception as e:
-            assert op.name in known_no_schema or "nn.functional" in op.name
+            assert op.name in known_no_schema or "nn.functional" in op.name or "_masked." in op.name
 
 
 class TestFXAPIBackwardCompatibility(JitTestCase):
