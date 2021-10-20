@@ -10,7 +10,8 @@ common_notes = {
     "experimental_warning": """This function is "experimental" and it may change in a future PyTorch release.""",
     "sync_note": "When inputs are on a CUDA device, this function synchronizes that device with the CPU.",
     "sync_note_ex": r"When the inputs are on a CUDA device, this function synchronizes only when :attr:`check_errors`\ `= True`.",
-    "sync_note_has_ex": "When inputs are on a CUDA device, this function synchronizes that device with the CPU. For a version of this function that does not synchronize, see :func:`{}`."
+    "sync_note_has_ex": ("When inputs are on a CUDA device, this function synchronizes that device with the CPU. "
+                         "For a version of this function that does not synchronize, see :func:`{}`.")
 }
 
 
@@ -1900,7 +1901,8 @@ to solve system of linear equations that share the matrix :attr:`A`.
 The returned permutation matrix is represented by a 1-indexed vector. `pivots[i] == j` represents
 that in the `i`-th step of the algorithm, the `i`-th row was permuted with the `j-1`-th row.
 
-On CUDA, one may use :attr:`pivot`\ `= False`. In this case, this function returns the LU decomposition without pivoting if it exists.
+On CUDA, one may use :attr:`pivot`\ `= False`. In this case, this function returns the LU
+decomposition without pivoting if it exists.
 
 Supports inputs of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if the inputs are batches of matrices then
@@ -1925,7 +1927,8 @@ Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
 
 Keyword args:
-    pivot (bool, optional): [Only on CUDA] Whether to compute the LU decomposition with partial pivoting, or the regular LU decomposition. Default: `True`.
+    pivot (bool, optional): [Only on CUDA] Whether to compute the LU decomposition with partial pivoting,
+                            or the regular LU decomposition. Default: `True`.
     out (tuple, optional): tuple of two tensors to write the output to. Ignored if `None`. Default: `None`.
 
 Returns:
@@ -1973,7 +1976,8 @@ Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
 
 Keyword args:
-    pivot (bool, optional): [Only on CUDA] Whether to compute the LU decomposition with partial pivoting, or the regular LU decomposition. Default: `True`.
+    pivot (bool, optional): [Only on CUDA] Whether to compute the LU decomposition with partial pivoting,
+                            or the regular LU decomposition. Default: `True`.
     check_errors (bool, optional): controls whether to check the content of ``infos``. Default: `False`.
     out (tuple, optional): tuple of three tensors to write the output to. Ignored if `None`. Default: `None`.
 
