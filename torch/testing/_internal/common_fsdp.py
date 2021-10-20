@@ -13,7 +13,7 @@ from torch.testing._internal.common_distributed import (
     TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import (
-    FILE_SCHEMA,
+    TEST_WITH_DEV_DBG_ASAN, FILE_SCHEMA,
     get_cycles_per_ms,
 )
 
@@ -257,6 +257,16 @@ class MixtureOfExperts(NestedWrappedModule):
 class FSDPTest(MultiProcessTestCase):
     def setUp(self):
         super(FSDPTest, self).setUp()
+        if not dist.is_available():
+            print("Distributed not available, skipping tests", file=sys.stderr)
+            sys.exit(0)
+
+        if TEST_WITH_DEV_DBG_ASAN:
+            print(
+                "Skip dev-asan as torch + multiprocessing spawn have known issues",
+                file=sys.stderr,
+            )
+            sys.exit(0)
         self._spawn_processes()
 
     @property

@@ -1,9 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
-import sys
-
 import torch
-from torch import distributed as dist
 from torch.distributed._fsdp import FullyShardedDataParallel as FSDP
 from torch.nn import Linear, Module
 from torch.nn.parallel import DistributedDataParallel
@@ -13,18 +10,7 @@ from torch.testing._internal.common_fsdp import (
     FSDPTest,
     get_full_params,
 )
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
-
-if not dist.is_available():
-    print("Distributed not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
-
-if TEST_WITH_DEV_DBG_ASAN:
-    print(
-        "Skip dev-asan as torch + multiprocessing spawn have known issues",
-        file=sys.stderr,
-    )
-    sys.exit(0)
+from torch.testing._internal.common_utils import run_tests
 
 
 class Model(Module):
