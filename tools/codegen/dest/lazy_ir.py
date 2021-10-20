@@ -151,8 +151,7 @@ def gen_lazy_nativefunc_definition(func: NativeFunction, backend_index: BackendI
     scalar_types = schema.filtered_types(values=False, scalars=True)
     returns_length = len(schema.returns)
 
-    get_device_str = f"""auto device = bridge::GetLtcDevice({", ".join([f"{t.name}" for t in value_types])});
-    LTC_CHECK(!!device) << "None of the input tensors is a lazy tensor.";"""
+    get_device_str = f"""auto device = bridge::GetLtcDevice({", ".join([f"{t.name}" for t in value_types])});"""
     lazy_tensor_decls_str = lazy_tensor_decls(value_types)
     node_ctor_input_str = node_ctor_inputs(schema)
 
