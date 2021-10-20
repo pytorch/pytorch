@@ -739,7 +739,9 @@ class FunctionSchema:
     def parse(func: str) -> 'FunctionSchema':
         # We should probably get a proper parser here
         assert ' -> ' in func, "function schema missing return type (spaces are mandatory)"
-        func_decl, return_decl = [x.strip() for x in func.split(' -> ')]
+        last_index = func.rfind(" -> ")
+        func_decl = func[:last_index]
+        return_decl = func[last_index + len(" -> "):]
         ops, args = func_decl.split('(', 1)
         assert args[-1] == ")", "Expecting closing )"
         args = args[:-1]
@@ -751,6 +753,8 @@ class FunctionSchema:
             arguments=arguments,
             returns=returns
         )
+        if str(r) != func:
+            import pdb; pdb.set_trace()
         assert str(r) == func, f'{str(r)} != {func}'
         return r
 
@@ -883,19 +887,32 @@ class Annotation:
     # we can conveniently assume it is canonically ordered
     alias_set: Tuple[str, ...]
     is_write: bool
+    alias_set_after: Tuple[str, ...]
 
     @staticmethod
     def parse(ann: str) -> 'Annotation':
-        m = re.match(r'^([a-z])(!?)(!?)$', ann)
+        # TODO: better way of doing this
+        becomes_wildcard_index = ann.find(" -> *")
+        if becomes_wildcard_index != -1:
+            after_set = "*"
+            # TODO: im not good enough with regexes to ignore -> *
+            m = re.match(r'^([a-z])(!?)(!?)$', ann[:becomes_wildcard_index] + ann[becomes_wildcard_index + len(" -> *"):])
+        else:
+            after_set = ""
+            m = re.match(r'^([a-z])(!?)(!?)$', ann)
         assert m is not None, f'unrecognized alias annotation {ann}'
         alias_set = (m.group(1),)
         is_write = m.group(2) == '!'
-        r = Annotation(alias_set=alias_set, is_write=is_write)
+        r = Annotation(alias_set=alias_set, is_write=is_write, alias_set_after=after_set)
+        if str(r) != ann:
+            import pdb; pdb.set_trace()
         assert str(r) == ann, f'{r} != {ann}'
         return r
 
     def __str__(self) -> str:
         alias_set = '|'.join(self.alias_set)
+        if self.alias_set_after:
+            alias_set = f'{alias_set}{" -> "}{self.alias_set_after}'
         is_write = '!' if self.is_write else ''
         return f'{alias_set}{is_write}'
 
@@ -909,12 +926,17 @@ class Annotation:
 class Type:
     @staticmethod
     def parse(t: str) -> 'Type':
-        r = Type._parse(t)
+        try:
+            r = Type._parse(t)
+        except:
+            import pdb; pdb.set_trace()
+            r = Type._parse(t)
         assert str(r) == t, f'{r} != {t}'
         return r
 
     @staticmethod
     def _parse(t: str) -> 'Type':
+        print(t)
         m = re.match(r'^(.+)\?$', t)
         if m is not None:
             return OptionalType(Type.parse(m.group(1)))
@@ -1080,7 +1102,9 @@ class Argument:
             default=default,
             annotation=annotation,
         )
-        assert str(r) == arg, f'{str(r)} != {arg}'
+        if str(r) != arg:
+            import pdb; pdb.set_trace()
+        # assert str(r) == arg, f'{str(r)} != {arg}'
         return r
 
     @property

@@ -1014,18 +1014,18 @@
   device_check: NoCheck
   device_guard: False
 
-- func: chunk(Tensor(a) self, int chunks, int dim=0) -> Tensor(a)[]
+- func: chunk(Tensor(a -> *) self, int chunks, int dim=0) -> Tensor[]
   variants: function, method
   device_check: NoCheck
   device_guard: False
 
-- func: tensor_split.sections(Tensor(a) self, int sections, int dim=0) -> Tensor(a)[]
+- func: tensor_split.sections(Tensor(a -> *) self, int sections, int dim=0) -> Tensor[]
   variants: function, method
 
-- func: tensor_split.indices(Tensor(a) self, int[] indices, int dim=0) -> Tensor(a)[]
+- func: tensor_split.indices(Tensor(a -> *) self, int[] indices, int dim=0) -> Tensor[]
   variants: function, method
 
-- func: tensor_split.tensor_indices_or_sections(Tensor(a) self, Tensor tensor_indices_or_sections, int dim=0) -> Tensor(a)[]
+- func: tensor_split.tensor_indices_or_sections(Tensor(a -> *) self, Tensor tensor_indices_or_sections, int dim=0) -> Tensor[]
   variants: function, method
 
 - func: clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
@@ -3948,7 +3948,7 @@
   dispatch:
     CompositeExplicitAutograd: unsafe_split
 
-- func: split.Tensor(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]
+- func: split.Tensor(Tensor(a -> *) self, int split_size, int dim=0) -> Tensor[]
   variants: function, method
   device_check: NoCheck
   device_guard: False
@@ -3962,29 +3962,29 @@
   dispatch:
     CompositeExplicitAutograd: unsafe_split_with_sizes
 
-- func: split_with_sizes(Tensor(a) self, int[] split_sizes, int dim=0) -> Tensor(a)[]
+- func: split_with_sizes(Tensor(a -> *) self, int[] split_sizes, int dim=0) -> Tensor[]
   variants: function, method
   device_check: NoCheck
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: split_with_sizes
 
-- func: hsplit.int(Tensor(a) self, int sections) -> Tensor(a)[]
+- func: hsplit.int(Tensor(a -> *) self, int sections) -> Tensor[]
   variants: function, method
 
-- func: hsplit.array(Tensor(a) self, int[] indices) -> Tensor(a)[]
+- func: hsplit.array(Tensor(a -> *) self, int[] indices) -> Tensor[]
   variants: function, method
 
-- func: vsplit.int(Tensor(a) self, int sections) -> Tensor(a)[]
+- func: vsplit.int(Tensor(a -> *) self, int sections) -> Tensor[]
   variants: function, method
 
-- func: vsplit.array(Tensor(a) self, int[] indices) -> Tensor(a)[]
+- func: vsplit.array(Tensor(a -> *) self, int[] indices) -> Tensor[]
   variants: function, method
 
-- func: dsplit.int(Tensor(a) self, int sections) -> Tensor(a)[]
+- func: dsplit.int(Tensor(a -> *) self, int sections) -> Tensor[]
   variants: function, method
 
-- func: dsplit.array(Tensor(a) self, int[] indices) -> Tensor(a)[]
+- func: dsplit.array(Tensor(a -> *) self, int[] indices) -> Tensor[]
   variants: function, method
 
 - func: squeeze(Tensor(a) self) -> Tensor(a)
@@ -5239,12 +5239,12 @@
   dispatch:
     SparseCPU, SparseCUDA: copy_sparse_
 
-- func: unbind.int(Tensor(a) self, int dim=0) -> Tensor(a)[]
+- func: unbind.int(Tensor(a -> *) self, int dim=0) -> Tensor[]
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: unbind
 
-- func: unbind.Dimname(Tensor(a) self, Dimname dim) -> Tensor(a)[]
+- func: unbind.Dimname(Tensor(a -> *) self, Dimname dim) -> Tensor[]
   variants: function, method
 
 - func: to_sparse.sparse_dim(Tensor self, int sparse_dim) -> Tensor

@@ -217,6 +217,9 @@ void initPythonIRBindings(PyObject* module_) {
   py::class_<AliasDb, std::shared_ptr<AliasDb>>(m, "AliasDb")
       .def("dump", &AliasDb::dump)
       .def("to_graphviz_str", &AliasDb::toGraphviz)
+      .def("may_contain_alias", [&](AliasDb& db, Value * v1, Value *v2) {
+        return db.mayContainAlias(v1, v2);
+      })
       .def("__str__", &AliasDb::toString);
 
 #define GS(name) def(#name, &Graph ::name)

@@ -36,7 +36,7 @@ at::optional<Node*> FindFusibleListUnpack(Node* n) {
 // that the symbolic function is aware of the number of outputs.
 //
 // Example IR
-//  split.Tensor(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]
+//  split.Tensor(Tensor(a -> *) self, int split_size, int dim=0) -> Tensor[]
 //  split_with_sizes(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
 //
 // graph(%input : Float(5, 4, 3, strides=[12, 3, 1])):
