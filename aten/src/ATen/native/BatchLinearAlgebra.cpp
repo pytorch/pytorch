@@ -1605,7 +1605,6 @@ TORCH_IMPL_FUNC(linalg_lu_factor_ex_out)(const Tensor& A,
   const auto info_contig = info.is_contiguous();
   const auto info_ = borrow_else_clone(info_contig, info, info, /*C-contig*/true);
 
-
   lu_factor_stub(A.device().type(), *LU_, *pivots_, *info_, pivot);
 
   if (!LU_f_contig) {
