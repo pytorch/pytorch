@@ -753,8 +753,6 @@ class FunctionSchema:
             arguments=arguments,
             returns=returns
         )
-        if str(r) != func:
-            import pdb; pdb.set_trace()
         assert str(r) == func, f'{str(r)} != {func}'
         return r
 
@@ -891,7 +889,7 @@ class Annotation:
 
     @staticmethod
     def parse(ann: str) -> 'Annotation':
-        # TODO: better way of doing this
+        # Only handling afterSet == Wildcard for now
         becomes_wildcard_index = ann.find(" -> *")
         if becomes_wildcard_index != -1:
             after_set = "*"
@@ -904,8 +902,6 @@ class Annotation:
         alias_set = (m.group(1),)
         is_write = m.group(2) == '!'
         r = Annotation(alias_set=alias_set, is_write=is_write, alias_set_after=after_set)
-        if str(r) != ann:
-            import pdb; pdb.set_trace()
         assert str(r) == ann, f'{r} != {ann}'
         return r
 
@@ -926,11 +922,7 @@ class Annotation:
 class Type:
     @staticmethod
     def parse(t: str) -> 'Type':
-        try:
-            r = Type._parse(t)
-        except:
-            import pdb; pdb.set_trace()
-            r = Type._parse(t)
+        r = Type._parse(t)
         assert str(r) == t, f'{r} != {t}'
         return r
 
@@ -1102,9 +1094,7 @@ class Argument:
             default=default,
             annotation=annotation,
         )
-        if str(r) != arg:
-            import pdb; pdb.set_trace()
-        # assert str(r) == arg, f'{str(r)} != {arg}'
+        assert str(r) == arg, f'{str(r)} != {arg}'
         return r
 
     @property
