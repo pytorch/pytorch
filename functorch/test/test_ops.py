@@ -311,7 +311,6 @@ class TestOperators(TestCase):
         xfail('clamp', ''),
         xfail('diag_embed'),
         xfail('eig'),
-        xfail('matrix_exp'),
         xfail('nn.functional.conv_transpose2d'),
         xfail('nn.functional.pad', 'constant'),
         xfail('view_as_complex'),
