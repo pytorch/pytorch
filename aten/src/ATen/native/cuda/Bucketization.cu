@@ -133,10 +133,9 @@ Tensor searchsorted_cuda(const Tensor& sorted_sequence, const Tensor& self, bool
   return result;
 }
 
-// This is a DUMMY function to force the linking against torch_cuda_cu on Windows.
-// This function should NOT be used or exposed or edited or else Windows builds (with BUILD_SPLIT_CUDA) will break.
+// See [Note about _torch_cuda_cu_linker_symbol_op and torch_cuda_cu] in native_functions.yaml
 Tensor _torch_cuda_cu_linker_symbol_op_cuda(const Tensor& self) {
-  return *self;
+  return self;
 }
 
 Tensor searchsorted_cuda(const Tensor& sorted_sequence, const Scalar& self, bool out_int32, bool right) {
