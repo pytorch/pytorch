@@ -119,9 +119,15 @@ def _convert_new(model: GraphModule, is_reference: bool = False,
         if node.op == 'placeholder':
             graph_inputs.append(node.name)
 
-    def insert_quantize_dequantize_node(graph: Graph, node: Node, modules: Dict[str, torch.nn.Module]) -> None:
-        """ Given a activation_post_process module call node, insert a
-        quantize node"""
+    def replace_observer_with_quantize_dequantize_node(graph: Graph, node: Node, modules: Dict[str, torch.nn.Module]) -> None:
+        """ Replace activation_post_process module call node with quantize and
+        dequantize node
+
+        Before:
+        ... -> observer_0(x) -> ...
+        After:
+        ... -> torch.quantize_per_tensor(x, ...) -> x.dequantize() -> ...
+        """
         assert modules is not None
         assert isinstance(node.target, str)
         observer_module = modules[node.target]
@@ -181,7 +187,7 @@ def _convert_new(model: GraphModule, is_reference: bool = False,
                 # TODO: remove dequantize node if any
                 raise Exception("output_quantized_idxs is not supported yet")
         elif node.op == 'call_module' and is_activation_post_process(modules[node.target]):
-            insert_quantize_dequantize_node(model.graph, node, modules)
+            replace_observer_with_quantize_dequantize_node(model.graph, node, modules)
 
     # removes qconfig and activation_post_process modules
     if _remove_qconfig_flag:
