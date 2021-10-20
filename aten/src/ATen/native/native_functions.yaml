@@ -2729,10 +2729,9 @@
 # Alias to linalg.matrix_power
 - func: matrix_power.out(Tensor self, int n, *, Tensor(a!) out) -> Tensor(a!)
 
+# Alias to linalg.matrix_exp
 - func: matrix_exp(Tensor self) -> Tensor
   variants: function, method
-  dispatch:
-    CPU, CUDA: matrix_exp
 
 - func: matrix_exp_backward(Tensor self, Tensor grad) -> Tensor
 
@@ -10400,6 +10399,12 @@
 
 - func: linalg_matmul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
+
+- func: linalg_matrix_exp(Tensor self) -> Tensor
+  python_module: linalg
+  variants: function
+  dispatch:
+    CPU, CUDA: linalg_matrix_exp
 
 - func: linalg_slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
   python_module: linalg
