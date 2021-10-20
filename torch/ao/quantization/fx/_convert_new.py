@@ -21,10 +21,7 @@ from .quantization_patterns import (
 )
 from ._equalize import update_obs_for_equalization, convert_eq_obs
 from .utils import (
-    collect_producer_nodes,
-    graph_module_from_producer_nodes,
     get_custom_module_class_keys,
-    WEIGHT_INDEX_DICT,
     get_quantize_node_info,
     create_getattr_from_value,
 )
@@ -34,25 +31,6 @@ from torch.ao.quantization.quantize import (
     is_activation_post_process,
 )
 
-
-def run_weight_observers(observed: GraphModule) -> None:
-    r''' Extract the subgraph that produces the weight for dynamic quant
-    or weight only quant node and run the subgraph to observe the weight.
-    Note that the observers of dynamic quant or weight only quant ops are
-    run during the convert step.
-    '''
-    for node in observed.graph.nodes:
-        if node.op == 'call_function' and node.target in WEIGHT_INDEX_DICT:
-            for i, node_arg in enumerate(node.args):
-                if i in WEIGHT_INDEX_DICT[node.target]:
-                    # node_arg is weight
-                    weight_observer_nodes = collect_producer_nodes(node_arg)
-                    if weight_observer_nodes is not None:
-                        weight_observer_module = \
-                            graph_module_from_producer_nodes(
-                                observed, weight_observer_nodes)
-                        # run the weight observer
-                        weight_observer_module()
 
 def restore_state(
         observed: GraphModule
@@ -109,10 +87,6 @@ def _convert_new(model: GraphModule, is_reference: bool = False,
         # inputs, and scale the weight
         weight_eq_obs_dict = update_obs_for_equalization(model, modules)
         convert_eq_obs(model, modules, weight_eq_obs_dict)
-
-    # always run weight observers in the top level forward method
-    # for dynamic quant ops or weight only quant ops
-    run_weight_observers(model)
 
     graph_inputs: List[str] = []
     for node in model.graph.nodes:
