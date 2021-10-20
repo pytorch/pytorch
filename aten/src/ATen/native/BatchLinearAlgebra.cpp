@@ -1618,7 +1618,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> linalg_lu_factor_ex_out(const Tensor& A,
     }
   }
 
-  return {LU, pivots, info};
+  return std::tie(LU, pivots, info);
 }
 
 std::tuple<Tensor, Tensor, Tensor> linalg_lu_factor_ex(const Tensor& A, bool pivot, bool check_errors) {
@@ -1639,7 +1639,7 @@ std::tuple<Tensor&, Tensor&> linalg_lu_factor_out(const Tensor& A, bool pivot, T
     singleCheckErrors(info.item<int64_t>(), "torch.linalg.lu_factor");
   }
 
-  return {LU, pivots};
+  return std::tie(LU, pivots);
 }
 
 std::tuple<Tensor, Tensor> linalg_lu_factor(const Tensor& A, bool pivot) {
