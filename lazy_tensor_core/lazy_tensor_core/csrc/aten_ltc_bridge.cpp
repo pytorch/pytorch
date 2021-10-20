@@ -109,6 +109,11 @@ LazyTensor GetOrCreateLtcTensor(const c10::optional<at::Tensor>& tensor,
   return xtensor ? *xtensor : LazyTensor::Create(*tensor, device);
 }
 
+LazyTensor GetLtcTensorOrCreateForWrappedNumber(const at::Tensor& tensor, const Device& device) {
+  return tensor.unsafeGetTensorImpl()->is_wrapped_number() ?
+      GetOrCreateLtcTensor(tensor, device) : GetLtcTensor(tensor);
+}
+
 std::vector<at::Tensor> LtcCreateTensorList(const at::TensorList& tensors) {
   std::vector<at::Tensor> aten_ltc_tensors(tensors.size());
   std::vector<LazyTensor> ltc_tensors;

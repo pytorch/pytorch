@@ -18,11 +18,11 @@ def node_ctor_inputs(func: LazyIrSchema) -> str:
     for arg in func.filtered_types():
         if isValueType(arg.type):
             if isinstance(arg.type, BaseCType):
-                node_ctor_values.append(f"l_{arg.name}.GetIrValue()")
+                node_ctor_values.append(f"lazy_{arg.name}.GetIrValue()")
             elif isinstance(arg.type, OptionalCType):
                 node_ctor_values.append(
-                    f"l_{arg.name} ? "
-                    f"c10::make_optional(l_{arg.name}->GetIrValue()) : "
+                    f"lazy_{arg.name} ? "
+                    f"c10::make_optional(lazy_{arg.name}->GetIrValue()) : "
                     "c10::nullopt")
             else:
                 raise AssertionError("TODO not sure if there are other valid types to handle here")
@@ -124,10 +124,14 @@ def lazy_tensor_decls(value_types: List[NamedCType]) -> str:
     lazy_tensor_decls: List[str] = []
     for t in value_types:
         if isinstance(t.type, BaseCType):
-            lazy_tensor_decls.append(f"LazyTensor l_{t.name} = bridge::GetLtcTensor({t.name});")
-        elif isinstance(t.type, OptionalCType):
             lazy_tensor_decls.append(
-                f"c10::optional<LazyTensor> l_{t.name} =  "
+                f"LazyTensor lazy_{t.name} = "
+                f"bridge::GetLtcTensorOrCreateForWrappedNumber({t.name}, *device);")
+        elif isinstance(t.type, OptionalCType):
+            # TODO(alanwaketan): Maybe we want to apply GetLtcTensorOrCreateForWrappedNumber here, but hold it
+            # until we encounter a real world example.
+            lazy_tensor_decls.append(
+                f"c10::optional<LazyTensor> lazy_{t.name} =  "
                 f"{t.name} ? "
                 f"bridge::TryGetLtcTensor(*{t.name}) : "
                 f"c10::nullopt;")
@@ -145,9 +149,11 @@ def gen_lazy_nativefunc_definition(func: NativeFunction, backend_index: BackendI
     all_types = schema.filtered_types()
     value_types = schema.filtered_types(values=True, scalars=False)
     scalar_types = schema.filtered_types(values=False, scalars=True)
+    returns_length = len(schema.returns)
+
+    get_device_str = f"""auto device = bridge::GetLtcDevice({", ".join([f"{t.name}" for t in value_types])});"""
     lazy_tensor_decls_str = lazy_tensor_decls(value_types)
     node_ctor_input_str = node_ctor_inputs(schema)
-    returns_length = len(schema.returns)
 
     # call the meta kernel if it exists, to compute output shape/dtype for our IR
     if func.structured or func.structured_delegate is not None:
@@ -174,19 +180,12 @@ def gen_lazy_nativefunc_definition(func: NativeFunction, backend_index: BackendI
 
     assert len(value_types) > 0, f"Only supporting tensor ops so far, none found in {sig}"
     first_tensor = value_types[0]
-    bridge_str = f"""auto result = bridge::AtenFromLtcTensor(l_{first_tensor.name}.CreateFrom(node,
-        // TODO (@wconstab): experiment on dtype
-        // try always overriding output dtype to match the one ATen says our op should produce.
-        // this diverges from most of the handwritten methods, which often do not override and
-        // rely on other behavior in the lowering or copy process to make this correct.
-        // (1) evaluate design goal: to always pick the IR's dtype in one place (here)
-        // (2) rationalize this with Google's design, it may be a problem
-        // (3) evaluate perf impact: make sure we're not actually doing casts becuase of this override
+    bridge_str = f"""auto result = bridge::AtenFromLtcTensor(lazy_{first_tensor.name}.CreateFrom(node,
         out_dtype.front()));"""
     if returns_length > 1:
         bridge_str = f"""std::vector<LazyTensor> lazy_tensors;
     for (int i = 0; i < {returns_length}; i++) {{
-        lazy_tensors.push_back(l_{first_tensor.name}.CreateFrom(ir::Value(node, i), out_dtype[i]));
+        lazy_tensors.push_back(lazy_{first_tensor.name}.CreateFrom(ir::Value(node, i), out_dtype[i]));
     }}
     auto result = bridge::TupleAtenFromLtcTensors<{returns_length}>(lazy_tensors);"""
 
@@ -194,6 +193,7 @@ def gen_lazy_nativefunc_definition(func: NativeFunction, backend_index: BackendI
 // TODO(alanwaketan): Quite a lot inefficient copy-by-value there. Let's optimize it.
 {sig.decl(name=f"{class_method_name}::{schema.aten_name}")} {{
     LTC_FN_COUNTER("lazy::");
+    {get_device_str}
     {lazy_tensor_decls_str}
     {meta_str}
     {node_str}

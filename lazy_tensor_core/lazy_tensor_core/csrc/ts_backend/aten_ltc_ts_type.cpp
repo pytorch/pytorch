@@ -74,18 +74,6 @@ at::Tensor subtensor(const at::Tensor& tensor, int dim, int groups, int g) {
 
 }  // namespace
 
-at::Tensor LazyNativeFunctions::add(const at::Tensor& self,
-                                    const at::Tensor& other,
-                                    const at::Scalar& alpha) {
-  LTC_FN_COUNTER("lazy::");
-  at::native::alpha_check(at::result_type(self, other), alpha);
-  return DoBinaryOp(self, other,
-                    [&](const LazyTensor& xself, const LazyTensor& xother,
-                        at::ScalarType dtype) {
-                      return tensor_aten_ops::add(xself, xother, alpha, dtype);
-                    });
-}
-
 at::Tensor LazyNativeFunctions::addmm(const at::Tensor& self,
                                       const at::Tensor& mat1,
                                       const at::Tensor& mat2,

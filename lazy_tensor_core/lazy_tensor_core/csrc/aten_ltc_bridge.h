@@ -35,6 +35,8 @@ LazyTensor GetOrCreateLtcTensor(const at::Tensor& tensor, const Device& device);
 LazyTensor GetOrCreateLtcTensor(const c10::optional<at::Tensor>& tensor,
                                 const Device& device);
 
+LazyTensor GetLtcTensorOrCreateForWrappedNumber(const at::Tensor& tensor, const Device& device);
+
 // Creates a vector of at::Tensor objects extracted from a list of lazy tensors.
 std::vector<at::Tensor> LtcCreateTensorList(const at::TensorList& tensors);
 
@@ -66,6 +68,15 @@ c10::optional<Device> GetLtcDevice(const c10::Device& device);
 
 c10::optional<Device> GetLtcDevice(
     const c10::optional<c10::Device>& device = c10::nullopt);
+
+template<typename T, typename... Args>
+c10::optional<Device> GetLtcDevice(const T& tensor, const Args&... forward_tensors) {
+    auto optional_device = GetLtcDevice(tensor);
+    if (optional_device) {
+        return optional_device;
+    }
+    return GetLtcDevice(forward_tensors...);
+}
 
 Device AtenDeviceToLtcDevice(const c10::Device& device);
 
