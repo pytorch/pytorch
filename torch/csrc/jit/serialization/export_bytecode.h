@@ -1,6 +1,6 @@
 #pragma once
 
-#include <unordered_map>
+#include <map>
 
 #include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
@@ -41,7 +41,7 @@ class TORCH_API BytecodeExportSet {
   }
 
  private:
-  std::unordered_map<c10::QualifiedName, ExportedFunction> items_;
+  std::map<c10::QualifiedName, ExportedFunction> items_;
 };
 
 } // namespace jit
