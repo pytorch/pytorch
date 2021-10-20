@@ -809,6 +809,9 @@ at::Tensor _convolution(
     }
     if (input_is_mkldnn && weight.is_mkldnn()) {
       // mkldnn will error on the below 0-dim handling code
+      if (input.size(1) == 0) {
+        o[input_channels_dim] = 0;
+      }
       return empty_mkldnn(
           o,
           optTypeMetaToScalarType(input.options().dtype_opt()),
@@ -817,7 +820,7 @@ at::Tensor _convolution(
           input.options().pinned_memory_opt());
     }
     if (input.size(1) == 0) {
-      // set channel dim of weight to 0 since input also has channels=0
+      // Set the channel dim of the output to 0 since the input also has channels=0.
       o[input_channels_dim] = 0;
       return input.view(o);
     }

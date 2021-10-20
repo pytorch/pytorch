@@ -57,7 +57,7 @@ static inline void slow_conv2d_shape_check(
   const int64_t dim_width = 3;
 
   // Allow for empty batch size and channel size but not other dimensions
-  TORCH_CHECK(ndim == 4, "Expected 4D input tensor, but got:", input.sizes());
+  TORCH_CHECK(ndim == 4, "Expected 4D input tensor, but got: ", input.sizes());
   for (int64_t dim = 2; dim < ndim; ++dim) {
     TORCH_CHECK(input.size(dim) != 0,
                 "Expected input tensor with optional zero batch and channel dimensions, but got dimension ",

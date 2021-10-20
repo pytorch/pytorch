@@ -13984,13 +13984,25 @@ class TestNNDeviceType(NNTestCase):
             inp = torch.randn(2, 0, 15, device=device)
             self._test_module_empty_input(mod, inp, check_size=False, check_parameters=False)
 
+            with self.assertRaisesRegex(RuntimeError, "Calculated padded input size"):
+                inp = torch.randn(2, 1, 0, device=device)
+                mod(inp)
+
             mod = torch.nn.Conv2d(in_channels, 33, 3, stride=2).to(device)
             inp = torch.randn(2, 0, 50, 100, device=device)
             self._test_module_empty_input(mod, inp, check_size=False, check_parameters=False)
 
+            with self.assertRaisesRegex(RuntimeError, "Calculated padded input size"):
+                inp = torch.randn(2, 1, 40, 0, device=device)
+                mod(inp)
+
             mod = torch.nn.Conv3d(in_channels, 33, 3, stride=2).to(device)
             inp = torch.randn(2, 0, 50, 20, 40, device=device)
             self._test_module_empty_input(mod, inp, check_size=False, check_parameters=False)
+
+            with self.assertRaisesRegex(RuntimeError, "Calculated padded input size"):
+                inp = torch.randn(2, 1, 50, 0, 40, device=device)
+                mod(inp)
 
     def test_group_conv_empty(self, device):
         mod = torch.nn.Conv2d(4, 4, stride=2, kernel_size=3, padding=1, groups=4).to(device)
