@@ -7,7 +7,6 @@ full_codegen:
   - _softmax_backward_data
   - addcdiv
   - addcmul
-  - bitwise_and.Scalar
   - bitwise_and.Tensor
   - cos
   - clamp
@@ -25,8 +24,8 @@ full_codegen:
   - softplus
   - softplus_backward
   - topk
-supported:
   - add.Tensor
+supported:
   - as_strided
   - as_strided_
   - bernoulli
