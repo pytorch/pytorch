@@ -5374,7 +5374,8 @@ class TestNN(NNTestCase):
 
     def test_adaptive_pooling_bfloat16(self):
         def _test_adaptive_pooling_bfloat16(self, device, mod, memory_format):
-            input = torch.randint(1, 10, (3, 19, 8, 8), dtype=torch.float32).to(device).to(memory_format=memory_format).requires_grad_()
+            input = torch.randint(1, 10, (3, 19, 8, 8), dtype=torch.float32)
+            input = input.to(device).to(memory_format=memory_format).requires_grad_()
             pool = mod((7, 7)).to(device)
 
             input2 = input.detach().clone().bfloat16().requires_grad_(True)
