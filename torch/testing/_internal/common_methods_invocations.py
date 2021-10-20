@@ -7971,6 +7971,18 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
            supports_autograd=False,
            sample_inputs_func=sample_inputs_comparison_ops),
+    OpInfo('linalg.lu_factor',
+           aten_name='linalg_lu_factor',
+           op=torch.linalg.lu_factor,
+           dtypes=floating_and_complex_types(),
+           supports_inplace_autograd=False,
+           # we use in-place operations which cannot be avoided.
+           # This causes vmap failures, hence we skip batched gradient checks
+           check_batched_grad=False,
+           check_batched_gradgrad=False,
+           supports_forward_ad=True,
+           sample_inputs_func=sample_inputs_lu,
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack]),
     OpInfo('lu',
            op=torch.lu,
            dtypes=floating_and_complex_types(),

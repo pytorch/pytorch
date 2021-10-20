@@ -4040,7 +4040,7 @@ Tensor lu_solve_jvp(
       // The identity permutation pivots are 1-based because of the Fortran-like LAPACK interfaces.
       // More details on the permutation matrix canceling note:
       // as part of forward AD we need to compute A^{-1} dA.
-      // Since A = P L U and P is not differentiable, we get
+      // Since A = P L U and P is locally constant for full-rank matrices, we get
       // dA = P d(L U), A^{-1} = (L U)^{-1} P^T, so
       // A^{-1} dA = (L U)^{-1} d(L U), which is lu_solve with
       // the pivots set to the identity permutation
@@ -4306,7 +4306,7 @@ Tensor plu_backward_base(
   return self_grad;
 }
 
-Tensor _lu_with_info_backward(
+Tensor lu_factor_ex_backward(
   const Tensor& grad,
   const Tensor& self,
   const Tensor& LU,
@@ -4320,8 +4320,8 @@ Tensor _lu_with_info_backward(
   return plu_backward_base({/*L_grad=*/grad, /*U_grad=*/grad}, self, P, L, U);
 }
 
-Tensor _lu_with_info_jvp(
-  const Tensor& dX,
+Tensor lu_factor_ex_jvp(
+  const Tensor& dA,
   const Tensor& LU,
   const Tensor& pivs
 ) {
@@ -4335,19 +4335,19 @@ Tensor _lu_with_info_jvp(
   auto n = LU.size(-1);
   auto k = std::min(m, n);
 
-  auto pdX = P.mT().matmul(dX);
+  auto pdA = P.mT().matmul(dA);
 
   // similar to the backward implementation, we also consider block structures such as:
   // for a matrix A of size m x n we decompose it as
   // A = (A1 | A2) with A1 of size m x m if m <= n and
   // A = (A1^T | A2^T)^T with A1 of size n x n if m > n.
-  auto pdX1 = pdX.narrow(-2, 0, k).narrow(-1, 0, k);
+  auto pdA1 = pdA.narrow(-2, 0, k).narrow(-1, 0, k);
   auto L1 = L.narrow(-2, 0, k).narrow(-1, 0, k);
   auto U1 = U.narrow(-2, 0, k).narrow(-1, 0, k);
 
-  // dK = L1^{-1} pdX1
+  // dK = L1^{-1} pdA1
   auto dK = std::get<0>(at::triangular_solve(
-    pdX1,
+    pdA1,
     L1,
     /*upper=*/false,
     /*transpose=*/false,
@@ -4377,11 +4377,11 @@ Tensor _lu_with_info_jvp(
 
     if (m < n) {
       // we only need to update dU2 defined as
-      // dU2 := L1^{-1} (pdX2 - dL1 U2)
-      auto pdX2 = pdX.narrow(-1, k, n - k);
+      // dU2 := L1^{-1} (pdA2 - dL1 U2)
+      auto pdA2 = pdA.narrow(-1, k, n - k);
       auto U2 = U.narrow(-1, k, n - k);
       dLU.narrow(-1, k, n - k).copy_(std::get<0>(at::triangular_solve(
-        pdX2 - dL1.matmul(U2),
+        pdA2 - dL1.matmul(U2),
         L1,
         /*upper=*/false,
         /*transpose=*/false,
@@ -4390,11 +4390,11 @@ Tensor _lu_with_info_jvp(
     }
     else {
       // we only need to update dL2 defined as
-      // dL2 := (pdX2 - L2 dU1) U1^{-1}
-      auto pdX2 = pdX.narrow(-2, k, m - k);
+      // dL2 := (pdA2 - L2 dU1) U1^{-1}
+      auto pdA2 = pdA.narrow(-2, k, m - k);
       auto L2 = L.narrow(-2, k, m - k);
       dLU.narrow(-2, k, m - k).copy_(std::get<0>(at::triangular_solve(
-        (pdX2 - L2.matmul(dU1)).mT(),
+        (pdA2 - L2.matmul(dU1)).mT(),
         U1,
         /*upper=*/true,
         /*transpose=*/true

@@ -1250,50 +1250,34 @@ void linalg_eigh_cusolver(const Tensor& eigenvalues, const Tensor& eigenvectors,
 // The 'apply_' word is used for templated by dtype functions that call an API routine
 // underneath. Since the cusolver API has a slightly different structure we do not prepend
 // apply_ to this function.
-void lu_looped_cusolver(const Tensor& self, const Tensor& pivots, const Tensor& infos, bool get_pivots) {
-  // Fill the pivots tensor with indices using 1-based (Fortran) indexing. This
-  // is needed for maintaining the same results with MAGMA.
-  auto k = std::min(self.size(-2), self.size(-1));
-  Tensor pivots_tmp = at::arange(1, k + 1, self.options().dtype(at::kInt)).expand_as(pivots);
-  pivots.copy_(pivots_tmp);
-
+void lu_factor_looped_cusolver(const Tensor& self, const Tensor& pivots, const Tensor& infos, bool get_pivots) {
   AT_DISPATCH_FLOATING_TYPES(
     self.scalar_type(),
-    "lu_cusolver",
+    "lu_factor_cusolver",
     [&self,
      &pivots,
      &infos,
      &get_pivots]() {
-    int m = cuda_int_cast(self.size(-2), "m");
-    int n = cuda_int_cast(self.size(-1), "n");
-    int lda = std::max<int>(1, m);
-    int64_t self_stride = matrixStride(self);
-    int64_t batch_size = batchCount(self);
-    scalar_t* self_data = self.data_ptr<scalar_t>();
-    int* infos_data = infos.data_ptr<int>();
+    const auto m = cuda_int_cast(self.size(-2), "m");
+    const auto n = cuda_int_cast(self.size(-1), "n");
+    const auto lda = std::max<int>(1, m);
+    const auto self_stride = matrixStride(self);
+    const auto batch_size = batchCount(self);
+    const auto self_data = self.data_ptr<scalar_t>();
+    const auto infos_data = infos.data_ptr<int>();
 
-    auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+    const auto pivots_data = get_pivots ? pivots.data_ptr<int>() : nullptr;
+    const auto pivots_stride = get_pivots ? pivots.size(-1) : 0;
+
+    const auto handle = at::cuda::getCurrentCUDASolverDnHandle();
     for (auto batch = decltype(batch_size){0}; batch < batch_size; ++batch) {
-      if (get_pivots) {
-        auto pivots_data = pivots.data_ptr<int>();
-        auto pivots_stride = pivots.size(-1);
-        at::cuda::solver::getrf<scalar_t>(
-          handle, m, n,
-          self_data + batch * self_stride,
-          lda,
-          pivots_data + batch * pivots_stride,
-          infos_data + batch
-        );
-      }
-      else {
-        at::cuda::solver::getrf<scalar_t>(
-          handle, m, n,
-          self_data + batch * self_stride,
-          lda,
-          nullptr,
-          infos_data + batch
-        );
-      }
+      at::cuda::solver::getrf<scalar_t>(
+        handle, m, n,
+        self_data + batch * self_stride,
+        lda,
+        get_pivots ? pivots_data + batch * pivots_stride : nullptr,
+        infos_data + batch
+      );
     }
   });
 

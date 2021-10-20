@@ -2432,6 +2432,8 @@ def random_matrix(rows, columns, *batch_dims, **kwargs):
         return torch.ones(rows, columns, dtype=dtype, device=device)
 
     A = torch.randn(batch_dims + (rows, columns), dtype=dtype, device=device)
+    if A.numel() == 0:
+        return A
     u, _, vh = torch.linalg.svd(A, full_matrices=False)
     k = min(rows, columns)
     s = torch.linspace(1 / (k + 1), 1, k, dtype=dtype, device=device)
