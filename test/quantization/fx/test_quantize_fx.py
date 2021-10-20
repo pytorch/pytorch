@@ -5483,7 +5483,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
                 kwargs["transform_input"] = False
             eager_quantizable_model = None
             if name in quantized_model_list:
-                eager_quantizable_model = quantized_models.__dict__[name](pretrained=True, quantize=False, **kwargs).eval().float()
+                eager_quantizable_model = quantized_models.__dict__[name](pretrained=False, quantize=False, **kwargs).eval().float()
             # compare with eager mode quantized model when it is available
             pretrained = eager_quantizable_model is not None
             model = models.__dict__[name](pretrained=pretrained, **kwargs).eval().float()
@@ -5522,8 +5522,8 @@ class TestQuantizeFxModels(QuantizationTestCase):
     def test_resnet18_ddp(self):
         from torchvision import models
         from torchvision.models import quantization as quantized_models
-        eager_quantizable_model = quantized_models.__dict__[name](pretrained=True, quantize=False).eval().float()
-        model = models.__dict__[name](pretrained=True).eval().float()
+        eager_quantizable_model = quantized_models.__dict__[name](pretrained=False, quantize=False).eval().float()
+        model = models.__dict__[name](pretrained=False).eval().float()
         self._test_model_impl(
             'ddp', 'resnet18', model, eager_quantizable_model)
 
