@@ -83,11 +83,13 @@ bool removableSetItem(Node* n) {
   if (n->inputs().at(0)->node()->kind() != prim::ListConstruct) {
     return false;
   }
+  auto li_node = n->inputs().at(0)->node();
   int64_t index = *constant_as<int64_t>(n->input(1));
   if (index < 0) {
-    index += n->inputs().size();
+    index += li_node->inputs().size();
   }
-  return index < static_cast<int64_t>(n->input(0)->node()->inputs().size());
+  auto li_len = static_cast<int64_t>(li_node->inputs().size());
+  return index < li_len && index >= 0;
 }
 
 bool MutationRemover::listMutationFollowingListConstruct(Node* n) {
