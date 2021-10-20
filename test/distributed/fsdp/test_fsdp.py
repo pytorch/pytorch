@@ -257,7 +257,7 @@ class FSDPTest(MultiProcessTestCase):
             ref_full_params,
             shard_full_params,
             exact_device=True,
-            msg="FullyShardedDataParallel didn't match PyTorch DDP",
+            msg=f"FullyShardedDataParallel didn't match PyTorch DDP after {num_steps} steps.",
         )
 
 
