@@ -245,28 +245,16 @@ struct DtypePropagationPass {
     return changed;
   }
 
-  bool checkSchemaReturnsTensors(const c10::FunctionSchema* schema) {
-    const std::vector<Argument>& return_args = schema->returns();
-    bool has_tensor_output = false;
-    for (const auto& arg : return_args) {
-      if (arg.type()->castRaw<TensorType>()) {
-        has_tensor_output = true;
-        break;
-      }
-    }
-    return has_tensor_output;
-  }
-
   // for efficiency
   bool processAtenOps(Node* n) {
     GRAPH_DEBUG("processAtenOps");
+    GRAPH_DEBUG("case = ", n->kind(), " ", *n);
 
-    auto schema_opt = n->maybeSchema();
-    if (!schema_opt || !checkSchemaReturnsTensors(schema_opt)) {
-      GRAPH_DEBUG("schema not found or op does not return tensors");
-      return false;
+    // Custom Rule Matching
+    if (auto prop_fn = dtype_prop_registry_->find(n->getOperator())) {
+      DtypePropRule rule = *prop_fn;
+      return rule(n);
     }
-    // TODO: Add custom rule support here
 
     GRAPH_DEBUG("case = ", n->kind(), " ", *n);
     bool changed = tryApplyDtypeMetaTensor(n);
