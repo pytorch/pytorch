@@ -217,6 +217,7 @@ namespace c10 {
   _(aten, linalg_matrix_norm)        \
   _(aten, matmul)                    \
   _(aten, linalg_matmul)             \
+  _(aten, linalg_matrix_exp)         \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \
@@ -462,6 +463,7 @@ namespace c10 {
   _(attr, df_output_vjps)            \
   _(attr, axes)                      \
   _(attr, axis)                      \
+  _(attr, symbolic_shape_inputs)     \
   _(attr, broadcast)                 \
   _(attr, direction)                 \
   _(attr, ends)                      \
