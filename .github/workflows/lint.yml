@@ -102,6 +102,10 @@ jobs:
         if: always()
         run: |
           (! git --no-pager grep -I -no $'cudaStreamSynchronize' --  ./aten ./c10 ':(exclude)aten/src/ATen/test' ':(exclude)c10/cuda/CUDAFunctions.h' || (echo "The above files call raw cuda APIs directly; please use at::cuda wrappers instead"; false))
+      - name: Ensure all test files have header containing ownership information
+        if: always()
+        run: |
+          (! git grep -L "# Owner(s): \[" test/distributed/**/test_*.py) || (printf "The above test files are missing a comment header with ownership information; please add the following line\n\n# Owner(s): [\"<owner: label>\"]\n\nto the top of each test file. The owner should be an existing pytorch/pytorch label."; false)
 
   clang-format:
     runs-on: ubuntu-18.04

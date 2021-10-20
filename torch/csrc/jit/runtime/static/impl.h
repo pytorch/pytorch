@@ -398,6 +398,7 @@ class TORCH_API ProcessedNode {
 
   ProcessedNode(const ProcessedNode& rhs)
       : node_(rhs.node_),
+        function_kind_(rhs.function_kind_),
         fn_(rhs.fn_),
         inputs_(std::make_unique<const IValue*[]>(rhs.inputs_size_)),
         outputs_(std::make_unique<IValue[]>(rhs.outputs_size_)),
@@ -415,7 +416,9 @@ class TORCH_API ProcessedNode {
       return *this;
     }
     node_ = rhs.node_;
+    function_kind_ = rhs.function_kind_;
     fn_ = rhs.fn_;
+
     if (!inputs_ || inputs_size_ != rhs.inputs_size_) {
       inputs_ = std::make_unique<const IValue*[]>(rhs.inputs_size_);
       inputs_size_ = rhs.inputs_size_;
