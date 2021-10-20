@@ -40,6 +40,8 @@ if IS_WINDOWS:
 if IS_IN_CI:
     if IS_MACOS:
         TEST_BINARY_DIR = Path(torch.__file__).resolve().parent / "bin"
+    elif IS_WINDOWS:
+        TEST_BINARY_DIR = REPO_ROOT / "build"
 BUILD_ENVIRONMENT = os.getenv("BUILD_ENVIRONMENT", "")
 
 print(f"[remove] USING PATH {TEST_BINARY_DIR}")
