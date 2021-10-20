@@ -301,10 +301,14 @@ static void isin_sorting(
 }
 
 namespace {
-Tensor _s_where_dispatch(
+inline Tensor _s_where_dispatch(
     const Tensor& condition,
     const Tensor& self,
     const Tensor& other) {
+  // Common checks and broadcasting of the input tensors
+  // for the TensorxTensor overload and ScalarxTensor overloads.
+  // Also refer `Note : where and _s_where` in native_functions.yaml
+  // for more context about the existence of `where` and `_s_where` ops.
   TORCH_CHECK(
       condition.device() == self.device() && self.device() == other.device(),
       "where: Expected condition, x and y to be on the same device, but condition is on ",
@@ -331,7 +335,7 @@ Tensor _s_where_dispatch(
   return at::_s_where(*b_condition, *b_self, *b_other);
 }
 
-Tensor get_promoted_where_tensor(const Tensor& t, ScalarType common_dtype) {
+inline Tensor get_promoted_where_tensor(const Tensor& t, ScalarType common_dtype) {
   // [NOTE] `where`: dynamic casting and type promotion
   // Since CPU doesn't support dynamic casting in kernels, if `t`'s type is not the same
   // as `common_dtype`, we create a temporary by casting `t` to `common_dtype`.
